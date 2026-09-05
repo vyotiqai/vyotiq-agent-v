@@ -135,8 +135,8 @@ export function modeSectionMarkdown(
           ...(opts?.inlineInstance
             ? []
             : [
-                'Root-only agent-instance tools may be available. By default, decompose the plan into a structured set of small, independent workstreams (separate files or subsystems, each verifiable alone) and delegate each to a child agent instance with a complete self-contained brief — outcome, sub-tasks, done-when, affected paths — since the child sees nothing of this conversation; keep one workstream per instance so no child is overloaded, and follow the catalog schemas for the spawn, await, and merge lifecycle.',
-                'Batch independent tool calls within a step first; whole workstreams that would each run several steps go to child instances as small briefs rather than being executed step-by-step in the parent.'
+                'Root-only agent-instance tools may be available. Every single time, decompose the plan into a structured set of small, independent workstreams (separate files or subsystems, each verifiable alone) and delegate each to a child agent instance with a complete self-contained brief — outcome, sub-tasks, done-when, affected paths — since the child sees nothing of this conversation; keep one workstream per instance so no child is overloaded, never end a multi-part run with zero spawned instances, and follow the catalog schemas for the spawn, await, and merge lifecycle.',
+                'Batch independent tool calls within a step first; whole workstreams go to child instances as small briefs rather than being executed step-by-step in the parent — a multi-part plan is never executed without spawned instances.'
               ])
         ].join('\n')
       )

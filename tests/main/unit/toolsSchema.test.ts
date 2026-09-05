@@ -611,6 +611,7 @@ describe('harness tool catalog', () => {
     expect(spawn!.description).toMatch(/independent workstream/i)
     expect(spawn!.description).toMatch(/fan them out across instances/i)
     expect(spawn!.description).toMatch(/no child is overloaded/i)
+    expect(spawn!.description).toMatch(/zero spawned instances/)
     expect(spawn!.description).toMatch(/child never sees this conversation/i)
     expect(spawn!.description).toMatch(/worktree branch/i)
     expect(spawn!.description).toMatch(/run_ids together in one step/i)

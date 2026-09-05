@@ -70,6 +70,8 @@ describe('modePolicy', () => {
     expect(section).toMatch(/delegate each to a child agent instance/)
     expect(section).toMatch(/decompose the plan into a structured set/)
     expect(section).toMatch(/one workstream per instance/)
+    expect(section).toMatch(/every single time/i)
+    expect(section).toMatch(/zero spawned instances/)
     expect(section).toMatch(/complete self-contained brief/)
     expect(section).toMatch(/child sees nothing of this conversation/)
     expect(section).toMatch(/spawn, await, and merge lifecycle/)

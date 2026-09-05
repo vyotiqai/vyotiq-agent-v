@@ -66,6 +66,7 @@ describe('delegation prompt assembly (harness + mode section + catalog)', () => 
 
     // Mode section (root, not inline): default-on decompose trigger + anti-overuse balance.
     expect(prompt).toMatch(/decompose the plan into a structured set/)
+    expect(prompt).toMatch(/every single time/)
     expect(prompt).toMatch(/batch independent tool calls within a step first/i)
 
     // Catalog: the five instance tools with operational lifecycle text.

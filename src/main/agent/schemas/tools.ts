@@ -1271,7 +1271,7 @@ export const TOOL_REGISTRY = {
   },
   spawn_agent_instance: {
     description:
-      'Spawn an Agent V child instance for one small, independent workstream — by default decompose the request into structured small-scope briefs and fan them out across instances instead of concentrating work in the parent (root runs only; depth 1). Goal is the child’s only prompt — include outcome, sub-tasks, done-when, and affected paths; the child never sees this conversation. Keep one workstream per brief so no child is overloaded. The child gets its own git worktree branch when isolation is available; pass path_scope prefixes when it is not. Returns run_id. Batch multiple spawns in one step, then await those run_ids together in one step; if a spawn is denied by the concurrent-run cap, await the already-running children instead of retrying.',
+      'Spawn an Agent V child instance for one small, independent workstream — always decompose the request into structured small-scope briefs and fan them out across instances instead of concentrating work in the parent; a multi-part run must never finish with zero spawned instances (root runs only; depth 1). Goal is the child’s only prompt — include outcome, sub-tasks, done-when, and affected paths; the child never sees this conversation. Keep one workstream per brief so no child is overloaded. The child gets its own git worktree branch when isolation is available; pass path_scope prefixes when it is not. Returns run_id. Batch multiple spawns in one step, then await those run_ids together in one step; if a spawn is denied by the concurrent-run cap, await the already-running children instead of retrying.',
     schema: spawnAgentInstanceArgs
   },
   await_agent_instance: {
