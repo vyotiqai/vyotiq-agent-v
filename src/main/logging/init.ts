@@ -31,6 +31,18 @@ function ensureLogsDirectory(): string {
   return dir
 }
 
+/**
+ * electron-log v5 only creates the log directory when its File transport is
+ * first registered (the File is cached in a module-global store), so it never
+ * re-creates a directory deleted mid-run. It invokes resolvePathFn on every
+ * message write — re-ensure the logs dir here so a missing
+ * `%APPDATA%\vyotiq\logs` is self-healed before each write instead of failing
+ * with ENOENT forever.
+ */
+export function resolvePathFn(): string {
+  return join(ensureLogsDirectory(), 'vyotiq.log')
+}
+
 function mapLevel(level: LogLevel): 'debug' | 'info' | 'warn' | 'error' {
   if (level === 'fatal') return 'error'
   return level
@@ -47,7 +59,7 @@ export function initMainLogging(): void {
   const isDev = !app.isPackaged
 
   log.initialize()
-  log.transports.file.resolvePathFn = (): string => join(logsDir, 'vyotiq.log')
+  log.transports.file.resolvePathFn = resolvePathFn
   log.transports.file.maxSize = 5 * 1024 * 1024 // 5 MB then rotate
   log.transports.file.level = isDev ? 'debug' : 'info'
   // Console writes to a closed pipe raise EPIPE; packaged / non-TTY runs skip console.
