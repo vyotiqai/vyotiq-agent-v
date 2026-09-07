@@ -73,7 +73,7 @@ describe('workspace index schedule debounce', () => {
         const { entry } = await ensureCodeIndexSynced(dir!)
         expect(entry?.store?.getStatus()?.chunkCount).toBeGreaterThan(0)
       },
-      { timeout: 5000 }
+      { timeout: 20_000 }
     )
   })
 

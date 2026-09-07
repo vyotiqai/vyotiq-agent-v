@@ -216,7 +216,7 @@ describe('gh helpers', () => {
     mockGhInstalled()
     vi.mocked(existsSync).mockImplementation((target) => {
       const normalized = String(target).replace(/\\/g, '/')
-      return normalized === bundledGhPath || normalized === '/ws/.git'
+      return normalized === bundledGhPath || normalized.endsWith('/ws/.git')
     })
     execFileAsync.mockImplementation(async (_executable, rawArgs) => {
       const args = rawArgs as string[]
@@ -260,7 +260,7 @@ describe('gh helpers', () => {
     mockGhInstalled()
     vi.mocked(existsSync).mockImplementation((target) => {
       const normalized = String(target).replace(/\\/g, '/')
-      return normalized === bundledGhPath || normalized === '/ws/.git'
+      return normalized === bundledGhPath || normalized.endsWith('/ws/.git')
     })
     execFileAsync.mockImplementation(async (_executable, rawArgs) => {
       const args = rawArgs as string[]
@@ -283,7 +283,7 @@ describe('gh helpers', () => {
     mockGhInstalled()
     vi.mocked(existsSync).mockImplementation((target) => {
       const normalized = String(target).replace(/\\/g, '/')
-      return normalized === bundledGhPath || normalized === '/ws/.git'
+      return normalized === bundledGhPath || normalized.endsWith('/ws/.git')
     })
     execFileAsync.mockImplementation(async (_executable, rawArgs) => {
       const args = rawArgs as string[]
@@ -337,7 +337,7 @@ describe('gh helpers', () => {
     mockGhInstalled()
     vi.mocked(existsSync).mockImplementation((target) => {
       const normalized = String(target).replace(/\\/g, '/')
-      return normalized === bundledGhPath || normalized === '/ws/.git'
+      return normalized === bundledGhPath || normalized.endsWith('/ws/.git')
     })
 
     let remoteConfigured = false
