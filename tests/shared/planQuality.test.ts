@@ -85,4 +85,76 @@ describe('scorePlanQuality', () => {
     expect(joined).toMatch(/no affected files or symbols/)
     expect(report.score).toBeLessThan(100)
   })
+
+  it('flags steps without their own verification even when Done when mentions tests', () => {
+    const md = [
+      '# Tighten plan quality',
+      '',
+      '## Goal',
+      '',
+      'Require a runnable check on every plan step.',
+      '',
+      '## Steps',
+      '',
+      '1. Edit `src/shared/planQuality.ts` so the scorer reads the Steps body.',
+      '2. Edit `src/main/agent/tools/modePolicy.ts` to reword the template line.',
+      '',
+      '## Done when',
+      '',
+      '- [ ] `pnpm typecheck` passes and the targeted vitest run is green.'
+    ].join('\n')
+    const report = scorePlanQuality(md)
+    expect(report.issues.join(' ')).toMatch(/Steps carry no verification/)
+  })
+
+  it('nudges 3-step plans without a diagram (advisory only)', () => {
+    const md = [
+      '# Widen coverage',
+      '',
+      '## Goal',
+      '',
+      'Extend plan scoring to cover diagram nudges.',
+      '',
+      '## Steps',
+      '',
+      '1. Edit `src/shared/planQuality.ts` to add the diagram check.',
+      '2. Edit `src/shared/planStub.ts` to seed the Architecture section.',
+      '3. Edit `src/main/agent/tools/modePolicy.ts` to teach the template.',
+      '',
+      '## Done when',
+      '',
+      '- [ ] `pnpm typecheck` and the targeted vitest run are green.'
+    ].join('\n')
+    const report = scorePlanQuality(md)
+    expect(report.issues.join(' ')).toMatch(/architecture diagram/i)
+  })
+
+  it('accepts a 3-step plan that carries a mermaid architecture diagram', () => {
+    const md = [
+      '# Widen coverage',
+      '',
+      '## Goal',
+      '',
+      'Extend plan scoring to cover diagram nudges.',
+      '',
+      '## Architecture',
+      '',
+      '```mermaid',
+      'graph TD; A[planQuality.ts] --> B[createPlan.ts] --> C[loop.ts];',
+      '```',
+      '',
+      '## Steps',
+      '',
+      '1. Edit `src/shared/planQuality.ts` to add the diagram check.',
+      '2. Edit `src/shared/planStub.ts` to seed the Architecture section.',
+      '3. Edit `src/main/agent/tools/modePolicy.ts` to teach the template.',
+      '',
+      '## Done when',
+      '',
+      '- [ ] `pnpm typecheck` and the targeted vitest run are green.'
+    ].join('\n')
+    const report = scorePlanQuality(md)
+    expect(report.issues).toEqual([])
+    expect(report.score).toBe(100)
+  })
 })

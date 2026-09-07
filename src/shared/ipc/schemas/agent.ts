@@ -157,7 +157,8 @@ export const IncompleteReasonSchema = z.enum([
   'network_interrupted',
   'circuit_open',
   'provider_error',
-  'goal_wait'
+  'goal_wait',
+  'repetition'
 ])
 export type IncompleteReason = z.infer<typeof IncompleteReasonSchema>
 
@@ -925,6 +926,15 @@ export const LoopCheckpointSchema = z.object({
   /** Runaway-loop invariants, restored on interrupted resume (v2). */
   identicalStepStreak: z.number().int().min(0).default(0),
   lastStepFingerprint: z.string().max(64).default(''),
+  /**
+   * Near-identical reasoning streak across steps (run be413e92 second guard).
+   * Additive v3 fields with defaults: older checkpoints parse/resume with
+   * 0 / '' / 0 and LOOP_CHECKPOINT_VERSION stays 3.
+   */
+  identicalReasoningStreak: z.number().int().min(0).default(0),
+  lastReasoningFingerprint: z.string().max(64).default(''),
+  /** Generation-repetition aborts auto-continued so far (capped by loopPolicy MAX_REPETITION_ABORTS). */
+  repetitionAborts: z.number().int().min(0).default(0),
   consecutiveToolFailureSteps: z.number().int().min(0).default(0),
   /**
    * Signatures of recent all-failed steps, newest first. Additive field:
@@ -1497,6 +1507,26 @@ export const WorkspaceListRulesResultSchema = z.object({
   )
 })
 export type WorkspaceListRulesResult = z.infer<typeof WorkspaceListRulesResultSchema>
+
+export const WorkspaceAgentContextRequestSchema = z.object({
+  workspacePath: z.string().min(1)
+})
+export type WorkspaceAgentContextRequest = z.infer<typeof WorkspaceAgentContextRequestSchema>
+
+export const WorkspaceAgentContextResultSchema = z.object({
+  workspaceName: z.string().min(1),
+  branch: z.string().nullable(),
+  rules: z.object({
+    agentsMd: z.boolean(),
+    cursorrules: z.boolean(),
+    vyotiqRulesCount: z.number().int().nonnegative()
+  }),
+  memoryNotes: z.number().int().nonnegative(),
+  codeIndex: z.object({
+    state: z.enum(['ready', 'building', 'degraded', 'off'])
+  })
+})
+export type WorkspaceAgentContextResult = z.infer<typeof WorkspaceAgentContextResultSchema>
 
 export const WorkspaceDiagnosticsRequestSchema = z.object({
   workspacePath: z.string().min(1),

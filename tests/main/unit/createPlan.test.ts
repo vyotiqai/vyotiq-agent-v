@@ -8,7 +8,9 @@ vi.mock('@main/app/window', () => ({
 }))
 
 import { executeTool } from '@main/agent/tools'
-import { canonicalizeAgentToolName } from '@main/agent/schemas/tools'
+import { executeCreatePlan } from '@main/agent/tools/createPlan'
+import { canonicalizeAgentToolName, validateParsedToolArgs } from '@main/agent/schemas/tools'
+import { loopHintForConsecutiveToolFailures } from '@main/agent/loopPolicy'
 import { DEFAULT_PLAN_STUB } from '@shared/planStub'
 
 const SIMPLE_PLAN = [
@@ -154,5 +156,63 @@ describe('create_plan', () => {
     )
     expect(result.ok).toBe(true)
     expect(existsSync(join(runDir, 'plan.md'))).toBe(true)
+  })
+
+  it('derives the title from a leading H1 in plan when title is omitted', async () => {
+    setup()
+    const result = await executeTool(
+      'create_plan',
+      JSON.stringify({ plan: `# My Title\n\n${SIMPLE_PLAN}` }),
+      workspace,
+      new AbortController().signal,
+      { runDir, agentMode: 'plan' }
+    )
+    expect(result.ok).toBe(true)
+    expect(result.summary).toBe('My Title')
+    const plan = readFileSync(join(runDir, 'plan.md'), 'utf8')
+    expect(plan.startsWith('# My Title\n\n## Goal')).toBe(true)
+    expect(plan.match(/# My Title/g)).toHaveLength(1)
+  })
+
+  it('rejects a title-less plan without a leading H1', async () => {
+    setup()
+    const result = await executeTool(
+      'create_plan',
+      JSON.stringify({ plan: SIMPLE_PLAN }),
+      workspace,
+      new AbortController().signal,
+      { runDir, agentMode: 'plan' }
+    )
+    expect(result.ok).toBe(false)
+    expect(result.content).toContain('requires title')
+  })
+
+  it('rejects an empty title and empty plan', () => {
+    setup()
+    const result = executeCreatePlan(workspace, { title: '', plan: '' }, { runDir })
+    expect(result.ok).toBe(false)
+    expect(result.content).toContain('requires title')
+  })
+})
+
+describe('create_plan title-derivation validation and hints', () => {
+  it('accepts a title as an H1 first line in plan without a title argument', () => {
+    const result = validateParsedToolArgs('create_plan', {
+      plan: `# My Title\n\n${SIMPLE_PLAN}`
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it('leaves title-less plans to the tool (schema no longer requires title)', () => {
+    const result = validateParsedToolArgs('create_plan', { plan: SIMPLE_PLAN })
+    expect(result.ok).toBe(true)
+  })
+
+  it('suggests the H1-first-line retry in the consecutive-failure loop hint', () => {
+    const hint = loopHintForConsecutiveToolFailures(2, {
+      tool: 'create_plan',
+      summary: 'create_plan requires title, or a plan whose first line is `# Title`.'
+    })
+    expect(hint).toContain('H1 first line')
   })
 })

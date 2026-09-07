@@ -214,6 +214,17 @@ describe('index clutter filters', () => {
     expect(isIndexableSourcePath('db/user.ts')).toBe(false)
     expect(isIndexableSourcePath('src/generated/api.ts')).toBe(false)
     expect(isIndexableSourcePath('src/logs/logger.ts')).toBe(false)
+
+    // toolchain / vendor dir segments are never indexable
+    expect(isIndexableSourcePath('.linux-vm/msys64/mingw64/include/EGL/egl.h')).toBe(false)
+    expect(isIndexableSourcePath('.linux-vm/msys64/mingw64/bin/gdbus-codegen-script.py')).toBe(false)
+    expect(isIndexableSourcePath('tools3/ucrt64/x.cpp')).toBe(false)
+    expect(isIndexableSourcePath('pkg/clang64/lib.cpp')).toBe(false)
+
+    // a token in a basename, or no token at all, stays indexable
+    // (`.md` is never source-indexable — INDEX_EXCLUDE_EXTS — so use a code ext)
+    expect(isIndexableSourcePath('src/msys64-notes.cpp')).toBe(true)
+    expect(isIndexableSourcePath('lib/tool.mingw.rs')).toBe(true)
   })
 })
 

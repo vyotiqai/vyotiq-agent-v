@@ -1,7 +1,7 @@
 import { execFile as execFileCb } from 'child_process'
 import { existsSync, statSync, readFileSync, writeFileSync, mkdtempSync, unlinkSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { dirname, join, resolve } from 'path'
 import { promisify } from 'util'
 import type {
   GitBlameLine,
@@ -112,8 +112,19 @@ function buildGitEnv(): NodeJS.ProcessEnv {
   }
 }
 
+/**
+ * Git discovers the nearest ancestor .git from cwd; match that here, or a
+ * workspace opened at a repo subdirectory is misreported as a non-repo.
+ * A `.git` file (git worktree checkout) counts too.
+ */
 export function isGitRepo(cwd: string): boolean {
-  return existsSync(join(cwd, '.git'))
+  let dir = resolve(cwd)
+  for (;;) {
+    if (existsSync(join(dir, '.git'))) return true
+    const parent = dirname(dir)
+    if (parent === dir) return false
+    dir = parent
+  }
 }
 
 /** Current local branch, or null for a detached HEAD / non-repository. */

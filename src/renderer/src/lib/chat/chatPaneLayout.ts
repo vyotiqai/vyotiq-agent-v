@@ -30,20 +30,35 @@ export type ChatPaneLayout = {
 export type PaneDropZone = 'left' | 'center' | 'right'
 
 let paneIdCounter = 0
-let sessionDragActive = false
+/** Timestamp of drag start; 0 when no session drag is active. */
+let sessionDragActive = 0
 
-/** Set while a sidebar session row is mid-drag (Electron dragover MIME quirk). */
+/**
+ * A module flag alone leaks: if the sidebar row unmounts mid-drag, dragend
+ * never fires and ordinary text/plain drags would keep being misread as
+ * session drags. The timestamp expires so the fallback self-clears.
+ */
+export const SESSION_DRAG_TTL_MS = 10_000
+
+/**
+ * Set while a sidebar session row is mid-drag (Electron dragover MIME quirk:
+ * dragover may only expose text/plain, not the custom MIME).
+ */
 export function markSessionDragStart(): void {
-  sessionDragActive = true
+  sessionDragActive = Date.now()
 }
 
 export function markSessionDragEnd(): void {
-  sessionDragActive = false
+  sessionDragActive = 0
 }
 
 export function isSessionDragEvent(dataTransfer: DataTransfer): boolean {
   if (dataTransfer.types.includes(SESSION_DRAG_MIME)) return true
-  return sessionDragActive && dataTransfer.types.includes('text/plain')
+  return (
+    sessionDragActive > 0 &&
+    Date.now() - sessionDragActive < SESSION_DRAG_TTL_MS &&
+    dataTransfer.types.includes('text/plain')
+  )
 }
 
 export function createPaneId(): string {

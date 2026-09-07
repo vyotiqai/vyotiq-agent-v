@@ -178,6 +178,7 @@ export const IPC = {
   workspaceEditorRecoveryClear: 'workspace:editor-recovery-clear',
   workspaceListDocs: 'workspace:listDocs',
   workspaceListRules: 'workspace:listRules',
+  agentContext: 'workspace:agentContext',
   workspaceDiagnostics: 'workspace:diagnostics',
   gitDiff: 'git:diff',
   prView: 'pr:view',

@@ -104,12 +104,19 @@ export function ChatPaneHost({
 
   const handleDrop = useCallback(
     (e: React.DragEvent, paneId: string) => {
+      // Mirror handleDragOver: foreign drags (files, text) bail without
+      // claiming the event, so the browser default stays intact.
+      if (!isSessionDragEvent(e.dataTransfer)) return
       e.preventDefault()
       const payload = parseSessionDragPayload(e.dataTransfer)
-      const zone = zoneFromEvent(e)
       setHighlight(null)
-      if (!payload) return
-      onSessionDrop(paneId, zone, payload)
+      if (!payload) {
+        e.dataTransfer.dropEffect = 'none'
+        return
+      }
+      // Single drop handling: keep inner pane surfaces from reacting too.
+      e.stopPropagation()
+      onSessionDrop(paneId, zoneFromEvent(e), payload)
     },
     [onSessionDrop, setHighlight]
   )

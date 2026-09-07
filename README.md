@@ -117,7 +117,7 @@ Run state (chat sessions) lives under AppData, not in the project folder:
           receipt.json
 ```
 
-Project-local agent memory stays at `{workspace}/.vyotiq/memory/` only and is accessed through memory tools; it is not injected automatically. `resources/harness/default.md` is the canonical bundled system harness and `/harness-apply` target. A well-formed workspace copy is appended as capped, untrusted preferences; it never replaces the bundled security spine. Built-in tool details live in `src/main/agent/schemas/tools.ts`, not in a duplicated harness catalog.
+Project-local agent memory stays at `{workspace}/.vyotiq/memory/`; capped excerpts of `index.md` and `state.md` are auto-injected into the system prompt each step, full note bodies are fetched via memory_read, and writes go through memory_write. `resources/harness/default.md` is the canonical bundled system harness and `/harness-apply` target. A well-formed workspace copy is appended as capped, untrusted preferences; it never replaces the bundled security spine. Built-in tool details live in `src/main/agent/schemas/tools.ts`, not in a duplicated harness catalog.
 
 When adding or changing a built-in tool, update its argument schema, handler, and runtime limits/classification together. Keep the tool description as a short capability blurb; `tests/main/unit/toolsSchema.test.ts` checks registry/handler parity and the harness boundary.
 

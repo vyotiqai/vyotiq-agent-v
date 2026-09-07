@@ -29,6 +29,9 @@ describe('loopCheckpoint', () => {
       overflowRetryUsed: true,
       identicalStepStreak: 2,
       lastStepFingerprint: 'fp-abc123',
+      identicalReasoningStreak: 3,
+      lastReasoningFingerprint: 'fp-def456',
+      repetitionAborts: 1,
       consecutiveToolFailureSteps: 1,
       recentFailureSignatures: ['sig-1', 'sig-2'],
       emptyResponseContinues: 1,
@@ -121,5 +124,39 @@ describe('loopCheckpoint', () => {
     expect(loaded?.usageTotals?.billedInputTokens).toBe(8_688_647)
     expect(loaded?.usageTotals?.steps).toBe(105)
     expect(loaded?.usageTotals?.lastStepInputTokens).toBe(124_395)
+  })
+
+  it('parses a v3 checkpoint written before the reasoning-streak fields with additive defaults', () => {
+    const runDir = join(root, 'run-v3-legacy')
+    mkdirSync(runDir, { recursive: true })
+    // A real v3 file from before the identical-reasoning / repetition-abort
+    // fields: the three additive fields are absent entirely. LOOP_CHECKPOINT_VERSION
+    // is unchanged (still 3), so resume must parse with defaults 0 / '' / 0.
+    const legacy = {
+      version: LOOP_CHECKPOINT_VERSION,
+      step: 105,
+      invokeId: 3,
+      updatedAt: '2026-09-01T08:07:53.081Z',
+      truncationContinues: 0,
+      overflowRetryUsed: false,
+      identicalStepStreak: 1,
+      lastStepFingerprint: '74a5e735e912861f',
+      consecutiveToolFailureSteps: 0,
+      emptyResponseContinues: 0,
+      goalNoToolFinishes: 0
+    }
+    const { writeFileSync } = require('fs') as typeof import('fs')
+    writeFileSync(join(runDir, LOOP_CHECKPOINT_FILENAME), JSON.stringify(legacy), 'utf8')
+
+    const loaded = loadLoopCheckpoint(runDir)
+    expect(loaded).not.toBeNull()
+    // Additive fields default — old checkpoints keep parsing/resuming.
+    expect(loaded?.identicalReasoningStreak).toBe(0)
+    expect(loaded?.lastReasoningFingerprint).toBe('')
+    expect(loaded?.repetitionAborts).toBe(0)
+    // Existing invariants survive.
+    expect(loaded?.step).toBe(105)
+    expect(loaded?.identicalStepStreak).toBe(1)
+    expect(loaded?.lastStepFingerprint).toBe('74a5e735e912861f')
   })
 })

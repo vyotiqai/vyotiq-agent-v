@@ -550,7 +550,19 @@ export async function loadToolResultContent(
   toolCallId: string
 ): Promise<string | null> {
   const dir = resolveRunDir(workspacePath, runId)
-  await flushMessageAppends(dir)
+  // Best-effort: a queued-append failure (e.g. transient EPERM/EBUSY) must not
+  // poison the read of already-persisted content. It stays surfaced to the run
+  // via takeMessageAppendFailureNotice.
+  try {
+    await flushMessageAppends(dir)
+  } catch (err) {
+    logger.warn('Failed to flush message appends for tool result', {
+      scope: 'state',
+      runId,
+      toolCallId,
+      err
+    })
+  }
   const p = join(dir, 'messages.jsonl')
   if (!existsSync(p)) return null
   let fh: Awaited<ReturnType<typeof open>>

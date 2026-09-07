@@ -17,19 +17,32 @@ export class CodeIndexStore {
   readonly dbPath: string
   readonly dimensions: number
 
+  /** Read-only fallback DB for getEmbeddingsByChunkHashes (parent-workspace reuse). */
+  private reuseDbPath: string | null = null
+  private reuseDb: DatabaseSync | null = null
+  private reuseDbDisabled = false
+
   private constructor(db: DatabaseSync, dbPath: string, dimensions: number) {
     this.db = db
     this.dbPath = dbPath
     this.dimensions = dimensions
   }
 
-  static open(workspacePath: string, dimensions: number): CodeIndexStore {
+  static open(
+    workspacePath: string,
+    dimensions: number,
+    opts?: { reuseDbPath?: string }
+  ): CodeIndexStore {
     const root = codeindexRoot(workspacePath)
     if (!existsSync(root)) mkdirSync(root, { recursive: true })
-    return CodeIndexStore.openDbPath(codeindexDbPath(workspacePath), dimensions)
+    return CodeIndexStore.openDbPath(codeindexDbPath(workspacePath), dimensions, opts)
   }
 
-  static openDbPath(dbPath: string, dimensions: number): CodeIndexStore {
+  static openDbPath(
+    dbPath: string,
+    dimensions: number,
+    opts?: { reuseDbPath?: string }
+  ): CodeIndexStore {
     const dir = dirname(dbPath)
     if (dir && !existsSync(dir)) mkdirSync(dir, { recursive: true })
     const db = new DatabaseSync(dbPath)
@@ -38,7 +51,9 @@ export class CodeIndexStore {
     // Main + utilityProcess may briefly contend on Windows; wait instead of failing.
     db.exec('PRAGMA busy_timeout = 5000;')
     migrate(db)
-    return new CodeIndexStore(db, dbPath, dimensions)
+    const store = new CodeIndexStore(db, dbPath, dimensions)
+    if (opts?.reuseDbPath) store.reuseDbPath = opts.reuseDbPath
+    return store
   }
 
   /** In-memory store for unit tests. */
@@ -49,6 +64,11 @@ export class CodeIndexStore {
   }
 
   close(): void {
+    try {
+      this.reuseDb?.close()
+    } catch {
+      /* already closed */
+    }
     try {
       this.db.close()
     } catch {
@@ -146,7 +166,51 @@ export class CodeIndexStore {
         out.set(r.chunkHash, bufferToEmbedding(Buffer.from(r.embedding), this.dimensions))
       }
     }
+    this.fillFromReuseDb(uniq, out)
     return out
+  }
+
+  /** Lazily open the read-only reuse DB; disable it permanently on any problem. */
+  private openReuseDb(): DatabaseSync | null {
+    if (this.reuseDbDisabled || !this.reuseDbPath) return null
+    if (this.reuseDb) return this.reuseDb
+    try {
+      const db = new DatabaseSync(this.reuseDbPath, { readOnly: true })
+      const row = db.prepare('SELECT value FROM meta WHERE key = ?').get('dimensions') as
+        | { value: string }
+        | undefined
+      if (!row || Number(row.value) !== this.dimensions) {
+        db.close()
+        this.reuseDbDisabled = true
+        return null
+      }
+      this.reuseDb = db
+      return db
+    } catch {
+      this.reuseDbDisabled = true
+      return null
+    }
+  }
+
+  /** Merge embeddings for misses from the reuse DB (never written to). */
+  private fillFromReuseDb(uniq: string[], out: Map<string, Float32Array>): void {
+    if (!this.reuseDbPath || out.size >= uniq.length) return
+    const db = this.openReuseDb()
+    if (!db) return
+    const misses = uniq.filter((h) => !out.has(h))
+    for (let i = 0; i < misses.length; i += 500) {
+      const slice = misses.slice(i, i + 500)
+      const placeholders = slice.map(() => '?').join(',')
+      const rows = db
+        .prepare(
+          `SELECT chunk_hash AS chunkHash, embedding FROM chunks WHERE chunk_hash IN (${placeholders})`
+        )
+        .all(...slice) as { chunkHash: string; embedding: Buffer }[]
+      for (const r of rows) {
+        if (!r.embedding || r.embedding.byteLength < this.dimensions * 4) continue
+        out.set(r.chunkHash, bufferToEmbedding(Buffer.from(r.embedding), this.dimensions))
+      }
+    }
   }
 
   listFilePaths(): string[] {

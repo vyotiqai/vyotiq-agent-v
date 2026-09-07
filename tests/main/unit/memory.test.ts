@@ -25,6 +25,7 @@ const canSymlink = (() => {
 import {
   ensureMemoryLayout,
   listMemoryNotes,
+  MEMORY_LIST_INDEX_EXCERPT,
   readMemoryFile,
   readMemoryIndex,
   readMemoryState,
@@ -106,5 +107,21 @@ describe('memory store', () => {
     expect(listMemoryNotes(dir)).toEqual({ indexExcerpt: '', notes: [], hasState: false })
     expect(readMemoryFile(dir, 'state.md')).toContain('not created yet')
     expect(existsSync(memoryRoot(dir))).toBe(false)
+  })
+
+  it('caps the listMemoryNotes index excerpt at 1500 with an overflow marker', () => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-'))
+    ensureMemoryLayout(dir)
+    const bigIndex = 'x'.repeat(1_600)
+    writeFileSync(join(memoryRoot(dir), 'index.md'), bigIndex, 'utf8')
+    const listed = listMemoryNotes(dir)
+    expect(listed.indexExcerpt.endsWith('\n…')).toBe(true)
+    expect(listed.indexExcerpt.length).toBe(MEMORY_LIST_INDEX_EXCERPT + 2)
+    expect(listed.indexExcerpt).not.toContain(bigIndex)
+    // Under the cap the excerpt is byte-exact.
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-'))
+    ensureMemoryLayout(dir)
+    writeFileSync(join(memoryRoot(dir), 'index.md'), '# small\n', 'utf8')
+    expect(listMemoryNotes(dir).indexExcerpt).toBe('# small\n')
   })
 })

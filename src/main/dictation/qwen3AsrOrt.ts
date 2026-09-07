@@ -387,12 +387,14 @@ export function computeQwenLogMel(wav: Float32Array, mel: QwenMelParams): Float3
 
 /** Build the production ORT runners for a downloaded Qwen3-ASR ONNX model dir. */
 export async function createQwen3AsrOnnxRunners(modelDir: string): Promise<Qwen3AsrRunners> {
-  const { createQwen3AsrOnnxRunnersFromOrt } = await import('./qwen3AsrOrtLoader')
   return createQwen3AsrOnnxRunnersFromOrt(modelDir)
 }
 
 import { dictationModelDir } from './modelPaths'
-import { readQwen3AsrConfig } from './qwen3AsrOrtLoader'
+import {
+  createQwen3AsrOnnxRunnersFromOrt,
+  readQwen3AsrConfig
+} from './qwen3AsrOrtLoader'
 
 /**
  * Transcribe a 16 kHz PCM recording using the downloaded on-device Qwen3-ASR

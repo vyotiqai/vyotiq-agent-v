@@ -37,6 +37,12 @@ export type AssembleContextRequest = AssembleInput & {
   apiKey?: string | null
   baseUrl?: string
   signal: AbortSignal
+  /**
+   * Workspace to read durable memory (state.md + index.md) from. Defaults to
+   * workspacePath. Worktree instances pass the parent workspace here because a
+   * sparse instance checkout has no .vyotiq; snapshot and rules stay worktree-local.
+   */
+  memoryWorkspacePath?: string | null
 }
 
 /** In-process cache for the stable instruction prefix only (not the volatile tail). */
@@ -560,10 +566,11 @@ export async function assembleContext(
   const budgets = allocateBudget(input.model)
   const window = contentWindow(input.model)
 
+  const memoryWorkspacePath = input.memoryWorkspacePath ?? input.workspacePath
   const [workspace, rules, memorySection] = await Promise.all([
     buildWorkspaceSnapshotAsync(input.workspacePath, input.goal),
     buildWorkspaceRulesSection(input.workspacePath, input.focusedFile),
-    buildMemorySection(input.workspacePath)
+    buildMemorySection(memoryWorkspacePath)
   ])
 
   let messages = input.messages.map((message) =>

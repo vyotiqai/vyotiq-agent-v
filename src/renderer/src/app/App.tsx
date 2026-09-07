@@ -493,21 +493,42 @@ function App() {
       zone: import('@renderer/lib/chat/chatPaneLayout').PaneDropZone,
       payload: { workspacePath: string; runId: string }
     ): boolean => {
+      // Reject drops whose session belongs to a workspace that is no longer
+      // open — the pane layout only holds open workspaces (sanitizePaneLayout).
+      const isOpen = openWorkspaces.some((path) =>
+        workspacePathsEqual(path, payload.workspacePath)
+      )
+      if (!isOpen) {
+        pushToast('The workspace for that chat is not open.')
+        return false
+      }
       const ok = dropSessionOnPane(anchorPaneId, zone, payload)
       if (!ok) {
         pushToast('Not enough room for another chat pane.')
         return false
       }
       void (async () => {
-        const ctrl = getRunController(payload.runId, payload.workspacePath)
-        if (!ctrl || ctrl.items.length === 0) {
-          await loadRunTranscriptIntoTab(payload.workspacePath, payload.runId)
+        try {
+          const ctrl = getRunController(payload.runId, payload.workspacePath)
+          if (!ctrl || ctrl.items.length === 0) {
+            await loadRunTranscriptIntoTab(payload.workspacePath, payload.runId)
+          }
+        } catch (err) {
+          // The layout already committed — never let a transcript-load failure
+          // surface as an unhandled rejection.
+          logger.warn('session drop transcript load failed', {
+            scope: 'chat',
+            workspacePath: payload.workspacePath,
+            runId: payload.runId,
+            err
+          })
+        } finally {
+          setView('chat')
         }
-        setView('chat')
       })()
       return true
     },
-    [dropSessionOnPane, getRunController, loadRunTranscriptIntoTab]
+    [dropSessionOnPane, getRunController, loadRunTranscriptIntoTab, openWorkspaces]
   )
 
   const getPaneTitle = useCallback(

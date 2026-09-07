@@ -15,6 +15,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import { CodeBlockCopyButton } from './CodeBlockCopyButton'
+import { MermaidDiagram } from './MermaidDiagram'
 import { highlightCode } from '@renderer/lib/markdown/markdownHighlight'
 import {
   balanceOutsideFences,
@@ -243,6 +244,11 @@ function FencedCodePre({
   const normalize = (s: string) => s.replace(/\n+$/, '')
   const text = normalize(String(child.props.children ?? ''))
   const unstable = openFenceBody !== null && text === normalize(openFenceBody)
+  // Mermaid fences render as real diagrams once settled; branch here (hook-free)
+  // rather than inside FencedCodeBlock to preserve hook order.
+  if (className.includes('language-mermaid') && !unstable) {
+    return <MermaidDiagram code={text} />
+  }
   return <FencedCodeBlock text={text} className={className} unstable={unstable} />
 }
 

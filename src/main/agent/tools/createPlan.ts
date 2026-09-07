@@ -29,18 +29,26 @@ function stripLeadingH1(markdown: string): string {
   return markdown.replace(/^\s*#\s+[^\n]+\n*/, '').trim()
 }
 
+/** Extract the first-line `# H1` title from plan markdown, if present. */
+function deriveTitleFromPlan(plan: string): string {
+  const match = plan.match(/^\s*#\s+(.+?)[ \t]*\r?\n/)
+  return match ? match[1]!.trim() : ''
+}
+
 export function executeCreatePlan(
   _workspace: string,
   args: Record<string, unknown>,
   context: CreatePlanContext
 ): CreatePlanResult {
-  const title = typeof args.title === 'string' ? args.title.trim() : ''
   const plan = typeof args.plan === 'string' ? args.plan.trim() : ''
+  const argTitle = typeof args.title === 'string' ? args.title.trim() : ''
+  const title = argTitle || deriveTitleFromPlan(plan)
   if (!title || !plan) {
     return {
       ok: false,
       summary: 'title',
-      content: 'create_plan requires title and plan markdown.'
+      content:
+        'create_plan requires title, or a plan whose first line is `# Title`. Resend with title, Goal, Scope, Steps, and Done when.'
     }
   }
 

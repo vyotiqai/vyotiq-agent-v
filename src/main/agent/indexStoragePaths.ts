@@ -3,6 +3,7 @@
  * Layout: {userData}/workspaces/{workspaceId}/codeindex|sparsegrep
  * (same workspace id as sessions — see storage/paths.ts).
  */
+import { existsSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { canonicalizeWorkspacePath } from '../../shared/workspacePath'
@@ -39,6 +40,26 @@ export function codeindexRoot(workspacePath: string): string {
 
 export function codeindexDbPath(workspacePath: string): string {
   return join(codeindexRoot(workspacePath), 'index.sqlite')
+}
+/**
+ * Instance-worktree workspaces live at
+ * {userData}/workspaces/{parentWorkspaceId}/instance-worktrees/{runId}; their
+ * code index can reuse the parent workspace's stored embeddings for identical
+ * model-salted chunk hashes instead of re-embedding them.
+ */
+export function instanceWorktreeReuseDbPath(workspaceRoot: string): string | null {
+  const segments = canonicalizeWorkspacePath(workspaceRoot)
+    .split(/[/\\]/)
+    .filter(Boolean)
+  const wtIdx = segments.lastIndexOf('instance-worktrees')
+  if (wtIdx <= 0) return null
+  const parentWsId = segments[wtIdx - 1]
+  if (!parentWsId) return null
+  const parentDb = join(resolveWorkspacesRoot(), parentWsId, 'codeindex', 'index.sqlite')
+  if (!existsSync(parentDb)) return null
+  const own = codeindexDbPath(workspaceRoot)
+  if (parentDb === own) return null
+  return parentDb
 }
 
 export function sparsegrepRoot(workspacePath: string): string {

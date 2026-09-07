@@ -12,6 +12,7 @@ describe('DEFAULT_PLAN_STUB chrome detection', () => {
     expect(PLAN_SECTIONS.map((section) => section.heading)).toEqual([
       'Goal',
       'Scope',
+      'Architecture',
       'Steps',
       'Done when',
       'Risks'
@@ -34,6 +35,12 @@ describe('DEFAULT_PLAN_STUB chrome detection', () => {
       isPlanSectionPromptLine(
         '_Small, understandable phases — each names affected paths and how it is verified._'
       )
+    ).toBe(true)
+  })
+
+  it('strips the architecture guidance prompt', () => {
+    expect(
+      isPlanSectionPromptLine('_What components and data flow are affected?_')
     ).toBe(true)
   })
 })

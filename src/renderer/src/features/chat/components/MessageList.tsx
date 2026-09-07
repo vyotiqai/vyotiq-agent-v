@@ -58,6 +58,7 @@ import { buildFooterStats } from '../utils/messageFooterStats'
 import { ChangeSummary, COMPACT_PREVIEW_COUNT } from './ChangeSummary'
 import { TextShimmer } from './TextShimmer'
 import { MessageFooter } from './MessageFooter'
+import { AgentContextCard } from './AgentContextCard'
 import { ThinkingBlock } from './ThinkingBlock'
 import { CompactSummaryBlock } from './CompactSummaryBlock'
 import { ToolApprovalCard } from './ToolApprovalCard'
@@ -767,6 +768,7 @@ export function MessageList({
   items: itemsProp,
   itemsStore,
   emptyLabel,
+  workspacePath,
   restoreScrollTop,
   scrollRestoreToken,
   onScrollTopChange,
@@ -806,6 +808,8 @@ export function MessageList({
   itemsStore?: ChatItemsStore
   /** Orientation text for a fresh transcript (e.g. "New chat in demo"); hidden while pending/running. */
   emptyLabel?: string
+  /** Fresh-chat only: workspace root backing the read-only agent context card. */
+  workspacePath?: string
   restoreScrollTop?: number
   scrollRestoreToken?: number
   onScrollTopChange?: (scrollTop: number) => void
@@ -1112,6 +1116,10 @@ export function MessageList({
     }
     pinnedToBottomRef.current = true
     lastScrollTopRef.current = el.scrollTop
+    // Keep the pre-layout-change scroll position truthful even though
+    // handleScroll skips programmatic scrolls: at run end the stale value
+    // would otherwise restore a pre-run offset instead of the tail.
+    scrollBeforeLayoutChangeRef.current = top
     window.requestAnimationFrame(() => {
       programmaticScrollRef.current = false
     })
@@ -1596,9 +1604,12 @@ export function MessageList({
       // scrollBeforeLayoutChangeRef only records user scrolls (programmatic
       // tail-follow is guarded out in handleScroll), so it goes stale during a
       // long stream. Mid-stream (live) flips trust an active pin over the
-      // stale top to keep the tail; run-end flips keep position restore.
+      // stale top to keep the tail. Run-end flips (liveRef already false)
+      // also trust an active pin: pinnedToBottomRef is only cleared by a
+      // genuine user scroll-away in handleScroll, so manual readers who
+      // scrolled up mid-run keep position restore here.
       const wasAtBottom =
-        (liveRef.current && pinnedToBottomRef.current) ||
+        pinnedToBottomRef.current ||
         (savedTop > 0
           ? savedTop >= bottomTop - nearBottomPxRef.current
           : distanceFromBottom(el) <= nearBottomPxRef.current)
@@ -1925,6 +1936,7 @@ export function MessageList({
               data-chat-empty-state
             >
               <span>{emptyLabel}</span>
+              {workspacePath ? <AgentContextCard workspacePath={workspacePath} /> : null}
             </div>
           ) : (
             (() => {

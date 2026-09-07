@@ -70,7 +70,7 @@ describe('Tooltip', () => {
     expect(tip()).toBeNull()
   })
 
-  it('shows content on focus and hides on Escape', () => {
+  it('shows content on keyboard focus and hides on Escape', () => {
     render(
       <Tooltip content="Focus tip" delayMs={100}>
         <button type="button">Focus me</button>
@@ -78,6 +78,8 @@ describe('Tooltip', () => {
     )
 
     const button = screen.getByRole('button', { name: 'Focus me' })
+    // Keyboard focus (Tab) opens tips — a keydown must precede the focus
+    fireEvent.keyDown(window, { key: 'Tab' })
     fireEvent.focus(button)
     act(() => {
       vi.advanceTimersByTime(100)
@@ -88,6 +90,34 @@ describe('Tooltip', () => {
 
     act(() => {
       fireEvent.keyDown(window, { key: 'Escape' })
+    })
+    expect(tip()).toBeNull()
+  })
+
+  it('does not summon a tip for programmatic or click focus', () => {
+    render(
+      <Tooltip content="Quiet tip" delayMs={50}>
+        <button type="button">Quiet</button>
+      </Tooltip>
+    )
+
+    // Defeat any keydown timestamp left by a previous test (module clock —
+    // prior tests can have advanced it ~100ms past their keydowns, so 10s
+    // reliably ages them out of the 1s keyboard-focus gate)
+    act(() => {
+      vi.advanceTimersByTime(10_000)
+    })
+    const button = screen.getByRole('button', { name: 'Quiet' })
+
+    button.focus()
+    act(() => {
+      vi.advanceTimersByTime(50)
+    })
+    expect(tip()).toBeNull()
+
+    fireEvent.focus(button)
+    act(() => {
+      vi.advanceTimersByTime(50)
     })
     expect(tip()).toBeNull()
   })
@@ -132,7 +162,7 @@ describe('Tooltip', () => {
     expect(tip()).toBeNull()
   })
 
-  it('keeps a focus-opened tip open when the pointer grazes and leaves', () => {
+  it('hides a focus-opened tip when the pointer leaves', () => {
     render(
       <Tooltip content="Focus stays" delayMs={50}>
         <button type="button">Stay</button>
@@ -140,6 +170,7 @@ describe('Tooltip', () => {
     )
 
     const button = screen.getByRole('button', { name: 'Stay' })
+    fireEvent.keyDown(window, { key: 'Tab' })
     button.focus()
     act(() => {
       vi.advanceTimersByTime(50)
@@ -147,15 +178,12 @@ describe('Tooltip', () => {
     expect(tip()).not.toBeNull()
     expect(tip()?.getAttribute('data-opened-by')).toBe('focus')
 
-    // Pointer graze doesn't close a tip the element still holds focus for
+    // Tips never persist without the pointer — graze closes even focus tips
     fireEvent.pointerLeave(button)
-    expect(tip()).not.toBeNull()
-
-    fireEvent.blur(button)
     expect(tip()).toBeNull()
   })
 
-  it('skips the delay when the previous tip just closed (toolbar scan)', () => {
+  it('skips the delay when the previous tip just closed via pointer (toolbar scan)', () => {
     render(
       <Tooltip content="Fast" delayMs={400}>
         <button type="button">Fast</button>
@@ -181,7 +209,7 @@ describe('Tooltip', () => {
     expect(tip()?.textContent).toBe('Fast')
   })
 
-  it('follows the trigger on scroll instead of hiding', () => {
+  it('hides on scroll', () => {
     render(
       <Tooltip content="Scroll tip" delayMs={50}>
         <button type="button">Scroll</button>
@@ -194,8 +222,9 @@ describe('Tooltip', () => {
     })
     expect(tip()).not.toBeNull()
 
+    // Scroll dismisses — the tip never follows its trigger around the screen
     fireEvent.scroll(window)
-    expect(tip()).not.toBeNull()
+    expect(tip()).toBeNull()
   })
 
   it('clamps the open tip box inside the viewport when the trigger sits at the edge', () => {

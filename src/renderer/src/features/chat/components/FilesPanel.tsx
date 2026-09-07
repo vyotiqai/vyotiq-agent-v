@@ -26,7 +26,7 @@ import {
   type WorkspaceEditorSelection
 } from '@shared/ipc'
 import { useAppVirtualizer } from '@renderer/lib/hooks/useAppVirtualizer'
-import { FileTypeIcon } from '@renderer/lib/fileIcons'
+import { FileTypeIcon } from '@renderer/lib/fileIcons/FileTypeIcon'
 import { Icon } from '@renderer/lib/icons'
 import { isIgnoredWorkspaceEntryName } from '@shared/utils/workspaceIgnores'
 import {

@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { tmpdir } from 'os'
 import { execFile as execFileCb } from 'child_process'
 import { promisify } from 'util'
@@ -859,7 +859,11 @@ describe('agentInstances', () => {
       doneWhen: 'needs scope complete',
     })
     expect(child.ok).toBe(false)
-    if (!child.ok) expect(child.error).toMatch(/path_scope/i)
+    if (!child.ok) {
+      expect(child.error).toMatch(/path_scope/i)
+      expect(child.error).toContain('Workspace resolved to')
+      expect(child.error).toContain(`${resolve(workspacePath)}", which is not a git repository.`)
+    }
   })
 
   it('rejects spawn with an unsafe path_scope prefix', async () => {

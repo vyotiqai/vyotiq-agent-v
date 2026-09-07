@@ -335,12 +335,13 @@ const createPlanArgs = z.object({
     .string()
     .trim()
     .min(1)
-    .describe('H1 title for the plan'),
+    .describe('H1 title for the plan (optional — omitted is fine when plan starts with an `# Title` line)')
+    .optional(),
   plan: z
     .string()
     .trim()
     .min(1)
-    .describe('Markdown with Goal, Steps, and Done when'),
+    .describe('Markdown with Goal, Scope, Architecture, Steps, Done when, and Risks'),
   todos: z
     .array(
       z.object({
@@ -865,7 +866,7 @@ const spawnAgentInstanceArgs = z.object({
   path_scope: z
     .array(z.string().min(1))
     .describe(
-      'Workspace-relative write path prefixes. Entries must be disjoint (a path may match only one instance); overlapping prefixes make concurrent worktrees unsafe. Required when git worktree isolation is unavailable.'
+      'Workspace-relative write path prefixes inside this workspace (no absolute paths, no `..`); absolute or out-of-workspace entries are rejected. Entries must be disjoint (a path may match only one instance); overlapping prefixes make concurrent worktrees unsafe. Required when git worktree isolation is unavailable — omit path_scope entirely when it is.'
     )
     .optional()
 })
@@ -1356,6 +1357,12 @@ function formatToolArgsError(name: string, detail: string): string {
   }
   if (name === 'todo_write' && /todos: Required/i.test(detail)) {
     return `${detail}. todo_write requires todos: [{ id, content, status }], or merge:true with an empty todos list.`
+  }
+  if (name === 'create_plan' && /^title:|title: Required|title and plan|requires title/i.test(detail)) {
+    return `${detail}. create_plan accepts the title as the plan's first line — send title or an H1 first line in plan (\`# Title\`), plus Goal, Steps, and Done when.`
+  }
+  if (name === 'spawn_agent_instance' && /path_scope/i.test(detail)) {
+    return `${detail}. path_scope only accepts workspace-relative prefixes inside this workspace — omit it entirely when git worktree isolation is available.`
   }
   return detail || 'Invalid tool arguments'
 }

@@ -121,6 +121,46 @@ describe.skipIf(!canGit)('git diff without an initial commit', () => {
   })
 })
 
+describe.skipIf(!canGit)('isGitRepo ancestor discovery', () => {
+  let repo: string
+  let plain: string
+
+  beforeAll(() => {
+    plain = mkdtempSync(join(tmpdir(), 'vyotiq-plain-'))
+    repo = mkdtempSync(join(tmpdir(), 'vyotiq-git-'))
+    git(repo, 'init', '--initial-branch=main')
+  })
+
+  afterAll(() => {
+    rmSync(repo, { recursive: true, force: true })
+    rmSync(plain, { recursive: true, force: true })
+  })
+
+  it('matches git ancestor .git discovery from a repo subdirectory', () => {
+    const subdir = join(repo, 'src', 'main')
+    mkdirSync(subdir, { recursive: true })
+    expect(isGitRepo(repo)).toBe(true)
+    expect(isGitRepo(subdir)).toBe(true)
+  })
+
+  it('treats a .git file (worktree checkout) as a repository', () => {
+    const wt = mkdtempSync(join(tmpdir(), 'vyotiq-wtfile-'))
+    try {
+      writeFileSync(join(wt, '.git'), 'gitdir: ../elsewhere/worktrees/one\n', 'utf8')
+      expect(isGitRepo(wt)).toBe(true)
+    } finally {
+      rmSync(wt, { recursive: true, force: true })
+    }
+  })
+
+  it('stays false when no ancestor contains .git', () => {
+    const subdir = join(plain, 'a', 'b')
+    mkdirSync(subdir, { recursive: true })
+    expect(isGitRepo(plain)).toBe(false)
+    expect(isGitRepo(subdir)).toBe(false)
+  })
+})
+
 describe.skipIf(!canGit)('git status', () => {
   let repo: string
   let plain: string

@@ -14,6 +14,7 @@ export const PLAN_STUB_MARKER = 'Draft the plan here.'
 export const PLAN_SECTIONS = [
   { heading: 'Goal', prompt: 'What result do you want?' },
   { heading: 'Scope', prompt: 'What is included and excluded?' },
+  { heading: 'Architecture', prompt: 'What components and data flow are affected?' },
   {
     heading: 'Steps',
     prompt: 'Small, understandable phases — each names affected paths and how it is verified.'
@@ -26,6 +27,7 @@ const LEGACY_HEADINGS = [
   'Goal',
   'Success criteria',
   'Scope',
+  'Architecture',
   'Open questions',
   'Approach',
   'Ordered steps',
@@ -40,6 +42,7 @@ const LEGACY_PROMPTS = new Set([
   'what result do you want',
   'how will we know it worked',
   'what is included and excluded',
+  'what components and data flow are affected',
   'what needs your decision',
   'what direction will be taken and why',
   'small, understandable phases',

@@ -84,7 +84,12 @@ export const TurnSummary = memo(function TurnSummary({
         : undefined
   // Terminal rows get a scannable status mark before the text so the transcript
   // reads at a glance; live rows keep the phase label as the mark.
-  const statusIcon: IconName | null = terminalStatus === 'done' ? 'check' : 'warning'
+  const statusIcon: IconName =
+    terminalStatus === 'done'
+      ? 'check'
+      : terminalStatus === 'error'
+        ? 'warning'
+        : 'minimize'
   const statusIconTone =
     terminalStatus === 'done' ? 'text-success' : (statusTone ?? 'text-tertiary')
 

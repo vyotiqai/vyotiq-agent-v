@@ -200,6 +200,7 @@ function TranscriptPane({
       <MessageList
         key={`transcript:${surfaceKey}`}
         emptyLabel={emptyLabel}
+        workspacePath={workspacePath ?? undefined}
         items={items}
         itemsStore={itemsStore}
         virtualizeLiveEarly

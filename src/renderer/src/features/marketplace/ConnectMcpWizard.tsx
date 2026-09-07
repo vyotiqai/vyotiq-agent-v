@@ -11,7 +11,7 @@ import {
   type GoogleMcpAccess,
   type McpAuthScope
 } from '@shared/mcpApps'
-import { Dialog } from '@renderer/lib/a11y'
+import { Dialog } from '@renderer/lib/a11y/Dialog'
 import { Button, Input } from '@renderer/lib/ui'
 import { copyText } from '@renderer/lib/markdown/copyText'
 

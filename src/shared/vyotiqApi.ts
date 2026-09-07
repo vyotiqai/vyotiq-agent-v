@@ -55,6 +55,8 @@ import type {
   TelemetryStatus,
   AppInfo,
   UpdaterStatus,
+  WorkspaceAgentContextRequest,
+  WorkspaceAgentContextResult,
   WorkspaceGrepRequest,
   WorkspaceGrepResult,
   GitConflictFileResult,
@@ -634,6 +636,10 @@ export interface VyotiqApi {
   onAppearanceCustomCssChanged: (handler: () => void) => () => void
   /** Main-process connectivity probe (1.1.1.1 HEAD) — matches agent retry logic. */
   probeNetwork: () => Promise<IpcResult<boolean>>
+  /** Read-only "what the agent knows" summary for the active workspace. */
+  agentContext: (payload: WorkspaceAgentContextRequest) => Promise<
+    IpcResult<WorkspaceAgentContextResult>
+  >
   /** Local codebase index embedder / download status. */
   codeIndexStatus: () => Promise<
     IpcResult<CodeIndexRuntimeStatus & { settings: CodeIndexSettings }>

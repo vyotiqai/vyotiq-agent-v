@@ -6,7 +6,10 @@ import type { StreamChunk } from '@main/agent/providers/types'
 import { resolveRunDir } from '@main/storage/paths'
 import {
   MAX_CONSECUTIVE_TOOL_FAILURE_STEPS,
-  MAX_IDENTICAL_STEP_STREAK
+  MAX_IDENTICAL_REASONING_STREAK_HINT,
+  MAX_IDENTICAL_REASONING_STREAK_TERMINAL,
+  MAX_IDENTICAL_STEP_STREAK,
+  MAX_REPETITION_ABORTS
 } from '@main/agent/loopPolicy'
 
 const userData = join(tmpdir(), `vyotiq-loopsafety-${process.pid}-${Date.now()}`)
@@ -395,4 +398,176 @@ describe('runAgent LOOP_SAFETY integration', () => {
       expect(streamChat).toHaveBeenCalledTimes(501)
     }
   )
+
+  it('aborts a degenerate repeating generation and steer-continues with a synthetic turn', async () => {
+    // Run be413e92 pathology: the generation streams identical ~1K blocks
+    // forever. The monitor soft-aborts mid-stream; the step must flush the
+    // partial output, emit a durable 'repetition' incomplete event, inject the
+    // synthetic continue turn, and persist the abort counter — then recover.
+    const runId = 'safety-repetition-steer'
+    let call = 0
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      call += 1
+      if (call === 1) {
+        for (let i = 0; i < 12; i++) {
+          yield { type: 'thinking_delta', text: 'X'.repeat(1024) }
+        }
+        return
+      }
+      // Step 2 runs after the repetition steer: the checkpoint must already
+      // carry the persisted abort counter.
+      const checkpoint = JSON.parse(
+        readFileSync(join(resolveRunDir(workspace, runId), 'loopCheckpoint.json'), 'utf8')
+      ) as { repetitionAborts?: number }
+      expect(checkpoint.repetitionAborts).toBe(1)
+      yield { type: 'text', text: 'recovered with a fresh action' }
+      yield { type: 'done', stopReason: 'stop' }
+    })
+    executeTool.mockResolvedValue({ ok: true, summary: 'file', content: 'body' })
+
+    const events = await collect(runId, workspace)
+
+    expect(streamChat).toHaveBeenCalledTimes(2)
+    expect(events.some((e) => e.type === 'incomplete' && e.reason === 'repetition')).toBe(true)
+    // The partial (aborted) generation is flushed as an assistant message.
+    expect(events.some((e) => e.type === 'assistant_message')).toBe(true)
+    // The synthetic continue turn is injected before the next generation.
+    const secondCallMessages = assembleContext.mock.calls[1][0].messages as Array<{
+      role: string
+      synthetic?: boolean
+      content: string
+    }>
+    expect(
+      secondCallMessages.some(
+        (m) =>
+          m.role === 'user' &&
+          m.synthetic === true &&
+          m.content.startsWith('Your output was cut off because it repeated the same text')
+      )
+    ).toBe(true)
+    expectNoLoopSafetyStop(events)
+  })
+
+  it('ends the turn after MAX_REPETITION_ABORTS degenerate generations', async () => {
+    // Every generation loops; after the cap the turn ends (status done) and no
+    // further generation burns tokens — the truncated auto-continue cap shape.
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      for (let i = 0; i < 12; i++) {
+        yield { type: 'thinking_delta', text: 'X'.repeat(1024) }
+      }
+    })
+    executeTool.mockResolvedValue({ ok: true, summary: 'file', content: 'body' })
+
+    const runId = 'safety-repetition-cap'
+    const events = await collect(runId, workspace)
+
+    expect(streamChat).toHaveBeenCalledTimes(MAX_REPETITION_ABORTS + 1)
+    const repetitionEvents = events.filter(
+      (e) => e.type === 'incomplete' && e.reason === 'repetition'
+    )
+    expect(repetitionEvents).toHaveLength(MAX_REPETITION_ABORTS + 1)
+    expect(events.some((e) => e.type === 'status' && e.status === 'done')).toBe(true)
+    expect(events.some((e) => e.type === 'status' && e.status === 'error')).toBe(false)
+    expect(events.some((e) => e.type === 'error' && e.code === 'LOOP_SAFETY')).toBe(false)
+  })
+
+  it('escalates the reasoning hint at streak 3 and stops terminally at streak 6 (no-tool step included)', async () => {
+    let call = 0
+    const reasoning =
+      'I have gone in circles again; the task list already reflects current statuses.'
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      call += 1
+      if (call <= MAX_IDENTICAL_REASONING_STREAK_TERMINAL - 1) {
+        // Tool-call steps 1..5: identical reasoning, distinct tool args (so the
+        // identical-STEP streak stays at 1 and only the reasoning streak climbs).
+        yield { type: 'thinking_delta', text: reasoning }
+        yield { type: 'text', text: 'Working on it.' }
+        yield {
+          type: 'tool_call',
+          toolCall: { id: `c${call}`, name: 'read', arguments: `{"path":"a${call}.ts"}` }
+        }
+        yield { type: 'done', stopReason: 'tool_calls' }
+        return
+      }
+      // Step 6: no tool call — the terminal reasoning stop must still fire.
+      // Same thinking + assistant text as steps 1-5 so the reasoning
+      // fingerprint matches and the streak reaches the terminal threshold.
+      yield { type: 'thinking_delta', text: reasoning }
+      yield { type: 'text', text: 'Working on it.' }
+      yield { type: 'done', stopReason: 'stop' }
+    })
+    executeTool.mockResolvedValue({ ok: true, summary: 'file', content: 'body' })
+
+    const runId = 'safety-reasoning-streak'
+    const events = await collect(runId, workspace)
+
+    expect(streamChat).toHaveBeenCalledTimes(MAX_IDENTICAL_REASONING_STREAK_TERMINAL)
+    // The hint escalates into the prompt from the step AFTER the streak hits 3.
+    const hintAt = (stepIndex: number): string | undefined =>
+      (assembleContext.mock.calls[stepIndex][0] as unknown as { loopHint?: string }).loopHint
+    expect(hintAt(MAX_IDENTICAL_REASONING_STREAK_HINT - 1)).toBeUndefined()
+    expect(hintAt(MAX_IDENTICAL_REASONING_STREAK_HINT)).toContain('repeating the same reasoning')
+    // Terminal stop on the no-tool-call step.
+    const loopStop = events.find((e) => e.type === 'error' && e.code === 'LOOP_SAFETY')
+    expect(loopStop).toBeTruthy()
+    expect(String(loopStop?.message)).toContain('near-identical reasoning repeated 6 steps in a row')
+    expect(events.some((e) => e.type === 'status' && e.status === 'error')).toBe(true)
+  })
+
+  it('resets the reasoning streak on different reasoning and on empty fingerprints', async () => {
+    let call = 0
+    const reasoning =
+      'I have gone in circles again; the task list already reflects current statuses.'
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      call += 1
+      if (call <= 3) {
+        yield { type: 'thinking_delta', text: reasoning }
+        yield { type: 'text', text: 'Working on it.' }
+        yield {
+          type: 'tool_call',
+          toolCall: { id: `c${call}`, name: 'read', arguments: `{"path":"a${call}.ts"}` }
+        }
+        yield { type: 'done', stopReason: 'tool_calls' }
+        return
+      }
+      if (call === 4) {
+        // Different reasoning resets the streak to 1.
+        yield { type: 'thinking_delta', text: 'completely different approach now' }
+        yield { type: 'text', text: 'New plan.' }
+        yield {
+          type: 'tool_call',
+          toolCall: { id: 'c4', name: 'read', arguments: '{"path":"b.ts"}' }
+        }
+        yield { type: 'done', stopReason: 'tool_calls' }
+        return
+      }
+      if (call === 5) {
+        // No thinking and no text: the empty fingerprint resets the streak to 0.
+        yield {
+          type: 'tool_call',
+          toolCall: { id: 'c5', name: 'read', arguments: '{"path":"c.ts"}' }
+        }
+        yield { type: 'done', stopReason: 'tool_calls' }
+        return
+      }
+      yield { type: 'text', text: 'done' }
+      yield { type: 'done', stopReason: 'stop' }
+    })
+    executeTool.mockResolvedValue({ ok: true, summary: 'file', content: 'body' })
+
+    const runId = 'safety-reasoning-reset'
+    const events = await collect(runId, workspace)
+
+    const hintAt = (stepIndex: number): string | undefined =>
+      (assembleContext.mock.calls[stepIndex][0] as unknown as { loopHint?: string }).loopHint
+    expect(hintAt(2)).toBeUndefined()
+    // Streak hit 3 after step 3 — step 4 carries the hint.
+    expect(hintAt(3)).toContain('repeating the same reasoning')
+    // Different reasoning reset the streak — step 5 carries no hint.
+    expect(hintAt(4)).toBeUndefined()
+    // '' fingerprint reset the streak — step 6 carries no hint.
+    expect(hintAt(5)).toBeUndefined()
+    expectNoLoopSafetyStop(events)
+    expect(streamChat).toHaveBeenCalledTimes(6)
+  })
 })

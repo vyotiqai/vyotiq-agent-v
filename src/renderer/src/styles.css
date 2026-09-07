@@ -1238,3 +1238,102 @@ dialog[open] {
     content: none;
   }
 }
+
+/* Agent context card — empty-session "what the agent knows" strip. */
+.agent-context-card {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 4px;
+  max-width: 40rem;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface, var(--vy-surface-2)) 65%, transparent);
+  box-shadow: var(--vy-shadow-chrome);
+}
+
+.acc-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-border) 7%, transparent);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.acc-sep {
+  width: 1px;
+  align-self: center;
+  background: color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+
+.acc-icon,
+.acc-text {
+  color: var(--color-muted);
+}
+
+.acc-text-primary {
+  color: var(--color-secondary);
+  font-weight: 500;
+}
+
+.acc-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--color-muted);
+}
+
+.acc-dot-ready {
+  background: var(--color-success);
+}
+
+.acc-dot-building {
+  background: var(--color-warning);
+  animation: acc-dot-pulse 1.6s var(--vy-ease, ease) infinite;
+}
+
+.acc-dot-degraded {
+  background: var(--color-warning);
+}
+
+.acc-dot-off {
+  background: var(--color-muted);
+}
+
+@keyframes acc-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+[data-agent-context-card-skeleton] .acc-skel-chip {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--color-border) 16%, transparent);
+  color: transparent;
+}
+
+@media (prefers-contrast: more) {
+  .agent-context-card {
+    border: 1px solid var(--color-border-strong);
+  }
+
+  .acc-segment {
+    border: 1px solid var(--color-border);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .acc-dot-building {
+    animation: none;
+  }
+}

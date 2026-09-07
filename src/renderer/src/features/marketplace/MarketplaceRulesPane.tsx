@@ -6,7 +6,7 @@ import {
   USER_RULE_NAME_MAX
 } from '@shared/ipc'
 import { ActionMenu, Button, IconButton, Input, Switch } from '@renderer/lib/ui'
-import { Dialog } from '@renderer/lib/a11y'
+import { Dialog } from '@renderer/lib/a11y/Dialog'
 import { Icon } from '@renderer/lib/icons'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { usePrompt } from '@renderer/lib/hooks/usePrompt'

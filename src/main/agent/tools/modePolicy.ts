@@ -156,7 +156,8 @@ export function modeSectionMarkdown(
         'mode',
         [
           'Plan mode. Inspect the workspace with read-only tools before drafting. Plans must name paths and symbols verified in this run.',
-          'Use `ask_question` for blocking choices, then publish the complete plan with `create_plan`. Follow the canonical structure: `## Goal` (outcome in 1–2 sentences), `## Scope` (in / out), `## Steps` (ordered; each step names affected paths or symbols verified in this run and how it is verified), `## Done when` (a `- [ ]` checklist of concrete criteria), `## Risks` (trade-offs, unknowns).',
+          'Use `ask_question` for blocking choices, then publish the complete plan with `create_plan`. Follow the canonical structure: `## Goal` (outcome in 1–2 sentences), `## Scope` (in / out), `## Architecture` (a ```mermaid diagram of the affected components and data flow, with nodes named after real files or symbols), `## Steps` (ordered; each step names the paths or symbols it touches — verified in this run — and the runnable check that proves it done: a test, command, or output), `## Done when` (a `- [ ]` checklist of concrete, observable criteria), `## Risks` (trade-offs, unknowns).',
+          'Give the run a check it can execute (tests, build, lint) and cite real evidence — test output or command results — rather than asserting success.',
           'Only plan.md and contract.md may be edited. Do not change product files, delete files, run `terminal`, write memory, or invoke MCP server tools. `diagnostics` and `run_tests` may run checks subject to approval.',
           ...autoModeSwitchBanner(mode, auto),
           ...(auto

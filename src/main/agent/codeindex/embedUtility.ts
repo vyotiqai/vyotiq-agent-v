@@ -69,6 +69,8 @@ type UtilityRequest = {
   targetId?: number
   workspaceRoot?: string
   dbPath?: string
+  /** Read-only parent index to reuse embeddings from (instance worktrees). */
+  reuseDbPath?: string
   dimensions?: number
   embedderKind?: EmbedderKind
   ollama?: { baseUrl?: string; model?: string; dimensions?: number }
@@ -429,7 +431,9 @@ async function handle(msg: UtilityRequest): Promise<void> {
         throw new Error('syncCode requires workspaceRoot, dbPath, dimensions')
       }
       const embedder = await resolveSyncEmbedder(msg)
-      const store = CodeIndexStore.openDbPath(dbPath, dimensions)
+      const store = CodeIndexStore.openDbPath(dbPath, dimensions, {
+        reuseDbPath: msg.reuseDbPath
+      })
       try {
         const sync = await syncCodeIndex(workspaceRoot, store, embedder, {
           signal,

@@ -19,6 +19,7 @@ import {
 } from './mdenseon'
 import { createLfm2LlamaCppEmbedder } from './lfm2LlamaCpp'
 import { CodeIndexStore, codeindexDbPath } from './store'
+import { instanceWorktreeReuseDbPath } from '../indexStoragePaths'
 import { syncCodeIndex, type SyncResult } from './sync'
 import type { WalkedFile } from '../tools/walk'
 import { clearIndexSyncProgress } from './indexProgress'
@@ -41,6 +42,11 @@ import {
 import { markCodeIndexEmbedder, setCodeIndexRuntimeStatus } from './modelStatus'
 import { logger } from '../../../shared/logger'
 import { enqueueIndexJob } from '../indexJobQueue'
+// Static imports despite the module cycle (workspaceIndex imports this barrel):
+// both sides only touch each other's bindings after module evaluation, so the
+// cycle is safe and the rollup dynamic/static chunk warning goes away.
+import { ensureSparseGrepSynced, SPARSE_GREP_SCAN_CAP } from '../sparsegrep'
+import { warmWorkspaceIndexes, workspaceIndexSearchSignal } from '../workspaceIndex'
 import {
   canUseIndexSearchUtility,
   canUseIndexSyncUtility,
@@ -454,7 +460,7 @@ async function withWorkspaceLock<T>(workspaceRoot: string, fn: () => Promise<T>)
 
 export async function getOrOpenCodeIndex(
   workspaceRoot: string,
-  opts: CodeIndexOptions & { signal?: AbortSignal } = {}
+  opts: CodeIndexOptions & { signal?: AbortSignal; reuseDbPath?: string } = {}
 ): Promise<CacheEntry & { store: CodeIndexStore }> {
   const { embedder } = await resolveEmbedder(opts)
   const key = cacheKey(workspaceRoot, embedder.modelId)
@@ -469,7 +475,9 @@ export async function getOrOpenCodeIndex(
       cache.delete(k)
     }
   }
-  const store = CodeIndexStore.open(workspaceRoot, embedder.dimensions)
+  const store = CodeIndexStore.open(workspaceRoot, embedder.dimensions, {
+    reuseDbPath: opts.reuseDbPath
+  })
   const entry: CacheEntry & { store: CodeIndexStore } = {
     store,
     embedder,
@@ -538,6 +546,7 @@ async function runCodeIndexSync(
     closeCodeIndex(workspaceRoot)
     const client = getEmbedUtilityClient()
     const kind = embedderKindFor(embedder)
+    const reuseDbPath = instanceWorktreeReuseDbPath(workspaceRoot)
     return await client.syncCode({
       workspaceRoot,
       dbPath: codeindexDbPath(workspaceRoot),
@@ -547,10 +556,15 @@ async function runCodeIndexSync(
       ollama: ollamaOptsForUtility(embedder, ollama),
       files,
       preserveNeural,
+      reuseDbPath: reuseDbPath ?? undefined,
       signal
     })
   }
-  const entry = await getOrOpenCodeIndex(workspaceRoot, { embedder, signal })
+  const entry = await getOrOpenCodeIndex(workspaceRoot, {
+    embedder,
+    signal,
+    reuseDbPath: instanceWorktreeReuseDbPath(workspaceRoot) ?? undefined
+  })
   if (!entry.store) throw new Error('Code index store unavailable')
   return syncCodeIndex(workspaceRoot, entry.store, entry.embedder, {
     signal,
@@ -741,12 +755,11 @@ export async function ensureCodeIndexSynced(
 
 function schedulePostSearchWarm(workspaceRoot: string): void {
   // Full code+sparse warm after search returns (queued or ready-utility fast path).
-  // Dynamic import avoids a load-time cycle (workspaceIndex imports this module).
-  void import('../workspaceIndex')
-    .then((m) => {
-      m.warmWorkspaceIndexes(workspaceRoot)
-    })
-    .catch(() => undefined)
+  try {
+    warmWorkspaceIndexes(workspaceRoot)
+  } catch {
+    // Same swallow as the previous promise chain — search must never fail on warm.
+  }
 }
 
 type CodebaseSearchResult = {
@@ -816,8 +829,7 @@ export async function runCodebaseSearch(
     refresh?: boolean
   } = {}
 ): Promise<CodebaseSearchResult> {
-  const ws = await import('../workspaceIndex')
-  const searchSignal = ws.workspaceIndexSearchSignal(workspaceRoot, opts.signal)
+  const searchSignal = workspaceIndexSearchSignal(workspaceRoot, opts.signal)
   let skipWarm = false
 
   const runQueuedInteractiveSearch = (runOpts: { forceResync?: boolean } = {}): Promise<CodebaseSearchResult> =>
@@ -1018,9 +1030,6 @@ export async function reindexCodeIndex(
         signal: opts.signal,
         embedderId: opts.embedderId
       })
-      // Dynamic import: codeindex barrel must not statically import sparsegrep
-      // (tools → codeindex → sparsegrep → ... → electron window named exports break Vitest).
-      const { ensureSparseGrepSynced, SPARSE_GREP_SCAN_CAP } = await import('../sparsegrep')
       await ensureSparseGrepSynced(workspaceRoot, {
         force: true,
         signal: opts.signal,

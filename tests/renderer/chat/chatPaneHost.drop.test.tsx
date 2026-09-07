@@ -201,11 +201,177 @@ describe('ChatPaneHost drop', () => {
       }
     })
     Object.defineProperty(drop, 'clientX', { configurable: true, value: 520 })
+    // Drop lands while the session drag is still active — dragend fires after drop.
+    markSessionDragStart()
     fireEvent(host, drop)
+    markSessionDragEnd()
 
     expect(onSessionDrop).toHaveBeenCalledWith('pane-1', 'right', {
       workspacePath: '/ws/b',
       runId: 'run-b'
     })
+  })
+
+  it('drop of an unparsable session payload no-ops with dropEffect none and clears highlight', () => {
+    const onSessionDrop = vi.fn(() => true)
+    render(
+      <ChatPaneHost
+        panes={[pane]}
+        focusedPaneId="pane-1"
+        sizes={[1]}
+        onFocusPane={() => {}}
+        onClosePane={() => {}}
+        onSizesChange={() => {}}
+        onSessionDrop={onSessionDrop}
+        getPaneTitle={() => 'Chat A'}
+        renderPane={() => <div data-testid="pane-body">body</div>}
+      />
+    )
+
+    const host = screen.getByTestId('pane-body').closest('[data-chat-pane]') as HTMLElement
+    mockPaneRect(host)
+
+    // Park the highlight first so the drop must clear it.
+    markSessionDragStart()
+    const dragOver = createEvent.dragOver(host, {
+      dataTransfer: { types: ['text/plain'] }
+    })
+    Object.defineProperty(dragOver, 'clientX', { configurable: true, value: 520 })
+    fireEvent(host, dragOver)
+    expect(
+      (host as HTMLElement).querySelector('div[aria-hidden="true"]')
+    ).toBeTruthy()
+
+    const drop = createEvent.drop(host, {
+      dataTransfer: {
+        types: [SESSION_DRAG_MIME],
+        getData: (type: string) => (type === SESSION_DRAG_MIME ? 'not-json' : '')
+      }
+    })
+    Object.defineProperty(drop, 'clientX', { configurable: true, value: 520 })
+    const dataTransfer = (drop as unknown as DragEvent).dataTransfer as DataTransfer
+    fireEvent(host, drop)
+    markSessionDragEnd()
+
+    expect(onSessionDrop).not.toHaveBeenCalled()
+    expect(dataTransfer.dropEffect).toBe('none')
+    expect(
+      (host as HTMLElement).querySelector('div[aria-hidden="true"]')
+    ).toBeFalsy()
+  })
+
+  it('drop of a foreign drag bails without preventDefault or onSessionDrop', () => {
+    const onSessionDrop = vi.fn(() => true)
+    render(
+      <ChatPaneHost
+        panes={[pane]}
+        focusedPaneId="pane-1"
+        sizes={[1]}
+        onFocusPane={() => {}}
+        onClosePane={() => {}}
+        onSizesChange={() => {}}
+        onSessionDrop={onSessionDrop}
+        getPaneTitle={() => 'Chat A'}
+        renderPane={() => <div data-testid="pane-body">body</div>}
+      />
+    )
+
+    const host = screen.getByTestId('pane-body').closest('[data-chat-pane]') as HTMLElement
+    mockPaneRect(host)
+
+    const drop = createEvent.drop(host, {
+      dataTransfer: {
+        types: ['text/plain'],
+        getData: (type: string) =>
+          type === 'text/plain'
+            ? JSON.stringify({ workspacePath: '/ws/b', runId: 'run-b' })
+            : ''
+      }
+    })
+    Object.defineProperty(drop, 'clientX', { configurable: true, value: 520 })
+    const preventDefault = vi.fn()
+    ;(drop as unknown as { preventDefault: () => void }).preventDefault = preventDefault
+    fireEvent(host, drop)
+
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(onSessionDrop).not.toHaveBeenCalled()
+    expect(
+      (host as HTMLElement).querySelector('div[aria-hidden="true"]')
+    ).toBeFalsy()
+  })
+
+  it('dragover of a foreign drag shows no highlight and claims nothing', () => {
+    const onSessionDrop = vi.fn(() => true)
+    render(
+      <ChatPaneHost
+        panes={[pane]}
+        focusedPaneId="pane-1"
+        sizes={[1]}
+        onFocusPane={() => {}}
+        onClosePane={() => {}}
+        onSizesChange={() => {}}
+        onSessionDrop={onSessionDrop}
+        getPaneTitle={() => 'Chat A'}
+        renderPane={() => <div data-testid="pane-body">body</div>}
+      />
+    )
+
+    const host = screen.getByTestId('pane-body').closest('[data-chat-pane]') as HTMLElement
+    mockPaneRect(host)
+
+    const dragOver = createEvent.dragOver(host, {
+      dataTransfer: { types: ['text/plain'] }
+    })
+    Object.defineProperty(dragOver, 'clientX', { configurable: true, value: 520 })
+    const preventDefault = vi.fn()
+    ;(dragOver as unknown as { preventDefault: () => void }).preventDefault =
+      preventDefault
+    fireEvent(host, dragOver)
+
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(
+      (host as HTMLElement).querySelector('div[aria-hidden="true"]')
+    ).toBeFalsy()
+  })
+
+  it('valid session drop claims the event once and stops propagation', () => {
+    const onSessionDrop = vi.fn(() => true)
+    render(
+      <ChatPaneHost
+        panes={[pane]}
+        focusedPaneId="pane-1"
+        sizes={[1]}
+        onFocusPane={() => {}}
+        onClosePane={() => {}}
+        onSizesChange={() => {}}
+        onSessionDrop={onSessionDrop}
+        getPaneTitle={() => 'Chat A'}
+        renderPane={() => <div data-testid="pane-body">body</div>}
+      />
+    )
+
+    const host = screen.getByTestId('pane-body').closest('[data-chat-pane]') as HTMLElement
+    mockPaneRect(host)
+
+    const drop = createEvent.drop(host, {
+      dataTransfer: {
+        types: [SESSION_DRAG_MIME],
+        getData: (type: string) =>
+          type === SESSION_DRAG_MIME
+            ? JSON.stringify({ workspacePath: '/ws/b', runId: 'run-b' })
+            : ''
+      }
+    })
+    Object.defineProperty(drop, 'clientX', { configurable: true, value: 520 })
+    const stopPropagation = vi.fn()
+    ;(drop as unknown as { stopPropagation: () => void }).stopPropagation =
+      stopPropagation
+    fireEvent(host, drop)
+
+    expect(onSessionDrop).toHaveBeenCalledTimes(1)
+    expect(stopPropagation).toHaveBeenCalledTimes(1)
+    expect(
+      (host as HTMLElement).querySelector('div[aria-hidden="true"]')
+    ).toBeFalsy()
   })
 })

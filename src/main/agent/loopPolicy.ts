@@ -17,6 +17,24 @@ export const MAX_IDENTICAL_STEP_STREAK = 3
 export const MAX_IDENTICAL_STEP_STREAK_TERMINAL = 8
 
 /**
+ * Steering hint from this many consecutive steps of near-identical reasoning
+ * (thinking + assistant text) even when tool calls differ. Root cause (run
+ * be413e92): 192 identical reasoning blocks ("I've gone in circles again…
+ * reconstruct the task list") with distinct tool calls — every existing loop
+ * trigger keyed on tool calls only, so it never fired. Per-step reasoning
+ * detection is the second line of defense behind the in-generation monitor.
+ */
+export const MAX_IDENTICAL_REASONING_STREAK_HINT = 3
+
+/**
+ * Terminal stop from this many consecutive steps of near-identical reasoning.
+ * Below this ceiling identical repeats steer via the escalating hint
+ * (loopHintForIdenticalReasoningStreak); the loop treats this reason as
+ * terminal.
+ */
+export const MAX_IDENTICAL_REASONING_STREAK_TERMINAL = 6
+
+/**
  * Stop the run after this many consecutive steps whose tool calls all failed.
  * Mirrors the "failed 4 steps in a row" loop hint threshold. Charges only
  * REPEATED failed attempts — a new failing attempt shape holds the streak
@@ -44,6 +62,16 @@ export const MAX_TRUNCATION_CONTINUES = 8
 export const MAX_EMPTY_RESPONSE_CONTINUES = 4
 
 /**
+ * Cap auto-continuation after an aborted degenerate generation (the monitor
+ * in generationRepetition.ts soft-aborted the stream). Each steer-continue
+ * re-sends the full context to a model that just looped, so an unbounded
+ * chain burns tokens (run be413e92: 192 identical reasoning blocks streamed
+ * for ~40 minutes before any guard fired). After this many repetition
+ * aborts in one run the turn ends instead of steering again.
+ */
+export const MAX_REPETITION_ABORTS = 3
+
+/**
  * Hard step ceiling for a single user turn. Without it, a run that alternates
  * distinct (non-identical) tool calls can loop indefinitely, paying for
  * compaction cycles each time the window refills. Generous by design — real
@@ -52,7 +80,10 @@ export const MAX_EMPTY_RESPONSE_CONTINUES = 4
  */
 export const MAX_STEPS_PER_TURN = 500
 
-export type LoopStopReason = 'tool_failure_streak' | 'identical_step_streak'
+export type LoopStopReason =
+  | 'tool_failure_streak'
+  | 'identical_step_streak'
+  | 'identical_reasoning_streak'
 
 export type LoopStop = { reason: LoopStopReason; message: string }
 
@@ -215,6 +246,13 @@ export function loopHintForConsecutiveToolFailures(
   ) {
     lines.push(
       'str_replace old_string was not found. Re-read with startLine/endLine and retry with an exact snippet (indentation and newlines).'
+    )
+  } else if (
+    recent?.tool === 'create_plan' &&
+    /title:|requires title|title and plan/i.test(recent.summary)
+  ) {
+    lines.push(
+      'create_plan accepts the title as the plan\'s first line — resend with `title`, or with an H1 first line (`# Title`) in `plan`, plus Goal, Steps, and Done when.'
     )
   } else if (
     recent?.tool === 'todo_write' &&
@@ -640,6 +678,43 @@ export function nextIdenticalStepStreak(
 }
 
 /**
+ * Stable fingerprint of one step's reasoning (thinking + assistant text).
+ * Normalizes case and whitespace runs so near-identical "rephrased" reasoning
+ * hashes equal, and keeps only the tail so unrelated prefixed text does not
+ * change the fingerprint. Empty input yields '' (nothing to compare).
+ */
+export function stepReasoningFingerprint(thinkingText: string, assistantText: string): string {
+  const combined = `${thinkingText}\n${assistantText}`.trim()
+  if (!combined) return ''
+  const normalized = `${combined.toLowerCase().replace(/\s+/g, ' ')}`
+  return createHash('sha256')
+    .update(normalized.slice(-1024))
+    .digest('hex')
+    .slice(0, 16)
+}
+
+/**
+ * Next identical-reasoning streak. An empty fingerprint means the step had no
+ * reasoning to compare and resets to 0 — it must never accumulate. Equal
+ * non-empty fingerprints continue the streak (+1); a different fingerprint
+ * restarts at 1.
+ */
+export function nextIdenticalReasoningStreak(
+  prevFingerprint: string,
+  prevStreak: number,
+  fingerprint: string
+): number {
+  if (!fingerprint) return 0
+  return fingerprint === prevFingerprint ? prevStreak + 1 : 1
+}
+
+/** Loop hint when near-identical reasoning repeats across steps (before hard stop). */
+export function loopHintForIdenticalReasoningStreak(streak: number): string | undefined {
+  if (streak < MAX_IDENTICAL_REASONING_STREAK_HINT) return undefined
+  return 'You are repeating the same reasoning. The task list in your context already reflects current statuses; take the next concrete action instead of restating the plan.'
+}
+
+/**
  * Next consecutive tool-failure streak. The counter's contract (loop.ts) is
  * "steps in a row whose tool calls ALL failed" — a step that mixes a success
  * with failures made progress and must reset the streak, not extend it.
@@ -722,7 +797,15 @@ export function loopStopDecision(state: {
   step: number
   consecutiveToolFailureSteps?: number
   identicalStepStreak: number
+  identicalReasoningStreak?: number
 }): LoopStop | undefined {
+  const reasoningStreak = state.identicalReasoningStreak ?? 0
+  if (reasoningStreak >= MAX_IDENTICAL_REASONING_STREAK_TERMINAL) {
+    return {
+      reason: 'identical_reasoning_streak',
+      message: `Stopping: near-identical reasoning repeated ${reasoningStreak} steps in a row without task-list progress. Resume from the task list with fresh actions.`
+    }
+  }
   if (state.identicalStepStreak >= MAX_IDENTICAL_STEP_STREAK_TERMINAL) {
     return {
       reason: 'identical_step_streak',

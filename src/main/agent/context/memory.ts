@@ -131,7 +131,7 @@ export function listMemoryNotes(workspacePath: string): {
     notes = []
   }
   return {
-    indexExcerpt: readMemoryIndex(workspacePath, Number.POSITIVE_INFINITY),
+    indexExcerpt: readMemoryIndex(workspacePath, MEMORY_LIST_INDEX_EXCERPT),
     notes,
     hasState: existsSync(join(root, 'state.md'))
   }

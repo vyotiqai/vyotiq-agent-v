@@ -54,6 +54,8 @@ type UtilityRequest = {
   targetId?: number
   workspaceRoot?: string
   dbPath?: string
+  /** Read-only parent index to reuse embeddings from (instance worktrees). */
+  reuseDbPath?: string
   dimensions?: number
   embedderKind?: EmbedderKind
   ollama?: { baseUrl?: string; model?: string; dimensions?: number }
@@ -428,6 +430,7 @@ export class EmbedUtilityClient {
     ollama?: { baseUrl?: string; model?: string; dimensions?: number }
     files?: WalkedFile[]
     preserveNeural?: boolean
+    reuseDbPath?: string
     signal?: AbortSignal
   }): Promise<SyncResult> {
     const res = await this.request(
@@ -441,6 +444,7 @@ export class EmbedUtilityClient {
         ollama: opts.ollama,
         files: opts.files,
         preserveNeural: opts.preserveNeural,
+        reuseDbPath: opts.reuseDbPath,
         wasmDir: resolveCodeindexWasmDir()
       },
       opts.signal,

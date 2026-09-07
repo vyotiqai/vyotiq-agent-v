@@ -44,6 +44,12 @@ const DEFERRED_CLEANUP_DELAYS_MS = [
 const pendingInstanceWorktrees = new Set<string>()
 const deferredCleanupKeys = new Set<string>()
 const deferredCleanupTimers = new Set<ReturnType<typeof setTimeout>>()
+// Locked left-overs are re-probed on every prune pass (boot, workspace open,
+// workspace switch). Each pass used to pay the full removal ladder per locked
+// path (~9s of git + WMI kill + rm retries) while holding the worktree mutex,
+// stalling spawns. Back off per path instead: retry no sooner than this.
+const PRUNE_LOCKED_BACKOFF_MS = 15 * 60_000
+const pruneSkipUntil = new Map<string, number>()
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -77,6 +83,67 @@ export function gitWorktreeRemoveErrorKind(
 export function gitRefIsMissingError(err: unknown): boolean {
   const text = execErrorText(err).toLowerCase()
   return text.includes('not found') || text.includes('does not exist')
+}
+
+/**
+ * The by-design lock deferral thrown by removeInstanceWorktreeUnlocked when a
+ * path stays locked and deferred cleanup was scheduled. Startup prune hits
+ * this for every still-locked leftover — it is a scheduled retry, not a
+ * prune failure, so callers log it at info level instead of warn.
+ */
+export function isDeferredWorktreeLockError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const rec = err as { code?: unknown; message?: unknown }
+  if (rec.code !== 'EPERM') return false
+  return (
+    typeof rec.message === 'string' && rec.message.startsWith('Instance worktree still locked:')
+  )
+}
+
+const LOCK_PROBE_SUFFIX = '.lockprobe'
+
+function deferredWorktreeLockError(worktreePath: string): Error {
+  return Object.assign(new Error(`Instance worktree still locked: ${worktreePath}`), {
+    code: 'EPERM'
+  })
+}
+
+/**
+ * Cheap lock probe: on Windows, renaming a directory fails with EPERM/EBUSY
+ * while any handle under it is open, so a rename-and-rename-back round trip
+ * detects a locked worktree in ~1 ms — instead of paying the full removal
+ * ladder (git + WMI kill + rm retries) before discovering the same thing.
+ * POSIX rename succeeds despite open files, so behavior off win32 is
+ * unchanged. Exported for tests; renameFn injection keeps it deterministic.
+ */
+export function probeInstanceWorktreePathLocked(
+  path: string,
+  renameFn: (from: string, to: string) => void = renameSync
+): boolean {
+  const probePath = `${path}${LOCK_PROBE_SUFFIX}`
+  try {
+    renameFn(path, probePath)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code
+    if (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES') return true
+    return false
+  }
+  try {
+    renameFn(probePath, path)
+  } catch (err) {
+    // The probe rename landed but the rename-back failed — the tree now sits
+    // at the probe path. Report locked so callers retry later instead of
+    // treating the original path as removable; the stray probe dir is pruned
+    // as its own entry on a later pass.
+    logger.warn('instance worktree lock probe rename-back failed', {
+      scope: 'git',
+      path,
+      probePath,
+      err
+    })
+    return true
+  }
+  return false
 }
 
 const NODE_MODULES_DIR = 'node_modules'
@@ -479,6 +546,7 @@ export function resetInstanceWorktreeCleanupForTests(): void {
   for (const timer of deferredCleanupTimers) clearTimeout(timer)
   deferredCleanupTimers.clear()
   deferredCleanupKeys.clear()
+  pruneSkipUntil.clear()
   pendingInstanceWorktrees.clear()
 }
 
@@ -834,7 +902,7 @@ export async function removeInstanceWorktree(
 async function removeInstanceWorktreeUnlocked(
   workspacePath: string,
   worktreePath: string,
-  opts?: { allowDeferred?: boolean }
+  opts?: { allowDeferred?: boolean; renameFn?: (from: string, to: string) => void }
 ): Promise<void> {
   if (!worktreePath.trim()) return
   if (!isSafeInstanceWorktreePath(workspacePath, worktreePath)) {
@@ -842,6 +910,15 @@ async function removeInstanceWorktreeUnlocked(
       scope: 'git',
       worktreePath
     })
+    return
+  }
+  if (probeInstanceWorktreePathLocked(worktreePath, opts?.renameFn)) {
+    if (opts?.allowDeferred !== false) {
+      scheduleDeferredInstanceWorktreeCleanup(workspacePath, worktreePath)
+      throw deferredWorktreeLockError(worktreePath)
+    }
+    // Deferred retry: scheduler logs give-up if the path remains. Do not throw
+    // EPERM on every attempt — that is the leftover-lock case, not a new failure.
     return
   }
   const runId = basename(worktreePath)
@@ -891,9 +968,7 @@ async function removeInstanceWorktreeUnlocked(
   if (outcome === 'locked' && existsSync(worktreePath)) {
     if (opts?.allowDeferred !== false) {
       scheduleDeferredInstanceWorktreeCleanup(workspacePath, worktreePath)
-      throw Object.assign(new Error(`Instance worktree still locked: ${worktreePath}`), {
-        code: 'EPERM'
-      })
+      throw deferredWorktreeLockError(worktreePath)
     }
     // Deferred retry: scheduler logs give-up if the path remains. Do not throw
     // EPERM on every attempt — that is the leftover-lock case, not a new failure.
@@ -933,22 +1008,33 @@ async function finalizeInstanceWorktreeUnlocked(
   }
 }
 
+export type PruneInstanceWorktreesOpts = {
+  /** Injected for tests so the lock probe is deterministic cross-platform. */
+  renameFn?: (from: string, to: string) => void
+  nowFn?: () => number
+  backoffMs?: number
+}
+
 /** Remove instance-worktrees that are not a live child run (startup / workspace open). */
 export async function pruneStaleInstanceWorktrees(
   workspacePath: string,
-  liveRunIds: ReadonlySet<string>
+  liveRunIds: ReadonlySet<string>,
+  opts?: PruneInstanceWorktreesOpts
 ): Promise<number> {
   return withGitWorktreeMutex(workspacePath, () =>
-    pruneStaleInstanceWorktreesUnlocked(workspacePath, liveRunIds)
+    pruneStaleInstanceWorktreesUnlocked(workspacePath, liveRunIds, opts)
   )
 }
 
 async function pruneStaleInstanceWorktreesUnlocked(
   workspacePath: string,
-  liveRunIds: ReadonlySet<string>
+  liveRunIds: ReadonlySet<string>,
+  opts?: PruneInstanceWorktreesOpts
 ): Promise<number> {
   const root = instanceWorktreesRoot(workspacePath)
   if (!existsSync(root)) return 0
+  const now = opts?.nowFn ?? Date.now
+  const backoffMs = opts?.backoffMs ?? PRUNE_LOCKED_BACKOFF_MS
   let entries: Dirent[]
   try {
     entries = readdirSync(root, { withFileTypes: true, encoding: 'utf8' })
@@ -957,6 +1043,9 @@ async function pruneStaleInstanceWorktreesUnlocked(
     return 0
   }
   let pruned = 0
+  let backoffSkipped = 0
+  const deferred: string[] = []
+  const failed: string[] = []
   for (const entry of entries) {
     if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
     const runId = entry.name.trim()
@@ -965,25 +1054,54 @@ async function pruneStaleInstanceWorktreesUnlocked(
     if (pendingInstanceWorktrees.has(pendingWorktreeKey(workspacePath, runId))) continue
     const worktreePath = join(root, runId)
     if (!isSafeInstanceWorktreePath(workspacePath, worktreePath)) continue
-    try {
-      await removeInstanceWorktreeUnlocked(workspacePath, worktreePath)
-      if (!existsSync(worktreePath)) pruned += 1
-    } catch (err) {
-      logger.warn('instance worktree prune failed', {
-        scope: 'git',
-        worktreePath,
-        err
-      })
+    const skipKey = resolve(worktreePath)
+    const skipUntil = pruneSkipUntil.get(skipKey)
+    if (skipUntil !== undefined && now() < skipUntil) {
+      backoffSkipped += 1
+      continue
     }
+    try {
+      await removeInstanceWorktreeUnlocked(workspacePath, worktreePath, {
+        renameFn: opts?.renameFn
+      })
+      if (!existsSync(worktreePath)) {
+        pruned += 1
+        pruneSkipUntil.delete(skipKey)
+      }
+    } catch (err) {
+      if (isDeferredWorktreeLockError(err)) {
+        deferred.push(worktreePath)
+        pruneSkipUntil.set(skipKey, now() + backoffMs)
+      } else {
+        failed.push(worktreePath)
+        logger.warn('instance worktree prune failed', {
+          scope: 'git',
+          worktreePath,
+          err
+        })
+      }
+    }
+  }
+  if (pruned > 0 || deferred.length > 0 || failed.length > 0 || backoffSkipped > 0) {
+    logger.info('instance worktree prune summary', {
+      scope: 'git',
+      root,
+      removed: pruned,
+      deferredCount: deferred.length,
+      deferred: deferred.slice(0, 5),
+      backoffSkipped,
+      failed: failed.slice(0, 3)
+    })
   }
   return pruned
 }
 
 export function pruneStaleInstanceWorktreesBestEffort(
   workspacePath: string,
-  liveRunIds: ReadonlySet<string>
+  liveRunIds: ReadonlySet<string>,
+  opts?: PruneInstanceWorktreesOpts
 ): void {
-  void pruneStaleInstanceWorktrees(workspacePath, liveRunIds).catch((err) => {
+  void pruneStaleInstanceWorktrees(workspacePath, liveRunIds, opts).catch((err) => {
     logger.warn('instance worktree prune failed', { scope: 'git', workspacePath, err })
   })
 }

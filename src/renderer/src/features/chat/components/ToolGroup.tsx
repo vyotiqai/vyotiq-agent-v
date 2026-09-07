@@ -241,23 +241,14 @@ export const ToolGroup = memo(function ToolGroup({
         {isPending ? (
           <TextShimmer className="shrink-0 font-medium text-fg">{headerLabel}</TextShimmer>
         ) : (
-          <>
-            {!isInterrupted && !hasFailure ? (
-              <Icon
-                name="check"
-                size={13}
-                className="shrink-0 text-success tool-status-morph"
-              />
-            ) : null}
-            <span
-              className={cn(
-                'shrink-0 font-medium tool-status-morph',
-                isInterrupted ? 'text-danger' : 'text-fg'
-              )}
-            >
-              {headerLabel}
-            </span>
-          </>
+          <span
+            className={cn(
+              'shrink-0 font-medium tool-status-morph',
+              isInterrupted ? 'text-danger' : 'text-fg'
+            )}
+          >
+            {headerLabel}
+          </span>
         )}
         {summary ? (
           <span className="min-w-0 flex-1 truncate text-tertiary" title={summary}>

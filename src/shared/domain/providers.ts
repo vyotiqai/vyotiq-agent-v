@@ -44,7 +44,7 @@ function seedIdsFor(provider: ProviderId): string[] {
 }
 
 function seedModelInfo(id: string, providerId: ProviderId): ModelInfo {
-  const supportsVision = /gpt-4o|gpt-5|claude|gemini|grok|llava|vision|pixtral/i.test(id)
+  const supportsVision = /gpt-4o|gpt-5|claude|gemini|grok|llava|vision|pixtral|glm-5\.3-flash|glm-[0-9.]+v/i.test(id)
   const supportsThinking = modelSupportsThinking(id, providerId)
   const known = knownContextWindow(id, providerId)
   const ollamaThinking =

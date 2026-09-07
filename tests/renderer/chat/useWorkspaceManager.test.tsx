@@ -1311,6 +1311,49 @@ describe('useWorkspaceManager', () => {
       result.current.chat.items.some((i) => i.kind === 'message' && i.content.includes('EVICT_LEAK'))
     ).toBe(false)
   })
+
+  it('refuses a pane drop beyond capacity and leaves the layout unchanged', async () => {
+    const { result } = renderHook(() => useWorkspaceManager())
+
+    await waitFor(() => {
+      expect(result.current.activeWorkspace).toBe('/ws-a')
+      expect(result.current.paneLayout?.panes.length).toBe(1)
+    })
+
+    const anchorPaneId = result.current.paneLayout!.panes[0]!.paneId
+    await act(async () => {
+      result.current.openRunTab('run-a')
+    })
+    await act(async () => {
+      expect(
+        result.current.dropSessionOnPane(anchorPaneId, 'right', {
+          workspacePath: '/ws-b',
+          runId: 'run-b'
+        })
+      ).toBe(true)
+    })
+    await waitFor(() => {
+      expect(result.current.paneLayout?.panes).toHaveLength(2)
+    })
+
+    // jsdom viewport (1024px / 360px min column) caps the row at two panes;
+    // the third drop is refused without touching the committed layout.
+    await act(async () => {
+      expect(
+        result.current.dropSessionOnPane(anchorPaneId, 'right', {
+          workspacePath: '/ws-b',
+          runId: 'run-c'
+        })
+      ).toBe(false)
+    })
+
+    expect(result.current.paneLayout?.panes).toHaveLength(2)
+    expect(result.current.paneLayout?.panes.map((p) => p.runId).sort()).toEqual([
+      'run-a',
+      'run-b'
+    ])
+    expect(result.current.paneLayout?.panes.some((p) => p.runId === 'run-c')).toBe(false)
+  })
 })
 
 describe('scrollTopByRunId prune helpers', () => {

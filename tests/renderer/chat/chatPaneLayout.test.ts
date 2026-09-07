@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   applyPaneDrop,
   closePane,
@@ -9,12 +9,14 @@ import {
   markSessionDragStart,
   maxPaneCount,
   openRunInFocusedPane,
+  parseSessionDragPayload,
   removeSessionFromLayout,
   resolvePaneDropZone,
   sanitizePaneLayout,
   singlePaneLayout,
   syncSinglePaneSession,
-  SESSION_DRAG_MIME
+  SESSION_DRAG_MIME,
+  SESSION_DRAG_TTL_MS
 } from '@renderer/lib/chat/chatPaneLayout'
 
 describe('chatPaneLayout', () => {
@@ -206,5 +208,86 @@ describe('chatPaneLayout', () => {
     expect(isSessionDragEvent(plainOnly)).toBe(true)
     markSessionDragEnd()
     expect(isSessionDragEvent(plainOnly)).toBe(false)
+  })
+
+  // The session-drag flag is module state; reset it so no test leaks into another.
+  afterEach(() => {
+    markSessionDragEnd()
+    vi.useRealTimers()
+  })
+
+  it('expires the text/plain fallback after the session drag TTL', () => {
+    vi.useFakeTimers()
+    markSessionDragStart()
+    const plainOnly = { types: ['text/plain'] } as DataTransfer
+    expect(isSessionDragEvent(plainOnly)).toBe(true)
+
+    vi.advanceTimersByTime(SESSION_DRAG_TTL_MS)
+    expect(isSessionDragEvent(plainOnly)).toBe(false)
+  })
+
+  it('clears the session drag flag on dragend before the TTL expires', () => {
+    vi.useFakeTimers()
+    markSessionDragStart()
+    vi.advanceTimersByTime(1000)
+    const plainOnly = { types: ['text/plain'] } as DataTransfer
+    expect(isSessionDragEvent(plainOnly)).toBe(true)
+
+    markSessionDragEnd()
+    expect(isSessionDragEvent(plainOnly)).toBe(false)
+  })
+
+  describe('parseSessionDragPayload', () => {
+    const dtFrom = (data: Partial<Record<string, string>>): DataTransfer =>
+      ({
+        getData: (mime: string) => data[mime] ?? '',
+        types: Object.keys(data)
+      }) as unknown as DataTransfer
+
+    const payload = JSON.stringify({ workspacePath: '/ws/home', runId: 'run-1' })
+
+    it('parses the custom MIME payload', () => {
+      expect(parseSessionDragPayload(dtFrom({ [SESSION_DRAG_MIME]: payload }))).toEqual({
+        workspacePath: '/ws/home',
+        runId: 'run-1'
+      })
+    })
+
+    it('falls back to text/plain when the custom MIME is absent', () => {
+      expect(parseSessionDragPayload(dtFrom({ 'text/plain': payload }))).toEqual({
+        workspacePath: '/ws/home',
+        runId: 'run-1'
+      })
+    })
+
+    it('falls back to text/plain when the custom MIME payload is malformed', () => {
+      const dt = dtFrom({ [SESSION_DRAG_MIME]: '{broken', 'text/plain': payload })
+      expect(parseSessionDragPayload(dt)).toEqual({
+        workspacePath: '/ws/home',
+        runId: 'run-1'
+      })
+    })
+
+    it('rejects invalid JSON', () => {
+      expect(parseSessionDragPayload(dtFrom({ [SESSION_DRAG_MIME]: 'not json' }))).toBeNull()
+    })
+
+    it('rejects non-string fields', () => {
+      expect(
+        parseSessionDragPayload(
+          dtFrom({ [SESSION_DRAG_MIME]: JSON.stringify({ workspacePath: 123, runId: null }) })
+        )
+      ).toBeNull()
+    })
+
+    it('rejects empty payloads', () => {
+      expect(parseSessionDragPayload(dtFrom({}))).toBeNull()
+      expect(parseSessionDragPayload(dtFrom({ [SESSION_DRAG_MIME]: '' }))).toBeNull()
+    })
+
+    it('rejects JSON that is not an object', () => {
+      expect(parseSessionDragPayload(dtFrom({ [SESSION_DRAG_MIME]: 'null' }))).toBeNull()
+      expect(parseSessionDragPayload(dtFrom({ 'text/plain': '"plain"' }))).toBeNull()
+    })
   })
 })

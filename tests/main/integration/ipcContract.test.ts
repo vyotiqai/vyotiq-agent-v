@@ -157,6 +157,7 @@ const VYOTIQ_INVOKE_MAP: Record<
   workspaceEditorRecoveryClear: IPC.workspaceEditorRecoveryClear,
   workspaceListDocs: IPC.workspaceListDocs,
   workspaceListRules: IPC.workspaceListRules,
+  agentContext: IPC.agentContext,
   workspaceDiagnostics: IPC.workspaceDiagnostics,
   windowMinimize: IPC.windowMinimize,
   windowMaximize: IPC.windowMaximize,
@@ -303,7 +304,7 @@ describe('main/renderer IPC contract', () => {
       expect(channels.has(channel)).toBe(true)
       expect(PUSH_CHANNELS.has(channel)).toBe(false)
     }
-    expect(Object.keys(VYOTIQ_INVOKE_MAP)).toHaveLength(189)
+    expect(Object.keys(VYOTIQ_INVOKE_MAP)).toHaveLength(190)
   })
 
   it('maps every VyotiqApi push listener to a push channel', () => {

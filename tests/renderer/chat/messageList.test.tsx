@@ -1051,7 +1051,7 @@ describe('MessageList', () => {
     expect(screen.getByText('Line 179')).toBeTruthy()
   })
 
-  it('preserves scroll position when a long live run ends', () => {
+  it('preserves scroll position when a long live run ends', async () => {
     class ResizeObserverStub {
       observe(): void {}
       unobserve(): void {}
@@ -1120,6 +1120,12 @@ describe('MessageList', () => {
         scrollTop = value
       }
     })
+    // Let the mount-time tail-follow's rAF reset programmaticScrollRef settle.
+    await act(async () => {
+      await new Promise((resolve) => window.requestAnimationFrame(resolve))
+      await new Promise((resolve) => window.requestAnimationFrame(resolve))
+    })
+    scrollTop = 12_000
     fireEvent.scroll(scroll)
     onScrollTopChange.mockClear()
     act(() => {
@@ -1135,7 +1141,7 @@ describe('MessageList', () => {
     vi.unstubAllGlobals()
   })
 
-  it('keeps scroll stable after the post-live hold enables full virtualization', () => {
+  it('keeps scroll stable after the post-live hold enables full virtualization', async () => {
     class ResizeObserverStub {
       observe(): void {}
       unobserve(): void {}
@@ -1199,6 +1205,12 @@ describe('MessageList', () => {
         scrollTop = value
       }
     })
+    // Let the mount-time tail-follow's rAF reset programmaticScrollRef settle.
+    await act(async () => {
+      await new Promise((resolve) => window.requestAnimationFrame(resolve))
+      await new Promise((resolve) => window.requestAnimationFrame(resolve))
+    })
+    scrollTop = 9_500
     fireEvent.scroll(scroll)
     act(() => {
       rerender(<MessageList items={items} running />)
@@ -1212,6 +1224,113 @@ describe('MessageList', () => {
       vi.advanceTimersByTime(800)
     })
     expect(scrollTop).toBe(9_500)
+
+    vi.useRealTimers()
+
+    process.env.VITEST = prevVitest
+    Element.prototype.getBoundingClientRect = originalGbc
+    vi.unstubAllGlobals()
+  })
+
+  it('stays pinned at the bottom when a run ends with no user scroll during the stream', async () => {
+    class ResizeObserverStub {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+
+    const originalGbc = Element.prototype.getBoundingClientRect
+    Element.prototype.getBoundingClientRect = function getBoundingClientRect(this: Element) {
+      if (this.hasAttribute?.('data-transcript-scroll')) {
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          bottom: 800,
+          right: 720,
+          width: 720,
+          height: 800,
+          toJSON() {
+            return {}
+          }
+        } as DOMRect
+      }
+      return {
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        bottom: 40,
+        right: 720,
+        width: 720,
+        height: 40,
+        toJSON() {
+          return {}
+        }
+      } as DOMRect
+    }
+
+    const prevVitest = process.env.VITEST
+    process.env.VITEST = ''
+
+    const items: UiItem[] = [
+      { kind: 'message', id: 'u0', role: 'user', content: 'start' },
+      ...Array.from({ length: 179 }, (_, i) => ({
+        kind: 'message' as const,
+        id: `m-${i}`,
+        role: 'assistant' as const,
+        content: `Line ${i}`
+      }))
+    ]
+    const { rerender } = render(<MessageList items={items} running />)
+    const scroll = document.querySelector('[data-transcript-scroll]') as HTMLDivElement
+    let scrollTop = 0
+    Object.defineProperty(scroll, 'clientHeight', { configurable: true, value: 800 })
+    Object.defineProperty(scroll, 'scrollHeight', { configurable: true, value: 40_000 })
+    Object.defineProperty(scroll, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value
+      }
+    })
+
+    // Let the mount-time tail-follow's rAF reset programmaticScrollRef settle.
+    await act(async () => {
+      await new Promise((resolve) => window.requestAnimationFrame(resolve))
+      await new Promise((resolve) => window.requestAnimationFrame(resolve))
+    })
+
+    // Stale pre-run reading position: recorded before the stream re-pins the
+    // tail, never touched again by a user scroll during the run.
+    scrollTop = 12_000
+    fireEvent.scroll(scroll)
+    expect(scrollTop).toBe(12_000)
+
+    // Reader sends a new prompt: MessageList re-pins to the live tail and the
+    // stream grows from there with no further user scroll events.
+    const streamingItems: UiItem[] = [
+      ...items,
+      { kind: 'message', id: 'u1', role: 'user', content: 'go' },
+      { kind: 'message', id: 'm-live', role: 'assistant', content: 'Streaming answer…' }
+    ]
+    act(() => {
+      rerender(<MessageList items={streamingItems} running />)
+    })
+    expect(scrollTop).toBe(40_000)
+
+    rerender(<MessageList items={streamingItems} running={false} />)
+    // Run-end layout flip must not restore the stale pre-run offset.
+    expect(scrollTop).toBe(40_000)
+
+    vi.useFakeTimers()
+    act(() => {
+      vi.advanceTimersByTime(800)
+    })
+    // Post-live hold expires and full virtualization kicks in: still pinned.
+    expect(scrollTop).toBe(40_000)
 
     vi.useRealTimers()
 

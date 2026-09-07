@@ -263,10 +263,14 @@ describe('modePolicy', () => {
     expect(plan).toMatch(/`create_plan`/)
     expect(plan).toMatch(/`diagnostics` and `run_tests` may run checks/)
     expect(plan).toMatch(/`terminal`/)
-    expect(plan).toMatch(/goal/)
-    expect(plan).toMatch(/success criteria/)
-    expect(plan).toMatch(/ordered steps/)
-    expect(plan).toMatch(/verification/)
+    expect(plan).toMatch(/`## Goal`/)
+    expect(plan).toMatch(/`## Scope`/)
+    expect(plan).toMatch(/`## Architecture`/)
+    expect(plan).toMatch(/```mermaid/)
+    expect(plan).toMatch(/`## Steps`/)
+    expect(plan).toMatch(/`## Done when`/)
+    expect(plan).toMatch(/`## Risks`/)
+    expect(plan).toMatch(/verified in this run/)
   })
 
   it('omits codebase_search when indexing is disabled', () => {

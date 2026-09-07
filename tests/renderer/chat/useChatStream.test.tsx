@@ -2331,6 +2331,109 @@ describe('useChatStream', () => {
     expect(content).toBe('full body')
   })
 
+  it('coalesces concurrent loadToolContent calls into a single IPC', async () => {
+    const loadToolResult = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ ok: true, data: { content: 'full body' } }), 20)
+        )
+    )
+    const loadRun = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        messages: [
+          { role: 'user', content: 'read' },
+          {
+            role: 'assistant',
+            content: '',
+            toolCalls: [{ id: 'c1', name: 'read', arguments: '{"path":"a.ts"}' }]
+          },
+          { role: 'tool', toolCallId: 'c1', toolName: 'read', content: 'snip' }
+        ]
+      }
+    })
+    const loadRunEvents = vi.fn().mockResolvedValue({ ok: true, data: [] })
+    // @ts-expect-error test bridge
+    window.vyotiq.loadRun = loadRun
+    // @ts-expect-error test bridge
+    window.vyotiq.loadRunEvents = loadRunEvents
+    // @ts-expect-error test bridge
+    window.vyotiq.loadToolResult = loadToolResult
+
+    const { result } = renderHook(() => useChatStream('/ws'))
+
+    await act(async () => {
+      await result.current.syncFromDisk('run-disk')
+    })
+
+    // All three calls are issued in the same tick, while the mocked IPC is
+    // still pending — they must share one in-flight promise.
+    let contents: Array<string | null> = []
+    await act(async () => {
+      contents = await Promise.all([
+        result.current.loadToolContent('c1'),
+        result.current.loadToolContent('c1'),
+        result.current.loadToolContent('c1')
+      ])
+    })
+
+    expect(contents).toEqual(['full body', 'full body', 'full body'])
+    expect(loadToolResult).toHaveBeenCalledTimes(1)
+    expect(loadToolResult).toHaveBeenCalledWith('/ws', 'run-disk', 'c1')
+  })
+
+  it('does not re-IPC a load that already failed this session', async () => {
+    const loadToolResult = vi.fn().mockResolvedValue({
+      ok: false,
+      error: 'IPC_CLIENT: load failed'
+    })
+    const loadRun = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        messages: [
+          { role: 'user', content: 'read' },
+          {
+            role: 'assistant',
+            content: '',
+            toolCalls: [{ id: 'c1', name: 'read', arguments: '{"path":"a.ts"}' }]
+          },
+          { role: 'tool', toolCallId: 'c1', toolName: 'read', content: 'snip' }
+        ]
+      }
+    })
+    const loadRunEvents = vi.fn().mockResolvedValue({ ok: true, data: [] })
+    // @ts-expect-error test bridge
+    window.vyotiq.loadRun = loadRun
+    // @ts-expect-error test bridge
+    window.vyotiq.loadRunEvents = loadRunEvents
+    // @ts-expect-error test bridge
+    window.vyotiq.loadToolResult = loadToolResult
+
+    const { result } = renderHook(() => useChatStream('/ws'))
+
+    await act(async () => {
+      await result.current.syncFromDisk('run-disk')
+    })
+
+    let first: string | null = null
+    await act(async () => {
+      first = await result.current.loadToolContent('c1')
+    })
+    expect(first).toBeNull()
+    expect(loadToolResult).toHaveBeenCalledTimes(1)
+    // The warn-level failure path is preserved.
+    expect(result.current.items.some((i) => i.kind === 'tool' && i.tool.contentTruncated)).toBe(
+      false
+    )
+
+    let second: string | null = null
+    await act(async () => {
+      second = await result.current.loadToolContent('c1')
+    })
+    expect(second).toBeNull()
+    expect(loadToolResult).toHaveBeenCalledTimes(1)
+  })
+
   it('preserves attachments when editing a queued follow-up', async () => {
     const { result } = renderHook(() => useChatStream('/ws'))
 

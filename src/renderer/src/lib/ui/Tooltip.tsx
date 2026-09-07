@@ -29,12 +29,21 @@ const VIEWPORT_PAD = 8
 const TIP_GAP = 6
 /** Consecutive tips (toolbar scan) skip the delay when the previous one just closed. */
 const FAST_REOPEN_MS = 300
+/** Keyboard focus (Tab) opens tips; clicks and programmatic focus do not. */
+const KEY_FOCUS_MS = 1000
 
 let lastTipClosedAt = 0
+let lastTipClosedByPointer = false
+let lastAnyKeydownAt = 0
 
-/** True when the previous tip closed within the fast-reopen window. */
-function justClosed(): boolean {
-  return Date.now() - lastTipClosedAt < FAST_REOPEN_MS
+/** True when the previous tip closed via pointer leave within the fast-reopen window. */
+function justClosedByPointer(): boolean {
+  return lastTipClosedByPointer && Date.now() - lastTipClosedAt < FAST_REOPEN_MS
+}
+
+/** Keyboard focus (Tab) opens tips; clicks and programmatic focus do not. */
+function recentAnyKeydown(): boolean {
+  return Date.now() - lastAnyKeydownAt < KEY_FOCUS_MS
 }
 
 function placeCoords(
@@ -91,9 +100,10 @@ export function Tooltip({
     timerRef.current = null
   }
 
-  const hide = useCallback((): void => {
+  const hide = useCallback((byPointer = false): void => {
     clearTimer()
     if (openedByRef.current != null) lastTipClosedAt = Date.now()
+    lastTipClosedByPointer = byPointer
     openedByRef.current = null
     setOpenedBy(null)
     setAdjust(null)
@@ -111,7 +121,8 @@ export function Tooltip({
       return
     }
     clearTimer()
-    const instant = justClosed()
+    // Fast re-open only for hover scanning a toolbar — never for focus.
+    const instant = via === 'hover' && justClosedByPointer()
     timerRef.current = window.setTimeout(
       () => {
         const el = triggerRef.current
@@ -129,9 +140,11 @@ export function Tooltip({
 
   useEffect(() => () => clearTimer(), [])
 
-  // Cancel pending show even before the tip mounts
+  // Track keyboard activity (Tab focus opens tips) and cancel pending show
+  // even before the tip mounts.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
+      lastAnyKeydownAt = Date.now()
       if (e.key !== 'Escape') return
       if (timerRef.current == null) return
       clearTimer()
@@ -154,35 +167,18 @@ export function Tooltip({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open, hide])
 
-  // Follow the trigger on scroll/resize instead of hiding; only give up when
-  // the trigger itself leaves the viewport.
+  // Any scroll or resize dismisses the tip — it never follows its trigger
+  // around the screen.
   useEffect(() => {
     if (!open) return
-    const onReposition = (): void => {
-      const el = triggerRef.current
-      if (!el) return
-      const rect = el.getBoundingClientRect()
-      if (
-        rect.bottom < 0 ||
-        rect.top > window.innerHeight ||
-        rect.right < 0 ||
-        rect.left > window.innerWidth
-      ) {
-        hide()
-        return
-      }
-      const next = placeCoords(rect, preferredSideRef.current)
-      setCoords((prev) =>
-        prev && prev.side === next.side && prev.top === next.top && prev.left === next.left
-          ? prev
-          : next
-      )
+    const onDismiss = (): void => {
+      hide()
     }
-    window.addEventListener('scroll', onReposition, true)
-    window.addEventListener('resize', onReposition)
+    window.addEventListener('scroll', onDismiss, true)
+    window.addEventListener('resize', onDismiss)
     return () => {
-      window.removeEventListener('scroll', onReposition, true)
-      window.removeEventListener('resize', onReposition)
+      window.removeEventListener('scroll', onDismiss, true)
+      window.removeEventListener('resize', onDismiss)
     }
   }, [open, hide])
 
@@ -259,13 +255,14 @@ export function Tooltip({
       child.props.onPointerEnter?.(e)
     },
     onPointerLeave: (e: PointerEvent) => {
-      const el = triggerRef.current
-      // Focus-opened tip: a pointer graze doesn't close it while it holds focus.
-      if (!(openedByRef.current === 'focus' && el && document.activeElement === el)) hide()
+      // Tips never persist without the pointer — even focus-opened ones.
+      hide(true)
       child.props.onPointerLeave?.(e)
     },
     onFocus: (e: FocusEvent) => {
-      show('focus')
+      // Keyboard-initiated focus (Tab) opens the tip; clicks, autofocus, and
+      // programmatic focus do not.
+      if (recentAnyKeydown()) show('focus')
       child.props.onFocus?.(e)
     },
     onBlur: (e: FocusEvent) => {

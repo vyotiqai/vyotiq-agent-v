@@ -324,7 +324,16 @@ export const INDEX_SKIP_DIR_SEGMENTS = new Set([
   'tmp',
   'temp',
   'logs',
-  'ci'
+  'ci',
+  // toolchain / vendor trees (e.g. an entire msys64 toolchain under .linux-vm)
+  'msys64',
+  'mingw',
+  'mingw32',
+  'mingw64',
+  'ucrt64',
+  'clang32',
+  'clang64',
+  'clangarm64'
 ])
 
 const MINIFIED_OR_GENERATED_NAME_RE =

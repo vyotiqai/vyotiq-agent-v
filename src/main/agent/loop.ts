@@ -60,6 +60,7 @@ import {
   proactiveCompactThresholdTokens
 } from '../../shared/domain/contextBudget'
 import { executeStepToolCalls } from './executeStepTools'
+import { GenerationRepetitionMonitor } from './generationRepetition'
 import { mergeOpenAiCompatToolArgDelta } from './toolArgWire'
 import { mergeStreamedToolName } from '../../shared/utils/toolName'
 import { loadHarness } from './harness'
@@ -69,6 +70,7 @@ import {
   loopHintForCompactionVerifyFailed,
   loopHintForConsecutiveToolFailures,
   loopHintAfterCompaction,
+  loopHintForIdenticalReasoningStreak,
   loopHintForIdenticalStepStreak,
   loopHintForMcpNotInCatalogFailFast,
   loopStopDecision,
@@ -77,13 +79,16 @@ import {
   stepFailureSignature,
   MAX_TRUNCATION_CONTINUES,
   MAX_EMPTY_RESPONSE_CONTINUES,
+  MAX_REPETITION_ABORTS,
   MAX_STEPS_PER_TURN,
   MCP_NOT_IN_CATALOG_FAIL_FAST_THRESHOLD,
+  nextIdenticalReasoningStreak,
   nextIdenticalStepStreak,
   runBudgetStopMessage,
   runNoticeForContextAboveSoftTrigger,
   seedKnownPathsFromMessages,
   seedMutationPathsFromMessages,
+  stepReasoningFingerprint,
   stepToolCallsFingerprint,
   summarizeRecentToolFailure,
   type LoopStop
@@ -265,7 +270,8 @@ const INCOMPLETE_MESSAGES: Record<Exclude<IncompleteReason, never>, string> = {
     'Temporarily paused after repeated provider failures. Nothing is retried automatically — use Continue or Retry in the chat to resume once the provider is reachable.',
   provider_error: 'The provider returned an error. Review the error details, then retry.',
   goal_wait:
-    'Goal is still active. Two finishes without tools — waiting for you to continue or mark complete.'
+    'Goal is still active. Two finishes without tools — waiting for you to continue or mark complete.',
+  repetition: 'The model kept repeating the same output text; the generation was cut off.'
 }
 
 /** True when two messages are the same role + normalized text (resume dedupe). */
@@ -1341,6 +1347,9 @@ export async function* runAgent(input: {
           overflowRetryUsed,
           identicalStepStreak,
           lastStepFingerprint,
+          identicalReasoningStreak,
+          lastReasoningFingerprint,
+          repetitionAborts,
           consecutiveToolFailureSteps,
           recentFailureSignatures,
           emptyResponseContinues,
@@ -1363,6 +1372,9 @@ export async function* runAgent(input: {
           overflowRetryUsed,
           identicalStepStreak,
           lastStepFingerprint,
+          identicalReasoningStreak,
+          lastReasoningFingerprint,
+          repetitionAborts,
           consecutiveToolFailureSteps,
           recentFailureSignatures,
           emptyResponseContinues,
@@ -1613,6 +1625,12 @@ export async function* runAgent(input: {
     /** Last executed step's tool fingerprint + repeat streak (runaway-loop guard). */
     let lastStepFingerprint = resumedLoopCheckpoint?.lastStepFingerprint ?? ''
     let identicalStepStreak = resumedLoopCheckpoint?.identicalStepStreak ?? 0
+    /** Near-identical reasoning streak across steps (run be413e92 second guard). */
+    let identicalReasoningStreak = resumedLoopCheckpoint?.identicalReasoningStreak ?? 0
+    let lastReasoningFingerprint = resumedLoopCheckpoint?.lastReasoningFingerprint ?? ''
+    let reasoningLoopHint: string | undefined
+    /** Generation-repetition aborts auto-continued so far (checkpointed, capped). */
+    let repetitionAborts = resumedLoopCheckpoint?.repetitionAborts ?? 0
     /** Steps in a row where every tool call failed (runaway-failure guard). */
     let consecutiveToolFailureSteps = resumedLoopCheckpoint?.consecutiveToolFailureSteps ?? 0
     /** Recent all-failed step signatures (failure-streak novelty rule). */
@@ -1761,7 +1779,8 @@ export async function* runAgent(input: {
       const loopSafetyStop = loopStopDecision({
         step,
         consecutiveToolFailureSteps,
-        identicalStepStreak
+        identicalStepStreak,
+        identicalReasoningStreak
       })
       // Terminal thresholds only: tool-failure streaks and identical-step
       // repeats at MAX_IDENTICAL_STEP_STREAK_TERMINAL (below it, repeats
@@ -1849,12 +1868,16 @@ export async function* runAgent(input: {
         outsidePathHint,
         compactionLoopHint,
         toolFailureLoopHint,
-        identicalStepLoopHint
+        identicalStepLoopHint,
+        reasoningLoopHint
       )
       const assembleBase = {
         harness,
         messages,
         workspacePath: toolWorkspace,
+        // Worktree children read memory from the session (parent) workspace —
+        // their sparse worktree has no .vyotiq; matches memory-tool routing.
+        memoryWorkspacePath: isInlineInstance && toolWorkspace !== workspace ? workspace : undefined,
         goal,
         contract,
         plan: plan || undefined,
@@ -2036,7 +2059,8 @@ export async function* runAgent(input: {
               compactionLoopHint,
               loopHintWhenContextStillLarge(postCompactEstimate ?? 0, proactiveThreshold),
               toolFailureLoopHint,
-              identicalStepLoopHint
+              identicalStepLoopHint,
+              reasoningLoopHint
             )
           })
           lastUsage = { inputTokens: assembled.estimatedTokens }
@@ -2130,7 +2154,8 @@ export async function* runAgent(input: {
                 compactionLoopHint,
                 loopHintWhenContextStillLarge(retryPostCompactEstimate ?? 0, proactiveThreshold),
                 toolFailureLoopHint,
-                identicalStepLoopHint
+                identicalStepLoopHint,
+                reasoningLoopHint
               )
             })
             lastUsage = { inputTokens: assembled.estimatedTokens }
@@ -2199,6 +2224,16 @@ export async function* runAgent(input: {
       let streamFinished = false
       let streamSteered = false
       let streamGotDone = false
+      /**
+       * Degenerate generation repetition monitor (run be413e92): one per
+       * generation attempt, reset on each stream retry so a latched attempt
+       * does not abort the retry. Detection soft-aborts the stream so the
+       * step handler can steer-continue below (capped by MAX_REPETITION_ABORTS).
+       */
+      let repetitionMonitor = new GenerationRepetitionMonitor()
+      let repetitionAborted = false
+      /** Set when the repetition cap ended the turn (no further auto-streaming). */
+      let repetitionCapEnded = false
       let lastStreamSnapshotAt = 0
       let lastStreamFailureMessage = ''
       let lastStreamFailureCode = 'PROVIDER_STREAM'
@@ -2250,6 +2285,8 @@ export async function* runAgent(input: {
           liveForwardedToolIds.clear()
           streamSteered = false
           streamGotDone = false
+          repetitionMonitor = new GenerationRepetitionMonitor()
+          repetitionAborted = false
         },
         waitBeforeRetry: async function* (attempt) {
           yield* yieldStreamRetryWait(
@@ -2332,9 +2369,24 @@ export async function* runAgent(input: {
           if (chunk.type === 'text' && chunk.text) {
             assistantText += chunk.text
             yield { type: 'text_delta', runId, text: chunk.text }
+            if (!repetitionAborted && repetitionMonitor.append(chunk.text)) {
+              // Degenerate repetition (run be413e92): soft-abort mid-stream,
+              // mirroring the soft-steer break — the step handler flushes the
+              // partial output and steers (capped by MAX_REPETITION_ABORTS).
+              repetitionAborted = true
+              streamSteered = true
+              stepSoftAbort.abort()
+              break
+            }
           } else if (chunk.type === 'thinking_delta' && chunk.text) {
             thinkingText += chunk.text
             yield { type: 'thinking_delta', runId, text: chunk.text, step }
+            if (!repetitionAborted && repetitionMonitor.append(chunk.text)) {
+              repetitionAborted = true
+              streamSteered = true
+              stepSoftAbort.abort()
+              break
+            }
           } else if (chunk.type === 'thinking_done') {
             // Anthropic emits one thinking_done per thinking block; append the
             // new segment instead of overwriting, guarded against providers
@@ -2919,6 +2971,80 @@ export async function* runAgent(input: {
         break
       }
 
+      // Degenerate generation repetition (run be413e92): the monitor soft-
+      // aborted the stream. Mirror the truncated auto-continue contract:
+      // flush the partial output, then steer-continue with a fresh-action
+      // prompt — capped by MAX_REPETITION_ABORTS so a model that cannot stop
+      // looping ends the turn instead of burning unbounded generations.
+      if (repetitionAborted) {
+        repetitionAborts += 1
+        persistLoopCheckpoint()
+        if (repetitionAborts > MAX_REPETITION_ABORTS) {
+          logger.warn('Stopping auto-continue after repeated generation repetition', {
+            scope: 'agent',
+            code: 'LOOP_SAFETY',
+            correlationId: runId,
+            step,
+            repetitionAborts
+          })
+          // Cap reached — end the turn with a durable incomplete event instead
+          // of steering again (truncation-cap fall-through contract). The
+          // aborted generation never executed its tools: drop partial tool
+          // chrome so the fall-through resolves no tool calls, and the no-tool
+          // path below pushes the partial assistant text once and closes the
+          // turn. streamSteered is consumed here so the generic steer-continue
+          // below cannot keep the turn alive.
+          toolCalls.length = 0
+          streamedToolCalls.clear()
+          streamSteered = false
+          repetitionCapEnded = true
+          const capEv: AgentEvent = {
+            type: 'incomplete',
+            runId,
+            invokeId,
+            reason: 'repetition',
+            step,
+            message: INCOMPLETE_MESSAGES.repetition
+          }
+          appendEvent(runDir, capEv)
+          yield capEv
+          // fall through to the no-tool-call turn close below
+        } else {
+          yield* flushPartialAssistant(
+            runId,
+            runDir,
+            messages,
+            assistantText,
+            thinkingText,
+            stepReasoningState,
+            toolCalls,
+            streamedToolCalls,
+            step,
+            'interrupted'
+          )
+          const continueEv: AgentEvent = {
+            type: 'incomplete',
+            runId,
+            invokeId,
+            reason: 'repetition',
+            step,
+            message: 'Output was repeating the same text; continuing automatically…'
+          }
+          appendEvent(runDir, continueEv)
+          yield continueEv
+          const continueUser: ChatMessage = {
+            role: 'user',
+            content:
+              'Your output was cut off because it repeated the same text. Continue from the task list with a fresh concrete action; do not restate the plan.',
+            // Loop-injected protocol turn — must never render as a user bubble.
+            synthetic: true
+          }
+          messages.push(continueUser)
+          appendMessage(runDir, continueUser)
+          continue
+        }
+      }
+
       // Mid-stream steer: keep the turn alive, flush partial output, then inject.
       // Do not bump identicalStepStreak or LOOP_SAFETY here — partial tool calls
       // never executed; prefer applying the follow-up over dropping it.
@@ -2967,7 +3093,22 @@ export async function* runAgent(input: {
         )
         lastStepFingerprint = stepFingerprint
         identicalStepLoopHint = loopHintForIdenticalStepStreak(identicalStepStreak)
-        const repeatStop = loopStopDecision({ step, identicalStepStreak })
+        // Per-step reasoning streak (run be413e92 second guard): the streamed
+        // buffers are final once the step completes, so the fingerprint is
+        // computed here, where the tool-call terminal check runs.
+        const reasoningFp = stepReasoningFingerprint(thinkingText, assistantText)
+        identicalReasoningStreak = nextIdenticalReasoningStreak(
+          lastReasoningFingerprint,
+          identicalReasoningStreak,
+          reasoningFp
+        )
+        lastReasoningFingerprint = reasoningFp
+        reasoningLoopHint = loopHintForIdenticalReasoningStreak(identicalReasoningStreak)
+        const repeatStop = loopStopDecision({
+          step,
+          identicalStepStreak,
+          identicalReasoningStreak
+        })
         // Terminal identical-step repeat (≥ MAX_IDENTICAL_STEP_STREAK_TERMINAL):
         // flush this step's partial output, then stop. Below the ceiling the
         // escalating hint steers instead.
@@ -3028,6 +3169,29 @@ export async function* runAgent(input: {
         appendEvent(runDir, assistantMsgEv)
         yield assistantMsgEv
 
+        // Per-step reasoning streak — both finalize paths feed it (the
+        // tool-call branch feeds it at the identicalStepStreak site). A
+        // no-tool-call step can also be the degenerate repeat, so the
+        // terminal check runs here too; the assistant message is already
+        // persisted above, so the stop does not flush a duplicate partial push.
+        const reasoningFp = stepReasoningFingerprint(thinkingText, assistantText)
+        identicalReasoningStreak = nextIdenticalReasoningStreak(
+          lastReasoningFingerprint,
+          identicalReasoningStreak,
+          reasoningFp
+        )
+        lastReasoningFingerprint = reasoningFp
+        reasoningLoopHint = loopHintForIdenticalReasoningStreak(identicalReasoningStreak)
+        const reasoningStop = loopStopDecision({
+          step,
+          identicalStepStreak,
+          identicalReasoningStreak
+        })
+        if (reasoningStop) {
+          yield* stopForLoopSafety(reasoningStop)
+          return
+        }
+
         const incomplete = classifyIncompleteTurn(stepStopReason, scrubbedAssistantText)
         if (incomplete === 'truncated' && !controller.signal.aborted) {
           truncationContinues += 1
@@ -3070,7 +3234,11 @@ export async function* runAgent(input: {
           }
         }
 
-        if (incomplete === 'empty_response' && !controller.signal.aborted) {
+        if (
+          incomplete === 'empty_response' &&
+          !controller.signal.aborted &&
+          !repetitionCapEnded
+        ) {
           emptyResponseContinues += 1
           // Persist immediately (matches truncationContinues): this continue
           // path bypasses the post-tool checkpoint write, so a crash would
@@ -3141,7 +3309,7 @@ export async function* runAgent(input: {
 
         if (controller.signal.aborted) break
 
-        if (agentMode === 'plan' && planUnreadyNudges < 2) {
+        if (agentMode === 'plan' && planUnreadyNudges < 2 && !repetitionCapEnded) {
           const planRaw = await readPlanRawAsync(runDir)
           // Draft-ready but structurally shallow plans get the same capped
           // nudge budget as missing plans, with the top quality issues named.
@@ -3152,7 +3320,7 @@ export async function* runAgent(input: {
               role: 'user',
               content:
                 quality === null
-                  ? 'Call `create_plan` with Goal, Steps, and Done when. Do not put the plan only in chat.'
+                  ? 'Call `create_plan` with title, Goal, Scope, Steps, and Done when. The title may be an H1 first line in `plan` (`# Title`). Do not put the plan only in chat.'
                   : `Plan published but shallow — refine it with \`create_plan\`. Top issues: ${quality.issues.slice(0, 2).join(' ')}`,
               // Loop-injected protocol turn — must never render as a user bubble.
               synthetic: true
@@ -3169,7 +3337,7 @@ export async function* runAgent(input: {
           continue
         }
 
-        if (incomplete) {
+        if (incomplete && !repetitionCapEnded) {
           const incompleteEv: AgentEvent = {
             type: 'incomplete',
             runId,
@@ -3553,7 +3721,8 @@ export async function* runAgent(input: {
           const failureStop = loopStopDecision({
             step,
             consecutiveToolFailureSteps,
-            identicalStepStreak
+            identicalStepStreak,
+            identicalReasoningStreak
           })
           // Same rule as the pre-step guards: terminal thresholds end the run.
           if (failureStop) {

@@ -66,6 +66,25 @@ describe('wire-supported modalities', () => {
     expect(models[0]?.inputModalities).toEqual(['text', 'image', 'audio', 'file'])
     expect(models[0]?.outputModalities).toEqual(['text'])
   })
+
+  it('infers GLM vision from id when the catalog omits modalities', () => {
+    const models = normalizeOpenAiStyleModels(
+      {
+        data: [
+          { id: '@cf/zai-org/glm-5.3-flash' },
+          { id: '@cf/zai-org/glm-5.2' },
+          { id: 'glm-4.5v' }
+        ]
+      },
+      { providerId: 'custom' }
+    )
+    const byId = new Map(models.map((m) => [m.id, m]))
+    expect(byId.get('@cf/zai-org/glm-5.3-flash')?.supportsVision).toBe(true)
+    expect(byId.get('@cf/zai-org/glm-5.3-flash')?.inputModalities).toEqual(['text', 'image'])
+    expect(byId.get('@cf/zai-org/glm-5.2')?.supportsVision).toBe(false)
+    expect(byId.get('@cf/zai-org/glm-5.2')?.inputModalities).toEqual(['text'])
+    expect(byId.get('glm-4.5v')?.supportsVision).toBe(true)
+  })
 })
 
 describe('native multimodal wire shapes', () => {

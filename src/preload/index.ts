@@ -440,6 +440,7 @@ const api: VyotiqApi = {
     }
   },
   probeNetwork: () => ipcRenderer.invoke(IPC.networkProbe),
+  agentContext: (payload) => ipcRenderer.invoke(IPC.agentContext, payload),
   codeIndexStatus: () => ipcRenderer.invoke(IPC.codeIndexStatus),
   codeIndexReindex: (payload) => ipcRenderer.invoke(IPC.codeIndexReindex, payload ?? {}),
   processMetrics: () => ipcRenderer.invoke(IPC.processMetrics),

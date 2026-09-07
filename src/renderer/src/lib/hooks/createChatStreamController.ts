@@ -1378,6 +1378,10 @@ export function createChatStreamController(
   const toolContentCache = new Map<string, string>()
   /** Preview retained so collapse can drop expanded full bodies. */
   const toolContentPreviews = new Map<string, string>()
+  /** Coalesces concurrent full-body loads — at most one IPC per toolCallId. */
+  const toolContentInFlight = new Map<string, Promise<string | null>>()
+  /** Loads already known to have failed this session — remounts must not re-IPC them. */
+  const failedToolLoads = new Set<string>()
   /** Full argument accumulation during streaming (items only keep a capped preview). */
   const pendingToolArgsFull = new Map<string, string>()
   /** Tool calls that reached `tool_start` this session (vs provisional delta chrome). */
@@ -1386,6 +1390,8 @@ export function createChatStreamController(
   const clearToolBodyCaches = (): void => {
     toolContentCache.clear()
     toolContentPreviews.clear()
+    toolContentInFlight.clear()
+    failedToolLoads.clear()
     pendingToolArgsFull.clear()
   }
 
@@ -4170,41 +4176,56 @@ export function createChatStreamController(
     const id = runId ?? contentRunId
     if (!id || !window.vyotiq?.loadToolResult) return null
 
-    const res = await window.vyotiq.loadToolResult(workspacePath, id, toolCallId)
-    if (disposed) return null
-    if (!res.ok) {
-      // A run interrupted mid-tool-call never persisted a result line; that is
-      // expected after a crash/quit, not a failure worth warn-level noise.
-      const notFound = /tool result not found/i.test(res.error ?? '')
-      const log = notFound ? logger.debug.bind(logger) : logger.warn.bind(logger)
-      log('loadToolResult failed', {
-        scope: 'chat',
-        correlationId: id,
-        toolCallId,
-        err: toLogErr(res.error)
-      })
-      const idx = findToolRowIndex(state.items, toolCallId)
-      const item = idx >= 0 ? state.items[idx] : undefined
-      if (item?.kind === 'tool') {
-        const notice = notFound
-          ? 'Full output not saved — the run was interrupted before this tool finished.'
-          : "Couldn't load full output."
-        patch({
-          items: replaceAt(state.items, idx, {
-            ...item,
-            tool: {
-              ...item.tool,
-              content: item.tool.content ? `${item.tool.content}\n\n${notice}` : notice,
-              // Stop expand retries from looping on a permanent failure.
-              contentTruncated: false
-            }
+    // Concurrent callers for the same tool row share one in-flight IPC.
+    const inFlight = toolContentInFlight.get(toolCallId)
+    if (inFlight) return inFlight
+    // A load that already failed this session must not re-IPC on remount/hydration.
+    if (failedToolLoads.has(toolCallId)) return null
+
+    const load = (async (): Promise<string | null> => {
+      try {
+        const res = await window.vyotiq.loadToolResult(workspacePath, id, toolCallId)
+        if (disposed) return null
+        if (!res.ok) {
+          failedToolLoads.add(toolCallId)
+          // A run interrupted mid-tool-call never persisted a result line; that is
+          // expected after a crash/quit, not a failure worth warn-level noise.
+          const notFound = /tool result not found/i.test(res.error ?? '')
+          const log = notFound ? logger.debug.bind(logger) : logger.warn.bind(logger)
+          log('loadToolResult failed', {
+            scope: 'chat',
+            correlationId: id,
+            toolCallId,
+            err: toLogErr(res.error)
           })
-        })
+          const idx = findToolRowIndex(state.items, toolCallId)
+          const item = idx >= 0 ? state.items[idx] : undefined
+          if (item?.kind === 'tool') {
+            const notice = notFound
+              ? 'Full output not saved — the run was interrupted before this tool finished.'
+              : "Couldn't load full output."
+            patch({
+              items: replaceAt(state.items, idx, {
+                ...item,
+                tool: {
+                  ...item.tool,
+                  content: item.tool.content ? `${item.tool.content}\n\n${notice}` : notice,
+                  // Stop expand retries from looping on a permanent failure.
+                  contentTruncated: false
+                }
+              })
+            })
+          }
+          return null
+        }
+        patchToolContent(toolCallId, res.data.content)
+        return res.data.content
+      } finally {
+        toolContentInFlight.delete(toolCallId)
       }
-      return null
-    }
-    patchToolContent(toolCallId, res.data.content)
-    return res.data.content
+    })()
+    toolContentInFlight.set(toolCallId, load)
+    return load
   }
 
   const subscribe = (listener: () => void): (() => void) => {

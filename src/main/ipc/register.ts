@@ -105,6 +105,7 @@ import {
   WorkspaceEditorRecoveryClearRequestSchema,
   WorkspaceListDocsRequestSchema,
   WorkspaceListRulesRequestSchema,
+  WorkspaceAgentContextRequestSchema,
   WorkspaceDiagnosticsRequestSchema,
   MarketplaceBrowseRequestSchema,
   MarketplaceGetContentsRequestSchema,
@@ -315,6 +316,7 @@ import {
 } from '@main/agent/codeindex'
 import { pruneStaleInstanceWorktreesBestEffort } from '../git/instanceWorktree'
 import { listWorkspaceRulesForMention, clearRulesCache, isRuleRelatedRelPath } from '../agent/context/rules'
+import { buildWorkspaceAgentContext } from '../agent/context/agentContext'
 import { toolDiagnosticsAsync } from '../agent/tools/diagnostics'
 import { disposeTerminalSessionsForWorkspace as disposeAgentTerminalSessionsForWorkspace } from '../agent/tools/terminalSessions'
 import {
@@ -3640,6 +3642,22 @@ export function registerIpc(): void {
       })
     } catch (err) {
       return failFrom(err, IPC.workspaceListRules)
+    }
+  })
+
+  ipcMain.handle(IPC.agentContext, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = WorkspaceAgentContextRequestSchema.parse(raw ?? {})
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(
+        await buildWorkspaceAgentContext(req.workspacePath, {
+          enabled: getSettings().codeIndex?.enabled !== false,
+          phase: getCodeIndexRuntimeStatus().phase
+        })
+      )
+    } catch (err) {
+      return failFrom(err, IPC.agentContext)
     }
   })
 

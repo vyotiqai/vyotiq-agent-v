@@ -93,7 +93,7 @@ export function Dialog({
       <dialog
         ref={dialogRef}
         className={cn(
-          'max-w-md rounded-xl border border-border bg-surface p-0 text-fg shadow-menu backdrop:bg-overlay',
+          'fixed inset-0 m-auto max-h-[min(90vh,900px)] max-w-md rounded-xl border border-border bg-surface p-0 text-fg shadow-menu backdrop:bg-overlay',
           className
         )}
         aria-modal="true"

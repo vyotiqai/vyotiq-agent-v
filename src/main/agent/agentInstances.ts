@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'fs'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import type { WebContents } from 'electron'
 import type { AgentEvent, AgentInteractionMode, ChatMessage } from '../../shared/ipc'
 import { contentDisplayText, RunReceiptSchema } from '../../shared/ipc'
@@ -32,6 +32,7 @@ import { startAgentRunInBackground } from './startAgentRun'
 import { excludeChatEventUiSubscription } from '../ipc/streamBatch'
 import { isSafePathScopePrefix } from './tools/writeGuard'
 import { disposeWorkspaceIndexes } from './workspaceIndex'
+import { copyWorkspaceIndexesForInstance } from './indexInheritance'
 
 const childToParent = new Map<string, string>()
 const childWorkspace = new Map<string, string>()
@@ -476,7 +477,10 @@ function resolveSpawnPathScope(
     if (!isSafePathScopePrefix(trimmed)) {
       return {
         ok: false,
-        error: `path_scope entry is not a safe workspace-relative path: ${trimmed}`
+        error:
+          `path_scope entry is not a safe workspace-relative path: ${trimmed}. ` +
+          'path_scope only accepts workspace-relative prefixes inside this workspace — ' +
+          'omit it entirely when git worktree isolation is available.'
       }
     }
     pathScope.push(trimmed)
@@ -581,8 +585,25 @@ export async function spawnAgentInstance(
       return {
         ok: false,
         error:
-          'Cannot isolate instance (no git worktree). Pass path_scope so shared-workspace writes stay constrained, or use a git repository.'
+          `Cannot isolate instance (no git worktree). Pass path_scope so shared-workspace writes stay constrained, or use a git repository. Workspace resolved to "${resolve(
+            input.workspacePath
+          )}", which is not a git repository.`
       }
+    }
+  }
+
+  // Warm-start the child's semantic indexes (codeindex + sparsegrep) from the
+  // parent workspace so its first codebase_search reuses the parent's
+  // embeddings instead of re-indexing identical code. Best-effort: a failed
+  // copy only costs the child a cold start.
+  if (worktreePath) {
+    try {
+      await copyWorkspaceIndexesForInstance(input.workspacePath, worktreePath)
+    } catch (err) {
+      logger.warn('instance index inheritance failed', {
+        scope: 'agentInstances',
+        err
+      })
     }
   }
 

@@ -151,10 +151,19 @@ export function scorePlanQuality(markdown: string): PlanQualityReport {
     )
   }
 
-  if (stepLines.length > 0 && !VERIFICATION_RE.test(`${stepsText}\n${doneLines.join('\n')}`)) {
+  if (stepLines.length > 0 && !VERIFICATION_RE.test(stepsText)) {
     deduct(
       10,
-      'No verification mentioned — say how the work is checked (tests, typecheck, lint, command output).'
+      'Steps carry no verification — name the runnable check for each step (test, command, or output) that proves it done.'
+    )
+  }
+
+  // Advisory diagram nudge for larger plans: architecture diagrams ground the
+  // change visually; small (≤2-step) plans are not pushed toward one.
+  if (stepLines.length >= 3 && !/^```mermaid/m.test(markdown)) {
+    deduct(
+      10,
+      'No architecture diagram — add a ```mermaid fenced block under ## Architecture showing the affected components and data flow.'
     )
   }
 
@@ -191,10 +200,11 @@ export function minimalReadyPlanMarkdown(): string {
     '',
     '## Steps',
     '',
-    '1. Explore the workspace, then write plan.md.',
+    '1. Inspect the workspace and draft `plan.md` anchored to verified paths.',
+    '2. Verify the plan with `pnpm typecheck` and the targeted vitest suite.',
     '',
     '## Done when',
     '',
-    'plan.md has a goal, steps, and a check for finished work.'
+    '- [ ] `pnpm typecheck` passes and the targeted vitest run is green.'
   ].join('\n')
 }

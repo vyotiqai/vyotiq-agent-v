@@ -1,10 +1,14 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createEvent, fireEvent, render, screen } from '@testing-library/react'
 import { ChatRow } from '@renderer/app/sidebar/ChatRow'
-import { SESSION_DRAG_MIME } from '@renderer/lib/chat/chatPaneLayout'
+import {
+  isSessionDragEvent,
+  markSessionDragEnd,
+  SESSION_DRAG_MIME
+} from '@renderer/lib/chat/chatPaneLayout'
 import type { RunSummary } from '@shared/ipc'
 
 const run: RunSummary = {
@@ -133,5 +137,79 @@ describe('ChatRow drag', () => {
     )
     fireEvent.doubleClick(screen.getByRole('button', { name: 'List files' }))
     expect(screen.getByLabelText('Rename chat')).toBeTruthy()
+  })
+
+  // The session-drag flag is module state; reset it so no test leaks into another.
+  afterEach(() => {
+    markSessionDragEnd()
+    vi.useRealTimers()
+  })
+
+  it('unmounts the draggable row while renaming', () => {
+    render(
+      <ChatRow
+        run={run}
+        workspacePath="/ws/home"
+        active={false}
+        onSelectRun={noop}
+        onRenameRun={noop}
+        onDeleteRun={noop}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Rename List files' }))
+    // The row button is gone, so no dragstart can fire from a renaming row.
+    expect(screen.queryByRole('button', { name: 'List files' })).toBeNull()
+  })
+
+  it('guards dragstart while confirming delete', () => {
+    render(
+      <ChatRow
+        run={run}
+        workspacePath="/ws/home"
+        active={false}
+        onSelectRun={noop}
+        onRenameRun={noop}
+        onDeleteRun={noop}
+      />
+    )
+    const row = screen.getByRole('button', { name: 'List files' })
+    fireEvent.keyDown(row, { key: 'Delete' })
+    expect(screen.getByRole('button', { name: 'Confirm delete List files' })).toBeTruthy()
+
+    const setData = vi.fn()
+    const dragEvent = createEvent.dragStart(row, {
+      dataTransfer: { types: [], setData, effectAllowed: 'copy' }
+    })
+    const preventDefault = vi.spyOn(dragEvent, 'preventDefault')
+    fireEvent(row, dragEvent)
+    expect(preventDefault).toHaveBeenCalled()
+    expect(setData).not.toHaveBeenCalled()
+    // No markSessionDragStart: a text/plain event is not a session drag.
+    expect(isSessionDragEvent({ types: ['text/plain'] } as DataTransfer)).toBe(false)
+  })
+
+  it('clears the session drag flag on dragend', () => {
+    vi.useFakeTimers()
+    render(
+      <ChatRow
+        run={run}
+        workspacePath="/ws/home"
+        active={false}
+        onSelectRun={noop}
+        onRenameRun={noop}
+        onDeleteRun={noop}
+      />
+    )
+    const row = screen.getByRole('button', { name: 'List files' })
+    const setData = vi.fn()
+    fireEvent.dragStart(row, {
+      dataTransfer: { types: [], setData, effectAllowed: 'copy' }
+    })
+    vi.advanceTimersByTime(1000)
+    const plainOnly = { types: ['text/plain'] } as DataTransfer
+    expect(isSessionDragEvent(plainOnly)).toBe(true)
+
+    fireEvent.dragEnd(row)
+    expect(isSessionDragEvent(plainOnly)).toBe(false)
   })
 })
