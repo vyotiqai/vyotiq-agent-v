@@ -595,6 +595,29 @@ function failFrom(err: unknown, channel: string, correlationId?: string): IpcRes
   return fail(message, code)
 }
 
+/**
+ * Expected user-state rejections (workspace/run checks, rewind index validation)
+ * must still reach the log: they were previously returned silently, so a
+ * renderer-side `IPC_CLIENT` error had no main-side cause to audit (2026-09-07
+ * chatRewindAndStart failures). `reason` is an allow-listed log field and is
+ * path/user-data scrubbed by the logger facade.
+ */
+function failExpected(
+  error: string,
+  channel: string,
+  correlationId?: string,
+  code?: string
+): IpcResult<never> {
+  logger.warn('IPC expected failure', {
+    scope: 'ipc',
+    ...(code ? { code } : {}),
+    channel,
+    ...(correlationId ? { correlationId } : {}),
+    reason: error
+  })
+  return fail(error, code)
+}
+
 function failWorkspaceFile(err: unknown, channel: string): IpcResult<never> {
   if (err instanceof WorkspaceFileError) {
     logger.warn('Workspace file operation failed', {
@@ -943,10 +966,10 @@ export function registerIpc(): void {
       const workspaces = getWorkspaces()
       const open = workspaces.openPaths.some((p) => workspacePathsEqual(p, req.workspacePath))
       if (!open) {
-        return fail('Workspace is not open')
+        return failExpected('Workspace is not open', IPC.chatStart)
       }
       if (!existsSync(req.workspacePath)) {
-        return fail('Workspace path does not exist')
+        return failExpected('Workspace path does not exist', IPC.chatStart)
       }
       const wc = event.sender
       let runId: string
@@ -958,10 +981,10 @@ export function registerIpc(): void {
           if (isRunTurnComplete(req.runId)) {
             const cleared = await waitUntilRunInactive(req.runId)
             if (!cleared || isActive(req.runId)) {
-              return fail('Run is already active')
+              return failExpected('Run is already active', IPC.chatStart, req.runId)
             }
           } else {
-            return fail('Run is already active')
+            return failExpected('Run is already active', IPC.chatStart, req.runId)
           }
         }
         runId = req.runId
@@ -973,7 +996,7 @@ export function registerIpc(): void {
       // chatStart cannot overlap the same runDir (check+set with no await gap).
       const registered = tryRegisterRunAbort(runId, req.workspacePath)
       if (!registered.ok) {
-        return fail(registered.error, registered.code)
+        return failExpected(registered.error, IPC.chatStart, runId, registered.code)
       }
       const { invokeId } = registered
       if (resume) {
@@ -1029,21 +1052,23 @@ export function registerIpc(): void {
       try {
         const req = ChatRewindAndStartRequestSchema.parse(raw)
         if (!isOpenWorkspace(req.workspacePath)) {
-          return fail('Workspace is not open')
+          return failExpected('Workspace is not open', IPC.chatRewindAndStart, req.runId)
         }
         if (!existsSync(req.workspacePath)) {
-          return fail('Workspace path does not exist')
+          return failExpected('Workspace path does not exist', IPC.chatRewindAndStart, req.runId)
         }
         if (!runExists(req.workspacePath, req.runId)) {
-          return fail('Run not found')
+          return failExpected('Run not found', IPC.chatRewindAndStart, req.runId)
         }
 
         if (isActive(req.runId)) {
           const cancelled = chatCancelResult(req.runId)
-          if (!cancelled.ok) return fail(cancelled.error)
+          if (!cancelled.ok) {
+            return failExpected(cancelled.error, IPC.chatRewindAndStart, req.runId)
+          }
           const cleared = await waitUntilRunInactive(req.runId)
           if (!cleared || isActive(req.runId)) {
-            return fail('Run is already active')
+            return failExpected('Run is already active', IPC.chatRewindAndStart, req.runId)
           }
         }
 
@@ -1052,7 +1077,7 @@ export function registerIpc(): void {
         const runId = req.runId
         const registered = tryRegisterRunAbort(runId, req.workspacePath)
         if (!registered.ok) {
-          return fail(registered.error, registered.code)
+          return failExpected(registered.error, IPC.chatRewindAndStart, runId, registered.code)
         }
         const { invokeId } = registered
 
@@ -1100,7 +1125,7 @@ export function registerIpc(): void {
         const msg = err instanceof Error ? err.message : String(err)
         // prepareRewind user-state (index/role/missing run) — not IPC_HANDLER.
         if (/editMessageIndex|run not found/i.test(msg)) {
-          return fail(msg)
+          return failExpected(msg, IPC.chatRewindAndStart)
         }
         return failFrom(err, IPC.chatRewindAndStart)
       }
@@ -1112,21 +1137,23 @@ export function registerIpc(): void {
     try {
       const req = ChatRewindRequestSchema.parse(raw)
       if (!isOpenWorkspace(req.workspacePath)) {
-        return fail('Workspace is not open')
+        return failExpected('Workspace is not open', IPC.chatRewind, req.runId)
       }
       if (!existsSync(req.workspacePath)) {
-        return fail('Workspace path does not exist')
+        return failExpected('Workspace path does not exist', IPC.chatRewind, req.runId)
       }
       if (!runExists(req.workspacePath, req.runId)) {
-        return fail('Run not found')
+        return failExpected('Run not found', IPC.chatRewind, req.runId)
       }
 
       if (isActive(req.runId)) {
         const cancelled = chatCancelResult(req.runId)
-        if (!cancelled.ok) return fail(cancelled.error)
+        if (!cancelled.ok) {
+          return failExpected(cancelled.error, IPC.chatRewind, req.runId)
+        }
         const cleared = await waitUntilRunInactive(req.runId)
         if (!cleared || isActive(req.runId)) {
-          return fail('Run is already active')
+          return failExpected('Run is already active', IPC.chatRewind, req.runId)
         }
       }
 
@@ -1155,7 +1182,7 @@ export function registerIpc(): void {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       if (/userMessageIndex|run not found/i.test(msg)) {
-        return fail(msg)
+        return failExpected(msg, IPC.chatRewind)
       }
       return failFrom(err, IPC.chatRewind)
     }
@@ -1591,23 +1618,23 @@ export function registerIpc(): void {
       try {
         const req = ChatRewindRequestSchema.parse(raw)
         if (!isOpenWorkspace(req.workspacePath)) {
-          return fail('Workspace is not open')
+          return failExpected('Workspace is not open', IPC.chatRewindPreview, req.runId)
         }
         if (!existsSync(req.workspacePath)) {
-          return fail('Workspace path does not exist')
+          return failExpected('Workspace path does not exist', IPC.chatRewindPreview, req.runId)
         }
         if (!runExists(req.workspacePath, req.runId)) {
-          return fail('Run not found')
+          return failExpected('Run not found', IPC.chatRewindPreview, req.runId)
         }
         if (isActive(req.runId)) {
-          return fail('Stop the run before reverting.')
+          return failExpected('Stop the run before reverting.', IPC.chatRewindPreview, req.runId)
         }
         const runDir = resolveRunDir(req.workspacePath, req.runId)
         return ok(planRewindWrites(runDir, req.userMessageIndex))
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         if (/userMessageIndex|run not found/i.test(msg)) {
-          return fail(msg)
+          return failExpected(msg, IPC.chatRewindPreview)
         }
         return failFrom(err, IPC.chatRewindPreview)
       }
@@ -1647,7 +1674,7 @@ export function registerIpc(): void {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         if (/already resolved|checkpoint not found|invalid checkpoint/i.test(msg)) {
-          return fail(msg)
+          return failExpected(msg, IPC.runsResolveWrites)
         }
         return failFrom(err, IPC.runsResolveWrites)
       }
@@ -1907,7 +1934,7 @@ export function registerIpc(): void {
         const msg = err instanceof Error ? err.message : String(err)
         // Same user-state class as runsDelete result.error (active / missing / corrupt).
         if (/cancel run first|run not found|invalid run status/i.test(msg)) {
-          return fail(msg)
+          return failExpected(msg, IPC.runsRename)
         }
         return failFrom(err, IPC.runsRename)
       }

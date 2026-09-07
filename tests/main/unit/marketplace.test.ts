@@ -492,6 +492,7 @@ describe('bundled marketplace catalog', () => {
       'frontend-design',
       'goal',
       'implement-feature',
+      'persona-builder',
       'review-code',
       'write-tests'
     ])

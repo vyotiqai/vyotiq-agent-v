@@ -2046,6 +2046,34 @@ export function createChatStreamController(
     }
   }
 
+  /**
+   * Reload the persisted message list after a run ends. `send()` appends the
+   * new user message optimistically and the turn's assistant/tool rows only
+   * ever exist on disk, so `state.messages` drifts from messages.jsonl across
+   * turns. editAndResend / revertToUserMessage index into this list while main
+   * validates the same index against disk — the drift made every edit of a
+   * recent message fail with "editMessageIndex must point at a user message"
+   * (2026-09-07, run 671d5529). Items stay as finalized live (a disk rebuild
+   * would drop live-only chrome); only the index-bearing list is corrected.
+   */
+  const resyncMessagesFromDisk = async (id: string, turn: number): Promise<void> => {
+    if (disposed || closedRuns.has(id)) return
+    if (!window.vyotiq?.loadRun) return
+    const res = await window.vyotiq.loadRun(workspacePath, id)
+    if (disposed || closedRuns.has(id)) return
+    // A newer send/edit started while loading — never clobber its optimistic state.
+    if (turn !== turnSeq) return
+    if (!res.ok) {
+      logger.warn('Terminal message resync failed', {
+        scope: 'chat',
+        correlationId: id,
+        err: res.error
+      })
+      return
+    }
+    patch({ messages: messagesForNextTurn(res.data.messages) })
+  }
+
   const handleEvent = (event: AgentEvent): void => {
     if (disposed) return
     if (closedRuns.has(event.runId)) return
@@ -2772,6 +2800,9 @@ export function createChatStreamController(
           items: withRunError
         })
         onTerminal?.()
+        // Keep the message list disk-aligned for edit/revert index math —
+        // see resyncMessagesFromDisk. turnSeq aborts it if a newer send started.
+        void resyncMessagesFromDisk(sessionRunId, turnSeq)
       }
     }
   }
@@ -3168,10 +3199,11 @@ export function createChatStreamController(
 
     if (!res.ok) {
       awaitingRun = false
-      logger.error('chatRewindAndStart failed', {
+      // Detail in the log line — string `err` keeps scrubbed text; AppError would not.
+      logger.error(`chatRewindAndStart failed: ${res.error}`, {
         scope: 'chat',
         correlationId: id,
-        err: toLogErr(res.error)
+        err: res.error
       })
       patch({
         error: res.error,

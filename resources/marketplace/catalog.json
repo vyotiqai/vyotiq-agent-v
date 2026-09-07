@@ -326,6 +326,22 @@
       "installable": true
     },
     {
+      "id": "persona-builder",
+      "name": "Persona builder",
+      "version": "1.0.0",
+      "description": "Draft a custom agent persona and tone for Agent V within the settings limits, confirm with you, and hand over paste-ready text for Settings.",
+      "kind": "skill",
+      "bundledPath": "persona-builder",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "sections": [
+        "featured"
+      ],
+      "category": "skills",
+      "featuredRank": 20,
+      "installable": true
+    },
+    {
       "id": "devtools",
       "name": "Devtools",
       "version": "1.0.0",
