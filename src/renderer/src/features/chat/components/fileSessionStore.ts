@@ -36,6 +36,8 @@ export type FileSession = {
   wordWrap: boolean
   autoSave: boolean
   formatOnSave: boolean
+  /** Hide dependency/build noise (node_modules, dist, …) in the file tree. */
+  showIgnoredFiles: boolean
   revision: number
 }
 
@@ -51,6 +53,7 @@ const EMPTY_SESSION: FileSession = {
   wordWrap: false,
   autoSave: true,
   formatOnSave: false,
+  showIgnoredFiles: false,
   revision: 0
 }
 

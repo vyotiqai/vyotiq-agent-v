@@ -146,7 +146,6 @@ export function isAutonomousHighRiskTool(name: string, argsJson?: string): boole
     canonical === 'delete' ||
     canonical === 'terminal' ||
     canonical === 'edit' ||
-    canonical === 'multi_edit' ||
     canonical === 'str_replace' ||
     canonical === 'edit_notebook' ||
     canonical === 'git_commit' ||

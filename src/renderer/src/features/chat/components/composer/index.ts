@@ -1,2 +1,2 @@
-export { Composer, buildUserContent } from './Composer'
+export { Composer } from './Composer'
 export type { ComposerVariant } from './ComposerToolbar'

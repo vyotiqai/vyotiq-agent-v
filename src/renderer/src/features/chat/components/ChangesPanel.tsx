@@ -57,6 +57,9 @@ function sideDelta(
   return { added: file.added, removed: file.removed }
 }
 
+/** Matches INSTANCE_BRANCH_PREFIX in src/main/git/instanceWorktree.ts. */
+const INSTANCE_BRANCH_PREFIX = 'vyotiq/instance/'
+
 function statusBadge(status: GitChangedFile['status']): string {
   switch (status) {
     case 'added':
@@ -156,7 +159,9 @@ export const ChangesPanel = memo(function ChangesPanel({
   writeCheckpointFiles,
   active = true,
   preferredScope = 'uncommitted',
-  preferredScopeToken = 0
+  preferredScopeToken = 0,
+  preferredSelectedPath = null,
+  preferredSelectedPathToken = 0
 }: {
   items: UiItem[]
   itemsStore?: ChatItemsStore
@@ -187,6 +192,10 @@ export const ChangesPanel = memo(function ChangesPanel({
   preferredScope?: ChangeScope
   /** Bump to re-apply preferredScope even if the scope value is unchanged. */
   preferredScopeToken?: number
+  /** File requested by the parent (e.g. transcript receipt click) — select + expand it. */
+  preferredSelectedPath?: string | null
+  /** Bump alongside preferredSelectedPath to re-apply the selection. */
+  preferredSelectedPathToken?: number
 }) {
   // Prefer parent-shared chrome; fall back for tests that mount the panel alone.
   const localChrome = useGitChrome(
@@ -220,7 +229,7 @@ export const ChangesPanel = memo(function ChangesPanel({
   const [layoutOpen, setLayoutOpen] = useState(false)
   const [layout, setLayout] = useState<DiffLayout>('unified')
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false)
-  const [wordWrap, setWordWrap] = useState(false)
+  const [wordWrap, setWordWrap] = useState(true)
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
@@ -252,6 +261,15 @@ export const ChangesPanel = memo(function ChangesPanel({
   const branchesSeqRef = useRef(0)
   const messageGenerationSeqRef = useRef(0)
   const messageEditedRef = useRef(false)
+
+  const branchGroups = useMemo(() => {
+    const regular: GitBranchEntry[] = []
+    const instances: GitBranchEntry[] = []
+    for (const branch of branches) {
+      (branch.name.startsWith(INSTANCE_BRANCH_PREFIX) ? instances : regular).push(branch)
+    }
+    return { regular, instances }
+  }, [branches])
 
   const closeMenus = useCallback(() => {
     setScopeOpen(false)
@@ -285,6 +303,17 @@ export const ChangesPanel = memo(function ChangesPanel({
     setExpanded(new Set())
     setSelectedPath(null)
   }, [preferredScope, preferredScopeToken])
+
+  // Runs after the scope effect above so the requested file wins over its reset.
+  useEffect(() => {
+    if (preferredSelectedPathToken <= 0 || !preferredSelectedPath) return
+    setSelectedPath(preferredSelectedPath)
+    setExpanded((prev) =>
+      prev.has(preferredSelectedPath)
+        ? prev
+        : new Set(prev).add(preferredSelectedPath)
+    )
+  }, [preferredSelectedPath, preferredSelectedPathToken])
 
   // Non-git workspaces with agent edits: prefer agent scope so we never stack
   // "Not a git repository" with an Agent edits footer.
@@ -843,13 +872,6 @@ export const ChangesPanel = memo(function ChangesPanel({
           })}
         </PanelToolbarDropdown>
 
-        <span className="shrink-0 tabular-nums text-caption leading-none text-muted">
-          {totals.added > 0 ? <span className="text-success">+{totals.added}</span> : null}
-          {totals.removed > 0 ? (
-            <span className="ml-1 text-danger">-{totals.removed}</span>
-          ) : null}
-        </span>
-
         <PanelToolbarDropdown
           open={branchOpen}
           onOpenChange={(next) => {
@@ -860,24 +882,24 @@ export const ChangesPanel = memo(function ChangesPanel({
           placement="down"
           align="start"
           aria-label="Switch branch"
-          panelClassName="max-h-56 overflow-auto"
           trigger={({ ref, 'aria-expanded': expanded, 'aria-controls': controls, onClick }) => (
-            <button
-              ref={ref}
-              type="button"
-              className="inline-flex h-6 max-w-[9rem] min-w-0 items-center gap-1 rounded-md px-1.5 text-caption leading-none text-muted hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]"
-              disabled={!workspacePath || chrome.result?.kind !== 'ok'}
-              onClick={onClick}
-              aria-expanded={expanded}
-              aria-controls={controls}
-              title={namedGitBranch(status?.branch) ?? 'Switch branch'}
-            >
-              <Icon name="branch" size={12} className="shrink-0" />
-              <span className="min-w-0 flex-1 truncate text-left">
-                {namedGitBranch(status?.branch) ?? 'detached'}
-              </span>
-              <Icon name="chevron" size={10} className="shrink-0" />
-            </button>
+            <Tooltip content={namedGitBranch(status?.branch) ?? 'Switch branch'}>
+              <button
+                ref={ref}
+                type="button"
+                className="inline-flex h-6 max-w-[9rem] min-w-0 items-center gap-1 rounded-md px-1.5 text-caption leading-none text-muted hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]"
+                disabled={!workspacePath || chrome.result?.kind !== 'ok'}
+                onClick={onClick}
+                aria-expanded={expanded}
+                aria-controls={controls}
+              >
+                <Icon name="branch" size={12} className="shrink-0" />
+                <span className="min-w-0 flex-1 truncate text-left">
+                  {namedGitBranch(status?.branch) ?? 'detached'}
+                </span>
+                <Icon name="chevron" size={10} className="shrink-0" />
+              </button>
+            </Tooltip>
           )}
         >
           {branchesBusy ? (
@@ -885,22 +907,47 @@ export const ChangesPanel = memo(function ChangesPanel({
           ) : branches.length === 0 ? (
             <p className="m-0 px-2.5 py-1.5 text-caption text-muted">No local branches</p>
           ) : (
-            branches.map((b) => (
-              <button
-                key={b.name}
-                type="button"
-                role="menuitem"
-                className={cn(
-                  'flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-caption hover:bg-surface',
-                  b.current ? 'text-fg' : 'text-muted'
-                )}
-                disabled={b.current}
-                onClick={() => void checkoutBranch(b.name)}
-              >
-                <span className="min-w-0 flex-1 truncate">{b.name}</span>
-                {b.current ? <Icon name="check" size={12} className="shrink-0" /> : null}
-              </button>
-            ))
+            // Scroll the list inside the panel — the panel itself must stay
+            // overflow-visible (base class) for nested submenus, and cn() does
+            // not merge conflicting overflow classes.
+            <div className="max-h-56 overflow-y-auto">
+              {branchGroups.regular.map((b) => (
+                <button
+                  key={b.name}
+                  type="button"
+                  role="menuitem"
+                  className={cn(
+                    'flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-caption hover:bg-surface',
+                    b.current ? 'text-fg' : 'text-muted'
+                  )}
+                  disabled={b.current}
+                  onClick={() => void checkoutBranch(b.name)}
+                >
+                  <span className="min-w-0 flex-1 truncate">{b.name}</span>
+                  {b.current ? <Icon name="check" size={12} className="shrink-0" /> : null}
+                </button>
+              ))}
+              {branchGroups.instances.length > 0 ? (
+                <div
+                  role="presentation"
+                  className="border-t border-border/40 px-2.5 pb-1 pt-1.5 text-2xs uppercase tracking-widest text-tertiary"
+                >
+                  Instance worktrees
+                </div>
+              ) : null}
+              {branchGroups.instances.map((b) => (
+                <button
+                  key={b.name}
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-caption text-muted hover:bg-surface"
+                  onClick={() => void checkoutBranch(b.name)}
+                >
+                  <span className="min-w-0 flex-1 truncate">{b.name}</span>
+                  {b.current ? <Icon name="check" size={12} className="shrink-0" /> : null}
+                </button>
+              ))}
+            </div>
           )}
         </PanelToolbarDropdown>
         </div>
@@ -1179,6 +1226,8 @@ export const ChangesPanel = memo(function ChangesPanel({
                 files={agentFiles}
                 fileDiffs={agentDiffs}
                 onOpenFile={onOpenFile}
+                focusPath={preferredSelectedPath}
+                focusPathToken={preferredSelectedPathToken}
                 fileResolutions={writeFileResolutions}
                 resolvablePaths={resolvablePaths}
                 conflictedPaths={conflictedPaths}

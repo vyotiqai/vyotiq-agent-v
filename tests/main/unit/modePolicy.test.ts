@@ -67,12 +67,13 @@ describe('modePolicy', () => {
 
   it('root Agent mode section carries the delegation decision policy', () => {
     const section = modeSectionMarkdown('agent')
-    expect(section).toMatch(/delegate each to a child agent instance/)
+    expect(section).toMatch(/every plan step maps to one child agent instance/)
     expect(section).toMatch(/decompose the plan into a structured set/)
-    expect(section).toMatch(/one workstream per instance/)
+    expect(section).toMatch(/one task per instance/)
     expect(section).toMatch(/every single time/i)
-    expect(section).toMatch(/zero spawned instances/)
-    expect(section).toMatch(/complete self-contained brief/)
+    expect(section).toMatch(/no matter how small the request/)
+    expect(section).toMatch(/spawned zero instances/)
+    expect(section).toMatch(/complete structured brief/)
     expect(section).toMatch(/child sees nothing of this conversation/)
     expect(section).toMatch(/spawn, await, and merge lifecycle/)
     expect(section).toMatch(/batch independent tool calls within a step first/i)
@@ -81,7 +82,7 @@ describe('modePolicy', () => {
 
   it('inline instance Agent mode section omits delegation policy (parent-only)', () => {
     const section = modeSectionMarkdown('agent', { inlineInstance: true })
-    expect(section).not.toMatch(/delegate each to a child agent instance/)
+    expect(section).not.toMatch(/every plan step maps to one child agent instance/)
     expect(section).not.toMatch(/child sees nothing of this conversation/)
     expect(section).not.toMatch(/spawn_agent_instance/)
     expect(section).not.toMatch(/merge_agent_instance/)
@@ -286,7 +287,6 @@ describe('modePolicy', () => {
       'update_goal',
       'edit',
       'str_replace',
-      'multi_edit',
       'diagnostics',
       'run_tests'
     ] as const

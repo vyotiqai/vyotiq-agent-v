@@ -107,6 +107,3 @@ export function EditBody({ tool, expanded, loading, loadFailed }: ToolBodyProps)
   )
 }
 
-export function MultiEditBody(props: ToolBodyProps) {
-  return <EditBody {...props} />
-}

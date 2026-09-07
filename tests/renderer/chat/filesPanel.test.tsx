@@ -237,7 +237,11 @@ describe('FilesPanel', () => {
 
     expect(await screen.findByText('README.md')).toBeTruthy()
     expect(screen.getByRole('separator', { name: 'Resize Files explorer' })).toBeTruthy()
-    expect(screen.getByText('.git')).toBeTruthy()
+    // Ignored dependency/build noise is hidden until "Show ignored files" is on.
+    expect(screen.queryByText('.git')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }))
+    fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Show ignored files' }))
+    expect(await screen.findByText('.git')).toBeTruthy()
     fireEvent.click(screen.getByText('src'))
     expect(await screen.findByText('note.ts')).toBeTruthy()
     fireEvent.click(screen.getByText('note.ts'))

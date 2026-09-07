@@ -67,7 +67,7 @@ export async function toolGlob(
   assertInsideWorkspace(workspaceRoot, '.')
   const regex = globToRegExp(trimmed)
   const limit =
-    maxResults == null ? Number.POSITIVE_INFINITY : Math.max(1, maxResults)
+    maxResults == null ? GLOB_DEFAULT_MAX_RESULTS : Math.max(1, maxResults)
 
   let files: WalkedFile[] | undefined
   let indexMode: 'trigram' | 'live' = 'live'

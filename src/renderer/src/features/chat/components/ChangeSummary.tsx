@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { Button, Tooltip, cn } from '@renderer/lib/ui'
 import { TOOL_CARD_HEADER, TOOL_CARD_SURFACE } from '@renderer/lib/utils/layout'
 import type { ChangedFile } from '../utils/transcriptRows'
@@ -77,6 +77,8 @@ export const ChangeSummary = memo(function ChangeSummary({
   onDiffExpandChange,
   compact = false,
   onOpenChanges,
+  focusPath = null,
+  focusPathToken = 0,
   layout = 'unified',
   wordWrap = false,
   findQuery = '',
@@ -106,7 +108,11 @@ export const ChangeSummary = memo(function ChangeSummary({
   onDiffExpandChange?: (hasExpanded: boolean) => void
   /** Transcript receipt — no Keep/Discard; Review opens Changes. */
   compact?: boolean
-  onOpenChanges?: () => void
+  onOpenChanges?: (path?: string) => void
+  /** Changes panel request: auto-expand this file (receipt click → Review with target). */
+  focusPath?: string | null
+  /** Bump alongside focusPath to re-apply the expansion. */
+  focusPathToken?: number
   layout?: DiffLayout
   wordWrap?: boolean
   findQuery?: string
@@ -126,6 +132,13 @@ export const ChangeSummary = memo(function ChangeSummary({
     if (!q) return files
     return files.filter((f) => f.path.toLowerCase().includes(q))
   }, [files, findQuery])
+
+  useEffect(() => {
+    if (!focusPath) return
+    setExpandedPaths((prev) =>
+      prev.has(focusPath) ? prev : new Set(prev).add(focusPath)
+    )
+  }, [focusPath, focusPathToken])
 
   if (files.length === 0) return null
 
@@ -182,7 +195,18 @@ export const ChangeSummary = memo(function ChangeSummary({
             <li key={file.path} className="min-w-0 [&+&]:border-t [&+&]:border-border/60">
               <div className="flex min-w-0 items-center gap-2 px-3 py-1.5 text-xs">
                 <FileBadge path={file.path} />
-                <ChangeFileName path={file.path} onOpenFile={onOpenFile} />
+                {onOpenChanges ? (
+                  <button
+                    type="button"
+                    className="min-w-0 truncate text-left text-fg underline-offset-2 hover:underline"
+                    title={file.path}
+                    onClick={() => onOpenChanges(file.path)}
+                  >
+                    {basename(file.path)}
+                  </button>
+                ) : (
+                  <ChangeFileName path={file.path} onOpenFile={onOpenFile} />
+                )}
                 <span className="ml-auto flex shrink-0 items-center gap-2 tabular-nums">
                   {(file.added ?? 0) > 0 ? <span className="text-success">+{file.added}</span> : null}
                   {(file.removed ?? 0) > 0 ? <span className="text-danger">-{file.removed}</span> : null}

@@ -68,7 +68,7 @@ function loadInlineInstanceStatus(
 
 /**
  * Deny workspace writes outside an inline instance's path_scope when set.
- * Call for product-file writers (edit / str_replace / multi_edit / delete) and git_commit paths.
+ * Call for product-file writers (edit / str_replace / delete) and git_commit paths.
  */
 export function assertInlineInstancePathScope(
   runDir: string | undefined,

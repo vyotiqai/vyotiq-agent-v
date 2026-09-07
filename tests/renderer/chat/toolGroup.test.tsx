@@ -84,7 +84,7 @@ describe('ToolGroup', () => {
       toolItem('t2', 'write_file_check', 'placeholder', 'fail')
     ]
     tools[1]!.tool.content =
-      'Unknown tool "write_file_check". Use edit, str_replace, or multi_edit to change files.'
+      'Unknown tool "write_file_check". Use edit or str_replace to change files.'
     render(<ToolGroup tools={tools} />)
     expect(screen.getByTestId('tool-group-list')).toBeTruthy()
     expect(screen.getAllByText(/Write file check/i).length).toBeGreaterThan(0)

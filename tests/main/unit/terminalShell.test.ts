@@ -21,6 +21,7 @@ import {
   appendPowerShellCompatHint,
   nestedPowerShellCommandMessage,
   docxUnzipViaShellMessage,
+  selfKillCommandMessage,
   appendMissingCommandHint,
   isMaskedExitCommand,
   parseEchoedExitCode
@@ -561,5 +562,40 @@ describe('PowerShell native-stderr exit inflation (win32)', () => {
       { timeoutMs: 30_000, shell: 'powershell' }
     )
     expect(result).toMatch(/exit_code: 5/)
+  })
+})
+
+describe('selfKillCommandMessage', () => {
+  const host = ['electron', 'vyotiq']
+
+  it('refuses the observed self-kill sweep', () => {
+    const msg = selfKillCommandMessage(
+      'Get-Process electron -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue',
+      host
+    )
+    expect(msg).toMatch(/Refused/)
+    expect(msg).toMatch(/verified orphan PIDs/i)
+  })
+
+  it('refuses name-based taskkill of the host image', () => {
+    expect(selfKillCommandMessage('taskkill /F /IM electron.exe', host)).toMatch(/Refused/)
+    expect(selfKillCommandMessage('Stop-Process -Name Electron', host)).toMatch(/Refused/)
+    expect(selfKillCommandMessage('kill -Name electron', host)).toMatch(/Refused/)
+  })
+
+  it('does not match electron-prefixed tools like electron-builder', () => {
+    expect(
+      selfKillCommandMessage(
+        'pnpm exec electron-builder --win dir --publish never',
+        host
+      )
+    ).toBeNull()
+    expect(selfKillCommandMessage('pnpm build && pnpm exec electron-vite preview', host)).toBeNull()
+  })
+
+  it('allows PID-targeted kills and unrelated process names', () => {
+    expect(selfKillCommandMessage('Stop-Process -Id 4242 -Force', host)).toBeNull()
+    expect(selfKillCommandMessage('taskkill /F /PID 4242 /T', host)).toBeNull()
+    expect(selfKillCommandMessage('Get-Process node | Stop-Process -Force', host)).toBeNull()
   })
 })

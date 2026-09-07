@@ -195,7 +195,7 @@ export function SessionChatColumn({
   showPageHeading?: boolean
   onActivate?: () => void
   approvalAutoFocus?: boolean
-  onOpenChanges?: () => void
+  onOpenChanges?: (path?: string) => void
   onOpenWorkspaceFile?: (path: string, options?: WorkspaceFileOpenOptions) => void
   agentInstances?: Record<string, AgentInstanceUiState>
   openInstanceRunId?: string | null

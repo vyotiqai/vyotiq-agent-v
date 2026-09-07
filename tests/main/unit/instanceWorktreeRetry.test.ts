@@ -313,7 +313,9 @@ describe('buildWorktreeProcessFilter', () => {
     expect(filter).not.toContain('ExecutablePath !=')
     expect(filter).toContain('ExecutablePath LIKE')
     expect(filter).toContain('CommandLine LIKE')
-    expect(filter).toContain('CurrentDirectory LIKE')
+    // Win32_Process has no CurrentDirectory property — the WQL query would be
+    // rejected outright ("Invalid query"), silently disabling the kill step.
+    expect(filter).not.toContain('CurrentDirectory')
   })
 })
 

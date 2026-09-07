@@ -4,7 +4,6 @@ import { Icon } from '@renderer/lib/icons'
 import { SearchInput } from '@renderer/lib/ui/SearchInput'
 import { Tooltip } from '@renderer/lib/ui/Tooltip'
 import { cn } from '@renderer/lib/ui/cn'
-import { prefersReducedMotion } from '@renderer/lib/utils/motion'
 import { useDropdownMenu } from '@renderer/lib/hooks/useDropdownMenu'
 import type { ProviderId, ServiceTier } from '@shared/ipc'
 import { PROVIDER_DEFAULTS } from '@shared/providers'
@@ -26,7 +25,9 @@ const SESSION_TAB_KEY = 'vyotiq:model-picker-tab'
 
 function readSessionTab(fallback: ProviderId, providers: ProviderId[]): ProviderId {
   try {
-    const stored = sessionStorage.getItem(SESSION_TAB_KEY)
+    // localStorage, not sessionStorage — the browsed-provider tab is a stable
+    // preference and must survive restarts.
+    const stored = localStorage.getItem(SESSION_TAB_KEY)
     if (stored && providers.includes(stored as ProviderId)) {
       return stored as ProviderId
     }
@@ -276,7 +277,7 @@ export function ModelPicker({
       setBrowsedProvider(next)
       onBrowseProvider?.(next)
       try {
-        sessionStorage.setItem(SESSION_TAB_KEY, next)
+        localStorage.setItem(SESSION_TAB_KEY, next)
       } catch {
         // ignore
       }
@@ -302,12 +303,21 @@ export function ModelPicker({
     return hits
   }, [query, providers, optionsByProvider])
 
+  /** Search-driven tab switch — ephemeral; the persisted session tab must not move. */
+  const setBrowsedTransient = useCallback(
+    (next: ProviderId) => {
+      setBrowsedProvider(next)
+      onBrowseProvider?.(next)
+    },
+    [onBrowseProvider]
+  )
+
   useEffect(() => {
     if (globalSearchResults?.length && query.trim()) {
       const first = parseModelSelectionKey(globalSearchResults[0].value)
-      if (first) selectBrowsedProvider(first.provider)
+      if (first) setBrowsedTransient(first.provider)
     }
-  }, [globalSearchResults, query, selectBrowsedProvider])
+  }, [globalSearchResults, query, setBrowsedTransient])
 
   const visibleOptions = useMemo(() => {
     if (globalSearchResults !== null) {
@@ -419,6 +429,11 @@ export function ModelPicker({
             id={panelId}
             role="listbox"
             aria-label="Select model"
+            aria-activedescendant={
+              activeIndex >= 0 && flatOptions[activeIndex]
+                ? `${listId}-opt-${flatOptions[activeIndex]!.value}`
+                : undefined
+            }
             tabIndex={0}
             className="fixed z-dropdown flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-menu animate-menu-in origin-bottom"
             style={{

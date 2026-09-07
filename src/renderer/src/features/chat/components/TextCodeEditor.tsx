@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { minimalSetup } from 'codemirror'
+import { bracketMatching, HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { tags as syntaxTags } from '@lezer/highlight'
 import { css } from '@codemirror/lang-css'
 import { html } from '@codemirror/lang-html'
 import { javascript } from '@codemirror/lang-javascript'
@@ -15,7 +17,7 @@ import {
   Transaction,
   type Extension
 } from '@codemirror/state'
-import { EditorView, hoverTooltip, lineNumbers } from '@codemirror/view'
+import { EditorView, highlightActiveLine, highlightActiveLineGutter, hoverTooltip, lineNumbers } from '@codemirror/view'
 import type { WorkspaceEditorSelection } from '@shared/ipc'
 import {
   mapLspDiagnosticsToCm,
@@ -42,6 +44,62 @@ function languageExtension(path: string): Extension {
   if (/\.(yaml|yml)$/.test(lower)) return yaml()
   return []
 }
+
+/**
+ * Syntax palette driven by theme CSS vars (`--vy-syntax-*` in styles.css), so
+ * light/dark themes get tuned colors (VS Code Light+/Dark+ style) instead of
+ * CodeMirror's light-background default fallback.
+ */
+const syntaxHighlightStyle = HighlightStyle.define([
+  { tag: [syntaxTags.propertyName], color: 'var(--vy-syntax-property)' },
+  {
+    tag: [syntaxTags.string, syntaxTags.special(syntaxTags.string)],
+    color: 'var(--vy-syntax-string)'
+  },
+  { tag: [syntaxTags.number], color: 'var(--vy-syntax-number)' },
+  {
+    tag: [
+      syntaxTags.bool,
+      syntaxTags.null,
+      syntaxTags.keyword,
+      syntaxTags.controlKeyword,
+      syntaxTags.moduleKeyword,
+      syntaxTags.operatorKeyword,
+      syntaxTags.definitionKeyword,
+      syntaxTags.modifier,
+      syntaxTags.atom,
+      syntaxTags.self,
+      syntaxTags.tagName
+    ],
+    color: 'var(--vy-syntax-keyword)'
+  },
+  {
+    tag: [syntaxTags.lineComment, syntaxTags.blockComment, syntaxTags.docComment],
+    color: 'var(--vy-syntax-comment)',
+    fontStyle: 'italic'
+  },
+  {
+    tag: [syntaxTags.function(syntaxTags.variableName), syntaxTags.macroName],
+    color: 'var(--vy-syntax-func)'
+  },
+  {
+    tag: [syntaxTags.typeName, syntaxTags.className, syntaxTags.namespace],
+    color: 'var(--vy-syntax-type)'
+  },
+  { tag: [syntaxTags.constant(syntaxTags.variableName)], color: 'var(--vy-syntax-constant)' },
+  {
+    tag: [syntaxTags.variableName, syntaxTags.definition(syntaxTags.variableName)],
+    color: 'var(--vy-syntax-variable)'
+  },
+  { tag: [syntaxTags.attributeName], color: 'var(--vy-syntax-property)' },
+  { tag: [syntaxTags.regexp, syntaxTags.escape], color: 'var(--vy-syntax-escape)' },
+  { tag: [syntaxTags.meta], color: 'var(--vy-syntax-comment)' },
+  { tag: [syntaxTags.heading], color: 'var(--vy-syntax-keyword)', fontWeight: 'bold' },
+  { tag: [syntaxTags.strong], fontWeight: 'bold' },
+  { tag: [syntaxTags.emphasis], fontStyle: 'italic' },
+  { tag: [syntaxTags.link], color: 'var(--vy-syntax-string)', textDecoration: 'underline' },
+  { tag: [syntaxTags.invalid], color: 'var(--vy-danger)', textDecoration: 'underline wavy' }
+])
 
 function normalizedSelections(
   selections: WorkspaceEditorSelection[],
@@ -199,6 +257,10 @@ export function TextCodeEditor({
       extensions: [
         minimalSetup,
         languageExtension(path),
+        syntaxHighlighting(syntaxHighlightStyle),
+        bracketMatching(),
+        highlightActiveLine(),
+        highlightActiveLineGutter(),
         lineNumbersCompartmentRef.current.of(
           lineNumbersRef.current ? lineNumbers() : []
         ),
@@ -234,7 +296,7 @@ export function TextCodeEditor({
           },
           '.cm-gutters': {
             backgroundColor: 'transparent',
-            border: '0',
+            borderRight: '1px solid color-mix(in srgb, var(--vy-border) 60%, transparent)',
             color: 'var(--vy-muted)',
             paddingRight: '0.25rem'
           },
@@ -247,6 +309,11 @@ export function TextCodeEditor({
           },
           '.cm-activeLine': {
             backgroundColor: 'color-mix(in srgb, var(--vy-surface) 45%, transparent)'
+          },
+          '.cm-matchingBracket': {
+            backgroundColor: 'color-mix(in srgb, var(--vy-accent) 14%, transparent)',
+            outline: '1px solid color-mix(in srgb, var(--vy-accent) 35%, transparent)',
+            color: 'inherit'
           },
           '.cm-lintRange-error': {
             backgroundImage:

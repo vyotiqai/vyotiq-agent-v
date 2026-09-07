@@ -185,18 +185,23 @@ describe('AskQuestionPanel', () => {
     expect(screen.getByText('Waiting for your answer — agent continues if skipped.')).toBeTruthy()
     expect(screen.getByText('0 of 2 answered')).toBeTruthy()
     expect(screen.getAllByText('Unanswered')).toHaveLength(2)
-    expect(screen.getByRole('button', { name: 'Submit answers' }).getAttribute('title')).toBe(
-      'Still need: Mode?; Notes'
-    )
+    // The why-not reason renders as a styled tooltip — native titles never
+    // show on disabled controls.
+    const submit = screen.getByRole('button', { name: 'Submit answers' })
+    expect(submit.hasAttribute('disabled')).toBe(true)
+    expect(submit.getAttribute('title')).toBeNull()
+    fireEvent.pointerEnter(submit.parentElement!)
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Still need: Mode?; Notes')
     fireEvent.click(screen.getByRole('radio', { name: 'Ask' }))
     expect(screen.getByRole('button', { name: 'Submit answers' }).hasAttribute('disabled')).toBe(
       true
     )
     expect(screen.getByText('1 of 2 answered')).toBeTruthy()
     expect(screen.getByText('Unanswered')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Submit answers' }).getAttribute('title')).toBe(
-      'Still need: Notes'
-    )
+    // Tip follows the updated why-not reason for the remaining question
+    fireEvent.pointerLeave(submit.parentElement!)
+    fireEvent.pointerEnter(submit.parentElement!)
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Still need: Notes')
 
     fireEvent.change(screen.getByPlaceholderText('Your answer…'), {
       target: { value: 'ship it' }

@@ -391,6 +391,7 @@ export const WorkspaceEditorRecoverySnapshotSchema = z.object({
   wordWrap: z.boolean().optional(),
   autoSave: z.boolean().optional(),
   formatOnSave: z.boolean().optional(),
+  showIgnoredFiles: z.boolean().optional(),
   tabs: z.array(WorkspaceEditorTabSnapshotSchema).max(WORKSPACE_EDITOR_RECOVERY_MAX_TABS),
   savedAt: z.string().datetime()
 }).superRefine((snapshot, ctx) => {

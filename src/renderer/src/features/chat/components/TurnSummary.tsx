@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react'
-import { Icon } from '@renderer/lib/icons'
+import { Icon, type IconName } from '@renderer/lib/icons'
 import { Tooltip, cn } from '@renderer/lib/ui'
 import { DISCLOSURE_CHEVRON, DISCLOSURE_ROW } from '@renderer/lib/utils/layout'
 import { formatElapsed } from '@shared/utils/timeFormat'
@@ -82,6 +82,11 @@ export const TurnSummary = memo(function TurnSummary({
       : terminalStatus === 'cancelled' || terminalStatus === 'interrupted'
         ? 'text-warning'
         : undefined
+  // Terminal rows get a scannable status mark before the text so the transcript
+  // reads at a glance; live rows keep the phase label as the mark.
+  const statusIcon: IconName | null = terminalStatus === 'done' ? 'check' : 'warning'
+  const statusIconTone =
+    terminalStatus === 'done' ? 'text-success' : (statusTone ?? 'text-tertiary')
 
   let accessibleName = doneText
   if (active) {
@@ -141,12 +146,21 @@ export const TurnSummary = memo(function TurnSummary({
               {receiptMark}
             </>
           )
-        ) : receiptCaption && receipt.tooltip ? (
-          <Tooltip content={receipt.tooltip}>
-            <span className={cn('min-w-0 truncate tabular-nums', statusTone)}>{doneText}</span>
-          </Tooltip>
         ) : (
-          <span className={cn('min-w-0 truncate tabular-nums', statusTone)}>{doneText}</span>
+          <>
+            <Icon
+              name={statusIcon}
+              size={13}
+              className={cn('shrink-0 tool-status-morph', statusIconTone)}
+            />
+            {receiptCaption && receipt.tooltip ? (
+              <Tooltip content={receipt.tooltip}>
+                <span className={cn('min-w-0 truncate tabular-nums', statusTone)}>{doneText}</span>
+              </Tooltip>
+            ) : (
+              <span className={cn('min-w-0 truncate tabular-nums', statusTone)}>{doneText}</span>
+            )}
+          </>
         )}
       </span>
       <Icon

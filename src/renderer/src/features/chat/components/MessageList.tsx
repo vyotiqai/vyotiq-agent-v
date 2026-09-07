@@ -1,7 +1,7 @@
 import { Fragment, memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAppVirtualizer } from '@renderer/lib/hooks/useAppVirtualizer'
 import { Icon } from '@renderer/lib/icons'
-import { cn, ImageLightbox, MarkdownContent } from '@renderer/lib/ui'
+import { Tooltip, cn, ImageLightbox, MarkdownContent } from '@renderer/lib/ui'
 import {
   focusComposerMessage,
   isEditableShortcutTarget,
@@ -586,7 +586,7 @@ const TranscriptRowBlock = memo(function TranscriptRowBlock({
   /** Live expanded with tool rows visible — TurnSummary skips duplicate phase label. */
   suppressPhaseLabel?: boolean
   mcpServerNames?: ReadonlyMap<string, string>
-  onOpenChanges?: () => void
+  onOpenChanges?: (path?: string) => void
   editingUserMessageIndex?: number | null
   editComposer?: ReactNode
   onBeginEditUserMessage?: (messageIndex: number) => void
@@ -841,7 +841,7 @@ export function MessageList({
   transcriptLoading?: boolean
   /** Hybrid-virtualize live transcripts without waiting for 160 rows. */
   virtualizeLiveEarly?: boolean
-  onOpenChanges?: () => void
+  onOpenChanges?: (path?: string) => void
   /** When false, use symmetric gutter (immersive Agent — no floating side rail). */
   sideRailPad?: boolean
   editingUserMessageIndex?: number | null
@@ -2078,20 +2078,21 @@ export function MessageList({
               className="pointer-events-none sticky bottom-4 z-dropdown flex h-0 justify-end pr-2"
               data-jump-to-bottom
             >
-              <button
-                type="button"
-                onClick={jumpToBottom}
-                aria-label={
-                  unpinnedNewCount > 0
-                    ? `Jump to latest messages, ${unpinnedNewCount} new`
-                    : 'Jump to latest messages'
-                }
-                title="Jump to latest (End)"
-                className="pointer-events-auto inline-flex -translate-y-full items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1.5 text-caption text-secondary shadow-md vy-transition hover:bg-surface-2 hover:text-fg"
-              >
-                <Icon name="chevron" size={12} />
-                {unpinnedNewCount > 0 ? `Latest · ${unpinnedNewCount}` : 'Latest'}
-              </button>
+              <Tooltip content="Jump to latest (End)">
+                <button
+                  type="button"
+                  onClick={jumpToBottom}
+                  aria-label={
+                    unpinnedNewCount > 0
+                      ? `Jump to latest messages, ${unpinnedNewCount} new`
+                      : 'Jump to latest messages'
+                  }
+                  className="pointer-events-auto inline-flex -translate-y-full items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1.5 text-caption text-secondary shadow-md vy-transition hover:bg-surface-2 hover:text-fg"
+                >
+                  <Icon name="chevron" size={12} />
+                  {unpinnedNewCount > 0 ? `Latest · ${unpinnedNewCount}` : 'Latest'}
+                </button>
+              </Tooltip>
             </div>
           ) : null}
         </div>

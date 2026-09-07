@@ -18,7 +18,9 @@ import { logger } from '@shared/logger'
 import { workspacePathsEqual, findByWorkspacePath } from '@shared/workspacePathMatch'
 import {
   createChatStreamController,
-  type ChatStreamController
+  EMPTY_RUN_EXPANSIONS,
+  type ChatStreamController,
+  type RunExpansions
 } from './createChatStreamController'
 import { ensureChatUiPerfDump } from './chatUiPerf'
 import {
@@ -326,6 +328,8 @@ export type WorkspaceUiSlice = {
   agentMode: AgentInteractionMode
   /** Whether this workspace's group is expanded in the sidebar (undefined = default). */
   expanded?: boolean
+  /** Persisted per-run card expansion state (tool/group/thinking, collapsed turns). */
+  expansionsByRunId: Record<string, RunExpansions>
 }
 
 const DRAFT_SCROLL_KEY = '__draft__'
@@ -465,7 +469,8 @@ function defaultUiState(): WorkspaceUiState {
     scrollTopByRunId: {},
     composerDraft: '',
     composerDraftByRunId: {},
-    agentMode: 'agent'
+    agentMode: 'agent',
+    expansionsByRunId: {}
   }
 }
 
@@ -487,8 +492,25 @@ function uiStateFromContext(ctx: WorkspaceContext): WorkspaceUiState {
     composerDraft: ctx.ui.composerDraft,
     composerDraftByRunId: { ...ctx.ui.composerDraftByRunId },
     agentMode: ctx.ui.agentMode,
-    expanded: ctx.ui.expanded
+    expanded: ctx.ui.expanded,
+    expansionsByRunId: pruneExpansionsByRunId(ctx.ui.expansionsByRunId, {
+      openRunIds: ctx.openRunIds,
+      activeRunId: ctx.activeRunId
+    })
   }
+}
+
+/** Keep persisted expansion state bounded to open (or recently open) runs. */
+function pruneExpansionsByRunId(
+  expansions: Record<string, RunExpansions>,
+  opts: { openRunIds: string[]; activeRunId: string | null }
+): Record<string, RunExpansions> {
+  const keep = new Set([...opts.openRunIds, ...(opts.activeRunId ? [opts.activeRunId] : [])])
+  const out: Record<string, RunExpansions> = {}
+  for (const [runId, value] of Object.entries(expansions)) {
+    if (keep.has(runId)) out[runId] = value
+  }
+  return out
 }
 
 function contextFromRegistry(path: string, registry: WorkspacesState): WorkspaceContext {
@@ -521,7 +543,8 @@ function contextFromRegistry(path: string, registry: WorkspacesState): Workspace
       composerDraft: ui.composerDraft,
       composerDraftByRunId: { ...(ui.composerDraftByRunId ?? {}) },
       agentMode: ui.agentMode ?? 'agent',
-      expanded: ui.expanded
+      expanded: ui.expanded,
+      expansionsByRunId: { ...(ui.expansionsByRunId ?? {}) }
     },
     settingsOverride:
       findSettingsOverride(registry.settingsOverridesByPath, path) ?? null
@@ -985,6 +1008,8 @@ export function useWorkspaceManager(options?: {
           }
         }
         registerRunId(assignedId, workspacePath)
+        // Draft expansion state now belongs to the assigned run bucket.
+        if (expansionRunId == null) expansionRunId = assignedId
         const ctx = contextsRef.current[workspacePath]
         if (!ctx) {
           void refreshRunsRef.current(workspacePath)
@@ -1030,6 +1055,11 @@ export function useWorkspaceManager(options?: {
         void refreshRunsRef.current(workspacePath)
       }
 
+      // Expansion state persists per run; a draft controller buckets under the
+      // draft key until a run id is assigned.
+      let expansionRunId: string | null = runId
+      const expansionBucketKey = (): string => expansionRunId ?? DRAFT_SCROLL_KEY
+
       const controller = createChatStreamController({
         workspacePath,
         runId,
@@ -1042,6 +1072,25 @@ export function useWorkspaceManager(options?: {
           const nextCtx: WorkspaceContext = {
             ...ctx,
             ui: { ...ctx.ui, agentMode: mode }
+          }
+          contextsRef.current = { ...contextsRef.current, [workspacePath]: nextCtx }
+          setContexts((prev) => ({ ...prev, [workspacePath]: nextCtx }))
+          schedulePersistUiState(workspacePath, nextCtx)
+        },
+        initialExpansions:
+          contextsRef.current[workspacePath]?.ui.expansionsByRunId[
+            runId ?? DRAFT_SCROLL_KEY
+          ] ?? EMPTY_RUN_EXPANSIONS,
+        onExpansionsChange: (next) => {
+          const ctx = contextsRef.current[workspacePath]
+          if (!ctx) return
+          const bucketKey = expansionBucketKey()
+          const nextCtx: WorkspaceContext = {
+            ...ctx,
+            ui: {
+              ...ctx.ui,
+              expansionsByRunId: { ...ctx.ui.expansionsByRunId, [bucketKey]: next }
+            }
           }
           contextsRef.current = { ...contextsRef.current, [workspacePath]: nextCtx }
           setContexts((prev) => ({ ...prev, [workspacePath]: nextCtx }))
@@ -1411,7 +1460,12 @@ export function useWorkspaceManager(options?: {
             composerDraft,
             composerDraftByRunId,
             agentMode: existing.ui.agentMode ?? refUi?.agentMode ?? ui.agentMode ?? 'agent',
-            expanded: existing.ui.expanded ?? refUi?.expanded ?? ui.expanded
+            expanded: existing.ui.expanded ?? refUi?.expanded ?? ui.expanded,
+            expansionsByRunId: {
+              ...(ui.expansionsByRunId ?? {}),
+              ...(refUi?.expansionsByRunId ?? {}),
+              ...(existing.ui.expansionsByRunId ?? {})
+            }
           },
           settingsOverride: findSettingsOverride(state.settingsOverridesByPath, path)
         }

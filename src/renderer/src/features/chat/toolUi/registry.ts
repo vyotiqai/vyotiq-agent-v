@@ -11,7 +11,7 @@ import {
 } from './bodies/BrowserBody'
 import { DeleteBody } from './bodies/DeleteBody'
 import { DiagnosticsBody } from './bodies/DiagnosticsBody'
-import { EditBody, MultiEditBody } from './bodies/EditBody'
+import { EditBody } from './bodies/EditBody'
 import { GitCommitBody, GitDiffBody, GitStatusBody } from './bodies/GitBody'
 import { GlobBody } from './bodies/GlobBody'
 import { GrepBody } from './bodies/GrepBody'
@@ -248,27 +248,6 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
         added: edit.added,
         removed: edit.removed,
         ...(edit.iconPath
-          ? { filePath: edit.iconPath }
-          : { icon: toolIconName(tool.name) })
-      }
-    }
-  },
-  multi_edit: {
-    Body: MultiEditBody,
-    hasBody: editHasBody,
-    headerMeta: (tool) => {
-      const edit = parseEditCardData(tool)
-      return {
-        verb: toolLabel(tool.name, tool.status, tool.content),
-        target:
-          edit.fileCount > 1
-            ? `${edit.fileCount} files`
-            : edit.fileCount === 1
-              ? basename(edit.path) || edit.path
-              : 'multi-edit',
-        added: edit.added,
-        removed: edit.removed,
-        ...(edit.fileCount === 1 && edit.iconPath
           ? { filePath: edit.iconPath }
           : { icon: toolIconName(tool.name) })
       }
@@ -764,7 +743,7 @@ export function toolHasBody(tool: UiToolRow, ctx?: ToolBodyCtx): boolean {
     // still expose previews as soon as content is available.
     if (tool.name === 'read' || tool.name === 'memory_read') return false
     // Edit peek is DiffPreview. Raw args JSON (`{`, `"path"`) is not a body.
-    if (tool.name === 'edit' || tool.name === 'multi_edit' || tool.name === 'str_replace') {
+    if (tool.name === 'edit' || tool.name === 'str_replace') {
       return false
     }
     return Boolean(tool.argsPreview?.trim() || tool.summary?.trim() || tool.content?.trim())

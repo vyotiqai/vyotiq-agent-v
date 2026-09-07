@@ -33,7 +33,7 @@ describe('ChatRow keyboard delete', () => {
         onDeleteRun={onDelete}
       />
     )
-    const row = screen.getByTitle('List files')
+    const row = screen.getByRole('button', { name: 'List files' })
     row.focus()
     fireEvent.keyDown(row, { key: 'Delete' })
     expect(screen.getByRole('group', { name: /Confirm delete List files/ })).toBeTruthy()
@@ -52,7 +52,7 @@ describe('ChatRow keyboard delete', () => {
         onDeleteRun={onDelete}
       />
     )
-    const row = screen.getByTitle('List files')
+    const row = screen.getByRole('button', { name: 'List files' })
     row.focus()
 
     fireEvent.keyDown(row, { key: 'Delete' })
@@ -76,7 +76,7 @@ describe('ChatRow keyboard delete', () => {
         onDeleteRun={noop}
       />
     )
-    fireEvent.doubleClick(screen.getByTitle('List files'))
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'List files' }))
     const input = screen.getByLabelText('Rename chat')
     fireEvent.keyDown(input, { key: 'Delete' })
     expect(screen.getByLabelText('Rename chat')).toBeTruthy()

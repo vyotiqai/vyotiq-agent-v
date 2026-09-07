@@ -78,28 +78,29 @@ export function TerminalSessionBar({
                 )}
                 {...tabMiddleClickHandlers(() => onKill(s.id))}
               >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={selected}
-                  title={label}
-                  tabIndex={emphasized ? 0 : -1}
-                  className={dockPanelTabButtonClass(emphasized)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Delete') {
-                      e.preventDefault()
-                      onKill(s.id)
-                    }
-                  }}
-                  onClick={() => onSelect(s.id)}
-                >
-                  <Icon
-                    name="terminal"
-                    size={14}
-                    className={cn('shrink-0', emphasized ? 'text-fg' : 'text-secondary')}
-                  />
-                  <span className="min-w-0 truncate">{label}</span>
-                </button>
+                <Tooltip content={label}>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    tabIndex={emphasized ? 0 : -1}
+                    className={dockPanelTabButtonClass(emphasized)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Delete') {
+                        e.preventDefault()
+                        onKill(s.id)
+                      }
+                    }}
+                    onClick={() => onSelect(s.id)}
+                  >
+                    <Icon
+                      name="terminal"
+                      size={14}
+                      className={cn('shrink-0', emphasized ? 'text-fg' : 'text-secondary')}
+                    />
+                    <span className="min-w-0 truncate">{label}</span>
+                  </button>
+                </Tooltip>
                 <Tooltip content={`Close ${s.title}`}>
                   <button
                     type="button"

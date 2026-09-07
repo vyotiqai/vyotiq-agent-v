@@ -17,8 +17,8 @@ async function ensureSidebarExpanded(): Promise<void> {
 
 async function splitBetaBesideAlpha(): Promise<void> {
   const { window } = launched
-  const alpha = window.getByTitle('Pane Session Alpha').first()
-  const beta = window.getByTitle('Pane Session Beta').first()
+  const alpha = window.getByRole('button', { name: 'Pane Session Alpha', exact: true }).first()
+  const beta = window.getByRole('button', { name: 'Pane Session Beta', exact: true }).first()
   await expect(alpha).toBeVisible({ timeout: 20_000 })
   await expect(beta).toBeVisible({ timeout: 20_000 })
 
@@ -104,12 +104,12 @@ test('drag sidebar session onto right third splits into two panes', async () => 
   await expect(window.locator('[data-chat-pane-title="Pane Session Beta"]')).toBeVisible()
 
   // Clicking an already-open session focuses its pane; does not add a third.
-  await window.getByTitle('Pane Session Alpha').first().click()
+  await window.getByRole('button', { name: 'Pane Session Alpha', exact: true }).first().click()
   await expect(window.locator('[data-chat-pane]')).toHaveCount(2)
   await expect(window.locator('[data-chat-pane-focused="1"]')).toHaveCount(1)
 
   const betaPane = window.locator('[data-chat-pane]').nth(1)
-  await window.getByTitle('Pane Session Beta').first().click()
+  await window.getByRole('button', { name: 'Pane Session Beta', exact: true }).first().click()
   await expect(betaPane).toHaveAttribute('data-chat-pane-focused', '1')
   await window.getByRole('button', { name: /Close Pane Session Beta/i }).click()
   await expect(window.locator('[data-chat-pane]')).toHaveCount(1, { timeout: 10_000 })
@@ -144,8 +144,8 @@ test('multi-pane polish: min widths, sidebar open state, docked empty, rail pad'
   await expect(window.getByRole('button', { name: /Close Pane Session Beta/i })).toBeVisible()
 
   // Sidebar: both open; focused marked distinctly.
-  const alphaRow = window.getByTitle('Pane Session Alpha').first()
-  const betaRow = window.getByTitle('Pane Session Beta').first()
+  const alphaRow = window.getByRole('button', { name: 'Pane Session Alpha', exact: true }).first()
+  const betaRow = window.getByRole('button', { name: 'Pane Session Beta', exact: true }).first()
   await expect(alphaRow).toHaveAttribute('data-session-open', '1')
   await expect(betaRow).toHaveAttribute('data-session-open', '1')
   await expect(betaRow).toHaveAttribute('data-session-focused', '1')

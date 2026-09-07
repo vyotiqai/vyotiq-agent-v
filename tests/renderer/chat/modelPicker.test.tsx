@@ -330,6 +330,67 @@ describe('ModelPicker', () => {
       Element.prototype.scrollIntoView = original
     }
   })
+
+  it('wires aria-activedescendant to the keyboard-active row', () => {
+    render(
+      <ModelPicker
+        providers={['openai']}
+        optionsByProvider={optionsByProvider}
+        seedsByProvider={seedsByProvider}
+        modelMetaByValue={{}}
+        provider="openai"
+        model="gpt-5.6"
+        favoriteModels={[]}
+        recentModels={[]}
+        warningsByProvider={{ openai: null, anthropic: null }}
+        serviceTier="default"
+        onModelChange={vi.fn()}
+        onToggleFavorite={vi.fn()}
+        onServiceTierChange={vi.fn()}
+        onRefreshCatalog={vi.fn()}
+        triggerClassName="test-trigger"
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Select model/i }))
+    const listbox = screen.getByRole('listbox', { name: /Select model/i })
+    expect(listbox.getAttribute('aria-activedescendant')).toBeNull()
+    fireEvent.keyDown(listbox, { key: 'ArrowDown' })
+    expect(listbox.getAttribute('aria-activedescendant')).toBe(
+      screen.getAllByRole('option')[0]!.id
+    )
+  })
+
+  it('does not persist the provider tab when search switches providers', () => {
+    sessionStorage.removeItem('vyotiq:model-picker-tab')
+    const onBrowseProvider = vi.fn()
+    render(
+      <ModelPicker
+        providers={['openai', 'anthropic']}
+        optionsByProvider={optionsByProvider}
+        seedsByProvider={seedsByProvider}
+        modelMetaByValue={{}}
+        provider="openai"
+        model="gpt-5.6"
+        favoriteModels={[]}
+        recentModels={[]}
+        warningsByProvider={{ openai: null, anthropic: null }}
+        serviceTier="default"
+        onModelChange={vi.fn()}
+        onToggleFavorite={vi.fn()}
+        onServiceTierChange={vi.fn()}
+        onRefreshCatalog={vi.fn()}
+        onBrowseProvider={onBrowseProvider}
+        triggerClassName="test-trigger"
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Select model/i }))
+    fireEvent.change(screen.getByLabelText('Search models'), { target: { value: 'claude' } })
+    expect(screen.getByRole('option', { name: /claude-sonnet-5/i })).toBeTruthy()
+    expect(onBrowseProvider).toHaveBeenCalledWith('anthropic')
+    expect(sessionStorage.getItem('vyotiq:model-picker-tab')).toBeNull()
+  })
 })
 
 const CUSTOM_WARNING =

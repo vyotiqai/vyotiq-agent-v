@@ -68,17 +68,6 @@ describe('Agent todo_write planning (no mutation gate)', () => {
     )
     expect(replaced.ok).toBe(true)
 
-    const multi = await executeTool(
-      'multi_edit',
-      JSON.stringify({
-        edits: [{ path: 'src/multi.ts', contents: 'export const multi = true\n' }]
-      }),
-      workspace,
-      signal,
-      agentCtx()
-    )
-    expect(multi.ok).toBe(true)
-
     const deleted = await executeTool(
       'delete',
       JSON.stringify({ path: 'src/gone.ts' }),

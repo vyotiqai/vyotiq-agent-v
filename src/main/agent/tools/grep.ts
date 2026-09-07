@@ -186,7 +186,9 @@ function formatGrepHits(
 }
 
 function resolveMaxResults(maxResults: number | undefined): number {
-  return maxResults == null ? Number.POSITIVE_INFINITY : Math.max(1, maxResults)
+  // GREP_DEFAULT_MAX_RESULTS was previously defined but dead: a null maxResults
+  // meant unbounded. Wire the constant in as the live default; explicit wins.
+  return maxResults == null ? GREP_DEFAULT_MAX_RESULTS : Math.max(1, maxResults)
 }
 
 /**

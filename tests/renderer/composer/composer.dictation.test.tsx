@@ -186,9 +186,9 @@ describe('Composer dictation', () => {
     expect(screen.getByRole('status', { name: /Listening/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Cancel dictation$/i })).toBeTruthy()
     const strip = screen.getByRole('status', { name: /Listening/i })
-    expect(strip.className).toMatch(/\bh-7\b/)
-    expect(strip.className).toMatch(/(?:^|\s)gap-1(?:\s|$)/)
-    expect(strip.className).not.toMatch(/\bh-8\b/)
+    expect(strip.className).toMatch(/\bh-8\b/)
+    expect(strip.className).toMatch(/(?:^|\s)gap-1\.5(?:\s|$)/)
+    expect(strip.className).not.toMatch(/\bh-9\b/)
     const cancel = screen.getByRole('button', { name: /^Cancel dictation$/i })
     const confirm = screen.getByRole('button', { name: /^Stop dictation$/i })
     // Cancel keeps the neutral chrome button; the primary Stop button is accented.
@@ -205,10 +205,9 @@ describe('Composer dictation', () => {
     expect(screen.queryByText('Listening…')).toBeNull()
     expect(screen.queryByText(/^Listening$/)).toBeNull()
     const form = document.querySelector('[data-composer-shell] form')
-    expect(form?.className).toMatch(/(?:^|\s)gap-1(?:\s|$)/)
-    expect(form?.className).not.toMatch(/(?:^|\s)gap-1\.5(?:\s|$)/)
-    expect(form?.className).toMatch(/(?:^|\s)py-1\.5(?:\s|$)/)
-    expect(form?.className).not.toMatch(/(?:^|\s)py-2(?:\s|$)/)
+    expect(form?.className).toMatch(/(?:^|\s)gap-1\.5(?:\s|$)/)
+    expect(form?.className).toMatch(/(?:^|\s)py-2(?:\s|$)/)
+    expect(form?.className).toMatch(/\bflex-col\b/)
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /^Stop dictation$/i }))

@@ -845,37 +845,6 @@ describe('executeStepToolCalls', () => {
     expect(maxConcurrent).toBeGreaterThan(1)
   })
 
-  it('keeps multi_edit serial', async () => {
-    let concurrent = 0
-    let maxConcurrent = 0
-    executeTool.mockImplementation(async (name: string) => {
-      concurrent += 1
-      maxConcurrent = Math.max(maxConcurrent, concurrent)
-      await new Promise((r) => setTimeout(r, 20))
-      concurrent -= 1
-      return { ok: true, summary: name, content: name }
-    })
-
-    const { ctx } = makeCtx(new AbortController().signal)
-    await executeStepToolCalls(
-      [
-        {
-          id: 'm1',
-          name: 'multi_edit',
-          arguments: '{"edits":[{"path":"a.ts","old_string":"x","new_string":"y"}]}'
-        },
-        {
-          id: 'm2',
-          name: 'multi_edit',
-          arguments: '{"edits":[{"path":"b.ts","old_string":"a","new_string":"b"}]}'
-        }
-      ],
-      ctx
-    )
-
-    expect(maxConcurrent).toBe(1)
-  })
-
   it('overlaps spawn_agent_instance in one step without starting child LLMs', async () => {
     let concurrent = 0
     let maxConcurrent = 0
@@ -1020,22 +989,6 @@ describe('groupStepToolCalls', () => {
       { id: 'e2', name: 'edit', arguments: '{"path":"a.ts","contents":"y"}' }
     ])
     expect(samePath.map((g) => g.map((c) => c.id))).toEqual([['e1'], ['e2']])
-  })
-
-  it('keeps multi_edit in singleton groups', () => {
-    const groups = groupStepToolCalls([
-      {
-        id: 'm1',
-        name: 'multi_edit',
-        arguments: '{"edits":[{"path":"a.ts","old_string":"x","new_string":"y"}]}'
-      },
-      {
-        id: 'm2',
-        name: 'multi_edit',
-        arguments: '{"edits":[{"path":"b.ts","old_string":"a","new_string":"b"}]}'
-      }
-    ])
-    expect(groups.map((g) => g.map((c) => c.id))).toEqual([['m1'], ['m2']])
   })
 
   it('batches consecutive spawns then consecutive awaits without reordering', () => {

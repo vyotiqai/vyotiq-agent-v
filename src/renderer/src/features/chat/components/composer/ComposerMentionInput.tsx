@@ -504,7 +504,7 @@ export const ComposerMentionInput = forwardRef<
         contentEditable={disabled ? false : true}
         suppressContentEditableWarning
         className={cn(
-          'min-h-7 min-w-0 w-full overflow-y-auto whitespace-pre-wrap break-words',
+          'min-h-9 min-w-0 w-full overflow-y-auto whitespace-pre-wrap break-words',
           COMPOSER_TEXTAREA_MAX_CLASS,
           'border-0 bg-transparent p-0 text-md leading-snug text-fg outline-none ring-0',
           'focus:ring-0 focus-visible:ring-0',

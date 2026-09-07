@@ -13,6 +13,15 @@ import {
   ToolApprovalSettingsSchema
 } from './settings'
 
+/** Per-run expansion state for chat cards (tool / group / thinking / turns). */
+export const RunExpansionsSchema = z.object({
+  toolIds: z.array(z.string()).max(200).default([]),
+  groupIds: z.array(z.string()).max(200).default([]),
+  thinkingIds: z.array(z.string()).max(200).default([]),
+  collapsedTurns: z.array(z.number().int()).max(200).default([])
+})
+export type RunExpansions = z.infer<typeof RunExpansionsSchema>
+
 export const WorkspaceUiStateSchema = z.object({
   activeRunId: z.string().nullable(),
   openRunIds: z.array(z.string()),
@@ -34,7 +43,9 @@ export const WorkspaceUiStateSchema = z.object({
    * generation counter restarted — main must re-seed the stale-write guard
    * instead of silently dropping every write until the counter catches up.
    */
-  writeEpoch: z.string().optional()
+  writeEpoch: z.string().optional(),
+  /** Persisted expansion state per run (tool/group/thinking cards, collapsed turns). */
+  expansionsByRunId: z.record(z.string(), RunExpansionsSchema).default({})
 })
 export type WorkspaceUiState = z.infer<typeof WorkspaceUiStateSchema>
 

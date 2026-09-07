@@ -48,7 +48,7 @@ const FILE_READ_TOOLS = new Set(['read', 'memory_read'])
  * dumps full patches into the timeline. Failures still open so the error is
  * visible without an extra click.
  */
-const DIFF_COMPACT_TOOLS = new Set(['edit', 'multi_edit', 'str_replace', 'git_diff'])
+const DIFF_COMPACT_TOOLS = new Set(['edit', 'str_replace', 'git_diff'])
 
 export function isFileReadTool(name: string): boolean {
   return FILE_READ_TOOLS.has(name)

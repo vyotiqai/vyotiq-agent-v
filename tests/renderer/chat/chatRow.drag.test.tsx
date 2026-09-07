@@ -30,7 +30,7 @@ describe('ChatRow drag', () => {
         onDeleteRun={noop}
       />
     )
-    const row = screen.getByTitle('List files')
+    const row = screen.getByRole('button', { name: 'List files' })
     expect(row.getAttribute('data-session-open')).toBe('1')
     expect(row.getAttribute('data-session-focused')).toBe('0')
 
@@ -45,7 +45,7 @@ describe('ChatRow drag', () => {
         onDeleteRun={noop}
       />
     )
-    expect(screen.getByTitle('List files').getAttribute('data-session-focused')).toBe('1')
+    expect(screen.getByRole('button', { name: 'List files' }).getAttribute('data-session-focused')).toBe('1')
   })
 
   it('sets session drag payload on dragstart', () => {
@@ -59,7 +59,7 @@ describe('ChatRow drag', () => {
         onDeleteRun={noop}
       />
     )
-    const row = screen.getByTitle('List files')
+    const row = screen.getByRole('button', { name: 'List files' })
     const setData = vi.fn()
     fireEvent.dragStart(row, {
       dataTransfer: {
@@ -90,7 +90,7 @@ describe('ChatRow drag', () => {
         onDeleteRun={noop}
       />
     )
-    const row = screen.getByTitle('Instance · List files')
+    const row = screen.getByRole('button', { name: 'List files' })
     expect(row.getAttribute('draggable')).toBe('false')
     const setData = vi.fn()
     fireEvent.dragStart(row, {
@@ -131,7 +131,7 @@ describe('ChatRow drag', () => {
         onDeleteRun={noop}
       />
     )
-    fireEvent.doubleClick(screen.getByTitle('List files'))
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'List files' }))
     expect(screen.getByLabelText('Rename chat')).toBeTruthy()
   })
 })

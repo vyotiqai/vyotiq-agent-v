@@ -319,7 +319,7 @@ function FileRow({
         {openWorkspaceFile ? (
           <button
             type="button"
-            className="flex min-w-0 flex-1 items-center gap-1.5 truncate rounded-sm text-left text-fg vy-transition hover:underline hover:underline-offset-2"
+            className="min-w-0 flex-1 truncate rounded-sm text-left text-fg vy-transition hover:underline hover:underline-offset-2"
             title={file.path}
             aria-label={`Open ${file.path}`}
             onClick={(e) => {
@@ -328,8 +328,8 @@ function FileRow({
               openWorkspaceFile(file.path)
             }}
           >
-            {label.dir ? <span className="shrink-0 text-muted">{label.dir}</span> : null}
-            <span className="truncate font-medium">{label.name}</span>
+            {label.dir ? <span className="text-muted">{label.dir}</span> : null}
+            <span className="font-medium">{label.name}</span>
           </button>
         ) : (
           <span className="min-w-0 flex-1 truncate text-fg" title={file.path}>
@@ -346,7 +346,7 @@ function FileRow({
         {file.statusLabel ? (
           <span
             className={cn(
-              'shrink-0 text-2xs',
+              'shrink-0 rounded-sm border border-border/60 bg-surface-2/40 px-1 leading-4 text-2xs',
               file.statusTone === 'success' ? 'text-success' : 'text-muted'
             )}
           >

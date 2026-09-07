@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { cn, MarkdownContent } from '@renderer/lib/ui'
+import { Tooltip, cn, MarkdownContent } from '@renderer/lib/ui'
 import {
   QUESTION_GATE_BODY,
   QUESTION_GATE_FOOTER,
@@ -347,35 +347,46 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
             )}
           >
             {showSubmit ? (
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                title={submitTitle}
-                aria-describedby={showProgress ? progressId : undefined}
-                aria-busy={phase === 'pending' ? true : undefined}
-                className={cn(
-                  'rounded-md border px-2.5 py-1 text-xs vy-transition',
-                  'disabled:opacity-[var(--vy-disabled-opacity)]',
-                  canSubmit
-                    ? 'border-accent bg-accent text-accent-fg hover:opacity-90'
-                    : 'border-border text-tertiary'
-                )}
-              >
-                {submitLabel}
-              </button>
+              // Disabled submit ignores pointer events — wrap so the why-not
+              // tip (e.g. "Still need: …") actually shows.
+              submitTitle ? (
+                <Tooltip content={submitTitle}>
+                  <span className="inline-flex cursor-not-allowed">
+                    <button
+                      type="submit"
+                      disabled
+                      aria-describedby={showProgress ? progressId : undefined}
+                      aria-busy={phase === 'pending' ? true : undefined}
+                      className="rounded-md border border-border px-2.5 py-1 text-xs text-tertiary disabled:opacity-[var(--vy-disabled-opacity)]"
+                    >
+                      {submitLabel}
+                    </button>
+                  </span>
+                </Tooltip>
+              ) : (
+                <button
+                  type="submit"
+                  aria-describedby={showProgress ? progressId : undefined}
+                  aria-busy={phase === 'pending' ? true : undefined}
+                  className="rounded-md border border-accent bg-accent px-2.5 py-1 text-xs text-accent-fg hover:opacity-90"
+                >
+                  {submitLabel}
+                </button>
+              )
             ) : null}
-            <button
-              type="button"
-              disabled={!canSkip}
-              title="Skip — the agent continues with a reasonable default"
-              className={cn(
-                'rounded-md px-2.5 py-1 text-xs text-tertiary vy-transition',
-                'hover:text-fg disabled:opacity-[var(--vy-disabled-opacity)]'
-              )}
-              onClick={skip}
-            >
-              Skip
-            </button>
+            <Tooltip content="Skip — the agent continues with a reasonable default">
+              <button
+                type="button"
+                disabled={!canSkip}
+                className={cn(
+                  'rounded-md px-2.5 py-1 text-xs text-tertiary vy-transition',
+                  'hover:text-fg disabled:opacity-[var(--vy-disabled-opacity)]'
+                )}
+                onClick={skip}
+              >
+                Skip
+              </button>
+            </Tooltip>
             {showProgress ? (
               <span id={progressId} className="min-w-0 truncate text-caption text-tertiary">
                 {answeredCount} of {question.questions.length} answered

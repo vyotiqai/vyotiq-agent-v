@@ -94,7 +94,7 @@ vi.mock('@main/agent/tools', () => ({
   executeTool: vi.fn()
 }))
 
-import { runAgent, setAutoCompactionForTests } from '@main/agent/loop'
+import { runAgent } from '@main/agent/loop'
 import { isActive, registerRunAbort, resetActiveRunsForTests } from '@main/agent/runRegistry'
 import {
   appendMessage,
@@ -121,15 +121,11 @@ describe('runAgent session continuation', () => {
     workspace = join(tmpdir(), `vyotiq-resume-ws-${process.pid}-${Date.now()}`)
     mkdirSync(workspace, { recursive: true })
     resetActiveRunsForTests()
-    // Auto compaction is disabled by default in the loop; these suites assert
-    // the auto path end to end, so re-enable it for the duration.
-    setAutoCompactionForTests(true)
     streamChat.mockReset()
     assembleContextMock.mockClear()
   })
 
   afterEach(() => {
-    setAutoCompactionForTests(false)
     if (existsSync(userData)) rmSync(userData, { recursive: true, force: true })
     if (existsSync(workspace)) rmSync(workspace, { recursive: true, force: true })
   })

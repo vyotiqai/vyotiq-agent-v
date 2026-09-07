@@ -28,7 +28,7 @@ function settingsActionLabel(section: DictationSettingsSection): string {
 
 const iconBtn = chromeIconButton
 
-const waveTrack = 'h-7 min-w-0 flex-1 overflow-hidden'
+const waveTrack = 'h-8 min-w-0 flex-1 overflow-hidden'
 
 function amp(raw: number): number {
   return Math.max(0.06, Math.min(1, raw))
@@ -169,7 +169,7 @@ export function DictationErrorBanner({
 }) {
   return (
     <div
-      className={cn('col-span-full', chromeRow)}
+      className={chromeRow}
       data-dictation-error
       role="alert"
     >

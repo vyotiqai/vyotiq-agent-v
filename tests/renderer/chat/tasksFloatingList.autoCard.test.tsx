@@ -85,12 +85,11 @@ describe('auto task card', () => {
     expect(chip.getAttribute('aria-expanded')).toBe('true')
     const card = document.querySelector('[data-tasks-popover-card]') as HTMLElement
     expect(card).toBeTruthy()
-    expect(card.querySelector('[data-tasks-popover-list]')?.textContent).toContain(
-      'Map project'
-    )
-    expect(card.querySelector('[data-tasks-popover-current]')?.textContent).toContain(
-      'Run tests'
-    )
+    const list = card.querySelector('[data-tasks-popover-list]') as HTMLElement
+    expect(list.textContent).toContain('Map project')
+    // The in-progress row is highlighted inside the list itself — no
+    // separate "current task" block.
+    expect(list.textContent).toContain('Run tests')
   })
 
   it('does not auto-open when the rail mounts onto an existing run with todos', async () => {

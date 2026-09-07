@@ -1,16 +1,40 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const listProviderModelsMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@main/agent/providers', () => ({ listProviderModels: listProviderModelsMock }))
 
 import { resolveModelInfo } from '@main/agent/modelResolve'
+import { __setModelsDevRegistryForTests } from '@shared/domain/modelsDevRegistry'
 
 const SIGNAL = new AbortController().signal
+
+const REGISTRY_FIXTURE = {
+  'cloudflare-workers-ai': {
+    api: 'https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1',
+    models: {
+      '@cf/zai-org/glm-5.3-flash': { id: '@cf/zai-org/glm-5.3-flash', limit: { context: 1_310_720 } },
+      '@cf/meta/llama-3.3-70b-instruct-fp8-fast': {
+        id: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+        limit: { context: 24_000 }
+      }
+    }
+  },
+  deepinfra: {
+    api: 'https://api.deepinfra.com/v1/openai',
+    models: { 'zai-org/glm-4.7-flash': { id: 'zai-org/glm-4.7-flash', limit: { context: 202_752 } } }
+  }
+}
 
 describe('resolveModelInfo', () => {
   beforeEach(() => {
     listProviderModelsMock.mockReset()
+    // Default: empty registry so lookups never hit the network.
+    __setModelsDevRegistryForTests({})
+  })
+
+  afterEach(() => {
+    __setModelsDevRegistryForTests(null)
   })
 
   it('keeps a live catalog context window when present', async () => {
@@ -53,5 +77,33 @@ describe('resolveModelInfo', () => {
         model: 'm'
       })
     )
+  })
+
+  it('resolves manually entered Cloudflare ids from the registry via the base URL host', async () => {
+    __setModelsDevRegistryForTests(REGISTRY_FIXTURE)
+    listProviderModelsMock.mockResolvedValue({ models: [] })
+    const info = await resolveModelInfo(
+      'custom',
+      '@cf/zai-org/glm-5.3-flash',
+      'cf-key',
+      'https://api.cloudflare.com/client/v4/accounts/acct/ai/v1',
+      SIGNAL
+    )
+    expect(info.contextWindow).toBe(1_310_720)
+  })
+
+  it('backfills context windows for live-listed rows that omit context_length', async () => {
+    __setModelsDevRegistryForTests(REGISTRY_FIXTURE)
+    listProviderModelsMock.mockResolvedValue({
+      models: [{ id: 'zai-org/glm-4.7-flash', supportsTools: true }]
+    })
+    const info = await resolveModelInfo(
+      'custom',
+      'zai-org/glm-4.7-flash',
+      null,
+      'https://api.deepinfra.com/v1/openai',
+      SIGNAL
+    )
+    expect(info.contextWindow).toBe(202_752)
   })
 })

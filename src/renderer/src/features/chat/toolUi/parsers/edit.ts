@@ -6,7 +6,7 @@ import { countLines, splitLines, splitLinesTail } from './common'
 export { countLines, splitLines } from './common'
 
 export type EditCardData = {
-  /** Display path (may be joined for multi_edit). */
+  /** Display path. */
   path: string
   /** Single real path for Material file icons; empty when unknown. */
   iconPath: string
@@ -55,56 +55,13 @@ function changeLabelFor(added: number, removed: number): string {
   return parts.join(' ')
 }
 
-function parseMultiEditCardData(
-  args: Record<string, unknown> | null | undefined,
-  summary: string | undefined
-): EditCardData | null {
-  const edits = args?.edits
-  if (!Array.isArray(edits) || edits.length === 0) return null
-
-  let added = 0
-  let removed = 0
-  const paths: string[] = []
-  for (const entry of edits) {
-    if (!entry || typeof entry !== 'object') continue
-    const edit = entry as Record<string, unknown>
-    if (typeof edit.path === 'string' && edit.path.trim()) paths.push(edit.path)
-    if (typeof edit.contents === 'string') {
-      added += countLines(edit.contents)
-      continue
-    }
-    if (typeof edit.diff === 'string' && edit.diff.trim()) {
-      const counts = countDiffLines(edit.diff)
-      added += counts.added
-      removed += counts.removed
-    }
-  }
-
-  const path =
-    paths.length > 1
-      ? summary?.trim() || paths.join(', ')
-      : paths[0] ?? (summary?.trim() || 'file')
-  const iconPath = iconPathForFile(paths[0] ?? path)
-  return {
-    path,
-    iconPath,
-    fileCount: edits.length,
-    added,
-    removed,
-    changeLabel: changeLabelFor(added, removed)
-  }
-}
-
 export function parseEditCardData(tool: UiToolRow): EditCardData {
   // Streaming argsPreview is often incomplete JSON — extract path/diff early.
   const args = extractPartialEditArgs(tool.argsPreview)
-  const fromEdits = parseMultiEditCardData(args, tool.summary)
-  if (fromEdits) return fromEdits
-
   const rawPath = typeof args?.path === 'string' ? args.path : tool.summary?.trim() || ''
   const path = rawPath
   const iconPath = iconPathForFile(rawPath)
-  const fileCount = tool.name === 'multi_edit' ? 0 : path ? 1 : 0
+  const fileCount = path ? 1 : 0
 
   if (
     tool.name === 'str_replace' ||
@@ -337,31 +294,6 @@ function normalizeWritePath(path: string): string {
   return path.replace(/\\/g, '/').replace(/^\.\//, '')
 }
 
-function multiEditPathAction(
-  tool: UiToolRow,
-  path: string
-): 'created' | 'modified' | undefined {
-  const content = tool.content
-  if (!content) return undefined
-  const needle = normalizeWritePath(path)
-  for (const raw of content.split('\n')) {
-    const line = raw.trim()
-    if (!line.startsWith('- ')) continue
-    const rest = line.slice(2)
-    const space = rest.indexOf(' ')
-    if (space < 0) continue
-    const verb = rest.slice(0, space).toLowerCase()
-    const linePath = normalizeWritePath(rest.slice(space + 1).trim())
-    if (linePath !== needle) continue
-    if (verb === 'created') return 'created'
-    if (verb === 'wrote' || verb === 'patched') return 'modified'
-  }
-  // Truncated content lost this path's result line; the batch-wide fallback would
-  // label it from whichever paths survived the cut. Only trust untruncated content.
-  if (tool.contentTruncated) return undefined
-  return inferFileWriteAction('multi_edit', content) ?? undefined
-}
-
 function changeFromEditArgs(
   edit: Record<string, unknown>,
   action?: 'created' | 'modified'
@@ -386,20 +318,6 @@ function changeFromEditArgs(
 
 /** Per-file line deltas for turn change summaries. */
 export function collectWritingChanges(tool: UiToolRow): FileChange[] {
-  const args = extractPartialEditArgs(tool.argsPreview)
-  if (tool.name === 'multi_edit') {
-    const edits = args?.edits
-    if (!Array.isArray(edits)) return []
-    const out: FileChange[] = []
-    for (const entry of edits) {
-      if (!entry || typeof entry !== 'object') continue
-      const record = entry as Record<string, unknown>
-      const path = typeof record.path === 'string' ? record.path : ''
-      const change = changeFromEditArgs(record, multiEditPathAction(tool, path))
-      if (change) out.push(change)
-    }
-    return out
-  }
   const { path, added, removed } = parseEditCardData(tool)
   const action = inferFileWriteAction(tool.name, tool.content)
   if (!path || (added === 0 && removed === 0 && action !== 'created')) return []

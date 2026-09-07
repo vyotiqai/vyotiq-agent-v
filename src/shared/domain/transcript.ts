@@ -17,7 +17,7 @@ import { summarizeToolArgs } from '../utils/toolSummary'
 import { truncateToolArgsPreview } from '../utils/toolResultIpc'
 import { finalizeTodoContentOnRunEnd } from '../utils/todoContent'
 
-const KEEP_FULL_ARGS_TOOLS = new Set(['edit', 'multi_edit', 'str_replace', 'delete'])
+const KEEP_FULL_ARGS_TOOLS = new Set(['edit', 'str_replace', 'delete'])
 
 function uiArgsPreview(name: string, args: string | undefined): string | undefined {
   if (!args) return undefined

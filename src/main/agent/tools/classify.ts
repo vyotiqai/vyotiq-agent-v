@@ -85,7 +85,7 @@ export function isParallelSafeTool(name: string): boolean {
   return PARALLEL_SAFE_BUILTIN.has(name)
 }
 
-/** `edit` / `str_replace` / `edit_notebook` / `memory_write`. `multi_edit` and `delete` stay serial. */
+/** `edit` / `str_replace` / `edit_notebook` / `memory_write`. `delete` stays serial. */
 export function isParallelMutationTool(name: string): boolean {
   return PARALLEL_MUTATION_BUILTIN.has(name)
 }

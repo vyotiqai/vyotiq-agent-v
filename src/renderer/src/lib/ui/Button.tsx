@@ -1,5 +1,6 @@
 import { type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { cn } from './cn'
+import { Tooltip } from './Tooltip'
 
 const interactive = 'vy-transition disabled:vy-disabled-state'
 
@@ -41,7 +42,9 @@ export function Button({
   pending?: boolean
 }) {
   const isDisabled = Boolean(disabled || pending)
-  return (
+  const why = isDisabled && typeof props.title === 'string' ? props.title : ''
+
+  const button = (
     <button
       className={cn(buttonBase, buttonVariants[variant], className)}
       type={type}
@@ -49,8 +52,21 @@ export function Button({
       aria-busy={pending || undefined}
       aria-disabled={isDisabled || undefined}
       {...props}
+      title={why ? undefined : props.title}
     >
       {children}
     </button>
   )
+
+  // Disabled buttons ignore pointer events — a native title never shows. Wrap
+  // so hover still shows why (same pattern as IconButton).
+  if (why) {
+    return (
+      <Tooltip content={why}>
+        <span className="inline-flex cursor-not-allowed">{button}</span>
+      </Tooltip>
+    )
+  }
+
+  return button
 }

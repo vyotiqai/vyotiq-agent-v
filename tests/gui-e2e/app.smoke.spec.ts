@@ -65,6 +65,10 @@ test('skip link targets main content landmark', async () => {
     await new Promise<void>((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
     })
+    // Chromium anchors sequential-focus navigation at the last focused
+    // element (the boot-focused composer). body.focus() only becomes the
+    // Tab start when body itself is focusable.
+    document.body.setAttribute('tabindex', '-1')
     document.body.focus()
   })
   await window.keyboard.press('Tab')

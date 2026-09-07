@@ -9,6 +9,8 @@ import {
 
 const SUGGEST_CAP = 8
 const LINE_STREAM_CHUNK = 64 * 1024
+/** Default (no-window) read cap: larger files return a bounded line window. */
+export const READ_DEFAULT_MAX_LINES = 2000
 
 export type ReadOptions = {
   offset?: number
@@ -168,8 +170,7 @@ export async function toolRead(
     return readByteRange(resolved, pathArg, st.size, offset, limit)
   }
 
-  const buf = await fsp.readFile(resolved)
-  return decodeTextBuffer(buf, pathArg)
+  return readDefaultWindow(resolved, pathArg, st.size)
 }
 
 /** Word .docx is a zip; extract paragraph text, then apply line/byte windows. */
@@ -301,21 +302,39 @@ function splitCompleteLines(
 }
 
 /**
- * Stream an inclusive, 1-based line range without loading the whole file into a string.
- * The header names the range actually returned.
+ * Index where the last complete '\n' starts in `raw`, or -1. utf16 newline
+ * detection only considers even indices so code units stay file-aligned.
  */
-async function readLineRange(
+function lastNewlineStart(raw: Buffer, encoding: LineEncoding): number {
+  if (encoding === 'utf8') return raw.lastIndexOf(0x0a)
+  const lastEven = raw.length % 2 === 0 ? raw.length - 2 : raw.length - 3
+  if (encoding === 'utf16le') {
+    for (let i = lastEven; i >= 0; i -= 2) {
+      if (raw[i] === 0x0a && raw[i + 1] === 0x00) return i
+    }
+  } else {
+    for (let i = lastEven; i >= 0; i -= 2) {
+      if (raw[i] === 0x00 && raw[i + 1] === 0x0a) return i
+    }
+  }
+  return -1
+}
+
+/**
+ * Stream lines without loading the whole file into a string.
+ * Lines are 1-based; `[start, endLimit]` is the inclusive window whose lines
+ * are collected (up to `maxCollected`), while `total` keeps counting every
+ * line so callers can name the real total. Decoding cuts at complete newlines
+ * so a multi-byte UTF-8 character straddling a chunk boundary stays intact.
+ */
+async function streamLines(
   resolved: string,
   pathArg: string,
   size: number,
-  options: ReadOptions
-): Promise<string> {
-  const startRaw = Math.max(1, Math.trunc(options.startLine ?? 1))
-  const endRaw =
-    options.endLine == null ? Number.POSITIVE_INFINITY : Math.trunc(options.endLine)
-  const start = Number.isFinite(endRaw) && endRaw < startRaw ? Math.max(1, endRaw) : startRaw
-  const endLimit = Number.isFinite(endRaw) && endRaw < startRaw ? startRaw : endRaw
-
+  start: number,
+  endLimit: number,
+  maxCollected: number
+): Promise<{ collected: string[]; total: number; trailingNewline: boolean }> {
   const fh = await fsp.open(resolved, 'r')
   try {
     const peek = Buffer.alloc(Math.min(4, size))
@@ -327,9 +346,17 @@ async function readLineRange(
     let leftoverText = ''
     let offset = skip
     let lineNo = 0
-    const collected: string[] = []
     let total = 0
     let sawNul = false
+    let trailingNewline = false
+    const collected: string[] = []
+    const pushLine = (line: string): void => {
+      lineNo += 1
+      total = lineNo
+      if (lineNo >= start && lineNo <= endLimit && collected.length < maxCollected) {
+        collected.push(line)
+      }
+    }
 
     while (offset < size) {
       const want = Math.min(LINE_STREAM_CHUNK, size - offset)
@@ -339,21 +366,32 @@ async function readLineRange(
       const n = (await fh.read(buf, 0, aligned, offset)).bytesRead
       if (n <= 0) break
       offset += n
-      let chunk = Buffer.concat([leftoverBytes, buf.subarray(0, n)])
-      const take = chunk.length - (chunk.length % unit)
-      leftoverBytes = chunk.subarray(take)
-      chunk = chunk.subarray(0, take)
-      if (encoding === 'utf8' && chunk.includes(0)) {
+      const raw = Buffer.concat([leftoverBytes, buf.subarray(0, n)])
+      if (encoding === 'utf8' && raw.includes(0)) {
         sawNul = true
         break
       }
-      const decoded = leftoverText + decodeLineBytes(chunk, encoding)
-      const split = splitCompleteLines(decoded)
-      leftoverText = split.leftover
-      for (const line of split.lines) {
-        lineNo += 1
-        total = lineNo
-        if (lineNo >= start && lineNo <= endLimit) collected.push(line)
+      const cut = lastNewlineStart(raw, encoding)
+      if (cut >= 0) {
+        const complete = cut + (encoding === 'utf8' ? 1 : 2)
+        const decoded = leftoverText + decodeLineBytes(raw.subarray(0, complete), encoding)
+        leftoverBytes = raw.subarray(complete)
+        leftoverText = ''
+        trailingNewline = true
+        // decoded ends with '\n', so the split leftover is always empty here.
+        for (const line of splitCompleteLines(decoded).lines) pushLine(line)
+      } else if (encoding === 'utf8') {
+        // No complete newline yet: hold raw bytes so a multi-byte character
+        // straddling the chunk boundary decodes with its continuation bytes.
+        leftoverBytes = raw
+      } else {
+        const take = raw.length - (raw.length % unit)
+        leftoverBytes = raw.subarray(take)
+        const decoded = leftoverText + decodeLineBytes(raw.subarray(0, take), encoding)
+        const split = splitCompleteLines(decoded)
+        leftoverText = split.leftover
+        trailingNewline = false
+        for (const line of split.lines) pushLine(line)
       }
     }
 
@@ -369,26 +407,83 @@ async function readLineRange(
       const tail =
         leftoverText +
         (leftoverBytes.length > 0 ? decodeLineBytes(leftoverBytes, encoding) : '')
-      lineNo += 1
-      total = lineNo
-      if (lineNo >= start && lineNo <= endLimit) collected.push(tail)
+      pushLine(tail)
+      trailingNewline = false
     } else if (total === 0) {
       // Empty file (or BOM-only): one empty line, matching split('\n') on ''.
       total = 1
-      if (start === 1 && endLimit >= 1) collected.push('')
+      if (start === 1 && endLimit >= 1 && maxCollected >= 1) collected.push('')
     }
 
-    // A trailing newline terminates the last line rather than starting a new one.
-    // Streaming already popped the final empty split piece into leftoverText, which
-    // we only counted when leftoverText was non-empty — matching split('\n')+pop.
-
-    if (start > total) {
-      throw new Error(`startLine ${start} is past the end of ${pathArg} (${total} lines).`)
-    }
-
-    const actualEnd = Math.min(endLimit, total)
-    return `--- lines ${start}-${actualEnd} of ${total} ---\n` + collected.join('\n')
+    return { collected, total, trailingNewline }
   } finally {
     await fh.close()
   }
+}
+
+/**
+ * Default (no-window) read. Files at or under READ_DEFAULT_MAX_LINES keep the
+ * exact full-text output (no header); larger files return the first
+ * READ_DEFAULT_MAX_LINES lines with a header naming the total and a hint.
+ */
+async function readDefaultWindow(
+  resolved: string,
+  pathArg: string,
+  size: number
+): Promise<string> {
+  const cap = READ_DEFAULT_MAX_LINES
+  const { collected, total, trailingNewline } = await streamLines(
+    resolved,
+    pathArg,
+    size,
+    1,
+    Number.POSITIVE_INFINITY,
+    cap
+  )
+  if (total <= cap) {
+    // Byte-identical with a full read: no header, trailing newline preserved.
+    return collected.join('\n') + (trailingNewline ? '\n' : '')
+  }
+  return (
+    `--- lines 1-${cap} of ${total} ---\n` +
+    collected.join('\n') +
+    `\n… read truncated at ${cap} lines; pass startLine/endLine to read further.`
+  )
+}
+
+/**
+ * Stream an inclusive, 1-based line range without loading the whole file into a string.
+ * The header names the range actually returned.
+ */
+async function readLineRange(
+  resolved: string,
+  pathArg: string,
+  size: number,
+  options: ReadOptions
+): Promise<string> {
+  const startRaw = Math.max(1, Math.trunc(options.startLine ?? 1))
+  const endRaw =
+    options.endLine == null ? Number.POSITIVE_INFINITY : Math.trunc(options.endLine)
+  const start = Number.isFinite(endRaw) && endRaw < startRaw ? Math.max(1, endRaw) : startRaw
+  const endLimit = Number.isFinite(endRaw) && endRaw < startRaw ? startRaw : endRaw
+
+  const { collected, total } = await streamLines(
+    resolved,
+    pathArg,
+    size,
+    start,
+    endLimit,
+    Number.POSITIVE_INFINITY
+  )
+
+  // A trailing newline terminates the last line rather than starting a new one.
+  // streamLines pops the final empty split piece into leftoverText and only
+  // counts it when leftover text/bytes are non-empty — matching split('\n')+pop.
+
+  if (start > total) {
+    throw new Error(`startLine ${start} is past the end of ${pathArg} (${total} lines).`)
+  }
+
+  const actualEnd = Math.min(endLimit, total)
+  return `--- lines ${start}-${actualEnd} of ${total} ---\n` + collected.join('\n')
 }

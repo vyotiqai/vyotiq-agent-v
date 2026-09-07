@@ -69,7 +69,7 @@ export async function toolSearch(
   const q = query.trim()
   if (!q) throw new Error('search query is required')
   const limit =
-    maxResults == null ? Number.POSITIVE_INFINITY : Math.max(1, maxResults)
+    maxResults == null ? SEARCH_DEFAULT_MAX_RESULTS : Math.max(1, maxResults)
 
   let pattern: RegExp
   if (regex) {

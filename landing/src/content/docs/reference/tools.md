@@ -17,10 +17,9 @@ Every call is schema-validated. Renderer transcripts can contain a preview while
 
 ## Files
 
-- `read` — file or shallow directory listing under the workspace root (text)
+- `read` — file or shallow directory listing under the workspace root (text). Windowless reads are capped at 2000 lines; zoom via startLine/endLine.
 - `edit` — create/overwrite with contents, or apply a unified diff
 - `list_dir` — one directory level with sizes
-- `multi_edit` — several file edits applied atomically (full `contents` or a unified `diff` per entry; one entry per path; if any edit fails, nothing is written)
 - `str_replace` — replace exact text in one file
 - `delete` — delete a workspace file or directory (recursive for a non-empty directory)
 - `edit_notebook` — insert or uniquely replace one cell in a nbformat v4 .ipynb (no kernel)
@@ -28,9 +27,9 @@ Every call is schema-validated. Renderer transcripts can contain a preview while
 
 ## Search
 
-- `search` — filename or content substring (first hit per file)
-- `glob` — workspace-relative glob paths
-- `grep` — regex with matching lines
+- `search` — filename or content substring (first hit per file). Defaults to 40 hits; pass maxResults to widen.
+- `glob` — workspace-relative glob paths. Defaults to 100 paths; pass maxResults to widen.
+- `grep` — regex with matching lines. Defaults to 60 results; pass maxResults to widen.
 - `codebase_search` — semantic search over the local code index (not memory RAG)
 
 ## Browser

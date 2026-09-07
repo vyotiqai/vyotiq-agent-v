@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type KeyboardEvent, type RefCallback } from 'react'
 import { Icon } from '@renderer/lib/icons'
-import { IconButton, cn } from '@renderer/lib/ui'
+import { IconButton, Tooltip, cn } from '@renderer/lib/ui'
 import {
   SIDEBAR_ROW,
   SIDEBAR_ROW_FOCUSED,
@@ -160,11 +160,12 @@ export const ChatRow = memo(function ChatRow({
       role="listitem"
       className={cn('group relative min-w-0', active ? 'text-fg-strong' : '')}
     >
-      <button
-        type="button"
-        ref={rowRef}
-        tabIndex={tabIndex}
-        data-session-row
+      <Tooltip content={runTooltip(run)}>
+        <button
+          type="button"
+          ref={rowRef}
+          tabIndex={tabIndex}
+          data-session-row
         draggable={!nested && !renaming && !confirmingDelete}
         className={cn(
           'app-region-no-drag flex w-full min-w-0 items-center gap-1.5 pr-2 text-left vy-transition',
@@ -184,7 +185,6 @@ export const ChatRow = memo(function ChatRow({
         aria-label={sessionAriaLabel}
         data-session-open={active ? '1' : '0'}
         data-session-focused={focused ? '1' : '0'}
-        title={runTooltip(run)}
         onClick={onSelect}
         onKeyDown={(e) => {
           // Same Delete-to-close pattern as dock/session tab strips; Esc cancels
@@ -233,7 +233,8 @@ export const ChatRow = memo(function ChatRow({
           </span>
         ) : null}
         <span className="min-w-0 flex-1 truncate">{title}</span>
-      </button>
+        </button>
+      </Tooltip>
 
       <div
         className={cn(

@@ -73,6 +73,50 @@ const OLLAMA_CLOUD_CONTEXT_EXACT: Record<string, number> = {
   'nemotron-3-nano:30b': 1_048_576
 }
 
+/**
+ * Cloudflare Workers AI chat models, keyed by full `@cf/...` catalog id.
+ * Values are the live `context_window` properties from the account model
+ * catalog (`GET /accounts/{id}/ai/models/search`, snapshot 2026-09-05). The
+ * OpenAI-compat mount has no model-list route (HTTP 405 on GET /v1/models),
+ * so manually entered Cloudflare ids resolve no live metadata — these exact
+ * windows keep meter and loop budgeting honest. Full ids only: a bare
+ * `glm-5.2` on an arbitrary custom host is not provably Cloudflare's serving
+ * configuration, so it stays unknown.
+ */
+const CLOUDFLARE_CONTEXT_EXACT: Record<string, number> = {
+  '@cf/aisingapore/gemma-sea-lion-v4-27b-it': 128_000,
+  '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b': 80_000,
+  '@cf/deepseek-ai/deepseek-v4-flash-0731': 1_310_720,
+  '@cf/deepseek-ai/deepseek-v4-pro-0813': 1_048_576,
+  '@cf/google/gemma-2b-it-lora': 8_192,
+  '@cf/google/gemma-4-26b-a4b-it': 256_000,
+  '@cf/google/gemma-7b-it-lora': 3_500,
+  '@cf/ibm-granite/granite-4.0-h-micro': 131_000,
+  '@cf/meta-llama/llama-2-7b-chat-hf-lora': 8_192,
+  '@cf/meta/llama-3.1-8b-instruct-fp8': 32_000,
+  '@cf/meta/llama-3.2-11b-vision-instruct': 128_000,
+  '@cf/meta/llama-3.2-1b-instruct': 60_000,
+  '@cf/meta/llama-3.2-3b-instruct': 80_000,
+  '@cf/meta/llama-3.3-70b-instruct-fp8-fast': 24_000,
+  '@cf/meta/llama-4-scout-17b-16e-instruct': 131_000,
+  '@cf/meta/llama-guard-3-8b': 131_072,
+  '@cf/mistral/mistral-7b-instruct-v0.2-lora': 15_000,
+  '@cf/mistralai/mistral-small-3.1-24b-instruct': 128_000,
+  '@cf/moonshotai/kimi-k2.6': 262_144,
+  '@cf/moonshotai/kimi-k2.7-code': 262_144,
+  '@cf/nvidia/nemotron-3-120b-a12b': 256_000,
+  '@cf/openai/gpt-oss-120b': 128_000,
+  '@cf/openai/gpt-oss-20b': 128_000,
+  '@cf/qwen/qwen2.5-coder-32b-instruct': 32_768,
+  '@cf/qwen/qwen3-30b-a3b-fp8': 32_768,
+  '@cf/qwen/qwen3.8-27b': 262_144,
+  '@cf/qwen/qwq-32b': 24_000,
+  '@cf/zai-org/glm-4.7-flash': 131_072,
+  '@cf/zai-org/glm-5.2': 262_144,
+  '@cf/zai-org/glm-5.3': 1_310_720,
+  '@cf/zai-org/glm-5.3-flash': 1_310_720
+}
+
 const OLLAMA_CLOUD_CONTEXT_FAMILY: Record<string, number> = {
   'gpt-oss': 131_072,
   'glm-5.1': 202_752,
@@ -107,6 +151,11 @@ export function knownContextWindow(
   modelId: string,
   providerId?: ProviderId
 ): number | undefined {
+  // Full Cloudflare catalog ids (@cf/…) are self-identifying — match before
+  // vendor-prefix stripping so @cf/… rows never fall through to heuristics.
+  const cloudflare = CLOUDFLARE_CONTEXT_EXACT[modelId.trim().toLowerCase()]
+  if (cloudflare != null) return cloudflare
+
   const core = coreModelId(modelId)
   const ollamaCloud =
     providerId === 'ollama' || /[:-]cloud$/i.test(core)

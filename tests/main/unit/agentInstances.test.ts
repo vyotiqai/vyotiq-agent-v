@@ -88,6 +88,24 @@ function mockWebContents() {
   } as unknown as import('electron').WebContents
 }
 
+async function gitInitWorkspace(dir: string): Promise<void> {
+  const git = (...args: string[]) =>
+    execFileAsync(
+      'git',
+      ['-c', 'user.email=test@example.com', '-c', 'user.name=Test', ...args],
+      {
+        cwd: dir,
+        encoding: 'utf8',
+        windowsHide: true,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+      }
+    )
+  writeFileSync(join(dir, 'README.md'), 'base\n')
+  await git('init')
+  await git('add', '.')
+  await git('commit', '-m', 'init')
+}
+
 describe('agentInstances', () => {
   let workspacePath: string
   let parentRunId: string
@@ -116,6 +134,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'child task',
+      outcome: 'child task outcome',
+      subTasks: ['child task step'],
+      doneWhen: 'child task complete',
       pathScope: ['src/main/']
     })
     expect(result.ok).toBe(true)
@@ -131,7 +152,7 @@ describe('agentInstances', () => {
     clearRunAbort(result.runId)
   })
 
-  it('passes multi-line goal through as the child user message unchanged', async () => {
+  it('appends the multi-line goal verbatim at the end of the composed child prompt', async () => {
     const goal = [
       'Fix auth token refresh in src/main/auth',
       '',
@@ -145,6 +166,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal,
+      outcome: 'auth token refresh fixed',
+      subTasks: ['read token store', 'fix expiry path'],
+      doneWhen: 'typecheck passes',
       pathScope: ['src/main/auth']
     })
     expect(result.ok).toBe(true)
@@ -154,9 +178,103 @@ describe('agentInstances', () => {
     expect(first?.role).toBe('user')
     expect(typeof first?.content).toBe('string')
     if (typeof first?.content !== 'string') return
-    expect(first.content.startsWith(goal)).toBe(true)
-    expect(first.content.slice(0, goal.length)).toBe(goal)
+    // Structured brief composes first; the raw goal text is appended verbatim last.
+    expect(first.content.startsWith('Outcome: auth token refresh fixed')).toBe(true)
+    expect(first.content.endsWith(goal)).toBe(true)
     clearRunAbort(result.runId)
+  })
+
+  it('composes the structured brief into the child prompt in the documented order', async () => {
+    const result = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'plain goal text',
+      outcome: 'fix the widget',
+      subTasks: ['read the widget', 'fix the widget'],
+      doneWhen: 'typecheck passes',
+      pathScope: ['src/widget']
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const started = vi.mocked(startAgentRunInBackground).mock.calls.at(-1)?.[0]
+    const first = started?.agentInput.messages?.[0]
+    const content = typeof first?.content === 'string' ? first.content : ''
+    expect(content.startsWith('Outcome: fix the widget\n\nSub-tasks:\n1. read the widget\n2. fix the widget\n\nDone when: typecheck passes\nPaths: src/widget\nplain goal text')).toBe(true)
+    expect(content).toContain('Outcome: ')
+    expect(content).toContain('Sub-tasks:')
+    expect(content).toContain('1. ')
+    expect(content).toContain('Done when: ')
+    clearRunAbort(result.runId)
+  })
+
+  it('composes the brief without a Paths line when path_scope is absent', async () => {
+    // A path_scope-less spawn needs worktree isolation, which needs a git repo.
+    await gitInitWorkspace(workspacePath)
+    const result = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'no paths line',
+      outcome: 'no paths line outcome',
+      subTasks: ['no paths line step'],
+      doneWhen: 'no paths line complete'
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const started = vi.mocked(startAgentRunInBackground).mock.calls.at(-1)?.[0]
+    const first = started?.agentInput.messages?.[0]
+    const content = typeof first?.content === 'string' ? first.content : ''
+    expect(content).not.toContain('\nPaths: ')
+    clearRunAbort(result.runId)
+  })
+
+  it('rejects spawn when outcome is missing or empty', async () => {
+    const result = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'no outcome',
+      outcome: '',
+      subTasks: ['a step'],
+      doneWhen: 'done'
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatch(/outcome/)
+  })
+
+  it('rejects spawn when sub_tasks is empty or has a blank entry', async () => {
+    const empty = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'no subtasks',
+      outcome: 'some outcome',
+      subTasks: [],
+      doneWhen: 'done'
+    })
+    expect(empty.ok).toBe(false)
+    if (!empty.ok) expect(empty.error).toMatch(/sub_tasks/)
+
+    const blank = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'blank subtask',
+      outcome: 'some outcome',
+      subTasks: ['   '],
+      doneWhen: 'done'
+    })
+    expect(blank.ok).toBe(false)
+    if (!blank.ok) expect(blank.error).toMatch(/sub_tasks/)
+  })
+
+  it('rejects spawn when done_when is missing or empty', async () => {
+    const result = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'no done when',
+      outcome: 'some outcome',
+      subTasks: ['a step'],
+      doneWhen: ''
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatch(/done_when/)
   })
 
   it('stores inline instance runs under session workspace, not worktree path', () => {
@@ -179,6 +297,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'hidden child',
+      outcome: 'hidden child outcome',
+      subTasks: ['hidden child step'],
+      doneWhen: 'hidden child complete',
       pathScope: ['src']
     })
     expect(result.ok).toBe(true)
@@ -197,6 +318,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'child',
+      outcome: 'child outcome',
+      subTasks: ['child step'],
+      doneWhen: 'child complete',
       pathScope: ['src']
     })
     expect(child.ok).toBe(true)
@@ -205,6 +329,9 @@ describe('agentInstances', () => {
       parentRunId: child.runId,
       workspacePath,
       goal: 'nested',
+      outcome: 'nested outcome',
+      subTasks: ['nested step'],
+      doneWhen: 'nested complete',
       pathScope: ['src']
     })
     expect(nested.ok).toBe(false)
@@ -220,6 +347,9 @@ describe('agentInstances', () => {
         parentRunId,
         workspacePath,
         goal: `task ${i}`,
+        outcome: `task ${i} outcome`,
+        subTasks: [`task ${i} step`],
+        doneWhen: `task ${i} complete`,
         pathScope: ['src']
       })
       expect(r.ok).toBe(true)
@@ -230,6 +360,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'beyond the global cap',
+      outcome: 'beyond the global cap outcome',
+      subTasks: ['beyond the global cap step'],
+      doneWhen: 'beyond the global cap complete',
       pathScope: ['src']
     })
     expect(capped.ok).toBe(false)
@@ -245,6 +378,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'child',
+      outcome: 'child outcome',
+      subTasks: ['child step'],
+      doneWhen: 'child complete',
       pathScope: ['src']
     })
     expect(child.ok).toBe(true)
@@ -271,6 +407,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'fills the last global slot',
+      outcome: 'fills the last global slot outcome',
+      subTasks: ['fills the last global slot step'],
+      doneWhen: 'fills the last global slot complete',
       pathScope: ['src']
     })
     expect(result.ok).toBe(true)
@@ -292,6 +431,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'fallback spawn',
+      outcome: 'fallback spawn outcome',
+      subTasks: ['fallback spawn step'],
+      doneWhen: 'fallback spawn complete',
       pathScope: ['src']
     })
     expect(result.ok).toBe(true)
@@ -341,6 +483,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'await me',
+      outcome: 'await me outcome',
+      subTasks: ['await me step'],
+      doneWhen: 'await me complete',
       pathScope: ['src']
     })
     expect(child.ok).toBe(true)
@@ -380,6 +525,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'race me',
+      outcome: 'race me outcome',
+      subTasks: ['race me step'],
+      doneWhen: 'race me complete',
       pathScope: ['src']
     })
     expect(child.ok).toBe(true)
@@ -423,8 +571,10 @@ describe('agentInstances', () => {
     emitAgentInstanceUpdate(workspacePath, parentRunId, {
       parentRunId,
       instanceRunId: 'child-batched',
-      phase: 'started',
-      goal: 'x'
+      goal: 'x',
+      outcome: 'x outcome',
+      subTasks: ['x step'],
+      doneWhen: 'x complete',
     })
     expect(emit).toHaveBeenCalled()
     expect(mainWindowSend).not.toHaveBeenCalled()
@@ -437,6 +587,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'single start',
+      outcome: 'single start outcome',
+      subTasks: ['single start step'],
+      doneWhen: 'single start complete',
       pathScope: ['src'],
       emitParentEvent: (ev) => {
         emitted.push(ev)
@@ -476,6 +629,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'cleanup',
+      outcome: 'cleanup outcome',
+      subTasks: ['cleanup step'],
+      doneWhen: 'cleanup complete',
       pathScope: ['src']
     })
     expect(child.ok).toBe(true)
@@ -492,6 +648,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'cancel me',
+      outcome: 'cancel me outcome',
+      subTasks: ['cancel me step'],
+      doneWhen: 'cancel me complete',
       pathScope: ['src']
     })
     expect(child.ok).toBe(true)
@@ -532,6 +691,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'lean ui',
+      outcome: 'lean ui outcome',
+      subTasks: ['lean ui step'],
+      doneWhen: 'lean ui complete',
       pathScope: ['src']
     })
     expect(child.ok).toBe(true)
@@ -598,6 +760,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'timeout me',
+      outcome: 'timeout me outcome',
+      subTasks: ['timeout me step'],
+      doneWhen: 'timeout me complete',
       pathScope: ['src']
     })
     expect(child.ok).toBe(true)
@@ -648,6 +813,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'keep running',
+      outcome: 'keep running outcome',
+      subTasks: ['keep running step'],
+      doneWhen: 'keep running complete',
       pathScope: ['src']
     })
     expect(child.ok).toBe(true)
@@ -664,6 +832,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'delete with parent',
+      outcome: 'delete with parent outcome',
+      subTasks: ['delete with parent step'],
+      doneWhen: 'delete with parent complete',
       pathScope: ['src']
     })
     expect(child.ok).toBe(true)
@@ -682,7 +853,10 @@ describe('agentInstances', () => {
     const child = await spawnAgentInstance({
       parentRunId,
       workspacePath,
-      goal: 'needs scope'
+      goal: 'needs scope',
+      outcome: 'needs scope outcome',
+      subTasks: ['needs scope step'],
+      doneWhen: 'needs scope complete',
     })
     expect(child.ok).toBe(false)
     if (!child.ok) expect(child.error).toMatch(/path_scope/i)
@@ -693,6 +867,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'escape',
+      outcome: 'escape outcome',
+      subTasks: ['escape step'],
+      doneWhen: 'escape complete',
       pathScope: ['../secret']
     })
     expect(child.ok).toBe(false)
@@ -704,6 +881,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'shared fallback',
+      outcome: 'shared fallback outcome',
+      subTasks: ['shared fallback step'],
+      doneWhen: 'shared fallback complete',
       pathScope: ['src']
     })
     expect(child.ok).toBe(true)
@@ -721,6 +901,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'will be denied',
+      outcome: 'will be denied outcome',
+      subTasks: ['will be denied step'],
+      doneWhen: 'will be denied complete',
       pathScope: ['src']
     })
     expect(child.ok).toBe(true)
@@ -743,6 +926,9 @@ describe('agentInstances', () => {
       parentRunId,
       workspacePath,
       goal: 'cancellable',
+      outcome: 'cancellable outcome',
+      subTasks: ['cancellable step'],
+      doneWhen: 'cancellable complete',
       pathScope: ['src']
     })
     expect(child.ok).toBe(true)
@@ -813,7 +999,10 @@ describe('agentInstances worktree', () => {
     const child = await spawnAgentInstance({
       parentRunId,
       workspacePath,
-      goal: 'edit in worktree'
+      goal: 'edit in worktree',
+      outcome: 'edit in worktree outcome',
+      subTasks: ['edit in worktree step'],
+      doneWhen: 'edit in worktree complete',
     })
     expect(child.ok).toBe(true)
     if (!child.ok) return
@@ -833,7 +1022,10 @@ describe('agentInstances worktree', () => {
     const child = await spawnAgentInstance({
       parentRunId,
       workspacePath,
-      goal: 'error then keep branch'
+      goal: 'error then keep branch',
+      outcome: 'error then keep branch outcome',
+      subTasks: ['error then keep branch step'],
+      doneWhen: 'error then keep branch complete',
     })
     expect(child.ok).toBe(true)
     if (!child.ok) return
@@ -857,7 +1049,10 @@ describe('agentInstances worktree', () => {
     const cancelled = await spawnAgentInstance({
       parentRunId,
       workspacePath,
-      goal: 'cancel then drop branch'
+      goal: 'cancel then drop branch',
+      outcome: 'cancel then drop branch outcome',
+      subTasks: ['cancel then drop branch step'],
+      doneWhen: 'cancel then drop branch complete',
     })
     expect(cancelled.ok).toBe(true)
     if (!cancelled.ok) return
@@ -879,7 +1074,10 @@ describe('agentInstances worktree', () => {
     const child = await spawnAgentInstance({
       parentRunId,
       workspacePath,
-      goal: 'dirty then finish'
+      goal: 'dirty then finish',
+      outcome: 'dirty then finish outcome',
+      subTasks: ['dirty then finish step'],
+      doneWhen: 'dirty then finish complete',
     })
     expect(child.ok).toBe(true)
     if (!child.ok) return
@@ -901,7 +1099,10 @@ describe('agentInstances worktree', () => {
     const child = await spawnAgentInstance({
       parentRunId,
       workspacePath,
-      goal: 'merge me'
+      goal: 'merge me',
+      outcome: 'merge me outcome',
+      subTasks: ['merge me step'],
+      doneWhen: 'merge me complete',
     })
     expect(child.ok).toBe(true)
     if (!child.ok) return
@@ -938,7 +1139,10 @@ describe('agentInstances worktree', () => {
     const child = await spawnAgentInstance({
       parentRunId,
       workspacePath,
-      goal: 'dirty parent refuse'
+      goal: 'dirty parent refuse',
+      outcome: 'dirty parent refuse outcome',
+      subTasks: ['dirty parent refuse step'],
+      doneWhen: 'dirty parent refuse complete',
     })
     expect(child.ok).toBe(true)
     if (!child.ok) return

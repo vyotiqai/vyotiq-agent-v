@@ -279,9 +279,6 @@ describe('TasksRailChip hover card', () => {
     expect(list.textContent).toContain('Run tests')
     expect(list.textContent).toContain('Write report')
     expect(list.querySelectorAll('li')).toHaveLength(3)
-    expect(card.querySelector('[data-tasks-popover-current]')?.textContent).toContain(
-      'Run tests'
-    )
     expect(screen.getByRole('progressbar')).toBeTruthy()
     expect(card.querySelector('[data-tasks-popover-live]')).toBeTruthy()
     expect(chip.getAttribute('aria-expanded')).toBe('true')
@@ -423,7 +420,7 @@ describe('TasksRailChip hover card', () => {
     ).toBe('1/2')
     const card = document.querySelector('[data-tasks-popover-card]') as HTMLElement
     expect(card).toBeTruthy()
-    expect(card.querySelector('[data-tasks-popover-current]')?.textContent).toContain(
+    expect(card.querySelector('[data-tasks-popover-list]')?.textContent).toContain(
       'Run tests'
     )
   })

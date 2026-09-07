@@ -766,13 +766,35 @@ export function parseOpenAiCompatUsage(raw: unknown): TokenUsage | undefined {
   }
 }
 
+/**
+ * Statuses that mean "host is reachable but has no model-list route":
+ * 405 Method Not Allowed (path exists, GET not supported — e.g. Cloudflare
+ * Workers AI compat) and 501 Not Implemented. These are catalog gaps, not
+ * connection failures; chat still works with a manually entered model ID.
+ */
+const MODEL_LIST_UNSUPPORTED_STATUSES: readonly number[] = [405, 501]
+
+/**
+ * Thrown when a reachable host does not implement the model-list endpoint.
+ * Callers treat this as an empty live catalog (seeds + manual model entry),
+ * never as a connection error.
+ */
+export class ModelListUnsupportedError extends Error {
+  readonly status: number
+  constructor(status: number, base: string) {
+    super(`${base} does not serve a model list (HTTP ${status})`)
+    this.name = 'ModelListUnsupportedError'
+    this.status = status
+  }
+}
+
 /** GET JSON for model-catalog probes only (not chat streams). */
 async function fetchJson(
   url: string,
   headers: Record<string, string>,
   signal?: AbortSignal,
   providerId?: ProviderId,
-  opts?: { quiet?: boolean; allowLocal?: boolean }
+  opts?: { quiet?: boolean; allowLocal?: boolean; silentStatuses?: readonly number[] }
 ): Promise<unknown> {
   const logProvider = providerId ?? 'openai-compat'
   const allowLocal =
@@ -798,7 +820,11 @@ async function fetchJson(
   }
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    if (!opts?.quiet) {
+    // An expected "no model-list route" status is a handled catalog state —
+    // not a provider failure; stay out of the logs entirely.
+    const expectedUnsupported =
+      opts?.silentStatuses?.includes(res.status) === true
+    if (!opts?.quiet && !expectedUnsupported) {
       logProviderFailure(
         logProvider,
         'http',
@@ -806,7 +832,11 @@ async function fetchJson(
         { soft: true }
       )
     }
-    throw new Error(formatProviderHttpError(res.status, text, providerId))
+    const err = new Error(formatProviderHttpError(res.status, text, providerId)) as Error & {
+      httpStatus?: number
+    }
+    err.httpStatus = res.status
+    throw err
   }
   return res.json()
 }
@@ -1156,13 +1186,21 @@ async function listOpenAiCompatModels(
 
   try {
     const data = await fetchJson(url, headers, signal, providerId, {
-      allowLocal: opts.allowLocal
+      allowLocal: opts.allowLocal,
+      silentStatuses: MODEL_LIST_UNSUPPORTED_STATUSES
     })
     return normalizeOpenAiStyleModels(data, {
       requireToolsParam: opts.requireToolsParam,
       providerId
     })
   } catch (err) {
+    // A reachable host without a model-list route (HTTP 405/501) is a catalog
+    // gap, not a connection failure — surface it as such so chat with a
+    // manually entered model ID still connects.
+    const status = (err as { httpStatus?: number } | null)?.httpStatus
+    if (typeof status === 'number' && MODEL_LIST_UNSUPPORTED_STATUSES.includes(status)) {
+      throw new ModelListUnsupportedError(status, base)
+    }
     if (providerId === 'custom') {
       const host = base.replace(/\/v1\/?$/i, '').replace(/\/$/, '')
       throw new Error(

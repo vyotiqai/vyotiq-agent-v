@@ -74,20 +74,6 @@ describe('extractFoldFacts', () => {
     expect(facts.files).toContain('config/settings.json')
   })
 
-  it('extracts multi_edit paths', () => {
-    const msgs: ChatMessage[] = [
-      toolCall('c1', 'multi_edit', {
-        edits: [
-          { path: 'a.ts', contents: '1' },
-          { path: 'b.ts', contents: '2' }
-        ]
-      }),
-      toolResult('c1', 'multi_edit', 'ok', true)
-    ]
-    const facts = extractFoldFacts(msgs)
-    expect(facts.wroteFiles).toEqual(['a.ts', 'b.ts'])
-  })
-
   it('collects open todos from todo_write results', () => {
     const todos: TodoItem[] = [
       { id: '1', content: 'First task', status: 'pending' },

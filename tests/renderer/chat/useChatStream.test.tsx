@@ -862,7 +862,7 @@ describe('useChatStream', () => {
         type: 'tool_call_delta',
         runId: 'run-1',
         toolCallId: 'pending_0',
-        name: 'multi_edit',
+        name: 'edit',
         argumentsDelta: '{"edits":[{"path":"api/page.tsx","contents":"x"}]}'
       })
       handler?.({

@@ -16,6 +16,11 @@ export type ActionMenuItem = {
   id: string
   label: string
   icon?: IconName
+  /**
+   * Render as a checkable toggle: reserves the check column, shows a check
+   * glyph when true, and exposes role/aria-checked. Omit for plain actions.
+   */
+  checked?: boolean
   onSelect: () => void
 }
 
@@ -132,7 +137,8 @@ export function ActionMenu({
           <li key={item.id} role="none">
             <button
               type="button"
-              role="menuitem"
+              role={item.checked != null ? 'menuitemcheckbox' : 'menuitem'}
+              aria-checked={item.checked != null ? item.checked : undefined}
               className={cn(optionClass, index === activeIndex && 'bg-surface')}
               onMouseEnter={() => setActiveIndex(index)}
               onClick={() => {
@@ -140,7 +146,15 @@ export function ActionMenu({
                 close(true)
               }}
             >
-              {item.icon ? <Icon name={item.icon} size={16} /> : null}
+              {item.checked != null ? (
+                item.checked ? (
+                  <Icon name="check" size={16} className="shrink-0" />
+                ) : (
+                  <span className="inline-block w-4 shrink-0" aria-hidden />
+                )
+              ) : item.icon ? (
+                <Icon name={item.icon} size={16} />
+              ) : null}
               {item.label}
             </button>
           </li>

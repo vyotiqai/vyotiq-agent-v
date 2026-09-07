@@ -56,4 +56,17 @@ describe('ModePicker', () => {
     fireEvent.keyDown(screen.getByLabelText('Other field'), { key: '.', ctrlKey: true })
     expect(onModeChange).not.toHaveBeenCalled()
   })
+
+  it('cycles while focus sits in the composer shell (live combobox target)', () => {
+    const onModeChange = vi.fn()
+    const { getByRole } = render(
+      <div data-composer-shell="">
+        <div role="combobox" aria-label="Message" aria-expanded="false" aria-controls="test-listbox" contentEditable tabIndex={0} />
+        <ModePicker mode="agent" onModeChange={onModeChange} />
+      </div>
+    )
+    getByRole('combobox', { name: /^Message$/i }).focus()
+    fireEvent.keyDown(getByRole('combobox', { name: /^Message$/i }), { key: '.', ctrlKey: true })
+    expect(onModeChange).toHaveBeenCalledWith('ask')
+  })
 })

@@ -8,8 +8,6 @@ import {
 
 export const MAX_AUDIO_FILES = 2
 
-export const AUDIO_ACCEPT = 'audio/wav,audio/mpeg,audio/mp3,audio/mp4,audio/webm,audio/ogg,.wav,.mp3,.m4a,.webm,.ogg'
-
 const ALLOWED_AUDIO_MIME = new Set([
   'audio/wav',
   'audio/wave',

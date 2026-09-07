@@ -126,6 +126,16 @@ export function sanitizeTodoItemContent(content: string): string {
   return content.replace(/\s+/g, ' ').trim()
 }
 
+/**
+ * Canonical id safe for the `[x] (id) content` checklist line format: any
+ * whitespace or parenthesis in a raw id would break parseSerializedTodoContent
+ * (rewind sync re-parses these lines), so ids are canonicalized once at write
+ * time. Deterministic, so merge-by-id stays stable across todo_write calls.
+ */
+function canonicalTodoId(id: string): string {
+  return id.replace(/[\s()]+/g, '')
+}
+
 function normalizeTodoItems(todos: TodoItem[]): TodoItem[] {
   const byId = new Map<string, TodoItem>()
   for (const todo of todos) {
@@ -135,7 +145,7 @@ function normalizeTodoItems(todos: TodoItem[]): TodoItem[] {
     // todos.json always round-trips through TodoFileSchema — an item with
     // no usable text is not a task, so it is dropped rather than stored
     // with content:"" (unreadable) or the id as text (silent rename).
-    const id = todo.id.trim()
+    const id = canonicalTodoId(todo.id)
     if (!id) continue
     const sanitized = sanitizeTodoItemContent(todo.content)
     const content = sanitized || todo.content.trim()

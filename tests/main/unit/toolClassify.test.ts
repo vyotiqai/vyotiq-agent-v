@@ -155,9 +155,7 @@ describe('tool classify', () => {
     expect(stepToolBatchClass('edit')).toBe('mutation')
     expect(stepToolBatchClass('str_replace')).toBe('mutation')
     expect(isParallelBatchClass('mutation')).toBe(true)
-    expect(isParallelMutationTool('multi_edit')).toBe(false)
     expect(isParallelMutationTool('delete')).toBe(false)
-    expect(stepToolBatchClass('multi_edit')).toBe('serial')
     expect(stepToolBatchClass('delete')).toBe('serial')
   })
 
@@ -168,7 +166,6 @@ describe('tool classify', () => {
     expect(isParallelSafeTool('memory_write')).toBe(false)
     expect(stepToolBatchClass('edit_notebook')).toBe('mutation')
     expect(stepToolBatchClass('memory_write')).toBe('mutation')
-    expect(isParallelMutationTool('multi_edit')).toBe(false)
     expect(isParallelMutationTool('delete')).toBe(false)
     expect(isApprovalExemptTool('edit_notebook')).toBe(false)
     expect(isApprovalExemptTool('memory_write')).toBe(false)

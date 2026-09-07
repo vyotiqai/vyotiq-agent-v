@@ -102,7 +102,7 @@ vi.mock('@main/agent/state', async (importOriginal) => {
   }
 })
 
-import { runAgent, setAutoCompactionForTests } from '@main/agent/loop'
+import { runAgent } from '@main/agent/loop'
 import { enqueueFollowUp, resetActiveRunsForTests } from '@main/agent/runRegistry'
 import { appendMessage, createRun, flushMessageAppends, loadCompaction } from '@main/agent/state'
 
@@ -152,9 +152,6 @@ describe('runAgent stop-reason classification', () => {
     workspace = join(tmpdir(), `vyotiq-stopreason-ws-${process.pid}-${Date.now()}`)
     mkdirSync(workspace, { recursive: true })
     resetActiveRunsForTests()
-    // Auto compaction is disabled by default in the loop; these suites assert
-    // the auto path end to end, so re-enable it for the duration.
-    setAutoCompactionForTests(true)
     streamChat.mockReset()
     executeTool.mockReset()
     assembleContext.mockReset()
@@ -170,7 +167,6 @@ describe('runAgent stop-reason classification', () => {
   })
 
   afterEach(() => {
-    setAutoCompactionForTests(false)
     if (existsSync(userData)) rmSync(userData, { recursive: true, force: true })
     if (existsSync(workspace)) rmSync(workspace, { recursive: true, force: true })
   })
@@ -566,53 +562,6 @@ describe('runAgent stop-reason classification', () => {
     expect(streamChat.mock.calls.some((c) => isParentCompactFork(c[0] as StreamChatReq))).toBe(true)
   })
 
-  it('stops with context_overflow without auto compact when the kill switch is disabled', async () => {
-    // beforeEach re-enables the hook; this suite pins the shipped default-off behavior.
-    setAutoCompactionForTests(false)
-    assembleContext.mockImplementation(async (input: { messages: unknown[] }) => ({
-      messages: input.messages,
-      system: 'system',
-      systemStable: 'system',
-      estimatedTokens: 200_000,
-      layers: { system: 10, history: 50, tools: 20, buffer: 20 },
-      overflow: true,
-      anthropicNative: undefined,
-      compaction: null
-    }))
-
-    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
-      yield { type: 'text', text: 'should not stream' }
-      yield { type: 'done', stopReason: 'stop' }
-    })
-
-    const runId = 'overflow-no-auto-compact'
-    const runDir = createRun(workspace, runId, 'goal')
-    for (let i = 0; i < 6; i++) {
-      await appendMessage(runDir, { role: 'user', content: `old-u-${i}` })
-      await appendMessage(runDir, { role: 'assistant', content: `old-a-${i}` })
-    }
-    await flushMessageAppends(runDir)
-
-    const events: CapturedEvent[] = []
-    for await (const ev of runAgent({
-      runId,
-      messages: [{ role: 'user', content: 'continue' }],
-      workspacePath: workspace,
-      resume: true,
-      newMessages: [{ role: 'user', content: 'continue' }]
-    })) {
-      events.push(ev as CapturedEvent)
-    }
-
-    expect(events.find((e) => e.type === 'incomplete')?.reason).toBe('context_overflow')
-    expect(events.some((e) => e.type === 'status' && e.status === 'error')).toBe(true)
-    expect(events.some((e) => e.type === 'compaction_started')).toBe(false)
-    expect(events.some((e) => e.type === 'compaction')).toBe(false)
-    expect(loadCompaction(resolveRunDir(workspace, runId))).toBeNull()
-    // No internal summarizer fork and no parent turn: the loop stops before streaming.
-    expect(streamChat).not.toHaveBeenCalled()
-  })
-
   it('ends the step when auto compact cannot persist compaction.json', async () => {
     saveCompactionFails.value = true
     assembleContext.mockImplementation(async (input: { messages: unknown[] }) => ({
@@ -717,7 +666,6 @@ describe('runAgent partial persistence', () => {
     workspace = join(tmpdir(), `vyotiq-partial-ws-${process.pid}-${Date.now()}`)
     mkdirSync(workspace, { recursive: true })
     resetActiveRunsForTests()
-    setAutoCompactionForTests(true)
     streamChat.mockReset()
     executeTool.mockReset()
     assembleContext.mockReset()
@@ -733,7 +681,6 @@ describe('runAgent partial persistence', () => {
   })
 
   afterEach(() => {
-    setAutoCompactionForTests(false)
     if (existsSync(userData)) rmSync(userData, { recursive: true, force: true })
     if (existsSync(workspace)) rmSync(workspace, { recursive: true, force: true })
   })

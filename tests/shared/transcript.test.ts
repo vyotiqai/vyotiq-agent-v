@@ -392,7 +392,7 @@ describe('stripToolShapedAssistantText', () => {
     const block =
       `Good — the CSS foundation is solid.\n` +
       `<${fw}DSML${fw}tool_calls>\n` +
-      `<${fw}DSML${fw}invoke name="multi_edit">\n` +
+      `<${fw}DSML${fw}invoke name="edit">\n` +
       `<${fw}DSML${fw}parameter name="edits" string="false">[{"path":"layout.tsx"}]</${fw}DSML${fw}parameter>\n` +
       `</${fw}DSML${fw}invoke>\n` +
       `</${fw}DSML${fw}tool_calls>`
@@ -402,7 +402,7 @@ describe('stripToolShapedAssistantText', () => {
   it('removes DSML markup with ASCII pipes as shown in the live UI', () => {
     const leaked =
       'Let me fix the remaining files.\n' +
-      '<|DSML|tool_calls><|DSML|invoke name="multi_edit">' +
+      '<|DSML|tool_calls><|DSML|invoke name="edit">' +
       '<|DSML|parameter name="edits" string="false">[{"path":"a.tsx"}]</|DSML|parameter>' +
       '</|DSML|invoke></|DSML|tool_calls>'
     expect(stripToolShapedAssistantText(leaked)).toBe('Let me fix the remaining files.')
@@ -433,7 +433,7 @@ describe('stripToolShapedAssistantTextForStream', () => {
   it('hides an in-progress DSML tool_calls block while streaming', () => {
     expect(
       stripToolShapedAssistantTextForStream(
-        'Applying edits.\n<|DSML|tool_calls>\n<|DSML|invoke name="multi_edit">'
+        'Applying edits.\n<|DSML|tool_calls>\n<|DSML|invoke name="edit">'
       )
     ).toBe('Applying edits.')
   })
@@ -454,7 +454,7 @@ describe('isToolShapedTextLeak', () => {
   it('detects a buffer that is only DSML markup', () => {
     expect(
       isToolShapedTextLeak(
-        '<|DSML|tool_calls><|DSML|invoke name="multi_edit"></|DSML|invoke></|DSML|tool_calls>'
+        '<|DSML|tool_calls><|DSML|invoke name="edit"></|DSML|invoke></|DSML|tool_calls>'
       )
     ).toBe(true)
   })

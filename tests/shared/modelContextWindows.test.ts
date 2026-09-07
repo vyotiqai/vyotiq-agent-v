@@ -113,6 +113,42 @@ describe('Ollama Cloud known windows', () => {
   })
 })
 
+describe('Cloudflare Workers AI known windows', () => {
+  it('resolves full @cf/ catalog ids from the live catalog snapshot', () => {
+    expect(knownContextWindow('@cf/zai-org/glm-5.3-flash', 'custom')).toBe(1_310_720)
+    expect(knownContextWindow('@cf/zai-org/glm-4.7-flash', 'custom')).toBe(131_072)
+    // Real catalog value — NOT the 128k/131k family number one would assume.
+    expect(knownContextWindow('@cf/meta/llama-3.3-70b-instruct-fp8-fast', 'custom')).toBe(24_000)
+    expect(knownContextWindow('@cf/qwen/qwen2.5-coder-32b-instruct', 'custom')).toBe(32_768)
+    expect(knownContextWindow('@cf/openai/gpt-oss-120b', 'custom')).toBe(128_000)
+    expect(knownContextWindow('@cf/zai-org/glm-5.3', 'custom')).toBe(1_310_720)
+    expect(knownContextWindow('@cf/deepseek-ai/deepseek-v4-pro-0813', 'custom')).toBe(1_048_576)
+  })
+
+  it('matches @cf/ ids case-insensitively', () => {
+    expect(knownContextWindow('@CF/Zai-Org/GLM-5.3-Flash', 'custom')).toBe(1_310_720)
+  })
+
+  it('does not apply Cloudflare windows to bare ids on other hosts', () => {
+    // Only the full @cf/ id proves Cloudflare's serving configuration.
+    expect(knownContextWindow('glm-5.2', 'custom')).toBeUndefined()
+    expect(knownContextWindow('gpt-oss-120b', 'custom')).toBeUndefined()
+  })
+
+  it('budgets the loop against the real window for manually entered @cf/ models', () => {
+    const model = {
+      id: '@cf/zai-org/glm-5.3-flash',
+      inputModalities: ['text'] as const,
+      outputModalities: ['text'] as const,
+      supportsTools: true,
+      supportsVision: false
+    }
+    expect(contextWindowFor(model, 'custom')).toBe(1_310_720)
+    // Per-share floor: 157,286 + 235,929 + 196,608 + 524,288 (remainder to buffer).
+    expect(contentWindow(model, 'custom')).toBe(1_114_111)
+  })
+})
+
 describe('DeepSeek seed + budget', () => {
   it('seeds V4 models with 1M windows', () => {
     const seeds = seedModelsFor('deepseek')

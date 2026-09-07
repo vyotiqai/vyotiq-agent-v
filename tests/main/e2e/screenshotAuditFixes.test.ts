@@ -225,7 +225,7 @@ describe('e2e screenshot audit fixes (T1/T2/R1)', () => {
     )
     expect(result.ok).toBe(false)
     expect(result.content).toMatch(/Unknown tool "write_file_check"/)
-    expect(result.content).toMatch(/edit, str_replace, or multi_edit/)
+    expect(result.content).toMatch(/edit or str_replace/)
 
     let msgs: ChatMessage[] = [{ role: 'user', content: 'cleanup' }]
     msgs = appendAssistantWithTools(msgs, '', [

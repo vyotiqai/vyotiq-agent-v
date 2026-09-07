@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'child_process'
+import { basename } from 'path'
 import kill from 'tree-kill'
 import { assertInsideWorkspace } from '../../../shared/workspacePath'
 import type { TerminalShell } from '../../../shared/ipc'
@@ -395,6 +396,61 @@ export function terminalNestedPowerShellPreflight(
 ): string | null {
   const nested = nestedPowerShellCommandMessage(command, resolved)
   return nested ? formatShellPreflight(cwd, resolved, nested) : null
+}
+
+/**
+ * Image names that terminate this app when killed: the dev Electron binary
+ * (`electron`) and the packaged app binary (e.g. `Vyotiq`). An agent cleanup
+ * sweep that kills by image name takes the host — and the running agent —
+ * down with the orphans (TerminateProcess exit code -1, nothing saved).
+ */
+export function hostProcessImageNames(): string[] {
+  const names = new Set<string>(['electron'])
+  try {
+    const base = basename(process.execPath).replace(/\.exe$/i, '').toLowerCase()
+    if (base) names.add(base)
+  } catch {
+    /* ignore */
+  }
+  return [...names]
+}
+
+/**
+ * Name-based kills of the host image are refused outright; the agent must kill
+ * verified orphan PIDs instead. PID-targeted kills stay allowed.
+ */
+export function selfKillCommandMessage(
+  command: string,
+  hostImageNames: readonly string[]
+): string | null {
+  const killPrimitive =
+    /Stop-Process|\btaskkill\b|\btskill\b|\bpkill\b|\bTerminateProcess\b|\bkill\b/i
+  if (!killPrimitive.test(command)) return null
+  const escaped = hostImageNames.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  if (escaped.length === 0) return null
+  // The lookahead excludes a word char or dash right after the image name so
+  // `electron` does not match electron-builder / electron-vite.
+  const hostToken = new RegExp(
+    "(?:^|[\\\\/\"'\\s=;,|(&])(" + escaped.join('|') + ')(?![\\w-])',
+    'i'
+  )
+  if (!hostToken.test(command)) return null
+  return [
+    `Refused: this command would kill the Vyotiq app itself. The agent host runs as ${hostImageNames.join(' / ')}; a name-based kill (Stop-Process / taskkill /IM / kill) terminates the host, ends this run, and loses all in-flight work.`,
+    'Kill verified orphan PIDs instead — never by image name:',
+    `  Get-CimInstance Win32_Process -Filter "Name = '<image>.exe'" | Select-Object ProcessId, ExecutablePath, CommandLine`,
+    `  Stop-Process -Id <pid> -Force   # per verified orphan only; never PID ${process.pid} (this app) or its process tree`,
+    'exit_code: 1'
+  ].join('\n')
+}
+
+export function terminalSelfKillPreflight(
+  command: string,
+  resolved: ResolvedTerminalShell,
+  cwd: string
+): string | null {
+  const body = selfKillCommandMessage(command, hostProcessImageNames())
+  return body ? formatShellPreflight(cwd, resolved, body) : null
 }
 
 /** Append Windows cmd hints when a pipeline stage used a Unix-only tool. */
@@ -1022,6 +1078,12 @@ export async function toolTerminal(
     const nested = terminalNestedPowerShellPreflight(command, resolved, cwd)
     if (nested) {
       resolve(nested)
+      return
+    }
+
+    const selfKill = terminalSelfKillPreflight(command, resolved, cwd)
+    if (selfKill) {
+      resolve(selfKill)
       return
     }
 

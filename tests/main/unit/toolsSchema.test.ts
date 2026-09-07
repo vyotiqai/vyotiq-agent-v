@@ -38,7 +38,7 @@ describe('toolsSchema', () => {
   it('covers every executable built-in with a short description', () => {
     const names = AGENT_TOOLS.map((t) => t.name).sort()
     expect(names).toEqual([...BUILTIN_TOOL_NAMES].sort())
-    expect(names.length).toBe(61)
+    expect(names.length).toBe(60)
     expect(names).toEqual(
       expect.arrayContaining([
         'github_pr_create',
@@ -64,7 +64,7 @@ describe('toolsSchema', () => {
   it('wires a real handler for every built-in tool (no missing/stub handlers)', () => {
     const handlerNames = Object.keys(BUILTIN_HANDLERS).sort()
     expect(handlerNames).toEqual([...BUILTIN_TOOL_NAMES].sort())
-    expect(handlerNames).toHaveLength(61)
+    expect(handlerNames).toHaveLength(60)
     for (const name of BUILTIN_TOOL_NAMES) {
       const handler = BUILTIN_HANDLERS[name as keyof typeof BUILTIN_HANDLERS]
       expect(typeof handler, `${name} handler must be a function`).toBe('function')
@@ -155,7 +155,7 @@ describe('toolsSchema', () => {
     expect(todo!.description).toMatch(/merge/i)
     expect(todo!.description).toMatch(/in_progress/)
     expect(todo!.description).toMatch(/demoted to pending/)
-    expect(todo!.description).not.toMatch(/before edit, str_replace, multi_edit, delete, or terminal/)
+    expect(todo!.description).not.toMatch(/before edit, str_replace, delete, or terminal/)
     const status = (
       todo!.parameters as {
         properties: { todos: { items: { properties: { status: Record<string, unknown> } } } }
@@ -313,10 +313,23 @@ describe('harness tool catalog', () => {
     expect(goal.description).toMatch(/child-only user prompt/i)
     expect(goal.description).toMatch(/sub-tasks/)
     expect(goal.description).toMatch(/no parent transcript/i)
-    expect(validateToolArgs('spawn_agent_instance', JSON.stringify({ goal: '   ' })).ok).toBe(false)
-    expect(validateToolArgs('spawn_agent_instance', JSON.stringify({ goal: 'audit src/main' })).ok).toBe(
-      true
-    )
+    expect(
+      validateToolArgs(
+        'spawn_agent_instance',
+        JSON.stringify({ goal: '   ', outcome: 'o', sub_tasks: ['a'], done_when: 'd' })
+      ).ok
+    ).toBe(false)
+    expect(
+      validateToolArgs(
+        'spawn_agent_instance',
+        JSON.stringify({
+          goal: 'audit src/main',
+          outcome: 'o',
+          sub_tasks: ['a'],
+          done_when: 'd',
+        })
+      ).ok
+    ).toBe(true)
   })
 
   it('describes await as waiting those run_ids together in one step', () => {
@@ -562,18 +575,6 @@ describe('harness tool catalog', () => {
     expect(result.data.pattern).toBeUndefined()
   })
 
-  it('rejects multi_edit items that pass both contents and diff', () => {
-    const result = validateToolArgs(
-      'multi_edit',
-      JSON.stringify({
-        edits: [{ path: 'a.ts', contents: 'x', diff: '@@ -1 +1 @@\n-a\n+b\n' }]
-      })
-    )
-    expect(result.ok).toBe(false)
-    if (result.ok) return
-    expect(result.error).toMatch(/contents or diff, not both/)
-  })
-
   it('rejects request_mcp_tools and release_mcp_tools without tools or serverId', () => {
     const request = validateToolArgs('request_mcp_tools', '{}')
     const release = validateToolArgs('release_mcp_tools', '{}')
@@ -609,15 +610,36 @@ describe('harness tool catalog', () => {
     const spawn = AGENT_TOOLS.find((t) => t.name === 'spawn_agent_instance')
     expect(spawn).toBeDefined()
     expect(spawn!.description).toMatch(/independent workstream/i)
-    expect(spawn!.description).toMatch(/fan them out across instances/i)
+    expect(spawn!.description).toMatch(/fanning them out across instances/i)
     expect(spawn!.description).toMatch(/no child is overloaded/i)
-    expect(spawn!.description).toMatch(/zero spawned instances/)
+    expect(spawn!.description).toMatch(/spawned zero instances/)
     expect(spawn!.description).toMatch(/child never sees this conversation/i)
     expect(spawn!.description).toMatch(/worktree branch/i)
     expect(spawn!.description).toMatch(/run_ids together in one step/i)
+    expect(spawn!.description).toMatch(/structured brief — outcome, sub_tasks, done_when/)
     const awaitTool = AGENT_TOOLS.find((t) => t.name === 'await_agent_instance')
     expect(awaitTool!.description).toMatch(/run_ids together in one step/i)
     expect(awaitTool!.description).toMatch(/On timeout the child keeps running/i)
+    const validBrief = validateToolArgs(
+      'spawn_agent_instance',
+      JSON.stringify({ goal: 'g', outcome: 'o', sub_tasks: ['a'], done_when: 'd' })
+    )
+    expect(validBrief.ok).toBe(true)
+    const missingFieldCases: [string, Record<string, unknown>][] = [
+      ['outcome', { goal: 'g', sub_tasks: ['a'], done_when: 'd' }],
+      ['sub_tasks', { goal: 'g', outcome: 'o', done_when: 'd' }],
+      ['done_when', { goal: 'g', outcome: 'o', sub_tasks: ['a'] }]
+    ]
+    for (const [field, args] of missingFieldCases) {
+      const result = validateToolArgs('spawn_agent_instance', JSON.stringify(args))
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error).toContain(field)
+    }
+    const emptySubTasks = validateToolArgs(
+      'spawn_agent_instance',
+      JSON.stringify({ goal: 'g', outcome: 'o', sub_tasks: [], done_when: 'd' })
+    )
+    expect(emptySubTasks.ok).toBe(false)
   })
 
   it('merge_agent_instance documents merge constraints', () => {

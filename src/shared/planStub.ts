@@ -6,10 +6,20 @@ export const PLAN_STUB_HINT =
 /** Substring used to detect an unfilled Plan-mode stub. */
 export const PLAN_STUB_MARKER = 'Draft the plan here.'
 
+/**
+ * Canonical plan skeleton seeded into plan.md. Each prompt is an italic
+ * placeholder that `isPlanSectionPromptLine` strips once chrome detection
+ * sees the draft (keep the normalized strings in LEGACY_PROMPTS in sync).
+ */
 export const PLAN_SECTIONS = [
-  { heading: 'Goal' },
-  { heading: 'Steps' },
-  { heading: 'Done when' }
+  { heading: 'Goal', prompt: 'What result do you want?' },
+  { heading: 'Scope', prompt: 'What is included and excluded?' },
+  {
+    heading: 'Steps',
+    prompt: 'Small, understandable phases — each names affected paths and how it is verified.'
+  },
+  { heading: 'Done when', prompt: 'How the finished work will be checked?' },
+  { heading: 'Risks', prompt: 'Anything that could affect the outcome?' }
 ] as const
 
 const LEGACY_HEADINGS = [
@@ -21,6 +31,7 @@ const LEGACY_HEADINGS = [
   'Ordered steps',
   'Verification',
   'Risks or trade-offs',
+  'Risks',
   'Steps',
   'Done when'
 ] as const
@@ -32,6 +43,7 @@ const LEGACY_PROMPTS = new Set([
   'what needs your decision',
   'what direction will be taken and why',
   'small, understandable phases',
+  'small, understandable phases — each names affected paths and how it is verified',
   'how the finished work will be checked',
   'anything that could affect the outcome'
 ])
@@ -43,7 +55,7 @@ export const DEFAULT_PLAN_STUB = [
   '',
   `_${PLAN_STUB_HINT}_`,
   '',
-  ...PLAN_SECTIONS.flatMap(({ heading }) => [`## ${heading}`, '', ''])
+  ...PLAN_SECTIONS.flatMap(({ heading, prompt }) => [`## ${heading}`, '', `_${prompt}_`, ''])
 ].join('\n')
 
 function unwrapEmphasis(line: string): string {

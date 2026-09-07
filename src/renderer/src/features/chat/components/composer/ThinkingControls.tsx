@@ -248,48 +248,62 @@ export function ThinkingControls({
     ? ariaLabel
     : `${ariaLabel} Shift-click for previous.${costHint}`
 
+  const button = (
+    <button
+      type="button"
+      disabled={locked}
+      aria-label={ariaLabel}
+      className={cn(chromePillButton, 'gap-0', on ? 'text-fg' : 'text-muted')}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={(e) => {
+        e.preventDefault()
+        if (locked) return
+        advance(e.shiftKey)
+      }}
+    >
+      <span className={cn('leading-tight', on ? 'text-fg' : 'text-tertiary')}>
+        {current.short}
+      </span>
+    </button>
+  )
+
   return (
     <div className={cn('relative flex h-7 shrink-0 items-center gap-0.5', className)}>
-      <Tooltip content={tip} delayMs={300}>
-      <button
-        type="button"
-        disabled={locked}
-        aria-label={ariaLabel}
-        className={cn(chromePillButton, 'gap-0', on ? 'text-fg' : 'text-muted')}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={(e) => {
-          e.preventDefault()
-          if (locked) return
-          advance(e.shiftKey)
-        }}
-      >
-        <span className={cn('leading-tight', on ? 'text-fg' : 'text-tertiary')}>
-          {current.short}
-        </span>
-      </button>
-      </Tooltip>
+      {/* Disabled buttons ignore pointer events — wrap so hover still shows why. */}
+      {locked ? (
+        <Tooltip content={tip} delayMs={300}>
+          <span className="inline-grid cursor-not-allowed" aria-disabled="true">
+            {button}
+          </span>
+        </Tooltip>
+      ) : (
+        <Tooltip content={tip} delayMs={300}>
+          {button}
+        </Tooltip>
+      )}
       {showSuggestLower ? (
         <span
           className="inline-flex h-7 max-w-[11rem] shrink-0 items-center gap-0.5 overflow-hidden rounded-md text-2xs leading-tight text-warning @max-[560px]:hidden"
           role="status"
         >
-          <button
-            type="button"
-            disabled={lowerLocked}
-            className={cn(
-              'min-w-0 truncate rounded px-1 font-medium vy-transition hover:bg-warning/20',
-              'disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]'
-            )}
-            title={lowerTitle}
-            aria-label={`Lower thinking effort to ${lowerLabel}`}
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              applyLower()
-            }}
-          >
-            Lower · {lowerLabel}
-          </button>
+          <Tooltip content={lowerTitle}>
+            <button
+              type="button"
+              disabled={lowerLocked}
+              className={cn(
+                'min-w-0 truncate rounded px-1 font-medium vy-transition hover:bg-warning/20',
+                'disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]'
+              )}
+              aria-label={`Lower thinking effort to ${lowerLabel}`}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                applyLower()
+              }}
+            >
+              Lower · {lowerLabel}
+            </button>
+          </Tooltip>
           <button
             type="button"
             className="inline-grid size-4 place-items-center rounded text-warning/80 vy-transition hover:bg-warning/20 hover:text-warning"

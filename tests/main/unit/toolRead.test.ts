@@ -5,6 +5,7 @@ import { tmpdir } from 'os'
 import { deflateRawSync } from 'zlib'
 import { toolRead } from '@main/agent/tools/read'
 import { extractDocxText } from '@main/agent/tools/docxText'
+import { READ_DEFAULT_MAX_LINES } from '@main/agent/tools/read'
 
 function crc32(buf: Buffer): number {
   let crc = ~0
@@ -226,17 +227,18 @@ describe('toolRead', () => {
 
     let inFlight = 0
     let maxConcurrent = 0
-    const origReadFile = fsp.readFile.bind(fsp)
-    const spy = vi.spyOn(fsp, 'readFile').mockImplementation((async (...args: unknown[]) => {
+    // Default reads stream via fsp.open/fh.read, so overlap is observed there.
+    const origOpen = fsp.open.bind(fsp)
+    const spy = vi.spyOn(fsp, 'open').mockImplementation((async (...args: unknown[]) => {
       inFlight += 1
       maxConcurrent = Math.max(maxConcurrent, inFlight)
       await new Promise((r) => setTimeout(r, 40))
       try {
-        return await origReadFile(...(args as Parameters<typeof origReadFile>))
+        return await origOpen(...(args as Parameters<typeof origOpen>))
       } finally {
         inFlight -= 1
       }
-    }) as typeof fsp.readFile)
+    }) as unknown as typeof fsp.open)
 
     try {
       const [a, b] = await Promise.all([
@@ -290,5 +292,52 @@ describe('toolRead', () => {
     const xml = wordDocumentXml(['Architecture overview'])
     const buf = buildZip([{ name: 'word/document.xml', data: xml }])
     expect(extractDocxText(buf)).toBe('Architecture overview')
+  })
+
+  it('truncates a default read past READ_DEFAULT_MAX_LINES with a header and hint', async () => {
+    const count = READ_DEFAULT_MAX_LINES + 500
+    writeFileSync(
+      join(root, 'over-cap.txt'),
+      Array.from({ length: count }, (_, i) => `L${i + 1}`).join('\n') + '\n',
+      'utf8'
+    )
+    const out = await toolRead(root, 'over-cap.txt')
+    const lines = out.split('\n')
+    expect(lines[0]).toBe(`--- lines 1-${READ_DEFAULT_MAX_LINES} of ${count} ---`)
+    expect(lines[1]).toBe('L1')
+    expect(lines[READ_DEFAULT_MAX_LINES]).toBe(`L${READ_DEFAULT_MAX_LINES}`)
+    expect(lines).toHaveLength(READ_DEFAULT_MAX_LINES + 2)
+    expect(lines[READ_DEFAULT_MAX_LINES + 1]).toBe(
+      `… read truncated at ${READ_DEFAULT_MAX_LINES} lines; pass startLine/endLine to read further.`
+    )
+    expect(out).not.toContain(`L${READ_DEFAULT_MAX_LINES + 1}`)
+  })
+
+  it('keeps byte-identical output for files at or under the cap (no header)', async () => {
+    const atCap =
+      Array.from({ length: READ_DEFAULT_MAX_LINES }, (_, i) => `L${i + 1}`).join('\n') + '\n'
+    writeFileSync(join(root, 'at-cap.txt'), atCap, 'utf8')
+    expect(await toolRead(root, 'at-cap.txt')).toBe(atCap)
+
+    writeFileSync(join(root, 'trail.txt'), 'one\ntwo\n', 'utf8')
+    expect(await toolRead(root, 'trail.txt')).toBe('one\ntwo\n')
+
+    writeFileSync(join(root, 'no-trail.txt'), 'one\ntwo', 'utf8')
+    expect(await toolRead(root, 'no-trail.txt')).toBe('one\ntwo')
+
+    writeFileSync(join(root, 'crlf.txt'), 'a\r\nb\r\n', 'utf8')
+    expect(await toolRead(root, 'crlf.txt')).toBe('a\r\nb\r\n')
+
+    writeFileSync(join(root, 'empty.txt'), '', 'utf8')
+    expect(await toolRead(root, 'empty.txt')).toBe('')
+  })
+
+  it('explicit startLine/endLine still reads exact ranges in a file past the cap', async () => {
+    const start = READ_DEFAULT_MAX_LINES + 1
+    const out = await toolRead(root, 'over-cap.txt', { startLine: start })
+    expect(out).toBe(
+      `--- lines ${start}-${start + 499} of ${READ_DEFAULT_MAX_LINES + 500} ---\n` +
+        Array.from({ length: 500 }, (_, i) => `L${start + i}`).join('\n')
+    )
   })
 })

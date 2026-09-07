@@ -98,7 +98,7 @@ const CANCEL_BACKGROUND_RETRY_MS = 45_000
 const CANCEL_BACKGROUND_RETRY_EVERY_MS = 5_000
 
 /** Writing tools need full args for the Changes panel diffs; everything else is capped. */
-const KEEP_FULL_ARGS_TOOLS = new Set(['edit', 'multi_edit', 'str_replace', 'delete'])
+const KEEP_FULL_ARGS_TOOLS = new Set(['edit', 'str_replace', 'delete'])
 
 function argsPreviewForUi(name: string, args: string): string {
   // Edit/write tools parse diffs from argsPreview while running. Capping at
@@ -1257,6 +1257,21 @@ const UI_SUSPEND_ALLOWED_EVENTS = new Set<AgentEvent['type']>([
   'loop_update'
 ])
 
+/** Per-run card expansion state persisted via workspace UI state. */
+export type RunExpansions = {
+  toolIds: string[]
+  groupIds: string[]
+  thinkingIds: string[]
+  collapsedTurns: number[]
+}
+
+export const EMPTY_RUN_EXPANSIONS: RunExpansions = {
+  toolIds: [],
+  groupIds: [],
+  thinkingIds: [],
+  collapsedTurns: []
+}
+
 export type CreateChatStreamControllerOptions = {
   workspacePath: string
   runId?: string | null
@@ -1266,12 +1281,17 @@ export type CreateChatStreamControllerOptions = {
   getAgentMode?: () => AgentInteractionMode
   /** Sync composer mode when the agent calls switch_mode. */
   onAgentModeChange?: (mode: AgentInteractionMode) => void
+  /** Restored expansion state for this run (survives reload/tab switches). */
+  initialExpansions?: Partial<RunExpansions>
+  /** Persist expansion changes (debounced by the caller). */
+  onExpansionsChange?: (next: RunExpansions) => void
 }
 
 export function createChatStreamController(
   options: CreateChatStreamControllerOptions
 ): ChatStreamController {
   const { workspacePath, onRunIdAssigned, onTerminal, getAgentMode, onAgentModeChange } = options
+  const { initialExpansions, onExpansionsChange } = options
   let lastNotifiedAgentMode: AgentInteractionMode | null = null
   const notifyAgentMode = (mode: AgentInteractionMode | null | undefined): void => {
     if (!mode || mode === lastNotifiedAgentMode) return
@@ -1367,6 +1387,57 @@ export function createChatStreamController(
     toolContentCache.clear()
     toolContentPreviews.clear()
     pendingToolArgsFull.clear()
+  }
+
+  /**
+   * Persisted expansion state. Hydration rebuilds items without reader flags,
+   * which reset every expanded tool/thinking card and collapsed turn; these
+   * sets are the durable source, re-applied after hydration and written to
+   * workspace UI state on change.
+   */
+  let restoringExpansions = false
+  const expandedToolIds = new Set(initialExpansions?.toolIds ?? [])
+  const expandedGroupIds = new Set(initialExpansions?.groupIds ?? [])
+  const expandedThinkingIds = new Set(initialExpansions?.thinkingIds ?? [])
+
+  const expansionsSnapshot = (): RunExpansions => ({
+    toolIds: [...expandedToolIds],
+    groupIds: [...expandedGroupIds],
+    thinkingIds: [...expandedThinkingIds],
+    collapsedTurns: [...state.collapsedTurnIndices]
+  })
+
+  const notifyExpansions = (): void => {
+    if (restoringExpansions) return
+    onExpansionsChange?.(expansionsSnapshot())
+  }
+
+  /** Re-apply persisted expansion flags onto (re)hydrated items. */
+  const applyPersistedExpansions = (items: UiItem[]): UiItem[] => {
+    if (
+      expandedToolIds.size === 0 &&
+      expandedGroupIds.size === 0 &&
+      expandedThinkingIds.size === 0
+    ) {
+      return items
+    }
+    return items.map((item) => {
+      if (item.kind === 'tool') {
+        const id = item.id || item.tool.id
+        const toolExpanded = expandedToolIds.has(id)
+        const groupExpanded = expandedGroupIds.has(id)
+        if (!toolExpanded && !groupExpanded) return item
+        return {
+          ...item,
+          ...(toolExpanded ? { toolExpanded: true as const } : {}),
+          ...(groupExpanded ? { groupExpanded: true as const } : {})
+        }
+      }
+      if (item.kind === 'message' && expandedThinkingIds.has(item.id)) {
+        return item.thinkingExpanded ? item : { ...item, thinkingExpanded: true }
+      }
+      return item
+    })
   }
 
   const applyToolCallDelta = (
@@ -1699,7 +1770,7 @@ export function createChatStreamController(
     runTerminalTick: 0,
     pendingRun: false,
     transcriptLoading: false,
-    collapsedTurnIndices: [],
+    collapsedTurnIndices: [...(initialExpansions?.collapsedTurns ?? [])],
     writeCheckpoint: null,
     pendingFollowUps: [],
     agentInstances: {}
@@ -1923,6 +1994,7 @@ export function createChatStreamController(
     adoptHydratedUsage(hydrated)
     patch({
       ...hydrated,
+      items: applyPersistedExpansions(hydrated.items),
       pendingFollowUps: hydratedPending,
       runId: id,
       pendingRun: false,
@@ -3502,11 +3574,13 @@ export function createChatStreamController(
     pendingCancel = false
     const mode = modeFromPersisted(events)
     if (mode) notifyAgentMode(mode)
+    const hydrated = hydrateFromDisk(kept, events, dismissedErrorMessage, {
+      idle: true,
+      priorAgentInstances: state.agentInstances
+    })
     patch({
-      ...hydrateFromDisk(kept, events, dismissedErrorMessage, {
-        idle: true,
-        priorAgentInstances: state.agentInstances
-      }),
+      ...hydrated,
+      items: applyPersistedExpansions(hydrated.items),
       ...(eventsLoadError ? { error: eventsLoadError } : {}),
       pendingFollowUps: hydratePendingFollowUps([], res.data.pendingFollowUps, state.pendingFollowUps),
       runId: id,
@@ -3661,7 +3735,8 @@ export function createChatStreamController(
     adoptHydratedUsage(hydrated)
     patch({
       // Transcript load / sidebar switch — run is not live on this controller.
-      ...hydrated
+      ...hydrated,
+      items: applyPersistedExpansions(hydrated.items)
     })
   }
 
@@ -3807,7 +3882,7 @@ export function createChatStreamController(
     const pendingQuestions = state.items.filter(
       (item): item is Extract<UiItem, { kind: 'question' }> => item.kind === 'question'
     )
-    const mergedItems =
+    const mergedItems = applyPersistedExpansions(
       pendingQuestions.length === 0
         ? hydrated.items
         : [
@@ -3816,6 +3891,7 @@ export function createChatStreamController(
               (q) => !hydrated.items.some((item) => item.kind === 'question' && item.id === q.id)
             )
           ]
+    )
     patch({
       ...hydrated,
       items: mergedItems,
@@ -3830,6 +3906,8 @@ export function createChatStreamController(
   }
 
   const setToolExpanded = (toolCallId: string, expanded: boolean): void => {
+    if (expanded) expandedToolIds.add(toolCallId)
+    else expandedToolIds.delete(toolCallId)
     if (!expanded) {
       const preview = toolContentPreviews.get(toolCallId)
       const full = toolContentCache.get(toolCallId)
@@ -3850,6 +3928,7 @@ export function createChatStreamController(
               : item
           )
         })
+        notifyExpansions()
         return
       }
     }
@@ -3860,9 +3939,12 @@ export function createChatStreamController(
           : item
       )
     })
+    notifyExpansions()
   }
 
   const setGroupExpanded = (anchorToolCallId: string, expanded: boolean): void => {
+    if (expanded) expandedGroupIds.add(anchorToolCallId)
+    else expandedGroupIds.delete(anchorToolCallId)
     patch({
       items: state.items.map((item) =>
         item.kind === 'tool' && (item.id === anchorToolCallId || item.tool.id === anchorToolCallId)
@@ -3870,6 +3952,7 @@ export function createChatStreamController(
           : item
       )
     })
+    notifyExpansions()
   }
 
   const handleApprovalRequest = (request: ToolApprovalRequest): void => {
@@ -4031,6 +4114,8 @@ export function createChatStreamController(
   }
 
   const setThinkingExpanded = (messageId: string, expanded: boolean): void => {
+    if (expanded) expandedThinkingIds.add(messageId)
+    else expandedThinkingIds.delete(messageId)
     patch({
       items: state.items.map((item) =>
         item.kind === 'message' && item.id === messageId
@@ -4038,12 +4123,14 @@ export function createChatStreamController(
           : item
       )
     })
+    notifyExpansions()
   }
 
   const toggleTurnCollapsed = (turnIndex: number): void => {
     const collapsed = new Set(state.collapsedTurnIndices)
     if (!collapsed.delete(turnIndex)) collapsed.add(turnIndex)
     patch({ collapsedTurnIndices: [...collapsed] })
+    notifyExpansions()
   }
 
   const patchToolContent = (toolCallId: string, content: string): void => {
@@ -4086,7 +4173,11 @@ export function createChatStreamController(
     const res = await window.vyotiq.loadToolResult(workspacePath, id, toolCallId)
     if (disposed) return null
     if (!res.ok) {
-      logger.warn('loadToolResult failed', {
+      // A run interrupted mid-tool-call never persisted a result line; that is
+      // expected after a crash/quit, not a failure worth warn-level noise.
+      const notFound = /tool result not found/i.test(res.error ?? '')
+      const log = notFound ? logger.debug.bind(logger) : logger.warn.bind(logger)
+      log('loadToolResult failed', {
         scope: 'chat',
         correlationId: id,
         toolCallId,
@@ -4095,7 +4186,9 @@ export function createChatStreamController(
       const idx = findToolRowIndex(state.items, toolCallId)
       const item = idx >= 0 ? state.items[idx] : undefined
       if (item?.kind === 'tool') {
-        const notice = "Couldn't load full output."
+        const notice = notFound
+          ? 'Full output not saved — the run was interrupted before this tool finished.'
+          : "Couldn't load full output."
         patch({
           items: replaceAt(state.items, idx, {
             ...item,

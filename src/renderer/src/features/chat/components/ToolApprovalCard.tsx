@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Icon } from '@renderer/lib/icons'
-import { cn } from '@renderer/lib/ui'
+import { Tooltip, cn } from '@renderer/lib/ui'
 import { QUESTION_GATE_BODY, QUESTION_GATE_FOOTER, QUESTION_GATE_HEADER, QUESTION_GATE_SURFACE } from '@renderer/lib/utils/layout'
 import type { UiToolApproval } from '@shared/transcript'
 import type { ToolApprovalDecision } from '@shared/ipc'
@@ -136,33 +136,47 @@ export const ToolApprovalCard = memo(function ToolApprovalCard({
         </p>
       ) : null}
       <div className={cn(QUESTION_GATE_FOOTER, 'flex-wrap border-t border-border/40')}>
-        {CHOICES.map((choice) => (
+        {CHOICES.map((choice) => {
+          if (!choice.primary) {
+            return (
+              <button
+                key={choice.decision}
+                type="button"
+                disabled={!canDecide}
+                className={cn(
+                  'rounded-md border px-2 py-1 text-xs vy-transition disabled:opacity-[var(--vy-disabled-opacity)]',
+                  'border-border text-fg hover:bg-surface'
+                )}
+                onClick={() => decide(choice.decision)}
+              >
+                {pendingDecision === choice.decision && phase === 'pending' ? 'Sending…' : choice.label}
+              </button>
+            )
+          }
+          return (
+            <Tooltip key={choice.decision} content={`${choice.label} (Enter)`}>
+              <button
+                ref={allowOnceRef}
+                type="button"
+                disabled={!canDecide}
+                className="rounded-md border border-accent bg-accent px-2 py-1 text-xs text-accent-fg vy-transition hover:opacity-90 disabled:opacity-[var(--vy-disabled-opacity)]"
+                onClick={() => decide(choice.decision)}
+              >
+                {pendingDecision === choice.decision && phase === 'pending' ? 'Sending…' : choice.label}
+              </button>
+            </Tooltip>
+          )
+        })}
+        <Tooltip content="Deny (Esc)">
           <button
-            key={choice.decision}
-            ref={choice.primary ? allowOnceRef : undefined}
             type="button"
             disabled={!canDecide}
-            title={choice.primary ? `${choice.label} (Enter)` : undefined}
-            className={cn(
-              'rounded-md border px-2 py-1 text-xs vy-transition disabled:opacity-[var(--vy-disabled-opacity)]',
-              choice.primary
-                ? 'border-accent bg-accent text-accent-fg hover:opacity-90'
-                : 'border-border text-fg hover:bg-surface'
-            )}
-            onClick={() => decide(choice.decision)}
+            className="ml-auto rounded-md border border-border px-2 py-1 text-xs text-danger vy-transition hover:bg-surface disabled:opacity-[var(--vy-disabled-opacity)]"
+            onClick={() => decide('deny')}
           >
-            {pendingDecision === choice.decision && phase === 'pending' ? 'Sending…' : choice.label}
+            {pendingDecision === 'deny' && phase === 'pending' ? 'Sending…' : 'Deny'}
           </button>
-        ))}
-        <button
-          type="button"
-          disabled={!canDecide}
-          title="Deny (Esc)"
-          className="ml-auto rounded-md border border-border px-2 py-1 text-xs text-danger vy-transition hover:bg-surface disabled:opacity-[var(--vy-disabled-opacity)]"
-          onClick={() => decide('deny')}
-        >
-          {pendingDecision === 'deny' && phase === 'pending' ? 'Sending…' : 'Deny'}
-        </button>
+        </Tooltip>
       </div>
     </div>
   )

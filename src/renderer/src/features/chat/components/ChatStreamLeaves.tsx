@@ -12,7 +12,6 @@ import type { ChatItemsStore, ChatMetaStore } from '../chatStores'
 /** Bumps on workspace change, run end, and (debounced) mid-run mutating tool results. */
 const MUTATING_GIT_TOOLS = new Set([
   'edit',
-  'multi_edit',
   'str_replace',
   'delete',
   'terminal',

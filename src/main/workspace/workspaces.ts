@@ -180,7 +180,8 @@ function defaultUiState(): WorkspaceUiState {
     scrollTopByRunId: {},
     composerDraft: '',
     composerDraftByRunId: {},
-    agentMode: 'agent'
+    agentMode: 'agent',
+    expansionsByRunId: {}
   }
 }
 

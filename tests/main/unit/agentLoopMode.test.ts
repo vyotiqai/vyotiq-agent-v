@@ -169,7 +169,6 @@ describe('runAgent mode and API key', () => {
     expect(seenTools).not.toContain('edit')
     expect(seenTools).not.toContain('terminal')
     expect(seenTools).not.toContain('delete')
-    expect(seenTools).not.toContain('multi_edit')
     expect(existsSync(join(workspace, '.vyotiq'))).toBe(false)
   })
 

@@ -291,7 +291,7 @@ describe('tool UI registry coverage', () => {
         summary: 'placeholder',
         status: 'fail',
         content:
-          'Unknown tool "write_file_check". Use edit, str_replace, or multi_edit to change files.',
+          'Unknown tool "write_file_check". Use edit or str_replace to change files.',
         argsPreview: JSON.stringify({ path: 'placeholder' })
       })
     ).toMatchObject({ target: '' })
@@ -426,36 +426,6 @@ describe('tool UI registry coverage', () => {
     }
 
     expect(getToolEntry('delete').hasBody(recursive)).toBe(true)
-  })
-
-  it('summarizes multi_edit batches without implying one target file', () => {
-    const meta = getToolHeaderMeta({
-      id: 'm1',
-      name: 'multi_edit',
-      summary: 'a.ts, b.tsx',
-      status: 'done',
-      argsPreview: JSON.stringify({
-        edits: [
-          { path: 'src/a.ts', contents: 'one\n' },
-          { path: 'src/b.tsx', contents: 'two\n' }
-        ]
-      })
-    })
-    expect(meta.filePath).toBeUndefined()
-    expect(meta.target).toBe('2 files')
-  })
-
-  it('uses a stable multi-edit target when arguments contain no files', () => {
-    const meta = getToolHeaderMeta({
-      id: 'm-empty',
-      name: 'multi_edit',
-      summary: 'file',
-      status: 'fail',
-      argsPreview: '{}',
-      content: 'edits: Required'
-    })
-    expect(meta.filePath).toBeUndefined()
-    expect(meta.target).toBe('multi-edit')
   })
 
   it('sets git_diff filePath from content headers when args omit path', () => {

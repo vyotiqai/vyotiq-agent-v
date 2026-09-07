@@ -278,6 +278,17 @@ describe('shouldBlockPanelShortcut', () => {
 })
 
 describe('shouldBlockAppShortcut', () => {
+  it('allows the enabled composer when it renders as a combobox', () => {
+    const composer = document.createElement('div')
+    composer.setAttribute('role', 'combobox')
+    composer.setAttribute('aria-label', 'Message')
+    composer.contentEditable = 'true'
+    document.body.appendChild(composer)
+    expect(isMainComposerTarget(composer)).toBe(true)
+    expect(shouldBlockAppShortcut(composer)).toBe(false)
+    composer.remove()
+  })
+
   it('blocks generic inputs and allows the main composer', () => {
     const input = document.createElement('input')
     document.body.appendChild(input)
@@ -296,6 +307,26 @@ describe('shouldBlockAppShortcut', () => {
 })
 
 describe('focusComposerMessage', () => {
+  it('focuses the enabled combobox composer and skips a disabled one', () => {
+    const disabled = document.createElement('div')
+    disabled.setAttribute('role', 'textbox')
+    disabled.setAttribute('aria-label', 'Message')
+    disabled.setAttribute('contenteditable', 'false')
+    document.body.appendChild(disabled)
+
+    const composer = document.createElement('div')
+    composer.setAttribute('role', 'combobox')
+    composer.setAttribute('aria-label', 'Message')
+    composer.contentEditable = 'true'
+    composer.tabIndex = 0
+    document.body.appendChild(composer)
+
+    expect(focusComposerMessage()).toBe(true)
+    expect(document.activeElement).toBe(composer)
+    composer.remove()
+    disabled.remove()
+  })
+
   it('focuses the Message textbox when present and editable', () => {
     const composer = document.createElement('div')
     composer.setAttribute('role', 'textbox')

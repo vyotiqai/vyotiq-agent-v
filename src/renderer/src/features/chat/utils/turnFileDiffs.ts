@@ -9,7 +9,7 @@ import {
 } from '../toolUi'
 import type { ChangedFile, ToolItem, TranscriptRow } from './transcriptRows'
 
-export const WRITING_TOOLS = new Set(['edit', 'multi_edit', 'str_replace', 'delete'])
+export const WRITING_TOOLS = new Set(['edit', 'str_replace', 'delete'])
 
 export function mergeChangedFileAction(
   existing?: 'created' | 'modified' | 'deleted',
@@ -103,25 +103,6 @@ export function diffLinesByPath(tool: UiToolRow): Map<string, DiffLine[]> {
     return out
   }
 
-  if (tool.name === 'multi_edit') {
-    const args = parseArgsRecord(tool.argsPreview)
-    const edits = args?.edits
-    if (!Array.isArray(edits)) return out
-    for (const entry of edits) {
-      if (!entry || typeof entry !== 'object') continue
-      const edit = entry as Record<string, unknown>
-      const path = typeof edit.path === 'string' ? edit.path : ''
-      if (!path) continue
-      const chunk = parseDiffPreview({
-        ...tool,
-        name: 'edit',
-        argsPreview: JSON.stringify(edit)
-      })
-      appendLines(out, path, chunk)
-    }
-    return out
-  }
-
   const { path } = parseEditCardData(tool)
   appendLines(out, path, parseDiffPreview(tool))
   return out
@@ -195,13 +176,7 @@ export function collectSessionChangedFiles(items: UiItem[]): ChangedFile[] {
       }
       continue
     }
-    if (
-      item.tool.name !== 'edit' &&
-      item.tool.name !== 'multi_edit' &&
-      item.tool.name !== 'str_replace'
-    ) {
-      continue
-    }
+    if (item.tool.name !== 'edit' && item.tool.name !== 'str_replace') continue
     for (const change of collectWritingChanges(item.tool)) {
       const key = normalizeRelPath(change.path)
       const existing = totals.get(key)

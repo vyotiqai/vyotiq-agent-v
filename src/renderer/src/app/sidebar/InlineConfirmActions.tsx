@@ -1,6 +1,6 @@
 import { useEffect, useRef, type Ref } from 'react'
 import { Icon } from '@renderer/lib/icons'
-import { cn } from '@renderer/lib/ui'
+import { Tooltip, cn } from '@renderer/lib/ui'
 
 function ConfirmActionButton({
   label,
@@ -18,27 +18,28 @@ function ConfirmActionButton({
   onClick: () => void
 }) {
   return (
-    <button
-      ref={buttonRef}
-      type="button"
-      className={cn(
-        'app-region-no-drag relative inline-grid place-items-center rounded-md text-muted vy-transition hover:bg-surface/60 hover:text-fg',
-        size === 'sm' ? 'size-6' : 'size-7',
-        className
-      )}
-      aria-label={label}
-      title={label}
-      onMouseDown={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-      }}
-      onClick={(e) => {
-        e.stopPropagation()
-        onClick()
-      }}
-    >
-      <Icon name={icon} size={size === 'sm' ? 12 : 14} />
-    </button>
+    <Tooltip content={label}>
+      <button
+        ref={buttonRef}
+        type="button"
+        className={cn(
+          'app-region-no-drag relative inline-grid place-items-center rounded-md text-muted vy-transition hover:bg-surface/60 hover:text-fg',
+          size === 'sm' ? 'size-6' : 'size-7',
+          className
+        )}
+        aria-label={label}
+        onMouseDown={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+        }}
+        onClick={(e) => {
+          e.stopPropagation()
+          onClick()
+        }}
+      >
+        <Icon name={icon} size={size === 'sm' ? 12 : 14} />
+      </button>
+    </Tooltip>
   )
 }
 

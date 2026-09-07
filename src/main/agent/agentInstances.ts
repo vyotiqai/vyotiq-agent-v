@@ -454,6 +454,9 @@ export type SpawnAgentInstanceInput = {
   parentRunId: string
   workspacePath: string
   goal: string
+  outcome: string
+  subTasks: string[]
+  doneWhen: string
   pathScope?: string[]
   emitParentEvent?: (event: AgentEvent) => void
 }
@@ -508,12 +511,52 @@ export async function spawnAgentInstance(
     return { ok: false, error: 'goal is required' }
   }
 
+  const outcome = input.outcome.trim()
+  if (!outcome) {
+    clearRunAbort(childRunId, registered.invokeId)
+    return { ok: false, error: 'outcome is required' }
+  }
+
+  if (!Array.isArray(input.subTasks) || input.subTasks.length === 0) {
+    clearRunAbort(childRunId, registered.invokeId)
+    return { ok: false, error: 'sub_tasks must be a non-empty array of strings' }
+  }
+  const subTasks: string[] = []
+  for (const task of input.subTasks) {
+    const trimmedTask = task.trim()
+    if (!trimmedTask) {
+      clearRunAbort(childRunId, registered.invokeId)
+      return { ok: false, error: 'sub_tasks must be a non-empty array of strings' }
+    }
+    subTasks.push(trimmedTask)
+  }
+
+  const doneWhen = input.doneWhen.trim()
+  if (!doneWhen) {
+    clearRunAbort(childRunId, registered.invokeId)
+    return { ok: false, error: 'done_when is required' }
+  }
+
   const scoped = resolveSpawnPathScope(input.pathScope)
   if (!scoped.ok) {
     clearRunAbort(childRunId, registered.invokeId)
     return scoped
   }
   const pathScope = scoped.pathScope
+
+  const briefLines = [
+    `Outcome: ${outcome}`,
+    '',
+    'Sub-tasks:',
+    ...subTasks.map((task, i) => `${i + 1}. ${task}`),
+    '',
+    `Done when: ${doneWhen}`
+  ]
+  if (pathScope?.length) {
+    briefLines.push(`Paths: ${pathScope.join(', ')}`)
+  }
+  briefLines.push(goalText)
+  const composedGoal = briefLines.join('\n')
   registerChildInstance(input.parentRunId, childRunId, input.workspacePath)
   const releaseChildIpc = registerRunIpcSender(childRunId, wc)
 
@@ -544,7 +587,7 @@ export async function spawnAgentInstance(
   }
 
   try {
-    createRun(input.workspacePath, childRunId, goalText, {
+    createRun(input.workspacePath, childRunId, composedGoal, {
       mode,
       parentRunId: input.parentRunId,
       inlineInstance: true,
@@ -566,14 +609,11 @@ export async function spawnAgentInstance(
     return { ok: false, error: `Failed to create instance run: ${message}` }
   }
 
-  const scopeNote =
-    pathScope && pathScope.length > 0
-      ? `\n\nPath scope (writes must stay within these paths):\n${pathScope.map((p) => `- ${p}`).join('\n')}`
-      : ''
-
+  // The child's prompt is the composed structured brief verbatim:
+  // outcome → sub-tasks → done-when → paths → raw goal (last line).
   const childMessage: ChatMessage = {
     role: 'user',
-    content: `${goalText}${scopeNote}`
+    content: composedGoal
   }
 
   const startedUpdate: AgentEvent = {

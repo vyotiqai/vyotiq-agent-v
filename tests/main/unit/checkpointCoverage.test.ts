@@ -11,7 +11,6 @@ import { mcpFilesystemWriteToolsForTests } from '@main/agent/tools/mcpCheckpoint
 const WORKSPACE_WRITE_BUILTINS = new Set([
   'edit',
   'str_replace',
-  'multi_edit',
   'delete',
   'terminal',
   'edit_notebook',

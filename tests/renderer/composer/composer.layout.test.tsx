@@ -43,70 +43,64 @@ const composerProps = {
 }
 
 describe('Composer layout', () => {
-  it('lays the input and controls out in one inline row', () => {
+  it('gives the field full width with a dedicated control row', () => {
     render(<Composer {...composerProps} />)
 
     const shell = document.querySelector('[data-composer-shell]')
     expect(shell).toBeTruthy()
     const form = shell?.querySelector('form')
     expect(form).toBeTruthy()
-    expect(form?.className).toMatch(/\bpx-2\.5\b/)
-    expect(form?.className).toMatch(/(?:^|\s)py-1\.5(?:\s|$)/)
-    expect(form?.className).not.toMatch(/(?:^|\s)py-2(?:\s|$)/)
-    expect(form?.className).toMatch(/(?:^|\s)gap-1(?:\s|$)/)
-    expect(form?.className).not.toMatch(/(?:^|\s)gap-1\.5(?:\s|$)/)
+    expect(form?.className).toMatch(/\bpx-3\b/)
+    expect(form?.className).toMatch(/(?:^|\s)py-2(?:\s|$)/)
+    expect(form?.className).toMatch(/(?:^|\s)gap-1\.5(?:\s|$)/)
+    expect(form?.className).toMatch(/\bflex-col\b/)
 
     const textarea = screen.getByRole('combobox', { name: /^Message$/i })
-    const toolbar = form?.querySelector('[data-composer-toolbar]')
+    const inputWrap = form?.querySelector('[data-composer-input-wrap]')
+    expect(inputWrap?.className).toMatch(/(?:^|\s)w-full(?:\s|$)/)
+    expect(textarea.className).toMatch(/\bmin-h-9\b/)
+    expect(textarea.className).toMatch(/(?:^|\s)w-full(?:\s|$)/)
+
+    // Control row below the field: leading tools cluster + trailing actions.
+    const row = form?.querySelector('[data-composer-row]')
+    expect(row?.className).toMatch(/(?:^|\s)justify-between(?:\s|$)/)
+    expect(row?.className).toMatch(/\bmin-h-8\b/)
+    const tools = row?.querySelector('[data-composer-toolbar-tools]')
+    const toolbar = row?.querySelector('[data-composer-toolbar]')
+    expect(tools).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Attach files$/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Select model$/i })).toBeTruthy()
+    // Field precedes the control row in the form.
+    expect(inputWrap!.compareDocumentPosition(row!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     const primary = screen.getByRole('button', { name: /^Dictate$/i })
-    expect(toolbar).toBeTruthy()
-    expect(toolbar?.contains(textarea)).toBe(false)
-    expect(form?.contains(textarea)).toBe(true)
-    // Input and controls share one row — no full-width chrome rows.
-    // Bottom-aligned so controls anchor to the draft as it grows multiline.
-    const row = toolbar?.parentElement
-    expect(row?.hasAttribute('data-composer-row')).toBe(true)
-    expect(row?.className).toMatch(/\bitems-end\b/)
-    expect(row?.firstElementChild?.className).toMatch(/\bflex-1\b/)
-    // Without a dictation session the toolbar shrink-wraps beside the input.
-    expect(toolbar?.className).not.toMatch(/\bflex-1\b/)
-    expect(textarea.className).toMatch(/\bmin-h-7\b/)
-    expect(toolbar?.className).toMatch(/\bh-7\b/)
-    expect(toolbar?.className).toMatch(/(?:^|\s)gap-1(?:\s|$)/)
+    expect(textarea.compareDocumentPosition(primary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // Idle toolbar shrink-wraps beside the tools cluster — no row fill.
+    expect(toolbar?.className).toMatch(/\bh-8\b/)
+    expect(toolbar?.className).toMatch(/(?:^|\s)gap-2(?:\s|$)/)
     expect(toolbar?.className).toMatch(/\bitems-center\b/)
+    expect(toolbar?.className).not.toMatch(/\bflex-1\b/)
     expect(toolbar?.className).not.toMatch(/col-span-full/)
-    expect(toolbar?.className).not.toMatch(/border-t/)
-    expect(toolbar?.className).not.toMatch(/\bmin-h-8\b/)
     expect(primary.className).toMatch(/\brounded-md\b/)
     expect(primary.className).not.toMatch(/\brounded-xl\b/)
-
-    expect(textarea.compareDocumentPosition(primary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('stacks the controls under a full-width input once the draft is multiline', () => {
+  it('keeps the two-row anatomy for multiline drafts', () => {
     render(<Composer {...composerProps} />)
 
     const ta = screen.getByRole('combobox', { name: /^Message$/i })
-    ta.textContent = '09:16:33.326 > [agent] token cost step {\n  provider: \'ollama\',\n}'
+    ta.textContent = 'line one\nline two\nline three'
     fireEvent.input(ta)
 
-    const toolbar = document.querySelector('[data-composer-toolbar]')!
-    const row = toolbar.parentElement as HTMLElement
-    const inputWrapper = row.firstElementChild as HTMLElement
-    expect(row.hasAttribute('data-composer-stacked')).toBe(true)
-    expect(row.className).toMatch(/\bflex-col\b/)
-    // Input claims the full width; the toolbar owns its own row below it.
-    expect(inputWrapper.className).toMatch(/(?:^|\s)w-full(?:\s|$)/)
-    expect(inputWrapper.className).not.toMatch(/\bflex-1\b/)
-    expect(toolbar.className).toMatch(/(?:^|\s)w-full(?:\s|$)/)
+    const row = document.querySelector('[data-composer-row]') as HTMLElement
+    const inputWrap = document.querySelector('[data-composer-input-wrap]') as HTMLElement
+    expect(row.className).not.toMatch(/\bflex-col\b/)
+    expect(inputWrap.className).toMatch(/(?:^|\s)w-full(?:\s|$)/)
+    expect(inputWrap.className).not.toMatch(/\bflex-1\b/)
 
-    // Deleting back to a single line restores the inline row.
+    // Deleting back to one line keeps the same anatomy — no reflow juggling.
     ta.textContent = 'one line'
     fireEvent.input(ta)
-    expect(row.hasAttribute('data-composer-stacked')).toBe(false)
-    expect(row.className).toMatch(/\bitems-end\b/)
-    expect(inputWrapper.className).toMatch(/\bflex-1\b/)
-    expect(toolbar.className).not.toMatch(/(?:^|\s)w-full(?:\s|$)/)
+    expect(inputWrap.className).toMatch(/(?:^|\s)w-full(?:\s|$)/)
   })
 
   it('keeps multiline text full width instead of a side column', () => {
@@ -121,7 +115,8 @@ describe('Composer layout', () => {
 
     const toolbar = form?.querySelector('[data-composer-toolbar]')
     expect(toolbar?.contains(textarea)).toBe(false)
-    expect(textarea.className).toMatch(/\bw-full\b/)
+    expect(textarea.className).toMatch(/(?:^|\s)w-full(?:\s|$)/)
+    expect(textarea.className).toMatch(/\bmin-h-9\b/)
     expect(toolbar?.className).toMatch(/\bitems-center\b/)
     expect(toolbar?.className).not.toMatch(/\bitems-end\b/)
   })
@@ -148,12 +143,22 @@ describe('Composer layout', () => {
     expect(toolbar).toBeTruthy()
     expect(toolbar!.className).toMatch(/\bmin-w-0\b/)
     expect(toolbar!.className).not.toMatch(/border-t/)
-    const modelPicker = toolbar!.querySelector('[aria-label="Select model"]')?.parentElement
+    const tools = document.querySelector('[data-composer-toolbar-tools]')!
+    const modelPicker = tools.querySelector('[aria-label="Select model"]')?.parentElement
     expect(modelPicker?.className).toMatch(/\bmin-w-0\b/)
     expect(modelPicker?.className).toMatch(/\bmax-w-\[6rem\]/)
     const mic = screen.getByRole('button', { name: /^Dictate$/i })
     expect(mic.parentElement?.className).toMatch(/\bgap-1\b/)
     expect(mic.parentElement?.className).not.toMatch(/\bgap-0\.5\b/)
+  })
+
+  it('opens the hidden file input from the restored attach button', () => {
+    render(<Composer {...composerProps} />)
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    const clickSpy = vi.spyOn(fileInput, 'click').mockImplementation(() => {})
+    fireEvent.click(screen.getByRole('button', { name: /^Attach files$/i }))
+    expect(clickSpy).toHaveBeenCalledTimes(1)
   })
 
   it('keeps git status out of the composer toolbar', () => {
@@ -172,7 +177,7 @@ describe('Composer layout', () => {
     const toolbar = document.querySelector('[data-composer-toolbar]')
     expect(toolbar).toBeTruthy()
     const slot = [...toolbar!.querySelectorAll('div')].find((el) =>
-      el.className.includes('@min-[280px]:inline-flex')
+      el.className.includes('@min-[300px]')
     )
     expect(slot).toBeTruthy()
     expect(slot!.className).toMatch(/\bhidden\b/)

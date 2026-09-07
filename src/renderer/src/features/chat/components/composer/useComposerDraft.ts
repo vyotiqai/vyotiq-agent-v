@@ -18,6 +18,19 @@ import { parseSlashSubmit } from '@shared/slashCommands'
 import { findSlashChipSubmit, hasComposerContent } from './mentionModel'
 import type { MentionMenuItem } from './mentionModel'
 
+/** Build the native-file / audio extras payload from a cleared draft, if any. */
+function buildExtras(
+  nativeFiles: AttachedNativeFile[],
+  audio: AttachedAudio[]
+): ComposerSendExtras | undefined {
+  return nativeFiles.length || audio.length
+    ? {
+        ...(nativeFiles.length ? { nativeFiles: nativeFiles } : {}),
+        ...(audio.length ? { audio: audio } : {})
+      }
+    : undefined
+}
+
 export function useComposerDraft({
   draft,
   onDraftChange,
@@ -31,7 +44,6 @@ export function useComposerDraft({
   audio = [],
   setAudio,
   setFileError,
-  running,
   disabled,
   sendBlocked,
   onSend,
@@ -66,7 +78,6 @@ export function useComposerDraft({
   audio?: AttachedAudio[]
   setAudio?: Dispatch<SetStateAction<AttachedAudio[]>>
   setFileError: (error: string | null) => void
-  running: boolean
   disabled?: boolean
   sendBlocked?: boolean
   onSend: (
@@ -135,8 +146,6 @@ export function useComposerDraft({
     },
     [rawSetText]
   )
-  void running
-
   const hasAttachments =
     images.length > 0 || files.length > 0 || nativeFiles.length > 0 || audio.length > 0
   const canSend = (hasComposerContent(text) || hasAttachments) && !disabled && !sendBlocked
@@ -223,13 +232,7 @@ export function useComposerDraft({
             return false
           }
           const { draftImages, draftFiles, draftNative, draftAudio, restore } = clearDraft(submissionId)
-          const extras: ComposerSendExtras | undefined =
-            draftNative.length || draftAudio.length
-              ? {
-                  ...(draftNative.length ? { nativeFiles: draftNative } : {}),
-                  ...(draftAudio.length ? { audio: draftAudio } : {})
-                }
-              : undefined
+          const extras = buildExtras(draftNative, draftAudio)
           try {
             const ok = await onSlashSubmit(
               cmd,
@@ -260,13 +263,7 @@ export function useComposerDraft({
             // Unknown slash → fall through as normal chat message
             const { draftText, draftImages, draftFiles, draftNative, draftAudio, restore } =
               clearDraft(submissionId)
-            const extras: ComposerSendExtras | undefined =
-              draftNative.length || draftAudio.length
-                ? {
-                    ...(draftNative.length ? { nativeFiles: draftNative } : {}),
-                    ...(draftAudio.length ? { audio: draftAudio } : {})
-                  }
-                : undefined
+            const extras = buildExtras(draftNative, draftAudio)
             try {
               const ok = await onSend(
                 draftText,
@@ -281,13 +278,7 @@ export function useComposerDraft({
             return
           }
           const { draftImages, draftFiles, draftNative, draftAudio, restore } = clearDraft(submissionId)
-          const extras: ComposerSendExtras | undefined =
-            draftNative.length || draftAudio.length
-              ? {
-                  ...(draftNative.length ? { nativeFiles: draftNative } : {}),
-                  ...(draftAudio.length ? { audio: draftAudio } : {})
-                }
-              : undefined
+          const extras = buildExtras(draftNative, draftAudio)
           try {
             const ok = await onSlashSubmit(
               cmd,
@@ -308,13 +299,7 @@ export function useComposerDraft({
     }
 
     const { draftText, draftImages, draftFiles, draftNative, draftAudio, restore } = clearDraft(submissionId)
-    const extras: ComposerSendExtras | undefined =
-      draftNative.length || draftAudio.length
-        ? {
-            ...(draftNative.length ? { nativeFiles: draftNative } : {}),
-            ...(draftAudio.length ? { audio: draftAudio } : {})
-          }
-        : undefined
+    const extras = buildExtras(draftNative, draftAudio)
     void Promise.resolve()
       .then(() =>
         onSend(

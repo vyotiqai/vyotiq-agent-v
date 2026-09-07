@@ -113,7 +113,7 @@ const searchArgs = z
       .number()
       .int()
       .min(1)
-      .describe('Optional max hits. Omit to return every match.')
+      .describe('Optional max hits. Omit for the 40-result default.')
       .optional(),
     regex: z
       .boolean()
@@ -215,7 +215,7 @@ const globArgs = z
       .number()
       .int()
       .min(1)
-      .describe('Optional max paths. Omit to return every match.')
+      .describe('Optional max paths. Omit for the 100-result default.')
       .optional()
   })
 
@@ -241,7 +241,7 @@ const grepArgs = z
       .number()
       .int()
       .min(1)
-      .describe('Optional max matching lines. Omit to return every match.')
+      .describe('Optional max matching lines. Omit for the 60-result default.')
       .optional()
   })
 
@@ -278,56 +278,6 @@ const listDirArgs = z
       .string()
       .describe('Workspace-relative directory from the workspace root (default workspace root)')
       .optional()
-  })
-
-const multiEditArgs = z
-  .object({
-    edits: z
-      .array(
-        z
-          .object({
-            path: z.string().trim().min(1).describe('File path inside the workspace'),
-            contents: z
-              .string()
-              .describe('Full file contents to write (empty contents is allowed only when creating a new file); use diff to empty an existing file')
-              .optional(),
-            diff: z
-              .string()
-              .describe('Unified diff to apply instead of full contents')
-              .optional()
-          })
-          .refine(
-            (args) =>
-              typeof args.contents === 'string' ||
-              (typeof args.diff === 'string' && args.diff.trim().length > 0),
-            { message: 'each edit requires contents or diff' }
-          )
-          .refine(
-            (args) =>
-              !(typeof args.contents === 'string' && typeof args.diff === 'string' && args.diff.trim()),
-            { message: 'each edit accepts contents or diff, not both', path: ['diff'] }
-          )
-      )
-      .min(1)
-      .superRefine((edits, ctx) => {
-        const seen = new Set<string>()
-        for (let i = 0; i < edits.length; i++) {
-          const path = edits[i]?.path?.trim()
-          if (!path) continue
-          const key = path.replace(/\\/g, '/').toLowerCase()
-          if (seen.has(key)) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: `duplicate path "${edits[i]!.path}" — combine into one edit`,
-              path: [i, 'path']
-            })
-          }
-          seen.add(key)
-        }
-      })
-      .describe(
-        'Edits applied together atomically; if any fails, none are written. Do not list the same path twice.'
-      )
   })
 
 const deleteArgs = z
@@ -894,6 +844,24 @@ const spawnAgentInstanceArgs = z.object({
     .describe(
       'Child-only user prompt: complete workstream (outcome, dependent sub-tasks, done-when). No parent transcript.'
     ),
+  outcome: z
+    .string()
+    .trim()
+    .min(1)
+    .describe('The single deliverable of this one small, atomic workstream.'),
+  sub_tasks: z
+    .array(z.string().trim().min(1))
+    .min(1)
+    .describe(
+      'Ordered, independently verifiable sub-tasks. Never overload one instance with work belonging to another.'
+    ),
+  done_when: z
+    .string()
+    .trim()
+    .min(1)
+    .describe(
+      'Concrete completion criteria: tests, commands, or files that verify the workstream is done.'
+    ),
   path_scope: z
     .array(z.string().min(1))
     .describe(
@@ -1002,12 +970,12 @@ const updateGoalArgs = z.object({
 export const TOOL_REGISTRY = {
   read: {
     description:
-      'Read a file under the workspace root (text only; Word .docx returns extracted document text — do not unzip it in the terminal). Directories return a shallow listing. Prefer startLine/endLine for a line window and omit offset/limit then — offset/limit is a byte window, not lines. For .ipynb cell edits use edit_notebook. Cite as [[path]] or [[path:line]].',
+      'Read a file under the workspace root (text only; Word .docx returns extracted document text — do not unzip it in the terminal). Directories return a shallow listing. Prefer startLine/endLine for a line window and omit offset/limit then — offset/limit is a byte window, not lines. A read without a window is capped at 2000 lines with a truncation hint — zoom with startLine/endLine to read further. For .ipynb cell edits use edit_notebook. Cite as [[path]] or [[path:line]].',
     schema: readArgs
   },
   edit: {
     description:
-      'Create/overwrite with contents (new or small files), or apply a unified diff. For one exact string change use str_replace; for several files use multi_edit.',
+      'Create/overwrite with contents (new or small files), or apply a unified diff. For one exact string change use str_replace.',
     schema: editArgs
   },
   search: {
@@ -1022,7 +990,7 @@ export const TOOL_REGISTRY = {
   },
   grep: {
     description:
-      'Regex search with every matching line and optional context. Text files (including tests/) and Word .docx (extracted text); other binaries are skipped. Cite hits as [[path]] or [[path:line]].',
+      'Regex search with every matching line and optional context. Text files (including tests/) and Word .docx (extracted text); other binaries are skipped. Defaults to 60 results; pass maxResults to widen or include to narrow. Cite hits as [[path]] or [[path:line]].',
     schema: grepArgs
   },
   codebase_search: {
@@ -1035,14 +1003,9 @@ export const TOOL_REGISTRY = {
       'List one directory level with sizes. Workspace-relative path from the workspace root, not a nested project folder. Gitignore- and build-dir-aware.',
     schema: listDirArgs
   },
-  multi_edit: {
-    description:
-      'Apply several file edits atomically (one entry per path). Prefer when changing multiple files; use str_replace for a single surgical change.',
-    schema: multiEditArgs
-  },
   str_replace: {
     description:
-      'Replace exact text in a file (unique old_string, or replace_all). Prefer for one surgical edit; use edit for new files or multi_edit for many files.',
+      'Replace exact text in a file (unique old_string, or replace_all). Prefer for one surgical edit; use edit for new files or full rewrites.',
     schema: strReplaceArgs
   },
   delete: {
@@ -1057,7 +1020,7 @@ export const TOOL_REGISTRY = {
   },
   create_plan: {
     description:
-      'Publish this run plan.md (Plan mode). title is the H1. plan markdown should cover Goal, Steps, and Done when. Optional todos merge into todo_write. Copies Done when into contract.md. Do not put the plan only in chat.',
+      'Publish this run plan.md (Plan mode; in root Agent runs the plan Steps are the fan-out manifest — every step maps to one child instance). title is the H1. plan markdown should cover Goal, Scope, Steps (each with affected paths + verification), a Done when checklist, and Risks; the result includes advisory quality feedback when sections are missing. Optional todos merge into todo_write. Copies Done when into contract.md. Do not put the plan only in chat.',
     schema: createPlanArgs
   },
   create_goal: {
@@ -1271,7 +1234,7 @@ export const TOOL_REGISTRY = {
   },
   spawn_agent_instance: {
     description:
-      'Spawn an Agent V child instance for one small, independent workstream — always decompose the request into structured small-scope briefs and fan them out across instances instead of concentrating work in the parent; a multi-part run must never finish with zero spawned instances (root runs only; depth 1). Goal is the child’s only prompt — include outcome, sub-tasks, done-when, and affected paths; the child never sees this conversation. Keep one workstream per brief so no child is overloaded. The child gets its own git worktree branch when isolation is available; pass path_scope prefixes when it is not. Returns run_id. Batch multiple spawns in one step, then await those run_ids together in one step; if a spawn is denied by the concurrent-run cap, await the already-running children instead of retrying.',
+      'Spawn an Agent V child instance for one small, independent workstream — always plan first with create_plan and decompose the request into structured small-scope briefs, fanning them out across instances instead of concentrating work in the parent; no request is too small: every actionable request, without exception, is planned and fanned out — every plan step maps to one instance, you decide how many — and a run must never finish actionable work having spawned zero instances (the parent only makes the individual tool calls needed to plan, brief, and verify; root runs only; depth 1). Each spawn carries a structured brief — outcome, sub_tasks, done_when — composed verbatim into the child prompt plus goal context and path_scope prefixes; the child never sees this conversation. Keep one workstream per brief so no child is overloaded. The child gets its own git worktree branch when isolation is available; pass path_scope prefixes when it is not. Returns run_id. Batch multiple spawns in one step, then await those run_ids together in one step; if a spawn is denied by the concurrent-run cap, await the already-running children instead of retrying.',
     schema: spawnAgentInstanceArgs
   },
   await_agent_instance: {
@@ -1391,11 +1354,6 @@ function formatToolArgsError(name: string, detail: string): string {
       ? detail
       : `${detail}. edit requires path plus contents or diff.`
   }
-  if (name === 'multi_edit') {
-    const hint =
-      'multi_edit requires edits: [{ path, contents }] or edits: [{ path, diff }]. Empty contents cannot replace an existing non-empty file; use diff to remove contents explicitly'
-    return detail.includes(hint) ? detail : `${detail}. ${hint}.`
-  }
   if (name === 'todo_write' && /todos: Required/i.test(detail)) {
     return `${detail}. todo_write requires todos: [{ id, content, status }], or merge:true with an empty todos list.`
   }
@@ -1426,7 +1384,7 @@ export function formatUnknownToolError(name: string): string {
     return `Unknown tool "${name}". ${catalog} Parallel work uses spawn_agent_instance (root Agent runs).`
   }
   if (/^write$|file_check|create_file|write_file/i.test(name)) {
-    return `Unknown tool "${name}". Use edit, str_replace, or multi_edit to change files.`
+    return `Unknown tool "${name}". Use edit or str_replace to change files.`
   }
   if (/^(bash|shell)$/i.test(name)) {
     return `Unknown tool "${name}". The shell tool is terminal.`

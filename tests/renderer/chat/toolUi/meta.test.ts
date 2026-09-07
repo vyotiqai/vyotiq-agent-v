@@ -12,7 +12,6 @@ describe('toolUi meta', () => {
   it('routes terminal and edit tools to prominent cards', () => {
     expect(toolPresentation('terminal')).toBe('prominent')
     expect(toolPresentation('edit')).toBe('prominent')
-    expect(toolPresentation('multi_edit')).toBe('prominent')
     expect(toolPresentation('str_replace')).toBe('prominent')
     expect(toolPresentation('todo_write')).toBe('compact')
     expect(toolCategory('todo_write')).toBe('search')
@@ -74,12 +73,6 @@ describe('toolUi meta', () => {
     expect(toolLabel('edit', 'running', 'Created foo.ts (3 chars)')).toBe('Editing')
     expect(toolLabel('edit', 'done')).toBe('Edited')
     expect(toolLabel('str_replace', 'done', 'Replaced 1 occurrence in foo.ts')).toBe('Edited')
-    expect(
-      toolLabel('multi_edit', 'done', 'Applied 2 edits:\n- created src/a.ts\n- created src/b.ts')
-    ).toBe('Created')
-    expect(
-      toolLabel('multi_edit', 'done', 'Applied 2 edits:\n- created src/a.ts\n- wrote src/b.ts')
-    ).toBe('Edited')
   })
 
   it('labels Skill from TOOL_LABELS', () => {

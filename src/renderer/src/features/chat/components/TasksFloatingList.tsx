@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Icon, type IconName } from '@renderer/lib/icons'
+import { Icon } from '@renderer/lib/icons'
 import { cn } from '@renderer/lib/ui'
 import { useRunTodos } from '../hooks/useRunTodos'
-import { pickCurrentTask, type TodoParsed, type TodoStatus } from '../toolUi/parsers/todo'
+import { pickCurrentTask, type TodoParsed } from '../toolUi/parsers/todo'
 import { TodoStatusIcon } from './TodoChecklist'
 import { TodoProgressBar } from './TasksCeilingBand'
 
@@ -70,14 +70,10 @@ export function TasksRailButton({
   const hasActive = current?.status === 'in_progress'
   const count = `${done}/${total}`
 
-  // Static status glyph — deliberately no spinner in the rail icon.
-  const statusIcon: IconName = hasActive ? 'circleHalf' : allDone ? 'check' : 'listTodo'
+  // One constant glyph; state is carried by color only (secondary / accent /
+  // success). The count sits under the icon inside the button — no floating
+  // badge outside its bounds.
   const statusClass = hasActive ? 'text-accent' : allDone ? 'text-success' : 'text-secondary'
-  const headerStatus: TodoStatus = hasActive
-    ? 'in_progress'
-    : allDone
-      ? 'completed'
-      : (current?.status ?? 'pending')
 
   const ariaLabel = `Tasks ${done} of ${total}${current ? `. ${current.content}` : ''}${labelSuffix ?? ''}`
 
@@ -196,17 +192,12 @@ export function TasksRailButton({
           onPointerLeave={scheduleClose}
         >
           <div className="flex min-w-0 items-center gap-1.5">
-            <TodoStatusIcon status={headerStatus} size={14} />
             <span className="text-xs font-semibold text-fg">Tasks</span>
             {running ? (
               <span
-                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent/10 px-1.5 py-px text-2xs font-medium text-accent"
+                className="inline-flex shrink-0 items-center rounded-full bg-accent/10 px-1.5 py-px text-2xs font-medium text-accent"
                 data-tasks-popover-live
               >
-                <span
-                  className="size-1.5 rounded-full bg-current motion-safe:animate-pulse"
-                  aria-hidden
-                />
                 Live
               </span>
             ) : null}
@@ -215,17 +206,6 @@ export function TasksRailButton({
             </span>
           </div>
           <TodoProgressBar done={done} total={total} className="mt-2" />
-          {hasActive && current ? (
-            <div
-              className="mt-2 flex items-start gap-1.5 rounded-md border border-border/60 bg-surface px-2 py-1.5"
-              data-tasks-popover-current
-            >
-              <TodoStatusIcon status="in_progress" size={12} className="mt-px" />
-              <span className="min-w-0 flex-1 text-2xs font-medium leading-snug text-fg [overflow-wrap:anywhere]">
-                {current.content}
-              </span>
-            </div>
-          ) : null}
           <ul
             className="m-0 mt-2 max-h-[min(14rem,max(6rem,calc(100vh-18rem)))] list-none space-y-1 overflow-y-auto p-0"
             data-tasks-popover-list
@@ -245,10 +225,7 @@ export function TasksRailButton({
               </li>
             ))}
           </ul>
-          <div className="mt-2 flex items-center justify-between gap-2 border-t border-border/40 pt-2">
-            <span className="min-w-0 truncate text-2xs tabular-nums text-muted">
-              {`${done} of ${total} complete`}{cancelled > 0 ? ` · ${cancelled} skipped` : ''}
-            </span>
+          <div className="mt-2 flex items-center justify-end gap-2 border-t border-border/40 pt-2">
             <button
               type="button"
               className="shrink-0 rounded-md px-1.5 py-0.5 text-2xs font-medium text-fg vy-transition hover:bg-surface"
@@ -296,12 +273,12 @@ export function TasksRailButton({
         onPointerEnter={scheduleOpen}
         onPointerLeave={scheduleClose}
       >
-        <Icon name={statusIcon} size={16} className={cn('shrink-0', statusClass)} />
+        <Icon name="listTodo" size={15} className={cn('shrink-0', statusClass)} />
         <span
           data-tasks-floating-count
           className={cn(
-            'absolute -bottom-1 -right-1 rounded-full bg-bg px-1 text-[9px] font-semibold leading-[13px] tabular-nums ring-1 ring-border',
-            allDone ? 'text-success' : 'text-fg'
+            'text-[9px] font-semibold leading-none tabular-nums',
+            allDone ? 'text-success' : 'text-muted'
           )}
         >
           {count}

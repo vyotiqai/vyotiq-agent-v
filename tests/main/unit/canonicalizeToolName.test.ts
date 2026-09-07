@@ -70,7 +70,7 @@ describe('formatUnknownToolError', () => {
 
   it('keeps write_file_check on the file-edit hint', () => {
     expect(formatUnknownToolError('write_file_check')).toMatch(
-      /edit, str_replace, or multi_edit/
+      /edit or str_replace/
     )
   })
 })

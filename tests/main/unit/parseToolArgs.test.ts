@@ -63,51 +63,6 @@ describe('parseToolArgs dispatch', () => {
     expect(result.content).toContain('edit requires contents or diff')
   })
 
-  it('does not leak undefined.length when multi_edit args are missing', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'vyotiq-multi-edit-missing-'))
-    try {
-      const result = await executeTool(
-        'multi_edit',
-        '{}',
-        workspace,
-        new AbortController().signal
-      )
-      expect(result.ok).toBe(false)
-      expect(result.content).not.toContain("Cannot read properties of undefined (reading 'length')")
-      expect(result.content).toContain(
-        'multi_edit requires edits: [{ path, contents }] or edits: [{ path, diff }]'
-      )
-    } finally {
-      rmSync(workspace, { recursive: true, force: true })
-    }
-  })
-
-  it('explains the complete multi_edit entry shape', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'vyotiq-multi-edit-shape-'))
-    try {
-      const missingPath = await executeTool(
-        'multi_edit',
-        JSON.stringify({ edits: [{ contents: 'next' }] }),
-        workspace,
-        new AbortController().signal
-      )
-      const missingBody = await executeTool(
-        'multi_edit',
-        JSON.stringify({ edits: [{ path: 'src/a.ts' }] }),
-        workspace,
-        new AbortController().signal
-      )
-      for (const result of [missingPath, missingBody]) {
-        expect(result.ok).toBe(false)
-        expect(result.content).toContain(
-          'multi_edit requires edits: [{ path, contents }] or edits: [{ path, diff }]'
-        )
-      }
-    } finally {
-      rmSync(workspace, { recursive: true, force: true })
-    }
-  })
-
   it('does not leak undefined.length when todo_write args are missing', async () => {
     const runDir = mkdtempSync(join(tmpdir(), 'vyotiq-todo-missing-'))
     try {
@@ -297,12 +252,9 @@ describe('wireToolCallArguments', () => {
     expect(wireToolCallArguments('edit', truncated)).toBe('{}')
   })
 
-  it('refuses to reconstruct truncated str_replace and multi_edit args', () => {
+  it('refuses to reconstruct truncated str_replace args', () => {
     expect(
       wireToolCallArguments('str_replace', '{"path":"a.ts","old_string":"x","new_string":"partia')
-    ).toBe('{}')
-    expect(
-      wireToolCallArguments('multi_edit', '{"edits":[{"path":"a.ts","contents":"half')
     ).toBe('{}')
   })
 

@@ -344,21 +344,21 @@ describe('runReceipt', () => {
       {
         role: 'tool',
         toolCallId: 'e1',
-        toolName: 'multi_edit',
+        toolName: 'edit',
         ok: false,
         content: 'aborted — no files'
       },
       {
         role: 'tool',
         toolCallId: 'e2',
-        toolName: 'multi_edit',
+        toolName: 'edit',
         ok: false,
         content: 'aborted â€" no files'
       },
       {
         role: 'tool',
         toolCallId: 'e3',
-        toolName: 'multi_edit',
+        toolName: 'edit',
         ok: false,
         content: 'aborted – no files'
       }
@@ -377,7 +377,7 @@ describe('runReceipt', () => {
     })
     expect(receipt.invokeId).toBe(3)
     expect(receipt.failureClusters).toEqual([
-      { key: 'multi_edit: aborted - no files', count: 3 }
+      { key: 'edit: aborted - no files', count: 3 }
     ])
   })
 
@@ -455,14 +455,6 @@ describe('runReceipt', () => {
         ok: false,
         content:
           'old_string not found in src/main/agent/loopPolicy.ts. Closest match near line 8:'
-      },
-      {
-        role: 'tool',
-        toolCallId: 'm1',
-        toolName: 'multi_edit',
-        ok: false,
-        content:
-          'edits.1.path: duplicate path "src/main/agent/harnessReview.ts" — combine into one edit'
       }
     ]
     const receipt = buildRunReceipt({
@@ -474,7 +466,6 @@ describe('runReceipt', () => {
     })
     expect(receipt.failureClusters).toEqual([
       { key: 'edit: Diff hunk failed to match (context/removal mismatch)', count: 2 },
-      { key: 'multi_edit: duplicate path — combine into one edit', count: 1 },
       { key: 'str_replace: old_string not found', count: 1 }
     ])
   })

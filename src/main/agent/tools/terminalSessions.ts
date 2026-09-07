@@ -12,6 +12,7 @@ import {
   TERMINAL_MAX_OUTPUT,
   terminalDocxUnzipPreflight,
   terminalNestedPowerShellPreflight,
+  terminalSelfKillPreflight,
   terminalSpawnSpec,
   type ResolvedTerminalShell
 } from './terminal'
@@ -341,6 +342,8 @@ export async function startBackgroundTerminal(
   if (docxUnzip) return docxUnzip
   const nested = terminalNestedPowerShellPreflight(command, resolved, cwd)
   if (nested) return nested
+  const selfKill = terminalSelfKillPreflight(command, resolved, cwd)
+  if (selfKill) return selfKill
   if (resolved === 'bash' && !commandOnPath('bash')) {
     return [
       `cwd: ${cwd}`,

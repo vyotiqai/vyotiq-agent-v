@@ -34,8 +34,17 @@ type CacheEntry = { fingerprint: string; files: RuleFile[]; builtAt: number }
 const cache = new Map<string, CacheEntry>()
 
 export function clearRulesCache(workspacePath?: string): void {
-  if (workspacePath) cache.delete(workspacePath)
-  else cache.clear()
+  if (!workspacePath) {
+    cache.clear()
+    return
+  }
+  // Entries are keyed `${workspacePath}\0${focusedFile}` (see readWorkspaceRules),
+  // so a bare delete of workspacePath never matched and clears silently no-oped
+  // — stale rules were served until an mtime/TTL bust. Delete every variant.
+  const prefix = `${workspacePath}\0`
+  for (const key of [...cache.keys()]) {
+    if (key === workspacePath || key.startsWith(prefix)) cache.delete(key)
+  }
 }
 
 export function isRuleRelatedRelPath(relPath: string): boolean {

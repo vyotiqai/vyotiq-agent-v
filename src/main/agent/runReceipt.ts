@@ -89,13 +89,13 @@ function failureClusterBody(toolName: string, content: string): string {
   }
   const text = normalizeFailureClusterText(content)
   if (
-    (toolName === 'edit' || toolName === 'multi_edit') &&
+    toolName === 'edit' &&
     /Diff hunk failed to match/i.test(text)
   ) {
     return 'Diff hunk failed to match (context/removal mismatch)'
   }
   if (
-    (toolName === 'edit' || toolName === 'multi_edit') &&
+    toolName === 'edit' &&
     /Diff hunk (?:near line \d+ |for line \d+ )?matched \d+/i.test(text)
   ) {
     return 'Diff hunk matched multiple locations'
@@ -105,9 +105,6 @@ function failureClusterBody(toolName: string, content: string): string {
     /old_string not found/i.test(text)
   ) {
     return 'old_string not found'
-  }
-  if (toolName === 'multi_edit' && /duplicate path /i.test(text)) {
-    return 'duplicate path — combine into one edit'
   }
   if (/Plan mode may only edit plan\.md or contract\.md/i.test(text)) {
     return 'Plan mode may only edit plan.md or contract.md'

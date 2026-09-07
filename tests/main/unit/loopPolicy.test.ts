@@ -70,34 +70,6 @@ describe('loopPolicy', () => {
     expect(hint).toMatch(/use diff to remove contents explicitly/i)
   })
 
-  it('hints the complete multi_edit entry shape after consecutive failures', () => {
-    const hint = loopHintForConsecutiveToolFailures(2, {
-      tool: 'multi_edit',
-      summary: 'edits.0: each edit requires contents or diff'
-    })
-    expect(hint).toContain(
-      'multi_edit requires edits: [{ path, contents }] or edits: [{ path, diff }]'
-    )
-    expect(hint).toMatch(/each complete edit object together/i)
-
-    const emptyHint = loopHintForConsecutiveToolFailures(2, {
-      tool: 'multi_edit',
-      summary: 'refusing to replace a non-empty file with empty contents'
-    })
-    expect(emptyHint).toMatch(/multi_edit requires edits/i)
-    expect(emptyHint).toMatch(/use diff to remove contents explicitly/i)
-  })
-
-  it('hints duplicate-path multi_edit without the schema-shape message', () => {
-    const hint = loopHintForConsecutiveToolFailures(2, {
-      tool: 'multi_edit',
-      summary:
-        'edits.1.path: duplicate path "src/main/agent/harnessReview.ts" — combine into one edit'
-    })
-    expect(hint).toMatch(/cannot list the same path twice/i)
-    expect(hint).not.toMatch(/requires edits: \[/i)
-  })
-
   it('hints stale edit diffs and missing str_replace snippets', () => {
     const diffHint = loopHintForConsecutiveToolFailures(2, {
       tool: 'edit',
@@ -310,11 +282,6 @@ describe('loopPolicy', () => {
     expect(readPathFromToolCall('grep', { path: 'a.ts' })).toBeNull()
     expect(editPathsFromToolCall('str_replace', { path: 'x.ts' })).toEqual(['x.ts'])
     expect(editPathsFromToolCall('edit', { filepath: 'y.ts' })).toEqual(['y.ts'])
-    expect(
-      editPathsFromToolCall('multi_edit', {
-        edits: [{ path: 'a.ts' }, { path: 'b\\c.ts' }, { path: 1 }]
-      })
-    ).toEqual(['a.ts', 'b/c.ts'])
   })
 
   it('treats concrete grep include and glob pattern as inspect paths', () => {

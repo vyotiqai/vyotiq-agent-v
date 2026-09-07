@@ -20,7 +20,7 @@ export type PaneRenderOptions = {
   /** Clear shared ChatSideRail on the rightmost column when the rail is visible. */
   sideRailPad: boolean
   /** Open Changes dock (agent scope) — injected by ChatView when multi-pane. */
-  onOpenChanges?: () => void
+  onOpenChanges?: (path?: string) => void
   /** Open a workspace path in the Files dock — injected by ChatView. */
   onOpenWorkspaceFile?: (path: string, options?: WorkspaceFileOpenOptions) => void
 }

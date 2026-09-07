@@ -495,15 +495,10 @@ export function ContextMeter({
     }
   }
 
+  // Silent before the first usage report: an em-dash placeholder spends
+  // permanent toolbar width on information that does not exist yet.
   if (!alignedUsage || alignedUsage.window <= 0) {
-    return (
-      <span
-        className="text-caption text-muted"
-        title="Context usage will appear once the model reports token counts"
-      >
-        Context: — / —
-      </span>
-    )
+    return null
   }
 
   const { budget, overBudget, ratio, displayPct, level } = usageMetrics(alignedUsage)

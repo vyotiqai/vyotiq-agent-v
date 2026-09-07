@@ -1,7 +1,12 @@
 import { SHORTCUT_BINDINGS, type ShortcutId } from './bindings'
 
-/** Main composer contenteditable — same selector as focus / aria. */
-export const COMPOSER_MESSAGE_SELECTOR = '[role="textbox"][aria-label="Message"]'
+/**
+ * Main composer contenteditable — same selector as focus / aria.
+ * Enabled renders role=combobox (ARIA 1.2 combobox pattern); disabled
+ * degrades to role=textbox. Match both so shortcuts survive the enabled state.
+ */
+export const COMPOSER_MESSAGE_SELECTOR =
+  '[role="textbox"][aria-label="Message"], [role="combobox"][aria-label="Message"]'
 
 /** Browser dock URL field. */
 export const BROWSER_URL_SELECTOR = '[data-browser-url]'
@@ -62,7 +67,11 @@ export function isMainComposerTarget(target: EventTarget | null): boolean {
   if (typeof el.closest === 'function') {
     return Boolean(el.closest(COMPOSER_MESSAGE_SELECTOR))
   }
-  return el.getAttribute?.('role') === 'textbox' && el.getAttribute?.('aria-label') === 'Message'
+  const role = el.getAttribute?.('role')
+  return (
+    el.getAttribute?.('aria-label') === 'Message' &&
+    (role === 'textbox' || role === 'combobox')
+  )
 }
 
 /**
@@ -87,11 +96,13 @@ export function shouldBlockPanelShortcut(target: EventTarget | null): boolean {
 
 /** Focus the Message composer. Returns whether focus landed on it. */
 export function focusComposerMessage(): boolean {
-  const el = document.querySelector(COMPOSER_MESSAGE_SELECTOR) as HTMLElement | null
-  if (!el) return false
-  if (el.getAttribute('contenteditable') === 'false') return false
-  el.focus()
-  return document.activeElement === el
+  const candidates = document.querySelectorAll<HTMLElement>(COMPOSER_MESSAGE_SELECTOR)
+  for (const el of candidates) {
+    if (el.getAttribute('contenteditable') === 'false') continue
+    el.focus()
+    if (document.activeElement === el) return true
+  }
+  return false
 }
 
 /**

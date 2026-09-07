@@ -26,7 +26,6 @@ function ArrowUpHarness({
     files: [],
     setFiles: () => {},
     setFileError: () => {},
-    running: false,
     onSend: async () => true,
     onEditLastUserMessage,
     getCaretStart: () => caret

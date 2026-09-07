@@ -16,14 +16,12 @@ import type { ToolCategory, ToolPresentation } from './types'
 const PROMINENT_TOOLS = new Set([
   'terminal',
   'edit',
-  'multi_edit',
   'str_replace'
 ])
 
 const FILE_TOOLS = new Set(['read', 'memory_read'])
 const EDIT_TOOLS = new Set([
   'edit',
-  'multi_edit',
   'str_replace',
   'memory_write',
   'delete',
@@ -226,7 +224,6 @@ export function isMcpTool(name: string): boolean {
 const TOOL_ICON_BY_NAME: Record<string, IconName> = {
   read: 'file',
   edit: 'edit',
-  multi_edit: 'edit',
   str_replace: 'edit',
   search: 'fileSearch',
   grep: 'scanSearch',

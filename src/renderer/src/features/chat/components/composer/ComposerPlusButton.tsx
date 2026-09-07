@@ -8,14 +8,21 @@ const PLUS_FULL_LABEL = 'Attachment limits reached'
 export function ComposerPlusButton({
   disabled,
   attachFull,
+  attachHint,
   onAttach
 }: {
   disabled?: boolean
   attachFull?: boolean
+  /** Per-bucket capacity summary while only some buckets are full. */
+  attachHint?: string | null
   onAttach: () => void
 }) {
   const blocked = Boolean(disabled) || Boolean(attachFull)
-  const label = attachFull ? PLUS_FULL_LABEL : PLUS_LABEL
+  const label = attachFull
+    ? PLUS_FULL_LABEL
+    : attachHint
+      ? `Attach files — ${attachHint}`
+      : PLUS_LABEL
   return (
     <Tooltip content={label}>
       <button
@@ -27,7 +34,7 @@ export function ComposerPlusButton({
         onMouseDown={(e) => e.preventDefault()}
         onClick={onAttach}
       >
-        <Icon name="plus" size={14} />
+        <Icon name="plus" size={16} />
       </button>
     </Tooltip>
   )

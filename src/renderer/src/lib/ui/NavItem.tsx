@@ -81,7 +81,7 @@ export function NavItem({
     return <Tooltip content={title ?? label}>{button}</Tooltip>
   }
 
-  return (
+  const button = (
     <button
       ref={buttonRef}
       type="button"
@@ -104,7 +104,6 @@ export function NavItem({
       aria-haspopup={ariaHasPopup}
       aria-controls={ariaControls}
       disabled={disabled}
-      title={title ?? label}
       onClick={onClick}
     >
       {icon ? (
@@ -119,4 +118,15 @@ export function NavItem({
       {trailing}
     </button>
   )
+  // Disabled buttons ignore pointer events — wrap so hover still shows why.
+  if (disabled) {
+    return (
+      <Tooltip content={title ?? label}>
+        <span className="inline-flex cursor-not-allowed" aria-disabled="true">
+          {button}
+        </span>
+      </Tooltip>
+    )
+  }
+  return <Tooltip content={title ?? label}>{button}</Tooltip>
 }

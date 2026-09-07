@@ -190,7 +190,7 @@ function extractTopLevelEditStrings(raw: string): Record<string, unknown> {
 }
 
 /**
- * Resolve edit/str_replace/multi_edit tool args from a complete or streaming
+ * Resolve edit/str_replace tool args from a complete or streaming
  * argsPreview blob. Returns null when nothing useful has arrived yet.
  */
 export function extractPartialEditArgs(raw: string | undefined | null): PartialEditArgs | null {

@@ -155,7 +155,7 @@ function TranscriptPane({
   workspacePath: string | null
   activeRunId: string | null
   agentMode?: AgentInteractionMode
-  onOpenChanges?: () => void
+  onOpenChanges?: (path?: string) => void
   sideRailPad?: boolean
   editingUserMessageIndex?: number | null
   editComposer?: React.ReactNode
@@ -689,6 +689,7 @@ const runGoal = useRunGoal({
     'uncommitted'
   )
   const [changesScopeToken, setChangesScopeToken] = useState(0)
+  const [changesPreferredPath, setChangesPreferredPath] = useState<string | null>(null)
 
   const persistRightPanel = useCallback((next: ChatRightPanelId | null) => {
     try {
@@ -778,15 +779,19 @@ const runGoal = useRunGoal({
   )
 
   const openChangesPanel = useCallback(
-    (scope: 'agent' | 'uncommitted' = 'uncommitted') => {
+    (scope: 'agent' | 'uncommitted' = 'uncommitted', path?: string) => {
       setChangesPreferredScope(scope)
       setChangesScopeToken((n) => n + 1)
+      setChangesPreferredPath(path ?? null)
       setRightPanel('changes')
     },
     [setRightPanel]
   )
 
-  const onOpenAgentChanges = useCallback(() => openChangesPanel('agent'), [openChangesPanel])
+  const onOpenAgentChanges = useCallback(
+    (path?: string) => openChangesPanel('agent', path),
+    [openChangesPanel]
+  )
 
   const activeRightPanelRef = useRef(activeRightPanel)
   activeRightPanelRef.current = activeRightPanel
@@ -1401,6 +1406,8 @@ const runGoal = useRunGoal({
             active={visiblePanelId === 'changes'}
             preferredScope={changesPreferredScope}
             preferredScopeToken={changesScopeToken}
+            preferredSelectedPath={changesPreferredPath}
+            preferredSelectedPathToken={changesScopeToken}
           />
         </div>
       ) : null}

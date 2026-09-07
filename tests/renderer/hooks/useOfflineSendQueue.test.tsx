@@ -7,7 +7,10 @@ import {
   resetOfflineFlushLocksForTests,
   useOfflineSendQueue
 } from '@renderer/lib/hooks/useOfflineSendQueue'
-import { offlineQueueLength } from '@renderer/lib/hooks/offlineQueueStore'
+import {
+  offlineQueueLength,
+  resetOfflineQueueMemoryForTests
+} from '@renderer/lib/hooks/offlineQueueStore'
 
 const useNetworkStatus = vi.hoisted(() => vi.fn())
 
@@ -21,6 +24,7 @@ beforeEach(() => {
   localStorage.clear()
   vi.useFakeTimers()
   resetOfflineFlushLocksForTests()
+  resetOfflineQueueMemoryForTests()
   useNetworkStatus.mockReturnValue({ online: true, offlineHint: null })
 })
 
@@ -29,6 +33,7 @@ afterEach(() => {
   vi.useRealTimers()
   vi.clearAllMocks()
   resetOfflineFlushLocksForTests()
+  resetOfflineQueueMemoryForTests()
 })
 
 describe('useOfflineSendQueue', () => {
@@ -51,7 +56,7 @@ describe('useOfflineSendQueue', () => {
     expect(result.current.offlineHint).toBe('1 message queued — will send when online')
   })
 
-  it('reports failure when an offline send cannot be persisted', async () => {
+  it('retains an offline send in memory when persistence fails', async () => {
     useNetworkStatus.mockReturnValue({ online: false, offlineHint: 'offline' })
     const onSend = vi.fn().mockResolvedValue(true)
     vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
@@ -61,10 +66,10 @@ describe('useOfflineSendQueue', () => {
     const { result } = renderHook(() => useOfflineSendQueue(WORKSPACE, onSend))
 
     await act(async () => {
-      expect(await result.current.sendWithOfflineQueue('retain this draft')).toBe(false)
+      expect(await result.current.sendWithOfflineQueue('retain this draft')).toBe(true)
     })
 
-    expect(offlineQueueLength(WORKSPACE)).toBe(0)
+    expect(offlineQueueLength(WORKSPACE)).toBe(1)
     expect(onSend).not.toHaveBeenCalled()
   })
 

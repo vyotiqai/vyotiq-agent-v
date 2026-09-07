@@ -81,47 +81,6 @@ describe('executeTool run-artifact remap', () => {
     expect(existsSync(join(workspace, 'plan.md'))).toBe(false)
   })
 
-  it('Plan mode remaps multi_edit plan artifacts', async () => {
-    setup()
-    const signal = new AbortController().signal
-    const result = await executeTool(
-      'multi_edit',
-      JSON.stringify({
-        edits: [
-          { path: 'plan.md', contents: '# Multi plan\n' },
-          { path: 'contract.md', contents: '## Goal\n\nmulti\n\n## Done when\n\n- x\n' }
-        ]
-      }),
-      workspace,
-      signal,
-      { runDir, agentMode: 'plan' }
-    )
-    expect(result.ok).toBe(true)
-    expect(readFileSync(join(runDir, 'plan.md'), 'utf8')).toContain('# Multi plan')
-    expect(readFileSync(join(runDir, 'contract.md'), 'utf8')).toContain('multi')
-  })
-
-  it('rejects multi_edit that mixes run artifacts with workspace files', async () => {
-    setup()
-    writeFileSync(join(workspace, 'src.ts'), 'export {}\n', 'utf8')
-    const signal = new AbortController().signal
-    const result = await executeTool(
-      'multi_edit',
-      JSON.stringify({
-        edits: [
-          { path: 'contract.md', contents: '## Goal\n\nmixed\n\n## Done when\n\n- x\n' },
-          { path: 'src.ts', contents: 'export const x = 1\n' }
-        ]
-      }),
-      workspace,
-      signal,
-      { runDir, agentMode: 'agent' }
-    )
-    expect(result.ok).toBe(false)
-    expect(result.content).toMatch(/cannot mix run artifacts/i)
-    expect(readFileSync(join(workspace, 'src.ts'), 'utf8')).toBe('export {}\n')
-  })
-
   it('Agent mode blocks delete of the run contract (run artifacts are protected)', async () => {
     setup()
     writeFileSync(join(workspace, 'contract.md'), 'workspace contract\n', 'utf8')

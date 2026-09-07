@@ -25,6 +25,32 @@ const SIMPLE_PLAN = [
   'plan.md has a goal, steps, and a check for finished work.'
 ].join('\n')
 
+const COMPLETE_PLAN = [
+  '# Ship the planner',
+  '',
+  '## Goal',
+  '',
+  'Make create_plan return structured quality feedback so shallow plans get refined.',
+  '',
+  '## Scope',
+  '',
+  'In: plan scoring and tool feedback. Out: plan panel rendering changes.',
+  '',
+  '## Steps',
+  '',
+  '1. Add `scorePlanQuality` to `src/shared/planQuality.ts` with unit tests.',
+  '2. Surface the report in `src/main/agent/tools/createPlan.ts` and run `pnpm exec vitest run tests/shared` to verify.',
+  '',
+  '## Done when',
+  '',
+  '- [ ] `scorePlanQuality` returns no issues for a complete plan.',
+  '- [ ] `pnpm typecheck` and the targeted vitest run are green.',
+  '',
+  '## Risks',
+  '',
+  'Over-strict gating could block quick plans — feedback stays advisory.'
+].join('\n')
+
 describe('create_plan', () => {
   let workspace: string
   let runDir: string
@@ -85,6 +111,33 @@ describe('create_plan', () => {
     )
     expect(result.ok).toBe(false)
     expect(result.content).toMatch(/real plan|empty stub/i)
+  })
+
+  it('returns no quality feedback for a complete plan', async () => {
+    setup()
+    const result = await executeTool(
+      'create_plan',
+      JSON.stringify({ title: 'Ship the planner', plan: COMPLETE_PLAN }),
+      workspace,
+      new AbortController().signal,
+      { runDir, agentMode: 'plan' }
+    )
+    expect(result.ok).toBe(true)
+    expect(result.content).not.toMatch(/Quality feedback/)
+  })
+
+  it('returns advisory quality feedback but still publishes a shallow plan', async () => {
+    setup()
+    const result = await executeTool(
+      'create_plan',
+      JSON.stringify({ title: 'Quick fix', plan: SIMPLE_PLAN }),
+      workspace,
+      new AbortController().signal,
+      { runDir, agentMode: 'plan' }
+    )
+    expect(result.ok).toBe(true)
+    expect(result.content).toMatch(/Quality feedback \(advisory/)
+    expect(existsSync(join(runDir, 'plan.md'))).toBe(true)
   })
 
   it('accepts the write_plan alias', async () => {

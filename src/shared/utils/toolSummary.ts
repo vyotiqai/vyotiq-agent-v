@@ -19,14 +19,14 @@ export function isUnresolvedToolName(name: string | undefined | null): boolean {
 }
 
 /**
- * Per-call create vs modify from tool result text (edit / multi_edit).
+ * Per-call create vs modify from tool result text (edit).
  * Null when the result does not describe a file write.
  */
 export function inferFileWriteAction(
   name: string,
   content?: string | null
 ): 'created' | 'modified' | null {
-  if (name !== 'edit' && name !== 'multi_edit') return null
+  if (name !== 'edit') return null
   const text = (content ?? '').trim()
   if (!text) return null
   if (name === 'edit') {
@@ -34,12 +34,7 @@ export function inferFileWriteAction(
     if (/^Wrote\b/i.test(text) || /^Applied diff\b/i.test(text)) return 'modified'
     return null
   }
-  const lines = text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith('- '))
-  if (lines.length === 0) return null
-  return lines.every((line) => /^- created\b/i.test(line)) ? 'created' : 'modified'
+  return null
 }
 
 export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
@@ -50,7 +45,6 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   grep: { running: 'Grepping', done: 'Grepped' },
   codebase_search: { running: 'Semantic search', done: 'Codebase search' },
   list_dir: { running: 'Listing', done: 'Listed' },
-  multi_edit: { running: 'Editing', done: 'Edited' },
   str_replace: { running: 'Editing', done: 'Edited' },
   delete: { running: 'Deleting', done: 'Deleted' },
   todo_write: { running: 'Updating tasks', done: 'Updated tasks' },
@@ -167,17 +161,6 @@ export function normalizeToolTarget(name: string, args: Record<string, unknown> 
   if (name === 'search' || name === 'glob' || name === 'grep' || name === 'codebase_search') {
     const query = args.query ?? args.pattern
     if (typeof query === 'string') return truncate(query)
-  }
-  if (name === 'multi_edit') {
-    const edits = args.edits
-    if (Array.isArray(edits)) {
-      const paths = edits
-        .map((edit) =>
-          edit && typeof edit === 'object' ? (edit as { path?: unknown }).path : undefined
-        )
-        .filter((path): path is string => typeof path === 'string')
-      if (paths.length) return truncate(paths.map((p) => formatPathLabel(p)).join(', '))
-    }
   }
   if (name === 'todo_write') {
     const todos = args.todos

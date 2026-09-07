@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { atomicWriteFile } from '../../storage/atomicWrite'
-import { extractDoneWhenBody, isPlanDraftReady } from '../../../shared/planQuality'
+import { extractDoneWhenBody, isPlanDraftReady, scorePlanQuality } from '../../../shared/planQuality'
 import { toolTodoWrite, type TodoItem } from './todo'
 
 export type CreatePlanContext = {
@@ -76,11 +76,17 @@ export function executeCreatePlan(
     toolTodoWrite(runDir, todos, true)
   }
 
+  const quality = scorePlanQuality(markdown)
+  const feedback =
+    quality.issues.length > 0
+      ? ` Quality feedback (advisory, score ${quality.score}/100): ${quality.issues.slice(0, 3).join(' ')}`
+      : ''
+
   return {
     ok: true,
     summary: title,
     content: doneWhen
-      ? 'Wrote plan.md. Copied Done when into contract.md ## Done when.'
-      : 'Wrote plan.md.'
+      ? `Wrote plan.md. Copied Done when into contract.md ## Done when.${feedback}`
+      : `Wrote plan.md.${feedback}`
   }
 }

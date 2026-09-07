@@ -136,7 +136,11 @@ describe('tool approval card', () => {
 
     const allow = screen.getByRole('button', { name: 'Allow once' })
     expect(document.activeElement).toBe(allow)
-    expect(allow.getAttribute('title')).toBe('Allow once (Enter)')
+    // The (Enter) hint renders as a styled tooltip now — native titles are
+    // suppressed on disabled controls and inconsistent everywhere else.
+    expect(allow.getAttribute('title')).toBeNull()
+    fireEvent.pointerEnter(allow)
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Allow once (Enter)')
 
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => {

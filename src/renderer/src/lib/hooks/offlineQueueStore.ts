@@ -1,4 +1,5 @@
 import type { AttachedFile, ComposerSendExtras } from '@shared/ipc'
+import { logger } from '@shared/logger'
 
 export type OfflineQueuedSend = {
   id: string
@@ -49,15 +50,23 @@ function storageKey(workspacePath: string): string {
   return `vyotiq.offlineQueue.${encodeURIComponent(workspacePath)}`
 }
 
+/**
+ * In-memory fallback for quota/AV-blocked localStorage writes: a silently
+ * dropped queue lost the user's typed message for the whole session even
+ * though the UI acknowledged it. The fallback survives until reload — still
+ * better than losing the send entirely — and readQueue prefers disk.
+ */
+const memoryFallback = new Map<string, OfflineQueuedSend[]>()
+
 function readQueue(workspacePath: string): OfflineQueuedSend[] {
   if (!workspacePath || typeof localStorage === 'undefined') return []
   try {
     const raw = localStorage.getItem(storageKey(workspacePath))
-    if (!raw) return []
+    if (!raw) return memoryFallback.get(workspacePath) ?? []
     const parsed = JSON.parse(raw) as OfflineQueuedSend[]
     return Array.isArray(parsed) ? parsed : []
   } catch {
-    return []
+    return memoryFallback.get(workspacePath) ?? []
   }
 }
 
@@ -66,12 +75,19 @@ function writeQueue(workspacePath: string, queue: OfflineQueuedSend[]): boolean 
   try {
     if (queue.length === 0) {
       localStorage.removeItem(storageKey(workspacePath))
+      memoryFallback.delete(workspacePath)
       return true
     }
     localStorage.setItem(storageKey(workspacePath), JSON.stringify(queue))
+    memoryFallback.delete(workspacePath)
     return true
-  } catch {
-    return false
+  } catch (err) {
+    memoryFallback.set(workspacePath, queue)
+    logger.warn('Offline queue localStorage write failed; kept in memory for this session', {
+      scope: 'offline-queue',
+      err
+    })
+    return true
   }
 }
 
@@ -115,4 +131,9 @@ export function removeOfflineQueueEntriesForRun(
   if (!workspacePath || !runId) return
   const next = readQueue(workspacePath).filter((entry) => entry.runId !== runId)
   writeQueue(workspacePath, next)
+}
+
+/** Test helper: clear the in-memory fallback so cases are isolated. */
+export function resetOfflineQueueMemoryForTests(): void {
+  memoryFallback.clear()
 }

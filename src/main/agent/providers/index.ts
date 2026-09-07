@@ -22,6 +22,7 @@ import {
   enrichOllamaModelsWithSelectedShow,
   groqProvider,
   mistralProvider,
+  ModelListUnsupportedError,
   ollamaProvider,
   openaiProvider,
   openrouterProvider,
@@ -30,11 +31,14 @@ import {
 import { opencodeProvider } from './opencode'
 import type { ListModelsRequest, LlmProvider } from './types'
 import { preloadOpenCodeGoCatalog } from '../../../shared/domain/opencodeGoCatalog'
+import { preloadModelsDevRegistry } from '../../../shared/domain/modelsDevRegistry'
 
-// OpenCode Go publishes its catalog without auth; warm the runtime models.dev
-// registry at startup so seed/merge paths resolve real context windows and
-// reasoning-effort ladders instead of placeholder defaults.
+// Warm the runtime model registries at startup: OpenCode Go's catalog without
+// auth, and the models.dev index that backfills context windows for manually
+// entered model ids on OpenAI-compatible hosts (no model-list route or no
+// `context_length` in the listing).
 preloadOpenCodeGoCatalog()
+preloadModelsDevRegistry()
 
 const providers: Record<ProviderId, LlmProvider> = {
   openai: openaiProvider,
@@ -256,6 +260,22 @@ async function listProviderModelsUncached(
   } catch (err) {
     if (input.forceRefresh) clearModelCacheKey(key)
     const seeds = seedModelsFor(input.provider)
+    // Reachable host without a model-list route (HTTP 405/501 on /models):
+    // the provider connects for chat — manual model entry is the flow, not a fix.
+    if (err instanceof ModelListUnsupportedError) {
+      const label = providerLabel(input.provider)
+      const hint =
+        input.provider === 'custom'
+          ? ' Type a model ID in the composer model picker search and press Enter to use it.'
+          : ''
+      return {
+        models: await applyOllamaSelectedShow(
+          { ...input, signal: timeout },
+          enrichCatalogModels(input.provider, seeds)
+        ),
+        warning: `${label} does not serve a model list (HTTP ${err.status}); the host is reachable and chat can still connect.${hint} Showing illustrative placeholder model IDs (not live models).`
+      }
+    }
     const raw = formatError(err)
     const providerAlreadyExplained = /Cannot reach Ollama|Cannot reach custom|returned no models|HTTP \d+|API key not set/i.test(
       raw

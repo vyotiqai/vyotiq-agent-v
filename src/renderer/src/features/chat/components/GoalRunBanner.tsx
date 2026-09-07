@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { RunGoal, RunLoop } from '@shared/ipc'
-import { Button, cn } from '@renderer/lib/ui'
+import { Button, Tooltip, cn } from '@renderer/lib/ui'
 import { Icon } from '@renderer/lib/icons'
 import { formatLoopInterval } from '@shared/goalRuntime'
 
@@ -59,12 +59,11 @@ export function GoalRunBanner({
         className={cn('shrink-0', paused ? 'text-muted' : 'text-accent')}
         aria-hidden
       />
-      <span
-        className="min-w-0 flex-1 truncate text-xs text-fg [overflow-wrap:anywhere]"
-        title={goal.objective}
-      >
-        {goal.objective}
-      </span>
+      <Tooltip content={goal.objective}>
+        <span className="min-w-0 flex-1 truncate text-xs text-fg [overflow-wrap:anywhere]">
+          {goal.objective}
+        </span>
+      </Tooltip>
       {armed && loop ? (
         <span className="hidden shrink-0 text-[11px] text-muted sm:inline">
           Loop {formatLoopInterval(loop.intervalMs)} · {nextTickLabel(loop, now)}

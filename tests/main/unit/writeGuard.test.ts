@@ -17,7 +17,6 @@ vi.mock('electron', () => ({
 }))
 
 import { toolEdit } from '@main/agent/tools/edit'
-import { toolMultiEdit } from '@main/agent/tools/multiEdit'
 import {
   assertInlineInstancePathScope,
   assertInlineInstancePushDenied,
@@ -47,11 +46,6 @@ describe('writeGuard', () => {
     expect(() => assertWritablePath('model.gguf')).toThrow(/binary path/)
     expect(() =>
       toolEdit(mkdtempSync(join(tmpdir(), 'vyotiq-write-guard-bin-')), 'model.gguf', 'x', undefined)
-    ).toThrow(/binary path/)
-    expect(() =>
-      toolMultiEdit(mkdtempSync(join(tmpdir(), 'vyotiq-write-guard-multi-bin-')), [
-        { path: 'weights.pt', contents: 'x' }
-      ])
     ).toThrow(/binary path/)
   })
 

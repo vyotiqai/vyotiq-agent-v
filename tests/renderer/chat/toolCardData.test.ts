@@ -134,69 +134,6 @@ describe('parseEditCardData', () => {
     ).toEqual([{ path: 'src/empty.ts', added: 0, removed: 0, action: 'created' }])
   })
 
-  it('matches multi_edit create/modify per path after ./ normalization', () => {
-    expect(
-      collectWritingChanges(
-        tool({
-          name: 'multi_edit',
-          argsPreview: JSON.stringify({
-            edits: [
-              { path: './src/a.ts', contents: 'one\n' },
-              { path: 'src/b.ts', contents: 'two\n' }
-            ]
-          }),
-          content: 'Applied 2 edits:\n- created src/a.ts\n- wrote src/b.ts'
-        })
-      )
-    ).toEqual([
-      { path: './src/a.ts', added: 1, removed: 0, action: 'created' },
-      { path: 'src/b.ts', added: 1, removed: 0, action: 'modified' }
-    ])
-  })
-
-  it('drops per-path actions the truncated multi_edit content can no longer confirm', () => {
-    expect(
-      collectWritingChanges(
-        tool({
-          name: 'multi_edit',
-          summary: 'a.ts, b.ts',
-          argsPreview: JSON.stringify({
-            edits: [
-              { path: 'src/a.ts', contents: 'A\n' },
-              { path: 'src/b.ts', contents: 'B\n' }
-            ]
-          }),
-          content: 'Applied 2 edits:\n- created src/a.ts\n- wrote src/b.t',
-          contentTruncated: true
-        })
-      )
-    ).toEqual([
-      { path: 'src/a.ts', added: 1, removed: 0, action: 'created' },
-      { path: 'src/b.ts', added: 1, removed: 0 }
-    ])
-  })
-
-  it('keeps full multi_edit per-path actions when content is not truncated', () => {
-    expect(
-      collectWritingChanges(
-        tool({
-          name: 'multi_edit',
-          summary: 'a.ts, b.ts',
-          argsPreview: JSON.stringify({
-            edits: [
-              { path: 'src/a.ts', contents: 'A\n' },
-              { path: 'src/b.ts', contents: 'B\n' }
-            ]
-          }),
-          content: 'Applied 2 edits:\n- created src/a.ts\n- wrote src/b.ts'
-        })
-      )
-    ).toEqual([
-      { path: 'src/a.ts', added: 1, removed: 0, action: 'created' },
-      { path: 'src/b.ts', added: 1, removed: 0, action: 'modified' }
-    ])
-  })
-
   it('counts diff lines from unified diff args', () => {
     const diff = '--- a\n+++ b\n@@\n-old\n+new\n+line'
     const data = parseEditCardData(
@@ -209,27 +146,6 @@ describe('parseEditCardData', () => {
     expect(data.added).toBe(2)
     expect(data.removed).toBe(1)
   })
-  it('counts multi_edit edits[] for the header totals', () => {
-    const data = parseEditCardData(
-      tool({
-        name: 'multi_edit',
-        summary: 'a.ts, b.ts',
-        argsPreview: JSON.stringify({
-          edits: [
-            { path: 'a.ts', contents: 'one\ntwo\n' },
-            { path: 'b.ts', diff: '@@\n-old\n+new\n' }
-          ]
-        })
-      })
-    )
-    expect(data.path).toBe('a.ts, b.ts')
-    expect(data.iconPath).toBe('a.ts')
-    expect(data.fileCount).toBe(2)
-    expect(data.added).toBe(3)
-    expect(data.removed).toBe(1)
-    expect(data.changeLabel).toBe('+3 -1')
-  })
-
   it('keeps path empty when streaming args have no path yet', () => {
     const data = parseEditCardData(
       tool({
@@ -362,27 +278,6 @@ describe('parseDiffPreview', () => {
     expect(parseDiffPreview(tool({ name: 'edit' }))).toEqual([])
   })
 
-  it('flattens multi_edit edits[] into a preview body', () => {
-    const lines = parseDiffPreview(
-      tool({
-        name: 'multi_edit',
-        argsPreview: JSON.stringify({
-          edits: [
-            { path: 'api/page.tsx', contents: '"use client"\n' },
-            { path: 'api/layout.tsx', contents: 'export default function Layout() {}\n' }
-          ]
-        })
-      })
-    )
-
-    expect(lines[0]).toEqual({ kind: 'context', text: 'api/page.tsx', lineNumber: null })
-    expect(lines.some((line) => line.kind === 'add' && line.text.includes('use client'))).toBe(true)
-    expect(lines.some((line) => line.kind === 'gap')).toBe(true)
-    expect(lines.some((line) => line.kind === 'context' && line.text === 'api/layout.tsx')).toBe(
-      true
-    )
-  })
-
   it('streams live diff lines from incomplete argsPreview JSON', () => {
     const incomplete = '{"path":"src/live.ts","diff":"@@\\n-old line\\n+new line'
     const lines = parseDiffPreview(
@@ -431,18 +326,6 @@ describe('parseDiffPreview', () => {
     ).toEqual([])
     expect(parseDiffPreview(tool({ name: 'edit', status: 'running', argsPreview: '{' }))).toEqual([])
     expect(parseDiffPreview(tool({ name: 'edit', status: 'running', argsPreview: '' }))).toEqual([])
-  })
-
-  it('streams multi_edit when the trailing edit object is still open', () => {
-    const mid =
-      '{"edits":[{"path":"a.ts","diff":"@@\\n+a\\n"},{"path":"b.ts","diff":"@@\\n+hello'
-    const lines = parseDiffPreview(
-      tool({ name: 'multi_edit', status: 'running', argsPreview: mid })
-    )
-    expect(lines.some((line) => line.text === 'a.ts')).toBe(true)
-    expect(lines.some((line) => line.kind === 'add' && line.text === 'a')).toBe(true)
-    expect(lines.some((line) => line.text === 'b.ts')).toBe(true)
-    expect(lines.some((line) => line.kind === 'add' && line.text === 'hello')).toBe(true)
   })
 
   it('parseDiffPreview fromEnd keeps only the peek tail of a large contents write', () => {

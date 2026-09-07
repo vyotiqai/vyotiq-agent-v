@@ -21,7 +21,6 @@ function EscapeHarness({
     files: [],
     setFiles: () => {},
     setFileError: () => {},
-    running: false,
     onSend: async () => true,
     mentionMenuOpen: true,
     onMentionBack,

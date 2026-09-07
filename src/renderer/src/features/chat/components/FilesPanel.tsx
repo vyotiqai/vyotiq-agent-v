@@ -26,7 +26,9 @@ import {
   type WorkspaceEditorSelection
 } from '@shared/ipc'
 import { useAppVirtualizer } from '@renderer/lib/hooks/useAppVirtualizer'
+import { FileTypeIcon } from '@renderer/lib/fileIcons'
 import { Icon } from '@renderer/lib/icons'
+import { isIgnoredWorkspaceEntryName } from '@shared/utils/workspaceIgnores'
 import {
   ActionMenu,
   IconButton,
@@ -317,8 +319,26 @@ function treeLoadMoreElementId(parentPath: string): string {
   return `workspace-file-load-more-${encodeURIComponent(parentPath)}`
 }
 
+/** Pixel x-offset of the nesting guide for ancestor level `ancestor` (1-based). */
+function treeGuideOffsetPx(ancestor: number): number {
+  return Math.round(ancestor * 16 * TREE_INDENT_REM) - 7
+}
+
 function treeIndentStyle(level: number): CSSProperties {
-  return { paddingLeft: `${Math.max(0, level - 1) * TREE_INDENT_REM + 0.25}rem` }
+  const paddingLeft = `${Math.max(0, level - 1) * TREE_INDENT_REM + 0.25}rem`
+  if (level < 2) return { paddingLeft }
+  // One vertical guide per ancestor level, drawn as background layers so the
+  // hierarchy stays readable without wrapping the tree in nested containers.
+  const guides = Array.from({ length: level - 1 }, (_, index) => index + 1)
+  return {
+    paddingLeft,
+    backgroundImage: guides
+      .map(() => 'linear-gradient(to bottom, var(--vy-tree-guide), var(--vy-tree-guide))')
+      .join(', '),
+    backgroundSize: guides.map(() => '1px 100%').join(', '),
+    backgroundPosition: guides.map((ancestor) => `${treeGuideOffsetPx(ancestor)}px 0`).join(', '),
+    backgroundRepeat: 'no-repeat'
+  }
 }
 
 function tabElementId(id: string): string {
@@ -348,6 +368,7 @@ function recoveryFromSession(
     wordWrap: session.wordWrap,
     autoSave: session.autoSave,
     formatOnSave: session.formatOnSave,
+    showIgnoredFiles: session.showIgnoredFiles,
     savedAt: new Date().toISOString(),
     tabs: session.tabs.map(
       ({ conflict: _conflict, savedContent: _savedContent, revision: _revision, ...tab }) => tab
@@ -546,7 +567,8 @@ export const FilesPanel = memo(function FilesPanel({
     showLineNumbers,
     wordWrap,
     autoSave,
-    formatOnSave
+    formatOnSave,
+    showIgnoredFiles
   } = session
   selectedPathRef.current = selectedPath
   treeFocusPathRef.current = treeFocusPath
@@ -978,7 +1000,8 @@ export const FilesPanel = memo(function FilesPanel({
           showLineNumbers: result.data.snapshot.showLineNumbers ?? true,
           wordWrap: result.data.snapshot.wordWrap ?? false,
           autoSave: result.data.snapshot.autoSave ?? true,
-          formatOnSave: result.data.snapshot.formatOnSave ?? false
+          formatOnSave: result.data.snapshot.formatOnSave ?? false,
+          showIgnoredFiles: result.data.snapshot.showIgnoredFiles ?? false
         })
         const recoveredActivePath = recoveredTabs.find((tab) => tab.id === recoveredActiveId)?.path
         if (recoveredActivePath) {
@@ -1714,7 +1737,11 @@ export const FilesPanel = memo(function FilesPanel({
       }
       setLoadingPath(null)
       if (!result.ok) {
-        setError(result.error)
+        setError(
+          operation.path
+            ? `${result.error} — searched in "${workspaceName(operation.path)}"`
+            : result.error
+        )
         setFailedOpenPath(path)
         return
       }
@@ -1807,6 +1834,7 @@ export const FilesPanel = memo(function FilesPanel({
       if (!directory) return
       const entries = sortEntries(directory.entries)
       for (const entry of entries) {
+        if (!showIgnoredFiles && isIgnoredWorkspaceEntryName(entry.name)) continue
         output.push({ kind: 'entry', entry, level })
         if (isDirectoryEntry(entry) && expandedPaths.includes(entry.path)) {
           visit(entry.path, level + 1)
@@ -1829,7 +1857,7 @@ export const FilesPanel = memo(function FilesPanel({
     }
     visit('', 1)
     return output
-  }, [directories, expandedPaths, treeFilter, treeSort])
+  }, [directories, expandedPaths, treeFilter, treeSort, showIgnoredFiles])
 
   const getTreeItemKey = useCallback(
     (index: number) => {
@@ -3131,6 +3159,22 @@ export const FilesPanel = memo(function FilesPanel({
         onSelect: () => updateSession({ wordWrap: !wordWrap })
       },
       {
+        id: 'editor-encoding',
+        label: `Encoding: ${activeTab.encoding.toUpperCase()}${activeTab.bom ? ' (BOM)' : ''}`,
+        disabled: true,
+        onSelect: () => {}
+      },
+      ...(activeTab.eol !== 'none'
+        ? [
+            {
+              id: 'editor-line-endings',
+              label: `Line endings: ${activeTab.eol.toUpperCase()}`,
+              disabled: true,
+              onSelect: () => {}
+            } satisfies ContextMenuItem
+          ]
+        : []),
+      {
         id: 'editor-auto-save',
         label: 'Auto Save',
         checked: autoSave,
@@ -3180,6 +3224,12 @@ export const FilesPanel = memo(function FilesPanel({
         label: 'Refresh files',
         icon: 'refresh',
         onSelect: refreshTree
+      },
+      {
+        id: 'show-ignored-files',
+        label: 'Show ignored files',
+        checked: showIgnoredFiles,
+        onSelect: () => updateSession({ showIgnoredFiles: !showIgnoredFiles })
       }
     ]
     if (canMutateSelected && !busy) {
@@ -3199,7 +3249,7 @@ export const FilesPanel = memo(function FilesPanel({
       )
     }
     return items
-  }, [busy, canMutateSelected, deleteSelected, moveSelected, refreshTree])
+  }, [busy, canMutateSelected, deleteSelected, moveSelected, refreshTree, showIgnoredFiles, updateSession])
 
   const treeSortItems = useMemo<ActionMenuItem[]>(
     () => [
@@ -3659,14 +3709,13 @@ export const FilesPanel = memo(function FilesPanel({
           className={cn(
             'flex min-h-0 min-w-0 flex-col border-border/40',
             narrowSurface
-              ? 'h-[14rem] min-h-[12rem] w-full max-w-none border-b'
+              ? 'h-[42%] min-h-[11rem] w-full max-w-none border-b'
               : 'w-[var(--files-explorer-width)] max-w-[45%] border-r'
           )}
         >
           <div className="flex min-w-0 shrink-0 items-center gap-1 border-b border-border/30 px-2 py-1" role="toolbar" aria-label="Workspace files">
-            <div className="flex min-w-0 flex-1 items-center gap-1.5">
-              <Icon name="folderOpen" size={14} className="shrink-0 text-muted" />
-              <span className="min-w-0 truncate text-caption font-medium text-fg" title={workspacePath}>
+            <div className="flex min-w-0 flex-1 items-center">
+              <span className="min-w-0 truncate text-caption font-medium tracking-normal text-fg" title={workspacePath}>
                 {workspaceName(workspacePath)}
               </span>
             </div>
@@ -3778,7 +3827,7 @@ export const FilesPanel = memo(function FilesPanel({
                 <button
                   ref={props.ref}
                   type="button"
-                  className={cn(DOCK_TOOLBAR_BTN, 'min-w-[4.5rem] shrink-0 justify-between px-1.5')}
+                  className={cn(DOCK_TOOLBAR_BTN, 'shrink-0 gap-1 px-1.5')}
                   aria-label="Sort workspace files"
                   aria-expanded={props['aria-expanded']}
                   aria-controls={props['aria-controls']}
@@ -3956,10 +4005,12 @@ export const FilesPanel = memo(function FilesPanel({
                       ) : (
                         <span className="w-[10px]" aria-hidden />
                       )}
-                      <Icon
-                        name={isDir ? (open ? 'folderOpen' : 'folder') : 'file'}
+                      <FileTypeIcon
+                        path={entry.path}
+                        kind={isDir ? 'folder' : 'file'}
+                        open={open}
                         size={14}
-                        className={cn('shrink-0', highlighted || focused ? 'text-fg' : 'text-muted')}
+                        className="shrink-0"
                       />
                       <span className="min-w-0 flex-1 truncate" title={entry.path}>
                         {entry.name}
@@ -4069,11 +4120,7 @@ export const FilesPanel = memo(function FilesPanel({
                       }
                       title={tab.path}
                     >
-                      <Icon
-                        name="file"
-                        size={14}
-                        className={cn('shrink-0', selected ? 'text-fg' : 'text-secondary')}
-                      />
+                      <FileTypeIcon path={tab.path} size={14} className="shrink-0" />
                       {tab.dirty ? <span className="text-warning" aria-hidden>●</span> : null}
                       <span className="min-w-0 truncate">{fileName(tab.path)}</span>
                     </button>
@@ -4172,11 +4219,6 @@ export const FilesPanel = memo(function FilesPanel({
                   </button>
                 ) : null}
                 <div className="ml-auto flex shrink-0 items-center gap-1">
-                <span className="hidden shrink-0 text-muted sm:inline" title="File encoding and line endings">
-                  {activeTab.encoding.toUpperCase()}
-                  {activeTab.eol !== 'none' ? ` · ${activeTab.eol.toUpperCase()}` : ''}
-                  {activeTab.bom ? ' · BOM' : ''}
-                </span>
                 <span
                   className={cn(
                     'inline-flex shrink-0 items-center gap-1',
@@ -4458,8 +4500,8 @@ export const FilesPanel = memo(function FilesPanel({
               <Icon name="fileSearch" size={28} className="mb-3 text-muted/50" />
               <p>Select a file to open it in the editor.</p>
               <p className="mt-1 max-w-[18rem] text-caption text-muted/80">
-                Text files use CodeMirror. Images, SVG, Markdown, and HTML can preview in the tab.
-                Other binary files use the bounded virtualized hex editor.
+                Text files open in the code editor. Images, SVG, Markdown, and HTML can preview in
+                the tab. Other binary files open in the hex editor.
               </p>
             </div>
           )}
@@ -4467,12 +4509,11 @@ export const FilesPanel = memo(function FilesPanel({
       </div>
       <div className="flex min-h-8 shrink-0 items-center justify-between gap-3 border-t border-border/30 px-3 py-1 text-caption text-muted">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span>
-            {tabs.length} open tab{tabs.length === 1 ? '' : 's'}
-            {dirtyTabCount > 0 ? (
-              <span className="text-warning"> · {dirtyTabCount} unsaved</span>
-            ) : null}
-          </span>
+          {dirtyTabCount > 0 ? (
+            <span className="text-warning" role="status">
+              {dirtyTabCount} unsaved tab{dirtyTabCount === 1 ? '' : 's'}
+            </span>
+          ) : null}
           {savingTabCount > 0 ? (
             <span className="text-muted" role="status" aria-live="polite">
               {savingTabCount === 1 ? 'Autosaving' : `Autosaving ${savingTabCount}`}

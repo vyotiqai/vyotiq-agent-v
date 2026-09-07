@@ -26,13 +26,8 @@ vi.mock('@main/agent/sparsegrep', async (importOriginal) => {
 
 import { applyUnifiedDiff, toolEdit } from '@main/agent/tools/edit'
 import { toolStrReplace, countOccurrences } from '@main/agent/tools/strReplace'
-import {
-  toolMultiEdit,
-  type MultiEditEntry,
-  type MultiEditDiskDeps
-} from '@main/agent/tools/multiEdit'
 import { toolListDir } from '@main/agent/tools/listDir'
-import { grepFilesForTest, toolGrep } from '@main/agent/tools/grep'
+import { grepFilesForTest, toolGrep, GREP_DEFAULT_MAX_RESULTS } from '@main/agent/tools/grep'
 import { toolDelete } from '@main/agent/tools/deletePath'
 import { minimalDocx } from './helpers/minimalDocx'
 import { toolApplyPatchAsync } from '@main/agent/tools/applyPatch'
@@ -75,6 +70,49 @@ describe('applyUnifiedDiff', () => {
 
   it('throws when there are no hunks', () => {
     expect(() => applyUnifiedDiff('hi', 'not a diff')).toThrow(/No unified-diff hunks/)
+  })
+
+  it('ignores the phantom blank context line from a trailing newline in the diff text', () => {
+    // Regression: a diff string ending in '\n' was parsed as demanding a blank
+    // context line after the hunk, failing every mid-file hunk with
+    // "Diff hunk failed to match ... Expected: <line> \"\"".
+    const diff = ['@@', '-old line', '+new line', ''].join('\n')
+    expect(applyUnifiedDiff('start\nold line\nend\n', diff)).toBe('start\nnew line\nend\n')
+  })
+
+  it('still honors a real blank context line before the trailing newline', () => {
+    const diff = ['@@', ' a', ' ', '-b', '+B', ''].join('\n')
+    expect(applyUnifiedDiff('a\n\nb\n', diff)).toBe('a\n\nB\n')
+  })
+
+  it('keeps the explicit blank-removal EOF anchor working', () => {
+    // ' -' as the last real hunk line (followed only by the '\n' terminator)
+    // must still anchor at end-of-file, not be silently dropped.
+    const diff = ['@@ -1,2 +1', ' a', '-', ''].join('\n')
+    expect(applyUnifiedDiff('a\n\n', diff)).toBe('a\n')
+  })
+
+  it('reports a bare @@ hunk failure without a bogus line anchor and locates expected content', () => {
+    const diff = ['@@', '-one', '-alphaX', '+ALPHA', ''].join('\n')
+    try {
+      applyUnifiedDiff('one\ntwo\nalpha\nthree\n', diff)
+      expect.unreachable()
+    } catch (err) {
+      const message = (err as Error).message
+      expect(message).toMatch(/bare @@ header declares no line/)
+      expect(message).not.toMatch(/near line \d+/)
+      expect(message).toContain('First expected line found at file line 1.')
+    }
+  })
+
+  it('tells the model to regenerate when no expected line exists in the file', () => {
+    const diff = ['@@ -1,2 +1,2 @@', ' header', '-gone', '+new', ''].join('\n')
+    try {
+      applyUnifiedDiff('one\ntwo\n', diff)
+      expect.unreachable()
+    } catch (err) {
+      expect((err as Error).message).toMatch(/None of the expected context\/removal lines exist/)
+    }
   })
 })
 
@@ -148,114 +186,6 @@ describe('toolStrReplace', () => {
     writeFileSync(join(workspace, 'a.txt'), 'foo\r\nbar\r\n', 'utf8')
     toolStrReplace(workspace, 'a.txt', 'foo', 'baz')
     expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('baz\r\nbar\r\n')
-  })
-})
-
-describe('toolMultiEdit', () => {
-  it('applies multiple edits atomically', () => {
-    writeFileSync(join(workspace, 'a.txt'), 'a\n', 'utf8')
-    mkdirSync(join(workspace, 'sub'), { recursive: true })
-    const edits: MultiEditEntry[] = [
-      { path: 'a.txt', contents: 'A edited\n' },
-      { path: 'sub/b.txt', contents: 'created\n' }
-    ]
-    const out = toolMultiEdit(workspace, edits)
-    expect(out).toMatch(/Applied 2 edits/)
-    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('A edited\n')
-    expect(readFileSync(join(workspace, 'sub', 'b.txt'), 'utf8')).toBe('created\n')
-  })
-
-  it('aborts with no files changed when one diff fails', () => {
-    writeFileSync(join(workspace, 'a.txt'), 'a\n', 'utf8')
-    writeFileSync(join(workspace, 'b.txt'), 'b\n', 'utf8')
-    const edits: MultiEditEntry[] = [
-      { path: 'a.txt', contents: 'changed\n' },
-      { path: 'b.txt', diff: ['@@ -1 +1 @@', '-nope', '+x', ''].join('\n') }
-    ]
-    expect(() => toolMultiEdit(workspace, edits)).toThrow(/aborted, no files changed/)
-    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('a\n')
-    expect(readFileSync(join(workspace, 'b.txt'), 'utf8')).toBe('b\n')
-  })
-
-  it('throws when the same path is listed twice', () => {
-    const edits: MultiEditEntry[] = [
-      { path: 'a.txt', contents: '1' },
-      { path: 'a.txt', contents: '2' }
-    ]
-    expect(() => toolMultiEdit(workspace, edits)).toThrow(/lists a.txt twice/)
-  })
-
-  it('rejects str_replace-style fields', () => {
-    const edits: MultiEditEntry[] = [
-      { path: 'a.txt', old_string: 'x', new_string: 'y' } as MultiEditEntry
-    ]
-    expect(() => toolMultiEdit(workspace, edits)).toThrow(/old_string\/new_string/)
-  })
-
-  it('rolls back earlier files when a later commit rename fails mid-batch', () => {
-    writeFileSync(join(workspace, 'a.txt'), 'a\n', 'utf8')
-    writeFileSync(join(workspace, 'b.txt'), 'b\n', 'utf8')
-    const realRename = renameSync
-    const disk: MultiEditDiskDeps = {
-      renameSyncFn: (from, to) => {
-        // Fail exactly the b.txt → b.txt.<pid>.<hex>.bak backup move.
-        if (String(from).endsWith('b.txt')) throw new Error('EACCES injected mid-commit')
-        realRename(String(from), String(to))
-      }
-    }
-    expect(() =>
-      toolMultiEdit(
-        workspace,
-        [
-          { path: 'a.txt', contents: 'A\n' },
-          { path: 'b.txt', contents: 'B\n' }
-        ],
-        undefined,
-        disk
-      )
-    ).toThrow(/EACCES injected mid-commit/)
-    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('a\n')
-    expect(readFileSync(join(workspace, 'b.txt'), 'utf8')).toBe('b\n')
-    const strays = readdirSync(workspace).filter((f) => f.endsWith('.bak') || f.endsWith('.tmp'))
-    expect(strays).toEqual([])
-  })
-
-  it('aborts cleanly when the signal fires before commit and writes nothing', () => {
-    const controller = new AbortController()
-    controller.abort()
-    expect(() =>
-      toolMultiEdit(
-        workspace,
-        [
-          { path: 'x.txt', contents: 'x\n' },
-          { path: 'y.txt', contents: 'y\n' }
-        ],
-        controller.signal
-      )
-    ).toThrow()
-    expect(existsSync(join(workspace, 'x.txt'))).toBe(false)
-    expect(existsSync(join(workspace, 'y.txt'))).toBe(false)
-  })
-
-  it('refuses to replace a non-empty file with empty contents', () => {
-    writeFileSync(join(workspace, 'full.txt'), 'data\n', 'utf8')
-    expect(() =>
-      toolMultiEdit(workspace, [{ path: 'full.txt', contents: '' }])
-    ).toThrow(/refusing to replace a non-empty file with empty contents/)
-    expect(readFileSync(join(workspace, 'full.txt'), 'utf8')).toBe('data\n')
-  })
-
-  it('allows creating a new empty file', () => {
-    const out = toolMultiEdit(workspace, [{ path: 'empty.txt', contents: '' }])
-    expect(out).toMatch(/Applied 1 edit:\n- created empty\.txt/)
-    expect(readFileSync(join(workspace, 'empty.txt'), 'utf8')).toBe('')
-  })
-
-  it('refuses text contents to a binary extension path', () => {
-    expect(() =>
-      toolMultiEdit(workspace, [{ path: 'model.gguf', contents: 'text' }])
-    ).toThrow(/binary/)
-    expect(existsSync(join(workspace, 'model.gguf'))).toBe(false)
   })
 })
 
@@ -342,9 +272,45 @@ describe('grepFilesForTest', () => {
     expect(out).toContain('export function toolWebFetch')
     expect(out).not.toMatch(/No matches/)
   })
+
+  it('stops at the default 60-result cap with a truncation notice', () => {
+    const lines = Array.from({ length: 70 }, (_, i) => `needle ${i + 1}`).join('\n')
+    writeFileSync(join(workspace, 'cap.txt'), lines, 'utf8')
+    const out = grepFilesForTest(workspace, 'needle', ['cap.txt'])
+    const rows = out.split('\n')
+    expect(rows).toHaveLength(GREP_DEFAULT_MAX_RESULTS + 1)
+    expect(rows[0]).toContain('cap.txt:1:')
+    expect(rows[GREP_DEFAULT_MAX_RESULTS - 1]).toContain(`cap.txt:${GREP_DEFAULT_MAX_RESULTS}:`)
+    expect(rows[GREP_DEFAULT_MAX_RESULTS]).toBe(`… stopped at ${GREP_DEFAULT_MAX_RESULTS} matches`)
+  })
+
+  it('honours an explicit maxResults over the default cap', () => {
+    const lines = Array.from({ length: 20 }, (_, i) => `pin ${i + 1}`).join('\n')
+    writeFileSync(join(workspace, 'pin.txt'), lines, 'utf8')
+    const out = grepFilesForTest(workspace, 'pin', ['pin.txt'], { maxResults: 5 })
+    expect(out).toContain('pin.txt:5:')
+    expect(out).not.toContain('pin.txt:6:')
+    expect(out).toContain('… stopped at 5 matches')
+  })
+
+  it('shows no truncation notice when hits are under the default cap', () => {
+    writeFileSync(join(workspace, 'few.txt'), 'hit one\nhit two\nhit three\n', 'utf8')
+    const out = grepFilesForTest(workspace, 'hit', ['few.txt'])
+    expect(out).toContain('few.txt:3:')
+    expect(out).not.toContain('stopped at')
+  })
 })
 
 describe('toolGrep', () => {
+  it('defaults to the 60-result cap when maxResults is omitted', async () => {
+    const lines = Array.from({ length: 70 }, (_, i) => `capMarker ${i + 1}`).join('\n')
+    writeFileSync(join(workspace, 'capMarker.txt'), lines, 'utf8')
+    const out = await toolGrep(workspace, 'capMarker')
+    expect(out).toContain(`… stopped at ${GREP_DEFAULT_MAX_RESULTS} matches`)
+    expect(out).not.toContain('capMarker.txt:61:')
+    expect(out).toContain('capMarker.txt:60:')
+  })
+
   it('scans a real temp dir and formats hits', async () => {
     writeFileSync(join(workspace, 'a.ts'), 'alpha beta\n', 'utf8')
     writeFileSync(join(workspace, 'b.ts'), 'gamma\n', 'utf8')

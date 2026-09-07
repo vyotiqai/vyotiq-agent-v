@@ -132,7 +132,7 @@ function DiffLines({
             </span>
             <span
               className={cn(
-                'min-w-0 flex-1 pr-2 text-fg/85',
+                'min-w-0 flex-1 py-px pl-1 pr-2 text-fg/85',
                 wordWrap
                   ? 'whitespace-pre-wrap [overflow-wrap:anywhere]'
                   : 'whitespace-pre'

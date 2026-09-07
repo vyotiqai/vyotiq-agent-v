@@ -461,6 +461,24 @@ describe('ChangesPanel', () => {
     })
   })
 
+  it('selects and expands the requested file from preferredSelectedPath', async () => {
+    render(
+      <ChangesPanel
+        items={[]}
+        workspacePath="/ws"
+        gitRevision={1}
+        preferredSelectedPath="src/a.ts"
+        preferredSelectedPathToken={1}
+      />
+    )
+    await screen.findAllByText('a.ts')
+    await waitFor(() => {
+      expect(window.vyotiq.gitDiff).toHaveBeenCalledWith(
+        expect.objectContaining({ workspacePath: '/ws', path: 'src/a.ts' })
+      )
+    })
+  })
+
   it('Staged scope commits without staging all', async () => {
     render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} />)
     await screen.findAllByText('a.ts')
@@ -603,7 +621,7 @@ describe('ChangesPanel', () => {
     })
     render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} />)
     await screen.findAllByText('a.ts')
-    fireEvent.click(screen.getByTitle('main'))
+    fireEvent.click(screen.getByRole('button', { name: 'main' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: /^feat$/i }))
     expect(await screen.findByRole('alert')).toBeTruthy()
     expect(screen.getByRole('alert').textContent).toMatch(/overwritten/i)

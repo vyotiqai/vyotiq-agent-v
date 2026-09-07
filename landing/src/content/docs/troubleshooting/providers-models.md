@@ -38,7 +38,7 @@ Check in this order:
 
 Seed model names can remain visible when the live catalog fails. They are fallback metadata, not proof that chat will succeed.
 
-For a Custom host that serves no model list (HTTP 404 or 405 on `GET /models`), the catalog can never load. Type the model ID in the composer model picker search and press Enter to use it manually; a wrong ID surfaces as the host's own HTTP error during the run.
+Some Custom hosts serve chat but no model list (HTTP 405 or 501 on `GET /models` — e.g. Cloudflare Workers AI compat). The catalog then shows a "does not serve a model list" notice instead of an error: the host is reachable and chat connects. Type the model ID in the composer model picker search and press Enter to use it manually; a wrong ID surfaces as the host's own HTTP error during the run. HTTP 404 usually means the base URL is wrong — fix it in Settings, then refresh.
 
 ## A model cannot use an attachment or control
 

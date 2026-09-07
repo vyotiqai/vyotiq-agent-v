@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { copyText } from '@renderer/lib/markdown/copyText'
+import { Tooltip } from '@renderer/lib/ui'
 import { cn } from '@renderer/lib/ui/cn'
 import { DEFAULT_SETTINGS } from '@shared/ipc'
 import { resolveAddressBarTarget } from '@shared/utils/searchEngine'
@@ -797,27 +798,28 @@ function NavIconButton({
   onClick: () => void
 }) {
   return (
-    <button
-      type="button"
-      className="flex size-7 items-center justify-center rounded-md text-fg/70 vy-transition hover:bg-surface-2 disabled:opacity-[var(--vy-disabled-opacity)]"
-      disabled={disabled}
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-    >
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+    <Tooltip content={label}>
+      <button
+        type="button"
+        className="flex size-7 items-center justify-center rounded-md text-fg/70 vy-transition hover:bg-surface-2 disabled:opacity-[var(--vy-disabled-opacity)]"
+        disabled={disabled}
+        onClick={onClick}
+        aria-label={label}
       >
-        {children}
-      </svg>
-    </button>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          {children}
+        </svg>
+      </button>
+    </Tooltip>
   )
 }
 

@@ -45,6 +45,15 @@ describe('ChangeSummary compact receipt', () => {
     expect(screen.queryByText(`file-0${COMPACT_PREVIEW_COUNT}.ts`)).toBeNull()
   })
 
+  it('clicking a file name opens the Changes panel with that path', () => {
+    const onOpenChanges = vi.fn()
+    render(<ChangeSummary files={files(2)} compact onOpenChanges={onOpenChanges} />)
+    fireEvent.click(screen.getByText('file-00.ts'))
+    expect(onOpenChanges).toHaveBeenCalledWith('src/file-00.ts')
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    expect(onOpenChanges).toHaveBeenLastCalledWith()
+  })
+
   it('omits Show more when files fit the preview', () => {
     render(<ChangeSummary files={files(2)} compact onOpenChanges={() => undefined} />)
     expect(screen.queryByRole('button', { name: /Show .+ more/ })).toBeNull()

@@ -39,7 +39,7 @@
       "name": "write_file_check",
       "summary": "placeholder",
       "ok": false,
-      "content": "Unknown tool \"write_file_check\". Use edit, str_replace, or multi_edit to change files."
+      "content": "Unknown tool \"write_file_check\". Use edit or str_replace to change files."
     },
     {
       "type": "assistant_message",

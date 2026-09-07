@@ -60,8 +60,11 @@ describe('delegation prompt assembly (harness + mode section + catalog)', () => 
       .filter(Boolean)
       .join('\n')
 
-    // Harness spine: delegation decision + brief contract.
-    expect(prompt).toMatch(/Delegate independent, self-contained workstreams to child agent instances/)
+    // Harness spine: delegation decision + brief contract (strict, no small-task escape).
+    expect(prompt).toMatch(/Delegate to child agent instances \(root runs\) every single time, no matter how small the request/)
+    expect(prompt).toMatch(/every plan step maps to one controlled child instance/)
+    expect(prompt).toMatch(/spawned zero instances violates this policy/)
+    expect(prompt).toMatch(/verified evidence/)
     expect(prompt).toMatch(/child sees nothing of this conversation/)
 
     // Mode section (root, not inline): default-on decompose trigger + anti-overuse balance.
@@ -94,9 +97,9 @@ describe('delegation prompt assembly (harness + mode section + catalog)', () => 
       .join('\n')
 
     // Children still get the generic workstream-brief principle from the spine…
-    expect(prompt).toMatch(/Delegate independent, self-contained workstreams/)
+    expect(prompt).toMatch(/Delegate to child agent instances \(root runs\)/)
     // …but no parent-only delegation trigger or instance lifecycle.
-    expect(prompt).not.toMatch(/decompose the plan into a structured set/)
+    expect(prompt).not.toMatch(/Fan every task out with a complete structured brief/)
     expect(prompt).not.toMatch(/spawn_agent_instance/)
     expect(prompt).not.toMatch(/merge_agent_instance/)
   })

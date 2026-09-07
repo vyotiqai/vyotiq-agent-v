@@ -255,9 +255,9 @@ describe('landing docs architecture and truth', () => {
     expect(footer).not.toContain("aria-current={onDocs ? 'page' : undefined}")
   })
 
-  it('lists all 61 built-ins including Skill', () => {
+  it('lists all 60 built-ins including Skill', () => {
     const tools = readDoc('reference/tools.md')
-    expect(BUILTIN_TOOL_NAMES).toHaveLength(61)
+    expect(BUILTIN_TOOL_NAMES).toHaveLength(60)
     for (const name of BUILTIN_TOOL_NAMES) {
       expect(tools, `missing tool ${name}`).toContain(`\`${name}\``)
     }

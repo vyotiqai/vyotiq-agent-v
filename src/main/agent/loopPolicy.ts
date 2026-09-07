@@ -62,7 +62,7 @@ export type LoopStop = { reason: LoopStopReason; message: string }
  */
 export const MCP_NOT_IN_CATALOG_FAIL_FAST_THRESHOLD = 2
 
-const WRITE_TOOLS = new Set(['edit', 'str_replace', 'multi_edit', 'edit_notebook'])
+const WRITE_TOOLS = new Set(['edit', 'str_replace', 'edit_notebook'])
 const FILE_MUTATION_TOOLS = new Set([...WRITE_TOOLS, 'delete'])
 
 const MCP_NOT_IN_CATALOG_MARKER = "is not in this step's tool catalog"
@@ -198,11 +198,11 @@ export function loopHintForConsecutiveToolFailures(
       'edit requires path plus non-empty contents (full file) or diff (unified @@ hunks). Never call edit with {}. Use diff to remove contents explicitly.'
     )
   } else if (
-    (recent?.tool === 'edit' || recent?.tool === 'multi_edit') &&
+    recent?.tool === 'edit' &&
     /Diff hunk failed to match|Diff hunk .* matched \d+/i.test(recent.summary)
   ) {
     lines.push(
-      'edit diff did not match the file. Re-read the current bytes and send a hunk whose context/removal lines match exactly.'
+      'edit diff did not match the file. Re-read the current bytes and send a hunk whose context/removal lines match exactly; bare @@ hunks carry no line anchor, so include unique surrounding context lines.'
     )
   } else if (
     recent?.tool === 'str_replace' &&
@@ -215,19 +215,6 @@ export function loopHintForConsecutiveToolFailures(
   ) {
     lines.push(
       'str_replace old_string was not found. Re-read with startLine/endLine and retry with an exact snippet (indentation and newlines).'
-    )
-  } else if (recent?.tool === 'multi_edit' && /duplicate path/i.test(recent.summary)) {
-    lines.push(
-      'multi_edit cannot list the same path twice — combine those edits into one entry.'
-    )
-  } else if (
-    recent?.tool === 'multi_edit' &&
-    /empty arguments|empty contents|edits(?:\.|:)|each edit requires|truncated during streaming/i.test(
-      recent.summary
-    )
-  ) {
-    lines.push(
-      'multi_edit requires edits: [{ path, contents }] or edits: [{ path, diff }]. Send each complete edit object together. Empty contents cannot replace an existing non-empty file; use diff to remove contents explicitly.'
     )
   } else if (
     recent?.tool === 'todo_write' &&
@@ -360,16 +347,6 @@ export function editPathsFromToolCall(
         : readPathArg(args)
     const path = raw ? normalizeWorkspaceRelPath(raw) : ''
     return path ? [path] : []
-  }
-  if (name === 'multi_edit' && Array.isArray(args.edits)) {
-    const paths: string[] = []
-    for (const entry of args.edits) {
-      if (entry && typeof entry === 'object' && typeof (entry as { path?: unknown }).path === 'string') {
-        const path = normalizeWorkspaceRelPath((entry as { path: string }).path)
-        if (path) paths.push(path)
-      }
-    }
-    return paths
   }
   return []
 }

@@ -310,7 +310,7 @@ describe('settings', () => {
       />
     )
 
-    const badge = screen.getByTitle(`Custom OpenAI-compatible · ${longModel}`)
+    const badge = screen.getByRole('button', { name: `Custom OpenAI-compatible · ${longModel}` })
     expect(badge.className).not.toContain('max-w-[200px]')
     expect(badge.className).toContain('max-w-full')
     const field = document.querySelector('[data-settings-field="active-model"]')
@@ -598,7 +598,7 @@ describe('settings', () => {
         onOpenComposerModel={onOpenComposerModel}
       />
     )
-    fireEvent.click(screen.getByTitle(`OpenAI · ${baseSettings.model}`))
+    fireEvent.click(screen.getByRole('button', { name: `OpenAI · ${baseSettings.model}` }))
     expect(onOpenComposerModel).toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: /^Open Providers$/i }))
     expect(screen.getByLabelText('Active provider')).toBeTruthy()

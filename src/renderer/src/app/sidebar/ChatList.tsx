@@ -207,14 +207,15 @@ function WorkspaceHeader({
           />
         </span>
       </button>
-      <button
-        type="button"
-        className="app-region-no-drag flex min-w-0 flex-1 items-center gap-1 text-left"
-        title={path}
-        onClick={onSelectWorkspace}
-      >
-        <span className="truncate font-medium">{name}</span>
-      </button>
+      <Tooltip content={path}>
+        <button
+          type="button"
+          className="app-region-no-drag flex min-w-0 flex-1 items-center gap-1 text-left"
+          onClick={onSelectWorkspace}
+        >
+          <span className="truncate font-medium">{name}</span>
+        </button>
+      </Tooltip>
       {onNewChat ? (
         <Tooltip content={`New chat in ${name}`}>
           <button
@@ -398,15 +399,16 @@ export function ChatList({
         <>
           <div className="mb-2 flex items-center justify-between gap-2 px-1">
             <p className={SIDEBAR_SECTION_LABEL}>Workspaces</p>
-            <button
-              type="button"
-              className="app-region-no-drag inline-grid size-7 place-items-center rounded-md text-muted vy-transition hover:bg-surface/50 hover:text-fg"
-              aria-label="Add workspace"
-              title="Add workspace"
-              onClick={onAddWorkspace}
-            >
-              <Icon name="folderPlus" size={14} />
-            </button>
+            <Tooltip content="Add workspace">
+              <button
+                type="button"
+                className="app-region-no-drag inline-grid size-7 place-items-center rounded-md text-muted vy-transition hover:bg-surface/50 hover:text-fg"
+                aria-label="Add workspace"
+                onClick={onAddWorkspace}
+              >
+                <Icon name="folderPlus" size={14} />
+              </button>
+            </Tooltip>
           </div>
 
           {filteredRunsCount === 0 && sessionQuery.trim() && !hideSessionRuns ? (

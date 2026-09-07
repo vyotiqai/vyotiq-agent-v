@@ -64,7 +64,6 @@ describe('toolSummary', () => {
     expect(summarizeToolArgs('edit', '{')).toBe('')
     expect(summarizeToolArgs('edit', '{"path":')).toBe('')
     expect(summarizeToolArgs('edit', '{}')).toBe('')
-    expect(summarizeToolArgs('multi_edit', '{')).toBe('')
     expect(summarizeToolArgs('str_replace', '{"path":"js/game.js"}')).toContain('game.js')
   })
 
@@ -152,7 +151,7 @@ describe('toolSummary', () => {
     ).toBe('584c0a1c')
   })
 
-  it('infers created vs modified from edit and multi_edit result text', () => {
+  it('infers created vs modified from edit result text', () => {
     expect(inferFileWriteAction('edit', 'Created src/a.ts (12 chars)')).toBe('created')
     expect(inferFileWriteAction('edit', 'created src/a.ts (12 chars)')).toBe('created')
     expect(inferFileWriteAction('edit', 'Wrote src/a.ts (12 chars)')).toBe('modified')
@@ -160,14 +159,5 @@ describe('toolSummary', () => {
     expect(inferFileWriteAction('edit', '')).toBe(null)
     expect(inferFileWriteAction('edit', 'Cancelled')).toBe(null)
     expect(inferFileWriteAction('str_replace', 'Created src/a.ts (12 chars)')).toBe(null)
-    expect(
-      inferFileWriteAction('multi_edit', 'Applied 2 edits:\n- created src/a.ts\n- created src/b.ts')
-    ).toBe('created')
-    expect(
-      inferFileWriteAction('multi_edit', 'Applied 2 edits:\n- created src/a.ts\n- wrote src/b.ts')
-    ).toBe('modified')
-    expect(
-      inferFileWriteAction('multi_edit', 'Applied 1 edit:\n- patched src/a.ts')
-    ).toBe('modified')
   })
 })

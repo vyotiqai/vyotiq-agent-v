@@ -320,7 +320,7 @@ describe('mapToolGroupProps', () => {
           'write_file_check',
           'placeholder',
           'fail',
-          'Unknown tool "write_file_check". Use edit, str_replace, or multi_edit to change files.'
+          'Unknown tool "write_file_check". Use edit or str_replace to change files.'
         )
       ],
       { groupTiming: { startedAt: 1_000 } }

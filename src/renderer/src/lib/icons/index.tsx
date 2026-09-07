@@ -1,5 +1,7 @@
 import type { Icon as PhosphorIcon, IconProps as PhosphorIconProps } from '@phosphor-icons/react'
 import {
+  ArrowClockwiseIcon,
+  ArrowCounterClockwiseIcon,
   ArrowElbowLeftIcon,
   ArrowUpIcon,
   ArrowsClockwiseIcon,
@@ -69,6 +71,8 @@ export type IconProps = PhosphorIconProps & { size?: number }
 
 const ICONS = {
   send: PaperPlaneRightIcon,
+  undo: ArrowCounterClockwiseIcon,
+  redo: ArrowClockwiseIcon,
   branch: GitBranchIcon,
   pullRequest: GitPullRequestIcon,
   gitMerge: GitMergeIcon,

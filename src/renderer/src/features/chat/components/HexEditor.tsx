@@ -557,18 +557,23 @@ export function HexEditor({
       ) : null}
       <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-1 border-b border-border/40 px-2 py-1">
         <button type="button" className={DOCK_TOOLBAR_BTN} onClick={undo} disabled={past.length === 0}>
+          <Icon name="undo" size={11} />
           Undo
         </button>
         <button type="button" className={DOCK_TOOLBAR_BTN} onClick={redo} disabled={future.length === 0}>
+          <Icon name="redo" size={11} />
           Redo
         </button>
         <button type="button" className={DOCK_TOOLBAR_BTN} onClick={insertByte}>
+          <Icon name="plus" size={11} />
           Insert
         </button>
         <button type="button" className={DOCK_TOOLBAR_BTN} onClick={deleteByte} disabled={bytes.length === 0}>
+          <Icon name="trash" size={11} />
           Delete
         </button>
         <button type="button" className={DOCK_TOOLBAR_BTN} onClick={searchReplace}>
+          <Icon name="scanSearch" size={11} />
           Find/replace
         </button>
         <button type="button" className={DOCK_TOOLBAR_BTN} onClick={toggleBookmark}>
@@ -576,15 +581,20 @@ export function HexEditor({
           Bookmark
         </button>
         <button type="button" className={DOCK_TOOLBAR_BTN} onClick={setTemplate}>
+          <Icon name="doc" size={11} />
           Template
         </button>
-        <span className="ml-auto text-2xs text-muted" aria-live="polite">
-          {selectionLabel}
+        <span
+          className="ml-auto text-2xs text-muted"
+          aria-live="polite"
+          title="Cursor position: byte offset in the file and the hex value of the selected byte"
+        >
+          Offset {selectionLabel}
         </span>
       </div>
       <div
         ref={scrollRef}
-        className="min-h-0 min-w-0 flex-1 overflow-auto px-2 py-1 font-mono text-caption"
+        className="min-h-0 min-w-0 flex-1 overflow-auto pl-2 pr-4 py-1 font-mono text-caption"
         role="list"
         aria-label="Hex editor"
       >
@@ -691,18 +701,21 @@ export function HexEditor({
         <span>{bytes.length.toLocaleString()} bytes</span>
         <span className="ml-auto">{activeBookmarks.length} bookmarks</span>
         {activeTemplate ? <span className="truncate">Template: {activeTemplate}</span> : null}
-        <button
-          type="button"
-          className={DOCK_TOOLBAR_ICON_BTN}
-          aria-label="Clear hex selection"
-          onClick={() => {
-            const next: WorkspaceEditorSelection[] = []
-            setSelections(next)
-            emitMeta(selected, next, activeBookmarks, activeTemplate)
-          }}
-        >
-          <Icon name="close" size={12} />
-        </button>
+        {selections.length > 0 ? (
+          <button
+            type="button"
+            className={DOCK_TOOLBAR_ICON_BTN}
+            aria-label="Clear hex selection"
+            title="Clear selection"
+            onClick={() => {
+              const next: WorkspaceEditorSelection[] = []
+              setSelections(next)
+              emitMeta(selected, next, activeBookmarks, activeTemplate)
+            }}
+          >
+            <Icon name="close" size={12} />
+          </button>
+        ) : null}
       </div>
     </div>
   )

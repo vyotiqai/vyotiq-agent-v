@@ -47,7 +47,7 @@ export function ComposerAttachments({
   if (!hasChips && !notice && !extracting) return null
 
   return (
-    <div className="col-span-full flex flex-col gap-1.5">
+    <div className="flex w-full min-w-0 flex-col gap-1.5">
       {hasChips ? (
         <div className="flex flex-wrap items-center gap-1.5">
           {images.map((url, i) => (

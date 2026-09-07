@@ -209,7 +209,7 @@ import { join } from 'path'
 import { resolveRunDir } from '../storage/paths'
 import { isSafeInstanceWorktreePath } from '../git/instanceWorktree'
 import { ensurePlanStub } from './planArtifacts'
-import { isPlanDraftReady } from '../../shared/planQuality'
+import { isPlanDraftReady, scorePlanQuality } from '../../shared/planQuality'
 
 export { cancelRun, clearRunAbort, registerRunAbort, resetActiveRunsForTests }
 
@@ -249,18 +249,7 @@ function loopHintWhenContextStillLarge(
  */
 const AUTO_COMPACT_MIN_REGROWTH_RATIO = 0.1
 
-/**
- * Automatic (proactive/overflow) LLM compaction is disabled: the agent loop
- * never folds history on its own. Manual compaction (/compact, menu) is
- * unaffected. Overflow without a manual fold stops the run with
- * `context_overflow` instead of force-folding.
- */
-let autoCompactionEnabled = false
 
-/** @internal — test hook: re-enable the auto compaction ignition points. */
-export function setAutoCompactionForTests(enabled: boolean): void {
-  autoCompactionEnabled = enabled
-}
 
 const CONTEXT_OVERFLOW_VERIFY_FAILED =
   'Context still exceeds the model window. Compaction produced a summary that failed verification and was not applied. Start a new chat or compact manually.'
@@ -1927,8 +1916,7 @@ export async function* runAgent(input: {
         providerInputTokens
       )
       const needsAutoCompact =
-        autoCompactionEnabled &&
-        (assembled.overflow || (proactiveDecision.trigger && !proactiveSuppressed))
+        assembled.overflow || (proactiveDecision.trigger && !proactiveSuppressed)
 
       const reloadCompactionWatermark = (): void => {
         if (!runDir) return
@@ -2056,8 +2044,9 @@ export async function* runAgent(input: {
       }
 
       if (assembled.overflow) {
-        // Auto retry shares the kill switch; disabled → overflow stop below.
-        if (!overflowRetryUsed && autoCompactionEnabled) {
+        // Shares the auto compaction gate; if folding didn't clear the window,
+        // the overflow stop below reports context_overflow.
+        if (!overflowRetryUsed) {
           overflowRetryUsed = true
           persistLoopCheckpoint()
           logger.warn('Context overflow after auto compact — retrying with same keep-recent', {
@@ -3152,22 +3141,26 @@ export async function* runAgent(input: {
 
         if (controller.signal.aborted) break
 
-        if (
-          agentMode === 'plan' &&
-          planUnreadyNudges < 2 &&
-          !isPlanDraftReady(await readPlanRawAsync(runDir))
-        ) {
-          planUnreadyNudges += 1
-          const nudge: ChatMessage = {
-            role: 'user',
-            content:
-              'Call `create_plan` with Goal, Steps, and Done when. Do not put the plan only in chat.',
-            // Loop-injected protocol turn — must never render as a user bubble.
-            synthetic: true
+        if (agentMode === 'plan' && planUnreadyNudges < 2) {
+          const planRaw = await readPlanRawAsync(runDir)
+          // Draft-ready but structurally shallow plans get the same capped
+          // nudge budget as missing plans, with the top quality issues named.
+          const quality = isPlanDraftReady(planRaw) ? scorePlanQuality(planRaw) : null
+          if (quality === null || quality.issues.length > 0) {
+            planUnreadyNudges += 1
+            const nudge: ChatMessage = {
+              role: 'user',
+              content:
+                quality === null
+                  ? 'Call `create_plan` with Goal, Steps, and Done when. Do not put the plan only in chat.'
+                  : `Plan published but shallow — refine it with \`create_plan\`. Top issues: ${quality.issues.slice(0, 2).join(' ')}`,
+              // Loop-injected protocol turn — must never render as a user bubble.
+              synthetic: true
+            }
+            messages.push(nudge)
+            appendMessage(runDir, nudge)
+            continue
           }
-          messages.push(nudge)
-          appendMessage(runDir, nudge)
-          continue
         }
 
         // Queued follow-ups at turn end auto-apply and continue the run.

@@ -14,6 +14,8 @@ type HunkLine = { tag: ' ' | '-' | '+'; content: string }
 type Hunk = {
   oldStart: number
   lines: HunkLine[]
+  /** False for bare `@@` headers, which declare no line position. */
+  declared: boolean
 }
 
 function parseHunks(diff: string): Hunk[] {
@@ -62,6 +64,16 @@ function parseHunks(diff: string): Hunk[] {
         continue
       }
 
+      // A diff text ending in '\n' yields a final '' split element — the diff
+      // terminator, not a blank context line. Treating it as context demanded a
+      // phantom blank line after the hunk (the "Diff hunk failed to match ...
+      // Expected: <line> \"\"" failure class). Real blank context lines arrive
+      // as ' ' lines, which stay untouched.
+      if (line === '' && i === diffLines.length - 1) {
+        i++
+        continue
+      }
+
       const tag = line[0]
       if (tag === ' ' || tag === '-' || tag === '+') {
         lines.push({ tag, content: line.slice(1) })
@@ -74,7 +86,7 @@ function parseHunks(diff: string): Hunk[] {
       i++
     }
 
-    hunks.push({ oldStart, lines })
+    hunks.push({ oldStart, lines, declared: Boolean(match) })
   }
 
   return hunks
@@ -129,12 +141,24 @@ function findHunkStart(lines: string[], hunk: Hunk): number {
     .slice(0, 3)
     .map((l) => `  ${JSON.stringify(l.slice(0, 100))}`)
     .join('\n')
+  // Name where the expected content actually lives — a bare `@@` hunk has no
+  // declared position, and even a declared one can point far from the drift.
+  const firstKnown = expected.findIndex((l) => l !== '' && lines.includes(l))
+  const located =
+    firstKnown >= 0
+      ? `\nFirst expected line found at file line ${lines.indexOf(expected[firstKnown]) + 1}.`
+      : '\nNone of the expected context/removal lines exist in the file — re-read it and regenerate the hunk from current bytes.'
+  if (!hunk.declared) {
+    throw new Error(
+      `Diff hunk failed to match (context/removal mismatch); the bare @@ header declares no line.\nExpected:\n${preview}${located}`
+    )
+  }
   const around = lines
     .slice(Math.max(0, hunk.oldStart - 1), hunk.oldStart + 3)
     .map((l, i) => `  L${hunk.oldStart + i}: ${JSON.stringify(l.slice(0, 100))}`)
     .join('\n')
   throw new Error(
-    `Diff hunk failed to match near line ${hunk.oldStart + 1} (context/removal mismatch).\nExpected:\n${preview}\nAround declared line:\n${around || '  (eof)'}`
+    `Diff hunk failed to match near line ${hunk.oldStart + 1} (context/removal mismatch).\nExpected:\n${preview}${located}\nAround declared line:\n${around || '  (eof)'}`
   )
 }
 

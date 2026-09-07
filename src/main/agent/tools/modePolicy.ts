@@ -61,7 +61,6 @@ const PLAN_EXTRA_BUILTIN = new Set([
   'update_goal',
   'edit',
   'str_replace',
-  'multi_edit',
   'diagnostics',
   'run_tests'
 ])
@@ -135,8 +134,8 @@ export function modeSectionMarkdown(
           ...(opts?.inlineInstance
             ? []
             : [
-                'Root-only agent-instance tools may be available. Every single time, decompose the plan into a structured set of small, independent workstreams (separate files or subsystems, each verifiable alone) and delegate each to a child agent instance with a complete self-contained brief — outcome, sub-tasks, done-when, affected paths — since the child sees nothing of this conversation; keep one workstream per instance so no child is overloaded, never end a multi-part run with zero spawned instances, and follow the catalog schemas for the spawn, await, and merge lifecycle.',
-                'Batch independent tool calls within a step first; whole workstreams go to child instances as small briefs rather than being executed step-by-step in the parent — a multi-part plan is never executed without spawned instances.'
+                'Root-only agent-instance tools may be available. Always prefer fan-out: every single time, no matter how small the request, plan first with `create_plan` (Goal, Steps, Done when) and decompose the plan into a structured set of very small, atomic, independent tasks (one verifiable deliverable each; split anything larger) — every plan step maps to one child agent instance. Fan every task out with a complete structured brief — outcome, sub-tasks, done-when, affected paths — since the child sees nothing of this conversation; you decide how many instances the decomposition needs, and the parent never finishes actionable work having spawned zero instances (it only makes the individual tool calls needed to plan, brief, and verify). Keep one task per instance so no child is overloaded; spawn all of them in one step and await them together in one step, and follow the catalog schemas for the spawn, await, and merge lifecycle. Batch independent tool calls within a step first. Briefs demand verified evidence — real file reads, command output, test results; a child reports anything unverified as unknown, never assumed, and the parent verifies each child’s summary before reporting success.',
+                'Batch independent tool calls within a step first; whole workstreams go to child instances as small briefs rather than being executed step-by-step in the parent.'
               ])
         ].join('\n')
       )
@@ -157,7 +156,7 @@ export function modeSectionMarkdown(
         'mode',
         [
           'Plan mode. Inspect the workspace with read-only tools before drafting. Plans must name paths and symbols verified in this run.',
-          'Use `ask_question` for blocking choices, then publish the complete plan with `create_plan`. Include goal, success criteria, scope, approach, ordered steps, verification, and risks.',
+          'Use `ask_question` for blocking choices, then publish the complete plan with `create_plan`. Follow the canonical structure: `## Goal` (outcome in 1–2 sentences), `## Scope` (in / out), `## Steps` (ordered; each step names affected paths or symbols verified in this run and how it is verified), `## Done when` (a `- [ ]` checklist of concrete criteria), `## Risks` (trade-offs, unknowns).',
           'Only plan.md and contract.md may be edited. Do not change product files, delete files, run `terminal`, write memory, or invoke MCP server tools. `diagnostics` and `run_tests` may run checks subject to approval.',
           ...autoModeSwitchBanner(mode, auto),
           ...(auto
@@ -291,24 +290,6 @@ export function assertToolAllowedInMode(
         error: auto
           ? 'Plan mode may only edit plan.md or contract.md (run plan artifacts). Call `switch_mode` with mode "agent" to edit product code.'
           : 'Plan mode may only edit plan.md or contract.md (run plan artifacts). Switch to Agent mode to edit product code.'
-      }
-    }
-  }
-
-  if (mode === 'plan' && name === 'multi_edit') {
-    const edits = Array.isArray(args.edits) ? args.edits : []
-    for (const entry of edits) {
-      const path =
-        entry && typeof entry === 'object' && typeof (entry as { path?: unknown }).path === 'string'
-          ? (entry as { path: string }).path
-          : ''
-      if (!isPlanArtifactPath(path)) {
-        return {
-          ok: false,
-          error: auto
-            ? 'Plan mode multi_edit may only target plan.md or contract.md. Call `switch_mode` with mode "agent" to edit product code.'
-            : 'Plan mode multi_edit may only target plan.md or contract.md. Switch to Agent mode to edit product code.'
-        }
       }
     }
   }

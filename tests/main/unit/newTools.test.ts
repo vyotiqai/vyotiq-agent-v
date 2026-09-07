@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { toolGlob } from '@main/agent/tools/glob'
+import { toolSearch } from '@main/agent/tools/search'
 import { toolGrep } from '@main/agent/tools/grep'
 import { toolListDir } from '@main/agent/tools/listDir'
-import { toolMultiEdit } from '@main/agent/tools/multiEdit'
 import { toolDelete } from '@main/agent/tools/deletePath'
 import { toolStrReplace } from '@main/agent/tools/strReplace'
 import { readTodos, toolTodoWrite } from '@main/agent/tools/todo'
@@ -93,6 +93,35 @@ describe('toolGlob', () => {
     expect(out).toContain('murmur-youtube-main/windows/Murmur.CrossPlatform.slnf')
     expect(out).toContain('murmur-youtube-main/windows/Murmur.App.csproj')
   })
+
+  it('defaults to 100 paths with a … N more suffix for a larger set', async () => {
+    mkdirSync(join(root, 'gen'), { recursive: true })
+    for (let i = 0; i < 150; i++) {
+      writeFileSync(join(root, 'gen', `f${String(i).padStart(3, '0')}.txt`), 'x\n', 'utf8')
+    }
+    const out = await toolGlob(root, 'gen/*.txt')
+    const listed = out.split('\n').filter((l) => l.startsWith('gen/'))
+    expect(listed).toHaveLength(100)
+    expect(out).toContain('… 50 more (raise maxResults or narrow the pattern)')
+  })
+
+  it('honours an explicit maxResults over the 100 default', async () => {
+    mkdirSync(join(root, 'gen'), { recursive: true })
+    for (let i = 0; i < 150; i++) {
+      writeFileSync(join(root, 'gen', `f${String(i).padStart(3, '0')}.txt`), 'x\n', 'utf8')
+    }
+    const out = await toolGlob(root, 'gen/*.txt', 10)
+    const listed = out.split('\n').filter((l) => l.startsWith('gen/'))
+    expect(listed).toHaveLength(10)
+    expect(out).toContain('… 140 more (raise maxResults or narrow the pattern)')
+  })
+
+  it('lists everything without a suffix when under the default cap', async () => {
+    const out = await toolGlob(root, '**/*.ts')
+    expect(out).toContain('src/a.ts')
+    expect(out).toContain('src/nested/b.ts')
+    expect(out).not.toContain('more (raise maxResults or narrow the pattern)')
+  })
 })
 
 describe('toolGrep', () => {
@@ -120,6 +149,36 @@ describe('toolGrep', () => {
   })
 })
 
+describe('toolSearch', () => {
+  const writeNeedleFiles = (count: number) => {
+    for (let i = 0; i < count; i++) {
+      writeFileSync(join(root, 'src', `gen${String(i).padStart(3, '0')}.ts`), `export const needle = ${i}\n`, 'utf8')
+    }
+  }
+
+  it('defaults to 40 hits and reports the truncation notice', async () => {
+    writeNeedleFiles(70)
+    const out = await toolSearch(root, 'needle')
+    const hitLines = out.split('\n').filter((l) => l.includes('needle'))
+    expect(hitLines).toHaveLength(40)
+    expect(out).toContain('… stopped at 40 matches')
+  })
+
+  it('honours an explicit maxResults over the 40 default', async () => {
+    writeNeedleFiles(70)
+    const out = await toolSearch(root, 'needle', 5)
+    const hitLines = out.split('\n').filter((l) => l.includes('needle'))
+    expect(hitLines).toHaveLength(5)
+    expect(out).toContain('… stopped at 5 matches')
+  })
+
+  it('shows no truncation notice under the default cap', async () => {
+    const out = await toolSearch(root, 'alpha')
+    expect(out).toContain('README.md:2')
+    expect(out).not.toContain('stopped at')
+  })
+})
+
 describe('toolListDir', () => {
   it('lists directories first and hides ignored entries', () => {
     const out = toolListDir(root, 'src')
@@ -131,155 +190,6 @@ describe('toolListDir', () => {
     expect(() => toolListDir(root, 'README.md')).toThrow(/Not a directory/)
   })
 })
-
-describe('toolMultiEdit', () => {
-  it('writes every edit when all of them apply', () => {
-    const out = toolMultiEdit(root, [
-      { path: 'src/a.ts', contents: 'updated a\n' },
-      { path: 'src/new.ts', contents: 'brand new\n' }
-    ])
-
-    expect(out).toContain('Applied 2 edits')
-    expect(out).toContain('- wrote src/a.ts')
-    expect(out).toContain('- created src/new.ts')
-    expect(readFileSync(join(root, 'src', 'a.ts'), 'utf8')).toBe('updated a\n')
-    expect(readFileSync(join(root, 'src', 'new.ts'), 'utf8')).toBe('brand new\n')
-  })
-
-  it('labels every new file as created', () => {
-    const out = toolMultiEdit(root, [
-      { path: 'src/one.ts', contents: 'one\n' },
-      { path: 'src/two.ts', contents: 'two\n' }
-    ])
-    expect(out).toContain('- created src/one.ts')
-    expect(out).toContain('- created src/two.ts')
-    expect(out).not.toContain('- wrote')
-  })
-
-  it('writes nothing when one edit fails to apply', () => {
-    expect(() =>
-      toolMultiEdit(root, [
-        { path: 'src/a.ts', contents: 'should not land\n' },
-        { path: 'README.md', diff: '@@ -1,1 +1,1 @@\n-nonexistent line\n+replacement\n' }
-      ])
-    ).toThrow(/no files changed/)
-
-    expect(readFileSync(join(root, 'src', 'a.ts'), 'utf8')).toContain('export const alpha')
-  })
-
-  it('rejects empty contents for existing non-empty files without changing the batch', () => {
-    expect(() =>
-      toolMultiEdit(root, [
-        { path: 'src/new-empty.ts', contents: 'would otherwise land\n' },
-        { path: 'src/a.ts', contents: '' }
-      ])
-    ).toThrow(/no files changed.*empty contents/i)
-
-    expect(readFileSync(join(root, 'src', 'a.ts'), 'utf8')).toContain('export const alpha')
-    expect(existsSync(join(root, 'src', 'new-empty.ts'))).toBe(false)
-  })
-
-  it('rejects a duplicated path rather than silently keeping the last write', () => {
-    expect(() =>
-      toolMultiEdit(root, [
-        { path: 'src/a.ts', contents: 'first\n' },
-        { path: 'src/a.ts', contents: 'second\n' }
-      ])
-    ).toThrow(/twice/)
-  })
-
-  it('rejects old_string/new_string and points to str_replace', () => {
-    expect(() =>
-      toolMultiEdit(root, [
-        {
-          path: 'src/a.ts',
-          old_string: 'alpha',
-          new_string: 'beta'
-        }
-      ])
-    ).toThrow(/str_replace/)
-    expect(readFileSync(join(root, 'src', 'a.ts'), 'utf8')).toContain('export const alpha')
-  })
-
-  it('does not clobber an existing target.tmp sibling', () => {
-    const preserved = 'user temp contents\n'
-    writeFileSync(join(root, 'src', 'a.ts.tmp'), preserved, 'utf8')
-    toolMultiEdit(root, [{ path: 'src/a.ts', contents: 'updated a\n' }])
-    expect(readFileSync(join(root, 'src', 'a.ts'), 'utf8')).toBe('updated a\n')
-    expect(readFileSync(join(root, 'src', 'a.ts.tmp'), 'utf8')).toBe(preserved)
-  })
-
-  it('rolls back completed renames when a later commit fails', () => {
-    const originalA = readFileSync(join(root, 'src', 'a.ts'), 'utf8')
-    const originalReadme = readFileSync(join(root, 'README.md'), 'utf8')
-    // multi_edit resolves through resolveInsideWorkspace, which realpaths;
-    // the injected rename seam receives that form, so match it (macOS tmpdir
-    // sits under the /var → /private/var symlink).
-    const readme = join(realpathSync(root), 'README.md')
-    expect(() =>
-      toolMultiEdit(
-        root,
-        [
-          { path: 'src/a.ts', contents: 'should roll back\n' },
-          { path: 'README.md', contents: 'should not land\n' }
-        ],
-        undefined,
-        {
-          renameSyncFn: (from, to) => {
-            if (to === readme && from.endsWith('.tmp')) {
-              throw new Error('simulated mid-commit failure')
-            }
-            renameSync(from, to)
-          }
-        }
-      )
-    ).toThrow(/simulated mid-commit failure/)
-    expect(readFileSync(join(root, 'src', 'a.ts'), 'utf8')).toBe(originalA)
-    expect(readFileSync(join(root, 'README.md'), 'utf8')).toBe(originalReadme)
-  })
-})
-
-describe('multi_edit summary', () => {
-  it('counts unique slash-normalized paths in the N files summary', async () => {
-    toolTodoWrite(root, [{ id: '1', content: 'Update nested TypeScript files', status: 'in_progress' }])
-    const result = await executeTool(
-      'multi_edit',
-      JSON.stringify({
-        edits: [
-          { path: 'src/a.ts', contents: 'updated a\n' },
-          { path: 'src\\nested\\b.ts', contents: 'updated b\n' }
-        ]
-      }),
-      root,
-      new AbortController().signal,
-      { runDir: root, agentMode: 'agent' }
-    )
-    expect(result.ok).toBe(true)
-    expect(result.summary).toBe('2 files')
-    expect(readFileSync(join(root, 'src', 'nested', 'b.ts'), 'utf8')).toBe('updated b\n')
-  })
-
-  it('rejects an edit that passes both contents and diff', async () => {
-    const result = await executeTool(
-      'multi_edit',
-      JSON.stringify({
-        edits: [
-          {
-            path: 'src/a.ts',
-            contents: 'updated\n',
-            diff: '@@ -1 +1 @@\n-export const alpha = 1\n+updated\n'
-          }
-        ]
-      }),
-      root,
-      new AbortController().signal
-    )
-    expect(result.ok).toBe(false)
-    expect(result.content).toMatch(/contents or diff, not both/)
-    expect(readFileSync(join(root, 'src', 'a.ts'), 'utf8')).toContain('export const alpha')
-  })
-})
-
 
 describe('toolDelete', () => {
   it('deletes a file', () => {

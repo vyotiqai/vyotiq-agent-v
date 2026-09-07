@@ -241,16 +241,18 @@ async function tryUnlink(path: string): Promise<void> {
 }
 
 /**
- * Kill processes that hold the worktree open: those whose executable, current
- * working directory, or command line references `root`. The previous `pnpm start`
- * Electron child can survive Ctrl+C, and child agent processes (node/esbuild)
- * keep the checkout locked by CWD/CLI even when their image is outside it.
+ * Kill processes that hold the worktree open: those whose executable or
+ * command line references `root`. Win32_Process cannot query a process's
+ * current directory, so cwd-only holders are out of scope for WQL. The
+ * previous `pnpm start` Electron child can survive Ctrl+C, and child agent
+ * processes (node/esbuild) keep the checkout locked via CLI references even
+ * when their image is outside it.
  */
 export function buildWorktreeProcessFilter(root: string, hostPid = process.pid): string {
   const prefix = resolve(root)
   if (!prefix) return ''
   const like = `${prefix.replace(/\\/g, '\\\\').replace(/'/g, "''")}%`
-  return `(ExecutablePath LIKE '${like}' OR CommandLine LIKE '${like}' OR CurrentDirectory LIKE '${like}') AND ProcessId != ${hostPid} AND ProcessId != $PID`
+  return `(ExecutablePath LIKE '${like}' OR CommandLine LIKE '${like}') AND ProcessId != ${hostPid} AND ProcessId != $PID`
 }
 
 export async function killProcessesWithExecutableUnder(root: string): Promise<void> {

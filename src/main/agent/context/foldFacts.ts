@@ -33,7 +33,7 @@ export type FoldFactsExtras = {
   todos?: readonly TodoItem[]
 }
 
-const WRITE_TOOLS = new Set(['edit', 'str_replace', 'multi_edit', 'delete', 'edit_notebook'])
+const WRITE_TOOLS = new Set(['edit', 'str_replace', 'delete', 'edit_notebook'])
 const INSPECT_TOOLS = new Set([
   'read',
   'list_dir',
@@ -119,14 +119,6 @@ function pathsFromCall(name: string, args: Record<string, unknown>): string[] {
   const out: string[] = []
   const push = (value: unknown): void => {
     if (typeof value === 'string' && value.trim()) out.push(value)
-  }
-  if (name === 'multi_edit' && Array.isArray(args.edits)) {
-    for (const entry of args.edits) {
-      if (entry && typeof entry === 'object' && typeof (entry as { path?: unknown }).path === 'string') {
-        push((entry as { path: string }).path)
-      }
-    }
-    return out
   }
   if (name === 'grep') {
     push(typeof args.include === 'string' ? args.include : args.path)

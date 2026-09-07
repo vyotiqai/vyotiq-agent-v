@@ -39,7 +39,6 @@ import { isSkillRelatedRelPath } from '../skills/local'
 import { isRuleRelatedRelPath, clearRulesCache } from '../context/rules'
 import { notifySkillsChanged } from '../skills/notify'
 import { toolListDir } from './listDir'
-import { toolMultiEditAsync, type MultiEditEntry } from './multiEdit'
 import { toolStrReplaceAsync } from './strReplace'
 import { toolDeleteAsync } from './deletePath'
 import {
@@ -596,34 +595,6 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     throwIfAborted(signal)
     const path = typeof args.path === 'string' && args.path.trim() ? args.path : '.'
     return toolOk('list_dir', path, toolListDir(workspace, path))
-  },
-  multi_edit: async (workspace, args, signal, context) => {
-    throwIfAborted(signal)
-    const edits = args.edits as MultiEditEntry[]
-    if (!context.skipWriteCheckpoint) {
-      const cp = getWriteCheckpoint(context.runDir)
-      if (cp) {
-        for (const edit of edits) {
-          const path = readPathArg(edit as Record<string, unknown>)
-          if (path) await cp.recordPrior(path, 'write')
-        }
-      }
-    }
-    const content = await toolMultiEditAsync(workspace, edits, signal)
-    invalidateAfterWorkspaceMutation(
-      workspace,
-      edits
-        .map((edit) => readPathArg(edit as Record<string, unknown>))
-        .filter((p): p is string => Boolean(p))
-    )
-    // Unique-path count, normalized like the schema's duplicate check.
-    const uniquePaths = new Set(
-      edits
-        .map((edit) => readPathArg(edit as Record<string, unknown>) ?? '')
-        .filter(Boolean)
-        .map((path) => path.replace(/\\/g, '/').toLowerCase())
-    )
-    return toolOk('multi_edit', `${uniquePaths.size} files`, content)
   },
   str_replace: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
@@ -1825,10 +1796,27 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     }
     const goal = readString(args, 'goal')
     if (!goal) return toolFail('spawn_agent_instance', 'spawn', 'goal is required')
+    const outcome = readString(args, 'outcome')
+    if (!outcome) return toolFail('spawn_agent_instance', 'spawn', 'outcome is required')
+    const doneWhen = readString(args, 'done_when')
+    if (!doneWhen) return toolFail('spawn_agent_instance', 'spawn', 'done_when is required')
+    const subTasks = Array.isArray(args.sub_tasks)
+      ? args.sub_tasks.filter((t): t is string => typeof t === 'string')
+      : []
+    if (subTasks.length === 0) {
+      return toolFail(
+        'spawn_agent_instance',
+        'spawn',
+        'sub_tasks must be a non-empty array of strings'
+      )
+    }
     const result = await spawnAgentInstance({
       parentRunId: context.runId,
       workspacePath: workspace,
       goal,
+      outcome,
+      subTasks,
+      doneWhen,
       pathScope: Array.isArray(args.path_scope)
         ? args.path_scope.filter((p): p is string => typeof p === 'string')
         : undefined,
@@ -1976,26 +1964,6 @@ function normalizeParsedToolArgs(
     const parsedTodos = parseJsonish(normalized.todos)
     if (Array.isArray(parsedTodos)) normalized.todos = parsedTodos
   }
-  if (name === 'multi_edit') {
-    const edits = normalized.edits
-    if (typeof edits === 'string') {
-      const parsedEdits = parseJsonish(edits)
-      if (Array.isArray(parsedEdits)) normalized.edits = parsedEdits
-    }
-    if (Array.isArray(normalized.edits)) {
-      normalized.edits = normalized.edits.map((raw) => {
-        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
-        const edit = { ...(raw as Record<string, unknown>) }
-        const path = readPathArg(edit)
-        if (path && typeof edit.path !== 'string') edit.path = path
-        if (typeof edit.contents !== 'string') {
-          const content = readString(edit, 'content')
-          if (content !== undefined) edit.contents = content
-        }
-        return edit
-      })
-    }
-  }
   if (name === 'terminal') {
     if (typeof normalized.command !== 'string') {
       const command = readString(normalized, 'cmd')
@@ -2014,7 +1982,17 @@ function normalizeParsedToolArgs(
   }
   if (name === 'spawn_agent_instance' && typeof normalized.goal !== 'string') {
     const prompt = readString(normalized, 'prompt') ?? readString(normalized, 'description')
-    if (prompt) normalized.goal = prompt
+    if (prompt) {
+      normalized.goal = prompt
+      // Legacy alias calls (Task/subagent) carry only a free-form prompt.
+      // Derive the structured fields the strict schema requires so the call
+      // reaches the handler, which re-validates with its own actionable errors.
+      if (typeof normalized.outcome !== 'string') normalized.outcome = prompt
+      if (typeof normalized.done_when !== 'string') normalized.done_when = prompt
+      if (!Array.isArray(normalized.sub_tasks) || normalized.sub_tasks.length === 0) {
+        normalized.sub_tasks = [prompt]
+      }
+    }
   }
   if (name === 'lsp') {
     if (typeof normalized.action !== 'string') {
@@ -2212,73 +2190,38 @@ export async function executeTool(
     return basename(n)
   }
 
-  if (name === 'multi_edit' && Array.isArray(args.edits)) {
-    const edits = args.edits as Array<Record<string, unknown>>
-    let anyRemap = false
-    let allRemap = edits.length > 0
-    const remapped = edits.map((edit) => {
-      const p = typeof edit.path === 'string' ? edit.path : ''
-      if (!shouldRemapPath(p)) {
-        allRemap = false
-        return edit
-      }
-      anyRemap = true
-      return { ...edit, path: remapPathArg(p) }
-    })
-    if (anyRemap && !allRemap) {
+  const pathArg = readPathArg(args) ?? ''
+  const remapRunArtifact =
+    (name === 'edit' ||
+      name === 'str_replace' ||
+      name === 'read' ||
+      name === 'delete') &&
+    shouldRemapPath(pathArg)
+  if (remapRunArtifact) {
+    if (!context.runDir) {
+      return toolFail(name, summary, 'Run artifacts require an active run directory')
+    }
+    if (name === 'delete') {
       return toolFail(
         name,
         summary,
-        'multi_edit cannot mix run artifacts (plan.md / contract.md) with workspace files'
+        'plan.md and contract.md are run artifacts and cannot be deleted. Edit or recreate the file instead.'
       )
     }
-    if (anyRemap) {
-      if (!context.runDir) {
-        return toolFail(name, summary, 'Run artifacts require an active run directory')
-      }
-      effectiveWorkspace = context.runDir
-      effectiveArgs = { ...args, edits: remapped }
+    effectiveWorkspace = context.runDir
+    effectiveArgs = { ...args, path: remapPathArg(pathArg) }
+    if (name === 'edit' || name === 'str_replace') {
       effectiveContext = { ...context, skipWriteCheckpoint: true }
-    }
-  } else {
-    const pathArg = readPathArg(args) ?? ''
-    const remapRunArtifact =
-      (name === 'edit' ||
-        name === 'str_replace' ||
-        name === 'read' ||
-        name === 'delete') &&
-      shouldRemapPath(pathArg)
-    if (remapRunArtifact) {
-      if (!context.runDir) {
-        return toolFail(name, summary, 'Run artifacts require an active run directory')
-      }
-      if (name === 'delete') {
-        return toolFail(
-          name,
-          summary,
-          'plan.md and contract.md are run artifacts and cannot be deleted. Edit or recreate the file instead.'
-        )
-      }
-      effectiveWorkspace = context.runDir
-      effectiveArgs = { ...args, path: remapPathArg(pathArg) }
-      if (name === 'edit' || name === 'str_replace') {
-        effectiveContext = { ...context, skipWriteCheckpoint: true }
-      }
     }
   }
 
   // Enforce inline instance path_scope on product-file writers (not run artifacts).
   if (
     effectiveWorkspace === workspace &&
-    (name === 'edit' || name === 'str_replace' || name === 'multi_edit' || name === 'delete' || name === 'edit_notebook')
+    (name === 'edit' || name === 'str_replace' || name === 'delete' || name === 'edit_notebook')
   ) {
     const writePaths: string[] = []
-    if (name === 'multi_edit' && Array.isArray(effectiveArgs.edits)) {
-      for (const edit of effectiveArgs.edits as Array<Record<string, unknown>>) {
-        const p = readPathArg(edit)
-        if (p) writePaths.push(p)
-      }
-    } else if (name === 'edit_notebook') {
+    if (name === 'edit_notebook') {
       const p =
         typeof effectiveArgs.target_notebook === 'string'
           ? effectiveArgs.target_notebook

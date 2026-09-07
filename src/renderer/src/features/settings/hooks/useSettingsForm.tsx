@@ -157,6 +157,30 @@ export function useSettingsForm({
    * override is on; otherwise they update global settings.
    */
   const runAgentUpdate = async (patch: AgentSettingsPatch): Promise<boolean> => {
+    // Mirror the composer's persistence contract: a thinking toggle also
+    // updates the per-provider prefs map that setActiveProvider restores from.
+    // Writing only the top-level fields made a Settings-only toggle revert
+    // itself when the user switched provider away and back.
+    const prefsProvider = effectiveChatSettings?.provider ?? settings.provider
+    const prefsPartial =
+      patch.thinkingEnabled !== undefined || patch.thinkingEffort !== undefined
+        ? (() => {
+            const currentPrefs =
+              settings.thinkingPrefsByProvider[prefsProvider] ?? {
+                thinkingEnabled: settings.thinkingEnabled,
+                thinkingEffort: settings.thinkingEffort
+              }
+            return {
+              thinkingPrefsByProvider: {
+                ...settings.thinkingPrefsByProvider,
+                [prefsProvider]: {
+                  thinkingEnabled: patch.thinkingEnabled ?? currentPrefs.thinkingEnabled,
+                  thinkingEffort: patch.thinkingEffort ?? currentPrefs.thinkingEffort
+                }
+              }
+            }
+          })()
+        : undefined
     if (workspaceOverrideActive && activeWorkspacePath && onSetSettingsOverride) {
       clearErrors()
       setModelsInfo(null)
@@ -173,12 +197,15 @@ export function useSettingsForm({
           setError(res.error)
           return false
         }
+        // thinkingPrefsByProvider is global-only (not part of the override
+        // schema) — write it to global settings like the composer path does.
+        if (prefsPartial) void runUpdate(prefsPartial)
         return true
       } finally {
         setSavingField(false)
       }
     }
-    return runUpdate(patch)
+    return runUpdate(prefsPartial ? { ...patch, ...prefsPartial } : patch)
   }
 
   /** Trim-on-save commit for the Persona draft; reverts the field on failure. */
