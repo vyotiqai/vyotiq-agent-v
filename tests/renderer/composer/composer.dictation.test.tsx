@@ -150,6 +150,9 @@ describe('Composer dictation', () => {
   it('idle mic tooltip includes the dictation engine', async () => {
     renderComposer()
     await waitFor(() => expect(window.vyotiq.getSettings).toHaveBeenCalled())
+    // Focus-opened tooltips require a recent keydown (keyboard navigation);
+    // clicks and programmatic focus deliberately do not open them.
+    fireEvent.keyDown(window, { key: 'Tab' })
     fireEvent.focus(screen.getByRole('button', { name: /^Dictate$/i }))
     await waitFor(
       () => {

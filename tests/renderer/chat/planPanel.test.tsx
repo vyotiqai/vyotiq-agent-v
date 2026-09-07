@@ -132,7 +132,9 @@ describe('PlanPanel', () => {
       expect(screen.getByLabelText('Plan outline')).toBeTruthy()
     })
     expect(screen.getByText('Outline')).toBeTruthy()
-    expect(screen.getByText('Checklist 1/2')).toBeTruthy()
+    // The stub's Done-when `- [ ]` counts as the first unchecked item; the
+    // appended Findings section adds one checked and one unchecked.
+    expect(screen.getByText('Checklist 1/3')).toBeTruthy()
     // H1 omitted from nav when H2s exist.
     const outline = screen.getByLabelText('Plan outline')
     expect(within(outline).queryByRole('button', { name: 'Comprehensive plan' })).toBeNull()
