@@ -49,7 +49,7 @@ describe('skills smoke (bundled + isolated marketplace)', () => {
   })
 
   it('finds the workflow skills plus UI/API skills with SKILL.md', () => {
-    expect(skillDirs.length).toBe(10)
+    expect(skillDirs.length).toBe(11)
     for (const dir of skillDirs) {
       expect(existsSync(join(dir, 'SKILL.md')), dir).toBe(true)
     }
@@ -72,6 +72,7 @@ describe('skills smoke (bundled + isolated marketplace)', () => {
       'frontend-design',
       'goal',
       'implement-feature',
+      'persona-builder',
       'review-code',
       'write-tests'
     ])
@@ -140,6 +141,7 @@ describe('skills smoke (bundled + isolated marketplace)', () => {
       'frontend-design',
       'goal',
       'implement-feature',
+      'persona-builder',
       'review-code',
       'create-skill',
       'write-tests'
