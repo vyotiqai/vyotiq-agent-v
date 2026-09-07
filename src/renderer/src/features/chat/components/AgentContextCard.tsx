@@ -24,8 +24,14 @@ export function AgentContextCard({ workspacePath }: { workspacePath: string }) {
 
   useEffect(() => {
     let cancelled = false
-    window.vyotiq
-      .agentContext({ workspacePath })
+    // Bridge surface is versioned — an older/partial preload without the
+    // method must render nothing (never throw inside the effect).
+    const request = window.vyotiq.agentContext?.({ workspacePath })
+    if (!request) {
+      setFailed(true)
+      return
+    }
+    request
       .then((res) => {
         if (cancelled) return
         if (res.ok) setContext(res.data)
