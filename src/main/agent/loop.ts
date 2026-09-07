@@ -1697,6 +1697,7 @@ export async function* runAgent(input: {
       if (controller.signal.aborted) break
       // Inject promoted follow-ups (Send now) before the next model call.
       yield* applyDrainedFollowUps(runId, runDir, messages)
+      const modeBeforeBoundary = agentMode
       agentMode = yield* applyPendingModeChange(
         runId,
         runDir,
@@ -1704,6 +1705,11 @@ export async function* runAgent(input: {
         agentMode,
         writeStatus
       )
+      // Composer-queued mode applied at this boundary: the pre-loop refresh
+      // built the catalog for the old mode, so force a rebuild even when this
+      // is the invoke's first step (otherwise one step runs with the old
+      // mode's tool list while the mode section already advertises the new one).
+      const modeChangedAtBoundary = agentMode !== modeBeforeBoundary
       // Live autoModeSwitch at step boundary — next step picks up Settings toggles.
       // Provider/model stay invoke-frozen; only switch_mode availability is live.
       const liveAutoModeSwitch = getSettings().autoModeSwitch === true
@@ -1819,7 +1825,7 @@ export async function* runAgent(input: {
       if (step > initialStep + 1) {
         refreshSkillPromptSections()
       }
-      if (step > initialStep + 1 || autoModeSwitchChanged) {
+      if (step > initialStep + 1 || autoModeSwitchChanged || modeChangedAtBoundary) {
         await refreshMcpToolsForStep()
       }
 

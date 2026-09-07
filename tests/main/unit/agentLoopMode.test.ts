@@ -234,6 +234,31 @@ describe('runAgent mode and API key', () => {
     expect(readFileSync(planPath, 'utf8')).toContain('## Steps')
   })
 
+  it('rebuilds the tool catalog when a queued mode lands at the first step boundary', async () => {
+    let seenTools: string[] = []
+    streamChat.mockImplementation(async function* (req: ProviderChatRequest): AsyncGenerator<StreamChunk> {
+      seenTools = (req.tools ?? []).map((t) => t.name)
+      yield { type: 'text', text: 'ok' }
+      yield { type: 'done', stopReason: 'end_turn' }
+    })
+
+    // Composer flipped Agent while the run was active: the mode is queued on
+    // main and consumed at this invoke's first step boundary.
+    const runId = 'mode-catalog-first-step'
+    setPendingMode(runId, 'agent')
+    for await (const _ of runAgent({
+      runId,
+      messages: [{ role: 'user', content: 'implement now' }],
+      workspacePath: workspace,
+      mode: 'ask'
+    })) {
+      // drain
+    }
+
+    expect(seenTools).toContain('edit')
+    expect(seenTools).toContain('terminal')
+  })
+
   it('nudges a text-only Plan step when plan.md is not ready', async () => {
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
       yield { type: 'text', text: 'Here is the full plan in chat.' }
