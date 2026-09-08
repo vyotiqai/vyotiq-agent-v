@@ -7,7 +7,7 @@ import {
   AgentQuestionRejectSchema,
   AgentBrowserStateSchema,
   CodeIndexRuntimeStatusSchema,
-  UpdaterStatusSchema,
+  UpdaterStatePayloadSchema,
   DictationRuntimeStatusSchema,
   GithubAuthStatusSchema,
   SkillsChangedPayloadSchema,
@@ -87,6 +87,7 @@ const api: VyotiqApi = {
     }),
   resolveWrites: (payload) => ipcRenderer.invoke(IPC.runsResolveWrites, payload),
   readRunArtifact: (payload) => ipcRenderer.invoke(IPC.runsReadArtifact, payload),
+  runStats: (payload) => ipcRenderer.invoke(IPC.runStats, payload),
   harnessReview: (payload) => ipcRenderer.invoke(IPC.harnessReview, payload),
   harnessPreviewApply: (payload) => ipcRenderer.invoke(IPC.harnessPreviewApply, payload),
   harnessApply: (payload) => ipcRenderer.invoke(IPC.harnessApply, payload),
@@ -375,10 +376,25 @@ const api: VyotiqApi = {
   getTraceStatus: () => ipcRenderer.invoke(IPC.traceStatus),
   stopTrace: () => ipcRenderer.invoke(IPC.traceStop),
   getAppInfo: () => ipcRenderer.invoke(IPC.appInfo),
-  getUpdaterStatus: () => ipcRenderer.invoke(IPC.updaterStatus),
-  checkForAppUpdates: () => ipcRenderer.invoke(IPC.updaterCheck),
-  downloadAppUpdate: () => ipcRenderer.invoke(IPC.updaterDownload),
-  installAppUpdate: () => ipcRenderer.invoke(IPC.updaterInstall),
+  updater: {
+    check: () => ipcRenderer.invoke(IPC.updaterCheck),
+    download: () => ipcRenderer.invoke(IPC.updaterDownload),
+    install: () => ipcRenderer.invoke(IPC.updaterInstall),
+    onState: (handler) => {
+      const listener = (_: IpcRendererEvent, payload: unknown): void => {
+        const parsed = UpdaterStatePayloadSchema.safeParse(payload)
+        if (!parsed.success) return
+        handler(parsed.data)
+      }
+      ipcRenderer.on(IPC.updaterState, listener)
+      return () => {
+        ipcRenderer.removeListener(IPC.updaterState, listener)
+      }
+    }
+  },
+  feedback: {
+    compose: (payload) => ipcRenderer.invoke(IPC.feedbackCompose, payload)
+  },
   workspaceGrep: (payload) => ipcRenderer.invoke(IPC.workspaceGrep, payload),
   gitConflictFile: (payload) => ipcRenderer.invoke(IPC.gitConflictFile, payload),
   gitResolveConflict: (payload) => ipcRenderer.invoke(IPC.gitResolveConflict, payload),
@@ -426,17 +442,6 @@ const api: VyotiqApi = {
     ipcRenderer.on(IPC.appearanceCustomCssChanged, listener)
     return () => {
       ipcRenderer.removeListener(IPC.appearanceCustomCssChanged, listener)
-    }
-  },
-  onUpdaterStatus: (handler) => {
-    const listener = (_: IpcRendererEvent, status: unknown): void => {
-      const parsed = UpdaterStatusSchema.safeParse(status)
-      if (!parsed.success) return
-      handler(parsed.data)
-    }
-    ipcRenderer.on(IPC.updaterStatusEvent, listener)
-    return () => {
-      ipcRenderer.removeListener(IPC.updaterStatusEvent, listener)
     }
   },
   probeNetwork: () => ipcRenderer.invoke(IPC.networkProbe),

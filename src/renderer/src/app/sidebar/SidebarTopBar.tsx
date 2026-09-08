@@ -16,20 +16,18 @@ export function SidebarTopBar({
   workspaceReady,
   searchRef,
   sessionQuery,
-  disabledTitle,
   onToggleSidebar,
   onSessionQuery,
-  onNewChat
+  onOpenHome
 }: {
   isDrawer: boolean
   isDarwin: boolean
   workspaceReady: boolean
   searchRef: RefObject<HTMLInputElement | null>
   sessionQuery: string
-  disabledTitle?: string
   onToggleSidebar: () => void
   onSessionQuery: (q: string) => void
-  onNewChat: () => void
+  onOpenHome: () => void
 }) {
   const headerStyle = isDarwin ? { paddingLeft: MACOS_TITLEBAR_INSET_PX } : undefined
   const alignWithTitleBar = !isDrawer
@@ -50,15 +48,12 @@ export function SidebarTopBar({
 
         <div className="app-region-no-drag shrink-0">
           <IconButton
-            icon="plus"
-            label="New chat"
+            icon="home"
+            label="Home"
             size="sm"
             variant="bare"
-            disabled={!workspaceReady}
-            title={
-              !workspaceReady ? disabledTitle : `New chat (${shortcutLabel('newChat')})`
-            }
-            onClick={onNewChat}
+            title={`Home (${shortcutLabel('goHome')})`}
+            onClick={onOpenHome}
           />
         </div>
       </div>
@@ -79,19 +74,15 @@ export function SidebarCollapsedHeader({
   isDrawer,
   isCollapsed,
   isDarwin,
-  workspaceReady,
-  disabledTitle,
   onToggleSidebar,
-  onNewChat,
+  onOpenHome,
   onAddWorkspace
 }: {
   isDrawer: boolean
   isCollapsed: boolean
   isDarwin: boolean
-  workspaceReady: boolean
-  disabledTitle?: string
   onToggleSidebar: () => void
-  onNewChat: () => void
+  onOpenHome: () => void
   onAddWorkspace?: () => void
 }) {
   const headerStyle = isDarwin
@@ -122,13 +113,12 @@ export function SidebarCollapsedHeader({
       </div>
         <div className="app-region-no-drag">
           <IconButton
-            icon="plus"
-            label="New chat"
+            icon="home"
+            label="Home"
             size="sm"
             variant="bare"
-            disabled={!workspaceReady}
-            title={!workspaceReady ? disabledTitle : `New chat (${shortcutLabel('newChat')})`}
-            onClick={onNewChat}
+            title={`Home (${shortcutLabel('goHome')})`}
+            onClick={onOpenHome}
           />
         </div>
         {onAddWorkspace ? (

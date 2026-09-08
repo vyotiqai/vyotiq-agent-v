@@ -54,6 +54,7 @@ describe('matchShortcut', () => {
     expect(matchShortcut(keyEvent('Escape', { ctrlKey: true }), 'stop')).toBe(false)
     expect(matchShortcut(keyEvent('Escape', { metaKey: true }), 'stop')).toBe(false)
     expect(matchShortcut(keyEvent('Escape', { altKey: true }), 'stop')).toBe(false)
+    expect(matchShortcut(keyEvent('Escape', { shiftKey: true }), 'stop')).toBe(false)
   })
 
   it('matches panel find/refresh', () => {
@@ -77,6 +78,17 @@ describe('matchShortcut', () => {
     expect(matchShortcut(keyEvent('.', { ctrlKey: true, shiftKey: true }), 'cycleMode')).toBe(
       true
     )
+    // Real US layout: Shift+'.' produces the '>' glyph, not '.'.
+    expect(matchShortcut(keyEvent('>', { ctrlKey: true, shiftKey: true }), 'cycleMode')).toBe(
+      true
+    )
+    expect(matchShortcut(keyEvent('>', { metaKey: true, shiftKey: true }), 'cycleMode')).toBe(
+      true
+    )
+    // '>' without the shiftKey flag is a synthetic-only event (real keyboards
+    // always pair the glyph with Shift); the glyph still maps to '.' and
+    // cycleMode's shift:'allow' permits it.
+    expect(matchShortcut(keyEvent('>', { ctrlKey: true }), 'cycleMode')).toBe(true)
     expect(matchShortcut(keyEvent('`', { ctrlKey: true }), 'panelTerminal')).toBe(true)
     expect(matchShortcut(keyEvent('e', { metaKey: true }), 'panelChanges')).toBe(true)
     expect(matchShortcut(keyEvent('b', { ctrlKey: true, shiftKey: true }), 'panelBrowser')).toBe(

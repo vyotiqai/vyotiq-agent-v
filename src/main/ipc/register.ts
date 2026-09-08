@@ -22,6 +22,7 @@ import {
   CompactRunRequestSchema,
   ResolveWritesRequestSchema,
   ReadRunArtifactRequestSchema,
+  RunStatsRequestSchema,
   HarnessReviewRequestSchema,
   HarnessPreviewApplyRequestSchema,
   HarnessApplyRequestSchema,
@@ -165,6 +166,7 @@ import {
   type CompactRunResult,
   type ResolveWritesResult,
   type ReadRunArtifactResult,
+  type RunStatsResult,
   type HarnessReviewResult,
   type HarnessPreviewApplyResult,
   type HarnessApplyResult,
@@ -177,7 +179,14 @@ import {
   type PersistedEvent,
   type TelemetryStatus,
   type AppInfo,
-  type UpdaterStatus,
+  type UpdateInfo,
+  type UpdaterStatePayload,
+  type FeedbackComposeRequest,
+  type FeedbackComposeResult,
+  UpdaterCheckRequestSchema,
+  UpdaterDownloadRequestSchema,
+  UpdaterInstallRequestSchema,
+  FeedbackComposeRequestSchema,
   type WorkspaceGrepResult,
   type GitConflictFileResult,
   type GithubIssuesListResult,
@@ -282,7 +291,8 @@ import {
 } from '../agent/compactRun'
 import { resolveWrites, planRewindWrites, getWriteCheckpointMeta } from '../agent/checkpoints'
 import { prepareRewindAndReplaceUserMessage, prepareRewindToUserMessage } from '../agent/rewindRun'
-import { resolveRunDir, workspaceBrowserArtifactsDir } from '@main/storage/paths'
+import { resolveRunDir, workspaceSessionsRoot, workspaceBrowserArtifactsDir } from '@main/storage/paths'
+import { collectRunStats } from '../agent/runStats'
   import { focusAgentBrowser, closeAgentBrowser, getAgentBrowserState, selectBrowserTab, browserGoBack, browserGoForward, setAgentBrowserBounds, navigateUrl, clearAgentBrowserData, takeBrowserScreenshot, disposeAgentBrowserForWorkspace, takeBrowserControl, releaseBrowserControl, manageTabs } from '@main/app/agentBrowser'
 import { extractAttachment } from '../attachments/extract'
 import {
@@ -413,9 +423,9 @@ import { installGithubCli } from '@main/git/ghBinary'
 import {
   checkForAppUpdates,
   downloadAppUpdate,
-  installAppUpdate,
-  updaterStatus
-} from '@main/app/updater'
+  installAppUpdate
+} from '@main/updater'
+import { composeFeedback } from '@main/feedback'
 import { grepWorkspaceHits } from '@main/agent/tools/grep'
 import {
   createPtySession,
@@ -1020,7 +1030,9 @@ export function registerIpc(): void {
               newMessages: req.newMessages,
               persistedMessageCount: req.persistedMessageCount,
               mode: req.mode,
-              focusedFile: req.focusedFile
+              focusedFile: req.focusedFile,
+              provider: req.provider,
+              model: req.model
             }
           : {
               runId,
@@ -1028,7 +1040,9 @@ export function registerIpc(): void {
               workspacePath: req.workspacePath,
               resume,
               mode: req.mode,
-              focusedFile: req.focusedFile
+              focusedFile: req.focusedFile,
+              provider: req.provider,
+              model: req.model
             }
       startAgentRunInBackground({
         runId,
@@ -1116,7 +1130,9 @@ export function registerIpc(): void {
             runId,
             workspacePath: req.workspacePath,
             resume: true,
-            mode: req.mode
+            mode: req.mode,
+            provider: req.provider,
+            model: req.model
           }
         })
 
@@ -1706,6 +1722,24 @@ export function registerIpc(): void {
         return ok({ name: req.name, exists: true, content })
       } catch (err) {
         return failFrom(err, IPC.runsReadArtifact)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.runStats,
+    async (event, raw): Promise<IpcResult<RunStatsResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = RunStatsRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        const stats = await collectRunStats(
+          workspaceSessionsRoot(req.workspacePath),
+          req.runIds
+        )
+        return ok({ stats })
+      } catch (err) {
+        return failFrom(err, IPC.runStats)
       }
     }
   )
@@ -2615,41 +2649,54 @@ export function registerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.updaterStatus, async (event): Promise<IpcResult<UpdaterStatus>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      return ok(updaterStatus())
-    } catch (err) {
-      return failFrom(err, IPC.updaterStatus)
+  ipcMain.handle(
+    IPC.updaterCheck,
+    async (event, raw): Promise<IpcResult<UpdateInfo | null>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        UpdaterCheckRequestSchema.parse(raw ?? {})
+        return ok(await checkForAppUpdates())
+      } catch (err) {
+        return failFrom(err, IPC.updaterCheck)
+      }
     }
-  })
+  )
 
-  ipcMain.handle(IPC.updaterCheck, async (event): Promise<IpcResult<UpdaterStatus>> => {
+  ipcMain.handle(IPC.updaterDownload, async (event, raw): Promise<IpcResult<undefined>> => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
-      return ok(await checkForAppUpdates())
-    } catch (err) {
-      return failFrom(err, IPC.updaterCheck)
-    }
-  })
-
-  ipcMain.handle(IPC.updaterDownload, async (event): Promise<IpcResult<UpdaterStatus>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      return ok(await downloadAppUpdate())
+      UpdaterDownloadRequestSchema.parse(raw ?? {})
+      await downloadAppUpdate()
+      return ok(undefined)
     } catch (err) {
       return failFrom(err, IPC.updaterDownload)
     }
   })
 
-  ipcMain.handle(IPC.updaterInstall, async (event): Promise<IpcResult<UpdaterStatus>> => {
+  ipcMain.handle(IPC.updaterInstall, async (event, raw): Promise<IpcResult<undefined>> => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
-      return ok(installAppUpdate())
+      UpdaterInstallRequestSchema.parse(raw ?? {})
+      installAppUpdate()
+      return ok(undefined)
     } catch (err) {
       return failFrom(err, IPC.updaterInstall)
     }
   })
+
+  ipcMain.handle(
+    IPC.feedbackCompose,
+    async (event, raw): Promise<IpcResult<FeedbackComposeResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = FeedbackComposeRequestSchema.parse(raw)
+        const mailto = await composeFeedback(req)
+        return ok({ ok: true, mailto })
+      } catch (err) {
+        return failFrom(err, IPC.feedbackCompose)
+      }
+    }
+  )
 
   ipcMain.handle(IPC.workspaceGrep, async (event, raw): Promise<IpcResult<WorkspaceGrepResult>> => {
     if (!senderOk(event)) return fail('Invalid sender')

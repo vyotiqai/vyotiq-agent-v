@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { AgentInteractionModeSchema } from './settings'
+import { ProviderIdSchema } from './providers'
 
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 export const MAX_IMAGE_DATA_URL_CHARS = Math.ceil(MAX_IMAGE_BYTES * (4 / 3)) + 128
@@ -645,7 +646,11 @@ export const ChatStartRequestSchema = z
     focusedFile: z.string().max(4_096).optional(),
     runId: RunIdSchema.optional(),
     /** Ask / Plan / Agent — authoritative for this invoke. */
-    mode: AgentInteractionModeSchema.optional()
+    mode: AgentInteractionModeSchema.optional(),
+    /** Session's pinned provider — authoritative for this invoke. */
+    provider: ProviderIdSchema.optional(),
+    /** Session's pinned model — authoritative for this invoke. */
+    model: z.string().min(1).optional()
   })
   .superRefine((val, ctx) => {
     if (val.incremental) {
@@ -691,7 +696,9 @@ export const ChatRewindAndStartRequestSchema = z.object({
   editedUserMessage: ChatMessageSchema.refine((m) => m.role === 'user', {
     message: 'editedUserMessage must be a user message'
   }),
-  mode: AgentInteractionModeSchema.optional()
+  mode: AgentInteractionModeSchema.optional(),
+  provider: ProviderIdSchema.optional(),
+  model: z.string().min(1).optional()
 })
 export type ChatRewindAndStartRequest = z.infer<typeof ChatRewindAndStartRequestSchema>
 
@@ -980,6 +987,41 @@ export const RunReceiptToolStatSchema = z.object({
 })
 export type RunReceiptToolStat = z.infer<typeof RunReceiptToolStatSchema>
 
+/** Real cumulative token accounting for a run (rebuilt from durable step_usage events). */
+export const RunTokenUsageSchema = z.object({
+  /** Latest step context window size. */
+  inputTokens: z.number().int().min(0).optional(),
+  /** Sum of per-step input tokens (multi-step billed input). */
+  billedInputTokens: z.number().int().min(0).optional(),
+  peakInputTokens: z.number().int().min(0).optional(),
+  outputTokens: z.number().int().min(0).optional(),
+  reasoningTokens: z.number().int().min(0).optional(),
+  cachedInputTokens: z.number().int().min(0).optional(),
+  billedCachedInputTokens: z.number().int().min(0).optional(),
+  cacheCreationInputTokens: z.number().int().min(0).optional()
+})
+export type RunTokenUsage = z.infer<typeof RunTokenUsageSchema>
+
+/** Per-run usage stat for aggregate surfaces (Home usage strip). */
+export const RunStatSchema = z.object({
+  runId: z.string(),
+  /** Transcript rows stitched across rotated archive heads + the live file. */
+  messages: z.number().int().min(0),
+  tokenUsage: RunTokenUsageSchema.optional()
+})
+export type RunStat = z.infer<typeof RunStatSchema>
+
+export const RunStatsRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  runIds: z.array(z.string().min(1)).min(1).max(100)
+})
+export type RunStatsRequest = z.infer<typeof RunStatsRequestSchema>
+
+export const RunStatsResultSchema = z.object({
+  stats: z.array(RunStatSchema)
+})
+export type RunStatsResult = z.infer<typeof RunStatsResultSchema>
+
 export const RunReceiptSchema = z.object({
   version: z.literal(RUN_RECEIPT_VERSION),
   writtenAt: z.string().min(1),
@@ -999,20 +1041,7 @@ export const RunReceiptSchema = z.object({
       message: z.string().optional()
     })
     .optional(),
-  tokenUsage: z
-    .object({
-      /** Latest step context window size. */
-      inputTokens: z.number().int().min(0).optional(),
-      /** Sum of per-step input tokens (multi-step billed input). */
-      billedInputTokens: z.number().int().min(0).optional(),
-      peakInputTokens: z.number().int().min(0).optional(),
-      outputTokens: z.number().int().min(0).optional(),
-      reasoningTokens: z.number().int().min(0).optional(),
-      cachedInputTokens: z.number().int().min(0).optional(),
-      billedCachedInputTokens: z.number().int().min(0).optional(),
-      cacheCreationInputTokens: z.number().int().min(0).optional()
-    })
-    .optional(),
+  tokenUsage: RunTokenUsageSchema.optional(),
   compactionCount: z.number().int().min(0),
   toolStats: z.object({
     totalCalls: z.number().int().min(0),

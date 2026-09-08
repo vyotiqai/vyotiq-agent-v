@@ -10,3 +10,17 @@ export const SITE_DESCRIPTION =
 export const SITE_VERSION = '1.0.0'
 
 export const SITE_URL_FALLBACK = 'https://vyotiq.com'
+
+export const SITE_FEEDBACK_EMAIL = 'vyotiq@gmail.com'
+
+export const SITE_FEEDBACK_SUBJECT = '[Vyotiq feedback]'
+
+export const SITE_FEEDBACK_BODY =
+  'What were you doing? What did you expect? What happened instead?'
+
+export function feedbackMailto(
+  email: string = SITE_FEEDBACK_EMAIL,
+  subject: string = SITE_FEEDBACK_SUBJECT
+): string {
+  return `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(SITE_FEEDBACK_BODY)}`
+}

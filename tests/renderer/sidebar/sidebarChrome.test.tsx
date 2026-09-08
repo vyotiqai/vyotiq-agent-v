@@ -37,7 +37,7 @@ const baseProps = {
   onOpenSettings: vi.fn(),
   onOpenMarketplace: vi.fn(),
   onOpenChat: vi.fn(),
-  onNewChat: vi.fn(),
+  onOpenHome: vi.fn(),
   onSelectRunInWorkspace: vi.fn(),
   onRenameRunInWorkspace: vi.fn(),
   onDeleteRunInWorkspace: vi.fn(),
@@ -64,7 +64,7 @@ afterEach(() => {
 })
 
 describe('Sidebar chrome', () => {
-  it('disables search and new chat when no workspace is open', () => {
+  it('disables search when no workspace is open', () => {
     render(
       <Sidebar
         {...baseProps}
@@ -76,9 +76,6 @@ describe('Sidebar chrome', () => {
     )
 
     expect((screen.getByRole('textbox', { name: /search chats/i }) as HTMLInputElement).disabled).toBe(
-      true
-    )
-    expect((screen.getByRole('button', { name: /new chat/i }) as HTMLButtonElement).disabled).toBe(
       true
     )
     expect((screen.getByRole('button', { name: /^settings$/i }) as HTMLButtonElement).disabled).toBe(
@@ -103,20 +100,20 @@ describe('Sidebar chrome', () => {
     )
   })
 
-  it('calls onNewChat from the header button', () => {
-    const onNewChat = vi.fn()
-    render(<Sidebar {...baseProps} onNewChat={onNewChat} />)
+  it('calls onOpenHome from the header button', () => {
+    const onOpenHome = vi.fn()
+    render(<Sidebar {...baseProps} onOpenHome={onOpenHome} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /new chat/i }))
-    expect(onNewChat).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: /^home$/i }))
+    expect(onOpenHome).toHaveBeenCalledTimes(1)
   })
 
-  it('calls onNewChat from the collapsed header button', () => {
-    const onNewChat = vi.fn()
-    render(<Sidebar {...baseProps} collapsed onNewChat={onNewChat} />)
+  it('calls onOpenHome from the collapsed header button', () => {
+    const onOpenHome = vi.fn()
+    render(<Sidebar {...baseProps} collapsed onOpenHome={onOpenHome} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /new chat/i }))
-    expect(onNewChat).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: /^home$/i }))
+    expect(onOpenHome).toHaveBeenCalledTimes(1)
   })
 
   it('calls onOpenSettings from the footer', () => {
@@ -133,7 +130,7 @@ describe('Sidebar chrome', () => {
     expect(container.querySelector('[data-collapsed]')).toBeTruthy()
     expect(container.querySelector('[data-sidebar-brand-toggle] [data-brand-mark]')).toBeTruthy()
     expect(screen.getByRole('button', { name: /expand sidebar/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /new chat/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /home/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^settings$/i })).toBeTruthy()
   })
 
@@ -200,7 +197,7 @@ describe('Sidebar chrome', () => {
     expect(screen.getByRole('textbox', { name: /search chats/i })).toBeTruthy()
     expect(screen.queryByText('Hidden in immersive')).toBeNull()
     expect(screen.getByText('Workspaces')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /new chat/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /home/i })).toBeTruthy()
 
     setWorkspaceHotUi('/ws/demo', { sessionQuery: 'Hidden' })
     rerender(<Sidebar {...props} />)
@@ -210,5 +207,37 @@ describe('Sidebar chrome', () => {
     rerender(<Sidebar {...props} />)
     expect(screen.getByRole('textbox', { name: /search chats/i })).toBeTruthy()
     expect(screen.getByText('Hidden in immersive')).toBeTruthy()
+  })
+
+  it('collapses the drawer to the rail when hideSessions is set (Home mode)', () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        variant="drawer"
+        hideSessions
+        runsByWorkspacePath={{
+          '/ws/demo': {
+            runs: [
+              {
+                runId: 'run-1',
+                status: 'done',
+                updatedAt: new Date().toISOString(),
+                goal: 'Drawer run'
+              }
+            ],
+            runsCapped: false,
+            runsError: null,
+            runsLoaded: true,
+            activeRunId: null
+          }
+        }}
+      />
+    )
+
+    expect(
+      document.querySelector('[data-sidebar-shell]')?.getAttribute('data-collapsed')
+    ).toBe('true')
+    expect(screen.queryByRole('button', { name: /Drawer run/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Home' })).toBeTruthy()
   })
 })

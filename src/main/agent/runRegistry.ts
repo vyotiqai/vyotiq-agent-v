@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import { contentDisplayText, type AgentEvent, type AgentInteractionMode, type ChatMessage } from '../../shared/ipc'
+import { logger } from '../../shared/logger'
 import { userMessageDisplayText } from '../../shared/slashCommands'
 import { cancelPendingQuestions, dismissPendingQuestions } from './agentQuestion'
 
@@ -16,6 +17,7 @@ type RunEntry = {
   invokeId: number
   /** True after a terminal event so follow-ups can start before cleanup finishes. */
   turnComplete: boolean
+  forceFinishTimer: NodeJS.Timeout | null
   /** Mid-run user messages waiting to inject into the live loop. */
   followUps: FollowUpEntry[]
   /**
@@ -136,6 +138,7 @@ export function registerRunAbort(runId: string, workspacePath: string): RunAbort
     workspacePath,
     invokeId,
     turnComplete: false,
+    forceFinishTimer: null,
     followUps: [],
     streamInterrupt: null
   })
@@ -258,6 +261,90 @@ function clearFollowUpsOnDiskNow(runId: string): void {
   }
 }
 
+/**
+ * Grace period before a cancelled run that never unwound is force-finalized.
+ * The loop's own cancel path (loop.ts) persists `cancelled` within seconds;
+ * only a loop frozen on an abort-unaware tool wait stays past this bound.
+ */
+const CANCEL_FORCE_FINISH_MS = 30_000
+export { CANCEL_FORCE_FINISH_MS }
+
+function armCancelForceFinish(runId: string, entry: RunEntry): void {
+  if (entry.forceFinishTimer) clearTimeout(entry.forceFinishTimer)
+  const timer = setTimeout(() => {
+    void forceFinishCancelledRun(runId)
+  }, CANCEL_FORCE_FINISH_MS)
+  // A cleanup timer must never hold the process (or a quit) open.
+  timer.unref?.()
+  entry.forceFinishTimer = timer
+}
+
+function disarmCancelForceFinish(runId: string): void {
+  const entry = active.get(runId)
+  if (!entry?.forceFinishTimer) return
+  clearTimeout(entry.forceFinishTimer)
+  entry.forceFinishTimer = null
+}
+
+/**
+ * A cancelled run whose loop never unwound (stuck on a tool that ignores the
+ * abort) leaves status.json `running` — a zombie the sidebar renders as a live
+ * spinner, and one `reconcileStaleRuns` skips forever because isActive stays
+ * true. Persist the terminal status the loop will never write, and notify the
+ * parent run so its sidebar instance row stops spinning. Safe to run after a
+ * late normal unwind: both paths write the same terminal status, and
+ * notifyChildTerminal is idempotent for already-resolved waiters.
+ */
+export async function forceFinishCancelledRun(runId: string): Promise<boolean> {
+  if (!isActive(runId)) return false
+  const workspacePath = getRunWorkspace(runId)
+  if (!workspacePath) return false
+  try {
+    // Dynamic imports avoid state/agentInstances import cycles. Plain
+    // require() here would resolve in the built CJS bundle but not under the
+    // vitest ESM loader, which would silently skip the force-finish.
+    const { resolveRunDir } = await import('../storage/paths')
+    const { loadStatus, updateStatus, appendEvent } = await import('./state')
+    const runDir = resolveRunDir(workspacePath, runId)
+    const status = loadStatus(runDir)
+    if (!status) return false
+    if (status.status === 'done' || status.status === 'error' || status.status === 'cancelled') {
+      return false
+    }
+    // Match the loop's own user-cancel contract (loop.ts writeStatus): a plain
+    // terminal patch, no resumable flag — this was a cancel, not a crash.
+    await updateStatus(runDir, { status: 'cancelled' }, { sync: true })
+    appendEvent(runDir, {
+      type: 'status',
+      runId,
+      status: 'cancelled',
+      ...(status.invokeId != null ? { invokeId: status.invokeId } : {})
+    })
+    if (status.inlineInstance && status.parentRunId) {
+      const { notifyChildTerminal } = await import('./agentInstances')
+      notifyChildTerminal(runId, 'cancelled', undefined, {
+        goal: status.goal,
+        pathScope: status.pathScope
+      })
+    }
+    const { invalidateListRunsCache } = await import('./runListCache')
+    invalidateListRunsCache(workspacePath)
+    logger.warn('Cancelled run never unwound — force-finalized on disk', {
+      scope: 'agent',
+      runId,
+      correlationId: runId
+    })
+    return true
+  } catch (err) {
+    logger.warn('Cancelled run force-finish failed', {
+      scope: 'agent',
+      runId,
+      err
+    })
+    return false
+  }
+}
+
 function cancelRunCore(runId: string, cascadeChildren = true): boolean {
   if (cascadeChildren) {
     for (const childId of getActiveInlineChildRunIds(runId)) {
@@ -271,6 +358,7 @@ function cancelRunCore(runId: string, cascadeChildren = true): boolean {
   entry.streamInterrupt?.abort()
   entry.streamInterrupt = null
   entry.controller.abort()
+  armCancelForceFinish(runId, entry)
   cancelPendingGateWaiters(runId)
   disposeTerminalSessionsNow(runId, entry.invokeId)
   clearFollowUpsOnDiskNow(runId)
@@ -386,6 +474,7 @@ export function clearRunAbort(runId: string, invokeId?: number): void {
   const entry = active.get(runId)
   if (!entry) return
   if (invokeId !== undefined && entry.invokeId !== invokeId) return
+  disarmCancelForceFinish(runId)
   active.delete(runId)
   pendingModeByRun.delete(runId)
   // Keep late checkpoint / follow_up_dropped buffers — IPC takeLate* owns cleanup

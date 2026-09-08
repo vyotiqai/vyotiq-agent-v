@@ -73,6 +73,7 @@ export function InlineConfirmActions({
     cancelRef.current?.focus()
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
+      if (e.defaultPrevented) return
       e.preventDefault()
       if (settledRef.current) return
       settledRef.current = true

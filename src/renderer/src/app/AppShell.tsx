@@ -29,6 +29,7 @@ import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
 import { focusComposerMessage, useAppShortcuts } from '@renderer/lib/shortcuts'
 import { TitleBar } from './TitleBar'
 import { CommandPalette } from '@renderer/features/commandPalette/CommandPalette'
+import { UpdateCard } from '@renderer/features/updates/UpdateCard'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 
@@ -46,6 +47,7 @@ function AppShellInner({
   focusedRunId = null,
   onOpenMarketplace,
   onOpenChat,
+  onOpenHome,
   onNewChat,
   onNewChatInWorkspace,
   onSelectRunInWorkspace,
@@ -66,9 +68,10 @@ function AppShellInner({
   onChatStop,
   onCloseChat,
   children,
-  loading
+  loading,
+  navigationMode = 'sidebar'
 }: {
-  view: 'chat' | 'settings' | 'marketplace'
+  view: 'chat' | 'settings' | 'marketplace' | 'home'
   workspacePath: string | null
   openWorkspaces?: string[]
   runsByWorkspacePath?: Record<string, WorkspaceSidebarRuns>
@@ -81,6 +84,7 @@ function AppShellInner({
   focusedRunId?: string | null
   onOpenMarketplace: () => void
   onOpenChat: () => void
+  onOpenHome: () => void
   onNewChat: () => void
   onNewChatInWorkspace?: (path: string) => void
   onSelectRunInWorkspace?: (path: string, runId: string) => void
@@ -105,6 +109,8 @@ function AppShellInner({
   onCloseChat?: () => void
   children: ReactNode
   loading?: boolean
+  /** Navigation layout: 'home' hides the sidebar chat list behind the slim rail. */
+  navigationMode?: 'home' | 'sidebar'
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
@@ -117,24 +123,28 @@ function AppShellInner({
     SIDEBAR_WIDTH_PX,
     clampSidebarWidthPx
   )
+  const [homeRailExpanded, setHomeRailExpanded] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
   const pendingSearchFocusRef = useRef(false)
   const drawerRef = useRef<HTMLDivElement>(null)
   const drawerTriggerRef = useRef<HTMLElement | null>(null)
   const mainRef = useRef<HTMLElement>(null)
   const isDesktop = useIsDesktop()
+  const navHome = navigationMode === 'home'
+  const sidebarExpandedDesktop = navHome ? homeRailExpanded : !sidebarCollapsed
 
   const closeDrawer = useCallback((): void => setDrawerOpen(false), [])
 
   const onToggleSidebar = useCallback((): void => {
     drawerTriggerRef.current = document.activeElement as HTMLElement | null
     if (isDesktop) {
-      setSidebarCollapsed((v) => !v)
+      if (navHome) setHomeRailExpanded((v) => !v)
+      else setSidebarCollapsed((v) => !v)
       setDrawerOpen(false)
     } else {
       setDrawerOpen((v) => !v)
     }
-  }, [isDesktop, setSidebarCollapsed])
+  }, [isDesktop, navHome, setSidebarCollapsed])
 
   const focusSearchInput = useCallback((): boolean => {
     const el = searchRef.current
@@ -150,9 +160,10 @@ function AppShellInner({
 
   const focusSearch = useCallback((): void => {
     if (isDesktop) {
-      if (sidebarCollapsed) {
+      if (!sidebarExpandedDesktop) {
         pendingSearchFocusRef.current = true
-        setSidebarCollapsed(false)
+        if (navHome) setHomeRailExpanded(true)
+        else setSidebarCollapsed(false)
         return
       }
     } else if (!drawerOpen) {
@@ -166,7 +177,8 @@ function AppShellInner({
     }
   }, [
     isDesktop,
-    sidebarCollapsed,
+    sidebarExpandedDesktop,
+    navHome,
     drawerOpen,
     setSidebarCollapsed,
     focusSearchInput
@@ -178,6 +190,12 @@ function AppShellInner({
   useEffect(() => {
     if (isDesktop) setDrawerOpen(false)
   }, [isDesktop])
+
+  // Switching into Home mode re-collapses the escape-hatch expansion so the
+  // rail (no chat list) is the default presentation again.
+  useEffect(() => {
+    if (navHome) setHomeRailExpanded(false)
+  }, [navHome])
 
   useEffect(() => {
     const onResize = (): void => {
@@ -194,7 +212,7 @@ function AppShellInner({
   // Focus search after expand/drawer mount — single rAF is too early for the new tree.
   useEffect(() => {
     if (!pendingSearchFocusRef.current) return
-    if (isDesktop ? sidebarCollapsed : !drawerOpen) return
+    if (isDesktop ? !sidebarExpandedDesktop : !drawerOpen) return
     if (!hasWorkspace) {
       pendingSearchFocusRef.current = false
       return
@@ -218,12 +236,13 @@ function AppShellInner({
     return () => {
       cancelled = true
     }
-  }, [sidebarCollapsed, drawerOpen, isDesktop, hasWorkspace, focusSearchInput])
+  }, [sidebarExpandedDesktop, drawerOpen, isDesktop, hasWorkspace, focusSearchInput])
 
   useEffect(() => {
     if (drawerOpen) return
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
+      if (e.defaultPrevented) return
       if (document.querySelector('[aria-expanded="true"][aria-haspopup]')) return
       if (!getWorkspaceHotUi(workspacePath).sessionQuery.trim()) return
       e.preventDefault()
@@ -283,6 +302,7 @@ function AppShellInner({
     onClearSearchFocus: clearSearchFocus,
     isSearchFocused,
     onNewChat,
+    onOpenHome,
     onSwitchWorkspaceByIndex: switchWorkspaceByIndex,
     onOpenSettings,
     chatViewActive: view === 'chat',
@@ -297,6 +317,7 @@ function AppShellInner({
 
   const sidebarProps = {
     view,
+    hideSessions: navHome,
     onDismissRunsError,
     sessionQuery,
     searchRef,
@@ -317,7 +338,7 @@ function AppShellInner({
     focusedRunId,
     onOpenMarketplace,
     onOpenChat,
-    onNewChat,
+    onOpenHome,
     onNewChatInWorkspace,
     onSelectRunInWorkspace,
     onRenameRunInWorkspace,
@@ -346,12 +367,12 @@ function AppShellInner({
             >
               <Sidebar
                 {...sidebarProps}
-                collapsed={sidebarCollapsed}
+                collapsed={navHome ? !homeRailExpanded : sidebarCollapsed}
                 widthPx={sidebarWidthPx}
               />
             </ErrorBoundary>
           </div>
-          {!sidebarCollapsed ? (
+          {sidebarExpandedDesktop ? (
             <PanelResizeHandle
               label="Resize sidebar"
               value={sidebarWidthPx}
@@ -366,7 +387,10 @@ function AppShellInner({
 
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col self-stretch">
         <ErrorBoundary title="Title bar couldn't render">
-          <TitleBar drawerOpen={drawerOpen} onToggleSidebar={onToggleSidebar} />
+          <TitleBar
+            drawerOpen={drawerOpen}
+            onToggleSidebar={onToggleSidebar}
+          />
         </ErrorBoundary>
 
         {drawerOpen && !isDesktop ? (
@@ -413,6 +437,7 @@ function AppShellInner({
         onClose={() => setCommandPaletteOpen(false)}
         onSelect={(id) => {
           if (id === 'settings') onOpenSettings()
+          else if (id === 'goHome') onOpenHome()
           else if (id === 'newChat') onNewChat()
           else if (id === 'sidebar') onToggleSidebar()
           else if (id === 'search') focusSearch()
@@ -430,6 +455,7 @@ function AppShellInner({
           else window.dispatchEvent(new CustomEvent('vyotiq:command', { detail: { id } }))
         }}
       />
+      <UpdateCard />
     </div>
   )
 }

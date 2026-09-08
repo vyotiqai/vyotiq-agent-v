@@ -2,7 +2,7 @@ import type { RefObject } from 'react'
 import type { RunSummary } from '@shared/ipc'
 import type { RunRecencyGroup } from '@renderer/lib/utils/groupRunsByRecency'
 
-export type SidebarView = 'chat' | 'settings' | 'marketplace'
+export type SidebarView = 'chat' | 'settings' | 'marketplace' | 'home'
 
 export type SidebarProps = {
   view: SidebarView
@@ -26,8 +26,9 @@ export type SidebarProps = {
   onOpenNotificationSettings?: () => void
   focusedRunId?: string | null
   onOpenMarketplace: () => void
+  /** Show the Home launch surface (Sidebar footer rail + Ctrl/Cmd+Shift+H). */
+  onOpenHome?: () => void
   onOpenChat: () => void
-  onNewChat: () => void
   /** Open a fresh chat in a specific workspace (switches there when needed). */
   onNewChatInWorkspace?: (path: string) => void
   onSelectRunInWorkspace?: (path: string, runId: string) => void
@@ -42,6 +43,8 @@ export type SidebarProps = {
   onCloseDrawer: () => void
   onToggleSidebar: () => void
   collapsed?: boolean
+  /** Home navigation mode: hide the session list (the mobile drawer collapses to the rail). */
+  hideSessions?: boolean
   /** Expanded desktop width in px (drag-resized). Ignored when collapsed or drawer. */
   widthPx?: number
   variant?: 'desktop' | 'drawer'

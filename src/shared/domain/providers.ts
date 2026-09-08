@@ -1,6 +1,7 @@
 import type { ModelInfo, ProviderId } from '../ipc/schemas/providers'
 import type { SecretProvider } from '../ipc/types/secrets'
 import { knownContextWindow } from './modelContextWindows'
+import { idSuggestsVision } from './modelVision'
 import {
   getCachedOpenCodeGoEffortLadder,
   getCachedOpenCodeGoModelIds,
@@ -44,7 +45,7 @@ function seedIdsFor(provider: ProviderId): string[] {
 }
 
 function seedModelInfo(id: string, providerId: ProviderId): ModelInfo {
-  const supportsVision = /gpt-4o|gpt-5|claude|gemini|grok|llava|vision|pixtral|glm-5\.3-flash|glm-[0-9.]+v/i.test(id)
+  const supportsVision = idSuggestsVision(id)
   const supportsThinking = modelSupportsThinking(id, providerId)
   const known = knownContextWindow(id, providerId)
   const ollamaThinking =

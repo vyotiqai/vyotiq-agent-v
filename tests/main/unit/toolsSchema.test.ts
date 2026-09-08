@@ -202,7 +202,7 @@ describe('harness tool catalog', () => {
     expect(harness).toMatch(/preserve unrelated user changes/i)
     expect(harness).toMatch(/Separate observed facts from inferences/i)
     expect(harness).toMatch(/Commits, pushes, deployments/i)
-    expect(harness).toMatch(/Continue authorized work until it is complete/i)
+    expect(harness).toMatch(/Continue authori[sz]ed work until it is complete/i)
     expect(harness).toMatch(/narrowest relevant checks/i)
     expect(harness).not.toMatch(
       /mcp__|mcp_list_tools|spawn_agent_instance|run_id|generate_image|edit_image|Ask\/Plan|auto-compacts|8 consecutive|6 steps/i
@@ -227,7 +227,7 @@ describe('harness tool catalog', () => {
     expect(harness).toMatch(/Do not add a package unless the requested change requires it/i)
     expect(harness).toMatch(/files, tests, logs, or runtime output/)
     expect(harness).toMatch(/do not rely on training memory/i)
-    expect(harness).toMatch(/Store verified facts only/)
+    expect(harness).toMatch(/Store verified facts/)
     expect(harness).not.toMatch(/memory_write/)
     expect(harness).toMatch(/evidence from this run/)
     expect(harness).not.toMatch(/never lorem ipsum/i)

@@ -17,14 +17,25 @@ export type ShortcutKeyEvent = Pick<
 >
 
 /**
+ * Shifted punctuation glyph → base key. With Shift held, `.` produces `>`
+ * on US layouts; map the glyph back so `shift: 'allow'` chords match.
+ */
+const SHIFTED_PUNCTUATION: Record<string, string> = {
+  '>': '.'
+}
+
+/**
  * True when `e` matches the binding for `id`.
  * Mod chords require Cmd/Ctrl and reject Alt.
  * Shift is forbidden unless the binding sets `shift: 'allow'` or `'require'`.
- * Escape (stop) ignores Ctrl/Meta/Alt so modified Esc never stops a run.
+ * Escape (stop) ignores Ctrl/Meta/Alt/Shift so modified Esc never stops a run.
  */
 export function matchShortcut(e: ShortcutKeyEvent, id: ShortcutId): boolean {
   const binding = SHORTCUT_BINDINGS[id]
-  if (e.key.toLowerCase() !== binding.key) return false
+  // Shifted punctuation (e.g. Shift+'.' produces '>' on US layouts) maps to
+  // its base key so `shift: 'allow'` chords like Cmd/Ctrl+Shift+. match.
+  const eventKey = SHIFTED_PUNCTUATION[e.key] ?? e.key.toLowerCase()
+  if (eventKey !== binding.key) return false
   if (binding.mod) {
     if (!(e.metaKey || e.ctrlKey)) return false
     if (e.altKey) return false
@@ -46,7 +57,7 @@ export function matchShortcut(e: ShortcutKeyEvent, id: ShortcutId): boolean {
     return true
   }
   if (id === 'stop') {
-    if (e.ctrlKey || e.metaKey || e.altKey) return false
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return false
   }
   return true
 }

@@ -678,14 +678,40 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     }
     return toolOk('update_goal', goal.status, goalToolContent(goal))
   },
-  create_plan: (workspace, args, signal, context) => {
+  create_plan: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const result = executeCreatePlan(workspace, args, {
       runDir: context.runDir
     })
-    return result.ok
-      ? toolOk('create_plan', result.summary, result.content)
-      : toolFail('create_plan', result.summary, result.content)
+    if (!result.ok) {
+      return toolFail('create_plan', result.summary, result.content)
+    }
+    // Deterministic mode contract: publishing the plan switches the run to
+    // Plan mode when automatic mode switching is on — no deny/retry loop.
+    let switched = false
+    if (
+      context.autoModeSwitch &&
+      resolveAgentMode(context) === 'agent' &&
+      context.setAgentMode
+    ) {
+      await context.setAgentMode('plan')
+      switched = true
+      if (context.runId) {
+        context.emitAgentEvent?.({
+          type: 'mode_changed',
+          runId: context.runId,
+          mode: 'plan',
+          ...(context.invokeId != null ? { invokeId: context.invokeId } : {})
+        })
+      }
+    }
+    return toolOk(
+      'create_plan',
+      result.summary,
+      switched
+        ? `${result.content} Switched to Plan mode; switch back to \`agent\` to implement.`
+        : result.content
+    )
   },
   browser_search: async (workspace, args, signal, context) => {
     throwIfAborted(signal)

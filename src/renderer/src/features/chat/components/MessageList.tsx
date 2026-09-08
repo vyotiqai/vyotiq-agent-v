@@ -2087,7 +2087,7 @@ export function MessageList({
           )}
           {isUnpinned ? (
             <div
-              className="pointer-events-none sticky bottom-4 z-dropdown flex h-0 justify-end pr-2"
+              className="pointer-events-none sticky bottom-4 z-dropdown flex h-0 justify-center"
               data-jump-to-bottom
             >
               <Tooltip content="Jump to latest (End)">
@@ -2099,10 +2099,15 @@ export function MessageList({
                       ? `Jump to latest messages, ${unpinnedNewCount} new`
                       : 'Jump to latest messages'
                   }
-                  className="pointer-events-auto inline-flex -translate-y-full items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1.5 text-caption text-secondary shadow-md vy-transition hover:bg-surface-2 hover:text-fg"
+                  className="pointer-events-auto inline-flex -translate-y-full items-center gap-1.5 rounded-full border border-border/80 bg-surface/95 py-1.5 px-2.5 text-caption font-medium text-secondary shadow-md backdrop-blur-sm vy-transition hover:border-border hover:bg-surface hover:text-fg focus-visible:vy-focus-ring"
                 >
                   <Icon name="chevron" size={12} />
-                  {unpinnedNewCount > 0 ? `Latest · ${unpinnedNewCount}` : 'Latest'}
+                  <span className="tracking-[var(--vy-tracking-tight)]">Latest</span>
+                  {unpinnedNewCount > 0 ? (
+                    <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-accent px-1 text-2xs font-medium leading-4 text-accent-fg">
+                      {unpinnedNewCount}
+                    </span>
+                  ) : null}
                 </button>
               </Tooltip>
             </div>

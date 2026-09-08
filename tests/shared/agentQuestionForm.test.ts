@@ -188,13 +188,40 @@ describe('normalizeAskQuestionArgs', () => {
     expect(result.error).toMatch(/Pass questions:/i)
   })
 
-  it('rejects missing type and missing prompt on typed items', () => {
-    const noType = normalizeAskQuestionArgs({
+  it('rejects an invalid type but infers an omitted type from options (live 3d334c22/870cde12/829b9ada)', () => {
+    const badType = normalizeAskQuestionArgs({
+      questions: [{ id: 'q1', prompt: 'Go?', type: 'choice' }]
+    })
+    expect(badType.ok).toBe(false)
+    if (badType.ok) return
+    expect(badType.error).toMatch(/type must be single, multi, boolean, or text/i)
+
+    const noTypeWithOptions = normalizeAskQuestionArgs({
+      questions: [
+        {
+          allowCustom: true,
+          id: 'direction',
+          options: ['Compact dashboard', 'Minimal launcher', 'Fix visual layer', 'You decide'],
+          prompt: 'Which direction should the redesign take?'
+        }
+      ]
+    })
+    expect(noTypeWithOptions.ok).toBe(true)
+    if (!noTypeWithOptions.ok) return
+    expect(noTypeWithOptions.form.questions[0]).toEqual({
+      id: 'direction',
+      prompt: 'Which direction should the redesign take?',
+      type: 'single',
+      options: ['Compact dashboard', 'Minimal launcher', 'Fix visual layer', 'You decide'],
+      allowCustom: true
+    })
+
+    const noTypeNoOptions = normalizeAskQuestionArgs({
       questions: [{ id: 'q1', prompt: 'Go?' }]
     })
-    expect(noType.ok).toBe(false)
-    if (noType.ok) return
-    expect(noType.error).toMatch(/type must be single, multi, boolean, or text/i)
+    expect(noTypeNoOptions.ok).toBe(true)
+    if (!noTypeNoOptions.ok) return
+    expect(noTypeNoOptions.form.questions[0]).toEqual({ id: 'q1', prompt: 'Go?', type: 'text' })
 
     const noPrompt = normalizeAskQuestionArgs({
       questions: [{ id: 'q1', type: 'boolean' }]
@@ -214,6 +241,43 @@ describe('normalizeAskQuestionArgs', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error).toMatch(/duplicate question id/i)
+  })
+
+  it('coerces single/multi with fewer than 2 valid options to text', () => {
+    const one = normalizeAskQuestionArgs({
+      questions: [{ id: 'q1', prompt: 'Only one?', type: 'single', options: ['A'] }]
+    })
+    expect(one.ok).toBe(true)
+    if (!one.ok) return
+    expect(one.form.questions[0]).toEqual({ id: 'q1', prompt: 'Only one?', type: 'text' })
+
+    const dupes = normalizeAskQuestionArgs({
+      questions: [{ id: 'q1', prompt: 'Dupes?', type: 'single', options: ['A', 'A', ' A '] }]
+    })
+    expect(dupes.ok).toBe(true)
+    if (!dupes.ok) return
+    expect(dupes.form.questions[0]).toEqual({ id: 'q1', prompt: 'Dupes?', type: 'text' })
+
+    const blanks = normalizeAskQuestionArgs({
+      questions: [{ id: 'q1', prompt: 'Blanks?', type: 'multi', options: ['', '   '] }]
+    })
+    expect(blanks.ok).toBe(true)
+    if (!blanks.ok) return
+    expect(blanks.form.questions[0]!.type).toBe('text')
+
+    const multiOne = normalizeAskQuestionArgs({
+      questions: [{ id: 'q1', prompt: 'One?', type: 'multi', options: ['A'], allowCustom: true }]
+    })
+    expect(multiOne.ok).toBe(true)
+    if (!multiOne.ok) return
+    expect(multiOne.form.questions[0]).toEqual({ id: 'q1', prompt: 'One?', type: 'text' })
+  })
+
+  it('coerces a legacy single-option question to text', () => {
+    const result = normalizeAskQuestionArgs({ question: 'Only?', options: ['A'] })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.form.questions[0]).toEqual({ id: 'q1', prompt: 'Only?', type: 'text' })
   })
 })
 

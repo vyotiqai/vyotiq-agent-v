@@ -300,6 +300,87 @@ describe('createChatStreamController', () => {
     )
   })
 
+  it('pins the session model on first send so another session model change does not bleed in', async () => {
+    let effective: { provider: 'openai' | 'anthropic'; model: string } = {
+      provider: 'openai',
+      model: 'gpt-a'
+    }
+    const chatStart = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      data: { runId: 'r-pin', invokeId: chatStart.mock.calls.length }
+    }))
+    const chatCancel = vi.fn().mockResolvedValue({ ok: true, data: true })
+    // @ts-expect-error test bridge
+    window.vyotiq = { chatStart, chatCancel }
+
+    const controller = createChatStreamController({
+      workspacePath: '/ws',
+      getDefaultProviderModel: () => effective
+    })
+
+    await controller.send('first turn')
+    expect(chatStart).toHaveBeenCalledTimes(1)
+    expect(chatStart).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'openai', model: 'gpt-a' })
+    )
+    expect(controller.providerModel).toEqual({ provider: 'openai', model: 'gpt-a' })
+
+    controller.handleEvent({ type: 'status', runId: 'r-pin', status: 'done', invokeId: 1 })
+    await flushStreamPatches()
+
+    // A model change in a different session only moves the shared default.
+    effective = { provider: 'anthropic', model: 'claude-b' }
+
+    await controller.send('second turn')
+    expect(chatStart).toHaveBeenCalledTimes(2)
+    expect(chatStart).toHaveBeenLastCalledWith(
+      expect.objectContaining({ provider: 'openai', model: 'gpt-a' })
+    )
+
+    // A change made in this session applies from its next turn.
+    controller.setProviderModel('anthropic', 'claude-b')
+    controller.handleEvent({ type: 'status', runId: 'r-pin', status: 'done', invokeId: 2 })
+    await flushStreamPatches()
+    await controller.send('third turn')
+    expect(chatStart).toHaveBeenCalledTimes(3)
+    expect(chatStart).toHaveBeenLastCalledWith(
+      expect.objectContaining({ provider: 'anthropic', model: 'claude-b' })
+    )
+  })
+
+  it('reset clears the session model pin back to the shared default', async () => {
+    let effective: { provider: 'openai' | 'anthropic'; model: string } = {
+      provider: 'openai',
+      model: 'gpt-a'
+    }
+    const chatStart = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      data: { runId: 'r-reset', invokeId: chatStart.mock.calls.length }
+    }))
+    const chatCancel = vi.fn().mockResolvedValue({ ok: true, data: true })
+    // @ts-expect-error test bridge
+    window.vyotiq = { chatStart, chatCancel }
+
+    const controller = createChatStreamController({
+      workspacePath: '/ws',
+      getDefaultProviderModel: () => effective
+    })
+
+    await controller.send('first turn')
+    expect(controller.providerModel).toEqual({ provider: 'openai', model: 'gpt-a' })
+
+    controller.handleEvent({ type: 'status', runId: 'r-reset', status: 'done', invokeId: 1 })
+    await flushStreamPatches()
+    controller.reset()
+    expect(controller.providerModel).toBeNull()
+
+    effective = { provider: 'anthropic', model: 'claude-b' }
+    await controller.send('fresh turn')
+    expect(chatStart).toHaveBeenLastCalledWith(
+      expect.objectContaining({ provider: 'anthropic', model: 'claude-b' })
+    )
+  })
+
   it('editAndResend truncates transcript and calls chatRewindAndStart', async () => {
     const chatRewindAndStart = vi.fn().mockResolvedValue({
       ok: true,

@@ -2,10 +2,19 @@ import { memo, useMemo, useState, type CSSProperties } from 'react'
 import { Icon } from '@renderer/lib/icons'
 import { cn } from '@renderer/lib/ui'
 import { ACTIVITY_ROW, DISCLOSURE_CHEVRON, DISCLOSURE_ROW } from '@renderer/lib/utils/layout'
+import type { UiToolProgressEntry } from '@shared/transcript'
 import type { ToolItem } from '../utils/transcriptRows'
 import { mapToolGroupProps, type ToolGroupNestedTool } from '../utils/toolGroupAdapter'
 import { TextShimmer } from './TextShimmer'
 import { ToolRowOutput } from './ToolRow'
+import {
+  WebSearchTimeline,
+  type WebSearchTimelineItem
+} from '../toolUi/WebSearchTimeline'
+import {
+  isWebSearchTimelineGroup,
+  parseWebSearchTimelineItem
+} from '../toolUi/parsers/webSearchTimeline'
 import {
   CompactRow,
   ExpandPanel,
@@ -157,6 +166,67 @@ export const ToolGroup = memo(function ToolGroup({
   // While pending, tools own live phase detail; TurnSummary owns collapse +
   // elapsed. Group duration appears only once settled, as a static receipt.
   const elapsedDisplay = isPending ? '' : props.elapsedDisplay
+
+  // Web-search family groups render the screenshot-style timeline instead of
+  // the generic header + nested list. Rows with bodies (browser_search /
+  // web_fetch) keep their per-tool expand persistence.
+  const isTimelineGroup = useMemo(() => isWebSearchTimelineGroup(uiTools), [uiTools])
+  const timelineItems = useMemo<WebSearchTimelineItem[]>(
+    () => (isTimelineGroup ? uiTools.map(parseWebSearchTimelineItem) : []),
+    [isTimelineGroup, uiTools]
+  )
+  const timelineExpandByToolId = useMemo(() => {
+    const map = new Map<string, boolean>()
+    if (!isTimelineGroup) return map
+    for (const item of tools) {
+      map.set(
+        item.tool.id,
+        item.toolExpanded ??
+          (groupExpanded === false
+            ? false
+            : toolDefaultExpanded(item.tool.name, item.tool.status))
+      )
+    }
+    return map
+  }, [isTimelineGroup, tools, groupExpanded])
+  const toolIdToItemId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const item of tools) map.set(item.tool.id, item.id)
+    return map
+  }, [tools])
+
+  if (isTimelineGroup && timelineItems.length > 0) {
+    const lone = singleTool ? tools[0] : undefined
+    return (
+      <div
+        className={cn(ACTIVITY_ROW, lone && 'tool-stagger-enter')}
+        role="group"
+        aria-busy={isPending || live || undefined}
+        style={{ '--stagger-index': 0 } as CSSProperties}
+      >
+        <WebSearchTimeline
+          items={timelineItems}
+          elapsedDisplay={elapsedDisplay}
+          live={live}
+          isToolExpanded={(toolId) => timelineExpandByToolId.get(toolId) ?? false}
+          onToolToggle={
+            onToolToggle
+              ? (toolId, next) =>
+                  onToolToggle(toolIdToItemId.get(toolId) ?? toolId, next)
+              : undefined
+          }
+          onLoadFullContent={onLoadFullContent}
+          mcpServerNames={mcpServerNames}
+          toolProgressById={new Map(
+            tools
+              .filter((item) => item.toolProgress)
+              .map((item) => [item.tool.id, item.toolProgress as UiToolProgressEntry[]])
+          )}
+          timing={resolvedGroupTiming}
+        />
+      </div>
+    )
+  }
 
   const headerLabel = isPending ? props.runningLabel : props.doneLabel
 

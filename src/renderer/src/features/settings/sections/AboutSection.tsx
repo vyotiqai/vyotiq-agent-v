@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AppInfo, UpdaterStatus } from '@shared/ipc'
-import { UpdaterStatusSchema } from '@shared/ipc/schemas/updater'
+import type { AppInfo, UpdaterStatePayload } from '@shared/ipc'
 import { VyotiqLockup } from '@renderer/lib/brand'
 import { Button, Switch } from '@renderer/lib/ui'
 import { copyText } from '@renderer/lib/markdown/copyText'
@@ -45,22 +44,25 @@ function buildInfoText(info: AppInfo): string {
   ].join('\n')
 }
 
-function updaterHint(status: UpdaterStatus | null): string {
-  if (!status) return 'Check GitHub Releases for a newer install.'
-  if (status.message) return status.message
-  switch (status.state) {
-    case 'dev':
-      return 'Updates apply to packaged installs.'
+function updaterHint(payload: UpdaterStatePayload | null): string {
+  if (!payload) return 'Check GitHub Releases for a newer install.'
+  switch (payload.status) {
+    case 'checking':
+      return 'Checking for updates…'
     case 'available':
-      return status.version ? `Version ${status.version} is available.` : 'An update is available.'
-    case 'ready':
-      return 'Restart to install the downloaded update.'
-    case 'none':
-      return 'This install is current.'
+      return payload.info?.version
+        ? `Version ${payload.info.version} is available.`
+        : 'An update is available.'
     case 'downloading':
-      return status.progress != null
-        ? `Downloading ${Math.round(status.progress * 100)}%`
+      return payload.progress != null
+        ? `Downloading ${Math.round(payload.progress.percent)}%`
         : 'Downloading update…'
+    case 'downloaded':
+      return 'Restart to install the downloaded update.'
+    case 'not-available':
+      return 'This install is current.'
+    case 'error':
+      return payload.error ?? 'Update check failed. Try again.'
     default:
       return 'Check GitHub Releases for a newer install.'
   }
@@ -71,7 +73,7 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
   const [copied, setCopied] = useState(false)
   const [openingSite, setOpeningSite] = useState(false)
   const [openingDocs, setOpeningDocs] = useState(false)
-  const [updater, setUpdater] = useState<UpdaterStatus | null>(null)
+  const [updater, setUpdater] = useState<UpdaterStatePayload | null>(null)
   const [updaterBusy, setUpdaterBusy] = useState(false)
   const setErrorMessage = form.setErrorMessage
   const setErrorRef = useRef(setErrorMessage)
@@ -103,45 +105,34 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
   useEffect(() => {
     let cancelled = false
     const api = window.vyotiq
-    if (!api?.getUpdaterStatus) return
-    void api
-      .getUpdaterStatus()
-      .then((res) => {
-        if (cancelled) return
-        // Same zod gate the push-event path applies: never render an
-        // out-of-contract status shape from the invoke path.
-        const parsed = res.ok ? UpdaterStatusSchema.safeParse(res.data) : null
-        if (parsed?.success) setUpdater(parsed.data)
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setErrorRef.current(err instanceof Error ? err.message : String(err))
-      })
-    const stop = api.onUpdaterStatus?.((status) => {
-      if (!cancelled) setUpdater(status)
+    if (!api?.updater) return
+    // The push channel is schema-gated in preload; one explicit check seeds
+    // the current state (same as pressing the Check button).
+    void api.updater.check().catch((err: unknown) => {
+      if (!cancelled) setErrorRef.current(err instanceof Error ? err.message : String(err))
+    })
+    const stop = api.updater.onState((payload) => {
+      if (!cancelled) setUpdater(payload)
     })
     return () => {
       cancelled = true
-      stop?.()
+      stop()
     }
   }, [])
 
   const dash = '—'
   const year = new Date().getFullYear()
-  const state = updater?.state
-  // 'ready' is excluded: a re-check while an update sits downloaded flips the
-  // status through checking/none and hides the "Restart to install" affordance
-  // until the re-download completes.
-  const canCheck =
-    state !== 'dev' && state !== 'checking' && state !== 'downloading' && state !== 'ready'
-  const canDownload = state === 'available'
-  const canInstall = state === 'ready'
+  const status = updater?.status
+  const canCheck = status !== 'checking' && status !== 'downloading'
+  const canDownload = status === 'available'
+  const canInstall = status === 'downloaded'
   const updateVersionShown =
     info?.version != null &&
-    updater?.version != null &&
-    (state === 'available' || state === 'downloading' || state === 'ready')
+    updater?.info?.version != null &&
+    (status === 'available' || status === 'downloading' || status === 'downloaded')
   const downloadPct =
-    state === 'downloading' && updater?.progress != null
-      ? Math.max(0, Math.min(100, Math.round(updater.progress * 100)))
+    status === 'downloading' && updater?.progress != null
+      ? Math.max(0, Math.min(100, Math.round(updater.progress.percent)))
       : null
 
   const runUpdater = (fn: () => Promise<{ ok: boolean; error?: string }> | undefined): void => {
@@ -240,7 +231,7 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
         <SettingsField
           id="about-auto-check"
           title="Automatic checks"
-          hint="Look for GitHub Releases at startup and every 6 hours."
+          hint="Look for GitHub Releases when the app starts."
         >
           <Switch
             size="md"
@@ -255,7 +246,7 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
         <SettingsField id="about-updater" title="App updates" hint={updaterHint(updater)}>
           {updateVersionShown ? (
             <p className="m-0 text-xs tabular-nums tracking-[var(--vy-tracking)] text-muted">
-              {info?.version} <span aria-hidden="true">→</span> {updater?.version}
+              {info?.version} <span aria-hidden="true">→</span> {updater?.info?.version}
             </p>
           ) : null}
           {downloadPct != null ? (
@@ -276,27 +267,27 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
           <div className="flex flex-wrap justify-end gap-1.5">
             <Button
               variant="subtle"
-              pending={updaterBusy && state === 'checking'}
-              disabled={!canCheck || updaterBusy || !window.vyotiq?.checkForAppUpdates}
-              onClick={() => runUpdater(() => window.vyotiq?.checkForAppUpdates())}
+              pending={updaterBusy && status === 'checking'}
+              disabled={!canCheck || updaterBusy || !window.vyotiq?.updater}
+              onClick={() => runUpdater(() => window.vyotiq?.updater.check())}
             >
-              {state === 'checking' ? 'Checking…' : 'Check'}
+              {status === 'checking' ? 'Checking…' : 'Check'}
             </Button>
-            {canDownload || state === 'downloading' ? (
+            {canDownload || status === 'downloading' ? (
               <Button
                 variant="subtle"
-                pending={state === 'downloading'}
-                disabled={!canDownload || updaterBusy || !window.vyotiq?.downloadAppUpdate}
-                onClick={() => runUpdater(() => window.vyotiq?.downloadAppUpdate())}
+                pending={status === 'downloading'}
+                disabled={!canDownload || updaterBusy || !window.vyotiq?.updater}
+                onClick={() => runUpdater(() => window.vyotiq?.updater.download())}
               >
-                {state === 'downloading' ? 'Downloading…' : 'Download'}
+                {status === 'downloading' ? 'Downloading…' : 'Download'}
               </Button>
             ) : null}
             {canInstall ? (
               <Button
                 variant="primary"
-                disabled={updaterBusy || !window.vyotiq?.installAppUpdate}
-                onClick={() => runUpdater(() => window.vyotiq?.installAppUpdate())}
+                disabled={updaterBusy || !window.vyotiq?.updater}
+                onClick={() => runUpdater(() => window.vyotiq?.updater.install())}
               >
                 Restart to install
               </Button>

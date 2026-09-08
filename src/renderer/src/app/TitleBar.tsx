@@ -56,8 +56,8 @@ export function TitleBar({
     >
       {/* Mobile only: open navigation when the drawer is closed.
           Desktop toggle lives inside the sidebar header. */}
-      {!isDesktop ? (
-        <div className="app-region-no-drag flex shrink-0 items-center pl-1.5">
+      <div className="app-region-no-drag flex shrink-0 items-center pl-1.5">
+        {!isDesktop ? (
           <IconButton
             icon="menu"
             label={drawerOpen ? 'Close menu' : 'Open menu'}
@@ -66,8 +66,8 @@ export function TitleBar({
             aria-expanded={drawerOpen}
             onClick={onToggleSidebar}
           />
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
       <div
         ref={setHost}

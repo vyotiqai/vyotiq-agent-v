@@ -20,6 +20,7 @@ import {
   type AgentInstanceUiState
 } from '@shared/utils/agentInstance'
 import {
+  useControllerWriteCheckpoint,
   useGitRevision,
   useHasChatItems
 } from './components/ChatStreamLeaves'
@@ -474,6 +475,26 @@ export function ChatView({
     closeInstancePane,
     pendingGates
   } = useInlineInstanceUi(agentInstances, activeRunId, instanceOpenControlled)
+
+  // The dock Changes panel must reflect the instance run being viewed — the
+  // parent run's items never contain the child's tool rows or write checkpoint.
+  const [instancePaneController, setInstancePaneController] = useState<
+    import('@renderer/lib/hooks/createChatStreamController').ChatStreamController | null
+  >(null)
+  const instanceItemsStore = useMemo<ChatItemsStore | undefined>(() => {
+    if (!instancePaneController) return undefined
+    return {
+      subscribeItems: instancePaneController.subscribeItems.bind(instancePaneController),
+      getItemsRevision: instancePaneController.getItemsRevision.bind(instancePaneController),
+      getItems: () => instancePaneController.items
+    }
+  }, [instancePaneController])
+  const instanceWriteCheckpoint = useControllerWriteCheckpoint(instancePaneController)
+  const instanceWriteCheckpointFiles = useMemo(() => {
+    const files = instanceWriteCheckpoint?.files
+    if (!files?.length || instanceWriteCheckpoint?.undone) return undefined
+    return files.map((f) => ({ path: f.path, action: f.action }))
+  }, [instanceWriteCheckpoint])
 
 const runGoal = useRunGoal({
   workspacePath,
@@ -1215,6 +1236,7 @@ const runGoal = useRunGoal({
           instanceRunId={viewingInstanceRunId}
           instanceMeta={agentInstances?.[viewingInstanceRunId]}
           getController={getInstanceController}
+          onControllerChange={setInstancePaneController}
           sideRailPad={agentSideRailPad}
           pendingGates={pendingGates}
           onOpenInstance={openInstancePane}
@@ -1385,25 +1407,27 @@ const runGoal = useRunGoal({
           inert={visiblePanelId !== 'changes' ? true : undefined}
         >
           <ChangesPanel
-            items={items}
-            itemsStore={itemsStore}
+            items={instancePaneController ? [] : items}
+            itemsStore={instanceItemsStore ?? itemsStore}
             workspacePath={workspacePath}
             gitRevision={gitRevision}
             chrome={gitChrome}
             onGitMutated={notifyGitMutated}
             onOpenFile={openWorkspaceFile}
             onViewPr={() => setRightPanel('pr')}
-            writeFileResolutions={writeFileResolutions}
-            resolvablePaths={writeResolvablePaths}
-            conflictedPaths={writeConflictedPaths}
-            writeCheckpointFiles={writeCheckpointFiles}
-            canResolve={canUndoWrites}
-            resolveBusy={undoBusy}
-            resolveBlockedReason={resolveBlockedReason}
-            onKeepWriteFile={keepWriteFile}
-            onDiscardWriteFile={discardWriteFile}
-            onKeepAllWrites={keepAllWrites}
-            onDiscardAllWrites={discardAllWrites}
+            writeFileResolutions={instancePaneController ? undefined : writeFileResolutions}
+            resolvablePaths={instancePaneController ? undefined : writeResolvablePaths}
+            conflictedPaths={instancePaneController ? undefined : writeConflictedPaths}
+            writeCheckpointFiles={
+              instancePaneController ? instanceWriteCheckpointFiles : writeCheckpointFiles
+            }
+            canResolve={instancePaneController ? false : canUndoWrites}
+            resolveBusy={instancePaneController ? false : undoBusy}
+            resolveBlockedReason={instancePaneController ? null : resolveBlockedReason}
+            onKeepWriteFile={instancePaneController ? undefined : keepWriteFile}
+            onDiscardWriteFile={instancePaneController ? undefined : discardWriteFile}
+            onKeepAllWrites={instancePaneController ? undefined : keepAllWrites}
+            onDiscardAllWrites={instancePaneController ? undefined : discardAllWrites}
             active={visiblePanelId === 'changes'}
             preferredScope={changesPreferredScope}
             preferredScopeToken={changesScopeToken}

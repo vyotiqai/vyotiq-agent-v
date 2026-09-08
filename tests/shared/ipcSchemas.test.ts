@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ChatMessageSchema,
   ChatStartRequestSchema,
+  ChatRewindAndStartRequestSchema,
   ChatStartResultSchema,
   ChatFollowUpRequestSchema,
   ChatFollowUpResultSchema,
@@ -153,6 +154,43 @@ describe('ipc schemas', () => {
       ChatStartRequestSchema.safeParse({
         workspacePath: '/ws',
         runId: 'run-1'
+      }).success
+    ).toBe(true)
+  })
+
+  it('accepts session-pinned provider/model on chatStart and rewind requests', () => {
+    const user = { role: 'user' as const, content: 'hi' }
+    expect(
+      ChatStartRequestSchema.safeParse({
+        messages: [user],
+        workspacePath: '/ws',
+        provider: 'openai',
+        model: 'gpt-session'
+      }).success
+    ).toBe(true)
+    expect(
+      ChatStartRequestSchema.safeParse({
+        messages: [user],
+        workspacePath: '/ws',
+        provider: 'not-a-provider',
+        model: 'gpt-session'
+      }).success
+    ).toBe(false)
+    expect(
+      ChatStartRequestSchema.safeParse({
+        messages: [user],
+        workspacePath: '/ws',
+        model: ''
+      }).success
+    ).toBe(false)
+    expect(
+      ChatRewindAndStartRequestSchema.safeParse({
+        workspacePath: '/ws',
+        runId: 'run-1',
+        editMessageIndex: 0,
+        editedUserMessage: user,
+        provider: 'anthropic',
+        model: 'claude-session'
       }).success
     ).toBe(true)
   })

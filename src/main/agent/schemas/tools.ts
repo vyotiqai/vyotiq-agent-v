@@ -690,7 +690,9 @@ const askQuestionItemCatalog = z.object({
   question: z.string().optional().describe('Alias for prompt'),
   type: z
     .enum(AGENT_QUESTION_TYPES)
-    .describe('single=one option; multi=many; boolean=yes/no; text=freeform'),
+    .describe(
+      'single=one option; multi=many; boolean=yes/no; text=freeform. Defaults to single with 2+ options, else text'
+    ),
   options: z
     .array(z.string())
     .optional()
@@ -1021,7 +1023,7 @@ export const TOOL_REGISTRY = {
   },
   create_plan: {
     description:
-      'Publish this run plan.md (Plan mode; in root Agent runs the plan Steps are the fan-out manifest — every step maps to one child instance). title is the H1. plan markdown should cover Goal, Scope, Steps (each with affected paths + verification), a Done when checklist, and Risks; the result includes advisory quality feedback when sections are missing. Optional todos merge into todo_write. Copies Done when into contract.md. Do not put the plan only in chat.',
+      'Publish this run plan.md (Plan mode; in root Agent runs the plan Steps are the fan-out manifest — every step maps to one child instance). When automatic mode switching is on, calling it in Agent mode switches the run to Plan mode. title is the H1. plan markdown should cover Goal, Scope, Steps (each with affected paths + verification), a Done when checklist, and Risks; the result includes advisory quality feedback when sections are missing. Optional todos merge into todo_write. Copies Done when into contract.md. Do not put the plan only in chat.',
     schema: createPlanArgs
   },
   create_goal: {
@@ -1148,7 +1150,7 @@ export const TOOL_REGISTRY = {
   },
   ask_question: {
     description:
-      'Ask the user a typed form in the transcript (single, multi, boolean, text; prefer 1–2 focused questions). Each questions[] item needs prompt and type. Never call with {} — pass questions[] or a legacy question/prompt. Blocks until answer, skip, or 15-minute timeout.',
+      'Ask the user a typed form in the transcript (single, multi, boolean, text; prefer 1–2 focused questions). Each questions[] item needs prompt; type defaults to single when options are given, else text. Never call with {} — pass questions[] or a legacy question/prompt. Blocks until answer, skip, or 15-minute timeout.',
     schema: askQuestionArgs
   },
   switch_mode: {

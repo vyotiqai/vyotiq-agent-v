@@ -1,0 +1,49 @@
+/**
+ * Local contract types for the in-app update card.
+ *
+ * The main-process updater + preload bridge (`window.vyotiq.updater`) are owned
+ * by another workstream and implemented to this exact contract, so the shapes
+ * live here instead of `src/shared` (which this feature must not modify).
+ */
+
+export interface UpdateNotesSection {
+  heading: string
+  items: string[]
+}
+
+export interface UpdateInfo {
+  version: string
+  releaseDate: string
+  releaseName: string
+  notesText: string
+  notesSections: UpdateNotesSection[]
+}
+
+export interface UpdateProgress {
+  percent: number
+  transferred: number
+  total: number
+}
+
+export type UpdaterStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
+
+export interface UpdaterState {
+  status: UpdaterStatus
+  info?: UpdateInfo
+  progress?: UpdateProgress
+  error?: string
+}
+
+export interface UpdaterBridge {
+  check: () => Promise<UpdateInfo | null>
+  download: () => Promise<void>
+  install: () => Promise<void>
+  onState: (cb: (s: UpdaterState) => void) => () => void
+}

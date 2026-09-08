@@ -3,6 +3,7 @@ export type ShortcutId =
   | 'sidebar'
   | 'search'
   | 'newChat'
+  | 'goHome'
   | 'settings'
   | 'focusComposer'
   | 'stop'
@@ -45,6 +46,8 @@ export const SHORTCUT_BINDINGS: Record<ShortcutId, ShortcutBinding> = {
   sidebar: { id: 'sidebar', key: 'b', mod: true },
   search: { id: 'search', key: 'k', mod: true },
   newChat: { id: 'newChat', key: 'n', mod: true },
+  // Shift required: ⌘H alone hides the app on macOS.
+  goHome: { id: 'goHome', key: 'h', mod: true, shift: 'require' },
   settings: { id: 'settings', key: ',', mod: true },
   focusComposer: { id: 'focusComposer', key: 'l', mod: true },
   stop: { id: 'stop', key: 'escape', mod: false },

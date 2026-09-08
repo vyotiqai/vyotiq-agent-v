@@ -2007,7 +2007,8 @@ describe('MessageList', () => {
         ]}
       />
     )
-    expect(screen.getByRole('button', { name: 'Jump to latest messages, 1 new' })).toBeTruthy()
-    expect(screen.getByText('Latest · 1')).toBeTruthy()
+    const pill = screen.getByRole('button', { name: 'Jump to latest messages, 1 new' })
+    expect(pill.textContent).toContain('Latest')
+    expect(pill.textContent).toContain('1')
   })
 })

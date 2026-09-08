@@ -140,6 +140,11 @@ export type SearchEngineId = z.infer<typeof SearchEngineSchema>
 export const OfflineWaitModeSchema = z.enum(['default', 'extended', 'wait_forever'])
 export type OfflineWaitMode = z.infer<typeof OfflineWaitModeSchema>
 
+/** Primary navigation layout: sessions/workspaces on Home, or the classic sidebar. */
+export const NavigationModeSchema = z.enum(['home', 'sidebar'])
+export type NavigationMode = z.infer<typeof NavigationModeSchema>
+export const DEFAULT_NAVIGATION_MODE: NavigationMode = 'home'
+
 /** User-global rules stored in settings (not workspace files). */
 export const MAX_USER_RULES = 16
 export const USER_RULE_NAME_MAX = 64
@@ -382,6 +387,7 @@ export const SettingsSchema = z.object({
   /** OpenAI-compatible base URL for the `custom` provider (must end with `/v1`). */
   customOpenAiBaseUrl: z.string().min(1).default('http://127.0.0.1:8080/v1'),
   theme: ThemeIdSchema,
+  navigationMode: NavigationModeSchema.default(DEFAULT_NAVIGATION_MODE),
   fontScale: FontScaleSchema.default(DEFAULT_FONT_SCALE),
   uiDensity: UiDensitySchema.default(DEFAULT_UI_DENSITY),
   accentPreset: AccentPresetSchema.default(DEFAULT_ACCENT_PRESET),
@@ -405,6 +411,8 @@ export const SettingsSchema = z.object({
   thinkingEffort: ThinkingEffortSchema.default(DEFAULT_THINKING_EFFORT),
   showThinking: z.boolean().default(true),
   favoriteModels: z.array(z.string()).default([]),
+  /** Session keys (`${workspacePath}␀${runId}`) pinned above the Home recency list. */
+  pinnedRuns: z.array(z.string()).max(24).default([]),
   recentModels: z.array(z.string()).max(5).default([]),
   thinkingPrefsByProvider: z.record(ProviderIdSchema, ThinkingPrefsSchema).default({}),
   serviceTierByModel: z.record(z.string(), ServiceTierSchema).default({}),
@@ -505,6 +513,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ollamaBaseUrl: 'http://127.0.0.1:11434',
   customOpenAiBaseUrl: 'http://127.0.0.1:8080/v1',
   theme: 'system',
+  navigationMode: DEFAULT_NAVIGATION_MODE,
   fontScale: DEFAULT_FONT_SCALE,
   uiDensity: DEFAULT_UI_DENSITY,
   accentPreset: DEFAULT_ACCENT_PRESET,
@@ -519,6 +528,7 @@ export const DEFAULT_SETTINGS: Settings = {
   thinkingEffort: DEFAULT_THINKING_EFFORT,
   showThinking: true,
   favoriteModels: [],
+  pinnedRuns: [],
   recentModels: [],
   thinkingPrefsByProvider: {},
   serviceTierByModel: {},

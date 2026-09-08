@@ -27,13 +27,20 @@ packageExtensions:
       typescript: 6.0.3
 
 overrides:
-  '@sentry/core': 10.67.0
+  # All @sentry packages must share one release line: @sentry/electron 7.18.0
+  # declares @sentry/core 10.73.0 exactly, so the override moves with it.
+  '@sentry/core': 10.73.0
   adm-zip: '>=0.6.0'
   sharp: '>=0.35.3'
   nanoid: '>=3.3.18'
   # GHSA-5jgf-p345-68v8 + GHSA-f65p-4m7j-42xc (high): SSRF/host-confusion in
   # fast-uri <3.1.6, pulled in via ajv (@modelcontextprotocol/sdk, app-builder-lib).
   fast-uri: '>=3.1.6'
+  # Security patches: decode-uri-component >=0.5.0, @xmldom/xmldom >=0.8.15,
+  # qs >=6.16.0 (moderate audit findings); all releases >=24h old at edit time.
+  decode-uri-component: '>=0.5.0'
+  '@xmldom/xmldom': '>=0.8.15'
+  qs: '>=6.16.0'
 
 minimumReleaseAgeExclude:
   - '@astrojs/internal-helpers@0.11.0'

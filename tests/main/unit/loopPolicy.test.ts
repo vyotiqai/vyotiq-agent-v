@@ -53,6 +53,19 @@ describe('loopPolicy', () => {
     })
     expect(malformedHint).toMatch(/ask_question requires questions/i)
 
+    const optionsHint = loopHintForConsecutiveToolFailures(2, {
+      tool: 'ask_question',
+      summary: 'Invalid arguments'
+    })
+    expect(optionsHint).toMatch(/at least 2 distinct non-blank options/i)
+
+    const directOptionsHint = loopHintForConsecutiveToolFailures(2, {
+      tool: 'ask_question',
+      summary:
+        'questions[0] (single) requires at least 2 options (duplicate or blank options are removed first)'
+    })
+    expect(directOptionsHint).toMatch(/at least 2 distinct non-blank options/i)
+
     expect(
       loopHintForConsecutiveToolFailures(1, {
         tool: 'ask_question',

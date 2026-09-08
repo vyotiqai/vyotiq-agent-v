@@ -16,6 +16,8 @@ export type AppShortcutHandlers = {
   onClearSearchFocus: () => void
   isSearchFocused: () => boolean
   onNewChat: () => void
+  /** Ctrl/Cmd+Shift+H — show the Home launch surface. */
+  onOpenHome?: () => void
   /** Ctrl/Cmd+1..9 — switch to the nth open workspace (0-based index). */
   onSwitchWorkspaceByIndex?: (index: number) => void
   onOpenSettings: () => void
@@ -43,6 +45,7 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
     onClearSearchFocus,
     isSearchFocused,
     onNewChat,
+    onOpenHome,
     onSwitchWorkspaceByIndex,
     onOpenSettings,
     onCloseChat,
@@ -57,6 +60,7 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.repeat) return
       if (matchShortcut(e, 'sidebar')) {
         if (shouldBlockAppShortcut(e.target)) return
         e.preventDefault()
@@ -80,6 +84,13 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
         if (shouldBlockAppShortcut(e.target)) return
         e.preventDefault()
         onNewChat()
+        return
+      }
+
+      if (matchShortcut(e, 'goHome')) {
+        if (shouldBlockAppShortcut(e.target)) return
+        e.preventDefault()
+        onOpenHome?.()
         return
       }
 
@@ -127,6 +138,7 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
         // Esc-to-stop from the composer is a designed action.
         if (shouldBlockAppShortcut(e.target)) return
         if (e.defaultPrevented) return
+        if (e.isComposing) return
         if (
           shouldDeferAppEscapeStop({
             drawerOpen,
@@ -137,18 +149,22 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
         }
         e.preventDefault()
         onStop()
+        return
       }
 
       if (matchShortcut(e, 'commandPalette')) {
         if (shouldBlockAppShortcut(e.target)) return
+        if (!onOpenCommandPalette) return
         e.preventDefault()
-        onOpenCommandPalette?.()
+        onOpenCommandPalette()
         return
       }
 
       if (matchShortcut(e, 'findInFiles')) {
+        if (shouldBlockAppShortcut(e.target)) return
+        if (!onFindInFiles) return
         e.preventDefault()
-        onFindInFiles?.()
+        onFindInFiles()
       }
     }
 
@@ -160,6 +176,7 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
     onClearSearchFocus,
     isSearchFocused,
     onNewChat,
+    onOpenHome,
     onSwitchWorkspaceByIndex,
     onOpenSettings,
     onCloseChat,

@@ -9,6 +9,7 @@ import {
   OLLAMA_THINKING_EFFORTS
 } from '../../../shared/reasoning'
 import { inferSupportedServiceTiers } from '../../../shared/domain/serviceTier'
+import { idSuggestsVision } from '../../../shared/domain/modelVision'
 import {
   opencodeGoTransportFor,
   opencodeGoEffortsFor
@@ -21,13 +22,7 @@ export function looksLikeChatModel(id: string): boolean {
   return !NON_CHAT.test(id)
 }
 
-export function idSuggestsVision(id: string): boolean {
-  // GLM: only 5.3-flash and the *v variants accept image input — a broad /glm/i
-  // would mis-flag text-only GLM-5.2/4.7 and make the client send images that 400.
-  return /gpt-4o|gpt-5|vision|llava|llama3\.2-vision|llama3\.2:vision|claude|gemini|grok|pixtral|mistral-small|mistral-medium|mistral-large|bakllava|moondream|glm-5\.3-flash|glm-[0-9.]+v/i.test(
-    id
-  )
-}
+export { idSuggestsVision }
 
 /**
  * Modalities we can actually send on the wire for a provider.

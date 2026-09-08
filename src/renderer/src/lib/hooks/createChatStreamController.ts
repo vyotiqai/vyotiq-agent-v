@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   ChatRewindPreviewResult,
   IncompleteReason,
+  ProviderId,
   PersistedEvent,
   ToolApprovalDecision,
   ToolApprovalRequest,
@@ -1135,6 +1136,8 @@ export type ChatStreamState = {
   pendingFollowUps: PendingFollowUpState[]
   /** Latest lifecycle for inline Agent V instances spawned by this run. */
   agentInstances: Record<string, AgentInstanceUiState>
+  /** Session-pinned provider/model — set on first send; other sessions' model changes cannot bleed in. */
+  providerModel: { provider: ProviderId; model: string } | null
 }
 
 export type ChatStreamController = ChatStreamState & {
@@ -1204,6 +1207,8 @@ export type ChatStreamController = ChatStreamState & {
   }) => void
   /** Mark compacting in-flight for manual Compact (IPC has no live stream). */
   setCompacting: (compacting: boolean) => void
+  /** Pin this session's provider/model (composer change made in this session). */
+  setProviderModel: (provider: ProviderId, model: string) => void
   /** Apply Keep/Discard results onto the live write checkpoint state. */
   applyWriteCheckpointResolution: (result: {
     checkpointId: string
@@ -1279,6 +1284,8 @@ export type CreateChatStreamControllerOptions = {
   onTerminal?: () => void
   /** Current Ask / Plan / Agent mode for chatStart. */
   getAgentMode?: () => AgentInteractionMode
+  /** Live default provider/model (effective settings) until this session pins its own. */
+  getDefaultProviderModel?: () => { provider: ProviderId; model: string } | null
   /** Sync composer mode when the agent calls switch_mode. */
   onAgentModeChange?: (mode: AgentInteractionMode) => void
   /** Restored expansion state for this run (survives reload/tab switches). */
@@ -1290,7 +1297,7 @@ export type CreateChatStreamControllerOptions = {
 export function createChatStreamController(
   options: CreateChatStreamControllerOptions
 ): ChatStreamController {
-  const { workspacePath, onRunIdAssigned, onTerminal, getAgentMode, onAgentModeChange } = options
+  const { workspacePath, onRunIdAssigned, onTerminal, getAgentMode, onAgentModeChange, getDefaultProviderModel } = options
   const { initialExpansions, onExpansionsChange } = options
   let lastNotifiedAgentMode: AgentInteractionMode | null = null
   const notifyAgentMode = (mode: AgentInteractionMode | null | undefined): void => {
@@ -1779,7 +1786,8 @@ export function createChatStreamController(
     collapsedTurnIndices: [...(initialExpansions?.collapsedTurns ?? [])],
     writeCheckpoint: null,
     pendingFollowUps: [],
-    agentInstances: {}
+    agentInstances: {},
+    providerModel: null
   }
 
   const notify = (): void => {
@@ -1881,8 +1889,22 @@ export function createChatStreamController(
       collapsedTurnIndices: [],
       writeCheckpoint: null,
       pendingFollowUps: [],
-      agentInstances: {}
+      agentInstances: {},
+      providerModel: null
     })
+  }
+
+  /**
+   * Resolve the provider/model for this turn. The session pins its selection on
+   * the first send so a model change in a different session (which only updates
+   * the shared global settings) cannot bleed into this one.
+   */
+  const resolveTurnProviderModel = (): { provider: ProviderId; model: string } | null => {
+    if (state.providerModel) return state.providerModel
+    const fallback = getDefaultProviderModel?.() ?? null
+    if (!fallback) return null
+    patch({ providerModel: fallback })
+    return fallback
   }
 
   const assignRunId = (id: string): void => {
@@ -2898,6 +2920,7 @@ export function createChatStreamController(
     }
     const mode = getAgentMode?.() ?? 'agent'
     const focusedFile = getFocusedFile() ?? undefined
+    const turnProviderModel = resolveTurnProviderModel()
     const startPayload = continuingRunId
       ? {
           incremental: true as const,
@@ -2908,13 +2931,17 @@ export function createChatStreamController(
           workspacePath,
           runId: continuingRunId,
           mode,
-          focusedFile
+          focusedFile,
+          provider: turnProviderModel?.provider,
+          model: turnProviderModel?.model
         }
       : {
           messages: nextMessages,
           workspacePath,
           mode,
-          focusedFile
+          focusedFile,
+          provider: turnProviderModel?.provider,
+          model: turnProviderModel?.model
         }
     let res = await window.vyotiq.chatStart(startPayload)
     for (let attempt = 2; attempt <= CHAT_START_MAX_ATTEMPTS && !res.ok; attempt++) {
@@ -3025,12 +3052,15 @@ export function createChatStreamController(
     })
 
     const mode = getAgentMode?.() ?? 'agent'
+    const resumeProviderModel = resolveTurnProviderModel()
     const startPayload = {
       workspacePath,
       runId: continuingRunId,
       messages: [],
       mode,
-      focusedFile: getFocusedFile() ?? undefined
+      focusedFile: getFocusedFile() ?? undefined,
+      provider: resumeProviderModel?.provider,
+      model: resumeProviderModel?.model
     }
     let res = await window.vyotiq.chatStart(startPayload)
     for (let attempt = 2; attempt <= CHAT_START_MAX_ATTEMPTS && !res.ok; attempt++) {
@@ -3189,12 +3219,15 @@ export function createChatStreamController(
     })
 
     const mode = getAgentMode?.() ?? 'agent'
+    const turnProviderModel = resolveTurnProviderModel()
     const res = await window.vyotiq.chatRewindAndStart({
       workspacePath,
       runId: id,
       editMessageIndex,
       editedUserMessage: user,
-      mode
+      mode,
+      provider: turnProviderModel?.provider,
+      model: turnProviderModel?.model
     })
 
     if (!res.ok) {
@@ -4355,6 +4388,13 @@ export function createChatStreamController(
     patch({ compacting: next })
   }
 
+  const setProviderModel = (provider: ProviderId, model: string): void => {
+    if (disposed) return
+    const trimmed = model.trim()
+    if (!trimmed) return
+    patch({ providerModel: { provider, model: trimmed } })
+  }
+
   const applyWriteCheckpointResolution = (result: {
     checkpointId: string
     kept: string[]
@@ -4458,6 +4498,9 @@ export function createChatStreamController(
     get agentInstances() {
       return state.agentInstances
     },
+    get providerModel() {
+      return state.providerModel
+    },
     get disposed() {
       return disposed
     },
@@ -4492,6 +4535,7 @@ export function createChatStreamController(
     syncFromDisk,
     applyManualCompaction,
     setCompacting,
+    setProviderModel,
     applyWriteCheckpointResolution,
     handleEvent,
     setUiSuspended,

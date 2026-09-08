@@ -2021,4 +2021,51 @@ describe('settings', () => {
     pushStatus?.(status)
     await waitFor(() => expect(screen.queryByText('status endpoint down')).toBeNull())
   })
+
+  it('General section shows the Navigation choice with Home page selected by default', () => {
+    render(
+      <SettingsView
+        settings={baseSettings}
+        secrets={emptySecrets}
+        onClose={vi.fn()}
+        onUpdate={vi.fn(async () => ({ ok: true as const }))}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      />
+    )
+    expect(document.querySelector('[data-settings-field="navigation"]')).toBeTruthy()
+    const home = screen.getByRole('button', { name: 'Home page' }) as HTMLButtonElement
+    const chat = screen.getByRole('button', { name: 'Sidebar' }) as HTMLButtonElement
+    expect(home.getAttribute('aria-pressed')).toBe('true')
+    expect(chat.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('Navigation choice persists through onUpdate', async () => {
+    const onUpdate = vi.fn(async () => ({ ok: true as const }))
+    function Harness() {
+      const [settings, setSettings] = useState<Settings>(baseSettings)
+      return (
+        <SettingsView
+          settings={settings}
+          secrets={emptySecrets}
+          onClose={vi.fn()}
+          onUpdate={async (partial) => {
+            setSettings((prev) => ({ ...prev, ...partial }))
+            return onUpdate(partial)
+          }}
+          onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+          onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+        />
+      )
+    }
+    render(<Harness />)
+    const chat = screen.getByRole('button', { name: 'Sidebar' }) as HTMLButtonElement
+    expect((screen.getByRole('button', { name: 'Home page' }) as HTMLButtonElement).getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(chat)
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith({ navigationMode: 'sidebar' })
+    )
+    await waitFor(() => expect(chat.getAttribute('aria-pressed')).toBe('true'))
+    expect((screen.getByRole('button', { name: 'Home page' }) as HTMLButtonElement).getAttribute('aria-pressed')).toBe('false')
+  })
 })

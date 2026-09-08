@@ -51,6 +51,11 @@ export const RESPONSE_VERBOSITY_OPTIONS = [
   { value: 'detailed', label: 'Detailed' }
 ]
 
+export const NAVIGATION_MODE_OPTIONS = [
+  { value: 'home', label: 'Home page' },
+  { value: 'sidebar', label: 'Sidebar' }
+]
+
 /** Mirrors the zod maxes in shared/ipc/schemas/settings.ts. */
 export const PERSONA_MAX_LENGTH = 1000
 export const TONE_MAX_LENGTH = 2000

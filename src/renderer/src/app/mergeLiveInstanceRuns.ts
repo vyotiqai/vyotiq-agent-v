@@ -29,8 +29,13 @@ export function mergeLiveInstanceRuns(
   if (!agentInstances || !parentRunId) return listed
   const byId = new Map(listed.map((run) => [run.runId, run]))
   for (const inst of Object.values(agentInstances)) {
-    const status = liveInstanceStatus(inst.phase)
+    const live = liveInstanceStatus(inst.phase)
     const prior = byId.get(inst.instanceRunId)
+    // A stale live `started` entry must not resurrect a spinner for a run the
+    // disk already marked terminal (e.g. the terminal agent_instance_update
+    // never reached this controller). Mirrors mergeAgentInstanceMaps' rule.
+    const status =
+      live === 'running' && prior && prior.status !== 'running' ? prior.status : live
     byId.set(inst.instanceRunId, {
       runId: inst.instanceRunId,
       status,

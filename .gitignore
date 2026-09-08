@@ -7,7 +7,7 @@ node_modules/
 # Build, pack, and Vite/Electron outputs
 dist/
 dist-package/
-dist-package-*/
+dist-package*/
 out/
 release/
 landing/dist/

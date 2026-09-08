@@ -38,8 +38,8 @@ export function Sidebar({
   onOpenNotificationSettings,
   focusedRunId = null,
   onOpenMarketplace,
+  onOpenHome,
   onOpenChat,
-  onNewChat,
   onNewChatInWorkspace,
   onSelectRunInWorkspace,
   onRenameRunInWorkspace,
@@ -52,6 +52,7 @@ export function Sidebar({
   onCloseDrawer,
   onToggleSidebar,
   collapsed = false,
+  hideSessions = false,
   widthPx,
   variant = 'desktop',
   /** Persisted per-workspace expand state + mutator (falls back to local when absent). */
@@ -59,10 +60,11 @@ export function Sidebar({
   onSetWorkspaceExpanded
 }: SidebarProps) {
   const workspaceReady = Boolean(hasWorkspace)
-  const needsWorkspaceLabel = 'Open a workspace first'
   const isDarwin = window.vyotiq?.platform === 'darwin'
   const isDrawer = variant === 'drawer'
-  const isCollapsed = collapsed && !isDrawer
+  // Home mode hides the session list everywhere the sidebar renders it: the
+  // desktop rail comes via `collapsed`; the mobile drawer collapses here.
+  const isCollapsed = (collapsed && !isDrawer) || (hideSessions && isDrawer)
   const dockImmersive = useDockImmersive()
   const hotUi = useWorkspaceHotUi(activePath)
   const sessionQuery = activePath ? hotUi.sessionQuery : sessionQueryProp
@@ -87,12 +89,12 @@ export function Sidebar({
 
   const clearSearch = (): void => onSessionQuery('')
 
-  const widthClass = isDrawer
-    ? SIDEBAR_WIDTH
-    : isCollapsed
-      ? isDarwin
-        ? SIDEBAR_WIDTH_COLLAPSED_DARWIN
-        : SIDEBAR_WIDTH_COLLAPSED
+  const widthClass = isCollapsed
+    ? isDarwin
+      ? SIDEBAR_WIDTH_COLLAPSED_DARWIN
+      : SIDEBAR_WIDTH_COLLAPSED
+    : isDrawer
+      ? SIDEBAR_WIDTH
       : undefined
 
   const expandedWidthPx =
@@ -124,6 +126,12 @@ export function Sidebar({
     afterNav()
   }
 
+  const openHome = (): void => {
+    clearSearch()
+    onOpenHome?.()
+    afterNav()
+  }
+
   return (
     <aside
       className={cn(
@@ -142,14 +150,8 @@ export function Sidebar({
           isDrawer={isDrawer}
           isCollapsed={isCollapsed}
           isDarwin={isDarwin}
-          workspaceReady={workspaceReady}
-          disabledTitle={needsWorkspaceLabel}
           onToggleSidebar={onToggleSidebar}
-          onNewChat={() => {
-            clearSearch()
-            onNewChat()
-            afterNav()
-          }}
+          onOpenHome={openHome}
           onAddWorkspace={onAddWorkspace}
         />
       ) : (
@@ -159,14 +161,9 @@ export function Sidebar({
           workspaceReady={workspaceReady}
           searchRef={searchRef}
           sessionQuery={sessionQuery}
-          disabledTitle={needsWorkspaceLabel}
           onToggleSidebar={onToggleSidebar}
           onSessionQuery={onSessionQuery}
-          onNewChat={() => {
-            clearSearch()
-            onNewChat()
-            afterNav()
-          }}
+          onOpenHome={openHome}
         />
       )}
 

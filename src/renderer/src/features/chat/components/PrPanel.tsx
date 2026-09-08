@@ -797,6 +797,7 @@ export function PrPanel({
         return
       }
       if (e.shiftKey && e.altKey && e.key.toLowerCase() === 't') {
+        if (isEditableShortcutTarget(e.target)) return
         e.preventDefault()
         startEditTitle()
       }

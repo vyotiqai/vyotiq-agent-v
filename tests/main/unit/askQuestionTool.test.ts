@@ -125,7 +125,8 @@ describe('ask_question tool', () => {
     expect(captured).toHaveLength(2)
   })
 
-  it('rejects single/multi without enough options', async () => {
+  it('coerces single/multi without enough options to text (live a1a46c65)', async () => {
+    let asked: { questions: Array<{ type: string; options?: string[] }> } | null = null
     const result = await executeTool(
       'ask_question',
       JSON.stringify({
@@ -133,10 +134,19 @@ describe('ask_question tool', () => {
       }),
       '/ws',
       new AbortController().signal,
-      { runId: 'run-1', toolCallId: 'tc-1' }
+      {
+        runId: 'run-1',
+        toolCallId: 'tc-1',
+        askQuestion: async (req) => {
+          asked = req as typeof asked
+          return [{ questionId: 'q1', values: ['A'] }]
+        }
+      }
     )
-    expect(result.ok).toBe(false)
-    expect(result.content).toMatch(/at least 2/i)
+    expect(result.ok).toBe(true)
+    expect(asked?.questions[0]!.type).toBe('text')
+    expect(asked?.questions[0]!.options).toBeUndefined()
+    expect(result.content).toBe('User answered: A')
   })
 
   it('skips in autonomous mode only when autonomousSkipQuestions is skip', async () => {
@@ -232,7 +242,7 @@ describe('ask_question tool', () => {
     expect(bad.content).toContain(ASK_QUESTION_ARGS_HINT)
   })
 
-  it('returns enriched failures for empty questions[] and missing type/prompt', async () => {
+  it('returns enriched failures for empty questions[] and invalid type/missing prompt', async () => {
     const empty = await executeTool(
       'ask_question',
       JSON.stringify({ questions: [] }),
@@ -247,16 +257,41 @@ describe('ask_question tool', () => {
 
     const noType = await executeTool(
       'ask_question',
-      JSON.stringify({ questions: [{ id: 'q1', prompt: 'Go?' }] }),
+      JSON.stringify({
+        questions: [
+          {
+            allowCustom: true,
+            id: 'direction',
+            options: ['Compact dashboard', 'Minimal launcher'],
+            prompt: 'Which direction should the redesign take?'
+          }
+        ]
+      }),
+      '/ws',
+      new AbortController().signal,
+      {
+        runId: 'run-1',
+        toolCallId: 'tc-1',
+        // Omitted type is inferred (single with 2+ options) instead of failing —
+        // live 3d334c22/870cde12/829b9ada all omitted type on optioned questions.
+        askQuestion: async () => [{ questionId: 'direction', values: ['Compact dashboard'] }]
+      }
+    )
+    expect(noType.ok).toBe(true)
+    expect(noType.content).toBe('User answered: Compact dashboard')
+
+    const badType = await executeTool(
+      'ask_question',
+      JSON.stringify({ questions: [{ id: 'q1', prompt: 'Go?', type: 'choice' }] }),
       '/ws',
       new AbortController().signal,
       { runId: 'run-1', toolCallId: 'tc-1' }
     )
-    expect(noType.ok).toBe(false)
+    expect(badType.ok).toBe(false)
     // Prompt is still recoverable for the tool row title; content carries the schema error.
-    expect(noType.summary).toBe('Go?')
-    expect(noType.content).toMatch(/type must be single, multi, boolean, or text/i)
-    expect(noType.content).toMatch(/Each questions\[\]\.type must be one of/i)
+    expect(badType.summary).toBe('Go?')
+    expect(badType.content).toMatch(/type must be single, multi, boolean, or text/i)
+    expect(badType.content).toMatch(/Each questions\[\]\.type must be one of/i)
 
     const noPrompt = await executeTool(
       'ask_question',

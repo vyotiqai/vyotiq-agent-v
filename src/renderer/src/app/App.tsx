@@ -1,5 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AppShell } from './AppShell'
+import { launchViewFor } from './launchView'
+import { pinnedRunKey, prunePinnedRun, togglePinnedRun } from '../features/home/pinnedRuns'
 import { ChatView } from '../features/chat/ChatView'
 import { SessionChatColumn } from '../features/chat/SessionChatColumn'
 import type { ChatPane } from '@renderer/lib/chat/chatPaneLayout'
@@ -10,6 +12,7 @@ import { useCustomSkinCss } from '@renderer/lib/hooks/useCustomSkinCss'
 import { pickAppearanceSettings, stepFontScale, DEFAULT_FONT_SCALE } from '@shared/appearance'
 import { useSettings } from '@renderer/lib/hooks/useSettings'
 import { useWorkspaceManager, resolveComposerDraft } from '@renderer/lib/hooks/useWorkspaceManager'
+import type { WorkspaceContext } from '@renderer/lib/hooks/useWorkspaceManager'
 import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
 import { ToastHost, pushToast } from '@renderer/lib/ui'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
@@ -63,6 +66,9 @@ const SettingsView = lazy(() =>
 )
 const MarketplaceView = lazy(() =>
   import('../features/marketplace').then((m) => ({ default: m.MarketplaceView }))
+)
+const HomePage = lazy(() =>
+  import('../features/home/HomePage').then((m) => ({ default: m.HomePage }))
 )
 
 function ViewSuspenseFallback() {
@@ -148,7 +154,20 @@ function App() {
       return changed ? next : prev
     })
   }, [])
-  const workspace = useWorkspaceManager({ openInstanceRunIds })
+  const contextsForModelRef = useRef<Record<string, WorkspaceContext>>({})
+  const getDefaultProviderModelForWorkspace = useCallback(
+    (workspacePath: string): { provider: ProviderId; model: string } | null => {
+      if (!workspacePath) return null
+      const ctx = findByWorkspacePath(contextsForModelRef.current, workspacePath)
+      const effective = resolveEffectiveSettings(settings, ctx?.settingsOverride)
+      return { provider: effective.provider, model: effective.model }
+    },
+    [settings]
+  )
+  const workspace = useWorkspaceManager({
+    openInstanceRunIds,
+    getDefaultProviderModelForWorkspace
+  })
   const {
     registry,
     activeWorkspace,
@@ -210,10 +229,11 @@ function App() {
   } = workspace
 
   const focusedParentRunId = chat.runId ?? activeContext?.activeRunId ?? null
+  contextsForModelRef.current = contexts
   const focusedOpenInstance =
     focusedParentRunId != null ? (openInstanceByParent[focusedParentRunId] ?? null) : null
 
-  const [view, setView] = useState<'chat' | 'settings' | 'marketplace'>('chat')
+  const [view, setView] = useState<'chat' | 'settings' | 'marketplace' | 'home'>('chat')
   const previousViewRef = useRef(view)
   const [marketplaceFocusServerId, setMarketplaceFocusServerId] = useState<string | null>(null)
   const [marketplaceFocusSkillPath, setMarketplaceFocusSkillPath] = useState<string | null>(null)
@@ -243,6 +263,16 @@ function App() {
       }))
     }
   }, [view])
+
+  // Navigation-mode preference applies once settings have loaded. During load the
+  // shell keeps the established chat skeleton; the launch view lands before the
+  // first post-load paint (useLayoutEffect) so no wrong surface flashes.
+  const launchViewAppliedRef = useRef(false)
+  useLayoutEffect(() => {
+    if (loading || launchViewAppliedRef.current) return
+    launchViewAppliedRef.current = true
+    setView(launchViewFor(settings.navigationMode))
+  }, [loading, settings.navigationMode])
 
   useLayoutEffect(() => {
     hydrate(
@@ -368,6 +398,17 @@ function App() {
     onProviderModelForWorkspace(focusedWorkspacePath ?? activeWorkspace, provider, model)
   }
 
+  /** Pin a model change to the session that made it, then update the shared default. */
+  const onSessionProviderModel = (
+    runId: string | null,
+    workspacePath: string | null | undefined,
+    provider: ProviderId,
+    model: string
+  ): void => {
+    if (!workspacePath) return
+    getRunController(runId, workspacePath)?.setProviderModel(provider, model)
+  }
+
   const onToggleFavorite = useCallback((provider: ProviderId, model: string): void => {
     const key = modelSelectionKey(provider, model)
     const set = new Set(settings.favoriteModels)
@@ -375,6 +416,15 @@ function App() {
     else set.add(key)
     void update({ favoriteModels: [...set] })
   }, [settings.favoriteModels, update])
+
+  // Pin/unpin a session above the Home recency list — same data-array settings
+  // pattern as favoriteModels. The cap keeps the newest pins (pinnedRuns.ts).
+  const onTogglePinnedRun = useCallback(
+    (key: string): void => {
+      void update({ pinnedRuns: togglePinnedRun(settings.pinnedRuns, key) })
+    },
+    [settings.pinnedRuns, update]
+  )
 
   const onServiceTierChange = (tier: ServiceTier): void => {
     const key = modelSelectionKey(effectiveChatSettings.provider, effectiveChatSettings.model)
@@ -399,6 +449,18 @@ function App() {
       : activeContext
     )?.settingsOverride
   )
+
+  // Session-pinned model: what this session actually uses and displays; falls back to
+  // the shared effective settings until the session's first send (or a composer change
+  // made in this session) pins it — a model change in a different session cannot bleed in.
+  const focusedSessionModel = chat.providerModel
+  const focusedChatSettings = focusedSessionModel
+    ? {
+        ...effectiveChatSettings,
+        provider: focusedSessionModel.provider,
+        model: focusedSessionModel.model
+      }
+    : effectiveChatSettings
 
   // Clear nested instance view when it no longer belongs to the focused parent session.
   useEffect(() => {
@@ -570,6 +632,28 @@ function App() {
     [newChatInWorkspace]
   )
 
+  // Home start bar / workspace cards route here: same switch + focus flow as
+  // onNewChatInWorkspace, then the typed goal lands in the new session's
+  // composer draft in that workspace. The new session is a draft (runId null),
+  // so setComposerDraftForPane(path, null, goal) targets it; empty goals skip
+  // the write so an existing draft is never clobbered with ''.
+  const onNewSessionInWorkspace = useCallback(
+    (path: string, goal: string): void => {
+      setOpenInstanceByParent({})
+      void newChatInWorkspace(path).then(() => {
+        if (goal) setComposerDraftForPane(path, null, goal)
+      })
+      setView('chat')
+      let attempts = 0
+      const tryFocus = (): void => {
+        if (focusComposerMessage()) return
+        if (attempts++ < 10) window.setTimeout(tryFocus, 0)
+      }
+      window.setTimeout(tryFocus, 0)
+    },
+    [newChatInWorkspace, setComposerDraftForPane]
+  )
+
   const onPickWorkspace = (): void => {
     void pickWorkspace().then(async (res) => {
       if (res.ok && res.data) {
@@ -729,6 +813,52 @@ function App() {
       )
     },
     [activeWorkspace, gateSendWithOnboarding, sendWithOfflineQueue]
+  )
+
+  // Home hero composer: a real send from the launch surface. newChatInWorkspace
+  // switches to the target workspace and ensures the draft controller
+  // (openRunTabInWorkspace → ensureController), so this send and the ChatView
+  // that mounts next share the same controller. Delivery goes through the same
+  // onboarding gate + offline queue as the dock composer, bound to (path, null).
+  const onSendInWorkspace = useCallback(
+    async (
+      path: string,
+      text: string,
+      images?: string[],
+      files?: AttachedFile[],
+      extras?: import('@shared/ipc').ComposerSendExtras
+    ): Promise<boolean> => {
+      await newChatInWorkspace(path)
+      setView('chat')
+      const focused = getFocusedPaneRef.current()
+      return gateSendWithOnboarding(
+        (sendText, sendImages, sendFiles, sendExtras) =>
+          sendWithOfflineQueue(
+            sendText,
+            sendImages,
+            sendFiles,
+            sendExtras,
+            (t, i, f, e) =>
+              getRunControllerRef.current(null, path)?.send(t, i, f, e) ?? false,
+            { runId: null, paneId: focused?.paneId, workspacePath: path }
+          ),
+        text,
+        images,
+        files,
+        extras,
+        { workspacePath: path, runId: null }
+      )
+    },
+    [newChatInWorkspace, gateSendWithOnboarding, sendWithOfflineQueue]
+  )
+
+  // Home composer drafts key to (workspace, null) — the same hot-store key a
+  // fresh chat uses, so a draft typed on Home is waiting in the chat composer.
+  const onHomeDraftChange = useCallback(
+    (path: string, draft: string): void => {
+      setComposerDraftForPane(path, null, draft)
+    },
+    [setComposerDraftForPane]
   )
 
   const onChatEditAndResend = useCallback(
@@ -1352,26 +1482,31 @@ function App() {
   }, [setSettingsError])
 
   // Surface available app updates outside Settings → About: one toast per
-  // available/ready state so users notice without opening settings.
+  // available/downloaded state so users notice without opening settings.
+  // autoDownload stays off — the user starts the download from the update card.
   useEffect(() => {
     const seen = new Set<string>()
-    const stop = window.vyotiq?.onUpdaterStatus?.((status) => {
-      if (status.state !== 'available' && status.state !== 'ready') return
-      const key = `${status.state}:${status.version ?? ''}`
+    const stop = window.vyotiq?.updater.onState((payload) => {
+      if (payload.status !== 'available' && payload.status !== 'downloaded') return
+      const version = payload.info?.version ?? ''
+      const key = `${payload.status}:${version}`
       if (seen.has(key)) return
       seen.add(key)
-      if (status.state === 'available') {
-        // autoDownload is always on, so the download starts immediately.
+      if (payload.status === 'available') {
         pushToast(
-          `${status.message ?? 'An update is available.'} Downloading in the background…`
+          version
+            ? `Version ${version} is available. Open the update card to review and download.`
+            : 'An update is available. Open the update card to review and download.'
         )
       } else {
         pushToast(
-          `${status.message ?? 'Update downloaded.'} Click to restart and install now.`,
+          version
+            ? `Version ${version} downloaded. Click to restart and install now.`
+            : 'Update downloaded. Click to restart and install now.',
           'success',
           12000,
           () => {
-            void window.vyotiq?.installAppUpdate()
+            void window.vyotiq?.updater.install()
           }
         )
       }
@@ -1469,6 +1604,9 @@ function App() {
         settings,
         paneContext?.settingsOverride
       )
+      const paneSessionModel = snap.providerModel
+      const paneProvider = paneSessionModel?.provider ?? paneChatSettings.provider
+      const paneModel = paneSessionModel?.model ?? paneChatSettings.model
       const paneModelsRefreshKey = modelsRefreshKeyFor(
         paneChatSettings,
         secrets,
@@ -1533,8 +1671,8 @@ function App() {
           operationalError={focused ? operationalError : null}
           hasWorkspace={Boolean(pane.workspacePath)}
           workspacePath={pane.workspacePath}
-          provider={paneChatSettings.provider}
-          model={paneChatSettings.model}
+          provider={paneProvider}
+          model={paneModel}
           ollamaBaseUrl={paneChatSettings.ollamaBaseUrl}
           customOpenAiBaseUrl={paneChatSettings.customOpenAiBaseUrl}
           modelsRefreshKey={paneModelsRefreshKey}
@@ -1543,25 +1681,24 @@ function App() {
           transcriptLoading={snap.transcriptLoading}
           showPageHeading={false}
           onActivate={() => focusPaneById(pane.paneId)}
-          onProviderModel={(provider, model) =>
+          onProviderModel={(provider, model) => {
+            paneCtrl?.setProviderModel(provider, model)
             onProviderModelForWorkspace(pane.workspacePath, provider, model)
-          }
+          }}
           favoriteModels={settings.favoriteModels}
           recentModels={settings.recentModels}
-          serviceTier={resolveServiceTier(
-            settings,
-            paneChatSettings.provider,
-            paneChatSettings.model
-          )}
+          serviceTier={resolveServiceTier(settings, paneProvider, paneModel)}
           onToggleFavorite={onToggleFavorite}
           onServiceTierChange={(tier) => {
-            const key = modelSelectionKey(paneChatSettings.provider, paneChatSettings.model)
+            const key = modelSelectionKey(paneProvider, paneModel)
             void update({
               serviceTier: tier,
               serviceTierByModel: { ...settings.serviceTierByModel, [key]: tier }
             })
           }}
-          chatSettings={paneChatSettings}
+          chatSettings={
+            paneSessionModel ? { ...paneChatSettings, ...paneSessionModel } : paneChatSettings
+          }
           onChatSettingsChange={(patch) =>
             onChatSettingsChangeForWorkspace(pane.workspacePath, patch, paneChatSettings)
           }
@@ -1763,6 +1900,10 @@ function App() {
       closeRunTab(runId)
     }
     refreshWorkspaceRuns(path)
+    const nextPins = prunePinnedRun(settings.pinnedRuns, pinnedRunKey(path, runId))
+    if (nextPins !== settings.pinnedRuns) {
+      void update({ pinnedRuns: [...nextPins] })
+    }
   }
 
   const onCloseWorkspace = (path: string): void => {
@@ -1857,6 +1998,7 @@ function App() {
         onOpenSettings={() => {}}
         onOpenMarketplace={() => {}}
         onOpenChat={() => {}}
+        onOpenHome={() => {}}
         onNewChat={() => {}}
         {...shellWorkspaceProps}
         loading
@@ -1882,6 +2024,7 @@ function App() {
     <AppShell
       view={view}
       workspacePath={activeWorkspace}
+      navigationMode={settings.navigationMode}
       onDismissRunsError={clearRunsError}
       sessionQuery=""
       onSessionQuery={setSessionQuery}
@@ -1895,6 +2038,7 @@ function App() {
       focusedRunId={focusedRunId}
       onOpenMarketplace={() => setView('marketplace')}
       onOpenChat={() => setView('chat')}
+      onOpenHome={() => setView('home')}
       onNewChat={onNewChat}
       running={chat.running || chat.pendingRun}
       onChatStop={onChatStop}
@@ -1977,6 +2121,57 @@ function App() {
           />
           </Suspense>
         </ErrorBoundary>
+      ) : view === 'home' ? (
+        <ErrorBoundary title="Home couldn't render" resetKey="home">
+          <Suspense fallback={<ViewSuspenseFallback />}>
+            <HomePage
+              openWorkspaces={openWorkspaces}
+              activeWorkspacePath={activeWorkspace}
+              runsByWorkspacePath={runsByWorkspacePath}
+              activeRuns={shellWorkspaceProps.activeRuns}
+              workspaceHasBackgroundRun={shellWorkspaceProps.workspaceHasBackgroundRun}
+              onNewSessionInWorkspace={onNewSessionInWorkspace}
+              onSelectRunInWorkspace={shellWorkspaceProps.onSelectRunInWorkspace}
+              onSwitchWorkspace={shellWorkspaceProps.onSwitchWorkspace}
+              onAddWorkspace={shellWorkspaceProps.onAddWorkspace}
+              onSendInWorkspace={onSendInWorkspace}
+              onDraftChangeInWorkspace={onHomeDraftChange}
+              onRenameRunInWorkspace={shellWorkspaceProps.onRenameRunInWorkspace}
+              onDeleteRunInWorkspace={shellWorkspaceProps.onDeleteRunInWorkspace}
+              onExportRunInWorkspace={shellWorkspaceProps.onExportRunInWorkspace}
+              isRunOpenInPane={shellWorkspaceProps.isRunOpenInPane}
+              isRunFocusedInPane={shellWorkspaceProps.isRunFocusedInPane}
+              pinnedRunKeys={settings.pinnedRuns}
+              onTogglePinnedRun={onTogglePinnedRun}
+              provider={effectiveChatSettings.provider}
+              model={effectiveChatSettings.model}
+              ollamaBaseUrl={effectiveChatSettings.ollamaBaseUrl}
+              customOpenAiBaseUrl={effectiveChatSettings.customOpenAiBaseUrl}
+              modelsRefreshKey={modelsRefreshKey}
+              secrets={secrets}
+              onProviderModel={onProviderModel}
+              favoriteModels={settings.favoriteModels}
+              recentModels={settings.recentModels}
+              serviceTier={resolveServiceTier(
+                settings,
+                effectiveChatSettings.provider,
+                effectiveChatSettings.model
+              )}
+              onToggleFavorite={onToggleFavorite}
+              onServiceTierChange={onServiceTierChange}
+              chatSettings={effectiveChatSettings}
+              onChatSettingsChange={onChatSettingsChange}
+              agentMode={agentSessionContext?.ui.agentMode ?? 'agent'}
+              onAgentModeChange={(mode) =>
+                setAgentMode(mode, {
+                  workspacePath: focusedWorkspacePath ?? undefined,
+                  runId: focusedRunId
+                })
+              }
+              slashHandlers={slashHandlersValue}
+            />
+          </Suspense>
+        </ErrorBoundary>
       ) : (
         <ErrorBoundary title="Chat couldn't render" resetKey={chatSurfaceEpoch}>
           <ChatView
@@ -2004,8 +2199,8 @@ function App() {
             hasWorkspace={Boolean(focusedWorkspacePath ?? activeWorkspace)}
             workspacePath={focusedWorkspacePath ?? activeWorkspace}
             tabAutocompleteEnabled={settings.tabAutocomplete !== false}
-            provider={effectiveChatSettings.provider}
-            model={effectiveChatSettings.model}
+            provider={focusedChatSettings.provider}
+            model={focusedChatSettings.model}
             ollamaBaseUrl={effectiveChatSettings.ollamaBaseUrl}
             customOpenAiBaseUrl={effectiveChatSettings.customOpenAiBaseUrl}
             modelsRefreshKey={modelsRefreshKey}
@@ -2013,17 +2208,25 @@ function App() {
             activeRunId={chat.runId ?? activeContext?.activeRunId ?? null}
             transcriptLoading={chat.transcriptLoading}
             headingRef={chatHeadingRef}
-            onProviderModel={onProviderModel}
+            onProviderModel={(provider, model) => {
+              onSessionProviderModel(
+                focusedParentRunId,
+                focusedWorkspacePath ?? activeWorkspace,
+                provider,
+                model
+              )
+              onProviderModel(provider, model)
+            }}
             favoriteModels={settings.favoriteModels}
             recentModels={settings.recentModels}
             serviceTier={resolveServiceTier(
               settings,
-              effectiveChatSettings.provider,
-              effectiveChatSettings.model
+              focusedChatSettings.provider,
+              focusedChatSettings.model
             )}
             onToggleFavorite={onToggleFavorite}
             onServiceTierChange={onServiceTierChange}
-            chatSettings={effectiveChatSettings}
+            chatSettings={focusedChatSettings}
             onChatSettingsChange={onChatSettingsChange}
             agentMode={agentSessionContext?.ui.agentMode ?? 'agent'}
             onAgentModeChange={(mode) =>

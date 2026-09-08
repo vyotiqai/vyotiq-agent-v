@@ -182,4 +182,78 @@ describe('switch_mode', () => {
       rmSync(workspace, { recursive: true, force: true })
     }
   })
+
+  it('create_plan switches the run to plan mode and publishes when autoModeSwitch is on', async () => {
+    const plan = [
+      '## Goal',
+      '',
+      'Prove the create_plan mode contract end to end through executeTool.',
+      '',
+      '## Steps',
+      '',
+      '1. Call `create_plan` in Agent mode and verify the run switches to Plan mode.',
+      '',
+      '## Done when',
+      '',
+      '- [ ] The targeted vitest run is green.'
+    ].join('\n')
+    const argsJson = JSON.stringify({ title: 'Ship the planner', plan })
+    const workspace = mkdtempSync(join(tmpdir(), 'vyotiq-create-plan-gate-'))
+    const runDir = join(workspace, 'run')
+    mkdirSync(runDir)
+    try {
+      let mode: 'ask' | 'plan' | 'agent' = 'agent'
+      const events: { type: string; mode?: string }[] = []
+      const result = await executeTool('create_plan', argsJson, workspace, new AbortController().signal, {
+        runId: 'gate-run-agent',
+        runDir,
+        invokeId: 7,
+        getAgentMode: () => mode,
+        setAgentMode: (next) => {
+          mode = next
+        },
+        emitAgentEvent: (ev) => events.push(ev),
+        autoModeSwitch: true
+      })
+      expect(result.ok).toBe(true)
+      expect(mode).toBe('plan')
+      expect(events).toEqual([
+        { type: 'mode_changed', runId: 'gate-run-agent', mode: 'plan', invokeId: 7 }
+      ])
+      expect(result.content).toMatch(/Switched to Plan mode/)
+      expect(existsSync(join(runDir, 'plan.md'))).toBe(true)
+
+      // Already in plan mode: publishes without a redundant switch.
+      const planEvents: { type: string }[] = []
+      const again = await executeTool('create_plan', argsJson, workspace, new AbortController().signal, {
+        runId: 'gate-run-plan',
+        runDir,
+        getAgentMode: () => 'plan',
+        emitAgentEvent: (ev) => planEvents.push(ev),
+        autoModeSwitch: true
+      })
+      expect(again.ok).toBe(true)
+      expect(planEvents).toHaveLength(0)
+
+      // Auto off: publishes in agent mode without switching.
+      let autoOffMode: 'ask' | 'plan' | 'agent' = 'agent'
+      const autoOffEvents: { type: string }[] = []
+      const autoOff = await executeTool('create_plan', argsJson, workspace, new AbortController().signal, {
+        runId: 'gate-run-autooff',
+        runDir,
+        getAgentMode: () => autoOffMode,
+        setAgentMode: (next) => {
+          autoOffMode = next
+        },
+        emitAgentEvent: (ev) => autoOffEvents.push(ev),
+        autoModeSwitch: false
+      })
+      expect(autoOff.ok).toBe(true)
+      expect(autoOffMode).toBe('agent')
+      expect(autoOffEvents).toHaveLength(0)
+      expect(autoOff.content).not.toMatch(/Switched to Plan mode/)
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
 })

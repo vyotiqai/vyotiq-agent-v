@@ -11,7 +11,7 @@ import { disposeAllPtySessions, replayPtySessionsToWindow } from '@main/app/ptyS
 import { disposeAllTerminalSessions } from '@main/agent/tools/terminalSessions'
 import { registerIpc } from './ipc/register'
 import { resumeActiveGoalsAndLoops } from './agent/resumeActiveGoals'
-import { initAutoUpdater } from '@main/app/updater'
+import { initAutoUpdater, scheduleStartupUpdateCheck } from '@main/updater'
 import { initNotifications } from './notifications/service'
 import { shutdownMcpServers, syncMcpServers } from '@main/agent/mcp'
 import { resolveEffectiveMcpServers, syncMarketplaceMcpIntoSettings, purgeOrphanMarketplacePackageDirs } from '@main/marketplace'
@@ -205,7 +205,11 @@ if (!gotLock) {
     }
     initNotifications()
     registerIpc()
+    // Updater listeners + the deferred one-shot startup check (ready + idle
+    // delay, packaged builds only). Never blocks first paint. The Settings
+    // "Check for updates automatically" switch gates the startup check.
     initAutoUpdater()
+    scheduleStartupUpdateCheck({ autoCheckEnabled: getSettings().autoCheckUpdates !== false })
     startLoadPerfMonitor()
     try {
       const orphan = purgeOrphanMarketplacePackageDirs()

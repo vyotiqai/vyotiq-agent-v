@@ -22,6 +22,7 @@ const state = {
 
 /** Stable object identity across renders — effects key on settings fields. */
 const settingsStub = {
+  navigationMode: 'sidebar' as const,
   theme: 'system',
   fontScale: 1,
   uiDensity: 'comfortable',

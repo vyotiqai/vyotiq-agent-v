@@ -51,10 +51,9 @@ function isDirectChildDir(parent: string, child: string): boolean {
 
 /**
  * A run id is attacker-controllable over IPC and ends up in `rmSync`/`writeFileSync`,
- * so the resolved directory must stay a direct child of the sessions root.
+ * so the resolved directory must stay a direct child of the given sessions root.
  */
-export function resolveRunDir(workspacePath: string, runId: string): string {
-  const root = workspaceSessionsRoot(workspacePath)
+export function resolveRunDirInRoot(root: string, runId: string): string {
   const dir = resolve(root, runId)
   if (!isDirectChildDir(root, dir)) {
     throw new Error(`Invalid run id: ${runId}`)
@@ -74,6 +73,10 @@ export function resolveRunDir(workspacePath: string, runId: string): string {
     }
   }
   return dir
+}
+
+export function resolveRunDir(workspacePath: string, runId: string): string {
+  return resolveRunDirInRoot(workspaceSessionsRoot(workspacePath), runId)
 }
 
 /**

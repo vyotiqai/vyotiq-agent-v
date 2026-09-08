@@ -91,12 +91,14 @@ vi.mock('@main/agent/tools', () => ({
 
 import { runAgent } from '@main/agent/loop'
 import { resetActiveRunsForTests } from '@main/agent/runRegistry'
+import { clearRunModelSelectionForTests } from '@main/agent/runModelSelection'
 import { saveWorkspacesState, defaultWorkspacesState, resetWorkspacesForTests } from '@main/workspace/workspaces'
 
 describe('runAgent effective workspace settings', () => {
   let workspace: string
 
   beforeEach(() => {
+    clearRunModelSelectionForTests()
     workspace = join(tmpdir(), `vyotiq-eff-ws-${process.pid}-${Date.now()}`)
     mkdirSync(workspace, { recursive: true })
     resetActiveRunsForTests()
@@ -129,6 +131,7 @@ describe('runAgent effective workspace settings', () => {
   afterEach(() => {
     resetWorkspacesForTests()
     resetActiveRunsForTests()
+    clearRunModelSelectionForTests()
     if (existsSync(userData)) rmSync(userData, { recursive: true, force: true })
     if (existsSync(workspace)) rmSync(workspace, { recursive: true, force: true })
   })
@@ -154,6 +157,61 @@ describe('runAgent effective workspace settings', () => {
     const request = streamChat.mock.calls[0]?.[0] as { model?: string }
     expect(request.model).toBe('override-model')
     expect(events.some((e) => e.type === 'status' && e.status === 'done')).toBe(true)
+  })
+
+  it('uses the invoke session model over the workspace override', async () => {
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'text', text: 'hello' }
+      yield { type: 'done' }
+    })
+
+    for await (const _ev of runAgent({
+      runId: 'session-model-pin',
+      messages: [{ role: 'user', content: 'hi' }],
+      workspacePath: workspace,
+      provider: 'ollama',
+      model: 'session-model'
+    })) {
+      void _ev
+    }
+
+    expect(streamChat).toHaveBeenCalled()
+    const request = streamChat.mock.calls[0]?.[0] as { model?: string }
+    expect(request.model).toBe('session-model')
+  })
+
+  it('recalls the run model for main-originated follow-up invokes', async () => {
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'text', text: 'hello' }
+      yield { type: 'done' }
+    })
+
+    const runId = 'follow-up-model-pin'
+    // First invoke: the renderer passed this session's model selection.
+    for await (const _ev of runAgent({
+      runId,
+      messages: [{ role: 'user', content: 'hi' }],
+      workspacePath: workspace,
+      model: 'session-model'
+    })) {
+      void _ev
+    }
+
+    // Second invoke carries no renderer selection (follow-up promote / goal
+    // relaunch): the workspace override says 'override-model', but the run
+    // keeps its own model — another session's model change cannot bleed in.
+    for await (const _ev of runAgent({
+      runId,
+      newMessages: [{ role: 'user', content: 'continue' }],
+      workspacePath: workspace,
+      resume: true
+    })) {
+      void _ev
+    }
+
+    expect(streamChat.mock.calls.length).toBeGreaterThanOrEqual(2)
+    const secondCall = streamChat.mock.calls.at(-1)?.[0] as { model?: string }
+    expect(secondCall.model).toBe('session-model')
   })
 
   it('uses global persona and tone when no workspace override is active', async () => {

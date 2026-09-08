@@ -216,6 +216,9 @@ describe('modePolicy', () => {
     expect(modeSectionMarkdown('agent', opts)).toMatch(/Automatic mode switching is ON/)
     expect(modeSectionMarkdown('agent', opts)).toMatch(/switch_mode[\s\S]*`ask`/)
     expect(modeSectionMarkdown('agent', opts)).toMatch(/switch_mode[\s\S]*`plan`/)
+    expect(modeSectionMarkdown('agent', opts)).toMatch(
+      /calling `create_plan` switches the run to `plan` mode/
+    )
     expect(modeSectionMarkdown('ask', opts)).toMatch(/switch_mode[\s\S]*`plan`/)
     expect(modeSectionMarkdown('ask', opts)).toMatch(/switch_mode[\s\S]*`agent`/)
     expect(modeSectionMarkdown('plan', opts)).toMatch(/switch_mode[\s\S]*`agent`/)
@@ -252,6 +255,19 @@ describe('modePolicy', () => {
       expect(denied.error).toMatch(/Switch to Agent mode/)
       expect(denied.error).not.toMatch(/switch_mode/)
     }
+  })
+
+  it('create_plan is allowed in every mode; the handler performs the switch', () => {
+    const opts = { autoModeSwitch: true }
+    expect(assertToolAllowedInMode('agent', 'create_plan', { title: 'Ship it' }, opts).ok).toBe(true)
+    // Auto off: user controls modes manually — create_plan in agent stays allowed.
+    expect(assertToolAllowedInMode('agent', 'create_plan', { title: 'Ship it' }).ok).toBe(true)
+    expect(
+      assertToolAllowedInMode('agent', 'create_plan', { title: 'Ship it' }, {
+        autoModeSwitch: false
+      }).ok
+    ).toBe(true)
+    expect(assertToolAllowedInMode('plan', 'create_plan', { title: 'Ship it' }, opts).ok).toBe(true)
   })
 
   it('Ask forbids diagnostics and terminal; Plan allows diagnostics', () => {

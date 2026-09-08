@@ -7,6 +7,7 @@ import type {
   ToolApprovalRequest,
   ToolApprovalDecision,
   AgentQuestionRequest,
+  ProviderId,
   WorkspaceSettingsOverride,
   WorkspaceUiState,
   WorkspacesState
@@ -561,9 +562,15 @@ function findSettingsOverride(
 export function useWorkspaceManager(options?: {
   /** Inline instance panes currently mounted (any split pane, not only the focused one). */
   openInstanceRunIds?: readonly string[]
+  /** Effective provider/model for a workspace — the default until a session pins its own. */
+  getDefaultProviderModelForWorkspace?: (
+    workspacePath: string
+  ) => { provider: ProviderId; model: string } | null
 }) {
   const openInstanceRunIdsRef = useRef<readonly string[]>(options?.openInstanceRunIds ?? [])
   openInstanceRunIdsRef.current = options?.openInstanceRunIds ?? []
+  const getDefaultProviderModelRef = useRef(options?.getDefaultProviderModelForWorkspace)
+  getDefaultProviderModelRef.current = options?.getDefaultProviderModelForWorkspace
   const [registry, setRegistry] = useState<WorkspacesState | null>(null)
   const [contexts, setContexts] = useState<Record<string, WorkspaceContext>>({})
   const [activeRuns, setActiveRuns] = useState<{ runId: string; workspacePath: string }[]>([])
@@ -1066,6 +1073,8 @@ export function useWorkspaceManager(options?: {
         onRunIdAssigned,
         onTerminal,
         getAgentMode: () => contextsRef.current[workspacePath]?.ui.agentMode ?? 'agent',
+        getDefaultProviderModel: () =>
+          getDefaultProviderModelRef.current?.(workspacePath) ?? null,
         onAgentModeChange: (mode) => {
           const ctx = contextsRef.current[workspacePath]
           if (!ctx || ctx.ui.agentMode === mode) return
@@ -2512,6 +2521,7 @@ export function useWorkspaceManager(options?: {
         writeCheckpoint: activeController.writeCheckpoint,
         pendingFollowUps: activeController.pendingFollowUps,
         agentInstances: activeController.agentInstances,
+        providerModel: activeController.providerModel,
         subscribeItems: chatStoresFor(activeController).subscribeItems,
         getItemsRevision: chatStoresFor(activeController).getItemsRevision,
         getItems: chatStoresFor(activeController).getItems,
@@ -2546,6 +2556,7 @@ export function useWorkspaceManager(options?: {
         writeCheckpoint: null as ChatStreamController['writeCheckpoint'],
         pendingFollowUps: [] as ChatStreamController['pendingFollowUps'],
         agentInstances: {} as ChatStreamController['agentInstances'],
+        providerModel: null as ChatStreamController['providerModel'],
         subscribeItems: EMPTY_CHAT_STORE.subscribeItems,
         getItemsRevision: EMPTY_CHAT_STORE.getItemsRevision,
         getItems: EMPTY_CHAT_STORE.getItems,
@@ -2695,6 +2706,7 @@ export function useWorkspaceManager(options?: {
         writeCheckpoint: ctrl.writeCheckpoint,
         pendingFollowUps: ctrl.pendingFollowUps,
         agentInstances: ctrl.agentInstances,
+        providerModel: ctrl.providerModel,
         subscribeItems: chatStoresFor(ctrl).subscribeItems,
         getItemsRevision: chatStoresFor(ctrl).getItemsRevision,
         getItems: chatStoresFor(ctrl).getItems,

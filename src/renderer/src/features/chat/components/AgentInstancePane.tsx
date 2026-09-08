@@ -117,6 +117,9 @@ type AgentInstancePaneProps = {
   showThinking?: boolean
   onOpenWorkspaceFile?: (path: string, options?: WorkspaceFileOpenOptions) => void
   approvalAutoFocus?: boolean
+  /** Report the controller backing this pane (WM-shared or pane-owned) so parents
+   * (e.g. the dock Changes panel) can subscribe to the same run's items. */
+  onControllerChange?: (controller: ChatStreamController | null) => void
 }
 
 function goalFromMessages(messages: ChatMessage[]): string | undefined {
@@ -147,7 +150,8 @@ export function AgentInstancePane({
   onClose,
   showThinking = true,
   onOpenWorkspaceFile,
-  approvalAutoFocus = true
+  approvalAutoFocus = true,
+  onControllerChange
 }: AgentInstancePaneProps) {
   const shared = getController?.(instanceRunId, workspacePath) ?? null
   const controller = useMemo(
@@ -160,6 +164,13 @@ export function AgentInstancePane({
     [shared, instanceRunId, workspacePath]
   )
   const ownsIpc = shared == null
+
+  // Dock surfaces (Changes panel) subscribe to the same run via this — fires on
+  // mount and controller swap, reports null on unmount.
+  useEffect(() => {
+    onControllerChange?.(controller)
+    return () => onControllerChange?.(null)
+  }, [controller, onControllerChange])
 
   const { running, pendingRun, transcriptLoading } = useControllerRunningMeta(controller)
   const [goalFromDisk, setGoalFromDisk] = useState<string | undefined>(undefined)

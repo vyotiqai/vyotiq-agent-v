@@ -263,12 +263,12 @@ export function loopHintForConsecutiveToolFailures(
     )
   } else if (
     recent?.tool === 'ask_question' &&
-    /question or questions is required|questions must contain at least 1|questions\[.*\]\.type must be|questions\[.*\]\.prompt is required|must be a JSON array|must be one complete JSON object|Invalid arguments/i.test(
+    /question or questions is required|questions must contain at least 1|questions\[.*\]\.type must be|questions\[.*\]\.prompt is required|must be a JSON array|must be one complete JSON object|Invalid arguments|requires at least 2 options/i.test(
       recent.summary
     )
   ) {
     lines.push(
-      'ask_question requires questions: [{ id, prompt, type: "boolean"|"text"|"single"|"multi", options? }] or legacy { question: "…" }. Never call it with {}.'
+      'ask_question requires questions: [{ id, prompt, type: "boolean"|"text"|"single"|"multi", options? }] or legacy { question: "…" }. Never call it with {}. single/multi questions need at least 2 distinct non-blank options — resend with 2+ options or use type "boolean"/"text".'
     )
   } else if (/Duplicate JSON key/i.test(recent?.summary ?? '')) {
     lines.push(

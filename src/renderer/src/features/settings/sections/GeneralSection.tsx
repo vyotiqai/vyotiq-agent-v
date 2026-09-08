@@ -2,16 +2,19 @@ import { useEffect, useRef, useState } from 'react'
 import {
   DEFAULT_NOTIFICATION_SETTINGS,
   type DesktopNotificationMode,
+  type NavigationMode,
   type SecretProvider,
   type Settings
 } from '@shared/ipc'
 import { findByWorkspacePath, workspacePathsEqual } from '@shared/workspacePathMatch'
-import { Button, Input, Switch, Menu } from '@renderer/lib/ui'
+import { Button, Input, Switch, Menu, cn } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { SettingsViewProps } from '../types'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
 import { ActiveModelLink } from '../components/ActiveModelLink'
 import { WorkspaceOverrideCard } from '../components/WorkspaceOverrideCard'
+import { FeedbackDialog } from '@renderer/features/feedback'
+import { NAVIGATION_MODE_OPTIONS } from '../constants'
 
 export function GeneralSection({
   settings,
@@ -57,6 +60,7 @@ export function GeneralSection({
 
   const notifications = form.settings.notifications ?? DEFAULT_NOTIFICATION_SETTINGS
   const notificationsLocked = form.formLocked || !notifications.enabled
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const patchNotifications = (patch: Partial<typeof notifications>): void => {
     void form.runUpdate({ notifications: { ...notifications, ...patch } })
   }
@@ -95,6 +99,43 @@ export function GeneralSection({
               void form.runUpdate({ tabAutocomplete: checked })
             }}
           />
+        </SettingsField>
+      </SettingsGroup>
+
+      <SettingsGroup title="Navigation">
+        <SettingsField
+          id="navigation"
+          title="Navigation"
+          hint="Where sessions and workspaces live."
+          help="Home page keeps sessions and workspaces on Home, with a slim sidebar. Sidebar is the classic layout. The sidebar layout applies immediately; the startup view changes the next time the app starts."
+          wide
+        >
+          <div role="group" aria-label="Navigation" className="flex flex-wrap gap-2">
+            {NAVIGATION_MODE_OPTIONS.map((option) => {
+              const selected = form.settings.navigationMode === option.value
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  disabled={form.formLocked}
+                  aria-pressed={selected}
+                  onClick={() => {
+                    if (form.settings.navigationMode !== option.value) {
+                      void form.runUpdate({ navigationMode: option.value as NavigationMode })
+                    }
+                  }}
+                  className={cn(
+                    'rounded-md border px-3 py-2 text-sm vy-transition',
+                    selected
+                      ? 'border-fg bg-surface text-fg-strong ring-1 ring-inset ring-border-strong'
+                      : 'border-border text-fg hover:bg-surface/50'
+                  )}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
         </SettingsField>
       </SettingsGroup>
 
@@ -400,6 +441,21 @@ export function GeneralSection({
           />
         </SettingsField>
       </SettingsGroup>
+
+      <SettingsGroup title="Feedback">
+        <SettingsField
+          id="send-feedback"
+          title="Send feedback"
+          hint="Report a bug, request a feature, or share praise. Opens a pre-filled email to vyotiq@gmail.com."
+          help="Feedback goes straight to the team's inbox. Optional diagnostics add app version, OS, and locale only — never chat contents."
+        >
+          <Button variant="subtle" onClick={() => setFeedbackOpen(true)}>
+            Send feedback
+          </Button>
+        </SettingsField>
+      </SettingsGroup>
+
+      <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </SettingsStack>
   )
 }

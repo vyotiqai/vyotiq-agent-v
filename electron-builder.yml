@@ -28,6 +28,34 @@ files:
   - '!**/node_modules/**/{test,tests,__tests__,doc,docs,examples}/**'
   - '!**/node_modules/**/*.md'
   - '!**/node_modules/**/*.map'
+  # onnxruntime-web (~107 MB packed): never loaded at runtime. No src import
+  # (only comments in dictation/qwen3AsrOrt.ts:6 and qwen3AsrOrtLoader.ts:3);
+  # every @huggingface/transformers call site (dictation/local.ts:145,
+  # dictation/whisperUtility.ts:74, dictation/qwen3AsrOrtLoader.ts:79,
+  # codeindex/embedUtility.ts:227, codeindex/mdenseon.ts:200,
+  # codeindex/onnxGeneric.ts:84) runs in the Electron main process /
+  # utilityProcess, where transformers.js resolves its onnxruntime-node
+  # backend; qwen3AsrOrtLoader imports onnxruntime-node directly.
+  - '!**/node_modules/onnxruntime-web/**'
+  # gpt-tokenizer: src/ is TypeScript (cjs/esm are loaded at runtime), and only
+  # o200k_base + cl100k_base encodings are imported (agent/context/tokenizer.ts:2-3,
+  # tokenizer.worker.ts:6-7). Drop TS sources and every other encoding.
+  - '!**/node_modules/gpt-tokenizer/{src,tests}/**'
+  - '!**/node_modules/gpt-tokenizer/**/{r50k_base,p50k_base,p50k_edit,o200k_harmony}*'
+  # node-pty build-only sources (winpty/conpty sources; runtime loads
+  # prebuilds/* via lib/utils.js, prebuild.js short-circuits node-gyp).
+  - '!**/node_modules/node-pty/{third_party,deps,src}/**'
+  # node-llama-cpp: llama/ holds llama.cpp sources + cmake toolchains used only
+  # to compile from source (npmRebuild: false; runtime addon comes from
+  # @node-llama-cpp/<platform>/bins — main package bins is empty).
+  - '!**/node_modules/node-llama-cpp/llama/**'
+  # cmake-js: native build tool only (prebuilt binaries ship per platform).
+  - '!**/node_modules/cmake-js/**'
+  # @sentry/react is bundled into out/renderer by vite (externalizeDeps:false);
+  # main requires only @sentry/electron/main (logging/sentry.ts:2) — the
+  # node_modules copy is never require()d at runtime. @sentry/browser STAYS
+  # (hard dependency of @sentry/electron).
+  - '!**/node_modules/@sentry/react/**'
 extraResources:
   - from: resources/harness
     to: harness
@@ -61,6 +89,17 @@ win:
     - '!**/onnxruntime-node/bin/napi-v6/darwin/**'
     - '!**/onnxruntime-node/bin/napi-v6/linux/**'
     - '!**/onnxruntime-node/bin/napi-v6/win32/arm64/**'
+    # node-pty: keep win32-x64 prebuilds only (platform-wrong).
+    - '!**/node_modules/node-pty/prebuilds/{darwin,linux}*/**'
+    - '!**/node_modules/node-pty/prebuilds/win32-arm64/**'
+    # node-llama-cpp: other-OS platform binaries (platform-wrong).
+    - '!**/node_modules/@node-llama-cpp/{linux,mac}-*/**'
+    # GPU backend = Vulkan (94.7 MB). CUDA variants (cuda 162.8 MB +
+    # cuda-ext 346.1 MB) are excluded to keep the installer < 500 MB — see
+    # docs/installer-size-audit.md for the CUDA-kept alternative (~+490 MB raw).
+    - '!**/node_modules/@node-llama-cpp/win-x64-cuda/**'
+    - '!**/node_modules/@node-llama-cpp/win-x64-cuda-ext/**'
+    - '!**/node_modules/@node-llama-cpp/win-arm64/**'
   executableName: Vyotiq
 nsis:
   artifactName: ${productName}-${version}-setup.${ext}
@@ -89,6 +128,10 @@ mac:
   files:
     - '!**/onnxruntime-node/bin/napi-v6/linux/**'
     - '!**/onnxruntime-node/bin/napi-v6/win32/**'
+    # node-pty: keep darwin prebuilds only (platform-wrong).
+    - '!**/node_modules/node-pty/prebuilds/{win32,linux}*/**'
+    # node-llama-cpp: other-OS platform binaries (platform-wrong).
+    - '!**/node_modules/@node-llama-cpp/{win,linux}-*/**'
 dmg:
   # ${arch} keeps arm64/x64 DMGs from colliding: both are uploaded to the same
   # GitHub release by the single macOS job in release.yml, and latest-mac.yml
@@ -102,6 +145,17 @@ linux:
   files:
     - '!**/onnxruntime-node/bin/napi-v6/darwin/**'
     - '!**/onnxruntime-node/bin/napi-v6/win32/**'
+    # node-pty: keep linux prebuilds only (platform-wrong).
+    - '!**/node_modules/node-pty/prebuilds/{win32,darwin}*/**'
+    # node-llama-cpp: other-OS platform binaries (platform-wrong).
+    - '!**/node_modules/@node-llama-cpp/{win,mac}-*/**'
+    # GPU backend = Vulkan. CUDA variants (linux-x64-cuda + linux-x64-cuda-ext,
+    # ~163 + ~346 MB like their win counterparts) are excluded to keep the
+    # AppImage < 500 MB — see docs/installer-size-audit.md for the CUDA-kept
+    # alternative table.
+    - '!**/node_modules/@node-llama-cpp/linux-x64-cuda/**'
+    - '!**/node_modules/@node-llama-cpp/linux-x64-cuda-ext/**'
+    - '!**/node_modules/@node-llama-cpp/linux-{arm64,armv7l,riscv64}/**'
 appImage:
   artifactName: ${productName}-${version}.${ext}
 npmRebuild: false

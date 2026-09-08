@@ -1,10 +1,11 @@
 ---
 import BrandLockup from './BrandLockup.astro'
 import LandingIcon from './LandingIcon.astro'
-import { SITE_PRODUCT } from '../lib/site'
+import { feedbackMailto, SITE_PRODUCT } from '../lib/site'
 
 const onDocs = Astro.url.pathname === '/docs' || Astro.url.pathname.startsWith('/docs/')
 const onDocsIndex = Astro.url.pathname === '/docs' || Astro.url.pathname === '/docs/'
+const feedbackHref = feedbackMailto()
 ---
 
 <header class="sticky top-0 z-40 border-b border-border/80 bg-bg/90 backdrop-blur-md">
@@ -29,6 +30,12 @@ const onDocsIndex = Astro.url.pathname === '/docs' || Astro.url.pathname === '/d
         aria-current={onDocsIndex ? 'page' : onDocs ? 'true' : undefined}
       >
         Docs
+      </a>
+      <a
+        class="inline-flex min-h-11 items-center px-3 text-muted hover:text-fg"
+        href={feedbackHref}
+      >
+        Feedback
       </a>
       <button
         type="button"

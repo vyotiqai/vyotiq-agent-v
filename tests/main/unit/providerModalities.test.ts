@@ -85,6 +85,35 @@ describe('wire-supported modalities', () => {
     expect(byId.get('@cf/zai-org/glm-5.2')?.inputModalities).toEqual(['text'])
     expect(byId.get('glm-4.5v')?.supportsVision).toBe(true)
   })
+
+  it('infers vision for extended families and keeps text-only variants false', () => {
+    const models = normalizeOpenAiStyleModels(
+      {
+        data: [
+          { id: 'gpt-4.1-mini' },
+          { id: 'o1' },
+          { id: 'o1-mini' },
+          { id: 'qwen2.5-vl-72b' },
+          { id: 'gemma3:4b' },
+          { id: 'gemma3:1b' },
+          { id: 'minicpm-v' },
+          { id: 'llama-4-scout-17b-16e-instruct' },
+          { id: 'deepseek-chat' }
+        ]
+      },
+      { providerId: 'custom' }
+    )
+    const byId = new Map(models.map((m) => [m.id, m]))
+    expect(byId.get('gpt-4.1-mini')?.supportsVision).toBe(true)
+    expect(byId.get('o1')?.supportsVision).toBe(true)
+    expect(byId.get('o1-mini')?.supportsVision).toBe(false)
+    expect(byId.get('qwen2.5-vl-72b')?.supportsVision).toBe(true)
+    expect(byId.get('gemma3:4b')?.supportsVision).toBe(true)
+    expect(byId.get('gemma3:1b')?.supportsVision).toBe(false)
+    expect(byId.get('minicpm-v')?.supportsVision).toBe(true)
+    expect(byId.get('llama-4-scout-17b-16e-instruct')?.supportsVision).toBe(true)
+    expect(byId.get('deepseek-chat')?.supportsVision).toBe(false)
+  })
 })
 
 describe('native multimodal wire shapes', () => {

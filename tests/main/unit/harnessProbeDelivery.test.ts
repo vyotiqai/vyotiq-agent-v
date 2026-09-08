@@ -21,12 +21,12 @@ describe('canonical harness delivers tool-selection guidance', () => {
       'Choose tools deliberately instead of defaulting to the first familiar one'
     )
     expect(loaded).toContain('create_goal before update_goal')
-    expect(loaded).toContain('Budget blocking tools')
+    expect(loaded).toContain('Budget-blocking tools')
     const toolPolicy = splitHarnessSections(loaded).find((c) => c.name === 'tool_policy')
     expect(toolPolicy).toBeTruthy()
     expect(toolPolicy!.text).toContain('Choose tools deliberately')
     expect(toolPolicy!.text).toContain('Respect tool prerequisites')
-    expect(toolPolicy!.text).toContain('Budget blocking tools')
+    expect(toolPolicy!.text).toContain('Budget-blocking tools')
   })
 
   it('tool_policy directs multi-file batches to per-file edit/str_replace calls', () => {

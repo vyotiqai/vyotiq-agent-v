@@ -24,6 +24,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'general'
   },
   {
+    id: 'navigation',
+    title: 'Navigation',
+    keywords: ['navigation', 'home', 'sidebar', 'layout', 'sessions', 'startup', 'launch', 'default view'],
+    section: 'general'
+  },
+  {
     id: 'workspaces',
     title: 'Workspaces',
     keywords: ['override', 'workspace', 'folder', 'tabs'],
@@ -386,6 +392,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     title: 'Automatic mode switching',
     keywords: ['mode', 'ask', 'plan', 'agent', 'switch'],
     section: 'tools'
+  },
+  {
+    id: 'send-feedback',
+    title: 'Send feedback',
+    keywords: ['feedback', 'bug', 'feature request', 'praise', 'email', 'contact'],
+    section: 'general'
   },
   {
     id: 'telemetry',

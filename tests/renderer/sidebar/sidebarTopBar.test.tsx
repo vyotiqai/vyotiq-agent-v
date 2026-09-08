@@ -62,7 +62,7 @@ describe('SidebarTopBar layout', () => {
 
         onSessionQuery={vi.fn()}
 
-        onNewChat={vi.fn()}
+        onOpenHome={vi.fn()}
 
       />
 
@@ -117,7 +117,7 @@ describe('SidebarTopBar layout', () => {
 
         onSessionQuery={vi.fn()}
 
-        onNewChat={vi.fn()}
+        onOpenHome={vi.fn()}
 
       />
 
@@ -135,7 +135,7 @@ describe('SidebarTopBar layout', () => {
 
 
 
-  it('places new chat in the toolbar row and uses a flat search field', () => {
+  it('places home in the toolbar row and uses a flat search field', () => {
 
     const { container } = render(
 
@@ -155,7 +155,7 @@ describe('SidebarTopBar layout', () => {
 
         onSessionQuery={vi.fn()}
 
-        onNewChat={vi.fn()}
+        onOpenHome={vi.fn()}
 
       />
 
@@ -163,7 +163,7 @@ describe('SidebarTopBar layout', () => {
 
 
 
-    expect(screen.getByRole('button', { name: /new chat/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /home/i })).toBeTruthy()
 
 
 

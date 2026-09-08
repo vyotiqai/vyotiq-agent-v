@@ -26,6 +26,7 @@ import {
   baseModelInfo,
   contextWindowFromOllamaShow,
   extractContextWindowFromCatalogRow,
+  idSuggestsVision,
   looksLikeChatModel,
   normalizeOpenAiStyleModels,
   ollamaCapabilityNames,
@@ -904,7 +905,7 @@ function modelInfoFromOllamaTagRow(
     name,
     {
       supportsTools: true,
-      supportsVision: Boolean(capNames?.includes('vision')) || /llava|vision/i.test(name),
+      supportsVision: Boolean(capNames?.includes('vision')) || idSuggestsVision(name),
       contextWindow,
       ...thinkingPartial
     },
@@ -1049,7 +1050,7 @@ export async function enrichOllamaModelsWithSelectedShow(
         supportsVision:
           existing?.supportsVision ||
           Boolean(capNames?.includes('vision')) ||
-          /llava|vision/i.test(catalogId),
+          idSuggestsVision(catalogId),
         supportedServiceTiers: existing?.supportedServiceTiers,
         ...thinkingPartial,
         supportsThinking

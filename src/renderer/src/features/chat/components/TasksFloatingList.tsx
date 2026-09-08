@@ -135,6 +135,8 @@ export function TasksRailButton({
     if (!open) return
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
+      if (e.defaultPrevented) return
+      e.preventDefault()
       closeNow()
     }
     const onDocMouseDown = (e: MouseEvent): void => {

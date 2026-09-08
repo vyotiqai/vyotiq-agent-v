@@ -51,4 +51,23 @@ describe('mergeLiveInstanceRuns', () => {
       })
     ])
   })
+
+  it('keeps a terminal disk status when the live phase is stale started', () => {
+    const listed: RunSummary[] = [
+      {
+        runId: 'child-3',
+        status: 'cancelled',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        goal: 'Stale goal',
+        parentRunId,
+        inlineInstance: true
+      }
+    ]
+    const live: Record<string, AgentInstanceUiState> = {
+      'child-3': { instanceRunId: 'child-3', phase: 'started', goal: 'Partition C' }
+    }
+    const merged = mergeLiveInstanceRuns(listed, live, parentRunId)
+    expect(merged[0]?.status).toBe('cancelled')
+    expect(merged[0]?.goal).toBe('Partition C')
+  })
 })

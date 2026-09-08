@@ -28,6 +28,7 @@ export const SHORTCUT_TITLES: Record<ShortcutId, string> = {
   sidebar: 'Toggle sidebar',
   search: 'Search chats',
   newChat: 'New chat',
+  goHome: 'Go to Home',
   settings: 'Open settings',
   focusComposer: 'Focus composer',
   stop: 'Stop run',

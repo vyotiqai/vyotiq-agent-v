@@ -72,8 +72,11 @@ import { startAgentRunInBackground } from '@main/agent/startAgentRun'
 import { resolveRunDir } from '@main/storage/paths'
 import { RUN_RECEIPT_VERSION } from '@shared/ipc'
 import {
+  CANCEL_FORCE_FINISH_MS,
   chatCancelResult,
   clearRunAbort,
+  cancelRun,
+  forceFinishCancelledRun,
   getActiveInlineChildRunIds,
   getRunAbort,
   isActive,
@@ -666,6 +669,47 @@ describe('agentInstances', () => {
     registerChildInstance(parentRunId, 'ghost', workspacePath)
     unregisterChildInstance('ghost')
     unregisterChildInstance('ghost')
+  })
+
+  it('force-finishes a cancelled run whose loop never unwound', async () => {
+    const zombieId = `zombie-${Date.now()}`
+    createRun(workspacePath, zombieId, 'zombie goal', {
+      mode: 'agent',
+      parentRunId,
+      inlineInstance: true
+    })
+    const reg = tryRegisterRunAbort(zombieId, workspacePath)
+    expect(reg.ok).toBe(true)
+    expect(await forceFinishCancelledRun(zombieId)).toBe(true)
+    expect(loadStatus(resolveRunDir(workspacePath, zombieId))?.status).toBe('cancelled')
+    // Already terminal — a second force-finish (or a late normal unwind) is a no-op.
+    expect(await forceFinishCancelledRun(zombieId)).toBe(false)
+    clearRunAbort(zombieId)
+  })
+
+  it('arms a bounded force-finish after cancelRun', async () => {
+    vi.useFakeTimers()
+    try {
+      const zombieId = `timer-zombie-${Date.now()}`
+      createRun(workspacePath, zombieId, 'timer goal', {
+        mode: 'agent',
+        parentRunId,
+        inlineInstance: true
+      })
+      const reg = tryRegisterRunAbort(zombieId, workspacePath)
+      expect(reg.ok).toBe(true)
+      expect(cancelRun(zombieId)).toBe(true)
+      await vi.advanceTimersByTimeAsync(CANCEL_FORCE_FINISH_MS - 1_000)
+      expect(loadStatus(resolveRunDir(workspacePath, zombieId))?.status).toBe('running')
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(loadStatus(resolveRunDir(workspacePath, zombieId))?.status).toBe('cancelled')
+      // Terminal run cleared from the registry — the timer must not fire again.
+      clearRunAbort(zombieId)
+      await vi.advanceTimersByTimeAsync(CANCEL_FORCE_FINISH_MS)
+      expect(loadStatus(resolveRunDir(workspacePath, zombieId))?.status).toBe('cancelled')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('summarizeChildRun returns the full last assistant text', async () => {

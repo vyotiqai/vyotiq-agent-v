@@ -228,7 +228,10 @@ beforeEach(() => {
 
   // @ts-expect-error test bridge
   window.vyotiq = {
-    getSettings: vi.fn(async () => ({ ok: true as const, data: { ...DEFAULT_SETTINGS } })),
+    getSettings: vi.fn(async () => ({
+      ok: true as const,
+      data: { ...DEFAULT_SETTINGS, navigationMode: 'sidebar' as const }
+    })),
     secretStatus: vi.fn(async () => ({
       ok: true as const,
       data: { keys: emptySecretStatus(), encryptionAvailable: true }

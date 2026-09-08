@@ -15,7 +15,7 @@ export const AGENT_QUESTION_MAX_ANSWER_VALUES = 16
 
 /** Model-facing example embedded in validation errors. */
 export const ASK_QUESTION_ARGS_HINT =
-  'Pass questions: [{ id, prompt, type: "boolean"|"text"|"single"|"multi", options? }] or legacy { question: "…" } (top-level prompt is an alias for question).'
+  'Pass questions: [{ id, prompt, type: "boolean"|"text"|"single"|"multi", options? }] (type defaults to "single" when 2+ options are given, else "text") or legacy { question: "…" }.'
 
 /** Tool result when the user skips, dismisses, or the wait times out. */
 export const ASK_QUESTION_NO_ANSWER_GUIDANCE =
@@ -77,11 +77,6 @@ function questionPromptFromRecord(rec: Record<string, unknown>): string {
 function validateItem(item: AgentQuestionItem, index: number): string | null {
   if (!item.id.trim()) return `questions[${index}].id is required`
   if (!item.prompt.trim()) return `questions[${index}].prompt is required`
-  if (item.type === 'single' || item.type === 'multi') {
-    if (!item.options || item.options.length < 2) {
-      return `questions[${index}] (${item.type}) requires at least 2 options (duplicate or blank options are removed first)`
-    }
-  }
   return null
 }
 
@@ -102,12 +97,26 @@ function parseTypedItem(raw: unknown, index: number): AgentQuestionItem | { erro
   }
   const id = typeof rec.id === 'string' ? rec.id.trim() : ''
   const prompt = questionPromptFromRecord(rec)
-  if (!isQuestionType(rec.type)) {
-    return { error: `questions[${index}].type must be single, multi, boolean, or text` }
-  }
-  const type = rec.type
   const options = uniqueTrimmedStrings(rec.options)
   const allowCustom = rec.allowCustom === true
+  // Models routinely omit `type` on items that carry options (live failures:
+  // 3d334c22/870cde12/829b9ada all sent id+prompt+options without type).
+  // Infer it the same way the legacy {question, options, allowMultiple} form
+  // does instead of failing the whole form: options ⇒ single, else text.
+  let requestedType: AgentQuestionType
+  if (isQuestionType(rec.type)) {
+    requestedType = rec.type
+  } else if (rec.type == null) {
+    requestedType = options.length >= 2 ? 'single' : 'text'
+  } else {
+    return { error: `questions[${index}].type must be single, multi, boolean, or text` }
+  }
+  // Fewer than 2 distinct non-blank options cannot render a choice — degrade
+  // to freeform text instead of failing the whole form.
+  const type: AgentQuestionType =
+    (requestedType === 'single' || requestedType === 'multi') && options.length < 2
+      ? 'text'
+      : requestedType
 
   const item: AgentQuestionItem = {
     id: id || `q${index + 1}`,
@@ -187,17 +196,15 @@ export function normalizeAskQuestionArgs(
   // Legacy: custom text on by default when options are present.
   const allowCustom = args.allowCustom !== false
 
+  // Fewer than 2 distinct non-blank options cannot render a choice — degrade
+  // to freeform text instead of failing the whole form.
   let type: AgentQuestionType
-  if (options.length === 0) {
+  if (options.length < 2) {
     type = 'text'
   } else if (allowMultiple) {
     type = 'multi'
   } else {
     type = 'single'
-  }
-
-  if ((type === 'single' || type === 'multi') && options.length < 2) {
-    return { ok: false, error: `${type} requires at least 2 options` }
   }
 
   const item: AgentQuestionItem = {

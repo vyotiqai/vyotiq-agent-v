@@ -670,6 +670,7 @@ export function useComposerDictation(opts: {
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
       if (e.altKey || e.ctrlKey || e.metaKey) return
+      if (e.defaultPrevented) return
       if (phaseRef.current === 'idle') return
       if (document.querySelector('[role="listbox"][aria-label="Slash commands"]')) return
       if (document.querySelector('[role="listbox"][aria-label="Mentions"]')) return

@@ -24,6 +24,7 @@ import type {
   ResolveWritesResult,
   ReadRunArtifactResult,
   RunArtifactName,
+  RunStatsResult,
   HarnessReviewResult,
   HarnessPreviewApplyResult,
   HarnessApplyResult,
@@ -54,7 +55,10 @@ import type {
   DictationLocalModelId,
   TelemetryStatus,
   AppInfo,
-  UpdaterStatus,
+  UpdateInfo,
+  UpdaterStatePayload,
+  FeedbackComposeRequest,
+  FeedbackComposeResult,
   WorkspaceAgentContextRequest,
   WorkspaceAgentContextResult,
   WorkspaceGrepRequest,
@@ -141,6 +145,23 @@ import type {
 export type HostPlatform = 'darwin' | 'win32' | 'linux' | string
 
 /**
+ * Renderer-facing updater namespace: `window.vyotiq.updater`.
+ * State transitions arrive on the `updater:state` push channel.
+ */
+export interface VyotiqUpdaterApi {
+  /** Current UpdateInfo when a check already found one; otherwise runs a check. */
+  check: () => Promise<IpcResult<UpdateInfo | null>>
+  download: () => Promise<IpcResult<undefined>>
+  install: () => Promise<IpcResult<undefined>>
+  onState: (handler: (payload: UpdaterStatePayload) => void) => () => void
+}
+
+/** Renderer-facing feedback namespace: `window.vyotiq.feedback`. */
+export interface VyotiqFeedbackApi {
+  compose: (payload: FeedbackComposeRequest) => Promise<IpcResult<FeedbackComposeResult>>
+}
+
+/**
  * Single source of truth for the contextBridge API.
  * Preload implements this; renderer `env.d.ts` types `window.vyotiq` from it.
  */
@@ -215,6 +236,10 @@ export interface VyotiqApi {
     runId: string
     name: RunArtifactName
   }) => Promise<IpcResult<ReadRunArtifactResult>>
+  runStats: (payload: {
+    workspacePath: string
+    runIds: string[]
+  }) => Promise<IpcResult<RunStatsResult>>
   harnessReview: (payload: {
     workspacePath: string
     limit?: number
@@ -431,10 +456,8 @@ export interface VyotiqApi {
   getTraceStatus: () => Promise<IpcResult<TraceStatusResult>>
   stopTrace: () => Promise<IpcResult<TraceStopResult>>
   getAppInfo: () => Promise<IpcResult<AppInfo>>
-  getUpdaterStatus: () => Promise<IpcResult<UpdaterStatus>>
-  checkForAppUpdates: () => Promise<IpcResult<UpdaterStatus>>
-  downloadAppUpdate: () => Promise<IpcResult<UpdaterStatus>>
-  installAppUpdate: () => Promise<IpcResult<UpdaterStatus>>
+  updater: VyotiqUpdaterApi
+  feedback: VyotiqFeedbackApi
   workspaceGrep: (payload: WorkspaceGrepRequest) => Promise<IpcResult<WorkspaceGrepResult>>
   gitConflictFile: (payload: {
     workspacePath: string
@@ -459,7 +482,6 @@ export interface VyotiqApi {
     title: string
     body?: string
   }) => Promise<IpcResult<GithubIssueCreateResult>>
-  onUpdaterStatus: (handler: (status: UpdaterStatus) => void) => () => void
   mcpStatus: (payload?: { workspacePath?: string | null }) => Promise<IpcResult<McpStatusResult>>
   mcpRefresh: (payload?: { workspacePath?: string | null }) => Promise<IpcResult<McpStatusResult>>
   mcpSetAuthToken: (serverId: string, token: string) => Promise<IpcResult<true>>

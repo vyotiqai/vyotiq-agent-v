@@ -165,6 +165,43 @@ describe('ollama cloud catalog auth', () => {
     expect(m?.supportedThinkingEfforts).toEqual(['low', 'medium', 'high', 'max'])
   })
 
+  it('infers vision from tag names via the shared id heuristic', async () => {
+    setDnsLookupForTests(async () => [{ address: PUBLIC_IP, family: 4 }])
+    setPublicFetchForTests(async (url) => {
+      if (url.pathname.endsWith('/v1/models')) {
+        return new Response(
+          JSON.stringify({
+            data: [{ id: 'qwen2.5-vl:7b' }, { id: 'gemma3:4b' }, { id: 'gemma3:1b' }]
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+      if (url.pathname.endsWith('/api/tags')) {
+        return new Response(
+          JSON.stringify({
+            models: [
+              { name: 'qwen2.5-vl:7b', capabilities: ['completion'] },
+              { name: 'gemma3:4b', capabilities: ['completion'] },
+              { name: 'gemma3:1b', capabilities: ['completion'] }
+            ]
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+      return new Response('not found', { status: 404 })
+    })
+
+    const models = await ollamaProvider.listModels({
+      baseUrl: 'https://ollama.com',
+      apiKey: 'test-ollama-key',
+      signal: AbortSignal.timeout(2000)
+    })
+    const byId = new Map(models.map((m) => [m.id, m]))
+    expect(byId.get('qwen2.5-vl:7b')?.supportsVision).toBe(true)
+    expect(byId.get('gemma3:4b')?.supportsVision).toBe(true)
+    expect(byId.get('gemma3:1b')?.supportsVision).toBe(false)
+  })
+
   it('enriches selected model thinking from /api/show', async () => {
     setDnsLookupForTests(async () => [{ address: PUBLIC_IP, family: 4 }])
     const seen: Array<{ url: string; auth?: string; method?: string }> = []

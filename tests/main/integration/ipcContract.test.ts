@@ -26,7 +26,8 @@ const VYOTIQ_INVOKE_MAP: Record<
     | 'onNotificationsChanged'
     | 'onNotificationActivate'
     | 'onAppearanceCustomCssChanged'
-    | 'onUpdaterStatus'
+    | 'updater'
+    | 'feedback'
     | 'onAccessibilitySupportChanged'
     | 'updateWorkspaceUiStateSync'
     | 'respondWorkspaceEditorFlush'
@@ -65,6 +66,7 @@ const VYOTIQ_INVOKE_MAP: Record<
   chatRewindPreview: IPC.chatRewindPreview,
   resolveWrites: IPC.runsResolveWrites,
   readRunArtifact: IPC.runsReadArtifact,
+  runStats: IPC.runStats,
   setGoalStatus: IPC.runsSetGoalStatus,
   setLoop: IPC.runsSetLoop,
   harnessReview: IPC.harnessReview,
@@ -172,10 +174,6 @@ const VYOTIQ_INVOKE_MAP: Record<
   getTraceStatus: IPC.traceStatus,
   stopTrace: IPC.traceStop,
   getAppInfo: IPC.appInfo,
-  getUpdaterStatus: IPC.updaterStatus,
-  checkForAppUpdates: IPC.updaterCheck,
-  downloadAppUpdate: IPC.updaterDownload,
-  installAppUpdate: IPC.updaterInstall,
   workspaceGrep: IPC.workspaceGrep,
   gitConflictFile: IPC.gitConflictFile,
   gitResolveConflict: IPC.gitResolveConflict,
@@ -248,7 +246,7 @@ const PUSH_CHANNELS = new Set<string>([
   IPC.notificationsChanged,
   IPC.notificationsActivate,
   IPC.appearanceCustomCssChanged,
-  IPC.updaterStatusEvent,
+  IPC.updaterState,
   IPC.accessibilitySupportChanged
 ])
 
@@ -273,7 +271,6 @@ const VYOTIQ_PUSH_MAP: Record<
   | 'onNotificationsChanged'
   | 'onNotificationActivate'
   | 'onAppearanceCustomCssChanged'
-  | 'onUpdaterStatus'
   | 'onAccessibilitySupportChanged',
   string
 > = {
@@ -293,9 +290,23 @@ const VYOTIQ_PUSH_MAP: Record<
   onNotificationsChanged: IPC.notificationsChanged,
   onNotificationActivate: IPC.notificationsActivate,
   onAppearanceCustomCssChanged: IPC.appearanceCustomCssChanged,
-  onUpdaterStatus: IPC.updaterStatusEvent,
   onAccessibilitySupportChanged: IPC.accessibilitySupportChanged
 }
+
+/** Namespaced VyotiqApi surfaces (window.vyotiq.updater / .feedback). */
+const VYOTIQ_NAMESPACE_INVOKE_MAP: Record<string, string> = {
+  'updater.check': IPC.updaterCheck,
+  'updater.download': IPC.updaterDownload,
+  'updater.install': IPC.updaterInstall,
+  'feedback.compose': IPC.feedbackCompose
+}
+
+const VYOTIQ_NAMESPACE_PUSH_MAP: Record<string, string> = {
+  'updater.onState': IPC.updaterState
+}
+
+/** Preload source shows only the leaf names inside the namespace object. */
+const namespaceMethod = (key: string): string => key.split('.')[1] ?? key
 
 describe('main/renderer IPC contract', () => {
   it('maps every VyotiqApi invoke to a shared IPC channel', () => {
@@ -304,22 +315,27 @@ describe('main/renderer IPC contract', () => {
       expect(channels.has(channel)).toBe(true)
       expect(PUSH_CHANNELS.has(channel)).toBe(false)
     }
-    expect(Object.keys(VYOTIQ_INVOKE_MAP)).toHaveLength(190)
+    expect(Object.keys(VYOTIQ_INVOKE_MAP)).toHaveLength(187)
   })
 
   it('maps every VyotiqApi push listener to a push channel', () => {
     const channels = new Set(Object.values(IPC))
-    for (const channel of Object.values(VYOTIQ_PUSH_MAP)) {
+    for (const channel of [
+      ...Object.values(VYOTIQ_PUSH_MAP),
+      ...Object.values(VYOTIQ_NAMESPACE_PUSH_MAP)
+    ]) {
       expect(channels.has(channel)).toBe(true)
       expect(PUSH_CHANNELS.has(channel)).toBe(true)
     }
-    expect(Object.keys(VYOTIQ_PUSH_MAP)).toHaveLength(18)
+    expect(Object.keys(VYOTIQ_PUSH_MAP)).toHaveLength(17)
   })
 
   it('accounts for every IPC channel as invoke or push', () => {
     const accounted = new Set([
       ...Object.values(VYOTIQ_INVOKE_MAP),
+      ...Object.values(VYOTIQ_NAMESPACE_INVOKE_MAP),
       ...Object.values(VYOTIQ_PUSH_MAP),
+      ...Object.values(VYOTIQ_NAMESPACE_PUSH_MAP),
       ...Object.values(VYOTIQ_SYNC_SEND_MAP),
       ...PRELOAD_INTERNAL_INVOKE_CHANNELS,
       ...EVENT_CHANNELS
@@ -334,7 +350,10 @@ describe('main/renderer IPC contract', () => {
       join(process.cwd(), 'src/main/ipc/register.ts'),
       'utf8'
     )
-    for (const channel of Object.values(VYOTIQ_INVOKE_MAP)) {
+    for (const channel of [
+      ...Object.values(VYOTIQ_INVOKE_MAP),
+      ...Object.values(VYOTIQ_NAMESPACE_INVOKE_MAP)
+    ]) {
       const key = channelKey(channel)
       expect(registerSrc).toMatch(new RegExp(`ipcMain\\.handle\\(\\s*IPC\\.${key}`))
     }
@@ -342,16 +361,22 @@ describe('main/renderer IPC contract', () => {
 
   it('preload wires invoke channels to ipcRenderer.invoke', () => {
     const preloadSrc = readFileSync(join(process.cwd(), 'src/preload/index.ts'), 'utf8')
-    for (const [method, channel] of Object.entries(VYOTIQ_INVOKE_MAP)) {
-      expect(preloadSrc).toContain(`${method}:`)
+    for (const [method, channel] of [
+      ...Object.entries(VYOTIQ_INVOKE_MAP),
+      ...Object.entries(VYOTIQ_NAMESPACE_INVOKE_MAP)
+    ]) {
+      expect(preloadSrc).toContain(`${namespaceMethod(method)}:`)
       expect(preloadSrc).toContain(`ipcRenderer.invoke(IPC.${channelKey(channel)}`)
     }
   })
 
   it('preload wires push channels to ipcRenderer.on', () => {
     const preloadSrc = readFileSync(join(process.cwd(), 'src/preload/index.ts'), 'utf8')
-    for (const [method, channel] of Object.entries(VYOTIQ_PUSH_MAP)) {
-      expect(preloadSrc).toContain(`${method}:`)
+    for (const [method, channel] of [
+      ...Object.entries(VYOTIQ_PUSH_MAP),
+      ...Object.entries(VYOTIQ_NAMESPACE_PUSH_MAP)
+    ]) {
+      expect(preloadSrc).toContain(`${namespaceMethod(method)}:`)
       expect(preloadSrc).toContain(`ipcRenderer.on(IPC.${channelKey(channel)}`)
     }
   })

@@ -37,6 +37,7 @@ import { isNetworkFailureCode, iterateNetworkWait, resolveOfflineWaitMs } from '
 import { isStreamIdleTimeoutError } from './providers/sse'
 import { resolveEffectiveSettings } from '../../shared/effectiveSettings'
 import { resolveServiceTier } from '../../shared/domain/modelSelection'
+import { recallRunModelSelection, rememberRunModelSelection } from './runModelSelection'
 import { stripToolShapedAssistantText } from '../../shared/transcript'
 import { createApprovalGate } from './toolApproval'
 import { persistAlwaysAllow } from './toolApprovalStore'
@@ -910,12 +911,27 @@ export async function* runAgent(input: {
   /** Ask / Plan / Agent — defaults to agent when omitted. */
   mode?: AgentInteractionMode
   focusedFile?: string | null
+  /** Session-pinned provider — authoritative for this invoke. */
+  provider?: ProviderId
+  /** Session-pinned model — authoritative for this invoke. */
+  model?: string
 }): AsyncGenerator<AgentEvent> {
   const globalSettings = getSettings()
   const workspaces = readWorkspacesState()
   const override = findWorkspaceSettingsOverride(workspaces, input.workspacePath)
   const effective = resolveEffectiveSettings(globalSettings, override)
-  const settings = { ...DEFAULT_SETTINGS, ...globalSettings, ...effective }
+  // Per-session model pinning: renderer turns pass their session's selection;
+  // main-originated invokes (follow-up promote, goal relaunch) recall the run's
+  // last selection so a model change in another session cannot bleed in here.
+  const recalled = recallRunModelSelection(input.runId)
+  const settings = {
+    ...DEFAULT_SETTINGS,
+    ...globalSettings,
+    ...effective,
+    provider: input.provider ?? recalled?.provider ?? effective.provider,
+    model: input.model ?? recalled?.model ?? effective.model
+  }
+  rememberRunModelSelection(input.runId, settings.provider, settings.model)
   let agentMode: AgentInteractionMode = input.mode ?? 'agent'
   const workspace = input.workspacePath
   const runId = input.runId
