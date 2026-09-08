@@ -1486,7 +1486,9 @@ function App() {
   // autoDownload stays off — the user starts the download from the update card.
   useEffect(() => {
     const seen = new Set<string>()
-    const stop = window.vyotiq?.updater.onState((payload) => {
+    const updaterApi = window.vyotiq?.updater
+    if (!updaterApi) return
+    const stop = updaterApi.onState((payload) => {
       if (payload.status !== 'available' && payload.status !== 'downloaded') return
       const version = payload.info?.version ?? ''
       const key = `${payload.status}:${version}`
