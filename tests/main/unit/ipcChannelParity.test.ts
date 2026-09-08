@@ -28,7 +28,7 @@ const PUSH_ONLY = new Set<keyof typeof IPC>([
   'notificationsChanged',
   'notificationsActivate',
   'appearanceCustomCssChanged',
-  'updaterStatusEvent',
+  'updaterState',
   'accessibilitySupportChanged'
 ])
 
