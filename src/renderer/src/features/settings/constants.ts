@@ -20,10 +20,10 @@ export const DENSITY_OPTIONS = [
 ]
 
 export const ACCENT_OPTIONS = [
-  { value: 'neutral', label: 'Neutral' },
   { value: 'blue', label: 'Blue' },
   { value: 'violet', label: 'Violet' },
-  { value: 'green', label: 'Green' }
+  { value: 'green', label: 'Green' },
+  { value: 'neutral', label: 'Neutral' }
 ]
 
 export const TOOL_APPROVAL_OPTIONS = [

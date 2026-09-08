@@ -152,7 +152,7 @@ export function AppearanceSection({
           id="appearance-accent"
           title="Accent color"
           hint="Primary buttons and focus rings."
-          help="Neutral keeps the default grayscale accent. Other presets tint accent and focus only."
+          help="Blue is the shipped accent. Neutral pins the grayscale instrument look; Violet and Green tint accent and focus only."
         >
           <Menu
             aria-label="Accent color"

@@ -27,7 +27,7 @@ export function stepFontScale(current: FontScale, direction: 1 | -1): FontScale 
 }
 
 export const DEFAULT_UI_DENSITY: UiDensity = 'default'
-export const DEFAULT_ACCENT_PRESET: AccentPreset = 'neutral'
+export const DEFAULT_ACCENT_PRESET: AccentPreset = 'blue'
 
 export type AppearanceSettings = {
   theme: ThemeId
