@@ -6,6 +6,8 @@
  * live here instead of `src/shared` (which this feature must not modify).
  */
 
+import type { IpcResult } from '@shared/ipc'
+
 export interface UpdateNotesSection {
   heading: string
   items: string[]
@@ -42,8 +44,8 @@ export interface UpdaterState {
 }
 
 export interface UpdaterBridge {
-  check: () => Promise<UpdateInfo | null>
-  download: () => Promise<void>
-  install: () => Promise<void>
+  check: () => Promise<IpcResult<UpdateInfo | null>>
+  download: () => Promise<IpcResult<undefined>>
+  install: () => Promise<IpcResult<undefined>>
   onState: (cb: (s: UpdaterState) => void) => () => void
 }

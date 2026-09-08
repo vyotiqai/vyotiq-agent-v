@@ -40,10 +40,13 @@ export function useUpdater(): {
     })
     // Exactly one check per mount. check() and onState both carry info; the
     // first writer wins so a fast check() never clobbers a live onState.
+    // The bridge resolves an IpcResult envelope — unwrap `data` before use.
     void bridge
       .check()
-      .then((info) => {
-        if (active && info) setState((prev) => prev ?? { status: 'available', info })
+      .then((res) => {
+        if (!active || !res.ok || res.data == null) return
+        const info = res.data
+        setState((prev) => prev ?? { status: 'available', info })
       })
       .catch(() => {
         // onState reports the error state; a rejected check() is non-actionable.

@@ -33,9 +33,9 @@ function installBridge(initial?: UpdaterState): {
 } {
   const listeners: StateListener[] = []
   const bridge: UpdaterBridge = {
-    check: vi.fn(async () => initial?.info ?? null),
-    download: vi.fn(async () => undefined),
-    install: vi.fn(async () => undefined),
+    check: vi.fn(async () => ({ ok: true as const, data: initial?.info ?? null })),
+    download: vi.fn(async () => ({ ok: true as const, data: undefined })),
+    install: vi.fn(async () => ({ ok: true as const, data: undefined })),
     onState: vi.fn((cb: StateListener) => {
       listeners.push(cb)
       return () => {
@@ -91,6 +91,24 @@ describe('UpdateCard', () => {
     expect(screen.getByText('Sidebar scroll fix')).toBeTruthy()
     expect(bridge.check).toHaveBeenCalledTimes(1)
     expect(bridge.onState).toHaveBeenCalledTimes(1)
+  })
+
+  it('unwraps the IpcResult envelope from check() without crashing', async () => {
+    // Regression: check() resolves { ok, data } — storing the envelope as info
+    // crashed on info.notesSections (the pre-fix production bug).
+    const { bridge } = installBridge()
+    bridge.check = vi.fn(async () => ({ ok: true as const, data: INFO }))
+    render(<UpdateCard />)
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toBeTruthy()
+    expect(screen.getByText('v1.2.0')).toBeTruthy()
+    expect(screen.getByText('Faster chat streaming')).toBeTruthy()
+  })
+
+  it('stays hidden when check() resolves ok with null data (up to date)', async () => {
+    installBridge()
+    render(<UpdateCard />)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
   it('shows determinate progress with percent and MB while downloading', async () => {
