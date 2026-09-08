@@ -69,7 +69,11 @@ jobs:
         # Deployed via the wrangler CLI instead of cloudflare/wrangler-action:
         # this repo's Actions policy only allows GitHub-owned actions, so the
         # official action (a third-party action) cannot start here.
-        run: pnpm dlx wrangler@4 pages deploy landing/dist --project-name=vyotiq --branch=main
+        # The Pages project is created on first deploy; the create call fails
+        # harmlessly once the project already exists.
+        run: |
+          pnpm dlx wrangler@4 pages project create vyotiq --production-branch main || echo "[deploy] Pages project vyotiq already exists"
+          pnpm dlx wrangler@4 pages deploy landing/dist --project-name=vyotiq --branch=main
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
