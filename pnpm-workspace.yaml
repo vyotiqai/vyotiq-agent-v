@@ -38,8 +38,11 @@ overrides:
   fast-uri: '>=3.1.6'
   # Security patches: decode-uri-component >=0.5.0, @xmldom/xmldom >=0.8.15,
   # qs >=6.16.0 (moderate audit findings); all releases >=24h old at edit time.
+  # @xmldom/xmldom is pinned to the exact patched 0.8 release: the >= range
+  # resolved 0.9.12, whose DOMParser API breaks plist@3.1.0 (declares ^0.8.8)
+  # and crashes electron-builder mac packaging ("mimeType undefined").
   decode-uri-component: '>=0.5.0'
-  '@xmldom/xmldom': '>=0.8.15'
+  '@xmldom/xmldom': '0.8.15'
   qs: '>=6.16.0'
 
 minimumReleaseAgeExclude:
