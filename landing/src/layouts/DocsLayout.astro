@@ -512,11 +512,16 @@ const structuredData = [
       const button = event.currentTarget
       if (!(button instanceof HTMLButtonElement) || !copyLabel) return
       let text: string | null = null
-      // Prefer the page's raw markdown served at /docs/<section>/<doc>.md.
+      // Prefer the page's raw markdown served at /docs/<section>/<doc>.md,
+      // prefixed with the title and URL so the copied context stands alone.
       try {
         const rawPath = `${location.pathname.replace(/\/+$/, '')}.md`
         const response = await fetch(rawPath)
-        if (response.ok) text = await response.text()
+        if (response.ok) {
+          const raw = await response.text()
+          const heading = document.querySelector<HTMLElement>('#page-title')
+          text = `# ${heading?.innerText?.trim() ?? document.title}\n${location.href}\n\n${raw}`
+        }
       } catch {
         // fall through to rendered-text fallback
       }

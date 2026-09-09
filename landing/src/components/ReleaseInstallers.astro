@@ -56,7 +56,7 @@ const showPackages = hasReleaseAssets()
           href={platform.asset.url}
           data-href-x64={platform.hrefX64 ?? undefined}
           title={platform.hint ?? undefined}
-          aria-label={platform.hint ?? undefined}
+          aria-label={platform.label}
           rel="noopener noreferrer"
         >
           <span class="label-full">{platform.label}</span>
@@ -86,8 +86,8 @@ const showPackages = hasReleaseAssets()
   }
 
   :global(html[data-os]) .platform-button {
-    min-height: 2.25rem;
-    padding-inline: 0.65rem;
+    min-height: 2.75rem;
+    padding-inline: 0.75rem;
     font-size: 0.75rem;
   }
 

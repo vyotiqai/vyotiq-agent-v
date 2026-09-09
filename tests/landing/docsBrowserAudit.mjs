@@ -364,7 +364,7 @@ async function checkHomepage(page, viewport) {
     anchors.map((anchor) => ({
       platform: anchor.getAttribute('data-release-platform') ?? '',
       href: anchor.getAttribute('href') ?? '',
-      text: (anchor.textContent ?? '').replace(/\s+/g, ' ').trim()
+      text: (anchor.getAttribute('aria-label') ?? anchor.textContent ?? '').replace(/\s+/g, ' ').trim()
     }))
   )
   if (packageLinks.length === 0) {
@@ -596,6 +596,7 @@ try {
   await page.evaluate(() => localStorage.setItem('vyotiq-theme', 'light'))
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.locator('[data-theme-toggle]').click()
+  await page.locator('[data-theme-option="dark"]').click()
   if ((await page.locator('html').getAttribute('data-theme')) !== 'dark') fail('Theme toggle did not reach dark')
   await page.reload({ waitUntil: 'domcontentloaded' })
   if ((await page.locator('html').getAttribute('data-theme')) !== 'dark') fail('Dark theme did not persist')
