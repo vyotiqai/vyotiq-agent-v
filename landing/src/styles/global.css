@@ -8,22 +8,22 @@
 :root,
 [data-theme="light"] {
   color-scheme: light;
-  --bg: #ebeceb;
-  --fg: #111111;
-  --muted: #585a58;
-  --border: #797b79;
-  --surface: #ffffff;
+  --bg: #FFFFFF;
+  --fg: #17232B;
+  --muted: #4A5F6D;
+  --border: #7A93A3;
+  --surface: #F7FAFC;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --duration: 160ms;
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: #000000;
-  --fg: #ffffff;
-  --muted: #9b9b9b;
-  --border: #686868;
-  --surface: #141414;
+  --bg: #141414;
+  --fg: #E8EDF0;
+  --muted: #9FB3BE;
+  --border: #5E7484;
+  --surface: #1A1E20;
 }
 
 @theme inline {
