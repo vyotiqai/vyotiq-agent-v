@@ -1,11 +1,10 @@
 ---
 import BrandLockup from './BrandLockup.astro'
-import { feedbackMailto, SITE_BRAND, SITE_PRODUCT } from '../lib/site'
+import { SITE_BRAND, SITE_PRODUCT } from '../lib/site'
 
 const year = new Date().getFullYear()
 const onDocs = Astro.url.pathname === '/docs' || Astro.url.pathname.startsWith('/docs/')
 const onDocsIndex = Astro.url.pathname === '/docs' || Astro.url.pathname === '/docs/'
-const feedbackHref = feedbackMailto()
 ---
 
 <footer class="border-t border-border">
@@ -49,12 +48,6 @@ const feedbackHref = feedbackMailto()
         href="/privacy"
       >
         Website privacy
-      </a>
-      <a
-        class="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-fg"
-        href={feedbackHref}
-      >
-        Feedback
       </a>
       <a
         class="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-fg"

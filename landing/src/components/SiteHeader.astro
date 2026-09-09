@@ -1,11 +1,10 @@
 ---
 import BrandLockup from './BrandLockup.astro'
 import LandingIcon from './LandingIcon.astro'
-import { feedbackMailto, SITE_PRODUCT } from '../lib/site'
+import { SITE_PRODUCT } from '../lib/site'
 
 const onDocs = Astro.url.pathname === '/docs' || Astro.url.pathname.startsWith('/docs/')
 const onDocsIndex = Astro.url.pathname === '/docs' || Astro.url.pathname === '/docs/'
-const feedbackHref = feedbackMailto()
 ---
 
 <header class="sticky top-0 z-40 border-b border-border/80 bg-bg/90 backdrop-blur-md">
@@ -31,22 +30,15 @@ const feedbackHref = feedbackMailto()
       >
         Docs
       </a>
-      <a
-        class="inline-flex min-h-11 items-center px-3 text-muted hover:text-fg"
-        href={feedbackHref}
-      >
-        Feedback
-      </a>
       <button
         type="button"
-        class="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-full border border-border bg-surface px-3 text-muted hover:border-muted hover:text-fg"
+        class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-muted hover:border-muted hover:text-fg"
         data-theme-toggle
         aria-label="Toggle color theme"
       >
-        <LandingIcon name="monitor" size={16} class="hidden" data-theme-icon="system" />
-        <LandingIcon name="sun" size={16} class="hidden" data-theme-icon="light" />
-        <LandingIcon name="moon" size={16} class="hidden" data-theme-icon="dark" />
-        <span class="hidden text-xs sm:inline" data-theme-label>System</span>
+        <LandingIcon name="monitor" size={18} class="hidden" data-theme-icon="system" />
+        <LandingIcon name="sun" size={18} class="hidden" data-theme-icon="light" />
+        <LandingIcon name="moon" size={18} class="hidden" data-theme-icon="dark" />
       </button>
     </nav>
   </div>
@@ -61,7 +53,6 @@ const feedbackHref = feedbackMailto()
     light: button?.querySelector<HTMLElement>('[data-theme-icon="light"]'),
     dark: button?.querySelector<HTMLElement>('[data-theme-icon="dark"]')
   }
-  const label = button?.querySelector<HTMLElement>('[data-theme-label]')
 
   const MODE_LABEL = {
     system: 'System',
@@ -94,10 +85,9 @@ const feedbackHref = feedbackMailto()
     }
     if (button) {
       const next = nextMode(mode)
-      button.setAttribute('aria-label', `Color theme: ${MODE_LABEL[mode]}. Click for ${MODE_LABEL[next]}.`)
+      button.setAttribute('aria-label', `Theme: ${MODE_LABEL[mode]} (switch to ${MODE_LABEL[next]})`)
       button.setAttribute('title', `${MODE_LABEL[mode]} theme`)
     }
-    if (label) label.textContent = MODE_LABEL[mode]
   }
 
   button?.addEventListener('click', () => {
