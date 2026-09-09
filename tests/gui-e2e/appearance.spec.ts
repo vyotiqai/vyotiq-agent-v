@@ -156,6 +156,22 @@ test('native skin applies data-skin and persists', async () => {
   expect(settings?.skinId).toBe('native')
 })
 
+test('gild skin applies data-skin and persists', async () => {
+  const { window } = launched
+  await openAppearanceSection(window)
+  await window.getByRole('button', { name: /^gild$/i }).click()
+
+  await expect
+    .poll(async () => readRootAppearance(window))
+    .toMatchObject({ skin: 'gild' })
+
+  const settings = await window.evaluate(async () => {
+    const res = await window.vyotiq.getSettings()
+    return res.ok ? res.data : null
+  })
+  expect(settings?.skinId).toBe('gild')
+})
+
 test('custom CSS overlay injects user skin style tag', async () => {
   const { window, userDataDir } = launched
   const cssPath = join(userDataDir, 'overlay.css')

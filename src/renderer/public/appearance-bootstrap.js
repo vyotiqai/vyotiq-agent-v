@@ -39,7 +39,8 @@
       (cache.skinId === 'default' ||
         cache.skinId === 'proof' ||
         cache.skinId === 'bench' ||
-        cache.skinId === 'native')
+        cache.skinId === 'native' ||
+        cache.skinId === 'gild')
         ? cache.skinId
         : 'default'
     root.setAttribute('data-skin', skin)

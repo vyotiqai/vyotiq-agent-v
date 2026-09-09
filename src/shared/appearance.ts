@@ -86,7 +86,8 @@ export function readAppearanceBootCache(): AppearanceBootCache | null {
       (skinId !== 'default' &&
         skinId !== 'proof' &&
         skinId !== 'bench' &&
-        skinId !== 'native') ||
+        skinId !== 'native' &&
+        skinId !== 'gild') ||
       (resolvedTheme !== 'light' && resolvedTheme !== 'dark')
     ) {
       return null

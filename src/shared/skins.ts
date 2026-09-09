@@ -1,9 +1,9 @@
 import { z } from 'zod'
 
-export const SkinIdSchema = z.enum(['default', 'proof', 'bench', 'native'])
+export const SkinIdSchema = z.enum(['default', 'proof', 'bench', 'native', 'gild'])
 export type SkinId = z.infer<typeof SkinIdSchema>
 
-export const SKIN_IDS: readonly SkinId[] = ['default', 'proof', 'bench', 'native']
+export const SKIN_IDS: readonly SkinId[] = ['default', 'proof', 'bench', 'native', 'gild']
 
 export const DEFAULT_SKIN_ID: SkinId = 'default'
 
@@ -48,14 +48,25 @@ export const SKIN_CATALOG: readonly SkinCatalogEntry[] = [
       background: 'linear-gradient(135deg, #f5f5f5 40%, #c2410c 40%, #c2410c 72%, #fb923c 72%)',
       fontFamily: 'system-ui, sans-serif'
     }
+  },
+  {
+    id: 'gild',
+    label: 'Gild',
+    description: 'Blue-slate instrument on alabaster and onyx.',
+    previewStyle: {
+      background: 'linear-gradient(180deg, #E5E4E2 0%, #536878 52%, #0A0A0A 100%)'
+    }
   }
 ]
 
 /** Opaque window canvas. */
 export function resolveSkinWindowBackground(
-  _skinId: SkinId,
+  skinId: SkinId,
   resolved: 'light' | 'dark',
   _platform?: string
 ): string {
+  if (skinId === 'gild') {
+    return resolved === 'dark' ? '#0A0A0A' : '#E5E4E2'
+  }
   return resolved === 'dark' ? '#000000' : '#ffffff'
 }

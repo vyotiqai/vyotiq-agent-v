@@ -9,7 +9,7 @@ import { DEFAULT_SETTINGS, parseSettings } from '@shared/ipc/schemas/settings'
 
 describe('skins', () => {
   it('SkinIdSchema accepts built-in catalog ids', () => {
-    for (const id of ['default', 'proof', 'bench', 'native']) {
+    for (const id of ['default', 'proof', 'bench', 'native', 'gild']) {
       expect(SkinIdSchema.parse(id)).toBe(id)
     }
   })
@@ -31,6 +31,8 @@ describe('skins', () => {
     expect(resolveSkinWindowBackground('proof', 'dark', 'darwin')).toBe('#000000')
     expect(resolveSkinWindowBackground('bench', 'light', 'linux')).toBe('#ffffff')
     expect(resolveSkinWindowBackground('native', 'dark', 'win32')).toBe('#000000')
+    expect(resolveSkinWindowBackground('gild', 'light', 'win32')).toBe('#E5E4E2')
+    expect(resolveSkinWindowBackground('gild', 'dark', 'win32')).toBe('#0A0A0A')
   })
 })
 
