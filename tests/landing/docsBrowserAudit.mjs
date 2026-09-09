@@ -607,6 +607,11 @@ try {
     fail('Breadcrumb does not expose current page')
   }
   await page.locator('[data-docs-copy]').click()
+  // The handler fetches the raw markdown before writing the clipboard —
+  // wait for the visible 'Copied' feedback instead of racing the write.
+  await page
+    .locator('[data-docs-copy-label]', { hasText: 'Copied' })
+    .waitFor({ timeout: 8000 })
   const copied = await page.evaluate(() => navigator.clipboard.readText())
   if (!copied.includes(title) || !copied.includes('/docs/start/quickstart')) fail('Copy page content is incomplete')
 

@@ -44,6 +44,9 @@ overrides:
   decode-uri-component: '>=0.5.0'
   '@xmldom/xmldom': '0.8.15'
   qs: '>=6.16.0'
+  # GHSA-w27v-7q3p-w38r (high): SVGO removeScripts bypass; astro pulls
+  # svgo ^4.0.2, patched in 4.1.0 (2026-08-24, >24h old).
+  svgo: '>=4.1.0'
 
 minimumReleaseAgeExclude:
   - '@astrojs/internal-helpers@0.11.0'
