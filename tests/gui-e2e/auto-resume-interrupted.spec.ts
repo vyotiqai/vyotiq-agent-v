@@ -68,5 +68,9 @@ test('auto-resumes interrupted run without manual Continue click', async () => {
     await expand.click()
   }
 
+  // Auto-resume restarts the interrupted run in the background (it shows in
+  // the Home "Running now" panel); open the session to watch it stream.
+  await window.getByRole('button', { name: /Auto resume test/i }).first().click()
+
   await expect(window.getByText(FIXTURE_ASSISTANT_TEXT)).toBeVisible({ timeout: 25_000 })
 })
