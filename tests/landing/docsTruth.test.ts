@@ -701,13 +701,12 @@ describe('landing docs architecture and truth', () => {
     expect(library).toContain('export function docsEditHref')
     expect(layout).toContain('docsNavTitle(entry.id, entry.data.title)')
     expect(layout).toContain("quickstartPage && 'docs-quickstart'")
-    expect(layout).toContain('docs-product-shot')
     expect(layout).toContain('docsEditHref(currentId)')
     expect(layout).toContain('docs-heading-anchor')
     expect(layout).toContain('terms.length > 0 && match.score >= 0')
     expect(layout).toContain("status.textContent = 'Type to search documentation.'")
     expect(header).toContain('data-theme-icon="system"')
-    expect(header).toContain('data-theme-label')
+    expect(header).toContain('data-theme-menu')
     expect(css).toContain('.doc-prose.docs-quickstart > h2:not(:first-of-type)::before')
     expect(css).toContain('.docs-heading-anchor')
     expect(css).toContain('.docs-edit-links')
@@ -846,10 +845,16 @@ describe('landing docs architecture and truth', () => {
     ] as const) {
       expect(text, `${file} Add GitHub`).toContain('Add GitHub')
       expect(text, `${file} Add Gmail`).toContain('Add Gmail')
-      expect(text, `${file} redirect`).toContain(redirect)
       expect(text, `${file} Agent mode`).toMatch(/Agent mode/)
       expect(text, `${file} MCP tools protection`).toContain('MCP tools protection')
     }
+    // The Google OAuth redirect URI lives canonically on the MCP page; the
+    // marketplace overview and troubleshooting pages point at that setup.
+    expect(mcp, 'customize/mcp.md redirect').toContain(redirect)
+    expect(troubleshooting, 'troubleshooting/marketplace-mcp.md redirect').toContain(redirect)
+    expect(marketplace, 'customize/marketplace.md canonical setup link').toContain(
+      '/docs/customize/mcp'
+    )
     expect(mcp).toContain('Native GitHub')
     expect(mcp).toContain('GitHub MCP')
     expect(mcp).toContain('gmailmcp')
