@@ -85,6 +85,19 @@ function expectAaOnBg(
   expect(contrastRatio(fg, bg), label).toBeGreaterThanOrEqual(minRatio)
 }
 
+function expectAaOnPair(
+  tokens: Record<string, string>,
+  fgName: string,
+  bgName: string,
+  label: string,
+  minRatio = 4.5
+): void {
+  const fg = resolveToken(tokens, fgName)
+  const bg = resolveToken(tokens, bgName)
+  if (!fg.startsWith('#') || !bg.startsWith('#')) return
+  expect(contrastRatio(fg, bg), label).toBeGreaterThanOrEqual(minRatio)
+}
+
 describe('skin contrast smoke', () => {
   const css = readFileSync(
     join(process.cwd(), 'src/renderer/src/styles.css'),
@@ -106,6 +119,26 @@ describe('skin contrast smoke', () => {
       it(`${skin} ${theme} keeps readable secondary on bg`, () => {
         const tokens = mergedSkinTokens(css, skin, theme)
         expectAaOnBg(tokens, '--vy-secondary', `${skin} ${theme} secondary`)
+      })
+
+      it(`${skin} ${theme} keeps accent visible on bg`, () => {
+        const tokens = mergedSkinTokens(css, skin, theme)
+        expectAaOnBg(tokens, '--vy-accent', `${skin} ${theme} accent`, 3)
+      })
+
+      it(`${skin} ${theme} keeps accent-fg readable on accent`, () => {
+        const tokens = mergedSkinTokens(css, skin, theme)
+        expectAaOnPair(
+          tokens,
+          '--vy-accent-fg',
+          '--vy-accent',
+          `${skin} ${theme} accent-fg`
+        )
+      })
+
+      it(`${skin} ${theme} keeps focus indicator visible on bg`, () => {
+        const tokens = mergedSkinTokens(css, skin, theme)
+        expectAaOnBg(tokens, '--vy-focus', `${skin} ${theme} focus`, 3)
       })
     }
   }
