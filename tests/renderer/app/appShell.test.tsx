@@ -32,6 +32,7 @@ const baseProps = {
   onOpenMarketplace: vi.fn(),
   onOpenChat: vi.fn(),
   onNewChat: vi.fn(),
+  onNewChatInWorkspace: vi.fn(),
   onSelectRunInWorkspace: vi.fn(),
   onRenameRunInWorkspace: vi.fn(),
   onDeleteRunInWorkspace: vi.fn(),
@@ -162,12 +163,17 @@ describe('AppShell', () => {
     fireEvent.click(screen.getByRole('button', { name: /collapse sidebar/i }))
     expect(screen.getByRole('button', { name: /expand sidebar/i })).toBeTruthy()
     expect(screen.queryByRole('textbox', { name: /search chats/i })).toBeNull()
-    expect(screen.getByRole('button', { name: /^new chat$/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /new chat in/i })).toBeNull()
     expect(screen.queryByRole('button', { name: /^search chats$/i })).toBeNull()
     expect(screen.getByRole('button', { name: /^settings$/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^marketplace$/i })).toBeTruthy()
     expect(screen.queryByRole('tablist', { name: /workspaces/i })).toBeNull()
     expect(localStorage.getItem('vyotiq.sidebarCollapsed')).toBe('1')
+
+    // Expanding restores the full sidebar chrome.
+    fireEvent.click(screen.getByRole('button', { name: /expand sidebar/i }))
+    expect(screen.getByRole('textbox', { name: /search chats/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /new chat in/i })).toBeTruthy()
   })
 
   it('disables workspace-dependent sidebar actions when no workspace is open', () => {
@@ -177,9 +183,7 @@ describe('AppShell', () => {
       </AppShell>
     )
 
-    expect((screen.getByRole('button', { name: /new chat/i }) as HTMLButtonElement).disabled).toBe(
-      true
-    )
+    expect(screen.queryByRole('button', { name: /new chat in/i })).toBeNull()
     expect((screen.getByRole('textbox', { name: /search chats/i }) as HTMLInputElement).disabled).toBe(
       true
     )

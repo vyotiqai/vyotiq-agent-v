@@ -296,8 +296,15 @@ describe('pruneStaleInstanceWorktrees lock classification', () => {
     }
     if (workspace && existsSync(workspace)) {
       // POSIX: restore the mode-000 paths so rmSync can traverse and remove.
+      // The root itself is chmod'd 0o555 by the fixture — without restoring
+      // it, this cleanup's rmdir of the worktree root throws EACCES.
       try {
         if (lockedSub) chmodSync(lockedSub, 0o755)
+      } catch {
+        /* already gone */
+      }
+      try {
+        if (staleDir) chmodSync(join(staleDir, '..'), 0o755)
       } catch {
         /* already gone */
       }

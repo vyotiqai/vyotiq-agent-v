@@ -259,6 +259,7 @@ async function removeTreeContinue(path: string): Promise<void> {
     return
   }
   if (st.isDirectory()) {
+    await tryChmodDir(path)
     let names: string[] = []
     try {
       names = await readdir(path)
@@ -286,6 +287,21 @@ async function removeTreeContinue(path: string): Promise<void> {
 function isEnotempty(err: unknown): boolean {
   const code = err && typeof err === 'object' ? (err as NodeJS.ErrnoException).code : undefined
   return code === 'ENOTEMPTY' || code === 'EEXIST'
+}
+
+/**
+ * POSIX: removing entries from a directory requires write permission on the
+ * directory itself, so a read-only checkout cannot be traversed or emptied
+ * (readdir/rmdir/unlink of children fail EACCES). Best-effort chmod before
+ * the walk — on win32 chmod is a no-op for directory removal semantics.
+ */
+async function tryChmodDir(path: string): Promise<void> {
+  if (process.platform === 'win32') return
+  try {
+    await chmod(path, 0o700)
+  } catch {
+    /* ENOENT / no ownership — the walk's own error handling takes over */
+  }
 }
 
 async function tryUnlink(path: string): Promise<void> {
