@@ -37,7 +37,7 @@ export const SKIN_CATALOG: readonly SkinCatalogEntry[] = [
     label: 'Bench',
     description: 'Neon-blue workshop — borders only, no elevation.',
     previewStyle: {
-      background: 'linear-gradient(135deg, #fafafa 40%, #0072ce 40%, #0072ce 72%, #0de7ff 72%)'
+      background: 'linear-gradient(135deg, #ffffff 40%, #0072ce 40%, #0072ce 72%, #0de7ff 72%)'
     }
   },
   {
@@ -45,7 +45,7 @@ export const SKIN_CATALOG: readonly SkinCatalogEntry[] = [
     label: 'Native',
     description: 'System fonts with branding-orange accent.',
     previewStyle: {
-      background: 'linear-gradient(135deg, #f5f5f5 40%, #c2410c 40%, #c2410c 72%, #fb923c 72%)',
+      background: 'linear-gradient(135deg, #f9f9f9 40%, #c2410c 40%, #c2410c 72%, #fb923c 72%)',
       fontFamily: 'system-ui, sans-serif'
     }
   },
