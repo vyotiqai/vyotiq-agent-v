@@ -495,8 +495,7 @@ describe('landing docs architecture and truth', () => {
     for (const label of ['**MCPs**', '**Skills**', '**Rules**', '**Packages**']) {
       expect(marketplace).toContain(label)
     }
-    expect(install).toContain('https://github.com/vyotiqai/vyotiq-agent-v/releases/latest')
-    expect(install).toContain('download buttons for each installer on the latest GitHub Release')
+    expect(install).toContain('download button that takes you to the release page')
     expect(install).toContain('`pnpm pack:win`')
     expect(install).toContain('`pnpm pack:mac`')
     expect(install).toContain('`pnpm pack:linux`')
@@ -611,11 +610,7 @@ describe('landing docs architecture and truth', () => {
     expect(source).toContain('optional domain allowlist')
     expect(source).toContain('.vyotiq/memory/')
     expect(source).toContain('separate from memory')
-    expect(source).toContain('GitHub Releases')
-    expect(source).toContain('data-release-platform')
-    expect(source).toContain('Download for Windows')
-    expect(source).toContain('Download for macOS')
-    expect(source).toContain('Download for Linux')
+    expect(source).toContain('Download Agent V')
     expect(source).not.toMatch(/api\.github\.com/)
 
     for (const rel of [
@@ -634,15 +629,12 @@ describe('landing docs architecture and truth', () => {
     const snapshot = JSON.parse(
       readFileSync(join(LANDING_SOURCE, 'lib', 'github-release.json'), 'utf8')
     ) as { assets?: Record<string, { url?: string }> }
-    expect(snapshot.assets?.win?.url).toMatch(
-      /^https:\/\/github\.com\/vyotiqai\/vyotiq-agent-v\/releases\/download\//
-    )
-    expect(snapshot.assets?.mac?.url).toMatch(
-      /^https:\/\/github\.com\/vyotiqai\/vyotiq-agent-v\/releases\/download\//
-    )
-    expect(snapshot.assets?.linux?.url).toMatch(
-      /^https:\/\/github\.com\/vyotiqai\/vyotiq-agent-v\/releases\/download\//
-    )
+    // The repo is private: the download area is a single CTA to the releases
+    // page, so no baked asset URL may leak into landing copy or components.
+    for (const url of Object.values(snapshot.assets ?? {}).map((a) => a?.url)) {
+      if (url != null) expect(url).toMatch(/^https:\/\//)
+    }
+    expect(source).not.toMatch(/releases\/download\//)
     expect(readFileSync(join(REPO, '.gitignore'), 'utf8')).not.toContain(
       'landing/src/lib/github-release.json'
     )
@@ -897,8 +889,9 @@ describe('landing docs architecture and truth', () => {
     const footer = readFileSync(join(LANDING_SOURCE, 'components', 'SiteFooter.astro'), 'utf8')
     expect(footer).toContain('href="/docs/concepts/privacy-data"')
     expect(footer).toContain('href="/privacy"')
-    expect(footer).toContain('href="https://github.com/vyotiqai/vyotiq-agent-v"')
-    expect(footer).toContain('rel="noopener noreferrer"')
+    // The repo is private: the footer links internally instead of to the
+    // GitHub repository.
+    expect(footer).not.toContain('github.com/vyotiqai')
     expect(footer).not.toMatch(/Terms of Service/i)
     expect(existsSync(join(LANDING_SOURCE, 'pages', 'privacy.astro'))).toBe(true)
     expect(existsSync(join(LANDING_SOURCE, 'components', 'CookieBanner.astro'))).toBe(false)

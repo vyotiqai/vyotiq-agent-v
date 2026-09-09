@@ -162,7 +162,7 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
             Agent V. A product of Vyotiq.com.
           </p>
           <p className="m-0 text-xs leading-snug tracking-[var(--vy-tracking)] text-muted">
-            © {year} Vyotiq
+            © {year} Vyotiq. Agent V is proprietary Vyotiq software. All rights reserved.
           </p>
         </div>
       </div>

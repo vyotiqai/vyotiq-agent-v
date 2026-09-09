@@ -360,52 +360,30 @@ async function checkHomepage(page, viewport) {
   if (!heroLinks.some((link) => link.href === '/docs')) {
     fail(`${viewport} homepage: hero missing Docs`)
   }
-  const packageLinks = await page.locator('#overview [data-release-platform]').evaluateAll((anchors) =>
-    anchors.map((anchor) => ({
-      platform: anchor.getAttribute('data-release-platform') ?? '',
-      href: anchor.getAttribute('href') ?? '',
-      text: (anchor.getAttribute('aria-label') ?? anchor.textContent ?? '').replace(/\s+/g, ' ').trim()
-    }))
-  )
-  if (packageLinks.length === 0) {
-    fail(`${viewport} homepage: missing installer download buttons`)
+  // The repository is private: the download area is a single call to action
+  // pointing at the releases page. No per-platform asset links and no asset
+  // reachability probes — asset URLs are auth-gated for the public.
+  const downloadCta = await page
+    .locator('#overview a[aria-label="Download Agent V"]')
+    .evaluateAll((anchors) =>
+      anchors.map((anchor) => ({
+        href: anchor.getAttribute('href') ?? '',
+        text: (anchor.textContent ?? '').replace(/\s+/g, ' ').trim()
+      }))
+    )
+  if (downloadCta.length !== 1) {
+    fail(`${viewport} homepage: expected exactly one download CTA, got ${JSON.stringify(downloadCta)}`)
   }
-  for (const id of ['win', 'mac', 'linux']) {
-    if (!packageLinks.some((link) => link.platform === id)) {
-      fail(`${viewport} homepage: missing ${id} installer button`)
+  for (const link of downloadCta) {
+    if (!/github\.com\/vyotiqai\/vyotiq-agent-v\/releases/.test(link.href)) {
+      fail(`${viewport} homepage: download CTA does not point at the releases page ${JSON.stringify(link)}`)
+    }
+    if (link.text !== 'Download Agent V') {
+      fail(`${viewport} homepage: download CTA label mismatch ${JSON.stringify(link)}`)
     }
   }
-  const expectedLabels = {
-    win: 'Download for Windows',
-    mac: 'Download for macOS',
-    linux: 'Download for Linux'
-  }
-  for (const link of packageLinks) {
-    if (!/^https:\/\/github\.com\/vyotiqai\/vyotiq-agent-v\/releases\/download\//.test(link.href)) {
-      fail(`${viewport} homepage: package link is not a GitHub asset ${JSON.stringify(link)}`)
-    }
-    const expected = expectedLabels[link.platform]
-    if (expected && link.text !== expected) {
-      fail(`${viewport} homepage: package label mismatch ${JSON.stringify(link)}`)
-    }
-    const probe = await page.request.fetch(link.href, {
-      method: 'HEAD',
-      maxRedirects: 5,
-      timeout: 20000
-    })
-    if (![200, 206, 302, 303, 307, 308].includes(probe.status())) {
-      const ranged = await page.request.fetch(link.href, {
-        method: 'GET',
-        headers: { Range: 'bytes=0-0' },
-        maxRedirects: 5,
-        timeout: 20000
-      })
-      if (![200, 206, 302, 303, 307, 308].includes(ranged.status())) {
-        fail(
-          `${viewport} homepage: ${link.platform} download HTTP ${probe.status()}/${ranged.status()} ${link.href}`
-        )
-      }
-    }
+  if ((await page.locator('#overview [data-release-platform]').count()) > 0) {
+    fail(`${viewport} homepage: stale per-platform installer links present`)
   }
   const metadata = await page.evaluate(() => ({
     title: document.title,
@@ -701,7 +679,7 @@ try {
   const installText = await page.locator('main').innerText()
   if (
     !installText.includes('pnpm pack:win') ||
-    !installText.includes('download buttons for each installer') ||
+    !installText.includes('download button that takes you to the release page') ||
     /the Vyotiq download page/i.test(installText)
   ) {
     fail('install page missing homepage downloads or pack-from-source')

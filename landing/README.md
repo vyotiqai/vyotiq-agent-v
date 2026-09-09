@@ -1,6 +1,6 @@
 # Agent V site
 
-Static site for Agent V (Vyotiq is the company; Agent V is the product). Astro 7 + Tailwind 4. Client JavaScript is limited to theme toggling, documentation controls, and emphasizing the matching OS package button when GitHub Release artifacts were baked at build time.
+Static site for Agent V (Vyotiq is the company; Agent V is the product). Astro 7 + Tailwind 4. Client JavaScript is limited to theme toggling and documentation controls.
 
 ## Local
 

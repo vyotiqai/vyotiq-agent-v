@@ -2,7 +2,7 @@
 /**
  * ARC-AGI dataset fetcher (Wave 1).
  *
- * Downloads the public ARC-AGI dataset (fchollet/ARC-AGI, Apache-2.0) from
+ * Downloads the ARC-AGI dataset (fchollet/ARC-AGI) from
  * raw.githubusercontent.com into a local cache dir:
  *   data/training/*.json  -> <cache>/training/*.json
  *   data/evaluation/*.json -> <cache>/evaluation/*.json

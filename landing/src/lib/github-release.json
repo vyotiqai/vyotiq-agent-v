@@ -7,6 +7,10 @@
       "name": "Vyotiq-1.1.3-setup.exe",
       "url": "https://github.com/vyotiqai/vyotiq-agent-v/releases/download/v1.1.3/Vyotiq-1.1.3-setup.exe"
     },
+    "mac": {
+      "name": "Vyotiq-1.1.3-arm64.dmg",
+      "url": "https://github.com/vyotiqai/vyotiq-agent-v/releases/download/v1.1.3/Vyotiq-1.1.3-arm64.dmg"
+    },
     "linux": {
       "name": "Vyotiq-1.1.3.AppImage",
       "url": "https://github.com/vyotiqai/vyotiq-agent-v/releases/download/v1.1.3/Vyotiq-1.1.3.AppImage"
@@ -18,10 +22,6 @@
     "macX64": {
       "name": "Vyotiq-1.1.3-x64.dmg",
       "url": "https://github.com/vyotiqai/vyotiq-agent-v/releases/download/v1.1.3/Vyotiq-1.1.3-x64.dmg"
-    },
-    "mac": {
-      "name": "Vyotiq-1.1.3-arm64.dmg",
-      "url": "https://github.com/vyotiqai/vyotiq-agent-v/releases/download/v1.1.3/Vyotiq-1.1.3-arm64.dmg"
     }
   }
 }
