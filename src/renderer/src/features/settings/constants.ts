@@ -19,13 +19,6 @@ export const DENSITY_OPTIONS = [
   { value: 'comfortable', label: 'Comfortable' }
 ]
 
-export const ACCENT_OPTIONS = [
-  { value: 'blue', label: 'Blue' },
-  { value: 'violet', label: 'Violet' },
-  { value: 'green', label: 'Green' },
-  { value: 'neutral', label: 'Neutral' }
-]
-
 export const TOOL_APPROVAL_OPTIONS = [
   { value: 'off', label: 'Off' },
   { value: 'mutating', label: 'Ask for edits and commands' },

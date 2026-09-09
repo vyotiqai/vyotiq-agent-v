@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AccentPreset, FontScale, UiDensity } from '@shared/appearance'
+import type { FontScale, UiDensity } from '@shared/appearance'
 import {
   pickAppearanceSettings,
   resolveAppearanceBootCache,
@@ -26,7 +26,6 @@ function applyToDocument(
   root.setAttribute('data-theme', resolvedTheme)
   root.setAttribute('data-font-scale', appearance.fontScale)
   root.setAttribute('data-density', appearance.uiDensity)
-  root.setAttribute('data-accent', appearance.accentPreset)
   root.setAttribute('data-skin', appearance.skinId)
   writeAppearanceBootCache(resolveAppearanceBootCache(appearance, resolvedTheme === 'dark'))
 }
@@ -117,7 +116,6 @@ export function useAppearance(initial: AppearanceSettings) {
           prev.theme === next.theme &&
           prev.fontScale === next.fontScale &&
           prev.uiDensity === next.uiDensity &&
-          prev.accentPreset === next.accentPreset &&
           prev.skinId === next.skinId &&
           prev.customCssPath === next.customCssPath &&
           prev.resolvedTheme === resolvedTheme
@@ -141,7 +139,6 @@ export function useAppearance(initial: AppearanceSettings) {
     theme: appearance.theme,
     fontScale: appearance.fontScale as FontScale,
     uiDensity: appearance.uiDensity as UiDensity,
-    accentPreset: appearance.accentPreset as AccentPreset,
     skinId: appearance.skinId,
     customCssPath: appearance.customCssPath,
     setAppearance,

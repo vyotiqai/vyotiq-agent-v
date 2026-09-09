@@ -18,7 +18,6 @@ const baseAppearance = {
   theme: 'system' as const,
   fontScale: 'default' as const,
   uiDensity: 'default' as const,
-  accentPreset: 'neutral' as const,
   skinId: DEFAULT_SKIN_ID,
   customCssPath: ''
 }
@@ -29,7 +28,6 @@ describe('appearance', () => {
     document.documentElement.removeAttribute('data-theme')
     document.documentElement.removeAttribute('data-font-scale')
     document.documentElement.removeAttribute('data-density')
-    document.documentElement.removeAttribute('data-accent')
     document.documentElement.removeAttribute('data-skin')
   })
 
@@ -41,7 +39,7 @@ describe('appearance', () => {
     expect(resolveAppearanceBootCache(baseAppearance, true).resolvedTheme).toBe('dark')
     expect(
       resolveAppearanceBootCache(
-        { ...baseAppearance, theme: 'light', accentPreset: 'blue' },
+        { ...baseAppearance, theme: 'light' },
         true
       ).resolvedTheme
     ).toBe('light')
@@ -53,7 +51,6 @@ describe('appearance', () => {
       resolvedTheme: resolveTheme('dark', false),
       fontScale: 'large',
       uiDensity: 'compact',
-      accentPreset: 'violet',
       skinId: 'proof'
     }
     writeAppearanceBootCache(cache)
@@ -67,19 +64,16 @@ describe('appearance', () => {
       resolvedTheme: 'light' as const,
       fontScale: 'small' as const,
       uiDensity: 'comfortable' as const,
-      accentPreset: 'green' as const,
       skinId: 'native' as const
     }
     const root = document.documentElement
     root.setAttribute('data-theme', cache.resolvedTheme)
     root.setAttribute('data-font-scale', cache.fontScale)
     root.setAttribute('data-density', cache.uiDensity)
-    root.setAttribute('data-accent', cache.accentPreset)
     root.setAttribute('data-skin', cache.skinId)
     expect(root.getAttribute('data-theme')).toBe('light')
     expect(root.getAttribute('data-font-scale')).toBe('small')
     expect(root.getAttribute('data-density')).toBe('comfortable')
-    expect(root.getAttribute('data-accent')).toBe('green')
     expect(root.getAttribute('data-skin')).toBe('native')
   })
 
@@ -96,7 +90,6 @@ describe('appearance', () => {
         resolvedTheme: 'dark',
         fontScale: 'default',
         uiDensity: 'default',
-        accentPreset: 'neutral',
         skinId: 'neon'
       })
     )

@@ -5,7 +5,6 @@ export type RootAppearanceAttrs = {
   theme: string | null
   fontScale: string | null
   density: string | null
-  accent: string | null
   skin: string | null
 }
 
@@ -51,7 +50,6 @@ export async function readRootAppearance(window: Page): Promise<RootAppearanceAt
     theme: document.documentElement.getAttribute('data-theme'),
     fontScale: document.documentElement.getAttribute('data-font-scale'),
     density: document.documentElement.getAttribute('data-density'),
-    accent: document.documentElement.getAttribute('data-accent'),
     skin: document.documentElement.getAttribute('data-skin')
   }))
 }
@@ -74,7 +72,6 @@ export async function resetAppearanceSettings(window: Page): Promise<void> {
       theme: 'system',
       fontScale: 'default',
       uiDensity: 'default',
-      accentPreset: 'neutral',
       skinId: 'default',
       customCssPath: ''
     })
@@ -87,7 +84,6 @@ export async function resetAppearanceSettings(window: Page): Promise<void> {
     .toMatchObject({
       fontScale: 'default',
       density: 'default',
-      accent: 'neutral',
       skin: 'default'
     })
 }

@@ -280,7 +280,6 @@ function App() {
         theme: settings.theme,
         fontScale: settings.fontScale,
         uiDensity: settings.uiDensity,
-        accentPreset: settings.accentPreset,
         skinId: settings.skinId,
         customCssPath: settings.customCssPath
       })
@@ -289,7 +288,6 @@ function App() {
     settings.theme,
     settings.fontScale,
     settings.uiDensity,
-    settings.accentPreset,
     settings.skinId,
     settings.customCssPath,
     hydrate

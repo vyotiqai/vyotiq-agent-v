@@ -13,7 +13,6 @@ function applyAppearanceDom(
   root.setAttribute('data-theme', resolvedTheme)
   root.setAttribute('data-font-scale', appearance.fontScale)
   root.setAttribute('data-density', appearance.uiDensity)
-  root.setAttribute('data-accent', appearance.accentPreset)
   root.setAttribute('data-skin', appearance.skinId)
 }
 
@@ -27,7 +26,6 @@ describe('useAppearance DOM contract', () => {
       theme: 'dark',
       fontScale: 'default',
       uiDensity: 'default',
-      accentPreset: 'neutral',
       skinId: 'bench',
       customCssPath: ''
     })
@@ -40,7 +38,6 @@ describe('useAppearance DOM contract', () => {
       theme: 'system',
       fontScale: 'default',
       uiDensity: 'default',
-      accentPreset: 'neutral',
       skinId: DEFAULT_SKIN_ID,
       customCssPath: '/tmp/custom.css'
     })

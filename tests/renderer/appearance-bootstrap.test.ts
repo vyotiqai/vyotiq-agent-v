@@ -14,7 +14,6 @@ function resetRoot(): void {
     'data-theme',
     'data-font-scale',
     'data-density',
-    'data-accent',
     'data-skin'
   ]) {
     root.removeAttribute(attr)
@@ -64,7 +63,6 @@ describe('appearance-bootstrap', () => {
     expect(root.getAttribute('data-theme')).toBe('light')
     expect(root.getAttribute('data-font-scale')).toBe('default')
     expect(root.getAttribute('data-density')).toBe('default')
-    expect(root.getAttribute('data-accent')).toBe('neutral')
   })
 
   it('uses prefers-color-scheme when cache is empty', () => {
@@ -87,7 +85,6 @@ describe('appearance-bootstrap', () => {
     expect(root.getAttribute('data-skin')).toBe('proof')
     expect(root.getAttribute('data-font-scale')).toBe('default')
     expect(root.getAttribute('data-density')).toBe('default')
-    expect(root.getAttribute('data-accent')).toBe('neutral')
   })
 
   it('applies full valid cache without overwriting with defaults', () => {
@@ -97,7 +94,6 @@ describe('appearance-bootstrap', () => {
         resolvedTheme: 'light',
         fontScale: 'large',
         uiDensity: 'compact',
-        accentPreset: 'violet',
         skinId: 'native'
       })
     )
@@ -106,7 +102,6 @@ describe('appearance-bootstrap', () => {
     expect(root.getAttribute('data-theme')).toBe('light')
     expect(root.getAttribute('data-font-scale')).toBe('large')
     expect(root.getAttribute('data-density')).toBe('compact')
-    expect(root.getAttribute('data-accent')).toBe('violet')
     expect(root.getAttribute('data-skin')).toBe('native')
   })
 
@@ -117,7 +112,6 @@ describe('appearance-bootstrap', () => {
     expect(root.getAttribute('data-skin')).toBe('default')
     expect(root.getAttribute('data-font-scale')).toBe('default')
     expect(root.getAttribute('data-density')).toBe('default')
-    expect(root.getAttribute('data-accent')).toBe('neutral')
     expect(root.getAttribute('data-theme')).toBe('light')
   })
 
@@ -128,7 +122,6 @@ describe('appearance-bootstrap', () => {
         resolvedTheme: 'dark',
         fontScale: 'default',
         uiDensity: 'default',
-        accentPreset: 'neutral',
         skinId: 'neon'
       })
     )

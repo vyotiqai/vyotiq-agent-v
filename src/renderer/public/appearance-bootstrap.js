@@ -34,16 +34,6 @@
         : 'default'
     root.setAttribute('data-density', density)
 
-    var accent =
-      cache &&
-      (cache.accentPreset === 'neutral' ||
-        cache.accentPreset === 'blue' ||
-        cache.accentPreset === 'violet' ||
-        cache.accentPreset === 'green')
-        ? cache.accentPreset
-        : 'neutral'
-    root.setAttribute('data-accent', accent)
-
     var skin =
       cache &&
       (cache.skinId === 'default' ||

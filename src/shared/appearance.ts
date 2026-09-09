@@ -11,9 +11,6 @@ export type FontScale = z.infer<typeof FontScaleSchema>
 export const UiDensitySchema = z.enum(['compact', 'default', 'comfortable'])
 export type UiDensity = z.infer<typeof UiDensitySchema>
 
-export const AccentPresetSchema = z.enum(['neutral', 'blue', 'violet', 'green'])
-export type AccentPreset = z.infer<typeof AccentPresetSchema>
-
 export const DEFAULT_FONT_SCALE: FontScale = 'default'
 
 const FONT_SCALE_STEPS: readonly FontScale[] = ['small', 'default', 'large']
@@ -27,13 +24,11 @@ export function stepFontScale(current: FontScale, direction: 1 | -1): FontScale 
 }
 
 export const DEFAULT_UI_DENSITY: UiDensity = 'default'
-export const DEFAULT_ACCENT_PRESET: AccentPreset = 'blue'
 
 export type AppearanceSettings = {
   theme: ThemeId
   fontScale: FontScale
   uiDensity: UiDensity
-  accentPreset: AccentPreset
   skinId: SkinId
   customCssPath: string
 }
@@ -45,7 +40,6 @@ export type AppearanceBootCache = {
   resolvedTheme: ResolvedTheme
   fontScale: FontScale
   uiDensity: UiDensity
-  accentPreset: AccentPreset
   skinId: SkinId
 }
 
@@ -54,7 +48,6 @@ export function pickAppearanceSettings(settings: AppearanceSettings): Appearance
     theme: settings.theme,
     fontScale: settings.fontScale,
     uiDensity: settings.uiDensity,
-    accentPreset: settings.accentPreset,
     skinId: settings.skinId,
     customCssPath: settings.customCssPath
   }
@@ -65,7 +58,10 @@ export function resolveAppearanceBootCache(
   systemDark = false
 ): AppearanceBootCache {
   return {
-    ...appearance,
+    theme: appearance.theme,
+    fontScale: appearance.fontScale,
+    uiDensity: appearance.uiDensity,
+    skinId: appearance.skinId,
     resolvedTheme: resolveTheme(appearance.theme, systemDark)
   }
 }
@@ -81,17 +77,12 @@ export function readAppearanceBootCache(): AppearanceBootCache | null {
     const theme = obj.theme
     const fontScale = obj.fontScale
     const uiDensity = obj.uiDensity
-    const accentPreset = obj.accentPreset
     const skinId = obj.skinId
     const resolvedTheme = obj.resolvedTheme
     if (
       (theme !== 'system' && theme !== 'light' && theme !== 'dark') ||
       (fontScale !== 'small' && fontScale !== 'default' && fontScale !== 'large') ||
       (uiDensity !== 'compact' && uiDensity !== 'default' && uiDensity !== 'comfortable') ||
-      (accentPreset !== 'neutral' &&
-        accentPreset !== 'blue' &&
-        accentPreset !== 'violet' &&
-        accentPreset !== 'green') ||
       (skinId !== 'default' &&
         skinId !== 'proof' &&
         skinId !== 'bench' &&
@@ -104,7 +95,6 @@ export function readAppearanceBootCache(): AppearanceBootCache | null {
       theme,
       fontScale,
       uiDensity,
-      accentPreset,
       skinId,
       resolvedTheme
     }

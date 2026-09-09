@@ -38,7 +38,6 @@ test('settings nav opens appearance section with all controls', async () => {
   await expect(window.getByText('Interface skin')).toBeVisible()
   await expect(window.getByRole('button', { name: /^text size$/i })).toBeVisible()
   await expect(window.getByRole('button', { name: /^ui density$/i })).toBeVisible()
-  await expect(window.getByRole('button', { name: /^accent color$/i })).toBeVisible()
   await expect(window.getByText('User CSS overlay')).toBeVisible()
 })
 
@@ -52,18 +51,6 @@ test('settings search navigates to interface skin field', async () => {
 
   await expect(window.getByText('Interface skin')).toBeVisible({ timeout: 10_000 })
   await expect(window.getByRole('button', { name: /^bench$/i })).toBeVisible()
-})
-
-test('settings search navigates to appearance accent field', async () => {
-  const { window } = launched
-  await openSettings(window)
-
-  const search = window.getByRole('textbox', { name: /search settings/i })
-  await search.fill('accent')
-  await search.press('Enter')
-
-  await expect(window.getByText('Accent color')).toBeVisible({ timeout: 10_000 })
-  await expect(window.getByRole('button', { name: /^accent color$/i })).toBeVisible()
 })
 
 test('theme menu updates DOM, boot cache, and persisted settings', async () => {
@@ -119,28 +106,6 @@ test('font scale and density menus update document attributes and CSS tokens', a
   })
   expect(settings?.fontScale).toBe('large')
   expect(settings?.uiDensity).toBe('compact')
-})
-
-test('accent menu updates data-accent and CSS accent token', async () => {
-  const { window } = launched
-  await openAppearanceSection(window)
-  await selectSettingsMenu(window, /^theme$/i, /^light$/i)
-  await selectSettingsMenu(window, /^accent color$/i, /^violet$/i)
-
-  await expect
-    .poll(async () => readRootAppearance(window))
-    .toMatchObject({ theme: 'light', accent: 'violet' })
-
-  const accent = await window.evaluate(() =>
-    getComputedStyle(document.documentElement).getPropertyValue('--vy-accent').trim()
-  )
-  expect(accent.toLowerCase()).toBe('#6d28d9')
-
-  const settings = await window.evaluate(async () => {
-    const res = await window.vyotiq.getSettings()
-    return res.ok ? res.data : null
-  })
-  expect(settings?.accentPreset).toBe('violet')
 })
 
 test('skin grid applies data-skin and persists proof', async () => {
@@ -219,7 +184,6 @@ test('appearance boot cache survives reload before React hydrates', async () => 
   await selectSettingsMenu(window, /^theme$/i, /^light$/i)
   await selectSettingsMenu(window, /^text size$/i, /^small$/i)
   await selectSettingsMenu(window, /^ui density$/i, /^comfortable$/i)
-  await selectSettingsMenu(window, /^accent color$/i, /^green$/i)
 
   await expect
     .poll(async () => readAppearanceBootCache(window))
@@ -228,7 +192,6 @@ test('appearance boot cache survives reload before React hydrates', async () => 
       resolvedTheme: 'light',
       fontScale: 'small',
       uiDensity: 'comfortable',
-      accentPreset: 'green',
       skinId: 'bench'
     })
 
@@ -241,7 +204,6 @@ test('appearance boot cache survives reload before React hydrates', async () => 
       theme: 'light',
       fontScale: 'small',
       density: 'comfortable',
-      accent: 'green',
       skin: 'bench'
     })
 
@@ -253,7 +215,6 @@ test('appearance boot cache survives reload before React hydrates', async () => 
     theme: 'light',
     fontScale: 'small',
     uiDensity: 'comfortable',
-    accentPreset: 'green',
     skinId: 'bench'
   })
 })
@@ -271,8 +232,7 @@ test.describe('seeded appearance on boot', () => {
         seedAppSettings(userDataDir, {
           theme: 'dark',
           fontScale: 'large',
-          uiDensity: 'comfortable',
-          accentPreset: 'blue'
+          uiDensity: 'comfortable'
         })
       }
     })
@@ -282,8 +242,7 @@ test.describe('seeded appearance on boot', () => {
       .toMatchObject({
         theme: 'dark',
         fontScale: 'large',
-        density: 'comfortable',
-        accent: 'blue'
+        density: 'comfortable'
       })
 
     const cache = await readAppearanceBootCache(seeded.window)
@@ -291,21 +250,18 @@ test.describe('seeded appearance on boot', () => {
       theme: 'dark',
       resolvedTheme: 'dark',
       fontScale: 'large',
-      uiDensity: 'comfortable',
-      accentPreset: 'blue'
+      uiDensity: 'comfortable'
     })
 
     const onDisk = JSON.parse(readFileSync(join(seeded.userDataDir, 'settings.json'), 'utf8')) as {
       theme?: string
       fontScale?: string
       uiDensity?: string
-      accentPreset?: string
     }
     expect(onDisk).toMatchObject({
       theme: 'dark',
       fontScale: 'large',
-      uiDensity: 'comfortable',
-      accentPreset: 'blue'
+      uiDensity: 'comfortable'
     })
   })
 })
@@ -329,6 +285,5 @@ test('corrupt appearance boot cache does not break startup', async () => {
   const attrs = await readRootAppearance(window)
   expect(attrs.fontScale).toBe('default')
   expect(attrs.density).toBe('default')
-  expect(attrs.accent).toBe('neutral')
   expect(attrs.skin).toBe('default')
 })

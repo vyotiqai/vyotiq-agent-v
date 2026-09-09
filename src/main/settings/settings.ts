@@ -364,6 +364,7 @@ function stripLegacyFields(raw: Record<string, unknown>): Record<string, unknown
     memoryAutoPromote: _memoryAutoPromote,
     harnessProposalRewriter: _harnessProposalRewriter,
     githubClientId: _legacyGithubClientId,
+    accentPreset: _legacyAccentPreset,
     ...rest
   } = raw
   return rest
@@ -494,7 +495,8 @@ export function getSettings(): Settings {
       'verifyBeforeDone' in raw ||
       'contractDoneWhen' in raw ||
       'readBeforeEdit' in raw ||
-      'memoryAutoPromote' in raw
+      'memoryAutoPromote' in raw ||
+      'accentPreset' in raw
     if (shouldPersist) {
       persistSettingsOnLoad(
         data,

@@ -1,4 +1,4 @@
-import type { AccentPreset, FontScale, UiDensity } from '@shared/appearance'
+import type { FontScale, UiDensity } from '@shared/appearance'
 import type { SkinId } from '@shared/skins'
 import { SKIN_CATALOG } from '@shared/skins'
 import type { Settings, ThemeId } from '@shared/ipc'
@@ -7,7 +7,6 @@ import { Menu } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { SettingsViewProps } from '../types'
 import {
-  ACCENT_OPTIONS,
   DENSITY_OPTIONS,
   FONT_SCALE_OPTIONS,
   THEME_OPTIONS
@@ -30,7 +29,6 @@ export function AppearanceSection({
     theme: ThemeId
     fontScale: FontScale
     uiDensity: UiDensity
-    accentPreset: AccentPreset
     skinId: SkinId
     customCssPath: string
   }>): void => {
@@ -55,7 +53,7 @@ export function AppearanceSection({
           id="appearance-skin"
           title="Interface skin"
           hint="Task-focused looks — contrast, elevation, or fonts."
-          help="Default matches the shipped instrument. Proof, Bench, and Native change contrast, elevation, or fonts. Accent color still overlays on top."
+          help="Default matches the shipped instrument. Proof, Bench, and Native change contrast, elevation, or fonts."
           wide
         >
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -143,25 +141,6 @@ export function AppearanceSection({
             placement="down"
             disabled={form.formLocked || !onAppearanceChange}
             onChange={(v) => apply({ uiDensity: v as UiDensity })}
-          />
-        </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup title="Accent">
-        <SettingsField
-          id="appearance-accent"
-          title="Accent color"
-          hint="Primary buttons and focus rings."
-          help="Blue is the shipped accent. Neutral pins the grayscale instrument look; Violet and Green tint accent and focus only."
-        >
-          <Menu
-            aria-label="Accent color"
-            value={settings.accentPreset}
-            options={ACCENT_OPTIONS}
-            searchable={false}
-            placement="down"
-            disabled={form.formLocked || !onAppearanceChange}
-            onChange={(v) => apply({ accentPreset: v as AccentPreset })}
           />
         </SettingsField>
       </SettingsGroup>

@@ -80,12 +80,6 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'appearance'
   },
   {
-    id: 'appearance-accent',
-    title: 'Accent color',
-    keywords: ['appearance', 'accent', 'color', 'blue', 'violet', 'green', 'neutral'],
-    section: 'appearance'
-  },
-  {
     id: 'active-provider',
     title: 'Active provider',
     keywords: ['openai', 'anthropic', 'ollama', 'custom', 'provider'],

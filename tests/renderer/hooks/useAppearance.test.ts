@@ -13,7 +13,6 @@ describe('useAppearance', () => {
     document.documentElement.removeAttribute('data-theme')
     document.documentElement.removeAttribute('data-font-scale')
     document.documentElement.removeAttribute('data-density')
-    document.documentElement.removeAttribute('data-accent')
     document.documentElement.removeAttribute('data-skin')
     // @ts-expect-error test bridge
     window.vyotiq = {
@@ -36,7 +35,6 @@ describe('useAppearance', () => {
         theme: 'dark',
         fontScale: 'large',
         uiDensity: 'compact',
-        accentPreset: 'blue',
         skinId: 'native'
       })
     )
@@ -44,20 +42,18 @@ describe('useAppearance', () => {
     expect(root.getAttribute('data-theme')).toBe('dark')
     expect(root.getAttribute('data-font-scale')).toBe('large')
     expect(root.getAttribute('data-density')).toBe('compact')
-    expect(root.getAttribute('data-accent')).toBe('blue')
     expect(root.getAttribute('data-skin')).toBe('native')
   })
 
   it('writes boot cache on apply', async () => {
     const { result } = renderHook(() => useAppearance(DEFAULT_SETTINGS))
     act(() => {
-      result.current.setAppearance({ theme: 'light', accentPreset: 'green' })
+      result.current.setAppearance({ theme: 'light' })
     })
     await waitFor(() => {
       const raw = localStorage.getItem(APPEARANCE_LOCAL_STORAGE_KEY)
       expect(raw).toBeTruthy()
       expect(raw).toContain('"theme":"light"')
-      expect(raw).toContain('"accentPreset":"green"')
     })
   })
 
@@ -79,7 +75,6 @@ describe('useAppearance', () => {
         theme: 'system',
         fontScale: 'default',
         uiDensity: 'default',
-        accentPreset: 'neutral'
       })
     )
     await waitFor(() => expect(handler).toBeTypeOf('function'))

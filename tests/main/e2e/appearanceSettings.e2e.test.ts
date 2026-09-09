@@ -42,27 +42,23 @@ describe('e2e: appearance settings persistence', () => {
     setSettings({
       theme: 'dark',
       fontScale: 'large',
-      uiDensity: 'comfortable',
-      accentPreset: 'violet'
+      uiDensity: 'comfortable'
     })
 
     const loaded = getSettings()
     expect(loaded.theme).toBe('dark')
     expect(loaded.fontScale).toBe('large')
     expect(loaded.uiDensity).toBe('comfortable')
-    expect(loaded.accentPreset).toBe('violet')
 
     const onDisk = JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8')) as {
       theme: string
       fontScale: string
       uiDensity: string
-      accentPreset: string
     }
     expect(onDisk).toMatchObject({
       theme: 'dark',
       fontScale: 'large',
-      uiDensity: 'comfortable',
-      accentPreset: 'violet'
+      uiDensity: 'comfortable'
     })
   })
 
@@ -73,13 +69,12 @@ describe('e2e: appearance settings persistence', () => {
     clearSettingsCacheForTests()
 
     setSettings({ theme: 'light', fontScale: 'small' })
-    setSettings({ accentPreset: 'green' })
+    setSettings({ uiDensity: 'compact' })
 
     const loaded = getSettings()
     expect(loaded.theme).toBe('light')
     expect(loaded.fontScale).toBe('small')
-    expect(loaded.uiDensity).toBe(DEFAULT_SETTINGS.uiDensity)
-    expect(loaded.accentPreset).toBe('green')
+    expect(loaded.uiDensity).toBe('compact')
     expect(loaded.telemetryEnabled).toBe(DEFAULT_SETTINGS.telemetryEnabled)
   })
 
@@ -87,7 +82,7 @@ describe('e2e: appearance settings persistence', () => {
     const { clearSettingsCacheForTests, getSettings } = await import('@main/settings/settings')
     clearSettingsCacheForTests()
 
-    const { fontScale: _fs, uiDensity: _ud, accentPreset: _ap, ...legacy } = DEFAULT_SETTINGS
+    const { fontScale: _fs, uiDensity: _ud, ...legacy } = DEFAULT_SETTINGS
     writeFileSync(
       join(userData, 'settings.json'),
       JSON.stringify({ ...legacy, theme: 'dark' }, null, 2),
@@ -98,7 +93,6 @@ describe('e2e: appearance settings persistence', () => {
     expect(loaded.theme).toBe('dark')
     expect(loaded.fontScale).toBe('default')
     expect(loaded.uiDensity).toBe('default')
-    expect(loaded.accentPreset).toBe('blue')
     expect(loaded.skinId).toBe('default')
     expect(loaded.customCssPath).toBe('')
   })

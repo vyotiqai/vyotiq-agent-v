@@ -1,7 +1,5 @@
 import { z } from 'zod'
 import {
-  AccentPresetSchema,
-  DEFAULT_ACCENT_PRESET,
   DEFAULT_FONT_SCALE,
   DEFAULT_SKIN_ID,
   DEFAULT_UI_DENSITY,
@@ -30,11 +28,9 @@ export const ThemeIdSchema = z.enum(['system', 'light', 'dark'])
 export type { ThemeId } from '../../theme'
 
 export {
-  AccentPresetSchema,
   FontScaleSchema,
   SkinIdSchema,
   UiDensitySchema,
-  type AccentPreset,
   type FontScale,
   type SkinId,
   type UiDensity
@@ -390,7 +386,6 @@ export const SettingsSchema = z.object({
   navigationMode: NavigationModeSchema.default(DEFAULT_NAVIGATION_MODE),
   fontScale: FontScaleSchema.default(DEFAULT_FONT_SCALE),
   uiDensity: UiDensitySchema.default(DEFAULT_UI_DENSITY),
-  accentPreset: AccentPresetSchema.default(DEFAULT_ACCENT_PRESET),
   skinId: SkinIdSchema.catch(DEFAULT_SKIN_ID).default(DEFAULT_SKIN_ID),
   /** Local user CSS overlay path. Empty = none. */
   customCssPath: z.string().default(''),
@@ -516,7 +511,6 @@ export const DEFAULT_SETTINGS: Settings = {
   navigationMode: DEFAULT_NAVIGATION_MODE,
   fontScale: DEFAULT_FONT_SCALE,
   uiDensity: DEFAULT_UI_DENSITY,
-  accentPreset: DEFAULT_ACCENT_PRESET,
   skinId: DEFAULT_SKIN_ID,
   customCssPath: '',
   telemetryEnabled: false,
