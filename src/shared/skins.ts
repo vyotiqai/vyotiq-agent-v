@@ -19,33 +19,33 @@ export const SKIN_CATALOG: readonly SkinCatalogEntry[] = [
   {
     id: 'default',
     label: 'Default',
-    description: 'Shipped instrument look.',
+    description: 'Azure instrument look.',
     previewStyle: {
-      background: 'linear-gradient(135deg, #fafafa 40%, #e5e5e5 40%, #e5e5e5 72%, #1d4ed8 72%)'
+      background: 'linear-gradient(135deg, #ffffff 40%, #00638e 40%, #00638e 72%, #4fb3e8 72%)'
     }
   },
   {
     id: 'proof',
     label: 'Proof',
-    description: 'Sharper contrast for diffs and long reading.',
+    description: 'Dusk contrast for diffs and long reading.',
     previewStyle: {
-      background: 'linear-gradient(135deg, #ffffff 40%, #525252 40%, #525252 72%, #1e40af 72%)'
+      background: 'linear-gradient(135deg, #f7f7f7 40%, #736a86 40%, #736a86 72%, #aca3c4 72%)'
     }
   },
   {
     id: 'bench',
     label: 'Bench',
-    description: 'Flat workshop — borders only, no elevation.',
+    description: 'Neon-blue workshop — borders only, no elevation.',
     previewStyle: {
-      background: 'linear-gradient(135deg, #fafafa 40%, #d4d4d4 40%, #d4d4d4 72%, #3b82f6 72%)'
+      background: 'linear-gradient(135deg, #fafafa 40%, #0072ce 40%, #0072ce 72%, #0de7ff 72%)'
     }
   },
   {
     id: 'native',
     label: 'Native',
-    description: 'System UI fonts with default neutral palette.',
+    description: 'System fonts with branding-orange accent.',
     previewStyle: {
-      background: 'linear-gradient(135deg, #f5f5f5 40%, #d4d4d4 40%, #d4d4d4 72%, #1d4ed8 72%)',
+      background: 'linear-gradient(135deg, #f5f5f5 40%, #c2410c 40%, #c2410c 72%, #fb923c 72%)',
       fontFamily: 'system-ui, sans-serif'
     }
   }

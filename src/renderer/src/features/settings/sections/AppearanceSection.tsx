@@ -53,7 +53,7 @@ export function AppearanceSection({
           id="appearance-skin"
           title="Interface skin"
           hint="Task-focused looks — contrast, elevation, or fonts."
-          help="Default matches the shipped instrument. Proof, Bench, and Native change contrast, elevation, or fonts."
+          help="Default ships the Azure instrument look. Proof uses dusk, Bench neon blue, and Native a branding-orange accent."
           wide
         >
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">

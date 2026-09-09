@@ -19,7 +19,6 @@
   --vy-chrome-border-color: var(--vy-border);
   --vy-chrome-surface: var(--vy-bg);
   --vy-prompt-surface: var(--vy-bg);
-  --vy-accent-hover: var(--vy-fg-strong);
 }
 
 [data-skin="proof"] {
@@ -79,9 +78,10 @@
   --vy-tertiary: var(--vy-gray-500);
   --vy-fg: var(--vy-gray-900);
   --vy-fg-strong: var(--vy-gray-950);
-  --vy-accent: var(--vy-gray-900);
-  --vy-accent-fg: var(--vy-gray-50);
-  --vy-focus: var(--vy-gray-500);
+  --vy-accent: #00638e;
+  --vy-accent-fg: #ffffff;
+  --vy-focus: #bfd8e3;
+  --vy-accent-hover: #004a6b;
   --vy-success: #15803d;
   --vy-danger: #b91c1c;
   --vy-warning: #a16207;
@@ -157,9 +157,10 @@
   --vy-tertiary: var(--vy-gray-500);
   --vy-fg: var(--vy-gray-900);
   --vy-fg-strong: var(--vy-gray-950);
-  --vy-accent: var(--vy-gray-900);
-  --vy-accent-fg: var(--vy-gray-50);
-  --vy-focus: var(--vy-gray-500);
+  --vy-accent: #4fb3e8;
+  --vy-accent-fg: #0a0a0a;
+  --vy-focus: #8cb9cc;
+  --vy-accent-hover: #8cb9cc;
   --vy-success: #22c55e;
   --vy-danger: #f87171;
   --vy-warning: #fbbf24;
@@ -243,6 +244,10 @@
   --vy-fg: #000000;
   --vy-fg-strong: #000000;
   --vy-composer: #f0f0f0;
+  --vy-accent: #736a86;
+  --vy-accent-fg: #ffffff;
+  --vy-accent-hover: #5f5869;
+  --vy-focus: #c8ced6;
 }
 
 [data-skin="proof"][data-theme="dark"] {
@@ -265,6 +270,10 @@
   --vy-fg: #ffffff;
   --vy-fg-strong: #ffffff;
   --vy-composer: #141414;
+  --vy-accent: #aca3c4;
+  --vy-accent-fg: #0a0a0a;
+  --vy-accent-hover: #bfb7d3;
+  --vy-focus: #c8ced6;
 }
 
 [data-skin="bench"][data-theme="light"] {
@@ -283,6 +292,10 @@
   --vy-muted: #525252;
   --vy-fg: #171717;
   --vy-composer: #f5f5f5;
+  --vy-accent: #0072ce;
+  --vy-accent-fg: #ffffff;
+  --vy-accent-hover: #005a9e;
+  --vy-focus: #00a6ff;
 }
 
 [data-skin="bench"][data-theme="dark"] {
@@ -301,6 +314,25 @@
   --vy-muted: #a3a3a3;
   --vy-fg: #f5f5f5;
   --vy-composer: #171717;
+  --vy-accent: #0de7ff;
+  --vy-accent-fg: #0a0a0a;
+  --vy-accent-hover: #3eebff;
+  --vy-focus: #00a6ff;
+}
+
+/* Native: branding-orange accent; light theme gains its own focus hue. */
+[data-skin="native"][data-theme="light"] {
+  --vy-accent: #c2410c;
+  --vy-accent-fg: #ffffff;
+  --vy-accent-hover: #9a3412;
+  --vy-focus: #f97316;
+}
+
+[data-skin="native"][data-theme="dark"] {
+  --vy-accent: #fb923c;
+  --vy-accent-fg: #0a0a0a;
+  --vy-accent-hover: #fca75e;
+  --vy-focus: #fb923c;
 }
 
 /* Opacity-only — transform on ancestors ghosts contenteditable glyphs / spellcheck. */

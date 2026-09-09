@@ -57,6 +57,22 @@ describe('default skin baseline', () => {
     expect(tokens['--vy-muted']).toBe('var(--vy-gray-600)')
   })
 
+  it('ships the Azure light accent in the base [data-theme="light"] block', () => {
+    const tokens = blockTokens(css, '[data-theme="light"]')
+    expect(tokens['--vy-accent']).toBe('#00638e')
+    expect(tokens['--vy-accent-fg']).toBe('#ffffff')
+    expect(tokens['--vy-accent-hover']).toBe('#004a6b')
+    expect(tokens['--vy-focus']).toBe('#bfd8e3')
+  })
+
+  it('ships the Azure dark accent in the base [data-theme="dark"] block', () => {
+    const tokens = blockTokens(css, '[data-theme="dark"]')
+    expect(tokens['--vy-accent']).toBe('#4fb3e8')
+    expect(tokens['--vy-accent-fg']).toBe('#0a0a0a')
+    expect(tokens['--vy-accent-hover']).toBe('#8cb9cc')
+    expect(tokens['--vy-focus']).toBe('#8cb9cc')
+  })
+
   it('matches dark theme neutral palette via base [data-theme="dark"]', () => {
     const tokens = blockTokens(css, '[data-theme="dark"]')
     expect(tokens['--vy-gray-base']).toBe('#000000')
