@@ -8,6 +8,8 @@ const FIXTURE_TRANSCRIPT = 'E2E dictation transcript.'
 
 let launched: LaunchedApp
 let workspacePath: string
+/** Result of storing the OpenAI secret — headless Linux CI has no OS keyring. */
+let secretWrite: { ok: boolean; error?: unknown } | null = null
 
 test.beforeAll(async () => {
   workspacePath = mkdtempSync(join(tmpdir(), 'vyotiq-dictation-ws-'))
@@ -53,12 +55,13 @@ test.beforeAll(async () => {
   if (!addRes.ok) throw new Error(addRes.error)
 
   workspacePath = addRes.data.activePath
-  await launched.window.evaluate(async () => {
+  secretWrite = await launched.window.evaluate(async () => {
     await window.vyotiq.setSettings({ toolApprovalOnboardingDone: true })
-    await window.vyotiq.setSecret('openai', 'sk-e2e-dictation-fixture')
+    const res = await window.vyotiq.setSecret('openai', 'sk-e2e-dictation-fixture')
     localStorage.removeItem('vyotiq.chatPaneLayout')
     localStorage.removeItem('vyotiq.rightPanel')
     localStorage.removeItem('vyotiq.browserPanelOpen')
+    return res
   })
   await launched.window.reload()
   await launched.window.waitForLoadState('domcontentloaded')
@@ -84,6 +87,14 @@ test('Mic stop inserts fixture transcript into Message', async () => {
 
   const composer = window.getByRole('combobox', { name: 'Message' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
+
+  // The dictate preflight requires the provider secret. On headless Linux
+  // there is no OS keyring, setSecret fails, and the hook correctly blocks
+  // recording — skip only when the write demonstrably failed; if it
+  // succeeded, the flow must run and the spec keeps its teeth.
+  if (secretWrite && !secretWrite.ok) {
+    test.skip(true, `setSecret unavailable: ${JSON.stringify(secretWrite.error)}`)
+  }
 
   const dictate = window.getByRole('button', { name: /^Dictate$/i })
   await expect(dictate).toBeVisible()
