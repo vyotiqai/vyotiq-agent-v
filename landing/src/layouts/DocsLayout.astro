@@ -40,14 +40,6 @@ const {
   audience
 } = Astro.props
 
-const TYPE_LABEL: Record<NonNullable<Props['type']>, string> = {
-  quickstart: 'Quickstart',
-  guide: 'Guide',
-  concept: 'Concept',
-  reference: 'Reference',
-  troubleshooting: 'Troubleshooting'
-}
-
 const groups = await groupedDocs()
 const searchEntries = await docsSearchEntries()
 const toc = headings.filter((h) => h.depth === 2 || h.depth === 3)
@@ -55,8 +47,6 @@ const pageTitle = `${title} — ${SITE_PRODUCT}`
 const onIndex = currentId == null && currentSection == null
 const onSection = currentSection != null
 const context = currentId ? await docsPageContext(currentId) : null
-const typeLabel = type ? TYPE_LABEL[type] : null
-const showType = type === 'quickstart' || type === 'guide'
 const quickstartPage = type === 'quickstart' && currentId === 'start/quickstart'
 const pageUrl = new URL(Astro.url.pathname, Astro.site)
 const structuredData = [
@@ -177,14 +167,6 @@ const structuredData = [
         <h1 id="page-title">{title}</h1>
         <p class="doc-lede">{description}</p>
         {
-          !onIndex && ((showType && typeLabel) || audience) ? (
-            <ul class="docs-page-meta">
-              {showType && typeLabel ? <li>{typeLabel}</li> : null}
-              {audience ? <li>{audience}</li> : null}
-            </ul>
-          ) : null
-        }
-        {
           toc.length > 0 ? (
             <details class="docs-mobile-toc">
               <summary>On this page</summary>
@@ -196,32 +178,6 @@ const structuredData = [
                 ))}
               </ul>
             </details>
-          ) : null
-        }
-        {
-          quickstartPage ? (
-            <figure class="docs-product-shot">
-              <img
-                class="docs-product-shot-light"
-                src="/product/agent-v-light.png"
-                alt="Agent V workspace with sidebar, composer, and chat"
-                width="1280"
-                height="800"
-                loading="lazy"
-                decoding="async"
-              />
-              <img
-                class="docs-product-shot-dark"
-                src="/product/agent-v-dark.png"
-                alt=""
-                width="1280"
-                height="800"
-                loading="lazy"
-                decoding="async"
-                aria-hidden="true"
-              />
-              <figcaption>Sidebar, composer, and review surfaces in one workspace.</figcaption>
-            </figure>
           ) : null
         }
         <div data-docs-body>
