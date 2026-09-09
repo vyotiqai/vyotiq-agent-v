@@ -54,7 +54,7 @@ export const SKIN_CATALOG: readonly SkinCatalogEntry[] = [
     label: 'Gild',
     description: 'Blue-slate instrument on alabaster and onyx.',
     previewStyle: {
-      background: 'linear-gradient(180deg, #E5E4E2 0%, #536878 52%, #0A0A0A 100%)'
+      background: 'linear-gradient(135deg, #e5e4e2 40%, #536878 40%, #536878 72%, #0a0a0a 72%)'
     }
   }
 ]

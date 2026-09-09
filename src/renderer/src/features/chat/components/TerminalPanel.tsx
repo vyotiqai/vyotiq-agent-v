@@ -28,7 +28,7 @@ function readTerminalTheme(): ITheme {
     cursor: readCssColor('--vy-fg', '#f5f5f5'),
     selectionBackground: readCssColor('--vy-surface-2', '#262626'),
     black: readCssColor('--vy-bg', '#000000'),
-    brightBlack: readCssColor('--vy-gray-400', '#525252')
+    brightBlack: readCssColor('--vy-tertiary', '#6b7280')
   }
 }
 

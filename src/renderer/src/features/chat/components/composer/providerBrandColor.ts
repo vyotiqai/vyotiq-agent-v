@@ -1,6 +1,6 @@
 const THEME_BACKGROUNDS = {
-  light: ['#ffffff', '#fafafa', '#f5f5f5'],
-  dark: ['#000000', '#171717', '#262626']
+  light: ['#ffffff', '#f7fafc', '#eef5f9'],
+  dark: ['#141414', '#1a1e20', '#202528']
 } as const
 
 const MIN_CONTRAST_RATIO = 3
@@ -15,8 +15,8 @@ function themeBackgrounds(theme: 'light' | 'dark'): readonly [string, string, st
   const fallbacks = THEME_BACKGROUNDS[theme]
   return [
     readCssColor('--vy-bg', fallbacks[0]),
-    readCssColor('--vy-gray-50', fallbacks[1]),
-    readCssColor('--vy-gray-100', fallbacks[2])
+    readCssColor('--vy-card', fallbacks[1]),
+    readCssColor('--vy-surface', fallbacks[2])
   ]
 }
 
