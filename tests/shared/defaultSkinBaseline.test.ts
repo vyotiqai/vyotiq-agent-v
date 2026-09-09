@@ -48,35 +48,30 @@ describe('default skin baseline', () => {
     expect(css).not.toMatch(/\[data-skin="default"\]\[data-theme=/)
   })
 
-  it('matches light theme neutral palette via base [data-theme="light"]', () => {
+  it('pins the Azure-tinted Default light palette in the base [data-theme="light"] block', () => {
     const tokens = blockTokens(css, '[data-theme="light"]')
-    expect(tokens['--vy-bg']).toBe('var(--vy-gray-base)')
-    expect(tokens['--vy-gray-base']).toBe('#ffffff')
-    expect(tokens['--vy-gray-900']).toBe('#171717')
-    expect(tokens['--vy-gray-600']).toBe('#525252')
-    expect(tokens['--vy-muted']).toBe('var(--vy-gray-600)')
+    const expectToken = (name: string, value: string) =>
+      expect((tokens[name] ?? '').toLowerCase()).toBe(value.toLowerCase())
+    expectToken('--vy-bg', '#FFFFFF')
+    expectToken('--vy-card', '#F7FAFC')
+    expectToken('--vy-surface', '#EEF5F9')
+    expectToken('--vy-surface-2', '#DCEAF2')
+    expectToken('--vy-border', '#C9DCE8')
+    expectToken('--vy-fg', '#17232B')
+    expectToken('--vy-muted', '#4A5F6D')
+    expectToken('--vy-accent', '#00638E')
   })
 
-  it('ships the Azure light accent in the base [data-theme="light"] block', () => {
-    const tokens = blockTokens(css, '[data-theme="light"]')
-    expect(tokens['--vy-accent']).toBe('#00638e')
-    expect(tokens['--vy-accent-fg']).toBe('#ffffff')
-    expect(tokens['--vy-accent-hover']).toBe('#004a6b')
-    expect(tokens['--vy-focus']).toBe('#bfd8e3')
-  })
-
-  it('ships the Azure dark accent in the base [data-theme="dark"] block', () => {
+  it('pins the Azure-tinted Default dark palette in the base [data-theme="dark"] block', () => {
     const tokens = blockTokens(css, '[data-theme="dark"]')
-    expect(tokens['--vy-accent']).toBe('#4fb3e8')
-    expect(tokens['--vy-accent-fg']).toBe('#0a0a0a')
-    expect(tokens['--vy-accent-hover']).toBe('#8cb9cc')
-    expect(tokens['--vy-focus']).toBe('#8cb9cc')
-  })
-
-  it('matches dark theme neutral palette via base [data-theme="dark"]', () => {
-    const tokens = blockTokens(css, '[data-theme="dark"]')
-    expect(tokens['--vy-gray-base']).toBe('#000000')
-    expect(tokens['--vy-gray-900']).toBe('#f5f5f5')
-    expect(tokens['--vy-gray-600']).toBe('#a3a3a3')
+    const expectToken = (name: string, value: string) =>
+      expect((tokens[name] ?? '').toLowerCase()).toBe(value.toLowerCase())
+    expectToken('--vy-bg', '#141414')
+    expectToken('--vy-card', '#1A1E20')
+    expectToken('--vy-surface', '#202528')
+    expectToken('--vy-border', '#303A40')
+    expectToken('--vy-fg', '#E8EDF0')
+    expectToken('--vy-muted', '#9FB3BE')
+    expectToken('--vy-accent', '#4FB3E8')
   })
 })

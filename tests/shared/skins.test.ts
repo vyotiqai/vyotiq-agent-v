@@ -27,10 +27,15 @@ describe('skins', () => {
   })
 
   it('uses opaque window backgrounds', () => {
-    expect(resolveSkinWindowBackground('default', 'light', 'win32')).toBe('#ffffff')
-    expect(resolveSkinWindowBackground('proof', 'dark', 'darwin')).toBe('#000000')
-    expect(resolveSkinWindowBackground('bench', 'light', 'linux')).toBe('#ffffff')
-    expect(resolveSkinWindowBackground('native', 'dark', 'win32')).toBe('#000000')
+    // Each skin owns its opaque window canvas, matching its CSS `--vy-bg`.
+    expect(resolveSkinWindowBackground('default', 'light', 'win32')).toBe('#FFFFFF')
+    expect(resolveSkinWindowBackground('default', 'dark', 'win32')).toBe('#141414')
+    expect(resolveSkinWindowBackground('proof', 'light', 'darwin')).toBe('#F7F7F7')
+    expect(resolveSkinWindowBackground('proof', 'dark', 'darwin')).toBe('#272A3B')
+    expect(resolveSkinWindowBackground('bench', 'light', 'linux')).toBe('#FFFFFF')
+    expect(resolveSkinWindowBackground('bench', 'dark', 'linux')).toBe('#04040A')
+    expect(resolveSkinWindowBackground('native', 'light', 'win32')).toBe('#F9F9F9')
+    expect(resolveSkinWindowBackground('native', 'dark', 'win32')).toBe('#1A1A1A')
     expect(resolveSkinWindowBackground('gild', 'light', 'win32')).toBe('#E5E4E2')
     expect(resolveSkinWindowBackground('gild', 'dark', 'win32')).toBe('#0A0A0A')
   })

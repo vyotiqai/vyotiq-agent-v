@@ -65,8 +65,16 @@ export function resolveSkinWindowBackground(
   resolved: 'light' | 'dark',
   _platform?: string
 ): string {
-  if (skinId === 'gild') {
-    return resolved === 'dark' ? '#0A0A0A' : '#E5E4E2'
+  switch (skinId) {
+    case 'default':
+      return resolved === 'dark' ? '#141414' : '#FFFFFF'
+    case 'proof':
+      return resolved === 'dark' ? '#272A3B' : '#F7F7F7'
+    case 'bench':
+      return resolved === 'dark' ? '#04040A' : '#FFFFFF'
+    case 'native':
+      return resolved === 'dark' ? '#1A1A1A' : '#F9F9F9'
+    case 'gild':
+      return resolved === 'dark' ? '#0A0A0A' : '#E5E4E2'
   }
-  return resolved === 'dark' ? '#000000' : '#ffffff'
 }
