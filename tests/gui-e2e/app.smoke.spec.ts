@@ -80,7 +80,7 @@ test('skip link targets main content landmark', async () => {
 test('hover shows new chat tooltip', async () => {
   const { window } = launched
   // Settings uses native title=; IconButton (New chat) mounts role=tooltip.
-  const newChat = window.getByRole('button', { name: /^new chat$/i }).first()
+  const newChat = window.getByRole('button', { name: /new chat in/i }).first()
   await expect(newChat).toBeVisible()
   const box = await newChat.boundingBox()
   expect(box).toBeTruthy()

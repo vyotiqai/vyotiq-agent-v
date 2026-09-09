@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
@@ -40,6 +40,17 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
   const userDataDir = mkdtempSync(join(tmpdir(), 'vyotiq-gui-e2e-'))
   mkdirSync(userDataDir, { recursive: true })
   options.preLaunchSeed?.(userDataDir)
+  // The e2e specs drive the classic sidebar chrome; the shipped default is
+  // the home rail. Merge the seed AFTER preLaunchSeed: seedAppSettings
+  // rewrites settings.json from DEFAULT_SETTINGS + its partial, which would
+  // otherwise clobber navigationMode. Specs can still opt out by seeding a
+  // navigationMode explicitly.
+  const settingsPath = join(userDataDir, 'settings.json')
+  const seeded: Record<string, unknown> = existsSync(settingsPath)
+    ? (JSON.parse(readFileSync(settingsPath, 'utf8')) as Record<string, unknown>)
+    : {}
+  if (seeded.navigationMode === undefined) seeded.navigationMode = 'sidebar'
+  writeFileSync(settingsPath, JSON.stringify(seeded), 'utf8')
   mkdirSync(videoDir, { recursive: true })
 
   const electronExecutable = require('electron') as string

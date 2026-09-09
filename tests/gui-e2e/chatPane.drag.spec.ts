@@ -161,7 +161,7 @@ test('multi-pane polish: min widths, sidebar open state, docked empty, rail pad'
   await expect(rightComposer).toHaveAttribute('data-composer-side-rail-pad', '1')
 
   // New chat in multi-pane stays docked (no centered hero).
-  await window.getByRole('button', { name: /^new chat$/i }).click()
+  await window.getByRole('button', { name: /new chat in/i }).first().click()
   await expect(window.locator('[data-chat-pane]')).toHaveCount(2)
   await expect(window.locator('[data-chat-pane-title="New chat"]')).toBeVisible({ timeout: 10_000 })
   const newPane = window.locator('[data-chat-pane-title="New chat"]')
