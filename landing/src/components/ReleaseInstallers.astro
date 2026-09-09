@@ -14,15 +14,30 @@ const macX64Asset = assets.macX64 ?? null
 const macAsset = macArm64Asset ?? macX64Asset
 
 const platforms = [
-  { id: 'win', label: 'Download for Windows', asset: assets.win, hrefX64: null, hint: null },
+  {
+    id: 'win',
+    label: 'Download for Windows',
+    short: 'Windows',
+    asset: assets.win,
+    hrefX64: null,
+    hint: null
+  },
   {
     id: 'mac',
     label: 'Download for macOS',
+    short: 'macOS',
     asset: macAsset,
     hrefX64: macX64Asset?.url ?? null,
     hint: 'macOS — correct architecture chosen automatically (Apple silicon or Intel)'
   },
-  { id: 'linux', label: 'Download for Linux', asset: assets.linux, hrefX64: null, hint: null }
+  {
+    id: 'linux',
+    label: 'Download for Linux',
+    short: 'Linux',
+    asset: assets.linux,
+    hrefX64: null,
+    hint: null
+  }
 ] as const
 
 const available = platforms.flatMap((platform) =>
@@ -36,7 +51,7 @@ const showPackages = hasReleaseAssets()
     {
       available.map((platform) => (
         <a
-          class="btn btn-secondary"
+          class="btn btn-secondary platform-button"
           data-release-platform={platform.id}
           href={platform.asset.url}
           data-href-x64={platform.hrefX64 ?? undefined}
@@ -44,7 +59,8 @@ const showPackages = hasReleaseAssets()
           aria-label={platform.hint ?? undefined}
           rel="noopener noreferrer"
         >
-          {platform.label}
+          <span class="label-full">{platform.label}</span>
+          <span class="label-short">{platform.short}</span>
         </a>
       ))
     }
@@ -58,6 +74,58 @@ const showPackages = hasReleaseAssets()
     </a>
   </div>
 </div>
+
+<style>
+  /* Compact "also available" chips for the platforms the visitor is NOT on.
+     Everything here is gated on html[data-os], which is only set by the
+     before-paint inline script below — without JavaScript all three buttons
+     render exactly as before: equal btn-secondary links with full labels.
+     Demoted buttons stay visible, clickable and keyboard-focusable. */
+  .label-short {
+    display: none;
+  }
+
+  :global(html[data-os]) .platform-button {
+    min-height: 2.25rem;
+    padding-inline: 0.65rem;
+    font-size: 0.75rem;
+  }
+
+  :global(html[data-os]) .platform-button:not(.btn-primary) {
+    color: var(--muted);
+  }
+
+  :global(html[data-os]) .platform-button:not(.btn-primary):hover {
+    color: var(--fg);
+  }
+
+  :global(html[data-os]) .label-full {
+    display: none;
+  }
+
+  :global(html[data-os]) .label-short {
+    display: inline;
+  }
+
+  /* The detected platform's button is the sole primary CTA: it keeps the
+     full "Download for <OS>" label, the standard button size, and is moved
+     to the front of the row. Fill/contrast comes from the global
+     .btn-primary class the script swaps in. */
+  :global(html[data-os]) .platform-button.btn-primary {
+    order: -1;
+    min-height: 2.75rem;
+    padding-inline: 1.25rem;
+    font-size: 0.875rem;
+  }
+
+  :global(html[data-os]) .platform-button.btn-primary .label-full {
+    display: inline;
+  }
+
+  :global(html[data-os]) .platform-button.btn-primary .label-short {
+    display: none;
+  }
+</style>
 
 {
   showPackages ? (
@@ -104,9 +172,12 @@ const showPackages = hasReleaseAssets()
             }
           } catch (error) {}
         }
-        var target = platform === 'mac' ? 'mac' : platform
-        var match = document.querySelector('[data-release-platform="' + target + '"]')
+        var match = document.querySelector('[data-release-platform="' + platform + '"]')
         if (!(match instanceof HTMLElement)) return
+        // data-os on <html> drives the CSS promotion/demotion above. It is
+        // only set when the detected platform actually has an installer in
+        // this snapshot; otherwise all three buttons stay equal.
+        document.documentElement.dataset.os = platform
         highlight(match)
       })()
     </script>
