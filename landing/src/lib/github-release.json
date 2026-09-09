@@ -1,19 +1,27 @@
 {
-  "tag": "v1.0.0",
-  "version": "1.0.0",
-  "htmlUrl": "https://github.com/vyotiqai/vyotiq-agent-v/releases/tag/v1.0.0",
+  "tag": "v1.1.2",
+  "version": "1.1.2",
+  "htmlUrl": "https://github.com/vyotiqai/vyotiq-agent-v/releases/tag/v1.1.2",
   "assets": {
     "win": {
-      "name": "Vyotiq-1.0.0-setup.exe",
-      "url": "https://github.com/vyotiqai/vyotiq-agent-v/releases/download/v1.0.0/Vyotiq-1.0.0-setup.exe"
+      "name": "Vyotiq-1.1.2-setup.exe",
+      "url": "https://github.com/vyotiqai/vyotiq-agent-v/releases/download/v1.1.2/Vyotiq-1.1.2-setup.exe"
     },
     "linux": {
-      "name": "Vyotiq-1.0.0.AppImage",
-      "url": "https://github.com/vyotiqai/vyotiq-agent-v/releases/download/v1.0.0/Vyotiq-1.0.0.AppImage"
+      "name": "Vyotiq-1.1.2.AppImage",
+      "url": "https://github.com/vyotiqai/vyotiq-agent-v/releases/download/v1.1.2/Vyotiq-1.1.2.AppImage"
+    },
+    "macArm64": {
+      "name": "Vyotiq-1.1.2-arm64.dmg",
+      "url": "https://github.com/vyotiqai/vyotiq-agent-v/releases/download/v1.1.2/Vyotiq-1.1.2-arm64.dmg"
+    },
+    "macX64": {
+      "name": "Vyotiq-1.1.2-x64.dmg",
+      "url": "https://github.com/vyotiqai/vyotiq-agent-v/releases/download/v1.1.2/Vyotiq-1.1.2-x64.dmg"
     },
     "mac": {
-      "name": "Vyotiq-1.0.0.dmg",
-      "url": "https://github.com/vyotiqai/vyotiq-agent-v/releases/download/v1.0.0/Vyotiq-1.0.0.dmg"
+      "name": "Vyotiq-1.1.2-arm64.dmg",
+      "url": "https://github.com/vyotiqai/vyotiq-agent-v/releases/download/v1.1.2/Vyotiq-1.1.2-arm64.dmg"
     }
   }
 }

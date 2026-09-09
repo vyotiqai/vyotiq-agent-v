@@ -1157,6 +1157,13 @@ a:focus-visible {
   line-height: 1.6;
 }
 
+.docs-section-intro {
+  margin: -0.25rem 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
 .docs-index-list {
   list-style: none;
   padding: 0 !important;
@@ -1340,6 +1347,11 @@ a:focus-visible {
 .docs-search-results a:hover,
 .docs-search-results a:focus-visible {
   background: var(--surface);
+}
+
+.docs-search-results a[data-active='true'] {
+  background: var(--surface);
+  box-shadow: inset 2px 0 0 currentColor;
 }
 
 .docs-search-results span,

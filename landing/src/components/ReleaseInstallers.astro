@@ -1,11 +1,21 @@
 ---
 import LandingIcon from './LandingIcon.astro'
 import { githubRelease, hasReleaseAssets, RELEASES_PAGE } from '../lib/githubRelease'
+import { SITE_PRODUCT } from '../lib/site'
+
+const { assets, version } = githubRelease
+
+// Two separately targeted macOS links. The legacy `mac` field (= the arm64
+// dmg) backfills the Apple-silicon slot so older single-field snapshots still
+// render; the Intel slot only links a real x64/zip capture.
+const macArm64Asset = assets.macArm64 ?? assets.mac ?? null
+const macX64Asset = assets.macX64 ?? null
 
 const platforms = [
-  { id: 'win', label: 'Download for Windows', asset: githubRelease.assets.win },
-  { id: 'mac', label: 'Download for macOS', asset: githubRelease.assets.mac },
-  { id: 'linux', label: 'Download for Linux', asset: githubRelease.assets.linux }
+  { id: 'win', label: 'Download for Windows', asset: assets.win },
+  { id: 'mac-arm64', label: 'Download for macOS (Apple silicon)', asset: macArm64Asset },
+  { id: 'mac-x64', label: 'Download for macOS (Intel)', asset: macX64Asset },
+  { id: 'linux', label: 'Download for Linux', asset: assets.linux }
 ] as const
 
 const available = platforms.flatMap((platform) =>
@@ -14,48 +24,96 @@ const available = platforms.flatMap((platform) =>
 const showPackages = hasReleaseAssets()
 ---
 
-<div class="home-installers" data-release-packages={showPackages ? 'true' : 'false'}>
+<div class="home-release-area">
+  <div class="home-installers" data-release-packages={showPackages ? 'true' : 'false'}>
+    {
+      available.map((platform) => (
+        <a
+          class="btn btn-secondary"
+          data-release-platform={platform.id}
+          href={platform.asset.url}
+          rel="noopener noreferrer"
+        >
+          {platform.label}
+        </a>
+      ))
+    }
+    <a class="home-text-link" href={githubRelease.htmlUrl || RELEASES_PAGE}>
+      GitHub Releases
+      <LandingIcon name="arrow-up-right" />
+    </a>
+    <a class="home-text-link" href="/docs">
+      Read the documentation
+      <LandingIcon name="arrow-up-right" />
+    </a>
+  </div>
   {
-    available.map((platform) => (
-      <a
-        class="btn btn-secondary"
-        data-release-platform={platform.id}
-        href={platform.asset.url}
-        rel="noopener noreferrer"
-      >
-        {platform.label}
-      </a>
-    ))
+    version && (
+      <p class="home-release-version">
+        Latest: {SITE_PRODUCT} v{version}
+      </p>
+    )
   }
-  <a class="home-text-link" href={githubRelease.htmlUrl || RELEASES_PAGE}>
-    GitHub Releases
-    <LandingIcon name="arrow-up-right" />
-  </a>
-  <a class="home-text-link" href="/docs">
-    Read the documentation
-    <LandingIcon name="arrow-up-right" />
-  </a>
+  <p class="home-release-note">Installers are named Vyotiq — Agent V is the assistant inside the Vyotiq app.</p>
 </div>
 
 {
   showPackages ? (
     <script is:inline>
       (function () {
+        function highlight(el) {
+          document.querySelectorAll('[data-release-platform]').forEach(function (link) {
+            link.classList.remove('btn-primary')
+            link.classList.add('btn-secondary')
+          })
+          el.classList.remove('btn-secondary')
+          el.classList.add('btn-primary')
+        }
         var ua = navigator.userAgent
         var platform = ''
         if (/Windows NT/i.test(ua)) platform = 'win'
         else if (!/Android/i.test(ua) && /Linux/i.test(ua)) platform = 'linux'
         else if (/Mac OS X|Macintosh/i.test(ua)) platform = 'mac'
         if (!platform) return
-        var match = document.querySelector('[data-release-platform="' + platform + '"]')
+        if (platform === 'mac') {
+          // macOS UA strings still report "Intel" on Apple silicon, so prefer
+          // the high-entropy architecture hint; default stays arm64. Both
+          // links always stay visible — detection only highlights.
+          try {
+            var uad = navigator.userAgentData
+            if (uad && typeof uad.getHighEntropyValues === 'function') {
+              uad
+                .getHighEntropyValues(['architecture'])
+                .then(function (values) {
+                  if (values && values.architecture === 'x86') {
+                    var intel = document.querySelector('[data-release-platform="mac-x64"]')
+                    if (intel instanceof HTMLElement) highlight(intel)
+                  }
+                })
+                .catch(function () {})
+            }
+          } catch (error) {}
+        }
+        var target = platform === 'mac' ? 'mac-arm64' : platform
+        var match = document.querySelector('[data-release-platform="' + target + '"]')
         if (!(match instanceof HTMLElement)) return
-        document.querySelectorAll('[data-release-platform]').forEach(function (link) {
-          link.classList.remove('btn-primary')
-          link.classList.add('btn-secondary')
-        })
-        match.classList.remove('btn-secondary')
-        match.classList.add('btn-primary')
+        highlight(match)
       })()
     </script>
   ) : null
 }
+
+<style>
+  .home-release-version,
+  .home-release-note {
+    margin: 0.75rem 0 0;
+    color: var(--muted);
+    font-size: 0.875rem;
+    line-height: 1.6;
+  }
+
+  .home-release-note {
+    margin-top: 0.375rem;
+    font-size: 0.8125rem;
+  }
+</style>

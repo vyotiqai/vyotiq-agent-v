@@ -75,6 +75,12 @@ const structuredData = [
             {
               '@type': 'ListItem',
               position: 2,
+              name: context.sectionLabel,
+              item: new URL(context.sectionHref, Astro.site).href
+            },
+            {
+              '@type': 'ListItem',
+              position: 3,
               name: title
             }
           ]
@@ -315,12 +321,22 @@ const structuredData = [
         type="search"
         placeholder="Search docs…"
         autocomplete="off"
+        role="combobox"
+        aria-expanded="true"
+        aria-controls="docs-search-results"
+        aria-autocomplete="list"
         data-docs-search-input
       />
       <kbd>Esc</kbd>
     </label>
     <p class="docs-search-status" aria-live="polite" data-docs-search-status></p>
-    <ul class="docs-search-results" data-docs-search-results></ul>
+    <ul
+      class="docs-search-results"
+      id="docs-search-results"
+      role="listbox"
+      aria-label="Search results"
+      data-docs-search-results
+    ></ul>
   </dialog>
   <script
     type="application/json"
@@ -357,6 +373,38 @@ const structuredData = [
     const raw = document.querySelector<HTMLScriptElement>('#docs-search-data')?.textContent ?? '[]'
     const entries = JSON.parse(raw) as SearchEntry[]
 
+    let activeIndex = -1
+
+    function resultLinks(): HTMLAnchorElement[] {
+      if (!results) return []
+      return [...results.querySelectorAll<HTMLAnchorElement>('li > a')]
+    }
+
+    function setActive(index: number, scroll = true): void {
+      const links = resultLinks()
+      if (!results) return
+      activeIndex = links.length === 0 ? -1 : Math.max(0, Math.min(index, links.length - 1))
+      links.forEach((link, i) => {
+        const active = i === activeIndex
+        if (active) {
+          link.dataset.active = 'true'
+          link.setAttribute('aria-selected', 'true')
+        } else {
+          delete link.dataset.active
+          link.setAttribute('aria-selected', 'false')
+        }
+      })
+      if (scroll && activeIndex >= 0) {
+        links[activeIndex]?.scrollIntoView({ block: 'nearest' })
+      }
+    }
+
+    function moveActive(delta: number): void {
+      const links = resultLinks()
+      if (links.length === 0) return
+      setActive(activeIndex < 0 ? (delta > 0 ? 0 : links.length - 1) : activeIndex + delta)
+    }
+
     function renderSearch(query = ''): void {
       if (!results || !status) return
       const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean)
@@ -379,6 +427,7 @@ const structuredData = [
       if (terms.length === 0) {
         results.replaceChildren()
         status.textContent = 'Type to search documentation.'
+        activeIndex = -1
         return
       }
 
@@ -390,6 +439,8 @@ const structuredData = [
           const summary = document.createElement('span')
           const section = document.createElement('small')
           link.href = entry.href
+          link.setAttribute('role', 'option')
+          link.setAttribute('aria-selected', 'false')
           heading.textContent = entry.title
           summary.textContent = entry.description
           section.textContent = entry.section
@@ -398,6 +449,8 @@ const structuredData = [
           return item
         })
       )
+      // Reset selection on every new result set; keyboard input re-selects.
+      activeIndex = -1
       status.textContent =
         matches.length === 0
           ? `No documentation matches “${query.trim()}”.`
@@ -418,6 +471,26 @@ const structuredData = [
       dialog?.close()
     })
     input?.addEventListener('input', () => renderSearch(input.value))
+    input?.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        moveActive(1)
+        return
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        moveActive(-1)
+        return
+      }
+      if (event.key === 'Enter') {
+        const links = resultLinks()
+        if (activeIndex >= 0 && links[activeIndex]) {
+          event.preventDefault()
+          links[activeIndex]!.click()
+        }
+        // Otherwise fall through so the browser submits/follows default behavior.
+      }
+    })
     dialog?.addEventListener('click', (event) => {
       if (event.target === dialog) dialog.close()
     })
@@ -482,9 +555,20 @@ const structuredData = [
     document.querySelector<HTMLElement>('[data-docs-copy]')?.addEventListener('click', async (event) => {
       const button = event.currentTarget
       if (!(button instanceof HTMLButtonElement) || !copyLabel) return
-      const heading = document.querySelector<HTMLElement>('#page-title')
-      const body = document.querySelector<HTMLElement>('[data-docs-body]')
-      const text = `${heading?.innerText ?? document.title}\n${location.href}\n\n${body?.innerText ?? ''}`.trim()
+      let text: string | null = null
+      // Prefer the page's raw markdown served at /docs/<section>/<doc>.md.
+      try {
+        const rawPath = `${location.pathname.replace(/\/+$/, '')}.md`
+        const response = await fetch(rawPath)
+        if (response.ok) text = await response.text()
+      } catch {
+        // fall through to rendered-text fallback
+      }
+      if (text == null || text.trim() === '') {
+        const heading = document.querySelector<HTMLElement>('#page-title')
+        const body = document.querySelector<HTMLElement>('[data-docs-body]')
+        text = `${heading?.innerText ?? document.title}\n${location.href}\n\n${body?.innerText ?? ''}`.trim()
+      }
       try {
         await navigator.clipboard.writeText(text)
         copyLabel.textContent = 'Copied'

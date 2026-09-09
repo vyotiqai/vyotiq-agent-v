@@ -127,16 +127,36 @@ export async function groupedDocs(): Promise<DocsNavGroup[]> {
   })).filter((group) => group.entries.length > 0)
 }
 
+/** Cap per-paragraph search snippets so the payload stays small. */
+const PROSE_SNIPPET_MAX = 200
+
 function searchableMarkdown(body: string): string {
   return body
     .replace(/^---[\s\S]*?---/, ' ')
     .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`\n]*`/g, ' ')
     .split('\n')
-    .filter((line) => /^#{1,6}\s+\S/.test(line))
-    .map((line) => line.replace(/^#{1,6}\s+/, ''))
+    .map((line) => {
+      const heading = /^#{1,6}\s+\S/.exec(line)
+      // Headings stay complete — they carry the strongest search signal.
+      if (heading) {
+        return line
+          .replace(/^#{1,6}\s+/, '')
+          .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+          .replace(/[`*_>|~-]/g, ' ')
+      }
+      // Body prose is indexed as a short snippet per paragraph.
+      const text = line
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+        .replace(/[`*_>|~-]/g, ' ')
+        .trim()
+      if (!text) return ''
+      return text.length > PROSE_SNIPPET_MAX
+        ? `${text.slice(0, PROSE_SNIPPET_MAX).trimEnd()}…`
+        : text
+    })
+    .filter(Boolean)
     .join(' ')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/[`*_>#|~-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }

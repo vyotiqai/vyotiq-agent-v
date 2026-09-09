@@ -1,24 +1,26 @@
 ---
-title: Build and install from source
-description: Pack Agent V with electron-builder and verify the runtime on Windows, macOS, or Linux.
+title: Install Agent V
+description: Install Agent V from the GitHub release, or build the packaged app from source and verify the runtime on Windows, macOS, or Linux.
 section: start
-order: 1
+order: 2
 type: quickstart
-audience: Evaluators and new users
+audience: New users
 related:
   - start/quickstart
   - concepts/privacy-data
 ---
 
-The Agent V homepage has download buttons for each installer on the latest GitHub Release at https://github.com/vyotiqai/vyotiq-agent-v/releases/latest. There is no app store listing. You can also run a local pnpm dev session, or pack an installer from this repository with electron-builder (--publish never).
+The Agent V homepage has download buttons for each installer on the latest GitHub Release at https://github.com/vyotiqai/vyotiq-agent-v/releases/latest. There is no app store listing.
 
-The packaged product name is Vyotiq. Agent V is the product/agent inside that app. Electron is the packager and runtime, not the product name.
+Installers and the Start-menu shortcut are named Vyotiq — Agent V is the assistant inside that app. Electron is the packager and runtime, not the product name.
 
-## Before you pack or launch
+To run a local pnpm dev session, or pack an installer from this repository with electron-builder (`--publish never`), build from source.
+
+## Build from source
 
 You need pnpm, a folder you can use as a workspace, and at least one model provider you can configure after launch. Cloud providers require their own API key. Local Ollama and a private or loopback Custom OpenAI-compatible endpoint can be used without a key.
 
-Packaging does not write a cloud API key. New settings initially select local Ollama with `qwen2.5`. That selection is not proof that Ollama is installed or reachable. Provider setup happens in [Settings → Providers](/docs/customize/providers).
+Packaging does not write a cloud API key. New settings start on local Ollama with `qwen2.5` — see Quickstart for what that does and does not guarantee. Provider setup happens in [Settings → Providers](/docs/customize/providers).
 
 From the repository root:
 
@@ -37,7 +39,7 @@ Scripts in package.json run pnpm build then electron-builder. Default output is 
 | `pnpm pack:win` | Windows NSIS | Vyotiq-1.0.0-setup.exe |
 | `pnpm pack:mac` | macOS DMG | Vyotiq-1.0.0-<arch>.dmg |
 | `pnpm pack:linux` | Linux AppImage | Vyotiq-1.0.0.AppImage |
-| pnpm pack:dir:win | Unpacked Windows dir | win-unpacked/ with Vyotiq.exe |
+| `pnpm pack:dir:win` | Unpacked Windows dir | win-unpacked/ with Vyotiq.exe |
 
 Names come from electron-builder.yml:
 
@@ -74,6 +76,6 @@ The packaged application targets the system architecture used for the pack. Ther
 
 ## Verify the installation
 
-Open Settings → About. The page shows the Vyotiq version, Electron, Chromium, Node.js, platform, and architecture. Copy copies that build information for support.
+Open Settings → About. The page shows the Vyotiq version, Electron, Chromium, Node.js, platform, and architecture. The Copy button copies that build information for support.
 
 Continue with the first useful run. If the app opens but a run cannot start, use [Provider and model issues](/docs/troubleshooting/providers-models).

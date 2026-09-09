@@ -58,6 +58,6 @@ Browse includes a Discover row of larger cards. This catalog wave is GitHub, Gma
 
 Add GitHub uses Sign in with OAuth, or paste a personal access token when OAuth is unavailable. Native GitHub in the Pull Request panel stays separate from GitHub MCP.
 
-Add Gmail (and Drive or Calendar) requires a Google Cloud Web client. Register the fixed redirect URI `http://127.0.0.1:19847/oauth/callback` then paste the client ID and secret. The first Google app collects that client; later Google Adds skip to workspace scope, Read only versus Read and write, and consent.
+Add Gmail (and Drive or Calendar) requires a one-time Google Cloud Web client with a fixed redirect URI. Follow the Google setup in [MCP servers](/docs/customize/mcp) before the first Connect.
 
 MCP server tools run in Agent mode. MCP tools protection defaults on under [Settings → Tools](/docs/reference/settings#tools).

@@ -25,7 +25,13 @@ function classifyInstaller(name) {
 }
 
 export function hasReleaseAssets(mapped) {
-  return Boolean(mapped?.assets?.win || mapped?.assets?.mac || mapped?.assets?.linux)
+  return Boolean(
+    mapped?.assets?.win ||
+      mapped?.assets?.mac ||
+      mapped?.assets?.macArm64 ||
+      mapped?.assets?.macX64 ||
+      mapped?.assets?.linux
+  )
 }
 
 /** Keep a previously baked snapshot when a fetch returns nothing usable. */
@@ -47,6 +53,15 @@ export function sanitizeSnapshot(value) {
     const name = typeof asset?.name === 'string' ? asset.name : ''
     const url = httpsUrl(asset?.url)
     if (name && url && classifyInstaller(name)) assets[id] = { name, url }
+  }
+  // Per-arch mac fields keep the -mac.zip Intel fallback, so gate on the
+  // artifact shape instead of classifyInstaller (which only knows .dmg).
+  for (const id of ['macArm64', 'macX64']) {
+    const asset = parsed.assets?.[id]
+    const name = typeof asset?.name === 'string' ? asset.name : ''
+    const url = httpsUrl(asset?.url)
+    const shape = id === 'macArm64' ? /\.dmg$/i : /\.(dmg|zip)$/i
+    if (name && url && shape.test(name)) assets[id] = { name, url }
   }
   return {
     tag: typeof parsed.tag === 'string' && parsed.tag.trim() ? parsed.tag.trim() : null,
@@ -88,9 +103,12 @@ export function mapGithubRelease(release) {
   const macPattern = version
     ? new RegExp(`^Vyotiq-${version}(?:-arm64|-x64)?\\.dmg$`, 'i')
     : null
+  // Legacy single-archive mac upload shape: `Vyotiq-<v>-mac.zip`.
+  const macZipPattern = version ? new RegExp(`^Vyotiq-${version}-mac\\.zip$`, 'i') : null
 
   const assets = {}
   const macCandidates = []
+  const macZipCandidates = []
   for (const asset of list) {
     if (asset == null || typeof asset !== 'object') continue
     const name = typeof asset.name === 'string' ? asset.name : ''
@@ -99,8 +117,18 @@ export function mapGithubRelease(release) {
     if (expected && name === expected.win) assets.win = { name, url }
     else if (expected && name === expected.linux) assets.linux = { name, url }
     else if (macPattern && macPattern.test(name)) macCandidates.push({ name, url })
+    else if (macZipPattern && macZipPattern.test(name)) macZipCandidates.push({ name, url })
   }
+  const macArm64 = macCandidates.find((candidate) => candidate.name.endsWith('-arm64.dmg')) ?? null
+  const macX64 =
+    macCandidates.find((candidate) => candidate.name.endsWith('-x64.dmg')) ??
+    macZipCandidates[0] ??
+    null
+  // Legacy `mac` field stays = the arm64 image when one ships (pickMacDmg
+  // prefers -arm64.dmg), falling back to the single-arch shape.
   const mac = pickMacDmg(macCandidates)
+  if (macArm64) assets.macArm64 = macArm64
+  if (macX64) assets.macX64 = macX64
   if (mac) assets.mac = mac
 
   for (const asset of list) {
@@ -110,8 +138,12 @@ export function mapGithubRelease(release) {
     const platform = classifyInstaller(name)
     if (!platform || !url || assets[platform]) continue
     if (platform === 'mac') {
-      const picked = pickMacDmg([{ name, url }, ...macCandidates])
-      if (picked) assets.mac = picked
+      if (!assets.mac) {
+        const picked = pickMacDmg([{ name, url }, ...macCandidates])
+        if (picked) assets.mac = picked
+      }
+      if (!assets.macArm64 && /-arm64\.dmg$/i.test(name)) assets.macArm64 = { name, url }
+      else if (!assets.macX64 && /-x64\.dmg$/i.test(name)) assets.macX64 = { name, url }
       continue
     }
     assets[platform] = { name, url }

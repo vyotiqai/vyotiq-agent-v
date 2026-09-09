@@ -1,12 +1,12 @@
 ---
 import DocsLayout from '../../layouts/DocsLayout.astro'
-import { docsHref, docsSectionHref, groupedDocs } from '../../lib/docs'
+import { DOC_SECTION_INTRO, docsHref, docsSectionHref, groupedDocs } from '../../lib/docs'
 
 const groups = await groupedDocs()
 ---
 
 <DocsLayout
-  title="Docs"
+  title="Documentation"
   description="Install Agent V, complete a first useful run, learn each work surface, and recover when something fails."
 >
   {
@@ -15,6 +15,7 @@ const groups = await groupedDocs()
         <h2>
           <a href={docsSectionHref(group.section)}>{group.label}</a>
         </h2>
+        <p class="docs-section-intro">{DOC_SECTION_INTRO[group.section]}</p>
         <ul class="docs-index-list">
           {group.entries.map((entry) => (
             <li>

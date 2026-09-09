@@ -1,6 +1,6 @@
 ---
 title: Built-in tools reference
-description: All 61 built-in tool names, grouped by job with mode, approval, output, and limit boundaries.
+description: The built-in tool catalog — 59 current tools plus 2 legacy aliases, grouped by job with mode, approval, output, and limit boundaries.
 section: reference
 order: 2
 type: reference

@@ -2,7 +2,7 @@
 title: "Quickstart: first useful change"
 description: Open a workspace, configure a provider and model, run a small task, then review the result.
 section: start
-order: 2
+order: 1
 type: quickstart
 audience: First-time users
 related:
@@ -15,7 +15,7 @@ This path ends with one reviewed Agent run. Use a small, reversible task in a wo
 
 ## Prerequisites
 
-- Agent V is installed.
+- Agent V is installed. If it is not installed yet, start with [Install Agent V](/docs/start/install).
 - You have a project folder.
 - You have either a cloud-provider key, local Ollama, or a private Custom OpenAI-compatible endpoint.
 

@@ -12,6 +12,8 @@ export type GithubReleaseSnapshot = {
   assets: {
     win?: ReleaseAsset
     mac?: ReleaseAsset
+    macArm64?: ReleaseAsset
+    macX64?: ReleaseAsset
     linux?: ReleaseAsset
   }
 }
@@ -52,6 +54,8 @@ function sanitize(value: unknown): GithubReleaseSnapshot {
     assets: {
       win: httpsAsset(parsed.assets?.win),
       mac: httpsAsset(parsed.assets?.mac),
+      macArm64: httpsAsset(parsed.assets?.macArm64),
+      macX64: httpsAsset(parsed.assets?.macX64),
       linux: httpsAsset(parsed.assets?.linux)
     }
   }
