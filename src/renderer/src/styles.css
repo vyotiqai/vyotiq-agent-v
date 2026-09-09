@@ -44,6 +44,14 @@
   --vy-font-mono: ui-monospace, monospace;
 }
 
+[data-skin="gild"] {
+  --vy-radius-sm: 2px;
+  --vy-radius-md: 4px;
+  --vy-radius-lg: 6px;
+  --vy-radius-xl: 8px;
+  --vy-shadow-chrome: 0 0 0 1px var(--vy-border);
+}
+
 /*
   Neutral grayscale design tokens (exact hex).
   Light: Base #FFF → 950 #0A0A0A
@@ -333,6 +341,45 @@
   --vy-accent-fg: #0a0a0a;
   --vy-accent-hover: #fca75e;
   --vy-focus: #fb923c;
+}
+
+/* Gild: mineral / engraved look — Alabaster light, Onyx dark; Blue Slate accent. */
+[data-skin="gild"][data-theme="light"] {
+  --vy-bg: #e5e4e2;
+  --vy-card: #ebeae8;
+  --vy-surface: #f0efed;
+  --vy-surface-2: #ddd9d5;
+  --vy-border: #c9cac7;
+  --vy-border-strong: #a8abaa;
+  --vy-fg: #1a1c1e;
+  --vy-fg-strong: #0a0a0a;
+  --vy-muted: #4a5259;
+  --vy-secondary: #3d4449;
+  --vy-tertiary: #6b747c;
+  --vy-composer: #e3e2e0;
+  --vy-accent: #536878;
+  --vy-accent-fg: #ffffff;
+  --vy-accent-hover: #43525f;
+  --vy-focus: #536878;
+}
+
+[data-skin="gild"][data-theme="dark"] {
+  --vy-bg: #0a0a0a;
+  --vy-card: #141618;
+  --vy-surface: #191c1e;
+  --vy-surface-2: #232629;
+  --vy-border: #2a2f34;
+  --vy-border-strong: #3a4045;
+  --vy-fg: #e5e4e2;
+  --vy-fg-strong: #f2f2f0;
+  --vy-muted: #98a4ad;
+  --vy-secondary: #b7c1c8;
+  --vy-tertiary: #7e8891;
+  --vy-composer: #141618;
+  --vy-accent: #8fa6b8;
+  --vy-accent-fg: #0a0a0a;
+  --vy-accent-hover: #a9bdcb;
+  --vy-focus: #a9bdcb;
 }
 
 /* Opacity-only — transform on ancestors ghosts contenteditable glyphs / spellcheck. */
