@@ -25,10 +25,10 @@ const canSymlink = (() => {
 import {
   ensureMemoryLayout,
   listMemoryNotes,
-  MEMORY_LIST_INDEX_EXCERPT,
   readMemoryFile,
   readMemoryIndex,
   readMemoryState,
+  truncateMemoryExcerpt,
   writeMemoryFile,
   memoryRoot
 } from '@main/agent/context/memory'
@@ -104,24 +104,87 @@ describe('memory store', () => {
     dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-'))
     expect(readMemoryIndex(dir)).toBe('')
     expect(readMemoryState(dir)).toBe('')
-    expect(listMemoryNotes(dir)).toEqual({ indexExcerpt: '', notes: [], hasState: false })
+    expect(listMemoryNotes(dir)).toEqual({ notes: [], indexedNotes: [], hasState: false })
     expect(readMemoryFile(dir, 'state.md')).toContain('not created yet')
     expect(existsSync(memoryRoot(dir))).toBe(false)
   })
 
-  it('caps the listMemoryNotes index excerpt at 1500 with an overflow marker', () => {
+  it('caps the injected index excerpt on a line boundary with an explicit marker', () => {
     dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-'))
     ensureMemoryLayout(dir)
-    const bigIndex = 'x'.repeat(1_600)
+    // Multi-entry index whose full text exceeds the cap: the cut must land on
+    // the last complete entry (line boundary), never mid-entry, and the tail
+    // must be announced with the deterministic marker.
+    const bigIndex = ['# Memory index', '', ...Array.from({ length: 40 }, (_, i) => `- [note-${i}].md — ${'x'.repeat(100)}`), ''].join('\n')
     writeFileSync(join(memoryRoot(dir), 'index.md'), bigIndex, 'utf8')
-    const listed = listMemoryNotes(dir)
-    expect(listed.indexExcerpt.endsWith('\n…')).toBe(true)
-    expect(listed.indexExcerpt.length).toBe(MEMORY_LIST_INDEX_EXCERPT + 2)
-    expect(listed.indexExcerpt).not.toContain(bigIndex)
-    // Under the cap the excerpt is byte-exact.
+    const capped = readMemoryIndex(dir, 3000)
+    expect(capped.length).toBeLessThanOrEqual(3000 + '[truncated: showing first 0 of 0 chars — memory_read the file for the rest]'.length)
+    expect(capped.endsWith('\n') || capped.includes('[truncated:')).toBe(true)
+    expect(capped).toContain('[truncated: showing first ')
+    expect(capped).toMatch(/of \d+ chars — memory_read the file for the rest\]$/)
+    // Cut lands on a line boundary: the last line before the marker is complete.
+    const lines = capped.split('\n')
+    const markerIdx = lines.findIndex((l) => l.startsWith('[truncated:'))
+    expect(markerIdx).toBeGreaterThan(0)
+    expect(lines[markerIdx - 1]).toMatch(/^- \[note-\d+\]\.md — x+$/)
+    // No half-entry: no truncated 'x' run shorter than the full 100.
+    expect(lines[markerIdx - 1].length).toBeGreaterThan(100)
+
+    // Under the cap the output is byte-exact with no marker.
     dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-'))
     ensureMemoryLayout(dir)
     writeFileSync(join(memoryRoot(dir), 'index.md'), '# small\n', 'utf8')
-    expect(listMemoryNotes(dir).indexExcerpt).toBe('# small\n')
+    expect(readMemoryIndex(dir, 3000)).toBe('# small\n')
+  })
+
+  it('hard-cuts (with marker) only when a single line exceeds the cap', () => {
+    expect(truncateMemoryExcerpt('a'.repeat(120), 100)).toBe(
+      'a'.repeat(100) + '\n[truncated: showing first 100 of 120 chars — memory_read the file for the rest]'
+    )
+  })
+
+  it('does not excerpt the index in memory_list output (pre-injected every step)', () => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-'))
+    ensureMemoryLayout(dir)
+    writeFileSync(join(memoryRoot(dir), 'index.md'), 'INDEX_BODY_MARKER\n', 'utf8')
+    writeMemoryFile(dir, 'notes/prefs.md', 'prefers pnpm\n')
+    const listed = listMemoryNotes(dir)
+    expect(listed).toEqual({ notes: ['prefs.md'], indexedNotes: [], hasState: false })
+    expect('INDEX_BODY_MARKER' in listed).toBe(false)
+  })
+
+  it('reports index coverage drift (unindexed + broken pointers)', () => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-'))
+    ensureMemoryLayout(dir)
+    writeFileSync(
+      join(memoryRoot(dir), 'index.md'),
+      '- [notes/live.md](notes/live.md) — live\n- [notes/gone.md](notes/gone.md) — deleted\n',
+      'utf8'
+    )
+    writeMemoryFile(dir, 'notes/live.md', 'live\n')
+    writeMemoryFile(dir, 'notes/orphan.md', 'not indexed\n')
+    const listed = listMemoryNotes(dir)
+    expect(listed.notes).toEqual(['live.md', 'orphan.md'])
+    expect(listed.indexedNotes).toEqual(['gone.md', 'live.md'])
+
+    const out = toolMemoryList(dir)
+    expect(out).toContain('index.md coverage: 2/2 notes')
+    expect(out).toContain('not in index.md: orphan.md')
+    expect(out).toContain('indexed but missing on disk: gone.md')
+  })
+
+  it('reports full coverage when every note is indexed and resolves', () => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-'))
+    ensureMemoryLayout(dir)
+    writeFileSync(
+      join(memoryRoot(dir), 'index.md'),
+      '- [notes/only.md](notes/only.md) — x\n',
+      'utf8'
+    )
+    writeMemoryFile(dir, 'notes/only.md', 'x\n')
+    const out = toolMemoryList(dir)
+    expect(out).toContain('index.md coverage: 1/1 notes — full')
+    expect(out).not.toContain('not in index.md:')
+    expect(out).not.toContain('indexed but missing on disk:')
   })
 })

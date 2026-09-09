@@ -4,6 +4,7 @@ import { join } from 'path'
 import type { ProviderChatRequest, StreamChunk } from '@main/agent/providers/types'
 import type { ArcTask } from '@main/agent/arcEval/types'
 import {
+  arcGridResponseFormat,
   buildArcPrompt,
   extractFirstGrid,
   renderArcGrid,
@@ -250,6 +251,38 @@ describe('solveTask harness loop', () => {
     expect(candidate.prediction).toBeNull()
     expect(candidate.error).toMatch(/no valid grid/i)
     expect(state.streamChat).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('responseFormat opt-in', () => {
+  beforeEach(() => {
+    state.streamChat.mockReset()
+    state.settings = {
+      provider: 'ollama',
+      model: 'qwen2.5',
+      ollamaBaseUrl: 'http://127.0.0.1:11434'
+    }
+  })
+
+  it('omits responseFormat from the provider request when not opted in', async () => {
+    replyWith('[[5,4],[7,6]]')
+    await solveTask(SAMPLE_TASK)
+    expect(lastRequest().responseFormat).toBeUndefined()
+  })
+
+  it('attaches the grid schema and key instruction when opted in', async () => {
+    replyWith('{"grid": [[5,4],[7,6]]}')
+    const candidate = await solveTask(SAMPLE_TASK, { responseFormat: arcGridResponseFormat() })
+    expect(candidate.prediction).toEqual(SAMPLE_TASK.test[0].output)
+    const request = lastRequest()
+    expect(request.responseFormat?.type).toBe('json_schema')
+    expect(request.responseFormat?.name).toBe('arc_grid')
+    expect(request.responseFormat?.strict).toBe(true)
+    expect(request.system).toContain('"grid"')
+  })
+
+  it('parses the wrapped {"grid": ...} reply with the shared extractor', () => {
+    expect(extractFirstGrid('{"grid": [[5,4],[7,6]]}')).toEqual([[5, 4], [7, 6]])
   })
 })
 

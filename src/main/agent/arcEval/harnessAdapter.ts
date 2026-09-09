@@ -8,6 +8,7 @@ import {
 import { getSecret } from '../../settings/secrets'
 import { getSettings } from '../../settings/settings'
 import { getProvider } from '../providers'
+import type { ResponseFormat } from '../providers/types'
 import type { ArcCandidate, ArcExample, ArcGrid, ArcTask } from './types'
 
 /**
@@ -41,6 +42,8 @@ export interface SolveTaskOptions {
   maxOutputTokens?: number
   /** Per-completion reasoning effort (e.g. 'low'); omit for thinking disabled. */
   reasoningEffort?: ThinkingEffort
+  /** Opt-in structured-output schema attached to the provider request (`response_format` passthrough). */
+  responseFormat?: ResponseFormat
   /** Candidate index recorded on the result (majority-vote ordering, Wave 2b). */
   index?: number
 }
@@ -65,6 +68,38 @@ export const ARC_SYSTEM_PROMPT = [
 
 const ARC_REPAIR_PROMPT =
   'Your reply was not a valid output grid. Reply again with ONLY the output grid as a JSON number[][] — no prose, no code fences. Cell values 0-9, every row the same length.'
+
+/**
+ * Fixed strict JSON schema for structured output (opt-in via
+ * `SolveTaskOptions.responseFormat`). Grid dimensions vary per task, so rows
+ * stay unconstrained arrays of 0-9 integers; `extractFirstGrid` still
+ * validates the real rectangle. The reply is wrapped as `{"grid": [[...]]}` —
+ * the first balanced `[[...]]` substring parses identically either way.
+ */
+export function arcGridResponseFormat(): ResponseFormat {
+  return {
+    type: 'json_schema',
+    name: 'arc_grid',
+    strict: true,
+    schema: {
+      type: 'object',
+      properties: {
+        grid: {
+          type: 'array',
+          items: {
+            type: 'array',
+            items: { type: 'integer', minimum: 0, maximum: 9 }
+          }
+        }
+      },
+      required: ['grid'],
+      additionalProperties: false
+    }
+  }
+}
+
+const ARC_RESPONSE_FORMAT_SUFFIX =
+  ' Wrap the grid in a JSON object under the key "grid" ({"grid": [[...]]}).'
 
 /** Render one grid compactly: one row per line, space-separated digits. */
 export function renderArcGrid(grid: ArcGrid): string {
@@ -237,7 +272,8 @@ async function completeOnce(
   messages: ChatMessage[],
   signal: AbortSignal,
   maxOutputTokens: number,
-  thinking: ThinkingConfig
+  thinking: ThinkingConfig,
+  responseFormat?: ResponseFormat
 ): Promise<CompletionOutcome> {
   let text = ''
   let reasoningChars = 0
@@ -253,7 +289,8 @@ async function completeOnce(
     system,
     messages,
     maxOutputTokens,
-    thinking
+    thinking,
+    ...(responseFormat ? { responseFormat } : {})
   })) {
     if (signal.aborted) throw new Error('Aborted')
     if (chunk.type === 'text' && chunk.text) text += chunk.text
@@ -292,6 +329,10 @@ async function runCandidate(
   const thinking: ThinkingConfig = opts?.reasoningEffort
     ? { enabled: true, effort: opts.reasoningEffort, display: 'omitted' }
     : { enabled: false }
+  const responseFormat = opts?.responseFormat
+  const system = responseFormat
+    ? `${ARC_SYSTEM_PROMPT}${ARC_RESPONSE_FORMAT_SUFFIX}`
+    : ARC_SYSTEM_PROMPT
   const rounds =
     mode === 'zero-shot' ? 1 : 1 + Math.max(0, opts?.repairRounds ?? 1)
 
@@ -303,11 +344,12 @@ async function runCandidate(
       try {
         outcome = await completeOnce(
           config,
-          ARC_SYSTEM_PROMPT,
+          system,
           messages,
           signal,
           maxOutputTokens,
-          thinking
+          thinking,
+          responseFormat
         )
       } catch (e) {
         return fail(

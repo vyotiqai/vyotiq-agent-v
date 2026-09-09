@@ -5,15 +5,30 @@ import {
 } from '../context/memory'
 
 export function toolMemoryList(workspace: string): string {
-  const { indexExcerpt, notes, hasState } = listMemoryNotes(workspace)
+  // index.md is auto-injected into the system prompt every step — do not
+  // duplicate it here. memory_read fetches the full file on demand.
+  const { notes, indexedNotes, hasState } = listMemoryNotes(workspace)
+  // Drift signal: notes on disk vs notes the injected index points at.
+  // Unindexed notes are invisible to retrieval (the index is the map);
+  // broken pointers would make memory_read fail. Zero injection cost —
+  // this output only exists when the agent calls memory_list.
+  const unindexed = notes.filter((n) => !indexedNotes.includes(n))
+  const broken = indexedNotes.filter((n) => !notes.includes(n))
+  const drift: string[] = []
+  if (unindexed.length) {
+    drift.push(`not in index.md: ${unindexed.join(', ')}`)
+  }
+  if (broken.length) {
+    drift.push(`indexed but missing on disk: ${broken.join(', ')}`)
+  }
   return [
-    '## index.md (excerpt)',
-    indexExcerpt || '(empty)',
-    '',
     '## notes/',
     notes.length ? notes.map((n) => `- ${n}`).join('\n') : '(none)',
     '',
-    `state.md: ${hasState ? 'present' : 'absent'}`
+    `index.md coverage: ${indexedNotes.length}/${notes.length} notes${drift.length ? ` (${drift.join('; ')})` : ' — full'}`,
+    `state.md: ${hasState ? 'present' : 'absent'}`,
+    '',
+    'index.md is pre-injected into the system prompt (memory_read index.md for the full file).'
   ].join('\n')
 }
 

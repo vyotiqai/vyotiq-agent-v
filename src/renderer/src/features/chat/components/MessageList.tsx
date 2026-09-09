@@ -222,14 +222,18 @@ export function estimateTranscriptRowSize(row: TranscriptRow | undefined): numbe
 }
 
 /**
- * Cheap revision string so streaming content growth re-measures without a length
- * change. Tail-follow only cares about the bottom of the transcript, and only the
- * trailing row grows during a stream (its id is stable, its content fingerprint
- * changes) — so a single last-row fingerprint is equivalent to a full O(n) join.
+ * Cheap revision string so content-size changes re-measure without a length
+ * change. Fingerprints every row (not just the trailing one): mid-transcript
+ * growth — a tool body expanding under later rows, "Show more" on an earlier
+ * prompt, prose streaming behind tool rows — changes some row's fingerprint,
+ * and a trailing-only check would miss it, leaving stale absolute offsets and
+ * overlapping rows. Fingerprints are short constant-cost strings, so the join
+ * stays trivial even for long transcripts.
  */
 export function transcriptRowsContentRevision(rows: readonly TranscriptRow[]): string {
   if (rows.length === 0) return ''
-  return transcriptRowFingerprint(rows[rows.length - 1]!)
+  if (rows.length === 1) return transcriptRowFingerprint(rows[0]!)
+  return `${rows.length}:${rows.map((row) => transcriptRowFingerprint(row)).join('|')}`
 }
 
 /** Vertical inset of the pinned turn prompt below the scrollport's top edge. */

@@ -86,6 +86,7 @@ async function run() {
   if (reasoningEffort !== undefined && !REASONING_EFFORTS.includes(reasoningEffort)) {
     throw new Error(`--reasoning-effort must be one of ${REASONING_EFFORTS.join('|')}, got: ${reasoningEffort}`)
   }
+  const responseFormat = flags['response-format'] === true
   const subset = flags.subset ?? 'train'
   const solverName = flags.solver ?? 'harness'
   const outPath = flags.out
@@ -107,7 +108,7 @@ async function run() {
   // Dynamic imports: the resolve shim must be registered before the TS
   // modules' extensionless relative imports are resolved.
   const adapterUrl = pathToFileURL(join(workspaceRoot, 'src/main/agent/arcEval/harnessAdapter.ts')).href
-  const [{ solveTask, solveTaskZeroShot }, { runEvalTasks }, { buildReport, formatConsole, writeJsonReport }] =
+  const [{ solveTask, solveTaskZeroShot, arcGridResponseFormat }, { runEvalTasks }, { buildReport, formatConsole, writeJsonReport }] =
     await Promise.all([
       import(adapterUrl),
       import('../../src/main/agent/arcEval/orchestrator.ts'),
@@ -128,7 +129,8 @@ async function run() {
       index: candidateIndex,
       ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-      ...(reasoningEffort !== undefined ? { reasoningEffort } : {})
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+      ...(responseFormat ? { responseFormat: arcGridResponseFormat() } : {})
     })
   const model = flags.model ? String(flags.model) : '<settings>'
   const startedAt = new Date().toISOString()

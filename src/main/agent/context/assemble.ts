@@ -383,11 +383,28 @@ function buildStableSystem(parts: {
   }
 
   if (parts.memorySection?.trim()) {
+    const memoryRaw = parts.memorySection.trim()
     const memory = capWithinSystem(
-      parts.memorySection.trim(),
+      memoryRaw,
       Math.floor(parts.budgets.memoryWorkspace / 2)
     )
-    if (memory) sections.push(memory)
+    if (memory) {
+      sections.push(memory)
+      if (memory.length < memoryRaw.length) {
+        logger.warn('Memory section truncated from system prompt under budget pressure', {
+          scope: 'assemble',
+          memoryChars: memoryRaw.length,
+          keptChars: memory.length,
+          systemBudget: parts.budgets.system
+        })
+      }
+    } else {
+      logger.warn('Memory section dropped from system prompt under budget pressure', {
+        scope: 'assemble',
+        memoryChars: memoryRaw.length,
+        systemBudget: parts.budgets.system
+      })
+    }
   }
 
   if (parts.compaction?.summary) {

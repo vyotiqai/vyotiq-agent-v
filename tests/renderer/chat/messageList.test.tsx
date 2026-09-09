@@ -933,6 +933,48 @@ describe('MessageList', () => {
     }
   })
 
+  it('bumps content revision when a non-trailing row changes size', () => {
+    const base = [
+      { kind: 'message', id: 'u1', role: 'user', content: 'hi' },
+      {
+        kind: 'message',
+        id: 'a1',
+        role: 'assistant',
+        content: 'Reading the directory…',
+        streaming: true
+      }
+    ] as UiItem[]
+    const before = buildTranscriptRows([
+      ...base,
+      {
+        kind: 'tool',
+        id: 't1',
+        tool: { id: 't1', name: 'read', summary: 'dir', status: 'running', content: '' }
+      }
+    ])
+    const after = buildTranscriptRows([
+      ...base,
+      {
+        kind: 'tool',
+        id: 't1',
+        tool: {
+          id: 't1',
+          name: 'read',
+          summary: 'dir',
+          status: 'done',
+          content: 'file list\n'.repeat(60)
+        }
+      }
+    ])
+
+    // Mid-transcript tool body grows while the trailing text row is stable.
+    // The remasure effect deps on this revision, so it must change or the
+    // virtualizer keeps stale offsets and rows overlap.
+    expect(transcriptRowsContentRevision(after)).not.toBe(
+      transcriptRowsContentRevision(before)
+    )
+  })
+
   it('uses document flow for short transcripts so rows cannot absolute-overlap', () => {
     const items: UiItem[] = [
       { kind: 'message', id: 'u1', role: 'user', content: 'hi' },

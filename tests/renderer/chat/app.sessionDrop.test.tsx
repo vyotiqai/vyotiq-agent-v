@@ -26,7 +26,6 @@ const settingsStub = {
   theme: 'system',
   fontScale: 1,
   uiDensity: 'comfortable',
-  accentPreset: 'default',
   skinId: 'default',
   customCssPath: '',
   tabAutocomplete: true,

@@ -45,6 +45,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
       'proof',
       'bench',
       'native',
+      'gild',
       'default',
       'contrast',
       'workshop',

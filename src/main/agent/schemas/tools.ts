@@ -1165,7 +1165,7 @@ export const TOOL_REGISTRY = {
   },
   memory_list: {
     description:
-      'List long-term memory under .vyotiq/memory/: index excerpt, note names, whether state.md exists.',
+      'List long-term memory under .vyotiq/memory/: note names, index coverage (unindexed/broken pointers), whether state.md exists. index.md is pre-injected into the system prompt.',
     schema: memoryListArgs
   },
   memory_read: {
