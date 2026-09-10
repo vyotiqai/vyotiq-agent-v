@@ -100,13 +100,20 @@ async function onTick(runId: string): Promise<void> {
   if (!info) return
   const loop = readLoop(info.runDir)
   if (!loop || loop.status !== 'armed') {
+    // Loop.json gone (run deleted) or stopped: drop the timer AND the meta
+    // entry, or one {workspacePath, runDir} leaks per deleted armed-loop run
+    // for the process lifetime (audit L-9 — deleteRun never disarms).
     clearTimer(runId)
+    meta.delete(runId)
+    tickRetries.delete(runId)
     return
   }
   const goal = readGoal(info.runDir)
   // A completed goal terminates the loop; a paused goal holds without launching.
   if (goal && goal.status === 'complete') {
     clearTimer(runId)
+    meta.delete(runId)
+    tickRetries.delete(runId)
     return
   }
   if (goal && goal.status === 'paused') {
@@ -236,6 +243,19 @@ export function rearmLoopFromDisk(workspacePath: string, runId: string, runDir: 
 }
 
 export const formatLoopStatusLine = formatLoopStatusLineShared
+
+/** Test helper — run ids still carrying scheduler meta (armed or leaked). */
+export function listLoopSchedulerMetaRunIdsForTests(): string[] {
+  return [...meta.keys()]
+}
+
+/** Test helper — clear timers + meta between tests. */
+export function resetRunLoopSchedulerForTests(): void {
+  for (const timer of timers.values()) clearTimeout(timer)
+  timers.clear()
+  meta.clear()
+  tickRetries.clear()
+}
 
 registerGoalLoopDisarm((runDir) => {
   disarmLoop(runDir)

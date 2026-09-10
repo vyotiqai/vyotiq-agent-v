@@ -1448,14 +1448,16 @@ export async function renameRun(
   }
   const goalText = goal.trim().slice(0, 200)
   const statusPath = join(dir, 'status.json')
-  const raw = JSON.parse(readFileSync(statusPath, 'utf8')) as unknown
+  // Async reads (audit L-15): the contract is capped elsewhere but this path
+  // read the full file on the main thread; IPC rename must not block the loop.
+  const raw = JSON.parse(await readFile(statusPath, 'utf8')) as unknown
   const parsed = RunStatusSchema.safeParse(raw)
   if (!parsed.success) {
     throw new Error('Invalid run status')
   }
   const contractPath = join(dir, 'contract.md')
   if (existsSync(contractPath)) {
-    const contract = readFileSync(contractPath, 'utf8')
+    const contract = await readFile(contractPath, 'utf8')
     const updated = GOAL_SECTION_RE.test(contract)
       ? contract.replace(GOAL_SECTION_RE, `$1${goalText}$3`)
       : contract

@@ -159,9 +159,12 @@ export function tryRegisterRunAbort(
   }
   if (active.size >= MAX_ACTIVE_RUNS) {
     rejectedRunStarts++
+    // Surface the live count (M-7 audit): resumes bypass this gate, so
+    // active.size can exceed the cap; and offline `wait_forever` runs hold
+    // slots indefinitely — the count tells the user why chatStart is refused.
     return {
       ok: false,
-      error: `Too many concurrent runs (max ${MAX_ACTIVE_RUNS})`,
+      error: `Too many concurrent runs (max ${MAX_ACTIVE_RUNS}; ${active.size} active)`,
       code: 'RUN_LIMIT_REACHED'
     }
   }

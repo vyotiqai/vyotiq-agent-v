@@ -33,6 +33,79 @@ export const STREAM_RETRY_BACKOFF_MS = STREAM_RETRY_BASE_MS
 
 export { isRetriableNetworkError, isRetriableProviderMessage, RetriableStreamError }
 
+/**
+ * User-facing hint for a dead local endpoint. `ECONNREFUSED` against a
+ * loopback/private host means the configured local backend (Ollama-style,
+ * e.g. `connect ECONNREFUSED 127.0.0.1:11434`) is not running — retrying the
+ * connect cannot help (audit M2).
+ */
+export const LOCAL_ENDPOINT_DOWN_HINT =
+  'local endpoint refused the connection — the backend is not running. Start the backend, then retry.'
+
+/** Host part of a `host:port` / `[v6]:port` endpoint string. */
+function endpointHost(endpoint: string): string {
+  const raw = endpoint.trim().toLowerCase()
+  if (!raw) return ''
+  if (raw.startsWith('[')) {
+    const close = raw.indexOf(']')
+    return close === -1 ? raw.slice(1) : raw.slice(1, close)
+  }
+  // Bare IPv6 with a trailing :port (`::1:11434`): strip it only when the
+  // remainder still looks like an IPv6 address.
+  if ((raw.match(/:/g) ?? []).length > 1) {
+    const stripped = raw.replace(/:\d{1,5}$/, '')
+    if (stripped.includes(':') && stripped !== '::') return stripped
+    return raw
+  }
+  const colon = raw.indexOf(':')
+  return colon === -1 ? raw : raw.slice(0, colon)
+}
+
+/** Loopback, localhost, and private-range hosts (RFC 1918 + IPv6 ULA/link-local). */
+function isLocalHost(host: string): boolean {
+  if (!host) return false
+  if (host === 'localhost' || host === '::1' || host.startsWith('127.')) return true
+  if (/^10\.\d{1,3}(\.\d{1,3}){1,2}$/.test(host)) return true
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true
+  if (/^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(host)) return true
+  if (/^169\.254\.\d{1,3}\.\d{1,3}$/.test(host)) return true
+  if (/^f[cd][0-9a-f]{2}:/i.test(host) || /^fe80:/i.test(host)) return true
+  return false
+}
+
+/**
+ * True when a failure message is `ECONNREFUSED` naming a loopback/private
+ * endpoint. A refused remote host is NOT this: a remote refusal can clear on
+ * its own, so it keeps the existing retry class.
+ */
+export function isLocalEndpointDownMessage(message: string): boolean {
+  if (!/ECONNREFUSED/i.test(message)) return false
+  const endpoint = message.match(/ECONNREFUSED[^\S\n]+(\S+)/i)?.[1] ?? ''
+  return isLocalHost(endpointHost(endpoint))
+}
+
+/** Decorate a dead-local-endpoint failure message with the user-facing hint. Idempotent. */
+export function describeLocalEndpointDown(message: string): string {
+  if (
+    !isLocalEndpointDownMessage(message) ||
+    message.includes(LOCAL_ENDPOINT_DOWN_HINT)
+  ) {
+    return message
+  }
+  return `${message} — ${LOCAL_ENDPOINT_DOWN_HINT}`
+}
+
+/** True when a thrown error (or its cause chain) is a dead-local-endpoint failure. */
+export function isLocalEndpointDownError(err: unknown): boolean {
+  let current: unknown = err
+  while (typeof current === 'object' && current !== null) {
+    const message = (current as { message?: unknown }).message
+    if (typeof message === 'string' && isLocalEndpointDownMessage(message)) return true
+    current = current instanceof Error ? (current as Error & { cause?: unknown }).cause : undefined
+  }
+  return false
+}
+
 export function isRetriableStreamFailure(err: unknown): boolean {
   return isRetriableNetworkError(err) || err instanceof RetriableStreamError
 }
@@ -63,6 +136,10 @@ export function shouldRetryStreamErrorChunk(
   attempt: number,
   httpStatus?: number
 ): boolean {
+  // Dead local endpoint (ECONNREFUSED to loopback/private): the configured
+  // local backend (Ollama-style, e.g. 127.0.0.1:11434) is not running —
+  // no retry can succeed. Fail fast regardless of error code (audit M2).
+  if (isLocalEndpointDownMessage(message)) return false
   if (errorCode === 'CIRCUIT_OPEN') return false
   if (errorCode === 'PROVIDER_NETWORK') {
     // The fetch layer already retried connect failures to exhaustion inside
@@ -89,6 +166,9 @@ export function isTransientHttpFailure(errorCode: string, httpStatus?: number): 
 }
 
 export function shouldRetryThrownStreamError(err: unknown, attempt: number): boolean {
+  // Dead local endpoint: no-retry class (audit M2) — fail fast like the
+  // chunk classification above.
+  if (isLocalEndpointDownError(err)) return false
   return !isAbortError(err) && attempt < MAX_STREAM_ATTEMPTS && isRetriableStreamFailure(err)
 }
 
@@ -182,6 +262,12 @@ export function decideStreamAttemptResult(
   const err = result.err
   if (isAbortError(err)) return { action: 'throw', err }
   if (isCircuitOpenError(err)) return { action: 'exhausted', err }
+  // Dead local endpoint: fail fast (no stream retries) and attach the
+  // user-facing hint to the message before it surfaces.
+  if (isLocalEndpointDownError(err)) {
+    if (err instanceof Error) err.message = describeLocalEndpointDown(err.message)
+    return { action: 'throw', err }
+  }
   if (shouldRetryThrownStreamError(err, attempt)) return { action: 'retry' }
   if (opts?.exhaustedOnLastRetriableThrow && isRetriableStreamFailure(err)) {
     return { action: 'exhausted', err }

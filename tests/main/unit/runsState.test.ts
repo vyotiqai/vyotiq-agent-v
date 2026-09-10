@@ -511,4 +511,25 @@ describe('listRuns / interruptOrphanRuns', () => {
     expect(status.goal).toBe('new goal')
     expect(readFileSync(join(dir, 'contract.md'), 'utf8')).toContain('new goal')
   })
+
+  it('leaves the contract goal section untouched when no section header matches (async read path)', async () => {
+    // Audit L-15 made both reads async; the no-match branch must stay
+    // byte-identical — contract written back unchanged when GOAL_SECTION_RE
+    // does not match.
+    const runId = 'rename-no-section'
+    const dir = createRun(workspace, runId, 'old goal')
+    const contract = '# Run contract\n\nNo goal section here\n'
+    writeFileSync(join(dir, 'contract.md'), contract, 'utf8')
+    await renameRun(workspace, runId, 'renamed goal')
+    expect(readFileSync(join(dir, 'contract.md'), 'utf8')).toBe(contract)
+  })
+
+  it('rejects rename when status.json is schema-invalid on the async read path', async () => {
+    // Parsable JSON that fails RunStatusSchema must hit the explicit
+    // 'Invalid run status' rejection — same shape as before audit L-15.
+    const runId = 'rename-invalid-status'
+    const dir = createRun(workspace, runId, 'old goal')
+    writeFileSync(join(dir, 'status.json'), '{"nonsense": true}', 'utf8')
+    await expect(renameRun(workspace, runId, 'new goal')).rejects.toThrow('Invalid run status')
+  })
 })

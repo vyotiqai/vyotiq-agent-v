@@ -9,7 +9,11 @@ import {
 } from '@main/agent/circuitBreaker'
 import {
   MAX_STREAM_ATTEMPTS,
+  LOCAL_ENDPOINT_DOWN_HINT,
   decideStreamAttemptResult,
+  describeLocalEndpointDown,
+  isLocalEndpointDownError,
+  isLocalEndpointDownMessage,
   runWithStreamRetry,
   runWithStreamRetryGen,
   shouldRetryProviderStreamError,
@@ -46,6 +50,79 @@ describe('streamRetry', () => {
     expect(shouldRetryStreamErrorChunk('PROVIDER_STREAM', 'fetch failed: other side closed', 1)).toBe(
       true
     )
+  })
+
+  it('fails fast on ECONNREFUSED against a local endpoint (no retries)', () => {
+    // Production shape (audit M2): Ollama-style local backend refusing connects.
+    const dead = 'fetch failed — connect ECONNREFUSED 127.0.0.1:11434'
+    expect(shouldRetryStreamErrorChunk('PROVIDER_NETWORK', dead, 1)).toBe(false)
+    expect(shouldRetryStreamErrorChunk('PROVIDER_STREAM', dead, 1)).toBe(false)
+    // Remote refusal keeps the existing retry semantics.
+    expect(
+      shouldRetryStreamErrorChunk('PROVIDER_NETWORK', 'connect ECONNREFUSED 93.184.216.34:443', 1)
+    ).toBe(true)
+    // Loopback/private shapes across the recognized families.
+    expect(
+      shouldRetryStreamErrorChunk('PROVIDER_NETWORK', 'connect ECONNREFUSED localhost:11434', 1)
+    ).toBe(false)
+    expect(
+      shouldRetryStreamErrorChunk('PROVIDER_NETWORK', 'connect ECONNREFUSED 192.168.1.5:8080', 1)
+    ).toBe(false)
+    expect(
+      shouldRetryStreamErrorChunk('PROVIDER_NETWORK', 'connect ECONNREFUSED [::1]:11434', 1)
+    ).toBe(false)
+    // Unrelated classes unchanged: transient HTTP and retriable provider messages.
+    expect(shouldRetryStreamErrorChunk('PROVIDER_HTTP', 'Rate limited (HTTP 429)', 1, 429)).toBe(true)
+    expect(
+      shouldRetryStreamErrorChunk('PROVIDER_STREAM', 'fetch failed: other side closed', 1)
+    ).toBe(true)
+  })
+
+  it('recognizes dead-local-endpoint messages by host family', () => {
+    expect(isLocalEndpointDownMessage('connect ECONNREFUSED 127.0.0.1:11434')).toBe(true)
+    expect(isLocalEndpointDownMessage('connect ECONNREFUSED localhost:11434')).toBe(true)
+    expect(isLocalEndpointDownMessage('connect ECONNREFUSED 10.0.0.3:1234')).toBe(true)
+    expect(isLocalEndpointDownMessage('connect ECONNREFUSED 172.20.1.2:1234')).toBe(true)
+    expect(isLocalEndpointDownMessage('connect ECONNREFUSED [::1]:80')).toBe(true)
+    expect(isLocalEndpointDownMessage('ECONNREFUSED')).toBe(false)
+    // Remote host: not a dead local endpoint.
+    expect(isLocalEndpointDownMessage('connect ECONNREFUSED api.anthropic.com:443')).toBe(false)
+    expect(isLocalEndpointDownMessage('connect ECONNREFUSED 8.8.8.8:53')).toBe(false)
+  })
+
+  it('decorates dead-local-endpoint messages with the backend-not-running hint', () => {
+    const raw = 'fetch failed — connect ECONNREFUSED 127.0.0.1:11434'
+    const described = describeLocalEndpointDown(raw)
+    expect(described).toContain(raw)
+    expect(described).toContain(LOCAL_ENDPOINT_DOWN_HINT)
+    expect(described).toContain('backend is not running')
+    // Idempotent — callers may route a message through this more than once.
+    expect(describeLocalEndpointDown(described)).toBe(described)
+    // Non-local failures pass through untouched.
+    expect(describeLocalEndpointDown('socket hang up')).toBe('socket hang up')
+  })
+
+  it('classifies dead-local-endpoint throws as no-retry and attaches the hint', () => {
+    const dead = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:11434'), {
+      code: 'ECONNREFUSED'
+    })
+    expect(isLocalEndpointDownError(dead)).toBe(true)
+    // Same failure wrapped in a cause chain.
+    expect(isLocalEndpointDownError(new Error('stream failed', { cause: dead }))).toBe(true)
+    // No-retry on every attempt.
+    expect(shouldRetryThrownStreamError(dead, 1)).toBe(false)
+    // Retry classification unchanged for other connect-class errors.
+    const refusedRemote = Object.assign(new Error('connect ECONNREFUSED 93.184.216.34:443'), {
+      code: 'ECONNREFUSED'
+    })
+    expect(shouldRetryThrownStreamError(refusedRemote, 1)).toBe(true)
+    const reset = Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' })
+    expect(shouldRetryThrownStreamError(reset, 1)).toBe(true)
+
+    // decideStreamAttemptResult fails fast (throw, not retry) and decorates.
+    const decision = decideStreamAttemptResult({ ok: false, err: dead }, 1)
+    expect(decision).toEqual({ action: 'throw', err: dead })
+    expect(dead.message).toContain(LOCAL_ENDPOINT_DOWN_HINT)
   })
 
   it('retries transient mid-stream HTTP statuses only', () => {

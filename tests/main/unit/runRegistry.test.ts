@@ -439,7 +439,14 @@ describe('runRegistry capacity', () => {
     }
     const over = tryRegisterRunAbort('run-over', '/ws')
     expect(over.ok).toBe(false)
-    if (!over.ok) expect(over.code).toBe('RUN_LIMIT_REACHED')
+    if (!over.ok) {
+      expect(over.code).toBe('RUN_LIMIT_REACHED')
+      // M-7 audit: the rejection must surface the live active-run count —
+      // offline `wait_forever` runs hold slots indefinitely, and resumes
+      // bypass the gate so the live count can exceed the cap.
+      expect(over.error).toContain(`max ${MAX_ACTIVE_RUNS}`)
+      expect(over.error).toMatch(/\(max \d+; 8 active\)/)
+    }
 
     clearRunAbort('run-0')
     expect(tryRegisterRunAbort('run-over', '/ws').ok).toBe(true)

@@ -107,4 +107,28 @@ describe('circuitBreaker', () => {
     )
     expect(circuitKeyProvider('openai')).toBe('provider:openai:http:default')
   })
+
+  it('evicts the breaker entry on success once closed and idle (per-session key bound)', () => {
+    // Audit L-13: per-session keys (mcp-connect:<sessionKey>) accumulate when
+    // every success leaves a fully-closed entry behind. A closed, zero-failure
+    // breaker is identical to an absent one (inspectCircuit reports closed
+    // either way), so success must not retain the entry.
+    const key = circuitKeyMcpConnect('session-a')
+    assertCircuitClosed(key, MCP_CONNECT_CIRCUIT_POLICY)
+    recordCircuitFailure(key, MCP_CONNECT_CIRCUIT_POLICY)
+    expect(inspectCircuit(key).state).toBe('open')
+
+    recordCircuitSuccess(key)
+    // Closed → indistinguishable from never-seen, and the entry is gone.
+    expect(inspectCircuit(key)).toEqual({
+      state: 'closed',
+      consecutiveFailures: 0,
+      retryAfterMs: 0
+    })
+    // Absent entry still asserts closed and re-creates on demand with the
+    // caller-supplied policy — a fresh failure re-opens as before.
+    assertCircuitClosed(key, MCP_CONNECT_CIRCUIT_POLICY)
+    recordCircuitFailure(key, MCP_CONNECT_CIRCUIT_POLICY)
+    expect(inspectCircuit(key).state).toBe('open')
+  })
 })

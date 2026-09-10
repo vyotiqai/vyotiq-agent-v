@@ -355,10 +355,20 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
             : 'error')
         await handleInlineInstanceFinished(workspacePath, runId, finishStatus)
       }
-    }
+      // L-14 (audit 02-agent-core): relaunch maps were only cleared on cancel
+      // or timer fire — a completed-but-never-cancelled run kept its entry
+      // until process exit. Clear on every terminal exit that is not handing
+      // the run off to a pending delayed relaunch.
+      if (
+        (terminalStatus === 'done' || terminalStatus === 'cancelled') ||
+        (terminalStatus === 'error' && !relaunchedActiveGoal)
+      ) {
+        clearGoalRelaunchState(runId)
+      }
       // Storage retention run-end sweep (audit H4/H5): free pass + armed
-      // policy per section 8.1 ack. Fire-and-forget - never blocks the terminal path.
+      // policy per §8.1 ack. Fire-and-forget — never blocks the terminal path.
       void sweepRetentionAuto()
+    }
   })().catch((err) => {
     logger.error('Background agent run failed after terminal cleanup', {
       scope: 'agent',

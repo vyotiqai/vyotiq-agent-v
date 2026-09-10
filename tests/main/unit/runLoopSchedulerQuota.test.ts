@@ -27,7 +27,13 @@ vi.mock('@main/agent/startAgentRun', () => ({
   sendChatEventToRenderer: vi.fn()
 }))
 
-import { armLoop, disarmLoop, readLoop } from '@main/agent/runLoopScheduler'
+import {
+  armLoop,
+  disarmLoop,
+  listLoopSchedulerMetaRunIdsForTests,
+  readLoop,
+  resetRunLoopSchedulerForTests
+} from '@main/agent/runLoopScheduler'
 import { createRun } from '@main/agent/state'
 import { resolveRunDir } from '@main/storage/paths'
 
@@ -41,6 +47,7 @@ describe('armed prompt loop during quota exhaustion', () => {
     mkdirSync(workspace, { recursive: true })
     workspaceState.path = workspace
     launchMock.mockClear()
+    resetRunLoopSchedulerForTests()
     vi.useFakeTimers()
   })
 
@@ -86,5 +93,48 @@ describe('armed prompt loop during quota exhaustion', () => {
     await vi.advanceTimersByTimeAsync(LOOP_INTERVAL_MS)
     expect(launchMock).toHaveBeenCalled()
     disarmLoop(runDir, runId, { workspacePath: workspace })
+  })
+
+  it('drops scheduler meta when the tick finds the run deleted (loop.json gone)', async () => {
+    // Audit L-9: deleteRun never calls disarmLoop — the next tick found
+    // readLoop null, cleared the timer, but kept the meta entry, leaking one
+    // {workspacePath, runDir} per deleted armed-loop run for the process
+    // lifetime. The null-loop branch must drop meta too.
+    const runId = 'loop-deleted'
+    createRun(workspace, runId, 'chat')
+    const runDir = resolveRunDir(workspace, runId)
+
+    armLoop({ workspacePath: workspace, runId, runDir, prompt: 'continue the goal', intervalMs: LOOP_INTERVAL_MS })
+    expect(listLoopSchedulerMetaRunIdsForTests()).toContain(runId)
+
+    // Simulate deleteRun: the whole run directory (loop.json included) is rmSync'd.
+    rmSync(runDir, { recursive: true, force: true })
+    await vi.advanceTimersByTimeAsync(LOOP_INTERVAL_MS)
+    expect(launchMock).not.toHaveBeenCalled()
+    expect(listLoopSchedulerMetaRunIdsForTests()).not.toContain(runId)
+  })
+
+  it('drops scheduler meta when a completed goal terminates the armed loop', async () => {
+    // The goal-complete tick branch (goal.json already complete without the
+    // disarm callback having fired — e.g. a hand-patched file) must clean meta
+    // alongside the timer, same leak shape as the deleted-run branch.
+    const runId = 'loop-goal-complete'
+    createRun(workspace, runId, 'chat')
+    const runDir = resolveRunDir(workspace, runId)
+    const { createGoal } = await import('@main/agent/runGoal')
+    createGoal(runDir, 'finish the sweep')
+
+    armLoop({ workspacePath: workspace, runId, runDir, prompt: 'continue the goal', intervalMs: LOOP_INTERVAL_MS })
+    // Patch goal.json straight to complete — bypasses updateGoalStatus's
+    // disarmLoopForGoal so the tick-side branch is what cleans up.
+    const goalPath = join(runDir, 'goal.json')
+    writeFileSync(
+      goalPath,
+      JSON.stringify({ ...JSON.parse(readFileSync(goalPath, 'utf8')), status: 'complete' })
+    )
+
+    await vi.advanceTimersByTimeAsync(LOOP_INTERVAL_MS)
+    expect(launchMock).not.toHaveBeenCalled()
+    expect(listLoopSchedulerMetaRunIdsForTests()).not.toContain(runId)
   })
 })

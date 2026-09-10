@@ -51,8 +51,8 @@ export function killProcessTreeAndWait(
  */
 export const TERMINAL_MAX_OUTPUT = 64 * 1024
 /**
- * Former upper bound for model-requested wait. Timeouts may exceed this;
- * omitted waits still default to TERMINAL_DEFAULT_TIMEOUT_MS.
+ * Schema-level upper bound for model-requested wait (terminalArgs timeoutMs /
+ * block_until_ms max). Omitted waits still default to TERMINAL_DEFAULT_TIMEOUT_MS.
  */
 export const TERMINAL_MAX_TIMEOUT_MS = 1_800_000
 /** Default wait for a new command when timeoutMs / block_until_ms are omitted. */

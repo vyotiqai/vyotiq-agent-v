@@ -145,6 +145,11 @@ export function recordCircuitSuccess(key: string): void {
   breaker.consecutiveFailures = 0
   breaker.openedAt = 0
   breaker.halfOpenProbes = 0
+  // A fully-closed, zero-failure breaker is semantically identical to an
+  // absent one — evict so per-session keys (mcp-connect:<sessionKey>) cannot
+  // accumulate for process lifetime (audit L-13). Policies are re-applied by
+  // assertCircuitClosed/recordCircuitFailure call sites on re-creation.
+  breakers.delete(key)
 }
 
 /** Abort (or other unfinished probe) must not consume the half-open slot. */

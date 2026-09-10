@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { TERMINAL_DEFAULT_TIMEOUT_MS } from '../tools/terminal'
+import { TERMINAL_DEFAULT_TIMEOUT_MS, TERMINAL_MAX_TIMEOUT_MS } from '../tools/terminal'
 import { DEFAULT_SEARCH_LIMIT } from '../codeindex/types'
 import {
   DEFAULT_NAV_TIMEOUT_MS,
@@ -140,6 +140,7 @@ const terminalArgs = z
         .number()
         .int()
         .min(0)
+        .max(TERMINAL_MAX_TIMEOUT_MS)
         .describe(
           'Wait ms before return. 0 = background now. Poll default 30000 when session_id is set and this is omitted.'
         )
@@ -152,6 +153,7 @@ const terminalArgs = z
         .number()
         .int()
         .min(1)
+        .max(TERMINAL_MAX_TIMEOUT_MS)
         .describe(
           `New-command wait (default ${TERMINAL_DEFAULT_TIMEOUT_MS}). When block_until_ms is also set, wait the larger; 0 still backgrounds now. Ignored when polling session_id.`
         )

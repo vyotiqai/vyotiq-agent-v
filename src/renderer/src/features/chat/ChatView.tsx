@@ -991,11 +991,13 @@ const runGoal = useRunGoal({
   // While the plan dock is already mounted, PlanPanel owns the plan.md polling;
   // this effect then stops so the artifact is never fetched twice per tick.
   // A dismissed panel must also stop the poll — tryAutoOpenPanel would no-op,
-  // so the interval would fire forever without any possible effect.
+  // so the interval would fire forever without any possible effect. A terminal
+  // run can no longer produce a fresh plan.md — stop polling once it stops.
   useEffect(() => {
     if (
       !workspacePath ||
       !activeRunId ||
+      !running ||
       agentMode !== 'plan' ||
       mountedPanels.includes('plan') ||
       dismissedPanelsRef.current.has('plan')

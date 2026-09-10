@@ -100,15 +100,19 @@ export function useRunTodos(opts: {
 
   // Poll only while active (hidden Plan dock must not start intervals).
   // Live 500ms cadence only when todos UI has items to show.
+  // No live run → no interval: todos.json is written only by the agent loop,
+  // the mount/active-change load covers display, and the wasRunning→!running
+  // transition refetches the terminal state (audit L-12: a mounted dock must
+  // not keep a 2s fallback poll ticking on an idle run forever).
   const hasVisibleTodos = (data?.items.length ?? 0) > 0
   useEffect(() => {
-    if (!active || !workspacePath || !runId) return
+    if (!active || !running || !workspacePath || !runId) return
     const ms = running && live && hasVisibleTodos ? LIVE_POLL_MS : POLL_MS
     const id = window.setInterval(() => {
       void load({ quiet: true })
     }, ms)
     return () => window.clearInterval(id)
-  }, [active, workspacePath, runId, running, live, hasVisibleTodos, load])
+  }, [active, running, workspacePath, runId, live, hasVisibleTodos, load])
 
   return { data, loading, loaded, error, reload: load }
 }

@@ -24,6 +24,44 @@ vi.mock('@main/agent/sparsegrep', async (importOriginal) => {
   }
 })
 
+// One-shot re-read retry tests (audit M11) need the first read of the target
+// file to return stale bytes while the re-read sees current disk content. The
+// fs builtin namespace is frozen in ESM, so vi.spyOn cannot patch it — a hoisted
+// module mock with a test-controlled route store is the repo pattern
+// (ipcRegister.test.ts / gh.test.ts).
+const { staleReadRoute } = vi.hoisted(() => ({
+  staleReadRoute: {
+    pathSuffix: null as string | null,
+    stale: null as string | null,
+    reads: 0
+  }
+}))
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>()
+  return {
+    ...actual,
+    readFileSync: (
+      path: import('fs').PathLike,
+      opts?: string | null
+    ): string | ReturnType<typeof actual.readFileSync> => {
+      if (
+        staleReadRoute.pathSuffix != null &&
+        typeof opts === 'string' &&
+        String(path).replace(/\\/g, '/').endsWith(staleReadRoute.pathSuffix)
+      ) {
+        staleReadRoute.reads++
+        // Non-null stale content serves exactly the first read; later reads
+        // observe current disk bytes (the one-shot re-read semantics).
+        const stale = staleReadRoute.stale
+        staleReadRoute.stale = null
+        if (stale != null) return stale
+      }
+      return actual.readFileSync(path, opts)
+    }
+  }
+})
+
 import { applyUnifiedDiff, toolEdit } from '@main/agent/tools/edit'
 import { toolStrReplace, countOccurrences } from '@main/agent/tools/strReplace'
 import { toolListDir } from '@main/agent/tools/listDir'
@@ -105,6 +143,74 @@ describe('applyUnifiedDiff', () => {
     }
   })
 
+  it('recovers a bare @@ hunk with stale context by anchoring on its removal lines (CRLF preserved)', () => {
+    // Audit M11 logged failure shape: "Diff hunk failed to match
+    // (context/removal mismatch); the bare @@ header declares no line." The
+    // removals are intact in the file; only the model's context line drifted,
+    // so the removal block anchors the edit and the file's real lines flow
+    // through (stale context is neither trusted nor spliced).
+    const original = [
+      'import { readFileSync } from "fs"',
+      'import { join } from "path"',
+      '',
+      'function loadConfig(root) {',
+      '  const raw = readFileSync(join(root, "config.json"), "utf8")',
+      '  return JSON.parse(raw)',
+      '}',
+      ''
+    ].join('\r\n')
+    const diff = [
+      '@@',
+      ' import { readFileSync } from "path"', // stale context — file says "fs"
+      '-function loadConfig(root) {',
+      '-  const raw = readFileSync(join(root, "config.json"), "utf8")',
+      '-  return JSON.parse(raw)',
+      '-}',
+      '+export function loadConfig(root) {',
+      '+  const raw = readFileSync(join(root, "config.json"), "utf8")',
+      '+  return JSON.parse(raw)',
+      '+}',
+      ''
+    ].join('\n')
+    const next = applyUnifiedDiff(original, diff)
+    expect(next).toBe(
+      [
+        'import { readFileSync } from "fs"',
+        'import { join } from "path"',
+        '',
+        'export function loadConfig(root) {',
+        '  const raw = readFileSync(join(root, "config.json"), "utf8")',
+        '  return JSON.parse(raw)',
+        '}',
+        ''
+      ].join('\r\n')
+    )
+  })
+
+  it('keeps the bare @@ failure when the removal block is ambiguous or absent', () => {
+    // Two identical target blocks → the removal-only anchor is ambiguous, so
+    // the original bare-@@ mismatch error must surface untouched.
+    const original = 'header\nfunction f() {\n  return 1\n}\nfunction f() {\n  return 1\n}\n'
+    const ambiguous = [
+      '@@',
+      ' // stale comment the file does not have',
+      '-function f() {',
+      '-  return 1',
+      '-}',
+      '+function g() {',
+      '+  return 1',
+      '+}',
+      ''
+    ].join('\n')
+    expect(() => applyUnifiedDiff(original, ambiguous)).toThrow(/bare @@ header declares no line/)
+
+    // No removal lines at all → nothing to anchor on; failure preserved.
+    const insertOnly = ['@@', ' // stale leading comment', '+inserted', ''].join('\n')
+    expect(() => applyUnifiedDiff('alpha\nbeta\n', insertOnly)).toThrow(
+      /bare @@ header declares no line/
+    )
+  })
+
   it('tells the model to regenerate when no expected line exists in the file', () => {
     const diff = ['@@ -1,2 +1,2 @@', ' header', '-gone', '+new', ''].join('\n')
     try {
@@ -134,6 +240,58 @@ describe('toolEdit', () => {
     const diff = ['@@ -1,2 +1,2 @@', ' one', '-two', '+2', ''].join('\n')
     toolEdit(workspace, 'a.txt', undefined, diff)
     expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('one\n2\n')
+  })
+
+  it('recovers a context mismatch with a one-shot re-read retry when the file changed on disk', () => {
+    // Audit M11 logged failure shape: "Diff hunk failed to match near line N
+    // (context/removal mismatch)" because the in-memory copy was stale. The
+    // first read returns the stale bytes; the one-shot re-read returns the
+    // current disk content the hunk was actually written against.
+    const stale = 'const a = 1\nconst b = 2\nconst c = 3\n'
+    const fresh = 'const a = 1\nconst bb = 2\nconst c = 3\n'
+    writeFileSync(join(workspace, 'a.ts'), fresh, 'utf8')
+    const diff = ['@@ -1,3 +1,3 @@', ' const a = 1', '-const bb = 2', '+const b = 2', ''].join('\n')
+
+    staleReadRoute.pathSuffix = '/a.ts'
+    staleReadRoute.stale = stale
+
+    try {
+      expect(toolEdit(workspace, 'a.ts', undefined, diff)).toBe('Applied diff to a.ts')
+      expect(staleReadRoute.reads).toBe(2)
+      expect(readFileSync(join(workspace, 'a.ts'), 'utf8')).toBe(
+        'const a = 1\nconst b = 2\nconst c = 3\n'
+      )
+    } finally {
+      staleReadRoute.pathSuffix = null
+      staleReadRoute.stale = null
+      staleReadRoute.reads = 0
+    }
+  })
+
+  it('still fails after the one-shot retry when the re-read bytes do not match either', () => {
+    // Bounded behavior: mismatch → re-read → retry → still mismatch → the
+    // original error surfaces and the file on disk is untouched. Exactly two
+    // reads, never more.
+    writeFileSync(join(workspace, 'a.ts'), 'const a = 1\nconst zz = 2\n', 'utf8')
+    const diff = ['@@ -1,2 +1,2 @@', ' const a = 1', '-const bb = 2', '+const b = 2', ''].join('\n')
+
+    staleReadRoute.pathSuffix = '/a.ts'
+    staleReadRoute.stale = 'const a = 1\nconst yy = 2\n' // also cannot match
+
+    try {
+      try {
+        toolEdit(workspace, 'a.ts', undefined, diff)
+        expect.unreachable()
+      } catch (err) {
+        expect((err as Error).message).toMatch(/Diff hunk failed to match near line 1/)
+        expect(staleReadRoute.reads).toBe(2)
+      }
+      expect(readFileSync(join(workspace, 'a.ts'), 'utf8')).toBe('const a = 1\nconst zz = 2\n')
+    } finally {
+      staleReadRoute.pathSuffix = null
+      staleReadRoute.stale = null
+      staleReadRoute.reads = 0
+    }
   })
 
   it('refuses to overwrite a non-empty file with empty contents', () => {

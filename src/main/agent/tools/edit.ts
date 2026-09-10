@@ -162,8 +162,65 @@ function findHunkStart(lines: string[], hunk: Hunk): number {
   )
 }
 
+/** True for the two context/removal mismatch failures — the only recoverable hunk class. */
+function isHunkMismatchError(err: unknown): boolean {
+  return err instanceof Error && err.message.includes('(context/removal mismatch)')
+}
+
+/**
+ * Bare-`@@` fallback (audit M11): anchor the hunk on its removal lines alone.
+ * Models emit stale context lines around an otherwise valid edit; the removals
+ * are the semantic core, so when they occur exactly once in the file the `-`/`+`
+ * cluster is applied there and the stale context lines are neither trusted nor
+ * re-emitted — the file's real lines flow through. Declined (caller rethrows the
+ * original mismatch error) when there are no removals, removals are split across
+ * clusters, or the removal block is absent or ambiguous.
+ */
+function applyHunkByRemovals(lines: string[], hunk: Hunk): string[] | undefined {
+  const body = hunk.lines
+  const firstRemoval = body.findIndex((l) => l.tag === '-')
+  if (firstRemoval < 0) return undefined
+
+  // One contiguous '-'/'+' cluster must hold every removal line.
+  let first = firstRemoval
+  while (first > 0 && body[first - 1].tag !== ' ') first--
+  let last = firstRemoval
+  while (last + 1 < body.length && body[last + 1].tag !== ' ') last++
+  for (let i = last + 1; i < body.length; i++) {
+    if (body[i].tag === '-') return undefined
+  }
+
+  const removals = body
+    .slice(first, last + 1)
+    .filter((l) => l.tag === '-')
+    .map((l) => l.content)
+  const hits: number[] = []
+  for (let pos = 0; pos + removals.length <= lines.length; pos++) {
+    if (matchesAt(lines, pos, removals)) hits.push(pos)
+  }
+  if (hits.length !== 1) return undefined
+
+  const out = lines.slice(0, hits[0])
+  let cursor = hits[0]
+  for (const { tag, content } of body.slice(first, last + 1)) {
+    if (tag === '-') cursor++
+    else out.push(content)
+  }
+  return [...out, ...lines.slice(cursor)]
+}
+
 function applyHunk(lines: string[], hunk: Hunk): string[] {
-  const start = findHunkStart(lines, hunk)
+  let start: number
+  try {
+    start = findHunkStart(lines, hunk)
+  } catch (err) {
+    // Bare-@@ hunks carry no line anchor (audit M11) — try locating the
+    // removal lines before surfacing the mismatch.
+    if (hunk.declared || !isHunkMismatchError(err)) throw err
+    const recovered = applyHunkByRemovals(lines, hunk)
+    if (recovered) return recovered
+    throw err
+  }
   const before = lines.slice(0, start)
   const out: string[] = []
   let cursor = start
@@ -230,7 +287,22 @@ export function toolEdit(
 
   if (typeof diff === 'string' && diff.trim()) {
     const original = existed ? readFileSync(resolved, 'utf8') : ''
-    const next = applyUnifiedDiff(original, diff)
+    let next: string
+    try {
+      next = applyUnifiedDiff(original, diff)
+    } catch (err) {
+      // One-shot re-read + retry (audit M11): the file may have changed on disk
+      // since the read above. Never retried further — the original mismatch
+      // error surfaces if the re-read bytes still do not match.
+      if (!existed || !isHunkMismatchError(err)) throw err
+      const fresh = readFileSync(resolved, 'utf8')
+      if (fresh === original) throw err
+      try {
+        next = applyUnifiedDiff(fresh, diff)
+      } catch {
+        throw err
+      }
+    }
     assertWritablePath(path)
     atomicWriteFile(resolved, next)
     return existed ? `Applied diff to ${path}` : `Created ${path}`
