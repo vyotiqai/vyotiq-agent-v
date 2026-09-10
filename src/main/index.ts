@@ -202,7 +202,7 @@ if (!gotLock) {
       }
       compactModelCacheOnBoot()
       // Storage retention boot sweep (audit H4/H5): free resolved/undone
-      // checkpoint pass (+ full policy after ┬º8.1 ack). Fire-and-forget ΓÇö
+      // checkpoint pass (+ full policy after §8.1 ack). Fire-and-forget —
       // never blocks first paint; the sweep itself is skip-and-log.
       void sweepRetentionAuto().catch(() => {
         /* sweepRetentionAuto already logs internally; nothing more to do */

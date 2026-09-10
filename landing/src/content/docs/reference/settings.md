@@ -64,6 +64,10 @@ See [Codebase search and indexing](/docs/tools/indexing). Enable codebase index,
 
 See [Voice dictation](/docs/tools/voice-dictation). Dictation engine, waveform, Local Whisper install, unload, and cache delete, Qwen3-ASR server URL and key, and Qwen3-ASR on-device models.
 
+## Storage
+
+Disk usage by category: checkpoints, session transcripts, workspace indexes, instance worktrees, traces, logs, and models. `Free up space` previews what each cleanup would reclaim and asks for confirmation before deleting. Retention controls: checkpoint GC keep-last-20 sessions with a 30-day backstop, orphaned workspace storage reaper with a 30-day grace, delete storage when a workspace is removed, session retention (off by default), and a 5 GB managed-size cap. Auto-cleanups never delete anything written in the last 24 hours.
+
 ## Tools
 
 See Security and approval, Browser, and Terminal. `Tool approval`, MCP tools protection, Terminal shell, Terminal screen reader, Browser domain allowlist, Search engine, Auto-resume interrupted runs, Automatic mode switching.

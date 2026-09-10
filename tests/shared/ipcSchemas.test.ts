@@ -828,7 +828,7 @@ describe('ipc schemas', () => {
     })
   })
 
-  it('fills legacy settings files with storage retention defaults (v2 ΓåÆ v3 migration)', () => {
+  it('fills legacy settings files with storage retention defaults (v2 → v3 migration)', () => {
     const legacy = SettingsSchema.parse({
       provider: 'ollama',
       model: 'qwen2.5',
@@ -911,7 +911,7 @@ describe('ipc schemas', () => {
     })
     expect(run.removedDirs).toBe(2)
 
-    // Ack request toggles the ┬º8.1 first-run flag.
+    // Ack request toggles the §8.1 first-run flag.
     expect(StorageSurfaceAckRequestSchema.parse({ acked: true })).toEqual({ acked: true })
   })
 

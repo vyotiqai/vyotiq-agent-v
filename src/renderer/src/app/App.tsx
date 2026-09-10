@@ -1916,7 +1916,7 @@ function App() {
 
   const onCloseWorkspace = async (path: string): Promise<void> => {
     // Storage retention (audit H5): offer storage-dir deletion with the measured
-    // size, confirmed here BEFORE the remove IPC ΓÇö main never prompts.
+    // size, confirmed here BEFORE the remove IPC — main never prompts.
     let deleteStorage = false
     if (settings.storage?.pruneOnWorkspaceRemoval && window.vyotiq?.storageReport) {
       try {

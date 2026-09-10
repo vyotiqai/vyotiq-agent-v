@@ -196,11 +196,11 @@ export interface VyotiqApi {
   storageReport: () => Promise<IpcResult<StorageReportResult>>
   /** Reclaim preview for the confirm-gated "Free up space" flow. */
   storageCleanupPreview: () => Promise<IpcResult<StorageCleanupPreviewResult>>
-  /** Run the confirmed cleanup ΓÇö echoes the preview's confirm token. */
+  /** Run the confirmed cleanup — echoes the preview's confirm token. */
   storageCleanupRun: (payload: {
     confirmToken: string
   }) => Promise<IpcResult<StorageCleanupRunResult>>
-  /** One-time ack that the user has seen Settings ΓåÆ Storage (┬º8.1). */
+  /** One-time ack that the user has seen Settings → Storage (§8.1). */
   storageAckSurface: (acked: boolean) => Promise<IpcResult<Settings>>
   getAccessibilitySupportState: () => Promise<IpcResult<{ enabled: boolean }>>
   onAccessibilitySupportChanged: (listener: (payload: { enabled: boolean }) => void) => () => void
