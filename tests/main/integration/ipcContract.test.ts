@@ -47,6 +47,10 @@ const VYOTIQ_INVOKE_MAP: Record<
   getSettings: IPC.getSettings,
   getAccessibilitySupportState: IPC.accessibilitySupportState,
   setSettings: IPC.setSettings,
+  storageReport: IPC.storageReport,
+  storageCleanupPreview: IPC.storageCleanupPreview,
+  storageCleanupRun: IPC.storageCleanupRun,
+  storageAckSurface: IPC.storageAckSurface,
   setSecret: IPC.setSecret,
   clearSecret: IPC.clearSecret,
   secretStatus: IPC.secretStatus,
@@ -315,7 +319,7 @@ describe('main/renderer IPC contract', () => {
       expect(channels.has(channel)).toBe(true)
       expect(PUSH_CHANNELS.has(channel)).toBe(false)
     }
-    expect(Object.keys(VYOTIQ_INVOKE_MAP)).toHaveLength(187)
+    expect(Object.keys(VYOTIQ_INVOKE_MAP)).toHaveLength(191)
   })
 
   it('maps every VyotiqApi push listener to a push channel', () => {

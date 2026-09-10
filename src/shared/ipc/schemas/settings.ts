@@ -373,8 +373,51 @@ export const DictationDeleteCacheRequestSchema = z.object({
 })
 export type DictationDeleteCacheRequest = z.infer<typeof DictationDeleteCacheRequestSchema>
 
+/**
+ * Storage retention policy (audit H4/H5). Defaults from the measured design
+ * (remediation/12-storage-retention-design.md ┬º6.4): keep-last-20 checkpoint
+ * sessions with a 30-day backstop, orphans reaped after a 30-day grace,
+ * session retention OFF by default, 5 GB managed-size backstop.
+ */
+export const StorageSettingsSchema = z.object({
+  /** Kill switch ΓÇö off means no checkpoint GC at all (keep everything forever). */
+  checkpointGcEnabled: z.boolean().default(true),
+  /** Keep the newest N checkpoint-bearing sessions per workspace (5ΓÇô100). */
+  checkpointKeepSessions: z.number().int().min(5).max(100).default(20),
+  /** Age backstop in days ΓÇö sessions with only older checkpoint data are pruned (7ΓÇô365). */
+  checkpointMaxAgeDays: z.number().int().min(7).max(365).default(30),
+  /** Orphan storage-id reaper (untracked `workspaces/{id}` dirs, confirm-gated). */
+  orphanReaperEnabled: z.boolean().default(true),
+  /** Days an untracked storage dir must be idle before it is even reported as reapable. */
+  orphanGraceDays: z.number().int().min(1).max(365).default(30),
+  /** Removing a workspace also offers deletion of its storage dir (size shown). */
+  pruneOnWorkspaceRemoval: z.boolean().default(true),
+  /** Auto session retention OFF by default ΓÇö "Clean now" applies it on demand. */
+  sessionRetentionEnabled: z.boolean().default(false),
+  /** Keep-last-N sessions per workspace when session retention runs (1ΓÇô200). */
+  sessionKeepCount: z.number().int().min(1).max(200).default(30),
+  /** Age window in days for session retention (7ΓÇô365). */
+  sessionMaxAgeDays: z.number().int().min(7).max(365).default(60),
+  /** Backstop over the managed userData surfaces (GB); LRU-evicts managed items only. */
+  sizeCapGb: z.number().int().min(1).max(50).default(5)
+})
+export type StorageSettings = z.infer<typeof StorageSettingsSchema>
+
+export const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
+  checkpointGcEnabled: true,
+  checkpointKeepSessions: 20,
+  checkpointMaxAgeDays: 30,
+  orphanReaperEnabled: true,
+  orphanGraceDays: 30,
+  pruneOnWorkspaceRemoval: true,
+  sessionRetentionEnabled: false,
+  sessionKeepCount: 30,
+  sessionMaxAgeDays: 60,
+  sizeCapGb: 5
+}
+
 /** Current persisted settings format. Bump with a matching load-time rewrite. */
-export const SETTINGS_FORMAT_VERSION = 2
+export const SETTINGS_FORMAT_VERSION = 3
 
 export const SettingsSchema = z.object({
   provider: ProviderIdSchema,
@@ -468,6 +511,14 @@ export const SettingsSchema = z.object({
    * until the normal 15-minute question timeout.
    */
   autonomousSkipQuestions: AutonomousSkipQuestionsSchema.default('wait'),
+  /** Storage retention policy (checkpoint GC, orphan reaper, size cap). */
+  storage: StorageSettingsSchema.default(DEFAULT_STORAGE_SETTINGS),
+  /**
+   * One-time ack for the ┬º8.1 first-run suspension: until the user has opened
+   * Settings ΓåÆ Storage once, only the free resolved/undone checkpoint pass runs
+   * automatically ΓÇö everything else waits for this ack.
+   */
+  storageSurfaceAcked: z.boolean().default(false),
   /** Offline connectivity wait budget (autonomousMode gates wait_forever). */
   offlineWaitMode: OfflineWaitModeSchema.default('default'),
   /**
@@ -493,12 +544,7 @@ export const SettingsSchema = z.object({
   /**
    * App-wide inbox + OS toast preferences. Not a workspace override.
    */
-  notifications: NotificationSettingsSchema.default(DEFAULT_NOTIFICATION_SETTINGS),
-  /**
-   * Ghost-text fill-in-the-middle in the Files editor using the active model.
-   * Tab accepts, Esc dismisses. Calls the active provider while typing.
-   */
-  tabAutocomplete: z.boolean().default(true)
+  notifications: NotificationSettingsSchema.default(DEFAULT_NOTIFICATION_SETTINGS)
 })
 export type Settings = z.infer<typeof SettingsSchema>
 
@@ -543,6 +589,8 @@ export const DEFAULT_SETTINGS: Settings = {
   dictation: DEFAULT_DICTATION_SETTINGS,
   autonomousMode: false,
   autonomousSkipQuestions: 'wait',
+  storage: DEFAULT_STORAGE_SETTINGS,
+  storageSurfaceAcked: false,
   offlineWaitMode: 'default',
   runSpendLimitUsd: 0,
   runTokenLimit: 0,
@@ -551,8 +599,7 @@ export const DEFAULT_SETTINGS: Settings = {
   agentTone: '',
   responseLanguage: '',
   responseVerbosity: 'concise',
-  notifications: DEFAULT_NOTIFICATION_SETTINGS,
-  tabAutocomplete: true
+  notifications: DEFAULT_NOTIFICATION_SETTINGS
 }
 
 export const SetSettingsRequestSchema = SettingsSchema.partial()

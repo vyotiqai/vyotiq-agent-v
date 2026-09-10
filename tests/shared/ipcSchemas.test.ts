@@ -50,7 +50,14 @@ import {
   GitStatusResultSchema,
   GitStatusSchema,
   WorkspaceEditorRecoverySaveRequestSchema,
-  WorkspaceEditorRecoverySnapshotSchema
+  WorkspaceEditorRecoverySnapshotSchema,
+  StorageSettingsSchema,
+  DEFAULT_STORAGE_SETTINGS,
+  StorageReportResultSchema,
+  StorageCleanupPreviewResultSchema,
+  StorageCleanupRunResultSchema,
+  StorageCleanupRunRequestSchema,
+  StorageSurfaceAckRequestSchema
 } from '@shared/ipc'
 import { IPC } from '@shared/channels'
 import { PROVIDER_DEFAULTS, seedModelsFor } from '@shared/providers'
@@ -789,7 +796,7 @@ describe('ipc schemas', () => {
     expect(parsed.uiDensity).toBe('default')
     expect(parsed.telemetryEnabled).toBe(false)
     expect(parsed.autoCompactThresholdRatio).toBe(0.55)
-    expect(parsed.settingsVersion).toBe(2)
+    expect(parsed.settingsVersion).toBe(3)
     expect(parsed.thinkingEffort).toBe(DEFAULT_THINKING_EFFORT)
     expect(parsed.thinkingEffort).toBe('low')
     expect(parsed.autoModeSwitch).toBe(false)
@@ -803,7 +810,7 @@ describe('ipc schemas', () => {
     })
     expect(legacy.telemetryEnabled).toBe(false)
     expect(legacy.autoCompactThresholdRatio).toBe(0.55)
-    expect(legacy.settingsVersion).toBe(2)
+    expect(legacy.settingsVersion).toBe(3)
     expect(legacy.thinkingEffort).toBe('low')
     expect(legacy.autoModeSwitch).toBe(false)
     expect(legacy.offlineWaitMode).toBe('default')
@@ -819,6 +826,93 @@ describe('ipc schemas', () => {
     expect(SetSettingsRequestSchema.parse({ telemetryEnabled: true })).toEqual({
       telemetryEnabled: true
     })
+  })
+
+  it('fills legacy settings files with storage retention defaults (v2 ΓåÆ v3 migration)', () => {
+    const legacy = SettingsSchema.parse({
+      provider: 'ollama',
+      model: 'qwen2.5',
+      ollamaBaseUrl: 'http://127.0.0.1:11434',
+      theme: 'system'
+    })
+    expect(legacy.storage).toEqual(DEFAULT_STORAGE_SETTINGS)
+    expect(legacy.storageSurfaceAcked).toBe(false)
+  })
+
+  it('keeps storage retention bounds enforced (audit H4/H5 policy)', () => {
+    const parsed = StorageSettingsSchema.parse(DEFAULT_STORAGE_SETTINGS)
+    expect(parsed).toEqual(DEFAULT_STORAGE_SETTINGS)
+    expect(parsed.checkpointGcEnabled).toBe(true)
+    expect(parsed.sessionRetentionEnabled).toBe(false)
+    // Out-of-bounds values are rejected, not clamped.
+    expect(() =>
+      StorageSettingsSchema.parse({ ...DEFAULT_STORAGE_SETTINGS, checkpointKeepSessions: 4 })
+    ).toThrow()
+    expect(() =>
+      StorageSettingsSchema.parse({ ...DEFAULT_STORAGE_SETTINGS, checkpointKeepSessions: 101 })
+    ).toThrow()
+    expect(() =>
+      StorageSettingsSchema.parse({ ...DEFAULT_STORAGE_SETTINGS, sizeCapGb: 0 })
+    ).toThrow()
+    expect(() =>
+      StorageSettingsSchema.parse({ ...DEFAULT_STORAGE_SETTINGS, sessionKeepCount: 0 })
+    ).toThrow()
+    // Partial storage blocks fill per-key defaults.
+    const partial = StorageSettingsSchema.parse({ checkpointGcEnabled: false })
+    expect(partial.checkpointGcEnabled).toBe(false)
+    expect(partial.orphanGraceDays).toBe(30)
+  })
+
+  it('parses storage report + confirm-token cleanup schemas (audit H4/H5 IPC)', () => {
+    const report = StorageReportResultSchema.parse({
+      categories: [
+        { id: 'checkpoints', label: 'Checkpoints', bytes: 100, files: 1, managed: true },
+        { id: 'cache', label: 'Cache', bytes: 5, files: 1, managed: false }
+      ],
+      workspaces: [
+        {
+          workspaceId: 'wid-a',
+          path: 'C:\\proj\\a',
+          displayName: 'a',
+          bytes: 2048,
+          files: 2,
+          sessionCount: 1,
+          tracked: true,
+          idleDays: 0,
+          reapable: false
+        }
+      ],
+      totalBytes: 105,
+      managedBytes: 100,
+      sizeCapBytes: 5 * 1024 * 1024 * 1024,
+      overCap: false
+    })
+    expect(report.overCap).toBe(false)
+
+    const preview = StorageCleanupPreviewResultSchema.parse({
+      categories: [
+        { id: 'checkpoints', label: 'Checkpoints', reclaimBytes: 4096, items: 2 }
+      ],
+      totalReclaimBytes: 4096,
+      orphanDirs: [],
+      confirm: { token: 'tok-1', mintedAt: '2026-09-10T07:00:00.000Z' }
+    })
+    expect(preview.confirm.token).toBe('tok-1')
+
+    // Run request must echo the confirm token; result summarizes reclaims.
+    expect(StorageCleanupRunRequestSchema.parse({ confirmToken: 'tok-1' })).toEqual({
+      confirmToken: 'tok-1'
+    })
+    const run = StorageCleanupRunResultSchema.parse({
+      categories: [{ id: 'checkpoints', label: 'Checkpoints', reclaimBytes: 4096, items: 2 }],
+      totalReclaimedBytes: 4096,
+      removedDirs: 2,
+      skipped: 0
+    })
+    expect(run.removedDirs).toBe(2)
+
+    // Ack request toggles the ┬º8.1 first-run flag.
+    expect(StorageSurfaceAckRequestSchema.parse({ acked: true })).toEqual({ acked: true })
   })
 
   it('rejects notification items with an empty title', () => {

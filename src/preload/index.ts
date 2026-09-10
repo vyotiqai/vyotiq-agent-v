@@ -26,8 +26,12 @@ const api: VyotiqApi = {
   pickWorkspace: () => ipcRenderer.invoke(IPC.pickWorkspace),
   getWorkspaces: () => ipcRenderer.invoke(IPC.workspacesGet),
   addWorkspace: (path) => ipcRenderer.invoke(IPC.workspacesAdd, path ? { path } : {}),
-  removeWorkspace: (path, stopActiveRuns) =>
-    ipcRenderer.invoke(IPC.workspacesRemove, { path, stopActiveRuns }),
+  removeWorkspace: (path, stopActiveRuns, deleteStorage) =>
+    ipcRenderer.invoke(IPC.workspacesRemove, {
+      path,
+      stopActiveRuns,
+      deleteStorage: deleteStorage === true
+    }),
   setActiveWorkspace: (path) => ipcRenderer.invoke(IPC.workspacesSetActive, { path }),
   updateWorkspaceUiState: (path, ui) =>
     ipcRenderer.invoke(IPC.workspacesUpdateUiState, { path, ui }),
@@ -41,6 +45,10 @@ const api: VyotiqApi = {
     ipcRenderer.invoke(IPC.workspacesSetSettingsOverride, { path, override }),
   getSettings: () => ipcRenderer.invoke(IPC.getSettings),
   setSettings: (partial) => ipcRenderer.invoke(IPC.setSettings, partial),
+  storageReport: () => ipcRenderer.invoke(IPC.storageReport),
+  storageCleanupPreview: () => ipcRenderer.invoke(IPC.storageCleanupPreview),
+  storageCleanupRun: (payload) => ipcRenderer.invoke(IPC.storageCleanupRun, payload),
+  storageAckSurface: (acked) => ipcRenderer.invoke(IPC.storageAckSurface, { acked }),
   getAccessibilitySupportState: () =>
     ipcRenderer.invoke(IPC.accessibilitySupportState) as Promise<
       IpcResult<{ enabled: boolean }>

@@ -14,6 +14,7 @@ export type SettingsSection =
   | 'agent'
   | 'indexing'
   | 'voice'
+  | 'storage'
   | 'tools'
   | 'shortcuts'
   | 'about'

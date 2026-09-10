@@ -1949,14 +1949,18 @@ export function useWorkspaceManager(options?: {
   )
 
   const removeWorkspace = useCallback(
-    async (path: string): Promise<void> => {
+    async (path: string, deleteStorage?: boolean): Promise<void> => {
       const activeForWorkspace = activeRunsRef.current.filter((run) =>
         workspacePathsEqual(run.workspacePath, path)
       )
       flushPersistUiState(path)
 
       if (!window.vyotiq?.removeWorkspace) return
-      const res = await window.vyotiq.removeWorkspace(path, activeForWorkspace.length > 0)
+      const res = await window.vyotiq.removeWorkspace(
+        path,
+        activeForWorkspace.length > 0,
+        deleteStorage
+      )
       if (res.ok) {
         for (const run of activeForWorkspace) {
           backgroundRunIdsRef.current.delete(run.runId)

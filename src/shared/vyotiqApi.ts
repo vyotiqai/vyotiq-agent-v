@@ -48,6 +48,9 @@ import type {
   SecretProvider,
   SecretsStatus,
   Settings,
+  StorageCleanupPreviewResult,
+  StorageCleanupRunResult,
+  StorageReportResult,
   CodeIndexSettings,
   CodeIndexRuntimeStatus,
   ProcessMetricsSnapshot,
@@ -170,7 +173,11 @@ export interface VyotiqApi {
   pickWorkspace: () => Promise<IpcResult<string | null>>
   getWorkspaces: () => Promise<IpcResult<WorkspacesState>>
   addWorkspace: (path?: string) => Promise<IpcResult<WorkspacesState>>
-  removeWorkspace: (path: string, stopActiveRuns?: boolean) => Promise<IpcResult<WorkspacesState>>
+  removeWorkspace: (
+    path: string,
+    stopActiveRuns?: boolean,
+    deleteStorage?: boolean
+  ) => Promise<IpcResult<WorkspacesState>>
   setActiveWorkspace: (path: string) => Promise<IpcResult<WorkspacesState>>
   updateWorkspaceUiState: (path: string, ui: WorkspaceUiState) => Promise<IpcResult<true>>
   /** Fire-and-forget UI state flush (e.g. beforeunload). */
@@ -185,6 +192,16 @@ export interface VyotiqApi {
   ) => Promise<IpcResult<WorkspacesState>>
   getSettings: () => Promise<IpcResult<Settings>>
   setSettings: (partial: Partial<Settings>) => Promise<IpcResult<Settings>>
+  /** Live storage usage report (audit H4/H5 retention surface). */
+  storageReport: () => Promise<IpcResult<StorageReportResult>>
+  /** Reclaim preview for the confirm-gated "Free up space" flow. */
+  storageCleanupPreview: () => Promise<IpcResult<StorageCleanupPreviewResult>>
+  /** Run the confirmed cleanup ΓÇö echoes the preview's confirm token. */
+  storageCleanupRun: (payload: {
+    confirmToken: string
+  }) => Promise<IpcResult<StorageCleanupRunResult>>
+  /** One-time ack that the user has seen Settings ΓåÆ Storage (┬º8.1). */
+  storageAckSurface: (acked: boolean) => Promise<IpcResult<Settings>>
   getAccessibilitySupportState: () => Promise<IpcResult<{ enabled: boolean }>>
   onAccessibilitySupportChanged: (listener: (payload: { enabled: boolean }) => void) => () => void
   setSecret: (provider: SecretProvider, key: string) => Promise<IpcResult<true>>

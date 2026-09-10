@@ -18,6 +18,7 @@ import { resolveEffectiveMcpServers, syncMarketplaceMcpIntoSettings, purgeOrphan
 import { getSettings } from '@main/settings/settings'
 import { migrateLegacySessions } from '@main/storage/migrations/migrateSessions'
 import { migrateWorkspaceRuns } from './storage/migrateWorkspaceRuns'
+import { sweepRetentionAuto } from '@main/storage/retention'
 import { purgeLegacyProjectHarness } from '@main/agent/harness'
 import { warmWorkspaceIndexes } from '@main/agent/workspaceIndex'
 import { compactModelCacheOnBoot } from '@main/agent/providers/modelCache'
@@ -200,6 +201,12 @@ if (!gotLock) {
         pruneStaleInstanceWorktreesBestEffort(root, liveIds)
       }
       compactModelCacheOnBoot()
+      // Storage retention boot sweep (audit H4/H5): free resolved/undone
+      // checkpoint pass (+ full policy after ┬º8.1 ack). Fire-and-forget ΓÇö
+      // never blocks first paint; the sweep itself is skip-and-log.
+      void sweepRetentionAuto().catch(() => {
+        /* sweepRetentionAuto already logs internally; nothing more to do */
+      })
     } catch (err) {
       logger.warn('Failed startup workspace maintenance', { scope: 'main', err })
     }

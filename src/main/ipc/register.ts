@@ -151,6 +151,9 @@ import {
   type DictationTranscribeResult,
   type IpcResult,
   type Settings,
+  type StorageCleanupPreviewResult,
+  type StorageCleanupRunResult,
+  type StorageReportResult,
   type AgentEvent,
   type AgentQuestionRequest,
   type ToolApprovalRequest,
@@ -292,6 +295,12 @@ import {
 import { resolveWrites, planRewindWrites, getWriteCheckpointMeta } from '../agent/checkpoints'
 import { prepareRewindAndReplaceUserMessage, prepareRewindToUserMessage } from '../agent/rewindRun'
 import { resolveRunDir, workspaceSessionsRoot, workspaceBrowserArtifactsDir } from '@main/storage/paths'
+import {
+  collectStorageReport,
+  previewStorageCleanup,
+  runStorageCleanup,
+  deleteWorkspaceStorageDir
+} from '@main/storage/retention'
 import { collectRunStats } from '../agent/runStats'
   import { focusAgentBrowser, closeAgentBrowser, getAgentBrowserState, selectBrowserTab, browserGoBack, browserGoForward, setAgentBrowserBounds, navigateUrl, clearAgentBrowserData, takeBrowserScreenshot, disposeAgentBrowserForWorkspace, takeBrowserControl, releaseBrowserControl, manageTabs } from '@main/app/agentBrowser'
 import { extractAttachment } from '../attachments/extract'
@@ -753,7 +762,7 @@ export function registerIpc(): void {
     async (event, raw): Promise<IpcResult<WorkspacesState>> => {
       if (!senderOk(event)) return fail('Invalid sender')
       try {
-        const { path, stopActiveRuns } = WorkspacesRemoveRequestSchema.parse(raw)
+        const { path, stopActiveRuns, deleteStorage } = WorkspacesRemoveRequestSchema.parse(raw)
         const activeRuns = listActiveRuns().filter((run) =>
           workspacePathsEqual(run.workspacePath, path)
         )
@@ -773,6 +782,11 @@ export function registerIpc(): void {
         // IPC otherwise races remove and can rewrite openPaths from a stale read.
         disposeWorkspaceIndexes(path)
         const next = await enqueueWorkspaceMutation(() => removeWorkspace(path))
+        // Storage retention (audit H5): renderer-confirmed storage-dir delete
+        // on workspace removal. Skip silently when the dir is gone already.
+        if (deleteStorage && getSettings().storage.pruneOnWorkspaceRemoval) {
+          await deleteWorkspaceStorageDir(path)
+        }
         invalidateMcpResolveCache()
         await syncMcpServers(resolveMcpServersForSessionMap())
         return ok(next)
@@ -893,6 +907,54 @@ export function registerIpc(): void {
       return ok(redactSettingsForIpc(next))
     } catch (err) {
       return failFrom(err, IPC.setSettings)
+    }
+  })
+
+  ipcMain.handle(IPC.storageReport, async (event): Promise<IpcResult<StorageReportResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok(await collectStorageReport())
+    } catch (err) {
+      return failFrom(err, IPC.storageReport)
+    }
+  })
+
+  ipcMain.handle(
+    IPC.storageCleanupPreview,
+    async (event): Promise<IpcResult<StorageCleanupPreviewResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        StorageCleanupPreviewRequestSchema.parse({})
+        return ok(await previewStorageCleanup())
+      } catch (err) {
+        return failFrom(err, IPC.storageCleanupPreview)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.storageCleanupRun,
+    async (event, raw): Promise<IpcResult<StorageCleanupRunResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = StorageCleanupRunRequestSchema.parse(raw)
+        return ok(await runStorageCleanup(req.confirmToken))
+      } catch (err) {
+        return failFrom(err, IPC.storageCleanupRun)
+      }
+    }
+  )
+
+  ipcMain.handle(IPC.storageAckSurface, async (event, raw): Promise<IpcResult<Settings>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = StorageSurfaceAckRequestSchema.parse(raw)
+      const next = await enqueueSettingsMutation(() =>
+        setSettings({ storageSurfaceAcked: req.acked })
+      )
+      return ok(redactSettingsForIpc(next))
+    } catch (err) {
+      return failFrom(err, IPC.storageAckSurface)
     }
   })
 

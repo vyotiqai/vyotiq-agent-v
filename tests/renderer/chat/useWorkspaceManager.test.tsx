@@ -465,7 +465,7 @@ describe('useWorkspaceManager', () => {
       handler?.({ type: 'text_delta', runId: 'run-bg', text: 'still going' })
     })
 
-    expect(removeWorkspace).toHaveBeenCalledWith('/ws-a', true)
+    expect(removeWorkspace).toHaveBeenCalledWith('/ws-a', true, undefined)
     expect(confirm).not.toHaveBeenCalled()
     expect(result.current.isRunActiveInBackground('run-bg')).toBe(false)
     confirm.mockRestore()

@@ -216,7 +216,12 @@ export const IPC = {
   notificationsMarkRead: 'notifications:markRead',
   notificationsDismiss: 'notifications:dismiss',
   notificationsChanged: 'notifications:changed',
-  notificationsActivate: 'notifications:activate'
+  notificationsActivate: 'notifications:activate',
+  /** Storage retention (audit H4/H5): report + confirm-gated cleanup + ack. */
+  storageReport: 'storage:report',
+  storageCleanupPreview: 'storage:cleanup-preview',
+  storageCleanupRun: 'storage:cleanup-run',
+  storageAckSurface: 'storage:ack-surface'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

@@ -295,50 +295,55 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'voice'
   },
   {
-    id: 'dictation-qwen3-server',
-    title: 'Qwen3-ASR server URL',
+    id: 'storage-usage',
+    title: 'Storage usage',
+    keywords: ['storage', 'disk', 'usage', 'report', 'size', 'free up space'],
+    section: 'storage'
+  },
+  {
+    id: 'storage-free-up-space',
+    title: 'Free up space',
+    keywords: ['storage', 'cleanup', 'reclaim', 'delete', 'orphan', 'untracked'],
+    section: 'storage'
+  },
+  {
+    id: 'storage-checkpoint-cleanup',
+    title: 'Checkpoint cleanup',
     keywords: [
-      'dictation',
-      'voice',
-      'qwen',
-      'qwen3',
-      'asr',
-      'transcribe',
-      'local server',
-      'vllm',
-      'microphone'
+      'checkpoints',
+      'undo',
+      'retain',
+      'evict',
+      'storage',
+      'discarded',
+      'resolved',
+      'undone'
     ],
-    section: 'voice'
+    section: 'storage'
   },
   {
-    id: 'dictation-qwen3-key',
-    title: 'Qwen3-ASR server API key',
-    keywords: ['dictation', 'voice', 'qwen', 'qwen3', 'asr', 'api key', 'token'],
-    section: 'voice'
+    id: 'storage-orphan-reaper',
+    title: 'Untracked workspace storage cleanup',
+    keywords: ['orphan', 'untracked', 'workspace', 'storage', 'grace', 'reap'],
+    section: 'storage'
   },
   {
-    id: 'dictation-qwen3-asr-0.6b',
-    title: 'Qwen3-ASR 0.6B',
-    keywords: ['dictation', 'voice', 'qwen', 'qwen3', 'asr', 'transcribe', 'local server'],
-    section: 'voice'
+    id: 'storage-prune-on-removal',
+    title: 'Delete storage when removing a workspace',
+    keywords: ['remove', 'workspace', 'delete', 'storage', 'prune', 'close'],
+    section: 'storage'
   },
   {
-    id: 'dictation-qwen3-asr-1.7b',
-    title: 'Qwen3-ASR 1.7B',
-    keywords: ['dictation', 'voice', 'qwen', 'qwen3', 'asr', 'transcribe', 'local server'],
-    section: 'voice'
+    id: 'storage-session-retention',
+    title: 'Automatic session retention',
+    keywords: ['sessions', 'history', 'transcripts', 'retain', 'delete', 'storage'],
+    section: 'storage'
   },
   {
-    id: 'dictation-qwen3-asr-onnx-0.6b',
-    title: 'Qwen3-ASR 0.6B (on-device)',
-    keywords: ['dictation', 'voice', 'qwen', 'qwen3', 'asr', 'transcribe', 'local server', 'onnx', 'on-device'],
-    section: 'voice'
-  },
-  {
-    id: 'dictation-qwen3-asr-onnx-1.7b',
-    title: 'Qwen3-ASR 1.7B (on-device)',
-    keywords: ['dictation', 'voice', 'qwen', 'qwen3', 'asr', 'transcribe', 'local server', 'onnx', 'on-device'],
-    section: 'voice'
+    id: 'storage-size-cap',
+    title: 'Managed size cap',
+    keywords: ['cap', 'limit', 'size', 'gb', 'storage', 'backstop', 'lru'],
+    section: 'storage'
   },
   {
     id: 'tool-approval',

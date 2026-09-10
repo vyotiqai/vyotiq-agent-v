@@ -19,6 +19,7 @@ import {
   resetChatEventBatchStats
 } from '../ipc/streamBatch'
 import { resolveRunDir } from '@main/storage/paths'
+import { sweepRetentionAuto } from '@main/storage/retention'
 import { logger } from '../../shared/logger'
 import { appendEvent, loadStatus } from './state'
 import { hydrateFollowUpsFromDisk, loadFollowUps, saveFollowUps } from './followUpStore'
@@ -355,6 +356,9 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
         await handleInlineInstanceFinished(workspacePath, runId, finishStatus)
       }
     }
+      // Storage retention run-end sweep (audit H4/H5): free pass + armed
+      // policy per section 8.1 ack. Fire-and-forget - never blocks the terminal path.
+      void sweepRetentionAuto()
   })().catch((err) => {
     logger.error('Background agent run failed after terminal cleanup', {
       scope: 'agent',

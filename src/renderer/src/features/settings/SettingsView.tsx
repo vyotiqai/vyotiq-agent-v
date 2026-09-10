@@ -10,6 +10,7 @@ import { ProvidersSection } from './sections/ProvidersSection'
 import { AgentSection } from './sections/AgentSection'
 import { IndexingSection } from './sections/IndexingSection'
 import { VoiceSection } from './sections/VoiceSection'
+import { StorageSection } from './sections/StorageSection'
 import { ToolsSection } from './sections/ToolsSection'
 import { AboutSection } from './sections/AboutSection'
 import { AppearanceSection } from './sections/AppearanceSection'
@@ -75,6 +76,8 @@ export function SettingsView(props: SettingsViewProps) {
         return <IndexingSection form={form} />
       case 'voice':
         return <VoiceSection form={form} secrets={secrets} />
+      case 'storage':
+        return <StorageSection form={form} />
       case 'tools':
         return <ToolsSection form={form} />
       case 'shortcuts':

@@ -1,7 +1,14 @@
 import { app } from 'electron'
 import { readFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
-import { DEFAULT_SETTINGS, SETTINGS_FORMAT_VERSION, SettingsSchema, type Settings } from '../../shared/ipc'
+import {
+  DEFAULT_SETTINGS,
+  DEFAULT_STORAGE_SETTINGS,
+  SETTINGS_FORMAT_VERSION,
+  SettingsSchema,
+  type Settings,
+  type StorageSettings
+} from '../../shared/ipc'
 import { DEFAULT_THINKING_EFFORT, LEGACY_THINKING_EFFORT } from '../../shared/ipc/schemas/providers'
 import {
   DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO,
@@ -349,6 +356,21 @@ function normalizeSettings(data: Settings): Settings {
   let next = data
   if (host !== data.ollamaBaseUrl) next = { ...next, ollamaBaseUrl: host }
   if (custom !== data.customOpenAiBaseUrl) next = { ...next, customOpenAiBaseUrl: custom }
+  // SETTINGS_FORMAT_VERSION 2→3 (storage retention, audit H4/H5): an old
+  // settings.json has no `storage` block — schema defaults already fill it at
+  // parse ({...DEFAULT_SETTINGS, ...raw}); this guarantees the merged key and
+  // fills any partially-migrated block without touching sibling settings.
+  if (next.storage == null) {
+    next = { ...next, storage: { ...DEFAULT_STORAGE_SETTINGS } }
+  } else {
+    let missing = false
+    for (const key of Object.keys(DEFAULT_STORAGE_SETTINGS) as (keyof StorageSettings)[]) {
+      if (next.storage[key] === undefined) missing = true
+    }
+    if (missing) {
+      next = { ...next, storage: { ...DEFAULT_STORAGE_SETTINGS, ...next.storage } }
+    }
+  }
   return next
 }
 
@@ -647,6 +669,10 @@ export function setSettings(
   if (notifications !== undefined) {
     notifications = { ...prev.notifications, ...notifications }
   }
+  let storage = partial.storage
+  if (storage !== undefined) {
+    storage = { ...prev.storage, ...storage }
+  }
   const merged = {
     ...prev,
     ...partial,
@@ -654,7 +680,8 @@ export function setSettings(
     ...(mcpServers !== undefined ? { mcpServers } : {}),
     ...(codeIndex !== undefined ? { codeIndex } : {}),
     ...(dictation !== undefined ? { dictation } : {}),
-    ...(notifications !== undefined ? { notifications } : {})
+    ...(notifications !== undefined ? { notifications } : {}),
+    ...(storage !== undefined ? { storage } : {})
   }
   // Gate the incoming patch at the write boundary so a mangled base URL paste
   // can never be persisted (2026-09 settings audit). Already-persisted legacy

@@ -104,6 +104,14 @@ function modelsRefreshKeyFor(
   return `${providerKey}:${nonce}`
 }
 
+/** Human-readable bytes for the remove-workspace storage confirm (audit H5). */
+function formatStorageBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
+
 function App() {
   const { LiveRegion } = useLiveAnnouncer()
   const {
@@ -1906,8 +1914,32 @@ function App() {
     }
   }
 
-  const onCloseWorkspace = (path: string): void => {
-    void removeWorkspace(path)
+  const onCloseWorkspace = async (path: string): Promise<void> => {
+    // Storage retention (audit H5): offer storage-dir deletion with the measured
+    // size, confirmed here BEFORE the remove IPC ΓÇö main never prompts.
+    let deleteStorage = false
+    if (settings.storage?.pruneOnWorkspaceRemoval && window.vyotiq?.storageReport) {
+      try {
+        const report = await window.vyotiq.storageReport()
+        const workspaceId = workspaceIdFromPath(path)
+        const entry = report.ok
+          ? report.data.workspaces.find((w) => w.workspaceId === workspaceId)
+          : undefined
+        if (entry && entry.bytes > 0) {
+          deleteStorage = await confirm(
+            `Also delete this workspace's app-data storage (${formatStorageBytes(entry.bytes)})? Session history and checkpoints for this workspace will be permanently removed.`,
+            {
+              title: 'Delete workspace storage',
+              confirmLabel: 'Close and delete storage',
+              danger: true
+            }
+          )
+        }
+      } catch {
+        // report/confirm failures must never block the remove itself
+      }
+    }
+    void removeWorkspace(path, deleteStorage)
   }
 
   const onExportRunInWorkspace = async (path: string, runId: string): Promise<void> => {

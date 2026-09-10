@@ -118,6 +118,7 @@ export const SECTION_LABELS: Record<SettingsSection, { title: string }> = {
   agent: { title: 'Agent' },
   indexing: { title: 'Indexing' },
   voice: { title: 'Voice' },
+  storage: { title: 'Storage' },
   tools: { title: 'Tools' },
   shortcuts: { title: 'Shortcuts' },
   about: { title: 'About' }

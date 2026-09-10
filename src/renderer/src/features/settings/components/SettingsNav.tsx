@@ -12,6 +12,7 @@ const SECTION_ICONS = {
   agent: 'bot',
   indexing: 'fileSearch',
   voice: 'mic',
+  storage: 'stack',
   tools: 'plug',
   shortcuts: 'keyboard',
   about: 'info'
