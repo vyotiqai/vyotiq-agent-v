@@ -495,7 +495,8 @@ describe('landing docs architecture and truth', () => {
     for (const label of ['**MCPs**', '**Skills**', '**Rules**', '**Packages**']) {
       expect(marketplace).toContain(label)
     }
-    expect(install).toContain('download button that takes you to the release page')
+    expect(install).toContain('https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/latest')
+    expect(install).toContain('download buttons for each installer')
     expect(install).toContain('`pnpm pack:win`')
     expect(install).toContain('`pnpm pack:mac`')
     expect(install).toContain('`pnpm pack:linux`')
@@ -610,7 +611,14 @@ describe('landing docs architecture and truth', () => {
     expect(source).toContain('optional domain allowlist')
     expect(source).toContain('.vyotiq/memory/')
     expect(source).toContain('separate from memory')
-    expect(source).toContain('Download Agent V')
+    // The releases repo is public: per-platform asset links are served to
+    // visitors, so the download area ships direct installer buttons plus a
+    // releases-page link. Asset URLs are still baked, not hand-edited.
+    expect(source).toContain('GitHub Releases')
+    expect(source).toContain('data-release-platform')
+    expect(source).toContain('Download for Windows')
+    expect(source).toContain('Download for macOS')
+    expect(source).toContain('Download for Linux')
     expect(source).not.toMatch(/api\.github\.com/)
 
     for (const rel of [
@@ -629,12 +637,20 @@ describe('landing docs architecture and truth', () => {
     const snapshot = JSON.parse(
       readFileSync(join(LANDING_SOURCE, 'lib', 'github-release.json'), 'utf8')
     ) as { assets?: Record<string, { url?: string }> }
-    // The repo is private: the download area is a single CTA to the releases
-    // page, so no baked asset URL may leak into landing copy or components.
-    for (const url of Object.values(snapshot.assets ?? {}).map((a) => a?.url)) {
-      if (url != null) expect(url).toMatch(/^https:\/\//)
-    }
-    expect(source).not.toMatch(/releases\/download\//)
+    // The releases repo is public: baked asset URLs back the per-platform
+    // buttons and must be GitHub download links on https.
+    expect(snapshot.assets?.win?.url).toMatch(
+      /^https:\/\/github\.com\/vyotiqai\/vyotiq-agent-v-releases\/releases\/download\//
+    )
+    expect(snapshot.assets?.linux?.url).toMatch(
+      /^https:\/\/github\.com\/vyotiqai\/vyotiq-agent-v-releases\/releases\/download\//
+    )
+    expect(snapshot.assets?.macArm64?.url).toMatch(
+      /^https:\/\/github\.com\/vyotiqai\/vyotiq-agent-v-releases\/releases\/download\//
+    )
+    expect(snapshot.assets?.macX64?.url).toMatch(
+      /^https:\/\/github\.com\/vyotiqai\/vyotiq-agent-v-releases\/releases\/download\//
+    )
     expect(readFileSync(join(REPO, '.gitignore'), 'utf8')).not.toContain(
       'landing/src/lib/github-release.json'
     )

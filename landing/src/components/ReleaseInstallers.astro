@@ -1,25 +1,204 @@
 ---
 import LandingIcon from './LandingIcon.astro'
-import { RELEASES_PAGE } from '../lib/githubRelease'
+import { githubRelease, hasReleaseAssets, RELEASES_PAGE } from '../lib/githubRelease'
 
-// The code repository is private, so per-platform asset links cannot be
-// served to visitors. The download area is one call to action pointing at
-// the releases page, where installers are published.
+const { assets } = githubRelease
+
+// One adaptive macOS link. It defaults to the arm64 dmg (with the legacy
+// `mac` field backfilling the Apple-silicon slot for older single-field
+// snapshots), falls back to the x64 asset when only Intel was captured, and
+// carries the x64 URL in a data attribute so the inline script can rewrite
+// the href on Intel Macs.
+const macArm64Asset = assets.macArm64 ?? assets.mac ?? null
+const macX64Asset = assets.macX64 ?? null
+const macAsset = macArm64Asset ?? macX64Asset
+
+const platforms = [
+  {
+    id: 'win',
+    label: 'Download for Windows',
+    short: 'Windows',
+    asset: assets.win,
+    hrefX64: null,
+    hint: null
+  },
+  {
+    id: 'mac',
+    label: 'Download for macOS',
+    short: 'macOS',
+    asset: macAsset,
+    hrefX64: macX64Asset?.url ?? null,
+    hint: 'macOS — correct architecture chosen automatically (Apple silicon or Intel)'
+  },
+  {
+    id: 'linux',
+    label: 'Download for Linux',
+    short: 'Linux',
+    asset: assets.linux,
+    hrefX64: null,
+    hint: null
+  }
+] as const
+
+const available = platforms.flatMap((platform) =>
+  platform.asset ? [{ ...platform, asset: platform.asset }] : []
+)
+const showPackages = hasReleaseAssets()
 ---
 
 <div class="home-release-area">
-  <div class="home-installers">
-    <a
-      class="btn btn-primary platform-button"
-      href={RELEASES_PAGE}
-      aria-label="Download Agent V"
-      rel="noopener noreferrer"
-    >
-      Download Agent V
-    </a>
-    <a class="home-text-link" href="/docs">
-      Read the documentation
-      <LandingIcon name="arrow-up-right" />
-    </a>
-  </div>
+  {
+    showPackages ? (
+      <div class="home-installers" data-release-packages="true">
+        {available.map((platform) => (
+          <a
+            class="btn btn-secondary platform-button"
+            data-release-platform={platform.id}
+            href={platform.asset.url}
+            data-href-x64={platform.hrefX64 ?? undefined}
+            title={platform.hint ?? undefined}
+            aria-label={platform.label}
+            rel="noopener noreferrer"
+          >
+            <span class="label-full">{platform.label}</span>
+            <span class="label-short">{platform.short}</span>
+          </a>
+        ))}
+        <a class="home-text-link" href={githubRelease.htmlUrl || RELEASES_PAGE}>
+          GitHub Releases
+          <LandingIcon name="arrow-up-right" />
+        </a>
+        <a class="home-text-link" href="/docs">
+          Read the documentation
+          <LandingIcon name="arrow-up-right" />
+        </a>
+      </div>
+    ) : (
+      // No baked snapshot: fall back to one call to action pointing at the
+      // releases page, where installers are published.
+      <div class="home-installers">
+        <a
+          class="btn btn-primary platform-button"
+          href={RELEASES_PAGE}
+          aria-label="Download Agent V"
+          rel="noopener noreferrer"
+        >
+          Download Agent V
+        </a>
+        <a class="home-text-link" href="/docs">
+          Read the documentation
+          <LandingIcon name="arrow-up-right" />
+        </a>
+      </div>
+    )
+  }
 </div>
+
+<style>
+  /* Compact "also available" chips for the platforms the visitor is NOT on.
+     Everything here is gated on html[data-os], which is only set by the
+     before-paint inline script below — without JavaScript all three buttons
+     render exactly as before: equal btn-secondary links with full labels.
+     Demoted buttons stay visible, clickable and keyboard-focusable. */
+  .label-short {
+    display: none;
+  }
+
+  :global(html[data-os]) .platform-button {
+    min-height: 2.75rem;
+    padding-inline: 0.75rem;
+    font-size: 0.75rem;
+  }
+
+  :global(html[data-os]) .platform-button:not(.btn-primary) {
+    color: var(--muted);
+  }
+
+  :global(html[data-os]) .platform-button:not(.btn-primary):hover {
+    color: var(--fg);
+  }
+
+  :global(html[data-os]) .label-full {
+    display: none;
+  }
+
+  :global(html[data-os]) .label-short {
+    display: inline;
+  }
+
+  /* The detected platform's button is the sole primary CTA: it keeps the
+     full "Download for <OS>" label, the standard button size, and is moved
+     to the front of the row. Fill/contrast comes from the global
+     .btn-primary class the script swaps in. */
+  :global(html[data-os]) .platform-button.btn-primary {
+    order: -1;
+    min-height: 2.75rem;
+    padding-inline: 1.25rem;
+    font-size: 0.875rem;
+  }
+
+  :global(html[data-os]) .platform-button.btn-primary .label-full {
+    display: inline;
+  }
+
+  :global(html[data-os]) .platform-button.btn-primary .label-short {
+    display: none;
+  }
+</style>
+
+{
+  showPackages ? (
+    <script is:inline>
+      (function () {
+        function highlight(el) {
+          document.querySelectorAll('[data-release-platform]').forEach(function (link) {
+            link.classList.remove('btn-primary')
+            link.classList.add('btn-secondary')
+          })
+          el.classList.remove('btn-secondary')
+          el.classList.add('btn-primary')
+        }
+        var ua = navigator.userAgent
+        var platform = ''
+        if (/Windows NT/i.test(ua)) platform = 'win'
+        else if (!/Android/i.test(ua) && /Linux/i.test(ua)) platform = 'linux'
+        else if (/Mac OS X|Macintosh/i.test(ua)) platform = 'mac'
+        if (!platform) return
+        if (platform === 'mac') {
+          // macOS UA strings still report "Intel" on Apple silicon, so use
+          // the high-entropy architecture hint to pick the right href. The
+          // server-rendered default is arm64; if the hint says x86 and an
+          // Intel capture exists, the single macOS button swaps its href in
+          // place. Buttons are never hidden or disabled — if the hint is
+          // unavailable or fails, the arm64 default stays.
+          try {
+            var uad = navigator.userAgentData
+            if (uad && typeof uad.getHighEntropyValues === 'function') {
+              uad
+                .getHighEntropyValues(['architecture'])
+                .then(function (values) {
+                  if (values && values.architecture === 'x86') {
+                    var macLink = document.querySelector('[data-release-platform="mac"]')
+                    if (
+                      macLink instanceof HTMLElement &&
+                      macLink.dataset.hrefX64
+                    ) {
+                      macLink.href = macLink.dataset.hrefX64
+                    }
+                  }
+                })
+                .catch(function () {})
+            }
+          } catch (error) {}
+        }
+        var match = document.querySelector('[data-release-platform="' + platform + '"]')
+        if (!(match instanceof HTMLElement)) return
+        // data-os on <html> drives the CSS promotion/demotion above. It is
+        // only set when the detected platform actually has an installer in
+        // this snapshot; otherwise all three buttons stay equal.
+        document.documentElement.dataset.os = platform
+        highlight(match)
+      })()
+    </script>
+  ) : null
+}

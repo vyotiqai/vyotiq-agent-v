@@ -10,7 +10,7 @@ related:
   - concepts/privacy-data
 ---
 
-The Agent V homepage has a download button that takes you to the release page with the latest installers for Windows, macOS, and Linux. There is no app store listing.
+The Agent V homepage has download buttons for each installer on the latest GitHub Release at https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/latest. There is no app store listing.
 
 Installers and the Start-menu shortcut are named Vyotiq — Agent V is the assistant inside that app. Electron is the packager and runtime, not the product name.
 
