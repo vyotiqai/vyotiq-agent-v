@@ -83,7 +83,7 @@ export function UpdateCard(): ReactElement | null {
         </button>
       </div>
 
-      {info.notesSections.length > 0 ? (
+      {(info.notesSections?.length ?? 0) > 0 ? (
         <div className="mt-3 max-h-40 overflow-y-auto">
           <h3 className="text-xs font-medium uppercase tracking-wide text-muted">
             What’s new

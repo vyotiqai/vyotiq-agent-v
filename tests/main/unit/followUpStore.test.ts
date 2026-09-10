@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, rmSync } from 'fs'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
@@ -16,6 +16,7 @@ import {
   resetActiveRunsForTests,
   registerRunAbort
 } from '@main/agent/runRegistry'
+import { logger } from '@shared/logger'
 
 describe('followUpStore', () => {
   let runDir: string
@@ -69,5 +70,22 @@ describe('followUpStore', () => {
     expect(existsSync(join(runDir, 'followups.json'))).toBe(true)
     saveFollowUps(runDir, [])
     expect(existsSync(join(runDir, 'followups.json'))).toBe(false)
+  })
+
+  it('warns and returns [] when followups.json is corrupt', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    try {
+      // Unparsable JSON — catch path warns.
+      writeFileSync(join(runDir, 'followups.json'), '{ not json', 'utf8')
+      expect(loadFollowUps(runDir)).toEqual([])
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy.mock.calls[0]?.[0]).toContain('followups.json')
+      // Valid JSON, wrong shape — schema-failure path warns too.
+      writeFileSync(join(runDir, 'followups.json'), JSON.stringify({ nope: true }), 'utf8')
+      expect(loadFollowUps(runDir)).toEqual([])
+      expect(warnSpy).toHaveBeenCalledTimes(2)
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })

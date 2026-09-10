@@ -6,6 +6,10 @@ import { copyText } from '@renderer/lib/markdown/copyText'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
 
+// Module-level so render stays pure under React Compiler annotation mode
+// (audit L3); Date access in a render body is an impurity.
+const CURRENT_YEAR = new Date().getFullYear()
+
 function platformLabel(platform: string, arch: string, osVersion: string): string {
   let os: string
   switch (platform) {
@@ -121,7 +125,6 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
   }, [])
 
   const dash = '—'
-  const year = new Date().getFullYear()
   const status = updater?.status
   const canCheck = status !== 'checking' && status !== 'downloading'
   const canDownload = status === 'available'
@@ -162,7 +165,7 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
             Agent V. A product of Vyotiq.com.
           </p>
           <p className="m-0 text-xs leading-snug tracking-[var(--vy-tracking)] text-muted">
-            © {year} Vyotiq. Agent V is proprietary Vyotiq software. All rights reserved.
+            © {CURRENT_YEAR} Vyotiq. Agent V is proprietary Vyotiq software. All rights reserved.
           </p>
         </div>
       </div>

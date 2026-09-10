@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -9,6 +9,7 @@ import {
   saveLoopCheckpoint
 } from '@main/agent/loopCheckpoint'
 import { LOOP_CHECKPOINT_VERSION } from '@shared/ipc/schemas/agent'
+import { logger } from '@shared/logger'
 
 const root = join(tmpdir(), `vyotiq-loop-cp-${process.pid}-${Date.now()}`)
 
@@ -158,5 +159,25 @@ describe('loopCheckpoint', () => {
     expect(loaded?.step).toBe(105)
     expect(loaded?.identicalStepStreak).toBe(1)
     expect(loaded?.lastStepFingerprint).toBe('74a5e735e912861f')
+  })
+
+  it('warns and returns null when loopCheckpoint.json is corrupt', () => {
+    const runDir = join(root, 'run-corrupt')
+    mkdirSync(runDir, { recursive: true })
+    const { writeFileSync } = require('fs') as typeof import('fs')
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    try {
+      // Unparsable JSON — catch path warns.
+      writeFileSync(join(runDir, LOOP_CHECKPOINT_FILENAME), '{ not json', 'utf8')
+      expect(loadLoopCheckpoint(runDir)).toBeNull()
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy.mock.calls[0]?.[0]).toContain('loopCheckpoint.json')
+      // Valid JSON, unknown version — schema-failure path warns too.
+      writeFileSync(join(runDir, LOOP_CHECKPOINT_FILENAME), JSON.stringify({ version: 99 }), 'utf8')
+      expect(loadLoopCheckpoint(runDir)).toBeNull()
+      expect(warnSpy).toHaveBeenCalledTimes(2)
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })

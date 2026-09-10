@@ -61,7 +61,7 @@ describe('delegation prompt assembly (harness + mode section + catalog)', () => 
       .join('\n')
 
     // Harness spine: delegation decision + brief contract (strict, no small-task escape).
-    expect(prompt).toMatch(/Delegate to child agent instances \(root runs\) every single time, no matter how small the request/)
+    expect(prompt).toMatch(/Delegate to child agent instances \(root runs\) every time, no matter how small the request/)
     expect(prompt).toMatch(/every plan step maps to one controlled child instance/)
     expect(prompt).toMatch(/spawned zero instances violates this policy/)
     expect(prompt).toMatch(/verified evidence/)

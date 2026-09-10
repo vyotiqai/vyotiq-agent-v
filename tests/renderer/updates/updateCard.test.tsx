@@ -105,6 +105,21 @@ describe('UpdateCard', () => {
     expect(screen.getByText('Faster chat streaming')).toBeTruthy()
   })
 
+  it('renders without a notes block when info.notesSections is undefined', async () => {
+    // The v1.1.1 crash shape: a bridge regression that hands back an info
+    // without notesSections must degrade to "no notes", not crash the UI.
+    const { emit } = installBridge()
+    render(<UpdateCard />)
+    emit({
+      status: 'available',
+      info: { ...INFO, notesSections: undefined } as unknown as UpdateInfo
+    })
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toBeTruthy()
+    expect(screen.getByText('v1.2.0')).toBeTruthy()
+    expect(screen.queryByText('What’s new')).toBeNull()
+  })
+
   it('stays hidden when check() resolves ok with null data (up to date)', async () => {
     installBridge()
     render(<UpdateCard />)

@@ -12,16 +12,19 @@ import {
   takeEventAppendFailureNotice
 } from '@main/agent/eventAppendQueue'
 
-const { appendFileMock } = vi.hoisted(() => ({
-  appendFileMock: vi.fn<typeof import('fs/promises').appendFile>()
+const { appendFileMock, unlinkMock } = vi.hoisted(() => ({
+  appendFileMock: vi.fn<typeof import('fs/promises').appendFile>(),
+  unlinkMock: vi.fn<typeof import('fs/promises').unlink>()
 }))
 
 vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs/promises')>()
   appendFileMock.mockImplementation(actual.appendFile)
+  unlinkMock.mockImplementation(actual.unlink)
   return {
     ...actual,
-    appendFile: appendFileMock
+    appendFile: appendFileMock,
+    unlink: unlinkMock
   }
 })
 
@@ -33,6 +36,7 @@ describe('eventAppendQueue', () => {
     mkdirSync(dir, { recursive: true })
     resetEventAppendQueueForTests()
     appendFileMock.mockClear()
+    unlinkMock.mockClear()
   })
 
   afterEach(() => {
@@ -141,6 +145,37 @@ describe('eventAppendQueue', () => {
     expect(archives.some((name) => name.includes('2026-01-01'))).toBe(false)
     const newestArchive = readFileSync(join(dir, archives[archives.length - 1]!), 'utf8')
     expect(newestArchive).toContain('y'.repeat(64))
+  })
+
+  it('skips an undeletable oldest archive instead of failing the append chain', async () => {
+    const path = join(dir, 'events.jsonl')
+    for (let i = 0; i < 5; i++) {
+      writeFileSync(join(dir, `events.archive.2026-01-0${i + 1}T00-00-00-000Z.jsonl`), `archive-${i}\n`, 'utf8')
+    }
+    const line = `${'y'.repeat(80)}\n`
+    writeFileSync(
+      path,
+      line.repeat(Math.ceil((EVENTS_FILE_MAX_BYTES + 64) / line.length)),
+      'utf8'
+    )
+
+    // Non-transient (EPERM is absent from TRANSIENT_APPEND_ERROR_CODES), so
+    // withTransientAppendRetry cannot mask the missing guard: pre-fix this
+    // rejection fails the append chain on the first attempt.
+    unlinkMock.mockRejectedValueOnce(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }))
+
+    enqueueEventAppend(dir, { type: 'status', status: 'undeletable-archive' })
+    await expect(flushEventAppends(dir)).resolves.toBeUndefined()
+    expect(takeEventAppendFailureNotice(dir)).toBeUndefined()
+
+    const active = readFileSync(path, 'utf8')
+    expect(active).toContain('undeletable-archive')
+    const archives = readdirSync(dir)
+      .filter((name) => name.startsWith('events.archive.'))
+      .sort()
+    // The undeletable oldest archive survives; the new one is still created.
+    expect(archives).toHaveLength(6)
+    expect(archives.some((name) => name.includes('2026-01-01'))).toBe(true)
   })
 
   it('keeps the JSONL record that crosses the rotation byte boundary', async () => {

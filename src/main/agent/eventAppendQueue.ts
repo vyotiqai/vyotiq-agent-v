@@ -92,7 +92,17 @@ async function enforceArchiveCap(dir: string): Promise<void> {
   while (archives.length >= MAX_EVENT_ARCHIVES) {
     const oldest = archives.shift()
     if (!oldest) break
-    await unlink(join(dir, oldest))
+    try {
+      await unlink(join(dir, oldest))
+    } catch (err) {
+      // best effort — an undeletable archive must not block the append chain
+      logger.warn('Failed to delete oldest events archive', {
+        scope: 'state',
+        correlationId: basename(dir),
+        filename: oldest,
+        err
+      })
+    }
   }
 }
 

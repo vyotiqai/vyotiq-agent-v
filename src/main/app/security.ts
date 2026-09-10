@@ -101,6 +101,11 @@ export function buildCspPolicy(env: { electronRendererUrl?: string } = {}): stri
       "script-src 'self' 'unsafe-inline'",
       "style-src 'self' 'unsafe-inline'",
       "font-src 'self' data:",
+      // `blob:` is a dead directive today: nothing under src/renderer calls
+      // URL.createObjectURL (guarded by tests/main/unit/rendererNoObjectUrls.test.ts;
+      // audit finding L9 in AUDIT-REPORT-2026-09-10.md). Kept for dev convenience —
+      // if the renderer ever adopts object URLs, add `blob:` to the prod policy
+      // below too so dev and prod cannot silently diverge.
       "img-src 'self' data: blob:",
       "connect-src 'self' ws://127.0.0.1:* ws://localhost:* wss://127.0.0.1:* wss://localhost:* http://127.0.0.1:* http://localhost:* https:"
     ].join('; ')

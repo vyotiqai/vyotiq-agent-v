@@ -204,8 +204,14 @@ export function loadStatus(dir: string): RunStatus | null {
   try {
     const raw = JSON.parse(readFileSync(p, 'utf8')) as unknown
     const parsed = RunStatusSchema.safeParse(raw)
-    return parsed.success ? parsed.data : null
-  } catch {
+    if (!parsed.success) throw parsed.error
+    return parsed.data
+  } catch (err) {
+    logger.warn('Corrupt status.json; treating as absent', {
+      scope: 'state',
+      correlationId: basename(dir),
+      err
+    })
     return null
   }
 }
@@ -1384,6 +1390,11 @@ export async function deleteRun(
     await finalizeInlineInstanceWorktreeBestEffort(workspacePath, status)
   }
   await drainRunWritersBeforeDelete(dir)
+  // M2: a chatStart can register this runId (tryRegisterRunAbort) during the
+  // awaits above — re-check so the directory is never deleted under a live run.
+  if (isActive(runId)) {
+    return { ok: false, error: 'Cancel run first' }
+  }
   rmSync(dir, { recursive: true, force: true })
   dismissRunLifecycleInbox(runId)
   invalidateListRunsCache(workspacePath)

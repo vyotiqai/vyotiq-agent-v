@@ -169,6 +169,8 @@ export const MarketplaceCatalogEntrySchema = z.object({
   description: z.string().default(''),
   kind: MarketplaceKindSchema,
   downloadUrl: z.string().optional(),
+  /** Optional hex sha256 digest of the version archive — verified before extraction. */
+  sha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   bundledPath: MarketplaceRelPathSchema.optional(),
   source: z.enum(['bundled', 'remote']).default('remote'),
   publisher: z.string().optional(),

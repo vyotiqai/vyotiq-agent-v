@@ -13,7 +13,7 @@ import {
 } from 'fs'
 import { tmpdir } from 'os'
 import { basename, dirname, extname, join, resolve, sep } from 'path'
-import { randomBytes } from 'crypto'
+import { createHash, randomBytes } from 'crypto'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import {
@@ -86,6 +86,11 @@ export function assertRegistryDownloadUrl(downloadUrl: string, registryUrl: stri
     registry = new URL(reg)
   } catch {
     throw new Error('Invalid download or registry URL')
+  }
+  // Network registries must be https only. The download helper is http(s)-only
+  // (no file:// registry exists), so plain http is rejected outright.
+  if (registry.protocol !== 'https:') {
+    throw new Error('Marketplace registry URL must use https: (plain http is not allowed)')
   }
   if (download.protocol !== registry.protocol || download.host !== registry.host) {
     throw new Error('Catalog download URL must match the configured registry origin')
@@ -181,10 +186,54 @@ export function assertExtractContained(destDir: string): void {
   walk(destDir)
 }
 
+/** Normalize a tar-listed entry name: backslashes and leading `./` are packaging variance. */
+function normalizeArchiveEntryName(entry: string): string {
+  return entry.trim().replace(/\\/g, '/').replace(/^(?:\.\/)+/, '')
+}
+
+/**
+ * @internal Exported for unit tests — archive entry pre-scan gate. Rejects
+ * `..` path segments and true-absolute names (leading `/`, UNC `\\`, drive
+ * letter) before tar runs: bsdtar refuses `..` entries itself, but GNU tar
+ * (Linux) extracts them outside destDir where assertExtractContained cannot
+ * see them. Absolute entries are rejected fail-closed even though tar
+ * sanitizes them; an entry that is empty after normalization is malformed.
+ */
+export function assertArchiveEntryNameContained(entry: string): void {
+  const name = normalizeArchiveEntryName(entry)
+  if (!name || name.split('/').includes('..') || name.startsWith('/') || /^[A-Za-z]:/.test(name)) {
+    throw new Error(`Archive extract rejected escaping entry: ${entry}`)
+  }
+}
+
+/**
+ * Pre-scan an archive's entry list with `tar -tf` and reject any entry that
+ * would extract outside destDir, BEFORE extraction (the zip-vs-tgz flag
+ * mirrors the extract branching in extractArchive). One bounded, one-shot
+ * subprocess per archive. assertExtractContained remains the post-extract
+ * backstop (symlinks, realpath escapes inside destDir).
+ */
+async function assertArchiveEntriesContained(archivePath: string): Promise<void> {
+  const ext = extname(archivePath).toLowerCase()
+  const { stdout } = await execFileAsync(
+    'tar',
+    ext === '.zip' ? ['-tf', archivePath] : ['-tzf', archivePath]
+  )
+  for (const line of stdout.split(/\r?\n/)) {
+    const entry = line.trim()
+    if (!entry) continue
+    assertArchiveEntryNameContained(entry)
+  }
+}
+
 async function extractArchive(archivePath: string, destDir: string): Promise<void> {
+  await assertArchiveEntriesContained(archivePath)
   mkdirSync(destDir, { recursive: true })
   const ext = extname(archivePath).toLowerCase()
-  // Prefer tar/libarchive for zip and tgz — it refuses `..` / absolute entry paths.
+  // Prefer tar/libarchive for zip and tgz — the pre-scan above refuses `..`
+  // entry paths up front (bsdtar also refuses them, but GNU tar on Linux
+  // extracts them) and tar sanitizes absolute entries; the
+  // assertExtractContained call below is the post-extract backstop.
   // Avoid Expand-Archive / unzip which do not enforce zip-slip containment.
   if (ext === '.zip') {
     await execFileAsync('tar', ['-xf', archivePath, '-C', destDir])
@@ -600,6 +649,16 @@ async function materializeToTemp(req: MarketplaceInstallRequest): Promise<{
     assertRegistryDownloadUrl(downloadUrl, registryUrl)
     const archivePath = join(tmp, 'pkg.zip')
     await downloadToFile(downloadUrl, archivePath)
+    // Verify the archive digest before extraction when the catalog provides one.
+    if (entry.sha256) {
+      const actual = createHash('sha256').update(readFileSync(archivePath)).digest('hex')
+      if (actual !== entry.sha256.toLowerCase()) {
+        cleanup()
+        throw new Error(
+          `Archive sha256 mismatch for ${entry.id}: expected ${entry.sha256}, got ${actual}`
+        )
+      }
+    }
     const extractDir = join(tmp, 'extract')
     try {
       await extractArchive(archivePath, extractDir)

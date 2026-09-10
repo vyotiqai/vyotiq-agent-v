@@ -13,6 +13,7 @@ import {
   MAX_CRASH_SNIPPETS,
   parseCrashSnippetsFromLogText,
   recordCrashSnippet,
+  rendererBoundaryCrashFromLogMessage,
   sanitizeCrashUrl,
   setCrashHistoryPathForTests,
   shouldReloadRendererAfterCrash
@@ -190,5 +191,58 @@ describe('backfillCrashSnippetsFromLog', () => {
       backfillVersion: number
     }
     expect(raw.backfillVersion).toBe(CRASH_BACKFILL_VERSION)
+  })
+})
+
+describe('rendererBoundaryCrashFromLogMessage', () => {
+  it('extracts a snippet from a bridged renderer boundary record', () => {
+    const snippet = rendererBoundaryCrashFromLogMessage({
+      data: [
+        '[renderer] Renderer crash',
+        {
+          code: 'RENDERER_CRASH',
+          componentStack: 'at UpdateCard (file://[app]/index.js)',
+          err: {
+            name: 'TypeError',
+            message: "Cannot read properties of undefined (reading 'length')"
+          }
+        }
+      ],
+      date: new Date('2026-09-08T23:16:12.000Z')
+    })
+    expect(snippet).toEqual({
+      at: '2026-09-08T23:16:12.000Z',
+      kind: 'renderer',
+      reason: "Cannot read properties of undefined (reading 'length')"
+    })
+  })
+
+  it('falls back to the log line when err has no message', () => {
+    const snippet = rendererBoundaryCrashFromLogMessage({
+      data: ['[renderer] React maximum update depth (#185)', { code: 'REACT_185' }],
+      date: new Date('2026-09-08T23:16:12.000Z')
+    })
+    expect(snippet).toEqual({
+      at: '2026-09-08T23:16:12.000Z',
+      kind: 'renderer',
+      reason: 'React maximum update depth (#185)'
+    })
+  })
+
+  it('ignores main-side renderer crash records and non-boundary lines', () => {
+    const mainRecord = {
+      data: [
+        '[main] Renderer process gone',
+        { code: 'RENDERER_CRASH', reason: 'crashed', exitCode: -1 }
+      ],
+      date: new Date('2026-09-08T23:16:12.000Z')
+    }
+    expect(rendererBoundaryCrashFromLogMessage(mainRecord)).toBeNull()
+    expect(
+      rendererBoundaryCrashFromLogMessage({
+        data: ['[renderer] Renderer crash', { code: 'STALE_CHUNK' }]
+      })
+    ).toBeNull()
+    expect(rendererBoundaryCrashFromLogMessage({ data: [] })).toBeNull()
   })
 })

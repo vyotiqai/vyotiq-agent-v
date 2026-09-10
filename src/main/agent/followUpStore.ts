@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, unlinkSync } from 'fs'
-import { join } from 'path'
+import { basename, join } from 'path'
 import { z } from 'zod'
+import { logger } from '../../shared/logger'
 import { atomicWriteJson } from '@main/storage/atomicWrite'
 import { ChatMessageSchema } from '@shared/ipc/schemas/agent'
 import { followUpPreview, peekFollowUps, seedFollowUps, type FollowUpEntry } from './runRegistry'
@@ -31,8 +32,14 @@ export function loadFollowUps(runDir: string): FollowUpEntry[] {
   if (!existsSync(path)) return []
   try {
     const parsed = FollowUpsFileSchema.safeParse(JSON.parse(readFileSync(path, 'utf8')))
-    return parsed.success ? parsed.data.followUps : []
-  } catch {
+    if (!parsed.success) throw parsed.error
+    return parsed.data.followUps
+  } catch (err) {
+    logger.warn('Corrupt followups.json; treating as empty', {
+      scope: 'state',
+      correlationId: basename(runDir),
+      err
+    })
     return []
   }
 }

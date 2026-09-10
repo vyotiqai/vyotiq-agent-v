@@ -4,7 +4,7 @@ Agent V is a proprietary coding workspace for real repositories by [Vyotiq](http
 
 ## Highlights
 
-- **Workspace tools** - **61** tools for read/edit/search, glob, grep, codebase_search, list_dir, and terminal access, all sandboxed to the workspace root.
+- **Workspace tools** - **60** tools for read/edit/search, glob, grep, codebase_search, list_dir, and terminal access, all sandboxed to the workspace root.
 - **Live agent browser** — navigate, snapshot, click, type, and wait on any page from inside a run.
 - **Interactive terminal dock** — xterm-based terminal (real PTY via node-pty when available).
 - **Git integration** — Changes panel, commits, and optional GitHub pull-request panel.

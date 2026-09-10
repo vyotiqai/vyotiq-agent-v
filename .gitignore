@@ -110,3 +110,9 @@ venv/
 .cursorrules
 AGENTS.md
 scripts/remove-coauthors-from-history.sh
+
+# L10 remediation (2026-09-10 audit): local-only clutter. Append-only block —
+# nothing above is modified, reordered, or weakened.
+asar-list.txt
+screenshots/
+scripts/tmp-*

@@ -4,7 +4,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { DEFAULT_SETTINGS, runDoneDedupeKey, runErrorDedupeKey, type Settings } from '@shared/ipc'
 
-const { send, windowState, settingsState, MockNotification } = vi.hoisted(() => {
+const { send, windowState, settingsState, MockNotification, isActiveMock } = vi.hoisted(() => {
   class MockNotification {
     static isSupported = vi.fn(() => true)
     static handleActivation = vi.fn()
@@ -26,7 +26,8 @@ const { send, windowState, settingsState, MockNotification } = vi.hoisted(() => 
     send: vi.fn(),
     windowState: { focused: false, minimized: false },
     settingsState: { current: null as Settings | null },
-    MockNotification
+    MockNotification,
+    isActiveMock: vi.fn<typeof import('@main/agent/runRegistry').isActive>()
   }
 })
 
@@ -47,6 +48,14 @@ vi.mock('@main/settings/settings', () => ({
   getSettings: () => settingsState.current ?? { ...DEFAULT_SETTINGS }
 }))
 
+vi.mock('@main/agent/runRegistry', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/agent/runRegistry')>()
+  return {
+    ...actual,
+    isActive: isActiveMock
+  }
+})
+
 vi.mock('@main/app/window', () => ({
   getMainWindow: () => ({
     isDestroyed: () => false,
@@ -63,6 +72,7 @@ vi.mock('@main/app/window', () => ({
 }))
 
 import { createRun, deleteRun } from '@main/agent/state'
+import { resolveRunDir } from '@main/storage/paths'
 import {
   initNotifications,
   listNotifications,
@@ -160,5 +170,24 @@ describe('deleteRun dismisses run inbox items', () => {
     const deleted = await deleteRun(workspace, parentId)
     expect(deleted.ok).toBe(true)
     expect(listNotifications().items).toHaveLength(0)
+  })
+
+  it('does not delete a run that becomes active during deletion', async () => {
+    const runId = 'run-active-mid-delete'
+    createRun(workspace, runId, 'Becomes active mid-delete')
+    const runDir = resolveRunDir(workspace, runId)
+    expect(existsSync(runDir)).toBe(true)
+
+    // Call 1 = deleteRun's entry guard; call 2 = the isActive re-check added
+    // immediately before rmSync. tryRegisterRunAbort (runRegistry.ts:150) can
+    // admit the same runId during the awaits between the two checks.
+    isActiveMock
+      .mockImplementationOnce(() => false)
+      .mockImplementationOnce(() => true)
+
+    const result = await deleteRun(workspace, runId)
+
+    expect(result).toEqual({ ok: false, error: 'Cancel run first' })
+    expect(existsSync(runDir)).toBe(true)
   })
 })

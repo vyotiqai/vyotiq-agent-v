@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, unlinkSync } from 'fs'
-import { join } from 'path'
+import { basename, join } from 'path'
 import { atomicWriteJson } from '@main/storage/atomicWrite'
+import { logger } from '../../shared/logger'
 import { LoopCheckpointSchema, LOOP_CHECKPOINT_VERSION, type LoopCheckpoint } from '@shared/ipc/schemas/agent'
 
 export const LOOP_CHECKPOINT_FILENAME = 'loopCheckpoint.json'
@@ -19,8 +20,14 @@ export function loadLoopCheckpoint(runDir: string): LoopCheckpoint | null {
     // versions by overwriting the literal so resume keeps restoring state.
     if (raw.version === 1 || raw.version === 2) raw.version = LOOP_CHECKPOINT_VERSION
     const parsed = LoopCheckpointSchema.safeParse(raw)
-    return parsed.success ? parsed.data : null
-  } catch {
+    if (!parsed.success) throw parsed.error
+    return parsed.data
+  } catch (err) {
+    logger.warn('Corrupt loopCheckpoint.json; treating as absent', {
+      scope: 'state',
+      correlationId: basename(runDir),
+      err
+    })
     return null
   }
 }

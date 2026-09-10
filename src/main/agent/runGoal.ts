@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'fs'
-import { join } from 'path'
+import { basename, join } from 'path'
 import {
   RunGoalSchema,
   type RunGoal,
@@ -10,6 +10,7 @@ import { wrapPromptSection } from './promptSections'
 import { atomicWriteJson } from '@main/storage/atomicWrite'
 import { enqueueStatusPatch } from './statusWriteQueue'
 import { invalidateListRunsCache } from './runListCache'
+import { logger } from '../../shared/logger'
 
 function goalPath(runDir: string): string {
   return join(runDir, 'goal.json')
@@ -24,8 +25,14 @@ export function readGoal(runDir: string): RunGoal | null {
   if (!existsSync(path)) return null
   try {
     const parsed = RunGoalSchema.safeParse(JSON.parse(readFileSync(path, 'utf8')))
-    return parsed.success ? parsed.data : null
-  } catch {
+    if (!parsed.success) throw parsed.error
+    return parsed.data
+  } catch (err) {
+    logger.warn('Corrupt goal.json; treating as absent', {
+      scope: 'state',
+      correlationId: basename(runDir),
+      err
+    })
     return null
   }
 }

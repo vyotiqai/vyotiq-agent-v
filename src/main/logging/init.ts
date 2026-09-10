@@ -10,6 +10,7 @@ import {
   formatWindowsExitCode,
   markRendererRecoveryPending,
   recordCrashSnippet,
+  rendererBoundaryCrashFromLogMessage,
   sanitizeCrashUrl,
   shouldReloadRendererAfterCrash,
   planRendererReload,
@@ -66,6 +67,18 @@ export function initMainLogging(): void {
   const consoleWritable =
     isDev && Boolean(process.stdout?.writable) && process.stdout.isTTY !== false
   log.transports.console.level = consoleWritable ? 'debug' : false
+
+  // React-level renderer crashes are caught by the renderer ErrorBoundary and
+  // reach main only as log records on the electron-log renderer→main bridge —
+  // they never trip render-process-gone (the only other recordCrashSnippet
+  // trigger). electron-log runs hooks once per enabled transport, so record
+  // only on the file pass to keep each crash in crash-history.json exactly once.
+  log.hooks.push((message, _transport, transportName) => {
+    if (transportName !== 'file') return message
+    const snippet = rendererBoundaryCrashFromLogMessage(message)
+    if (snippet) recordCrashSnippet(snippet)
+    return message
+  })
 
   setLoggerBackend({
     log: (level, message, fields) => {

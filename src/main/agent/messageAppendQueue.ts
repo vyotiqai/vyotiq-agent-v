@@ -180,6 +180,12 @@ async function enforceMessageArchiveCap(dir: string): Promise<void> {
     if (!oldest) break
     try {
       await unlink(join(dir, oldest))
+      logger.warn('Evicted oldest messages archive (archive cap exceeded)', {
+        scope: 'state',
+        code: 'MESSAGES_ARCHIVE_EVICTED',
+        correlationId: basename(dir),
+        filename: oldest
+      })
     } catch {
       // best effort — an undeletable archive must not block the append chain
     }

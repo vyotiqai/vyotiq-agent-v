@@ -54,6 +54,11 @@ export async function refreshRemoteCatalog(): Promise<MarketplaceCatalog> {
   }
   const url = `${registryUrl}/v1/catalog`
   try {
+    // Network registries must be https; plain http is refused here and falls
+    // through to the cached catalog below (same as any fetch failure).
+    if (new URL(url).protocol !== 'https:') {
+      throw new Error('Marketplace registry URL must use https: (plain http is not allowed)')
+    }
     const { response, body } = await fetchPublicResponse(
       new URL(url),
       AbortSignal.timeout(15_000),

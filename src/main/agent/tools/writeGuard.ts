@@ -46,7 +46,12 @@ export function isRelPathInPathScope(relPath: string, pathScope: string[]): bool
   return pathScope.some((raw) => {
     if (!isSafePathScopePrefix(raw)) return false
     const scope = normalizeScopePath(raw)
-    return norm === scope || norm.startsWith(`${scope}/`)
+    // Windows path matching is case-insensitive, mirroring
+    // parallelMutationPathKey (classify.ts) and mutationQueue.pathKey — a
+    // `src/` scope must also cover `SRC/`. POSIX behavior is unchanged.
+    const relKey = process.platform === 'win32' ? norm.toLowerCase() : norm
+    const scopeKey = process.platform === 'win32' ? scope.toLowerCase() : scope
+    return relKey === scopeKey || relKey.startsWith(`${scopeKey}/`)
   })
 }
 

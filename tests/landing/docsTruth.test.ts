@@ -482,7 +482,7 @@ describe('landing docs architecture and truth', () => {
     expect(pkg).toContain('"description": "Agent V — coding workspace for real repositories"')
 
     expect(readme).toMatch(/^# Agent V/m)
-    expect(readme).toContain('**61** tools')
+    expect(readme).toContain('**60** tools')
     expect(readme).not.toMatch(/\b43 tools\b/i)
     expect(readme).not.toMatch(/docs\/architecture\.md/)
     expect(readme).toContain('**MCPs**')

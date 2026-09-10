@@ -292,6 +292,31 @@ export function parseCrashSnippetsFromLogText(text: string): CrashSnippet[] {
 }
 
 /**
+ * Extract a React error-boundary crash snippet from one bridged renderer log
+ * record. electron-log hands hooks the raw arguments as
+ * `data: ['[renderer] <message>', { code, err, ... }]` — main-side
+ * `Renderer process gone` records carry the `[main] ` prefix and never match.
+ * Returns null for every non-boundary record so live wiring stays a single
+ * cheap check per log record.
+ */
+export function rendererBoundaryCrashFromLogMessage(message: {
+  data?: unknown[]
+  date?: unknown
+}): CrashSnippet | null {
+  const line = message.data?.[0]
+  if (typeof line !== 'string' || !line.startsWith('[renderer] ')) return null
+  if (!line.includes('Renderer crash') && !line.includes('React maximum update depth')) return null
+  const meta = message.data?.[1] as { code?: unknown; err?: { message?: unknown } } | undefined
+  if (meta?.code !== 'RENDERER_CRASH' && meta?.code !== 'REACT_185') return null
+  const at = message.date instanceof Date ? message.date : new Date()
+  const reason =
+    typeof meta.err?.message === 'string' && meta.err.message
+      ? meta.err.message
+      : line.slice('[renderer] '.length)
+  return { at: at.toISOString(), kind: 'renderer', reason }
+}
+
+/**
  * One-shot: seed crash-history.json from recent log crash lines.
  * No-ops when `backfillVersion` is already {@link CRASH_BACKFILL_VERSION}.
  * @returns number of snippets newly added from the log
