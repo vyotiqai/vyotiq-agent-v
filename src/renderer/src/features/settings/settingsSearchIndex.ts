@@ -346,6 +346,52 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'storage'
   },
   {
+    id: 'dictation-qwen3-server',
+    title: 'Qwen3-ASR server URL',
+    keywords: [
+      'dictation',
+      'voice',
+      'qwen',
+      'qwen3',
+      'asr',
+      'transcribe',
+      'local server',
+      'vllm',
+      'microphone'
+    ],
+    section: 'voice'
+  },
+  {
+    id: 'dictation-qwen3-key',
+    title: 'Qwen3-ASR server API key',
+    keywords: ['dictation', 'voice', 'qwen', 'qwen3', 'asr', 'api key', 'token'],
+    section: 'voice'
+  },
+  {
+    id: 'dictation-qwen3-asr-0.6b',
+    title: 'Qwen3-ASR 0.6B',
+    keywords: ['dictation', 'voice', 'qwen', 'qwen3', 'asr', 'transcribe', 'local server'],
+    section: 'voice'
+  },
+  {
+    id: 'dictation-qwen3-asr-1.7b',
+    title: 'Qwen3-ASR 1.7B',
+    keywords: ['dictation', 'voice', 'qwen', 'qwen3', 'asr', 'transcribe', 'local server'],
+    section: 'voice'
+  },
+  {
+    id: 'dictation-qwen3-asr-onnx-0.6b',
+    title: 'Qwen3-ASR 0.6B (on-device)',
+    keywords: ['dictation', 'voice', 'qwen', 'qwen3', 'asr', 'transcribe', 'local server', 'onnx', 'on-device'],
+    section: 'voice'
+  },
+  {
+    id: 'dictation-qwen3-asr-onnx-1.7b',
+    title: 'Qwen3-ASR 1.7B (on-device)',
+    keywords: ['dictation', 'voice', 'qwen', 'qwen3', 'asr', 'transcribe', 'local server', 'onnx', 'on-device'],
+    section: 'voice'
+  },
+  {
     id: 'tool-approval',
     title: 'Tool approval',
     keywords: ['approval', 'allowlist', 'tools', 'mutating'],
