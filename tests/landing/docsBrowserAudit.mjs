@@ -354,7 +354,7 @@ async function checkHomepage(page, viewport) {
       text: (anchor.textContent ?? '').replace(/\s+/g, ' ').trim()
     }))
   )
-  if (!heroLinks.some((link) => link.href.includes('github.com/vyotiqai/vyotiq-agent-v/releases'))) {
+  if (!heroLinks.some((link) => link.href.includes('github.com/vyotiqai/vyotiq-agent-v-releases/releases'))) {
     fail(`${viewport} homepage: hero missing GitHub Releases`)
   }
   if (!heroLinks.some((link) => link.href === '/docs')) {
@@ -375,7 +375,7 @@ async function checkHomepage(page, viewport) {
     fail(`${viewport} homepage: expected exactly one download CTA, got ${JSON.stringify(downloadCta)}`)
   }
   for (const link of downloadCta) {
-    if (!/github\.com\/vyotiqai\/vyotiq-agent-v\/releases/.test(link.href)) {
+    if (!/github\.com\/vyotiqai\/vyotiq-agent-v-releases\/releases/.test(link.href)) {
       fail(`${viewport} homepage: download CTA does not point at the releases page ${JSON.stringify(link)}`)
     }
     if (link.text !== 'Download Agent V') {

@@ -163,5 +163,5 @@ npmRebuild: false
 publish:
   provider: github
   owner: vyotiqai
-  repo: vyotiq-agent-v
+  repo: vyotiq-agent-v-releases
   releaseType: release

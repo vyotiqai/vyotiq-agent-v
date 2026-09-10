@@ -73,7 +73,10 @@ jobs:
 
       - name: Package installers
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Cross-repo publish: electron-builder creates the release in the
+          # PUBLIC vyotiqai/vyotiq-agent-v-releases repo (source stays
+          # private). GITHUB_TOKEN only covers this private repo.
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}

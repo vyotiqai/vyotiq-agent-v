@@ -1,8 +1,8 @@
-export const RELEASES_PAGE = 'https://github.com/vyotiqai/vyotiq-agent-v/releases/latest'
+export const RELEASES_PAGE = 'https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/latest'
 export const RELEASES_API =
-  'https://api.github.com/repos/vyotiqai/vyotiq-agent-v/releases/latest'
+  'https://api.github.com/repos/vyotiqai/vyotiq-agent-v-releases/releases/latest'
 export const RELEASES_LIST_API =
-  'https://api.github.com/repos/vyotiqai/vyotiq-agent-v/releases?per_page=10'
+  'https://api.github.com/repos/vyotiqai/vyotiq-agent-v-releases/releases?per_page=10'
 
 export const EMPTY_GITHUB_RELEASE = {
   tag: null,

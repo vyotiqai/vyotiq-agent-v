@@ -1,4 +1,4 @@
-export const RELEASES_PAGE = 'https://github.com/vyotiqai/vyotiq-agent-v/releases/latest'
+export const RELEASES_PAGE = 'https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/latest'
 
 export type ReleaseAsset = {
   name: string
