@@ -1,7 +1,29 @@
-import { defaultSchema } from 'rehype-sanitize'
+import { fromHtml } from 'hast-util-from-html'
+import { toHtml } from 'hast-util-to-html'
+import { defaultSchema, sanitize, type Schema } from 'hast-util-sanitize'
 
 /** Markdown body sanitization — highlighted code uses `sanitizeHighlightedHtml` instead. */
 export const markdownSanitizeSchema = defaultSchema
+
+/**
+ * Structural schema for the Shiki-highlight path (belt 1 of
+ * {@link sanitizeHighlightedHtml}). Shiki's classic structure emits only
+ * `pre`/`code`/`span` plus text (`@shikijs/core` `tokensToHast`): `pre` carries
+ * `class="shiki <theme>"`, `style="background-color:…;color:…"` and `tabindex`;
+ * token `span`s carry `style` declarations; `span.line` carries `class="line"`.
+ * A schema's `attributes` replaces the default wholesale, so it is rebuilt from
+ * the GitHub default with only the highlight-path entries widened. Style VALUES
+ * are not pattern-checkable by hast-util-sanitize — the regex belt after this
+ * one rebuilds every declaration against ALLOWED_STYLE_PROPS.
+ */
+export const highlightSanitizeSchema: Schema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    pre: ['className', 'style', 'tabIndex'],
+    span: ['className', 'style']
+  }
+}
 
 const ALLOWED_TAGS = new Set([
   'span',
@@ -137,13 +159,15 @@ const DANGEROUS_TAGS = [
  * Strip disallowed tags and dangerous attributes from Shiki-highlighted HTML
  * before `dangerouslySetInnerHTML`.
  *
- * NOTE: a regex sanitizer is inherently more brittle than a HAST-level one
- * (rehype-sanitize). This covers the practical injection channels for code
- * output (which Shiki HTML-escapes), but the highlighted-code path should
- * eventually route through `hast-util-sanitize` like the markdown body does.
+ * Belt 1 (primary): parse to HAST and sanitize with {@link highlightSanitizeSchema} —
+ * disallowed tags, attributes, and script content are dropped at the tree level.
+ * Belt 2 (value check): the regex chain below rebuilds every attribute and style
+ * declaration against the Shiki-only allowlists, closing the value-level gaps a
+ * structural schema cannot express.
  */
 export function sanitizeHighlightedHtml(html: string): string {
-  let out = html
+  const tree = sanitize(fromHtml(html, { fragment: true }), highlightSanitizeSchema)
+  let out = toHtml(tree)
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, '')
     // Remove namespaced/active tags and their inner content (e.g. <svg:script>).

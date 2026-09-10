@@ -5,9 +5,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, waitFor } from '@testing-library/react'
 import { MarkdownContent } from '@renderer/lib/ui/MarkdownContent'
 import {
+  highlightSanitizeSchema,
   markdownSanitizeSchema,
   sanitizeHighlightedHtml
 } from '@renderer/lib/markdown/markdownSanitize'
+import { defaultSchema } from 'hast-util-sanitize'
 
 afterEach(() => {
   cleanup()
@@ -119,6 +121,54 @@ describe('markdown sanitization — schema', () => {
   it('only allows language-* class names on code', () => {
     const codeAttributes = (markdownSanitizeSchema.attributes as Record<string, unknown[]>).code
     expect(codeAttributes.includes('className')).toBe(false)
+  })
+})
+
+describe('highlightSanitizeSchema — belt 1 structural pass', () => {
+  it('keeps the schema on GitHub defaults for markdown-body rendering', () => {
+    expect(markdownSanitizeSchema).toBe(defaultSchema)
+    expect(highlightSanitizeSchema.tagNames).toEqual(defaultSchema.tagNames)
+    expect(highlightSanitizeSchema.protocols).toEqual(defaultSchema.protocols)
+  })
+
+  it('drops script content entirely (strip list) from highlighted HTML', () => {
+    const out = sanitizeHighlightedHtml(
+      '<pre><code>ok<script>window.__pwned = true</script>x</code></pre>'
+    )
+    expect(out).not.toContain('script')
+    expect(out).not.toContain('pwned')
+  })
+
+  it('drops event-handler attributes in the structural pass', () => {
+    const out = sanitizeHighlightedHtml(
+      '<span class="line" onerror="alert(1)">x</span>'
+    )
+    expect(out).not.toContain('onerror')
+    expect(out).toContain('class="line"')
+  })
+
+  it('drops foreign tags Shiki never emits (structural, not value-level)', () => {
+    const out = sanitizeHighlightedHtml(
+      '<iframe src="https://evil.test"></iframe><span class="line">x</span>'
+    )
+    expect(out).not.toContain('iframe')
+    expect(out).toContain('<span class="line">x</span>')
+  })
+
+  it('preserves shiki structure through the structural pass', () => {
+    const out = sanitizeHighlightedHtml(
+      '<pre class="shiki github-light" style="background-color:#fff;color:#24292e" tabindex="0"><code><span class="line" style="color:#d73a49">const</span></code></pre>'
+    )
+    expect(out).toContain('class="shiki github-light"')
+    expect(out).toContain('class="line"')
+    expect(out).toContain('background-color:#fff')
+    expect(out).toContain('tabindex')
+  })
+
+  it('applies the same host-page CSP rules to the schema', () => {
+    const schema = highlightSanitizeSchema.attributes as Record<string, string[]>
+    expect(schema.pre).toEqual(['className', 'style', 'tabIndex'])
+    expect(schema.span).toEqual(['className', 'style'])
   })
 })
 
