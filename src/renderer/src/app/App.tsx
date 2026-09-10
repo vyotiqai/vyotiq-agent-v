@@ -40,6 +40,7 @@ import {
 } from '@shared/domain/modelSelection'
 import { logger } from '@shared/logger'
 import { workspacePathsEqual, findByWorkspacePath } from '@shared/workspacePathMatch'
+import { workspaceIdFromPath } from '@shared/utils/workspaceId'
 import { normalizeRelPath } from '../features/chat/utils/turnFileDiffs'
 import { ToolApprovalOnboardingModal } from '../features/chat/components/ToolApprovalOnboardingModal'
 import { useOfflineSendQueue } from '@renderer/lib/hooks/useOfflineSendQueue'
@@ -1916,7 +1917,7 @@ function App() {
 
   const onCloseWorkspace = async (path: string): Promise<void> => {
     // Storage retention (audit H5): offer storage-dir deletion with the measured
-    // size, confirmed here BEFORE the remove IPC — main never prompts.
+    // size, confirmed here BEFORE the remove IPC ΓÇö main never prompts.
     let deleteStorage = false
     if (settings.storage?.pruneOnWorkspaceRemoval && window.vyotiq?.storageReport) {
       try {

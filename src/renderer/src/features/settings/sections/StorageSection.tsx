@@ -123,8 +123,7 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
         >
           <div className="flex items-center gap-2">
             <Button
-              variant="secondary"
-              size="sm"
+              variant="subtle"
               disabled={reportBusy}
               onClick={refreshReport}
             >
@@ -166,8 +165,7 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
             help="Deleting the local dictation model requires a multi-GB re-download — manage it in Settings → Voice. The embedder model is shared by all workspaces (Settings → Indexing)."
           >
             <Button
-              variant="secondary"
-              size="sm"
+              variant="subtle"
               onClick={() => form.navigateSection('voice')}
             >
               Open Voice settings
@@ -185,7 +183,7 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
         >
           <div className="flex flex-wrap items-center justify-end gap-2">
             {cleanupStage === 'idle' || cleanupStage === 'done' ? (
-              <Button variant="secondary" size="sm" onClick={startCleanup}>
+              <Button variant="subtle" onClick={startCleanup}>
                 {cleanupStage === 'done' ? 'Clean again' : 'Free up space'}
               </Button>
             ) : null}
@@ -217,10 +215,10 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
                 ))}
             </ul>
             <div className="mt-2 flex justify-end gap-2">
-              <Button variant="secondary" size="sm" onClick={cancelCleanup}>
+              <Button variant="subtle" onClick={cancelCleanup}>
                 Cancel
               </Button>
-              <Button variant="danger" size="sm" onClick={confirmCleanup}>
+              <Button variant="danger" onClick={confirmCleanup}>
                 Delete {formatBytes(preview.totalReclaimBytes)}
               </Button>
             </div>
