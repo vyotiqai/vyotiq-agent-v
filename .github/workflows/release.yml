@@ -260,3 +260,29 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run deploy-landing.yml --ref main
+
+      - name: Mirror a release pointer on the source repo
+        # Installers live on the releases-only repo; this repo is where people
+        # browse the code, so keep its Releases page current: a pointer release
+        # per tag, marked Latest, linking to the real installers.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if gh release view "v$VERSION" --repo vyotiqai/vyotiq-agent-v > /dev/null 2>&1; then
+            echo "Pointer release v$VERSION already exists on the source repo"
+            exit 0
+          fi
+          {
+            echo "Agent V v$VERSION."
+            echo ""
+            echo "**Downloads:** the [Windows · macOS · Linux installers](https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v$VERSION) are published on the [releases repository](https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/latest), where the in-app updater and the [website](https://vyotiq.com) point."
+            echo ""
+            echo "Full release notes: https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v$VERSION"
+          } > pointer.md
+          gh release create "v$VERSION" \
+            --repo vyotiqai/vyotiq-agent-v \
+            --title "Vyotiq v$VERSION" \
+            --notes-file pointer.md \
+            --latest
