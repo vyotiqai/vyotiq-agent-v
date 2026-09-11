@@ -411,6 +411,7 @@ import {
   resolveConflict
 } from '@main/git/git'
 import { invalidateGitStatusCache, readGitStatusCached } from '@main/git/gitStatusCache'
+import { emitGitStatusChanged } from '@main/git/gitStatusEvents'
 import { generateCommitMessage } from '@main/git/commitMessage'
 import {
   prClose,
@@ -1741,6 +1742,7 @@ export function registerIpc(): void {
         persistWriteCheckpointEvent(runDir, req.runId, result.checkpointId)
         if (result.discarded.length > 0) {
           invalidateGitStatusCache(req.workspacePath)
+          emitGitStatusChanged(req.workspacePath)
         }
         logger.info('Resolved agent writes', {
           scope: 'ipc',
@@ -2220,6 +2222,7 @@ export function registerIpc(): void {
         return ok(result)
       } finally {
         invalidateGitStatusCache(req.workspacePath)
+        emitGitStatusChanged(req.workspacePath)
       }
     } catch (err) {
       return failFrom(err, IPC.gitCommit)
@@ -2236,6 +2239,7 @@ export function registerIpc(): void {
         return ok(result)
       } finally {
         invalidateGitStatusCache(req.workspacePath)
+        emitGitStatusChanged(req.workspacePath)
       }
     } catch (err) {
       return failFrom(err, IPC.gitStageAll)
@@ -2252,6 +2256,7 @@ export function registerIpc(): void {
         return ok(result)
       } finally {
         invalidateGitStatusCache(req.workspacePath)
+        emitGitStatusChanged(req.workspacePath)
       }
     } catch (err) {
       return failFrom(err, IPC.gitStagePaths)
@@ -2268,6 +2273,7 @@ export function registerIpc(): void {
         return ok(result)
       } finally {
         invalidateGitStatusCache(req.workspacePath)
+        emitGitStatusChanged(req.workspacePath)
       }
     } catch (err) {
       return failFrom(err, IPC.gitUnstagePaths)

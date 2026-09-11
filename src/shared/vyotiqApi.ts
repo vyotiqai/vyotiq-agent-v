@@ -32,6 +32,7 @@ import type {
   GitCommitResult,
   GitBlameResult,
   GitGenerateCommitMessageResult,
+  GitStatusChangedPayload,
   GitStatusResult,
   IpcResult,
   ListModelsResult,
@@ -692,6 +693,8 @@ export interface VyotiqApi {
   markNotificationsRead: (payload: NotificationMutateRequest) => Promise<IpcResult<NotificationList>>
   dismissNotifications: (payload: NotificationMutateRequest) => Promise<IpcResult<NotificationList>>
   onNotificationsChanged: (handler: (payload: NotificationList) => void) => () => void
+  /** Pushed from main after a workspace's git status may have changed. */
+  onGitStatusChanged: (handler: (payload: GitStatusChangedPayload) => void) => () => void
   onNotificationActivate: (handler: (action: NotificationAction) => void) => () => void
   onSystemThemeChanged: (handler: (prefersDark: boolean) => void) => () => void
   /** Native OS clipboard write (sandboxed preload). Write-only. */

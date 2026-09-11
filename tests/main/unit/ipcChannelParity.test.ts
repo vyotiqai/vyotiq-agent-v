@@ -23,6 +23,7 @@ const PUSH_ONLY = new Set<keyof typeof IPC>([
   'codeIndexStatusEvent',
   'dictationStatusEvent',
   'skillsChanged',
+  'gitStatusChanged',
   'workspaceEditorFlushRequest',
   'workspaceEditorFlushResponse',
   'notificationsChanged',
