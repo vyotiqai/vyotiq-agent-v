@@ -25,18 +25,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with:
-          node-version: 22
-
-      - name: Verify tag matches package.json version
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        env:
-          GITHUB_REF_NAME: ${{ github.ref_name }}
-        run: |
-          node -e "const pkg=require('./package.json');const tag=process.env.GITHUB_REF_NAME.replace(/^v/,'');if(tag!==pkg.version){console.error('Tag v'+tag+' does not match package.json version '+pkg.version+'. Bump package.json to '+tag+' and re-tag, or move the tag to v'+pkg.version+'.');process.exit(1)}console.log('Tag v'+tag+' matches package.json version '+pkg.version)"
-
+      # setup-node v5 resolves the package manager for its default
+      # package-manager-cache, so pnpm must be on PATH before it runs.
       - name: Enable pnpm
         run: |
           corepack enable
@@ -46,6 +36,14 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          node -e "const pkg=require('./package.json');const tag=process.env.GITHUB_REF_NAME.replace(/^v/,'');if(tag!==pkg.version){console.error('Tag v'+tag+' does not match package.json version '+pkg.version+'. Bump package.json to '+tag+' and re-tag, or move the tag to v'+pkg.version+'.');process.exit(1)}console.log('Tag v'+tag+' matches package.json version '+pkg.version)"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -78,6 +76,9 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
+          # pnpm is not installed in this job (node scripts + gh only); the
+          # v5 default package-manager-cache would try to resolve pnpm.
+          package-manager-cache: false
 
       - name: Extract release notes from CHANGELOG.md
         if: startsWith(github.ref, 'refs/tags/')
@@ -139,18 +140,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with:
-          node-version: 22
-
-      - name: Verify tag matches package.json version
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        env:
-          GITHUB_REF_NAME: ${{ github.ref_name }}
-        run: |
-          node -e "const pkg=require('./package.json');const tag=process.env.GITHUB_REF_NAME.replace(/^v/,'');if(tag!==pkg.version){console.error('Tag v'+tag+' does not match package.json version '+pkg.version+'. electron-builder would publish '+pkg.version+'-named assets onto the v'+tag+' release. Bump package.json to '+tag+' and re-tag, or move the tag to v'+pkg.version+'.');process.exit(1)}console.log('Tag v'+tag+' matches package.json version '+pkg.version)"
-
+      # setup-node v5 resolves the package manager for its default
+      # package-manager-cache, so pnpm must be on PATH before it runs.
       - name: Enable pnpm
         run: |
           corepack enable
@@ -160,6 +151,14 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          node -e "const pkg=require('./package.json');const tag=process.env.GITHUB_REF_NAME.replace(/^v/,'');if(tag!==pkg.version){console.error('Tag v'+tag+' does not match package.json version '+pkg.version+'. electron-builder would publish '+pkg.version+'-named assets onto the v'+tag+' release. Bump package.json to '+tag+' and re-tag, or move the tag to v'+pkg.version+'.');process.exit(1)}console.log('Tag v'+tag+' matches package.json version '+pkg.version)"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -215,6 +214,9 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
+          # pnpm is not installed in this job (node scripts + gh only); the
+          # v5 default package-manager-cache would try to resolve pnpm.
+          package-manager-cache: false
 
       - name: Ensure release notes are populated
         env:
