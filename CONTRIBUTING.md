@@ -59,6 +59,11 @@ packaged app; CI covers them, so a local run is optional.
 6. Make sure `pnpm typecheck`, `pnpm lint`, and `pnpm test` pass and the CI
    workflow is green on your PR.
 
+AI agents (and anyone driving one) must also follow
+[.github/AGENT-CHECKLIST.md](.github/AGENT-CHECKLIST.md) — it encodes the
+packaging, release, and verification gates this repo enforces, including the
+launch-the-packaged-app rule that prevents broken installers.
+
 ## Licensing
 
 By contributing, you agree that your contributions are licensed under the
