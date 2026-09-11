@@ -148,10 +148,13 @@ async function checkTypography(page, label) {
           text: element.textContent?.trim().slice(0, 80),
           family: getComputedStyle(element).fontFamily
         }))
-        .filter((element) => !element.family.includes('Plus Jakarta Sans'))
+        .filter(
+          (element) =>
+            !element.family.includes('Schibsted Grotesk') && !element.family.includes('IBM Plex Mono')
+        )
     )
   if (wrongFont.length > 0) {
-    fail(`${label}: interface typography is not Plus Jakarta Sans ${JSON.stringify(wrongFont)}`)
+    fail(`${label}: interface typography is not Schibsted Grotesk or IBM Plex Mono ${JSON.stringify(wrongFont)}`)
   }
 }
 
@@ -252,6 +255,8 @@ async function checkDocsRoute(page, route, viewport) {
     anchors.some((anchor) => {
       const url = new URL(anchor.href)
       if (url.origin === location.origin) return false
+      // mailto links never fetch a remote origin, so the https rule is web-only.
+      if (url.protocol === 'mailto:') return false
       return url.protocol !== 'https:' || (anchor.target === '_blank' && !anchor.rel.includes('noopener'))
     })
   )
@@ -303,8 +308,8 @@ async function checkHomepage(page, viewport) {
   await goto(page, '/', `${viewport} homepage`)
   await checkNoOverflow(page, `${viewport} homepage`)
   if ((await page.locator('main h1').count()) !== 1) fail(`${viewport} homepage: expected one h1`)
-  if ((await page.locator('main section').count()) !== 8) {
-    fail(`${viewport} homepage: expected eight narrative sections`)
+  if ((await page.locator('main section').count()) !== 9) {
+    fail(`${viewport} homepage: expected nine narrative sections`)
   }
   const headings = await page.locator('main h1, main h2, main h3').evaluateAll((elements) =>
     elements.map((element) => ({ depth: Number(element.tagName.slice(1)), text: element.textContent?.trim() }))
@@ -315,16 +320,16 @@ async function checkHomepage(page, viewport) {
   for (const id of ['overview', 'capabilities']) {
     if ((await page.locator(`#${id}`).count()) !== 1) fail(`${viewport} homepage: missing #${id}`)
   }
-  const sectionEyebrows = await page.locator('.home-eyebrow').allTextContents()
+  const sectionEyebrows = await page.locator('.eyebrow').allTextContents()
   const expectedEyebrows = [
-    'Agent V',
-    '01 / Integrated workspace',
-    '02 / Controlled modes',
-    '03 / Long-running work',
-    '04 / Provider choice',
-    '05 / Deliberate extension',
-    '06 / Data boundaries',
-    '07 / Documentation'
+    '01 One workspace',
+    '02 Three modes',
+    '03 Long-running work',
+    '04 Provider choice',
+    '05 Extensions',
+    '06 Data boundaries',
+    '07 Documentation',
+    '→ Get started'
   ]
   if (
     JSON.stringify(sectionEyebrows.map((text) => text.trim().toLowerCase())) !==
@@ -340,7 +345,7 @@ async function checkHomepage(page, viewport) {
   }))
   if (
     heroStructure.headings !== 1 ||
-    heroStructure.paragraphs !== 2 ||
+    heroStructure.paragraphs < 1 ||
     heroStructure.links < 2 ||
     !heroStructure.text.includes('Agent V') ||
     heroStructure.text.includes('Vyotiq Agent V') ||
@@ -534,7 +539,7 @@ try {
   await page.setViewportSize({ width: 1440, height: 900 })
   await goto(page, '/')
   await page.screenshot({ path: screenshots.darkDesktop })
-  await page.locator('.home-provider-layout').screenshot({ path: screenshots.providerDetails })
+  await page.locator('.provider-band').screenshot({ path: screenshots.providerDetails })
   await page.evaluate(() => localStorage.setItem('vyotiq-theme', 'light'))
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.screenshot({ path: screenshots.lightDesktop })
@@ -760,8 +765,8 @@ try {
   }
   await noScript.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' })
   if (
-    (await noScript.locator('main section').count()) !== 8 ||
-    !(await noScript.locator('main').innerText()).includes('Local state, explicit network boundaries.')
+    (await noScript.locator('main section').count()) !== 9 ||
+    !(await noScript.locator('main').innerText()).includes('Local by default. Explicit about the network.')
   ) {
     fail('JavaScript-disabled fallback hides homepage narrative')
   }

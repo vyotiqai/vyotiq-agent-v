@@ -43,7 +43,7 @@ const modes = [
   {
     name: 'Agent',
     boundary:
-      'The full built-in catalog, subject to tool approval and safety gates. Commands, edits, Git, and browser actions happen here.'
+      'The full built-in catalog, subject to approvals and safety gates. Commands, edits, Git, and browser actions happen here.'
   }
 ]
 
@@ -80,7 +80,7 @@ const extensionItems = [
 const localItems = [
   { label: 'Workspace files and run records', detail: 'Including editor history and session state.' },
   { label: 'Settings, indexes, model caches', detail: 'Optional code indexing stays derived and local.' },
-  { label: 'Rotating logs', detail: 'Telemetry only: no workspace paths, file names, or chat payloads.' }
+  { label: 'Rotating logs', detail: 'Local rotating logs, telemetry only: no workspace paths, file names, or chat payloads.' }
 ]
 
 const remoteItems = [
@@ -186,8 +186,8 @@ const docsLinks = [
       <p class="eyebrow"><strong>03</strong> Long-running work</p>
       <h2 id="continuity-title">Long work stays resumable.</h2>
       <p>
-        A run carries more than a transcript. Sessions, checkpoints, and compaction keep the
-        state needed to return, catch up, and continue.
+        A run carries more than a transcript. Sessions, checkpoints, and compaction
+        keep the state needed to return, catch up, and continue.
       </p>
     </header>
     <div class="home-split">
@@ -213,8 +213,8 @@ const docsLinks = [
       <p class="eyebrow"><strong>04</strong> Provider choice</p>
       <h2 id="providers-title">Bring your own model.</h2>
       <p>
-        Configure a local Ollama, one of nine cloud providers, or any OpenAI-compatible endpoint,
-        then pick from the models that host exposes.
+        Configure a local Ollama, one of nine cloud providers, or a
+        custom OpenAI-compatible host, then pick from the models that host exposes.
       </p>
     </header>
     <div class="provider-band">
@@ -257,7 +257,8 @@ const docsLinks = [
     </ul>
     <p class="home-supporting-copy">
       Memory is plain Markdown under <code>.vyotiq/memory/</code>, injected into every run.
-      Optional code indexing builds a separate local index for search; it is not memory.
+      Optional code indexing builds a separate local index for search; it is
+      separate from memory.
     </p>
     <a class="text-link mt-6" href="/docs/customize/marketplace">
       Browse customization docs
@@ -312,20 +313,20 @@ const docsLinks = [
       <article>
         <h3>Credentials</h3>
         <p>
-          Provider keys, MCP bearer tokens, and GitHub tokens use the operating system's secure
-          storage where available.
+          Provider keys, MCP bearer tokens, and GitHub tokens use operating-system secure storage
+          where available.
         </p>
       </article>
       <article>
         <h3>Approvals</h3>
         <p>
           Tool approval can gate every tool, only mutating tools, or nothing, with named tools
-          allowlisted. Browser domains can be restricted to an allowlist.
+          allowlisted. Browser navigation can also use an optional domain allowlist.
         </p>
       </article>
       <article>
         <h3>Crash reporting</h3>
-        <p>Opt-in, and only present in builds configured for the reporting path.</p>
+        <p>Crash and error sharing is opt-in, and only present in builds configured for the reporting path.</p>
       </article>
     </div>
     <a class="text-link mt-6" href="/docs/concepts/security">

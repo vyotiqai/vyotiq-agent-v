@@ -250,7 +250,7 @@ describe('landing docs architecture and truth', () => {
       "const onDocsIndex = Astro.url.pathname === '/docs' || Astro.url.pathname === '/docs/'"
     )
     expect(header).toContain("aria-current={onDocsIndex ? 'page' : onDocs ? 'true' : undefined}")
-    expect(footer).toContain("aria-current={onDocsIndex ? 'page' : onDocs ? 'true' : undefined}")
+    expect(footer).toContain("ariaCurrent: onDocsIndex ? 'page' : onDocs ? 'true' : undefined")
     expect(header).not.toContain("aria-current={onDocs ? 'page' : undefined}")
     expect(footer).not.toContain("aria-current={onDocs ? 'page' : undefined}")
   })
@@ -310,7 +310,7 @@ describe('landing docs architecture and truth', () => {
       expect(text).toContain('Ollama')
     }
     expect(providers).toContain('**Active provider** shows local Ollama')
-    expect(features).toContain('New settings initially select Ollama with <code>qwen2.5</code>')
+    expect(features).toContain('Fresh settings start on local Ollama with <code>qwen2.5</code>')
     expect(features).toContain('nine cloud providers')
     expect(features).toContain('custom OpenAI-compatible host')
     expect(features).not.toMatch(/default provider/i)
@@ -335,13 +335,13 @@ describe('landing docs architecture and truth', () => {
     expect(hero).toContain('id="overview"')
     expect(features).toContain('id="capabilities"')
     const sectionTitles = [
-      'Files, terminal, browser, and Git stay on the same task.',
-      'Choose how the agent works.',
-      'Stay oriented as the task grows.',
-      'Use the models you configure.',
-      'Add context and capability on purpose.',
-      'Local state, explicit network boundaries.',
-      'Explore the product in detail.'
+      'Six panels, one task, zero app-switching.',
+      'You decide how much the agent may do.',
+      'Long work stays resumable.',
+      'Bring your own model.',
+      'Extend on purpose, not by default.',
+      'Local by default. Explicit about the network.',
+      'Docs for every step.'
     ]
     let cursor = -1
     for (const title of sectionTitles) {
@@ -382,15 +382,16 @@ describe('landing docs architecture and truth', () => {
     )
 
     expect(hero.match(/<h1\b/g)).toHaveLength(1)
-    expect(hero.match(/<p\b/g)).toHaveLength(2)
+    expect(hero.match(/<p\b/g)).toHaveLength(1)
     expect(hero.match(/<a\b/g) ?? []).toHaveLength(0)
     expect(hero).toContain('<ReleaseInstallers />')
-    expect(hero).toContain('home-eyebrow')
+    expect(hero).toContain('<ul class="hero-meta"')
     expect(hero).toContain('{SITE_PRODUCT}')
     expect(hero).not.toContain('{SITE_BRAND} {SITE_PRODUCT}')
     expect(hero).not.toMatch(/<strong>|Desktop|Electron/)
-    expect(css).toContain('--font-headline: "Plus Jakarta Sans", system-ui, sans-serif')
-    expect(css).not.toMatch(/Unbounded|@font-face/)
+    expect(css).toContain('--font-sans: "Schibsted Grotesk Variable", "Schibsted Grotesk", system-ui, sans-serif')
+    expect(css).toContain('--font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace')
+    expect(css).not.toMatch(/Plus Jakarta|Unbounded|@font-face/)
     expect(sync).toContain("resources', 'branding', 'precision-mono")
     expect(sync).toContain("node_modules', '@lobehub', 'icons', 'es")
     expect(sync).not.toMatch(/destFonts|Unbounded-variable/)
@@ -468,9 +469,9 @@ describe('landing docs architecture and truth', () => {
 
     expect(header).toContain('<BrandLockup />')
     expect(header).toContain('aria-label={`${SITE_PRODUCT} home`}')
-    expect(footer).toContain('<span>© {year} {SITE_BRAND}</span>')
-    expect(footer).toContain('<span>{SITE_PRODUCT}</span>')
-    expect(hero).toContain('<p class="home-eyebrow">{SITE_PRODUCT}</p>')
+    expect(footer).toContain('© {year} {SITE_BRAND}')
+    expect(footer).toContain('{SITE_PRODUCT} is a coding workspace for real repositories')
+    expect(hero).toContain('<ul class="hero-meta"')
 
     expect(emptyChat).not.toContain('VyotiqLockup')
     expect(emptyChat).not.toContain('data-empty-brand')
@@ -507,7 +508,7 @@ describe('landing docs architecture and truth', () => {
     expect(docsIndex).not.toContain('docs-start-grid')
     expect(docsIndex).not.toMatch(/Install Vyotiq/)
     const features = readFileSync(join(LANDING_SOURCE, 'components', 'FeatureGrid.astro'), 'utf8')
-    expect(features).toContain('Agent V keeps the state')
+    expect(features).toContain('keep the state needed to return')
     expect(features).not.toMatch(/\bVyotiq keeps\b/)
     for (const text of [
       landingReadme,
@@ -908,12 +909,12 @@ describe('landing docs architecture and truth', () => {
     expect(headers).not.toMatch(/Content-Security-Policy/i)
 
     const footer = readFileSync(join(LANDING_SOURCE, 'components', 'SiteFooter.astro'), 'utf8')
-    expect(footer).toContain('href="/docs/concepts/privacy-data"')
+    expect(footer).toContain("href: '/docs/concepts/privacy-data'")
     expect(footer).toContain('href="/privacy"')
     expect(footer).toContain('href="/terms"')
-    expect(footer).toContain('href="/changelog"')
+    expect(footer).toContain("href: '/changelog'")
     // The repo is open source: the footer links to it.
-    expect(footer).toContain('href="https://github.com/vyotiqai/vyotiq-agent-v"')
+    expect(footer).toContain("href: 'https://github.com/vyotiqai/vyotiq-agent-v'")
     expect(footer).toContain('GPL-3.0')
     expect(existsSync(join(LANDING_SOURCE, 'pages', 'privacy.astro'))).toBe(true)
     expect(existsSync(join(LANDING_SOURCE, 'pages', 'terms.astro'))).toBe(true)
