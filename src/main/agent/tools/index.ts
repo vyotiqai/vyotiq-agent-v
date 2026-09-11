@@ -425,7 +425,7 @@ async function withTerminalCheckpointWatch<T>(
   } finally {
     if (snap) {
       await applyWatchDiffToCheckpoint(snap, await diffSince(snap), context)
-      disposeWatch(snap)
+      await disposeWatch(snap)
     }
   }
 }
@@ -454,7 +454,7 @@ async function withBackgroundTerminalCheckpointWatch(
       await applyWatchDiffToCheckpoint(snap, await diffSince(snap), context)
       invalidateAfterWorkspaceMutation(workspace)
     } finally {
-      disposeWatch(snap)
+      await disposeWatch(snap)
     }
   }
   try {
@@ -1883,11 +1883,17 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       const label = formatAgentInstanceLabel(childRunId)
       const branch = loadStatus(childDir)?.worktreeBranch
       const branchLine = branch ? `\nworktree_branch: ${branch}` : ''
-      return toolOk(
-        'await_agent_instance',
-        label,
-        `${label}\nphase: ${terminal.phase}${branchLine}\n\n${terminal.summary}`
-      )
+      const content = `${label}\nphase: ${terminal.phase}${branchLine}\n\n${terminal.summary}`
+      // A child that ended in error/cancelled is not a successful await: returning
+      // ok:true here rendered the "Instance finished" chip over a failed child
+      // (screenshot audit 2026-09-08: instance cards "Failed <id>" beside await
+      // chips "Instance finished <id>" for the same run). ok:false routes the chip
+      // and step failure accounting to the failed state while the content still
+      // carries the terminal phase and the child's summary.
+      if (terminal.phase !== 'done') {
+        return toolFail('await_agent_instance', label, content)
+      }
+      return toolOk('await_agent_instance', label, content)
     } catch (err) {
       throwIfAborted(signal)
       const msg = err instanceof Error ? err.message : String(err)

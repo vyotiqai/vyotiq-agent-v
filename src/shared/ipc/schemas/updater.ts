@@ -25,7 +25,9 @@ export const UpdateInfoSchema = z.object({
   releaseDate: z.string(),
   releaseName: z.string(),
   notesText: z.string(),
-  notesSections: z.array(ReleaseNotesSectionSchema)
+  notesSections: z.array(ReleaseNotesSectionSchema),
+  /** GitHub release page for "Full release notes" links; '' when unknown. */
+  releaseUrl: z.string().optional()
 })
 export type UpdateInfo = z.infer<typeof UpdateInfoSchema>
 

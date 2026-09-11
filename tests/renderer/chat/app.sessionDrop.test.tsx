@@ -28,7 +28,6 @@ const settingsStub = {
   uiDensity: 'comfortable',
   skinId: 'default',
   customCssPath: '',
-  tabAutocomplete: true,
   favoriteModels: [],
   recentModels: [],
   mcpServers: [],

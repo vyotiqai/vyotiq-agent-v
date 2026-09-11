@@ -94,6 +94,7 @@ vi.mock('@main/agent/tools', () => ({
 
 import { runAgent } from '@main/agent/loop'
 import { resetActiveRunsForTests } from '@main/agent/runRegistry'
+import { flushEventAppends } from '@main/agent/eventAppendQueue'
 
 describe('runAgent steps', () => {
   let workspace: string
@@ -245,9 +246,19 @@ describe('runAgent steps', () => {
       void _ev
     }
 
+    // Appends are serialized asynchronously — flush before reading, or the
+    // final snapshot may not have landed yet (this read used to race it).
+    await flushEventAppends()
     const eventsPath = join(resolveRunDir(workspace, runId), 'events.jsonl')
     const persisted = readFileSync(eventsPath, 'utf8')
-    expect(persisted).not.toContain('"type":"stream_snapshot"')
+    // Answer-text snapshots ARE durable (a hard kill recovers from
+    // events.jsonl); the invariant is that no snapshot carries thinking bytes.
+    const snapshotLines = persisted
+      .split('\n')
+      .filter((line) => line.includes('"type":"stream_snapshot"'))
+    for (const line of snapshotLines) {
+      expect(line).not.toContain('Long reasoning')
+    }
     expect(persisted).toContain('"type":"thinking_done"')
     expect(persisted).toContain('Long reasoning')
   })

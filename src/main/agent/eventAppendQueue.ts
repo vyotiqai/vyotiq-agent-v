@@ -14,11 +14,30 @@ export const EVENTS_FILE_MAX_BYTES = 2 * 1024 * 1024
 export const EVENTS_FILE_KEEP_BYTES = 1024 * 1024
 const MAX_EVENT_ARCHIVES = 5
 const EVENT_ARCHIVE_PREFIX = 'events.archive.'
+/**
+ * Backpressure cap for the serialized append chain. In-flight output snapshots
+ * repeat the whole accumulated buffer, so a stalled write (AV scan, transient
+ * retry, slow rotation) would otherwise queue an O(N) chain of O(N) strings in
+ * the main heap. Reconstructable snapshots are dropped past this budget;
+ * durable state records always enqueue.
+ */
+export const EVENTS_PENDING_MAX_BYTES = 64 * 1024 * 1024
+/** Effective cap — overridable by tests to avoid multi-MB fixtures. */
+let pendingMaxBytes = EVENTS_PENDING_MAX_BYTES
+
+/** @internal Test hook. */
+export function setEventAppendPendingMaxBytesForTests(bytes: number | null): void {
+  pendingMaxBytes = bytes ?? EVENTS_PENDING_MAX_BYTES
+}
 
 /**
  * Per-run-dir serialized append chain — ordered, non-blocking, single-writer safe.
  */
 const appendChains = new Map<string, Promise<void>>()
+/** Bytes of event lines enqueued but not yet written (or failed), per run dir. */
+const pendingBytes = new Map<string, number>()
+/** Dropped snapshot count per run dir — logged periodically, not per line. */
+const droppedSnapshotCounts = new Map<string, number>()
 /** Accumulated append failures per run dir, consumed by flushEventAppends (throws). */
 const failuresForFlush = new Map<string, DirAppendFailures>()
 /**
@@ -183,6 +202,27 @@ async function rotateEventsFileIfNeeded(path: string, dir: string): Promise<void
 
 export function enqueueEventAppend(dir: string, event: unknown): void {
   const line = `${JSON.stringify({ at: new Date().toISOString(), event })}\n`
+  const lineBytes = Buffer.byteLength(line, 'utf8')
+  const pending = pendingBytes.get(dir) ?? 0
+  const isStreamSnapshot =
+    typeof event === 'object' &&
+    event !== null &&
+    (event as { type?: unknown }).type === 'stream_snapshot'
+  if (isStreamSnapshot && pending + lineBytes > pendingMaxBytes) {
+    const count = (droppedSnapshotCounts.get(dir) ?? 0) + 1
+    droppedSnapshotCounts.set(dir, count)
+    if (count === 1 || count % 50 === 0) {
+      logger.warn('Dropped in-flight stream snapshots under append backpressure', {
+        scope: 'state',
+        code: 'EVENTS_BACKPRESSURE',
+        correlationId: basename(dir),
+        dropped: count,
+        pendingBytes: pending
+      })
+    }
+    return
+  }
+  pendingBytes.set(dir, pending + lineBytes)
   const path = join(dir, 'events.jsonl')
   const prev = appendChains.get(dir) ?? Promise.resolve()
   const next = prev
@@ -201,6 +241,9 @@ export function enqueueEventAppend(dir: string, event: unknown): void {
       })
     })
     .finally(() => {
+      const rest = (pendingBytes.get(dir) ?? 0) - lineBytes
+      if (rest > 0) pendingBytes.set(dir, rest)
+      else pendingBytes.delete(dir)
       // Drop settled chains so long sessions do not retain every Promise forever.
       if (appendChains.get(dir) === next) appendChains.delete(dir)
     })
@@ -233,4 +276,7 @@ export function resetEventAppendQueueForTests(): void {
   appendChains.clear()
   failuresForFlush.clear()
   pendingNotices.clear()
+  pendingBytes.clear()
+  droppedSnapshotCounts.clear()
+  pendingMaxBytes = EVENTS_PENDING_MAX_BYTES
 }

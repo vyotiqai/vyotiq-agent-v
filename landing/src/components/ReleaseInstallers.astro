@@ -68,6 +68,10 @@ const showPackages = hasReleaseAssets()
           GitHub Releases
           <LandingIcon name="arrow-up-right" />
         </a>
+        <a class="home-text-link" href="/changelog">
+          {githubRelease.version ? `What's new in v${githubRelease.version}` : "What's new"}
+          <LandingIcon name="arrow-up-right" />
+        </a>
         <a class="home-text-link" href="/docs">
           Read the documentation
           <LandingIcon name="arrow-up-right" />

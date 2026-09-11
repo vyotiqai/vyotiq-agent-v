@@ -396,9 +396,11 @@ function providerThinkingDefaults(
       thinkingDefaultEffort = 'high'
       break
     case 'opencode': {
-      // Effort ladder follows each model's routed endpoint protocol.
+      // Effort ladder follows each model's routed endpoint protocol. The
+      // Messages mount is Anthropic-native (toggle/budget_tokens models), so
+      // it goes through the manual thinking policy; chat uses effort.
       const transport = opencodeGoTransportFor(id)
-      thinkingMode = 'effort'
+      thinkingMode = transport === 'messages' ? 'manual' : 'effort'
       thinkingCanDisable = true
       supportedThinkingEfforts = opencodeGoEffortsFor(transport)
       break

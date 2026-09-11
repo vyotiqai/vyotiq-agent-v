@@ -9,6 +9,7 @@ import {
   EVENTS_FILE_MAX_BYTES,
   flushEventAppends,
   resetEventAppendQueueForTests,
+  setEventAppendPendingMaxBytesForTests,
   takeEventAppendFailureNotice
 } from '@main/agent/eventAppendQueue'
 
@@ -258,5 +259,66 @@ describe('eventAppendQueue', () => {
     expect(notice?.message).toContain('disk full')
     // Second read is empty until a new batch of failures occurs.
     expect(takeEventAppendFailureNotice(dir)).toBeUndefined()
+  })
+
+  it('drops snapshots past the pending-byte budget but never durable events', async () => {
+    // One snapshot line is ~285 bytes with JSON chrome; budget allows exactly one.
+    setEventAppendPendingMaxBytesForTests(512)
+
+    // Block the first append so the chain backs up; pending bytes accumulate.
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const actualAppend = appendFileMock.getMockImplementation()
+    appendFileMock.mockImplementationOnce(async (...args: Parameters<typeof appendFileMock>) => {
+      await gate
+      return actualAppend!(...args)
+    })
+
+    const snapshot = { type: 'stream_snapshot', text: 'x'.repeat(200) }
+    enqueueEventAppend(dir, snapshot)
+    enqueueEventAppend(dir, snapshot)
+    enqueueEventAppend(dir, snapshot)
+    // Durable state records must enqueue regardless of the snapshot backlog.
+    enqueueEventAppend(dir, { type: 'status', status: 'running' })
+
+    release()
+    await flushEventAppends(dir)
+
+    const lines = readFileSync(join(dir, 'events.jsonl'), 'utf8').trim().split('\n')
+    const types = lines.map((line) => (JSON.parse(line) as { event: { type: string } }).event.type)
+    expect(types.filter((type) => type === 'stream_snapshot')).toHaveLength(1)
+    expect(types).toContain('status')
+  })
+
+  it('releases pending-byte accounting after failed appends (budget does not leak)', async () => {
+    setEventAppendPendingMaxBytesForTests(512)
+    appendFileMock.mockRejectedValueOnce(new Error('disk full'))
+
+    const snapshot = { type: 'stream_snapshot', text: 'y'.repeat(200) }
+    enqueueEventAppend(dir, snapshot)
+    await flushEventAppends(dir).catch(() => undefined)
+
+    // A second snapshot of the same size must still be accepted: the failed
+    // line's bytes were released in the settle path.
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const actualAppend = appendFileMock.getMockImplementation()
+    appendFileMock.mockImplementationOnce(async (...args: Parameters<typeof appendFileMock>) => {
+      await gate
+      return actualAppend!(...args)
+    })
+    enqueueEventAppend(dir, snapshot)
+    enqueueEventAppend(dir, { type: 'status', status: 'running' })
+    release()
+    await flushEventAppends(dir).catch(() => undefined)
+
+    const lines = readFileSync(join(dir, 'events.jsonl'), 'utf8').trim().split('\n')
+    const types = lines.map((line) => (JSON.parse(line) as { event: { type: string } }).event.type)
+    expect(types).toContain('stream_snapshot')
+    expect(types).toContain('status')
   })
 })

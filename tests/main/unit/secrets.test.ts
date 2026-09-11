@@ -5,6 +5,8 @@ import { tmpdir } from 'os'
 
 const userData = join(tmpdir(), `vyotiq-secrets-${process.pid}-${Date.now()}`)
 
+const counters = vi.hoisted(() => ({ decryptCalls: 0 }))
+
 vi.mock('electron', () => ({
   app: {
     getPath: (name: string) => {
@@ -16,6 +18,7 @@ vi.mock('electron', () => ({
     isEncryptionAvailable: () => true,
     encryptString: (value: string) => Buffer.from(`enc:${value}`),
     decryptString: (buf: Buffer) => {
+      counters.decryptCalls++
       const text = buf.toString()
       return text.startsWith('enc:') ? text.slice(4) : text
     }
@@ -92,5 +95,14 @@ describe('secrets store', () => {
     expect(JSON.stringify(after)).not.toContain('shared-google-secret')
     clearGoogleMcpClientSecret()
     expect(hasGoogleMcpClientSecret()).toBe(false)
+  })
+
+  it('decrypts a stored blob once across repeated reads', () => {
+    setGoogleMcpClientSecret('cache-once-secret')
+    counters.decryptCalls = 0
+    expect(getGoogleMcpClientSecret()).toBe('cache-once-secret')
+    expect(counters.decryptCalls).toBe(1)
+    expect(getGoogleMcpClientSecret()).toBe('cache-once-secret')
+    expect(counters.decryptCalls).toBe(1)
   })
 })

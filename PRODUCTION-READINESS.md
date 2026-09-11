@@ -14,7 +14,7 @@ Baseline win-x64 `--dir` build measured **1397.1 MB unpacked → 709.5 MB** afte
 
 | Exclusion | Size | Why it is safe |
 | --- | --- | --- |
-| `onnxruntime-web` | ~107 MB packed | No src import (only comments in `dictation/qwen3AsrOrt.ts` / `qwen3AsrOrtLoader.ts`). Every `@huggingface/transformers` call site runs in main/utilityProcess where transformers.js resolves the `onnxruntime-node` backend; `qwen3AsrOrtLoader` imports `onnxruntime-node` directly. |
+| `onnxruntime-web` | ~107 MB packed | No src import. Every `@huggingface/transformers` call site runs in main/utilityProcess where transformers.js resolves the `onnxruntime-node` backend. |
 | `@node-llama-cpp/*-cuda-ext` | 346.1 MB | CUDA-extended binaries; the runtime GPU backend ships via Vulkan + CPU. |
 | `@node-llama-cpp/*-cuda` | 162.8 MB | Same — excluded in favor of Vulkan. |
 | `node-llama-cpp/llama` | ~33 MB | llama.cpp sources + cmake toolchains used only to compile from source (`npmRebuild: false`; runtime addon comes from `@node-llama-cpp/<platform>/bins`). |
@@ -75,7 +75,7 @@ Update card UI: `src/renderer/src/features/updates/{UpdateCard.tsx, useUpdater.t
 
 Settings → General → "Send feedback" opens `src/renderer/src/features/feedback/FeedbackDialog.tsx` (type: bug / feature / praise / other, title, message, optional diagnostics).
 
-- Composes a **mailto to `vyotiq@gmail.com`** with subject `[Vyotiq <ver>] <type>: <title>` via `src/main/feedback/{index.ts, mailto.ts}` (`buildFeedbackMailto`, pure function) and opens it with `shell.openExternal`.
+- Composes a **mailto to `support@vyotiq.com`** with subject `[Vyotiq <ver>] <type>: <title>` via `src/main/feedback/{index.ts, mailto.ts}` (`buildFeedbackMailto`, pure function) and opens it with `shell.openExternal`.
 - Optional diagnostics block = **app version, OS, locale, timestamp only — never chat contents** (`src/main/feedback/mailto.ts:18-23`).
 - The dialog also exposes a plain `mailto:` fallback link so feedback stays deliverable even if the IPC call fails.
 
@@ -88,7 +88,7 @@ The landing site mirrors the address (`landing/src/lib/site.ts` — `SITE_FEEDBA
 - Astro site under `landing/` (pnpm workspace package); `pnpm landing:build` verified — **54 pages**.
 - Download links are baked from the latest published GitHub Release at build time by `landing/scripts/bake-github-release.mjs`: it fetches the releases API, falls back to the releases list when the latest has no assets, and — on any failure — keeps the previously baked `landing/src/lib/github-release.json` snapshot instead of hiding package buttons.
 - Deployed by `.github/workflows/deploy-landing.yml` to Cloudflare Pages via `wrangler@4 pages deploy --project-name=vyotiq`.
-- **Blocked:** the workflow requires repo secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; as of 2026-09-08 both are empty in the repo, so deploy run 34254965003 failed at wrangler auth. The build itself succeeds.
+- **Deploying:** the workflow requires repo secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; as of 2026-09-10 both are set in the repo and deploys succeed — the live site's download CTA points at `vyotiqai/vyotiq-agent-v-releases/releases/latest`.
 
 ---
 
@@ -99,6 +99,8 @@ The landing site mirrors the address (`landing/src/lib/site.ts` — `SITE_FEEDBA
 | v1.0.0 | Baseline. |
 | v1.1.0 | Partial: Windows + Linux published; mac job failed. Tag is immutable and left in place. |
 | v1.1.1 | Complete — published 2026-09-08, Release run 34254964752 success. |
+| v1.1.2 | Complete — published 2026-09-08. Desktop update-check crash fix, blue default accent color. |
+| v1.1.3 | Complete — published 2026-09-10 to the releases repo, current release. Memory tool reliability, OS-aware landing download button, accessible theme switcher, 19 accessibility findings resolved. |
 
 Release commits: `74c82e1` (feat: production readiness), `39d54be` (chore(release): v1.1.0), `801c394` (ipcChannelParity updaterState), `a502aa8` (App updater-toast bridge guard), `ea70e01` (xmldom pin), `33c7389` (chore(release): v1.1.1).
 
@@ -124,6 +126,6 @@ Fix: pinned the override to exactly `'0.8.15'` in `pnpm-workspace.yaml` (commit 
 ## 8. Known issues / open items
 
 1. **3 `appShell` tests red** (`button /new chat/i`): `DEFAULT_NAVIGATION_MODE = 'home'` (`src/shared/ipc/schemas/settings.ts:146`) hides the sidebar New Chat button; the tests set no `navigationMode`. Owned by the in-flight home-screen session, not this run.
-2. **Landing deploy blocked** on the two empty Cloudflare secrets (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`).
+2. **Landing deploy resolved** (2026-09-10): both Cloudflare secrets (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) are set and deploys succeed; the live download CTA points at `vyotiqai/vyotiq-agent-v-releases/releases/latest`.
 3. **Optional CUDA swap decision open** (section 1: keep `cuda`, drop `cuda-ext` + Vulkan — win ~261 / linux ~445–475 MB).
 4. **`publisherName` must stay unset** in `electron-builder.yml` while builds are unsigned: electron-updater compares the downloaded installer's Authenticode subject against it and throws `ERR_UPDATER_INVALID_SIGNATURE` on mismatch. Re-add it together with `win.forceCodeSigning: true` once a signing cert is always present in the release environment.

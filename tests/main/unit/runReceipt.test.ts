@@ -553,7 +553,7 @@ describe('runReceipt', () => {
     expect(receipt.unreadEditPaths).toEqual([])
   })
 
-  it('omits Cancelled stubs from failure clusters and consecutive-failure streaks', () => {
+  it('omits Cancelled stubs from tool stats, failure clusters, and streaks', () => {
     const messages: ChatMessage[] = [
       { role: 'tool', toolCallId: 'a', toolName: 'edit', ok: false, content: 'boom' },
       { role: 'tool', toolCallId: 'b', toolName: 'terminal', ok: false, content: 'Cancelled' },
@@ -566,9 +566,168 @@ describe('runReceipt', () => {
       events: [],
       contract: ''
     })
-    expect(receipt.toolStats.failed).toBe(3)
+    expect(receipt.toolStats.failed).toBe(2)
+    expect(receipt.toolStats.byName.terminal).toBeUndefined()
     expect(receipt.failureClusters).toEqual([{ key: 'edit: boom', count: 2 }])
     expect(receipt.maxConsecutiveToolFailures).toBe(1)
+  })
+
+  it('excludes approval / mode gate refusals from tool stats, clusters, and streaks', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'tool',
+        toolCallId: 'g1',
+        toolName: 'terminal',
+        ok: false,
+        content:
+          'The user denied permission to run terminal. Do not retry it; ask what to do instead or continue without it.'
+      },
+      {
+        role: 'tool',
+        toolCallId: 'g2',
+        toolName: 'git_commit',
+        ok: false,
+        content:
+          'Tool approval for git_commit timed out and was auto-denied. Do not retry it; ask what to do instead or continue without it.'
+      },
+      {
+        role: 'tool',
+        toolCallId: 'g3',
+        toolName: 'edit',
+        ok: false,
+        content:
+          'Tool approval required but no app window is listening. Reopen Vyotiq and retry, or turn off tool approval in Settings → Tools.'
+      },
+      {
+        role: 'tool',
+        toolCallId: 'g4',
+        toolName: 'terminal',
+        ok: false,
+        content:
+          'Ask mode does not allow tool "terminal". Switch to Agent mode (composer) to run commands.'
+      },
+      {
+        role: 'tool',
+        toolCallId: 'g5',
+        toolName: 'edit',
+        ok: false,
+        content:
+          'Plan mode may only edit plan.md or contract.md (run plan artifacts). Call `switch_mode` with mode "agent" to edit product code.'
+      },
+      { role: 'tool', toolCallId: 'x', toolName: 'edit', ok: false, content: 'real failure' }
+    ]
+    const receipt = buildRunReceipt({
+      runId: 'gate-refusals',
+      status: { status: 'error', step: 2, updatedAt: new Date().toISOString() },
+      messages,
+      events: [],
+      contract: ''
+    })
+    // Only the real failure counts — never-executed calls are usage, not failures.
+    expect(receipt.toolStats.totalCalls).toBe(1)
+    expect(receipt.toolStats.failed).toBe(1)
+    expect(receipt.toolStats.ok).toBe(0)
+    expect(receipt.toolStats.byName).toEqual({ edit: { ok: 0, failed: 1 } })
+    expect(receipt.failureClusters).toEqual([{ key: 'edit: real failure', count: 1 }])
+    expect(receipt.maxConsecutiveToolFailures).toBe(1)
+  })
+
+  it('skipped run_tests and errored checks do not count as verification', () => {
+    const base = { status: 'done' as const, step: 2, updatedAt: new Date().toISOString() }
+    // Skip result (ok=true, no runner) must not stamp a verified check.
+    const skipped = buildRunReceipt({
+      runId: 'skip-check',
+      status: base,
+      messages: [],
+      events: [
+        {
+          at: '2026-09-03T10:00:00.000Z',
+          event: {
+            type: 'writes_checkpoint',
+            runId: 'skip-check',
+            files: [{ path: 'a.ts', action: 'modified', undoable: true }]
+          }
+        },
+        {
+          at: '2026-09-03T10:01:00.000Z',
+          event: {
+            type: 'tool_result',
+            runId: 'skip-check',
+            toolCallId: 't1',
+            name: 'run_tests',
+            summary: 'skipped',
+            ok: true,
+            content:
+              'No test runner detected (no package.json test script); tests skipped. Pass an explicit sandboxed `command` to run project tests.'
+          }
+        }
+      ],
+      contract: ''
+    })
+    expect(skipped.verification?.lastCheckAt).toBeUndefined()
+    expect(skipped.verification?.verifiedAfterLastMutation).toBe(false)
+
+    // A check that reported errors is a failed verification, not a pass.
+    const errored = buildRunReceipt({
+      runId: 'errored-check',
+      status: base,
+      messages: [],
+      events: [
+        {
+          at: '2026-09-03T10:00:00.000Z',
+          event: {
+            type: 'writes_checkpoint',
+            runId: 'errored-check',
+            files: [{ path: 'a.ts', action: 'modified', undoable: true }]
+          }
+        },
+        {
+          at: '2026-09-03T10:01:00.000Z',
+          event: {
+            type: 'tool_result',
+            runId: 'errored-check',
+            toolCallId: 'd1',
+            name: 'diagnostics',
+            summary: 'typecheck',
+            ok: true,
+            content: 'src/a.ts(1,1): error TS2304: Cannot find name x'
+          }
+        }
+      ],
+      contract: ''
+    })
+    expect(errored.verification?.verifiedAfterLastMutation).toBe(false)
+
+    // A clean check after the mutation still verifies.
+    const clean = buildRunReceipt({
+      runId: 'clean-check',
+      status: base,
+      messages: [],
+      events: [
+        {
+          at: '2026-09-03T10:00:00.000Z',
+          event: {
+            type: 'writes_checkpoint',
+            runId: 'clean-check',
+            files: [{ path: 'a.ts', action: 'modified', undoable: true }]
+          }
+        },
+        {
+          at: '2026-09-03T10:01:00.000Z',
+          event: {
+            type: 'tool_result',
+            runId: 'clean-check',
+            toolCallId: 'd1',
+            name: 'diagnostics',
+            summary: 'typecheck',
+            ok: true,
+            content: 'No diagnostics found.'
+          }
+        }
+      ],
+      contract: ''
+    })
+    expect(clean.verification?.verifiedAfterLastMutation).toBe(true)
   })
 
   it('aggregates run_tests calls and the latest pass/fail summary', () => {

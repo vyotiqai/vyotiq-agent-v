@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from 'fs'
+import { existsSync, readFileSync, readdirSync, statSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { atomicWriteJson } from '../storage/atomicWrite'
 import { CRASH_DEDUPE_KEY } from '../../shared/ipc'
@@ -54,6 +54,42 @@ export function countCrashpadReports(crashDumpsDir: string): number {
   }
 }
 
+/** Keep the newest renderer minidumps; each dump measured ~43 MB in the field. */
+export const MAX_CRASHPAD_REPORTS = 5
+
+/** Delete Crashpad minidumps older than the newest `keep`; best-effort, never throws. */
+export function pruneCrashpadReports(crashDumpsDir: string, keep = MAX_CRASHPAD_REPORTS): number {
+  if (keep <= 0) return 0
+  const reportsDir = join(crashDumpsDir, 'reports')
+  if (!existsSync(reportsDir)) return 0
+  try {
+    const dumps = readdirSync(reportsDir)
+      .filter((name) => /\.dmp$/i.test(name))
+      .map((name) => {
+        const full = join(reportsDir, name)
+        try {
+          return { full, mtimeMs: statSync(full).mtimeMs }
+        } catch {
+          return null
+        }
+      })
+      .filter((entry): entry is { full: string; mtimeMs: number } => entry != null)
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    let removed = 0
+    for (const entry of dumps.slice(keep)) {
+      try {
+        unlinkSync(entry.full)
+        removed += 1
+      } catch {
+        // Locked or already gone — leave it for the next boot.
+      }
+    }
+    return removed
+  } catch {
+    return 0
+  }
+}
+
 /** Redact workspace paths from a renderer URL before logging. */
 export function sanitizeCrashUrl(url: string): string {
   const trimmed = url.trim()
@@ -80,6 +116,8 @@ export type CrashSnippet = {
   name?: string
   url?: string
   crashDumpCount?: number
+  /** Same-signature records suppressed by the recorder between this and the prior entry. */
+  suppressedRepeats?: number
 }
 
 export type CrashRecoveryPending = {
@@ -104,6 +142,19 @@ let historyPathOverride: string | null = null
 
 export function setCrashHistoryPathForTests(path: string | null): void {
   historyPathOverride = path
+}
+
+/** Same-signature repeats inside this window skip the sync read+write cycle. */
+export const SNIPPET_REPEAT_SUPPRESS_MS = 30_000
+let lastSnippetSignature = ''
+let lastSnippetLoggedAt = 0
+let snippetSuppressedCount = 0
+
+/** Test hook — clears the in-memory snippet dedupe state. */
+export function resetCrashSnippetDedupeForTests(): void {
+  lastSnippetSignature = ''
+  lastSnippetLoggedAt = 0
+  snippetSuppressedCount = 0
 }
 
 function historyPath(): string {
@@ -170,8 +221,33 @@ function snippetDedupeKey(snippet: CrashSnippet): string {
 
 /** Append a crash snippet (keeps the newest MAX_CRASH_SNIPPETS). */
 export function recordCrashSnippet(snippet: CrashSnippet): void {
+  // A renderer error storm (React #185) bridges one log record per throw into
+  // this hook; a synchronous read+write per record saturates the main thread.
+  // Same-signature repeats inside the suppress window only bump the in-memory
+  // count, recorded on the next persisted entry.
+  const now = Date.now()
+  const signature = [
+    snippet.kind,
+    snippet.reason,
+    snippet.exitCode ?? '',
+    snippet.processType ?? '',
+    snippet.name ?? ''
+  ].join('\0')
+  if (
+    signature === lastSnippetSignature &&
+    now - lastSnippetLoggedAt < SNIPPET_REPEAT_SUPPRESS_MS
+  ) {
+    snippetSuppressedCount += 1
+    return
+  }
+  const suppressed = snippetSuppressedCount
+  snippetSuppressedCount = 0
+  lastSnippetSignature = signature
+  lastSnippetLoggedAt = now
   const history = readHistory()
-  history.snippets = [snippet, ...history.snippets].slice(0, MAX_CRASH_SNIPPETS)
+  const recorded: CrashSnippet =
+    suppressed > 0 ? { ...snippet, suppressedRepeats: suppressed } : snippet
+  history.snippets = [recorded, ...history.snippets].slice(0, MAX_CRASH_SNIPPETS)
   writeHistory(history)
 }
 

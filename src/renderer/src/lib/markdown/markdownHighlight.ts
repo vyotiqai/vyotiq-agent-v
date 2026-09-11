@@ -1,5 +1,4 @@
-import { createHighlighterCore, type HighlighterCore } from 'shiki/core'
-import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
+import type { HighlighterCore } from 'shiki/core'
 
 // Importing the `shiki` root entry registers every bundled grammar, which emits ~250
 // chunks into the renderer build. Load the core plus the languages we actually render.
@@ -36,12 +35,23 @@ const LANGUAGE_ALIASES: Record<string, SupportedLanguage> = {
 let corePromise: Promise<HighlighterCore> | null = null
 const loadedLanguages = new Set<SupportedLanguage>()
 
+async function createCore(): Promise<HighlighterCore> {
+  const [shiki, engine] = await Promise.all([
+    import('shiki/core'),
+    import('shiki/engine/javascript')
+  ])
+  return shiki.createHighlighterCore({
+    themes: [import('shiki/themes/github-dark.mjs'), import('shiki/themes/github-light.mjs')],
+    langs: [],
+    engine: engine.createJavaScriptRegexEngine()
+  })
+}
+
 function getCore(): Promise<HighlighterCore> {
   if (!corePromise) {
-    corePromise = createHighlighterCore({
-      themes: [import('shiki/themes/github-dark.mjs'), import('shiki/themes/github-light.mjs')],
-      langs: [],
-      engine: createJavaScriptRegexEngine()
+    corePromise = createCore().catch((err) => {
+      corePromise = null
+      throw err
     })
   }
   return corePromise

@@ -34,6 +34,12 @@ export const StorageReportWorkspaceSchema = z.object({
   tracked: z.boolean(),
   /** Idle days since the dir's last write (floor; 0 = touched today). */
   idleDays: z.number().int().nonnegative(),
+  /**
+   * True when the dir holds only derived index caches (no sessions/meta) —
+   * a storage id minted for an instance worktree path. Such dirs skip the
+   * orphan grace window: nothing user-authored can be lost.
+   */
+  derivedOnly: z.boolean().optional(),
   /** True when orphan settings would consider it after the grace window. */
   reapable: z.boolean()
 })

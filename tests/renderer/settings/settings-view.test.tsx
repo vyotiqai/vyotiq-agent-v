@@ -1464,142 +1464,6 @@ describe('settings', () => {
     expect(unload).not.toHaveBeenCalled()
   })
 
-  it('switching from Qwen3-ASR to Local resets localModelId to a Whisper model', async () => {
-    // @ts-expect-error test bridge
-    window.vyotiq.dictationStatus = vi.fn(async () => ({
-      ok: true as const,
-      data: {
-        phase: 'ready' as const,
-        progress: 1,
-        message: 'Ready',
-        error: null,
-        installed: [{ id: 'whisper-tiny.en' as const, bytesOnDisk: 41, loaded: true }],
-        recommendedModelId: 'whisper-small.en' as const,
-        engine: 'qwen3-asr' as const,
-        activeModelId: null,
-        loadedModelId: 'whisper-tiny.en' as const
-      }
-    }))
-    const onUpdate = vi.fn(async () => ({ ok: true as const }))
-    render(
-      <SettingsView
-        settings={{
-          ...baseSettings,
-          dictation: {
-            ...DEFAULT_SETTINGS.dictation,
-            engine: 'qwen3-asr',
-            localModelId: 'qwen3-asr-1.7b',
-            qwen3AsrServerUrl: 'http://127.0.0.1:8000/v1'
-          }
-        }}
-        secrets={emptySecrets}
-        onClose={vi.fn()}
-        onUpdate={onUpdate}
-        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
-        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
-      />
-    )
-    fireEvent.click(screen.getByRole('button', { name: /^Voice$/i }))
-    await waitFor(() => expect(window.vyotiq.dictationStatus).toHaveBeenCalled())
-    fireEvent.click(screen.getByLabelText('Dictation engine'))
-    const local = await waitFor(() => screen.getByRole('option', { name: /^Local$/i }))
-    fireEvent.click(local)
-    await waitFor(() => expect(onUpdate).toHaveBeenCalled())
-    expect(onUpdate).toHaveBeenCalledWith({
-      dictation: {
-        ...DEFAULT_SETTINGS.dictation,
-        engine: 'local',
-        localModelId: 'whisper-tiny.en',
-        qwen3AsrServerUrl: 'http://127.0.0.1:8000/v1'
-      }
-    })
-  })
-
-  it('disables Whisper "Use" when the engine is Qwen3-ASR', async () => {
-    // @ts-expect-error test bridge
-    window.vyotiq.dictationStatus = vi.fn(async () => ({
-      ok: true as const,
-      data: {
-        phase: 'ready' as const,
-        progress: 1,
-        message: 'Ready',
-        error: null,
-        installed: [{ id: 'whisper-tiny.en' as const, bytesOnDisk: 41, loaded: true }],
-        recommendedModelId: 'whisper-small.en' as const,
-        engine: 'qwen3-asr' as const,
-        activeModelId: null,
-        loadedModelId: 'whisper-tiny.en' as const
-      }
-    }))
-    render(
-      <SettingsView
-        settings={{
-          ...baseSettings,
-          dictation: {
-            ...DEFAULT_SETTINGS.dictation,
-            engine: 'qwen3-asr',
-            localModelId: 'qwen3-asr-1.7b',
-            qwen3AsrServerUrl: 'http://127.0.0.1:8000/v1'
-          }
-        }}
-        secrets={emptySecrets}
-        onClose={vi.fn()}
-        onUpdate={vi.fn(async () => ({ ok: true as const }))}
-        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
-        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
-      />
-    )
-    fireEvent.click(screen.getByRole('button', { name: /^Voice$/i }))
-    await waitFor(() => expect(window.vyotiq.dictationStatus).toHaveBeenCalled())
-    const useTiny = screen.getByRole('button', { name: /Use Whisper Tiny/i }) as HTMLButtonElement
-    expect(useTiny.disabled).toBe(true)
-    const useQwen06 = screen.queryByRole('button', { name: /Use Qwen3-ASR 0.6B/i }) as HTMLButtonElement | null
-    expect(useQwen06).not.toBeNull()
-    expect(useQwen06!.disabled).toBe(false)
-  })
-
-  it('disables Qwen3-ASR "Use" when the engine is Local', async () => {
-    // @ts-expect-error test bridge
-    window.vyotiq.dictationStatus = vi.fn(async () => ({
-      ok: true as const,
-      data: {
-        phase: 'ready' as const,
-        progress: 1,
-        message: 'Ready',
-        error: null,
-        installed: [{ id: 'whisper-tiny.en' as const, bytesOnDisk: 41, loaded: true }],
-        recommendedModelId: 'whisper-small.en' as const,
-        engine: 'local' as const,
-        activeModelId: null,
-        loadedModelId: 'whisper-tiny.en' as const
-      }
-    }))
-    render(
-      <SettingsView
-        settings={{
-          ...baseSettings,
-          dictation: {
-            ...DEFAULT_SETTINGS.dictation,
-            engine: 'local',
-            localModelId: 'whisper-small.en'
-          }
-        }}
-        secrets={emptySecrets}
-        onClose={vi.fn()}
-        onUpdate={vi.fn(async () => ({ ok: true as const }))}
-        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
-        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
-      />
-    )
-    fireEvent.click(screen.getByRole('button', { name: /^Voice$/i }))
-    await waitFor(() => expect(window.vyotiq.dictationStatus).toHaveBeenCalled())
-    const useQwen = screen.getByRole('button', { name: /Use Qwen3-ASR 1.7B/i }) as HTMLButtonElement
-    expect(useQwen.disabled).toBe(true)
-    const useTiny = screen.queryByRole('button', { name: /Use Whisper Tiny/i }) as HTMLButtonElement | null
-    expect(useTiny).not.toBeNull()
-    expect(useTiny!.disabled).toBe(false)
-  })
-
   it('settings search navigates to dictation engine', async () => {
     Element.prototype.scrollIntoView = vi.fn()
     render(
@@ -1917,23 +1781,9 @@ describe('settings', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Voice$/i }))
     await waitFor(() => expect(window.vyotiq.dictationStatus).toHaveBeenCalled())
     expect(screen.getByText('Local Whisper models')).toBeTruthy()
-    expect(screen.getByText('Qwen3-ASR (local server)')).toBeTruthy()
-    expect(screen.getByText('Qwen3-ASR (on-device)')).toBeTruthy()
     await waitFor(() => {
       const smallField = document.querySelector('[data-settings-field="dictation-whisper-small"]')
       expect(smallField?.textContent).toMatch(/Recommended for this PC/)
-    })
-
-    // Server URL input commits on blur (Enter blurs in the browser)
-    const serverUrlInput = screen.getByLabelText('Qwen3-ASR server URL')
-    fireEvent.change(serverUrlInput, { target: { value: 'http://127.0.0.1:9000/v1' } })
-    fireEvent.blur(serverUrlInput)
-    await waitFor(() => {
-      expect(onUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          dictation: expect.objectContaining({ qwen3AsrServerUrl: 'http://127.0.0.1:9000/v1' })
-        })
-      )
     })
   })
 

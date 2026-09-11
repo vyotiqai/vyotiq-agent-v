@@ -442,7 +442,33 @@ function cacheKey(workspaceRoot: string, modelId: string): string {
 
 const locks = new Map<string, Promise<void>>()
 
-async function withWorkspaceLock<T>(workspaceRoot: string, fn: () => Promise<T>): Promise<T> {
+/**
+ * Interactive callers must not queue behind a wedged sync indefinitely.
+ *
+ * The lock is a promise-chain mutex, so a warm job whose `syncCode` RPC sits at
+ * the client's 30-minute absolute ceiling holds the slot for that long and an
+ * interactive `codebase_search` behind it looks like a hang. Bounding only the
+ * *acquire* keeps long-but-honest syncs working (they still hold the lock as
+ * long as they need) while a genuinely wedged holder degrades to a clear error.
+ */
+const INTERACTIVE_LOCK_WAIT_MS = 30_000
+
+export class WorkspaceLockBusyError extends Error {
+  readonly workspaceRoot: string
+  constructor(workspaceRoot: string, waitedMs: number) {
+    super(
+      `Codebase index is busy for this workspace (waited ${Math.round(waitedMs / 1000)}s for the current index operation). Retry shortly.`
+    )
+    this.name = 'WorkspaceLockBusyError'
+    this.workspaceRoot = workspaceRoot
+  }
+}
+
+async function withWorkspaceLock<T>(
+  workspaceRoot: string,
+  fn: () => Promise<T>,
+  opts: { waitTimeoutMs?: number } = {}
+): Promise<T> {
   const key = workspaceKey(workspaceRoot)
   const prev = locks.get(key) ?? Promise.resolve()
   let release!: () => void
@@ -450,7 +476,29 @@ async function withWorkspaceLock<T>(workspaceRoot: string, fn: () => Promise<T>)
     release = r
   })
   locks.set(key, prev.then(() => gate))
-  await prev
+  const waitTimeoutMs = opts.waitTimeoutMs ?? 0
+  if (waitTimeoutMs > 0) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new WorkspaceLockBusyError(workspaceRoot, waitTimeoutMs)),
+          waitTimeoutMs
+        )
+        const onPrev = (): void => {
+          clearTimeout(timer)
+          resolve()
+        }
+        void prev.then(onPrev, onPrev)
+      })
+    } catch (err) {
+      // Never acquired, but this slot is already chained into the queue —
+      // resolving it is what lets the next waiter proceed at all.
+      release()
+      throw err
+    }
+  } else {
+    await prev
+  }
   try {
     return await fn()
   } finally {
@@ -837,7 +885,9 @@ export async function runCodebaseSearch(
       priority: 'interactive',
       signal: searchSignal,
       run: () =>
-        withWorkspaceLock(workspaceRoot, async () => {
+        withWorkspaceLock(
+          workspaceRoot,
+          async () => {
           const disabledResult: CodebaseSearchResult = {
             hits: [],
             status: {
@@ -952,7 +1002,9 @@ export async function runCodebaseSearch(
           }
 
           return formatCodebaseSearchResult(hits, status, entry.embedder.modelId)
-        })
+          },
+          { waitTimeoutMs: INTERACTIVE_LOCK_WAIT_MS }
+        )
     })
 
   const indexingOn =

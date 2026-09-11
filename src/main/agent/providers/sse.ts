@@ -12,6 +12,30 @@ import { logProviderFailure } from './log'
  */
 export const STREAM_IDLE_TIMEOUT_MS = 10 * 60 * 1000
 
+/**
+ * Hard cap on a single un-terminated SSE line. A well-behaved provider sends
+ * small `data:` frames; a proxy error page or corrupted stream delivered as one
+ * giant line would otherwise grow `buffer` without bound and can OOM the main
+ * process in one allocation. Exceeding this is terminal (retrying re-delivers
+ * the same bytes), so it fails fast with a clear message.
+ */
+export const SSE_MAX_LINE_CHARS = 32 * 1024 * 1024
+/** Hard cap on one logical frame joined from multiple `data:` lines. */
+export const SSE_MAX_FRAME_CHARS = 64 * 1024 * 1024
+
+export class SseFrameTooLargeError extends Error {
+  readonly limitChars: number
+
+  constructor(limitChars: number, kind: 'line' | 'frame') {
+    super(
+      `Provider stream ${kind} exceeded ${Math.round(limitChars / (1024 * 1024))} MB — ` +
+        'the upstream response is corrupt or not an SSE stream'
+    )
+    this.name = 'SseFrameTooLargeError'
+    this.limitChars = limitChars
+  }
+}
+
 export class StreamIdleTimeoutError extends Error {
   readonly idleMs: number
 
@@ -34,6 +58,10 @@ export type IterateSseOptions = {
    * Pass `0` to disable (tests / explicit opt-out only).
    */
   idleTimeoutMs?: number
+  /** Override the unterminated-line cap (tests). Default {@link SSE_MAX_LINE_CHARS}. */
+  maxLineChars?: number
+  /** Override the joined-frame cap (tests). Default {@link SSE_MAX_FRAME_CHARS}. */
+  maxFrameChars?: number
 }
 
 /**
@@ -103,15 +131,19 @@ export async function* iterateSseData(
     throw new Error('No response body')
   }
   const idleTimeoutMs = opts?.idleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS
+  const maxLineChars = opts?.maxLineChars ?? SSE_MAX_LINE_CHARS
+  const maxFrameChars = opts?.maxFrameChars ?? SSE_MAX_FRAME_CHARS
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
   let dataLines: string[] = []
+  let frameChars = 0
 
   const flush = (): string | null => {
     if (dataLines.length === 0) return null
     const data = dataLines.join('\n')
     dataLines = []
+    frameChars = 0
     return data
   }
 
@@ -141,6 +173,11 @@ export async function* iterateSseData(
       buffer += decoder.decode(value, { stream: true })
       const parts = buffer.split('\n')
       buffer = parts.pop() ?? ''
+      // A provider that never sends a newline would grow this tail without
+      // bound; complete lines are processed below (and frame-capped by bytes).
+      if (buffer.length > maxLineChars) {
+        throw new SseFrameTooLargeError(maxLineChars, 'line')
+      }
 
       for (const raw of parts) {
         const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw
@@ -157,15 +194,26 @@ export async function* iterateSseData(
         if (line.startsWith(':')) continue
         if (line.startsWith('data:')) {
           const v = line.slice(5)
+          frameChars += v.length
+          if (frameChars > maxFrameChars) {
+            throw new SseFrameTooLargeError(maxFrameChars, 'frame')
+          }
           dataLines.push(v.startsWith(' ') ? v.slice(1) : v)
         }
       }
     }
 
     if (buffer.length) {
+      if (buffer.length > maxLineChars) {
+        throw new SseFrameTooLargeError(maxLineChars, 'line')
+      }
       const line = buffer.endsWith('\r') ? buffer.slice(0, -1) : buffer
       if (line.startsWith('data:')) {
         const v = line.slice(5)
+        frameChars += v.length
+        if (frameChars > maxFrameChars) {
+          throw new SseFrameTooLargeError(maxFrameChars, 'frame')
+        }
         dataLines.push(v.startsWith(' ') ? v.slice(1) : v)
       }
     }

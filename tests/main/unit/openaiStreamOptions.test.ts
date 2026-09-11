@@ -123,6 +123,56 @@ describe('buildOpenAiCompatBody prompt cache', () => {
     expect(body.prompt_cache_key).toBeUndefined()
     expect(body.prompt_cache_options).toBeUndefined()
   })
+
+  it('strips omitFields from the built body (strict-host unknown-field recovery)', () => {
+    const body = buildOpenAiCompatBody(
+      { ...baseReq, thinking: { enabled: true, effort: 'high', display: 'summarized' } },
+      { defaultBaseUrl: 'http://127.0.0.1:8080/v1' },
+      'custom',
+      { omitFields: ['include_reasoning', 'service_tier'] }
+    )
+    expect(body.include_reasoning).toBeUndefined()
+    expect(body.reasoning_effort).toBe('high')
+  })
+
+  it('sanitizes restricted schema keywords only when the sanitizeTools override is set', () => {
+    const tools = [
+      {
+        name: 'lookup',
+        description: 'lookup',
+        parameters: {
+          type: 'object',
+          properties: { id: { type: 'string', format: 'uuid' } },
+          required: ['id'],
+          additionalProperties: false
+        }
+      }
+    ]
+    const raw = buildOpenAiCompatBody(
+      { ...baseReq, tools },
+      { defaultBaseUrl: 'https://opencode.ai/zen/go/v1' },
+      'opencode'
+    )
+    const rawParams = (
+      raw.tools as Array<{ function: { parameters: Record<string, unknown> } }>
+    )[0]!.function.parameters
+    expect(rawParams.additionalProperties).toBe(false)
+
+    const sanitized = buildOpenAiCompatBody(
+      { ...baseReq, tools },
+      { defaultBaseUrl: 'https://opencode.ai/zen/go/v1' },
+      'opencode',
+      { sanitizeTools: true }
+    )
+    const params = (
+      sanitized.tools as Array<{ function: { parameters: Record<string, unknown> } }>
+    )[0]!.function.parameters
+    expect(params.additionalProperties).toBeUndefined()
+    expect(
+      (params.properties as Record<string, Record<string, unknown>>).id!.format
+    ).toBeUndefined()
+    expect(params.required).toEqual(['id'])
+  })
 })
 
 describe('xai conv-id cache affinity header', () => {

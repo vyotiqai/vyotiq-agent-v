@@ -206,7 +206,6 @@ function wrapLandingInline(text) {
   next = next.replace(/\bOpenAI\b/g, '**OpenAI**')
   next = next.replace(/\bOpenRouter\b/g, '**OpenRouter**')
   next = next.replace(/\0OPENAI_COMPAT\0/g, 'OpenAI-compatible')
-  next = next.replace(/Qwen3-ASR \(local server\)/g, '**Qwen3-ASR (local server)**')
   next = next.replace(/\b(MCPs|Skills|Rules|Packages)\b/g, '**$1**')
   next = next.replace(/\b(Mutating tools|All tools|Not now)\b/g, '**$1**')
   next = next.replace(/\b(Ask for edits and commands|Ask for every tool|Active provider)\b/g, '**$1**')

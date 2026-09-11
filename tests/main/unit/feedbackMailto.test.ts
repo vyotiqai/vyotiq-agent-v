@@ -14,7 +14,7 @@ const base: FeedbackMailtoInput = {
 }
 
 describe('buildFeedbackMailto', () => {
-  it('targets vyotiq@gmail.com with exact subject/body (no diagnostics)', () => {
+  it('targets the support address with exact subject/body (no diagnostics)', () => {
     const url = buildFeedbackMailto(base)
     expect(url.startsWith(`mailto:${FEEDBACK_EMAIL}?subject=`)).toBe(true)
     expect(url).toBe(

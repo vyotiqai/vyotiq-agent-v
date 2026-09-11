@@ -101,9 +101,9 @@ function mapModalities(input: string[] | undefined): OpenCodeInputModality[] {
 function effortFromOptions(
   options: ModelsDevModel['reasoning_options']
 ): { ladder?: readonly ThinkingEffort[]; canDisable: boolean } {
+  const list = options ?? []
   const ladder: ThinkingEffort[] = []
-  let canDisable = true
-  for (const opt of options ?? []) {
+  for (const opt of list) {
     if (!EFFORT_OPTION_TYPES.has(opt.type)) continue
     for (const v of opt.values ?? []) {
       const e = v.toLowerCase() as ThinkingEffort
@@ -112,8 +112,16 @@ function effortFromOptions(
       }
     }
   }
-  // models.dev lists only the *enabled* effort tiers; a model with reasoning
-  // but no effort ladder still allows disabling via the transport default.
+  // models.dev lists only the *enabled* tiers. Disable is possible when an
+  // explicit affordance exists: a `toggle` option (Anthropic-style) or an
+  // `effort: none` rung. Models that declare effort tiers without either
+  // cannot be disabled (the Go mount rejects it with "[1210] cannot be
+  // disabled"). No options at all → the transport default still applies.
+  const hasToggle = list.some((o) => o.type === 'toggle')
+  const hasNone = list.some((o) =>
+    (o.values ?? []).some((v) => v.toLowerCase() === 'none')
+  )
+  const canDisable = list.length === 0 ? true : hasToggle || hasNone
   return { ladder: ladder.length ? ladder : undefined, canDisable }
 }
 
@@ -151,17 +159,28 @@ export async function loadOpenCodeGoCatalog(
   const stale =
     !catalogState || opts?.forceRefresh || Date.now() - catalogState.fetchedAt > CATALOG_TTL_MS
   if (!stale && catalogState) return catalogState
-  if (inflight && !opts?.forceRefresh) return inflight
-  inflight =
-    inflight ??
-    fetchCatalog(opts?.signal)
+  if (opts?.forceRefresh) {
+    // A forced refresh must not join (or return) an older in-flight fetch.
+    const run = fetchCatalog(opts.signal)
       .then((state) => {
         catalogState = state
         return state
       })
       .finally(() => {
-        inflight = null
+        if (inflight === run) inflight = null
       })
+    inflight = run
+    return run
+  }
+  if (inflight) return inflight
+  inflight = fetchCatalog(opts?.signal)
+    .then((state) => {
+      catalogState = state
+      return state
+    })
+    .finally(() => {
+      inflight = null
+    })
   return inflight
 }
 
@@ -181,7 +200,19 @@ export function normalizeOpenCodeGoModelId(id: string): string {
 /* Structural endpoint routing (protocol, not capability data)                 */
 /* -------------------------------------------------------------------------- */
 
-const RESPONSES_MODELS = new Set(['grok-4.5', 'gpt-5.6-luna', 'muse-spark-1.2-contributor'])
+/**
+ * Endpoints table from https://opencode.ai/docs/go/ (live 2026-09-11). Keep in
+ * sync with the docs table, not with the live `/models` ids: the catalog lists
+ * ids before they are routed, and a missed id silently sends the model to the
+ * wrong mount where every run fails.
+ */
+const RESPONSES_MODELS = new Set([
+  'grok-4.5',
+  'grok-4.6',
+  'gpt-5.6-luna',
+  'muse-spark-1.2-contributor',
+  'muse-spark-1.3-contributor'
+])
 
 const MESSAGES_MODELS = new Set([
   'minimax-m3',

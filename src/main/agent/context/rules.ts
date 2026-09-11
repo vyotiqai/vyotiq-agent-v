@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from 'fs/promises'
-import { existsSync, readdirSync, statSync, type Dirent } from 'fs'
+import type { Dirent } from 'fs'
 import { join, relative, sep } from 'path'
 import { wrapPromptSection } from '../promptSections'
 import { wrapUntrustedContent } from '../untrustedContent'
@@ -58,43 +58,54 @@ export function isRuleRelatedRelPath(relPath: string): boolean {
   )
 }
 
-function fingerprintFor(workspacePath: string): string {
+/**
+ * Change fingerprint for the rules inputs.
+ *
+ * Async on purpose: this runs on every `readWorkspaceRules` call — i.e. once per
+ * agent step via `assembleContext` — *including* cache hits, because the walk is
+ * what busts the cache. The previous sync version did a recursive
+ * `readdirSync` + `statSync` per file on the main thread at that cadence.
+ */
+async function fingerprintFor(workspacePath: string): Promise<string> {
   const parts: string[] = []
   for (const name of ROOT_FILES) {
     const p = join(workspacePath, name)
     try {
-      parts.push(existsSync(p) ? `${name}:${statSync(p).mtimeMs}` : `${name}:-`)
-    } catch {
-      parts.push(`${name}:?`)
+      const st = await stat(p)
+      parts.push(`${name}:${st.mtimeMs}`)
+    } catch (err) {
+      parts.push(isNotFound(err) ? `${name}:-` : `${name}:?`)
     }
   }
   for (const { dir, extensions } of RULE_DIRS) {
     const p = join(workspacePath, dir)
     try {
-      if (!existsSync(p)) {
-        parts.push(`${dir}:-`)
-        continue
-      }
-      parts.push(`${dir}:${statSync(p).mtimeMs}`)
-      parts.push(`${dir}:files:${maxRuleFileMtimeMs(p, extensions, 0)}`)
-    } catch {
-      parts.push(`${dir}:?`)
+      const dirStat = await stat(p)
+      parts.push(`${dir}:${dirStat.mtimeMs}`)
+      parts.push(`${dir}:files:${await maxRuleFileMtimeMs(p, extensions, 0)}`)
+    } catch (err) {
+      parts.push(isNotFound(err) ? `${dir}:-` : `${dir}:?`)
     }
   }
   return parts.join('|')
 }
 
+function isNotFound(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
 /** Max mtime across a bounded rules walk so nested file edits bust the cache. */
-function maxRuleFileMtimeMs(
+async function maxRuleFileMtimeMs(
   dirPath: string,
   extensions: string[],
   depth: number
-): number {
+): Promise<number> {
   if (depth > MAX_DIR_DEPTH) return 0
   let max = 0
   let entries: Dirent[]
   try {
-    entries = readdirSync(dirPath, { withFileTypes: true })
+    entries = await readdir(dirPath, { withFileTypes: true })
   } catch {
     return 0
   }
@@ -103,13 +114,13 @@ function maxRuleFileMtimeMs(
     if (seen >= MAX_RULE_FILES) break
     const full = join(dirPath, entry.name)
     if (entry.isDirectory()) {
-      max = Math.max(max, maxRuleFileMtimeMs(full, extensions, depth + 1))
+      max = Math.max(max, await maxRuleFileMtimeMs(full, extensions, depth + 1))
       continue
     }
     if (!extensions.some((ext) => entry.name.toLowerCase().endsWith(ext))) continue
     seen++
     try {
-      max = Math.max(max, statSync(full).mtimeMs)
+      max = Math.max(max, (await stat(full)).mtimeMs)
     } catch {
       /* skip */
     }
@@ -251,7 +262,7 @@ export async function readWorkspaceRules(
 ): Promise<RuleFile[]> {
   if (!workspacePath) return []
 
-  const fingerprint = fingerprintFor(workspacePath)
+  const fingerprint = await fingerprintFor(workspacePath)
   const key = `${workspacePath}\0${focusedFile ?? ''}`
   const cached = cache.get(key)
   if (cached && cached.fingerprint === fingerprint && Date.now() - cached.builtAt < CACHE_TTL_MS) {

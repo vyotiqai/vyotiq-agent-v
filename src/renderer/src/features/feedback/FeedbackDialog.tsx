@@ -1,5 +1,7 @@
-import { useId, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
+import { FEEDBACK_MESSAGE_MAX, FEEDBACK_TITLE_MAX } from '@shared/ipc'
 import { Dialog } from '@renderer/lib/a11y'
+import { copyText } from '@renderer/lib/markdown/copyText'
 import { Button, Input, selectClass } from '@renderer/lib/ui'
 
 export type FeedbackType = 'bug' | 'feature' | 'praise' | 'other'
@@ -16,9 +18,21 @@ export type FeedbackComposeResult = {
   mailto: string
 }
 
+/**
+ * Bridge result — the real preload returns an `IpcResult` envelope
+ * (`{ok:true,data}` | `{ok:false,error}`); the inner data carries the compose
+ * result. `mailto` is accepted at the top level too so the dialog degrades
+ * gracefully if the envelope ever changes shape.
+ */
+type FeedbackBridgeReply = {
+  ok: boolean
+  data?: FeedbackComposeResult
+  mailto?: string
+}
+
 type FeedbackBridge = {
   feedback: {
-    compose: (input: FeedbackComposeInput) => Promise<FeedbackComposeResult>
+    compose: (input: FeedbackComposeInput) => Promise<FeedbackBridgeReply>
   }
 }
 
@@ -40,14 +54,35 @@ const FEEDBACK_TYPES: Array<{ value: FeedbackType; label: string }> = [
   { value: 'other', label: 'Other' }
 ]
 
-const FEEDBACK_EMAIL = 'vyotiq@gmail.com'
+const FEEDBACK_EMAIL = 'support@vyotiq.com'
+
+/** Plain-text subject/body of the pre-filled email (shared by mailto + copy). */
+function buildFeedbackText(input: FeedbackComposeInput): { subject: string; body: string } {
+  const label = FEEDBACK_TYPES.find((t) => t.value === input.type)?.label ?? 'Feedback'
+  return {
+    subject: `[Vyotiq] ${label}: ${input.title}`,
+    body: `${input.message}\n\n(Feedback type: ${label})`
+  }
+}
 
 /** Client-built fallback so feedback stays deliverable even without the bridge. */
 function buildFallbackMailto(input: FeedbackComposeInput): string {
-  const label = FEEDBACK_TYPES.find((t) => t.value === input.type)?.label ?? 'Feedback'
-  const subject = `[Vyotiq] ${label}: ${input.title}`
-  const body = `${input.message}\n\n(Feedback type: ${label})`
+  const { subject, body } = buildFeedbackText(input)
   return `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+}
+
+/**
+ * Normalize a bridge reply into the compose result. The preload wraps the
+ * result in the `IpcResult` envelope (`{ok:true,data}`), while older bridge
+ * mocks return a flat `{ok,mailto}` — tolerate both so a shape change can
+ * never drop the main-composed mailto (which carries the diagnostics block).
+ */
+function unwrapComposeReply(res: FeedbackBridgeReply): FeedbackComposeResult {
+  const data = res.data
+  if (data && typeof data.mailto === 'string') {
+    return { ok: res.ok && data.ok !== false, mailto: data.mailto }
+  }
+  return { ok: Boolean(res.ok), mailto: res.mailto ?? '' }
 }
 
 type Phase = 'idle' | 'sending' | 'success' | 'error'
@@ -65,6 +100,8 @@ export function FeedbackDialog({
   const [includeDiagnostics, setIncludeDiagnostics] = useState(false)
   const [phase, setPhase] = useState<Phase>('idle')
   const [mailto, setMailto] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const copiedTimerRef = useRef<number | null>(null)
 
   const headerId = useId()
   const typeFieldId = useId()
@@ -89,6 +126,30 @@ export function FeedbackDialog({
     }
     setPhase('idle')
     setMailto(null)
+    setCopied(false)
+  }
+
+  useEffect(
+    () => () => {
+      if (copiedTimerRef.current != null) window.clearTimeout(copiedTimerRef.current)
+    },
+    []
+  )
+
+  const copyEmailText = (): void => {
+    const input: FeedbackComposeInput = {
+      type,
+      title: trimmedTitle,
+      message: trimmedMessage,
+      includeDiagnostics
+    }
+    const { subject, body } = buildFeedbackText(input)
+    void copyText(`${subject}\n\n${body}`).then((ok) => {
+      if (!ok) return
+      setCopied(true)
+      if (copiedTimerRef.current != null) window.clearTimeout(copiedTimerRef.current)
+      copiedTimerRef.current = window.setTimeout(() => setCopied(false), 1600)
+    })
   }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
@@ -110,8 +171,10 @@ export function FeedbackDialog({
     void api
       .compose(input)
       .then((res) => {
-        setMailto(res.ok ? res.mailto : (res.mailto || buildFallbackMailto(input)))
-        setPhase(res.ok ? 'success' : 'error')
+        const compose = unwrapComposeReply(res)
+        const mailtoHref = compose.mailto || buildFallbackMailto(input)
+        setMailto(mailtoHref)
+        setPhase(compose.ok ? 'success' : 'error')
       })
       .catch(() => {
         setMailto(buildFallbackMailto(input))
@@ -153,12 +216,17 @@ export function FeedbackDialog({
               Thanks — your email client should have opened with the message pre-filled.
               If it didn&apos;t, use the link below to open or copy it manually.
             </p>
-            <a
-              className="text-sm underline decoration-border underline-offset-2 vy-transition hover:text-fg focus-visible:vy-focus-ring rounded-sm"
-              href={mailtoHref}
-            >
-              Open email manually
-            </a>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <a
+                className="text-sm underline decoration-border underline-offset-2 vy-transition hover:text-fg focus-visible:vy-focus-ring rounded-sm"
+                href={mailtoHref}
+              >
+                Open email manually
+              </a>
+              <Button variant="ghost" onClick={copyEmailText}>
+                {copied ? 'Copied' : 'Copy message'}
+              </Button>
+            </div>
             <div className="flex justify-end">
               <Button variant="subtle" onClick={close}>
                 Done
@@ -171,12 +239,17 @@ export function FeedbackDialog({
               We couldn&apos;t open your email client automatically. Your feedback is still
               deliverable — open the pre-filled email below and send it from your mail app.
             </p>
-            <a
-              className="text-sm underline decoration-border underline-offset-2 vy-transition hover:text-fg focus-visible:vy-focus-ring rounded-sm"
-              href={mailtoHref}
-            >
-              Open pre-filled email
-            </a>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <a
+                className="text-sm underline decoration-border underline-offset-2 vy-transition hover:text-fg focus-visible:vy-focus-ring rounded-sm"
+                href={mailtoHref}
+              >
+                Open pre-filled email
+              </a>
+              <Button variant="ghost" onClick={copyEmailText}>
+                {copied ? 'Copied' : 'Copy message'}
+              </Button>
+            </div>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={close}>
                 Close
@@ -218,11 +291,15 @@ export function FeedbackDialog({
                 ref={titleInputRef}
                 placeholder="Short summary"
                 value={title}
+                maxLength={FEEDBACK_TITLE_MAX}
                 disabled={phase === 'sending'}
                 onChange={(e) => {
                   setTitle(e.target.value)
                 }}
               />
+              <p className="m-0 text-right text-[11px] tabular-nums text-muted" aria-hidden>
+                {trimmedTitle.length}/{FEEDBACK_TITLE_MAX}
+              </p>
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -235,12 +312,16 @@ export function FeedbackDialog({
                 rows={5}
                 placeholder="What happened, or what would you like to see?"
                 value={message}
+                maxLength={FEEDBACK_MESSAGE_MAX}
                 disabled={phase === 'sending'}
                 onChange={(e) => {
                   setMessage(e.target.value)
                 }}
                 className="w-full rounded-md border border-border bg-surface px-[var(--vy-control-px)] py-2 text-sm leading-[1.4] text-fg placeholder:text-muted vy-transition hover:border-border-strong focus-visible:border-border-strong focus-visible:vy-focus-ring focus-visible:outline-none disabled:vy-disabled-state resize-y"
               />
+              <p className="m-0 text-right text-[11px] tabular-nums text-muted" aria-hidden>
+                {trimmedMessage.length}/{FEEDBACK_MESSAGE_MAX}
+              </p>
             </div>
 
             <div className="flex items-center gap-2">

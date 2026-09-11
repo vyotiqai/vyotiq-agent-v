@@ -31,7 +31,11 @@ export const GitStatusSchema = z.object({
   added: z.number().int().min(0),
   removed: z.number().int().min(0),
   hasRemote: z.boolean(),
-  hasCommits: z.boolean()
+  hasCommits: z.boolean(),
+  /** Commits on HEAD not on the upstream — only when a tracking ref exists. */
+  ahead: z.number().int().min(0).optional(),
+  /** Commits on the upstream not on HEAD — only when a tracking ref exists. */
+  behind: z.number().int().min(0).optional()
 })
 export type GitStatus = z.infer<typeof GitStatusSchema>
 
@@ -67,7 +71,8 @@ export const GitGenerateCommitMessageRequestSchema = z.object({
 
 export const GitGenerateCommitMessageResultSchema = z.object({
   message: z.string().min(1).nullable(),
-  source: z.enum(['agent', 'fallback'])
+  source: z.enum(['agent', 'fallback']),
+  reason: z.string().nullish()
 })
 export type GitGenerateCommitMessageResult = z.infer<
   typeof GitGenerateCommitMessageResultSchema

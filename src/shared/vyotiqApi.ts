@@ -25,6 +25,7 @@ import type {
   ReadRunArtifactResult,
   RunArtifactName,
   RunStatsResult,
+  HomeActivityResult,
   HarnessReviewResult,
   HarnessPreviewApplyResult,
   HarnessApplyResult,
@@ -125,9 +126,6 @@ import type {
   WorkspaceLspStatus,
   WorkspaceLspRequest,
   WorkspaceLspResponse,
-  WorkspaceInlineCompleteRequest,
-  WorkspaceInlineCompleteAbortRequest,
-  WorkspaceInlineCompleteResult,
   WorkspaceEditorRecoverySaveRequest,
   WorkspaceEditorRecoveryLoadRequest,
   WorkspaceEditorRecoveryLoadResult,
@@ -257,6 +255,10 @@ export interface VyotiqApi {
     workspacePath: string
     runIds: string[]
   }) => Promise<IpcResult<RunStatsResult>>
+  homeActivity: (payload: {
+    workspacePaths: string[]
+    windowDays?: number
+  }) => Promise<IpcResult<HomeActivityResult>>
   harnessReview: (payload: {
     workspacePath: string
     limit?: number
@@ -638,12 +640,6 @@ export interface VyotiqApi {
   workspaceLspRequest: (
     payload: WorkspaceLspRequest
   ) => Promise<IpcResult<WorkspaceLspResponse>>
-  workspaceInlineComplete: (
-    payload: WorkspaceInlineCompleteRequest
-  ) => Promise<IpcResult<WorkspaceInlineCompleteResult>>
-  workspaceInlineCompleteAbort: (
-    payload: WorkspaceInlineCompleteAbortRequest
-  ) => Promise<IpcResult<true>>
   workspaceEditorRecoverySave: (
     payload: WorkspaceEditorRecoverySaveRequest
   ) => Promise<IpcResult<true>>

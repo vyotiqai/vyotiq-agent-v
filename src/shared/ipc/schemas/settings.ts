@@ -290,17 +290,10 @@ export const CodeIndexReindexRequestSchema = z.object({
 })
 export type CodeIndexReindexRequest = z.infer<typeof CodeIndexReindexRequestSchema>
 
-export const DictationEngineSchema = z.enum(['openai', 'openrouter', 'local', 'qwen3-asr', 'qwen3-asr-onnx'])
+export const DictationEngineSchema = z.enum(['openai', 'openrouter', 'local'])
 export type DictationEngine = z.infer<typeof DictationEngineSchema>
 
-export const DictationLocalModelIdSchema = z.enum([
-  'whisper-tiny.en',
-  'whisper-small.en',
-  'qwen3-asr-0.6b',
-  'qwen3-asr-1.7b',
-  'qwen3-asr-onnx-0.6b',
-  'qwen3-asr-onnx-1.7b'
-])
+export const DictationLocalModelIdSchema = z.enum(['whisper-tiny.en', 'whisper-small.en'])
 export type DictationLocalModelId = z.infer<typeof DictationLocalModelIdSchema>
 
 export const DictationWaveformStyleSchema = z.enum(['bars', 'dots', 'line', 'mirror'])
@@ -312,25 +305,14 @@ export const DictationSettingsSchema = z.object({
   /** Which installed local model to use. Empty until the user selects/installs. */
   localModelId: z.union([z.literal(''), DictationLocalModelIdSchema]).default(''),
   /** Composer listening visualizer. */
-  waveformStyle: DictationWaveformStyleSchema.default('bars'),
-  /**
-   * OpenAI-compatible transcription base URL for the `qwen3-asr` engine.
-   * Point this at a running vLLM (`vllm serve Qwen/Qwen3-ASR-…`, base
-   * `http://127.0.0.1:8000/v1`) or `qwen-asr-serve` endpoint. The app POSTs
-   * `<url>/audio/transcriptions`; it does not download the model.
-   */
-  qwen3AsrServerUrl: z.string().min(1).default('http://127.0.0.1:8000/v1'),
-  /** Optional bearer token for the Qwen3-ASR server. Empty = no auth header. */
-  qwen3AsrApiKey: z.string().default('')
+  waveformStyle: DictationWaveformStyleSchema.default('bars')
 })
 export type DictationSettings = z.infer<typeof DictationSettingsSchema>
 
 export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
   engine: 'openai',
   localModelId: '',
-   waveformStyle: 'bars',
-   qwen3AsrServerUrl: 'http://127.0.0.1:8000/v1',
-   qwen3AsrApiKey: ''
+  waveformStyle: 'bars'
 }
 
 export const DictationModelPhaseSchema = z.enum([
@@ -417,7 +399,7 @@ export const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
 }
 
 /** Current persisted settings format. Bump with a matching load-time rewrite. */
-export const SETTINGS_FORMAT_VERSION = 3
+export const SETTINGS_FORMAT_VERSION = 4
 
 export const SettingsSchema = z.object({
   provider: ProviderIdSchema,
@@ -544,12 +526,7 @@ export const SettingsSchema = z.object({
   /**
    * App-wide inbox + OS toast preferences. Not a workspace override.
    */
-  notifications: NotificationSettingsSchema.default(DEFAULT_NOTIFICATION_SETTINGS),
-  /**
-   * Ghost-text fill-in-the-middle in the Files editor using the active model.
-   * Tab accepts, Esc dismisses. Calls the active provider while typing.
-   */
-  tabAutocomplete: z.boolean().default(true)
+  notifications: NotificationSettingsSchema.default(DEFAULT_NOTIFICATION_SETTINGS)
 })
 export type Settings = z.infer<typeof SettingsSchema>
 
@@ -604,8 +581,7 @@ export const DEFAULT_SETTINGS: Settings = {
   agentTone: '',
   responseLanguage: '',
   responseVerbosity: 'concise',
-  notifications: DEFAULT_NOTIFICATION_SETTINGS,
-  tabAutocomplete: true
+  notifications: DEFAULT_NOTIFICATION_SETTINGS
 }
 
 export const SetSettingsRequestSchema = SettingsSchema.partial()

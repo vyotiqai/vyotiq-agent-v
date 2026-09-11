@@ -31,8 +31,6 @@ const api = {
   workspaceFormatFile: vi.fn(),
   workspaceLspStatus: vi.fn(),
   workspaceLspRequest: vi.fn(),
-  workspaceInlineComplete: vi.fn(async () => ({ ok: true as const, data: { text: '' } })),
-  workspaceInlineCompleteAbort: vi.fn(async () => ({ ok: true as const, data: true })),
   gitDiff: vi.fn(),
   gitBlame: vi.fn(),
   writeClipboard: vi.fn(() => true),

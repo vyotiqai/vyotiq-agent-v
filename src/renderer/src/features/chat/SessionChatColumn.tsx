@@ -380,6 +380,7 @@ export function SessionChatColumn({
       ) : null}
       {openInstanceRunId && workspacePath ? (
         <AgentInstancePane
+          key={openInstanceRunId}
           workspacePath={workspacePath}
           instanceRunId={openInstanceRunId}
           instanceMeta={agentInstances?.[openInstanceRunId]}

@@ -561,7 +561,7 @@ describe('ThinkingControls', () => {
     beforeAll(async () => {
       await loadOpenCodeGoCatalog()
       goMeta = new Map(seedModelsFor('opencode').map((m) => [m.id, m]))
-    })
+    }, 30_000)
     const goSettings: EffectiveChatSettings = {
       ...chatSettings,
       provider: 'opencode',

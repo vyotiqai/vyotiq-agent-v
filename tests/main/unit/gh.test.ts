@@ -333,6 +333,48 @@ describe('gh helpers', () => {
     )
   })
 
+  it('prCreateFromChanges deletes the stray topic branch when nothing commits', async () => {
+    mockGhInstalled()
+    vi.mocked(existsSync).mockImplementation((target) => {
+      const normalized = String(target).replace(/\\/g, '/')
+      return normalized === bundledGhPath || normalized.endsWith('/ws/.git')
+    })
+    execFileAsync.mockImplementation(async (_executable, rawArgs) => {
+      const args = rawArgs as string[]
+      if (args[0] === '--version') return { stdout: 'gh version 2.0', stderr: '' }
+      if (args[0] === 'auth' && args[1] === 'setup-git') return { stdout: '', stderr: '' }
+      if (args[0] === 'remote') return { stdout: 'origin\n', stderr: '' }
+      if (args[0] === 'symbolic-ref') return { stdout: 'main\n', stderr: '' }
+      if (args[0] === 'repo' && args[1] === 'view') {
+        return { stdout: JSON.stringify({ defaultBranchRef: { name: 'main' } }), stderr: '' }
+      }
+      if (args[0] === 'pr' && args[1] === 'view') {
+        throw new Error('no pull requests found for branch "main"')
+      }
+      if (args[0] === 'check-ref-format') return { stdout: `${args[2]}\n`, stderr: '' }
+      if (args[0] === 'show-ref') throw new Error('branch does not exist')
+      if (args[0] === 'switch') return { stdout: '', stderr: '' }
+      if (args[0] === 'branch') return { stdout: '', stderr: '' }
+      // Concurrent commit emptied the worktree: nothing dirty, nothing staged.
+      if (args[0] === 'status') return { stdout: '', stderr: '' }
+      if (args[0] === 'diff') return { stdout: '', stderr: '' }
+      if (args[0] === 'pr' && args[1] === 'create') {
+        throw new Error('should not create a pull request')
+      }
+      throw new Error(`unexpected command: ${args.join(' ')}`)
+    })
+
+    await expect(prCreateFromChanges('/ws', 'ship it', 'all')).rejects.toThrow(
+      /Nothing to commit/i
+    )
+    const argLists = execFileAsync.mock.calls.map((call) => call[1] as string[])
+    // The user is switched back to the original branch, never left on the stray.
+    expect(argLists.some((args) => args[0] === 'switch' && args[1] === 'main')).toBe(true)
+    const deleted = argLists.find((args) => args[0] === 'branch' && args[1] === '--delete')
+    expect(deleted?.[2]).toMatch(/^vyotiq\/ship-it-/)
+    expect(argLists.some((args) => args[0] === 'pr' && args[1] === 'create')).toBe(false)
+  })
+
   it('automatically creates a private repository when no remote exists', async () => {
     mockGhInstalled()
     vi.mocked(existsSync).mockImplementation((target) => {

@@ -1,0 +1,107 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro'
+import SiteFooter from '../components/SiteFooter.astro'
+import SiteHeader from '../components/SiteHeader.astro'
+import { SITE_BRAND, SITE_PRODUCT } from '../lib/site'
+---
+
+<BaseLayout
+  title={`Terms of Service — ${SITE_PRODUCT}`}
+  description="The terms that apply to the Agent V website and the open-source Agent V desktop application."
+>
+  <SiteHeader />
+  <main id="main-content" class="wrap py-16 md:py-24" tabindex="-1">
+    <article class="legal-page">
+      <p class="home-eyebrow">Legal</p>
+      <h1>Terms of Service</h1>
+      <p>
+        These terms apply to the {SITE_BRAND} website and to your use of the {SITE_PRODUCT}
+        desktop application and its download services. Last updated: September 11, 2026.
+      </p>
+
+      <h2>The software</h2>
+      <p>
+        {SITE_PRODUCT} is free and open-source software licensed under the GNU General Public
+        License v3.0 (GPL-3.0). You may use, study, modify, and redistribute it under that
+        license, available in the <a
+          href="https://github.com/vyotiqai/vyotiq-agent-v/blob/main/LICENSE"
+          rel="noopener noreferrer">LICENSE file</a
+        > of the source repository. Nothing in these terms restricts rights the license grants
+        you.
+      </p>
+
+      <h2>No warranty</h2>
+      <p>
+        The website and the application are provided "as is", without warranty of any kind.
+        The authors and copyright holders are not liable for any damages arising from their
+        use, to the maximum extent permitted by law. The application operates on your
+        repositories and systems at your direction: review changes before committing and keep
+        backups of work you cannot afford to lose.
+      </p>
+
+      <h2>Acceptable use</h2>
+      <p>
+        Do not use the website or the application to break the law, infringe others' rights,
+        distribute malware, or attack systems you do not have permission to test. You are
+        responsible for how you configure model providers, MCP servers, and the commands the
+        agent runs in your workspaces.
+      </p>
+
+      <h2>Your data</h2>
+      <p>
+        The application stores its data locally on your machine. The website stores a theme
+        preference and, when enabled, cookieless analytics — see
+        <a href="/privacy">Website privacy</a>. The application's data handling is documented
+        in <a href="/docs/concepts/privacy-data">Privacy and data storage</a>.
+      </p>
+
+      <h2>Changes</h2>
+      <p>
+        We may update these terms as the product evolves. Material changes are announced on
+        this page. Questions: <a href="mailto:support@vyotiq.com">support@vyotiq.com</a>.
+      </p>
+    </article>
+  </main>
+  <SiteFooter />
+</BaseLayout>
+
+<style>
+  .legal-page {
+    max-width: 42rem;
+  }
+
+  .legal-page h1 {
+    margin: 1rem 0 0;
+    font-family: var(--font-headline);
+    font-size: clamp(2rem, 4vw, 2.75rem);
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    line-height: 1.1;
+  }
+
+  .legal-page h2 {
+    margin: 2rem 0 0.75rem;
+    font-family: var(--font-headline);
+    font-size: 1.125rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  .legal-page p {
+    margin: 1rem 0 0;
+    color: var(--muted);
+    font-size: 1rem;
+    line-height: 1.7;
+  }
+
+  .legal-page a {
+    color: var(--fg);
+    text-decoration: underline;
+    text-decoration-color: var(--border);
+    text-underline-offset: 0.2em;
+  }
+
+  .legal-page a:hover {
+    text-decoration-color: var(--fg);
+  }
+</style>

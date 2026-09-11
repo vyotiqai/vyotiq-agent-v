@@ -7,7 +7,35 @@
  * `arguments` changed so IPC actually delivers the paint.
  */
 
+/**
+ * Cheap structural pre-filter for `isCompleteJson`.
+ *
+ * A complete JSON value can only end in `}`, `]`, `"`, a digit, or the last
+ * letter of a bare literal (`true`/`false` → `e`, `null` → `l`). Rejecting
+ * everything else without touching `JSON.parse` matters because `isCompleteJson`
+ * runs on the *accumulated* argument buffer on every streamed chunk: for a
+ * large `write`/`edit` that was a throwing full parse of a multi-hundred-KB
+ * string per chunk, i.e. quadratic in argument size, on the main thread.
+ */
+function endsLikeCompleteJson(text: string): boolean {
+  for (let i = text.length - 1; i >= 0; i--) {
+    const ch = text[i]!
+    if (ch > ' ') {
+      return (
+        ch === '}' ||
+        ch === ']' ||
+        ch === '"' ||
+        (ch >= '0' && ch <= '9') ||
+        ch === 'e' ||
+        ch === 'l'
+      )
+    }
+  }
+  return false
+}
+
 function isCompleteJson(text: string): boolean {
+  if (!endsLikeCompleteJson(text)) return false
   try {
     JSON.parse(text)
     return true
@@ -16,8 +44,56 @@ function isCompleteJson(text: string): boolean {
   }
 }
 
-function withoutWhitespace(text: string): string {
-  return text.replace(/\s+/g, '')
+/** Matches the character set of JS `\s` without allocating. */
+function isWhitespaceCode(code: number): boolean {
+  return (
+    code === 0x20 ||
+    (code >= 0x09 && code <= 0x0d) ||
+    code === 0xa0 ||
+    code === 0x1680 ||
+    (code >= 0x2000 && code <= 0x200a) ||
+    code === 0x2028 ||
+    code === 0x2029 ||
+    code === 0x202f ||
+    code === 0x205f ||
+    code === 0x3000 ||
+    code === 0xfeff
+  )
+}
+
+function nextNonWhitespace(text: string, from: number): number {
+  let i = from
+  while (i < text.length && isWhitespaceCode(text.charCodeAt(i))) i++
+  return i
+}
+
+/** Allocation-free equivalent of `withoutWhitespace(a) === withoutWhitespace(b)`. */
+function equalsIgnoringWhitespace(a: string, b: string): boolean {
+  let i = 0
+  let j = 0
+  for (;;) {
+    i = nextNonWhitespace(a, i)
+    j = nextNonWhitespace(b, j)
+    if (i >= a.length || j >= b.length) return i >= a.length && j >= b.length
+    if (a[i] !== b[j]) return false
+    i++
+    j++
+  }
+}
+
+/** Allocation-free equivalent of `withoutWhitespace(t).startsWith(withoutWhitespace(p))`. */
+function startsWithIgnoringWhitespace(text: string, prefix: string): boolean {
+  let i = 0
+  let j = 0
+  for (;;) {
+    i = nextNonWhitespace(text, i)
+    j = nextNonWhitespace(prefix, j)
+    if (j >= prefix.length) return true
+    if (i >= text.length) return false
+    if (text[i] !== prefix[j]) return false
+    i++
+    j++
+  }
 }
 
 /** End index (exclusive) of the JSON value starting at `start`, or -1 if open. */
@@ -100,7 +176,7 @@ export function mergeOpenAiCompatToolArgDelta(
 
   const incomingJson = lastCompleteJsonValue(incoming)
   if (incomingJson) {
-    if (withoutWhitespace(incomingJson) === withoutWhitespace(existing)) {
+    if (equalsIgnoringWhitespace(incomingJson, existing)) {
       return { arguments: incomingJson, yieldDelta: '' }
     }
     if (incomingJson.startsWith(existing)) {
@@ -117,7 +193,7 @@ export function mergeOpenAiCompatToolArgDelta(
     // incomplete `existing` and must fall through to append.
     if (
       isCompleteJson(existing) ||
-      withoutWhitespace(incomingJson).startsWith(withoutWhitespace(existing))
+      startsWithIgnoringWhitespace(incomingJson, existing)
     ) {
       return { arguments: incomingJson, yieldDelta: incomingJson }
     }
@@ -131,7 +207,7 @@ export function mergeOpenAiCompatToolArgDelta(
     // + `}` into the unparseable `[…]}`.
     if (
       (root === '{' || root === '[') &&
-      withoutWhitespace(incoming).startsWith(withoutWhitespace(existing))
+      startsWithIgnoringWhitespace(incoming, existing)
     ) {
       return { arguments: incoming, yieldDelta: incoming === existing ? '' : incoming }
     }

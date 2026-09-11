@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatMessage } from '@shared/ipc'
 import type { UiAgentQuestionAnswer } from '@shared/transcript'
 import type { AgentInstanceUiState } from '@shared/utils/agentInstance'
@@ -153,23 +153,67 @@ export function AgentInstancePane({
   approvalAutoFocus = true,
   onControllerChange
 }: AgentInstancePaneProps) {
-  const shared = getController?.(instanceRunId, workspacePath) ?? null
+  // Controller resolution must be identity-stable across renders. The WM map can
+  // re-key/evict/forget entries mid-run (forgetRunRouting even disposes), and
+  // adopting every identity flip re-fired onControllerChange (parent setState)
+  // plus the catch-up IPC effects below — the churn behind React #185 storms.
+  // Adopt a shared controller only when it is a genuinely different, live object;
+  // otherwise keep the current one and create the pane-owned controller once.
+  const sharedRef = useRef<{ key: string; controller: ChatStreamController | null }>({
+    key: '',
+    controller: null
+  })
+  const ownedRef = useRef<ChatStreamController | null>(null)
+  const resolutionKey = `${workspacePath}\u0000${instanceRunId}`
+  const sharedNow = getController?.(instanceRunId, workspacePath) ?? null
+  if (sharedRef.current.key !== resolutionKey) {
+    sharedRef.current = { key: resolutionKey, controller: sharedNow }
+    // The prior run's pane-owned controller is disposed by the ownsIpc effect
+    // cleanup when the controller identity changes below.
+    ownedRef.current = null
+  } else {
+    const held = sharedRef.current.controller
+    if (sharedNow != null && sharedNow !== held) {
+      // Adopt the WM-shared controller only over nothing held or a disposed
+      // one (WM always disposes before replacing — forgetRunRouting, re-key).
+      // Never swap between two live shared controllers: map churn would
+      // re-fire onControllerChange plus the catch-up effects per event — the
+      // engine of the React #185 cascade this guard exists to break.
+      if (held == null || held.disposed) {
+        sharedRef.current.controller = sharedNow
+      }
+    } else if (held?.disposed) {
+      // WM forgot the run (forgetRunRouting disposes) — fall back to owned.
+      sharedRef.current.controller = null
+    }
+  }
+  const shared = sharedRef.current.controller
   const controller = useMemo(
     () =>
       shared ??
-      createChatStreamController({
+      (ownedRef.current ??= createChatStreamController({
         workspacePath,
         runId: instanceRunId
-      }),
+      })),
     [shared, instanceRunId, workspacePath]
   )
+  if (ownedRef.current && ownedRef.current !== controller) ownedRef.current = null
   const ownsIpc = shared == null
 
   // Dock surfaces (Changes panel) subscribe to the same run via this — fires on
-  // mount and controller swap, reports null on unmount.
+  // mount and controller swap, reports null on unmount. Guarded so parent
+  // setState can never fire from a mere re-render.
+  const reportedControllerRef = useRef<ChatStreamController | null>(null)
   useEffect(() => {
+    if (reportedControllerRef.current === controller) return
+    reportedControllerRef.current = controller
     onControllerChange?.(controller)
-    return () => onControllerChange?.(null)
+    return () => {
+      if (reportedControllerRef.current === controller) {
+        reportedControllerRef.current = null
+        onControllerChange?.(null)
+      }
+    }
   }, [controller, onControllerChange])
 
   const { running, pendingRun, transcriptLoading } = useControllerRunningMeta(controller)

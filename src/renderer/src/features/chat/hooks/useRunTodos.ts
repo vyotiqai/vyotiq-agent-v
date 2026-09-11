@@ -30,12 +30,19 @@ export function useRunTodos(opts: {
   const [error, setError] = useState<string | null>(null)
   const wasRunningRef = useRef(running)
   const loadSeqRef = useRef(0)
+  /**
+   * Last raw todos.json content applied to state. The live poll re-reads the
+   * same file every 500 ms; re-parsing identical content into a fresh object
+   * re-rendered the plan surfaces for no change. `undefined` = never loaded.
+   */
+  const lastContentRef = useRef<string | null | undefined>(undefined)
 
   const load = useCallback(
     async (loadOpts?: { quiet?: boolean }) => {
       const seq = ++loadSeqRef.current
       if (!workspacePath || !runId) {
         if (seq !== loadSeqRef.current) return
+        lastContentRef.current = undefined
         setData(null)
         setError(null)
         setLoading(false)
@@ -54,15 +61,19 @@ export function useRunTodos(opts: {
         })
         if (seq !== loadSeqRef.current) return
         if (!res.ok) {
+          lastContentRef.current = undefined
           setData(null)
           setError(res.error)
           return
         }
         if (!res.data.exists || !res.data.content) {
+          lastContentRef.current = null
           setData(null)
           setError(null)
           return
         }
+        if (res.data.content === lastContentRef.current) return
+        lastContentRef.current = res.data.content
         const parsed = parseTodosJson(res.data.content)
         if (!parsed) {
           setData(null)

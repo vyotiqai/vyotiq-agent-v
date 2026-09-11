@@ -62,6 +62,7 @@ import {
 } from '@main/storage/retention'
 import { workspacesRoot, workspaceIdFromPath } from '@main/storage/paths'
 import { DEFAULT_STORAGE_SETTINGS } from '@shared/ipc'
+import { logger } from '@shared/logger'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const HOUR_MS = 60 * 60 * 1000
@@ -387,6 +388,36 @@ describe('collectStorageReport (rollup math + orphan flags)', () => {
     expect(ws?.tracked).toBe(true)
     expect(ws?.reapable).toBe(false)
   })
+
+  it('flags derived index-only dirs reapable below the grace window', async () => {
+    ackedSettings({ orphanGraceDays: 30 })
+    // Instance-worktree index storage: no sessions/, no meta.json, only the
+    // derived index caches. Last write today (0 idle days).
+    const derived = join(workspacesRoot(), 'wid-derived', 'codeindex')
+    mkdirSync(derived, { recursive: true })
+    writeWithAge(join(derived, 'index.sqlite'), 1024, 0)
+
+    const report = await collectStorageReport()
+    const ws = report.workspaces.find((w) => w.workspaceId === 'wid-derived')
+    expect(ws?.derivedOnly).toBe(true)
+    expect(ws?.reapable).toBe(true)
+
+    const preview = await previewStorageCleanup()
+    expect(preview.orphanDirs.map((w) => w.workspaceId)).toContain('wid-derived')
+    const result = await runStorageCleanup(preview.confirm.token)
+    expect(result.totalReclaimedBytes).toBeGreaterThanOrEqual(1024)
+    expect(existsSync(join(workspacesRoot(), 'wid-derived'))).toBe(false)
+  })
+
+  it('keeps a fresh untracked dir with sessions out of the reapable set', async () => {
+    ackedSettings({ orphanGraceDays: 30 })
+    makeStorageId('wid-user', ['run-1'])
+    writeWithAge(join(workspacesRoot(), 'wid-user', 'sessions', 'run-1', 'messages.jsonl'), 200, 0)
+    const report = await collectStorageReport()
+    const ws = report.workspaces.find((w) => w.workspaceId === 'wid-user')
+    expect(ws?.derivedOnly).toBe(false)
+    expect(ws?.reapable).toBe(false)
+  })
 })
 
 describe('confirm-gated cleanup flow', () => {
@@ -449,6 +480,46 @@ describe('size-cap LRU', () => {
     expect(sizeCapCat?.items ?? 0).toBe(0)
     // The live checkpoint (20d, inside backstop, under keep-20) survives.
     expect(existsSync(join(runDir, 'checkpoints', 'cp-live'))).toBe(true)
+  })
+
+  it('skips checkpoint eviction when reclaimable checkpoints cannot satisfy the excess', async () => {
+    // ~1 KB cap, ~50 KB of transcripts, only ~20 KB of checkpoints: the
+    // overage is dominated by a surface the cap cannot evict, so evicting
+    // undo history would destroy data without ever reaching the cap.
+    ackedSettings({ sizeCapGb: 0.000001 })
+    makeStorageId('wid-a')
+    const runDir = makeSession('wid-a', 'run-1', { ageDays: 20, transcriptBytes: 50_000 })
+    makeCheckpoint(runDir, 'cp-old', { bytes: 10_000, ageDays: 5 })
+    makeCheckpoint(runDir, 'cp-new', { bytes: 10_000, ageDays: 3 })
+    // Keep the session itself inside the 30-day backstop so only the
+    // size-cap pass can act on the checkpoints.
+    age(runDir, 20)
+    const infoSpy = vi.spyOn(logger, 'info')
+    const preview = await previewStorageCleanup()
+    await runStorageCleanup(preview.confirm.token)
+    expect(infoSpy).toHaveBeenCalledWith(
+      'Size-cap eviction skipped: reclaimable checkpoints cannot satisfy excess',
+      expect.objectContaining({ scope: 'storage', code: 'SIZE_CAP_EVICTED' })
+    )
+    expect(existsSync(join(runDir, 'checkpoints', 'cp-old'))).toBe(true)
+    expect(existsSync(join(runDir, 'checkpoints', 'cp-new'))).toBe(true)
+  })
+
+  it('evicts oldest checkpoints when they can satisfy the excess', async () => {
+    // ~11 KB cap, ~20 KB of checkpoints: the oldest checkpoint alone can
+    // bring the managed set under the cap, so the LRU backstop fires.
+    ackedSettings({ sizeCapGb: 0.00001 })
+    makeStorageId('wid-a')
+    const runDir = makeSession('wid-a', 'run-1', { ageDays: 20, transcriptBytes: 10 })
+    makeCheckpoint(runDir, 'cp-old', { bytes: 10_000, ageDays: 5 })
+    makeCheckpoint(runDir, 'cp-new', { bytes: 10_000, ageDays: 3 })
+    age(runDir, 20)
+    const preview = await previewStorageCleanup()
+    const result = await runStorageCleanup(preview.confirm.token)
+    const sizeCapCat = result.categories.find((c) => c.id === 'size-cap')
+    expect(sizeCapCat?.items).toBeGreaterThanOrEqual(1)
+    expect(existsSync(join(runDir, 'checkpoints', 'cp-old'))).toBe(false)
+    expect(existsSync(join(runDir, 'checkpoints', 'cp-new'))).toBe(true)
   })
 })
 

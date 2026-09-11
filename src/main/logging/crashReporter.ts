@@ -1,6 +1,7 @@
 import { mkdirSync } from 'fs'
 import { join } from 'path'
 import { app, crashReporter } from 'electron'
+import { pruneCrashpadReports } from './crashDiagnostics'
 
 let started = false
 let crashDumpsDir: string | undefined
@@ -9,6 +10,7 @@ function resolveCrashDumpsDir(): string {
   const dir = join(app.getPath('userData'), 'Crashpad')
   mkdirSync(join(dir, 'reports'), { recursive: true })
   mkdirSync(join(dir, 'attachments'), { recursive: true })
+  pruneCrashpadReports(dir)
   try {
     app.setPath('crashDumps', dir)
   } catch {

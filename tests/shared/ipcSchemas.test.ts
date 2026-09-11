@@ -57,7 +57,8 @@ import {
   StorageCleanupPreviewResultSchema,
   StorageCleanupRunResultSchema,
   StorageCleanupRunRequestSchema,
-  StorageSurfaceAckRequestSchema
+  StorageSurfaceAckRequestSchema,
+  SETTINGS_FORMAT_VERSION
 } from '@shared/ipc'
 import { IPC } from '@shared/channels'
 import { PROVIDER_DEFAULTS, seedModelsFor } from '@shared/providers'
@@ -796,7 +797,9 @@ describe('ipc schemas', () => {
     expect(parsed.uiDensity).toBe('default')
     expect(parsed.telemetryEnabled).toBe(false)
     expect(parsed.autoCompactThresholdRatio).toBe(0.55)
-    expect(parsed.settingsVersion).toBe(3)
+    expect(parsed.settingsVersion).toBe(SETTINGS_FORMAT_VERSION)
+    // Pin the migrated format version so an accidental bump must update this test.
+    expect(SETTINGS_FORMAT_VERSION).toBe(4)
     expect(parsed.thinkingEffort).toBe(DEFAULT_THINKING_EFFORT)
     expect(parsed.thinkingEffort).toBe('low')
     expect(parsed.autoModeSwitch).toBe(false)
@@ -810,7 +813,7 @@ describe('ipc schemas', () => {
     })
     expect(legacy.telemetryEnabled).toBe(false)
     expect(legacy.autoCompactThresholdRatio).toBe(0.55)
-    expect(legacy.settingsVersion).toBe(3)
+    expect(legacy.settingsVersion).toBe(SETTINGS_FORMAT_VERSION)
     expect(legacy.thinkingEffort).toBe('low')
     expect(legacy.autoModeSwitch).toBe(false)
     expect(legacy.offlineWaitMode).toBe('default')
@@ -819,8 +822,6 @@ describe('ipc schemas', () => {
     expect(parsed.dictation.engine).toBe('openai')
     expect(legacy.dictation.engine).toBe('openai')
     expect(legacy.notifications).toEqual(DEFAULT_NOTIFICATION_SETTINGS)
-    expect(parsed.tabAutocomplete).toBe(true)
-    expect(legacy.tabAutocomplete).toBe(true)
     expect(parsed.toolApproval.mcpProtection).toBe(true)
     expect(legacy.toolApproval.mcpProtection).toBe(true)
     expect(SetSettingsRequestSchema.parse({ telemetryEnabled: true })).toEqual({

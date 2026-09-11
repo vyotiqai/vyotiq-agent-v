@@ -40,7 +40,6 @@ import {
 } from '@shared/domain/modelSelection'
 import { logger } from '@shared/logger'
 import { workspacePathsEqual, findByWorkspacePath } from '@shared/workspacePathMatch'
-import { workspaceIdFromPath } from '@shared/utils/workspaceId'
 import { normalizeRelPath } from '../features/chat/utils/turnFileDiffs'
 import { ToolApprovalOnboardingModal } from '../features/chat/components/ToolApprovalOnboardingModal'
 import { useOfflineSendQueue } from '@renderer/lib/hooks/useOfflineSendQueue'
@@ -248,7 +247,12 @@ function App() {
   const [marketplaceFocusSkillPath, setMarketplaceFocusSkillPath] = useState<string | null>(null)
   const [marketplaceFocusRulePath, setMarketplaceFocusRulePath] = useState<string | null>(null)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
+  // Lifted so the command palette can open the feedback dialog from any view.
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [modelsRefreshNonce, setModelsRefreshNonce] = useState(0)
+  const [homeRefreshVersion, setHomeRefreshVersion] = useState(0)
+  const [openChangesRequest, setOpenChangesRequest] = useState(0)
+  const consumeOpenChangesRequest = useCallback(() => setOpenChangesRequest(0), [])
   const chatHeadingRef = useRef<HTMLHeadingElement>(null)
   const settingsBackRef = useRef<HTMLButtonElement>(null)
 
@@ -820,52 +824,6 @@ function App() {
       )
     },
     [activeWorkspace, gateSendWithOnboarding, sendWithOfflineQueue]
-  )
-
-  // Home hero composer: a real send from the launch surface. newChatInWorkspace
-  // switches to the target workspace and ensures the draft controller
-  // (openRunTabInWorkspace → ensureController), so this send and the ChatView
-  // that mounts next share the same controller. Delivery goes through the same
-  // onboarding gate + offline queue as the dock composer, bound to (path, null).
-  const onSendInWorkspace = useCallback(
-    async (
-      path: string,
-      text: string,
-      images?: string[],
-      files?: AttachedFile[],
-      extras?: import('@shared/ipc').ComposerSendExtras
-    ): Promise<boolean> => {
-      await newChatInWorkspace(path)
-      setView('chat')
-      const focused = getFocusedPaneRef.current()
-      return gateSendWithOnboarding(
-        (sendText, sendImages, sendFiles, sendExtras) =>
-          sendWithOfflineQueue(
-            sendText,
-            sendImages,
-            sendFiles,
-            sendExtras,
-            (t, i, f, e) =>
-              getRunControllerRef.current(null, path)?.send(t, i, f, e) ?? false,
-            { runId: null, paneId: focused?.paneId, workspacePath: path }
-          ),
-        text,
-        images,
-        files,
-        extras,
-        { workspacePath: path, runId: null }
-      )
-    },
-    [newChatInWorkspace, gateSendWithOnboarding, sendWithOfflineQueue]
-  )
-
-  // Home composer drafts key to (workspace, null) — the same hot-store key a
-  // fresh chat uses, so a draft typed on Home is waiting in the chat composer.
-  const onHomeDraftChange = useCallback(
-    (path: string, draft: string): void => {
-      setComposerDraftForPane(path, null, draft)
-    },
-    [setComposerDraftForPane]
   )
 
   const onChatEditAndResend = useCallback(
@@ -1917,14 +1875,15 @@ function App() {
 
   const onCloseWorkspace = async (path: string): Promise<void> => {
     // Storage retention (audit H5): offer storage-dir deletion with the measured
-    // size, confirmed here BEFORE the remove IPC ΓÇö main never prompts.
+    // size, confirmed here BEFORE the remove IPC — main never prompts.
     let deleteStorage = false
     if (settings.storage?.pruneOnWorkspaceRemoval && window.vyotiq?.storageReport) {
       try {
         const report = await window.vyotiq.storageReport()
-        const workspaceId = workspaceIdFromPath(path)
+        // Match by path — StorageReportWorkspace.path is the tracked source
+        // path; avoids importing node-crypto-based workspaceId in renderer.
         const entry = report.ok
-          ? report.data.workspaces.find((w) => w.workspaceId === workspaceId)
+          ? report.data.workspaces.find((w) => w.path != null && workspacePathsEqual(w.path, path))
           : undefined
         if (entry && entry.bytes > 0) {
           deleteStorage = await confirm(
@@ -1954,6 +1913,38 @@ function App() {
       pushToast(`Chat exported to ${res.data.path}`)
     }
   }
+
+  const onStopRunInWorkspace = useCallback(
+    async (path: string, runId: string): Promise<void> => {
+      const controller = getRunController(runId, path)
+      if (controller) {
+        await controller.stop()
+      } else {
+        const result = await window.vyotiq.chatCancel(runId)
+        if (!result.ok) {
+          pushToast(result.error, 'error')
+          return
+        }
+      }
+      await refreshWorkspaceRuns(path)
+      await refreshActiveRuns()
+      setHomeRefreshVersion((version) => version + 1)
+    },
+    [getRunController, refreshActiveRuns, refreshWorkspaceRuns]
+  )
+
+  const onReviewChangesInWorkspace = useCallback(
+    async (path: string, runId?: string): Promise<void> => {
+      if (runId) {
+        await onSelectRunInWorkspace(path, runId)
+      } else {
+        await switchWorkspace(path)
+        setView('chat')
+      }
+      setOpenChangesRequest((request) => request + 1)
+    },
+    [onSelectRunInWorkspace, switchWorkspace]
+  )
 
   const chatError = chat.error
 
@@ -2064,6 +2055,11 @@ function App() {
       onOpenSettings={() => {
         setView('settings')
       }}
+      onOpenFeedback={() => {
+        setSettingsSection('general')
+        setView('settings')
+        setFeedbackOpen(true)
+      }}
       onOpenNotificationSettings={() => {
         setSettingsSection('general')
         setView('settings')
@@ -2094,6 +2090,8 @@ function App() {
             backRef={settingsBackRef}
             section={settingsSection}
             onSectionChange={setSettingsSection}
+            feedbackOpen={feedbackOpen}
+            onFeedbackOpenChange={setFeedbackOpen}
             onClose={() => setView('chat')}
             onUpdate={update}
             onReloadSettings={refresh}
@@ -2159,7 +2157,6 @@ function App() {
           <Suspense fallback={<ViewSuspenseFallback />}>
             <HomePage
               openWorkspaces={openWorkspaces}
-              activeWorkspacePath={activeWorkspace}
               runsByWorkspacePath={runsByWorkspacePath}
               activeRuns={shellWorkspaceProps.activeRuns}
               workspaceHasBackgroundRun={shellWorkspaceProps.workspaceHasBackgroundRun}
@@ -2167,41 +2164,17 @@ function App() {
               onSelectRunInWorkspace={shellWorkspaceProps.onSelectRunInWorkspace}
               onSwitchWorkspace={shellWorkspaceProps.onSwitchWorkspace}
               onAddWorkspace={shellWorkspaceProps.onAddWorkspace}
-              onSendInWorkspace={onSendInWorkspace}
-              onDraftChangeInWorkspace={onHomeDraftChange}
               onRenameRunInWorkspace={shellWorkspaceProps.onRenameRunInWorkspace}
               onDeleteRunInWorkspace={shellWorkspaceProps.onDeleteRunInWorkspace}
               onExportRunInWorkspace={shellWorkspaceProps.onExportRunInWorkspace}
+              onStopRunInWorkspace={onStopRunInWorkspace}
+              onReviewChangesInWorkspace={(path, runId) => void onReviewChangesInWorkspace(path, runId)}
+              onRefreshWorkspaceRuns={(path) => refreshWorkspaceRuns(path)}
+              refreshVersion={homeRefreshVersion}
               isRunOpenInPane={shellWorkspaceProps.isRunOpenInPane}
               isRunFocusedInPane={shellWorkspaceProps.isRunFocusedInPane}
               pinnedRunKeys={settings.pinnedRuns}
               onTogglePinnedRun={onTogglePinnedRun}
-              provider={effectiveChatSettings.provider}
-              model={effectiveChatSettings.model}
-              ollamaBaseUrl={effectiveChatSettings.ollamaBaseUrl}
-              customOpenAiBaseUrl={effectiveChatSettings.customOpenAiBaseUrl}
-              modelsRefreshKey={modelsRefreshKey}
-              secrets={secrets}
-              onProviderModel={onProviderModel}
-              favoriteModels={settings.favoriteModels}
-              recentModels={settings.recentModels}
-              serviceTier={resolveServiceTier(
-                settings,
-                effectiveChatSettings.provider,
-                effectiveChatSettings.model
-              )}
-              onToggleFavorite={onToggleFavorite}
-              onServiceTierChange={onServiceTierChange}
-              chatSettings={effectiveChatSettings}
-              onChatSettingsChange={onChatSettingsChange}
-              agentMode={agentSessionContext?.ui.agentMode ?? 'agent'}
-              onAgentModeChange={(mode) =>
-                setAgentMode(mode, {
-                  workspacePath: focusedWorkspacePath ?? undefined,
-                  runId: focusedRunId
-                })
-              }
-              slashHandlers={slashHandlersValue}
             />
           </Suspense>
         </ErrorBoundary>
@@ -2231,7 +2204,6 @@ function App() {
             operationalError={operationalError}
             hasWorkspace={Boolean(focusedWorkspacePath ?? activeWorkspace)}
             workspacePath={focusedWorkspacePath ?? activeWorkspace}
-            tabAutocompleteEnabled={settings.tabAutocomplete !== false}
             provider={focusedChatSettings.provider}
             model={focusedChatSettings.model}
             ollamaBaseUrl={effectiveChatSettings.ollamaBaseUrl}
@@ -2325,6 +2297,8 @@ function App() {
               setOpenInstanceForParent(focusedParentRunId, id)
             }
             getInstanceController={getRunController}
+            openChangesRequest={openChangesRequest}
+            onOpenChangesRequestHandled={consumeOpenChangesRequest}
           />
         </ErrorBoundary>
       )}

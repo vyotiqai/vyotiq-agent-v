@@ -7,7 +7,9 @@ import {
   sparsegrepRoot,
   setWorkspaceIndexStorageRootOverrideForTests,
   legacyCodeindexRoot,
-  legacySparsegrepRoot
+  legacySparsegrepRoot,
+  removeWorkspaceIndexStorage,
+  workspaceIndexStorageDir
 } from '@main/agent/indexStoragePaths'
 import { CodeIndexStore, closeCodeIndex, syncCodeIndex, createLocalHashEmbedder } from '@main/agent/codeindex'
 import { SparseGrepStore, closeSparseGrep, syncSparseGrep } from '@main/agent/sparsegrep'
@@ -73,5 +75,37 @@ describe('index storage outside project tree', () => {
     expect(existsSync(legacyCode)).toBe(false)
     expect(existsSync(legacySparse)).toBe(false)
     expect(existsSync(join(workspace, '.vyotiq', 'memory', 'index.md'))).toBe(true)
+  })
+
+  it('removeWorkspaceIndexStorage deletes the derived indexes and nothing else', async () => {
+    workspace = mkdtempSync(join(tmpdir(), 'vyotiq-wt-idx-'))
+    storageRoot = mkdtempSync(join(tmpdir(), 'vyotiq-ud-wt-'))
+    setWorkspaceIndexStorageRootOverrideForTests(storageRoot)
+
+    const codeStore = CodeIndexStore.open(workspace, 8)
+    codeStore.close()
+    const sparse = SparseGrepStore.open(workspace)
+    sparse.close()
+    expect(existsSync(codeindexRoot(workspace))).toBe(true)
+    expect(existsSync(sparsegrepRoot(workspace))).toBe(true)
+
+    // Sibling user-ish content under the same id dir must never be touched.
+    const sessions = join(workspaceIndexStorageDir(workspace), 'sessions')
+    mkdirSync(sessions, { recursive: true })
+    writeFileSync(join(sessions, 'keep.txt'), 'keep', 'utf8')
+
+    await removeWorkspaceIndexStorage(workspace)
+
+    expect(existsSync(codeindexRoot(workspace))).toBe(false)
+    expect(existsSync(sparsegrepRoot(workspace))).toBe(false)
+    expect(existsSync(join(sessions, 'keep.txt'))).toBe(true)
+  })
+
+  it('removeWorkspaceIndexStorage is an idempotent no-op for a missing dir', async () => {
+    workspace = mkdtempSync(join(tmpdir(), 'vyotiq-wt-idx-missing-'))
+    storageRoot = mkdtempSync(join(tmpdir(), 'vyotiq-ud-wt-missing-'))
+    setWorkspaceIndexStorageRootOverrideForTests(storageRoot)
+    await expect(removeWorkspaceIndexStorage(workspace)).resolves.toBeUndefined()
+    await expect(removeWorkspaceIndexStorage(workspace)).resolves.toBeUndefined()
   })
 })

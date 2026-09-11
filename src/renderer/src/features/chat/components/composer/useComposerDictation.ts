@@ -8,7 +8,7 @@ import {
   type DictationWaveformStyle,
   type SecretProvider
 } from '@shared/ipc'
-import { DICTATION_LOCAL_CATALOG, isQwen3AsrModelId, isQwen3AsrOnnxModelId } from '@shared/dictation'
+import { DICTATION_LOCAL_CATALOG } from '@shared/dictation'
 import { blobToBase64, blobToPcm16kBase64 } from '@renderer/lib/audio/pcm16k'
 import { isEditableShortcutTarget, matchShortcut } from '@renderer/lib/shortcuts'
 import { prefersReducedMotion } from '@renderer/lib/utils/motion'
@@ -22,7 +22,7 @@ export type DictationPhase = 'idle' | 'checking' | 'recording' | 'transcribing'
 /** Auto-stop headroom so a final timeslice rarely exceeds the engine's byte limit. */
 function sizeStopBytes(engine: DictationEngine): number {
   const cap =
-    engine === 'local' || engine === 'qwen3-asr-onnx' ? MAX_LOCAL_AUDIO_BYTES : MAX_DICTATION_BYTES
+    engine === 'local' ? MAX_LOCAL_AUDIO_BYTES : MAX_DICTATION_BYTES
   return cap - 256 * 1024
 }
 
@@ -65,11 +65,6 @@ export function formatDictationEngineHint(
       const entry = DICTATION_LOCAL_CATALOG.find((m) => m.id === localModelId)
       return entry ? `Local · ${entry.label}` : 'Local'
     }
-    case 'qwen3-asr':
-    case 'qwen3-asr-onnx': {
-      const entry = DICTATION_LOCAL_CATALOG.find((m) => m.id === localModelId)
-      return entry ? `Qwen3-ASR · ${entry.label}` : 'Qwen3-ASR'
-    }
     default: {
       const _exhaustive: never = engine
       return _exhaustive
@@ -88,8 +83,6 @@ function classifyErrorAction(
     case 'openrouter':
       return null
     case 'local':
-    case 'qwen3-asr':
-    case 'qwen3-asr-onnx':
       return 'voice'
     default: {
       const _exhaustive: never = engine
@@ -171,26 +164,6 @@ async function preflightDictation(
         return {
           ok: false,
           message: 'Install a local Whisper model',
-          settingsSection: 'voice'
-        }
-      }
-      return { ok: true, ctx }
-    }
-    case 'qwen3-asr': {
-      if (!isQwen3AsrModelId(ctx.localModelId)) {
-        return {
-          ok: false,
-          message: 'Select a Qwen3-ASR model in Settings → Voice',
-          settingsSection: 'voice'
-        }
-      }
-      return { ok: true, ctx }
-    }
-    case 'qwen3-asr-onnx': {
-      if (!isQwen3AsrOnnxModelId(ctx.localModelId)) {
-        return {
-          ok: false,
-          message: 'Install a Qwen3-ASR (on-device) model in Settings → Voice',
           settingsSection: 'voice'
         }
       }
@@ -455,9 +428,7 @@ export function useComposerDictation(opts: {
       return
     }
     const byteCap =
-      engineRef.current === 'local' || engineRef.current === 'qwen3-asr-onnx'
-        ? MAX_LOCAL_AUDIO_BYTES
-        : MAX_DICTATION_BYTES
+      engineRef.current === 'local' ? MAX_LOCAL_AUDIO_BYTES : MAX_DICTATION_BYTES
     if (blob.size > byteCap) {
       publishError('Recording is too large to transcribe (limit reached)')
       goIdle()
@@ -472,7 +443,7 @@ export function useComposerDictation(opts: {
       const mime = blob.type || mimeRef.current.split(';')[0] || 'audio/webm'
       const engine = engineRef.current
       let pcm16k: string | undefined
-      if (engine === 'local' || engine === 'qwen3-asr-onnx') {
+      if (engine === 'local') {
         pcm16k = await blobToPcm16kBase64(blob)
       }
       if (sessionGenRef.current !== gen) return
@@ -586,9 +557,7 @@ export function useComposerDictation(opts: {
         if (phaseRef.current === 'recording' && sessionGenRef.current === gen) {
           void finishAndTranscribe()
         }
-        }, ready.ctx.engine === 'local' || ready.ctx.engine === 'qwen3-asr-onnx'
-          ? MAX_LOCAL_DICTATION_MS
-          : MAX_DICTATION_MS)
+        }, ready.ctx.engine === 'local' ? MAX_LOCAL_DICTATION_MS : MAX_DICTATION_MS)
     } catch (err) {
       if (sessionGenRef.current !== gen) return
       stopTracks()

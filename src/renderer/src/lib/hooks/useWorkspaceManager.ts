@@ -582,6 +582,8 @@ export function useWorkspaceManager(options?: {
 
   const controllersRef = useRef(new Map<string, ChatStreamController>())
   const autoResumeAttemptedRef = useRef(new Set<string>())
+  const autoResumeQueueRef = useRef<Array<() => Promise<void>>>([])
+  const autoResumeDrainingRef = useRef(false)
   const paneLayoutRef = useRef<ChatPaneLayout | null>(null)
   const paneLayoutHydratedRef = useRef(false)
   const paneCapacityContextRef = useRef<PaneCapacityContext>({
@@ -1196,6 +1198,29 @@ export function useWorkspaceManager(options?: {
 
   refreshRunsRef.current = refreshRuns
 
+  /**
+   * Auto-resume queue: one interrupted run at a time. A crash can leave many
+   * runs marked resumable; resuming them concurrently stampedes the provider,
+   * the indexer, and the machine.
+   */
+  const drainAutoResumeQueue = useCallback(async (): Promise<void> => {
+    if (autoResumeDrainingRef.current) return
+    autoResumeDrainingRef.current = true
+    try {
+      while (autoResumeQueueRef.current.length > 0) {
+        const task = autoResumeQueueRef.current.shift()!
+        try {
+          await task()
+        } catch {
+          // resumeInterrupted surfaces its own errors/toasts.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 750))
+      }
+    } finally {
+      autoResumeDrainingRef.current = false
+    }
+  }, [])
+
   const loadRunTranscript = useCallback(
     async (
       workspacePath: string,
@@ -1284,12 +1309,18 @@ export function useWorkspaceManager(options?: {
       } finally {
         if (stillCurrent()) ctrl.setTranscriptLoading(false)
         if (stillCurrent() && autoResumeAfterLoad) {
-          pushToast('Resuming interrupted run…')
-          void ctrl.resumeInterrupted()
+          // Serialize resumes: a crash can leave dozens of interrupted runs and
+          // resuming them all at once stampedes the provider and the machine.
+          autoResumeQueueRef.current.push(async () => {
+            if (ctrl.disposed) return
+            pushToast('Resuming interrupted run…')
+            await ctrl.resumeInterrupted()
+          })
+          void drainAutoResumeQueue()
         }
       }
     },
-    [bump, ensureController]
+    [bump, drainAutoResumeQueue, ensureController]
   )
 
   const loadRunIntoTab = useCallback(

@@ -75,7 +75,7 @@ import {
   type CitationCatalogEntry
 } from '@shared/utils/inlineCitations'
 import { toolHasBody, toolDefaultExpanded, toolUsesPeekCollapse } from '../toolUi'
-import { collectTurnCitationCatalogs } from '../utils/citationCatalog'
+import { collectTurnCitationCatalogs, type CitationCatalogCacheEntry } from '../utils/citationCatalog'
 import { useRunSession } from '../RunSessionContext'
 
 /** Stable id on the first work row of a turn (region landmark / tests). */
@@ -98,12 +98,43 @@ const EMPTY_CITATION_CATALOG: CitationCatalogEntry[] = []
 /** Line height for text-sm + leading-relaxed (1.625 × 13px). */
 const LINE_PX = 21
 
+/**
+ * Cached appearance scale.
+ *
+ * `estimateTranscriptRowSize` runs for every unmeasured row on every virtualizer
+ * re-measure, and a live run re-measures on every streamed frame. Reading
+ * `getComputedStyle(document.documentElement)` once per row forced a style
+ * recalculation hundreds of times per frame, which alone pinned the main thread.
+ * The scale only moves when the user changes font/density, and mounted rows are
+ * corrected by `measureElement` anyway, so a short TTL is imperceptible.
+ */
+const APPEARANCE_SCALE_TTL_MS = 1000
+let cachedAppearanceScale = 1
+let cachedAppearanceScaleAt = 0
+
 function appearanceMeasureScale(): number {
   if (typeof document === 'undefined') return 1
+  const now = Date.now()
+  if (cachedAppearanceScaleAt && now - cachedAppearanceScaleAt < APPEARANCE_SCALE_TTL_MS) {
+    return cachedAppearanceScale
+  }
   const style = getComputedStyle(document.documentElement)
   const font = Number.parseFloat(style.getPropertyValue('--vy-font-scale')) || 1
   const density = Number.parseFloat(style.getPropertyValue('--vy-density-scale')) || 1
-  return font * density
+  cachedAppearanceScale = font * density
+  cachedAppearanceScaleAt = now
+  return cachedAppearanceScale
+}
+
+/** Count `\n` without allocating an array of every line (was `split('\n').length`). */
+function countNewlines(text: string): number {
+  let count = 1
+  let index = text.indexOf('\n')
+  while (index !== -1) {
+    count++
+    index = text.indexOf('\n', index + 1)
+  }
+  return count
 }
 
 /**
@@ -133,7 +164,7 @@ export function estimateTranscriptRowSize(row: TranscriptRow | undefined): numbe
     }
     case 'text': {
       const content = row.item.content
-      const newlines = content.split('\n').length
+      const newlines = countNewlines(content)
       const fromChars = Math.ceil(content.length / CHARS_PER_LINE)
       const lines = Math.max(1, newlines, fromChars)
       const base = 40 * scale + lines * linePx
@@ -436,8 +467,7 @@ function TranscriptUserPrompt({
 }
 
 function footerTurnSpan(
-  rows: readonly TranscriptRow[],
-  turnIndex: number,
+  entry: TurnRowIndexEntry | undefined,
   item: AssistantItem,
   live: boolean,
   terminalStatus?: TurnOutcome | null
@@ -448,31 +478,68 @@ function footerTurnSpan(
   hasTurnSummary: boolean
   status?: TurnOutcome
 } {
-  for (const row of rows) {
-    if (row.kind === 'turn' && row.turnIndex === turnIndex) {
-      return {
-        startedAt: row.span.startedAt,
-        endedAt: row.span.endedAt,
-        active: row.span.active,
-        hasTurnSummary: true,
-        status: row.span.status
-      }
-    }
-  }
-  let startedAt: number | null = null
-  for (const row of rows) {
-    if (row.kind === 'user' && row.turnIndex === turnIndex) {
-      startedAt = timestampMs(row.item.at)
-      break
+  if (entry?.turnSpan) {
+    return {
+      startedAt: entry.turnSpan.startedAt,
+      endedAt: entry.turnSpan.endedAt,
+      active: entry.turnSpan.active,
+      hasTurnSummary: true,
+      status: entry.turnSpan.status
     }
   }
   return {
-    startedAt,
+    startedAt: entry?.userStartedAt ?? null,
     endedAt: timestampMs(item.at),
     active: live && item.streaming === true,
     hasTurnSummary: false,
     ...(terminalStatus ? { status: terminalStatus } : {})
   }
+}
+
+type TurnRowSpan = Extract<TranscriptRow, { kind: 'turn' }>['span']
+
+type TurnRowIndexEntry = {
+  hasClosingAnswer: boolean
+  hasVisibleToolWork: boolean
+  turnSpan: TurnRowSpan | null
+  userStartedAt: number | null
+}
+
+/**
+ * Per-turn facts the row renderer needs, indexed once per transcript build.
+ *
+ * The renderer used to answer them with `rows.some(...)`/`rows.find(...)`
+ * inside `renderRow`, so a transcript of R rows cost O(R) per rendered row —
+ * O(R²) per frame while streaming. One pass here keeps it O(R) per frame.
+ */
+function buildTurnRowIndex(rows: readonly TranscriptRow[]): Map<number, TurnRowIndexEntry> {
+  const byTurn = new Map<number, TurnRowIndexEntry>()
+  const entryFor = (turnIndex: number): TurnRowIndexEntry => {
+    let entry = byTurn.get(turnIndex)
+    if (!entry) {
+      entry = {
+        hasClosingAnswer: false,
+        hasVisibleToolWork: false,
+        turnSpan: null,
+        userStartedAt: null
+      }
+      byTurn.set(turnIndex, entry)
+    }
+    return entry
+  }
+  for (const row of rows) {
+    const entry = entryFor(row.turnIndex)
+    if (row.kind === 'activity' || row.kind === 'card') {
+      entry.hasVisibleToolWork = true
+    } else if (row.kind === 'text') {
+      if (row.final && Boolean(row.item.content?.trim())) entry.hasClosingAnswer = true
+    } else if (row.kind === 'turn') {
+      if (entry.turnSpan == null) entry.turnSpan = row.span
+    } else if (row.kind === 'user') {
+      if (entry.userStartedAt == null) entry.userStartedAt = timestampMs(row.item.at)
+    }
+  }
+  return byTurn
 }
 
 function AssistantTextRow({
@@ -951,7 +1018,16 @@ export function MessageList({
   useLayoutEffect(() => {
     prevRowsRef.current = allRows
   }, [allRows])
-  const citationCatalogs = useMemo(() => collectTurnCitationCatalogs(allRows), [allRows])
+  const citationCacheRef = useRef<Map<number, CitationCatalogCacheEntry>>(new Map())
+  const citationResult = useMemo(
+    () => collectTurnCitationCatalogs(allRows, citationCacheRef.current),
+    [allRows]
+  )
+  const citationCatalogs = citationResult.catalogs
+  const turnRowIndex = useMemo(() => buildTurnRowIndex(allRows), [allRows])
+  useEffect(() => {
+    citationCacheRef.current = citationResult.cache
+  }, [citationResult])
   const resolvedTurnUsage = useResolvedTurnUsage(metaStore, turnUsage)
   const activeLiveTurnIndex = useMemo(() => {
     if (!(pendingRun || running)) return null
@@ -1400,7 +1476,7 @@ export function MessageList({
         const suppressPhase =
           turnRow.span.active === true &&
           !collapsedTurnSet.has(turnRow.turnIndex) &&
-          turnHasVisibleToolWork(allRows, turnRow.turnIndex) &&
+          (turnRowIndex.get(turnRow.turnIndex)?.hasVisibleToolWork ?? false) &&
           !compacting
         if (suppressPhase) return ''
         return `Assistant: ${formatRunActivityLabel(turnRow.span.activity)}`
@@ -1430,7 +1506,7 @@ export function MessageList({
       return `Assistant: ${label}`
     }
     return ''
-  }, [allRows, activeLiveTurnIndex, compacting, collapsedTurnSet, turnStatus])
+  }, [allRows, activeLiveTurnIndex, compacting, collapsedTurnSet, turnRowIndex, turnStatus])
 
   const liveReceiptAnnouncement = useMemo(() => {
     if (activeLiveTurnIndex == null) return ''
@@ -1495,14 +1571,26 @@ export function MessageList({
     return []
   }, [useHybridVirtualize, flowStartIndex, displayRows])
 
+  // Keep the virtualizer callbacks referentially stable.
+  //
+  // `virtualizedRows` is a fresh `slice()` on every frame while streaming, so
+  // using it as a `useCallback` dep gave `getItemKey`/`estimateSize` a new
+  // identity ~60×/s. TanStack compares `getItemKey` by identity in
+  // `getMeasurementOptions` and resets `pendingMin = null` when it changes,
+  // which forced a full re-measure — `estimateSize` for *every* row in the
+  // transcript — on every single frame. Reading the current rows through a ref
+  // keeps measurements stable unless the row count or a real option changes.
+  const virtualizedRowsRef = useRef(virtualizedRows)
+  virtualizedRowsRef.current = virtualizedRows
+
   const getItemKey = useCallback(
-    (index: number) => virtualizedRows[index]?.id ?? index,
-    [virtualizedRows]
+    (index: number) => virtualizedRowsRef.current[index]?.id ?? index,
+    []
   )
 
   const estimateSize = useCallback(
-    (index: number) => estimateTranscriptRowSize(virtualizedRows[index]),
-    [virtualizedRows]
+    (index: number) => estimateTranscriptRowSize(virtualizedRowsRef.current[index]),
+    []
   )
 
   const measureElementHeight = useCallback((element: Element) => {
@@ -1547,6 +1635,27 @@ export function MessageList({
     flowAnchorRef.current = captureScrollAnchor(el, flowStartIndexRef.current, virtualIndices)
   }, [])
 
+  // Leading-edge coalescing: the first scroll event of a frame captures the
+  // anchor synchronously (behavior unchanged), the rest of the frame's events
+  // are skipped — captureScrollAnchor walks DOM rects and must not run per event.
+  const recordAnchorFrameRef = useRef<number | null>(null)
+  const recordScrollAnchorCoalesced = useCallback((): void => {
+    if (recordAnchorFrameRef.current != null) return
+    recordScrollAnchor()
+    recordAnchorFrameRef.current = window.requestAnimationFrame(() => {
+      recordAnchorFrameRef.current = null
+    })
+  }, [recordScrollAnchor])
+
+  useEffect(() => {
+    return () => {
+      if (recordAnchorFrameRef.current != null) {
+        window.cancelAnimationFrame(recordAnchorFrameRef.current)
+        recordAnchorFrameRef.current = null
+      }
+    }
+  }, [])
+
   const handleScroll = useCallback(
     (scrollTop: number) => {
       const el = containerRef.current
@@ -1571,14 +1680,14 @@ export function MessageList({
         pinnedToBottomRef.current = pinned
         restorePendingRef.current = false
         setIsUnpinned((prev) => (prev === !pinned ? prev : !pinned))
-        recordScrollAnchor()
+        recordScrollAnchorCoalesced()
         scrollBeforeLayoutChangeRef.current = el.scrollTop
       }
       if (!programmaticScrollRef.current) {
         onScrollTopChange?.(scrollTop)
       }
     },
-    [onScrollTopChange, recordScrollAnchor]
+    [onScrollTopChange, recordScrollAnchorCoalesced]
   )
 
   const remasureMountedRows = useCallback(() => {
@@ -1590,6 +1699,25 @@ export function MessageList({
       virtualizer.measureElement(node)
     }
   }, [])
+
+  // Per-frame revision only needs to re-measure rows whose object identity
+  // changed — stable historical rows keep stable heights (ResizeObserver covers
+  // the rest), so skip the forced layout read for them.
+  const prevMeasuredRowsRef = useRef<readonly TranscriptRow[] | null>(null)
+  const remeasureChangedRows = useCallback(() => {
+    const root = containerRef.current
+    const virtualizer = rowVirtualizerRef.current
+    if (!root || !virtualizer) return
+    const prev = prevMeasuredRowsRef.current
+    const nodes = root.querySelectorAll('[data-index]')
+    for (const node of nodes) {
+      if (!(node instanceof HTMLElement)) continue
+      const index = Number(node.dataset.index)
+      if (prev && Number.isInteger(index) && virtualizedRows[index] === prev[index]) continue
+      virtualizer.measureElement(node)
+    }
+    prevMeasuredRowsRef.current = virtualizedRows
+  }, [virtualizedRows])
 
   // Never call measure() here — it clears itemSizeCache and off-screen rows fall
   // back to estimates (huge gaps between Thought/Read). Remasure mounted only.
@@ -1678,8 +1806,8 @@ export function MessageList({
 
   useLayoutEffect(() => {
     if (!shouldVirtualize) return
-    remasureMountedRows()
-  }, [rowsContentRevision, shouldVirtualize, remasureMountedRows])
+    remeasureChangedRows()
+  }, [rowsContentRevision, shouldVirtualize, remeasureChangedRows])
 
   useLayoutEffect(() => {
     if (!scrollRestored || displayRows.length === 0) return
@@ -1706,17 +1834,17 @@ export function MessageList({
   }, [scrollRestored, scrollRestoreToken, shouldVirtualize])
 
   const renderRow = (row: TranscriptRow, omitTasksBand = false): ReactNode => {
+    const turnEntry = turnRowIndex.get(row.turnIndex)
     const footerSpan =
       row.kind === 'text' && row.final
         ? footerTurnSpan(
-            allRows,
-            row.turnIndex,
+            turnEntry,
             row.item,
             activeLiveTurnIndex != null && row.turnIndex === activeLiveTurnIndex,
             row.turnIndex === latestTurnIndex ? turnStatus : null
           )
         : null
-    const closingAnswer = turnHasClosingAnswer(allRows, row.turnIndex)
+    const closingAnswer = turnEntry?.hasClosingAnswer ?? false
     const liveTurn = activeLiveTurnIndex != null && row.turnIndex === activeLiveTurnIndex
     const rowUsage =
       row.kind === 'turn' || (row.kind === 'text' && row.final)
@@ -1744,7 +1872,7 @@ export function MessageList({
         row.kind === 'turn' &&
         row.span.active === true &&
         !collapsedTurnSet.has(row.turnIndex) &&
-        turnHasVisibleToolWork(allRows, row.turnIndex) &&
+        (turnEntry?.hasVisibleToolWork ?? false) &&
         !compacting
       }
       mcpServerNames={mcpServerNames}

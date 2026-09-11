@@ -46,13 +46,15 @@ export function logProviderFailure(
     ? 'CATALOG_PROBE'
     : isAuth
       ? 'PROVIDER_AUTH'
-      : kind === 'circuit'
-        ? 'CIRCUIT_OPEN'
-        : kind === 'timeout'
-          ? 'PROVIDER_TIMEOUT'
-          : kind === 'stream' || kind === 'parse'
-            ? 'PROVIDER_STREAM'
-            : 'PROVIDER_HTTP'
+      : isBilling
+        ? 'PROVIDER_BILLING'
+        : kind === 'circuit'
+          ? 'CIRCUIT_OPEN'
+          : kind === 'timeout'
+            ? 'PROVIDER_TIMEOUT'
+            : kind === 'stream' || kind === 'parse'
+              ? 'PROVIDER_STREAM'
+              : 'PROVIDER_HTTP'
 
   const fields = {
     scope: 'provider' as const,

@@ -113,6 +113,57 @@ function toBrowserEntry(file: GitChangedFile, scope: ChangeScope): BrowserFileEn
   }
 }
 
+/**
+ * Signature of the only inputs the change collectors read.
+ *
+ * Streaming assistant text and in-flight tool-arg deltas do not change which
+ * files were edited or what their diffs are, so this deliberately ignores
+ * everything except a tool's identity, its settled status, and its payload
+ * sizes. A settled call's `argsPreview` never changes afterwards.
+ */
+function changeSourceSignature(items: readonly UiItem[]): string {
+  let signature = ''
+  for (const item of items) {
+    if (item.kind !== 'tool') continue
+    const tool = item.tool
+    signature += `${item.id}\u0001${tool.name}\u0001${tool.status}\u0001${tool.argsPreview?.length ?? 0}\u0001${tool.content?.length ?? 0}\u0002`
+  }
+  return signature
+}
+
+type ChangeData = {
+  toolAgentFiles: ReturnType<typeof collectLastTurnChangedFiles>
+  agentDiffs: ReturnType<typeof collectLastTurnFileDiffs>
+  sessionToolAgentFiles: ReturnType<typeof collectSessionChangedFiles>
+  sessionAgentDiffs: ReturnType<typeof collectSessionFileDiffs>
+}
+
+type ChangeDataCache = { current: { signature: string; data: ChangeData } | null }
+
+/**
+ * Signature-keyed cache for the four session-wide change collectors.
+ *
+ * Each one walks every tool item and JSON-parses its arguments to split diffs.
+ * `useMemo` cannot express "recompute when this signature changes" without the
+ * array-identity problem above, so the comparison is explicit here.
+ */
+function readChangeData(
+  cache: ChangeDataCache,
+  signature: string,
+  items: UiItem[]
+): ChangeData {
+  const cached = cache.current
+  if (cached && cached.signature === signature) return cached.data
+  const data: ChangeData = {
+    toolAgentFiles: collectLastTurnChangedFiles(items),
+    agentDiffs: collectLastTurnFileDiffs(items),
+    sessionToolAgentFiles: collectSessionChangedFiles(items),
+    sessionAgentDiffs: collectSessionFileDiffs(items)
+  }
+  cache.current = { signature, data }
+  return data
+}
+
 function ScopeDelta({ added, removed }: { added: number; removed: number }) {
   if (added <= 0 && removed <= 0) return null
   return (
@@ -205,19 +256,34 @@ export const ChangesPanel = memo(function ChangesPanel({
     0
   )
   const chrome = chromeProp ?? localChrome
-  const liveItems = useChatLiveItems(itemsStore, items)
-  const toolAgentFiles = useMemo(() => collectLastTurnChangedFiles(liveItems), [liveItems])
+  // Hidden mounted dock: stop the live subscription and freeze the last visible
+  // snapshot so the five session-wide diff collectors never re-run per frame.
+  const hidden = active === false
+  const liveItems = useChatLiveItems(itemsStore, items, !hidden)
+  const visibleItemsRef = useRef<UiItem[]>(liveItems)
+  useEffect(() => {
+    if (!hidden) visibleItemsRef.current = liveItems
+  }, [hidden, liveItems])
+  const sourceItems = hidden ? visibleItemsRef.current : liveItems
+  // `sourceItems` is a fresh array on every streamed frame, so keying the
+  // collectors on it re-ran all of them ~60×/s — each walking every tool item
+  // and JSON-parsing its arguments to split diffs. Tool arguments only matter
+  // once a call settles, so key on tool identity + status + payload size and
+  // let the collectors hold their results across streaming frames.
+  const changeCacheRef = useRef<{ signature: string; data: ChangeData } | null>(null)
+  const sourceSignature = useMemo(() => changeSourceSignature(sourceItems), [sourceItems])
+  const sourceItemsRef = useRef(sourceItems)
+  sourceItemsRef.current = sourceItems
+  const changeData = readChangeData(changeCacheRef, sourceSignature, sourceItemsRef.current)
+  const { toolAgentFiles, agentDiffs, sessionToolAgentFiles, sessionAgentDiffs } = changeData
   const agentFiles = useMemo(
     () => mergeCheckpointChangedFiles(toolAgentFiles, writeCheckpointFiles),
     [toolAgentFiles, writeCheckpointFiles]
   )
-  const agentDiffs = useMemo(() => collectLastTurnFileDiffs(liveItems), [liveItems])
-  const sessionToolAgentFiles = useMemo(() => collectSessionChangedFiles(liveItems), [liveItems])
   const sessionAgentFiles = useMemo(
     () => mergeCheckpointChangedFiles(sessionToolAgentFiles, writeCheckpointFiles),
     [sessionToolAgentFiles, writeCheckpointFiles]
   )
-  const sessionAgentDiffs = useMemo(() => collectSessionFileDiffs(liveItems), [liveItems])
   const agentCheckpointOnly = useMemo(
     () => checkpointOnlyChangedFiles(toolAgentFiles, writeCheckpointFiles),
     [toolAgentFiles, writeCheckpointFiles]
@@ -245,6 +311,7 @@ export const ChangesPanel = memo(function ChangesPanel({
   const [composing, setComposing] = useState(false)
   const [message, setMessage] = useState('')
   const [messageGenerating, setMessageGenerating] = useState(false)
+  const [generationNotice, setGenerationNotice] = useState<string | null>(null)
   const [pushOpen, setPushOpen] = useState(false)
   const [branchOpen, setBranchOpen] = useState(false)
   const [branches, setBranches] = useState<GitBranchEntry[]>([])
@@ -624,6 +691,58 @@ export const ChangesPanel = memo(function ChangesPanel({
     })
   }, [chrome, message, commitMode, onGitMutated, onViewPr, refreshCommits])
 
+  /**
+   * Collapsed-toolbar path: no composer is open, so the message state is empty
+   * and chrome.createPr would no-op. Generate the message first (same flow as
+   * openCompose), then run the Commit & Create PR pipeline with it.
+   */
+  const sendCreatePrFromMenu = useCallback(() => {
+    setPushOpen(false)
+    const fallback = defaultCommitMessage(visibleGitFiles, visibleGitFiles.length)
+    const sequence = ++messageGenerationSeqRef.current
+    messageEditedRef.current = false
+    const launch = (value: string) => {
+      void chrome.createPr(value, commitMode, true).then(async (ok) => {
+        if (!ok || sequence !== messageGenerationSeqRef.current) return
+        setMessage('')
+        setMessageGenerating(false)
+        messageEditedRef.current = false
+        setComposing(false)
+        onGitMutated?.()
+        setScope('commits')
+        setSelectedCommit(null)
+        setExpanded(new Set())
+        setSelectedPath(null)
+        const list = await refreshCommits()
+        setSelectedCommit(list[0] ?? null)
+        onViewPr?.()
+      })
+    }
+    if (!workspacePath) {
+      launch(fallback)
+      return
+    }
+    setMessageGenerating(true)
+    void window.vyotiq
+      .gitGenerateCommitMessage({ workspacePath, mode: commitMode })
+      .then((result) => {
+        if (sequence !== messageGenerationSeqRef.current) return
+        setMessageGenerating(false)
+        const generated =
+          result.ok && result.data.source === 'agent' && result.data.message
+            ? result.data.message
+            : fallback
+        setMessage(generated)
+        launch(generated)
+      })
+      .catch(() => {
+        if (sequence !== messageGenerationSeqRef.current) return
+        setMessageGenerating(false)
+        setMessage(fallback)
+        launch(fallback)
+      })
+  }, [chrome, commitMode, onGitMutated, onViewPr, refreshCommits, visibleGitFiles, workspacePath])
+
   const sendStageAll = useCallback(() => {
     void chrome.stageAll().then((ok) => {
       if (!ok) return
@@ -651,6 +770,7 @@ export const ChangesPanel = memo(function ChangesPanel({
     setComposing(true)
     setPushOpen(false)
     setMessageGenerating(false)
+    setGenerationNotice(null)
 
     if (!workspacePath) return
     setMessageGenerating(true)
@@ -660,13 +780,18 @@ export const ChangesPanel = memo(function ChangesPanel({
         if (sequence !== messageGenerationSeqRef.current || messageEditedRef.current) return
         if (result.ok && result.data.source === 'agent' && result.data.message) {
           setMessage(result.data.message)
+          setGenerationNotice(null)
         } else {
           setMessage(fallback)
+          setGenerationNotice(
+            result.ok ? (result.data.reason ?? 'Generation failed') : 'Generation failed'
+          )
         }
       })
       .catch(() => {
         if (sequence !== messageGenerationSeqRef.current || messageEditedRef.current) return
         setMessage(fallback)
+        setGenerationNotice('Generation failed')
       })
       .finally(() => {
         if (sequence !== messageGenerationSeqRef.current) return
@@ -1114,6 +1239,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                 onMessageChange={onMessageChange}
                 busy={chrome.busy || Boolean(resolveBusy) || messageGenerating}
                 generating={messageGenerating}
+                generationNotice={generationNotice}
                 hasRemote={Boolean(status.hasRemote)}
                 onCommit={sendCommit}
                 onCreatePr={sendCreatePr}
@@ -1136,6 +1262,13 @@ export const ChangesPanel = memo(function ChangesPanel({
                         onClick={openCompose}
                       >
                         {commitPrimaryPushes ? 'Commit' : 'Commit & Push'}
+                      </button>
+                      <button
+                        type="button"
+                        className="flex w-full whitespace-nowrap px-2.5 py-1.5 text-left text-caption hover:bg-surface"
+                        onClick={sendCreatePrFromMenu}
+                      >
+                        Commit &amp; Create PR
                       </button>
                     </div>
                   ) : null

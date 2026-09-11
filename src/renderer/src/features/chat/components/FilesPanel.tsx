@@ -44,7 +44,6 @@ import { HexEditor } from './HexEditor'
 import { TextCodeEditor } from './TextCodeEditor'
 import { FilePreview } from './FilePreview'
 import { defaultPreviewOpen, filePreviewKind } from './filePreviewKind'
-import { type InlineCompleteRequestFn } from './tabAutocomplete'
 import { DiffPreview } from './DiffPreview'
 import { useWorkspaceLsp } from '../hooks/useWorkspaceLsp'
 import { parseUnifiedDiff } from '../toolUi/parsers/edit'
@@ -471,7 +470,6 @@ function isUnderPath(path: string, parent: string): boolean {
 export const FilesPanel = memo(function FilesPanel({
   workspacePath,
   active,
-  tabAutocompleteEnabled = true,
   gitRevision = 0,
   onGitMutated,
   onFlushReady,
@@ -483,7 +481,6 @@ export const FilesPanel = memo(function FilesPanel({
 }: {
   workspacePath: string | null
   active: boolean
-  tabAutocompleteEnabled?: boolean
   gitRevision?: number
   onGitMutated?: () => void
   onFlushReady?: (flush: (() => Promise<boolean>) | null) => void
@@ -3329,58 +3326,6 @@ export const FilesPanel = memo(function FilesPanel({
     [activeTabId, mutateTab]
   )
 
-  const workspacePathCompleteRef = useRef(workspacePath)
-  workspacePathCompleteRef.current = workspacePath
-  const inlineCompleteFileRef = useRef(
-    activeTab?.kind === 'text' ? activeTab.path : ''
-  )
-  inlineCompleteFileRef.current = activeTab?.kind === 'text' ? activeTab.path : ''
-  const inlineAbortRef = useRef<(() => void) | null>(null)
-
-  const requestInlineComplete = useMemo((): InlineCompleteRequestFn => {
-    const fn = (async (prefix: string, suffix: string): Promise<string> => {
-      const api = window.vyotiq
-      const ws = workspacePathCompleteRef.current
-      const path = inlineCompleteFileRef.current
-      if (!api?.workspaceInlineComplete || !ws || !path) return ''
-      inlineAbortRef.current?.()
-      const requestId = crypto.randomUUID()
-      let active = true
-      inlineAbortRef.current = () => {
-        if (!active) return
-        active = false
-        void api.workspaceInlineCompleteAbort?.({ requestId })
-      }
-      try {
-        const result = await api.workspaceInlineComplete({
-          workspacePath: ws,
-          path,
-          prefix,
-          suffix,
-          requestId
-        })
-        if (!active) return ''
-        if (!result.ok) return ''
-        return result.data.text
-      } catch {
-        return ''
-      } finally {
-        if (active && inlineAbortRef.current) {
-          inlineAbortRef.current = null
-        }
-      }
-    }) as InlineCompleteRequestFn
-    fn.abort = () => {
-      inlineAbortRef.current?.()
-    }
-    return fn
-  }, [])
-
-  useEffect(() => {
-    if (tabAutocompleteEnabled && workspacePath) return
-    inlineAbortRef.current?.()
-  }, [tabAutocompleteEnabled, workspacePath])
-
   const updateHexMeta = useCallback(
     (meta: {
       cursor: number
@@ -4430,11 +4375,6 @@ export const FilesPanel = memo(function FilesPanel({
                       : null
                   }
                   onLspHover={inlineLspEnabled ? inlineLsp.fetchHover : undefined}
-                  onInlineComplete={
-                    tabAutocompleteEnabled && workspacePath
-                      ? requestInlineComplete
-                      : undefined
-                  }
                   onScrollToLineHandled={() => setScrollToLine(null)}
                   onChange={(content) => {
                     const accepted = mutateTab(activeTab.id, (tab) => ({

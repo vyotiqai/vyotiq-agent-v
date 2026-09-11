@@ -262,7 +262,6 @@ export function ChatView({
   hasWorkspace,
   workspacePath,
   writeConflictedPaths,
-  tabAutocompleteEnabled = true,
   provider,
   model,
   ollamaBaseUrl,
@@ -326,7 +325,9 @@ export function ChatView({
   agentInstances,
   openInstanceRunId: openInstanceRunIdProp = null,
   onOpenInstanceRunIdChange,
-  getInstanceController
+  getInstanceController,
+  openChangesRequest = 0,
+  onOpenChangesRequestHandled
 }: {
   items: UiItem[]
   /** When set, transcript leaves subscribe so ChatView/Composer skip token patches. */
@@ -357,7 +358,6 @@ export function ChatView({
   operationalError?: string | null
   hasWorkspace: boolean
   workspacePath: string | null
-  tabAutocompleteEnabled?: boolean
   provider: ProviderId
   model: string
   ollamaBaseUrl?: string
@@ -460,6 +460,9 @@ export function ChatView({
     runId: string,
     workspacePath: string
   ) => import('@renderer/lib/hooks/createChatStreamController').ChatStreamController | null
+  openChangesRequest?: number
+  /** One-shot consumption ack — the owner resets the request so a remount cannot replay it. */
+  onOpenChangesRequestHandled?: () => void
 }) {
   const paneCount = paneCountProp ?? multiPane?.panes.length ?? 1
   const instanceOpenControlled =
@@ -814,6 +817,22 @@ const runGoal = useRunGoal({
     (path?: string) => openChangesPanel('agent', path),
     [openChangesPanel]
   )
+
+  const handledOpenChangesRequestRef = useRef(0)
+  useEffect(() => {
+    // The owner resets the counter to 0 after consuming; clear the handled mark
+    // so a later request can reuse the same value (0 -> 1 -> 0 -> 1).
+    if (openChangesRequest <= 0) {
+      handledOpenChangesRequestRef.current = 0
+      return
+    }
+    if (openChangesRequest === handledOpenChangesRequestRef.current) return
+    handledOpenChangesRequestRef.current = openChangesRequest
+    openChangesPanel('uncommitted')
+    // Reset the owner's counter: the ref resets on unmount, so without this a
+    // later ChatView remount re-consumes the same request and force-opens Changes.
+    onOpenChangesRequestHandled?.()
+  }, [onOpenChangesRequestHandled, openChangesPanel, openChangesRequest])
 
   const activeRightPanelRef = useRef(activeRightPanel)
   activeRightPanelRef.current = activeRightPanel
@@ -1234,6 +1253,7 @@ const runGoal = useRunGoal({
 
       {viewingInstanceRunId && workspacePath ? (
         <AgentInstancePane
+          key={viewingInstanceRunId}
           workspacePath={workspacePath}
           instanceRunId={viewingInstanceRunId}
           instanceMeta={agentInstances?.[viewingInstanceRunId]}
@@ -1342,7 +1362,6 @@ const runGoal = useRunGoal({
             <FilesPanel
               workspacePath={workspacePath}
               active={visiblePanelId === 'files'}
-              tabAutocompleteEnabled={tabAutocompleteEnabled}
               gitRevision={gitRevision}
               onGitMutated={notifyGitMutated}
               onFlushReady={registerFilesFlush}

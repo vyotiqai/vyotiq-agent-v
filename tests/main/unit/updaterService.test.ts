@@ -147,7 +147,9 @@ describe('updater service', () => {
         notesSections: [
           { heading: 'Fixed', items: ['Crash on save', 'Wrong icon'] },
           { heading: 'Added', items: ['Pinned chats'] }
-        ]
+        ],
+        releaseUrl:
+          'https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v1.3.0'
       }
     })
 

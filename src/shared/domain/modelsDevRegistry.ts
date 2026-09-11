@@ -67,7 +67,9 @@ const REGISTRY_ID_BY_PROVIDER: Partial<Record<ProviderId, string>> = {
   openrouter: 'openrouter',
   xai: 'xai',
   mistral: 'mistral',
-  opencode: 'opencode'
+  // The app's `opencode` provider is OpenCode Go; models.dev keeps that under
+  // `opencode-go` (`opencode` is the separate Zen catalog).
+  opencode: 'opencode-go'
 }
 
 let index: RegistryIndex | null = null

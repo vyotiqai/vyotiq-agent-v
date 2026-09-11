@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { logger } from '@shared/logger'
 import { isReactMaxUpdateDepth } from '@renderer/logging/reactMaxUpdateDepth'
+import { shouldLogErrorSignature } from '@renderer/logging/errorLogRateLimiter'
 import {
   isStaleChunkFailure,
   rearmStaleChunkReload,
@@ -46,9 +47,15 @@ export class ErrorBoundary extends Component<Props, State> {
       return
     }
     const is185 = isReactMaxUpdateDepth(error.message)
+    const code = is185 ? 'REACT_185' : 'RENDERER_CRASH'
+    // A render loop throws repeatedly — log one record per signature window or
+    // the renderer→main log bridge floods the main process (OOM amplifier).
+    const decision = shouldLogErrorSignature(`${code}\u0000${error.message}`)
+    if (!decision.log) return
     logger.fatal(is185 ? 'React maximum update depth (#185)' : 'Renderer crash', {
       scope: 'renderer',
-      code: is185 ? 'REACT_185' : 'RENDERER_CRASH',
+      code,
+      ...(decision.suppressed > 0 ? { suppressedRepeats: decision.suppressed } : {}),
       componentStack: info.componentStack?.slice(0, is185 ? 4000 : 500),
       err: error
     })

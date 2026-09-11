@@ -26,7 +26,7 @@ Agent V stores local state in Electron's platform-specific userData directory. T
 | Exact sparse index | workspaces/{workspaceId}/sparsegrep/ | Derived cache |
 | Logs | Directory returned by Open logs folder | Local rotating logs |
 | Code-index models | Codeindex model directory under user data | Downloaded ONNX weights |
-| Dictation models | Dictation cache under user data | Whisper and Qwen3-ASR on-device files |
+| Dictation models | Dictation cache under user data | Whisper model files |
 | Marketplace packages | Marketplace-managed package root under user data | Use Marketplace lifecycle actions |
 | Personal skills | ~/.vyotiq/skills/ | One directory per SKILL.md skill |
 | Workspace skills | {workspace}/.vyotiq/skills/ and .cursor/skills/ | Project files |
@@ -36,6 +36,8 @@ Agent V stores local state in Electron's platform-specific userData directory. T
 ## Safe cleanup
 
 Stop or finish affected runs before deleting derived state. Semantic and sparse indexes can be rebuilt. Downloaded models can be removed through their Settings controls. **Packages** should be removed through Marketplace.
+
+Settings → Storage shows disk usage by category and offers a confirm-gated **Free up space** sweep: checkpoint garbage collection (keep-last-20 sessions, 30-day backstop), untracked workspace storage cleanup (30-day grace), and a 5 GB managed-size cap. Automatic cleanup never deletes anything written in the last 24 hours.
 
 Do not manually edit encrypted secret data. Removing settings.json resets persisted settings but does not document deletion of every separate store.
 

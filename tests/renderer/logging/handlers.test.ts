@@ -5,8 +5,10 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { logger, setLoggerBackend, getLoggerBackend } from '@shared/logger'
 import {
   installRendererErrorHandlers,
-  isRendererErrorHandlersInstalled
+  isRendererErrorHandlersInstalled,
+  reportUncaughtRendererError
 } from '@renderer/logging/handlers'
+import { resetErrorLogRateLimiter } from '@renderer/logging/errorLogRateLimiter'
 
 describe('renderer error handlers', () => {
   const previous = getLoggerBackend()
@@ -14,6 +16,9 @@ describe('renderer error handlers', () => {
 
   beforeEach(() => {
     fatal.mockReset()
+    // The rate limiter keeps module-level state; tests 4 and 5 intentionally
+    // share an error signature, so clear it or the second one is suppressed.
+    resetErrorLogRateLimiter()
     setLoggerBackend({
       log: (level, message, fields) => {
         if (level === 'fatal') fatal(message, fields)
@@ -82,6 +87,24 @@ describe('renderer error handlers', () => {
         scope: 'renderer',
         code: 'REACT_185',
         componentStack: expect.stringContaining('MessageList')
+      })
+    )
+  })
+
+  it('reports React root uncaught errors with the production component stack', () => {
+    installRendererErrorHandlers()
+    reportUncaughtRendererError(
+      new Error(
+        'Minified React error #185; visit https://react.dev/errors/185 for the full message'
+      ),
+      '\n    at LoopingComponent\n    at App'
+    )
+    expect(fatal).toHaveBeenCalledWith(
+      expect.stringMatching(/^React maximum update depth \(#185\):/),
+      expect.objectContaining({
+        scope: 'renderer',
+        code: 'REACT_185',
+        componentStack: expect.stringContaining('LoopingComponent')
       })
     )
   })

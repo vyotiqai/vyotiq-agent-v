@@ -1,7 +1,7 @@
 /**
  * Recording blob → 16 kHz mono Int16 PCM (base64) for the local dictation
- * engines (`local` Whisper / `qwen3-asr-onnx`), which take raw samples rather
- * than container audio. Used by composer push-to-talk dictation.
+ * engine (`local` Whisper), which takes raw samples rather than container
+ * audio. Used by composer push-to-talk dictation.
  */
 import { MAX_LOCAL_AUDIO_BYTES } from '@shared/ipc'
 

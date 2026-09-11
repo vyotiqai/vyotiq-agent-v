@@ -19,6 +19,8 @@ export interface UpdateInfo {
   releaseName: string
   notesText: string
   notesSections: UpdateNotesSection[]
+  /** GitHub release page for "Full release notes" links; '' when unknown. */
+  releaseUrl?: string
 }
 
 export interface UpdateProgress {

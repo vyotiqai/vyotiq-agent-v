@@ -349,10 +349,10 @@ export function stripIncompleteToolPrefix(content: string): string {
   let searchFrom = 0
   let cutAt: number | null = null
   while (searchFrom < content.length) {
-    const rest = content.slice(searchFrom)
-    const match = rest.match(/\btool\s*\{/)
-    if (!match || match.index === undefined) break
-    const start = searchFrom + match.index
+    TOOL_BLOB_SCAN_RE.lastIndex = searchFrom
+    const match = TOOL_BLOB_SCAN_RE.exec(content)
+    if (!match) break
+    const start = match.index
     let i = start + match[0].length
     let depth = 1
     while (i < content.length && depth > 0) {
@@ -423,24 +423,49 @@ export function stripIncompleteToolPrefix(content: string): string {
   return content
 }
 
+const TOOL_JSON_BLOB_RE = /(\s*)tool\s*\{/y
+const TOOL_LINE_BLOB_RE = /tool\s+[a-z_]+\s+\S.+?(?:\r?\n|$)/iy
+const TOOL_BLOB_SCAN_RE = /\btool\s*\{/g
+const WHITESPACE_CHAR_RE = /\s/
+
+/**
+ * One scan for every marker any stripping branch can act on.
+ *
+ * `stripToolShapedAssistantTextInner` otherwise costs ~6 O(n) passes plus a full
+ * `toLowerCase()` allocation per call, and the streaming path calls it once per
+ * rendered frame on the whole accumulated answer. When none of these markers
+ * appear there is provably nothing to strip and only the newline collapse (and
+ * trim) applies.
+ */
+const SCRUB_CANDIDATE_RE = /\btool\s*(?:\{|$)|\btool\s+[a-z_]+|<(?:\uFF5C|\|)/i
+const NEWLINE_RUN_RE = /\n{3,}/g
+
 function stripToolShapedAssistantTextInner(content: string, options?: { trim?: boolean }): string {
   if (!content) return content
+  if (!SCRUB_CANDIDATE_RE.test(content)) {
+    const collapsed = content.replace(NEWLINE_RUN_RE, '\n\n')
+    return options?.trim === false ? collapsed : collapsed.trim()
+  }
   const withoutDsml = stripDsmlToolMarkup(content)
   let result = ''
   let i = 0
-  while (i < withoutDsml.length) {
-    const rest = withoutDsml.slice(i)
-    const jsonMatch = rest.match(/^(\s*)tool\s*\{/)
+  const length = withoutDsml.length
+  // One lowercased copy lets the scan jump between candidates instead of
+  // slicing the remaining buffer at every character (O(n^2) allocations).
+  const lower = withoutDsml.toLowerCase()
+  while (i < length) {
+    TOOL_JSON_BLOB_RE.lastIndex = i
+    const jsonMatch = TOOL_JSON_BLOB_RE.exec(withoutDsml)
     if (jsonMatch) {
       i += jsonMatch[0].length
       let depth = 1
-      while (i < withoutDsml.length && depth > 0) {
+      while (i < length && depth > 0) {
         const ch = withoutDsml[i]!
         i += 1
         if (ch === '{') depth += 1
         else if (ch === '}') depth -= 1
       }
-      while (i < withoutDsml.length && (withoutDsml[i] === ' ' || withoutDsml[i] === '\t')) i += 1
+      while (i < length && (withoutDsml[i] === ' ' || withoutDsml[i] === '\t')) i += 1
       if (withoutDsml[i] === '\r') i += 1
       if (withoutDsml[i] === '\n') i += 1
       continue
@@ -448,15 +473,30 @@ function stripToolShapedAssistantTextInner(content: string, options?: { trim?: b
 
     const atLineStart = i === 0 || withoutDsml[i - 1] === '\n'
     if (atLineStart) {
-      const lineMatch = rest.match(/^tool\s+([a-z_]+)\s+(\S.+?)(?:\r?\n|$)/i)
+      TOOL_LINE_BLOB_RE.lastIndex = i
+      const lineMatch = TOOL_LINE_BLOB_RE.exec(withoutDsml)
       if (lineMatch) {
         i += lineMatch[0].length
         continue
       }
     }
 
-    result += withoutDsml[i]!
-    i += 1
+    const nextTool = lower.indexOf('tool', i)
+    if (nextTool < 0) {
+      result += withoutDsml.slice(i)
+      break
+    }
+    // `\s*` in the blob regex may consume whitespace before `tool`; walk back
+    // to that run's start so a candidate is never skipped.
+    let candidate = nextTool
+    while (candidate > i && WHITESPACE_CHAR_RE.test(withoutDsml[candidate - 1]!)) candidate -= 1
+    if (candidate <= i) {
+      result += withoutDsml[i]!
+      i += 1
+    } else {
+      result += withoutDsml.slice(i, candidate)
+      i = candidate
+    }
   }
   const collapsed = result.replace(/\n{3,}/g, '\n\n')
   return options?.trim === false ? collapsed : collapsed.trim()
@@ -474,6 +514,11 @@ export function stripToolShapedAssistantText(content: string): string {
 /** Like stripToolShapedAssistantText but also hides in-progress tool blobs while streaming. */
 export function stripToolShapedAssistantTextForStream(content: string): string {
   if (!content) return content
+  // Skip `stripIncompleteToolPrefix` too — it is another ~6 O(n) passes and
+  // cannot cut anything when no candidate marker exists.
+  if (!SCRUB_CANDIDATE_RE.test(content)) {
+    return content.replace(NEWLINE_RUN_RE, '\n\n')
+  }
   return stripToolShapedAssistantTextInner(stripIncompleteToolPrefix(content), { trim: false })
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "vyotiq",
-  "version": "1.1.4",
+  "version": "1.2.0",
   "description": "Agent V — coding workspace for real repositories",
   "packageManager": "pnpm@11.25.0+sha512.5cde925b4f075f725eb71fbae18a42ffe784524789f19b61c731cb8721ec28aaee160e01a8d5af4fedb2a42cdbf300efe23db356b0d4a17b4d63e11f8ab7c956",
   "engines": {
@@ -8,12 +8,15 @@
   },
   "main": "./out/main/index.js",
   "author": "Vyotiq",
-  "license": "UNLICENSED",
+  "license": "GPL-3.0-or-later",
   "private": true,
   "homepage": "https://vyotiq.com",
   "repository": {
     "type": "git",
     "url": "https://github.com/vyotiqai/vyotiq-agent-v.git"
+  },
+  "bugs": {
+    "url": "https://github.com/vyotiqai/vyotiq-agent-v/issues"
   },
   "scripts": {
     "dev": "pnpm sync:harness && pnpm sync:file-icons && pnpm sync:codeindex-wasm && electron-vite dev",
@@ -44,6 +47,7 @@
     "sync:codeindex-wasm": "node scripts/sync-codeindex-wasm.mjs",
     "sync:landing-brand": "node scripts/sync-landing-brand.mjs",
     "bake:landing-release": "node landing/scripts/bake-github-release.mjs",
+    "notes:extract": "node scripts/extract-release-notes.mjs",
     "landing:dev": "pnpm sync:brand && pnpm sync:landing-brand && pnpm bake:landing-release && pnpm --filter @vyotiq/landing dev",
     "landing:build": "pnpm sync:brand && pnpm sync:landing-brand && pnpm bake:landing-release && pnpm --filter @vyotiq/landing build",
     "landing:check": "pnpm --filter @vyotiq/landing check",

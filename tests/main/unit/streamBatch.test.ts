@@ -243,6 +243,78 @@ describe('ChatEventBatcher', () => {
     expect(stats.byType['text_delta']).toBe(2)
     expect(stats.byType['tool_call_delta']).toBe(2)
   })
+
+  it('drops oldest deltas when the pending queue exceeds the count cap', () => {
+    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+
+    // Alternating invoke ids prevent adjacent coalescing, so 600 pushes are
+    // 600 distinct segments — past the cap, oldest must be dropped and the
+    // newest retained (the renderer catch-up rebuilds any gap).
+    for (let i = 0; i < 600; i++) {
+      batcher.push({
+        type: 'text_delta',
+        runId: 'run-1',
+        invokeId: i % 2 === 0 ? 1 : 2,
+        text: `s${i}`
+      })
+    }
+
+    expect(getChatEventBatchStats().pushed).toBe(600)
+    expect(getChatEventBatchStats().overflowDropped).toBeGreaterThan(0)
+    expect(getChatEventBatchStats().overflowDropped).toBeLessThanOrEqual(600 - 512)
+
+    vi.advanceTimersByTime(16)
+
+    const last = sent.at(-1) as { type: string; text: string }
+    expect(last.type).toBe('text_delta')
+    expect(last.text.endsWith('s599')).toBe(true)
+  })
+
+  it('drops oldest deltas when pending bytes exceed the byte cap', () => {
+    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+
+    const big = 'x'.repeat(1024 * 1024)
+    for (let i = 0; i < 12; i++) {
+      batcher.push({
+        type: 'text_delta',
+        runId: 'run-1',
+        invokeId: i % 2 === 0 ? 1 : 2,
+        text: `${big}${i}`
+      })
+    }
+
+    expect(getChatEventBatchStats().overflowDropped).toBeGreaterThan(0)
+
+    vi.advanceTimersByTime(16)
+
+    const last = sent.at(-1) as { text: string }
+    expect(last.text.endsWith('11')).toBe(true)
+  })
+
+  it('never drops pending usage events when enforcing the cap', () => {
+    const batcher = new ChatEventBatcher((ev) => sent.push(ev))
+
+    for (let i = 0; i < 600; i++) {
+      batcher.push({
+        type: 'text_delta',
+        runId: 'run-1',
+        invokeId: i % 2 === 0 ? 1 : 2,
+        text: `s${i}`
+      })
+    }
+    // An active-workspace usage event rides the same queue — it must survive.
+    batcher.push({
+      type: 'step_usage',
+      runId: 'run-1',
+      step: 3,
+      inputTokens: 9,
+      outputTokens: 9
+    })
+
+    vi.advanceTimersByTime(16)
+
+    expect(sent.some((ev) => ev.type === 'step_usage')).toBe(true)
+  })
 })
 
 describe('ChatEventDispatcher priority', () => {

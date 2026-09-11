@@ -354,6 +354,20 @@ describe('ChangesPanel', () => {
     })
   })
 
+  it('collapsed split-button menu runs Commit & Create PR with the generated message', async () => {
+    render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} />)
+    await screen.findAllByText('a.ts')
+    fireEvent.click(screen.getByRole('button', { name: /More commit options/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Commit & Create PR$/i }))
+    await waitFor(() => {
+      expect(window.vyotiq.prCreate).toHaveBeenCalledWith('/ws', {
+        message: 'feat: improve generated commit messages',
+        mode: 'all',
+        draft: true
+      })
+    })
+  })
+
   it('installs GitHub CLI automatically before creating a PR', async () => {
     ;(window.vyotiq.githubAuthStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,

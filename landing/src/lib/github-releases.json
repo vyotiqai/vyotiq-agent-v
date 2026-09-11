@@ -1,0 +1,9 @@
+[
+  {
+    "tag": "v1.1.3",
+    "version": "1.1.3",
+    "htmlUrl": "https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v1.1.3",
+    "publishedAt": "2026-09-10T02:12:25Z",
+    "body": "## Desktop\n\n- Memory tool: more reliable recall and storage of project decisions across sessions\n- Evaluation harness adapter updates (internal quality tooling)\n\n## Website\n\n- The download button now detects your operating system and links the right installer\n- New accessible theme switcher with light, dark, and system options\n- Fixed a scroll dead-zone in the documentation sidebar and documentation layout issues\n- Resolved 19 accessibility and compliance audit findings"
+  }
+]

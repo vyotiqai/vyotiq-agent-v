@@ -4,6 +4,7 @@ import { knownContextWindow } from './modelContextWindows'
 import { idSuggestsVision } from './modelVision'
 import {
   getCachedOpenCodeGoEffortLadder,
+  getCachedOpenCodeGoMeta,
   getCachedOpenCodeGoModelIds,
   mergeOpenCodeGoMeta,
   opencodeGoEffortsFor,
@@ -75,11 +76,14 @@ function seedModelInfo(id: string, providerId: ProviderId): ModelInfo {
     // Registry-derived ladder so seeds match the live catalog UI exactly.
     ...(goTransport && supportsThinking
       ? {
-          thinkingMode: 'effort' as const,
+          thinkingMode: goTransport === 'messages' ? 'manual' : 'effort',
           thinkingCanDisable: true,
           supportedThinkingEfforts: opencodeGoEffortsFor(goTransport),
           ...(goLadder
-            ? { thinkingCanDisable: false, supportedThinkingEfforts: [...goLadder] }
+            ? {
+                thinkingCanDisable: getCachedOpenCodeGoMeta(id)?.thinkingCanDisable ?? false,
+                supportedThinkingEfforts: [...goLadder]
+              }
             : {})
         }
       : {}),

@@ -62,6 +62,8 @@ initCrashReporter()
 let quitting = false
 let editorFlushSequence = 0
 const EDITOR_FLUSH_TIMEOUT_MS = 4_500
+/** Bound on awaiting child-process teardown in before-quit (fatal path). */
+const CHILD_SHUTDOWN_TIMEOUT_MS = 5_000
 
 // Route console/process termination signals into the existing graceful
 // shutdown. Without this, Ctrl+C on `pnpm start` kills the launcher but orphans
@@ -267,6 +269,20 @@ if (!gotLock) {
         })
       }
     })
+  }).catch((err: unknown) => {
+    // Boot steps outside the inner try/catch must not become an unhandled
+    // rejection: surface the failure and quit instead of a silent dead boot.
+    logger.error('Fatal error during app boot', { scope: 'main', err })
+    void dialog
+      .showMessageBox({
+        type: 'error',
+        title: 'Vyotiq failed to start',
+        message: 'Vyotiq failed to start. Check the logs for details.',
+        buttons: ['Quit'],
+        defaultId: 0
+      })
+      .then(() => app.quit())
+      .catch(() => app.quit())
   })
 
   app.on('window-all-closed', () => {
@@ -294,10 +310,24 @@ if (!gotLock) {
       closeAgentBrowser()
       disposeAllTerminalSessions()
       disposeAllPtySessions()
-      void shutdownMcpServers()
       shutdownTokenizerPool()
-      void getEmbedUtilityClient().shutdown()
-      void getDictationUtilityClient().shutdown()
+      // Await child-process teardown so quit cannot land mid-shutdown, but bound
+      // each wait so a stuck child cannot hang quit on the fatal path.
+      const shutdowns: Array<[string, Promise<void>]> = [
+        ['MCP servers', shutdownMcpServers()],
+        ['embed utility', getEmbedUtilityClient().shutdown()],
+        ['dictation utility', getDictationUtilityClient().shutdown()]
+      ]
+      for (const [label, task] of shutdowns) {
+        try {
+          await Promise.race([
+            task,
+            new Promise<void>((resolve) => setTimeout(resolve, CHILD_SHUTDOWN_TIMEOUT_MS))
+          ])
+        } catch (err) {
+          logger.warn(`Failed to shut down ${label} before quit`, { scope: 'main', err })
+        }
+      }
 
       const win = BrowserWindow.getFocusedWindow() ?? getMainWindow()
       const showQuitAnywayDialog = async (): Promise<'wait' | 'quit'> => {

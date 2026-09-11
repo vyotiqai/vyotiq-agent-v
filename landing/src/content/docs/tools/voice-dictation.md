@@ -19,9 +19,7 @@ Dictation engine offers:
 
 - **OpenAI** — uses gpt-transcribe and the saved **OpenAI** key.
 - **OpenRouter** — uses gpt-transcribe through **OpenRouter** and its saved key.
-- Qwen3-ASR (on-device) — runs Qwen3-ASR inference on this machine after model download.
 - **Local** — runs English Whisper inference on this machine.
-- **Qwen3-ASR (local server)** — optional local ASR HTTP server
 
 The engine is read each time the microphone stops, so changing it does not require a restart. The mic does not inherently require an **OpenAI** key; its requirement follows the selected engine.
 

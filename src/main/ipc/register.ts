@@ -23,6 +23,7 @@ import {
   ResolveWritesRequestSchema,
   ReadRunArtifactRequestSchema,
   RunStatsRequestSchema,
+  HomeActivityRequestSchema,
   HarnessReviewRequestSchema,
   HarnessPreviewApplyRequestSchema,
   HarnessApplyRequestSchema,
@@ -93,8 +94,6 @@ import {
   WorkspaceFormatFileRequestSchema,
   WorkspaceLspStatusRequestSchema,
   WorkspaceLspRequestSchema,
-  WorkspaceInlineCompleteRequestSchema,
-  WorkspaceInlineCompleteAbortRequestSchema,
   WorkspaceGrepRequestSchema,
   GitConflictFileRequestSchema,
   GitResolveConflictRequestSchema,
@@ -173,6 +172,7 @@ import {
   type ResolveWritesResult,
   type ReadRunArtifactResult,
   type RunStatsResult,
+  type HomeActivityResult,
   type HarnessReviewResult,
   type HarnessPreviewApplyResult,
   type HarnessApplyResult,
@@ -305,6 +305,7 @@ import {
   deleteWorkspaceStorageDir
 } from '@main/storage/retention'
 import { collectRunStats } from '../agent/runStats'
+import { collectHomeActivity } from '../agent/activityStats'
   import { focusAgentBrowser, closeAgentBrowser, getAgentBrowserState, selectBrowserTab, browserGoBack, browserGoForward, setAgentBrowserBounds, navigateUrl, clearAgentBrowserData, takeBrowserScreenshot, disposeAgentBrowserForWorkspace, takeBrowserControl, releaseBrowserControl, manageTabs } from '@main/app/agentBrowser'
 import { extractAttachment } from '../attachments/extract'
 import {
@@ -490,7 +491,6 @@ import {
   workspaceLspRequest,
   workspaceLspStatus
 } from '@main/workspace/lspService'
-import { abortInlineComplete, completeInline } from '@main/workspace/inlineComplete'
 
 export { chatCancelResult }
 
@@ -1821,6 +1821,24 @@ export function registerIpc(): void {
         )
       } catch (err) {
         return failFrom(err, IPC.harnessReview)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.homeActivity,
+    async (event, raw): Promise<IpcResult<HomeActivityResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = HomeActivityRequestSchema.parse(raw)
+        for (const p of req.workspacePaths) {
+          if (!isOpenWorkspace(p)) return fail('Workspace is not open')
+        }
+        return ok(
+          collectHomeActivity(req.workspacePaths, new Date(), req.windowDays)
+        )
+      } catch (err) {
+        return failFrom(err, IPC.homeActivity)
       }
     }
   )
@@ -3689,28 +3707,6 @@ export function registerIpc(): void {
       return ok(await workspaceLspRequest(req))
     } catch (err) {
       return failFrom(err, IPC.workspaceLspRequest)
-    }
-  })
-
-  ipcMain.handle(IPC.workspaceInlineComplete, async (event, raw) => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = WorkspaceInlineCompleteRequestSchema.parse(raw ?? {})
-      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
-      return ok(await completeInline(event.sender.id, req))
-    } catch (err) {
-      return failFrom(err, IPC.workspaceInlineComplete)
-    }
-  })
-
-  ipcMain.handle(IPC.workspaceInlineCompleteAbort, async (event, raw) => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = WorkspaceInlineCompleteAbortRequestSchema.parse(raw ?? {})
-      abortInlineComplete(req.requestId)
-      return ok(true)
-    } catch (err) {
-      return failFrom(err, IPC.workspaceInlineCompleteAbort)
     }
   })
 

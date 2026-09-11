@@ -18,7 +18,6 @@ Open Settings from the sidebar, /settings, or Open settings (Ctrl+, / ⌘,). Sea
 | Control | Options and notes |
 | --- | --- |
 | Active model | opens the composer model picker, or jump to Providers. Workspace Override can pin a different provider/model per folder |
-| Tab autocomplete | ghost text in the Files editor from the active model. Tab accepts, Esc dismisses. On by default |
 | Workspaces | open workspace tabs. `Add workspace`. Enable Override for per-workspace provider, model, and agent settings. Override seeds thinking, persona & style, compaction, and approval from global defaults when first enabled |
 | Share crash & error reports | optional opt-in. Local rotating logs are always written. Unavailable in builds with no Sentry DSN. Never includes chat contents, API keys, or file bodies |
 | Enable notifications | master switch for the inbox and desktop toasts |
@@ -62,7 +61,7 @@ See [Codebase search and indexing](/docs/tools/indexing). Enable codebase index,
 
 ## Voice
 
-See [Voice dictation](/docs/tools/voice-dictation). Dictation engine, waveform, Local Whisper install, unload, and cache delete, Qwen3-ASR server URL and key, and Qwen3-ASR on-device models.
+See [Voice dictation](/docs/tools/voice-dictation). Dictation engine, waveform, Local Whisper install, unload, and cache delete.
 
 ## Storage
 

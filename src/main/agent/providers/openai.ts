@@ -20,6 +20,7 @@ import {
 import { serviceTierForApiBody } from '../../../shared/domain/serviceTier'
 import {
   getCachedOpenCodeGoEffortLadder,
+  getCachedOpenCodeGoMeta,
   clampEffortToOpenCodeGoLadder
 } from '../../../shared/domain/opencodeGoCatalog'
 import {
@@ -56,12 +57,16 @@ import { mergeStreamedToolName } from '../../../shared/utils/toolName'
 import {
   formatProviderHttpError,
   parseOpenRouterAffordableOutputTokens,
+  parseRejectedBodyField,
   scrubProviderErrorSnippet,
   scrubProviderErrorText,
   shouldRetryOmitCacheKey,
   shouldRetryOmitIncludeUsage,
-  shouldRetryOpenRouterCompatBody
+  shouldRetryOpenRouterCompatBody,
+  shouldRetrySanitizeToolSchema,
+  stripRejectedBodyField
 } from './httpErrors'
+import { sanitizeToolParameters } from './toolSchemaSanitize'
 import {
   resolveSystemZones,
   volatileSessionMessage,
@@ -293,6 +298,13 @@ export type OpenAiCompatOptions = {
    * body field stays Responses-API only for these hosts.
    */
   convIdHeader?: boolean
+  /**
+   * OpenCode Go: send `<header name>: <promptCacheKey>` on chat requests. The
+   * gateway requires a stable per-conversation session id for routing and
+   * prompt caching and refuses requests without it ("Request is missing
+   * x-opencode-session"). Hosts without that contract leave it unset.
+   */
+  sessionHeader?: string
   /** DeepSeek: enable thinking mode via extra_body fields. */
   deepseekThinking?: boolean
   /**
@@ -447,11 +459,21 @@ function toOpenAiContent(
         })
         continue
       }
+      // Chat Completions accepts only wav/mp3. Anything else (m4a/webm/ogg/mp4)
+      // must not be relabeled as wav — the model would receive undecodable
+      // bytes — so surface the omission instead.
       const format = data.mediaType.includes('wav')
         ? 'wav'
         : data.mediaType.includes('mpeg') || data.mediaType.includes('mp3')
           ? 'mp3'
-          : 'wav'
+          : null
+      if (!format) {
+        parts.push({
+          type: 'text',
+          text: `[audio omitted: ${data.mediaType || 'this format'} is not supported by chat audio (wav/mp3 only)]`
+        })
+        continue
+      }
       parts.push({
         type: 'input_audio',
         input_audio: { data: data.data, format }
@@ -1217,14 +1239,20 @@ export function buildOpenAiCompatBody(
   req: ProviderChatRequest,
   opts: OpenAiCompatOptions,
   providerId?: ProviderId,
-  overrides?: { omitReasoning?: boolean; omitIncludeUsage?: boolean; omitCacheKey?: boolean }
+  overrides?: {
+    omitReasoning?: boolean
+    omitIncludeUsage?: boolean
+    omitCacheKey?: boolean
+    omitFields?: readonly string[]
+    sanitizeTools?: boolean
+  }
 ): Record<string, unknown> {
   const tools = req.tools.map((t) => ({
     type: 'function',
     function: {
       name: t.name,
       description: t.description,
-      parameters: t.parameters
+      parameters: overrides?.sanitizeTools ? sanitizeToolParameters(t.parameters) : t.parameters
     }
   }))
   const stripReasoningReplay =
@@ -1349,19 +1377,22 @@ export function buildOpenAiCompatBody(
       // Mistral docs: reasoning_effort on chat completions (ThinkChunk in content).
       body.reasoning_effort = normalizeEffortForMistral(effort)
     } else if (providerId === 'opencode') {
-      // Go's chat/completions mount is a generic OpenAI-compatible gateway:
-      // widest-overlap reasoning_effort (+ include_reasoning), same as custom.
-      // Models with a declared per-model ladder (models.dev reasoning_options)
-      // reject unlisted levels with "[1210] cannot be disabled" — clamp to the
-      // ladder first (opencode.ts already normalized the request for known
-      // models; this guard covers stale caches/unknown callers).
+      // Go's chat/completions mount is a generic OpenAI-compatible gateway
+      // that strict-decodes the request body: unknown fields fail with
+      // `invalid request body: json: unknown field "X"`. Never send
+      // `include_reasoning` here — it was copied from the custom
+      // "widest-overlap" path, but the mount's schema does not declare it and
+      // every thinking request 400s (Console Go, live 2026-09-10:
+      // `invalid_request_error: json: unknown field "include_reasoning"`).
+      // `reasoning_effort` IS declared. Models with a declared per-model ladder
+      // (models.dev reasoning_options) reject unlisted levels with
+      // "[1210] cannot be disabled" — clamp to the ladder first (opencode.ts
+      // already normalized the request for known models; this guard covers
+      // stale caches/unknown callers).
       const goLadder = getCachedOpenCodeGoEffortLadder(req.model)
       body.reasoning_effort = goLadder
         ? clampEffortToOpenCodeGoLadder(effort, goLadder)
         : normalizeEffortForOpenAiCompatReasoning(effort, 'xai')
-      if (req.thinking.display !== 'omitted') {
-        body.include_reasoning = true
-      }
     }
   } else if (req.thinking?.enabled === false && providerId === 'ollama') {
     const gptOss = isOllamaGptOssModel(req.model)
@@ -1396,6 +1427,14 @@ export function buildOpenAiCompatBody(
     req.modelInfo?.supportsThinking
   ) {
     body.reasoning_effort = 'none'
+  } else if (
+    req.thinking?.enabled === false &&
+    providerId === 'opencode' &&
+    getCachedOpenCodeGoMeta(req.model)?.thinkingCanDisable
+  ) {
+    // Registry declares an explicit disable rung (effort `none` / toggle) —
+    // send it instead of silently running the floor effort.
+    body.reasoning_effort = 'none'
   }
 
   const tier = serviceTierForApiBody(req.serviceTier)
@@ -1406,8 +1445,24 @@ export function buildOpenAiCompatBody(
     }
   }
 
+  // Strict-host recovery: drop optional fields the host named as unknown (see
+  // parseRejectedBodyField) so a body-schema mismatch on inert instrumentation
+  // never fails the run. Message-level names strip from message/content rows.
+  for (const field of overrides?.omitFields ?? []) {
+    stripRejectedBodyField(body, field)
+  }
+
   return body
 }
+
+/**
+ * Outer body-rebuild attempts. Each rejected optional field consumes one
+ * attempt (`omitIncludeUsage`, `omitCacheKey`, one named `omitFields` entry,
+ * the OpenRouter reasoning fallback, the affordable-token remap), so the budget
+ * must exceed the number of omit passes — 6 covers the realistic worst case
+ * without letting a pathological host multiply requests unboundedly.
+ */
+const CHAT_BODY_MAX_ATTEMPTS = 6
 
 export function createOpenAiCompatibleProvider(
   id: LlmProvider['id'],
@@ -1468,6 +1523,11 @@ export function createOpenAiCompatibleProvider(
       if (opts.convIdHeader && req.promptCacheKey?.trim()) {
         headers['x-grok-conv-id'] = req.promptCacheKey.trim()
       }
+      // OpenCode Go routing/session header — value is the same runId the
+      // prompt_cache_key body field carries (see enablePromptCache).
+      if (opts.sessionHeader && req.promptCacheKey?.trim()) {
+        headers[opts.sessionHeader] = req.promptCacheKey.trim()
+      }
       if (req.apiKey?.trim()) {
         headers.Authorization = `Bearer ${req.apiKey.trim()}`
       }
@@ -1475,11 +1535,17 @@ export function createOpenAiCompatibleProvider(
       let maxOutputTokens = req.maxOutputTokens
       let res: Response | undefined
       let bodyOverrides:
-        | { omitReasoning?: boolean; omitIncludeUsage?: boolean; omitCacheKey?: boolean }
+        | {
+            omitReasoning?: boolean
+            omitIncludeUsage?: boolean
+            omitCacheKey?: boolean
+            omitFields?: readonly string[]
+            sanitizeTools?: boolean
+          }
         | undefined
       let lastHttpErrorText = ''
 
-      for (let attempt = 0; attempt < 4; attempt++) {
+      for (let attempt = 0; attempt < CHAT_BODY_MAX_ATTEMPTS; attempt++) {
         const body = buildOpenAiCompatBody(
           { ...req, maxOutputTokens },
           opts,
@@ -1534,6 +1600,29 @@ export function createOpenAiCompatibleProvider(
         // OpenCode Go models are known to) — retry once without it.
         if (!bodyOverrides?.omitCacheKey && shouldRetryOmitCacheKey(res.status, text)) {
           bodyOverrides = { ...bodyOverrides, omitCacheKey: true }
+          continue
+        }
+
+        // Strict hosts name an unsupported optional field in the 400/422 body
+        // (Console Go: json: unknown field "include_reasoning"). Strip exactly
+        // that field and retry — a run must not die on inert instrumentation.
+        const rejectedField = parseRejectedBodyField(res.status, text)
+        if (rejectedField && !bodyOverrides?.omitFields?.includes(rejectedField)) {
+          bodyOverrides = {
+            ...bodyOverrides,
+            omitFields: [...(bodyOverrides?.omitFields ?? []), rejectedField]
+          }
+          continue
+        }
+
+        // A host that rejects the tool schema itself gets one retry with
+        // restricted JSON-Schema keywords removed (see toolSchemaSanitize).
+        if (
+          !bodyOverrides?.sanitizeTools &&
+          req.tools.length > 0 &&
+          shouldRetrySanitizeToolSchema(res.status, text)
+        ) {
+          bodyOverrides = { ...bodyOverrides, sanitizeTools: true }
           continue
         }
 

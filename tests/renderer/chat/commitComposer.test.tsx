@@ -64,3 +64,41 @@ describe('CommitComposer keydown', () => {
     expect(onCommit).not.toHaveBeenCalled()
   })
 })
+
+describe('CommitComposer generation notice', () => {
+  it('renders the fallback reason with aria-live and keeps the composer usable', () => {
+    const onCommit = vi.fn()
+    render(
+      <CommitComposer
+        message="Update 3 files"
+        onMessageChange={() => {}}
+        busy={false}
+        hasRemote
+        generationNotice="Generation timed out"
+        onCommit={onCommit}
+      />
+    )
+
+    const notice = screen.getByText(/Generation unavailable: Generation timed out/)
+    expect(notice.getAttribute('aria-live')).toBe('polite')
+    expect((screen.getByLabelText('Commit message') as HTMLInputElement).value).toBe(
+      'Update 3 files'
+    )
+    const commit = screen.getByRole('button', { name: 'Commit' }) as HTMLButtonElement
+    expect(commit.disabled).toBe(false)
+  })
+
+  it('renders no notice when generation succeeds', () => {
+    render(
+      <CommitComposer
+        message="feat: generated subject"
+        onMessageChange={() => {}}
+        busy={false}
+        hasRemote
+        onCommit={() => {}}
+      />
+    )
+
+    expect(screen.queryByText(/Generation unavailable:/)).toBeNull()
+  })
+})

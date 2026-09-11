@@ -1,5 +1,5 @@
-import { copyFile, mkdir, readdir, stat } from 'fs/promises'
-import { createReadStream, rmSync } from 'fs'
+import { copyFile, mkdir, readdir, rm, stat } from 'fs/promises'
+import { createReadStream } from 'fs'
 import { createHash, randomUUID } from 'crypto'
 import { dirname, join } from 'path'
 import { tmpdir } from 'os'
@@ -36,6 +36,8 @@ const SNAPSHOT_BLOB_FILE_MAX_BYTES = 8 * 1024 * 1024
 const SNAPSHOT_BLOB_TOTAL_MAX_BYTES = 64 * 1024 * 1024
 /** Files above this size are never content-hashed — mtime/size diff only. */
 const SNAPSHOT_HASH_MAX_BYTES = 32 * 1024 * 1024
+/** Bound total hashed bytes per snapshot pass — mirrors SNAPSHOT_BLOB_TOTAL_MAX_BYTES. */
+const SNAPSHOT_HASH_TOTAL_MAX_BYTES = 64 * 1024 * 1024
 const SNAPSHOT_FILE_CAP = 5_000
 const YIELD_EVERY_DIRS = 64
 
@@ -138,6 +140,7 @@ export async function startWatch(workspaceRoot: string): Promise<WorkspaceSnapsh
   const files = new Map<string, WorkspaceFileFingerprint>()
   const walked = await walkWorkspace(workspaceRoot, SNAPSHOT_FILE_CAP)
   let totalBlobBytes = 0
+  let totalHashBytes = 0
   for (const fp of walked) {
     let blobPath: string | undefined
     let contentHash: string | undefined
@@ -155,12 +158,15 @@ export async function startWatch(workspaceRoot: string): Promise<WorkspaceSnapsh
         blobPath = undefined
       }
     }
-    // Hash everything small enough to hash cheaply — including files that got
-    // a revert blob. A same-size in-place rewrite of a small file changes no
-    // mtime/size, so without a contentHash the diff misses it entirely
-    // (build runners / installers touch files exactly this way).
-    if (fp.size <= SNAPSHOT_HASH_MAX_BYTES) {
+    // Hash small files for same-size rewrite detection (build runners touch
+    // files exactly this way), bounded by SNAPSHOT_HASH_TOTAL_MAX_BYTES like
+    // the blob budget: the walk order is BFS (root files before subdirs), so
+    // the first files to fit are also the most checkpoint-relevant. A
+    // same-size in-place rewrite of a budget-exhausted file is mtime/size
+    // diff only — the trade the blob budget already makes.
+    if (fp.size <= SNAPSHOT_HASH_MAX_BYTES && totalHashBytes + fp.size <= SNAPSHOT_HASH_TOTAL_MAX_BYTES) {
       contentHash = await hashFile(fp.full)
+      if (contentHash != null) totalHashBytes += fp.size
     }
     files.set(fp.rel, { ...fp, blobPath, contentHash })
   }
@@ -198,9 +204,10 @@ export async function diffSince(snapshot: WorkspaceSnapshot): Promise<WorkspaceD
   return { created, modified, deleted }
 }
 
-export function disposeWatch(snapshot: WorkspaceSnapshot): void {
+export async function disposeWatch(snapshot: WorkspaceSnapshot): Promise<void> {
   try {
-    rmSync(snapshot.blobDir, { recursive: true, force: true })
+    // Async delete: performance.mdc rule 3 — no sync recursive fs on main-thread hot paths.
+    await rm(snapshot.blobDir, { recursive: true, force: true })
   } catch (err) {
     logger.warn('Failed to dispose workspace mutation snapshot', {
       scope: 'agent',

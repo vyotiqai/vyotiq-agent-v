@@ -466,6 +466,24 @@ export function isAbortStubToolResult(content: string): boolean {
 }
 
 /**
+ * Approval / mode gate refusals — the tool never executed, so receipt usage
+ * stats must not count them as failed executions (Home Activity tool rows,
+ * session `N tools · M failed` chips, and `N!` streaks all read these).
+ * Distinct from {@link isNonMutatingWriteFailure}, which is unread-edit policy.
+ */
+export function isGateRefusalToolResult(content: string): boolean {
+  if (/^The user denied permission to run /i.test(content)) return true
+  if (/timed out and was auto-denied\./i.test(content)) return true
+  if (/Tool approval required but no app window is listening\./i.test(content)) return true
+  if (/Tool approval failed because no app window is listening\./i.test(content)) return true
+  if (/^(?:Ask|Plan) mode does not allow (?:tool|lsp|MCP)/i.test(content)) return true
+  if (/^Plan mode may only edit plan\.md or contract\.md/i.test(content)) return true
+  if (/^Automatic mode switching is off\./i.test(content)) return true
+  if (/^Background terminal requires run ownership/i.test(content)) return true
+  return false
+}
+
+/**
  * Failures that never mutated the file. Counting them as unread-before-edit
  * poisoned harness review (Plan-mode memory-path edits on run 75135925).
  */

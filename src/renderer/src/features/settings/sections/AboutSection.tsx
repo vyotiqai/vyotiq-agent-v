@@ -165,7 +165,7 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
             Agent V. A product of Vyotiq.com.
           </p>
           <p className="m-0 text-xs leading-snug tracking-[var(--vy-tracking)] text-muted">
-            © {CURRENT_YEAR} Vyotiq. Agent V is proprietary Vyotiq software. All rights reserved.
+            © {CURRENT_YEAR} Vyotiq. Agent V is free software licensed under GPL-3.0.
           </p>
         </div>
       </div>

@@ -12,11 +12,15 @@ import { logger } from '../../shared/logger'
 /** Idle delay after app ready before the one-shot startup update check. */
 export const STARTUP_CHECK_DELAY_MS = 10_000
 
+/** Interval between background update checks while the app keeps running. */
+export const PERIODIC_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+
 let current: UpdaterStatePayload = { status: 'idle' }
 let lastInfo: UpdateInfo | null = null
 let initialized = false
 let checkInFlight = false
 let startupTimer: NodeJS.Timeout | null = null
+let periodicTimer: NodeJS.Timeout | null = null
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -25,12 +29,16 @@ function errorMessage(err: unknown): string {
 /** electron-updater info → exact contract shape (markdown release body parsed). */
 function toUpdateInfo(info: ElectronUpdateInfo): UpdateInfo {
   const parsed = parseReleaseNotes(info.releaseNotes)
+  const version = info.version ?? ''
   return {
-    version: info.version ?? '',
+    version,
     releaseDate: info.releaseDate ?? '',
-    releaseName: info.releaseName || `Version ${info.version ?? ''}`,
+    releaseName: info.releaseName || `Version ${version}`,
     notesText: parsed.notesText,
-    notesSections: parsed.notesSections
+    notesSections: parsed.notesSections,
+    releaseUrl: version
+      ? `https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v${version}`
+      : ''
   }
 }
 
@@ -107,8 +115,8 @@ export function initAutoUpdater(): void {
 /**
  * Deferred one-shot startup check: after app ready + a short idle delay so it
  * never blocks first paint. Skipped entirely in dev (!app.isPackaged).
- * There is deliberately no interval — later checks only happen when the
- * renderer invokes `updater:check`.
+ * Later checks happen when the renderer invokes `updater:check` or on the
+ * background interval from schedulePeriodicUpdateCheck.
  */
 export function scheduleStartupUpdateCheck(
   options?: { autoCheckEnabled?: boolean }
@@ -131,6 +139,27 @@ export function scheduleStartupUpdateCheck(
       startupTimer = setTimeout(run, STARTUP_CHECK_DELAY_MS)
     })
   }
+}
+
+/**
+ * Background interval check so a long-running session still learns about new
+ * releases (the startup check is one-shot and other checks are renderer
+ * driven). Same gates as the startup check: packaged builds only and the
+ * Settings autoCheckUpdates switch (absent setting = enabled). The interval
+ * is unref'd so it never keeps the process alive on shutdown.
+ */
+export function schedulePeriodicUpdateCheck(
+  options?: { autoCheckEnabled?: boolean }
+): void {
+  if (!app.isPackaged) return
+  if (options?.autoCheckEnabled === false) return
+  if (periodicTimer) return
+  periodicTimer = setInterval(() => {
+    void checkForAppUpdates().catch((err) => {
+      logger.warn('[updater] periodic check failed', { error: errorMessage(err) })
+    })
+  }, PERIODIC_CHECK_INTERVAL_MS)
+  periodicTimer.unref?.()
 }
 
 /**

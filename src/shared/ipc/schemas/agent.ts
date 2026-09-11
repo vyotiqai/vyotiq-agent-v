@@ -1007,7 +1007,38 @@ export const RunStatSchema = z.object({
   runId: z.string(),
   /** Transcript rows stitched across rotated archive heads + the live file. */
   messages: z.number().int().min(0),
-  tokenUsage: RunTokenUsageSchema.optional()
+  tokenUsage: RunTokenUsageSchema.optional(),
+  // — Session detail from receipt.json (absent while a run has no receipt). —
+  model: z.string().min(1).optional(),
+  provider: z.string().min(1).optional(),
+  billedCost: z.number().finite().optional(),
+  /** Final agent step count (receipt.step). */
+  steps: z.number().int().min(0).optional(),
+  compactionCount: z.number().int().min(0).optional(),
+  toolStats: z
+    .object({
+      totalCalls: z.number().int().min(0),
+      ok: z.number().int().min(0),
+      failed: z.number().int().min(0),
+      byName: z.record(z.string(), RunReceiptToolStatSchema)
+    })
+    .optional(),
+  failureClusters: z
+    .array(z.object({ key: z.string(), count: z.number().int().min(1) }))
+    .optional(),
+  maxConsecutiveToolFailures: z.number().int().min(0).optional(),
+  verification: z
+    .object({
+      lastMutationAt: z.string().optional(),
+      lastCheckAt: z.string().optional(),
+      verifiedAfterLastMutation: z.boolean()
+    })
+    .optional(),
+  /** Raw model context window in effect at the final step (context pressure). */
+  contextWindow: z.number().int().min(0).optional(),
+  /** First persisted event timestamp — run start (duration = writtenAt − this). */
+  startedAt: z.string().optional(),
+  writtenAt: z.string().optional()
 })
 export type RunStat = z.infer<typeof RunStatSchema>
 
@@ -1022,6 +1053,109 @@ export const RunStatsResultSchema = z.object({
 })
 export type RunStatsResult = z.infer<typeof RunStatsResultSchema>
 
+/** Home Activity request: aggregate over the open workspaces' receipts. */
+export const HomeActivityRequestSchema = z.object({
+  workspacePaths: z.array(z.string().min(1)).min(1).max(12),
+  /** Local-day window (1–30); the renderer offers 7 and 30. Default 7. */
+  windowDays: z.number().int().min(1).max(30).optional()
+})
+export type HomeActivityRequest = z.infer<typeof HomeActivityRequestSchema>
+
+/** One local-day bucket of usage derived from run receipts. */
+export const HomeActivityDaySchema = z.object({
+  /** Local calendar day (YYYY-MM-DD) of the receipt's writtenAt. */
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  runs: z.number().int().min(0),
+  billedInputTokens: z.number().int().min(0),
+  outputTokens: z.number().int().min(0),
+  /** Only when a run's durable checkpoint reported provider cost. */
+  billedCost: z.number().finite().optional(),
+  /** Output tokens per model — only for runs whose receipt recorded one. */
+  byModel: z.record(z.string().min(1), z.number().int().min(0)).optional(),
+  /** Billed thinking tokens recorded that day (subset of output). */
+  reasoningTokens: z.number().int().min(0).optional(),
+  /** Peak per-step context input recorded that day (max across runs). */
+  peakInputTokens: z.number().int().min(0).optional(),
+  /** Raw model context window in effect that day (latest reported). */
+  contextWindow: z.number().int().min(0).optional()
+})
+export type HomeActivityDay = z.infer<typeof HomeActivityDaySchema>
+
+/** Per-workspace usage slice — only included for multi-workspace requests. */
+export const HomeActivityWorkspaceSchema = z.object({
+  path: z.string().min(1),
+  runs: z.number().int().min(0),
+  billedInputTokens: z.number().int().min(0),
+  outputTokens: z.number().int().min(0),
+  billedCost: z.number().finite().optional()
+})
+export type HomeActivityWorkspace = z.infer<typeof HomeActivityWorkspaceSchema>
+
+/** Compact 7-day activity for the Home tab — all values from real receipts. */
+export const HomeActivityResultSchema = z.object({
+  /** Only days that have data, ascending; the renderer fills the sparse axis. */
+  days: z.array(HomeActivityDaySchema),
+  /** Days with any activity in the window (streak/cadence signal). */
+  activeDays: z.number().int().min(0).optional(),
+  /** Requested window in local days (echoes the request; default 7). */
+  windowDays: z.number().int().min(1).max(30).optional(),
+  /** Per-workspace usage slices — only for multi-workspace requests. */
+  workspaces: z.array(HomeActivityWorkspaceSchema).optional(),
+  /**
+   * Attention signals from receipts — present only when receipts report them.
+   * unverifiedRuns counts parent runs whose files were mutated after the last
+   * check; topTools aggregates per-tool ok/failed across window receipts.
+   */
+  attention: z
+    .object({
+      unverifiedRuns: z.number().int().min(0),
+      /** Sessions that ended in error — newest first, max 3 (attention digest). */
+      errorRuns: z
+        .array(
+          z.object({
+            runId: z.string().min(1),
+            /** Owning workspace — lets Home open the run directly. */
+            workspacePath: z.string().min(1),
+            goal: z.string().optional()
+          })
+        )
+        .optional(),
+      topTools: z
+        .array(
+          z.object({
+            name: z.string().min(1),
+            ok: z.number().int().min(0),
+            failed: z.number().int().min(0)
+          })
+        )
+        .optional()
+    })
+    .optional(),
+  outcomes: z.object({
+    done: z.number().int().min(0),
+    error: z.number().int().min(0),
+    cancelled: z.number().int().min(0),
+    running: z.number().int().min(0)
+  }),
+  totals: z.object({
+    runs: z.number().int().min(0),
+    billedInputTokens: z.number().int().min(0),
+    outputTokens: z.number().int().min(0),
+    billedCost: z.number().finite().optional(),
+    cachedInputTokens: z.number().int().min(0).optional(),
+    /** Billed thinking tokens in the window (subset of output). */
+    reasoningTokens: z.number().int().min(0).optional(),
+    /** Peak per-step context input in the window (max across runs). */
+    peakInputTokens: z.number().int().min(0).optional(),
+    /** Raw model context window (latest reported in the window). */
+    contextWindow: z.number().int().min(0).optional(),
+    /** Token total (input+output) of the prior equal-length window, when > 0. */
+    previousTokens: z.number().int().min(0).optional()
+  }),
+  generatedAt: z.string().min(1)
+})
+export type HomeActivityResult = z.infer<typeof HomeActivityResultSchema>
+
 export const RunReceiptSchema = z.object({
   version: z.literal(RUN_RECEIPT_VERSION),
   writtenAt: z.string().min(1),
@@ -1034,6 +1168,20 @@ export const RunReceiptSchema = z.object({
   invokeId: z.number().int().min(1).optional(),
   goal: z.string().optional(),
   mode: z.string().optional(),
+  /** Provider that served this run — forward-looking usage tagging. */
+  provider: z.string().min(1).optional(),
+  /** Model that served this run — forward-looking usage tagging. */
+  model: z.string().min(1).optional(),
+  /**
+   * Provider-reported cumulative cost for the run, carried from the durable
+   * usage totals at final receipt write. Absent on interim receipts and runs
+   * whose provider never reported a cost field — never a fake 0.
+   */
+  billedCost: z.number().finite().optional(),
+  /** Raw model context window in effect at the final step (context pressure). */
+  contextWindow: z.number().int().min(0).optional(),
+  /** First persisted event timestamp — run start (duration = writtenAt − this). */
+  startedAt: z.string().optional(),
   statusError: z.string().optional(),
   incomplete: z
     .object({

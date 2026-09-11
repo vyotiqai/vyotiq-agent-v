@@ -105,9 +105,10 @@ describe('UpdateCard', () => {
     expect(screen.getByText('Faster chat streaming')).toBeTruthy()
   })
 
-  it('renders without a notes block when info.notesSections is undefined', async () => {
+  it('falls back to plain-text notes when info.notesSections is undefined', async () => {
     // The v1.1.1 crash shape: a bridge regression that hands back an info
-    // without notesSections must degrade to "no notes", not crash the UI.
+    // without notesSections must degrade to the plain-text notes panel, not
+    // crash the UI.
     const { emit } = installBridge()
     render(<UpdateCard />)
     emit({
@@ -117,7 +118,8 @@ describe('UpdateCard', () => {
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toBeTruthy()
     expect(screen.getByText('v1.2.0')).toBeTruthy()
-    expect(screen.queryByText('What’s new')).toBeNull()
+    expect(screen.getByText('What’s new')).toBeTruthy()
+    expect(screen.getByText(/Faster chat streaming/)).toBeTruthy()
   })
 
   it('stays hidden when check() resolves ok with null data (up to date)', async () => {
@@ -153,6 +155,37 @@ describe('UpdateCard', () => {
     const button = await screen.findByRole('button', { name: 'Install & restart' })
     fireEvent.click(button)
     await waitFor(() => expect(bridge.install).toHaveBeenCalledTimes(1))
+  })
+
+  it('opens the GitHub release page from the Full release notes link', async () => {
+    const { emit } = installBridge()
+    const openExternal = vi.fn(async () => ({ ok: true as const, data: undefined }))
+    ;(window as unknown as { vyotiq: Record<string, unknown> }).vyotiq.shellOpenExternal =
+      openExternal
+    render(<UpdateCard />)
+    emit({
+      status: 'available',
+      info: {
+        ...INFO,
+        releaseUrl:
+          'https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v1.2.0'
+      }
+    })
+    const link = await screen.findByRole('button', { name: 'Full release notes' })
+    fireEvent.click(link)
+    await waitFor(() =>
+      expect(openExternal).toHaveBeenCalledWith(
+        'https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v1.2.0'
+      )
+    )
+  })
+
+  it('hides the Full release notes link when releaseUrl is absent', async () => {
+    const { emit } = installBridge()
+    render(<UpdateCard />)
+    emit({ status: 'available', info: INFO })
+    await screen.findByRole('dialog')
+    expect(screen.queryByRole('button', { name: 'Full release notes' })).toBeNull()
   })
 
   it('hides the card after dismiss and persists the last-seen version', async () => {

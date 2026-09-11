@@ -158,6 +158,28 @@ function decryptBlob(encrypted: string): string | null {
   }
 }
 
+const decryptedBlobCache = new Map<string, string>()
+const DECRYPTED_BLOB_CACHE_LIMIT = 64
+
+/**
+ * `decryptBlob` hits the OS keychain on every call, and getSettings() restores
+ * MCP secrets per step/tool. Cache successful decrypts keyed by the ciphertext
+ * blob — rotation/clear produce a new blob, so entries are never stale.
+ */
+function decryptBlobCached(encrypted: string): string | null {
+  const hit = decryptedBlobCache.get(encrypted)
+  if (hit !== undefined) return hit
+  const value = decryptBlob(encrypted)
+  if (value !== null) {
+    if (decryptedBlobCache.size >= DECRYPTED_BLOB_CACHE_LIMIT) {
+      const oldest = decryptedBlobCache.keys().next().value
+      if (oldest !== undefined) decryptedBlobCache.delete(oldest)
+    }
+    decryptedBlobCache.set(encrypted, value)
+  }
+  return value
+}
+
 export function setSecret(provider: SecretProvider, key: string): void {
   const trimmed = key.trim()
   if (!trimmed) {
@@ -199,7 +221,7 @@ export function getSecret(provider: SecretProvider): string | null {
   const data = readFile()
   const encrypted = data[provider]
   if (!encrypted) return null
-  return decryptBlob(encrypted)
+  return decryptBlobCached(encrypted)
 }
 
 /** True only when a stored blob decrypts successfully with the current OS keychain. */
@@ -261,7 +283,7 @@ export function getMcpAuthToken(serverId: string): string | null {
   if (!id) return null
   const encrypted = readFile()[mcpAuthKey(id)]
   if (!encrypted) return null
-  return decryptBlob(encrypted)
+  return decryptBlobCached(encrypted)
 }
 
 /** True when an encrypted MCP bearer blob exists (does not decrypt). */
@@ -329,7 +351,7 @@ export function getMcpOAuthState(serverId: string): McpOAuthStoredState | null {
   if (!id) return null
   const encrypted = readFile()[mcpOauthKey(id)]
   if (!encrypted) return null
-  const raw = decryptBlob(encrypted)
+  const raw = decryptBlobCached(encrypted)
   if (!raw) return null
   try {
     return JSON.parse(raw) as McpOAuthStoredState
@@ -392,7 +414,7 @@ export function getMcpOAuthClientSecret(serverId: string): string | null {
   if (!id) return null
   const encrypted = readFile()[mcpOAuthClientSecretKey(id)]
   if (!encrypted) return null
-  return decryptBlob(encrypted)
+  return decryptBlobCached(encrypted)
 }
 
 export function hasMcpOAuthClientSecret(serverId: string): boolean {
@@ -423,7 +445,7 @@ export function clearGoogleMcpClientSecret(): void {
 export function getGoogleMcpClientSecret(): string | null {
   const encrypted = readFile()[GOOGLE_MCP_CLIENT_SECRET_KEY]
   if (!encrypted) return null
-  return decryptBlob(encrypted)
+  return decryptBlobCached(encrypted)
 }
 
 export function hasGoogleMcpClientSecret(): boolean {
@@ -444,7 +466,7 @@ export function setGithubAccessToken(token: string): void {
 export function getGithubAccessToken(): string | null {
   const encrypted = readFile()[GITHUB_TOKEN_KEY]
   if (!encrypted) return null
-  return decryptBlob(encrypted)
+  return decryptBlobCached(encrypted)
 }
 
 export function hasGithubAccessToken(): boolean {
@@ -504,7 +526,7 @@ export function getMcpServerSecrets(serverId: string): McpServerSecrets | null {
   if (!id) return null
   const encrypted = readFile()[mcpServerSecretsKey(id)]
   if (!encrypted) return null
-  const raw = decryptBlob(encrypted)
+  const raw = decryptBlobCached(encrypted)
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as McpServerSecrets

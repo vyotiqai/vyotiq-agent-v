@@ -24,6 +24,7 @@ import {
 } from './indexJobQueue'
 import { clearIndexSyncProgress } from './codeindex/indexProgress'
 import { setCodeIndexRuntimeStatus } from './codeindex/modelStatus'
+import { isHeapPressureHigh } from '../perf/heapPressure'
 import {
   advanceWarmPagingState,
   warmProgressKey,
@@ -129,6 +130,17 @@ export function warmWorkspaceIndexes(
   if (!workspaceRoot.trim()) return
   const key = workspaceKey(workspaceRoot)
   if (permanentlyDisposedKeys.has(key)) return
+  // Near the V8 ceiling, background index work must not allocate: the walk,
+  // hashing and utility RPC bookkeeping run on main, and the last-resort GC
+  // that follows an allocation failure is a hard process abort. Indexes simply
+  // stay warm-as-is; every mutation/search retries once pressure drops.
+  if (isHeapPressureHigh()) {
+    logger.debug('Workspace index warm skipped under heap pressure', {
+      scope: 'workspaceIndex',
+      workspace: workspaceRoot
+    })
+    return
+  }
   removeLegacyWorkspaceIndexDirs(workspaceRoot)
   const coalesceKey = `warm:${key}`
 
@@ -141,7 +153,7 @@ export function warmWorkspaceIndexes(
       const signal = combineSignals(disposeSignal, activeIndexJobPreemptSignal())
       try {
         throwIfAborted(signal)
-        logger.info('Workspace index warm started', { scope: 'workspaceIndex', warmCodeIndex })
+        logger.debug('Workspace index warm started', { scope: 'workspaceIndex', warmCodeIndex })
         throwIfAborted(signal)
         // Deferred: the embedding model is only loaded on the first codebase_search.
         const code: Awaited<ReturnType<typeof ensureCodeIndexSynced>> = warmCodeIndex
@@ -151,7 +163,8 @@ export function warmWorkspaceIndexes(
             })
           : { entry: null, sync: null, disabled: false }
         if (code.sync) {
-          logger.info('Code index warm sync', {
+          const changed = code.sync.indexed > 0 || code.sync.removed > 0
+          ;(changed ? logger.info.bind(logger) : logger.debug.bind(logger))('Code index warm sync', {
             scope: 'workspaceIndex',
             workspace: workspaceRoot,
             scanned: code.sync.scanned,
@@ -169,7 +182,8 @@ export function warmWorkspaceIndexes(
           pageCap: SPARSE_GREP_SCAN_CAP
         })
         if (sparse.sync) {
-          logger.info('Sparse grep warm sync', {
+          const sparseChanged = sparse.sync.indexed > 0 || sparse.sync.removed > 0
+          ;(sparseChanged ? logger.info.bind(logger) : logger.debug.bind(logger))('Sparse grep warm sync', {
             scope: 'workspaceIndex',
             workspace: workspaceRoot,
             scanned: sparse.sync.scanned,
@@ -262,7 +276,13 @@ export function warmWorkspaceIndexes(
           indexProgress: null
         })
       } catch (err) {
-        if (signal.aborted || isAbortError(err)) return
+        if (signal.aborted || isAbortError(err)) {
+          // A preempted/aborted page leaves a partial fingerprint in pagingState.
+          // The next run would compare against it and could falsely stall the
+          // workspace forever; drop it so the next attempt starts clean.
+          if (signal.aborted) clearPaging(key)
+          return
+        }
         throw err
       }
     }

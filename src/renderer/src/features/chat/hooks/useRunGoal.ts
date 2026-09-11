@@ -44,6 +44,35 @@ function parseLoop(content: string | null | undefined): RunLoop | null {
   }
 }
 
+/**
+ * Structural equality for polled goal/loop payloads. The 500 ms live poll
+ * re-parses identical JSON into fresh objects; without this guard every poll
+ * re-rendered the whole chat subtree for no data change.
+ */
+function sameGoal(a: RunGoal | null, b: RunGoal | null): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return (
+    a.objective === b.objective &&
+    a.status === b.status &&
+    a.createdAt === b.createdAt &&
+    a.updatedAt === b.updatedAt &&
+    a.continueCount === b.continueCount
+  )
+}
+
+function sameLoop(a: RunLoop | null, b: RunLoop | null): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return (
+    a.prompt === b.prompt &&
+    a.intervalMs === b.intervalMs &&
+    a.status === b.status &&
+    a.nextAt === b.nextAt &&
+    a.lastTickAt === b.lastTickAt
+  )
+}
+
 export function useRunGoal(opts: {
   workspacePath: string | null
   runId: string | null
@@ -75,8 +104,10 @@ export function useRunGoal(opts: {
       window.vyotiq.readRunArtifact({ workspacePath, runId, name: 'loop.json' })
     ])
     if (seq !== loadSeqRef.current) return
-    setGoal(goalRes.ok ? parseGoal(goalRes.data.content) : null)
-    setLoop(loopRes.ok ? parseLoop(loopRes.data.content) : null)
+    const nextGoal = goalRes.ok ? parseGoal(goalRes.data.content) : null
+    const nextLoop = loopRes.ok ? parseLoop(loopRes.data.content) : null
+    setGoal((prev) => (sameGoal(prev, nextGoal) ? prev : nextGoal))
+    setLoop((prev) => (sameLoop(prev, nextLoop) ? prev : nextLoop))
   }, [workspacePath, runId])
 
   useEffect(() => {
@@ -86,8 +117,11 @@ export function useRunGoal(opts: {
   const hasVisibleGoal = Boolean(goal && goal.status !== 'complete')
   const hasArmedLoop = loop?.status === 'armed'
   useEffect(() => {
-    if (!active || !workspacePath || !runId) return
-    const ms = running && (hasVisibleGoal || hasArmedLoop) ? LIVE_POLL_MS : POLL_MS
+    // Same L-12 gate as useRunTodos: a mounted pane must not keep polling
+    // artifacts on an idle run forever. State arrives via `goal_update` /
+    // `loop_update` push events while the run is live.
+    if (!active || !running || !workspacePath || !runId) return
+    const ms = hasVisibleGoal || hasArmedLoop ? LIVE_POLL_MS : POLL_MS
     const id = window.setInterval(() => {
       void load()
     }, ms)
@@ -99,9 +133,11 @@ export function useRunGoal(opts: {
     return window.vyotiq.onChatEvent((event: AgentEvent) => {
       if (event.runId !== runId) return
       if (event.type === 'goal_update') {
-        setGoal(event.goal)
+        setGoal((prev) => (sameGoal(prev, event.goal) ? prev : event.goal))
       }
-      if (event.type === 'loop_update') setLoop(event.loop)
+      if (event.type === 'loop_update') {
+        setLoop((prev) => (sameLoop(prev, event.loop) ? prev : event.loop))
+      }
     })
   }, [runId])
 
@@ -116,7 +152,7 @@ export function useRunGoal(opts: {
       pushToast(res.error, 'error')
       return false
     }
-    setGoal(res.data.goal)
+    setGoal((prev) => (sameGoal(prev, res.data.goal) ? prev : res.data.goal))
     return true
   }, [workspacePath, runId])
 
@@ -131,7 +167,7 @@ export function useRunGoal(opts: {
       pushToast(res.error, 'error')
       return false
     }
-    setGoal(res.data.goal)
+    setGoal((prev) => (sameGoal(prev, res.data.goal) ? prev : res.data.goal))
     return true
   }, [workspacePath, runId])
 
@@ -146,7 +182,7 @@ export function useRunGoal(opts: {
       pushToast(res.error, 'error')
       return false
     }
-    setGoal(res.data.goal)
+    setGoal((prev) => (sameGoal(prev, res.data.goal) ? prev : res.data.goal))
     return true
   }, [workspacePath, runId])
 
@@ -161,7 +197,7 @@ export function useRunGoal(opts: {
       pushToast(res.error, 'error')
       return false
     }
-    setLoop(res.data.loop)
+    setLoop((prev) => (sameLoop(prev, res.data.loop) ? prev : res.data.loop))
     return true
   }, [workspacePath, runId])
 

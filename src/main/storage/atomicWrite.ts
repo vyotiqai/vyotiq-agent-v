@@ -19,8 +19,19 @@ import { randomBytes } from 'crypto'
 /** Transient Windows locks (AV / indexer / concurrent handle) — not real permission denials on POSIX. */
 const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY'])
 
-/** Backoff between rename attempts (Windows only). */
+/** Backoff between rename attempts for the async writer (Windows only). */
 const RENAME_RETRY_DELAYS_MS = [10, 25, 50, 100, 200] as const
+
+/**
+ * Backoff for the *synchronous* writer. `sleepSync` parks the whole main thread
+ * via `Atomics.wait`, so every millisecond here is a millisecond the entire app
+ * (all windows) cannot repaint or answer IPC. The async ladder above totals
+ * 385 ms, which turned every per-step checkpoint write into a visible freeze
+ * once Windows AV/indexer contention made the retries the common path. Keep
+ * the attempt count (transient EPERM usually clears on the immediate retry) and
+ * shrink the waits to a total of ~18 ms.
+ */
+const RENAME_RETRY_DELAYS_MS_SYNC = [0, 1, 2, 5, 10] as const
 
 export function isTransientRenameError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false
@@ -33,6 +44,13 @@ function sleepSync(ms: number): void {
   const sab = new SharedArrayBuffer(4)
   const ia = new Int32Array(sab)
   Atomics.wait(ia, 0, 0, ms)
+}
+
+/** Worst-case main-thread stall contributed by one synchronous atomic write. */
+export function syncRenameWorstCaseDelayMs(): number {
+  let total = 0
+  for (const ms of RENAME_RETRY_DELAYS_MS_SYNC) total += ms
+  return total
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -58,7 +76,7 @@ export type AtomicWriteGuard = () => void | Promise<void>
 /** Sync rename with Windows backoff on EPERM/EACCES/EBUSY. */
 export function renameSyncWithRetry(from: string, to: string, deps: RenameRetryDeps = {}): void {
   const isWindows = deps.isWindows ?? process.platform === 'win32'
-  const delays = deps.delaysMs ?? RENAME_RETRY_DELAYS_MS
+  const delays = deps.delaysMs ?? RENAME_RETRY_DELAYS_MS_SYNC
   const doRename = deps.renameSyncFn ?? renameSync
   const sleep = deps.sleepSyncFn ?? sleepSync
 

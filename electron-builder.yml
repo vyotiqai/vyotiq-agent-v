@@ -7,13 +7,22 @@ directories:
 asar: true
 compression: maximum
 files:
-  - 'NOTICE'
+  # Every matcher that copies app files must carry the FULL exclusion list:
+  # a matcher left ignore-only gets `**/*` prepended by AppFileWalker and its
+  # file set unions with the others, re-including excluded trees. Platform
+  # `files` sets below therefore repeat these app exclusions before their
+  # native trims. The leading positive pattern is required too.
+  - '**/*'
   - '!**/.vscode/*'
-  - '!src/*'
+  - '!src/**'
   - '!tests/**'
   - '!docs/**'
   - '!landing/**'
-  - '!dist-package*/**'
+  - '!scripts/**'
+  - '!audit/**'
+  - '!remediation/**'
+  - '!tmp-os-evidence/**'
+  - '!dist-*/**'
   - '!resources/harness/proposals/**'
   - '!resources/branding/**'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
@@ -28,14 +37,11 @@ files:
   - '!**/node_modules/**/{test,tests,__tests__,doc,docs,examples}/**'
   - '!**/node_modules/**/*.md'
   - '!**/node_modules/**/*.map'
-  # onnxruntime-web (~107 MB packed): never loaded at runtime. No src import
-  # (only comments in dictation/qwen3AsrOrt.ts:6 and qwen3AsrOrtLoader.ts:3);
-  # every @huggingface/transformers call site (dictation/local.ts:145,
-  # dictation/whisperUtility.ts:74, dictation/qwen3AsrOrtLoader.ts:79,
-  # codeindex/embedUtility.ts:227, codeindex/mdenseon.ts:200,
-  # codeindex/onnxGeneric.ts:84) runs in the Electron main process /
-  # utilityProcess, where transformers.js resolves its onnxruntime-node
-  # backend; qwen3AsrOrtLoader imports onnxruntime-node directly.
+  # onnxruntime-web (~107 MB packed): never loaded at runtime. No src import;
+  # every @huggingface/transformers call site (dictation/local.ts,
+  # dictation/whisperUtility.ts, codeindex/embedUtility.ts, codeindex/mdenseon.ts,
+  # codeindex/onnxGeneric.ts) runs in the Electron main process /
+  # utilityProcess, where transformers.js resolves its onnxruntime-node backend.
   - '!**/node_modules/onnxruntime-web/**'
   # gpt-tokenizer: src/ is TypeScript (cjs/esm are loaded at runtime), and only
   # o200k_base + cl100k_base encodings are imported (agent/context/tokenizer.ts:2-3,
@@ -67,7 +73,11 @@ extraResources:
   - from: resources/codeindex/wasm
     to: codeindex/wasm
 asarUnpack:
-  - resources/**
+  # Runtime only reads icons from app.asar.unpacked (window.ts:39,
+  # notifications/service.ts:99 — both fall back to the asar copy).
+  # harness/marketplace/codeindex resolve via process.resourcesPath
+  # (extraResources), so unpacking resources/** only duplicated ~13 MB.
+  - 'resources/icon.*'
   # Native addons cannot load from asar. Unpack .node files and ORT shared libs
   # (dll/so/dylib sit beside the binding). pnpm nests under .pnpm — use ** globs.
   # Do not unpack @huggingface/transformers (JS/WASM only; no .node).
@@ -86,20 +96,43 @@ win:
   # once the signing cert is always present in the release environment.
   # Win x64 only — drop other onnxruntime natives (~150 MB). macOS/Linux keep theirs.
   files:
-    - '!**/onnxruntime-node/bin/napi-v6/darwin/**'
-    - '!**/onnxruntime-node/bin/napi-v6/linux/**'
-    - '!**/onnxruntime-node/bin/napi-v6/win32/arm64/**'
-    # node-pty: keep win32-x64 prebuilds only (platform-wrong).
-    - '!**/node_modules/node-pty/prebuilds/{darwin,linux}*/**'
-    - '!**/node_modules/node-pty/prebuilds/win32-arm64/**'
-    # node-llama-cpp: other-OS platform binaries (platform-wrong).
-    - '!**/node_modules/@node-llama-cpp/{linux,mac}-*/**'
-    # GPU backend = Vulkan (94.7 MB). CUDA variants (cuda 162.8 MB +
-    # cuda-ext 346.1 MB) are excluded to keep the installer < 500 MB — see
-    # docs/installer-size-audit.md for the CUDA-kept alternative (~+490 MB raw).
-    - '!**/node_modules/@node-llama-cpp/win-x64-cuda/**'
-    - '!**/node_modules/@node-llama-cpp/win-x64-cuda-ext/**'
-    - '!**/node_modules/@node-llama-cpp/win-arm64/**'
+    # App exclusions repeat here — see the `files:` comment above.
+    - from: .
+      filter:
+        - '!**/.vscode/*'
+        - '!src/**'
+        - '!tests/**'
+        - '!docs/**'
+        - '!landing/**'
+        - '!scripts/**'
+        - '!audit/**'
+        - '!remediation/**'
+        - '!tmp-os-evidence/**'
+        - '!dist-*/**'
+        - '!resources/harness/proposals/**'
+        - '!resources/branding/**'
+        - '!electron.vite.config.{js,ts,mjs,cjs}'
+        - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md}'
+        - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+        - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+        - '!**/*.{md,map}'
+        - '!**/tree-sitter-wasms/**'
+        - '!build{,/**/*}'
+        - '!{.git,.github,.cursor,.vyotiq}/**'
+        - '!**/onnxruntime-node/bin/napi-v6/darwin/**'
+        - '!**/onnxruntime-node/bin/napi-v6/linux/**'
+        - '!**/onnxruntime-node/bin/napi-v6/win32/arm64/**'
+        # node-pty: keep win32-x64 prebuilds only (platform-wrong).
+        - '!**/node_modules/node-pty/prebuilds/{darwin,linux}*/**'
+        - '!**/node_modules/node-pty/prebuilds/win32-arm64/**'
+        # node-llama-cpp: other-OS platform binaries (platform-wrong).
+        - '!**/node_modules/@node-llama-cpp/{linux,mac}-*/**'
+        # GPU backend = Vulkan (94.7 MB). CUDA variants (cuda 162.8 MB +
+        # cuda-ext 346.1 MB) are excluded to keep the installer < 500 MB — see
+        # docs/installer-size-audit.md for the CUDA-kept alternative (~+490 MB raw).
+        - '!**/node_modules/@node-llama-cpp/win-x64-cuda/**'
+        - '!**/node_modules/@node-llama-cpp/win-x64-cuda-ext/**'
+        - '!**/node_modules/@node-llama-cpp/win-arm64/**'
   executableName: Vyotiq
 nsis:
   artifactName: ${productName}-${version}-setup.${ext}
@@ -126,12 +159,35 @@ mac:
     NSMicrophoneUsageDescription: Vyotiq uses the microphone for voice dictation.
   notarize: false
   files:
-    - '!**/onnxruntime-node/bin/napi-v6/linux/**'
-    - '!**/onnxruntime-node/bin/napi-v6/win32/**'
-    # node-pty: keep darwin prebuilds only (platform-wrong).
-    - '!**/node_modules/node-pty/prebuilds/{win32,linux}*/**'
-    # node-llama-cpp: other-OS platform binaries (platform-wrong).
-    - '!**/node_modules/@node-llama-cpp/{win,linux}-*/**'
+    # App exclusions repeat here — see the `files:` comment above.
+    - from: .
+      filter:
+        - '!**/.vscode/*'
+        - '!src/**'
+        - '!tests/**'
+        - '!docs/**'
+        - '!landing/**'
+        - '!scripts/**'
+        - '!audit/**'
+        - '!remediation/**'
+        - '!tmp-os-evidence/**'
+        - '!dist-*/**'
+        - '!resources/harness/proposals/**'
+        - '!resources/branding/**'
+        - '!electron.vite.config.{js,ts,mjs,cjs}'
+        - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md}'
+        - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+        - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+        - '!**/*.{md,map}'
+        - '!**/tree-sitter-wasms/**'
+        - '!build{,/**/*}'
+        - '!{.git,.github,.cursor,.vyotiq}/**'
+        - '!**/onnxruntime-node/bin/napi-v6/linux/**'
+        - '!**/onnxruntime-node/bin/napi-v6/win32/**'
+        # node-pty: keep darwin prebuilds only (platform-wrong).
+        - '!**/node_modules/node-pty/prebuilds/{win32,linux}*/**'
+        # node-llama-cpp: other-OS platform binaries (platform-wrong).
+        - '!**/node_modules/@node-llama-cpp/{win,linux}-*/**'
 dmg:
   # ${arch} keeps arm64/x64 DMGs from colliding: both are uploaded to the same
   # GitHub release by the single macOS job in release.yml, and latest-mac.yml
@@ -143,19 +199,42 @@ linux:
   maintainer: vyotiq.com
   category: Development
   files:
-    - '!**/onnxruntime-node/bin/napi-v6/darwin/**'
-    - '!**/onnxruntime-node/bin/napi-v6/win32/**'
-    # node-pty: keep linux prebuilds only (platform-wrong).
-    - '!**/node_modules/node-pty/prebuilds/{win32,darwin}*/**'
-    # node-llama-cpp: other-OS platform binaries (platform-wrong).
-    - '!**/node_modules/@node-llama-cpp/{win,mac}-*/**'
-    # GPU backend = Vulkan. CUDA variants (linux-x64-cuda + linux-x64-cuda-ext,
-    # ~163 + ~346 MB like their win counterparts) are excluded to keep the
-    # AppImage < 500 MB — see docs/installer-size-audit.md for the CUDA-kept
-    # alternative table.
-    - '!**/node_modules/@node-llama-cpp/linux-x64-cuda/**'
-    - '!**/node_modules/@node-llama-cpp/linux-x64-cuda-ext/**'
-    - '!**/node_modules/@node-llama-cpp/linux-{arm64,armv7l,riscv64}/**'
+    # App exclusions repeat here — see the `files:` comment above.
+    - from: .
+      filter:
+        - '!**/.vscode/*'
+        - '!src/**'
+        - '!tests/**'
+        - '!docs/**'
+        - '!landing/**'
+        - '!scripts/**'
+        - '!audit/**'
+        - '!remediation/**'
+        - '!tmp-os-evidence/**'
+        - '!dist-*/**'
+        - '!resources/harness/proposals/**'
+        - '!resources/branding/**'
+        - '!electron.vite.config.{js,ts,mjs,cjs}'
+        - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md}'
+        - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+        - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+        - '!**/*.{md,map}'
+        - '!**/tree-sitter-wasms/**'
+        - '!build{,/**/*}'
+        - '!{.git,.github,.cursor,.vyotiq}/**'
+        - '!**/onnxruntime-node/bin/napi-v6/darwin/**'
+        - '!**/onnxruntime-node/bin/napi-v6/win32/**'
+        # node-pty: keep linux prebuilds only (platform-wrong).
+        - '!**/node_modules/node-pty/prebuilds/{win32,darwin}*/**'
+        # node-llama-cpp: other-OS platform binaries (platform-wrong).
+        - '!**/node_modules/@node-llama-cpp/{win,mac}-*/**'
+        # GPU backend = Vulkan. CUDA variants (linux-x64-cuda + linux-x64-cuda-ext,
+        # ~163 + ~346 MB like their win counterparts) are excluded to keep the
+        # AppImage < 500 MB — see docs/installer-size-audit.md for the CUDA-kept
+        # alternative table.
+        - '!**/node_modules/@node-llama-cpp/linux-x64-cuda/**'
+        - '!**/node_modules/@node-llama-cpp/linux-x64-cuda-ext/**'
+        - '!**/node_modules/@node-llama-cpp/linux-{arm64,armv7l,riscv64}/**'
 appImage:
   artifactName: ${productName}-${version}.${ext}
 npmRebuild: false

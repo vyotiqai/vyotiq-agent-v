@@ -169,6 +169,52 @@ describe('SSE frame parsing', () => {
   it('exposes the default idle threshold at 10 minutes', () => {
     expect(STREAM_IDLE_TIMEOUT_MS).toBe(10 * 60 * 1000)
   })
+
+  it('fails an oversized unterminated SSE line instead of buffering it unbounded', async () => {
+    const { res, cancelled } = neverEndingResponse(['data: ' + 'x'.repeat(256)])
+    const pending = (async () => {
+      for await (const _data of iterateSseData(res, new AbortController().signal, {
+        maxLineChars: 64
+      })) {
+        // no complete frames expected
+      }
+    })()
+    await expect(pending).rejects.toMatchObject({
+      name: 'SseFrameTooLargeError',
+      limitChars: 64
+    })
+    expect(cancelled()).toBe(true)
+  })
+
+  it('fails a joined data frame past the frame budget', async () => {
+    const { res } = chunkedResponse([
+      'data: ' + 'a'.repeat(40) + '\n',
+      'data: ' + 'b'.repeat(40) + '\n\n'
+    ])
+    const pending = (async () => {
+      for await (const _data of iterateSseData(res, new AbortController().signal, {
+        maxFrameChars: 64
+      })) {
+        // no complete frames expected
+      }
+    })()
+    await expect(pending).rejects.toMatchObject({
+      name: 'SseFrameTooLargeError',
+      limitChars: 64
+    })
+  })
+
+  it('does not trip the line cap on a chunk holding many complete frames', async () => {
+    const frames = Array.from({ length: 40 }, (_, i) => `data: {"i":${i}}\n\n`).join('')
+    const { res } = chunkedResponse([frames])
+    const out: string[] = []
+    for await (const data of iterateSseData(res, new AbortController().signal, {
+      maxLineChars: 64
+    })) {
+      out.push(data)
+    }
+    expect(out).toHaveLength(40)
+  })
 })
 
 describe('anthropic stream usage', () => {
@@ -252,6 +298,52 @@ describe('openai responses stream', () => {
     const error = chunks.find((c) => c.type === 'error')
 
     expect(error?.error).toContain('The model produced invalid content.')
+  })
+
+  it('retries without an unknown optional field on strict gateways (Console Go responses)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              message: 'invalid request body: json: unknown field "prompt_cache_options"',
+              type: 'invalid_request_error'
+            }
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        sseBody([
+          'data: {"type":"response.output_text.delta","delta":"ok"}\n\n',
+          'data: {"type":"response.completed","response":{"id":"resp_1"}}\n\n'
+        ])
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const chunks = await collect(
+      streamOpenAiResponses(
+        baseReq({ model: 'gpt-5.6-luna', promptCacheKey: 'run-x' }),
+        'https://opencode.ai/zen/go/v1/responses',
+        { 'x-opencode-session': 'run-x' },
+        'opencode'
+      )
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)) as Record<
+      string,
+      unknown
+    >
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]![1]?.body)) as Record<
+      string,
+      unknown
+    >
+    expect(firstBody.prompt_cache_options).toEqual({ mode: 'explicit', ttl: '30m' })
+    expect(secondBody.prompt_cache_options).toBeUndefined()
+    expect(secondBody.prompt_cache_key).toBe('run-x')
+    expect(chunks.some((c) => c.type === 'text' && c.text === 'ok')).toBe(true)
   })
 
   it('streams tool call argument deltas keyed by item_id', async () => {
@@ -891,6 +983,167 @@ describe('mistral ThinkChunk stream', () => {
     }
     expect(firstBody.stream_options).toEqual({ include_usage: true })
     expect(secondBody.stream_options).toBeUndefined()
+    expect(chunks.some((c) => c.type === 'text' && c.text === 'ok')).toBe(true)
+  })
+
+  it('strips the optional field a strict host names as unknown and retries (Console Go: invalid request body: json: unknown field "include_reasoning")', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              message: 'invalid request body: json: unknown field "include_reasoning"',
+              type: 'invalid_request_error'
+            }
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        sseBody([
+          'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+          'data: {"choices":[{"finish_reason":"stop"}]}\n\n'
+        ])
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { customProvider } = await import('@main/agent/providers/openai')
+    const chunks = await collect(
+      customProvider.streamChat(
+        baseReq({
+          model: 'local-model',
+          baseUrl: 'http://127.0.0.1:8080/v1',
+          thinking: { enabled: true, effort: 'high', display: 'summarized' }
+        })
+      )
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)) as {
+      include_reasoning?: unknown
+    }
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]![1]?.body)) as {
+      include_reasoning?: unknown
+    }
+    expect(firstBody.include_reasoning).toBe(true)
+    expect(secondBody.include_reasoning).toBeUndefined()
+    expect(secondBody.reasoning_effort).toBe('high')
+    expect(chunks.some((c) => c.type === 'text' && c.text === 'ok')).toBe(true)
+  })
+
+  it('strips a message-level field the strict host names and retries (json: unknown field "reasoning_content")', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              message: 'invalid request body: json: unknown field "reasoning_content"',
+              type: 'invalid_request_error'
+            }
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        sseBody([
+          'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+          'data: {"choices":[{"finish_reason":"stop"}]}\n\n'
+        ])
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { customProvider } = await import('@main/agent/providers/openai')
+    const chunks = await collect(
+      customProvider.streamChat(
+        baseReq({
+          model: 'deepseek-ai/DeepSeek-V4-Flash-0731',
+          baseUrl: 'https://api.deepinfra.com/v1/openai',
+          thinking: { enabled: true, effort: 'high', display: 'summarized' },
+          messages: [
+            {
+              role: 'assistant',
+              content: '',
+              thinking: 'plan steps',
+              reasoningState: { kind: 'openai_compat', reasoningContent: 'plan steps' },
+              toolCalls: [{ id: 'c1', name: 'read', arguments: '{}' }]
+            },
+            { role: 'tool', toolCallId: 'c1', content: '{}' }
+          ]
+        })
+      )
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const assistantOf = (call: number): Record<string, unknown> | undefined => {
+      const body = JSON.parse(String(fetchMock.mock.calls[call]![1]?.body)) as {
+        messages: Array<Record<string, unknown>>
+      }
+      return body.messages.find((m) => m.role === 'assistant')
+    }
+    expect(assistantOf(0)?.reasoning_content).toBe('plan steps')
+    expect(assistantOf(1)?.reasoning_content).toBeUndefined()
+    expect(chunks.some((c) => c.type === 'text' && c.text === 'ok')).toBe(true)
+  })
+
+  it('retries with sanitized tool schemas when the host rejects schema keywords', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              message:
+                'unsupported_tool_schema: The tool schema is not supported (unsupported_keyword)',
+              type: 'invalid_request_error'
+            }
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        sseBody([
+          'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+          'data: {"choices":[{"finish_reason":"stop"}]}\n\n'
+        ])
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { customProvider } = await import('@main/agent/providers/openai')
+    const chunks = await collect(
+      customProvider.streamChat(
+        baseReq({
+          model: 'local-model',
+          baseUrl: 'http://127.0.0.1:8080/v1',
+          tools: [
+            {
+              name: 'lookup',
+              description: 'lookup',
+              parameters: {
+                type: 'object',
+                properties: { id: { type: 'string', format: 'uuid' } },
+                required: ['id'],
+                additionalProperties: false
+              }
+            }
+          ]
+        })
+      )
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const paramsOf = (call: number): Record<string, unknown> => {
+      const body = JSON.parse(String(fetchMock.mock.calls[call]![1]?.body)) as {
+        tools: Array<{ function: { parameters: Record<string, unknown> } }>
+      }
+      return body.tools[0]!.function.parameters
+    }
+    expect(paramsOf(0).additionalProperties).toBe(false)
+    expect(paramsOf(1).additionalProperties).toBeUndefined()
+    expect(
+      (paramsOf(1).properties as Record<string, Record<string, unknown>>).id!.format
+    ).toBeUndefined()
     expect(chunks.some((c) => c.type === 'text' && c.text === 'ok')).toBe(true)
   })
 

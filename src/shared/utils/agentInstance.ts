@@ -7,7 +7,10 @@ export type AgentInstanceUiState = {
 }
 
 export function formatAgentInstanceLabel(runId: string): string {
-  return `Agent V Instance id; ${runId}`
+  // Full run_id stays first and machine-parsable (parseAgentInstanceRunId captures
+  // the token right after the label); the short id is the ledger-chip prefix so
+  // timeout/error text correlates with instance rows in the UI.
+  return `Agent V Instance id; ${runId} (short ${formatAgentInstanceShortId(runId)})`
 }
 
 /** Short prefix for tool headers and compact rows (first UUID segment). */

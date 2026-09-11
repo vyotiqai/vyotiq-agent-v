@@ -36,6 +36,13 @@ export function useGitRevision(
   const prevPathRef = useRef<string | null | undefined>(undefined)
   const itemsRef = useRef(items)
   itemsRef.current = items
+  /**
+   * With a store, subscription drives rescans — including `items` in the deps
+   * tore the effect down and re-scanned on every streamed patch. Without a
+   * store, the prop is the only signal, so it stays a dependency there. Null
+   * here is a stable value, never a per-render fresh array.
+   */
+  const fallbackItems = itemsStore ? null : items
 
   useEffect(() => {
     if (wasRunning.current && !running) setRevision((value) => value + 1)
@@ -77,22 +84,30 @@ export function useGitRevision(
       unsubscribe?.()
       if (timer != null) window.clearTimeout(timer)
     }
-  }, [itemsStore, items, running])
+  }, [itemsStore, fallbackItems, running])
 
   return [revision, bump]
 }
 
-function useLiveItems(itemsStore: ChatItemsStore | undefined, items: UiItem[]): UiItem[] {
+function useLiveItems(
+  itemsStore: ChatItemsStore | undefined,
+  items: UiItem[],
+  enabled = true
+): UiItem[] {
   const subscribeItems = itemsStore?.subscribeItems
   const getItemsRevision = itemsStore?.getItemsRevision
   const getItems = itemsStore?.getItems
   const subscribe = useCallback(
-    (onStoreChange: () => void) => subscribeItems?.(onStoreChange) ?? (() => {}),
-    [subscribeItems]
+    (onStoreChange: () => void) =>
+      enabled ? (subscribeItems?.(onStoreChange) ?? (() => {})) : () => {},
+    [subscribeItems, enabled]
   )
-  const getRevision = useCallback(() => getItemsRevision?.() ?? 0, [getItemsRevision])
+  const getRevision = useCallback(
+    () => (enabled ? (getItemsRevision?.() ?? 0) : 0),
+    [getItemsRevision, enabled]
+  )
   useSyncExternalStore(subscribe, getRevision, getRevision)
-  return getItems ? getItems() : items
+  return enabled && getItems ? getItems() : items
 }
 
 /**
@@ -145,9 +160,10 @@ export function useHasChatItems(
 
 export function useChatLiveItems(
   itemsStore: ChatItemsStore | undefined,
-  items: UiItem[]
+  items: UiItem[],
+  enabled = true
 ): UiItem[] {
-  return useLiveItems(itemsStore, items)
+  return useLiveItems(itemsStore, items, enabled)
 }
 
 /** Turn receipts — subscribe on the transcript leaf, not ChatView. */

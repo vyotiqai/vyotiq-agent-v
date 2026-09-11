@@ -45,6 +45,22 @@ describe('collectWorkspaceFiles', () => {
     }
   })
 
+  it('skips dist-* build output directories but keeps dist-named files', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'vyotiq-walk-dist-'))
+    try {
+      writeFileSync(join(root, 'a.ts'), 'export const a = 1\n', 'utf8')
+      writeFileSync(join(root, 'dist-notes.ts'), 'export const n = 1\n', 'utf8')
+      mkdirSync(join(root, 'dist-verify'))
+      writeFileSync(join(root, 'dist-verify', 'bundle.ts'), 'export {}\n', 'utf8')
+      mkdirSync(join(root, 'dist-package'))
+      writeFileSync(join(root, 'dist-package', 'x.ts'), 'export {}\n', 'utf8')
+      const files = await collectWorkspaceFiles(root, 100, undefined, TEXT_EXTS)
+      expect(files.map((f) => f.rel).sort()).toEqual(['a.ts', 'dist-notes.ts'])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('skips lockfiles and minified dumps but still lists tests', async () => {
     const root = mkdtempSync(join(tmpdir(), 'vyotiq-walk-clutter-'))
     try {

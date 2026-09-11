@@ -19,7 +19,13 @@ import {
 } from '@main/agent/providers/opencode'
 
 // Endpoints table from https://opencode.ai/docs/go/ — structural routing only.
-const RESPONSES_ENDPOINT_MODELS = ['grok-4.5', 'gpt-5.6-luna', 'muse-spark-1.2-contributor']
+const RESPONSES_ENDPOINT_MODELS = [
+  'grok-4.5',
+  'grok-4.6',
+  'gpt-5.6-luna',
+  'muse-spark-1.2-contributor',
+  'muse-spark-1.3-contributor'
+]
 const MESSAGES_ENDPOINT_MODELS = [
   'minimax-m3',
   'minimax-m2.7',
@@ -32,9 +38,10 @@ const MESSAGES_ENDPOINT_MODELS = [
 
 // Resolve the live models.dev `opencode-go` registry before any assertion that
 // depends on runtime-fetched metadata (context windows, effort ladders).
+// 30s: the public fetch can exceed vitest's 10s default under full-suite load.
 beforeAll(async () => {
   await loadOpenCodeGoCatalog()
-})
+}, 30_000)
 
 describe('OpenCode Go (opencode) provider wiring', () => {
   it('is a recognized provider id', () => {
@@ -68,8 +75,6 @@ describe('OpenCode Go (opencode) provider wiring', () => {
   })
 
   it('defaults every other routed model to chat completions', () => {
-    const routed = new Set([...RESPONSES_ENDPOINT_MODELS, ...MESSAGES_ENDPOINT_MODELS])
-    for (const id of [...routed].length ? [] : []) void id // (kept for clarity)
     // Spot-check documented chat models route to chat.
     for (const id of ['kimi-k3', 'glm-5.2', 'deepseek-v4-pro', 'hy3', 'longcat-2.0']) {
       expect(opencodeEndpointFor(id)).toBe('chat')
@@ -112,7 +117,8 @@ describe('OpenCode Go (opencode) provider wiring', () => {
     const minimax = models.get('minimax-m3')!
     expect(minimax.thinkingApi).toBe('messages')
     expect(minimax.supportedThinkingEfforts).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
-    expect(minimax.thinkingMode).toBe('effort')
+    // Messages mount is Anthropic-native: budget policy, not the effort dialect.
+    expect(minimax.thinkingMode).toBe('manual')
 
     const glm = models.get('glm-5.2')!
     expect(glm.thinkingApi).toBe('chat_completions')
@@ -123,6 +129,9 @@ describe('OpenCode Go (opencode) provider wiring', () => {
     expect(glm53.thinkingApi).toBe('chat_completions')
     expect(glm53.supportedThinkingEfforts).toEqual(['low', 'high', 'max'])
     expect(glm53.thinkingCanDisable).toBe(false)
+
+    // hy3 declares an `effort: none` rung, so disable must stay available.
+    expect(models.get('hy3')!.thinkingCanDisable).toBe(true)
 
     // Registry marks every Go model reasoning-capable — even non-family ids.
     for (const id of ['longcat-2.0', 'hy3', 'mimo-v2.5', 'ox-alpha-free']) {
@@ -160,6 +169,10 @@ describe('OpenCode Go (opencode) provider wiring', () => {
 describe('opencode chat transport prompt-cache wiring', () => {
   it('ships enablePromptCache so the loop promptCacheKey reaches the wire', () => {
     expect(OPENCODE_CHAT_OPTS.enablePromptCache).toBe(true)
+  })
+
+  it('ships optionalApiKey so the public /models catalog loads before a key is saved (live: HTTP 200 keyless)', () => {
+    expect(OPENCODE_CHAT_OPTS.optionalApiKey).toBe(true)
   })
 
   it('ships stripReasoningReplay so prior-turn reasoning never re-enters history (live 6265fa90: ritual openers 21/24 steps, 98% of thinking bytes, zero compactions)', () => {
@@ -273,7 +286,8 @@ describe('opencode non-chat transport cache wiring (regression pins)', () => {
       )
     )
 
-    expect(capturedUrl).toBe(`${OPENCODE_GO_BASE}/responses`)
+    expect(OPENCODE_GO_BASE).toBe('https://opencode.ai/zen/go/v1')
+    expect(capturedUrl).toBe('https://opencode.ai/zen/go/v1/responses')
     expect(capturedBody?.prompt_cache_key).toBe('run-xyz')
   })
 

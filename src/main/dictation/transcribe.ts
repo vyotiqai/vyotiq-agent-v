@@ -7,7 +7,6 @@ import {
   type DictationTranscribeRequest,
   type DictationTranscribeResult
 } from '../../shared/ipc'
-import { dictationCatalogEntry, isQwen3AsrModelId } from '../../shared/dictation'
 import { transcribeLocalDictation } from './local'
 
 const OPENAI_TRANSCRIBE_URL = 'https://api.openai.com/v1/audio/transcriptions'
@@ -154,44 +153,6 @@ async function transcribeOpenRouter(
   })
 }
 
-async function transcribeQwen3Asr(
-  request: DictationTranscribeRequest,
-  signal?: AbortSignal
-): Promise<DictationTranscribeResult> {
-  const dictation = getSettings().dictation
-  const localModelId = dictation?.localModelId ?? ''
-  if (!localModelId || !isQwen3AsrModelId(localModelId)) {
-    throw new Error('Select a Qwen3-ASR model in Settings → Voice to use dictation')
-  }
-  const entry = dictationCatalogEntry(localModelId)
-  const serverUrl = (dictation?.qwen3AsrServerUrl ?? '').trim()
-  if (!serverUrl) {
-    throw new Error('Set the Qwen3-ASR server URL in Settings → Voice (e.g. http://127.0.0.1:8000/v1)')
-  }
-  const base = serverUrl.replace(/\/+$/, '')
-  const url = `${base}/audio/transcriptions`
-  const bytes = decodeAudioBytes(request.data)
-  const mime = (request.mime || 'audio/webm').split(';')[0]?.trim() || 'audio/webm'
-  try {
-    return await postCloudTranscription({
-      url,
-      apiKey: dictation?.qwen3AsrApiKey,
-      model: entry.hubRepo,
-      bytes,
-      mime,
-      signal
-    })
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    if (/fetch failed|ECONNREFUSED|network/i.test(msg)) {
-      throw new Error(
-        `Could not reach the Qwen3-ASR server at ${base}. Start vLLM/qwen-asr-serve and check the URL in Settings → Voice.`
-      )
-    }
-    throw err
-  }
-}
-
 function currentEngine(): DictationEngine {
   try {
     return getSettings().dictation?.engine ?? 'openai'
@@ -219,10 +180,6 @@ export async function transcribeDictation(
     case 'openrouter':
       return transcribeOpenRouter(request, signal)
     case 'local':
-      return transcribeLocalDictation(request, signal)
-    case 'qwen3-asr':
-      return transcribeQwen3Asr(request, signal)
-    case 'qwen3-asr-onnx':
       return transcribeLocalDictation(request, signal)
     default: {
       const _exhaustive: never = engine

@@ -4,6 +4,7 @@
  * (same workspace id as sessions — see storage/paths.ts).
  */
 import { existsSync } from 'fs'
+import { rm, rmdir } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { canonicalizeWorkspacePath } from '../../shared/workspacePath'
@@ -32,6 +33,40 @@ function resolveWorkspacesRoot(): string {
 
 export function workspaceIndexStorageId(workspacePath: string): string {
   return workspaceIdFromCanonical(canonicalizeWorkspacePath(workspacePath))
+}
+
+/** Per-workspace derived index storage dir (`…/workspaces/{id}`). */
+export function workspaceIndexStorageDir(workspacePath: string): string {
+  return join(resolveWorkspacesRoot(), workspaceIndexStorageId(workspacePath))
+}
+
+/**
+ * Remove a workspace's derived index storage (codeindex + sparsegrep). Used
+ * when an instance worktree is torn down: its storage id is keyed by the
+ * ephemeral worktree path, so nothing else can ever reference it again.
+ * Idempotent and best-effort — a held SQLite handle delays removal to the
+ * retention sweep instead of failing the worktree teardown.
+ */
+export async function removeWorkspaceIndexStorage(workspacePath: string): Promise<void> {
+  const dir = workspaceIndexStorageDir(workspacePath)
+  for (const name of ['codeindex', 'sparsegrep']) {
+    try {
+      await rm(join(dir, name), {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 120
+      })
+    } catch {
+      // Locked by the embed utility or a still-exiting child — leave it; the
+      // dir is untracked and the retention report surfaces it.
+    }
+  }
+  try {
+    await rmdir(dir)
+  } catch {
+    // Not empty (another surface wrote here) or already gone.
+  }
 }
 
 export function codeindexRoot(workspacePath: string): string {

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Main-process client for the long-lived ONNX + index-sync utilityProcess.
  * Prefer utilityProcess; on spawn failure retry once, then surface the error.
  * In-process only when VYOTIQ_INDEX_SYNC_IN_PROCESS / VYOTIQ_EMBED_IN_PROCESS / Vitest.
@@ -12,6 +12,13 @@ import type { SyncResult } from './sync'
 import type { SparseSyncResult } from '../sparsegrep/sync'
 import type { CandidateLookup } from '../sparsegrep/query'
 import type { WalkedFile } from '../tools/walk'
+import {
+  assertCircuitClosed,
+  circuitKeyEmbedUtility,
+  EMBED_UTILITY_CIRCUIT_POLICY,
+  recordCircuitFailure,
+  recordCircuitSuccess
+} from '../circuitBreaker'
 import { publishIndexSyncProgress } from './indexProgress'
 import type { CodeIndexSyncProgress } from '../../../shared/ipc/schemas/settings'
 
@@ -94,16 +101,25 @@ type Pending = {
   timer: ReturnType<typeof setTimeout>
   waitMs: number
   op: UtilityRequest['op']
-  /** Abort listener registered for this RPC — needed so timeout refresh can detach it. */
+  /** Absolute start â€” progress refreshes cannot extend a wedged request forever. */
+  startedAt: number
+  /** Last progress fingerprint; identical heartbeats must not count as activity. */
+  progressKey?: string
+  /** Abort listener registered for this RPC â€” needed so timeout refresh can detach it. */
   signal?: AbortSignal
   onAbort?: () => void
+  /** Utility process this RPC was posted to, so a stale child's exit cannot reject it. */
+  child?: UtilityChild
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000
-/** Idle timeout for long syncs — refreshed whenever the child posts progress. */
-const SYNC_IDLE_TIMEOUT_MS = 600_000
+/** Idle timeout for long syncs â€” refreshed only when progress counters advance. */
+const SYNC_IDLE_TIMEOUT_MS = 300_000
+/** Hard ceiling per RPC regardless of progress; a wedged ONNX child is killed. */
+const DEFAULT_ABSOLUTE_TIMEOUT_MS = 30 * 60_000
 const SPAWN_TIMEOUT_MS = 15_000
 const SPAWN_MAX_ATTEMPTS = 2
+const EMBED_UTILITY_CIRCUIT_KEY = circuitKeyEmbedUtility()
 /** After this much idle time, dispose ONNX and kill the utility child to free RSS. */
 const DEFAULT_IDLE_UNLOAD_MS = 5 * 60_000
 
@@ -156,6 +172,8 @@ export type EmbedUtilityClientOptions = {
   timeoutMs?: number
   /** Idle timeout for syncCode/syncSparse (refreshed on progress). */
   syncIdleTimeoutMs?: number
+  /** Hard ceiling per RPC; a wedged child is killed even if it keeps reporting progress. */
+  absoluteTimeoutMs?: number
   /**
    * After this many ms with no embed/sync/search traffic, dispose the ONNX
    * session and kill the utility child. `0` disables. Default 5 minutes
@@ -250,23 +268,27 @@ export class EmbedUtilityClient {
   private readonly pending = new Map<number, Pending>()
   private readonly timeoutMs: number
   private readonly syncIdleTimeoutMs: number
+  private readonly absoluteTimeoutMs: number
   private readonly idleUnloadMs: number
   private readonly forkImpl: ((script: string) => UtilityChild) | null
   private readonly scriptPath: string
   private modelId: string | null = null
   private dimensions = LIGHTON_DENSE_DIM
   private generation = 0
-  /** Last successful ensure — used to re-ensure after child exit/re-spawn. */
+  /** Last successful ensure â€” used to re-ensure after child exit/re-spawn. */
   private lastEnsure: { modelDir: string; modelId: string } | null = null
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   private lastActivityAt: number | null = null
   private cachedRssMb: number | null = null
   private cachedHeapUsedMb: number | null = null
   private idleUnloadInFlight = false
+  /** Set before an intentional `kill()` so the resulting exit is not a crash. */
+  private expectingExit = false
 
   constructor(opts: EmbedUtilityClientOptions = {}) {
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.syncIdleTimeoutMs = opts.syncIdleTimeoutMs ?? SYNC_IDLE_TIMEOUT_MS
+    this.absoluteTimeoutMs = opts.absoluteTimeoutMs ?? DEFAULT_ABSOLUTE_TIMEOUT_MS
     this.idleUnloadMs = opts.idleUnloadMs ?? resolveIdleUnloadMs()
     this.forkImpl = opts.forkImpl ?? null
     this.scriptPath = opts.scriptPath ?? defaultScriptPath()
@@ -297,7 +319,7 @@ export class EmbedUtilityClient {
         if (typeof res.heapUsedMb === 'number') this.cachedHeapUsedMb = res.heapUsedMb
       }
     } catch {
-      /* ignore — snapshot still has pid / sessionLoaded */
+      /* ignore â€” snapshot still has pid / sessionLoaded */
     }
     return this.getPerfStats()
   }
@@ -328,12 +350,23 @@ export class EmbedUtilityClient {
   }
 
   /**
+   * A stuck health probe must never keep a wedged child alive: pings are
+   * disposable, so only real work defers the idle unload.
+   */
+  private hasNonProbePending(): boolean {
+    for (const pending of this.pending.values()) {
+      if (pending.op !== 'ping') return true
+    }
+    return false
+  }
+
+  /**
    * Dispose ONNX in the child and kill the process so native ORT heaps are
    * released. Keeps `lastEnsure` so the next op can re-spawn + re-ensure.
    */
   async idleUnload(): Promise<void> {
     if (this.idleUnloadInFlight) return
-    if (this.pending.size > 0) {
+    if (this.hasNonProbePending()) {
       this.armIdleUnload()
       return
     }
@@ -347,9 +380,9 @@ export class EmbedUtilityClient {
       } catch {
         /* kill below still frees the process */
       }
-      // Requests may have arrived during the dispose await — defer unload rather
+      // Requests may have arrived during the dispose await â€” defer unload rather
       // than killing the child out from under them.
-      if (this.pending.size > 0) {
+      if (this.hasNonProbePending()) {
         this.armIdleUnload()
         return
       }
@@ -648,6 +681,21 @@ export class EmbedUtilityClient {
     }
   }
 
+  /**
+   * Reject only the RPCs that were posted to `child`.
+   *
+   * Used when a *previous* child exits: its replacement already owns newer
+   * requests, and failing those would cascade into another respawn.
+   */
+  private rejectPendingForChild(child: UtilityChild, err: Error): void {
+    for (const [id, p] of this.pending) {
+      if (p.child !== child) continue
+      clearTimeout(p.timer)
+      this.pending.delete(id)
+      p.reject(err)
+    }
+  }
+
   private sendCancel(targetId: number): void {
     const child = this.child
     if (!child || !this.spawned) return
@@ -660,28 +708,42 @@ export class EmbedUtilityClient {
   }
 
   /**
-   * Hung sync may kill the child (write chain). searchCode only kills when it
-   * is the sole in-flight RPC — otherwise an overlapping sync would be aborted
-   * via child `exit` → rejectAll. Counts others excluding `requestId` while
-   * that entry is still in `pending`.
+   * Any real RPC that exhausts its timeout means the child is unusable: a
+   * spinning ONNX Run cannot be soft-cancelled, so keeping the process alive
+   * just burns cores. Overlapping callers are rejected and retried by their own
+   * queues. Only health probes (`ping`) and the cancel message itself skip it.
    */
-  private shouldKillChildOnTimeout(op: UtilityRequest['op'], requestId: number): boolean {
-    if (op === 'syncCode' || op === 'syncSparse') return true
-    if (op !== 'searchCode') return false
-    for (const id of this.pending.keys()) {
-      if (id !== requestId) return false
-    }
-    return true
+  private shouldKillChildOnTimeout(op: UtilityRequest['op']): boolean {
+    return op !== 'ping' && op !== 'cancel'
   }
 
   /** Reset idle timer when the child is still making progress. */
-  private refreshPendingTimeout(requestId: number): void {
+  private refreshPendingTimeout(requestId: number, progressKey?: string): void {
     const pending = this.pending.get(requestId)
     if (!pending || !isLongRunningOp(pending.op)) return
+    if (Date.now() - pending.startedAt >= this.absoluteTimeoutMs) {
+      // Progress messages must not keep a wedged ONNX child alive indefinitely â€”
+      // a spinning inference never yields, so kill the process and respawn fresh.
+      this.failPending(requestId, new Error(`Embed utility exceeded max duration (${pending.op})`), {
+        killChild: true,
+        signal: pending.signal,
+        onAbort: pending.onAbort
+      })
+      return
+    }
+    if (progressKey != null) {
+      if (pending.progressKey === progressKey) {
+        // Heartbeat with identical counters: the child is reporting but not
+        // advancing (classic wedged-ONNX signature). Do NOT refresh â€” the idle
+        // timer armed at the last real advance fires and kills it.
+        return
+      }
+      pending.progressKey = progressKey
+    }
     clearTimeout(pending.timer)
     pending.timer = setTimeout(() => {
       this.failPending(requestId, new Error(`Embed utility timeout (${pending.op})`), {
-        killChild: this.shouldKillChildOnTimeout(pending.op, requestId),
+        killChild: this.shouldKillChildOnTimeout(pending.op),
         signal: pending.signal,
         onAbort: pending.onAbort
       })
@@ -717,6 +779,9 @@ export class EmbedUtilityClient {
 
   private clearChild(child: UtilityChild | null): void {
     if (!child) return
+    // Mark the exit we are about to cause so the `exit` handler does not count
+    // an intentional idle unload / teardown as a crash.
+    this.expectingExit = true
     try {
       child.kill()
     } catch {
@@ -793,7 +858,9 @@ export class EmbedUtilityClient {
           message: string
         }
         if (typeof evt.requestId === 'number') {
-          this.refreshPendingTimeout(evt.requestId)
+          const ip = evt.indexProgress
+          const key = `${ip.stage}|${ip.filesDone}|${ip.indexed}|${ip.skipped}|${ip.removed}|${ip.embedChunks ?? 0}|${ip.currentPath ?? ''}`
+          this.refreshPendingTimeout(evt.requestId, key)
         }
         const ip = evt.indexProgress
         publishIndexSyncProgress(
@@ -821,16 +888,44 @@ export class EmbedUtilityClient {
       pending.resolve(res)
     })
     child.on('exit', () => {
-      this.rejectAll(new Error('Embed utility exited'))
+      // Only reject the requests that belonged to *this* child. A timed-out
+      // request already killed and cleared the child, so a replacement may be
+      // spawned before this exit event fires; rejecting unconditionally here
+      // also rejected the replacement's in-flight work with a bogus
+      // "Embed utility exited" and forced yet another respawn.
       if (this.child === child) {
+        const crashed = !this.expectingExit
+        this.expectingExit = false
+        this.rejectAll(new Error('Embed utility exited'))
         this.child = null
         this.spawned = false
         this.spawnPromise = null
         this.markSessionLost()
+        // A child that died on its own (not one we just killed) counts toward
+        // the breaker, so a crash loop stops re-forking instead of respawning
+        // on every index mutation for the rest of the run.
+        if (crashed) {
+          recordCircuitFailure(EMBED_UTILITY_CIRCUIT_KEY, EMBED_UTILITY_CIRCUIT_POLICY)
+        }
+      } else {
+        this.rejectPendingForChild(child, new Error('Embed utility exited'))
       }
     })
     child.on('error', (err: unknown) => {
-      this.rejectAll(err instanceof Error ? err : new Error(String(err)))
+      const failure = err instanceof Error ? err : new Error(String(err))
+      if (this.child === child) {
+        recordCircuitFailure(EMBED_UTILITY_CIRCUIT_KEY, EMBED_UTILITY_CIRCUIT_POLICY)
+        this.rejectAll(failure)
+        // A launch failure leaves the child unusable but still referenced.
+        // Leaving state set made every later request postMessage into a dead
+        // process and stall for its full 120 s timeout before a respawn.
+        this.child = null
+        this.spawned = false
+        this.spawnPromise = null
+        this.markSessionLost()
+      } else {
+        this.rejectPendingForChild(child, failure)
+      }
     })
 
     return child
@@ -839,6 +934,11 @@ export class EmbedUtilityClient {
   private async ensureSpawned(): Promise<void> {
     if (this.child && this.spawned) return
     if (this.spawnPromise) return this.spawnPromise
+
+    // Stop re-forking a child that keeps dying on launch. Without this the
+    // utility was respawned per request (2 attempts, 50 ms apart) on every
+    // index mutation and paging re-warm for as long as the run kept writing.
+    assertCircuitClosed(EMBED_UTILITY_CIRCUIT_KEY, EMBED_UTILITY_CIRCUIT_POLICY)
 
     this.spawnPromise = (async () => {
       const gen = this.generation
@@ -849,6 +949,7 @@ export class EmbedUtilityClient {
         }
         try {
           await this.spawnOnce(gen)
+          recordCircuitSuccess(EMBED_UTILITY_CIRCUIT_KEY)
           return
         } catch (err) {
           lastErr = err instanceof Error ? err : new Error(String(err))
@@ -859,6 +960,7 @@ export class EmbedUtilityClient {
           }
         }
       }
+      recordCircuitFailure(EMBED_UTILITY_CIRCUIT_KEY, EMBED_UTILITY_CIRCUIT_POLICY)
       throw lastErr ?? new Error('Embed utility spawn failed')
     })()
 
@@ -905,7 +1007,7 @@ export class EmbedUtilityClient {
         const armTimeout = (): ReturnType<typeof setTimeout> =>
           setTimeout(() => {
             this.failPending(id, new Error(`Embed utility timeout (${body.op})`), {
-              killChild: this.shouldKillChildOnTimeout(body.op, id),
+              killChild: this.shouldKillChildOnTimeout(body.op),
               signal,
               onAbort
             })
@@ -931,8 +1033,10 @@ export class EmbedUtilityClient {
           timer: armTimeout(),
           waitMs,
           op: body.op,
+          startedAt: Date.now(),
           signal,
-          onAbort
+          onAbort,
+          child
         })
 
         try {

@@ -34,6 +34,7 @@ import {
   quotaExhaustedStopMessage
 } from './quotaGate'
 import { isNetworkFailureCode, iterateNetworkWait, resolveOfflineWaitMs } from './networkMonitor'
+import { waitForHeapPressureRelief } from '../perf/heapPressure'
 import { isStreamIdleTimeoutError } from './providers/sse'
 import { resolveEffectiveSettings } from '../../shared/effectiveSettings'
 import { resolveServiceTier } from '../../shared/domain/modelSelection'
@@ -55,6 +56,8 @@ import {
   shouldTriggerAutoCompact,
   type CompactionRecord
 } from './context'
+import { trimToolResults } from './context/toolTrim'
+import { KEEP_LAST_TOOL_RESULTS } from './context/types'
 import { autoCompactLlmEvents } from './compactRun'
 import {
   DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO,
@@ -163,6 +166,7 @@ import {
 import { enqueueMessageRewrite } from './messageAppendQueue'
 import { atomicWriteFile } from '../storage/atomicWrite'
 import { writeRunReceiptBestEffort } from './runReceipt'
+import { recordUsageDeltas } from './usageLedger'
 import { writeTrajectoryArtifactsBestEffort } from './runTrajectory'
 import {
   emptyStepUsageTotals,
@@ -948,11 +952,15 @@ export async function* runAgent(input: {
   let compactionCountThisRun = 0
   let costLogProvider: ProviderId | string = settings.provider
   let costLogModel = settings.model
+  /** Context window in effect at the latest step — for the closeout receipt. */
+  let costLogContextWindow: number | undefined
   /** Agent step counter — declared early so interim receipt can close over it. */
   let step = 0
   /** Last step that flushed an interim receipt.json (start writes at step 0). */
   let lastReceiptPersistedStep = 0
   const RECEIPT_PERSIST_EVERY_STEPS = 5
+  /** Event tail for interim receipt/trajectory loads — the terminal `finally` stitches full history. */
+  const INTERIM_RECEIPT_EVENT_TAIL = 800
   const flushStepArtifacts = async (): Promise<void> => {
     if (!runDir || !isCurrentInvoke(runId, invokeId)) return
     try {
@@ -977,7 +985,7 @@ export async function* runAgent(input: {
     // Interim receipts use the in-memory working set + a bounded event tail to
     // avoid re-parsing the full messages.jsonl every few steps. Final receipt in
     // `finally` still loads durable disk state.
-    const events = await loadEventsAsync(runDir, runId)
+    const events = await loadEventsAsync(runDir, runId, { limit: INTERIM_RECEIPT_EVENT_TAIL })
     writeRunReceiptBestEffort({
       runDir,
       runId,
@@ -1372,8 +1380,14 @@ export async function* runAgent(input: {
           goalNoToolFinishes,
           usageTotals
         })
-      } catch {
+      } catch (err) {
         // Checkpoint write is best-effort; the run must not fail on it.
+        logger.warn('Usage totals checkpoint persist failed', {
+          scope: 'agent',
+          code: 'PERSIST',
+          correlationId: runId,
+          err
+        })
       }
     }
     const persistLoopCheckpoint = (): void => {
@@ -1710,6 +1724,13 @@ export async function* runAgent(input: {
       if (controller.signal.aborted) break
       // Fairness under many concurrent runs — yield before sync-heavy step work.
       await new Promise<void>((resolve) => setImmediate(resolve))
+      if (controller.signal.aborted) break
+      // Backpressure: near the V8 heap ceiling the per-step full-context
+      // re-assembly races the last-resort GC into an OOM abort (observed 3.9
+      // GB). Suspend allocation-heavy step work until pressure drops; the
+      // bounded wait keeps runs from deadlocking, and the gate re-arms every
+      // step so a sustained-pressure heap stays allocation-throttled.
+      if (!(await waitForHeapPressureRelief(controller.signal))) break
       if (controller.signal.aborted) break
       // Inject promoted follow-ups (Send now) before the next model call.
       yield* applyDrainedFollowUps(runId, runDir, messages)
@@ -2222,6 +2243,7 @@ export async function* runAgent(input: {
       }
 
       const contextWindow = contextWindowFor(modelInfo, providerId)
+      costLogContextWindow = contextWindow
       const compactionTrigger = proactiveThreshold
       const priorProviderInput =
         lastUsage?.inputTokens && lastUsage.inputTokens > 0 ? lastUsage.inputTokens : undefined
@@ -2257,6 +2279,8 @@ export async function* runAgent(input: {
       /** Set when the repetition cap ended the turn (no further auto-streaming). */
       let repetitionCapEnded = false
       let lastStreamSnapshotAt = 0
+      /** Text content of the last durable snapshot — unchanged text is not re-persisted. */
+      let lastSnapshotText = ''
       let lastStreamFailureMessage = ''
       let lastStreamFailureCode = 'PROVIDER_STREAM'
       let lastStreamFailureHttpStatus: number | undefined = undefined
@@ -2298,6 +2322,7 @@ export async function* runAgent(input: {
           assistantText = ''
           thinkingText = ''
           lastStreamSnapshotAt = 0
+          lastSnapshotText = ''
           thinkingDoneEmitted = false
           stepReasoningState = undefined
           stepStopReason = undefined
@@ -2372,8 +2397,15 @@ export async function* runAgent(input: {
           // at most STREAM_SNAPSHOT_INTERVAL_MS of assistant text (recoverable
           // from events.jsonl even before the step completes).
           const nowMs = Date.now()
-          if (nowMs - lastStreamSnapshotAt >= STREAM_SNAPSHOT_INTERVAL_MS) {
+          // Emit only when the answer text changed since the last snapshot —
+          // thinking-only progress used to re-persist the full unchanged text
+          // every interval (O(N·T) disk churn, audit item L7).
+          if (
+            nowMs - lastStreamSnapshotAt >= STREAM_SNAPSHOT_INTERVAL_MS &&
+            assistantText !== lastSnapshotText
+          ) {
             lastStreamSnapshotAt = nowMs
+            lastSnapshotText = assistantText
             // Snapshot the recoverable answer text only. Re-carrying the growing
             // reasoning text on every interval duplicated those bytes ~2x per
             // second of thinking on disk, and no reader consumes snapshot
@@ -2542,6 +2574,10 @@ export async function* runAgent(input: {
                 }
                 costTotals = mergeStepUsageTotals(costTotals, stepPartial)
                 persistUsageTotalsCheckpoint()
+                // Per-day usage ledger — deltas since the last record, attributed
+                // to today. Best-effort; never breaks the run loop. The raw
+                // context window feeds the per-day context-pressure signal.
+                recordUsageDeltas(runDir, costTotals, new Date(), contextWindow)
               }
               const usageEv: AgentEvent = {
                 type: 'step_usage',
@@ -3706,6 +3742,10 @@ export async function* runAgent(input: {
       for (const toolMsg of toolOutcome.messages) {
         messages.push(toolMsg)
       }
+      // Mirror the wire trim in RAM: tool bodies past the keep window are full
+      // file/terminal dumps held until the next fold, so the working set grows
+      // monotonically on long runs. messages.jsonl keeps the full bodies.
+      messages = trimToolResults(messages, KEEP_LAST_TOOL_RESULTS)
 
       if (uniqueToolCalls.length > 0) {
         // Soft-steer / Send now aborts tools as ok:false — that is not a real
@@ -3878,8 +3918,15 @@ export async function* runAgent(input: {
           loadStatus,
           loadMessages: () => loadMessages(workspace, runId),
           loadEvents: () => finalEvents,
-          readContract
+          readContract,
+          provider: costLogProvider,
+          model: costLogModel,
+          billedCost: costTotals.billedCost,
+          contextWindow: costLogContextWindow
         })
+        // Final ledger record — bills the tail delta accumulated since the last
+        // step write so the day buckets end complete after teardown.
+        recordUsageDeltas(runDir, costTotals)
         // Observational AHE sidecars — best-effort; must not block receipt success.
         writeTrajectoryArtifactsBestEffort({
           runDir,

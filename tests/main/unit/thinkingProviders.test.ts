@@ -780,9 +780,10 @@ describe('opencode go chat thinking body', () => {
   // 'medium' with "[1210] This model always engages in thinking and cannot be
   // disabled; please use low, high, or max" (live-verified 2026-08-30).
   // Ladder assertions read the cached live catalog — warm it before asserting.
+  // 30s: the public fetch can exceed vitest's 10s default under full-suite load.
   beforeAll(async () => {
     await loadOpenCodeGoCatalog()
-  })
+  }, 30_000)
 
   it('clamps medium to the declared ladder on glm-5.3-flash', () => {
     const body = buildOpenAiCompatBody(
@@ -791,7 +792,20 @@ describe('opencode go chat thinking body', () => {
       'opencode'
     )
     expect(body.reasoning_effort).toBe('high')
-    expect(body.include_reasoning).toBe(true)
+    expect(body.include_reasoning).toBeUndefined()
+  })
+
+  it('never sends include_reasoning — Console Go strict-decodes unknown fields and 400s (invalid_request_error: json: unknown field "include_reasoning", live 2026-09-10)', () => {
+    const body = buildOpenAiCompatBody(
+      baseReq({
+        model: 'glm-5.3-flash',
+        thinking: { enabled: true, effort: 'high', display: 'summarized' }
+      }),
+      { defaultBaseUrl: 'https://opencode.ai/zen/go/v1' },
+      'opencode'
+    )
+    expect(body.reasoning_effort).toBe('high')
+    expect(body.include_reasoning).toBeUndefined()
   })
 
   it('keeps declared rungs and maps xhigh to the top tier', () => {
@@ -838,6 +852,16 @@ describe('opencode go chat thinking body', () => {
   it('passes disable through on models without a declared ladder', () => {
     const thinking = opencodeThinkingFor('glm-5', { enabled: false })
     expect(thinking).toEqual({ enabled: false })
+  })
+
+  it('honors disable on registry models with an effort: none rung (hy3)', () => {
+    expect(opencodeThinkingFor('hy3', { enabled: false })).toEqual({ enabled: false })
+    const body = buildOpenAiCompatBody(
+      baseReq({ model: 'hy3', thinking: { enabled: false } }),
+      { defaultBaseUrl: 'https://opencode.ai/zen/go/v1' },
+      'opencode'
+    )
+    expect(body.reasoning_effort).toBe('none')
   })
 
   it('clamps enabled requests and defaults effort on ladder models', () => {

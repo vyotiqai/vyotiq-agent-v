@@ -26,7 +26,9 @@ export function GeneralSection({
   settingsOverridesByPath,
   onSetSettingsOverride,
   onOpenComposerModel,
-  onOpenProviders
+  onOpenProviders,
+  feedbackOpen,
+  onFeedbackOpenChange
 }: {
   settings: Settings
   secrets: Record<SecretProvider, boolean>
@@ -38,6 +40,9 @@ export function GeneralSection({
   onSetSettingsOverride?: SettingsViewProps['onSetSettingsOverride']
   onOpenComposerModel?: () => void
   onOpenProviders?: () => void
+  /** Controlled dialog state (lifted so the command palette can open it). */
+  feedbackOpen?: boolean
+  onFeedbackOpenChange?: (open: boolean) => void
 }) {
   const modelLabel = form.workspaceOverrideActive
     ? `${form.displayProviderMeta?.label ?? form.displayProvider} · ${form.displayModel} (workspace)`
@@ -60,7 +65,14 @@ export function GeneralSection({
 
   const notifications = form.settings.notifications ?? DEFAULT_NOTIFICATION_SETTINGS
   const notificationsLocked = form.formLocked || !notifications.enabled
-  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  // Dialog state is lifted to App when the command palette opens it; local
+  // state covers the in-settings button so both paths share one dialog.
+  const [localFeedbackOpen, setLocalFeedbackOpen] = useState(false)
+  const dialogOpen = feedbackOpen ?? localFeedbackOpen
+  const setDialogOpen = (open: boolean): void => {
+    setLocalFeedbackOpen(open)
+    onFeedbackOpenChange?.(open)
+  }
   const patchNotifications = (patch: Partial<typeof notifications>): void => {
     void form.runUpdate({ notifications: { ...notifications, ...patch } })
   }
@@ -79,25 +91,6 @@ export function GeneralSection({
             disabled={form.formLocked}
             onOpenComposer={onOpenComposerModel}
             onOpenProviders={onOpenProviders}
-          />
-        </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup title="Editor">
-        <SettingsField
-          id="tab-autocomplete"
-          title="Tab autocomplete"
-          hint="Ghost text in the Files editor from the active model. Tab accepts, Esc dismisses. Typing the next characters keeps the rest."
-          help="Uses the workspace-active provider and model. Requests fire after a short pause while typing. Turn off to stop those calls."
-        >
-          <Switch
-            size="md"
-            checked={form.settings.tabAutocomplete ?? true}
-            disabled={form.formLocked}
-            label="Tab autocomplete"
-            onCheckedChange={(checked) => {
-              void form.runUpdate({ tabAutocomplete: checked })
-            }}
           />
         </SettingsField>
       </SettingsGroup>
@@ -446,16 +439,16 @@ export function GeneralSection({
         <SettingsField
           id="send-feedback"
           title="Send feedback"
-          hint="Report a bug, request a feature, or share praise. Opens a pre-filled email to vyotiq@gmail.com."
+          hint="Report a bug, request a feature, or share praise. Opens a pre-filled email to support@vyotiq.com."
           help="Feedback goes straight to the team's inbox. Optional diagnostics add app version, OS, and locale only — never chat contents."
         >
-          <Button variant="subtle" onClick={() => setFeedbackOpen(true)}>
+          <Button variant="subtle" onClick={() => setDialogOpen(true)}>
             Send feedback
           </Button>
         </SettingsField>
       </SettingsGroup>
 
-      <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
+      <FeedbackDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
     </SettingsStack>
   )
 }

@@ -2,7 +2,9 @@
  * Opt-in concurrent-load snapshot for multi-workspace / multi-run repros.
  * Enable with VYOTIQ_PERF=1 — logs `[vyotiq-perf] load` every LOAD_SNAPSHOT_MS.
  */
+import { getHeapSpaceStatistics, getHeapStatistics } from 'node:v8'
 import { isPerfDebugEnabled } from '../agent/context/perfDebug'
+import { HEAP_PRESSURE_RATIO } from './heapPressure'
 import { getTokenizerPerfStats } from '../agent/context/tokenizer'
 import {
   getEmbedUtilityPerfStats,
@@ -26,6 +28,7 @@ import {
 
 const LOAD_SNAPSHOT_MS = 5_000
 let lastProcessMetricsLogAt = 0
+let lastHeapPressureLogAt = 0
 
 export type LoadSnapshot = {
   at: string
@@ -106,12 +109,21 @@ function cheapWorkingSetOverWarn(): boolean {
   return utilityRss > PROCESS_METRICS_RSS_WARN_MB
 }
 
+/** Main-process V8 heap usage vs. its old-space ceiling — the OOM-relevant pair. */
+function mainHeapStats(): { heapUsedMb: number; heapLimitMb: number } {
+  const mem = process.memoryUsage()
+  return {
+    heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+    heapLimitMb: Math.round(getHeapStatistics().heap_size_limit / 1024 / 1024)
+  }
+}
+
 function sampleProcessMetricsAndMaybeLog(): void {
   const snap = collectProcessMetrics()
   const now = Date.now()
   if (!shouldLogProcessMetrics(snap, now, lastProcessMetricsLogAt)) return
   lastProcessMetricsLogAt = now
-  console.warn('[vyotiq-perf] processes', JSON.stringify(snap))
+  console.warn('[vyotiq-perf] processes', JSON.stringify({ ...snap, mainHeap: mainHeapStats() }))
 }
 
 export function logLoadSnapshot(): void {
@@ -126,10 +138,43 @@ export function logLoadSnapshot(): void {
         rssMb: snap.rssMb,
         combinedRssMb: snap.combinedRssMb,
         utilityRssMb: snap.utility.rssMb,
-        heapUsedMb: snap.heapUsedMb
+        heapUsedMb: snap.heapUsedMb,
+        heapLimitMb: mainHeapStats().heapLimitMb
       })
     )
   }
+}
+
+/**
+ * Near-ceiling heap diagnostics. A hard V8 OOM abort leaves no post-mortem;
+ * logging the space breakdown (and external ArrayBuffer bytes) while there is
+ * still headroom is what identifies the retainer on the next occurrence.
+ */
+function logHeapPressureIfHigh(): void {
+  const stats = getHeapStatistics()
+  if (stats.heap_size_limit <= 0) return
+  if (stats.used_heap_size / stats.heap_size_limit < HEAP_PRESSURE_RATIO) return
+  const now = Date.now()
+  if (lastHeapPressureLogAt > 0 && now - lastHeapPressureLogAt < 30_000) return
+  lastHeapPressureLogAt = now
+  const mem = process.memoryUsage()
+  console.warn(
+    '[vyotiq-perf] heap-pressure',
+    JSON.stringify({
+      heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+      heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
+      externalMb: Math.round(mem.external / 1024 / 1024),
+      arrayBuffersMb: Math.round(mem.arrayBuffers / 1024 / 1024),
+      rssMb: Math.round(mem.rss / 1024 / 1024),
+      heapLimitMb: Math.round(stats.heap_size_limit / 1024 / 1024),
+      spaces: getHeapSpaceStatistics()
+        .filter((space) => space.space_used_size > 0)
+        .map((space) => ({
+          name: space.space_name,
+          usedMb: Math.round(space.space_used_size / 1024 / 1024)
+        }))
+    })
+  )
 }
 
 function tickLoadPerfMonitor(): void {
@@ -140,6 +185,7 @@ function tickLoadPerfMonitor(): void {
   if (isPerfDebugEnabled() || cheapWorkingSetOverWarn()) {
     sampleProcessMetricsAndMaybeLog()
   }
+  logHeapPressureIfHigh()
   logLoadSnapshot()
 }
 
@@ -171,4 +217,5 @@ export function stopLoadPerfMonitor(): void {
   lastLagMs = 0
   lagSamples.length = 0
   lastProcessMetricsLogAt = 0
+  lastHeapPressureLogAt = 0
 }

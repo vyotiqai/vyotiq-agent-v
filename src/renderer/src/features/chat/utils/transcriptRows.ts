@@ -162,6 +162,13 @@ export function buildTranscriptRows(
   const includeThinking = options?.showThinking !== false
   const hiddenThinkingStreamingTurns = new Set<number>()
   const todoWriteRunningTurns = new Set<number>()
+  // Single O(items) pass so per-tool gating lookups below stay O(1).
+  const questionGatedToolIds = new Set<string>()
+  for (const entry of items) {
+    if (entry.kind === 'question' && entry.question.toolCallId) {
+      questionGatedToolIds.add(entry.question.toolCallId)
+    }
+  }
 
   const flush = (): void => {
     const run = pending
@@ -255,10 +262,10 @@ export function buildTranscriptRows(
       if (item.tool.name === 'todo_write' && item.tool.status === 'running') {
         todoWriteRunningTurns.add(Math.max(turnIndex, 0))
       }
-      const gatedByQuestion = items.some(
-        (entry) => entry.kind === 'question' && entry.question.toolCallId === item.id
-      )
-      if (!gatedByQuestion) pending.push(item)
+      // `questionGatedToolIds` is built once per pass below; the previous
+      // `items.some(...)` here was an O(items) scan inside the O(items) item
+      // loop, i.e. O(items²) on every streamed frame.
+      if (!questionGatedToolIds.has(item.id)) pending.push(item)
       continue
     }
 

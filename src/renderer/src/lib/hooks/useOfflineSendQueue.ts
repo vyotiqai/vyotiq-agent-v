@@ -22,6 +22,9 @@ type FlushHandler = (entry: OfflineQueuedSend) => boolean | void | Promise<boole
 /** Prevents duplicate flush loops when two owners briefly share a workspace. */
 const flushingWorkspaces = new Set<string>()
 
+/** Delay before re-arming the flush effect after a failed attempt. */
+const FLUSH_RETRY_MS = 5_000
+
 export function useOfflineSendQueue(
   workspacePath: string,
   onFlush: FlushHandler
@@ -101,10 +104,12 @@ export function useOfflineSendQueue(
   useEffect(() => {
     if (!online || !workspacePath) return
     let cancelled = false
+    let retryTimer: number | null = null
     const timer = window.setTimeout(() => {
       if (cancelled || flushingWorkspaces.has(workspacePath)) return
       flushingWorkspaces.add(workspacePath)
       void (async () => {
+        let dequeued = false
         try {
           while (!cancelled) {
             const next = peekOfflineQueue(workspacePath)
@@ -118,20 +123,25 @@ export function useOfflineSendQueue(
               ok = false
             }
             if (!ok) {
-              bumpQueue()
+              // Re-arm from a plain timer: queueTick is a dep of this effect, so
+              // bumping it from inside the flush loop re-ran the effect per failure
+              // and cascaded into React's maximum-update-depth error.
+              retryTimer = window.setTimeout(bumpQueue, FLUSH_RETRY_MS)
               break
             }
             dequeueOfflineMessage(workspacePath)
-            bumpQueue()
+            dequeued = true
           }
         } finally {
           flushingWorkspaces.delete(workspacePath)
+          if (dequeued) bumpQueue()
         }
       })()
     }, 2_000)
     return () => {
       cancelled = true
       window.clearTimeout(timer)
+      if (retryTimer != null) window.clearTimeout(retryTimer)
     }
   }, [online, workspacePath, onFlush, bumpQueue, queueTick])
 

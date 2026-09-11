@@ -1,44 +1,10 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import type { EffectiveChatSettings } from '@shared/effectiveSettings'
-import type { ProviderId, SecretProvider } from '@shared/ipc'
 import { AppShell } from '@renderer/app/AppShell'
 import { launchViewFor } from '@renderer/app/launchView'
 import { HomePage } from '@renderer/features/home/HomePage'
 import { clearWorkspaceHotUi } from '@renderer/lib/hooks/workspaceHotUiStore'
-
-// Same composer stub contract as homePage.test.tsx: these tests cover the
-// Home page's routing wiring, not the composer internals.
-const composerState = vi.hoisted(() => ({
-  props: {} as Record<string, unknown>
-}))
-
-vi.mock('@renderer/features/chat/components/composer', () => ({
-  Composer: function ComposerStub(props: {
-    onSend?: (
-      text: string,
-      images?: string[],
-      files?: unknown,
-      extras?: unknown
-    ) => unknown
-  }) {
-    composerState.props = props as Record<string, unknown>
-    return (
-      <div data-testid="composer-stub">
-        <button
-          type="button"
-          aria-label="Composer send"
-          onClick={() => {
-            void props.onSend?.('Ship the home surface', undefined, undefined, undefined)
-          }}
-        >
-          Composer send
-        </button>
-      </div>
-    )
-  }
-}))
 
 const DEMO = '/ws/demo'
 
@@ -78,7 +44,6 @@ const baseProps = {
 }
 
 beforeEach(() => {
-  composerState.props = {}
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
     value: (query: string) => ({
@@ -124,22 +89,13 @@ function renderDemoHome(overrides: Partial<Parameters<typeof HomePage>[0]> = {})
   return render(
     <HomePage
       openWorkspaces={[DEMO]}
-      activeWorkspacePath={DEMO}
       runsByWorkspacePath={baseProps.runsByWorkspacePath}
       onNewSessionInWorkspace={vi.fn()}
       onSelectRunInWorkspace={vi.fn()}
       onSwitchWorkspace={vi.fn()}
       onAddWorkspace={vi.fn()}
-      onSendInWorkspace={vi.fn(async () => true)}
-      onDraftChangeInWorkspace={vi.fn()}
       pinnedRunKeys={[]}
       onTogglePinnedRun={vi.fn()}
-      provider={'openai' as ProviderId}
-      model="gpt-test"
-      secrets={{} as Record<SecretProvider, boolean>}
-      onProviderModel={vi.fn()}
-      chatSettings={{} as unknown as EffectiveChatSettings}
-      onChatSettingsChange={vi.fn()}
       {...overrides}
     />
   )
@@ -160,16 +116,12 @@ describe('launchViewFor (App navigation-mode decision)', () => {
   })
 })
 
-describe('Home hero composer → session pipeline wiring', () => {
-  it('routes the composed send to the send handler bound to the workspace', () => {
-    const onSendInWorkspace = vi.fn(async () => true)
-    renderDemoHome({ onSendInWorkspace })
+describe('Home session entry points', () => {
+  it('renders no composer on the Home tab', () => {
+    renderDemoHome()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Composer send' }))
-
-    expect(onSendInWorkspace).toHaveBeenCalledTimes(1)
-    expect(onSendInWorkspace).toHaveBeenCalledWith(DEMO, 'Ship the home surface', undefined, undefined, undefined)
-    expect(composerState.props.workspacePath).toBe(DEMO)
+    expect(screen.queryByText(/Describe a task/)).toBeNull()
+    expect(screen.getByText('Home')).toBeTruthy()
   })
 
   it('keeps the workspace card action routing to the new-session handler', () => {

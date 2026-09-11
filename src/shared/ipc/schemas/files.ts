@@ -451,37 +451,3 @@ export const WorkspaceEditorRecoveryClearRequestSchema = z.object({
 export type WorkspaceEditorRecoveryClearRequest = z.infer<
   typeof WorkspaceEditorRecoveryClearRequestSchema
 >
-
-export const INLINE_COMPLETE_PREFIX_MAX = 8_000
-export const INLINE_COMPLETE_SUFFIX_MAX = 4_000
-
-export const INLINE_COMPLETE_REQUEST_ID = z
-  .string()
-  .min(8)
-  .max(64)
-  .regex(/^[A-Za-z0-9_-]+$/)
-
-export const WorkspaceInlineCompleteRequestSchema = z.object({
-  workspacePath: WorkspacePathSchema,
-  path: z
-    .string()
-    .min(1)
-    .max(4_096)
-    .refine(isSafeWorkspaceRelPath, 'Path must stay inside the workspace'),
-  prefix: z.string().max(INLINE_COMPLETE_PREFIX_MAX),
-  suffix: z.string().max(INLINE_COMPLETE_SUFFIX_MAX),
-  requestId: INLINE_COMPLETE_REQUEST_ID.optional()
-})
-export type WorkspaceInlineCompleteRequest = z.infer<typeof WorkspaceInlineCompleteRequestSchema>
-
-export const WorkspaceInlineCompleteAbortRequestSchema = z.object({
-  requestId: INLINE_COMPLETE_REQUEST_ID
-})
-export type WorkspaceInlineCompleteAbortRequest = z.infer<
-  typeof WorkspaceInlineCompleteAbortRequestSchema
->
-
-export const WorkspaceInlineCompleteResultSchema = z.object({
-  text: z.string().max(500)
-})
-export type WorkspaceInlineCompleteResult = z.infer<typeof WorkspaceInlineCompleteResultSchema>

@@ -15,6 +15,49 @@ env:
   CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
 
 jobs:
+  verify:
+    name: Verify (typecheck + tests)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          node -e "const pkg=require('./package.json');const tag=process.env.GITHUB_REF_NAME.replace(/^v/,'');if(tag!==pkg.version){console.error('Tag v'+tag+' does not match package.json version '+pkg.version+'. Bump package.json to '+tag+' and re-tag, or move the tag to v'+pkg.version+'.');process.exit(1)}console.log('Tag v'+tag+' matches package.json version '+pkg.version)"
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.25.0 --activate
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # Gate the release on the unit suite so a red tree cannot be tagged.
+      # The full matrix (lint, e2e, packaging smoke, audit) runs in CI on main.
+      - name: Unit tests
+        run: pnpm test
+
   create-release:
     # Serialize release creation ahead of the matrix: electron-builder in
     # every matrix job would otherwise POST the same release concurrently,
@@ -23,6 +66,7 @@ jobs:
     # first turns every matrix job into an uploader. Re-runs of failed
     # jobs skip creation because the release already exists.
     name: Create release
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -34,6 +78,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+
+      - name: Extract release notes from CHANGELOG.md
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node scripts/extract-release-notes.mjs --version "$(node -p "require('./package.json').version")" --out release-notes.md
 
       - name: Create the release in the public releases repo
         if: startsWith(github.ref, 'refs/tags/')
@@ -51,12 +99,12 @@ jobs:
             gh release create "$TAG" \
               --repo vyotiqai/vyotiq-agent-v-releases \
               --title "Vyotiq v$VERSION" \
-              --notes "Vyotiq v$VERSION installers and update metadata."
+              --notes-file release-notes.md
           fi
 
   package:
     name: ${{ matrix.name }}
-    needs: create-release
+    needs: [verify, create-release]
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -145,3 +193,68 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifacts }}
           if-no-files-found: error
+
+  finalize-release:
+    # Post-publish verification: the release body must carry the changelog
+    # notes (the in-app update card parses it), the three updater manifests
+    # must all be present (a missing latest*.yml silently kills auto-update
+    # on that OS — happened on v1.1.0), and the landing site redeploys so its
+    # download buttons point at the new release without a manual step.
+    name: Finalize release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Ensure release notes are populated
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="$GITHUB_REF_NAME"
+          BODY=$(gh release view "$TAG" --repo vyotiqai/vyotiq-agent-v-releases --json body --jq .body)
+          STUB="Vyotiq v$VERSION installers and update metadata."
+          if [ "$BODY" = "$STUB" ] || [ -z "$BODY" ]; then
+            echo "Release body is empty or the pre-automation stub; updating from CHANGELOG.md"
+            node scripts/extract-release-notes.mjs --version "$VERSION" --out release-notes.md
+            gh release edit "$TAG" --repo vyotiqai/vyotiq-agent-v-releases --notes-file release-notes.md
+          else
+            echo "Release body already carries notes"
+          fi
+
+      - name: Verify installers and updater manifests
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          ASSETS=$(gh api "repos/vyotiqai/vyotiq-agent-v-releases/releases/tags/$TAG" --jq '.assets[].name')
+          echo "Release assets:"; echo "$ASSETS"
+          FAIL=0
+          for required in latest.yml latest-linux.yml latest-mac.yml; do
+            if ! echo "$ASSETS" | grep -qx "$required"; then
+              echo "::error::Missing updater manifest $required — auto-update is dead on that OS (see the v1.1.0 incident)"
+              FAIL=1
+            fi
+          done
+          echo "$ASSETS" | grep -q -- '-setup\.exe$' || { echo "::error::Missing Windows NSIS installer"; FAIL=1; }
+          echo "$ASSETS" | grep -q -- '\.AppImage$' || { echo "::error::Missing Linux AppImage"; FAIL=1; }
+          [ "$(echo "$ASSETS" | grep -c -- '\.dmg$')" -ge 2 ] || { echo "::error::Missing macOS DMGs (arm64 + x64)"; FAIL=1; }
+          [ "$(echo "$ASSETS" | grep -c -- 'mac\.zip$')" -ge 2 ] || { echo "::error::Missing macOS zips (arm64 + x64)"; FAIL=1; }
+          exit $FAIL
+
+      - name: Redeploy landing with the new release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-landing.yml --ref main

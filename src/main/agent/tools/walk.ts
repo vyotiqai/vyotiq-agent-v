@@ -527,7 +527,10 @@ export async function collectWorkspaceFilesPage(
       )
       if (!isContainedByConstruction(full, realRoot)) continue
       if (entry.isDirectory()) {
-        if (skipDirNames?.has(entry.name.toLowerCase())) continue
+        const lowerName = entry.name.toLowerCase()
+        // Build outputs with dist- variants (dist-verify, dist-package-alt, …)
+        // are never source; untracked ones would otherwise pollute every walk.
+        if (lowerName.startsWith('dist-') || skipDirNames?.has(lowerName)) continue
         queue.push({ dir: full, relDir: childRel })
       } else if (entry.isFile()) {
         if (exts && !exts.has(extname(entry.name).toLowerCase())) continue

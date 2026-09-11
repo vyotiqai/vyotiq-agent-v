@@ -23,12 +23,6 @@ import {
   mapLspDiagnosticsToCm,
   type LspDiagnosticItem
 } from '@shared/utils/lspDiagnostics'
-import {
-  tabAutocomplete,
-  SELECT_SYNC_EVENT,
-  clearTabGhost,
-  type InlineCompleteRequestFn
-} from './tabAutocomplete'
 
 function languageExtension(path: string): Extension {
   const lower = path.toLowerCase()
@@ -178,7 +172,6 @@ export function TextCodeEditor({
   scrollToLine = null,
   lspDiagnostics = null,
   onLspHover,
-  onInlineComplete,
   onScrollToLineHandled,
   onChange,
   onMetaChange,
@@ -194,7 +187,6 @@ export function TextCodeEditor({
   scrollToLine?: number | null
   lspDiagnostics?: readonly LspDiagnosticItem[] | null
   onLspHover?: (line: number, character: number) => Promise<string | null>
-  onInlineComplete?: InlineCompleteRequestFn
   onScrollToLineHandled?: () => void
   onChange: (value: string) => boolean | void
   onMetaChange: (meta: { cursor: number; selections: WorkspaceEditorSelection[] }) => void
@@ -222,7 +214,6 @@ export function TextCodeEditor({
   const completeCompartmentRef = useRef(new Compartment())
   const lspDiagnosticsRef = useRef(lspDiagnostics)
   const onLspHoverRef = useRef(onLspHover)
-  const onInlineCompleteRef = useRef(onInlineComplete)
   initialValueRef.current = value
   initialCursorRef.current = cursor
   initialSelectionsRef.current = selections
@@ -235,7 +226,6 @@ export function TextCodeEditor({
   wordWrapRef.current = wordWrap
   lspDiagnosticsRef.current = lspDiagnostics
   onLspHoverRef.current = onLspHover
-  onInlineCompleteRef.current = onInlineComplete
 
   useEffect(() => {
     const host = hostRef.current
@@ -268,9 +258,7 @@ export function TextCodeEditor({
         wrapStyleCompartmentRef.current.of(wrapStyleTheme(wordWrapRef.current)),
         lintCompartmentRef.current.of([]),
         hoverCompartmentRef.current.of([]),
-        completeCompartmentRef.current.of(
-          tabAutocomplete(() => onInlineCompleteRef.current)
-        ),
+        completeCompartmentRef.current.of([]),
         EditorView.theme({
           '&': {
             height: '100%',
@@ -334,17 +322,6 @@ export function TextCodeEditor({
             backgroundColor: 'var(--vy-surface)',
             border: '1px solid color-mix(in srgb, var(--vy-border) 70%, transparent)',
             borderRadius: '0.375rem'
-          },
-          '.cm-tab-ghost': {
-            opacity: '0.46',
-            pointerEvents: 'none',
-            whiteSpace: 'pre',
-            color: 'inherit'
-          },
-          '.cm-tab-ghost-block': {
-            fontFamily: 'var(--font-mono)',
-            lineHeight: '1.6',
-            padding: '0 0.125rem'
           }
         }),
         EditorView.updateListener.of((update) => {
@@ -412,12 +389,6 @@ export function TextCodeEditor({
       viewRef.current = null
     }
   }, [path])
-
-  useEffect(() => {
-    const view = viewRef.current
-    if (!view || onInlineComplete) return
-    clearTabGhost(view)
-  }, [onInlineComplete])
 
   useEffect(() => {
     const view = viewRef.current
@@ -514,8 +485,7 @@ export function TextCodeEditor({
       )
     if (sameRanges) return
     view.dispatch({
-      selection: nextSelection,
-      annotations: Transaction.userEvent.of(SELECT_SYNC_EVENT)
+      selection: nextSelection
     })
   }, [cursor, selections])
 

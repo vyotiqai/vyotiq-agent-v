@@ -366,15 +366,18 @@ function applySampling(body: Record<string, unknown>, req: ProviderChatRequest):
 /** OpenAI-compatible-style entry point that posts to a caller-supplied Messages URL. */
 export function streamAnthropicMessages(
   req: ProviderChatRequest,
-  messagesUrl = 'https://api.anthropic.com/v1/messages'
+  messagesUrl = 'https://api.anthropic.com/v1/messages',
+  extraHeaders?: Record<string, string>
 ): AsyncGenerator<StreamChunk> {
   // LlmProvider.streamChat is typed with a single argument; anthropic's implementation
-  // accepts an optional messages URL that callers (e.g. OpenCode Go) supply.
+  // accepts an optional messages URL and extra headers that callers (e.g. OpenCode Go)
+  // supply.
   const stream = anthropicProvider.streamChat as (
     req: ProviderChatRequest,
-    messagesUrl?: string
+    messagesUrl?: string,
+    extraHeaders?: Record<string, string>
   ) => AsyncGenerator<StreamChunk>
-  return stream(req, messagesUrl)
+  return stream(req, messagesUrl, extraHeaders)
 }
 
 export const anthropicProvider: LlmProvider = {
@@ -439,7 +442,8 @@ export const anthropicProvider: LlmProvider = {
   },
   async *streamChat(
     req: ProviderChatRequest,
-    messagesUrl = 'https://api.anthropic.com/v1/messages'
+    messagesUrl = 'https://api.anthropic.com/v1/messages',
+    extraHeaders?: Record<string, string>
   ): AsyncGenerator<StreamChunk> {
     if (!req.apiKey) {
       yield { type: 'error', error: 'Anthropic API key not set' }
@@ -531,7 +535,8 @@ export const anthropicProvider: LlmProvider = {
     const baseHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
       'x-api-key': req.apiKey,
-      'anthropic-version': '2023-06-01'
+      'anthropic-version': '2023-06-01',
+      ...(extraHeaders ?? {})
     }
 
     let res: Response

@@ -29,8 +29,11 @@ const DIFF_TIMEOUT_MS = 60_000
 const MERGE_TIMEOUT_MS = 120_000
 const PR_CREATE_TIMEOUT_MS = 120_000
 const MAX_BUFFER = 8 * 1024 * 1024
+const DIFF_CAP_CHARS = 200_000
+
 function capDiff(text: string): string {
-  return text
+  if (text.length <= DIFF_CAP_CHARS) return text
+  return `${text.slice(0, DIFF_CAP_CHARS)}\n[diff truncated]`
 }
 
 function buildGhEnv(): NodeJS.ProcessEnv {
@@ -485,11 +488,15 @@ export async function prCreateFromChanges(
 
   const baseBranch = await githubDefaultBranch(cwd)
   let branch = await currentGitBranch(cwd)
+  const originalBranch = branch
+  // Captured only for detached HEAD, so switching back restores the exact commit.
+  let originalHead: string | null = null
   let existing: PrView | null = null
   let createdBranch = false
   if (branch && branch !== baseBranch) existing = await prView(cwd)
 
   if (!branch || branch === baseBranch) {
+    if (!branch) originalHead = (await git(['rev-parse', 'HEAD'], cwd)).trim()
     branch = generatedPrBranch(commitMessage)
     await createBranch(cwd, branch)
     createdBranch = true
@@ -506,7 +513,21 @@ export async function prCreateFromChanges(
         detail: 'Pull request already exists; there were no new changes to commit'
       }
     }
-    if (createdBranch) throw new Error(outcome.detail)
+    if (createdBranch) {
+      // The staged set emptied after we created the topic branch (e.g. a
+      // concurrent commit). Never strand the user on an empty vyotiq/...
+      // branch: switch back and delete it, then surface why nothing committed.
+      try {
+        const restore = originalBranch
+          ? ['switch', originalBranch]
+          : ['switch', '--detach', originalHead ?? 'HEAD']
+        await git(restore, cwd)
+        await git(['branch', '--delete', branch], cwd)
+      } catch {
+        // Best-effort cleanup; the primary failure below still applies.
+      }
+      throw new Error(outcome.detail)
+    }
     await pushCurrentBranch(cwd)
     return createPrForBranch(cwd, branch, baseBranch, opts.draft !== false, setup)
   }

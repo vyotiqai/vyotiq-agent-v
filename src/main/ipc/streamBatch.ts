@@ -5,6 +5,15 @@ import { workspacePathsEqual } from '../../shared/workspacePathMatch'
 const ACTIVE_BATCH_MS = 16
 const BACKGROUND_BATCH_MS = 80
 
+/**
+ * Backstop caps for a wedged renderer whose slot stays attached: delta
+ * segments are reconstructable from events.jsonl catch-up, so once the queue
+ * exceeds either cap the oldest delta segments are dropped instead of
+ * ballooning the main heap (OOM amplifier, 2026-09-11 crash).
+ */
+const PENDING_SEGMENTS_MAX = 512
+const PENDING_SEGMENTS_MAX_BYTES = 8 * 1024 * 1024
+
 type PendingSegment =
   | { kind: 'text'; text: string; invokeId?: number }
   | { kind: 'thinking'; text: string; step?: number; invokeId?: number }
@@ -23,6 +32,19 @@ type PendingSegment =
       invokeId?: number
     }
 
+/**
+ * One entry of a run's ordered emission queue: either a coalescable delta
+ * segment or a verbatim non-delta event (active-workspace usage).
+ *
+ * Sharing one queue is what lets usage events ride the batch timer without
+ * reordering: previously each active-workspace `step_usage`/`context_usage`
+ * called `flushRun()` first, which emitted every still-pending delta early and
+ * reset the 16 ms coalescing window three times per agent step.
+ */
+type PendingEmission =
+  | PendingSegment
+  | { kind: 'event'; event: AgentEvent }
+
 /** Composite pending-usage key: step + kind (0 = step_usage, 1 = context_usage). */
 function usageKey(type: string, step: number): string {
   return `${step}:${type === 'context_usage' ? 1 : 0}`
@@ -35,10 +57,19 @@ function parseUsageKey(key: string): { step: number; kind: number } {
   return { step: Number.isFinite(step) ? step : 0, kind: Number.isFinite(kind) ? kind : 0 }
 }
 
+/** Rough retained size of a pending emission for the queue byte cap. */
+function pendingSegmentBytes(segment: PendingEmission): number {
+  if (segment.kind === 'event') return 0
+  if (segment.kind === 'tool_call_delta') return segment.argumentsDelta.length
+  return segment.text.length
+}
+
 type RunSlot = {
   workspacePath: string
   send: (ev: AgentEvent) => void
-  pendingSegments: PendingSegment[]
+  pendingSegments: PendingEmission[]
+  /** Rough byte size of pendingSegments (text/argumentsDelta lengths). */
+  pendingBytes: number
   /**
    * Background coalesce: latest usage event per (type, step) so inactive
    * workspaces do not lose earlier step meters when several arrive before
@@ -71,6 +102,8 @@ export type ChatEventBatchStats = {
   attachedRuns: number
   /** Deltas dropped because the renderer is not subscribed to that run. */
   uiGated: number
+  /** Oldest delta segments dropped by the pending-queue cap (wedged renderer backstop). */
+  overflowDropped: number
 }
 
 let stats: ChatEventBatchStats = {
@@ -83,7 +116,8 @@ let stats: ChatEventBatchStats = {
   usageCoalesced: 0,
   maxPendingDepth: 0,
   attachedRuns: 0,
-  uiGated: 0
+  uiGated: 0,
+  overflowDropped: 0
 }
 
 export function getChatEventBatchStats(): ChatEventBatchStats {
@@ -97,7 +131,8 @@ export function getChatEventBatchStats(): ChatEventBatchStats {
     usageCoalesced: stats.usageCoalesced,
     maxPendingDepth: stats.maxPendingDepth,
     attachedRuns: stats.attachedRuns,
-    uiGated: stats.uiGated
+    uiGated: stats.uiGated,
+    overflowDropped: stats.overflowDropped
   }
 }
 
@@ -112,7 +147,8 @@ export function resetChatEventBatchStats(): void {
     usageCoalesced: 0,
     maxPendingDepth: 0,
     attachedRuns: 0,
-    uiGated: 0
+    uiGated: 0,
+    overflowDropped: 0
   }
 }
 
@@ -259,6 +295,7 @@ export class ChatEventDispatcher {
       workspacePath,
       send,
       pendingSegments: [],
+      pendingBytes: 0,
       pendingUsageByStep: new Map(),
       attachCount: 1,
       dueMs: 0
@@ -345,18 +382,21 @@ export class ChatEventDispatcher {
     }
 
     if (ev.type === 'step_usage' || ev.type === 'context_usage') {
-      if (!isActiveWorkspace(slot.workspacePath)) {
-        // Keep latest usage per (type, step) so background workspaces retain meters.
-        const key = usageKey(ev.type, ev.step)
-        const prev = slot.pendingUsageByStep.get(key)
-        if (prev) stats.usageCoalesced += 1
-        slot.pendingUsageByStep.set(key, ev)
-        this.notePendingDepth()
+      if (isActiveWorkspace(slot.workspacePath)) {
+        // Ride the batch timer in emission order instead of forcing a flush.
+        // Forcing one here emitted every pending delta early and restarted the
+        // coalescing window up to three times per step for the meters alone.
+        slot.pendingSegments.push({ kind: 'event', event: ev })
         this.schedule(slot)
         return
       }
-      this.flushRun(runId)
-      this.emit(slot, ev)
+      // Keep latest usage per (type, step) so background workspaces retain meters.
+      const key = usageKey(ev.type, ev.step)
+      const prev = slot.pendingUsageByStep.get(key)
+      if (prev) stats.usageCoalesced += 1
+      slot.pendingUsageByStep.set(key, ev)
+      this.notePendingDepth()
+      this.schedule(slot)
       return
     }
 
@@ -403,6 +443,7 @@ export class ChatEventDispatcher {
     if (!slot) return
     this.emitSegments(slot, runId, slot.pendingSegments)
     slot.pendingSegments = []
+    slot.pendingBytes = 0
     this.flushPendingUsageEvents(slot)
     slot.dueMs = 0
   }
@@ -434,6 +475,7 @@ export class ChatEventDispatcher {
       if (slot.pendingSegments.length) {
         this.emitSegments(slot, runId, slot.pendingSegments)
         slot.pendingSegments = []
+        slot.pendingBytes = 0
       }
       this.flushPendingUsageEvents(slot)
       slot.dueMs = 0
@@ -497,6 +539,7 @@ export class ChatEventDispatcher {
       if (slot.pendingSegments.length) {
         this.emitSegments(slot, runId, slot.pendingSegments)
         slot.pendingSegments = []
+        slot.pendingBytes = 0
       }
       this.flushPendingUsageEvents(slot)
       slot.dueMs = 0
@@ -533,12 +576,14 @@ export class ChatEventDispatcher {
           step: segment.step,
           invokeId: segment.invokeId
         }
+        slot.pendingBytes += segment.text.length
       } else if (segment.kind === 'text' && last.kind === 'text') {
         queue[queue.length - 1] = {
           kind: 'text',
           text: last.text + segment.text,
           invokeId: segment.invokeId
         }
+        slot.pendingBytes += segment.text.length
       } else if (segment.kind === 'tool_call_delta' && last.kind === 'tool_call_delta') {
         queue[queue.length - 1] = {
           kind: 'tool_call_delta',
@@ -547,6 +592,7 @@ export class ChatEventDispatcher {
           argumentsDelta: last.argumentsDelta + segment.argumentsDelta,
           invokeId: segment.invokeId
         }
+        slot.pendingBytes += segment.argumentsDelta.length
       } else if (segment.kind === 'terminal_output_delta' && last.kind === 'terminal_output_delta') {
         queue[queue.length - 1] = {
           kind: 'terminal_output_delta',
@@ -555,14 +601,49 @@ export class ChatEventDispatcher {
           stream: segment.stream,
           invokeId: segment.invokeId
         }
+        slot.pendingBytes += segment.text.length
       }
     } else {
       queue.push(segment)
+      slot.pendingBytes += pendingSegmentBytes(segment)
     }
+    this.enforcePendingCap(slot)
   }
 
-  private emitSegments(slot: RunSlot, runId: string, segments: PendingSegment[]): void {
+  /**
+   * Drop the oldest delta segments once the pending queue exceeds either cap.
+   * Only reconstructable deltas are dropped — `{kind:'event'}` entries
+   * (usage etc.) are never dropped, and the renderer rebuilds any gaps via its
+   * loadRun + resumeUiIfNeeded catch-up after reconnect.
+   */
+  private enforcePendingCap(slot: RunSlot): void {
+    if (
+      slot.pendingSegments.length <= PENDING_SEGMENTS_MAX &&
+      slot.pendingBytes <= PENDING_SEGMENTS_MAX_BYTES
+    ) {
+      return
+    }
+    let dropped = 0
+    while (
+      slot.pendingSegments.length > PENDING_SEGMENTS_MAX ||
+      slot.pendingBytes > PENDING_SEGMENTS_MAX_BYTES
+    ) {
+      const idx = slot.pendingSegments.findIndex((segment) => segment.kind !== 'event')
+      if (idx < 0) break
+      const removed = slot.pendingSegments[idx]!
+      slot.pendingSegments.splice(idx, 1)
+      slot.pendingBytes -= pendingSegmentBytes(removed)
+      dropped += 1
+    }
+    if (dropped > 0) stats.overflowDropped += dropped
+  }
+
+  private emitSegments(slot: RunSlot, runId: string, segments: PendingEmission[]): void {
     for (const segment of segments) {
+      if (segment.kind === 'event') {
+        this.emit(slot, segment.event)
+        continue
+      }
       if (segment.kind === 'text') {
         if (!segment.text) continue
         this.emit(slot, {

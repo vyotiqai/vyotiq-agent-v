@@ -510,7 +510,6 @@ describe('landing docs architecture and truth', () => {
     expect(features).toContain('Agent V keeps the state')
     expect(features).not.toMatch(/\bVyotiq keeps\b/)
     for (const text of [
-      readme,
       landingReadme,
       site,
       hero,
@@ -528,6 +527,10 @@ describe('landing docs architecture and truth', () => {
       expect(text).not.toMatch(/\bdefault provider\b/i)
       expect(text).not.toMatch(/Vyotiq Agent V/)
     }
+    // The repo is open source (GPL-3.0): the README states it, the marketing
+    // surfaces above still don't lead with it.
+    expect(readme).toMatch(/\bopen[- ]source\b/i)
+    expect(readme).toContain('GPL-3.0')
     expect(layout).not.toContain('`${SITE_BRAND} ${SITE_PRODUCT}')
     expect(docsLayout).not.toContain('`${title} — ${SITE_BRAND} ${SITE_PRODUCT}`')
     expect(llms).not.toContain('`${SITE_BRAND} ${SITE_PRODUCT}`')
@@ -587,7 +590,9 @@ describe('landing docs architecture and truth', () => {
       readFileSync(join(LANDING_SOURCE, rel), 'utf8')
     ).join('\n')
     for (const [label, pattern] of [
-      ['open source', /\bopen[- ]source\b/i],
+      // "Open source" only passes when qualified with the actual license
+      // (the footer's "Open source (GPL-3.0)" chrome) — a bare claim stays banned.
+      ['open source', /\bopen[- ]source\b(?!\s*\((?:GPL|Apache|MIT))/i],
       ['free pricing', /(?:\$\s*0|\bfree\b)/i],
       ['no telemetry', /\bno telemetry\b/i],
       ['no cloud', /\bno cloud\b/i],
@@ -871,7 +876,7 @@ describe('landing docs architecture and truth', () => {
     expect(troubleshooting).toContain('already in use')
   })
 
-  it('ships production static files and footer chrome without inventing terms of service', () => {
+  it('ships production static files and open-source footer chrome with terms', () => {
     const robots = readFileSync(join(REPO, 'landing', 'public', 'robots.txt'), 'utf8')
     expect(robots).toContain('Allow: /')
     expect(robots).toContain('Sitemap: https://vyotiq.com/sitemap-index.xml')
@@ -905,11 +910,14 @@ describe('landing docs architecture and truth', () => {
     const footer = readFileSync(join(LANDING_SOURCE, 'components', 'SiteFooter.astro'), 'utf8')
     expect(footer).toContain('href="/docs/concepts/privacy-data"')
     expect(footer).toContain('href="/privacy"')
-    // The repo is private: the footer links internally instead of to the
-    // GitHub repository.
-    expect(footer).not.toContain('github.com/vyotiqai')
-    expect(footer).not.toMatch(/Terms of Service/i)
+    expect(footer).toContain('href="/terms"')
+    expect(footer).toContain('href="/changelog"')
+    // The repo is open source: the footer links to it.
+    expect(footer).toContain('href="https://github.com/vyotiqai/vyotiq-agent-v"')
+    expect(footer).toContain('GPL-3.0')
     expect(existsSync(join(LANDING_SOURCE, 'pages', 'privacy.astro'))).toBe(true)
+    expect(existsSync(join(LANDING_SOURCE, 'pages', 'terms.astro'))).toBe(true)
+    expect(existsSync(join(LANDING_SOURCE, 'pages', 'changelog.astro'))).toBe(true)
     expect(existsSync(join(LANDING_SOURCE, 'components', 'CookieBanner.astro'))).toBe(false)
 
     const layout = readFileSync(join(LANDING_SOURCE, 'layouts', 'BaseLayout.astro'), 'utf8')

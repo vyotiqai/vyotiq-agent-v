@@ -21,6 +21,18 @@ export const MCP_CONNECT_CIRCUIT_POLICY: CircuitPolicy = {
   halfOpenMax: 1
 }
 
+/**
+ * The codeindex embed utility is a forked `utilityProcess` that loads ONNX.
+ * When it crashes it was re-forked on demand with no backoff and no breaker —
+ * during a run that is every 1500 ms mutation debounce plus 2 s/5 s/30 s paging
+ * re-warms. Three consecutive failed spawns stop the fork storm for a minute.
+ */
+export const EMBED_UTILITY_CIRCUIT_POLICY: CircuitPolicy = {
+  failureThreshold: 3,
+  openMs: 60_000,
+  halfOpenMax: 1
+}
+
 export const CIRCUIT_FAILURE_THRESHOLD = DEFAULT_CIRCUIT_POLICY.failureThreshold
 export const CIRCUIT_OPEN_MS = DEFAULT_CIRCUIT_POLICY.openMs
 
@@ -74,6 +86,10 @@ export function circuitKeyMcpConnect(sessionKey: string): string {
 
 export function circuitKeyMcpInvoke(sessionKey: string): string {
   return `mcp-invoke:${sessionKey}`
+}
+
+export function circuitKeyEmbedUtility(): string {
+  return 'utility:codeindex-embed'
 }
 
 type Breaker = {

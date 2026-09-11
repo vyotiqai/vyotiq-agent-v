@@ -13,6 +13,7 @@ import {
   gitRemoteUrl,
   isGitRepo,
   listLocalBranches,
+  readGitAheadBehind,
   readGitCommitFiles,
   readGitBlame,
   readGitDiff,
@@ -448,6 +449,73 @@ describe.skipIf(!canGit)('git blame', () => {
         author: 'Not Committed Yet'
       })
       expect(result.lines[0]?.shortSha).toMatch(/^[0-9a-f]{7}$/i)
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+})
+
+describe.skipIf(!canGit)('git ahead/behind vs upstream', () => {
+  it('counts ahead/behind against the tracking ref through readGitStatus', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vyotiq-git-ahead-'))
+    const bare = mkdtempSync(join(tmpdir(), 'vyotiq-git-ahead-bare-'))
+    const twin = mkdtempSync(join(tmpdir(), 'vyotiq-git-ahead-twin-'))
+    try {
+      git(bare, 'init', '--bare', '--initial-branch=main')
+      git(repo, 'init', '--initial-branch=main')
+      git(repo, 'config', 'user.email', 'test@example.com')
+      git(repo, 'config', 'user.name', 'Test')
+      git(repo, 'config', 'commit.gpgsign', 'false')
+      writeFileSync(join(repo, 'base.txt'), 'one\n', 'utf8')
+      git(repo, 'add', '-A')
+      git(repo, 'commit', '-m', 'first')
+      git(repo, 'remote', 'add', 'origin', bare)
+      git(repo, 'push', '-u', 'origin', 'main')
+
+      const synced = expectOk(await readGitStatus(repo))
+      expect(synced.ahead).toBe(0)
+      expect(synced.behind).toBe(0)
+
+      // A twin clone advances the remote; a fetch lets repo see it (behind).
+      git(twin, 'clone', bare, '.')
+      git(twin, 'config', 'user.email', 'test@example.com')
+      git(twin, 'config', 'user.name', 'Test')
+      writeFileSync(join(twin, 'remote.txt'), 'remote\n', 'utf8')
+      git(twin, 'add', '-A')
+      git(twin, 'commit', '-m', 'remote commit')
+      git(twin, 'push', 'origin', 'main')
+      git(repo, 'fetch', 'origin')
+
+      // A local commit on top → ahead and behind at once.
+      writeFileSync(join(repo, 'local.txt'), 'local\n', 'utf8')
+      git(repo, 'add', '-A')
+      git(repo, 'commit', '-m', 'local commit')
+
+      const mixed = expectOk(await readGitStatus(repo))
+      expect(mixed.ahead).toBe(1)
+      expect(mixed.behind).toBe(1)
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+      rmSync(bare, { recursive: true, force: true })
+      rmSync(twin, { recursive: true, force: true })
+    }
+  })
+
+  it('omits ahead/behind when the branch has no upstream', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vyotiq-git-noupstream-'))
+    try {
+      git(repo, 'init', '--initial-branch=main')
+      git(repo, 'config', 'user.email', 'test@example.com')
+      git(repo, 'config', 'user.name', 'Test')
+      writeFileSync(join(repo, 'solo.txt'), 'one\n', 'utf8')
+      git(repo, 'add', '-A')
+      git(repo, 'commit', '-m', 'first')
+
+      const status = expectOk(await readGitStatus(repo))
+      expect(status.hasRemote).toBe(false)
+      expect(status.ahead).toBeUndefined()
+      expect(status.behind).toBeUndefined()
+      await expect(readGitAheadBehind(repo)).resolves.toBeNull()
     } finally {
       rmSync(repo, { recursive: true, force: true })
     }

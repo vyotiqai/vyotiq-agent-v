@@ -91,7 +91,6 @@ venv/
 
 # Local-only editor and internal design notes (must stay after docx un-ignores)
 /.cursor/
-/.devin/
 /.vyotiq/rules/
 # Editor recovery snapshot (full source mirror) — local-only, never commit.
 /.vyotiq/editor-recovery.json
@@ -116,3 +115,8 @@ scripts/remove-coauthors-from-history.sh
 asar-list.txt
 screenshots/
 scripts/tmp-*
+
+# Local-only outputs: packaging verification unpacks and OSS-flip evidence
+# snapshots taken by prior working sessions. Machine-local, never publish.
+dist-verify*/
+tmp-os-evidence/

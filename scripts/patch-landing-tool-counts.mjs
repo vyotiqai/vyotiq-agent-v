@@ -100,17 +100,4 @@ install = install.replace(
 )
 writeDocumentXml(installPath, install)
 
-const voicePath = path.join(root, 'landing/src/content/docs/tools/voice-dictation.md.docx')
-let voice = readDocumentXml(voicePath)
-if (!voice.includes('Qwen3-ASR (local server)')) {
-  const localClose =
-    '<w:t xml:space="preserve"> — runs English Whisper inference on this machine.</w:t></w:r></w:p>'
-  if (!voice.includes(localClose)) throw new Error('voice.docx Local engine paragraph not found')
-  voice = voice.replace(
-    localClose,
-    `${localClose}${listItem('Qwen3-ASR (local server)', 'optional local ASR HTTP server')}`
-  )
-  writeDocumentXml(voicePath, voice)
-}
-
 console.log('[patch-landing-tool-counts] updated tools/what-it-is/mcp/install docx')

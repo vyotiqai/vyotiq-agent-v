@@ -1,7 +1,7 @@
 # Vyotiq Release Runbook
 
 Release process for **Agent V** (Electron + electron-builder + electron-updater), published to
-GitHub Releases at `vyotiqai/vyotiq-agent-v`, with an Astro landing site deployed to
+GitHub Releases at `vyotiqai/vyotiq-agent-v-releases`, with an Astro landing site deployed to
 Cloudflare Pages (project `vyotiq`).
 
 Every command, workflow name, secret name, and path below was verified against the actual
@@ -40,39 +40,64 @@ The **only** release trigger is pushing a tag matching `v*` (`.github/workflows/
 `on.push.tags: ['v*']`; a `workflow_dispatch` on a branch intentionally packages with
 `--publish never` and cannot publish to a release).
 
-1. **Bump the version** in root `package.json`.
+1. **Write the release notes first.** Add a `## [X.Y.Z] - YYYY-MM-DD` entry to the root
+   `CHANGELOG.md` with `### Added` / `### Changed` / `### Fixed` subsections and `- ` bullets.
+   The release body — which the in-app update card parses into its "What's new" sections
+   (`parseReleaseNotes`, `src/shared/utils/releaseNotes.ts`) and the landing `/changelog` page
+   renders — is generated from this entry. The `create-release` job runs
+   `scripts/extract-release-notes.mjs` and **fails the release** if the version has no entry or
+   the entry has no bullets. Preview locally with:
+   ```
+   node scripts/extract-release-notes.mjs --version X.Y.Z
+   ```
+2. **Bump the version** in root `package.json`.
    - On a clean tree: `pnpm version minor` (or `patch` / `major`). This commits and creates the tag
-     for you — skip steps 2–3.
+     for you — skip steps 3–4.
    - With in-flight work (this repo almost always has some — other sessions keep uncommitted work):
      `pnpm version` rejects a dirty tree. Bump the `"version"` field **manually** and commit. This
      is exactly what was done for v1.1.0 and v1.1.1. Never bulk-revert the working tree to get a
      clean state — see Troubleshooting (e).
-2. **Commit** (only when you bumped manually):
+3. **Commit** (only when you bumped manually):
    ```
-   git add package.json
+   git add package.json CHANGELOG.md
    git commit -m "chore: bump version to X.Y.Z"
    ```
-3. **Create an annotated tag:**
+4. **Create an annotated tag:**
    ```
    git tag -a vX.Y.Z -m "Vyotiq vX.Y.Z"
    ```
-4. **Push the commit and tag together:**
+5. **Push the commit and tag together:**
    ```
    git push --follow-tags
    ```
-5. **Release workflow runs automatically.** Pushing the tag starts the `Release` workflow, which
-   builds and publishes:
-   - `windows-x64` (job name; `windows-latest`, `electron-builder --win`) → NSIS setup.exe
+
+### What the Release workflow does automatically
+
+Pushing the tag starts the `Release` workflow, which now runs, in order:
+
+1. **`verify`** — tag↔version guard, `pnpm typecheck`, `pnpm test` (ubuntu). A red tree cannot be
+   tagged into a release. (The full three-OS matrix — lint, e2e, packaging smoke, audit — stays in
+   CI on `main`.)
+2. **`create-release`** — extracts the notes from `CHANGELOG.md` and creates the release in the
+   public releases repo **with those notes as the body** (no more empty bodies, no manual
+   `gh release edit`).
+3. **`package`** (matrix) — builds and publishes:
+   - `windows-x64` (`windows-latest`, `electron-builder --win`) → NSIS setup.exe
    - `linux-x64` (`ubuntu-latest`, `electron-builder --linux`) → AppImage
    - `macOS` (`macos-latest`, `electron-builder --mac --arm64 --x64` — both arches in one job so a
      single `latest-mac.yml` lists both zips) → arm64 + x64 DMGs and zips
 
    Each job runs `pnpm build:vite` then
-   `pnpm exec electron-builder <target> --publish always` with `GH_TOKEN: secrets.GITHUB_TOKEN`,
+   `pnpm exec electron-builder <target> --publish always` with `GH_TOKEN: secrets.RELEASES_TOKEN`,
    publishing installers **plus** the updater metadata (`latest.yml`, `latest-linux.yml`,
-   `latest-mac.yml`) to the GitHub Release for `vX.Y.Z`. The `macOS` job is run unsigned unless
-   `CSC_LINK` is set (`--config.mac.identity=null` fallback), so mac packaging does not require a
-   cert.
+   `latest-mac.yml`). The `macOS` job runs unsigned unless `CSC_LINK` is set
+   (`--config.mac.identity=null` fallback), so mac packaging does not require a cert.
+4. **`finalize-release`** — runs after the matrix and enforces, with the workflow failing on breach:
+   - the release body is populated (backfills from `CHANGELOG.md` if a re-run found the old stub);
+   - **all three `latest*.yml` files and every platform installer are present** on the release
+     (the v1.1.0 silent-mac-update guard — §4 explains why this matters);
+   - the landing site is redeployed via `gh workflow run deploy-landing.yml --ref main`, so
+     download buttons and `/changelog` refresh on their own.
 
 6. **Verify the release:**
    ```
@@ -80,7 +105,8 @@ The **only** release trigger is pushing a tag matching `v*` (`.github/workflows/
    gh run list --workflow=release.yml
    gh run watch <run-id> --exit-status
    ```
-7. **Redeploy the landing site** so its download buttons bake the new release — see §5.
+   A green `finalize-release` job means the body and all updater manifests are confirmed; §4 is
+   then a spot-check, not a requirement.
 
 ---
 
@@ -114,7 +140,7 @@ After the `Release` workflow finishes, check the release page:
 
 ```
 gh release view vX.Y.Z
-gh api repos/vyotiqai/vyotiq-agent-v/releases/tags/vX.Y.Z --jq '.assets[] | [.name, .size] | @tsv'
+gh api repos/vyotiqai/vyotiq-agent-v-releases/releases/tags/vX.Y.Z --jq '.assets[] | [.name, .size] | @tsv'
 ```
 
 **Expected assets** (per `electron-builder.yml` artifact names):
@@ -129,7 +155,9 @@ gh api repos/vyotiqai/vyotiq-agent-v/releases/tags/vX.Y.Z --jq '.assets[] | [.na
 **All three `latest*.yml` files MUST be present.** electron-updater reads only its own OS's file —
 a missing one means auto-update **silently fails on that OS**. This bit us on v1.1.0: the macOS job
 failed, so v1.1.0 shipped without `latest-mac.yml` and mac users got no update until v1.1.1.
-`gh release view vX.Y.Z` shows the asset list; count the three metadata files explicitly.
+The `finalize-release` job now fails the workflow unless all three are present (plus the
+exe/DMG/zip/AppImage installers), so a successful run implies they exist; the commands below are
+the manual equivalent.
 
 **Sanity sizes** — real v1.1.1 assets, all ≤ 500 MB (the CUDA variants of `@node-llama-cpp` are
 excluded in `electron-builder.yml` precisely to stay under this):
@@ -152,29 +180,29 @@ For a local unpacked size audit after packaging, run
 `.github/workflows/deploy-landing.yml` (name **Deploy landing**) runs **on every push to `main`
 that touches its path filters** (`landing/**`, `resources/branding/**`, `resources/icon.*`,
 `src/shared/domain/providers.ts`, `src/shared/ipc/schemas/providers.ts`, `package.json`,
-`pnpm-lock.yaml`, the workflow itself), plus manual `workflow_dispatch`. It is **not** triggered by
-a tag push — after a release you must re-run it so the baked release snapshot updates:
+`pnpm-lock.yaml`, the workflow itself), plus manual `workflow_dispatch`.
 
-1. Trigger it: push any commit to `main` that touches a watched path, or
-   `gh workflow run deploy-landing.yml`.
+**After a tagged release it runs automatically**: the Release workflow's `finalize-release` job
+dispatches it with `gh workflow run deploy-landing.yml --ref main`, so the baked release snapshot
+and the `/changelog` page refresh on their own. Trigger it by hand only as a fallback:
+
+1. Trigger it: `gh workflow run deploy-landing.yml`.
 2. The job (`deploy` / **Cloudflare Pages**, `ubuntu-latest`) runs:
    - `pnpm install --frozen-lockfile`
    - `pnpm landing:build` — this runs `pnpm sync:brand`, `pnpm sync:landing-brand`, and
      `pnpm bake:landing-release` (`landing/scripts/bake-github-release.mjs`), which fetches the
-     **latest published GitHub Release** at build time and bakes its download URLs into
-     `landing/src/lib/github-release.json` (a failed fetch keeps the previous snapshot rather than
-     hiding the buttons)
+     **latest published GitHub Releases** at build time and bakes their download URLs into
+     `landing/src/lib/github-release.json` and the recent release notes into
+     `landing/src/lib/github-releases.json` (a failed fetch keeps the previous snapshots rather
+     than hiding the buttons)
    - `pnpm landing:check` (Astro check gate)
    - `pnpm dlx wrangler@4 pages deploy landing/dist --project-name=vyotiq --branch=main`
 3. **Required repo secrets** (Settings → Secrets and variables → Actions):
    `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
 
-**Known state (2026-09-08):** both Cloudflare secrets are **empty** in the repo, so deploys fail at
-wrangler auth (failed run 34254965003) and the live site still points its download buttons at the
-v1.0.0 snapshot. **Fix:** add both secrets in GitHub repo Settings → Secrets and variables →
-Actions, then re-run the workflow (`gh workflow run deploy-landing.yml`, or push any commit to
-`main` touching a watched path — `package.json` qualifies). Until a deploy succeeds, the live
-landing site's download buttons point at v1.0.0 regardless of what you release.
+**Known state (2026-09-10):** both Cloudflare secrets are **set** in the repo and deploys succeed
+(they were empty before 2026-09-10, which is what failed run 34254965003 at wrangler auth). If a
+deploy ever fails at wrangler auth again, re-check both secrets, then re-run the workflow.
 
 ---
 
@@ -195,25 +223,28 @@ landing site's download buttons point at v1.0.0 regardless of what you release.
 ## 7. Quick reference
 
 ```
-# 1. Bump version (dirty tree: edit package.json manually, then)
-git add package.json && git commit -m "chore: bump version to X.Y.Z"
+# 1. Add the CHANGELOG.md entry for X.Y.Z (## [X.Y.Z] - date, ### subsections, - bullets)
+#    Preview it: node scripts/extract-release-notes.mjs --version X.Y.Z
 
-# 2. Tag and push (this is the only release trigger)
+# 2. Bump version (dirty tree: edit package.json manually, then)
+git add package.json CHANGELOG.md && git commit -m "chore: bump version to X.Y.Z"
+
+# 3. Tag and push (this is the only release trigger)
 git tag -a vX.Y.Z -m "Vyotiq vX.Y.Z"
 git push --follow-tags
 
-# 3. Watch the release build
+# 4. Watch the release build (verify → create-release → package ×3 → finalize-release)
 gh run list --workflow=release.yml
 gh run watch <run-id> --exit-status
 
-# 4. Verify the release
+# 5. Spot-check the release (finalize-release already verified notes + manifests)
 gh release view vX.Y.Z
-gh api repos/vyotiqai/vyotiq-agent-v/releases/tags/vX.Y.Z --jq '.assets[] | [.name, .size] | @tsv'
+gh api repos/vyotiqai/vyotiq-agent-v-releases/releases/tags/vX.Y.Z --jq '.assets[] | [.name, .size] | @tsv'
 #   → confirm latest.yml, latest-linux.yml, latest-mac.yml are all present
 
-# 5. Re-run landing deploy (after the release is live)
+# 6. Landing redeploy runs automatically from finalize-release; manual fallback:
 gh workflow run deploy-landing.yml
 
-# 6. Local size audit (after pnpm pack / electron-builder dir)
+# 7. Local size audit (after pnpm pack / electron-builder dir)
 node scripts/bundle-size-report.mjs --unpacked dist-package/win-unpacked
 ```

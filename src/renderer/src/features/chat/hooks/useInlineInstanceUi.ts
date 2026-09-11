@@ -10,6 +10,16 @@ function isActiveChildPhase(phase: AgentInstanceUiState['phase'] | undefined): b
   return phase === 'started'
 }
 
+/** Order-sensitive identity check so an unchanged scan never re-renders consumers. */
+function sameGates(a: readonly InlineInstanceGate[], b: readonly InlineInstanceGate[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i]!.runId !== b[i]!.runId || a[i]!.kind !== b[i]!.kind) return false
+  }
+  return true
+}
+
 /**
  * Tracks which inline instance sub-session is open under the parent chat,
  * plus pending approval/question gates for child runs.
@@ -60,7 +70,9 @@ export function useInlineInstanceUi(
       isActiveChildPhase(known[id]?.phase)
     )
     if (childIds.length === 0) {
-      if (generation === scanGenerationRef.current) setPendingGates([])
+      if (generation === scanGenerationRef.current) {
+        setPendingGates((prev) => (prev.length === 0 ? prev : []))
+      }
       return
     }
 
@@ -83,7 +95,9 @@ export function useInlineInstanceUi(
         }
       }
     }
-    if (generation === scanGenerationRef.current) setPendingGates(next)
+    if (generation === scanGenerationRef.current) {
+      setPendingGates((prev) => (sameGates(prev, next) ? prev : next))
+    }
   }, [agentInstances, openInstanceRunId])
 
   useEffect(() => {
@@ -116,12 +130,15 @@ export function useInlineInstanceUi(
   }, [scanPendingGates])
 
   useEffect(() => {
-    setPendingGates((prev) =>
-      prev.filter((gate) => {
+    setPendingGates((prev) => {
+      const next = prev.filter((gate) => {
         const phase = agentInstances?.[gate.runId]?.phase
         return isActiveChildPhase(phase)
       })
-    )
+      // Same reference when nothing dropped — avoids a re-render on every
+      // agentInstances update.
+      return next.length === prev.length ? prev : next
+    })
   }, [agentInstances])
 
   const closeInstancePane = useCallback((): void => {

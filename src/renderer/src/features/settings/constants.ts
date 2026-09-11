@@ -99,9 +99,7 @@ export const CODEINDEX_EMBEDDER_OPTIONS = [
 export const DICTATION_ENGINE_OPTIONS = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'local', label: 'Local' },
-  { value: 'qwen3-asr', label: 'Qwen3-ASR (local server)' },
-  { value: 'qwen3-asr-onnx', label: 'Qwen3-ASR (on-device)' }
+  { value: 'local', label: 'Local' }
 ]
 
 export const DICTATION_WAVEFORM_STYLE_OPTIONS = [

@@ -86,6 +86,39 @@ const pendingModeByRun = new Map<string, AgentInteractionMode>()
 /** writes_checkpoint persisted in loop finally after the generator consumer ended. */
 const lateWriteCheckpointByRun = new Map<string, AgentEvent>()
 const lateFollowUpDroppedByRun = new Map<string, AgentEvent>()
+/**
+ * IPC takeLate* owns late-buffer cleanup after the generator ends, but a window
+ * that never gets taken (renderer closed mid-teardown) would retain the event
+ * forever. A delayed prune bounds that retention without racing the take window.
+ */
+const LATE_BUFFER_PRUNE_MS = 60_000
+const lateBufferPruneTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function scheduleLateBufferPrune(runId: string): void {
+  if (lateBufferPruneTimers.has(runId)) return
+  const timer = setTimeout(() => {
+    lateBufferPruneTimers.delete(runId)
+    lateWriteCheckpointByRun.delete(runId)
+    lateFollowUpDroppedByRun.delete(runId)
+  }, LATE_BUFFER_PRUNE_MS)
+  // A cleanup timer must never hold the process (or a quit) open.
+  timer.unref?.()
+  lateBufferPruneTimers.set(runId, timer)
+}
+
+function cancelLateBufferPrune(runId: string): void {
+  const timer = lateBufferPruneTimers.get(runId)
+  if (!timer) return
+  clearTimeout(timer)
+  lateBufferPruneTimers.delete(runId)
+}
+
+/** Invalidate prior-run late state when a run id registers again (resume). */
+function resetLateBufferState(runId: string): void {
+  cancelLateBufferPrune(runId)
+  lateWriteCheckpointByRun.delete(runId)
+  lateFollowUpDroppedByRun.delete(runId)
+}
 let nextInvokeId = 1
 
 /** Queue a mode switch to apply at the start of the next loop step. */
@@ -142,6 +175,9 @@ export function registerRunAbort(runId: string, workspacePath: string): RunAbort
     followUps: [],
     streamInterrupt: null
   })
+  // Fresh registration — stale late buffers from a prior finish of this id are
+  // meaningless now, and a pending prune timer must not eat the new run's ones.
+  resetLateBufferState(runId)
   return { controller, invokeId }
 }
 
@@ -482,6 +518,8 @@ export function clearRunAbort(runId: string, invokeId?: number): void {
   pendingModeByRun.delete(runId)
   // Keep late checkpoint / follow_up_dropped buffers — IPC takeLate* owns cleanup
   // after the generator ends (set in runAgent finally, taken after for-await).
+  // The delayed prune bounds retention when IPC never takes them.
+  scheduleLateBufferPrune(runId)
 }
 
 /** Queue a user message for mid-run injection (passive — does not interrupt). */

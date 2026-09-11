@@ -8,7 +8,7 @@ import {
 
 describe('agentInstance utils', () => {
   it('formats inline instance label', () => {
-    expect(formatAgentInstanceLabel('abc123')).toBe('Agent V Instance id; abc123')
+    expect(formatAgentInstanceLabel('abc123')).toBe('Agent V Instance id; abc123 (short abc123)')
   })
 
   it('formats short instance id from uuid prefix', () => {

@@ -4,6 +4,11 @@
  */
 
 export const ONNX_EMBED_MAX_LENGTH = 512
+/**
+ * One forward covers at most this many texts. Larger requests are chunked so a
+ * single pathological batch can never pin the utility/ORT in one inference.
+ */
+export const ONNX_EMBED_MAX_BATCH = 32
 
 export function l2NormalizeInPlace(vec: Float32Array): Float32Array {
   let norm = 0
@@ -118,7 +123,8 @@ async function tokenizePaddedBatch(
       truncation: true,
       max_length: ONNX_EMBED_MAX_LENGTH
     })
-    if (batchDim(batched?.input_ids) === texts.length) {
+    const seqLen = batched?.input_ids?.dims?.[1]
+    if (batchDim(batched?.input_ids) === texts.length && (seqLen == null || seqLen > 0)) {
       return batched
     }
   } catch {
@@ -140,6 +146,9 @@ async function tokenizePaddedBatch(
     encoded.push(one)
     maxLen = Math.max(maxLen, one.input_ids.data.length)
   }
+  // An empty/degenerate tokenization would build tensors with a zero sequence
+  // dimension; some ORT builds spin on [batch, 0] inputs. Keep at least one.
+  maxLen = Math.max(1, maxLen)
 
   const batch = encoded.length
   const idData = new BigInt64Array(batch * maxLen)
@@ -207,8 +216,21 @@ export async function embedBatchedOnnx(opts: {
 }): Promise<Float32Array[]> {
   throwIfAborted(opts.signal)
   if (opts.texts.length === 0) return []
+  if (opts.texts.length > ONNX_EMBED_MAX_BATCH) {
+    const out: Float32Array[] = []
+    for (let i = 0; i < opts.texts.length; i += ONNX_EMBED_MAX_BATCH) {
+      out.push(
+        ...(await embedBatchedOnnx({
+          ...opts,
+          texts: opts.texts.slice(i, i + ONNX_EMBED_MAX_BATCH)
+        }))
+      )
+      throwIfAborted(opts.signal)
+    }
+    return out
+  }
   const prefix = opts.role === 'query' ? 'query: ' : 'document: '
-  const prefixed = opts.texts.map((raw) => `${prefix}${raw}`)
+  const prefixed = opts.texts.map((raw) => `${prefix}${typeof raw === 'string' ? raw : ''}`)
   const inputs = await tokenizePaddedBatch(opts.tokenizer, prefixed, opts.Tensor)
   throwIfAborted(opts.signal)
   const outputs = await opts.model(inputs)

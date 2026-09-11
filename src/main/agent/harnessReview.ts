@@ -59,7 +59,7 @@ function formatRunSources(runs: Iterable<string>, cap = 5): string {
   return shown.length > 0 ? `; runs: ${shown.join(', ')}${more}` : ''
 }
 
-function migrateLegacyReceipt(raw: unknown): unknown {
+export function migrateLegacyReceipt(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
   const receipt = raw as Record<string, unknown>
   const version = receipt.version

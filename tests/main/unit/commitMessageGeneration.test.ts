@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { logger } from '@shared/logger'
 
 const mocks = vi.hoisted(() => ({
   readGitDiff: vi.fn(),
   readGitLog: vi.fn(),
   readGitStatus: vi.fn(),
-  streamChat: vi.fn()
+  streamChat: vi.fn(),
+  getSettings: vi.fn(),
+  getSecret: vi.fn()
 }))
 
 vi.mock('@main/git/git', () => ({
@@ -14,16 +17,11 @@ vi.mock('@main/git/git', () => ({
 }))
 
 vi.mock('@main/settings/settings', () => ({
-  getSettings: () => ({
-    provider: 'ollama',
-    model: 'qwen2.5-coder',
-    ollamaBaseUrl: 'http://127.0.0.1:11434',
-    customOpenAiBaseUrl: 'http://127.0.0.1:8080/v1'
-  })
+  getSettings: mocks.getSettings
 }))
 
 vi.mock('@main/settings/secrets', () => ({
-  getSecret: () => null
+  getSecret: mocks.getSecret
 }))
 
 vi.mock('@main/workspace/workspaces', () => ({
@@ -47,6 +45,8 @@ describe('generateCommitMessage', () => {
     mocks.readGitLog.mockReset()
     mocks.readGitStatus.mockReset()
     mocks.streamChat.mockReset()
+    mocks.getSettings.mockReset()
+    mocks.getSecret.mockReset()
     mocks.readGitDiff.mockResolvedValue({
       ok: true,
       content: 'diff --git a/src/tools/shell.ts b/src/tools/shell.ts\n+export function runShell() {}'
@@ -79,6 +79,13 @@ describe('generateCommitMessage', () => {
       }
     })
     mocks.readGitLog.mockResolvedValue([{ subject: 'feat(cli): add command runner' }])
+    mocks.getSettings.mockReturnValue({
+      provider: 'ollama',
+      model: 'qwen2.5-coder',
+      ollamaBaseUrl: 'http://127.0.0.1:11434',
+      customOpenAiBaseUrl: 'http://127.0.0.1:8080/v1'
+    })
+    mocks.getSecret.mockReturnValue(null)
   })
 
   it('sends the selected diff and recent history to the configured agent model', async () => {
@@ -97,13 +104,120 @@ describe('generateCommitMessage', () => {
   })
 
   it('falls back without preventing commit when the provider returns an error', async () => {
+    // The fallback choke point logs a warn with the reason for every branch —
+    // asserted here once; every other fallback test below routes through it.
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     mocks.streamChat.mockImplementation(async function* () {
       yield { type: 'error', error: 'provider unavailable' }
     })
 
     await expect(generateCommitMessage('/ws', 'all')).resolves.toEqual({
       message: null,
-      source: 'fallback'
+      source: 'fallback',
+      reason: 'The model returned an error'
+    })
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Commit message generation unavailable'),
+      expect.objectContaining({ code: 'COMMIT_MESSAGE_FALLBACK' })
+    )
+    warnSpy.mockRestore()
+  })
+
+  it('falls back with the diff reason when the diff cannot be read', async () => {
+    mocks.readGitDiff.mockResolvedValue({ ok: false, error: 'git failed' })
+
+    await expect(generateCommitMessage('/ws', 'all')).resolves.toEqual({
+      message: null,
+      source: 'fallback',
+      reason: 'No diff content found for the selected changes'
+    })
+  })
+
+  it('falls back with the settings reason when settings cannot be read', async () => {
+    mocks.getSettings.mockImplementation(() => {
+      throw new Error('settings unavailable')
+    })
+
+    await expect(generateCommitMessage('/ws', 'all')).resolves.toEqual({
+      message: null,
+      source: 'fallback',
+      reason: 'Could not read chat settings'
+    })
+  })
+
+  it('falls back with the api-key reason when the provider requires a key', async () => {
+    mocks.getSettings.mockReturnValue({
+      provider: 'custom',
+      model: 'gpt',
+      customOpenAiBaseUrl: 'https://api.example.com/v1'
+    })
+
+    await expect(generateCommitMessage('/ws', 'all')).resolves.toEqual({
+      message: null,
+      source: 'fallback',
+      reason: 'No API key configured for custom'
+    })
+  })
+
+  it('falls back with the timeout reason when generation aborts', async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.streamChat.mockImplementation(async function* (request: { signal: AbortSignal }) {
+        yield { type: 'text', text: 'feat(cli): partial subject' }
+        await new Promise<void>((resolve) => {
+          if (request.signal.aborted) resolve()
+          else request.signal.addEventListener('abort', () => resolve())
+        })
+        yield { type: 'text', text: ' never finished' }
+      })
+
+      const pending = generateCommitMessage('/ws', 'all')
+      const expectation = expect(pending).resolves.toEqual({
+        message: null,
+        source: 'fallback',
+        reason: 'Generation timed out'
+      })
+      await vi.advanceTimersByTimeAsync(12_000)
+      await expectation
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('falls back with the connectivity reason when the provider stream throws', async () => {
+    mocks.streamChat.mockImplementation(() => {
+      throw new Error('ECONNREFUSED')
+    })
+
+    await expect(generateCommitMessage('/ws', 'all')).resolves.toEqual({
+      message: null,
+      source: 'fallback',
+      reason: 'Could not reach the model'
+    })
+  })
+
+  it('falls back with the parse reason when the reply is a rejected placeholder', async () => {
+    mocks.streamChat.mockImplementation(async function* () {
+      yield { type: 'text', text: 'Update 11 files' }
+      yield { type: 'done' }
+    })
+
+    await expect(generateCommitMessage('/ws', 'all')).resolves.toEqual({
+      message: null,
+      source: 'fallback',
+      reason: 'The model reply was not a usable commit message'
+    })
+  })
+
+  it('falls back when the model returns no text at all', async () => {
+    mocks.streamChat.mockImplementation(async function* () {
+      yield { type: 'done' }
+    })
+
+    await expect(generateCommitMessage('/ws', 'all')).resolves.toEqual({
+      message: null,
+      source: 'fallback',
+      reason: 'The model returned no text'
     })
   })
 })

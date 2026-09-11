@@ -9,11 +9,9 @@ import {
   type DictationTranscribeResult,
   type Settings
 } from '../../shared/ipc'
-import { dictationCatalogEntry, DICTATION_LOCAL_MODEL_IDS, isQwen3AsrOnnxModelId } from '../../shared/dictation'
+import { dictationCatalogEntry, DICTATION_LOCAL_MODEL_IDS } from '../../shared/dictation'
 import { getSettings, setSettings } from '../settings/settings'
 import {
-  DICTATION_QWEN_ONNX_OPTIONAL_FILES,
-  DICTATION_QWEN_ONNX_REQUIRED_FILES,
   DICTATION_WHISPER_OPTIONAL_FILES,
   DICTATION_WHISPER_REQUIRED_FILES,
   recommendedDictationModelId
@@ -26,7 +24,6 @@ import {
 } from './download'
 import { dictationModelDir } from './modelPaths'
 import { getDictationRuntimeStatus, setDictationRuntimeStatus } from './modelStatus'
-import { transcribeQwen3AsrOnnxModel } from './qwen3AsrOrt'
 import {
   getDictationUtilityClient,
   type DictationWhisperBackend
@@ -78,23 +75,9 @@ function whisperFiles(hubRepo: string): DownloadFileSpec[] {
   ]
 }
 
-/** Curated download specs for any local dictation model (Whisper or Qwen-ONNX). */
+/** Curated download specs for any local dictation model. */
 function curatedFiles(modelId: DictationLocalModelId): DownloadFileSpec[] {
-  const entry = dictationCatalogEntry(modelId)
-  if (entry.backend === 'qwen3-asr-onnx') {
-    return [
-      ...DICTATION_QWEN_ONNX_REQUIRED_FILES.map((relativePath) => ({
-        relativePath,
-        url: hfResolve(entry.hubRepo, relativePath)
-      })),
-      ...DICTATION_QWEN_ONNX_OPTIONAL_FILES.map((relativePath) => ({
-        relativePath,
-        url: hfResolve(entry.hubRepo, relativePath),
-        optional: true
-      }))
-    ]
-  }
-  return whisperFiles(entry.hubRepo)
+  return whisperFiles(dictationCatalogEntry(modelId).hubRepo)
 }
 
 function normalizeHubRelativePath(raw: string): string {
@@ -137,7 +120,6 @@ export function selectDictationDownloadFiles(
 
 async function resolveWhisperFiles(modelId: DictationLocalModelId): Promise<DownloadFileSpec[]> {
   const entry = dictationCatalogEntry(modelId)
-  if (entry.backend !== 'whisper') return curatedFiles(modelId)
   if (process.env.VITEST === 'true' || process.env.VITEST === '1') {
     return selectDictationDownloadFiles(entry.hubRepo)
   }
@@ -190,8 +172,6 @@ function dirSizeBytes(dir: string): number {
 export function listInstalledDictationModels(): DictationRuntimeStatus['installed'] {
   const out: DictationRuntimeStatus['installed'] = []
   for (const id of DICTATION_LOCAL_MODEL_IDS) {
-    const entry = dictationCatalogEntry(id)
-    if (entry.backend === 'qwen3-asr') continue // server-hosted, never local
     const dir = dictationModelDir(id)
     const files = curatedFiles(id)
     if (!modelFilesPresent(dir, files)) continue
@@ -231,28 +211,10 @@ async function resolveBackend(): Promise<DictationWhisperBackend> {
 }
 
 async function ensureLoaded(modelId: DictationLocalModelId, signal?: AbortSignal): Promise<void> {
-  const entry = dictationCatalogEntry(modelId)
   const dir = dictationModelDir(modelId)
   const files = curatedFiles(modelId)
   if (!modelFilesPresent(dir, files)) {
-    throw new Error(
-      entry.backend === 'qwen3-asr-onnx'
-        ? 'Install the Qwen3-ASR (on-device) model in Settings → Voice to use dictation'
-        : 'Install a local Whisper model in Settings → Voice to use dictation'
-    )
-  }
-  // The on-device Qwen3-ASR engine loads ORT sessions lazily and caches them,
-  // so no separate worker ensure step is needed here.
-  if (entry.backend === 'qwen3-asr-onnx') {
-    loadedModelId = modelId
-    publishStatus({
-      phase: 'ready',
-      progress: 1,
-      error: null,
-      message: 'Ready',
-      activeModelId: null
-    })
-    return
+    throw new Error('Install a local Whisper model in Settings → Voice to use dictation')
   }
   // Always re-establish the worker session: the utility process can die
   // between utterances (abort teardown, crash), and a stale `loadedModelId`
@@ -355,10 +317,6 @@ export async function transcribeLocalDictation(
   assertPcm16kBase64(pcmB64)
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
   const modelId = resolveLocalModelId()
-  const entry = dictationCatalogEntry(modelId)
-  if (entry.backend === 'qwen3-asr-onnx') {
-    return transcribeQwen3AsrOnnxModel(modelId, request)
-  }
   await ensureLoaded(modelId, signal)
   const backend = await resolveBackend()
   const text = (await (signal

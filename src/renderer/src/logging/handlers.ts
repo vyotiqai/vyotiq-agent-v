@@ -1,6 +1,7 @@
 import { logger } from '@shared/logger'
 import { logErrorSummary } from '@shared/logPolicy'
 import { captureRendererException } from './sentry'
+import { shouldLogErrorSignature } from './errorLogRateLimiter'
 import {
   componentStackFromUnknown,
   errorMessageFromUnknown,
@@ -26,22 +27,12 @@ export function installRendererErrorHandlers(): void {
     const rawMessage = event.message || ''
     if (isBenignScriptError(rawMessage)) return
     const err = event.error ?? new Error(rawMessage || 'Unknown error')
-    const componentStack = componentStackFromUnknown(event.error)
-    const is185 =
-      isReactMaxUpdateDepth(rawMessage) ||
-      isReactMaxUpdateDepth(err instanceof Error ? err.message : '')
-    logger.fatal(
-      is185
-        ? `React maximum update depth (#185): ${logErrorSummary(err, 'REACT_185')}`
-        : `Uncaught renderer error: ${logErrorSummary(err, 'UNCAUGHT')}`,
-      {
-        scope: 'renderer',
-        code: is185 ? 'REACT_185' : 'UNCAUGHT',
-        componentStack: componentStack?.slice(0, 4000),
-        err
-      }
+    reportRendererFatal(
+      err,
+      rawMessage,
+      componentStackFromUnknown(event.error),
+      'Uncaught renderer error'
     )
-    captureRendererException(err, { scope: 'renderer', code: is185 ? 'REACT_185' : 'UNCAUGHT' })
   })
 
   window.addEventListener('unhandledrejection', (event) => {
@@ -58,21 +49,58 @@ export function installRendererErrorHandlers(): void {
     }
     const err = reason instanceof Error ? reason : new Error(String(reason))
     const message = errorMessageFromUnknown(reason) || err.message
-    const componentStack = componentStackFromUnknown(reason)
-    const is185 = isReactMaxUpdateDepth(message)
-    logger.fatal(
-      is185
-        ? `React maximum update depth (#185): ${logErrorSummary(err, 'REACT_185')}`
-        : `Unhandled renderer rejection: ${logErrorSummary(err, 'UNCAUGHT')}`,
-      {
-        scope: 'renderer',
-        code: is185 ? 'REACT_185' : 'UNCAUGHT',
-        componentStack: componentStack?.slice(0, 4000),
-        err
-      }
+    reportRendererFatal(
+      err,
+      message,
+      componentStackFromUnknown(reason),
+      'Unhandled renderer rejection'
     )
-    captureRendererException(err, { scope: 'renderer', code: is185 ? 'REACT_185' : 'UNCAUGHT' })
   })
+}
+
+function reportRendererFatal(
+  err: Error,
+  rawMessage: string,
+  componentStack: string | null | undefined,
+  prefix: 'Uncaught renderer error' | 'Unhandled renderer rejection'
+): void {
+  const is185 = isReactMaxUpdateDepth(rawMessage) || isReactMaxUpdateDepth(err.message)
+  const code = is185 ? 'REACT_185' : 'UNCAUGHT'
+  // Throttle per signature — an #185 loop must not flood the main process log
+  // bridge (main does per-record formatting + crash-snippet disk I/O).
+  const decision = shouldLogErrorSignature(`${code}\u0000${err.message}`)
+  if (!decision.log) return
+  logger.fatal(
+    is185
+      ? `React maximum update depth (#185): ${logErrorSummary(err, 'REACT_185')}`
+      : `${prefix}: ${logErrorSummary(err, 'UNCAUGHT')}`,
+    {
+      scope: 'renderer',
+      code,
+      ...(decision.suppressed > 0 ? { suppressedRepeats: decision.suppressed } : {}),
+      componentStack: componentStack?.slice(0, 4000),
+      err
+    }
+  )
+  captureRendererException(err, { scope: 'renderer', code })
+}
+
+/**
+ * React 19 root `onUncaughtError` callback. React calls this instead of
+ * window.onerror, and `errorInfo` carries the component stack even in
+ * production — the only reliable locator for an #185 loop.
+ */
+export function reportUncaughtRendererError(
+  error: unknown,
+  componentStack?: string | null
+): void {
+  const err = error instanceof Error ? error : new Error(String(error))
+  reportRendererFatal(
+    err,
+    errorMessageFromUnknown(error) || err.message,
+    componentStack,
+    'Uncaught renderer error'
+  )
 }
 
 export function isRendererErrorHandlersInstalled(): boolean {

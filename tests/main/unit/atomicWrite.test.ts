@@ -9,7 +9,8 @@ import {
   atomicWriteBufferAsync,
   isTransientRenameError,
   renameSyncWithRetry,
-  renameWithRetry
+  renameWithRetry,
+  syncRenameWorstCaseDelayMs
 } from '@main/storage/atomicWrite'
 
 function eperm(): NodeJS.ErrnoException {
@@ -101,6 +102,30 @@ describe('atomicWrite Windows rename retry', () => {
 
     expect(renameSyncFn).toHaveBeenCalledTimes(2)
     expect(sleepSyncFn).toHaveBeenCalledWith(1)
+  })
+
+  it('keeps the synchronous rename ladder short enough not to freeze the UI', () => {
+    // sleepSync parks the whole main thread, and per-step checkpoints write
+    // several times per agent step — the old 385ms ladder made those retries
+    // (the common path under Windows AV contention) a visible, repeated freeze.
+    expect(syncRenameWorstCaseDelayMs()).toBeLessThanOrEqual(20)
+  })
+
+  it('renameSyncWithRetry defaults to the short ladder, not the async one', () => {
+    const renameSyncFn = vi
+      .fn<(from: string, to: string) => void>()
+      .mockImplementation(() => {
+        throw eperm()
+      })
+    const sleepSyncFn = vi.fn()
+
+    expect(() =>
+      renameSyncWithRetry('a.tmp', 'a', { isWindows: true, renameSyncFn, sleepSyncFn })
+    ).toThrow()
+    // One attempt per delay + a final attempt.
+    expect(renameSyncFn).toHaveBeenCalledTimes(6)
+    const total = sleepSyncFn.mock.calls.reduce((sum, [ms]) => sum + (ms as number), 0)
+    expect(total).toBe(syncRenameWorstCaseDelayMs())
   })
 
   it('atomicWriteJson / async round-trip with unique tmp cleanup', async () => {

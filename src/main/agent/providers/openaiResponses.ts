@@ -1,4 +1,4 @@
-import type { ChatMessage, MessageContent } from '../../../shared/ipc'
+import type { ChatMessage, MessageContent, ProviderId } from '../../../shared/ipc'
 import { createHash } from 'crypto'
 import { contentToText, providerContentParts } from '../../../shared/ipc'
 import { formatError } from '../../../shared/errors'
@@ -14,7 +14,8 @@ import { normalizeStopReason } from './stopReason'
 import { iterateSseJson } from './sse'
 import { logProviderFailure, providerFetchFailureChunk } from './log'
 import { CHAT_FETCH_MAX_ATTEMPTS, fetchWithRetry } from './fetchWithRetry'
-import { formatProviderHttpError } from './httpErrors'
+import { formatProviderHttpError, parseRejectedBodyField, scrubProviderErrorSnippet, shouldRetrySanitizeToolSchema, stripRejectedBodyField } from './httpErrors'
+import { sanitizeToolParameters } from './toolSchemaSanitize'
 import {
   resolveSystemZones,
   supportsExplicitPromptCache,
@@ -247,23 +248,35 @@ export function toResponsesUserContent(
 }
 
 function toResponsesTools(
-  tools: ProviderChatRequest['tools']
+  tools: ProviderChatRequest['tools'],
+  sanitize = false
 ): Array<Record<string, unknown>> {
   return tools.map((t) => ({
     type: 'function',
     name: t.name,
     description: t.description,
-    parameters: t.parameters
+    parameters: sanitize ? sanitizeToolParameters(t.parameters) : t.parameters
   }))
 }
+
+/**
+ * Body-rebuild attempts on strict hosts: unknown optional fields and rejected
+ * tool schemas self-heal one per attempt (mirrors the chat completions loop).
+ */
+const RESPONSES_BODY_MAX_ATTEMPTS = 6
 
 /** Stream chat via OpenAI Responses API for reasoning models. */
 export async function* streamOpenAiResponses(
   req: ProviderChatRequest,
-  responsesUrl = 'https://api.openai.com/v1/responses'
+  responsesUrl = 'https://api.openai.com/v1/responses',
+  extraHeaders?: Record<string, string>,
+  providerId: ProviderId = 'openai'
 ): AsyncGenerator<StreamChunk> {
   if (!req.apiKey) {
-    yield { type: 'error', error: 'OpenAI API key not set' }
+    yield {
+      type: 'error',
+      error: `${providerId === 'opencode' ? 'OpenCode Go' : 'OpenAI'} API key not set`
+    }
     return
   }
 
@@ -283,79 +296,120 @@ export async function* streamOpenAiResponses(
   const supportsThinking = req.modelInfo?.supportsThinking !== false
   const explicitCache = supportsExplicitPromptCache(req.model)
 
-  const body: Record<string, unknown> = {
-    model: req.model,
-    input: toResponsesInput(req.messages, req.system, priorState, {
-      explicitPromptCache: explicitCache,
-      systemStable: req.systemStable,
-      systemVolatile: req.systemVolatile
-    }),
-    stream: true,
-    store: true,
-    ...(req.tools.length
-      ? {
-          tools: toResponsesTools(req.tools),
-          tool_choice: req.toolChoice ?? 'auto',
-          parallel_tool_calls: req.parallelToolCalls ?? true
-        }
-      : {}),
-    ...(thinkingOn
-      ? {
-          reasoning: {
-            effort: normalizeEffortForOpenAiResponses(req.thinking?.effort, true),
-            summary: 'auto',
-            context: 'all_turns'
+  const buildBody = (
+    omitFields: readonly string[],
+    sanitizeTools: boolean
+  ): Record<string, unknown> => {
+    const body: Record<string, unknown> = {
+      model: req.model,
+      input: toResponsesInput(req.messages, req.system, priorState, {
+        explicitPromptCache: explicitCache,
+        systemStable: req.systemStable,
+        systemVolatile: req.systemVolatile
+      }),
+      stream: true,
+      store: true,
+      ...(req.tools.length
+        ? {
+            tools: toResponsesTools(req.tools, sanitizeTools),
+            tool_choice: req.toolChoice ?? 'auto',
+            parallel_tool_calls: req.parallelToolCalls ?? true
           }
-        }
-      : thinkingOff && supportsThinking
+        : {}),
+      ...(thinkingOn
         ? {
             reasoning: {
-              effort: 'none',
+              effort: normalizeEffortForOpenAiResponses(req.thinking?.effort, true),
               summary: 'auto',
               context: 'all_turns'
             }
           }
-        : {}),
-    ...(priorState?.responseId ? { previous_response_id: priorState.responseId } : {}),
-    ...(req.promptCacheKey ? { prompt_cache_key: req.promptCacheKey } : {}),
-    ...(explicitCache
-      ? { prompt_cache_options: { mode: 'explicit', ttl: '30m' } }
-      : {})
-  }
-
-  const tier = serviceTierForApiBody(parseServiceTier(req.serviceTier))
-  if (tier) {
-    const supported = req.modelInfo?.supportedServiceTiers
-    if (!Array.isArray(supported) || supported.includes(tier)) {
-      body.service_tier = tier
+        : thinkingOff && supportsThinking
+          ? {
+              reasoning: {
+                effort: 'none',
+                summary: 'auto',
+                context: 'all_turns'
+              }
+            }
+          : {}),
+      ...(priorState?.responseId ? { previous_response_id: priorState.responseId } : {}),
+      ...(req.promptCacheKey ? { prompt_cache_key: req.promptCacheKey } : {}),
+      ...(explicitCache
+        ? { prompt_cache_options: { mode: 'explicit', ttl: '30m' } }
+        : {})
     }
+
+    const tier = serviceTierForApiBody(parseServiceTier(req.serviceTier))
+    if (tier) {
+      const supported = req.modelInfo?.supportedServiceTiers
+      if (!Array.isArray(supported) || supported.includes(tier)) {
+        body.service_tier = tier
+      }
+    }
+
+    // Strict-host recovery: drop optional fields the host named as unknown,
+    // including message/item-level names (see stripRejectedBodyField).
+    for (const field of omitFields) stripRejectedBodyField(body, field)
+    return body
   }
 
-  let res: Response
-  try {
-    res = await fetchWithRetry(
-      responsesUrl,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${req.apiKey}`
+  const omitFields: string[] = []
+  let sanitizeTools = false
+  let res: Response | undefined
+  let lastHttpErrorText = ''
+
+  for (let attempt = 0; attempt < RESPONSES_BODY_MAX_ATTEMPTS; attempt++) {
+    const body = buildBody(omitFields, sanitizeTools)
+    try {
+      res = await fetchWithRetry(
+        responsesUrl,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(extraHeaders ?? {}),
+            Authorization: `Bearer ${req.apiKey}`
+          },
+          signal: req.signal,
+          body: JSON.stringify(body)
         },
-        signal: req.signal,
-        body: JSON.stringify(body)
-      },
-      { maxAttempts: CHAT_FETCH_MAX_ATTEMPTS }
-    )
-  } catch (err) {
-    if (req.signal.aborted) throw err
-    yield providerFetchFailureChunk('openai', err)
-    return
+        { maxAttempts: CHAT_FETCH_MAX_ATTEMPTS }
+      )
+    } catch (err) {
+      if (req.signal.aborted) throw err
+      yield providerFetchFailureChunk(providerId, err)
+      return
+    }
+
+    if (res.ok) break
+
+    const text = await res.text().catch(() => '')
+    lastHttpErrorText = text
+
+    const rejectedField = parseRejectedBodyField(res.status, text)
+    if (rejectedField && !omitFields.includes(rejectedField)) {
+      omitFields.push(rejectedField)
+      continue
+    }
+
+    if (!sanitizeTools && req.tools.length > 0 && shouldRetrySanitizeToolSchema(res.status, text)) {
+      sanitizeTools = true
+      continue
+    }
+
+    break
   }
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    logProviderFailure('openai', 'http', { status: res.status })
-    yield { type: 'error', error: formatProviderHttpError(res.status, text, 'openai'), errorCode: 'PROVIDER_HTTP', httpStatus: res.status }
+  if (!res?.ok) {
+    const status = res?.status ?? 0
+    const message = formatProviderHttpError(status, lastHttpErrorText, providerId)
+    logProviderFailure(providerId, 'http', {
+      status,
+      message: scrubProviderErrorSnippet(lastHttpErrorText) || message,
+      model: req.model
+    })
+    yield { type: 'error', error: message, errorCode: 'PROVIDER_HTTP', httpStatus: status }
     return
   }
 
@@ -516,7 +570,7 @@ export async function* streamOpenAiResponses(
       if (type === 'response.failed') {
         const errObj = response?.error as { message?: string } | undefined
         const message = errObj?.message ?? 'OpenAI response failed'
-        logProviderFailure('openai', 'stream', {})
+        logProviderFailure(providerId, 'stream', {})
         yield { type: 'error', error: message, errorCode: 'PROVIDER_STREAM' }
         return
       }

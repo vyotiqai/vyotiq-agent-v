@@ -1,11 +1,14 @@
 /**
- * Automatic trace flight-recorder wiring. ON by default, zero manual steps:
- *  - Boot: starts the record-continuously ring buffer (traceCapture).
- *  - Renderer crash (non-killed/clean), child-process crash (non-clean),
- *    renderer unresponsive (attached per webContents via
- *    browser-window-created), uncaughtException/unhandledRejection → dump the
- *    ring buffer to {userData}/traces/ and resume recording (30s auto
+ * Automatic trace flight-recorder wiring. Perf-gated (VYOTIQ_PERF=1 starts the
+ * ring at boot); otherwise triggers-only:
+ *  - VYOTIQ_PERF=1 boot: starts the record-continuously ring buffer (traceCapture).
+ *  - Always (unless VYOTIQ_TRACE_OFF=1): renderer crash (non-killed/clean),
+ *    child-process crash (non-clean), renderer unresponsive (attached per
+ *    webContents via browser-window-created), uncaughtException/unhandledRejection → dump the
+ *    buffer to {userData}/traces/ and resume recording (30s auto
  *    cool-down dedupes trigger storms; manual IPC dumps always force).
+ *    dumpNow() starts a buffer on demand, so triggers-only mode still yields
+ *    a trace file for a real crash (post-trigger events only).
  *
  * Reliability note (honest): renderer-crash / child-crash / unresponsive
  * dumps are fully reliable because main survives. uncaughtException and
@@ -36,6 +39,12 @@ type AppLike = {
 export type TraceAutoCapture = {
   /** Idempotent boot: start the ring buffer + attach crash/hang triggers. */
   init: () => void
+  /**
+   * Idempotent boot variant: attach crash/hang triggers without starting the
+   * always-on ring buffer (perf-gated default). dumpNow() starts a buffer on
+   * demand, so a crash still yields a trace file.
+   */
+  initTriggersOnly: () => void
   capture: TraceCapture
 }
 
@@ -65,6 +74,34 @@ export function createTraceAutoCapture(
     })
   }
 
+  const attachTriggers = (): void => {
+    app.on('render-process-gone', ((_event: unknown, _wc: unknown, details: CrashDetailsLike) => {
+      if (details.reason === 'killed' || details.reason === 'clean-exit') return
+      dump('renderer-crash')
+    }) as never)
+
+    app.on('child-process-gone', ((_event: unknown, details: ChildDetailsLike) => {
+      if (details.reason === 'clean-exit' || details.reason === 'killed') return
+      dump('child-process-crash')
+    }) as never)
+
+    app.on('browser-window-created', ((_event: unknown, win: { webContents: { on: (event: string, listener: () => void) => void; isDestroyed: () => boolean } }) => {
+      win.webContents.on('unresponsive', () => {
+        if (win.webContents.isDestroyed()) return
+        dump('renderer-unresponsive')
+      })
+    }) as never)
+
+    // Register BEFORE logging/init's fatal handler so the dump starts
+    // inside the 250ms pre-exit flush window (best-effort — see header).
+    proc.on('uncaughtException', (() => {
+      dump('uncaught-exception')
+    }) as never)
+    proc.on('unhandledRejection', (() => {
+      dump('unhandled-rejection')
+    }) as never)
+  }
+
   return {
     capture,
     init(): void {
@@ -87,31 +124,16 @@ export function createTraceAutoCapture(
           })
         })
 
-      app.on('render-process-gone', ((_event: unknown, _wc: unknown, details: CrashDetailsLike) => {
-        if (details.reason === 'killed' || details.reason === 'clean-exit') return
-        dump('renderer-crash')
-      }) as never)
-
-      app.on('child-process-gone', ((_event: unknown, details: ChildDetailsLike) => {
-        if (details.reason === 'clean-exit' || details.reason === 'killed') return
-        dump('child-process-crash')
-      }) as never)
-
-      app.on('browser-window-created', ((_event: unknown, win: { webContents: { on: (event: string, listener: () => void) => void; isDestroyed: () => boolean } }) => {
-        win.webContents.on('unresponsive', () => {
-          if (win.webContents.isDestroyed()) return
-          dump('renderer-unresponsive')
-        })
-      }) as never)
-
-      // Register BEFORE logging/init's fatal handler so the dump starts
-      // inside the 250ms pre-exit flush window (best-effort — see header).
-      proc.on('uncaughtException', (() => {
-        dump('uncaught-exception')
-      }) as never)
-      proc.on('unhandledRejection', (() => {
-        dump('unhandled-rejection')
-      }) as never)
+      attachTriggers()
+    },
+    initTriggersOnly(): void {
+      if (initialized) return
+      initialized = true
+      logger.info('Trace flight recorder triggers-only (ring starts on first dump)', {
+        scope: 'perf',
+        kind: 'trace'
+      })
+      attachTriggers()
     }
   }
 }
@@ -133,9 +155,12 @@ export function getTraceAutoCapture(): TraceAutoCapture {
 }
 
 /**
- * Boot hook. ON by default; VYOTIQ_TRACE_OFF=1 is a measurement/diagnostics
- * opt-out only (no settings surface) so the flight recorder's cost can be
- * A/B measured per the STRICT perf rule.
+ * Boot hook. Off by default: an always-on trace ring is continuous idle cost
+ * (STRICT perf rule), so the ring buffer only auto-starts under VYOTIQ_PERF=1
+ * (measurement mode). VYOTIQ_TRACE_OFF=1 hard-disables everything, including
+ * crash-triggered dumps. With both vars unset the crash/hang triggers stay
+ * wired — dumpNow() restarts the buffer on demand, so a crash still produces
+ * a trace file (post-trigger events; pre-crash events need VYOTIQ_PERF=1).
  */
 export function initTraceAutoCapture(): void {
   if (process.env.VYOTIQ_TRACE_OFF === '1') {
@@ -146,7 +171,14 @@ export function initTraceAutoCapture(): void {
     return
   }
   instance ??= getTraceAutoCapture()
-  instance.init()
+  if (process.env.VYOTIQ_PERF === '1') {
+    instance.init()
+    return
+  }
+  // Perf-gated: register only the crash/hang dump triggers (they self-start
+  // the buffer inside dumpNow when a real problem signal fires). No ring at
+  // boot — steady-state cost stays zero until something goes wrong.
+  instance.initTriggersOnly()
 }
 
 /** @internal */

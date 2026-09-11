@@ -41,6 +41,7 @@ import {
   resetInstanceWorktreeCleanupForTests,
   retryRemoveInstanceWorktreePath
 } from '@main/git/instanceWorktree'
+import { workspaceIndexStorageDir } from '@main/agent/indexStoragePaths'
 import { logger } from '@shared/logger'
 
 describe('retryRemoveInstanceWorktreePath', () => {
@@ -555,10 +556,20 @@ describe('pruneStaleInstanceWorktrees', () => {
     writeFileSync(join(root, liveId, 'keep.txt'), 'live', 'utf8')
     writeFileSync(join(root, staleId, 'gone.txt'), 'stale', 'utf8')
 
+    const staleIndex = join(workspaceIndexStorageDir(join(root, staleId)), 'codeindex')
+    const liveIndex = join(workspaceIndexStorageDir(join(root, liveId)), 'codeindex')
+    mkdirSync(staleIndex, { recursive: true })
+    mkdirSync(liveIndex, { recursive: true })
+    writeFileSync(join(staleIndex, 'index.sqlite'), 'stale-index', 'utf8')
+    writeFileSync(join(liveIndex, 'index.sqlite'), 'live-index', 'utf8')
+
     const pruned = await pruneStaleInstanceWorktrees(workspace, new Set([liveId]))
     expect(pruned).toBe(1)
     expect(existsSync(join(root, liveId))).toBe(true)
     expect(existsSync(join(root, staleId))).toBe(false)
+    // The dead worktree's derived index storage goes with it; a live one stays.
+    expect(existsSync(staleIndex)).toBe(false)
+    expect(existsSync(liveIndex)).toBe(true)
   })
 })
 

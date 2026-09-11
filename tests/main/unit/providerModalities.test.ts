@@ -170,6 +170,20 @@ describe('native multimodal wire shapes', () => {
     ])
   })
 
+  it('OpenAI chat omits audio formats chat does not accept instead of mislabeling them wav', () => {
+    const parts = mapOpenAiContentParts([
+      { type: 'text', text: 'listen' },
+      { type: 'audio', url: 'data:audio/mp4;base64,QQ==', mime: 'audio/mp4' }
+    ])
+    expect(parts).toEqual([
+      { type: 'text', text: 'listen' },
+      {
+        type: 'text',
+        text: '[audio omitted: audio/mp4 is not supported by chat audio (wav/mp3 only)]'
+      }
+    ])
+  })
+
   it('Anthropic maps file_native to document blocks', () => {
     const body = buildAnthropicBody({
       model: 'claude-sonnet-4',

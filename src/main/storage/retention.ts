@@ -99,6 +99,44 @@ async function dirExists(p: string): Promise<boolean> {
   }
 }
 
+async function fileExists(p: string): Promise<boolean> {
+  try {
+    return (await stat(p)).isFile()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * True when an untracked storage dir holds nothing but derived indexes
+ * (`codeindex`/`sparsegrep`) — the signature of a storage id minted for an
+ * instance worktree path. Those dirs contain no user data (transcripts,
+ * sessions, memory), only rebuildable caches, so the 30-day orphan grace does
+ * not apply to them.
+ */
+async function isDerivedIndexOnlyDir(id: string): Promise<boolean> {
+  const root = join(workspacesRoot(), id)
+  if (await dirExists(join(root, 'sessions'))) return false
+  if (await fileExists(join(root, 'meta.json'))) return false
+  let entries
+  try {
+    entries = await readdir(root, { withFileTypes: true })
+  } catch {
+    return false
+  }
+  if (entries.length === 0) return false
+  let sawIndex = false
+  for (const entry of entries) {
+    const name = entry.name.toLowerCase()
+    if (name === 'codeindex' || name === 'sparsegrep') {
+      if (entry.isDirectory()) sawIndex = true
+      continue
+    }
+    return false
+  }
+  return sawIndex
+}
+
 /** Read + JSON.parse; null on any failure (never fatal). */
 async function readJson(p: string): Promise<unknown | null> {
   try {
@@ -410,6 +448,7 @@ export async function collectStorageReport(): Promise<StorageReportResult> {
     const sessionCount = (await dirExists(sessionsDir))
       ? (await listRunIds(sessionsDir)).length
       : 0
+    const derivedOnly = trackedPath == null ? await isDerivedIndexOnlyDir(id) : false
     const idleDays = Math.max(0, Math.floor((nowMs - measure.lastWriteMs) / DAY_MS))
     workspaces.push({
       workspaceId: id,
@@ -420,10 +459,11 @@ export async function collectStorageReport(): Promise<StorageReportResult> {
       sessionCount,
       tracked: trackedPath != null,
       idleDays,
+      derivedOnly,
       reapable:
         settings.storage.orphanReaperEnabled &&
         trackedPath == null &&
-        idleDays >= settings.storage.orphanGraceDays
+        (derivedOnly || idleDays >= settings.storage.orphanGraceDays)
     })
   }
   workspaces.sort((a, b) => b.bytes - a.bytes)
@@ -629,7 +669,9 @@ export function selectOrphanDirs(
 ): StorageReportWorkspace[] {
   if (!settings.storage.orphanReaperEnabled) return []
   return workspaces.filter(
-    (w) => !w.tracked && w.idleDays >= settings.storage.orphanGraceDays
+    (w) =>
+      !w.tracked &&
+      (w.derivedOnly === true || w.idleDays >= settings.storage.orphanGraceDays)
   )
 }
 
@@ -675,7 +717,8 @@ async function enforceSizeCap(
   const out = { bytes: 0, dirs: 0, skipped: 0 }
   const report = await collectStorageReport()
   const capBytes = settings.storage.sizeCapGb * 1024 * 1024 * 1024
-  if (report.managedBytes <= capBytes) return out
+  const excessBytes = report.managedBytes - capBytes
+  if (excessBytes <= 0) return out
 
   // LRU candidates: checkpoint dirs across all workspaces, oldest first.
   type Candidate = { dir: string; bytes: number; lastWriteMs: number; runId: string }
@@ -700,7 +743,21 @@ async function enforceSizeCap(
   }
   candidates.sort((a, b) => a.lastWriteMs - b.lastWriteMs)
 
-  let excess = report.managedBytes - capBytes
+  const reclaimableBytes = candidates.reduce((sum, c) => sum + c.bytes, 0)
+  if (reclaimableBytes < excessBytes) {
+    // The overage is dominated by surfaces the cap cannot evict (e.g. tracked
+    // workspace indexes). Deleting undo history would not bring the managed
+    // set under the cap, so skip instead of destroying checkpoints for nothing.
+    logger.info('Size-cap eviction skipped: reclaimable checkpoints cannot satisfy excess', {
+      scope: 'storage',
+      code: 'SIZE_CAP_EVICTED',
+      excessBytes,
+      reclaimableBytes
+    })
+    return out
+  }
+
+  let excess = excessBytes
   for (const cand of candidates) {
     if (excess <= 0) break
     try {

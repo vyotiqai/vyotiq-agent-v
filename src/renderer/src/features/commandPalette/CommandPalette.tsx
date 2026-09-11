@@ -13,16 +13,19 @@ export function CommandPalette({
   open,
   onClose,
   onSelect,
-  workspaces
+  workspaces,
+  extraEntries = []
 }: {
   open: boolean
   onClose: () => void
   onSelect: (id: string) => void
   /** When provided, replaces the generic workspace1..9 rows with real per-slot commands. */
   workspaces?: PaletteWorkspace[]
+  /** App-level commands outside SHORTCUT_BINDINGS (stable identity; merged after the base catalog). */
+  extraEntries?: ShortcutCatalogEntry[]
 }) {
   const entries = useMemo(() => {
-    if (!workspaces) return shortcutCatalog()
+    if (!workspaces) return [...shortcutCatalog(), ...extraEntries]
     const base = shortcutCatalog().filter((entry) => !/^workspace[1-9]$/.test(entry.id))
     const dynamic: ShortcutCatalogEntry[] = []
     workspaces.slice(0, 9).forEach((ws, i) => {
@@ -39,8 +42,8 @@ export function CommandPalette({
         label: ''
       })
     })
-    return [...base, ...dynamic]
-  }, [workspaces])
+    return [...base, ...extraEntries, ...dynamic]
+  }, [workspaces, extraEntries])
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)

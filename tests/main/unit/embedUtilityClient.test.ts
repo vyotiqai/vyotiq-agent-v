@@ -555,6 +555,168 @@ describe('embedUtilityClient', () => {
     await client.shutdown()
   })
 
+  it('kills the child when progress keeps a sync alive past the absolute deadline', async () => {
+    let child: FakeUtilityChild | null = null
+    const client = new EmbedUtilityClient({
+      forkImpl: () => {
+        const c = new FakeUtilityChild()
+        c.on('message-request', (message: unknown) => {
+          const msg = message as { id: number; op: string }
+          if (msg.op !== 'syncCode') return
+          void (async () => {
+            // Heartbeats keep the idle timer alive forever; the absolute
+            // deadline must still fail the RPC and kill the wedged child.
+            for (let i = 0; i < 8; i++) {
+              await new Promise((r) => setTimeout(r, 40))
+              c.emit('message', {
+                type: 'indexProgress',
+                requestId: msg.id,
+                indexProgress: {
+                  kind: 'code',
+                  stage: 'scanning',
+                  filesDone: i + 1,
+                  filesTotal: 8,
+                  indexed: 0,
+                  skipped: i + 1,
+                  removed: 0,
+                  embedChunks: 0,
+                  currentPath: `f${i}.ts`
+                },
+                progress: (i + 1) / 8,
+                message: 'scanning'
+              })
+            }
+          })()
+        })
+        const orig = c.postMessage.bind(c)
+        c.postMessage = (message: unknown) => {
+          c.messages.push(message)
+          const msg = message as { id: number; op: string }
+          if (msg.op === 'ensure') {
+            queueMicrotask(() =>
+              c.emit('message', {
+                id: msg.id,
+                ok: true,
+                modelId: 'test-model',
+                dimensions: LIGHTON_DENSE_DIM
+              })
+            )
+            return
+          }
+          if (msg.op === 'syncCode') {
+            c.emit('message-request', message)
+            return
+          }
+          if (msg.op === 'cancel') {
+            queueMicrotask(() => c.emit('message', { id: msg.id, ok: true }))
+            return
+          }
+          orig(message)
+        }
+        queueMicrotask(() => c.emit('spawn'))
+        child = c
+        return c as unknown as UtilityChild
+      },
+      scriptPath: '/virtual/embedUtility.js',
+      timeoutMs: 5_000,
+      syncIdleTimeoutMs: 5_000,
+      absoluteTimeoutMs: 100
+    })
+
+    await client.ensure({ modelDir: '/models/x', modelId: 'test-model' })
+    await expect(
+      client.syncCode({
+        workspaceRoot: '/ws',
+        dbPath: '/ws/index.sqlite',
+        dimensions: 8,
+        modelId: 'local-hash-v1',
+        embedderKind: 'hash'
+      })
+    ).rejects.toThrow(/exceeded max duration \(syncCode\)/)
+    expect(child!.killed).toBe(true)
+    await client.shutdown()
+  })
+
+  it('does not refresh the idle timeout on non-advancing progress heartbeats', async () => {
+    let child: FakeUtilityChild | null = null
+    const client = new EmbedUtilityClient({
+      forkImpl: () => {
+        const c = new FakeUtilityChild()
+        c.on('message-request', (message: unknown) => {
+          const msg = message as { id: number; op: string }
+          if (msg.op !== 'syncCode') return
+          void (async () => {
+            // Identical counters every heartbeat — the wedge signature.
+            for (let i = 0; i < 10; i++) {
+              await new Promise((r) => setTimeout(r, 40))
+              c.emit('message', {
+                type: 'indexProgress',
+                requestId: msg.id,
+                indexProgress: {
+                  kind: 'code',
+                  stage: 'scanning',
+                  filesDone: 1,
+                  filesTotal: 1,
+                  indexed: 0,
+                  skipped: 1,
+                  removed: 0,
+                  embedChunks: 0,
+                  currentPath: 'same.ts'
+                },
+                progress: 0.5,
+                message: 'scanning'
+              })
+            }
+          })()
+        })
+        const orig = c.postMessage.bind(c)
+        c.postMessage = (message: unknown) => {
+          c.messages.push(message)
+          const msg = message as { id: number; op: string }
+          if (msg.op === 'ensure') {
+            queueMicrotask(() =>
+              c.emit('message', {
+                id: msg.id,
+                ok: true,
+                modelId: 'test-model',
+                dimensions: LIGHTON_DENSE_DIM
+              })
+            )
+            return
+          }
+          if (msg.op === 'syncCode') {
+            c.emit('message-request', message)
+            return
+          }
+          if (msg.op === 'cancel') {
+            queueMicrotask(() => c.emit('message', { id: msg.id, ok: true }))
+            return
+          }
+          orig(message)
+        }
+        queueMicrotask(() => c.emit('spawn'))
+        child = c
+        return c as unknown as UtilityChild
+      },
+      scriptPath: '/virtual/embedUtility.js',
+      timeoutMs: 120,
+      syncIdleTimeoutMs: 120
+    })
+
+    await client.ensure({ modelDir: '/models/x', modelId: 'test-model' })
+    await expect(
+      client.syncCode({
+        workspaceRoot: '/ws',
+        dbPath: '/ws/index.sqlite',
+        dimensions: 8,
+        modelId: 'local-hash-v1',
+        embedderKind: 'hash'
+      })
+    ).rejects.toThrow(/Embed utility timeout \(syncCode\)/)
+    expect(child!.killed).toBe(true)
+    await client.shutdown()
+  })
+
   it('idle-unloads the utility child after idleUnloadMs while keeping lastEnsure', async () => {
     vi.useFakeTimers()
     let child: FakeUtilityChild | null = null
@@ -587,6 +749,36 @@ describe('embedUtilityClient', () => {
     expect(session.modelId).toBe('test-model')
     expect(client.getPerfStats().sessionLoaded).toBe(true)
 
+    await client.shutdown()
+    vi.useRealTimers()
+  })
+
+  it('idle-unloads even while a stuck health ping is in flight', async () => {
+    vi.useFakeTimers()
+    let child: FakeUtilityChild | null = null
+    const client = new EmbedUtilityClient({
+      forkImpl: () => {
+        const c = new FakeUtilityChild()
+        // A wedged child never answers pings; the probe must not pin it alive.
+        c.holdOps.add('ping')
+        queueMicrotask(() => c.emit('spawn'))
+        child = c
+        return c as unknown as UtilityChild
+      },
+      scriptPath: '/virtual/embedUtility.js',
+      timeoutMs: 5_000,
+      idleUnloadMs: 50
+    })
+
+    await client.ensure({ modelDir: '/models/x', modelId: 'test-model' })
+    const stuckPing = client.refreshPerfStats().catch(() => undefined)
+
+    await vi.advanceTimersByTimeAsync(60)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(child!.killed).toBe(true)
+    await stuckPing
     await client.shutdown()
     vi.useRealTimers()
   })
@@ -674,7 +866,7 @@ describe('embedUtilityClient', () => {
     await client.shutdown()
   })
 
-  it('does not kill utility child when searchCode times out while syncCode is in-flight', async () => {
+  it('kills the utility child when searchCode times out even with syncCode in-flight', async () => {
     vi.useFakeTimers()
     let child: FakeUtilityChild | null = null
     const client = new EmbedUtilityClient({
@@ -710,6 +902,7 @@ describe('embedUtilityClient', () => {
       query: 'alpha'
     })
     const searchExpect = expect(searchP).rejects.toThrow(/Embed utility timeout \(searchCode\)/)
+    const syncExpect = expect(syncP).rejects.toThrow(/Embed utility exited/)
     await Promise.resolve()
     await Promise.resolve()
     await Promise.resolve()
@@ -719,37 +912,16 @@ describe('embedUtilityClient', () => {
     // searchCode uses max(timeoutMs, 180s); sync idle is 600s — only search times out.
     await vi.advanceTimersByTimeAsync(180_000)
     await searchExpect
-    // Policy: overlapping sync must not be abortAll'd via child kill/exit.
-    expect(child!.killed).toBe(false)
-
-    const syncHeld = child!.heldMessages.find((m) => m.op === 'syncCode')
-    expect(syncHeld).toBeDefined()
-    child!.emit('message', {
-      id: syncHeld!.id,
-      ok: true,
-      sync: {
-        scanned: 1,
-        indexed: 1,
-        skipped: 0,
-        removed: 0,
-        status: {
-          ready: true,
-          modelId: 'hash',
-          fileCount: 1,
-          chunkCount: 1,
-          lastIndexedAt: new Date().toISOString()
-        }
-      }
-    })
-    await expect(syncP).resolves.toMatchObject({ indexed: 1 })
+    // A timed-out RPC means the native session is unusable; kill it so the
+    // overlapping sync is rejected and its queue retries on a fresh child.
+    expect(child!.killed).toBe(true)
+    await syncExpect
     await client.shutdown()
     vi.useRealTimers()
   })
 
   it('kills utility child when searchCode times out as the only in-flight RPC', async () => {
-    // Chosen behavior: a hung search with nothing else in flight may still kill
-    // the child (same as other long-running ops). Do not kill when another RPC
-    // is pending — see the overlapping syncCode test.
+    // Uniform policy: any timed-out RPC kills the child.
     vi.useFakeTimers()
     let child: FakeUtilityChild | null = null
     const client = new EmbedUtilityClient({

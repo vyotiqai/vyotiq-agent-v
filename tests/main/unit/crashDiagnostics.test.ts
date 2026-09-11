@@ -1,5 +1,5 @@
 ﻿import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
@@ -12,8 +12,10 @@ import {
   markRendererRecoveryPending,
   MAX_CRASH_SNIPPETS,
   parseCrashSnippetsFromLogText,
+  pruneCrashpadReports,
   recordCrashSnippet,
   rendererBoundaryCrashFromLogMessage,
+  resetCrashSnippetDedupeForTests,
   sanitizeCrashUrl,
   setCrashHistoryPathForTests,
   shouldReloadRendererAfterCrash
@@ -70,6 +72,7 @@ describe('crash history persistence', () => {
 
   afterEach(() => {
     setCrashHistoryPathForTests(null)
+    resetCrashSnippetDedupeForTests()
     if (dir) rmSync(dir, { recursive: true, force: true })
   })
 
@@ -105,6 +108,69 @@ describe('crash history persistence', () => {
   })
 })
 
+describe('recordCrashSnippet repeat suppression', () => {
+  let dir: string
+
+  afterEach(() => {
+    setCrashHistoryPathForTests(null)
+    resetCrashSnippetDedupeForTests()
+    if (dir) rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('collapses a same-signature storm into one record and counts the repeats', () => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-crash-dedupe-'))
+    setCrashHistoryPathForTests(join(dir, 'crash-history.json'))
+    resetCrashSnippetDedupeForTests()
+
+    // A renderer #185 storm bridges one record per throw — 50 identical
+    // signatures must not produce 50 sync read+write cycles.
+    for (let i = 0; i < 50; i++) {
+      recordCrashSnippet({
+        at: `2026-09-11T09:16:00.${String(i).padStart(3, '0')}Z`,
+        kind: 'renderer',
+        reason: 'Minified React error #185'
+      })
+    }
+    const afterStorm = listCrashSnippets()
+    expect(afterStorm).toHaveLength(1)
+    expect(afterStorm[0]?.suppressedRepeats).toBeUndefined()
+
+    // A distinct signature always records, carrying the storm's repeat count.
+    recordCrashSnippet({
+      at: '2026-09-11T09:16:10.000Z',
+      kind: 'renderer',
+      reason: 'other crash'
+    })
+    const afterDistinct = listCrashSnippets()
+    expect(afterDistinct).toHaveLength(2)
+    expect(afterDistinct[0]?.reason).toBe('other crash')
+    expect(afterDistinct[0]?.suppressedRepeats).toBe(49)
+
+    // After a distinct signature, the storm signature records again.
+    recordCrashSnippet({
+      at: '2026-09-11T09:16:20.000Z',
+      kind: 'renderer',
+      reason: 'Minified React error #185'
+    })
+    expect(listCrashSnippets()).toHaveLength(3)
+  })
+
+  it('still enforces the snippet cap across distinct signatures', () => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-crash-dedupe-cap-'))
+    setCrashHistoryPathForTests(join(dir, 'crash-history.json'))
+    resetCrashSnippetDedupeForTests()
+
+    for (let i = 0; i < MAX_CRASH_SNIPPETS + 4; i++) {
+      recordCrashSnippet({
+        at: `2026-09-11T09:${String(10 + i).padStart(2, '0')}:00.000Z`,
+        kind: 'renderer',
+        reason: `distinct crash ${i}`
+      })
+    }
+    expect(listCrashSnippets()).toHaveLength(MAX_CRASH_SNIPPETS)
+  })
+})
+
 describe('parseCrashSnippetsFromLogText', () => {
   it('parses single-line and multi-line crash entries', () => {
     const text = [
@@ -137,6 +203,7 @@ describe('backfillCrashSnippetsFromLog', () => {
 
   afterEach(() => {
     setCrashHistoryPathForTests(null)
+    resetCrashSnippetDedupeForTests()
     if (dir) rmSync(dir, { recursive: true, force: true })
   })
 
@@ -244,5 +311,40 @@ describe('rendererBoundaryCrashFromLogMessage', () => {
       })
     ).toBeNull()
     expect(rendererBoundaryCrashFromLogMessage({ data: [] })).toBeNull()
+  })
+})
+
+describe('pruneCrashpadReports', () => {
+  it('keeps the newest dumps and deletes the rest', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vyotiq-crashpad-'))
+    try {
+      const reports = join(dir, 'reports')
+      mkdirSync(reports, { recursive: true })
+      for (let i = 0; i < 7; i++) {
+        const file = join(reports, `dump-${i}.dmp`)
+        writeFileSync(file, 'dmp')
+        const at = new Date(Date.now() - (7 - i) * 1_000)
+        utimesSync(file, at, at)
+      }
+      writeFileSync(join(reports, 'kept.txt'), 'not a dump')
+      expect(pruneCrashpadReports(dir, 5)).toBe(2)
+      expect(
+        readdirSync(reports)
+          .filter((name) => name.endsWith('.dmp'))
+          .sort()
+      ).toEqual(['dump-2.dmp', 'dump-3.dmp', 'dump-4.dmp', 'dump-5.dmp', 'dump-6.dmp'])
+      expect(existsSync(join(reports, 'kept.txt'))).toBe(true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('is a no-op when the reports directory is missing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vyotiq-crashpad-'))
+    try {
+      expect(pruneCrashpadReports(dir, 5)).toBe(0)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

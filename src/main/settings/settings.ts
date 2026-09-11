@@ -398,6 +398,41 @@ function persistedSettingsVersion(raw: Record<string, unknown>): number {
     : 0
 }
 
+/** Engines removed from DictationEngineSchema after v3; map to the on-device path. */
+const LEGACY_DICTATION_ENGINES = new Set(['qwen3-asr', 'qwen3-asr-onnx'])
+
+/** Local model ids that shipped only with the removed qwen3 engines. */
+const LEGACY_DICTATION_MODEL_PREFIX = 'qwen3-asr'
+
+/**
+ * A persisted dictation object with a removed engine fails SettingsSchema and
+ * drops the whole object back to defaults ('openai') — a silent switch from
+ * local/self-hosted transcription to the cloud path. Migrate instead.
+ */
+function migrateRemovedDictationEngine(value: unknown): unknown {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return value
+  const dictation = { ...(value as Record<string, unknown>) }
+  if (typeof dictation.engine === 'string' && LEGACY_DICTATION_ENGINES.has(dictation.engine)) {
+    logger.warn('Migrated removed dictation engine to local', {
+      scope: 'settings',
+      code: 'SETTINGS_DICTATION_MIGRATE',
+      engine: dictation.engine
+    })
+    dictation.engine = 'local'
+  }
+  if (
+    typeof dictation.localModelId === 'string' &&
+    dictation.localModelId.startsWith(LEGACY_DICTATION_MODEL_PREFIX)
+  ) {
+    dictation.localModelId = ''
+  }
+  // The removed qwen3 server engine stored its endpoint + bearer token inside
+  // `dictation`; drop them so a stale secret cannot survive the format bump.
+  delete dictation.qwen3AsrServerUrl
+  delete dictation.qwen3AsrApiKey
+  return dictation
+}
+
 /**
  * Rewrite old product defaults that were already written into settings.json.
  * Version is read from the raw file (not merged defaults) so a missing key
@@ -413,14 +448,19 @@ function migratePersistedSettingsDefaults(raw: Record<string, unknown>): {
     return { data: raw, persist: false }
   }
   const next: Record<string, unknown> = { ...raw, settingsVersion: SETTINGS_FORMAT_VERSION }
-  if (raw.autoCompactThresholdRatio === LEGACY_AUTO_COMPACT_THRESHOLD_RATIO) {
+  // Only files older than v3 seeded these legacy values; a later format bump
+  // must not re-run them against deliberate post-v3 choices.
+  if (rawVersion < 3 && raw.autoCompactThresholdRatio === LEGACY_AUTO_COMPACT_THRESHOLD_RATIO) {
     next.autoCompactThresholdRatio = DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO
   }
   // Same contract: rewrite only the exact effort the previous format version
   // seeded; anything else (including an intentional 'medium' after this stamp)
   // is a user choice and survives.
-  if (raw.thinkingEffort === LEGACY_THINKING_EFFORT) {
+  if (rawVersion < 3 && raw.thinkingEffort === LEGACY_THINKING_EFFORT) {
     next.thinkingEffort = DEFAULT_THINKING_EFFORT
+  }
+  if (rawVersion < 4) {
+    next.dictation = migrateRemovedDictationEngine(next.dictation)
   }
   return { data: next, persist: true }
 }

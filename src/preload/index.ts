@@ -96,7 +96,7 @@ const api: VyotiqApi = {
   resolveWrites: (payload) => ipcRenderer.invoke(IPC.runsResolveWrites, payload),
   readRunArtifact: (payload) => ipcRenderer.invoke(IPC.runsReadArtifact, payload),
   runStats: (payload) => ipcRenderer.invoke(IPC.runStats, payload),
-  harnessReview: (payload) => ipcRenderer.invoke(IPC.harnessReview, payload),
+  homeActivity: (payload) => ipcRenderer.invoke(IPC.homeActivity, payload),  harnessReview: (payload) => ipcRenderer.invoke(IPC.harnessReview, payload),
   harnessPreviewApply: (payload) => ipcRenderer.invoke(IPC.harnessPreviewApply, payload),
   harnessApply: (payload) => ipcRenderer.invoke(IPC.harnessApply, payload),
   onChatEvent: (handler) => {
@@ -532,9 +532,6 @@ const api: VyotiqApi = {
   workspaceFormatFile: (payload) => ipcRenderer.invoke(IPC.workspaceFormatFile, payload),
   workspaceLspStatus: (payload) => ipcRenderer.invoke(IPC.workspaceLspStatus, payload),
   workspaceLspRequest: (payload) => ipcRenderer.invoke(IPC.workspaceLspRequest, payload),
-  workspaceInlineComplete: (payload) => ipcRenderer.invoke(IPC.workspaceInlineComplete, payload),
-  workspaceInlineCompleteAbort: (payload) =>
-    ipcRenderer.invoke(IPC.workspaceInlineCompleteAbort, payload),
   workspaceEditorRecoverySave: (payload) =>
     ipcRenderer.invoke(IPC.workspaceEditorRecoverySave, payload),
   workspaceEditorRecoveryLoad: (payload) =>

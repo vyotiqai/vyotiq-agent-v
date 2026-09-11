@@ -13,7 +13,9 @@ import {
 import {
   CIRCUIT_FAILURE_THRESHOLD,
   CircuitOpenError,
-  circuitKeyHttp
+  circuitKeyHttp,
+  resetCircuitBreakersForTests,
+  setCircuitNowForTests
 } from '@main/agent/circuitBreaker'
 
 describe('isRetriableNetworkError', () => {
@@ -162,6 +164,49 @@ describe('fetchWithRetry', () => {
     ).rejects.toBeInstanceOf(CircuitOpenError)
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  it('never sends an already-aborted request', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      fetchWithRetry('https://pre-abort.test', { signal: controller.signal })
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('releases the half-open probe when a non-retriable error fails the attempt', async () => {
+    const url = 'https://probe-release-fetch.test'
+    let now = Date.now()
+    setCircuitNowForTests(() => now)
+    try {
+      const fetchMock = vi
+        .fn()
+        .mockRejectedValue(Object.assign(new Error('reset'), { code: 'ECONNRESET' }))
+      vi.stubGlobal('fetch', fetchMock)
+      for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) {
+        await expect(
+          fetchWithRetry(url, {}, { maxAttempts: 1 })
+        ).rejects.toMatchObject({ code: 'ECONNRESET' })
+      }
+
+      // Open window elapsed: this call is the half-open probe, and it fails
+      // with a non-retriable error (bad URL). The probe slot must be released.
+      now += 60_001
+      fetchMock.mockRejectedValueOnce(new TypeError('Invalid URL'))
+      await expect(fetchWithRetry(url, {}, { maxAttempts: 1 })).rejects.toThrow('Invalid URL')
+
+      // A later call can probe again and close the breaker on success.
+      now += 60_001
+      fetchMock.mockResolvedValueOnce(new Response('ok', { status: 200 }))
+      const res = await fetchWithRetry(url, {})
+      expect(res.status).toBe(200)
+    } finally {
+      resetCircuitBreakersForTests()
+    }
+  })
 })
 
 describe('httpRetryBackoffMs', () => {
@@ -211,5 +256,49 @@ describe('runWithNetworkRetry', () => {
       CircuitOpenError
     )
     expect(fn).not.toHaveBeenCalled()
+  })
+
+  it('never runs an already-aborted operation', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const fn = vi.fn()
+    await expect(runWithNetworkRetry(fn, { signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError'
+    })
+    expect(fn).not.toHaveBeenCalled()
+  })
+
+  it('releases the half-open probe when a non-retriable error fails the operation', async () => {
+    const key = circuitKeyHttp('https://probe-release-run.test')
+    let now = Date.now()
+    setCircuitNowForTests(() => now)
+    try {
+      const err = Object.assign(new Error('reset'), { code: 'ECONNRESET' })
+      for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) {
+        await expect(
+          runWithNetworkRetry(
+            async () => {
+              throw err
+            },
+            { maxAttempts: 1, circuitKey: key }
+          )
+        ).rejects.toMatchObject({ code: 'ECONNRESET' })
+      }
+
+      now += 60_001
+      await expect(
+        runWithNetworkRetry(
+          async () => {
+            throw new TypeError('bad operation')
+          },
+          { maxAttempts: 1, circuitKey: key }
+        )
+      ).rejects.toThrow('bad operation')
+
+      now += 60_001
+      await expect(runWithNetworkRetry(async () => 'ok', { circuitKey: key })).resolves.toBe('ok')
+    } finally {
+      resetCircuitBreakersForTests()
+    }
   })
 })

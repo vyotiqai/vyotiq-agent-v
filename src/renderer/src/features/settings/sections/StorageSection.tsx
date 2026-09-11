@@ -342,7 +342,7 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
         <SettingsField
           id="storage-orphan-grace"
           title="Untracked grace window"
-          hint={`Untracked dirs must be idle ${storage.orphanGraceDays} days before they are listed as cleanable (1–365).`}
+          hint={`Untracked dirs must be idle ${storage.orphanGraceDays} days before they are listed as cleanable (1–365). Derived index dirs left by deleted instance worktrees are cleanable immediately.`}
           help="Protects a dir minted seconds before a crash from being treated as dead — worst case we hold ~100 MB for a month."
         >
           <input

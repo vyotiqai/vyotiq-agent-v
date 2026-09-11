@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
@@ -280,6 +280,48 @@ describe('workspaceMutationWatch', () => {
     expect(diff.modified).toContain('src.ts')
     expect(diff.modified.join('\n')).not.toMatch(/bin[\\/]/)
     expect(diff.created.join('\n')).not.toMatch(/bin[\\/]/)
-    disposeWatch(snap)
+    await disposeWatch(snap)
+  })
+
+  it('bounds the content-hash pass by total bytes (64MB) and detects only budget-covered same-size rewrites', async () => {
+    // 30MB files sit under the 32MB per-file hash cap; 30+30 fits the 64MB
+    // total budget regardless of readdir order (BFS visits root files first),
+    // while a 5MB file in a subdir is reached only after both fit → exhausted.
+    const PATH_A = join(workspace, 'a.bin')
+    const PATH_B = join(workspace, 'b.bin')
+    const PATH_C = join(workspace, 'sub', 'c.bin')
+    const SIZE = 30 * 1024 * 1024
+    mkdirSync(join(workspace, 'sub'), { recursive: true })
+    writeFileSync(PATH_A, Buffer.alloc(SIZE, 1))
+    writeFileSync(PATH_B, Buffer.alloc(SIZE, 2))
+    writeFileSync(PATH_C, Buffer.alloc(5 * 1024 * 1024, 3))
+    // Pin mtimes to a whole-second stamp so identical rewrites of the pin
+    // leave mtime/size unchanged — only the contentHash path can flag them.
+    const pin = () => {
+      const stamp = new Date(1_700_000_000_000)
+      for (const p of [PATH_A, PATH_B, PATH_C]) utimesSync(p, stamp, stamp)
+    }
+    pin()
+
+    beginWriteCheckpoint(runDir, workspace)
+    const snap = await startWatch(workspace)
+    expect(snap.files.get('a.bin')?.contentHash).toBeTruthy()
+    expect(snap.files.get('b.bin')?.contentHash).toBeTruthy()
+    expect(snap.files.get('sub/c.bin')?.contentHash).toBeUndefined()
+
+    // Same-size in-place rewrites, mtimes re-pinned to the same stamp.
+    writeFileSync(PATH_A, Buffer.alloc(SIZE, 9))
+    writeFileSync(PATH_C, Buffer.alloc(5 * 1024 * 1024, 8))
+    pin()
+
+    const diff = await diffSince(snap)
+    expect(diff.modified).toContain('a.bin')
+    expect(diff.modified.join('\n')).not.toContain('c.bin')
+    await applyWatchDiffToCheckpoint(snap, diff, { runDir })
+    await disposeWatch(snap)
+    const meta = finalizeWriteCheckpoint(runDir)
+    expect(meta!.files).toEqual([
+      expect.objectContaining({ path: 'a.bin', action: 'modified', undoable: false })
+    ])
   })
 })

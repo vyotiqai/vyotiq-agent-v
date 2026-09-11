@@ -57,7 +57,7 @@ describe('FeedbackDialog', () => {
   it('submits the typed payload including includeDiagnostics and shows the confirmation state', async () => {
     const compose = vi.fn(async () => ({
       ok: true as const,
-      mailto: 'mailto:vyotiq@gmail.com?subject=hi'
+      mailto: 'mailto:support@vyotiq.com?subject=hi'
     }))
     setBridge(compose)
     render(<FeedbackDialog open onClose={vi.fn()} />)
@@ -81,7 +81,7 @@ describe('FeedbackDialog', () => {
   })
 
   it('shows the mailto fallback link when compose reports failure', async () => {
-    const compose = vi.fn(async () => ({ ok: false as const, mailto: 'mailto:vyotiq@gmail.com?x=1' }))
+    const compose = vi.fn(async () => ({ ok: false as const, mailto: 'mailto:support@vyotiq.com?x=1' }))
     setBridge(compose)
     render(<FeedbackDialog open onClose={vi.fn()} />)
 
@@ -91,7 +91,7 @@ describe('FeedbackDialog', () => {
     const alert = await screen.findByRole('alert')
     expect(alert).toBeTruthy()
     const link = screen.getByText('Open pre-filled email').closest('a')
-    expect(link?.getAttribute('href')).toBe('mailto:vyotiq@gmail.com?x=1')
+    expect(link?.getAttribute('href')).toBe('mailto:support@vyotiq.com?x=1')
   })
 
   it('falls back to a client-built mailto when the bridge is unavailable', async () => {
@@ -103,7 +103,7 @@ describe('FeedbackDialog', () => {
 
     const alert = await screen.findByRole('alert')
     const link = screen.getByText('Open pre-filled email').closest('a')
-    expect(link?.getAttribute('href')).toContain('mailto:vyotiq@gmail.com')
+    expect(link?.getAttribute('href')).toContain('mailto:support@vyotiq.com')
     expect(link?.getAttribute('href')).toContain(encodeURIComponent('Search in logs'))
     expect(alert).toBeTruthy()
   })

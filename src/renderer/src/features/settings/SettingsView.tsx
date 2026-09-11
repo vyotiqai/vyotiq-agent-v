@@ -49,6 +49,8 @@ export function SettingsView(props: SettingsViewProps) {
             onSetSettingsOverride={onSetSettingsOverride}
             onOpenComposerModel={onOpenComposerModel}
             onOpenProviders={() => form.navigateSection('providers')}
+            feedbackOpen={props.feedbackOpen}
+            onFeedbackOpenChange={props.onFeedbackOpenChange}
           />
         )
       case 'appearance':

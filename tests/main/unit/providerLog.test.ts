@@ -40,6 +40,26 @@ describe('logProviderFailure', () => {
     )
     expect(logger.error).not.toHaveBeenCalled()
   })
+
+  it('classifies HTTP 402 as PROVIDER_BILLING (matches providerHttpErrorCode)', () => {
+    logProviderFailure('openrouter', 'http', { status: 402, message: 'credits' })
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Provider http failure',
+      expect.objectContaining({
+        provider: 'openrouter',
+        status: 402,
+        code: 'PROVIDER_BILLING'
+      })
+    )
+  })
+
+  it('classifies 401/403 as PROVIDER_AUTH', () => {
+    logProviderFailure('openai', 'http', { status: 401 })
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Provider http failure',
+      expect.objectContaining({ status: 401, code: 'PROVIDER_AUTH' })
+    )
+  })
 })
 
 describe('ollama catalog when host is down', () => {

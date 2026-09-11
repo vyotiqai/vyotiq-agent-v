@@ -26,7 +26,11 @@ import {
 } from '@renderer/lib/utils/layout'
 import { PanelResizeHandle } from '@renderer/lib/ui'
 import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
-import { focusComposerMessage, useAppShortcuts } from '@renderer/lib/shortcuts'
+import {
+  focusComposerMessage,
+  useAppShortcuts,
+  type ShortcutCatalogEntry
+} from '@renderer/lib/shortcuts'
 import { TitleBar } from './TitleBar'
 import { CommandPalette } from '@renderer/features/commandPalette/CommandPalette'
 import { UpdateCard } from '@renderer/features/updates/UpdateCard'
@@ -44,6 +48,7 @@ function AppShellInner({
   onSessionQuery,
   onOpenSettings,
   onOpenNotificationSettings,
+  onOpenFeedback,
   focusedRunId = null,
   onOpenMarketplace,
   onOpenChat,
@@ -81,6 +86,8 @@ function AppShellInner({
   onSessionQuery: (q: string) => void
   onOpenSettings: () => void
   onOpenNotificationSettings?: () => void
+  /** Open the feedback surface from anywhere (command palette). */
+  onOpenFeedback?: () => void
   focusedRunId?: string | null
   onOpenMarketplace: () => void
   onOpenChat: () => void
@@ -286,6 +293,15 @@ function AppShellInner({
     [openWorkspaces, workspacePath]
   )
 
+  /** App-level commands outside SHORTCUT_BINDINGS, merged into the palette. */
+  const paletteExtras = useMemo<ShortcutCatalogEntry[]>(
+    () =>
+      onOpenFeedback
+        ? [{ id: 'sendFeedback', title: 'Send feedback', label: '' }]
+        : [],
+    [onOpenFeedback]
+  )
+
   const isSearchFocused = useCallback(
     (): boolean => document.activeElement === searchRef.current,
     []
@@ -434,6 +450,7 @@ function AppShellInner({
       <CommandPalette
         open={commandPaletteOpen}
         workspaces={paletteWorkspaces}
+        extraEntries={paletteExtras}
         onClose={() => setCommandPaletteOpen(false)}
         onSelect={(id) => {
           if (id === 'settings') onOpenSettings()
@@ -441,6 +458,7 @@ function AppShellInner({
           else if (id === 'newChat') onNewChat()
           else if (id === 'sidebar') onToggleSidebar()
           else if (id === 'search') focusSearch()
+          else if (id === 'sendFeedback') onOpenFeedback?.()
           else if (id === 'findInFiles') window.dispatchEvent(new Event('vyotiq:find-in-files'))
           else if (id === 'focusComposer') focusComposerMessage()
           else if (id === 'stop') onChatStop?.()

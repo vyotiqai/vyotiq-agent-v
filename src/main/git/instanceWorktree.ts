@@ -16,6 +16,7 @@ import { canonicalizeWorkspacePath, workspacePathIsInside } from '../../shared/w
 import { sanitizedTerminalEnv } from '../agent/tools/terminal'
 import { disposeTerminalSessionsUnderPath } from '../agent/tools/terminalSessions'
 import { disposeWorkspaceIndexes } from '../agent/workspaceIndex'
+import { removeWorkspaceIndexStorage } from '../agent/indexStoragePaths'
 import { disposePtySessionsUnderPath } from '../app/ptySessions'
 import { workspaceId, workspaceMetaDir } from '../storage/paths'
 import { disposeWorkspaceLsp } from '../workspace/lspService'
@@ -372,6 +373,11 @@ async function releaseInstanceWorktreeResources(worktreePath: string): Promise<v
     disposeWorkspaceIndexes(worktreePath, { permanent: true })
   } catch {
     /* indexes may never have been opened for this root */
+  }
+  try {
+    await removeWorkspaceIndexStorage(worktreePath)
+  } catch {
+    /* best-effort — an untracked leftover is reaped by the retention report */
   }
   try {
     disposeWorkspaceLsp(worktreePath)
@@ -928,6 +934,12 @@ async function removeInstanceWorktreeUnlocked(
     })
     return
   }
+  // Release index/PTY/LSP handles BEFORE the lock probe: a leftover terminal
+  // or index handle is exactly what keeps the path locked, and the old
+  // probe-first order meant deferred retries could never free it (they skip
+  // the release) — the cleanup ladder then gave up on a path only the app
+  // itself was holding.
+  await releaseInstanceWorktreeResources(worktreePath)
   if (probeInstanceWorktreePathLocked(worktreePath, opts?.renameFn)) {
     if (opts?.allowDeferred !== false) {
       scheduleDeferredInstanceWorktreeCleanup(workspacePath, worktreePath)
@@ -939,7 +951,6 @@ async function removeInstanceWorktreeUnlocked(
   }
   const runId = basename(worktreePath)
   clearPendingInstanceWorktree(workspacePath, runId)
-  await releaseInstanceWorktreeResources(worktreePath)
 
   const alreadyAside = basename(worktreePath).includes('.deleted-')
   const hasGitDir = !alreadyAside && existsSync(join(worktreePath, '.git'))

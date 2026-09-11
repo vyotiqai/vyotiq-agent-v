@@ -8,14 +8,12 @@ import type {
   SecretProvider
 } from '@shared/ipc'
 import { DEFAULT_DICTATION_SETTINGS } from '@shared/ipc'
-import { DICTATION_LOCAL_CATALOG, isQwen3AsrModelId, isQwen3AsrOnnxModelId } from '@shared/dictation'
-import { Button, Input, Menu, type MenuOption } from '@renderer/lib/ui'
+import { DICTATION_LOCAL_CATALOG } from '@shared/dictation'
+import { Button, Menu, type MenuOption } from '@renderer/lib/ui'
 import { DICTATION_ENGINE_OPTIONS, DICTATION_WAVEFORM_STYLE_OPTIONS } from '../constants'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
 
 const WHISPER_MODELS = DICTATION_LOCAL_CATALOG.filter((m) => m.backend === 'whisper')
-const QWEN_MODELS = DICTATION_LOCAL_CATALOG.filter((m) => m.backend === 'qwen3-asr')
-const QWEN_ONNX_MODELS = DICTATION_LOCAL_CATALOG.filter((m) => m.backend === 'qwen3-asr-onnx')
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
@@ -38,10 +36,6 @@ function engineKeyHint(
         : 'No OpenRouter API key — add one in Settings → Providers.'
     case 'local':
       return 'Works offline after a model is installed. English only.'
-    case 'qwen3-asr':
-      return 'Point this at a running vLLM or qwen-asr-serve endpoint in Settings → Voice.'
-    case 'qwen3-asr-onnx':
-      return 'Downloads community ONNX weights and runs on-device via ONNX Runtime. CPU works; GPU optional.'
     default: {
       const _exhaustive: never = engine
       return _exhaustive
@@ -141,8 +135,6 @@ export function VoiceSection({
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [serverUrl, setServerUrl] = useState(dictation.qwen3AsrServerUrl)
-  const [serverKey, setServerKey] = useState(dictation.qwen3AsrApiKey)
   const statusSeq = useRef(0)
 
   const refreshStatus = useCallback(() => {
@@ -159,11 +151,6 @@ export function VoiceSection({
   }, [])
 
   useEffect(() => {
-    setServerUrl(dictation.qwen3AsrServerUrl)
-    setServerKey(dictation.qwen3AsrApiKey)
-  }, [dictation.qwen3AsrServerUrl, dictation.qwen3AsrApiKey])
-
-  useEffect(() => {
     refreshStatus()
     const unsub =
       typeof window.vyotiq.onDictationStatus === 'function'
@@ -173,13 +160,20 @@ export function VoiceSection({
             setLoadError(null)
           })
         : undefined
-    const id =
-      unsub == null
-        ? window.setInterval(refreshStatus, 1000)
-        : window.setInterval(refreshStatus, 8000)
+    // Poll only while visible; a hidden settings window must not keep IPC awake.
+    const poll = (): void => {
+      if (document.visibilityState === 'hidden') return
+      refreshStatus()
+    }
+    const onVisibility = (): void => {
+      if (document.visibilityState !== 'hidden') refreshStatus()
+    }
+    const id = unsub == null ? window.setInterval(poll, 1000) : window.setInterval(poll, 8000)
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       unsub?.()
       window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [refreshStatus, dictation.engine, dictation.localModelId])
 
@@ -196,12 +190,6 @@ export function VoiceSection({
       runtime?.loadedModelId ||
       runtime?.installed[0]?.id ||
       ''
-    if (engine === 'qwen3-asr' && !isQwen3AsrModelId(localModelId)) {
-      localModelId = QWEN_MODELS[0]?.id ?? ''
-    }
-    if (engine === 'qwen3-asr-onnx' && !isQwen3AsrOnnxModelId(localModelId)) {
-      localModelId = QWEN_ONNX_MODELS[0]?.id ?? ''
-    }
     if (engine === 'local' && !WHISPER_MODELS.some((m) => m.id === localModelId)) {
       localModelId = runtime?.loadedModelId || runtime?.installed[0]?.id || WHISPER_MODELS[0]?.id || ''
     }
@@ -216,14 +204,6 @@ export function VoiceSection({
   const patchWaveformStyle = (waveformStyle: DictationWaveformStyle) => {
     if ((dictation.waveformStyle ?? 'bars') === waveformStyle) return
     void form.runUpdate({ dictation: { ...dictation, waveformStyle } })
-  }
-
-  const patchServerUrl = (value: string) => {
-    void form.runUpdate({ dictation: { ...dictation, qwen3AsrServerUrl: value } })
-  }
-
-  const patchServerKey = (value: string) => {
-    void form.runUpdate({ dictation: { ...dictation, qwen3AsrApiKey: value } })
   }
 
   const runModelAction = (
@@ -250,8 +230,8 @@ export function VoiceSection({
         <SettingsField
           id="dictation-engine"
           title="Dictation engine"
-          hint="OpenAI and OpenRouter use gpt-transcribe. Local (Whisper) runs ONNX on this machine. Qwen3-ASR connects to a local vLLM / qwen-asr-serve GPU server."
-          help="Engine is read on each mic stop — no restart. Local stays disabled until at least one Whisper model is installed below. Qwen3-ASR needs a running local server (see below)."
+          hint="OpenAI and OpenRouter use gpt-transcribe. Local (Whisper) runs ONNX on this machine."
+          help="Engine is read on each mic stop — no restart. Local stays disabled until at least one Whisper model is installed below."
         >
           <div className="flex w-full max-w-xs flex-col items-stretch gap-1.5">
             <Menu
@@ -345,7 +325,7 @@ export function VoiceSection({
                      <Button
                        type="button"
                        variant="subtle"
-                       disabled={form.formLocked || busy || downloading || dictation.engine === 'qwen3-asr' || dictation.engine === 'qwen3-asr-onnx'}
+                       disabled={form.formLocked || busy || downloading}
                        onClick={() => patchLocalModelId(model.id)}
                      >
                        Use {model.label}
@@ -382,180 +362,6 @@ export function VoiceSection({
         })}
       </SettingsGroup>
 
-      <SettingsGroup title="Qwen3-ASR (local server)">
-        <SettingsField
-          id="dictation-qwen3-server"
-          title="Server URL"
-          hint="OpenAI-compatible transcription base URL."
-          help="Run `vllm serve Qwen/Qwen3-ASR-0.6B` (or `qwen-asr-serve`) and paste its base URL, e.g. http://127.0.0.1:8000/v1. The app POSTs `<url>/audio/transcriptions`; it does not download the model."
-          wide
-        >
-          <Input
-            type="url"
-            aria-label="Qwen3-ASR server URL"
-            placeholder="http://127.0.0.1:8000/v1"
-            value={serverUrl}
-            disabled={form.formLocked}
-            onChange={(e) => setServerUrl(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                e.currentTarget.blur()
-              }
-            }}
-            onBlur={() => {
-              if (serverUrl !== dictation.qwen3AsrServerUrl) patchServerUrl(serverUrl)
-            }}
-          />
-        </SettingsField>
-        <SettingsField
-          id="dictation-qwen3-key"
-          title="API key (optional)"
-          hint="Bearer token for the server. Leave blank if the server has no auth."
-          help="Only needed when vLLM / qwen-asr-serve was started with `--api-key`."
-          wide
-        >
-          <Input
-            type="password"
-            aria-label="Qwen3-ASR server API key"
-            placeholder="Optional"
-            value={serverKey}
-            disabled={form.formLocked}
-            onChange={(e) => setServerKey(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                e.currentTarget.blur()
-              }
-            }}
-            onBlur={() => {
-              if (serverKey !== dictation.qwen3AsrApiKey) patchServerKey(serverKey)
-            }}
-          />
-        </SettingsField>
-        {QWEN_MODELS.map((model) => {
-          const inUse = dictation.localModelId === model.id
-          return (
-            <SettingsField
-              key={model.id}
-              id={`dictation-${model.id}`}
-              title={model.label}
-              hint={`${model.roleLabel} · ${model.language} · ${model.approxDownloadLabel}`}
-              help={`${model.ramHint} Select a model, then start the matching server (served as ${model.hubRepo}).`}
-              wide
-            >
-              <div className="flex w-full flex-col gap-2">
-                <p className="m-0 text-xs text-secondary">
-                  Served by your local GPU server
-                  {inUse ? ' · In use' : ''}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                   {!inUse ? (
-                     <Button
-                       type="button"
-                       variant="subtle"
-                       disabled={form.formLocked || busy || dictation.engine === 'local' || dictation.engine === 'qwen3-asr-onnx'}
-                       onClick={() => patchLocalModelId(model.id)}
-                     >
-                       Use {model.label}
-                     </Button>
-                   ) : (
-                     <Button type="button" variant="subtle" disabled>
-                       In use
-                     </Button>
-                   )}
-                </div>
-              </div>
-            </SettingsField>
-          )
-        })}
-      </SettingsGroup>
-
-      <SettingsGroup title="Qwen3-ASR (on-device)">
-        {QWEN_ONNX_MODELS.map((model) => {
-          const inst = runtime?.installed.find((m) => m.id === model.id)
-          const installed = inst != null
-          const loaded = inst?.loaded === true
-          const inUse = installed && dictation.localModelId === model.id
-          const statusLabel = cardStatusLabel(model.id, runtime)
-          const fieldId = `dictation-${model.id}`
-          return (
-            <SettingsField
-              key={model.id}
-              id={fieldId}
-              title={model.label}
-              hint={`${model.roleLabel} · ${model.language} · ${model.approxDownloadLabel}`}
-              help={`${model.ramHint} Select a model, then record — the app downloads the community ONNX weights on first use.`}
-              wide
-            >
-              <div className="flex w-full flex-col gap-2">
-                <p className="m-0 text-xs text-secondary">
-                  {statusLabel}
-                  {installed && inst.bytesOnDisk > 0
-                    ? ` · ${formatBytes(inst.bytesOnDisk)} on disk`
-                    : ''}
-                  {inUse ? ' · In use' : ''}
-                </p>
-                <VoiceProgressBar status={runtime} modelId={model.id} />
-                <VoiceModelError status={runtime} modelId={model.id} />
-                <div className="flex flex-wrap gap-2">
-                  {!installed ? (
-                    <Button
-                      type="button"
-                      variant="subtle"
-                      disabled={form.formLocked || busy || downloading}
-                      onClick={() =>
-                        runModelAction(() => window.vyotiq.dictationInstall({ modelId: model.id }))
-                      }
-                    >
-                      Install {model.label}
-                    </Button>
-                  ) : null}
-                  {installed && !inUse ? (
-                    <Button
-                      type="button"
-                      variant="subtle"
-                      disabled={
-                        form.formLocked ||
-                        busy ||
-                        downloading ||
-                        dictation.engine !== 'qwen3-asr-onnx'
-                      }
-                      onClick={() => patchLocalModelId(model.id)}
-                    >
-                      Use {model.label}
-                    </Button>
-                  ) : null}
-                  {loaded ? (
-                    <Button
-                      type="button"
-                      variant="subtle"
-                      disabled={form.formLocked || busy || downloading}
-                      onClick={() => runModelAction(() => window.vyotiq.dictationUnload())}
-                    >
-                      Unload {model.label}
-                    </Button>
-                  ) : null}
-                  {installed ? (
-                    <Button
-                      type="button"
-                      variant="danger"
-                      disabled={form.formLocked || busy || downloading}
-                      onClick={() =>
-                        runModelAction(() =>
-                          window.vyotiq.dictationDeleteCache({ modelId: model.id })
-                        )
-                      }
-                    >
-                      Delete {model.label} cache
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-            </SettingsField>
-          )
-        })}
-      </SettingsGroup>
       {actionError ? (
         <p className="m-0 text-xs text-danger" role="alert">
           {actionError}

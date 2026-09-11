@@ -145,12 +145,21 @@ export function IndexingSection({ form }: { form: SettingsFormState }) {
             setStatusError(null)
           })
         : undefined
+    // Poll only while visible; a hidden settings window must not keep IPC awake.
+    const poll = (): void => {
+      if (document.visibilityState === 'hidden') return
+      refreshStatus()
+    }
+    const onVisibility = (): void => {
+      if (document.visibilityState !== 'hidden') refreshStatus()
+    }
     // Fallback poll only when push subscription is unavailable.
-    const id =
-      unsub == null ? window.setInterval(refreshStatus, 1000) : window.setInterval(refreshStatus, 8000)
+    const id = unsub == null ? window.setInterval(poll, 1000) : window.setInterval(poll, 8000)
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       unsub?.()
       window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [refreshStatus, codeIndex.embedder, codeIndex.enabled, codeIndex.autoDownload])
 
@@ -163,11 +172,20 @@ export function IndexingSection({ form }: { form: SettingsFormState }) {
         setProcessMetrics(res.data)
       })
     }
+    const poll = (): void => {
+      if (document.visibilityState === 'hidden') return
+      pull()
+    }
+    const onVisibility = (): void => {
+      if (document.visibilityState !== 'hidden') pull()
+    }
     pull()
-    const id = window.setInterval(pull, 8000)
+    const id = window.setInterval(poll, 8000)
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       cancelled = true
       window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])
 

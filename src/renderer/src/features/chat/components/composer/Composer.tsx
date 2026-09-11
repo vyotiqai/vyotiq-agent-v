@@ -742,15 +742,29 @@ export function Composer({
 
   const catalogLoading = catalogFetchLoading || refreshingCatalog
 
+  /**
+   * At most one fallback attempt per (provider, current model, fallback) triple.
+   * `onProviderModel` and the catalog identity change on parent renders, so an
+   * effect calling this on identity change could re-enter indefinitely when the
+   * fallback selection never settles — the React #185 loop class.
+   */
+  const visionFallbackAttemptRef = useRef<string | null>(null)
+  const audioFallbackAttemptRef = useRef<string | null>(null)
+
   const ensureVisionModel = useCallback((): void => {
     if (running) return
     const fallback = pickVisionFallback(catalog, model, {
       ...filterOpts,
       hasImages: true
     })
-    if (fallback && fallback !== model) {
-      onProviderModel(provider, fallback)
+    if (!fallback || fallback === model) {
+      visionFallbackAttemptRef.current = null
+      return
     }
+    const attemptKey = `${provider}::${model}::${fallback}`
+    if (visionFallbackAttemptRef.current === attemptKey) return
+    visionFallbackAttemptRef.current = attemptKey
+    onProviderModel(provider, fallback)
   }, [running, catalog, model, filterOpts, onProviderModel, provider])
 
   const ensureAudioModel = useCallback((): void => {
@@ -759,9 +773,14 @@ export function Composer({
       ...filterOpts,
       hasAudio: true
     })
-    if (fallback && fallback !== model) {
-      onProviderModel(provider, fallback)
+    if (!fallback || fallback === model) {
+      audioFallbackAttemptRef.current = null
+      return
     }
+    const attemptKey = `${provider}::${model}::${fallback}`
+    if (audioFallbackAttemptRef.current === attemptKey) return
+    audioFallbackAttemptRef.current = attemptKey
+    onProviderModel(provider, fallback)
   }, [running, catalog, model, filterOpts, onProviderModel, provider])
 
   // Cover picker, draft restore, and any setImages path — not only onPickAttachments.

@@ -102,4 +102,45 @@ describe('auto-resume interrupted runs', () => {
       messages: []
     })
   })
+
+  it('serializes multiple interrupted-run resumes instead of stampeding', async () => {
+    getSettings.mockResolvedValue({ ok: true, data: { autoResumeInterruptedRuns: true } })
+    loadRun.mockImplementation(async (_ws: string, runId: string) => ({
+      ok: true,
+      data: {
+        runId,
+        messages: [{ role: 'user', content: 'hello' }],
+        status: 'cancelled',
+        resumable: true,
+        error: RUN_INTERRUPTED_ERROR
+      }
+    }))
+    let releaseFirst: (() => void) | null = null
+    chatStart.mockImplementation(async (args: { runId: string }) => {
+      if (releaseFirst == null) {
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve
+        })
+      }
+      return { ok: true, data: { runId: args.runId, invokeId: 1 } }
+    })
+
+    const { result } = renderHook(() => useWorkspaceManager())
+    await act(async () => {
+      await Promise.all([
+        result.current.loadRunIntoTab('/ws-a', 'run-a'),
+        result.current.loadRunIntoTab('/ws-a', 'run-b')
+      ])
+    })
+
+    await waitFor(() => expect(chatStart).toHaveBeenCalledTimes(1), { timeout: 3000 })
+    // While the first resume is still in flight, the second must not start.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 900))
+    })
+    expect(chatStart).toHaveBeenCalledTimes(1)
+
+    releaseFirst!()
+    await waitFor(() => expect(chatStart).toHaveBeenCalledTimes(2), { timeout: 5000 })
+  })
 })

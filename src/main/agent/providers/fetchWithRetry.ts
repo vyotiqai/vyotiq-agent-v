@@ -105,6 +105,12 @@ export async function runWithNetworkRetry<T>(
   const isRetriable = opts?.isRetriable ?? isRetriableNetworkError
   const circuitKey = opts?.circuitKey
   if (circuitKey) assertCircuitClosed(circuitKey)
+  // An already-aborted signal never fires the listener below, so without this
+  // guard the request would still be sent (and the half-open probe leaked).
+  if (opts?.signal?.aborted) {
+    if (circuitKey) releaseCircuitProbe(circuitKey)
+    throw new DOMException('Aborted', 'AbortError')
+  }
   let lastError: unknown
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -118,9 +124,19 @@ export async function runWithNetworkRetry<T>(
         if (circuitKey) releaseCircuitProbe(circuitKey)
         throw err
       }
-      if (isCircuitOpenError(err)) throw err
-      if (!isRetriable(err) || attempt >= maxAttempts) {
-        if (circuitKey && isRetriable(err)) recordCircuitFailure(circuitKey)
+      if (isCircuitOpenError(err)) {
+        if (circuitKey) releaseCircuitProbe(circuitKey)
+        throw err
+      }
+      const retriable = isRetriable(err)
+      if (!retriable || attempt >= maxAttempts) {
+        // Non-retriable failures (bad URL, programming errors) are not host
+        // failures: release the half-open slot instead of leaking it, or the
+        // breaker stays half-open forever and bricks the host.
+        if (circuitKey) {
+          if (retriable) recordCircuitFailure(circuitKey)
+          else releaseCircuitProbe(circuitKey)
+        }
         throw err
       }
       await sleepAbortable(httpRetryBackoffMs(attempt), opts?.signal)
@@ -215,6 +231,13 @@ export async function fetchWithRetry(
   const connectTimeoutMs = opts?.connectTimeoutMs ?? CONNECT_TIMEOUT_MS
   const circuitKey = opts?.circuitKey === false ? undefined : (opts?.circuitKey ?? circuitKeyHttp(url))
   if (circuitKey) assertCircuitClosed(circuitKey)
+  // An already-aborted signal never fires the listener registered per attempt,
+  // so without this guard the POST would still be sent (and the half-open probe
+  // leaked) before the abort surfaced as a connect timeout instead of AbortError.
+  if (init.signal?.aborted) {
+    if (circuitKey) releaseCircuitProbe(circuitKey)
+    throw new DOMException('Aborted', 'AbortError')
+  }
   let lastError: unknown
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -248,9 +271,19 @@ export async function fetchWithRetry(
         if (circuitKey) releaseCircuitProbe(circuitKey)
         throw err
       }
-      if (isCircuitOpenError(timeoutErr)) throw timeoutErr
-      if (!isRetriableNetworkError(timeoutErr) || attempt >= maxAttempts) {
-        if (circuitKey && isRetriableNetworkError(timeoutErr)) recordCircuitFailure(circuitKey)
+      if (isCircuitOpenError(timeoutErr)) {
+        if (circuitKey) releaseCircuitProbe(circuitKey)
+        throw timeoutErr
+      }
+      const retriable = isRetriableNetworkError(timeoutErr)
+      if (!retriable || attempt >= maxAttempts) {
+        // Non-retriable failures (bad URL, programming errors) are not host
+        // failures: release the half-open slot instead of leaking it, or the
+        // breaker stays half-open forever and bricks the host.
+        if (circuitKey) {
+          if (retriable) recordCircuitFailure(circuitKey)
+          else releaseCircuitProbe(circuitKey)
+        }
         throw timeoutErr
       }
       await sleepAbortable(httpRetryBackoffMs(attempt), init.signal)

@@ -73,4 +73,23 @@ describe('useRunGoal poll cadence', () => {
     })
     expect(readRunArtifact.mock.calls.length).toBeGreaterThan(afterMount)
   })
+
+  it('does not poll once the run is idle (L-12 parity)', async () => {
+    readRunArtifact.mockResolvedValue({
+      ok: true,
+      data: { name: 'goal.json', exists: false, content: null }
+    })
+    renderHook(() =>
+      useRunGoal({ workspacePath: '/ws', runId: 'run-1', running: false, active: true })
+    )
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const afterMount = readRunArtifact.mock.calls.length
+    await act(async () => {
+      vi.advanceTimersByTime(10_000)
+      await Promise.resolve()
+    })
+    expect(readRunArtifact.mock.calls.length).toBe(afterMount)
+  })
 })

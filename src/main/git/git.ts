@@ -1,5 +1,6 @@
 import { execFile as execFileCb } from 'child_process'
 import { existsSync, statSync, readFileSync, writeFileSync, mkdtempSync, unlinkSync } from 'fs'
+import { stat } from 'fs/promises'
 import { tmpdir } from 'os'
 import { dirname, join, resolve } from 'path'
 import { promisify } from 'util'
@@ -139,6 +140,29 @@ export async function currentGitBranch(cwd: string): Promise<string | null> {
 export async function hasGitCommits(cwd: string): Promise<boolean> {
   if (!isGitRepo(cwd)) return false
   return (await gitQuiet(['rev-parse', '--verify', 'HEAD'], cwd, READ_TIMEOUT_MS)) != null
+}
+
+/**
+ * Best-effort ahead/behind counts vs the current branch's upstream
+ * (`rev-list --left-right --count @{upstream}...HEAD`): left = upstream
+ * (behind), right = HEAD (ahead). Null when no upstream exists (never pushed
+ * / no tracking ref) or git fails — the caller omits the fields rather than
+ * showing fake zeros.
+ */
+export async function readGitAheadBehind(
+  cwd: string
+): Promise<{ ahead: number; behind: number } | null> {
+  const raw = await gitQuiet(
+    ['rev-list', '--left-right', '--count', '@{upstream}...HEAD'],
+    cwd,
+    READ_TIMEOUT_MS
+  )
+  const m = /^(\d+)\t(\d+)$/.exec(raw?.trim() ?? '')
+  if (!m) return null
+  const behind = Number(m[1])
+  const ahead = Number(m[2])
+  if (!Number.isFinite(behind) || !Number.isFinite(ahead) || behind < 0 || ahead < 0) return null
+  return { ahead, behind }
 }
 
 async function git(args: string[], cwd: string, timeout: number): Promise<string> {
@@ -449,6 +473,12 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
   }
 
   const remote = await gitQuiet(['remote'], cwd, READ_TIMEOUT_MS)
+  const hasRemote = Boolean(remote?.trim())
+
+  // Ahead/behind only when a remote exists AND history does — `@{upstream}`
+  // fails on never-pushed branches and best-effort null keeps chrome honest.
+  const aheadBehind =
+    hasRemote && hasCommits ? await readGitAheadBehind(cwd) : null
 
   const status: GitStatus = {
     branch,
@@ -457,8 +487,9 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
     fileCount: all.length,
     added,
     removed,
-    hasRemote: Boolean(remote?.trim()),
-    hasCommits
+    hasRemote,
+    hasCommits,
+    ...(aheadBehind ?? {})
   }
   return { kind: 'ok', status }
 }
@@ -471,8 +502,11 @@ export type GitDiffOptions = {
   vsHead?: boolean
 }
 
+const DIFF_CAP_CHARS = 200_000
+
 function capDiff(text: string): string {
-  return text
+  if (text.length <= DIFF_CAP_CHARS) return text
+  return `${text.slice(0, DIFF_CAP_CHARS)}\n[diff truncated]`
 }
 
 /**
@@ -496,8 +530,8 @@ async function readUntrackedFileDiff(
   }
 
   try {
-    const stat = statSync(abs)
-    if (!stat.isFile()) return null
+    const fileStat = await stat(abs)
+    if (!fileStat.isFile()) return null
   } catch {
     return null
   }

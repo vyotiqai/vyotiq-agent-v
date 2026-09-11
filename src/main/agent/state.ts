@@ -232,6 +232,7 @@ export function syncMessages(dir: string, messages: ChatMessage[]): void {
   // stale archive heads would otherwise be re-prepended by stitched readers and
   // duplicate history on every resume.
   removeMessageArchivesSync(dir)
+  invalidateMessagesCache(dir)
 }
 
 /** Await pending async appends, then rewrite messages.jsonl (authoritative).
@@ -243,6 +244,7 @@ export async function syncMessagesAsync(dir: string, messages: ChatMessage[]): P
   await atomicWriteFileAsync(join(dir, 'messages.jsonl'), body ? `${body}\n` : '')
   // Same archive reconciliation as syncMessages — see the comment there.
   await removeMessageArchives(dir)
+  invalidateMessagesCache(dir)
 }
 
 export function appendMessage(dir: string, message: ChatMessage): Promise<void> {
@@ -385,6 +387,61 @@ function stitchedMessagesContentSync(dir: string): string | null {
   return parts.join('')
 }
 
+/**
+ * Size+mtime fingerprint of the transcript inputs (live file + rotated archives).
+ * A handful of stat calls instead of reading and concatenating every archive.
+ */
+function stitchFingerprint(dir: string): string {
+  const parts: string[] = []
+  for (const name of listMessageArchivesSync(dir)) {
+    try {
+      const st = statSync(join(dir, name))
+      parts.push(`${name}:${st.size}:${st.mtimeMs}`)
+    } catch {
+      parts.push(`${name}:?`)
+    }
+  }
+  try {
+    const st = statSync(join(dir, 'messages.jsonl'))
+    parts.push(`messages.jsonl:${st.size}:${st.mtimeMs}`)
+  } catch {
+    parts.push('messages.jsonl:-')
+  }
+  return parts.join('|')
+}
+
+/**
+ * Memoized stitched read.
+ *
+ * Compaction re-read the whole transcript on *every* attempt, and once a run is
+ * in context overflow that is every step — a multi-MB read plus a per-line
+ * `JSON.parse` + zod validation on the main thread, repeatedly. The transcript is
+ * append-only (or rotated, which changes the archive list), so size+mtime is a
+ * sound fingerprint: any real change moves it.
+ */
+const STITCH_CACHE_MAX_ENTRIES = 4
+const stitchCache = new Map<string, { fingerprint: string; content: string | null }>()
+
+function stitchedMessagesContentCached(dir: string): string | null {
+  const fingerprint = stitchFingerprint(dir)
+  const cached = stitchCache.get(dir)
+  if (cached && cached.fingerprint === fingerprint) return cached.content
+  const content = stitchedMessagesContentSync(dir)
+  stitchCache.delete(dir)
+  stitchCache.set(dir, { fingerprint, content })
+  if (stitchCache.size > STITCH_CACHE_MAX_ENTRIES) {
+    const oldest = stitchCache.keys().next()
+    if (!oldest.done) stitchCache.delete(oldest.value)
+  }
+  return content
+}
+
+/** Drop the memo for one run dir (after a rewrite that re-stitched archives). */
+export function invalidateMessagesCache(dir?: string): void {
+  if (dir) stitchCache.delete(dir)
+  else stitchCache.clear()
+}
+
 async function stitchedMessagesContentAsync(dir: string): Promise<string | null> {
   const parts: string[] = []
   for (const name of await listMessageArchives(dir)) {
@@ -508,10 +565,16 @@ export function loadWorkingMessagesForFold(
   foldedMessages: number
 ): { messages: ChatMessage[]; foldedMessages: number } {
   const fold = Math.max(0, Math.floor(foldedMessages))
+  const dir = resolveRunDir(workspacePath, runId)
+  // Single stitched read for the whole decision. The previous shape called
+  // `loadMessagesAfterFold` and then `loadMessages` on the fallback branch,
+  // reading and parsing the entire transcript twice per compaction attempt.
+  const content = stitchedMessagesContentCached(dir)
+  if (content == null) return { messages: [], foldedMessages: 0 }
   if (fold <= 0) {
-    return { messages: loadMessages(workspacePath, runId), foldedMessages: 0 }
+    return { messages: parseMessagesJsonl(content), foldedMessages: 0 }
   }
-  const after = loadMessagesAfterFold(workspacePath, runId, fold)
+  const after = parseMessagesJsonlSkipping(content, fold)
   const kept = stripLeadingOrphanToolMessages(after)
   if (kept.length > 0) {
     return {
@@ -519,7 +582,7 @@ export function loadWorkingMessagesForFold(
       foldedMessages: fold + (after.length - kept.length)
     }
   }
-  return applyFoldedMessagesWatermark(loadMessages(workspacePath, runId), fold)
+  return applyFoldedMessagesWatermark(parseMessagesJsonl(content), fold)
 }
 
 function toolMessageText(content: MessageContent): string {
@@ -1382,6 +1445,9 @@ export async function deleteRun(
         await drainRunWritersBeforeDelete(childDir)
         rmSync(childDir, { recursive: true, force: true })
       }
+      // The stitched-transcript memo pins multi-MB strings per run dir — drop
+      // it with the directory or the LRU keeps deleted runs resident.
+      invalidateMessagesCache(childDir)
       dismissRunLifecycleInbox(child.runId)
     }
   }
@@ -1396,6 +1462,7 @@ export async function deleteRun(
     return { ok: false, error: 'Cancel run first' }
   }
   rmSync(dir, { recursive: true, force: true })
+  invalidateMessagesCache(dir)
   dismissRunLifecycleInbox(runId)
   invalidateListRunsCache(workspacePath)
   logger.info('Deleted run', {

@@ -31,6 +31,7 @@ export function CommitComposer({
   onMessageChange,
   busy,
   generating = false,
+  generationNotice = null,
   hasRemote,
   onCommit,
   onCreatePr,
@@ -43,6 +44,7 @@ export function CommitComposer({
   onMessageChange: (value: string) => void
   busy: boolean
   generating?: boolean
+  generationNotice?: string | null
   hasRemote: boolean
   onCommit: (push: boolean) => void
   onCreatePr?: () => void
@@ -86,6 +88,15 @@ export function CommitComposer({
       {generating ? (
         <span className="shrink-0 text-2xs text-muted" aria-live="polite">
           Agent suggestion…
+        </span>
+      ) : null}
+      {generationNotice ? (
+        <span
+          className="shrink-0 max-w-[48ch] truncate text-2xs text-muted"
+          title={generationNotice}
+          aria-live="polite"
+        >
+          Generation unavailable: {generationNotice} — using fallback
         </span>
       ) : null}
       <button

@@ -100,8 +100,103 @@ export function shouldRetryOmitCacheKey(status: number, body: string): boolean {
   return PROMPT_CACHE_KEY_REJECT_RE.test(message)
 }
 
+/**
+ * Optional OpenAI-compat body fields we may speculatively attach. A strict host
+ * names one as rejected when it decodes the body strictly — Console Go
+ * (OpenCode's Go gateway) returns
+ * `invalid_request_error: invalid request body: json: unknown field "X"`
+ * (live 2026-09-10); Python-style proxies say
+ * `Extra inputs are not permitted: X` / `Unknown parameter: X`.
+ *
+ * Only instrumentation fields are strippable. Required (`model`, `messages`,
+ * `stream`), capability-bearing (`tools`, `tool_choice`), and semantic-contract
+ * (`response_format`, `max_tokens`, `temperature`, `stop`) fields are never
+ * stripped: silently dropping structured output or a generation cap would turn
+ * a schema mismatch into a wrong answer instead of a loud failure.
+ */
+const STRIPPABLE_BODY_FIELDS = new Set([
+  'include_reasoning',
+  'reasoning_effort',
+  'reasoning_format',
+  'reasoning',
+  'reasoning_content',
+  'thinking',
+  'think',
+  'prompt_cache_key',
+  'prompt_cache_options',
+  'prompt_cache_breakpoint',
+  'stream_options',
+  'service_tier',
+  'parallel_tool_calls'
+])
+
+const REJECTED_FIELD_PATTERNS: readonly RegExp[] = [
+  // `json: unknown field "X"`; tolerate escaped quotes from unparsed wrappers.
+  /unknown field \\?["']([A-Za-z0-9_.-]+)\\?["']/i,
+  /unknown parameter:?\s*\\?["']?([A-Za-z0-9_.-]+)\\?["']?/i,
+  /extra inputs are not permitted:?\s*\\?["']?([A-Za-z0-9_.-]+)\\?["']?/i,
+  /unexpected keyword argument \\?['"]([A-Za-z0-9_.-]+)\\?['"]/i,
+  /unrecognized request argument supplied:?\s*\\?["']?([A-Za-z0-9_.-]+)\\?["']?/i
+]
+
+/**
+ * Name of the optional body field a host says it does not know, if any.
+ * Callers strip exactly that field and retry — it is inert on hosts that
+ * accept it, so the retry only fires on a real rejection.
+ */
+export function parseRejectedBodyField(status: number, body: string): string | undefined {
+  if (status !== 400 && status !== 422) return undefined
+  const message = parseProviderErrorMessage(body) ?? body
+  for (const pattern of REJECTED_FIELD_PATTERNS) {
+    const raw = pattern.exec(message)?.[1]
+    if (!raw) continue
+    // Unquoted captures can swallow sentence punctuation ("...: temperature.").
+    const field = raw.replace(/[.,;:]+$/, '')
+    if (STRIPPABLE_BODY_FIELDS.has(field)) return field
+  }
+  return undefined
+}
+
+/**
+ * Strict hosts name fields at any nesting depth (Go decodes structs inside the
+ * message list too). Delete the named field from the body root and from message
+ * / input rows and their content parts, so a message-level rejection
+ * (`reasoning_content`, `prompt_cache_breakpoint`) self-heals as well.
+ */
+export function stripRejectedBodyField(body: Record<string, unknown>, field: string): void {
+  delete body[field]
+  for (const listKey of ['messages', 'input']) {
+    const list = body[listKey]
+    if (!Array.isArray(list)) continue
+    for (const item of list) {
+      if (!item || typeof item !== 'object') continue
+      const rec = item as Record<string, unknown>
+      delete rec[field]
+      const content = rec.content
+      if (!Array.isArray(content)) continue
+      for (const part of content) {
+        if (part && typeof part === 'object') delete (part as Record<string, unknown>)[field]
+      }
+    }
+  }
+}
+
+const UNSUPPORTED_TOOL_SCHEMA_RE =
+  /unsupported[_ -]?tool[_ -]?schema|unsupported[_ -]?keyword|tool schema is not supported/i
+
+/**
+ * True when a 400/422 says the tool schema itself was rejected. Callers retry
+ * once with restricted JSON-Schema keywords removed — the host already refused
+ * the schema, so a narrower one cannot do worse.
+ */
+export function shouldRetrySanitizeToolSchema(status: number, body: string): boolean {
+  if (status !== 400 && status !== 422) return false
+  const message = parseProviderErrorMessage(body) ?? body
+  return UNSUPPORTED_TOOL_SCHEMA_RE.test(message)
+}
+
 const PROVIDER_SECRET_RE =
-  /\b(?:sk-[a-zA-Z0-9_-]+|Bearer\s+[a-zA-Z0-9._/=+-]+|wk-[A-Za-z0-9_-]{4,}\.ws-[A-Za-z0-9_-]{4,}|api[_-]?key["\s:=]+[a-zA-Z0-9._-]+)/gi
+  /\b(?:sk-[a-zA-Z0-9_-]+|Bearer\s+[a-zA-Z0-9._/=+~-]+|wk-[A-Za-z0-9_-]{4,}\.ws-[A-Za-z0-9_-]{4,}|AIza[0-9A-Za-z_-]{20,}|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|api[_-]?key["\\\s:=]+[a-zA-Z0-9._-]+)/gi
 
 /** OpenAI often echoes a masked key fragment: "Incorrect API key provided: abcd…wxyz". */
 const INCORRECT_API_KEY_RE =

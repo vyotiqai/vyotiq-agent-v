@@ -101,11 +101,27 @@ const CANCEL_BACKGROUND_RETRY_EVERY_MS = 5_000
 /** Writing tools need full args for the Changes panel diffs; everything else is capped. */
 const KEEP_FULL_ARGS_TOOLS = new Set(['edit', 'str_replace', 'delete'])
 
+/**
+ * Ceiling on how much of a writing tool's arguments the transcript retains.
+ *
+ * These tools bypass the 4000-char preview cap so the Changes panel can parse
+ * old/new file bodies into diffs. Unbounded, a long run kept every edit's full
+ * payload alive in `state.items` for the life of the run — a few large files
+ * across 100+ steps is hundreds of MB, and the renderer dies before the run
+ * finishes. 256 KB covers any realistically diffable edit while keeping the
+ * worst case bounded.
+ */
+const EDIT_ARGS_KEEP_CHARS = 256 * 1024
+
 function argsPreviewForUi(name: string, args: string): string {
   // Edit/write tools parse diffs from argsPreview while running. Capping at
   // 4000 chars froze the peek on the head of the file until finalize, then
   // dumped the rest in one paint.
-  if (KEEP_FULL_ARGS_TOOLS.has(name)) return args
+  if (KEEP_FULL_ARGS_TOOLS.has(name)) {
+    return args.length > EDIT_ARGS_KEEP_CHARS
+      ? `${args.slice(0, EDIT_ARGS_KEEP_CHARS)}\n…`
+      : args
+  }
   return truncateToolArgsPreview(args)
 }
 
@@ -1391,6 +1407,16 @@ export function createChatStreamController(
   const failedToolLoads = new Set<string>()
   /** Full argument accumulation during streaming (items only keep a capped preview). */
   const pendingToolArgsFull = new Map<string, string>()
+  /**
+   * Hard ceiling on the streaming arg accumulator.
+   *
+   * Entries are dropped when `assistant_message` carries the tool calls, but a
+   * provider that never echoes them back left every call's full arguments —
+   * including multi-hundred-KB `write`/`edit` bodies — resident until the run
+   * ended. Evict oldest-first (Map preserves insertion order) so a long run
+   * stays bounded instead of growing without limit.
+   */
+  const PENDING_TOOL_ARGS_MAX = 64
   /** Tool calls that reached `tool_start` this session (vs provisional delta chrome). */
   const startedToolCallIds = new Set<string>()
 
@@ -1467,6 +1493,13 @@ export function createChatStreamController(
       pendingToolArgsFull.get(event.toolCallId) ??
       (existing?.kind === 'tool' ? existing.tool.argsPreview ?? '' : '')
     const fullArgs = mergeOpenAiCompatToolArgDelta(prior, event.argumentsDelta).arguments
+    if (!pendingToolArgsFull.has(event.toolCallId)) {
+      while (pendingToolArgsFull.size >= PENDING_TOOL_ARGS_MAX) {
+        const oldest = pendingToolArgsFull.keys().next()
+        if (oldest.done) break
+        pendingToolArgsFull.delete(oldest.value)
+      }
+    }
     pendingToolArgsFull.set(event.toolCallId, fullArgs)
     const argsPreview = argsPreviewForUi(toolName || 'tool', fullArgs)
     const resolvedName = toolName || (existing?.kind === 'tool' ? existing.tool.name : '') || 'tool'

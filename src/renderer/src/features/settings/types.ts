@@ -65,6 +65,9 @@ export type SettingsViewProps = {
   ) => Promise<{ ok: true } | { ok: false; error: string }>
   section?: SettingsSection
   onSectionChange?: (section: SettingsSection) => void
+  /** Open the feedback dialog from outside Settings (command palette). */
+  feedbackOpen?: boolean
+  onFeedbackOpenChange?: (open: boolean) => void
   /** Close Settings and focus the composer model picker. */
   onOpenComposerModel?: () => void
 }

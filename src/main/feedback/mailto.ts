@@ -11,7 +11,7 @@ export interface FeedbackMailtoInput {
   now?: Date
 }
 
-export const FEEDBACK_EMAIL = 'vyotiq@gmail.com'
+export const FEEDBACK_EMAIL = 'support@vyotiq.com'
 
 /**
  * Pure mailto builder for the feedback service.
