@@ -11,6 +11,7 @@ import {
   DictationRuntimeStatusSchema,
   GithubAuthStatusSchema,
   SkillsChangedPayloadSchema,
+  GitStatusChangedPayloadSchema,
   NotificationListSchema,
   NotificationActionSchema
 } from '../shared/ipc'
@@ -503,6 +504,17 @@ const api: VyotiqApi = {
     ipcRenderer.on(IPC.notificationsChanged, listener)
     return () => {
       ipcRenderer.removeListener(IPC.notificationsChanged, listener)
+    }
+  },
+  onGitStatusChanged: (handler) => {
+    const listener = (_: IpcRendererEvent, raw: unknown): void => {
+      const parsed = GitStatusChangedPayloadSchema.safeParse(raw)
+      if (!parsed.success) return
+      handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.gitStatusChanged, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.gitStatusChanged, listener)
     }
   },
   onNotificationActivate: (handler) => {

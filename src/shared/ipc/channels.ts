@@ -95,6 +95,7 @@ export const IPC = {
   gitLog: 'git:log',
   gitCommitFiles: 'git:commit-files',
   gitBlame: 'git:blame',
+  gitStatusChanged: 'git:status-changed',
   windowMinimize: 'window:minimize',
   windowMaximize: 'window:maximize',
   windowClose: 'window:close',

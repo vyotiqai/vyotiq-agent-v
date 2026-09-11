@@ -238,6 +238,16 @@ export const GitCommitFilesResultSchema = z.object({
 })
 export type GitCommitFilesResult = z.infer<typeof GitCommitFilesResultSchema>
 
+/**
+ * Payload pushed from main after a workspace's git status may have changed.
+ * Subscribers re-pull a fresh snapshot via IPC.gitStatus, so the payload only
+ * identifies the workspace.
+ */
+export const GitStatusChangedPayloadSchema = z.object({
+  workspacePath: z.string().min(1)
+})
+export type GitStatusChangedPayload = z.infer<typeof GitStatusChangedPayloadSchema>
+
 export const GitConflictFileRequestSchema = z.object({
   workspacePath: z.string().min(1),
   path: z.string().min(1).max(4_096)
