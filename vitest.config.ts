@@ -32,12 +32,9 @@ export default defineConfig({
      */
     teardownTimeout: 15_000,
     pool: 'forks',
-    poolOptions: {
-      forks: {
-        maxForks: Math.max(1, Math.min(4, cpus().length)),
-        minForks: 1
-      }
-    },
+    // Vitest 4: pool limits moved from poolOptions to top-level options.
+    maxForks: Math.max(1, Math.min(4, cpus().length)),
+    minForks: 1,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
