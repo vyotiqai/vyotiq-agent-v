@@ -2,93 +2,113 @@
 import ProviderMarks from './ProviderMarks.astro'
 import LandingIcon from './LandingIcon.astro'
 
-const workspaceSurfaces = [
+const workspacePanels = [
   {
     name: 'Files',
-    detail: 'Navigate the repository tree and edit workspace files.'
+    detail: 'Repository tree and editor for workspace files, sandboxed to the folder you opened.'
   },
   {
     name: 'Browser',
-    detail: 'Inspect and act on websites in the embedded browser.'
+    detail: 'Embedded browser for reading and acting on live websites from inside a run.'
   },
   {
     name: 'Terminal',
-    detail: 'Run project commands and inspect their captured output.'
+    detail: 'Project commands with their captured output, beside the conversation.'
   },
   {
     name: 'Changes',
-    detail: 'Review working-tree status, diffs, and checkpoint actions.'
+    detail: 'Working-tree status, diffs, and checkpoint actions before anything is committed.'
   },
   {
     name: 'Pull Request',
-    detail: 'Work with GitHub pull requests through the GitHub CLI boundary.'
+    detail: 'GitHub pull requests through the GitHub CLI, reviewed in the same window.'
   },
   {
     name: 'Plan',
-    detail: 'Keep the run contract, plan, and todos visible as work progresses.'
+    detail: "The run's plan, contract, and todos, visible as work progresses."
   }
 ]
 
 const modes = [
   {
     name: 'Ask',
-    detail: 'Investigate with read-only built-ins and browse-only browser actions.'
+    boundary:
+      'Read-only built-in tools and a browse-only browser. It can answer, but it cannot change anything.'
   },
   {
     name: 'Plan',
-    detail: 'Use read tools, todos, diagnostics, and edits limited to run plan and contract files.'
+    boundary:
+      "Adds todos, diagnostics, and edits limited to the run's plan.md and contract.md. Implementation waits for approval."
   },
   {
     name: 'Agent',
-    detail: 'Edit product files and use the full built-in tool catalog, subject to approvals.'
+    boundary:
+      'The full built-in catalog, subject to tool approval and safety gates. Commands, edits, Git, and browser actions happen here.'
   }
 ]
 
 const continuityItems = [
-  'Workspace sessions keep chats and run state connected to the repository.',
-  'Background runs can surface completion, failure, or a request for attention through notifications.',
-  'Context estimates help plan the next turn; compaction summarizes older history when needed.',
-  'Contracts, plans, todos, and receipts preserve intent and structured run evidence.'
+  'Workspace sessions keep chats and run state tied to the repository they belong to.',
+  'Background runs keep working while you do something else and can notify you on completion, failure, or when they need attention.',
+  'Context estimates and compaction summarize older history when the window fills, so a long run stays usable.',
+  'Plans, todos, and checkpoints record what was intended and what completed, so you can pick the work back up.'
 ]
 
 const extensionItems = [
   {
+    key: 'MC',
     name: 'MCPs',
     detail: 'Connect tools and resources from configured Model Context Protocol servers.'
   },
   {
+    key: 'SK',
     name: 'Skills',
-    detail: 'Add task-specific instructions and workflows.'
+    detail: 'Add task-specific instructions and workflows the agent can invoke.'
   },
   {
+    key: 'RU',
     name: 'Rules',
-    detail: 'Apply persistent user or workspace guidance.'
+    detail: 'Apply persistent guidance from user or workspace rule files.'
   },
   {
+    key: 'PK',
     name: 'Packages',
-    detail: 'Install and scope Marketplace bundles through explicit lifecycle controls.'
+    detail: 'Install Marketplace bundles with explicit lifecycle controls.'
   }
+]
+
+const localItems = [
+  { label: 'Workspace files and run records', detail: 'Including editor history and session state.' },
+  { label: 'Settings, indexes, model caches', detail: 'Optional code indexing stays derived and local.' },
+  { label: 'Rotating logs', detail: 'Telemetry only: no workspace paths, file names, or chat payloads.' }
+]
+
+const remoteItems = [
+  { label: 'Model providers', detail: 'Receive the prompts and attached content you send.' },
+  { label: 'Visited websites', detail: 'Seen by the embedded browser during browser actions.' },
+  { label: 'GitHub and remotes', detail: 'Reached when you use pull requests or push.' },
+  { label: 'Dictation and remote MCP', detail: 'OpenAI or OpenRouter for voice; servers you configure.' }
 ]
 
 const docsLinks = [
   {
-    label: 'Workflow',
-    detail: 'Start with a workspace, provider, and first reviewed run.',
+    label: 'Quickstart: first useful change',
+    detail: 'Open a workspace, connect a model, run one small task, review the diff.',
     href: '/docs/start/quickstart'
   },
   {
-    label: 'Tools',
-    detail: 'See the built-in tool catalog and mode availability.',
+    label: 'Built-in tools',
+    detail: 'The full catalog and which mode can use each tool.',
     href: '/docs/reference/tools'
   },
   {
-    label: 'Providers',
-    detail: 'Configure provider hosts, credentials, and models.',
+    label: 'Providers and models',
+    detail: 'Set up Ollama, a cloud provider, or a custom endpoint.',
     href: '/docs/customize/providers'
   },
   {
     label: 'Privacy and security',
-    detail: 'Understand stored data, external requests, approvals, and recovery limits.',
+    detail: 'What is stored, what leaves the machine, and what gates it.',
     href: '/docs/concepts/privacy-data'
   }
 ]
@@ -97,24 +117,25 @@ const docsLinks = [
 <div class="home-sections">
   <section id="capabilities" class="home-section wrap" aria-labelledby="workspace-title">
     <header class="home-section-heading">
-      <p class="home-eyebrow">01 / Integrated workspace</p>
-      <h2 id="workspace-title">Files, terminal, browser, and Git stay on the same task.</h2>
+      <p class="eyebrow"><strong>01</strong> One workspace</p>
+      <h2 id="workspace-title">Six panels, one task, zero app-switching.</h2>
       <p>
-        Search the codebase, edit files, run commands, use the web, and review Git state without
-        breaking the task into disconnected surfaces.
+        The chat drives the work. These panels keep everything it touches in view, so context
+        never lives in another window.
       </p>
     </header>
-    <ul class="home-surface-grid">
+    <ul class="data-sheet">
       {
-        workspaceSurfaces.map((surface) => (
+        workspacePanels.map((panel, index) => (
           <li>
-            <h3>{surface.name}</h3>
-            <p>{surface.detail}</p>
+            <span class="sheet-key" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+            <h3>{panel.name}</h3>
+            <p>{panel.detail}</p>
           </li>
         ))
       }
     </ul>
-    <a class="home-text-link" href="/docs/agent/workspaces-sessions">
+    <a class="text-link" href="/docs/agent/workspaces-sessions">
       Tour the workspace
       <LandingIcon name="arrow-up-right" />
     </a>
@@ -122,39 +143,51 @@ const docsLinks = [
 
   <section class="home-section wrap" aria-labelledby="modes-title">
     <header class="home-section-heading">
-      <p class="home-eyebrow">02 / Controlled modes</p>
-      <h2 id="modes-title">Choose how the agent works.</h2>
+      <p class="eyebrow"><strong>02</strong> Three modes</p>
+      <h2 id="modes-title">You decide how much the agent may do.</h2>
       <p>
-        The mode changes which actions are available. Start with investigation, make decisions
-        explicit, then move into implementation when the task is ready.
+        The mode is an enforced tool boundary, not a suggestion. Start read-only, plan with
+        guardrails, then execute under approval.
       </p>
     </header>
-    <ol class="home-mode-list">
-      {
-        modes.map((mode, index) => (
-          <li>
-            <span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
-            <div>
-              <h3>{mode.name}</h3>
-              <p>{mode.detail}</p>
-            </div>
-          </li>
-        ))
-      }
-    </ol>
-    <a class="home-text-link" href="/docs/agent/modes">
-      Compare modes
+    <div class="mode-table-wrap">
+      <table class="mode-table">
+        <thead>
+          <tr>
+            <th scope="col">Mode</th>
+            <th scope="col">Boundary</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            modes.map((mode) => (
+              <tr>
+                <th scope="row">{mode.name}</th>
+                <td>{mode.boundary}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="home-supporting-copy">
+      MCP server tools are available to Agent only. Ask and Plan can list a server's catalog but
+      cannot invoke its tools. Switch modes any time with the composer picker or
+      <code>Ctrl+.</code>
+    </p>
+    <a class="text-link mt-6" href="/docs/agent/modes">
+      Compare modes in detail
       <LandingIcon name="arrow-up-right" />
     </a>
   </section>
 
   <section class="home-section wrap" aria-labelledby="continuity-title">
     <header class="home-section-heading">
-      <p class="home-eyebrow">03 / Long-running work</p>
-      <h2 id="continuity-title">Stay oriented as the task grows.</h2>
+      <p class="eyebrow"><strong>03</strong> Long-running work</p>
+      <h2 id="continuity-title">Long work stays resumable.</h2>
       <p>
-        Runs carry more than a transcript. Agent V keeps the state and artifacts needed to return
-        to work, understand what happened, and decide what comes next.
+        A run carries more than a transcript. Sessions, checkpoints, and compaction keep the
+        state needed to return, catch up, and continue.
       </p>
     </header>
     <div class="home-split">
@@ -162,14 +195,13 @@ const docsLinks = [
         {continuityItems.map((item) => <li>{item}</li>)}
       </ul>
       <aside class="home-note" aria-labelledby="checkpoint-title">
-        <h3 id="checkpoint-title">Checkpoint boundary</h3>
+        <h3 id="checkpoint-title">The honest limits of checkpoints</h3>
         <p>
           Checkpoints cover guarded agent writes. They are not Git commits and cannot reverse
-          terminal commands, browser actions, MCP calls, GitHub operations, or other remote side
-          effects.
+          terminal commands, browser actions, MCP calls, or other remote side effects.
         </p>
-        <a class="home-text-link" href="/docs/agent/checkpoints">
-          Understand checkpoints
+        <a class="text-link" href="/docs/agent/checkpoints">
+          How checkpoints work
           <LandingIcon name="arrow-up-right" />
         </a>
       </aside>
@@ -178,108 +210,137 @@ const docsLinks = [
 
   <section class="home-section wrap" aria-labelledby="providers-title">
     <header class="home-section-heading">
-      <p class="home-eyebrow">04 / Provider choice</p>
-      <h2 id="providers-title">Use the models you configure.</h2>
+      <p class="eyebrow"><strong>04</strong> Provider choice</p>
+      <h2 id="providers-title">Bring your own model.</h2>
       <p>
-        Configure local Ollama, nine cloud providers, or a custom OpenAI-compatible host, then
-        choose among the models exposed by that configuration.
+        Configure a local Ollama, one of nine cloud providers, or any OpenAI-compatible endpoint,
+        then pick from the models that host exposes.
       </p>
     </header>
-    <div class="home-provider-layout">
+    <div class="provider-band">
       <ProviderMarks />
-      <div class="home-note">
-        <h3>Initial selection</h3>
+      <aside class="home-note">
+        <h3>What new settings select</h3>
         <p>
-          New settings initially select Ollama with <code>qwen2.5</code>. That selection does not
-          install or start Ollama, and the endpoint may not be reachable.
+          Fresh settings start on local Ollama with <code>qwen2.5</code>. That is a selection,
+          not an install: the endpoint only works once Ollama exists and is reachable.
         </p>
-        <a class="home-text-link" href="/docs/customize/providers">
+        <a class="text-link" href="/docs/customize/providers">
           Configure providers
           <LandingIcon name="arrow-up-right" />
         </a>
-      </div>
+      </aside>
     </div>
   </section>
 
   <section class="home-section wrap" aria-labelledby="extensions-title">
     <header class="home-section-heading">
-      <p class="home-eyebrow">05 / Deliberate extension</p>
-      <h2 id="extensions-title">Add context and capability on purpose.</h2>
+      <p class="eyebrow"><strong>05</strong> Extensions</p>
+      <h2 id="extensions-title">Extend on purpose, not by default.</h2>
       <p>
-        Extend the repository workflow when the task calls for it, without making extensions the
-        center of the day-to-day workspace.
+        Marketplace installs are opt-in and scoped. The workspace stays lean until a task calls
+        for more.
       </p>
     </header>
     <ul class="home-extension-grid">
       {
         extensionItems.map((item) => (
           <li>
-            <h3>{item.name}</h3>
+            <h3>
+              {item.name}
+              <span aria-hidden="true">{item.key}</span>
+            </h3>
             <p>{item.detail}</p>
           </li>
         ))
       }
     </ul>
     <p class="home-supporting-copy">
-      Explicit Markdown memory lives under <code>.vyotiq/memory/</code>. Optional code indexing
-      keeps derived indexes locally; it is separate from memory.
+      Memory is plain Markdown under <code>.vyotiq/memory/</code>, injected into every run.
+      Optional code indexing builds a separate local index for search; it is not memory.
     </p>
-    <a class="home-text-link" href="/docs/customize/marketplace">
-      Explore customization
+    <a class="text-link mt-6" href="/docs/customize/marketplace">
+      Browse customization docs
       <LandingIcon name="arrow-up-right" />
     </a>
   </section>
 
   <section class="home-section wrap" aria-labelledby="boundaries-title">
     <header class="home-section-heading">
-      <p class="home-eyebrow">06 / Data boundaries</p>
-      <h2 id="boundaries-title">Local state, explicit network boundaries.</h2>
+      <p class="eyebrow"><strong>06</strong> Data boundaries</p>
+      <h2 id="boundaries-title">Local by default. Explicit about the network.</h2>
       <p>
-        Workspace files, run records, settings, indexes, and rotating logs are stored on the
-        machine. Requests cross that boundary when the work requires an external service.
+        Workspace files, run records, settings, indexes, and logs stay on the machine. Content
+        crosses the boundary only when the work itself calls an outside service.
       </p>
     </header>
-    <div class="home-boundary-grid">
+    <div class="boundary-grid">
+      <div class="boundary-zone boundary-local">
+        <h3>
+          <i aria-hidden="true"></i>
+          Stays on this machine
+        </h3>
+        <ul>
+          {
+            localItems.map((item) => (
+              <li>
+                {item.label}
+                <span>{item.detail}</span>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+      <div class="boundary-zone boundary-remote">
+        <h3>
+          <i aria-hidden="true"></i>
+          Crosses the network
+        </h3>
+        <ul>
+          {
+            remoteItems.map((item) => (
+              <li>
+                {item.label}
+                <span>{item.detail}</span>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </div>
+    <div class="boundary-facts">
       <article>
-        <h3>Stored credentials</h3>
+        <h3>Credentials</h3>
         <p>
-          Provider keys, MCP bearer tokens, and GitHub tokens use operating-system secure storage
-          where available.
+          Provider keys, MCP bearer tokens, and GitHub tokens use the operating system's secure
+          storage where available.
         </p>
       </article>
       <article>
-        <h3>Approval controls</h3>
+        <h3>Approvals</h3>
         <p>
-          Tool approval can gate mutating tools or every tool, while named tools can be
-          allowlisted. Browser navigation can also use an optional domain allowlist.
-        </p>
-      </article>
-      <article>
-        <h3>External requests</h3>
-        <p>
-          Configured providers, visited websites, GitHub, OpenAI or OpenRouter dictation, and remote
-          MCP servers receive the content required for the request made to them.
+          Tool approval can gate every tool, only mutating tools, or nothing, with named tools
+          allowlisted. Browser domains can be restricted to an allowlist.
         </p>
       </article>
       <article>
         <h3>Crash reporting</h3>
-        <p>
-          Crash and error sharing is opt-in and only available in builds configured for that
-          reporting path.
-        </p>
+        <p>Opt-in, and only present in builds configured for the reporting path.</p>
       </article>
     </div>
-    <a class="home-text-link" href="/docs/concepts/security">
-      Review security boundaries
+    <a class="text-link mt-6" href="/docs/concepts/security">
+      Review the security model
       <LandingIcon name="arrow-up-right" />
     </a>
   </section>
 
-  <section class="home-section home-docs-section wrap" aria-labelledby="docs-title">
+  <section class="home-section wrap" aria-labelledby="docs-title">
     <header class="home-section-heading">
-      <p class="home-eyebrow">07 / Documentation</p>
-      <h2 id="docs-title">Explore the product in detail.</h2>
-      <p>Follow the path that matches the decision or task in front of you.</p>
+      <p class="eyebrow"><strong>07</strong> Documentation</p>
+      <h2 id="docs-title">Docs for every step.</h2>
+      <p>
+        Start with an install and a first reviewed run, or go straight to the reference.
+      </p>
     </header>
     <nav aria-label="Product documentation">
       <ul class="home-docs-grid">

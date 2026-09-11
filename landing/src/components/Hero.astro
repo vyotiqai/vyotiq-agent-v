@@ -1,22 +1,30 @@
 ---
 import { SITE_PRODUCT } from '../lib/site'
+import { githubRelease } from '../lib/githubRelease'
 import ReleaseInstallers from './ReleaseInstallers.astro'
+import WorkspaceMock from './WorkspaceMock.astro'
+
+const version = githubRelease.version
+const platforms = 'Windows, macOS, Linux'
 ---
 
 <section id="overview" class="home-hero wrap" aria-labelledby="home-title">
-  <div class="home-hero-copy">
-    <p class="home-eyebrow">{SITE_PRODUCT}</p>
-    <h1 id="home-title">Understand, change, and review real repositories.</h1>
-    <p>
-      Open a local repository, pick a configured model, and keep the current run in one window.
-    </p>
-    <ReleaseInstallers />
+  <div class="hero-grid">
+    <div class="home-hero-copy">
+      <ul class="hero-meta" aria-label="Release facts">
+        {version ? <li>v{version}</li> : null}
+        <li>{platforms}</li>
+        <li>GPL-3.0</li>
+      </ul>
+      <h1 id="home-title">The coding workspace for real repositories.</h1>
+      <p>
+        {SITE_PRODUCT} runs a natural-language agent next to the tools real work needs:
+        <span class="hero-copy-strong">files, terminal, browser, Git, and pull requests</span> in
+        one window. You pick the model, your code stays on your machine, and every change waits
+        for your review.
+      </p>
+      <ReleaseInstallers />
+    </div>
+    <WorkspaceMock />
   </div>
 </section>
-
-<style>
-  .home-hero-copy > .home-eyebrow {
-    margin-top: 0;
-    margin-bottom: 1.25rem;
-  }
-</style>

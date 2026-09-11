@@ -45,7 +45,7 @@ alwaysApply: true
 
 Keep Node APIs out of the renderer.
 
-alwaysApply: true injects the body automatically, and an omitted value does too when the rule has no globs. Explicit alwaysApply: false rules are requestable only. Globs change this: when the run has a focused file, a rule auto-injects if that file matches the globs — even with alwaysApply: false — and stays requestable-only when no file is focused.
+alwaysApply: true injects the body automatically, and an omitted value does too when the rule has no globs. Explicit alwaysApply: false rules are requestable only. Globs change this: when the run has a focused file, a rule auto-injects if that file matches the globs, even with alwaysApply: false, and stays requestable-only when no file is focused.
 
 ## Create and verify
 

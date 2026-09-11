@@ -15,9 +15,9 @@ Memory is explicit Markdown under {workspace}/.vyotiq/memory/. It is not an embe
 
 ## Layout
 
-- index.md — short pointers to durable notes.
-- state.md — optional current state.
-- notes/<name>.md — named notes using letters, numbers, dot, underscore, or hyphen.
+- index.md: short pointers to durable notes.
+- state.md: optional current state.
+- notes/<name>.md: named notes using letters, numbers, dot, underscore, or hyphen.
 
 The memory root is required to remain inside the workspace. Path traversal, junction, or symlink escape is rejected.
 
@@ -38,7 +38,7 @@ A useful pattern is:
 ```md
 # Memory index
 
-- [release.md](notes/release.md) — verified packaging command and artifact rule
+- [release.md](notes/release.md): verified packaging command and artifact rule
 ```
 
 ## Version-control implications

@@ -1,6 +1,6 @@
 ---
 title: Built-in tools reference
-description: The built-in tool catalog — 59 current tools plus 2 legacy aliases, grouped by job with mode, approval, output, and limit boundaries.
+description: "The built-in tool catalog: 59 current tools plus 2 legacy aliases, grouped by job with mode, approval, output, and limit boundaries."
 section: reference
 order: 2
 type: reference
@@ -11,26 +11,26 @@ related:
   - customize/mcp
 ---
 
-Names are `TOOL_REGISTRY` keys. Ask/Plan hide mutating tools; see modes. MCP server tools are extra and Agent-only. `web_fetch` and `web_search` are legacy transcript bodies only — they are not in this list.
+Names are `TOOL_REGISTRY` keys. Ask/Plan hide mutating tools; see modes. MCP server tools are extra and Agent-only. `web_fetch` and `web_search` are legacy transcript bodies only: they are not in this list.
 
 Every call is schema-validated. Renderer transcripts can contain a preview while full output remains in run storage. `Tool approval` applies after mode filtering; a hidden or mode-denied tool cannot be enabled by an approval.
 
 ## Files
 
-- `read` — file or shallow directory listing under the workspace root (text). Windowless reads are capped at 2000 lines; zoom via startLine/endLine.
-- `edit` — create/overwrite with contents, or apply a unified diff
-- `list_dir` — one directory level with sizes
-- `str_replace` — replace exact text in one file
-- `delete` — delete a workspace file or directory (recursive for a non-empty directory)
-- `edit_notebook` — insert or uniquely replace one cell in a nbformat v4 .ipynb (no kernel)
-- `lsp` — language-server hover, completions, diagnostics, definition, or rename when a server is on PATH
+- `read`: file or shallow directory listing under the workspace root (text). Windowless reads are capped at 2000 lines; zoom via startLine/endLine.
+- `edit`: create/overwrite with contents, or apply a unified diff
+- `list_dir`: one directory level with sizes
+- `str_replace`: replace exact text in one file
+- `delete`: delete a workspace file or directory (recursive for a non-empty directory)
+- `edit_notebook`: insert or uniquely replace one cell in a nbformat v4 .ipynb (no kernel)
+- `lsp`: language-server hover, completions, diagnostics, definition, or rename when a server is on PATH
 
 ## Search
 
-- `search` — filename or content substring (first hit per file). Defaults to 40 hits; pass maxResults to widen.
-- `glob` — workspace-relative glob paths. Defaults to 100 paths; pass maxResults to widen.
-- `grep` — regex with matching lines. Defaults to 60 results; pass maxResults to widen.
-- `codebase_search` — semantic search over the local code index (not memory RAG)
+- `search`: filename or content substring (first hit per file). Defaults to 40 hits; pass maxResults to widen.
+- `glob`: workspace-relative glob paths. Defaults to 100 paths; pass maxResults to widen.
+- `grep`: regex with matching lines. Defaults to 60 results; pass maxResults to widen.
+- `codebase_search`: semantic search over the local code index (not memory RAG)
 
 ## Browser
 
@@ -56,19 +56,19 @@ Embedded agent browser. Page text is untrusted. After navigate/search/mutations,
 
 ## Terminal and diagnostics
 
-- `terminal` — shell command (builds/CLI, not file inspection)
-- `diagnostics` — typecheck or lint (configured command, package script, or tsc/eslint)
-- `run_tests` — workspace test script or an optional sandboxed command
+- `terminal`: shell command (builds/CLI, not file inspection)
+- `diagnostics`: typecheck or lint (configured command, package script, or tsc/eslint)
+- `run_tests`: workspace test script or an optional sandboxed command
 
 ## Git
 
 - `git_status`
 - `git_diff`
-- `git_commit` — Agent-only; optional push; stages files this run changed
-- `git_apply` — apply a unified diff with git apply
-- `github_pr_create` — Agent-only; gh pr create (draft default)
-- `github_pr_review` — Agent-only; approve / request-changes / comment
-- `github_issue` — Agent-only; list or create
+- `git_commit`: Agent-only; optional push; stages files this run changed
+- `git_apply`: apply a unified diff with git apply
+- `github_pr_create`: Agent-only; gh pr create (draft default)
+- `github_pr_review`: Agent-only; approve / request-changes / comment
+- `github_issue`: Agent-only; list or create
 
 ## Memory
 
@@ -80,7 +80,7 @@ See Memory files.
 
 ## Skill
 
-- `Skill` — load an enabled Marketplace skill (SKILL.md) or a plugin-rule id, or a relative file under a skill
+- `Skill`: load an enabled Marketplace skill (SKILL.md) or a plugin-rule id, or a relative file under a skill
 
 ## MCP meta
 
@@ -96,12 +96,12 @@ These are built-ins about connected servers, not the servers’ own tools.
 
 ## Questions, todos, modes
 
-- `ask_question` — typed form in the transcript; blocks until answer, skip, or timeout
-- `todo_write` — this run’s task list
-- `create_plan` — write plan.md and contract.md
-- `create_goal` — start or replace this chat’s long-lived goal
-- `update_goal` — mark the goal complete or resume it after a user pause
-- `switch_mode` — only present when Automatic mode switching is on
+- `ask_question`: typed form in the transcript; blocks until answer, skip, or timeout
+- `todo_write`: this run’s task list
+- `create_plan`: write plan.md and contract.md
+- `create_goal`: start or replace this chat’s long-lived goal
+- `update_goal`: mark the goal complete or resume it after a user pause
+- `switch_mode`: only present when Automatic mode switching is on
 
 ## Instances
 

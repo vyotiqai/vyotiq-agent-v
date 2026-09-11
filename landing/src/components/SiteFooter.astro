@@ -5,69 +5,85 @@ import { SITE_BRAND, SITE_PRODUCT } from '../lib/site'
 const year = new Date().getFullYear()
 const onDocs = Astro.url.pathname === '/docs' || Astro.url.pathname.startsWith('/docs/')
 const onDocsIndex = Astro.url.pathname === '/docs' || Astro.url.pathname === '/docs/'
+
+type FooterLink = {
+  label: string
+  href: string
+  external?: boolean
+  ariaCurrent?: 'page' | 'true'
+}
+
+const columns: { heading: string; links: FooterLink[] }[] = [
+  {
+    heading: 'Product',
+    links: [
+      { label: 'Download', href: '/#download' },
+      { label: 'Changelog', href: '/changelog' },
+      { label: 'Quickstart', href: '/docs/start/quickstart' },
+      { label: 'Modes', href: '/docs/agent/modes' }
+    ]
+  },
+  {
+    heading: 'Resources',
+    links: [
+      { label: 'Documentation', href: '/docs', ariaCurrent: onDocsIndex ? 'page' : onDocs ? 'true' : undefined },
+      { label: 'Keyboard shortcuts', href: '/docs/reference/shortcuts' },
+      { label: 'Security', href: '/docs/concepts/security' },
+      { label: 'Privacy and data', href: '/docs/concepts/privacy-data' }
+    ]
+  },
+  {
+    heading: 'Project',
+    links: [
+      { label: 'Source (GPL-3.0)', href: 'https://github.com/vyotiqai/vyotiq-agent-v', external: true },
+      { label: 'Releases', href: 'https://github.com/vyotiqai/vyotiq-agent-v-releases/releases', external: true },
+      { label: 'Report an issue', href: 'https://github.com/vyotiqai/vyotiq-agent-v/issues', external: true },
+      { label: 'support@vyotiq.com', href: 'mailto:support@vyotiq.com' }
+    ]
+  }
+]
 ---
 
-<footer class="border-t border-border">
-  <div class="wrap flex flex-wrap items-center justify-between gap-4 py-8 text-sm text-muted">
-    <p class="flex min-w-0 items-center gap-3">
-      <BrandLockup variant="mark" alt={SITE_BRAND} />
-      <span>© {year} {SITE_BRAND}</span>
-      <span>{SITE_PRODUCT}</span>
-    </p>
-    <nav class="flex flex-wrap items-center gap-x-5 gap-y-2" aria-label="Footer">
-      <a
-        class:list={[
-          'inline-flex min-h-11 min-w-11 items-center justify-center hover:text-fg',
-          onDocs && 'text-fg'
-        ]}
-        href="/docs"
-        aria-current={onDocsIndex ? 'page' : onDocs ? 'true' : undefined}
-      >
-        Docs
-      </a>
-      <a
-        class="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-fg"
-        href="/docs/agent/modes"
-      >
-        Modes
-      </a>
-      <a
-        class="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-fg"
-        href="/changelog"
-      >
-        Changelog
-      </a>
-      <a
-        class="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-fg"
-        href="/docs/concepts/security"
-      >
-        Security
-      </a>
-      <a
-        class="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-fg"
-        href="/docs/concepts/privacy-data"
-      >
-        Data &amp; privacy
-      </a>
-      <a
-        class="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-fg"
-        href="/privacy"
-      >
-        Website privacy
-      </a>
-      <a
-        class="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-fg"
-        href="/terms"
-      >
-        Terms
-      </a>
-      <a
-        class="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-fg"
-        href="https://github.com/vyotiqai/vyotiq-agent-v"
-        rel="noopener noreferrer"
-      >
-        Open source (GPL-3.0)
-      </a>
-    </nav>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="site-footer-grid">
+      <div class="site-footer-brand">
+        <BrandLockup />
+        <p>
+          {SITE_PRODUCT} is a free, open-source coding workspace for real repositories. Local
+          tools, your choice of model, every change reviewed.
+        </p>
+      </div>
+      {
+        columns.map((column) => (
+          <nav class="site-footer-col" aria-label={column.heading}>
+            <h3>{column.heading}</h3>
+            <ul>
+              {column.links.map((link) => (
+                <li>
+                  <a
+                    href={link.href}
+                    aria-current={'ariaCurrent' in link ? link.ariaCurrent : undefined}
+                    rel={'external' in link && link.external ? 'noopener noreferrer' : undefined}
+                  >
+                    {link.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        ))
+      }
+    </div>
+    <div class="site-footer-base">
+      <p>
+        © {year} {SITE_BRAND}
+        <span class="mono">· {SITE_PRODUCT} is GPL-3.0-or-later</span>
+      </p>
+      <nav class="flex flex-wrap items-center gap-x-4" aria-label="Legal">
+        <a class="hover:text-fg" href="/privacy">Privacy</a>
+        <a class="hover:text-fg" href="/terms">Terms</a>
+      </nav>
+    </div>
   </div>
 </footer>

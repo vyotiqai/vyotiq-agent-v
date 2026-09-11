@@ -43,4 +43,4 @@ The Agent Instance pane exposes child status in the parent transcript.
 
 Do not merge merely because a child stopped running. Confirm its done state and test evidence. A worktree merge can fail when the parent is dirty or branches conflict; resolve that state explicitly rather than bypassing it.
 
-The five instance tools—`spawn_agent_instance`, `await_agent_instance`, `pull_agent_instance`, `merge_agent_instance`, and `cancel_agent_instance`—are root-Agent-only.
+The five instance tools (`spawn_agent_instance`, `await_agent_instance`, `pull_agent_instance`, `merge_agent_instance`, and `cancel_agent_instance`) are root-Agent-only.

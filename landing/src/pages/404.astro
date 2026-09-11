@@ -14,8 +14,8 @@ import { SITE_PRODUCT } from '../lib/site'
   <SiteHeader />
   <main id="main-content" class="wrap flex items-center py-16 md:py-24" tabindex="-1">
     <div class="max-w-2xl">
-      <p class="font-headline text-xs uppercase tracking-[0.16em] text-muted">404</p>
-      <h1 class="mt-4 font-headline text-3xl leading-tight tracking-tight text-fg md:text-4xl">
+      <p class="error-page-code">404 / NO MATCH</p>
+      <h1 class="mt-4 text-4xl font-semibold tracking-tight text-fg md:text-5xl">
         Page not found
       </h1>
       <p class="mt-4 max-w-xl text-pretty text-base leading-relaxed text-muted">
@@ -27,12 +27,9 @@ import { SITE_PRODUCT } from '../lib/site'
           <LandingIcon name="house" />
           Home
         </a>
-        <a
-          class="inline-flex min-h-11 items-center text-sm font-medium text-fg underline decoration-border underline-offset-4 hover:decoration-fg"
-          href="/docs"
-        >
+        <a class="text-link" href="/docs">
           Browse docs
-          <LandingIcon name="arrow-up-right" class="ml-2" />
+          <LandingIcon name="arrow-up-right" />
         </a>
       </p>
     </div>

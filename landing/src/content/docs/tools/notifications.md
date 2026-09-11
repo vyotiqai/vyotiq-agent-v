@@ -23,8 +23,8 @@ Category switches are:
 
 - Agent run finished
 - Agent run failed
-- Agent needs you — approvals and questions
-- System alerts — crash recovery and other system events
+- Agent needs you: approvals and questions
+- System alerts: crash recovery and other system events
 
 The current defaults enable the master switch and all four categories.
 

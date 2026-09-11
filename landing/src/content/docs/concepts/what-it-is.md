@@ -16,7 +16,7 @@ The application and workspaces run on this machine. Model requests go to the act
 
 ## Product surfaces
 
-Three top-level views—chat, Settings, and Marketplace—organize the product. Chat includes workspace and chat navigation, a persisted transcript, the composer, and six dock panels: Files, Browser, Terminal, Changes, Pull Request, and Plan.
+Three top-level views organize the product: chat, Settings, and Marketplace. Chat includes workspace and chat navigation, a persisted transcript, the composer, and six dock panels: Files, Browser, Terminal, Changes, Pull Request, and Plan.
 
 Ask, Plan, and Agent are enforced interaction modes. The built-in tool catalog contains 61 tools, including Skill. Connected MCP servers can add separate Agent-only tools.
 

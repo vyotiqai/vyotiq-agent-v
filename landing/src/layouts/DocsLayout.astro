@@ -121,6 +121,7 @@ const structuredData = [
                 aria-current={currentSection === group.section ? 'page' : undefined}
               >
                 {group.label}
+                <span class="docs-nav-count">{group.entries.length}</span>
               </a>
               <ul>
                 {group.entries.map((entry) => {
@@ -295,6 +296,7 @@ const structuredData = [
     ></ul>
   </dialog>
   <script
+    is:inline
     type="application/json"
     id="docs-search-data"
     set:html={JSON.stringify(searchEntries satisfies DocsSearchEntry[])}

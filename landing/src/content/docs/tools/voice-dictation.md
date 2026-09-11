@@ -17,9 +17,9 @@ Dictation transcribes microphone audio into the composer. Configure it under [Se
 
 Dictation engine offers:
 
-- **OpenAI** — uses gpt-transcribe and the saved **OpenAI** key.
-- **OpenRouter** — uses gpt-transcribe through **OpenRouter** and its saved key.
-- **Local** — runs English Whisper inference on this machine.
+- **OpenAI**: uses gpt-transcribe and the saved **OpenAI** key.
+- **OpenRouter**: uses gpt-transcribe through **OpenRouter** and its saved key.
+- **Local**: runs English Whisper inference on this machine.
 
 The engine is read each time the microphone stops, so changing it does not require a restart. The mic does not inherently require an **OpenAI** key; its requirement follows the selected engine.
 
@@ -29,8 +29,8 @@ Waveform chooses the listening visualizer in the composer: Bars, Dots, Line, or 
 
 **Local** remains disabled until at least one model is installed:
 
-- Whisper Tiny — Fast, English, about 41 MB.
-- Whisper Small — Recommended, English, about 249 MB.
+- Whisper Tiny: Fast, English, about 41 MB.
+- Whisper Small: Recommended, English, about 249 MB.
 
 Use Install Whisper Tiny or Install Whisper Small. Installation does not switch Dictation engine to **Local** by itself.
 

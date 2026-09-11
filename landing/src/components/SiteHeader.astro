@@ -1,54 +1,57 @@
 ---
 import BrandLockup from './BrandLockup.astro'
 import LandingIcon from './LandingIcon.astro'
+import { githubRelease, RELEASES_PAGE } from '../lib/githubRelease'
 import { SITE_PRODUCT } from '../lib/site'
 
 const onDocs = Astro.url.pathname === '/docs' || Astro.url.pathname.startsWith('/docs/')
 const onDocsIndex = Astro.url.pathname === '/docs' || Astro.url.pathname === '/docs/'
+const onHome = Astro.url.pathname === '/' || Astro.url.pathname === ''
 
 const themeOptions = [
   { value: 'system', label: 'System', icon: 'monitor' },
   { value: 'light', label: 'Light', icon: 'sun' },
   { value: 'dark', label: 'Dark', icon: 'moon' }
 ] as const
+
+const { assets } = githubRelease
+const downloadHref = assets.win?.url ?? assets.macArm64?.url ?? assets.linux?.url ?? RELEASES_PAGE
 ---
 
-<header class="sticky top-0 z-40 border-b border-border/80 bg-bg/90 backdrop-blur-md">
-  <div class="wrap flex flex-wrap items-center justify-between gap-3 py-3">
+<header class="site-header">
+  <div class="wrap site-header-inner">
     <a href="/" class="flex min-h-11 items-center" aria-label={`${SITE_PRODUCT} home`}>
       <BrandLockup />
     </a>
 
-    <nav class="flex flex-wrap items-center gap-1 text-sm" aria-label="Primary">
-      <a class="inline-flex min-h-11 items-center px-3 text-muted hover:text-fg" href="/#overview">
-        Overview
-      </a>
-      <a class="inline-flex min-h-11 items-center px-3 text-muted hover:text-fg" href="/#capabilities">
-        Capabilities
-      </a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="/#overview" aria-current={onHome ? 'page' : undefined}>Overview</a>
+      <a href="/#capabilities">Capabilities</a>
+      <a href="/docs" aria-current={onDocsIndex ? 'page' : onDocs ? 'true' : undefined}>Docs</a>
+      <a href="/changelog">Changelog</a>
       <a
-        class:list={[
-          'inline-flex min-h-11 items-center px-3 hover:text-fg',
-          onDocs ? 'text-fg' : 'text-muted'
-        ]}
-        href="/docs"
-        aria-current={onDocsIndex ? 'page' : onDocs ? 'true' : undefined}
+        href="https://github.com/vyotiqai/vyotiq-agent-v"
+        rel="noopener noreferrer"
+        aria-label="Source on GitHub"
       >
-        Docs
+        <LandingIcon name="github" size={17} />
       </a>
+    </nav>
+
+    <div class="header-actions">
       <div class="relative" data-theme-root>
         <button
           type="button"
-          class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted hover:border-muted hover:text-fg"
+          class="theme-button"
           data-theme-toggle
           aria-label="Color theme"
           aria-haspopup="menu"
           aria-expanded="false"
           aria-controls="theme-menu"
         >
-          <span class="hidden" data-theme-icon="system"><LandingIcon name="monitor" size={18} /></span>
-          <span class="hidden" data-theme-icon="light"><LandingIcon name="sun" size={18} /></span>
-          <span class="hidden" data-theme-icon="dark"><LandingIcon name="moon" size={18} /></span>
+          <span class="hidden" data-theme-icon="system"><LandingIcon name="monitor" size={17} /></span>
+          <span class="hidden" data-theme-icon="light"><LandingIcon name="sun" size={17} /></span>
+          <span class="hidden" data-theme-icon="dark"><LandingIcon name="moon" size={17} /></span>
         </button>
         <div
           id="theme-menu"
@@ -56,31 +59,37 @@ const themeOptions = [
           aria-label="Color theme"
           hidden
           data-theme-menu
-          class="absolute right-0 top-full z-10 mt-2 w-44 rounded-lg border border-border bg-surface py-1 shadow-lg shadow-black/20"
+          class="theme-menu"
         >
           {
             themeOptions.map((option) => (
-              <button
-                type="button"
-                role="menuitemradio"
-                data-theme-option={option.value}
-                aria-checked="false"
-                class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-muted hover:bg-bg hover:text-fg"
-              >
-                <LandingIcon name={option.icon} size={16} />
+              <button type="button" role="menuitemradio" data-theme-option={option.value} aria-checked="false">
+                <LandingIcon name={option.icon} size={15} />
                 <span>{option.label}</span>
-                <span
-                  aria-hidden="true"
-                  data-theme-check
-                  class="ml-auto h-1.5 w-1.5 rounded-full bg-current opacity-0"
-                />
+                <span aria-hidden="true" class="theme-check">
+                  <LandingIcon name="check" size={13} />
+                </span>
               </button>
             ))
           }
         </div>
       </div>
-    </nav>
+      <a class="header-download" href={downloadHref} rel="noopener noreferrer">
+        <LandingIcon name="download" size={15} />
+        <span>Download</span>
+      </a>
+    </div>
   </div>
+  <script
+    is:inline
+    type="application/json"
+    data-release-assets
+    set:html={JSON.stringify({
+      win: assets.win?.url ?? null,
+      mac: (assets.macArm64 ?? assets.mac)?.url ?? null,
+      linux: assets.linux?.url ?? null
+    })}
+  />
 </header>
 
 <script>
@@ -125,11 +134,7 @@ const themeOptions = [
       icon.classList.toggle('hidden', name !== mode)
     }
     for (const option of options) {
-      const selected = option.dataset.themeOption === mode
-      option.setAttribute('aria-checked', String(selected))
-      option.classList.toggle('text-fg', selected)
-      option.classList.toggle('text-muted', !selected)
-      option.querySelector('[data-theme-check]')?.classList.toggle('opacity-100', selected)
+      option.setAttribute('aria-checked', String(option.dataset.themeOption === mode))
     }
     if (button) {
       button.setAttribute('aria-label', `Color theme: ${MODE_LABEL[mode]}`)
@@ -206,4 +211,24 @@ const themeOptions = [
   })
 
   apply()
+</script>
+
+<script is:inline>
+  // Point the header download at the current platform's installer when one
+  // exists in the baked release snapshot. Falls back to the releases page.
+  (function () {
+    var link = document.querySelector('a.header-download')
+    var data = document.querySelector('script[data-release-assets]')
+    if (!link || !data) return
+    var ua = navigator.userAgent
+    var platform = ''
+    if (/Windows NT/i.test(ua)) platform = 'win'
+    else if (!/Android/i.test(ua) && /Linux/i.test(ua)) platform = 'linux'
+    else if (/Mac OS X|Macintosh/i.test(ua)) platform = 'mac'
+    if (!platform) return
+    try {
+      var assets = JSON.parse(data.textContent || '{}')
+      if (assets[platform]) link.href = assets[platform]
+    } catch (error) {}
+  })()
 </script>

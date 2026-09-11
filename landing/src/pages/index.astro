@@ -2,8 +2,10 @@
 import BaseLayout from '../layouts/BaseLayout.astro'
 import FeatureGrid from '../components/FeatureGrid.astro'
 import Hero from '../components/Hero.astro'
+import LandingIcon from '../components/LandingIcon.astro'
 import SiteFooter from '../components/SiteFooter.astro'
 import SiteHeader from '../components/SiteHeader.astro'
+import { RELEASES_PAGE } from '../lib/githubRelease'
 ---
 
 <BaseLayout>
@@ -11,6 +13,29 @@ import SiteHeader from '../components/SiteHeader.astro'
   <main id="main-content" tabindex="-1">
     <Hero />
     <FeatureGrid />
+    <section class="home-cta">
+      <div class="wrap home-cta-inner">
+        <p class="eyebrow"><strong>→</strong> Get started</p>
+        <h2>Open a repository and put it to work.</h2>
+        <p>
+          Agent V is free and open source under GPL-3.0. Installers are published for Windows,
+          macOS, and Linux, and the app updates itself.
+        </p>
+        <div class="hero-ctas">
+          <a class="btn btn-primary" href={RELEASES_PAGE} rel="noopener noreferrer">
+            Download Agent V
+          </a>
+          <a
+            class="text-link"
+            href="https://github.com/vyotiqai/vyotiq-agent-v"
+            rel="noopener noreferrer"
+          >
+            Read the source
+            <LandingIcon name="arrow-up-right" />
+          </a>
+        </div>
+      </div>
+    </section>
   </main>
   <SiteFooter />
 </BaseLayout>

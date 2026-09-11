@@ -10,9 +10,9 @@ import { SITE_BRAND, SITE_PRODUCT } from '../lib/site'
   description="The terms that apply to the Agent V website and the open-source Agent V desktop application."
 >
   <SiteHeader />
-  <main id="main-content" class="wrap py-16 md:py-24" tabindex="-1">
+  <main id="main-content" class="wrap py-14 md:py-20" tabindex="-1">
     <article class="legal-page">
-      <p class="home-eyebrow">Legal</p>
+      <p class="eyebrow"><strong>§</strong> Legal</p>
       <h1>Terms of Service</h1>
       <p>
         These terms apply to the {SITE_BRAND} website and to your use of the {SITE_PRODUCT}
@@ -50,7 +50,7 @@ import { SITE_BRAND, SITE_PRODUCT } from '../lib/site'
       <h2>Your data</h2>
       <p>
         The application stores its data locally on your machine. The website stores a theme
-        preference and, when enabled, cookieless analytics — see
+        preference and, when enabled, cookieless analytics, see
         <a href="/privacy">Website privacy</a>. The application's data handling is documented
         in <a href="/docs/concepts/privacy-data">Privacy and data storage</a>.
       </p>
@@ -65,43 +65,3 @@ import { SITE_BRAND, SITE_PRODUCT } from '../lib/site'
   <SiteFooter />
 </BaseLayout>
 
-<style>
-  .legal-page {
-    max-width: 42rem;
-  }
-
-  .legal-page h1 {
-    margin: 1rem 0 0;
-    font-family: var(--font-headline);
-    font-size: clamp(2rem, 4vw, 2.75rem);
-    font-weight: 600;
-    letter-spacing: -0.04em;
-    line-height: 1.1;
-  }
-
-  .legal-page h2 {
-    margin: 2rem 0 0.75rem;
-    font-family: var(--font-headline);
-    font-size: 1.125rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-  }
-
-  .legal-page p {
-    margin: 1rem 0 0;
-    color: var(--muted);
-    font-size: 1rem;
-    line-height: 1.7;
-  }
-
-  .legal-page a {
-    color: var(--fg);
-    text-decoration: underline;
-    text-decoration-color: var(--border);
-    text-underline-offset: 0.2em;
-  }
-
-  .legal-page a:hover {
-    text-decoration-color: var(--fg);
-  }
-</style>

@@ -14,9 +14,9 @@ const analyticsHost = analytics ? new URL(analytics.src).host : null
   description="How the Agent V website stores a theme preference and when cookieless analytics is included in a build."
 >
   <SiteHeader />
-  <main id="main-content" class="wrap py-16 md:py-24" tabindex="-1">
+  <main id="main-content" class="wrap py-14 md:py-20" tabindex="-1">
     <article class="legal-page">
-      <p class="home-eyebrow">Website</p>
+      <p class="eyebrow"><strong>§</strong> Website</p>
       <h1>Website privacy</h1>
       <p>
         This page describes the public Agent V website. Product data stored by the Agent V
@@ -64,47 +64,3 @@ const analyticsHost = analytics ? new URL(analytics.src).host : null
   <SiteFooter />
 </BaseLayout>
 
-<style>
-  .legal-page {
-    max-width: 42rem;
-  }
-
-  .legal-page h1 {
-    margin: 1rem 0 0;
-    font-family: var(--font-headline);
-    font-size: clamp(2rem, 4vw, 2.75rem);
-    font-weight: 600;
-    letter-spacing: -0.04em;
-    line-height: 1.1;
-  }
-
-  .legal-page h2 {
-    margin: 2rem 0 0.75rem;
-    font-family: var(--font-headline);
-    font-size: 1.125rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-  }
-
-  .legal-page p {
-    margin: 1rem 0 0;
-    color: var(--muted);
-    font-size: 1rem;
-    line-height: 1.7;
-  }
-
-  .legal-page a {
-    color: var(--fg);
-    text-decoration: underline;
-    text-decoration-color: var(--border);
-    text-underline-offset: 0.2em;
-  }
-
-  .legal-page a:hover {
-    text-decoration-color: var(--fg);
-  }
-
-  .legal-page code {
-    font-size: 0.875em;
-  }
-</style>

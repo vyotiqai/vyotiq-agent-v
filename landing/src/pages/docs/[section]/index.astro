@@ -38,6 +38,7 @@ const intro = DOC_SECTION_INTRO[section]
       group.entries.map((entry) => (
         <li>
           <a href={docsHref(entry.id)}>{entry.data.title}</a>
+          <span>{entry.data.description}</span>
         </li>
       ))
     }

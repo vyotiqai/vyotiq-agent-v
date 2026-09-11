@@ -5,7 +5,7 @@ export { DOC_SECTIONS, type DocSection }
 
 export const DOC_SECTION_LABEL: Record<DocSection, string> = {
   start: 'Start here',
-  agent: 'Work with Agent',
+  agent: 'Working with the agent',
   customize: 'Customize',
   tools: 'Tools and panels',
   concepts: 'Concepts and security',
@@ -14,12 +14,12 @@ export const DOC_SECTION_LABEL: Record<DocSection, string> = {
 }
 
 export const DOC_SECTION_INTRO: Record<DocSection, string> = {
-  start: 'Install Agent V, tour the workspace, and complete your first useful run.',
-  agent: 'Choose a mode, manage sessions and runs, and work with plans, todos, goals, and checkpoints.',
-  customize: 'Configure providers, models, MCP servers, skills, rules, and packages.',
-  tools: 'Use the files editor, terminal, browser, Git surfaces, indexing, memory, and voice.',
-  concepts: 'Understand what Agent V is, how runs and state work, and how privacy and security apply.',
-  reference: 'Look up settings, shortcuts, tools, attachments, and storage paths.',
+  start: 'Install Agent V, connect a model, and finish a first useful run.',
+  agent: 'Modes, sessions, plans, todos, goals, and checkpoints: how a run is kept on track.',
+  customize: 'Providers, models, MCP servers, skills, rules, and packages.',
+  tools: 'The files editor, terminal, browser, Git surfaces, indexing, memory, and voice.',
+  concepts: 'What Agent V is, how runs and state work, and where privacy and security apply.',
+  reference: 'Settings, shortcuts, tools, attachments, and storage paths at a glance.',
   troubleshooting:
     'Recover from failed runs, provider issues, Marketplace and MCP problems, and Git or indexing errors.'
 }

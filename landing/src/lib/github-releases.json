@@ -1,5 +1,26 @@
 [
   {
+    "tag": "v1.2.1",
+    "version": "1.2.1",
+    "htmlUrl": "https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v1.2.1",
+    "publishedAt": "2026-09-11T13:46:23Z",
+    "body": "## Fixed\n\n- The v1.2.0 installers crashed at launch on every platform (\"A JavaScript error occurred in the main process: Cannot find module './encodingParams/o200k_harmony.js'\") — an over-aggressive packaging trim removed gpt-tokenizer files the app loads at startup\n- v1.2.0 installs cannot self-update (the app crashes before the update card runs) — install v1.2.1 manually from the website or GitHub Releases; v1.1.x installs update normally"
+  },
+  {
+    "tag": "v1.2.0",
+    "version": "1.2.0",
+    "htmlUrl": "https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v1.2.0",
+    "publishedAt": "2026-09-11T12:06:03Z",
+    "body": "> [!WARNING]\n> **v1.2.0 crashes at launch on every platform** (packaging bug). Do not install this version — use [v1.2.1](https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v1.2.1) instead.\n> Existing v1.2.0 installs cannot self-update (the app crashes before the update card appears) — uninstall and install v1.2.1 manually.\n\n## Added\n\n- The in-app update card now shows structured release notes (\"What's new\") for every release, pulled automatically from this changelog\n- The app periodically checks for updates every 6 hours while running, in addition to the startup check\n- \"Full release notes\" link on the update card opens the GitHub release page\n- Website changelog page listing recent releases with their changes\n- Website terms of service page\n- Agent V is now open source under GPL-3.0 — build it from source and contribute on GitHub\n\n## Changed\n\n- Release notes are now automatic: the GitHub release body is generated from this changelog at publish time, so the update card always shows the recent changes\n- Releases verify themselves after publishing — installers and updater metadata for Windows, macOS, and Linux must all be present — and the website redeploys automatically with fresh download buttons\n- Feedback and support contact moved to support@vyotiq.com"
+  },
+  {
+    "tag": "v1.1.4",
+    "version": "1.1.4",
+    "htmlUrl": "https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v1.1.4",
+    "publishedAt": "2026-09-10T04:51:24Z",
+    "body": "## Website\n\n- Per-platform download buttons restored on the landing page\n\n## Fixed\n\n- svgo build-tooling override for GHSA-w27v-7q3p-w38r (high severity)"
+  },
+  {
     "tag": "v1.1.3",
     "version": "1.1.3",
     "htmlUrl": "https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v1.1.3",

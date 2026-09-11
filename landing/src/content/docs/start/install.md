@@ -12,7 +12,7 @@ related:
 
 The Agent V homepage has download buttons for each installer on the latest GitHub Release at https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/latest. There is no app store listing.
 
-Installers and the Start-menu shortcut are named Vyotiq — Agent V is the assistant inside that app. Electron is the packager and runtime, not the product name.
+Installers and the Start-menu shortcut are named Vyotiq: Agent V is the assistant inside that app. Electron is the packager and runtime, not the product name.
 
 To run a local pnpm dev session, or pack an installer from this repository with electron-builder (`--publish never`), build from source.
 
@@ -20,7 +20,7 @@ To run a local pnpm dev session, or pack an installer from this repository with 
 
 You need pnpm, a folder you can use as a workspace, and at least one model provider you can configure after launch. Cloud providers require their own API key. Local Ollama and a private or loopback Custom OpenAI-compatible endpoint can be used without a key.
 
-Packaging does not write a cloud API key. New settings start on local Ollama with `qwen2.5` — see Quickstart for what that does and does not guarantee. Provider setup happens in [Settings → Providers](/docs/customize/providers).
+Packaging does not write a cloud API key. New settings start on local Ollama with `qwen2.5`; see Quickstart for what that does and does not guarantee. Provider setup happens in [Settings → Providers](/docs/customize/providers).
 
 From the repository root:
 
