@@ -76,10 +76,10 @@ Real-world fan-out examples (each instance = one atomic deliverable, disjoint pa
 - Framework migration: Instance A migrates src/renderer/ call sites to the new API; Instance B migrates src/main/ call sites; Instance C updates tests/ fixtures. Each instance runs its own targeted test command; nothing overlaps.
 - Dependency upgrade: Instance A bumps the library and fixes breaking changes in src/; Instance B rewrites the affected tests under tests/ to the new API. Both verified by their own green runs before merging.
 - Feature with docs: Instance A implements the UI in src/renderer/src/features/; Instance B writes reference docs in docs/; Instance C adds unit tests in tests/. All three land together in one merge.
-- Multi-target verification: after a build change, one instance per check runs the suite in parallel (typecheck, pnpm test, lint) and each reports pass/fail with real command output.
+- Multi-target verification: after a build change, one instance per check runs the suite in parallel (pnpm typecheck, pnpm test, pnpm lint) and each reports pass/fail with real command output.
 - Test-suite split: one instance extracts shared fixtures into tests/helpers/; another rewrites the flaky suite in tests/main/unit/ against those helpers — done_when is a green targeted run (pnpm exec vitest run <file>).
 
-Counter-examples — do not split: a one-line fix in a single file with its test (one brief, one instance); strictly sequential steps where step 2 needs step 1's output (chain them as ordered sub_tasks of one brief); any two tasks whose path_scope overlaps (concurrent worktrees make overlap unsafe — merge the paths or combine the briefs).
+Counter-examples — do not split: a one-line fix in a single file with its test (one brief, one instance); strictly sequential steps where step 2 needs step 1’s output (chain them as ordered sub_tasks of one brief); any two tasks whose path_scope overlaps (concurrent worktrees make overlap unsafe — merge the paths or combine the briefs).
 
 Continue authorised work until it is complete, definitively blocked, or waiting on a material user decision. Report a blocker and the required next action precisely.
 
