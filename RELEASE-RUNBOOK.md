@@ -126,6 +126,11 @@ that is hidden because `DEFAULT_NAVIGATION_MODE = 'home'`
 (`src/shared/ipc/schemas/settings.ts:146`). These are tracked and pre-existing — do not block a
 release on them, but confirm the failure set has not *grown*.
 
+**Launch the packaged app once before tagging** (the v1.2.0 incident): CI's build + smoke + e2e
+do not catch a runtime file missing from the asar. After `pnpm pack:dir:win`, start
+`dist-package/win-unpacked/Vyotiq.exe` and confirm the window opens (not an "Error" dialog) and
+`%APPDATA%\Vyotiq\logs\vyotiq.log` is created.
+
 CI (`.github/workflows/ci.yml`, name `CI`) gates on all three OSes (ubuntu/windows/macos):
 `pnpm typecheck`, `pnpm test:coverage`, `pnpm lint`, `pnpm build:vite`, `pnpm landing:build`,
 `pnpm landing:check` + `pnpm landing:audit` (Linux), `pnpm audit --audit-level high`, an unpacked
@@ -217,6 +222,7 @@ deploy ever fails at wrangler auth again, re-check both secrets, then re-run the
 | e | Working tree churn from `git restore .` / bulk revert | Concurrent sessions have in-flight work — a bulk revert destroys it. | Never bulk-revert. Stage explicit paths only: `git add package.json` etc. |
 | f | Landing deploy fails at wrangler auth | `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` repo secrets are empty. | Add both secrets (Settings → Secrets and variables → Actions), then `gh workflow run deploy-landing.yml`. |
 | g | Mac users on old versions never receive an update | `latest-mac.yml` missing from the release (macOS job failed — happened on v1.1.0). | Check all three `latest*.yml` assets after every release (§4). If missing, do not re-tag — fix the mac job on `main` and ship the next version. |
+| h | Packaged app shows "A JavaScript error occurred in the main process" on launch | An over-aggressive `files:`/node_modules trim in `electron-builder.yml` dropped runtime-required files (v1.2.0: the gpt-tokenizer encoding trim removed `encodingParams/o200k_harmony.js`, which `modelParams.js` statically requires — 982 files missing). | Keep trims to provably dead trees (sources/tests/build tools). Verify with a static require scan AND by launching the packaged app (§3). The dialog names the missing module — read it via `Get-Process Vyotiq | Select MainWindowTitle` + screenshot, then fix the trim and ship a new version. |
 
 ---
 

@@ -43,11 +43,12 @@ files:
   # codeindex/onnxGeneric.ts) runs in the Electron main process /
   # utilityProcess, where transformers.js resolves its onnxruntime-node backend.
   - '!**/node_modules/onnxruntime-web/**'
-  # gpt-tokenizer: src/ is TypeScript (cjs/esm are loaded at runtime), and only
-  # o200k_base + cl100k_base encodings are imported (agent/context/tokenizer.ts:2-3,
-  # tokenizer.worker.ts:6-7). Drop TS sources and every other encoding.
+  # gpt-tokenizer: only TypeScript src/ and tests are dead weight. Every other
+  # tree ships — modelParams.js statically requires ALL encodingParams/*.js
+  # (including o200k_harmony), and each encoding module pulls its bpeRanks data,
+  # so trimming "unused" encodings breaks startup with "Cannot find module
+  # ./encodingParams/o200k_harmony.js" (the v1.2.0 installer crash).
   - '!**/node_modules/gpt-tokenizer/{src,tests}/**'
-  - '!**/node_modules/gpt-tokenizer/**/{r50k_base,p50k_base,p50k_edit,o200k_harmony}*'
   # node-pty build-only sources (winpty/conpty sources; runtime loads
   # prebuilds/* via lib/utils.js, prebuild.js short-circuits node-gyp).
   - '!**/node_modules/node-pty/{third_party,deps,src}/**'

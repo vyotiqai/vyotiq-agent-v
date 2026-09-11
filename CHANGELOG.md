@@ -9,6 +9,13 @@ website changelog — a release must not ship without an entry here. Each
 release's `###` subsections (for example `### Added`, `### Fixed`) become the
 "About this update" sections users see.
 
+## [1.2.1] - 2026-09-11
+
+### Fixed
+
+- The v1.2.0 installers crashed at launch on every platform ("A JavaScript error occurred in the main process: Cannot find module './encodingParams/o200k_harmony.js'") — an over-aggressive packaging trim removed gpt-tokenizer files the app loads at startup
+- v1.2.0 installs cannot self-update (the app crashes before the update card runs) — install v1.2.1 manually from the website or GitHub Releases; v1.1.x installs update normally
+
 ## [1.2.0] - 2026-09-11
 
 ### Added
