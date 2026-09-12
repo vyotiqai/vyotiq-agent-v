@@ -103,12 +103,9 @@ beforeEach(() => {
       data: {
         settings: baseSettings.codeIndex,
         phase: 'idle' as const,
-        modelId: '',
-        embedder: 'mdenseon' as const,
         progress: null,
         message: null,
         error: null,
-        modelDir: null,
         indexProgress: null
       }
     })),
@@ -1150,13 +1147,8 @@ describe('settings', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: /^Indexing$/i }))
     expect(document.querySelector('[data-settings-field="codeindex-enabled"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="codeindex-embedder"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="codeindex-auto-download"]')).toBeTruthy()
     expect(document.querySelector('[data-settings-field="codeindex-status"]')).toBeTruthy()
     expect(document.querySelector('[data-settings-field="show-thinking"]')).toBeNull()
-    expect(document.querySelector('select')).toBeNull()
-    expect(screen.getByLabelText(/Codebase embedder/i)).toBeTruthy()
-    expect(screen.getByLabelText(/Auto-download embedder model/i)).toBeTruthy()
     expect(screen.getByRole('button', { name: /Reindex workspace/i })).toBeTruthy()
   })
 

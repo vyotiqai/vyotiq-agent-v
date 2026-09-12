@@ -10,7 +10,6 @@ vi.mock('@main/app/window', () => ({
 import { executeTool } from '@main/agent/tools'
 import { executeCreatePlan } from '@main/agent/tools/createPlan'
 import { canonicalizeAgentToolName, validateParsedToolArgs } from '@main/agent/schemas/tools'
-import { loopHintForConsecutiveToolFailures } from '@main/agent/loopPolicy'
 import { DEFAULT_PLAN_STUB } from '@shared/planStub'
 
 const SIMPLE_PLAN = [
@@ -206,13 +205,5 @@ describe('create_plan title-derivation validation and hints', () => {
   it('leaves title-less plans to the tool (schema no longer requires title)', () => {
     const result = validateParsedToolArgs('create_plan', { plan: SIMPLE_PLAN })
     expect(result.ok).toBe(true)
-  })
-
-  it('suggests the H1-first-line retry in the consecutive-failure loop hint', () => {
-    const hint = loopHintForConsecutiveToolFailures(2, {
-      tool: 'create_plan',
-      summary: 'create_plan requires title, or a plan whose first line is `# Title`.'
-    })
-    expect(hint).toContain('H1 first line')
   })
 })

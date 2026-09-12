@@ -792,17 +792,70 @@ function isRewoundCheckpoint(meta: WriteCheckpointMeta, fromUserMessageIndex: nu
   return fromUserMessageIndex === 0
 }
 
-/** Read-only preview of what rewindWritesFrom would restore; mutates nothing. */
-export function planRewindWrites(runDir: string, fromUserMessageIndex: number): RewindWritesPlan {
-  const index = loadIndex(runDir)
+/** Per-run checkpoint selection for a rewind that spans multiple runs. */
+export type RewindRunScope = {
+  runDir: string
+  /**
+   * 'anchored' keeps the parent-run rule (isRewoundCheckpoint against the
+   * rewind point); 'all' restores every checkpoint in the run — used for
+   * inline instance runs whose entire recorded work is being undone.
+   */
+  selection: 'anchored' | 'all'
+}
+
+type RewindEntry = {
+  runDir: string
+  meta: WriteCheckpointMeta
+  createdAtMs: number
+  scopeSeq: number
+  indexPos: number
+}
+
+function collectRewindEntries(
+  scopes: RewindRunScope[],
+  fromUserMessageIndex: number
+): RewindEntry[] {
+  const entries: RewindEntry[] = []
+  for (let scopeSeq = 0; scopeSeq < scopes.length; scopeSeq++) {
+    const scope = scopes[scopeSeq]!
+    const index = loadIndex(scope.runDir)
+    for (let indexPos = index.checkpoints.length - 1; indexPos >= 0; indexPos--) {
+      const entry = index.checkpoints[indexPos]!
+      const meta = loadMeta(scope.runDir, entry.id)
+      if (!meta) continue
+      if (scope.selection === 'anchored' && !isRewoundCheckpoint(meta, fromUserMessageIndex)) {
+        continue
+      }
+      const ts = Date.parse(meta.createdAt)
+      entries.push({
+        runDir: scope.runDir,
+        meta,
+        createdAtMs: Number.isFinite(ts) ? ts : 0,
+        scopeSeq,
+        indexPos
+      })
+    }
+  }
+  // Restore the newest action first: each restore's post-write hash guard
+  // expects exactly the content produced by the next-newer undone write, so
+  // strict reverse-chronological order keeps the guard chain verifiable even
+  // when a parent run and its inline instances touched the same files.
+  entries.sort(
+    (a, b) => b.createdAtMs - a.createdAtMs || a.scopeSeq - b.scopeSeq || b.indexPos - a.indexPos
+  )
+  return entries
+}
+
+/** Read-only preview of what rewindWritesFromScopes would restore; mutates nothing. */
+export function planRewindWritesAcrossRuns(
+  scopes: RewindRunScope[],
+  fromUserMessageIndex: number
+): RewindWritesPlan {
   const checkpointIds: string[] = []
   const byPath = new Map<string, RewindWritesPlanFile>()
-  for (let i = index.checkpoints.length - 1; i >= 0; i--) {
-    const entry = index.checkpoints[i]!
-    const meta = loadMeta(runDir, entry.id)
-    if (!meta || !isRewoundCheckpoint(meta, fromUserMessageIndex)) continue
-    checkpointIds.push(meta.id)
-    for (const file of meta.files) {
+  for (const entry of collectRewindEntries(scopes, fromUserMessageIndex)) {
+    checkpointIds.push(entry.meta.id)
+    for (const file of entry.meta.files) {
       // Newest checkpoint wins per path; older checkpoints never overwrite it.
       if (!byPath.has(file.path)) {
         byPath.set(file.path, {
@@ -820,34 +873,30 @@ export function planRewindWrites(runDir: string, fromUserMessageIndex: number): 
 }
 
 /**
- * Force-restore every write checkpoint whose anchor is at or after
- * `fromUserMessageIndex` (newest first). Ignores UI Keep/Discard and prior
- * undone flags so edit-and-resend can rewind multi-turn history.
+ * Force-restore every selected write checkpoint (newest first). Selection is
+ * per scope: parent runs filter by the rewind anchor, inline instance runs are
+ * included whole. Ignores UI Keep/Discard and prior undone flags so
+ * edit-and-resend can rewind multi-turn history.
  *
  * Checkpoints without `anchorUserMessageIndex` (legacy runs) are only restored
  * when rewinding to the start of the transcript (`fromUserMessageIndex === 0`).
  * Including them on a mid-history rewind would undo earlier-turn writes.
  */
-export function rewindWritesFrom(
-  runDir: string,
+export function rewindWritesFromScopes(
   workspaceRoot: string,
+  scopes: RewindRunScope[],
   fromUserMessageIndex: number
 ): RewindWritesResult {
-  discardWriteCheckpoint(runDir)
-  const index = loadIndex(runDir)
+  for (const scope of scopes) discardWriteCheckpoint(scope.runDir)
   const checkpointIds: string[] = []
   const restored: string[] = []
   const skipped: string[] = []
   let undoableRestoreFailed = false
 
-  for (let i = index.checkpoints.length - 1; i >= 0; i--) {
-    const entry = index.checkpoints[i]!
-    const meta = loadMeta(runDir, entry.id)
-    if (!meta || !isRewoundCheckpoint(meta, fromUserMessageIndex)) continue
-
-    const checkpointDir = join(runDir, 'checkpoints', entry.id)
+  for (const entry of collectRewindEntries(scopes, fromUserMessageIndex)) {
+    const checkpointDir = join(entry.runDir, 'checkpoints', entry.meta.id)
     let hadIoFailure = false
-    for (const file of [...meta.files].reverse()) {
+    for (const file of [...entry.meta.files].reverse()) {
       const outcome = restoreOneFile(workspaceRoot, checkpointDir, file)
       if (outcome === 'restored') {
         file.resolved = 'discarded'
@@ -861,14 +910,32 @@ export function rewindWritesFrom(
     }
     if (hadIoFailure) {
       undoableRestoreFailed = true
-      saveMeta(runDir, meta)
+      saveMeta(entry.runDir, entry.meta)
     } else {
-      markCheckpointFullyResolved(runDir, meta)
+      markCheckpointFullyResolved(entry.runDir, entry.meta)
     }
-    checkpointIds.push(meta.id)
+    checkpointIds.push(entry.meta.id)
   }
 
   return { checkpointIds, restored, skipped, undoableRestoreFailed }
+}
+
+/** Single-run rewind (parent scope) — see rewindWritesFromScopes. */
+export function rewindWritesFrom(
+  runDir: string,
+  workspaceRoot: string,
+  fromUserMessageIndex: number
+): RewindWritesResult {
+  return rewindWritesFromScopes(
+    workspaceRoot,
+    [{ runDir, selection: 'anchored' }],
+    fromUserMessageIndex
+  )
+}
+
+/** Single-run preview (parent scope) — see planRewindWritesAcrossRuns. */
+export function planRewindWrites(runDir: string, fromUserMessageIndex: number): RewindWritesPlan {
+  return planRewindWritesAcrossRuns([{ runDir, selection: 'anchored' }], fromUserMessageIndex)
 }
 
 /** Test helper: clear all active sessions. */

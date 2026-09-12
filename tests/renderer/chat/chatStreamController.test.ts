@@ -30,6 +30,36 @@ describe('createChatStreamController', () => {
     expect(controller.collapsedTurnIndices).toEqual([])
   })
 
+  it('re-notifies agent mode when a stale dedup cache would swallow a live divergence', () => {
+    let liveMode: 'ask' | 'plan' | 'agent' = 'agent'
+    const onAgentModeChange = vi.fn((mode: 'ask' | 'plan' | 'agent') => {
+      liveMode = mode
+    })
+    const controller = createChatStreamController({
+      workspacePath: '/ws',
+      runId: 'r1',
+      getAgentMode: () => liveMode,
+      onAgentModeChange
+    })
+
+    // Prime the dedup cache with an event that matches live state: no notify.
+    controller.handleEvent({ type: 'mode_changed', runId: 'r1', mode: 'agent' })
+    expect(onAgentModeChange).not.toHaveBeenCalled()
+
+    // User picks plan locally while idle — UI state changes without an event.
+    liveMode = 'plan'
+
+    // Run later emits 'agent' (switch_mode): the stale cache still says
+    // 'agent', but live state says 'plan' — the notify must not be swallowed.
+    controller.handleEvent({ type: 'mode_changed', runId: 'r1', mode: 'agent' })
+    expect(onAgentModeChange).toHaveBeenCalledTimes(1)
+    expect(onAgentModeChange).toHaveBeenCalledWith('agent')
+
+    // Identical follow-up with live state already correct stays suppressed.
+    controller.handleEvent({ type: 'mode_changed', runId: 'r1', mode: 'agent' })
+    expect(onAgentModeChange).toHaveBeenCalledTimes(1)
+  })
+
   it('appends terminal_output_delta into a running terminal tool row', async () => {
     const controller = createChatStreamController({ workspacePath: '/ws', runId: 'r1' })
 

@@ -1,0 +1,120 @@
+---
+const steps = [
+  {
+    num: '01',
+    name: 'Plan',
+    text: 'You describe the task in plain language. The agent drafts a plan and waits for your approval before touching files.'
+  },
+  {
+    num: '02',
+    name: 'Work',
+    text: 'Once approved, it edits files, runs terminal commands, and checks your repository directly — no servers in the middle.'
+  },
+  {
+    num: '03',
+    name: 'Verify',
+    text: 'It runs your tests and diagnostics, then reports what passed and what failed as evidence, not a summary of intent.'
+  },
+  {
+    num: '04',
+    name: 'Keep',
+    text: 'Sessions and checkpoints preserve state, so you can review every change in Git or roll back to where you were.'
+  }
+]
+---
+
+<section class="how section" aria-labelledby="how-title">
+  <div class="wrap">
+    <p class="eyebrow mono"><strong>01</strong> — How a run works</p>
+    <h2 id="how-title" class="how-title">Four steps, all on your side of the glass.</h2>
+    <ol class="how-list">
+      {
+        steps.map((step) => (
+          <li class="how-step">
+            <span class="how-num mono" aria-hidden="true">
+              {step.num}
+            </span>
+            <div>
+              <h3 class="how-name">{step.name}</h3>
+              <p class="how-text">{step.text}</p>
+            </div>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+</section>
+
+<style>
+  .how-title {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(1.75rem, 3.2vw, 2.5rem);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    margin: 0 0 3rem;
+    max-width: 24ch;
+  }
+
+  .how-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 2.5rem;
+  }
+
+  .how-step {
+    background: var(--surface);
+    border: none;
+    border-radius: var(--radius-lg, 16px);
+    box-shadow: var(--shadow-card, 0 1px 2px rgb(2 8 23 / 0.3), 0 8px 24px rgb(2 8 23 / 0.25));
+    padding: 1.25rem;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.875rem;
+    align-items: start;
+    transition: transform var(--duration, 150ms) var(--ease, ease),
+      box-shadow var(--duration, 150ms) var(--ease, ease);
+  }
+
+  .how-step:hover {
+    transform: translateY(-1px);
+  }
+
+  .how-num {
+    color: var(--accent);
+    font-size: 0.8125rem;
+    letter-spacing: 0.08em;
+    line-height: 1.4;
+  }
+
+  .how-name {
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-size: 1rem;
+    margin: 0 0 0.5rem;
+  }
+
+  .how-text {
+    color: var(--muted);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    margin: 0;
+  }
+
+  @media (max-width: 900px) {
+    .how-list {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 560px) {
+    .how-list {
+      grid-template-columns: 1fr;
+      gap: 2rem;
+    }
+  }
+</style>

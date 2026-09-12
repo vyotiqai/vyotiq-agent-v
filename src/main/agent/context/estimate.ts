@@ -42,11 +42,25 @@ function countContentTokens(content: MessageContent, encoding: EncodingName): nu
   return n
 }
 
+export interface EstimateMessagesOptions {
+  /**
+   * Count reasoning replay fields (reasoningState / thinking) in the estimate.
+   * Defaults to true. Providers that strip prior-turn reasoning from the wire
+   * (they regenerate thinking from context instead of replaying it) must pass
+   * false: replay-only fields then inflate the wire estimate severalfold above
+   * the real request (observed 46k real -> 709k estimated) and fire compaction
+   * far too early.
+   */
+  countReasoningReplay?: boolean
+}
+
 export async function estimateMessagesTokensAsync(
   messages: ChatMessage[],
-  model?: ModelInfo
+  model?: ModelInfo,
+  options?: EstimateMessagesOptions
 ): Promise<number> {
   const encoding = encodingForModel(model)
+  const countReasoningReplay = options?.countReasoningReplay !== false
 
   // Prefix total cache: when the previously counted array's last message object is
   // still the last message and the array only grew, the prefix total is still valid
@@ -55,12 +69,13 @@ export async function estimateMessagesTokensAsync(
   // calls during a compaction step (same array -> instant hit). Assumes messages are
   // immutable per www: the existing WeakMap cache already relies on this.
   if (messages.length === 0) {
-    messagesTotalCache = { tail: null, length: 0, total: 0, encoding }
+    messagesTotalCache = { tail: null, length: 0, total: 0, encoding, replay: countReasoningReplay }
     return 0
   }
   if (
     messagesTotalCache &&
     messagesTotalCache.encoding === encoding &&
+    messagesTotalCache.replay === countReasoningReplay &&
     messages.length >= messagesTotalCache.length &&
     // Immutable messages: when the previously-counted tail is still at index
     // cache.length-1, the whole prefix [0, cache.length) is unchanged (it moved
@@ -69,9 +84,15 @@ export async function estimateMessagesTokensAsync(
   ) {
     let total = messagesTotalCache.total
     for (let i = messagesTotalCache.length; i < messages.length; i++) {
-      total += estimateOneMessageTokens(messages[i]!, encoding)
+      total += estimateOneMessageTokens(messages[i]!, encoding, countReasoningReplay)
     }
-    messagesTotalCache = { tail: messages[messages.length - 1], length: messages.length, total, encoding }
+    messagesTotalCache = {
+      tail: messages[messages.length - 1],
+      length: messages.length,
+      total,
+      encoding,
+      replay: countReasoningReplay
+    }
     return total
   }
 
@@ -82,7 +103,7 @@ export async function estimateMessagesTokensAsync(
 
   for (const message of messages) {
     const cached = messageTokenCache.get(message)
-    if (cached && cached.encoding === encoding) {
+    if (cached && cached.encoding === encoding && cached.replay === countReasoningReplay) {
       total += cached.tokens
       continue
     }
@@ -103,10 +124,16 @@ export async function estimateMessagesTokensAsync(
     }
     // Prefer reasoningState (wire replay) over UI thinking when both exist —
     // counting both double-counts the same reasoning and triggers compaction early.
-    if (message.reasoningState) {
-      texts.push({ text: JSON.stringify(message.reasoningState), encoding })
-    } else if (message.thinking) {
-      texts.push({ text: message.thinking, encoding })
+    // When the provider does not replay reasoning on the wire (it strips prior-turn
+    // reasoning and regenerates thinking from context), skip replay-only fields
+    // entirely: counting them inflates the wire estimate severalfold above the
+    // real request.
+    if (countReasoningReplay) {
+      if (message.reasoningState) {
+        texts.push({ text: JSON.stringify(message.reasoningState), encoding })
+      } else if (message.thinking) {
+        texts.push({ text: message.thinking, encoding })
+      }
     }
     if (message.toolCalls) {
       for (const toolCall of message.toolCalls) {
@@ -124,7 +151,8 @@ export async function estimateMessagesTokensAsync(
       tail: messages[messages.length - 1],
       length: messages.length,
       total,
-      encoding
+      encoding,
+      replay: countReasoningReplay
     }
     return total
   }
@@ -133,19 +161,23 @@ export async function estimateMessagesTokensAsync(
   for (const span of spans) {
     let n = span.images
     for (let i = span.start; i < span.end; i++) n += counts[i] ?? 0
-    messageTokenCache.set(span.message, { encoding, tokens: n })
+    messageTokenCache.set(span.message, { encoding, replay: countReasoningReplay, tokens: n })
     total += n
   }
   messagesTotalCache = {
     tail: messages[messages.length - 1]!,
     length: messages.length,
     total,
-    encoding
+    encoding,
+    replay: countReasoningReplay
   }
   return total
 }
 
-const messageTokenCache = new WeakMap<object, { encoding: EncodingName; tokens: number }>()
+const messageTokenCache = new WeakMap<
+  object,
+  { encoding: EncodingName; replay: boolean; tokens: number }
+>()
 
 /**
  * Tracks the last fully-counted messages array so a growing array only re-counts
@@ -156,17 +188,26 @@ let messagesTotalCache: {
   length: number
   total: number
   encoding: EncodingName
+  replay: boolean
 } | null = null
 
-function estimateOneMessageTokens(message: ChatMessage, encoding: EncodingName): number {
+function estimateOneMessageTokens(
+  message: ChatMessage,
+  encoding: EncodingName,
+  countReasoningReplay: boolean
+): number {
   const cached = messageTokenCache.get(message)
-  if (cached && cached.encoding === encoding) return cached.tokens
+  if (cached && cached.encoding === encoding && cached.replay === countReasoningReplay) {
+    return cached.tokens
+  }
 
   let n = countContentTokens(message.content, encoding)
-  if (message.reasoningState) {
-    n += countTextTokens(JSON.stringify(message.reasoningState), encoding)
-  } else if (message.thinking) {
-    n += countTextTokens(message.thinking, encoding)
+  if (countReasoningReplay) {
+    if (message.reasoningState) {
+      n += countTextTokens(JSON.stringify(message.reasoningState), encoding)
+    } else if (message.thinking) {
+      n += countTextTokens(message.thinking, encoding)
+    }
   }
   if (message.toolCalls) {
     for (const toolCall of message.toolCalls) {
@@ -178,7 +219,7 @@ function estimateOneMessageTokens(message: ChatMessage, encoding: EncodingName):
     // toolName is not in `content`; do not re-count content (already counted above).
     n += countTextTokens(message.toolName ?? '', encoding)
   }
-  messageTokenCache.set(message, { encoding, tokens: n })
+  messageTokenCache.set(message, { encoding, replay: countReasoningReplay, tokens: n })
   return n
 }
 
@@ -191,6 +232,12 @@ function estimateOneMessageTokens(message: ChatMessage, encoding: EncodingName):
  * size severalfold. When no provider figure exists (first step, or a provider
  * that reports no usage), fall back to the local estimate — safe over-triggers
  * only cost an occasional summarizer call, while under-triggers overflow.
+ *
+ * The provider figure survives run restarts: the durable loop checkpoint's
+ * usageTotals carry the last step's provider-reported input tokens, restored
+ * into providerInputTokens on resume (see loop.ts) so a resumed run does not
+ * fall back to the replay-inflated estimate before the first usage report
+ * arrives.
  */
 export function shouldTriggerAutoCompact(
   estimatedTokens: number,

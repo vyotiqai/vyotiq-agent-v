@@ -11,7 +11,7 @@ related:
   - reference/settings
 ---
 
-Dictation transcribes microphone audio into the composer. Configure it under [Settings → Voice](/docs/tools/voice-dictation).
+Dictation transcribes microphone audio into the composer. Configure the engine, waveform, and models in the app under Settings → Voice.
 
 ## Choose an engine
 
@@ -46,4 +46,4 @@ Always review names, code identifiers, paths, and commands. Transcription output
 
 **OpenAI** and **OpenRouter** receive the recorded audio for transcription. **Local** keeps inference on this machine after model download. **Local** model files are cached under app user data.
 
-For microphone, missing-key, download, load, or model errors, use Indexing and dictation issues.
+For microphone, missing-key, download, load, or model errors, see [Indexing and dictation issues](/docs/troubleshooting/indexing-dictation).

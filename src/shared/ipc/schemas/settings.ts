@@ -197,69 +197,36 @@ export const DEFAULT_TOOL_APPROVAL: ToolApprovalSettings = {
   mcpProtection: true
 }
 
-export const CodeIndexEmbedderSchema = z.enum(['mdenseon', 'lfm2', 'ollama', 'hash'])
-export type CodeIndexEmbedderSetting = z.infer<typeof CodeIndexEmbedderSchema>
-
 export const CodeIndexSettingsSchema = z.object({
-  enabled: z.boolean().default(true),
-  /**
-   * Default: LightOn dense ONNX — batched inference in the utilityProcess
-   * (~10× the throughput of sequential llama.cpp). LFM2.5-Embedding-350M
-   * resolves to local ONNX export → llama.cpp GGUF → DenseOn fallback.
-   */
-  embedder: CodeIndexEmbedderSchema.default('mdenseon'),
-  /** Download ONNX weights into userData on first use. */
-  autoDownload: z.boolean().default(true),
-  /** Ollama embedding model when embedder=ollama. */
-  ollamaModel: z.string().min(1).default('nomic-embed-text'),
-  /** Ollama model serving the LFM2.5-Embedding GGUF when embedder=lfm2 and no local ONNX. */
-  lfm2OllamaModel: z.string().min(1).default('hf.co/LiquidAI/LFM2.5-Embedding-350M-GGUF')
+  enabled: z.boolean().default(true)
 })
 export type CodeIndexSettings = z.infer<typeof CodeIndexSettingsSchema>
 
 export const DEFAULT_CODE_INDEX_SETTINGS: CodeIndexSettings = {
-  enabled: true,
-  embedder: 'mdenseon',
-  autoDownload: true,
-  ollamaModel: 'nomic-embed-text',
-  lfm2OllamaModel: 'hf.co/LiquidAI/LFM2.5-Embedding-350M-GGUF'
+  enabled: true
 }
 
-export const CodeIndexModelPhaseSchema = z.enum([
-  'idle',
-  'ready',
-  'downloading',
-  'loading',
-  'indexing',
-  'fallback_hash',
-  'error'
-])
+export const CodeIndexModelPhaseSchema = z.enum(['idle', 'ready', 'syncing', 'error'])
 export type CodeIndexModelPhase = z.infer<typeof CodeIndexModelPhaseSchema>
 
 export const CodeIndexSyncProgressSchema = z.object({
-  kind: z.enum(['code', 'sparse']),
-  stage: z.enum(['walking', 'scanning', 'embedding', 'reconciling', 'done']),
+  stage: z.enum(['walking', 'scanning', 'reconciling', 'done']),
   filesDone: z.number().int().nonnegative(),
   filesTotal: z.number().int().nonnegative(),
   indexed: z.number().int().nonnegative(),
   skipped: z.number().int().nonnegative(),
   removed: z.number().int().nonnegative(),
-  /** Chunks embedded so far in this sync (code index only). */
-  embedChunks: z.number().int().nonnegative(),
   currentPath: z.string().nullable()
 })
 export type CodeIndexSyncProgress = z.infer<typeof CodeIndexSyncProgressSchema>
 
 export const CodeIndexRuntimeStatusSchema = z.object({
   phase: CodeIndexModelPhaseSchema,
-  modelId: z.string(),
-  embedder: CodeIndexEmbedderSchema,
-  /** 0–1 overall fraction for the active phase (download or index sync). */
+  /** 0–1 overall fraction for the active phase (index sync). */
   progress: z.number().nullable(),
   message: z.string().nullable(),
   error: z.string().nullable(),
-  modelDir: z.string().nullable(),
-  /** Live file/embed counters while phase === 'indexing'. */
+  /** Live file counters while phase === 'syncing'. */
   indexProgress: CodeIndexSyncProgressSchema.nullable().default(null)
 })
 export type CodeIndexRuntimeStatus = z.infer<typeof CodeIndexRuntimeStatusSchema>
@@ -275,13 +242,7 @@ export const ProcessMetricsSnapshotSchema = z.object({
   at: z.string(),
   totalWorkingSetMb: z.number(),
   maxCpuPercent: z.number(),
-  byType: z.array(ProcessMetricsByTypeSchema),
-  embedUtility: z.object({
-    pid: z.number().nullable(),
-    sessionLoaded: z.boolean(),
-    rssMb: z.number().nullable(),
-    heapUsedMb: z.number().nullable()
-  })
+  byType: z.array(ProcessMetricsByTypeSchema)
 })
 export type ProcessMetricsSnapshot = z.infer<typeof ProcessMetricsSnapshotSchema>
 
@@ -504,13 +465,6 @@ export const SettingsSchema = z.object({
   /** Offline connectivity wait budget (autonomousMode gates wait_forever). */
   offlineWaitMode: OfflineWaitModeSchema.default('default'),
   /**
-   * Per-run budget guards, checked at each step boundary against cumulative
-   * provider-reported cost (USD) and total tokens (billed input + output).
-   * 0 disables each cap.
-   */
-  runSpendLimitUsd: z.number().min(0).default(0),
-  runTokenLimit: z.number().int().min(0).default(0),
-  /**
    * User-global rules injected as `<user_rules>` on every agent step.
    * Disabled rules are omitted. Workspace rules override these on conflict.
    */
@@ -574,8 +528,6 @@ export const DEFAULT_SETTINGS: Settings = {
   storage: DEFAULT_STORAGE_SETTINGS,
   storageSurfaceAcked: false,
   offlineWaitMode: 'default',
-  runSpendLimitUsd: 0,
-  runTokenLimit: 0,
   userRules: [],
   agentPersona: '',
   agentTone: '',

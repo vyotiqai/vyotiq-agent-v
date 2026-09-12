@@ -424,7 +424,6 @@ export async function collectStorageReport(): Promise<StorageReportResult> {
     traces,
     logs,
     dictationModels,
-    embedderModel,
     partitions,
     cache
   ] = await Promise.all([
@@ -433,7 +432,6 @@ export async function collectStorageReport(): Promise<StorageReportResult> {
     measureDir(join(root, 'traces')).catch(() => EMPTY_MEASURE),
     measureDir(join(root, 'logs')).catch(() => EMPTY_MEASURE),
     measureDir(join(root, 'dictation', 'models')).catch(() => EMPTY_MEASURE),
-    measureDir(join(root, 'codeindex', 'models')).catch(() => EMPTY_MEASURE),
     measureBrowserPartitions(),
     measureDir(join(root, 'Cache')).catch(() => EMPTY_MEASURE)
   ])
@@ -478,9 +476,8 @@ export async function collectStorageReport(): Promise<StorageReportResult> {
     worktreeBytes += wt.bytes
     worktreeFiles += wt.files
     const ci = await measureDir(join(workspacesRoot(), id, 'codeindex'))
-    const sg = await measureDir(join(workspacesRoot(), id, 'sparsegrep'))
-    indexBytes += ci.bytes + sg.bytes
-    indexFiles += ci.files + sg.files
+    indexBytes += ci.bytes
+    indexFiles += ci.files
   }
 
   const categories: StorageReportCategory[] = [
@@ -491,7 +488,6 @@ export async function collectStorageReport(): Promise<StorageReportResult> {
     categoryEntry('traces', 'Traces', traces, true),
     categoryEntry('logs', 'Logs', logs, true),
     categoryEntry('dictation-models', 'Dictation models', dictationModels, false),
-    categoryEntry('embedder-model', 'Embedder model', embedderModel, false),
     categoryEntry('browser-partitions', 'Browser partitions', partitions, false),
     categoryEntry('cache', 'Cache', cache, false)
   ]

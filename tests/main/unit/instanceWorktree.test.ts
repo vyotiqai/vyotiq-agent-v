@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { execFileSync } from 'child_process'
@@ -20,6 +20,7 @@ vi.mock('electron', () => ({
 
 import {
   addInstanceWorktree,
+  gitShowToFile,
   instanceWorktreePath,
   isInstanceWorktreeDir,
   mergeInstanceBranch,
@@ -187,6 +188,40 @@ describe.skipIf(!canGit)('instanceWorktree merge gate', () => {
 
     const result = await mergeInstanceBranch(repo, branch)
     expect(result.ok).toBe(true)
+  }, 30_000)
+
+  it('reports pre-merge head and every applied change after a merge', async () => {
+    initRepo()
+    writeFileSync(join(repo, 'del.txt'), 'gone\n', 'utf8')
+    git(repo, 'add', '.')
+    git(repo, '-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-m', 'seed')
+
+    const branch = `vyotiq/instance/run-changes-${process.pid}`
+    git(repo, 'checkout', '-b', branch)
+    mkdirSync(join(repo, 'src'), { recursive: true })
+    writeFileSync(join(repo, 'src', 'new.ts'), 'export const n = 1\n', 'utf8')
+    writeFileSync(join(repo, 'README.md'), 'instance edit\n', 'utf8')
+    rmSync(join(repo, 'del.txt'))
+    git(repo, 'add', '-A')
+    git(repo, '-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-m', 'work')
+    git(repo, 'checkout', 'main')
+
+    const result = await mergeInstanceBranch(repo, branch)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.preMergeHead).toMatch(/^[0-9a-f]{40,64}$/)
+    expect(result.changedFiles).toEqual(
+      expect.arrayContaining([
+        { path: 'src/new.ts', action: 'created' },
+        { path: 'README.md', action: 'modified' },
+        { path: 'del.txt', action: 'deleted' }
+      ])
+    )
+
+    const prior = await gitShowToFile(repo, result.preMergeHead, 'README.md')
+    expect(prior).not.toBeNull()
+    if (prior) expect(readFileSync(prior, 'utf8')).toBe('base\n')
+    expect(await gitShowToFile(repo, result.preMergeHead, 'src/new.ts')).toBeNull()
   }, 30_000)
 })
 

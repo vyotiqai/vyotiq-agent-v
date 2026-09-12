@@ -15,8 +15,6 @@ export function CodebaseSearchBody({ tool, loading, loadFailed, inGroup }: ToolB
         {!inGroup ? <Chip>{data.query}</Chip> : null}
         <span className="text-2xs tabular-nums text-tertiary">
           {data.hits.length} {data.hits.length === 1 ? 'hit' : 'hits'}
-          {data.modelId ? ` · ${data.modelId}` : ''}
-          {data.fallbackHash ? ' · hash' : ''}
         </span>
       </div>
       {tool.contentTruncated ? <TruncatedBanner loading={loading} failed={loadFailed} /> : null}

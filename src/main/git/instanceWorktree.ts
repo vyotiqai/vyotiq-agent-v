@@ -8,8 +8,10 @@ import {
   type Dirent,
   type Stats
 } from 'fs'
-import { chmod, lstat, readdir, readlink, rmdir, unlink } from 'fs/promises'
+import { chmod, lstat, readdir, readlink, rmdir, unlink, writeFile } from 'fs/promises'
 import { basename, join, resolve, sep } from 'path'
+import { tmpdir } from 'os'
+import { randomUUID } from 'crypto'
 import { promisify } from 'util'
 import { logger } from '../../shared/logger'
 import { canonicalizeWorkspacePath, workspacePathIsInside } from '../../shared/workspacePath'
@@ -1159,9 +1161,89 @@ export function isInstanceWorktreeFallbackError(error: string): boolean {
   )
 }
 
+export type MergedInstanceFileAction = 'created' | 'modified' | 'deleted'
+
+/** One workspace-relative file change a successful instance merge applied. */
+export type MergedInstanceFileChange = {
+  path: string
+  action: MergedInstanceFileAction
+}
+
 export type MergeInstanceBranchResult =
-  | { ok: true; detail: string }
+  | {
+      ok: true
+      detail: string
+      /** HEAD before the merge — prior content source for checkpoint capture. */
+      preMergeHead: string
+      changedFiles: MergedInstanceFileChange[]
+    }
   | { ok: false; error: string }
+
+/**
+ * File changes the merge applied, read as the pre-merge→post-merge diff.
+ * Empty on diff failure — the merge itself already succeeded, so the caller
+ * must not fail the tool; those changes are simply not checkpoint-revertable.
+ */
+async function mergedChangedFiles(
+  workspacePath: string,
+  preMergeHead: string
+): Promise<MergedInstanceFileChange[]> {
+  try {
+    const out = await git(
+      ['diff', '--name-status', '--no-renames', '-z', preMergeHead, 'HEAD'],
+      workspacePath,
+      WRITE_TIMEOUT_MS
+    )
+    const parts = out.split('\0')
+    const changes: MergedInstanceFileChange[] = []
+    for (let i = 0; i + 1 < parts.length; i += 2) {
+      const status = parts[i]!.trim()
+      const path = parts[i + 1]!.trim()
+      if (status === 'A') changes.push({ path, action: 'created' })
+      else if (status === 'M') changes.push({ path, action: 'modified' })
+      else if (status === 'D') changes.push({ path, action: 'deleted' })
+    }
+    return changes
+  } catch (err) {
+    logger.warn('post-merge change list failed; merged changes are not checkpoint-revertable', {
+      scope: 'git',
+      workspacePath,
+      err
+    })
+    return []
+  }
+}
+
+/**
+ * Write the content `relPath` had at `ref` to a temp file so a checkpoint can
+ * snapshot prior content. Returns null when the path is absent at `ref` or the
+ * extraction fails — callers record those paths as non-undoable instead.
+ */
+export async function gitShowToFile(
+  workspacePath: string,
+  ref: string,
+  relPath: string
+): Promise<string | null> {
+  try {
+    const out = await execFile(
+      'git',
+      ['show', `${ref}:${relPath}`],
+      {
+        cwd: workspacePath,
+        encoding: 'buffer',
+        timeout: READ_TIMEOUT_MS,
+        maxBuffer: MAX_BUFFER,
+        windowsHide: true,
+        env: GIT_ENV
+      }
+    )
+    const tmp = join(tmpdir(), `vyotiq-merge-prior-${process.pid}-${randomUUID()}`)
+    await writeFile(tmp, out.stdout as Buffer)
+    return tmp
+  } catch {
+    return null
+  }
+}
 
 /**
  * Sequential merge-back: merge one instance branch into the parent HEAD.
@@ -1190,6 +1272,16 @@ async function mergeInstanceBranchUnlocked(
   if (!trimmed) return { ok: false, error: 'branch is required' }
   if (!isSafeInstanceBranch(trimmed)) {
     return { ok: false, error: 'branch is not a valid instance worktree branch' }
+  }
+
+  let preMergeHead: string
+  try {
+    preMergeHead = (await git(['rev-parse', 'HEAD'], workspacePath, READ_TIMEOUT_MS)).trim()
+  } catch {
+    return { ok: false, error: 'Repository has no HEAD commit; cannot merge instance branch' }
+  }
+  if (!preMergeHead) {
+    return { ok: false, error: 'Repository has no HEAD commit; cannot merge instance branch' }
   }
 
   try {
@@ -1239,5 +1331,10 @@ async function mergeInstanceBranchUnlocked(
     // Branch may still be checked out elsewhere — leave it.
   }
 
-  return { ok: true, detail: `Merged ${trimmed} into HEAD` }
+  return {
+    ok: true,
+    detail: `Merged ${trimmed} into HEAD`,
+    preMergeHead,
+    changedFiles: await mergedChangedFiles(workspacePath, preMergeHead)
+  }
 }

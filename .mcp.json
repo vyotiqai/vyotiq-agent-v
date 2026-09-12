@@ -1,12 +1,3 @@
 {
-  "mcpServers": {
-    "context-engine": {
-      "command": "cce",
-      "args": [
-        "serve",
-        "--project-dir",
-        "."
-      ]
-    }
-  }
+  "mcpServers": {}
 }

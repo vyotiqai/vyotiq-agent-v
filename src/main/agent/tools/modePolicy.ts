@@ -283,6 +283,20 @@ export function assertToolAllowedInMode(
     }
   }
 
+  if (name === 'browser_tabs' && args.action === 'close') {
+    return {
+      ok: false,
+      error: `${mode === 'ask' ? 'Ask' : 'Plan'} mode does not allow browser_tabs close. ${switchToAgentHint}`
+    }
+  }
+
+  if (mode === 'plan' && name === 'update_goal' && args.status === 'complete') {
+    return {
+      ok: false,
+      error: `Plan mode does not allow update_goal "complete". ${switchToAgentHint}`
+    }
+  }
+
   if (mode === 'plan' && (name === 'edit' || name === 'str_replace')) {
     const path = typeof args.path === 'string' ? args.path : ''
     if (!isPlanArtifactPath(path)) {

@@ -700,23 +700,29 @@ describe('runAgent partial persistence', () => {
     expect(messages).toContain('streamed before the failure')
   })
 
-  it('emits PROVIDER_STREAM when a retriable thrown stream error exhausts attempts', async () => {
+  it('recovers from a retriable thrown stream error (no exhaustion stop)', async () => {
     const { RetriableStreamError } = await import('@main/agent/providers/fetchWithRetry')
+    let attempt = 0
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      attempt += 1
       yield { type: 'text', text: 'partial before disconnect' }
-      throw new RetriableStreamError('stream ended')
+      if (attempt === 1) throw new RetriableStreamError('stream ended')
+      yield { type: 'done', stopReason: 'stop' }
     })
 
-    const events = await collect('thrown-stream-exhausted', workspace)
+    const events = await collect('thrown-stream-recovered', workspace)
 
-    expect(events.some((e) => e.type === 'error' && e.code === 'PROVIDER_STREAM')).toBe(true)
-    expect(events.some((e) => e.type === 'error' && e.code === 'AGENT_LOOP')).toBe(false)
-    expect(events.some((e) => e.type === 'status' && e.status === 'error')).toBe(true)
-    expect(
-      events.some(
-        (e) => e.type === 'incomplete' && e.reason === 'network_interrupted'
-      )
-    ).toBe(true)
+    // No attempt ceiling (cap removed): the retriable throw retries until the
+    // stream recovers instead of ending the run.
+    expect(attempt).toBe(2)
+    expect(events.some((e) => e.type === 'status' && e.status === 'done')).toBe(true)
+    expect(events.some((e) => e.type === 'incomplete')).toBe(false)
+
+    const messages = readFileSync(
+      join(resolveRunDir(workspace, 'thrown-stream-recovered'), 'messages.jsonl'),
+      'utf8'
+    )
+    expect(messages).toContain('partial before disconnect')
   })
 
   it('retries a PROVIDER_NETWORK error chunk once and finishes the step', async () => {
@@ -742,32 +748,31 @@ describe('runAgent partial persistence', () => {
     expect(events.some((e) => e.type === 'incomplete')).toBe(false)
   })
 
-  it('stops resumable after PROVIDER_NETWORK exhausts retries and keeps queued follow-ups on disk', async () => {
-    const runId = 'network-chunk-exhausted'
+  it('keeps queued follow-ups on disk through a retried network outage', async () => {
+    const runId = 'network-chunk-recovered'
     let calls = 0
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
       calls += 1
       if (calls === 1) {
         const queued = enqueueFollowUp(runId, { role: 'user', content: 'queued before outage' })
         expect(queued.ok).toBe(true)
+        yield {
+          type: 'error',
+          error: 'Connect timed out waiting for response headers after 30000ms',
+          errorCode: 'PROVIDER_NETWORK'
+        }
+        return
       }
-      yield {
-        type: 'error',
-        error: 'Connect timed out waiting for response headers after 30000ms',
-        errorCode: 'PROVIDER_NETWORK'
-      }
+      // No attempt ceiling (cap removed): the outage retries until recovery.
+      yield { type: 'text', text: 'recovered after reconnect' }
+      yield { type: 'done', stopReason: 'stop' }
     })
 
     const events = await collect(runId, workspace)
 
-    expect(
-      events.some((e) => e.type === 'incomplete' && e.reason === 'network_interrupted')
-    ).toBe(true)
     expect(events.some((e) => e.type === 'follow_up_dropped')).toBe(false)
-    expect(events.some((e) => e.type === 'status' && e.status === 'error')).toBe(true)
-
-    const followUps = readFileSync(join(resolveRunDir(workspace, runId), 'followups.json'), 'utf8')
-    expect(followUps).toContain('queued before outage')
+    expect(events.some((e) => e.type === 'status' && e.status === 'done')).toBe(true)
+    expect(events.some((e) => e.type === 'incomplete')).toBe(false)
   })
 
   it('emits stream_reset so the UI drops output from a retried attempt', async () => {
@@ -826,44 +831,48 @@ describe('runAgent partial persistence', () => {
     expect(resetIdx).toBeGreaterThan(deltaIdx)
   })
 
-  it('stops TERMINALLY with QUOTA_EXHAUSTED when a usage-limit chunk precedes the circuit chunk', async () => {
+  it('retries a usage-limit 429 until recovery (no exhaustion stop)', async () => {
     const runId = 'quota-chunk-then-circuit'
+    let calls = 0
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
-      // Wire shape from run 6265fa90: PROVIDER_HTTP 429 with the quota body,
-      // retried once at the stream layer, then the circuit chunk goes terminal.
-      yield {
-        type: 'error',
-        error:
-          'Weekly usage limit reached. Resets in 6 days. To continue using this model now, enable usage from your available balance.',
-        errorCode: 'PROVIDER_HTTP',
-        httpStatus: 429
+      calls += 1
+      // Wire shape from run 6265fa90: PROVIDER_HTTP 429 with the quota body.
+      // Quota errors are no longer a terminal class, and the attempt ceiling
+      // is gone (run-stopping caps removed): the 429 retries until the
+      // stream recovers instead of ending the run.
+      if (calls === 1) {
+        yield {
+          type: 'error',
+          error:
+            'Weekly usage limit reached. Resets in 6 days. To continue using this model now, enable usage from your available balance.',
+          errorCode: 'PROVIDER_HTTP',
+          httpStatus: 429
+        }
+        return
       }
-      yield {
-        type: 'error',
-        error: 'Circuit open for http:opencode.ai; retry in 58s',
-        errorCode: 'CIRCUIT_OPEN'
-      }
+      yield { type: 'text', text: 'recovered after quota window' }
+      yield { type: 'done', stopReason: 'stop' }
     })
 
     const events = await collect(runId, workspace)
 
+    expect(calls).toBe(2)
     expect(
       events.some((e) => e.type === 'error' && e.code === 'QUOTA_EXHAUSTED')
-    ).toBe(true)
-    expect(events.some((e) => e.type === 'status' && e.status === 'error')).toBe(true)
+    ).toBe(false)
     expect(events.some((e) => e.type === 'incomplete')).toBe(false)
+    expect(events.some((e) => e.type === 'status' && e.status === 'done')).toBe(true)
 
     const statusFile = readFileSync(
       join(resolveRunDir(workspace, runId), 'status.json'),
       'utf8'
     )
-    const status = JSON.parse(statusFile) as { resumable?: boolean; error?: string }
-    expect(status.resumable).toBeUndefined()
-    expect(status.error).toContain('quota exhausted')
-    expect(status.error).toContain('resets in 6 days')
+    const status = JSON.parse(statusFile) as { status?: string; error?: string }
+    expect(status.status).toBe('done')
+    expect(status.error ?? '').not.toContain('Weekly usage limit reached')
   })
 
-  it('stops TERMINALLY with QUOTA_EXHAUSTED when the exhausted class carries a quota message', async () => {
+  it('stops resumably when the exhausted class carries a quota message', async () => {
     const runId = 'quota-exhausted-class'
     let calls = 0
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
@@ -884,8 +893,12 @@ describe('runAgent partial persistence', () => {
 
     expect(
       events.some((e) => e.type === 'error' && e.code === 'QUOTA_EXHAUSTED')
+    ).toBe(false)
+    // circuit_open stop path removed: a circuit-shaped stream error now
+    // surfaces as the resumable network-interrupted class instead.
+    expect(
+      events.some((e) => e.type === 'incomplete' && e.reason === 'network_interrupted')
     ).toBe(true)
-    expect(events.some((e) => e.type === 'incomplete')).toBe(false)
     expect(calls).toBeGreaterThanOrEqual(1)
   })
 })

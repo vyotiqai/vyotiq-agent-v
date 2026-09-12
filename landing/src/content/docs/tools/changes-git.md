@@ -43,4 +43,4 @@ Before a commit, inspect both staged and unstaged changes. Do not include secret
 
 ## Remote work
 
-A local commit does not create a pull request. Use the Pull Request panel or explicit GitHub CLI workflow after confirming branch, remote, authentication, and commit state. For missing repository, identity, remote, or GitHub errors, use Git and pull-request issues.
+A local commit does not create a pull request. Use the Pull Request panel or an explicit GitHub CLI workflow after confirming branch, remote, authentication, and commit state. For missing repository, identity, remote, or GitHub errors, see [Git and pull-request issues](/docs/troubleshooting/git-pull-requests).

@@ -1,5 +1,3 @@
-import { logger } from '../../shared/logger'
-
 export type CircuitState = 'closed' | 'open' | 'half_open'
 
 export type CircuitPolicy = {
@@ -88,10 +86,6 @@ export function circuitKeyMcpInvoke(sessionKey: string): string {
   return `mcp-invoke:${sessionKey}`
 }
 
-export function circuitKeyEmbedUtility(): string {
-  return 'utility:codeindex-embed'
-}
-
 type Breaker = {
   state: CircuitState
   consecutiveFailures: number
@@ -175,36 +169,15 @@ export function releaseCircuitProbe(key: string): void {
   breaker.halfOpenProbes = Math.max(0, breaker.halfOpenProbes - 1)
 }
 
-export function recordCircuitFailure(key: string, policy?: CircuitPolicy): void {
-  const breaker = getOrCreate(key, policy)
-  const at = now()
-  if (breaker.state === 'half_open') {
-    openBreaker(key, breaker, at)
-    return
-  }
+/**
+ * Record a failure for diagnostics only. Run-stopping caps removed (user
+ * decision): the breaker never opens, so a failure streak can never open a
+ * circuit and stop/pause a run — callers retry until the provider recovers
+ * or the user stops the run. `policy` is kept for call-site compatibility.
+ */
+export function recordCircuitFailure(key: string, _policy?: CircuitPolicy): void {
+  const breaker = getOrCreate(key)
   breaker.consecutiveFailures += 1
-  if (breaker.consecutiveFailures >= breaker.policy.failureThreshold) {
-    openBreaker(key, breaker, at)
-  }
-}
-
-function openBreaker(key: string, breaker: Breaker, at: number): void {
-  const alreadyOpen = breaker.state === 'open'
-  breaker.state = 'open'
-  breaker.openedAt = at
-  breaker.halfOpenProbes = 0
-  breaker.consecutiveFailures = Math.max(
-    breaker.consecutiveFailures,
-    breaker.policy.failureThreshold
-  )
-  if (alreadyOpen) return
-  logger.warn('Circuit opened', {
-    scope: 'agent',
-    code: 'CIRCUIT_OPEN',
-    circuitKey: key,
-    retryAfterMs: breaker.policy.openMs,
-    kind: 'open'
-  })
 }
 
 export function resetCircuit(key: string): void {

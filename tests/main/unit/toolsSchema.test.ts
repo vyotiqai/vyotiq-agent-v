@@ -133,8 +133,8 @@ describe('toolsSchema', () => {
     ).properties
     expect(props.query?.description).toMatch(/camelCase/i)
     expect(props.query?.description).not.toMatch(/use grep for every exact symbol occurrence/i)
-    expect(props.mode?.description).toMatch(/lexical/i)
-    expect(props.mode?.description).toMatch(/symbol/i)
+    // The mode parameter is gone — the search is honestly lexical now.
+    expect(props.mode).toBeUndefined()
   })
 
   it('owns browser @eN freshness and ask_question stacking in tool schemas', () => {

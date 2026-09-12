@@ -6,11 +6,6 @@ import { getHeapSpaceStatistics, getHeapStatistics } from 'node:v8'
 import { isPerfDebugEnabled } from '../agent/context/perfDebug'
 import { HEAP_PRESSURE_RATIO } from './heapPressure'
 import { getTokenizerPerfStats } from '../agent/context/tokenizer'
-import {
-  getEmbedUtilityPerfStats,
-  refreshEmbedUtilityPerfStatsBestEffort,
-  type EmbedUtilityPerfStats
-} from '../agent/codeindex/embedUtilityClient'
 import { listActiveRuns, getRejectedRunStarts } from '../agent/runRegistry'
 import { getStatusWriteQueueStats } from '../agent/statusWriteQueue'
 import {
@@ -40,9 +35,6 @@ export type LoadSnapshot = {
   eventLoopLagP99: number
   heapUsedMb: number
   rssMb: number
-  /** Combined main RSS + last-known utility RSS (when available). */
-  combinedRssMb: number
-  utility: EmbedUtilityPerfStats
   chat: ReturnType<typeof getChatEventBatchStats>
   dispatcher: ReturnType<typeof getChatEventDispatcherSnapshot>
   statusWrites: ReturnType<typeof getStatusWriteQueueStats>
@@ -75,8 +67,6 @@ export function collectLoadSnapshot(): LoadSnapshot {
   const ws = getWorkspaces()
   const mem = process.memoryUsage()
   const rssMb = Math.round(mem.rss / 1024 / 1024)
-  const utility = getEmbedUtilityPerfStats()
-  const utilityRss = utility.rssMb ?? 0
   return {
     at: new Date().toISOString(),
     activeRuns: listActiveRuns().length,
@@ -87,8 +77,6 @@ export function collectLoadSnapshot(): LoadSnapshot {
     eventLoopLagP99: eventLoopLagP99(),
     heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
     rssMb,
-    combinedRssMb: rssMb + utilityRss,
-    utility,
     chat: getChatEventBatchStats(),
     dispatcher: getChatEventDispatcherSnapshot(),
     statusWrites: getStatusWriteQueueStats(),
@@ -97,16 +85,13 @@ export function collectLoadSnapshot(): LoadSnapshot {
 }
 
 export function collectProcessMetrics(): ProcessMetricsSnapshot {
-  refreshEmbedUtilityPerfStatsBestEffort()
-  return collectProcessMetricsSnapshot(getEmbedUtilityPerfStats(), readAppProcessMetrics())
+  return collectProcessMetricsSnapshot(readAppProcessMetrics())
 }
 
 /** Cheap RSS proxy so the 5s timer can skip `app.getAppMetrics()` when idle. */
 function cheapWorkingSetOverWarn(): boolean {
   const rssMb = Math.round(process.memoryUsage().rss / 1024 / 1024)
-  if (rssMb > PROCESS_METRICS_RSS_WARN_MB) return true
-  const utilityRss = getEmbedUtilityPerfStats().rssMb ?? 0
-  return utilityRss > PROCESS_METRICS_RSS_WARN_MB
+  return rssMb > PROCESS_METRICS_RSS_WARN_MB
 }
 
 /** Main-process V8 heap usage vs. its old-space ceiling — the OOM-relevant pair. */
@@ -128,16 +113,13 @@ function sampleProcessMetricsAndMaybeLog(): void {
 
 export function logLoadSnapshot(): void {
   if (!isPerfDebugEnabled()) return
-  refreshEmbedUtilityPerfStatsBestEffort()
   const snap = collectLoadSnapshot()
   console.info('[vyotiq-perf] load', JSON.stringify(snap))
-  if (snap.combinedRssMb > 1024 || snap.rssMb > 1024) {
+  if (snap.rssMb > 1024) {
     console.warn(
       '[vyotiq-perf] heap-high',
       JSON.stringify({
         rssMb: snap.rssMb,
-        combinedRssMb: snap.combinedRssMb,
-        utilityRssMb: snap.utility.rssMb,
         heapUsedMb: snap.heapUsedMb,
         heapLimitMb: mainHeapStats().heapLimitMb
       })

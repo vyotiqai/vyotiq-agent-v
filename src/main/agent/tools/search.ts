@@ -13,9 +13,9 @@ import {
 import { compileUserRegex } from './safeUserRegex'
 import { extractDocxText, isDocxPath, MAX_DOCX_ARCHIVE_BYTES } from './docxText'
 import {
-  querySparseCandidates,
+  queryIndexCandidates,
   resolveCandidateFullPaths
-} from '../sparsegrep'
+} from '../codeindex'
 
 const YIELD_EVERY_FILES = 32
 export const SEARCH_SCAN_CAP = 5000
@@ -112,7 +112,7 @@ export async function toolSearch(
     truncated = true
   } else {
     let contentFiles: WalkedFile[] = allFiles.filter((f) => !fileHitRels.has(f.rel))
-    const sparse = await querySparseCandidates(workspaceRoot, {
+    const sparse = await queryIndexCandidates(workspaceRoot, {
       query: q,
       kind: regex ? 'regex' : 'substring',
       caseSensitive: false,

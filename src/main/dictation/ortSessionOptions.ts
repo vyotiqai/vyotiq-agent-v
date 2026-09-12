@@ -10,7 +10,7 @@ export type OrtSessionOptions = {
 
 export type OrtThreadContext = 'in-process' | 'utility'
 
-/** UtilityProcess budget — enough for DenseOn ingest without taking every core. */
+/** UtilityProcess budget — enough for Whisper ingest without taking every core. */
 const UTILITY_INTRA_OP_DEFAULT = 4
 
 /**

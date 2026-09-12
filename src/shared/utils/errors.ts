@@ -14,18 +14,15 @@ export type ErrorCode =
   | 'AGENT_INCOMPLETE'
   | 'AGENT_FINALLY_FLUSH'
   | 'AGENT_FINALLY_DISPOSE'
-  | 'BUDGET_EXHAUSTED'
   | 'CATALOG_PROBE'
   | 'COMPACTION'
   | 'CIRCUIT_OPEN'
   | 'IPC_VALIDATION'
   | 'IPC_HANDLER'
   | 'IPC_CLIENT'
-  | 'LOOP_SAFETY'
   | 'MCP_CONNECT'
   | 'MCP_SPAWN'
   | 'PERSIST'
-  | 'QUOTA_EXHAUSTED'
   | 'RENDERER_CRASH'
   | 'PROVIDER_AUTH'
   | 'PROVIDER_BILLING'
@@ -160,11 +157,10 @@ const RETRYABLE_TURN_ERROR_CODES = new Set<ErrorCode>([
 
 // 2026-09-01 audit (runs 9349708b / c9e863c0): empty_response and truncated
 // incompletes ended turns with NO user-visible banner because only network-
-// class reasons were recognized here. The loop already auto-continues these
-// in-band; when it gives up (MAX_EMPTY_RESPONSE_CONTINUES / MAX_TRUNCATION_
-// CONTINUES) the user must see why the run stopped. They are surfaceable
-// turn failures: the Continue/retry affordance re-issues a user turn, not an
-// auto-resend, so listing them cannot create a resend loop.
+// class reasons were recognized here. The loop auto-continues these in-band;
+// when a turn does surface them, the user must see why the run stopped. They
+// are surfaceable turn failures: the Continue/retry affordance re-issues a
+// user turn, not an auto-resend, so listing them cannot create a resend loop.
 const RETRYABLE_INCOMPLETE_REASONS = new Set([
   'network_interrupted',
   'circuit_open',

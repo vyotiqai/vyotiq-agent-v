@@ -29,7 +29,6 @@ import {
 } from '@main/agent/state'
 import { flushBeforeQuit, type EditorFlushStatus } from '@main/quitFlush'
 import { shutdownTokenizerPool } from '@main/agent/context/tokenizerPool'
-import { getEmbedUtilityClient } from '@main/agent/codeindex/embedUtilityClient'
 import { getDictationUtilityClient } from '@main/dictation/whisperUtilityClient'
 import {
   getWorkspaces,
@@ -315,7 +314,6 @@ if (!gotLock) {
       // each wait so a stuck child cannot hang quit on the fatal path.
       const shutdowns: Array<[string, Promise<void>]> = [
         ['MCP servers', shutdownMcpServers()],
-        ['embed utility', getEmbedUtilityClient().shutdown()],
         ['dictation utility', getDictationUtilityClient().shutdown()]
       ]
       for (const [label, task] of shutdowns) {

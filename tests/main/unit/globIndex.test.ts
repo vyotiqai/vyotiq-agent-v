@@ -3,26 +3,25 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
-const querySparseFileList = vi.fn()
+const queryIndexFileList = vi.fn()
 
-vi.mock('@main/agent/sparsegrep', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@main/agent/sparsegrep')>()
+vi.mock('@main/agent/codeindex', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/agent/codeindex')>()
   return {
     ...actual,
-    querySparseFileList: (...args: unknown[]) => querySparseFileList(...args)
+    queryIndexFileList: (...args: unknown[]) => queryIndexFileList(...args)
   }
 })
 
 import { globPatternIsTextOnly, nestedGlobPattern, toolGlob } from '@main/agent/tools/glob'
-import { SPARSE_GREP_SCAN_CAP } from '@main/agent/sparsegrep'
 
-describe('glob sparsegrep index path', () => {
+describe('glob index file-list path', () => {
   let root: string
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'vyotiq-glob-index-'))
     mkdirSync(root, { recursive: true })
-    querySparseFileList.mockReset()
+    queryIndexFileList.mockReset()
   })
 
   afterEach(() => {
@@ -30,7 +29,7 @@ describe('glob sparsegrep index path', () => {
   })
 
   it('uses trigram index file list when ready', async () => {
-    querySparseFileList.mockResolvedValue({
+    queryIndexFileList.mockResolvedValue({
       ready: true,
       paths: ['src/a.ts', 'src/b.ts', 'docs/readme.md'],
       fileCount: 3,
@@ -49,23 +48,23 @@ describe('glob sparsegrep index path', () => {
     mkdirSync(join(root, 'src'), { recursive: true })
     const { writeFileSync } = await import('fs')
     writeFileSync(join(root, 'src', 'live-only.ts'), 'export const x = 1\n', 'utf8')
-    querySparseFileList.mockResolvedValue({
+    queryIndexFileList.mockResolvedValue({
       ready: true,
       paths: [],
-      fileCount: SPARSE_GREP_SCAN_CAP,
+      fileCount: 24000,
       syncComplete: false
     })
     const out = await toolGlob(root, '**/*.ts')
     expect(out).toContain('src/live-only.ts')
-    expect(out).toMatch(/index sync in progress \(20000 files indexed so far\)/)
+    expect(out).toMatch(/index sync in progress \(24000 files indexed so far\)/)
     expect(out).toMatch(/index=live/)
   })
 
   it('omits incomplete notice when syncComplete is true even at scan cap', async () => {
-    querySparseFileList.mockResolvedValue({
+    queryIndexFileList.mockResolvedValue({
       ready: true,
       paths: ['a.ts'],
-      fileCount: SPARSE_GREP_SCAN_CAP + 500,
+      fileCount: 24500,
       syncComplete: true
     })
     const out = await toolGlob(root, '**/*.ts')
@@ -74,10 +73,10 @@ describe('glob sparsegrep index path', () => {
     expect(out).toMatch(/index=trigram/)
   })
 
-  it('live-walks non-text globs even when the sparse list is ready', async () => {
+  it('live-walks non-text globs even when the indexed list is ready', async () => {
     const { writeFileSync } = await import('fs')
     writeFileSync(join(root, 'icon.png'), 'png', 'utf8')
-    querySparseFileList.mockResolvedValue({
+    queryIndexFileList.mockResolvedValue({
       ready: true,
       paths: ['src/a.ts'],
       fileCount: 1,
@@ -89,7 +88,7 @@ describe('glob sparsegrep index path', () => {
   })
 
   it('lists nested matches when a source glob omits the nested folder prefix', async () => {
-    querySparseFileList.mockResolvedValue({
+    queryIndexFileList.mockResolvedValue({
       ready: true,
       paths: ['project/src/a.ts'],
       fileCount: 1,

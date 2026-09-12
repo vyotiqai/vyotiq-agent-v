@@ -10,7 +10,7 @@ import {
   isRunPlanPath,
   modeSectionMarkdown
 } from '../../../src/main/agent/tools/modePolicy'
-import { AGENT_ONLY_BUILTIN } from '../../../src/main/agent/tools/classify'
+import { AGENT_ONLY_BUILTIN, INLINE_OMIT_BUILTIN } from '../../../src/main/agent/tools/classify'
 import { BUILTIN_TOOL_NAMES } from '../../../src/main/agent/schemas/tools'
 import { setMcpReadOnlyHintsForTests } from '../../../src/main/agent/mcp'
 
@@ -159,6 +159,25 @@ describe('modePolicy', () => {
     ).toBe(false)
     expect(isBuiltinAllowedInMode('ask', 'edit_notebook')).toBe(false)
     expect(isBuiltinAllowedInMode('plan', 'edit_notebook')).toBe(false)
+  })
+
+  it('Ask and Plan deny browser_tabs close; Agent allows it', () => {
+    const opts = { autoModeSwitch: true }
+    expect(assertToolAllowedInMode('ask', 'browser_tabs', { action: 'close' }, opts).ok).toBe(false)
+    expect(assertToolAllowedInMode('plan', 'browser_tabs', { action: 'close' }, opts).ok).toBe(false)
+    expect(assertToolAllowedInMode('agent', 'browser_tabs', { action: 'close' }, opts).ok).toBe(true)
+    expect(assertToolAllowedInMode('ask', 'browser_tabs', { action: 'list' }, opts).ok).toBe(true)
+  })
+
+  it('Plan denies update_goal complete; active and Agent complete stay allowed', () => {
+    const opts = { autoModeSwitch: true }
+    expect(assertToolAllowedInMode('plan', 'update_goal', { status: 'complete' }, opts).ok).toBe(false)
+    expect(assertToolAllowedInMode('plan', 'update_goal', { status: 'active' }, opts).ok).toBe(true)
+    expect(assertToolAllowedInMode('agent', 'update_goal', { status: 'complete' }, opts).ok).toBe(true)
+  })
+
+  it('browser_tabs without a close action stays allowed in Ask mode', () => {
+    expect(assertToolAllowedInMode('ask', 'browser_tabs', {}, {}).ok).toBe(true)
   })
 
   it('Ask mode denies diagnostics and terminal; Plan allows diagnostics', () => {
@@ -341,6 +360,13 @@ describe('modePolicy', () => {
     ]
     expect([...classified].sort()).toEqual([...BUILTIN_TOOL_NAMES].sort())
     expect(new Set(classified).size).toBe(BUILTIN_TOOL_NAMES.length)
+
+    // Goal tools ride PLAN_EXTRA (plan-first goal flow) but are also omitted
+    // from inline child instances. Pin the coupling so future edits can't
+    // silently change either set.
+    expect(
+      [...INLINE_OMIT_BUILTIN].filter((name) => !AGENT_ONLY_BUILTIN.has(name)).sort()
+    ).toEqual(['create_goal', 'update_goal'])
 
     for (const name of ASK_SAFE_BUILTIN) {
       expect(isBuiltinAllowedInMode('ask', name), name).toBe(true)

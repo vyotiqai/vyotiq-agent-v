@@ -4,16 +4,14 @@
  * When a write-capable instance is spawned into a git worktree, the child
  * resolves its own index storage (workspaceIndexStorageId is keyed by the
  * canonical worktree path), so its first codebase_search would cold-start a
- * full walk + chunk + embed of code identical to the parent workspace. Both
- * stores skip unchanged files by mtime+size → SHA-256 and reuse embeddings by
- * chunkContentHash within one DB (codeindex/sync.ts), so copying the parent's
- * index DBs into the child's storage at spawn makes the child instantly warm
- * at the cost of one local file copy.
+ * full walk + chunk + index of code identical to the parent workspace. The
+ * store skips unchanged files by mtime+size → SHA-256 (codeindex/sync.ts), so
+ * copying the parent's index DB into the child's storage at spawn makes the
+ * child instantly warm at the cost of one local file copy.
  *
  * Copy strategy (chosen from verified store evidence):
- * - Both CodeIndexStore and SparseGrepStore use node:sqlite DatabaseSync with
- *   `PRAGMA journal_mode = WAL` (codeindex/store.ts, sparsegrep/store.ts) and
- *   a single `index.sqlite` per index dir.
+ * - CodeIndexStore uses node:sqlite DatabaseSync with `PRAGMA journal_mode =
+ *   WAL` (codeindex/store.ts) and a single `index.sqlite` per index dir.
  * - We do NOT open the parent DB to take a VACUUM INTO snapshot: even a
  *   read-only connection can create/attach -shm/-wal files under the parent's
  *   storage dir, and DatabaseSync would block the main thread. Instead we copy
@@ -23,29 +21,24 @@
  *   behind; a torn copy from a concurrent parent write is removed so the
  *   child falls back to cold-start indexing instead of a corrupt DB.
  *
- * The helper is best-effort: per-index failures are collected and warned, and
- * it never throws — a failed copy only costs the child its warm start.
+ * The helper is best-effort: failures are collected and warned, and it never
+ * throws — a failed copy only costs the child its warm start.
  */
 import { copyFile, mkdir, rm, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import { DatabaseSync } from 'node:sqlite'
-import {
-  codeindexDbPath,
-  codeindexRoot,
-  sparsegrepDbPath,
-  sparsegrepRoot
-} from './indexStoragePaths'
+import { codeindexDbPath, codeindexRoot } from './indexStoragePaths'
 import { logger } from '../../shared/logger'
 
 const DB_FILENAME = 'index.sqlite'
 const WAL_SUFFIX = '-wal'
 // The copy runs synchronously per spawn inside the spawn path; a pathological
 // multi-hundred-MB parent DB would stall every instance start. Past this,
-// skip the copy — the child cold-starts and reuses embeddings by chunk hash.
+// skip the copy — the child cold-starts.
 const MAX_INHERIT_DB_BYTES = 512 * 1024 * 1024
 
 type IndexPair = {
-  label: 'codeindex' | 'sparsegrep'
+  label: 'codeindex'
   srcRoot: string
   dstRoot: string
   srcDb: string
@@ -58,12 +51,6 @@ function indexPairs(parentWorkspacePath: string, worktreePath: string): IndexPai
       srcRoot: codeindexRoot(parentWorkspacePath),
       dstRoot: codeindexRoot(worktreePath),
       srcDb: codeindexDbPath(parentWorkspacePath)
-    },
-    {
-      label: 'sparsegrep',
-      srcRoot: sparsegrepRoot(parentWorkspacePath),
-      dstRoot: sparsegrepRoot(worktreePath),
-      srcDb: sparsegrepDbPath(parentWorkspacePath)
     }
   ]
 }
@@ -130,12 +117,12 @@ async function copyIndex(pair: IndexPair, maxDbBytes: number): Promise<void> {
 }
 
 /**
- * Copy the parent workspace's codeindex + sparsegrep DBs into the instance
- * worktree's index storage so the child's first codebase_search is warm.
+ * Copy the parent workspace's code index DB into the instance worktree's
+ * index storage so the child's first codebase_search is warm.
  *
- * Best-effort and non-fatal: each index is copied independently and failures
- * are logged (warn) and collected, never thrown. The parent's storage dir is
- * only ever read — nothing is written, locked, or deleted there.
+ * Best-effort and non-fatal: failures are logged (warn) and collected, never
+ * thrown. The parent's storage dir is only ever read — nothing is written,
+ * locked, or deleted there.
  */
 export async function copyWorkspaceIndexesForInstance(
   parentWorkspacePath: string,

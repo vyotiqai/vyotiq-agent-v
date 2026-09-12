@@ -141,18 +141,6 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'agent'
   },
   {
-    id: 'agent-run-spend-limit',
-    title: 'Run spend limit',
-    keywords: ['spend', 'cost', 'usd', 'budget', 'limit', 'run'],
-    section: 'agent'
-  },
-  {
-    id: 'agent-run-token-limit',
-    title: 'Run token limit',
-    keywords: ['tokens', 'budget', 'limit', 'run', 'usage'],
-    section: 'agent'
-  },
-  {
     id: 'agent-persona',
     title: 'Persona',
     keywords: ['persona', 'identity', 'name', 'assistant'],
@@ -191,37 +179,13 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   {
     id: 'codeindex-enabled',
     title: 'Enable codebase index',
-    keywords: ['codebase', 'index', 'semantic', 'codeindex', 'mdenseon', 'sparsegrep'],
-    section: 'indexing'
-  },
-  {
-    id: 'codeindex-embedder',
-    title: 'Embedder',
-    keywords: ['embedder', 'mdenseon', 'lfm2', 'ollama', 'hash', 'onnx', 'denseon', 'liquidai', 'gguf', 'llama.cpp', 'node-llama-cpp', 'codebase', 'multilingual', '1024'],
-    section: 'indexing'
-  },
-  {
-    id: 'codeindex-lfm2-ollama-model',
-    title: 'LFM2 Ollama GGUF model',
-    keywords: ['lfm2', 'ollama', 'gguf', 'liquidai', 'llama.cpp', 'node-llama-cpp', 'embedder', 'codeindex', 'embedding'],
-    section: 'indexing'
-  },
-  {
-    id: 'codeindex-auto-download',
-    title: 'Auto-download model',
-    keywords: ['download', 'onnx', 'model', 'codeindex', 'embedder'],
-    section: 'indexing'
-  },
-  {
-    id: 'codeindex-ollama-model',
-    title: 'Ollama embedding model',
-    keywords: ['ollama', 'embed', 'nomic', 'codeindex'],
+    keywords: ['codebase', 'index', 'codeindex', 'keyword search', 'trigram'],
     section: 'indexing'
   },
   {
     id: 'codeindex-status',
     title: 'Index status',
-    keywords: ['reindex', 'status', 'indexing', 'download', 'sparsegrep', 'codebase'],
+    keywords: ['reindex', 'status', 'syncing', 'codebase'],
     section: 'indexing'
   },
   {
@@ -232,8 +196,6 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
       'memory',
       'cpu',
       'electron',
-      'onnx',
-      'embed',
       'diagnostics',
       'task manager'
     ],
@@ -583,12 +545,10 @@ function cssEscape(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 
-/** Conditional fields (provider/embedder-specific) scroll to the control that reveals them. */
+/** Conditional fields (provider-specific) scroll to the control that reveals them. */
 const FIELD_SCROLL_FALLBACK: Record<string, string> = {
   'ollama-url': 'api-keys',
-  'custom-url': 'api-keys',
-  'codeindex-ollama-model': 'codeindex-embedder',
-  'codeindex-lfm2-ollama-model': 'codeindex-embedder'
+  'custom-url': 'api-keys'
 }
 
 function querySettingsField(fieldId: string): HTMLElement | null {

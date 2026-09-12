@@ -11,7 +11,7 @@ related:
   - reference/storage
 ---
 
-Memory is explicit Markdown under {workspace}/.vyotiq/memory/. It is not an embedding store and it is not populated from every chat automatically.
+Memory is explicit Markdown under {workspace}/.vyotiq/memory/. It is not a search index and it is not populated from every chat automatically.
 
 ## Layout
 
@@ -47,4 +47,4 @@ Memory is in the project tree. It can appear in Git status and can be committed 
 
 ## Memory versus search
 
-Use exact or semantic search to find current code. Use memory for deliberately curated notes. A stale memory note does not override current source. When the two disagree, verify the source and update or remove the note.
+Use exact or keyword search to find current code. Use memory for deliberately curated notes. A stale memory note does not override current source. When the two disagree, verify the source and update or remove the note.

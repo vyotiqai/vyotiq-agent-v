@@ -18,7 +18,7 @@ Marketplace is the customization hub. It has two jobs: browse packages from a co
 
 The Marketplace home shows registry content when a registry is configured and acknowledged. A package can contain supported customization assets. Registry trust matters because installed content can influence agent behavior or connect external systems.
 
-Read the package description and contents before installing. Installation success should appear without restarting the app.
+Read the package description and contents before installing. Installed packages appear in Manage without restarting the app.
 
 ## Manage
 
@@ -44,7 +44,7 @@ Workspace overrides are managed with the workspace's Override state under [Setti
 
 ## Live updates
 
-Created or edited **Skills** and **Rules** are discovered through live refresh paths. Installed or removed Marketplace state should update in Manage without requiring an application restart.
+Created or edited **Skills** and **Rules** are picked up through live refresh paths. Installed or removed packages update in Manage without a restart.
 
 ## Security boundary
 
@@ -54,7 +54,7 @@ Use the focused pages for setup and failure recovery. Start with MCP servers for
 
 ## Discover GitHub and Google
 
-Browse includes a Discover row of larger cards. This catalog wave is GitHub, Gmail, Google Drive, and Google Calendar. Add on a card installs that MCP and opens Connect.
+Browse includes a Discover row of larger cards. The catalog is GitHub, Gmail, Google Drive, and Google Calendar. Add on a card installs that MCP and opens Connect.
 
 Add GitHub uses Sign in with OAuth, or paste a personal access token when OAuth is unavailable. Native GitHub in the Pull Request panel stays separate from GitHub MCP.
 

@@ -250,7 +250,8 @@ const PUSH_CHANNELS = new Set<string>([
   IPC.notificationsActivate,
   IPC.appearanceCustomCssChanged,
   IPC.updaterState,
-  IPC.accessibilitySupportChanged
+  IPC.accessibilitySupportChanged,
+  IPC.gitStatusChanged
 ])
 
 const VYOTIQ_SYNC_SEND_MAP: Record<'updateWorkspaceUiStateSync', string> = {
@@ -274,7 +275,8 @@ const VYOTIQ_PUSH_MAP: Record<
   | 'onNotificationsChanged'
   | 'onNotificationActivate'
   | 'onAppearanceCustomCssChanged'
-  | 'onAccessibilitySupportChanged',
+  | 'onAccessibilitySupportChanged'
+  | 'onGitStatusChanged',
   string
 > = {
   onChatEvent: IPC.chatEvent,
@@ -293,7 +295,8 @@ const VYOTIQ_PUSH_MAP: Record<
   onNotificationsChanged: IPC.notificationsChanged,
   onNotificationActivate: IPC.notificationsActivate,
   onAppearanceCustomCssChanged: IPC.appearanceCustomCssChanged,
-  onAccessibilitySupportChanged: IPC.accessibilitySupportChanged
+  onAccessibilitySupportChanged: IPC.accessibilitySupportChanged,
+  onGitStatusChanged: IPC.gitStatusChanged
 }
 
 /** Namespaced VyotiqApi surfaces (window.vyotiq.updater / .feedback). */
@@ -330,7 +333,7 @@ describe('main/renderer IPC contract', () => {
       expect(channels.has(channel)).toBe(true)
       expect(PUSH_CHANNELS.has(channel)).toBe(true)
     }
-    expect(Object.keys(VYOTIQ_PUSH_MAP)).toHaveLength(17)
+    expect(Object.keys(VYOTIQ_PUSH_MAP)).toHaveLength(18)
   })
 
   it('accounts for every IPC channel as invoke or push', () => {

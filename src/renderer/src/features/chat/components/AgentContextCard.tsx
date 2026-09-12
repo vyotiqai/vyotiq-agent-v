@@ -124,7 +124,7 @@ export function AgentContextCard({ workspacePath }: { workspacePath: string }) {
 
       <div
         className="acc-segment"
-        title={`Code index: ${INDEX_STATE_LABEL[state]}${state === 'building' ? ' (embedding in progress)' : ''}`}
+        title={`Code index: ${INDEX_STATE_LABEL[state]}${state === 'building' ? ' (sync in progress)' : ''}`}
       >
         <Icon name="scanSearch" size={12} className="acc-icon" />
         <span className={`acc-dot acc-dot-${state}`} aria-hidden />

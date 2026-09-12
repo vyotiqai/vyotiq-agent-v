@@ -1,6 +1,6 @@
 ---
 title: "Quickstart: first useful change"
-description: Open a workspace, configure a provider and model, run a small task, then review the result.
+description: Open a workspace, configure a provider and model, run a small Agent task, then review the diff.
 section: start
 order: 1
 type: quickstart
@@ -17,7 +17,7 @@ This path ends with one reviewed Agent run. Use a small, reversible task in a wo
 
 - Agent V is installed. If it is not installed yet, start with [Install Agent V](/docs/start/install).
 - You have a project folder.
-- You have either a cloud-provider key, local Ollama, or a private Custom OpenAI-compatible endpoint.
+- You have either a cloud-provider key, a local Ollama install, or a private Custom OpenAI-compatible endpoint.
 
 ## Open a workspace
 
@@ -34,7 +34,7 @@ Open [Settings → Providers](/docs/customize/providers).
 1. Set **Active provider**. Saving a key does not make that provider active.
 1. Return to chat and choose a model in the composer. Use `Refresh models` when you need the live catalog.
 
-New settings start with local Ollama active at `http://127.0.0.1:11434` and the seed model `qwen2.5`. That is a selection, not proof that Ollama is installed or reachable. The `Active provider` menu and composer include configured providers and retain the current active provider so you can repair its configuration.
+New settings start with local Ollama active at `http://127.0.0.1:11434` and the seed model `qwen2.5`. That is a selection, not proof that Ollama is installed or reachable. The `Active provider` menu and composer include configured providers and keep the current active provider so you can repair its configuration.
 
 ## Choose Agent mode and send
 

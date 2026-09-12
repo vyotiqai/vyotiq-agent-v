@@ -2,7 +2,6 @@ import { describe, expect, it, beforeEach, vi } from 'vitest'
 import {
   askQuestionThroughRenderer,
   AGENT_QUESTION_HEARTBEAT_MS,
-  AGENT_QUESTION_TIMEOUT_MS,
   cancelPendingQuestions,
   listPendingAgentQuestions,
   registerQuestionSender,
@@ -201,14 +200,24 @@ describe('agentQuestion', () => {
     expect(rejectAgentQuestion({ runId: 'run-1', reason: 'orphan' })).toBe(false)
   })
 
-  it('resolves with empty answers after the question timeout', async () => {
+  it('waits indefinitely for the user answer (no auto-deny timeout)', async () => {
     vi.useFakeTimers()
     try {
       registerQuestionSender('run-1', () => {})
       const pending = askQuestionThroughRenderer(REQUEST, new AbortController().signal)
-      const expectEmpty = expect(pending).resolves.toEqual([])
-      await vi.advanceTimersByTimeAsync(AGENT_QUESTION_TIMEOUT_MS)
-      await expectEmpty
+      // No answer timeout (run-stopping cap removed): advancing past the old
+      // 15-minute auto-deny must NOT settle the question.
+      await vi.advanceTimersByTimeAsync(900_000 + 1)
+      let settled = false
+      void pending.then(() => {
+        settled = true
+      })
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      expect(resolveAgentQuestion({ requestId: 'req-1', runId: 'run-1', answers: ANSWER })).toBe(
+        true
+      )
+      await expect(pending).resolves.toEqual(ANSWER)
     } finally {
       vi.useRealTimers()
     }

@@ -4,11 +4,9 @@ import {
   CircuitOpenError,
   recordCircuitFailure,
   resetCircuitBreakersForTests,
-  setCircuitNowForTests,
   CIRCUIT_FAILURE_THRESHOLD
 } from '@main/agent/circuitBreaker'
 import {
-  MAX_STREAM_ATTEMPTS,
   LOCAL_ENDPOINT_DOWN_HINT,
   decideStreamAttemptResult,
   describeLocalEndpointDown,
@@ -29,23 +27,21 @@ import {
 
 describe('streamRetry', () => {
   it('exports shared retry constants', () => {
-    expect(MAX_STREAM_ATTEMPTS).toBe(5)
     expect(STREAM_RETRY_BASE_MS).toBe(1000)
     expect(streamRetryBackoffMs(1)).toBeGreaterThanOrEqual(500)
   })
 
-  it('classifies retriable provider and thrown stream errors', () => {
+  it('classifies retriable provider and thrown stream errors with no attempt ceiling', () => {
     expect(shouldRetryProviderStreamError('fetch failed: other side closed', 1)).toBe(true)
-    expect(shouldRetryProviderStreamError('fetch failed: other side closed', 4)).toBe(true)
-    expect(shouldRetryProviderStreamError('fetch failed: other side closed', 5)).toBe(false)
+    expect(shouldRetryProviderStreamError('fetch failed: other side closed', 5)).toBe(true)
     expect(shouldRetryThrownStreamError(new RetriableStreamError('stream ended'), 1)).toBe(true)
-    expect(shouldRetryThrownStreamError(new RetriableStreamError('stream ended'), 5)).toBe(false)
+    expect(shouldRetryThrownStreamError(new RetriableStreamError('stream ended'), 5)).toBe(true)
     expect(shouldRetryThrownStreamError(new DOMException('Aborted', 'AbortError'), 1)).toBe(false)
   })
 
-  it('gives PROVIDER_NETWORK one deliberate stream-layer retry', () => {
+  it('retries PROVIDER_NETWORK indefinitely (cap removed)', () => {
     expect(shouldRetryStreamErrorChunk('PROVIDER_NETWORK', 'Connect timed out', 1)).toBe(true)
-    expect(shouldRetryStreamErrorChunk('PROVIDER_NETWORK', 'Connect timed out', 2)).toBe(false)
+    expect(shouldRetryStreamErrorChunk('PROVIDER_NETWORK', 'Connect timed out', 5)).toBe(true)
     expect(shouldRetryStreamErrorChunk('CIRCUIT_OPEN', 'Circuit open', 1)).toBe(false)
     expect(shouldRetryStreamErrorChunk('PROVIDER_STREAM', 'fetch failed: other side closed', 1)).toBe(
       true
@@ -146,25 +142,9 @@ describe('streamRetry', () => {
     expect(http).toBeLessThanOrEqual(STREAM_HTTP_RETRY_MAX_MS)
   })
 
-  it('classifies retriable provider and thrown stream errors', () => {
-    expect(decideStreamAttemptResult({ ok: true, outcome: 'complete' }, 1)).toEqual({
-      action: 'complete'
-    })
-    expect(decideStreamAttemptResult({ ok: true, outcome: 'terminal' }, 1)).toEqual({
-      action: 'terminal'
-    })
-    expect(decideStreamAttemptResult({ ok: true, outcome: 'retry' }, 1)).toEqual({
-      action: 'retry'
-    })
-    expect(decideStreamAttemptResult({ ok: true, outcome: 'retry' }, 5)).toEqual({
-      action: 'exhausted'
-    })
-    const err = new RetriableStreamError('stream ended')
-    expect(decideStreamAttemptResult({ ok: false, err }, 1)).toEqual({ action: 'retry' })
-    expect(
-      decideStreamAttemptResult({ ok: false, err }, 5, { exhaustedOnLastRetriableThrow: true })
-    ).toEqual({ action: 'exhausted', err })
-    expect(decideStreamAttemptResult({ ok: false, err }, 5)).toEqual({ action: 'throw', err })
+  it('retries transient mid-stream HTTP statuses at any attempt (cap removed)', () => {
+    expect(shouldRetryStreamErrorChunk('PROVIDER_HTTP', 'Rate limited (HTTP 429)', 1, 429)).toBe(true)
+    expect(shouldRetryStreamErrorChunk('PROVIDER_HTTP', 'Rate limited (HTTP 429)', 5, 429)).toBe(true)
   })
 
   it('retries runAttempt on inline retry', async () => {
@@ -211,15 +191,19 @@ describe('streamRetry', () => {
     })
   })
 
-  it('throws when retries are exhausted', async () => {
-    const runAttempt = vi.fn().mockResolvedValue('retry')
+  it('keeps retrying retriable failures until the run is cancelled (no exhaustion)', async () => {
+    const controller = new AbortController()
+    const runAttempt = vi.fn().mockRejectedValue(new RetriableStreamError('stream ended'))
+    setTimeout(() => controller.abort(), 1200)
+    // No attempt ceiling (cap removed): the loop only exits via abort.
     await expect(
       runWithStreamRetry({
         onAttemptStart: vi.fn(),
-        runAttempt
+        runAttempt,
+        signal: controller.signal
       })
-    ).rejects.toBeInstanceOf(RetriableStreamError)
-    expect(runAttempt).toHaveBeenCalledTimes(MAX_STREAM_ATTEMPTS)
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(runAttempt).toHaveBeenCalled()
   })
 
   it('runWithStreamRetryGen yields wait events and completes', async () => {
@@ -252,8 +236,7 @@ describe('streamRetry', () => {
     expect(result).toEqual({ status: 'complete' })
   })
 
-  it('runWithStreamRetryGen returns exhausted on last retriable throw', async () => {
-    const err = new RetriableStreamError('stream ended')
+  it('runWithStreamRetryGen retries retriable throws until recovery (no exhaustion)', async () => {
     const gen = runWithStreamRetryGen({
       onAttemptStart: () => undefined,
       waitBeforeRetry: function* () {
@@ -261,10 +244,8 @@ describe('streamRetry', () => {
       },
       runAttempt: async function* (attempt) {
         yield* []
-        if (attempt < MAX_STREAM_ATTEMPTS) {
-          throw err
-        }
-        throw err
+        if (attempt < 3) throw new RetriableStreamError('stream ended')
+        return 'complete'
       }
     })
 
@@ -279,9 +260,8 @@ describe('streamRetry', () => {
       events.push(next.value)
     }
 
-    expect(events).toHaveLength(MAX_STREAM_ATTEMPTS - 1)
-    expect(events.every((e) => e === 'wait')).toBe(true)
-    expect(result).toEqual({ status: 'exhausted', err })
+    expect(events).toEqual(['wait', 'wait'])
+    expect(result).toEqual({ status: 'complete' })
   })
 
   it('runWithStreamRetryGen returns terminal without further attempts', async () => {
@@ -316,27 +296,23 @@ describe('streamRetry', () => {
     expect(decideStreamAttemptResult({ ok: false, err }, 1)).toEqual({ action: 'exhausted', err })
   })
 
-  it('skips stream attempts when the provider circuit is already open', async () => {
+  it('never opens the circuit — failures never block stream attempts', async () => {
     const key = 'provider:circuit-test'
     for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) recordCircuitFailure(key)
     const runAttempt = vi.fn().mockResolvedValue('complete')
-    await expect(
-      runWithStreamRetry({
-        circuitKey: key,
-        onAttemptStart: vi.fn(),
-        runAttempt
-      })
-    ).rejects.toBeInstanceOf(CircuitOpenError)
-    expect(runAttempt).not.toHaveBeenCalled()
+    await runWithStreamRetry({
+      circuitKey: key,
+      onAttemptStart: vi.fn(),
+      runAttempt
+    })
+    expect(runAttempt).toHaveBeenCalledTimes(1)
   })
 
-  it('releases the half-open probe when an attempt throws non-retriably', async () => {
+  it('releases probe bookkeeping safely when an attempt throws non-retriably', async () => {
     resetCircuitBreakersForTests()
     try {
       const key = 'provider:probe-leak'
       for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) recordCircuitFailure(key)
-      // Past openMs — the next assertCircuitClosed consumes the single probe slot.
-      setCircuitNowForTests(Date.now() + 61_000)
       await expect(
         runWithStreamRetry({
           circuitKey: key,
@@ -344,7 +320,7 @@ describe('streamRetry', () => {
           runAttempt: vi.fn().mockRejectedValue(new Error('permanent provider bug'))
         })
       ).rejects.toThrow('permanent provider bug')
-      // The probe slot was released, so a later call can probe again and succeed.
+      // A later call proceeds normally — no half-open probe slot to wait for.
       const runAttempt = vi.fn().mockResolvedValue('complete')
       await runWithStreamRetry({ circuitKey: key, onAttemptStart: vi.fn(), runAttempt })
       expect(runAttempt).toHaveBeenCalledTimes(1)
@@ -353,12 +329,11 @@ describe('streamRetry', () => {
     }
   })
 
-  it('runWithStreamRetryGen releases the half-open probe on a terminal throw', async () => {
+  it('runWithStreamRetryGen keeps going after a terminal throw (probe no-op)', async () => {
     resetCircuitBreakersForTests()
     try {
       const key = 'provider:probe-leak-gen'
       for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) recordCircuitFailure(key)
-      setCircuitNowForTests(Date.now() + 61_000)
       const gen = runWithStreamRetryGen({
         circuitKey: key,
         onAttemptStart: () => undefined,

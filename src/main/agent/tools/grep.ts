@@ -14,9 +14,9 @@ import {
 import { compileUserRegex } from './safeUserRegex'
 import { extractDocxText, isDocxPath, MAX_DOCX_ARCHIVE_BYTES } from './docxText'
 import {
-  querySparseCandidates,
+  queryIndexCandidates,
   resolveCandidateFullPaths
-} from '../sparsegrep'
+} from '../codeindex'
 
 export const GREP_SCAN_CAP = 20_000
 export const GREP_MAX_FILE_BYTES = 512 * 1024
@@ -194,7 +194,7 @@ function resolveMaxResults(maxResults: number | undefined): number {
 /**
  * Regex content search with optional surrounding context.
  *
- * Uses trigram candidate prune when sparsegrep index is ready; otherwise live walk.
+ * Uses trigram candidate prune when the code index is ready; otherwise live walk.
  * Output format is identical either way (`rel:line:…`).
  */
 export async function toolGrep(
@@ -218,7 +218,7 @@ export async function toolGrep(
   let indexSyncInProgress = false
   let indexedFileCount = 0
 
-  const sparse = await querySparseCandidates(workspaceRoot, {
+  const sparse = await queryIndexCandidates(workspaceRoot, {
     query: trimmed,
     kind: 'regex',
     caseSensitive: options.caseSensitive === true,

@@ -7,24 +7,127 @@ const groups = await groupedDocs()
 
 <DocsLayout
   title="Documentation"
-  description="Install Agent V, complete a first useful run, learn each work surface, and recover when something fails."
+  description="Install, configure, and extend Vyotiq Agent V — concepts, customization, tools, and reference."
 >
-  {
-    groups.map((group) => (
-      <section>
-        <h2>
-          <a href={docsSectionHref(group.section)}>{group.label}</a>
-        </h2>
-        <p class="docs-section-intro">{DOC_SECTION_INTRO[group.section]}</p>
-        <ul class="docs-index-list">
-          {group.entries.map((entry) => (
-            <li>
-              <a href={docsHref(entry.id)}>{entry.data.title}</a>
-              <span>{entry.data.description}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-    ))
-  }
+  <div class="docs-index">
+    {
+      groups.map((group) => (
+        <section class="docs-index-section">
+          <header class="docs-index-head">
+            <a class="docs-index-eyebrow" href={docsSectionHref(group.section)}>{group.label}</a>
+            <p class="docs-index-intro">{DOC_SECTION_INTRO[group.section]}</p>
+          </header>
+          <ul class="docs-index-list">
+            {group.entries.map((entry) => (
+              <li>
+                <a class="docs-index-link" href={docsHref(entry.id)}>
+                  <span class="docs-index-title">{entry.data.title}</span>
+                  <span class="docs-index-desc">{entry.data.description}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))
+    }
+  </div>
 </DocsLayout>
+
+<style>
+  .docs-index {
+    display: grid;
+    gap: 3rem;
+  }
+
+  .docs-index-section + .docs-index-section {
+    border-top: 1px solid var(--border-faint);
+    padding-top: 3rem;
+  }
+
+  .docs-index-head {
+    display: grid;
+    gap: 0.625rem;
+    margin-bottom: 1.75rem;
+  }
+
+  .docs-index-eyebrow {
+    justify-self: start;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-decoration: none;
+    transition: color var(--duration) var(--ease);
+  }
+
+  .docs-index-eyebrow:hover {
+    color: var(--accent-strong);
+  }
+
+  .docs-index-intro {
+    margin: 0;
+    max-width: 60ch;
+    font-size: 1rem;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+
+  .docs-index-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .docs-index-link {
+    display: grid;
+    grid-template-columns: 14rem minmax(0, 1fr);
+    gap: 0.5rem 1.5rem;
+    align-items: baseline;
+    padding: 1rem 1.25rem;
+    text-decoration: none;
+    background: var(--surface);
+    border: 1px solid var(--border-faint);
+    border-radius: 16px;
+    box-shadow: 0 1px 2px rgb(2 8 23 / 0.3), 0 8px 24px rgb(2 8 23 / 0.25);
+    transition:
+      border-color var(--duration) var(--ease),
+      box-shadow var(--duration) var(--ease),
+      transform var(--duration) var(--ease);
+  }
+
+  .docs-index-link:hover {
+    border-color: var(--border);
+    transform: translateY(-1px);
+    box-shadow: 0 1px 2px rgb(2 8 23 / 0.3), 0 12px 32px rgb(2 8 23 / 0.35);
+  }
+
+  .docs-index-title {
+    font-family: var(--font-display);
+    font-size: 0.9375rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--fg);
+    transition: color var(--duration) var(--ease);
+  }
+
+  .docs-index-desc {
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    color: var(--muted);
+  }
+
+  .docs-index-link:hover .docs-index-title {
+    color: var(--accent-strong);
+  }
+
+  @media (max-width: 50rem) {
+    .docs-index-link {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0.25rem;
+    }
+  }
+</style>

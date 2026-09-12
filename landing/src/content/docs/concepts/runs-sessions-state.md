@@ -1,6 +1,6 @@
 ---
 title: Runs, sessions, and state
-description: Learn how chats, invocations, artifacts, receipts, instances, interruption, and cleanup relate on disk.
+description: How chats, invocations, run artifacts, child instances, and interruption map to on-disk state.
 section: concepts
 order: 2
 type: concept
@@ -11,41 +11,41 @@ related:
   - reference/storage
 ---
 
-A workspace, chat, run, and invocation are different levels of state.
+Agent V tracks state at four levels: workspace, chat, run, and invocation.
 
 ## Workspace record
 
-Agent V derives a stable workspace ID from the canonical project path. Under app data, that workspace record contains metadata, sessions, the semantic index, and the sparsegrep index.
+The app derives a stable workspace ID from the canonical project path, so the same folder always maps to the same record. Under app data, each workspace record holds its metadata, sessions, and code indexes.
 
 ## Chat and run
 
-A chat selects one persisted run directory. Its transcript and status survive switching panes and application restarts. The run status records running, cancelled, error, or done, plus the step, update time, mode, workspace, and resumable interruption state.
+A chat points at one persisted run directory. Its transcript and status survive pane switches and app restarts. The run status records one of running, cancelled, error, or done, plus the current step, the last update time, the mode, the workspace, and whether an interruption is resumable.
 
 ## Invocation
 
-Each send starts a new invocation in the existing run. An invocation ID separates live events from late events belonging to the previous turn. Continue starts another invocation from persisted state; it does not rewrite the earlier transcript.
+Every send starts a new invocation inside the existing run. The invocation ID separates live events from late events that still belong to the previous turn. Continue starts a new invocation from persisted state; it never rewrites the earlier transcript.
 
 ## Run artifacts
 
-A run can contain:
+A run directory can contain:
 
-- transcript messages and event history;
-- status;
-- contract.md and plan.md;
+- the transcript (`messages.jsonl`) and event history (`events.jsonl`);
+- run status;
+- `contract.md` and `plan.md`;
 - todo state;
-- goal.json and loop.json for long-lived goals and prompt timers;
+- `goal.json` and `loop.json` for long-lived goals and prompt timers;
 - checkpoint records;
 - tool outputs and summaries;
-- receipt.json with structured activity and write information.
+- `receipt.json` with structured activity and write information.
 
-The renderer can show shortened tool output while full persisted output remains in run storage.
+The renderer may show shortened tool output while the full output stays in run storage.
 
 ## Child instances
 
-An inline Agent instance has its own run ID and parent run ID. It can also record a path scope, worktree path, and worktree branch. Child runs are hidden from the normal top-level list and appear under the parent workflow.
+An inline Agent instance gets its own run ID and a parent run ID. It can also record a path scope, a worktree path, and a worktree branch. Child runs are hidden from the top-level list and appear under the parent workflow.
 
 ## Interruption and cleanup
 
-An orphaned or interrupted run can be marked resumable with an interruption timestamp. Opening that specific chat shows Continue or triggers its configured auto-resume.
+An orphaned or interrupted run can be marked resumable with an interruption timestamp. Opening that chat shows a Continue button, or the configured auto-resume picks it up.
 
-Deleting or cleaning a persisted run is a data operation, not the same as closing a tab. Before cleanup, confirm the run no longer contains the only copy of a plan, transcript, receipt, or evidence needed for support.
+Deleting or cleaning a run is a data operation, not closing a tab. Before cleanup, make sure the run does not hold the only copy of a plan, transcript, receipt, or evidence you need for support.

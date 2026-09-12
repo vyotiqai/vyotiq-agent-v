@@ -13,7 +13,6 @@ allowBuilds:
   onnxruntime-node: true
   protobufjs: true
   sharp: true
-  node-llama-cpp: true
 
 peerDependencyRules:
   allowedVersions:

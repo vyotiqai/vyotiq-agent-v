@@ -38,12 +38,6 @@ export function workspaceSessionsRoot(workspacePath: string): string {
   return join(workspaceMetaDir(workspaceId(canonical)), 'sessions')
 }
 
-/** Trigram Instant Grep index (derived cache — not in the project tree). */
-export function workspaceSparseGrepRoot(workspacePath: string): string {
-  const canonical = canonicalizeWorkspacePath(workspacePath)
-  return join(workspaceMetaDir(workspaceId(canonical)), 'sparsegrep')
-}
-
 function isDirectChildDir(parent: string, child: string): boolean {
   const rel = relative(parent, child)
   return Boolean(rel) && !rel.startsWith('..') && !isAbsolute(rel) && rel === basename(rel)

@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { CodeIndexStore } from '@main/agent/codeindex/store'
-import { createLocalHashEmbedder } from '@main/agent/codeindex/embed'
-import { INDEX_SCAN_CAP, syncCodeIndex } from '@main/agent/codeindex/sync'
+import { syncCodeIndex } from '@main/agent/codeindex/sync'
+import { INDEX_SCAN_CAP } from '@main/agent/codeindex/types'
 
 describe('codeindex paginated sync', () => {
   let dir: string | undefined
@@ -35,41 +35,25 @@ describe('codeindex paginated sync', () => {
     const pageCap = 80
     const total = 150
     const root = buildTree(total)
-    const store = CodeIndexStore.open(root, 32)
-    const embedder = createLocalHashEmbedder(32)
+    const store = CodeIndexStore.openMemory()
 
-    store.replaceFileChunks('pkg0/file0.ts', 'seed', Date.now(), [
-      {
-        startLine: 1,
-        endLine: 1,
-        kind: 'module',
-        name: 'seed',
-        chunkHash: 'seed',
-        embedding: new Float32Array(32),
-        ftsText: 'seeded early'
-      }
-    ])
-
-    const first = await syncCodeIndex(root, store, embedder, { pageCap })
+    const first = await syncCodeIndex(root, store, { pageCap })
     expect(first.partial).toBe(true)
     expect(first.syncComplete).toBe(false)
     expect(first.cursor).toBeTruthy()
     expect(store.getMeta('syncComplete')).toBe('false')
     expect(store.getStatus().fileCount).toBeGreaterThan(0)
-    expect(store.listFilePaths()).toContain('pkg0/file0.ts')
 
     const midCount = store.getStatus().fileCount
     expect(midCount).toBeLessThanOrEqual(pageCap)
 
-    const second = await syncCodeIndex(root, store, embedder, { pageCap })
+    const second = await syncCodeIndex(root, store, { pageCap })
     expect(second.syncComplete).toBe(true)
     expect(store.getMeta('syncComplete')).toBe('true')
     expect(store.getMeta('syncCursor')).toBe('')
 
     const finalCount = store.getStatus().fileCount
-    expect(finalCount).toBeGreaterThan(pageCap)
     expect(finalCount).toBe(total)
-    expect(store.listFilePaths()).toContain('pkg0/file0.ts')
     expect(store.listFilePaths()).toContain(`pkg${Math.floor((total - 1) / 100)}/file${total - 1}.ts`)
     expect(INDEX_SCAN_CAP).toBe(24000)
 
@@ -89,21 +73,12 @@ describe('codeindex paginated sync', () => {
       writeFileSync(join(root, `bulk${Math.floor(i / 100)}`, `f${i}.ts`), `export const x${i} = ${i}\n`, 'utf8')
     }
 
-    const store = CodeIndexStore.open(root, 32)
-    const embedder = createLocalHashEmbedder(32)
-    store.replaceFileChunks('src/keep.ts', 'manual', Date.now(), [
-      {
-        startLine: 1,
-        endLine: 1,
-        kind: 'module',
-        name: 'keep',
-        chunkHash: 'manual',
-        embedding: new Float32Array(32),
-        ftsText: 'keepMe'
-      }
+    const store = CodeIndexStore.openMemory()
+    // Pre-index a file the partial page will not reach — it must survive.
+    store.replaceFileChunks('src/keep.ts', 'manual', Date.now(), 10, [
+      { startLine: 1, endLine: 1, kind: 'module', name: 'keep', ftsBody: 'keepMe' }
     ])
-
-    const partial = await syncCodeIndex(root, store, embedder, { pageCap })
+    const partial = await syncCodeIndex(root, store, { pageCap })
     expect(partial.partial).toBe(true)
     expect(store.listFilePaths()).toContain('src/keep.ts')
 

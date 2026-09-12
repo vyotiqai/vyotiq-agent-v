@@ -13,6 +13,7 @@ export type CompactionVerifyFailureKind =
   | 'missing_done_when'
   | 'missing_constraint'
   | 'low_file_coverage'
+  | 'refusal'
 
 export type CompactionVerifyFailure = {
   kind: CompactionVerifyFailureKind
@@ -243,11 +244,62 @@ export function formatCompactionVerifyFailure(failure: CompactionVerifyFailure):
       return `Missing constraint: ${failure.detail}`
     case 'low_file_coverage':
       return `Low file coverage: ${failure.detail}`
+    case 'refusal':
+      return `Refusal detected: ${failure.detail}`
     default: {
       const _exhaustive: never = failure.kind
       return _exhaustive
     }
   }
+}
+
+/**
+ * First-person inability openers that mark a summarizer reply as a refusal
+ * (e.g. "I can't comply with this request, but I can explain how to write a
+ * session summary...").
+ */
+const REFUSAL_OPENER_RE =
+  /\bI (?:can'?t|cannot|can not|won'?t|will not|am unable to|am not able to|refuse to)\b/i
+
+/** Non-compliance terms that must co-occur with the opener to avoid hedging false positives. */
+const REFUSAL_NONCOMPLIANCE_RE =
+  /\b(?:comply|compliance|help(?:ing)? with|assist(?:ing|ance)? with|refus(?:e|ing)|instead)\b/i
+
+/** How much of the summary's opening prose the refusal scan sees. */
+const REFUSAL_WINDOW_CHARS = 400
+
+/** Co-location window after the opener for the non-compliance term. */
+const REFUSAL_COOCCURRENCE_CHARS = 240
+
+/**
+ * Detect a refusal-style summarizer output anchored on the summary's own
+ * opening prose (leading markdown headings skipped, first two prose lines).
+ *
+ * Tradeoff: scanning only the opening means a refusal quoted deep inside a
+ * genuine summary (e.g. a transcript quote under Key Decisions) is not
+ * rejected — that is deliberate, since rejecting real content is worse than
+ * missing an unusual refusal that opens mid-text. The reverse risk is a
+ * summary that opens by quoting the user's refusal ("User said: 'I can't
+ * comply'"); that rare shape will false-positive, which is acceptable because
+ * verification failure only triggers a retry, not data loss.
+ */
+export function detectSummaryRefusal(summary: string): string | null {
+  const prose: string[] = []
+  let chars = 0
+  for (const line of summary.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || /^#{1,6}\s/.test(trimmed)) continue
+    prose.push(trimmed)
+    chars += trimmed.length
+    if (prose.length >= 2 || chars >= REFUSAL_WINDOW_CHARS) break
+  }
+  const opening = prose.join(' ').slice(0, REFUSAL_WINDOW_CHARS)
+  if (!opening) return null
+  const opener = REFUSAL_OPENER_RE.exec(opening)
+  if (!opener) return null
+  const coOccurrence = opening.slice(opener.index, opener.index + REFUSAL_COOCCURRENCE_CHARS)
+  if (!REFUSAL_NONCOMPLIANCE_RE.test(coOccurrence)) return null
+  return opening.replace(/\s+/g, ' ').slice(0, 160)
 }
 
 /**
@@ -260,6 +312,10 @@ export function verifyCompactionSummary(
   foldedText = ''
 ): CompactionVerifyResult {
   const failures: CompactionVerifyFailure[] = []
+  const refusal = detectSummaryRefusal(summary)
+  if (refusal) {
+    failures.push({ kind: 'refusal', detail: refusal })
+  }
   const claimed = extractClaimedPaths(summary)
   const mentionedFiles: string[] = []
 

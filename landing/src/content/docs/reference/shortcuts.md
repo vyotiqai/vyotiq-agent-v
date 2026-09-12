@@ -20,6 +20,7 @@ Windows and Linux use Ctrl; macOS uses ⌘. Shift chords use Ctrl+Shift or ⌘�
 | Toggle sidebar | Ctrl+B | ⌘B |
 | Search chats | Ctrl+K | ⌘K |
 | New chat | Ctrl+N | ⌘N |
+| Go to Home | Ctrl+Shift+H | ⌘⇧H |
 | Open settings | Ctrl+, | ⌘, |
 | Focus composer | Ctrl+L | ⌘L |
 | Stop run | Esc | Esc |

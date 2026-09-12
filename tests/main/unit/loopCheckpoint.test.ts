@@ -26,16 +26,7 @@ describe('loopCheckpoint', () => {
       step: 12,
       invokeId: 3,
       updatedAt: new Date().toISOString(),
-      truncationContinues: 1,
       overflowRetryUsed: true,
-      identicalStepStreak: 2,
-      lastStepFingerprint: 'fp-abc123',
-      identicalReasoningStreak: 3,
-      lastReasoningFingerprint: 'fp-def456',
-      repetitionAborts: 1,
-      consecutiveToolFailureSteps: 1,
-      recentFailureSignatures: ['sig-1', 'sig-2'],
-      emptyResponseContinues: 1,
       goalNoToolFinishes: 2
     }
     saveLoopCheckpoint(runDir, checkpoint)
@@ -43,8 +34,8 @@ describe('loopCheckpoint', () => {
     const raw = JSON.parse(readFileSync(join(runDir, LOOP_CHECKPOINT_FILENAME), 'utf8')) as unknown
     expect(raw).toMatchObject({
       step: 12,
-      truncationContinues: 1,
-      overflowRetryUsed: true
+      overflowRetryUsed: true,
+      goalNoToolFinishes: 2
     })
     expect(loadLoopCheckpoint(runDir)).toEqual(checkpoint)
   })
@@ -57,7 +48,6 @@ describe('loopCheckpoint', () => {
       step: 0,
       invokeId: 1,
       updatedAt: new Date().toISOString(),
-      truncationContinues: 0,
       overflowRetryUsed: false
     })
     clearLoopCheckpoint(runDir)
@@ -73,12 +63,7 @@ describe('loopCheckpoint', () => {
       step: 105,
       invokeId: 3,
       updatedAt: '2026-08-29T08:07:53.081Z',
-      truncationContinues: 0,
       overflowRetryUsed: false,
-      identicalStepStreak: 1,
-      lastStepFingerprint: '74a5e735e912861f',
-      consecutiveToolFailureSteps: 0,
-      emptyResponseContinues: 0,
       goalNoToolFinishes: 0
     }
     const { writeFileSync } = require('fs') as typeof import('fs')
@@ -89,9 +74,7 @@ describe('loopCheckpoint', () => {
     expect(loaded?.version).toBe(LOOP_CHECKPOINT_VERSION)
     // Invariants survive the migration.
     expect(loaded?.step).toBe(105)
-    expect(loaded?.identicalStepStreak).toBe(1)
-    // recentFailureSignatures postdates v2 files — parses to an empty window.
-    expect(loaded?.recentFailureSignatures).toEqual([])
+    expect(loaded?.goalNoToolFinishes).toBe(0)
     expect(loaded?.usageTotals).toBeUndefined()
   })
 
@@ -103,7 +86,6 @@ describe('loopCheckpoint', () => {
       step: 108,
       invokeId: 3,
       updatedAt: new Date().toISOString(),
-      truncationContinues: 0,
       overflowRetryUsed: false,
       usageTotals: {
         billedInputTokens: 8_688_647,
@@ -127,12 +109,12 @@ describe('loopCheckpoint', () => {
     expect(loaded?.usageTotals?.lastStepInputTokens).toBe(124_395)
   })
 
-  it('parses a v3 checkpoint written before the reasoning-streak fields with additive defaults', () => {
+  it('parses a legacy checkpoint whose removed streak fields are still on disk', () => {
     const runDir = join(root, 'run-v3-legacy')
     mkdirSync(runDir, { recursive: true })
-    // A real v3 file from before the identical-reasoning / repetition-abort
-    // fields: the three additive fields are absent entirely. LOOP_CHECKPOINT_VERSION
-    // is unchanged (still 3), so resume must parse with defaults 0 / '' / 0.
+    // A real v3 file from when the loop carried streak counters: those fields
+    // are gone from the schema, so the parser must strip them and keep the
+    // surviving invariants. LOOP_CHECKPOINT_VERSION is unchanged (still 3).
     const legacy = {
       version: LOOP_CHECKPOINT_VERSION,
       step: 105,
@@ -151,14 +133,13 @@ describe('loopCheckpoint', () => {
 
     const loaded = loadLoopCheckpoint(runDir)
     expect(loaded).not.toBeNull()
-    // Additive fields default — old checkpoints keep parsing/resuming.
-    expect(loaded?.identicalReasoningStreak).toBe(0)
-    expect(loaded?.lastReasoningFingerprint).toBe('')
-    expect(loaded?.repetitionAborts).toBe(0)
-    // Existing invariants survive.
+    // Surviving invariants parse; removed streak fields are stripped.
     expect(loaded?.step).toBe(105)
-    expect(loaded?.identicalStepStreak).toBe(1)
-    expect(loaded?.lastStepFingerprint).toBe('74a5e735e912861f')
+    expect(loaded?.overflowRetryUsed).toBe(false)
+    expect(loaded?.goalNoToolFinishes).toBe(0)
+    expect(loaded?.usageTotals).toBeUndefined()
+    expect(loaded).not.toHaveProperty('identicalStepStreak')
+    expect(loaded).not.toHaveProperty('lastStepFingerprint')
   })
 
   it('warns and returns null when loopCheckpoint.json is corrupt', () => {

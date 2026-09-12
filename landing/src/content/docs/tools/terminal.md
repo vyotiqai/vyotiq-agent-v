@@ -44,4 +44,4 @@ Agent commands and newly created terminal sessions start from the active workspa
 
 The package can fall back when the native PTY module is unavailable. A fallback may not reproduce every interactive terminal feature. Preserve the exact message, selected shell, workspace path, and command when diagnosing it.
 
-Do not kill broad Node, Electron, or pnpm process groups to clear a terminal problem. Close the named session or stop the specific command through its own control. See Browser and terminal issues for ordered checks.
+Do not kill broad Node, Electron, or pnpm process groups to clear a terminal problem. Close the named session or stop the specific command through its own control. See [Browser and terminal issues](/docs/troubleshooting/browser-terminal) for ordered checks.

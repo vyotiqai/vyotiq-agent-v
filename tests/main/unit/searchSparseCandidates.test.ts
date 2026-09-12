@@ -3,13 +3,13 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
-const querySparseCandidates = vi.fn()
+const queryIndexCandidates = vi.fn()
 
-vi.mock('@main/agent/sparsegrep', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@main/agent/sparsegrep')>()
+vi.mock('@main/agent/codeindex', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/agent/codeindex')>()
   return {
     ...actual,
-    querySparseCandidates: (...args: unknown[]) => querySparseCandidates(...args)
+    queryIndexCandidates: (...args: unknown[]) => queryIndexCandidates(...args)
   }
 })
 
@@ -28,20 +28,20 @@ vi.mock('@main/agent/tools/walk', async (importOriginal) => {
 
 import { toolSearch } from '@main/agent/tools/search'
 
-describe('toolSearch sparse candidates', () => {
+describe('toolSearch index candidates', () => {
   let root: string
 
   afterEach(() => {
-    querySparseCandidates.mockReset()
+    queryIndexCandidates.mockReset()
     if (existsSync(root)) rmSync(root, { recursive: true, force: true })
   })
 
-  it('content-searches sparse hits even when they are outside the filename walk prefix', async () => {
+  it('content-searches index hits even when they are outside the filename walk prefix', async () => {
     root = mkdtempSync(join(tmpdir(), 'vyotiq-search-sparse-'))
     writeFileSync(join(root, 'prefix.ts'), 'export const prefixOnly = 1\n', 'utf8')
     mkdirSync(join(root, 'deep'), { recursive: true })
     writeFileSync(join(root, 'deep', 'hit.ts'), 'export const uniqueSparseMarker = 1\n', 'utf8')
-    querySparseCandidates.mockResolvedValue({
+    queryIndexCandidates.mockResolvedValue({
       lookup: { ok: true, paths: ['deep/hit.ts'], mode: 'trigram' },
       fileCount: 2,
       syncComplete: true
@@ -51,10 +51,10 @@ describe('toolSearch sparse candidates', () => {
     expect(out).toMatch(/index=trigram/)
   })
 
-  it('live-scans content when trigram prune returns no candidates', async () => {
+  it('live-scans content when the trigram prune returns no candidates', async () => {
     root = mkdtempSync(join(tmpdir(), 'vyotiq-search-sparse-empty-'))
     writeFileSync(join(root, 'prefix.ts'), 'export const prefixOnly = 1\n', 'utf8')
-    querySparseCandidates.mockResolvedValue({
+    queryIndexCandidates.mockResolvedValue({
       lookup: { ok: true, paths: [], mode: 'trigram' },
       fileCount: 1,
       syncComplete: true

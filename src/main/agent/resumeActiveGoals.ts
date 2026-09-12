@@ -64,7 +64,7 @@ export function resumeActiveGoalsAndLoops(wc: WebContents): void {
         workspacePath,
         runId,
         wc,
-        mode: 'agent',
+        mode: status?.mode ?? 'agent',
         message: {
           role: 'user',
           content: formatGoalContinueMessage(goal.objective),

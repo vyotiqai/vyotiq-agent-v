@@ -29,7 +29,7 @@ The app reads workspace instructions in this order:
 1. Markdown or MDC files under .cursor/rules/
 1. Markdown files under .vyotiq/rules/
 
-Workspace instructions are assembled after user-global rules and therefore win when the two conflict. A single file is capped at 64 KiB, discovery is bounded to 24 files and three nested directory levels, and symlink-style surprises are avoided by the workspace file boundary.
+Workspace instructions are assembled after user-global rules, so they win when the two conflict. A single file is capped at 64 KiB, discovery is bounded to 24 files at up to three nested directory levels, and reads stay inside the workspace file boundary.
 
 ## Frontmatter
 
@@ -49,6 +49,6 @@ alwaysApply: true injects the body automatically, and an omitted value does too 
 
 ## Create and verify
 
-Use /create-rule to create a workspace rule under .vyotiq/rules/, or use the **Rules** editor. Changes clear the rule cache and should affect subsequent agent steps without an app restart.
+Use /create-rule to create a workspace rule under .vyotiq/rules/, or use the **Rules** editor. Rule file writes clear the rule cache, so edits apply to subsequent agent steps without an app restart.
 
 Keep each rule narrow and testable. Do not put API keys, tokens, or private chat content in rule files; workspace rules are ordinary project files and can be committed.

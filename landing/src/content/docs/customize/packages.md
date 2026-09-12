@@ -21,7 +21,7 @@ Before browsing or installing registry content, review the registry URL and ackn
 
 An installed package can expose install state, version state, enablement, update, and removal actions. Use the visible action for that row rather than manually editing the package store.
 
-After an install, update, enable, disable, or removal, the Manage list and affected discovery surfaces should refresh without an app restart.
+After an install, update, enable, disable, or removal, the Manage list and affected discovery surfaces refresh without an app restart.
 
 ## Global versus workspace state
 

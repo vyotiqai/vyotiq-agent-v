@@ -148,21 +148,19 @@ describe('fetchWithRetry', () => {
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
   })
 
-  it('fail-fasts once consecutive exhausted fetches open the host circuit', async () => {
+  it('keeps fetching through consecutive exhausted fetches (circuit never opens)', async () => {
     const fetchMock = vi
       .fn()
       .mockRejectedValue(Object.assign(new Error('reset'), { code: 'ECONNRESET' }))
     vi.stubGlobal('fetch', fetchMock)
-    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) {
+    // No attempt ceiling / circuit trip (cap removed): every call still
+    // reaches the fetch layer and surfaces the raw retriable error.
+    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD + 1; i++) {
       await expect(
         fetchWithRetry('https://down.fetch.test', {}, { maxAttempts: 1 })
       ).rejects.toMatchObject({ code: 'ECONNRESET' })
     }
-    fetchMock.mockClear()
-    await expect(
-      fetchWithRetry('https://down.fetch.test', {}, { maxAttempts: 3 })
-    ).rejects.toBeInstanceOf(CircuitOpenError)
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(CIRCUIT_FAILURE_THRESHOLD + 1)
   })
 
   it('never sends an already-aborted request', async () => {
@@ -177,35 +175,17 @@ describe('fetchWithRetry', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('releases the half-open probe when a non-retriable error fails the attempt', async () => {
+  it('surfaces non-retriable errors directly and keeps fetching afterwards', async () => {
     const url = 'https://probe-release-fetch.test'
-    let now = Date.now()
-    setCircuitNowForTests(() => now)
-    try {
-      const fetchMock = vi
-        .fn()
-        .mockRejectedValue(Object.assign(new Error('reset'), { code: 'ECONNRESET' }))
-      vi.stubGlobal('fetch', fetchMock)
-      for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) {
-        await expect(
-          fetchWithRetry(url, {}, { maxAttempts: 1 })
-        ).rejects.toMatchObject({ code: 'ECONNRESET' })
-      }
-
-      // Open window elapsed: this call is the half-open probe, and it fails
-      // with a non-retriable error (bad URL). The probe slot must be released.
-      now += 60_001
-      fetchMock.mockRejectedValueOnce(new TypeError('Invalid URL'))
-      await expect(fetchWithRetry(url, {}, { maxAttempts: 1 })).rejects.toThrow('Invalid URL')
-
-      // A later call can probe again and close the breaker on success.
-      now += 60_001
-      fetchMock.mockResolvedValueOnce(new Response('ok', { status: 200 }))
-      const res = await fetchWithRetry(url, {})
-      expect(res.status).toBe(200)
-    } finally {
-      resetCircuitBreakersForTests()
-    }
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('Invalid URL'))
+      .mockResolvedValueOnce(new Response('ok', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(fetchWithRetry(url, {}, { maxAttempts: 1 })).rejects.toThrow('Invalid URL')
+    // A later call proceeds normally — no half-open probe slot to wait for.
+    const res = await fetchWithRetry(url, {})
+    expect(res.status).toBe(200)
   })
 })
 
@@ -242,20 +222,19 @@ describe('runWithNetworkRetry', () => {
     expect(fn).toHaveBeenCalledTimes(1)
   })
 
-  it('fail-fasts once the host circuit is open', async () => {
+  it('keeps running through repeated host failures (circuit never opens)', async () => {
     const err = Object.assign(new Error('reset'), { code: 'ECONNRESET' })
-    const fn = vi.fn().mockRejectedValue(err)
+    const fn = vi.fn(async () => {
+      throw err
+    })
     const key = circuitKeyHttp('https://down.circuit.test')
-    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) {
+    // No circuit trip (cap removed): every call still runs the operation.
+    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD + 1; i++) {
       await expect(
         runWithNetworkRetry(fn, { maxAttempts: 1, circuitKey: key })
       ).rejects.toMatchObject({ code: 'ECONNRESET' })
     }
-    fn.mockClear()
-    await expect(runWithNetworkRetry(fn, { maxAttempts: 3, circuitKey: key })).rejects.toBeInstanceOf(
-      CircuitOpenError
-    )
-    expect(fn).not.toHaveBeenCalled()
+    expect(fn).toHaveBeenCalledTimes(CIRCUIT_FAILURE_THRESHOLD + 1)
   })
 
   it('never runs an already-aborted operation', async () => {
@@ -268,37 +247,22 @@ describe('runWithNetworkRetry', () => {
     expect(fn).not.toHaveBeenCalled()
   })
 
-  it('releases the half-open probe when a non-retriable error fails the operation', async () => {
+  it('surfaces non-retriable operation errors directly and keeps running afterwards', async () => {
     const key = circuitKeyHttp('https://probe-release-run.test')
-    let now = Date.now()
-    setCircuitNowForTests(() => now)
-    try {
-      const err = Object.assign(new Error('reset'), { code: 'ECONNRESET' })
-      for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) {
-        await expect(
-          runWithNetworkRetry(
-            async () => {
-              throw err
-            },
-            { maxAttempts: 1, circuitKey: key }
-          )
-        ).rejects.toMatchObject({ code: 'ECONNRESET' })
-      }
-
-      now += 60_001
-      await expect(
-        runWithNetworkRetry(
-          async () => {
-            throw new TypeError('bad operation')
-          },
-          { maxAttempts: 1, circuitKey: key }
-        )
-      ).rejects.toThrow('bad operation')
-
-      now += 60_001
-      await expect(runWithNetworkRetry(async () => 'ok', { circuitKey: key })).resolves.toBe('ok')
-    } finally {
-      resetCircuitBreakersForTests()
-    }
+    let calls = 0
+    await expect(
+      runWithNetworkRetry(
+        async () => {
+          calls += 1
+          if (calls === 1) throw new TypeError('bad operation')
+          return 'ok'
+        },
+        { maxAttempts: 1, circuitKey: key }
+      )
+    ).rejects.toThrow('bad operation')
+    // A later call proceeds normally — no half-open probe slot to wait for.
+    await expect(
+      runWithNetworkRetry(async () => 'ok', { circuitKey: key })
+    ).resolves.toBe('ok')
   })
 })

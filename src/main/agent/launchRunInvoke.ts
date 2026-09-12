@@ -7,6 +7,7 @@ import { hydrateFollowUpsFromDisk, syncFollowUpsToDisk } from './followUpStore'
 import {
   enqueueFollowUp,
   isActive,
+  setPendingMode,
   tryRegisterRunAbort
 } from './runRegistry'
 import { startAgentRunInBackground } from './startAgentRun'
@@ -33,6 +34,7 @@ export function launchRunFollowUpOrStart(input: {
   if (isActive(input.runId)) {
     const queued = enqueueFollowUp(input.runId, input.message)
     if (!queued.ok) return { ok: false, error: queued.error }
+    if (input.mode) setPendingMode(input.runId, input.mode)
     syncFollowUpsToDisk(resolveRunDir(input.workspacePath, input.runId), input.runId)
     return { ok: true }
   }

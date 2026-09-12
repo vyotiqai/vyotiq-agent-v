@@ -100,16 +100,10 @@ vi.mock('@main/workspace/workspaces', () => ({
   })
 }))
 
-describe('load snapshot utility fields', () => {
-  it('includes combinedRssMb and utility perf block', async () => {
+describe('load snapshot fields', () => {
+  it('reports main-process RSS directly', async () => {
     const { collectLoadSnapshot } = await import('@main/perf/loadSnapshot')
     const snap = collectLoadSnapshot()
-    expect(snap.combinedRssMb).toBeGreaterThanOrEqual(snap.rssMb)
-    expect(snap.utility).toEqual(
-      expect.objectContaining({
-        sessionLoaded: expect.any(Boolean),
-        idleUnloadMs: expect.any(Number)
-      })
-    )
+    expect(snap.rssMb).toBeGreaterThan(0)
   })
 })

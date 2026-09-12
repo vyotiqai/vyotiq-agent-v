@@ -2,65 +2,180 @@
 import BaseLayout from '../layouts/BaseLayout.astro'
 import SiteFooter from '../components/SiteFooter.astro'
 import SiteHeader from '../components/SiteHeader.astro'
-import { landingAnalytics } from '../lib/analytics'
 import { SITE_PRODUCT } from '../lib/site'
 
-const analytics = landingAnalytics()
-const analyticsHost = analytics ? new URL(analytics.src).host : null
+// Analytics is a build-time opt-in: no script tag is emitted unless both
+// variables are set at build time. See src/lib/analytics.ts.
+const analytics =
+  import.meta.env.PUBLIC_ANALYTICS_SRC && import.meta.env.PUBLIC_ANALYTICS_DOMAIN
+    ? { src: import.meta.env.PUBLIC_ANALYTICS_SRC, domain: import.meta.env.PUBLIC_ANALYTICS_DOMAIN }
+    : null
 ---
 
 <BaseLayout
-  title={`Website privacy — ${SITE_PRODUCT}`}
-  description="How the Agent V website stores a theme preference and when cookieless analytics is included in a build."
+  title={`Privacy — ${SITE_PRODUCT}`}
+  description={`What the ${SITE_PRODUCT} website and desktop app store on your machine, what leaves it, and under which conditions.`}
 >
   <SiteHeader />
-  <main id="main-content" class="wrap py-14 md:py-20" tabindex="-1">
-    <article class="legal-page">
-      <p class="eyebrow"><strong>§</strong> Website</p>
-      <h1>Website privacy</h1>
-      <p>
-        This page describes the public Agent V website. Product data stored by the Agent V
-        application is documented in
-        <a href="/docs/concepts/privacy-data">Privacy and data storage</a>.
+  <main id="main-content" class="wrap">
+    <header class="page-head">
+      <p class="eyebrow">Privacy</p>
+      <h1>Privacy</h1>
+      <p class="lede">
+        A plain inventory of what this website and the {SITE_PRODUCT} desktop app store, where the
+        data lives, and what leaves your machine. Everything below is checked against the source
+        code.
       </p>
+    </header>
 
-      <h2>Theme preference</h2>
-      <p>
-        The color theme control stores a first-party <code>vyotiq-theme</code> value in
-        <code>localStorage</code> when you choose light or dark. Choosing system removes that
-        value. This is essential presentation state. It is not a third-party cookie, and this
-        site does not show a cookie banner for it.
-      </p>
-
-      <h2>Analytics</h2>
-      {
-        analytics ? (
+    <section class="block" aria-labelledby="website">
+      <p class="mono" id="website">01 · This website</p>
+      <div class="prose">
+        <p>
+          The site stores one thing in your browser: your light or dark theme preference, kept in
+          <code>localStorage</code> under the key <code>vyotiq-theme</code>. It is first-party, it
+          never leaves your browser, and no cookies are set for it.
+        </p>
+        {analytics ? (
           <p>
-            This site build loads a cookieless analytics script from <code>{analyticsHost}</code>
-            for <code>{analytics.domain}</code>. The script is included only because both
-            <code>PUBLIC_ANALYTICS_SRC</code> and <code>PUBLIC_ANALYTICS_DOMAIN</code> were set
-            at build time. It is not used for advertising, and this site does not set advertising
-            cookies.
+            The site also runs basic, cookieless analytics. Requests carry no cookies and record no
+            identifiers; we use them to count page views, nothing more.
           </p>
         ) : (
           <p>
-            This site build does not load an analytics script. Analytics is optional and ships
-            only when an operator sets <code>PUBLIC_ANALYTICS_SRC</code> and
-            <code>PUBLIC_ANALYTICS_DOMAIN</code> at build time. When those variables are unset,
-            no tracker is injected.
+            The site currently runs no analytics and sets no cookies. If that ever changes, this
+            page will say so.
           </p>
-        )
-      }
+        )}
+      </div>
+    </section>
 
-      <h2>What this site does not do</h2>
-      <p>
-        The website does not set a cookie banner or advertising cookies. It does not sell
-        personal information. The terms that govern use of the site and the open-source
-        application are in <a href="/terms">Terms of Service</a>. Security contacts for the
-        project remain on <a href="/docs/concepts/security">Security</a>.
-      </p>
-    </article>
+    <section class="block" aria-labelledby="app-data">
+      <p class="mono" id="app-data">02 · App data on your machine</p>
+      <div class="prose">
+        <p>
+          {SITE_PRODUCT} is a desktop app. Its data lives in your per-user application data folder
+          (<code>%APPDATA%\vyotiq</code> on Windows, the equivalent folder on macOS and Linux).
+          Settings are stored there as <code>settings.json</code>, and each workspace keeps its
+          session record under <code>workspaces/&lt;id&gt;/sessions/&lt;run&gt;/</code>:
+          <code>messages.jsonl</code> for the conversation transcript and <code>events.jsonl</code>
+          for telemetry event records. Both are ordinary files on your disk.
+        </p>
+        <p>
+          Browser screenshots and downloaded files the app collects are also kept under that
+          application data folder, not inside your repository.
+        </p>
+      </div>
+    </section>
+
+    <section class="block" aria-labelledby="workspace">
+      <p class="mono" id="workspace">03 · Inside the workspace</p>
+      <div class="prose">
+        <p>
+          Some agent state is written next to your code: long-term memory notes live in
+          <code>.vyotiq/memory/</code> inside the repository you open, and derived search indexes in
+          <code>.vyotiq/</code>. These folders belong to your project tree, so how you commit, share,
+          or delete them is up to you.
+        </p>
+      </div>
+    </section>
+
+    <section class="block" aria-labelledby="outbound">
+      <p class="mono" id="outbound">04 · What leaves your machine</p>
+      <div class="prose">
+        <p>
+          <strong>Model requests.</strong> When you run a task, the prompt and the repository
+          context it needs are sent to the model provider endpoint you have configured. {SITE_PRODUCT}
+          does not route these requests through its own servers.
+        </p>
+        <p>
+          <strong>Crash and error reports.</strong> The app can send error reports to Sentry, but
+          only when two conditions hold at once: the build includes a Sentry DSN, and telemetry is
+          switched on in the app settings. Reports are error events, not chat transcripts. Personal
+          data is explicitly excluded (<code>sendDefaultPii: false</code>), and every event is
+          scrubbed by a filter before it is sent. If either condition is missing, nothing is
+          initialized and nothing is sent.
+        </p>
+        <p>
+          <strong>Update checks.</strong> The app checks for new versions on the project's GitHub
+          Releases repository (<code>vyotiqai/vyotiq-agent-v-releases</code>). Automatic download is
+          disabled: the app tells you a release exists and does nothing until you choose to get it.
+        </p>
+      </div>
+    </section>
+
+    <section class="block" aria-labelledby="credentials">
+      <p class="mono" id="credentials">05 · Credentials</p>
+      <div class="prose">
+        <p>
+          API keys and tokens are kept out of <code>settings.json</code> and stored in the system
+          credential storage instead. They are not written into plain settings files.
+        </p>
+      </div>
+    </section>
+
+    <section class="block" aria-labelledby="questions">
+      <p class="mono" id="questions">06 · Questions</p>
+      <div class="prose">
+        <p>
+          For questions about this page, write to <a class="text-link" href="mailto:support@vyotiq.com">support@vyotiq.com</a>.
+          The documentation covers the details in more depth:
+          <a class="text-link" href="/docs/concepts/privacy-data">how Agent V handles your data</a> and
+          <a class="text-link" href="/docs/concepts/security">the security model</a>.
+        </p>
+      </div>
+    </section>
   </main>
   <SiteFooter />
 </BaseLayout>
 
+<style>
+  .page-head {
+    padding: var(--space-9, 96px) 0 var(--space-6, 32px);
+    max-width: 720px;
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(2.5rem, 5vw, 3.5rem);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin: var(--space-4, 16px) 0 var(--space-5, 24px);
+  }
+
+  .lede {
+    color: var(--muted);
+    font-size: 1.0625rem;
+    line-height: 1.65;
+    margin: 0;
+  }
+
+  .block {
+    border-top: 1px solid var(--border-faint);
+    padding: var(--space-6, 32px) 0;
+    max-width: 720px;
+  }
+
+  .mono {
+    margin: 0 0 var(--space-4, 16px);
+  }
+
+  .prose p {
+    line-height: 1.7;
+    margin: 0 0 var(--space-4, 16px);
+  }
+
+  .prose p:last-child {
+    margin-bottom: 0;
+  }
+
+  .prose code {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 0.875em;
+    background: var(--well);
+    border: 1px solid var(--border-faint);
+    border-radius: 8px;
+    padding: 0.125em 0.375em;
+  }
+</style>

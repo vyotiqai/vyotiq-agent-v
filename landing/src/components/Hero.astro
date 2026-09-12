@@ -1,42 +1,300 @@
 ---
+import LandingIcon from './LandingIcon.astro'
 import { SITE_PRODUCT } from '../lib/site'
-import { githubRelease } from '../lib/githubRelease'
-import ReleaseInstallers from './ReleaseInstallers.astro'
-
-const version = githubRelease.version
-const platforms = 'Windows, macOS, Linux'
-const panels = ['Files', 'Browser', 'Terminal', 'Changes', 'Pull Request', 'Plan']
 ---
 
-<section id="overview" class="home-hero wrap" aria-labelledby="home-title">
-  <ul class="hero-meta" aria-label="Release facts">
-    {version ? <li>v{version}</li> : null}
-    <li>{platforms}</li>
-    <li>GPL-3.0</li>
-  </ul>
-  <h1 id="home-title">The coding workspace for real repositories.</h1>
-  <div class="hero-foot">
-    <p>
-      {SITE_PRODUCT} runs a natural-language agent next to the tools real work needs:
-      <span class="hero-copy-strong">files, terminal, browser, Git, and pull requests</span> in
-      one window. You pick the model, your code stays on your machine, and every change waits
-      for your review.
-    </p>
-    <div class="hero-foot-actions">
-      <ReleaseInstallers />
+<section class="hero glow-hero" aria-labelledby="home-title">
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <p class="eyebrow mono">
+        <strong>{SITE_PRODUCT}</strong> — coding agent
+      </p>
+      <h1 id="home-title" class="hero-title">
+        A coding agent that <span class="gradient-text">plans before it changes code</span>.
+      </h1>
+      <p class="hero-sub">
+        It runs on your machine, works in real repositories, and uses the model keys you
+        configure. Nothing ships without your review.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#download">Download Agent V</a>
+        <a class="text-link mono" href="/docs/start/quickstart">
+          Read the quickstart
+          <LandingIcon name="arrow-right" size={12} />
+        </a>
+      </div>
+    </div>
+
+    <div class="hero-visual">
+      <div class="window" aria-hidden="true">
+        <div class="titlebar">
+          <span class="dots">
+            <i></i><i></i><i></i>
+          </span>
+          <span class="titlebar-label mono">Agent V</span>
+        </div>
+        <div class="frame">
+          <aside class="rail">
+            <span class="rail-label mono">Sessions</span>
+            <span class="item active"></span>
+            <span class="item"></span>
+            <span class="item"></span>
+          </aside>
+          <div class="pane">
+            <div class="pane-head mono">Plan</div>
+            <ul class="plan">
+              <li class="done">
+                <span class="tick"><LandingIcon name="check" size={9} /></span>
+                <span class="line"></span>
+              </li>
+              <li class="doing">
+                <span class="tick"></span>
+                <span class="line long"></span>
+              </li>
+              <li>
+                <span class="tick"></span>
+                <span class="line"></span>
+              </li>
+            </ul>
+            <div class="composer">
+              <span class="composer-hint mono">Composer</span>
+              <span class="composer-line"></span>
+              <span class="composer-send"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="visual-note mono">Schematic — the app window, not a screenshot</p>
     </div>
   </div>
-  <div class="hero-panels">
-    <span class="hero-panels-label">Dock panels</span>
-    <ul aria-label="The six dock panels">
-      {
-        panels.map((panel, index) => (
-          <li>
-            <strong aria-hidden="true">{String(index + 1).padStart(2, '0')}</strong>
-            {panel}
-          </li>
-        ))
-      }
-    </ul>
-  </div>
 </section>
+
+<style>
+  .hero {
+    position: relative;
+  }
+
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: 4rem;
+    align-items: center;
+    padding-top: 6.5rem;
+    padding-bottom: 7rem;
+  }
+
+  .hero-title {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: clamp(2.4rem, 5vw, 3.5rem);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    margin: 0 0 1.25rem;
+    max-width: 15ch;
+  }
+
+  .hero-sub {
+    color: var(--muted);
+    font-size: 1.05rem;
+    line-height: 1.6;
+    margin: 0 0 2rem;
+    max-width: 44ch;
+  }
+
+  .hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+  }
+
+  .hero-visual {
+    min-width: 0;
+  }
+
+  /* ---- CSS-drawn app window ---- */
+
+  .window {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-card, 0 1px 2px rgb(2 8 23 / 0.3), 0 8px 24px rgb(2 8 23 / 0.25));
+    overflow: hidden;
+  }
+
+  .titlebar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.625rem 0.875rem;
+    background: var(--well);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .dots {
+    display: flex;
+    gap: 0.375rem;
+  }
+
+  .dots i {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--border);
+  }
+
+  .titlebar-label {
+    font-size: 0.6875rem;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+  }
+
+  .frame {
+    display: grid;
+    grid-template-columns: 34% 1fr;
+  }
+
+  .rail {
+    background: var(--well);
+    border-right: 1px solid var(--border);
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .rail-label {
+    font-size: 0.625rem;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 0.25rem;
+  }
+
+  .item {
+    height: 0.5rem;
+    background: var(--bg);
+    border: none;
+    border-radius: var(--radius-sm);
+    transition: background-color var(--duration, 150ms) var(--ease, ease);
+  }
+
+  .item.active {
+    background: var(--accent-soft);
+  }
+
+  .pane {
+    padding: 0.75rem;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+  }
+
+  .pane-head {
+    font-size: 0.625rem;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .plan {
+    list-style: none;
+    margin: 0;
+    padding: 0.625rem;
+    background: var(--well);
+    border: none;
+    border-radius: var(--radius-md);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    flex: 1;
+  }
+
+  .plan li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .tick {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 0.875rem;
+    height: 0.875rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    flex: none;
+  }
+
+  .doing .tick {
+    border-color: var(--accent);
+  }
+
+  .line {
+    height: 0.4375rem;
+    width: 70%;
+    background: color-mix(in srgb, var(--muted) 16%, transparent);
+    border: none;
+    border-radius: 999px;
+  }
+
+  .line.long {
+    width: 88%;
+  }
+
+  .done .line {
+    background: var(--accent-soft);
+  }
+
+  .composer {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.625rem;
+  }
+
+  .composer-hint {
+    font-size: 0.625rem;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    flex: none;
+  }
+
+  .composer-line {
+    height: 0.375rem;
+    width: 45%;
+    background: color-mix(in srgb, var(--muted) 16%, transparent);
+    border-radius: var(--radius-sm);
+  }
+
+  .composer-send {
+    margin-left: auto;
+    width: 1rem;
+    height: 1rem;
+    background: var(--accent);
+    border: none;
+    border-radius: 999px;
+  }
+
+  .visual-note {
+    margin: 0.75rem 0 0;
+    font-size: 0.6875rem;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+  }
+
+  @media (max-width: 900px) {
+    .hero-grid {
+      grid-template-columns: 1fr;
+      gap: 3rem;
+      padding-top: 4rem;
+      padding-bottom: 4rem;
+    }
+  }
+</style>

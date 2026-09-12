@@ -1,6 +1,6 @@
 ---
 title: Built-in tools reference
-description: "The built-in tool catalog: 59 current tools plus 2 legacy aliases, grouped by job with mode, approval, output, and limit boundaries."
+description: "The built-in tool catalog: 60 registered tools grouped by job, with mode, approval, and output boundaries."
 section: reference
 order: 2
 type: reference
@@ -11,9 +11,9 @@ related:
   - customize/mcp
 ---
 
-Names are `TOOL_REGISTRY` keys. Ask/Plan hide mutating tools; see modes. MCP server tools are extra and Agent-only. `web_fetch` and `web_search` are legacy transcript bodies only: they are not in this list.
+Names are the tool registry keys. Ask mode hides mutating tools; Plan mode allows only plan writes. Tool approval applies on top of mode filtering, so a tool that a mode hides cannot be enabled by an approval. MCP server tools are extra and appear in Agent runs only. `web_fetch` and `web_search` are not in the catalog: they exist only as legacy transcript bodies.
 
-Every call is schema-validated. Renderer transcripts can contain a preview while full output remains in run storage. `Tool approval` applies after mode filtering; a hidden or mode-denied tool cannot be enabled by an approval.
+Every call is schema-validated against the registered tool schema before it runs.
 
 ## Files
 
@@ -30,7 +30,7 @@ Every call is schema-validated. Renderer transcripts can contain a preview while
 - `search`: filename or content substring (first hit per file). Defaults to 40 hits; pass maxResults to widen.
 - `glob`: workspace-relative glob paths. Defaults to 100 paths; pass maxResults to widen.
 - `grep`: regex with matching lines. Defaults to 60 results; pass maxResults to widen.
-- `codebase_search`: semantic search over the local code index (not memory RAG)
+- `codebase_search`: ranked search over the local code index (hybrid, semantic, or lexical) — not memory RAG
 
 ## Browser
 
@@ -76,7 +76,7 @@ Embedded agent browser. Page text is untrusted. After navigate/search/mutations,
 - `memory_read`
 - `memory_write`
 
-See Memory files.
+See [Memory files](/docs/tools/memory).
 
 ## Skill
 
@@ -84,7 +84,7 @@ See Memory files.
 
 ## MCP meta
 
-These are built-ins about connected servers, not the servers’ own tools.
+These are built-ins about connected servers, not the servers' own tools.
 
 - `mcp_list_tools`
 - `request_mcp_tools`
@@ -94,18 +94,18 @@ These are built-ins about connected servers, not the servers’ own tools.
 - `mcp_list_prompts`
 - `mcp_get_prompt`
 
-## Questions, todos, modes
+## Questions, todos, plans, and goals
 
 - `ask_question`: typed form in the transcript; blocks until answer, skip, or timeout
-- `todo_write`: this run’s task list
-- `create_plan`: write plan.md and contract.md
-- `create_goal`: start or replace this chat’s long-lived goal
+- `todo_write`: this run's task list
+- `create_plan`: publish plan.md (and the contract copy) for this run
+- `create_goal`: start or replace this chat's long-lived goal (`goal.json`)
 - `update_goal`: mark the goal complete or resume it after a user pause
 - `switch_mode`: only present when Automatic mode switching is on
 
 ## Instances
 
-Root run only (depth 1). Git worktrees isolate writes; without a worktree, `path_scope` is required.
+Root runs only (depth 1). Git worktrees isolate writes; without a worktree, `path_scope` is required.
 
 - `spawn_agent_instance`
 - `await_agent_instance`

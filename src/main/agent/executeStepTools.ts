@@ -31,7 +31,7 @@ import {
   unreadExistingEditPaths
 } from './loopPolicy'
 import { searchHitPathsFromResult } from './tools/search'
-import { codebaseSearchHitPathsFromResult } from './codeindex/search'
+import { codebaseSearchHitPathsFromResult } from './codeindex/query'
 import { readPathArg } from './tools/argAccess'
 import { hasJavaScriptProject, hasTypeScriptProject } from './tools/diagnostics'
 import { ensureToolCallIds } from './dedupeToolCalls'

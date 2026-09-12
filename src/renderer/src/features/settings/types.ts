@@ -25,8 +25,6 @@ export type SettingsErrorField =
   | 'apikey'
   | 'keepTurns'
   | 'autoCompactThreshold'
-  | 'runSpendLimit'
-  | 'runTokenLimit'
   | null
 
 export type SettingsViewProps = {

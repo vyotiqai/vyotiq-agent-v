@@ -11,9 +11,9 @@ export type CodeIndexCardState = 'ready' | 'building' | 'degraded' | 'off'
  * Map the live code-index runtime phase to the context-card state.
  * `idle` is the runtime's own neutral phase (initial state, and it reports
  * `idle` when the index is disabled — see workspaceIndex.ts) so it maps to the
- * documented neutral value 'off'. `fallback_hash` / `error` are degraded, the
- * in-flight phases (`downloading` / `loading` / `indexing`) are building.
- * Never invents status: unknown input falls through to 'off'.
+ * documented neutral value 'off'. `error` is degraded, the in-flight phase
+ * (`syncing`) is building. Never invents status: unknown input falls through
+ * to 'off'.
  */
 export function mapCodeIndexState(
   phase: CodeIndexModelPhase,
@@ -23,11 +23,8 @@ export function mapCodeIndexState(
   switch (phase) {
     case 'ready':
       return 'ready'
-    case 'downloading':
-    case 'loading':
-    case 'indexing':
+    case 'syncing':
       return 'building'
-    case 'fallback_hash':
     case 'error':
       return 'degraded'
     case 'idle':

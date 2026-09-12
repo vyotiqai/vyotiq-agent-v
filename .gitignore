@@ -120,3 +120,8 @@ scripts/tmp-*
 # snapshots taken by prior working sessions. Machine-local, never publish.
 dist-verify*/
 tmp-os-evidence/
+
+# Local agent session scratch (2026-09-12): worktree merge leftovers, audit notes
+tmp-merge/
+.vyotiq/audit-modes/
+.vyotiq/fixes/

@@ -2,7 +2,6 @@
  * Chromium per-process RSS/CPU rollup (app.getAppMetrics).
  * Pure summarizers stay Electron-free so unit tests can feed fixtures.
  */
-import type { EmbedUtilityPerfStats } from '../agent/codeindex/embedUtilityClient'
 
 export const PROCESS_METRICS_RSS_WARN_MB = 1024
 export const PROCESS_METRICS_CPU_WARN = 15
@@ -28,17 +27,10 @@ export type ProcessMetricsSnapshot = {
   totalWorkingSetMb: number
   maxCpuPercent: number
   byType: ProcessMetricsByType[]
-  embedUtility: {
-    pid: number | null
-    sessionLoaded: boolean
-    rssMb: number | null
-    heapUsedMb: number | null
-  }
 }
 
 export function summarizeProcessMetrics(
   metrics: ProcessMetricInput[],
-  embedUtility: EmbedUtilityPerfStats,
   at: string = new Date().toISOString()
 ): ProcessMetricsSnapshot {
   const byTypeMap = new Map<string, ProcessMetricsByType>()
@@ -75,13 +67,7 @@ export function summarizeProcessMetrics(
     at,
     totalWorkingSetMb: Math.round(totalKb / 1024),
     maxCpuPercent: Math.round(maxCpuPercent * 10) / 10,
-    byType,
-    embedUtility: {
-      pid: embedUtility.pid,
-      sessionLoaded: embedUtility.sessionLoaded,
-      rssMb: embedUtility.rssMb,
-      heapUsedMb: embedUtility.heapUsedMb
-    }
+    byType
   }
 }
 
@@ -92,8 +78,7 @@ export function shouldLogProcessMetrics(
 ): boolean {
   const hot =
     snap.totalWorkingSetMb > PROCESS_METRICS_RSS_WARN_MB ||
-    snap.maxCpuPercent > PROCESS_METRICS_CPU_WARN ||
-    (snap.embedUtility.rssMb ?? 0) > PROCESS_METRICS_RSS_WARN_MB
+    snap.maxCpuPercent > PROCESS_METRICS_CPU_WARN
   if (!hot) return false
   if (lastLogAtMs <= 0) return true
   return nowMs - lastLogAtMs >= PROCESS_METRICS_LOG_INTERVAL_MS
@@ -126,9 +111,8 @@ export function readAppProcessMetrics(): ProcessMetricInput[] {
 }
 
 export function collectProcessMetricsSnapshot(
-  embedUtility: EmbedUtilityPerfStats,
   metrics: ProcessMetricInput[] = readAppProcessMetrics(),
   at?: string
 ): ProcessMetricsSnapshot {
-  return summarizeProcessMetrics(metrics, embedUtility, at)
+  return summarizeProcessMetrics(metrics, at)
 }

@@ -2,66 +2,201 @@
 import BaseLayout from '../layouts/BaseLayout.astro'
 import SiteFooter from '../components/SiteFooter.astro'
 import SiteHeader from '../components/SiteHeader.astro'
-import { SITE_BRAND, SITE_PRODUCT } from '../lib/site'
+import { SITE_PRODUCT } from '../lib/site'
 ---
 
 <BaseLayout
-  title={`Terms of Service — ${SITE_PRODUCT}`}
-  description="The terms that apply to the Agent V website and the open-source Agent V desktop application."
+  title={`Terms — ${SITE_PRODUCT}`}
+  description={`The terms that apply to the ${SITE_PRODUCT} website and to using the ${SITE_PRODUCT} desktop application, in plain language.`}
 >
   <SiteHeader />
-  <main id="main-content" class="wrap py-14 md:py-20" tabindex="-1">
-    <article class="legal-page">
-      <p class="eyebrow"><strong>§</strong> Legal</p>
-      <h1>Terms of Service</h1>
-      <p>
-        These terms apply to the {SITE_BRAND} website and to your use of the {SITE_PRODUCT}
-        desktop application and its download services. Last updated: September 11, 2026.
+  <main id="main-content" class="wrap">
+    <header class="page-head">
+      <p class="eyebrow">Terms</p>
+      <h1>Terms of service</h1>
+      <p class="lede">
+        These terms cover the {SITE_PRODUCT} website and your use of the {SITE_PRODUCT} desktop
+        application. They are written to be read, not skimmed past.
       </p>
+    </header>
 
-      <h2>The software</h2>
-      <p>
-        {SITE_PRODUCT} is free and open-source software licensed under the GNU General Public
-        License v3.0 (GPL-3.0). You may use, study, modify, and redistribute it under that
-        license, available in the <a
-          href="https://github.com/vyotiqai/vyotiq-agent-v/blob/main/LICENSE"
-          rel="noopener noreferrer">LICENSE file</a
-        > of the source repository. Nothing in these terms restricts rights the license grants
-        you.
-      </p>
+    <section class="block" aria-labelledby="software">
+      <p class="mono" id="software">01 · The software</p>
+      <div class="prose">
+        <p>
+          {SITE_PRODUCT} is free, open-source desktop software published by Vyotiq. The license is
+          the GNU General Public License, version 3 or later (GPL-3.0-or-later), as recorded in the
+          repository's <code>package.json</code> and <code>LICENSE</code> file. You can read, modify,
+          and redistribute the software under that license.
+        </p>
+      </div>
+    </section>
 
-      <h2>No warranty</h2>
-      <p>
-        The website and the application are provided "as is", without warranty of any kind.
-        The authors and copyright holders are not liable for any damages arising from their
-        use, to the maximum extent permitted by law. The application operates on your
-        repositories and systems at your direction: review changes before committing and keep
-        backups of work you cannot afford to lose.
-      </p>
+    <section class="block" aria-labelledby="license">
+      <p class="mono" id="license">02 · The license governs the software</p>
+      <div class="prose">
+        <p>
+          The GPL is the agreement that governs the software itself. Nothing on this page changes,
+          restricts, or replaces it. If anything here seemed to conflict with the GPL for your use of
+          the software, the GPL would control.
+        </p>
+      </div>
+    </section>
 
-      <h2>Acceptable use</h2>
-      <p>
-        Do not use the website or the application to break the law, infringe others' rights,
-        distribute malware, or attack systems you do not have permission to test. You are
-        responsible for how you configure model providers, MCP servers, and the commands the
-        agent runs in your workspaces.
-      </p>
+    <section class="block" aria-labelledby="repositories">
+      <p class="mono" id="repositories">03 · Your repositories are yours</p>
+      <div class="prose">
+        <p>
+          You keep all rights to your code, your files, and your data. {SITE_PRODUCT} runs locally
+          and works on the repositories you open; the app never claims a license over your content by
+          virtue of editing it. What you do with your repositories, including committing or sharing
+          the <code>.vyotiq</code> folder the app writes, stays your call.
+        </p>
+      </div>
+    </section>
 
-      <h2>Your data</h2>
-      <p>
-        The application stores its data locally on your machine. The website stores a theme
-        preference and, when enabled, cookieless analytics, see
-        <a href="/privacy">Website privacy</a>. The application's data handling is documented
-        in <a href="/docs/concepts/privacy-data">Privacy and data storage</a>.
-      </p>
+    <section class="block" aria-labelledby="privacy">
+      <p class="mono" id="privacy">04 · Privacy</p>
+      <div class="prose">
+        <p>
+          The <a class="text-link" href="/privacy">privacy page</a> lists what is stored and what
+          leaves your machine, including the conditions under which error reports are sent. Those
+          statements are part of these terms by reference.
+        </p>
+      </div>
+    </section>
 
-      <h2>Changes</h2>
-      <p>
-        We may update these terms as the product evolves. Material changes are announced on
-        this page. Questions: <a href="mailto:support@vyotiq.com">support@vyotiq.com</a>.
-      </p>
-    </article>
+    <section class="block" aria-labelledby="downloads">
+      <p class="mono" id="downloads">05 · Downloads and updates</p>
+      <div class="prose">
+        <p>
+          Installers and updates are distributed through the project's GitHub Releases repository
+          (<code>vyotiqai/vyotiq-agent-v-releases</code>). GitHub's own terms apply to your use of
+          GitHub's service. The app checks that repository for new versions and never downloads one
+          without your approval.
+        </p>
+      </div>
+    </section>
+
+    <section class="block" aria-labelledby="website">
+      <p class="mono" id="website">06 · The website</p>
+      <div class="prose">
+        <p>
+          The documentation, changelog, and other pages on vyotiq.com are provided as-is for
+          information. We may add, change, or remove pages over time.
+        </p>
+      </div>
+    </section>
+
+    <section class="block" aria-labelledby="warranty">
+      <p class="mono" id="warranty">07 · No warranty</p>
+      <div class="prose">
+        <p>
+          As the GPL states, the program is provided "as is", without warranty of any kind, unless
+          required by applicable law. It may have defects, and you use it at your own risk. Keep
+          backups and review changes the agent makes to your files.
+        </p>
+      </div>
+    </section>
+
+    <section class="block" aria-labelledby="liability">
+      <p class="mono" id="liability">08 · Limitation of liability</p>
+      <div class="prose">
+        <p>
+          As the GPL states, and except when required by applicable law, neither the copyright holder
+          nor contributors are liable to you for damages, including general, special, incidental, or
+          consequential damages, arising out of the use of or inability to use the program. This
+          section follows the license; it does not narrow any protection the GPL gives you.
+        </p>
+      </div>
+    </section>
+
+    <section class="block" aria-labelledby="use">
+      <p class="mono" id="use">09 · Acceptable use</p>
+      <div class="prose">
+        <p>
+          Use the software and this site lawfully and respect other people's rights. Do not use the
+          site to distribute malware, attack its availability, or misrepresent who published the
+          software.
+        </p>
+      </div>
+    </section>
+
+    <section class="block" aria-labelledby="changes">
+      <p class="mono" id="changes">10 · Changes to these terms</p>
+      <div class="prose">
+        <p>
+          We may revise these terms as the product changes. The GPL license for the software itself
+          can only change as the GPL allows. The date below shows when this page was last updated.
+        </p>
+        <p class="mono updated">Last updated: 2026-09-12</p>
+      </div>
+    </section>
+
+    <section class="block" aria-labelledby="contact">
+      <p class="mono" id="contact">11 · Contact</p>
+      <div class="prose">
+        <p>
+          Questions about these terms go to
+          <a class="text-link" href="mailto:support@vyotiq.com">support@vyotiq.com</a>.
+        </p>
+      </div>
+    </section>
   </main>
   <SiteFooter />
 </BaseLayout>
 
+<style>
+  .page-head {
+    padding: var(--space-9, 96px) 0 var(--space-6, 32px);
+    max-width: 720px;
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(2.5rem, 5vw, 3.5rem);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin: var(--space-4, 16px) 0 var(--space-5, 24px);
+  }
+
+  .lede {
+    color: var(--muted);
+    font-size: 1.0625rem;
+    line-height: 1.65;
+    margin: 0;
+  }
+
+  .block {
+    border-top: 1px solid var(--border-faint);
+    padding: var(--space-6, 32px) 0;
+    max-width: 720px;
+  }
+
+  .mono {
+    margin: 0 0 var(--space-4, 16px);
+  }
+
+  .prose p {
+    line-height: 1.7;
+    margin: 0 0 var(--space-4, 16px);
+  }
+
+  .prose p:last-child {
+    margin-bottom: 0;
+  }
+
+  .prose code {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 0.875em;
+    background: var(--well);
+    border: 1px solid var(--border-faint);
+    border-radius: 8px;
+    padding: 0.125em 0.375em;
+  }
+
+  .updated {
+    color: var(--muted);
+  }
+</style>

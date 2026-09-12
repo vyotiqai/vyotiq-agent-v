@@ -22,8 +22,6 @@ import {
   formatTerminalSessionOutput
 } from '@main/agent/tools/terminal'
 import { terminalResultOk } from '@main/agent/tools'
-import { nextConsecutiveToolFailureSteps } from '@main/agent/loopPolicy'
-import type { ChatMessage } from '@shared/ipc'
 
 /**
  * Fixtures are the verbatim outcomes from run 1de9344a (Aether OS build,
@@ -314,55 +312,5 @@ describe('terminalResultOk (barrel wiring)', () => {
     const content =
       'cwd: w\nshell: powershell\n\nstderr:\nerror[E0308]: mismatched types\nexit_code: 101'
     expect(terminalResultOk('cargo test --release', content)).toBe(false)
-  })
-})
-
-function toolMsg(content: string, ok: boolean, toolName = 'terminal'): ChatMessage {
-  return {
-    role: 'tool',
-    toolCallId: 'c1',
-    toolName,
-    ok,
-    content
-  } as unknown as ChatMessage
-}
-
-describe('nextConsecutiveToolFailureSteps', () => {
-  it('mixed step (success + failure) resets the streak — the documented all-failed contract', () => {
-    const step = [toolMsg('10 tasks', true, 'todo_write'), toolMsg('probe failed', false)]
-    expect(nextConsecutiveToolFailureSteps(3, step)).toBe(0)
-  })
-
-  it('all-failed step extends the streak', () => {
-    const step = [toolMsg('err a', false), toolMsg('err b', false)]
-    expect(nextConsecutiveToolFailureSteps(2, step)).toBe(3)
-  })
-
-  it('all-ok step resets the streak', () => {
-    expect(nextConsecutiveToolFailureSteps(3, [toolMsg('fine', true)])).toBe(0)
-  })
-
-  it('abort/interrupt stubs are not tool results — a stub-only step resets', () => {
-    expect(nextConsecutiveToolFailureSteps(2, [toolMsg('Cancelled', false)])).toBe(0)
-    expect(nextConsecutiveToolFailureSteps(2, [toolMsg('Interrupted', false)])).toBe(0)
-  })
-
-  it('ignores non-tool messages', () => {
-    const step = [
-      { role: 'assistant', content: 'text' },
-      toolMsg('err', false)
-    ] as unknown as ChatMessage[]
-    expect(nextConsecutiveToolFailureSteps(1, step)).toBe(2)
-  })
-
-  it('empty step output resets (no evidence of failure)', () => {
-    expect(nextConsecutiveToolFailureSteps(2, [])).toBe(0)
-  })
-
-  it('streak reaching 4 still stops via loopStopDecision — genuinely stuck runs stop', () => {
-    const step = [toolMsg('err', false)]
-    let streak = 0
-    for (let i = 0; i < 4; i++) streak = nextConsecutiveToolFailureSteps(streak, step)
-    expect(streak).toBe(4)
   })
 })

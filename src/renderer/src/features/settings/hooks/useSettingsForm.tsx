@@ -121,9 +121,7 @@ export function useSettingsForm({
       customUrl: 'custom-url-error',
       apikey: 'apikey-error',
       keepTurns: 'keep-turns-error',
-      autoCompactThreshold: 'auto-compact-threshold-error',
-      runSpendLimit: 'run-spend-limit-error',
-      runTokenLimit: 'run-token-limit-error'
+      autoCompactThreshold: 'auto-compact-threshold-error'
     }
     const id = idByField[errorField]
     if (!id) return {}

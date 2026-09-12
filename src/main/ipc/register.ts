@@ -295,8 +295,12 @@ import {
   CompactionUnavailableError,
   CompactionVerifyFailedError
 } from '../agent/compactRun'
-import { resolveWrites, planRewindWrites, getWriteCheckpointMeta } from '../agent/checkpoints'
-import { prepareRewindAndReplaceUserMessage, prepareRewindToUserMessage } from '../agent/rewindRun'
+import { resolveWrites, getWriteCheckpointMeta } from '../agent/checkpoints'
+import {
+  prepareRewindAndReplaceUserMessage,
+  prepareRewindToUserMessage,
+  planRewindToUserMessage
+} from '../agent/rewindRun'
 import { resolveRunDir, workspaceSessionsRoot, workspaceBrowserArtifactsDir } from '@main/storage/paths'
 import {
   collectStorageReport,
@@ -1711,8 +1715,13 @@ export function registerIpc(): void {
         if (isActive(req.runId)) {
           return failExpected('Stop the run before reverting.', IPC.chatRewindPreview, req.runId)
         }
-        const runDir = resolveRunDir(req.workspacePath, req.runId)
-        return ok(planRewindWrites(runDir, req.userMessageIndex))
+        return ok(
+          await planRewindToUserMessage({
+            workspacePath: req.workspacePath,
+            runId: req.runId,
+            userMessageIndex: req.userMessageIndex
+          })
+        )
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         if (/userMessageIndex|run not found/i.test(msg)) {
@@ -2107,7 +2116,7 @@ export function registerIpc(): void {
             const launched = launchRunFollowUpOrStart({
               workspacePath: req.workspacePath,
               runId: req.runId,
-              mode: 'agent',
+              mode: loadStatus(runDir)?.mode ?? 'agent',
               wc,
               message: {
                 role: 'user',

@@ -80,11 +80,6 @@ describe('loadSnapshot', () => {
     expect(typeof snap.eventLoopLagMs).toBe('number')
     expect(typeof snap.heapUsedMb).toBe('number')
     expect(typeof snap.rssMb).toBe('number')
-    expect(typeof snap.combinedRssMb).toBe('number')
-    expect(snap.utility).toMatchObject({
-      pid: null,
-      sessionLoaded: false
-    })
     expect(snap.heapUsedMb).toBeGreaterThan(0)
     expect(snap.rssMb).toBeGreaterThan(0)
   })

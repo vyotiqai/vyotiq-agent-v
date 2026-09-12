@@ -52,17 +52,15 @@ import { planGoalRelaunch } from './goalRelaunchPlan'
  * they survive across invokes of the same runId within one app session).
  * Timers are cleared when the run is intentionally aborted (see clearGoalRelaunchState).
  */
-const relaunchCounts = new Map<string, number>()
 const relaunchTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
-/** Cancel a pending delayed relaunch and drop the run's relaunch budget state. */
+/** Cancel a pending delayed relaunch and drop the run's relaunch state. */
 export function clearGoalRelaunchState(runId: string): void {
   const timer = relaunchTimers.get(runId)
   if (timer) {
     clearTimeout(timer)
     relaunchTimers.delete(runId)
   }
-  relaunchCounts.delete(runId)
 }
 
 export function isTerminalAgentRunEvent(ev: AgentEvent): boolean {
@@ -261,30 +259,20 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
         const plan = planGoalRelaunch({
           terminalStatus,
           persisted,
-          goalActive: goal?.status === 'active',
-          relaunchCount: relaunchCounts.get(runId) ?? 0
+          goalActive: goal?.status === 'active'
         })
         if (plan.kind === 'blocked_quota') {
           logger.warn('Goal run stopped on provider quota exhaustion — not relaunching', {
             scope: 'goal',
             correlationId: runId
           })
-        } else if (plan.kind === 'budget_exhausted') {
-          logger.warn(
-            'Goal run relaunch budget exhausted — leaving goal active for user continue',
-            {
-              scope: 'goal',
-              correlationId: runId,
-              maxAutoRelaunches: plan.maxAutoRelaunches
-            }
-          )
         } else if (goal && plan.kind !== 'none' && !isActive(runId)) {
           const executeRelaunch = (): void => {
             launchRunFollowUpOrStart({
               workspacePath,
               runId,
               wc,
-              mode: 'agent',
+              mode: persisted?.mode ?? 'agent',
               message: {
                 role: 'user',
                 content: formatGoalContinueMessage(goal.objective),
@@ -301,7 +289,6 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
             })
           }
           if (plan.kind === 'delayed') {
-            relaunchCounts.set(runId, (relaunchCounts.get(runId) ?? 0) + 1)
             logger.info(
               `Circuit open — delaying goal relaunch ${Math.round(plan.delayMs / 1000)}s`,
               { scope: 'goal', correlationId: runId, retryAfterMs: plan.delayMs }

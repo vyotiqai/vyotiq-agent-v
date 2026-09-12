@@ -1,16 +1,10 @@
 /**
- * Shared warm/debounce for codeindex + sparsegrep.
+ * Shared warm/debounce for the code index.
  * Indexes live under Electron userData/workspaces/{id}/ — not `.vyotiq/`.
- * Warm is serialized via the global index job queue (codeindex then sparsegrep).
+ * Warm is serialized via the global index job queue.
  */
 import { existsSync, rmSync } from 'fs'
-import { ensureCodeIndexSynced, disposeCodeIndexWorkspace, isHashEmbedderModelId } from './codeindex'
-import {
-  ensureSparseGrepSynced,
-  disposeSparseGrepWorkspace,
-  SPARSE_GREP_SYNC_DEBOUNCE_MS,
-  SPARSE_GREP_SCAN_CAP
-} from './sparsegrep'
+import { ensureCodeIndexSynced, disposeCodeIndexWorkspace } from './codeindex'
 import { throwIfAborted } from './tools/walk'
 import { legacyCodeindexRoot, legacySparsegrepRoot } from './indexStoragePaths'
 import { isAbortError } from '../../shared/errors'
@@ -23,33 +17,21 @@ import {
   IndexQueueFullError
 } from './indexJobQueue'
 import { clearIndexSyncProgress } from './codeindex/indexProgress'
-import { setCodeIndexRuntimeStatus } from './codeindex/modelStatus'
+import { setCodeIndexRuntimeStatus } from './codeindex/status'
 import { isHeapPressureHigh } from '../perf/heapPressure'
-import {
-  advanceWarmPagingState,
-  warmProgressKey,
-  type WarmPagingState
-} from './workspaceIndexPaging'
+import { workspaceIndexStorageDir } from './indexStoragePaths'
+import { join } from 'path'
 
-export const WORKSPACE_INDEX_DEBOUNCE_MS = SPARSE_GREP_SYNC_DEBOUNCE_MS
+export const WORKSPACE_INDEX_DEBOUNCE_MS = 1500
 
 function workspaceKey(workspaceRoot: string): string {
   return process.platform === 'win32' ? workspaceRoot.toLowerCase() : workspaceRoot
 }
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
-const pagingTimers = new Map<string, ReturnType<typeof setTimeout>>()
-const pagingState = new Map<string, WarmPagingState>()
 const abortControllers = new Map<string, AbortController>()
 /** Worktrees torn down permanently — block warm/search after instance finalize. */
 const permanentlyDisposedKeys = new Set<string>()
-
-function clearPaging(key: string): void {
-  const t = pagingTimers.get(key)
-  if (t) clearTimeout(t)
-  pagingTimers.delete(key)
-  pagingState.delete(key)
-}
 
 function controllerFor(workspaceRoot: string): AbortController {
   const key = workspaceKey(workspaceRoot)
@@ -100,27 +82,31 @@ function combineSignals(...signals: Array<AbortSignal | null | undefined>): Abor
   return ac.signal
 }
 
-/** Drop pre-migration SQLite caches that lived inside the project tree. */
-export function removeLegacyWorkspaceIndexDirs(workspaceRoot: string): void {
-  for (const root of [legacyCodeindexRoot(workspaceRoot), legacySparsegrepRoot(workspaceRoot)]) {
-    if (!existsSync(root)) continue
-    try {
-      rmSync(root, { recursive: true, force: true })
-      logger.info('Removed legacy in-workspace index dir', { scope: 'workspaceIndex', root })
-    } catch (err) {
-      logger.warn('Failed to remove legacy index dir', { scope: 'workspaceIndex', root, err })
-    }
+function removeDirBestEffort(root: string, label: string): void {
+  if (!existsSync(root)) return
+  try {
+    rmSync(root, { recursive: true, force: true })
+    logger.info('Removed legacy index dir', { scope: 'workspaceIndex', root, label })
+  } catch (err) {
+    logger.warn('Failed to remove legacy index dir', { scope: 'workspaceIndex', root, err })
   }
 }
 
+/** Drop pre-migration caches: in-workspace dirs and the obsolete sparse store. */
+export function removeLegacyWorkspaceIndexDirs(workspaceRoot: string): void {
+  removeDirBestEffort(legacyCodeindexRoot(workspaceRoot), 'legacy-codeindex')
+  removeDirBestEffort(legacySparsegrepRoot(workspaceRoot), 'legacy-sparsegrep')
+  removeDirBestEffort(
+    join(workspaceIndexStorageDir(workspaceRoot), 'sparsegrep'),
+    'obsolete-sparsegrep'
+  )
+}
+
 /**
- * Warm indexes (boot / workspace open / scheduled sync) via a single background job.
- *
- * The code index is warmed by default (`warmCodeIndex` !== false) so it is
- * dense-ready on the agent's first `codebase_search` — boot passes no options.
- * The sync runs as a background job (concurrency-1 queue, embedding in the
- * utility process) and the embedder unloads after 5 idle minutes, so boot
- * responsiveness and steady-state memory stay bounded.
+ * Warm the code index (boot / workspace open / scheduled sync) via a single
+ * background job. Sync is an incremental SQLite pass — no models, no child
+ * process. Large workspaces page: an incomplete sync resumes on the next warm
+ * (every mutation and every codebase_search re-warms).
  */
 export function warmWorkspaceIndexes(
   workspaceRoot: string,
@@ -131,9 +117,9 @@ export function warmWorkspaceIndexes(
   const key = workspaceKey(workspaceRoot)
   if (permanentlyDisposedKeys.has(key)) return
   // Near the V8 ceiling, background index work must not allocate: the walk,
-  // hashing and utility RPC bookkeeping run on main, and the last-resort GC
-  // that follows an allocation failure is a hard process abort. Indexes simply
-  // stay warm-as-is; every mutation/search retries once pressure drops.
+  // hashing and SQLite writes run on main, and the last-resort GC that follows
+  // an allocation failure is a hard process abort. Indexes simply stay
+  // warm-as-is; every mutation/search retries once pressure drops.
   if (isHeapPressureHigh()) {
     logger.debug('Workspace index warm skipped under heap pressure', {
       scope: 'workspaceIndex',
@@ -155,134 +141,38 @@ export function warmWorkspaceIndexes(
         throwIfAborted(signal)
         logger.debug('Workspace index warm started', { scope: 'workspaceIndex', warmCodeIndex })
         throwIfAborted(signal)
-        // Deferred: the embedding model is only loaded on the first codebase_search.
-        const code: Awaited<ReturnType<typeof ensureCodeIndexSynced>> = warmCodeIndex
-          ? await ensureCodeIndexSynced(workspaceRoot, {
-              signal,
-              keepIndexingStatus: true
-            })
-          : { entry: null, sync: null, disabled: false }
-        if (code.sync) {
-          const changed = code.sync.indexed > 0 || code.sync.removed > 0
+        if (!warmCodeIndex) {
+          clearIndexSyncProgress()
+          setCodeIndexRuntimeStatus({ phase: 'idle', progress: 1, message: null, error: null })
+          return
+        }
+        const { sync } = await ensureCodeIndexSynced(workspaceRoot, {
+          signal,
+          keepIndexingStatus: true
+        })
+        if (sync) {
+          const changed = sync.indexed > 0 || sync.removed > 0
           ;(changed ? logger.info.bind(logger) : logger.debug.bind(logger))('Code index warm sync', {
             scope: 'workspaceIndex',
             workspace: workspaceRoot,
-            scanned: code.sync.scanned,
-            indexed: code.sync.indexed,
-            skipped: code.sync.skipped,
-            removed: code.sync.removed,
-            complete: code.sync.syncComplete,
-            cursor: code.sync.cursor,
-            model: code.entry?.embedder.modelId
+            scanned: sync.scanned,
+            indexed: sync.indexed,
+            skipped: sync.skipped,
+            removed: sync.removed,
+            complete: sync.syncComplete,
+            cursor: sync.cursor
           })
         }
-        throwIfAborted(signal)
-        const sparse = await ensureSparseGrepSynced(workspaceRoot, {
-          signal,
-          pageCap: SPARSE_GREP_SCAN_CAP
-        })
-        if (sparse.sync) {
-          const sparseChanged = sparse.sync.indexed > 0 || sparse.sync.removed > 0
-          ;(sparseChanged ? logger.info.bind(logger) : logger.debug.bind(logger))('Sparse grep warm sync', {
-            scope: 'workspaceIndex',
-            workspace: workspaceRoot,
-            scanned: sparse.sync.scanned,
-            indexed: sparse.sync.indexed,
-            skipped: sparse.sync.skipped,
-            removed: sparse.sync.removed,
-            complete: sparse.sync.syncComplete,
-            cursor: sparse.sync.cursor
-          })
-        }
-        const codeDone = code.disabled === true || code.sync == null || code.sync.syncComplete
-        const sparseDone = sparse.sync == null || sparse.sync.syncComplete
-        if (!codeDone || !sparseDone) {
-          const progressKey = warmProgressKey({
-            codeScanned: code.sync?.scanned,
-            codeIndexed: code.sync?.indexed,
-            codeComplete: code.sync?.syncComplete,
-            codeCursor: code.sync?.cursor,
-            sparseScanned: sparse.sync?.scanned,
-            sparseIndexed: sparse.sync?.indexed,
-            sparseComplete: sparse.sync?.syncComplete,
-            sparseCursor: sparse.sync?.cursor
-          })
-          const next = advanceWarmPagingState(pagingState.get(key), progressKey)
-          pagingState.set(key, next)
-          if (next.stalled) {
-            logger.warn('Workspace index warm stalled (no paging progress)', {
-              scope: 'workspaceIndex',
-              workspace: workspaceRoot,
-              key: progressKey
-            })
-            clearPaging(key)
-            setCodeIndexRuntimeStatus({
-              phase: 'error',
-              modelId: code.entry?.indexModelId ?? code.entry?.embedder.modelId ?? '',
-              message: 'Index paging stalled — no progress',
-              error:
-                'Index paging made no progress. Click Reindex workspace to retry.',
-              progress: null,
-              indexProgress: null
-            })
-            return
-          }
-          logger.info('Workspace index warm paging backoff', {
-            scope: 'workspaceIndex',
-            workspace: workspaceRoot,
-            backoffMs: next.backoffMs,
-            stallCount: next.stallCount
-          })
-          setCodeIndexRuntimeStatus({
-            phase: 'indexing',
-            modelId: code.entry?.indexModelId ?? code.entry?.embedder.modelId ?? '',
-            message: `Indexes paging — continuing in ${Math.round(next.backoffMs / 1000)}s`,
-            error: null,
-            progress: 0.7,
-            indexProgress: null
-          })
-          const prevPaging = pagingTimers.get(key)
-          if (prevPaging) clearTimeout(prevPaging)
-          pagingTimers.set(
-            key,
-            setTimeout(() => {
-              pagingTimers.delete(key)
-              warmWorkspaceIndexes(workspaceRoot)
-            }, next.backoffMs)
-          )
-          return
-        }
-        clearPaging(key)
         clearIndexSyncProgress()
-        const queryModelId = code.entry?.embedder.modelId ?? ''
-        const indexModelId = code.entry?.indexModelId ?? queryModelId
-        const queryHash = Boolean(queryModelId) && isHashEmbedderModelId(queryModelId)
-        const keptNeural =
-          queryHash && Boolean(indexModelId) && !isHashEmbedderModelId(indexModelId)
         setCodeIndexRuntimeStatus({
-          phase: queryHash
-            ? 'fallback_hash'
-            : code.disabled
-              ? 'idle'
-              : 'ready',
-          modelId: indexModelId,
-          message: keptNeural
-            ? `Neural embedder unavailable — kept ${indexModelId} (lexical search)`
-            : code.sync && sparse.sync
-              ? `Indexes ready · code ${code.sync.indexed} upd/${code.sync.skipped} skip · sparse ${sparse.sync.indexed} upd/${sparse.sync.skipped} skip`
-              : 'Indexes ready',
+          phase: 'ready',
+          message: sync ? `Index ready · ${sync.indexed} updated · ${sync.skipped} skipped` : 'Index ready',
           error: null,
           progress: 1,
           indexProgress: null
         })
       } catch (err) {
-        if (signal.aborted || isAbortError(err)) {
-          // A preempted/aborted page leaves a partial fingerprint in pagingState.
-          // The next run would compare against it and could falsely stall the
-          // workspace forever; drop it so the next attempt starts clean.
-          if (signal.aborted) clearPaging(key)
-          return
-        }
+        if (signal.aborted || isAbortError(err)) return
         throw err
       }
     }
@@ -294,10 +184,17 @@ export function warmWorkspaceIndexes(
       scope: 'workspaceIndex',
       reason: logErrorSummary(err)
     })
+    setCodeIndexRuntimeStatus({
+      phase: 'error',
+      message: null,
+      error: 'Workspace index sync failed. Click Reindex workspace to retry.',
+      progress: null,
+      indexProgress: null
+    })
   })
 }
 
-/** Debounced sync after mutations — one timer warms both indexes. */
+/** Debounced sync after mutations. */
 export function scheduleWorkspaceIndexSync(
   workspaceRoot: string,
   delayMs: number = WORKSPACE_INDEX_DEBOUNCE_MS
@@ -333,7 +230,6 @@ export function disposeWorkspaceIndexes(
   const prev = timers.get(key)
   if (prev) clearTimeout(prev)
   timers.delete(key)
-  clearPaging(key)
   dropPendingByCoalesceKey(`warm:${key}`)
   dropPendingByCoalesceKey(`reindex:${key}`)
   const ac = abortControllers.get(key)
@@ -342,16 +238,12 @@ export function disposeWorkspaceIndexes(
     abortControllers.delete(key)
   }
   disposeCodeIndexWorkspace(workspaceRoot)
-  disposeSparseGrepWorkspace(workspaceRoot)
 }
 
 /** Test helper. */
 export function clearWorkspaceIndexSyncTimers(): void {
   for (const t of timers.values()) clearTimeout(t)
   timers.clear()
-  for (const t of pagingTimers.values()) clearTimeout(t)
-  pagingTimers.clear()
-  pagingState.clear()
   for (const ac of abortControllers.values()) ac.abort()
   abortControllers.clear()
   permanentlyDisposedKeys.clear()

@@ -478,21 +478,20 @@ describe('mcp_read_resource / mcp_get_prompt content and failures', () => {
     expect(listConnectedMcpServerIdsForTests()).not.toContain('docs')
   })
 
-  it('fail-fasts MCP invokes after consecutive transport failures open the circuit', async () => {
+  it('returns transport errors on every MCP invoke (circuit never opens)', async () => {
     const callTool = vi.fn(async () => {
       throw Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' })
     })
     registerMcpSessionForTests('brk', mockClient({ callTool }))
     const signal = new AbortController().signal
-    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) {
+    // No attempt ceiling / circuit trip (cap removed): every invoke reaches
+    // the transport and surfaces the raw error; the session is kept for retry.
+    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD + 1; i++) {
       const result = await invokeMcpTool('brk', 'echo', {}, signal)
       expect(result.ok).toBe(false)
       expect(result.content).toContain('session kept for retry')
     }
-    const blocked = await invokeMcpTool('brk', 'echo', {}, signal)
-    expect(blocked.ok).toBe(false)
-    expect(blocked.content).toMatch(/Circuit open for mcp-invoke:brk/)
-    expect(callTool).toHaveBeenCalledTimes(CIRCUIT_FAILURE_THRESHOLD)
+    expect(callTool).toHaveBeenCalledTimes(CIRCUIT_FAILURE_THRESHOLD + 1)
   })
 })
 

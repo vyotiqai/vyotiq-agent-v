@@ -88,21 +88,10 @@ describe('workspace:agentContext', () => {
 
   it('maps code-index runtime phases to card states', () => {
     expect(mapCodeIndexState('ready', true)).toBe('ready')
-    expect(mapCodeIndexState('downloading', true)).toBe('building')
-    expect(mapCodeIndexState('loading', true)).toBe('building')
-    expect(mapCodeIndexState('indexing', true)).toBe('building')
-    expect(mapCodeIndexState('fallback_hash', true)).toBe('degraded')
+    expect(mapCodeIndexState('syncing', true)).toBe('building')
     expect(mapCodeIndexState('error', true)).toBe('degraded')
     expect(mapCodeIndexState('idle', true)).toBe('off')
-    for (const phase of [
-      'idle',
-      'ready',
-      'downloading',
-      'loading',
-      'indexing',
-      'fallback_hash',
-      'error'
-    ] as const) {
+    for (const phase of ['idle', 'ready', 'syncing', 'error'] as const) {
       expect(mapCodeIndexState(phase, false)).toBe('off')
     }
   })

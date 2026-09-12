@@ -10,9 +10,6 @@ import { needsYouDedupeKey } from '../../shared/ipc'
 
 export type QuestionSender = (request: AgentQuestionRequest) => void
 
-/** Default wait for user answers before auto-denying (15 minutes). */
-export const AGENT_QUESTION_TIMEOUT_MS = 900_000
-
 /** Debug heartbeat while a question is parked waiting for the user (5 min — a parked prompt is expected, not an incident). */
 export const AGENT_QUESTION_HEARTBEAT_MS = 300_000
 
@@ -22,7 +19,7 @@ const pending = new Map<
   string,
   {
     resolve: (answers: AgentQuestionAnswer[]) => void
-    /** Clears timeout/abort listeners then rejects — used by cancelPendingQuestions. */
+    /** Clears abort listeners then rejects — used by cancelPendingQuestions. */
     cancel: (err: Error) => void
     runId: string
     invokeId?: number
@@ -178,14 +175,11 @@ export function askQuestionThroughRenderer(
   }
 
   return new Promise<AgentQuestionAnswer[]>((resolve, reject) => {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined
+    // No answer timeout (run-stopping cap removed — user decision): the
+    // question waits indefinitely for the user; abort/cancel still applies.
     let heartbeatId: ReturnType<typeof setInterval> | undefined
     let settled = false
     const clearWaiters = (): void => {
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId)
-        timeoutId = undefined
-      }
       if (heartbeatId !== undefined) {
         clearInterval(heartbeatId)
         heartbeatId = undefined
@@ -209,9 +203,6 @@ export function askQuestionThroughRenderer(
     function onAbort(): void {
       cancel(abortQuestionError())
     }
-    function onTimeout(): void {
-      settle([])
-    }
     if (signal.aborted) {
       reject(abortQuestionError())
       return
@@ -224,7 +215,6 @@ export function askQuestionThroughRenderer(
       request
     })
     signal.addEventListener('abort', onAbort, { once: true })
-    timeoutId = setTimeout(onTimeout, AGENT_QUESTION_TIMEOUT_MS)
     logger.info('Agent question waiting for user', {
       scope: 'agent',
       code: 'AGENT_QUESTION_WAIT',

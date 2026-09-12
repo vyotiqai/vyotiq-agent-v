@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import {
-  QUOTA_EXHAUSTED_STOP_CODE,
-  isQuotaExhaustedMessage,
-  parseQuotaResetHorizon,
-  quotaExhaustedStopMessage
-} from '@main/agent/quotaGate'
+import { isQuotaExhaustedMessage } from '@main/agent/quotaGate'
 import { parseCircuitRetryAfterMs } from '@main/agent/circuitBreaker'
-import { planGoalRelaunch, MAX_AUTO_RELAUNCH_PER_RUN } from '@main/agent/goalRelaunchPlan'
+import { planGoalRelaunch } from '@main/agent/goalRelaunchPlan'
 import type { RunStatus } from '@shared/ipc'
 
 // Verbatim from %APPDATA%/vyotiq/logs/vyotiq.log run 6265fa90,
@@ -27,7 +22,7 @@ const resumableCircuitStatus: RunStatus = {
 
 const resumableQuotaStatus: RunStatus = {
   ...resumableCircuitStatus,
-  error: quotaExhaustedStopMessage('6 days')
+  error: INCIDENT_QUOTA_MESSAGE
 }
 
 describe('quotaGate', () => {
@@ -49,37 +44,12 @@ describe('quotaGate', () => {
     expect(isQuotaExhaustedMessage('socket hang up')).toBe(false)
     expect(isQuotaExhaustedMessage('')).toBe(false)
   })
-
-  it('parses the reset horizon', () => {
-    expect(parseQuotaResetHorizon(INCIDENT_QUOTA_MESSAGE)).toBe('6 days')
-    expect(parseQuotaResetHorizon('usage limit reached. resets in 2 days')).toBe('2 days')
-    expect(parseQuotaResetHorizon('resets in 36 hours')).toBe('36 hours')
-    // Minutes shape is real: opencode "5-hour usage limit reached. Resets in
-    // 32min." (runs f086bc66 / c3290c9d, 2026-09-01) degraded to "resets in
-    // soon" without a minutes branch.
-    expect(parseQuotaResetHorizon('5-hour usage limit reached. Resets in 32min.')).toBe(
-      '32 minutes'
-    )
-    expect(parseQuotaResetHorizon('quota exceeded')).toBeNull()
-  })
-
-  it('exposes the stop code and a user-facing message with the reset horizon', () => {
-    expect(QUOTA_EXHAUSTED_STOP_CODE).toBe('QUOTA_EXHAUSTED')
-    expect(quotaExhaustedStopMessage('6 days')).toContain('resets in 6 days')
-    expect(quotaExhaustedStopMessage('1 day')).toContain('resets in 1 day')
-    expect(quotaExhaustedStopMessage(null)).toContain('resets in soon')
-    // "Weekly" lied for 5-hour windows — the gate must not name a plan shape.
-    expect(
-      quotaExhaustedStopMessage('32 minutes').startsWith('Provider usage limit reached')
-    ).toBe(true)
-  })
 })
 
 describe('planGoalRelaunch (goal relaunch gate)', () => {
   const base = {
     terminalStatus: 'error' as const,
-    goalActive: true,
-    relaunchCount: 0
+    goalActive: true
   }
 
   it('blocks relaunch on a quota-exhausted stop even with an active goal', () => {
@@ -109,19 +79,16 @@ describe('planGoalRelaunch (goal relaunch gate)', () => {
     expect(far).toEqual({ kind: 'delayed', delayMs: 120_000 })
   })
 
-  it('returns budget_exhausted after MAX_AUTO_RELAUNCH_PER_RUN delayed relaunches', () => {
-    expect(MAX_AUTO_RELAUNCH_PER_RUN).toBeGreaterThan(0)
-    expect(planGoalRelaunch({ ...base, persisted: resumableCircuitStatus, relaunchCount: 5 })).toEqual(
-      { kind: 'budget_exhausted', maxAutoRelaunches: MAX_AUTO_RELAUNCH_PER_RUN }
-    )
-    expect(
-      planGoalRelaunch({
-        ...base,
-        persisted: resumableCircuitStatus,
-        relaunchCount: 2,
-        maxAutoRelaunches: 2
+  it('keeps planning delayed relaunches no matter how many relaunches already happened (cap removed)', () => {
+    // No relaunch budget (run-stopping caps removed): the plan API no longer
+    // takes a relaunch count, and repeated calls keep yielding the same
+    // delayed relaunch until the goal completes or the user stops it.
+    for (let i = 0; i < 10; i++) {
+      expect(planGoalRelaunch({ ...base, persisted: resumableCircuitStatus })).toEqual({
+        kind: 'delayed',
+        delayMs: 58_000
       })
-    ).toEqual({ kind: 'budget_exhausted', maxAutoRelaunches: 2 })
+    }
   })
 
   it('still relaunches immediately for plain network stops', () => {

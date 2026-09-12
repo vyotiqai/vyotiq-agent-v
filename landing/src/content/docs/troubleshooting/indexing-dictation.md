@@ -1,6 +1,6 @@
 ---
 title: Indexing and dictation issues
-description: Recover from model downloads, hash fallback, reindex failures, Ollama embedding errors, and voice setup problems.
+description: Recover from reindex failures, search gaps, and voice setup problems.
 section: troubleshooting
 order: 5
 type: troubleshooting
@@ -11,26 +11,21 @@ related:
   - reference/storage
 ---
 
-## Semantic search is unavailable
+## Codebase search returns nothing
 
 Open Settings → Indexing. Confirm Enable codebase index is on. When off, `codebase_search` is removed from the tool catalog.
 
 Read Index status:
 
-- downloading or loading: wait for the active model phase.
-- indexing: inspect file and chunk progress.
-- `fallback_hash`: dense embedding failed and local hash is serving as fallback.
+- syncing: inspect file progress and wait for the first pass to finish.
+- ready: the index is built; search results cover production source only.
 - error: preserve the message before changing settings.
 
-Use Reindex workspace once after fixing the cause.
+Use Reindex workspace once after fixing the cause. grep and glob keep working without the index through a live scan.
 
-## Local dense model download fails
+## Reindex fails
 
-Confirm Auto-download model, network access, disk space, and model-directory permissions. A partial model must pass required-file validation before it becomes ready.
-
-## Ollama embedder fails
-
-Confirm Ollama is reachable and Ollama embedding model exists on that host. The default model is nomic-embed-text. A remote Ollama host receives the indexed text.
+Confirm the workspace folder exists and is readable, and that disk space is available. The index lives under app data, not the project tree.
 
 ## Dictation mic or transcription fails
 
@@ -50,4 +45,4 @@ The supported local IDs are whisper-tiny.en and whisper-small.en. **Local** tran
 
 ## Collect evidence
 
-Record app version, platform, selected embedder or dictation engine, model ID, phase, progress text, and exact error. Do not delete indexes or caches before capturing the error unless the recovery step specifically requires it.
+Record app version, platform, dictation engine, index phase, progress text, and exact error. Do not delete indexes or caches before capturing the error unless the recovery step specifically requires it.

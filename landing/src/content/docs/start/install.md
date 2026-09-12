@@ -10,7 +10,7 @@ related:
   - concepts/privacy-data
 ---
 
-The Agent V homepage has download buttons for each installer on the latest GitHub Release at https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/latest. There is no app store listing.
+Packaged installers are published on the latest GitHub Release at https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/latest. There is no app store listing.
 
 Installers and the Start-menu shortcut are named Vyotiq: Agent V is the assistant inside that app. Electron is the packager and runtime, not the product name.
 
@@ -64,7 +64,7 @@ The installer is per-user (perMachine: false), creates Start menu and desktop sh
 1. Open Vyotiq-<version>-<arch>.dmg and install the application.
 1. Launch Vyotiq.
 
-The current package configuration leaves notarize: false for local packs. GitHub Releases notarize the macOS DMG only when Apple ID, app-specific password, and team ID secrets are present at pack time. Unsigned builds can require an explicit Gatekeeper confirmation before first launch.
+electron-builder.yml sets notarize: false for local packs. Whether a published DMG is notarized depends on the release pipeline having Apple credentials configured. Unsigned builds can require an explicit Gatekeeper confirmation before first launch.
 
 ## Install on Linux
 

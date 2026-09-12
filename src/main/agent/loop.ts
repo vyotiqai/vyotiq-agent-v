@@ -14,8 +14,12 @@ import { resolveProviderChatBaseUrl, seedModelsFor } from '../../shared/provider
 import { formatError, isAbortError } from '../../shared/errors'
 import { logger, logErrorSummary } from '../../shared/logger'
 import { workspaceIdFromPath } from '../../shared/workspaceId'
+import { isNetworkFailureCode, iterateNetworkWait, resolveOfflineWaitMs } from './networkMonitor'
+import { isRetriableProviderMessage } from './providers/fetchWithRetry'
+import { providerHttpErrorCode } from './providers/httpErrors'
+import { circuitKeyProvider } from './circuitBreaker'
+import { waitForHeapPressureRelief } from '../perf/heapPressure'
 import {
-  MAX_STREAM_ATTEMPTS,
   isRetriableStreamFailure,
   isTransientHttpFailure,
   runWithStreamRetryGen,
@@ -24,17 +28,6 @@ import {
   sleepStreamRetryBackoff,
   streamRetryBackoffMsFor as streamRetryBackoffMs
 } from './streamRetry'
-import { isRetriableProviderMessage } from './providers/fetchWithRetry'
-import { providerHttpErrorCode } from './providers/httpErrors'
-import { circuitKeyProvider, isCircuitOpenError } from './circuitBreaker'
-import {
-  QUOTA_EXHAUSTED_STOP_CODE,
-  isQuotaExhaustedMessage,
-  parseQuotaResetHorizon,
-  quotaExhaustedStopMessage
-} from './quotaGate'
-import { isNetworkFailureCode, iterateNetworkWait, resolveOfflineWaitMs } from './networkMonitor'
-import { waitForHeapPressureRelief } from '../perf/heapPressure'
 import { isStreamIdleTimeoutError } from './providers/sse'
 import { resolveEffectiveSettings } from '../../shared/effectiveSettings'
 import { resolveServiceTier } from '../../shared/domain/modelSelection'
@@ -72,30 +65,12 @@ import {
   combineLoopHints,
   loopHintForCompactionFailure,
   loopHintForCompactionVerifyFailed,
-  loopHintForConsecutiveToolFailures,
   loopHintAfterCompaction,
-  loopHintForIdenticalReasoningStreak,
-  loopHintForIdenticalStepStreak,
   loopHintForMcpNotInCatalogFailFast,
-  loopStopDecision,
-  nextConsecutiveToolFailureSteps,
-  nextToolFailureStreak,
-  stepFailureSignature,
-  MAX_TRUNCATION_CONTINUES,
-  MAX_EMPTY_RESPONSE_CONTINUES,
-  MAX_REPETITION_ABORTS,
-  MAX_STEPS_PER_TURN,
   MCP_NOT_IN_CATALOG_FAIL_FAST_THRESHOLD,
-  nextIdenticalReasoningStreak,
-  nextIdenticalStepStreak,
-  runBudgetStopMessage,
   runNoticeForContextAboveSoftTrigger,
   seedKnownPathsFromMessages,
-  seedMutationPathsFromMessages,
-  stepReasoningFingerprint,
-  stepToolCallsFingerprint,
-  summarizeRecentToolFailure,
-  type LoopStop
+  seedMutationPathsFromMessages
 } from './loopPolicy'
 import { disposeTerminalSessionsForInvoke } from './tools/terminalSessions'
 import { getProvider } from './providers'
@@ -371,7 +346,7 @@ async function* yieldStreamRetryWait(
         runId,
         invokeId,
         attempt: streamAttempt,
-        maxAttempts: MAX_STREAM_ATTEMPTS,
+        maxAttempts: 0,
         retryInMs,
         code: errorCode,
         step
@@ -389,7 +364,7 @@ async function* yieldStreamRetryWait(
     runId,
     invokeId,
     attempt: streamAttempt,
-    maxAttempts: MAX_STREAM_ATTEMPTS,
+    maxAttempts: 0,
     retryInMs: backoffMs,
     code: errorCode,
     step
@@ -452,51 +427,6 @@ async function* yieldNetworkInterruptedTerminal(
     message: errorMessage,
     code: errorCode,
     resumable: true,
-    flushWriteCheckpoint,
-    writeStatus
-  })
-}
-
-/**
- * Shared quota-exhaustion terminal path (same contract at both stream-failure
- * sites): flush partial output, drop queued follow-ups — a quota resume is a
- * user "continue", not an automatic replay — and stop the run non-resumably.
- */
-function* yieldQuotaExhaustedTerminal(
-  runId: string,
-  invokeId: number,
-  step: number,
-  runDir: string | undefined,
-  messages: ChatMessage[],
-  assistantText: string,
-  thinkingText: string,
-  stepReasoningState: ProviderReasoningState | undefined,
-  toolCalls: ToolCall[],
-  streamedToolCalls: Map<string, ToolCall>,
-  quotaResetHorizon: string | null,
-  flushWriteCheckpoint: () => Generator<AgentEvent, void, unknown>,
-  writeStatus: (patch: { status: 'error'; error: string; resumable?: true }) => void
-): Generator<AgentEvent, void, unknown> {
-  if (!runDir) return
-  yield* flushPartialAssistant(
-    runId,
-    runDir,
-    messages,
-    assistantText,
-    thinkingText,
-    stepReasoningState,
-    toolCalls,
-    streamedToolCalls,
-    step,
-    'interrupted'
-  )
-  yield* emitTerminalRunError({
-    runId,
-    invokeId,
-    runDir,
-    message: quotaExhaustedStopMessage(quotaResetHorizon),
-    code: QUOTA_EXHAUSTED_STOP_CODE,
-    dropFollowUpsReason: 'quota_exhausted',
     flushWriteCheckpoint,
     writeStatus
   })
@@ -1066,18 +996,6 @@ export async function* runAgent(input: {
       }
       const persisted = loadStatus(runDir)
       initialStep = persisted?.step ?? 0
-      // Run 6265fa90 (2026-09-01): every app restart re-fired the 500-step
-      // runaway guard ~200ms in — status running → error, no steps, no
-      // provider call — because the run-scoped counter restored 500 and the
-      // step++ at the loop head crossed the ceiling immediately. The guard's
-      // own message says "Send continue to keep going": a resume that carries
-      // a fresh user turn is a new turn, so its step budget starts at 0.
-      if (
-        initialStep >= MAX_STEPS_PER_TURN &&
-        ((input.newMessages?.length ?? 0) > 0 || (input.messages?.length ?? 0) > 0)
-      ) {
-        initialStep = 0
-      }
       // Prefer chatStart mode when the UI sent one; otherwise restore last run mode.
       agentMode = input.mode ?? persisted?.mode ?? 'agent'
       const diskMessages = await loadMessagesAsync(workspace, runId)
@@ -1196,7 +1114,7 @@ export async function* runAgent(input: {
       }
     }
 
-    // Fresh invoke — do not inherit a prior LOOP_SAFETY failure streak.
+    // Fresh invoke — clear any persisted error from the prior stop.
     writeStatus({
       status: 'running',
       mode: agentMode,
@@ -1328,7 +1246,6 @@ export async function* runAgent(input: {
     // Interrupted resume restores budget fields even when invokeId differs — each
     // chatStart allocates a new invokeId while the prior slot unwinds. Follow-up
     // resume after done clears the checkpoint instead (see agentLoopResume tests).
-    let truncationContinues = resumedLoopCheckpoint?.truncationContinues ?? 0
     let overflowRetryUsed = resumedLoopCheckpoint?.overflowRetryUsed ?? false
     let goalNoToolFinishes = resumedLoopCheckpoint?.goalNoToolFinishes ?? 0
     /** Current cumulative usage as the checkpoint's optional v3 payload. */
@@ -1367,16 +1284,7 @@ export async function* runAgent(input: {
           step,
           invokeId,
           updatedAt: new Date().toISOString(),
-          truncationContinues,
           overflowRetryUsed,
-          identicalStepStreak,
-          lastStepFingerprint,
-          identicalReasoningStreak,
-          lastReasoningFingerprint,
-          repetitionAborts,
-          consecutiveToolFailureSteps,
-          recentFailureSignatures,
-          emptyResponseContinues,
           goalNoToolFinishes,
           usageTotals
         })
@@ -1398,16 +1306,7 @@ export async function* runAgent(input: {
           step,
           invokeId,
           updatedAt: new Date().toISOString(),
-          truncationContinues,
           overflowRetryUsed,
-          identicalStepStreak,
-          lastStepFingerprint,
-          identicalReasoningStreak,
-          lastReasoningFingerprint,
-          repetitionAborts,
-          consecutiveToolFailureSteps,
-          recentFailureSignatures,
-          emptyResponseContinues,
           goalNoToolFinishes,
           // Carry the durable usage totals so this write never erases them.
           ...(persistUsageTotalsCheckpointPayload()
@@ -1650,22 +1549,7 @@ export async function* runAgent(input: {
     }
 
     await refreshMcpToolsForStep()
-    let identicalStepLoopHint: string | undefined
     let compactionLoopHint: string | undefined
-    /** Last executed step's tool fingerprint + repeat streak (runaway-loop guard). */
-    let lastStepFingerprint = resumedLoopCheckpoint?.lastStepFingerprint ?? ''
-    let identicalStepStreak = resumedLoopCheckpoint?.identicalStepStreak ?? 0
-    /** Near-identical reasoning streak across steps (run be413e92 second guard). */
-    let identicalReasoningStreak = resumedLoopCheckpoint?.identicalReasoningStreak ?? 0
-    let lastReasoningFingerprint = resumedLoopCheckpoint?.lastReasoningFingerprint ?? ''
-    let reasoningLoopHint: string | undefined
-    /** Generation-repetition aborts auto-continued so far (checkpointed, capped). */
-    let repetitionAborts = resumedLoopCheckpoint?.repetitionAborts ?? 0
-    /** Steps in a row where every tool call failed (runaway-failure guard). */
-    let consecutiveToolFailureSteps = resumedLoopCheckpoint?.consecutiveToolFailureSteps ?? 0
-    /** Recent all-failed step signatures (failure-streak novelty rule). */
-    let recentFailureSignatures = [...(resumedLoopCheckpoint?.recentFailureSignatures ?? [])]
-    let toolFailureLoopHint: string | undefined
     /** Estimated tokens left by the last auto-compaction (re-compaction throttle). */
     let postCompactEstimateFloor: number | null = null
     /**
@@ -1676,30 +1560,14 @@ export async function* runAgent(input: {
      * the provider number prevents compaction firing far too early on such
      * providers. Local estimate still governs overflow and all UI estimates.
      */
-    let providerInputTokens: number | null = null
+    // Anchor survives resume: costTotals.inputTokens was restored above from the
+    // durable loop checkpoint's usageTotals (lastStepInputTokens — the last
+    // provider-reported input tokens), so a resumed run keeps deciding on the
+    // provider figure instead of falling back to the replay-inflated estimate
+    // before the first usage report arrives.
+    let providerInputTokens: number | null =
+      costTotals.inputTokens > 0 ? costTotals.inputTokens : null
     let lastCompactVerifyFailed = false
-    let loopSafetyEmitted = false
-    const stopForLoopSafety = function* (stop: LoopStop): Generator<AgentEvent, void, unknown> {
-      if (loopSafetyEmitted) return
-      loopSafetyEmitted = true
-      logger.warn('Stopping run: loop safety limit reached', {
-        scope: 'agent',
-        code: 'LOOP_SAFETY',
-        correlationId: runId,
-        reason: stop.reason,
-        step
-      })
-      yield* emitTerminalRunError({
-        runId,
-        invokeId,
-        runDir,
-        message: stop.message,
-        code: 'LOOP_SAFETY',
-        dropFollowUpsReason: stop.reason,
-        flushWriteCheckpoint,
-        writeStatus
-      })
-    }
     const knownPaths = seedKnownPathsFromMessages(messages)
     const mutationPaths = seedMutationPathsFromMessages(messages)
     /**
@@ -1710,8 +1578,6 @@ export async function* runAgent(input: {
     const recentReadPaths = new Map<string, number>()
     /** Plan-mode chat-essay nudges this invoke (cap 2). */
     let planUnreadyNudges = 0
-    /** Empty-response auto-continues this invoke (unbounded, same class as truncation). */
-    let emptyResponseContinues = resumedLoopCheckpoint?.emptyResponseContinues ?? 0
     const costWarnOnce = new Set<string>()
     /** Rolling cache-hit samples from large steps (low_cache_hit_rate). */
     const recentLargeCacheHits: number[] = []
@@ -1790,48 +1656,6 @@ export async function* runAgent(input: {
         return
       }
       step++
-      // Hard runaway-loop ceiling: distinct-but-unproductive step chains never
-      // trip the identical-step or tool-failure streaks, so bound them here.
-      if (step > MAX_STEPS_PER_TURN) {
-        yield* emitTerminalRunError({
-          runId,
-          invokeId,
-          runDir,
-          message: `This turn reached ${MAX_STEPS_PER_TURN} agent steps and was stopped as a runaway-loop guard. Send "continue" to keep going, or break the task into smaller steps.`,
-          code: 'LOOP_SAFETY',
-          preserveFollowUps: true,
-          flushWriteCheckpoint,
-          writeStatus
-        })
-        return
-      }
-      const budgetStop = runBudgetStopMessage(getSettings(), costTotals)
-      if (budgetStop) {
-        yield* emitTerminalRunError({
-          runId,
-          invokeId,
-          runDir,
-          message: budgetStop,
-          code: 'BUDGET_EXHAUSTED',
-          preserveFollowUps: true,
-          flushWriteCheckpoint,
-          writeStatus
-        })
-        return
-      }
-      const loopSafetyStop = loopStopDecision({
-        step,
-        consecutiveToolFailureSteps,
-        identicalStepStreak,
-        identicalReasoningStreak
-      })
-      // Terminal thresholds only: tool-failure streaks and identical-step
-      // repeats at MAX_IDENTICAL_STEP_STREAK_TERMINAL (below it, repeats
-      // degrade to the per-step hint).
-      if (loopSafetyStop) {
-        yield* stopForLoopSafety(loopSafetyStop)
-        return
-      }
       const stepSoftAbort = new AbortController()
       setStreamInterrupt(runId, stepSoftAbort)
       try {
@@ -1880,6 +1704,19 @@ export async function* runAgent(input: {
         settings.thinkingEnabled &&
         catalogThinkingAllowed(settings.model, modelInfo.supportsThinking)
 
+      // Whether reasoning replay fields (reasoningState / thinking) are on the
+      // wire for this provider. Mirrors the strip decision in
+      // providers/openai.ts createOpenAiCompatProvider: deepseek/opencode/
+      // openrouter — and custom hosts running with thinking display omitted —
+      // regenerate thinking from context and strip prior-turn reasoning from
+      // the request, so replay-only fields must not be counted in the wire
+      // estimate (observed 46k real -> 709k estimated on resume).
+      const countReasoningReplay =
+        providerId !== 'deepseek' &&
+        providerId !== 'opencode' &&
+        providerId !== 'openrouter' &&
+        !(providerId === 'custom' && thinkingEnabled && !settings.showThinking)
+
       const persistLiveToolChrome = (
         toolCallId: string,
         name: string | undefined,
@@ -1909,10 +1746,7 @@ export async function* runAgent(input: {
       const assembleLoopHint = combineLoopHints(
         mcpNotInCatalogFailFastHint(),
         outsidePathHint,
-        compactionLoopHint,
-        toolFailureLoopHint,
-        identicalStepLoopHint,
-        reasoningLoopHint
+        compactionLoopHint
       )
       const assembleBase = {
         harness,
@@ -1948,6 +1782,7 @@ export async function* runAgent(input: {
         taskList: formatTodosContextSection(readTodos(runDir)),
         activeGoal: isInlineInstance ? undefined : formatActiveGoalSection(readGoal(runDir)),
         providerId,
+        countReasoningReplay,
         provider,
         apiKey,
         baseUrl,
@@ -2100,13 +1935,17 @@ export async function* runAgent(input: {
               mcpNotInCatalogFailFastHint(),
               outsidePathHint,
               compactionLoopHint,
-              loopHintWhenContextStillLarge(postCompactEstimate ?? 0, proactiveThreshold),
-              toolFailureLoopHint,
-              identicalStepLoopHint,
-              reasoningLoopHint
+              loopHintWhenContextStillLarge(postCompactEstimate ?? 0, proactiveThreshold)
             )
           })
           lastUsage = { inputTokens: assembled.estimatedTokens }
+          // RC2: the compaction record's remainingEstimate (compactRun.ts) still
+          // counts reasoning replay for providers that strip it, inflating the
+          // re-compaction throttle floor far above the compacted context (record
+          // tokenEstimate=2640 vs next context_usage 340478). Anchor the floor on
+          // the re-assembled estimate, which reflects the actual post-compaction
+          // context scale.
+          postCompactEstimateFloor = assembled.estimatedTokens
         }
       }
 
@@ -2195,10 +2034,7 @@ export async function* runAgent(input: {
                 mcpNotInCatalogFailFastHint(),
                 outsidePathHint,
                 compactionLoopHint,
-                loopHintWhenContextStillLarge(retryPostCompactEstimate ?? 0, proactiveThreshold),
-                toolFailureLoopHint,
-                identicalStepLoopHint,
-                reasoningLoopHint
+                loopHintWhenContextStillLarge(retryPostCompactEstimate ?? 0, proactiveThreshold)
               )
             })
             lastUsage = { inputTokens: assembled.estimatedTokens }
@@ -2272,25 +2108,16 @@ export async function* runAgent(input: {
        * Degenerate generation repetition monitor (run be413e92): one per
        * generation attempt, reset on each stream retry so a latched attempt
        * does not abort the retry. Detection soft-aborts the stream so the
-       * step handler can steer-continue below (capped by MAX_REPETITION_ABORTS).
+       * step handler can steer-continue below.
        */
       let repetitionMonitor = new GenerationRepetitionMonitor()
       let repetitionAborted = false
-      /** Set when the repetition cap ended the turn (no further auto-streaming). */
-      let repetitionCapEnded = false
       let lastStreamSnapshotAt = 0
       /** Text content of the last durable snapshot — unchanged text is not re-persisted. */
       let lastSnapshotText = ''
       let lastStreamFailureMessage = ''
       let lastStreamFailureCode = 'PROVIDER_STREAM'
       let lastStreamFailureHttpStatus: number | undefined = undefined
-      // Quota exhaustion is sticky across stream attempts: the wire 429 chunk
-      // ("Weekly/5-hour usage limit reached...") goes terminal the moment it
-      // is seen, but 429s from OTHER concurrent runs on the same key can also
-      // land here via the circuit — capture from ANY failure chunk in the
-      // step. Reset per step — it must not leak across steps.
-      let stepQuotaExhausted = false
-      let stepQuotaResetHorizon: string | null = null
       // Const capture so nested generators keep `string` (outer `runDir` is `string | null`).
       const streamRunDir = runDir
       if (!streamRunDir) {
@@ -2426,7 +2253,7 @@ export async function* runAgent(input: {
             if (!repetitionAborted && repetitionMonitor.append(chunk.text)) {
               // Degenerate repetition (run be413e92): soft-abort mid-stream,
               // mirroring the soft-steer break — the step handler flushes the
-              // partial output and steers (capped by MAX_REPETITION_ABORTS).
+              // partial output and steers.
               repetitionAborted = true
               streamSteered = true
               stepSoftAbort.abort()
@@ -2711,49 +2538,10 @@ export async function* runAgent(input: {
               chunk.errorCode === 'PROVIDER_HTTP'
                 ? providerHttpErrorCode(chunk.httpStatus)
                 : chunk.errorCode === 'PROVIDER_NETWORK' ||
-                    chunk.errorCode === 'PROVIDER_TIMEOUT' ||
-                    chunk.errorCode === 'CIRCUIT_OPEN'
+                    chunk.errorCode === 'PROVIDER_TIMEOUT'
                   ? chunk.errorCode
                   : 'PROVIDER_STREAM'
             lastStreamFailureHttpStatus = chunk.httpStatus
-            if (isQuotaExhaustedMessage(message)) {
-              stepQuotaExhausted = true
-              stepQuotaResetHorizon = parseQuotaResetHorizon(message) ?? stepQuotaResetHorizon
-            }
-            // A usage-limit 429 is a billing gate, not a transient outage: stop
-            // TERMINALLY (non-resumable) the moment it is seen. Burning stream
-            // attempts (and tripping the circuit) only delays the stop and
-            // re-bills the full prompt on retries that cannot succeed (runs
-            // f086bc66 / c3290c9d, 2026-09-01: 429 → attempt 2 → circuit open →
-            // terminal). Flushed partial output is preserved; queued follow-ups
-            // are dropped — a quota resume is a user "continue", not an
-            // automatic replay (same gate blocks the goal relaunch storm of run
-            // 6265fa90).
-            if (stepQuotaExhausted) {
-              logger.warn('Provider quota exhausted — stopping without retries', {
-                scope: 'agent',
-                code: 'QUOTA_EXHAUSTED',
-                correlationId: runId,
-                provider: providerId,
-                step
-              })
-              yield* yieldQuotaExhaustedTerminal(
-                runId,
-                invokeId,
-                step,
-                runDir,
-                messages,
-                assistantText,
-                thinkingText,
-                stepReasoningState,
-                toolCalls,
-                streamedToolCalls,
-                stepQuotaResetHorizon,
-                flushWriteCheckpoint,
-                writeStatus
-              )
-              return 'terminal'
-            }
             if (errorCode === 'PROVIDER_NETWORK') {
               // Retriable at the stream layer now — record so a final exhaust
               // classifies as networkRelated (interrupted, not hard error).
@@ -2785,7 +2573,6 @@ export async function* runAgent(input: {
             // transient provider-side wait — interrupted + Continue, not a hard error.
             if (
               isNetworkFailureCode(errorCode) ||
-              errorCode === 'CIRCUIT_OPEN' ||
               errorCode === 'PROVIDER_TIMEOUT' ||
               (errorCode === 'PROVIDER_HTTP' && isTransientHttpFailure(errorCode, chunk.httpStatus))
             ) {
@@ -2804,11 +2591,9 @@ export async function* runAgent(input: {
                 errorCode,
                 flushWriteCheckpoint,
                 writeStatus,
-                errorCode === 'CIRCUIT_OPEN'
-                  ? 'circuit_open'
-                  : errorCode === 'PROVIDER_HTTP' && !isNetworkFailureCode(errorCode)
-                    ? 'provider_error'
-                    : 'network_interrupted'
+                errorCode === 'PROVIDER_HTTP' && !isNetworkFailureCode(errorCode)
+                  ? 'provider_error'
+                  : 'network_interrupted'
               )
               return 'terminal'
             }
@@ -2899,17 +2684,10 @@ export async function* runAgent(input: {
 
       if (streamRetryResult.status === 'terminal') return
       streamFinished = streamRetryResult.status === 'complete'
-      if (
-        streamRetryResult.status === 'exhausted' &&
-        isCircuitOpenError(streamRetryResult.err)
-      ) {
-        lastStreamFailureMessage = streamRetryResult.err.message
-        lastStreamFailureCode = 'CIRCUIT_OPEN'
-      }
 
       // Soft-steer may end the provider generator cleanly (return after abort)
       // without throwing — still treat as steered so partial tools are not
-      // fingerprinted for identical-step LOOP_SAFETY. Skip when a `done` chunk
+      // executed. Skip when a `done` chunk
       // already arrived (follow-up queued after a complete stream step).
       if (
         !streamSteered &&
@@ -2922,9 +2700,7 @@ export async function* runAgent(input: {
 
       // Exhausted retriable stream attempts — network failures get Continue UX.
       if (!streamFinished && !controller.signal.aborted && !streamSteered) {
-        const message =
-          lastStreamFailureMessage.trim() ||
-          `Provider stream failed after ${MAX_STREAM_ATTEMPTS} attempts`
+        const message = lastStreamFailureMessage.trim() || 'Provider stream failed'
         const errorCode = lastStreamFailureCode || 'PROVIDER_STREAM'
         const transientHttp = isTransientHttpFailure(errorCode, lastStreamFailureHttpStatus)
         const networkRelated =
@@ -2933,7 +2709,6 @@ export async function* runAgent(input: {
           transientHttp ||
           (lastStreamFailureMessage.trim().length > 0 &&
             isRetriableProviderMessage(lastStreamFailureMessage))
-        const circuitOpen = errorCode === 'CIRCUIT_OPEN'
         logger.error(message, {
           scope: 'agent',
           code: errorCode,
@@ -2942,28 +2717,7 @@ export async function* runAgent(input: {
           step,
           networkRelated
         })
-        // Quota exhaustion seen during the exhausted attempts: stop terminally
-        // (a billing gate cannot clear within a circuit window). Same contract
-        // as the in-stream branch above.
-        if (stepQuotaExhausted) {
-          yield* yieldQuotaExhaustedTerminal(
-            runId,
-            invokeId,
-            step,
-            runDir,
-            messages,
-            assistantText,
-            thinkingText,
-            stepReasoningState,
-            toolCalls,
-            streamedToolCalls,
-            stepQuotaResetHorizon,
-            flushWriteCheckpoint,
-            writeStatus
-          )
-          return
-        }
-        if (networkRelated || circuitOpen) {
+        if (networkRelated) {
           yield* yieldNetworkInterruptedTerminal(
             runId,
             invokeId,
@@ -2979,11 +2733,9 @@ export async function* runAgent(input: {
             errorCode,
             flushWriteCheckpoint,
             writeStatus,
-            circuitOpen
-              ? 'circuit_open'
-              : transientHttp && !isNetworkFailureCode(errorCode)
-                ? 'provider_error'
-                : 'network_interrupted'
+            transientHttp && !isNetworkFailureCode(errorCode)
+              ? 'provider_error'
+              : 'network_interrupted'
           )
           return
         }
@@ -3032,80 +2784,45 @@ export async function* runAgent(input: {
       // Degenerate generation repetition (run be413e92): the monitor soft-
       // aborted the stream. Mirror the truncated auto-continue contract:
       // flush the partial output, then steer-continue with a fresh-action
-      // prompt — capped by MAX_REPETITION_ABORTS so a model that cannot stop
-      // looping ends the turn instead of burning unbounded generations.
+      // prompt.
       if (repetitionAborted) {
-        repetitionAborts += 1
-        persistLoopCheckpoint()
-        if (repetitionAborts > MAX_REPETITION_ABORTS) {
-          logger.warn('Stopping auto-continue after repeated generation repetition', {
-            scope: 'agent',
-            code: 'LOOP_SAFETY',
-            correlationId: runId,
-            step,
-            repetitionAborts
-          })
-          // Cap reached — end the turn with a durable incomplete event instead
-          // of steering again (truncation-cap fall-through contract). The
-          // aborted generation never executed its tools: drop partial tool
-          // chrome so the fall-through resolves no tool calls, and the no-tool
-          // path below pushes the partial assistant text once and closes the
-          // turn. streamSteered is consumed here so the generic steer-continue
-          // below cannot keep the turn alive.
-          toolCalls.length = 0
-          streamedToolCalls.clear()
-          streamSteered = false
-          repetitionCapEnded = true
-          const capEv: AgentEvent = {
-            type: 'incomplete',
-            runId,
-            invokeId,
-            reason: 'repetition',
-            step,
-            message: INCOMPLETE_MESSAGES.repetition
-          }
-          appendEvent(runDir, capEv)
-          yield capEv
-          // fall through to the no-tool-call turn close below
-        } else {
-          yield* flushPartialAssistant(
-            runId,
-            runDir,
-            messages,
-            assistantText,
-            thinkingText,
-            stepReasoningState,
-            toolCalls,
-            streamedToolCalls,
-            step,
-            'interrupted'
-          )
-          const continueEv: AgentEvent = {
-            type: 'incomplete',
-            runId,
-            invokeId,
-            reason: 'repetition',
-            step,
-            message: 'Output was repeating the same text; continuing automatically…'
-          }
-          appendEvent(runDir, continueEv)
-          yield continueEv
-          const continueUser: ChatMessage = {
-            role: 'user',
-            content:
-              'Your output was cut off because it repeated the same text. Continue from the task list with a fresh concrete action; do not restate the plan.',
-            // Loop-injected protocol turn — must never render as a user bubble.
-            synthetic: true
-          }
-          messages.push(continueUser)
-          appendMessage(runDir, continueUser)
-          continue
+        yield* flushPartialAssistant(
+          runId,
+          runDir,
+          messages,
+          assistantText,
+          thinkingText,
+          stepReasoningState,
+          toolCalls,
+          streamedToolCalls,
+          step,
+          'interrupted'
+        )
+        const continueEv: AgentEvent = {
+          type: 'incomplete',
+          runId,
+          invokeId,
+          reason: 'repetition',
+          step,
+          message: 'Output was repeating the same text; continuing automatically…'
         }
+        appendEvent(runDir, continueEv)
+        yield continueEv
+        const continueUser: ChatMessage = {
+          role: 'user',
+          content:
+            'Your output was cut off because it repeated the same text. Continue from the task list with a fresh concrete action; do not restate the plan.',
+          // Loop-injected protocol turn — must never render as a user bubble.
+          synthetic: true
+        }
+        messages.push(continueUser)
+        appendMessage(runDir, continueUser)
+        continue
       }
 
       // Mid-stream steer: keep the turn alive, flush partial output, then inject.
-      // Do not bump identicalStepStreak or LOOP_SAFETY here — partial tool calls
-      // never executed; prefer applying the follow-up over dropping it.
+      // Partial tool calls never executed; prefer applying the follow-up over
+      // dropping it.
       if (streamSteered) {
         yield* flushPartialAssistant(
           runId,
@@ -3142,54 +2859,6 @@ export async function* runAgent(input: {
       if (uniqueToolCalls.length > 0) {
         goalNoToolFinishes = 0
         ensureToolCallIds(uniqueToolCalls, { prefix: 'call_guard' })
-
-        const stepFingerprint = stepToolCallsFingerprint(uniqueToolCalls)
-        identicalStepStreak = nextIdenticalStepStreak(
-          lastStepFingerprint,
-          identicalStepStreak,
-          stepFingerprint
-        )
-        lastStepFingerprint = stepFingerprint
-        identicalStepLoopHint = loopHintForIdenticalStepStreak(identicalStepStreak)
-        // Per-step reasoning streak (run be413e92 second guard): the streamed
-        // buffers are final once the step completes, so the fingerprint is
-        // computed here, where the tool-call terminal check runs.
-        const reasoningFp = stepReasoningFingerprint(thinkingText, assistantText)
-        identicalReasoningStreak = nextIdenticalReasoningStreak(
-          lastReasoningFingerprint,
-          identicalReasoningStreak,
-          reasoningFp
-        )
-        lastReasoningFingerprint = reasoningFp
-        reasoningLoopHint = loopHintForIdenticalReasoningStreak(identicalReasoningStreak)
-        const repeatStop = loopStopDecision({
-          step,
-          identicalStepStreak,
-          identicalReasoningStreak
-        })
-        // Terminal identical-step repeat (≥ MAX_IDENTICAL_STEP_STREAK_TERMINAL):
-        // flush this step's partial output, then stop. Below the ceiling the
-        // escalating hint steers instead.
-        if (repeatStop) {
-          yield* flushPartialAssistant(
-            runId,
-            runDir,
-            messages,
-            assistantText,
-            thinkingText,
-            stepReasoningState,
-            uniqueToolCalls,
-            streamedToolCalls,
-            step,
-            'interrupted'
-          )
-          yield* stopForLoopSafety(repeatStop)
-          return
-        }
-      } else {
-        identicalStepStreak = 0
-        lastStepFingerprint = ''
-        identicalStepLoopHint = undefined
       }
 
       if (uniqueToolCalls.length === 0) {
@@ -3227,147 +2896,85 @@ export async function* runAgent(input: {
         appendEvent(runDir, assistantMsgEv)
         yield assistantMsgEv
 
-        // Per-step reasoning streak — both finalize paths feed it (the
-        // tool-call branch feeds it at the identicalStepStreak site). A
-        // no-tool-call step can also be the degenerate repeat, so the
-        // terminal check runs here too; the assistant message is already
-        // persisted above, so the stop does not flush a duplicate partial push.
-        const reasoningFp = stepReasoningFingerprint(thinkingText, assistantText)
-        identicalReasoningStreak = nextIdenticalReasoningStreak(
-          lastReasoningFingerprint,
-          identicalReasoningStreak,
-          reasoningFp
-        )
-        lastReasoningFingerprint = reasoningFp
-        reasoningLoopHint = loopHintForIdenticalReasoningStreak(identicalReasoningStreak)
-        const reasoningStop = loopStopDecision({
-          step,
-          identicalStepStreak,
-          identicalReasoningStreak
-        })
-        if (reasoningStop) {
-          yield* stopForLoopSafety(reasoningStop)
-          return
-        }
-
         const incomplete = classifyIncompleteTurn(stepStopReason, scrubbedAssistantText)
         if (incomplete === 'truncated' && !controller.signal.aborted) {
-          truncationContinues += 1
-          persistLoopCheckpoint()
-          if (truncationContinues > MAX_TRUNCATION_CONTINUES) {
-            logger.warn('Stopping auto-continue after repeated truncation', {
-              scope: 'agent',
-              correlationId: runId,
-              step,
-              truncationContinues
-            })
-            // Do not continue; fall through so the turn ends with an incomplete event
-            // instead of looping forever and burning tokens.
-          } else {
-            logger.info('Auto-continuing after truncation', {
-              scope: 'agent',
-              correlationId: runId,
-              step,
-              truncationContinues
-            })
-            const continueEv: AgentEvent = {
-              type: 'incomplete',
-              runId,
-              invokeId,
-              reason: 'truncated',
-              step,
-              message: 'Output was truncated; continuing automatically…'
-            }
-            appendEvent(runDir, continueEv)
-            yield continueEv
-            const continueUser: ChatMessage = {
-              role: 'user',
-              content: 'Continue from where you left off. Finish without repeating.',
-              // Loop-injected protocol turn — must never render as a user bubble.
-              synthetic: true
-            }
-            messages.push(continueUser)
-            appendMessage(runDir, continueUser)
-            continue
+          const continueEv: AgentEvent = {
+            type: 'incomplete',
+            runId,
+            invokeId,
+            reason: 'truncated',
+            step,
+            message: 'Output was truncated; continuing automatically…'
           }
+          appendEvent(runDir, continueEv)
+          yield continueEv
+          const continueUser: ChatMessage = {
+            role: 'user',
+            content: 'Continue from where you left off. Finish without repeating.',
+            // Loop-injected protocol turn — must never render as a user bubble.
+            synthetic: true
+          }
+          messages.push(continueUser)
+          appendMessage(runDir, continueUser)
+          continue
         }
 
-        if (
-          incomplete === 'empty_response' &&
-          !controller.signal.aborted &&
-          !repetitionCapEnded
-        ) {
-          emptyResponseContinues += 1
-          // Persist immediately (matches truncationContinues): this continue
-          // path bypasses the post-tool checkpoint write, so a crash would
-          // otherwise restore a stale count and re-burn empty steps.
-          persistLoopCheckpoint()
-          if (emptyResponseContinues > MAX_EMPTY_RESPONSE_CONTINUES) {
-            logger.warn('Stopping auto-continue after repeated empty response', {
-              scope: 'agent',
-              correlationId: runId,
-              step,
-              emptyResponseContinues
-            })
-            // Do not continue; fall through so the turn ends with an incomplete event.
-          } else {
-            logger.info('Auto-continuing after empty response', {
-              scope: 'agent',
-              correlationId: runId,
-              step,
-              emptyResponseContinues
-            })
-            const continueEv: AgentEvent = {
-              type: 'incomplete',
-              runId,
-              invokeId,
-              reason: 'empty_response',
-              step,
-              message: 'Model returned an empty response; retrying…'
-            }
-            appendEvent(runDir, continueEv)
-            yield continueEv
-            // Drop empty assistant from in-memory history and rewrite disk so
-            // resume/hydrate does not see a blank turn the working list no longer has.
-            // "Empty" = no user-visible text and no tool calls. Reasoning is not
-            // an answer, so discard reasoning-only turns before retrying.
-            const last = messages[messages.length - 1]
-            if (
-              last?.role === 'assistant' &&
-              !contentToText(last.content).trim() &&
-              !last.toolCalls?.length
-            ) {
-              messages.pop()
-            }
-            // Retry the SAME request: no injected user message. Fabricating a
-            // "Your previous response was empty…" user turn leaked protocol text
-            // into messages.jsonl (rendered as a user bubble) and taught the model
-            // a phantom turn; re-streaming the unchanged history is the honest retry.
-            // Rewrite from DISK, not the working set: after mid-run compaction the
-            // working list is post-fold and a sync here would permanently drop the
-            // folded head from messages.jsonl (breaking rewind indices and the
-            // stitched transcript).
-            if (foldedMessages > 0) {
-              const diskMessages = await loadMessagesAsync(workspace, runId)
-              const diskLast = diskMessages[diskMessages.length - 1]
-              if (
-                diskLast?.role === 'assistant' &&
-                !contentToText(diskLast.content).trim() &&
-                !diskLast.toolCalls?.length
-              ) {
-                diskMessages.pop()
-              }
-              await syncMessagesAsync(runDir, diskMessages)
-            } else {
-              await syncMessagesAsync(runDir, messages)
-            }
-            continue
+        if (incomplete === 'empty_response' && !controller.signal.aborted) {
+          logger.info('Auto-continuing after empty response', {
+            scope: 'agent',
+            correlationId: runId,
+            step
+          })
+          const continueEv: AgentEvent = {
+            type: 'incomplete',
+            runId,
+            invokeId,
+            reason: 'empty_response',
+            step,
+            message: 'Model returned an empty response; retrying…'
           }
+          appendEvent(runDir, continueEv)
+          yield continueEv
+          // Drop empty assistant from in-memory history and rewrite disk so
+          // resume/hydrate does not see a blank turn the working list no longer has.
+          // "Empty" = no user-visible text and no tool calls. Reasoning is not
+          // an answer, so discard reasoning-only turns before retrying.
+          const last = messages[messages.length - 1]
+          if (
+            last?.role === 'assistant' &&
+            !contentToText(last.content).trim() &&
+            !last.toolCalls?.length
+          ) {
+            messages.pop()
+          }
+          // Retry the SAME request: no injected user message. Fabricating a
+          // "Your previous response was empty…" user turn leaked protocol text
+          // into messages.jsonl (rendered as a user bubble) and taught the model
+          // a phantom turn; re-streaming the unchanged history is the honest retry.
+          // Rewrite from DISK, not the working set: after mid-run compaction the
+          // working list is post-fold and a sync here would permanently drop the
+          // folded head from messages.jsonl (breaking rewind indices and the
+          // stitched transcript).
+          if (foldedMessages > 0) {
+            const diskMessages = await loadMessagesAsync(workspace, runId)
+            const diskLast = diskMessages[diskMessages.length - 1]
+            if (
+              diskLast?.role === 'assistant' &&
+              !contentToText(diskLast.content).trim() &&
+              !diskLast.toolCalls?.length
+            ) {
+              diskMessages.pop()
+            }
+            await syncMessagesAsync(runDir, diskMessages)
+          } else {
+            await syncMessagesAsync(runDir, messages)
+          }
+          continue
         }
 
         if (controller.signal.aborted) break
 
-        if (agentMode === 'plan' && planUnreadyNudges < 2 && !repetitionCapEnded) {
+        if (agentMode === 'plan' && planUnreadyNudges < 2) {
           const planRaw = await readPlanRawAsync(runDir)
           // Draft-ready but structurally shallow plans get the same capped
           // nudge budget as missing plans, with the top quality issues named.
@@ -3395,7 +3002,7 @@ export async function* runAgent(input: {
           continue
         }
 
-        if (incomplete && !repetitionCapEnded) {
+        if (incomplete) {
           const incompleteEv: AgentEvent = {
             type: 'incomplete',
             runId,
@@ -3746,53 +3353,6 @@ export async function* runAgent(input: {
       // file/terminal dumps held until the next fold, so the working set grows
       // monotonically on long runs. messages.jsonl keeps the full bodies.
       messages = trimToolResults(messages, KEEP_LAST_TOOL_RESULTS)
-
-      if (uniqueToolCalls.length > 0) {
-        // Soft-steer / Send now aborts tools as ok:false — that is not a real
-        // identical-step streak or failure streak. Skip LOOP_SAFETY so follow-ups apply.
-        if (toolsSteered) {
-          identicalStepStreak = 0
-          lastStepFingerprint = ''
-          identicalStepLoopHint = undefined
-          consecutiveToolFailureSteps = 0
-          toolFailureLoopHint = undefined
-          recentFailureSignatures = []
-        } else {
-          // Novelty-aware failure streak (root fix for run 3d8e0ead): an
-          // all-failed step charges the streak only when it repeats a recent
-          // failed attempt; a new attempt shape holds the streak so distinct
-          // approaches can keep exploring one external blocker.
-          if (nextConsecutiveToolFailureSteps(0, toolOutcome.messages) === 1) {
-            const signature = stepFailureSignature(toolOutcome.messages)
-            const next = nextToolFailureStreak(
-              consecutiveToolFailureSteps,
-              signature,
-              recentFailureSignatures
-            )
-            consecutiveToolFailureSteps = next.streak
-            recentFailureSignatures = next.recentSignatures
-          } else {
-            // Mixed or successful step — real progress; clear streak + window.
-            consecutiveToolFailureSteps = 0
-            recentFailureSignatures = []
-          }
-          toolFailureLoopHint = loopHintForConsecutiveToolFailures(
-            consecutiveToolFailureSteps,
-            summarizeRecentToolFailure(toolOutcome.messages)
-          )
-          const failureStop = loopStopDecision({
-            step,
-            consecutiveToolFailureSteps,
-            identicalStepStreak,
-            identicalReasoningStreak
-          })
-          // Same rule as the pre-step guards: terminal thresholds end the run.
-          if (failureStop) {
-            yield* stopForLoopSafety(failureStop)
-            return
-          }
-        }
-      }
 
       if (
         !controller.signal.aborted &&

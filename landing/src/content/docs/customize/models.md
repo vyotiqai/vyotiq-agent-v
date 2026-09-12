@@ -47,7 +47,7 @@ Thinking preferences are retained per provider. If the selected model does not e
 
 ## Speed and service tier
 
-Models that support service tiers can show Speed with Default, Flex, or Fast. The selected value is stored per model where applicable. Availability and billing are provider decisions; the app only sends the supported tier value.
+Models that support service tiers can show Speed with Default, Flex, or Priority. The selected value is stored per model where applicable. Availability and billing are provider decisions; the app only sends the supported tier value.
 
 ## Favorites, recents, and fallback metadata
 

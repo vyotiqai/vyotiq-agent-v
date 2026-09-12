@@ -2,20 +2,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-
-// Keep the bundled llama.cpp stage hermetic in unit tests: without this, the
-// optional `node-llama-cpp` dep would trigger a real 229 MB GGUF download from
-// Hugging Face. The real path is covered by a separate runtime smoke check.
-vi.mock('node-llama-cpp', () => ({
-  getLlama: vi.fn().mockRejectedValue(new Error('node-llama-cpp mocked unavailable in unit tests')),
-  resolveModelFile: vi.fn()
-}))
 import {
-  CodeIndexStore,
-  closeCodeIndex,
+  closeCodeIndexStore,
   disposeCodeIndexWorkspace,
   ensureCodeIndexSynced,
-  reindexCodeIndex
+  getOrOpenCodeIndexStore,
+  reindexCodeIndex,
+  runCodebaseSearch
 } from '@main/agent/codeindex'
 import {
   clearWorkspaceIndexSyncTimers,
@@ -23,13 +16,11 @@ import {
   scheduleWorkspaceIndexSync,
   warmWorkspaceIndexes
 } from '@main/agent/workspaceIndex'
-import { closeSparseGrep, SparseGrepStore } from '@main/agent/sparsegrep'
 import {
   indexJobQueueIsBusyForTests,
   indexJobQueuePendingCountForTests,
   resetIndexJobQueueForTests
 } from '@main/agent/indexJobQueue'
-import { DEFAULT_EMBED_DIM } from '@main/agent/codeindex/types'
 import { toolCodebaseSearch } from '@main/agent/tools/codebaseSearch'
 
 describe('workspace index schedule debounce', () => {
@@ -41,8 +32,6 @@ describe('workspace index schedule debounce', () => {
     if (dir) {
       disposeWorkspaceIndexes(dir)
       disposeCodeIndexWorkspace(dir)
-      closeCodeIndex(dir)
-      closeSparseGrep(dir)
       try {
         rmSync(dir, { recursive: true, force: true })
       } catch {
@@ -70,8 +59,8 @@ describe('workspace index schedule debounce', () => {
     await vi.advanceTimersByTimeAsync(400)
     await vi.waitFor(
       async () => {
-        const { entry } = await ensureCodeIndexSynced(dir!)
-        expect(entry?.store?.getStatus()?.chunkCount).toBeGreaterThan(0)
+        const { sync } = await ensureCodeIndexSynced(dir!)
+        expect(sync?.status.chunkCount).toBeGreaterThan(0)
       },
       { timeout: 20_000 }
     )
@@ -89,9 +78,9 @@ describe('workspace index schedule debounce', () => {
     // Let any stray warm promise settle if it somehow started.
     await Promise.resolve()
 
-    const store = CodeIndexStore.open(dir, DEFAULT_EMBED_DIM)
+    const store = getOrOpenCodeIndexStore(dir)
     expect(store.getStatus().chunkCount).toBe(0)
-    store.close()
+    closeCodeIndexStore(dir)
   })
 })
 
@@ -103,8 +92,6 @@ describe('reindexCodeIndex', () => {
     if (dir) {
       disposeWorkspaceIndexes(dir)
       disposeCodeIndexWorkspace(dir)
-      closeCodeIndex(dir)
-      closeSparseGrep(dir)
       try {
         rmSync(dir, { recursive: true, force: true })
       } catch {
@@ -114,24 +101,20 @@ describe('reindexCodeIndex', () => {
     }
   })
 
-  it('also syncs sparsegrep in the same reindex job', async () => {
-    dir = mkdtempSync(join(tmpdir(), 'vyotiq-reindex-sparse-'))
+  it('forces a full sync through the reindex queue slot', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-reindex-'))
     mkdirSync(join(dir, 'src'), { recursive: true })
     writeFileSync(join(dir, 'src', 'a.ts'), 'export const reindexMarker = 1\n', 'utf8')
-    // Hermetic: hash embedder needs no ONNX weights; reindex must honor the override.
-    const sync = await reindexCodeIndex(dir, { embedderId: 'hash' })
+    const sync = await reindexCodeIndex(dir)
     expect(sync).not.toBeNull()
-    const sparse = SparseGrepStore.open(dir)
-    try {
-      expect(sparse.getStatus().fileCount).toBeGreaterThan(0)
-      expect(sparse.listFilePaths()).toContain('src/a.ts')
-    } finally {
-      sparse.close()
-    }
+    expect(sync!.indexed).toBe(1)
+    const store = getOrOpenCodeIndexStore(dir)
+    expect(store.getStatus().ready).toBe(true)
+    closeCodeIndexStore(dir)
   })
 })
 
-describe('codebase_search follow-up warm', () => {
+describe('codebase_search warm and result behavior', () => {
   let dir: string | undefined
 
   afterEach(() => {
@@ -140,8 +123,6 @@ describe('codebase_search follow-up warm', () => {
     if (dir) {
       disposeWorkspaceIndexes(dir)
       disposeCodeIndexWorkspace(dir)
-      closeCodeIndex(dir)
-      closeSparseGrep(dir)
       try {
         rmSync(dir, { recursive: true, force: true })
       } catch {
@@ -151,53 +132,56 @@ describe('codebase_search follow-up warm', () => {
     }
   })
 
-  it('enqueues a full warm job after interactive search', async () => {
+  it('returns ranked hits with the honest header after a cold search', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-search-cold-'))
+    mkdirSync(join(dir, 'src'), { recursive: true })
+    writeFileSync(
+      join(dir, 'src', 'alpha.ts'),
+      'export function alphaHelper(): number { return 1 }\n',
+      'utf8'
+    )
+    const result = await runCodebaseSearch(dir, 'alphaHelper')
+    expect(result.hits.length).toBeGreaterThan(0)
+    expect(result.hits[0]!.path).toBe('src/alpha.ts')
+    expect(result.formatted).toMatch(/^1\. src\/alpha\.ts:\d+-\d+/)
+    // No model / fallback annotations anywhere in the output.
+    expect(result.formatted).not.toMatch(/model=/)
+    expect(result.formatted).not.toMatch(/fallback=/)
+  })
+
+  it('enqueues a warm job after interactive search', async () => {
     dir = mkdtempSync(join(tmpdir(), 'vyotiq-search-warm-'))
     mkdirSync(join(dir, 'src'), { recursive: true })
     writeFileSync(join(dir, 'src', 'a.ts'), 'export function alphaHelper(): number { return 1 }\n', 'utf8')
-    await ensureCodeIndexSynced(dir, { preferOllama: false })
     const workspaceIndex = await import('@main/agent/workspaceIndex')
     const spy = vi.spyOn(workspaceIndex, 'warmWorkspaceIndexes')
-    await toolCodebaseSearch(dir, 'alphaHelper', { preferOllama: false })
+    await toolCodebaseSearch(dir, 'alphaHelper')
     await vi.waitFor(() => {
       expect(spy).toHaveBeenCalledWith(dir)
     })
     spy.mockRestore()
   })
 
-  it('enqueues a full warm job after a cold empty-index search', async () => {
-    dir = mkdtempSync(join(tmpdir(), 'vyotiq-search-warm-cold-'))
+  it('forces a sync on refresh:true and still returns hits', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-search-refresh-'))
     mkdirSync(join(dir, 'src'), { recursive: true })
     writeFileSync(
       join(dir, 'src', 'a.ts'),
-      'export function alphaHelper(): number { return 1 }\n',
+      'export function refreshMarkerHelper(): number { return 2 }\n',
       'utf8'
     )
-    const workspaceIndex = await import('@main/agent/workspaceIndex')
-    const spy = vi.spyOn(workspaceIndex, 'warmWorkspaceIndexes')
-    await toolCodebaseSearch(dir, 'alphaHelper', { preferOllama: false })
-    await vi.waitFor(() => {
-      expect(spy).toHaveBeenCalledWith(dir)
-    })
-    spy.mockRestore()
+    const result = await runCodebaseSearch(dir, 'refreshMarkerHelper', { refresh: true })
+    expect(result.hits.length).toBeGreaterThan(0)
+    expect(result.status.ready).toBe(true)
   })
 
-  it('enqueues a full warm job after refresh:true search', async () => {
-    dir = mkdtempSync(join(tmpdir(), 'vyotiq-search-warm-refresh-'))
+  it('tool output keeps the index header with chunk and file counts', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'vyotiq-tool-header-'))
     mkdirSync(join(dir, 'src'), { recursive: true })
-    writeFileSync(
-      join(dir, 'src', 'a.ts'),
-      'export function alphaHelper(): number { return 1 }\n',
-      'utf8'
-    )
-    await ensureCodeIndexSynced(dir, { preferOllama: false })
-    const workspaceIndex = await import('@main/agent/workspaceIndex')
-    const spy = vi.spyOn(workspaceIndex, 'warmWorkspaceIndexes')
-    await toolCodebaseSearch(dir, 'alphaHelper', { preferOllama: false, refresh: true })
-    await vi.waitFor(() => {
-      expect(spy).toHaveBeenCalledWith(dir)
-    })
-    spy.mockRestore()
+    writeFileSync(join(dir, 'src', 'a.ts'), 'export function headerHelper(): number { return 3 }\n', 'utf8')
+    const out = await toolCodebaseSearch(dir, 'headerHelper')
+    expect(out).toMatch(/^index: \d+ chunks \/ \d+ files · hits=\d+/)
+    expect(out).toContain('src/a.ts')
   })
 })
 

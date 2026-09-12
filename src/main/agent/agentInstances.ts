@@ -13,7 +13,8 @@ import {
   finalizeInstanceWorktree,
   isInstanceWorktreeFallbackError,
   isSafeInstanceWorktreePath,
-  mergeInstanceBranch
+  mergeInstanceBranch,
+  type MergeInstanceBranchResult
 } from '../git/instanceWorktree'
 import { appendEvent, createRun, loadMessages, loadMessagesAsync, loadStatus } from './state'
 import { resolveRunDir } from '@main/storage/paths'
@@ -42,16 +43,6 @@ const childWaiters = new Map<
 >()
 const runIpcSenders = new Map<string, WebContents>()
 const parentInstanceEmitters = new Map<string, (event: AgentEvent) => void>()
-
-/**
- * Repeated hard tool denials (terminal/diagnostics/git_commit on a shared
- * path_scope instance without a worktree) mean the instance structurally
- * cannot reach its goal. After this many denials the instance is cancelled
- * instead of burning steps in a retry loop it can never win.
- */
-export const INLINE_INSTANCE_DENIED_TOOL_CANCEL_THRESHOLD = 2
-
-const deniedToolCounts = new Map<string, number>()
 
 export { formatAgentInstanceLabel }
 
@@ -110,7 +101,6 @@ export function registerChildInstance(
 export function unregisterChildInstance(childRunId: string): void {
   const parentRunId = childToParent.get(childRunId)
   childWorkspace.delete(childRunId)
-  deniedToolCounts.delete(childRunId)
   if (!parentRunId) return
   childToParent.delete(childRunId)
   unregisterInlineChildRun(childRunId)
@@ -406,23 +396,18 @@ export function waitForChildTerminal(
 }
 
 /**
- * Record a hard tool denial for an inline instance. When the same instance
- * crosses the threshold, cancel it so the loop stops instead of retrying a
- * structurally-denied tool forever. Returns true when this call cancelled.
+ * Record a hard tool denial for an inline instance. Run-stopping caps removed
+ * (user decision): denials are logged but never cancel the instance — the
+ * loop keeps going and the user decides when to stop it. Always returns
+ * false (never cancelled here).
  */
 export function noteInlineInstanceDeniedTool(childRunId: string | undefined): boolean {
   if (!childRunId || !childToParent.has(childRunId)) return false
-  const count = (deniedToolCounts.get(childRunId) ?? 0) + 1
-  deniedToolCounts.set(childRunId, count)
-  if (count < INLINE_INSTANCE_DENIED_TOOL_CANCEL_THRESHOLD) return false
-  deniedToolCounts.delete(childRunId)
-  logger.warn('Inline instance auto-cancelled after repeated tool denials', {
+  logger.warn('Inline instance tool call denied', {
     scope: 'agent',
-    childRunId,
-    denials: count
+    childRunId
   })
-  cancelRun(childRunId)
-  return true
+  return false
 }
 
 /** Parent-side cancel for an inline child (cancel_agent_instance tool). */
@@ -592,9 +577,9 @@ export async function spawnAgentInstance(
     }
   }
 
-  // Warm-start the child's semantic indexes (codeindex + sparsegrep) from the
-  // parent workspace so its first codebase_search reuses the parent's
-  // embeddings instead of re-indexing identical code. Best-effort: a failed
+  // Warm-start the child's code index from the
+  // parent workspace so its first codebase_search is already warm instead of
+  // re-indexing identical code. Best-effort: a failed
   // copy only costs the child a cold start.
   if (worktreePath) {
     try {
@@ -727,7 +712,7 @@ export async function mergeAgentInstanceBranch(
   workspacePath: string,
   parentRunId: string,
   childRunId: string
-): Promise<{ ok: true; detail: string } | { ok: false; error: string }> {
+): Promise<MergeInstanceBranchResult> {
   const childStatus = loadStatus(resolveRunDir(workspacePath, childRunId))
   if (!childStatus?.inlineInstance || childStatus.parentRunId !== parentRunId) {
     return { ok: false, error: 'run_id is not an inline instance spawned by this parent run' }
@@ -758,5 +743,4 @@ export function resetAgentInstancesForTests(): void {
   childWaiters.clear()
   runIpcSenders.clear()
   parentInstanceEmitters.clear()
-  deniedToolCounts.clear()
 }

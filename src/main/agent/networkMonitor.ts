@@ -4,24 +4,19 @@ import { isRetriableNetworkError } from './providers/fetchWithRetry'
 const DEFAULT_PROBE_URL = 'https://1.1.1.1/cdn-cgi/trace'
 const PROBE_TIMEOUT_MS = 5000
 const OFFLINE_POLL_MS = 2000
-export const MAX_OFFLINE_WAIT_MS = 60_000
-const EXTENDED_OFFLINE_WAIT_MS = 900_000
-
 export type OfflineWaitMode = 'default' | 'extended' | 'wait_forever'
 
-/** Resolve offline wait budget from settings (autonomous gates wait_forever). */
-export function resolveOfflineWaitMs(settings: {
+/**
+ * Offline wait is unlimited (run-stopping caps removed — user decision): the
+ * caller polls every OFFLINE_POLL_MS and resumes on its own when connectivity
+ * returns, or the user cancels the run. `settings` kept for call-site
+ * compatibility.
+ */
+export function resolveOfflineWaitMs(_settings: {
   offlineWaitMode?: OfflineWaitMode
   autonomousMode?: boolean
 }): number {
-  const mode = settings.offlineWaitMode ?? 'default'
-  if (mode === 'extended') return EXTENDED_OFFLINE_WAIT_MS
-  if (mode === 'wait_forever') {
-    return settings.autonomousMode === true
-      ? Number.POSITIVE_INFINITY
-      : EXTENDED_OFFLINE_WAIT_MS
-  }
-  return MAX_OFFLINE_WAIT_MS
+  return Number.POSITIVE_INFINITY
 }
 
 function probeTimeoutSignal(parent?: AbortSignal): AbortSignal {
@@ -101,7 +96,7 @@ export async function* iterateNetworkWait(options: {
   signal?: AbortSignal
   maxWaitMs?: number
 }): AsyncGenerator<number, void, unknown> {
-  const maxWaitMs = options.maxWaitMs ?? MAX_OFFLINE_WAIT_MS
+  const maxWaitMs = options.maxWaitMs ?? Number.POSITIVE_INFINITY
   let waited = 0
 
   while (waited < maxWaitMs) {

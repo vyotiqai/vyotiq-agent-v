@@ -164,8 +164,9 @@ The `finalize-release` job now fails the workflow unless all three are present (
 exe/DMG/zip/AppImage installers), so a successful run implies they exist; the commands below are
 the manual equivalent.
 
-**Sanity sizes** — real v1.1.1 assets, all ≤ 500 MB (the CUDA variants of `@node-llama-cpp` are
-excluded in `electron-builder.yml` precisely to stay under this):
+**Sanity sizes** — measured on real v1.1.1 assets, all ≤ 500 MB (builds since the
+v1.2.x indexing migration are smaller still — the embedding stack was removed
+and only the dictation ONNX natives remain unpacked):
 
 | Asset | v1.1.1 size |
 | --- | --- |

@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   CIRCUIT_FAILURE_THRESHOLD,
-  CIRCUIT_OPEN_MS,
-  CircuitOpenError,
   MCP_CONNECT_CIRCUIT_POLICY,
   assertCircuitClosed,
   circuitKeyHttp,
@@ -12,93 +10,47 @@ import {
   recordCircuitFailure,
   recordCircuitSuccess,
   releaseCircuitProbe,
-  resetCircuit,
-  setCircuitNowForTests
+  resetCircuit
 } from '@main/agent/circuitBreaker'
 
 describe('circuitBreaker', () => {
-  it('stays closed until consecutive failures reach the threshold', () => {
+  it('never opens, no matter how many consecutive failures are recorded', () => {
     const key = circuitKeyProvider('openai')
-    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD - 1; i++) {
-      assertCircuitClosed(key)
+    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD + 5; i++) {
       recordCircuitFailure(key)
       expect(inspectCircuit(key).state).toBe('closed')
+      expect(() => assertCircuitClosed(key)).not.toThrow()
     }
-    recordCircuitFailure(key)
-    expect(inspectCircuit(key).state).toBe('open')
-    expect(() => assertCircuitClosed(key)).toThrow(CircuitOpenError)
+    // Failures are still counted for diagnostics.
+    expect(inspectCircuit(key).consecutiveFailures).toBe(CIRCUIT_FAILURE_THRESHOLD + 5)
   })
 
-  it('closes again after a successful call', () => {
-    const key = circuitKeyHttp('https://api.example.test/v1')
-    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) recordCircuitFailure(key)
-    expect(inspectCircuit(key).state).toBe('open')
-    resetCircuit(key)
-    assertCircuitClosed(key)
-    recordCircuitSuccess(key)
-    expect(inspectCircuit(key).state).toBe('closed')
-  })
-
-  it('allows one half-open probe after the open window, then re-opens on failure', () => {
-    const key = 'http:probe.test'
-    let t = 1_000
-    setCircuitNowForTests(() => t)
-    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) recordCircuitFailure(key)
-    expect(() => assertCircuitClosed(key)).toThrow(CircuitOpenError)
-
-    t += CIRCUIT_OPEN_MS
-    assertCircuitClosed(key)
-    expect(inspectCircuit(key).state).toBe('half_open')
-    expect(() => assertCircuitClosed(key)).toThrow(CircuitOpenError)
-
-    recordCircuitFailure(key)
-    expect(inspectCircuit(key).state).toBe('open')
-  })
-
-  it('releases a half-open probe so a later call can probe again', () => {
-    const key = 'http:abort-probe.test'
-    let t = 1_000
-    setCircuitNowForTests(() => t)
-    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) recordCircuitFailure(key)
-    t += CIRCUIT_OPEN_MS
-    assertCircuitClosed(key)
-    expect(inspectCircuit(key).state).toBe('half_open')
-    expect(() => assertCircuitClosed(key)).toThrow(CircuitOpenError)
-
-    releaseCircuitProbe(key)
-    assertCircuitClosed(key)
-    expect(inspectCircuit(key).state).toBe('half_open')
-    expect(() => assertCircuitClosed(key)).toThrow(CircuitOpenError)
-  })
-
-  it('half-open success returns to closed', () => {
-    const key = 'provider:gemini'
-    let t = 5_000
-    setCircuitNowForTests(() => t)
-    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) recordCircuitFailure(key)
-    t += CIRCUIT_OPEN_MS
-    assertCircuitClosed(key)
-    recordCircuitSuccess(key)
-    expect(inspectCircuit(key).state).toBe('closed')
-    assertCircuitClosed(key)
-  })
-
-  it('MCP connect policy opens after a single failure', () => {
+  it('MCP connect keys never open either (single-failure trip removed)', () => {
     const key = circuitKeyMcpConnect('fs')
     assertCircuitClosed(key, MCP_CONNECT_CIRCUIT_POLICY)
     recordCircuitFailure(key, MCP_CONNECT_CIRCUIT_POLICY)
-    expect(inspectCircuit(key).state).toBe('open')
-    expect(() => assertCircuitClosed(key, MCP_CONNECT_CIRCUIT_POLICY)).toThrow(
-      /Circuit open for mcp-connect:fs/
-    )
+    expect(inspectCircuit(key).state).toBe('closed')
+    expect(() => assertCircuitClosed(key, MCP_CONNECT_CIRCUIT_POLICY)).not.toThrow()
   })
 
-  it('isolates keys so one host does not trip another', () => {
+  it('resets the failure count on success', () => {
+    const key = circuitKeyHttp('https://api.example.test/v1')
+    recordCircuitFailure(key)
+    recordCircuitFailure(key)
+    recordCircuitSuccess(key)
+    expect(inspectCircuit(key).consecutiveFailures).toBe(0)
+    resetCircuit(key)
+    expect(inspectCircuit(key).state).toBe('closed')
+    assertCircuitClosed(key)
+  })
+
+  it('isolates keys so one host cannot affect another', () => {
     const down = circuitKeyHttp('https://down.test/a')
     const up = circuitKeyHttp('https://up.test/a')
-    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) recordCircuitFailure(down)
+    for (let i = 0; i < 10; i++) recordCircuitFailure(down)
     assertCircuitClosed(up)
-    expect(() => assertCircuitClosed(down)).toThrow(CircuitOpenError)
+    expect(inspectCircuit(up).consecutiveFailures).toBe(0)
+    expect(inspectCircuit(down).consecutiveFailures).toBe(10)
   })
 
   it('isolates custom provider endpoints in the stream circuit key', () => {
@@ -114,10 +66,7 @@ describe('circuitBreaker', () => {
     // breaker is identical to an absent one (inspectCircuit reports closed
     // either way), so success must not retain the entry.
     const key = circuitKeyMcpConnect('session-a')
-    assertCircuitClosed(key, MCP_CONNECT_CIRCUIT_POLICY)
     recordCircuitFailure(key, MCP_CONNECT_CIRCUIT_POLICY)
-    expect(inspectCircuit(key).state).toBe('open')
-
     recordCircuitSuccess(key)
     // Closed → indistinguishable from never-seen, and the entry is gone.
     expect(inspectCircuit(key)).toEqual({
@@ -125,10 +74,12 @@ describe('circuitBreaker', () => {
       consecutiveFailures: 0,
       retryAfterMs: 0
     })
-    // Absent entry still asserts closed and re-creates on demand with the
-    // caller-supplied policy — a fresh failure re-opens as before.
-    assertCircuitClosed(key, MCP_CONNECT_CIRCUIT_POLICY)
-    recordCircuitFailure(key, MCP_CONNECT_CIRCUIT_POLICY)
-    expect(inspectCircuit(key).state).toBe('open')
+  })
+
+  it('probe release is a safe no-op now that the breaker never opens', () => {
+    const key = circuitKeyHttp('https://probe.test/a')
+    releaseCircuitProbe(key)
+    expect(() => assertCircuitClosed(key)).not.toThrow()
+    expect(inspectCircuit(key).state).toBe('closed')
   })
 })

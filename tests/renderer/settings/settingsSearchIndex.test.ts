@@ -29,11 +29,11 @@ describe('scrollToSettingsField', () => {
     expect(el.className).toContain('ring-1')
   })
 
-  it('falls back from ollama embedder model to the embedder picker', () => {
-    document.body.innerHTML = '<div data-settings-field="codeindex-embedder"></div>'
-    const el = document.querySelector('[data-settings-field="codeindex-embedder"]') as HTMLElement
+  it('is a no-op for removed indexing fields', () => {
+    document.body.innerHTML = '<div data-settings-field="codeindex-enabled"></div>'
+    const el = document.querySelector('[data-settings-field="codeindex-enabled"]') as HTMLElement
     el.scrollIntoView = vi.fn()
-    scrollToSettingsField('codeindex-ollama-model')
-    expect(el.className).toContain('ring-1')
+    expect(() => scrollToSettingsField('codeindex-ollama-model')).not.toThrow()
+    expect(el.className).not.toContain('ring-1')
   })
 })

@@ -1,6 +1,6 @@
 import { join } from 'path'
 import { assertInsideWorkspace } from '../../../shared/workspacePath'
-import { querySparseFileList } from '../sparsegrep'
+import { queryIndexFileList } from '../codeindex'
 import {
   collectWorkspaceFilesPage,
   formatLiveScanCapNotice,
@@ -74,7 +74,7 @@ export async function toolGlob(
   let indexSyncInProgress = false
   let indexedFileCount = 0
 
-  const list = await querySparseFileList(workspaceRoot, { signal })
+  const list = await queryIndexFileList(workspaceRoot, { signal })
   if (list) {
     indexedFileCount = list.fileCount
     indexSyncInProgress = !list.syncComplete

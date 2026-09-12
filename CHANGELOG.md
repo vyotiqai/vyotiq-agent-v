@@ -9,6 +9,12 @@ website changelog — a release must not ship without an entry here. Each
 release's `###` subsections (for example `### Added`, `### Fixed`) become the
 "About this update" sections users see.
 
+## [1.3.0] - 2026-09-12
+
+### Changed
+
+- The codebase index was rebuilt from the ground up: the old embedding stack (local ONNX dense embedders, node-llama-cpp, sparsegrep, tree-sitter wasm grammars, model downloads, and the embedding utility process) is gone. Codebase search now uses a simple, fully local SQLite full-text/trigram index over symbol-aware chunks with BM25 ranking and incremental mtime/size/hash sync — no models, no downloads, faster startup, and a smaller install.
+
 ## [1.2.1] - 2026-09-11
 
 ### Fixed

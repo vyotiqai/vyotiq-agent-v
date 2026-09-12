@@ -1,46 +1,99 @@
 ---
 import DocsLayout from '../../../layouts/DocsLayout.astro'
-import {
-  DOC_SECTION_INTRO,
-  DOC_SECTION_LABEL,
-  DOC_SECTIONS,
-  docsHref,
-  groupedDocs,
-  type DocSection
-} from '../../../lib/docs'
+import { DOC_SECTION_INTRO, DOC_SECTION_LABEL, DOC_SECTIONS, docsHref, groupedDocs, type DocSection } from '../../../lib/docs'
 
-export function getStaticPaths() {
-  return DOC_SECTIONS.map((section) => ({ params: { section } }))
+export async function getStaticPaths() {
+  return DOC_SECTIONS.map((section) => ({
+    params: { section },
+    props: { section }
+  }))
 }
 
-const section = Astro.params.section as DocSection
-if (!DOC_SECTIONS.includes(section)) {
-  return Astro.redirect('/docs')
+interface Props {
+  section: DocSection
 }
 
+const { section } = Astro.props
 const groups = await groupedDocs()
-const group = groups.find((entry) => entry.section === section)
-if (!group) {
-  return Astro.redirect('/docs')
-}
-
-const label = DOC_SECTION_LABEL[section]
-const intro = DOC_SECTION_INTRO[section]
+const group = groups.find((candidate) => candidate.section === section)
 ---
 
 <DocsLayout
-  title={label}
-  description={intro}
+  title={DOC_SECTION_LABEL[section]}
+  description={DOC_SECTION_INTRO[section]}
   currentSection={section}
 >
-  <ul class="docs-index-list">
-    {
-      group.entries.map((entry) => (
-        <li>
-          <a href={docsHref(entry.id)}>{entry.data.title}</a>
-          <span>{entry.data.description}</span>
-        </li>
-      ))
-    }
-  </ul>
+  {
+    group && (
+      <ul class="docs-section-list">
+        {group.entries.map((entry) => (
+          <li>
+            <a class="docs-section-link" href={docsHref(entry.id)}>
+              <span class="docs-section-title">{entry.data.title}</span>
+              <span class="docs-section-desc">{entry.data.description}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    )
+  }
 </DocsLayout>
+
+<style>
+  .docs-section-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .docs-section-link {
+    display: grid;
+    grid-template-columns: 14rem minmax(0, 1fr);
+    gap: 0.5rem 1.5rem;
+    align-items: baseline;
+    padding: 1rem 1.25rem;
+    text-decoration: none;
+    background: var(--surface);
+    border: 1px solid var(--border-faint);
+    border-radius: 16px;
+    box-shadow: 0 1px 2px rgb(2 8 23 / 0.3), 0 8px 24px rgb(2 8 23 / 0.25);
+    transition:
+      border-color var(--duration) var(--ease),
+      box-shadow var(--duration) var(--ease),
+      transform var(--duration) var(--ease);
+  }
+
+  .docs-section-link:hover {
+    border-color: var(--border);
+    transform: translateY(-1px);
+    box-shadow: 0 1px 2px rgb(2 8 23 / 0.3), 0 12px 32px rgb(2 8 23 / 0.35);
+  }
+
+  .docs-section-title {
+    font-family: var(--font-display);
+    font-size: 0.9375rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--fg);
+    transition: color var(--duration) var(--ease);
+  }
+
+  .docs-section-desc {
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    color: var(--muted);
+  }
+
+  .docs-section-link:hover .docs-section-title {
+    color: var(--accent-strong);
+  }
+
+  @media (max-width: 50rem) {
+    .docs-section-link {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0.25rem;
+    }
+  }
+</style>

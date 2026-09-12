@@ -33,7 +33,7 @@ The in-app device flow uses the app's built-in GitHub OAuth App client ID. No us
 1. Refresh the panel.
 1. Create a draft pull request from the current topic branch, or open the existing pull request.
 
-The panel can show Changes, Description, Commits, Checks, and Reviews for an available pull request. “Checks completed” is not equivalent to passed; the panel counts successful conclusions separately.
+The panel can show Changes, Description, Commits, Checks, and Reviews for an available pull request. "Checks completed" is not equivalent to passed; the panel counts successful conclusions separately.
 
 ## Repository creation boundary
 
@@ -45,4 +45,4 @@ Do not paste access tokens into chat, rules, or skill files. Use the connection 
 
 ## Recover from an empty panel
 
-The panel maps failures to actionable states such as GitHub CLI not found, Not a git repository, GitHub repository not configured, No commits yet, and GitHub authentication required. Follow the state in that order instead of repeatedly pressing refresh. Full recovery is in Git and pull-request issues.
+The panel maps failures to actionable states such as GitHub CLI not found, Not a git repository, GitHub repository not configured, No commits yet, and GitHub authentication required. Follow the state in that order instead of repeatedly pressing refresh. Full recovery is in [Git and pull-request issues](/docs/troubleshooting/git-pull-requests).

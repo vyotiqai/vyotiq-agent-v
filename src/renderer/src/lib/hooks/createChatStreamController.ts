@@ -1317,8 +1317,11 @@ export function createChatStreamController(
   const { initialExpansions, onExpansionsChange } = options
   let lastNotifiedAgentMode: AgentInteractionMode | null = null
   const notifyAgentMode = (mode: AgentInteractionMode | null | undefined): void => {
-    if (!mode || mode === lastNotifiedAgentMode) return
+    if (!mode) return
+    const live = getAgentMode?.()
+    const previous = lastNotifiedAgentMode
     lastNotifiedAgentMode = mode
+    if (mode === live || (live == null && mode === previous)) return
     onAgentModeChange?.(mode)
   }
   const listeners = new Set<() => void>()

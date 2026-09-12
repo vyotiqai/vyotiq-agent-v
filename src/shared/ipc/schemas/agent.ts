@@ -928,29 +928,7 @@ export const LoopCheckpointSchema = z.object({
   step: z.number().int().min(0),
   invokeId: z.number().int().min(1),
   updatedAt: z.string().min(1),
-  truncationContinues: z.number().int().min(0).default(0),
   overflowRetryUsed: z.boolean().default(false),
-  /** Runaway-loop invariants, restored on interrupted resume (v2). */
-  identicalStepStreak: z.number().int().min(0).default(0),
-  lastStepFingerprint: z.string().max(64).default(''),
-  /**
-   * Near-identical reasoning streak across steps (run be413e92 second guard).
-   * Additive v3 fields with defaults: older checkpoints parse/resume with
-   * 0 / '' / 0 and LOOP_CHECKPOINT_VERSION stays 3.
-   */
-  identicalReasoningStreak: z.number().int().min(0).default(0),
-  lastReasoningFingerprint: z.string().max(64).default(''),
-  /** Generation-repetition aborts auto-continued so far (capped by loopPolicy MAX_REPETITION_ABORTS). */
-  repetitionAborts: z.number().int().min(0).default(0),
-  consecutiveToolFailureSteps: z.number().int().min(0).default(0),
-  /**
-   * Signatures of recent all-failed steps, newest first. Additive field:
-   * checkpoints written before it parse to []. Feeds the failure-streak
-   * novelty rule in loopPolicy.ts; the cap must stay in sync with
-   * FAILURE_SIGNATURE_WINDOW there.
-   */
-  recentFailureSignatures: z.array(z.string().max(64)).max(32).default([]),
-  emptyResponseContinues: z.number().int().min(0).default(0),
   goalNoToolFinishes: z.number().int().min(0).default(0),
   /**
    * Durable cumulative usage (v3). events.jsonl rotates its archives

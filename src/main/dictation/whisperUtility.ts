@@ -9,7 +9,7 @@
  * pcm16k is base64 Int16 LE PCM at 16 kHz. Rebuild Float32Array in this process —
  * do not pass postMessage clones / Buffers / `{ raw }` objects to Whisper.
  */
-import { applyOrtThreadEnvHints, buildOrtSessionOptions, resolveOrtIntraOpThreads } from '../agent/codeindex/ortSessionOptions'
+import { applyOrtThreadEnvHints, buildOrtSessionOptions, resolveOrtIntraOpThreads } from './ortSessionOptions'
 import { invokeWhisperAsr, type WhisperAsrFn } from './whisperAudio'
 
 type UtilityOp = 'ensure' | 'transcribe' | 'dispose' | 'ping'

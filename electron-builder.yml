@@ -30,17 +30,13 @@ files:
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
   - '!**/*.{md,map}'
-  # onnxruntime natives are trimmed per target OS (see win/mac/linux.files).
-  # Grammars ship via extraResources/codeindex/wasm; skip full package (~49 MB).
-  - '!**/tree-sitter-wasms/**'
   # Drop dev-only weight from asar-packed node_modules (never loaded at runtime).
   - '!**/node_modules/**/{test,tests,__tests__,doc,docs,examples}/**'
   - '!**/node_modules/**/*.md'
   - '!**/node_modules/**/*.map'
   # onnxruntime-web (~107 MB packed): never loaded at runtime. No src import;
   # every @huggingface/transformers call site (dictation/local.ts,
-  # dictation/whisperUtility.ts, codeindex/embedUtility.ts, codeindex/mdenseon.ts,
-  # codeindex/onnxGeneric.ts) runs in the Electron main process /
+  # dictation/whisperUtility.ts) runs in the Electron main process /
   # utilityProcess, where transformers.js resolves its onnxruntime-node backend.
   - '!**/node_modules/onnxruntime-web/**'
   # gpt-tokenizer: only TypeScript src/ and tests are dead weight. Every other
@@ -52,10 +48,6 @@ files:
   # node-pty build-only sources (winpty/conpty sources; runtime loads
   # prebuilds/* via lib/utils.js, prebuild.js short-circuits node-gyp).
   - '!**/node_modules/node-pty/{third_party,deps,src}/**'
-  # node-llama-cpp: llama/ holds llama.cpp sources + cmake toolchains used only
-  # to compile from source (npmRebuild: false; runtime addon comes from
-  # @node-llama-cpp/<platform>/bins — main package bins is empty).
-  - '!**/node_modules/node-llama-cpp/llama/**'
   # cmake-js: native build tool only (prebuilt binaries ship per platform).
   - '!**/node_modules/cmake-js/**'
   # @sentry/react is bundled into out/renderer by vite (externalizeDeps:false);
@@ -71,12 +63,10 @@ extraResources:
       - '!proposals/**'
   - from: resources/marketplace
     to: marketplace
-  - from: resources/codeindex/wasm
-    to: codeindex/wasm
 asarUnpack:
   # Runtime only reads icons from app.asar.unpacked (window.ts:39,
   # notifications/service.ts:99 — both fall back to the asar copy).
-  # harness/marketplace/codeindex resolve via process.resourcesPath
+  # harness/marketplace resolve via process.resourcesPath
   # (extraResources), so unpacking resources/** only duplicated ~13 MB.
   - 'resources/icon.*'
   # Native addons cannot load from asar. Unpack .node files and ORT shared libs
@@ -117,7 +107,6 @@ win:
         - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
         - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
         - '!**/*.{md,map}'
-        - '!**/tree-sitter-wasms/**'
         - '!build{,/**/*}'
         - '!{.git,.github,.cursor,.vyotiq}/**'
         - '!**/onnxruntime-node/bin/napi-v6/darwin/**'
@@ -126,14 +115,6 @@ win:
         # node-pty: keep win32-x64 prebuilds only (platform-wrong).
         - '!**/node_modules/node-pty/prebuilds/{darwin,linux}*/**'
         - '!**/node_modules/node-pty/prebuilds/win32-arm64/**'
-        # node-llama-cpp: other-OS platform binaries (platform-wrong).
-        - '!**/node_modules/@node-llama-cpp/{linux,mac}-*/**'
-        # GPU backend = Vulkan (94.7 MB). CUDA variants (cuda 162.8 MB +
-        # cuda-ext 346.1 MB) are excluded to keep the installer < 500 MB — see
-        # docs/installer-size-audit.md for the CUDA-kept alternative (~+490 MB raw).
-        - '!**/node_modules/@node-llama-cpp/win-x64-cuda/**'
-        - '!**/node_modules/@node-llama-cpp/win-x64-cuda-ext/**'
-        - '!**/node_modules/@node-llama-cpp/win-arm64/**'
   executableName: Vyotiq
 nsis:
   artifactName: ${productName}-${version}-setup.${ext}
@@ -180,15 +161,12 @@ mac:
         - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
         - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
         - '!**/*.{md,map}'
-        - '!**/tree-sitter-wasms/**'
         - '!build{,/**/*}'
         - '!{.git,.github,.cursor,.vyotiq}/**'
         - '!**/onnxruntime-node/bin/napi-v6/linux/**'
         - '!**/onnxruntime-node/bin/napi-v6/win32/**'
         # node-pty: keep darwin prebuilds only (platform-wrong).
         - '!**/node_modules/node-pty/prebuilds/{win32,linux}*/**'
-        # node-llama-cpp: other-OS platform binaries (platform-wrong).
-        - '!**/node_modules/@node-llama-cpp/{win,linux}-*/**'
 dmg:
   # ${arch} keeps arm64/x64 DMGs from colliding: both are uploaded to the same
   # GitHub release by the single macOS job in release.yml, and latest-mac.yml
@@ -220,22 +198,12 @@ linux:
         - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
         - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
         - '!**/*.{md,map}'
-        - '!**/tree-sitter-wasms/**'
         - '!build{,/**/*}'
         - '!{.git,.github,.cursor,.vyotiq}/**'
         - '!**/onnxruntime-node/bin/napi-v6/darwin/**'
         - '!**/onnxruntime-node/bin/napi-v6/win32/**'
         # node-pty: keep linux prebuilds only (platform-wrong).
         - '!**/node_modules/node-pty/prebuilds/{win32,darwin}*/**'
-        # node-llama-cpp: other-OS platform binaries (platform-wrong).
-        - '!**/node_modules/@node-llama-cpp/{win,mac}-*/**'
-        # GPU backend = Vulkan. CUDA variants (linux-x64-cuda + linux-x64-cuda-ext,
-        # ~163 + ~346 MB like their win counterparts) are excluded to keep the
-        # AppImage < 500 MB — see docs/installer-size-audit.md for the CUDA-kept
-        # alternative table.
-        - '!**/node_modules/@node-llama-cpp/linux-x64-cuda/**'
-        - '!**/node_modules/@node-llama-cpp/linux-x64-cuda-ext/**'
-        - '!**/node_modules/@node-llama-cpp/linux-{arm64,armv7l,riscv64}/**'
 appImage:
   artifactName: ${productName}-${version}.${ext}
 npmRebuild: false

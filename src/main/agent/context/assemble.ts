@@ -36,6 +36,14 @@ export type AssembleContextRequest = AssembleInput & {
   provider: LlmProvider
   apiKey?: string | null
   baseUrl?: string
+  /**
+   * Count reasoning replay fields (reasoningState / thinking) in the history
+   * token estimate. Defaults to true. Providers that strip prior-turn
+   * reasoning from the wire (regenerating thinking from context instead of
+   * replaying it) must pass false — see loop.ts, mirrors the strip decision
+   * in providers/openai.ts createOpenAiCompatProvider.
+   */
+  countReasoningReplay?: boolean
   signal: AbortSignal
   /**
    * Workspace to read durable memory (state.md + index.md) from. Defaults to
@@ -556,11 +564,12 @@ async function computeLayers(
   system: string,
   messages: ChatMessage[],
   toolsJsonEstimate: number,
-  model: ModelInfo
+  model: ModelInfo,
+  countReasoningReplay?: boolean
 ): Promise<ContextLayerBreakdown> {
   const [systemTokens, history] = await Promise.all([
     estimateTextTokensAsync(system, model),
-    estimateMessagesTokensAsync(messages, model)
+    estimateMessagesTokensAsync(messages, model, { countReasoningReplay })
   ])
   const used = systemTokens + history + toolsJsonEstimate
   const budget = contentWindow(model)
@@ -637,7 +646,8 @@ export async function assembleContext(
     zones.system,
     messages,
     input.toolsJsonEstimate,
-    input.model
+    input.model,
+    input.countReasoningReplay
   )
   let estimated = totalFromLayers(layers)
   // Cheap pre-compaction elision: once the assembled history itself crosses
@@ -651,7 +661,13 @@ export async function assembleContext(
     const trimmed = trimToolResults(messages, KEEP_LAST_TOOL_RESULTS)
     if (trimmed.some((m, i) => m !== messages[i])) {
       messages = trimmed
-      layers = await computeLayers(zones.system, messages, input.toolsJsonEstimate, input.model)
+      layers = await computeLayers(
+        zones.system,
+        messages,
+        input.toolsJsonEstimate,
+        input.model,
+        input.countReasoningReplay
+      )
       estimated = totalFromLayers(layers)
     }
   }

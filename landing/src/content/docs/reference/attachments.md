@@ -24,7 +24,7 @@ Counts are independent by attachment kind.
 
 The picker accepts images, PDF, plain text, Markdown/MDX, JSON/JSONC, YAML, TOML, INI, CSV/TSV, logs, SQL, HTML/XML, CSS/SCSS, JavaScript/TypeScript, Python, Ruby, Go, Rust, Java, Kotlin, Swift, C/C++, C#, PHP, shell scripts, PowerShell, patch/diff, WAV, MP3, and M4A. Text MIME types are also accepted.
 
-Acceptance by the picker does not guarantee successful extraction. The main process returns an actionable error for unsupported or unreadable content.
+Acceptance by the picker does not guarantee successful extraction. The main process returns a specific error for unsupported or unreadable content.
 
 ## Audio formats
 

@@ -1,15 +1,16 @@
 /**
- * Index-backed grep/glob integration e2e — real tools + sparsegrep, small tree (~200 files).
+ * Index-backed grep/glob integration e2e — real tools + the SQLite code index, small tree (~200 files).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
-  closeSparseGrep,
-  disposeSparseGrepWorkspace,
-  ensureSparseGrepSynced
-} from '@main/agent/sparsegrep'
+  closeCodeIndexStore,
+  disposeCodeIndexWorkspace,
+  ensureCodeIndexSynced,
+  getOrOpenCodeIndexStore
+} from '@main/agent/codeindex'
 import { toolGrep } from '@main/agent/tools/grep'
 import { toolGlob } from '@main/agent/tools/glob'
 
@@ -42,8 +43,8 @@ describe('e2e: large repo index integration', () => {
   })
 
   afterEach(() => {
-    disposeSparseGrepWorkspace(workspace)
-    closeSparseGrep(workspace)
+    disposeCodeIndexWorkspace(workspace)
+    closeCodeIndexStore(workspace)
     if (existsSync(workspace)) {
       try {
         rmSync(workspace, { recursive: true, force: true })
@@ -54,9 +55,9 @@ describe('e2e: large repo index integration', () => {
   })
 
   it('index-backed grep finds marker with index=trigram footer', async () => {
-    const { store, sync } = await ensureSparseGrepSynced(workspace)
+    const { sync } = await ensureCodeIndexSynced(workspace)
     expect(sync?.syncComplete).toBe(true)
-    expect(store.getStatus().ready).toBe(true)
+    expect(getOrOpenCodeIndexStore(workspace).getStatus().ready).toBe(true)
 
     const out = await toolGrep(workspace, MARKER)
     expect(out).toContain(MARKER)
@@ -66,9 +67,8 @@ describe('e2e: large repo index integration', () => {
   }, 60_000)
 
   it('index-backed glob lists marker file with index=trigram footer', async () => {
-    const { store, sync } = await ensureSparseGrepSynced(workspace)
+    const { sync } = await ensureCodeIndexSynced(workspace)
     expect(sync?.syncComplete).toBe(true)
-    expect(store.getStatus().ready).toBe(true)
 
     const out = await toolGlob(workspace, `**/file${FILE_COUNT - 1}.ts`)
     expect(out).toContain(markerRel)
@@ -77,8 +77,9 @@ describe('e2e: large repo index integration', () => {
   }, 60_000)
 
   it('surfaces in-progress notice when syncComplete is false', async () => {
-    const { store, sync } = await ensureSparseGrepSynced(workspace)
+    const { sync } = await ensureCodeIndexSynced(workspace)
     expect(sync?.syncComplete).toBe(true)
+    const store = getOrOpenCodeIndexStore(workspace)
     store.setMeta('syncComplete', 'false')
 
     const grepOut = await toolGrep(workspace, MARKER)

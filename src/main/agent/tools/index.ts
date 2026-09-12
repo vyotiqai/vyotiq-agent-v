@@ -117,6 +117,7 @@ import {
 } from '../workspaceMutationWatch'
 import { resolveInsideWorkspace } from '@main/workspace/safePath'
 import { withWorkspaceMutation } from '@main/workspace/mutationQueue'
+import { recordMergedInstanceChanges } from './mergeCheckpoint'
 import { clearWorkspaceSnapshotCache } from '../context/workspaceSnapshot'
 import { commitPaths } from '@main/git/git'
 import {
@@ -356,8 +357,7 @@ export function terminalResultOk(command: string, content: string): boolean {
   if (/exit_code: 0\b/.test(content)) return true
   // Informative non-zero exits (any shell): environment probes answered
   // "not installed" and elevation denials answer the question asked — they
-  // are evidence, not tool faults. Counting them as failures made runs stop
-  // on LOOP_SAFETY while probing a machine's toolchain (run 1de9344a).
+  // are evidence, not tool faults (run 1de9344a).
   if (isCommandProbeNoTargetContent(command, content)) return true
   if (isRemoteGrepNoMatchContent(command, content)) return true
   if (isElevationDeniedContent(command, content)) return true
@@ -561,13 +561,9 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
   codebase_search: async (workspace, args, signal) => {
     throwIfAborted(signal)
     const query = args.query as string
-    const modeRaw = typeof args.mode === 'string' ? args.mode : 'hybrid'
-    const mode =
-      modeRaw === 'semantic' || modeRaw === 'lexical' || modeRaw === 'hybrid' ? modeRaw : 'hybrid'
     const content = await toolCodebaseSearch(workspace, query, {
       maxResults:
         typeof args.maxResults === 'number' ? args.maxResults : CODEBASE_SEARCH_DEFAULT_LIMIT,
-      mode,
       refresh: args.refresh === true,
       signal
     })
@@ -1476,7 +1472,7 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     const content =
       previous === mode
         ? `Already in ${mode} mode.`
-        : `Mode switched from ${previous} to ${mode}. Tool availability updated for subsequent steps.`
+        : `Mode switched from ${previous} to ${mode}. Tool gating applies immediately; the visible tool catalog refreshes for subsequent steps.`
     return toolOk('switch_mode', mode, content)
   },
   terminal: async (workspace, args, signal, context) => {
@@ -1933,6 +1929,9 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     if (!result.ok) {
       return toolFail('merge_agent_instance', formatAgentInstanceLabel(childRunId), result.error)
     }
+    // The merge touched the parent workspace outside any edit tool — record its
+    // file changes onto this turn's checkpoint so chatRewind can revert them.
+    await recordMergedInstanceChanges(workspace, context, result)
     invalidateAfterWorkspaceMutation(workspace)
     return toolOk('merge_agent_instance', formatAgentInstanceLabel(childRunId), result.detail)
   },

@@ -22,9 +22,7 @@ Include:
 1. Constraints such as “do not commit” or “preserve this API.”
 1. A verification command or observable result.
 
-Fix the overflow in the Settings navigation at 390px. Preserve keyboard navigation,
-
-run the renderer typecheck, and report the changed file. Do not edit unrelated views.
+For example: "Fix the overflow in the Settings navigation at 390px. Preserve keyboard navigation, run the renderer typecheck, and report the changed file. Do not edit unrelated views."
 
 Use Ask for explanation, Plan for an approval-ready approach, and Agent for implementation.
 

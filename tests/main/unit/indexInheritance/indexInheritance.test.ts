@@ -15,15 +15,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   codeindexDbPath,
   codeindexRoot,
-  sparsegrepDbPath,
   setWorkspaceIndexStorageRootOverrideForTests
 } from '@main/agent/indexStoragePaths'
 import { copyWorkspaceIndexesForInstance } from '@main/agent/indexInheritance'
 import { logger } from '@shared/logger'
 
 /**
- * Real sqlite DBs via node:sqlite DatabaseSync — the same module both stores
- * use (codeindex/store.ts, sparsegrep/store.ts, WAL journal mode).
+ * Real sqlite DBs via node:sqlite DatabaseSync — the same module the store
+ * uses (codeindex/store.ts, WAL journal mode).
  */
 
 function sha256(filePath: string): string {
@@ -72,9 +71,8 @@ describe('copyWorkspaceIndexesForInstance', () => {
     if (storageRoot && existsSync(storageRoot)) rmSync(storageRoot, { recursive: true, force: true })
   })
 
-  it('copies usable codeindex + sparsegrep DBs into the worktree storage', async () => {
+  it('copies the code index DB into the worktree storage', async () => {
     seedIndexDb(codeindexDbPath(workspace), 'code-marker')
-    seedIndexDb(sparsegrepDbPath(workspace), 'sparse-marker')
     const worktreePath = join(workspace, 'wt')
 
     await copyWorkspaceIndexesForInstance(workspace, worktreePath)
@@ -86,16 +84,6 @@ describe('copyWorkspaceIndexesForInstance', () => {
       (childCode.prepare('SELECT value FROM meta WHERE key = ?').get('marker') as { value: string })
         .value
     ).toBe('code-marker')
-
-    const childSparse = openReadOnly(sparsegrepDbPath(worktreePath))
-    openDbs.push(childSparse)
-    expect(
-      (
-        childSparse.prepare('SELECT value FROM meta WHERE key = ?').get('marker') as {
-          value: string
-        }
-      ).value
-    ).toBe('sparse-marker')
 
     // Child copies live in the child's own storage id — not the parent's.
     expect(codeindexDbPath(worktreePath)).not.toBe(codeindexDbPath(workspace))
@@ -132,7 +120,6 @@ describe('copyWorkspaceIndexesForInstance', () => {
     await expect(copyWorkspaceIndexesForInstance(workspace, worktreePath)).resolves.toBeUndefined()
 
     expect(existsSync(codeindexDbPath(worktreePath))).toBe(false)
-    expect(existsSync(sparsegrepDbPath(worktreePath))).toBe(false)
   })
 
   it('oversized parent DB → skipped, child cold-starts', async () => {

@@ -15,7 +15,7 @@ related:
 
 Open Marketplace → Manage and review the package registry acknowledgement. Remote catalogs, Git/npm/zip or local-path packages, and MCP endpoints are unsigned. Agent V requires acknowledgement before remote install or endpoint changes.
 
-Confirm the source instead of treating acknowledgement as a generic “continue” button.
+Confirm the source instead of treating acknowledgement as a generic "continue" button.
 
 ## A package install or removal fails
 

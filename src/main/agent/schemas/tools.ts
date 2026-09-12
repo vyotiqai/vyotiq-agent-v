@@ -254,19 +254,13 @@ const codebaseSearchArgs = z
       .trim()
       .min(1)
       .describe(
-        'Natural-language or keyword query over indexed functions/classes. Prefer camelCase identifiers once known (the lexical side tokenizes them).'
+        'Keyword query over indexed code — identifiers, file names, or substrings. Prefer camelCase identifiers once known.'
       ),
     maxResults: z
       .number()
       .int()
       .min(1)
       .describe(`Max hits (default ${DEFAULT_SEARCH_LIMIT})`)
-      .optional(),
-    mode: z
-      .enum(['hybrid', 'semantic', 'lexical'])
-      .describe(
-        'hybrid (default) = dense + FTS RRF for paraphrases; semantic = vectors only; lexical = FTS only — use lexical when you already have a symbol'
-      )
       .optional(),
     refresh: z
       .boolean()
@@ -1000,7 +994,7 @@ export const TOOL_REGISTRY = {
   },
   codebase_search: {
     description:
-      'Ranked local search over the indexed repository — the default way to locate code when you do not already know where it lives: dense semantic ranking fused with lexical/FTS matching (hybrid) finds paraphrases and related code that substring search misses. Workspace docs/ and Word .docx are matched at search time (extracted text), not stored in the index. Use grep for every occurrence of a known symbol or regex verification; use glob/list_dir for paths only. The tool result states which mode was used. Not memory RAG. Cite hits as [[path]] or [[path:line]].',
+      'Ranked keyword search over the locally indexed repository — the default way to locate code when you do not already know where it lives. Matches identifiers, file names, and substrings (trigram index, BM25 ranking); camelCase identifiers work as-is. Workspace docs/ and Word .docx are matched at search time (extracted text), not stored in the index. Use grep for every occurrence of a known symbol or regex verification; use glob/list_dir for paths only. Not memory RAG. Cite hits as [[path]] or [[path:line]].',
     schema: codebaseSearchArgs
   },
   list_dir: {

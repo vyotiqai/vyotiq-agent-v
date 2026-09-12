@@ -36,7 +36,7 @@ const transcribeDictationMock = vi.hoisted(() => vi.fn())
 const runExistsMock = vi.hoisted(() => vi.fn())
 const isActiveMock = vi.hoisted(() => vi.fn(() => false))
 const resolveWritesMock = vi.hoisted(() => vi.fn())
-const planRewindWritesMock = vi.hoisted(() => vi.fn(() => ({ checkpointIds: [], files: [] })))
+const planRewindPreviewMock = vi.hoisted(() => vi.fn(async () => ({ checkpointIds: [], files: [] })))
 const renameRunMock = vi.hoisted(() => vi.fn())
 const previewHarnessApplyMock = vi.hoisted(() =>
   vi.fn(() => {
@@ -126,12 +126,12 @@ vi.mock('@main/agent/loop', () => ({
 
 vi.mock('@main/agent/rewindRun', () => ({
   prepareRewindAndReplaceUserMessage: prepareRewindMock,
-  prepareRewindToUserMessage: prepareRewindToUserMessageMock
+  prepareRewindToUserMessage: prepareRewindToUserMessageMock,
+  planRewindToUserMessage: (...args: unknown[]) => planRewindPreviewMock(...args)
 }))
 
 vi.mock('@main/agent/checkpoints', () => ({
   resolveWrites: (...args: unknown[]) => resolveWritesMock(...args),
-  planRewindWrites: (...args: unknown[]) => planRewindWritesMock(...args),
   getWriteCheckpointMeta: vi.fn(() => null)
 }))
 
@@ -278,8 +278,8 @@ describe('registerIpc', () => {
     waitUntilRunInactiveMock.mockResolvedValue(true)
     isActiveMock.mockReturnValue(false)
     resolveWritesMock.mockReset()
-    planRewindWritesMock.mockReset()
-    planRewindWritesMock.mockReturnValue({ checkpointIds: [], files: [] })
+    planRewindPreviewMock.mockReset()
+    planRewindPreviewMock.mockResolvedValue({ checkpointIds: [], files: [] })
     renameRunMock.mockReset()
     previewHarnessApplyMock.mockReset()
     previewHarnessApplyMock.mockImplementation(() => {
@@ -861,7 +861,7 @@ describe('registerIpc', () => {
     it('returns the planned file set without mutating anything', async () => {
       runExistsMock.mockReturnValue(true)
       isActiveMock.mockReturnValue(false)
-      planRewindWritesMock.mockReturnValue({
+      planRewindPreviewMock.mockResolvedValue({
         checkpointIds: ['cp-1'],
         files: [{ path: 'a.txt', action: 'modified', undoable: true }]
       })
@@ -876,7 +876,11 @@ describe('registerIpc', () => {
           files: [{ path: 'a.txt', action: 'modified', undoable: true }]
         }
       })
-      expect(planRewindWritesMock).toHaveBeenCalledWith(expect.any(String), 0)
+      expect(planRewindPreviewMock).toHaveBeenCalledWith({
+        workspacePath: '/ws',
+        runId: 'run-revert',
+        userMessageIndex: 0
+      })
     })
 
     it('refuses while a run is active', async () => {
@@ -890,7 +894,7 @@ describe('registerIpc', () => {
       if (!result.ok) {
         expect(result.error).toMatch(/stop the run/i)
       }
-      expect(planRewindWritesMock).not.toHaveBeenCalled()
+      expect(planRewindPreviewMock).not.toHaveBeenCalled()
     })
 
     it('maps run-not-found to user-facing fail', async () => {

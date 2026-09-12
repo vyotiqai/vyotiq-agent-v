@@ -755,19 +755,17 @@ export function setSettings(
     logger.error('Failed to write settings', { scope: 'settings', code: 'SETTINGS', err })
     throw err
   }
-  const prevEmbedder = prev.codeIndex?.embedder ?? 'mdenseon'
-  const nextEmbedder = next.codeIndex?.embedder ?? 'mdenseon'
-  if (partial.codeIndex !== undefined && prevEmbedder !== nextEmbedder) {
+  const prevCodeIndex = prev.codeIndex
+  if (
+    partial.codeIndex !== undefined &&
+    (prevCodeIndex?.enabled ?? true) !== (next.codeIndex?.enabled ?? true)
+  ) {
     try {
       // Lazy require avoids circular import with codeindex → settings.
-      const { closeCodeIndex, clearMDenseOnSession, clearLfm2LlamaCppCache } = require('../agent/codeindex') as {
-        closeCodeIndex: (workspaceRoot?: string) => void
-        clearMDenseOnSession: () => void
-        clearLfm2LlamaCppCache: () => void
+      const { closeCodeIndexStore } = require('../agent/codeindex') as {
+        closeCodeIndexStore: (workspaceRoot?: string) => void
       }
-      closeCodeIndex()
-      clearMDenseOnSession()
-      clearLfm2LlamaCppCache()
+      closeCodeIndexStore()
     } catch {
       // ignore if codeindex unavailable in early boot / tests without electron
     }

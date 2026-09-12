@@ -957,14 +957,12 @@ describe('agentInstances', () => {
     expect(child.ok).toBe(true)
     if (!child.ok) return
 
-    // First denial records the strike but leaves the run live.
+    // Denials are logged but never cancel the inline instance (cap removed):
+    // the parent decides when to stop the child, not the denial counter.
+    expect(noteInlineInstanceDeniedTool(child.runId)).toBe(false)
+    expect(noteInlineInstanceDeniedTool(child.runId)).toBe(false)
     expect(noteInlineInstanceDeniedTool(child.runId)).toBe(false)
     expect(getRunAbort(child.runId)?.signal.aborted).toBe(false)
-    // Reaching the threshold cancels the stuck loop.
-    expect(noteInlineInstanceDeniedTool(child.runId)).toBe(true)
-    // startAgentRunInBackground is mocked (no live loop), so cancel shows up
-    // as an aborted controller; the slot clears only in a real loop finally.
-    expect(getRunAbort(child.runId)?.signal.aborted).toBe(true)
     const status = loadStatus(resolveRunDir(workspacePath, child.runId))
     expect(status?.inlineInstance).toBe(true)
   })

@@ -1,234 +1,323 @@
 ---
+// Slim sticky site header. Consumed with no props by every page layout.
 import BrandLockup from './BrandLockup.astro'
 import LandingIcon from './LandingIcon.astro'
-import { githubRelease, RELEASES_PAGE } from '../lib/githubRelease'
-import { SITE_PRODUCT } from '../lib/site'
 
-const onDocs = Astro.url.pathname === '/docs' || Astro.url.pathname.startsWith('/docs/')
-const onDocsIndex = Astro.url.pathname === '/docs' || Astro.url.pathname === '/docs/'
-const onHome = Astro.url.pathname === '/' || Astro.url.pathname === ''
-
-const themeOptions = [
-  { value: 'system', label: 'System', icon: 'monitor' },
-  { value: 'light', label: 'Light', icon: 'sun' },
-  { value: 'dark', label: 'Dark', icon: 'moon' }
-] as const
-
-const { assets } = githubRelease
-const downloadHref = assets.win?.url ?? assets.macArm64?.url ?? assets.linux?.url ?? RELEASES_PAGE
+const path = Astro.url.pathname
+const nav = [
+  { href: '/docs', label: 'Docs', active: path.startsWith('/docs') },
+  { href: '/changelog', label: 'Changelog', active: path.startsWith('/changelog') },
+  { href: '/#download', label: 'Download', active: false },
+]
 ---
 
-<header class="site-header">
-  <div class="wrap site-header-inner">
-    <a href="/" class="flex min-h-11 items-center" aria-label={`${SITE_PRODUCT} home`}>
+<header class="header">
+  <div class="bar">
+    <a href="/" class="brand" aria-label="VYOTIQ home">
       <BrandLockup />
     </a>
 
-    <nav class="site-nav" aria-label="Primary">
-      <a href="/#overview" aria-current={onHome ? 'page' : undefined}>Overview</a>
-      <a href="/#capabilities">Capabilities</a>
-      <a href="/docs" aria-current={onDocsIndex ? 'page' : onDocs ? 'true' : undefined}>Docs</a>
-      <a href="/changelog">Changelog</a>
-      <a
-        href="https://github.com/vyotiqai/vyotiq-agent-v"
-        rel="noopener noreferrer"
-        aria-label="Source on GitHub"
-      >
-        <LandingIcon name="github" size={17} />
-      </a>
+    <nav class="nav" aria-label="Main">
+      {
+        nav.map((item) => (
+          <a
+            href={item.href}
+            class:list={['nav-link', { active: item.active }]}
+            aria-current={item.active ? 'page' : undefined}
+          >
+            {item.label}
+          </a>
+        ))
+      }
     </nav>
 
-    <div class="header-actions">
-      <div class="relative" data-theme-root>
-        <button
-          type="button"
-          class="theme-button"
-          data-theme-toggle
-          aria-label="Color theme"
-          aria-haspopup="menu"
-          aria-expanded="false"
-          aria-controls="theme-menu"
-        >
-          <span class="hidden" data-theme-icon="system"><LandingIcon name="monitor" size={17} /></span>
-          <span class="hidden" data-theme-icon="light"><LandingIcon name="sun" size={17} /></span>
-          <span class="hidden" data-theme-icon="dark"><LandingIcon name="moon" size={17} /></span>
-        </button>
-        <div
-          id="theme-menu"
-          role="menu"
-          aria-label="Color theme"
-          hidden
-          data-theme-menu
-          class="theme-menu"
-        >
-          {
-            themeOptions.map((option) => (
-              <button type="button" role="menuitemradio" data-theme-option={option.value} aria-checked="false">
-                <LandingIcon name={option.icon} size={15} />
-                <span>{option.label}</span>
-                <span aria-hidden="true" class="theme-check">
-                  <LandingIcon name="check" size={13} />
-                </span>
-              </button>
-            ))
-          }
-        </div>
-      </div>
-      <a class="header-download" href={downloadHref} rel="noopener noreferrer">
-        <LandingIcon name="download" size={15} />
-        <span>Download</span>
+    <div class="actions">
+      <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch theme">
+        <span class="only-dark" aria-hidden="true">
+          <LandingIcon name="sun" size={16} />
+        </span>
+        <span class="only-light" aria-hidden="true">
+          <LandingIcon name="moon" size={16} />
+        </span>
+      </button>
+
+      <a
+        class="icon-btn"
+        href="https://github.com/vyotiqai/vyotiq-agent-v"
+        aria-label="VYOTIQ on GitHub"
+        title="GitHub"
+      >
+        <span aria-hidden="true">
+          <LandingIcon name="github" size={16} />
+        </span>
       </a>
+
+      <button
+        type="button"
+        class="icon-btn menu-btn"
+        id="menu-button"
+        aria-expanded="false"
+        aria-controls="mobile-nav"
+      >
+        <span class="menu-open" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" />
+          </svg>
+        </span>
+        <span class="menu-close" aria-hidden="true">
+          <LandingIcon name="x" size={16} />
+        </span>
+        <span class="sr-only">Menu</span>
+      </button>
     </div>
   </div>
-  <script
-    is:inline
-    type="application/json"
-    data-release-assets
-    set:html={JSON.stringify({
-      win: assets.win?.url ?? null,
-      mac: (assets.macArm64 ?? assets.mac)?.url ?? null,
-      linux: assets.linux?.url ?? null
-    })}
-  />
+
+  <nav id="mobile-nav" class="mobile-nav" hidden aria-label="Mobile">
+    {nav.map((item) => <a href={item.href} class="mobile-link">{item.label}</a>)}
+    <a href="https://github.com/vyotiqai/vyotiq-agent-v" class="mobile-link">GitHub</a>
+  </nav>
 </header>
+
+<style>
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: color-mix(in srgb, var(--bg) 80%, transparent);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border-faint);
+  }
+
+  .bar {
+    max-width: 72rem;
+    margin-inline: auto;
+    padding-inline: 1.5rem;
+    height: 3.5rem;
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    color: var(--fg);
+    text-decoration: none;
+  }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    gap: 1.75rem;
+    margin-left: auto;
+  }
+
+  .nav-link {
+    font-size: 0.875rem;
+    line-height: 1;
+    color: var(--muted);
+    text-decoration: none;
+    padding: 0.5rem 0.875rem;
+    border-radius: var(--radius-pill);
+    transition:
+      color var(--duration) var(--ease),
+      background-color var(--duration) var(--ease);
+  }
+
+  .nav-link:hover {
+    color: var(--fg);
+    background: var(--accent-soft);
+  }
+
+  .nav-link.active {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    text-decoration: none;
+  }
+
+  .icon-btn:hover {
+    color: var(--fg);
+    border-color: transparent;
+    background: var(--accent-soft);
+  }
+
+  .icon-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Theme icons: moon in light (click for dark), sun in dark (click for light). */
+  .only-dark {
+    display: none;
+  }
+
+  :global([data-theme='dark']) .only-dark {
+    display: inline-flex;
+  }
+
+  :global([data-theme='dark']) .only-light {
+    display: none;
+  }
+
+  .only-light {
+    display: inline-flex;
+  }
+
+  /* Mobile menu button: hidden on desktop. */
+  .menu-btn {
+    display: none;
+  }
+
+  .menu-close {
+    display: none;
+  }
+
+  .menu-btn[aria-expanded='true'] .menu-open {
+    display: none;
+  }
+
+  .menu-btn[aria-expanded='true'] .menu-close {
+    display: inline-flex;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .mobile-nav {
+    display: none;
+    flex-direction: column;
+    padding-block: 0.5rem 0.75rem;
+    background: var(--surface);
+    border-top: 1px solid var(--border-faint);
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    box-shadow: 0 16px 40px rgb(2 8 23 / 0.35);
+  }
+
+  .mobile-nav[hidden] {
+    display: none;
+  }
+
+  .mobile-link {
+    font-size: 0.9375rem;
+    color: var(--muted);
+    text-decoration: none;
+    margin-inline: 0.75rem;
+    padding: 0.625rem 0.875rem;
+    border-radius: var(--radius-md);
+    transition:
+      color var(--duration) var(--ease),
+      background-color var(--duration) var(--ease);
+  }
+
+  .mobile-link:hover {
+    color: var(--fg);
+    background: var(--accent-soft);
+  }
+
+  @media (max-width: 760px) {
+    .nav {
+      display: none;
+    }
+
+    .menu-btn {
+      display: inline-flex;
+    }
+
+    .mobile-nav {
+      display: flex;
+    }
+
+    .mobile-nav[hidden] {
+      display: none;
+    }
+  }
+
+  @media (min-width: 761px) {
+    .mobile-nav {
+      display: none;
+    }
+  }
+</style>
 
 <script>
   const KEY = 'vyotiq-theme'
-  const root = document.querySelector<HTMLElement>('[data-theme-root]')
-  const button = document.querySelector<HTMLButtonElement>('[data-theme-toggle]')
-  const menu = document.querySelector<HTMLElement>('[data-theme-menu]')
-  const media = window.matchMedia('(prefers-color-scheme: dark)')
+  const root = document.documentElement
 
-  type Mode = 'light' | 'dark' | 'system'
-
-  const MODE_LABEL: Record<Mode, string> = {
-    system: 'System',
-    light: 'Light',
-    dark: 'Dark'
-  }
-
-  const icons = {
-    system: button?.querySelector<HTMLElement>('[data-theme-icon="system"]'),
-    light: button?.querySelector<HTMLElement>('[data-theme-icon="light"]'),
-    dark: button?.querySelector<HTMLElement>('[data-theme-icon="dark"]')
-  }
-
-  const options = Array.from(menu?.querySelectorAll<HTMLButtonElement>('[data-theme-option]') ?? [])
-
-  function storedMode(): Mode {
-    const value = localStorage.getItem(KEY)
-    if (value === 'light' || value === 'dark') return value
-    return 'system'
-  }
-
-  function resolved(mode: Mode): 'light' | 'dark' {
-    if (mode === 'system') return media.matches ? 'dark' : 'light'
-    return mode
-  }
-
-  function apply(): void {
-    const mode = storedMode()
-    document.documentElement.setAttribute('data-theme', resolved(mode))
-    for (const [name, icon] of Object.entries(icons)) {
-      if (!icon) continue
-      icon.classList.toggle('hidden', name !== mode)
+  // Theme toggle. The old header stored 'system' | 'light' | 'dark'; if the
+  // resolved value is neither explicit option, fall back to the media query.
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-theme-toggle]')) {
+    const setLabel = () => {
+      const dark = root.getAttribute('data-theme') === 'dark'
+      btn.setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme')
     }
-    for (const option of options) {
-      option.setAttribute('aria-checked', String(option.dataset.themeOption === mode))
+    setLabel()
+    btn.addEventListener('click', () => {
+      let current = root.getAttribute('data-theme')
+      if (current !== 'light' && current !== 'dark') {
+        current = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+      }
+      const next = current === 'dark' ? 'light' : 'dark'
+      root.setAttribute('data-theme', next)
+      try {
+        localStorage.setItem(KEY, next)
+      } catch {
+        /* storage unavailable; theme still switches for this page view */
+      }
+      setLabel()
+    })
+  }
+
+  // Mobile menu. Without JS the panel stays hidden; links remain in the DOM.
+  const menuBtn = document.querySelector<HTMLButtonElement>('#menu-button')
+  const panel = document.querySelector<HTMLElement>('#mobile-nav')
+  if (menuBtn && panel) {
+    const setOpen = (open: boolean) => {
+      menuBtn.setAttribute('aria-expanded', String(open))
+      panel.hidden = !open
     }
-    if (button) {
-      button.setAttribute('aria-label', `Color theme: ${MODE_LABEL[mode]}`)
-      button.setAttribute('title', `Color theme: ${MODE_LABEL[mode]}`)
-    }
+    menuBtn.addEventListener('click', () => {
+      setOpen(menuBtn.getAttribute('aria-expanded') !== 'true')
+    })
+    panel.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('a')) setOpen(false)
+    })
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && menuBtn.getAttribute('aria-expanded') === 'true') {
+        setOpen(false)
+        menuBtn.focus()
+      }
+    })
+    window.matchMedia('(min-width: 761px)').addEventListener('change', (e) => {
+      if (e.matches) setOpen(false)
+    })
   }
-
-  function setMode(mode: Mode): void {
-    if (mode === 'system') localStorage.removeItem(KEY)
-    else localStorage.setItem(KEY, mode)
-    apply()
-  }
-
-  function openMenu(): void {
-    if (!menu || !button) return
-    menu.hidden = false
-    button.setAttribute('aria-expanded', 'true')
-    const current =
-      options.find((option) => option.getAttribute('aria-checked') === 'true') ?? options[0]
-    current?.focus()
-  }
-
-  function closeMenu(returnFocus: boolean): void {
-    if (!menu || !button || menu.hidden) return
-    menu.hidden = true
-    button.setAttribute('aria-expanded', 'false')
-    if (returnFocus) button.focus()
-  }
-
-  function moveFocus(step: number): void {
-    if (options.length === 0) return
-    const current = options.indexOf(document.activeElement as HTMLButtonElement)
-    const next = (current + step + options.length) % options.length
-    options[next].focus()
-  }
-
-  button?.addEventListener('click', () => {
-    if (menu?.hidden) openMenu()
-    else closeMenu(false)
-  })
-
-  menu?.addEventListener('click', (event) => {
-    const option = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-theme-option]')
-    const value = option?.dataset.themeOption
-    if (!option || (value !== 'light' && value !== 'dark' && value !== 'system')) return
-    setMode(value)
-    closeMenu(true)
-  })
-
-  root?.addEventListener('keydown', (event) => {
-    if (menu?.hidden) return
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      closeMenu(true)
-    } else if (event.key === 'ArrowDown') {
-      event.preventDefault()
-      moveFocus(1)
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault()
-      moveFocus(-1)
-    } else if (event.key === 'Tab') {
-      closeMenu(false)
-    }
-  })
-
-  document.addEventListener('click', (event) => {
-    if (menu?.hidden) return
-    if (root?.contains(event.target as Node)) return
-    closeMenu(false)
-  })
-
-  media.addEventListener('change', () => {
-    if (storedMode() === 'system') apply()
-  })
-
-  apply()
-</script>
-
-<script is:inline>
-  // Point the header download at the current platform's installer when one
-  // exists in the baked release snapshot. Falls back to the releases page.
-  (function () {
-    var link = document.querySelector('a.header-download')
-    var data = document.querySelector('script[data-release-assets]')
-    if (!link || !data) return
-    var ua = navigator.userAgent
-    var platform = ''
-    if (/Windows NT/i.test(ua)) platform = 'win'
-    else if (!/Android/i.test(ua) && /Linux/i.test(ua)) platform = 'linux'
-    else if (/Mac OS X|Macintosh/i.test(ua)) platform = 'mac'
-    if (!platform) return
-    try {
-      var assets = JSON.parse(data.textContent || '{}')
-      if (assets[platform]) link.href = assets[platform]
-    } catch (error) {}
-  })()
 </script>

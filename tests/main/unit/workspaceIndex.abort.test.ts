@@ -8,11 +8,9 @@ import {
   warmWorkspaceIndexes,
   workspaceIndexAbortSignal
 } from '@main/agent/workspaceIndex'
-import { closeCodeIndex } from '@main/agent/codeindex'
-import { closeSparseGrep } from '@main/agent/sparsegrep'
+import { closeCodeIndexStore } from '@main/agent/codeindex'
 import { resetIndexJobQueueForTests, enqueueIndexJob } from '@main/agent/indexJobQueue'
-import { setCodeIndexModelsRootOverrideForTests } from '@main/agent/codeindex'
-import { resetCodeIndexRuntimeStatusForTests } from '@main/agent/codeindex/modelStatus'
+import { resetCodeIndexRuntimeStatusForTests } from '@main/agent/codeindex/status'
 
 describe('workspaceIndex abort + warm policy', () => {
   let dir: string | undefined
@@ -21,11 +19,9 @@ describe('workspaceIndex abort + warm policy', () => {
     clearWorkspaceIndexSyncTimers()
     resetIndexJobQueueForTests()
     resetCodeIndexRuntimeStatusForTests()
-    setCodeIndexModelsRootOverrideForTests(null)
     if (dir) {
       disposeWorkspaceIndexes(dir)
-      closeCodeIndex(dir)
-      closeSparseGrep(dir)
+      closeCodeIndexStore(dir)
       try {
         rmSync(dir, { recursive: true, force: true })
       } catch {

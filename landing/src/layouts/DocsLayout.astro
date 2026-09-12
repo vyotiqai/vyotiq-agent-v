@@ -1,321 +1,395 @@
 ---
 import BaseLayout from './BaseLayout.astro'
-import LandingIcon from '../components/LandingIcon.astro'
-import SiteFooter from '../components/SiteFooter.astro'
 import SiteHeader from '../components/SiteHeader.astro'
-import { SITE_BRAND, SITE_PRODUCT } from '../lib/site'
+import SiteFooter from '../components/SiteFooter.astro'
+import LandingIcon from '../components/LandingIcon.astro'
 import {
+  DOC_SECTION_LABEL,
   docsEditHref,
   docsFeedbackHref,
   docsHref,
   docsNavTitle,
   docsPageContext,
-  docsSearchEntries,
   docsSectionHref,
   docsTocLabel,
+  docsSearchEntries,
   groupedDocs,
   type DocSection,
   type DocsSearchEntry
 } from '../lib/docs'
 
-type Heading = { depth: number; slug: string; text: string }
-
 interface Props {
   title: string
   description: string
-  currentId?: string | null
-  currentSection?: DocSection | null
-  headings?: Heading[]
-  type?: 'quickstart' | 'guide' | 'concept' | 'reference' | 'troubleshooting'
+  currentId?: string
+  currentSection?: DocSection
+  headings?: { depth: number; slug: string; text: string }[]
+  type?: string
   audience?: string
 }
 
-const {
-  title,
-  description,
-  currentId = null,
-  currentSection = null,
-  headings = [],
-  type,
-  audience
-} = Astro.props
+const { title, description, currentId, currentSection, headings = [], type, audience = [] } = Astro.props
+
+const toc = headings
+  .filter((heading) => heading.depth === 2 || heading.depth === 3)
+  .map((heading) => ({ depth: heading.depth, slug: heading.slug, text: docsTocLabel(heading.text) }))
 
 const groups = await groupedDocs()
-const searchEntries = await docsSearchEntries()
-const toc = headings.filter((h) => h.depth === 2 || h.depth === 3)
-const pageTitle = `${title} — ${SITE_PRODUCT}`
-const onIndex = currentId == null && currentSection == null
-const onSection = currentSection != null
+const searchEntries: DocsSearchEntry[] = await docsSearchEntries()
+
 const context = currentId ? await docsPageContext(currentId) : null
-const quickstartPage = type === 'quickstart' && currentId === 'start/quickstart'
-const pageUrl = new URL(Astro.url.pathname, Astro.site)
-const structuredData = [
-  {
+const activeSection: DocSection | null =
+  currentSection ?? (currentId ? (currentId.split('/')[0] as DocSection) : null)
+const onIndex = !currentId && !currentSection
+
+const origin = Astro.site?.toString() ?? 'https://vyotiq.com/'
+const breadcrumbTrail: { name: string; href: string }[] = [{ name: 'Documentation', href: '/docs' }]
+if (context) {
+  breadcrumbTrail.push({ name: context.sectionLabel, href: context.sectionHref })
+} else if (currentSection) {
+  breadcrumbTrail.push({ name: DOC_SECTION_LABEL[currentSection], href: docsSectionHref(currentSection) })
+}
+
+const structuredData: Record<string, unknown>[] = []
+if (!onIndex) {
+  structuredData.push({
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
-    itemListElement: [
-      {
-        '@type': 'ListItem',
-        position: 1,
-        name: 'Docs',
-        item: new URL('/docs', Astro.site).href
-      },
-      ...(context
-        ? [
-            {
-              '@type': 'ListItem',
-              position: 2,
-              name: context.sectionLabel,
-              item: new URL(context.sectionHref, Astro.site).href
-            },
-            {
-              '@type': 'ListItem',
-              position: 3,
-              name: title
-            }
-          ]
-        : [])
-    ]
-  },
-  ...(!onIndex
-    ? [
-        {
-          '@context': 'https://schema.org',
-          '@type': 'TechArticle',
-          headline: title,
-          description,
-          audience: audience ? { '@type': 'Audience', audienceType: audience } : undefined,
-          url: pageUrl.href,
-          author: { '@type': 'Organization', name: SITE_BRAND }
-        }
-      ]
-    : [])
-]
+    itemListElement: breadcrumbTrail.map((crumb, index) => ({
+      '@type': 'ListItem',
+      position: index + 1,
+      name: crumb.name,
+      item: new URL(crumb.href, origin).toString()
+    }))
+  })
+}
+if (currentId) {
+  structuredData.push({
+    '@context': 'https://schema.org',
+    '@type': 'TechArticle',
+    headline: title,
+    description,
+    ...(type ? { articleSection: type } : {}),
+    ...(audience ? { audience: { '@type': 'Audience', audienceType: audience } } : {})
+  })
+}
+
+const searchPayload = JSON.stringify(searchEntries).replace(/</g, '\\u003c')
+const mobileCrumb = context?.sectionLabel ?? (currentSection ? DOC_SECTION_LABEL[currentSection] : 'Documentation')
 ---
 
-<BaseLayout title={pageTitle} description={description} structuredData={structuredData}>
+<BaseLayout title={title} description={description} structuredData={structuredData}>
   <SiteHeader />
-  <div class="wrap docs-shell py-10 md:py-14">
-    <aside class="docs-nav" aria-label="Docs">
-      <button class="docs-search-button" type="button" data-docs-search-open>
-        <LandingIcon name="search" size={15} />
-        <span>Search docs</span>
-        <kbd><span data-mod-key>Ctrl</span> K</kbd>
+
+  <div class="docs-shell">
+    <div class="docs-mobile-bar">
+      <button
+        type="button"
+        class="docs-menu-button"
+        data-docs-nav-toggle
+        aria-expanded="false"
+        aria-controls="docs-sidebar"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+          <path d="M4 7h16M4 12h16M4 17h16" />
+        </svg>
+        <span>Docs</span>
       </button>
-      <div class="docs-nav-scroll">
-      <details class="docs-nav-box" id="docs-nav-box" open>
-        <summary class="docs-nav-summary">Docs menu</summary>
-        <a
-          class:list={['docs-nav-index', onIndex && 'docs-nav-current']}
-          href="/docs"
-          aria-current={onIndex ? 'page' : undefined}
-        >
-          Docs
-        </a>
+      <span class="docs-mobile-crumb">{mobileCrumb}</span>
+    </div>
+
+    <div class="docs-scrim" data-docs-scrim aria-hidden="true"></div>
+
+    <aside class="docs-sidebar" id="docs-sidebar" data-docs-sidebar aria-label="Documentation">
+      <div class="docs-sidebar-head">
+        <button type="button" class="docs-search-button" data-docs-search-open>
+          <LandingIcon name="search" size={14} />
+          <span>Search docs</span>
+          <span class="docs-search-keys"><kbd data-mod-key>Ctrl</kbd><kbd>K</kbd></span>
+        </button>
+        <button type="button" class="docs-sidebar-close" data-docs-nav-close aria-label="Close menu">
+          <LandingIcon name="x" size={16} />
+        </button>
+      </div>
+
+      <nav class="docs-nav">
+        <a class:list={['docs-nav-home', onIndex && 'is-active']} href="/docs">All documentation</a>
         {
           groups.map((group) => (
             <div class="docs-nav-group">
               <a
-                class:list={['docs-nav-heading', currentSection === group.section && 'docs-nav-section-current']}
+                class:list={['docs-nav-label', activeSection === group.section && 'is-active']}
                 href={docsSectionHref(group.section)}
-                aria-current={currentSection === group.section ? 'page' : undefined}
               >
-                {group.label}
+                <span>{group.label}</span>
                 <span class="docs-nav-count">{group.entries.length}</span>
               </a>
-              <ul>
-                {group.entries.map((entry) => {
-                  const current = entry.id === currentId
-                  return (
-                    <li>
-                      <a
-                        href={docsHref(entry.id)}
-                        class:list={[current && 'docs-nav-current']}
-                        aria-current={current ? 'page' : undefined}
-                      >
-                        {docsNavTitle(entry.id, entry.data.title)}
-                      </a>
-                    </li>
-                  )
-                })}
+              <ul class="docs-nav-list">
+                {group.entries.map((entry) => (
+                  <li>
+                    <a
+                      class:list={['docs-nav-link', entry.id === currentId && 'is-active']}
+                      aria-current={entry.id === currentId ? 'page' : undefined}
+                      href={docsHref(entry.id)}
+                    >
+                      {docsNavTitle(entry.id, entry.data.title)}
+                    </a>
+                  </li>
+                ))}
               </ul>
             </div>
           ))
         }
-      </details>
-      </div>
+      </nav>
     </aside>
 
-    <main id="main-content" class="min-w-0" tabindex="-1">
-      <article class:list={['doc-prose', onIndex && 'docs-index-prose', quickstartPage && 'docs-quickstart']}>
+    <main id="main-content" class="docs-main" tabindex="-1">
+      <article class="docs-article">
         {
-          context || onSection ? (
+          !onIndex && (
             <nav class="docs-breadcrumbs" aria-label="Breadcrumb">
               <a href="/docs">Docs</a>
-              <span aria-hidden="true">/</span>
-              {context ? (
+              {breadcrumbTrail.slice(1).map((crumb) => (
                 <>
-                  <a href={context.sectionHref}>{context.sectionLabel}</a>
-                  <span aria-hidden="true">/</span>
-                  <span aria-current="page">{title}</span>
+                  <span class="docs-breadcrumb-sep" aria-hidden="true">/</span>
+                  <a href={crumb.href}>{crumb.name}</a>
                 </>
-              ) : (
-                <span aria-current="page">{title}</span>
-              )}
+              ))}
+              <span class="docs-breadcrumb-sep" aria-hidden="true">/</span>
+              <span class="docs-breadcrumb-current" aria-current="page">{title}</span>
             </nav>
-          ) : null
+          )
         }
-        <h1 id="page-title">{title}</h1>
-        <p class="doc-lede">{description}</p>
+
+        <header class="docs-header">
+          <h1 id="page-title">{title}</h1>
+          <p class="docs-lede">{description}</p>
+        </header>
+
         {
-          toc.length > 0 ? (
-            <details class="docs-mobile-toc">
+          toc.length > 0 && (
+            <details class="docs-toc-details">
               <summary>On this page</summary>
               <ul>
-                {toc.map((heading) => (
-                  <li class:list={[heading.depth === 3 && 'docs-toc-h3']}>
-                    <a href={`#${heading.slug}`}>{docsTocLabel(heading.text)}</a>
+                {toc.map((item) => (
+                  <li class={item.depth === 3 ? 'is-h3' : undefined}>
+                    <a href={`#${item.slug}`}>{item.text}</a>
                   </li>
                 ))}
               </ul>
             </details>
-          ) : null
+          )
         }
-        <div data-docs-body>
+
+        <div class="docs-prose" data-docs-body>
           <slot />
         </div>
+
         {
-          context && context.related.length > 0 ? (
-            <section class="docs-related" aria-labelledby="related-pages-heading">
-              <h2 id="related-pages-heading">Related pages</h2>
+          context && context.related.length > 0 && (
+            <section class="docs-related">
+              <p class="docs-eyebrow">Related</p>
               <ul>
                 {context.related.map((entry) => (
                   <li>
-                    <a href={docsHref(entry.id)}>{entry.data.title}</a>
+                    <a href={docsHref(entry.id)}>
+                      <span>{docsNavTitle(entry.id, entry.data.title)}</span>
+                      <LandingIcon name="arrow-up-right" size={13} />
+                    </a>
                   </li>
                 ))}
               </ul>
             </section>
-          ) : null
+          )
         }
+
         {
-          context ? (
-            <nav class="docs-pager" aria-label="Documentation pages">
+          context && (context.previous || context.next) && (
+            <nav class="docs-pager" aria-label="Adjacent pages">
               {context.previous ? (
-                <a href={docsHref(context.previous.id)} rel="prev">
-                  <span class="inline-flex items-center gap-1">
-                    <LandingIcon name="chevron-left" size={13} />
+                <a class="docs-pager-link is-prev" href={docsHref(context.previous.id)}>
+                  <span class="docs-eyebrow">
+                    <LandingIcon name="chevron-left" size={12} />
                     Previous
                   </span>
-                  <strong>{context.previous.data.title}</strong>
+                  <span class="docs-pager-title">{docsNavTitle(context.previous.id, context.previous.data.title)}</span>
                 </a>
               ) : (
                 <span />
               )}
               {context.next ? (
-                <a href={docsHref(context.next.id)} rel="next">
-                  <span class="inline-flex items-center justify-end gap-1">
+                <a class="docs-pager-link is-next" href={docsHref(context.next.id)}>
+                  <span class="docs-eyebrow">
                     Next
-                    <LandingIcon name="chevron-right" size={13} />
+                    <LandingIcon name="chevron-right" size={12} />
                   </span>
-                  <strong>{context.next.data.title}</strong>
+                  <span class="docs-pager-title">{docsNavTitle(context.next.id, context.next.data.title)}</span>
                 </a>
-              ) : null}
+              ) : (
+                <span />
+              )}
             </nav>
-          ) : null
+          )
         }
+
         {
-          currentId ? (
-            <p class="docs-edit-links">
+          currentId && (
+            <footer class="docs-article-footer">
               <a href={docsEditHref(currentId)}>
-                Edit page
+                <span>Edit this page</span>
                 <LandingIcon name="arrow-up-right" size={12} />
               </a>
-              <span aria-hidden="true">·</span>
               <a href={docsFeedbackHref(title)}>
-                Report an issue
+                <span>Report an issue</span>
                 <LandingIcon name="arrow-up-right" size={12} />
               </a>
-            </p>
-          ) : null
+            </footer>
+          )
         }
       </article>
     </main>
 
     {
-      toc.length > 0 ? (
+      toc.length > 0 && (
         <nav class="docs-toc" aria-label="On this page">
-          <p class="docs-nav-heading">On this page</p>
-          <ul>
-            {toc.map((heading) => (
-              <li class:list={[heading.depth === 3 && 'docs-toc-h3']}>
-                <a href={`#${heading.slug}`}>{docsTocLabel(heading.text)}</a>
+          <div class="docs-toc-head">
+            <p class="docs-eyebrow">On this page</p>
+            <button type="button" class="docs-copy-button" data-docs-copy>
+              <LandingIcon name="copy" size={12} />
+              <span data-docs-copy-label>Copy</span>
+            </button>
+          </div>
+          <ul class="docs-toc-list" data-docs-toc>
+            {toc.map((item) => (
+              <li class={item.depth === 3 ? 'is-h3' : undefined}>
+                <a href={`#${item.slug}`}>{item.text}</a>
               </li>
             ))}
           </ul>
-          <button class="docs-copy-button" type="button" data-docs-copy>
-            <LandingIcon name="copy" size={14} />
-            <span data-docs-copy-label>Copy page</span>
-          </button>
         </nav>
-      ) : null
+      )
     }
   </div>
-  <dialog class="docs-search-dialog" aria-labelledby="docs-search-title" data-docs-search-dialog>
-    <div class="docs-search-header">
-      <div>
-        <h2 id="docs-search-title">Search documentation</h2>
-        <p>Search page titles, summaries, and headings.</p>
-      </div>
-      <button type="button" data-docs-search-close aria-label="Close documentation search">
-        <LandingIcon name="x" size={15} />
-        <span class="sr-only">Close</span>
-      </button>
-    </div>
-    <label class="docs-search-field">
-      <span class="sr-only">Search documentation</span>
+
+  <dialog class="docs-search-dialog" data-docs-search-dialog aria-label="Search documentation">
+    <form class="docs-search-form" role="combobox" aria-expanded="true" aria-haspopup="listbox" aria-owns="docs-search-results" onsubmit="return false">
+      <LandingIcon name="search" size={16} />
       <input
-        type="search"
-        placeholder="Search docs…"
-        autocomplete="off"
-        role="combobox"
-        aria-expanded="true"
-        aria-controls="docs-search-results"
-        aria-autocomplete="list"
         data-docs-search-input
+        type="search"
+        placeholder="Search the docs"
+        autocomplete="off"
+        aria-autocomplete="list"
+        aria-controls="docs-search-results"
       />
-      <kbd>Esc</kbd>
-    </label>
-    <p class="docs-search-status" aria-live="polite" data-docs-search-status></p>
-    <ul
-      class="docs-search-results"
-      id="docs-search-results"
-      role="listbox"
-      aria-label="Search results"
-      data-docs-search-results
-    ></ul>
+    </form>
+    <ul class="docs-search-results" id="docs-search-results" role="listbox" aria-label="Search results" data-docs-search-results></ul>
+    <p class="docs-search-empty" data-docs-search-empty hidden>No results. Try a different term.</p>
+    <p class="docs-search-footer">
+      <span><kbd>&uarr;</kbd><kbd>&darr;</kbd> navigate</span>
+      <span><kbd>Enter</kbd> open</span>
+      <span><kbd>Esc</kbd> close</span>
+    </p>
   </dialog>
-  <script
-    is:inline
-    type="application/json"
-    id="docs-search-data"
-    set:html={JSON.stringify(searchEntries satisfies DocsSearchEntry[])}
-  />
+
+  <script type="application/json" id="docs-search-data" is:inline set:html={searchPayload} />
+
   <SiteFooter />
-  <script is:inline>
-    (function () {
-      var box = document.getElementById('docs-nav-box')
-      if (!(box instanceof HTMLDetailsElement)) return
-      var mq = window.matchMedia('(min-width: 48rem)')
-      function sync() {
-        box.open = mq.matches
-      }
-      sync()
-      mq.addEventListener('change', sync)
-    })()
-  </script>
+
   <script>
+    // ---- Mobile drawer -------------------------------------------------
+    const sidebar = document.querySelector<HTMLElement>('[data-docs-sidebar]')
+    const toggleButton = document.querySelector<HTMLButtonElement>('[data-docs-nav-toggle]')
+    const closeButton = document.querySelector<HTMLButtonElement>('[data-docs-nav-close]')
+    const scrim = document.querySelector<HTMLElement>('[data-docs-scrim]')
+
+    function setNavOpen(open: boolean) {
+      sidebar?.classList.toggle('is-open', open)
+      scrim?.classList.toggle('is-open', open)
+      toggleButton?.setAttribute('aria-expanded', open ? 'true' : 'false')
+      document.documentElement.classList.toggle('docs-nav-locked', open)
+    }
+
+    toggleButton?.addEventListener('click', () => {
+      setNavOpen(!sidebar?.classList.contains('is-open'))
+    })
+    closeButton?.addEventListener('click', () => setNavOpen(false))
+    scrim?.addEventListener('click', () => setNavOpen(false))
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') setNavOpen(false)
+    })
+    window.matchMedia('(min-width: 50.01rem)').addEventListener('change', (event) => {
+      if (event.matches) setNavOpen(false)
+    })
+
+    // ---- Mod-key label -------------------------------------------------
+    const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent)
+    if (isMac) {
+      document.querySelectorAll('[data-mod-key]').forEach((key) => {
+        key.textContent = 'Cmd'
+      })
+    }
+
+    // ---- Heading anchors -----------------------------------------------
+    const prose = document.querySelector<HTMLElement>('[data-docs-body]')
+    prose?.querySelectorAll<HTMLElement>('h2, h3, h4').forEach((heading) => {
+      if (!heading.id) return
+      const anchor = document.createElement('a')
+      anchor.className = 'docs-heading-anchor'
+      anchor.href = `#${heading.id}`
+      anchor.setAttribute('aria-label', `Link to this section`)
+      anchor.textContent = '#'
+      heading.appendChild(anchor)
+    })
+
+    // ---- Copy page -----------------------------------------------------
+    const copyButton = document.querySelector<HTMLButtonElement>('[data-docs-copy]')
+    const copyLabel = document.querySelector<HTMLElement>('[data-docs-copy-label]')
+    copyButton?.addEventListener('click', async () => {
+      if (!copyButton) return
+      try {
+        const response = await fetch(`${window.location.pathname}.md`)
+        await navigator.clipboard.writeText(await response.text())
+        copyButton.classList.add('is-copied')
+        if (copyLabel) copyLabel.textContent = 'Copied'
+        window.setTimeout(() => {
+          copyButton.classList.remove('is-copied')
+          if (copyLabel) copyLabel.textContent = 'Copy'
+        }, 2000)
+      } catch {
+        /* clipboard unavailable — ignore */
+      }
+    })
+
+    // ---- TOC scroll spy ------------------------------------------------
+    const tocLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>('[data-docs-toc] a'))
+    if (tocLinks.length > 0) {
+      const pairs = tocLinks
+        .map((link) => ({
+          link,
+          heading: document.getElementById(decodeURIComponent(link.hash.slice(1)))
+        }))
+        .filter((pair): pair is { link: HTMLAnchorElement; heading: HTMLElement } => pair.heading !== null)
+
+      const observer = new IntersectionObserver(
+        (observed) => {
+          for (const observation of observed) {
+            if (!observation.isIntersecting) continue
+            for (const pair of pairs) pair.link.removeAttribute('aria-current')
+            const active = pairs.find((pair) => pair.heading === observation.target)
+            active?.link.setAttribute('aria-current', 'location')
+          }
+        },
+        { rootMargin: '-10% 0px -80% 0px' }
+      )
+      for (const pair of pairs) observer.observe(pair.heading)
+    }
+  </script>
+
+  <script>
+    // ---- Docs search ---------------------------------------------------
     type SearchEntry = {
+      id: string
       title: string
       description: string
       section: string
@@ -324,249 +398,1000 @@ const structuredData = [
     }
 
     const dialog = document.querySelector<HTMLDialogElement>('[data-docs-search-dialog]')
+    const openButtons = document.querySelectorAll<HTMLButtonElement>('[data-docs-search-open]')
     const input = document.querySelector<HTMLInputElement>('[data-docs-search-input]')
-    const results = document.querySelector<HTMLUListElement>('[data-docs-search-results]')
-    const status = document.querySelector<HTMLElement>('[data-docs-search-status]')
-    const copyLabel = document.querySelector<HTMLElement>('[data-docs-copy-label]')
-    const raw = document.querySelector<HTMLScriptElement>('#docs-search-data')?.textContent ?? '[]'
-    const entries = JSON.parse(raw) as SearchEntry[]
+    const resultsEl = document.querySelector<HTMLUListElement>('[data-docs-search-results]')
+    const emptyEl = document.querySelector<HTMLElement>('[data-docs-search-empty]')
+    const payload = document.getElementById('docs-search-data')
 
+    const entries: SearchEntry[] = payload ? JSON.parse(payload.textContent ?? '[]') : []
     let activeIndex = -1
 
-    function resultLinks(): HTMLAnchorElement[] {
-      if (!results) return []
-      return [...results.querySelectorAll<HTMLAnchorElement>('li > a')]
+    function openSearch() {
+      dialog?.showModal()
+      input?.focus()
+      input?.select()
     }
 
-    function setActive(index: number, scroll = true): void {
-      const links = resultLinks()
-      if (!results) return
-      activeIndex = links.length === 0 ? -1 : Math.max(0, Math.min(index, links.length - 1))
-      links.forEach((link, i) => {
-        const active = i === activeIndex
-        if (active) {
-          link.dataset.active = 'true'
-          link.setAttribute('aria-selected', 'true')
-        } else {
-          delete link.dataset.active
-          link.setAttribute('aria-selected', 'false')
-        }
+    function setActive(index: number) {
+      const items = resultsEl?.querySelectorAll('li') ?? []
+      activeIndex = index
+      items.forEach((item, i) => {
+        const isActive = i === index
+        item.classList.toggle('is-active', isActive)
+        item.setAttribute('aria-selected', isActive ? 'true' : 'false')
       })
-      if (scroll && activeIndex >= 0) {
-        links[activeIndex]?.scrollIntoView({ block: 'nearest' })
-      }
+      if (dialog) dialog.setAttribute('aria-activedescendant', index >= 0 ? `docs-search-option-${index}` : '')
     }
 
-    function moveActive(delta: number): void {
-      const links = resultLinks()
-      if (links.length === 0) return
-      setActive(activeIndex < 0 ? (delta > 0 ? 0 : links.length - 1) : activeIndex + delta)
+    function renderResults(results: SearchEntry[]) {
+      if (!resultsEl || !emptyEl) return
+      resultsEl.innerHTML = ''
+      emptyEl.hidden = results.length > 0
+      results.forEach((entry, index) => {
+        const item = document.createElement('li')
+        item.className = 'docs-search-item'
+        item.id = `docs-search-option-${index}`
+        item.setAttribute('role', 'option')
+        item.setAttribute('aria-selected', 'false')
+
+        const link = document.createElement('a')
+        link.href = entry.href
+        const heading = document.createElement('span')
+        heading.className = 'docs-search-title'
+        heading.textContent = entry.title
+        const meta = document.createElement('span')
+        meta.className = 'docs-search-meta'
+        meta.textContent = [entry.section, entry.description].filter(Boolean).join(' — ')
+        link.append(heading, meta)
+        item.append(link)
+        resultsEl.append(item)
+      })
+      setActive(-1)
     }
 
-    function renderSearch(query = ''): void {
-      if (!results || !status) return
-      const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean)
-      const matches = entries
-        .map((entry) => {
-          const haystack =
-            `${entry.title} ${entry.description} ${entry.section} ${entry.text}`.toLowerCase()
-          const score = terms.reduce((total, term) => {
-            if (!haystack.includes(term)) return -1000
-            if (entry.title.toLowerCase().includes(term)) return total + 8
-            if (entry.description.toLowerCase().includes(term)) return total + 4
-            return total + 1
-          }, 0)
-          return { entry, score }
-        })
-        .filter((match) => terms.length > 0 && match.score >= 0)
-        .sort((a, b) => b.score - a.score || a.entry.title.localeCompare(b.entry.title))
-        .slice(0, 12)
-
-      if (terms.length === 0) {
-        results.replaceChildren()
-        status.textContent = 'Type to search documentation.'
-        activeIndex = -1
+    function runSearch(raw: string) {
+      const query = raw.trim().toLowerCase()
+      if (!query) {
+        renderResults([])
         return
       }
-
-      results.replaceChildren(
-        ...matches.map(({ entry }) => {
-          const item = document.createElement('li')
-          const link = document.createElement('a')
-          const heading = document.createElement('strong')
-          const summary = document.createElement('span')
-          const section = document.createElement('small')
-          link.href = entry.href
-          link.setAttribute('role', 'option')
-          link.setAttribute('aria-selected', 'false')
-          heading.textContent = entry.title
-          summary.textContent = entry.description
-          section.textContent = entry.section
-          link.append(heading, summary, section)
-          item.append(link)
-          return item
-        })
-      )
-      // Reset selection on every new result set; keyboard input re-selects.
-      activeIndex = -1
-      status.textContent =
-        matches.length === 0
-          ? `No documentation matches “${query.trim()}”.`
-          : `${matches.length} result${matches.length === 1 ? '' : 's'}`
-    }
-
-    function openSearch(): void {
-      if (!dialog) return
-      if (!dialog.open) dialog.showModal()
-      renderSearch(input?.value)
-      requestAnimationFrame(() => input?.focus())
-    }
-
-    document.querySelectorAll<HTMLElement>('[data-docs-search-open]').forEach((button) => {
-      button.addEventListener('click', openSearch)
-    })
-    document.querySelector<HTMLElement>('[data-docs-search-close]')?.addEventListener('click', () => {
-      dialog?.close()
-    })
-    input?.addEventListener('input', () => renderSearch(input.value))
-    input?.addEventListener('keydown', (event) => {
-      if (event.key === 'ArrowDown') {
-        event.preventDefault()
-        moveActive(1)
-        return
-      }
-      if (event.key === 'ArrowUp') {
-        event.preventDefault()
-        moveActive(-1)
-        return
-      }
-      if (event.key === 'Enter') {
-        const links = resultLinks()
-        if (activeIndex >= 0 && links[activeIndex]) {
-          event.preventDefault()
-          links[activeIndex]!.click()
+      const terms = query.split(/\s+/)
+      const scored: { entry: SearchEntry; score: number }[] = []
+      for (const entry of entries) {
+        const title = entry.title.toLowerCase()
+        const description = entry.description.toLowerCase()
+        const text = entry.text.toLowerCase()
+        let score = 0
+        let matchesAll = true
+        for (const term of terms) {
+          if (title.includes(term)) {
+            score += title.startsWith(term) ? 14 : 10
+          } else if (description.includes(term)) {
+            score += 4
+          } else if (text.includes(term)) {
+            score += 2
+          } else {
+            matchesAll = false
+            break
+          }
         }
-        // Otherwise fall through so the browser submits/follows default behavior.
+        if (matchesAll) scored.push({ entry, score })
       }
-    })
+      scored.sort((a, b) => b.score - a.score)
+      renderResults(scored.slice(0, 8).map((hit) => hit.entry))
+    }
+
+    openButtons.forEach((button) => button.addEventListener('click', openSearch))
+    input?.addEventListener('input', () => runSearch(input.value))
     dialog?.addEventListener('click', (event) => {
       if (event.target === dialog) dialog.close()
     })
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && dialog?.open) {
+    dialog?.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault()
-        dialog.close()
-        return
+        const count = resultsEl?.children.length ?? 0
+        if (count === 0) return
+        const delta = event.key === 'ArrowDown' ? 1 : -1
+        setActive((activeIndex + delta + count) % count)
       }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      if (event.key === 'Enter' && activeIndex >= 0) {
         event.preventDefault()
-        openSearch()
+        const link = resultsEl?.children[activeIndex]?.querySelector('a')
+        link?.click()
       }
     })
-
-    const isApple =
-      /Mac|iPhone|iPad/.test(navigator.platform) || navigator.userAgent.includes('Mac')
-    document.querySelectorAll('[data-mod-key]').forEach((node) => {
-      node.textContent = isApple ? '⌘' : 'Ctrl'
+    resultsEl?.addEventListener('click', (event) => {
+      if ((event.target as HTMLElement).closest('a')) dialog?.close()
     })
-
-    const navScroll = document.querySelector('.docs-nav-scroll')
-    const currentNav = document.querySelector('.docs-nav a[aria-current="page"]')
-    if (navScroll instanceof HTMLElement && currentNav instanceof HTMLElement) {
-      const navBox = navScroll.getBoundingClientRect()
-      const itemBox = currentNav.getBoundingClientRect()
-      if (itemBox.top < navBox.top || itemBox.bottom > navBox.bottom) {
-        navScroll.scrollTop += itemBox.top - navBox.top - (navBox.height - itemBox.height) / 2
+    window.addEventListener('keydown', (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        if (dialog?.open) dialog.close()
+        else openSearch()
       }
-    }
-
-    const tocLinks = [...document.querySelectorAll<HTMLAnchorElement>('.docs-toc a[href^="#"]')]
-    const headingEls = tocLinks
-      .map((link) => document.getElementById(decodeURIComponent(link.hash.slice(1))))
-      .filter((el): el is HTMLElement => el instanceof HTMLElement)
-
-    function setActiveToc(id: string | null): void {
-      for (const link of tocLinks) {
-        const active = id != null && link.hash === `#${id}`
-        if (active) link.setAttribute('aria-current', 'location')
-        else link.removeAttribute('aria-current')
-      }
-    }
-
-    if (headingEls.length > 0 && 'IntersectionObserver' in window) {
-      const visible = new Map<string, IntersectionObserverEntry>()
-      const observer = new IntersectionObserver(
-        (entries) => {
-          for (const entry of entries) {
-            if (entry.isIntersecting) visible.set(entry.target.id, entry)
-            else visible.delete(entry.target.id)
-          }
-          const firstVisible = headingEls.find((el) => visible.has(el.id))
-          setActiveToc(firstVisible?.id ?? headingEls[0]?.id ?? null)
-        },
-        { rootMargin: '-20% 0px -65% 0px', threshold: [0, 1] }
-      )
-      for (const el of headingEls) observer.observe(el)
-      setActiveToc(headingEls[0]?.id ?? null)
-    }
-
-    document.querySelector<HTMLElement>('[data-docs-copy]')?.addEventListener('click', async (event) => {
-      const button = event.currentTarget
-      if (!(button instanceof HTMLButtonElement) || !copyLabel) return
-      let text: string | null = null
-      // Prefer the page's raw markdown served at /docs/<section>/<doc>.md,
-      // prefixed with the title and URL so the copied context stands alone.
-      try {
-        const rawPath = `${location.pathname.replace(/\/+$/, '')}.md`
-        const response = await fetch(rawPath)
-        if (response.ok) {
-          const raw = await response.text()
-          const heading = document.querySelector<HTMLElement>('#page-title')
-          text = `# ${heading?.innerText?.trim() ?? document.title}\n${location.href}\n\n${raw}`
-        }
-      } catch {
-        // fall through to rendered-text fallback
-      }
-      if (text == null || text.trim() === '') {
-        const heading = document.querySelector<HTMLElement>('#page-title')
-        const body = document.querySelector<HTMLElement>('[data-docs-body]')
-        text = `${heading?.innerText ?? document.title}\n${location.href}\n\n${body?.innerText ?? ''}`.trim()
-      }
-      try {
-        await navigator.clipboard.writeText(text)
-        copyLabel.textContent = 'Copied'
-      } catch {
-        copyLabel.textContent = 'Copy failed'
-      }
-      window.setTimeout(() => {
-        copyLabel.textContent = 'Copy page'
-      }, 1600)
     })
-
-    const prose = document.querySelector<HTMLElement>('[data-docs-body]')
-    if (prose) {
-      for (const heading of prose.querySelectorAll<HTMLHeadingElement>('h2, h3')) {
-        const id = heading.id || heading.textContent?.trim().toLowerCase().replace(/\s+/g, '-')
-        if (!id) continue
-        if (!heading.id) heading.id = id
-        if (heading.querySelector('.docs-heading-anchor')) continue
-        const anchor = document.createElement('a')
-        anchor.className = 'docs-heading-anchor'
-        anchor.href = `#${id}`
-        anchor.setAttribute('aria-label', `Link to ${heading.textContent?.trim() ?? 'section'}`)
-        anchor.innerHTML =
-          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>'
-        heading.append(anchor)
-      }
-      const keys = new Set(['Esc', 'Enter', 'Tab'])
-      for (const code of prose.querySelectorAll('code')) {
-        if (code.closest('pre')) continue
-        const label = code.textContent?.trim() ?? ''
-        if (!keys.has(label)) continue
-        const kbd = document.createElement('kbd')
-        kbd.textContent = label
-        code.replaceWith(kbd)
-      }
-    }
   </script>
 </BaseLayout>
+
+<style>
+  /* ---- Shell grid ---------------------------------------------------- */
+  .docs-shell {
+    display: grid;
+    grid-template-columns: 15rem minmax(0, 1fr) 13rem;
+    column-gap: 2.5rem;
+    max-width: 75rem;
+    margin-inline: auto;
+    padding-inline: 1.5rem;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .docs-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  /* ---- Sidebar ------------------------------------------------------- */
+  .docs-sidebar {
+    position: sticky;
+    top: 4rem;
+    height: fit-content;
+    max-height: calc(100dvh - 4rem);
+    overflow-y: auto;
+    padding-block: 2.25rem 3rem;
+    padding-right: 1.25rem;
+    border-right: 1px solid var(--border-faint);
+    scrollbar-width: thin;
+  }
+
+  .docs-sidebar-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1.75rem;
+  }
+
+  .docs-search-button {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2.125rem;
+    padding: 0 0.625rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 6px);
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 0.8125rem;
+    cursor: pointer;
+    transition:
+      border-color var(--duration) var(--ease),
+      color var(--duration) var(--ease);
+  }
+
+  .docs-search-button:hover {
+    border-color: var(--border);
+    color: var(--fg);
+  }
+
+  .docs-search-keys {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 2px;
+  }
+
+  .docs-search-button kbd {
+    font-family: var(--font-mono);
+    font-size: 0.5625rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    padding: 0 0.25rem;
+    background: var(--well);
+    color: var(--muted);
+  }
+
+  .docs-sidebar-close {
+    display: none;
+    align-items: center;
+    background: none;
+    border: 0;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 0.375rem;
+  }
+
+  .docs-nav {
+    display: grid;
+    gap: 1.75rem;
+  }
+
+  .docs-nav-home {
+    display: block;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--border-faint);
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--fg);
+    text-decoration: none;
+    transition: color var(--duration) var(--ease);
+  }
+
+  .docs-nav-home:hover {
+    color: var(--accent-strong);
+  }
+
+  .docs-nav-home.is-active {
+    color: var(--accent);
+  }
+
+  .docs-nav-group {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .docs-nav-label {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-decoration: none;
+    transition: color var(--duration) var(--ease);
+  }
+
+  .docs-nav-label:hover {
+    color: var(--fg);
+  }
+
+  .docs-nav-label.is-active {
+    color: var(--accent);
+  }
+
+  .docs-nav-count {
+    font-size: 0.625rem;
+    opacity: 0.7;
+  }
+
+  .docs-nav-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.125rem;
+  }
+
+  .docs-nav-link {
+    display: block;
+    padding: 0.375rem 0.625rem;
+    border-radius: 8px;
+    font-size: 0.8438rem;
+    line-height: 1.45;
+    color: var(--muted);
+    text-decoration: none;
+    transition:
+      color var(--duration) var(--ease),
+      background-color var(--duration) var(--ease);
+  }
+
+  .docs-nav-link:hover {
+    color: var(--fg);
+  }
+
+  .docs-nav-link.is-active {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 500;
+  }
+
+  /* ---- Main column --------------------------------------------------- */
+  .docs-main {
+    min-width: 0;
+    padding-block: 2.25rem 4rem;
+  }
+
+  .docs-article {
+    max-width: 70ch;
+  }
+
+  .docs-breadcrumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem;
+    margin-bottom: 1.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+
+  .docs-breadcrumbs a {
+    color: var(--muted);
+    text-decoration: none;
+    transition: color var(--duration) var(--ease);
+  }
+
+  .docs-breadcrumbs a:hover {
+    color: var(--accent-strong);
+  }
+
+  .docs-breadcrumb-sep {
+    color: var(--border);
+  }
+
+  .docs-breadcrumb-current {
+    color: var(--fg);
+  }
+
+  .docs-header h1 {
+    margin: 0 0 1rem;
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 4vw, 2.625rem);
+    font-weight: 700;
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+  }
+
+  .docs-lede {
+    margin: 0 0 2.5rem;
+    max-width: 60ch;
+    font-size: 1.0625rem;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+
+  /* ---- Mobile TOC ---------------------------------------------------- */
+  .docs-toc-details {
+    display: none;
+    margin: 0 0 2.25rem;
+    border-block: 1px solid var(--border-faint);
+    padding-block: 0.75rem;
+  }
+
+  .docs-toc-details summary {
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+  }
+
+  .docs-toc-details summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .docs-toc-details summary::after {
+    content: '+';
+    font-size: 0.875rem;
+    color: var(--muted);
+  }
+
+  .docs-toc-details[open] summary::after {
+    content: '−';
+  }
+
+  .docs-toc-details ul {
+    list-style: none;
+    margin: 0.875rem 0 0.25rem;
+    padding: 0;
+    display: grid;
+    gap: 0.375rem;
+  }
+
+  .docs-toc-details li.is-h3 {
+    padding-left: 1rem;
+  }
+
+  .docs-toc-details a {
+    font-size: 0.875rem;
+    color: var(--muted);
+    text-decoration: none;
+  }
+
+  .docs-toc-details a:hover {
+    color: var(--fg);
+  }
+
+  /* ---- Prose --------------------------------------------------------- */
+  .docs-prose {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: var(--fg);
+  }
+
+  .docs-prose :global(h2) {
+    margin: 3rem 0 1rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border-faint);
+    font-family: var(--font-display);
+    font-size: 1.375rem;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  .docs-prose :global(h2:first-child),
+  .docs-prose :global(h3:first-child) {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .docs-prose :global(h3) {
+    margin: 2.25rem 0 0.75rem;
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 700;
+  }
+
+  .docs-prose :global(h4) {
+    margin: 1.75rem 0 0.5rem;
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 700;
+  }
+
+  .docs-prose :global(p) {
+    margin: 0 0 1.125rem;
+  }
+
+  .docs-prose :global(ul),
+  .docs-prose :global(ol) {
+    margin: 0 0 1.125rem;
+    padding-left: 1.375rem;
+    display: grid;
+    gap: 0.375rem;
+  }
+
+  .docs-prose :global(ul) {
+    list-style: disc;
+  }
+
+  .docs-prose :global(ol) {
+    list-style: decimal;
+  }
+
+  .docs-prose :global(li > ul),
+  .docs-prose :global(li > ol) {
+    margin: 0.375rem 0 0;
+  }
+
+  .docs-prose :global(a) {
+    color: var(--accent-strong);
+    text-decoration: underline;
+    text-decoration-color: var(--border);
+    text-underline-offset: 3px;
+  }
+
+  .docs-prose :global(a:hover) {
+    color: var(--accent);
+    text-decoration-color: var(--accent);
+  }
+
+  .docs-prose :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    background: var(--well);
+    border: 1px solid var(--border-faint);
+    border-radius: 8px;
+    padding: 0.125em 0.375em;
+  }
+
+  .docs-prose :global(pre) {
+    margin: 0 0 1.5rem;
+    padding: 1rem 1.25rem;
+    background: var(--well);
+    border: 1px solid var(--border-faint);
+    border-radius: 8px;
+    overflow-x: auto;
+  }
+
+  .docs-prose :global(pre code) {
+    display: block;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+
+  .docs-prose :global(blockquote) {
+    margin: 0 0 1.5rem;
+    padding: 0.25rem 0 0.25rem 1.25rem;
+    border-left: 2px solid var(--border-faint);
+    color: var(--muted);
+  }
+
+  .docs-prose :global(blockquote p:last-child) {
+    margin-bottom: 0;
+  }
+
+  .docs-prose :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 1.5rem;
+    font-size: 0.9375rem;
+  }
+
+  .docs-prose :global(th) {
+    padding: 0.5rem 0.75rem 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    text-align: left;
+  }
+
+  .docs-prose :global(td) {
+    padding: 0.625rem 0.75rem 0.625rem 0;
+    border-bottom: 1px solid var(--border-faint);
+    vertical-align: top;
+  }
+
+  .docs-prose :global(hr) {
+    border: 0;
+    border-top: 1px solid var(--border-faint);
+    margin: 2.5rem 0;
+  }
+
+  .docs-prose :global(img) {
+    max-width: 100%;
+    height: auto;
+    border: 1px solid var(--border-faint);
+    border-radius: 8px;
+  }
+
+  .docs-prose :global(kbd) {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    background: var(--surface);
+    border: 1px solid var(--border-faint);
+    border-radius: var(--radius-sm, 4px);
+    padding: 0.1em 0.4em;
+  }
+
+  :global(.docs-heading-anchor) {
+    opacity: 0;
+    margin-left: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.75em;
+    font-weight: 400;
+    color: var(--muted);
+    text-decoration: none;
+    transition: opacity var(--duration) var(--ease);
+  }
+
+  :global(h2:hover .docs-heading-anchor),
+  :global(h3:hover .docs-heading-anchor),
+  :global(h4:hover .docs-heading-anchor),
+  :global(.docs-heading-anchor:focus-visible) {
+    opacity: 1;
+  }
+
+  :global(.docs-heading-anchor:hover) {
+    color: var(--accent-strong);
+  }
+
+  /* ---- Related ------------------------------------------------------- */
+  .docs-related {
+    margin-top: 3rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border-faint);
+  }
+
+  .docs-related ul {
+    list-style: none;
+    margin: 0.875rem 0 0;
+    padding: 0;
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .docs-related a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.9375rem;
+    color: var(--fg);
+    text-decoration: none;
+    transition: color var(--duration) var(--ease);
+  }
+
+  .docs-related a:hover {
+    color: var(--accent-strong);
+  }
+
+  .docs-related a :global(svg) {
+    color: var(--muted);
+  }
+
+  /* ---- Pager --------------------------------------------------------- */
+  .docs-pager {
+    margin-top: 2.5rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border-faint);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+
+  .docs-pager-link {
+    display: grid;
+    gap: 0.375rem;
+    min-width: 0;
+    text-decoration: none;
+  }
+
+  .docs-pager-link .docs-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .docs-pager-link.is-next {
+    justify-items: end;
+    text-align: right;
+  }
+
+  .docs-pager-title {
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color var(--duration) var(--ease);
+  }
+
+  .docs-pager-link:hover .docs-pager-title {
+    color: var(--accent-strong);
+  }
+
+  /* ---- Article footer links ------------------------------------------ */
+  .docs-article-footer {
+    margin-top: 2.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border-faint);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+  }
+
+  .docs-article-footer a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.8125rem;
+    color: var(--muted);
+    text-decoration: none;
+    transition: color var(--duration) var(--ease);
+  }
+
+  .docs-article-footer a:hover {
+    color: var(--accent-strong);
+  }
+
+  /* ---- TOC rail ------------------------------------------------------ */
+  .docs-toc {
+    position: sticky;
+    top: 4rem;
+    height: fit-content;
+    max-height: calc(100dvh - 4rem);
+    overflow-y: auto;
+    padding-block: 2.25rem 3rem;
+    padding-left: 1.25rem;
+    border-left: 1px solid var(--border-faint);
+    scrollbar-width: thin;
+  }
+
+  .docs-toc-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.875rem;
+  }
+
+  .docs-copy-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    padding: 0.2rem 0.45rem;
+    cursor: pointer;
+    transition:
+      color var(--duration) var(--ease),
+      border-color var(--duration) var(--ease);
+  }
+
+  .docs-copy-button:hover {
+    color: var(--fg);
+    border-color: var(--border);
+  }
+
+  .docs-copy-button.is-copied {
+    color: var(--accent);
+    border-color: var(--accent-soft);
+  }
+
+  .docs-toc-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-left: 1px solid var(--border-faint);
+    display: grid;
+    gap: 0.2rem;
+  }
+
+  .docs-toc-list a {
+    display: block;
+    padding: 0.2rem 0 0.2rem 0.875rem;
+    margin-left: -1px;
+    border-left: 1px solid transparent;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--muted);
+    text-decoration: none;
+    transition:
+      color var(--duration) var(--ease),
+      border-color var(--duration) var(--ease);
+  }
+
+  .docs-toc-list a:hover {
+    color: var(--fg);
+  }
+
+  .docs-toc-list a[aria-current='location'] {
+    color: var(--accent);
+    border-left-color: var(--accent);
+  }
+
+  .docs-toc-list .is-h3 a {
+    padding-left: 1.75rem;
+    font-size: 0.7813rem;
+  }
+
+  /* ---- Search dialog ------------------------------------------------- */
+  .docs-search-dialog {
+    width: min(34rem, calc(100vw - 2rem));
+    margin: 12dvh auto auto;
+    padding: 0;
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--fg);
+    box-shadow: 0 0 0 1px var(--border-faint), 0 16px 48px rgb(2 8 23 / 0.45);
+  }
+
+  .docs-search-dialog::backdrop {
+    background: rgb(2 8 23 / 0.55);
+  }
+
+  .docs-search-form {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.875rem 1rem;
+    border-bottom: 1px solid var(--border-faint);
+    color: var(--muted);
+  }
+
+  .docs-search-form input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: none;
+    color: var(--fg);
+    font: inherit;
+    font-size: 0.9375rem;
+    outline: none;
+  }
+
+  .docs-search-form input::placeholder {
+    color: var(--muted);
+  }
+
+  .docs-search-results {
+    list-style: none;
+    margin: 0;
+    padding: 0.5rem;
+    max-height: 18rem;
+    overflow-y: auto;
+    display: grid;
+    gap: 2px;
+  }
+
+  :global(.docs-search-item) {
+    border-radius: 8px;
+  }
+
+  :global(.docs-search-item.is-active) {
+    background: var(--accent-soft);
+  }
+
+  :global(.docs-search-item a) {
+    display: grid;
+    gap: 0.125rem;
+    padding: 0.5rem 0.625rem;
+    text-decoration: none;
+  }
+
+  :global(.docs-search-title) {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--fg);
+  }
+
+  :global(.docs-search-item.is-active .docs-search-title) {
+    color: var(--accent-strong);
+  }
+
+  :global(.docs-search-meta) {
+    font-size: 0.75rem;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .docs-search-empty {
+    margin: 0;
+    padding: 1rem;
+    font-size: 0.875rem;
+    color: var(--muted);
+  }
+
+  .docs-search-footer {
+    margin: 0;
+    display: flex;
+    gap: 1rem;
+    padding: 0.625rem 1rem;
+    border-top: 1px solid var(--border-faint);
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+
+  .docs-search-footer kbd {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    border: 1px solid var(--border-faint);
+    border-radius: var(--radius-sm, 4px);
+    padding: 0 0.25rem;
+    background: var(--well);
+  }
+
+  /* ---- Mobile bar, scrim, drawer ------------------------------------- */
+  .docs-mobile-bar {
+    display: none;
+  }
+
+  .docs-scrim {
+    position: fixed;
+    inset: 0;
+    background: rgb(2 8 23 / 0.55);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration) var(--ease);
+    z-index: 50;
+  }
+
+  .docs-scrim.is-open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  :global(html.docs-nav-locked) {
+    overflow: hidden;
+  }
+
+  /* ---- Tablet: two columns, TOC rail hidden -------------------------- */
+  @media (max-width: 63.99rem) {
+    .docs-shell {
+      grid-template-columns: 15rem minmax(0, 1fr);
+    }
+
+    .docs-toc {
+      display: none;
+    }
+
+    .docs-toc-details {
+      display: block;
+    }
+  }
+
+  /* ---- Mobile: single column, drawer --------------------------------- */
+  @media (max-width: 50rem) {
+    .docs-shell {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .docs-mobile-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding-block: 0.875rem;
+      border-bottom: 1px solid var(--border-faint);
+    }
+
+    .docs-menu-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--fg);
+      background: none;
+      border: 1px solid var(--border-faint);
+      border-radius: 8px;
+      padding: 0.4rem 0.7rem;
+      cursor: pointer;
+    }
+
+    .docs-mobile-crumb {
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .docs-sidebar {
+      position: fixed;
+      inset-block: 0;
+      left: 0;
+      top: 0;
+      width: min(19rem, 84vw);
+      max-height: none;
+      height: 100dvh;
+      transform: translateX(-105%);
+      transition: transform var(--duration) var(--ease);
+      background: var(--bg);
+      border-radius: 0 12px 12px 0;
+      box-shadow: 0 0 0 1px var(--border-faint), 0 16px 48px rgb(2 8 23 / 0.45);
+      z-index: 60;
+      padding: 1.25rem 1.25rem 2.5rem;
+      overflow-y: auto;
+    }
+
+    .docs-sidebar.is-open {
+      transform: none;
+    }
+
+    .docs-sidebar-close {
+      display: inline-flex;
+    }
+
+    .docs-main {
+      padding-block: 1.75rem 3.5rem;
+    }
+  }
+</style>

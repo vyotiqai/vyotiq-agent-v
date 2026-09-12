@@ -128,7 +128,9 @@ export async function groupedDocs(): Promise<DocsNavGroup[]> {
 }
 
 /** Cap per-paragraph search snippets so the payload stays small. */
-const PROSE_SNIPPET_MAX = 200
+const PROSE_SNIPPET_MAX = 100
+/** Only the first N content lines of a doc are indexed. */
+const PROSE_LINE_LIMIT = 40
 
 function searchableMarkdown(body: string): string {
   return body
@@ -136,6 +138,7 @@ function searchableMarkdown(body: string): string {
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`[^`\n]*`/g, ' ')
     .split('\n')
+    .slice(0, PROSE_LINE_LIMIT)
     .map((line) => {
       const heading = /^#{1,6}\s+\S/.exec(line)
       // Headings stay complete — they carry the strongest search signal.

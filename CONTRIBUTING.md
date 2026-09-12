@@ -26,7 +26,7 @@ pnpm install          # installs deps, rebuilds native modules, syncs generated 
 pnpm dev              # electron-vite dev server with hot reload
 ```
 
-The `postinstall` hook runs asset syncs (file icons, codeindex wasm, harness
+The `postinstall` hook runs asset syncs (file icons, harness
 docs, brand marks); they are re-run automatically by the build scripts, so you
 only touch canonical sources under `resources/` and `scripts/`.
 

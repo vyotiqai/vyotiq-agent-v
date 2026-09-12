@@ -1,58 +1,22 @@
 import { promises as fsp } from 'fs'
-import { chunkSourceAst } from './chunkAst'
-import { chunkContentHash, sha256Text } from './hash'
-import type { Embedder } from './embed'
-import { CodeIndexStore, buildChunkFtsText } from './store'
+import { chunkSource } from './chunk'
+import { sha256Text } from './hash'
+import { buildChunkFtsBody, type CodeIndexStore } from './store'
 import {
   CODE_INDEX_EXTS,
   collectWorkspaceFiles,
   collectWorkspaceFilesPage,
   INDEX_SKIP_DIR_SEGMENTS,
-  isDenseIndexPath,
+  isIndexableSourcePath,
   throwIfAborted,
   yieldToEventLoop,
   type WalkedFile
 } from '../tools/walk'
-import {
-  CODE_INDEX_MAX_FILE_BYTES,
-  denseModelIdsCompatible,
-  isLightOnDenseModelId,
-  shouldPreserveIndexedEmbeddings,
-  type CodeChunk,
-  type IndexStatus
-} from './types'
-import {
-  publishIndexSyncProgress,
-  type IndexProgressUpdate
-} from './indexProgress'
+import { CODE_INDEX_MAX_FILE_BYTES, CODE_INDEX_RECONCILE_WALK_CAP, INDEX_SCAN_CAP, type IndexStatus, type SyncResult } from './types'
+import { publishIndexSyncProgress, type IndexProgressUpdate } from './indexProgress'
 
-/**
- * Yield periodically so crawl/SQLite on main stays responsive without
- * paying setImmediate per file (YIELD_EVERY=1 was a major sync tax).
- */
+/** Yield periodically so crawl/SQLite on main stays responsive. */
 const YIELD_EVERY = 32
-/** Max files considered per dense index page (production source). */
-export const INDEX_SCAN_CAP = 24000
-/** Full-tree reconcile walk after the last page (must exceed one page). */
-export const CODE_INDEX_RECONCILE_WALK_CAP = INDEX_SCAN_CAP * 2
-/**
- * Similar-length groups. Mixed batch 32 paid pad-to-longest tax;
- * per-chunk forwards paid call overhead. Same-bucket pad stays small.
- */
-export const CODE_INDEX_EMBED_BATCH = 16
-const EMBED_BATCH = CODE_INDEX_EMBED_BATCH
-const EMBED_LENGTH_BUCKET_EDGES = [256, 512, 1024, 2048] as const
-const EMBED_BUCKET_COUNT = EMBED_LENGTH_BUCKET_EDGES.length + 1
-
-/** Map chunk character length to a pad-similar embed bucket. */
-export function embedLengthBucket(charLen: number): number {
-  const n = Number.isFinite(charLen) ? Math.max(0, Math.floor(charLen)) : 0
-  for (let i = 0; i < EMBED_LENGTH_BUCKET_EDGES.length; i++) {
-    if (n <= EMBED_LENGTH_BUCKET_EDGES[i]!) return i
-  }
-  return EMBED_LENGTH_BUCKET_EDGES.length
-}
-const MAX_FILE_BYTES = CODE_INDEX_MAX_FILE_BYTES
 const PROGRESS_THROTTLE_MS = 75
 
 function roundMtime(mtimeMs: number): number {
@@ -68,38 +32,6 @@ function isMissingPathError(err: unknown): boolean {
   )
 }
 
-function isCodeIndexPath(rel: string, full: string): boolean {
-  return isDenseIndexPath(rel, full)
-}
-
-type PendingIndexFile = {
-  rel: string
-  fileHash: string
-  mtimeMs: number
-  size: number
-  chunks: CodeChunk[]
-  chunkHashes: string[]
-  embeddings: Array<Float32Array | undefined>
-  pendingSlots: number
-  embedPending: boolean
-}
-
-type EmbedSlot = {
-  file: PendingIndexFile
-  chunkIndex: number
-}
-
-export type SyncResult = {
-  scanned: number
-  indexed: number
-  skipped: number
-  removed: number
-  status: IndexStatus
-  partial: boolean
-  syncComplete: boolean
-  cursor: string | null
-}
-
 export type SyncCodeIndexOptions = {
   signal?: AbortSignal
   /**
@@ -107,13 +39,8 @@ export type SyncCodeIndexOptions = {
    * that long, treat as a partial page (do not `deleteFilesNotIn`).
    */
   files?: WalkedFile[]
-  /** Optional progress sink (utility child posts; main uses publishIndexSyncProgress). */
+  /** Optional progress sink (defaults to publishIndexSyncProgress). */
   onProgress?: (update: IndexProgressUpdate, opts?: { force?: boolean }) => void
-  /**
-   * Transient neural embedder failure: keep existing vectors, FTS-index new
-   * files with embed_pending instead of writing hash vectors.
-   */
-  preserveNeural?: boolean
   /** Page size for paged walks. Tests pass a small cap; production uses INDEX_SCAN_CAP. */
   pageCap?: number
 }
@@ -201,7 +128,7 @@ async function collectCodeIndexPage(
     )
   }
   return {
-    files: page.files.filter((f) => isCodeIndexPath(f.rel, f.full)),
+    files: page.files.filter((f) => isIndexableSourcePath(f.rel, f.full)),
     exhausted: page.exhausted,
     lastRel: page.lastRel,
     startAfter
@@ -211,7 +138,6 @@ async function collectCodeIndexPage(
 export async function syncCodeIndex(
   workspaceRoot: string,
   store: CodeIndexStore,
-  embedder: Embedder,
   signalOrOpts?: AbortSignal | SyncCodeIndexOptions
 ): Promise<SyncResult> {
   const opts: SyncCodeIndexOptions =
@@ -222,38 +148,9 @@ export async function syncCodeIndex(
   const onProgress = createThrottledProgress(opts.onProgress)
 
   throwIfAborted(signal)
-  const prevModelId = store.getMeta('modelId')
-  const prevDimensions = store.getMeta('dimensions')
-  const preservingNeural = shouldPreserveIndexedEmbeddings({
-    usedFallback: opts.preserveNeural === true,
-    storeModelId: prevModelId,
-    storeChunkCount: store.getStatus().chunkCount
-  })
-  // Same sqlite path for all models — file SHA skip must not keep foreign embeddings.
-  // Lazy mDenseOn placeholder vs stored DenseOn-ONNX is the same family, not a model change.
-  const modelChanged =
-    !preservingNeural &&
-    ((prevModelId != null && !denseModelIdsCompatible(prevModelId, embedder.modelId)) ||
-      (prevDimensions != null && prevDimensions !== String(embedder.dimensions)))
-  const hashModelId =
-    prevModelId &&
-      isLightOnDenseModelId(prevModelId) &&
-      isLightOnDenseModelId(embedder.modelId)
-      ? prevModelId
-      : embedder.modelId
-
   report(
     onProgress,
-    {
-      kind: 'code',
-      stage: 'walking',
-      filesDone: 0,
-      filesTotal: 0,
-      indexed: 0,
-      skipped: 0,
-      embedChunks: 0,
-      currentPath: null
-    },
+    { stage: 'walking', filesDone: 0, filesTotal: 0, indexed: 0, skipped: 0, currentPath: null },
     { force: true }
   )
 
@@ -264,7 +161,7 @@ export async function syncCodeIndex(
   const pageCap = opts.pageCap ?? INDEX_SCAN_CAP
 
   if (opts.files != null) {
-    files = opts.files.filter((f) => isCodeIndexPath(f.rel, f.full))
+    files = opts.files.filter((f) => isIndexableSourcePath(f.rel, f.full))
     const capped =
       opts.pageCap != null && Number.isFinite(opts.pageCap) && opts.files.length >= opts.pageCap
     batchComplete = !capped
@@ -281,121 +178,19 @@ export async function syncCodeIndex(
   const seen = new Set<string>()
   let indexed = 0
   let skipped = 0
-  let embedChunks = 0
   let filesDone = 0
   let currentPath: string | null = null
 
-  const pendingFiles: PendingIndexFile[] = []
-  const bucketTexts: string[][] = Array.from({ length: EMBED_BUCKET_COUNT }, () => [])
-  const bucketSlots: EmbedSlot[][] = Array.from({ length: EMBED_BUCKET_COUNT }, () => [])
+  const progressUpdate = (): IndexProgressUpdate => ({
+    stage: 'scanning',
+    filesDone,
+    filesTotal,
+    indexed,
+    skipped,
+    currentPath
+  })
 
-  const commitFile = (file: PendingIndexFile): void => {
-    if (!file.embedPending) {
-      for (let ci = 0; ci < file.chunks.length; ci++) {
-        if (!file.embeddings[ci]) {
-          throw new Error(`missing embedding for ${file.rel} chunk ${ci}`)
-        }
-      }
-    }
-    store.replaceFileChunks(
-      file.rel,
-      file.fileHash,
-      file.mtimeMs,
-      file.chunks.map((c, idx) => ({
-        startLine: c.startLine,
-        endLine: c.endLine,
-        kind: c.kind,
-        name: c.name,
-        parentName: c.parentName,
-        chunkHash: file.chunkHashes[idx]!,
-        embedding: file.embeddings[idx] ?? new Float32Array(0),
-        ftsText: buildChunkFtsText(file.rel, c)
-      })),
-      file.size,
-      file.embedPending
-    )
-    seen.add(file.rel)
-    indexed++
-  }
-
-  const commitReadyPending = (): void => {
-    const rest: PendingIndexFile[] = []
-    for (const file of pendingFiles) {
-      if (file.pendingSlots === 0) commitFile(file)
-      else rest.push(file)
-    }
-    pendingFiles.length = 0
-    for (const file of rest) pendingFiles.push(file)
-  }
-
-  const flushBucket = async (bucket: number): Promise<void> => {
-    const batchTexts = bucketTexts[bucket]!
-    const batchSlots = bucketSlots[bucket]!
-    if (batchTexts.length === 0) return
-    throwIfAborted(signal)
-    report(
-      onProgress,
-      {
-        kind: 'code',
-        stage: 'embedding',
-        filesDone,
-        filesTotal,
-        indexed,
-        skipped,
-        embedChunks: embedChunks + batchTexts.length,
-        currentPath
-      },
-      { force: true }
-    )
-    const part = await embedder.embed(batchTexts, { role: 'document', signal })
-    if (part.length !== batchTexts.length) {
-      throw new Error(
-        `embed batch size mismatch: got ${part.length} for ${batchTexts.length} texts`
-      )
-    }
-    for (let si = 0; si < batchSlots.length; si++) {
-      const slot = batchSlots[si]!
-      slot.file.embeddings[slot.chunkIndex] = part[si]!
-      slot.file.pendingSlots--
-    }
-    embedChunks += batchTexts.length
-    batchTexts.length = 0
-    batchSlots.length = 0
-    commitReadyPending()
-    await yieldToEventLoop()
-    throwIfAborted(signal)
-  }
-
-  const flushEmbedBatch = async (): Promise<void> => {
-    for (let b = 0; b < EMBED_BUCKET_COUNT; b++) await flushBucket(b)
-  }
-
-  const enqueueChunk = async (
-    file: PendingIndexFile,
-    chunkIndex: number,
-    text: string
-  ): Promise<void> => {
-    file.pendingSlots++
-    const bucket = embedLengthBucket(text.length)
-    bucketTexts[bucket]!.push(text)
-    bucketSlots[bucket]!.push({ file, chunkIndex })
-    if (bucketTexts[bucket]!.length >= EMBED_BATCH) await flushBucket(bucket)
-  }
-
-  report(
-    onProgress,
-    {
-      kind: 'code',
-      stage: 'scanning',
-      filesDone: 0,
-      filesTotal,
-      indexed: 0,
-      skipped: 0,
-      embedChunks: 0,
-      currentPath: null
-    },
-    { force: true }
-  )
+  report(onProgress, { ...progressUpdate(), filesDone: 0, currentPath: null }, { force: true })
 
   for (let i = 0; i < files.length; i++) {
     throwIfAborted(signal)
@@ -408,171 +203,67 @@ export async function syncCodeIndex(
     currentPath = rel
     const st = await statFile(full)
     if (!st.ok) {
-      if (!st.missing && store.getFileHash(rel)) seen.add(rel)
+      if (!st.missing && store.getFileStamp(rel)) seen.add(rel)
       skipped++
-      report(onProgress, {
-        kind: 'code',
-        stage: 'scanning',
-        filesDone,
-        filesTotal,
-        indexed,
-        skipped,
-        embedChunks,
-        currentPath: rel
-      })
+      report(onProgress, progressUpdate())
       continue
     }
-    if (st.size > MAX_FILE_BYTES) {
+    if (st.size > CODE_INDEX_MAX_FILE_BYTES) {
       skipped++
-      report(onProgress, {
-        kind: 'code',
-        stage: 'scanning',
-        filesDone,
-        filesTotal,
-        indexed,
-        skipped,
-        embedChunks,
-        currentPath: rel
-      })
+      report(onProgress, progressUpdate())
       continue
     }
     const mtimeMs = roundMtime(st.mtimeMs)
-    if (!modelChanged) {
-      const stamp = store.getFileStamp(rel)
-      if (
-        stamp &&
-        stamp.mtimeMs === mtimeMs &&
-        stamp.size === st.size &&
-        (!stamp.embedPending || preservingNeural)
-      ) {
-        seen.add(rel)
-        skipped++
-        report(onProgress, {
-          kind: 'code',
-          stage: 'scanning',
-          filesDone,
-          filesTotal,
-          indexed,
-          skipped,
-          embedChunks,
-          currentPath: rel
-        })
-        continue
-      }
+    const stamp = store.getFileStamp(rel)
+    if (stamp && stamp.mtimeMs === mtimeMs && stamp.size === st.size) {
+      seen.add(rel)
+      skipped++
+      report(onProgress, progressUpdate())
+      continue
     }
     const textResult = await readTextFile(full)
     if (!textResult.ok) {
-      if (!textResult.missing && store.getFileHash(rel)) seen.add(rel)
+      if (!textResult.missing && store.getFileStamp(rel)) seen.add(rel)
       skipped++
-      report(onProgress, {
-        kind: 'code',
-        stage: 'scanning',
-        filesDone,
-        filesTotal,
-        indexed,
-        skipped,
-        embedChunks,
-        currentPath: rel
-      })
+      report(onProgress, progressUpdate())
       continue
     }
     const text = textResult.text
     if (text.includes('\0')) {
       skipped++
-      report(onProgress, {
-        kind: 'code',
-        stage: 'scanning',
-        filesDone,
-        filesTotal,
-        indexed,
-        skipped,
-        embedChunks,
-        currentPath: rel
-      })
+      report(onProgress, progressUpdate())
       continue
     }
     const fileHash = sha256Text(text)
-    if (!modelChanged && store.getFileHash(rel) === fileHash) {
-      const stamp = store.getFileStamp(rel)
-      if (!stamp?.embedPending || preservingNeural) {
-        store.updateFileStamp(rel, fileHash, mtimeMs, st.size)
-        seen.add(rel)
-        skipped++
-        report(onProgress, {
-          kind: 'code',
-          stage: 'scanning',
-          filesDone,
-          filesTotal,
-          indexed,
-          skipped,
-          embedChunks,
-          currentPath: rel
-        })
-        continue
-      }
+    if (store.getFileStamp(rel)?.hash === fileHash) {
+      store.updateFileStamp(rel, fileHash, mtimeMs, st.size)
+      seen.add(rel)
+      skipped++
+      report(onProgress, progressUpdate())
+      continue
     }
-    const chunks = await chunkSourceAst(rel, text)
-    const chunkHashes = chunks.map((c) =>
-      chunkContentHash(hashModelId, rel, c.startLine, c.endLine, c.text)
-    )
-    const pending: PendingIndexFile = {
+    const chunks = chunkSource(rel, text)
+    store.replaceFileChunks(
       rel,
       fileHash,
       mtimeMs,
-      size: st.size,
-      chunks,
-      chunkHashes,
-      embeddings: new Array(chunks.length),
-      pendingSlots: 0,
-      embedPending: preservingNeural
-    }
-    if (preservingNeural) {
-      for (let ci = 0; ci < chunks.length; ci++) {
-        pending.embeddings[ci] = new Float32Array(0)
-      }
-      commitFile(pending)
-      report(onProgress, {
-        kind: 'code',
-        stage: 'scanning',
-        filesDone,
-        filesTotal,
-        indexed,
-        skipped,
-        embedChunks,
-        currentPath: rel
-      })
-      continue
-    }
-    const reused = store.getEmbeddingsByChunkHashes(chunkHashes)
-    for (let ci = 0; ci < chunks.length; ci++) {
-      const cached = reused.get(chunkHashes[ci]!)
-      if (cached) {
-        pending.embeddings[ci] = cached
-        continue
-      }
-      await enqueueChunk(pending, ci, chunks[ci]!.contextualizedText)
-    }
-    if (pending.pendingSlots === 0) commitFile(pending)
-    else pendingFiles.push(pending)
-    report(onProgress, {
-      kind: 'code',
-      stage: 'scanning',
-      filesDone,
-      filesTotal,
-      indexed,
-      skipped,
-      embedChunks,
-      currentPath: rel
-    })
-  }
-
-  await flushEmbedBatch()
-  if (pendingFiles.length > 0) {
-    throw new Error(`code index embed flush left ${pendingFiles.length} files pending`)
+      st.size,
+      chunks.map((c) => ({
+        startLine: c.startLine,
+        endLine: c.endLine,
+        kind: c.kind,
+        name: c.name,
+        parentName: c.parentName,
+        ftsBody: buildChunkFtsBody(rel, c)
+      }))
+    )
+    seen.add(rel)
+    indexed++
+    report(onProgress, progressUpdate())
   }
 
   let removed = 0
-  let partial = !batchComplete
+  const partial = !batchComplete
   let syncComplete = batchComplete
   let cursor: string | null = batchComplete ? null : pageLastRel
 
@@ -581,16 +272,7 @@ export async function syncCodeIndex(
     store.setMeta('syncCursor', '')
     report(
       onProgress,
-      {
-        kind: 'code',
-        stage: 'reconciling',
-        filesDone: filesTotal,
-        filesTotal,
-        indexed,
-        skipped,
-        embedChunks,
-        currentPath: null
-      },
+      { stage: 'reconciling', filesDone: filesTotal, filesTotal, indexed, skipped, currentPath: null },
       { force: true }
     )
     throwIfAborted(signal)
@@ -600,7 +282,7 @@ export async function syncCodeIndex(
     } else {
       const allFiles = await collectWorkspaceFiles(
         workspaceRoot,
-        pageCap != null ? Math.max(CODE_INDEX_RECONCILE_WALK_CAP, pageCap * 2) : undefined,
+        Math.max(CODE_INDEX_RECONCILE_WALK_CAP, pageCap * 2),
         signal,
         CODE_INDEX_EXTS,
         INDEX_SKIP_DIR_SEGMENTS
@@ -608,10 +290,10 @@ export async function syncCodeIndex(
       throwIfAborted(signal)
       reconcileSeen = new Set<string>()
       for (const f of allFiles) {
-        if (!isCodeIndexPath(f.rel, f.full)) continue
+        if (!isIndexableSourcePath(f.rel, f.full)) continue
         const st = await statFile(f.full)
         if (st.ok) reconcileSeen.add(f.rel)
-        else if (!st.missing && store.getFileHash(f.rel)) reconcileSeen.add(f.rel)
+        else if (!st.missing && store.getFileStamp(f.rel)) reconcileSeen.add(f.rel)
       }
     }
     removed = store.deleteFilesNotIn(reconcileSeen)
@@ -620,33 +302,28 @@ export async function syncCodeIndex(
     if (pageLastRel) store.setMeta('syncCursor', pageLastRel)
   }
 
-  if (!preservingNeural && (indexed > 0 || prevModelId == null)) {
-    store.setMeta('modelId', embedder.modelId)
-    store.setMeta('dimensions', String(embedder.dimensions))
-  }
   store.setMeta('lastIndexedAt', new Date().toISOString())
   report(
     onProgress,
     {
-      kind: 'code',
       stage: 'done',
       filesDone: filesTotal,
       filesTotal,
       indexed,
       skipped,
       removed,
-      embedChunks,
       currentPath: null
     },
     { force: true }
   )
 
+  const status: IndexStatus = store.getStatus()
   return {
     scanned: files.length,
     indexed,
     skipped,
     removed,
-    status: store.getStatus(),
+    status,
     partial,
     syncComplete,
     cursor

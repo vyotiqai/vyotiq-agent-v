@@ -27,7 +27,7 @@ Bundled Marketplace skills that can be installed without a registry include the 
 
 ## Create a skill
 
-Use Marketplace → Manage → **Skills** or /create-skill. /create-skill personal targets the personal scope; the default command description creates under .vyotiq/skills/.
+Use Marketplace → Manage → **Skills** or /create-skill. /create-skill creates under {workspace}/.vyotiq/skills/ by default; /create-skill personal targets the personal scope.
 
 A minimal file is:
 
@@ -50,4 +50,4 @@ The Skill built-in loads an enabled skill or a relative file under that skill. S
 
 ## Refresh behavior
 
-Marketplace editing clears the local skill cache, and filesystem fingerprints refresh discovery. New or changed skills should appear without restarting the application. If a skill is missing, verify the file is named SKILL.md, the frontmatter parses, the directory is not a symlink, and another source did not already claim the same name.
+Marketplace editing clears the local skill cache, and filesystem fingerprints refresh discovery. New or changed skills appear without restarting the application. If a skill is missing, verify the file is named SKILL.md, the frontmatter parses, the directory sits under one of the discovered locations, and another source did not already claim the same name.

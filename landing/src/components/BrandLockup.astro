@@ -8,39 +8,35 @@ interface Props {
 const { class: className, variant = 'lockup', alt = '' } = Astro.props
 ---
 
-<span class:list={['inline-flex items-center gap-2.5', className]}>
-  <img
-    src="/brand/mark-black.svg"
-    alt={alt}
-    width="28"
-    height="28"
-    class="size-7 dark:hidden"
-  />
-  <img
-    src="/brand/mark-white.svg"
-    alt=""
-    width="28"
-    height="28"
-    class="hidden size-7 dark:block"
-  />
+<span
+  class:list={['brand-lockup inline-flex items-baseline gap-2', className]}
+  aria-label={alt || undefined}
+>
+  <span class="brand-lockup-word">Agent V</span>
   {
     variant === 'lockup' ? (
-      <>
-        <img
-          src="/brand/wordmark-black.svg"
-          alt=""
-          width="73"
-          height="13"
-          class="h-[13px] w-auto dark:hidden"
-        />
-        <img
-          src="/brand/wordmark-white.svg"
-          alt=""
-          width="73"
-          height="13"
-          class="hidden h-[13px] w-auto dark:block"
-        />
-      </>
+      <span class="brand-lockup-annotation">VYOTIQ</span>
     ) : null
   }
 </span>
+
+<style>
+  .brand-lockup-word {
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--fg);
+  }
+
+  .brand-lockup-annotation {
+    font-family: var(--font-mono);
+    font-size: 0.5625rem;
+    font-weight: 500;
+    letter-spacing: 0.22em;
+    line-height: 1;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+</style>

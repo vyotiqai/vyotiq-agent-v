@@ -21,11 +21,8 @@ Deletion is permanent. Symlinks and workspace boundaries restrict mutation actio
 
 ## Edit and save
 
-Opening a file creates an editor tab. A dirty text tab can use:
+Opening a file creates an editor tab. A dirty text tab can use Save, Discard/Reload, and Close tab. View and behavior options include:
 
-- Save
-- Discard/Reload
-- Close tab
 - Line numbers
 - Word wrap
 - Auto Save

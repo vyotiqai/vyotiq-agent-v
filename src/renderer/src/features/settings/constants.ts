@@ -89,13 +89,6 @@ export const ACTIVE_PROVIDER_OPTIONS = PROVIDER_DEFAULTS.map((p) => ({
   label: p.label
 }))
 
-export const CODEINDEX_EMBEDDER_OPTIONS = [
-  { value: 'mdenseon', label: 'LightOn dense ONNX (default — batched, utility process)' },
-  { value: 'lfm2', label: 'LFM2.5-Embedding-350M (llama.cpp / Ollama, 1024-dim)' },
-  { value: 'ollama', label: 'Ollama' },
-  { value: 'hash', label: 'Local hash (offline bag-of-tokens fallback)' }
-]
-
 export const DICTATION_ENGINE_OPTIONS = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'openrouter', label: 'OpenRouter' },

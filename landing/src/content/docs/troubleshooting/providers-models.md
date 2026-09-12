@@ -24,7 +24,7 @@ Expected empty-state text is No providers configured. Open [Settings → Provide
 
 ## Active provider is empty
 
-The `Active menu` lists configured hosts only. If it says No providers configured yet. Add an API key below or use local Ollama, confirm secure storage accepted the key. For Ollama, confirm whether the host is local or Ollama Cloud; Cloud requires a key.
+The `Active menu` lists configured hosts only. If it says "No providers configured yet. Add an API key below or use local Ollama", confirm secure storage accepted the key. For Ollama, confirm whether the host is local or Ollama Cloud; Cloud requires a key.
 
 ## Refresh models fails
 

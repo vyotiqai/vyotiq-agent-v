@@ -198,7 +198,7 @@ const INDEX_EXCLUDE_EXTS = new Set([
   '.ipynb'
 ])
 
-/** Production source languages — shared by dense embed and sparsegrep. */
+/** Production source languages — shared by the code index. */
 export const CODE_INDEX_EXTS = new Set(
   [...TEXT_EXTS].filter((ext) => !INDEX_EXCLUDE_EXTS.has(ext))
 )
@@ -393,8 +393,8 @@ function isIndexSkipFileName(base: string): boolean {
 }
 
 /**
- * True when a generic indexer should store this path (dense embed and sparsegrep).
- * Production source only — tests, docs, configs, scripts, databases, and clutter stay out.
+ * True when a generic indexer should store this path. Production source only —
+ * tests, docs, configs, scripts, databases, and clutter stay out.
  */
 export function isIndexableSourcePath(rel: string, full?: string): boolean {
   const ext = extname(full ?? rel.replace(/\\/g, '/')).toLowerCase()

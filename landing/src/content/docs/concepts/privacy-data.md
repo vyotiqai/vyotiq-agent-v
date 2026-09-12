@@ -1,6 +1,6 @@
 ---
 title: Privacy and data storage
-description: Map local data, provider-bound content, credentials, logs, indexes, memory, and deletion boundaries.
+description: What Agent V writes to disk, what stays on your machine, and what leaves it only if you opt in.
 section: concepts
 order: 4
 type: concept
@@ -11,34 +11,32 @@ related:
   - tools/voice-dictation
 ---
 
-Agent V is local-first, not offline-only. The desktop process stores product state locally, while configured providers and integrations receive the content required for each request.
+Everything Agent V writes lives in two places: the app-data directory (`%APPDATA%\vyotiq` on Windows) and a `.vyotiq` folder inside each workspace. There is no separate database — state is plain JSON and markdown files you can open in any editor.
 
-## Stored locally
+## Stays local
 
-App and workspace state stay on this machine. [Storage locations](/docs/reference/storage) lists what exists and where. Workspace `.vyotiq/memory/`, `.vyotiq/rules/`, and `.vyotiq/skills/` are ordinary project files and can enter version control.
+- **Transcripts, events, run artifacts, receipts.** Written under app data as plain files.
+- **Memory, rules, and skills.** Stored in the workspace `.vyotiq` folder as markdown. Agent V does not sync or upload them.
+- **Model requests.** By default Agent V talks to a local Ollama server (`http://127.0.0.1:11434`), so your code and prompts stay on your machine. If you configure a cloud provider instead, requests go to that provider — you choose this in Settings → Providers.
+- **Dictation.** Voice input runs a local Whisper model (ONNX) in a separate utility process. Recorded audio stays on your machine.
+- **Notifications and inbox.** Stored locally in app data.
 
-## Content sent elsewhere
+## Opt-in only
 
-A configured model provider receives prompts, selected context, attachments, tool results used in the next step, and required model parameters. **OpenAI** or **OpenRouter** dictation receives recorded audio when selected.
+- **Crash and error reports.** The **Share crash & error reports** setting (Settings → General) is off by default. When enabled, reports go to a Sentry project you configure with your own DSN.
 
-Remote MCP servers receive invoked tool arguments or resource/prompt requests. Browser navigation contacts the target website. GitHub operations contact GitHub. A remote Ollama or Custom host is remote even when its API is compatible with a local service.
+## Secrets
 
-## Credentials
+API keys are stored with the operating system's secure storage (Electron safeStorage), not in plain settings files.
 
-Provider keys, MCP bearer tokens, and GitHub tokens use Electron safeStorage where the operating system supports it. Do not copy secrets into chat, workspace files, logs, rules, or skills.
+## Logs
 
-## Logs and reporting
+Agent V always writes rotating local logs under app data. Open them from **Settings → General → Open logs folder**.
 
-Local rotating logs are always written and can be opened through [Settings → General](/docs/reference/settings) → `Open logs folder`. Share crash & error reports is opt-in and available only in a build with a Sentry DSN. That reporting path excludes chat contents, API keys, and file bodies.
+## Uninstall
 
-## Notifications and desktop privacy
+The Windows uninstaller does not delete the app-data directory. After uninstalling, delete `%APPDATA%\vyotiq` yourself if you want a clean removal.
 
-Inbox items are stored locally when notifications and their category are enabled. OS notification titles and bodies can appear outside the app; select Off when the desktop surface is not private.
+## Privacy policy
 
-## Retention and deletion
-
-Windows uninstall does not delete app data automatically. Removing a workspace tab also does not mean all persisted run state was erased. Delete project files, app-data state, downloaded models, indexes, packages, and external-provider data through their own boundaries. See Storage locations before manual cleanup.
-
-## The public website
-
-The public site is a separate surface from this application. Theme storage and optional cookieless analytics for that site are documented on [Website privacy](/privacy).
+The published privacy policy lives at [vyotiq.com/privacy](https://vyotiq.com/privacy).

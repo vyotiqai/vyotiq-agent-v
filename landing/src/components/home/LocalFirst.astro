@@ -1,0 +1,93 @@
+---
+const rows = [
+  {
+    name: 'App data',
+    text: 'Everything the app stores lives in the OS user-data directory, not in the cloud. On Windows that is %APPDATA%\\vyotiq.'
+  },
+  {
+    name: 'Model keys',
+    text: 'Provider API keys are configured in the app\u2019s settings and used to call the providers you choose. They are not written into your repositories.'
+  },
+  {
+    name: 'Crash reporting',
+    text: 'Sentry crash reports are sent only if you enable telemetry in settings, and the report never includes personally identifying information.'
+  }
+]
+---
+
+<section class="local section" aria-labelledby="local-title">
+  <div class="wrap">
+    <p class="eyebrow mono"><strong>03</strong> — Local first</p>
+    <h2 id="local-title" class="local-title">Your data stays where you can see it.</h2>
+    <dl class="local-list">
+      {
+        rows.map((row) => (
+          <div class="local-row">
+            <dt class="local-name mono">{row.name}</dt>
+            <dd class="local-text">{row.text}</dd>
+          </div>
+        ))
+      }
+    </dl>
+  </div>
+</section>
+
+<style>
+  .local-title {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(1.75rem, 3.2vw, 2.5rem);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    margin: 0 0 3rem;
+    max-width: 26ch;
+  }
+
+  .local-list {
+    margin: 0;
+    max-width: 62ch;
+    background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+    border: none;
+    border-radius: var(--radius-lg, 16px);
+    box-shadow: var(--shadow-card, 0 1px 2px rgb(2 8 23 / 0.3), 0 8px 24px rgb(2 8 23 / 0.25));
+    overflow: hidden;
+  }
+
+  .local-row {
+    padding: 1rem 1.25rem;
+    display: grid;
+    grid-template-columns: 12rem 1fr;
+    gap: 1.5rem;
+    transition: background-color var(--duration, 150ms) var(--ease, ease);
+  }
+
+  .local-row:hover {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+
+  .local-row + .local-row {
+    border-top: 1px solid var(--border-faint);
+  }
+
+  .local-name {
+    font-size: 0.8125rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-top: 0.1875rem;
+  }
+
+  .local-text {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+  }
+
+  @media (max-width: 640px) {
+    .local-row {
+      grid-template-columns: 1fr;
+      gap: 0.375rem;
+    }
+  }
+</style>

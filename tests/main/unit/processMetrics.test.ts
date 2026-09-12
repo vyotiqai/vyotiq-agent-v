@@ -4,16 +4,6 @@ import {
   summarizeProcessMetrics,
   PROCESS_METRICS_LOG_INTERVAL_MS
 } from '@main/perf/processMetrics'
-import type { EmbedUtilityPerfStats } from '@main/agent/codeindex/embedUtilityClient'
-
-const idleUtility: EmbedUtilityPerfStats = {
-  pid: null,
-  sessionLoaded: false,
-  rssMb: null,
-  heapUsedMb: null,
-  idleUnloadMs: 300_000,
-  lastActivityAt: null
-}
 
 describe('processMetrics summarizer', () => {
   it('rolls Chromium rows up by type and converts KiB working set to MB', () => {
@@ -25,7 +15,6 @@ describe('processMetrics summarizer', () => {
         { type: 'Tab', cpuPercent: 4, workingSetKb: 200 * 1024 },
         { type: 'Utility', cpuPercent: 18, workingSetKb: 700 * 1024 }
       ],
-      { ...idleUtility, pid: 42, sessionLoaded: true, rssMb: 640 },
       '2026-08-23T00:00:00.000Z'
     )
     expect(snap.totalWorkingSetMb).toBe(2400)
@@ -34,13 +23,12 @@ describe('processMetrics summarizer', () => {
       count: 2,
       workingSetMb: 1000
     })
-    expect(snap.embedUtility).toMatchObject({ pid: 42, sessionLoaded: true, rssMb: 640 })
   })
 
   it('logs when combined RSS or CPU is high, rate-limited to 30s', () => {
     const hot = summarizeProcessMetrics(
       [{ type: 'Browser', cpuPercent: 40, workingSetKb: 1200 * 1024 }],
-      idleUtility
+      '2026-08-23T00:00:00.000Z'
     )
     expect(shouldLogProcessMetrics(hot, 1_000, 0)).toBe(true)
     expect(shouldLogProcessMetrics(hot, 1_000 + PROCESS_METRICS_LOG_INTERVAL_MS - 1, 1_000)).toBe(
@@ -50,7 +38,7 @@ describe('processMetrics summarizer', () => {
 
     const cool = summarizeProcessMetrics(
       [{ type: 'Browser', cpuPercent: 1, workingSetKb: 200 * 1024 }],
-      idleUtility
+      '2026-08-23T00:00:00.000Z'
     )
     expect(shouldLogProcessMetrics(cool, 5_000, 0)).toBe(false)
   })

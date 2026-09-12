@@ -1,14 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { compactMessages } from '@main/agent/context/compact'
 import {
-  CIRCUIT_FAILURE_THRESHOLD,
-  CIRCUIT_OPEN_MS,
   assertCircuitClosed,
   circuitKeyProvider,
   inspectCircuit,
-  recordCircuitFailure,
-  resetCircuitBreakersForTests,
-  setCircuitNowForTests
+  recordCircuitFailure
 } from '@main/agent/circuitBreaker'
 import type {
   LlmProvider,
@@ -249,25 +245,22 @@ describe('compactMessages', () => {
 
   it('does not count a hard structured stream error as circuit success', async () => {
     const key = circuitKeyProvider('openai')
-    let t = 1_000
-    setCircuitNowForTests(() => t)
-    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) recordCircuitFailure(key)
-    t += CIRCUIT_OPEN_MS
+    recordCircuitFailure(key)
 
-    try {
-      const result = await compactMessages({
-        provider: mockProvider([{ type: 'error', error: 'invalid_request' }]),
-        model: 'gpt-4o',
-        signal: new AbortController().signal,
-        messages: history,
-        supportsStructuredOutput: true
-      })
-      expect(result).toBeNull()
-      expect(inspectCircuit(key).state).toBe('half_open')
-      assertCircuitClosed(key)
-    } finally {
-      resetCircuitBreakersForTests()
-    }
+    const result = await compactMessages({
+      provider: mockProvider([{ type: 'error', error: 'invalid_request' }]),
+      model: 'gpt-4o',
+      signal: new AbortController().signal,
+      messages: history,
+      supportsStructuredOutput: true
+    })
+    // Hard structured errors are never retried and never counted as circuit
+    // success.
+    expect(result).toBeNull()
+    // The breaker never opens (cap removed) — failure counts stay
+    // diagnostics-only and can never block a later compaction.
+    expect(inspectCircuit(key).state).toBe('closed')
+    expect(() => assertCircuitClosed(key)).not.toThrow()
   })
 
   it('retries a retriable structured stream error instead of falling back to freeform', async () => {

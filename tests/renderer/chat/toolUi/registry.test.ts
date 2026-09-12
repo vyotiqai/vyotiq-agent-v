@@ -75,7 +75,7 @@ describe('tool UI registry coverage', () => {
         summary: 'q',
         status: 'done',
         argsPreview: JSON.stringify({ query: 'q' }),
-        content: 'index: 1 chunks / 1 files · model=local-hash-v1 · fallback=hash · hits=0\n\nNo codebase_search hits.'
+        content: 'index: 1 chunks / 1 files · hits=0\n\nNo codebase_search hits.'
       })
     ).toBe(true)
   })

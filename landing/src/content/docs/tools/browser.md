@@ -41,9 +41,10 @@ Take Screenshot writes a JPEG under the active run when a chat is open, or under
 
 Open [Settings → Tools](/docs/reference/settings#tools) → Browser domain allowlist. Empty means no extra host filter; built-in SSRF rules still apply. Add one hostname per line or comma-separated:
 
+```text
 example.com
-
 *.corp.internal
+```
 
 Exact names match only that host. *.example.com matches suffix subdomains. Full pasted URLs are reduced to their hostname. The check runs on every navigation and redirect.
 
@@ -51,4 +52,4 @@ Exact names match only that host. *.example.com matches suffix subdomains. Full 
 
 Treat snapshots, text, downloads, prompts, and sign-in pages as untrusted. Keep tool approval on for browser mutations when account or external data is involved. A screenshot captures the actual current page; it does not prove a workflow succeeded.
 
-If navigation is blocked, preserve the shown host and error, then use Browser and terminal issues.
+If navigation is blocked, preserve the shown host and error, then see [Browser and terminal issues](/docs/troubleshooting/browser-terminal).

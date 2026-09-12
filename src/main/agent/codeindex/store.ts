@@ -2,73 +2,51 @@ import { existsSync, mkdirSync } from 'fs'
 import { dirname } from 'path'
 import { DatabaseSync } from 'node:sqlite'
 import type { ChunkKind, IndexStatus, StoredChunk } from './types'
-import { DEFAULT_MODEL_ID } from './types'
-import { bufferToEmbedding, embeddingToBuffer } from './embed'
+import { CODE_INDEX_SCHEMA_VERSION } from './types'
 import { codeindexDbPath, codeindexRoot } from '../indexStoragePaths'
-
-export type ChunkRow = StoredChunk & {
-  embedding: Float32Array
-}
 
 export { codeindexRoot, codeindexDbPath } from '../indexStoragePaths'
 
+/**
+ * One SQLite store per workspace: a `files` table for incremental sync and
+ * glob/file-list acceleration, a `chunks` metadata table, and one FTS5 index
+ * with the trigram tokenizer — substring + keyword matching with BM25 ranking,
+ * no embeddings, no models.
+ */
 export class CodeIndexStore {
   readonly db: DatabaseSync
   readonly dbPath: string
-  readonly dimensions: number
 
-  /** Read-only fallback DB for getEmbeddingsByChunkHashes (parent-workspace reuse). */
-  private reuseDbPath: string | null = null
-  private reuseDb: DatabaseSync | null = null
-  private reuseDbDisabled = false
-
-  private constructor(db: DatabaseSync, dbPath: string, dimensions: number) {
+  private constructor(db: DatabaseSync, dbPath: string) {
     this.db = db
     this.dbPath = dbPath
-    this.dimensions = dimensions
   }
 
-  static open(
-    workspacePath: string,
-    dimensions: number,
-    opts?: { reuseDbPath?: string }
-  ): CodeIndexStore {
+  static open(workspacePath: string): CodeIndexStore {
     const root = codeindexRoot(workspacePath)
     if (!existsSync(root)) mkdirSync(root, { recursive: true })
-    return CodeIndexStore.openDbPath(codeindexDbPath(workspacePath), dimensions, opts)
+    return CodeIndexStore.openDbPath(codeindexDbPath(workspacePath))
   }
 
-  static openDbPath(
-    dbPath: string,
-    dimensions: number,
-    opts?: { reuseDbPath?: string }
-  ): CodeIndexStore {
+  static openDbPath(dbPath: string): CodeIndexStore {
     const dir = dirname(dbPath)
     if (dir && !existsSync(dir)) mkdirSync(dir, { recursive: true })
     const db = new DatabaseSync(dbPath)
     db.exec('PRAGMA journal_mode = WAL;')
     db.exec('PRAGMA synchronous = NORMAL;')
-    // Main + utilityProcess may briefly contend on Windows; wait instead of failing.
     db.exec('PRAGMA busy_timeout = 5000;')
     migrate(db)
-    const store = new CodeIndexStore(db, dbPath, dimensions)
-    if (opts?.reuseDbPath) store.reuseDbPath = opts.reuseDbPath
-    return store
+    return new CodeIndexStore(db, dbPath)
   }
 
   /** In-memory store for unit tests. */
-  static openMemory(dimensions: number): CodeIndexStore {
+  static openMemory(): CodeIndexStore {
     const db = new DatabaseSync(':memory:')
     migrate(db)
-    return new CodeIndexStore(db, ':memory:', dimensions)
+    return new CodeIndexStore(db, ':memory:')
   }
 
   close(): void {
-    try {
-      this.reuseDb?.close()
-    } catch {
-      /* already closed */
-    }
     try {
       this.db.close()
     } catch {
@@ -84,144 +62,52 @@ export class CodeIndexStore {
   }
 
   setMeta(key: string, value: string): void {
-    this.db.prepare(
-      'INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
-    ).run(key, value)
+    this.db
+      .prepare(
+        'INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+      )
+      .run(key, value)
   }
 
   getStatus(): IndexStatus {
-    const fileCount = (
-      this.db.prepare('SELECT COUNT(*) AS c FROM files').get() as { c: number }
-    ).c
+    const fileCount = (this.db.prepare('SELECT COUNT(*) AS c FROM files').get() as { c: number }).c
     const chunkCount = (
       this.db.prepare('SELECT COUNT(*) AS c FROM chunks').get() as { c: number }
     ).c
-    const modelId = this.getMeta('modelId') ?? DEFAULT_MODEL_ID
     const lastIndexedAt = this.getMeta('lastIndexedAt')
     return {
-      ready: chunkCount > 0,
-      modelId,
+      ready: fileCount > 0,
       fileCount,
       chunkCount,
-      lastIndexedAt
+      lastIndexedAt,
+      syncComplete: this.getMeta('syncComplete') === 'true'
     }
   }
 
-  getFileHash(path: string): string | null {
-    const row = this.db.prepare('SELECT file_hash AS h FROM files WHERE path = ?').get(path) as
-      | { h: string }
-      | undefined
-    return row?.h ?? null
-  }
-
-  getFileStamp(path: string): {
-    hash: string
-    mtimeMs: number
-    size: number
-    embedPending: boolean
-  } | null {
+  getFileStamp(path: string): { hash: string; mtimeMs: number; size: number } | null {
     const row = this.db
       .prepare(
-        `SELECT file_hash AS hash, mtime_ms AS mtimeMs, size_bytes AS size,
-                embed_pending AS embedPending
+        `SELECT file_hash AS hash, mtime_ms AS mtimeMs, size_bytes AS size
          FROM files WHERE path = ?`
       )
-      .get(path) as
-      | { hash: string; mtimeMs: number; size: number | null; embedPending: number | null }
-      | undefined
+      .get(path) as { hash: string; mtimeMs: number; size: number | null } | undefined
     if (!row || row.size == null || !Number.isFinite(row.size)) return null
-    return {
-      hash: row.hash,
-      mtimeMs: row.mtimeMs,
-      size: row.size,
-      embedPending: row.embedPending === 1
-    }
+    return { hash: row.hash, mtimeMs: row.mtimeMs, size: row.size }
   }
 
   updateFileStamp(path: string, fileHash: string, mtimeMs: number, sizeBytes: number): void {
     this.db
-      .prepare(
-        'UPDATE files SET file_hash = ?, mtime_ms = ?, size_bytes = ? WHERE path = ?'
-      )
+      .prepare('UPDATE files SET file_hash = ?, mtime_ms = ?, size_bytes = ? WHERE path = ?')
       .run(fileHash, mtimeMs, sizeBytes, path)
   }
 
-  /** Lookup embeddings keyed by chunk_hash (same model salt → reuse without re-embed). */
-  getEmbeddingsByChunkHashes(hashes: string[]): Map<string, Float32Array> {
-    const out = new Map<string, Float32Array>()
-    if (!hashes.length) return out
-    const uniq = [...new Set(hashes)]
-    // SQLite default max variable count is often 999 — chunk large IN lists.
-    const SQLITE_IN_CHUNK = 500
-    for (let i = 0; i < uniq.length; i += SQLITE_IN_CHUNK) {
-      const slice = uniq.slice(i, i + SQLITE_IN_CHUNK)
-      const placeholders = slice.map(() => '?').join(',')
-      const rows = this.db
-        .prepare(
-          `SELECT chunk_hash AS chunkHash, embedding FROM chunks WHERE chunk_hash IN (${placeholders})`
-        )
-        .all(...slice) as { chunkHash: string; embedding: Buffer }[]
-      for (const r of rows) {
-        if (!r.embedding || r.embedding.byteLength < 4) continue
-        out.set(r.chunkHash, bufferToEmbedding(Buffer.from(r.embedding), this.dimensions))
-      }
-    }
-    this.fillFromReuseDb(uniq, out)
-    return out
-  }
-
-  /** Lazily open the read-only reuse DB; disable it permanently on any problem. */
-  private openReuseDb(): DatabaseSync | null {
-    if (this.reuseDbDisabled || !this.reuseDbPath) return null
-    if (this.reuseDb) return this.reuseDb
-    try {
-      const db = new DatabaseSync(this.reuseDbPath, { readOnly: true })
-      const row = db.prepare('SELECT value FROM meta WHERE key = ?').get('dimensions') as
-        | { value: string }
-        | undefined
-      if (!row || Number(row.value) !== this.dimensions) {
-        db.close()
-        this.reuseDbDisabled = true
-        return null
-      }
-      this.reuseDb = db
-      return db
-    } catch {
-      this.reuseDbDisabled = true
-      return null
-    }
-  }
-
-  /** Merge embeddings for misses from the reuse DB (never written to). */
-  private fillFromReuseDb(uniq: string[], out: Map<string, Float32Array>): void {
-    if (!this.reuseDbPath || out.size >= uniq.length) return
-    const db = this.openReuseDb()
-    if (!db) return
-    const misses = uniq.filter((h) => !out.has(h))
-    for (let i = 0; i < misses.length; i += 500) {
-      const slice = misses.slice(i, i + 500)
-      const placeholders = slice.map(() => '?').join(',')
-      const rows = db
-        .prepare(
-          `SELECT chunk_hash AS chunkHash, embedding FROM chunks WHERE chunk_hash IN (${placeholders})`
-        )
-        .all(...slice) as { chunkHash: string; embedding: Buffer }[]
-      for (const r of rows) {
-        if (!r.embedding || r.embedding.byteLength < this.dimensions * 4) continue
-        out.set(r.chunkHash, bufferToEmbedding(Buffer.from(r.embedding), this.dimensions))
-      }
-    }
-  }
-
   listFilePaths(): string[] {
-    const rows = this.db.prepare('SELECT path FROM files').all() as { path: string }[]
+    const rows = this.db.prepare('SELECT path FROM files ORDER BY path').all() as { path: string }[]
     return rows.map((r) => r.path)
   }
 
-  deleteFile(path: string): void {
-    const ids = this.db
-      .prepare('SELECT id FROM chunks WHERE path = ?')
-      .all(path) as { id: number }[]
+  private deleteFile(path: string): void {
+    const ids = this.db.prepare('SELECT id FROM chunks WHERE path = ?').all(path) as { id: number }[]
     const delFts = this.db.prepare('DELETE FROM chunks_fts WHERE chunk_id = ?')
     for (const { id } of ids) delFts.run(String(id))
     this.db.prepare('DELETE FROM chunks WHERE path = ?').run(path)
@@ -247,62 +133,40 @@ export class CodeIndexStore {
     }
   }
 
-  upsertFile(
-    path: string,
-    fileHash: string,
-    mtimeMs: number,
-    sizeBytes: number,
-    embedPending = false
-  ): void {
-    this.db
-      .prepare(
-        `INSERT INTO files(path, file_hash, mtime_ms, size_bytes, embed_pending) VALUES(?, ?, ?, ?, ?)
-         ON CONFLICT(path) DO UPDATE SET file_hash = excluded.file_hash, mtime_ms = excluded.mtime_ms, size_bytes = excluded.size_bytes, embed_pending = excluded.embed_pending`
-      )
-      .run(path, fileHash, mtimeMs, sizeBytes, embedPending ? 1 : 0)
-  }
-
   replaceFileChunks(
     path: string,
     fileHash: string,
     mtimeMs: number,
+    sizeBytes: number,
     chunks: {
       startLine: number
       endLine: number
       kind: ChunkKind
       name: string
       parentName?: string
-      chunkHash: string
-      embedding: Float32Array
-      ftsText: string
-    }[],
-    sizeBytes = 0,
-    embedPending = false
+      ftsBody: string
+    }[]
   ): void {
     this.db.exec('BEGIN IMMEDIATE')
     try {
       this.deleteFile(path)
-      this.upsertFile(path, fileHash, mtimeMs, sizeBytes, embedPending)
-      const insert = this.db.prepare(
-        `INSERT INTO chunks(path, start_line, end_line, kind, name, parent_name, chunk_hash, embedding)
-         VALUES(?, ?, ?, ?, ?, ?, ?, ?)`
+      this.db
+        .prepare(
+          `INSERT INTO files(path, file_hash, mtime_ms, size_bytes) VALUES(?, ?, ?, ?)
+           ON CONFLICT(path) DO UPDATE SET file_hash = excluded.file_hash,
+             mtime_ms = excluded.mtime_ms, size_bytes = excluded.size_bytes`
+        )
+        .run(path, fileHash, mtimeMs, sizeBytes)
+      const insertChunk = this.db.prepare(
+        `INSERT INTO chunks(path, start_line, end_line, kind, name, parent_name)
+         VALUES(?, ?, ?, ?, ?, ?)`
       )
       const insertFts = this.db.prepare(
-        `INSERT INTO chunks_fts(chunk_id, path, name, parent_name, body) VALUES(?, ?, ?, ?, ?)`
+        `INSERT INTO chunks_fts(chunk_id, path, name, body) VALUES(?, ?, ?, ?)`
       )
       for (const c of chunks) {
-        const info = insert.run(
-          path,
-          c.startLine,
-          c.endLine,
-          c.kind,
-          c.name,
-          c.parentName ?? null,
-          c.chunkHash,
-          embeddingToBuffer(c.embedding)
-        )
-        const id = Number(info.lastInsertRowid)
-        insertFts.run(String(id), path, c.name, c.parentName ?? '', c.ftsText)
+        const info = insertChunk.run(path, c.startLine, c.endLine, c.kind, c.name, c.parentName ?? null)
+        insertFts.run(Number(info.lastInsertRowid), path, c.name, c.ftsBody)
       }
       this.db.exec('COMMIT')
     } catch (err) {
@@ -315,36 +179,11 @@ export class CodeIndexStore {
     }
   }
 
-  loadAllEmbeddings(): { id: number; embedding: Float32Array }[] {
-    const rows = this.db.prepare('SELECT id, embedding FROM chunks').all() as {
-      id: number
-      embedding: Buffer
-    }[]
-    return rows
-      .filter((r) => r.embedding && r.embedding.byteLength >= 4)
-      .map((r) => ({
-        id: r.id,
-        embedding: bufferToEmbedding(Buffer.from(r.embedding), this.dimensions)
-      }))
-  }
-
-  *iterateEmbeddings(): Generator<{ id: number; embedding: Float32Array }, void, undefined> {
-    const stmt = this.db.prepare('SELECT id, embedding FROM chunks')
-    const rows = stmt.iterate() as IterableIterator<{ id: number; embedding: Buffer }>
-    for (const r of rows) {
-      if (!r.embedding || r.embedding.byteLength < 4) continue
-      yield {
-        id: r.id,
-        embedding: bufferToEmbedding(Buffer.from(r.embedding), this.dimensions)
-      }
-    }
-  }
-
   getChunk(id: number): StoredChunk | null {
     const row = this.db
       .prepare(
         `SELECT id, path, start_line AS startLine, end_line AS endLine, kind, name,
-                parent_name AS parentName, chunk_hash AS chunkHash
+                parent_name AS parentName
          FROM chunks WHERE id = ?`
       )
       .get(id) as
@@ -356,15 +195,20 @@ export class CodeIndexStore {
           kind: ChunkKind
           name: string
           parentName: string | null
-          chunkHash: string
         }
       | undefined
     return row ?? null
   }
 
+  /**
+   * Ranked FTS search over the trigram index. Phrases shorter than three
+   * characters never match a trigram table, so tokens are floored at 3 chars;
+   * a LIKE fallback over path/name covers shorter identifiers. Primary pass
+   * ANDs all tokens; if that yields nothing, an OR pass keeps recall. BM25
+   * column weights favour path/name matches over body text.
+   */
   searchFts(query: string, limit: number): number[] {
     const tokens = ftsQueryTokens(query)
-    const q = tokensToMatchQuery(tokens)
     const ids: number[] = []
     const seen = new Set<number>()
     const push = (id: number): void => {
@@ -372,44 +216,43 @@ export class CodeIndexStore {
       seen.add(id)
       ids.push(id)
     }
+    const runMatch = (matchQuery: string): number[] => {
+      const rows = this.db
+        .prepare(
+          `SELECT chunk_id AS id FROM chunks_fts
+           WHERE chunks_fts MATCH ?
+           ORDER BY bm25(chunks_fts, 0, 4.0, 3.0, 1.0)
+           LIMIT ?`
+        )
+        .all(matchQuery, limit) as { id: number | string }[]
+      return rows.map((r) => Number(r.id))
+    }
 
-    if (q) {
+    const phrases = tokens.map((t) => `"${t}"`)
+    if (phrases.length > 0) {
       try {
-        const rows = this.db
-          .prepare(
-            `SELECT chunk_id AS id FROM chunks_fts
-             WHERE chunks_fts MATCH ?
-             ORDER BY bm25(chunks_fts)
-             LIMIT ?`
-          )
-          .all(q, limit) as { id: string }[]
-        for (const r of rows) push(Number(r.id))
+        for (const id of runMatch(phrases.join(' '))) push(id)
+        if (ids.length === 0 && phrases.length > 1) {
+          for (const id of runMatch(phrases.join(' OR '))) push(id)
+        }
       } catch {
-        const like = `%${query.replace(/[%_]/g, '')}%`
-        const rows = this.db
-          .prepare(
-            `SELECT c.id AS id FROM chunks c
-             JOIN chunks_fts f ON f.chunk_id = CAST(c.id AS TEXT)
-             WHERE f.body LIKE ? OR f.name LIKE ? OR c.path LIKE ?
-             LIMIT ?`
-          )
-          .all(like, like, like, limit) as { id: number }[]
-        for (const r of rows) push(r.id)
+        /* malformed query — fall through to LIKE */
       }
     }
 
-    // path is UNINDEXED in FTS5; LIKE covers filename queries on existing DBs
-    // and tokens that only appear in the path.
+    // Short tokens (< 3 chars) and path-only matches: plain LIKE sweep.
     if (ids.length < limit) {
-      const pathStmt = this.db.prepare(
-        `SELECT id FROM chunks WHERE path LIKE ? LIMIT ?`
+      const likeStmt = this.db.prepare(
+        `SELECT c.id AS id FROM chunks c
+         WHERE c.path LIKE ? OR c.name LIKE ?
+         LIMIT ?`
       )
       for (const token of tokens) {
         if (ids.length >= limit) break
         if (token.length < 3) continue
         const like = `%${token.replace(/[%_]/g, '')}%`
         if (like.length < 5) continue
-        const rows = pathStmt.all(like, limit) as { id: number }[]
+        const rows = likeStmt.all(like, like, limit) as { id: number }[]
         for (const r of rows) {
           push(r.id)
           if (ids.length >= limit) break
@@ -417,6 +260,27 @@ export class CodeIndexStore {
       }
     }
     return ids.slice(0, limit)
+  }
+
+  /**
+   * Distinct file paths whose indexed text contains the literal substring —
+   * the FTS5 trigram equivalent of trigram candidate pruning. Returns null
+   * when the literal cannot prune (shorter than 3 chars).
+   */
+  lookupFilesByLiteral(literal: string, limit = 20000): string[] | null {
+    const lit = literal.trim()
+    if (lit.length < 3) return null
+    const phrase = `"${lit.replace(/"/g, '')}"`
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT DISTINCT path FROM chunks_fts WHERE chunks_fts MATCH ? LIMIT ?`
+        )
+        .all(phrase, limit) as { path: string }[]
+      return rows.map((r) => r.path)
+    } catch {
+      return null
+    }
   }
 }
 
@@ -426,11 +290,23 @@ function migrate(db: DatabaseSync): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+  `)
+  const version = (() => {
+    const row = db.prepare(`SELECT value FROM meta WHERE key = 'schemaVersion'`).get() as
+      | { value: string }
+      | undefined
+    return row?.value ?? null
+  })()
+  if (version != null && version !== CODE_INDEX_SCHEMA_VERSION) {
+    // Foreign schema (e.g. the old embedding store) — rebuild from scratch.
+    db.exec('DROP TABLE IF EXISTS chunks_fts; DROP TABLE IF EXISTS chunks; DROP TABLE IF EXISTS files;')
+  }
+  db.exec(`
     CREATE TABLE IF NOT EXISTS files (
       path TEXT PRIMARY KEY,
       file_hash TEXT NOT NULL,
       mtime_ms INTEGER NOT NULL,
-      size_bytes INTEGER
+      size_bytes INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS chunks (
       id INTEGER PRIMARY KEY,
@@ -439,93 +315,26 @@ function migrate(db: DatabaseSync): void {
       end_line INTEGER NOT NULL,
       kind TEXT NOT NULL,
       name TEXT NOT NULL,
-      parent_name TEXT,
-      chunk_hash TEXT NOT NULL,
-      embedding BLOB NOT NULL
+      parent_name TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_chunks_path ON chunks(path);
     CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
       chunk_id UNINDEXED,
-      path UNINDEXED,
+      path,
       name,
-      parent_name,
       body,
-      tokenize = 'porter unicode61'
+      tokenize = 'trigram'
     );
   `)
-  ensureColumn(db, 'files', 'size_bytes', 'size_bytes INTEGER')
-  ensureColumn(db, 'files', 'embed_pending', 'embed_pending INTEGER NOT NULL DEFAULT 0')
-}
-
-function ensureColumn(db: DatabaseSync, table: string, column: string, ddl: string): void {
-  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
-  if (rows.some((r) => r.name === column)) return
-  db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`)
+  db.prepare(
+    `INSERT INTO meta(key, value) VALUES('schemaVersion', ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  ).run(CODE_INDEX_SCHEMA_VERSION)
+  // Fail loud when the runtime SQLite lacks FTS5/trigram — never degrade silently.
+  db.prepare(`SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH '"abc"' LIMIT 1`).get()
 }
 
 const CAMEL_SPLIT = /_|(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/
-
-/**
- * English function words that survive the 3-char token floor.
- * Applied to MATCH queries only — indexed `body` is unchanged.
- */
-const FTS_QUERY_STOPWORDS = new Set([
-  'about',
-  'also',
-  'and',
-  'any',
-  'are',
-  'been',
-  'being',
-  'but',
-  'does',
-  'doing',
-  'done',
-  'for',
-  'from',
-  'have',
-  'here',
-  'how',
-  'into',
-  'its',
-  'just',
-  'more',
-  'most',
-  'one',
-  'only',
-  'other',
-  'our',
-  'over',
-  'should',
-  'some',
-  'such',
-  'than',
-  'that',
-  'the',
-  'their',
-  'them',
-  'then',
-  'there',
-  'these',
-  'they',
-  'this',
-  'those',
-  'very',
-  'was',
-  'were',
-  'what',
-  'when',
-  'where',
-  'which',
-  'while',
-  'who',
-  'why',
-  'will',
-  'with',
-  'would',
-  'you',
-  'your'
-])
 
 /** Identifier-style tokens for FTS, including camelCase / snake_case splits. */
 export function ftsQueryTokens(raw: string): string[] {
@@ -534,7 +343,7 @@ export function ftsQueryTokens(raw: string): string[] {
     const s = part.trim().toLowerCase().replace(/"/g, '')
     if (s.length >= 3) tokens.add(s)
   }
-  for (const part of raw.split(/[^a-zA-Z0-9_]+/)) {
+  for (const part of raw.split(/[^a-zA-Z0-9_$]+/)) {
     if (!part) continue
     push(part)
     for (const bit of part.split(CAMEL_SPLIT)) push(bit)
@@ -542,23 +351,46 @@ export function ftsQueryTokens(raw: string): string[] {
   return [...tokens]
 }
 
-function tokensToMatchQuery(tokens: string[]): string {
-  const kept = tokens.filter((t) => !FTS_QUERY_STOPWORDS.has(t))
-  if (!kept.length) return ''
-  // FTS5 default operator is AND; quoted terms keep porter tokens intact.
-  return kept.map((t) => `"${t}"`).join(' ')
-}
-
-/** Build a safe FTS5 MATCH query from free text. */
-export function sanitizeFtsQuery(raw: string): string {
-  return tokensToMatchQuery(ftsQueryTokens(raw))
-}
-
-/** FTS document: path + names + camelCase splits + chunk body. */
-export function buildChunkFtsText(
+/** FTS body document: identifier splits folded in so camelCase bits rank too. */
+export function buildChunkFtsBody(
   path: string,
   chunk: { name: string; parentName?: string | null; text: string }
 ): string {
   const ident = `${path}\n${chunk.name}\n${chunk.parentName ?? ''}`
   return `${ident}\n${ftsQueryTokens(ident).join(' ')}\n${chunk.text}`
+}
+
+/**
+ * Longest literal run usable for trigram candidate pruning of a regex or
+ * substring query. Returns null when the pattern cannot safely prune
+ * (alternation, lookaround, or no run of 3+ literal chars) — callers fall
+ * back to a live scan.
+ */
+export function literalRunForPattern(pattern: string): string | null {
+  const trimmed = pattern.trim()
+  if (!trimmed) return null
+  if (
+    trimmed === '.' ||
+    trimmed === '.*' ||
+    trimmed === '.+' ||
+    trimmed === '^' ||
+    trimmed === '$' ||
+    trimmed === '^$' ||
+    /^\.\*$/.test(trimmed) ||
+    /^\.\+$/.test(trimmed)
+  ) {
+    return null
+  }
+  // Alternation or lookaround — a required literal would over-prune.
+  if (/(^|[^\\])\|/.test(trimmed) || /\(\?/.test(trimmed)) return null
+  const withoutClasses = trimmed.replace(/\[[^\]]*]/g, ' ')
+  const unescaped = withoutClasses.replace(/\\(.)/g, '$1')
+  const forRuns = unescaped.replace(/[.*+?^${}()|[\]\\]/g, ' ')
+  const runs = forRuns.match(/[A-Za-z0-9_$.-]{3,}/g)
+  if (!runs || runs.length === 0) return null
+  let best = runs[0]!
+  for (const r of runs) {
+    if (r.length > best.length) best = r
+  }
+  return best
 }

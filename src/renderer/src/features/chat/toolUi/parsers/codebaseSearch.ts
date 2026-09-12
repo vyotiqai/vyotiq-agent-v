@@ -13,8 +13,6 @@ export type CodebaseSearchHit = {
 
 export type CodebaseSearchParsed = {
   query: string
-  modelId: string | null
-  fallbackHash: boolean
   hits: CodebaseSearchHit[]
 }
 
@@ -30,15 +28,8 @@ export function parseCodebaseSearchData(tool: UiToolRow): CodebaseSearchParsed {
     typeof args?.query === 'string' ? args.query : tool.summary?.trim() || ''
   const content = tool.content ?? ''
 
-  let modelId: string | null = null
-  let fallbackHash = false
-  const header = content.split('\n')[0] ?? ''
-  const modelMatch = header.match(/model=([^\s·]+)/)
-  if (modelMatch) modelId = modelMatch[1]!
-  if (header.includes('fallback=hash')) fallbackHash = true
-
   if (content.includes('No codebase_search hits')) {
-    return { query, modelId, fallbackHash, hits: [] }
+    return { query, hits: [] }
   }
 
   const hits: CodebaseSearchHit[] = []
@@ -64,5 +55,5 @@ export function parseCodebaseSearchData(tool: UiToolRow): CodebaseSearchParsed {
     })
   }
 
-  return { query, modelId, fallbackHash, hits }
+  return { query, hits }
 }

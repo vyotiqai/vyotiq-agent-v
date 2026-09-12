@@ -760,7 +760,7 @@ describe('status message parser', () => {
       tool({
         name: 'switch_mode',
         argsPreview: JSON.stringify({ mode: 'plan' }),
-        content: 'Mode switched from agent to plan. Tool availability updated for subsequent steps.'
+        content: 'Mode switched from agent to plan. Tool gating applies immediately; the visible tool catalog refreshes for subsequent steps.'
       })
     )
     expect(data.chip).toBe('plan')
@@ -1030,14 +1030,14 @@ describe('mcp pin/release parser', () => {
 })
 
 describe('codebase_search parser', () => {
-  it('parses header model/fallback and hit paths (not SearchBody format)', () => {
+  it('parses hit paths from the honest index header (not SearchBody format)', () => {
     const data = parseCodebaseSearchData(
       tool({
         name: 'codebase_search',
         summary: 'where is auth validated',
         argsPreview: JSON.stringify({ query: 'where is auth validated' }),
         content: [
-          'index: 2 chunks / 1 files · model=local-hash-v1 · fallback=hash · hits=1',
+          'index: 2 chunks / 1 files · hits=1',
           '',
           '1. src/auth.ts:1-8 [function validateAuthToken] score=0.5000',
           'export function validateAuthToken(t: string) {',
@@ -1047,8 +1047,6 @@ describe('codebase_search parser', () => {
       })
     )
     expect(data.query).toBe('where is auth validated')
-    expect(data.modelId).toBe('local-hash-v1')
-    expect(data.fallbackHash).toBe(true)
     expect(data.hits).toHaveLength(1)
     expect(data.hits[0]?.path).toBe('src/auth.ts')
     expect(data.hits[0]?.name).toBe('validateAuthToken')
@@ -1059,28 +1057,24 @@ describe('codebase_search parser', () => {
     const data = parseCodebaseSearchData(
       tool({
         name: 'codebase_search',
-        content: 'index: 0 chunks / 0 files · model=local-hash-v1 · fallback=hash · hits=0\n\nNo codebase_search hits.'
+        content: 'index: 0 chunks / 0 files · hits=0\n\nNo codebase_search hits.'
       })
     )
     expect(data.hits).toHaveLength(0)
-    expect(data.fallbackHash).toBe(true)
   })
 
-  it('still parses fallback=hash when the neural-unavailable sentence is present', () => {
+  it('ignores stale model/fallback annotations from older transcripts', () => {
     const data = parseCodebaseSearchData(
       tool({
         name: 'codebase_search',
         content: [
           'index: 2 chunks / 1 files · model=local-hash-v1 · fallback=hash · hits=1',
-          'Neural embeddings are unavailable; hits are lexical/hash only (not dense semantic search).',
           '',
           '1. src/auth.ts:1-8 [function validateAuthToken] score=0.5000',
           'export function validateAuthToken(t: string) { return t.length > 0 }'
         ].join('\n')
       })
     )
-    expect(data.fallbackHash).toBe(true)
-    expect(data.modelId).toBe('local-hash-v1')
     expect(data.hits).toHaveLength(1)
     expect(data.hits[0]?.path).toBe('src/auth.ts')
   })

@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro'
+import LandingIcon from '../components/LandingIcon.astro'
 import SiteFooter from '../components/SiteFooter.astro'
 import SiteHeader from '../components/SiteHeader.astro'
 import { githubReleases } from '../lib/githubReleases'
@@ -25,15 +26,16 @@ const releases = githubReleases.map((release) => {
   description="Release notes for every Agent V desktop release: what changed, fixed, and shipped."
 >
   <SiteHeader />
-  <main id="main-content" class="wrap py-14 md:py-20" tabindex="-1">
+  <main id="main-content" class="wrap changelog-main" tabindex="-1">
     <div class="changelog-page">
       <header class="page-header-block">
-        <p class="eyebrow"><strong>↳</strong> Releases</p>
+        <p class="eyebrow">Releases</p>
         <h1>Changelog</h1>
-        <p>
+        <p class="lede">
           Every desktop release and what it changes. Installers live on
-          <a href={RELEASES_PAGE} rel="noopener noreferrer">GitHub Releases</a>; the app checks
-          for updates on its own and shows these notes when a new version is available.
+          <a href={RELEASES_PAGE} rel="noopener noreferrer">GitHub Releases</a>. The app checks
+          for updates on its own and shows these notes when a new version is available; it never
+          downloads one without you.
         </p>
       </header>
 
@@ -50,21 +52,25 @@ const releases = githubReleases.map((release) => {
           <div class="changelog-list">
             {releases.map((release) => (
               <article class="changelog-entry">
-                <header class="changelog-entry-title">
+                <div class="changelog-meta">
                   <h2>
                     <a href={release.htmlUrl} rel="noopener noreferrer">v{release.version}</a>
                   </h2>
-                  {release.dateLabel && (
-                    <time datetime={release.publishedAt}>{release.dateLabel}</time>
-                  )}
-                  <a class="changelog-entry-link" href={release.htmlUrl} rel="noopener noreferrer">
-                    Full notes →
+                  <p class="changelog-date">
+                    {release.dateLabel ? (
+                      <time datetime={release.publishedAt}>{release.dateLabel}</time>
+                    ) : (
+                      <span>Unpublished</span>
+                    )}
+                  </p>
+                  <a class="text-link changelog-notes" href={release.htmlUrl} rel="noopener noreferrer">
+                    Full notes <LandingIcon name="arrow-up-right" size={12} />
                   </a>
-                </header>
+                </div>
                 <div class="changelog-body">
                   {release.sections.map((section) => (
                     <section class="changelog-section">
-                      {section.heading && <h3>{section.heading}</h3>}
+                      {section.heading && <h3 class="mono">{section.heading}</h3>}
                       <ul>
                         {section.items.map((item) => (
                           <li>{item}</li>
@@ -82,3 +88,97 @@ const releases = githubReleases.map((release) => {
   </main>
   <SiteFooter />
 </BaseLayout>
+
+<style>
+  .changelog-main {
+    padding-block: 5rem;
+  }
+
+  .changelog-page {
+    max-width: 52rem;
+  }
+
+  .changelog-page > header {
+    margin-bottom: 4rem;
+  }
+
+  .changelog-list {
+    display: grid;
+    gap: 1.5rem;
+  }
+
+  .changelog-entry {
+    display: grid;
+    grid-template-columns: 11rem 1fr;
+    gap: 2.5rem;
+    padding: 2rem;
+    background: var(--surface);
+    border: 1px solid var(--border-faint);
+    border-radius: 16px;
+    box-shadow: 0 1px 2px rgb(2 8 23 / 0.3), 0 8px 24px rgb(2 8 23 / 0.25);
+  }
+
+  .changelog-meta {
+    align-self: start;
+  }
+
+  .changelog-meta h2 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.5rem;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+
+  .changelog-meta h2 a {
+    color: var(--fg);
+    text-decoration: none;
+  }
+
+  .changelog-meta h2 a:hover {
+    color: var(--accent);
+  }
+
+  .changelog-date {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    margin: 0.375rem 0 0.75rem;
+  }
+
+  .changelog-notes {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .changelog-body {
+    display: grid;
+    gap: 1.5rem;
+  }
+
+  .changelog-section h3 {
+    color: var(--muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    margin: 0 0 0.5rem;
+    text-transform: uppercase;
+  }
+
+  .changelog-section ul {
+    margin: 0;
+    padding-left: 1rem;
+  }
+
+  .changelog-section li {
+    margin-block: 0.25rem;
+  }
+
+  @media (max-width: 40rem) {
+    .changelog-entry {
+      grid-template-columns: 1fr;
+      gap: 1.25rem;
+    }
+  }
+</style>

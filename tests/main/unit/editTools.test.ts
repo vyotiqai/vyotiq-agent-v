@@ -15,11 +15,11 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 
 vi.mock('@main/app/window', () => ({ getMainWindow: () => null }))
-vi.mock('@main/agent/sparsegrep', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@main/agent/sparsegrep')>()
+vi.mock('@main/agent/codeindex', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/agent/codeindex')>()
   return {
     ...actual,
-    querySparseCandidates: async () => null,
+    queryIndexCandidates: async () => null,
     resolveCandidateFullPaths: () => []
   }
 })

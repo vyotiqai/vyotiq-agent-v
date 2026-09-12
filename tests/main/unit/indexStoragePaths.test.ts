@@ -4,15 +4,13 @@ import { join, resolve } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   codeindexRoot,
-  sparsegrepRoot,
   setWorkspaceIndexStorageRootOverrideForTests,
   legacyCodeindexRoot,
   legacySparsegrepRoot,
   removeWorkspaceIndexStorage,
   workspaceIndexStorageDir
 } from '@main/agent/indexStoragePaths'
-import { CodeIndexStore, closeCodeIndex, syncCodeIndex, createLocalHashEmbedder } from '@main/agent/codeindex'
-import { SparseGrepStore, closeSparseGrep, syncSparseGrep } from '@main/agent/sparsegrep'
+import { CodeIndexStore, closeCodeIndexStore, syncCodeIndex } from '@main/agent/codeindex'
 import { removeLegacyWorkspaceIndexDirs } from '@main/agent/workspaceIndex'
 
 describe('index storage outside project tree', () => {
@@ -21,42 +19,31 @@ describe('index storage outside project tree', () => {
 
   afterEach(() => {
     if (workspace) {
-      closeCodeIndex(workspace)
-      closeSparseGrep(workspace)
+      closeCodeIndexStore(workspace)
     }
     setWorkspaceIndexStorageRootOverrideForTests(null)
     if (workspace && existsSync(workspace)) rmSync(workspace, { recursive: true, force: true })
     if (storageRoot && existsSync(storageRoot)) rmSync(storageRoot, { recursive: true, force: true })
   })
 
-  it('writes codeindex + sparsegrep under userData override, not .vyotiq', async () => {
+  it('writes the code index under the userData override, not .vyotiq', async () => {
     workspace = mkdtempSync(join(tmpdir(), 'vyotiq-ws-idx-'))
     storageRoot = mkdtempSync(join(tmpdir(), 'vyotiq-ud-idx-'))
     setWorkspaceIndexStorageRootOverrideForTests(storageRoot)
     mkdirSync(join(workspace, 'src'), { recursive: true })
     writeFileSync(join(workspace, 'src', 'a.ts'), 'export const a = 1\n', 'utf8')
 
-    const embedder = createLocalHashEmbedder()
-    const codeStore = CodeIndexStore.open(workspace, embedder.dimensions)
+    const codeStore = CodeIndexStore.open(workspace)
     try {
-      await syncCodeIndex(workspace, codeStore, embedder)
+      await syncCodeIndex(workspace, codeStore)
       expect(resolve(codeStore.dbPath).startsWith(resolve(storageRoot))).toBe(true)
       expect(resolve(codeStore.dbPath)).toContain(`${join('codeindex')}`)
       expect(resolve(codeindexRoot(workspace)).startsWith(resolve(storageRoot))).toBe(true)
       expect(resolve(codeindexRoot(workspace)).startsWith(resolve(workspace))).toBe(false)
       expect(existsSync(legacyCodeindexRoot(workspace))).toBe(false)
-    } finally {
-      codeStore.close()
-    }
-
-    const sparse = SparseGrepStore.open(workspace)
-    try {
-      await syncSparseGrep(workspace, sparse)
-      expect(sparse.dbPath.startsWith(resolve(storageRoot))).toBe(true)
-      expect(resolve(sparsegrepRoot(workspace)).startsWith(resolve(workspace))).toBe(false)
       expect(existsSync(legacySparsegrepRoot(workspace))).toBe(false)
     } finally {
-      sparse.close()
+      codeStore.close()
     }
   })
 
@@ -77,17 +64,27 @@ describe('index storage outside project tree', () => {
     expect(existsSync(join(workspace, '.vyotiq', 'memory', 'index.md'))).toBe(true)
   })
 
+  it('removeLegacyWorkspaceIndexDirs removes the obsolete userData sparsegrep dir', () => {
+    workspace = mkdtempSync(join(tmpdir(), 'vyotiq-legacy-idx-'))
+    storageRoot = mkdtempSync(join(tmpdir(), 'vyotiq-ud-legacy-'))
+    setWorkspaceIndexStorageRootOverrideForTests(storageRoot)
+    const obsoleteSparse = join(workspaceIndexStorageDir(workspace), 'sparsegrep')
+    mkdirSync(obsoleteSparse, { recursive: true })
+    writeFileSync(join(obsoleteSparse, 'index.sqlite'), 'stale', 'utf8')
+
+    removeLegacyWorkspaceIndexDirs(workspace)
+
+    expect(existsSync(obsoleteSparse)).toBe(false)
+  })
+
   it('removeWorkspaceIndexStorage deletes the derived indexes and nothing else', async () => {
     workspace = mkdtempSync(join(tmpdir(), 'vyotiq-wt-idx-'))
     storageRoot = mkdtempSync(join(tmpdir(), 'vyotiq-ud-wt-'))
     setWorkspaceIndexStorageRootOverrideForTests(storageRoot)
 
-    const codeStore = CodeIndexStore.open(workspace, 8)
+    const codeStore = CodeIndexStore.open(workspace)
     codeStore.close()
-    const sparse = SparseGrepStore.open(workspace)
-    sparse.close()
     expect(existsSync(codeindexRoot(workspace))).toBe(true)
-    expect(existsSync(sparsegrepRoot(workspace))).toBe(true)
 
     // Sibling user-ish content under the same id dir must never be touched.
     const sessions = join(workspaceIndexStorageDir(workspace), 'sessions')
@@ -97,7 +94,6 @@ describe('index storage outside project tree', () => {
     await removeWorkspaceIndexStorage(workspace)
 
     expect(existsSync(codeindexRoot(workspace))).toBe(false)
-    expect(existsSync(sparsegrepRoot(workspace))).toBe(false)
     expect(existsSync(join(sessions, 'keep.txt'))).toBe(true)
   })
 

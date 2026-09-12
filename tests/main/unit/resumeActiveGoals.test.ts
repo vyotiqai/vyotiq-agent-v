@@ -90,6 +90,19 @@ describe('resumeActiveGoalsAndLoops', () => {
     expect(launched.message.synthetic).toBe(true)
   })
 
+  it('resumes a goal in its persisted interaction mode', () => {
+    const planId = 'goal-plan-mode'
+    createRun(workspace, planId, 'chat', 'plan')
+    createGoal(resolveRunDir(workspace, planId), 'plan objective')
+
+    resumeActiveGoalsAndLoops({ isDestroyed: () => false } as WebContents)
+
+    expect(launchMock).toHaveBeenCalledTimes(1)
+    const launched = launchMock.mock.calls[0]?.[0] as { runId: string; mode: string }
+    expect(launched.runId).toBe(planId)
+    expect(launched.mode).toBe('plan')
+  })
+
   it('skips the app-start relaunch when the run stopped on provider quota', () => {
     // Run 6265fa90 (2026-09-01): quota-exhausted terminal stops were relaunched
     // at every app restart and re-stopped instantly on the same billing-gate

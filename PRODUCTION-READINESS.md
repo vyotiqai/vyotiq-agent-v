@@ -2,6 +2,13 @@
 
 Run report for the 2026-09-08 release window (v1.1.0 / v1.1.1). Every file path, constant, and behavior cited below was verified by reading the current tree on the instance branch.
 
+> Update 2026-09-12 (v1.2.x): the v1.1.x-era codebase-index embedding stack
+> (`node-llama-cpp`, `tree-sitter-wasms`, sparsegrep, local ONNX embedders,
+> model downloads, `extraResources/codeindex/wasm`) has been removed. The code
+> index is now a plain, fully local SQLite full-text/trigram index on the main
+> process (see `CHANGELOG.md` and `src/main/agent/codeindex/`). The v1.1.x
+> measurements below are retained as a historical run report.
+
 > This file lives at the repo root because `docs/*.md` is gitignored in this repo — only `docs/**/*.docx` are tracked. `electron-builder.yml` excludes `docs/**` from the package for the same reason.
 
 ---

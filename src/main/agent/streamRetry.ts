@@ -13,15 +13,12 @@ import {
   RetriableStreamError
 } from './providers/fetchWithRetry'
 
-export const MAX_STREAM_ATTEMPTS = 5
 /**
- * Run-level retries for connect-class network failures (PROVIDER_NETWORK).
- * fetchWithRetry already burns its 5-attempt connect budget inside one stream
- * call; one extra stream attempt (with a fresh fetch budget plus a network
- * wait) lets a longer outage or a flaky tunnel recover instead of ending the
- * run. Beyond that the failure surfaces as a resumable network-interrupted stop.
+ * Run-stopping caps removed (user decision): transient stream failures retry
+ * forever with capped exponential backoff until the stream recovers or the
+ * user stops the run. Only hard errors end the run (auth/billing, invalid
+ * request, dead local endpoint, persistence failure).
  */
-export const PROVIDER_NETWORK_MAX_ATTEMPTS = 2
 export const STREAM_RETRY_BASE_MS = 1000
 export const STREAM_RETRY_MAX_MS = 8000
 /** Slower curve for provider-side wait failures (429/5xx) — they need real cool-down. */
@@ -110,8 +107,9 @@ export function isRetriableStreamFailure(err: unknown): boolean {
   return isRetriableNetworkError(err) || err instanceof RetriableStreamError
 }
 
-export function shouldRetryProviderStreamError(message: string, attempt: number): boolean {
-  return attempt < MAX_STREAM_ATTEMPTS && isRetriableProviderMessage(message)
+export function shouldRetryProviderStreamError(message: string, _attempt: number): boolean {
+  // No attempt ceiling (cap removed): retriable provider messages retry forever.
+  return isRetriableProviderMessage(message)
 }
 
 /**
@@ -143,19 +141,19 @@ export function shouldRetryStreamErrorChunk(
   if (errorCode === 'CIRCUIT_OPEN') return false
   if (errorCode === 'PROVIDER_NETWORK') {
     // The fetch layer already retried connect failures to exhaustion inside
-    // this attempt (5 × ~30s connect budget). One deliberate stream-level
-    // retry — fresh fetch budget plus the network-wait backoff — recovers a
-    // longer outage without ending the run mid-task.
-    return attempt < PROVIDER_NETWORK_MAX_ATTEMPTS
+    // this attempt (5 × ~30s connect budget). Stream-level retries continue
+    // indefinitely (fresh fetch budget plus the network-wait backoff) until
+    // the network returns or the user stops the run (cap removed).
+    return true
   }
   if (errorCode === 'PROVIDER_HTTP') {
-    if (httpStatus != null) return attempt < MAX_STREAM_ATTEMPTS && isRetriableHttpStatus(httpStatus)
+    if (httpStatus != null) return isRetriableHttpStatus(httpStatus)
     // Status-less in-band stream errors (OpenRouter error frames, Anthropic
     // `event: error`, Gemini in-band errors) are upstream failures mid-stream.
     // They never matched the connect-error message regex, so a transient
     // overload after several streamed seconds ended the run. Retry them like
     // an equivalent connect-time 5xx unless the message is clearly permanent.
-    return attempt < MAX_STREAM_ATTEMPTS && !isPermanentInBandStreamMessage(message)
+    return !isPermanentInBandStreamMessage(message)
   }
   return shouldRetryProviderStreamError(message, attempt)
 }
@@ -165,11 +163,12 @@ export function isTransientHttpFailure(errorCode: string, httpStatus?: number): 
   return errorCode === 'PROVIDER_HTTP' && (httpStatus == null || isRetriableHttpStatus(httpStatus))
 }
 
-export function shouldRetryThrownStreamError(err: unknown, attempt: number): boolean {
+export function shouldRetryThrownStreamError(err: unknown, _attempt?: number): boolean {
   // Dead local endpoint: no-retry class (audit M2) — fail fast like the
   // chunk classification above.
   if (isLocalEndpointDownError(err)) return false
-  return !isAbortError(err) && attempt < MAX_STREAM_ATTEMPTS && isRetriableStreamFailure(err)
+  // No attempt ceiling (cap removed): retriable throws retry forever.
+  return !isAbortError(err) && isRetriableStreamFailure(err)
 }
 
 /** Full jitter over exponential backoff for attempt N (1-based). */
@@ -244,19 +243,17 @@ export type StreamAttemptDecision =
 
 /**
  * Shared attempt classification for Promise + generator stream retry drivers.
- * When `exhaustedOnLastRetriableThrow` is true (agent loop), a retriable throw on
- * the final attempt becomes `exhausted` instead of rethrowing.
+ * No attempt ceiling (cap removed): retriable outcomes and throws always
+ * retry; only `complete`, `terminal` (hard error), abort, or a non-retriable
+ * throw ends the driver.
  */
 export function decideStreamAttemptResult(
-  result: { ok: true; outcome: StreamAttemptOutcome } | { ok: false; err: unknown },
-  attempt: number,
-  opts?: { exhaustedOnLastRetriableThrow?: boolean }
+  result: { ok: true; outcome: StreamAttemptOutcome } | { ok: false; err: unknown }
 ): StreamAttemptDecision {
   if (result.ok) {
     if (result.outcome === 'complete') return { action: 'complete' }
     if (result.outcome === 'terminal') return { action: 'terminal' }
-    if (attempt < MAX_STREAM_ATTEMPTS) return { action: 'retry' }
-    return { action: 'exhausted' }
+    return { action: 'retry' }
   }
 
   const err = result.err
@@ -268,10 +265,7 @@ export function decideStreamAttemptResult(
     if (err instanceof Error) err.message = describeLocalEndpointDown(err.message)
     return { action: 'throw', err }
   }
-  if (shouldRetryThrownStreamError(err, attempt)) return { action: 'retry' }
-  if (opts?.exhaustedOnLastRetriableThrow && isRetriableStreamFailure(err)) {
-    return { action: 'exhausted', err }
-  }
+  if (shouldRetryThrownStreamError(err)) return { action: 'retry' }
   return { action: 'throw', err }
 }
 
@@ -293,14 +287,14 @@ export async function runWithStreamRetry(options: {
   runAttempt: (attempt: number) => Promise<StreamAttemptOutcome>
 }): Promise<void> {
   if (options.circuitKey) assertCircuitClosed(options.circuitKey)
-  for (let attempt = 1; attempt <= MAX_STREAM_ATTEMPTS; attempt++) {
+  for (let attempt = 1; ; attempt++) {
     options.onAttemptStart(attempt)
     let decision: StreamAttemptDecision
     try {
       const outcome = await options.runAttempt(attempt)
-      decision = decideStreamAttemptResult({ ok: true, outcome }, attempt)
+      decision = decideStreamAttemptResult({ ok: true, outcome })
     } catch (err) {
-      decision = decideStreamAttemptResult({ ok: false, err }, attempt)
+      decision = decideStreamAttemptResult({ ok: false, err })
       if (decision.action === 'retry') {
         options.onRetriableFailure?.(err, attempt)
       }
@@ -328,20 +322,16 @@ export async function runWithStreamRetry(options: {
       if (isCircuitOpenError(decision.err)) throw decision.err
       throw new RetriableStreamError('Stream retries exhausted')
     }
-    // retry
-    if (attempt < MAX_STREAM_ATTEMPTS) {
-      try {
-        await sleepStreamRetryBackoff(options.signal, attempt)
-      } catch (err) {
-        if (options.circuitKey && isAbortError(err)) {
-          releaseCircuitProbe(options.circuitKey)
-        }
-        throw err
+    // retry — no attempt ceiling (cap removed): sleep on the capped backoff
+    // curve and retry until the stream recovers or the run is cancelled.
+    try {
+      await sleepStreamRetryBackoff(options.signal, attempt)
+    } catch (err) {
+      if (options.circuitKey && isAbortError(err)) {
+        releaseCircuitProbe(options.circuitKey)
       }
-      continue
+      throw err
     }
-    if (options.circuitKey) recordCircuitFailure(options.circuitKey)
-    throw new RetriableStreamError('Stream retries exhausted')
   }
 }
 
@@ -365,20 +355,16 @@ export async function* runWithStreamRetryGen<TEvent>(options: {
       throw err
     }
   }
-  for (let attempt = 1; attempt <= MAX_STREAM_ATTEMPTS; attempt++) {
+  for (let attempt = 1; ; attempt++) {
     const started = options.onAttemptStart(attempt)
     if (started) yield* started
 
     let decision: StreamAttemptDecision
     try {
       const outcome = yield* options.runAttempt(attempt)
-      decision = decideStreamAttemptResult({ ok: true, outcome }, attempt, {
-        exhaustedOnLastRetriableThrow: true
-      })
+      decision = decideStreamAttemptResult({ ok: true, outcome })
     } catch (err) {
-      decision = decideStreamAttemptResult({ ok: false, err }, attempt, {
-        exhaustedOnLastRetriableThrow: true
-      })
+      decision = decideStreamAttemptResult({ ok: false, err })
       if (decision.action === 'retry') {
         options.onRetriableFailure?.(err, attempt)
       }
@@ -415,7 +401,4 @@ export async function* runWithStreamRetryGen<TEvent>(options: {
       throw err
     }
   }
-
-  if (options.circuitKey) recordCircuitFailure(options.circuitKey)
-  return { status: 'exhausted' }
 }
