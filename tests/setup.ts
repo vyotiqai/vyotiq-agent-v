@@ -1,4 +1,4 @@
-import { afterEach, vi } from 'vitest'
+import { afterAll, afterEach, vi } from 'vitest'
 import { resetActiveRunsForTests } from '@main/agent/runRegistry'
 import { resetCircuitBreakersForTests } from '@main/agent/circuitBreaker'
 
