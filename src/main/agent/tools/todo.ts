@@ -15,6 +15,18 @@ export const TodoItemSchema = z.object({
 })
 export type TodoItem = z.infer<typeof TodoItemSchema>
 
+/**
+ * One entry as accepted by the todo_write tool. `content` is required by the
+ * Zod schema on the replace path; with merge:true it may be omitted entirely
+ * to patch only the status of an existing id — the handler backfills it from
+ * the stored todo. Content that is present but blank stays a no-op.
+ */
+export type TodoWriteEntry = {
+  id: string
+  content?: string
+  status: TodoStatus
+}
+
 const TodoFileSchema = z.object({
   updatedAt: z.string(),
   todos: z.array(TodoItemSchema)
@@ -202,12 +214,29 @@ export function finalizeTodosOnRunEnd(
  */
 export function toolTodoWrite(
   runDir: string,
-  todos: TodoItem[],
+  todos: TodoWriteEntry[],
   merge = false
 ): { content: string; todos: TodoItem[]; notice?: string } {
   if (!runDir) throw new Error('todo_write is only available inside a run')
 
-  const incoming = normalizeTodoItems(todos)
+  // merge:true is a partial patch: an entry may omit content entirely to
+  // update only the status of a stored todo by id — backfill it from the
+  // stored list before normalization. Content that is present but blank stays
+  // a no-op (normalizeTodoItems drops it; existing policy: never overwrite
+  // stored text from a blank merge). An omitted-content entry with no stored
+  // match also has nothing to patch and is dropped. The replace path still
+  // requires full items, enforced by the Zod schema.
+  const storedById = merge
+    ? new Map(readTodos(runDir).map((todo) => [todo.id, todo]))
+    : new Map<string, TodoItem>()
+  const incoming = normalizeTodoItems(
+    todos.map((todo) => ({
+      id: todo.id,
+      content:
+        todo.content ?? storedById.get(canonicalTodoId(todo.id))?.content ?? '',
+      status: todo.status
+    }))
+  )
   let next: TodoItem[]
   if (merge) {
     const byId = new Map(readTodos(runDir).map((todo) => [todo.id, todo]))

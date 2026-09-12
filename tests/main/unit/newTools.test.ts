@@ -277,6 +277,43 @@ describe('toolTodoWrite', () => {
     expect(todos.find((todo) => todo.id === '2')?.status).toBe('completed')
   })
 
+  it('backfills omitted content from the stored todo on status-only merges', () => {
+    toolTodoWrite(root, [
+      { id: '1', content: 'First', status: 'pending' },
+      { id: '2', content: 'Second', status: 'pending' }
+    ])
+    const { content, todos } = toolTodoWrite(root, [{ id: '1', status: 'completed' }], true)
+
+    expect(todos.find((todo) => todo.id === '1')).toEqual({
+      id: '1',
+      content: 'First',
+      status: 'completed'
+    })
+    expect(todos.find((todo) => todo.id === '2')?.content).toBe('Second')
+    expect(content).toContain('1/2 complete')
+    expect(content).toContain('[x] (1) First')
+  })
+
+  it('drops an omitted-content merge entry with no stored match', () => {
+    toolTodoWrite(root, [{ id: '1', content: 'First', status: 'pending' }])
+    const { todos } = toolTodoWrite(root, [{ id: 'missing', status: 'completed' }], true)
+
+    expect(todos).toEqual([{ id: '1', content: 'First', status: 'pending' }])
+  })
+
+  it('upserts a new id with content on merge', () => {
+    toolTodoWrite(root, [{ id: '1', content: 'First', status: 'pending' }])
+    toolTodoWrite(root, [{ id: '2', content: 'Second', status: 'in_progress' }], true)
+
+    const todos = readTodos(root)
+    expect(todos).toHaveLength(2)
+    expect(todos.find((todo) => todo.id === '2')).toEqual({
+      id: '2',
+      content: 'Second',
+      status: 'in_progress'
+    })
+  })
+
   it('auto-demotes earlier in-progress tasks, keeping the last', () => {
     const { content, todos, notice } = toolTodoWrite(root, [
       { id: '1', content: 'First', status: 'in_progress' },

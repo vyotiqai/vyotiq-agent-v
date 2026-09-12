@@ -420,6 +420,30 @@ describe('harness tool catalog', () => {
     expect(validateToolArgs('grep', JSON.stringify({ pattern: '   ' })).ok).toBe(false)
   })
 
+  it('requires full items on todo_write replace but allows status-only entries under merge', () => {
+    const replace = validateToolArgs(
+      'todo_write',
+      JSON.stringify({ todos: [{ id: '1', status: 'completed' }] })
+    )
+    expect(replace.ok).toBe(false)
+    if (!replace.ok) {
+      expect(replace.error).toContain('todos.0.content: Required')
+    }
+
+    const merge = validateToolArgs(
+      'todo_write',
+      JSON.stringify({ todos: [{ id: '1', status: 'completed' }], merge: true })
+    )
+    expect(merge.ok).toBe(true)
+
+    // A provided-but-blank content is still rejected on the replace path.
+    const blank = validateToolArgs(
+      'todo_write',
+      JSON.stringify({ todos: [{ id: '1', content: '   ', status: 'completed' }] })
+    )
+    expect(blank.ok).toBe(false)
+  })
+
   it('rejects duplicate top-level path keys before JSON last-wins', () => {
     const result = validateToolArgs(
       'read',

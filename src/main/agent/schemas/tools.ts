@@ -298,21 +298,32 @@ const todoWriteArgs = z
               .describe('Stable id'),
             content: z
               .string()
-              .trim()
-              .min(1)
-              .describe('Task text (whitespace collapsed)'),
+              .optional()
+              .describe(
+                'Task text (whitespace collapsed); omit on an existing id with merge=true to update status only'
+              ),
             status: z
               .enum(['pending', 'in_progress', 'completed', 'cancelled'])
               .describe('pending, in_progress, completed, or cancelled')
           })
       )
-      .describe('The full task list, or the subset to update when merge=true'),
+      .describe(
+        'The full task list, or the subset to update when merge=true (status-only entries allowed with merge=true)'
+      ),
     merge: z
       .boolean()
       .describe(
-        'Merge these entries into the existing list by id instead of replacing it. Replace (default) clears omitted ids.'
+        'Merge these entries into the existing list by id instead of replacing it. Replace (default) clears omitted ids and requires full items.'
       )
       .optional()
+  })
+  .superRefine((args, ctx) => {
+    if (args.merge === true) return
+    args.todos.forEach((todo, i) => {
+      if (todo.content == null || !todo.content.trim()) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Required', path: ['todos', i, 'content'] })
+      }
+    })
   })
   .refine((args) => args.merge === true || args.todos.length > 0, {
     message: 'todos must be non-empty unless merge=true',
@@ -1014,7 +1025,7 @@ export const TOOL_REGISTRY = {
   },
   todo_write: {
     description:
-      "This run's task list. Pass todos: [{ id, content, status }]. Default replace clears omitted ids; merge:true upserts by id. Extra in_progress items are demoted to pending (one kept). completed counts toward N/M; cancelled stays in the denominator.",
+      "This run's task list. Pass todos: [{ id, content, status }]. Default replace clears omitted ids and requires full items; merge:true upserts by id — omit content on an existing id to update status only (content backfilled from the stored todo). Extra in_progress items are demoted to pending (one kept). completed counts toward N/M; cancelled stays in the denominator.",
     schema: todoWriteArgs
   },
   create_plan: {
