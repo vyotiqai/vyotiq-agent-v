@@ -38,7 +38,11 @@ describe('MermaidDiagram in MarkdownContent', () => {
     expect(container.querySelector('[data-testid="rendered-svg"]')).toBeTruthy()
     expect(container.querySelector('pre.language-mermaid')).toBeNull()
     expect(mermaidMock.initialize).toHaveBeenCalledWith(
-      expect.objectContaining({ securityLevel: 'strict', startOnLoad: false })
+      expect.objectContaining({
+        securityLevel: 'strict',
+        startOnLoad: false,
+        suppressErrorRendering: true
+      })
     )
     expect(mermaidMock.render).toHaveBeenCalledWith(
       expect.any(String),
@@ -54,6 +58,29 @@ describe('MermaidDiagram in MarkdownContent', () => {
     })
     expect(container.querySelector('[data-mermaid-diagram]')).toBeNull()
     expect(getByText(/graph TD; A\[createPlan\.ts\]/)).toBeTruthy()
+  })
+
+  it('removes mermaid stray temp elements from document.body when rendering fails', async () => {
+    mermaidMock.render.mockImplementationOnce(async (id: string) => {
+      // Simulate mermaid's render(): it appends a temp container to
+      // document.body (div id `d${id}`, iframe id `i${id}` in sandbox mode)
+      // before rejecting on a parse failure.
+      const strayDiv = document.createElement('div')
+      strayDiv.id = `d${id}`
+      document.body.appendChild(strayDiv)
+      const strayIframe = document.createElement('iframe')
+      strayIframe.id = `i${id}`
+      document.body.appendChild(strayIframe)
+      throw new Error('Parse error')
+    })
+    const { container } = render(<MarkdownContent content={DIAGRAM_CONTENT} />)
+    await waitFor(() => {
+      expect(container.querySelector('[data-mermaid-failed]')).toBeTruthy()
+    })
+    const renderedId = mermaidMock.render.mock.calls[0][0] as string
+    expect(document.getElementById(`d${renderedId}`)).toBeNull()
+    expect(document.getElementById(`i${renderedId}`)).toBeNull()
+    expect(container.querySelector('pre code.language-mermaid')).toBeTruthy()
   })
 
   it('keeps a mid-stream (unclosed) mermaid fence as plain code', async () => {

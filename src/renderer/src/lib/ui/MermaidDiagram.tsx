@@ -16,7 +16,14 @@ function loadMermaid(theme: 'dark' | 'neutral'): Promise<MermaidApi> {
   if (!mermaidPromise || loadedTheme !== theme) {
     loadedTheme = theme
     mermaidPromise = import('mermaid').then((mod) => {
-      mod.default.initialize({ startOnLoad: false, securityLevel: 'strict', theme })
+      mod.default.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        // Suppress mermaid's own error-diagram SVG ("Syntax error in text");
+        // on failure mermaid removes its temp `d${id}` element before rejecting.
+        suppressErrorRendering: true,
+        theme
+      })
       return mod.default
     })
   }
@@ -48,6 +55,12 @@ export const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: str
         if (!cancelled) setSvg(result.svg)
       })
       .catch(() => {
+        // Defense in depth: mermaid's render() draws into a temp element it
+        // appends to document.body (div id `d${id}`, iframe id `i${id}` in
+        // sandbox mode). If it ever rejects without removing them (older
+        // paths, draw failures), strip the strays so no error SVG leaks.
+        document.getElementById(`d${id}`)?.remove()
+        document.getElementById(`i${id}`)?.remove()
         if (!cancelled) setFailed(true)
       })
     return () => {
