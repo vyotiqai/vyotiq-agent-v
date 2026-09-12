@@ -1,116 +1,224 @@
 ---
-const rows = [
+// Homepage capability sections. One section per headline in the approved order.
+import LandingIcon from './LandingIcon.astro'
+import { SITE_PRODUCT } from '../lib/site'
+
+const panels = [
   {
-    name: 'Modes',
-    text: 'Ask, Plan, and Agent. Plan mode holds file edits until you approve the plan.'
+    name: 'Files',
+    text: 'Browse the workspace tree, open diffs, and stage exactly the lines you mean.'
   },
   {
-    name: 'Built-in tools',
-    text: 'Sixty of them: a file editor, terminal, browser, Git surfaces, search, and LSP integration.'
+    name: 'Browser',
+    text: 'Watch the running app in a live preview while the agent works beside it.'
   },
   {
-    name: 'Models',
-    text: 'Ten wired providers plus any OpenAI-compatible endpoint. Your API keys live in app settings.'
+    name: 'Terminal',
+    text: 'Run commands in the workspace with output streamed into the transcript.'
   },
   {
-    name: 'Project memory',
-    text: 'Each workspace keeps agent memory in .vyotiq/memory inside the repository.'
+    name: 'Changes',
+    text: 'Every edit is tracked per file and per line, held for your review.'
   },
   {
-    name: 'Code indexing',
-    text: 'A local index in .vyotiq/codeindex powers repository-wide semantic search.'
+    name: 'Pull Request',
+    text: 'Draft the pull request description from the work the agent already did.'
   },
   {
-    name: 'Voice dictation',
-    text: 'Whisper models run locally in a utility process, not a browser tab.'
+    name: 'Plan',
+    text: 'The plan panel shows what the agent intends before a single line moves.'
+  }
+]
+
+const modes = [
+  {
+    name: 'Ask',
+    text: 'Read-only by design: answers come from your repository without touching it.'
   },
   {
-    name: 'MCP',
-    text: 'Attach external tool servers managed through the app\u2019s marketplace and settings.'
+    name: 'Plan',
+    text: 'Holds file edits until you approve the plan. Nothing ships without your review.'
   },
   {
-    name: 'Checkpoints',
-    text: 'Runs checkpoint along the way, so a bad merge or edit can be rolled back.'
-  },
-  {
-    name: 'Updates',
-    text: 'The app checks for new versions but never installs one without your confirmation.'
+    name: 'Agent',
+    text: 'Full workspace writes, each one guarded by an approval you give first.'
   }
 ]
 ---
 
-<section class="features section" aria-labelledby="features-title">
+<section id="capabilities" class="features" aria-labelledby="features-title">
   <div class="wrap">
-    <p class="eyebrow mono"><strong>02</strong> — Features</p>
-    <h2 id="features-title" class="features-title">What is in the box.</h2>
-    <dl class="spec">
+    <h2 id="features-title" class="section-title">Six panels, one task, zero app-switching.</h2>
+    <p class="section-lead">Every workspace opens in one window, so work flows across panels.</p>
+    <div class="card-grid panels-grid">
       {
-        rows.map((row) => (
-          <div class="spec-row">
-            <dt class="spec-name mono">{row.name}</dt>
-            <dd class="spec-text">{row.text}</dd>
-          </div>
+        panels.map((panel) => (
+          <article class="spec-card">
+            <h3 class="spec-name mono">{panel.name}</h3>
+            <p>{panel.text}</p>
+          </article>
         ))
       }
-    </dl>
+    </div>
+  </div>
+</section>
+
+<section class="features alt" aria-labelledby="modes-title">
+  <div class="wrap">
+    <h2 id="modes-title" class="section-title">You decide how much the agent may do.</h2>
+    <div class="card-grid modes-grid">
+      {
+        modes.map((mode) => (
+          <article class="spec-card">
+            <h3 class="spec-name mono">{mode.name}</h3>
+            <p>{mode.text}</p>
+          </article>
+        ))
+      }
+    </div>
+    <p class="section-note">
+      File edits stay subject to approvals: Plan mode holds edits until you approve the plan,
+      and Agent mode asks before each write.
+    </p>
+  </div>
+</section>
+
+<section class="features" aria-labelledby="checkpoints-title">
+  <div class="wrap checkpoints">
+    <h2 id="checkpoints-title" class="section-title">Long work stays resumable.</h2>
+    <p>
+      Checkpoints snapshot the workspace between steps so a long session returns where it left
+      off. They are not Git commits: a checkpoint cannot reverse what your build tools already
+      ran, and checkpoints keep the state needed to return to any step. A token estimate line shows the
+      expected cost before you run a plan.
+    </p>
+  </div>
+</section>
+
+<section class="features alt" aria-labelledby="models-title">
+  <div class="wrap">
+    <h2 id="models-title" class="section-title">Bring your own model.</h2>
+    <div class="card-grid">
+      <article class="spec-card">
+        <h3 class="spec-name mono">Initial selection</h3>
+        <p>Fresh settings start on local Ollama with <code>qwen2.5</code>, wired and ready.</p>
+      </article>
+      <article class="spec-card">
+        <h3 class="spec-name mono">Cloud providers</h3>
+        <p>Nine wired clouds sit beside the local host; pick among nine cloud providers, each enabled by its key.</p>
+      </article>
+      <article class="spec-card">
+        <h3 class="spec-name mono">Any host</h3>
+        <p>Point at a custom OpenAI-compatible host when the built-ins do not fit.</p>
+      </article>
+    </div>
+    <p class="section-note">
+      API keys stay in operating-system secure storage; the agent never reads them as text.
+    </p>
+  </div>
+</section>
+
+<section class="features" aria-labelledby="extend-title">
+  <div class="wrap">
+    <h2 id="extend-title" class="section-title">Extend on purpose, not by default.</h2>
+    <p>
+      Attach external tool servers as marketplace packages. Nothing attaches on its own: the
+      agent only calls servers you attached on purpose.
+    </p>
+  </div>
+</section>
+
+<section class="features alt" aria-labelledby="network-title">
+  <div class="wrap">
+    <h2 id="network-title" class="section-title">Local by default. Explicit about the network.</h2>
+    <p>
+      Voice dictation runs Whisper models locally in a utility process. Network calls are opt-in
+      and pass through an optional domain allowlist. Version checks never install on their own,
+      and rotating logs keep disk use flat.
+    </p>
+  </div>
+</section>
+
+<section class="features" aria-labelledby="memory-docs-title">
+  <div class="wrap">
+    <h2 id="memory-docs-title" class="section-title">Docs for every step.</h2>
+    <p>
+      Project memory lives in <code>.vyotiq/memory/</code> inside your repository — separate from memory the agent holds per session. Checkpoints, plans, and approvals are explained
+      in the guides.
+    </p>
+    <a class="text-link mono" href="/docs/start/quickstart">
+      Start the quickstart
+      <LandingIcon name="arrow-right" size={12} />
+    </a>
   </div>
 </section>
 
 <style>
-  .features-title {
-    font-family: var(--font-display);
-    font-weight: 700;
-    font-size: clamp(1.75rem, 3.2vw, 2.5rem);
-    line-height: 1.08;
-    letter-spacing: -0.02em;
-    margin: 0 0 3rem;
+  .features {
+    padding: 4.5rem 0;
   }
 
-  .spec {
-    margin: 0;
+  .features.alt {
     background: var(--surface);
-    border: none;
-    border-radius: var(--radius-lg, 16px);
-    box-shadow: var(--shadow-card, 0 1px 2px rgb(2 8 23 / 0.3), 0 8px 24px rgb(2 8 23 / 0.25));
-    overflow: hidden;
-  }
-
-  .spec-row {
-    display: grid;
-    grid-template-columns: 14rem 1fr;
-    gap: 1.5rem;
-    padding: 0.875rem 1.25rem;
-    transition: background-color var(--duration, 150ms) var(--ease, ease);
-  }
-
-  .spec-row:hover {
-    background: var(--well);
-  }
-
-  .spec-row + .spec-row {
     border-top: 1px solid var(--border-faint);
+    border-bottom: 1px solid var(--border-faint);
+  }
+
+  .section-title {
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.75rem;
+  }
+
+  .section-lead {
+    color: var(--muted);
+    margin: 0 0 2rem;
+    max-width: 46rem;
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 1rem;
+    margin: 0 0 1rem;
+  }
+
+  .spec-card {
+    background: var(--well);
+    border: 1px solid var(--border-faint);
+    border-radius: var(--radius);
+    padding: 1.25rem 1.25rem 1rem;
   }
 
   .spec-name {
+    margin: 0 0 0.5rem;
     font-size: 0.8125rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--fg);
-    padding-top: 0.1875rem;
+    color: var(--accent-strong);
   }
 
-  .spec-text {
+  .spec-card p {
     margin: 0;
+    color: var(--fg);
+    font-size: 0.9375rem;
+  }
+
+  .section-note {
     color: var(--muted);
     font-size: 0.9375rem;
-    line-height: 1.55;
-    max-width: 58ch;
+    margin: 1rem 0 0;
+    max-width: 46rem;
   }
 
-  @media (max-width: 640px) {
-    .spec-row {
-      grid-template-columns: 1fr;
-      gap: 0.25rem;
-    }
+  .features > .wrap > p {
+    color: var(--fg);
+    max-width: 46rem;
+    margin: 0 0 1rem;
+  }
+
+  .text-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
   }
 </style>

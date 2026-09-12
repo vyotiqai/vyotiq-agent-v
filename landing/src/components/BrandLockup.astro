@@ -9,34 +9,43 @@ const { class: className, variant = 'lockup', alt = '' } = Astro.props
 ---
 
 <span
-  class:list={['brand-lockup inline-flex items-baseline gap-2', className]}
+  class:list={['brand-lockup inline-flex items-center gap-2.5', className]}
   aria-label={alt || undefined}
 >
-  <span class="brand-lockup-word">Agent V</span>
+  <img
+    src="/brand/mark-black.svg"
+    alt=""
+    width="16"
+    height="16"
+    class="brand-lockup-mark"
+    loading="eager"
+    decoding="async"
+  />
   {
     variant === 'lockup' ? (
-      <span class="brand-lockup-annotation">VYOTIQ</span>
+      <img
+        src="/brand/wordmark-black.svg"
+        alt=""
+        width="73"
+        height="13"
+        class="brand-lockup-wordmark"
+        loading="eager"
+        decoding="async"
+      />
     ) : null
   }
 </span>
 
 <style>
-  .brand-lockup-word {
-    font-family: var(--font-display);
-    font-size: 1.125rem;
-    font-weight: 800;
-    line-height: 1;
-    letter-spacing: -0.02em;
-    color: var(--fg);
+  .brand-lockup-mark,
+  .brand-lockup-wordmark {
+    display: block;
+    flex: none;
   }
 
-  .brand-lockup-annotation {
-    font-family: var(--font-mono);
-    font-size: 0.5625rem;
-    font-weight: 500;
-    letter-spacing: 0.22em;
-    line-height: 1;
-    text-transform: uppercase;
-    color: var(--muted);
+  /* The canonical assets are drawn for light surfaces; invert on dark. */
+  :global([data-theme='dark']) .brand-lockup-mark,
+  :global([data-theme='dark']) .brand-lockup-wordmark {
+    filter: invert(1);
   }
 </style>

@@ -1,6 +1,21 @@
 ---
 // Site footer. Consumed with no props by every page layout.
 import BrandLockup from './BrandLockup.astro'
+import { SITE_BRAND, SITE_PRODUCT } from '../lib/site'
+
+const year = new Date().getFullYear()
+
+// Footer chrome reflects the Docs section: the index claims the page itself.
+const onDocs = Astro.url.pathname.startsWith('/docs')
+const onDocsIndex = Astro.url.pathname === '/docs' || Astro.url.pathname === '/docs/'
+
+/** Mark footer links as part of the current Docs section while browsing docs. */
+function withSectionChrome<T extends { href: string }>(links: T[]) {
+  return links.map((link) => ({
+    ...link,
+    ariaCurrent: onDocsIndex ? 'page' : onDocs ? 'true' : undefined,
+  }))
+}
 
 const cols = [
   {
@@ -24,6 +39,7 @@ const cols = [
     title: 'Legal',
     links: [
       { href: '/privacy', label: 'Privacy' },
+      { href: '/docs/concepts/privacy-data', label: 'Privacy & data' },
       { href: '/terms', label: 'Terms' },
     ],
   },
@@ -38,32 +54,54 @@ const cols = [
           <BrandLockup />
         </a>
         <p class="desc">
-          VYOTIQ is a coding workspace for real repositories. Free and open source under GPL-3.0.
+          {SITE_PRODUCT} is a coding workspace for real repositories. Open source (GPL-3.0).
         </p>
       </div>
 
       <nav class="cols" aria-label="Footer">
         {
-          cols.map((col) => (
-            <div class="col">
-              <h2 class="col-title">{col.title}</h2>
-              <ul class="col-list">
-                {col.links.map((link) => (
-                  <li>
-                    <a href={link.href} class="col-link">
-                      {link.label}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))
+          cols
+            .filter((col) => col.title !== 'Legal')
+            .map((col) => (
+              <div class="col">
+                <h2 class="col-title">{col.title}</h2>
+                <ul class="col-list">
+                  {withSectionChrome(col.links).map((link) => (
+                    <li>
+                      <a href={link.href} class="col-link" aria-current={link.ariaCurrent}>
+                        {link.label}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))
         }
+        <div class="col">
+          <h2 class="col-title">Legal</h2>
+          <ul class="col-list">
+            <li>
+              <a href="/privacy" class="col-link" aria-current={onDocsIndex ? 'page' : onDocs ? 'true' : undefined}>
+                Privacy
+              </a>
+            </li>
+            <li>
+              <a href="/docs/concepts/privacy-data" class="col-link" aria-current={onDocsIndex ? 'page' : onDocs ? 'true' : undefined}>
+                Privacy &amp; data
+              </a>
+            </li>
+            <li>
+              <a href="/terms" class="col-link" aria-current={onDocsIndex ? 'page' : onDocs ? 'true' : undefined}>
+                Terms
+              </a>
+            </li>
+          </ul>
+        </div>
       </nav>
     </div>
 
     <div class="colophon">
-      <span>&copy; 2026 VYOTIQ</span>
+      <span>© {year} {SITE_BRAND}</span>
       <span>Coding workspace for real repositories</span>
       <span>GPL-3.0</span>
     </div>

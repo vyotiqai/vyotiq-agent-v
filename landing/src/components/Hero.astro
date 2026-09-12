@@ -1,28 +1,25 @@
 ---
 import LandingIcon from './LandingIcon.astro'
+import ReleaseInstallers from './ReleaseInstallers.astro'
 import { SITE_PRODUCT } from '../lib/site'
 ---
 
-<section class="hero glow-hero" aria-labelledby="home-title">
+<section id="overview" class="hero glow-hero" aria-labelledby="home-title">
   <div class="wrap hero-grid">
     <div class="hero-copy">
-      <p class="eyebrow mono">
-        <strong>{SITE_PRODUCT}</strong> — coding agent
-      </p>
       <h1 id="home-title" class="hero-title">
         A coding agent that <span class="gradient-text">plans before it changes code</span>.
       </h1>
       <p class="hero-sub">
-        It runs on your machine, works in real repositories, and uses the model keys you
-        configure. Nothing ships without your review.
+        {SITE_PRODUCT} runs on your machine, works in real repositories, and uses the model
+        keys you configure. Nothing ships without your review.
       </p>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="#download">Download Agent V</a>
-        <a class="text-link mono" href="/docs/start/quickstart">
-          Read the quickstart
-          <LandingIcon name="arrow-right" size={12} />
-        </a>
-      </div>
+      <ul class="hero-meta">
+        <li>Windows · macOS · Linux</li>
+        <li>Bring your own model keys</li>
+        <li>GPL-3.0</li>
+      </ul>
+      <ReleaseInstallers />
     </div>
 
     <div class="hero-visual">
@@ -64,7 +61,7 @@ import { SITE_PRODUCT } from '../lib/site'
           </div>
         </div>
       </div>
-      <p class="visual-note mono">Schematic — the app window, not a screenshot</p>
+      <div class="visual-note mono">Schematic — the app window, not a screenshot</div>
     </div>
   </div>
 </section>
@@ -101,11 +98,17 @@ import { SITE_PRODUCT } from '../lib/site'
     max-width: 44ch;
   }
 
-  .hero-actions {
+  .hero-meta {
     display: flex;
     align-items: center;
-    gap: 1.5rem;
+    gap: 1.25rem;
     flex-wrap: wrap;
+    list-style: none;
+    margin: 0 0 1.75rem;
+    padding: 0;
+    color: var(--muted);
+    font-size: 0.8125rem;
+    letter-spacing: 0.02em;
   }
 
   .hero-visual {

@@ -3,6 +3,7 @@ import BaseLayout from './BaseLayout.astro'
 import SiteHeader from '../components/SiteHeader.astro'
 import SiteFooter from '../components/SiteFooter.astro'
 import LandingIcon from '../components/LandingIcon.astro'
+import { SITE_PRODUCT } from '../lib/site'
 import {
   DOC_SECTION_LABEL,
   docsEditHref,
@@ -29,6 +30,9 @@ interface Props {
 }
 
 const { title, description, currentId, currentSection, headings = [], type, audience = [] } = Astro.props
+
+const pageTitle = `${title} — ${SITE_PRODUCT}`
+const quickstartPage = currentId === 'start/quickstart'
 
 const toc = headings
   .filter((heading) => heading.depth === 2 || heading.depth === 3)
@@ -78,7 +82,7 @@ const searchPayload = JSON.stringify(searchEntries).replace(/</g, '\\u003c')
 const mobileCrumb = context?.sectionLabel ?? (currentSection ? DOC_SECTION_LABEL[currentSection] : 'Documentation')
 ---
 
-<BaseLayout title={title} description={description} structuredData={structuredData}>
+<BaseLayout title={pageTitle} description={description} structuredData={structuredData}>
   <SiteHeader />
 
   <div class="docs-shell">
@@ -112,7 +116,7 @@ const mobileCrumb = context?.sectionLabel ?? (currentSection ? DOC_SECTION_LABEL
         </button>
       </div>
 
-      <nav class="docs-nav">
+      <nav class="docs-nav docs-nav-scroll">
         <a class:list={['docs-nav-home', onIndex && 'is-active']} href="/docs">All documentation</a>
         {
           groups.map((group) => (
@@ -181,7 +185,7 @@ const mobileCrumb = context?.sectionLabel ?? (currentSection ? DOC_SECTION_LABEL
           )
         }
 
-        <div class="docs-prose" data-docs-body>
+        <div class:list={['docs-prose', quickstartPage && 'docs-quickstart']} data-docs-body>
           <slot />
         </div>
 
@@ -207,7 +211,7 @@ const mobileCrumb = context?.sectionLabel ?? (currentSection ? DOC_SECTION_LABEL
           context && (context.previous || context.next) && (
             <nav class="docs-pager" aria-label="Adjacent pages">
               {context.previous ? (
-                <a class="docs-pager-link is-prev" href={docsHref(context.previous.id)}>
+                <a class="docs-pager-link is-prev" rel="prev" href={docsHref(context.previous.id)}>
                   <span class="docs-eyebrow">
                     <LandingIcon name="chevron-left" size={12} />
                     Previous
@@ -218,7 +222,7 @@ const mobileCrumb = context?.sectionLabel ?? (currentSection ? DOC_SECTION_LABEL
                 <span />
               )}
               {context.next ? (
-                <a class="docs-pager-link is-next" href={docsHref(context.next.id)}>
+                <a class="docs-pager-link is-next" rel="next" href={docsHref(context.next.id)}>
                   <span class="docs-eyebrow">
                     Next
                     <LandingIcon name="chevron-right" size={12} />
@@ -284,6 +288,7 @@ const mobileCrumb = context?.sectionLabel ?? (currentSection ? DOC_SECTION_LABEL
       />
     </form>
     <ul class="docs-search-results" id="docs-search-results" role="listbox" aria-label="Search results" data-docs-search-results></ul>
+    <p class="docs-search-status" data-docs-search-status role="status"></p>
     <p class="docs-search-empty" data-docs-search-empty hidden>No results. Try a different term.</p>
     <p class="docs-search-footer">
       <span><kbd>&uarr;</kbd><kbd>&darr;</kbd> navigate</span>
@@ -315,7 +320,13 @@ const mobileCrumb = context?.sectionLabel ?? (currentSection ? DOC_SECTION_LABEL
     })
     closeButton?.addEventListener('click', () => setNavOpen(false))
     scrim?.addEventListener('click', () => setNavOpen(false))
+    // Keys with their own semantics inside form controls (cancel, activate,
+    // focus movement) never implicitly toggle the drawer.
+    const drawerHandled = new Set(['Esc', 'Enter', 'Tab'])
     document.addEventListener('keydown', (event) => {
+      const target = event.target as HTMLElement | null
+      const inForm = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA'
+      if (inForm && drawerHandled.has(event.key)) return
       if (event.key === 'Escape') setNavOpen(false)
     })
     window.matchMedia('(min-width: 50.01rem)').addEventListener('change', (event) => {
@@ -402,6 +413,7 @@ const mobileCrumb = context?.sectionLabel ?? (currentSection ? DOC_SECTION_LABEL
     const input = document.querySelector<HTMLInputElement>('[data-docs-search-input]')
     const resultsEl = document.querySelector<HTMLUListElement>('[data-docs-search-results]')
     const emptyEl = document.querySelector<HTMLElement>('[data-docs-search-empty]')
+    const status = document.querySelector<HTMLElement>('[data-docs-search-status]')
     const payload = document.getElementById('docs-search-data')
 
     const entries: SearchEntry[] = payload ? JSON.parse(payload.textContent ?? '[]') : []
@@ -409,6 +421,7 @@ const mobileCrumb = context?.sectionLabel ?? (currentSection ? DOC_SECTION_LABEL
 
     function openSearch() {
       dialog?.showModal()
+      if (status) status.textContent = 'Type to search documentation.'
       input?.focus()
       input?.select()
     }
@@ -478,8 +491,9 @@ const mobileCrumb = context?.sectionLabel ?? (currentSection ? DOC_SECTION_LABEL
         }
         if (matchesAll) scored.push({ entry, score })
       }
-      scored.sort((a, b) => b.score - a.score)
-      renderResults(scored.slice(0, 8).map((hit) => hit.entry))
+      const visible = scored.filter((match) => terms.length > 0 && match.score >= 0)
+      visible.sort((a, b) => b.score - a.score)
+      renderResults(visible.slice(0, 8).map((hit) => hit.entry))
     }
 
     openButtons.forEach((button) => button.addEventListener('click', openSearch))
