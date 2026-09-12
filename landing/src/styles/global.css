@@ -423,7 +423,7 @@ summary:focus-visible,
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem 0.75rem;
-  margin: 0 0 1.75rem;
+  margin: 0 0 clamp(1.5rem, 3vw, 2.25rem);
   padding: 0;
   color: var(--muted);
   font-family: var(--font-mono);
@@ -447,22 +447,48 @@ summary:focus-visible,
   background: var(--border);
 }
 
+/* The headline is the composition: full container width, poster scale. */
 .home-hero h1 {
-  max-width: 15ch;
   margin: 0;
-  font-size: clamp(2.75rem, 6vw, 5rem);
+  font-size: clamp(3rem, 7.2vw, 7.5rem);
   font-weight: 620;
   letter-spacing: -0.045em;
-  line-height: 1.02;
+  line-height: 1.01;
   text-wrap: balance;
 }
 
-.home-hero > p {
+/* Split foot: statement left, actions right, one hairline above. */
+.hero-foot {
+  display: grid;
+  gap: 2rem;
+  margin-top: clamp(2rem, 4vw, 3.25rem);
+  padding-top: clamp(1.75rem, 3vw, 2.5rem);
+  border-top: 1px solid var(--border-faint);
+}
+
+@media (min-width: 64rem) {
+  .hero-foot {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+}
+
+.hero-foot > p {
   max-width: 36rem;
-  margin: 1.75rem 0 0;
+  margin: 0;
   color: var(--muted);
-  font-size: clamp(1.0625rem, 1.5vw, 1.1875rem);
+  font-size: clamp(1.0625rem, 1.4vw, 1.1875rem);
   line-height: 1.66;
+}
+
+.hero-foot-actions .hero-ctas {
+  margin-top: 0;
+}
+
+@media (min-width: 64rem) {
+  .hero-foot-actions {
+    max-width: 30rem;
+  }
 }
 
 .hero-copy-strong {
@@ -475,7 +501,6 @@ summary:focus-visible,
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem 1rem;
-  margin-top: 2.25rem;
 }
 
 .hero-ctas .text-link {
@@ -494,15 +519,15 @@ summary:focus-visible,
   margin-top: 0;
 }
 
-/* Factual strip replacing any product imagery: the six dock panels. */
+/* Factual strip closing the hero: the six dock panels. */
 .hero-panels {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.75rem 2rem;
-  margin-top: clamp(2.5rem, 5vw, 4rem);
+  margin-top: clamp(2.25rem, 4.5vw, 3.5rem);
   padding-block: 1.1rem;
-  border-block: 1px solid var(--border-faint);
+  border-bottom: 1px solid var(--border-faint);
 }
 
 .hero-panels-label {
