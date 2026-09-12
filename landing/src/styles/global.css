@@ -11,48 +11,20 @@
 
 @import "tailwindcss";
 
-/* Webfonts (Schibsted Grotesk Variable, Plus Jakarta Sans,
-   JetBrains Mono) are imported via @fontsource in
-   src/layouts/BaseLayout.astro. */
+/* Webfonts: Schibsted Grotesk Variable loads via @fontsource-variable
+   in src/layouts/BaseLayout.astro; the --font-mono stack falls back to
+   ui-monospace / Cascadia Mono when IBM Plex Mono is not installed. */
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* ---- Tokens ------------------------------------------------ */
-/* Dark is the DEFAULT theme: :root carries the dark values and
-   [data-theme="light"] overrides them. */
+/* Light is the DEFAULT theme: :root carries the light values
+   (and the explicit [data-theme="light"] selector keeps SSR
+   and the theme toggle in sync); [data-theme="dark"] overrides
+   them. BaseLayout's inline init script always sets an explicit
+   data-theme from localStorage before first paint. */
 
-:root {
-  color-scheme: dark;
-  --bg: #0b111e;
-  --surface: #111a2c;
-  --well: #0e1526;
-  --fg: #e9eef8;
-  --muted: #97a4be;
-  --border: #223049;
-  --border-strong: #33456b;
-  --border-faint: #1a2438;
-  --accent: #2dd4bf;
-  --accent-strong: #5eead4;
-  --accent-fg: #052e29;
-  --accent-soft: color-mix(in srgb, #2dd4bf 12%, transparent);
-  --shadow-mock: none;
-  --shadow-card:
-    0 1px 2px rgb(2 8 23 / 0.3),
-    0 8px 24px rgb(2 8 23 / 0.25);
-  --shadow-card-hover:
-    0 2px 4px rgb(2 8 23 / 0.35),
-    0 16px 40px rgb(2 8 23 / 0.35);
-  --shadow-cta: 0 8px 24px rgb(45 212 191 / 0.25);
-  --font-display: "Schibsted Grotesk Variable", "Plus Jakarta Sans", system-ui, sans-serif;
-  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --duration: 150ms;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
-  --radius-pill: 999px;
-}
-
+:root,
 [data-theme="light"] {
   color-scheme: light;
   --bg: #f7f9fc;
@@ -60,7 +32,7 @@
   --well: #eef2f8;
   --fg: #101828;
   --muted: #5a6b85;
-  --border: #dce4ef;
+  --border: #7c8ba1;
   --border-strong: #c3cedf;
   --border-faint: #e8edf5;
   --accent: #0d9488;
@@ -75,11 +47,43 @@
     0 2px 4px rgb(16 24 40 / 0.08),
     0 16px 40px rgb(16 24 40 / 0.12);
   --shadow-cta: 0 8px 24px rgb(13 148 136 / 0.2);
+  --font-display: "Schibsted Grotesk Variable", "Schibsted Grotesk", system-ui, sans-serif;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --duration: 150ms;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b111e;
+  --surface: #111a2c;
+  --well: #0e1526;
+  --fg: #e9eef8;
+  --muted: #97a4be;
+  --border: #64748b;
+  --border-strong: #33456b;
+  --border-faint: #1a2438;
+  --accent: #2dd4bf;
+  --accent-strong: #5eead4;
+  --accent-fg: #052e29;
+  --accent-soft: color-mix(in srgb, #2dd4bf 12%, transparent);
+  --shadow-mock: none;
+  --shadow-card:
+    0 1px 2px rgb(2 8 23 / 0.3),
+    0 8px 24px rgb(2 8 23 / 0.25);
+  --shadow-card-hover:
+    0 2px 4px rgb(2 8 23 / 0.35),
+    0 16px 40px rgb(2 8 23 / 0.35);
+  --shadow-cta: 0 8px 24px rgb(45 212 191 / 0.25);
 }
 
 @theme inline {
-  --font-sans: "Plus Jakarta Sans", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+  --font-sans: "Schibsted Grotesk Variable", "Schibsted Grotesk", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace;
   --font-display: var(--font-display);
   --color-bg: var(--bg);
   --color-surface: var(--surface);
@@ -371,6 +375,69 @@ h3 {
   font-size: 0.75rem;
   text-decoration: none;
   transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* ---- Docs sidebar scroll ------------------------------------ */
+
+.docs-nav-scroll {
+  max-height: calc(100vh - 7rem);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding-right: 0.25rem;
+}
+
+/* ---- Docs heading anchors ----------------------------------- */
+
+.docs-heading-anchor {
+  margin-left: 0.375rem;
+  color: var(--muted);
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity var(--duration) var(--ease);
+}
+
+.docs-prose :global(h2:hover) .docs-heading-anchor,
+.docs-prose :global(h3:hover) .docs-heading-anchor,
+.docs-heading-anchor:focus-visible {
+  opacity: 1;
+  color: var(--accent-strong);
+}
+
+/* ---- Docs edit links ---------------------------------------- */
+
+.docs-edit-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-faint);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.docs-edit-links a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.docs-edit-links a:hover {
+  color: var(--accent-strong);
+}
+
+/* ---- Quickstart step chrome ---------------------------------- */
+/* Every quickstart h2 after the first gets a step divider so the
+   walkthrough reads as numbered stages rather than prose. */
+
+.doc-prose.docs-quickstart > h2:not(:first-of-type)::before {
+  content: '';
+  display: block;
+  margin-block: 3rem 1rem;
+  border-top: 2px solid var(--accent-soft);
 }
 
 .skip-link:focus {

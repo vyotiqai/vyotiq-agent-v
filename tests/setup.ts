@@ -114,3 +114,11 @@ afterEach(() => {
   resetCircuitBreakersForTests()
   vi.clearAllMocks()
 })
+
+// Forked pool workers run many files in one process; without an explicit
+// collection the jsdom environment and module registry of the previous file
+// stay reachable until the worker's heap limit kills the whole run. Exposed
+// via --expose-gc in vitest.config.ts execArgv.
+afterAll(() => {
+  ;(globalThis as unknown as { gc?: () => void }).gc?.()
+})

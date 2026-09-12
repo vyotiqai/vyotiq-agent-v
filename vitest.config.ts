@@ -33,8 +33,16 @@ export default defineConfig({
     teardownTimeout: 15_000,
     pool: 'forks',
     // Vitest 4: pool limits moved from poolOptions to top-level options.
-    maxForks: Math.max(1, Math.min(4, cpus().length)),
+    maxForks: Math.max(1, Math.min(24, cpus().length)),
     minForks: 1,
+    // PDF parsing (extractAttachment) drives pdf.js over malformed fixtures
+    // and can exceed the ~4GB default heap inside a forked worker, killing
+    // the whole run. The forks pool strips everything except profiling flags
+    // from the CLI's process.execArgv and then appends project.config.execArgv
+    // (vitest cli-api chunk: "...process.execArgv.filter(...--cpu-prof|
+    // --heap-prof...), ...project.config.execArgv"), so the only place the
+    // worker heap can be raised is this config option.
+    execArgv: ['--max-old-space-size=8192', '--expose-gc'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],

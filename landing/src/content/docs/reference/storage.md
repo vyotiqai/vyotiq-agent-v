@@ -13,7 +13,7 @@ related:
 
 [Privacy and data storage](/docs/concepts/privacy-data) states the policy. This page lists locations.
 
-Agent V keeps local state in Electron's per-user application data directory, named `vyotiq` — on Windows that is `%APPDATA%/vyotiq`. If you need an absolute path on a support call, open the log folder from Settings → General, or copy the build info from Settings → About.
+Agent V keeps local state in Electron's per-user application data directory, named `vyotiq` (this is Vyotiq's app data folder) — on Windows that is `%APPDATA%/vyotiq`. If you need an absolute path on a support call, open the log folder from Settings → General, or copy the build info from Settings → About.
 
 | Data | Location or root | Notes |
 | --- | --- | --- |

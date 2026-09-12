@@ -2,10 +2,16 @@
 // Slim sticky site header. Consumed with no props by every page layout.
 import BrandLockup from './BrandLockup.astro'
 import LandingIcon from './LandingIcon.astro'
+import { SITE_PRODUCT } from '../lib/site'
 
 const path = Astro.url.pathname
+
+// Header chrome reflects the Docs section: the index claims the page itself.
+const onDocs = path.startsWith('/docs')
+const onDocsIndex = Astro.url.pathname === '/docs' || Astro.url.pathname === '/docs/'
+
 const nav = [
-  { href: '/docs', label: 'Docs', active: path.startsWith('/docs') },
+  { href: '/docs', label: 'Docs', active: onDocs },
   { href: '/changelog', label: 'Changelog', active: path.startsWith('/changelog') },
   { href: '/#download', label: 'Download', active: false },
 ]
@@ -13,13 +19,20 @@ const nav = [
 
 <header class="header">
   <div class="bar">
-    <a href="/" class="brand" aria-label="VYOTIQ home">
+    <a href="/" class="brand" aria-label={`${SITE_PRODUCT} home`}>
       <BrandLockup />
     </a>
 
     <nav class="nav" aria-label="Main">
+      <a
+        href="/docs"
+        class:list={['nav-link', { active: onDocs }]}
+        aria-current={onDocsIndex ? 'page' : onDocs ? 'true' : undefined}
+      >
+        Docs
+      </a>
       {
-        nav.map((item) => (
+        nav.slice(1).map((item) => (
           <a
             href={item.href}
             class:list={['nav-link', { active: item.active }]}
@@ -32,14 +45,29 @@ const nav = [
     </nav>
 
     <div class="actions">
-      <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch theme">
-        <span class="only-dark" aria-hidden="true">
-          <LandingIcon name="sun" size={16} />
-        </span>
-        <span class="only-light" aria-hidden="true">
-          <LandingIcon name="moon" size={16} />
-        </span>
-      </button>
+      <div class="theme-menu" data-theme-menu>
+        <button
+          type="button"
+          class="icon-btn"
+          data-theme-toggle
+          aria-label="Switch theme"
+          aria-haspopup="menu"
+          aria-expanded="false"
+        >
+          <span class="only-dark" aria-hidden="true">
+            <LandingIcon name="sun" size={16} />
+          </span>
+          <span class="only-light" aria-hidden="true">
+            <LandingIcon name="moon" size={16} />
+          </span>
+        </button>
+        <span class="sr-only" data-theme-icon="system">system</span>
+        <div class="theme-pop" data-theme-pop hidden>
+          <button type="button" class="theme-option mono" data-theme-option="light">light</button>
+          <button type="button" class="theme-option mono" data-theme-option="dark">dark</button>
+          <button type="button" class="theme-option mono" data-theme-option="system">system</button>
+        </div>
+      </div>
 
       <a
         class="icon-btn"
@@ -97,6 +125,43 @@ const nav = [
     display: flex;
     align-items: center;
     gap: 2rem;
+  }
+
+  .theme-menu {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .theme-pop {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.375rem;
+    background: var(--surface);
+    border: 1px solid var(--border-faint);
+    border-radius: 10px;
+    box-shadow: var(--shadow-card);
+    min-width: 7rem;
+    z-index: 50;
+  }
+
+  .theme-option {
+    text-align: left;
+    padding: 0.375rem 0.625rem;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--fg);
+    font-size: 0.8125rem;
+    cursor: pointer;
+  }
+
+  .theme-option:hover,
+  .theme-option[aria-pressed='true'] {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
   }
 
   .brand {
@@ -272,29 +337,85 @@ const nav = [
   const KEY = 'vyotiq-theme'
   const root = document.documentElement
 
-  // Theme toggle. The old header stored 'system' | 'light' | 'dark'; if the
-  // resolved value is neither explicit option, fall back to the media query.
-  for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-theme-toggle]')) {
-    const setLabel = () => {
-      const dark = root.getAttribute('data-theme') === 'dark'
-      btn.setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme')
+  // Theme menu. The toggle opens the option list; each option applies and
+  // persists 'light' | 'dark' | 'system' under the same key the inline init
+  // script in BaseLayout reads before first paint.
+  const menu = document.querySelector<HTMLElement>('[data-theme-menu]')
+  const toggle = menu?.querySelector<HTMLButtonElement>('[data-theme-toggle]')
+  const pop = menu?.querySelector<HTMLElement>('[data-theme-pop]')
+  const icon = menu?.querySelector<HTMLElement>('[data-theme-icon]')
+  const options = menu
+    ? Array.from(menu.querySelectorAll<HTMLButtonElement>('[data-theme-option]'))
+    : []
+
+  const systemTheme = () =>
+    window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+
+  type ThemeChoice = 'light' | 'dark' | 'system'
+
+  const storedTheme = (): ThemeChoice => {
+    try {
+      const value = localStorage.getItem(KEY)
+      if (value === 'light' || value === 'dark' || value === 'system') return value
+    } catch {
+      /* storage unavailable */
     }
-    setLabel()
-    btn.addEventListener('click', () => {
-      let current = root.getAttribute('data-theme')
-      if (current !== 'light' && current !== 'dark') {
-        current = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-      }
-      const next = current === 'dark' ? 'light' : 'dark'
-      root.setAttribute('data-theme', next)
-      try {
-        localStorage.setItem(KEY, next)
-      } catch {
-        /* storage unavailable; theme still switches for this page view */
-      }
-      setLabel()
+    return 'system'
+  }
+
+  const currentTheme = (): 'light' | 'dark' => {
+    const value = root.getAttribute('data-theme')
+    if (value === 'light' || value === 'dark') return value
+    return systemTheme()
+  }
+
+  function render() {
+    if (icon) icon.textContent = storedTheme()
+    for (const option of options) {
+      option.setAttribute('aria-pressed', option.dataset.option === storedTheme() ? 'true' : 'false')
+    }
+  }
+
+  function applyTheme(value: ThemeChoice) {
+    root.setAttribute('data-theme', value === 'system' ? systemTheme() : value)
+    try {
+      localStorage.setItem(KEY, value)
+    } catch {
+      /* storage unavailable; theme still switches for this page view */
+    }
+    toggle?.setAttribute('aria-label', `Switch theme (current: ${value})`)
+    render()
+  }
+
+  toggle?.addEventListener('click', () => {
+    if (!pop) return
+    const open = pop.hidden
+    pop.hidden = !open
+    toggle.setAttribute('aria-expanded', String(open))
+  })
+
+  for (const option of options) {
+    option.addEventListener('click', () => {
+      const value = option.dataset.option
+      if (value === 'light' || value === 'dark' || value === 'system') applyTheme(value)
+      if (pop) pop.hidden = true
+      toggle?.setAttribute('aria-expanded', 'false')
     })
   }
+
+  document.addEventListener('click', (event) => {
+    if (!pop || pop.hidden || !menu) return
+    if (!menu.contains(event.target as Node)) {
+      pop.hidden = true
+      toggle?.setAttribute('aria-expanded', 'false')
+    }
+  })
+
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (storedTheme() === 'system') applyTheme('system')
+  })
+
+  render()
 
   // Mobile menu. Without JS the panel stays hidden; links remain in the DOM.
   const menuBtn = document.querySelector<HTMLButtonElement>('#menu-button')

@@ -1,6 +1,6 @@
 ---
 title: What Agent V is
-description: A desktop coding workspace that runs an agent inside your repository, with enforced modes, local-first storage, and explicit memory.
+description: A coding workspace that runs an agent inside your repository, with enforced modes, local-first storage, and explicit memory.
 section: concepts
 order: 1
 type: concept
@@ -10,7 +10,7 @@ related:
   - concepts/security
 ---
 
-Agent V is a desktop coding workspace for working through real repositories. It combines a natural-language harness, workspace tools, provider-hosted models, live context management, and explicit file-backed memory.
+Agent V is a coding workspace for working through real repositories. It combines a natural-language harness, workspace tools, provider-hosted models, live context management, and explicit file-backed memory.
 
 The app and your workspaces stay on this machine. Model requests go to the provider you configure. New installs default to a local Ollama server, but Ollama still has to be installed and running before it can serve a request.
 
