@@ -2,29 +2,37 @@
 import { SITE_PRODUCT } from '../lib/site'
 import { githubRelease } from '../lib/githubRelease'
 import ReleaseInstallers from './ReleaseInstallers.astro'
-import WorkspaceMock from './WorkspaceMock.astro'
 
 const version = githubRelease.version
 const platforms = 'Windows, macOS, Linux'
+const panels = ['Files', 'Browser', 'Terminal', 'Changes', 'Pull Request', 'Plan']
 ---
 
 <section id="overview" class="home-hero wrap" aria-labelledby="home-title">
-  <div class="hero-grid">
-    <div class="home-hero-copy">
-      <ul class="hero-meta" aria-label="Release facts">
-        {version ? <li>v{version}</li> : null}
-        <li>{platforms}</li>
-        <li>GPL-3.0</li>
-      </ul>
-      <h1 id="home-title">The coding workspace for real repositories.</h1>
-      <p>
-        {SITE_PRODUCT} runs a natural-language agent next to the tools real work needs:
-        <span class="hero-copy-strong">files, terminal, browser, Git, and pull requests</span> in
-        one window. You pick the model, your code stays on your machine, and every change waits
-        for your review.
-      </p>
-      <ReleaseInstallers />
-    </div>
-    <WorkspaceMock />
+  <ul class="hero-meta" aria-label="Release facts">
+    {version ? <li>v{version}</li> : null}
+    <li>{platforms}</li>
+    <li>GPL-3.0</li>
+  </ul>
+  <h1 id="home-title">The coding workspace for real repositories.</h1>
+  <p>
+    {SITE_PRODUCT} runs a natural-language agent next to the tools real work needs:
+    <span class="hero-copy-strong">files, terminal, browser, Git, and pull requests</span> in
+    one window. You pick the model, your code stays on your machine, and every change waits
+    for your review.
+  </p>
+  <ReleaseInstallers />
+  <div class="hero-panels">
+    <span class="hero-panels-label">Dock panels</span>
+    <ul aria-label="The six dock panels">
+      {
+        panels.map((panel, index) => (
+          <li>
+            <strong aria-hidden="true">{String(index + 1).padStart(2, '0')}</strong>
+            {panel}
+          </li>
+        ))
+      }
+    </ul>
   </div>
 </section>
