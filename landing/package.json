@@ -7,7 +7,7 @@
   "license": "GPL-3.0-or-later",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "node scripts/bake-github-release.mjs && astro build",
     "preview": "astro preview",
     "media:scene": "node scripts/encode-media.mjs detect",
     "media:encode": "node scripts/encode-media.mjs encode",
