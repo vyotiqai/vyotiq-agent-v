@@ -18,11 +18,3 @@
   outline: 2px solid rgb(234 88 12 / 0.6);
   outline-offset: 2px;
 }
-
-/* faint engineering grid — hero backdrop, fading out with a radial mask */
-.bg-grid {
-  background-image:
-    linear-gradient(to right, rgb(24 24 27 / 0.045) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(24 24 27 / 0.045) 1px, transparent 1px);
-  background-size: 54px 54px;
-}
