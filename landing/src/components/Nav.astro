@@ -1,69 +1,74 @@
 ---
-import release from '../data/release.json';
-
 const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
-
-const downloadHref = release.source === 'github' ? release.url : `${REPO}#build-from-source`;
 ---
 
-<header class="sticky top-0 z-50 border-b border-white/10 bg-zinc-950/80 backdrop-blur">
-  <nav class="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6" aria-label="Main">
-    <a href="#top" class="flex items-center gap-2.5">
-      <img src="/brand/vyotiq-lockup-white.svg" alt="Vyotiq" width="128" height="32" class="h-8 w-auto" />
-    </a>
-    <div class="hidden items-center gap-8 text-sm text-zinc-400 md:flex">
-      <a href="#why" class="transition hover:text-white">Why</a>
-      <a href="#capabilities" class="transition hover:text-white">Capabilities</a>
-      <a href="#security" class="transition hover:text-white">Security</a>
-    </div>
-    <div class="flex items-center gap-3">
-      <a
-        href="https://github.com/vyotiqai/vyotiq-agent-v"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="text-zinc-400 transition hover:text-white"
-        aria-label="GitHub repository"
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path
-            d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12Z"
-          ></path>
-        </svg>
+<header class="sticky top-0 z-50 px-3 pt-3 sm:px-6 sm:pt-4">
+  <div class="mx-auto max-w-5xl rounded-2xl border border-zinc-200/80 bg-white/85 shadow-sm backdrop-blur">
+    <nav class="flex h-14 items-center justify-between px-4 sm:h-16 sm:px-6" aria-label="Main">
+      <a href="#top" class="flex items-center gap-2.5">
+        <img src="/brand/vyotiq-lockup-black.svg" alt="Vyotiq" width="128" height="32" class="h-7 w-auto" />
       </a>
-      <a
-        href={downloadHref}
-        target="_blank"
-        rel="noopener noreferrer"
-        class="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-zinc-200 transition hover:bg-white/10 hover:text-white"
-      >
-        Download
-      </a>
-      <button
-        id="menu-toggle"
-        class="inline-flex size-9 items-center justify-center rounded-lg border border-white/10 text-zinc-300 transition hover:text-white md:hidden"
-        aria-expanded="false"
-        aria-controls="mobile-menu"
-        aria-label="Open menu"
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path
-            d="M4 7h16M4 12h16M4 17h16"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"></path>
-        </svg>
-      </button>
-    </div>
-  </nav>
-      <div id="mobile-menu" class="hidden border-t border-white/10 md:hidden">
-        <nav class="mx-auto flex max-w-6xl flex-col gap-1 px-4 py-3 text-sm sm:px-6" aria-label="Mobile">
-          <a href="#why" class="rounded-lg px-3 py-2.5 text-zinc-300 transition hover:bg-white/5 hover:text-white">Why</a>
-          <a href="#capabilities" class="rounded-lg px-3 py-2.5 text-zinc-300 transition hover:bg-white/5 hover:text-white">Capabilities</a>
-          <a href="#security" class="rounded-lg px-3 py-2.5 text-zinc-300 transition hover:bg-white/5 hover:text-white">Security</a>
-          <a href="https://github.com/vyotiqai/vyotiq-agent-v" target="_blank" rel="noopener noreferrer" class="rounded-lg px-3 py-2.5 text-zinc-300 transition hover:bg-white/5 hover:text-white">GitHub</a>
-          <a href="https://github.com/vyotiqai/vyotiq-agent-v#build-from-source" target="_blank" rel="noopener noreferrer" class="rounded-lg px-3 py-2.5 font-semibold text-white transition hover:bg-white/5">Download</a>
-        </nav>
+      <div class="hidden items-center gap-7 text-sm font-medium text-zinc-600 md:flex">
+        <a href="#why" class="transition hover:text-zinc-950">Why</a>
+        <a href="#capabilities" class="transition hover:text-zinc-950">Capabilities</a>
+        <a href="#changelog" class="transition hover:text-zinc-950">Changelog</a>
       </div>
+      <div class="flex items-center gap-2">
+        <a
+          href={REPO}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="GitHub repository"
+          class="inline-flex size-9 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path
+              d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12Z"
+          ></path>
+          </svg>
+        </a>
+        <a
+          href={`${REPO}#build-from-source`}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="hidden rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-700 sm:inline-flex"
+        >
+          Download
+        </a>
+        <button
+          id="menu-toggle"
+          class="inline-flex size-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-600 transition hover:text-zinc-950 md:hidden"
+          aria-expanded="false"
+          aria-controls="mobile-menu"
+          aria-label="Open menu"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M4 7h16M4 12h16M4 17h16"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"></path>
+          </svg>
+        </button>
+      </div>
+    </nav>
+    <div id="mobile-menu" class="hidden border-t border-zinc-100 md:hidden">
+      <nav class="mx-auto flex max-w-6xl flex-col gap-1 px-4 py-3 text-sm sm:px-6" aria-label="Mobile">
+        <a href="#why" class="rounded-lg px-3 py-2.5 text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950">Why</a>
+        <a href="#capabilities" class="rounded-lg px-3 py-2.5 text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950">Capabilities</a>
+        <a href="#changelog" class="rounded-lg px-3 py-2.5 text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950">Changelog</a>
+        <a href={REPO} target="_blank" rel="noopener noreferrer" class="rounded-lg px-3 py-2.5 text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950">GitHub</a>
+        <a
+          href={`${REPO}#build-from-source`}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="rounded-lg px-3 py-2.5 font-semibold text-zinc-950 transition hover:bg-zinc-100"
+        >
+          Download
+        </a>
+      </nav>
+    </div>
+  </div>
 </header>
 
 <script>

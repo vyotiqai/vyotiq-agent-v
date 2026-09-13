@@ -1,0 +1,53 @@
+---
+const oldWay = [
+  'Re-explaining your codebase to a fresh chat, every session.',
+  'Copy-pasting between terminal, editor, and a chat window.',
+  'No memory between sessions — the same setup every time.',
+  'One agent task at a time, serially.',
+  'Edits you can only hope were correct.',
+];
+
+const newWay = [
+  '60 sandboxed workspace tools work your repository directly.',
+  'Terminal, browser, git, and editor surfaces in one workspace.',
+  'File-backed memory under .vyotiq/memory persists between runs.',
+  'Spawn parallel agent instances on isolated git worktrees.',
+  'Every change verified by re-reads and greps before it lands.',
+];
+---
+
+<section class="mx-auto max-w-6xl px-4 pb-20 sm:px-6 sm:pb-28">
+  <div class="grid gap-4 lg:grid-cols-2">
+    <div class="rounded-2xl border border-zinc-200 bg-white/60 p-8">
+      <h3 class="text-sm font-semibold uppercase tracking-wider text-zinc-500">The old way</h3>
+      <ul class="mt-6 space-y-4">
+        {
+          oldWay.map((item) => (
+            <li class="flex gap-3 text-sm leading-relaxed text-zinc-500">
+              <svg class="mt-0.5 size-4 shrink-0 text-zinc-300" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="m6 6 8 8M14 6l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              {item}
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+    <div class="rounded-2xl border border-orange-200 bg-white p-8 shadow-lg shadow-orange-900/5">
+      <h3 class="text-sm font-semibold uppercase tracking-wider text-orange-600">With Agent V</h3>
+      <ul class="mt-6 space-y-4">
+        {
+          newWay.map((item) => (
+            <li class="flex gap-3 text-sm font-medium leading-relaxed text-zinc-800">
+              <svg class="mt-0.5 size-4 shrink-0 text-orange-600" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <circle cx="10" cy="10" r="10" fill="currentColor" opacity="0.12" />
+                <path d="m6 10.5 2.5 2.5L14 7.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              {item}
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </div>
+</section>

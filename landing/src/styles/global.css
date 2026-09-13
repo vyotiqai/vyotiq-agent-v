@@ -13,105 +13,18 @@
 }
 
 ::selection {
-  background-color: rgb(139 124 248 / 0.3);
+  background-color: rgb(234 88 12 / 0.15);
 }
 
 :focus-visible {
-  outline: 2px solid rgb(167 157 255 / 0.7);
+  outline: 2px solid rgb(234 88 12 / 0.6);
   outline-offset: 2px;
 }
 
-/* --- design-system layer: ambient depth, gradient craft, texture --- */
-
-/* Slow drifting aurora fields (Linear-style ambient background) */
-@keyframes aurora {
-  0% {
-    transform: translate3d(0, 0, 0) scale(1);
-    opacity: 0.85;
-  }
-  50% {
-    transform: translate3d(-4%, 3%, 0) scale(1.08);
-    opacity: 1;
-  }
-  100% {
-    transform: translate3d(3%, -2%, 0) scale(1.02);
-    opacity: 0.9;
-  }
-}
-
-.aurora {
-  animation: aurora 16s ease-in-out infinite alternate;
-  will-change: transform, opacity;
-}
-
-.aurora-reverse {
-  animation-direction: alternate-reverse;
-  animation-duration: 20s;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .aurora,
-  .aurora-reverse {
-    animation: none;
-  }
-}
-
-/* Gradient display text — white sweeping into shadow */
-.text-sweep {
-  background: linear-gradient(105deg, #fafafa 30%, #a1a1aa 75%, #63636b 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-/* Gradient hairline border (mask-composite ring) */
-.g-border {
-  position: relative;
-}
-
-.g-border::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(
-    135deg,
-    rgb(167 157 255 / 0.55),
-    rgb(103 232 249 / 0.18) 40%,
-    rgb(255 255 255 / 0.06) 70%,
-    rgb(167 157 255 / 0.25)
-  );
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-  pointer-events: none;
-}
-
-.g-border-hover {
-  transition: transform 0.25s ease, background-color 0.25s ease, box-shadow 0.25s ease;
-}
-
-.g-border-hover:hover {
-  transform: translateY(-2px);
-  background-color: rgb(255 255 255 / 0.045);
-  box-shadow:
-    0 12px 40px -12px rgb(0 0 0 / 0.6),
-    0 0 24px -8px rgb(139 124 248 / 0.25);
-}
-
-/* Film grain — adds physical texture to flat dark surfaces */
-.grain::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  pointer-events: none;
-  opacity: 0.032;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+/* faint engineering grid — hero backdrop, fading out with a radial mask */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgb(24 24 27 / 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(24 24 27 / 0.045) 1px, transparent 1px);
+  background-size: 54px 54px;
 }
