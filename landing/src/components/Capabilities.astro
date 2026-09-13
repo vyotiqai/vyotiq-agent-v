@@ -1,99 +1,28 @@
 ---
+import providerIcons from '../data/provider-icons.json';
+
 const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
 
-const rows = [
-  {
-    title: 'The full surface of a real workspace',
-    lead: 'Agent V works your repository directly — every tool sandboxed to the workspace root.',
-    points: [
-      '60 workspace tools: read/edit/search, glob, grep, codebase_search, list_dir, terminal',
-      'Live agent browser — navigate, snapshot, click, type, and wait from inside a run',
-      'Interactive terminal dock with a real PTY via node-pty',
-      'Git integration — Changes panel, commits, optional GitHub pull-request panel',
-    ],
-    img: '/media/showcase-1.webp',
-    w: 1200,
-    h: 636,
-    caption: 'Real session · 0:35–0:41',
-  },
-  {
-    title: 'Every model you already use',
-    lead: 'Chat with the providers you already pay for.',
-    points: [
-      'OpenAI, Anthropic, Gemini, Mistral',
-      'Ollama, DeepSeek, Groq',
-      'OpenRouter, xAI, Modal',
-      'Any OpenAI-compatible endpoint',
-    ],
-    img: '/media/showcase-2.webp',
-    w: 1200,
-    h: 636,
-    caption: 'Real session · 1:08–1:14',
-  },
-  {
-    title: 'Context and memory that persist',
-    lead: 'Budget layers and structured compaction keep long sessions working; memory persists between them.',
-    points: [
-      'Budget layers and tool-result trimming',
-      'Structured compaction with a live context-window meter',
-      'File-backed markdown memory under .vyotiq/memory',
-      'Memory injected into every run',
-    ],
-    img: '/media/showcase-3.webp',
-    w: 1200,
-    h: 636,
-    caption: 'Real session · 2:17–2:23',
-  },
-  {
-    title: 'Run agents in parallel',
-    lead: 'Big task? Fan it out — every agent works in its own isolated checkout.',
-    points: [
-      'Spawn parallel agent instances on isolated git worktrees',
-      'Each instance inherits context and gets its own branch',
-      'Pull results, follow up, or cancel mid-flight',
-      'Merge finished agent branches back into yours',
-    ],
-    img: '/media/showcase-4.webp',
-    w: 1200,
-    h: 638,
-    caption: 'Real session · 0:39–0:45',
-  },
+const toolChips = [
+  'read',
+  'edit',
+  'search',
+  'glob',
+  'grep',
+  'codebase_search',
+  'list_dir',
+  'terminal',
+  'todo_write',
 ];
 
-const workspace = [
-  {
-    title: 'MCP servers',
-    desc: 'Connect Model Context Protocol servers — tools from your .mcp.json join the registry.',
-  },
-  {
-    title: 'Skills & slash commands',
-    desc: 'Package know-how into skills; trigger flows with / commands from the composer.',
-  },
-  {
-    title: 'Code index',
-    desc: 'A local SQLite code index keeps search fast on large repositories.',
-  },
-  {
-    title: 'Voice dictation',
-    desc: 'Dictate prompts with a local Whisper model — audio stays on your machine.',
-  },
-  {
-    title: 'Command palette',
-    desc: 'Every action reachable from the keyboard.',
-  },
-  {
-    title: 'File attachments',
-    desc: 'Drop files and images straight into the conversation.',
-  },
-  {
-    title: 'Themes',
-    desc: 'Appearance settings and custom skins for the workspace.',
-  },
-  {
-    title: 'Auto-updates',
-    desc: 'New versions arrive automatically via GitHub Releases.',
-  },
-];
+const memoryContent = `# Index
+
+- notes/vyotiq-workspace-pnpm.md
+  pnpm deps-check bypass env var; root postinstall
+  broken in worktrees; no-BOM package.json write
+  rule; workspace pins.`;
+
+const instances = [1, 2, 3];
 ---
 
 <section id="capabilities" class="mx-auto max-w-6xl scroll-mt-20 px-4 py-20 sm:px-6 sm:py-28">
@@ -104,54 +33,298 @@ const workspace = [
     Everything the agent needs to work a real repo
   </h2>
 
-  <div class="mt-16 space-y-20 sm:mt-20 sm:space-y-24">
-    {
-      rows.map((row, i) => (
-        <div class="grid items-center gap-10 lg:grid-cols-2 lg:gap-14">
-          <div class={i % 2 === 1 ? 'lg:order-2' : ''}>
-            <h3 class="text-2xl font-semibold tracking-tight text-zinc-950">{row.title}</h3>
-            <p class="mt-3 text-base leading-relaxed text-zinc-600">{row.lead}</p>
-            <ul class="mt-6 space-y-3">
-              {row.points.map((pt) => (
-                <li class="flex gap-3 text-sm leading-relaxed text-zinc-700">
-                  <span class="mt-0.5 select-none font-mono text-zinc-300" aria-hidden="true">
-                    –
-                  </span>
-                  {pt}
-                </li>
-              ))}
-            </ul>
-          </div>
-          <figure class={i % 2 === 1 ? 'lg:order-1' : ''}>
-            <img
-              src={row.img}
-              alt={`Agent V — ${row.title} (real session recording)`}
-              width={row.w}
-              height={row.h}
-              class="h-auto w-full rounded-2xl border border-zinc-200 shadow-xl shadow-zinc-900/10"
-              loading="lazy"
-              decoding="async"
-            />
-            <figcaption class="mt-2 text-center font-mono text-xs text-zinc-400">
-              {row.caption}
-            </figcaption>
-          </figure>
-        </div>
-      ))
-    }
+  <!-- 01 · workspace surface: text + real session recording -->
+  <div class="mt-16 grid items-center gap-10 lg:grid-cols-2 lg:gap-14">
+    <div>
+      <h3 class="text-2xl font-semibold tracking-tight text-zinc-950">
+        The full surface of a real workspace
+      </h3>
+      <p class="mt-3 text-base leading-relaxed text-zinc-600">
+        Agent V works your repository directly — every tool sandboxed to the workspace root.
+      </p>
+      <div class="mt-6 flex flex-wrap gap-2">
+        {
+          toolChips.map((t) => (
+            <span class="rounded-md border border-zinc-200 bg-white px-2.5 py-1 font-mono text-xs text-zinc-700 shadow-sm">
+              {t}
+            </span>
+          ))
+        }
+        <span
+          class="rounded-md border border-orange-200 bg-orange-50 px-2.5 py-1 font-mono text-xs font-medium text-orange-700"
+        >
+          +51 more
+        </span>
+      </div>
+      <p class="mt-4 text-sm leading-relaxed text-zinc-600">
+        Plus a live agent browser, an interactive terminal dock with a real PTY, and git
+        integration — Changes panel, commits, optional GitHub pull-request panel.
+      </p>
+    </div>
+    <figure class="relative">
+      <img
+        src="/media/showcase-1.webp"
+        alt="Agent V — real session recording"
+        width="1200"
+        height="636"
+        class="h-auto w-full rounded-2xl border border-zinc-200 shadow-xl shadow-zinc-900/10"
+        loading="lazy"
+        decoding="async"
+      />
+      <figcaption
+        class="absolute right-3 top-3 rounded-full bg-zinc-950/80 px-3 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-zinc-200 backdrop-blur"
+      >
+        Real session · 0:35–0:41
+      </figcaption>
+    </figure>
   </div>
 
+  <!-- 02 · models: recording + real provider logos -->
+  <div class="mt-20 grid items-center gap-10 sm:mt-24 lg:grid-cols-2 lg:gap-14">
+    <figure class="relative lg:order-1">
+      <img
+        src="/media/showcase-2.webp"
+        alt="Agent V — real session recording"
+        width="1200"
+        height="636"
+        class="h-auto w-full rounded-2xl border border-zinc-200 shadow-xl shadow-zinc-900/10"
+        loading="lazy"
+        decoding="async"
+      />
+      <figcaption
+        class="absolute right-3 top-3 rounded-full bg-zinc-950/80 px-3 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-zinc-200 backdrop-blur"
+      >
+        Real session · 1:08–1:14
+      </figcaption>
+    </figure>
+    <div class="lg:order-2">
+      <h3 class="text-2xl font-semibold tracking-tight text-zinc-950">
+        Every model you already use
+      </h3>
+      <p class="mt-3 text-base leading-relaxed text-zinc-600">
+        Chat with the providers you already pay for.
+      </p>
+      <div class="mt-6 flex flex-wrap gap-2.5" aria-label="Supported model providers">
+        {
+          providerIcons.map((p) => (
+            <span
+              class="grid size-12 place-items-center rounded-xl border border-zinc-200 bg-white shadow-sm"
+              title={p.title}
+            >
+              <svg
+                viewBox={p.viewBox}
+                role="img"
+                aria-label={p.title}
+                class="size-6 text-zinc-700"
+                fill="currentColor"
+                fill-rule="evenodd"
+              >
+                <title>{p.title}</title>
+                {p.paths.map((d) => <path d={d} />)}
+              </svg>
+            </span>
+          ))
+        }
+      </div>
+      <p class="mt-4 font-mono text-sm text-zinc-500">…or any OpenAI-compatible endpoint.</p>
+    </div>
+  </div>
+
+  <!-- 03 · context & memory: text + real memory file -->
+  <div class="mt-20 grid items-center gap-10 sm:mt-24 lg:grid-cols-2 lg:gap-14">
+    <div>
+      <h3 class="text-2xl font-semibold tracking-tight text-zinc-950">
+        Context and memory that persist
+      </h3>
+      <p class="mt-3 text-base leading-relaxed text-zinc-600">
+        Long sessions stay within budget; what matters is remembered between them.
+      </p>
+      <ul class="mt-6 space-y-3">
+        <li class="flex gap-3 text-sm leading-relaxed text-zinc-700">
+          <span class="mt-0.5 select-none font-mono text-zinc-300" aria-hidden="true">–</span>
+          Budget layers and tool-result trimming
+        </li>
+        <li class="flex gap-3 text-sm leading-relaxed text-zinc-700">
+          <span class="mt-0.5 select-none font-mono text-zinc-300" aria-hidden="true">–</span>
+          Structured compaction with a live context-window meter
+        </li>
+        <li class="flex gap-3 text-sm leading-relaxed text-zinc-700">
+          <span class="mt-0.5 select-none font-mono text-zinc-300" aria-hidden="true">–</span>
+          File-backed markdown memory under <code class="font-mono text-xs">.vyotiq/memory</code>
+        </li>
+      </ul>
+    </div>
+    <figure>
+      <div class="overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-950 shadow-xl shadow-zinc-900/10">
+        <div class="flex items-center gap-1.5 border-b border-white/10 px-4 py-2.5">
+          <span class="size-2.5 rounded-full bg-zinc-700"></span>
+          <span class="size-2.5 rounded-full bg-zinc-700"></span>
+          <span class="size-2.5 rounded-full bg-zinc-700"></span>
+          <span class="ml-2 font-mono text-[11px] text-zinc-500">.vyotiq/memory/index.md</span>
+        </div>
+        <pre class="overflow-x-auto p-5 font-mono text-[11px] leading-relaxed text-zinc-300"
+          >{memoryContent}</pre
+        >
+        <div class="flex items-center justify-between border-t border-white/10 px-4 py-2.5">
+          <span class="font-mono text-[10px] text-zinc-500">plain markdown · file-backed</span>
+          <span
+            class="rounded-full bg-orange-500/15 px-2.5 py-0.5 font-mono text-[10px] font-medium text-orange-400"
+          >
+            injected every run
+          </span>
+        </div>
+      </div>
+      <figcaption class="mt-2 text-center font-mono text-xs text-zinc-400">
+        Real workspace memory
+      </figcaption>
+    </figure>
+  </div>
+
+  <!-- 04 · parallel agents: worktree diagram + text -->
+  <div class="mt-20 grid items-center gap-10 sm:mt-24 lg:grid-cols-2 lg:gap-14">
+    <div class="rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl shadow-zinc-900/10 sm:p-8">
+      <div class="flex items-center gap-3">
+        <span class="font-mono text-xs font-semibold text-zinc-950">main</span>
+        <div class="relative h-px flex-1 bg-zinc-300">
+          <span class="absolute -top-[3px] left-[12%] size-[7px] rounded-full bg-orange-500"></span>
+          <span class="absolute -top-[3px] left-[48%] size-[7px] rounded-full bg-zinc-400"></span>
+          <span class="absolute -top-[3px] left-[84%] size-[7px] rounded-full bg-zinc-400"></span>
+        </div>
+      </div>
+      <div class="mt-1 grid grid-cols-3 gap-3">
+        {
+          instances.map((n) => (
+            <div class="text-center">
+              <span class="font-mono text-xs text-zinc-300" aria-hidden="true">↑</span>
+              <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                <p class="font-mono text-xs font-semibold text-zinc-950">instance {n}</p>
+                <p class="mt-1 font-mono text-[10px] leading-relaxed text-zinc-500">
+                  own worktree · own branch
+                </p>
+              </div>
+            </div>
+          ))
+        }
+      </div>
+      <p class="mt-4 text-center font-mono text-[11px] text-zinc-500">
+        finished branches merge back into <span class="font-semibold text-zinc-800">main</span>
+      </p>
+    </div>
+    <div>
+      <h3 class="text-2xl font-semibold tracking-tight text-zinc-950">Run agents in parallel</h3>
+      <p class="mt-3 text-base leading-relaxed text-zinc-600">
+        Big task? Fan it out — every agent works in its own isolated checkout.
+      </p>
+      <ul class="mt-6 space-y-3">
+        <li class="flex gap-3 text-sm leading-relaxed text-zinc-700">
+          <span class="mt-0.5 select-none font-mono text-zinc-300" aria-hidden="true">–</span>
+          Spawn parallel agent instances on isolated git worktrees
+        </li>
+        <li class="flex gap-3 text-sm leading-relaxed text-zinc-700">
+          <span class="mt-0.5 select-none font-mono text-zinc-300" aria-hidden="true">–</span>
+          Each instance inherits context and gets its own branch
+        </li>
+        <li class="flex gap-3 text-sm leading-relaxed text-zinc-700">
+          <span class="mt-0.5 select-none font-mono text-zinc-300" aria-hidden="true">–</span>
+          Pull results, follow up, or cancel mid-flight
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- the rest of the workspace: micro-UI cards -->
   <div class="mt-20 sm:mt-24">
     <h3 class="text-xl font-semibold tracking-tight text-zinc-950">And the rest of the workspace</h3>
     <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {
-        workspace.map((w) => (
-          <div class="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-            <h4 class="text-sm font-semibold text-zinc-950">{w.title}</h4>
-            <p class="mt-2 text-sm leading-relaxed text-zinc-600">{w.desc}</p>
-          </div>
-        ))
-      }
+      <div class="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div class="flex h-20 items-center justify-center gap-2 rounded-xl border border-zinc-100 bg-zinc-50 px-3">
+          <span class="rounded-md border border-zinc-200 bg-white px-2 py-1 font-mono text-[11px] text-zinc-700">.mcp.json</span>
+          <span class="text-zinc-300" aria-hidden="true">→</span>
+          <span class="rounded-md border border-zinc-200 bg-white px-2 py-1 font-mono text-[11px] text-zinc-700">context_search</span>
+        </div>
+        <h4 class="mt-4 text-sm font-semibold text-zinc-950">MCP servers</h4>
+        <p class="mt-1.5 text-sm leading-relaxed text-zinc-600">
+          Tools from your .mcp.json join the registry.
+        </p>
+      </div>
+      <div class="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div class="flex h-20 items-center justify-center gap-2 rounded-xl border border-zinc-100 bg-zinc-50 px-3">
+          <span class="rounded-md border border-zinc-200 bg-white px-2 py-1 font-mono text-[11px] text-zinc-700">SKILL.md</span>
+          <span class="grid size-6 place-items-center rounded-full bg-zinc-950 font-mono text-[11px] font-semibold text-white">/</span>
+        </div>
+        <h4 class="mt-4 text-sm font-semibold text-zinc-950">Skills &amp; slash commands</h4>
+        <p class="mt-1.5 text-sm leading-relaxed text-zinc-600">
+          Package know-how; trigger flows from the composer.
+        </p>
+      </div>
+      <div class="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div class="flex h-20 items-center justify-center gap-2 rounded-xl border border-zinc-100 bg-zinc-50 px-3">
+          <span class="rounded-md border border-zinc-200 bg-white px-2 py-1 font-mono text-[11px] text-zinc-700">SQLite</span>
+          <span class="text-zinc-300" aria-hidden="true">→</span>
+          <span class="rounded-md border border-zinc-200 bg-white px-2 py-1 font-mono text-[11px] text-zinc-700">code index</span>
+        </div>
+        <h4 class="mt-4 text-sm font-semibold text-zinc-950">Code index</h4>
+        <p class="mt-1.5 text-sm leading-relaxed text-zinc-600">
+          Fast search on large repositories, locally.
+        </p>
+      </div>
+      <div class="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div class="flex h-20 items-center justify-center gap-1 rounded-xl border border-zinc-100 bg-zinc-50 px-3" aria-hidden="true">
+          <span class="w-1 rounded-full bg-orange-500/70" style="height: 10px"></span>
+          <span class="w-1 rounded-full bg-orange-500" style="height: 22px"></span>
+          <span class="w-1 rounded-full bg-orange-500/70" style="height: 34px"></span>
+          <span class="w-1 rounded-full bg-orange-500" style="height: 18px"></span>
+          <span class="w-1 rounded-full bg-orange-500/70" style="height: 28px"></span>
+          <span class="w-1 rounded-full bg-orange-500/50" style="height: 12px"></span>
+        </div>
+        <h4 class="mt-4 text-sm font-semibold text-zinc-950">Voice dictation</h4>
+        <p class="mt-1.5 text-sm leading-relaxed text-zinc-600">
+          Local Whisper — audio stays on your machine.
+        </p>
+      </div>
+      <div class="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div class="flex h-20 items-center justify-center rounded-xl border border-zinc-100 bg-zinc-50 px-3">
+          <span class="flex w-full max-w-[180px] items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-sm">
+            <span class="text-zinc-300" aria-hidden="true">⌕</span>
+            <span class="font-mono text-[11px] text-zinc-400">Jump to any action…</span>
+          </span>
+        </div>
+        <h4 class="mt-4 text-sm font-semibold text-zinc-950">Command palette</h4>
+        <p class="mt-1.5 text-sm leading-relaxed text-zinc-600">
+          Every action reachable from the keyboard.
+        </p>
+      </div>
+      <div class="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div class="flex h-20 items-center justify-center gap-2 rounded-xl border border-zinc-100 bg-zinc-50 px-3">
+          <span class="rounded-lg border border-dashed border-zinc-300 bg-white px-3 py-1.5 font-mono text-[11px] text-zinc-600">＋ attach</span>
+          <span class="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 font-mono text-[11px] text-zinc-600">img.png</span>
+        </div>
+        <h4 class="mt-4 text-sm font-semibold text-zinc-950">File attachments</h4>
+        <p class="mt-1.5 text-sm leading-relaxed text-zinc-600">
+          Drop files and images into the conversation.
+        </p>
+      </div>
+      <div class="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div class="flex h-20 items-center justify-center gap-2.5 rounded-xl border border-zinc-100 bg-zinc-50 px-3">
+          <span class="size-6 rounded-full border border-zinc-200 bg-zinc-950" title="Dark"></span>
+          <span class="size-6 rounded-full border border-zinc-300 bg-white" title="Light"></span>
+          <span class="size-6 rounded-full bg-orange-500" title="Accent"></span>
+        </div>
+        <h4 class="mt-4 text-sm font-semibold text-zinc-950">Themes</h4>
+        <p class="mt-1.5 text-sm leading-relaxed text-zinc-600">
+          Appearance settings and custom skins.
+        </p>
+      </div>
+      <div class="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div class="flex h-20 items-center justify-center gap-2 rounded-xl border border-zinc-100 bg-zinc-50 px-3">
+          <span class="rounded-full bg-orange-600 px-2.5 py-1 font-mono text-[11px] font-semibold text-white">v1.1.3</span>
+          <span class="rounded-md border border-zinc-200 bg-white px-2 py-1 font-mono text-[11px] text-zinc-600">GitHub Releases</span>
+        </div>
+        <h4 class="mt-4 text-sm font-semibold text-zinc-950">Auto-updates</h4>
+        <p class="mt-1.5 text-sm leading-relaxed text-zinc-600">
+          New versions arrive automatically.
+        </p>
+      </div>
     </div>
   </div>
 
