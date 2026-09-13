@@ -9,10 +9,19 @@ const downloadHref =
 ---
 
 <section class="relative overflow-hidden">
-  <div
-    class="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_55%_40%_at_50%_0%,rgba(255,255,255,0.05),transparent)]"
-    aria-hidden="true"
-  >
+  <div class="pointer-events-none absolute inset-0 -z-10 overflow-hidden" aria-hidden="true">
+    <div
+      class="aurora absolute -top-40 left-1/2 h-[480px] w-[820px] max-w-none -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(139,124,248,0.22),transparent)] blur-3xl"
+    >
+    </div>
+    <div
+      class="aurora aurora-reverse absolute -top-24 right-[8%] h-[340px] w-[460px] rounded-full bg-[radial-gradient(closest-side,rgba(103,232,249,0.12),transparent)] blur-3xl"
+    >
+    </div>
+    <div
+      class="absolute inset-0 bg-[radial-gradient(ellipse_55%_40%_at_50%_0%,rgba(255,255,255,0.04),transparent)]"
+    >
+    </div>
   </div>
 
   <div class="mx-auto max-w-6xl px-4 sm:px-6">
@@ -47,7 +56,7 @@ const downloadHref =
         class="mt-10 text-4xl font-semibold leading-[1.05] tracking-tight text-white sm:text-6xl lg:text-7xl"
       >
         Your coding workspace
-        <span class="block text-zinc-500">for real repositories</span>
+        <span class="text-sweep block">for real repositories</span>
       </h1>
 
       <p class="mt-6 max-w-xl text-base leading-relaxed text-zinc-400 sm:text-lg">
@@ -88,12 +97,19 @@ const downloadHref =
       </div>
     </div>
 
-    <img
-      src="/media/agentv-hero.webp"
-      alt="Agent V — real session screen recording"
-      class="mt-16 w-full rounded-2xl border border-white/10 shadow-2xl shadow-black/40 sm:mt-20"
-      decoding="async"
-      fetchpriority="high"
-    />
+    <div class="relative mt-16 sm:mt-20">
+      <div
+        class="aurora pointer-events-none absolute -inset-x-6 -top-12 h-full rounded-full bg-[radial-gradient(closest-side,rgba(139,124,248,0.16),transparent)] blur-3xl"
+        aria-hidden="true"
+      >
+      </div>
+      <img
+        src="/media/agentv-hero.webp"
+        alt="Agent V — real session screen recording"
+        class="g-border relative w-full rounded-2xl shadow-2xl shadow-black/50"
+        decoding="async"
+        fetchpriority="high"
+      />
+    </div>
   </div>
 </section>
