@@ -1,0 +1,8 @@
+{
+  "events": [
+    { "type": "status", "status": "running" },
+    { "type": "text_delta", "text": "E2E fixture response." },
+    { "type": "assistant_message", "content": "E2E fixture response." },
+    { "type": "status", "status": "done" }
+  ]
+}

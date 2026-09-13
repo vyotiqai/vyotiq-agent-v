@@ -1,0 +1,58 @@
+{
+  "events": [
+    { "type": "status", "status": "running" },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "edit-live-1",
+      "name": "edit",
+      "argumentsDelta": ""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "edit-live-1",
+      "name": "edit",
+      "argumentsDelta": "{\"path\":\"src/live-stream.ts\""
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "edit-live-1",
+      "name": "edit",
+      "argumentsDelta": ",\"diff\":\"@@"
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "edit-live-1",
+      "name": "edit",
+      "argumentsDelta": "\\n-old code\\n+LIVE_EARLY_MARK"
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "edit-live-1",
+      "name": "edit",
+      "argumentsDelta": "\\n+pad-1\\n+pad-2\\n+pad-3\\n+"
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "edit-live-1",
+      "name": "edit",
+      "argumentsDelta": "LIVE_LATE_MARK\\n\"}"
+    },
+    {
+      "type": "tool_start",
+      "toolCallId": "edit-live-1",
+      "name": "edit",
+      "summary": "src/live-stream.ts"
+    },
+    {
+      "type": "tool_result",
+      "toolCallId": "edit-live-1",
+      "name": "edit",
+      "summary": "src/live-stream.ts",
+      "ok": true,
+      "content": "Updated src/live-stream.ts"
+    },
+    { "type": "text_delta", "text": "Live edit stream fixture done." },
+    { "type": "assistant_message", "content": "Live edit stream fixture done." },
+    { "type": "status", "status": "done" }
+  ]
+}

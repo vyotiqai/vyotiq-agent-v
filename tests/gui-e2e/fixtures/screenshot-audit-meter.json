@@ -1,0 +1,37 @@
+{
+  "events": [
+    { "type": "status", "status": "running" },
+    {
+      "type": "step_usage",
+      "step": 49,
+      "inputTokens": 1000000,
+      "cachedInputTokens": 990000,
+      "outputTokens": 120,
+      "billedInputTokens": 2313786
+    },
+    {
+      "type": "context_usage",
+      "step": 49,
+      "estimatedTokens": 2312,
+      "inputTokens": 2312,
+      "contextWindow": 32768,
+      "contentWindow": 27852,
+      "compactionTrigger": 27852,
+      "source": "provider"
+    },
+    {
+      "type": "token_cost_hint",
+      "kind": "long_run_task_boundary",
+      "message": "Long run at step 49 (billed input 2313786) — consider /clear between unrelated tasks"
+    },
+    {
+      "type": "text_delta",
+      "text": "Audit meter fixture done."
+    },
+    {
+      "type": "assistant_message",
+      "content": "Audit meter fixture done."
+    },
+    { "type": "status", "status": "done" }
+  ]
+}

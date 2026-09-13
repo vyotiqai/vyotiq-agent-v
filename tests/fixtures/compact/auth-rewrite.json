@@ -1,0 +1,79 @@
+{
+  "id": "auth-rewrite",
+  "description": "Answered ask_question + wrote src/auth/rewrite.ts (ba335d72-shaped fold)",
+  "contract": "## Goal\n\nRewrite auth to JWT\n\n## Done when\n\n- Login uses JWT\n",
+  "messages": [
+    { "role": "user", "content": "Rewrite auth in src/auth/rewrite.ts" },
+    {
+      "role": "assistant",
+      "content": "",
+      "toolCalls": [
+        { "id": "r1", "name": "read", "arguments": "{\"path\":\"src/auth/rewrite.ts\"}" }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "export const auth = 1",
+      "toolCallId": "r1",
+      "toolName": "read",
+      "ok": true
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "toolCalls": [
+        { "id": "e1", "name": "edit", "arguments": "{\"path\":\"src/auth/rewrite.ts\",\"contents\":\"jwt\"}" }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "ok",
+      "toolCallId": "e1",
+      "toolName": "edit",
+      "ok": true
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "toolCalls": [{ "id": "q1", "name": "ask_question", "arguments": "{}" }]
+    },
+    {
+      "role": "tool",
+      "content": "User answered: Use the planted-choice-9f3a",
+      "toolCallId": "q1",
+      "toolName": "ask_question",
+      "ok": true
+    }
+  ],
+  "mustKeep": {
+    "decisions": ["Use the planted-choice-9f3a"],
+    "wroteFiles": ["src/auth/rewrite.ts"],
+    "contractGoal": "Rewrite auth to JWT"
+  },
+  "mustNotInvent": ["src/invented.ts"],
+  "summaries": [
+    {
+      "id": "faithful",
+      "expectOk": true,
+      "text": "## Session Intent\nRewrite auth to JWT\n\n## Files Touched\n- src/auth/rewrite.ts\n\n## Key Decisions\n- Use the planted-choice-9f3a\n\n## Next Steps\n- Execute the JWT choice"
+    },
+    {
+      "id": "invented-path",
+      "expectOk": false,
+      "failKinds": ["invented_path"],
+      "text": "## Session Intent\nRewrite auth to JWT\n\n## Files Touched\n- src/auth/rewrite.ts\n- src/invented.ts\n\n## Key Decisions\n- Use the planted-choice-9f3a"
+    },
+    {
+      "id": "dropped-decision",
+      "expectOk": false,
+      "failKinds": ["missing_decision"],
+      "text": "## Session Intent\nRewrite auth to JWT\n\n## Files Touched\n- src/auth/rewrite.ts\n\n## Key Decisions\n- (none)"
+    },
+    {
+      "id": "dropped-write",
+      "expectOk": false,
+      "failKinds": ["missing_wrote_file"],
+      "text": "## Session Intent\nRewrite auth to JWT\n\n## Files Touched\n- (none)\n\n## Key Decisions\n- Use the planted-choice-9f3a"
+    }
+  ]
+}

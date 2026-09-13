@@ -1,0 +1,104 @@
+{
+  "events": [
+    { "type": "status", "status": "running" },
+    {
+      "type": "assistant_message",
+      "content": "",
+      "toolCalls": [
+        { "id": "d1", "name": "delete", "arguments": "{\"path\":\".sv.js\"}" },
+        {
+          "id": "w1",
+          "name": "write_file_check",
+          "arguments": "{\"path\":\"placeholder\"}"
+        }
+      ]
+    },
+    {
+      "type": "tool_start",
+      "toolCallId": "d1",
+      "name": "delete",
+      "summary": ".sv.js"
+    },
+    {
+      "type": "tool_result",
+      "toolCallId": "d1",
+      "name": "delete",
+      "summary": "Deleted .sv.js",
+      "ok": true,
+      "content": "Deleted .sv.js"
+    },
+    {
+      "type": "tool_start",
+      "toolCallId": "w1",
+      "name": "write_file_check",
+      "summary": "placeholder"
+    },
+    {
+      "type": "tool_result",
+      "toolCallId": "w1",
+      "name": "write_file_check",
+      "summary": "placeholder",
+      "ok": false,
+      "content": "Unknown tool \"write_file_check\". Use edit or str_replace to change files."
+    },
+    {
+      "type": "assistant_message",
+      "content": "",
+      "toolCalls": [
+        {
+          "id": "a1",
+          "name": "ask_question",
+          "arguments": "{\"questions\":\"[{\\\"id\\\": \\\"how_open\\\", \\\"prompt\\\": \\\"How?\\\", \\\"type\\\": \\\"single\\\", \\\"options\\\": [\\\"A VS Code \\\"Live Server\\\" or similar\\\", \\\"Other\\\"]}]\"}"
+        }
+      ]
+    },
+    {
+      "type": "tool_start",
+      "toolCallId": "a1",
+      "name": "ask_question",
+      "summary": "ask_question"
+    },
+    {
+      "type": "tool_result",
+      "toolCallId": "a1",
+      "name": "ask_question",
+      "summary": "ask_question",
+      "ok": false,
+      "content": "ask_question.questions must be a JSON array of question objects. Pass questions: [{ id, prompt, type, ... }]."
+    },
+    {
+      "type": "assistant_message",
+      "content": "",
+      "toolCalls": [
+        {
+          "id": "a2",
+          "name": "ask_question",
+          "arguments": "{\"title\":\"Diagnosing your empty screen\",\"questions\":[{\"id\":\"how_open\",\"prompt\":\"How?\",\"type\":\"text\"}]}"
+        }
+      ]
+    },
+    {
+      "type": "tool_start",
+      "toolCallId": "a2",
+      "name": "ask_question",
+      "summary": "Diagnosing your empty screen"
+    },
+    {
+      "type": "tool_result",
+      "toolCallId": "a2",
+      "name": "ask_question",
+      "summary": "Diagnosing your empty screen",
+      "ok": false,
+      "content": "Question timed out or was dismissed without answers. Continue with a reasonable default, or ask again with a shorter question."
+    },
+    {
+      "type": "text_delta",
+      "text": "Audit tools fixture done."
+    },
+    {
+      "type": "assistant_message",
+      "content": "Audit tools fixture done."
+    },
+    { "type": "status", "status": "done" }
+  ]
+}

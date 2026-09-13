@@ -1,0 +1,27 @@
+{
+  "id": "chat-only",
+  "description": "No tool writes or decisions — empty extractive set must pass a non-inventing summary",
+  "contract": "## Goal\n\nchat\n\n## Done when\n\n- The goal above is satisfied (check outcomes: read results, command output, or user-visible success).\n",
+  "messages": [
+    { "role": "user", "content": "What does the loop do?" },
+    { "role": "assistant", "content": "It assembles context and calls tools." }
+  ],
+  "mustKeep": {
+    "decisions": [],
+    "wroteFiles": []
+  },
+  "mustNotInvent": ["src/invented.ts"],
+  "summaries": [
+    {
+      "id": "faithful",
+      "expectOk": true,
+      "text": "## Session Intent\nExplained the agent loop\n\n## Files Touched\n- (none)\n\n## Key Decisions\n- (none)"
+    },
+    {
+      "id": "invented-path",
+      "expectOk": false,
+      "failKinds": ["invented_path"],
+      "text": "## Session Intent\nExplained the agent loop\n\n## Files Touched\n- src/invented.ts\n\n## Key Decisions\n- (none)"
+    }
+  ]
+}
