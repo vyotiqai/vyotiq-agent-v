@@ -1,7 +1,10 @@
 ---
 import providerIcons from '../data/provider-icons.json';
+import release from '../data/release.json';
 
 const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
+const downloadHref =
+  release.version && release.url ? release.url : `${REPO}#build-from-source`;
 ---
 
 <section class="relative overflow-hidden">
@@ -53,7 +56,7 @@ const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
 
       <div class="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4">
         <a
-          href={`${REPO}#build-from-source`}
+          href={downloadHref}
           target="_blank"
           rel="noopener noreferrer"
           class="inline-flex w-full items-center justify-center gap-2 rounded-full bg-zinc-900 px-7 py-3 font-semibold text-white transition hover:bg-zinc-700 sm:w-auto"

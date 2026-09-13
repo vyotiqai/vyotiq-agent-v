@@ -1,5 +1,9 @@
 ---
+import release from '../data/release.json';
+
 const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
+const downloadHref =
+  release.version && release.url ? release.url : `${REPO}#build-from-source`;
 ---
 
 <header class="sticky top-0 z-50 px-3 pt-3 sm:px-6 sm:pt-4">
@@ -11,6 +15,7 @@ const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
       <div class="hidden items-center gap-7 text-sm font-medium text-zinc-600 md:flex">
         <a href="#why" class="transition hover:text-zinc-950">Why</a>
         <a href="#capabilities" class="transition hover:text-zinc-950">Capabilities</a>
+        <a href="#security" class="transition hover:text-zinc-950">Security</a>
         <a href="#changelog" class="transition hover:text-zinc-950">Changelog</a>
       </div>
       <div class="flex items-center gap-2">
@@ -28,7 +33,7 @@ const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
           </svg>
         </a>
         <a
-          href={`${REPO}#build-from-source`}
+          href={downloadHref}
           target="_blank"
           rel="noopener noreferrer"
           class="hidden rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-700 sm:inline-flex"
@@ -56,10 +61,11 @@ const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
       <nav class="mx-auto flex max-w-6xl flex-col gap-1 px-4 py-3 text-sm sm:px-6" aria-label="Mobile">
         <a href="#why" class="rounded-lg px-3 py-2.5 text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950">Why</a>
         <a href="#capabilities" class="rounded-lg px-3 py-2.5 text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950">Capabilities</a>
+        <a href="#security" class="rounded-lg px-3 py-2.5 text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950">Security</a>
         <a href="#changelog" class="rounded-lg px-3 py-2.5 text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950">Changelog</a>
         <a href={REPO} target="_blank" rel="noopener noreferrer" class="rounded-lg px-3 py-2.5 text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950">GitHub</a>
         <a
-          href={`${REPO}#build-from-source`}
+          href={downloadHref}
           target="_blank"
           rel="noopener noreferrer"
           class="rounded-lg px-3 py-2.5 font-semibold text-zinc-950 transition hover:bg-zinc-100"
