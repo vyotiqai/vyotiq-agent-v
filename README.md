@@ -13,7 +13,7 @@ Agent V is a free, open-source coding workspace for real repositories by [Vyotiq
 - **Live agent browser** — navigate, snapshot, click, type, and wait on any page from inside a run.
 - **Interactive terminal dock** — xterm-based terminal (real PTY via node-pty when available).
 - **Git integration** — Changes panel, commits, and optional GitHub pull-request panel.
-- **Multi-provider chat** — OpenAI, Anthropic, Gemini, Ollama, DeepSeek, Groq, OpenRouter, xAI, Modal, Mistral, and any OpenAI-compatible endpoint.
+- **Multi-provider chat** — OpenAI, Anthropic, Gemini, Ollama, DeepSeek, Groq, OpenRouter, xAI, Mistral, OpenCode Go, and any OpenAI-compatible endpoint.
 - **Context management** — budget layers, tool-result trimming, structured compaction, and a live context-window meter.
 - **Long-term memory** — plain markdown memory under `{workspace}/.vyotiq/memory/`, injected into every run.
 - **Marketplace** — install **MCPs**, **Skills**, **Rules**, and **Packages**.

@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Astro upgraded to the latest security release
 - Test-pool reliability: capped concurrent sessions to stop flaky test runs
 - Lint error blocking the CI gate
+- Documentation accuracy pass: README, CONTRIBUTING, SECURITY, NOTICE, and CODE_OF_CONDUCT claims verified against the tree
 
 ### Changed
 
