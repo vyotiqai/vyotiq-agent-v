@@ -33,7 +33,11 @@ export default defineConfig({
     teardownTimeout: 15_000,
     pool: 'forks',
     // Vitest 4: pool limits moved from poolOptions to top-level options.
-    maxForks: Math.max(1, Math.min(24, cpus().length)),
+    // Cap concurrent forks at 8: worst case is maxForks x per-fork heap
+    // (8 x 8192MB). Up to 24 forks x 8GB has OOM'd CI runners (worker exit
+    // at ~8.2GB RSS). The 8192MB per-fork heap itself stays — it was the fix
+    // for a real PDF-fixture OOM; do not lower it.
+    maxForks: Math.max(1, Math.min(8, cpus().length)),
     minForks: 1,
     // PDF parsing (extractAttachment) drives pdf.js over malformed fixtures
     // and can exceed the ~4GB default heap inside a forked worker, killing
