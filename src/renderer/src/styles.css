@@ -1,0 +1,1378 @@
+@import "tailwindcss";
+@import "@fontsource/plus-jakarta-sans/400.css";
+@import "@fontsource/plus-jakarta-sans/500.css";
+@import "@fontsource/plus-jakarta-sans/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+:root,
+[data-skin="default"] {
+  --vy-font-sans: "Plus Jakarta Sans", system-ui, sans-serif;
+  --vy-font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --vy-radius-sm: 4px;
+  --vy-radius-md: 6px;
+  --vy-radius-lg: 8px;
+  --vy-radius-xl: 10px;
+  --vy-chrome-border-width: 1px;
+  --vy-chrome-border-color: var(--vy-border);
+  --vy-chrome-surface: var(--vy-bg);
+  --vy-prompt-surface: var(--vy-bg);
+}
+
+[data-skin="proof"] {
+  --vy-radius-sm: 2px;
+  --vy-radius-md: 4px;
+  --vy-radius-lg: 6px;
+  --vy-radius-xl: 8px;
+  --vy-shadow-chrome: 0 0 0 1px var(--vy-border);
+}
+
+[data-skin="bench"] {
+  --vy-radius-sm: 2px;
+  --vy-radius-md: 4px;
+  --vy-radius-lg: 6px;
+  --vy-radius-xl: 8px;
+  --vy-shadow-chrome: none;
+  --vy-shadow-menu: 0 0 0 1px var(--vy-border);
+  --vy-chrome-surface: var(--vy-surface-2);
+}
+
+[data-skin="native"] {
+  --vy-font-sans: system-ui, sans-serif;
+  --vy-font-mono: ui-monospace, monospace;
+}
+
+[data-skin="gild"] {
+  --vy-radius-sm: 2px;
+  --vy-radius-md: 4px;
+  --vy-radius-lg: 6px;
+  --vy-radius-xl: 8px;
+  --vy-shadow-chrome: 0 0 0 1px var(--vy-border);
+}
+
+/*
+  Semantic tokens below are skin-tinted — see the [data-skin][data-theme] blocks.
+  The --vy-gray-* ramps that follow are legacy neutral references, kept for
+  backward compatibility.
+*/
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  --vy-gray-base: #ffffff;
+  --vy-gray-50: #fafafa;
+  --vy-gray-100: #f5f5f5;
+  --vy-gray-200: #e5e5e5;
+  --vy-gray-300: #d4d4d4;
+  --vy-gray-400: #a3a3a3;
+  --vy-gray-500: #737373;
+  --vy-gray-600: #525252;
+  --vy-gray-700: #404040;
+  --vy-gray-800: #262626;
+  --vy-gray-900: #171717;
+  --vy-gray-950: #0a0a0a;
+
+  --vy-bg: #FFFFFF;
+  --vy-card: #F7FAFC;
+  --vy-surface: #EEF5F9;
+  --vy-surface-2: #DCEAF2;
+  --vy-border: #C9DCE8;
+  --vy-border-strong: #9DBCCC;
+  --vy-muted: #4A5F6D;
+  --vy-secondary: #3A4E5A;
+  --vy-tertiary: #5E7484;
+  --vy-fg: #17232B;
+  --vy-fg-strong: #0B141A;
+  --vy-accent: #00638E;
+  --vy-accent-fg: #FFFFFF;
+  --vy-focus: #00638E;
+  --vy-accent-hover: #004A6B;
+  --vy-success: #15803d;
+  --vy-danger: #b91c1c;
+  --vy-warning: #a16207;
+  --vy-composer: #E9F2F7;
+  --vy-overlay: rgb(10 10 10 / 0.28);
+  --vy-window-close: #e81123;
+  --vy-window-close-fg: #ffffff;
+  --vy-shadow: 0 0 0 1px var(--vy-border);
+  --vy-shadow-menu: 0 0 0 1px var(--vy-border), 0 8px 24px rgb(10 10 10 / 0.08);
+  --vy-shadow-chrome: 0 10px 28px -14px rgb(10 10 10 / 0.12);
+
+  --vy-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --vy-duration: 160ms;
+  --vy-disabled-opacity: 0.45;
+  --vy-tracking: -0.01em;
+  --vy-tracking-tight: -0.012em;
+  --vy-tracking-body: -0.006em;
+  --vy-tracking-caps: 0.06em;
+  --leading-mono: 1.6;
+
+  /* Code editor syntax palette (VS Code Light+ hues). */
+  --vy-syntax-property: #0451a5;
+  --vy-syntax-string: #a31515;
+  --vy-syntax-number: #098658;
+  --vy-syntax-keyword: #0000ff;
+  --vy-syntax-comment: #008000;
+  --vy-syntax-func: #795e26;
+  --vy-syntax-type: #267f99;
+  --vy-syntax-variable: #001080;
+  --vy-syntax-constant: #0070c1;
+  --vy-syntax-escape: #811f3f;
+  --vy-tree-guide: color-mix(in srgb, var(--vy-tertiary) 40%, transparent);
+
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-dropdown: 20;
+  --z-tooltip: 50;
+  --z-drawer: 30;
+  --z-toast: 40;
+
+  --vy-font-scale: 1;
+  --vy-density-scale: 1;
+  --vy-control-min-h: calc(2rem * var(--vy-density-scale));
+  --vy-control-px: calc(0.75rem * var(--vy-density-scale));
+  --vy-control-gap: calc(0.375rem * var(--vy-density-scale));
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --vy-gray-base: #000000;
+  --vy-gray-50: #0a0a0a;
+  --vy-gray-100: #171717;
+  --vy-gray-200: #262626;
+  --vy-gray-300: #373737;
+  --vy-gray-400: #525252;
+  --vy-gray-500: #8a8a8a;
+  --vy-gray-600: #a3a3a3;
+  --vy-gray-700: #d4d4d4;
+  --vy-gray-800: #e5e5e5;
+  --vy-gray-900: #f5f5f5;
+  --vy-gray-950: #fafafa;
+
+  --vy-bg: #141414;
+  --vy-card: #1A1E20;
+  --vy-surface: #202528;
+  --vy-surface-2: #293034;
+  --vy-border: #303A40;
+  --vy-border-strong: #46545C;
+  --vy-muted: #9FB3BE;
+  --vy-secondary: #BCCDD6;
+  --vy-tertiary: #7E939F;
+  --vy-fg: #E8EDF0;
+  --vy-fg-strong: #F5F8FA;
+  --vy-accent: #4FB3E8;
+  --vy-accent-fg: #0A0A0A;
+  --vy-focus: #8CB9CC;
+  --vy-accent-hover: #8CB9CC;
+  --vy-success: #22c55e;
+  --vy-danger: #f87171;
+  --vy-warning: #fbbf24;
+  --vy-composer: #1B1F22;
+  --vy-overlay: rgb(0 0 0 / 0.55);
+  --vy-window-close: #e81123;
+  --vy-window-close-fg: #ffffff;
+  --vy-shadow: 0 0 0 1px var(--vy-border);
+  --vy-shadow-menu: 0 0 0 1px var(--vy-border), 0 10px 28px rgb(0 0 0 / 0.45);
+  --vy-shadow-chrome: 0 10px 28px -14px rgb(0 0 0 / 0.45);
+
+  --vy-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --vy-duration: 160ms;
+  --vy-disabled-opacity: 0.45;
+  --vy-tracking: -0.01em;
+  --vy-tracking-tight: -0.012em;
+  --vy-tracking-body: -0.006em;
+  --vy-tracking-caps: 0.06em;
+  --leading-mono: 1.6;
+
+  /* Code editor syntax palette (VS Code Dark+ hues). */
+  --vy-syntax-property: #9cdcfe;
+  --vy-syntax-string: #ce9178;
+  --vy-syntax-number: #b5cea8;
+  --vy-syntax-keyword: #569cd6;
+  --vy-syntax-comment: #6a9955;
+  --vy-syntax-func: #dcdcaa;
+  --vy-syntax-type: #4ec9b0;
+  --vy-syntax-variable: #9cdcfe;
+  --vy-syntax-constant: #4fc1ff;
+  --vy-syntax-escape: #d7ba7d;
+  --vy-tree-guide: color-mix(in srgb, var(--vy-tertiary) 32%, transparent);
+
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-dropdown: 20;
+  --z-tooltip: 50;
+  --z-drawer: 30;
+  --z-toast: 40;
+
+  --vy-font-scale: 1;
+  --vy-density-scale: 1;
+  --vy-control-min-h: calc(2rem * var(--vy-density-scale));
+  --vy-control-px: calc(0.75rem * var(--vy-density-scale));
+  --vy-control-gap: calc(0.375rem * var(--vy-density-scale));
+}
+
+[data-font-scale="small"] {
+  --vy-font-scale: 0.92;
+}
+
+[data-font-scale="large"] {
+  --vy-font-scale: 1.08;
+}
+
+[data-density="compact"] {
+  --vy-density-scale: 0.9;
+}
+
+[data-density="comfortable"] {
+  --vy-density-scale: 1.08;
+}
+
+[data-skin="proof"][data-theme="light"] {
+  --vy-bg: #F7F7F7;
+  --vy-card: #EFEFF2;
+  --vy-surface: #E8E9EE;
+  --vy-surface-2: #DDE0E6;
+  --vy-border: #C8CED6;
+  --vy-border-strong: #9EA4B2;
+  --vy-muted: #5B5E72;
+  --vy-secondary: #454860;
+  --vy-tertiary: #75788E;
+  --vy-fg: #272A3B;
+  --vy-fg-strong: #1C1F2C;
+  --vy-composer: #ECECF0;
+  --vy-accent: #736A86;
+  --vy-accent-fg: #FFFFFF;
+  --vy-accent-hover: #615A74;
+  --vy-focus: #736A86;
+}
+
+[data-skin="proof"][data-theme="dark"] {
+  --vy-bg: #272A3B;
+  --vy-card: #2E3247;
+  --vy-surface: #353A52;
+  --vy-surface-2: #3E445F;
+  --vy-border: #404763;
+  --vy-border-strong: #5A6180;
+  --vy-muted: #A9ADC4;
+  --vy-secondary: #C6C9DA;
+  --vy-tertiary: #8B8FA6;
+  --vy-fg: #E6E6EE;
+  --vy-fg-strong: #F1F1F7;
+  --vy-composer: #2E3247;
+  --vy-accent: #ACA3C4;
+  --vy-accent-fg: #0A0A0A;
+  --vy-accent-hover: #BEB6D4;
+  --vy-focus: #C8CED6;
+}
+
+[data-skin="bench"][data-theme="light"] {
+  --vy-bg: #FFFFFF;
+  --vy-card: #F2F9FE;
+  --vy-surface: #E6F3FC;
+  --vy-surface-2: #D0EAFB;
+  --vy-border: #BEE0F6;
+  --vy-border-strong: #8DC0E6;
+  --vy-muted: #3D566E;
+  --vy-secondary: #29405C;
+  --vy-tertiary: #5C7890;
+  --vy-fg: #0E1B2A;
+  --vy-fg-strong: #04040A;
+  --vy-composer: #ECF6FD;
+  --vy-accent: #0072CE;
+  --vy-accent-fg: #FFFFFF;
+  --vy-accent-hover: #005FAE;
+  --vy-focus: #0072CE;
+}
+
+[data-skin="bench"][data-theme="dark"] {
+  --vy-bg: #04040A;
+  --vy-card: #0B0F22;
+  --vy-surface: #101533;
+  --vy-surface-2: #182046;
+  --vy-border: #1F2956;
+  --vy-border-strong: #33407E;
+  --vy-muted: #94A6C6;
+  --vy-secondary: #B5C3DE;
+  --vy-tertiary: #7083A6;
+  --vy-fg: #DCE6F5;
+  --vy-fg-strong: #F0F5FC;
+  --vy-composer: #0B0F22;
+  --vy-accent: #0DE7FF;
+  --vy-accent-fg: #04040A;
+  --vy-accent-hover: #56EDFF;
+  --vy-focus: #00A6FF;
+}
+
+/* Native: branding-orange accent on warm grays; light theme gains its own focus hue. */
+[data-skin="native"][data-theme="light"] {
+  --vy-bg: #F9F9F9;
+  --vy-card: #F3F1EF;
+  --vy-surface: #ECE9E6;
+  --vy-surface-2: #E2DEDA;
+  --vy-border: #D6D1CC;
+  --vy-border-strong: #ADA69F;
+  --vy-muted: #646464;
+  --vy-secondary: #4E4E4E;
+  --vy-tertiary: #6F6F6F;
+  --vy-fg: #2B2B2B;
+  --vy-fg-strong: #1A1A1A;
+  --vy-composer: #F1EEEB;
+  --vy-accent: #C2410C;
+  --vy-accent-fg: #FFFFFF;
+  --vy-accent-hover: #A33A0B;
+  --vy-focus: #E85002;
+}
+
+[data-skin="native"][data-theme="dark"] {
+  --vy-bg: #1A1A1A;
+  --vy-card: #212020;
+  --vy-surface: #292827;
+  --vy-surface-2: #32302E;
+  --vy-border: #3A3836;
+  --vy-border-strong: #544F4B;
+  --vy-muted: #B0A9A2;
+  --vy-secondary: #CDC7C0;
+  --vy-tertiary: #8B857E;
+  --vy-fg: #F0EEEB;
+  --vy-fg-strong: #FAF9F7;
+  --vy-composer: #222120;
+  --vy-accent: #FB923C;
+  --vy-accent-fg: #0A0A0A;
+  --vy-accent-hover: #FCA85E;
+  --vy-focus: #FB923C;
+}
+
+/* Gild: mineral / engraved look — Alabaster light, Onyx dark; Blue Slate accent. */
+[data-skin="gild"][data-theme="light"] {
+  --vy-bg: #E5E4E2;
+  --vy-card: #EBEAE8;
+  --vy-surface: #F0EFED;
+  --vy-surface-2: #DDD9D5;
+  --vy-border: #C9CAC7;
+  --vy-border-strong: #A8ABAA;
+  --vy-fg: #1A1C1E;
+  --vy-fg-strong: #0A0A0A;
+  --vy-muted: #4A5259;
+  --vy-secondary: #3D4449;
+  --vy-tertiary: #6B747C;
+  --vy-composer: #E3E2E0;
+  --vy-accent: #536878;
+  --vy-accent-fg: #FFFFFF;
+  --vy-accent-hover: #43525F;
+  --vy-focus: #536878;
+}
+
+[data-skin="gild"][data-theme="dark"] {
+  --vy-bg: #0A0A0A;
+  --vy-card: #141618;
+  --vy-surface: #191C1E;
+  --vy-surface-2: #232629;
+  --vy-border: #2A2F34;
+  --vy-border-strong: #3A4045;
+  --vy-fg: #E5E4E2;
+  --vy-fg-strong: #F2F2F0;
+  --vy-muted: #98A4AD;
+  --vy-secondary: #B7C1C8;
+  --vy-tertiary: #7E8891;
+  --vy-composer: #141618;
+  --vy-accent: #8FA6B8;
+  --vy-accent-fg: #0A0A0A;
+  --vy-accent-hover: #A9BDCB;
+  --vy-focus: #A9BDCB;
+}
+
+/* Opacity-only — transform on ancestors ghosts contenteditable glyphs / spellcheck. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes chrome-drop-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@theme {
+  --font-sans: var(--vy-font-sans);
+  --font-mono: var(--vy-font-mono);
+
+  --text-3xs: calc(9px * var(--vy-font-scale));
+  --text-2xs: calc(10px * var(--vy-font-scale));
+  --text-caption: calc(11px * var(--vy-font-scale));
+  --text-xs: calc(12px * var(--vy-font-scale));
+  --text-sm: calc(13px * var(--vy-font-scale));
+  --text-md: calc(14px * var(--vy-font-scale));
+  --text-lg: calc(15px * var(--vy-font-scale));
+  --text-heading: calc(16px * var(--vy-font-scale));
+  --text-title: calc(17px * var(--vy-font-scale));
+  --leading-mono: 1.6;
+
+  --radius-sm: var(--vy-radius-sm);
+  --radius-md: var(--vy-radius-md);
+  --radius-lg: var(--vy-radius-lg);
+  --radius-xl: var(--vy-radius-xl);
+  --radius-pill: 999px;
+
+  --color-bg: var(--vy-bg);
+  --color-card: var(--vy-card);
+  --color-surface: var(--vy-surface);
+  --color-surface-2: var(--vy-surface-2);
+  --color-border: var(--vy-border);
+  --color-border-strong: var(--vy-border-strong);
+  --color-muted: var(--vy-muted);
+  --color-secondary: var(--vy-secondary);
+  --color-tertiary: var(--vy-tertiary);
+  --color-fg: var(--vy-fg);
+  --color-fg-strong: var(--vy-fg-strong);
+  --color-accent: var(--vy-accent);
+  --color-accent-fg: var(--vy-accent-fg);
+  --color-accent-hover: var(--vy-accent-hover);
+  --color-focus: var(--vy-focus);
+  --color-success: var(--vy-success);
+  --color-danger: var(--vy-danger);
+  --color-warning: var(--vy-warning);
+  --color-composer: var(--vy-composer);
+  --color-overlay: var(--vy-overlay);
+  --color-window-close: var(--vy-window-close);
+  --color-window-close-fg: var(--vy-window-close-fg);
+
+  --shadow-card: var(--vy-shadow);
+  --shadow-menu: var(--vy-shadow-menu);
+
+  --ease-vy: var(--vy-ease);
+  --default-transition-duration: var(--vy-duration);
+  --default-transition-timing-function: var(--vy-ease);
+
+  --animate-fade-in: fade-in var(--vy-duration) var(--vy-ease);
+  --animate-chrome-drop-in: chrome-drop-in var(--vy-duration) var(--vy-ease);
+  --animate-slide-in-left: slide-in-left var(--vy-duration) var(--vy-ease);
+
+  /* Motion system — operate/product surface: anchored emergence, state feedback */
+  --animate-menu-in: vy-pop-in var(--vy-duration) var(--vy-ease) both;
+  --animate-tip-in: vy-tip-in 120ms var(--vy-ease) both;
+  --animate-toast-in: vy-toast-in 220ms var(--vy-ease) both;
+  --animate-toast-out: vy-toast-out 150ms var(--vy-ease) both;
+  --animate-dialog-in: vy-dialog-in 200ms var(--vy-ease) both;
+
+  --z-index-sticky: var(--z-sticky);
+  --z-index-dropdown: var(--z-dropdown);
+  --z-index-tooltip: var(--z-tooltip);
+  --z-index-drawer: var(--z-drawer);
+  --z-index-toast: var(--z-toast);
+}
+
+@utility app-region-drag {
+  -webkit-app-region: drag;
+}
+
+@utility app-region-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+@utility overflow-anchor-auto {
+  overflow-anchor: auto;
+}
+
+@utility overflow-anchor-none {
+  overflow-anchor: none;
+}
+
+@utility vy-transition {
+  transition-property: background-color, border-color, color, opacity, box-shadow, transform;
+  transition-duration: var(--vy-duration);
+  transition-timing-function: var(--vy-ease);
+}
+
+@utility vy-chrome {
+  border-radius: var(--vy-radius-xl);
+  border-width: var(--vy-chrome-border-width);
+  border-style: solid;
+  border-color: var(--vy-chrome-border-color);
+}
+
+@utility vy-disabled-state {
+  cursor: not-allowed;
+  opacity: var(--vy-disabled-opacity);
+}
+
+/** Softens the cut where clamped content is truncated. */
+@utility mask-fade-bottom {
+  mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
+}
+
+/** Diff rows: tint + gutter sign (+/−) mark add/del — never hue alone. */
+@utility diff-row-add {
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+}
+
+@utility diff-row-del {
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+}
+
+@utility vy-focus-ring {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+@layer base {
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-bg font-sans text-sm text-fg antialiased;
+    line-height: 1.4;
+    letter-spacing: var(--vy-tracking-body);
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Contenteditable under transform/tracking paints ghosted glyphs + drifted spellcheck. */
+  [data-composer-shell] {
+    transform: none;
+  }
+
+  input,
+  textarea,
+  [contenteditable]:not([contenteditable='false']) {
+    letter-spacing: 0;
+    text-rendering: auto;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  input:disabled,
+  textarea:disabled,
+  select:disabled {
+    cursor: not-allowed;
+  }
+
+  textarea {
+    resize: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: var(--color-border-strong);
+    color: var(--color-fg-strong);
+  }
+
+  /*
+    Custom webkit scrollbars everywhere. Never pair these with standard
+    `scrollbar-width` / `scrollbar-color`: since Chromium 121 setting those
+    disables ::-webkit-* styling and falls back to native scrollbars
+    (chunky, with arrow buttons on Windows).
+  */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-button,
+  *::-webkit-scrollbar-corner {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--vy-border-strong);
+    border: 2px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--vy-muted);
+  }
+
+  /* Sidebar chat list — always-visible custom scrollbar. */
+  .sidebar-scroll {
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .sidebar-scroll-x {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .sidebar-scroll-x::-webkit-scrollbar {
+    height: 8px;
+  }
+
+  .sidebar-scroll-x::-webkit-scrollbar-thumb {
+    background-color: var(--vy-border-strong);
+    border-radius: 4px;
+  }
+
+  .sidebar-scroll-x::-webkit-scrollbar-thumb:hover {
+    background-color: var(--vy-muted);
+  }
+
+  .sidebar-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar-thumb {
+    background-color: var(--vy-border-strong);
+    border-radius: 6px;
+    min-height: 2.5rem;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: var(--vy-muted);
+  }
+
+  .files-panel-scroll {
+    overflow: auto;
+    overscroll-behavior: contain;
+    /* Tree rows are fixed-height; snap so a row never clips at the pane edge. */
+    scroll-snap-type: y proximity;
+  }
+
+  .files-panel-scroll li[data-index] {
+    scroll-snap-align: start;
+  }
+
+  .files-panel-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .files-panel-scroll::-webkit-scrollbar-thumb {
+    background-color: var(--vy-border-strong);
+    border-radius: 6px;
+  }
+
+  .files-panel-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: var(--vy-muted);
+  }
+
+  /* Snap vertical scrolling to whole lines so the top row never clips mid-glyph. */
+  [data-code-editor] .cm-scroller {
+    scroll-snap-type: y proximity;
+  }
+
+  [data-code-editor] .cm-line {
+    scroll-snap-align: start;
+  }
+
+  [data-code-editor][data-word-wrap='true'] .cm-scroller {
+    overflow-x: hidden;
+  }
+
+  [data-code-editor][data-word-wrap='true'] .cm-line {
+    overflow-wrap: anywhere;
+  }
+
+  [data-code-editor] .cm-scroller::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  [data-code-editor] .cm-scroller::-webkit-scrollbar-thumb {
+    background-color: var(--vy-border-strong);
+    border-radius: 4px;
+  }
+
+  [data-code-editor] .cm-scroller::-webkit-scrollbar-thumb:hover {
+    background-color: var(--vy-muted);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html:focus-within {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@utility sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+@utility skip-link {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+
+  &:focus-visible {
+    position: fixed;
+    left: 0.5rem;
+    top: 0.5rem;
+    z-index: 9999;
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 0.5rem 0.75rem;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+    border-radius: 0.375rem;
+    background: var(--color-surface);
+    color: var(--color-fg);
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :focus-visible,
+  .skip-link:focus-visible {
+    outline-width: 3px;
+  }
+}
+
+@media (forced-colors: active) {
+  :focus-visible,
+  .skip-link:focus-visible {
+    outline: 2px solid Highlight;
+  }
+}
+
+.markdown-body {
+  &> :first-child {
+    margin-top: 0;
+  }
+
+  &> :last-child {
+    margin-bottom: 0;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    margin: 0.85em 0 0.4em;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: var(--vy-tracking-tight);
+    color: var(--color-fg-strong);
+  }
+
+  h1 {
+    font-size: 1.4em;
+  }
+
+  h2 {
+    margin-top: 1.4em;
+    font-size: 1.3em;
+  }
+
+  h3 {
+    margin-top: 1.1em;
+    font-size: 1.15em;
+  }
+
+  h4,
+  h5,
+  h6 {
+    font-size: 1em;
+  }
+
+  hr {
+    margin: 1.1em 0;
+    border: 0;
+    border-top: 1px solid var(--color-border);
+  }
+
+  img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+  }
+
+  input[type='checkbox'] {
+    margin-right: 0.4em;
+    vertical-align: middle;
+  }
+
+  p {
+    margin: 0.6em 0;
+  }
+
+  /* Tailwind preflight strips list markers globally; restore them for prose. */
+  ul,
+  ol {
+    margin: 0.6em 0;
+    padding-left: 1.35rem;
+  }
+
+  ul {
+    list-style: disc outside;
+  }
+
+  ol {
+    list-style: decimal outside;
+  }
+
+  ul ul {
+    list-style: circle outside;
+  }
+
+  ul ul ul {
+    list-style: square outside;
+  }
+
+  li {
+    margin: 0.4em 0;
+  }
+
+  li::marker {
+    color: var(--color-tertiary);
+  }
+
+  li>ul,
+  li>ol {
+    margin: 0.25em 0;
+  }
+
+  li.task-list-item {
+    list-style: none;
+    margin-left: 0;
+  }
+
+  blockquote {
+    margin: 0.6em 0;
+    padding: 0.1em 0 0.1em 0.85rem;
+    border-left: 2px solid color-mix(in srgb, var(--color-tertiary) 60%, transparent);
+    color: var(--color-secondary);
+  }
+
+  a {
+    color: var(--color-muted);
+    text-decoration: underline;
+  }
+
+  del {
+    color: var(--color-muted);
+  }
+
+  code {
+    font-family: var(--font-mono);
+  }
+
+  pre code {
+    display: block;
+  }
+
+  .markdown-table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  table {
+    border-collapse: collapse;
+    margin: 0;
+    width: max-content;
+    min-width: 100%;
+    font-size: 0.92em;
+  }
+
+  th,
+  td {
+    border: 1px solid var(--color-border);
+    padding: 0.35em 0.65em;
+    text-align: left;
+    vertical-align: top;
+    /* Bound column growth so one long cell can't starve the rest; wrap at word
+       boundaries (never mid-token). Horizontal scroll remains the fallback. */
+    max-width: 22rem;
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+
+  th {
+    background: var(--color-surface);
+    color: var(--color-fg-strong);
+    font-weight: 600;
+  }
+
+  tbody tr:nth-child(even) td {
+    background: color-mix(in srgb, var(--color-surface) 55%, transparent);
+  }
+}
+
+/*
+ * Transcript rows: keep a scrolled-to row clear of the scrollport's top edge.
+ *
+ * Find-in-transcript and turn-panel jumps land a row at the very top of the
+ * container, which sliced the first text line through the glyphs. Reserving
+ * scroll margin places the row fully inside the viewport instead.
+ */
+[data-transcript-row] {
+  scroll-margin-top: 0.5rem;
+  scroll-margin-bottom: 0.5rem;
+}
+
+/* Plan dock: wide tables scroll horizontally (readable cells); task lists status-only. */
+[data-plan-panel] .markdown-body {
+  h1,
+  h2,
+  h3 {
+    scroll-margin-top: 0.75rem;
+  }
+
+  h1 {
+    margin-top: 0.35em;
+  }
+
+  h2 {
+    margin-top: 1.1em;
+    padding-top: 0.15em;
+  }
+
+  /* Wrap long prose inside bounded columns; scroll only when many columns
+     still overflow. Never shatter mid-token (word-break stays normal). */
+  table {
+    width: max-content;
+    min-width: 100%;
+    max-width: none;
+  }
+
+  th,
+  td {
+    max-width: 22rem;
+    overflow-wrap: break-word;
+    word-break: normal;
+    min-width: 5.5rem;
+  }
+
+  /* Narrow first column (# / id) when present. */
+  th:first-child,
+  td:first-child {
+    min-width: 2.75rem;
+    white-space: nowrap;
+  }
+
+  /* Status / last column: keep FIXED etc. on one line when short. */
+  th:last-child,
+  td:last-child {
+    min-width: 7rem;
+  }
+
+  td strong {
+    color: var(--color-fg-strong);
+    font-weight: 600;
+  }
+
+  input[type='checkbox'] {
+    pointer-events: none;
+    accent-color: var(--color-tertiary);
+  }
+}
+
+[data-plan-panel] .markdown-body input[type='checkbox'] {
+  /* Visual: read-only checklist status (no write-back IPC). */
+  opacity: 0.9;
+}
+
+@keyframes vy-shimmer {
+  from {
+    background-position: 100% center;
+  }
+
+  to {
+    background-position: 0% center;
+  }
+}
+
+.vy-text-shimmer {
+  display: inline-block;
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  background-image: linear-gradient(90deg,
+      var(--color-tertiary) 0%,
+      var(--color-tertiary) 40%,
+      var(--color-muted) 50%,
+      var(--color-tertiary) 60%,
+      var(--color-tertiary) 100%);
+  background-repeat: no-repeat;
+}
+
+.vy-text-shimmer--active {
+  animation: vy-shimmer var(--vy-shimmer-duration, 2s) linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vy-text-shimmer--active {
+    animation: none;
+    color: inherit;
+    background-image: none;
+    background-clip: unset;
+    -webkit-background-clip: unset;
+  }
+}
+
+@keyframes tool-stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Emergence from a trigger — scale settles while a few px of rise resolve.
+   transform-origin is set per-placement (origin-bottom / origin-top) so the
+   panel appears to grow out of the control, not float in from nowhere. */
+@keyframes vy-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Tooltip: brief, near-invisible settle. Outer wrapper keeps the
+   translate-based centering; this only scales the inner content. */
+@keyframes vy-tip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Toast: state feedback for the bottom-right stack. Enters from the right
+   (where it lives) and exits the same way, so a dismissed notice reads as
+   "slid away" rather than blinked out. */
+@keyframes vy-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes vy-toast-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+
+  to {
+    opacity: 0;
+    transform: translateX(16px) scale(0.98);
+  }
+}
+
+@keyframes vy-toast-progress {
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* Dialog panel: a calm drop-and-settle instead of an instant pop. */
+@keyframes vy-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.tool-status-morph {
+  transition-property: color, opacity;
+  transition-duration: var(--vy-duration);
+  transition-timing-function: var(--vy-ease);
+}
+
+/* Height disclosure — keep content mounted while grid rows animate 0fr ↔ 1fr. */
+.tool-expand {
+  display: grid;
+  grid-template-rows: 0fr;
+}
+
+.tool-expand[data-open='true'] {
+  grid-template-rows: 1fr;
+}
+
+.tool-expand-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tool-stagger-enter {
+    animation: tool-stagger-in var(--vy-duration) var(--vy-ease) both;
+    animation-delay: calc(min(var(--stagger-index, 0), 8) * 40ms);
+  }
+
+  .tool-body-enter {
+    animation: tool-stagger-in 120ms var(--vy-ease) both;
+  }
+
+  .tool-expand {
+    transition: grid-template-rows var(--vy-duration) var(--vy-ease);
+  }
+}
+
+/* Native <dialog> (useNativeDialog) has no entrance by default — showModal
+   just appears. Animate the open transition so it matches the non-native
+   panel. Exit stays instant (close() removes [open] immediately). */
+dialog[open] {
+  animation: vy-dialog-in 200ms var(--vy-ease) both;
+}
+
+@media (max-width: 639px) {
+  [data-vy-text-entry] {
+    min-height: 2.75rem;
+    font-size: 1rem;
+  }
+}
+
+/* Hero empty-state mode atmosphere — subtle composer framing only. */
+[data-chat-hero][data-hero-mode='agent'] [data-composer-shell] {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 18%, transparent),
+    var(--vy-shadow-floating-bottom, 0 8px 24px rgb(0 0 0 / 0.18));
+}
+
+[data-chat-hero][data-hero-mode='ask'] [data-composer-shell] {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-border) 55%, transparent),
+    var(--vy-shadow-floating-bottom, 0 8px 24px rgb(0 0 0 / 0.18));
+}
+
+[data-chat-hero][data-hero-mode='plan'] [data-composer-hero] {
+  position: relative;
+}
+
+[data-chat-hero][data-hero-mode='plan'] [data-composer-hero]::before {
+  content: 'Goal\A Scope\A Risks\A Todos';
+  position: absolute;
+  inset: -1.5rem 0 auto;
+  z-index: 0;
+  pointer-events: none;
+  white-space: pre;
+  text-align: left;
+  font-size: 0.625rem;
+  line-height: 2.4;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-fg) 4%, transparent);
+}
+
+[data-chat-hero][data-hero-mode='plan'] [data-composer-hero] > * {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-contrast: more) {
+  [data-chat-hero][data-hero-mode='agent'] [data-composer-shell],
+  [data-chat-hero][data-hero-mode='ask'] [data-composer-shell] {
+    box-shadow: 0 0 0 2px var(--color-border);
+  }
+
+  [data-chat-hero][data-hero-mode='plan'] [data-composer-hero]::before {
+    color: color-mix(in srgb, var(--color-fg) 12%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-chat-hero][data-hero-mode='plan'] [data-composer-hero]::before {
+    content: none;
+  }
+}
+
+/* Agent context card — empty-session "what the agent knows" strip. */
+.agent-context-card {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 4px;
+  max-width: 40rem;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface, var(--vy-surface-2)) 65%, transparent);
+  box-shadow: var(--vy-shadow-chrome);
+}
+
+.acc-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-border) 7%, transparent);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.acc-sep {
+  width: 1px;
+  align-self: center;
+  background: color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+
+.acc-icon,
+.acc-text {
+  color: var(--color-muted);
+}
+
+.acc-text-primary {
+  color: var(--color-secondary);
+  font-weight: 500;
+}
+
+.acc-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--color-muted);
+}
+
+.acc-dot-ready {
+  background: var(--color-success);
+}
+
+.acc-dot-building {
+  background: var(--color-warning);
+  animation: acc-dot-pulse 1.6s var(--vy-ease, ease) infinite;
+}
+
+.acc-dot-degraded {
+  background: var(--color-warning);
+}
+
+.acc-dot-off {
+  background: var(--color-muted);
+}
+
+@keyframes acc-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+[data-agent-context-card-skeleton] .acc-skel-chip {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--color-border) 16%, transparent);
+  color: transparent;
+}
+
+@media (prefers-contrast: more) {
+  .agent-context-card {
+    border: 1px solid var(--color-border-strong);
+  }
+
+  .acc-segment {
+    border: 1px solid var(--color-border);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .acc-dot-building {
+    animation: none;
+  }
+}
