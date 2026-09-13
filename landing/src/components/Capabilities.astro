@@ -1,0 +1,89 @@
+---
+const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
+
+const capabilities = [
+  {
+    title: '60 workspace tools',
+    desc: 'Read/edit/search, glob, grep, codebase_search, list_dir, and terminal access — all sandboxed to the workspace.',
+  },
+  {
+    title: 'Live agent browser',
+    desc: 'Navigate, snapshot, click, type, and wait on any page from inside a run.',
+  },
+  {
+    title: 'Interactive terminal dock',
+    desc: 'xterm-based terminal with a real PTY via node-pty when available.',
+  },
+  {
+    title: 'Git integration',
+    desc: 'Changes panel, commits, and an optional GitHub pull-request panel.',
+  },
+  {
+    title: 'Multi-provider chat',
+    desc: 'OpenAI, Anthropic, Gemini, Ollama, DeepSeek, Groq, OpenRouter, xAI, Modal, Mistral — and any OpenAI-compatible endpoint.',
+  },
+  {
+    title: 'Context management',
+    desc: 'Budget layers, tool-result trimming, structured compaction, and a live context-window meter.',
+  },
+  {
+    title: 'Long-term memory',
+    desc: 'Plain markdown memory under .vyotiq/memory, injected into every run.',
+  },
+  {
+    title: 'Marketplace',
+    desc: 'Install MCPs, Skills, Rules, and Packages.',
+  },
+];
+---
+
+<section id="capabilities" class="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
+  <p class="font-mono text-[11px] uppercase tracking-[0.25em] text-zinc-500">Capabilities</p>
+  <h2 class="mt-4 max-w-2xl text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+    Everything the agent needs to work a real repo
+  </h2>
+  <p class="mt-4 max-w-2xl text-base leading-relaxed text-zinc-400 sm:text-lg">
+    Agent V pairs a natural-language agent harness with 60 workspace tools, a live agent browser,
+    and a full terminal dock — all sandboxed to your workspace.
+  </p>
+
+  <div class="mt-12 grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-4">
+    {
+      capabilities.map((c) => (
+        <div>
+          <h3 class="text-sm font-semibold text-white">{c.title}</h3>
+          <p class="mt-2 text-sm leading-relaxed text-zinc-400">{c.desc}</p>
+        </div>
+      ))
+    }
+  </div>
+
+  <a
+    href={`${REPO}#highlights`}
+    target="_blank"
+    rel="noopener noreferrer"
+    class="mt-12 inline-flex items-center gap-1.5 text-sm text-zinc-400 transition hover:text-white"
+  >
+    See the full README
+    <span aria-hidden="true">→</span>
+  </a>
+
+  <div id="security" class="mt-16 rounded-2xl border border-white/10 bg-white/[0.02] p-6 sm:p-8">
+    <h3 class="text-sm font-semibold text-white">Security by default</h3>
+    <p class="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-400">
+      Agent V runs with <code class="font-mono text-xs text-zinc-300">contextIsolation: true</code>,
+      <code class="font-mono text-xs text-zinc-300">sandbox: true</code>, and
+      <code class="font-mono text-xs text-zinc-300">nodeIntegration: false</code> — paths are
+      sandboxed to the workspace root.
+    </p>
+    <a
+      href={`${REPO}#security`}
+      target="_blank"
+      rel="noopener noreferrer"
+      class="mt-4 inline-flex items-center gap-1.5 text-sm text-zinc-400 transition hover:text-white"
+    >
+      Learn about security
+      <span aria-hidden="true">→</span>
+    </a>
+  </div>
+</section>
