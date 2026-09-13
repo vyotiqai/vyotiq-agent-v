@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "kind": "plugin",
+  "id": "electron-app",
+  "name": "Electron app",
+  "version": "1.0.0",
+  "description": "Vyotiq plugin for Electron + Vite apps: workflow skill and main/renderer conventions.",
+  "mcp": [],
+  "skills": ["skills/electron-workflow"],
+  "rules": ["rules/electron.md"]
+}

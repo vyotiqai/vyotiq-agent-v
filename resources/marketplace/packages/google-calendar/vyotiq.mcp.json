@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "google-calendar",
+  "name": "Google Calendar",
+  "version": "1.0.0",
+  "description": "Official hosted Google Calendar MCP (HTTP).",
+  "transport": "http",
+  "url": "https://calendarmcp.googleapis.com/mcp/v1"
+}

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "github",
+  "name": "GitHub",
+  "version": "1.0.0",
+  "description": "Official hosted GitHub MCP (HTTP).",
+  "transport": "http",
+  "url": "https://api.githubcopilot.com/mcp/"
+}

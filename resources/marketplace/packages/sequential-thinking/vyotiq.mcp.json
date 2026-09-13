@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "sequential-thinking",
+  "name": "Sequential thinking",
+  "version": "1.0.0",
+  "description": "Official MCP sequential-thinking server (stdio via npx).",
+  "transport": "stdio",
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+  "env": {}
+}

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "kind": "plugin",
+  "id": "devtools",
+  "name": "Devtools",
+  "version": "1.0.0",
+  "description": "Vyotiq starter plugin with a debug-checklist skill and workspace conventions rule.",
+  "mcp": [],
+  "skills": ["skills/debug-checklist"],
+  "rules": ["rules/conventions.md"]
+}

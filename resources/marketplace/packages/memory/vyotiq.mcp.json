@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "memory",
+  "name": "Memory",
+  "version": "1.0.0",
+  "description": "Official MCP knowledge-graph memory server (stdio via npx).",
+  "transport": "stdio",
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-memory"],
+  "env": {}
+}

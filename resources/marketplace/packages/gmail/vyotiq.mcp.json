@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "gmail",
+  "name": "Gmail",
+  "version": "1.0.0",
+  "description": "Official hosted Gmail MCP (HTTP).",
+  "transport": "http",
+  "url": "https://gmailmcp.googleapis.com/mcp/v1"
+}

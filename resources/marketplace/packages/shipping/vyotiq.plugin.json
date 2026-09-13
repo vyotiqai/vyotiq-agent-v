@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "kind": "plugin",
+  "id": "shipping",
+  "name": "Shipping",
+  "version": "1.0.0",
+  "description": "Vyotiq plugin for commits, PRs, and tests: nested skills plus shipping conventions.",
+  "mcp": [],
+  "skills": [
+    "skills/commit-message",
+    "skills/pr-description",
+    "skills/test-writing"
+  ],
+  "rules": ["rules/shipping.md"]
+}

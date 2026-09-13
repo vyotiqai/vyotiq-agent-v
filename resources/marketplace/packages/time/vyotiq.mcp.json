@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "time",
+  "name": "Time",
+  "version": "1.0.0",
+  "description": "Official MCP time server (stdio via uvx). Requires uv on PATH. Pins mcp<2 for SDK compatibility.",
+  "transport": "stdio",
+  "command": "uvx",
+  "args": ["--with", "mcp<2", "mcp-server-time"],
+  "env": {
+    "PYTHONIOENCODING": "utf-8"
+  }
+}

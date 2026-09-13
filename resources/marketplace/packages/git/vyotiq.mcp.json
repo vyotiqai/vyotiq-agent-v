@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "git",
+  "name": "Git",
+  "version": "1.0.0",
+  "description": "Official MCP git server (stdio via uvx). Requires uv on PATH.",
+  "transport": "stdio",
+  "command": "uvx",
+  "args": ["--with", "mcp<2", "mcp-server-git", "--repository", "."],
+  "env": {}
+}

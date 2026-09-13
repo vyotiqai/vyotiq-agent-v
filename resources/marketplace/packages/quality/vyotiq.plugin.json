@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "kind": "plugin",
+  "id": "quality",
+  "name": "Quality",
+  "version": "1.0.0",
+  "description": "Vyotiq plugin for code and security review: nested skills plus quality conventions.",
+  "mcp": [],
+  "skills": ["skills/code-review", "skills/security-review"],
+  "rules": ["rules/quality.md"]
+}
