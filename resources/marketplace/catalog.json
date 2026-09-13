@@ -1,0 +1,413 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    {
+      "id": "github",
+      "name": "GitHub",
+      "version": "1.0.0",
+      "description": "Official hosted GitHub MCP. Repos, search, Actions, and GitHub API tools.",
+      "kind": "mcp",
+      "bundledPath": "github",
+      "source": "bundled",
+      "publisher": "GitHub",
+      "verified": true,
+      "sections": [
+        "discover",
+        "featured"
+      ],
+      "category": "developer",
+      "featuredRank": 1,
+      "iconPath": "icons/github.svg",
+      "installable": true
+    },
+    {
+      "id": "gmail",
+      "name": "Gmail",
+      "version": "1.0.0",
+      "description": "Official hosted Gmail MCP. Search, read, and draft email.",
+      "kind": "mcp",
+      "bundledPath": "gmail",
+      "source": "bundled",
+      "publisher": "Google",
+      "verified": true,
+      "sections": [
+        "discover",
+        "featured"
+      ],
+      "category": "productivity",
+      "featuredRank": 2,
+      "iconPath": "icons/gmail.svg",
+      "installable": true
+    },
+    {
+      "id": "google-drive",
+      "name": "Google Drive",
+      "version": "1.0.0",
+      "description": "Official hosted Google Drive MCP. Search, read, and manage Drive files.",
+      "kind": "mcp",
+      "bundledPath": "google-drive",
+      "source": "bundled",
+      "publisher": "Google",
+      "verified": true,
+      "sections": [
+        "discover",
+        "featured"
+      ],
+      "category": "productivity",
+      "featuredRank": 3,
+      "iconPath": "icons/google-drive.svg",
+      "installable": true
+    },
+    {
+      "id": "google-calendar",
+      "name": "Google Calendar",
+      "version": "1.0.0",
+      "description": "Official hosted Google Calendar MCP. List, read, and manage calendar events.",
+      "kind": "mcp",
+      "bundledPath": "google-calendar",
+      "source": "bundled",
+      "publisher": "Google",
+      "verified": true,
+      "sections": [
+        "discover",
+        "featured"
+      ],
+      "category": "productivity",
+      "featuredRank": 4,
+      "iconPath": "icons/google-calendar.svg",
+      "installable": true
+    },
+    {
+      "id": "filesystem",
+      "name": "Filesystem",
+      "version": "1.0.0",
+      "description": "Official MCP filesystem server via npx (stdio). Scopes tools to the workspace when configured.",
+      "kind": "mcp",
+      "bundledPath": "filesystem",
+      "source": "bundled",
+      "publisher": "Model Context Protocol",
+      "verified": true,
+      "sections": [
+        "featured"
+      ],
+      "category": "infrastructure",
+      "featuredRank": 5,
+      "iconPath": "icons/filesystem.svg",
+      "installable": true
+    },
+    {
+      "id": "memory",
+      "name": "Memory",
+      "version": "1.0.0",
+      "description": "Official MCP knowledge-graph memory server via npx. Persist entities and relations across chats.",
+      "kind": "mcp",
+      "bundledPath": "memory",
+      "source": "bundled",
+      "publisher": "Model Context Protocol",
+      "verified": true,
+      "sections": [
+        "featured"
+      ],
+      "category": "infrastructure",
+      "featuredRank": 6,
+      "iconPath": "icons/memory.svg",
+      "installable": true
+    },
+    {
+      "id": "sequential-thinking",
+      "name": "Sequential thinking",
+      "version": "1.0.0",
+      "description": "Official MCP sequential-thinking server via npx. Structured, reflective problem-solving tools.",
+      "kind": "mcp",
+      "bundledPath": "sequential-thinking",
+      "source": "bundled",
+      "publisher": "Model Context Protocol",
+      "verified": true,
+      "sections": [
+        "featured"
+      ],
+      "category": "infrastructure",
+      "featuredRank": 7,
+      "iconPath": "icons/sequential-thinking.svg",
+      "installable": true
+    },
+    {
+      "id": "fetch",
+      "name": "Fetch",
+      "version": "1.0.0",
+      "description": "Official MCP fetch server via uvx (requires uv on PATH). Fetch and convert web content for the agent. Pins mcp Python SDK <2 for compatibility.",
+      "kind": "mcp",
+      "bundledPath": "fetch",
+      "source": "bundled",
+      "publisher": "Model Context Protocol",
+      "verified": true,
+      "sections": [
+        "featured"
+      ],
+      "category": "infrastructure",
+      "featuredRank": 8,
+      "iconPath": "icons/fetch.svg",
+      "installable": true
+    },
+    {
+      "id": "git",
+      "name": "Git",
+      "version": "1.0.0",
+      "description": "Official MCP git server via uvx (requires uv on PATH). Status, diffs, and repo tools scoped to the workspace.",
+      "kind": "mcp",
+      "bundledPath": "git",
+      "source": "bundled",
+      "publisher": "Model Context Protocol",
+      "verified": true,
+      "sections": [
+        "featured"
+      ],
+      "category": "infrastructure",
+      "featuredRank": 9,
+      "iconPath": "icons/git.svg",
+      "installable": true
+    },
+    {
+      "id": "time",
+      "name": "Time",
+      "version": "1.0.0",
+      "description": "Official MCP time server via uvx (requires uv on PATH). Timezone conversion and current time tools. Pins mcp Python SDK <2 for compatibility.",
+      "kind": "mcp",
+      "bundledPath": "time",
+      "source": "bundled",
+      "publisher": "Model Context Protocol",
+      "verified": true,
+      "sections": [
+        "featured"
+      ],
+      "category": "infrastructure",
+      "featuredRank": 10,
+      "iconPath": "icons/time.svg",
+      "installable": true
+    },
+    {
+      "id": "implement-feature",
+      "name": "Implement feature",
+      "version": "1.0.0",
+      "description": "Plan and implement a requested feature in the current project using its existing architecture, conventions, and tests.",
+      "kind": "skill",
+      "bundledPath": "implement-feature",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "sections": [
+        "featured"
+      ],
+      "category": "skills",
+      "featuredRank": 11,
+      "installable": true
+    },
+    {
+      "id": "fix-bug",
+      "name": "Fix bug",
+      "version": "1.0.0",
+      "description": "Reproduce, diagnose, and fix a bug or regression in the current project with a minimal evidence-based change.",
+      "kind": "skill",
+      "bundledPath": "fix-bug",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "sections": [
+        "featured"
+      ],
+      "category": "skills",
+      "featuredRank": 12,
+      "installable": true
+    },
+    {
+      "id": "review-code",
+      "name": "Review code",
+      "version": "1.0.0",
+      "description": "Review current code changes for correctness, regressions, security, maintainability, and missing tests.",
+      "kind": "skill",
+      "bundledPath": "review-code",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "sections": [
+        "featured"
+      ],
+      "category": "skills",
+      "featuredRank": 13,
+      "installable": true
+    },
+    {
+      "id": "write-tests",
+      "name": "Write tests",
+      "version": "1.0.0",
+      "description": "Add or improve focused automated tests for the current project using its existing test framework and conventions.",
+      "kind": "skill",
+      "bundledPath": "write-tests",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "sections": [
+        "featured"
+      ],
+      "category": "skills",
+      "featuredRank": 14,
+      "installable": true
+    },
+    {
+      "id": "explain-code",
+      "name": "Explain code",
+      "version": "1.0.0",
+      "description": "Explain how the current project works using evidence from its code, contracts, data flow, and tests.",
+      "kind": "skill",
+      "bundledPath": "explain-code",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "sections": [
+        "featured"
+      ],
+      "category": "skills",
+      "featuredRank": 15,
+      "installable": true
+    },
+    {
+      "id": "create-skill",
+      "name": "Create skill",
+      "version": "1.0.0",
+      "description": "Create Agent Skills with valid SKILL.md structure, clear scope, useful instructions, and deterministic validation.",
+      "kind": "skill",
+      "bundledPath": "create-skill",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "category": "skills",
+      "installable": true
+    },
+    {
+      "id": "goal",
+      "name": "Goal",
+      "version": "1.0.0",
+      "description": "Keep working a long-lived chat objective until it is complete. Use when the user sets /goal or asks to persist until an outcome is done. Pair with /loop. Never pause yourself.",
+      "kind": "skill",
+      "bundledPath": "goal",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "category": "skills",
+      "installable": true
+    },
+    {
+      "id": "frontend-design",
+      "name": "Frontend design",
+      "version": "1.0.0",
+      "description": "Design and implement UI layout, hierarchy, motion, and brand-facing screens without generic clutter.",
+      "kind": "skill",
+      "bundledPath": "frontend-design",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "category": "skills",
+      "installable": true
+    },
+    {
+      "id": "accessibility",
+      "name": "Accessibility",
+      "version": "1.0.0",
+      "description": "Audit and improve UI accessibility: semantic HTML, keyboard, focus, contrast, screen-reader names, and motion preferences.",
+      "kind": "skill",
+      "bundledPath": "accessibility",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "category": "skills",
+      "installable": true
+    },
+    {
+      "id": "api-design",
+      "name": "API design",
+      "version": "1.0.0",
+      "description": "Design or change HTTP, IPC, and SDK API contracts, schemas, errors, and versioning.",
+      "kind": "skill",
+      "bundledPath": "api-design",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "category": "skills",
+      "installable": true
+    },
+    {
+      "id": "persona-builder",
+      "name": "Persona builder",
+      "version": "1.0.0",
+      "description": "Draft a custom agent persona and tone for Agent V within the settings limits, confirm with you, and hand over paste-ready text for Settings.",
+      "kind": "skill",
+      "bundledPath": "persona-builder",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "sections": [
+        "featured"
+      ],
+      "category": "skills",
+      "featuredRank": 20,
+      "installable": true
+    },
+    {
+      "id": "devtools",
+      "name": "Devtools",
+      "version": "1.0.0",
+      "description": "Vyotiq starter plugin: a debug-checklist skill and workspace conventions rule.",
+      "kind": "plugin",
+      "bundledPath": "devtools",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "verified": true,
+      "sections": [
+        "featured"
+      ],
+      "category": "plugins",
+      "featuredRank": 16,
+      "installable": true
+    },
+    {
+      "id": "electron-app",
+      "name": "Electron app",
+      "version": "1.0.0",
+      "description": "Vyotiq plugin for Electron + Vite apps: a workflow skill and main/renderer conventions rule.",
+      "kind": "plugin",
+      "bundledPath": "electron-app",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "verified": true,
+      "sections": [
+        "featured"
+      ],
+      "category": "plugins",
+      "featuredRank": 17,
+      "installable": true
+    },
+    {
+      "id": "quality",
+      "name": "Quality",
+      "version": "1.0.0",
+      "description": "Vyotiq plugin for code and security review: nested skills plus quality conventions.",
+      "kind": "plugin",
+      "bundledPath": "quality",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "verified": true,
+      "sections": [
+        "featured"
+      ],
+      "category": "plugins",
+      "featuredRank": 18,
+      "installable": true
+    },
+    {
+      "id": "shipping",
+      "name": "Shipping",
+      "version": "1.0.0",
+      "description": "Vyotiq plugin for commits, PRs, and tests: nested skills plus shipping conventions.",
+      "kind": "plugin",
+      "bundledPath": "shipping",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "verified": true,
+      "sections": [
+        "featured"
+      ],
+      "category": "plugins",
+      "featuredRank": 19,
+      "installable": true
+    }
+  ]
+}
