@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/vyotiqai/vyotiq-agent-v/security/advisories/new
+    about: >-
+      Report security issues privately (never in a public issue). See
+      SECURITY.md for the full policy.
+  - name: Documentation
+    url: https://vyotiq.com/docs
+    about: Product manual, troubleshooting, and concepts.

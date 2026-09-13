@@ -1,0 +1,52 @@
+name: Bug report
+description: Report a problem with the Agent V desktop app
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out a bug report.
+        For security vulnerabilities, use [private security reporting](https://github.com/vyotiqai/vyotiq-agent-v/security/advisories/new) instead.
+  - type: input
+    id: version
+    attributes:
+      label: Agent V version
+      description: Settings → About shows the exact version.
+      placeholder: e.g. 1.2.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS (Apple silicon)
+        - macOS (Intel)
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What exactly did you do, and what did you expect to happen?
+      placeholder: |
+        1. Open ...
+        2. Run ...
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Structured logs never include workspace paths, file names, or chat
+        payloads. Attach the relevant portion if available.
+      render: shell
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, provider setup, or workspace details that matter.

@@ -1,0 +1,282 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Without a cert (CSC_LINK unset) pack unsigned so macOS DMG still builds;
+  # with it set, electron-builder signs normally.
+  CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
+
+jobs:
+  verify:
+    name: Verify (typecheck + tests)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # setup-node v5 resolves the package manager for its default
+      # package-manager-cache, so pnpm must be on PATH before it runs.
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.25.0 --activate
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          node -e "const pkg=require('./package.json');const tag=process.env.GITHUB_REF_NAME.replace(/^v/,'');if(tag!==pkg.version){console.error('Tag v'+tag+' does not match package.json version '+pkg.version+'. Bump package.json to '+tag+' and re-tag, or move the tag to v'+pkg.version+'.');process.exit(1)}console.log('Tag v'+tag+' matches package.json version '+pkg.version)"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # Gate the release on the unit suite so a red tree cannot be tagged.
+      # The full matrix (lint, e2e, packaging smoke, audit) runs in CI on main.
+      - name: Unit tests
+        run: pnpm test
+
+  create-release:
+    # Serialize release creation ahead of the matrix: electron-builder in
+    # every matrix job would otherwise POST the same release concurrently,
+    # and on a fresh tag the losers get 422 "Published releases must have a
+    # valid tag" (macOS lost that race on v1.1.4). Creating the release
+    # first turns every matrix job into an uploader. Re-runs of failed
+    # jobs skip creation because the release already exists.
+    name: Create release
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          # pnpm is not installed in this job (node scripts + gh only); the
+          # v5 default package-manager-cache would try to resolve pnpm.
+          package-manager-cache: false
+
+      - name: Extract release notes from CHANGELOG.md
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node scripts/extract-release-notes.mjs --version "$(node -p "require('./package.json').version")" --out release-notes.md
+
+      - name: Create the release in the public releases repo
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          # Cross-repo publish: the release lives in the PUBLIC
+          # vyotiqai/vyotiq-agent-v-releases repo (source stays private).
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="$GITHUB_REF_NAME"
+          if gh release view "$TAG" --repo vyotiqai/vyotiq-agent-v-releases > /dev/null 2>&1; then
+            echo "Release $TAG already exists in the releases repo; skipping creation"
+          else
+            gh release create "$TAG" \
+              --repo vyotiqai/vyotiq-agent-v-releases \
+              --title "Vyotiq v$VERSION" \
+              --notes-file release-notes.md
+          fi
+
+  package:
+    name: ${{ matrix.name }}
+    needs: [verify, create-release]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            builder_args: --win
+            artifacts: dist-package/*.exe
+            artifact: Vyotiq-windows-x64-setup
+          - name: linux-x64
+            os: ubuntu-latest
+            builder_args: --linux
+            artifacts: dist-package/*.AppImage
+            artifact: Vyotiq-linux-x64-appimage
+          - name: macOS
+            os: macos-latest
+            # Both arches in one electron-builder invocation so a single
+            # latest-mac.yml lists both zips — MacUpdater picks the right one
+            # by URL. Separate jobs would overwrite each other's metadata and
+            # identically-named assets on the release.
+            builder_args: --mac --arm64 --x64
+            artifacts: |
+              dist-package/*.dmg
+              dist-package/*.zip
+            artifact: Vyotiq-macos
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # setup-node v5 resolves the package manager for its default
+      # package-manager-cache, so pnpm must be on PATH before it runs.
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.25.0 --activate
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          node -e "const pkg=require('./package.json');const tag=process.env.GITHUB_REF_NAME.replace(/^v/,'');if(tag!==pkg.version){console.error('Tag v'+tag+' does not match package.json version '+pkg.version+'. electron-builder would publish '+pkg.version+'-named assets onto the v'+tag+' release. Bump package.json to '+tag+' and re-tag, or move the tag to v'+pkg.version+'.');process.exit(1)}console.log('Tag v'+tag+' matches package.json version '+pkg.version)"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build bundles
+        run: pnpm build:vite
+
+      - name: Package installers
+        env:
+          # Cross-repo publish: electron-builder creates the release in the
+          # PUBLIC vyotiqai/vyotiq-agent-v-releases repo (source stays
+          # private). GITHUB_TOKEN only covers this private repo.
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        # --publish always only on real tag pushes: a manual dispatch on a
+        # branch would otherwise target the release derived from package.json's
+        # version and re-upload identically-named assets onto it.
+        run: >-
+          pnpm exec electron-builder ${{ matrix.builder_args }}
+          ${{ startsWith(github.ref, 'refs/tags/') && '--publish always' || '--publish never' }}
+          ${{ matrix.name == 'macOS' && secrets.CSC_LINK == '' && '--config.mac.identity=null' || '' }}
+          ${{ matrix.name == 'macOS' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' && '--config.mac.notarize=true' || '' }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+
+  finalize-release:
+    # Post-publish verification: the release body must carry the changelog
+    # notes (the in-app update card parses it) and the three updater manifests
+    # must all be present (a missing latest*.yml silently kills auto-update
+    # on that OS — happened on v1.1.0).
+    name: Finalize release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          # pnpm is not installed in this job (node scripts + gh only); the
+          # v5 default package-manager-cache would try to resolve pnpm.
+          package-manager-cache: false
+
+      - name: Ensure release notes are populated
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="$GITHUB_REF_NAME"
+          BODY=$(gh release view "$TAG" --repo vyotiqai/vyotiq-agent-v-releases --json body --jq .body)
+          STUB="Vyotiq v$VERSION installers and update metadata."
+          if [ "$BODY" = "$STUB" ] || [ -z "$BODY" ]; then
+            echo "Release body is empty or the pre-automation stub; updating from CHANGELOG.md"
+            node scripts/extract-release-notes.mjs --version "$VERSION" --out release-notes.md
+            gh release edit "$TAG" --repo vyotiqai/vyotiq-agent-v-releases --notes-file release-notes.md
+          else
+            echo "Release body already carries notes"
+          fi
+
+      - name: Verify installers and updater manifests
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          ASSETS=$(gh api "repos/vyotiqai/vyotiq-agent-v-releases/releases/tags/$TAG" --jq '.assets[].name')
+          echo "Release assets:"; echo "$ASSETS"
+          FAIL=0
+          for required in latest.yml latest-linux.yml latest-mac.yml; do
+            if ! echo "$ASSETS" | grep -qx "$required"; then
+              echo "::error::Missing updater manifest $required — auto-update is dead on that OS (see the v1.1.0 incident)"
+              FAIL=1
+            fi
+          done
+          echo "$ASSETS" | grep -q -- '-setup\.exe$' || { echo "::error::Missing Windows NSIS installer"; FAIL=1; }
+          echo "$ASSETS" | grep -q -- '\.AppImage$' || { echo "::error::Missing Linux AppImage"; FAIL=1; }
+          [ "$(echo "$ASSETS" | grep -c -- '\.dmg$')" -ge 2 ] || { echo "::error::Missing macOS DMGs (arm64 + x64)"; FAIL=1; }
+          [ "$(echo "$ASSETS" | grep -c -- 'mac\.zip$')" -ge 2 ] || { echo "::error::Missing macOS zips (arm64 + x64)"; FAIL=1; }
+          exit $FAIL
+
+      - name: Mirror a release pointer on the source repo
+        # Installers live on the releases-only repo; this repo is where people
+        # browse the code, so keep its Releases page current: a pointer release
+        # per tag, marked Latest, linking to the real installers.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if gh release view "v$VERSION" --repo vyotiqai/vyotiq-agent-v > /dev/null 2>&1; then
+            echo "Pointer release v$VERSION already exists on the source repo"
+            exit 0
+          fi
+          {
+            echo "Agent V v$VERSION."
+            echo ""
+            echo "**Downloads:** the [Windows · macOS · Linux installers](https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v$VERSION) are published on the [releases repository](https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/latest), where the in-app updater and the [website](https://vyotiq.com) point."
+            echo ""
+            echo "Full release notes: https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v$VERSION"
+          } > pointer.md
+          gh release create "v$VERSION" \
+            --repo vyotiqai/vyotiq-agent-v \
+            --title "Vyotiq v$VERSION" \
+            --notes-file pointer.md \
+            --latest

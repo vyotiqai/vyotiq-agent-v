@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # setup-node v5 resolves the package manager for its default
+      # package-manager-cache, so pnpm must be on PATH before it runs.
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.25.0 --activate
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: npx playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test (with coverage)
+        run: pnpm test:coverage
+
+      - name: Upload coverage artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build:vite
+
+      - name: Dependency audit
+        run: pnpm audit --audit-level high
+
+      - name: Package unpacked (smoke)
+        run: pnpm exec electron-builder --${{ runner.os == 'Windows' && 'win' || runner.os == 'macOS' && 'mac' || 'linux' }} dir --publish never
+
+      - name: GUI e2e
+        if: runner.os != 'Linux'
+        run: pnpm test:gui-e2e
+        env:
+          VYOTIQ_E2E_FIXTURE: '1'
+
+      - name: GUI e2e
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum pnpm test:gui-e2e
+        env:
+          VYOTIQ_E2E_FIXTURE: '1'
