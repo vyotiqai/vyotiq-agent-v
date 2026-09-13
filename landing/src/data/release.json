@@ -1,0 +1,11 @@
+{
+  "source": "fallback",
+  "version": null,
+  "url": "https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/latest",
+  "publishedAt": null,
+  "assets": {
+    "windows": null,
+    "macos": null,
+    "linux": null
+  }
+}

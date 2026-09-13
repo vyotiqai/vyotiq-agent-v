@@ -164,6 +164,10 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build bundles
+        env:
+          # SENTRY_DSN is inlined at build time; without it the packaged app
+          # ships without crash reporting.
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: pnpm build:vite
 
       - name: Package installers
