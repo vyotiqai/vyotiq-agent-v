@@ -1,0 +1,211 @@
+appId: com.vyotiq.agent
+productName: Vyotiq
+icon: resources/icon.png
+directories:
+  buildResources: build
+  output: dist-package
+asar: true
+compression: maximum
+files:
+  # Every matcher that copies app files must carry the FULL exclusion list:
+  # a matcher left ignore-only gets `**/*` prepended by AppFileWalker and its
+  # file set unions with the others, re-including excluded trees. Platform
+  # `files` sets below therefore repeat these app exclusions before their
+  # native trims. The leading positive pattern is required too.
+  - '**/*'
+  - '!**/.vscode/*'
+  - '!src/**'
+  - '!tests/**'
+  - '!docs/**'
+  - '!scripts/**'
+  - '!audit/**'
+  - '!remediation/**'
+  - '!tmp-os-evidence/**'
+  - '!dist-*/**'
+  - '!resources/harness/proposals/**'
+  - '!resources/branding/**'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!**/*.{md,map}'
+  # Drop dev-only weight from asar-packed node_modules (never loaded at runtime).
+  - '!**/node_modules/**/{test,tests,__tests__,doc,docs,examples}/**'
+  - '!**/node_modules/**/*.md'
+  - '!**/node_modules/**/*.map'
+  # onnxruntime-web (~107 MB packed): never loaded at runtime. No src import;
+  # every @huggingface/transformers call site (dictation/local.ts,
+  # dictation/whisperUtility.ts) runs in the Electron main process /
+  # utilityProcess, where transformers.js resolves its onnxruntime-node backend.
+  - '!**/node_modules/onnxruntime-web/**'
+  # gpt-tokenizer: only TypeScript src/ and tests are dead weight. Every other
+  # tree ships — modelParams.js statically requires ALL encodingParams/*.js
+  # (including o200k_harmony), and each encoding module pulls its bpeRanks data,
+  # so trimming "unused" encodings breaks startup with "Cannot find module
+  # ./encodingParams/o200k_harmony.js" (the v1.2.0 installer crash).
+  - '!**/node_modules/gpt-tokenizer/{src,tests}/**'
+  # node-pty build-only sources (winpty/conpty sources; runtime loads
+  # prebuilds/* via lib/utils.js, prebuild.js short-circuits node-gyp).
+  - '!**/node_modules/node-pty/{third_party,deps,src}/**'
+  # cmake-js: native build tool only (prebuilt binaries ship per platform).
+  - '!**/node_modules/cmake-js/**'
+  # @sentry/react is bundled into out/renderer by vite (externalizeDeps:false);
+  # main requires only @sentry/electron/main (logging/sentry.ts:2) — the
+  # node_modules copy is never require()d at runtime. @sentry/browser STAYS
+  # (hard dependency of @sentry/electron).
+  - '!**/node_modules/@sentry/react/**'
+extraResources:
+  - from: resources/harness
+    to: harness
+    filter:
+      - '**/*'
+      - '!proposals/**'
+  - from: resources/marketplace
+    to: marketplace
+asarUnpack:
+  # Runtime only reads icons from app.asar.unpacked (window.ts:39,
+  # notifications/service.ts:99 — both fall back to the asar copy).
+  # harness/marketplace resolve via process.resourcesPath
+  # (extraResources), so unpacking resources/** only duplicated ~13 MB.
+  - 'resources/icon.*'
+  # Native addons cannot load from asar. Unpack .node files and ORT shared libs
+  # (dll/so/dylib sit beside the binding). pnpm nests under .pnpm — use ** globs.
+  # Do not unpack @huggingface/transformers (JS/WASM only; no .node).
+  - '**/*.node'
+  - '**/node_modules/onnxruntime-node/bin/**'
+win:
+  icon: resources/icon.ico
+  target:
+    - nsis
+  # publisherName enables NSIS updater signature verification: electron-updater
+  # compares the downloaded installer's Authenticode subject against it and
+  # throws ERR_UPDATER_INVALID_SIGNATURE when they do not match. It MUST stay
+  # unset while release builds are unsigned (release.yml falls back to unsigned
+  # packs when CSC_LINK is unset) or Windows auto-update always fails. Re-add
+  # `publisherName: <cert subject CN>` together with win.forceCodeSigning: true
+  # once the signing cert is always present in the release environment.
+  # Win x64 only — drop other onnxruntime natives (~150 MB). macOS/Linux keep theirs.
+  files:
+    # App exclusions repeat here — see the `files:` comment above.
+    - from: .
+      filter:
+        - '!**/.vscode/*'
+        - '!src/**'
+        - '!tests/**'
+        - '!docs/**'
+        - '!scripts/**'
+        - '!audit/**'
+        - '!remediation/**'
+        - '!tmp-os-evidence/**'
+        - '!dist-*/**'
+        - '!resources/harness/proposals/**'
+        - '!resources/branding/**'
+        - '!electron.vite.config.{js,ts,mjs,cjs}'
+        - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md}'
+        - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+        - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+        - '!**/*.{md,map}'
+        - '!build{,/**/*}'
+        - '!{.git,.github,.cursor,.vyotiq}/**'
+        - '!**/onnxruntime-node/bin/napi-v6/darwin/**'
+        - '!**/onnxruntime-node/bin/napi-v6/linux/**'
+        - '!**/onnxruntime-node/bin/napi-v6/win32/arm64/**'
+        # node-pty: keep win32-x64 prebuilds only (platform-wrong).
+        - '!**/node_modules/node-pty/prebuilds/{darwin,linux}*/**'
+        - '!**/node_modules/node-pty/prebuilds/win32-arm64/**'
+  executableName: Vyotiq
+nsis:
+  artifactName: ${productName}-${version}-setup.${ext}
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+mac:
+  icon: resources/icon.icns
+  target:
+    - dmg
+    - zip
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  category: public.app-category.developer-tools
+  extendInfo:
+    NSMicrophoneUsageDescription: Vyotiq uses the microphone for voice dictation.
+  notarize: false
+  files:
+    # App exclusions repeat here — see the `files:` comment above.
+    - from: .
+      filter:
+        - '!**/.vscode/*'
+        - '!src/**'
+        - '!tests/**'
+        - '!docs/**'
+        - '!scripts/**'
+        - '!audit/**'
+        - '!remediation/**'
+        - '!tmp-os-evidence/**'
+        - '!dist-*/**'
+        - '!resources/harness/proposals/**'
+        - '!resources/branding/**'
+        - '!electron.vite.config.{js,ts,mjs,cjs}'
+        - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md}'
+        - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+        - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+        - '!**/*.{md,map}'
+        - '!build{,/**/*}'
+        - '!{.git,.github,.cursor,.vyotiq}/**'
+        - '!**/onnxruntime-node/bin/napi-v6/linux/**'
+        - '!**/onnxruntime-node/bin/napi-v6/win32/**'
+        # node-pty: keep darwin prebuilds only (platform-wrong).
+        - '!**/node_modules/node-pty/prebuilds/{win32,linux}*/**'
+dmg:
+  # ${arch} keeps arm64/x64 DMGs from colliding: both are uploaded to the same
+  # GitHub release by the single macOS job in release.yml, and latest-mac.yml
+  # must reference distinct files per arch (MacUpdater picks by URL).
+  artifactName: ${productName}-${version}-${arch}.${ext}
+linux:
+  target:
+    - AppImage
+  maintainer: vyotiq.com
+  category: Development
+  files:
+    # App exclusions repeat here — see the `files:` comment above.
+    - from: .
+      filter:
+        - '!**/.vscode/*'
+        - '!src/**'
+        - '!tests/**'
+        - '!docs/**'
+        - '!scripts/**'
+        - '!audit/**'
+        - '!remediation/**'
+        - '!tmp-os-evidence/**'
+        - '!dist-*/**'
+        - '!resources/harness/proposals/**'
+        - '!resources/branding/**'
+        - '!electron.vite.config.{js,ts,mjs,cjs}'
+        - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md}'
+        - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+        - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+        - '!**/*.{md,map}'
+        - '!build{,/**/*}'
+        - '!{.git,.github,.cursor,.vyotiq}/**'
+        - '!**/onnxruntime-node/bin/napi-v6/darwin/**'
+        - '!**/onnxruntime-node/bin/napi-v6/win32/**'
+        # node-pty: keep linux prebuilds only (platform-wrong).
+        - '!**/node_modules/node-pty/prebuilds/{win32,darwin}*/**'
+appImage:
+  artifactName: ${productName}-${version}.${ext}
+npmRebuild: false
+
+publish:
+  provider: github
+  owner: vyotiqai
+  repo: vyotiq-agent-v-releases
+  releaseType: release
