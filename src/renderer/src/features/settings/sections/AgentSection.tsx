@@ -385,7 +385,7 @@ export function AgentSection({ form }: { form: SettingsFormState }) {
           id="memory-files"
           title="Memory files"
           hint="Long-term memory under .vyotiq/memory/ (plain markdown)."
-          help="Use memory_* tools in Agent mode for durable facts. Not embedding RAG — facts are markdown files in the workspace. Use codebase_search for semantic code retrieval (local LightOn dense ONNX index in app userData; Ollama/hash overrides)."
+          help="Use memory_* tools in Agent mode for durable facts. Not embedding RAG — facts are markdown files in the workspace. Use codebase_search for ranked keyword retrieval over a local SQLite trigram index (built in app userData)."
           wide
         >
           <p className="m-0 text-xs text-secondary">index.md, state.md, and notes/ in the workspace.</p>

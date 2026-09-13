@@ -464,6 +464,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'about'
   },
   {
+    id: 'about-source',
+    title: 'Source',
+    keywords: ['github', 'repository', 'repo', 'source', 'open source', 'about'],
+    section: 'about'
+  },
+  {
     id: 'about-auto-check',
     title: 'Check for updates on launch',
     keywords: ['updates', 'auto check', 'upgrade', 'about'],
