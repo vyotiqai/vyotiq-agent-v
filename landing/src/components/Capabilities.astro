@@ -12,6 +12,8 @@ const rows = [
       'Git integration — Changes panel, commits, optional GitHub pull-request panel',
     ],
     img: '/media/showcase-1.webp',
+    w: 1200,
+    h: 636,
     caption: 'Real session · 0:35–0:41',
   },
   {
@@ -24,6 +26,8 @@ const rows = [
       'Any OpenAI-compatible endpoint',
     ],
     img: '/media/showcase-2.webp',
+    w: 1200,
+    h: 636,
     caption: 'Real session · 1:08–1:14',
   },
   {
@@ -36,6 +40,8 @@ const rows = [
       'Memory injected into every run',
     ],
     img: '/media/showcase-3.webp',
+    w: 1200,
+    h: 636,
     caption: 'Real session · 2:17–2:23',
   },
   {
@@ -48,6 +54,8 @@ const rows = [
       'Merge finished agent branches back into yours',
     ],
     img: '/media/showcase-4.webp',
+    w: 1200,
+    h: 638,
     caption: 'Real session · 0:39–0:45',
   },
 ];
@@ -118,7 +126,9 @@ const workspace = [
             <img
               src={row.img}
               alt={`Agent V — ${row.title} (real session recording)`}
-              class="w-full rounded-2xl border border-zinc-200 shadow-xl shadow-zinc-900/10"
+              width={row.w}
+              height={row.h}
+              class="h-auto w-full rounded-2xl border border-zinc-200 shadow-xl shadow-zinc-900/10"
               loading="lazy"
               decoding="async"
             />
