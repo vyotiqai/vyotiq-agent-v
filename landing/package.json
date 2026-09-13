@@ -1,7 +1,7 @@
 {
   "name": "@vyotiq/landing",
   "version": "0.0.1",
-  "description": "Agent V landing site — vyotiq.com",
+  "description": "Agent V landing site â€” vyotiq.com",
   "type": "module",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -18,7 +18,7 @@
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@fontsource/plus-jakarta-sans": "^5.3.0",
     "@tailwindcss/vite": "^4.3.3",
-    "astro": "^5.0.0",
+    "astro": "^7.3.2",
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
