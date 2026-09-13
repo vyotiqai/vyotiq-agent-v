@@ -38,10 +38,57 @@ const rows = [
     img: '/media/showcase-3.webp',
     caption: 'Real session · 2:17–2:23',
   },
+  {
+    title: 'Run agents in parallel',
+    lead: 'Big task? Fan it out — every agent works in its own isolated checkout.',
+    points: [
+      'Spawn parallel agent instances on isolated git worktrees',
+      'Each instance inherits context and gets its own branch',
+      'Pull results, follow up, or cancel mid-flight',
+      'Merge finished agent branches back into yours',
+    ],
+    img: '/media/showcase-4.webp',
+    caption: 'Real session · 0:39–0:45',
+  },
+];
+
+const workspace = [
+  {
+    title: 'MCP servers',
+    desc: 'Connect Model Context Protocol servers — tools from your .mcp.json join the registry.',
+  },
+  {
+    title: 'Skills & slash commands',
+    desc: 'Package know-how into skills; trigger flows with / commands from the composer.',
+  },
+  {
+    title: 'Code index',
+    desc: 'A local SQLite code index keeps search fast on large repositories.',
+  },
+  {
+    title: 'Voice dictation',
+    desc: 'Dictate prompts with a local Whisper model — audio stays on your machine.',
+  },
+  {
+    title: 'Command palette',
+    desc: 'Every action reachable from the keyboard.',
+  },
+  {
+    title: 'File attachments',
+    desc: 'Drop files and images straight into the conversation.',
+  },
+  {
+    title: 'Themes',
+    desc: 'Appearance settings and custom skins for the workspace.',
+  },
+  {
+    title: 'Auto-updates',
+    desc: 'New versions arrive automatically via GitHub Releases.',
+  },
 ];
 ---
 
-<section id="capabilities" class="mx-auto max-w-6xl scroll-mt-20 px-4 py-20 sm:px-6 sm:py-28">
+<section id="capabilities" class="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
   <p class="font-mono text-[11px] uppercase tracking-[0.25em] text-zinc-500">Capabilities</p>
   <h2 class="mt-4 max-w-2xl text-3xl font-semibold tracking-tight text-white sm:text-4xl">
     Everything the agent needs to work a real repo
@@ -80,6 +127,20 @@ const rows = [
         </div>
       ))
     }
+  </div>
+
+  <div class="mt-20 sm:mt-24">
+    <h3 class="text-xl font-semibold tracking-tight text-white">And the rest of the workspace</h3>
+    <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {
+        workspace.map((w) => (
+          <div class="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+            <h4 class="text-sm font-semibold text-white">{w.title}</h4>
+            <p class="mt-2 text-sm leading-relaxed text-zinc-400">{w.desc}</p>
+          </div>
+        ))
+      }
+    </div>
   </div>
 
   <div id="security" class="mt-20 scroll-mt-20 rounded-2xl border border-white/10 bg-white/[0.02] p-6 sm:p-8">

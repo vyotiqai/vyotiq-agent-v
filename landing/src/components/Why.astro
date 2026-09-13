@@ -1,0 +1,49 @@
+---
+const reasons = [
+  {
+    title: 'Free and open source',
+    desc: 'GPL-3.0-or-later. Clone it, read every line, change it — no subscription for the app itself.',
+  },
+  {
+    title: 'Your code stays yours',
+    desc: 'A local desktop app — tools are sandboxed to the workspace root, with Electron contextIsolation and sandbox on.',
+  },
+  {
+    title: 'Bring your own models',
+    desc: 'OpenAI, Anthropic, Gemini, Ollama, DeepSeek, Groq, OpenRouter, xAI, Modal, Mistral — or any OpenAI-compatible endpoint.',
+  },
+  {
+    title: 'Built for real repositories',
+    desc: '60 sandboxed workspace tools, a real terminal, a live agent browser, and full git integration.',
+  },
+  {
+    title: 'Agents in parallel',
+    desc: 'Spawn multiple agent instances, each isolated in its own git worktree — merge their branches when they land.',
+  },
+  {
+    title: 'Extensible end to end',
+    desc: 'Model Context Protocol servers, skills, slash commands, and a marketplace of ready-made additions.',
+  },
+];
+---
+
+<section id="why" class="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
+  <p class="font-mono text-[11px] uppercase tracking-[0.25em] text-zinc-500">Why Agent V</p>
+  <h2 class="mt-4 max-w-2xl text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+    A coding agent that answers to you
+  </h2>
+  <p class="mt-4 max-w-2xl text-base leading-relaxed text-zinc-400 sm:text-lg">
+    No subscriptions, no lock-in, no cloud middleman for your code.
+  </p>
+
+  <div class="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    {
+      reasons.map((r) => (
+        <div class="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+          <h3 class="text-sm font-semibold text-white">{r.title}</h3>
+          <p class="mt-2 text-sm leading-relaxed text-zinc-400">{r.desc}</p>
+        </div>
+      ))
+    }
+  </div>
+</section>
