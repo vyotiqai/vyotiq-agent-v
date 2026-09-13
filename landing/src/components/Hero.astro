@@ -16,10 +16,6 @@ const downloadHref =
 
   <div class="mx-auto max-w-6xl px-4 sm:px-6">
     <div class="pt-16 text-center sm:pt-24">
-      <p class="font-mono text-xs text-zinc-400">
-        <span class="text-orange-600">~/agent-v</span> — local coding workspace
-      </p>
-
       <div
         class="mt-8 flex flex-wrap items-center justify-center gap-2.5 sm:gap-3"
         aria-label="Supported model providers"
@@ -99,35 +95,15 @@ const downloadHref =
         aria-hidden="true"
       >
       </div>
-      <div class="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl shadow-zinc-900/10">
-        <div class="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-4 py-2.5">
-          <div class="flex gap-1.5" aria-hidden="true">
-            <span class="size-2.5 rounded-full bg-zinc-300"></span>
-            <span class="size-2.5 rounded-full bg-zinc-300"></span>
-            <span class="size-2.5 rounded-full bg-zinc-300"></span>
-          </div>
-          <span class="font-mono text-[11px] text-zinc-500">Agent V — ~/your-repo</span>
-          <span class="font-mono text-[11px] text-zinc-400">v{release.version ?? 'dev'}</span>
-        </div>
-        <img
-          src="/media/agentv-hero.webp"
-          alt="Agent V — real session screen recording"
-          width="1918"
-          height="1020"
-          class="h-auto w-full"
-          decoding="async"
-          fetchpriority="high"
-        />
-        <div
-          class="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-zinc-200 bg-zinc-50 px-4 py-2 font-mono text-[10px] text-zinc-500"
-        >
-          <span>branch: main</span>
-          <span>60 tools</span>
-          <span>10 providers</span>
-          <span>sandbox: on</span>
-          <span>local-first</span>
-        </div>
-      </div>
+      <img
+        src="/media/agentv-hero.webp"
+        alt="Agent V — real session screen recording"
+        width="1918"
+        height="1020"
+        class="relative h-auto w-full rounded-2xl border border-zinc-200 shadow-2xl shadow-zinc-900/10"
+        decoding="async"
+        fetchpriority="high"
+      />
     </div>
   </div>
 </section>
