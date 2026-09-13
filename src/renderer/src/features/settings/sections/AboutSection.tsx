@@ -77,6 +77,7 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
   const [copied, setCopied] = useState(false)
   const [openingSite, setOpeningSite] = useState(false)
   const [openingDocs, setOpeningDocs] = useState(false)
+  const [openingSource, setOpeningSource] = useState(false)
   const [updater, setUpdater] = useState<UpdaterStatePayload | null>(null)
   const [updaterBusy, setUpdaterBusy] = useState(false)
   const setErrorMessage = form.setErrorMessage
@@ -165,7 +166,7 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
             Agent V. A product of Vyotiq.com.
           </p>
           <p className="m-0 text-xs leading-snug tracking-[var(--vy-tracking)] text-muted">
-            © {CURRENT_YEAR} Vyotiq. Agent V is free software licensed under GPL-3.0.
+            © {CURRENT_YEAR} Vyotiq. Agent V is free software licensed under GPL-3.0-or-later.
           </p>
         </div>
       </div>
@@ -352,6 +353,32 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
             }}
           >
             {openingDocs ? 'Opening…' : 'Open'}
+          </Button>
+        </SettingsField>
+        <SettingsField
+          id="about-source"
+          title="Source"
+          hint="github.com/vyotiqai/vyotiq-agent-v"
+        >
+          <Button
+            variant="subtle"
+            pending={openingSource}
+            onClick={() => {
+              if (!window.vyotiq?.shellOpenExternal) return
+              form.clearErrors()
+              setOpeningSource(true)
+              void window.vyotiq
+                .shellOpenExternal('https://github.com/vyotiqai/vyotiq-agent-v')
+                .then((res) => {
+                  if (!res.ok) form.setErrorMessage(res.error)
+                })
+                .catch((err: unknown) => {
+                  form.setErrorMessage(err instanceof Error ? err.message : String(err))
+                })
+                .finally(() => setOpeningSource(false))
+            }}
+          >
+            {openingSource ? 'Opening…' : 'Open'}
           </Button>
         </SettingsField>
       </SettingsGroup>
