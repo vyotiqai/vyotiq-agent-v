@@ -1,5 +1,7 @@
 ---
+import { Image } from 'astro:assets';
 import release from '../data/release.json';
+import heroApp from '../assets/hero-app.webp';
 
 const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
 const downloadHref =
@@ -57,15 +59,15 @@ const downloadHref =
     </div>
 
     <figure class="mt-12 sm:mt-14">
-      <img
-        src="/media/hero-app.webp"
+      <Image
+        src={heroApp}
         alt="Agent V — real workspace: three parallel agent instances finishing while a 45-file verified change set is reviewed"
-        width="1917"
-        height="1018"
-        class="relative h-auto w-full rounded-lg border border-zinc-200 shadow-2xl shadow-zinc-900/10"
+        widths={[640, 960, 1280]}
+        sizes="(min-width: 80rem) 1216px, 92vw"
         loading="eager"
         fetchpriority="high"
         decoding="async"
+        class="relative h-auto w-full rounded-lg border border-zinc-200 shadow-2xl shadow-zinc-900/10"
       />
     </figure>
   </div>
