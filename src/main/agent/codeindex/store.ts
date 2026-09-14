@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from 'fs'
 import { dirname } from 'path'
 import { DatabaseSync } from 'node:sqlite'
+import type { StatementSync } from 'node:sqlite'
 import type { ChunkKind, IndexStatus, StoredChunk } from './types'
 import { CODE_INDEX_SCHEMA_VERSION } from './types'
 import { codeindexDbPath, codeindexRoot } from '../indexStoragePaths'
@@ -16,6 +17,8 @@ export { codeindexRoot, codeindexDbPath } from '../indexStoragePaths'
 export class CodeIndexStore {
   readonly db: DatabaseSync
   readonly dbPath: string
+  /** Lazily prepared statements, cached per SQL text and reused across calls. */
+  private stmtCache = new Map<string, StatementSync>()
 
   private constructor(db: DatabaseSync, dbPath: string) {
     this.db = db
@@ -46,27 +49,35 @@ export class CodeIndexStore {
     return new CodeIndexStore(db, ':memory:')
   }
 
+  private prepareCached(sql: string): StatementSync {
+    let stmt = this.stmtCache.get(sql)
+    if (!stmt) {
+      stmt = this.db.prepare(sql)
+      this.stmtCache.set(sql, stmt)
+    }
+    return stmt
+  }
+
   close(): void {
     try {
       this.db.close()
     } catch {
       /* already closed */
     }
+    this.stmtCache.clear()
   }
 
   getMeta(key: string): string | null {
-    const row = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as
+    const row = this.prepareCached('SELECT value FROM meta WHERE key = ?').get(key) as
       | { value: string }
       | undefined
     return row?.value ?? null
   }
 
   setMeta(key: string, value: string): void {
-    this.db
-      .prepare(
-        'INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
-      )
-      .run(key, value)
+    this.prepareCached(
+      'INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+    ).run(key, value)
   }
 
   getStatus(): IndexStatus {
@@ -107,11 +118,13 @@ export class CodeIndexStore {
   }
 
   private deleteFile(path: string): void {
-    const ids = this.db.prepare('SELECT id FROM chunks WHERE path = ?').all(path) as { id: number }[]
-    const delFts = this.db.prepare('DELETE FROM chunks_fts WHERE chunk_id = ?')
-    for (const { id } of ids) delFts.run(String(id))
-    this.db.prepare('DELETE FROM chunks WHERE path = ?').run(path)
-    this.db.prepare('DELETE FROM files WHERE path = ?').run(path)
+    // Set-based FTS cleanup, executed BEFORE the chunks delete: one DELETE
+    // over the path's chunk ids instead of a SELECT + per-id DELETE (N+1).
+    this.prepareCached(
+      'DELETE FROM chunks_fts WHERE chunk_id IN (SELECT id FROM chunks WHERE path = ?)'
+    ).run(path)
+    this.prepareCached('DELETE FROM chunks WHERE path = ?').run(path)
+    this.prepareCached('DELETE FROM files WHERE path = ?').run(path)
   }
 
   /** Delete every file path not in `seen` in one IMMEDIATE transaction. */
@@ -150,18 +163,16 @@ export class CodeIndexStore {
     this.db.exec('BEGIN IMMEDIATE')
     try {
       this.deleteFile(path)
-      this.db
-        .prepare(
-          `INSERT INTO files(path, file_hash, mtime_ms, size_bytes) VALUES(?, ?, ?, ?)
-           ON CONFLICT(path) DO UPDATE SET file_hash = excluded.file_hash,
-             mtime_ms = excluded.mtime_ms, size_bytes = excluded.size_bytes`
-        )
-        .run(path, fileHash, mtimeMs, sizeBytes)
-      const insertChunk = this.db.prepare(
+      this.prepareCached(
+        `INSERT INTO files(path, file_hash, mtime_ms, size_bytes) VALUES(?, ?, ?, ?)
+         ON CONFLICT(path) DO UPDATE SET file_hash = excluded.file_hash,
+           mtime_ms = excluded.mtime_ms, size_bytes = excluded.size_bytes`
+      ).run(path, fileHash, mtimeMs, sizeBytes)
+      const insertChunk = this.prepareCached(
         `INSERT INTO chunks(path, start_line, end_line, kind, name, parent_name)
          VALUES(?, ?, ?, ?, ?, ?)`
       )
-      const insertFts = this.db.prepare(
+      const insertFts = this.prepareCached(
         `INSERT INTO chunks_fts(chunk_id, path, name, body) VALUES(?, ?, ?, ?)`
       )
       for (const c of chunks) {

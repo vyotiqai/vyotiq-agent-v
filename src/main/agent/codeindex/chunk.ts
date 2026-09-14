@@ -81,12 +81,27 @@ function findBraceEnd(source: string, openIdx: number): number {
   return source.length - 1
 }
 
-function lineAt(source: string, index: number): number {
-  let line = 1
-  for (let i = 0; i < index && i < source.length; i++) {
-    if (source[i] === '\n') line++
+/**
+ * Line-number lookup with a running cursor. Consecutive queries in ascending
+ * index order amortize to O(1); a query below the cursor position (regex passes
+ * and JSON keys restart at 0) falls back to a rescan from 0. Semantics
+ * unchanged: count of '\n' before `index`, 1-based line.
+ */
+function createLineCounter(source: string): (index: number) => number {
+  let cursorIdx = 0
+  let cursorLine = 1
+  return (index: number): number => {
+    if (index < cursorIdx) {
+      cursorIdx = 0
+      cursorLine = 1
+    }
+    const limit = index < source.length ? index : source.length
+    for (let i = cursorIdx; i < limit; i++) {
+      if (source[i] === '\n') cursorLine++
+    }
+    cursorIdx = limit
+    return cursorLine
   }
-  return line
 }
 
 type Span = {
@@ -99,24 +114,97 @@ type Span = {
 
 const NESTED_CHILD_KINDS = new Set<ChunkKind>(['function', 'method'])
 
+/** First index in sorted `arr` whose value is > `value` (count of values <= value). */
+function upperBound(arr: readonly number[], value: number): number {
+  let lo = 0
+  let hi = arr.length
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (arr[mid]! <= value) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
 /**
  * Do not embed a class body that is already covered by method/function children.
  * Keep `parentName` on children so FTS still finds the class.
+ *
+ * Sort + sweep equivalent of the previous O(spans²) pairwise scan. A class span
+ * is dropped exactly when some function/method span:
+ *   - has parentName === span.name, or
+ *   - lies strictly inside its line range:
+ *     startLine >= s && endLine <= e && (startLine > s || endLine < e).
  */
 export function dropParentSpansCoveredByChildren<T extends Span>(spans: T[]): T[] {
-  return spans.filter((span, i) => {
-    if (span.kind !== 'class') return true
-    return !spans.some((other, j) => {
-      if (i === j) return false
-      if (!NESTED_CHILD_KINDS.has(other.kind)) return false
-      if (other.parentName === span.name) return true
-      return (
-        other.startLine >= span.startLine &&
-        other.endLine <= span.endLine &&
-        (other.startLine > span.startLine || other.endLine < span.endLine)
-      )
-    })
-  })
+  const children = spans.filter((s) => NESTED_CHILD_KINDS.has(s.kind))
+  const classSpans = spans.filter((s) => s.kind === 'class')
+  if (children.length === 0 || classSpans.length === 0) return [...spans]
+
+  const parentNames = new Set<string>()
+  for (const c of children) {
+    if (c.parentName !== undefined) parentNames.add(c.parentName)
+  }
+
+  // Children grouped by startLine. Ties at a class's startLine s need the
+  // strict check (endLine < e), handled via the group's minimum endLine.
+  const endsByStart = new Map<number, { minEnd: number; ends: number[] }>()
+  for (const c of children) {
+    let group = endsByStart.get(c.startLine)
+    if (!group) {
+      group = { minEnd: c.endLine, ends: [] }
+      endsByStart.set(c.startLine, group)
+    }
+    group.ends.push(c.endLine)
+    if (c.endLine < group.minEnd) group.minEnd = c.endLine
+  }
+  const childStartsDesc = [...endsByStart.keys()].sort((a, b) => b - a)
+
+  // Fenwick tree over compressed child endLine values. Before classes at
+  // startLine s are evaluated, every child with startLine > s is inserted, so a
+  // prefix count > 0 proves a child with startLine > s && endLine <= e.
+  const endValues = [...new Set(children.map((c) => c.endLine))].sort((a, b) => a - b)
+  const bit = new Int32Array(endValues.length + 1)
+  const bitAdd = (value: number): void => {
+    for (let rank = upperBound(endValues, value); rank < bit.length; rank += rank & -rank) {
+      bit[rank]!++
+    }
+  }
+  const bitCountAtMost = (value: number): number => {
+    let total = 0
+    for (let rank = upperBound(endValues, value); rank > 0; rank -= rank & -rank) {
+      total += bit[rank]!
+    }
+    return total
+  }
+
+  const classesByStart = new Map<number, T[]>()
+  for (const c of classSpans) {
+    const group = classesByStart.get(c.startLine)
+    if (group) group.push(c)
+    else classesByStart.set(c.startLine, [c])
+  }
+  const classStartsDesc = [...classesByStart.keys()].sort((a, b) => b - a)
+
+  const drop = new Set<T>()
+  let p = 0
+  for (const s of classStartsDesc) {
+    while (p < childStartsDesc.length && childStartsDesc[p]! > s) {
+      for (const e of endsByStart.get(childStartsDesc[p]!)!.ends) bitAdd(e)
+      p++
+    }
+    const tie = endsByStart.get(s)
+    for (const cls of classesByStart.get(s)!) {
+      if (parentNames.has(cls.name) || bitCountAtMost(cls.endLine) > 0) {
+        drop.add(cls)
+        continue
+      }
+      if (tie !== undefined && tie.minEnd < cls.endLine) drop.add(cls)
+    }
+  }
+
+  if (drop.size === 0) return [...spans]
+  return spans.filter((s) => !drop.has(s))
 }
 
 function splitOversized(lines: string[], span: Span, path: string): CodeChunk[] {
@@ -154,6 +242,7 @@ function splitOversized(lines: string[], span: Span, path: string): CodeChunk[] 
 
 function chunkTypeScriptLike(path: string, source: string): CodeChunk[] {
   const lines = toLines(source)
+  const lineFor = createLineCounter(source)
   const spans: Span[] = []
   const classRe =
     /(?:^|\n)(?:export\s+)?(?:abstract\s+)?(?:default\s+)?class\s+([A-Za-z0-9_$]+)/g
@@ -176,8 +265,12 @@ function chunkTypeScriptLike(path: string, source: string): CodeChunk[] {
       const nameIdx = m.index + m[0].lastIndexOf(name)
       const braceIdx = source.indexOf('{', nameIdx)
       const arrowBody = source.indexOf('=>', nameIdx)
+      // Query parent before startLine/endLine so the per-match cursor queries
+      // stay in ascending index order (parent: m.index <= startLine: m.index+1
+      // <= endLine: endIdx, which is always > m.index).
+      const parentName = getParent?.(m.index)
       let endIdx: number
-      let startLine = lineAt(source, m.index === 0 ? 0 : m.index + 1)
+      const startLine = lineFor(m.index === 0 ? 0 : m.index + 1)
       if (kind !== 'function' && braceIdx >= 0 && (arrowBody < 0 || braceIdx < arrowBody + 2)) {
         endIdx = findBraceEnd(source, braceIdx)
       } else if (braceIdx >= 0 && (kind === 'function' || kind === 'class' || kind === 'method')) {
@@ -195,13 +288,13 @@ function chunkTypeScriptLike(path: string, source: string): CodeChunk[] {
       } else {
         continue
       }
-      const endLine = lineAt(source, endIdx)
+      const endLine = lineFor(endIdx)
       spans.push({
         startLine,
         endLine: Math.max(startLine, endLine),
         kind,
         name,
-        parentName: getParent?.(m.index)
+        parentName
       })
     }
   }
@@ -214,14 +307,14 @@ function chunkTypeScriptLike(path: string, source: string): CodeChunk[] {
     const braceIdx = source.indexOf('{', cm.index)
     if (braceIdx < 0) continue
     const endIdx = findBraceEnd(source, braceIdx)
-    const startLine = lineAt(source, cm.index === 0 ? 0 : cm.index + 1)
-    const endLine = lineAt(source, endIdx)
+    const startLine = lineFor(cm.index === 0 ? 0 : cm.index + 1)
+    const endLine = lineFor(endIdx)
     classSpans.push({ startLine, endLine: Math.max(startLine, endLine), kind: 'class', name })
   }
   spans.push(...classSpans)
 
   const parentFor = (idx: number): string | undefined => {
-    const line = lineAt(source, idx)
+    const line = lineFor(idx)
     for (const c of classSpans) {
       if (line >= c.startLine && line <= c.endLine) return c.name
     }
@@ -300,6 +393,7 @@ function chunkMarkdown(path: string, source: string): CodeChunk[] {
 
 function chunkJson(path: string, source: string): CodeChunk[] {
   const lines = toLines(source)
+  const lineFor = createLineCounter(source)
   try {
     const obj = JSON.parse(source) as unknown
     if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
@@ -308,7 +402,7 @@ function chunkJson(path: string, source: string): CodeChunk[] {
         const keyRe = new RegExp(`"${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"\\s*:`)
         const m = keyRe.exec(source)
         if (!m) continue
-        const startLine = lineAt(source, m.index)
+        const startLine = lineFor(m.index)
         spans.push({
           startLine,
           endLine: Math.min(lines.length, startLine + 40),

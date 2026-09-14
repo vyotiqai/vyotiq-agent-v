@@ -17,6 +17,11 @@ import { publishIndexSyncProgress, type IndexProgressUpdate } from './indexProgr
 
 /** Yield periodically so crawl/SQLite on main stays responsive. */
 const YIELD_EVERY = 32
+/**
+ * Yield when accumulated per-file work exceeds this budget, so one slow file
+ * (hash + chunk + SQLite commit) can't block the main process for seconds.
+ */
+const YIELD_BUDGET_MS = 8
 const PROGRESS_THROTTLE_MS = 75
 
 function roundMtime(mtimeMs: number): number {
@@ -192,11 +197,16 @@ export async function syncCodeIndex(
 
   report(onProgress, { ...progressUpdate(), filesDone: 0, currentPath: null }, { force: true })
 
+  let lastYield = performance.now()
   for (let i = 0; i < files.length; i++) {
     throwIfAborted(signal)
-    if (i > 0 && i % YIELD_EVERY === 0) {
+    if (
+      i > 0 &&
+      (i % YIELD_EVERY === 0 || performance.now() - lastYield >= YIELD_BUDGET_MS)
+    ) {
       await yieldToEventLoop()
       throwIfAborted(signal)
+      lastYield = performance.now()
     }
     const { full, rel } = files[i]!
     filesDone = i + 1
