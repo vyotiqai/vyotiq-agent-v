@@ -34,6 +34,7 @@ const providers = [
   { slug: 'openrouter', folder: 'OpenRouter' },
   { slug: 'xai', folder: 'XAI' },
   { slug: 'mistral', folder: 'Mistral' },
+  { slug: 'opencode', folder: 'OpenCode' },
 ];
 
 const results = [];
@@ -73,30 +74,6 @@ for (const { slug, folder } of providers) {
 
   console.log(`${slug}: ${paths.length} path(s), title="${titleMatch[2]}", viewBox="${viewBoxMatch[1]}"`);
   results.push({ slug, title: titleMatch[2], viewBox: viewBoxMatch[1], paths });
-}
-
-// Vendor override: Modal Labs has no @lobehub/icons brand entry. Use their
-// official favicon (modal.com/assets/favicon.svg, fetched 2026-09-13) — 7
-// pure-geometry paths, no transforms; mono-rendered via currentColor exactly
-// like every @lobehub chip.
-const modalSvgPath = join(here, '_modal-favicon.svg');
-try {
-  const modalSvg = readFileSync(modalSvgPath, 'utf8');
-  const modalViewBox = modalSvg.match(/viewBox="([^"]+)"/)?.[1];
-  const modalPaths = [...modalSvg.matchAll(/ d="([^"]+)"/g)].map((m) => m[1]);
-  if (!modalViewBox || modalPaths.length === 0) {
-    failures.push('modal: vendor favicon parse failed');
-  } else {
-    const modalEntry = { slug: 'modal', title: 'Modal', viewBox: modalViewBox, paths: modalPaths };
-    const mistralIndex = results.findIndex((r) => r.slug === 'mistral');
-    if (mistralIndex === -1) results.push(modalEntry);
-    else results.splice(mistralIndex, 0, modalEntry);
-    console.log(
-      `modal: ${modalPaths.length} path(s), title="Modal", viewBox="${modalViewBox}" (vendor favicon override)`,
-    );
-  }
-} catch (err) {
-  failures.push(`modal: cannot read vendor favicon (${err.message})`);
 }
 
 if (failures.length > 0) {
