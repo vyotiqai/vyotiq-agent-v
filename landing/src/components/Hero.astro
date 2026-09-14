@@ -37,14 +37,14 @@ const downloadHref =
 
       <div class="mt-7 flex flex-col items-center gap-3 sm:flex-row sm:justify-center sm:gap-4">
         <div
-          class="group relative inline-flex w-full items-center justify-center rounded-lg bg-zinc-900 px-7 py-3 font-semibold text-white transition hover:bg-zinc-700 sm:w-auto"
+          class="group relative inline-flex w-full overflow-hidden rounded-lg bg-zinc-900 shadow-sm sm:w-auto"
           data-os-picker
         >
           <a
             href={downloadHref}
             data-os-primary
-            aria-label="Get Agent V"
-            class="absolute inset-0 flex items-center justify-center gap-2 transition-opacity duration-150 group-hover:pointer-events-none group-hover:opacity-0"
+            aria-haspopup="true"
+            class="flex w-full items-center justify-center gap-2 bg-zinc-900 px-7 py-3 font-semibold text-white transition duration-200 group-hover:pointer-events-none group-hover:opacity-0 [.open_&]:pointer-events-none [.open_&]:opacity-0"
           >
             Get Agent V
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -58,7 +58,7 @@ const downloadHref =
           </a>
 
           <div
-            class="absolute inset-0 hidden items-center justify-center gap-6 opacity-0 transition-opacity duration-150 group-focus-within:opacity-100 group-focus-within:flex group-hover:opacity-100 group-hover:flex [.open_&]:opacity-100 [.open_&]:flex"
+            class="absolute inset-0 hidden items-center justify-center gap-5 group-focus-within:flex group-hover:flex [.open_&]:flex"
             role="menu"
             aria-label="Choose your operating system"
           >
@@ -66,22 +66,15 @@ const downloadHref =
               osOptions.map((o) => (
                 <a
                   href={o.href}
-                  role="menuitem"
+                  title={`Download for ${o.name}`}
                   data-os-row={o.os}
-                  class="relative flex flex-col items-center gap-0.5 text-white opacity-60 transition hover:opacity-100"
+                  class="flex items-center rounded-lg p-2 text-white transition hover:bg-white/10 data-[detected]:ring-2 data-[detected]:ring-orange-500"
                 >
                   <svg viewBox={o.icon.viewBox} class="size-5" fill="currentColor" aria-hidden="true">
                     {o.icon.paths.map((d) => (
                       <path d={d} />
                     ))}
                   </svg>
-                  <span class="text-[10px] font-medium">{o.name}</span>
-                  <span
-                    data-os-badge
-                    class="hidden absolute -top-2 -right-2 rounded-full bg-orange-600 px-1.5 py-px font-mono text-[9px] font-semibold text-white"
-                  >
-                    Your OS
-                  </span>
                 </a>
               ))
             }
@@ -158,8 +151,7 @@ const downloadHref =
       (/Linux/i.test(ua) && !/Android/i.test(ua) && 'linux') ||
       null;
     const row = os ? picker.querySelector(`[data-os-row="${os}"]`) : null;
-    row?.querySelector('[data-os-badge]')?.classList.remove('hidden');
-    row?.classList.remove('opacity-60');
+    row?.setAttribute('data-detected', '');
     // smart: when installers are published, the primary button downloads the
     // detected OS build directly
     const rowHref = row?.getAttribute('href');
