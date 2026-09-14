@@ -36,11 +36,15 @@ const downloadHref =
       </p>
 
       <div class="mt-7 flex flex-col items-center gap-3 sm:flex-row sm:justify-center sm:gap-4">
-        <div class="group relative w-full sm:w-auto" data-os-picker>
+        <div
+          class="group relative inline-flex w-full items-center justify-center rounded-lg bg-zinc-900 px-7 py-3 font-semibold text-white transition hover:bg-zinc-700 sm:w-auto"
+          data-os-picker
+        >
           <a
             href={downloadHref}
             data-os-primary
-            class="flex w-full items-center justify-center gap-2 rounded-lg bg-zinc-900 px-7 py-3 font-semibold text-white transition duration-200 group-hover:pointer-events-none group-hover:opacity-0 group-focus-within:pointer-events-none group-focus-within:opacity-0 [.open_&]:pointer-events-none [.open_&]:opacity-0"
+            aria-label="Get Agent V"
+            class="absolute inset-0 flex items-center justify-center gap-2 transition-opacity duration-150 group-hover:pointer-events-none group-hover:opacity-0"
           >
             Get Agent V
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -54,22 +58,30 @@ const downloadHref =
           </a>
 
           <div
-            class="absolute inset-0 z-10 flex items-center justify-center gap-6 rounded-lg bg-zinc-900 opacity-0 transition duration-200 invisible group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100 [.open_&]:visible [.open_&]:opacity-100"
+            class="absolute inset-0 hidden items-center justify-center gap-6 opacity-0 transition-opacity duration-150 group-focus-within:opacity-100 group-focus-within:flex group-hover:opacity-100 group-hover:flex [.open_&]:opacity-100 [.open_&]:flex"
+            role="menu"
+            aria-label="Choose your operating system"
           >
             {
               osOptions.map((o) => (
                 <a
                   href={o.href}
-                  data-os-link={o.os}
-                  title={`Download Agent V for ${o.name}`}
-                  class="p-1.5 text-white transition hover:scale-110"
+                  role="menuitem"
+                  data-os-row={o.os}
+                  class="relative flex flex-col items-center gap-0.5 text-white opacity-60 transition hover:opacity-100"
                 >
-                  <svg viewBox={o.icon.viewBox} class="size-6" fill="currentColor" aria-hidden="true">
+                  <svg viewBox={o.icon.viewBox} class="size-5" fill="currentColor" aria-hidden="true">
                     {o.icon.paths.map((d) => (
                       <path d={d} />
                     ))}
                   </svg>
-                  <span class="sr-only">{o.name}</span>
+                  <span class="text-[10px] font-medium">{o.name}</span>
+                  <span
+                    data-os-badge
+                    class="hidden absolute -top-2 -right-2 rounded-full bg-orange-600 px-1.5 py-px font-mono text-[9px] font-semibold text-white"
+                  >
+                    Your OS
+                  </span>
                 </a>
               ))
             }
@@ -138,22 +150,24 @@ const downloadHref =
 <script>
   const picker = document.querySelector('[data-os-picker]');
   if (picker) {
-    // smart: detect the visitor's OS from the user agent
+    // smart: detect the visitor's OS and mark its row
     const ua = navigator.userAgent;
     const os =
       (/Win/i.test(ua) && !/Android/i.test(ua) && 'windows') ||
       (/Mac/i.test(ua) && !/iPhone|iPad/i.test(ua) && 'macos') ||
       (/Linux/i.test(ua) && !/Android/i.test(ua) && 'linux') ||
       null;
-    const detected = os ? picker.querySelector(`[data-os-link="${os}"]`) : null;
+    const row = os ? picker.querySelector(`[data-os-row="${os}"]`) : null;
+    row?.querySelector('[data-os-badge]')?.classList.remove('hidden');
+    row?.classList.remove('opacity-60');
     // smart: when installers are published, the primary button downloads the
     // detected OS build directly
-    const detectedHref = detected?.getAttribute('href');
-    const hasRelease = Array.from(picker.querySelectorAll('[data-os-link]')).some(
-      (l) => !l.getAttribute('href')?.endsWith('#build-from-source'),
+    const rowHref = row?.getAttribute('href');
+    const hasRelease = Array.from(picker.querySelectorAll('[data-os-row]')).some(
+      (r) => !r.getAttribute('href')?.endsWith('#build-from-source'),
     );
-    if (detected && detectedHref && hasRelease) {
-      picker.querySelector('[data-os-primary]')?.setAttribute('href', detectedHref);
+    if (row && rowHref && hasRelease) {
+      picker.querySelector('[data-os-primary]')?.setAttribute('href', rowHref);
     }
     // touch: first tap opens the menu instead of navigating
     if (window.matchMedia('(hover: none)').matches) {
