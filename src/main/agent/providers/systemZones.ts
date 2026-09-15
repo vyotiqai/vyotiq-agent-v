@@ -94,10 +94,17 @@ export function markOpenAiChatCacheBreakpoint(msg: Record<string, unknown>): boo
  */
 export function markResponsesCacheBreakpoint(item: Record<string, unknown>): boolean {
   if (item.type === 'function_call' || item.type === 'function_call_output') return false
+  // Assistant message content must use output_text parts (Responses API contract);
+  // input_text is only valid on developer/user items and is rejected upstream.
+  const assistant = item.role === 'assistant'
   const content = item.content
   if (typeof content === 'string') {
     item.content = [
-      { type: 'input_text', text: content, prompt_cache_breakpoint: EXPLICIT_CACHE_BP }
+      {
+        type: assistant ? 'output_text' : 'input_text',
+        text: content,
+        prompt_cache_breakpoint: EXPLICIT_CACHE_BP
+      }
     ]
     return true
   }
@@ -106,10 +113,10 @@ export function markResponsesCacheBreakpoint(item: Record<string, unknown>): boo
     const part = content[i]
     if (!part || typeof part !== 'object') continue
     const p = part as Record<string, unknown>
-    if (
-      (p.type === 'input_text' || p.type === 'text') &&
-      typeof p.text === 'string'
-    ) {
+    const markable = assistant
+      ? p.type === 'output_text'
+      : p.type === 'input_text' || p.type === 'text'
+    if (markable && typeof p.text === 'string') {
       p.prompt_cache_breakpoint = EXPLICIT_CACHE_BP
       return true
     }

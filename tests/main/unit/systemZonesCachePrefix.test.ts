@@ -134,20 +134,55 @@ describe('Responses / Gemini trailing volatile', () => {
       ]
     })
     // Walks back past function_call_output; marks assistant text instead.
+    // Assistant message content must be output_text — input_text is rejected
+    // upstream with: [invalid_value] Supported values are: 'output_text' and 'refusal'.
     expect(input[2]).toEqual({
       role: 'assistant',
       content: [
         {
-          type: 'input_text',
+          type: 'output_text',
           text: 'ok',
           prompt_cache_breakpoint: { mode: 'explicit' }
         }
       ]
     })
+    const items = input as Array<Record<string, unknown>>
+    for (const item of items) {
+      if (item.role !== 'assistant') continue
+      const parts = item.content as Array<{ type: string }>
+      expect(parts.every((p) => p.type !== 'input_text')).toBe(true)
+    }
     expect(input[input.length - 1]).toEqual({
       role: 'user',
       content: volatileSessionMessage('SNAP').content
     })
+  })
+
+  it('Responses: assistant breakpoint on string content yields output_text, never input_text', () => {
+    const input = toResponsesInput(
+      [
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: 'answer text' }
+      ],
+      'ignored',
+      undefined,
+      { explicitPromptCache: true, systemStable: 'DEV STABLE', systemVolatile: 'SNAP' }
+    ) as Array<Record<string, unknown>>
+    const assistant = input.find((item) => item.role === 'assistant')
+    expect(assistant).toBeDefined()
+    expect(assistant!.content).toEqual([
+      {
+        type: 'output_text',
+        text: 'answer text',
+        prompt_cache_breakpoint: { mode: 'explicit' }
+      }
+    ])
+    // No assistant item anywhere in the body may carry an input_text part.
+    for (const item of input) {
+      if (item.role !== 'assistant') continue
+      const parts = item.content as Array<{ type: string }>
+      expect(parts.every((p) => p.type !== 'input_text')).toBe(true)
+    }
   })
 
   it('Responses: stable developer + trailing user volatile', () => {
