@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { ToolApprovalOnboardingModal } from '@renderer/features/chat/components/ToolApprovalOnboardingModal'
 
 beforeEach(() => {
@@ -19,14 +19,21 @@ afterEach(() => {
 })
 
 describe('ToolApprovalOnboardingModal', () => {
-  it('renders mode choices when open', () => {
+  it('renders mode choices when open, Mutating first with Recommended', () => {
     render(<ToolApprovalOnboardingModal open onChoose={vi.fn()} onDismiss={vi.fn()} />)
 
     expect(screen.getByRole('dialog', { name: 'Tool approval' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Tool approval' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /off/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /mutating tools/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /all tools/i })).toBeTruthy()
+    const dialog = screen.getByRole('dialog', { name: 'Tool approval' })
+    const modeButtons = within(dialog)
+      .getAllByRole('button')
+      .filter((el) => el.getAttribute('type') === 'button' && el.textContent !== 'Not now')
+    // Order: Mutating, Off, All (Not now is separate)
+    const labels = modeButtons.map((b) => b.textContent ?? '')
+    expect(labels[0]).toMatch(/Mutating tools/i)
+    expect(labels[0]).toMatch(/Recommended/i)
+    expect(labels[1]).toMatch(/^Off/i)
+    expect(labels[2]).toMatch(/All tools/i)
   })
 
   it('calls onChoose with selected mode', () => {

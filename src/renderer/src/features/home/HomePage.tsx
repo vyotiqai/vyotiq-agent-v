@@ -495,7 +495,7 @@ export function HomePage({
           <section aria-labelledby="home-empty-heading" className="border-y border-border/50 py-20 text-center">
             <Icon name="folderPlus" size={28} className="mx-auto text-muted" aria-hidden="true" />
             <h1 id="home-empty-heading" className="mt-4 text-xl font-semibold text-fg">Open a workspace</h1>
-            <p className="mx-auto mt-2 max-w-md text-sm text-muted">Add a project folder to start sessions and track active work.</p>
+            <p className="mx-auto mt-2 max-w-md text-sm text-muted">Pick a project folder. Agent V will work in that folder when you ask.</p>
             <Button className="mt-5" onClick={onAddWorkspace}>Add workspace</Button>
           </section>
         </div>
