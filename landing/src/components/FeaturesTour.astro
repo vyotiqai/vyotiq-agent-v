@@ -1,0 +1,110 @@
+---
+/**
+ * Full features tour — rendered entirely from src/data/features.ts.
+ * Add/remove/reorder features there; this layout stays stable.
+ */
+import { enabledCategories, featuresInCategory } from '../data/features';
+import FeatureCard from './FeatureCard.astro';
+import ParallelWorktrees from './ParallelWorktrees.astro';
+import AgentModes from './AgentModes.astro';
+import AgentBrowser from './AgentBrowser.astro';
+
+const categories = enabledCategories();
+---
+
+<section id="features-tour" class="scroll-mt-24" aria-label="Features tour">
+  <nav
+    class="sticky top-[52px] z-40 border-b border-[var(--av-hairline)] bg-[color-mix(in_srgb,var(--av-bg)_92%,transparent)] backdrop-blur-md"
+    aria-label="Feature categories"
+  >
+    <div class="av-max mx-auto flex gap-1 overflow-x-auto px-4 py-2.5 sm:px-6 lg:px-10">
+      {
+        categories.map((cat) => (
+          <a
+            href={`#category-${cat.id}`}
+            class="shrink-0 rounded-full border border-[var(--av-hairline)] bg-[var(--av-panel)] px-3 py-1.5 text-xs font-medium text-[color-mix(in_srgb,var(--av-ink)_70%,transparent)] transition hover:border-[color-mix(in_srgb,var(--av-ink)_22%,transparent)] hover:text-[var(--av-ink)]"
+          >
+            {cat.title}
+          </a>
+        ))
+      }
+    </div>
+  </nav>
+
+  <div class="flex flex-col">
+    {
+      categories.map((cat, index) => {
+        const items = featuresInCategory(cat.id);
+        const band = index % 2 === 0 ? 'bg-[var(--av-band)]' : 'bg-[var(--av-bg)]';
+        const hasParallel = items.some((f) => f.showcase === 'parallel');
+        const hasModes = items.some((f) => f.showcase === 'modes');
+        const hasBrowser = items.some((f) => f.showcase === 'browser');
+        const cardItems = items.filter((f) => !f.showcase);
+        const showcaseCards = items.filter((f) => f.showcase);
+
+        return (
+          <section
+            id={`category-${cat.id}`}
+            class:list={['scroll-mt-28', band]}
+            aria-labelledby={`category-heading-${cat.id}`}
+          >
+            <div class="av-max mx-auto px-4 py-14 sm:px-6 sm:py-16 lg:px-10">
+              <header class="max-w-2xl">
+                <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
+                  {String(index + 1).padStart(2, '0')} · {items.length}{' '}
+                  {items.length === 1 ? 'capability' : 'capabilities'}
+                </p>
+                <h2
+                  id={`category-heading-${cat.id}`}
+                  class="mt-2 text-[clamp(1.45rem,2.6vw,2rem)] font-semibold tracking-tight text-[var(--av-ink)]"
+                >
+                  {cat.title}
+                </h2>
+                <p class="mt-3 text-base leading-relaxed text-[color-mix(in_srgb,var(--av-ink)_60%,transparent)]">
+                  {cat.description}
+                </p>
+              </header>
+
+              {hasParallel ? (
+                <div class="mt-10 -mx-4 sm:-mx-6 lg:-mx-10">
+                  <ParallelWorktrees />
+                </div>
+              ) : null}
+              {hasModes ? (
+                <div class="mt-10 -mx-4 sm:-mx-6 lg:-mx-10">
+                  <AgentModes />
+                </div>
+              ) : null}
+              {hasBrowser ? (
+                <div class="mt-10 -mx-4 sm:-mx-6 lg:-mx-10">
+                  <AgentBrowser />
+                </div>
+              ) : null}
+
+              {cardItems.length > 0 ? (
+                <div
+                  class:list={[
+                    'grid gap-4 sm:grid-cols-2',
+                    hasParallel || hasModes || hasBrowser ? 'mt-10' : 'mt-8',
+                  ]}
+                >
+                  {cardItems.map((feature) => (
+                    <FeatureCard feature={feature} />
+                  ))}
+                </div>
+              ) : null}
+
+              {showcaseCards.length > 0 ? (
+                <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {showcaseCards.map((feature) => (
+                    <FeatureCard feature={feature} compact />
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </section>
+        );
+      })
+    }
+  </div>
+</section>
