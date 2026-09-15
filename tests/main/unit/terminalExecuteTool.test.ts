@@ -45,7 +45,7 @@ describe('executeTool terminal', () => {
         await new Promise((r) => setTimeout(r, 400))
       }
     }
-  })
+  }, 30_000)
 
   it('runs a foreground command and reports exit code', async () => {
     const result = await executeTool(

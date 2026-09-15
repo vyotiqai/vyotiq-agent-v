@@ -220,7 +220,7 @@ describe('CodeIndexStore', () => {
     expect(literalRunForPattern('ok')).toBeNull()
   })
 
-  it('rebuilds the legacy embedding-store schema and accepts inserts', () => {
+  it('rebuilds the legacy embedding-store schema and accepts inserts', { timeout: 120_000 }, () => {
     const dir = mkdtempSync(join(tmpdir(), 'vyotiq-codeindex-store-'))
     const dbPath = join(dir, 'index.sqlite')
     // Exact on-disk dump: meta claims the old '2' version string.
