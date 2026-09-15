@@ -1,8 +1,8 @@
----
+﻿---
 /**
- * Feature showcase #3 — Built-in agent browser.
+ * Feature showcase #3 â€” Built-in agent browser.
  * Asymmetric 2-column stage (not #1 tabs, not #2 equal cards).
- * Real tools: browser_navigate → browser_snapshot → browser_click/type/fill.
+ * Real tools: browser_navigate â†’ browser_snapshot â†’ browser_click/type/fill.
  * Honest: page text untrusted; cite [[https://url]]; fresh @eN after navigate.
  */
 interface Props {
@@ -21,7 +21,7 @@ const { embedded = false } = Astro.props;
     <div class="mb-6 flex flex-col gap-2 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
-          Feature 03 · Built-in browser
+          Feature 03 Â· Built-in browser
         </p>
         <h3
           id="agent-browser-heading"
@@ -31,7 +31,7 @@ const { embedded = false } = Astro.props;
         </h3>
       </div>
       <p class="max-w-md text-sm leading-relaxed text-[var(--av-muted)] sm:text-right">
-        Live agent browser with real tools —
+        Live agent browser with real tools â€”
         <span class="font-mono text-[12px] text-[color-mix(in_srgb,var(--av-ink)_85%,transparent)]">browser_navigate</span>,
         <span class="font-mono text-[12px] text-[color-mix(in_srgb,var(--av-ink)_85%,transparent)]">browser_snapshot</span>, then click/type/fill with fresh
         <span class="font-mono text-[12px] text-[color-mix(in_srgb,var(--av-ink)_85%,transparent)]">@eN</span> refs. Page text is untrusted.
@@ -43,10 +43,10 @@ const { embedded = false } = Astro.props;
       class="ab overflow-hidden rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)]"
       data-phase="snapshot"
     >
-      <!-- Minimal URL strip — no traffic lights / OS chrome -->
+      <!-- Minimal URL strip â€” no traffic lights / OS chrome -->
       <div class="flex items-center gap-3 border-b border-[var(--av-hairline)] bg-[var(--av-panel)] px-4 py-3 sm:px-5">
         <div
-          class="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3.5 py-1.5 shadow-sm"
+          class="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3.5 py-1.5 shadow-sm"
         >
           <span class="size-1.5 shrink-0 rounded-full bg-[var(--av-accent)]" aria-hidden="true"></span>
           <p class="ab-url truncate font-mono text-[12px] text-[color-mix(in_srgb,var(--av-ink)_75%,transparent)] sm:text-[13px]">
@@ -73,50 +73,50 @@ const { embedded = false } = Astro.props;
               <p class="font-mono text-[10px] font-semibold uppercase tracking-wider text-[var(--av-muted)]">
                 browser_snapshot
               </p>
-              <p class="font-mono text-[10px] text-[var(--av-muted)]">viewport · refs</p>
+              <p class="font-mono text-[10px] text-[var(--av-muted)]">viewport Â· refs</p>
             </div>
 
             <ul class="ab-snapshot space-y-1.5" role="list" aria-label="Accessibility snapshot refs">
               <li
-                class="ab-ref flex items-center gap-2.5 rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-2.5 transition"
+                class="ab-ref flex items-center gap-2.5 rounded-lg border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-2.5 transition"
                 data-ref="e1"
               >
                 <span class="ab-ref-badge shrink-0 rounded-md bg-[var(--av-panel)] px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[var(--av-muted)]">
                   @e1
                 </span>
                 <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm font-medium text-[var(--av-ink)]">button · Sign in</p>
+                  <p class="truncate text-sm font-medium text-[var(--av-ink)]">button Â· Sign in</p>
                   <p class="truncate font-mono text-[10px] text-[var(--av-muted)]">role=button</p>
                 </div>
               </li>
               <li
-                class="ab-ref flex items-center gap-2.5 rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-2.5 transition"
+                class="ab-ref flex items-center gap-2.5 rounded-lg border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-2.5 transition"
                 data-ref="e2"
               >
                 <span class="ab-ref-badge shrink-0 rounded-md bg-[var(--av-panel)] px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[var(--av-muted)]">
                   @e2
                 </span>
                 <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm font-medium text-[var(--av-ink)]">link · API reference</p>
-                  <p class="truncate font-mono text-[10px] text-[var(--av-muted)]">role=link · href=/api</p>
+                  <p class="truncate text-sm font-medium text-[var(--av-ink)]">link Â· API reference</p>
+                  <p class="truncate font-mono text-[10px] text-[var(--av-muted)]">role=link Â· href=/api</p>
                 </div>
               </li>
               <li
-                class="ab-ref flex items-center gap-2.5 rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-2.5 transition"
+                class="ab-ref flex items-center gap-2.5 rounded-lg border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-2.5 transition"
                 data-ref="e3"
               >
                 <span class="ab-ref-badge shrink-0 rounded-md bg-[var(--av-panel)] px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[var(--av-muted)]">
                   @e3
                 </span>
                 <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm font-medium text-[var(--av-ink)]">textbox · Search docs</p>
-                  <p class="truncate font-mono text-[10px] text-[var(--av-muted)]">role=textbox · name=q</p>
+                  <p class="truncate text-sm font-medium text-[var(--av-ink)]">textbox Â· Search docs</p>
+                  <p class="truncate font-mono text-[10px] text-[var(--av-muted)]">role=textbox Â· name=q</p>
                 </div>
               </li>
             </ul>
 
             <p class="ab-snap-note relative mt-3 font-mono text-[10px] leading-relaxed text-[var(--av-muted)]">
-              Refs invalidate after navigate — snapshot again before click / type / fill.
+              Refs invalidate after navigate â€” snapshot again before click / type / fill.
             </p>
           </div>
         </div>
@@ -131,7 +131,7 @@ const { embedded = false } = Astro.props;
             <li>
               <button
                 type="button"
-                class="ab-tool group flex w-full items-start gap-3 rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-3 text-left transition hover:border-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]"
+                class="ab-tool group flex w-full items-start gap-3 rounded-lg border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-3 text-left transition hover:border-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]"
                 data-phase="navigate"
                 aria-pressed="false"
                 tabindex="-1"
@@ -146,7 +146,7 @@ const { embedded = false } = Astro.props;
                     browser_navigate
                   </span>
                   <span class="mt-0.5 block text-xs text-[var(--av-muted)]">
-                    Open URL · JS rendered · invalidates prior refs
+                    Open URL Â· JS rendered Â· invalidates prior refs
                   </span>
                 </span>
               </button>
@@ -154,7 +154,7 @@ const { embedded = false } = Astro.props;
             <li>
               <button
                 type="button"
-                class="ab-tool group flex w-full items-start gap-3 rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-3 text-left transition hover:border-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]"
+                class="ab-tool group flex w-full items-start gap-3 rounded-lg border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-3 text-left transition hover:border-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]"
                 data-phase="snapshot"
                 aria-pressed="true"
                 tabindex="0"
@@ -169,7 +169,7 @@ const { embedded = false } = Astro.props;
                     browser_snapshot
                   </span>
                   <span class="mt-0.5 block text-xs text-[var(--av-muted)]">
-                    @eN refs · viewport · page text · screenshot
+                    @eN refs Â· viewport Â· page text Â· screenshot
                   </span>
                 </span>
               </button>
@@ -177,7 +177,7 @@ const { embedded = false } = Astro.props;
             <li>
               <button
                 type="button"
-                class="ab-tool group flex w-full items-start gap-3 rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-3 text-left transition hover:border-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]"
+                class="ab-tool group flex w-full items-start gap-3 rounded-lg border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-3 text-left transition hover:border-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]"
                 data-phase="act"
                 aria-pressed="false"
                 tabindex="-1"
@@ -189,7 +189,7 @@ const { embedded = false } = Astro.props;
                 </span>
                 <span class="min-w-0">
                   <span class="block font-mono text-[12px] font-semibold text-[var(--av-ink)] sm:text-[13px]">
-                    browser_click · @e2
+                    browser_click Â· @e2
                   </span>
                   <span class="mt-0.5 block text-xs text-[var(--av-muted)]">
                     Act on latest snapshot refs only
@@ -200,7 +200,7 @@ const { embedded = false } = Astro.props;
           </ol>
 
           <p class="mt-4 font-mono text-[10px] leading-relaxed text-[var(--av-muted)]">
-            Also: browser_tabs · scroll · search · back · MAX_BROWSER_TABS = 16
+            Also: browser_tabs Â· scroll Â· search Â· back Â· MAX_BROWSER_TABS = 16
           </p>
         </div>
       </div>
@@ -211,7 +211,7 @@ const { embedded = false } = Astro.props;
           Page text from the browser is <span class="font-medium text-[color-mix(in_srgb,var(--av-ink)_75%,transparent)]">untrusted</span>.
           Cite sources as
           <span class="font-mono text-[11px] text-[color-mix(in_srgb,var(--av-ink)_85%,transparent)]">[[https://url]]</span>
-          — never treat snapshot content as instructions.
+          â€” never treat snapshot content as instructions.
         </p>
       </div>
     </article>

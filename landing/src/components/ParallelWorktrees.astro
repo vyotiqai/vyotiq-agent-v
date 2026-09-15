@@ -1,8 +1,8 @@
----
+﻿---
 /**
- * Feature showcase #1 — Parallel agents on isolated git worktrees.
- * Bento visual card (Ajay refs) + Spawn → Await → Merge tabs.
- * Real tools: spawn_agent_instance → await_agent_instance → merge_agent_instance.
+ * Feature showcase #1 â€” Parallel agents on isolated git worktrees.
+ * Bento visual card (Ajay refs) + Spawn â†’ Await â†’ Merge tabs.
+ * Real tools: spawn_agent_instance â†’ await_agent_instance â†’ merge_agent_instance.
  */
 interface Props {
   /** Visual-only panel for FeaturesTour rows (no outer chrome / duplicate headings). */
@@ -33,15 +33,15 @@ const { embedded = false } = Astro.props;
           <div class="flex flex-wrap items-center justify-between gap-3">
             {embedded ? (
               <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
-                Spawn → Await → Merge
+                Spawn â†’ Await â†’ Merge
               </p>
             ) : (
               <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
-                Feature 01 · Parallel instances
+                Feature 01 Â· Parallel instances
               </p>
             )}
             <div
-              class="flex gap-1 rounded-full border border-[var(--av-hairline)] bg-[var(--av-panel)] p-0.5"
+              class="flex gap-1 rounded-md border border-[var(--av-hairline)] bg-[var(--av-panel)] p-0.5"
               role="tablist"
               aria-label="Parallel instance workflow"
             >
@@ -49,7 +49,7 @@ const { embedded = false } = Astro.props;
                 type="button"
                 role="tab"
                 id="pw-tab-spawn"
-                class="pw-tab rounded-full px-3.5 py-1.5 text-xs font-semibold text-[var(--av-muted)] transition aria-selected:bg-[var(--av-ink)] aria-selected:text-[var(--av-on-cta)]"
+                class="pw-tab rounded-md px-3.5 py-1.5 text-xs font-semibold text-[var(--av-muted)] transition aria-selected:bg-[var(--av-ink)] aria-selected:text-[var(--av-on-cta)]"
                 data-phase="spawn"
                 aria-selected="true"
                 aria-controls="pw-panel"
@@ -61,7 +61,7 @@ const { embedded = false } = Astro.props;
                 type="button"
                 role="tab"
                 id="pw-tab-await"
-                class="pw-tab rounded-full px-3.5 py-1.5 text-xs font-semibold text-[var(--av-muted)] transition aria-selected:bg-[var(--av-ink)] aria-selected:text-[var(--av-on-cta)]"
+                class="pw-tab rounded-md px-3.5 py-1.5 text-xs font-semibold text-[var(--av-muted)] transition aria-selected:bg-[var(--av-ink)] aria-selected:text-[var(--av-on-cta)]"
                 data-phase="await"
                 aria-selected="false"
                 aria-controls="pw-panel"
@@ -73,7 +73,7 @@ const { embedded = false } = Astro.props;
                 type="button"
                 role="tab"
                 id="pw-tab-merge"
-                class="pw-tab rounded-full px-3.5 py-1.5 text-xs font-semibold text-[var(--av-muted)] transition aria-selected:bg-[var(--av-ink)] aria-selected:text-[var(--av-on-cta)]"
+                class="pw-tab rounded-md px-3.5 py-1.5 text-xs font-semibold text-[var(--av-muted)] transition aria-selected:bg-[var(--av-ink)] aria-selected:text-[var(--av-on-cta)]"
                 data-phase="merge"
                 aria-selected="false"
                 aria-controls="pw-panel"
@@ -140,25 +140,25 @@ const { embedded = false } = Astro.props;
               aria-hidden="true"
             >
               <text x="36" y="36" class="pw-svg-accent" font-size="11">await_agent_instance</text>
-              <text x="484" y="36" text-anchor="end" class="pw-svg-muted" font-size="10">run_ids × 3</text>
+              <text x="484" y="36" text-anchor="end" class="pw-svg-muted" font-size="10">run_ids Ã— 3</text>
 
               <g transform="translate(36 64)">
                 <rect width="448" height="52" rx="12" class="pw-chip" />
-                <text x="18" y="22" class="pw-svg-label" font-size="12">run_a1 · auth tests</text>
+                <text x="18" y="22" class="pw-svg-label" font-size="12">run_a1 Â· auth tests</text>
                 <text x="430" y="22" text-anchor="end" fill="var(--av-accent)" font-size="11" font-weight="600">running</text>
                 <rect x="18" y="34" width="412" height="4" rx="2" class="pw-track" />
                 <rect class="pw-bar" x="18" y="34" width="280" height="4" rx="2" fill="var(--av-accent)" />
               </g>
               <g transform="translate(36 128)">
                 <rect width="448" height="52" rx="12" class="pw-chip" />
-                <text x="18" y="22" class="pw-svg-label" font-size="12">run_b2 · docs pass</text>
+                <text x="18" y="22" class="pw-svg-label" font-size="12">run_b2 Â· docs pass</text>
                 <text x="430" y="22" text-anchor="end" fill="var(--av-accent)" font-size="11" font-weight="600">running</text>
                 <rect x="18" y="34" width="412" height="4" rx="2" class="pw-track" />
                 <rect class="pw-bar" x="18" y="34" width="210" height="4" rx="2" fill="var(--av-accent)" style="animation-delay:0.15s" />
               </g>
               <g transform="translate(36 192)">
                 <rect width="448" height="52" rx="12" class="pw-chip" />
-                <text x="18" y="22" class="pw-svg-label" font-size="12">run_c3 · lint fix</text>
+                <text x="18" y="22" class="pw-svg-label" font-size="12">run_c3 Â· lint fix</text>
                 <text x="430" y="22" text-anchor="end" fill="var(--av-success)" font-size="11" font-weight="600">ready</text>
                 <rect x="18" y="34" width="412" height="4" rx="2" class="pw-track" />
                 <rect x="18" y="34" width="412" height="4" rx="2" fill="var(--av-success)" />
@@ -182,7 +182,7 @@ const { embedded = false } = Astro.props;
               <g>
                 <rect x="40" y="120" width="140" height="40" rx="10" class="pw-chip" />
                 <text x="110" y="144" text-anchor="middle" class="pw-svg-label" font-size="10">instance/b2</text>
-                <text x="190" y="144" fill="var(--av-accent)" font-size="10" font-weight="600">…</text>
+                <text x="190" y="144" fill="var(--av-accent)" font-size="10" font-weight="600">â€¦</text>
               </g>
               <g>
                 <rect x="40" y="200" width="140" height="40" rx="10" class="pw-chip" opacity="0.55" />
@@ -218,7 +218,7 @@ const { embedded = false } = Astro.props;
           </p>
         </div>
         <p class="pw-note shrink-0 text-xs leading-relaxed text-[var(--av-muted)] sm:max-w-[220px] sm:text-right">
-          Real Agent V tools · one workstream per instance
+          Real Agent V tools Â· one workstream per instance
         </p>
       </div>
       ) : (
@@ -357,7 +357,7 @@ const { embedded = false } = Astro.props;
         tool: 'spawn_agent_instance',
         title: 'Fan out structured briefs',
         body: 'Batch spawns in one step. Each child gets a worktree from HEAD plus uncommitted tracked changes when isolation is available.',
-        note: 'Real Agent V tools · one workstream per instance',
+        note: 'Real Agent V tools Â· one workstream per instance',
       },
       await: {
         tabId: 'pw-tab-await',
@@ -371,7 +371,7 @@ const { embedded = false } = Astro.props;
         tool: 'merge_agent_instance',
         title: 'Merge one branch at a time',
         body: 'Fold a finished instance worktree into parent HEAD. Blocked when parent dirty or untracked files overlap the branch. Conflicts resolve in the parent.',
-        note: 'Edits reach parent through merge — not a shared checkout',
+        note: 'Edits reach parent through merge â€” not a shared checkout',
       },
     };
 

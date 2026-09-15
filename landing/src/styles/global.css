@@ -1,4 +1,4 @@
-@import '@fontsource/plus-jakarta-sans/400.css';
+﻿@import '@fontsource/plus-jakarta-sans/400.css';
 @import '@fontsource/plus-jakarta-sans/500.css';
 @import '@fontsource/plus-jakarta-sans/600.css';
 @import '@fontsource/jetbrains-mono/400.css';
@@ -13,7 +13,7 @@
 
 :root {
   color-scheme: light;
-  /* Muse-like calm canvas — keep token strings verify-dist expects */
+  /* Muse-like calm canvas â€” keep token strings verify-dist expects */
   --av-bg: #f7f7f4;
   --av-panel: #ffffff;
   --av-band: #f0efeb;
@@ -29,7 +29,7 @@
   --av-flyout-shadow: 0 0 16px color-mix(in srgb, var(--av-ink) 4%, transparent),
     0 0 8px color-mix(in srgb, var(--av-ink) 2%, transparent);
   --av-squircle: 1.75rem;
-  --av-pill: 9999px;
+  --av-pill: 0.625rem; /* soft rectangle, not capsule */
   --av-content: 90rem;
 }
 
