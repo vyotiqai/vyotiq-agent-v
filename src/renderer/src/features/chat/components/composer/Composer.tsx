@@ -49,6 +49,8 @@ import { useComposerFiles, ATTACHMENT_ACCEPT, MAX_FILES, isImageFile } from './u
 import { useComposerAudio, isAudioFile, MAX_AUDIO_FILES } from './useComposerAudio'
 import { useComposerDictation, type DictationPhase } from './useComposerDictation'
 import { useComposerModels } from './useComposerModels'
+import { deriveModelReadiness, modelReadinessSendReason } from './modelReadiness'
+import { ModelReadinessBanner } from './ModelReadinessBanner'
 import { pickAudioFallback, pickVisionFallback } from './composerModelUtils'
 import {
   getWorkspaceHotUi,
@@ -629,6 +631,50 @@ export function Composer({
     })
   }, [])
 
+  const [refreshingCatalog, setRefreshingCatalog] = useState(false)
+  const [browsedProvider, setBrowsedProvider] = useState<ProviderId>(provider)
+
+  useEffect(() => {
+    setBrowsedProvider(provider)
+  }, [provider])
+
+  const {
+    providers,
+    optionsByProvider,
+    seedsByProvider,
+    modelMetaByValue,
+    warningsByProvider,
+    modelsWarning,
+    catalog,
+    filterOpts,
+    refreshCatalog,
+    catalogLoading: catalogFetchLoading
+  } = useComposerModels({
+    provider,
+    model,
+    ollamaBaseUrl,
+    customOpenAiBaseUrl,
+    modelsRefreshKey,
+    hasWorkspace,
+    hasImages: images.length > 0,
+    hasAudio: audio.length > 0,
+    browsedProvider,
+    secrets
+  })
+
+  const catalogLoading = catalogFetchLoading || refreshingCatalog
+  const readinessIssue = deriveModelReadiness({
+    provider,
+    model,
+    secrets,
+    ollamaBaseUrl,
+    customOpenAiBaseUrl,
+    catalogWarning: modelsWarning,
+    liveCatalog: catalog.length > 0 ? catalog : null,
+    catalogLoading
+  })
+  const readinessBlocksSend = readinessIssue != null
+
   const { text, setText, canSend, submit, onKeyDown } = useComposerDraft({
     draft: resolvedDraft,
     onDraftChange,
@@ -643,7 +689,7 @@ export function Composer({
     setAudio,
     setFileError,
     disabled,
-    sendBlocked: extracting,
+    sendBlocked: extracting || readinessBlocksSend,
     onSend: sendWithMentions,
     slashMenuOpen: slash.open,
     slashActiveCommand: slash.activeCommand,
@@ -704,35 +750,6 @@ export function Composer({
     setCaret: setDictationCaret
   })
 
-  const [refreshingCatalog, setRefreshingCatalog] = useState(false)
-  const [browsedProvider, setBrowsedProvider] = useState<ProviderId>(provider)
-
-  useEffect(() => {
-    setBrowsedProvider(provider)
-  }, [provider])
-
-  const {
-    providers,
-    optionsByProvider,
-    seedsByProvider,
-    modelMetaByValue,
-    warningsByProvider,
-    catalog,
-    filterOpts,
-    refreshCatalog,
-    catalogLoading: catalogFetchLoading
-  } = useComposerModels({
-    provider,
-    model,
-    ollamaBaseUrl,
-    customOpenAiBaseUrl,
-    modelsRefreshKey,
-    hasWorkspace,
-    hasImages: images.length > 0,
-    hasAudio: audio.length > 0,
-    browsedProvider,
-    secrets
-  })
 
   preferNativePdfRef.current = Boolean(
     (
@@ -740,7 +757,6 @@ export function Composer({
     )?.inputModalities?.includes('file')
   )
 
-  const catalogLoading = catalogFetchLoading || refreshingCatalog
 
   /**
    * At most one fallback attempt per (provider, current model, fallback) triple.
@@ -876,13 +892,15 @@ export function Composer({
       ? hasWorkspace
         ? 'Sending is unavailable right now.'
         : 'Open a workspace to send a message.'
-      : extracting
-        ? 'Finish processing the attachment before sending.'
-        : fileError || imageError || audioError
-          ? 'Resolve the attachment issue before sending.'
-          : isInline
-            ? 'Enter a replacement message to resend.'
-            : 'Type a message or attach a file to send.'
+      : readinessBlocksSend && readinessIssue
+        ? modelReadinessSendReason(readinessIssue)
+        : extracting
+          ? 'Finish processing the attachment before sending.'
+          : fileError || imageError || audioError
+            ? 'Resolve the attachment issue before sending.'
+            : isInline
+              ? 'Enter a replacement message to resend.'
+              : 'Type a message or attach a file to send.'
     : null
 
   const hasContent =
@@ -1057,6 +1075,26 @@ export function Composer({
         onRemoveNativeFile={removeNativeFile}
         onRemoveAudio={removeAudio}
       />
+
+      {readinessIssue && hasWorkspace ? (
+        <ModelReadinessBanner
+          issue={readinessIssue}
+          busy={catalogLoading}
+          onRecheck={() => {
+            void refreshCatalog({ forceRefresh: true, provider })
+          }}
+          onAddKey={() => {
+            slashHandlers?.onOpenSettings?.('providers')
+          }}
+          onChooseModel={() => {
+            const trigger = document.querySelector<HTMLButtonElement>(
+              'button[aria-label="Select model"]'
+            )
+            trigger?.focus()
+            trigger?.click()
+          }}
+        />
+      ) : null}
 
       {dictationStripState?.kind === 'error' ? (
         <DictationErrorBanner
