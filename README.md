@@ -1,6 +1,27 @@
 # Vyotiq
 
+[![CI](https://github.com/vyotiqai/vyotiq-agent-v/actions/workflows/ci.yml/badge.svg)](https://github.com/vyotiqai/vyotiq-agent-v/actions/workflows/ci.yml)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+
 Vyotiq ("Agent V") is an Electron desktop app: a coding workspace for real repositories. It pairs a chat interface with multiple model providers with an agent that can act directly on your checked-out code — terminal, files, and repository tools — instead of only working from pasted snippets. Local voice dictation is built in via a Whisper model shipped with the app.
+
+## Features
+
+- **Multi-provider chat** — talk to OpenAI, Anthropic, Google Gemini, Ollama (local models), DeepSeek, Groq, OpenRouter, xAI, Mistral, or any custom OpenAI-compatible endpoint, plus an OpenCode provider. Model lists are fetched per provider where the API supports it.
+- **An agent that acts on your checkout** — the built-in tool catalog includes a terminal, file tools (read, edit, search, glob, grep, codebase search), git tools (status, diff, commit, apply patch), GitHub tools (pull requests, issues), typecheck/lint/test runners, browser automation, notebook editing, and language-server queries.
+- **Agent runs and instance worktrees** — the agent can fan work out to child instances; each child runs on its own git worktree branch and the result is merged back into the parent branch.
+- **Local Whisper dictation** — voice dictation runs entirely on your machine (Whisper via transformers.js with the onnxruntime-node backend) in the Electron main process / a utility process. No audio leaves the app.
+- **Skills and marketplace** — skills ship with the app as marketplace resources and can be loaded into a run; plugin rules are supported alongside skill files.
+- **MCP client** — connect Model Context Protocol servers, list their tools/resources/prompts, and pin their tools into the agent's catalog.
+- **Long-term workspace memory** — the agent keeps notes under `.vyotiq/memory/` in the workspace and re-reads them on later runs.
+
+## Platforms
+
+Vyotiq builds for **Windows** (NSIS installer), **macOS** (dmg and zip), and **Linux** (AppImage, deb, rpm). Target definitions are in `electron-builder.yml`.
+
+## Downloads
+
+No release has been published yet. When releases start, installers will be published to the companion repository [vyotiqai/vyotiq-agent-v-releases](https://github.com/vyotiqai/vyotiq-agent-v-releases). Until then, build from source as described below.
 
 ## Quick start
 
@@ -76,6 +97,14 @@ pnpm landing:build
 - `landing/` — Astro marketing site (separate workspace package)
 - `tests/` — vitest unit/e2e suites plus Playwright GUI e2e
 - `scripts/` — sync and build helper scripts wired into the package scripts
+
+## Documentation
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — development workflow and the standard gates
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — code of conduct
+- [SECURITY.md](SECURITY.md) — how to report vulnerabilities
+- [RELEASE-RUNBOOK.md](RELEASE-RUNBOOK.md) — maintainer release procedure
+- [NOTICE](NOTICE) — third-party notices
 
 ## Contributing
 
