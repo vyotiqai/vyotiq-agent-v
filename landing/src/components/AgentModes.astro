@@ -1,0 +1,145 @@
+---
+/**
+ * Feature showcase #2 — Ask / Plan / Agent interaction modes.
+ * Unique 3-up bento (not a ParallelWorktrees clone).
+ * Honest: Ask = read-only Q&A; Plan = plan.md artifacts via create_plan;
+ * Agent = full tools; switch_mode / slash set_mode_* can change mid-run.
+ */
+interface Props {
+  embedded?: boolean;
+}
+const { embedded = false } = Astro.props;
+---
+
+<article
+  id={embedded ? undefined : 'modes'}
+  class:list={[embedded ? null : 'scroll-mt-24']}
+  aria-labelledby={embedded ? undefined : 'agent-modes-heading'}
+>
+  <div class:list={[embedded ? null : 'mx-auto av-max px-4 py-16 sm:px-6 sm:py-20 lg:px-10']}>
+    {!embedded ? (
+    <div class="mb-6 flex flex-col gap-2 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
+          Feature 02 · Interaction modes
+        </p>
+        <h3
+          id="agent-modes-heading"
+          class="mt-1 text-[clamp(1.35rem,2.2vw,1.65rem)] font-semibold tracking-tight text-[var(--av-ink)]"
+        >
+          Ask. Plan. Agent.
+        </h3>
+      </div>
+      <p class="max-w-md text-sm leading-relaxed text-[var(--av-muted)] sm:text-right">
+        Composer modes that match the phase of the work — read-only, plan artifacts, or full agency. Switch with the UI, slash commands, or <span class="font-mono text-[12px] text-[color-mix(in_srgb,var(--av-ink)_85%,transparent)]">switch_mode</span>.
+      </p>
+    </div>
+    ) : null}
+
+    <div class:list={['grid md:grid-cols-3', embedded ? 'gap-3' : 'gap-4']}>
+      <!-- ASK -->
+      <article class="flex flex-col overflow-hidden rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)]">
+        <div class="relative flex min-h-[200px] flex-1 items-center justify-center border-b border-[var(--av-hairline)] bg-[var(--av-panel)] px-5 py-8">
+          <div
+            class="pointer-events-none absolute inset-0 opacity-40"
+            style="background-image: radial-gradient(circle at 1px 1px, rgb(161 161 170 / 0.35) 1px, transparent 0); background-size: 18px 18px;"
+            aria-hidden="true"
+          ></div>
+          <svg class="relative h-auto w-full max-w-[200px]" viewBox="0 0 200 140" fill="none" aria-hidden="true">
+            <circle cx="100" cy="58" r="36" stroke="color-mix(in srgb, var(--av-ink) 40%, transparent)" stroke-width="1" stroke-dasharray="3 4" />
+            <circle cx="100" cy="58" r="22" class="am-chip" />
+            <circle cx="100" cy="58" r="8" fill="var(--av-accent)" opacity="0.9" />
+            <circle cx="100" cy="58" r="3" fill="var(--av-bg)" />
+            <rect x="48" y="104" width="104" height="22" rx="11" class="am-chip" />
+            <text x="100" y="119" text-anchor="middle" class="am-svg-muted" font-family="ui-monospace, monospace" font-size="9">read-only tools</text>
+          </svg>
+        </div>
+        <div class="p-5">
+          <p class="font-mono text-xs font-medium text-[var(--av-accent)]">ask</p>
+          <h4 class="mt-1 text-lg font-semibold tracking-tight text-[var(--av-ink)]">Ask</h4>
+          <p class="mt-2 text-sm leading-relaxed text-[var(--av-muted)]">
+            Read-only Q&amp;A over the repo. Explore and explain without changing product source.
+          </p>
+        </div>
+      </article>
+
+      <!-- PLAN -->
+      <article class="flex flex-col overflow-hidden rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)]">
+        <div class="relative flex min-h-[200px] flex-1 items-center justify-center border-b border-[var(--av-hairline)] bg-[var(--av-panel)] px-5 py-5">
+          <div
+            class="pointer-events-none absolute inset-0 opacity-40"
+            style="background-image: radial-gradient(circle at 1px 1px, rgb(161 161 170 / 0.35) 1px, transparent 0); background-size: 18px 18px;"
+            aria-hidden="true"
+          ></div>
+          <div class="relative w-full max-w-[210px] space-y-1 font-mono text-[10px]">
+            <div class="rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-2 text-[var(--av-ink)]">plan.md</div>
+            <div class="rounded-md border border-[var(--av-hairline)] bg-[color-mix(in_srgb,var(--av-bg)_90%,transparent)] px-3 py-1 text-[var(--av-muted)]">## Goal</div>
+            <div class="rounded-md border border-[var(--av-hairline)] bg-[color-mix(in_srgb,var(--av-bg)_90%,transparent)] px-3 py-1 text-[var(--av-muted)]">## Scope</div>
+            <div class="rounded-md border border-[var(--av-hairline)] bg-[color-mix(in_srgb,var(--av-bg)_90%,transparent)] px-3 py-1 text-[var(--av-muted)]">## Architecture</div>
+            <div class="rounded-md border border-[color-mix(in_srgb,var(--av-accent)_30%,transparent)] bg-[color-mix(in_srgb,var(--av-accent)_8%,transparent)] px-3 py-1 text-[var(--av-accent)]">## Steps</div>
+            <div class="rounded-md border border-[var(--av-hairline)] bg-[color-mix(in_srgb,var(--av-bg)_90%,transparent)] px-3 py-1 text-[var(--av-muted)]">## Done when</div>
+            <div class="rounded-md border border-[var(--av-hairline)] bg-[color-mix(in_srgb,var(--av-bg)_90%,transparent)] px-3 py-1 text-[var(--av-muted)]">## Risks</div>
+          </div>
+        </div>
+        <div class="p-5">
+          <p class="font-mono text-xs font-medium text-[var(--av-accent)]">plan · create_plan</p>
+          <h4 class="mt-1 text-lg font-semibold tracking-tight text-[var(--av-ink)]">Plan</h4>
+          <p class="mt-2 text-sm leading-relaxed text-[var(--av-muted)]">
+            Draft structured plans into <span class="font-mono text-[12px] text-[color-mix(in_srgb,var(--av-ink)_85%,transparent)]">plan.md</span> — Goal, Scope, Architecture, Steps, Done when, Risks. Stay on plan artifacts until you switch.
+          </p>
+        </div>
+      </article>
+
+      <!-- AGENT -->
+      <article class="flex flex-col overflow-hidden rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)]">
+        <div class="relative flex min-h-[200px] flex-1 items-center justify-center border-b border-[var(--av-hairline)] bg-[var(--av-panel)] px-5 py-8">
+          <div
+            class="pointer-events-none absolute inset-0 opacity-40"
+            style="background-image: radial-gradient(circle at 1px 1px, rgb(161 161 170 / 0.35) 1px, transparent 0); background-size: 18px 18px;"
+            aria-hidden="true"
+          ></div>
+          <svg class="relative h-auto w-full max-w-[220px]" viewBox="0 0 220 140" fill="none" aria-hidden="true">
+            <rect x="20" y="28" width="72" height="28" rx="8" class="am-chip" />
+            <text x="56" y="46" text-anchor="middle" class="am-svg-label" font-family="ui-monospace, monospace" font-size="9">edit</text>
+            <rect x="108" y="28" width="72" height="28" rx="8" class="am-chip" />
+            <text x="144" y="46" text-anchor="middle" class="am-svg-label" font-family="ui-monospace, monospace" font-size="9">terminal</text>
+            <rect x="64" y="72" width="92" height="28" rx="8" class="am-chip-accent" />
+            <text x="110" y="90" text-anchor="middle" fill="var(--av-accent)" font-family="ui-monospace, monospace" font-size="9">full tools</text>
+            <path d="M56 56 V72" stroke="color-mix(in srgb, var(--av-ink) 40%, transparent)" stroke-width="1" stroke-dasharray="2 3" />
+            <path d="M144 56 V72" stroke="color-mix(in srgb, var(--av-ink) 40%, transparent)" stroke-width="1" stroke-dasharray="2 3" />
+            <path d="M110 100 V118" stroke="var(--av-accent)" stroke-width="1.25" />
+            <circle cx="110" cy="124" r="5" fill="var(--av-accent)" />
+          </svg>
+        </div>
+        <div class="p-5">
+          <p class="font-mono text-xs font-medium text-[var(--av-accent)]">agent</p>
+          <h4 class="mt-1 text-lg font-semibold tracking-tight text-[var(--av-ink)]">Agent</h4>
+          <p class="mt-2 text-sm leading-relaxed text-[var(--av-muted)]">
+            Full agency — edit, run, verify. Implement the plan and ship the change in the real workspace.
+          </p>
+        </div>
+      </article>
+    </div>
+  </div>
+</article>
+
+<style>
+  .am-chip {
+    fill: var(--av-bg);
+    stroke: var(--av-hairline);
+    stroke-width: 1;
+  }
+  .am-chip-accent {
+    fill: var(--av-bg);
+    stroke: var(--av-accent);
+    stroke-opacity: 0.45;
+    stroke-width: 1;
+  }
+  .am-svg-label {
+    fill: var(--av-ink);
+  }
+  .am-svg-muted {
+    fill: var(--av-muted);
+  }
+
+</style>

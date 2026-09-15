@@ -1,0 +1,38 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import LegalDocument from '../components/LegalDocument.astro';
+import { legalFileMeta, markdownToHtml } from '../lib/legal';
+import manifest from '../data/legal-manifest.json';
+
+const meta = legalFileMeta('TERMS.md');
+const baked = manifest.files.find((f) => f.id === 'terms');
+if (!baked || baked.sha256 !== meta.sha256) {
+  throw new Error('TERMS.md sha256 mismatch between repo file and legal-manifest (run bake-legal)');
+}
+const html = markdownToHtml(meta.text);
+---
+
+<Layout
+  title="Terms of Service — Agent V"
+  description="Terms of Service for the Agent V website and downloads, from the repository TERMS.md."
+  canonical="https://vyotiq.com/terms"
+>
+  <Nav />
+  <main id="main">
+    <LegalDocument
+      eyebrow="Legal"
+      title="Terms of Service"
+      lede="This page renders the repository TERMS.md file."
+      sourceName="TERMS.md"
+      rawPath="/legal/TERMS.md"
+      githubUrl="https://github.com/vyotiqai/vyotiq-agent-v/blob/main/TERMS.md"
+      bytes={meta.bytes}
+      sha256={meta.sha256}
+      mode="html"
+      html={html}
+    />
+  </main>
+  <Footer />
+</Layout>

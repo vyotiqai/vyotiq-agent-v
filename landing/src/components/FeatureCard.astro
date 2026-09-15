@@ -1,0 +1,54 @@
+---
+import type { Feature } from '../data/features';
+
+interface Props {
+  feature: Feature;
+  /** denser card for homepage secondary lists */
+  compact?: boolean;
+}
+
+const { feature, compact = false } = Astro.props;
+---
+
+<article
+  id={`feature-${feature.id}`}
+  class:list={[
+    'scroll-mt-28 rounded-[1.25rem] border border-[var(--av-hairline)] bg-[var(--av-panel)]',
+    compact ? 'p-4' : 'p-5 sm:p-6',
+  ]}
+>
+  <h3
+    class:list={[
+      'font-semibold tracking-tight text-[var(--av-ink)]',
+      compact ? 'text-sm' : 'text-lg',
+    ]}
+  >
+    {feature.title}
+  </h3>
+  <p
+    class:list={[
+      'mt-2 leading-relaxed text-[color-mix(in_srgb,var(--av-ink)_62%,transparent)]',
+      compact ? 'text-sm' : 'text-[15px] sm:text-base',
+    ]}
+  >
+    {feature.summary}
+  </p>
+  {
+    !compact && feature.body ? (
+      <p class="mt-3 text-sm leading-relaxed text-[var(--av-muted)]">{feature.body}</p>
+    ) : null
+  }
+  {
+    feature.anchors && feature.anchors.length > 0 ? (
+      <ul class="mt-4 flex flex-wrap gap-1.5" aria-label={`${feature.title} anchors`}>
+        {feature.anchors.map((a) => (
+          <li>
+            <span class="inline-flex rounded-full border border-[var(--av-hairline)] bg-[var(--av-bg)] px-2.5 py-1 font-mono text-[11px] text-[color-mix(in_srgb,var(--av-ink)_72%,transparent)]">
+              {a}
+            </span>
+          </li>
+        ))}
+      </ul>
+    ) : null
+  }
+</article>

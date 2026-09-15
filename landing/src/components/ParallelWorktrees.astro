@@ -1,0 +1,453 @@
+﻿---
+/**
+ * Feature showcase #1 â€” Parallel agents on isolated git worktrees.
+ * Bento visual card (Ajay refs) + Spawn â†’ Await â†’ Merge tabs.
+ * Real tools: spawn_agent_instance â†’ await_agent_instance â†’ merge_agent_instance.
+ */
+interface Props {
+  /** Visual-only panel for FeaturesTour rows (no outer chrome / duplicate headings). */
+  embedded?: boolean;
+}
+const { embedded = false } = Astro.props;
+---
+
+<article
+  id={embedded ? undefined : 'parallel'}
+  class:list={[embedded ? null : 'scroll-mt-24']}
+  aria-labelledby={embedded ? undefined : 'parallel-worktrees-heading'}
+>
+  <div class:list={[embedded ? null : 'mx-auto av-max px-4 py-16 sm:px-6 sm:py-20 lg:px-10']}>
+    <article
+      class="pw overflow-hidden rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)]"
+      data-phase="spawn"
+    >
+      <div class:list={['relative isolate overflow-hidden bg-[var(--av-panel)]', embedded ? null : 'border-b border-[var(--av-hairline)]']}>
+        <!-- Quiet grid like Tower cards -->
+        <div
+          class="pointer-events-none absolute inset-0 opacity-[0.45]"
+          style="background-image: radial-gradient(circle at 1px 1px, rgb(161 161 170 / 0.35) 1px, transparent 0); background-size: 20px 20px;"
+          aria-hidden="true"
+        ></div>
+
+        <div class="relative px-4 pb-2 pt-5 sm:px-6 sm:pt-6">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            {embedded ? (
+              <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
+                Spawn â†’ Await â†’ Merge
+              </p>
+            ) : (
+              <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
+                Feature 01 Â· Parallel instances
+              </p>
+            )}
+            <div
+              class="flex gap-1 rounded-md border border-[var(--av-hairline)] bg-[var(--av-panel)] p-0.5"
+              role="tablist"
+              aria-label="Parallel instance workflow"
+            >
+              <button
+                type="button"
+                role="tab"
+                id="pw-tab-spawn"
+                class="pw-tab rounded-md px-3.5 py-1.5 text-xs font-semibold text-[var(--av-muted)] transition aria-selected:bg-[var(--av-ink)] aria-selected:text-[var(--av-on-cta)]"
+                data-phase="spawn"
+                aria-selected="true"
+                aria-controls="pw-panel"
+                tabindex="0"
+              >
+                Spawn
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="pw-tab-await"
+                class="pw-tab rounded-md px-3.5 py-1.5 text-xs font-semibold text-[var(--av-muted)] transition aria-selected:bg-[var(--av-ink)] aria-selected:text-[var(--av-on-cta)]"
+                data-phase="await"
+                aria-selected="false"
+                aria-controls="pw-panel"
+                tabindex="-1"
+              >
+                Await
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="pw-tab-merge"
+                class="pw-tab rounded-md px-3.5 py-1.5 text-xs font-semibold text-[var(--av-muted)] transition aria-selected:bg-[var(--av-ink)] aria-selected:text-[var(--av-on-cta)]"
+                data-phase="merge"
+                aria-selected="false"
+                aria-controls="pw-panel"
+                tabindex="-1"
+              >
+                Merge
+              </button>
+            </div>
+          </div>
+
+          <div
+            id="pw-panel"
+            class="relative mt-4 flex min-h-[280px] items-center justify-center sm:min-h-[320px]"
+            role="tabpanel"
+            aria-labelledby="pw-tab-spawn"
+          >
+            <!-- SPAWN -->
+            <svg
+              class="pw-view h-auto w-full max-w-xl"
+              data-view="spawn"
+              viewBox="0 0 520 280"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <circle cx="90" cy="140" r="42" stroke="var(--av-accent)" stroke-opacity="0.12" stroke-width="1" />
+              <circle cx="90" cy="140" r="28" stroke="var(--av-accent)" stroke-opacity="0.2" stroke-width="1" />
+              <circle cx="90" cy="140" r="16" class="pw-node-fill" />
+              <circle cx="90" cy="140" r="16" stroke="var(--av-accent)" stroke-width="1.5" fill="none" />
+              <text x="90" y="144" text-anchor="middle" class="pw-svg-label" font-size="9">HEAD</text>
+
+              <path d="M106 140 H170" class="pw-line" stroke-dasharray="3 4" />
+              <path class="pw-draw pw-accent" d="M170 140 C230 140 230 56 290 56 H330" />
+              <path class="pw-draw pw-accent" d="M170 140 H330" style="animation-delay:0.08s" />
+              <path class="pw-draw pw-accent" d="M170 140 C230 140 230 224 290 224 H330" style="animation-delay:0.16s" />
+
+              <g class="pw-child">
+                <rect x="330" y="34" width="150" height="44" rx="10" class="pw-chip" />
+                <circle cx="348" cy="56" r="4" fill="var(--av-accent)" />
+                <text x="360" y="52" class="pw-svg-accent" font-size="10">spawn</text>
+                <text x="360" y="66" class="pw-svg-muted" font-size="9">vyotiq/instance/a1</text>
+              </g>
+              <g class="pw-child" style="animation-delay:100ms">
+                <rect x="330" y="118" width="150" height="44" rx="10" class="pw-chip" />
+                <circle cx="348" cy="140" r="4" fill="var(--av-accent)" />
+                <text x="360" y="136" class="pw-svg-accent" font-size="10">spawn</text>
+                <text x="360" y="150" class="pw-svg-muted" font-size="9">vyotiq/instance/b2</text>
+              </g>
+              <g class="pw-child" style="animation-delay:200ms">
+                <rect x="330" y="202" width="150" height="44" rx="10" class="pw-chip" />
+                <circle cx="348" cy="224" r="4" fill="var(--av-accent)" />
+                <text x="360" y="220" class="pw-svg-accent" font-size="10">spawn</text>
+                <text x="360" y="234" class="pw-svg-muted" font-size="9">vyotiq/instance/c3</text>
+              </g>
+            </svg>
+
+            <!-- AWAIT -->
+            <svg
+              class="pw-view hidden h-auto w-full max-w-xl"
+              data-view="await"
+              viewBox="0 0 520 280"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <text x="36" y="36" class="pw-svg-accent" font-size="11">await_agent_instance</text>
+              <text x="484" y="36" text-anchor="end" class="pw-svg-muted" font-size="10">run_ids Ã— 3</text>
+
+              <g transform="translate(36 64)">
+                <rect width="448" height="52" rx="12" class="pw-chip" />
+                <text x="18" y="22" class="pw-svg-label" font-size="12">run_a1 Â· auth tests</text>
+                <text x="430" y="22" text-anchor="end" fill="var(--av-accent)" font-size="11" font-weight="600">running</text>
+                <rect x="18" y="34" width="412" height="4" rx="2" class="pw-track" />
+                <rect class="pw-bar" x="18" y="34" width="280" height="4" rx="2" fill="var(--av-accent)" />
+              </g>
+              <g transform="translate(36 128)">
+                <rect width="448" height="52" rx="12" class="pw-chip" />
+                <text x="18" y="22" class="pw-svg-label" font-size="12">run_b2 Â· docs pass</text>
+                <text x="430" y="22" text-anchor="end" fill="var(--av-accent)" font-size="11" font-weight="600">running</text>
+                <rect x="18" y="34" width="412" height="4" rx="2" class="pw-track" />
+                <rect class="pw-bar" x="18" y="34" width="210" height="4" rx="2" fill="var(--av-accent)" style="animation-delay:0.15s" />
+              </g>
+              <g transform="translate(36 192)">
+                <rect width="448" height="52" rx="12" class="pw-chip" />
+                <text x="18" y="22" class="pw-svg-label" font-size="12">run_c3 Â· lint fix</text>
+                <text x="430" y="22" text-anchor="end" fill="var(--av-success)" font-size="11" font-weight="600">ready</text>
+                <rect x="18" y="34" width="412" height="4" rx="2" class="pw-track" />
+                <rect x="18" y="34" width="412" height="4" rx="2" fill="var(--av-success)" />
+              </g>
+            </svg>
+
+            <!-- MERGE -->
+            <svg
+              class="pw-view hidden h-auto w-full max-w-xl"
+              data-view="merge"
+              viewBox="0 0 520 280"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <g>
+                <rect x="40" y="40" width="140" height="40" rx="10" class="pw-chip" />
+                <text x="110" y="64" text-anchor="middle" class="pw-svg-label" font-size="10">instance/a1</text>
+                <text x="190" y="64" fill="var(--av-success)" font-size="10" font-weight="600">ok</text>
+              </g>
+              <g>
+                <rect x="40" y="120" width="140" height="40" rx="10" class="pw-chip" />
+                <text x="110" y="144" text-anchor="middle" class="pw-svg-label" font-size="10">instance/b2</text>
+                <text x="190" y="144" fill="var(--av-accent)" font-size="10" font-weight="600">â€¦</text>
+              </g>
+              <g>
+                <rect x="40" y="200" width="140" height="40" rx="10" class="pw-chip" opacity="0.55" />
+                <text x="110" y="224" text-anchor="middle" class="pw-svg-muted" font-size="10">instance/c3</text>
+                <text x="190" y="224" class="pw-svg-muted" font-size="10">queued</text>
+              </g>
+
+              <path class="pw-draw" d="M180 60 C260 60 260 140 340 140" stroke="var(--av-success)" />
+              <path class="pw-draw pw-accent" d="M180 140 H340" style="animation-delay:0.1s" />
+              <path d="M180 220 C260 220 260 140 340 140" class="pw-line" stroke-dasharray="3 4" opacity="0.5" />
+
+              <circle cx="380" cy="140" r="36" stroke="var(--av-success)" stroke-opacity="0.15" stroke-width="1" />
+              <circle cx="380" cy="140" r="22" class="pw-node-fill" />
+              <circle cx="380" cy="140" r="22" stroke="var(--av-success)" stroke-width="1.5" fill="none" />
+              <text x="380" y="144" text-anchor="middle" class="pw-svg-label" font-size="9">HEAD</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      {!embedded ? (
+      <div class="flex flex-col gap-4 border-t border-[var(--av-hairline)] p-5 sm:flex-row sm:items-end sm:justify-between sm:gap-8 sm:p-6">
+        <div class="max-w-xl">
+          <p class="pw-tool font-mono text-xs font-medium text-[var(--av-accent)]">spawn_agent_instance</p>
+          <h3
+            id="parallel-worktrees-heading"
+            class="pw-title mt-1.5 text-xl font-semibold tracking-tight text-[var(--av-ink)] sm:text-2xl"
+          >
+            Fan out structured briefs
+          </h3>
+          <p class="pw-body mt-2 text-sm leading-relaxed text-[var(--av-muted)] sm:text-base">
+            Batch spawns in one step. Each child gets a worktree from HEAD plus uncommitted tracked changes when isolation is available.
+          </p>
+        </div>
+        <p class="pw-note shrink-0 text-xs leading-relaxed text-[var(--av-muted)] sm:max-w-[220px] sm:text-right">
+          Real Agent V tools Â· one workstream per instance
+        </p>
+      </div>
+      ) : (
+        <div class="hidden" aria-hidden="true">
+          <p class="pw-tool">spawn_agent_instance</p>
+          <p class="pw-title">Fan out structured briefs</p>
+          <p class="pw-body">Batch spawns in one step.</p>
+          <p class="pw-note">Real Agent V tools</p>
+        </div>
+      )}
+    </article>
+  </div>
+</article>
+
+<style>
+  .pw-line {
+    stroke: color-mix(in srgb, var(--av-ink) 40%, transparent);
+    stroke-width: 1.25;
+    fill: none;
+    stroke-linecap: round;
+  }
+  .pw-accent {
+    stroke: var(--av-accent);
+  }
+  .pw-draw {
+    fill: none;
+    stroke-width: 1.35;
+    stroke-linecap: round;
+    stroke-dasharray: 240;
+    stroke-dashoffset: 240;
+    animation: pw-stroke 0.9s ease forwards;
+  }
+  .pw-node-fill {
+    fill: var(--av-bg);
+    stroke: var(--av-hairline);
+    stroke-width: 1;
+  }
+  .pw-chip {
+    fill: var(--av-bg);
+    stroke: var(--av-hairline);
+    stroke-width: 1;
+  }
+  .pw-track {
+    fill: var(--av-hairline);
+  }
+  .pw-svg-label {
+    fill: var(--av-ink);
+    font-family: var(--font-mono), ui-monospace, monospace;
+  }
+  .pw-svg-muted {
+    fill: var(--av-muted);
+    font-family: var(--font-mono), ui-monospace, monospace;
+  }
+  .pw-svg-accent {
+    fill: var(--av-accent);
+    font-family: var(--font-mono), ui-monospace, monospace;
+  }
+  .pw-bar {
+    animation: pw-bar 2.2s ease-in-out infinite;
+  }
+
+  /* Dark inherits --av-* from .dark; do not invert chip fills to ink. */
+  :global(.dark) .pw-line {
+    stroke: color-mix(in srgb, var(--av-ink) 35%, transparent);
+  }
+
+  .pw-view {
+    animation: pw-in 0.28s ease;
+  }
+  .pw-child {
+    animation: pw-rise 0.4s ease both;
+  }
+
+  @keyframes pw-stroke {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+  @keyframes pw-bar {
+    0%,
+    100% {
+      opacity: 0.75;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+  @keyframes pw-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes pw-rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pw-view,
+    .pw-child,
+    .pw-draw,
+    .pw-bar {
+      animation: none !important;
+    }
+    .pw-draw {
+      stroke-dashoffset: 0;
+    }
+  }
+</style>
+
+<script>
+  const root = document.querySelector('.pw');
+  if (root) {
+    const tabs = Array.from(root.querySelectorAll('.pw-tab'));
+    const views = Array.from(root.querySelectorAll('.pw-view'));
+    const panel = root.querySelector('#pw-panel');
+    const tool = root.querySelector('.pw-tool');
+    const title = root.querySelector('.pw-title');
+    const body = root.querySelector('.pw-body');
+    const note = root.querySelector('.pw-note');
+
+    const copy = {
+      spawn: {
+        tabId: 'pw-tab-spawn',
+        tool: 'spawn_agent_instance',
+        title: 'Fan out structured briefs',
+        body: 'Batch spawns in one step. Each child gets a worktree from HEAD plus uncommitted tracked changes when isolation is available.',
+        note: 'Real Agent V tools Â· one workstream per instance',
+      },
+      await: {
+        tabId: 'pw-tab-await',
+        tool: 'await_agent_instance',
+        title: 'Wait on run ids together',
+        body: 'Await the whole batch in one step. Get phase, summary, and wroteFiles. Then pull_agent_instance for summary / outline / tail.',
+        note: 'Siblings keep working while you inspect',
+      },
+      merge: {
+        tabId: 'pw-tab-merge',
+        tool: 'merge_agent_instance',
+        title: 'Merge one branch at a time',
+        body: 'Fold a finished instance worktree into parent HEAD. Blocked when parent dirty or untracked files overlap the branch. Conflicts resolve in the parent.',
+        note: 'Edits reach parent through merge â€” not a shared checkout',
+      },
+    };
+
+    const phases = ['spawn', 'await', 'merge'];
+    let autoTimer = null;
+    let userPaused = false;
+
+    const setPhase = (phase, { focusTab = false } = {}) => {
+      const data = copy[phase];
+      if (!data) return;
+      root.setAttribute('data-phase', phase);
+      tabs.forEach((tab) => {
+        const selected = tab.getAttribute('data-phase') === phase;
+        tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+        tab.setAttribute('tabindex', selected ? '0' : '-1');
+        if (selected && focusTab) tab.focus();
+      });
+      if (panel) panel.setAttribute('aria-labelledby', data.tabId);
+      if (tool) tool.textContent = data.tool;
+      if (title) title.textContent = data.title;
+      if (body) body.textContent = data.body;
+      if (note) note.textContent = data.note;
+      views.forEach((view) => {
+        const on = view.getAttribute('data-view') === phase;
+        view.classList.toggle('hidden', !on);
+        if (on) {
+          view.style.animation = 'none';
+          void view.offsetWidth;
+          view.style.animation = '';
+          view.querySelectorAll('.pw-draw, .pw-child, .pw-bar').forEach((el) => {
+            el.style.animation = 'none';
+            void el.offsetWidth;
+            el.style.animation = '';
+          });
+        }
+      });
+    };
+
+    const selectPhase = (phase, { pause = false, focusTab = false } = {}) => {
+      if (pause) {
+        userPaused = true;
+        if (autoTimer) window.clearInterval(autoTimer);
+      }
+      setPhase(phase, { focusTab });
+    };
+
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        selectPhase(tab.getAttribute('data-phase'), { pause: true });
+      });
+
+      tab.addEventListener('keydown', (event) => {
+        const key = event.key;
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key)) return;
+        event.preventDefault();
+        const currentIndex = tabs.indexOf(tab);
+        let nextIndex = currentIndex;
+        if (key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        if (key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
+        if (key === 'Home') nextIndex = 0;
+        if (key === 'End') nextIndex = tabs.length - 1;
+        const nextTab = tabs[nextIndex];
+        if (!nextTab) return;
+        selectPhase(nextTab.getAttribute('data-phase'), { pause: true, focusTab: true });
+      });
+    });
+
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    setPhase('spawn');
+    if (!reduce) {
+      let i = 0;
+      autoTimer = window.setInterval(() => {
+        if (userPaused) return;
+        i = (i + 1) % phases.length;
+        setPhase(phases[i]);
+      }, 4500);
+    }
+  }
+</script>

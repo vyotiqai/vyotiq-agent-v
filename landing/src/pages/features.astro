@@ -1,0 +1,27 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import PageHero from '../components/PageHero.astro';
+import FeaturesTour from '../components/FeaturesTour.astro';
+import FinalCta from '../components/FinalCta.astro';
+
+---
+
+<Layout
+  title="Features — Agent V"
+  description="A calm tour of Agent V: parallel instances, Ask / Plan / Agent, browser tools, BYO models, memory, MCP, tool approval, and more — grounded in the real product."
+  canonical="https://vyotiq.com/features"
+>
+  <Nav />
+  <main id="main">
+    <PageHero
+      eyebrow="Product"
+      title="What Agent V can do"
+      lede="A calm walk through the product — parallel instances, Ask / Plan / Agent, a built-in browser, and the rest of the stack. Each claim maps to real tools in the app."
+    />
+    <FeaturesTour />
+    <FinalCta />
+  </main>
+  <Footer />
+</Layout>

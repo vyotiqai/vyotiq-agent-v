@@ -1,0 +1,37 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import LegalDocument from '../components/LegalDocument.astro';
+import { legalFileMeta, markdownToHtml } from '../lib/legal';
+import manifest from '../data/legal-manifest.json';
+
+const meta = legalFileMeta('NOTICE');
+const baked = manifest.files.find((f) => f.id === 'notice');
+if (!baked || baked.sha256 !== meta.sha256) {
+  throw new Error('NOTICE sha256 mismatch between repo file and legal-manifest (run bake-legal)');
+}
+const html = markdownToHtml(meta.text);
+---
+
+<Layout
+  title="Third-party notices — Agent V"
+  description="Third-party open-source notices for components bundled with Agent V, from the repository NOTICE file."
+  canonical="https://vyotiq.com/notice"
+>
+  <Nav />
+  <main id="main">
+    <LegalDocument
+      title="Third-party notices"
+      lede="This page renders the repository NOTICE file. It is a non-exhaustive summary; the lockfile and each package license remain authoritative."
+      sourceName="NOTICE"
+      rawPath="/legal/NOTICE"
+      githubUrl="https://github.com/vyotiqai/vyotiq-agent-v/blob/main/NOTICE"
+      bytes={meta.bytes}
+      sha256={meta.sha256}
+      mode="html"
+      html={html}
+    />
+  </main>
+  <Footer />
+</Layout>

@@ -1,0 +1,56 @@
+---
+/**
+ * Full features tour — flat muse-style alternating rows from features.ts.
+ */
+import { enabledCategories, featuresInCategory, tourFeatures, categoryById } from '../data/features';
+import FeatureRow from './FeatureRow.astro';
+
+const items = tourFeatures();
+const categories = enabledCategories();
+const jumpTargets = categories.map((cat) => {
+  const first = featuresInCategory(cat.id)[0];
+  return first ? { id: cat.id, title: cat.title, href: `#feature-${first.id}` } : null;
+}).filter((x): x is NonNullable<typeof x> => x !== null);
+---
+
+<section id="features-tour" class="scroll-mt-24" aria-label="Features tour">
+  {
+    jumpTargets.length > 1 ? (
+      <nav
+        class="av-max mx-auto px-4 pb-2 pt-2 sm:px-6 lg:px-10"
+        aria-label="Jump to a capability area"
+      >
+        <ul class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm text-[var(--av-muted)]">
+          <li class="sr-only">Jump to</li>
+          {jumpTargets.map((t, i) => (
+            <li class="inline-flex items-baseline gap-x-2">
+              {i > 0 ? (
+                <span aria-hidden="true" class="text-[color-mix(in_srgb,var(--av-ink)_22%,transparent)]">
+                  ·
+                </span>
+              ) : null}
+              <a
+                href={t.href}
+                class="text-[color-mix(in_srgb,var(--av-ink)_68%,transparent)] underline decoration-transparent underline-offset-4 transition hover:text-[var(--av-ink)] hover:decoration-[color-mix(in_srgb,var(--av-ink)_28%,transparent)]"
+              >
+                {t.title}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    ) : null
+  }
+
+  <div class="flex flex-col">
+    {
+      items.map((feature, index) => (
+        <FeatureRow
+          feature={feature}
+          category={categoryById(feature.categoryId)}
+          index={index}
+        />
+      ))
+    }
+  </div>
+</section>

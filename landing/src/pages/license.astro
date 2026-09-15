@@ -1,0 +1,40 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import LegalDocument from '../components/LegalDocument.astro';
+import { legalFileMeta } from '../lib/legal';
+import manifest from '../data/legal-manifest.json';
+
+const meta = legalFileMeta('LICENSE');
+const baked = manifest.files.find((f) => f.id === 'license');
+if (!baked || baked.sha256 !== meta.sha256) {
+  throw new Error('LICENSE sha256 mismatch between repo file and legal-manifest (run bake-legal)');
+}
+const lede =
+  'SPDX license identifier from package.json: ' +
+  manifest.spdxLicense +
+  '. The full text below is the repository LICENSE file (GNU General Public License version 3).';
+---
+
+<Layout
+  title="License — Agent V"
+  description="Agent V is licensed under GPL-3.0-or-later. Full GNU GPLv3 text from the repository LICENSE file."
+  canonical="https://vyotiq.com/license"
+>
+  <Nav />
+  <main id="main">
+    <LegalDocument
+      title="License"
+      lede={lede}
+      sourceName="LICENSE"
+      rawPath="/legal/LICENSE"
+      githubUrl="https://github.com/vyotiqai/vyotiq-agent-v/blob/main/LICENSE"
+      bytes={meta.bytes}
+      sha256={meta.sha256}
+      mode="pre"
+      text={meta.text}
+    />
+  </main>
+  <Footer />
+</Layout>

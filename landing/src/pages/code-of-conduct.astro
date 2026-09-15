@@ -1,0 +1,37 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import LegalDocument from '../components/LegalDocument.astro';
+import { legalFileMeta, markdownToHtml } from '../lib/legal';
+import manifest from '../data/legal-manifest.json';
+
+const meta = legalFileMeta('CODE_OF_CONDUCT.md');
+const baked = manifest.files.find((f) => f.id === 'code-of-conduct');
+if (!baked || baked.sha256 !== meta.sha256) {
+  throw new Error('CODE_OF_CONDUCT.md sha256 mismatch between repo file and legal-manifest (run bake-legal)');
+}
+const html = markdownToHtml(meta.text);
+---
+
+<Layout
+  title="Code of Conduct — Agent V"
+  description="Contributor Covenant Code of Conduct for the Agent V community, from the repository CODE_OF_CONDUCT.md."
+  canonical="https://vyotiq.com/code-of-conduct"
+>
+  <Nav />
+  <main id="main">
+    <LegalDocument
+      title="Code of Conduct"
+      lede="This page renders the repository CODE_OF_CONDUCT.md file (Contributor Covenant 2.1)."
+      sourceName="CODE_OF_CONDUCT.md"
+      rawPath="/legal/CODE_OF_CONDUCT.md"
+      githubUrl="https://github.com/vyotiqai/vyotiq-agent-v/blob/main/CODE_OF_CONDUCT.md"
+      bytes={meta.bytes}
+      sha256={meta.sha256}
+      mode="html"
+      html={html}
+    />
+  </main>
+  <Footer />
+</Layout>

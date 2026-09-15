@@ -1,0 +1,58 @@
+---
+import PageHero from './PageHero.astro';
+
+interface Props {
+  eyebrow?: string;
+  title: string;
+  lede: string;
+  sourceName: string;
+  rawPath: string;
+  githubUrl: string;
+  bytes: number;
+  sha256: string;
+  mode: 'pre' | 'html';
+  html?: string;
+  text?: string;
+}
+
+const {
+  eyebrow = 'Legal',
+  title,
+  lede,
+  sourceName,
+  rawPath,
+  githubUrl,
+  bytes,
+  sha256,
+  mode,
+  html,
+  text,
+} = Astro.props;
+---
+
+<PageHero eyebrow={eyebrow} title={title} lede={lede} narrow />
+
+<div class="mx-auto w-full max-w-3xl px-4 pb-8 sm:px-6">
+  <div
+    class="flex flex-col gap-3 rounded border border-[var(--av-hairline)] bg-[var(--av-panel)] px-4 py-3 text-sm text-[var(--av-muted)] sm:flex-row sm:items-center sm:justify-between"
+  >
+    <p>
+      Source of truth: <code class="av-code">{sourceName}</code> in the repository ({bytes.toLocaleString()}{' '}
+      bytes, SHA-256 <code class="av-code">{sha256.slice(0, 12)}…</code>).
+    </p>
+    <p class="flex shrink-0 flex-wrap gap-3">
+      <a href={rawPath} class="av-link">Download file</a>
+      <a href={githubUrl} class="av-link" target="_blank" rel="noopener noreferrer">View on GitHub ↗</a>
+    </p>
+  </div>
+</div>
+
+<div class="mx-auto w-full max-w-3xl px-4 pb-24 sm:px-6">
+  {
+    mode === 'pre' ? (
+      <pre class="av-legal-pre overflow-x-auto whitespace-pre-wrap break-words rounded border border-[var(--av-hairline)] bg-[var(--av-panel)] p-4 font-mono text-[12px] leading-5 text-[var(--av-ink)] sm:text-[13px]">{text}</pre>
+    ) : (
+      <article class="av-legal-md" set:html={html} />
+    )
+  }
+</div>

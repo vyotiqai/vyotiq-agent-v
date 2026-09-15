@@ -1,0 +1,136 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import PageHero from '../components/PageHero.astro';
+import release from '../data/release.json';
+import osIcons from '../data/os-icons.json';
+
+const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
+const RELEASES = 'https://github.com/vyotiqai/vyotiq-agent-v-releases';
+
+const tagPageUrl =
+  typeof release.url === 'string' && release.url ? release.url : `${REPO}/releases/latest`;
+
+const realAsset = (asset) =>
+  asset && typeof asset.url === 'string' && asset.url ? asset : null;
+
+const formatSize = (bytes) => {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return null;
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1000
+    ? `${(mb / 1024).toFixed(2)} GB`
+    : mb >= 100
+      ? `${Math.round(mb)} MB`
+      : `${mb.toFixed(1)} MB`;
+};
+
+const win = realAsset(release.assets?.windows);
+const macArm = realAsset(release.assets?.macos?.arm64);
+const macIntel = realAsset(release.assets?.macos?.x64);
+const linApp = realAsset(release.assets?.linux?.appimage);
+const linDeb = realAsset(release.assets?.linux?.deb);
+
+const osOptions = [
+  { id: 'windows', name: 'Windows', asset: win, icon: osIcons.windows },
+  { id: 'macos-arm64', name: 'macOS (Apple Silicon)', asset: macArm, icon: osIcons.macos },
+  { id: 'macos-x64', name: 'macOS (Intel)', asset: macIntel, icon: osIcons.macos },
+  { id: 'linux-appimage', name: 'Linux (AppImage)', asset: linApp, icon: osIcons.linux },
+  ...(linDeb ? [{ id: 'linux-deb', name: 'Linux (deb)', asset: linDeb, icon: osIcons.linux }] : []),
+].map((option) => ({
+  ...option,
+  href: option.asset?.url ?? tagPageUrl,
+  size: formatSize(option.asset?.size),
+  hasInstaller: Boolean(option.asset?.url),
+}));
+
+const hasRelease =
+  release.source === 'github' && typeof release.version === 'string' && release.version !== '';
+---
+
+<Layout
+  title="Download Agent V"
+  description="Download Agent V for Windows, macOS, or Linux — or build from source."
+  canonical="https://vyotiq.com/download"
+>
+  <Nav />
+  <main id="main">
+    <PageHero
+      eyebrow="Get Agent V"
+      title="Download"
+      lede="Free and open source for Windows, macOS, and Linux. Installers appear when a release is published — until then, build from source."
+      narrow
+    />
+
+    <div class="mx-auto w-full max-w-3xl px-4 pb-24 sm:px-6">
+      {
+        hasRelease ? (
+          <p class="mb-6 text-sm text-[var(--av-muted)]">
+            Current release: <span class="font-medium text-[var(--av-ink)]">v{release.version}</span>
+          </p>
+        ) : (
+          <div class="mb-8 rounded border border-dashed border-[var(--av-hairline)] bg-[var(--av-panel)] px-4 py-3.5 text-sm leading-6 text-[var(--av-muted)]">
+            No published installers yet. Prefer
+            <a href="/docs#quick-start" class="av-link">build from source</a>
+            , or open the releases page via the links below.
+          </div>
+        )
+      }
+
+      <ul class="divide-y divide-[var(--av-hairline)] overflow-hidden rounded border border-[var(--av-hairline)]" aria-label="Download options">
+        {
+          osOptions.map((option) => (
+            <li>
+              <a
+                href={option.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="flex items-center justify-between gap-3 bg-[var(--av-bg)] px-4 py-3.5 transition hover:bg-[var(--av-panel)]"
+              >
+                <span class="flex min-w-0 items-center gap-3">
+                  <svg
+                    viewBox={option.icon.viewBox}
+                    class="size-5 shrink-0 text-[var(--av-muted)]"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    {option.icon.paths.map((d) => (
+                      <path d={d} />
+                    ))}
+                  </svg>
+                  <span class="font-medium text-[var(--av-ink)]">{option.name}</span>
+                  {!option.hasInstaller ? (
+                    <span class="rounded border border-[var(--av-hairline)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--av-muted)]">
+                      Releases
+                    </span>
+                  ) : null}
+                </span>
+                <span class="shrink-0 text-xs tabular-nums text-[var(--av-muted)]">
+                  {option.size ?? 'Open →'}
+                </span>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+
+      <div class="mt-10 flex flex-col gap-3 sm:flex-row">
+        <a href="/docs#quick-start" class="av-cta-primary px-5 text-sm">Build from source</a>
+        <a
+          href={REPO}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="av-cta-secondary px-5 text-sm"
+        >
+          View on GitHub
+        </a>
+      </div>
+
+      <p class="mt-8 text-sm leading-6 text-[var(--av-muted)]">
+        Published installers (when available) live in
+        <a href={RELEASES} class="av-link" target="_blank" rel="noopener noreferrer">vyotiq-agent-v-releases ↗</a>.
+      </p>
+    </div>
+  </main>
+  <Footer />
+</Layout>

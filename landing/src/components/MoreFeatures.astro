@@ -1,0 +1,74 @@
+---
+/**
+ * Compact secondary capabilities — derived from src/data/features.ts
+ * so the homepage stays in sync with the full tour catalog.
+ */
+import { secondaryStackGroups } from '../data/features';
+
+const groups = secondaryStackGroups();
+---
+
+<article
+  id="more-features"
+  class="scroll-mt-24"
+  aria-labelledby="more-features-heading"
+>
+  <div class="mx-auto av-max px-4 pt-16 pb-24 sm:px-6 sm:pt-20 sm:pb-32 lg:px-10">
+    <div class="mb-5 flex flex-col gap-1.5 sm:mb-6 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
+          Also in Agent V
+        </p>
+        <h3
+          id="more-features-heading"
+          class="mt-1 text-lg font-semibold tracking-tight text-[var(--av-ink)] sm:text-xl"
+        >
+          The rest of the stack
+        </h3>
+      </div>
+      <p class="max-w-sm text-sm leading-relaxed text-[var(--av-muted)] sm:text-right">
+        From the same catalog as the
+        <a href="/features" class="font-medium text-[var(--av-ink)] underline decoration-[color-mix(in_srgb,var(--av-ink)_25%,transparent)] underline-offset-2 hover:decoration-[var(--av-ink)]">full features tour</a>.
+      </p>
+    </div>
+
+    <ul class="divide-y divide-[var(--av-hairline)] border-y border-[var(--av-hairline)]">
+      {
+        groups.map((group) => (
+          <li id={`more-${group.id}`}>
+            <div class="flex flex-col gap-2 py-2.5 sm:flex-row sm:items-start sm:gap-6 sm:py-2">
+              <div class="sm:w-44 sm:shrink-0">
+                <h4 class="text-sm font-semibold tracking-tight text-[var(--av-ink)]">{group.title}</h4>
+                <p class="mt-0.5 font-mono text-[10px] leading-snug text-[var(--av-accent)]">{group.anchor}</p>
+              </div>
+              <div class="min-w-0 flex-1">
+                <ul class="flex flex-wrap gap-1.5" aria-label={`${group.title} capabilities`}>
+                  {group.chips.map((chip) => (
+                    <li>
+                      <a
+                        href={`/features#feature-${chip.id}`}
+                        class="inline-flex max-w-full flex-col rounded border border-[var(--av-hairline)] bg-[var(--av-panel)] px-2 py-1 transition hover:border-[color-mix(in_srgb,var(--av-ink)_22%,transparent)] sm:flex-row sm:items-baseline sm:gap-1.5"
+                      >
+                        <span class="text-[12px] font-medium text-[var(--av-ink)]">{chip.label}</span>
+                        <span class="font-mono text-[10px] text-[var(--av-muted)]">{chip.detail}</span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </li>
+        ))
+      }
+    </ul>
+
+    <div class="mt-8 text-center">
+      <a
+        href="/features"
+        class="av-cta-secondary inline-flex !min-h-0 px-5 py-2.5 text-sm font-semibold"
+      >
+        Open the full features tour
+      </a>
+    </div>
+  </div>
+</article>

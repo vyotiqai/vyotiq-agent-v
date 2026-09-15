@@ -1,0 +1,95 @@
+---
+const items = [
+  {
+    href: '/docs',
+    title: 'Docs & quick start',
+    body: 'Install from source, connect providers, and understand the agent tool catalog.',
+    icon: 'docs',
+  },
+  {
+    href: '/security',
+    title: 'How we think about safety',
+    body: 'Tool approval, local keys, and how to report vulnerabilities — from the repo SECURITY policy.',
+    icon: 'shield',
+  },
+  {
+    href: '/features',
+    title: 'Full feature tour',
+    body: 'Parallel instances, Ask / Plan / Agent modes, built-in browser, memory, MCP, and more.',
+    icon: 'spark',
+  },
+  {
+    href: '/contributing',
+    title: 'Contributing',
+    body: 'Dev workflow and the standard gates: typecheck, test, and lint.',
+    icon: 'git',
+  },
+];
+---
+
+<section id="learn-more" class="scroll-mt-24 bg-[var(--av-panel)]" aria-labelledby="learn-more-heading">
+  <div class="av-max mx-auto px-4 py-20 sm:px-6 sm:py-24 lg:px-10">
+    <div class="grid gap-10 lg:grid-cols-[minmax(0,240px)_1fr] lg:gap-16">
+      <h2
+        id="learn-more-heading"
+        class="text-[clamp(1.75rem,3vw,2.5rem)] font-semibold tracking-tight text-[var(--av-ink)]"
+      >
+        Learn more
+      </h2>
+      <ul class="divide-y divide-[var(--av-hairline)] border-y border-[var(--av-hairline)]">
+        {
+          items.map((item) => (
+            <li>
+              <a
+                href={item.href}
+                class="group flex items-start gap-4 py-5 transition sm:items-center sm:gap-5"
+              >
+                <span
+                  class="mt-0.5 grid size-10 shrink-0 place-items-center rounded-2xl border border-[var(--av-hairline)] bg-[var(--av-band)] text-[var(--av-muted)] transition group-hover:border-[color-mix(in_srgb,var(--av-ink)_22%,transparent)] group-hover:text-[var(--av-ink)]"
+                  aria-hidden="true"
+                >
+                  {item.icon === 'docs' ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+                      <path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" stroke-linejoin="round" />
+                      <path d="M14 3v5h5M9 13h6M9 17h4" stroke-linecap="round" />
+                    </svg>
+                  ) : item.icon === 'shield' ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+                      <path d="M12 3 5 6v6c0 5 3.5 8.5 7 9 3.5-.5 7-4 7-9V6l-7-3Z" stroke-linejoin="round" />
+                      <path d="m9.5 12 1.8 1.8L15 10" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                  ) : item.icon === 'spark' ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+                      <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8" stroke-linecap="round" />
+                    </svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+                      <circle cx="7" cy="6" r="2.5" />
+                      <circle cx="17" cy="12" r="2.5" />
+                      <circle cx="7" cy="18" r="2.5" />
+                      <path d="M9.2 7.2 14.8 10.8M9.2 16.8 14.8 13.2" stroke-linecap="round" />
+                    </svg>
+                  )}
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="block text-base font-semibold tracking-tight text-[var(--av-ink)] sm:text-lg">
+                    {item.title}
+                  </span>
+                  <span class="mt-1 block text-sm leading-relaxed text-[var(--av-muted)]">
+                    {item.body}
+                  </span>
+                </span>
+                <span
+                  class="mt-1 shrink-0 text-[var(--av-muted)] transition group-hover:translate-x-0.5 group-hover:text-[var(--av-ink)]"
+                  aria-hidden="true"
+                >
+                  →
+                </span>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </div>
+</section>

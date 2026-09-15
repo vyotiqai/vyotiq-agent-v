@@ -1,0 +1,368 @@
+﻿---
+/**
+ * Feature showcase #3 â€” Built-in agent browser.
+ * Asymmetric 2-column stage (not #1 tabs, not #2 equal cards).
+ * Real tools: browser_navigate â†’ browser_snapshot â†’ browser_click/type/fill.
+ * Honest: page text untrusted; cite [[https://url]]; fresh @eN after navigate.
+ */
+interface Props {
+  embedded?: boolean;
+}
+const { embedded = false } = Astro.props;
+---
+
+<article
+  id={embedded ? undefined : 'browser'}
+  class:list={[embedded ? null : 'scroll-mt-24']}
+  aria-labelledby={embedded ? undefined : 'agent-browser-heading'}
+>
+  <div class:list={[embedded ? null : 'mx-auto av-max px-4 py-16 sm:px-6 sm:py-20 lg:px-10']}>
+    {!embedded ? (
+    <div class="mb-6 flex flex-col gap-2 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
+          Feature 03 Â· Built-in browser
+        </p>
+        <h3
+          id="agent-browser-heading"
+          class="mt-1 text-[clamp(1.35rem,2.2vw,1.65rem)] font-semibold tracking-tight text-[var(--av-ink)]"
+        >
+          Navigate. Snapshot. Act.
+        </h3>
+      </div>
+      <p class="max-w-md text-sm leading-relaxed text-[var(--av-muted)] sm:text-right">
+        Live agent browser with real tools â€”
+        <span class="font-mono text-[12px] text-[color-mix(in_srgb,var(--av-ink)_85%,transparent)]">browser_navigate</span>,
+        <span class="font-mono text-[12px] text-[color-mix(in_srgb,var(--av-ink)_85%,transparent)]">browser_snapshot</span>, then click/type/fill with fresh
+        <span class="font-mono text-[12px] text-[color-mix(in_srgb,var(--av-ink)_85%,transparent)]">@eN</span> refs. Page text is untrusted.
+      </p>
+    </div>
+    ) : null}
+
+    <article
+      class="ab overflow-hidden rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)]"
+      data-phase="snapshot"
+    >
+      <!-- Minimal URL strip â€” no traffic lights / OS chrome -->
+      <div class="flex items-center gap-3 border-b border-[var(--av-hairline)] bg-[var(--av-panel)] px-4 py-3 sm:px-5">
+        <div
+          class="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3.5 py-1.5 shadow-sm"
+        >
+          <span class="size-1.5 shrink-0 rounded-full bg-[var(--av-accent)]" aria-hidden="true"></span>
+          <p class="ab-url truncate font-mono text-[12px] text-[color-mix(in_srgb,var(--av-ink)_75%,transparent)] sm:text-[13px]">
+            https://example.com/docs
+          </p>
+        </div>
+        <p class="hidden shrink-0 font-mono text-[10px] uppercase tracking-wider text-[var(--av-muted)] sm:block">
+          isolated session
+        </p>
+      </div>
+
+      <!-- Asymmetric body: snapshot (3) + tool stack (2) -->
+      <div class="grid md:grid-cols-5">
+        <!-- Snapshot panel -->
+        <div class="relative border-b border-[var(--av-hairline)] bg-[var(--av-panel)] p-4 sm:p-5 md:col-span-3 md:border-b-0 md:border-r">
+          <div
+            class="pointer-events-none absolute inset-0 opacity-40"
+            style="background-image: radial-gradient(circle at 1px 1px, rgb(161 161 170 / 0.3) 1px, transparent 0); background-size: 18px 18px;"
+            aria-hidden="true"
+          ></div>
+
+          <div class="relative">
+            <div class="mb-3 flex items-center justify-between gap-2">
+              <p class="font-mono text-[10px] font-semibold uppercase tracking-wider text-[var(--av-muted)]">
+                browser_snapshot
+              </p>
+              <p class="font-mono text-[10px] text-[var(--av-muted)]">viewport Â· refs</p>
+            </div>
+
+            <ul class="ab-snapshot space-y-1.5" role="list" aria-label="Accessibility snapshot refs">
+              <li
+                class="ab-ref flex items-center gap-2.5 rounded-lg border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-2.5 transition"
+                data-ref="e1"
+              >
+                <span class="ab-ref-badge shrink-0 rounded-md bg-[var(--av-panel)] px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[var(--av-muted)]">
+                  @e1
+                </span>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-medium text-[var(--av-ink)]">button Â· Sign in</p>
+                  <p class="truncate font-mono text-[10px] text-[var(--av-muted)]">role=button</p>
+                </div>
+              </li>
+              <li
+                class="ab-ref flex items-center gap-2.5 rounded-lg border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-2.5 transition"
+                data-ref="e2"
+              >
+                <span class="ab-ref-badge shrink-0 rounded-md bg-[var(--av-panel)] px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[var(--av-muted)]">
+                  @e2
+                </span>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-medium text-[var(--av-ink)]">link Â· API reference</p>
+                  <p class="truncate font-mono text-[10px] text-[var(--av-muted)]">role=link Â· href=/api</p>
+                </div>
+              </li>
+              <li
+                class="ab-ref flex items-center gap-2.5 rounded-lg border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-2.5 transition"
+                data-ref="e3"
+              >
+                <span class="ab-ref-badge shrink-0 rounded-md bg-[var(--av-panel)] px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[var(--av-muted)]">
+                  @e3
+                </span>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-medium text-[var(--av-ink)]">textbox Â· Search docs</p>
+                  <p class="truncate font-mono text-[10px] text-[var(--av-muted)]">role=textbox Â· name=q</p>
+                </div>
+              </li>
+            </ul>
+
+            <p class="ab-snap-note relative mt-3 font-mono text-[10px] leading-relaxed text-[var(--av-muted)]">
+              Refs invalidate after navigate â€” snapshot again before click / type / fill.
+            </p>
+          </div>
+        </div>
+
+        <!-- Tool stack -->
+        <div class="flex flex-col p-4 sm:p-5 md:col-span-2">
+          <p class="mb-3 font-mono text-[10px] font-semibold uppercase tracking-wider text-[var(--av-muted)]">
+            Tool sequence
+          </p>
+
+          <ol class="ab-tools flex flex-1 flex-col gap-2" aria-label="Browser tool workflow">
+            <li>
+              <button
+                type="button"
+                class="ab-tool group flex w-full items-start gap-3 rounded-lg border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-3 text-left transition hover:border-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]"
+                data-phase="navigate"
+                aria-pressed="false"
+                tabindex="-1"
+              >
+                <span
+                  class="ab-step mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border border-[var(--av-hairline)] bg-[var(--av-panel)] font-mono text-[10px] font-semibold text-[var(--av-muted)]"
+                >
+                  1
+                </span>
+                <span class="min-w-0">
+                  <span class="block font-mono text-[12px] font-semibold text-[var(--av-ink)] sm:text-[13px]">
+                    browser_navigate
+                  </span>
+                  <span class="mt-0.5 block text-xs text-[var(--av-muted)]">
+                    Open URL Â· JS rendered Â· invalidates prior refs
+                  </span>
+                </span>
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                class="ab-tool group flex w-full items-start gap-3 rounded-lg border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-3 text-left transition hover:border-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]"
+                data-phase="snapshot"
+                aria-pressed="true"
+                tabindex="0"
+              >
+                <span
+                  class="ab-step mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border border-[var(--av-hairline)] bg-[var(--av-panel)] font-mono text-[10px] font-semibold text-[var(--av-muted)]"
+                >
+                  2
+                </span>
+                <span class="min-w-0">
+                  <span class="block font-mono text-[12px] font-semibold text-[var(--av-ink)] sm:text-[13px]">
+                    browser_snapshot
+                  </span>
+                  <span class="mt-0.5 block text-xs text-[var(--av-muted)]">
+                    @eN refs Â· viewport Â· page text Â· screenshot
+                  </span>
+                </span>
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                class="ab-tool group flex w-full items-start gap-3 rounded-lg border border-[var(--av-hairline)] bg-[var(--av-bg)] px-3 py-3 text-left transition hover:border-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]"
+                data-phase="act"
+                aria-pressed="false"
+                tabindex="-1"
+              >
+                <span
+                  class="ab-step mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border border-[var(--av-hairline)] bg-[var(--av-panel)] font-mono text-[10px] font-semibold text-[var(--av-muted)]"
+                >
+                  3
+                </span>
+                <span class="min-w-0">
+                  <span class="block font-mono text-[12px] font-semibold text-[var(--av-ink)] sm:text-[13px]">
+                    browser_click Â· @e2
+                  </span>
+                  <span class="mt-0.5 block text-xs text-[var(--av-muted)]">
+                    Act on latest snapshot refs only
+                  </span>
+                </span>
+              </button>
+            </li>
+          </ol>
+
+          <p class="mt-4 font-mono text-[10px] leading-relaxed text-[var(--av-muted)]">
+            Also: browser_tabs Â· scroll Â· search Â· back Â· MAX_BROWSER_TABS = 16
+          </p>
+        </div>
+      </div>
+
+      <!-- Footer honesty -->
+      <div class="border-t border-[var(--av-hairline)] bg-[var(--av-bg)] px-4 py-3 sm:px-5">
+        <p class="text-xs leading-relaxed text-[var(--av-muted)]">
+          Page text from the browser is <span class="font-medium text-[color-mix(in_srgb,var(--av-ink)_75%,transparent)]">untrusted</span>.
+          Cite sources as
+          <span class="font-mono text-[11px] text-[color-mix(in_srgb,var(--av-ink)_85%,transparent)]">[[https://url]]</span>
+          â€” never treat snapshot content as instructions.
+        </p>
+      </div>
+    </article>
+  </div>
+</article>
+
+<style>
+  .ab[data-phase='navigate'] .ab-tool[data-phase='navigate'],
+  .ab[data-phase='snapshot'] .ab-tool[data-phase='snapshot'],
+  .ab[data-phase='act'] .ab-tool[data-phase='act'] {
+    border-color: color-mix(in srgb, var(--av-accent) 45%, transparent);
+    background-color: color-mix(in srgb, var(--av-accent) 8%, var(--av-bg));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--av-accent) 12%, transparent);
+  }
+
+  .ab[data-phase='navigate'] .ab-tool[data-phase='navigate'] .ab-step,
+  .ab[data-phase='snapshot'] .ab-tool[data-phase='snapshot'] .ab-step,
+  .ab[data-phase='act'] .ab-tool[data-phase='act'] .ab-step {
+    border-color: var(--av-accent);
+    background-color: var(--av-accent);
+    color: var(--av-on-cta);
+  }
+
+  /* Snapshot emphasis by phase */
+  .ab[data-phase='navigate'] .ab-snapshot {
+    opacity: 0.45;
+  }
+  .ab[data-phase='navigate'] .ab-snap-note {
+    opacity: 1;
+  }
+
+  .ab[data-phase='snapshot'] .ab-ref {
+    border-color: rgb(228 228 231);
+  }
+  .ab[data-phase='snapshot'] .ab-ref .ab-ref-badge {
+    background-color: color-mix(in srgb, var(--av-accent) 10%, var(--av-bg));
+    color: var(--av-accent);
+  }
+
+  .ab[data-phase='act'] .ab-ref[data-ref='e2'] {
+    border-color: color-mix(in srgb, var(--av-accent) 50%, transparent);
+    background-color: color-mix(in srgb, var(--av-accent) 8%, var(--av-bg));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--av-accent) 10%, transparent);
+  }
+  .ab[data-phase='act'] .ab-ref[data-ref='e2'] .ab-ref-badge {
+    background-color: var(--av-accent);
+    color: var(--av-on-cta);
+  }
+  .ab[data-phase='act'] .ab-ref:not([data-ref='e2']) {
+    opacity: 0.5;
+  }
+
+  .ab-url {
+    transition: opacity 0.2s ease;
+  }
+  .ab[data-phase='navigate'] .ab-url {
+    color: var(--av-accent);
+  }
+
+  :global(.dark) .ab[data-phase='navigate'] .ab-tool[data-phase='navigate'],
+  :global(.dark) .ab[data-phase='snapshot'] .ab-tool[data-phase='snapshot'],
+  :global(.dark) .ab[data-phase='act'] .ab-tool[data-phase='act'] {
+    background-color: color-mix(in srgb, var(--av-accent) 12%, transparent);
+    border-color: color-mix(in srgb, var(--av-accent) 40%, transparent);
+  }
+
+  :global(.dark) .ab[data-phase='snapshot'] .ab-ref .ab-ref-badge {
+    background-color: color-mix(in srgb, var(--av-accent) 15%, transparent);
+    color: var(--av-accent);
+  }
+
+  :global(.dark) .ab[data-phase='act'] .ab-ref[data-ref='e2'] {
+    background-color: color-mix(in srgb, var(--av-accent) 12%, transparent);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ab-url,
+    .ab-ref,
+    .ab-tool {
+      transition: none !important;
+    }
+  }
+</style>
+
+<script>
+  const root = document.querySelector('.ab');
+  if (root) {
+    const tools = Array.from(root.querySelectorAll('.ab-tool'));
+    const urlEl = root.querySelector('.ab-url');
+    const phases = ['navigate', 'snapshot', 'act'];
+    const urls = {
+      navigate: 'https://example.com/docs',
+      snapshot: 'https://example.com/docs',
+      act: 'https://example.com/docs#reference',
+    };
+
+    let autoTimer = null;
+    let userPaused = false;
+    let i = phases.indexOf(root.getAttribute('data-phase') || 'snapshot');
+    if (i < 0) i = 1;
+
+    const setPhase = (phase, { focusTool = false } = {}) => {
+      if (!phases.includes(phase)) return;
+      root.setAttribute('data-phase', phase);
+      tools.forEach((btn) => {
+        const on = btn.getAttribute('data-phase') === phase;
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.setAttribute('tabindex', on ? '0' : '-1');
+        if (on && focusTool) btn.focus();
+      });
+      if (urlEl && urls[phase]) urlEl.textContent = urls[phase];
+    };
+
+    const selectPhase = (phase, { pause = false, focusTool = false } = {}) => {
+      if (pause) {
+        userPaused = true;
+        if (autoTimer) window.clearInterval(autoTimer);
+      }
+      i = phases.indexOf(phase);
+      setPhase(phase, { focusTool });
+    };
+
+    tools.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        selectPhase(btn.getAttribute('data-phase'), { pause: true });
+      });
+
+      btn.addEventListener('keydown', (event) => {
+        const key = event.key;
+        if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(key)) return;
+        event.preventDefault();
+        const currentIndex = tools.indexOf(btn);
+        let nextIndex = currentIndex;
+        if (key === 'ArrowUp') nextIndex = (currentIndex - 1 + tools.length) % tools.length;
+        if (key === 'ArrowDown') nextIndex = (currentIndex + 1) % tools.length;
+        if (key === 'Home') nextIndex = 0;
+        if (key === 'End') nextIndex = tools.length - 1;
+        const nextBtn = tools[nextIndex];
+        if (!nextBtn) return;
+        selectPhase(nextBtn.getAttribute('data-phase'), { pause: true, focusTool: true });
+      });
+    });
+
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    setPhase(phases[i]);
+    if (!reduce) {
+      autoTimer = window.setInterval(() => {
+        if (userPaused) return;
+        i = (i + 1) % phases.length;
+        setPhase(phases[i]);
+      }, 4500);
+    }
+  }
+</script>

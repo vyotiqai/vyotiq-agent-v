@@ -1,0 +1,157 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import PageHero from '../components/PageHero.astro';
+
+const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
+
+const toc = [
+  { href: '#overview', label: 'Overview' },
+  { href: '#quick-start', label: 'Quick start' },
+  { href: '#build-from-source', label: 'Build from source' },
+  { href: '#providers', label: 'Providers' },
+  { href: '#agent-tools', label: 'Agent tools' },
+  { href: '#support', label: 'Support' },
+];
+---
+
+<Layout
+  title="Docs — Agent V"
+  description="Overview, quick start, providers, and agent tools for Agent V — the free open-source coding workspace."
+  canonical="https://vyotiq.com/docs"
+>
+  <Nav />
+  <main id="main">
+    <PageHero
+      eyebrow="Resources"
+      title="Docs"
+      lede="Get Agent V running locally, connect the models you already use, and understand the agent tools."
+      narrow
+    />
+
+    <div class="mx-auto w-full max-w-3xl px-4 pb-24 sm:px-6">
+      <nav class="mb-12 flex flex-wrap gap-2" aria-label="On this page">
+        {
+          toc.map((item) => (
+            <a
+              href={item.href}
+              class="rounded border border-[var(--av-hairline)] bg-[var(--av-panel)] px-3 py-1.5 text-[13px] text-[color-mix(in_srgb,var(--av-ink)_75%,transparent)] transition hover:border-[color-mix(in_srgb,var(--av-ink)_22%,transparent)] hover:text-[var(--av-ink)]"
+            >
+              {item.label}
+            </a>
+          ))
+        }
+      </nav>
+
+      <article class="space-y-12 text-[15px] leading-7 text-[color-mix(in_srgb,var(--av-ink)_78%,transparent)]">
+        <section id="overview" class="scroll-mt-24">
+          <h2 class="text-xl font-semibold tracking-tight text-[var(--av-ink)]">Overview</h2>
+          <p class="mt-3">
+            Agent V (Vyotiq) is an Electron desktop app: a coding workspace for real repositories.
+            It pairs a chat interface with multiple model providers and an agent that can act
+            directly on your checked-out code — terminal, files, and repository tools — instead of
+            only working from pasted snippets. Local voice dictation is built in via Whisper shipped
+            with the app.
+          </p>
+        </section>
+
+        <section id="quick-start" class="scroll-mt-24 border-t border-[var(--av-hairline)] pt-12">
+          <h2 class="text-xl font-semibold tracking-tight text-[var(--av-ink)]">Quick start</h2>
+          <p class="mt-3">
+            Prerequisites: Node.js <code class="av-code">&gt;=22.18.0</code> and pnpm (pinned via
+            <code class="av-code">packageManager</code>; enable once with
+            <code class="av-code">corepack enable</code>).
+          </p>
+          <pre class="av-pre mt-4"><code>git clone https://github.com/vyotiqai/vyotiq-agent-v.git
+cd vyotiq-agent-v
+pnpm install
+pnpm dev</code></pre>
+          <p class="mt-3">
+            <code class="av-code">pnpm install</code> fetches Electron, rebuilds native modules, and runs asset sync.
+            Optional: copy <code class="av-code">.env.example</code> to <code class="av-code">.env</code> for Sentry
+            (leave blank for local work).
+          </p>
+        </section>
+
+        <section id="build-from-source" class="scroll-mt-24 border-t border-[var(--av-hairline)] pt-12">
+          <h2 class="text-xl font-semibold tracking-tight text-[var(--av-ink)]">Build from source</h2>
+          <p class="mt-3">Production build and packaging helpers:</p>
+          <pre class="av-pre mt-4"><code>pnpm build        # typecheck + electron-vite production build
+pnpm pack         # installers for Windows, macOS, and Linux
+pnpm pack:win     # Windows NSIS installer
+pnpm pack:mac     # macOS dmg
+pnpm pack:linux   # Linux AppImage</code></pre>
+          <p class="mt-3">
+            Artifacts land in <code class="av-code">dist-package/</code>. Until published installers exist, prefer
+            building from source or check the
+            <a href="https://github.com/vyotiqai/vyotiq-agent-v-releases" class="av-link" target="_blank" rel="noopener noreferrer">companion releases repo ↗</a>.
+          </p>
+        </section>
+
+        <section id="providers" class="scroll-mt-24 border-t border-[var(--av-hairline)] pt-12">
+          <h2 class="text-xl font-semibold tracking-tight text-[var(--av-ink)]">Providers (BYO)</h2>
+          <p class="mt-3">Bring your own API keys. Keys stay on your machine. Supported providers include:</p>
+          <ul class="mt-3 list-disc space-y-1 pl-5">
+            <li>OpenAI</li>
+            <li>Anthropic</li>
+            <li>Google Gemini</li>
+            <li>Ollama (local models)</li>
+            <li>DeepSeek, Groq, OpenRouter, xAI, Mistral</li>
+            <li>OpenCode provider</li>
+            <li>Custom OpenAI-compatible endpoints</li>
+          </ul>
+          <p class="mt-3">Model lists are fetched per provider where the API supports it.</p>
+        </section>
+
+        <section id="agent-tools" class="scroll-mt-24 border-t border-[var(--av-hairline)] pt-12">
+          <h2 class="text-xl font-semibold tracking-tight text-[var(--av-ink)]">Agent tools</h2>
+          <p class="mt-3">Honest categories from the built-in tool catalog:</p>
+          <div class="mt-4 grid gap-2.5 sm:grid-cols-2">
+            {
+              [
+                ['Terminal', 'Run commands in your workspace'],
+                ['Files', 'read, edit, search, glob, grep, codebase search'],
+                ['Git', 'status, diff, commit, apply patch'],
+                ['GitHub', 'pull requests and issues'],
+                ['Quality', 'typecheck, lint, and test runners'],
+                ['Browser', 'navigate, snapshot, click, type, fill'],
+                ['Notebooks', 'notebook editing'],
+                ['Language server', 'LSP queries'],
+                ['Parallel instances', 'spawn / await / merge on worktrees'],
+                ['MCP', 'connect servers and pin their tools'],
+              ].map(([title, body]) => (
+                <div class="rounded border border-[var(--av-hairline)] bg-[var(--av-panel)] px-3.5 py-3">
+                  <h3 class="text-sm font-semibold text-[var(--av-ink)]">{title}</h3>
+                  <p class="mt-1 text-[13px] leading-5 text-[var(--av-muted)]">{body}</p>
+                </div>
+              ))
+            }
+          </div>
+        </section>
+
+                <section class="scroll-mt-24 rounded border border-[var(--av-hairline)] bg-[var(--av-panel)] p-5">
+          <h2 class="text-lg font-semibold text-[var(--av-ink)]">Contribute &amp; legal</h2>
+          <ul class="mt-3 space-y-2">
+            <li><a href="/contributing" class="av-link">Contributing</a> <span class="text-[var(--av-muted)]">(from CONTRIBUTING.md)</span></li>
+            <li><a href="/security" class="av-link">Security policy</a> <span class="text-[var(--av-muted)]">(from SECURITY.md)</span></li>
+            <li><a href="/code-of-conduct" class="av-link">Code of Conduct</a></li>
+            <li><a href="/privacy" class="av-link">Privacy Policy</a></li>
+            <li><a href="/terms" class="av-link">Terms of Service</a></li>
+            <li><a href="/license" class="av-link">License</a> <span class="text-[var(--av-muted)]">(GPL-3.0-or-later)</span></li>
+            <li><a href="/legal" class="av-link">All legal documents</a></li>
+          </ul>
+        </section>
+
+        <section id="support" class="scroll-mt-24 border-t border-[var(--av-hairline)] pt-12">
+          <h2 class="text-xl font-semibold tracking-tight text-[var(--av-ink)]">Support</h2>
+          <p class="mt-3">
+            Questions or help:
+            <a href="mailto:support@vyotiq.com" class="av-link">support@vyotiq.com</a>.
+          </p>
+        </section>
+      </article>
+    </div>
+  </main>
+  <Footer />
+</Layout>

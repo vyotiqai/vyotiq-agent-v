@@ -1,4 +1,4 @@
-@import '@fontsource/plus-jakarta-sans/400.css';
+﻿@import '@fontsource/plus-jakarta-sans/400.css';
 @import '@fontsource/plus-jakarta-sans/500.css';
 @import '@fontsource/plus-jakarta-sans/600.css';
 @import '@fontsource/jetbrains-mono/400.css';
@@ -13,33 +13,207 @@
 
 :root {
   color-scheme: light;
+  /* Muse-like calm canvas â€” keep token strings verify-dist expects */
+  --av-bg: #f7f7f4;
+  --av-panel: #ffffff;
+  --av-band: #f0efeb;
+  --av-ink: #26251e;
+  --av-muted: color-mix(in srgb, var(--av-ink) 58%, transparent);
+  --av-accent: #f54e00;
+  --av-cta: #26251e;
+  --av-on-cta: #ffffff;
+  --av-cta-secondary: #ebeae5;
+  --av-hairline: color-mix(in srgb, var(--av-ink) 10%, transparent);
+  --av-success: #16a34a;
+  --av-shadow: color-mix(in srgb, var(--av-ink) 10%, transparent);
+  --av-flyout-shadow: 0 0 16px color-mix(in srgb, var(--av-ink) 4%, transparent),
+    0 0 8px color-mix(in srgb, var(--av-ink) 2%, transparent);
+  --av-squircle: 1.75rem;
+  --av-pill: 0.625rem; /* soft rectangle, not capsule */
+  --av-content: 90rem;
 }
 
-/* Dark theme: mirror-invert the zinc scale and white so every token-based
-   surface, text, border, and hover flips consistently. The orange accent
-   stays. zinc-400 uses the lighter value — it labels text on dark and a
-   straight mirror would sit below WCAG AA. */
 .dark {
   color-scheme: dark;
-  --color-white: #09090b;
-  --color-zinc-50: #09090b;
-  --color-zinc-100: #18181b;
-  --color-zinc-200: #27272a;
-  --color-zinc-300: #3f3f46;
-  --color-zinc-400: #a1a1aa;
-  --color-zinc-500: #94949b;
-  --color-zinc-600: #a1a1aa;
-  --color-zinc-700: #d4d4d8;
-  --color-zinc-800: #e4e4e7;
-  --color-zinc-900: #f4f4f5;
-  --color-zinc-950: #fafafa;
+  --av-bg: #0c0c0a;
+  --av-panel: #161614;
+  --av-band: #121210;
+  --av-ink: #f4f4f0;
+  --av-muted: color-mix(in srgb, var(--av-ink) 68%, transparent);
+  --av-accent: #f54e00;
+  --av-cta: #f4f4f0;
+  --av-on-cta: #0c0c0a;
+  --av-cta-secondary: #222220;
+  --av-hairline: color-mix(in srgb, var(--av-ink) 16%, transparent);
+  --av-success: #4ade80;
+  --av-shadow: color-mix(in srgb, #000 45%, transparent);
+  --av-flyout-shadow: 0 0 20px color-mix(in srgb, #000 35%, transparent),
+    0 0 8px color-mix(in srgb, #000 20%, transparent);
+
+  --color-white: #0c0c0a;
+  --color-zinc-50: #0c0c0a;
+  --color-zinc-100: #161614;
+  --color-zinc-200: #272724;
+  --color-zinc-300: #3f3f3a;
+  --color-zinc-400: #a1a19a;
+  --color-zinc-500: #94948c;
+  --color-zinc-600: #a1a19a;
+  --color-zinc-700: #d4d4cc;
+  --color-zinc-800: #e4e4dc;
+  --color-zinc-900: #f4f4f0;
+  --color-zinc-950: #fafaf7;
 }
 
 ::selection {
-  background-color: rgb(234 88 12 / 0.15);
+  background-color: color-mix(in srgb, var(--av-accent) 18%, transparent);
 }
 
 :focus-visible {
-  outline: 2px solid rgb(234 88 12 / 0.6);
+  outline: 2px solid color-mix(in srgb, var(--av-accent) 65%, transparent);
   outline-offset: 2px;
+}
+
+.av-cta-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 48px;
+  border-radius: var(--av-pill);
+  background: var(--av-cta);
+  color: var(--av-on-cta);
+  font-weight: 600;
+  transition: opacity 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+}
+.av-cta-primary:hover {
+  opacity: 0.92;
+}
+
+.av-cta-accent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 48px;
+  border-radius: var(--av-pill);
+  background: var(--av-accent);
+  color: #fff;
+  font-weight: 600;
+  transition: opacity 0.15s ease;
+}
+.av-cta-accent:hover {
+  opacity: 0.92;
+}
+
+.av-cta-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 48px;
+  border-radius: var(--av-pill);
+  border: 1px solid var(--av-hairline);
+  background: var(--av-cta-secondary);
+  color: var(--av-ink);
+  font-weight: 600;
+  transition: opacity 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+.av-cta-secondary:hover {
+  opacity: 0.92;
+  border-color: color-mix(in srgb, var(--av-ink) 28%, transparent);
+}
+
+.av-cta-split {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  min-height: 48px;
+  border-radius: var(--av-pill);
+  background: var(--av-cta);
+}
+.av-cta-split > .av-cta-primary {
+  border-radius: 0;
+  min-height: 48px;
+}
+.av-cta-split > .av-cta-primary:first-child {
+  border-top-left-radius: var(--av-pill);
+  border-bottom-left-radius: var(--av-pill);
+}
+.av-cta-split > .av-cta-primary:last-child {
+  border-top-right-radius: var(--av-pill);
+  border-bottom-right-radius: var(--av-pill);
+}
+.av-cta-split > .av-cta-primary + .av-cta-primary {
+  border-left: 1px solid color-mix(in srgb, var(--av-on-cta) 18%, transparent);
+}
+
+.av-accent-text {
+  color: var(--av-accent);
+}
+
+.av-panel {
+  background: var(--av-panel);
+}
+
+.av-band {
+  background: var(--av-band);
+}
+
+.av-hairline {
+  border-color: var(--av-hairline);
+}
+
+.av-squircle {
+  border-radius: var(--av-squircle);
+}
+
+.av-code {
+  border-radius: 0.5rem;
+  background: var(--av-band);
+  padding: 0.125rem 0.375rem;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.av-pre {
+  overflow-x: auto;
+  border-radius: var(--av-squircle);
+  border: 1px solid var(--av-hairline);
+  background: var(--av-panel);
+  padding: 1rem;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--av-ink);
+}
+.av-link {
+  font-weight: 500;
+  color: var(--av-accent);
+  text-underline-offset: 2px;
+}
+.av-link:hover {
+  text-decoration: underline;
+}
+.av-flyout {
+  box-shadow: var(--av-flyout-shadow);
+}
+
+.av-legal-md {
+  font-size: 15px;
+  line-height: 1.7;
+  color: color-mix(in srgb, var(--av-ink) 78%, transparent);
+}
+.av-legal-md > * + * { margin-top: 0.85rem; }
+.av-legal-md h1 { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; color: var(--av-ink); }
+.av-legal-md h2 { margin-top: 2rem; font-size: 1.15rem; font-weight: 600; letter-spacing: -0.01em; color: var(--av-ink); }
+.av-legal-md h3 { margin-top: 1.5rem; font-size: 1rem; font-weight: 600; color: var(--av-ink); }
+.av-legal-md ul, .av-legal-md ol { padding-left: 1.25rem; }
+.av-legal-md ul { list-style: disc; }
+.av-legal-md ol { list-style: decimal; }
+.av-legal-md li + li { margin-top: 0.35rem; }
+.av-legal-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.av-legal-table th, .av-legal-table td { border: 1px solid var(--av-hairline); padding: 0.5rem 0.75rem; text-align: left; }
+.av-legal-table th { background: var(--av-panel); font-weight: 600; color: var(--av-ink); }
+
+.av-max {
+  max-width: var(--av-content);
 }

@@ -1,0 +1,90 @@
+{
+  "bakedAt": "2026-09-15T18:07:29.453Z",
+  "repository": "https://github.com/vyotiqai/vyotiq-agent-v.git",
+  "packageName": "vyotiq",
+  "spdxLicense": "GPL-3.0-or-later",
+  "absentFromRepo": [
+    "ACCEPTABLE_USE.md",
+    "TERMS_OF_SERVICE.md",
+    "PRIVACY_POLICY.md"
+  ],
+  "files": [
+    {
+      "id": "license",
+      "source": "LICENSE",
+      "publicPath": "/legal/LICENSE",
+      "route": "/license",
+      "title": "GNU GPL v3",
+      "category": "legal",
+      "bytes": 32472,
+      "sha256": "5216caa77d0d7c3de0e9b1fd6e073013c6d662cae3a4c2f73f09b36c5f1e2536",
+      "firstLine": "                    GNU GENERAL PUBLIC LICENSE"
+    },
+    {
+      "id": "notice",
+      "source": "NOTICE",
+      "publicPath": "/legal/NOTICE",
+      "route": "/notice",
+      "title": "Third-party notices",
+      "category": "legal",
+      "bytes": 1457,
+      "sha256": "43f1c9d914d1097937b5b796b1bacc5c8876e29273e69e4ef5b74db04ddb940e",
+      "firstLine": "# Third-Party Notices"
+    },
+    {
+      "id": "privacy",
+      "source": "PRIVACY.md",
+      "publicPath": "/legal/PRIVACY.md",
+      "route": "/privacy",
+      "title": "Privacy Policy",
+      "category": "legal",
+      "bytes": 8487,
+      "sha256": "a549728a51eaf9cb9098d86884cce848ab97503ad6e7ffb63c79f517b328e8f3",
+      "firstLine": "# Privacy Policy"
+    },
+    {
+      "id": "terms",
+      "source": "TERMS.md",
+      "publicPath": "/legal/TERMS.md",
+      "route": "/terms",
+      "title": "Terms of Service",
+      "category": "legal",
+      "bytes": 7251,
+      "sha256": "e57190830ac3715e62db85fb1b29505046398b96a158f241b4f019be957279b4",
+      "firstLine": "# Terms of Service"
+    },
+    {
+      "id": "security",
+      "source": "SECURITY.md",
+      "publicPath": "/legal/SECURITY.md",
+      "route": "/security",
+      "title": "Security policy",
+      "category": "legal",
+      "bytes": 1331,
+      "sha256": "656e9f62a8bb1796d80b97fc821bf5012e982ad023b7da7f17845a5180045ed8",
+      "firstLine": "# Security Policy"
+    },
+    {
+      "id": "code-of-conduct",
+      "source": "CODE_OF_CONDUCT.md",
+      "publicPath": "/legal/CODE_OF_CONDUCT.md",
+      "route": "/code-of-conduct",
+      "title": "Code of Conduct",
+      "category": "legal",
+      "bytes": 5473,
+      "sha256": "b573d14f56f315b6cb144a51c3037a9a4be33bb16cd0cfaecb24d2c24ce86213",
+      "firstLine": "# Contributor Covenant Code of Conduct"
+    },
+    {
+      "id": "contributing",
+      "source": "CONTRIBUTING.md",
+      "publicPath": "/legal/CONTRIBUTING.md",
+      "route": "/contributing",
+      "title": "Contributing",
+      "category": "community",
+      "bytes": 1732,
+      "sha256": "7ef4353da0d0eac9971796bad1393a6ae2194416c93de1cdab07d62e17bf0653",
+      "firstLine": "﻿# Contributing"
+    }
+  ]
+}
