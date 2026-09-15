@@ -2,6 +2,7 @@ import type { ModelInfo, ProviderId } from '../../../shared/ipc'
 import { formatError } from '../../../shared/errors'
 import { withResolvedContextWindow } from '../../../shared/domain/modelContextWindows'
 import { providerLabel, providerNeedsKey, seedModelsFor } from '../../../shared/providers'
+import { isChatFixtureReplayEnabled } from '../../e2e/chatFixtureReplay'
 import { anthropicProvider } from './anthropic'
 import { geminiProvider } from './gemini'
 import {
@@ -210,6 +211,19 @@ async function listProviderModelsUncached(
   key: string,
   generation: number
 ): Promise<{ models: ModelInfo[]; warning?: string }> {
+  // GUI e2e replays chat without a live provider. Treat seed IDs as a ready
+  // catalog (no seed-fallback warning) so the renderer readiness gate does not
+  // keep Send disabled while VYOTIQ_E2E_FIXTURE=1.
+  if (isChatFixtureReplayEnabled()) {
+    const seeds = seedModelsFor(input.provider)
+    const models = await applyOllamaSelectedShow(
+      input,
+      enrichCatalogModels(input.provider, seeds)
+    )
+    setCachedModels(key, models, generation)
+    return { models }
+  }
+
   // OpenCode Go publishes its catalog without auth (verified: GET /v1/models →
   // HTTP 200 unauthenticated), so fetch it even before a key is saved. Chat
   // still requires a key via providerNeedsKey/preflight.
