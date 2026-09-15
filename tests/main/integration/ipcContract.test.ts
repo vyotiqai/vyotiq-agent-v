@@ -346,6 +346,7 @@ describe('main/renderer IPC contract', () => {
       ...PRELOAD_INTERNAL_INVOKE_CHANNELS,
       ...EVENT_CHANNELS,
       IPC.runsFork,
+      IPC.loadEarlierMessages,
       IPC.toolsCatalogGet,
       IPC.toolsCatalogChanged
     ])

@@ -316,13 +316,17 @@ describe('opencode non-chat transport cache wiring (regression pins)', () => {
     expect(system[0]?.cache_control).toEqual({ type: 'ephemeral' })
 
     const messages = body.messages as Array<{ role: string; content: unknown }>
-    const historyLast = messages[messages.length - 2] // before the trailing volatile user message
+    // Volatile merges into the trailing user turn (consecutive user messages are
+    // invalid on the wire); the cache breakpoint stays on the history block.
+    const historyLast = messages.at(-1)!
     expect(historyLast.role).toBe('user')
-    const lastBlock = (historyLast.content as Array<Record<string, unknown>>).at(-1)
-    expect(lastBlock?.cache_control).toEqual({ type: 'ephemeral' })
-    // Volatile rides AFTER the cacheable prefix as an unmarked trailing message.
-    const volatileMsg = messages.at(-1)
-    expect(JSON.stringify(volatileMsg?.content)).not.toContain('cache_control')
+    const blocks = historyLast.content as Array<Record<string, unknown>>
+    expect(blocks.at(-2)?.cache_control).toEqual({ type: 'ephemeral' })
+    expect(String(blocks.at(-2)?.text)).toBe('third')
+    // Volatile rides AFTER the cache breakpoint as an unmarked block.
+    const volatileBlock = blocks.at(-1)
+    expect(String(volatileBlock?.text)).toContain('<live_session>')
+    expect(volatileBlock).not.toHaveProperty('cache_control')
   })
 })
 

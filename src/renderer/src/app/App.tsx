@@ -1646,6 +1646,11 @@ function App() {
           secrets={secrets}
           activeRunId={pane.runId}
           transcriptLoading={snap.transcriptLoading}
+          transcriptHasEarlier={snap.transcriptHasEarlier}
+          transcriptLoadingEarlier={snap.transcriptLoadingEarlier}
+          onLoadEarlierMessages={() => {
+            void paneCtrl?.loadEarlierMessages()
+          }}
           showPageHeading={false}
           onActivate={() => focusPaneById(pane.paneId)}
           onProviderModel={(provider, model) => {
@@ -2212,6 +2217,11 @@ function App() {
             secrets={secrets}
             activeRunId={chat.runId ?? activeContext?.activeRunId ?? null}
             transcriptLoading={chat.transcriptLoading}
+            transcriptHasEarlier={chat.transcriptHasEarlier}
+            transcriptLoadingEarlier={chat.transcriptLoadingEarlier}
+            onLoadEarlierMessages={() => {
+              void chatActionsRef.current?.loadEarlierMessages()
+            }}
             headingRef={chatHeadingRef}
             onProviderModel={(provider, model) => {
               onSessionProviderModel(

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, rmSync, writeFileSync, openSync, readSync, closeSync, fstatSync } from 'fs'
-import { readFile, readdir, open } from 'fs/promises'
+import { readFile, readdir, open, stat } from 'fs/promises'
 import { join, basename } from 'path'
 import { atomicWriteFile, atomicWriteFileAsync, atomicWriteJson } from '../storage/atomicWrite'
 import { enqueueEventAppend, flushEventAppends, listEventArchives, listEventArchivesSync, removeEventArchives } from './eventAppendQueue'
@@ -552,6 +552,175 @@ export async function loadMessagesAfterFoldAsync(
   } catch (err) {
     logger.warn('Failed to read messages.jsonl', { scope: 'state', runId, err })
     return []
+  }
+}
+
+const MESSAGES_WINDOW_BYTE_BUDGET = 4 * 1024 * 1024
+const MESSAGES_WINDOW_DEFAULT_LIMIT = 400
+
+export interface MessagesWindow {
+  messages: ChatMessage[]
+  hasEarlier: boolean
+  earlierCursor: string | null
+}
+
+interface TranscriptSource {
+  path: string
+  size: number
+}
+
+async function listTranscriptSources(dir: string): Promise<TranscriptSource[]> {
+  const paths = (await listMessageArchives(dir)).map((name) => join(dir, name))
+  paths.push(join(dir, 'messages.jsonl'))
+  const sources: TranscriptSource[] = []
+  for (const path of paths) {
+    try {
+      const st = await stat(path)
+      if (st.isFile() && st.size > 0) sources.push({ path, size: st.size })
+    } catch {
+      // Pruned archive or a run with no live messages yet.
+    }
+  }
+  return sources
+}
+
+interface MessageWindow {
+  buf: Buffer
+  start: number
+}
+
+/**
+ * Read up to `byteBudget` bytes ending at `endOffset` (exclusive), trimmed to whole
+ * lines. Reads only this window, so hydration cost stays bounded for any transcript.
+ */
+async function readMessageWindow(
+  path: string,
+  endOffset: number,
+  byteBudget: number
+): Promise<MessageWindow | null> {
+  let size: number
+  try {
+    size = (await stat(path)).size
+  } catch {
+    return null
+  }
+  const end = Math.min(endOffset, size)
+  if (end <= 0) return null
+  const start = Math.max(0, end - byteBudget)
+  const handle = await open(path, 'r')
+  try {
+    const length = end - start
+    const buf = Buffer.alloc(length)
+    const { bytesRead } = await handle.read(buf, 0, length, start)
+    if (bytesRead <= 0) return null
+    let windowStart = start
+    if (windowStart > 0) {
+      const firstNewline = buf.indexOf(0x0a)
+      if (firstNewline === -1) return null
+      windowStart += firstNewline + 1
+    }
+    let lastNewline = -1
+    for (let i = bytesRead - 1; i >= 0; i--) {
+      if (buf[i] === 0x0a) {
+        lastNewline = i
+        break
+      }
+    }
+    if (lastNewline === -1) return null
+    const windowEnd = start + lastNewline + 1
+    if (windowEnd <= windowStart) return null
+    return { buf: buf.subarray(windowStart - start, windowEnd - start), start: windowStart }
+  } finally {
+    await handle.close()
+  }
+}
+
+interface ParsedWindowMessage {
+  message: ChatMessage
+  offset: number
+}
+
+function parseMessageWindow(window: MessageWindow): ParsedWindowMessage[] {
+  const out: ParsedWindowMessage[] = []
+  const buf = window.buf
+  let lineStart = 0
+  while (lineStart < buf.length) {
+    const newline = buf.indexOf(0x0a, lineStart)
+    const lineEnd = newline === -1 ? buf.length : newline
+    if (lineEnd > lineStart) {
+      try {
+        const parsed = ChatMessageSchema.safeParse(JSON.parse(buf.toString('utf8', lineStart, lineEnd)))
+        if (parsed.success) out.push({ message: parsed.data, offset: window.start + lineStart })
+        else logger.warn('Discarding malformed message line in transcript window', { scope: 'state' })
+      } catch {
+        logger.warn('Discarding unparseable line in transcript window', { scope: 'state' })
+      }
+    }
+    if (newline === -1) break
+    lineStart = newline + 1
+  }
+  return out
+}
+
+function parseWindowCursor(cursor: string): { index: number; offset: number } | null {
+  const separator = cursor.indexOf(':')
+  if (separator <= 0) return null
+  const index = Number(cursor.slice(0, separator))
+  const offset = Number(cursor.slice(separator + 1))
+  if (!Number.isInteger(index) || index < 0 || !Number.isInteger(offset) || offset <= 0) return null
+  return { index, offset }
+}
+
+/**
+ * Bounded transcript hydration: returns at most `limit` messages from the most
+ * recent content, reading byte windows from the transcript tail instead of the
+ * whole file. `cursor` (from a previous window result) pages backwards through
+ * earlier messages. Byte offsets are stable for append-only transcripts; a stale
+ * cursor (rewind/compaction rewrote the file) yields an empty window with
+ * `hasEarlier: false` so the caller can re-hydrate from the current tail.
+ */
+export async function loadMessagesWindowAsync(
+  workspacePath: string,
+  runId: string,
+  opts?: { limit?: number; cursor?: string | null }
+): Promise<MessagesWindow> {
+  const dir = resolveRunDir(workspacePath, runId)
+  await flushMessageAppends(dir)
+  const sources = await listTranscriptSources(dir)
+  const limit = Math.max(1, Math.min(opts?.limit ?? MESSAGES_WINDOW_DEFAULT_LIMIT, 2000))
+  let startIndex = sources.length - 1
+  let startEndOffset: number | undefined
+  if (opts?.cursor) {
+    const parsedCursor = parseWindowCursor(opts.cursor)
+    if (!parsedCursor || parsedCursor.index >= sources.length) {
+      return { messages: [], hasEarlier: false, earlierCursor: null }
+    }
+    startIndex = parsedCursor.index
+    startEndOffset = parsedCursor.offset
+  }
+  const messages: ChatMessage[] = []
+  let firstIndex = -1
+  let firstOffset = -1
+  for (let i = startIndex; i >= 0 && messages.length < limit; i--) {
+    const endOffset =
+      i === startIndex && startEndOffset != null
+        ? Math.min(startEndOffset, sources[i].size)
+        : sources[i].size
+    const window = await readMessageWindow(sources[i].path, endOffset, MESSAGES_WINDOW_BYTE_BUDGET)
+    if (!window) continue
+    const parsed = parseMessageWindow(window)
+    if (parsed.length === 0) continue
+    const need = limit - messages.length
+    const take = need >= parsed.length ? parsed : parsed.slice(parsed.length - need)
+    messages.unshift(...take.map((item) => item.message))
+    firstIndex = i
+    firstOffset = take[0].offset
+  }
+  const hasEarlier = firstIndex > 0 || firstOffset > 0
+  return {
+    messages,
+    hasEarlier,
+    earlierCursor: hasEarlier ? `${firstIndex}:${firstOffset}` : null
   }
 }
 
@@ -1351,11 +1520,11 @@ async function interruptRunningRunOnDisk(
   await flushEventAppends(dir)
   await flushStatusWrites(dir)
   const events = await loadEventsAsync(dir, runId)
-  writeRunReceiptBestEffort({
+  await writeRunReceiptBestEffort({
     runDir: dir,
     runId,
     loadStatus,
-    loadMessages: () => loadMessages(workspacePath, runId),
+    loadMessages: () => loadMessagesAsync(workspacePath, runId),
     loadEvents: () => events,
     readContract
   })

@@ -1298,7 +1298,10 @@ export function useWorkspaceManager(options?: {
           }
         }
         if (!stillCurrent()) return
-        ctrl.hydrateTranscript(res.data.messages, events)
+        ctrl.hydrateTranscript(res.data.messages, events, {
+          hasEarlier: res.data.hasEarlier,
+          earlierCursor: res.data.earlierCursor
+        })
         bump()
         if (
           stillCurrent() &&
@@ -2569,6 +2572,8 @@ export function useWorkspaceManager(options?: {
         runTerminalTick: activeController.runTerminalTick,
         pendingRun: activeController.pendingRun,
         transcriptLoading: activeController.transcriptLoading,
+        transcriptHasEarlier: activeController.transcriptHasEarlier,
+        transcriptLoadingEarlier: activeController.transcriptLoadingEarlier,
         collapsedTurnIndices: activeController.collapsedTurnIndices,
         writeCheckpoint: activeController.writeCheckpoint,
         pendingFollowUps: activeController.pendingFollowUps,
@@ -2604,6 +2609,8 @@ export function useWorkspaceManager(options?: {
         runTerminalTick: 0,
         pendingRun: false,
         transcriptLoading: false,
+        transcriptHasEarlier: false,
+        transcriptLoadingEarlier: false,
         collapsedTurnIndices: [] as number[],
         writeCheckpoint: null as ChatStreamController['writeCheckpoint'],
         pendingFollowUps: [] as ChatStreamController['pendingFollowUps'],
@@ -2754,6 +2761,8 @@ export function useWorkspaceManager(options?: {
         runTerminalTick: ctrl.runTerminalTick,
         pendingRun: ctrl.pendingRun,
         transcriptLoading: ctrl.transcriptLoading,
+        transcriptHasEarlier: ctrl.transcriptHasEarlier,
+        transcriptLoadingEarlier: ctrl.transcriptLoadingEarlier,
         collapsedTurnIndices: ctrl.collapsedTurnIndices,
         writeCheckpoint: ctrl.writeCheckpoint,
         pendingFollowUps: ctrl.pendingFollowUps,
@@ -2796,7 +2805,8 @@ export function useWorkspaceManager(options?: {
             applyManualCompaction: activeController.applyManualCompaction.bind(activeController),
             setCompacting: activeController.setCompacting.bind(activeController),
             applyWriteCheckpointResolution:
-              activeController.applyWriteCheckpointResolution.bind(activeController)
+              activeController.applyWriteCheckpointResolution.bind(activeController),
+            loadEarlierMessages: activeController.loadEarlierMessages.bind(activeController)
           }
         : null,
     [activeController]

@@ -32,6 +32,7 @@ export function MarketplaceAddPanel({
 
   const {
     formLocked,
+    busyTargetId,
     setFeedback,
     runInstall,
     detectMcp,
@@ -112,7 +113,7 @@ export function MarketplaceAddPanel({
         />
         <Button
           variant="subtle"
-          pending={formLocked}
+          pending={busyTargetId === 'marketplace-detect'}
           disabled={formLocked || !pasteInput.trim()}
           onClick={() => {
             void (async () => {
@@ -211,7 +212,7 @@ export function MarketplaceAddPanel({
             ) : null}
             <Button
               variant="subtle"
-              pending={formLocked}
+              pending={busyTargetId === 'marketplace-apply'}
               disabled={
                 formLocked ||
                 (!editServer && !detectResult.install) ||
@@ -268,7 +269,7 @@ export function MarketplaceAddPanel({
         <div className="flex flex-wrap gap-2">
           <Button
             variant="subtle"
-            pending={formLocked}
+            pending={busyTargetId === 'marketplace-scan'}
             disabled={formLocked}
             onClick={() => {
               void (async () => {
@@ -292,7 +293,7 @@ export function MarketplaceAddPanel({
           </Button>
           <Button
             variant="subtle"
-            pending={formLocked}
+            pending={busyTargetId === 'marketplace-scan'}
             disabled={formLocked}
             onClick={() => {
               void (async () => {
@@ -356,7 +357,7 @@ export function MarketplaceAddPanel({
             ))}
             <Button
               variant="subtle"
-              pending={formLocked}
+              pending={busyTargetId === 'marketplace-import'}
               disabled={formLocked || importSelected.size === 0}
               onClick={() => {
                 void (async () => {
@@ -423,6 +424,9 @@ export function MarketplaceAddPanel({
             />
             <Button
               variant="subtle"
+              pending={
+                busyTargetId === 'marketplace-detect' || busyTargetId === 'marketplace-apply'
+              }
               disabled={formLocked || !stdioCommand.trim()}
               onClick={() => void addStdioMcp()}
             >
@@ -473,6 +477,7 @@ export function MarketplaceAddPanel({
             />
             <Button
               variant="subtle"
+              pending={busyTargetId === 'marketplace-install-remote'}
               disabled={formLocked || !remoteUrl.trim()}
               onClick={() => {
                 void (async () => {
@@ -483,14 +488,17 @@ export function MarketplaceAddPanel({
                     })
                     return
                   }
-                  const ok = await runInstall({
-                    source: 'remote',
-                    target: remoteUrl.trim(),
-                    kind: 'mcp',
-                    name: remoteName.trim() || undefined,
-                    transport: remoteTransport,
-                    bearerToken: remoteBearer.trim() || undefined
-                  })
+                  const ok = await runInstall(
+                    {
+                      source: 'remote',
+                      target: remoteUrl.trim(),
+                      kind: 'mcp',
+                      name: remoteName.trim() || undefined,
+                      transport: remoteTransport,
+                      bearerToken: remoteBearer.trim() || undefined
+                    },
+                    { busyTargetId: 'marketplace-install-remote' }
+                  )
                   if (ok) {
                     setRemoteUrl('')
                     setRemoteName('')
@@ -507,6 +515,7 @@ export function MarketplaceAddPanel({
           <p className="m-0 text-xs font-medium text-fg">Local / package sources</p>
           <Button
             variant="subtle"
+            pending={busyTargetId === 'marketplace-install-path'}
             disabled={formLocked}
             onClick={() => {
               void (async () => {
@@ -518,10 +527,10 @@ export function MarketplaceAddPanel({
                 if (!pick.data) return
                 const path = pick.data
                 const isZip = /\.(zip|tgz)$/i.test(path)
-                const ok = await runInstall({
-                  source: isZip ? 'zip' : 'path',
-                  target: path
-                })
+                const ok = await runInstall(
+                  { source: isZip ? 'zip' : 'path', target: path },
+                  { busyTargetId: 'marketplace-install-path' }
+                )
                 if (ok) onInstalled()
               })()
             }}
@@ -539,11 +548,14 @@ export function MarketplaceAddPanel({
             />
             <Button
               variant="subtle"
-              pending={formLocked}
+              pending={busyTargetId === 'marketplace-install-git'}
               disabled={formLocked || !gitUrl.trim()}
               onClick={() => {
                 void (async () => {
-                  const ok = await runInstall({ source: 'git', target: gitUrl.trim() })
+                  const ok = await runInstall(
+                    { source: 'git', target: gitUrl.trim() },
+                    { busyTargetId: 'marketplace-install-git' }
+                  )
                   if (ok) {
                     setGitUrl('')
                     onInstalled()
@@ -565,11 +577,14 @@ export function MarketplaceAddPanel({
             />
             <Button
               variant="subtle"
-              pending={formLocked}
+              pending={busyTargetId === 'marketplace-install-npm'}
               disabled={formLocked || !npmName.trim()}
               onClick={() => {
                 void (async () => {
-                  const ok = await runInstall({ source: 'npm', target: npmName.trim() })
+                  const ok = await runInstall(
+                    { source: 'npm', target: npmName.trim() },
+                    { busyTargetId: 'marketplace-install-npm' }
+                  )
                   if (ok) {
                     setNpmName('')
                     onInstalled()

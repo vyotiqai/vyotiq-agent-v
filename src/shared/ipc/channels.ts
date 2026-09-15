@@ -53,6 +53,7 @@ export const IPC = {
   listRuns: 'runs:list',
   listOlderRuns: 'runs:listOlder',
   loadRun: 'runs:load',
+  loadEarlierMessages: 'runs:load-earlier',
   loadRunEvents: 'runs:events',
   loadToolResult: 'runs:tool-result',
   runsDelete: 'runs:delete',

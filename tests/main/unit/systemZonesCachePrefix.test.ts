@@ -201,9 +201,12 @@ describe('Responses / Gemini trailing volatile', () => {
     const body = buildGeminiBody(req)
     expect(body.systemInstruction).toEqual({ parts: [{ text: 'GEM STABLE' }] })
     const contents = body.contents as Array<{ role: string; parts: Array<{ text: string }> }>
-    expect(contents[contents.length - 1]).toEqual({
+    // Volatile merges into the trailing user entry: history ends on a user turn,
+    // and two consecutive user contents entries are invalid for the Gemini API.
+    expect(contents).toHaveLength(1)
+    expect(contents[0]).toEqual({
       role: 'user',
-      parts: [{ text: volatileSessionMessage('GEM VOL').content }]
+      parts: [{ text: 'hi' }, { text: volatileSessionMessage('GEM VOL').content }]
     })
     // Combined system must not leak into systemInstruction when zones are set.
     expect(JSON.stringify(body.systemInstruction)).not.toContain('GEM VOL')

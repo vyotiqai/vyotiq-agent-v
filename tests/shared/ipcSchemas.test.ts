@@ -679,12 +679,16 @@ describe('ipc schemas', () => {
         pendingFollowUps: [{ id: 'fu-1', preview: 'hi', ready: true }],
         status: 'cancelled',
         resumable: true,
-        error: 'Interrupted'
+        error: 'Interrupted',
+        hasEarlier: true,
+        earlierCursor: '2:1024'
       })
     ).toMatchObject({
       runId: 'r1',
       status: 'cancelled',
-      resumable: true
+      resumable: true,
+      hasEarlier: true,
+      earlierCursor: '2:1024'
     })
     expect(
       LoadToolResultRequestSchema.parse({

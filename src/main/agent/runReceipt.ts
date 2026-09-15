@@ -523,11 +523,11 @@ export function writeRunReceipt(runDir: string, receipt: RunReceipt): void {
 }
 
 /** Best-effort: load run state pieces and write receipt.json. Never throws to callers. */
-export function writeRunReceiptBestEffort(input: {
+export async function writeRunReceiptBestEffort(input: {
   runDir: string
   runId: string
   loadStatus: (dir: string) => RunStatus | null
-  loadMessages: () => ChatMessage[]
+  loadMessages: () => ChatMessage[] | Promise<ChatMessage[]>
   loadEvents: (dir: string) => PersistedEvent[]
   readContract: (dir: string) => string
   provider?: string
@@ -538,14 +538,14 @@ export function writeRunReceiptBestEffort(input: {
   estimatedCost?: number
   /** Raw model context window in effect at the final step (context pressure). */
   contextWindow?: number
-}): RunReceipt | null {
+}): Promise<RunReceipt | null> {
   try {
     const status = input.loadStatus(input.runDir)
     if (!status) return null
     const receipt = buildRunReceipt({
       runId: input.runId,
       status,
-      messages: input.loadMessages(),
+      messages: await input.loadMessages(),
       events: input.loadEvents(input.runDir),
       contract: input.readContract(input.runDir),
       runDir: input.runDir,

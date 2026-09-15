@@ -161,10 +161,13 @@ describe('runAgent skill-body stub rewrite gate', () => {
       // Drain the run.
     }
 
-    // Step 1: skill turn is still the open (last) message — no stub, no disk
-    // read. Step 2: follow-up exists — exactly one read + one rewrite. Step 3:
-    // already stubbed — the idempotent pass reports 0 and the disk is untouched.
-    expect(vi.mocked(loadMessagesAsync)).toHaveBeenCalledTimes(1)
+    // Step 1: skill turn is still the open (last) message — no stub, no stub-gate
+    // disk read. Step 2: follow-up exists — the gate reads and rewrites exactly
+    // once. Step 3: already stubbed — the idempotent pass reports 0 and the disk
+    // is untouched. Beyond the gate, run receipts are best-effort and read the
+    // durable transcript twice (interim receipt at run start, final receipt at
+    // run end) — hence 3 total reads while the rewrite itself stays write-once.
+    expect(vi.mocked(loadMessagesAsync)).toHaveBeenCalledTimes(3)
     expect(vi.mocked(syncMessagesAsync)).toHaveBeenCalledTimes(1)
 
     const transcript = readFileSync(

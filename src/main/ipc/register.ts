@@ -38,7 +38,9 @@ import {
   ListOlderRunsRequestSchema,
   LoadRunRequestSchema,
   LoadRunEventsRequestSchema,
+  LoadEarlierMessagesRequestSchema,
   type LoadRunResult,
+  type LoadEarlierMessagesResult,
   LoadToolResultRequestSchema,
   DeleteRunRequestSchema,
   ExportRunRequestSchema,
@@ -377,7 +379,7 @@ import {
   listRuns,
   listRunsOlder,
   buildRunMarkdownExport,
-  loadMessagesAsync,
+  loadMessagesWindowAsync,
   loadEventsForRunAsync,
   LOAD_EVENTS_UI_LIMIT,
   loadToolResultContent,
@@ -1180,6 +1182,7 @@ export function registerIpc(): void {
             workspacePath: req.workspacePath,
             runId: req.runId,
             editMessageIndex: req.editMessageIndex,
+            targetUserAt: req.targetUserAt,
             editedUserMessage: req.editedUserMessage
           })
         } catch (err) {
@@ -1255,7 +1258,8 @@ export function registerIpc(): void {
       const prepared = await prepareRewindToUserMessage({
         workspacePath: req.workspacePath,
         runId: req.runId,
-        userMessageIndex: req.userMessageIndex
+        userMessageIndex: req.userMessageIndex,
+        targetUserAt: req.targetUserAt
       })
       if (prepared.writes.restored.length > 0) {
         invalidateGitStatusCache(req.workspacePath)
@@ -1728,7 +1732,8 @@ export function registerIpc(): void {
           await planRewindToUserMessage({
             workspacePath: req.workspacePath,
             runId: req.runId,
-            userMessageIndex: req.userMessageIndex
+            userMessageIndex: req.userMessageIndex,
+            targetUserAt: req.targetUserAt
           })
         )
       } catch (err) {
@@ -1960,11 +1965,13 @@ export function registerIpc(): void {
         const req = LoadRunRequestSchema.parse(raw)
         if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
         const runDir = resolveRunDir(req.workspacePath, req.runId)
-        const messages = await loadMessagesAsync(req.workspacePath, req.runId)
+        const window = await loadMessagesWindowAsync(req.workspacePath, req.runId)
         const status = loadStatus(runDir)
         return ok({
           runId: req.runId,
-          messages: messages.map(toolMessageForIpc),
+          messages: window.messages.map(toolMessageForIpc),
+          hasEarlier: window.hasEarlier,
+          earlierCursor: window.earlierCursor,
           pendingFollowUps: loadFollowUpPreviews(runDir),
           ...(status
             ? {
@@ -1976,6 +1983,28 @@ export function registerIpc(): void {
         })
       } catch (err) {
         return failFrom(err, IPC.loadRun)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.loadEarlierMessages,
+    async (event, raw): Promise<IpcResult<LoadEarlierMessagesResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = LoadEarlierMessagesRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        const window = await loadMessagesWindowAsync(req.workspacePath, req.runId, {
+          cursor: req.cursor,
+          limit: req.limit
+        })
+        return ok({
+          messages: window.messages.map(toolMessageForIpc),
+          hasEarlier: window.hasEarlier,
+          earlierCursor: window.earlierCursor
+        })
+      } catch (err) {
+        return failFrom(err, IPC.loadEarlierMessages)
       }
     }
   )

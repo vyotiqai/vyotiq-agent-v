@@ -29,13 +29,17 @@ function useControllerRunningMeta(controller: ChatStreamController): {
   running: boolean
   pendingRun: boolean
   transcriptLoading: boolean
+  transcriptHasEarlier: boolean
+  transcriptLoadingEarlier: boolean
 } {
   const [, bump] = useState(0)
   useEffect(() => controller.subscribeMeta(() => bump((n) => n + 1)), [controller])
   return {
     running: controller.running,
     pendingRun: controller.pendingRun,
-    transcriptLoading: controller.transcriptLoading
+    transcriptLoading: controller.transcriptLoading,
+    transcriptHasEarlier: controller.transcriptHasEarlier,
+    transcriptLoadingEarlier: controller.transcriptLoadingEarlier
   }
 }
 
@@ -50,6 +54,9 @@ const AgentInstanceTranscript = memo(function AgentInstanceTranscript({
   running,
   pendingRun,
   transcriptLoading,
+  transcriptHasEarlier,
+  transcriptLoadingEarlier,
+  onLoadEarlierMessages,
   sideRailPad,
   showThinking,
   collapsedTurns,
@@ -63,6 +70,9 @@ const AgentInstanceTranscript = memo(function AgentInstanceTranscript({
   running: boolean
   pendingRun: boolean
   transcriptLoading: boolean
+  transcriptHasEarlier: boolean
+  transcriptLoadingEarlier: boolean
+  onLoadEarlierMessages: () => void | Promise<void>
   sideRailPad: boolean
   showThinking: boolean
   collapsedTurns: ReadonlySet<number>
@@ -94,6 +104,9 @@ const AgentInstanceTranscript = memo(function AgentInstanceTranscript({
        pendingRun={pendingRun}
        turnStatus={controller.turnStatus}
        transcriptLoading={transcriptLoading}
+      transcriptHasEarlier={transcriptHasEarlier}
+      transcriptLoadingEarlier={transcriptLoadingEarlier}
+      onLoadEarlierMessages={onLoadEarlierMessages}
       sideRailPad={sideRailPad}
       showThinking={showThinking}
       collapsedTurns={collapsedTurns}
@@ -224,7 +237,8 @@ export function AgentInstancePane({
     }
   }, [controller, onControllerChange])
 
-  const { running, pendingRun, transcriptLoading } = useControllerRunningMeta(controller)
+  const { running, pendingRun, transcriptLoading, transcriptHasEarlier, transcriptLoadingEarlier } =
+    useControllerRunningMeta(controller)
   const contextUsage = useControllerContextUsage(controller)
   const [goalFromDisk, setGoalFromDisk] = useState<string | undefined>(undefined)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -424,6 +438,11 @@ export function AgentInstancePane({
           running={running}
           pendingRun={pendingRun}
           transcriptLoading={transcriptLoading}
+          transcriptHasEarlier={transcriptHasEarlier}
+          transcriptLoadingEarlier={transcriptLoadingEarlier}
+          onLoadEarlierMessages={() => {
+            void controller.loadEarlierMessages()
+          }}
           sideRailPad={sideRailPad}
           showThinking={showThinking}
           collapsedTurns={collapsedTurns}

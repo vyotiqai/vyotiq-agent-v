@@ -80,9 +80,11 @@ jobs:
           # v5 default package-manager-cache would try to resolve pnpm.
           package-manager-cache: false
 
-      - name: Extract release notes from CHANGELOG.md
+      - name: Write the stub release notes body
         if: startsWith(github.ref, 'refs/tags/')
-        run: node scripts/extract-release-notes.mjs --version "$(node -p "require('./package.json').version")" --out release-notes.md
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "Vyotiq v$VERSION installers and update metadata." > release-notes.md
 
       - name: Create the draft release in the public releases repo
         if: startsWith(github.ref, 'refs/tags/')
@@ -235,8 +237,9 @@ jobs:
           if-no-files-found: warn
 
   finalize-release:
-    # Post-publish verification: the release body must carry the changelog
-    # notes (the in-app update card parses it) and the three updater manifests
+    # Post-publish verification: the release body must be non-empty (the stub
+    # body is written if the create step left it empty; the in-app update card
+    # parses it) and the three updater manifests
     # must all be present (a missing latest*.yml silently kills auto-update
     # on that OS — happened on v1.1.0).
     name: Finalize release
@@ -268,8 +271,8 @@ jobs:
           BODY=$(gh release view "$TAG" --repo vyotiqai/vyotiq-agent-v-releases --json body --jq .body)
           STUB="Vyotiq v$VERSION installers and update metadata."
           if [ "$BODY" = "$STUB" ] || [ -z "$BODY" ]; then
-            echo "Release body is empty or the pre-automation stub; updating from CHANGELOG.md"
-            node scripts/extract-release-notes.mjs --version "$VERSION" --out release-notes.md
+            echo "Release body is empty or the pre-automation stub; writing stub body"
+            printf '%s' "$STUB" > release-notes.md
             gh release edit "$TAG" --repo vyotiqai/vyotiq-agent-v-releases --notes-file release-notes.md
           else
             echo "Release body already carries notes"

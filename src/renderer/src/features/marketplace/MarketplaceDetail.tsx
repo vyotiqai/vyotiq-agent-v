@@ -37,7 +37,7 @@ export function MarketplaceDetail({
   onBack: () => void
   onOpenManage: () => void
 }) {
-  const { installed, mcpStatusById, workspaceEnabledForId, formLocked, installFromCatalog, feedback, setFeedback, openConnectWizard } =
+  const { installed, mcpStatusById, workspaceEnabledForId, formLocked, busyTargetId, installFromCatalog, feedback, setFeedback, openConnectWizard } =
     controller
   const installedItem = useMemo(
     () => installed.items.find((i) => i.id === entry.id),
@@ -130,14 +130,14 @@ export function MarketplaceDetail({
             ) : (
               <Button
                 variant="primary"
-                pending={formLocked}
+                pending={busyTargetId === entry.id}
                 disabled={formLocked}
                 onClick={() => {
                   setFeedback(null)
                   void installFromCatalog(entry)
                 }}
               >
-                {formLocked ? 'Installing…' : 'Add to Agent V'}
+                {busyTargetId === entry.id ? 'Installing…' : 'Add to Agent V'}
               </Button>
             )}
           </div>

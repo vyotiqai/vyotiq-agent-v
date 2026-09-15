@@ -239,7 +239,15 @@ export function buildGeminiBody(req: ProviderChatRequest): Record<string, unknow
   const contents = toGeminiContents(req.messages)
   if (zones.volatile) {
     const vol = volatileSessionMessage(zones.volatile)
-    contents.push({ role: 'user', parts: [{ text: vol.content }] })
+    // Append into the trailing user entry when one exists: after tool execution
+    // history ends on a user turn, and two consecutive user contents entries are
+    // invalid for the Gemini API.
+    const last = contents[contents.length - 1]
+    if (last && last.role === 'user') {
+      last.parts = [...((last.parts as Array<Record<string, unknown>>) ?? []), { text: vol.content }]
+    } else {
+      contents.push({ role: 'user', parts: [{ text: vol.content }] })
+    }
   }
   return {
     contents,

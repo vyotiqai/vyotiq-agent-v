@@ -702,8 +702,10 @@ export type ChatStartRequest = z.infer<typeof ChatStartRequestSchema>
 export const ChatRewindAndStartRequestSchema = z.object({
   workspacePath: z.string().min(1),
   runId: RunIdSchema,
-  /** Index into messages.jsonl of the user message being replaced. */
+  /** Index into messages.jsonl of the user message being replaced. Ignored when targetUserAt resolves. */
   editMessageIndex: z.number().int().min(0),
+  /** ISO `at` of the user message being replaced; when present, resolved against disk instead of the index (capped hydration). */
+  targetUserAt: z.string().min(1).optional(),
   editedUserMessage: ChatMessageSchema.refine((m) => m.role === 'user', {
     message: 'editedUserMessage must be a user message'
   }),
@@ -717,8 +719,10 @@ export type ChatRewindAndStartRequest = z.infer<typeof ChatRewindAndStartRequest
 export const ChatRewindRequestSchema = z.object({
   workspacePath: z.string().min(1),
   runId: RunIdSchema,
-  /** Index into messages.jsonl of the user message to rewind to (inclusive). */
-  userMessageIndex: z.number().int().min(0)
+  /** Index into messages.jsonl of the user message to rewind to (inclusive). Ignored when targetUserAt resolves. */
+  userMessageIndex: z.number().int().min(0),
+  /** ISO `at` of the user message to rewind to; when present, resolved against disk instead of the index (capped hydration). */
+  targetUserAt: z.string().min(1).optional()
 })
 export type ChatRewindRequest = z.infer<typeof ChatRewindRequestSchema>
 
@@ -1468,9 +1472,26 @@ export const LoadRunResultSchema = z.object({
   pendingFollowUps: z.array(LoadRunPendingFollowUpSchema).default([]),
   status: z.enum(['running', 'cancelled', 'error', 'done']).optional(),
   resumable: z.literal(true).optional(),
-  error: z.string().optional()
+  error: z.string().optional(),
+  hasEarlier: z.boolean(),
+  earlierCursor: z.string().nullable()
 })
 export type LoadRunResult = z.infer<typeof LoadRunResultSchema>
+
+export const LoadEarlierMessagesRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  runId: RunIdSchema,
+  cursor: z.string().min(1),
+  limit: z.number().int().min(1).max(2000).optional()
+})
+export type LoadEarlierMessagesRequest = z.infer<typeof LoadEarlierMessagesRequestSchema>
+
+export const LoadEarlierMessagesResultSchema = z.object({
+  messages: z.array(ChatMessageSchema),
+  hasEarlier: z.boolean(),
+  earlierCursor: z.string().nullable()
+})
+export type LoadEarlierMessagesResult = z.infer<typeof LoadEarlierMessagesResultSchema>
 
 export const LoadToolResultRequestSchema = z.object({
   workspacePath: z.string().min(1),

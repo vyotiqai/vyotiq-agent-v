@@ -59,6 +59,9 @@ export function SessionChatColumn({
   secrets,
   activeRunId,
   transcriptLoading,
+  transcriptHasEarlier,
+  transcriptLoadingEarlier,
+  onLoadEarlierMessages,
   headingRef,
   onProviderModel,
   favoriteModels = [],
@@ -142,6 +145,9 @@ export function SessionChatColumn({
   secrets: Record<SecretProvider, boolean>
   activeRunId: string | null
   transcriptLoading?: boolean
+  transcriptHasEarlier?: boolean
+  transcriptLoadingEarlier?: boolean
+  onLoadEarlierMessages?: () => void | Promise<void>
   headingRef?: Ref<HTMLHeadingElement>
   onProviderModel: (provider: ProviderId, model: string) => void
   favoriteModels?: string[]
@@ -421,6 +427,9 @@ export function SessionChatColumn({
                   turnFailureLabel={turnFailureLabel}
                   turnStatus={turnStatus}
                   transcriptLoading={transcriptLoading}
+                  transcriptHasEarlier={transcriptHasEarlier}
+                  transcriptLoadingEarlier={transcriptLoadingEarlier}
+                  onLoadEarlierMessages={onLoadEarlierMessages}
                   restoreScrollTop={restoreScrollTop}
                   scrollRestoreToken={scrollRestoreToken}
                   onScrollTopChange={onScrollTopChange}

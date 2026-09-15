@@ -1144,6 +1144,12 @@ export type ChatStreamState = {
   runTerminalTick: number
   pendingRun: boolean
   transcriptLoading: boolean
+  /** Transcript is windowed: earlier messages exist on disk but are not loaded yet. */
+  transcriptHasEarlier: boolean
+  /** Opaque cursor for runs:load-earlier — byte-offset window of the first loaded message. */
+  transcriptEarlierCursor: string | null
+  /** A runs:load-earlier fetch is in flight. */
+  transcriptLoadingEarlier: boolean
   /** Turn summary disclosure — survives transcript remounts like tool/group expand state. */
   collapsedTurnIndices: number[]
   /** Latest turn write checkpoint for Undo on the Files Changed card. */
@@ -1188,9 +1194,19 @@ export type ChatStreamController = ChatStreamState & {
   /** Resume an interrupted run from disk without adding a user turn. */
   resumeInterrupted: () => Promise<boolean>
   reset: () => void
-  loadTranscript: (loaded: ChatMessage[], events?: PersistedEvent[]) => void
+  loadTranscript: (
+    loaded: ChatMessage[],
+    events?: PersistedEvent[],
+    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null }
+  ) => void
   /** Load messages without canceling an active/background run (restore / tab select). */
-  hydrateTranscript: (loaded: ChatMessage[], events?: PersistedEvent[]) => void
+  hydrateTranscript: (
+    loaded: ChatMessage[],
+    events?: PersistedEvent[],
+    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null }
+  ) => void
+  /** Fetch the next earlier transcript window (runs:load-earlier) and merge it into the UI. */
+  loadEarlierMessages: () => Promise<boolean>
   reattachActiveRun: (runId: string) => Promise<void>
   clearError: () => void
   /** Lazy-load full tool output from disk when IPC preview was truncated. */
@@ -1819,6 +1835,9 @@ export function createChatStreamController(
     runTerminalTick: 0,
     pendingRun: false,
     transcriptLoading: false,
+    transcriptHasEarlier: false,
+    transcriptEarlierCursor: null,
+    transcriptLoadingEarlier: false,
     collapsedTurnIndices: [...(initialExpansions?.collapsedTurns ?? [])],
     writeCheckpoint: null,
     pendingFollowUps: [],
@@ -2064,6 +2083,8 @@ export function createChatStreamController(
       pendingRun: false,
       running: stillActive,
       runStartedAt: stillActive ? state.runStartedAt ?? Date.now() : null,
+      transcriptHasEarlier: res.data.hasEarlier,
+      transcriptEarlierCursor: res.data.earlierCursor,
       ...(eventsLoadError ? { error: eventsLoadError } : {})
     })
     if (!stillActive) onTerminal?.()
@@ -2129,7 +2150,11 @@ export function createChatStreamController(
       })
       return
     }
-    patch({ messages: messagesForNextTurn(res.data.messages) })
+    patch({
+      messages: messagesForNextTurn(res.data.messages),
+      transcriptHasEarlier: res.data.hasEarlier,
+      transcriptEarlierCursor: res.data.earlierCursor
+    })
   }
 
   const handleEvent = (event: AgentEvent): void => {
@@ -3260,6 +3285,7 @@ export function createChatStreamController(
       workspacePath,
       runId: id,
       editMessageIndex,
+      targetUserAt: state.messages[editMessageIndex]?.at ?? undefined,
       editedUserMessage: user,
       mode,
       provider: turnProviderModel?.provider,
@@ -3346,7 +3372,8 @@ export function createChatStreamController(
       const res = await window.vyotiq.chatRewindPreview({
         workspacePath,
         runId: id,
-        userMessageIndex
+        userMessageIndex,
+        targetUserAt: state.messages[userMessageIndex]?.at ?? undefined
       })
       return res.ok ? res.data : null
     } catch {
@@ -3422,7 +3449,8 @@ export function createChatStreamController(
     const res = await window.vyotiq.chatRewind({
       workspacePath,
       runId: id,
-      userMessageIndex
+      userMessageIndex,
+      targetUserAt: state.messages[userMessageIndex]?.at ?? undefined
     })
 
     if (!res.ok) {
@@ -3694,7 +3722,9 @@ export function createChatStreamController(
       pendingRun: false,
       running: false,
       runStartedAt: null,
-      runTerminalTick: state.runTerminalTick + 1
+      runTerminalTick: state.runTerminalTick + 1,
+      transcriptHasEarlier: res.data.hasEarlier,
+      transcriptEarlierCursor: res.data.earlierCursor
     })
     onTerminal?.()
     return true
@@ -3824,7 +3854,11 @@ export function createChatStreamController(
     awaitingRun = false
   }
 
-  const applyTranscriptUi = (loaded: ChatMessage[], events?: PersistedEvent[]): void => {
+  const applyTranscriptUi = (
+    loaded: ChatMessage[],
+    events?: PersistedEvent[],
+    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null }
+  ): void => {
     const kept = messagesForNextTurn(loaded)
     const rows = events ?? []
     assistantId = null
@@ -3843,12 +3877,18 @@ export function createChatStreamController(
     patch({
       // Transcript load / sidebar switch — run is not live on this controller.
       ...hydrated,
-      items: applyPersistedExpansions(hydrated.items)
+      items: applyPersistedExpansions(hydrated.items),
+      transcriptHasEarlier: transcriptWindow?.hasEarlier ?? false,
+      transcriptEarlierCursor: transcriptWindow?.earlierCursor ?? null
     })
   }
 
   /** Replace session UI and cancel any in-flight run on this controller. */
-  const loadTranscript = (loaded: ChatMessage[], events?: PersistedEvent[]): void => {
+  const loadTranscript = (
+    loaded: ChatMessage[],
+    events?: PersistedEvent[],
+    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null }
+  ): void => {
     const id = runId
     if (id) {
       closeRun(id)
@@ -3872,15 +3912,90 @@ export function createChatStreamController(
       runStartedAt: null,
       collapsedTurnIndices: []
     })
-    applyTranscriptUi(loaded, events)
+    applyTranscriptUi(loaded, events, transcriptWindow)
   }
 
   /** Hydrate UI from disk without canceling — used for restore and tab select. */
-  const hydrateTranscript = (loaded: ChatMessage[], events?: PersistedEvent[]): void => {
+  const hydrateTranscript = (
+    loaded: ChatMessage[],
+    events?: PersistedEvent[],
+    transcriptWindow?: { hasEarlier?: boolean; earlierCursor?: string | null }
+  ): void => {
     if (disposed) return
     // Never clobber an in-flight live stream with a lagging disk snapshot.
     if (state.running || state.pendingRun || awaitingRun) return
-    applyTranscriptUi(loaded, events)
+    applyTranscriptUi(loaded, events, transcriptWindow)
+  }
+
+  /**
+   * Fetch the next earlier transcript window (runs:load-earlier) and merge it
+   * into the UI. Bounded by main's window size (400), so a 190 MB transcript
+   * never re-freezes the renderer. A stale cursor (rewind rewrote the file)
+   * re-anchors to the new window bounds instead of corrupting the view.
+   */
+  const loadEarlierMessages = async (): Promise<boolean> => {
+    const id = runId ?? contentRunId
+    if (disposed || !id || !workspacePath) return false
+    if (closedRuns.has(id)) return false
+    // Never race a live stream, a pending send, or another load-earlier fetch.
+    if (state.running || state.pendingRun || awaitingRun) return false
+    if (!state.transcriptHasEarlier || !state.transcriptEarlierCursor) return false
+    if (state.transcriptLoadingEarlier) return false
+    if (!window.vyotiq?.loadEarlierMessages) return false
+    patch({ transcriptLoadingEarlier: true })
+    try {
+      const res = await window.vyotiq.loadEarlierMessages(
+        workspacePath,
+        id,
+        state.transcriptEarlierCursor
+      )
+      if (disposed || closedRuns.has(id)) return false
+      if (!res.ok) {
+        logger.warn('loadEarlierMessages failed', {
+          scope: 'chat',
+          correlationId: id,
+          err: toLogErr(res.error)
+        })
+        return false
+      }
+      const data = res.data
+      if (data.messages.length === 0) {
+        // Stale cursor (transcript rewritten) — re-anchor to current bounds.
+        patch({
+          transcriptHasEarlier: data.hasEarlier,
+          transcriptEarlierCursor: data.earlierCursor
+        })
+        return false
+      }
+      const fingerprint = (m: ChatMessage): string =>
+        `${m.role}|${m.at ?? ''}|${
+          typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        }`
+      const known = new Set(state.messages.map(fingerprint))
+      // A stale-cursor clamp can overlap the loaded tail — drop duplicates.
+      const fresh = data.messages.filter((m) => !known.has(fingerprint(m)))
+      if (fresh.length === 0) {
+        patch({
+          transcriptHasEarlier: data.hasEarlier,
+          transcriptEarlierCursor: data.earlierCursor
+        })
+        return false
+      }
+      const merged = [...fresh, ...state.messages]
+      let events: PersistedEvent[] = []
+      if (window.vyotiq?.loadRunEvents) {
+        const eventsRes = await window.vyotiq.loadRunEvents(workspacePath, id)
+        if (eventsRes.ok) events = eventsRes.data
+      }
+      if (disposed || closedRuns.has(id)) return false
+      applyTranscriptUi(merged, events, {
+        hasEarlier: data.hasEarlier,
+        earlierCursor: data.earlierCursor
+      })
+      return true
+    } finally {
+      if (!disposed) patch({ transcriptLoadingEarlier: false })
+    }
   }
 
   const reattachActiveRun = async (id: string): Promise<void> => {
@@ -4008,7 +4123,9 @@ export function createChatStreamController(
       pendingRun: false,
       runStartedAt: state.runStartedAt ?? Date.now(),
       error: eventsLoadError,
-      pendingFollowUps: refreshedPending
+      pendingFollowUps: refreshedPending,
+      transcriptHasEarlier: res.data.hasEarlier,
+      transcriptEarlierCursor: res.data.earlierCursor
     })
   }
 
@@ -4522,6 +4639,15 @@ export function createChatStreamController(
     get transcriptLoading() {
       return state.transcriptLoading
     },
+    get transcriptHasEarlier() {
+      return state.transcriptHasEarlier
+    },
+    get transcriptEarlierCursor() {
+      return state.transcriptEarlierCursor
+    },
+    get transcriptLoadingEarlier() {
+      return state.transcriptLoadingEarlier
+    },
     get collapsedTurnIndices() {
       return state.collapsedTurnIndices
     },
@@ -4557,6 +4683,7 @@ export function createChatStreamController(
     reset,
     loadTranscript,
     hydrateTranscript,
+    loadEarlierMessages,
     reattachActiveRun,
     clearError,
     loadToolContent,

@@ -8,7 +8,7 @@ import {
   type Dirent,
   type Stats
 } from 'fs'
-import { chmod, lstat, readdir, readlink, rmdir, unlink, writeFile } from 'fs/promises'
+import { chmod, lstat, readdir, readlink, rmdir, symlink, unlink, writeFile } from 'fs/promises'
 import { basename, join, resolve, sep } from 'path'
 import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
@@ -771,6 +771,100 @@ async function applySparseConeCheckout(
   await git(['checkout', branch], worktreePath, WRITE_TIMEOUT_MS)
 }
 
+/**
+ * Best-effort junction of the parent's node_modules into the worktree so
+ * child test/build runs work without paying a full install (worktrees never
+ * materialize ignored dirs). Removal unlinks the junction without recursing
+ * into the parent's node_modules (shouldUnlinkWithoutRecurse).
+ */
+async function linkNodeModulesBestEffort(
+  workspacePath: string,
+  worktreePath: string
+): Promise<void> {
+  try {
+    const source = join(workspacePath, NODE_MODULES_DIR)
+    const target = join(worktreePath, NODE_MODULES_DIR)
+    if (!existsSync(source) || existsSync(target)) return
+    await symlink(source, target, process.platform === 'win32' ? 'junction' : 'dir')
+  } catch (err) {
+    logger.warn('instance worktree node_modules link failed', {
+      scope: 'git',
+      worktreePath,
+      err
+    })
+  }
+}
+
+/**
+ * Forward the parent's uncommitted tracked changes into the fresh worktree so
+ * the child edits the real baseline, not HEAD. Diffs are limited to files
+ * present in the worktree checkout (sparse cones skip the rest by design).
+ * Warn-only on failure — forwarding must never block a spawn.
+ */
+async function forwardParentDirtyDiffToWorktree(
+  workspacePath: string,
+  worktreePath: string
+): Promise<void> {
+  try {
+    const names = await git(['diff', '--name-only', '-z', 'HEAD'], workspacePath, READ_TIMEOUT_MS)
+    const changed = names
+      .split('\0')
+      .map((f) => f.trim())
+      .filter(Boolean)
+    if (changed.length === 0) return
+    const present = changed.filter((f) => existsSync(join(worktreePath, f)))
+    if (present.length === 0) return
+    if (present.length < changed.length) {
+      logger.info('instance worktree baseline forwarding limited to its checkout cone', {
+        scope: 'git',
+        worktreePath,
+        forwarded: present.length,
+        skipped: changed.length - present.length
+      })
+    }
+    const patch = await execFile(
+      'git',
+      ['diff', '--binary', 'HEAD', '--', ...present],
+      {
+        cwd: workspacePath,
+        encoding: 'buffer',
+        timeout: WRITE_TIMEOUT_MS,
+        maxBuffer: MAX_BUFFER,
+        windowsHide: true,
+        env: GIT_ENV
+      }
+    )
+    const bytes = patch.stdout as Buffer
+    if (!bytes || bytes.length === 0) return
+    const tmp = join(tmpdir(), `vyotiq-instance-baseline-${process.pid}-${randomUUID()}.patch`)
+    await writeFile(tmp, bytes)
+    try {
+      await git(['apply', '--binary', '--whitespace=nowarn', tmp], worktreePath, WRITE_TIMEOUT_MS)
+    } finally {
+      try {
+        await unlink(tmp)
+      } catch {
+        /* best-effort temp cleanup */
+      }
+    }
+  } catch (err) {
+    logger.warn('instance worktree baseline forwarding failed; child starts from HEAD', {
+      scope: 'git',
+      worktreePath,
+      err
+    })
+  }
+}
+
+/** Junction deps + forward the parent's dirty baseline into a fresh worktree. */
+async function provisionInstanceWorktreeBasics(
+  workspacePath: string,
+  worktreePath: string
+): Promise<void> {
+  await linkNodeModulesBestEffort(workspacePath, worktreePath)
+  await forwardParentDirtyDiffToWorktree(workspacePath, worktreePath)
+}
+
 async function addInstanceWorktreeUnlocked(
   workspacePath: string,
   runId: string,
@@ -816,6 +910,7 @@ async function addInstanceWorktreeUnlocked(
         )
         await applySparseConeCheckout(worktreePath, branch, cones)
         markPendingInstanceWorktree(workspacePath, runId)
+        await provisionInstanceWorktreeBasics(workspacePath, worktreePath)
         return { ok: true, worktreePath, branch }
       } catch (sparseErr) {
         logger.warn('sparse instance worktree failed; using full checkout', {
@@ -852,6 +947,7 @@ async function addInstanceWorktreeUnlocked(
       WRITE_TIMEOUT_MS
     )
     markPendingInstanceWorktree(workspacePath, runId)
+    await provisionInstanceWorktreeBasics(workspacePath, worktreePath)
     return { ok: true, worktreePath, branch }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -880,6 +976,7 @@ async function addInstanceWorktreeUnlocked(
       }
       await git(['worktree', 'add', worktreePath, branch], workspacePath, WRITE_TIMEOUT_MS)
       markPendingInstanceWorktree(workspacePath, runId)
+      await provisionInstanceWorktreeBasics(workspacePath, worktreePath)
       return { ok: true, worktreePath, branch }
     } catch (retryErr) {
       const retryMessage = retryErr instanceof Error ? retryErr.message : String(retryErr)
@@ -1277,7 +1374,9 @@ export async function gitShowToFile(
 
 /**
  * Sequential merge-back: merge one instance branch into the parent HEAD.
- * Refuses when the parent worktree is dirty so merges stay one-at-a-time and reviewable.
+ * Refuses only when parent dirty/untracked files overlap the branch's changed
+ * files — git itself cannot merge over locally modified paths — so disjoint
+ * dirty state stays mergeable.
  */
 export async function mergeInstanceBranch(
   workspacePath: string,
@@ -1314,30 +1413,66 @@ async function mergeInstanceBranchUnlocked(
     return { ok: false, error: 'Repository has no HEAD commit; cannot merge instance branch' }
   }
 
+  let parentDirty: Set<string>
   try {
     const status = await git(
-      ['status', '--porcelain=v1', '-uall'],
+      ['status', '--porcelain=v1', '-z', '-uall'],
       workspacePath,
       READ_TIMEOUT_MS
     )
-    const blocked: string[] = []
-    for (const line of status.split(/\r?\n/)) {
-      if (line.length < 4) continue
-      const xy = line.slice(0, 2)
-      if (xy === '??' || xy.trim() === '') continue // untracked: merge cannot overwrite it (git aborts if it would)
-      blocked.push(line.trim())
-    }
-    if (blocked.length > 0) {
-      const shown =
-        blocked.slice(0, 5).join(', ') + (blocked.length > 5 ? `, +${blocked.length - 5} more` : '')
-      return {
-        ok: false,
-        error: `Parent worktree has uncommitted tracked changes (${shown}). Commit or stash them, then merge one instance branch at a time.`
-      }
-    }
+    parentDirty = new Set(
+      status
+        .split('\0')
+        .map((entry) => {
+          // `XY path` entries only — the -z format appends a bare original
+          // path for staged renames, which must not enter the dirty set.
+          const match = /^([MADRCU? ]{2}) (.+)$/.exec(entry)
+          return match?.[2]?.trim() ?? ''
+        })
+        .filter(Boolean)
+    )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return { ok: false, error: `Failed to read parent git status: ${message}` }
+  }
+
+  let childChanged: Set<string>
+  try {
+    const mergeBase = (
+      await git(['merge-base', 'HEAD', trimmed], workspacePath, READ_TIMEOUT_MS)
+    ).trim()
+    const diffOut = await git(
+      ['diff', '--name-status', '--no-renames', '-z', mergeBase, trimmed],
+      workspacePath,
+      READ_TIMEOUT_MS
+    )
+    childChanged = new Set<string>()
+    const parts = diffOut.split('\0')
+    // `--name-status -z` records are `STATUS\0PATH\0`; with --no-renames
+    // every path sits at an odd index.
+    for (let i = 1; i < parts.length; i += 2) {
+      const path = parts[i]?.trim()
+      if (path) childChanged.add(path)
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: `Failed to compute the branch's changed files: ${message}` }
+  }
+
+  // Overlap-based gate: a dirty parent no longer blocks the merge outright —
+  // git itself only refuses when the merge would overwrite locally changed
+  // files. Refuse up front exactly when parent dirty/untracked files intersect
+  // the branch's changed files, so merges never fail mid-way and disjoint
+  // dirty state stays mergeable.
+  const overlapping = [...childChanged].filter((path) => parentDirty.has(path))
+  if (overlapping.length > 0) {
+    const shown =
+      overlapping.slice(0, 5).join(', ') +
+      (overlapping.length > 5 ? `, +${overlapping.length - 5} more` : '')
+    return {
+      ok: false,
+      error: `Parent has uncommitted or untracked changes to files this branch also changed (${shown}). Commit those files in the parent first, then merge one instance branch at a time.`
+    }
   }
 
   try {

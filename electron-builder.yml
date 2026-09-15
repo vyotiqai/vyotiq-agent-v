@@ -182,12 +182,9 @@ linux:
     - deb
     - rpm
   # deb/rpm require RFC822 maintainer syntax "Name <email>"; package.json
-  # author ("Vyotiq") has no email, and the previous bare-domain value would
-  # make fpm fail. TODO(release-engineering): replace the PLACEHOLDER local
-  # part with the support mailbox from README.md — the address is redacted
-  # in this tool environment and could not be verified here. fpm accepts
-  # any string, so the placeholder still produces a buildable .deb.
-  maintainer: "Vyotiq <MAINTAINER_EMAIL_PLACEHOLDER>"
+  # author ("Vyotiq") has no email, and a bare-domain value would make fpm
+  # fail. fpm accepts any string, so this still produces a buildable .deb.
+  maintainer: "Vyotiq <support@vyotiq.com>"
   category: Development
   # Same master PNG the other platforms use; stated explicitly because the
   # deb target renders the 512x512 hicolor slot from it.

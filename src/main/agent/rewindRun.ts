@@ -175,21 +175,37 @@ export async function collectRewindRunScopes(input: {
   return scopes
 }
 
+/**
+ * Resolve the disk index of a user message. Under capped hydration the renderer
+ * cannot know global transcript indexes; it sends the target user message's ISO
+ * `at`, resolved here against the full transcript the rewind loads anyway.
+ */
+function resolveUserMessageIndex(
+  messages: ChatMessage[],
+  requestedIndex: number,
+  targetUserAt?: string
+): number {
+  if (!targetUserAt) return requestedIndex
+  return messages.findIndex((m) => m.role === 'user' && m.at === targetUserAt)
+}
+
 /** Read-only preview of which files chatRewind to userMessageIndex would restore. */
 export async function planRewindToUserMessage(input: {
   workspacePath: string
   runId: string
   userMessageIndex: number
+  targetUserAt?: string
 }): Promise<RewindWritesPlan> {
   const messages = await loadMessagesAsync(input.workspacePath, input.runId)
+  const userMessageIndex = resolveUserMessageIndex(messages, input.userMessageIndex, input.targetUserAt)
   const scopes = await collectRewindRunScopes({
     workspacePath: input.workspacePath,
     runId: input.runId,
     messages,
-    fromUserMessageIndex: input.userMessageIndex,
+    fromUserMessageIndex: userMessageIndex,
     quiesce: false
   })
-  return planRewindWritesAcrossRuns(scopes, input.userMessageIndex)
+  return planRewindWritesAcrossRuns(scopes, userMessageIndex)
 }
 
 /**
@@ -200,9 +216,10 @@ export async function prepareRewindAndReplaceUserMessage(input: {
   workspacePath: string
   runId: string
   editMessageIndex: number
+  targetUserAt?: string
   editedUserMessage: ChatMessage
 }): Promise<PrepareRewindResult> {
-  const { workspacePath, runId, editMessageIndex, editedUserMessage } = input
+  const { workspacePath, runId, editedUserMessage } = input
   const runDir = resolveRunDir(workspacePath, runId)
   if (!existsSync(runDir)) {
     throw new Error('Run not found')
@@ -215,6 +232,7 @@ export async function prepareRewindAndReplaceUserMessage(input: {
   clearFollowUpsOnDisk(runDir)
 
   const diskMessages = await loadMessagesAsync(workspacePath, runId)
+  const editMessageIndex = resolveUserMessageIndex(diskMessages, input.editMessageIndex, input.targetUserAt)
   if (editMessageIndex < 0 || editMessageIndex >= diskMessages.length) {
     throw new Error('editMessageIndex out of range')
   }
@@ -296,7 +314,7 @@ async function applyRewindPersistence(input: {
   await flushEventAppends(runDir)
   await flushStatusWrites(runDir)
   const events = await loadEventsAsync(runDir, runId)
-  const receipt = writeRunReceiptBestEffort({
+  const receipt = await writeRunReceiptBestEffort({
     runDir,
     runId,
     loadStatus,
@@ -320,8 +338,9 @@ export async function prepareRewindToUserMessage(input: {
   workspacePath: string
   runId: string
   userMessageIndex: number
+  targetUserAt?: string
 }): Promise<PrepareRewindResult> {
-  const { workspacePath, runId, userMessageIndex } = input
+  const { workspacePath, runId } = input
   const runDir = resolveRunDir(workspacePath, runId)
   if (!existsSync(runDir)) {
     throw new Error('Run not found')
@@ -332,6 +351,7 @@ export async function prepareRewindToUserMessage(input: {
   clearFollowUpsOnDisk(runDir)
 
   const diskMessages = await loadMessagesAsync(workspacePath, runId)
+  const userMessageIndex = resolveUserMessageIndex(diskMessages, input.userMessageIndex, input.targetUserAt)
   if (userMessageIndex < 0 || userMessageIndex >= diskMessages.length) {
     throw new Error('userMessageIndex out of range')
   }

@@ -215,6 +215,7 @@
       ],
       "category": "skills",
       "featuredRank": 12,
+      "iconPath": "icons/debug.svg",
       "installable": true
     },
     {
@@ -231,6 +232,7 @@
       ],
       "category": "skills",
       "featuredRank": 13,
+      "iconPath": "icons/code-review.svg",
       "installable": true
     },
     {
@@ -247,6 +249,7 @@
       ],
       "category": "skills",
       "featuredRank": 14,
+      "iconPath": "icons/test-writing.svg",
       "installable": true
     },
     {
@@ -263,6 +266,7 @@
       ],
       "category": "skills",
       "featuredRank": 15,
+      "iconPath": "icons/docs.svg",
       "installable": true
     },
     {
@@ -299,6 +303,7 @@
       "source": "bundled",
       "publisher": "Agent V",
       "category": "skills",
+      "iconPath": "icons/frontend-design.svg",
       "installable": true
     },
     {
@@ -311,6 +316,7 @@
       "source": "bundled",
       "publisher": "Agent V",
       "category": "skills",
+      "iconPath": "icons/accessibility.svg",
       "installable": true
     },
     {
@@ -323,6 +329,7 @@
       "source": "bundled",
       "publisher": "Agent V",
       "category": "skills",
+      "iconPath": "icons/api-design.svg",
       "installable": true
     },
     {
@@ -356,6 +363,7 @@
       ],
       "category": "plugins",
       "featuredRank": 16,
+      "iconPath": "icons/devtools.svg",
       "installable": true
     },
     {
@@ -373,6 +381,7 @@
       ],
       "category": "plugins",
       "featuredRank": 17,
+      "iconPath": "icons/electron-app.svg",
       "installable": true
     },
     {
@@ -390,6 +399,7 @@
       ],
       "category": "plugins",
       "featuredRank": 18,
+      "iconPath": "icons/quality.svg",
       "installable": true
     },
     {
@@ -407,6 +417,7 @@
       ],
       "category": "plugins",
       "featuredRank": 19,
+      "iconPath": "icons/shipping.svg",
       "installable": true
     }
   ]

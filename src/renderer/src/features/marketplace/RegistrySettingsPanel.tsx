@@ -73,12 +73,23 @@ export function RegistrySettingsPanel({
                   return
                 }
                 setFeedback(null)
-                void onUpdate({
-                  marketplace: {
-                    registryUrl: trimmed,
-                    remoteInstallAcked: remoteAcked
+                void (async () => {
+                  const res = await onUpdate({
+                    marketplace: {
+                      registryUrl: trimmed,
+                      remoteInstallAcked: remoteAcked
+                    }
+                  })
+                  if (!res.ok) {
+                    setFeedback({ kind: 'error', text: res.error })
+                    return
                   }
-                })
+                  // Registry changed: refetch its catalog so Browse does not keep
+                  // serving the previous registry's cached entries.
+                  const refreshed = await window.vyotiq.marketplaceRefreshCatalog()
+                  if (!refreshed.ok) return
+                  window.dispatchEvent(new CustomEvent('vyotiq:marketplace-catalog-refreshed'))
+                })()
               }}
             />
             <Button

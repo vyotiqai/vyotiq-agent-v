@@ -216,6 +216,8 @@ const api: VyotiqApi = {
     return ipcRenderer.invoke(IPC.listOlderRuns, limit && limit > 0 ? { workspacePath: path, olderThan: cursor, limit } : { workspacePath: path, olderThan: cursor })
   },
   loadRun: (workspacePath, runId) => ipcRenderer.invoke(IPC.loadRun, { workspacePath, runId }),
+  loadEarlierMessages: (workspacePath, runId, cursor, limit) =>
+    ipcRenderer.invoke(IPC.loadEarlierMessages, { workspacePath, runId, cursor, limit }),
   loadRunEvents: (workspacePath, runId) =>
     ipcRenderer.invoke(IPC.loadRunEvents, { workspacePath, runId }),
   loadToolResult: (workspacePath, runId, toolCallId) =>

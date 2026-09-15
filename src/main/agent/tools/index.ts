@@ -1842,11 +1842,12 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       pathScope: Array.isArray(args.path_scope)
         ? args.path_scope.filter((p): p is string => typeof p === 'string')
         : undefined,
+      isolation: args.isolation === 'shared' ? 'shared' : undefined,
       emitParentEvent: context.emitAgentEvent
     })
     if (!result.ok) return toolFail('spawn_agent_instance', 'spawn', result.error)
     const branchLine = result.worktreeBranch
-      ? `\nworktree_branch: ${result.worktreeBranch}\nWhen done, merge one branch at a time with merge_agent_instance (parent must be clean).`
+      ? `\nworktree_branch: ${result.worktreeBranch}\nWhen done, merge one branch at a time with merge_agent_instance (refused only if your uncommitted or untracked changes overlap the branch's changed files).`
       : ''
     return toolOk(
       'spawn_agent_instance',

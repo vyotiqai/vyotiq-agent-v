@@ -46,7 +46,6 @@
     "sync:brand": "node scripts/generate-precision-mono-brand.mjs",
     "sync:app-icon": "node scripts/sync-app-icon.mjs",
     "sync:file-icons": "node scripts/sync-file-icons.mjs",
-    "notes:extract": "node scripts/extract-release-notes.mjs",
     "postinstall": "node node_modules/electron/install.js && (electron-builder install-app-deps || node -e \"console.warn('[vyotiq] native module rebuild failed — node-pty will use pipe fallback if unavailable')\") && node scripts/sync-file-icons.mjs && node scripts/sync-harness.mjs && node scripts/sync-docx-md.mjs && node scripts/generate-precision-mono-brand.mjs"
   },
   "dependencies": {

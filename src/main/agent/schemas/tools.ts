@@ -878,6 +878,12 @@ const spawnAgentInstanceArgs = z.object({
     .describe(
       'Workspace-relative write path prefixes inside this workspace (no absolute paths, no `..`); absolute or out-of-workspace entries are rejected. Entries must be disjoint (a path may match only one instance); overlapping prefixes make concurrent worktrees unsafe. Required when git worktree isolation is unavailable — omit path_scope entirely when it is.'
     )
+    .optional(),
+  isolation: z
+    .enum(['worktree', 'shared'])
+    .describe(
+      "Isolation mode: 'worktree' (default) gives the child its own git worktree branch; 'shared' runs the child directly in this workspace — cheaper, but requires path_scope and disjoint scopes across concurrent children."
+    )
     .optional()
 })
 
@@ -1245,7 +1251,7 @@ export const TOOL_REGISTRY = {
   },
   spawn_agent_instance: {
     description:
-      'Spawn an Agent V child instance for one small, independent workstream — always plan first with create_plan and decompose the request into structured small-scope briefs, fanning them out across instances instead of concentrating work in the parent; no request is too small: every actionable request, without exception, is planned and fanned out — every plan step maps to one instance, you decide how many — and a run must never finish actionable work having spawned zero instances (the parent only makes the individual tool calls needed to plan, brief, and verify; root runs only; depth 1). Each spawn carries a structured brief — outcome, sub_tasks, done_when — composed verbatim into the child prompt plus goal context and path_scope prefixes; the child never sees this conversation. Keep one workstream per brief so no child is overloaded. The child gets its own git worktree branch when isolation is available; pass path_scope prefixes when it is not. Returns run_id. Batch multiple spawns in one step, then await those run_ids together in one step; if a spawn is denied by the concurrent-run cap, await the already-running children instead of retrying.',
+      'Spawn an Agent V child instance for one small, independent workstream — plan first with create_plan, decompose the request into structured small-scope briefs, and fan out when two or more independent workstreams are worth running in parallel; the parent handles small work directly, and spawns are never denied (root runs only; depth 1). Each spawn carries a structured brief — outcome, sub_tasks, done_when — composed verbatim into the child prompt plus goal context and path_scope prefixes; the child never sees this conversation. Keep one workstream per brief so no child is overloaded. The child gets its own git worktree branch when isolation is available: the worktree starts from HEAD plus your uncommitted tracked changes inside its checkout, and shares the parent node_modules. isolation: "shared" runs the child directly in this workspace (requires path_scope). Returns run_id. Batch multiple spawns in one step, then await those run_ids together in one step.',
     schema: spawnAgentInstanceArgs
   },
   await_agent_instance: {
@@ -1259,7 +1265,7 @@ export const TOOL_REGISTRY = {
   },
   merge_agent_instance: {
     description:
-      'Merge a successfully finished (done) instance worktree branch into parent HEAD. Parent tree must be clean; one branch at a time.',
+      'Merge a successfully finished (done) instance worktree branch into parent HEAD. One branch at a time; refused only when the parent has uncommitted or untracked changes to files the branch also changed.',
     schema: mergeAgentInstanceArgs
   },
   cancel_agent_instance: {

@@ -41,10 +41,10 @@ in-app updater chain never breaks.**
 - [ ] **`@xmldom/xmldom` stays pinned to exactly `0.8.15`** in
       `pnpm-workspace.yaml` overrides; `>=0.8.15` resolves 0.9.x which breaks
       `plist@3.1.0` mac packaging.
-- [ ] **Every release ships from `CHANGELOG.md`.** The release body, the
-      in-app update card, and the website changelog all parse it
-      (`## Heading` + `- bullet` after extraction). A release without a
-      changelog entry must fail — never weaken that gate.
+- [ ] **Release notes are the tag-only flow — no changelog gate.** The
+      release body is set by `release.yml` (a stub body is acceptable); a
+      release does not require a `CHANGELOG.md` entry. Do not re-add a
+      changelog requirement to the release pipeline.
 - [ ] **Installers live on the releases-only repo**
       (`vyotiqai/vyotiq-agent-v-releases`); the updater and website point
       there. The source repo (`vyotiqai/vyotiq-agent-v`) only receives a
@@ -57,7 +57,7 @@ in-app updater chain never breaks.**
 - [ ] `pnpm typecheck` — exit 0.
 - [ ] `pnpm lint` — exit 0.
 - [ ] `pnpm test` — green. Known-allowed failures are listed in
-      `RELEASE-RUNBOOK.md` §3; confirm the failure set has not grown, and
+      `RELEASE-RUNBOOK.md` §7; confirm the failure set has not grown, and
       never introduce a new one.
 - [ ] If you touched a feature area, run its targeted suites first for a fast
       loop (e.g. `pnpm exec vitest run tests/renderer/updates
@@ -147,9 +147,9 @@ dependency's file layout:
       on every push to main and every PR — keep it green; a red main blocks
       the release pipeline's `verify` trust model.
 - [ ] `release.yml` job order is load-bearing:
-      `verify → create-release (notes!) → package ×3 → finalize-release`.
-      Finalize enforces: release body not a stub, all three `latest*.yml`
-      manifests + all installers present,
+      `verify → create-release (tag-only notes) → package ×3 → finalize-release`.
+      Finalize enforces: all three `latest*.yml`
+      manifests + all installers present, a non-empty release body, and the
       pointer release mirrored to the source repo. Never remove these gates.
 - [ ] Workflow path filters matter: tag pushes trigger Release.
 
@@ -157,15 +157,12 @@ dependency's file layout:
 
 ## 5. Release procedure (follow in order)
 
-1. [ ] Add the release entry to `CHANGELOG.md`:
-       `## [X.Y.Z] - YYYY-MM-DD` with `### Added/Changed/Fixed` subsections
-       and `- ` bullets. These become the update card's "About this update".
-       Preview with
-       `node scripts/extract-release-notes.mjs --version X.Y.Z`
-       (exit 1 + clear error = fix the entry; the pipeline fails on empty).
+1. [ ] Release notes: none are required. The release body is set by
+       `release.yml` (a stub body is acceptable). No changelog entry is
+       part of the release procedure.
 2. [ ] Bump `"version"` in `package.json` (on a dirty tree, edit manually —
        `pnpm version` refuses a dirty tree; do **not** bulk-revert).
-3. [ ] `git add package.json CHANGELOG.md && git commit -m "chore: bump version to X.Y.Z"`.
+3. [ ] `git add package.json && git commit -m "chore: bump version to X.Y.Z"`.
 4. [ ] **Run the pre-tag gate** (§1 suite + §2 launch test if packaging or
        runtime deps changed).
 5. [ ] `git tag -a vX.Y.Z -m "Vyotiq vX.Y.Z"` then
@@ -177,7 +174,8 @@ dependency's file layout:
        windows-x64 / linux-x64 / macOS → Finalize release.
 7. [ ] Post-verify the release:
        - `gh release view vX.Y.Z --repo vyotiqai/vyotiq-agent-v-releases`
-         shows structured notes (not a stub).
+         shows a published (non-draft) release with a body — stub body
+         acceptable per §0 (tag-only notes; not structured notes).
        - Assets include: `latest.yml`, `latest-linux.yml`, `latest-mac.yml`,
          `Vyotiq-X.Y.Z-setup.exe`, both `-arm64.dmg`/`-x64.dmg`, both
          `*-mac.zip`, `.AppImage` (+ blockmaps). All three manifests are
@@ -191,7 +189,7 @@ dependency's file layout:
        errors), silent-install, launch, confirm version + window + logs.
 9. [ ] Announce/state clearly: **v1.2.0-style broken releases cannot
        self-update** (the app dies before the update card renders) — say so
-       in the changelog and release notes so users know to reinstall manually.
+       in the release notes so users know to reinstall manually.
 
 ---
 

@@ -131,3 +131,10 @@ tmp-os-evidence/
 tmp-merge/
 .vyotiq/audit-modes/
 .vyotiq/fixes/
+
+# Local agent instance scratch (2026-09-15): branch listings, diff deltas, and
+# patch files written at the .vyotiq root by agent runs. Machine-local, never
+# commit. Append-only block — nothing above is modified, reordered, or weakened.
+/.vyotiq/*.txt
+/.vyotiq/*.patch
+/.vyotiq/*.diff

@@ -16,7 +16,7 @@ import {
   mergeInstanceBranch,
   type MergeInstanceBranchResult
 } from '../git/instanceWorktree'
-import { appendEvent, createRun, loadMessages, loadMessagesAsync, loadStatus } from './state'
+import { appendEvent, createRun, loadMessagesAsync, loadStatus } from './state'
 import { resolveRunDir } from '@main/storage/paths'
 import { createRunId } from './loop'
 import { RUN_RECEIPT_FILENAME } from './runReceipt'
@@ -223,11 +223,7 @@ function formatChildSummary(
   return 'Instance finished.'
 }
 
-export function summarizeChildRun(workspacePath: string, childRunId: string): string {
-  return formatChildSummary(workspacePath, childRunId, loadMessages(workspacePath, childRunId))
-}
-
-async function summarizeChildRunAsync(workspacePath: string, childRunId: string): Promise<string> {
+export async function summarizeChildRunAsync(workspacePath: string, childRunId: string): Promise<string> {
   return formatChildSummary(
     workspacePath,
     childRunId,
@@ -444,6 +440,7 @@ export type SpawnAgentInstanceInput = {
   subTasks: string[]
   doneWhen: string
   pathScope?: string[]
+  isolation?: 'worktree' | 'shared'
   emitParentEvent?: (event: AgentEvent) => void
 }
 
@@ -550,10 +547,24 @@ export async function spawnAgentInstance(
   const releaseChildIpc = registerRunIpcSender(childRunId, wc)
 
   const mode: AgentInteractionMode = 'agent'
-  // Write-capable instances get a git worktree when possible; otherwise shared + required path_scope.
+  // Write-capable instances get a git worktree when possible; otherwise shared
+  // + required path_scope. isolation: 'shared' skips the worktree (requires
+  // path_scope) for cheap, disjoint-scope workstreams.
   let worktreePath: string | undefined
   let worktreeBranch: string | undefined
-  {
+  if (input.isolation === 'shared') {
+    if (!pathScope?.length) {
+      releaseChildIpc()
+      unregisterChildInstance(childRunId)
+      clearRunAbort(childRunId, registered.invokeId)
+      return {
+        ok: false,
+        error:
+          "isolation: 'shared' requires path_scope so shared-workspace writes stay constrained. " +
+          'Pass workspace-relative path prefixes, or omit isolation to get a git worktree.'
+      }
+    }
+  } else {
     const wt = await addInstanceWorktree(input.workspacePath, childRunId, pathScope)
     if (wt.ok) {
       worktreePath = wt.worktreePath

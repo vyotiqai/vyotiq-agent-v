@@ -313,7 +313,7 @@ export function useMarketplaceController({
 
   const setEnabled = useCallback(
     async (item: MarketplaceInstalledItem, enabled: boolean) => {
-      beginBusy()
+      beginBusy(item.id)
       const epoch = ++feedbackSeqRef.current
       try {
         const res = await window.vyotiq.marketplaceSetEnabled(item.id, enabled)
@@ -354,7 +354,7 @@ export function useMarketplaceController({
         window.confirm(
           'Also sign out of GitHub in Settings?\n\nCancel keeps GitHub signed in.'
         )
-      beginBusy()
+      beginBusy(id)
       const epoch = ++feedbackSeqRef.current
       try {
         const res = await window.vyotiq.marketplaceUninstall(id, { signOutGithub })
@@ -375,7 +375,7 @@ export function useMarketplaceController({
 
   const detectMcp = useCallback(
     async (input: string): Promise<McpDetectResult | null> => {
-      beginBusy()
+      beginBusy('marketplace-detect')
       setFeedback(null)
       try {
         const trimmed = input.trim()
@@ -411,7 +411,7 @@ export function useMarketplaceController({
 
   const applyDetectedMcp = useCallback(
     async (payload: McpApplyDetectedRequest): Promise<boolean> => {
-      beginBusy()
+      beginBusy('marketplace-apply')
       const epoch = setFeedback(null)
       try {
         const acked = await ensureRemoteAck()
@@ -450,7 +450,7 @@ export function useMarketplaceController({
 
   const scanExternalMcp = useCallback(
     async (paths?: string[]): Promise<McpImportExternalResult | null> => {
-      beginBusy()
+      beginBusy('marketplace-scan')
       setFeedback(null)
       try {
         const res = await window.vyotiq.marketplaceScanExternalMcp(
@@ -476,7 +476,7 @@ export function useMarketplaceController({
 
   const importExternalMcp = useCallback(
     async (payload: McpImportExternalRequest): Promise<boolean> => {
-      beginBusy()
+      beginBusy('marketplace-import')
       setFeedback(null)
       try {
         const acked = await ensureRemoteAck()

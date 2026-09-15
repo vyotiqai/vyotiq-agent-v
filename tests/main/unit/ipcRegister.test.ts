@@ -178,6 +178,11 @@ vi.mock('@main/agent/state', () => ({
   listRuns: vi.fn(),
   loadMessages: vi.fn(),
   loadMessagesAsync: vi.fn(),
+  loadMessagesWindowAsync: vi.fn(() => ({
+    messages: [{ role: 'user' as const, content: 'kept' }],
+    hasEarlier: false,
+    earlierCursor: null
+  })),
   loadEventsForRun: vi.fn(),
   loadEventsForRunAsync: vi.fn(),
   LOAD_EVENTS_UI_LIMIT: 500,
@@ -676,7 +681,8 @@ describe('registerIpc', () => {
       expect(prepareRewindToUserMessageMock).toHaveBeenCalledWith({
         workspacePath: '/ws',
         runId: 'run-revert',
-        userMessageIndex: 0
+        userMessageIndex: 0,
+        targetUserAt: undefined
       })
       expect(tryRegisterRunAbortMock).not.toHaveBeenCalled()
       expect(runAgentMock).not.toHaveBeenCalled()
@@ -880,7 +886,8 @@ describe('registerIpc', () => {
       expect(planRewindPreviewMock).toHaveBeenCalledWith({
         workspacePath: '/ws',
         runId: 'run-revert',
-        userMessageIndex: 0
+        userMessageIndex: 0,
+        targetUserAt: undefined
       })
     })
 

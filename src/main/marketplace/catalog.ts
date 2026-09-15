@@ -11,6 +11,7 @@ import { getSettings } from '../settings/settings'
 import { bundledCatalogPath, marketplaceCatalogCachePath } from './paths'
 import { logger } from '../../shared/logger'
 import { formatError } from '../../shared/errors'
+import { MARKETPLACE_ICON_URL_MAX_LENGTH } from '../../shared/utils/marketplaceIconUrl'
 
 function readJsonCatalog(path: string): MarketplaceCatalog {
   const raw = JSON.parse(readFileSync(path, 'utf8')) as unknown
@@ -46,6 +47,67 @@ function writeCachedRemoteCatalog(catalog: MarketplaceCatalog): void {
 
 import { fetchPublicResponse } from '../agent/tools/webFetch'
 
+const INLINE_ICON_MIME_ALLOWLIST = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml'
+])
+
+/** Max binary bytes so the base64 data URL stays under the renderer icon gate. */
+const INLINE_ICON_MAX_BYTES = Math.floor(((MARKETPLACE_ICON_URL_MAX_LENGTH - 64) * 3) / 4)
+
+/** Remote registry iconUrl values are https URLs; the renderer only accepts data URLs. */
+function collectRemoteIconUrls(raw: unknown): Map<string, string> {
+  const result = new Map<string, string>()
+  const packages = (raw as { packages?: unknown } | null)?.packages
+  if (!Array.isArray(packages)) return result
+  for (const entry of packages) {
+    const id = (entry as { id?: unknown } | null)?.id
+    const iconUrl = (entry as { iconUrl?: unknown } | null)?.iconUrl
+    if (typeof id === 'string' && typeof iconUrl === 'string' && iconUrl.startsWith('https:')) {
+      result.set(id, iconUrl)
+    }
+  }
+  return result
+}
+
+async function inlineRemoteCatalogIcons(
+  entries: Array<{ id: string }>,
+  iconUrls: Map<string, string>
+): Promise<Map<string, string>> {
+  const inlined = new Map<string, string>()
+  const pending = entries.filter((entry) => iconUrls.has(entry.id))
+  const CHUNK = 4
+  for (let i = 0; i < pending.length; i += CHUNK) {
+    const results = await Promise.all(
+      pending.slice(i, i + CHUNK).map(async (entry): Promise<readonly [string, string] | null> => {
+        const url = iconUrls.get(entry.id)
+        if (!url) return null
+        try {
+          const { response, body } = await fetchPublicResponse(
+            new URL(url),
+            AbortSignal.timeout(8_000),
+            { accept: 'image/*' }
+          )
+          if (!response.ok) return null
+          const mime = (response.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
+          if (!INLINE_ICON_MIME_ALLOWLIST.has(mime)) return null
+          if (body.byteLength === 0 || body.byteLength > INLINE_ICON_MAX_BYTES) return null
+          return [entry.id, `data:${mime};base64,${body.toString('base64')}`] as const
+        } catch {
+          return null
+        }
+      })
+    )
+    for (const item of results) {
+      if (item) inlined.set(item[0], item[1])
+    }
+  }
+  return inlined
+}
+
 /** Fetch remote catalog when registryUrl is set; cache on success. */
 export async function refreshRemoteCatalog(): Promise<MarketplaceCatalog> {
   const registryUrl = (getSettings().marketplace?.registryUrl ?? '').trim().replace(/\/$/, '')
@@ -67,9 +129,20 @@ export async function refreshRemoteCatalog(): Promise<MarketplaceCatalog> {
     if (!response.ok) throw new Error(`Catalog fetch failed: HTTP ${response.status}`)
     const raw = JSON.parse(body.toString('utf8')) as unknown
     const catalog = MarketplaceCatalogSchema.parse(raw)
+    // Bundled entries keep their local asset icons; only inline remote-only entries.
+    const bundledIds = new Set(loadBundledCatalog().packages.map((p) => p.id))
+    const iconUrls = collectRemoteIconUrls(raw)
+    const inlinedIcons = await inlineRemoteCatalogIcons(
+      catalog.packages.filter((p) => !bundledIds.has(p.id)),
+      iconUrls
+    )
     const withSource: MarketplaceCatalog = {
       schemaVersion: 1,
-      packages: catalog.packages.map((p) => ({ ...p, source: 'remote' as const }))
+      packages: catalog.packages.map((p) => ({
+        ...p,
+        ...(inlinedIcons.has(p.id) ? { iconUrl: inlinedIcons.get(p.id) } : {}),
+        source: 'remote' as const
+      }))
     }
     writeCachedRemoteCatalog(withSource)
     return withSource

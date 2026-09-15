@@ -120,7 +120,6 @@ import {
   loadCompaction,
   loadEventsAsync,
   loadStepUsageTotalsAsync,
-  loadMessages,
   loadWorkingMessagesForFold,
   loadStatus,
   runExists,
@@ -919,7 +918,7 @@ export async function* runAgent(input: {
     // avoid re-parsing the full messages.jsonl every few steps. Final receipt in
     // `finally` still loads durable disk state.
     const events = await loadEventsAsync(runDir, runId, { limit: INTERIM_RECEIPT_EVENT_TAIL })
-    writeRunReceiptBestEffort({
+    await writeRunReceiptBestEffort({
       runDir,
       runId,
       loadStatus,
@@ -1204,11 +1203,11 @@ export async function* runAgent(input: {
     await flushStatusWrites(runDir)
     const startEvents = await loadEventsAsync(runDir, runId)
     // Interim receipt so PlanPanel does not keep a prior invoke's done receipt while live.
-    writeRunReceiptBestEffort({
+    await writeRunReceiptBestEffort({
       runDir,
       runId,
       loadStatus,
-      loadMessages: () => loadMessages(workspace, runId),
+      loadMessages: () => loadMessagesAsync(workspace, runId),
       loadEvents: () => startEvents,
       readContract
     })
@@ -3510,11 +3509,11 @@ export async function* runAgent(input: {
         await flushEventAppends(runDir)
         await flushStatusWrites(runDir)
         const finalEvents = await loadEventsAsync(runDir, runId)
-        const receipt = writeRunReceiptBestEffort({
+        const receipt = await writeRunReceiptBestEffort({
           runDir,
           runId,
           loadStatus,
-          loadMessages: () => loadMessages(workspace, runId),
+          loadMessages: () => loadMessagesAsync(workspace, runId),
           loadEvents: () => finalEvents,
           readContract,
           provider: costLogProvider,

@@ -228,10 +228,23 @@ function applyCacheControl(
 
   if (volatileText) {
     const vol = volatileSessionMessage(volatileText)
-    cloned.push({
-      role: 'user',
-      content: [{ type: 'text', text: vol.content }]
-    })
+    // Merge into the trailing user turn instead of pushing a fresh user message:
+    // after tool execution history ends on a user turn, and consecutive user
+    // messages are rejected on the wire (roles must alternate).
+    const last = cloned[cloned.length - 1]
+    if (last && last.role === 'user') {
+      const prev = Array.isArray(last.content)
+        ? (last.content as Array<Record<string, unknown>>)
+        : typeof last.content === 'string' && last.content
+          ? [{ type: 'text', text: last.content }]
+          : []
+      last.content = [...prev, { type: 'text', text: vol.content }]
+    } else {
+      cloned.push({
+        role: 'user',
+        content: [{ type: 'text', text: vol.content }]
+      })
+    }
   }
 
   return { system: systemBlocks, messages: cloned }

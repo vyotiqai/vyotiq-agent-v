@@ -142,4 +142,47 @@ describe('remote marketplace catalog', () => {
     expect(merged[0]).toMatchObject({ name: 'Bundled A', source: 'bundled' })
     expect(merged[1]).toMatchObject({ name: 'Remote B', source: 'remote' })
   })
+
+  it('inlines remote https icon URLs as data URLs and skips bundled ids', async () => {
+    const { fetchSpy, refreshRemoteCatalog } = await setup('https://registry.example/')
+    const png = Buffer.from('fake-png-bytes')
+    fetchSpy.mockImplementation(async (url: URL) => {
+      if (url.href === 'https://registry.example/v1/catalog') {
+        return okFetchPayload({
+          schemaVersion: 1,
+          packages: [
+            {
+              id: 'remote-a',
+              name: 'Remote A',
+              version: '1.0.0',
+              kind: 'skill',
+              iconUrl: 'https://cdn.example/a.png'
+            },
+            {
+              id: 'github',
+              name: 'GitHub Remote',
+              version: '1.0.0',
+              kind: 'mcp',
+              iconUrl: 'https://cdn.example/b.png'
+            }
+          ]
+        })
+      }
+      return {
+        response: new Response(null, { status: 200, headers: { 'content-type': 'image/png' } }),
+        finalUrl: url,
+        body: png
+      }
+    })
+
+    const catalog = await refreshRemoteCatalog()
+
+    const remoteA = catalog.packages.find((p) => p.id === 'remote-a')
+    const github = catalog.packages.find((p) => p.id === 'github')
+    expect(remoteA?.iconUrl).toMatch(/^data:image\/png;base64,/)
+    // Bundled entries keep their local asset icons — no icon fetch happens for them.
+    expect(github?.iconUrl).toBeUndefined()
+    const iconCalls = fetchSpy.mock.calls.filter((c) => c[0]?.href !== 'https://registry.example/v1/catalog')
+    expect(iconCalls.map((c) => c[0]?.href)).toEqual(['https://cdn.example/a.png'])
+  })
 })

@@ -97,6 +97,9 @@ function TranscriptPane({
   pendingRun,
   running,
   transcriptLoading,
+  transcriptHasEarlier,
+  transcriptLoadingEarlier,
+  onLoadEarlierMessages,
   restoreScrollTop,
   scrollRestoreToken,
   onScrollTopChange,
@@ -139,6 +142,12 @@ function TranscriptPane({
   pendingRun?: boolean
   running: boolean
   transcriptLoading?: boolean
+  /** Earlier transcript messages exist on disk but are not loaded (runs:load-earlier). */
+  transcriptHasEarlier?: boolean
+  /** A runs:load-earlier fetch is in flight. */
+  transcriptLoadingEarlier?: boolean
+  /** Fetch the next earlier transcript window and merge it into the view. */
+  onLoadEarlierMessages?: () => void | Promise<void>
   restoreScrollTop?: number
   scrollRestoreToken?: number
   onScrollTopChange?: (scrollTop: number) => void
@@ -213,6 +222,9 @@ function TranscriptPane({
         turnFailureLabel={turnFailureLabel}
         turnStatus={turnStatus}
         transcriptLoading={transcriptLoading}
+        transcriptHasEarlier={transcriptHasEarlier}
+        transcriptLoadingEarlier={transcriptLoadingEarlier}
+        onLoadEarlierMessages={onLoadEarlierMessages}
         restoreScrollTop={restoreScrollTop}
         scrollRestoreToken={scrollRestoreToken}
         onScrollTopChange={onScrollTopChange}
@@ -270,6 +282,9 @@ export function ChatView({
   secrets,
   activeRunId,
   transcriptLoading,
+  transcriptHasEarlier,
+  transcriptLoadingEarlier,
+  onLoadEarlierMessages,
   headingRef,
   onProviderModel,
   favoriteModels = [],
@@ -366,6 +381,9 @@ export function ChatView({
   secrets: Record<import('@shared/ipc').SecretProvider, boolean>
   activeRunId: string | null
   transcriptLoading?: boolean
+  transcriptHasEarlier?: boolean
+  transcriptLoadingEarlier?: boolean
+  onLoadEarlierMessages?: () => void | Promise<void>
   headingRef?: Ref<HTMLHeadingElement>
   onProviderModel: (provider: ProviderId, model: string) => void
   favoriteModels?: string[]
@@ -1286,6 +1304,9 @@ const runGoal = useRunGoal({
               pendingRun={pendingRun}
               running={running}
               transcriptLoading={transcriptLoading}
+              transcriptHasEarlier={transcriptHasEarlier}
+              transcriptLoadingEarlier={transcriptLoadingEarlier}
+              onLoadEarlierMessages={onLoadEarlierMessages}
               restoreScrollTop={restoreScrollTop}
               scrollRestoreToken={scrollRestoreToken}
               onScrollTopChange={onScrollTopChange}

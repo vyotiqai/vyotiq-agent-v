@@ -384,6 +384,51 @@ describe('MarketplaceView', () => {
     })
   })
 
+  it('shows Installing… only on the detail being installed, not on other details', async () => {
+    let resolveInstall: ((value: unknown) => void) | undefined
+    // @ts-expect-error test bridge
+    window.vyotiq.marketplaceInstall = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveInstall = resolve
+        })
+    )
+    render(
+      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
+    )
+    await screen.findByRole('heading', { name: /^Featured$/i })
+    fireEvent.click(screen.getByText('Filesystem'))
+    expect(await screen.findByRole('button', { name: /^Add to Agent V$/i })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^Add to Agent V$/i }))
+    expect(await screen.findByRole('button', { name: /^Installing/i })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Marketplace$/i }))
+    await screen.findByRole('heading', { name: /^Featured$/i })
+    fireEvent.click(screen.getByText('Fetch'))
+    expect(await screen.findByRole('button', { name: /^Add to Agent V$/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Installing/i })).toBeNull()
+
+    resolveInstall?.({
+      ok: true,
+      data: {
+        item: {
+          id: 'filesystem',
+          kind: 'mcp',
+          name: 'Filesystem',
+          version: '1.0.0',
+          description: '',
+          enabled: true,
+          installSource: 'bundled',
+          installedAt: new Date().toISOString(),
+          packagePath: 'filesystem/1.0.0'
+        }
+      }
+    })
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /^Installing/i })).toBeNull()
+    })
+  })
+
   it('Manage hub lists packages, skills, and MCP add', async () => {
     render(
       <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
@@ -586,6 +631,25 @@ describe('MarketplaceView', () => {
     expect(await screen.findByLabelText(/Package registry/i)).toBeTruthy()
     expect(screen.getByLabelText(/Registry URL/i)).toBeTruthy()
     expect(screen.getByLabelText(/Acknowledge marketplace install risk/i)).toBeTruthy()
+  })
+
+  it('refreshes the remote catalog after the registry URL changes on blur', async () => {
+    const refreshCatalog = vi.fn(async () => ({
+      ok: true as const,
+      data: { schemaVersion: 1 as const, packages: [] }
+    }))
+    // @ts-expect-error test bridge
+    window.vyotiq.marketplaceRefreshCatalog = refreshCatalog
+    render(
+      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
+    )
+    fireEvent.click((await screen.findAllByRole('tab', { name: /^Manage$/i }))[0]!)
+    const input = await screen.findByLabelText(/Registry URL/i)
+    fireEvent.change(input, { target: { value: 'https://registry.example.com' } })
+    fireEvent.blur(input)
+    await waitFor(() => {
+      expect(refreshCatalog).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('exposes full package names on truncated cards and roving tab a11y', async () => {

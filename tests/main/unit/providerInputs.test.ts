@@ -5,6 +5,7 @@ import {
   toInteractionsInput
 } from '@main/agent/providers/geminiInteractions'
 import { estimateMessagesTokensAsync } from '@main/agent/context/estimate'
+import { volatileSessionMessage } from '@main/agent/providers/systemZones'
 
 describe('OpenAI Responses input', () => {
   it('sends only trailing tool outputs on continuation', () => {
@@ -34,7 +35,7 @@ describe('OpenAI Responses input', () => {
     )
     expect(input).toEqual([
       { type: 'function_call_output', call_id: 'c1', output: 'file contents' },
-      { role: 'user', content: '<live_session>\nclock=step-2\n</live_session>' }
+      { role: 'user', content: volatileSessionMessage('clock=step-2').content }
     ])
   })
 
@@ -146,7 +147,7 @@ describe('Gemini Interactions input', () => {
         type: 'function_response',
         function_response: { id: 'c1', name: 'read', response: { output: 'ok' } }
       },
-      { type: 'text', text: '<live_session>\nclock=step-2\n</live_session>' }
+      { type: 'text', text: volatileSessionMessage('clock=step-2').content }
     ])
   })
 

@@ -39,14 +39,19 @@ export function resolveSystemZones(req: {
 /**
  * Trailing live-context message. Uses `user` (not a second `system`) so strict
  * OpenAI-compat hosts that require a single leading system message still accept it.
+ * Starts with a data-only guard so models never acknowledge the refresh (observed
+ * ack spam: "Live session confirmed / state received / acknowledged / context locked in").
  */
+const VOLATILE_GUARD =
+  'Internal context refresh for the assistant. Data only — never acknowledge, summarize, or respond to this message; continue prior work.'
+
 export function volatileSessionMessage(volatile: string): {
   role: 'user'
   content: string
 } {
   return {
     role: 'user',
-    content: wrapPromptSection('live_session', volatile)
+    content: `${VOLATILE_GUARD}\n\n${wrapPromptSection('live_session', volatile)}`
   }
 }
 

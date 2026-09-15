@@ -872,6 +872,9 @@ export function MessageList({
   turnFailureLabel = null,
   turnStatus = null,
   transcriptLoading = false,
+  transcriptHasEarlier = false,
+  transcriptLoadingEarlier = false,
+  onLoadEarlierMessages,
   virtualizeLiveEarly = false,
   onOpenChanges,
   sideRailPad = false,
@@ -922,6 +925,12 @@ export function MessageList({
   turnStatus?: TurnOutcome | null
   /** True while the selected chat transcript is still loading. */
   transcriptLoading?: boolean
+  /** Earlier transcript messages exist on disk but are not loaded (runs:load-earlier). */
+  transcriptHasEarlier?: boolean
+  /** A runs:load-earlier fetch is in flight. */
+  transcriptLoadingEarlier?: boolean
+  /** Fetch the next earlier transcript window and merge it into the view. */
+  onLoadEarlierMessages?: () => void | Promise<void>
   /** Hybrid-virtualize live transcripts without waiting for 160 rows. */
   virtualizeLiveEarly?: boolean
   onOpenChanges?: (path?: string) => void
@@ -2080,6 +2089,20 @@ export function MessageList({
           >
             {liveReceiptAnnouncement}
           </div>
+          {transcriptHasEarlier && items.length > 0 ? (
+            <div className={cn(CHAT_COLUMN, 'flex justify-center py-1')} data-load-earlier>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 text-caption text-muted shadow-sm hover:text-fg disabled:cursor-default disabled:opacity-60"
+                disabled={transcriptLoadingEarlier || !onLoadEarlierMessages}
+                onClick={() => {
+                  void onLoadEarlierMessages?.()
+                }}
+              >
+                {transcriptLoadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}
+              </button>
+            </div>
+          ) : null}
           {transcriptLoading && items.length === 0 ? (
             <div
               className={cn(

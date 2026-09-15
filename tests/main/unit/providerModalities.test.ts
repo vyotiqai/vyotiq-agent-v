@@ -254,16 +254,21 @@ describe('native multimodal wire shapes', () => {
       cache_control: { type: 'ephemeral' }
     })
     const messages = body.messages as Array<Record<string, unknown>>
-    expect(messages[0]).toMatchObject({
-      role: 'user',
-      content: [{ type: 'text', text: 'hi', cache_control: { type: 'ephemeral' } }]
+    // Volatile merges into the trailing user turn (consecutive user messages are
+    // invalid on the wire); the cache breakpoint stays on the history block.
+    expect(messages).toHaveLength(1)
+    expect(messages[0].role).toBe('user')
+    const mergedContent = messages[0].content as Array<Record<string, unknown>>
+    expect(mergedContent).toHaveLength(2)
+    expect(mergedContent[0]).toMatchObject({
+      type: 'text',
+      text: 'hi',
+      cache_control: { type: 'ephemeral' }
     })
-    const last = messages[messages.length - 1]!
-    expect(last.role).toBe('user')
-    const lastContent = last.content as Array<Record<string, unknown>>
-    expect(lastContent[0]?.text).toContain('<live_session>')
-    expect(lastContent[0]?.text).toContain('VOLATILE HINT')
-    expect(lastContent[0]).not.toHaveProperty('cache_control')
+    const volatileBlock = mergedContent[1]
+    expect(String(volatileBlock?.text)).toContain('<live_session>')
+    expect(String(volatileBlock?.text)).toContain('VOLATILE HINT')
+    expect(volatileBlock).not.toHaveProperty('cache_control')
     expect(tools[1]?.cache_control).toEqual({ type: 'ephemeral' })
     expect(body).not.toHaveProperty('context_management')
   })
@@ -293,11 +298,12 @@ describe('native multimodal wire shapes', () => {
     const messages = body.messages as Array<Record<string, unknown>>
     const last = messages[messages.length - 1]!
     const lastContent = last.content as Array<Record<string, unknown>>
-    expect(lastContent[0]?.text).toContain('<live_session>')
-    expect(lastContent[0]?.text).toContain('Date (UTC): 2026-08-16T12:00:00.000Z')
-    expect(String(lastContent[0]?.text)).not.toContain('<prior_session>')
-    expect(String(lastContent[0]?.text)).not.toContain('Prior work on auth')
-    expect(lastContent[0]).not.toHaveProperty('cache_control')
+    const volatileText = String(lastContent[lastContent.length - 1]?.text)
+    expect(volatileText).toContain('<live_session>')
+    expect(volatileText).toContain('Date (UTC): 2026-08-16T12:00:00.000Z')
+    expect(volatileText).not.toContain('<prior_session>')
+    expect(volatileText).not.toContain('Prior work on auth')
+    expect(lastContent[lastContent.length - 1]).not.toHaveProperty('cache_control')
     expect(body).not.toHaveProperty('context_management')
   })
 })

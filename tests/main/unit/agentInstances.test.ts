@@ -48,7 +48,7 @@ import {
   registerRunIpcSender,
   resetAgentInstancesForTests,
   spawnAgentInstance,
-  summarizeChildRun,
+  summarizeChildRunAsync,
   unregisterChildInstance,
   waitForChildTerminal
 } from '@main/agent/agentInstances'
@@ -476,7 +476,7 @@ describe('agentInstances', () => {
     )
 
     const waitPromise = waitForChildTerminal(child.runId, workspacePath, 5_000)
-    notifyChildTerminal(child.runId, 'done', summarizeChildRun(workspacePath, child.runId))
+    notifyChildTerminal(child.runId, 'done', await summarizeChildRunAsync(workspacePath, child.runId))
     const terminal = await waitPromise
     expect(terminal.phase).toBe('done')
     expect(terminal.summary).toMatch(/wroteFiles/)
@@ -686,7 +686,7 @@ describe('agentInstances', () => {
       join(runDir, 'messages.jsonl'),
       `${JSON.stringify({ role: 'user', content: 'go' })}\n${JSON.stringify({ role: 'assistant', content: huge })}\n`
     )
-    const summary = summarizeChildRun(workspacePath, childRunId)
+    const summary = await summarizeChildRunAsync(workspacePath, childRunId)
     expect(summary).toContain(huge)
     expect(summary).not.toContain('…(truncated)')
   })
@@ -725,7 +725,7 @@ describe('agentInstances', () => {
     const done = lines.find((e) => e.type === 'agent_instance_update' && e.phase === 'done')
     expect(done?.summary).toBe('Instance finished.')
     expect(done?.summary).not.toContain(huge)
-    expect(summarizeChildRun(workspacePath, child.runId)).toContain(huge)
+    expect(await summarizeChildRunAsync(workspacePath, child.runId)).toContain(huge)
     const ipc = mainWindowSend.mock.calls
       .map((call) => call[1] as { type?: string; phase?: string; summary?: string })
       .find((payload) => payload?.type === 'agent_instance_update' && payload.phase === 'done')
@@ -1142,14 +1142,14 @@ describe('agentInstances worktree', () => {
     clearRunAbort(child.runId)
   })
 
-  it('refuses merge when parent worktree is dirty', async () => {
+  it('merges when parent dirty files do not overlap the branch changed files', async () => {
     const child = await spawnAgentInstance({
       parentRunId,
       workspacePath,
-      goal: 'dirty parent refuse',
-      outcome: 'dirty parent refuse outcome',
-      subTasks: ['dirty parent refuse step'],
-      doneWhen: 'dirty parent refuse complete',
+      goal: 'dirty parent disjoint',
+      outcome: 'dirty parent disjoint outcome',
+      subTasks: ['dirty parent disjoint step'],
+      doneWhen: 'dirty parent disjoint complete',
     })
     expect(child.ok).toBe(true)
     if (!child.ok) return
@@ -1157,14 +1157,113 @@ describe('agentInstances worktree', () => {
     writeFileSync(join(status!.worktreePath!, 'child.txt'), 'x\n')
     await updateStatus(resolveRunDir(workspacePath, child.runId), { status: 'done' }, { sync: true })
     await handleInlineInstanceFinished(workspacePath, child.runId, 'done')
-    // Tracked modification (not untracked): untracked-only parents are allowed by the merge gate.
+    // Dirty tracked file the branch never touched — disjoint dirty state stays mergeable.
     writeFileSync(join(workspacePath, 'README.md'), 'dirty\n')
+    const merged = await mergeAgentInstanceBranch(workspacePath, parentRunId, child.runId)
+    expect(merged.ok).toBe(true)
+    if (merged.ok) {
+      expect(readFileSync(join(workspacePath, 'child.txt'), 'utf8')).toBe('x\n')
+      expect(readFileSync(join(workspacePath, 'README.md'), 'utf8')).toBe('dirty\n')
+    }
+    clearRunAbort(child.runId)
+  })
+
+  it('refuses merge when parent dirty files overlap the branch changed files', async () => {
+    const child = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'dirty parent overlap',
+      outcome: 'dirty parent overlap outcome',
+      subTasks: ['dirty parent overlap step'],
+      doneWhen: 'dirty parent overlap complete',
+    })
+    expect(child.ok).toBe(true)
+    if (!child.ok) return
+    const status = loadStatus(resolveRunDir(workspacePath, child.runId))
+    writeFileSync(join(status!.worktreePath!, 'child.txt'), 'x\n')
+    await updateStatus(resolveRunDir(workspacePath, child.runId), { status: 'done' }, { sync: true })
+    await handleInlineInstanceFinished(workspacePath, child.runId, 'done')
+    // Untracked in the parent, but the branch adds the same file — git merge would abort on it.
+    writeFileSync(join(workspacePath, 'child.txt'), 'parent-side\n')
     const merged = await mergeAgentInstanceBranch(workspacePath, parentRunId, child.runId)
     expect(merged.ok).toBe(false)
     if (!merged.ok) {
-      expect(merged.error).toMatch(/uncommitted tracked changes/i)
+      expect(merged.error).toMatch(/also changed \(child\.txt\)/i)
     }
     clearRunAbort(child.runId)
+  })
+
+  it('forwards parent uncommitted tracked changes into the child worktree', async () => {
+    writeFileSync(join(workspacePath, 'README.md'), 'forwarded baseline\n')
+    const child = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'forward baseline',
+      outcome: 'forward baseline outcome',
+      subTasks: ['forward baseline step'],
+      doneWhen: 'forward baseline complete',
+    })
+    expect(child.ok).toBe(true)
+    if (!child.ok) return
+    const status = loadStatus(resolveRunDir(workspacePath, child.runId))
+    expect(status?.worktreePath).toBeTruthy()
+    expect(readFileSync(join(status!.worktreePath!, 'README.md'), 'utf8')).toBe(
+      'forwarded baseline\n'
+    )
+    clearRunAbort(child.runId)
+  })
+
+  it('junctions parent node_modules into the child worktree', async () => {
+    mkdirSync(join(workspacePath, 'node_modules'), { recursive: true })
+    writeFileSync(join(workspacePath, 'node_modules', 'marker.txt'), 'deps\n')
+    const child = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'junction deps',
+      outcome: 'junction deps outcome',
+      subTasks: ['junction deps step'],
+      doneWhen: 'junction deps complete',
+    })
+    expect(child.ok).toBe(true)
+    if (!child.ok) return
+    const status = loadStatus(resolveRunDir(workspacePath, child.runId))
+    expect(status?.worktreePath).toBeTruthy()
+    expect(existsSync(join(status!.worktreePath!, 'node_modules', 'marker.txt'))).toBe(true)
+    clearRunAbort(child.runId)
+  })
+
+  it('spawns shared-isolation children without a worktree and requires path_scope', async () => {
+    const missingScope = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'shared no scope',
+      outcome: 'shared no scope outcome',
+      subTasks: ['shared no scope step'],
+      doneWhen: 'shared no scope complete',
+      isolation: 'shared'
+    })
+    expect(missingScope.ok).toBe(false)
+    if (!missingScope.ok) {
+      expect(missingScope.error).toMatch(/isolation: 'shared' requires path_scope/i)
+    }
+    mkdirSync(join(workspacePath, 'shared-scope'), { recursive: true })
+    const shared = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'shared scoped',
+      outcome: 'shared scoped outcome',
+      subTasks: ['shared scoped step'],
+      doneWhen: 'shared scoped complete',
+      pathScope: ['shared-scope'],
+      isolation: 'shared'
+    })
+    expect(shared.ok).toBe(true)
+    if (shared.ok) {
+      const status = loadStatus(resolveRunDir(workspacePath, shared.runId))
+      expect(status?.worktreePath).toBeUndefined()
+      expect(status?.worktreeBranch).toBeUndefined()
+      clearRunAbort(shared.runId)
+    }
   })
 })
 

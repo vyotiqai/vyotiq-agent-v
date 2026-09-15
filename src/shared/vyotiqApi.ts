@@ -40,6 +40,7 @@ import type {
   ListOlderRunsResult,
   ExportRunResult,
   LoadRunResult,
+  LoadEarlierMessagesResult,
   PersistedEvent,
   ProviderId,
   RunSummary,
@@ -316,6 +317,12 @@ export interface VyotiqApi {
     workspacePath: string,
     runId: string
   ) => Promise<IpcResult<LoadRunResult>>
+  loadEarlierMessages: (
+    workspacePath: string,
+    runId: string,
+    cursor: string,
+    limit?: number
+  ) => Promise<IpcResult<LoadEarlierMessagesResult>>
   loadRunEvents: (
     workspacePath: string,
     runId: string
