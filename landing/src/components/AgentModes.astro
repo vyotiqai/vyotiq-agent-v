@@ -5,14 +5,19 @@
  * Honest: Ask = read-only Q&A; Plan = plan.md artifacts via create_plan;
  * Agent = full tools; switch_mode / slash set_mode_* can change mid-run.
  */
+interface Props {
+  embedded?: boolean;
+}
+const { embedded = false } = Astro.props;
 ---
 
 <article
-  id="modes"
-  class="scroll-mt-24"
-  aria-labelledby="agent-modes-heading"
+  id={embedded ? undefined : 'modes'}
+  class:list={[embedded ? null : 'scroll-mt-24']}
+  aria-labelledby={embedded ? undefined : 'agent-modes-heading'}
 >
-  <div class="mx-auto av-max px-4 py-16 sm:px-6 sm:py-20 lg:px-10">
+  <div class:list={[embedded ? null : 'mx-auto av-max px-4 py-16 sm:px-6 sm:py-20 lg:px-10']}>
+    {!embedded ? (
     <div class="mb-6 flex flex-col gap-2 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
@@ -29,8 +34,9 @@
         Composer modes that match the phase of the work — read-only, plan artifacts, or full agency. Switch with the UI, slash commands, or <span class="font-mono text-[12px] text-[color-mix(in_srgb,var(--av-ink)_85%,transparent)]">switch_mode</span>.
       </p>
     </div>
+    ) : null}
 
-    <div class="grid gap-4 md:grid-cols-3">
+    <div class:list={['grid md:grid-cols-3', embedded ? 'gap-3' : 'gap-4']}>
       <!-- ASK -->
       <article class="flex flex-col overflow-hidden rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)]">
         <div class="relative flex min-h-[200px] flex-1 items-center justify-center border-b border-[var(--av-hairline)] bg-[var(--av-panel)] px-5 py-8">

@@ -5,14 +5,19 @@
  * Real tools: browser_navigate → browser_snapshot → browser_click/type/fill.
  * Honest: page text untrusted; cite [[https://url]]; fresh @eN after navigate.
  */
+interface Props {
+  embedded?: boolean;
+}
+const { embedded = false } = Astro.props;
 ---
 
 <article
-  id="browser"
-  class="scroll-mt-24"
-  aria-labelledby="agent-browser-heading"
+  id={embedded ? undefined : 'browser'}
+  class:list={[embedded ? null : 'scroll-mt-24']}
+  aria-labelledby={embedded ? undefined : 'agent-browser-heading'}
 >
-  <div class="mx-auto av-max px-4 py-16 sm:px-6 sm:py-20 lg:px-10">
+  <div class:list={[embedded ? null : 'mx-auto av-max px-4 py-16 sm:px-6 sm:py-20 lg:px-10']}>
+    {!embedded ? (
     <div class="mb-6 flex flex-col gap-2 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
@@ -32,6 +37,7 @@
         <span class="font-mono text-[12px] text-[color-mix(in_srgb,var(--av-ink)_85%,transparent)]">@eN</span> refs. Page text is untrusted.
       </p>
     </div>
+    ) : null}
 
     <article
       class="ab overflow-hidden rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)]"

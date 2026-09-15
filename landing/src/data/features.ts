@@ -112,7 +112,7 @@ export const features: Feature[] = [
     title: 'Full tool catalog on your repo',
     summary: 'Terminal, file tools, git, typecheck/lint/test runners, notebooks, and LSP queries — on the checked-out tree.',
     body: 'The agent uses a built-in catalog that includes terminal, read/edit/search/glob/grep/codebase search, git status/diff/commit/apply patch, and verification runners.',
-    anchors: ['terminal', 'read_file', 'edit_file', 'git_*', 'run_tests', 'lsp'],
+    anchors: ['terminal', 'read', 'edit', 'search', 'git_*', 'diagnostics', 'run_tests', 'lsp'],
     homepage: true,
     order: 10,
     enabled: true,
@@ -124,7 +124,7 @@ export const features: Feature[] = [
     title: 'Parallel agents on isolated worktrees',
     summary: 'Spawn child instances on their own branches, await them, then merge back into the parent.',
     body: 'Each child runs on its own git worktree branch so parallel work stays isolated until you merge.',
-    anchors: ['spawn_agent_instance', 'await_agent_instance', 'merge_agent_instance'],
+    anchors: ['spawn_agent_instance', 'await_agent_instance', 'pull_agent_instance', 'merge_agent_instance', 'cancel_agent_instance'],
     homepage: true,
     showcase: 'parallel',
     order: 10,
@@ -240,6 +240,17 @@ export const features: Feature[] = [
     evidence: 'Landing MoreFeatures — ask_question',
   },
   {
+    id: 'run-todos',
+    categoryId: 'control',
+    title: 'Run task list',
+    summary: 'Publish and update a structured todo list for the current run so progress stays visible.',
+    body: 'The agent keeps an in-run task list via todo_write — useful alongside plans and longer agent loops.',
+    anchors: ['todo_write'],
+    order: 30,
+    enabled: true,
+    evidence: 'TOOL_REGISTRY — todo_write',
+  },
+  {
     id: 'goals',
     categoryId: 'ship',
     title: 'Goals',
@@ -302,8 +313,29 @@ export const features: Feature[] = [
   },
 ];
 
+function categoryOrder(categoryId: string): number {
+  return featureCategories.find((c) => c.id === categoryId)?.order ?? 999;
+}
+
+export function categoryById(categoryId: string): FeatureCategory | undefined {
+  return featureCategories.find((c) => c.id === categoryId);
+}
+
+/** Enabled features sorted by category order, then feature order. */
 export function enabledFeatures(): Feature[] {
-  return features.filter((f) => f.enabled).sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
+  return features
+    .filter((f) => f.enabled)
+    .sort(
+      (a, b) =>
+        categoryOrder(a.categoryId) - categoryOrder(b.categoryId) ||
+        a.order - b.order ||
+        a.title.localeCompare(b.title),
+    );
+}
+
+/** Flat tour sequence — same order as enabledFeatures. */
+export function tourFeatures(): Feature[] {
+  return enabledFeatures();
 }
 
 export function enabledCategories(): FeatureCategory[] {

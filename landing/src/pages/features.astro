@@ -5,23 +5,20 @@ import Footer from '../components/Footer.astro';
 import PageHero from '../components/PageHero.astro';
 import FeaturesTour from '../components/FeaturesTour.astro';
 import FinalCta from '../components/FinalCta.astro';
-import { enabledCategories, enabledFeatures } from '../data/features';
 
-const count = enabledFeatures().length;
-const categoryCount = enabledCategories().length;
 ---
 
 <Layout
   title="Features — Agent V"
-  description="A structured tour of Agent V: parallel instances, Ask / Plan / Agent, browser tools, BYO models, memory, MCP, tool approval, and more — grounded in the real product."
+  description="A calm tour of Agent V: parallel instances, Ask / Plan / Agent, browser tools, BYO models, memory, MCP, tool approval, and more — grounded in the real product."
   canonical="https://vyotiq.com/features"
 >
   <Nav />
   <main id="main">
     <PageHero
-      eyebrow="Product tour"
-      title="Every capability, organized"
-      lede={`A structured tour of ${count} capabilities across ${categoryCount} areas. Add, improve, or remove features in one catalog — the page stays consistent.`}
+      eyebrow="Product"
+      title="What Agent V can do"
+      lede="A calm walk through the product — parallel instances, Ask / Plan / Agent, a built-in browser, and the rest of the stack. Each claim maps to real tools in the app."
     />
     <FeaturesTour />
     <FinalCta />

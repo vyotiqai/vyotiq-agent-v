@@ -4,19 +4,24 @@
  * Bento visual card (Ajay refs) + Spawn → Await → Merge tabs.
  * Real tools: spawn_agent_instance → await_agent_instance → merge_agent_instance.
  */
+interface Props {
+  /** Visual-only panel for FeaturesTour rows (no outer chrome / duplicate headings). */
+  embedded?: boolean;
+}
+const { embedded = false } = Astro.props;
 ---
 
 <article
-  id="parallel"
-  class="scroll-mt-24"
-  aria-labelledby="parallel-worktrees-heading"
+  id={embedded ? undefined : 'parallel'}
+  class:list={[embedded ? null : 'scroll-mt-24']}
+  aria-labelledby={embedded ? undefined : 'parallel-worktrees-heading'}
 >
-  <div class="mx-auto av-max px-4 py-16 sm:px-6 sm:py-20 lg:px-10">
+  <div class:list={[embedded ? null : 'mx-auto av-max px-4 py-16 sm:px-6 sm:py-20 lg:px-10']}>
     <article
       class="pw overflow-hidden rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-bg)]"
       data-phase="spawn"
     >
-      <div class="relative isolate overflow-hidden border-b border-[var(--av-hairline)] bg-[var(--av-panel)]">
+      <div class:list={['relative isolate overflow-hidden bg-[var(--av-panel)]', embedded ? null : 'border-b border-[var(--av-hairline)]']}>
         <!-- Quiet grid like Tower cards -->
         <div
           class="pointer-events-none absolute inset-0 opacity-[0.45]"
@@ -26,9 +31,15 @@
 
         <div class="relative px-4 pb-2 pt-5 sm:px-6 sm:pt-6">
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
-              Feature 01 · Parallel instances
-            </p>
+            {embedded ? (
+              <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
+                Spawn → Await → Merge
+              </p>
+            ) : (
+              <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
+                Feature 01 · Parallel instances
+              </p>
+            )}
             <div
               class="flex gap-1 rounded-full border border-[var(--av-hairline)] bg-[var(--av-panel)] p-0.5"
               role="tablist"
@@ -192,7 +203,8 @@
         </div>
       </div>
 
-      <div class="flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between sm:gap-8 sm:p-6">
+      {!embedded ? (
+      <div class="flex flex-col gap-4 border-t border-[var(--av-hairline)] p-5 sm:flex-row sm:items-end sm:justify-between sm:gap-8 sm:p-6">
         <div class="max-w-xl">
           <p class="pw-tool font-mono text-xs font-medium text-[var(--av-accent)]">spawn_agent_instance</p>
           <h3
@@ -209,6 +221,14 @@
           Real Agent V tools · one workstream per instance
         </p>
       </div>
+      ) : (
+        <div class="hidden" aria-hidden="true">
+          <p class="pw-tool">spawn_agent_instance</p>
+          <p class="pw-title">Fan out structured briefs</p>
+          <p class="pw-body">Batch spawns in one step.</p>
+          <p class="pw-note">Real Agent V tools</p>
+        </div>
+      )}
     </article>
   </div>
 </article>

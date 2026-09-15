@@ -1,0 +1,221 @@
+---
+/**
+ * Calm abstract visual panel for non-showcase features.
+ * Suggests the capability with CSS/SVG — not stock photos or fake product shots.
+ */
+import type { Feature } from '../data/features';
+
+interface Props {
+  feature: Feature;
+}
+
+const { feature } = Astro.props;
+const kind = feature.id;
+---
+
+<div
+  class="fv relative flex min-h-[240px] items-center justify-center overflow-hidden rounded-[1.75rem] border border-[var(--av-hairline)] bg-[var(--av-panel)] sm:min-h-[280px]"
+  aria-hidden="true"
+>
+  <div
+    class="pointer-events-none absolute inset-0 opacity-[0.4]"
+    style="background-image: radial-gradient(circle at 1px 1px, rgb(161 161 170 / 0.32) 1px, transparent 0); background-size: 18px 18px;"
+  ></div>
+
+  {kind === 'tool-catalog' ? (
+    <svg class="relative h-auto w-full max-w-[280px] px-6" viewBox="0 0 280 180" fill="none">
+      <rect x="24" y="28" width="100" height="36" rx="10" class="fv-chip" />
+      <rect x="140" y="28" width="116" height="36" rx="10" class="fv-chip" />
+      <rect x="24" y="76" width="116" height="36" rx="10" class="fv-chip" />
+      <rect x="156" y="76" width="100" height="36" rx="10" class="fv-chip-accent" />
+      <rect x="56" y="124" width="168" height="36" rx="10" class="fv-chip" />
+      <text x="74" y="51" class="fv-label" font-size="11">terminal</text>
+      <text x="198" y="51" text-anchor="middle" class="fv-label" font-size="11">read · edit</text>
+      <text x="82" y="99" class="fv-label" font-size="11">git_*</text>
+      <text x="206" y="99" text-anchor="middle" class="fv-accent" font-size="11">lsp</text>
+      <text x="140" y="147" text-anchor="middle" class="fv-muted" font-size="11">run_tests · diagnostics</text>
+    </svg>
+  ) : kind === 'byo-providers' ? (
+    <svg class="relative h-auto w-full max-w-[260px] px-6" viewBox="0 0 260 170" fill="none">
+      <circle cx="130" cy="78" r="34" class="fv-ring" />
+      <circle cx="130" cy="78" r="12" fill="var(--av-accent)" opacity="0.9" />
+      <circle cx="52" cy="48" r="16" class="fv-chip" />
+      <circle cx="208" cy="48" r="16" class="fv-chip" />
+      <circle cx="52" cy="118" r="16" class="fv-chip" />
+      <circle cx="208" cy="118" r="16" class="fv-chip" />
+      <circle cx="130" cy="148" r="14" class="fv-chip" />
+      <path d="M66 54 L100 68" class="fv-line" />
+      <path d="M194 54 L160 68" class="fv-line" />
+      <path d="M66 112 L100 90" class="fv-line" />
+      <path d="M194 112 L160 90" class="fv-line" />
+      <path d="M130 126 L130 134" class="fv-line" />
+    </svg>
+  ) : kind === 'thinking-effort' ? (
+    <svg class="relative h-auto w-full max-w-[240px] px-6" viewBox="0 0 240 160" fill="none">
+      <rect x="32" y="70" width="28" height="40" rx="6" class="fv-chip" />
+      <rect x="72" y="54" width="28" height="56" rx="6" class="fv-chip" />
+      <rect x="112" y="40" width="28" height="70" rx="6" class="fv-chip" />
+      <rect x="152" y="28" width="28" height="82" rx="6" class="fv-chip-accent" />
+      <text x="120" y="140" text-anchor="middle" class="fv-muted" font-size="11">ThinkingEffort</text>
+    </svg>
+  ) : kind === 'workspace-memory' ? (
+    <svg class="relative h-auto w-full max-w-[260px] px-6" viewBox="0 0 260 170" fill="none">
+      <rect x="50" y="36" width="160" height="100" rx="14" class="fv-chip" />
+      <path d="M74 64 H186" class="fv-line" />
+      <path d="M74 84 H170" class="fv-line" />
+      <path d="M74 104 H150" class="fv-line" />
+      <text x="130" y="152" text-anchor="middle" class="fv-accent" font-size="11">.vyotiq/memory/</text>
+    </svg>
+  ) : kind === 'code-index' ? (
+    <svg class="relative h-auto w-full max-w-[260px] px-6" viewBox="0 0 260 170" fill="none">
+      <rect x="40" y="40" width="72" height="90" rx="10" class="fv-chip" />
+      <rect x="128" y="52" width="92" height="18" rx="6" class="fv-chip-accent" />
+      <rect x="128" y="82" width="72" height="14" rx="5" class="fv-chip" />
+      <rect x="128" y="106" width="84" height="14" rx="5" class="fv-chip" />
+      <text x="130" y="152" text-anchor="middle" class="fv-muted" font-size="11">on-device index</text>
+    </svg>
+  ) : kind === 'mcp' ? (
+    <svg class="relative h-auto w-full max-w-[260px] px-6" viewBox="0 0 260 170" fill="none">
+      <rect x="30" y="55" width="80" height="60" rx="12" class="fv-chip" />
+      <rect x="150" y="55" width="80" height="60" rx="12" class="fv-chip" />
+      <path d="M110 85 H150" stroke="var(--av-accent)" stroke-width="1.5" />
+      <circle cx="130" cy="85" r="6" fill="var(--av-accent)" />
+      <text x="70" y="90" text-anchor="middle" class="fv-label" font-size="10">MCP</text>
+      <text x="190" y="90" text-anchor="middle" class="fv-label" font-size="10">tools</text>
+    </svg>
+  ) : kind === 'skills-marketplace' ? (
+    <svg class="relative h-auto w-full max-w-[260px] px-6" viewBox="0 0 260 170" fill="none">
+      <rect x="48" y="40" width="164" height="28" rx="8" class="fv-chip-accent" />
+      <rect x="48" y="80" width="164" height="28" rx="8" class="fv-chip" />
+      <rect x="48" y="120" width="164" height="28" rx="8" class="fv-chip" />
+      <text x="130" y="58" text-anchor="middle" class="fv-accent" font-size="11">SKILL.md</text>
+      <text x="130" y="98" text-anchor="middle" class="fv-muted" font-size="11">/marketplace</text>
+      <text x="130" y="138" text-anchor="middle" class="fv-muted" font-size="11">/create-skill</text>
+    </svg>
+  ) : kind === 'tool-approval' ? (
+    <svg class="relative h-auto w-full max-w-[260px] px-6" viewBox="0 0 260 160" fill="none">
+      <rect x="36" y="48" width="188" height="64" rx="14" class="fv-chip" />
+      <rect x="52" y="66" width="72" height="28" rx="14" class="fv-chip-accent" />
+      <rect x="136" y="66" width="72" height="28" rx="14" class="fv-chip" />
+      <text x="88" y="85" text-anchor="middle" class="fv-accent" font-size="11">Allow</text>
+      <text x="172" y="85" text-anchor="middle" class="fv-muted" font-size="11">Deny</text>
+    </svg>
+  ) : kind === 'ask-question' ? (
+    <svg class="relative h-auto w-full max-w-[260px] px-6" viewBox="0 0 260 160" fill="none">
+      <rect x="40" y="36" width="180" height="36" rx="10" class="fv-chip" />
+      <rect x="40" y="84" width="120" height="28" rx="10" class="fv-chip-accent" />
+      <rect x="170" y="84" width="50" height="28" rx="10" class="fv-chip" />
+      <text x="130" y="59" text-anchor="middle" class="fv-label" font-size="11">Which approach?</text>
+      <text x="100" y="103" text-anchor="middle" class="fv-accent" font-size="10">Option A</text>
+      <text x="195" y="103" text-anchor="middle" class="fv-muted" font-size="10">B</text>
+    </svg>
+  ) : kind === 'run-todos' ? (
+    <svg class="relative h-auto w-full max-w-[260px] px-6" viewBox="0 0 260 170" fill="none">
+      <rect x="48" y="36" width="164" height="28" rx="8" class="fv-chip-accent" />
+      <rect x="48" y="76" width="164" height="28" rx="8" class="fv-chip" />
+      <rect x="48" y="116" width="164" height="28" rx="8" class="fv-chip" />
+      <circle cx="68" cy="50" r="5" fill="var(--av-accent)" />
+      <circle cx="68" cy="90" r="5" class="fv-ring-fill" />
+      <circle cx="68" cy="130" r="5" class="fv-ring-fill" />
+      <text x="130" y="55" text-anchor="middle" class="fv-label" font-size="11">done</text>
+      <text x="130" y="95" text-anchor="middle" class="fv-muted" font-size="11">in progress</text>
+      <text x="130" y="135" text-anchor="middle" class="fv-muted" font-size="11">pending</text>
+    </svg>
+  ) : kind === 'goals' ? (
+    <svg class="relative h-auto w-full max-w-[240px] px-6" viewBox="0 0 240 160" fill="none">
+      <circle cx="120" cy="72" r="40" class="fv-ring" />
+      <circle cx="120" cy="72" r="24" class="fv-ring" />
+      <circle cx="120" cy="72" r="8" fill="var(--av-accent)" />
+      <text x="120" y="140" text-anchor="middle" class="fv-muted" font-size="11">create_goal · update_goal</text>
+    </svg>
+  ) : kind === 'github-tools' ? (
+    <svg class="relative h-auto w-full max-w-[260px] px-6" viewBox="0 0 260 160" fill="none">
+      <rect x="36" y="40" width="88" height="80" rx="12" class="fv-chip" />
+      <rect x="136" y="40" width="88" height="80" rx="12" class="fv-chip" />
+      <text x="80" y="84" text-anchor="middle" class="fv-label" font-size="12">PR</text>
+      <text x="180" y="84" text-anchor="middle" class="fv-label" font-size="12">Issue</text>
+      <text x="130" y="144" text-anchor="middle" class="fv-accent" font-size="11">github_*</text>
+    </svg>
+  ) : kind === 'whisper-dictation' ? (
+    <svg class="relative h-auto w-full max-w-[240px] px-6" viewBox="0 0 240 160" fill="none">
+      <rect x="104" y="36" width="32" height="56" rx="16" class="fv-chip-accent" />
+      <path d="M78 78 C78 104 98 120 120 120 C142 120 162 104 162 78" class="fv-line-accent" />
+      <path d="M120 120 V140" class="fv-line-accent" />
+      <path d="M100 140 H140" class="fv-line-accent" />
+    </svg>
+  ) : kind === 'verify-loop' ? (
+    <svg class="relative h-auto w-full max-w-[260px] px-6" viewBox="0 0 260 160" fill="none">
+      <circle cx="130" cy="78" r="46" class="fv-ring" stroke-dasharray="4 5" />
+      <path d="M108 80 L122 94 L156 60" stroke="var(--av-success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+      <text x="130" y="148" text-anchor="middle" class="fv-muted" font-size="11">diagnostics · tests · lsp</text>
+    </svg>
+  ) : kind === 'notebooks' ? (
+    <svg class="relative h-auto w-full max-w-[240px] px-6" viewBox="0 0 240 160" fill="none">
+      <rect x="48" y="28" width="144" height="104" rx="12" class="fv-chip" />
+      <rect x="64" y="48" width="112" height="16" rx="4" class="fv-chip-accent" />
+      <rect x="64" y="76" width="112" height="10" rx="3" class="fv-chip" />
+      <rect x="64" y="96" width="80" height="10" rx="3" class="fv-chip" />
+    </svg>
+  ) : kind === 'desktop-platforms' ? (
+    <svg class="relative h-auto w-full max-w-[280px] px-6" viewBox="0 0 280 150" fill="none">
+      <rect x="24" y="48" width="70" height="54" rx="10" class="fv-chip" />
+      <rect x="105" y="40" width="70" height="70" rx="14" class="fv-chip-accent" />
+      <rect x="186" y="48" width="70" height="54" rx="10" class="fv-chip" />
+      <text x="59" y="80" text-anchor="middle" class="fv-label" font-size="10">Win</text>
+      <text x="140" y="80" text-anchor="middle" class="fv-accent" font-size="10">macOS</text>
+      <text x="221" y="80" text-anchor="middle" class="fv-label" font-size="10">Linux</text>
+    </svg>
+  ) : (
+    <svg class="relative h-auto w-full max-w-[220px] px-6" viewBox="0 0 220 150" fill="none">
+      <circle cx="110" cy="70" r="36" class="fv-ring" />
+      <circle cx="110" cy="70" r="10" fill="var(--av-accent)" opacity="0.85" />
+    </svg>
+  )}
+</div>
+
+<style>
+  .fv-chip {
+    fill: var(--av-bg);
+    stroke: var(--av-hairline);
+    stroke-width: 1;
+  }
+  .fv-chip-accent {
+    fill: color-mix(in srgb, var(--av-accent) 8%, var(--av-bg));
+    stroke: color-mix(in srgb, var(--av-accent) 35%, transparent);
+    stroke-width: 1;
+  }
+  .fv-ring {
+    fill: none;
+    stroke: var(--av-hairline);
+    stroke-width: 1.25;
+  }
+  .fv-ring-fill {
+    fill: var(--av-bg);
+    stroke: var(--av-hairline);
+    stroke-width: 1.25;
+  }
+  .fv-line {
+    stroke: color-mix(in srgb, var(--av-ink) 35%, transparent);
+    stroke-width: 1.15;
+    fill: none;
+    stroke-linecap: round;
+  }
+  .fv-line-accent {
+    stroke: var(--av-accent);
+    stroke-width: 1.5;
+    fill: none;
+    stroke-linecap: round;
+  }
+  .fv-label {
+    fill: var(--av-ink);
+    font-family: ui-monospace, monospace;
+  }
+  .fv-muted {
+    fill: var(--av-muted);
+    font-family: ui-monospace, monospace;
+  }
+  .fv-accent {
+    fill: var(--av-accent);
+    font-family: ui-monospace, monospace;
+  }
+</style>
