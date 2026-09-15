@@ -1,7 +1,5 @@
 ---
-import { Image } from 'astro:assets';
 import release from '../data/release.json';
-import heroApp from '../assets/hero-app.png';
 import providerIcons from '../data/provider-icons.json';
 import osIcons from '../data/os-icons.json';
 
@@ -211,27 +209,6 @@ const hasRelease =
       </a>
     </div>
 
-    <figure class="mt-14 sm:mt-16 lg:mt-20">
-      <div class="av-squircle overflow-hidden border border-[var(--av-hairline)] bg-[var(--av-panel)] shadow-lg shadow-[var(--av-shadow)]">
-        <div class="flex items-center gap-2 border-b border-[var(--av-hairline)] bg-[var(--av-panel)] px-3 py-2">
-          <span class="size-2.5 rounded-full bg-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]" aria-hidden="true"></span>
-          <span class="size-2.5 rounded-full bg-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]" aria-hidden="true"></span>
-          <span class="size-2.5 rounded-full bg-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]" aria-hidden="true"></span>
-          <p class="mx-auto pr-10 text-center font-mono text-[11px] text-[var(--av-muted)]">Agent V</p>
-        </div>
-        <Image
-          src={heroApp}
-          alt="Agent V — real workspace: three parallel agent instances finishing while a 45-file verified change set is reviewed"
-          format="png"
-          widths={[640, 960, 1280, 1920]}
-          sizes="(min-width: 80rem) 1216px, 92vw"
-          loading="eager"
-          fetchpriority="high"
-          decoding="async"
-          class="relative h-auto w-full"
-        />
-      </div>
-    </figure>
     <div id="providers" class="mt-10 scroll-mt-24 border-t border-[var(--av-hairline)] pt-10 sm:mt-12 sm:pt-12">
       <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between lg:gap-10">
         <div class="max-w-xl">

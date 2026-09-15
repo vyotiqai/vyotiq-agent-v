@@ -1,13 +1,13 @@
 {
   "name": "@vyotiq/landing",
   "version": "0.0.1",
-  "description": "Agent V landing site \u00e2\u20ac\u201d vyotiq.com",
+  "description": "Agent V landing site \u2014 vyotiq.com",
   "type": "module",
   "private": true,
   "license": "GPL-3.0-or-later",
   "scripts": {
     "dev": "astro dev",
-    "build": "node scripts/bake-legal.mjs && node scripts/bake-github-release.mjs && astro build",
+    "build": "node scripts/bake-legal.mjs && node scripts/bake-github-release.mjs && node scripts/bake-github-changelog.mjs && astro build",
     "preview": "astro preview",
     "media:scene": "node scripts/encode-media.mjs detect",
     "media:encode": "node scripts/encode-media.mjs encode",

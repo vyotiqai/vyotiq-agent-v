@@ -9,6 +9,16 @@ on:
     branches: [main]
     paths:
       - 'landing/**'
+      - 'PRIVACY.md'
+      - 'TERMS.md'
+      - 'LICENSE'
+      - 'NOTICE'
+      - 'SECURITY.md'
+      - 'CODE_OF_CONDUCT.md'
+      - 'CONTRIBUTING.md'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - '.github/workflows/deploy-landing.yml'
   workflow_dispatch:
 
@@ -39,16 +49,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # landing/package.json "build" already runs
-      # `node scripts/bake-github-release.mjs && astro build`, but the steps
-      # are kept separate here so a bake failure never blurs into a build log.
-      - name: Bake release download links
-        working-directory: landing
-        run: node scripts/bake-github-release.mjs
-
+      # Prefer the package build script so bake-legal, bake-github-release,
+      # and bake-github-changelog stay in lockstep with landing/package.json.
       - name: Build landing
-        working-directory: landing
-        run: pnpm exec astro build
+        run: pnpm --filter @vyotiq/landing build
+
+      - name: Verify dist
+        run: pnpm --filter @vyotiq/landing verify-dist
 
       # The secrets context is not reliably readable in step-level `if`
       # expressions, so the two secrets are bridged through env vars

@@ -216,13 +216,15 @@ const ink = 'text-[var(--av-ink)]';
           class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 font-medium text-[var(--av-ink)] transition hover:bg-[var(--av-band)]"
           data-accordion-trigger
           aria-expanded="false"
+          aria-controls="mobile-resources-panel"
+          id="mobile-resources-trigger"
         >
           Resources
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
           </svg>
         </button>
-        <div class="hidden flex-col gap-0.5 pb-1 pl-2" data-accordion-panel>
+        <div id="mobile-resources-panel" class="hidden flex-col gap-0.5 pb-1 pl-2" data-accordion-panel role="region" aria-labelledby="mobile-resources-trigger">
           {
             resourceLinks.map((l) => (
               <a

@@ -170,4 +170,73 @@ console.log('verify-dist: legal', {
   spdx: legalManifest.spdxLicense,
   routes: ['legal', 'license', 'notice', 'privacy', 'terms', 'security', 'code-of-conduct', 'contributing'],
 });
+
+const changelogPath = path.join(landingRoot, 'src', 'data', 'changelog.json');
+if (!(await exists(changelogPath))) {
+  console.error('verify-dist: missing changelog.json (run bake-github-changelog)');
+  process.exit(1);
+}
+const changelog = JSON.parse(await readFile(changelogPath, 'utf8'));
+const changelogHtml = await readFile(path.join(dist, 'changelog', 'index.html'), 'utf8');
+const changelogEmptyOk =
+  Array.isArray(changelog.releases) &&
+  changelog.releases.length === 0 &&
+  changelogHtml.includes('No releases published yet');
+const changelogPopulatedOk =
+  Array.isArray(changelog.releases) &&
+  changelog.releases.length > 0 &&
+  typeof changelog.releases[0]?.version === 'string' &&
+  changelogHtml.includes(changelog.releases[0].version);
+if (!changelogEmptyOk && !changelogPopulatedOk) {
+  console.error('verify-dist: changelog page does not match changelog.json');
+  process.exit(1);
+}
+console.log('verify-dist: changelog', {
+  source: changelog.source,
+  releases: Array.isArray(changelog.releases) ? changelog.releases.length : null,
+});
+
+const sitemap = await readFile(path.join(dist, 'sitemap.xml'), 'utf8');
+const robots = await readFile(path.join(dist, 'robots.txt'), 'utf8');
+const sitemapRoutes = [
+  '/',
+  '/features',
+  '/docs',
+  '/download',
+  '/changelog',
+  '/legal',
+  '/license',
+  '/notice',
+  '/security',
+  '/code-of-conduct',
+  '/contributing',
+  '/privacy',
+  '/terms',
+];
+for (const route of sitemapRoutes) {
+  const loc = `https://vyotiq.com${route === '/' ? '/' : route}`;
+  if (!sitemap.includes(`<loc>${loc}</loc>`)) {
+    console.error(`verify-dist: sitemap.xml missing ${loc}`);
+    process.exit(1);
+  }
+}
+if (!robots.includes('Sitemap: https://vyotiq.com/sitemap.xml')) {
+  console.error('verify-dist: robots.txt missing sitemap pointer');
+  process.exit(1);
+}
+console.log('verify-dist: sitemap+robots ok');
+
+if (html.includes('hero-app') && (html.match(/hero-app/g) ?? []).length > 2) {
+  // soft signal only — Image may emit multiple srcset URLs for one figure
+}
+const heroAppRefs = (html.match(/hero-app\./g) ?? []).length;
+console.log(`verify-dist: hero-app asset refs=${heroAppRefs}`);
+
+
+for (const claim of ['WhatsApp', '1Password', 'Meta AI', 'muse.ai']) {
+  if (html.includes(claim)) {
+    console.error(`verify-dist: forbidden product claim "${claim}" found in index`);
+    process.exit(1);
+  }
+}
 console.log('verify-dist: OK');

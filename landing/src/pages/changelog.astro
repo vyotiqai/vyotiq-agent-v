@@ -3,8 +3,31 @@ import Layout from '../layouts/Layout.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 import PageHero from '../components/PageHero.astro';
+import changelog from '../data/changelog.json';
 
 const RELEASES = 'https://github.com/vyotiqai/vyotiq-agent-v-releases';
+
+const releases = Array.isArray(changelog.releases) ? changelog.releases : [];
+
+const formatDate = (iso: string | null) => {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(date);
+};
+
+/** Escape HTML so GitHub release bodies never execute as markup. */
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 ---
 
 <Layout
@@ -17,21 +40,81 @@ const RELEASES = 'https://github.com/vyotiqai/vyotiq-agent-v-releases';
     <PageHero
       eyebrow="Resources"
       title="Changelog"
-      lede="Every release of Agent V, newest first."
+      lede="Every release of Agent V, newest first — sourced from the companion releases repository at build time."
       narrow
     />
     <div class="mx-auto w-full max-w-3xl px-4 pb-24 sm:px-6">
-      <section class="rounded border border-dashed border-[var(--av-hairline)] bg-[var(--av-panel)] px-8 py-12 text-center sm:px-10">
-        <p class="font-mono text-sm font-medium text-[color-mix(in_srgb,var(--av-ink)_70%,transparent)]">
-          No releases published yet
-        </p>
-        <p class="mx-auto mt-3 max-w-md text-[15px] leading-7 text-[color-mix(in_srgb,var(--av-ink)_65%,transparent)]">
-          Installers and release notes for each version will live in the
-          <a href={RELEASES} target="_blank" rel="noopener noreferrer" class="av-link">
-            companion releases repository ↗
-          </a>.
-        </p>
-      </section>
+      {
+        releases.length === 0 ? (
+          <section class="rounded border border-dashed border-[var(--av-hairline)] bg-[var(--av-panel)] px-8 py-12 text-center sm:px-10">
+            <p class="font-mono text-sm font-medium text-[color-mix(in_srgb,var(--av-ink)_70%,transparent)]">
+              No releases published yet
+            </p>
+            <p class="mx-auto mt-3 max-w-md text-[15px] leading-7 text-[color-mix(in_srgb,var(--av-ink)_65%,transparent)]">
+              Installers and release notes for each version will live in the
+              <a href={RELEASES} target="_blank" rel="noopener noreferrer" class="av-link">
+                companion releases repository ↗
+              </a>
+              .
+            </p>
+          </section>
+        ) : (
+          <ol class="space-y-6">
+            {releases.map((release) => {
+              const date = formatDate(release.publishedAt);
+              const title = release.version || release.tag || 'Release';
+              const body = typeof release.body === 'string' ? release.body.trim() : '';
+              return (
+                <li class="rounded border border-[var(--av-hairline)] bg-[var(--av-panel)] px-5 py-5 sm:px-6">
+                  <div class="flex flex-wrap items-baseline justify-between gap-2">
+                    <h2 class="text-lg font-semibold tracking-tight text-[var(--av-ink)]">
+                      {release.url ? (
+                        <a
+                          href={release.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="hover:text-[var(--av-accent)]"
+                        >
+                          {title}
+                        </a>
+                      ) : (
+                        title
+                      )}
+                      {release.prerelease ? (
+                        <span class="ml-2 rounded-full border border-[var(--av-hairline)] px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-[var(--av-muted)]">
+                          Pre-release
+                        </span>
+                      ) : null}
+                    </h2>
+                    {date ? <time class="text-sm text-[var(--av-muted)]" datetime={release.publishedAt ?? undefined}>{date}</time> : null}
+                  </div>
+                  {body ? (
+                    <pre
+                      class="mt-4 overflow-x-auto whitespace-pre-wrap break-words font-sans text-[14px] leading-6 text-[color-mix(in_srgb,var(--av-ink)_72%,transparent)]"
+                      set:html={escapeHtml(body)}
+                    />
+                  ) : null}
+                  {release.url ? (
+                    <p class="mt-4">
+                      <a href={release.url} target="_blank" rel="noopener noreferrer" class="av-link text-sm">
+                        View on GitHub ↗
+                      </a>
+                    </p>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ol>
+        )
+      }
+      <p class="mt-10 text-sm text-[var(--av-muted)]">
+        Source:{' '}
+        <a href={RELEASES} target="_blank" rel="noopener noreferrer" class="av-link">
+          vyotiqai/vyotiq-agent-v-releases ↗
+        </a>
+        {changelog.source === 'github' ? ' (baked from GitHub at build time)' : ' (no releases baked yet — fallback empty list)'}
+        .
+      </p>
     </div>
   </main>
   <Footer />
