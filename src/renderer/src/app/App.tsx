@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AppShell } from './AppShell'
 import { launchViewFor } from './launchView'
+import { needsDraftChatAfterWorkspaceAdd } from './workspaceAddHandoff'
 import { pinnedRunKey, prunePinnedRun, togglePinnedRun } from '../features/home/pinnedRuns'
 import { ChatView } from '../features/chat/ChatView'
 import { SessionChatColumn } from '../features/chat/SessionChatColumn'
@@ -665,11 +666,33 @@ function App() {
     [newChatInWorkspace, setComposerDraftForPane]
   )
 
+  const focusComposerSoon = useCallback((): void => {
+    let attempts = 0
+    const tryFocus = (): void => {
+      if (focusComposerMessage()) return
+      if (attempts++ < 10) window.setTimeout(tryFocus, 0)
+    }
+    window.setTimeout(tryFocus, 0)
+  }, [])
+
+  /** After a successful add: show Chat, draft if fresh, focus composer. */
+  const handoffToChatAfterWorkspaceAdd = useCallback(
+    (activePath: string, activeRunId: string | null): void => {
+      setOpenInstanceByParent({})
+      setView('chat')
+      if (needsDraftChatAfterWorkspaceAdd(activeRunId)) {
+        void newChatInWorkspace(activePath)
+      }
+      focusComposerSoon()
+    },
+    [focusComposerSoon, newChatInWorkspace]
+  )
+
   const onPickWorkspace = (): void => {
     void pickWorkspace().then(async (res) => {
-      if (res.ok && res.data) {
-        await addWorkspace(res.data)
-      }
+      if (!res.ok || !res.data) return
+      const added = await addWorkspace(res.data)
+      if (added) handoffToChatAfterWorkspaceAdd(added.activePath, added.activeRunId)
     })
   }
 
@@ -2112,7 +2135,10 @@ function App() {
             customCssError={customCssError}
             onPickWorkspace={async () => {
               const res = await pickWorkspace()
-              if (res.ok && res.data) await addWorkspace(res.data)
+              if (res.ok && res.data) {
+                const added = await addWorkspace(res.data)
+                if (added) handoffToChatAfterWorkspaceAdd(added.activePath, added.activeRunId)
+              }
               return res
             }}
             activeWorkspacePath={focusedWorkspacePath ?? activeWorkspace}
