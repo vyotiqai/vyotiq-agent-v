@@ -1954,8 +1954,10 @@ export function useWorkspaceManager(options?: {
   )
 
   const addWorkspace = useCallback(
-    async (path?: string): Promise<void> => {
-      if (!window.vyotiq?.addWorkspace) return
+    async (
+      path?: string
+    ): Promise<{ activePath: string; activeRunId: string | null } | null> => {
+      if (!window.vyotiq?.addWorkspace) return null
       const res = await window.vyotiq.addWorkspace(path)
       if (res.ok) {
         setWorkspaceError(null)
@@ -1983,17 +1985,15 @@ export function useWorkspaceManager(options?: {
           }
           setChatSurfaceEpoch((t) => t + 1)
           setScrollRestoreToken((t) => t + 1)
-          // Fresh workspace (no prior active run) → land on a new chat with the
-          // composer focused, mirroring onNewChat. Re-added workspaces with an
-          // existing active run keep focus on reviewing that run.
-          if (!visibleRunId) {
-            requestAnimationFrame(() =>
-              requestAnimationFrame(() => focusComposerMessage())
-            )
-          }
+          // Composer focus for a fresh workspace is owned by App after setView('chat')
+          // so focus runs once Chat is mounted. Returning activeRunId lets App open a
+          // draft session when null, or keep the persisted run on re-add.
+          return { activePath: addedActive, activeRunId: visibleRunId }
         }
+        return null
       } else {
         setWorkspaceError(res.error)
+        return null
       }
     },
     [applyRegistry, ensureController, loadRunTranscript, refreshRuns]
