@@ -3,21 +3,27 @@ import type { ToolApprovalMode } from '@shared/ipc'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
 import { Alert, Button } from '@renderer/lib/ui'
 
-const MODES: { mode: ToolApprovalMode; label: string; description: string }[] = [
-  {
-    mode: 'off',
-    label: 'Off',
-    description: 'Run tools without asking (current default).'
-  },
+const MODES: {
+  mode: ToolApprovalMode
+  label: string
+  description: string
+  recommended?: boolean
+}[] = [
   {
     mode: 'mutating',
     label: 'Mutating tools',
-    description: 'Ask before file edits, terminal, and other mutating tools.'
+    description: 'Ask before file edits, terminal, and other changes. Reads can run without asking.',
+    recommended: true
+  },
+  {
+    mode: 'off',
+    label: 'Off',
+    description: 'Run tools without asking. Faster; riskier on unfamiliar repos.'
   },
   {
     mode: 'all',
     label: 'All tools',
-    description: 'Ask before every tool call, including reads.'
+    description: 'Ask before every tool, including reads. Maximum control; more interruptions.'
   }
 ]
 
@@ -51,8 +57,8 @@ export function ToolApprovalOnboardingModal({
             Tool approval
           </h2>
           <p id={descId} className="m-0 mt-1 text-sm text-secondary">
-            Choose whether Agent V should ask before the agent runs tools. You can change this
-            anytime in Settings → Tools.
+            Choose when Agent V should ask before running tools on this workspace. You can change
+            this anytime in Settings → Tools.
           </p>
         </div>
         {error ? <Alert>{error}</Alert> : null}
@@ -60,12 +66,19 @@ export function ToolApprovalOnboardingModal({
           {MODES.map((item) => (
             <button
               key={item.mode}
-              ref={item.mode === 'off' ? initialFocusRef : undefined}
+              ref={item.mode === 'mutating' ? initialFocusRef : undefined}
               type="button"
               className="rounded-xl border border-border bg-surface-2 px-3 py-2 text-left transition-colors hover:bg-surface"
               onClick={() => onChoose(item.mode)}
             >
-              <div className="text-sm font-medium text-fg-strong">{item.label}</div>
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-medium text-fg-strong">{item.label}</div>
+                {item.recommended ? (
+                  <span className="rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
+                    Recommended
+                  </span>
+                ) : null}
+              </div>
               <div className="text-xs text-secondary">{item.description}</div>
             </button>
           ))}

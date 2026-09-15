@@ -752,14 +752,12 @@ function App() {
     [flushPendingSend, settings.toolApproval, update]
   )
 
-  const dismissApprovalOnboarding = useCallback(async () => {
+  const dismissApprovalOnboarding = useCallback(() => {
+    // Close without sending and without marking onboarding done or forcing Off.
+    // The next send re-opens the modal until the user picks an explicit mode.
     pendingSendRef.current = null
-    await update({
-      toolApproval: { ...settings.toolApproval, mode: 'off' },
-      toolApprovalOnboardingDone: true
-    })
     setApprovalOnboardingOpen(false)
-  }, [settings.toolApproval, update])
+  }, [])
 
   const gateSendWithOnboarding = useCallback(
     async (
