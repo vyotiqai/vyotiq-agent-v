@@ -1,0 +1,116 @@
+---
+/**
+ * Compact secondary capabilities — grouped categories, not a longer list.
+ * Same ~6-row footprint; each row packs related capabilities as chips.
+ * Flagships stay tall: ParallelWorktrees, AgentModes, AgentBrowser.
+ */
+const groups = [
+  {
+    id: 'memory-index',
+    title: 'Memory & retrieval',
+    anchor: '.vyotiq/memory · codeIndex',
+    chips: [
+      { label: 'File-backed memory', detail: 'memory_list / read / write' },
+      { label: 'Local code index', detail: 'SQLite, reindex on-device' },
+    ],
+  },
+  {
+    id: 'extend',
+    title: 'Extend the agent',
+    anchor: '/marketplace · Skill',
+    chips: [
+      { label: 'MCP + marketplace', detail: 'mcp__server__tool' },
+      { label: 'Skills & plugins', detail: 'SKILL.md · /create-skill' },
+    ],
+  },
+  {
+    id: 'control',
+    title: 'Stay in control',
+    anchor: 'isToolGated · ask_question',
+    chips: [
+      { label: 'Tool approval', detail: 'Allow / Deny · 15m auto-deny' },
+      { label: 'ask_question', detail: 'Structured mid-run prompts' },
+    ],
+  },
+  {
+    id: 'models',
+    title: 'Models you bring',
+    anchor: 'ProviderId · ThinkingEffort',
+    chips: [
+      { label: 'BYO providers', detail: 'OpenAI · Anthropic · Gemini · Ollama · more' },
+      { label: 'Thinking effort', detail: 'minimal to max per model' },
+    ],
+  },
+  {
+    id: 'ship',
+    title: 'Goals & GitHub',
+    anchor: 'create_goal · github_*',
+    chips: [
+      { label: 'Goals', detail: 'create_goal / update_goal' },
+      { label: 'GitHub', detail: 'PR create · review · issues' },
+    ],
+  },
+  {
+    id: 'local-loop',
+    title: 'Local loop',
+    anchor: 'dictation · diagnostics',
+    chips: [
+      { label: 'Whisper dictation', detail: 'On-device STT' },
+      { label: 'Verify', detail: 'diagnostics · run_tests · lsp' },
+      { label: 'Notebooks', detail: 'edit_notebook' },
+    ],
+  },
+] as const;
+---
+
+<article
+  id="more-features"
+  class="scroll-mt-24"
+  aria-labelledby="more-features-heading"
+>
+  <div class="mx-auto av-max px-4 pt-16 pb-24 sm:px-6 sm:pt-20 sm:pb-32 lg:px-10">
+    <div class="mb-5 flex flex-col gap-1.5 sm:mb-6 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
+          Also in Agent V
+        </p>
+        <h3
+          id="more-features-heading"
+          class="mt-1 text-lg font-semibold tracking-tight text-[var(--av-ink)] sm:text-xl"
+        >
+          The rest of the stack
+        </h3>
+      </div>
+      <p class="max-w-sm text-sm leading-relaxed text-[var(--av-muted)] sm:text-right">
+        Everything else, kept scannable.
+      </p>
+    </div>
+
+    <ul class="divide-y divide-[var(--av-hairline)] border-y border-[var(--av-hairline)]">
+      {
+        groups.map((group) => (
+          <li id={`more-${group.id}`}>
+            <div class="flex flex-col gap-2 py-2.5 sm:flex-row sm:items-start sm:gap-6 sm:py-2">
+              <div class="sm:w-44 sm:shrink-0">
+                <h4 class="text-sm font-semibold tracking-tight text-[var(--av-ink)]">{group.title}</h4>
+                <p class="mt-0.5 font-mono text-[10px] leading-snug text-[var(--av-accent)]">{group.anchor}</p>
+              </div>
+              <div class="min-w-0 flex-1">
+                <ul class="flex flex-wrap gap-1.5" aria-label={`${group.title} capabilities`}>
+                  {group.chips.map((chip) => (
+                    <li>
+                      <span class="inline-flex max-w-full flex-col rounded border border-[var(--av-hairline)] bg-[var(--av-panel)] px-2 py-1 sm:flex-row sm:items-baseline sm:gap-1.5">
+                        <span class="text-[12px] font-medium text-[var(--av-ink)]">{chip.label}</span>
+                        <span class="font-mono text-[10px] text-[var(--av-muted)]">{chip.detail}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</article>

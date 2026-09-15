@@ -1,0 +1,45 @@
+---
+import release from '../data/release.json';
+
+const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
+const downloadHref =
+  release.version && release.url ? release.url : '/download';
+---
+
+<section class="bg-[var(--av-bg)] px-4 py-24 sm:px-6 sm:py-32" aria-labelledby="final-cta-heading">
+  <div class="mx-auto max-w-2xl text-center">
+    <h2
+      id="final-cta-heading"
+      class="text-[clamp(2.25rem,6vw,4rem)] font-semibold leading-[1.05] tracking-tight text-[var(--av-ink)]"
+    >
+      Try Agent V now.
+    </h2>
+    <p class="mx-auto mt-4 max-w-md text-base text-[var(--av-muted)]">
+      Free and open source. Runs on your machine with the models you already use.
+    </p>
+    <div class="mt-8 flex flex-col items-center gap-3">
+      <a
+        href={downloadHref}
+        class="av-cta-primary w-full max-w-sm px-7 py-3.5 text-base"
+      >
+        Download Agent V
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path
+            d="M12 4v12m0 0-5-5m5 5 5-5"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"></path>
+        </svg>
+      </a>
+      <a
+        href={REPO}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="av-cta-secondary w-full max-w-sm px-7 py-3.5 text-base"
+      >
+        View on GitHub
+      </a>
+    </div>
+  </div>
+</section>

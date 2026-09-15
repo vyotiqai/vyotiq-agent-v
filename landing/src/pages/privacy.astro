@@ -1,0 +1,38 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import LegalDocument from '../components/LegalDocument.astro';
+import { legalFileMeta, markdownToHtml } from '../lib/legal';
+import manifest from '../data/legal-manifest.json';
+
+const meta = legalFileMeta('PRIVACY.md');
+const baked = manifest.files.find((f) => f.id === 'privacy');
+if (!baked || baked.sha256 !== meta.sha256) {
+  throw new Error('PRIVACY.md sha256 mismatch between repo file and legal-manifest (run bake-legal)');
+}
+const html = markdownToHtml(meta.text);
+---
+
+<Layout
+  title="Privacy Policy — Agent V"
+  description="Privacy Policy for Agent V / Vyotiq, from the repository PRIVACY.md."
+  canonical="https://vyotiq.com/privacy"
+>
+  <Nav />
+  <main id="main">
+    <LegalDocument
+      eyebrow="Legal"
+      title="Privacy Policy"
+      lede="This page renders the repository PRIVACY.md file."
+      sourceName="PRIVACY.md"
+      rawPath="/legal/PRIVACY.md"
+      githubUrl="https://github.com/vyotiqai/vyotiq-agent-v/blob/main/PRIVACY.md"
+      bytes={meta.bytes}
+      sha256={meta.sha256}
+      mode="html"
+      html={html}
+    />
+  </main>
+  <Footer />
+</Layout>

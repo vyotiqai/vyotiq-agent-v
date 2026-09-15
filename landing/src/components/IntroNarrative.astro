@@ -1,0 +1,36 @@
+---
+import { Image } from 'astro:assets';
+import heroApp from '../assets/hero-app.png';
+---
+
+<section id="intro" class="scroll-mt-24 bg-[var(--av-bg)]" aria-labelledby="intro-heading">
+  <div class="av-max mx-auto px-4 py-20 sm:px-6 sm:py-28 lg:px-10">
+    <div class="mx-auto max-w-3xl text-center">
+      <h2
+        id="intro-heading"
+        class="text-[clamp(1.85rem,4vw,3rem)] font-semibold leading-[1.12] tracking-tight text-[var(--av-ink)]"
+      >
+        Built for the repos you already ship
+      </h2>
+      <p class="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-[color-mix(in_srgb,var(--av-ink)_58%,transparent)] sm:text-lg">
+        Give Agent V a task in your checkout and it handles the rest — read the code, make the change,
+        run it, and check its own work — with the models you already use, keys staying on your machine.
+      </p>
+    </div>
+
+    <figure class="mx-auto mt-12 max-w-5xl sm:mt-16">
+      <div class="av-squircle overflow-hidden border border-[var(--av-hairline)] bg-[var(--av-panel)] shadow-lg shadow-[var(--av-shadow)]">
+        <Image
+          src={heroApp}
+          alt="Agent V workspace with parallel agent instances and a verified change set under review"
+          format="png"
+          widths={[640, 960, 1280, 1600]}
+          sizes="(min-width: 80rem) 1024px, 90vw"
+          loading="lazy"
+          decoding="async"
+          class="h-auto w-full"
+        />
+      </div>
+    </figure>
+  </div>
+</section>

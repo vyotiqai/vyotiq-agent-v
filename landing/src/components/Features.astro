@@ -1,0 +1,52 @@
+---
+import ParallelWorktrees from './ParallelWorktrees.astro';
+import AgentModes from './AgentModes.astro';
+import AgentBrowser from './AgentBrowser.astro';
+import MoreFeatures from './MoreFeatures.astro';
+
+interface Props {
+  /** Hide the home intro when the page already has a PageHero */
+  hideIntro?: boolean;
+}
+
+const { hideIntro = false } = Astro.props;
+---
+
+<section id="features" class="scroll-mt-24" aria-labelledby={hideIntro ? undefined : 'features-heading'}>
+  {
+    hideIntro ? null : (
+      <div class="av-max mx-auto px-4 pt-8 sm:px-6 sm:pt-12 lg:px-10">
+        <header class="mx-auto max-w-3xl pb-6 text-center sm:pb-10">
+          <p class="inline-flex items-center gap-1.5 rounded-full border border-[var(--av-hairline)] bg-[var(--av-panel)] px-3.5 py-1 text-xs font-medium text-[color-mix(in_srgb,var(--av-ink)_70%,transparent)]">
+            <span class="size-1.5 rounded-full bg-[var(--av-accent)]" aria-hidden="true"></span>
+            Features
+          </p>
+          <h2
+            id="features-heading"
+            class="mt-5 text-[clamp(1.85rem,3.5vw,2.75rem)] font-semibold leading-[1.12] tracking-tight text-[var(--av-ink)]"
+          >
+            Capabilities that earn their keep
+          </h2>
+          <p class="mx-auto mt-4 max-w-xl text-base leading-relaxed text-[color-mix(in_srgb,var(--av-ink)_58%,transparent)]">
+            Parallel instances, Ask / Plan / Agent modes, a built-in browser, and the rest of the stack — each grounded in real tools from the app.
+          </p>
+        </header>
+      </div>
+    )
+  }
+
+  <div class="flex flex-col">
+    <div class="bg-[var(--av-band)]">
+      <ParallelWorktrees />
+    </div>
+    <div class="bg-[var(--av-panel)]">
+      <AgentModes />
+    </div>
+    <div class="bg-[var(--av-band)]">
+      <AgentBrowser />
+    </div>
+    <div class="bg-[var(--av-bg)]">
+      <MoreFeatures />
+    </div>
+  </div>
+</section>

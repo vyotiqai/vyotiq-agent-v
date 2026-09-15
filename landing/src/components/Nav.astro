@@ -3,24 +3,160 @@ import release from '../data/release.json';
 
 const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
 const downloadHref =
-  release.version && release.url ? release.url : `${REPO}#build-from-source`;
+  release.version && release.url ? release.url : '/download';
+
+const pathname = Astro.url.pathname.replace(/\/$/, '') || '/';
+
+const resourceLinks = [
+  { href: '/docs', label: 'Docs' },
+  { href: '/changelog', label: 'Changelog' },
+  { href: '/docs#quick-start', label: 'Quick start' },
+  { href: '/contributing', label: 'Contributing' },
+  { href: REPO, label: 'GitHub', external: true },
+  { href: '/legal', label: 'Legal' },
+  { href: '/license', label: 'License' },
+  { href: '/notice', label: 'Notices' },
+  { href: '/privacy', label: 'Privacy' },
+  { href: '/terms', label: 'Terms' },
+  { href: '/security', label: 'Security' },
+  { href: '/code-of-conduct', label: 'Code of Conduct' },
+  { href: 'mailto:support@vyotiq.com', label: 'Support' },
+];
+
+const isActive = (href: string) => {
+  const path = href.split('#')[0];
+  if (!path || path === '/') return pathname === '/';
+  return pathname === path || pathname.startsWith(path + '/');
+};
+
+const muted = 'text-[color-mix(in_srgb,var(--av-ink)_55%,transparent)]';
+const ink = 'text-[var(--av-ink)]';
 ---
 
-<header class="sticky top-0 z-50 border-b border-zinc-200/80 bg-[#faf9f7]/90 backdrop-blur dark:border-zinc-800/80 dark:bg-[#09090b]/90">
-  <nav class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6" aria-label="Main">
-    <a href="#top" class="flex items-center">
-      <img src="/brand/vyotiq-lockup-black.svg" alt="Vyotiq" width="115" height="29" class="h-6 w-auto dark:hidden" />
-      <img src="/brand/vyotiq-lockup-white.svg" alt="Vyotiq" width="115" height="29" class="hidden h-6 w-auto dark:block" />
+<header class="sticky top-0 z-50 border-b border-[var(--av-hairline)] bg-[var(--av-panel)]">
+  <nav
+    class="av-max mx-auto flex h-[52px] items-center gap-4 px-4 sm:px-6 lg:px-10"
+    aria-label="Main"
+  >
+    <a href="/" class="flex shrink-0 items-center" aria-label="Agent V home">
+      <img
+        src="/brand/vyotiq-lockup-black.svg"
+        alt="Vyotiq"
+        width="115"
+        height="29"
+        class="h-5 w-auto dark:hidden"
+      />
+      <img
+        src="/brand/vyotiq-lockup-white.svg"
+        alt="Vyotiq"
+        width="115"
+        height="29"
+        class="hidden h-5 w-auto dark:block"
+      />
     </a>
-    <div class="flex items-center gap-2">
+
+    <div class="hidden flex-1 items-center justify-center gap-1 md:flex">
+      <a
+        href="/features"
+        class:list={[
+          'rounded-full px-3 py-1.5 text-[13px] transition hover:text-[var(--av-ink)]',
+          isActive('/features') ? ink : muted,
+        ]}
+        aria-current={isActive('/features') ? 'page' : undefined}
+      >
+        Features
+      </a>
+      <a
+        href="/download"
+        class:list={[
+          'rounded-full px-3 py-1.5 text-[13px] transition hover:text-[var(--av-ink)]',
+          isActive('/download') ? ink : muted,
+        ]}
+        aria-current={isActive('/download') ? 'page' : undefined}
+      >
+        Download
+      </a>
+      <div class="relative flex items-center" data-nav-flyout>
+        <a
+          href="/docs"
+          class:list={[
+            'rounded-full px-3 py-1.5 text-[13px] transition hover:text-[var(--av-ink)]',
+            isActive('/docs') ||
+            isActive('/changelog') ||
+            isActive('/legal') ||
+            isActive('/license') ||
+            isActive('/notice') ||
+            isActive('/security') ||
+            isActive('/code-of-conduct') ||
+            isActive('/contributing') ||
+            isActive('/privacy') ||
+            isActive('/terms')
+              ? ink
+              : muted,
+          ]}
+        >
+          Resources
+        </a>
+        <button
+          type="button"
+          class:list={[
+            'inline-flex size-7 items-center justify-center rounded-full transition hover:bg-[var(--av-band)] hover:text-[var(--av-ink)]',
+            muted,
+          ]}
+          data-flyout-trigger
+          aria-expanded="false"
+          aria-haspopup="true"
+          aria-controls="resources-flyout"
+          aria-label="Open Resources menu"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true" class="opacity-70">
+            <path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+        </button>
+        <div
+          id="resources-flyout"
+          data-flyout-panel
+          class="av-flyout absolute left-0 top-full z-50 mt-2 hidden w-[24rem] rounded-[1.25rem] border border-[var(--av-hairline)] bg-[var(--av-panel)] p-2"
+          role="menu"
+        >
+          <div class="grid grid-cols-2 gap-0.5">
+            {
+              resourceLinks.map((l) => (
+                <a
+                  href={l.href}
+                  role="menuitem"
+                  target={l.external ? '_blank' : undefined}
+                  rel={l.external ? 'noopener noreferrer' : undefined}
+                  class:list={[
+                    'flex items-center gap-1 rounded-xl px-3 py-2 text-[13px] transition hover:bg-[var(--av-band)]',
+                    isActive(l.href)
+                      ? 'font-medium text-[var(--av-ink)]'
+                      : 'text-[color-mix(in_srgb,var(--av-ink)_70%,transparent)]',
+                  ]}
+                >
+                  {l.label}
+                  {l.external ? (
+                    <span aria-hidden="true" class="text-[10px] opacity-60">
+                      ↗
+                    </span>
+                  ) : null}
+                </a>
+              ))
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ml-auto flex items-center gap-1.5 sm:gap-2">
       <button
         id="theme-toggle"
         type="button"
         aria-label="Toggle theme"
-        class="inline-flex size-9 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950"
+        class="inline-flex size-8 items-center justify-center rounded-full text-[var(--av-muted)] transition hover:bg-[var(--av-band)] hover:text-[var(--av-ink)]"
       >
         <svg
-          class="hidden size-[18px] dark:block"
+          class="hidden size-[16px] dark:block"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -34,7 +170,7 @@ const downloadHref =
           ></path>
         </svg>
         <svg
-          class="size-[18px] dark:hidden"
+          class="size-[16px] dark:hidden"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -47,34 +183,19 @@ const downloadHref =
         </svg>
       </button>
       <a
-        href={REPO}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="GitHub repository"
-        class="inline-flex size-9 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950"
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path
-            d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12Z"
-          ></path>
-        </svg>
-      </a>
-      <a
         href={downloadHref}
-        target="_blank"
-        rel="noopener noreferrer"
-        class="hidden rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-700 sm:inline-flex"
+        class="av-cta-primary hidden !min-h-0 px-4 py-1.5 text-[13px] sm:inline-flex"
       >
-        Get Agent V
+        Download
       </a>
       <button
         id="menu-toggle"
-        class="inline-flex size-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-600 transition hover:text-zinc-950 md:hidden"
+        class="inline-flex size-8 items-center justify-center rounded-full border border-[var(--av-hairline)] text-[var(--av-muted)] transition hover:text-[var(--av-ink)] md:hidden"
         aria-expanded="false"
         aria-controls="mobile-menu"
         aria-label="Open menu"
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path
             d="M4 7h16M4 12h16M4 17h16"
             stroke="currentColor"
@@ -84,22 +205,81 @@ const downloadHref =
       </button>
     </div>
   </nav>
-  <div id="mobile-menu" class="hidden border-t border-zinc-100 md:hidden">
-    <nav class="mx-auto flex max-w-7xl flex-col gap-1 px-4 py-3 text-sm sm:px-6" aria-label="Mobile">
-      <a href={REPO} target="_blank" rel="noopener noreferrer" class="rounded-lg px-3 py-2.5 text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950">GitHub</a>
-      <a
-        href={downloadHref}
-        target="_blank"
-        rel="noopener noreferrer"
-        class="rounded-lg px-3 py-2.5 font-semibold text-zinc-950 transition hover:bg-zinc-100"
-      >
-        Get Agent V
+
+  <div id="mobile-menu" class="hidden border-t border-[var(--av-hairline)] md:hidden">
+    <nav class="av-max mx-auto flex flex-col gap-1 px-4 py-3 text-sm sm:px-6" aria-label="Mobile">
+      <a href="/features" class="rounded-xl px-3 py-2.5 font-medium text-[var(--av-ink)] transition hover:bg-[var(--av-band)]">Features</a>
+      <a href="/download" class="rounded-xl px-3 py-2.5 font-medium text-[var(--av-ink)] transition hover:bg-[var(--av-band)]">Download</a>
+      <div data-mobile-accordion>
+        <button
+          type="button"
+          class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 font-medium text-[var(--av-ink)] transition hover:bg-[var(--av-band)]"
+          data-accordion-trigger
+          aria-expanded="false"
+        >
+          Resources
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+        </button>
+        <div class="hidden flex-col gap-0.5 pb-1 pl-2" data-accordion-panel>
+          {
+            resourceLinks.map((l) => (
+              <a
+                href={l.href}
+                target={l.external ? '_blank' : undefined}
+                rel={l.external ? 'noopener noreferrer' : undefined}
+                class="rounded-xl px-3 py-2 text-[color-mix(in_srgb,var(--av-ink)_75%,transparent)] transition hover:bg-[var(--av-band)] hover:text-[var(--av-ink)]"
+              >
+                {l.label}
+                {l.external ? ' ↗' : ''}
+              </a>
+            ))
+          }
+        </div>
+      </div>
+      <a href={downloadHref} class="rounded-xl px-3 py-2.5 font-semibold text-[var(--av-ink)] transition hover:bg-[var(--av-band)]">
+        Download Agent V
       </a>
     </nav>
   </div>
 </header>
 
 <script>
+  const flyouts = Array.from(document.querySelectorAll('[data-nav-flyout]'));
+  const closeAllFlyouts = () => {
+    flyouts.forEach((root) => {
+      const trigger = root.querySelector('[data-flyout-trigger]');
+      const panel = root.querySelector('[data-flyout-panel]');
+      panel?.classList.add('hidden');
+      trigger?.setAttribute('aria-expanded', 'false');
+    });
+  };
+  flyouts.forEach((root) => {
+    const trigger = root.querySelector('[data-flyout-trigger]');
+    const panel = root.querySelector('[data-flyout-panel]');
+    trigger?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const willOpen = panel?.classList.contains('hidden');
+      closeAllFlyouts();
+      if (willOpen) {
+        panel?.classList.remove('hidden');
+        trigger.setAttribute('aria-expanded', 'true');
+      }
+    });
+    panel?.querySelectorAll('a').forEach((a) =>
+      a.addEventListener('click', () => closeAllFlyouts()),
+    );
+  });
+  document.addEventListener('click', (e) => {
+    if (!(e.target instanceof Node)) return;
+    if (!flyouts.some((f) => f.contains(e.target as Node))) closeAllFlyouts();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAllFlyouts();
+  });
+
   const toggle = document.getElementById('menu-toggle');
   const menu = document.getElementById('mobile-menu');
   toggle?.addEventListener('click', () => {
@@ -114,6 +294,18 @@ const downloadHref =
       toggle?.setAttribute('aria-expanded', 'false');
     }),
   );
+
+  menu?.querySelectorAll('[data-mobile-accordion]').forEach((acc) => {
+    const btn = acc.querySelector('[data-accordion-trigger]');
+    const panel = acc.querySelector('[data-accordion-panel]');
+    btn?.addEventListener('click', () => {
+      const open = panel?.classList.toggle('hidden') === false;
+      if (open) panel?.classList.add('flex');
+      else panel?.classList.remove('flex');
+      btn.setAttribute('aria-expanded', String(open));
+    });
+  });
+
   const themeToggle = document.getElementById('theme-toggle');
   themeToggle?.addEventListener('click', () => {
     const dark = document.documentElement.classList.toggle('dark');

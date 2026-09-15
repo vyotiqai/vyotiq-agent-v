@@ -1,0 +1,38 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import PageHero from '../components/PageHero.astro';
+
+const RELEASES = 'https://github.com/vyotiqai/vyotiq-agent-v-releases';
+---
+
+<Layout
+  title="Changelog — Agent V"
+  description="Every release of Agent V, newest first."
+  canonical="https://vyotiq.com/changelog"
+>
+  <Nav />
+  <main id="main">
+    <PageHero
+      eyebrow="Resources"
+      title="Changelog"
+      lede="Every release of Agent V, newest first."
+      narrow
+    />
+    <div class="mx-auto w-full max-w-3xl px-4 pb-24 sm:px-6">
+      <section class="rounded border border-dashed border-[var(--av-hairline)] bg-[var(--av-panel)] px-8 py-12 text-center sm:px-10">
+        <p class="font-mono text-sm font-medium text-[color-mix(in_srgb,var(--av-ink)_70%,transparent)]">
+          No releases published yet
+        </p>
+        <p class="mx-auto mt-3 max-w-md text-[15px] leading-7 text-[color-mix(in_srgb,var(--av-ink)_65%,transparent)]">
+          Installers and release notes for each version will live in the
+          <a href={RELEASES} target="_blank" rel="noopener noreferrer" class="av-link">
+            companion releases repository ↗
+          </a>.
+        </p>
+      </section>
+    </div>
+  </main>
+  <Footer />
+</Layout>

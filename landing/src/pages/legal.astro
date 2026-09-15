@@ -1,0 +1,69 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import PageHero from '../components/PageHero.astro';
+import manifest from '../data/legal-manifest.json';
+
+const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
+---
+
+<Layout
+  title="Legal — Agent V"
+  description="Legal documents for Agent V, sourced from the repository: LICENSE, NOTICE, PRIVACY.md, TERMS.md, SECURITY.md, and CODE_OF_CONDUCT.md."
+  canonical="https://vyotiq.com/legal"
+>
+  <Nav />
+  <main id="main">
+    <PageHero
+      eyebrow="Legal"
+      title="Legal documents"
+      lede="These pages publish documents that exist in the Agent V repository. Content is copied at build time and checked against SHA-256 hashes of the repo files."
+      narrow
+    />
+
+    <div class="mx-auto w-full max-w-3xl px-4 pb-24 sm:px-6">
+      <p class="text-sm text-[var(--av-muted)]">
+        Package <code class="av-code">{manifest.packageName}</code> · SPDX{' '}
+        <code class="av-code">{manifest.spdxLicense}</code> · Repository{' '}
+        <a class="av-link" href={REPO} target="_blank" rel="noopener noreferrer">{REPO.replace('https://', '')} ↗</a>
+      </p>
+
+      <ul class="mt-8 divide-y divide-[var(--av-hairline)] overflow-hidden rounded border border-[var(--av-hairline)]">
+        {
+          manifest.files.filter((f) => f.category === 'legal' || !f.category).map((f) => (
+            <li class="flex flex-col gap-1 bg-[var(--av-bg)] px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <a href={f.route} class="font-medium text-[var(--av-ink)] hover:text-[var(--av-accent)]">
+                  {f.title}
+                </a>
+                <p class="mt-0.5 font-mono text-[11px] text-[var(--av-muted)]">
+                  {f.source} · {f.bytes.toLocaleString()} bytes · sha256 {f.sha256.slice(0, 12)}…
+                </p>
+              </div>
+              <div class="flex gap-3 text-sm">
+                <a href={f.route} class="av-link">
+                  Read
+                </a>
+                <a href={f.publicPath} class="av-link">
+                  Download
+                </a>
+              </div>
+            </li>
+          ))
+        }
+      </ul>
+
+      {manifest.absentFromRepo.length > 0 && (
+        <section class="mt-10 rounded border border-dashed border-[var(--av-hairline)] bg-[var(--av-panel)] px-4 py-4 text-sm leading-6 text-[var(--av-muted)]">
+          <h2 class="text-sm font-semibold text-[var(--av-ink)]">Not present in this repository</h2>
+          <p class="mt-2">
+            A filesystem check of the repo root found no files named{' '}
+            <code class="av-code">{manifest.absentFromRepo.join(', ')}</code>.
+          </p>
+        </section>
+      )}
+    </div>
+  </main>
+  <Footer />
+</Layout>

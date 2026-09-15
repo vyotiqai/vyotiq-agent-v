@@ -1,0 +1,38 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import LegalDocument from '../components/LegalDocument.astro';
+import { legalFileMeta, markdownToHtml } from '../lib/legal';
+import manifest from '../data/legal-manifest.json';
+
+const meta = legalFileMeta('CONTRIBUTING.md');
+const baked = manifest.files.find((f) => f.id === 'contributing');
+if (!baked || baked.sha256 !== meta.sha256) {
+  throw new Error('CONTRIBUTING.md sha256 mismatch between repo file and legal-manifest (run bake-legal)');
+}
+const html = markdownToHtml(meta.text);
+---
+
+<Layout
+  title="Contributing — Agent V"
+  description="How to contribute to Agent V, from the repository CONTRIBUTING.md file."
+  canonical="https://vyotiq.com/contributing"
+>
+  <Nav />
+  <main id="main">
+    <LegalDocument
+      eyebrow="Resources"
+      title="Contributing"
+      lede="This page renders the repository CONTRIBUTING.md file."
+      sourceName="CONTRIBUTING.md"
+      rawPath="/legal/CONTRIBUTING.md"
+      githubUrl="https://github.com/vyotiqai/vyotiq-agent-v/blob/main/CONTRIBUTING.md"
+      bytes={meta.bytes}
+      sha256={meta.sha256}
+      mode="html"
+      html={html}
+    />
+  </main>
+  <Footer />
+</Layout>

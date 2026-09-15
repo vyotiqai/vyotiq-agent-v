@@ -1,0 +1,25 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import PageHero from '../components/PageHero.astro';
+import Features from '../components/Features.astro';
+---
+
+<Layout
+  title="Features — Agent V"
+  description="Parallel instances, Ask / Plan / Agent modes, built-in browser, and more — the Agent V capabilities designed for real repositories."
+  canonical="https://vyotiq.com/features"
+>
+  <Nav />
+  <main id="main">
+    <PageHero
+      eyebrow="Product"
+      title="Built for real repositories"
+      lede="Parallel instances, Ask / Plan / Agent, a built-in browser, and the rest of the stack — each designed with honest tool names."
+    />
+    <div class="mx-auto max-w-7xl border-t border-[var(--av-hairline)] px-4 sm:px-6"></div>
+    <Features hideIntro />
+  </main>
+  <Footer />
+</Layout>

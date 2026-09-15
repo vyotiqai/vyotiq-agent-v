@@ -8,7 +8,7 @@ import osIcons from '../data/os-icons.json';
 const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
 
 // Tag-page fallback: the baked release page when known, the releases listing
-// otherwise. Installer URLs come only from the baked manifest — never invented.
+// otherwise. Installer URLs come only from the baked manifest - never invented.
 const tagPageUrl =
   typeof release.url === 'string' && release.url ? release.url : `${REPO}/releases/latest`;
 
@@ -62,32 +62,47 @@ const hasRelease =
   release.source === 'github' && typeof release.version === 'string' && release.version !== '';
 ---
 
-<section class="relative overflow-hidden">
-  <div class="mx-auto max-w-7xl px-4 sm:px-6">
-    <div class="pt-12 text-center sm:pt-16">
+<section class="relative">
+  <div class="av-max mx-auto px-4 sm:px-6 lg:px-10">
+    <div class="mx-auto max-w-3xl pt-16 text-center sm:pt-20 md:pt-24">
+      <img
+        src="/brand/vyotiq-app-icon.svg"
+        alt=""
+        width="56"
+        height="56"
+        class="mx-auto size-14"
+        aria-hidden="true"
+      />
       <h1
-        class="mx-auto max-w-3xl text-5xl font-semibold leading-[1.05] tracking-tight text-zinc-950 sm:text-6xl lg:text-7xl"
+        class="mt-6 text-[clamp(2.4rem,5vw,4.25rem)] font-semibold leading-[1.05] tracking-tight text-[var(--av-ink)]"
       >
         Meet Agent V.
-        <span class="block text-zinc-500">Your repo's new teammate.</span>
+        <span class="block text-[color-mix(in_srgb,var(--av-ink)_55%,transparent)]">Your repo's new teammate.</span>
       </h1>
 
-      <p class="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-zinc-600 sm:text-lg">
+      <p class="mx-auto mt-6 max-w-xl text-base leading-relaxed text-[color-mix(in_srgb,var(--av-ink)_60%,transparent)] sm:text-lg">
         A free, open-source coding agent that sits in your workspace: reads your code, makes the
         change, runs it, checks its own work. With the models you already use.
       </p>
 
-      <div class="mt-7 flex flex-col items-center gap-3 sm:flex-row sm:justify-center sm:gap-4">
-        <div class="relative w-full sm:w-auto" data-os-picker>
-          <div class="relative inline-flex w-full shadow-sm sm:w-auto">
+      <div class="mt-8 flex flex-col items-stretch justify-center gap-2.5 sm:flex-row sm:items-center sm:gap-2.5">
+        <div class="relative mx-auto w-full sm:mx-0 sm:w-auto" data-os-picker>
+          <div class="av-cta-split w-full sm:w-auto">
             <a
               href={tagPageUrl}
               data-os-primary
               data-os-default-url={tagPageUrl}
-              class="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-l-lg bg-zinc-900 px-6 py-3 font-semibold text-white transition hover:bg-zinc-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900"
+              class="av-cta-primary flex min-w-0 flex-1 items-center justify-center gap-2 px-5 py-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--av-accent)] sm:flex-none"
             >
-              Get Agent V
-              <span data-os-primary-os class="hidden text-sm font-normal text-zinc-300 sm:inline"></span>
+              <svg
+                data-os-primary-icon
+                class="hidden size-4 shrink-0"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden="true"
+              ></svg>
+              <span class="font-semibold">Download Agent V</span>
+              <span data-os-primary-os class="hidden text-sm font-medium text-[color-mix(in_srgb,var(--av-on-cta)_72%,transparent)] sm:inline"></span>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path
                   d="M12 4v12m0 0-5-5m5 5 5-5"
@@ -104,7 +119,7 @@ const hasRelease =
               aria-controls="os-download-menu"
               aria-haspopup="true"
               aria-label="Choose download for your operating system"
-              class="flex items-center justify-center rounded-r-lg border-l border-white/10 bg-zinc-900 px-3 py-3 text-white transition hover:bg-zinc-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900"
+              class="av-cta-primary flex items-center justify-center px-3.5 py-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--av-accent)]"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" data-os-chevron class="transition">
                 <path
@@ -115,12 +130,13 @@ const hasRelease =
                   stroke-linejoin="round"></path>
               </svg>
             </button>
-            <div
-              id="os-download-menu"
-              data-os-menu
-              class="absolute left-1/2 top-full z-20 mt-2 hidden w-72 -translate-x-1/2 rounded-lg border border-zinc-200 bg-white p-1.5 text-left shadow-xl shadow-zinc-900/10"
-            >
-              <p class="px-2.5 pb-1.5 pt-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
+          </div>
+          <div
+            id="os-download-menu"
+            data-os-menu
+            class="absolute left-0 top-full z-30 mt-1.5 hidden w-72 rounded border border-[var(--av-hairline)] bg-[var(--av-bg)] p-1.5 text-left shadow-lg shadow-[var(--av-shadow)]"
+          >
+              <p class="px-2.5 pb-1.5 pt-1 text-xs font-medium uppercase tracking-wide text-[var(--av-muted)]">
                 Download for
               </p>
               <ul class="flex flex-col" aria-label="Download options">
@@ -134,12 +150,14 @@ const hasRelease =
                         data-os-url={option.asset?.url ?? ''}
                         data-os-name={option.name}
                         data-os-size={option.size ?? ''}
-                        class="group flex items-center justify-between gap-3 rounded-md px-2.5 py-2 text-sm text-zinc-800 transition hover:bg-zinc-100 focus-visible:bg-zinc-100 focus-visible:outline-none data-[detected]:bg-orange-50 data-[detected]:text-orange-900"
+                        data-os-icon-viewbox={option.icon.viewBox}
+                        data-os-icon-paths={JSON.stringify(option.icon.paths)}
+                        class="group flex items-center justify-between gap-3 rounded-md px-2.5 py-2 text-sm text-[var(--av-ink)] transition hover:bg-[var(--av-panel)] focus-visible:bg-[var(--av-panel)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--av-accent)] data-[detected]:bg-[color-mix(in_srgb,var(--av-accent)_8%,transparent)] data-[detected]:text-[var(--av-ink)]"
                       >
                         <span class="flex min-w-0 items-center gap-2.5">
                           <svg
                             viewBox={option.icon.viewBox}
-                            class="size-4 shrink-0 text-zinc-500 group-data-[detected]:text-orange-600"
+                            class="size-4 shrink-0 text-[var(--av-muted)] group-data-[detected]:text-[var(--av-accent)]"
                             fill="currentColor"
                             aria-hidden="true"
                           >
@@ -148,25 +166,24 @@ const hasRelease =
                             ))}
                           </svg>
                           <span class="truncate font-medium">{option.name}</span>
-                          <span class="hidden shrink-0 text-xs font-semibold text-orange-600 group-data-[detected]:inline">
+                          <span class="hidden shrink-0 text-xs font-semibold text-[var(--av-accent)] group-data-[detected]:inline">
                             Detected
                           </span>
                         </span>
-                        <span class="shrink-0 text-xs tabular-nums text-zinc-500">{option.size}</span>
+                        <span class="shrink-0 text-xs tabular-nums text-[var(--av-muted)]">{option.size}</span>
                       </a>
                     </li>
                   ))
                 }
               </ul>
             </div>
-          </div>
           {
             hasRelease ? (
               <p
-                class="mt-2.5 flex flex-wrap items-center justify-center gap-x-1.5 text-xs text-zinc-500"
+                class="mt-2.5 flex flex-wrap items-center justify-center gap-x-1.5 text-xs text-[var(--av-muted)]"
                 data-os-meta
               >
-                <span class="font-medium text-zinc-700">v{release.version}</span>
+                <span class="font-medium text-[var(--av-ink)]">v{release.version}</span>
                 {releaseDate ? <span>· released {releaseDate}</span> : null}
                 <span data-os-primary-size class="hidden" />
               </p>
@@ -177,7 +194,7 @@ const hasRelease =
           href={REPO}
           target="_blank"
           rel="noopener noreferrer"
-          class="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-300 bg-white px-7 py-3 font-semibold text-zinc-900 transition hover:border-zinc-400 sm:w-auto"
+          class="av-cta-secondary inline-flex w-full items-center justify-center gap-2 px-5 text-sm sm:w-auto"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path
@@ -188,48 +205,77 @@ const hasRelease =
         </a>
       </div>
 
-      <p class="mt-4 text-xs text-zinc-500">Free and open source. Runs on your machine.</p>
-
-      <div
-        class="mt-8 flex flex-wrap items-center justify-center gap-2.5 sm:gap-3"
-        aria-label="Supported model providers"
-      >
-        {
-          providerIcons.map((p) => (
-            <span
-              class="grid size-9 place-items-center rounded-lg border border-zinc-200 bg-white shadow-sm"
-              title={p.title}
-            >
-              <svg
-                viewBox={p.viewBox}
-                role="img"
-                aria-label={p.title}
-                class="size-[18px] text-zinc-700"
-                fill="currentColor"
-                fill-rule="evenodd"
-              >
-                <title>{p.title}</title>
-                {p.paths.map((d) => <path d={d} />)}
-              </svg>
-            </span>
-          ))
-        }
-      </div>
+      <p class="mt-5 text-xs text-[var(--av-muted)]">Free and open source. Runs on your machine.</p>
+      <a href="#intro" class="av-cta-secondary mt-8 inline-flex !min-h-0 gap-1.5 px-4 py-2 text-[13px] font-medium">Learn more
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
     </div>
 
-    <figure class="mt-12 sm:mt-14">
-      <Image
-        src={heroApp}
-        alt="Agent V — real workspace: three parallel agent instances finishing while a 45-file verified change set is reviewed"
-        format="png"
-        widths={[640, 960, 1280, 1920]}
-        sizes="(min-width: 80rem) 1216px, 92vw"
-        loading="eager"
-        fetchpriority="high"
-        decoding="async"
-        class="relative h-auto w-full rounded-lg border border-zinc-200 shadow-2xl shadow-zinc-900/10"
-      />
+    <figure class="mt-14 sm:mt-16 lg:mt-20">
+      <div class="av-squircle overflow-hidden border border-[var(--av-hairline)] bg-[var(--av-panel)] shadow-lg shadow-[var(--av-shadow)]">
+        <div class="flex items-center gap-2 border-b border-[var(--av-hairline)] bg-[var(--av-panel)] px-3 py-2">
+          <span class="size-2.5 rounded-full bg-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]" aria-hidden="true"></span>
+          <span class="size-2.5 rounded-full bg-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]" aria-hidden="true"></span>
+          <span class="size-2.5 rounded-full bg-[color-mix(in_srgb,var(--av-ink)_18%,transparent)]" aria-hidden="true"></span>
+          <p class="mx-auto pr-10 text-center font-mono text-[11px] text-[var(--av-muted)]">Agent V</p>
+        </div>
+        <Image
+          src={heroApp}
+          alt="Agent V — real workspace: three parallel agent instances finishing while a 45-file verified change set is reviewed"
+          format="png"
+          widths={[640, 960, 1280, 1920]}
+          sizes="(min-width: 80rem) 1216px, 92vw"
+          loading="eager"
+          fetchpriority="high"
+          decoding="async"
+          class="relative h-auto w-full"
+        />
+      </div>
     </figure>
+    <div id="providers" class="mt-10 scroll-mt-24 border-t border-[var(--av-hairline)] pt-10 sm:mt-12 sm:pt-12">
+      <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between lg:gap-10">
+        <div class="max-w-xl">
+          <p class="text-xs font-semibold uppercase tracking-wider text-[var(--av-muted)]">
+            Multi-provider
+          </p>
+          <h2 class="mt-2 text-lg font-semibold tracking-tight text-[var(--av-ink)] sm:text-xl">
+            Bring your own models
+          </h2>
+          <p class="mt-2 text-sm leading-relaxed text-[var(--av-muted)] sm:text-[15px]">
+            OpenAI, Anthropic, Gemini, Ollama, DeepSeek, Groq, OpenRouter, xAI, Mistral, OpenCode, and custom endpoints. Your keys stay on your machine.
+          </p>
+        </div>
+        <ul
+          class="flex flex-wrap items-center gap-2 lg:max-w-md lg:justify-end"
+          aria-label="Supported model providers"
+        >
+          {
+            providerIcons.map((p) => (
+              <li>
+                <span
+                  class="grid size-9 place-items-center rounded border border-[var(--av-hairline)] bg-[var(--av-panel)]"
+                  title={p.title}
+                >
+                  <svg
+                    viewBox={p.viewBox}
+                    role="img"
+                    aria-label={p.title}
+                    class="size-[18px] text-[color-mix(in_srgb,var(--av-ink)_75%,transparent)]"
+                    fill="currentColor"
+                    fill-rule="evenodd"
+                  >
+                    <title>{p.title}</title>
+                    {p.paths.map((d) => (
+                      <path d={d} />
+                    ))}
+                  </svg>
+                </span>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -254,7 +300,11 @@ const hasRelease =
       toggle?.setAttribute('aria-expanded', String(open));
     };
 
-    toggle?.addEventListener('click', () => setOpen(!open));
+    toggle?.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(!open);
+    });
 
     toggle?.addEventListener('keydown', (event) => {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -278,6 +328,12 @@ const hasRelease =
       }
     });
 
+    items.forEach((item) => {
+      item.addEventListener('click', () => {
+        clearDetection();
+        markDetected(item);
+      });
+    });
     document.addEventListener('click', (event) => {
       if (open && event.target instanceof Node && !root.contains(event.target)) setOpen(false);
     });
@@ -313,26 +369,51 @@ const hasRelease =
         if (hints?.architecture === 'arm') return 'arm64';
         if (hints?.architecture === 'x86') return 'x64';
       } catch {
-        // High-entropy hints unavailable — the default pick stands.
+        // High-entropy hints unavailable - the default pick stands.
       }
       return null;
     };
 
     const byId = (id: string) => items.find((item) => item.dataset.osId === id);
 
+    const primaryIcon = root.querySelector<SVGElement>('[data-os-primary-icon]');
+
+    const setPrimaryIcon = (item: HTMLAnchorElement) => {
+      if (!primaryIcon) return;
+      const viewBox = item.dataset.osIconViewbox;
+      const rawPaths = item.dataset.osIconPaths;
+      if (!viewBox || !rawPaths) {
+        primaryIcon.classList.add('hidden');
+        primaryIcon.innerHTML = '';
+        return;
+      }
+      let paths: string[] = [];
+      try {
+        paths = JSON.parse(rawPaths) as string[];
+      } catch {
+        primaryIcon.classList.add('hidden');
+        return;
+      }
+      primaryIcon.setAttribute('viewBox', viewBox);
+      primaryIcon.innerHTML = paths.map((d) => `<path d="${d}"></path>`).join('');
+      primaryIcon.classList.remove('hidden');
+    };
+
     const markDetected = (item: HTMLAnchorElement | undefined) => {
       if (!item) return;
       item.setAttribute('data-detected', '');
       item.setAttribute('aria-current', 'true');
       if (primaryOs && item.dataset.osName) primaryOs.textContent = `for ${item.dataset.osName}`;
-      // Real installer when baked; tag-page URL otherwise — never a dead link.
+      // Real installer when baked; tag-page URL otherwise - never a dead link.
       if (primary) primary.setAttribute('href', item.dataset.osUrl || tagUrl);
+      setPrimaryIcon(item);
       if (primarySize) {
         const size = item.dataset.osSize || '';
-        primarySize.textContent = size ? `· ${size}` : '';
+        primarySize.textContent = size ? `\u00B7 ${size}` : '';
         primarySize.classList.toggle('hidden', !size);
       }
     };
+
 
     const clearDetection = () => {
       items.forEach((item) => {

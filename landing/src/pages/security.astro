@@ -1,0 +1,37 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import LegalDocument from '../components/LegalDocument.astro';
+import { legalFileMeta, markdownToHtml } from '../lib/legal';
+import manifest from '../data/legal-manifest.json';
+
+const meta = legalFileMeta('SECURITY.md');
+const baked = manifest.files.find((f) => f.id === 'security');
+if (!baked || baked.sha256 !== meta.sha256) {
+  throw new Error('SECURITY.md sha256 mismatch between repo file and legal-manifest (run bake-legal)');
+}
+const html = markdownToHtml(meta.text);
+---
+
+<Layout
+  title="Security — Agent V"
+  description="Security policy for Agent V: supported versions and how to report vulnerabilities."
+  canonical="https://vyotiq.com/security"
+>
+  <Nav />
+  <main id="main">
+    <LegalDocument
+      title="Security"
+      lede="This page renders the repository SECURITY.md file. Do not open public issues for vulnerabilities."
+      sourceName="SECURITY.md"
+      rawPath="/legal/SECURITY.md"
+      githubUrl="https://github.com/vyotiqai/vyotiq-agent-v/blob/main/SECURITY.md"
+      bytes={meta.bytes}
+      sha256={meta.sha256}
+      mode="html"
+      html={html}
+    />
+  </main>
+  <Footer />
+</Layout>
