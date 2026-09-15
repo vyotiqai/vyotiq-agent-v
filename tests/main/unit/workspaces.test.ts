@@ -295,6 +295,7 @@ describe('workspaces registry', () => {
       model: 'gpt-4.1',
       agentPersona: 'Nova',
       agentTone: 'friendly, blunt',
+      agentIdentity: 'V2 blurb',
       responseLanguage: 'Spanish',
       responseVerbosity: 'detailed'
     })
@@ -302,12 +303,14 @@ describe('workspaces registry', () => {
       useOverride: true,
       agentPersona: 'Nova',
       agentTone: 'friendly, blunt',
+      agentIdentity: 'V2 blurb',
       responseLanguage: 'Spanish',
       responseVerbosity: 'detailed'
     })
     const reread = readWorkspacesState()
     expect(reread.settingsOverridesByPath[workspaceA]?.agentPersona).toBe('Nova')
     expect(reread.settingsOverridesByPath[workspaceA]?.agentTone).toBe('friendly, blunt')
+    expect(reread.settingsOverridesByPath[workspaceA]?.agentIdentity).toBe('V2 blurb')
 
     const cleared = setWorkspaceSettingsOverride(workspaceA, null)
     expect(cleared.settingsOverridesByPath[workspaceA]).toBeUndefined()

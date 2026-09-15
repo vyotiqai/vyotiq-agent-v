@@ -22,16 +22,13 @@ export function setRendererCaptureException(
   captureFn = fn
 }
 
-/** Wire shared logger to electron-log/renderer (IPC → main disk). */
+/** Wire shared logger to electron-log/renderer (renderer console transport). */
 export async function initRendererLogging(): Promise<void> {
   // electron-log/renderer can hang indefinitely when the main bridge is busy
-  // (seen with Network Service child crashes + DevTools). Fail open so UI boots.
-  const mod = (await Promise.race([
-    import('electron-log/renderer'),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('electron-log/renderer import timed out')), 2000)
-    )
-  ])) as { default: ElectronLogRenderer }
+  // (seen with Network Service child crashes + DevTools, or a cold dev
+  // prebundle). Fail open so UI boots — but retry the import a few times first,
+  // otherwise logging is lost for the whole session after one busy-bridge hit.
+  const mod = await importElectronLogWithRetries([2000, 5000, 10000])
   const log = mod.default
   log.transports.console.level = import.meta.env.DEV ? 'debug' : 'warn'
 
@@ -53,4 +50,36 @@ export async function initRendererLogging(): Promise<void> {
     }
   }
   setLoggerBackend(backend)
+}
+
+/**
+ * Race the electron-log/renderer import against escalating timeouts and retry
+ * on a timer. The pending dynamic import keeps loading after a timeout, so
+ * later attempts typically resolve fast once the bridge frees up.
+ */
+async function importElectronLogWithRetries(
+  timeoutsMs: readonly number[]
+): Promise<{ default: ElectronLogRenderer }> {
+  for (let attempt = 0; ; attempt++) {
+    const isLast = attempt === timeoutsMs.length - 1
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const promise = import('electron-log/renderer')
+      const guard = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('electron-log/renderer import timed out')),
+          timeoutsMs[attempt]
+        )
+      })
+      try {
+        return (await Promise.race([promise, guard])) as { default: ElectronLogRenderer }
+      } finally {
+        clearTimeout(timer)
+      }
+    } catch (err) {
+      if (isLast) throw err
+      void err
+      await new Promise<void>((resolve) => setTimeout(resolve, 1000))
+    }
+  }
 }

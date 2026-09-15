@@ -207,6 +207,12 @@ export async function sleepStreamRetryBackoff(
       err.name = 'AbortError'
       throw err
     }
+    // Yield via the macrotask queue instead of returning inline: a bare
+    // return keeps every retry iteration in microtasks, which starves timers
+    // entirely — an abort scheduled with setTimeout never fires and the
+    // no-attempt-ceiling retry loop spins until the worker OOMs. setImmediate
+    // hands control back to the event loop with no measurable test delay.
+    await new Promise<void>((resolve) => setImmediate(resolve))
     return
   }
   const wait = ms ?? streamRetryBackoffMs(attempt)

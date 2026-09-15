@@ -1,5 +1,6 @@
 import { formatTokens } from '@renderer/lib/utils/formatTokens'
 import { formatDisplayTime, formatElapsed } from '@shared/utils/timeFormat'
+import { formatUsdCost } from '@shared/utils/costDisplay'
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 
 /** Match TurnSummary: sub-second turns are not worth a duration caption. */
@@ -40,6 +41,27 @@ export function reportedBilledCost(usage: StepUsageTotals): number | null {
   return usage.billedCost
 }
 
+/**
+ * Cost to show for the turn, with its honesty label.
+ * - Actual: every step reported a provider cost field (OpenRouter-style).
+ * - Estimate: every step either reported a cost or was priced from published
+ *   model rates (tokens × price). Runs with unpriceable steps return null —
+ *   a partial estimate would silently undercount, so tokens-only is shown.
+ */
+export function turnCost(
+  usage: StepUsageTotals
+): { cost: number; estimated: boolean } | null {
+  if (usage.steps <= 0) return null
+  if (usage.stepsWithCostReport === usage.steps) {
+    return { cost: usage.billedCost, estimated: false }
+  }
+  const covered = usage.stepsWithCostReport + usage.stepsWithEstimate
+  if (covered === usage.steps && usage.stepsWithEstimate > 0) {
+    return { cost: usage.billedCost + usage.estimatedCost, estimated: true }
+  }
+  return null
+}
+
 export function reportedSavedCost(usage: StepUsageTotals): number | null {
   if (usage.billedCostSaved > 0) return usage.billedCostSaved
   return null
@@ -58,16 +80,7 @@ export function formatTokPerSec(n: number): string {
 }
 
 export function formatBilledUsd(n: number): string {
-  const sign = n < 0 ? '-' : ''
-  const abs = Math.abs(n)
-  if (abs === 0) return '$0'
-  if (abs < 0.01) {
-    return `${sign}$${abs.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}`
-  }
-  if (abs < 1) {
-    return `${sign}$${abs.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`
-  }
-  return `${sign}$${abs.toFixed(2)}`
+  return formatUsdCost(n)
 }
 
 export function formatFooterDuration(ms: number | null): string {
@@ -123,7 +136,7 @@ export function buildFooterStats(opts: {
   const duration = opts.omitDuration ? '' : formatFooterDuration(turnElapsedMs(opts))
   const usage = opts.usage
   const hasUsage = usage != null && usage.steps > 0
-  const cost = hasUsage ? reportedBilledCost(usage) : null
+  const cost = hasUsage ? turnCost(usage) : null
   const saved = hasUsage ? reportedSavedCost(usage) : null
   const cachePct = hasUsage ? cacheCaptionPct(usage) : null
   const tokens = hasUsage ? freshCaptionTokens(usage) : 0
@@ -137,7 +150,12 @@ export function buildFooterStats(opts: {
 
   const captionParts: string[] = []
   if (duration) captionParts.push(duration)
-  if (cost != null) captionParts.push(formatBilledUsd(cost))
+  if (cost != null) {
+    // Estimates are labeled — never presented as a provider bill.
+    captionParts.push(
+      cost.estimated ? `${formatBilledUsd(cost.cost)} est.` : formatBilledUsd(cost.cost)
+    )
+  }
   // Fresh (non-cached) input + output — not the run total; the tooltip breaks it down.
   if (showTokens) captionParts.push(`${formatTokens(tokens)} tok (in+out)`)
   if (tokPerSec != null) {
@@ -150,6 +168,9 @@ export function buildFooterStats(opts: {
   const clock = clockLabel(opts.at)
   const detail: string[] = []
   if (clock) detail.push(clock)
+  if (cost?.estimated) {
+    detail.push('Estimate from published model rates — not a provider bill')
+  }
   if (saved != null) detail.push(`Saved ${formatBilledUsd(saved)}`)
   if (hasUsage) {
     if (usage.billedInputTokens > 0) detail.push(`In ${formatTokens(usage.billedInputTokens)}`)

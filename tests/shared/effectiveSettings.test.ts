@@ -28,6 +28,7 @@ describe('resolveEffectiveSettings', () => {
       autoCompactThresholdRatio: 0.35,
       agentPersona: 'Nova',
       agentTone: 'friendly, blunt',
+      agentIdentity: 'Override blurb',
       responseLanguage: 'Spanish',
       responseVerbosity: 'detailed'
     })
@@ -44,6 +45,7 @@ describe('resolveEffectiveSettings', () => {
       toolApproval: DEFAULT_SETTINGS.toolApproval,
       agentPersona: 'Nova',
       agentTone: 'friendly, blunt',
+      agentIdentity: 'Override blurb',
       responseLanguage: 'Spanish',
       responseVerbosity: 'detailed'
     })
@@ -51,12 +53,28 @@ describe('resolveEffectiveSettings', () => {
 
   it('falls back to global persona/tone/style when the override leaves them unset', () => {
     const effective = resolveEffectiveSettings(
-      { ...DEFAULT_SETTINGS, agentPersona: 'Atlas', agentTone: 'formal', responseVerbosity: 'balanced' },
+      {
+        ...DEFAULT_SETTINGS,
+        agentPersona: 'Atlas',
+        agentTone: 'formal',
+        agentIdentity: 'Global blurb',
+        responseVerbosity: 'balanced'
+      },
       { useOverride: true, provider: 'openai', model: 'gpt-5.6' }
     )
     expect(effective.agentPersona).toBe('Atlas')
     expect(effective.agentTone).toBe('formal')
+    expect(effective.agentIdentity).toBe('Global blurb')
     expect(effective.responseLanguage).toBe('')
     expect(effective.responseVerbosity).toBe('balanced')
+  })
+
+  it('lets the workspace agentIdentity override win over the global setting', () => {
+    const effective = resolveEffectiveSettings(
+      { ...DEFAULT_SETTINGS, agentIdentity: 'Global blurb' },
+      { useOverride: true, provider: 'openai', model: 'gpt-5.6', agentIdentity: 'Override blurb' }
+    )
+    expect(effective.agentIdentity).toBe('Override blurb')
+    expect(effective.agentPersona).toBe(DEFAULT_SETTINGS.agentPersona)
   })
 })

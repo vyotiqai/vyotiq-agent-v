@@ -12,8 +12,16 @@
  *  - No release (404) → warning + explicit fallback data, exit 0 (expected
  *    before the first publish; the workflow has no continue-on-error)
  *  - Any other failure → warning + fallback data, exit 0 (a landing deploy
- *    must not go red because the releases API hiccuped; the warning surfaces
- *    in CI logs as ::warning::)
+ *    must not go red because the releases API hiccuped or rate-limited; the
+ *    warning surfaces in CI logs as ::warning::)
+ *
+ * Asset selection mirrors electron-builder.yml artifact names:
+ *   win   → Vyotiq-<v>-setup.exe                (nsis.artifactName)
+ *   mac   → Vyotiq-<v>-arm64.dmg / -x64.dmg     (dmg.artifactName ${arch})
+ *   linux → Vyotiq-<v>.AppImage                 (appImage.artifactName)
+ * A .deb asset is picked up when present (schema-ready; electron-builder.yml
+ * has no deb target yet). Missing entries stay null and the UI falls back to
+ * the release tag page — download URLs are never invented here.
  *
  * The releases live in the public vyotiqai/vyotiq-agent-v-releases repo, so
  * unauthenticated API access is enough; set GITHUB_TOKEN to raise the rate
@@ -24,13 +32,13 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const RELEASES_API_URL =
-  'https://api.github.com/repos/vyotiqai/vyotiq-agent-v-releases/releases/latest'
+const RELEASES_REPO = 'vyotiqai/vyotiq-agent-v-releases'
+const RELEASES_API_URL = `https://api.github.com/repos/${RELEASES_REPO}/releases/latest`
 
 const FALLBACK_RELEASE = {
   source: 'fallback',
   version: null,
-  url: 'https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/latest',
+  url: `https://github.com/${RELEASES_REPO}/releases/latest`,
   publishedAt: null,
   assets: { windows: null, macos: null, linux: null },
 }
@@ -48,9 +56,42 @@ function warn(message) {
   console.warn(`${prefix}bake-github-release: ${message}`)
 }
 
-function pickAsset(assets, suffix) {
-  const match = assets.find((asset) => typeof asset.name === 'string' && asset.name.endsWith(suffix))
-  return match ? match.browser_download_url : null
+/** Normalize one GitHub asset into { name, url, size }, or null. */
+function assetEntry(asset) {
+  if (!asset || typeof asset !== 'object') return null
+  return {
+    name: typeof asset.name === 'string' ? asset.name : null,
+    url: typeof asset.browser_download_url === 'string' ? asset.browser_download_url : null,
+    size: typeof asset.size === 'number' && Number.isFinite(asset.size) ? asset.size : null,
+  }
+}
+
+function named(assets, test) {
+  return assets.filter((a) => typeof a.name === 'string' && test(a.name))
+}
+
+function pickWindows(assets) {
+  const exes = named(assets, (name) => /\.exe$/i.test(name))
+  return assetEntry(exes.find((a) => a.name.endsWith('-setup.exe')) ?? exes[0])
+}
+
+function pickMacos(assets) {
+  const dmgs = named(assets, (name) => /\.dmg$/i.test(name))
+  const arm64 = dmgs.find((a) => /(?:-|_|\.)arm64\.dmg$/i.test(a.name) || /aarch64\.dmg$/i.test(a.name))
+  const x64 = dmgs.find((a) => /(?:-|_|\.)x64\.dmg$/i.test(a.name) || /(?:x86_64|-intel)\.dmg$/i.test(a.name))
+  if (!arm64 && !x64 && dmgs.length === 1) {
+    // Single-arch release: offer the one DMG under both menu entries rather
+    // than guessing an architecture label the filename doesn't carry.
+    const only = assetEntry(dmgs[0])
+    return { arm64: only, x64: only }
+  }
+  return { arm64: assetEntry(arm64), x64: assetEntry(x64) }
+}
+
+function pickLinux(assets) {
+  const appimage = named(assets, (name) => /\.appimage$/i.test(name))[0]
+  const deb = named(assets, (name) => /\.deb$/i.test(name))[0]
+  return { appimage: assetEntry(appimage), deb: assetEntry(deb) }
 }
 
 async function main() {
@@ -78,9 +119,9 @@ async function main() {
         url: typeof release.html_url === 'string' ? release.html_url : FALLBACK_RELEASE.url,
         publishedAt: typeof release.published_at === 'string' ? release.published_at : null,
         assets: {
-          windows: pickAsset(assets, '-setup.exe'),
-          macos: pickAsset(assets, '.dmg'),
-          linux: pickAsset(assets, '.AppImage'),
+          windows: pickWindows(assets),
+          macos: pickMacos(assets),
+          linux: pickLinux(assets),
         },
       }
       console.log(`bake-github-release: baked release ${data.version} (${data.url})`)

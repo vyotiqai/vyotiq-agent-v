@@ -67,7 +67,8 @@ vi.mock('electron', () => ({
     }
   },
   BrowserWindow: {
-    fromWebContents
+    fromWebContents,
+    getAllWindows: vi.fn(() => [])
   },
   nativeTheme: {
     shouldUseDarkColors: true

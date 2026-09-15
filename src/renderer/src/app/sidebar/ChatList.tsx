@@ -280,6 +280,7 @@ export function ChatList({
   onRenameRun,
   onDeleteRun,
   onExportRun,
+  onForkRun,
   onLoadOlderRuns,
   isRunOpenInPane,
   isRunFocusedInPane,
@@ -302,6 +303,7 @@ export function ChatList({
   onRenameRun: (path: string, runId: string, goal: string) => void
   onDeleteRun: (path: string, runId: string) => void
   onExportRun?: (path: string, runId: string) => void
+  onForkRun?: (path: string, runId: string) => void
   onLoadOlderRuns?: (path: string) => void
   isRunOpenInPane?: (path: string, runId: string) => boolean
   isRunFocusedInPane?: (path: string, runId: string) => boolean
@@ -525,6 +527,7 @@ export function ChatList({
                                     onRenameRun={onRenameRun}
                                     onDeleteRun={onDeleteRun}
                                     onExportRun={onExportRun}
+                                    onForkRun={onForkRun}
                                     tabIndex={
                                       parentNavIndex >= 0 ? tabIndexFor(parentNavIndex) : undefined
                                     }

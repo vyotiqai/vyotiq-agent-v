@@ -15,6 +15,8 @@ export type UsageLedgerDay = {
   outputTokens: number
   /** Provider-reported cost deltas (may stay absent when never reported). */
   billedCost?: number
+  /** Estimated cost deltas (tokens × published prices), kept separate. */
+  estimatedCost?: number
   cachedInputTokens?: number
   /** Billed thinking-token deltas recorded this day (subset of output). */
   reasoningTokens?: number
@@ -32,6 +34,7 @@ export type UsageLedger = {
     billedInputTokens: number
     outputTokens: number
     billedCost: number
+    estimatedCost: number
     cachedInputTokens: number
     reasoningTokens: number
   }
@@ -46,7 +49,12 @@ export function readUsageLedger(runDir: string): UsageLedger | null {
   try {
     const raw = JSON.parse(readFileSync(path, 'utf8')) as UsageLedger
     if (raw?.version !== USAGE_LEDGER_VERSION || typeof raw.days !== 'object') return null
-    return raw
+    // Ledgers written before estimate tracking lack `lastTotals.estimatedCost`
+    // — normalize so monotonic max() below never produces NaN.
+    return {
+      ...raw,
+      lastTotals: { ...raw.lastTotals, estimatedCost: raw.lastTotals.estimatedCost ?? 0 }
+    }
   } catch {
     return null
   }
@@ -81,6 +89,7 @@ export function recordUsageDeltas(
       billedInputTokens: 0,
       outputTokens: 0,
       billedCost: 0,
+      estimatedCost: 0,
       cachedInputTokens: 0,
       reasoningTokens: 0
     }
@@ -89,6 +98,7 @@ export function recordUsageDeltas(
     const dInput = delta(totals.billedInputTokens, last.billedInputTokens)
     const dOutput = delta(totals.outputTokens, last.outputTokens)
     const dCost = delta(totals.billedCost, last.billedCost)
+    const dEstimate = delta(totals.estimatedCost, last.estimatedCost)
     const dCached = delta(totals.billedCachedInputTokens, last.cachedInputTokens)
     const dReasoning = delta(totals.reasoningTokens, last.reasoningTokens)
     // Nothing new to record — skip the write entirely (the snapshot only
@@ -102,6 +112,7 @@ export function recordUsageDeltas(
     day.inputTokens += dInput
     day.outputTokens += dOutput
     if (dCost > 0) day.billedCost = (day.billedCost ?? 0) + dCost
+    if (dEstimate > 0) day.estimatedCost = (day.estimatedCost ?? 0) + dEstimate
     if (dCached > 0) day.cachedInputTokens = (day.cachedInputTokens ?? 0) + dCached
     if (dReasoning > 0) {
       day.reasoningTokens = (day.reasoningTokens ?? 0) + dReasoning
@@ -121,6 +132,7 @@ export function recordUsageDeltas(
         billedInputTokens: Math.max(totals.billedInputTokens, last.billedInputTokens),
         outputTokens: Math.max(totals.outputTokens, last.outputTokens),
         billedCost: Math.max(totals.billedCost, last.billedCost),
+        estimatedCost: Math.max(totals.estimatedCost, last.estimatedCost),
         cachedInputTokens: Math.max(totals.billedCachedInputTokens, last.cachedInputTokens),
         reasoningTokens: Math.max(totals.reasoningTokens, last.reasoningTokens)
       },

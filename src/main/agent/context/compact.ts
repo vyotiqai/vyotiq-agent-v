@@ -22,6 +22,7 @@ import {
   estimateMessagesTokensAsync,
   estimateTextTokensAsync
 } from './estimate'
+import { exceedsHardLimit } from '../../../shared/domain/contextBudget'
 import { stripLeadingOrphanToolMessages } from './foldWatermark'
 import { KEEP_RECENT_TURNS, type CompactionRecord } from './types'
 
@@ -50,6 +51,24 @@ export function countUserTurns(messages: readonly ChatMessage[]): number {
     if (m.role === 'user') n++
   }
   return n
+}
+
+/**
+ * True when the unchunked message-shape fork path is safe to call. The fork
+ * sends the full pre-compaction history in a single request; when that history
+ * would exceed the model window the provider 400s at its hard limit and kills
+ * the run (observed: e7d7d807 — request resolved to 1,068,578 tokens on a
+ * 1,048,576-token raw window). When the window or model info is missing we
+ * cannot prove overflow, so we allow the fork and rely on the chunked fallback
+ * only when overflow is provable.
+ */
+export async function shouldUseForkCompaction(
+  messages: readonly ChatMessage[],
+  window?: number,
+  modelInfo?: ModelInfo
+): Promise<boolean> {
+  if (window == null || modelInfo == null) return true
+  return !exceedsHardLimit(window, await estimateMessagesTokensAsync(messages, modelInfo))
 }
 
 /**
@@ -424,24 +443,35 @@ export async function compactMessages(input: {
   }
 
   if (input.forkPrefix && input.messages.length > 0) {
-    const forked = await streamMessageSummary({
-      provider: input.provider,
-      model: input.model,
-      apiKey: input.apiKey,
-      baseUrl: input.baseUrl,
-      signal: input.signal,
-      messages: input.messages,
-      focus: input.focus,
-      priorSummary: prior || undefined,
-      promptCacheKey: input.promptCacheKey,
-      modelInfo: input.modelInfo
-    })
-    if (input.signal.aborted) return null
-    if (forked) return mergeForkSummary(forked)
-    logger.warn('Message-shape compaction produced no summary; falling back to structured tools=[] path', {
-      scope: 'agent',
-      code: 'COMPACTION'
-    })
+    // An over-window fork request 400s at the provider hard limit and kills the
+    // run (observed: e7d7d807 — request resolved to 1,068,578 tokens on a
+    // 1,048,576-token raw window). Skip the unchunked message-shape fork when the
+    // history would exceed the window and let the chunked path below summarize it.
+    if (!(await shouldUseForkCompaction(input.messages, input.contextWindow, input.modelInfo))) {
+      logger.warn('Fork compaction skipped: history exceeds model window; using chunked fallback', {
+        scope: 'agent',
+        code: 'COMPACTION'
+      })
+    } else {
+      const forked = await streamMessageSummary({
+        provider: input.provider,
+        model: input.model,
+        apiKey: input.apiKey,
+        baseUrl: input.baseUrl,
+        signal: input.signal,
+        messages: input.messages,
+        focus: input.focus,
+        priorSummary: prior || undefined,
+        promptCacheKey: input.promptCacheKey,
+        modelInfo: input.modelInfo
+      })
+      if (input.signal.aborted) return null
+      if (forked) return mergeForkSummary(forked)
+      logger.warn('Message-shape compaction produced no summary; falling back to structured tools=[] path', {
+        scope: 'agent',
+        code: 'COMPACTION'
+      })
+    }
   }
 
   const chunks = chunkMessagesForCap(input.messages, Math.max(2000, charCap - 500))

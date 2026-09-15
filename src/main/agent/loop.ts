@@ -31,11 +31,13 @@ import {
 } from './streamRetry'
 import { isStreamIdleTimeoutError } from './providers/sse'
 import { resolveEffectiveSettings } from '../../shared/effectiveSettings'
+import { estimateStepCost, resolveModelPrice } from '../../shared/pricing/modelPrices'
 import { resolveServiceTier } from '../../shared/domain/modelSelection'
 import { recallRunModelSelection, rememberRunModelSelection } from './runModelSelection'
 import { stripToolShapedAssistantText } from '../../shared/transcript'
 import { createApprovalGate } from './toolApproval'
 import { persistAlwaysAllow } from './toolApprovalStore'
+import { createLiveEventQueue, pushLiveEvent } from './liveEventQueue'
 import { getSecret, hasStoredSecretBlob, secretStatus } from '@main/settings/secrets'
 import { getSettings } from '@main/settings/settings'
 import { findWorkspaceSettingsOverride, readWorkspacesState } from '@main/workspace/workspaces'
@@ -1029,7 +1031,14 @@ export async function* runAgent(input: {
         checkpointTotals.steps >= archivedTotals.steps &&
         checkpointTotals.billedInputTokens >= archivedTotals.billedInputTokens
       ) {
-        costTotals = { ...emptyStepUsageTotals(), ...checkpointTotals, inputTokens: checkpointTotals.lastStepInputTokens }
+        costTotals = {
+          ...emptyStepUsageTotals(),
+          ...checkpointTotals,
+          inputTokens: checkpointTotals.lastStepInputTokens,
+          // Checkpoints written before estimate tracking lack these — never NaN.
+          estimatedCost: checkpointTotals.estimatedCost ?? 0,
+          stepsWithEstimate: checkpointTotals.stepsWithEstimate ?? 0
+        }
       } else {
         costTotals = archivedTotals
       }
@@ -1209,6 +1218,9 @@ export async function* runAgent(input: {
     const provider = getProvider(providerId)
     costLogProvider = providerId
     costLogModel = settings.model
+    // Published price for cost estimation; null when unpriceable (custom
+    // endpoints, unknown models) — those runs show tokens, never a fake cost.
+    const runModelPrice = resolveModelPrice(providerId, settings.model)
 
     let apiKey: string | null = getSecret(providerId)
     const baseUrl = resolveProviderChatBaseUrl(providerId, settings, apiKey)
@@ -1264,6 +1276,8 @@ export async function* runAgent(input: {
         billedCost: costTotals.billedCost,
         billedCostSaved: costTotals.billedCostSaved,
         stepsWithCostReport: costTotals.stepsWithCostReport,
+        estimatedCost: costTotals.estimatedCost,
+        stepsWithEstimate: costTotals.stepsWithEstimate,
         generationMs: costTotals.generationMs,
         lastStepInputTokens: costTotals.inputTokens
       }
@@ -1769,7 +1783,9 @@ export async function* runAgent(input: {
         pluginRulesSection,
         userRules: getSettings().userRules ?? [],
         persona: settings.agentPersona || DEFAULT_AGENT_PERSONA,
-        identity: settings.agentPersona ? undefined : DEFAULT_AGENT_IDENTITY,
+        identity:
+          settings.agentIdentity ||
+          (settings.agentPersona ? undefined : DEFAULT_AGENT_IDENTITY),
         tone: settings.agentTone || DEFAULT_AGENT_TONE,
         responseLanguage: settings.responseLanguage || undefined,
         responseVerbosity: settings.responseVerbosity,
@@ -2369,6 +2385,13 @@ export async function* runAgent(input: {
                 providerInputTokens = chunk.usage.inputTokens
               }
               const generationMs = Math.max(0, Date.now() - streamStartedAt)
+              // Estimated cost only when the provider did NOT report a cost
+              // field and the model has verified published pricing. Runs on
+              // unpriceable models keep token-only reporting — never a fake $.
+              const stepEstimatedCost =
+                chunk.usage.billedCost == null && runModelPrice
+                  ? estimateStepCost(chunk.usage, runModelPrice) ?? undefined
+                  : undefined
               const cacheFieldsPresent =
                 chunk.usage.cachedInputTokens != null ||
                 chunk.usage.cacheCreationInputTokens != null
@@ -2395,6 +2418,9 @@ export async function* runAgent(input: {
                 ...(chunk.usage.billedCost != null ? { billedCost: chunk.usage.billedCost } : {}),
                 ...(chunk.usage.billedCostSaved != null
                   ? { billedCostSaved: chunk.usage.billedCostSaved }
+                  : {}),
+                ...(stepEstimatedCost !== undefined
+                  ? { estimatedCost: stepEstimatedCost }
                   : {})
               })
               if (stepPartial) {
@@ -2424,6 +2450,9 @@ export async function* runAgent(input: {
                 ...(chunk.usage.billedCost != null ? { billedCost: chunk.usage.billedCost } : {}),
                 ...(chunk.usage.billedCostSaved != null
                   ? { billedCostSaved: chunk.usage.billedCostSaved }
+                  : {}),
+                ...(stepEstimatedCost !== undefined
+                  ? { estimatedCost: stepEstimatedCost }
                   : {}),
                 billedInputTokens: costTotals.billedInputTokens,
                 peakInputTokens: costTotals.peakInputTokens,
@@ -2461,6 +2490,8 @@ export async function* runAgent(input: {
                 cacheHitRateStep: hitRate,
                 billedInputTokens: costTotals.billedInputTokens,
                 peakInputTokens: costTotals.peakInputTokens,
+                estimatedStepCost: stepEstimatedCost,
+                estimatedCostTotal: costTotals.estimatedCost,
                 hotspot,
                 layers,
                 messagesCount: assembled.messages.length,
@@ -2480,7 +2511,8 @@ export async function* runAgent(input: {
                 thinkingEnabled: Boolean(settings.thinkingEnabled),
                 thinkingEffortHigh,
                 step,
-                billedInputTokens: costTotals.billedInputTokens
+                billedInputTokens: costTotals.billedInputTokens,
+                cachedInputTokensTotal: costTotals.billedCachedInputTokens
               })) {
                 // High thinking / long-run boundary re-notify on buckets; other kinds once.
                 const warnOnceKey =
@@ -2786,7 +2818,8 @@ export async function* runAgent(input: {
       // Degenerate generation repetition (run be413e92): the monitor soft-
       // aborted the stream. Mirror the truncated auto-continue contract:
       // flush the partial output, then steer-continue with a fresh-action
-      // prompt.
+      // prompt. Every repetition abort steer-continues; the run finishes when
+      // a generation completes without degenerating.
       if (repetitionAborted) {
         yield* flushPartialAssistant(
           runId,
@@ -3204,7 +3237,7 @@ export async function* runAgent(input: {
       // Long-running tools emit live progress while the step await is blocked.
       // Queue those events and drain them between wakeups instead of holding
       // them until the batch settles.
-      const liveEvents: AgentEvent[] = []
+      const liveEvents = createLiveEventQueue()
       const liveToolResultsEmitted = new Set<string>()
       let wakeLiveEvents: (() => void) | null = null
 
@@ -3253,7 +3286,10 @@ export async function* runAgent(input: {
         invalidateMcpToolCatalogCache,
         mcpNotInCatalogCounts,
         emitLiveEvent: (ev: AgentEvent) => {
-          liveEvents.push(ev)
+          const dropped = pushLiveEvent(liveEvents, ev)
+          if (dropped > 0) {
+            logger.warn(`live event queue overflow: dropped ${dropped} delta event(s), queued=${liveEvents.events.length}`)
+          }
           if (ev.type === 'tool_progress' || ev.type === 'mode_changed' || ev.type === 'agent_instance_update' || ev.type === 'goal_update' || ev.type === 'loop_update') {
             appendEvent(runDir!, ev)
           }
@@ -3280,8 +3316,8 @@ export async function* runAgent(input: {
       )
 
       for (;;) {
-        while (liveEvents.length) {
-          const ev = liveEvents.shift()!
+        while (liveEvents.events.length) {
+          const ev = liveEvents.events.shift()!
           yield ev.type === 'tool_result' ? toolResultEventForIpc(ev) : ev
         }
         if (toolsSettled) break
@@ -3484,6 +3520,8 @@ export async function* runAgent(input: {
           provider: costLogProvider,
           model: costLogModel,
           billedCost: costTotals.billedCost,
+          estimatedCost:
+            costTotals.stepsWithEstimate > 0 ? costTotals.estimatedCost : undefined,
           contextWindow: costLogContextWindow
         })
         // Final ledger record — bills the tail delta accumulated since the last
@@ -3519,6 +3557,10 @@ export async function* runAgent(input: {
             reasoningTokens: costTotals.reasoningTokens,
             billedCachedInputTokens: costTotals.billedCachedInputTokens,
             cacheCreationInputTokens: costTotals.cacheCreationInputTokens,
+            billedCost: costTotals.billedCost,
+            estimatedCost:
+              costTotals.stepsWithEstimate > 0 ? costTotals.estimatedCost : undefined,
+            stepsWithEstimate: costTotals.stepsWithEstimate,
             billedCacheHitRate: billedHit,
             compactionCountThisRun,
             topToolsByCalls: topToolsByCallCount(receipt?.toolStats?.byName)

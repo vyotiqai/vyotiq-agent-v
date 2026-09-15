@@ -553,10 +553,7 @@ function scheduleDeferredInstanceWorktreeCleanup(
           return
         }
         deferredCleanupKeys.delete(key)
-        logger.warn('deferred instance worktree cleanup gave up', {
-          scope: 'git',
-          worktreePath
-        })
+        reportDeferredCleanupGaveUp(worktreePath)
       })
     }, delay)
     if (typeof timer.unref === 'function') timer.unref()
@@ -566,10 +563,43 @@ function scheduleDeferredInstanceWorktreeCleanup(
   attempt(0)
 }
 
+// Boot prune can defer cleanup for dozens of locked worktrees whose retry
+// ladders all expire together — coalesce their give-up warns into one summary
+// instead of a per-path burst.
+const GAVE_UP_COALESCE_MS = 2000
+const GAVE_UP_MAX_PATHS_SHOWN = 5
+let gaveUpPendingPaths: string[] = []
+let gaveUpTimer: ReturnType<typeof setTimeout> | undefined
+
+function reportDeferredCleanupGaveUp(worktreePath: string): void {
+  gaveUpPendingPaths.push(worktreePath)
+  if (gaveUpTimer) clearTimeout(gaveUpTimer)
+  gaveUpTimer = setTimeout(() => {
+    const paths = gaveUpPendingPaths
+    gaveUpPendingPaths = []
+    gaveUpTimer = undefined
+    logger.warn(
+      `deferred instance worktree cleanup gave up for ${paths.length} worktree${paths.length === 1 ? '' : 's'}`,
+      {
+        scope: 'git',
+        count: paths.length,
+        samplePaths: paths.slice(0, GAVE_UP_MAX_PATHS_SHOWN),
+        note: 'leftovers stay locked; next boot prune re-probes with backoff'
+      }
+    )
+  }, GAVE_UP_COALESCE_MS)
+  if (typeof gaveUpTimer.unref === 'function') gaveUpTimer.unref()
+}
+
 export function resetInstanceWorktreeCleanupForTests(): void {
   for (const timer of deferredCleanupTimers) clearTimeout(timer)
   deferredCleanupTimers.clear()
   deferredCleanupKeys.clear()
+  if (gaveUpTimer) {
+    clearTimeout(gaveUpTimer)
+    gaveUpTimer = undefined
+  }
+  gaveUpPendingPaths = []
   pruneSkipUntil.clear()
   pendingInstanceWorktrees.clear()
 }

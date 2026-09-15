@@ -361,6 +361,42 @@ describe('TasksRailChip hover card', () => {
     expect(document.querySelector('[data-tasks-popover-card]')).toBeNull()
   })
 
+  it('flips the card to the right when the trigger hugs the left edge', async () => {
+    vi.useFakeTimers()
+    readRunArtifact.mockResolvedValue(
+      todosPayload([{ id: '1', content: 'Ship', status: 'pending' }])
+    )
+    render(
+      <TasksRailChip workspacePath="/ws" runId="run-1" running onOpenPlan={vi.fn()} />
+    )
+    await act(async () => {
+      await Promise.resolve()
+    })
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 1024
+    })
+
+    const chip = screen.getByRole('button', { name: /Tasks 0 of 1/ })
+    // rect.left (0) - 8 (gap) - 288 (card width fallback) < 12 (viewport
+    // pad): no room on the left, so the card must flip to the right side.
+    chip.getBoundingClientRect = () =>
+      ({ left: 0, right: 24, top: 300, width: 24, height: 24 }) as DOMRect
+
+    fireEvent.pointerEnter(chip)
+    act(() => {
+      vi.advanceTimersByTime(150)
+    })
+    const card = document.querySelector('[data-tasks-popover-card]') as HTMLElement
+    expect(card).toBeTruthy()
+    // Placed right of the trigger (right edge 24 + 8 gap) and inside the
+    // viewport instead of clamped onto the trigger.
+    expect(card.style.left).toBe('32px')
+    // Entrance animation grows out of the side the card opens toward.
+    expect(card.style.transformOrigin).toBe('left center')
+  })
+
   it('opens the plan panel from the card footer button', async () => {
     vi.useFakeTimers()
     readRunArtifact.mockResolvedValue(

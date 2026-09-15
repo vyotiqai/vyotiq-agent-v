@@ -32,10 +32,13 @@ const winBtn =
 
 export function TitleBar({
   drawerOpen,
-  onToggleSidebar
+  onToggleSidebar,
+  sidebarExpanded = false
 }: {
   drawerOpen: boolean
   onToggleSidebar: () => void
+  /** Desktop only: suppress the centered brand mark while the sidebar is expanded. */
+  sidebarExpanded?: boolean
 }) {
   const isDesktop = useIsDesktop()
   const showControls = useShowWindowControls()
@@ -84,7 +87,7 @@ export function TitleBar({
           if (!occupied && showControls) void window.vyotiq?.windowMaximize()
         }}
       >
-        {!isDesktop && !drawerOpen && !occupied ? (
+        {!drawerOpen && !sidebarExpanded && !occupied ? (
           <div className="pointer-events-none flex h-full items-center justify-center" aria-hidden>
             <VyotiqMark size={17} className="text-fg/70" decorative />
           </div>

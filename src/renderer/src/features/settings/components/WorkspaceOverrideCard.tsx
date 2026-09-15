@@ -112,6 +112,7 @@ export function WorkspaceOverrideCard({
                   autoCompactThresholdRatio: globalSettings.autoCompactThresholdRatio,
                   toolApproval: globalSettings.toolApproval,
                   agentPersona: globalSettings.agentPersona,
+                  agentIdentity: globalSettings.agentIdentity,
                   agentTone: globalSettings.agentTone,
                   responseLanguage: globalSettings.responseLanguage,
                   responseVerbosity: globalSettings.responseVerbosity

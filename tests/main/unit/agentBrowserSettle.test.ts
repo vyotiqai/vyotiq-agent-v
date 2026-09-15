@@ -1,24 +1,88 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('electron', () => ({
-  session: { fromPartition: () => ({ on: vi.fn() }) },
-  WebContentsView: class {
-    webContents = {
-      on: vi.fn(),
-      setWindowOpenHandler: vi.fn(),
-      isDestroyed: () => false,
-      close: vi.fn()
-    }
-    setBounds = vi.fn()
-    setVisible = vi.fn()
+interface FakeWcLike {
+  url: string
+  loading: boolean
+  emit: (event: string) => boolean
+}
+
+// Shared between the electron mock factory and the tests below so a test can
+// preconfigure loadURL behavior before navigateUrl runs (no races with the
+// navigation continuation microtasks).
+const h = vi.hoisted(() => {
+  return {
+    instances: [] as { webContents: FakeWcLike }[],
+    loadBehavior: null as null | ((wc: FakeWcLike, url: string) => void)
   }
-}))
+})
+
+vi.mock('electron', async () => {
+  const { EventEmitter } = await import('node:events')
+
+  class FakeSession extends EventEmitter {
+    setPermissionRequestHandler = (): void => {}
+    setPermissionCheckHandler = (): void => {}
+    webRequest = { onHeadersReceived: (): void => {} }
+  }
+  const sharedSession = new FakeSession()
+
+  class FakeWebContents extends EventEmitter {
+    url = 'about:blank'
+    title = ''
+    loading = false
+    destroyedFlag = false
+    loadURLCalls: string[] = []
+    session = sharedSession
+    setWindowOpenHandler = (): void => {}
+    focus = (): void => {}
+    setBackgroundThrottling = (): void => {}
+    close = (): void => {}
+    executeJavaScript = async (): Promise<boolean> => true
+    isDestroyed = (): boolean => this.destroyedFlag
+    getURL = (): string => this.url
+    getTitle = (): string => this.title
+    isLoading = (): boolean => this.loading
+    loadURL = async (u: string): Promise<undefined> => {
+      this.loadURLCalls.push(u)
+      if (h.loadBehavior) {
+        h.loadBehavior(this, u)
+        return undefined
+      }
+      this.url = u
+      this.loading = false
+      this.emit('did-finish-load')
+      return undefined
+    }
+  }
+
+  class FakeWebContentsView {
+    webContents = new FakeWebContents()
+    setBounds = (): void => {}
+    setVisible = (): void => {}
+    constructor() {
+      h.instances.push(this)
+    }
+  }
+
+  return {
+    session: { fromPartition: (): FakeSession => sharedSession },
+    WebContentsView: FakeWebContentsView
+  }
+})
 
 vi.mock('@main/app/window', () => ({
   getMainWindow: () => null
 }))
 
-import { settleAfterActionForTests } from '@main/app/agentBrowser'
+vi.mock('@main/settings/settings', () => ({
+  getSettings: () => ({ browserDomainAllowlist: [] })
+}))
+
+import {
+  navigateUrl,
+  resetAgentBrowserForTests,
+  settleAfterActionForTests
+} from '@main/app/agentBrowser'
 
 function createFakeContents() {
   const listeners = new Map<string, Set<() => void>>()
@@ -90,5 +154,33 @@ describe('browser action settle cleanup', () => {
     await expect(done).rejects.toMatchObject({ name: 'AbortError' })
     expect(wc.listenerCount('did-finish-load')).toBe(0)
     expect(wc.listenerCount('did-navigate-in-page')).toBe(0)
+  })
+})
+
+describe('navigateUrl superseded navigation (ERR_ABORTED)', () => {
+  afterEach(() => {
+    h.loadBehavior = null
+    resetAgentBrowserForTests()
+  })
+
+  it('succeeds when loadURL rejects with ERR_ABORTED while the superseding navigation completes', async () => {
+    h.loadBehavior = (wc, url) => {
+      // Simulate a page-initiated redirect (e.g. Google) superseding the
+      // wc.loadURL() call: the initial navigation rejects with ERR_ABORTED (-3)
+      // while the superseding one completes and resolves `done` via
+      // did-finish-load (waitForLoad already ignores errorCode -3 there).
+      wc.loading = true
+      queueMicrotask(() => {
+        wc.url = 'https://www.google.com/'
+        wc.loading = false
+        wc.emit('did-finish-load')
+      })
+      const err = new Error(`ERR_ABORTED (-3) loading '${url}'`) as NodeJS.ErrnoException
+      err.errno = -3
+      throw err
+    }
+    const result = await navigateUrl('https://www.google.com/', { agentControl: true })
+    expect(result).toContain('Navigated to https://www.google.com/')
+    expect(result).toContain('tab_id: ')
   })
 })

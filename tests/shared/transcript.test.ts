@@ -439,6 +439,46 @@ describe('stripToolShapedAssistantTextForStream', () => {
   })
 })
 
+describe('prompt section echo scrubbing', () => {
+  it('reduces a whole-message <live_session_summary> echo to empty text', () => {
+    expect(
+      stripToolShapedAssistantText(
+        '<live_session_summary> Date (UTC): 2026-09-13T15:58:59.696Z OS: Windows x64 10.0.26200\n\nTop-level\n\ndir .vyotiq file AGENTS.md\n\n</live_session>'
+      )
+    ).toBe('')
+  })
+
+  it('keeps text around a stripped echo block with a mangled closer', () => {
+    expect(
+      stripToolShapedAssistantText(
+        'Done.\n<live_session_summary>\nTop-level\nfile AGENTS.md\n</live_session>\nAll good.'
+      )
+    ).toBe('Done.\n\nAll good.')
+  })
+
+  it('strips several echo blocks in one message', () => {
+    expect(
+      stripToolShapedAssistantText(
+        '<live_session>a</live_session>\nmid\n<live_session_summary>b</live_session_summary>'
+      )
+    ).toBe('mid')
+  })
+
+  it('leaves a lone opening tag (streaming partial) alone', () => {
+    const partial = 'Working… <live_session_summary> Date (UTC):'
+    expect(stripToolShapedAssistantTextForStream(partial)).toBe(partial)
+  })
+
+  it('strips a closed echo block while streaming and keeps surrounding text', () => {
+    const out = stripToolShapedAssistantTextForStream(
+      'Hi\n<live_session>\nRoot: /repo\n</live_session>\nthere'
+    )
+    expect(out).toContain('Hi')
+    expect(out).toContain('there')
+    expect(out).not.toContain('live_session')
+  })
+})
+
 describe('isToolShapedTextLeak', () => {
   it('detects leaked tool JSON and pseudo calls', () => {
     expect(isToolShapedTextLeak('tool {"path":"a.ts"}')).toBe(true)

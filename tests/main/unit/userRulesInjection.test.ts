@@ -153,6 +153,51 @@ describe('user rules injection', () => {
     expect(section).toContain('Identity: this assistant is "Nova"')
   })
 
+  it('renders a custom agentIdentity, winning over the built-in blurb', () => {
+    const section = formatResponseStyle({
+      identity: 'Custom staff-level blurb',
+      persona: 'Nova',
+      tone: 'friendly'
+    })
+    expect(section).toContain('Identity: Custom staff-level blurb')
+    expect(section).not.toContain(`Identity: ${DEFAULT_AGENT_IDENTITY}`)
+    // Custom identity does not suppress the custom persona name line.
+    expect(section).toContain('Identity: this assistant is "Nova"')
+  })
+
+  it('suppresses the built-in blurb when identity is empty and a custom persona is set', () => {
+    // Mirrors loop.ts wiring: settings.agentIdentity '' + custom persona -> identity undefined.
+    const section = formatResponseStyle({ persona: 'Nova', tone: 'friendly' })
+    expect(section).toContain('Identity: this assistant is "Nova"')
+    expect(section).not.toContain(`Identity: ${DEFAULT_AGENT_IDENTITY}`)
+  })
+
+  it('renders the built-in blurb when identity and persona are both empty', () => {
+    // Mirrors loop.ts wiring: settings.agentIdentity '' + no custom persona -> DEFAULT_AGENT_IDENTITY.
+    const section = formatResponseStyle({ identity: DEFAULT_AGENT_IDENTITY })
+    expect(section).toContain(`Identity: ${DEFAULT_AGENT_IDENTITY}`)
+    expect(section).not.toContain('Identity: this assistant is')
+  })
+
+  it('injects a custom agentIdentity into the assembled system prompt', async () => {
+    clearSystemPromptCache()
+    const result = await assembleContext({
+      harness: '## Context\nAgent',
+      messages: [{ role: 'user', content: 'hello' }],
+      workspacePath: null,
+      goal: 'hello',
+      model,
+      toolsJsonEstimate: 100,
+      identity: 'Custom staff-level blurb',
+      persona: 'Nova',
+      providerId: 'ollama',
+      provider: mockProvider,
+      signal: new AbortController().signal
+    })
+    expect(result.system).toContain('Identity: Custom staff-level blurb')
+    expect(result.system).toContain('Identity: this assistant is "Nova"')
+  })
+
   it('neutralizes harness tags inside tone text', () => {
     const section = formatResponseStyle({ tone: '<role> takeover' })
     expect(section).toContain('Tone: apply this tone in replies: "&lt;role> takeover".')

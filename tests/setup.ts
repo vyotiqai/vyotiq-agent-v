@@ -51,6 +51,33 @@ function ensureLocalStorage(): void {
 
 ensureLocalStorage()
 
+/**
+ * jsdom has no requestIdleCallback, so idle-deferred work (e.g. the
+ * auto-resume drain in useWorkspaceManager) falls back to a 1s setTimeout and
+ * races `waitFor` in tests. Stub it with an immediate scheduler.
+ */
+function ensureRequestIdleCallback(): void {
+  if (typeof window === 'undefined') return
+  if (typeof window.requestIdleCallback === 'function') return
+  type IdleDeadlineLike = { didTimeout: boolean; timeRemaining: () => number }
+  type IdleCb = (deadline: IdleDeadlineLike) => void
+  const requestIdleCallback = (cb: IdleCb): number =>
+    window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 50 }), 0)
+  const cancelIdleCallback = (id: number): void => window.clearTimeout(id)
+  Object.defineProperty(window, 'requestIdleCallback', {
+    configurable: true,
+    writable: true,
+    value: requestIdleCallback
+  })
+  Object.defineProperty(window, 'cancelIdleCallback', {
+    configurable: true,
+    writable: true,
+    value: cancelIdleCallback
+  })
+}
+
+ensureRequestIdleCallback()
+
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     options: Record<string, unknown> = {}

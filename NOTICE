@@ -19,8 +19,7 @@ others) remain in full effect and are reproduced in each project's repository.
 - @modelcontextprotocol/sdk — MIT
 - @huggingface/transformers — Apache-2.0
 - onnxruntime-node — MIT
-- node-llama-cpp — MIT
-- tree-sitter-wasms / web-tree-sitter — MIT
+- tree-sitter-wasms — Unlicense (prebuilt WASM grammars)
 - material-icon-theme — MIT (icon assets)
 - @lobehub/icons — MIT
 - @phosphor-icons/react — MIT

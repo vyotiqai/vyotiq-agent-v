@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { FEEDBACK_MESSAGE_MAX, FEEDBACK_TITLE_MAX } from '@shared/ipc'
-import { Dialog } from '@renderer/lib/a11y'
+import { Dialog } from '@renderer/lib/a11y/Dialog'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { Button, Input, selectClass } from '@renderer/lib/ui'
 

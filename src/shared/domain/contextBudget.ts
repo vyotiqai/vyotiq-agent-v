@@ -80,3 +80,17 @@ export function remainingContentTokens(contentWindow: number, usedTokens: number
   const used = Number.isFinite(usedTokens) && usedTokens > 0 ? usedTokens : 0
   return Math.max(0, contentWindow - used)
 }
+
+/**
+ * True when an estimated request would exceed the given model window. Used to
+ * skip compaction/request paths that would otherwise 400 at the provider hard
+ * limit (observed: run e7d7d807, request resolved to 1,068,578 tokens on a
+ * 1,048,576-token raw window). Callers pass the relevant window — the content
+ * window is safe here because it sits below the raw window, so a request that
+ * fits the content window can never breach the provider hard limit.
+ */
+export function exceedsHardLimit(contextWindow: number, estimatedTokens: number): boolean {
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return false
+  if (!Number.isFinite(estimatedTokens) || estimatedTokens <= 0) return false
+  return estimatedTokens > contextWindow
+}

@@ -95,7 +95,7 @@ export type AssembleInput = {
   userRules?: UserRule[]
   /** Optional assistant identity override (settings.agentPersona). */
   persona?: string
-  /** Built-in identity blurb; assembled only when no user persona is set. */
+  /** Built-in identity blurb; overridden by settings.agentIdentity, and assembled only when identity is empty and no user persona is set. */
   identity?: string
   /** Optional tone directive (settings.agentTone). Empty/omitted = spine default. */
   tone?: string

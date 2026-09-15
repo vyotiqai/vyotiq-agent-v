@@ -47,6 +47,7 @@ import {
 import { toolResultEventForPersistence } from '../../shared/utils/toolResultIpc'
 import { finalizeInterruptedTodos } from './tools/todo'
 import { readGoal } from './runGoal'
+import { readLenientReceiptCost } from './runStats'
 import { finalizeTodoContentOnRunEnd, type TodoFinalizeOutcome } from '../../shared/utils/todoContent'
 import { DEFAULT_PLAN_STUB, stripPlanStubChrome } from '../../shared/planStub'
 import { ensureWorkspaceStorage, resolveRunDir, workspaceSessionsRoot } from '../storage/paths'
@@ -1044,6 +1045,8 @@ async function collectRunsFromRoot(root: string): Promise<{
         ...(status.worktreePath ? { worktreePath: status.worktreePath } : {}),
         ...(status.worktreeBranch ? { worktreeBranch: status.worktreeBranch } : {})
       }
+      const receiptCost = await readLenientReceiptCost(dir)
+      if (receiptCost) Object.assign(summary, receiptCost)
       if (status.inlineInstance && status.parentRunId) {
         instances.push(summary)
       } else if (!status.inlineInstance) {

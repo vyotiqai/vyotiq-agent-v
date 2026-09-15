@@ -84,7 +84,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: node scripts/extract-release-notes.mjs --version "$(node -p "require('./package.json').version")" --out release-notes.md
 
-      - name: Create the release in the public releases repo
+      - name: Create the draft release in the public releases repo
         if: startsWith(github.ref, 'refs/tags/')
         env:
           # Cross-repo publish: the release lives in the PUBLIC
@@ -97,8 +97,16 @@ jobs:
           if gh release view "$TAG" --repo vyotiqai/vyotiq-agent-v-releases > /dev/null 2>&1; then
             echo "Release $TAG already exists in the releases repo; skipping creation"
           else
+            # Draft-first: nothing is public until finalize-release publishes
+            # it, so a half-uploaded release can never be picked up by the
+            # in-app updater. electron-builder's GitHubPublisher reuses an
+            # existing release whose tag_name matches this tag (verified in
+            # packages/electron-publish/src/gitHubPublisher.ts), so the
+            # matrix jobs upload into this draft instead of racing to create
+            # the release (the v1.1.4 422 on macOS).
             gh release create "$TAG" \
               --repo vyotiqai/vyotiq-agent-v-releases \
+              --draft \
               --title "Vyotiq v$VERSION" \
               --notes-file release-notes.md
           fi
@@ -121,7 +129,10 @@ jobs:
           - name: linux-x64
             os: ubuntu-latest
             builder_args: --linux
-            artifacts: dist-package/*.AppImage
+            artifacts: |
+              dist-package/*.AppImage
+              dist-package/*.deb
+              dist-package/*.rpm
             artifact: Vyotiq-linux-x64-appimage
           - name: macOS
             os: macos-latest
@@ -170,6 +181,14 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: pnpm build:vite
 
+      # --- Code-signing hook (no-op while secrets are unset) --------------
+      # Windows Authenticode: CSC_LINK / CSC_KEY_PASSWORD below; the workflow
+      #   env CSC_IDENTITY_AUTO_DISCOVERY only enables identity discovery
+      #   when CSC_LINK exists - unset keeps the unsigned pack.
+      # Azure Trusted Signing: the AZURE_* secrets below activate electron-
+      #   builder's Azure signer once electron-builder.yml gains
+      #   win.azureSignOptions (v26 key; renamed win.sign { type: "azure" }
+      #   in v27). Until that config exists these env vars are inert.
       - name: Package installers
         env:
           # Cross-repo publish: electron-builder creates the release in the
@@ -181,6 +200,9 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         # --publish always only on real tag pushes: a manual dispatch on a
         # branch would otherwise target the release derived from package.json's
         # version and re-upload identically-named assets onto it.
@@ -196,6 +218,21 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifacts }}
           if-no-files-found: error
+
+      - name: Upload updater metadata artifacts
+        # latest*.yml + blockmaps are only emitted on tag pushes
+        # (--publish always); a manual dispatch (--publish never) does not
+        # produce them, hence the tag gate. Warn (not error) because the
+        # authoritative missing-manifest gate is finalize-release's asset
+        # check against the release itself.
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.artifact }}-update-metadata
+          path: |
+            dist-package/latest*.yml
+            dist-package/*.blockmap
+          if-no-files-found: warn
 
   finalize-release:
     # Post-publish verification: the release body must carry the changelog
@@ -244,7 +281,9 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: |
           TAG="$GITHUB_REF_NAME"
-          ASSETS=$(gh api "repos/vyotiqai/vyotiq-agent-v-releases/releases/tags/$TAG" --jq '.assets[].name')
+          # gh release view, not releases/tags/$TAG - that REST endpoint 404s
+          # for drafts, and at this point the release is still a draft.
+          ASSETS=$(gh release view "$TAG" --repo vyotiqai/vyotiq-agent-v-releases --json assets --jq '.assets[].name')
           echo "Release assets:"; echo "$ASSETS"
           FAIL=0
           for required in latest.yml latest-linux.yml latest-mac.yml; do
@@ -255,9 +294,22 @@ jobs:
           done
           echo "$ASSETS" | grep -q -- '-setup\.exe$' || { echo "::error::Missing Windows NSIS installer"; FAIL=1; }
           echo "$ASSETS" | grep -q -- '\.AppImage$' || { echo "::error::Missing Linux AppImage"; FAIL=1; }
+          echo "$ASSETS" | grep -q -- '\.deb$' || { echo "::error::Missing Linux .deb package"; FAIL=1; }
+          echo "$ASSETS" | grep -q -- '\.rpm$' || { echo "::error::Missing Linux .rpm package"; FAIL=1; }
           [ "$(echo "$ASSETS" | grep -c -- '\.dmg$')" -ge 2 ] || { echo "::error::Missing macOS DMGs (arm64 + x64)"; FAIL=1; }
           [ "$(echo "$ASSETS" | grep -c -- 'mac\.zip$')" -ge 2 ] || { echo "::error::Missing macOS zips (arm64 + x64)"; FAIL=1; }
           exit $FAIL
+
+      - name: Publish the draft release
+        # Flip the draft created by create-release and filled by
+        # electron-builder to published only after every asset check passed.
+        # This is the moment the in-app updater and the website can see the
+        # release. Re-runs are safe: --draft=false on a published release is
+        # a no-op.
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo vyotiqai/vyotiq-agent-v-releases --draft=false
 
       - name: Mirror a release pointer on the source repo
         # Installers live on the releases-only repo; this repo is where people

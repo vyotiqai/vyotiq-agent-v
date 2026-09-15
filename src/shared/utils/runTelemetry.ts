@@ -28,6 +28,14 @@ export type StepUsageTotals = {
   billedCostSaved: number
   /** Steps whose usage payload included a numeric cost field. */
   stepsWithCostReport: number
+  /**
+   * Sum of per-step estimated USD cost (tokens × published model prices) for
+   * steps where the provider did NOT report a cost field. Kept separate from
+   * `billedCost` so estimates are never presented as a provider bill.
+   */
+  estimatedCost: number
+  /** Steps whose cost is an estimate (no provider-reported cost that step). */
+  stepsWithEstimate: number
   /** Sum of per-step provider-stream wall-clock (request start → done usage). */
   generationMs: number
 }
@@ -47,6 +55,8 @@ export function emptyStepUsageTotals(): StepUsageTotals {
     billedCost: 0,
     billedCostSaved: 0,
     stepsWithCostReport: 0,
+    estimatedCost: 0,
+    stepsWithEstimate: 0,
     generationMs: 0
   }
 }
@@ -77,6 +87,8 @@ export function mergeStepUsageTotals(a: StepUsageTotals, b: StepUsageTotals): St
     billedCost: a.billedCost + (b.stepsWithCostReport > 0 ? b.billedCost : 0),
     billedCostSaved: a.billedCostSaved + b.billedCostSaved,
     stepsWithCostReport: a.stepsWithCostReport + b.stepsWithCostReport,
+    estimatedCost: a.estimatedCost + (b.stepsWithEstimate > 0 ? b.estimatedCost : 0),
+    stepsWithEstimate: a.stepsWithEstimate + b.stepsWithEstimate,
     generationMs: a.generationMs + b.generationMs
   }
 }
@@ -95,6 +107,10 @@ export function stepUsageFromEvent(event: AgentEvent): StepUsageTotals | null {
     typeof event.billedCostSaved === 'number' && Number.isFinite(event.billedCostSaved)
       ? event.billedCostSaved
       : 0
+  const estimatedCost =
+    typeof event.estimatedCost === 'number' && Number.isFinite(event.estimatedCost)
+      ? event.estimatedCost
+      : undefined
   return {
     inputTokens,
     ...(event.inputTokensIncludesCache !== undefined
@@ -112,6 +128,8 @@ export function stepUsageFromEvent(event: AgentEvent): StepUsageTotals | null {
     billedCost: billedCost ?? 0,
     billedCostSaved,
     stepsWithCostReport: billedCost !== undefined ? 1 : 0,
+    estimatedCost: estimatedCost ?? 0,
+    stepsWithEstimate: estimatedCost !== undefined ? 1 : 0,
     generationMs:
       typeof event.generationMs === 'number' && Number.isFinite(event.generationMs)
         ? Math.max(0, Math.round(event.generationMs))

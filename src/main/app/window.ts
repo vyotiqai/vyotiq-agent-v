@@ -109,8 +109,12 @@ export function createWindow(): BrowserWindow {
     mainWindow?.show()
   })
 
-  mainWindow.on('closed', () => {
-    mainWindow = null
+  // Capture the created window: after a second-instance recreate, the wedged
+  // (destroyed) window's own closed event must not null the reference to its
+  // fresh replacement.
+  const created = mainWindow
+  created.on('closed', () => {
+    if (mainWindow === created) mainWindow = null
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {

@@ -46,6 +46,16 @@ ehthumbs.db
 !.env.example
 !.env.*.example
 
+# Developer certificates, keys, and credentials
+*.pem
+*.key
+*.pfx
+*.p12
+*.jks
+*.crt
+*.cer
+*.der
+
 # Generated synced assets (scripts/sync-*.mjs on postinstall/dev/build)
 src/renderer/public/file-icons/
 resources/codeindex/wasm/

@@ -52,6 +52,7 @@ export const NAVIGATION_MODE_OPTIONS = [
 /** Mirrors the zod maxes in shared/ipc/schemas/settings.ts. */
 export const PERSONA_MAX_LENGTH = 1000
 export const TONE_MAX_LENGTH = 2000
+export const IDENTITY_MAX_LENGTH = 1000
 export const LANGUAGE_MAX_LENGTH = 64
 
 export const RESPONSE_LANGUAGE_SUGGESTIONS = [

@@ -1,4 +1,9 @@
-/** Soft cap on retained PTY scrollback per session (renderer-side). */
+/**
+ * Soft cap on retained PTY scrollback per session (renderer-side). Mirrors
+ * PTY_SCROLLBACK_MAX = 200_000 in src/main/app/ptySessions.ts — shared and
+ * renderer code must not import from @main (process boundary), so the value is
+ * duplicated here deliberately. Keep both in sync.
+ */
 export const PTY_OUTPUT_BUFFER_MAX_CHARS = 200_000
 
 /** Append PTY output for a session, trimming from the front when over maxChars. */

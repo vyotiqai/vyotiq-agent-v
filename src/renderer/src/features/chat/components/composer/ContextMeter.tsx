@@ -13,6 +13,7 @@ import {
   LONG_RUN_BILLED_INPUT_HINT_THRESHOLD,
   LONG_RUN_STEP_HINT_THRESHOLD
 } from '@shared/utils/tokenCost'
+import { formatBilledUsd, turnCost } from '../../utils/messageFooterStats'
 import { clampComposerDropdownPanel } from './composerDropdownLayout'
 
 export type { ContextUsageState }
@@ -231,6 +232,7 @@ function ContextMeterPanel({
   const headroom = Math.max(0, budget - usage.used)
   const hitPct = cacheHitPct(usage.stepUsage)
   const runHit = billedCacheHitPct(usage.stepUsage)
+  const runCost = turnCost(usage.stepUsage)
   const reasoningPct =
     usage.stepUsage.reasoningTokens > 0 && usage.stepUsage.outputTokens > 0
       ? Math.round((usage.stepUsage.reasoningTokens / usage.stepUsage.outputTokens) * 100)
@@ -344,6 +346,18 @@ function ContextMeterPanel({
                   label="Completed steps"
                   value={String(usage.stepUsage.steps)}
                   title="Provider calls finished this run"
+                />
+              ) : null}
+              {runCost != null ? (
+                <RunStat
+                  label="Run cost"
+                  value={`${formatBilledUsd(runCost.cost)}${runCost.estimated ? ' est.' : ''}`}
+                  tone={runCost.estimated ? 'text-secondary' : undefined}
+                  title={
+                    runCost.estimated
+                      ? 'Estimated from published model rates — not a provider bill'
+                      : 'Provider-reported cost for this run'
+                  }
                 />
               ) : null}
               {usage.stepUsage.billedInputTokens > 0 ? (

@@ -1221,6 +1221,23 @@ export function useWorkspaceManager(options?: {
     }
   }, [])
 
+  // First resume waits for browser idle so first paint + hydration win;
+  // subsequent resumes keep the existing 750ms serialization.
+  const autoResumeDrainScheduledRef = useRef(false)
+  const scheduleAutoResumeDrain = useCallback((): void => {
+    if (autoResumeDrainScheduledRef.current) return
+    autoResumeDrainScheduledRef.current = true
+    const start = (): void => {
+      autoResumeDrainScheduledRef.current = false
+      void drainAutoResumeQueue()
+    }
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(start, { timeout: 2000 })
+    } else {
+      window.setTimeout(start, 1000)
+    }
+  }, [drainAutoResumeQueue])
+
   const loadRunTranscript = useCallback(
     async (
       workspacePath: string,
@@ -1316,7 +1333,7 @@ export function useWorkspaceManager(options?: {
             pushToast('Resuming interrupted run…')
             await ctrl.resumeInterrupted()
           })
-          void drainAutoResumeQueue()
+          scheduleAutoResumeDrain()
         }
       }
     },

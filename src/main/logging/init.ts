@@ -305,6 +305,26 @@ function maybeReloadRendererAfterCrash(
   rendererReloadTimer = setTimeout(fire, plan.waitMs)
 }
 
+// Per-webContents renderer unresponsiveness tracking. The second-instance
+// handler consults this to decide whether the existing window is wedged
+// (recreate) or merely hidden (focus).
+const rendererUnresponsiveState = new Map<number, { unresponsiveAt: number; responsiveAt: number }>()
+
+export function rendererUnresponsiveForMs(now: number = Date.now()): number | null {
+  let maxForMs: number | null = null
+  for (const state of rendererUnresponsiveState.values()) {
+    if (state.unresponsiveAt > state.responsiveAt) {
+      const forMs = now - state.unresponsiveAt
+      if (maxForMs === null || forMs > maxForMs) maxForMs = forMs
+    }
+  }
+  return maxForMs
+}
+
+export function resetRendererUnresponsiveTrackingForTests(): void {
+  rendererUnresponsiveState.clear()
+}
+
 export function attachWebContentsCrashLogging(
   webContents: Electron.WebContents
 ): void {
@@ -318,13 +338,24 @@ export function attachWebContentsCrashLogging(
       })
       return
     }
+    // A crashed renderer is no longer unresponsive; drop stale tracking so a
+    // later relaunch does not recreate a freshly reloaded window.
+    rendererUnresponsiveState.delete(webContents.id)
     logRendererProcessGone(webContents, details)
     maybeReloadRendererAfterCrash(webContents, details)
   })
   webContents.on('unresponsive', () => {
+    rendererUnresponsiveState.set(webContents.id, { unresponsiveAt: Date.now(), responsiveAt: 0 })
     logger.warn('Renderer unresponsive', { scope: 'main' })
   })
   webContents.on('responsive', () => {
+    const state = rendererUnresponsiveState.get(webContents.id)
+    if (state) state.responsiveAt = Date.now()
     logger.info('Renderer responsive again', { scope: 'main' })
+  })
+  // Destroyed renderers cannot be unresponsive; drop their tracking so a stale
+  // entry cannot force a later relaunch into recreating a healthy window.
+  webContents.once('destroyed', () => {
+    rendererUnresponsiveState.delete(webContents.id)
   })
 }

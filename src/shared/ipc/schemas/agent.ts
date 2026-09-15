@@ -378,7 +378,8 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     type: z.literal('network_wait'),
     ...eventBase,
     attempt: z.number().int().min(1),
-    maxAttempts: z.number().int().min(1),
+    /** 0 = no attempt ceiling (retriable errors retry until success/failure). */
+    maxAttempts: z.number().int().min(0),
     retryInMs: z.number().int().min(0),
     code: z.string().optional(),
     step: z.number().int().min(1).optional()
@@ -397,6 +398,12 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     billedCost: z.number().finite().optional(),
     /** Provider-reported cache cost effect (may be negative on a write turn). */
     billedCostSaved: z.number().finite().optional(),
+    /**
+     * Estimated USD cost of THIS step (tokens × published model prices). Present
+     * only when the provider did not report a cost field and the model has
+     * verified pricing — never shown as a provider bill.
+     */
+    estimatedCost: z.number().finite().optional(),
     /** Wall-clock ms of this provider stream (start → done usage chunk). */
     generationMs: z.number().int().min(0).optional(),
     /** Running sum of per-step inputTokens after this step (true billed shape). */
@@ -594,7 +601,11 @@ export const RunSummarySchema = z.object({
   /** Write path prefixes for inline instances — used for compact sidebar labels. */
   pathScope: z.array(z.string().min(1)).optional(),
   worktreePath: z.string().min(1).optional(),
-  worktreeBranch: z.string().min(1).optional()
+  worktreeBranch: z.string().min(1).optional(),
+  /** Provider-reported cost for the run when the provider bills it. */
+  billedCost: z.number().nonnegative().optional(),
+  /** Sum of token×price estimates for steps the provider didn't bill. */
+  estimatedCost: z.number().nonnegative().optional()
 })
 export type RunSummary = z.infer<typeof RunSummarySchema>
 
@@ -949,6 +960,9 @@ export const LoopCheckpointSchema = z.object({
       billedCost: z.number(),
       billedCostSaved: z.number(),
       stepsWithCostReport: z.number().int().min(0),
+      /** Cumulative estimated cost (tokens × published prices), v3 additive. */
+      estimatedCost: z.number().optional(),
+      stepsWithEstimate: z.number().int().min(0).optional(),
       generationMs: z.number().int().min(0),
       lastStepInputTokens: z.number().int().min(0)
     })
@@ -990,6 +1004,8 @@ export const RunStatSchema = z.object({
   model: z.string().min(1).optional(),
   provider: z.string().min(1).optional(),
   billedCost: z.number().finite().optional(),
+  /** Estimated cost (tokens × published prices) for runs without a provider-reported bill. */
+  estimatedCost: z.number().finite().optional(),
   /** Final agent step count (receipt.step). */
   steps: z.number().int().min(0).optional(),
   compactionCount: z.number().int().min(0).optional(),
@@ -1048,6 +1064,8 @@ export const HomeActivityDaySchema = z.object({
   outputTokens: z.number().int().min(0),
   /** Only when a run's durable checkpoint reported provider cost. */
   billedCost: z.number().finite().optional(),
+  /** Estimated cost (tokens × published prices) for runs without a reported bill. */
+  estimatedCost: z.number().finite().optional(),
   /** Output tokens per model — only for runs whose receipt recorded one. */
   byModel: z.record(z.string().min(1), z.number().int().min(0)).optional(),
   /** Billed thinking tokens recorded that day (subset of output). */
@@ -1065,7 +1083,8 @@ export const HomeActivityWorkspaceSchema = z.object({
   runs: z.number().int().min(0),
   billedInputTokens: z.number().int().min(0),
   outputTokens: z.number().int().min(0),
-  billedCost: z.number().finite().optional()
+  billedCost: z.number().finite().optional(),
+  estimatedCost: z.number().finite().optional()
 })
 export type HomeActivityWorkspace = z.infer<typeof HomeActivityWorkspaceSchema>
 
@@ -1120,6 +1139,8 @@ export const HomeActivityResultSchema = z.object({
     billedInputTokens: z.number().int().min(0),
     outputTokens: z.number().int().min(0),
     billedCost: z.number().finite().optional(),
+    /** Estimated cost (tokens × published prices) across window runs, when any. */
+    estimatedCost: z.number().finite().optional(),
     cachedInputTokens: z.number().int().min(0).optional(),
     /** Billed thinking tokens in the window (subset of output). */
     reasoningTokens: z.number().int().min(0).optional(),
@@ -1156,6 +1177,12 @@ export const RunReceiptSchema = z.object({
    * whose provider never reported a cost field — never a fake 0.
    */
   billedCost: z.number().finite().optional(),
+  /**
+   * Cumulative estimated cost (tokens × published model prices) for runs
+   * whose provider did not report a cost field. Kept separate from
+   * `billedCost` so estimates are never presented as a provider bill.
+   */
+  estimatedCost: z.number().finite().optional(),
   /** Raw model context window in effect at the final step (context pressure). */
   contextWindow: z.number().int().min(0).optional(),
   /** First persisted event timestamp — run start (duration = writtenAt − this). */
@@ -1482,6 +1509,13 @@ export const RenameRunRequestSchema = z.object({
   goal: z.string().min(1)
 })
 export type RenameRunRequest = z.infer<typeof RenameRunRequestSchema>
+
+export const ForkRunRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  runId: RunIdSchema,
+  forkIndex: z.number().int().min(0).optional()
+})
+export type ForkRunRequest = z.infer<typeof ForkRunRequestSchema>
 
 export const ActiveRunSchema = z.object({
   runId: z.string(),

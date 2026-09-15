@@ -810,6 +810,14 @@ async function waitForLoad(
   return { arm, checkIdle, done }
 }
 
+/** ERR_ABORTED (-3) from wc.loadURL: the navigation was superseded, not failed. */
+function isErrAborted(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const code = (err as NodeJS.ErrnoException).code
+  const errno = (err as NodeJS.ErrnoException).errno
+  return code === 'ERR_ABORTED' || errno === -3 || err.message.includes('ERR_ABORTED (-3)')
+}
+
 /** Navigate the agent browser to an http(s) URL. */
 export async function navigateUrl(
   rawUrl: string,
@@ -884,7 +892,16 @@ async function navigateUrlUnlocked(
     arm()
     const loaded = observePromise(wc.loadURL(url.toString()))
     checkIdle()
-    await loaded
+    try {
+      await loaded
+    } catch (err) {
+      if (!isErrAborted(err)) throw err
+      // loadURL was superseded (e.g. a redirect fired by the page itself).
+      // waitForLoad already treats errorCode -3 as benign, so defer to the
+      // real navigation outcome instead of failing the tool call. A
+      // user-initiated abort still surfaces as AbortError from `done` below.
+      await done
+    }
     await done
     // DNS-resolved private hosts may pass sync hostname checks — revalidate final URL.
     if (!allowLocal) {

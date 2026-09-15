@@ -10,6 +10,54 @@ export function wireCapsFromModel(model: ModelInfo): ProviderWireCaps {
   }
 }
 
+/** Providers reject requests carrying more than this many image parts (400: "Image count N exceeds limit 8 per request"). */
+export const MAX_IMAGES_PER_REQUEST = 8
+
+export const IMAGE_CAP_OMISSION_MARKER =
+  '[image omitted: earlier attachment dropped to stay under the 8-image provider limit]'
+
+/**
+ * Cap image parts per outgoing provider request. Keeps the most recent
+ * `maxImages` image parts by transcript position and replaces each older one
+ * with a short text marker. Only caps when images survive stripping — when
+ * the model does not support them, stripUnsupportedModalitiesFromMessages
+ * has already replaced every image part with a text marker.
+ */
+export function capImagesPerRequest(
+  messages: ChatMessage[],
+  caps: ProviderWireCaps,
+  maxImages: number = MAX_IMAGES_PER_REQUEST
+): ChatMessage[] {
+  if (caps.image === false || maxImages < 1) return messages
+  const totalImages = messages.reduce((n, m) => {
+    if (typeof m.content === 'string') return n
+    return n + m.content.filter((p) => p.type === 'image_url').length
+  }, 0)
+  let over = totalImages - maxImages
+  if (over <= 0) return messages
+  return messages.map((m) => {
+    if (typeof m.content === 'string' || over <= 0) return m
+    if (!m.content.some((p) => p.type === 'image_url')) return m
+    const parts = m.content.map((p) => {
+      if (p.type === 'image_url' && over > 0) {
+        over -= 1
+        return { type: 'text' as const, text: IMAGE_CAP_OMISSION_MARKER }
+      }
+      return p
+    })
+    if (parts.every((p) => p.type === 'text')) {
+      return {
+        ...m,
+        content: parts
+          .map((p) => (p.type === 'text' ? p.text : ''))
+          .filter(Boolean)
+          .join('\n')
+      }
+    }
+    return { ...m, content: parts }
+  })
+}
+
 /** Replace unsupported multimodal parts with text markers before send/estimate. */
 export function stripUnsupportedModalitiesFromMessages(
   messages: ChatMessage[],

@@ -29,6 +29,7 @@ function renderBar(
   options: {
     drawerOpen?: boolean
     desktop?: boolean
+    sidebarExpanded?: boolean
   } = {}
 ) {
   // @ts-expect-error test bridge
@@ -54,6 +55,7 @@ function renderBar(
       <TitleBar
         drawerOpen={options.drawerOpen ?? false}
         onToggleSidebar={vi.fn()}
+        sidebarExpanded={options.sidebarExpanded ?? false}
       />
     </BreakpointProvider>
   )
@@ -82,6 +84,16 @@ describe('TitleBar', () => {
   it('shows the brand mark in the mobile title bar when navigation is closed', () => {
     const { container } = renderBar('win32', { desktop: false })
     expect(container.querySelector('[data-titlebar-accessory] [data-brand-mark]')).toBeTruthy()
+  })
+
+  it('shows the brand mark on desktop when the accessory is unoccupied', () => {
+    const { container } = renderBar('win32')
+    expect(container.querySelector('[data-titlebar-accessory] [data-brand-mark]')).toBeTruthy()
+  })
+
+  it('hides the brand mark on desktop while the sidebar is expanded', () => {
+    const { container } = renderBar('win32', { sidebarExpanded: true })
+    expect(container.querySelector('[data-titlebar-accessory] [data-brand-mark]')).toBeNull()
   })
 
   it('uses shared macOS inset on mobile title bar', () => {

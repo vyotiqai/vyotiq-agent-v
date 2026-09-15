@@ -123,7 +123,10 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
-  deleteAppDataOnUninstall: false
+  # Offer cleanup at uninstall: the assisted uninstaller shows a checkbox to
+  # remove the per-user app data dir (%APPDATA%\Vyotiq) instead of leaving
+  # stale profiles/configs behind forever.
+  deleteAppDataOnUninstall: true
   runAfterFinish: true
 mac:
   icon: resources/icon.icns
@@ -171,9 +174,24 @@ dmg:
   artifactName: ${productName}-${version}-${arch}.${ext}
 linux:
   target:
+    # AppImage stays the primary target: only it carries electron-updater
+    # auto-update metadata (latest-linux.yml points at the AppImage). deb and
+    # rpm are install-path conveniences and update through the package
+    # manager instead.
     - AppImage
-  maintainer: vyotiq.com
+    - deb
+    - rpm
+  # deb/rpm require RFC822 maintainer syntax "Name <email>"; package.json
+  # author ("Vyotiq") has no email, and the previous bare-domain value would
+  # make fpm fail. TODO(release-engineering): replace the PLACEHOLDER local
+  # part with the support mailbox from README.md — the address is redacted
+  # in this tool environment and could not be verified here. fpm accepts
+  # any string, so the placeholder still produces a buildable .deb.
+  maintainer: "Vyotiq <MAINTAINER_EMAIL_PLACEHOLDER>"
   category: Development
+  # Same master PNG the other platforms use; stated explicitly because the
+  # deb target renders the 512x512 hicolor slot from it.
+  icon: resources/icon.png
   files:
     # App exclusions repeat here — see the `files:` comment above.
     - from: .
@@ -208,4 +226,10 @@ publish:
   provider: github
   owner: vyotiqai
   repo: vyotiq-agent-v-releases
-  releaseType: release
+  # Draft-first: release.yml pre-creates the draft, electron-builder uploads
+  # into the existing draft (GitHubPublisher reuses any release whose
+  # tag_name matches this tag), and finalize-release publishes it only after
+  # every asset check passes. If electron-builder ever creates the release
+  # itself (fallback path), it creates a draft too — nothing goes public
+  # half-uploaded.
+  releaseType: draft

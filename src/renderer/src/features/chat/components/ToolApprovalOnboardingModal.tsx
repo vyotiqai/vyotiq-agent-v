@@ -1,6 +1,6 @@
 import { useId, useRef } from 'react'
 import type { ToolApprovalMode } from '@shared/ipc'
-import { Dialog } from '@renderer/lib/a11y'
+import { Dialog } from '@renderer/lib/a11y/Dialog'
 import { Alert, Button } from '@renderer/lib/ui'
 
 const MODES: { mode: ToolApprovalMode; label: string; description: string }[] = [

@@ -8,7 +8,8 @@ import {
   freshCaptionTokens,
   outputTokensPerSecond,
   reportedBilledCost,
-  reportedSavedCost
+  reportedSavedCost,
+  turnCost
 } from '@renderer/features/chat/utils/messageFooterStats'
 
 function usage(partial: Partial<StepUsageTotals>): StepUsageTotals {
@@ -111,6 +112,55 @@ describe('reported costs', () => {
   })
 })
 
+describe('turnCost', () => {
+  it('shows provider-reported cost as actual when every step reported', () => {
+    expect(
+      turnCost(usage({ steps: 2, stepsWithCostReport: 2, billedCost: 0.012 }))
+    ).toEqual({ cost: 0.012, estimated: false })
+  })
+
+  it('labels estimated cost when every step is priced from published rates', () => {
+    expect(
+      turnCost(
+        usage({
+          steps: 2,
+          stepsWithCostReport: 0,
+          stepsWithEstimate: 2,
+          estimatedCost: 0.0035
+        })
+      )
+    ).toEqual({ cost: 0.0035, estimated: true })
+  })
+
+  it('sums mixed reported and estimated steps, labeled as an estimate', () => {
+    expect(
+      turnCost(
+        usage({
+          steps: 2,
+          stepsWithCostReport: 1,
+          billedCost: 0.01,
+          stepsWithEstimate: 1,
+          estimatedCost: 0.0035
+        })
+      )
+    ).toEqual({ cost: 0.0135, estimated: true })
+  })
+
+  it('returns null when any step is unpriceable — no partial estimates', () => {
+    expect(
+      turnCost(
+        usage({
+          steps: 2,
+          stepsWithCostReport: 0,
+          stepsWithEstimate: 1,
+          estimatedCost: 0.0035
+        })
+      )
+    ).toBeNull()
+    expect(turnCost(usage({ steps: 0 }))).toBeNull()
+  })
+})
+
 describe('formatBilledUsd', () => {
   it('uses four decimals under a cent and fewer above', () => {
     expect(formatBilledUsd(0.0012)).toBe('$0.0012')
@@ -207,6 +257,27 @@ describe('buildFooterStats', () => {
     expect(stats.caption).toMatch(/tok/)
     expect(stats.caption).not.toMatch(/tok\/s/)
     expect(stats.caption).not.toContain('$')
+  })
+
+  it('labels estimated cost with est. and explains the basis in the tooltip', () => {
+    const stats = buildFooterStats({
+      startedAt: null,
+      endedAt: null,
+      active: false,
+      nowMs: 0,
+      omitDuration: true,
+      usage: usage({
+        steps: 2,
+        stepsWithCostReport: 0,
+        stepsWithEstimate: 2,
+        estimatedCost: 0.0035,
+        billedInputTokens: 2000,
+        outputTokens: 40
+      })
+    })
+    expect(stats.caption).toContain('$0.0035 est.')
+    expect(stats.tooltip).toContain('Estimate from published model rates')
+    expect(stats.caption).not.toContain('Saved')
   })
 })
 

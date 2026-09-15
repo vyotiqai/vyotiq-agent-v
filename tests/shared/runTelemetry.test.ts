@@ -46,6 +46,8 @@ describe('runTelemetry', () => {
       billedCost: 0,
       billedCostSaved: 0,
       stepsWithCostReport: 0,
+      estimatedCost: 0,
+      stepsWithEstimate: 0,
       generationMs: 0
     })
   })
@@ -92,6 +94,8 @@ describe('runTelemetry', () => {
         billedCost: 0.012,
         billedCostSaved: 0.004,
         stepsWithCostReport: 1,
+        estimatedCost: 0,
+        stepsWithEstimate: 0,
         generationMs: 1200
       },
       {
@@ -108,6 +112,8 @@ describe('runTelemetry', () => {
         billedCost: 0,
         billedCostSaved: 0,
         stepsWithCostReport: 0,
+        estimatedCost: 0,
+        stepsWithEstimate: 0,
         generationMs: 800
       }
     )
@@ -148,6 +154,8 @@ describe('runTelemetry', () => {
       billedCost: 0,
       billedCostSaved: 0,
       stepsWithCostReport: 0,
+      estimatedCost: 0,
+      stepsWithEstimate: 0,
       generationMs: 0
     })
   })
@@ -205,6 +213,30 @@ describe('runTelemetry', () => {
     expect(merged.billedCostSaved).toBe(0.004)
     expect(merged.stepsWithCostReport).toBe(1)
     expect(merged.steps).toBe(2)
+  })
+
+  it('sums estimated cost only from steps that carry an estimate', () => {
+    const withEstimate = stepUsageFromEvent({
+      type: 'step_usage',
+      runId: 'r1',
+      step: 1,
+      inputTokens: 10,
+      outputTokens: 2,
+      estimatedCost: 0.0035
+    })
+    const withoutEstimate = stepUsageFromEvent({
+      type: 'step_usage',
+      runId: 'r1',
+      step: 2,
+      inputTokens: 8,
+      outputTokens: 1,
+      billedCost: 0.01
+    })
+    const merged = mergeStepUsageTotals(withEstimate!, withoutEstimate!)
+    expect(merged.estimatedCost).toBe(0.0035)
+    expect(merged.stepsWithEstimate).toBe(1)
+    expect(merged.billedCost).toBe(0.01)
+    expect(merged.stepsWithCostReport).toBe(1)
   })
 
   it('sums generationMs from steps that reported a stream clock', () => {

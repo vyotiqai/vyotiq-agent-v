@@ -30,7 +30,6 @@ import { DatabaseSync } from 'node:sqlite'
 import { codeindexDbPath, codeindexRoot } from './indexStoragePaths'
 import { logger } from '../../shared/logger'
 
-const DB_FILENAME = 'index.sqlite'
 const WAL_SUFFIX = '-wal'
 // The copy runs synchronously per spawn inside the spawn path; a pathological
 // multi-hundred-MB parent DB would stall every instance start. Past this,
@@ -39,7 +38,6 @@ const MAX_INHERIT_DB_BYTES = 512 * 1024 * 1024
 
 type IndexPair = {
   label: 'codeindex'
-  srcRoot: string
   dstRoot: string
   srcDb: string
 }
@@ -48,7 +46,6 @@ function indexPairs(parentWorkspacePath: string, worktreePath: string): IndexPai
   return [
     {
       label: 'codeindex',
-      srcRoot: codeindexRoot(parentWorkspacePath),
       dstRoot: codeindexRoot(worktreePath),
       srcDb: codeindexDbPath(parentWorkspacePath)
     }

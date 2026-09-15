@@ -85,6 +85,8 @@ import type {
   DictationTranscribeRequest,
   DictationTranscribeResult,
   McpStatusResult,
+  ToolCatalogRequest,
+  ToolCatalogResult,
   MarketplaceIndex,
   MarketplaceCatalogEntry,
   MarketplaceInstallResult,
@@ -333,6 +335,11 @@ export interface VyotiqApi {
     runId: string,
     goal: string
   ) => Promise<IpcResult<RunSummary>>
+  forkRun: (
+    workspacePath: string,
+    runId: string,
+    forkIndex?: number
+  ) => Promise<IpcResult<string>>
   setGoalStatus: (payload: SetGoalStatusRequest) => Promise<IpcResult<SetGoalStatusResult>>
   setLoop: (payload: SetLoopRequest) => Promise<IpcResult<SetLoopResult>>
   listActiveRuns: () => Promise<IpcResult<ActiveRunsResult>>
@@ -504,6 +511,7 @@ export interface VyotiqApi {
   }) => Promise<IpcResult<GithubIssueCreateResult>>
   mcpStatus: (payload?: { workspacePath?: string | null }) => Promise<IpcResult<McpStatusResult>>
   mcpRefresh: (payload?: { workspacePath?: string | null }) => Promise<IpcResult<McpStatusResult>>
+  toolsCatalogGet: (payload?: ToolCatalogRequest) => Promise<IpcResult<ToolCatalogResult>>
   mcpSetAuthToken: (serverId: string, token: string) => Promise<IpcResult<true>>
   mcpClearAuthToken: (serverId: string) => Promise<IpcResult<true>>
   mcpStartOAuth: (
@@ -689,6 +697,7 @@ export interface VyotiqApi {
   /** Chromium per-process RSS/CPU plus embed utility RSS. */
   processMetrics: () => Promise<IpcResult<ProcessMetricsSnapshot>>
   onSkillsChanged: (handler: (payload: { workspacePath: string | null }) => void) => () => void
+  onToolsCatalogChanged: (handler: (payload: ToolCatalogResult) => void) => () => void
   listNotifications: () => Promise<IpcResult<NotificationList>>
   markNotificationsRead: (payload: NotificationMutateRequest) => Promise<IpcResult<NotificationList>>
   dismissNotifications: (payload: NotificationMutateRequest) => Promise<IpcResult<NotificationList>>

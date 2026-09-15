@@ -11,6 +11,15 @@ const HEADER_BYTES = 32 * 1024
 /** A ~1024x768 screenshot, the common case when dimensions are unavailable. */
 export const DEFAULT_IMAGE_TOKENS = 765
 
+/**
+ * Local image-token estimates miss the extra "image/vision expansion" the
+ * upstream GLM/OpenRouter vision pipeline adds at request time (observed +~130k
+ * over a 938k estimate on a 1.07M-token run). Pad the estimate so the local
+ * figure over-counts image-heavy context and trips overflow compaction before
+ * the wire request breaches the provider hard limit.
+ */
+export const VISION_ESTIMATE_OVERCOUNT = 0.18
+
 export type ImageDimensions = { width: number; height: number }
 
 function dataUrlHeaderBytes(url: string): Buffer | null {
@@ -123,4 +132,13 @@ export function estimateImageTokens(url: string): number {
   const dims = imageDimensionsFromDataUrl(url)
   if (!dims) return DEFAULT_IMAGE_TOKENS
   return imageTokensForDimensions(dims.width, dims.height)
+}
+
+/**
+ * Per-image token cost with the upstream vision-expansion headroom applied.
+ * Used where the estimate must stay above the wire request so overflow triggers
+ * early instead of after the provider rejects an over-limit request.
+ */
+export function estimateImageTokensWithExpansion(url: string): number {
+  return Math.ceil(estimateImageTokens(url) * (1 + VISION_ESTIMATE_OVERCOUNT))
 }

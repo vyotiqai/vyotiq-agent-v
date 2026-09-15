@@ -14,6 +14,7 @@ export type EffectiveChatSettings = Pick<
   | 'toolApproval'
   | 'agentPersona'
   | 'agentTone'
+  | 'agentIdentity'
   | 'responseLanguage'
   | 'responseVerbosity'
 >
@@ -41,6 +42,7 @@ export function resolveEffectiveSettings(
       toolApproval: global.toolApproval,
       agentPersona: global.agentPersona,
       agentTone: global.agentTone,
+      agentIdentity: global.agentIdentity,
       responseLanguage: global.responseLanguage,
       responseVerbosity: global.responseVerbosity
     }
@@ -59,6 +61,7 @@ export function resolveEffectiveSettings(
     toolApproval: override.toolApproval ?? global.toolApproval,
     agentPersona: override.agentPersona ?? global.agentPersona,
     agentTone: override.agentTone ?? global.agentTone,
+    agentIdentity: override.agentIdentity ?? global.agentIdentity,
     responseLanguage: override.responseLanguage ?? global.responseLanguage,
     responseVerbosity: override.responseVerbosity ?? global.responseVerbosity
   }

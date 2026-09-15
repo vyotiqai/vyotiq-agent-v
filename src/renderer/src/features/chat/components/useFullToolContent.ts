@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { UiToolRow } from '@shared/transcript'
 
 export type FullToolContentState = {
@@ -19,13 +19,19 @@ export function useFullToolContent(
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
   const truncated = Boolean(tool.contentTruncated)
+  // Keep the latest loader in a ref: an unstable (freshly-inlined) `load`
+  // identity must not retrigger this effect and its setState calls every
+  // render, or the component hits React's nested-update cap.
+  const loadRef = useRef(load)
+  loadRef.current = load
 
   useEffect(() => {
-    if (!truncated || !enabled || !load) return undefined
+    const loader = loadRef.current
+    if (!truncated || !enabled || !loader) return undefined
     let cancelled = false
     setLoading(true)
     setFailed(false)
-    void load(tool.id)
+    void loader(tool.id)
       .then((text) => {
         if (!cancelled && text == null) setFailed(true)
       })
@@ -38,14 +44,14 @@ export function useFullToolContent(
     return () => {
       cancelled = true
     }
-  }, [truncated, enabled, tool.id, load])
+  }, [truncated, enabled, tool.id])
 
   useEffect(() => {
     if (!truncated) {
       setFailed(false)
       setLoading(false)
     }
-  }, [truncated, tool.id])
+  }, [truncated])
 
   return { loading, failed }
 }

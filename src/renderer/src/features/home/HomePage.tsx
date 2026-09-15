@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { RunSummary } from '@shared/ipc'
+import type { RunStat, RunSummary } from '@shared/ipc'
+import { aggregateRunCost, runCostDisplay, type RunCostDisplay } from '@shared/utils/costDisplay'
 import { Icon } from '@renderer/lib/icons'
 import { ActionMenu, AlertBlock, Button, IconButton, PageHeader, cn } from '@renderer/lib/ui'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
@@ -55,6 +56,7 @@ function statePresentation(state: HomeEntryState): {
 function SessionRow({
   entry,
   state,
+  stat,
   pinned,
   showWorkspace,
   active,
@@ -70,6 +72,7 @@ function SessionRow({
 }: {
   entry: HomeEntry
   state: HomeEntryState
+  stat?: RunStat
   pinned: boolean
   showWorkspace: boolean
   active: boolean
@@ -91,6 +94,7 @@ function SessionRow({
   const title = runTitle(entry.run)
   const presentation = statePresentation(state)
   const age = relativeAge(entry.run.updatedAt)
+  const cost = runCostDisplay(stat)
 
   useEffect(() => {
     if (!renaming) return
@@ -157,6 +161,11 @@ function SessionRow({
             {state !== 'done' ? <span className={presentation.className}>{presentation.label}</span> : null}
             {showWorkspace ? <span className="truncate">{formatWorkspaceName(entry.workspacePath)}</span> : null}
             {age ? <span>{age}</span> : null}
+            {cost ? (
+              <span className="tabular-nums" title={cost.title}>
+                {cost.text}
+              </span>
+            ) : null}
             {pinned ? (
               <span className="inline-flex items-center gap-1 text-warning">
                 <Icon name="star" size={11} aria-hidden="true" /> Pinned
@@ -236,6 +245,7 @@ function SessionRow({
 function WorkspaceRow({
   path,
   sessionCount,
+  costTotal,
   running,
   summary,
   loading,
@@ -249,6 +259,7 @@ function WorkspaceRow({
 }: {
   path: string
   sessionCount: number
+  costTotal?: RunCostDisplay
   running: boolean
   summary?: WorkspaceGitSummary
   loading: boolean
@@ -290,6 +301,11 @@ function WorkspaceRow({
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
             {running ? <span className="text-fg">Running</span> : null}
             <span>{sessionCount} {sessionCount === 1 ? 'session' : 'sessions'}</span>
+            {costTotal ? (
+              <span className="tabular-nums" title={costTotal.title}>
+                {costTotal.text}
+              </span>
+            ) : null}
             {summary?.branch ? <span>{summary.branch}</span> : null}
             <span className={error ? 'text-danger' : summary?.changedFiles ? 'text-warning' : undefined}>
               {repositoryState}
@@ -432,6 +448,15 @@ export function HomePage({
     }
     return result
   }, [openWorkspaces, runsByWorkspacePath])
+  const costByWorkspace = useMemo(() => {
+    const result: Record<string, RunCostDisplay | undefined> = {}
+    for (const path of openWorkspaces) {
+      result[path] = aggregateRunCost(
+        (runsByWorkspacePath[path]?.runs ?? []).map((run) => stats.data[pinnedRunKey(path, run.runId)])
+      ) ?? undefined
+    }
+    return result
+  }, [openWorkspaces, runsByWorkspacePath, stats.data])
 
   const refreshAll = async (): Promise<void> => {
     if (refreshing) return
@@ -487,6 +512,7 @@ export function HomePage({
         key={key}
         entry={entry}
         state={resolvedState}
+        stat={stats.data[key]}
         pinned={pinnedRunKeys.includes(key)}
         showWorkspace={openWorkspaces.length > 1}
         active={isRunOpenInPane?.(entry.workspacePath, entry.run.runId) ?? false}
@@ -555,6 +581,7 @@ export function HomePage({
                 key={path}
                 path={path}
                 sessionCount={runsByWorkspacePath[path]?.runs.length ?? 0}
+                costTotal={costByWorkspace[path]}
                 running={workspaceHasBackgroundRun?.(path) ?? false}
                 summary={git.data[path]}
                 loading={git.loading}

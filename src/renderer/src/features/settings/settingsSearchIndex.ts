@@ -147,6 +147,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'agent'
   },
   {
+    id: 'agent-identity',
+    title: 'Identity',
+    keywords: ['identity', 'blurb', 'persona', 'about'],
+    section: 'agent'
+  },
+  {
     id: 'agent-tone',
     title: 'Tone',
     keywords: ['tone', 'voice', 'style', 'friendly', 'attitude'],
@@ -347,6 +353,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: 'auto-mode-switch',
     title: 'Automatic mode switching',
     keywords: ['mode', 'ask', 'plan', 'agent', 'switch'],
+    section: 'tools'
+  },
+  {
+    id: 'tools-catalog',
+    title: 'Live tool catalog',
+    keywords: ['tools', 'catalog', 'mcp', 'active', 'available', 'servers'],
     section: 'tools'
   },
   {

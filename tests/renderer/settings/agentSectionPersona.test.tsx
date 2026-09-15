@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SettingsView } from '@renderer/features/settings'
 import { DEFAULT_SETTINGS, emptySecretStatus, type Settings } from '@shared/ipc'
-import { DEFAULT_AGENT_PERSONA, DEFAULT_AGENT_TONE } from '@shared/agentPersona'
+import { DEFAULT_AGENT_IDENTITY, DEFAULT_AGENT_PERSONA, DEFAULT_AGENT_TONE } from '@shared/agentPersona'
 
 afterEach(() => {
   cleanup()
@@ -129,6 +129,66 @@ describe('Agent section — Persona & style fields', () => {
     const tone = screen.getByLabelText('Tone') as HTMLTextAreaElement
     expect(tone.value).toBe('Blunt, warm')
     expect(tone.placeholder).toBe(DEFAULT_AGENT_TONE)
+  })
+
+  it('shows the built-in identity as placeholder when empty and the saved identity when set', () => {
+    const onUpdate = vi.fn<Parameters<Update>, ReturnType<Update>>(
+      async () => ({ ok: true })
+    )
+    renderAgentSettings(DEFAULT_SETTINGS, onUpdate)
+
+    const identity = screen.getByLabelText('Identity') as HTMLTextAreaElement
+    expect(identity.value).toBe('')
+    expect(identity.placeholder).toBe(DEFAULT_AGENT_IDENTITY)
+    expect(onUpdate).not.toHaveBeenCalled()
+
+    cleanup()
+    renderAgentSettings(
+      { ...DEFAULT_SETTINGS, agentIdentity: 'Verified first, claims second' } as Settings,
+      onUpdate
+    )
+    const saved = screen.getByLabelText('Identity') as HTMLTextAreaElement
+    expect(saved.value).toBe('Verified first, claims second')
+  })
+
+  it('persists trimmed identity on blur and skips no-change blurs', async () => {
+    const onUpdate = vi.fn<Parameters<Update>, ReturnType<Update>>(
+      async () => ({ ok: true })
+    )
+    renderAgentSettings(DEFAULT_SETTINGS, onUpdate)
+
+    const identity = screen.getByLabelText('Identity') as HTMLTextAreaElement
+    fireEvent.change(identity, { target: { value: '  Reads code before acting  ' } })
+    fireEvent.blur(identity)
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ agentIdentity: 'Reads code before acting' })
+      )
+    )
+    await waitFor(() =>
+      expect((screen.getByLabelText('Identity') as HTMLTextAreaElement).value).toBe(
+        'Reads code before acting'
+      )
+    )
+
+    fireEvent.blur(identity)
+    expect(onUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it('flushes an unblurred identity draft when Settings unmounts', async () => {
+    const onUpdate = vi.fn<Parameters<Update>, ReturnType<Update>>(
+      async () => ({ ok: true })
+    )
+    const { unmount } = renderAgentSettings(DEFAULT_SETTINGS, onUpdate)
+    fireEvent.change(screen.getByLabelText('Identity'), {
+      target: { value: '  Never blurred either  ' }
+    })
+    unmount()
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ agentIdentity: 'Never blurred either' })
+      )
+    )
   })
 
   it('shows the live character counter for persona', () => {

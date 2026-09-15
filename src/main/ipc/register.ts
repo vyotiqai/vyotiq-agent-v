@@ -4,6 +4,7 @@ import { ZodError } from 'zod'
 import { IPC } from '../../shared/channels'
 import { isGithubMcpId, isGoogleMcpId } from '../../shared/mcpApps'
 import { toolMessageForIpc } from '../../shared/utils/toolResultIpc'
+import { computeToolCatalog, notifyToolCatalogChanged } from '../agent/toolsCatalog'
 import {
   ChatStartRequestSchema,
   ChatUiSubscribeRequestSchema,
@@ -28,6 +29,8 @@ import {
   HarnessPreviewApplyRequestSchema,
   HarnessApplyRequestSchema,
   SetSettingsRequestSchema,
+  ToolCatalogRequestSchema,
+  type ToolCatalogResult,
   SetSecretRequestSchema,
   ClearSecretRequestSchema,
   ListModelsRequestSchema,
@@ -39,6 +42,7 @@ import {
   LoadToolResultRequestSchema,
   DeleteRunRequestSchema,
   ExportRunRequestSchema,
+  ForkRunRequestSchema,
   RenameRunRequestSchema,
   SetGoalStatusRequestSchema,
   SetLoopRequestSchema,
@@ -383,6 +387,7 @@ import {
   runExists,
   appendEvent
 } from '../agent/state'
+import { forkRun } from '../agent/forkRun'
 import { pauseGoalIfActive, readGoal, updateGoalStatus } from '../agent/runGoal'
 import { emitGoalUpdate } from '../agent/goalEvents'
 import { armLoop, disarmLoop, readLoop } from '../agent/runLoopScheduler'
@@ -750,6 +755,7 @@ export function registerIpc(): void {
         const next = await addWorkspace(win, req.path)
         invalidateMcpResolveCache()
         await syncMcpServers(resolveMcpServersForSessionMap())
+        notifyToolCatalogChanged()
         const warmPath = next.activePath ?? req.path
         if (warmPath) {
           warmWorkspaceIndexes(warmPath)
@@ -797,6 +803,7 @@ export function registerIpc(): void {
         }
         invalidateMcpResolveCache()
         await syncMcpServers(resolveMcpServersForSessionMap())
+        notifyToolCatalogChanged()
         return ok(next)
       } catch (err) {
         return failFrom(err, IPC.workspacesRemove)
@@ -876,6 +883,7 @@ export function registerIpc(): void {
         invalidateMcpResolveCache()
         // Force-off / Force-on may change which MCP processes should stay alive.
         await syncMcpServers(resolveMcpServersForSessionMap())
+        notifyToolCatalogChanged()
         notifySkillsChanged(path)
         return ok(next)
       } catch (err) {
@@ -911,6 +919,7 @@ export function registerIpc(): void {
       if (partial.mcpServers !== undefined || partial.marketplace !== undefined) {
         invalidateMcpResolveCache()
         await syncMcpServers(resolveMcpServersForSessionMap())
+        notifyToolCatalogChanged()
       }
       return ok(redactSettingsForIpc(next))
     } catch (err) {
@@ -2051,6 +2060,25 @@ export function registerIpc(): void {
   )
 
   ipcMain.handle(
+    IPC.runsFork,
+    async (event, raw): Promise<IpcResult<string>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = ForkRunRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        return ok(await forkRun(req.workspacePath, req.runId, req.forkIndex))
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        // Same user-state class as runsRename result.error (active / missing / corrupt).
+        if (/cancel run first|run not found|invalid run status/i.test(msg)) {
+          return failExpected(msg, IPC.runsFork)
+        }
+        return failFrom(err, IPC.runsFork)
+      }
+    }
+  )
+
+  ipcMain.handle(
     IPC.runsRename,
     async (event, raw): Promise<IpcResult<RunSummary>> => {
       if (!senderOk(event)) return fail('Invalid sender')
@@ -2916,12 +2944,30 @@ export function registerIpc(): void {
         ? findWorkspaceSettingsOverride(workspaces, workspacePath)?.marketplaceOverrides ?? null
         : null
       await refreshMcpServers(resolveMcpServersForSessionMap())
+      notifyToolCatalogChanged()
       return ok({
         servers: getMcpServerStatus(resolveEffectiveMcpServers(overrides), workspacePath),
         ...mcpStatusExtras()
       })
     } catch (err) {
       return failFrom(err, IPC.mcpRefresh)
+    }
+  })
+
+  ipcMain.handle(IPC.toolsCatalogGet, async (event, raw): Promise<IpcResult<ToolCatalogResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = ToolCatalogRequestSchema.parse(raw ?? {})
+      const workspaces = getWorkspaces()
+      const requestedPath =
+        typeof req.workspacePath === 'string' ? req.workspacePath.trim() || null : undefined
+      if (requestedPath && !isOpenWorkspace(requestedPath)) {
+        return fail('Workspace is not open')
+      }
+      const workspacePath = requestedPath !== undefined ? requestedPath : workspaces.activePath
+      return ok(computeToolCatalog(workspacePath))
+    } catch (err) {
+      return failFrom(err, IPC.toolsCatalogGet)
     }
   })
 
@@ -2941,6 +2987,7 @@ export function registerIpc(): void {
         setSettings({ mcpServers: nextServers })
       })
       await syncMcpServers(resolveMcpServersForSessionMap())
+      notifyToolCatalogChanged()
       if (isGithubMcpId(serverId)) {
         try {
           await linkNativeGithubFromMcpToken(token)
@@ -2977,6 +3024,7 @@ export function registerIpc(): void {
         setSettings({ mcpServers: nextServers })
       })
       await syncMcpServers(resolveMcpServersForSessionMap())
+      notifyToolCatalogChanged()
       return ok(true)
     } catch (err) {
       return failFrom(err, IPC.mcpClearAuthToken)
@@ -3060,6 +3108,7 @@ export function registerIpc(): void {
       })
       invalidateMcpResolveCache()
       await syncMcpServers(resolveMcpServersForSessionMap())
+      notifyToolCatalogChanged()
       return ok({
         servers: getMcpServerStatus(resolveEffectiveMcpServers()),
         ...mcpStatusExtras()
@@ -3107,6 +3156,7 @@ export function registerIpc(): void {
       const result = await installMarketplacePackage(req)
       invalidateMcpResolveCache()
       await syncMcpServers(resolveMcpServersForSessionMap())
+      notifyToolCatalogChanged()
       return ok(result)
     } catch (err) {
       return failFrom(err, IPC.marketplaceInstall)
@@ -3132,6 +3182,7 @@ export function registerIpc(): void {
         const result = await installMarketplacePackage(req.install)
         invalidateMcpResolveCache()
         await syncMcpServers(resolveMcpServersForSessionMap())
+        notifyToolCatalogChanged()
         return ok({
           applied: 'marketplace' as const,
           serverId: result.item.id,
@@ -3141,6 +3192,7 @@ export function registerIpc(): void {
       const applied = applyDetectedManualMcp(req)
       invalidateMcpResolveCache()
       await syncMcpServers(resolveMcpServersForSessionMap())
+      notifyToolCatalogChanged()
       return ok(applied)
     } catch (err) {
       return failFrom(err, IPC.marketplaceApplyDetectedMcp)
@@ -3164,6 +3216,7 @@ export function registerIpc(): void {
       const result = await importExternalMcpServers(req)
       invalidateMcpResolveCache()
       await syncMcpServers(resolveMcpServersForSessionMap())
+      notifyToolCatalogChanged()
       return ok(result)
     } catch (err) {
       return failFrom(err, IPC.marketplaceImportExternalMcp)
@@ -3178,6 +3231,7 @@ export function registerIpc(): void {
       await syncMarketplaceMcpIntoSettings()
       invalidateMcpResolveCache()
       await syncMcpServers(resolveMcpServersForSessionMap())
+      notifyToolCatalogChanged()
       if (signOutGithub && isGithubMcpId(id)) {
         try {
           await logoutGithubAuth()
@@ -3201,6 +3255,7 @@ export function registerIpc(): void {
       if (item?.kind === 'mcp' || item?.kind === 'plugin') {
         if (item.kind === 'mcp') await syncMarketplaceMcpIntoSettings()
         await syncMcpServers(resolveMcpServersForSessionMap())
+        notifyToolCatalogChanged()
       }
       return ok(index)
     } catch (err) {

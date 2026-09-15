@@ -71,6 +71,25 @@ function readInterruptedCost(runDir: string): number | undefined {
   }
 }
 
+/**
+ * Estimated-cost fallback for interrupted runs, mirroring `readInterruptedCost`
+ * for runs whose provider never reported a bill. Checkpoints written before
+ * estimate tracking simply lack the field → undefined, never a fake 0.
+ */
+function readInterruptedEstimatedCost(runDir: string): number | undefined {
+  const path = join(runDir, 'loopCheckpoint.json')
+  if (!existsSync(path)) return undefined
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as { usageTotals?: unknown }
+    const t = raw?.usageTotals
+    if (!t || typeof t !== 'object') return undefined
+    const cost = (t as { estimatedCost?: unknown }).estimatedCost
+    return typeof cost === 'number' && Number.isFinite(cost) && cost > 0 ? cost : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function blankDay(date: string): HomeActivityDay {
   return { date, runs: 0, billedInputTokens: 0, outputTokens: 0 }
 }
@@ -105,6 +124,8 @@ export function collectHomeActivity(
   let outputTokens = 0
   let billedCostTotal = 0
   let withCost = false
+  let estimatedCostTotal = 0
+  let withEstimate = false
   let cachedInputTokens = 0
   let withCache = false
   let reasoningTokensTotal = 0
@@ -116,7 +137,16 @@ export function collectHomeActivity(
   /** Per-workspace usage slices (rendered only for multi-workspace requests). */
   const workspaceSlices = new Map<
     string,
-    { path: string; runs: Set<string>; billedInputTokens: number; outputTokens: number; billedCost: number; withCost: boolean }
+    {
+      path: string
+      runs: Set<string>
+      billedInputTokens: number
+      outputTokens: number
+      billedCost: number
+      withCost: boolean
+      estimatedCost: number
+      withEstimate: boolean
+    }
   >()
   /** Previous equal-length window totals — the trend signal (tokens). */
   const previousKeys = new Set(lastDayKeys(localDayKeyOf(new Date(now.getTime() - windowDays * 86_400_000).toISOString()), windowDays))
@@ -136,7 +166,9 @@ export function collectHomeActivity(
         billedInputTokens: 0,
         outputTokens: 0,
         billedCost: 0,
-        withCost: false
+        withCost: false,
+        estimatedCost: 0,
+        withEstimate: false
       }
       workspaceSlices.set(workspacePath, slice)
     }
@@ -160,6 +192,7 @@ export function collectHomeActivity(
       inputTokens: number
       outputTokens: number
       billedCost?: number
+      estimatedCost?: number
       cachedInputTokens?: number
       model?: string
       reasoningTokens?: number
@@ -172,6 +205,8 @@ export function collectHomeActivity(
       outputTokens: number
       billedCost: number
       withCost: boolean
+      estimatedCost: number
+      withEstimate: boolean
     }
   ): void => {
     activeRunIds.add(runId)
@@ -188,6 +223,15 @@ export function collectHomeActivity(
       if (slice) {
         slice.billedCost += usage.billedCost
         slice.withCost = true
+      }
+    }
+    if (usage.estimatedCost != null && usage.estimatedCost > 0) {
+      day.estimatedCost = (day.estimatedCost ?? 0) + usage.estimatedCost
+      estimatedCostTotal += usage.estimatedCost
+      withEstimate = true
+      if (slice) {
+        slice.estimatedCost += usage.estimatedCost
+        slice.withEstimate = true
       }
     }
     if (usage.cachedInputTokens != null && usage.cachedInputTokens > 0) {
@@ -261,6 +305,7 @@ export function collectHomeActivity(
               inputTokens: entry.inputTokens,
               outputTokens: entry.outputTokens,
               billedCost: entry.billedCost,
+              estimatedCost: entry.estimatedCost,
               cachedInputTokens: entry.cachedInputTokens,
               model: receipt?.model,
               reasoningTokens: entry.reasoningTokens,
@@ -308,6 +353,8 @@ export function collectHomeActivity(
       const day = receiptDate ? bucketFor(receiptDate) : null
       const usage = receipt.tokenUsage
       const billedCost = receipt.billedCost ?? readInterruptedCost(runDir)
+      const estimatedCost =
+        receipt.estimatedCost ?? readInterruptedEstimatedCost(runDir)
       if (day) {
         addUsage(
           day,
@@ -316,6 +363,7 @@ export function collectHomeActivity(
             inputTokens: usage?.billedInputTokens ?? 0,
             outputTokens: usage?.outputTokens ?? 0,
             billedCost,
+            estimatedCost,
             cachedInputTokens: usage?.cachedInputTokens,
             model: receipt.model,
             reasoningTokens: usage?.reasoningTokens,
@@ -334,7 +382,8 @@ export function collectHomeActivity(
     runs: slice.runs.size,
     billedInputTokens: slice.billedInputTokens,
     outputTokens: slice.outputTokens,
-    ...(slice.withCost ? { billedCost: slice.billedCost } : {})
+    ...(slice.withCost ? { billedCost: slice.billedCost } : {}),
+    ...(slice.withEstimate ? { estimatedCost: slice.estimatedCost } : {})
   }))
   // Top tools across window receipts — only when receipts recorded tool calls.
   const topTools = [...toolTotals.entries()]
@@ -367,6 +416,7 @@ export function collectHomeActivity(
       billedInputTokens,
       outputTokens,
       ...(withCost ? { billedCost: billedCostTotal } : {}),
+      ...(withEstimate ? { estimatedCost: estimatedCostTotal } : {}),
       ...(withCache ? { cachedInputTokens } : {}),
       ...(withReasoning ? { reasoningTokens: reasoningTokensTotal } : {}),
       ...(withPeak ? { peakInputTokens: peakInputTokensTotal } : {}),

@@ -4,6 +4,7 @@ import { Menu, Button, Switch, Textarea } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import { TERMINAL_SCREEN_READER_OPTIONS, TERMINAL_SHELL_OPTIONS, TOOL_APPROVAL_OPTIONS } from '../constants'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
+import { ToolCatalogCard } from '../components/ToolCatalogCard'
 import {
   formatBrowserDomainAllowlist,
   parseBrowserDomainAllowlist
@@ -37,6 +38,18 @@ export function ToolsSection({ form }: { form: SettingsFormState }) {
           search engine, browser domain allowlist, and automatic mode switching stay app-wide.
         </p>
       ) : null}
+
+      <SettingsGroup title="Tool catalog">
+        <SettingsField
+          id="tools-catalog"
+          title="Live tool catalog"
+          hint="What the agent can actually call right now. Updates live as servers connect, settings change, or runs start."
+          help="Built-in tools ship with the app runtime and cannot be removed. MCP tools come from connected servers: add or remove them via the server cards — enable/disable a server, or edit its allowed/denied tool lists. Inactive tools show the exact reason."
+          wide
+        >
+          <ToolCatalogCard />
+        </SettingsField>
+      </SettingsGroup>
 
       <SettingsGroup title="Approval">
         <SettingsField

@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { Dialog } from '@renderer/lib/a11y'
+import { Dialog } from '@renderer/lib/a11y/Dialog'
 import { Icon } from '@renderer/lib/icons'
 
 export function ImageLightbox({

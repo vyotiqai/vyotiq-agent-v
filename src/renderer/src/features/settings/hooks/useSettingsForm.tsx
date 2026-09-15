@@ -37,6 +37,7 @@ export type AgentSettingsPatch = Partial<
     | 'thinkingEffort'
     | 'agentPersona'
     | 'agentTone'
+    | 'agentIdentity'
     | 'responseLanguage'
     | 'responseVerbosity'
   >
@@ -81,6 +82,10 @@ export function useSettingsForm({
   const derivedTone = effectiveChatSettings?.agentTone ?? settings.agentTone ?? ''
   const [tonePersisted, setTonePersisted] = useState(derivedTone)
   const [toneDraft, setToneDraft] = useState(derivedTone)
+  const derivedIdentity =
+    effectiveChatSettings?.agentIdentity ?? settings.agentIdentity ?? ''
+  const [identityPersisted, setIdentityPersisted] = useState(derivedIdentity)
+  const [identityDraft, setIdentityDraft] = useState(derivedIdentity)
   const derivedLanguage =
     effectiveChatSettings?.responseLanguage ?? settings.responseLanguage ?? ''
   const [languagePersisted, setLanguagePersisted] = useState(derivedLanguage)
@@ -228,6 +233,17 @@ export function useSettingsForm({
     return ok
   }
 
+  /** Trim-on-save commit for the Identity draft; reverts the field on failure. */
+  const persistIdentity = async (): Promise<boolean> => {
+    const next = identityDraft.trim()
+    if (next !== identityDraft) setIdentityDraft(next)
+    if (next === identityPersisted) return true
+    const ok = await runAgentUpdate({ agentIdentity: next })
+    if (ok) setIdentityPersisted(next)
+    else setIdentityDraft(identityPersisted)
+    return ok
+  }
+
   /** Trim-on-save commit for the Response language draft; reverts on failure. */
   const persistLanguage = async (): Promise<boolean> => {
     const next = languageDraft.trim()
@@ -335,6 +351,11 @@ export function useSettingsForm({
     setTonePersisted(derivedTone)
     setToneDraft(derivedTone)
   }, [derivedTone])
+
+  useEffect(() => {
+    setIdentityPersisted(derivedIdentity)
+    setIdentityDraft(derivedIdentity)
+  }, [derivedIdentity])
 
   useEffect(() => {
     setLanguagePersisted(derivedLanguage)
@@ -627,6 +648,8 @@ export function useSettingsForm({
     if (persona !== personaPersisted) void runAgentUpdate({ agentPersona: persona })
     const tone = toneDraft.trim()
     if (tone !== tonePersisted) void runAgentUpdate({ agentTone: tone })
+    const identity = identityDraft.trim()
+    if (identity !== identityPersisted) void runAgentUpdate({ agentIdentity: identity })
     const language = languageDraft.trim()
     if (language !== languagePersisted) void runAgentUpdate({ responseLanguage: language })
   }
@@ -653,6 +676,10 @@ export function useSettingsForm({
     setToneDraft,
     persistTone,
     toneDirty: toneDraft !== tonePersisted,
+    identityDraft,
+    setIdentityDraft,
+    persistIdentity,
+    identityDirty: identityDraft !== identityPersisted,
     languageDraft,
     setLanguageDraft,
     persistLanguage,

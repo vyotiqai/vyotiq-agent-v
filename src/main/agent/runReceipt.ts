@@ -466,6 +466,12 @@ export function buildRunReceipt(input: {
   model?: string
   /** Cumulative provider-reported cost (durable usage totals at write time). */
   billedCost?: number
+  /**
+   * Cumulative estimated cost (tokens × published model prices) for runs
+   * whose provider never reported a cost field. Kept separate from
+   * `billedCost` — never presented as a provider bill.
+   */
+  estimatedCost?: number
   /** Raw model context window in effect at the final step (context pressure). */
   contextWindow?: number
 }): RunReceipt {
@@ -487,6 +493,9 @@ export function buildRunReceipt(input: {
     ...(input.provider ? { provider: input.provider } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.billedCost != null && input.billedCost > 0 ? { billedCost: input.billedCost } : {}),
+    ...(input.estimatedCost != null && input.estimatedCost > 0
+      ? { estimatedCost: input.estimatedCost }
+      : {}),
     ...(input.contextWindow != null && input.contextWindow > 0
       ? { contextWindow: input.contextWindow }
       : {}),
@@ -525,6 +534,8 @@ export function writeRunReceiptBestEffort(input: {
   model?: string
   /** Cumulative provider-reported cost (durable usage totals at write time). */
   billedCost?: number
+  /** Cumulative estimated cost (tokens × published prices) — estimate only. */
+  estimatedCost?: number
   /** Raw model context window in effect at the final step (context pressure). */
   contextWindow?: number
 }): RunReceipt | null {
@@ -541,6 +552,7 @@ export function writeRunReceiptBestEffort(input: {
       provider: input.provider,
       model: input.model,
       billedCost: input.billedCost,
+      estimatedCost: input.estimatedCost,
       contextWindow: input.contextWindow
     })
     writeRunReceipt(input.runDir, receipt)

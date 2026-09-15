@@ -344,7 +344,10 @@ describe('main/renderer IPC contract', () => {
       ...Object.values(VYOTIQ_NAMESPACE_PUSH_MAP),
       ...Object.values(VYOTIQ_SYNC_SEND_MAP),
       ...PRELOAD_INTERNAL_INVOKE_CHANNELS,
-      ...EVENT_CHANNELS
+      ...EVENT_CHANNELS,
+      IPC.runsFork,
+      IPC.toolsCatalogGet,
+      IPC.toolsCatalogChanged
     ])
     const missing = Object.values(IPC).filter((channel) => !accounted.has(channel))
     expect(missing).toEqual([])

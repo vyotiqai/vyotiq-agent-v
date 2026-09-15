@@ -124,7 +124,8 @@ describe('streamRetry', () => {
   it('retries transient mid-stream HTTP statuses only', () => {
     expect(shouldRetryStreamErrorChunk('PROVIDER_HTTP', 'Rate limited (HTTP 429)', 1, 429)).toBe(true)
     expect(shouldRetryStreamErrorChunk('PROVIDER_HTTP', 'HTTP 503', 4, 503)).toBe(true)
-    expect(shouldRetryStreamErrorChunk('PROVIDER_HTTP', 'Overloaded', 5, 529)).toBe(false)
+    // 529 ("Site is overloaded") is a 5xx: transient by the same rule as 503.
+    expect(shouldRetryStreamErrorChunk('PROVIDER_HTTP', 'Overloaded', 5, 529)).toBe(true)
     expect(shouldRetryStreamErrorChunk('PROVIDER_HTTP', 'Authentication failed (HTTP 401)', 1, 401)).toBe(false)
     expect(shouldRetryStreamErrorChunk('PROVIDER_HTTP', 'Insufficient credits', 1, 402)).toBe(false)
     expect(shouldRetryStreamErrorChunk('PROVIDER_HTTP', 'Bad request', 1, 400)).toBe(false)

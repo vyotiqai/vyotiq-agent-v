@@ -4,6 +4,16 @@ import type { UpdateInfo, UpdateProgress, UpdaterBridge, UpdaterState } from './
 /** localStorage key holding the version the user last dismissed. */
 export const LAST_SEEN_UPDATE_VERSION_KEY = 'vyotiq.updates.lastSeenVersion'
 
+/** localStorage key holding notes handed to Stage B across an install restart. */
+export const PENDING_NOTES_KEY = 'vyotiq.updates.pendingNotes'
+
+/** Notes payload Stage A hands to Stage B across the restart. */
+export interface PendingNotes {
+  version: string
+  notesText: string
+  notesSections: UpdateInfo['notesSections']
+}
+
 /** Read the preload bridge without assuming it exists (older preload / tests). */
 function readUpdaterBridge(): UpdaterBridge | null {
   const api = (window as unknown as { vyotiq?: { updater?: UpdaterBridge } }).vyotiq
@@ -69,6 +79,21 @@ export function useUpdater(): {
   }
 
   const install = (): void => {
+    // Stage B handoff: persist the parsed notes so the post-restart "What's
+    // New" modal can show what this build shipped. Best-effort: Stage B falls
+    // back to a generic line + GitHub link when the payload is absent.
+    if (info != null) {
+      try {
+        const pending: PendingNotes = {
+          version: info.version,
+          notesText: info.notesText,
+          notesSections: info.notesSections
+        }
+        window.localStorage.setItem(PENDING_NOTES_KEY, JSON.stringify(pending))
+      } catch {
+        // Best-effort handoff; still proceed with the install.
+      }
+    }
     void readUpdaterBridge()?.install().catch(() => {})
   }
 

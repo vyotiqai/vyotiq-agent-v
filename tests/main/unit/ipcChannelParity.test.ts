@@ -30,7 +30,8 @@ const PUSH_ONLY = new Set<keyof typeof IPC>([
   'notificationsActivate',
   'appearanceCustomCssChanged',
   'updaterState',
-  'accessibilitySupportChanged'
+  'accessibilitySupportChanged',
+  'toolsCatalogChanged'
 ])
 
 function registeredChannels(): Set<string> {

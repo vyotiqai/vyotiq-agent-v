@@ -19,7 +19,7 @@ import {
   type ContextLayerBreakdown
 } from './types'
 import { formatPinnedFacts } from './pinFoldFacts'
-import { stripUnsupportedModalitiesFromMessages, wireCapsFromModel } from './stripImages'
+import { capImagesPerRequest, stripUnsupportedModalitiesFromMessages, wireCapsFromModel } from './stripImages'
 import { trimToolResults } from './toolTrim'
 import { buildWorkspaceRulesSection } from './rules'
 import { formatResponseStyle, formatUserRules } from './userRules'
@@ -606,6 +606,7 @@ export async function assembleContext(
   )
   messages = stubPastSkillInvocationsInMessages(messages).messages
   messages = stripUnsupportedModalitiesFromMessages(messages, wireCapsFromModel(input.model))
+  messages = capImagesPerRequest(messages, wireCapsFromModel(input.model))
   const compaction = input.priorCompaction ?? null
 
   const estimateStarted = perfNow()

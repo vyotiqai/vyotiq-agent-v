@@ -141,6 +141,34 @@ async function readLenientTokenUsage(runDir: string): Promise<RunTokenUsage | un
   return undefined
 }
 
+/** Best-effort lenient receipt cost extraction — survives partial/corrupt receipts. */
+export async function readLenientReceiptCost(
+  runDir: string
+): Promise<{ billedCost?: number; estimatedCost?: number } | undefined> {
+  const receiptPath = join(runDir, 'receipt.json')
+  if (!existsSync(receiptPath)) return undefined
+  try {
+    const raw = JSON.parse(await readFile(receiptPath, 'utf8')) as {
+      billedCost?: unknown
+      estimatedCost?: unknown
+    }
+    const billed =
+      typeof raw?.billedCost === 'number' && raw.billedCost > 0 ? raw.billedCost : undefined
+    const estimated =
+      typeof raw?.estimatedCost === 'number' && raw.estimatedCost > 0
+        ? raw.estimatedCost
+        : undefined
+    if (billed == null && estimated == null) return undefined
+    return {
+      ...(billed != null ? { billedCost: billed } : {}),
+      ...(estimated != null ? { estimatedCost: estimated } : {})
+    }
+  } catch {
+    // Corrupt or foreign receipt — omit cost rather than guess.
+  }
+  return undefined
+}
+
 /** Full receipt when it parses strictly (post-migration), else undefined. */
 async function readReceiptDetail(runDir: string): Promise<RunReceipt | undefined> {
   const receiptPath = join(runDir, 'receipt.json')
@@ -170,6 +198,9 @@ function statFromReceipt(receipt: RunReceipt): RunStat {
     ...(receipt.provider ? { provider: receipt.provider } : {}),
     ...(receipt.billedCost != null && receipt.billedCost > 0
       ? { billedCost: receipt.billedCost }
+      : {}),
+    ...(receipt.estimatedCost != null && receipt.estimatedCost > 0
+      ? { estimatedCost: receipt.estimatedCost }
       : {}),
     ...(receipt.step > 0 ? { steps: receipt.step } : {}),
     ...(receipt.compactionCount > 0 ? { compactionCount: receipt.compactionCount } : {}),

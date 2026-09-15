@@ -473,6 +473,8 @@ export const SettingsSchema = z.object({
   agentPersona: z.string().max(1000).default(''),
   /** Optional tone directive for replies. Empty = default spine tone. */
   agentTone: z.string().max(2000).default(''),
+  /** Optional identity blurb for replies. Empty = built-in fallback (unless a custom persona suppresses it). */
+  agentIdentity: z.string().max(1000).default(''),
   /** Preferred response language. Empty = follow the user's language. */
   responseLanguage: z.string().max(64).default(''),
   /** Default answer length for conversational replies. */
@@ -531,6 +533,7 @@ export const DEFAULT_SETTINGS: Settings = {
   userRules: [],
   agentPersona: '',
   agentTone: '',
+  agentIdentity: '',
   responseLanguage: '',
   responseVerbosity: 'concise',
   notifications: DEFAULT_NOTIFICATION_SETTINGS

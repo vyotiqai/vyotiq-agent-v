@@ -34,6 +34,7 @@ import {
 import { TitleBar } from './TitleBar'
 import { CommandPalette } from '@renderer/features/commandPalette/CommandPalette'
 import { UpdateCard } from '@renderer/features/updates/UpdateCard'
+import { WhatsNewModal } from '@renderer/features/whats-new/WhatsNewModal'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 
@@ -406,6 +407,7 @@ function AppShellInner({
           <TitleBar
             drawerOpen={drawerOpen}
             onToggleSidebar={onToggleSidebar}
+            sidebarExpanded={sidebarExpandedDesktop}
           />
         </ErrorBoundary>
 
@@ -474,6 +476,7 @@ function AppShellInner({
         }}
       />
       <UpdateCard />
+      <WhatsNewModal />
     </div>
   )
 }

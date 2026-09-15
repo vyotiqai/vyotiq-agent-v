@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAppVirtualizer } from '@renderer/lib/hooks/useAppVirtualizer'
 import { Icon } from '@renderer/lib/icons'
 import { Tooltip, cn, ImageLightbox, MarkdownContent } from '@renderer/lib/ui'
@@ -302,6 +302,14 @@ const VIRTUALIZE_MIN_ROWS = 160
  * steps otherwise mounts the entire transcript and freezes the renderer.
  */
 const HYBRID_FLOW_TAIL_ROWS = 40
+
+/**
+ * Live flow suffix mount bound. The active turn's prompt stays in document flow
+ * (its sticky pin persists mid-run) while the turn stays within this many rows;
+ * mega-turns fall back to the trailing window so streaming frames never remount
+ * hundreds of rows.
+ */
+const LIVE_FLOW_TURN_MAX_ROWS = HYBRID_FLOW_TAIL_ROWS * 3
 
 /** Keep document flow briefly after a live run ends so heights settle before virtualizing. */
 const POST_LIVE_FLOW_HOLD_MS = 800
@@ -1543,33 +1551,52 @@ export function MessageList({
     displayRows.length >= virtualizeMinRows &&
     activeLiveTurnIndex != null
 
-  const flowStartIndex = useMemo(() => {
-    if (!useHybridVirtualize || activeLiveTurnIndex == null) return displayRows.length
-    const turnStartIdx = displayRows.findIndex((row) => row.turnIndex >= activeLiveTurnIndex)
-    const turnBased = turnStartIdx < 0 ? displayRows.length : turnStartIdx
-    const tailStart = Math.max(0, displayRows.length - HYBRID_FLOW_TAIL_ROWS)
-    return Math.max(turnBased, tailStart)
-  }, [useHybridVirtualize, displayRows, activeLiveTurnIndex])
-
   const useFullVirtualize =
     !live &&
     !postLiveHold &&
     displayRows.length >= (virtualizeLiveEarly ? HYBRID_FLOW_TAIL_ROWS : VIRTUALIZE_MIN_ROWS)
 
+  // Live: anchor the flow suffix on the active turn and bound the mount to the
+  // trailing window — a long-running turn must not remount per streaming frame.
+  // Idle virtualized transcripts anchor on the latest turn instead so its
+  // prompt bubble keeps pinning after the run ends (the "pin not persistent" case).
+  const flowStartIndex = useMemo(() => {
+    const idleVirtualize = !useHybridVirtualize && useFullVirtualize
+    const anchorTurn = useHybridVirtualize
+      ? activeLiveTurnIndex
+      : idleVirtualize
+        ? latestTurnIndex
+        : null
+    if (anchorTurn == null || anchorTurn < 0) return displayRows.length
+    const turnStartIdx = displayRows.findIndex((row) => row.turnIndex >= anchorTurn)
+    const turnBased = turnStartIdx < 0 ? displayRows.length : turnStartIdx
+    const tailStart = Math.max(0, displayRows.length - HYBRID_FLOW_TAIL_ROWS)
+    if (idleVirtualize) {
+      // Keep the latest prompt in flow, but never flow-mount more rows than
+      // the idle virtualization threshold (single mega-turn transcripts).
+      const idleStart = Math.min(turnBased, tailStart)
+      return displayRows.length - idleStart > VIRTUALIZE_MIN_ROWS ? tailStart : idleStart
+    }
+    // Live: keep the active turn's prompt in flow so its pin persists mid-run,
+    // but only while the turn stays within the live mount bound — mega-turns
+    // fall back to the trailing window so streaming frames stay cheap.
+    const liveStart = Math.min(turnBased, tailStart)
+    return displayRows.length - liveStart > LIVE_FLOW_TURN_MAX_ROWS ? tailStart : liveStart
+  }, [useHybridVirtualize, useFullVirtualize, displayRows, activeLiveTurnIndex, latestTurnIndex])
+
   const virtualizedRows = useMemo(() => {
-    if (useHybridVirtualize && flowStartIndex > 0) {
+    if ((useHybridVirtualize || useFullVirtualize) && flowStartIndex > 0) {
       return displayRows.slice(0, flowStartIndex)
     }
-    if (useFullVirtualize) return displayRows
     return []
   }, [useHybridVirtualize, flowStartIndex, useFullVirtualize, displayRows])
 
   const flowSuffixRows = useMemo(() => {
-    if (useHybridVirtualize && flowStartIndex > 0) {
+    if ((useHybridVirtualize || useFullVirtualize) && flowStartIndex > 0) {
       return displayRows.slice(flowStartIndex)
     }
     return []
-  }, [useHybridVirtualize, flowStartIndex, displayRows])
+  }, [useHybridVirtualize, flowStartIndex, useFullVirtualize, displayRows])
 
   // Keep the virtualizer callbacks referentially stable.
   //
@@ -1605,10 +1632,12 @@ export function MessageList({
   shouldVirtualizeRef.current = shouldVirtualize
   flowStartIndexRef.current = flowStartIndex
 
+  // Mirror the JSX render-path selection exactly (see useHybridLayout /
+  // useFlowLayout below) so scroll restore reacts to the layout actually rendered.
   const layoutMode: TranscriptLayoutMode =
-    useHybridVirtualize && flowStartIndex > 0
+    shouldVirtualize && flowSuffixRows.length > 0
       ? 'hybrid'
-      : useFullVirtualize
+      : shouldVirtualize
         ? 'full-virtual'
         : 'flow'
 
@@ -1620,6 +1649,11 @@ export function MessageList({
     getItemKey,
     anchorTo: 'end',
     followOnAppend: true,
+    // Default flushSync-on-change re-enters React's commit from ref/layout
+    // callbacks (measureElement → resizeItem → notify) and trips the dev-only
+    // "flushSync was called from inside a lifecycle method" warning on every
+    // streaming tick. Scroll pinning stays direct-DOM, so async notify is safe.
+    useFlushSync: false,
     scrollEndThreshold: nearBottomPx,
     overscan: 8,
     enabled: shouldVirtualize,
@@ -1940,28 +1974,27 @@ export function MessageList({
           const hasTasksBand =
             isUser && tasksAnchorUserId != null && row.item.id === tasksAnchorUserId
           return (
-            <Fragment key={row.id}>
-              <div
-                data-transcript-row={index}
-                data-find-current={currentFindRow === index ? '' : undefined}
-                id={turnWorkPanelId(row, displayRows, index)}
-                data-sticky-turn-prompt={isUser ? '' : undefined}
-                className={cn(
-                  isUser
-                    ? 'sticky z-sticky mb-2.5'
-                    : rowSpacingClass(row, displayRows[index + 1]),
-                  currentFindRow === index && 'rounded-md ring-1 ring-accent/40'
-                )}
-                style={isUser ? { top: `${STICKY_TURN_TOP_PX}px` } : undefined}
-              >
-                {renderRow(row, isUser)}
-              </div>
+            <div
+              key={row.id}
+              data-transcript-row={index}
+              data-find-current={currentFindRow === index ? '' : undefined}
+              id={turnWorkPanelId(row, displayRows, index)}
+              data-sticky-turn-prompt={isUser ? '' : undefined}
+              className={cn(
+                isUser
+                  ? 'sticky z-sticky mb-2.5'
+                  : rowSpacingClass(row, displayRows[index + 1]),
+                currentFindRow === index && 'rounded-md ring-1 ring-accent/40'
+              )}
+              style={isUser ? { top: `${STICKY_TURN_TOP_PX}px` } : undefined}
+            >
+              {renderRow(row, isUser)}
               {hasTasksBand ? (
                 <div key={`${row.id}-tasks-band`} className="mt-1 pb-2.5">
                   <TasksCeilingBand key={row.item.id} running={running} />
                 </div>
               ) : null}
-            </Fragment>
+            </div>
           )
         })}
       </div>

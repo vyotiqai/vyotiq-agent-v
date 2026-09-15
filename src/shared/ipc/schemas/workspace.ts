@@ -106,6 +106,8 @@ export const WorkspaceSettingsOverrideSchema = z.object({
   agentPersona: z.string().max(1000).optional(),
   /** Tone directive override; empty/undefined = global setting. */
   agentTone: z.string().max(2000).optional(),
+  /** Identity blurb override; empty/undefined = global setting. */
+  agentIdentity: z.string().max(1000).optional(),
   /** Preferred response language override; undefined = global setting. */
   responseLanguage: z.string().max(64).optional(),
   /** Default answer length override; undefined = global setting. */

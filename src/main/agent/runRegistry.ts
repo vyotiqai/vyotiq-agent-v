@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { contentDisplayText, type AgentEvent, type AgentInteractionMode, type ChatMessage } from '../../shared/ipc'
 import { logger } from '../../shared/logger'
 import { userMessageDisplayText } from '../../shared/slashCommands'
+import { invalidateListRunsCache } from './runListCache'
 import { cancelPendingQuestions, dismissPendingQuestions } from './agentQuestion'
 
 export type FollowUpEntry = {
@@ -321,9 +322,17 @@ export async function forceFinishCancelledRun(runId: string): Promise<boolean> {
   const workspacePath = getRunWorkspace(runId)
   if (!workspacePath) return false
   try {
-    // Dynamic imports avoid state/agentInstances import cycles. Plain
+    // state and agentInstances statically import this module (state.ts ->
+    // isActive, and agentInstances -> state/startAgentRun), so importing them
+    // at top level would close a module cycle; keep those two lazy. Plain
     // require() here would resolve in the built CJS bundle but not under the
     // vitest ESM loader, which would silently skip the force-finish.
+    // resolveRunDir must ALSO stay lazy: tests/setup.ts imports this module
+    // before any test file registers its vi.mock('electron'), so a static
+    // import of ../storage/paths would evaluate electron (a plain string path
+    // under Node, i.e. `app` undefined) during setup and cache an unmocked
+    // paths module for every test file (26 failures in activityStats +
+    // agentLoopSteps suites — verified 2026-09-14).
     const { resolveRunDir } = await import('../storage/paths')
     const { loadStatus, updateStatus, appendEvent } = await import('./state')
     const runDir = resolveRunDir(workspacePath, runId)
@@ -348,7 +357,6 @@ export async function forceFinishCancelledRun(runId: string): Promise<boolean> {
         pathScope: status.pathScope
       })
     }
-    const { invalidateListRunsCache } = await import('./runListCache')
     invalidateListRunsCache(workspacePath)
     logger.warn('Cancelled run never unwound — force-finalized on disk', {
       scope: 'agent',

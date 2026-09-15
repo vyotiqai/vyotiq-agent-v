@@ -34,19 +34,23 @@ export default defineConfig({
     pool: 'forks',
     // Vitest 4: pool limits moved from poolOptions to top-level options.
     // Cap concurrent forks at 8: worst case is maxForks x per-fork heap
-    // (8 x 8192MB). Up to 24 forks x 8GB has OOM'd CI runners (worker exit
-    // at ~8.2GB RSS). The 8192MB per-fork heap itself stays — it was the fix
-    // for a real PDF-fixture OOM; do not lower it.
+    // (8 x 4096MB). Historically, up to 24 forks x 8GB OOM'd CI runners
+    // (worker exit at ~8.2GB RSS). The per-fork heap is now 4096MB — PDF
+    // extraction is bounded at the source (src/main/attachments/extract.ts
+    // early-stops at the attachment text cap and destroys the document),
+    // so 4096MB is a safety margin, not a requirement.
     maxForks: Math.max(1, Math.min(8, cpus().length)),
     minForks: 1,
-    // PDF parsing (extractAttachment) drives pdf.js over malformed fixtures
-    // and can exceed the ~4GB default heap inside a forked worker, killing
-    // the whole run. The forks pool strips everything except profiling flags
+    // PDF parsing (extractAttachment) drives pdf.js over malformed fixtures,
+    // but extraction is bounded at the source (src/main/attachments/extract.ts
+    // early-stops at the attachment text cap and destroys the document), so
+    // the default ~4GB heap would generally suffice; 4096MB is kept as a
+    // safety margin. The forks pool strips everything except profiling flags
     // from the CLI's process.execArgv and then appends project.config.execArgv
     // (vitest cli-api chunk: "...process.execArgv.filter(...--cpu-prof|
     // --heap-prof...), ...project.config.execArgv"), so the only place the
     // worker heap can be raised is this config option.
-    execArgv: ['--max-old-space-size=8192', '--expose-gc'],
+    execArgv: ['--max-old-space-size=4096', '--expose-gc'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],

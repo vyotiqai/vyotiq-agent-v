@@ -9,6 +9,7 @@ import {
 } from '@renderer/lib/utils/layout'
 import type { RunSummary } from '@shared/ipc'
 import { isResumableInterruptedRun } from '@shared/runInterrupt'
+import { runCostDisplay } from '@shared/utils/costDisplay'
 import {
   markSessionDragEnd,
   markSessionDragStart,
@@ -55,6 +56,7 @@ export const ChatRow = memo(function ChatRow({
   onRenameRun,
   onDeleteRun,
   onExportRun,
+  onForkRun,
   tabIndex,
   rowRef,
   onNavKeyDown
@@ -71,6 +73,7 @@ export const ChatRow = memo(function ChatRow({
   onRenameRun: (workspacePath: string, runId: string, goal: string) => void
   onDeleteRun: (workspacePath: string, runId: string) => void
   onExportRun?: (workspacePath: string, runId: string) => void
+  onForkRun?: (workspacePath: string, runId: string) => void
   tabIndex?: number
   rowRef?: RefCallback<HTMLElement>
   onNavKeyDown?: (event: KeyboardEvent<HTMLButtonElement>) => void
@@ -110,6 +113,7 @@ export const ChatRow = memo(function ChatRow({
 
   const title = titleOverride ?? runTitle(run)
   const fullLabel = runTooltip(run)
+  const cost = runCostDisplay(run)
 
   const runStatusLabel = ((): string | null => {
     if (run.status === 'running') return 'Running'
@@ -122,6 +126,7 @@ export const ChatRow = memo(function ChatRow({
     if (runStatusLabel) parts.push(runStatusLabel)
     if (run.goalStatus === 'active') parts.push('active goal')
     if (run.goalStatus === 'paused') parts.push('paused goal')
+    if (cost) parts.push(cost.text)
     return parts.join(', ')
   })()
 
@@ -233,6 +238,14 @@ export const ChatRow = memo(function ChatRow({
           </span>
         ) : null}
         <span className="min-w-0 flex-1 truncate">{title}</span>
+        {cost ? (
+          <span
+            className="shrink-0 text-3xs tabular-nums text-muted group-hover:hidden [@media(hover:none)]:hidden"
+            title={cost.title}
+          >
+            {cost.text}
+          </span>
+        ) : null}
         </button>
       </Tooltip>
 
@@ -271,6 +284,23 @@ export const ChatRow = memo(function ChatRow({
                 setRenaming(true)
               }}
             />
+            {onForkRun ? (
+              <IconButton
+                icon="branch"
+                label={`Fork ${fullLabel}`}
+                size="xs"
+                variant="bare"
+                className="text-muted hover:text-fg"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onForkRun(workspacePath, run.runId)
+                }}
+              />
+            ) : null}
             {onExportRun ? (
               <IconButton
                 icon="download"

@@ -171,6 +171,44 @@ describe('auto task card', () => {
     expect(document.querySelector('[data-tasks-popover-card]')).toBeTruthy()
   })
 
+  it('returns focus to the trigger when Escape closes a focused card', async () => {
+    vi.useFakeTimers()
+    readRunArtifact.mockResolvedValue(EMPTY)
+    render(
+      <ChatSideRail
+        activePanel={null}
+        onSelectPanel={vi.fn()}
+        workspacePath="/ws"
+        runId="run-1"
+        running
+      />
+    )
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    readRunArtifact.mockResolvedValue(
+      todosPayload([{ id: '1', content: 'Ship', status: 'pending' }])
+    )
+    await act(async () => {
+      vi.advanceTimersByTime(2000)
+      await Promise.resolve()
+    })
+    const chip = screen.getByRole('button', { name: /Tasks 0 of 1/ })
+    const card = document.querySelector('[data-tasks-popover-card]') as HTMLElement
+    expect(card).toBeTruthy()
+
+    // Focus sits on the card's footer action; Escape must close the card AND
+    // hand focus back to the rail trigger.
+    const footer = screen.getByRole('button', { name: 'Open plan panel' })
+    footer.focus()
+    expect(document.activeElement).toBe(footer)
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(document.querySelector('[data-tasks-popover-card]')).toBeNull()
+    expect(document.activeElement).toBe(chip)
+  })
+
   it('renders nothing without todos and never auto-opens', () => {
     const { container } = render(
       <TasksRailButton data={null} onOpenPlan={vi.fn()} />

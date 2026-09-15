@@ -28,6 +28,18 @@ describe('ptyOutputBuffer', () => {
     expect(buffers.get('a')?.length).toBe(PTY_OUTPUT_BUFFER_MAX_CHARS)
   })
 
+  it('keeps repeated appends capped, retaining the tail', () => {
+    const buffers = new Map<string, string>()
+    const half = PTY_OUTPUT_BUFFER_MAX_CHARS / 2
+    appendPtyOutputBuffer(buffers, 'a', 'x'.repeat(half))
+    appendPtyOutputBuffer(buffers, 'a', 'y'.repeat(half))
+    // Third append pushes past the cap: the oldest half (x) must be dropped.
+    appendPtyOutputBuffer(buffers, 'a', 'z'.repeat(half))
+    const out = buffers.get('a')
+    expect(out?.length).toBe(PTY_OUTPUT_BUFFER_MAX_CHARS)
+    expect(out).toBe('y'.repeat(half) + 'z'.repeat(half))
+  })
+
   it('prunes buffers for dead sessions', () => {
     const buffers = new Map<string, string>([
       ['live', '1'],

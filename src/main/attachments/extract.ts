@@ -101,10 +101,40 @@ function clip(text: string): { text: string; truncated: boolean } {
 
 async function extractPdfText(bytes: Buffer): Promise<string> {
   // unpdf ships as ESM only, so it has to be pulled in at call time from CJS main.
-  const { extractText, getDocumentProxy } = await import('unpdf')
+  const { getDocumentProxy } = await import('unpdf')
   const pdf = await getDocumentProxy(new Uint8Array(bytes))
-  const { text } = await extractText(pdf, { mergePages: true })
-  return Array.isArray(text) ? text.join('\n\n') : text
+  try {
+    // clip() only ever keeps MAX_ATTACHMENT_CHARS, so parsing past a small
+    // multiple of that is pure waste — and was the cause of a real OOM on a
+    // large fixture. unpdf's extractText() has no page range, so walk pages
+    // ourselves and stop as soon as we hold more text than clip() can keep.
+    const budget = MAX_ATTACHMENT_CHARS * 2
+    const pages: string[] = []
+    let total = 0
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+      const page = await pdf.getPage(pageNumber)
+      let pageText = ''
+      try {
+        const content = await page.getTextContent()
+        // Same per-item join as unpdf's extractText: item text, newline on EOL.
+        for (const item of content.items) {
+          if (!('str' in item)) continue
+          pageText += item.str
+          if (item.hasEOL) pageText += '\n'
+        }
+      } finally {
+        await page.cleanup()
+      }
+      pages.push(pageText)
+      total += pageText.length
+      if (total >= budget) break
+    }
+    return pages.join('\n\n')
+  } finally {
+    // The proxy unpdf returns has no destroy(); its loading task is the
+    // teardown handle — same call unpdf's extractText uses internally.
+    await pdf.loadingTask.destroy()
+  }
 }
 
 /**

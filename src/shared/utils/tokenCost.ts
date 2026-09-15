@@ -193,6 +193,8 @@ export function evaluateTokenCostWarnings(input: {
   step: number
   /** Cumulative Σ step inputs this run (true bill shape). */
   billedInputTokens?: number
+  /** Cumulative Σ cached input tokens this run — qualifies the billed figure. */
+  cachedInputTokensTotal?: number
   /**
    * Newest large (≥ {@link LARGE_STEP_INPUT_THRESHOLD}) cache-reported hit rates.
    * Warning uses the mean once length ≥ {@link RECENT_LARGE_CACHE_WINDOW}.
@@ -250,9 +252,17 @@ export function evaluateTokenCostWarnings(input: {
     input.step >= LONG_RUN_STEP_HINT_THRESHOLD ||
     billed >= LONG_RUN_BILLED_INPUT_HINT_THRESHOLD
   ) {
+    // Σ step inputs overstates the bill when the provider caches most of the
+    // prompt — qualify the figure with the cumulative cache share.
+    const cachedTotal = Math.max(0, input.cachedInputTokensTotal ?? 0)
+    const cachedPct =
+      billed > 0 && cachedTotal > 0 ? Math.min(100, (cachedTotal / billed) * 100) : null
     out.push({
       kind: 'long_run_task_boundary',
-      message: `Long run at step ${input.step} (billed input ${billed})`
+      message:
+        cachedPct == null
+          ? `Long run at step ${input.step} (billed input ${billed})`
+          : `Long run at step ${input.step} (billed input ${billed}, ${cachedPct.toFixed(1)}% from cache)`
     })
   }
   return out

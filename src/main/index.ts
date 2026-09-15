@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp } from '@electron-toolkit/utils'
 import { watchWindowShortcuts } from '@main/app/windowShortcuts'
 import { createWindow, applyWindowChrome, getMainWindow } from '@main/app/window'
+import { planSecondInstanceAction } from '@main/app/secondInstance'
 import { initCustomCssWatchFromSettings } from '@main/appearance/customCss'
 import { configureChromiumDiskCache } from '@main/app/chromiumProfile'
 import { applyCertificateLogging, applyCsp } from '@main/app/security'
@@ -36,7 +37,7 @@ import {
 } from '@main/workspace/workspaces'
 import { cancelAndWaitActiveRuns, listActiveRuns } from '@main/agent/runRegistry'
 import { pruneStaleInstanceWorktreesBestEffort } from '@main/git/instanceWorktree'
-import { initMainLogging } from './logging/init'
+import { initMainLogging, rendererUnresponsiveForMs } from './logging/init'
 import { initTraceAutoCapture } from './perf/traceAutoCapture'
 import { initCrashReporter } from './logging/crashReporter'
 import { logger } from '../shared/logger'
@@ -63,6 +64,9 @@ let editorFlushSequence = 0
 const EDITOR_FLUSH_TIMEOUT_MS = 4_500
 /** Bound on awaiting child-process teardown in before-quit (fatal path). */
 const CHILD_SHUTDOWN_TIMEOUT_MS = 5_000
+// Goal/loop resume adds provider+indexer load at window load; let first paint
+// and renderer hydration win first.
+const RESUME_AFTER_FIRST_PAINT_MS = 2_000
 
 // Route console/process termination signals into the existing graceful
 // shutdown. Without this, Ctrl+C on `pnpm start` kills the launcher but orphans
@@ -130,14 +134,40 @@ function requestRendererEditorFlush(win: BrowserWindow | null): Promise<EditorFl
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
+  // Logging is not initialized this early; the shared logger falls back to
+  // console so a rejected relaunch is no longer a silent no-op.
+  logger.warn('Single-instance lock denied; another instance owns the app - quitting', {
+    scope: 'main'
+  })
   app.quit()
 } else {
   app.on('second-instance', () => {
     const win = getMainWindow() ?? BrowserWindow.getAllWindows()[0]
-    if (win) {
-      if (win.isMinimized()) win.restore()
-      win.focus()
+    const unresponsiveForMs = rendererUnresponsiveForMs()
+    const plan = planSecondInstanceAction({ hasWindow: !!win, unresponsiveForMs })
+    logger.info('Second instance launched', { scope: 'main', action: plan.action, unresponsiveForMs })
+    if (!win) return
+    if (plan.action === 'recreate-window') {
+      logger.warn('Recreating window unresponsive beyond threshold', {
+        scope: 'main',
+        unresponsiveForMs
+      })
+      // Create the replacement BEFORE destroying the wedged window:
+      // window-all-closed quits the app once the window count hits zero.
+      const fresh = createWindow()
+      applyWindowChrome(getSettings().theme, getSettings().skinId)
+      fresh.webContents.once('did-finish-load', () => {
+        replayPtySessionsToWindow(fresh)
+        // Same rationale as boot resume: let first paint and hydration win.
+        setTimeout(() => {
+          if (!fresh.isDestroyed()) resumeActiveGoalsAndLoops(fresh.webContents)
+        }, RESUME_AFTER_FIRST_PAINT_MS)
+      })
+      win.destroy()
+      return
     }
+    if (win.isMinimized()) win.restore()
+    win.focus()
   })
 
   app.whenReady().then(async () => {
@@ -245,7 +275,13 @@ if (!gotLock) {
     const bootWindow = getMainWindow()
     bootWindow?.webContents.once('did-finish-load', () => {
       const win = getMainWindow()
-      if (win && !win.isDestroyed()) resumeActiveGoalsAndLoops(win.webContents)
+      if (win && !win.isDestroyed()) {
+        // Goal/loop resume adds provider+indexer load at window load; let
+        // first paint and renderer hydration win first.
+        setTimeout(() => {
+          if (!win.isDestroyed()) resumeActiveGoalsAndLoops(win.webContents)
+        }, RESUME_AFTER_FIRST_PAINT_MS)
+      }
     })
 
     const pushNativeTheme = (): void => {
@@ -264,7 +300,11 @@ if (!gotLock) {
         applyWindowChrome(getSettings().theme, getSettings().skinId)
         win.webContents.once('did-finish-load', () => {
           replayPtySessionsToWindow(win)
-          resumeActiveGoalsAndLoops(win.webContents)
+          // Goal/loop resume adds provider+indexer load at window load; let
+          // first paint and renderer hydration win first.
+          setTimeout(() => {
+            if (!win.isDestroyed()) resumeActiveGoalsAndLoops(win.webContents)
+          }, RESUME_AFTER_FIRST_PAINT_MS)
         })
       }
     })

@@ -503,23 +503,42 @@ function stripToolShapedAssistantTextInner(content: string, options?: { trim?: b
 }
 
 /**
+ * Match a full prompt-section echo block (`<live_session_summary>…</live_session>`,
+ * `<live_session>…</live_session>` — closers may be mangled). Only a complete
+ * opening+closing pair is stripped: a lone opening tag stays (streaming partial
+ * until the block closes) and tags quoted inside code fences survive.
+ */
+const PROMPT_SECTION_ECHO_RE =
+  /<live_session(?:_summary)?>[\s\S]*?<\/live_session(?:_summary)?>/gi
+
+/**
+ * Drop model echoes of internal prompt sections (run f2b4: the model flashed
+ * the whole `<live_session>` session/workspace context back as assistant text).
+ */
+function stripPromptSectionEchoes(content: string): string {
+  if (!/<live_session/i.test(content)) return content
+  return content.replace(PROMPT_SECTION_ECHO_RE, '')
+}
+
+/**
  * Drop model-emitted pseudo tool calls that leaked into the text channel
  * (e.g. `tool {"edits":[...]}` or DeepSeek `<｜DSML｜tool_calls>` blocks)
  * so they do not render as plain transcript text.
  */
 export function stripToolShapedAssistantText(content: string): string {
-  return stripToolShapedAssistantTextInner(content, { trim: true })
+  return stripToolShapedAssistantTextInner(stripPromptSectionEchoes(content), { trim: true })
 }
 
 /** Like stripToolShapedAssistantText but also hides in-progress tool blobs while streaming. */
 export function stripToolShapedAssistantTextForStream(content: string): string {
   if (!content) return content
+  const noEcho = stripPromptSectionEchoes(content)
   // Skip `stripIncompleteToolPrefix` too — it is another ~6 O(n) passes and
   // cannot cut anything when no candidate marker exists.
-  if (!SCRUB_CANDIDATE_RE.test(content)) {
-    return content.replace(NEWLINE_RUN_RE, '\n\n')
+  if (!SCRUB_CANDIDATE_RE.test(noEcho)) {
+    return noEcho.replace(NEWLINE_RUN_RE, '\n\n')
   }
-  return stripToolShapedAssistantTextInner(stripIncompleteToolPrefix(content), { trim: false })
+  return stripToolShapedAssistantTextInner(stripIncompleteToolPrefix(noEcho), { trim: false })
 }
 
 /** Scrub leaked tool text from any assistant rows still marked streaming. */

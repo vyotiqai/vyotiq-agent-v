@@ -3,13 +3,18 @@ import type {
   OfflineWaitMode,
   ResponseVerbosity
 } from '@shared/ipc'
-import { DEFAULT_AGENT_PERSONA, DEFAULT_AGENT_TONE } from '@shared/agentPersona'
+import {
+  DEFAULT_AGENT_IDENTITY,
+  DEFAULT_AGENT_PERSONA,
+  DEFAULT_AGENT_TONE
+} from '@shared/agentPersona'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import { Input, Menu, Switch } from '@renderer/lib/ui'
 import { AutoTextarea } from '../components/AutoTextarea'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
 import {
   AUTONOMOUS_QUESTIONS_OPTIONS,
+  IDENTITY_MAX_LENGTH,
   LANGUAGE_MAX_LENGTH,
   OFFLINE_WAIT_OPTIONS,
   PERSONA_MAX_LENGTH,
@@ -111,6 +116,41 @@ export function AgentSection({ form }: { form: SettingsFormState }) {
               value={form.personaDraft}
               max={PERSONA_MAX_LENGTH}
               dirty={form.personaDirty}
+            />
+          </div>
+        </SettingsField>
+
+        <SettingsField
+          id="agent-identity"
+          title="Identity"
+          hint="Who the agent says it is."
+          help={
+            form.workspaceOverrideActive
+              ? 'With workspace override on, this applies to the active workspace only.'
+              : 'Leave blank to use the built-in Agent V blurb. Per-workspace via Workspace Override.'
+          }
+          wide
+        >
+          <div className="flex w-full flex-col gap-1.5">
+            <AutoTextarea
+              placeholder={DEFAULT_AGENT_IDENTITY}
+              aria-label="Identity"
+              maxLength={IDENTITY_MAX_LENGTH}
+              maxRows={6}
+              disabled={form.formLocked}
+              value={form.identityDraft}
+              key={`agent-identity-${form.workspaceOverrideActive}`}
+              onChange={(e) => {
+                form.setIdentityDraft(e.target.value)
+              }}
+              onBlur={() => {
+                void form.persistIdentity()
+              }}
+            />
+            <DraftMeta
+              value={form.identityDraft}
+              max={IDENTITY_MAX_LENGTH}
+              dirty={form.identityDirty}
             />
           </div>
         </SettingsField>

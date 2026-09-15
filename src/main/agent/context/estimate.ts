@@ -1,7 +1,7 @@
 import type { ChatMessage, MessageContent } from '../../../shared/ipc'
 import { attachedFileToText, contentToText } from '../../../shared/ipc'
 import type { ModelInfo } from '../../../shared/ipc/schemas/providers'
-import { estimateImageTokens } from './imageTokens'
+import { estimateImageTokens, estimateImageTokensWithExpansion } from './imageTokens'
 import {
   countTextTokens,
   countTextTokensAsync,
@@ -32,7 +32,7 @@ function countContentTokens(content: MessageContent, encoding: EncodingName): nu
   if (typeof content === 'string') return countTextTokens(content, encoding)
   let n = 0
   for (const part of content) {
-    if (part.type === 'image_url') n += estimateImageTokens(part.url)
+    if (part.type === 'image_url') n += estimateImageTokensWithExpansion(part.url)
     else if (part.type === 'file') n += countTextTokens(attachedFileToText(part), encoding)
     else if (part.type === 'audio') n += estimateBinaryPartTokens(Math.ceil((dataUrlBase64Length(part.url) * 3) / 4))
     else if (part.type === 'file_native')
@@ -55,7 +55,7 @@ export interface EstimateMessagesOptions {
 }
 
 export async function estimateMessagesTokensAsync(
-  messages: ChatMessage[],
+  messages: readonly ChatMessage[],
   model?: ModelInfo,
   options?: EstimateMessagesOptions
 ): Promise<number> {
@@ -113,7 +113,7 @@ export async function estimateMessagesTokensAsync(
       texts.push({ text: message.content, encoding })
     } else {
       for (const part of message.content) {
-        if (part.type === 'image_url') images += estimateImageTokens(part.url)
+        if (part.type === 'image_url') images += estimateImageTokensWithExpansion(part.url)
         else if (part.type === 'file') texts.push({ text: attachedFileToText(part), encoding })
         else if (part.type === 'audio')
           images += estimateBinaryPartTokens(Math.ceil((dataUrlBase64Length(part.url) * 3) / 4))

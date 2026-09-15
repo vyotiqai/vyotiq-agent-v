@@ -575,7 +575,7 @@ export const PlanPanel = memo(function PlanPanel({
   const tasksBlock =
     tab === 'plan' && hasTodos ? (
       <div className="mb-3 min-w-0" data-plan-tasks>
-        <div className="mb-1.5 flex items-baseline justify-between gap-2">
+        <div className="mb-2 flex min-w-0 items-baseline justify-between gap-1.5">
           <p className="m-0 text-2xs font-medium uppercase tracking-[var(--vy-tracking-caps)] text-muted">
             Tasks
           </p>
@@ -588,7 +588,7 @@ export const PlanPanel = memo(function PlanPanel({
         ) : (
           <>
             <TodoProgressBar done={todosData!.done} total={todosData!.total} />
-            <TodoChecklist items={todoItems} className="mt-1.5" />
+            <TodoChecklist items={todoItems} className="mt-2" />
           </>
         )}
       </div>

@@ -17,10 +17,16 @@ const CARD_GAP_PX = 8
 /** Capture-phase scroll listener: passive (never preventDefault) + capturing. */
 const SCROLL_LISTENER: AddEventListenerOptions = { capture: true, passive: true }
 
-type CardCoords = { top: number; left: number }
+type CardCoords = { top: number; left: number; side: 'left' | 'right' }
 
 /** Constrained card width: shrinks on narrow windows, capped at w-72. */
 const cardWidthClass = 'w-[min(18rem,calc(100vw-1.5rem))]'
+
+/** Entrance animation grows from the side the card opens toward. */
+const cardSideStyle: Record<CardCoords['side'], { transformOrigin: string }> = {
+  left: { transformOrigin: 'right center' },
+  right: { transformOrigin: 'left center' }
+}
 
 /**
  * The live plan control itself: status icon + done/total badge, with the
@@ -115,13 +121,28 @@ export function TasksRailButton({
     const rect = el.getBoundingClientRect()
     const cardW = cardRef.current?.offsetWidth || CARD_WIDTH_FALLBACK_PX
     const cardH = cardRef.current?.offsetHeight || CARD_HEIGHT_FALLBACK_PX
-    const left = Math.max(VIEWPORT_PAD_PX, rect.left - CARD_GAP_PX - cardW)
+    // Flip to whichever side has room for the card + gap. Left is the norm
+    // for the edge-hugging rail; right rescues narrow windows instead of
+    // clamping the card onto the trigger.
+    const side: CardCoords['side'] =
+      rect.left - CARD_GAP_PX - cardW >= VIEWPORT_PAD_PX ? 'left' : 'right'
+    const left =
+      side === 'left'
+        ? Math.max(VIEWPORT_PAD_PX, rect.left - CARD_GAP_PX - cardW)
+        : Math.min(
+            rect.right + CARD_GAP_PX,
+            window.innerWidth - cardW - VIEWPORT_PAD_PX
+          )
     const maxTop = Math.max(VIEWPORT_PAD_PX, window.innerHeight - cardH - VIEWPORT_PAD_PX)
     const top = Math.min(
       Math.max(VIEWPORT_PAD_PX, rect.top + rect.height / 2 - cardH / 2),
       maxTop
     )
-    setCoords((prev) => (prev?.top === top && prev?.left === left ? prev : { top, left }))
+    setCoords((prev) =>
+      prev?.top === top && prev?.left === left && prev?.side === side
+        ? prev
+        : { top, left, side }
+    )
   }, [])
 
   useLayoutEffect(() => {
@@ -136,8 +157,13 @@ export function TasksRailButton({
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
       if (e.defaultPrevented) return
+      // Decide focus restoration before the card unmounts.
+      const restoreFocus = cardRef.current?.contains(document.activeElement) ?? false
       e.preventDefault()
       closeNow()
+      // Escape closes the card and hands focus back to the trigger when the
+      // card (or its footer action) had it; hover-opened cards keep focus put.
+      if (restoreFocus) triggerRef.current?.focus()
     }
     const onDocMouseDown = (e: MouseEvent): void => {
       const target = e.target as Node
@@ -189,11 +215,11 @@ export function TasksRailButton({
             'pointer-events-auto fixed z-tooltip rounded-xl border border-border bg-card p-3 shadow-menu animate-tip-in',
             cardWidthClass
           )}
-          style={{ top: coords.top, left: coords.left }}
+          style={{ top: coords.top, left: coords.left, ...cardSideStyle[coords.side] }}
           onPointerEnter={clearTimers}
           onPointerLeave={scheduleClose}
         >
-          <div className="flex min-w-0 items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-2">
             <span className="text-xs font-semibold text-fg">Tasks</span>
             {running ? (
               <span
@@ -203,13 +229,13 @@ export function TasksRailButton({
                 Live
               </span>
             ) : null}
-            <span className="ml-auto shrink-0 tabular-nums text-caption text-muted">
+            <span className="ml-auto shrink-0 tabular-nums text-2xs text-muted">
               {count}
             </span>
           </div>
           <TodoProgressBar done={done} total={total} className="mt-2" />
           <ul
-            className="m-0 mt-2 max-h-[min(14rem,max(6rem,calc(100vh-18rem)))] list-none space-y-1 overflow-y-auto p-0"
+            className="m-0 mt-2 max-h-[min(14rem,calc(100vh-12rem))] list-none space-y-1 overflow-y-auto p-0"
             data-tasks-popover-list
           >
             {items.map((item, index) => (

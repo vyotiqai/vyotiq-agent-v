@@ -11,6 +11,7 @@ import {
   DictationRuntimeStatusSchema,
   GithubAuthStatusSchema,
   SkillsChangedPayloadSchema,
+  ToolCatalogResultSchema,
   GitStatusChangedPayloadSchema,
   NotificationListSchema,
   NotificationActionSchema
@@ -225,6 +226,8 @@ const api: VyotiqApi = {
     ipcRenderer.invoke(IPC.runsExport, { workspacePath, runId }),
   renameRun: (workspacePath, runId, goal) =>
     ipcRenderer.invoke(IPC.runsRename, { workspacePath, runId, goal }),
+  forkRun: (workspacePath, runId, forkIndex) =>
+    ipcRenderer.invoke(IPC.runsFork, { workspacePath, runId, forkIndex }),
   setGoalStatus: (payload) => ipcRenderer.invoke(IPC.runsSetGoalStatus, payload),
   setLoop: (payload) => ipcRenderer.invoke(IPC.runsSetLoop, payload),
   listActiveRuns: () => ipcRenderer.invoke(IPC.runsActive),
@@ -412,6 +415,7 @@ const api: VyotiqApi = {
   githubIssueCreate: (payload) => ipcRenderer.invoke(IPC.githubIssueCreate, payload),
   mcpStatus: (payload) => ipcRenderer.invoke(IPC.mcpStatus, payload ?? {}),
   mcpRefresh: (payload) => ipcRenderer.invoke(IPC.mcpRefresh, payload ?? {}),
+  toolsCatalogGet: (payload) => ipcRenderer.invoke(IPC.toolsCatalogGet, payload ?? {}),
   mcpSetAuthToken: (serverId, token) =>
     ipcRenderer.invoke(IPC.mcpSetAuthToken, { serverId, token }),
   mcpClearAuthToken: (serverId) => ipcRenderer.invoke(IPC.mcpClearAuthToken, { serverId }),
@@ -490,6 +494,17 @@ const api: VyotiqApi = {
     ipcRenderer.on(IPC.skillsChanged, listener)
     return () => {
       ipcRenderer.removeListener(IPC.skillsChanged, listener)
+    }
+  },
+  onToolsCatalogChanged: (handler) => {
+    const listener = (_: IpcRendererEvent, raw: unknown): void => {
+      const parsed = ToolCatalogResultSchema.safeParse(raw)
+      if (!parsed.success) return
+      handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.toolsCatalogChanged, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.toolsCatalogChanged, listener)
     }
   },
   listNotifications: () => ipcRenderer.invoke(IPC.notificationsList),
