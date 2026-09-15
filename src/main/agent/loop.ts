@@ -1322,9 +1322,10 @@ export async function* runAgent(input: {
           overflowRetryUsed,
           goalNoToolFinishes,
           // Carry the durable usage totals so this write never erases them.
-          ...(persistUsageTotalsCheckpointPayload()
-            ? { usageTotals: persistUsageTotalsCheckpointPayload() }
-            : {})
+          ...(() => {
+            const usageTotals = persistUsageTotalsCheckpointPayload()
+            return usageTotals ? { usageTotals } : {}
+          })()
         })
       } catch (err) {
         logger.warn('Loop checkpoint persist failed', {
