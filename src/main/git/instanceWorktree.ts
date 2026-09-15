@@ -1010,7 +1010,15 @@ export async function commitDirtyInstanceWorktree(worktreePath: string): Promise
   if (!dirty) return
 
   try {
-    await git(['add', '-A'], worktreePath, WRITE_TIMEOUT_MS)
+    // Exclude node_modules: provisioning junctions the parent's node_modules
+    // into the worktree, and in repos whose HEAD lacks ignore coverage a bare
+    // `add -A` would stage that junction (gitlink/symlink — or traverse the
+    // parent's real deps on Windows) into the instance branch.
+    await git(
+      ['add', '-A', '--', '.', ':(exclude)node_modules'],
+      worktreePath,
+      WRITE_TIMEOUT_MS
+    )
     // Nothing staged (e.g. only ignored files) — skip empty commit.
     try {
       await git(['diff', '--cached', '--quiet'], worktreePath, READ_TIMEOUT_MS)

@@ -65,7 +65,7 @@ emitted (release.yml:222-235); publishing happens only on real tag pushes.
   tag already exists (:97-98). Draft-first so the in-app updater can never
   see a half-uploaded release, and so every matrix job uploads into this
   draft instead of racing to create the release (:100-106).
-- **`package` — one job per matrix name** (release.yml:114-235):
+- **`package` — one job per matrix name** (release.yml:116-235):
   `windows-x64` (`--win`; `*.exe`), `linux-x64` (`--linux`; AppImage/deb/
   rpm), and `macOS` (`--mac --arm64 --x64`; dmg/zip — both arches in one
   electron-builder invocation so a single `latest-mac.yml` lists both zips,
@@ -75,7 +75,7 @@ emitted (release.yml:222-235); publishing happens only on real tag pushes.
   then "Upload artifacts" (:215-220) and "Upload updater metadata
   artifacts" — the `latest*.yml` manifests and blockmaps, emitted only on
   tag pushes (:222-235).
-- **`finalize-release` — "Finalize release"** (release.yml:237-338, tag
+- **`finalize-release` — "Finalize release"** (release.yml:239-338, tag
   pushes only): "Ensure release notes are populated" (:261-276) backfills
   the body when it is empty or the pre-automation stub
   `Vyotiq v$VERSION installers and update metadata.` (:269); "Verify
@@ -146,8 +146,7 @@ re-introduce it.
 
 ## Note (transitional)
 
-The changelog-coupled release steps were removed from `release.yml` in the
-working tree (uncommitted at the time of writing): create-release writes
-the stub body directly, and finalize-release only backfills that stub when
-the release body came up empty. Once that commit lands, no `CHANGELOG.md`
+The changelog-coupled release steps have been removed from `release.yml`:
+create-release writes the stub body directly, and finalize-release only
+backfills that stub when the release body came up empty. No `CHANGELOG.md`
 file is needed at any point of the flow.

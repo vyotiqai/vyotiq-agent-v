@@ -158,27 +158,52 @@ describe.skipIf(!canGit)('instanceWorktree merge gate', () => {
     if (result.ok) expect(result.detail).toContain(branch)
   }, 30_000)
 
-  it('refuses merging when the parent has a tracked modification', async () => {
+  it('refuses merging when a tracked modification overlaps the branch changed files', async () => {
     initRepo()
     const branch = `vyotiq/instance/run-b-${process.pid}`
-    addBranch(branch)
+    git(repo, 'checkout', '-b', branch)
+    writeFileSync(join(repo, 'README.md'), 'instance edit\n', 'utf8')
+    git(repo, 'add', '.')
+    git(repo, '-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-m', 'work')
+    git(repo, 'checkout', 'main')
+
     writeFileSync(join(repo, 'README.md'), 'modified\n', 'utf8')
 
     const result = await mergeInstanceBranch(repo, branch)
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(/uncommitted tracked changes.*README\.md/s)
+    if (!result.ok) expect(result.error).toMatch(/also changed \(README\.md\)/i)
   }, 30_000)
 
-  it('refuses merging when the parent has a staged addition', async () => {
+  it('refuses merging when a staged addition overlaps the branch changed files', async () => {
     initRepo()
     const branch = `vyotiq/instance/run-c-${process.pid}`
-    addBranch(branch)
+    git(repo, 'checkout', '-b', branch)
     writeFileSync(join(repo, 'staged.ts'), 'export const s = 1\n', 'utf8')
+    git(repo, 'add', '.')
+    git(repo, '-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-m', 'work')
+    git(repo, 'checkout', 'main')
+
+    writeFileSync(join(repo, 'staged.ts'), 'export const s = 2\n', 'utf8')
     git(repo, 'add', 'staged.ts')
 
     const result = await mergeInstanceBranch(repo, branch)
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(/uncommitted tracked changes.*staged\.ts/s)
+    if (!result.ok) expect(result.error).toMatch(/also changed \(staged\.ts\)/i)
+  }, 30_000)
+
+  it('allows merging when parent dirty files are disjoint from the branch changes', async () => {
+    initRepo()
+    const branch = `vyotiq/instance/run-e-${process.pid}`
+    git(repo, 'checkout', '-b', branch)
+    writeFileSync(join(repo, 'instance-file.txt'), 'instance\n', 'utf8')
+    git(repo, 'add', '.')
+    git(repo, '-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-m', 'work')
+    git(repo, 'checkout', 'main')
+
+    writeFileSync(join(repo, 'README.md'), 'parent dirty\n', 'utf8')
+
+    const result = await mergeInstanceBranch(repo, branch)
+    expect(result.ok).toBe(true)
   }, 30_000)
 
   it('allows merging a clean parent tree', async () => {

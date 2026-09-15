@@ -1162,7 +1162,9 @@ describe('agentInstances worktree', () => {
     const merged = await mergeAgentInstanceBranch(workspacePath, parentRunId, child.runId)
     expect(merged.ok).toBe(true)
     if (merged.ok) {
-      expect(readFileSync(join(workspacePath, 'child.txt'), 'utf8')).toBe('x\n')
+      // autocrlf smudges branch content on checkout; compare normalized.
+      const childTxt = readFileSync(join(workspacePath, 'child.txt'), 'utf8')
+      expect(childTxt.replace(/\r\n/g, '\n')).toBe('x\n')
       expect(readFileSync(join(workspacePath, 'README.md'), 'utf8')).toBe('dirty\n')
     }
     clearRunAbort(child.runId)
@@ -1207,9 +1209,9 @@ describe('agentInstances worktree', () => {
     if (!child.ok) return
     const status = loadStatus(resolveRunDir(workspacePath, child.runId))
     expect(status?.worktreePath).toBeTruthy()
-    expect(readFileSync(join(status!.worktreePath!, 'README.md'), 'utf8')).toBe(
-      'forwarded baseline\n'
-    )
+    // git apply honors autocrlf and may smudge LF to CRLF; compare normalized.
+    const forwarded = readFileSync(join(status!.worktreePath!, 'README.md'), 'utf8')
+    expect(forwarded.replace(/\r\n/g, '\n')).toBe('forwarded baseline\n')
     clearRunAbort(child.runId)
   })
 
