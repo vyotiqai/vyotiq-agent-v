@@ -202,6 +202,19 @@ export function isSeedFallbackWarning(warning: string | null | undefined): boole
 }
 
 /**
+ * Host is reachable but GET /models returns 405/501 (no catalog route).
+ * Chat can still connect — placeholders stay out of the live list via
+ * {@link isSeedFallbackWarning}, but send must not be blocked.
+ */
+export function isModelListUnsupportedWarning(warning: string | null | undefined): boolean {
+  if (!warning) return false
+  return (
+    /does not serve a model list \(HTTP (?:405|501)\)/i.test(warning) &&
+    /host is reachable/i.test(warning)
+  )
+}
+
+/**
  * Live catalog rows for the model picker. Keep previous models while a refresh
  * is in flight — wiping here drops `modelMeta` and makes Think flicker.
  */

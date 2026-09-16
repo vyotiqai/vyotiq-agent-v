@@ -19,12 +19,14 @@ export function ModelReadinessBanner({
       ? `Add an API key for ${issue.label}`
       : issue.kind === 'unreachable'
         ? `${issue.label} isn’t ready`
-        : `Model isn’t available`
+        : issue.kind === 'manual_catalog'
+          ? `${issue.label}: no model list`
+          : `Model isn’t available`
 
   const body =
     issue.kind === 'missing_key'
       ? 'Keys stay encrypted on this device.'
-      : issue.kind === 'unreachable'
+      : issue.kind === 'unreachable' || issue.kind === 'manual_catalog'
         ? issue.detail
         : `“${issue.model}” isn’t in the live ${issue.label} catalog. Pull or pick another model.`
 
@@ -54,6 +56,16 @@ export function ModelReadinessBanner({
               Add API key
             </Button>
           </>
+        ) : null}
+        {issue.kind === 'manual_catalog' ? (
+          <Button
+            type="button"
+            className="min-h-8 px-2 text-xs"
+            disabled={busy}
+            onClick={onRecheck}
+          >
+            Recheck
+          </Button>
         ) : null}
         {issue.kind === 'model_missing' ? (
           <>

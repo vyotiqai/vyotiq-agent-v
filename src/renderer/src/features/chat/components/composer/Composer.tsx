@@ -49,7 +49,7 @@ import { useComposerFiles, ATTACHMENT_ACCEPT, MAX_FILES, isImageFile } from './u
 import { useComposerAudio, isAudioFile, MAX_AUDIO_FILES } from './useComposerAudio'
 import { useComposerDictation, type DictationPhase } from './useComposerDictation'
 import { useComposerModels } from './useComposerModels'
-import { deriveModelReadiness, modelReadinessSendReason } from './modelReadiness'
+import { deriveModelReadiness, modelReadinessBlocksSend, modelReadinessSendReason } from './modelReadiness'
 import { ModelReadinessBanner } from './ModelReadinessBanner'
 import { pickAudioFallback, pickVisionFallback } from './composerModelUtils'
 import {
@@ -673,7 +673,7 @@ export function Composer({
     liveCatalog: catalog.length > 0 ? catalog : null,
     catalogLoading
   })
-  const readinessBlocksSend = readinessIssue != null
+  const readinessBlocksSend = modelReadinessBlocksSend(readinessIssue)
 
   const { text, setText, canSend, submit, onKeyDown } = useComposerDraft({
     draft: resolvedDraft,
