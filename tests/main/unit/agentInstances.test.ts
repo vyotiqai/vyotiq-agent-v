@@ -799,6 +799,80 @@ describe('agentInstances', () => {
     expect(outline).not.toContain('more messages')
   })
 
+  it('caps the await/summary payload at CHILD_SUMMARY_MAX_CHARS with a truncation marker', async () => {
+    const childRunId = `sumcap-${Date.now()}`
+    createRun(workspacePath, childRunId, 'summary cap', {
+      mode: 'agent',
+      parentRunId,
+      inlineInstance: true
+    })
+    const runDir = resolveRunDir(workspacePath, childRunId)
+    const huge = 'x'.repeat(9_000)
+    writeFileSync(
+      join(runDir, 'messages.jsonl'),
+      `${JSON.stringify({ role: 'user', content: 'go' })}\n${JSON.stringify({ role: 'assistant', content: huge })}\n`
+    )
+    const summary = await summarizeChildRunAsync(workspacePath, childRunId)
+    expect(summary).toContain('[...truncated')
+    expect(summary.length).toBeLessThanOrEqual(6_100)
+    expect(summary.endsWith('[...truncated 3000 chars]')).toBe(true)
+  })
+
+  it('tail shows only the newest 40 messages in original order with true counts', async () => {
+    const childRunId = `tailcap-${Date.now()}`
+    createRun(workspacePath, childRunId, 'tail cap', {
+      mode: 'agent',
+      parentRunId,
+      inlineInstance: true
+    })
+    const runDir = resolveRunDir(workspacePath, childRunId)
+    const rows = Array.from({ length: 60 }, (_, i) =>
+      JSON.stringify({ role: 'user', content: `m${i}` })
+    )
+    writeFileSync(join(runDir, 'messages.jsonl'), `${rows.join('\n')}\n`)
+    const tail = await pullChildRun(workspacePath, childRunId, 'tail')
+    expect(tail).toContain('showing 40 of 60 messages')
+    const blocks = tail.match(/\n\n\[user\]\n/g)
+    expect(blocks).toHaveLength(40)
+    expect(tail).toContain('\nm20')
+    expect(tail).toContain('\nm59')
+    expect(tail).not.toContain('\nm19')
+    expect(tail).not.toContain('\nm0')
+    expect(tail.indexOf('\nm20')).toBeLessThan(tail.indexOf('\nm59'))
+  })
+
+  it('outline caps long lines and the composed outline', async () => {
+    const childRunId = `outcap-${Date.now()}`
+    createRun(workspacePath, childRunId, 'outline cap', {
+      mode: 'agent',
+      parentRunId,
+      inlineInstance: true
+    })
+    const runDir = resolveRunDir(workspacePath, childRunId)
+    const longLine = 'y'.repeat(500)
+    const rows = Array.from({ length: 60 }, () =>
+      JSON.stringify({ role: 'user', content: longLine })
+    )
+    writeFileSync(join(runDir, 'messages.jsonl'), `${rows.join('\n')}\n`)
+
+    const single = await pullChildRun(workspacePath, childRunId, 'outline')
+    const line = single.split('\n').find((l) => l.startsWith('1. user:'))
+    expect(line).toBeTruthy()
+    expect(line!.length).toBeLessThanOrEqual(320)
+    expect(line!.length).toBeGreaterThan(280)
+    expect(line!.startsWith('1. user: ' + 'y'.repeat(280))).toBe(true)
+    expect(line).toContain('…[truncated]')
+
+    // Giant outline: many long lines composing far beyond 10k chars.
+    const manyRows = Array.from({ length: 200 }, () =>
+      JSON.stringify({ role: 'user', content: longLine })
+    )
+    writeFileSync(join(runDir, 'messages.jsonl'), `${manyRows.join('\n')}\n`)
+    const giant = await pullChildRun(workspacePath, childRunId, 'outline')
+    expect(giant.length).toBeLessThanOrEqual(10_040)
+    expect(giant).toContain('[...truncated')
+  })
+
   it('fails await immediately when disk says running but the child is not active', async () => {
     const childRunId = `stale-${Date.now()}`
     createRun(workspacePath, childRunId, 'stale', {
