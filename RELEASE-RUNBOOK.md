@@ -1,8 +1,7 @@
 # RELEASE-RUNBOOK — Vyotiq (Agent V)
 
 Operating manual for cutting a release. Every job/step name below is quoted
-verbatim from `.github/workflows/release.yml` or
-`.github/workflows/deploy-landing.yml`, with the line numbers that define
+verbatim from `.github/workflows/release.yml`, with the line numbers that define
 them (tree at `a848f70`). Versioning rules live in
 `.github/AGENT-CHECKLIST.md` §0. The release flow is **tag-only**: no
 changelog entry is part of the procedure — the release body set by
@@ -91,18 +90,6 @@ emitted (release.yml:222-235); publishing happens only on real tag pushes.
 Publishing is automatic: there is no separate manual publish step. If any
 finalize check fails, the release stays a draft — fix and re-run the failed
 jobs rather than re-tagging.
-
-## 5. Landing redeploy after publish
-
-`.github/workflows/deploy-landing.yml` — job "Build + deploy landing"
-(deploy-landing.yml:19-20) — fires on pushes to `main` touching
-`landing/**` or the workflow itself, or on manual `workflow_dispatch`
-(:7-13). "Bake release download links" (`node scripts/bake-github-release.mjs`,
-:45-47) stamps the current release URLs into the site, "Build landing" runs
-the Astro build (:49-51), and "Deploy to Cloudflare Pages" publishes
-(:69-78), skipped with a warning when `CLOUDFLARE_API_TOKEN` /
-`CLOUDFLARE_ACCOUNT_ID` are unset (:56-67). After a release publishes,
-dispatch this workflow so https://vyotiq.com serves the new download URLs.
 
 ## 6. How to verify a release
 

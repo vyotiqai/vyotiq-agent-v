@@ -79,22 +79,12 @@ pnpm pack:dir:win # unpacked Windows build (packaging smoke test)
 
 Artifacts are written to `dist-package/` (see `electron-builder.yml`: appId `com.vyotiq.agent`, product name "Vyotiq") — an NSIS setup exe on Windows, dmg/zip on macOS, and AppImage/deb/rpm on Linux.
 
-## Landing site
-
-The Astro marketing site in `landing/` is a separate pnpm workspace package:
-
-```bash
-pnpm landing:dev
-pnpm landing:build
-```
-
 ## Project layout
 
 - `src/main` — Electron main process
 - `src/preload` — preload bridge
 - `src/renderer` — React UI
 - `src/shared` — code shared between main and renderer
-- `landing/` — Astro marketing site (separate workspace package)
 - `tests/` — vitest unit/e2e suites plus Playwright GUI e2e
 - `scripts/` — sync and build helper scripts wired into the package scripts
 

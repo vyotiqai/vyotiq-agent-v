@@ -31,8 +31,6 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "start": "electron-vite preview",
-    "landing:dev": "pnpm --filter @vyotiq/landing dev",
-    "landing:build": "pnpm --filter @vyotiq/landing build",
     "pack": "pnpm build && electron-builder --win --mac --linux --publish never",
     "pack:win": "pnpm build && electron-builder --win nsis --publish never",
     "pack:win:alt": "pnpm build && electron-builder --win nsis --publish never --config.directories.output=dist-package-alt",
