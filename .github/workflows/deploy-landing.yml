@@ -72,7 +72,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          working_directory: landing
+          workingDirectory: landing
           # Project name defaults to 'vyotiq'; override per-repo via the
           # CLOUDFLARE_PAGES_PROJECT repository variable if it differs.
           command: pages deploy dist --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT || 'vyotiq' }}
