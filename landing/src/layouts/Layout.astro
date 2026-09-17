@@ -1,61 +1,61 @@
 ---
 import '../styles/global.css';
+import '@fontsource/plus-jakarta-sans/400.css';
+import '@fontsource/plus-jakarta-sans/500.css';
+import '@fontsource/plus-jakarta-sans/600.css';
+import '@fontsource/plus-jakarta-sans/700.css';
+import '@fontsource/jetbrains-mono/400.css';
+import '@fontsource/jetbrains-mono/500.css';
 
-const REPO = 'https://github.com/vyotiqai/vyotiq-agent-v';
-const SOCIAL = 'https://vyotiq.com/brand/vyotiq-social-card.png';
-const DESCRIPTION =
-  'The coding agent that sits in your workspace — reads your code, makes the change, runs it, and checks its own work. Locally, with the models you already use. Free and open source.';
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = 'Agent V — coding workspace for real repositories',
+  description =
+    'Agent V by Vyotiq is a local-first, open source coding workspace that plans, edits, and ships in real repositories. Free for Windows, macOS, and Linux.',
+} = Astro.props;
+
+const canonical = `https://vyotiq.com${Astro.url.pathname}`;
+const socialCard = 'https://vyotiq.com/brand/vyotiq-social-card.png';
 ---
 
 <!doctype html>
-<html lang="en" class="scroll-smooth">
+<html lang="en">
   <head>
-    <script is:inline>
-      (() => {
-        const stored = localStorage.getItem('theme');
-        const dark = stored
-          ? stored === 'dark'
-          : window.matchMedia('(prefers-color-scheme: dark)').matches;
-        document.documentElement.classList.toggle('dark', dark);
-      })();
-    </script>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Agent V — AI coding workspace for real repositories</title>
-    <meta name="description" content={DESCRIPTION} />
-    <link rel="canonical" href="https://vyotiq.com/" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="canonical" href={canonical} />
     <meta name="generator" content={Astro.generator} />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#faf9f7" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#09090b" />
-
-    <link rel="icon" type="image/svg+xml" href="/brand/vyotiq-app-icon.svg" />
-    <link rel="icon" type="image/png" sizes="1024x1024" href="/brand/vyotiq-app-icon.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/brand/vyotiq-app-icon-180.png" />
-
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Agent V" />
-    <meta property="og:title" content="Agent V — AI coding workspace for real repositories" />
-    <meta property="og:description" content={DESCRIPTION} />
-    <meta property="og:url" content="https://vyotiq.com/" />
-    <meta property="og:image" content={SOCIAL} />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Vyotiq — Agent V social card" />
+    <meta property="og:site_name" content="Vyotiq" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={socialCard} />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Agent V — AI coding workspace for real repositories" />
-    <meta name="twitter:description" content={DESCRIPTION} />
-    <meta name="twitter:image" content={SOCIAL} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={socialCard} />
+    <meta name="theme-color" content="#09090b" />
+    <script is:inline>
+      (() => {
+        try {
+          const stored = localStorage.getItem('vyotiq-theme');
+          const dark = stored ? stored === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.classList.toggle('dark', dark);
+        } catch {
+          /* no-op */
+        }
+      })();
+    </script>
   </head>
-  <body
-    id="top"
-    class="min-h-screen bg-[#faf9f7] font-sans text-zinc-800 antialiased selection:bg-orange-600/15 dark:bg-[#09090b]"
-  >
-    <a
-      href="#main"
-      class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-zinc-900 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white"
-    >
-      Skip to content
-    </a>
+  <body class="bg-white font-sans text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
     <slot />
   </body>
 </html>

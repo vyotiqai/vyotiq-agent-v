@@ -1,14 +1,27 @@
 ---
+import { Image } from 'astro:assets';
 import Layout from '../layouts/Layout.astro';
 import Nav from '../components/Nav.astro';
 import Hero from '../components/Hero.astro';
+import Features from '../components/Features.astro';
+import Download from '../components/Download.astro';
 import Footer from '../components/Footer.astro';
+import heroApp from '../assets/hero-app.png';
 ---
 
 <Layout>
   <Nav />
-  <main id="main">
+  <main>
     <Hero />
+
+    <section class="mx-auto max-w-6xl px-6 pb-4">
+      <div class="overflow-hidden rounded-2xl border border-zinc-200 shadow-2xl shadow-zinc-950/10 dark:border-zinc-800 dark:shadow-black/40">
+        <Image src={heroApp} alt="Agent V app" widths={[768, 1280, 1920]} sizes="(max-width: 1152px) 100vw, 1152px" loading="eager" class="h-auto w-full" />
+      </div>
+    </section>
+
+    <Features />
+    <Download />
   </main>
   <Footer />
 </Layout>

@@ -1,24 +1,68 @@
-// Verifies the built landing embeds the real recording GIFs.
-// Usage: node scripts/verify-dist.mjs
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
+// Gates for the built dist. Fails (exit 1) with a reason per missing gate.
+import { readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const html = await readFile(path.join(import.meta.dirname, '..', 'dist', 'index.html'), 'utf8');
+const landDir = fileURLToPath(new URL('..', import.meta.url));
+const read = (p) => readFileSync(`${landDir}${p}`, 'utf8');
 
-const mediaRefs = (html.match(/media\/agentv/g) ?? []).length;
-const gifRefs = (html.match(/agentv-highlight-\d\.gif/g) ?? []).length;
-const illustrative = (html.match(/Illustrative UI/g) ?? []).length;
-const hasVideo = (html.match(/<video/g) ?? []).length;
-const hasMp4 = (html.match(/\.mp4/g) ?? []).length;
+const release = JSON.parse(read('src/data/release.json'));
+const changelog = JSON.parse(read('src/data/changelog.json'));
 
-console.log(`verify-dist: media/agentv refs=${mediaRefs} (expect >=2)`);
-console.log(`verify-dist: agentv-highlight GIF refs=${gifRefs} (expect >=2)`);
-console.log(`verify-dist: 'Illustrative UI' occurrences=${illustrative} (expect 0)`);
-console.log(`verify-dist: <video> elements=${hasVideo} (expect 0)`);
-console.log(`verify-dist: .mp4 references=${hasMp4} (expect 0)`);
+const failures = [];
+const ok = (label, pass, detail = '') => {
+  console.log(`${pass ? 'PASS' : 'FAIL'} ${label}${detail ? ` — ${detail}` : ''}`);
+  if (!pass) failures.push(label);
+};
 
-if (mediaRefs < 2 || gifRefs < 2 || illustrative !== 0 || hasVideo !== 0 || hasMp4 !== 0) {
-  console.error('verify-dist: FAILED');
+// 1. Pages built
+const hasHome = existsSync(`${landDir}dist/index.html`);
+const hasChangelog = existsSync(`${landDir}dist/changelog/index.html`);
+ok('dist/index.html exists', hasHome);
+ok('dist/changelog/index.html exists', hasChangelog);
+if (!hasHome || !hasChangelog) {
+  console.error('verify-dist: missing pages, aborting');
   process.exit(1);
 }
-console.log('verify-dist: OK');
+
+const home = read('dist/index.html');
+const chlog = read('dist/changelog/index.html');
+
+// 2. Landing structure
+ok('hero download CTA', /id="hero-download"/.test(home));
+ok('features section', home.includes('id="features"'));
+ok('download section', home.includes('id="download"'));
+ok('nav changelog link', home.includes('href="/changelog"'));
+ok('no dead CHANGELOG.md links', !/CHANGELOG\.md/.test(home) && !/CHANGELOG\.md/.test(chlog));
+ok('no localhost refs', !/localhost/.test(home) && !/localhost/.test(chlog));
+
+// 3. Installer links — every baked asset must appear; no invented URLs
+const slots = [
+  ['windows exe', release.assets.windows.exe],
+  ['macos arm64 dmg', release.assets.macos.arm64],
+  ['macos x64 dmg', release.assets.macos.x64],
+  ['linux appimage', release.assets.linux.appimage],
+  ['linux deb', release.assets.linux.deb],
+  ['linux rpm', release.assets.linux.rpm],
+];
+if (release.source === 'github') {
+  for (const [label, asset] of slots) {
+    ok(`installer baked: ${label}`, asset !== null && home.includes(asset.url));
+  }
+  ok('download fallback not shown', !home.includes('No installer yet'));
+} else {
+  ok('fallback links releases page', home.includes(release.url));
+}
+
+// 4. Changelog page state
+if (changelog.source === 'github' && changelog.releases.length > 0) {
+  ok('changelog populated', chlog.includes(changelog.releases[0].tag));
+  ok('no unescaped script from notes', !/<script>alert|<script>document/.test(chlog));
+} else {
+  ok('changelog empty state', /No releases published yet/.test(chlog));
+}
+
+if (failures.length) {
+  console.error(`verify-dist: ${failures.length} gate(s) failed`);
+  process.exit(1);
+}
+console.log('verify-dist: all gates green');

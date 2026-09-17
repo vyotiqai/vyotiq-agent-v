@@ -1,7 +1,3 @@
-@import '@fontsource/plus-jakarta-sans/400.css';
-@import '@fontsource/plus-jakarta-sans/500.css';
-@import '@fontsource/plus-jakarta-sans/600.css';
-@import '@fontsource/jetbrains-mono/400.css';
 @import 'tailwindcss';
 
 @custom-variant dark (&:where(.dark, .dark *));
@@ -11,35 +7,25 @@
   --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
 }
 
-:root {
-  color-scheme: light;
-}
-
-/* Dark theme: mirror-invert the zinc scale and white so every token-based
-   surface, text, border, and hover flips consistently. The orange accent
-   stays. zinc-400 uses the lighter value — it labels text on dark and a
-   straight mirror would sit below WCAG AA. */
-.dark {
-  color-scheme: dark;
-  --color-white: #09090b;
-  --color-zinc-50: #09090b;
-  --color-zinc-100: #18181b;
-  --color-zinc-200: #27272a;
-  --color-zinc-300: #3f3f46;
-  --color-zinc-400: #a1a1aa;
-  --color-zinc-500: #94949b;
-  --color-zinc-600: #a1a1aa;
-  --color-zinc-700: #d4d4d8;
-  --color-zinc-800: #e4e4e7;
-  --color-zinc-900: #f4f4f5;
-  --color-zinc-950: #fafafa;
+html {
+  scroll-behavior: smooth;
 }
 
 ::selection {
-  background-color: rgb(234 88 12 / 0.15);
+  background-color: oklch(0.705 0.213 47.604 / 0.25); /* orange-500/25 */
 }
 
-:focus-visible {
-  outline: 2px solid rgb(234 88 12 / 0.6);
-  outline-offset: 2px;
+/* Hero grid backdrop (zinc-200/40 light, zinc-800/40 dark) */
+.hero-grid {
+  background-image:
+    linear-gradient(to right, rgb(228 228 231 / 0.4) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(228 228 231 / 0.4) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black, transparent);
+}
+
+.dark .hero-grid {
+  background-image:
+    linear-gradient(to right, rgb(39 39 42 / 0.4) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(39 39 42 / 0.4) 1px, transparent 1px);
 }

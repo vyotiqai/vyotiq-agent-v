@@ -40,11 +40,16 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # landing/package.json "build" already runs
-      # `node scripts/bake-github-release.mjs && astro build`, but the steps
-      # are kept separate here so a bake failure never blurs into a build log.
+      # `node scripts/bake-github-release.mjs && node scripts/bake-github-changelog.mjs && astro build`,
+      # but the steps are kept separate here so a bake failure never blurs
+      # into a build log.
       - name: Bake release download links
         working-directory: landing
         run: node scripts/bake-github-release.mjs
+
+      - name: Bake changelog release notes
+        working-directory: landing
+        run: node scripts/bake-github-changelog.mjs
 
       - name: Build landing
         working-directory: landing
