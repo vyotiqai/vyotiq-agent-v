@@ -9,6 +9,14 @@ import { RUNNER_BOOTSTRAP_FILENAME, writeRunnerBootstrap } from './paths'
 import type { AgentToolDef, AgentToolRuntimeResult } from './types'
 
 export const DEFAULT_AGENT_TOOL_TIMEOUT_MS = 30_000
+/**
+ * Grace period after the child's 'exit' before we call it a no-result exit.
+ * The child posts its result and then falls off the end of the script, and
+ * postMessage/process.send are async — the parent can dispatch 'exit' before
+ * the already-queued 'message'. Without this window the runner rejects a call
+ * that actually succeeded (observed flaky on Windows).
+ */
+const EXIT_SETTLE_GRACE_MS = 100
 
 /** Minimal child surface the runner needs from any spawn implementation. */
 export type RunnerChild = {
@@ -64,6 +72,7 @@ export function createAgentToolRunner(spawn: AgentToolSpawn) {
     return await new Promise<AgentToolRuntimeResult>((resolve, reject) => {
       let settled = false
       let child: RunnerChild | null = null
+      let exitTimer: ReturnType<typeof setTimeout> | null = null
       const timer = setTimeout(() => {
         if (settled) return
         settled = true
@@ -74,6 +83,7 @@ export function createAgentToolRunner(spawn: AgentToolSpawn) {
         if (settled) return
         settled = true
         clearTimeout(timer)
+        if (exitTimer) clearTimeout(exitTimer)
         try {
           child?.kill()
         } catch {
@@ -108,7 +118,11 @@ export function createAgentToolRunner(spawn: AgentToolSpawn) {
         }
       })
       child.onExit?.(() => {
-        settle(() => reject(new Error(`Agent tool "${def.name}" child exited before sending a result`)))
+        // Let a message queued just before exit win the race (see grace const).
+        if (settled || exitTimer) return
+        exitTimer = setTimeout(() => {
+          settle(() => reject(new Error(`Agent tool "${def.name}" child exited before sending a result`)))
+        }, EXIT_SETTLE_GRACE_MS)
       })
     })
   }
