@@ -27,10 +27,10 @@ if (!hasHome || !hasChangelog) {
 const home = read('dist/index.html');
 const chlog = read('dist/changelog/index.html');
 
-// 2. Landing structure
-ok('hero download CTA', /id="hero-download"/.test(home));
-ok('features section', home.includes('id="features"'));
-ok('download section', home.includes('id="download"'));
+// 2. Landing structure — single full-screen page
+ok('download row', home.includes('id="download"'));
+ok('ascii accent', home.includes('data-ascii'));
+ok('app screenshot', home.includes('data-shot'));
 ok('nav changelog link', home.includes('href="/changelog"'));
 ok('no dead CHANGELOG.md links', !/CHANGELOG\.md/.test(home) && !/CHANGELOG\.md/.test(chlog));
 ok('no localhost refs', !/localhost/.test(home) && !/localhost/.test(chlog));

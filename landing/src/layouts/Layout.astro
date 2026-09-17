@@ -42,20 +42,9 @@ const socialCard = 'https://vyotiq.com/brand/vyotiq-social-card.png';
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={socialCard} />
-    <meta name="theme-color" content="#09090b" />
-    <script is:inline>
-      (() => {
-        try {
-          const stored = localStorage.getItem('vyotiq-theme');
-          const dark = stored ? stored === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-          document.documentElement.classList.toggle('dark', dark);
-        } catch {
-          /* no-op */
-        }
-      })();
-    </script>
+    <meta name="theme-color" content="#141414" />
   </head>
-  <body class="bg-white font-sans text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
+  <body class="bg-ink font-sans text-fg antialiased">
     <slot />
   </body>
 </html>

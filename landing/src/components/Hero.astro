@@ -1,76 +1,143 @@
 ---
 import release from '../data/release.json';
+import heroApp from '../assets/hero-app.png';
 
-const version = release.tag ?? null;
-const win = release.assets.windows.exe?.url ?? null;
-const macArm = release.assets.macos.arm64?.url ?? null;
-const macIntel = release.assets.macos.x64?.url ?? null;
-const linux = release.assets.linux.appimage?.url ?? null;
+const fmt = (a) => (a ? `${Math.round(a.size / (1024 * 1024))} MB` : '');
+
+const groups = [
+  {
+    os: 'windows',
+    name: 'Windows',
+    hint: 'Windows 10+ · x64',
+    items: [{ label: 'Installer', asset: release.assets.windows.exe }],
+  },
+  {
+    os: 'macos',
+    name: 'macOS',
+    hint: 'macOS 12+ · signed',
+    items: [
+      { label: 'Apple Silicon', asset: release.assets.macos.arm64 },
+      { label: 'Intel', asset: release.assets.macos.x64 },
+    ],
+  },
+  {
+    os: 'linux',
+    name: 'Linux',
+    hint: 'glibc 2.28+ · x64',
+    items: [
+      { label: 'AppImage', asset: release.assets.linux.appimage },
+      { label: 'DEB', asset: release.assets.linux.deb },
+      { label: 'RPM', asset: release.assets.linux.rpm },
+    ],
+  },
+];
+
+const ascii = [
+  '██    ██',
+  '██    ██',
+  ' ██████ ',
+  '  ████  ',
+  '   ██   ',
+].join('\n');
 ---
 
-<section class="relative flex min-h-[calc(100svh-4rem)] flex-col items-center justify-center overflow-hidden px-6 text-center">
-  <div class="pointer-events-none absolute inset-0 -z-10" aria-hidden="true">
+<section class="relative flex flex-1 flex-col overflow-hidden">
+  <div class="pointer-events-none absolute inset-0" aria-hidden="true">
     <div class="hero-grid absolute inset-0"></div>
-    <div class="absolute left-1/2 top-0 h-72 w-72 -translate-x-1/2 rounded-full bg-orange-500/15 blur-3xl"></div>
+    <div class="hero-glow vy-drift absolute left-1/2 top-[8%] h-[520px] w-[900px] -translate-x-1/2"></div>
   </div>
 
-  {
-    version && (
-      <a href={release.url} target="_blank" rel="noopener noreferrer" class="mb-6 inline-flex items-center gap-2 rounded-full border border-zinc-200 px-3 py-1 text-xs font-medium text-zinc-600 transition-colors hover:border-orange-500/60 hover:text-zinc-900 dark:border-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100">
-        <span class="size-1.5 rounded-full bg-orange-500" aria-hidden="true" />
-        Open source · {version}
-      </a>
-    )
-  }
+  <pre
+    data-ascii
+    class="vy-breathe pointer-events-none absolute right-10 top-24 hidden select-none font-mono text-sm leading-tight text-vy lg:block"
+    aria-hidden="true">{ascii}</pre
+  >
 
-  <h1 class="max-w-3xl text-balance text-4xl font-bold tracking-tight text-zinc-900 sm:text-6xl dark:text-zinc-50">
-    The coding workspace for <span class="text-orange-600 dark:text-orange-400">real repositories</span>.
-  </h1>
+  <div class="mx-auto w-full max-w-6xl px-6 pt-14 md:pt-20">
+    <p class="vy-rise flex items-center justify-center gap-2.5 font-mono text-[11px] uppercase tracking-[0.2em] text-fog md:justify-start">
+      <span class="relative flex size-2">
+        <span class="absolute inline-flex size-full animate-ping rounded-full bg-vy opacity-60"></span>
+        <span class="relative inline-flex size-2 rounded-full bg-vy"></span>
+      </span>
+      {release.tag ?? 'Open source'} — free &amp; open source
+    </p>
 
-  <p class="mt-6 max-w-xl text-pretty text-lg text-zinc-600 dark:text-zinc-400">
-    Agent V plans, edits, and ships in your actual working tree — local-first, private by default, and completely free.
-  </p>
+    <h1 class="vy-rise mt-5 max-w-3xl text-balance text-4xl font-bold leading-[1.08] tracking-tight text-bright md:text-6xl [animation-delay:80ms]">
+      The coding workspace for real repositories.
+    </h1>
 
-  <div class="mt-10 flex flex-col items-center gap-3 sm:flex-row">
-    <a
-      id="hero-download"
-      href={win ?? (linux ?? '/#download')}
-      class="inline-flex items-center gap-2 rounded-full bg-orange-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-orange-500"
-      data-win={win} data-mac={macArm} data-linux={linux}
-    >
-      <svg viewBox="0 0 24 24" fill="currentColor" class="size-4" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 13v-6h7.5v7.1L3 18.5Zm8.5.2V12.5H21v10l-9.5-1.8Zm0-7.2V4.3L21 3v8.5h-9.5Z"/></svg>
-      <span id="hero-download-label">Download now</span>
-    </a>
-    <a
-      href="https://github.com/vyotiqai/vyotiq-agent-v"
-      target="_blank"
-      rel="noopener noreferrer"
-      class="inline-flex items-center gap-2 rounded-full border border-zinc-300 px-6 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:border-zinc-400 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:bg-zinc-900"
-    >
-      Build from source
-    </a>
+    <p class="vy-rise mt-5 max-w-xl text-pretty text-base leading-relaxed text-fog md:text-lg [animation-delay:160ms]">
+      Agent V plans, edits, and ships in your actual working tree. Local-first, private by default, free to run.
+    </p>
+
+    <p class="vy-rise mt-6 font-mono text-[11px] uppercase tracking-[0.18em] text-fog/70 [animation-delay:240ms]">
+      Electron · React · TypeScript · SQLite · MCP
+    </p>
   </div>
 
-  <p class="mt-6 text-sm text-zinc-500 dark:text-zinc-500">Windows · macOS · Linux — free under GPL-3.0</p>
+  <div
+    id="download"
+    class="vy-rise mx-auto mt-10 grid w-full max-w-6xl grid-cols-1 gap-px border-y border-line bg-line/40 sm:grid-cols-3 [animation-delay:320ms]"
+  >
+    {
+      groups.map((g) => (
+        <div
+          data-os={g.os}
+          class="bg-ink px-6 py-5 transition-colors data-[recommended]:bg-surface"
+        >
+          <div class="flex items-center justify-between">
+            <p class="text-sm font-semibold text-fg">{g.name}</p>
+            <p class="font-mono text-[10px] uppercase tracking-wider text-fog/70">{g.hint}</p>
+          </div>
+          <ul class="mt-3 space-y-2">
+            {g.items
+              .filter((i) => i.asset)
+              .map((i) => (
+                <li class="flex items-center justify-between gap-3">
+                  <div class="min-w-0">
+                    <p class="text-xs text-fog">{i.label}</p>
+                    <p class="truncate font-mono text-[11px] text-fog/70">{i.asset.file}</p>
+                  </div>
+                  <a
+                    href={i.asset.url}
+                    download
+                    class="shrink-0 font-mono text-xs font-medium text-vy underline-offset-4 transition-colors hover:text-vy-hover hover:underline"
+                  >
+                    {fmt(i.asset)} ↓
+                  </a>
+                </li>
+              ))}
+            {g.items.every((i) => !i.asset) && (
+              <li class="text-xs text-fog/70">Grab it from the releases page.</li>
+            )}
+          </ul>
+        </div>
+      ))
+    }
+  </div>
 
-  <a href="#features" class="absolute bottom-8 text-zinc-400 transition-colors hover:text-zinc-600 dark:hover:text-zinc-300" aria-label="Scroll to features">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-5 animate-bounce" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-  </a>
+  <div data-shot class="vy-float relative mx-auto mt-auto w-full max-w-4xl px-6 pt-10">
+    <div class="overflow-hidden rounded-t-2xl border border-b-0 border-line bg-panel shadow-[0_-24px_80px_-24px_rgb(79_179_232/0.18)]">
+      <div class="flex h-7 items-center gap-1.5 border-b border-line/60 px-4">
+        <span class="size-2 rounded-full bg-[#ff5f57]"></span>
+        <span class="size-2 rounded-full bg-[#febc2e]"></span>
+        <span class="size-2 rounded-full bg-[#28c840]"></span>
+        <span class="ml-3 font-mono text-[10px] tracking-wider text-fog/60">agent-v</span>
+      </div>
+      <img src={heroApp.src} alt="Agent V app" class="h-[30vh] min-h-[220px] w-full object-cover object-top" />
+    </div>
+  </div>
 </section>
 
 <script is:inline>
   (() => {
     const ua = navigator.userAgent;
-    const uaData = navigator.userAgentData?.platform || '';
-    const isMac = /Mac|iPhone|iPad/.test(ua) || /mac/i.test(uaData);
-    const isLinux = !isMac && (/Linux|X11/.test(ua) || /lin/i.test(uaData));
-    const btn = document.getElementById('hero-download');
-    const label = document.getElementById('hero-download-label');
-    if (!btn || !label) return;
-    const url = isMac ? btn.dataset.mac : isLinux ? btn.dataset.linux : btn.dataset.win;
-    if (url) {
-      btn.href = url;
-      label.textContent = `Download for ${isMac ? 'macOS' : isLinux ? 'Linux' : 'Windows'}`;
-    }
+    const uaPlatform = navigator.userAgentData?.platform || '';
+    const isMac = /Mac|iPhone|iPad/.test(ua) || /mac/i.test(uaPlatform);
+    const isLinux = !isMac && (/Linux|X11/.test(ua) || /lin/i.test(uaPlatform));
+    const os = isMac ? 'macos' : isLinux ? 'linux' : 'windows';
+    document
+      .querySelector('#download [data-os="' + os + '"]')
+      ?.setAttribute('data-recommended', '');
   })();
 </script>

@@ -2,66 +2,24 @@
 import release from '../data/release.json';
 ---
 
-<header class="sticky top-0 z-50 border-b border-zinc-200/70 bg-white/85 backdrop-blur dark:border-zinc-800/70 dark:bg-zinc-950/85">
-  <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+<header class="relative z-10">
+  <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-6">
     <a href="/" class="flex items-center gap-2.5" aria-label="Vyotiq home">
-      <img src="/brand/vyotiq-lockup-black.svg" alt="Vyotiq" class="h-5 w-auto dark:hidden" />
-      <img src="/brand/vyotiq-lockup-white.svg" alt="Vyotiq" class="hidden h-5 w-auto dark:block" />
+      <img src="/brand/vyotiq-lockup-white.svg" alt="Vyotiq" class="h-5 w-auto" />
     </a>
 
-    <nav class="hidden items-center gap-8 text-sm font-medium text-zinc-600 md:flex dark:text-zinc-400" aria-label="Main">
-      <a href="/#features" class="transition-colors hover:text-zinc-900 dark:hover:text-zinc-100">Features</a>
-      <a href="/#download" class="transition-colors hover:text-zinc-900 dark:hover:text-zinc-100">Download</a>
-      <a href="/changelog" class="transition-colors hover:text-zinc-900 dark:hover:text-zinc-100">Changelog</a>
-      <a href="https://github.com/vyotiqai/vyotiq-agent-v" target="_blank" rel="noopener noreferrer" class="transition-colors hover:text-zinc-900 dark:hover:text-zinc-100" aria-label="GitHub repository">
+    <nav class="flex items-center gap-6 text-sm font-medium text-fog" aria-label="Main">
+      <a href="/changelog" class="hidden transition-colors hover:text-fg sm:block">Changelog</a>
+      <a
+        href="https://github.com/vyotiqai/vyotiq-agent-v"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="transition-colors hover:text-fg"
+        aria-label="GitHub repository"
+      >
         <svg viewBox="0 0 16 16" fill="currentColor" class="size-5" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A7.99 7.99 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
       </a>
-    </nav>
-
-    <div class="flex items-center gap-2">
-      <button id="theme-toggle" type="button" class="rounded-lg p-2 text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100" aria-label="Toggle theme">
-        <svg class="size-5 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-        <svg class="hidden size-5 dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-      </button>
-      <a href="/#download" class="hidden rounded-full bg-orange-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-500 sm:block">Download</a>
-      <button id="menu-toggle" type="button" class="rounded-lg p-2 text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900 md:hidden" aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu">
-        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-      </button>
-    </div>
-  </div>
-
-  <div id="mobile-menu" class="hidden border-t border-zinc-200/70 px-6 py-4 dark:border-zinc-800/70 md:hidden">
-    <nav class="flex flex-col gap-3 text-sm font-medium text-zinc-600 dark:text-zinc-400" aria-label="Mobile">
-      <a href="/#features">Features</a>
-      <a href="/#download">Download</a>
-      <a href="/changelog">Changelog</a>
-      <a href={release.url} target="_blank" rel="noopener noreferrer">Releases</a>
+      <a href="/#download" class="rounded-full bg-vy px-4 py-1.5 text-sm font-semibold text-vy-ink transition-colors hover:bg-vy-hover">Download</a>
     </nav>
   </div>
 </header>
-
-<script is:inline>
-  (() => {
-    const root = document.documentElement;
-    const toggle = document.getElementById('theme-toggle');
-    toggle?.addEventListener('click', () => {
-      const dark = root.classList.toggle('dark');
-      try {
-        localStorage.setItem('vyotiq-theme', dark ? 'dark' : 'light');
-      } catch {
-        /* no-op */
-      }
-    });
-
-    const menu = document.getElementById('mobile-menu');
-    const menuToggle = document.getElementById('menu-toggle');
-    menuToggle?.addEventListener('click', () => {
-      const open = menu?.classList.toggle('hidden') === false;
-      menuToggle.setAttribute('aria-expanded', String(open));
-    });
-    menu?.querySelectorAll('a').forEach((a) => a.addEventListener('click', () => {
-      menu.classList.add('hidden');
-      menuToggle?.setAttribute('aria-expanded', 'false');
-    }));
-  })();
-</script>

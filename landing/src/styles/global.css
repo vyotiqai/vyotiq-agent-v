@@ -1,10 +1,20 @@
 @import 'tailwindcss';
 
-@custom-variant dark (&:where(.dark, .dark *));
-
 @theme {
   --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
+
+  /* Vyotiq app palette — instrument "Azure", dark */
+  --color-ink: #141414;
+  --color-panel: #1a1e20;
+  --color-surface: #202528;
+  --color-line: #303a40;
+  --color-fg: #e8edf0;
+  --color-bright: #f5f8fa;
+  --color-fog: #7e939f;
+  --color-vy: #4fb3e8;
+  --color-vy-hover: #8cb9cc;
+  --color-vy-ink: #0a0a0a;
 }
 
 html {
@@ -12,20 +22,86 @@ html {
 }
 
 ::selection {
-  background-color: oklch(0.705 0.213 47.604 / 0.25); /* orange-500/25 */
+  background-color: rgb(79 179 232 / 0.3);
 }
 
-/* Hero grid backdrop (zinc-200/40 light, zinc-800/40 dark) */
+/* Steel grid backdrop, faded out radially */
 .hero-grid {
   background-image:
-    linear-gradient(to right, rgb(228 228 231 / 0.4) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(228 228 231 / 0.4) 1px, transparent 1px);
+    linear-gradient(to right, rgb(48 58 64 / 0.55) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(48 58 64 / 0.55) 1px, transparent 1px);
   background-size: 56px 56px;
-  mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black, transparent);
+  mask-image: radial-gradient(ellipse 75% 65% at 50% 30%, black, transparent);
 }
 
-.dark .hero-grid {
-  background-image:
-    linear-gradient(to right, rgb(39 39 42 / 0.4) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(39 39 42 / 0.4) 1px, transparent 1px);
+/* Single soft accent glow */
+.hero-glow {
+  background: radial-gradient(closest-side, rgb(79 179 232 / 0.13), transparent 72%);
+}
+
+/* --- Subtle motion --- */
+@keyframes vy-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes vy-drift {
+  0%,
+  100% {
+    transform: translate(-2%, -2%) scale(1);
+  }
+  50% {
+    transform: translate(2%, 3%) scale(1.07);
+  }
+}
+
+@keyframes vy-float {
+  0%,
+  100% {
+    transform: perspective(1400px) rotateX(6deg) translateY(0);
+  }
+  50% {
+    transform: perspective(1400px) rotateX(6deg) translateY(-7px);
+  }
+}
+
+@keyframes vy-breathe {
+  0%,
+  100% {
+    opacity: 0.1;
+  }
+  50% {
+    opacity: 0.22;
+  }
+}
+
+.vy-rise {
+  animation: vy-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.vy-drift {
+  animation: vy-drift 16s ease-in-out infinite;
+}
+
+.vy-float {
+  animation: vy-float 9s ease-in-out infinite;
+}
+
+.vy-breathe {
+  animation: vy-breathe 7s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vy-rise,
+  .vy-drift,
+  .vy-float,
+  .vy-breathe {
+    animation: none;
+  }
 }
