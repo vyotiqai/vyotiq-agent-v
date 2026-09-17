@@ -27,7 +27,6 @@ Watch mode: `pnpm test:watch`. Coverage gate: `pnpm test:coverage`.
 - Dev app: `pnpm dev`
 - Production build (typecheck + electron-vite build): `pnpm build`
 - Packaged installers: `pnpm pack:win` / `pnpm pack:mac` / `pnpm pack:linux`
-- Landing site: `pnpm landing:dev` / `pnpm landing:build`
 
 ## Releases
 

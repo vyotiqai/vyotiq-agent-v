@@ -132,7 +132,7 @@ let sessionFallbackId: string | undefined
  * promptCacheKey, so normal runs reuse it; requests that arrive without one
  * fall back to a per-process UUID so the header is always present and stable.
  */
-export function opencodeSessionKeyFor(req: ProviderChatRequest): string {
+function opencodeSessionKeyFor(req: ProviderChatRequest): string {
   const fromReq = req.promptCacheKey?.trim()
   if (fromReq) return fromReq
   if (!sessionFallbackId) sessionFallbackId = randomUUID()

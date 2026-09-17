@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MessageList } from '@renderer/features/chat/components/MessageList'
 import type { UiItem } from '@shared/transcript'
+import { toolGroup } from './helpers/testGroups'
 
 beforeEach(() => {
   Object.defineProperty(window, 'matchMedia', {
@@ -22,20 +23,6 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
 })
-
-function toolGroup(groupKey: string, summaries: string[]): UiItem[] {
-  return summaries.map((summary, i) => ({
-    kind: 'tool' as const,
-    id: `${groupKey}-${i}`,
-    tool: {
-      id: `${groupKey}-${i}`,
-      name: 'read',
-      summary,
-      status: 'done' as const
-    },
-    groupTiming: { startedAt: 1_000, endedAt: 2_000 }
-  }))
-}
 
 describe('MessageList', () => {
   it('expands and collapses tool groups independently', async () => {

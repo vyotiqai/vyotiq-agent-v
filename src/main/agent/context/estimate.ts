@@ -1,5 +1,5 @@
 import type { ChatMessage, MessageContent } from '../../../shared/ipc'
-import { attachedFileToText, contentToText } from '../../../shared/ipc'
+import { attachedFileToText } from '../../../shared/ipc'
 import type { ModelInfo } from '../../../shared/ipc/schemas/providers'
 import { estimateImageTokens, estimateImageTokensWithExpansion } from './imageTokens'
 import {
@@ -248,8 +248,4 @@ export function shouldTriggerAutoCompact(
     return { trigger: providerInputTokens >= triggerTokens, source: 'provider' }
   }
   return { trigger: estimatedTokens >= triggerTokens, source: 'estimate' }
-}
-
-export function messagePreview(message: ChatMessage): string {
-  return contentToText(message.content).slice(0, 200)
 }

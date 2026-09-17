@@ -65,7 +65,7 @@ export function collectCitationCatalog(
       }
     } else if (tool.name === 'grep' || tool.name === 'search') {
       if (tool.content) addGrepSearchPaths(tool.content, addFile)
-    } else if (tool.name === 'codebase_search') {
+    } else if (tool.name === 'codebase_search' || tool.name === 'concept_search') {
       if (tool.content) addCodebaseSearchPaths(tool.content, addFile)
     }
     if (URL_TOOLS.has(tool.name)) {

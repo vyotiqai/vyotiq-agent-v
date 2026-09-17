@@ -5,7 +5,8 @@ import { literalRunForPattern, type CodeIndexStore } from './store'
 import { getOrOpenCodeIndexStore } from './storeCache'
 import { codeindexDbPath } from '../indexStoragePaths'
 import type { CodebaseSearchHit } from './types'
-import { CODE_INDEX_MAX_FILE_BYTES, DEFAULT_SEARCH_LIMIT } from './types'
+import { CODE_INDEX_MAX_FILE_BYTES, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT } from './types'
+import type { DenseEmbedder } from './denseJob'
 import {
   collectWorkspaceFilesPage,
   DOC_TEXT_EXTS,
@@ -191,6 +192,59 @@ export async function searchCodeIndex(
     hits.push(...docsHits)
     hits.sort((a, b) => b.score - a.score)
     if (hits.length > limit) hits.length = limit
+  }
+  return hits
+}
+
+/**
+ * Dense (semantic) search: embed the query, stream a cosine top-K over the
+ * vectorized dense rows, and map hits to the same CodebaseSearchHit shape the
+ * lexical search returns. Normalized vectors make cosine == dot product; the
+ * scan stays O(rows) with a bounded top-K, no full materialization.
+ */
+export async function conceptSearchStore(
+  store: CodeIndexStore,
+  query: string,
+  opts: { limit?: number; signal?: AbortSignal; embed: DenseEmbedder }
+): Promise<CodebaseSearchHit[]> {
+  throwIfAborted(opts.signal)
+  const q = query.trim()
+  if (!q) return []
+  const [qVec] = await opts.embed([q])
+  if (!qVec || qVec.length === 0) {
+    throw new Error('Embedding returned an empty query vector')
+  }
+  const limit = Math.min(Math.max(1, opts.limit ?? DEFAULT_SEARCH_LIMIT), MAX_SEARCH_LIMIT)
+  const top: { id: number; score: number }[] = []
+  for (const { id, vec } of store.iterateDenseVectors()) {
+    throwIfAborted(opts.signal)
+    // Defensive: a model/dim change resets vectors via the warm job; skip any
+    // incompatible leftover row instead of computing a meaningless dot product.
+    if (vec.length !== qVec.length) continue
+    let dot = 0
+    for (let i = 0; i < qVec.length; i++) dot += qVec[i]! * vec[i]!
+    if (top.length < limit) {
+      top.push({ id, score: dot })
+      top.sort((a, b) => b.score - a.score)
+    } else if (dot > top[top.length - 1]!.score) {
+      top[top.length - 1] = { id, score: dot }
+      top.sort((a, b) => b.score - a.score)
+    }
+  }
+  const hits: CodebaseSearchHit[] = []
+  for (const t of top) {
+    const row = store.getDenseRow(t.id)
+    if (!row) continue
+    hits.push({
+      path: row.path,
+      startLine: row.startLine,
+      endLine: row.endLine,
+      kind: row.kind,
+      name: row.name,
+      parentName: row.parentName,
+      score: t.score,
+      snippet: row.text.replace(/\s+/g, ' ').trim().slice(0, 900)
+    })
   }
   return hits
 }

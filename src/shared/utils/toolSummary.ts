@@ -44,6 +44,7 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   glob: { running: 'Globbing', done: 'Globbed' },
   grep: { running: 'Grepping', done: 'Grepped' },
   codebase_search: { running: 'Semantic search', done: 'Codebase search' },
+  concept_search: { running: 'Concept search', done: 'Concept search' },
   list_dir: { running: 'Listing', done: 'Listed' },
   str_replace: { running: 'Editing', done: 'Edited' },
   delete: { running: 'Deleting', done: 'Deleted' },
@@ -158,7 +159,13 @@ export function normalizeToolTarget(name: string, args: Record<string, unknown> 
     const raw = typeof path === 'string' && path.trim() ? path : '.'
     return truncate(formatListDirPathLabel(raw))
   }
-  if (name === 'search' || name === 'glob' || name === 'grep' || name === 'codebase_search') {
+  if (
+    name === 'search' ||
+    name === 'glob' ||
+    name === 'grep' ||
+    name === 'codebase_search' ||
+    name === 'concept_search'
+  ) {
     const query = args.query ?? args.pattern
     if (typeof query === 'string') return truncate(query)
   }

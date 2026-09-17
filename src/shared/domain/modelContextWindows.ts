@@ -9,6 +9,7 @@ import { ollamaIdWithoutCloudSuffix, ollamaModelFamily } from './reasoning'
  */
 const EXACT_CONTEXT_WINDOWS: Record<string, number> = {
   // DeepSeek V4 (+ legacy aliases that route to V4-Flash)
+  'deepseek-flash': 1_000_000,
   'deepseek-v4-flash': 1_000_000,
   'deepseek-v4-pro': 1_000_000,
   'deepseek-chat': 1_000_000,
@@ -28,6 +29,7 @@ const EXACT_CONTEXT_WINDOWS: Record<string, number> = {
   // Anthropic
   'claude-opus-5': 200_000,
   'claude-sonnet-4': 200_000,
+  'claude-sonnet-4-6': 200_000,
   'claude-haiku-4-5': 200_000,
   // Gemini
   'gemini-3.6-flash': 1_048_576,
@@ -36,6 +38,7 @@ const EXACT_CONTEXT_WINDOWS: Record<string, number> = {
   'gemini-2.0-flash': 1_048_576,
   // Groq / xAI / Mistral seeds
   'llama-4-scout-17b-16e-instruct': 128_000,
+  'meta-llama/llama-4-scout-17b-16e-instruct': 128_000,
   'llama-3.3-70b-versatile': 128_000,
   'grok-4-latest': 1_000_000,
   'grok-2-latest': 131_072,

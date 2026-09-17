@@ -8,6 +8,7 @@ const PARALLEL_SAFE_BUILTIN = new Set([
   'glob',
   'grep',
   'codebase_search',
+  'concept_search',
   'list_dir',
   'memory_list',
   'memory_read',

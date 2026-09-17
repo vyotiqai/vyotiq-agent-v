@@ -43,7 +43,7 @@ vi.mock('@main/settings/settings', () => ({
 
 const downloadMock = vi.fn()
 const fetchMock = vi.fn()
-vi.mock('@main/agent/tools/webFetch', () => ({
+vi.mock('@main/net/webFetch', () => ({
   downloadPublicUrlToFile: (...args: unknown[]) => downloadMock(...args),
   fetchPublicResponse: (...args: unknown[]) => fetchMock(...args)
 }))

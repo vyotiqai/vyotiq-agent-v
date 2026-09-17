@@ -1991,7 +1991,7 @@ export function MessageList({
               data-sticky-turn-prompt={isUser ? '' : undefined}
               className={cn(
                 isUser
-                  ? 'sticky z-sticky mb-2.5'
+                  ? 'sticky z-sticky mb-2.5 bg-bg'
                   : rowSpacingClass(row, displayRows[index + 1]),
                 currentFindRow === index && 'rounded-md ring-1 ring-accent/40'
               )}

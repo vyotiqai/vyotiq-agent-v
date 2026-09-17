@@ -17,24 +17,6 @@ export function stripLeadingOrphanToolMessages(messages: ChatMessage[]): ChatMes
 }
 
 /**
- * Drop tool rows no provider can pair anywhere in the set: missing `toolCallId`,
- * or a result whose assistant tool call is absent (stale rows, partial slices).
- */
-export function stripOrphanToolMessages(messages: ChatMessage[]): ChatMessage[] {
-  if (!messages.some((m) => m.role === 'tool')) return messages
-  const callIds = new Set<string>()
-  for (const m of messages) {
-    if (m.role === 'assistant' && m.toolCalls) {
-      for (const call of m.toolCalls) callIds.add(call.id)
-    }
-  }
-  return messages.filter((m) => {
-    if (m.role !== 'tool') return true
-    return m.toolCallId != null && callIds.has(m.toolCallId)
-  })
-}
-
-/**
  * Apply a compaction `foldedMessages` watermark without leaving a leading orphan
  * `tool` row (including the sole-message case).
  */

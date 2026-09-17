@@ -13,9 +13,16 @@ import {
   ProviderIdSchema,
   ServiceTierSchema,
   ThinkingEffortSchema,
+  customProviderId,
+  customProviderSlug,
+  CustomProviderIdSchema,
   type ThinkingEffort
 } from './providers'
 import { DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO } from '../../domain/contextBudget'
+import {
+  CUSTOM_OPENAI_DEFAULT,
+  normalizeCustomOpenAiBaseUrl
+} from '../../domain/providers'
 import {
   DEFAULT_MARKETPLACE_SETTINGS,
   MarketplaceSettingsSchema,
@@ -362,12 +369,91 @@ export const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
 /** Current persisted settings format. Bump with a matching load-time rewrite. */
 export const SETTINGS_FORMAT_VERSION = 5
 
+/**
+ * One user-defined OpenAI-compatible provider entry. `id` is a dynamic
+ * `custom:<slug>` id (see CustomProviderIdSchema); `name` is the display
+ * label; `baseUrl` must be an OpenAI-compatible base URL (normalized to end
+ * with `/v1` by the domain helpers).
+ */
+export const CustomProviderSchema = z.object({
+  id: CustomProviderIdSchema,
+  name: z.string().trim().min(1).max(60),
+  baseUrl: z.string().trim().min(1)
+})
+export type CustomProvider = z.infer<typeof CustomProviderSchema>
+
+/** Slug of the entry seeded from the legacy single-provider field. */
+export const DEFAULT_CUSTOM_PROVIDER_SLUG = 'default'
+export const DEFAULT_CUSTOM_PROVIDER_ID = customProviderId(DEFAULT_CUSTOM_PROVIDER_SLUG)
+
+/**
+ * Dedupe custom provider rows: first entry wins per id slug AND per
+ * normalized base URL (two ids pointing at one endpoint collapse to one),
+ * invalid rows are dropped. Idempotent: the output of a call is stable under
+ * a second call.
+ */
+export function normalizeCustomProviders(
+  raw: ReadonlyArray<unknown> | undefined
+): CustomProvider[] {
+  if (!raw?.length) return []
+  const out: CustomProvider[] = []
+  const seenIds = new Set<string>()
+  const seenBases = new Set<string>()
+  for (const row of raw) {
+    const parsed = CustomProviderSchema.safeParse(row)
+    if (!parsed.success) continue
+    const slug = customProviderSlug(parsed.data.id)
+    if (!slug || seenIds.has(slug)) continue
+    const base = normalizeCustomOpenAiBaseUrl(parsed.data.baseUrl)
+    if (seenBases.has(base)) continue
+    seenIds.add(slug)
+    seenBases.add(base)
+    out.push(parsed.data)
+  }
+  return out
+}
+
+/**
+ * One-time legacy migration: seed a single `custom:default` entry from the
+ * pre-multi-provider `customOpenAiBaseUrl` field when it differs from the
+ * product default. A persisted list (even empty) prevents re-seeding, and the
+ * legacy field is kept intact so nothing is lost on downgrade/rollback.
+ */
+export function seedCustomProvidersFromLegacy(
+  raw: Record<string, unknown>
+): { data: Record<string, unknown>; seeded: boolean } {
+  if (Array.isArray(raw.customProviders)) {
+    // A persisted list already exists (possibly seeded by an earlier load) —
+    // never re-seed over it.
+    return { data: raw, seeded: false }
+  }
+  const legacy =
+    typeof raw.customOpenAiBaseUrl === 'string' ? raw.customOpenAiBaseUrl : undefined
+  if (
+    !legacy?.trim() ||
+    normalizeCustomOpenAiBaseUrl(legacy) === normalizeCustomOpenAiBaseUrl(CUSTOM_OPENAI_DEFAULT)
+  ) {
+    return { data: raw, seeded: false }
+  }
+  const seeded = normalizeCustomProviders([
+    { id: DEFAULT_CUSTOM_PROVIDER_ID, name: 'Custom', baseUrl: legacy.trim() }
+  ])
+  if (!seeded.length) return { data: raw, seeded: false }
+  return { data: { ...raw, customProviders: seeded }, seeded: true }
+}
+
 export const SettingsSchema = z.object({
   provider: ProviderIdSchema,
   model: z.string().min(1),
   ollamaBaseUrl: z.string().min(1),
   /** OpenAI-compatible base URL for the `custom` provider (must end with `/v1`). */
   customOpenAiBaseUrl: z.string().min(1).default('http://127.0.0.1:8080/v1'),
+  /**
+   * User-defined OpenAI-compatible providers (`custom:<slug>` ids). Global;
+   * deduped on load via normalizeCustomProviders, seeded once from the legacy
+   * single-provider field by seedCustomProvidersFromLegacy.
+   */
+  customProviders: z.array(CustomProviderSchema).default([]),
   theme: ThemeIdSchema,
   navigationMode: NavigationModeSchema.default(DEFAULT_NAVIGATION_MODE),
   fontScale: FontScaleSchema.default(DEFAULT_FONT_SCALE),
@@ -491,6 +577,7 @@ export const DEFAULT_SETTINGS: Settings = {
   model: 'qwen2.5',
   ollamaBaseUrl: 'http://127.0.0.1:11434',
   customOpenAiBaseUrl: 'http://127.0.0.1:8080/v1',
+  customProviders: [],
   theme: 'system',
   navigationMode: DEFAULT_NAVIGATION_MODE,
   fontScale: DEFAULT_FONT_SCALE,

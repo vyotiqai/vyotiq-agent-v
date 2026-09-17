@@ -236,6 +236,7 @@ describe('loopPolicy', () => {
 
   it('treats codebase_search hit paths from result as inspect', () => {
     expect(isInspectToolName('codebase_search')).toBe(true)
+    expect(isInspectToolName('concept_search')).toBe(true)
     const known = new Set<string>()
     const result = `index: 2 chunks / 1 files · model=local-hash-v1 · fallback=hash · hits=1
 

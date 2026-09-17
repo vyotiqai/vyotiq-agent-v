@@ -37,6 +37,8 @@ describe('resolveEffectiveSettings', () => {
       model: 'gpt-5.6',
       ollamaBaseUrl: DEFAULT_SETTINGS.ollamaBaseUrl,
       customOpenAiBaseUrl: DEFAULT_SETTINGS.customOpenAiBaseUrl,
+      // customProviders is global-only in both branches.
+      customProviders: DEFAULT_SETTINGS.customProviders,
       thinkingEnabled: false,
       thinkingEffort: 'high',
       showThinking: false,
@@ -49,6 +51,25 @@ describe('resolveEffectiveSettings', () => {
       responseLanguage: 'Spanish',
       responseVerbosity: 'detailed'
     })
+  })
+
+  it('keeps customProviders global-only in both branches', () => {
+    const global = {
+      ...DEFAULT_SETTINGS,
+      customProviders: [{ id: 'custom:lan', name: 'LAN', baseUrl: 'http://127.0.0.1:8080/v1' }]
+    }
+    const override = {
+      useOverride: true,
+      provider: 'openai',
+      model: 'gpt-5.6',
+      customOpenAiBaseUrl: 'https://override.example.com/v1'
+    } as const
+    expect(resolveEffectiveSettings(global, override).customProviders).toEqual(
+      global.customProviders
+    )
+    expect(
+      resolveEffectiveSettings(global, { ...override, useOverride: false }).customProviders
+    ).toEqual(global.customProviders)
   })
 
   it('falls back to global persona/tone/style when the override leaves them unset', () => {

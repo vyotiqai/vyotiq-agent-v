@@ -431,9 +431,9 @@ export async function waitUntilRunInactive(
 }
 
 /** Default bound for cancel-and-wait during quit. */
-export const QUIT_RUN_QUIESCE_MS = 15_000
+const QUIT_RUN_QUIESCE_MS = 15_000
 
-export type CancelAndWaitActiveRunsResult = {
+type CancelAndWaitActiveRunsResult = {
   cancelled: number
   timedOut: string[]
 }
@@ -639,26 +639,6 @@ export function takeNextReadyFollowUp(runId: string): FollowUpEntry | undefined 
   if (!entry || entry.followUps.length === 0) return undefined
   if (!entry.followUps[0]?.ready) return undefined
   return entry.followUps.shift()
-}
-
-/** Take promoted follow-ups only (FIFO among ready items). */
-export function drainReadyFollowUps(runId: string): FollowUpEntry[] {
-  const drained: FollowUpEntry[] = []
-  for (;;) {
-    const next = takeNextReadyFollowUp(runId)
-    if (!next) break
-    drained.push(next)
-  }
-  return drained
-}
-
-/** Take all pending follow-ups (FIFO) — test/cleanup helper. */
-export function drainFollowUps(runId: string): FollowUpEntry[] {
-  const entry = active.get(runId)
-  if (!entry) return []
-  const drained = entry.followUps
-  entry.followUps = []
-  return drained
 }
 
 export function clearFollowUps(runId: string): void {

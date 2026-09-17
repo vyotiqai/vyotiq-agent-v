@@ -6,7 +6,7 @@ import {
 import { listProviderModels } from '@main/agent/providers'
 import {
   setPublicFetchForTests
-} from '@main/agent/tools/webFetch'
+} from '@main/net/webFetch'
 import { resetSoftWarnCooldownsForTests } from '@main/agent/providers/log'
 
 vi.mock('@shared/logger', () => ({

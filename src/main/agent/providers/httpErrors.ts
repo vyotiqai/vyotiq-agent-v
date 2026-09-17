@@ -277,13 +277,25 @@ export function formatProviderHttpError(
  * Terminal failure class for a provider HTTP status. 401/403 (auth/plan) and
  * 402 (credits) are permanent user-action failures — they must not ride the
  * retryable PROVIDER_HTTP code, or the UI offers a Retry that can never
- * succeed. 404/429/5xx stay PROVIDER_HTTP (transient or re-issuable).
+ * succeed. The same applies to deterministic 4xx (bad request, wrong model,
+ * method not allowed): they map to the non-retryable PROVIDER_REQUEST code.
+ * 404/429/5xx stay PROVIDER_HTTP (transient or re-issuable).
  * Mirrors the log classification in providers/log.ts.
  */
 export function providerHttpErrorCode(
   status: number | undefined
-): 'PROVIDER_AUTH' | 'PROVIDER_BILLING' | 'PROVIDER_HTTP' {
+): 'PROVIDER_AUTH' | 'PROVIDER_BILLING' | 'PROVIDER_HTTP' | 'PROVIDER_REQUEST' {
   if (status === 401 || status === 403) return 'PROVIDER_AUTH'
   if (status === 402) return 'PROVIDER_BILLING'
+  if (
+    status !== undefined &&
+    status >= 400 &&
+    status < 500 &&
+    status !== 404 &&
+    status !== 408 &&
+    status !== 429
+  ) {
+    return 'PROVIDER_REQUEST'
+  }
   return 'PROVIDER_HTTP'
 }

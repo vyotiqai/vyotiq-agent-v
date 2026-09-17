@@ -68,8 +68,8 @@ vi.mock('@main/app/agentBrowser', async (importOriginal) => {
 
 const toolWebFetch = vi.fn(async () => '# Fetched page')
 
-vi.mock('@main/agent/tools/webFetch', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@main/agent/tools/webFetch')>()
+vi.mock('@main/net/webFetch', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/net/webFetch')>()
   return {
     ...actual,
     toolWebFetch: (...args: unknown[]) => toolWebFetch(...args)

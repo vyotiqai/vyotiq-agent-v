@@ -2,7 +2,12 @@ import { existsSync, mkdirSync } from 'fs'
 import { dirname } from 'path'
 import { DatabaseSync } from 'node:sqlite'
 import type { StatementSync } from 'node:sqlite'
-import type { ChunkKind, IndexStatus, StoredChunk } from './types'
+import type {
+  ChunkKind,
+  DenseStatus,
+  IndexStatus,
+  StoredChunk
+} from './types'
 import { CODE_INDEX_SCHEMA_VERSION } from './types'
 import { codeindexDbPath, codeindexRoot } from '../indexStoragePaths'
 
@@ -10,9 +15,10 @@ export { codeindexRoot, codeindexDbPath } from '../indexStoragePaths'
 
 /**
  * One SQLite store per workspace: a `files` table for incremental sync and
- * glob/file-list acceleration, a `chunks` metadata table, and one FTS5 index
- * with the trigram tokenizer — substring + keyword matching with BM25 ranking,
- * no embeddings, no models.
+ * glob/file-list acceleration, a `chunks` metadata table, one FTS5 index
+ * with the trigram tokenizer — substring + keyword matching with BM25 ranking —
+ * and a `dense_chunks` table holding per-chunk source text plus optional
+ * Float32LE embedding vectors for the semantic (concept) search leg.
  */
 export class CodeIndexStore {
   readonly db: DatabaseSync
@@ -123,6 +129,9 @@ export class CodeIndexStore {
     this.prepareCached(
       'DELETE FROM chunks_fts WHERE chunk_id IN (SELECT id FROM chunks WHERE path = ?)'
     ).run(path)
+    // Dense rows share the chunk ids, so deleting by path is a single set-based
+    // DELETE too (dense_chunks carries its own path column).
+    this.prepareCached('DELETE FROM dense_chunks WHERE path = ?').run(path)
     this.prepareCached('DELETE FROM chunks WHERE path = ?').run(path)
     this.prepareCached('DELETE FROM files WHERE path = ?').run(path)
   }
@@ -158,6 +167,9 @@ export class CodeIndexStore {
       name: string
       parentName?: string
       ftsBody: string
+      /** Raw chunk source. When present, a dense_chunks row is written in the
+       *  same transaction for the semantic search leg (same chunk id). */
+      text?: string
     }[]
   ): void {
     this.db.exec('BEGIN IMMEDIATE')
@@ -175,9 +187,18 @@ export class CodeIndexStore {
       const insertFts = this.prepareCached(
         `INSERT INTO chunks_fts(chunk_id, path, name, body) VALUES(?, ?, ?, ?)`
       )
+      const insertDense = this.prepareCached(
+        `INSERT INTO dense_chunks(id, path, start_line, end_line, kind, name, parent_name, text)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?)`
+      )
       for (const c of chunks) {
         const info = insertChunk.run(path, c.startLine, c.endLine, c.kind, c.name, c.parentName ?? null)
-        insertFts.run(Number(info.lastInsertRowid), path, c.name, c.ftsBody)
+        const id = Number(info.lastInsertRowid)
+        insertFts.run(id, path, c.name, c.ftsBody)
+        // Same transaction, same id: chunks + dense rows commit or roll back together.
+        if (c.text !== undefined) {
+          insertDense.run(id, path, c.startLine, c.endLine, c.kind, c.name, c.parentName ?? null, c.text)
+        }
       }
       this.db.exec('COMMIT')
     } catch (err) {
@@ -293,6 +314,161 @@ export class CodeIndexStore {
       return null
     }
   }
+
+  /**
+   * Dense (semantic) leg: rows not yet vectorized, id order, capped at `limit`.
+   * Backed by the partial vec-NULL index.
+   */
+  pendingDenseBatch(limit: number): {
+    id: number
+    path: string
+    name: string
+    parentName: string | null
+    text: string
+  }[] {
+    const rows = this.prepareCached(
+      `SELECT id, path, name, parent_name AS parentName, text
+       FROM dense_chunks WHERE vec IS NULL ORDER BY id LIMIT ?`
+    ).all(limit) as {
+      id: number
+      path: string
+      name: string
+      parentName: string | null
+      text: string
+    }[]
+    return rows
+  }
+
+  /** One dense row (full metadata + stored text) for hit mapping. */
+  getDenseRow(id: number): {
+    id: number
+    path: string
+    startLine: number
+    endLine: number
+    kind: ChunkKind
+    name: string
+    parentName: string | null
+    text: string
+  } | null {
+    const row = this.prepareCached(
+      `SELECT id, path, start_line AS startLine, end_line AS endLine, kind, name, parent_name AS parentName, text
+       FROM dense_chunks WHERE id = ?`
+    ).get(id) as {
+      id: number
+      path: string
+      startLine: number
+      endLine: number
+      kind: ChunkKind
+      name: string
+      parentName: string | null
+      text: string
+    } | undefined
+    return row ?? null
+  }
+  /**
+   * Store the dense vector for a dense row. Validate the dimension — reject a
+   * vector whose length contradicts the configured `denseDim` meta or an already
+   * stored vector for the same row — a silent mismatch would poison cosine
+   * search.
+   */
+  setDenseVector(id: number, vec: Float32Array): void {
+    const dimMeta = this.getMeta('denseDim')
+    if (dimMeta != null) {
+      const dim = Number(dimMeta)
+      if (Number.isInteger(dim) && dim > 0 && vec.length !== dim) {
+        throw new Error(
+          `setDenseVector: vector length ${vec.length} does not match configured dense dimension ${dim}`
+        )
+      }
+    }
+    const existing = this.prepareCached(
+      `SELECT length(vec) / 4 AS dim FROM dense_chunks WHERE id = ?`
+    ).get(id) as { dim: number | null } | undefined
+    if (existing?.dim != null && existing.dim > 0 && vec.length !== existing.dim) {
+      throw new Error(
+        `setDenseVector: vector length ${vec.length} does not match existing vector length ${existing.dim} for dense row ${id}`
+      )
+    }
+    const blob = encodeDenseVec(vec)
+    this.prepareCached(`UPDATE dense_chunks SET vec = ? WHERE id = ?`).run(blob, id)
+  }
+
+  /**
+   * Stream vectorized dense rows without materializing the whole set. Rows
+   * with a NULL vec are skipped (they belong to pendingDenseBatch).
+   */
+  *iterateDenseVectors(): Generator<{ id: number; vec: Float32Array }> {
+    const stmt = this.prepareCached(
+      `SELECT id, vec FROM dense_chunks WHERE vec IS NOT NULL ORDER BY id`
+    )
+    const rows = stmt.iterate() as IterableIterator<{ id: number; vec: Uint8Array | null }>
+    for (const row of rows) {
+      if (row.vec == null) continue
+      yield { id: Number(row.id), vec: decodeDenseVec(row.vec) }
+    }
+  }
+
+  /** Total dense rows and how many carry a vector — one SELECT, SUM/CASE. */
+  denseStatus(): DenseStatus {
+    const row = this.prepareCached(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(CASE WHEN vec IS NOT NULL THEN 1 ELSE 0 END), 0) AS vectorized
+       FROM dense_chunks`
+    ).get() as { total: number; vectorized: number }
+    return { total: row.total, vectorized: row.vectorized }
+  }
+
+  /**
+   * Drop every stored vector and the model identity, in one transaction —
+   * used when the embedding model (or dimension) changes and old vectors
+   * become incomparable.
+   */
+  resetDenseVectors(): void {
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      this.prepareCached(`UPDATE dense_chunks SET vec = NULL`).run()
+      this.prepareCached(
+        `DELETE FROM meta WHERE key IN ('denseModel', 'denseDim')`
+      ).run()
+      this.db.exec('COMMIT')
+    } catch (err) {
+      try {
+        this.db.exec('ROLLBACK')
+      } catch {
+        /* ignore */
+      }
+      throw err
+    }
+  }
+
+  /** Active embedding model identity, or null when none is configured. */
+  getDenseModel(): { model: string; dim: number } | null {
+    const model = this.getMeta('denseModel')
+    const dim = this.getMeta('denseDim')
+    if (model == null || dim == null) return null
+    return { model, dim: Number(dim) }
+  }
+
+  setDenseModel(model: string, dim: number): void {
+    this.setMeta('denseModel', model)
+    this.setMeta('denseDim', String(dim))
+  }
+}
+
+/** Float32 values -> Float32LE bytes (explicit endianness, no platform assumptions). */
+function encodeDenseVec(vec: Float32Array): Buffer {
+  const blob = Buffer.allocUnsafe(vec.byteLength)
+  for (let i = 0; i < vec.length; i++) blob.writeFloatLE(vec[i]!, i * 4)
+  return blob
+}
+
+/** Float32LE bytes -> Float32Array (exact bit round-trip, including -0). */
+function decodeDenseVec(blob: Uint8Array): Float32Array {
+  const count = blob.byteLength / 4
+  const view = new DataView(blob.buffer, blob.byteOffset, blob.byteLength)
+  const vec = new Float32Array(count)
+  for (let i = 0; i < count; i++) vec[i] = view.getFloat32(i * 4, true)
+  return vec
 }
 
 /**
@@ -302,6 +478,17 @@ export class CodeIndexStore {
  */
 const EXPECTED_TABLE_COLUMNS: Record<string, readonly string[]> = {
   chunks: ['id', 'path', 'start_line', 'end_line', 'kind', 'name', 'parent_name'],
+  dense_chunks: [
+    'id',
+    'path',
+    'start_line',
+    'end_line',
+    'kind',
+    'name',
+    'parent_name',
+    'text',
+    'vec'
+  ],
   files: ['path', 'file_hash', 'mtime_ms', 'size_bytes'],
   chunks_fts: ['chunk_id', 'path', 'name', 'body']
 }
@@ -335,7 +522,9 @@ function migrate(db: DatabaseSync): void {
   if (version !== CODE_INDEX_SCHEMA_VERSION || !schemaColumnsMatch(db)) {
     // Foreign or structurally legacy schema (e.g. the old embedding store whose
     // meta row claims our version) — rebuild from scratch.
-    db.exec('DROP TABLE IF EXISTS chunks_fts; DROP TABLE IF EXISTS chunks; DROP TABLE IF EXISTS files;')
+    db.exec(
+      'DROP TABLE IF EXISTS dense_chunks; DROP TABLE IF EXISTS chunks_fts; DROP TABLE IF EXISTS chunks; DROP TABLE IF EXISTS files;'
+    )
   }
   db.exec(`
     CREATE TABLE IF NOT EXISTS files (
@@ -361,6 +550,21 @@ function migrate(db: DatabaseSync): void {
       body,
       tokenize = 'trigram'
     );
+    CREATE TABLE IF NOT EXISTS dense_chunks (
+      id INTEGER PRIMARY KEY,
+      path TEXT NOT NULL,
+      start_line INTEGER NOT NULL,
+      end_line INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      name TEXT NOT NULL,
+      parent_name TEXT,
+      text TEXT NOT NULL,
+      vec BLOB
+    );
+    CREATE INDEX IF NOT EXISTS idx_dense_chunks_path ON dense_chunks(path);
+    -- Partial index for the pending-vector batch scan (id order via rowid).
+    CREATE INDEX IF NOT EXISTS idx_dense_chunks_vec_pending
+      ON dense_chunks(path) WHERE vec IS NULL;
   `)
   db.prepare(
     `INSERT INTO meta(key, value) VALUES('schemaVersion', ?)

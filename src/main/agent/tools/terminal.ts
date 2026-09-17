@@ -142,6 +142,15 @@ const FILE_OP_UNIX_TOKENS = new Set([
   'cat'
 ])
 
+/** PowerShell file-inspection cmdlets/aliases whose primary use is workspace file exploration. */
+const POWERSHELL_FILE_OP_TOKENS = new Set([
+  'get-childitem',
+  'gci',
+  'select-string',
+  'sls',
+  'get-content'
+])
+
 const UNIX_CMD_HINTS: Record<string, string> = {
   ls: 'the list_dir tool',
   grep: 'the grep tool',
@@ -543,6 +552,25 @@ export function appendPowerShellCompatHint(
 }
 
 /**
+ * Advisory: the primary pipeline stage is a PowerShell file-op cmdlet or alias
+ * (Get-ChildItem/gci, Select-String/sls, Get-Content). Soft hint only — never
+ * gated on exit code, never fails the command. Exported for tests.
+ */
+export function isPowerShellFileOp(command: string): boolean {
+  const primary = primaryCommandToken(command)
+  return primary != null && POWERSHELL_FILE_OP_TOKENS.has(primary)
+}
+
+export function appendPowerShellFileOpHint(
+  content: string,
+  resolved: ResolvedTerminalShell,
+  command: string
+): string {
+  if (resolved !== 'powershell' || !isPowerShellFileOp(command)) return content
+  return `${content}\n\n[Tool hint] For workspace file search or read, use the grep, read, glob, and list_dir tools.`
+}
+
+/**
  * Command missing from PATH (92c049d6: `swift --version` / `dotnet --list-sdks`).
  * Exclude `The term '='` — that is a parse error, already hinted above.
  */
@@ -907,6 +935,7 @@ function formatTerminalOutput(
   }
   out = appendWindowsCompatHint(command, out, code, resolved)
   out = appendPowerShellCompatHint(out, code, stderr, resolved, command)
+  out = appendPowerShellFileOpHint(out, resolved, command)
   out = appendMissingCommandHint(out, code, stderr)
   return out
 }

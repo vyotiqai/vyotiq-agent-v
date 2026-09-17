@@ -9,7 +9,7 @@ import { toolListDir } from '@main/agent/tools/listDir'
 import { toolDelete } from '@main/agent/tools/deletePath'
 import { toolStrReplace } from '@main/agent/tools/strReplace'
 import { readTodos, toolTodoWrite } from '@main/agent/tools/todo'
-import { htmlToMarkdown, spaShellWarning, extractMainHtml } from '@main/agent/tools/webFetch'
+import { htmlToMarkdown, spaShellWarning, extractMainHtml } from '@main/net/webFetch'
 import { globToRegExp } from '@main/agent/tools/walk'
 
 vi.mock('@main/app/window', () => ({

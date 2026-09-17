@@ -58,6 +58,7 @@ const RESULT_ONLY_TOOLS = new Set([
   'glob',
   'grep',
   'codebase_search',
+  'concept_search',
   'list_dir',
   'web_fetch',
   'web_search',
@@ -297,6 +298,15 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
     })
   },
   codebase_search: {
+    Body: CodebaseSearchBody,
+    hasBody: resultHasBody,
+    headerMeta: (tool) => ({
+      verb: toolLabel(tool.name, tool.status),
+      target: tool.summary,
+      icon: 'scanSearch'
+    })
+  },
+  concept_search: {
     Body: CodebaseSearchBody,
     hasBody: resultHasBody,
     headerMeta: (tool) => ({

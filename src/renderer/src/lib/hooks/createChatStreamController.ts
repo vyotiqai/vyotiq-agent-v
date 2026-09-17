@@ -2020,6 +2020,80 @@ export function createChatStreamController(
     uiResumeGeneration += 1
   }
 
+  type DiskRunData = Extract<
+    Awaited<ReturnType<NonNullable<typeof window.vyotiq>['loadRun']>>,
+    { ok: true }
+  >['data']
+
+  /**
+   * Shared read→hydrate core for catchUpUiFromDisk / syncFromDisk /
+   * reattachActiveRun: loadRun (+ per-site guard hooks) → loadRunEvents →
+   * messagesForNextTurn → agent-mode notify → hydrateFromDisk. Call sites keep
+   * their own merge/notify/patch semantics via the hooks and the returned data.
+   */
+  const hydrateRunFromDisk = async (
+    id: string,
+    label: string,
+    opts: {
+      /** Checked after each await — closed/disposed runs must not patch state. */
+      isStale?: () => boolean
+      /** Between loadRun and its ok-check (reattach TOCTOU). False aborts. */
+      beforeResCheck?: () => Promise<boolean>
+      /** Between the ok-check and loadRunEvents (syncFromDisk re-checks). False aborts. */
+      afterResCheck?: () => Promise<boolean>
+      /** After loadRunEvents, before hydrate (reattach final active check). False aborts. */
+      afterEvents?: () => Promise<boolean>
+      /** Closure var resets that must run after kept, before the mode notify. */
+      beforeNotify?: () => void
+      /** loadRun failed, after the shared warn log (reattach still marks running). */
+      onLoadRunFailure?: () => void
+      idle?: boolean
+    } = {}
+  ): Promise<
+    | {
+        ok: true
+        data: DiskRunData
+        events: PersistedEvent[]
+        eventsLoadError: string | null
+        kept: ChatMessage[]
+        hydrated: ReturnType<typeof hydrateFromDisk>
+      }
+    | { ok: false }
+  > => {
+    if (!window.vyotiq?.loadRun) return { ok: false }
+    const res = await window.vyotiq.loadRun(workspacePath, id)
+    if (opts.isStale?.()) return { ok: false }
+    if (opts.beforeResCheck && !(await opts.beforeResCheck())) return { ok: false }
+    if (!res.ok) {
+      logger.warn(`${label} loadRun failed`, {
+        scope: 'chat',
+        correlationId: id,
+        err: toLogErr(res.error)
+      })
+      opts.onLoadRunFailure?.()
+      return { ok: false }
+    }
+    if (opts.afterResCheck && !(await opts.afterResCheck())) return { ok: false }
+    let events: PersistedEvent[] = []
+    let eventsLoadError: string | null = null
+    if (window.vyotiq.loadRunEvents) {
+      const eventsRes = await window.vyotiq.loadRunEvents(workspacePath, id)
+      if (opts.isStale?.()) return { ok: false }
+      if (eventsRes.ok) events = eventsRes.data
+      else eventsLoadError = eventsRes.error
+    }
+    if (opts.afterEvents && !(await opts.afterEvents())) return { ok: false }
+    const kept = messagesForNextTurn(res.data.messages)
+    opts.beforeNotify?.()
+    const mode = modeFromPersisted(events)
+    if (mode) notifyAgentMode(mode)
+    const hydrated = hydrateFromDisk(kept, events, dismissedErrorMessage, {
+      ...(opts.idle === undefined ? {} : { idle: opts.idle }),
+      priorAgentInstances: state.agentInstances
+    })
+    return { ok: true, data: res.data, events, eventsLoadError, kept, hydrated }
+  }
+
   /** Force-reload transcript while preserving live running state (after UI suspend). */
   const catchUpUiFromDisk = async (id: string): Promise<boolean> => {
     if (closedRuns.has(id) || disposed) return false
@@ -2038,54 +2112,35 @@ export function createChatStreamController(
     } else {
       stillActive = state.running || state.pendingRun
     }
-    if (!window.vyotiq?.loadRun) return false
-    const res = await window.vyotiq.loadRun(workspacePath, id)
-    if (closedRuns.has(id) || disposed) return false
-    if (!res.ok) {
-      logger.warn('catchUpUiFromDisk loadRun failed', {
-        scope: 'chat',
-        correlationId: id,
-        err: toLogErr(res.error)
-      })
-      return false
-    }
-    let events: PersistedEvent[] = []
-    let eventsLoadError: string | null = null
-    if (window.vyotiq.loadRunEvents) {
-      const eventsRes = await window.vyotiq.loadRunEvents(workspacePath, id)
-      if (closedRuns.has(id) || disposed) return false
-      if (eventsRes.ok) events = eventsRes.data
-      else eventsLoadError = eventsRes.error
-    }
-    const kept = messagesForNextTurn(res.data.messages)
-    assistantId = null
-    reasoningId = null
-    runId = id
-    contentRunId = id
-    if (liveInvokeId != null) activeInvokeId = liveInvokeId
-    const mode = modeFromPersisted(events)
-    if (mode) notifyAgentMode(mode)
+    const read = await hydrateRunFromDisk(id, 'catchUpUiFromDisk', {
+      isStale: () => closedRuns.has(id) || disposed,
+      idle: !stillActive,
+      beforeNotify: () => {
+        assistantId = null
+        reasoningId = null
+        runId = id
+        contentRunId = id
+        if (liveInvokeId != null) activeInvokeId = liveInvokeId
+      }
+    })
+    if (!read.ok) return false
     const hydratedPending = hydratePendingFollowUps(
       pendingFromMain,
-      res.data.pendingFollowUps,
+      read.data.pendingFollowUps,
       state.pendingFollowUps
     )
-    const hydrated = hydrateFromDisk(kept, events, dismissedErrorMessage, {
-      idle: !stillActive,
-      priorAgentInstances: state.agentInstances
-    })
-    adoptHydratedUsage(hydrated)
+    adoptHydratedUsage(read.hydrated)
     patch({
-      ...hydrated,
-      items: applyPersistedExpansions(hydrated.items),
+      ...read.hydrated,
+      items: applyPersistedExpansions(read.hydrated.items),
       pendingFollowUps: hydratedPending,
       runId: id,
       pendingRun: false,
       running: stillActive,
       runStartedAt: stillActive ? state.runStartedAt ?? Date.now() : null,
-      transcriptHasEarlier: res.data.hasEarlier,
-      transcriptEarlierCursor: res.data.earlierCursor,
-      ...(eventsLoadError ? { error: eventsLoadError } : {})
+      transcriptHasEarlier: read.data.hasEarlier,
+      transcriptEarlierCursor: read.data.earlierCursor,
+      ...(read.eventsLoadError ? { error: read.eventsLoadError } : {})
     })
     if (!stillActive) onTerminal?.()
     return true
@@ -3674,57 +3729,46 @@ export function createChatStreamController(
       }
     }
     if (closedRuns.has(id) || disposed) return false
-    if (!window.vyotiq?.loadRun) return false
-    const res = await window.vyotiq.loadRun(workspacePath, id)
-    if (!res.ok) {
-      logger.warn('syncFromDisk loadRun failed', {
-        scope: 'chat',
-        correlationId: id,
-        err: toLogErr(res.error)
-      })
-      return false
-    }
-    // Re-check after awaits — run may have resumed / re-registered.
-    if (!opts?.ignoreActiveList && window.vyotiq?.listActiveRuns) {
-      const active = await window.vyotiq.listActiveRuns()
-      if (active.ok && active.data.some((entry) => entry.runId === id)) {
-        return false
-      }
-    }
-    if (closedRuns.has(id) || disposed) return false
-    let events: PersistedEvent[] = []
-    let eventsLoadError: string | null = null
-    if (window.vyotiq.loadRunEvents) {
-      const eventsRes = await window.vyotiq.loadRunEvents(workspacePath, id)
-      if (eventsRes.ok) events = eventsRes.data
-      else eventsLoadError = eventsRes.error
-    }
-    const kept = messagesForNextTurn(res.data.messages)
-    assistantId = null
-    reasoningId = null
-    // Keep session id so the next send continues this run (not a forked transcript).
-    runId = id
-    contentRunId = id
-    awaitingRun = false
-    pendingCancel = false
-    const mode = modeFromPersisted(events)
-    if (mode) notifyAgentMode(mode)
-    const hydrated = hydrateFromDisk(kept, events, dismissedErrorMessage, {
+    const read = await hydrateRunFromDisk(id, 'syncFromDisk', {
       idle: true,
-      priorAgentInstances: state.agentInstances
+      afterResCheck: async () => {
+        // Re-check after awaits — run may have resumed / re-registered.
+        if (!opts?.ignoreActiveList && window.vyotiq?.listActiveRuns) {
+          const active = await window.vyotiq.listActiveRuns()
+          if (active.ok && active.data.some((entry) => entry.runId === id)) {
+            return false
+          }
+        }
+        if (closedRuns.has(id) || disposed) return false
+        return true
+      },
+      beforeNotify: () => {
+        assistantId = null
+        reasoningId = null
+        // Keep session id so the next send continues this run (not a forked transcript).
+        runId = id
+        contentRunId = id
+        awaitingRun = false
+        pendingCancel = false
+      }
     })
+    if (!read.ok) return false
     patch({
-      ...hydrated,
-      items: applyPersistedExpansions(hydrated.items),
-      ...(eventsLoadError ? { error: eventsLoadError } : {}),
-      pendingFollowUps: hydratePendingFollowUps([], res.data.pendingFollowUps, state.pendingFollowUps),
+      ...read.hydrated,
+      items: applyPersistedExpansions(read.hydrated.items),
+      ...(read.eventsLoadError ? { error: read.eventsLoadError } : {}),
+      pendingFollowUps: hydratePendingFollowUps(
+        [],
+        read.data.pendingFollowUps,
+        state.pendingFollowUps
+      ),
       runId: id,
       pendingRun: false,
       running: false,
       runStartedAt: null,
       runTerminalTick: state.runTerminalTick + 1,
-      transcriptHasEarlier: res.data.hasEarlier,
-      transcriptEarlierCursor: res.data.earlierCursor
+      transcriptHasEarlier: read.data.hasEarlier,
+      transcriptEarlierCursor: read.data.earlierCursor
     })
     onTerminal?.()
     return true
@@ -4041,91 +4085,80 @@ export function createChatStreamController(
       })
       return
     }
-    const res = await window.vyotiq.loadRun(workspacePath, id)
-    if (closedRuns.has(id) || disposed) return
-    // TOCTOU: run may have finished while we loaded disk.
-    if (window.vyotiq?.listActiveRuns) {
-      const active = await window.vyotiq.listActiveRuns()
-      if (!active.ok || !active.data.some((entry) => entry.runId === id)) {
-        await syncFromDisk(id)
-        return
+    const read = await hydrateRunFromDisk(id, 'reattachActiveRun', {
+      isStale: () => closedRuns.has(id) || disposed,
+      beforeResCheck: async () => {
+        // TOCTOU: run may have finished while we loaded disk.
+        if (window.vyotiq?.listActiveRuns) {
+          const active = await window.vyotiq.listActiveRuns()
+          if (!active.ok || !active.data.some((entry) => entry.runId === id)) {
+            await syncFromDisk(id)
+            return false
+          }
+          const live = active.data.find((entry) => entry.runId === id)
+          if (live?.invokeId != null) activeInvokeId = live.invokeId
+          if (live?.pendingFollowUps) {
+            pendingFromMain = live.pendingFollowUps
+          }
+        }
+        return true
+      },
+      onLoadRunFailure: () => {
+        // Still mark running if list said live — live events will catch up.
+        patch({
+          runId: id,
+          running: true,
+          pendingRun: false,
+          runStartedAt: state.runStartedAt ?? Date.now(),
+          error: null,
+          pendingFollowUps: hydratedPending
+        })
+      },
+      afterEvents: async () => {
+        // Final active check before committing running:true + hydrate.
+        if (window.vyotiq?.listActiveRuns) {
+          const active = await window.vyotiq.listActiveRuns()
+          if (!active.ok || !active.data.some((entry) => entry.runId === id)) {
+            await syncFromDisk(id)
+            return false
+          }
+        }
+        return true
       }
-      const live = active.data.find((entry) => entry.runId === id)
-      if (live?.invokeId != null) activeInvokeId = live.invokeId
-      if (live?.pendingFollowUps) {
-        pendingFromMain = live.pendingFollowUps
-      }
-    }
-    if (!res.ok) {
-      logger.warn('reattachActiveRun loadRun failed', {
-        scope: 'chat',
-        correlationId: id,
-        err: toLogErr(res.error)
-      })
-      // Still mark running if list said live — live events will catch up.
-      patch({
-        runId: id,
-        running: true,
-        pendingRun: false,
-        runStartedAt: state.runStartedAt ?? Date.now(),
-        error: null,
-        pendingFollowUps: hydratedPending
-      })
-      return
-    }
-    let events: PersistedEvent[] = []
-    let eventsLoadError: string | null = null
-    if (window.vyotiq.loadRunEvents) {
-      const eventsRes = await window.vyotiq.loadRunEvents(workspacePath, id)
-      if (closedRuns.has(id) || disposed) return
-      if (eventsRes.ok) events = eventsRes.data
-      else eventsLoadError = eventsRes.error
-    }
-    // Final active check before committing running:true + hydrate.
-    if (window.vyotiq?.listActiveRuns) {
-      const active = await window.vyotiq.listActiveRuns()
-      if (!active.ok || !active.data.some((entry) => entry.runId === id)) {
-        await syncFromDisk(id)
-        return
-      }
-    }
-    const kept = messagesForNextTurn(res.data.messages)
-    const mode = modeFromPersisted(events)
-    if (mode) notifyAgentMode(mode)
+    })
+    if (!read.ok) return
     const refreshedPending = hydratePendingFollowUps(
       pendingFromMain,
-      res.data.pendingFollowUps,
+      read.data.pendingFollowUps,
       hydratedPending
     )
-    const hydrated = hydrateFromDisk(kept, events, dismissedErrorMessage, {
-      priorAgentInstances: state.agentInstances
-    })
-    adoptHydratedUsage(hydrated)
+    adoptHydratedUsage(read.hydrated)
     const pendingQuestions = state.items.filter(
       (item): item is Extract<UiItem, { kind: 'question' }> => item.kind === 'question'
     )
     const mergedItems = applyPersistedExpansions(
       pendingQuestions.length === 0
-        ? hydrated.items
+        ? read.hydrated.items
         : [
-            ...hydrated.items,
+            ...read.hydrated.items,
             ...pendingQuestions.filter(
-              (q) => !hydrated.items.some((item) => item.kind === 'question' && item.id === q.id)
+              (q) =>
+                !read.hydrated.items.some((item) => item.kind === 'question' && item.id === q.id)
             )
           ]
     )
     patch({
-      ...hydrated,
+      ...read.hydrated,
       items: mergedItems,
-      messages: kept,
+      messages: read.kept,
       runId: id,
       running: true,
       pendingRun: false,
       runStartedAt: state.runStartedAt ?? Date.now(),
-      error: eventsLoadError,
+      error: read.eventsLoadError,
       pendingFollowUps: refreshedPending,
-      transcriptHasEarlier: res.data.hasEarlier,
-      transcriptEarlierCursor: res.data.earlierCursor
+      transcriptHasEarlier: read.data.hasEarlier,
+      transcriptEarlierCursor: read.data.earlierCursor
     })
   }
 

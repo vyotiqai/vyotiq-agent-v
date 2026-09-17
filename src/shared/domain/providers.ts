@@ -1,4 +1,10 @@
-import type { ModelInfo, ProviderId } from '../ipc/schemas/providers'
+import {
+  isCustomProviderId,
+  type ModelInfo,
+  type ProviderId,
+  type ProviderIdAny
+} from '../ipc/schemas/providers'
+import type { CustomProvider } from '../ipc/schemas/settings'
 import type { SecretProvider } from '../ipc/types/secrets'
 import { knownContextWindow } from './modelContextWindows'
 import { idSuggestsVision } from './modelVision'
@@ -27,7 +33,7 @@ const SEED_MODEL_IDS: Record<ProviderId, string[]> = {
   anthropic: ['claude-opus-5', 'claude-sonnet-4', 'claude-haiku-4-5'],
   gemini: ['gemini-3.6-flash', 'gemini-2.5-pro'],
   ollama: ['qwen2.5', 'llama3.2', 'deepseek-r1', 'gpt-oss:120b', 'deepseek-v4-flash'],
-  deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+  deepseek: ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-pro'],
   groq: ['llama-4-scout-17b-16e-instruct'],
   openrouter: ['openrouter/auto'],
   xai: ['grok-4-latest'],
@@ -40,8 +46,10 @@ const SEED_MODEL_IDS: Record<ProviderId, string[]> = {
 }
 
 /** Resolve seed model ids for a provider; OpenCode Go is sourced live. */
-function seedIdsFor(provider: ProviderId): string[] {
+function seedIdsFor(provider: ProviderIdAny): string[] {
   if (provider === 'opencode') return getCachedOpenCodeGoModelIds()
+  // Dynamic `custom:<slug>` ids reuse the builtin `custom` OpenAI-compatible seeds.
+  if (isCustomProviderId(provider)) return SEED_MODEL_IDS.custom
   return SEED_MODEL_IDS[provider]
 }
 
@@ -112,15 +120,29 @@ export const PROVIDER_DEFAULTS: ProviderDefault[] = [
   { id: 'opencode', label: 'OpenCode Go', models: seedIdsFor('opencode') }
 ]
 
-export function seedModelsFor(provider: ProviderId): ModelInfo[] {
-  return seedIdsFor(provider).map((id) => seedModelInfo(id, provider))
+export function seedModelsFor(provider: ProviderIdAny): ModelInfo[] {
+  // seedModelInfo's per-provider heuristics are keyed by builtin catalog ids;
+  // dynamic `custom:<slug>` ids run through the `custom` heuristics.
+  const catalogId: ProviderId = isCustomProviderId(provider) ? 'custom' : provider
+  return seedIdsFor(provider).map((id) => seedModelInfo(id, catalogId))
 }
 
-export function defaultModelFor(provider: ProviderId): string {
+export function defaultModelFor(provider: ProviderIdAny): string {
   return seedIdsFor(provider)[0]!
 }
 
-export function providerLabel(provider: ProviderId): string {
+/**
+ * Display label for a provider. Builtin ids use the catalog label; dynamic
+ * `custom:<slug>` ids use the saved entry's name, falling back to 'Custom'
+ * when the list is missing or has no entry for that id.
+ */
+export function providerLabel(
+  provider: ProviderIdAny,
+  customProviders?: readonly CustomProvider[]
+): string {
+  if (isCustomProviderId(provider)) {
+    return customProviders?.find((entry) => entry.id === provider)?.name.trim() || 'Custom'
+  }
   return PROVIDER_DEFAULTS.find((entry) => entry.id === provider)?.label ?? provider
 }
 
@@ -167,9 +189,10 @@ export function isPrivateOrLoopbackHost(url: string): boolean {
  * Whether a provider requires an API key for live catalog/chat.
  * Local Ollama and private/LAN custom OpenAI-compat hosts do not; cloud hosts do.
  */
-export function providerNeedsKey(provider: ProviderId, baseUrl?: string): boolean {
+export function providerNeedsKey(provider: ProviderIdAny, baseUrl?: string): boolean {
   if (provider === 'ollama') return isOllamaCloudHost(baseUrl ?? '')
-  if (provider === 'custom') {
+  // Builtin `custom` and dynamic `custom:<slug>` share the keyless-LAN rule.
+  if (provider === 'custom' || isCustomProviderId(provider)) {
     return !isPrivateOrLoopbackHost(normalizeCustomOpenAiBaseUrl(baseUrl ?? CUSTOM_OPENAI_DEFAULT))
   }
   return true
@@ -302,6 +325,8 @@ export function normalizeCustomOpenAiBaseUrl(url: string): string {
 type ProviderBaseUrlSettings = {
   ollamaBaseUrl?: string
   customOpenAiBaseUrl?: string
+  /** Saved dynamic `custom:<slug>` provider entries (resolved before legacy). */
+  customProviders?: readonly CustomProvider[]
 }
 
 /**
@@ -405,7 +430,7 @@ export function validateOllamaBaseUrl(raw: string): ParsedBaseUrl {
 
 /** Chat / listModels base URL when the provider uses a configurable host. */
 export function resolveProviderChatBaseUrl(
-  providerId: ProviderId,
+  providerId: ProviderIdAny,
   settings: ProviderBaseUrlSettings,
   apiKey?: string | null
 ): string | undefined {
@@ -415,12 +440,30 @@ export function resolveProviderChatBaseUrl(
   if (providerId === 'custom') {
     return normalizeCustomOpenAiBaseUrl(settings.customOpenAiBaseUrl ?? CUSTOM_OPENAI_DEFAULT)
   }
+  if (isCustomProviderId(providerId)) {
+    return resolveCustomProviderBaseUrl(providerId, settings)
+  }
   return undefined
+}
+
+/**
+ * Base URL for a dynamic `custom:<slug>` provider. The saved list entry wins;
+ * `custom:default` and any id missing from the list fall back to the legacy
+ * single-provider field (or the product default) for backward compat.
+ */
+function resolveCustomProviderBaseUrl(
+  providerId: ProviderIdAny,
+  settings: ProviderBaseUrlSettings
+): string | undefined {
+  if (!isCustomProviderId(providerId)) return undefined
+  const entry = settings.customProviders?.find((e) => e.id === providerId)
+  if (entry) return normalizeCustomOpenAiBaseUrl(entry.baseUrl)
+  return normalizeCustomOpenAiBaseUrl(settings.customOpenAiBaseUrl ?? CUSTOM_OPENAI_DEFAULT)
 }
 
 /** Catalog listModels base URL (native host for Ollama; `/v1` base for custom). */
 export function resolveProviderListBaseUrl(
-  providerId: ProviderId,
+  providerId: ProviderIdAny,
   reqBase: string | undefined,
   settings: ProviderBaseUrlSettings,
   apiKey?: string | null
@@ -433,12 +476,20 @@ export function resolveProviderListBaseUrl(
       reqBase ?? settings.customOpenAiBaseUrl ?? CUSTOM_OPENAI_DEFAULT
     )
   }
+  if (isCustomProviderId(providerId)) {
+    // Explicit request base wins; otherwise list entry, then legacy fallback.
+    return reqBase
+      ? normalizeCustomOpenAiBaseUrl(reqBase)
+      : resolveCustomProviderBaseUrl(providerId, settings)
+  }
   return reqBase
 }
 
 export type ProviderConfiguredOpts = {
   ollamaBaseUrl?: string
   customOpenAiBaseUrl?: string
+  /** Saved dynamic `custom:<slug>` provider entries (resolved before legacy). */
+  customProviders?: readonly CustomProvider[]
 }
 
 export type ListConfiguredProvidersOpts = ProviderConfiguredOpts & {
@@ -446,28 +497,35 @@ export type ListConfiguredProvidersOpts = ProviderConfiguredOpts & {
 }
 
 function resolveProviderBaseUrlForKey(
-  provider: ProviderId,
+  provider: ProviderIdAny,
   opts?: ProviderConfiguredOpts
 ): string | undefined {
   if (provider === 'ollama') return opts?.ollamaBaseUrl
   if (provider === 'custom') return opts?.customOpenAiBaseUrl
+  if (isCustomProviderId(provider)) {
+    // Saved list entry wins; `custom:default` and missing entries fall back to
+    // the legacy single-provider field, then the product default.
+    const entry = opts?.customProviders?.find((e) => e.id === provider)
+    if (entry) return normalizeCustomOpenAiBaseUrl(entry.baseUrl)
+    return opts?.customOpenAiBaseUrl
+  }
   return undefined
 }
 
 /** True when the provider has a saved key or does not require one for its current host. */
 export function isProviderConfigured(
-  provider: ProviderId,
-  secrets: Record<SecretProvider, boolean>,
+  provider: ProviderIdAny,
+  secrets: Record<string, boolean>,
   opts?: ProviderConfiguredOpts
 ): boolean {
-  if (secrets[provider as SecretProvider]) return true
+  if (secrets[provider]) return true
   const baseUrl = resolveProviderBaseUrlForKey(provider, opts)
   return !providerNeedsKey(provider, baseUrl)
 }
 
 /** Provider ids that are configured, preserving catalog order. */
 export function listConfiguredProviders(
-  secrets: Record<SecretProvider, boolean>,
+  secrets: Record<string, boolean>,
   opts?: ListConfiguredProvidersOpts
 ): ProviderId[] {
   const include = new Set(opts?.alwaysInclude ?? [])
@@ -482,11 +540,11 @@ export function listConfiguredProviders(
 
 /** Menu options for configured providers only. */
 export function providerOptionsForConfigured(
-  secrets: Record<SecretProvider, boolean>,
+  secrets: Record<string, boolean>,
   opts?: ListConfiguredProvidersOpts
 ): { value: ProviderId; label: string }[] {
   return listConfiguredProviders(secrets, opts).map((id) => ({
     value: id,
-    label: providerLabel(id)
+    label: providerLabel(id, opts?.customProviders)
   }))
 }

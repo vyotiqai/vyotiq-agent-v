@@ -51,6 +51,7 @@ describe('reasoning', () => {
   it('detects DeepSeek-native thinking SKUs for custom hosts', () => {
     expect(isDeepSeekNativeThinkingModel('deepseek-ai/DeepSeek-V4-Pro')).toBe(true)
     expect(isDeepSeekNativeThinkingModel('deepseek-v4-flash')).toBe(true)
+    expect(isDeepSeekNativeThinkingModel('deepseek-flash')).toBe(true)
     expect(isDeepSeekNativeThinkingModel('deepseek-r1')).toBe(true)
     expect(isDeepSeekNativeThinkingModel('deepseek-v3.2')).toBe(true)
     expect(isDeepSeekNativeThinkingModel('gpt-oss-120b')).toBe(false)

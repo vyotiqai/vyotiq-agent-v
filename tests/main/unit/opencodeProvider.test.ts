@@ -8,7 +8,8 @@ import {
   preloadOpenCodeGoCatalog
 } from '@shared/domain/opencodeGoCatalog'
 import { PUBLIC_CATALOG_PROVIDERS, getProvider } from '@main/agent/providers'
-import { buildOpenAiCompatBody, shouldRetryOmitCacheKey } from '@main/agent/providers/openai'
+import { shouldRetryOmitCacheKey } from '@main/agent/providers/httpErrors'
+import { buildOpenAiCompatBody } from '@main/agent/providers/openai'
 import { buildAnthropicBody } from '@main/agent/providers/anthropic'
 import { streamOpenAiResponses } from '@main/agent/providers/openaiResponses'
 import {

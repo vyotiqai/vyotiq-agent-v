@@ -71,14 +71,18 @@ export { flushStatusWrites } from './statusWriteQueue'
 
 const CONTRACT_CAP = 4000
 
+function contractCapText(text: string): string {
+  const t = text.trim()
+  if (!t) return ''
+  if (t.length <= CONTRACT_CAP) return t
+  return t.slice(0, CONTRACT_CAP) + '\n…'
+}
+
 export function readContract(runDir: string): string {
   const p = join(runDir, 'contract.md')
   if (!existsSync(p)) return ''
   try {
-    const text = readFileSync(p, 'utf8').trim()
-    if (!text) return ''
-    if (text.length <= CONTRACT_CAP) return text
-    return text.slice(0, CONTRACT_CAP) + '\n…'
+    return contractCapText(readFileSync(p, 'utf8'))
   } catch {
     return ''
   }
@@ -88,10 +92,7 @@ export async function readContractAsync(runDir: string): Promise<string> {
   const p = join(runDir, 'contract.md')
   if (!existsSync(p)) return ''
   try {
-    const text = (await readFile(p, 'utf8')).trim()
-    if (!text) return ''
-    if (text.length <= CONTRACT_CAP) return text
-    return text.slice(0, CONTRACT_CAP) + '\n…'
+    return contractCapText(await readFile(p, 'utf8'))
   } catch {
     return ''
   }
@@ -504,23 +505,6 @@ export function loadMessages(workspacePath: string, runId: string): ChatMessage[
   return parseMessagesJsonl(content)
 }
 
-/**
- * Load only the post-fold working set from disk (skip parsing folded prefix).
- * Equivalent to `applyFoldedMessagesWatermark(loadMessages(...), fold)` without
- * materializing the folded ChatMessage objects.
- */
-export function loadMessagesAfterFold(
-  workspacePath: string,
-  runId: string,
-  foldedMessages: number
-): ChatMessage[] {
-  const dir = resolveRunDir(workspacePath, runId)
-  const content = stitchedMessagesContentSync(dir)
-  if (content == null) return []
-  const skip = Math.max(0, Math.floor(foldedMessages))
-  return parseMessagesJsonlSkipping(content, skip)
-}
-
 export async function loadMessagesAsync(
   workspacePath: string,
   runId: string
@@ -531,24 +515,6 @@ export async function loadMessagesAsync(
     const content = await stitchedMessagesContentAsync(dir)
     if (content == null) return []
     return parseMessagesJsonl(content)
-  } catch (err) {
-    logger.warn('Failed to read messages.jsonl', { scope: 'state', runId, err })
-    return []
-  }
-}
-
-export async function loadMessagesAfterFoldAsync(
-  workspacePath: string,
-  runId: string,
-  foldedMessages: number
-): Promise<ChatMessage[]> {
-  const dir = resolveRunDir(workspacePath, runId)
-  await flushMessageAppends(dir)
-  try {
-    const content = await stitchedMessagesContentAsync(dir)
-    if (content == null) return []
-    const skip = Math.max(0, Math.floor(foldedMessages))
-    return parseMessagesJsonlSkipping(content, skip)
   } catch (err) {
     logger.warn('Failed to read messages.jsonl', { scope: 'state', runId, err })
     return []
@@ -736,9 +702,8 @@ export function loadWorkingMessagesForFold(
 ): { messages: ChatMessage[]; foldedMessages: number } {
   const fold = Math.max(0, Math.floor(foldedMessages))
   const dir = resolveRunDir(workspacePath, runId)
-  // Single stitched read for the whole decision. The previous shape called
-  // `loadMessagesAfterFold` and then `loadMessages` on the fallback branch,
-  // reading and parsing the entire transcript twice per compaction attempt.
+  // Single stitched read for the whole decision instead of reading and
+  // parsing the entire transcript twice per compaction attempt.
   const content = stitchedMessagesContentCached(dir)
   if (content == null) return { messages: [], foldedMessages: 0 }
   if (fold <= 0) {
@@ -1139,16 +1104,6 @@ export async function loadEventsForHydrationAsync(
   const criticalText = readFileTailSync(p, eventsTailByteBudget(Math.max(limit * 10, 2000)))
   const critical = collectLatestCriticalEvents(criticalText, inferredRunId)
   return mergeCriticalHydrationEvents(uiEvents, critical)
-}
-
-export function loadEventsForRun(
-  workspacePath: string,
-  runId: string,
-  options?: { limit?: number }
-): PersistedEvent[] {
-  const dir = resolveRunDir(workspacePath, runId)
-  if (!existsSync(join(dir, 'events.jsonl'))) return []
-  return loadEvents(dir, runId, options)
 }
 
 export async function loadEventsForRunAsync(

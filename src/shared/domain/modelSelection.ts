@@ -17,6 +17,14 @@ export function resolveServiceTier(
   return settings.serviceTierByModel[key] ?? settings.serviceTier
 }
 
+/**
+ * Parse a `provider::model` key back into its parts.
+ *
+ * The declared provider type stays the builtin `ProviderId` union for wire
+ * compat with existing call sites. At runtime dynamic `custom:<slug>` ids
+ * round-trip through the same split: slugs cannot contain ':' (see
+ * CUSTOM_PROVIDER_SLUG_RE), so the parse stays unambiguous.
+ */
 export function parseModelSelectionKey(
   key: string
 ): { provider: ProviderId; model: string } | null {

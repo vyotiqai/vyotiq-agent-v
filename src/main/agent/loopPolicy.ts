@@ -246,7 +246,8 @@ export function isInspectToolName(name: string): boolean {
     name === 'grep' ||
     name === 'glob' ||
     name === 'search' ||
-    name === 'codebase_search'
+    name === 'codebase_search' ||
+    name === 'concept_search'
   )
 }
 
@@ -291,7 +292,11 @@ export function inspectPathsFromToolCall(
       .map((p) => normalizeWorkspaceRelPath(p))
       .filter((p) => isConcreteWorkspacePath(p))
   }
-  if (name === 'codebase_search' && typeof resultContent === 'string' && resultContent) {
+  if (
+    (name === 'codebase_search' || name === 'concept_search') &&
+    typeof resultContent === 'string' &&
+    resultContent
+  ) {
     return codebaseSearchHitPathsFromResult(resultContent)
       .map((p) => normalizeWorkspaceRelPath(p))
       .filter((p) => isConcreteWorkspacePath(p))

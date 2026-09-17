@@ -9,8 +9,6 @@ import {
   enqueueFollowUp,
   takeNextFollowUp,
   takeNextReadyFollowUp,
-  drainReadyFollowUps,
-  drainFollowUps,
   removeFollowUp,
   updateFollowUp,
   promoteFollowUp,
@@ -134,7 +132,7 @@ describe('runRegistry follow-ups', () => {
     const handle2 = registerRunAbort(runId, '/ws')
     enqueueFollowUp(runId, { role: 'user', content: 'steer' })
     expect(tryBeginRunClosing(runId, handle2.invokeId)).toBe('has_followups')
-    expect(drainFollowUps(runId)).toHaveLength(1)
+    expect(takeNextFollowUp(runId)).toBeTruthy()
     expect(tryBeginRunClosing(runId, handle2.invokeId)).toBe('closed')
   })
 
@@ -204,7 +202,7 @@ describe('runRegistry follow-ups', () => {
     expect(hasReadyFollowUps(runId)).toBe(false)
     promoteFollowUp(runId, queued.id)
     expect(hasReadyFollowUps(runId)).toBe(true)
-    expect(drainReadyFollowUps(runId)[0]?.ready).toBe(true)
+    expect(takeNextReadyFollowUp(runId)?.ready).toBe(true)
   })
 
   it('updates and promotes queued follow-ups', () => {

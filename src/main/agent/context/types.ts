@@ -1,9 +1,6 @@
 import type { ChatMessage, ModelInfo, ResponseVerbosity, UserRule } from '../../../shared/ipc'
 import type { TokenUsage } from '../providers/types'
-import {
-  BUDGET_SHARES as SHARED_BUDGET_SHARES,
-  DEFAULT_CONTEXT_WINDOW as SHARED_DEFAULT_CONTEXT_WINDOW
-} from '../../../shared/domain/contextBudget'
+import { DEFAULT_CONTEXT_WINDOW as SHARED_DEFAULT_CONTEXT_WINDOW } from '../../../shared/domain/contextBudget'
 
 export type BudgetLayers = {
   system: number
@@ -12,9 +9,6 @@ export type BudgetLayers = {
   history: number
   buffer: number
 }
-
-/** Fixed budget shares of model context window — kept in sync via shared/domain/contextBudget. */
-export const BUDGET_SHARES: BudgetLayers = SHARED_BUDGET_SHARES
 
 export const KEEP_RECENT_TURNS = 12
 export const KEEP_LAST_TOOL_RESULTS = 6

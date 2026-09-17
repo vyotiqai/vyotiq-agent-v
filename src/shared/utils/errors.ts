@@ -28,6 +28,7 @@ export type ErrorCode =
   | 'PROVIDER_BILLING'
   | 'PROVIDER_HTTP'
   | 'PROVIDER_NETWORK'
+  | 'PROVIDER_REQUEST'
   | 'PROVIDER_STREAM'
   | 'PROVIDER_TIMEOUT'
   | 'PROVIDER_KEYCHAIN'
@@ -146,7 +147,8 @@ const EXPECTED_CODES = new Set<ErrorCode>([
 // Codes excluded here are permanent user-action failures (bad key, missing
 // plan, exhausted credits) — the UI must not offer Retry for them. PROVIDER_HTTP
 // stays retryable for 404/429/5xx; 401/402/403 arrive pre-mapped to PROVIDER_AUTH
-// / PROVIDER_BILLING by the loop (see providerHttpErrorCode).
+// / PROVIDER_BILLING and deterministic 4xx (wrong model, bad request) to
+// PROVIDER_REQUEST by the loop (see providerHttpErrorCode).
 const RETRYABLE_TURN_ERROR_CODES = new Set<ErrorCode>([
   'PROVIDER_NETWORK',
   'PROVIDER_HTTP',

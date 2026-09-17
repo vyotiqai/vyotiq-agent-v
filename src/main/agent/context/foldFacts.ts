@@ -41,6 +41,7 @@ const INSPECT_TOOLS = new Set([
   'glob',
   'search',
   'codebase_search',
+  'concept_search',
   'memory_read',
   'memory_write'
 ])

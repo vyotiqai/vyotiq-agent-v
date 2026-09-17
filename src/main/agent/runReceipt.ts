@@ -39,7 +39,7 @@ type SeedToolMessage = {
 }
 
 /** Normalize em/en dashes and common UTF-8 mojibake to ASCII `-` for stable cluster keys. */
-export function normalizeFailureClusterText(text: string): string {
+function normalizeFailureClusterText(text: string): string {
   return text
     .replace(/\u2014|\u2013/g, '-')
     .replace(/â€"|â€“/g, '-')
@@ -95,13 +95,6 @@ function failureClusterBody(toolName: string, content: string): string {
   return text.slice(0, 80)
 }
 
-/** Longest run of back-to-back failed tool calls in message order (weakness signal). */
-export function maxConsecutiveToolFailuresFromMessages(
-  messages: readonly SeedToolMessage[]
-): number {
-  return scanToolMessages(messages).maxConsecutiveToolFailures
-}
-
 function unreadEditPathsFromMessages(
   messages: readonly SeedToolMessage[],
   resultByCallId: Map<string, { ok: boolean; content: string }>
@@ -122,7 +115,8 @@ function unreadEditPathsFromMessages(
         call.name === 'read' ||
         call.name === 'grep' ||
         call.name === 'glob' ||
-        call.name === 'codebase_search'
+        call.name === 'codebase_search' ||
+        call.name === 'concept_search'
       ) {
         applyToolCallToKnownPaths(known, call.name, args, ok, content)
         continue

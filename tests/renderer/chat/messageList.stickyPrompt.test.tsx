@@ -104,14 +104,17 @@ function forceHybridPath(): () => void {
 }
 
 describe('MessageList native turn prompt pinning', () => {
-  it('marks the original user prompt bubble as the pinned element without complete row fills', () => {
+  it('pins the user prompt bubble inline with an opaque pinned stack (no scroll-through)', () => {
     render(<MessageList items={items} />)
     const pinned = [...document.querySelectorAll('[data-sticky-turn-prompt]')]
     expect(pinned.length).toBe(2)
     for (const el of pinned) {
-      // The prompt bubble pins inline (position: sticky) without full-row bg-bg fills
+      // The prompt bubble pins inline (position: sticky). The pinned stack is
+      // opaque: without a full-row fill, rows scrolling beneath the pinned
+      // prompt bleed through (bubble hover tint + transparent tasks band)
+      // and render as overlapping text.
       expect(el.className).toContain('sticky')
-      expect(el.className).not.toContain('bg-bg')
+      expect(el.className).toContain('bg-bg')
       const prompt = el.querySelector('[data-user-prompt]')
       expect(prompt).not.toBeNull()
       // Edge-to-edge floating bubble styling with surface shadow

@@ -15,6 +15,49 @@ export const ProviderIdSchema = z.enum([
 ])
 export type ProviderId = z.infer<typeof ProviderIdSchema>
 
+/**
+ * Slug part of a dynamic custom-provider id (`custom:<slug>`). Lowercase
+ * alphanumeric + hyphens, 1-40 chars, no ':' — slugs cannot contain ':' so
+ * `modelSelectionKey`'s `provider::model` separator stays unambiguous.
+ */
+export const CUSTOM_PROVIDER_SLUG_RE = /^[a-z0-9-]{1,40}$/
+export const CUSTOM_PROVIDER_ID_PREFIX = 'custom:'
+
+/** Parse the slug out of a `custom:<slug>` id, or null when it is not one. */
+export function customProviderSlug(id: string): string | null {
+  if (!id || !id.startsWith(CUSTOM_PROVIDER_ID_PREFIX)) return null
+  const slug = id.slice(CUSTOM_PROVIDER_ID_PREFIX.length)
+  return CUSTOM_PROVIDER_SLUG_RE.test(slug) ? slug : null
+}
+
+/** Dynamic custom-provider id: `custom:<slug>` with a validated slug. */
+export type CustomProviderId = `custom:${string}`
+export const CustomProviderIdSchema = z
+  .string()
+  .refine((id) => customProviderSlug(id) !== null, {
+    message:
+      'must be `custom:<slug>` with a lowercase [a-z0-9-]{1,40} slug and no additional ":"'
+  })
+  .transform((id) => id as CustomProviderId)
+
+/** Any provider id: a builtin catalog id or a dynamic `custom:<slug>` id. */
+export type ProviderIdAny = ProviderId | CustomProviderId
+
+/**
+ * Wire schema accepting any provider id (builtin enum + dynamic custom ids).
+ * `ProviderIdSchema` is kept unchanged for wire compat with existing payloads.
+ */
+export const ProviderIdSchemaAny = z.union([ProviderIdSchema, CustomProviderIdSchema])
+
+export function isCustomProviderId(id: string): id is CustomProviderId {
+  return customProviderSlug(id) !== null
+}
+
+/** Build a dynamic custom-provider id from a slug (parse sites validate it). */
+export function customProviderId(slug: string): CustomProviderId {
+  return `custom:${slug}`
+}
+
 export const InputModalitySchema = z.enum(['text', 'image', 'audio', 'file'])
 export const OutputModalitySchema = z.enum(['text', 'image'])
 

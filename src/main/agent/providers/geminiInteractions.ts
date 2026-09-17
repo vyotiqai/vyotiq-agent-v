@@ -1,9 +1,13 @@
 import type { ChatMessage } from '../../../shared/ipc'
-import { createHash } from 'crypto'
 import { contentToText, providerContentParts } from '../../../shared/ipc'
 import { formatError } from '../../../shared/errors'
 import { wireToolCallArguments, mergeOpenAiCompatToolArgDelta } from '../toolArgWire'
 import { mergeStreamedToolName } from '../../../shared/utils/toolName'
+import {
+  continuationPromptKeys,
+  rememberContinuationPrompt,
+  stablePromptKey
+} from './promptKeys'
 import {
   normalizeEffortForGeminiInteractions,
   statefulContinuationMessages,
@@ -18,24 +22,6 @@ import { CHAT_FETCH_MAX_ATTEMPTS, fetchWithRetry } from './fetchWithRetry'
 import { formatProviderHttpError } from './httpErrors'
 import { parseDataUrl } from './normalize'
 import { resolveSystemZones, volatileSessionMessage } from './systemZones'
-
-const continuationPromptKeys = new Map<string, string>()
-const MAX_CONTINUATION_KEYS = 256
-
-function stablePromptKey(req: ProviderChatRequest): string | undefined {
-  if (req.systemStable === undefined) return undefined
-  const stable = resolveSystemZones(req).stable ?? ''
-  return createHash('sha256').update(req.model).update('\0').update(stable).digest('hex')
-}
-
-function rememberContinuationPrompt(interactionId: string, key: string): void {
-  continuationPromptKeys.delete(interactionId)
-  continuationPromptKeys.set(interactionId, key)
-  if (continuationPromptKeys.size > MAX_CONTINUATION_KEYS) {
-    const oldest = continuationPromptKeys.keys().next().value
-    if (oldest) continuationPromptKeys.delete(oldest)
-  }
-}
 
 export function serializeToolArgs(value: unknown): string {
   if (value == null) return ''

@@ -7,6 +7,8 @@ vi.mock('@main/app/window', () => ({
 import {
   isFindstrNoMatch,
   isFindstrNoMatchContent,
+  isPowerShellFileOp,
+  appendPowerShellFileOpHint,
   isDirMissingPath,
   isDirMissingPathContent,
   lastPipelineCommandToken,
@@ -349,6 +351,49 @@ describe('appendPowerShellCompatHint', () => {
     expect(out).toMatch(/\$_\.Line not \$_ \.Line/)
     expect(out).toMatch(/Get-Content/)
     expect(out).toMatch(/do not -split the path string/i)
+  })
+})
+
+describe('isPowerShellFileOp / appendPowerShellFileOpHint', () => {
+  const HINT = /\[Tool hint\] For workspace file search or read, use the grep, read, glob, and list_dir tools\./
+
+  it('hints when the primary pipeline stage is a file-op cmdlet', () => {
+    expect(isPowerShellFileOp('Get-ChildItem src -Recurse | Select-String foo')).toBe(true)
+    expect(isPowerShellFileOp('Select-String -Path x.ts foo')).toBe(true)
+    expect(isPowerShellFileOp('Get-Content package.json')).toBe(true)
+  })
+
+  it('hints for gci and sls aliases', () => {
+    expect(isPowerShellFileOp('gci src -Recurse')).toBe(true)
+    expect(isPowerShellFileOp('sls -Path x.ts foo')).toBe(true)
+  })
+
+  it('is case-insensitive (primaryCommandToken lowercases)', () => {
+    expect(isPowerShellFileOp('get-childitem src')).toBe(true)
+    expect(isPowerShellFileOp('SELECT-STRING foo')).toBe(true)
+  })
+
+  it('does not hint when a non-file-op command is primary', () => {
+    expect(isPowerShellFileOp('pnpm test | Select-String FAIL')).toBe(false)
+    expect(isPowerShellFileOp('git status')).toBe(false)
+    expect(isPowerShellFileOp('node script.js')).toBe(false)
+  })
+
+  it('appends the hint for PowerShell shell with file-op primary', () => {
+    const base = 'cwd: /ws\nshell: powershell\nexit_code: 0'
+    const out = appendPowerShellFileOpHint(base, 'powershell', 'Get-ChildItem src -Recurse | Select-String foo')
+    expect(out).toMatch(HINT)
+    expect(out.startsWith(base)).toBe(true)
+  })
+
+  it('does not append the hint for cmd.exe shell even on file-op commands', () => {
+    const base = 'cwd: /ws\nshell: cmd\nexit_code: 0'
+    expect(appendPowerShellFileOpHint(base, 'cmd', 'Get-ChildItem src -Recurse')).toBe(base)
+  })
+
+  it('does not append the hint for non-file-op primary under PowerShell', () => {
+    const base = 'cwd: /ws\nshell: powershell\nexit_code: 0'
+    expect(appendPowerShellFileOpHint(base, 'powershell', 'pnpm test | Select-String FAIL')).toBe(base)
   })
 })
 

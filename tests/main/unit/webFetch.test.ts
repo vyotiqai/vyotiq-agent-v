@@ -10,7 +10,7 @@ import {
   setDnsLookupForTests,
   setPublicFetchForTests,
   spaShellWarning
-} from '@main/agent/tools/webFetch'
+} from '@main/net/webFetch'
 
 const PUBLIC_IP = '93.184.216.34'
 const PUBLIC_IPV6 = '2606:2800:220:1:248:1893:25c8:1946'

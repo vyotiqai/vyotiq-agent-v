@@ -73,6 +73,10 @@ describe('buildToolCatalog', () => {
       active: false,
       reason: 'code-index-off'
     })
+    expect(byName.get('concept_search')).toMatchObject({
+      active: false,
+      reason: 'code-index-off'
+    })
   })
 
   it('reports MCP tools with server state and policy reasons', () => {

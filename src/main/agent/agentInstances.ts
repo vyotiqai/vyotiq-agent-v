@@ -198,6 +198,18 @@ function formatWroteFilesBlock(wroteFiles: string[]): string | null {
   return `wroteFiles:\n${lines.join('\n')}`
 }
 
+const CHILD_SUMMARY_MAX_CHARS = 6_000
+const CHILD_OUTLINE_LINE_MAX_CHARS = 280
+const CHILD_OUTLINE_MAX_CHARS = 10_000
+const CHILD_TAIL_MAX_MESSAGES = 40
+const CHILD_TAIL_MESSAGE_MAX_CHARS = 2_000
+const CHILD_TAIL_MAX_CHARS = 12_000
+
+function capChildText(text: string, max: number): string {
+  if (text.length <= max) return text
+  return `${text.slice(0, max)}\n[...truncated ${text.length - max} chars]`
+}
+
 function formatChildSummary(
   workspacePath: string,
   childRunId: string,
@@ -224,11 +236,12 @@ function formatChildSummary(
 }
 
 export async function summarizeChildRunAsync(workspacePath: string, childRunId: string): Promise<string> {
-  return formatChildSummary(
+  const summary = formatChildSummary(
     workspacePath,
     childRunId,
     await loadMessagesAsync(workspacePath, childRunId)
   )
+  return capChildText(summary, CHILD_SUMMARY_MAX_CHARS)
 }
 
 function formatChildOutline(
@@ -245,14 +258,18 @@ function formatChildOutline(
   ]
   for (const [i, msg] of messages.entries()) {
     const text = contentDisplayText(msg.content).replace(/\s+/g, ' ').trim()
-    lines.push(`${i + 1}. ${msg.role}: ${text || '(empty)'}`)
+    const capped =
+      text.length <= CHILD_OUTLINE_LINE_MAX_CHARS
+        ? text
+        : `${text.slice(0, CHILD_OUTLINE_LINE_MAX_CHARS)}…[truncated]`
+    lines.push(`${i + 1}. ${msg.role}: ${capped || '(empty)'}`)
   }
   const wroteBlock = formatWroteFilesBlock(wroteFilesFromReceipt(runDir))
   if (wroteBlock) {
     lines.push('')
     lines.push(wroteBlock)
   }
-  return lines.join('\n')
+  return capChildText(lines.join('\n'), CHILD_OUTLINE_MAX_CHARS)
 }
 
 function formatChildTail(
@@ -262,16 +279,18 @@ function formatChildTail(
 ): string {
   const runDir = resolveRunDir(workspacePath, childRunId)
   const status = loadStatus(runDir)
+  const total = messages.length
+  const shown = Math.min(CHILD_TAIL_MAX_MESSAGES, total)
   const parts: string[] = [
     `${formatAgentInstanceLabel(childRunId)}`,
     `status: ${status?.status ?? 'unknown'}`,
-    `showing ${messages.length} of ${messages.length} messages`
+    `showing ${shown} of ${total} messages`
   ]
-  for (const msg of messages) {
+  for (const msg of messages.slice(total - shown)) {
     const raw = contentDisplayText(msg.content).trim() || '(empty)'
-    parts.push(`\n\n[${msg.role}]\n${raw}`)
+    parts.push(`\n\n[${msg.role}]\n${capChildText(raw, CHILD_TAIL_MESSAGE_MAX_CHARS)}`)
   }
-  return parts.join('')
+  return capChildText(parts.join(''), CHILD_TAIL_MAX_CHARS)
 }
 
 export async function pullChildRun(
@@ -283,7 +302,8 @@ export async function pullChildRun(
   switch (view) {
     case 'summary': {
       const status = loadStatus(resolveRunDir(workspacePath, childRunId))
-      return `${formatAgentInstanceLabel(childRunId)}\nstatus: ${status?.status ?? 'unknown'}\n\n${formatChildSummary(workspacePath, childRunId, messages)}`
+      const summary = `${formatAgentInstanceLabel(childRunId)}\nstatus: ${status?.status ?? 'unknown'}\n\n${formatChildSummary(workspacePath, childRunId, messages)}`
+      return capChildText(summary, CHILD_SUMMARY_MAX_CHARS)
     }
     case 'outline':
       return formatChildOutline(workspacePath, childRunId, messages)

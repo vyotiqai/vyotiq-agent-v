@@ -74,7 +74,7 @@ import {
 import type { PaneCapacityContext } from '@renderer/lib/hooks/useWorkspaceManager'
 import type { ChatPane, PaneDropZone } from '@renderer/lib/chat/chatPaneLayout'
 
-export type { ChatItemsStore, ChatMetaStore } from './chatStores'
+
 
 /** Heavy dock panels are code-split: xterm/CodeMirror/PR tooling parse on first open. */
 const FilesPanel = lazy(() =>
@@ -90,168 +90,6 @@ function DockPanelSuspenseFallback() {
 }
 
 const MemoComposer = memo(Composer)
-
-function TranscriptPane({
-  items,
-  itemsStore,
-  pendingRun,
-  running,
-  transcriptLoading,
-  transcriptHasEarlier,
-  transcriptLoadingEarlier,
-  onLoadEarlierMessages,
-  restoreScrollTop,
-  scrollRestoreToken,
-  onScrollTopChange,
-  onLoadToolContent,
-  onThinkingToggle,
-  onToolToggle,
-  onGroupToggle,
-  onTurnToggle,
-  onApprovalDecision,
-  onQuestionSubmit,
-  collapsedTurns,
-  showThinking,
-  mcpServerNames,
-  surfaceKey,
-  workspacePath,
-  activeRunId,
-  agentMode,
-  onOpenChanges,
-  sideRailPad = false,
-  editingUserMessageIndex = null,
-  editComposer,
-  onBeginEditUserMessage,
-  onRevertUserMessage,
-  messageCount = 0,
-  networkWait = null,
-  compacting = false,
-  turnFailed = false,
-  turnFailureLabel = null,
-  turnStatus = null,
-  agentInstances,
-  onOpenAgentInstance,
-  onOpenWorkspaceFile,
-  turnUsage,
-  metaStore,
-  onContinue
-}: {
-  items: UiItem[]
-  /** When set, MessageList subscribes via store so TranscriptPane skips token patches. */
-  itemsStore?: ChatItemsStore
-  pendingRun?: boolean
-  running: boolean
-  transcriptLoading?: boolean
-  /** Earlier transcript messages exist on disk but are not loaded (runs:load-earlier). */
-  transcriptHasEarlier?: boolean
-  /** A runs:load-earlier fetch is in flight. */
-  transcriptLoadingEarlier?: boolean
-  /** Fetch the next earlier transcript window and merge it into the view. */
-  onLoadEarlierMessages?: () => void | Promise<void>
-  restoreScrollTop?: number
-  scrollRestoreToken?: number
-  onScrollTopChange?: (scrollTop: number) => void
-  onLoadToolContent?: (toolCallId: string) => Promise<string | null>
-  onThinkingToggle?: (messageId: string, expanded: boolean) => void
-  onToolToggle?: (toolCallId: string, expanded: boolean) => void
-  onGroupToggle?: (anchorToolCallId: string, expanded: boolean) => void
-  onTurnToggle?: (turnIndex: number) => void
-  onApprovalDecision?: (requestId: string, decision: ToolApprovalDecision) => void | Promise<void>
-  onQuestionSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
-  collapsedTurns?: ReadonlySet<number>
-  showThinking?: boolean
-  mcpServerNames?: ReadonlyMap<string, string>
-  surfaceKey: string
-  workspacePath: string | null
-  activeRunId: string | null
-  agentMode?: AgentInteractionMode
-  onOpenChanges?: (path?: string) => void
-  sideRailPad?: boolean
-  editingUserMessageIndex?: number | null
-  editComposer?: React.ReactNode
-  onBeginEditUserMessage?: (messageIndex: number) => void
-  onRevertUserMessage?: (messageIndex: number) => void
-  messageCount?: number
-  networkWait?: {
-    attempt: number
-    maxAttempts: number
-    retryInMs: number
-    code?: string
-  } | null
-  compacting?: boolean
-  turnFailed?: boolean
-  turnFailureLabel?: string | null
-  turnStatus?: import('@shared/transcript').TurnOutcome | null
-  agentInstances?: Record<string, AgentInstanceUiState>
-  onOpenAgentInstance?: (instanceRunId: string) => void
-  onOpenWorkspaceFile?: (path: string, options?: import('./components/FilesPanel').WorkspaceFileOpenOptions) => void
-  turnUsage?: readonly StepUsageTotals[]
-  metaStore?: ChatMetaStore
-  /** Retry affordance handed to the transcript's run_error rows. */
-  onContinue?: () => void
-}) {
-  const runSession = useMemo(
-    () => ({
-      workspacePath: workspacePath ?? null,
-      runId: activeRunId ?? null,
-      agentMode,
-      agentInstances,
-      onOpenAgentInstance,
-      onOpenWorkspaceFile
-    }),
-    [workspacePath, activeRunId, agentMode, agentInstances, onOpenAgentInstance, onOpenWorkspaceFile]
-  )
-  const emptyLabel =
-    activeRunId == null && workspacePath
-      ? `New chat in ${formatWorkspaceName(workspacePath)}`
-      : undefined
-  return (
-    <RunSessionProvider value={runSession}>
-      <MessageList
-        key={`transcript:${surfaceKey}`}
-        emptyLabel={emptyLabel}
-        workspacePath={workspacePath ?? undefined}
-        items={items}
-        itemsStore={itemsStore}
-        virtualizeLiveEarly
-        pendingRun={pendingRun}
-        running={running}
-        networkWait={networkWait}
-        compacting={compacting}
-        turnFailed={turnFailed}
-        turnFailureLabel={turnFailureLabel}
-        turnStatus={turnStatus}
-        transcriptLoading={transcriptLoading}
-        transcriptHasEarlier={transcriptHasEarlier}
-        transcriptLoadingEarlier={transcriptLoadingEarlier}
-        onLoadEarlierMessages={onLoadEarlierMessages}
-        restoreScrollTop={restoreScrollTop}
-        scrollRestoreToken={scrollRestoreToken}
-        onScrollTopChange={onScrollTopChange}
-        onLoadToolContent={onLoadToolContent}
-        onThinkingToggle={onThinkingToggle}
-        onToolToggle={onToolToggle}
-        onGroupToggle={onGroupToggle}
-        onTurnToggle={onTurnToggle}
-        onApprovalDecision={onApprovalDecision}
-        onQuestionSubmit={onQuestionSubmit}
-        onRetryNetwork={onContinue}
-        collapsedTurns={collapsedTurns}
-        showThinking={showThinking}
-        mcpServerNames={mcpServerNames}
-        onOpenChanges={onOpenChanges}
-        sideRailPad={sideRailPad}
-        editingUserMessageIndex={editingUserMessageIndex}
-        editComposer={editComposer}
-        onBeginEditUserMessage={onBeginEditUserMessage}
-        onRevertUserMessage={onRevertUserMessage}
-        messageCount={messageCount}
-        turnUsage={turnUsage}
-        metaStore={metaStore}
-      />
-    </RunSessionProvider>
-  )
-}
 
 export function ChatView({
   items,
@@ -783,6 +621,21 @@ const runGoal = useRunGoal({
     },
     [setRightPanel, workspacePath]
   )
+  const transcriptRunSession = useMemo(
+    () => ({
+      workspacePath: workspacePath ?? null,
+      runId: activeRunId ?? null,
+      agentMode,
+      agentInstances,
+      onOpenAgentInstance,
+      onOpenWorkspaceFile: openWorkspaceFile
+    }),
+    [workspacePath, activeRunId, agentMode, agentInstances, onOpenAgentInstance, openWorkspaceFile]
+  )
+  const transcriptEmptyLabel =
+    activeRunId == null && workspacePath
+      ? `New chat in ${formatWorkspaceName(workspacePath)}`
+      : undefined
   const composerRunSession = useMemo(
     () => ({
       workspacePath: workspacePath ?? null,
@@ -1298,51 +1151,50 @@ const runGoal = useRunGoal({
           onStopLoop={runGoal.stopLoop}
           onStopRun={onStop}
           transcript={
-            <TranscriptPane
-              items={items}
-              itemsStore={itemsStore}
-              pendingRun={pendingRun}
-              running={running}
-              transcriptLoading={transcriptLoading}
-              transcriptHasEarlier={transcriptHasEarlier}
-              transcriptLoadingEarlier={transcriptLoadingEarlier}
-              onLoadEarlierMessages={onLoadEarlierMessages}
-              restoreScrollTop={restoreScrollTop}
-              scrollRestoreToken={scrollRestoreToken}
-              onScrollTopChange={onScrollTopChange}
-              onLoadToolContent={onLoadToolContent}
-              onThinkingToggle={onThinkingToggle}
-              onToolToggle={onToolToggle}
-              onGroupToggle={onGroupToggle}
-              onTurnToggle={onTurnToggle}
-              onApprovalDecision={onApprovalDecision}
-              onQuestionSubmit={onQuestionSubmit}
-              collapsedTurns={collapsedTurns}
-              showThinking={showThinking}
-              mcpServerNames={mcpServerNames}
-              surfaceKey={surfaceKey}
-              workspacePath={workspacePath}
-              activeRunId={activeRunId}
-              agentMode={agentMode}
-              onOpenChanges={onOpenAgentChanges}
-              sideRailPad={agentSideRailPad}
-              editingUserMessageIndex={editingUserMessageIndex}
-              editComposer={editComposer}
-              onBeginEditUserMessage={onEditAndResend ? beginPromptEdit : undefined}
-              onRevertUserMessage={onRevertToUserMessage ? beginPromptRevert : undefined}
-              messageCount={messages.length}
-              networkWait={networkWait}
-              compacting={compacting}
-              turnFailed={turnFailed}
-              turnFailureLabel={turnFailureLabel}
-              turnStatus={turnStatus}
-              onContinue={onContinue}
-              agentInstances={agentInstances}
-              onOpenAgentInstance={onOpenAgentInstance}
-              onOpenWorkspaceFile={openWorkspaceFile}
-              turnUsage={turnUsage}
-              metaStore={metaStore}
-            />
+            <RunSessionProvider value={transcriptRunSession}>
+              <MessageList
+                key={`transcript:${surfaceKey}`}
+                emptyLabel={transcriptEmptyLabel}
+                workspacePath={workspacePath ?? undefined}
+                items={items}
+                itemsStore={itemsStore}
+                virtualizeLiveEarly
+                pendingRun={pendingRun}
+                running={running}
+                networkWait={networkWait}
+                compacting={compacting}
+                turnFailed={turnFailed}
+                turnFailureLabel={turnFailureLabel}
+                turnStatus={turnStatus}
+                transcriptLoading={transcriptLoading}
+                transcriptHasEarlier={transcriptHasEarlier}
+                transcriptLoadingEarlier={transcriptLoadingEarlier}
+                onLoadEarlierMessages={onLoadEarlierMessages}
+                restoreScrollTop={restoreScrollTop}
+                scrollRestoreToken={scrollRestoreToken}
+                onScrollTopChange={onScrollTopChange}
+                onLoadToolContent={onLoadToolContent}
+                onThinkingToggle={onThinkingToggle}
+                onToolToggle={onToolToggle}
+                onGroupToggle={onGroupToggle}
+                onTurnToggle={onTurnToggle}
+                onApprovalDecision={onApprovalDecision}
+                onQuestionSubmit={onQuestionSubmit}
+                onRetryNetwork={onContinue}
+                collapsedTurns={collapsedTurns}
+                showThinking={showThinking}
+                mcpServerNames={mcpServerNames}
+                onOpenChanges={onOpenAgentChanges}
+                sideRailPad={agentSideRailPad}
+                editingUserMessageIndex={editingUserMessageIndex}
+                editComposer={editComposer}
+                onBeginEditUserMessage={onEditAndResend ? beginPromptEdit : undefined}
+                onRevertUserMessage={onRevertToUserMessage ? beginPromptRevert : undefined}
+                messageCount={messages.length}
+                turnUsage={turnUsage}
+                metaStore={metaStore}
+              />
+            </RunSessionProvider>
           }
           composer={
             <RunSessionProvider value={composerRunSession}>
