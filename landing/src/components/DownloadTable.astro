@@ -32,37 +32,47 @@ const groups = [
 ];
 ---
 
-<div id="download" class="mx-auto grid w-full max-w-6xl grid-cols-1 gap-px border-y border-line bg-line/40 md:grid-cols-3">
-  {
-    groups.map((g) => (
-      <div data-os={g.os} class="bg-ink px-6 py-6 transition-colors data-[recommended]:bg-surface">
-        <div class="flex items-center justify-between">
-          <p class="text-sm font-semibold text-fg">{g.name}</p>
-          <p class="font-mono text-[10px] uppercase tracking-wider text-fog/70">{g.hint}</p>
+<div id="download" class="mx-auto w-full max-w-5xl px-6 pb-20 pt-2">
+  <div class="grid divide-y divide-line/60 border-y border-line/60">
+    {
+      groups.map((g) => (
+        <div data-os={g.os} class="py-6 transition-colors data-[recommended]:bg-surface/60">
+          <div class="flex items-baseline justify-between">
+            <p class="flex items-baseline gap-3 text-sm font-semibold text-bright">
+              {g.name}
+              <span class="hidden rounded-full bg-vy/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-vy" data-rec>
+                your system
+              </span>
+            </p>
+            <p class="font-mono text-[11px] text-fog/70">{g.hint}</p>
+          </div>
+          <ul class="mt-3 divide-y divide-line/40">
+            {g.items
+              .filter((i) => i.asset)
+              .map((i) => (
+                <li class="flex items-center justify-between gap-4 py-2.5">
+                  <div class="min-w-0">
+                    <p class="truncate font-mono text-xs text-fg/90">{i.asset.file}</p>
+                    <p class="text-xs text-fog/70">{i.label}</p>
+                  </div>
+                  <div class="flex shrink-0 items-center gap-4">
+                    <span class="font-mono text-xs text-fog/70">{fmt(i.asset)}</span>
+                    <a
+                      href={i.asset.url}
+                      download
+                      class="text-sm font-medium text-vy underline-offset-4 transition-colors hover:text-vy-hover hover:underline"
+                    >
+                      Download
+                    </a>
+                  </div>
+                </li>
+              ))}
+            {g.items.every((i) => !i.asset) && <li class="py-2.5 text-xs text-fog/70">Grab it from the releases page.</li>}
+          </ul>
         </div>
-        <ul class="mt-4 space-y-3">
-          {g.items
-            .filter((i) => i.asset)
-            .map((i) => (
-              <li class="flex items-center justify-between gap-3">
-                <div class="min-w-0">
-                  <p class="text-xs text-fog">{i.label}</p>
-                  <p class="truncate font-mono text-[11px] text-fog/70">{i.asset.file}</p>
-                </div>
-                <a
-                  href={i.asset.url}
-                  download
-                  class="shrink-0 font-mono text-xs font-medium text-vy underline-offset-4 transition-colors hover:text-vy-hover hover:underline"
-                >
-                  {fmt(i.asset)} ↓
-                </a>
-              </li>
-            ))}
-          {g.items.every((i) => !i.asset) && <li class="text-xs text-fog/70">Grab it from the releases page.</li>}
-        </ul>
-      </div>
-    ))
-  }
+      ))
+    }
+  </div>
 </div>
 
 <script is:inline>
@@ -72,6 +82,9 @@ const groups = [
     const isMac = /Mac|iPhone|iPad/.test(ua) || /mac/i.test(uaPlatform);
     const isLinux = !isMac && (/Linux|X11/.test(ua) || /lin/i.test(uaPlatform));
     const os = isMac ? 'macos' : isLinux ? 'linux' : 'windows';
-    document.querySelector('#download [data-os="' + os + '"]')?.setAttribute('data-recommended', '');
+    const el = document.querySelector('#download [data-os="' + os + '"]');
+    if (!el) return;
+    el.setAttribute('data-recommended', '');
+    el.querySelector('[data-rec]')?.classList.remove('hidden');
   })();
 </script>

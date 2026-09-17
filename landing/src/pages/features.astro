@@ -3,7 +3,6 @@ import Layout from '../layouts/Layout.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 import PageHeader from '../components/PageHeader.astro';
-import FeatureCard from '../components/FeatureCard.astro';
 import features from '../data/features.json';
 ---
 
@@ -11,9 +10,18 @@ import features from '../data/features.json';
   <div class="flex min-h-svh flex-col">
     <Nav />
     <main class="flex-1">
-      <PageHeader eyebrow="Core features" title="Everything the workspace ships with." sub="No feature list theater — these are the surfaces in the app today, described the way you'd meet them." />
-      <div class="mx-auto mt-12 grid w-full max-w-6xl grid-cols-1 gap-4 px-6 sm:grid-cols-2 lg:grid-cols-3 pb-20">
-        {features.map((f, i) => <FeatureCard index={i} title={f.title} body={f.body} />)}
+      <PageHeader eyebrow="Features" title="What the workspace ships with." sub="No feature-list theater. These are the surfaces in the app today, described the way you'd meet them." />
+      <div class="mx-auto w-full max-w-5xl px-6 pb-24 pt-10">
+        <ul class="divide-y divide-line/60 border-y border-line/60">
+          {
+            features.map((f) => (
+              <li class="grid gap-1.5 py-7 md:grid-cols-[230px_1fr] md:gap-8">
+                <h2 class="text-sm font-semibold text-bright">{f.title}</h2>
+                <p class="max-w-2xl text-sm leading-relaxed text-fog">{f.body}</p>
+              </li>
+            ))
+          }
+        </ul>
       </div>
     </main>
     <Footer />

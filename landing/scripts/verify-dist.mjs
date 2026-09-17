@@ -41,10 +41,9 @@ for (const [label, href] of [['features', '/features'], ['workflows', '/workflow
   ok(`home nav link: ${label}`, home.includes(`href="${href}"`));
   ok(`download nav link: ${label}`, download.includes(`href="${href}"`));
 }
-ok('ascii accent', home.includes('data-ascii'));
+ok('agent transcript', home.includes('data-transcript'));
 ok('app screenshot', home.includes('data-shot'));
 ok('home CTA to download', home.includes('href="/download"'));
-ok('home highlights strip', home.includes('Core features') && home.includes('Agent V workflows'));
 ok('features page has cards', featuresPage.includes('Multi-provider chat') && featuresPage.includes('Long-term workspace memory'));
 ok('workflows page has steps', workflowsPage.includes('Fan out') && workflowsPage.includes('Verify'));
 

@@ -2,18 +2,18 @@
 import Layout from '../layouts/Layout.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
-import DownloadTable from '../components/DownloadTable.astro';
 import site from '../data/site.json';
 import release from '../data/release.json';
 import heroApp from '../assets/hero-app.png';
 
-const ascii = ['██    ██', '██    ██', ' ██████ ', '  ████  ', '   ██   '].join('\n');
-
-const highlights = [
-  { href: '/features', eyebrow: 'Core features', text: 'Multi-provider chat, real repo tooling, local dictation, MCP, memory.' },
-  { href: '/workflows', eyebrow: 'Agent V workflows', text: 'Plan, edit, fan out, verify, ship — how an agent run actually works.' },
-  { href: '/download', eyebrow: 'Download', text: `Installers for Windows, macOS, and Linux — ${release.tag ?? 'latest'}.` },
-  { href: '/changelog', eyebrow: 'Changelog', text: 'Release notes for every published version, straight from the repo.' },
+const transcript = [
+  { kind: 'cmd', text: 'fix the flaky test in chatStore' },
+  { kind: 'step', text: 'read src/renderer/stores/chatStore.ts — 212 lines' },
+  { kind: 'step', text: 'edit 3 hunks applied' },
+  { kind: 'step', text: 'run pnpm vitest -- chatStore' },
+  { kind: 'ok', text: '38 passed · 0 failed' },
+  { kind: 'step', text: 'commit fix(chat): await flush before assertion' },
+  { kind: 'pr', text: 'PR #142 opened' },
 ];
 ---
 
@@ -21,71 +21,42 @@ const highlights = [
   <div class="flex min-h-svh flex-col">
     <Nav />
 
-    <section class="relative flex flex-1 flex-col overflow-hidden">
-      <div class="pointer-events-none absolute inset-0" aria-hidden="true">
-        <div class="hero-grid absolute inset-0"></div>
-        <div class="hero-glow vy-drift absolute left-1/2 top-[6%] h-[520px] w-[900px] -translate-x-1/2"></div>
-      </div>
-
-      <pre
-        data-ascii
-        class="vy-breathe pointer-events-none absolute right-10 top-28 hidden select-none font-mono text-sm leading-tight text-vy lg:block"
-        aria-hidden="true">{ascii}</pre
-      >
-
-      <div class="mx-auto w-full max-w-6xl px-6 pt-16 md:pt-24">
-        <p class="vy-rise flex items-center gap-2.5 font-mono text-[11px] uppercase tracking-[0.2em] text-fog">
-          <span class="relative flex size-2">
-            <span class="absolute inline-flex size-full animate-ping rounded-full bg-vy opacity-60"></span>
-            <span class="relative inline-flex size-2 rounded-full bg-vy"></span>
-          </span>
-          {release.tag ?? 'Open source'} — free & open source
-        </p>
-
-        <h1 class="vy-rise mt-5 max-w-3xl text-balance text-4xl font-bold leading-[1.08] tracking-tight text-bright md:text-6xl [animation-delay:80ms]">
-          The coding workspace for real repositories.
-        </h1>
-
-        <p class="vy-rise mt-5 max-w-xl text-pretty text-base leading-relaxed text-fog md:text-lg [animation-delay:160ms]">
-          Agent V plans, edits, and ships in your actual working tree. Local-first, private by default, free to run.
-        </p>
-
-        <p class="vy-rise mt-6 font-mono text-[11px] uppercase tracking-[0.18em] text-fog/70 [animation-delay:240ms]">
-          {site.stack.join(' · ')}
-        </p>
-
-        <div class="vy-rise mt-8 flex flex-wrap items-center gap-3 [animation-delay:320ms]">
-          <a href="/download" class="rounded-full bg-vy px-6 py-2.5 text-sm font-semibold text-vy-ink transition-colors hover:bg-vy-hover">Download Agent V</a>
-          <a href="/workflows" class="rounded-full border border-line px-6 py-2.5 text-sm font-medium text-fg transition-colors hover:border-vy/60 hover:text-bright">See how it works</a>
-        </div>
-      </div>
-
-      <div data-shot class="vy-float relative mx-auto mt-auto w-full max-w-4xl px-6 pt-12">
-        <div class="overflow-hidden rounded-t-2xl border border-b-0 border-line bg-panel shadow-[0_-24px_80px_-24px_rgb(79_179_232/0.18)]">
-          <div class="flex h-7 items-center gap-1.5 border-b border-line/60 px-4">
-            <span class="size-2 rounded-full bg-[#ff5f57]"></span>
-            <span class="size-2 rounded-full bg-[#febc2e]"></span>
-            <span class="size-2 rounded-full bg-[#28c840]"></span>
-            <span class="ml-3 font-mono text-[10px] tracking-wider text-fog/60">agent-v</span>
+    <main class="flex-1">
+      <section class="mx-auto grid w-full max-w-5xl gap-12 px-6 pb-16 pt-14 sm:pt-20 lg:grid-cols-[1fr_360px] lg:items-center lg:gap-16">
+        <div>
+          <h1 class="vy-in max-w-lg text-balance text-4xl font-bold leading-[1.12] tracking-tight text-bright sm:text-5xl">
+            Agent V works in your repository, not in a sandbox.
+          </h1>
+          <p class="vy-in mt-4 max-w-md text-base leading-relaxed text-fog [animation-delay:80ms]">
+            Chat with the model you prefer. The agent reads your working tree, edits real files, runs your checks, and opens pull requests.
+          </p>
+          <div class="vy-in mt-7 flex items-center gap-5 [animation-delay:140ms]">
+            <a href="/download" class="rounded-lg bg-vy px-5 py-2.5 text-sm font-semibold text-vy-ink transition-colors hover:bg-vy-hover">Download for {release.tag ?? 'v1.0.0'}</a>
+            <a href="/workflows" class="text-sm font-medium text-fog transition-colors hover:text-fg">See how it works</a>
           </div>
-          <img src={heroApp.src} alt="Agent V app" class="h-[30vh] min-h-[200px] w-full object-cover object-top" />
         </div>
-      </div>
-    </section>
 
-    <section class="border-t border-line/50 bg-ink">
-      <div class="mx-auto grid w-full max-w-6xl grid-cols-1 gap-px bg-line/40 sm:grid-cols-2 lg:grid-cols-4">
-        {
-          highlights.map((h, i) => (
-            <a href={h.href} class="vy-rise group bg-ink px-6 py-8 transition-colors hover:bg-surface [animation-delay:{`${300 + i * 70}ms`}]">
-              <p class="font-mono text-[11px] uppercase tracking-[0.2em] text-vy/80">{h.eyebrow}</p>
-              <p class="mt-3 text-sm leading-relaxed text-fog group-hover:text-fg">{h.text}</p>
-              <p class="mt-4 font-mono text-xs text-fog/60 transition-colors group-hover:text-vy">→</p>
-            </a>
-          ))
-        }
-      </div>
-    </section>
+        <div data-transcript class="vy-in rounded-xl border border-line bg-panel p-5 font-mono text-[13px] leading-relaxed [animation-delay:160ms]">
+          {
+            transcript.map((t) => (
+              <p class="flex gap-3">
+                <span class:list={['shrink-0', t.kind === 'cmd' ? 'text-bright' : t.kind === 'ok' ? 'text-vy' : t.kind === 'pr' ? 'text-vy' : 'text-fog/50']}>
+                  {t.kind === 'cmd' ? '›' : t.kind === 'ok' ? '✓' : t.kind === 'pr' ? '→' : '·'}
+                </span>
+                <span class:list={[t.kind === 'cmd' ? 'text-fg' : t.kind === 'ok' || t.kind === 'pr' ? 'text-fg/80' : 'text-fog']}>{t.text}</span>
+              </p>
+            ))
+          }
+        </div>
+      </section>
+
+      <section class="border-t border-line/60">
+        <div class="mx-auto w-full max-w-5xl px-6 py-14">
+          <p class="font-mono text-xs text-fog/70">The workspace</p>
+          <img data-shot src={heroApp.src} alt="Agent V workspace" class="vy-in mt-4 w-full rounded-xl border border-line" loading="lazy" />
+        </div>
+      </section>
+    </main>
 
     <Footer />
   </div>
