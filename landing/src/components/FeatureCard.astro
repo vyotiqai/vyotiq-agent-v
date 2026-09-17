@@ -1,0 +1,16 @@
+---
+interface Props {
+  index: number;
+  title: string;
+  body: string;
+}
+
+const { index, title, body } = Astro.props;
+const num = String(index + 1).padStart(2, '0');
+---
+
+<article class="vy-rise group rounded-2xl border border-line bg-panel p-6 transition-colors hover:border-vy/50 [animation-delay:{`${index * 60}ms`}]">
+  <p class="font-mono text-xs text-vy/80">{num}</p>
+  <h2 class="mt-3 text-base font-semibold text-bright">{title}</h2>
+  <p class="mt-2 text-sm leading-relaxed text-fog">{body}</p>
+</article>

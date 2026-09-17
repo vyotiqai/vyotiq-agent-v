@@ -1,0 +1,29 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import PageHeader from '../components/PageHeader.astro';
+import DownloadTable from '../components/DownloadTable.astro';
+import site from '../data/site.json';
+import release from '../data/release.json';
+---
+
+<Layout title="Download — Vyotiq Agent V" description="Download Agent V for Windows, macOS (Apple Silicon and Intel), and Linux (AppImage, deb, rpm). Free and open source.">
+  <div class="flex min-h-svh flex-col">
+    <Nav />
+    <main class="flex-1">
+      <PageHeader eyebrow={`Download — ${release.tag ?? 'latest'}`} title="Pick your system." sub="Every installer is built and published to the releases repository. Pick the row that matches your machine." />
+      <div class="mt-12 pb-6">
+        <DownloadTable />
+      </div>
+      <div class="mx-auto w-full max-w-6xl px-6 pb-20">
+        <p class="text-sm text-fog">
+          Prefer to build it yourself? The source lives at
+          <a href={site.links.github} target="_blank" rel="noopener noreferrer" class="text-vy underline-offset-4 transition-colors hover:text-vy-hover hover:underline">{site.links.github.replace('https://', '')}</a>
+          — clone, install, and run from source.
+        </p>
+      </div>
+    </main>
+    <Footer />
+  </div>
+</Layout>

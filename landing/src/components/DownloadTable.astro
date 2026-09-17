@@ -1,0 +1,77 @@
+---
+import release from '../data/release.json';
+
+const fmt = (a) => (a ? `${Math.round(a.size / (1024 * 1024))} MB` : '');
+
+const groups = [
+  {
+    os: 'windows',
+    name: 'Windows',
+    hint: 'Windows 10+ · x64',
+    items: [{ label: 'Installer', asset: release.assets.windows.exe }],
+  },
+  {
+    os: 'macos',
+    name: 'macOS',
+    hint: 'macOS 12+ · signed',
+    items: [
+      { label: 'Apple Silicon', asset: release.assets.macos.arm64 },
+      { label: 'Intel', asset: release.assets.macos.x64 },
+    ],
+  },
+  {
+    os: 'linux',
+    name: 'Linux',
+    hint: 'glibc 2.28+ · x64',
+    items: [
+      { label: 'AppImage', asset: release.assets.linux.appimage },
+      { label: 'DEB', asset: release.assets.linux.deb },
+      { label: 'RPM', asset: release.assets.linux.rpm },
+    ],
+  },
+];
+---
+
+<div id="download" class="mx-auto grid w-full max-w-6xl grid-cols-1 gap-px border-y border-line bg-line/40 md:grid-cols-3">
+  {
+    groups.map((g) => (
+      <div data-os={g.os} class="bg-ink px-6 py-6 transition-colors data-[recommended]:bg-surface">
+        <div class="flex items-center justify-between">
+          <p class="text-sm font-semibold text-fg">{g.name}</p>
+          <p class="font-mono text-[10px] uppercase tracking-wider text-fog/70">{g.hint}</p>
+        </div>
+        <ul class="mt-4 space-y-3">
+          {g.items
+            .filter((i) => i.asset)
+            .map((i) => (
+              <li class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="text-xs text-fog">{i.label}</p>
+                  <p class="truncate font-mono text-[11px] text-fog/70">{i.asset.file}</p>
+                </div>
+                <a
+                  href={i.asset.url}
+                  download
+                  class="shrink-0 font-mono text-xs font-medium text-vy underline-offset-4 transition-colors hover:text-vy-hover hover:underline"
+                >
+                  {fmt(i.asset)} ↓
+                </a>
+              </li>
+            ))}
+          {g.items.every((i) => !i.asset) && <li class="text-xs text-fog/70">Grab it from the releases page.</li>}
+        </ul>
+      </div>
+    ))
+  }
+</div>
+
+<script is:inline>
+  (() => {
+    const ua = navigator.userAgent;
+    const uaPlatform = navigator.userAgentData?.platform || '';
+    const isMac = /Mac|iPhone|iPad/.test(ua) || /mac/i.test(uaPlatform);
+    const isLinux = !isMac && (/Linux|X11/.test(ua) || /lin/i.test(uaPlatform));
+    const os = isMac ? 'macos' : isLinux ? 'linux' : 'windows';
+    document.querySelector('#download [data-os="' + os + '"]')?.setAttribute('data-recommended', '');
+  })();
+</script>

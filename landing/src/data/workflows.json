@@ -1,0 +1,32 @@
+[
+  {
+    "step": "Plan",
+    "title": "Read the repo before it acts",
+    "body": "Agent V plans against your actual working tree — it can search the codebase, query the language server, read code index state, and run git status before writing a plan, not against pasted snippets."
+  },
+  {
+    "step": "Edit",
+    "title": "Change real files, not a simulation",
+    "body": "The agent edits, creates, and moves files in your checkout with precise string-level edits, applies unified diffs, and keeps unrelated user changes untouched."
+  },
+  {
+    "step": "Fan out",
+    "title": "Delegate to child instances",
+    "body": "Split work into independent workstreams and spawn child agent instances. Each child gets its own git worktree branch; finished branches merge back into the parent without disturbing in-flight work."
+  },
+  {
+    "step": "Verify",
+    "title": "Run the real gates",
+    "body": "Typecheck, lint, and test runners are first-class tools in the catalog. Agent V runs the narrowest relevant checks, expands verification when changes cross boundaries, and reports what it verified separately from what it assumes."
+  },
+  {
+    "step": "Ship",
+    "title": "Commit, PR, and release",
+    "body": "Git status, diffs, commits, and patch application are wired in, plus GitHub pull requests and issues. Releases publish installers to the releases repository, and the site picks them up automatically."
+  },
+  {
+    "step": "Extend",
+    "title": "Shape the tool catalog to you",
+    "body": "Pin MCP server tools, load marketplace skills and plugin rules into a run, or let the agent build a tool that doesn't exist yet — available instantly, no restart."
+  }
+]

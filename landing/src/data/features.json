@@ -1,0 +1,34 @@
+[
+  {
+    "title": "Multi-provider chat",
+    "body": "Talk to OpenAI, Anthropic, Google Gemini, Ollama for local models, DeepSeek, Groq, OpenRouter, xAI, Mistral — or any custom OpenAI-compatible endpoint. Model lists are fetched per provider where the API supports it."
+  },
+  {
+    "title": "An agent that acts on your checkout",
+    "body": "The built-in tool catalog covers a terminal, file tools (read, edit, search, glob, grep), git tools (status, diff, commit, apply patch), GitHub pull requests and issues, typecheck / lint / test runners, browser automation, notebook editing, and language-server queries."
+  },
+  {
+    "title": "Agent instances & worktrees",
+    "body": "The agent can fan work out to child instances. Every child runs on its own git worktree branch and the result merges back into the parent branch — parallel work without clobbering your checkout."
+  },
+  {
+    "title": "Local Whisper dictation",
+    "body": "Voice dictation runs entirely on your machine — Whisper via transformers.js on the onnxruntime-node backend, in the Electron main process. No audio ever leaves the app."
+  },
+  {
+    "title": "Skills & marketplace",
+    "body": "Skills ship with the app as marketplace resources and can be loaded into a run. Plugin rules are supported alongside skill files."
+  },
+  {
+    "title": "MCP client",
+    "body": "Connect Model Context Protocol servers, browse their tools, resources, and prompts, and pin the tools you want into the agent's catalog."
+  },
+  {
+    "title": "Self-built agent tools",
+    "body": "When no existing tool fits, the agent writes its own at runtime. A new tool becomes available immediately in the catalog — no restart — and runs in an isolated child process. Built tools show up under Settings → Agent tools."
+  },
+  {
+    "title": "Long-term workspace memory",
+    "body": "The agent keeps structured notes under .vyotiq/memory/ in your workspace and re-reads them on later runs — durable facts survive across sessions."
+  }
+]

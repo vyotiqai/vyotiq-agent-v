@@ -1,0 +1,21 @@
+---
+interface Props {
+  eyebrow: string;
+  title: string;
+  sub?: string;
+}
+
+const { eyebrow, title, sub } = Astro.props;
+---
+
+<div class="mx-auto w-full max-w-6xl px-6 pt-16">
+  <p class="vy-rise font-mono text-[11px] uppercase tracking-[0.2em] text-fog">{eyebrow}</p>
+  <h1 class="vy-rise mt-4 max-w-2xl text-balance text-4xl font-bold leading-[1.1] tracking-tight text-bright md:text-5xl [animation-delay:80ms]">
+    {title}
+  </h1>
+  {sub && (
+    <p class="vy-rise mt-4 max-w-xl text-pretty text-base leading-relaxed text-fog [animation-delay:160ms]">
+      {sub}
+    </p>
+  )}
+</div>

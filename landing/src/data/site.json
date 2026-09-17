@@ -1,0 +1,16 @@
+{
+  "name": "Vyotiq",
+  "tagline": "Agent V — coding workspace for real repositories",
+  "nav": [
+    { "label": "Home", "href": "/" },
+    { "label": "Features", "href": "/features" },
+    { "label": "Workflows", "href": "/workflows" },
+    { "label": "Download", "href": "/download" },
+    { "label": "Changelog", "href": "/changelog" }
+  ],
+  "links": {
+    "github": "https://github.com/vyotiqai/vyotiq-agent-v",
+    "releases": "https://github.com/vyotiqai/vyotiq-agent-v-releases"
+  },
+  "stack": ["Electron", "React", "TypeScript", "SQLite", "MCP"]
+}

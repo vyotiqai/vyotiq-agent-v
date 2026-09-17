@@ -1,0 +1,18 @@
+---
+interface Props {
+  index: number;
+  step: string;
+  title: string;
+  body: string;
+}
+
+const { index, step, title, body } = Astro.props;
+const num = String(index + 1).padStart(2, '0');
+---
+
+<article class="vy-rise relative border-l border-line pb-10 pl-8 [animation-delay:{`${index * 60}ms`}] last:pb-0">
+  <span class="absolute -left-[5px] top-1.5 size-2.5 rounded-full border-2 border-vy bg-ink"></span>
+  <p class="font-mono text-[11px] uppercase tracking-[0.2em] text-vy/80">{num} · {step}</p>
+  <h2 class="mt-2 text-lg font-semibold text-bright">{title}</h2>
+  <p class="mt-2 max-w-xl text-sm leading-relaxed text-fog">{body}</p>
+</article>

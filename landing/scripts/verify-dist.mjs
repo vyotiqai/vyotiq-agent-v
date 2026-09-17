@@ -17,25 +17,41 @@ const ok = (label, pass, detail = '') => {
 // 1. Pages built
 const hasHome = existsSync(`${landDir}dist/index.html`);
 const hasChangelog = existsSync(`${landDir}dist/changelog/index.html`);
+const hasFeatures = existsSync(`${landDir}dist/features/index.html`);
+const hasWorkflows = existsSync(`${landDir}dist/workflows/index.html`);
+const hasDownload = existsSync(`${landDir}dist/download/index.html`);
 ok('dist/index.html exists', hasHome);
+ok('dist/features/index.html exists', hasFeatures);
+ok('dist/workflows/index.html exists', hasWorkflows);
+ok('dist/download/index.html exists', hasDownload);
 ok('dist/changelog/index.html exists', hasChangelog);
-if (!hasHome || !hasChangelog) {
+if (!hasHome || !hasChangelog || !hasFeatures || !hasWorkflows || !hasDownload) {
   console.error('verify-dist: missing pages, aborting');
   process.exit(1);
 }
 
 const home = read('dist/index.html');
+const download = read('dist/download/index.html');
+const featuresPage = read('dist/features/index.html');
+const workflowsPage = read('dist/workflows/index.html');
 const chlog = read('dist/changelog/index.html');
 
-// 2. Landing structure — single full-screen page
-ok('download row', home.includes('id="download"'));
+// 2. Home structure + navigation — every menu link wired on every page
+for (const [label, href] of [['features', '/features'], ['workflows', '/workflows'], ['download', '/download'], ['changelog', '/changelog']]) {
+  ok(`home nav link: ${label}`, home.includes(`href="${href}"`));
+  ok(`download nav link: ${label}`, download.includes(`href="${href}"`));
+}
 ok('ascii accent', home.includes('data-ascii'));
 ok('app screenshot', home.includes('data-shot'));
-ok('nav changelog link', home.includes('href="/changelog"'));
+ok('home CTA to download', home.includes('href="/download"'));
+ok('home highlights strip', home.includes('Core features') && home.includes('Agent V workflows'));
+ok('features page has cards', featuresPage.includes('Multi-provider chat') && featuresPage.includes('Long-term workspace memory'));
+ok('workflows page has steps', workflowsPage.includes('Fan out') && workflowsPage.includes('Verify'));
+
 ok('no dead CHANGELOG.md links', !/CHANGELOG\.md/.test(home) && !/CHANGELOG\.md/.test(chlog));
 ok('no localhost refs', !/localhost/.test(home) && !/localhost/.test(chlog));
 
-// 3. Installer links — every baked asset must appear; no invented URLs
+// 3. Installer links — every baked asset on the download page; no invented URLs
 const slots = [
   ['windows exe', release.assets.windows.exe],
   ['macos arm64 dmg', release.assets.macos.arm64],
@@ -46,11 +62,12 @@ const slots = [
 ];
 if (release.source === 'github') {
   for (const [label, asset] of slots) {
-    ok(`installer baked: ${label}`, asset !== null && home.includes(asset.url));
+    ok(`installer baked: ${label}`, asset !== null && download.includes(asset.url));
   }
-  ok('download fallback not shown', !home.includes('No installer yet'));
+  ok('download fallback not shown', !download.includes('No installer yet'));
+  ok('download per-OS groups', download.includes('data-os="windows"') && download.includes('data-os="macos"') && download.includes('data-os="linux"'));
 } else {
-  ok('fallback links releases page', home.includes(release.url));
+  ok('fallback links releases page', download.includes(release.url));
 }
 
 // 4. Changelog page state

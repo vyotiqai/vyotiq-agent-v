@@ -1,17 +1,36 @@
 ---
-import release from '../data/release.json';
+import site from '../data/site.json';
+
+const path = Astro.url.pathname;
+const isActive = (href) => (href === '/' ? path === '/' : path.startsWith(href));
+const current = site.nav.find((n) => isActive(n.href))?.label ?? '';
 ---
 
-<header class="relative z-10">
+<header class="relative z-20 border-b border-line/50">
   <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-6">
     <a href="/" class="flex items-center gap-2.5" aria-label="Vyotiq home">
       <img src="/brand/vyotiq-lockup-white.svg" alt="Vyotiq" class="h-5 w-auto" />
+      {current && <span class="hidden font-mono text-[11px] uppercase tracking-[0.2em] text-fog/70 sm:inline">/ {current}</span>}
     </a>
 
-    <nav class="flex items-center gap-6 text-sm font-medium text-fog" aria-label="Main">
-      <a href="/changelog" class="hidden transition-colors hover:text-fg sm:block">Changelog</a>
+    <nav class="hidden items-center gap-6 text-sm font-medium text-fog md:flex" aria-label="Main">
+      {
+        site.nav.map((n) => (
+          <a
+            href={n.href}
+            aria-current={isActive(n.href) ? 'page' : undefined}
+            class:list={[
+              'transition-colors hover:text-fg',
+              isActive(n.href) ? 'text-fg' : '',
+              n.label === 'Download' ? 'hidden' : '',
+            ]}
+          >
+            {n.label}
+          </a>
+        ))
+      }
       <a
-        href="https://github.com/vyotiqai/vyotiq-agent-v"
+        href={site.links.github}
         target="_blank"
         rel="noopener noreferrer"
         class="transition-colors hover:text-fg"
@@ -19,7 +38,24 @@ import release from '../data/release.json';
       >
         <svg viewBox="0 0 16 16" fill="currentColor" class="size-5" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A7.99 7.99 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
       </a>
-      <a href="/#download" class="rounded-full bg-vy px-4 py-1.5 text-sm font-semibold text-vy-ink transition-colors hover:bg-vy-hover">Download</a>
+      <a href="/download" class="rounded-full bg-vy px-4 py-1.5 text-sm font-semibold text-vy-ink transition-colors hover:bg-vy-hover">Download</a>
     </nav>
+
+    <!-- Mobile menu -->
+    <details class="relative md:hidden">
+      <summary class="flex cursor-pointer list-none items-center rounded-lg border border-line px-3 py-1.5 text-sm text-fg" aria-label="Open menu">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="size-4" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
+      </summary>
+      <nav class="absolute right-0 z-30 mt-2 flex w-52 flex-col gap-1 rounded-xl border border-line bg-panel p-2 shadow-2xl" aria-label="Mobile">
+        {
+          site.nav.map((n) => (
+            <a href={n.href} class:list={['rounded-lg px-3 py-2 text-sm transition-colors', isActive(n.href) ? 'bg-surface text-fg' : 'text-fog hover:bg-surface hover:text-fg']}>
+              {n.label}
+            </a>
+          ))
+        }
+        <a href={site.links.github} target="_blank" rel="noopener noreferrer" class="rounded-lg px-3 py-2 text-sm text-fog transition-colors hover:bg-surface hover:text-fg">GitHub</a>
+      </nav>
+    </details>
   </div>
 </header>
