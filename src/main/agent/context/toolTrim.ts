@@ -6,10 +6,8 @@ import {
   isDurableToolResultName
 } from './durableToolResults'
 
-export type TrimToolResultsOptions = Record<string, never>
-
 /** Stub text for cleared ephemeral tool bodies. */
-export function clearedToolStub(_text: string): string {
+function clearedToolStub(_text: string): string {
   return CLEARED_TOOL_RESULT_STUB
 }
 
@@ -20,8 +18,7 @@ export function clearedToolStub(_text: string): string {
  */
 export function trimToolResults(
   messages: ChatMessage[],
-  keepLast = KEEP_LAST_TOOL_RESULTS,
-  _opts: TrimToolResultsOptions = {}
+  keepLast = KEEP_LAST_TOOL_RESULTS
 ): ChatMessage[] {
   const toolIndexes: number[] = []
   for (let i = 0; i < messages.length; i++) {

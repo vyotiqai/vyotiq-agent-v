@@ -2,8 +2,11 @@ import { app } from 'electron'
 import { readFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import {
+  CustomProviderSchema,
   DEFAULT_SETTINGS,
   DEFAULT_STORAGE_SETTINGS,
+  normalizeCustomProviders,
+  seedCustomProvidersFromLegacy,
   SETTINGS_FORMAT_VERSION,
   SettingsSchema,
   type Settings,
@@ -356,6 +359,18 @@ function normalizeSettings(data: Settings): Settings {
   let next = data
   if (host !== data.ollamaBaseUrl) next = { ...next, ollamaBaseUrl: host }
   if (custom !== data.customOpenAiBaseUrl) next = { ...next, customOpenAiBaseUrl: custom }
+  // Dedupe dynamic custom providers on every load: invalid rows dropped, first
+  // entry wins per id slug and per normalized base URL.
+  const customProviders = normalizeCustomProviders(data.customProviders)
+  const customProvidersChanged =
+    customProviders.length !== data.customProviders.length ||
+    customProviders.some(
+      (entry, i) =>
+        entry.id !== data.customProviders[i]?.id ||
+        entry.name !== data.customProviders[i]?.name ||
+        entry.baseUrl !== data.customProviders[i]?.baseUrl
+    )
+  if (customProvidersChanged) next = { ...next, customProviders }
   // SETTINGS_FORMAT_VERSION 2→3 (storage retention, audit H4/H5): an old
   // settings.json has no `storage` block — schema defaults already fill it at
   // parse ({...DEFAULT_SETTINGS, ...raw}); this guarantees the merged key and
@@ -533,9 +548,12 @@ export function getSettings(): Settings {
   try {
     const raw = JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>
     const migrated = migratePersistedSettingsDefaults(stripLegacyFields(raw))
+    // Seed the legacy single-provider base URL into the customProviders list
+    // BEFORE the first parse so the seeded entry is persisted with the load.
+    const seeded = seedCustomProvidersFromLegacy(migrated.data)
     const parsed = SettingsSchema.safeParse({
       ...DEFAULT_SETTINGS,
-      ...migrated.data
+      ...seeded.data
     })
     if (!parsed.success) {
       logger.warn('Settings schema mismatch; merging known fields', {
@@ -544,19 +562,25 @@ export function getSettings(): Settings {
       })
       const merged: Settings = { ...DEFAULT_SETTINGS }
       for (const key of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
-        const value = migrated.data[key]
+        const value = seeded.data[key]
         const field = SettingsSchema.shape[key].safeParse(value)
         if (field.success) {
           ;(merged as Record<string, unknown>)[key] = field.data
         }
       }
       settingsCache = migrateLegacyMcpSecretsOnLoad(normalizeSettings(merged))
-      if (migrated.persist) persistSettingsOnLoad(settingsCache, 'migrated settings defaults')
+      if (migrated.persist || seeded.seeded) {
+        persistSettingsOnLoad(
+          settingsCache,
+          migrated.persist ? 'migrated settings defaults' : 'seeded custom providers'
+        )
+      }
       return restoreMcpSecrets(settingsCache)
     }
     const data = migrateLegacyMcpSecretsOnLoad(normalizeSettings(parsed.data))
     const shouldPersist =
       migrated.persist ||
+      seeded.seeded ||
       data.ollamaBaseUrl !== parsed.data.ollamaBaseUrl ||
       'workspacePath' in raw ||
       'maxSteps' in raw ||
@@ -572,9 +596,11 @@ export function getSettings(): Settings {
         data,
         migrated.persist
           ? 'migrated settings defaults'
-          : data.ollamaBaseUrl !== parsed.data.ollamaBaseUrl
-            ? 'normalized Ollama URL'
-            : 'stripped legacy fields from settings'
+          : seeded.seeded
+            ? 'seeded custom providers from legacy base URL'
+            : data.ollamaBaseUrl !== parsed.data.ollamaBaseUrl
+              ? 'normalized Ollama URL'
+              : 'stripped legacy fields from settings'
       )
     }
     settingsCache = data
@@ -743,11 +769,22 @@ export function setSettings(
     const check = validateCustomOpenAiBaseUrl(partial.customOpenAiBaseUrl)
     if (!check.ok) throw new Error(check.error)
   }
+  if (partial.customProviders !== undefined) {
+    // Gate the patch at the write boundary: every entry must parse before it
+    // can be merged or persisted (a mangled row throws instead of silently
+    // dropping user providers).
+    for (const entry of partial.customProviders) CustomProviderSchema.parse(entry)
+  }
   if (typeof merged.ollamaBaseUrl === 'string') {
     merged.ollamaBaseUrl = ollamaNativeHost(merged.ollamaBaseUrl)
   }
   if (typeof merged.customOpenAiBaseUrl === 'string') {
     merged.customOpenAiBaseUrl = normalizeCustomOpenAiBaseUrl(merged.customOpenAiBaseUrl)
+  }
+  if (partial.customProviders !== undefined) {
+    // Normalize (dedupe by id slug and base URL, drop invalid rows) before the
+    // final parse so duplicates never reach storage.
+    merged.customProviders = normalizeCustomProviders(merged.customProviders)
   }
   if (partial.mcpServers !== undefined) {
     const hasGoogle = (merged.mcpServers ?? []).some((s) => isGoogleMcpId(s.id))

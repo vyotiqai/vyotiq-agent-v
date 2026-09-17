@@ -51,7 +51,7 @@ import { normalizeStopReason } from './stopReason'
 import { iterateSseJson } from './sse'
 import { logProviderFailure, providerFetchFailureChunk } from './log'
 import { CHAT_FETCH_MAX_ATTEMPTS, fetchWithRetry } from './fetchWithRetry'
-import { assertAllowedUrl, fetchWithValidatedRedirects } from '@main/agent/tools/webFetch'
+import { assertAllowedUrl, fetchWithValidatedRedirects } from '@main/net/webFetch'
 import { mergeOpenAiCompatToolArgDelta, wireToolCallArguments } from '../toolArgWire'
 import { mergeStreamedToolName } from '../../../shared/utils/toolName'
 import {
@@ -74,10 +74,6 @@ import {
   markOpenAiChatCacheBreakpoint,
   attachTrailingHistoryCacheBreakpoint
 } from './systemZones'
-
-/** Re-export for callers/tests that imported from openai. */
-export { supportsExplicitPromptCache } from './systemZones'
-export { shouldRetryOmitCacheKey } from './httpErrors'
 
 export function openAiCompatMessageReasoningDelta(
   messageReasoning: string,
@@ -811,13 +807,14 @@ export class ModelListUnsupportedError extends Error {
   }
 }
 
-/** GET JSON for model-catalog probes only (not chat streams). */
+/** GET/POST JSON for model-catalog probes only (not chat streams). */
 async function fetchJson(
   url: string,
   headers: Record<string, string>,
   signal?: AbortSignal,
   providerId?: ProviderId,
-  opts?: { quiet?: boolean; allowLocal?: boolean; silentStatuses?: readonly number[] }
+  opts?: { quiet?: boolean; allowLocal?: boolean; silentStatuses?: readonly number[] },
+  post?: { method: 'POST'; body: unknown }
 ): Promise<unknown> {
   const logProvider = providerId ?? 'openai-compat'
   const allowLocal =
@@ -828,8 +825,9 @@ async function fetchJson(
       await fetchWithValidatedRedirects(
         new URL(url),
         signal ?? new AbortController().signal,
-        headers,
-        allowLocal
+        post ? { 'Content-Type': 'application/json', ...headers } : headers,
+        allowLocal,
+        post ? { method: 'POST', body: JSON.stringify(post.body) } : undefined
       )
     ).response
   } catch (err) {
@@ -860,51 +858,6 @@ async function fetchJson(
     }
     err.httpStatus = res.status
     throw err
-  }
-  return res.json()
-}
-
-/** POST JSON for Ollama `/api/show` (catalog GET helper is list-only). */
-async function fetchJsonPost(
-  url: string,
-  headers: Record<string, string>,
-  body: unknown,
-  signal?: AbortSignal,
-  providerId?: ProviderId,
-  opts?: { quiet?: boolean; allowLocal?: boolean }
-): Promise<unknown> {
-  const logProvider = providerId ?? 'openai-compat'
-  const allowLocal =
-    providerId === 'ollama' || providerId === 'custom' || opts?.allowLocal === true
-  let res: Response
-  try {
-    res = (
-      await fetchWithValidatedRedirects(
-        new URL(url),
-        signal ?? new AbortController().signal,
-        { 'Content-Type': 'application/json', ...headers },
-        allowLocal,
-        { method: 'POST', body: JSON.stringify(body) }
-      )
-    ).response
-  } catch (err) {
-    if (signal?.aborted) throw err
-    if (!opts?.quiet) {
-      logProviderFailure(logProvider, 'network', {}, { soft: true })
-    }
-    throw new Error(formatError(err))
-  }
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    if (!opts?.quiet) {
-      logProviderFailure(
-        logProvider,
-        'http',
-        { status: res.status, message: scrubProviderErrorSnippet(text) || undefined },
-        { soft: true }
-      )
-    }
-    throw new Error(formatProviderHttpError(res.status, text, providerId))
   }
   return res.json()
 }
@@ -1028,13 +981,13 @@ export async function enrichOllamaModelsWithSelectedShow(
   }
 
   try {
-    const raw = await fetchJsonPost(
+    const raw = await fetchJson(
       `${host}/api/show`,
       headers,
-      { model: showId },
       opts.signal,
       'ollama',
-      { quiet: true }
+      { quiet: true },
+      { method: 'POST', body: { model: showId } }
     )
     if (!raw || typeof raw !== 'object') return models
     const row = raw as Record<string, unknown>
@@ -1861,11 +1814,13 @@ export function createOpenAiCompatibleProvider(
   }
 }
 
+const OPENAI_OPTS: OpenAiCompatOptions = {
+  defaultBaseUrl: 'https://api.openai.com/v1',
+  enablePromptCache: true
+}
+const compat = createOpenAiCompatibleProvider('openai', OPENAI_OPTS)
 export const openaiProvider: LlmProvider = {
-  ...createOpenAiCompatibleProvider('openai', {
-    defaultBaseUrl: 'https://api.openai.com/v1',
-    enablePromptCache: true
-  }),
+  ...compat,
   async *streamChat(req: ProviderChatRequest): AsyncGenerator<StreamChunk> {
     // Responses-first for reasoning-family models (better cache + tool loops).
     const modelCore = normalizeModelIdForHeuristics(req.model)
@@ -1876,11 +1831,7 @@ export const openaiProvider: LlmProvider = {
       yield* streamOpenAiResponses(req)
       return
     }
-    const base = createOpenAiCompatibleProvider('openai', {
-      defaultBaseUrl: 'https://api.openai.com/v1',
-      enablePromptCache: true
-    })
-    yield* base.streamChat(req)
+    yield* compat.streamChat(req)
   }
 }
 /** DeepSeek thinking is enabled via extra_body fields; caching is automatic (no key field). Prior-turn reasoning is never replayed (DeepSeek API guidance). */
@@ -1935,11 +1886,3 @@ export const customProvider = createOpenAiCompatibleProvider('custom', {
   /** Hosts that ignore unknown fields still benefit when OpenAI-like. */
   enablePromptCache: true
 })
-
-/** Exported for tests / multimodal mapping checks. */
-export function mapOpenAiContentParts(
-  parts: ContentPart[],
-  ollamaVision?: boolean
-): string | Array<Record<string, unknown>> {
-  return toOpenAiContent(parts, { ollamaVision })
-}

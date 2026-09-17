@@ -6,6 +6,7 @@ export type EffectiveChatSettings = Pick<
   | 'model'
   | 'ollamaBaseUrl'
   | 'customOpenAiBaseUrl'
+  | 'customProviders'
   | 'keepRecentTurns'
   | 'autoCompactThresholdRatio'
   | 'thinkingEnabled'
@@ -34,6 +35,8 @@ export function resolveEffectiveSettings(
       model: global.model,
       ollamaBaseUrl: global.ollamaBaseUrl,
       customOpenAiBaseUrl: global.customOpenAiBaseUrl,
+      // customProviders is global-only: per-workspace overrides never narrow it.
+      customProviders: global.customProviders,
       keepRecentTurns: global.keepRecentTurns,
       autoCompactThresholdRatio: global.autoCompactThresholdRatio,
       thinkingEnabled: global.thinkingEnabled,
@@ -52,6 +55,8 @@ export function resolveEffectiveSettings(
     model: override.model ?? global.model,
     ollamaBaseUrl: global.ollamaBaseUrl,
     customOpenAiBaseUrl: override.customOpenAiBaseUrl ?? global.customOpenAiBaseUrl,
+    // customProviders is global-only in both branches.
+    customProviders: global.customProviders,
     keepRecentTurns: override.keepRecentTurns ?? global.keepRecentTurns,
     autoCompactThresholdRatio:
       override.autoCompactThresholdRatio ?? global.autoCompactThresholdRatio,

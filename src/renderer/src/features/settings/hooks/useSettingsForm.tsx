@@ -590,7 +590,7 @@ export function useSettingsForm({
         if (ok) setOllamaUrl(OLLAMA_CLOUD_BASE_URL)
       }
       setModelsInfo(`Saved ${keyProviderLabel} key.`)
-      await refreshModels(keyProvider, { skipKeyCheck: true })
+      await refreshModels(keyProvider as ProviderId, { skipKeyCheck: true })
     } finally {
       setSavingKey(false)
     }

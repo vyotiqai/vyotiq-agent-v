@@ -122,7 +122,6 @@ vi.mock('@main/dictation/transcribe', () => ({
 vi.mock('@main/agent/loop', () => ({
   runAgent: runAgentMock,
   createRunId: () => 'run-test',
-  registerRunAbort: vi.fn()
 }))
 
 vi.mock('@main/agent/rewindRun', () => ({
@@ -183,7 +182,6 @@ vi.mock('@main/agent/state', () => ({
     hasEarlier: false,
     earlierCursor: null
   })),
-  loadEventsForRun: vi.fn(),
   loadEventsForRunAsync: vi.fn(),
   LOAD_EVENTS_UI_LIMIT: 500,
   loadToolResultContent: vi.fn(),

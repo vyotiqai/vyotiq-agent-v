@@ -13,6 +13,7 @@ Vyotiq ("Agent V") is an Electron desktop app: a coding workspace for real repos
 - **Local Whisper dictation** — voice dictation runs entirely on your machine (Whisper via transformers.js with the onnxruntime-node backend) in the Electron main process / a utility process. No audio leaves the app.
 - **Skills and marketplace** — skills ship with the app as marketplace resources and can be loaded into a run; plugin rules are supported alongside skill files.
 - **MCP client** — connect Model Context Protocol servers, list their tools/resources/prompts, and pin their tools into the agent's catalog.
+- **Self-built agent tools** — when no existing tool fits, the agent can write its own at runtime with `build_tool`: a new tool becomes available immediately in the catalog as `agent__<name>` (no restart) and runs in an isolated child process; built tools are listed under Settings → "Agent tools".
 - **Long-term workspace memory** — the agent keeps notes under `.vyotiq/memory/` in the workspace and re-reads them on later runs.
 
 ## Platforms
@@ -21,7 +22,7 @@ Vyotiq builds for **Windows** (NSIS installer), **macOS** (dmg and zip), and **L
 
 ## Downloads
 
-No release has been published yet. When releases start, installers will be published to the companion repository [vyotiqai/vyotiq-agent-v-releases](https://github.com/vyotiqai/vyotiq-agent-v-releases). Until then, build from source as described below.
+Installers are published to the companion repository [vyotiqai/vyotiq-agent-v-releases](https://github.com/vyotiqai/vyotiq-agent-v-releases). Grab the latest release there, or use the download UI on [vyotiq.com/download](https://vyotiq.com/download). You can still build from source as described below.
 
 ## Quick start
 

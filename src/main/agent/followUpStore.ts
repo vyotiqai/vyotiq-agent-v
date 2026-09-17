@@ -17,7 +17,7 @@ const FollowUpsFileSchema = z.object({
   followUps: z.array(PersistedFollowUpSchema)
 })
 
-export type PersistedFollowUpPreview = {
+type PersistedFollowUpPreview = {
   id: string
   preview: string
   ready?: boolean

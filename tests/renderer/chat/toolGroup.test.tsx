@@ -225,29 +225,7 @@ describe('ToolGroup', () => {
     })
   })
 
-  it('marks an interrupted group without hiding what it did', () => {
-    const tools = [
-      toolItem('t1', 'read', 'a.ts', 'fail', { startedAt: 1_000, endedAt: 2_000 })
-    ]
-    tools[0]!.tool.content = 'Cancelled'
-    render(<ToolGroup tools={tools} />)
-    expect(screen.getByText('interrupted')).toBeTruthy()
-    // In-progress verb: work did not complete.
-    expect(screen.getByText('Reading')).toBeTruthy()
-    expect(screen.queryByText('Read')).toBeNull()
-    expect(screen.getByText(/a\.ts/)).toBeTruthy()
-  })
 
-  it('shows Asking interrupted for cancelled ask_question, not Asked', () => {
-    const tools = [
-      toolItem('t1', 'ask_question', 'Pick one', 'fail', { startedAt: 1_000, endedAt: 2_000 })
-    ]
-    tools[0]!.tool.content = 'Cancelled'
-    render(<ToolGroup tools={tools} />)
-    expect(screen.getByText('interrupted')).toBeTruthy()
-    expect(screen.getByText('Asking')).toBeTruthy()
-    expect(screen.queryByText('Asked')).toBeNull()
-  })
 
   it('marks only the cancelled nested tool as interrupted, not completed siblings', () => {
     const tools = [

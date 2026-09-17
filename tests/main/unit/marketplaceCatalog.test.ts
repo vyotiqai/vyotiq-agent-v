@@ -45,7 +45,7 @@ describe('remote marketplace catalog', () => {
   async function setup(registryUrl: string) {
     const settingsMod = await import('@main/settings/settings')
     const pathsMod = await import('@main/marketplace/paths')
-    const webFetchMod = await import('@main/agent/tools/webFetch')
+    const webFetchMod = await import('@main/net/webFetch')
     vi.spyOn(settingsMod, 'getSettings').mockReturnValue({
       ...DEFAULT_SETTINGS,
       marketplace: { ...DEFAULT_SETTINGS.marketplace, registryUrl }

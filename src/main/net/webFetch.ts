@@ -4,20 +4,20 @@ import * as http from 'http'
 import * as https from 'https'
 import { BlockList, isIP } from 'net'
 import { dirname } from 'path'
-import { isRetriableToolNetworkError } from '../networkMonitor'
+import { isRetriableToolNetworkError } from '../agent/networkMonitor'
 import {
   circuitKeyHttp,
   assertCircuitClosed,
   isCircuitOpenError,
   recordCircuitFailure,
   recordCircuitSuccess
-} from '../circuitBreaker'
+} from '../agent/circuitBreaker'
 import {
   httpRetryBackoffMs,
   runWithNetworkRetry,
   sleepAbortable
-} from '../providers/fetchWithRetry'
-import { abortError } from '../../../shared/errors'
+} from '../agent/providers/fetchWithRetry'
+import { abortError } from '../../shared/errors'
 import type { IncomingMessage, RequestOptions } from 'http'
 
 /**

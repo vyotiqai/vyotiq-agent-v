@@ -232,7 +232,7 @@ function resolveChatConfig(opts: SolveTaskOptions | undefined):
   const model = opts?.model ?? settings.model
   if (!model?.trim()) {
     return {
-      error: `No chat model configured — set a provider and model in settings (or pass opts.model) for ${providerLabel(provider) ?? provider}.`
+      error: `No chat model configured — set a provider and model in settings (or pass opts.model)${provider ? ` for ${providerLabel(provider)}` : ''}.`
     }
   }
   let apiKey: string | null = null

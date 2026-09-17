@@ -264,7 +264,11 @@ export async function syncCodeIndex(
         kind: c.kind,
         name: c.name,
         parentName: c.parentName,
-        ftsBody: buildChunkFtsBody(rel, c)
+        ftsBody: buildChunkFtsBody(rel, c),
+        // Raw chunk source — written atomically into dense_chunks for the
+        // semantic (concept) search leg; rows start vec-NULL and are
+        // vectorized by the background dense warm job.
+        text: c.text
       }))
     )
     seen.add(rel)

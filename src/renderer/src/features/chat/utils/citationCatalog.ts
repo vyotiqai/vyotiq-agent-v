@@ -25,6 +25,7 @@ const CONTENT_CITING_TOOLS = new Set([
   'grep',
   'search',
   'codebase_search',
+  'concept_search',
   'browser_search',
   'browser_navigate',
   'browser_snapshot'

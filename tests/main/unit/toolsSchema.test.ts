@@ -12,7 +12,7 @@ import {
   SETTLE_FALLBACK_MS
 } from '@main/app/browserUrl'
 import { estimateTextTokens } from '@main/agent/context/estimate'
-import { BUDGET_SHARES } from '@main/agent/context/types'
+import { BUDGET_SHARES } from '@shared/domain/contextBudget'
 
 const SECTION_HEADERS = [
   'WHEN TO USE:',
@@ -25,7 +25,7 @@ const SECTION_HEADERS = [
 
 describe('toolsSchema', () => {
   it('tells file and web tools how to cite this-turn evidence', () => {
-    for (const name of ['read', 'grep', 'search', 'codebase_search'] as const) {
+    for (const name of ['read', 'grep', 'search', 'codebase_search', 'concept_search'] as const) {
       const tool = AGENT_TOOLS.find((t) => t.name === name)
       expect(tool?.description, name).toContain('[[path]]')
     }
@@ -38,7 +38,7 @@ describe('toolsSchema', () => {
   it('covers every executable built-in with a short description', () => {
     const names = AGENT_TOOLS.map((t) => t.name).sort()
     expect(names).toEqual([...BUILTIN_TOOL_NAMES].sort())
-    expect(names.length).toBe(60)
+    expect(names.length).toBe(61)
     expect(names).toEqual(
       expect.arrayContaining([
         'github_pr_create',
@@ -64,7 +64,7 @@ describe('toolsSchema', () => {
   it('wires a real handler for every built-in tool (no missing/stub handlers)', () => {
     const handlerNames = Object.keys(BUILTIN_HANDLERS).sort()
     expect(handlerNames).toEqual([...BUILTIN_TOOL_NAMES].sort())
-    expect(handlerNames).toHaveLength(60)
+    expect(handlerNames).toHaveLength(61)
     for (const name of BUILTIN_TOOL_NAMES) {
       const handler = BUILTIN_HANDLERS[name as keyof typeof BUILTIN_HANDLERS]
       expect(typeof handler, `${name} handler must be a function`).toBe('function')
@@ -112,6 +112,18 @@ describe('toolsSchema', () => {
     expect(termProps.command?.description).not.toMatch(/Settings → Tools/)
     expect(termProps.timeoutMs?.description).toMatch(/New-command wait/)
     expect(termProps.working_directory?.description).toMatch(/Ignored when polling/)
+  })
+
+  it('presents concept_search as the dense/semantic counterpart of codebase_search', () => {
+    const tool = AGENT_TOOLS.find((t) => t.name === 'concept_search')
+    expect(tool).toBeDefined()
+    // Tool separation: dense leg is for broad topics / paraphrases; exact
+    // identifiers stay with the BM25 keyword leg.
+    expect(tool!.description).toMatch(/semantic/i)
+    expect(tool!.description).toMatch(/codebase_search/)
+    expect(tool!.description).toMatch(/\[\[path\]\]/)
+    const props = (tool!.parameters as { properties: Record<string, unknown> }).properties
+    expect(Object.keys(props).sort()).toEqual(['maxResults', 'query'])
   })
 
   it('presents codebase_search as the default way to locate code, grep for exhaustive/regex', () => {

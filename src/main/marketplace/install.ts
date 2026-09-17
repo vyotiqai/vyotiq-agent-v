@@ -46,7 +46,7 @@ import { synthesizeVyotiqMcpManifest } from './mcpImport'
 import { assertSafeGitCloneUrl } from './gitCloneUrl'
 import { sanitizeMcpManifestEnv } from './sanitizeMcpEnv'
 import { withCompatibleUvxArgs } from '../agent/mcp/uvxCompat'
-import { downloadPublicUrlToFile } from '../agent/tools/webFetch'
+import { downloadPublicUrlToFile } from '@main/net/webFetch'
 
 const execFileAsync = promisify(execFile)
 

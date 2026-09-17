@@ -1037,6 +1037,9 @@ export async function runStorageCleanup(confirmToken: string): Promise<StorageCl
 const SIZE_CAP_AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000
 let lastSizeCapAutoMs = 0
 
+const ORPHAN_REAP_AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000
+let lastOrphanReapAutoMs = 0
+
 export async function sweepRetentionAuto(): Promise<void> {
   try {
     const settings = getSettings()
@@ -1067,6 +1070,24 @@ export async function sweepRetentionAuto(): Promise<void> {
       lastSizeCapAutoMs = nowMs
       await enforceSizeCap(settings, protectedRuns, nowMs)
     }
+    // Derived-only orphan reap (§6.2) — codeindex-only strays left behind by
+    // past worktree/workspace paths. No user data inside (verified: no
+    // sessions/, no meta.json), so this needs no ack and no confirm; the
+    // reaper setting + the same 6 h cadence gate it. User-data orphans stay
+    // confirm-gated via the Settings → Storage cleanup flow.
+    if (
+      settings.storage.orphanReaperEnabled &&
+      nowMs - lastOrphanReapAutoMs >= ORPHAN_REAP_AUTO_INTERVAL_MS
+    ) {
+      lastOrphanReapAutoMs = nowMs
+      const report = await collectStorageReport()
+      const derivedOnlyOrphans = selectOrphanDirs(report.workspaces, settings, nowMs).filter(
+        (w) => w.derivedOnly === true
+      )
+      if (derivedOnlyOrphans.length > 0) {
+        await reapOrphanDirs(derivedOnlyOrphans)
+      }
+    }
   } catch (err) {
     // Never run-fatal (M3 lesson).
     logger.warn('Automatic retention sweep failed (skipped)', {
@@ -1074,6 +1095,12 @@ export async function sweepRetentionAuto(): Promise<void> {
       err
     })
   }
+}
+
+/** Test hook — clears the auto-sweep interval timestamps. */
+export function resetRetentionAutoForTests(): void {
+  lastSizeCapAutoMs = 0
+  lastOrphanReapAutoMs = 0
 }
 
 /** Measure one workspace's storage dir size for the remove-workspace confirm. */

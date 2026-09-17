@@ -25,7 +25,7 @@
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test": "pnpm sync:harness && pnpm sync:docx-md && node scripts/test-exit-wrapper.cjs",
     "test:coverage": "pnpm sync:harness && pnpm sync:docx-md && vitest run --coverage",
-    "test:reliability": "vitest run tests/main/unit/runsState.test.ts tests/main/unit/agentLoopResume.test.ts tests/main/unit/followUpStore.test.ts tests/main/unit/loopCheckpoint.test.ts tests/main/unit/runRegistry.test.ts tests/main/unit/eventAppendQueue.test.ts tests/main/unit/networkMonitor.test.ts tests/main/unit/codeindex.search.test.ts tests/main/unit/globIndex.test.ts tests/main/audit/enduranceRun.audit.test.ts tests/main/audit/largeRepoScanCap.audit.test.ts tests/renderer/chat/autoResume.test.tsx tests/renderer/chat/chatStreamController.test.ts",
+    "test:reliability": "vitest run tests/main/unit/runsState.test.ts tests/main/unit/agentLoopResume.test.ts tests/main/unit/followUpStore.test.ts tests/main/unit/loopCheckpoint.test.ts tests/main/unit/runRegistry.test.ts tests/main/unit/eventAppendQueue.test.ts tests/main/unit/networkMonitor.test.ts tests/main/unit/codeindex.search.test.ts tests/main/unit/globIndex.test.ts tests/main/audit/enduranceRun.audit.test.ts tests/main/audit/largeRepoScanCap.audit.test.ts tests/renderer/chat/autoResume.test.tsx tests/renderer/chat/chatStreamController",
     "test:e2e": "vitest run tests/main/e2e",
     "test:gui-e2e": "playwright test -c tests/gui-e2e/playwright.config.ts",
     "test:watch": "vitest",

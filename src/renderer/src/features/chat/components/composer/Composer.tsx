@@ -1076,7 +1076,7 @@ export function Composer({
         onRemoveAudio={removeAudio}
       />
 
-      {readinessIssue && hasWorkspace ? (
+      {readinessIssue && readinessIssue.kind !== 'manual_catalog' && hasWorkspace ? (
         <ModelReadinessBanner
           issue={readinessIssue}
           busy={catalogLoading}

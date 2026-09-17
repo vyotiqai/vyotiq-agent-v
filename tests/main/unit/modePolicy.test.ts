@@ -308,11 +308,17 @@ describe('modePolicy', () => {
     expect(plan).toMatch(/verified in this run/)
   })
 
-  it('omits codebase_search when indexing is disabled', () => {
-    const defs = [{ name: 'read' }, { name: 'codebase_search' }, { name: 'grep' }]
+  it('omits codebase_search and concept_search when indexing is disabled', () => {
+    const defs = [
+      { name: 'read' },
+      { name: 'codebase_search' },
+      { name: 'concept_search' },
+      { name: 'grep' }
+    ]
     expect(filterToolDefsForCodeIndex(defs, true).map((d) => d.name)).toEqual([
       'read',
       'codebase_search',
+      'concept_search',
       'grep'
     ])
     expect(filterToolDefsForCodeIndex(defs, false).map((d) => d.name)).toEqual(['read', 'grep'])

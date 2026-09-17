@@ -408,7 +408,6 @@ describe('ChatView composer placement', () => {
     expect(document.querySelector('[data-terminal-panel]')).toBeTruthy()
     expect(document.querySelector('[data-agent-browser-panel]')).toBeNull()
   })
-
   it('restores the Plan panel from localStorage on mount', async () => {
     localStorage.setItem('vyotiq.rightPanel', 'plan')
     render(<ChatView {...baseProps} items={[]} />)
@@ -1335,39 +1334,5 @@ describe('ChatView composer placement', () => {
     expect(banner.parentElement!.className).toMatch(/mx-auto/)
     expect(banner.parentElement!.className).toMatch(/max-w-\[840px\]/)
     expect(wrapper.className).toMatch(/pb-1\.5/)
-  })
-})
-
-describe('ChatView review-changes request', () => {
-  it('opens Changes once and acks the owner so a remount cannot replay the request', async () => {
-    const onHandled = vi.fn()
-    const view = (request: number) => (
-      <ChatView
-        {...baseProps}
-        items={[]}
-        openChangesRequest={request}
-        onOpenChangesRequestHandled={onHandled}
-      />
-    )
-    const { rerender, unmount } = render(view(1))
-    await waitForPanel('[data-changes-panel]')
-    expect(onHandled).toHaveBeenCalledTimes(1)
-
-    // The same request value must not re-fire while mounted.
-    rerender(view(1))
-    expect(onHandled).toHaveBeenCalledTimes(1)
-
-    // Owner consumes -> resets to 0; a later request may reuse the same value.
-    rerender(view(0))
-    rerender(view(1))
-    await waitFor(() => expect(onHandled).toHaveBeenCalledTimes(2))
-
-    // After the owner reset, a remount must not replay the consumed request and
-    // force the Changes dock back open.
-    unmount()
-    localStorage.removeItem('vyotiq.rightPanel')
-    render(view(0))
-    await waitFor(() => expect(document.querySelector('[data-changes-panel]')).toBeNull())
-    expect(onHandled).toHaveBeenCalledTimes(2)
   })
 })

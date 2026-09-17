@@ -51,13 +51,6 @@ function toAnthropicContent(content: MessageContent): string | Array<Record<stri
       })
       continue
     }
-    if (p.type === 'audio') {
-      blocks.push({
-        type: 'text',
-        text: '[audio omitted: Anthropic does not support native audio input]'
-      })
-      continue
-    }
     const data = parseDataUrl(p.url)
     if (data) {
       blocks.push({
@@ -72,6 +65,23 @@ function toAnthropicContent(content: MessageContent): string | Array<Record<stri
     }
   }
   return blocks
+}
+
+function assistantThinkingTextContent(
+  thinkingBlocks: ReturnType<typeof anthropicThinkingBlocksFromMessage>,
+  m: ChatMessage
+): Array<Record<string, unknown>> {
+  const content: Array<Record<string, unknown>> = []
+  for (const block of thinkingBlocks) {
+    if (block.type === 'thinking' && block.thinking) {
+      content.push({ type: 'thinking', thinking: block.thinking })
+    } else if (block.type === 'redacted_thinking' && block.data) {
+      content.push({ type: 'redacted_thinking', data: block.data })
+    }
+  }
+  const text = typeof m.content === 'string' ? m.content : contentToText(m.content)
+  if (text) content.push({ type: 'text', text })
+  return content
 }
 
 function toAnthropicMessages(messages: ChatMessage[]): {
@@ -103,17 +113,10 @@ function toAnthropicMessages(messages: ChatMessage[]): {
       continue
     }
     if (m.role === 'assistant' && m.toolCalls?.length) {
-      const content: Array<Record<string, unknown>> = []
-      const thinkingBlocks = anthropicThinkingBlocksFromMessage(m.reasoningState)
-      for (const block of thinkingBlocks) {
-        if (block.type === 'thinking' && block.thinking) {
-          content.push({ type: 'thinking', thinking: block.thinking })
-        } else if (block.type === 'redacted_thinking' && block.data) {
-          content.push({ type: 'redacted_thinking', data: block.data })
-        }
-      }
-      const text = typeof m.content === 'string' ? m.content : contentToText(m.content)
-      if (text) content.push({ type: 'text', text })
+      const content = assistantThinkingTextContent(
+        anthropicThinkingBlocksFromMessage(m.reasoningState),
+        m
+      )
       for (const t of m.toolCalls) {
         let input: unknown = {}
         try {
@@ -129,17 +132,7 @@ function toAnthropicMessages(messages: ChatMessage[]): {
     if (m.role === 'assistant') {
       const thinkingBlocks = anthropicThinkingBlocksFromMessage(m.reasoningState)
       if (thinkingBlocks.length) {
-        const content: Array<Record<string, unknown>> = []
-        for (const block of thinkingBlocks) {
-          if (block.type === 'thinking' && block.thinking) {
-            content.push({ type: 'thinking', thinking: block.thinking })
-          } else if (block.type === 'redacted_thinking' && block.data) {
-            content.push({ type: 'redacted_thinking', data: block.data })
-          }
-        }
-        const text = typeof m.content === 'string' ? m.content : contentToText(m.content)
-        if (text) content.push({ type: 'text', text })
-        out.push({ role: 'assistant', content })
+        out.push({ role: 'assistant', content: assistantThinkingTextContent(thinkingBlocks, m) })
         continue
       }
     }
@@ -463,16 +456,7 @@ export const anthropicProvider: LlmProvider = {
       return
     }
 
-    const converted = toAnthropicMessages(req.messages)
-
-    const systemForCache =
-      req.systemStable !== undefined || req.systemVolatile !== undefined
-        ? { stable: req.systemStable ?? '', volatile: req.systemVolatile ?? '' }
-        : req.system
-
-    const cached = applyCacheControl(systemForCache, converted.messages)
-
-    const tools = toAnthropicTools(req.tools)
+    const body = buildAnthropicBody(req)
 
     const native = req.anthropicNative
     const betas = ['prompt-caching-2024-07-31']
@@ -481,30 +465,6 @@ export const anthropicProvider: LlmProvider = {
     }
     if (native?.enableContextManagement) {
       betas.push('context-management-2025-06-27', 'compact-2026-01-12')
-    }
-
-    const body: Record<string, unknown> = {
-      model: req.model,
-      max_tokens: defaultMaxTokens(req.model, req.maxOutputTokens),
-      system: cached.system,
-      messages: cached.messages,
-      tools: tools.length ? tools : undefined,
-      stream: true
-    }
-
-    if (req.toolChoice && tools.length) {
-      body.tool_choice = {
-        type: req.toolChoice === 'required' ? 'any' : req.toolChoice
-      }
-    }
-
-    if (req.responseFormat) {
-      body.output_config = {
-        format: {
-          type: 'json_schema',
-          schema: req.responseFormat.schema
-        }
-      }
     }
 
     if (native && native.enableContextManagement) {
@@ -541,9 +501,6 @@ export const anthropicProvider: LlmProvider = {
       })
       body.context_management = { edits }
     }
-
-    Object.assign(body, anthropicThinkingFields(req))
-    applySampling(body, req)
 
     const baseHeaders: Record<string, string> = {
       'Content-Type': 'application/json',

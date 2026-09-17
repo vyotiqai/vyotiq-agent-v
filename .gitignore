@@ -138,3 +138,11 @@ tmp-merge/
 /.vyotiq/*.txt
 /.vyotiq/*.patch
 /.vyotiq/*.diff
+
+# Local agent session scratch (2026-09-17): loose patch dumps at the repo root,
+# read-only simplify-audit reports, and TMP runtime repro tests that are marked
+# "delete after run". Machine-local, never commit. Append-only block — nothing
+# above is modified, reordered, or weakened.
+/_*.diff
+/artifacts/
+tests/**/_tmp-*.test.ts

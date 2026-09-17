@@ -201,7 +201,7 @@ export function normalizeEffortForOllamaThink(
  */
 export function isDeepSeekNativeThinkingModel(id: string): boolean {
   const core = normalizeModelIdForHeuristics(id).toLowerCase()
-  return /deepseek-v4|deepseek-reasoner|deepseek-r1|deepseek-v3(\.\d+)?/i.test(core)
+  return /deepseek-v4|deepseek-flash|deepseek-reasoner|deepseek-r1|deepseek-v3(\.\d+)?/i.test(core)
 }
 
 /**

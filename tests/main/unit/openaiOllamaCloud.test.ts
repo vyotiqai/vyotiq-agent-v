@@ -8,7 +8,7 @@ import {
   resetDnsLookupForTests,
   setDnsLookupForTests,
   setPublicFetchForTests
-} from '@main/agent/tools/webFetch'
+} from '@main/net/webFetch'
 
 vi.mock('@shared/logger', () => ({
   logger: {

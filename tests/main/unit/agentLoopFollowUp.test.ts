@@ -96,7 +96,7 @@ import {
   promoteFollowUp,
   resetActiveRunsForTests,
   peekFollowUps,
-  drainFollowUps,
+  takeNextFollowUp,
   registerRunAbort
 } from '@main/agent/runRegistry'
 import { hydrateFollowUpsFromDisk, loadFollowUps, syncFollowUpsToDisk } from '@main/agent/followUpStore'
@@ -360,7 +360,7 @@ describe('runAgent mid-run follow-ups', () => {
     expect(queued.ok).toBe(true)
     syncFollowUpsToDisk(runDir, runId)
 
-    drainFollowUps(runId)
+    takeNextFollowUp(runId)
     resetActiveRunsForTests()
     registerRunAbort(runId, workspace)
     hydrateFollowUpsFromDisk(runDir, runId)

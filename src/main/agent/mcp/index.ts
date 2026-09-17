@@ -70,7 +70,7 @@ import { readWorkspacesState } from '../../workspace/workspaces'
 import { workspacePathsEqual } from '../../../shared/workspacePath'
 import { listActiveRuns } from '../runRegistry'
 import { AppError, formatError, isAbortError, mcpConnectErrorCode } from '../../../shared/errors'
-import { assertPublicUrl } from '../tools/webFetch'
+import { assertPublicUrl } from '@main/net/webFetch'
 import {
   assertCircuitClosed,
   circuitKeyMcpConnect,

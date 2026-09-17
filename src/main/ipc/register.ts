@@ -504,8 +504,6 @@ import {
   workspaceLspStatus
 } from '@main/workspace/lspService'
 
-export { chatCancelResult }
-
 const dictationTranscriptions = new Map<string, AbortController>()
 
 type IpcSender = { sender: Electron.WebContents; senderFrame?: Electron.WebFrameMain | null | undefined }

@@ -1,6 +1,6 @@
-import { execFile as execFileCallback, execFileSync } from 'child_process'
+import { execFile as execFileCallback } from 'child_process'
 import { promisify } from 'util'
-import { existsSync, readdirSync, statSync } from 'fs'
+import { existsSync, statSync } from 'fs'
 import { readdir, stat } from 'fs/promises'
 import { join } from 'path'
 import { namedGitBranch } from '../../../shared/utils/gitBranch'
@@ -48,31 +48,6 @@ export function clearWorkspaceSnapshotCache(workspacePath?: string): void {
   templateBuildInflight.clear()
 }
 
-export function buildWorkspaceSnapshot(workspacePath: string | null, goal: string): string {
-  if (!workspacePath) {
-    return wrapPromptSection('workspace', ['No workspace selected.', `Goal: ${goal}`].join('\n'))
-  }
-
-  const fingerprint = workspaceFingerprint(workspacePath)
-  const cached = snapshotCache.get(workspacePath)
-  const fresh =
-    cached &&
-    cached.fingerprint === fingerprint &&
-    Date.now() - cached.builtAt < CACHE_TTL_MS
-
-  if (fresh) {
-    return fillWorkspaceGoal(cached.template, goal)
-  }
-
-  const template = buildWorkspaceSnapshotTemplateSync(workspacePath)
-  snapshotCache.set(workspacePath, {
-    fingerprint,
-    template,
-    builtAt: Date.now()
-  })
-  return fillWorkspaceGoal(template, goal)
-}
-
 export async function buildWorkspaceSnapshotAsync(
   workspacePath: string | null,
   goal: string
@@ -112,49 +87,6 @@ export async function buildWorkspaceSnapshotAsync(
 
   const template = await inflight
   return fillWorkspaceGoal(template, goal)
-}
-
-function buildWorkspaceSnapshotTemplateSync(workspacePath: string): string {
-  const lines: string[] = [
-    `Root: ${workspacePath}`,
-    'Terminal cwd: workspace root (terminal paths are relative to this directory).',
-    `Goal: ${GOAL_TOKEN}`
-  ]
-
-  const found = MANIFESTS.filter((name) => existsSync(join(workspacePath, name)))
-  if (found.length) {
-    lines.push('', `### Manifests`, found.map((n) => `- ${n}`).join('\n'))
-  }
-
-  try {
-    const all = readdirSync(workspacePath)
-    const entries = all
-      .filter((name) => !name.startsWith('.') || name === '.vyotiq')
-      .slice(0, MAX_ENTRIES)
-      .map((name) => {
-        try {
-          const st = statSync(join(workspacePath, name))
-          return `${st.isDirectory() ? 'dir' : 'file'}  ${name}`
-        } catch {
-          return `?  ${name}`
-        }
-      })
-    lines.push('', '### Top-level')
-    lines.push(...entries)
-    if (all.length > MAX_ENTRIES) {
-      lines.push('… (truncated)')
-    }
-  } catch {
-    lines.push('(listing unavailable)')
-  }
-
-  const branch = gitBranchSync(workspacePath)
-  if (branch) lines.push('', `Git branch: ${branch}`)
-
-  const gitStatus = gitStatusShortSync(workspacePath)
-  if (gitStatus) lines.push('', '### Git status (short)', gitStatus)
-
-  return wrapPromptSection('workspace', lines.join('\n'))
 }
 
 async function buildWorkspaceSnapshotTemplateAsync(workspacePath: string): Promise<string> {
@@ -276,39 +208,6 @@ async function gitBranchAsync(cwd: string): Promise<string | null> {
   try {
     if (!existsSync(join(cwd, '.git'))) return null
     const out = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd, GIT_BRANCH_TIMEOUT_MS)
-    return namedGitBranch(out)
-  } catch {
-    return null
-  }
-}
-
-function gitStatusShortSync(cwd: string): string | null {
-  try {
-    if (!existsSync(join(cwd, '.git'))) return null
-    const out = execFileSync('git', ['status', '--short'], {
-      cwd,
-      encoding: 'utf8',
-      timeout: GIT_STATUS_TIMEOUT_MS,
-      stdio: ['ignore', 'pipe', 'ignore']
-    })
-    const lines = out.trim().split('\n').filter(Boolean).slice(0, 15)
-    if (!lines.length) return '(clean)'
-    const suffix = out.trim().split('\n').length > 15 ? '\n… (truncated)' : ''
-    return lines.join('\n') + suffix
-  } catch {
-    return null
-  }
-}
-
-function gitBranchSync(cwd: string): string | null {
-  try {
-    if (!existsSync(join(cwd, '.git'))) return null
-    const out = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-      cwd,
-      encoding: 'utf8',
-      timeout: GIT_BRANCH_TIMEOUT_MS,
-      stdio: ['ignore', 'pipe', 'ignore']
-    })
     return namedGitBranch(out)
   } catch {
     return null

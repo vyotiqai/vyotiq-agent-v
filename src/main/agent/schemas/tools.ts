@@ -268,6 +268,23 @@ const codebaseSearchArgs = z
       .optional()
   })
 
+const conceptSearchArgs = z
+  .object({
+    query: z
+      .string()
+      .trim()
+      .min(1)
+      .describe(
+        'Concept or topic to search semantically — broad ideas, paraphrases, or when unsure of the exact phrasing.'
+      ),
+    maxResults: z
+      .number()
+      .int()
+      .min(1)
+      .describe(`Max hits (default ${DEFAULT_SEARCH_LIMIT})`)
+      .optional()
+  })
+
 const listDirArgs = z
   .object({
     path: z
@@ -1015,6 +1032,11 @@ export const TOOL_REGISTRY = {
       'Ranked keyword search over the locally indexed repository — the default way to locate code when you do not already know where it lives. Matches identifiers, file names, and substrings (trigram index, BM25 ranking); camelCase identifiers work as-is. Workspace docs/ and Word .docx are matched at search time (extracted text), not stored in the index. Use grep for every occurrence of a known symbol or regex verification; use glob/list_dir for paths only. Not memory RAG. Cite hits as [[path]] or [[path:line]].',
     schema: codebaseSearchArgs
   },
+  concept_search: {
+    description:
+      'Dense semantic search over the locally indexed repository (MiniLM embeddings, cosine ranking) — use for broad topics, paraphrases, or when unsure of the exact phrasing. Returns an actionable message while the index is cold or the embedding model is still downloading; for exact identifiers, names, or error codes prefer codebase_search. Cite hits as [[path]] or [[path:line]].',
+    schema: conceptSearchArgs
+  },
   list_dir: {
     description:
       'List one directory level with sizes. Workspace-relative path from the workspace root, not a nested project folder. Gitignore- and build-dir-aware.',
@@ -1174,7 +1196,7 @@ export const TOOL_REGISTRY = {
   },
   terminal: {
     description:
-      'Run a shell command (cwd workspace root or working_directory). For builds, installs, downloads, and CLI — not for cat/type/findstr (use read/list_dir/glob/grep). Wait expiry keeps the process running and returns session_id — poll that UUID. Frames returned before the process closes carry a placeholder exit_code: -1 — a live or matched session, not a failure; poll session_id for the real exit. When command is set it wins over session_id. block_until_ms: 0 starts in the background.',
+      'Run a shell command (cwd workspace root or working_directory). For builds, installs, downloads, and CLI — not for cat/type/findstr/Get-ChildItem/Select-String/Get-Content (use read/list_dir/glob/grep). Wait expiry keeps the process running and returns session_id — poll that UUID. Frames returned before the process closes carry a placeholder exit_code: -1 — a live or matched session, not a failure; poll session_id for the real exit. When command is set it wins over session_id. block_until_ms: 0 starts in the background.',
     schema: terminalArgs
   },
   memory_list: {
@@ -1256,11 +1278,12 @@ export const TOOL_REGISTRY = {
   },
   await_agent_instance: {
     description:
-      'Wait for a spawned child instance to finish; returns phase plus the child’s summary and wroteFiles. Await multiple run_ids together in one step. On timeout the child keeps running — await again with a longer timeout_ms, pull_agent_instance, or cancel_agent_instance.',
+      'Wait for a spawned child instance to finish; returns phase plus the child’s summary and wroteFiles. Await multiple run_ids together in one step. On timeout the child keeps running — await again with a longer timeout_ms, pull_agent_instance, or cancel_agent_instance. The returned summary is capped (~6,000 chars, ends with a [...truncated N chars] marker when cut); use pull_agent_instance views for more detail.',
     schema: awaitAgentInstanceArgs
   },
   pull_agent_instance: {
-    description: 'Pull child summary, outline, or tail.',
+    description:
+      'Pull child summary, outline, or tail. Bounded: summary ≤6,000 chars, outline ≤10,000 chars (280 per line), tail newest 40 messages ≤12,000 chars — cut payloads end with a [...truncated N chars] marker.',
     schema: pullAgentInstanceArgs
   },
   merge_agent_instance: {
@@ -1330,6 +1353,7 @@ const TOOL_NAME_ALIASES = new Map<string, AgentToolName>([
   ['updategoal', 'update_goal'],
   ['writeplan', 'create_plan'],
   ['semanticsearch', 'codebase_search'],
+  ['conceptsearch', 'concept_search'],
   ['searchreplace', 'str_replace'],
   ['replaceinfile', 'str_replace'],
   ['getmcptools', 'mcp_list_tools'],

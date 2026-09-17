@@ -45,7 +45,7 @@ function writeCachedRemoteCatalog(catalog: MarketplaceCatalog): void {
   writeFileSync(path, JSON.stringify(catalog, null, 2), 'utf8')
 }
 
-import { fetchPublicResponse } from '../agent/tools/webFetch'
+import { fetchPublicResponse } from '@main/net/webFetch'
 
 const INLINE_ICON_MIME_ALLOWLIST = new Set([
   'image/png',

@@ -9,7 +9,7 @@ import {
 } from '@main/agent/providers/normalize'
 import { toResponsesUserContent } from '@main/agent/providers/openaiResponses'
 import { toInteractionsInput } from '@main/agent/providers/geminiInteractions'
-import { mapOpenAiContentParts } from '@main/agent/providers/openai'
+import { toOpenAiMessages } from '@main/agent/providers/openai'
 import { buildAnthropicBody } from '@main/agent/providers/anthropic'
 
 describe('wire-supported modalities', () => {
@@ -160,10 +160,18 @@ describe('native multimodal wire shapes', () => {
   })
 
   it('OpenAI chat maps audio to input_audio', () => {
-    const parts = mapOpenAiContentParts([
-      { type: 'text', text: 'transcribe' },
-      { type: 'audio', url: 'data:audio/wav;base64,QQ==', mime: 'audio/wav' }
-    ])
+    const parts = toOpenAiMessages(
+      [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'transcribe' },
+            { type: 'audio', url: 'data:audio/wav;base64,QQ==', mime: 'audio/wav' }
+          ]
+        }
+      ],
+      undefined
+    )[0]?.content
     expect(parts).toEqual([
       { type: 'text', text: 'transcribe' },
       { type: 'input_audio', input_audio: { data: 'QQ==', format: 'wav' } }
@@ -171,10 +179,18 @@ describe('native multimodal wire shapes', () => {
   })
 
   it('OpenAI chat omits audio formats chat does not accept instead of mislabeling them wav', () => {
-    const parts = mapOpenAiContentParts([
-      { type: 'text', text: 'listen' },
-      { type: 'audio', url: 'data:audio/mp4;base64,QQ==', mime: 'audio/mp4' }
-    ])
+    const parts = toOpenAiMessages(
+      [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'listen' },
+            { type: 'audio', url: 'data:audio/mp4;base64,QQ==', mime: 'audio/mp4' }
+          ]
+        }
+      ],
+      undefined
+    )[0]?.content
     expect(parts).toEqual([
       { type: 'text', text: 'listen' },
       {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useSyncExternalStore } from
 import {
   createChatStreamController,
   type ChatStreamController
-} from './createChatStreamController'
+} from '@renderer/lib/hooks/createChatStreamController'
 
 /**
  * Thin React wrapper around {@link createChatStreamController} for tests and single-workspace use.

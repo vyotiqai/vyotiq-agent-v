@@ -1,7 +1,16 @@
-import type { ChatMessage, MessageContent, ProviderId } from '../../../shared/ipc'
-import { createHash } from 'crypto'
+import type {
+  ChatMessage,
+  MessageContent,
+  ProviderContentPart,
+  ProviderId
+} from '../../../shared/ipc'
 import { contentToText, providerContentParts } from '../../../shared/ipc'
 import { formatError } from '../../../shared/errors'
+import {
+  continuationPromptKeys,
+  rememberContinuationPrompt,
+  stablePromptKey
+} from './promptKeys'
 import {
   normalizeEffortForOpenAiResponses,
   statefulContinuationMessages,
@@ -26,24 +35,6 @@ import {
 import { mergeOpenAiCompatToolArgDelta, wireToolCallArguments } from '../toolArgWire'
 
 export { supportsExplicitPromptCache } from './systemZones'
-
-const continuationPromptKeys = new Map<string, string>()
-const MAX_CONTINUATION_KEYS = 256
-
-function stablePromptKey(req: ProviderChatRequest): string | undefined {
-  if (req.systemStable === undefined) return undefined
-  const stable = resolveSystemZones(req).stable ?? ''
-  return createHash('sha256').update(req.model).update('\0').update(stable).digest('hex')
-}
-
-function rememberContinuationPrompt(responseId: string, key: string): void {
-  continuationPromptKeys.delete(responseId)
-  continuationPromptKeys.set(responseId, key)
-  if (continuationPromptKeys.size > MAX_CONTINUATION_KEYS) {
-    const oldest = continuationPromptKeys.keys().next().value
-    if (oldest) continuationPromptKeys.delete(oldest)
-  }
-}
 
 /** Exported for tests — parse Responses usage including cache write tokens. */
 export function parseOpenAiResponsesUsage(raw: unknown): TokenUsage | undefined {
@@ -220,11 +211,13 @@ export function toResponsesUserContent(
   content: MessageContent
 ): string | Array<Record<string, unknown>> {
   if (typeof content === 'string') return content
+  // caps.audio=false means providerContentParts turns audio parts into text, so
+  // the predicate is a runtime no-op that only narrows the type.
   const parts = providerContentParts(content, {
     image: true,
     fileNative: true,
     audio: false
-  })
+  }).filter((p): p is Exclude<ProviderContentPart, { type: 'audio' }> => p.type !== 'audio')
   const rich = parts.some((p) => p.type !== 'text')
   if (!rich) return contentToText(content)
   return parts.map((part) => {
@@ -235,12 +228,6 @@ export function toResponsesUserContent(
         type: 'input_file',
         filename: part.name,
         file_data: `data:${mime};base64,${part.data}`
-      }
-    }
-    if (part.type === 'audio') {
-      return {
-        type: 'input_text',
-        text: '[audio omitted: OpenAI Responses does not accept input_audio]'
       }
     }
     return { type: 'input_text', text: part.text }

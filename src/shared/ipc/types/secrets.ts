@@ -1,11 +1,22 @@
 import { z } from 'zod'
-import { ProviderIdSchema } from '../schemas/providers'
+import {
+  CustomProviderIdSchema,
+  ProviderIdSchema,
+  type ProviderId
+} from '../schemas/providers'
 
-/** All providers may store an API key (Ollama optional locally; required for ollama.com). */
-export const SecretProviderSchema = ProviderIdSchema
-export type SecretProvider = z.infer<typeof SecretProviderSchema>
+/**
+ * Every provider may store an API key (Ollama optional locally; required for
+ * ollama.com). Dynamic `custom:<slug>` provider ids are accepted too; the
+ * builtin tuple in SECRET_PROVIDERS stays unchanged for wire compat.
+ */
+export type SecretProvider = ProviderId | `custom:${string}`
+export const SecretProviderSchema = z.union([
+  ProviderIdSchema,
+  CustomProviderIdSchema
+])
 
-export const SECRET_PROVIDERS = SecretProviderSchema.options as [
+export const SECRET_PROVIDERS = ProviderIdSchema.options as [
   SecretProvider,
   ...SecretProvider[]
 ]

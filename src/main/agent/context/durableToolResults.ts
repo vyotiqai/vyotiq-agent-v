@@ -19,8 +19,6 @@ export const DURABLE_TOOL_RESULT_NAMES = [
   'diagnostics'
 ] as const
 
-export type DurableToolResultName = (typeof DURABLE_TOOL_RESULT_NAMES)[number]
-
 const DURABLE_SET = new Set<string>(DURABLE_TOOL_RESULT_NAMES)
 
 /** True when this tool's result body must stay intact under client trim. */

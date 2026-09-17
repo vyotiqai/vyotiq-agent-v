@@ -46,7 +46,9 @@ export function buildToolCatalog(inputs: {
   for (const name of BUILTIN_TOOL_NAMES) {
     const registry = TOOL_REGISTRY[name]
     const modes = ALL_MODES.filter((mode) => isBuiltinAllowedInMode(mode, name, { autoModeSwitch })) as CatalogMode[]
-    const active = isBuiltinAllowedInMode('agent', name, { autoModeSwitch }) && (codeIndexEnabled || name !== 'codebase_search')
+    const active =
+      isBuiltinAllowedInMode('agent', name, { autoModeSwitch }) &&
+      (codeIndexEnabled || (name !== 'codebase_search' && name !== 'concept_search'))
     entries.push({
       name,
       description: registry?.description ?? '',
@@ -55,7 +57,7 @@ export function buildToolCatalog(inputs: {
       active,
       reason: active
         ? undefined
-        : name === 'codebase_search'
+        : name === 'codebase_search' || name === 'concept_search'
           ? 'code-index-off'
           : 'auto-mode-switch-off'
     })

@@ -234,7 +234,6 @@ export function rearmLoopFromDisk(workspacePath: string, runId: string, runDir: 
   return next
 }
 
-export const formatLoopStatusLine = formatLoopStatusLineShared
 
 /** Test helper — run ids still carrying scheduler meta (armed or leaked). */
 export function listLoopSchedulerMetaRunIdsForTests(): string[] {

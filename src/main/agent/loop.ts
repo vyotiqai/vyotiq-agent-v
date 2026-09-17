@@ -198,7 +198,6 @@ import { isSafeInstanceWorktreePath } from '../git/instanceWorktree'
 import { ensurePlanStub } from './planArtifacts'
 import { isPlanDraftReady, scorePlanQuality } from '../../shared/planQuality'
 
-export { cancelRun, clearRunAbort, registerRunAbort, resetActiveRunsForTests }
 
 /** Index of the last user message in `messages`, or undefined if none. */
 function lastUserMessageIndex(messages: ChatMessage[]): number | undefined {

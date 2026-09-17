@@ -24,6 +24,7 @@ export const ASK_SAFE_BUILTIN = new Set([
   'glob',
   'grep',
   'codebase_search',
+  'concept_search',
   'list_dir',
   'browser_search',
   'ask_question',
@@ -210,13 +211,13 @@ export function filterToolDefsForMode<T extends { name: string }>(
   return filtered
 }
 
-/** Drop `codebase_search` when Settings → Indexing is off. */
+/** Drop `codebase_search` / `concept_search` when Settings → Indexing is off. */
 export function filterToolDefsForCodeIndex<T extends { name: string }>(
   defs: T[],
   codeIndexEnabled: boolean
 ): T[] {
   if (codeIndexEnabled) return defs
-  return defs.filter((t) => t.name !== 'codebase_search')
+  return defs.filter((t) => t.name !== 'codebase_search' && t.name !== 'concept_search')
 }
 
 export type ModeDenyResult = { ok: true } | { ok: false; error: string }

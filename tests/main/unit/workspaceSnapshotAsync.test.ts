@@ -3,7 +3,6 @@ import { mkdtempSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
-  buildWorkspaceSnapshot,
   buildWorkspaceSnapshotAsync,
   clearWorkspaceSnapshotCache
 } from '@main/agent/context/workspaceSnapshot'
@@ -21,15 +20,15 @@ describe('buildWorkspaceSnapshotAsync', () => {
     clearWorkspaceSnapshotCache()
   })
 
-  it('matches sync snapshot output for non-git workspaces', async () => {
+  it('matches rebuild output for non-git workspaces', async () => {
     writeFileSync(join(dir, 'package.json'), '{"name":"demo"}', 'utf8')
     writeFileSync(join(dir, 'alpha.ts'), 'export const a = 1\n', 'utf8')
 
-    const sync = buildWorkspaceSnapshot(dir, 'goal')
+    const first = await buildWorkspaceSnapshotAsync(dir, 'goal')
     clearWorkspaceSnapshotCache()
-    const asyncSnap = await buildWorkspaceSnapshotAsync(dir, 'goal')
+    const rebuilt = await buildWorkspaceSnapshotAsync(dir, 'goal')
 
-    expect(asyncSnap).toBe(sync)
-    expect(asyncSnap).toContain('alpha.ts')
+    expect(rebuilt).toBe(first)
+    expect(rebuilt).toContain('alpha.ts')
   })
 })

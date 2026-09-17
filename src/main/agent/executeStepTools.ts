@@ -51,7 +51,7 @@ const RECENT_READ_STALE_STEPS = 4
  * (file may have changed, targeted startLine/endLine window). Mirrors the
  * soft-warning pattern used for unread-edit and missing-diagnostics nudges.
  */
-export function recentRereadNote(
+function recentRereadNote(
   recentReadPaths: Map<string, number> | undefined,
   readStampStep: number | undefined,
   name: string,

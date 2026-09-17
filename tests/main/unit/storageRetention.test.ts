@@ -55,6 +55,7 @@ import {
   measureWorkspaceStorageDir,
   previewStorageCleanup,
   resetPendingCleanupTokenForTests,
+  resetRetentionAutoForTests,
   runStorageCleanup,
   selectOrphanDirs,
   sweepRetentionAuto,
@@ -417,6 +418,62 @@ describe('collectStorageReport (rollup math + orphan flags)', () => {
     const ws = report.workspaces.find((w) => w.workspaceId === 'wid-user')
     expect(ws?.derivedOnly).toBe(false)
     expect(ws?.reapable).toBe(false)
+  })
+})
+
+describe('sweepRetentionAuto orphan reap (derived-only strays)', () => {
+  beforeEach(() => {
+    resetRetentionAutoForTests()
+  })
+
+  it('auto-reaps a derived-only orphan dir without ack or confirm', async () => {
+    ackedSettings()
+    const derived = join(workspacesRoot(), 'wid-auto', 'codeindex')
+    mkdirSync(derived, { recursive: true })
+    writeWithAge(join(derived, 'index.sqlite'), 1024, 0)
+
+    await sweepRetentionAuto()
+
+    expect(existsSync(join(workspacesRoot(), 'wid-auto'))).toBe(false)
+  })
+
+  it('never auto-reaps a user-data orphan, even past the grace window', async () => {
+    ackedSettings({ orphanGraceDays: 30 })
+    makeStorageId('wid-old', ['run-old'])
+    writeWithAge(join(workspacesRoot(), 'wid-old', 'sessions', 'run-old', 'messages.jsonl'), 200, 45)
+    age(join(workspacesRoot(), 'wid-old', 'sessions', 'run-old'), 45)
+    age(join(workspacesRoot(), 'wid-old', 'sessions'), 45)
+    age(join(workspacesRoot(), 'wid-old'), 45)
+
+    await sweepRetentionAuto()
+
+    expect(existsSync(join(workspacesRoot(), 'wid-old'))).toBe(true)
+    expect(existsSync(join(workspacesRoot(), 'wid-old', 'sessions', 'run-old'))).toBe(true)
+  })
+
+  it('skips orphan reaping when the reaper setting is disabled', async () => {
+    ackedSettings({ orphanReaperEnabled: false })
+    const derived = join(workspacesRoot(), 'wid-off', 'codeindex')
+    mkdirSync(derived, { recursive: true })
+    writeWithAge(join(derived, 'index.sqlite'), 1024, 0)
+
+    await sweepRetentionAuto()
+
+    expect(existsSync(join(workspacesRoot(), 'wid-off'))).toBe(true)
+  })
+
+  it('never auto-reaps a tracked workspace dir', async () => {
+    ackedSettings()
+    const wsPath = 'C:\\proj\\tracked'
+    const id = workspaceIdFromPath(wsPath)
+    const derived = join(workspacesRoot(), id, 'codeindex')
+    mkdirSync(derived, { recursive: true })
+    writeWithAge(join(derived, 'index.sqlite'), 1024, 0)
+    mockWorkspacesState.workspaceIdsByPath = { [wsPath]: id }
+
+    await sweepRetentionAuto()
+
+    expect(existsSync(join(workspacesRoot(), id))).toBe(true)
   })
 })
 

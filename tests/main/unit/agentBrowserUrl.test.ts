@@ -4,7 +4,7 @@ import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import { pathToFileURL } from 'url'
 import { normalizeBrowserUrl } from '@main/app/browserUrl'
-import { isSyncBlockedUrl } from '@main/agent/tools/webFetch'
+import { isSyncBlockedUrl } from '@main/net/webFetch'
 
 describe('normalizeBrowserUrl', () => {
   it('accepts localhost and loopback', () => {

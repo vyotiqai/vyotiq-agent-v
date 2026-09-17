@@ -42,6 +42,12 @@ export type IndexStatus = {
   syncComplete: boolean
 }
 
+/** Dense (semantic) leg coverage: total dense rows and how many carry a vector. */
+export type DenseStatus = {
+  total: number
+  vectorized: number
+}
+
 export const DEFAULT_SEARCH_LIMIT = 10
 export const MAX_SEARCH_LIMIT = 40
 /** Soft cap on characters per chunk body before split. */

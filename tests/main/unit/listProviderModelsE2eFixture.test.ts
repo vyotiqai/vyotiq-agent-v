@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { listProviderModels } from '@main/agent/providers'
 import { resetModelCacheForTests } from '@main/agent/providers/modelCache'
 import { resetSoftWarnCooldownsForTests } from '@main/agent/providers/log'
-import { setPublicFetchForTests } from '@main/agent/tools/webFetch'
+import { setPublicFetchForTests } from '@main/net/webFetch'
 
 vi.mock('@shared/logger', () => ({
   logger: {

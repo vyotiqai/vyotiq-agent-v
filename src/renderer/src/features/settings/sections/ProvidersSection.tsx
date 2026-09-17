@@ -80,7 +80,7 @@ export function ProvidersSection({
                 className="mr-1.5 inline-flex rounded-sm border border-border bg-bg px-1.5 py-0.5 text-xs text-fg-strong vy-transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]"
                 disabled={form.formLocked}
                 onClick={() => {
-                  void form.setActiveProvider(id)
+                  void form.setActiveProvider(id as ProviderId)
                 }}
               >
                 Use {providerLabel(id)}
@@ -136,7 +136,7 @@ export function ProvidersSection({
               form.selectKeyProvider(id)
             }}
             onSetActive={(id) => {
-              void form.setActiveProvider(id)
+              void form.setActiveProvider(id as ProviderId)
             }}
             onSaveKey={() => {
               void form.saveKey()

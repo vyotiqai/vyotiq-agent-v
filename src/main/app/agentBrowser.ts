@@ -12,7 +12,7 @@ import {
   parseBrowserTarget,
   type BrowserElementRef
 } from './agentBrowserRefs'
-import { assertAllowedUrl, isSyncBlockedUrl } from '@main/agent/tools/webFetch'
+import { assertAllowedUrl, isSyncBlockedUrl } from '@main/net/webFetch'
 import {
   DEFAULT_NAV_TIMEOUT_MS,
   DEFAULT_WAIT_TIMEOUT_MS,

@@ -9,6 +9,7 @@ import { contentWindow, contextWindowFor } from '@main/agent/context/budget'
 
 describe('knownContextWindow', () => {
   it('returns 1M for DeepSeek V4 models and legacy aliases', () => {
+    expect(knownContextWindow('deepseek-flash', 'deepseek')).toBe(1_000_000)
     expect(knownContextWindow('deepseek-v4-flash', 'deepseek')).toBe(1_000_000)
     expect(knownContextWindow('deepseek-v4-pro', 'deepseek')).toBe(1_000_000)
     expect(knownContextWindow('deepseek-chat', 'deepseek')).toBe(1_000_000)
@@ -152,7 +153,8 @@ describe('Cloudflare Workers AI known windows', () => {
 describe('DeepSeek seed + budget', () => {
   it('seeds V4 models with 1M windows', () => {
     const seeds = seedModelsFor('deepseek')
-    expect(seeds.map((m) => m.id)).toEqual(['deepseek-v4-flash', 'deepseek-v4-pro'])
+    expect(seeds.map((m) => m.id)).toEqual(['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-pro'])
+    expect(seeds.find((m) => m.id === 'deepseek-flash')?.contextWindow).toBe(1_000_000)
     expect(seeds.find((m) => m.id === 'deepseek-v4-flash')?.contextWindow).toBe(1_000_000)
   })
 
