@@ -252,6 +252,35 @@ if (release.source !== 'github') {
   if (release.version && !dl.includes(release.version)) {
     fail('download page', `does not state the published version ${release.version}`)
   }
+
+  // Strongest available proof that a button downloads a real installer: fetch
+  // each asset's headers and check the served length against the size the
+  // GitHub API reported. A redirect to a missing object shows up here.
+  if (NETWORK) {
+    console.log(`  … checking ${release.installers.length} asset URLs`)
+    const checks = await Promise.all(
+      release.installers.map(async (asset) => {
+        try {
+          const res = await fetch(asset.url, { method: 'HEAD', redirect: 'follow' })
+          const len = Number(res.headers.get('content-length') ?? 0)
+          return { asset, status: res.status, len }
+        } catch (err) {
+          return { asset, status: 0, len: 0, error: err.message }
+        }
+      })
+    )
+    let bad = 0
+    for (const { asset, status, len, error } of checks) {
+      if (status !== 200) {
+        fail('download asset', `${asset.name} → ${status || 'network error'}${error ? ` (${error})` : ''}`)
+        bad++
+      } else if (len !== asset.size) {
+        fail('download asset', `${asset.name} served ${len} bytes, release says ${asset.size}`)
+        bad++
+      }
+    }
+    if (bad === 0) ok(`all ${checks.length} installers download at the advertised size`)
+  }
 }
 
 /* -------------------------------------------------------------- network --- */

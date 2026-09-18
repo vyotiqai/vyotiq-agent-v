@@ -1,1 +1,7 @@
 resources/harness/default.md text eol=lf
+
+# Generated art is compared byte-for-byte against what its generator writes
+# (tests/main/unit/marketplaceBrandIcons.test.ts). The scripts emit LF, so a
+# CRLF checkout on Windows would fail that test — pin these to LF everywhere.
+resources/marketplace/icons/*.svg text eol=lf
+resources/branding/**/*.svg text eol=lf
