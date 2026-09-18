@@ -255,17 +255,14 @@ test('lays the reference rail beside the session lists, and fits the window', as
   // runner is not a 1600x950 screen), and the OS silently clamps setBounds to
   // the work area. Ask for the largest window the display will actually give,
   // and report what we got so the assertions below can be honest about it.
-  const { restore, granted } = await app.evaluate(({ BrowserWindow, screen }) => {
+  const { restore, granted } = await app.evaluate(({ BrowserWindow }) => {
     const win = BrowserWindow.getAllWindows()[0]
     const before = win.getBounds()
-    const area = screen.getPrimaryDisplay().workAreaSize
-    win.setBounds({
-      ...before,
-      x: 0,
-      y: 0,
-      width: Math.min(1600, area.width),
-      height: Math.min(950, area.height)
-    })
+    win.setBounds({ ...before, x: 0, y: 0, width: 1600, height: 950 })
+    // Windows and Linux hand back the size we asked for even when it exceeds
+    // the display; macOS clamps it to the work area. Read back what we were
+    // actually given so the assertions below only claim what this window can
+    // demonstrate.
     return { restore: before, granted: win.getBounds() }
   })
   try {
@@ -303,16 +300,19 @@ test('lays the reference rail beside the session lists, and fits the window', as
       }
     })
 
-    // The rail is a second column, not more page: stacking it is what used to
-    // push Home past a screen at every window size.
-    expect(box.repositories!.left).toBeGreaterThan(box.attention!.left)
-    expect(box.repositories!.top).toBe(box.attention!.top)
     // A provider with no key blocks every run, so it cannot render below the
-    // sessions — that is where it was invisible without scrolling.
+    // sessions — that is where it was invisible without scrolling. This holds
+    // at any width, stacked or not.
     expect(box.environment!.top).toBeLessThan(box.attention!.top)
-    // "Fits the window" is only a claim we can make about a window that got the
-    // height we asked for. On a display too short to grant 950px the content
-    // legitimately scrolls, and asserting otherwise would be testing the runner.
+
+    // The rail is a second column, not more page: stacking it is what used to
+    // push Home past a screen. Both of these describe the wide layout, so they
+    // only apply when the window actually got the size they are about — a
+    // display that clamped it is not a regression.
+    if (granted.width >= 1600) {
+      expect(box.repositories!.left).toBeGreaterThan(box.attention!.left)
+      expect(box.repositories!.top).toBe(box.attention!.top)
+    }
     if (granted.height >= 950) {
       expect(box.scrollHeight).toBeLessThanOrEqual(box.clientHeight)
     }

@@ -72,6 +72,10 @@ describe('jsonDocCache', () => {
     // entry — the cache must not serve a document it can no longer vouch for.
     if (!after.ok) throw new Error('expected parsed doc')
     expect(after.doc).toEqual({ a: 1 })
-    expect(after.mtimeMs).toBe(old.getTime())
+    // stat reports mtimeMs as a float derived from nanosecond precision, so a
+    // timestamp written as an exact millisecond can read back a fraction under
+    // it (…628.999 for …629 on ext4 and APFS). Compare at millisecond
+    // resolution rather than asserting the float landed exactly.
+    expect(Math.round(after.mtimeMs)).toBe(old.getTime())
   })
 })

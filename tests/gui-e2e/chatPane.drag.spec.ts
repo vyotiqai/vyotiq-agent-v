@@ -249,15 +249,11 @@ test('sessions clicked into empty draft panes hydrate their transcripts', async 
   // of the sidebar and rail. Take the widest window the display will grant —
   // a small CI display (the macOS runner) otherwise clamps the layout to two
   // and the third pane never opens.
-  await app.evaluate(({ BrowserWindow, screen }) => {
+  await app.evaluate(({ BrowserWindow }) => {
     const win = BrowserWindow.getAllWindows()[0]
-    const area = screen.getPrimaryDisplay().workAreaSize
-    win.setBounds({
-      x: 0,
-      y: 0,
-      width: Math.min(1600, area.width),
-      height: Math.min(1000, area.height)
-    })
+    // Windows and Linux grant this even on a smaller display; macOS clamps it
+    // to the work area, and the skip below covers that case.
+    win.setBounds({ x: 0, y: 0, width: 1600, height: 1000 })
   })
   await ensureSidebarExpanded()
 
