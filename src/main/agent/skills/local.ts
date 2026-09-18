@@ -17,6 +17,7 @@ import { isSkillMdFilename, resolveSkillMdPath, SKILL_MD } from './paths'
 import { serializeSkillMarkdown } from '../../../shared/utils/skillMarkdown'
 import { normalizeTrigger } from '../../../shared/slashCommands'
 import { realpathIfExists } from '../../workspace/safePath'
+import { BUILTIN_COMMANDS } from '../slashCommands/builtins'
 
 export type LocalSkillSource = 'project' | 'personal'
 export type LocalSkillOrigin = 'vyotiq' | 'cursor'
@@ -265,28 +266,93 @@ export function isAllowedLocalSkillPath(
   return projectRoots.some((root) => isInsideRoot(real, realpathIfExists(root)))
 }
 
+/** Mirrors `SkillNameSchema.max(64)` — a longer `name:` fails frontmatter parsing. */
+const MAX_SKILL_NAME_LEN = 64
+const SKILL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+const RESERVED_SKILL_WORD_RE = /(?:^|-)(?:anthropic|claude)(?:-|$)/i
+
+function trimSlugEdges(value: string): string {
+  return value.replace(/-+/g, '-').replace(/^-|-$/g, '')
+}
+
+function isValidSkillName(slug: string): boolean {
+  return (
+    slug.length > 0 &&
+    slug.length <= MAX_SKILL_NAME_LEN &&
+    SKILL_NAME_RE.test(slug) &&
+    !RESERVED_SKILL_WORD_RE.test(slug)
+  )
+}
+
+/**
+ * True when `absPath` lives under the shared personal skills root. Edits there
+ * are visible from every workspace, so they must invalidate every cache key —
+ * `fingerprintFor` only samples the root's own mtime, which rewriting a nested
+ * SKILL.md does not change.
+ */
+function isPersonalSkillPath(absPath: string): boolean {
+  return isInsideRoot(resolve(absPath), realpathIfExists(personalSkillsRoot()))
+}
+
 function skillSlug(title?: string): string {
-  const n = normalizeTrigger(title || '')
-    .replace(/[^a-z0-9-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 64)
-  if (n && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(n) && !/(?:^|-)(?:anthropic|claude)(?:-|$)/i.test(n)) {
-    return n
-  }
+  // Trim the edges again after the length cap: slicing mid-word can leave a
+  // trailing '-', which fails SKILL_NAME_RE and would discard the whole title.
+  const n = trimSlugEdges(
+    trimSlugEdges(normalizeTrigger(title || '').replace(/[^a-z0-9-]/g, '-')).slice(
+      0,
+      MAX_SKILL_NAME_LEN
+    )
+  )
+  if (isValidSkillName(n)) return n
   return `skill-${new Date().toISOString().slice(0, 10)}`
 }
 
-function uniqueSkillDir(parent: string, base: string): { dir: string; slug: string } {
-  let slug = base
-  let dir = join(parent, slug)
-  let n = 2
-  while (existsSync(dir)) {
-    slug = `${base}-${n}`
-    dir = join(parent, slug)
-    n += 1
+/** `base` with an `-N` disambiguator, kept within the 64-char name limit. */
+function slugWithSuffix(base: string, n: number): string {
+  if (n <= 1) return base
+  const suffix = `-${n}`
+  const head = trimSlugEdges(base.slice(0, MAX_SKILL_NAME_LEN - suffix.length))
+  return `${head}${suffix}`
+}
+
+/**
+ * Pick a folder slug that is free on disk, does not collide with an existing
+ * local skill `name:` (any root — `scanSkillRoot` drops later duplicates, so a
+ * colliding stub would be written but never listed), does not shadow a builtin
+ * slash trigger, and stays a valid skill name.
+ */
+function uniqueSkillDir(
+  parent: string,
+  base: string,
+  taken: ReadonlySet<string>
+): { dir: string; slug: string } {
+  for (let n = 1; n <= 1000; n += 1) {
+    const slug = slugWithSuffix(base, n)
+    if (!isValidSkillName(slug)) continue
+    if (taken.has(slug)) continue
+    const dir = join(parent, slug)
+    if (existsSync(dir)) continue
+    return { dir, slug }
   }
-  return { dir, slug }
+  throw new Error(`Could not find a free skill name for "${base}"`)
+}
+
+/**
+ * Slugs a new skill must avoid: every local skill `name:` already visible from
+ * this workspace, plus builtin slash triggers (`mergeByTrigger` gives builtins
+ * priority, so a skill named `help` would never be reachable as `/help`).
+ */
+function takenSkillNames(workspacePath: string | null): Set<string> {
+  const taken = new Set<string>()
+  for (const skill of loadLocalSkills(workspacePath)) {
+    const key = skill.name.trim().toLowerCase()
+    if (key) taken.add(key)
+  }
+  for (const command of BUILTIN_COMMANDS) {
+    const key = normalizeTrigger(command.trigger)
+    if (key) taken.add(key)
+  }
+  return taken
 }
 
 export type CreateLocalSkillResult = {
@@ -304,7 +370,6 @@ export function createLocalSkill(args: {
 }): CreateLocalSkillResult {
   const scope: LocalSkillSource = args.scope === 'personal' ? 'personal' : 'project'
   const base = skillSlug(args.title)
-  const displayTitle = (args.title ?? '').trim() || base
 
   let parent: string
   let relativePrefix: string
@@ -322,11 +387,12 @@ export function createLocalSkill(args: {
 
   mkdirSync(parent, { recursive: true })
   const parentResolved = resolve(parent)
-  const { dir, slug } = uniqueSkillDir(parent, base)
+  const { dir, slug } = uniqueSkillDir(parent, base, takenSkillNames(args.workspacePath ?? null))
   if (!isInsideRoot(resolve(dir), parentResolved)) {
     throw new Error('Skill path escapes skills root')
   }
-  mkdirSync(dir, { recursive: true })
+  // No title given: title the stub after the slug that was actually taken.
+  const displayTitle = (args.title ?? '').trim() || slug
   const absolute = join(dir, SKILL_MD)
   const body = [
     '---',
@@ -343,8 +409,13 @@ export function createLocalSkill(args: {
     'Describe the workflow the agent should follow.',
     ''
   ].join('\n')
+  // Fail loudly instead of writing a stub that every reader silently drops.
+  parseSkillFrontmatter(body)
+  mkdirSync(dir, { recursive: true })
   writeFileSync(absolute, body, 'utf8')
   clearLocalSkillsCache(args.workspacePath ?? null)
+  // Personal skills are shared by every workspace key, not just this one.
+  if (scope === 'personal') clearLocalSkillsCache()
 
   return {
     path: absolute,
@@ -471,6 +542,7 @@ export function writeLocalSkillFile(args: {
     throw new Error('Renamed skill path escapes skills root')
   }
   clearLocalSkillsCache(args.workspacePath ?? null)
+  if (isPersonalSkillPath(nextPath)) clearLocalSkillsCache()
   return {
     skillPath: nextPath,
     relativePath: relativeFromSkillPath(nextPath, args.workspacePath),
@@ -490,6 +562,8 @@ export function deleteLocalSkillFile(
   if (existsSync(real)) real = realpathSync(real)
   const skillDir = dirname(real)
   assertSkillFileNotAtRoot(skillDir, workspacePath)
+  const personal = isPersonalSkillPath(real)
   rmSync(skillDir, { recursive: true, force: true })
   clearLocalSkillsCache(workspacePath ?? null)
+  if (personal) clearLocalSkillsCache()
 }

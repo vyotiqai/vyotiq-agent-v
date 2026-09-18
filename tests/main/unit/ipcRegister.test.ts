@@ -156,7 +156,10 @@ vi.mock('@main/agent/providers/modelCache', () => ({
 vi.mock('@main/agent/runRegistry', () => ({
   activeRunCount: vi.fn(() => 0),
   chatCancelResult: vi.fn(),
+  cancelRun: vi.fn(),
   listActiveRuns: vi.fn(() => []),
+  registerProfileRunFinishListener: vi.fn(),
+  notifyProfileRunFinished: vi.fn(),
   registerRunAbort: registerRunAbortMock,
   tryRegisterRunAbort: tryRegisterRunAbortMock,
   clearRunAbort: clearRunAbortMock,
@@ -588,7 +591,7 @@ describe('registerIpc', () => {
       expect(runAgentMock).not.toHaveBeenCalled()
     })
 
-    it('marks turn complete on terminal status; clearRunAbort owned by runAgent', async () => {
+    it('marks turn complete on terminal status; clearRunAbort guarded by invokeId', async () => {
       runAgentMock.mockImplementation(async function* () {
         yield { type: 'status', runId: 'run-test', status: 'done' } satisfies AgentEvent
       })
@@ -598,8 +601,10 @@ describe('registerIpc', () => {
       await flushAsync()
 
       expect(markRunTurnCompleteMock).toHaveBeenCalledWith('run-test', 42)
-      // clearRunAbort is owned by runAgent's finally (mocked here).
-      expect(clearRunAbortMock).not.toHaveBeenCalled()
+      // startAgentRun's finally clears the slot as a safety net for generators
+      // that throw before the loop's try — always invokeId-guarded so a fresh
+      // re-registration of the same runId is never cleared.
+      expect(clearRunAbortMock).toHaveBeenCalledWith('run-test', 42)
     })
   })
 
@@ -648,7 +653,7 @@ describe('registerIpc', () => {
         expect(result.error).toMatch(/editMessageIndex out of range/i)
         expect(result.code).not.toBe('IPC_HANDLER')
       }
-      expect(tryRegisterRunAbortMock).toHaveBeenCalledWith('run-edit', '/ws')
+      expect(tryRegisterRunAbortMock).toHaveBeenCalledWith('run-edit', '/ws', undefined)
       expect(clearRunAbortMock).toHaveBeenCalledWith('run-edit', 42)
       expect(runAgentMock).not.toHaveBeenCalled()
     })

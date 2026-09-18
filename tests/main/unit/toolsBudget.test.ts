@@ -86,4 +86,13 @@ describe('buildStepToolCatalog', () => {
     expect(small.estimate).toBeGreaterThan(0)
     expect(bigger.estimate).toBeGreaterThan(small.estimate)
   })
+
+  it('reports per-tool token estimates summing to the aggregate', () => {
+    const result = buildStepToolCatalog([tool('read', 'r'), tool('edit', 'e'.repeat(500))])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.perTool.map((p) => p.name)).toEqual(['read', 'edit'])
+    expect(result.perTool.every((p) => p.tokens > 0)).toBe(true)
+    expect(result.perTool.reduce((n, p) => n + p.tokens, 0)).toBe(result.estimate)
+  })
 })

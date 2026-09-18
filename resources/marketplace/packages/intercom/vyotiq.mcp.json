@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "intercom",
+  "name": "Intercom",
+  "version": "1.0.0",
+  "description": "Search customer conversations, contacts, and help-centre articles.",
+  "transport": "http",
+  "url": "https://mcp.intercom.com/mcp",
+  "auth": "oauth",
+  "docsUrl": "https://developers.intercom.com/docs/guides/mcp"
+}

@@ -96,4 +96,66 @@ describe('useWorkspaceGitSummaries', () => {
     expect(result.current.loading).toBe(false)
     expect(gitStatus).not.toHaveBeenCalled()
   })
+
+  it('re-pulls only the touched workspace when git:status-changed fires for it', async () => {
+    let listener: ((payload: { workspacePath: string }) => void) | undefined
+    const unsubscribe = vi.fn()
+    const onGitStatusChanged = vi.fn(
+      (handler: (payload: { workspacePath: string }) => void) => {
+        listener = handler
+        return unsubscribe
+      }
+    )
+    // @ts-expect-error test bridge
+    window.vyotiq = { gitStatus, onGitStatusChanged }
+    const { result, unmount } = renderHook(() =>
+      useWorkspaceGitSummaries(['/repo', '/other'], true)
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(gitStatus).toHaveBeenCalledTimes(2)
+
+    gitStatus.mockClear()
+    gitStatus.mockImplementation(async (path: string) =>
+      path === '/repo' ? status('src/live.ts') : status()
+    )
+    act(() => listener?.({ workspacePath: '/repo' }))
+    await waitFor(() => expect(gitStatus).toHaveBeenCalledTimes(1))
+    expect(gitStatus).toHaveBeenCalledWith('/repo')
+    await waitFor(
+      () => expect(result.current.data['/repo']?.topFiles?.[0]?.path).toBe('src/live.ts')
+    )
+    // The sibling workspace keeps its own snapshot untouched.
+    expect(result.current.data['/other']?.topFiles?.[0]?.path).toBe('src/a.ts')
+    expect(result.current.errors).toEqual({})
+
+    // Workspaces Home does not track are ignored without a fetch.
+    act(() => listener?.({ workspacePath: '/elsewhere' }))
+    expect(gitStatus).toHaveBeenCalledTimes(1)
+
+    unmount()
+    expect(unsubscribe).toHaveBeenCalled()
+  })
+
+  it('coalesces a burst of events for the same workspace into one re-pull', async () => {
+    let listener: ((payload: { workspacePath: string }) => void) | undefined
+    const onGitStatusChanged = vi.fn(
+      (handler: (payload: { workspacePath: string }) => void) => {
+        listener = handler
+        return () => {}
+      }
+    )
+    // @ts-expect-error test bridge
+    window.vyotiq = { gitStatus, onGitStatusChanged }
+    const { result } = renderHook(() => useWorkspaceGitSummaries(['/repo'], true))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    gitStatus.mockClear()
+
+    act(() => {
+      listener?.({ workspacePath: '/repo' })
+      listener?.({ workspacePath: '/repo' })
+    })
+    await waitFor(() => expect(gitStatus).toHaveBeenCalledTimes(1))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 300)))
+    expect(gitStatus).toHaveBeenCalledTimes(1)
+  })
 })

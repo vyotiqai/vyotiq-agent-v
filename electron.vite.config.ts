@@ -27,11 +27,27 @@ export default defineConfig(({ mode }) => {
     'process.env.VITE_SENTRY_DSN': JSON.stringify(sentryDsn)
   }
 
+  // Vyotiq's own Google OAuth client for the hosted Gmail/Drive/Calendar MCP
+  // servers. Those endpoints support no dynamic client registration, so without
+  // this every user has to build a Google Cloud client by hand. Empty in a dev
+  // checkout, which falls back to exactly that manual path.
+  // Registered as a Desktop app client: the secret is non-confidential by
+  // Google's own definition, and PKCE + the loopback redirect carry the flow.
+  const googleMcpDefine = {
+    'process.env.VYOTIQ_GOOGLE_MCP_CLIENT_ID': JSON.stringify(
+      env.VYOTIQ_GOOGLE_MCP_CLIENT_ID || ''
+    ),
+    'process.env.VYOTIQ_GOOGLE_MCP_CLIENT_SECRET': JSON.stringify(
+      env.VYOTIQ_GOOGLE_MCP_CLIENT_SECRET || ''
+    )
+  }
+
   return {
     main: {
       envPrefix: ['VITE_', 'SENTRY_'],
-      // Bake DSN into packaged main (runtime process.env is empty in production).
-      define: dsnDefine,
+      // Bake DSN + Google MCP client into packaged main (runtime process.env is
+      // empty in production).
+      define: { ...dsnDefine, ...googleMcpDefine },
       resolve: {
         alias: {
           '@main': resolve('src/main'),

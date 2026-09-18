@@ -6,5 +6,8 @@
   "version": "1.0.0",
   "description": "Official hosted GitHub MCP (HTTP).",
   "transport": "http",
-  "url": "https://api.githubcopilot.com/mcp/"
+  "url": "https://api.githubcopilot.com/mcp/",
+  "auth": "oauth-client",
+  "setupUrl": "https://github.com/settings/applications/new",
+  "docsUrl": "https://github.com/github/github-mcp-server"
 }

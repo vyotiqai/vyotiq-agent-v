@@ -250,6 +250,33 @@ export function ToolsSection({ form }: { form: SettingsFormState }) {
         </SettingsField>
 
         <SettingsField
+          id="max-chat-panes"
+          title="Max chat panes"
+          hint="How many split session panes can show side by side. Auto fits as many 280px columns as the window allows."
+          help="Auto derives the limit from the window width (hard cap 6). A fixed limit may exceed what fits — the pane row scrolls horizontally."
+        >
+          <Menu
+            aria-label="Max chat panes"
+            value={String(form.settings.maxChatPanes ?? 0)}
+            options={[
+              { value: '0', label: 'Auto (fits window)' },
+              { value: '1', label: '1' },
+              { value: '2', label: '2' },
+              { value: '3', label: '3' },
+              { value: '4', label: '4' },
+              { value: '5', label: '5' },
+              { value: '6', label: '6' }
+            ]}
+            searchable={false}
+            placement="down"
+            disabled={form.formLocked}
+            onChange={(v) => {
+              void form.runUpdate({ maxChatPanes: Number(v) })
+            }}
+          />
+        </SettingsField>
+
+        <SettingsField
           id="auto-mode-switch"
           title="Automatic mode switching"
           hint="Agent may call switch_mode mid-run. Applies at next step of a live run. Default on."

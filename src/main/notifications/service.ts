@@ -20,6 +20,7 @@ import {
 } from '../../shared/ipc'
 import { getSettings } from '../settings/settings'
 import { getMainWindow } from '../app/window'
+import { notifyBadgeChange } from '../app/badges'
 import { setNotificationBus } from './bus'
 import {
   dismissNotificationItems,
@@ -121,6 +122,12 @@ function snapshot(): NotificationList {
 
 function pushChanged(): void {
   sendToRenderer(IPC.notificationsChanged, snapshot())
+  notifyBadgeChange()
+}
+
+/** Unread items across the inbox — drives the taskbar badge. */
+export function unreadNotificationCount(): number {
+  return listNotificationItems().filter((item) => !item.read).length
 }
 
 function closeLive(id: string): void {

@@ -15,6 +15,7 @@ import { isApprovalExemptTool } from './tools/classify'
 import { ASK_SAFE_BUILTIN } from './tools/modePolicy'
 import { streamSignalFor } from './runRegistry'
 import { dismissLifecycleNotification } from '../notifications/bus'
+import { notifyBadgeChange } from '../app/badges'
 import { needsYouDedupeKey } from '../../shared/ipc'
 
 /** Browse/fetch egress — gated, but not workspace-mutating.
@@ -71,6 +72,11 @@ export function listPendingToolApprovals(runId: string): ToolApprovalRequest[] {
     if (entry.runId === runId) out.push(entry.request)
   }
   return out
+}
+
+/** Total approvals waiting across all runs — drives the taskbar badge. */
+export function countPendingToolApprovals(): number {
+  return pending.size
 }
 
 /** Returns false when the request is unknown or runId does not match. */
@@ -225,6 +231,7 @@ function askThroughRenderer(
       if (settled || !pending.has(request.requestId)) return
       settled = true
       pending.delete(request.requestId)
+      notifyBadgeChange()
       clearWaiters()
       resolve(decision)
     }
@@ -232,6 +239,7 @@ function askThroughRenderer(
       if (settled || !pending.has(request.requestId)) return
       settled = true
       pending.delete(request.requestId)
+      notifyBadgeChange()
       clearWaiters()
       reject(err)
     }
@@ -249,6 +257,7 @@ function askThroughRenderer(
       invokeId,
       request
     })
+    notifyBadgeChange()
     signal.addEventListener('abort', onAbort, { once: true })
     timeoutId = setTimeout(() => {
       if (!pending.has(request.requestId)) return

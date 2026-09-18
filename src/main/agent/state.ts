@@ -18,6 +18,7 @@ import { getCachedListRuns, invalidateListRunsCache } from './runListCache'
 import {
   ChatMessageSchema,
   PersistedEventSchema,
+  RunLoopSchema,
   RunStatusSchema,
   contentToText,
   runDoneDedupeKey,
@@ -48,6 +49,7 @@ import { toolResultEventForPersistence } from '../../shared/utils/toolResultIpc'
 import { finalizeInterruptedTodos } from './tools/todo'
 import { readGoal } from './runGoal'
 import { readLenientReceiptCost } from './runStats'
+import { readJsonDocCached } from './jsonDocCache'
 import { finalizeTodoContentOnRunEnd, type TodoFinalizeOutcome } from '../../shared/utils/todoContent'
 import { DEFAULT_PLAN_STUB, stripPlanStubChrome } from '../../shared/planStub'
 import { ensureWorkspaceStorage, resolveRunDir, workspaceSessionsRoot } from '../storage/paths'
@@ -65,7 +67,7 @@ import {
 import { writeRunReceiptBestEffort } from './runReceipt'
 import { RUN_LIST_CAP } from '@shared/domain/runs'
 
-export { flushEventAppends, takeEventAppendFailureNotice } from './eventAppendQueue'
+export { flushEventAppends, takeEventAppendFailureNotice, onRunStorageLost, clearRunStorageLostHandler } from './eventAppendQueue'
 export { flushMessageAppends, takeMessageAppendFailureNotice } from './messageAppendQueue'
 export { flushStatusWrites } from './statusWriteQueue'
 
@@ -1134,9 +1136,9 @@ async function collectRunsFromRoot(root: string): Promise<{
     const dir = join(root, entry.name)
     try {
       const statusPath = join(dir, 'status.json')
-      const raw = JSON.parse(await readFile(statusPath, 'utf8')) as unknown
-      const parsed = RunStatusSchema.safeParse(raw)
-      if (!parsed.success) {
+      const doc = await readJsonDocCached(statusPath)
+      const parsed = doc.ok ? RunStatusSchema.safeParse(doc.doc) : null
+      if (!parsed || !parsed.success) {
         logger.warn('Skipping run with invalid status.json', {
           scope: 'state',
           runId: entry.name
@@ -1145,14 +1147,18 @@ async function collectRunsFromRoot(root: string): Promise<{
       }
       const status = parsed.data
       const goal = readGoal(dir)
-      let loopArmed = false
+      // Schema-validated so `nextAt` is only carried when the file really holds
+      // an armed loop — a corrupt or partial loop.json reads as disarmed.
+      let armedLoop: { nextAt: string } | null = null
       try {
-        const loopRaw = JSON.parse(readFileSync(join(dir, 'loop.json'), 'utf8')) as {
-          status?: unknown
+        const parsedLoop = RunLoopSchema.safeParse(
+          JSON.parse(readFileSync(join(dir, 'loop.json'), 'utf8'))
+        )
+        if (parsedLoop.success && parsedLoop.data.status === 'armed') {
+          armedLoop = { nextAt: parsedLoop.data.nextAt }
         }
-        loopArmed = loopRaw.status === 'armed'
       } catch {
-        loopArmed = false
+        armedLoop = null
       }
       const summary: RunSummary = {
         runId: entry.name,
@@ -1160,14 +1166,17 @@ async function collectRunsFromRoot(root: string): Promise<{
         updatedAt: status.updatedAt,
         goal: status.goal,
         ...(goal ? { goalStatus: goal.status } : {}),
-        ...(loopArmed ? { loopArmed: true as const } : {}),
+        ...(goal?.continueCount ? { goalContinueCount: goal.continueCount } : {}),
+        ...(armedLoop ? { loopArmed: true as const, loopNextAt: armedLoop.nextAt } : {}),
         ...(status.resumable ? { resumable: true as const } : {}),
         ...(status.error ? { error: status.error } : {}),
         ...(status.parentRunId ? { parentRunId: status.parentRunId } : {}),
         ...(status.inlineInstance ? { inlineInstance: true as const } : {}),
         ...(status.pathScope?.length ? { pathScope: status.pathScope } : {}),
         ...(status.worktreePath ? { worktreePath: status.worktreePath } : {}),
-        ...(status.worktreeBranch ? { worktreeBranch: status.worktreeBranch } : {})
+        ...(status.worktreeBranch ? { worktreeBranch: status.worktreeBranch } : {}),
+        ...(status.agentProfileId ? { agentProfileId: status.agentProfileId } : {}),
+        ...(status.agentProfileName ? { agentProfileName: status.agentProfileName } : {})
       }
       const receiptCost = await readLenientReceiptCost(dir)
       if (receiptCost) Object.assign(summary, receiptCost)
@@ -1508,9 +1517,9 @@ export async function reconcileStaleRuns(
     const dir = join(runs, entry.name)
     try {
       const statusPath = join(dir, 'status.json')
-      const raw = JSON.parse(await readFile(statusPath, 'utf8')) as unknown
-      const parsed = RunStatusSchema.safeParse(raw)
-      if (!parsed.success) {
+      const doc = await readJsonDocCached(statusPath)
+      const parsed = doc.ok ? RunStatusSchema.safeParse(doc.doc) : null
+      if (!parsed || !parsed.success) {
         logger.warn('Run reconcile skipped invalid status.json', {
           scope: 'runs',
           runId: entry.name

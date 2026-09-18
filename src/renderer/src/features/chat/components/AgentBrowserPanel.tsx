@@ -57,7 +57,8 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
   workspacePath,
   activeRunId,
   visible = true,
-  onClose
+  onClose,
+  onPopOut
 }: {
   className?: string
   workspacePath?: string | null
@@ -65,6 +66,8 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
   /** When false (CSS-hidden dock tab), clear native WebContentsView bounds so the overlay does not paint over other panels. */
   visible?: boolean
   onClose?: () => void
+  /** Hide the dock while keeping the browser alive (PiP pop-out) — unlike onClose, which closes the browser. */
+  onPopOut?: () => void
 }) {
   const [state, setState] = useState<AgentBrowserState>(EMPTY)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -332,6 +335,16 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
             setStatusMsg('Cache cleared')
           })
           break
+        case 'pip-toggle': {
+          void window.vyotiq.browserPipToggle?.().then((res) => {
+            if (res && !res.ok) {
+              setStatusMsg(res.error)
+              return
+            }
+            if (res?.ok && res.data.pip) onPopOut?.()
+          })
+          break
+        }
         case 'close':
           // onClose → closeDockTab('browser') also calls browserClose; invoke here
           // so Close works even if onClose is omitted in tests.
@@ -342,7 +355,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
           break
       }
     },
-    [activeRunId, onClose, state.url, workspacePath]
+    [activeRunId, onClose, onPopOut, state.url, workspacePath]
   )
 
   const viewportSpec = browserViewportPreset(viewportPreset)
@@ -612,6 +625,12 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
               </MenuButton>
               <MenuButton onClick={() => handleMenuAction('copy-url')} disabled={!state.url}>
                 Copy Current URL
+              </MenuButton>
+              <MenuButton
+                onClick={() => handleMenuAction('pip-toggle')}
+                disabled={!hasPage}
+              >
+                {state.pip ? 'Return browser to panel' : 'Pop out to floating window'}
               </MenuButton>
               <div className="my-1 border-t border-border/30" />
               <MenuButton onClick={() => handleMenuAction('recents-bar')}>

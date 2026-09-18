@@ -1,8 +1,9 @@
-import { mkdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, rmSync, utimesSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { collectHomeActivity } from '@main/agent/activityStats'
+import { resetJsonDocCacheForTests } from '@main/agent/jsonDocCache'
 import { workspaceSessionsRoot } from '@main/storage/paths'
 
 vi.mock('electron', () => ({
@@ -83,10 +84,11 @@ function ledgerFile(
 
 afterEach(() => {
   rmSync(sessionsRoot(), { recursive: true, force: true })
+  resetJsonDocCacheForTests()
 })
 
 describe('collectHomeActivity', () => {
-  it('buckets legacy receipts into local days and sums tokens within the window', () => {
+  it('buckets legacy receipts into local days and sums tokens within the window', async () => {
     makeRun('run-a', {
       'receipt.json': receipt({
         runId: 'run-a',
@@ -101,7 +103,7 @@ describe('collectHomeActivity', () => {
       })
     })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.days).toHaveLength(1)
     expect(res.days[0]).toMatchObject({
@@ -117,7 +119,7 @@ describe('collectHomeActivity', () => {
     })
   })
 
-  it('attributes multi-day usage via the per-day ledger, not the receipt write day', () => {
+  it('attributes multi-day usage via the per-day ledger, not the receipt write day', async () => {
     makeRun('run-a', {
       'receipt.json': receipt({
         runId: 'run-a',
@@ -138,7 +140,7 @@ describe('collectHomeActivity', () => {
       })
     })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     // Two distinct ledger days, exactly their deltas — nothing re-attributed
     // to the receipt write day.
@@ -161,7 +163,7 @@ describe('collectHomeActivity', () => {
     expect(res.outcomes).toEqual({ done: 1, error: 0, cancelled: 0, running: 0 })
   })
 
-  it('keeps a live (receiptless) run in the window through its per-step ledger', () => {
+  it('keeps a live (receiptless) run in the window through its per-step ledger', async () => {
     makeRun('run-live', {
       'status.json': JSON.stringify({
         status: 'running',
@@ -174,7 +176,7 @@ describe('collectHomeActivity', () => {
       )
     })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.outcomes.running).toBe(1)
     expect(res.days[0]).toMatchObject({
@@ -187,7 +189,7 @@ describe('collectHomeActivity', () => {
     expect(res.totals.billedCost).toBe(0.1)
   })
 
-  it('excludes inline instance runs entirely', () => {
+  it('excludes inline instance runs entirely', async () => {
     makeRun('inst-a', {
       'status.json': JSON.stringify({
         status: 'done',
@@ -201,14 +203,14 @@ describe('collectHomeActivity', () => {
       })
     })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.days).toEqual([])
     expect(res.totals.runs).toBe(0)
     expect(res.outcomes).toEqual({ done: 0, error: 0, cancelled: 0, running: 0 })
   })
 
-  it('uses receipt billedCost for completed runs (checkpoint cleared on done)', () => {
+  it('uses receipt billedCost for completed runs (checkpoint cleared on done)', async () => {
     makeRun('run-a', {
       'receipt.json': receipt({
         runId: 'run-a',
@@ -217,13 +219,13 @@ describe('collectHomeActivity', () => {
       })
     })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.totals.billedCost).toBe(1.25)
     expect(res.days[0]!.billedCost).toBe(1.25)
   })
 
-  it('falls back to the durable checkpoint for interrupted legacy runs without receipt cost', () => {
+  it('falls back to the durable checkpoint for interrupted legacy runs without receipt cost', async () => {
     makeRun('run-a', {
       'receipt.json': receipt({
         runId: 'run-a',
@@ -253,12 +255,12 @@ describe('collectHomeActivity', () => {
       })
     })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.totals.billedCost).toBe(0.42)
   })
 
-  it('counts legacy out-of-window cost without double-counting usage', () => {
+  it('counts legacy out-of-window cost without double-counting usage', async () => {
     makeRun('run-old', {
       'receipt.json': receipt({
         runId: 'run-old',
@@ -269,7 +271,7 @@ describe('collectHomeActivity', () => {
       })
     })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.days).toEqual([])
     expect(res.outcomes.done).toBe(0)
@@ -281,7 +283,7 @@ describe('collectHomeActivity', () => {
     })
   })
 
-  it('shows by-model split only for receipts that recorded a model', () => {
+  it('shows by-model split only for receipts that recorded a model', async () => {
     makeRun('run-a', {
       'receipt.json': receipt({
         runId: 'run-a',
@@ -297,12 +299,12 @@ describe('collectHomeActivity', () => {
       })
     })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.days[0]!.byModel).toEqual({ 'glm-5.3': 40 })
   })
 
-  it('counts a validated receiptless running status, never as usage', () => {
+  it('counts a validated receiptless running status, never as usage', async () => {
     makeRun('run-live', {
       'status.json': JSON.stringify({
         status: 'running',
@@ -311,27 +313,27 @@ describe('collectHomeActivity', () => {
       })
     })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.outcomes.running).toBe(1)
     expect(res.days).toHaveLength(0)
     expect(res.totals.runs).toBe(0)
   })
 
-  it('skips corrupt receipts and ledgers instead of failing the aggregate', () => {
+  it('skips corrupt receipts and ledgers instead of failing the aggregate', async () => {
     makeRun('run-a', { 'receipt.json': '{not json' })
     makeRun('run-b', {
       'receipt.json': receipt({ runId: 'run-b' }),
       'usage.json': '{not json'
     })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.outcomes.running).toBe(0)
     expect(res.totals.runs).toBe(1) // run-b falls back to its receipt
   })
 
-  it('omits billedCost/cachedInputTokens unless reported somewhere in the window', () => {
+  it('omits billedCost/cachedInputTokens unless reported somewhere in the window', async () => {
     makeRun('run-a', {
       'receipt.json': receipt({
         runId: 'run-a',
@@ -339,23 +341,23 @@ describe('collectHomeActivity', () => {
       })
     })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect('billedCost' in res.totals).toBe(false)
     expect('cachedInputTokens' in res.totals).toBe(false)
   })
 
-  it('returns an empty honest result when the workspace has no sessions', () => {
+  it('returns an empty honest result when the workspace has no sessions', async () => {
     mkdirSync(sessionsRoot(), { recursive: true })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.days).toEqual([])
     expect(res.outcomes).toEqual({ done: 0, error: 0, cancelled: 0, running: 0 })
     expect(res.totals.runs).toBe(0)
   })
 
-  it('surfaces reasoning/peak/contextWindow from ledger days into day buckets and totals', () => {
+  it('surfaces reasoning/peak/contextWindow from ledger days into day buckets and totals', async () => {
     makeRun('run-a', {
       'receipt.json': receipt({
         runId: 'run-a',
@@ -376,7 +378,7 @@ describe('collectHomeActivity', () => {
       )
     })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.days[0]).toMatchObject({
       reasoningTokens: 24,
@@ -390,7 +392,7 @@ describe('collectHomeActivity', () => {
     })
   })
 
-  it('keeps the context window paired with the run that reported the largest peak', () => {
+  it('keeps the context window paired with the run that reported the largest peak', async () => {
     makeRun('run-large-peak', {
       'receipt.json': receipt({ runId: 'run-large-peak', model: 'large-window' }),
       'usage.json': ledgerFile({
@@ -414,13 +416,13 @@ describe('collectHomeActivity', () => {
       })
     })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.totals.peakInputTokens).toBe(90_000)
     expect(res.totals.contextWindow).toBe(120_000)
   })
 
-  it('honors windowDays=30, computes activeDays and the previous-window trend', () => {
+  it('honors windowDays=30, computes activeDays and the previous-window trend', async () => {
     makeRun('run-a', {
       'receipt.json': receipt({ runId: 'run-a' }),
       'usage.json': ledgerFile({
@@ -430,7 +432,7 @@ describe('collectHomeActivity', () => {
       })
     })
 
-    const res = collectHomeActivity([WS], NOW, 30)
+    const res = await collectHomeActivity([WS], NOW, 30)
 
     expect(res.windowDays).toBe(30)
     // Only the in-window ledger day lands in days; the previous-window day
@@ -441,7 +443,7 @@ describe('collectHomeActivity', () => {
     expect(res.totals.previousTokens).toBe(132)
   })
 
-  it('emits per-workspace slices only for multi-workspace requests', () => {
+  it('emits per-workspace slices only for multi-workspace requests', async () => {
     makeRun('run-a', {
       'receipt.json': receipt({
         runId: 'run-a',
@@ -450,10 +452,10 @@ describe('collectHomeActivity', () => {
       })
     })
 
-    const single = collectHomeActivity([WS], NOW)
+    const single = await collectHomeActivity([WS], NOW)
     expect(single.workspaces).toBeUndefined()
 
-    const multi = collectHomeActivity([WS, 'C:\\vyotiq-activity-test-2'], NOW)
+    const multi = await collectHomeActivity([WS, 'C:\\vyotiq-activity-test-2'], NOW)
     expect(multi.workspaces).toHaveLength(1)
     expect(multi.workspaces![0]).toMatchObject({
       path: WS,
@@ -464,7 +466,7 @@ describe('collectHomeActivity', () => {
     })
   })
 
-  it('surfaces attention signals from window receipts (unverified runs + top tools)', () => {
+  it('surfaces attention signals from window receipts (unverified runs + top tools)', async () => {
     makeRun('run-a', {
       'receipt.json': receipt({
         runId: 'run-a',
@@ -500,7 +502,7 @@ describe('collectHomeActivity', () => {
       })
     })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     // Only run-a is unverified (run-b verified after its last mutation).
     expect(res.attention).toEqual({
@@ -512,15 +514,15 @@ describe('collectHomeActivity', () => {
     })
   })
 
-  it('omits the attention block when no receipt reports verification or tools', () => {
+  it('omits the attention block when no receipt reports verification or tools', async () => {
     makeRun('run-a', { 'receipt.json': receipt({ runId: 'run-a' }) })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.attention).toBeUndefined()
   })
 
-  it('digests error runs newest-first with workspace and goal, capped at 3', () => {
+  it('digests error runs newest-first with workspace and goal, capped at 3', async () => {
     for (const [id, at] of [
       ['err-1', '2026-09-09T08:00:00.000Z'],
       ['err-2', '2026-09-09T09:00:00.000Z'],
@@ -537,7 +539,7 @@ describe('collectHomeActivity', () => {
       })
     }
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.attention?.errorRuns).toEqual([
       { runId: 'err-3', workspacePath: WS, goal: 'goal err-3' },
@@ -546,11 +548,90 @@ describe('collectHomeActivity', () => {
     ])
   })
 
-  it('never lists non-error runs in the digest', () => {
+  it('never lists non-error runs in the digest', async () => {
     makeRun('ok-run', { 'receipt.json': receipt({ runId: 'ok-run' }) })
 
-    const res = collectHomeActivity([WS], NOW)
+    const res = await collectHomeActivity([WS], NOW)
 
     expect(res.attention?.errorRuns).toBeUndefined()
+  })
+})
+
+describe('window pruning (mtime-keyed)', () => {
+  /** Before the earliest previous-window local day for any windowDays ≤ 30. */
+  const LONG_AGO = new Date('2026-08-01T10:00:00.000Z')
+
+  function backdate(runId: string, files: string[]): void {
+    for (const name of files) {
+      utimesSync(join(sessionsRoot(), runId, name), LONG_AGO, LONG_AGO)
+    }
+  }
+
+  it('aggregates identically whether or not ancient run dirs exist', async () => {
+    makeRun('fresh-run', {
+      'receipt.json': receipt({
+        runId: 'fresh-run',
+        tokenUsage: { billedInputTokens: 900, outputTokens: 60 }
+      })
+    })
+    // A fully ancient run: receipt + ledger both last written before the
+    // previous window's start. Physically every day key it holds predates
+    // the cutoff, so it must contribute nothing at all.
+    makeRun('ancient-run', {
+      'receipt.json': receipt({
+        runId: 'ancient-run',
+        writtenAt: '2026-07-20T10:00:00.000Z',
+        tokenUsage: { billedInputTokens: 444444, outputTokens: 4444 }
+      }),
+      'usage.json': ledgerFile({
+        '2026-07-20': { inputTokens: 444444, outputTokens: 4444 }
+      })
+    })
+    backdate('ancient-run', ['receipt.json', 'usage.json'])
+
+    const withAncient = await collectHomeActivity([WS], NOW)
+    rmSync(join(sessionsRoot(), 'ancient-run'), { recursive: true, force: true })
+    const withoutAncient = await collectHomeActivity([WS], NOW)
+
+    expect(withAncient).toEqual(withoutAncient)
+    expect(withAncient.days).toHaveLength(1)
+    expect(withAncient.days[0]).toMatchObject({ runs: 1, billedInputTokens: 900 })
+  })
+
+  it('still counts a stale receiptless running dir (window-independent rule)', async () => {
+    makeRun('zombie-run', {
+      'status.json': JSON.stringify({
+        status: 'running',
+        step: 1,
+        updatedAt: '2026-07-15T00:00:00.000Z'
+      })
+    })
+    backdate('zombie-run', ['status.json'])
+
+    const res = await collectHomeActivity([WS], NOW)
+
+    expect(res.outcomes.running).toBe(1)
+    expect(res.days).toHaveLength(0)
+  })
+
+  it('keeps previous-window ledger days in the trend when the run is out-of-window', async () => {
+    // Day inside the previous 7-day window, written while it happened — the
+    // mtime respects the cutoff, so pruning must not drop the trend sample.
+    makeRun('trend-run', {
+      'usage.json': ledgerFile({
+        '2026-08-30': { inputTokens: 700, outputTokens: 70 }
+      })
+    })
+    backdate('trend-run', ['usage.json'])
+    utimesSync(
+      join(sessionsRoot(), 'trend-run', 'usage.json'),
+      new Date('2026-08-30T10:00:00.000Z'),
+      new Date('2026-08-30T10:00:00.000Z')
+    )
+
+    const res = await collectHomeActivity([WS], NOW)
+
+    expect(res.totals.previousTokens).toBe(770)
+    expect(res.days).toHaveLength(0)
   })
 })

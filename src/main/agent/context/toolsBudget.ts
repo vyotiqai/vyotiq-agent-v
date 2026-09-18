@@ -30,7 +30,8 @@ export function isOptionalBuiltinName(name: string): boolean {
   return OPTIONAL_BUILTIN_NAMES.has(name)
 }
 
-function estimateToolDefTokens(tool: ToolDefinition): number {
+/** BPE token estimate of one wire tool definition (JSON shape). */
+export function estimateToolDefTokens(tool: ToolDefinition): number {
   try {
     return estimateTextTokens(JSON.stringify(tool))
   } catch {
@@ -48,6 +49,8 @@ export type StepToolCatalog = {
   tools: ToolDefinition[]
   estimate: number
   fingerprint: string
+  /** Per-tool token estimates (same measurement as `estimate`). */
+  perTool: { name: string; tokens: number }[]
 }
 
 /**
@@ -55,11 +58,17 @@ export type StepToolCatalog = {
  * Never defers, never evicts, never returns overflow.
  */
 export function buildStepToolCatalog(tools: ToolDefinition[]): StepToolCatalog {
-  const estimate = tools.reduce((n, t) => n + estimateToolDefTokens(t), 0)
+  let estimate = 0
+  const perTool = tools.map((t) => {
+    const tokens = estimateToolDefTokens(t)
+    estimate += tokens
+    return { name: t.name, tokens }
+  })
   return {
     ok: true,
     tools,
     estimate,
-    fingerprint: toolCatalogFingerprint(tools)
+    fingerprint: toolCatalogFingerprint(tools),
+    perTool
   }
 }

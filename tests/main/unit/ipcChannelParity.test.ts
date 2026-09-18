@@ -23,6 +23,8 @@ const PUSH_ONLY = new Set<keyof typeof IPC>([
   'codeIndexStatusEvent',
   'dictationStatusEvent',
   'skillsChanged',
+  'agentProfilesChanged',
+  'tasksChanged',
   'gitStatusChanged',
   'workspaceEditorFlushRequest',
   'workspaceEditorFlushResponse',
@@ -31,7 +33,8 @@ const PUSH_ONLY = new Set<keyof typeof IPC>([
   'appearanceCustomCssChanged',
   'updaterState',
   'accessibilitySupportChanged',
-  'toolsCatalogChanged'
+  'toolsCatalogChanged',
+  'deepLinkOpened'
 ])
 
 function registeredChannels(): Set<string> {

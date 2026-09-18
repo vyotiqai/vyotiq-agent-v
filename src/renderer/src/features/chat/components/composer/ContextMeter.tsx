@@ -6,6 +6,7 @@ import { useDropdownMenu } from '@renderer/lib/hooks/useDropdownMenu'
 import { formatTokens } from '@renderer/lib/utils/formatTokens'
 import {
   alignContextUsageToModelWindow,
+  type ContextToolGroupDetail,
   type ContextUsageState
 } from '@shared/utils/contextUsage'
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
@@ -143,33 +144,200 @@ function BreakdownRow({
   label,
   tokens,
   total,
-  color
+  color,
+  pctOverride,
+  muted,
+  onToggle,
+  expanded
 }: {
   label: string
   tokens: number
   total: number
   color: string
+  /** Rendered in the % column instead of the computed share; null renders an em dash. */
+  pctOverride?: string | null
+  /** Dimmed informational row (e.g. deferred tools) — no bar, muted text. */
+  muted?: boolean
+  /** When set, the row is an expandable disclosure toggling its children. */
+  onToggle?: () => void
+  expanded?: boolean
 }) {
-  if (tokens <= 0) return null
-  return (
-    <div className="flex items-center gap-2">
+  if (tokens <= 0 && !onToggle) return null
+  const pct =
+    pctOverride !== undefined
+      ? pctOverride === null
+        ? '—'
+        : pctOverride
+      : formatPct(tokens, total)
+  const row = (
+    <>
       <span className={cn('size-1.5 shrink-0 rounded-full', color)} aria-hidden />
-      <span className="w-14 shrink-0 text-2xs text-secondary">{label}</span>
-      <div className="min-w-0 flex-1">
-        <div className="h-1 overflow-hidden rounded-full bg-surface-2">
-          <div
-            className={cn('h-full rounded-full vy-transition', color)}
-            style={{ width: `${total > 0 ? Math.min(100, (tokens / total) * 100) : 0}%` }}
-          />
+      <span
+        className={cn(
+          'w-24 shrink-0 truncate text-2xs',
+          muted ? 'text-tertiary' : 'text-secondary'
+        )}
+        title={label}
+      >
+        {label}
+      </span>
+      {muted ? (
+        <span className="min-w-0 flex-1" aria-hidden />
+      ) : (
+        <div className="min-w-0 flex-1">
+          <div className="h-1 overflow-hidden rounded-full bg-surface-2">
+            <div
+              className={cn('h-full rounded-full vy-transition', color)}
+              style={{ width: `${total > 0 ? Math.min(100, (tokens / total) * 100) : 0}%` }}
+            />
+          </div>
         </div>
-      </div>
-      <span className="w-10 shrink-0 text-right text-2xs tabular-nums text-fg">
+      )}
+      <span
+        className={cn(
+          'w-10 shrink-0 text-right text-2xs tabular-nums',
+          muted ? 'text-tertiary' : 'text-fg'
+        )}
+      >
         {formatTokens(tokens)}
       </span>
-      <span className="w-9 shrink-0 text-right text-2xs tabular-nums text-secondary">
-        {formatPct(tokens, total)}
+      <span
+        className={cn(
+          'w-9 shrink-0 text-right text-2xs tabular-nums',
+          muted ? 'text-tertiary' : 'text-secondary'
+        )}
+      >
+        {pct}
       </span>
-    </div>
+    </>
+  )
+  if (!onToggle) {
+    return <div className="flex items-center gap-2">{row}</div>
+  }
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={expanded}
+      className="flex w-full items-center gap-2 rounded text-left vy-transition hover:bg-surface/60"
+    >
+      {row}
+    </button>
+  )
+}
+
+/** Indented per-server rows under the expandable MCP tools row. */
+function McpServerRows({ groups }: { groups: ContextToolGroupDetail[] }) {
+  return (
+    <>
+      {groups.map((group) => (
+        <div key={group.serverId} className="flex items-center gap-2 pl-3.5">
+          <span className="w-1.5 shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-2xs text-tertiary" title={group.serverId}>
+            {group.serverId}
+          </span>
+          <span className="shrink-0 text-3xs tabular-nums text-tertiary">
+            {group.toolCount} {group.toolCount === 1 ? 'tool' : 'tools'}
+          </span>
+          <span className="w-10 shrink-0 text-right text-2xs tabular-nums text-secondary">
+            {formatTokens(group.tokens)}
+          </span>
+          <span className="w-9 shrink-0" aria-hidden />
+        </div>
+      ))}
+    </>
+  )
+}
+
+/**
+ * Full context breakdown (Messages / System tools / MCP tools / System prompt /
+ * Skills / Autocompact buffer / Free space + deferred tools), falling back to
+ * the legacy 3-layer split when the run predates `detail` events.
+ */
+function BreakdownRows({ usage }: { usage: ContextUsageState }) {
+  const [mcpOpen, setMcpOpen] = useState(false)
+  const detail = usage.detail
+  if (!detail) {
+    const contentTotal = usage.layers.system + usage.layers.history + usage.layers.tools
+    return (
+      <>
+        <BreakdownRow
+          label="System"
+          tokens={usage.layers.system}
+          total={contentTotal}
+          color="bg-fg/35"
+        />
+        <BreakdownRow
+          label="History"
+          tokens={usage.layers.history}
+          total={contentTotal}
+          color="bg-fg/70"
+        />
+        <BreakdownRow
+          label="Tools"
+          tokens={usage.layers.tools}
+          total={contentTotal}
+          color="bg-fg"
+        />
+      </>
+    )
+  }
+  const base = usage.window
+  const hasMcpServers = detail.tools.mcpByServer.length > 0
+  return (
+    <>
+      <BreakdownRow
+        label="Messages"
+        tokens={usage.layers.history}
+        total={base}
+        color="bg-accent"
+      />
+      <BreakdownRow
+        label="System tools"
+        tokens={detail.tools.builtin.tokens}
+        total={base}
+        color="bg-warning"
+      />
+      <BreakdownRow
+        label="MCP tools"
+        tokens={detail.tools.mcp.tokens}
+        total={base}
+        color="bg-success"
+        onToggle={hasMcpServers ? () => setMcpOpen((v) => !v) : undefined}
+        expanded={hasMcpServers ? mcpOpen : undefined}
+      />
+      {mcpOpen && hasMcpServers ? <McpServerRows groups={detail.tools.mcpByServer} /> : null}
+      <BreakdownRow
+        label="System prompt"
+        tokens={detail.systemPrompt}
+        total={base}
+        color="bg-fg/50"
+      />
+      <BreakdownRow label="Skills" tokens={detail.skills} total={base} color="bg-fg/35" />
+      <BreakdownRow
+        label="Autocompact buffer"
+        tokens={detail.autocompactBuffer}
+        total={base}
+        color="bg-fg/20"
+      />
+      <BreakdownRow label="Free space" tokens={detail.free} total={base} color="bg-fg/10" />
+      <BreakdownRow
+        label="Deferred sys tools"
+        tokens={detail.tools.deferredBuiltin.tokens}
+        total={base}
+        color="bg-fg/15"
+        muted
+        pctOverride={null}
+      />
+      <BreakdownRow
+        label="Deferred MCP tools"
+        tokens={detail.tools.deferredMcp.tokens}
+        total={base}
+        color="bg-fg/15"
+        muted
+        pctOverride={null}
+      />
+    </>
   )
 }
 
@@ -314,24 +482,7 @@ function ContextMeterPanel({
             <p className="m-0 text-3xs font-medium uppercase tracking-[var(--vy-tracking-caps)] text-secondary">
               Breakdown
             </p>
-            <BreakdownRow
-              label="System"
-              tokens={usage.layers.system}
-              total={contentTotal}
-              color="bg-fg/35"
-            />
-            <BreakdownRow
-              label="History"
-              tokens={usage.layers.history}
-              total={contentTotal}
-              color="bg-fg/70"
-            />
-            <BreakdownRow
-              label="Tools"
-              tokens={usage.layers.tools}
-              total={contentTotal}
-              color="bg-fg"
-            />
+            <BreakdownRows usage={usage} />
           </div>
         ) : null}
 

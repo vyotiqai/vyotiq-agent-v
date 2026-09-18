@@ -81,16 +81,18 @@ describe('deriveModelReadiness', () => {
     expect(modelReadinessSendReason(issue!)).not.toMatch(/before sending/i)
   })
 
-  it('flags a selected model missing from the live catalog', () => {
+  it('does not flag a selected model missing from the live catalog', () => {
+    // Hosted catalogs omit servable models (OpenRouter stealth ids like
+    // `stealth/union-alpha` are routed but unlisted), so catalog membership
+    // must never block send — a wrong id fails at send time instead.
     const issue = deriveModelReadiness({
-      provider: 'ollama',
-      model: 'qwen2.5',
-      secrets: emptySecretStatus(),
-      ollamaBaseUrl: 'http://127.0.0.1:11434',
+      provider: 'openrouter',
+      model: 'stealth/union-alpha',
+      secrets: { ...emptySecretStatus(), openrouter: true },
       catalogWarning: null,
       liveCatalog: [{
-        id: 'llama3.2',
-        displayName: 'llama3.2',
+        id: 'openai/gpt-4o',
+        displayName: 'GPT-4o',
         inputModalities: ['text'],
         outputModalities: ['text'],
         supportsTools: true,
@@ -98,13 +100,8 @@ describe('deriveModelReadiness', () => {
       }],
       catalogLoading: false
     })
-    expect(issue).toEqual({
-      kind: 'model_missing',
-      provider: 'ollama',
-      label: 'Ollama',
-      model: 'qwen2.5'
-    })
-    expect(modelReadinessBlocksSend(issue)).toBe(true)
+    expect(issue).toBeNull()
+    expect(modelReadinessBlocksSend(issue)).toBe(false)
   })
 
   it('does not block during the first catalog load before any warning', () => {

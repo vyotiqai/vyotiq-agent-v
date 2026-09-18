@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "stripe",
+  "name": "Stripe",
+  "version": "1.0.0",
+  "description": "Customers, payments, subscriptions, and invoices from your Stripe account.",
+  "transport": "http",
+  "url": "https://mcp.stripe.com",
+  "auth": "oauth",
+  "docsUrl": "https://docs.stripe.com/mcp"
+}

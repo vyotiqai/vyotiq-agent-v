@@ -3,8 +3,9 @@ import {
   CHAT_COLUMN,
   CHAT_COLUMN_MAX,
   CHAT_GUTTER,
-  COMPOSER_FLOAT_FADE,
   CHAT_STAGE_INSET,
+  CHAT_STAGE_TOP_INSET,
+  CHAT_STAGE_TOP_SPACER,
   MICRO_LABEL,
   MICRO_LABEL_CAPS,
   SETTINGS_COLUMN,
@@ -19,6 +20,8 @@ import {
   TRANSCRIPT_ROW_GAP,
   TRANSCRIPT_TURN_GAP,
   TRANSCRIPT_WORK_ROW_GAP,
+  TURN_PROMPT_STACK,
+  TURN_PROMPT_STACK_PINNED,
   USER_PROMPT_SURFACE
 } from '@renderer/lib/utils/layout'
 
@@ -43,15 +46,21 @@ describe('layout typography and spacing tokens', () => {
   })
 
   it('exports user prompt surface typography', () => {
-    expect(USER_PROMPT_SURFACE).toContain('text-sm')
-    expect(USER_PROMPT_SURFACE).toContain('leading-relaxed')
-    expect(USER_PROMPT_SURFACE).toContain('tracking-[var(--vy-tracking-body)]')
-    expect(USER_PROMPT_SURFACE).toContain('vy-chrome')
-  })
-
-  it('fades the composer dock into the stage background, not the composer surface', () => {
-    expect(COMPOSER_FLOAT_FADE).toContain('from-[var(--vy-bg)]')
-    expect(COMPOSER_FLOAT_FADE).not.toContain('--vy-chrome-surface')
+    // The bordered prompt still steps up from the 13px body scale to the
+    // heading scale.
+    expect(USER_PROMPT_SURFACE).toContain('text-heading')
+    expect(USER_PROMPT_SURFACE).not.toContain('text-sm')
+    expect(USER_PROMPT_SURFACE).toContain('leading-normal')
+    expect(USER_PROMPT_SURFACE).toContain('text-fg-strong')
+    expect(USER_PROMPT_SURFACE).toContain('tracking-[var(--vy-tracking-tight)]')
+    // A stable, unfilled border defines the user's prompt bubble without a
+    // shadow.
+    expect(USER_PROMPT_SURFACE).toContain('w-full')
+    expect(USER_PROMPT_SURFACE).toContain('border')
+    expect(USER_PROMPT_SURFACE).toContain('border-border')
+    expect(USER_PROMPT_SURFACE).not.toContain('bg-')
+    expect(USER_PROMPT_SURFACE).not.toContain('shadow-')
+    expect(USER_PROMPT_SURFACE).toContain('px-3')
   })
 
   it('exports micro label tokens', () => {
@@ -64,6 +73,26 @@ describe('layout typography and spacing tokens', () => {
   it('exports chat stage inset clearing the side rail', () => {
     expect(CHAT_STAGE_INSET).toContain('pr-10')
     expect(CHAT_STAGE_INSET).toContain('pl-4')
+  })
+
+  it('keeps the pinned prompt cover compact and flat', () => {
+    expect(TURN_PROMPT_STACK).toContain('py-2.5')
+    expect(TURN_PROMPT_STACK_PINNED).toContain('vy-turn-prompt-cover')
+    expect(TURN_PROMPT_STACK_PINNED).toContain('top-0')
+    // The cover carries no chrome or gradient tokens.
+    for (const token of [TURN_PROMPT_STACK, TURN_PROMPT_STACK_PINNED]) {
+      expect(token).not.toContain('border')
+      expect(token).not.toContain('shadow')
+      expect(token).not.toContain('bg-bg')
+    }
+  })
+
+  it('pairs the stage top inset with a scrolled spacer of the same height', () => {
+    // Chromium insets a sticky child's `top: 0` by the scroller's own
+    // padding-top, so the transcript can only carry its top inset as a scrolled
+    // spacer — otherwise rows bleed through the strip above the pinned prompt.
+    expect(CHAT_STAGE_TOP_INSET).toBe('pt-4')
+    expect(CHAT_STAGE_TOP_SPACER).toBe('h-4')
   })
 
   it('documents sidebar list active accent', () => {

@@ -24,10 +24,6 @@ const YIELD_EVERY = 32
 const YIELD_BUDGET_MS = 8
 const PROGRESS_THROTTLE_MS = 75
 
-function roundMtime(mtimeMs: number): number {
-  return Math.round(mtimeMs)
-}
-
 function isMissingPathError(err: unknown): boolean {
   return (
     typeof err === 'object' &&
@@ -223,7 +219,9 @@ export async function syncCodeIndex(
       report(onProgress, progressUpdate())
       continue
     }
-    const mtimeMs = roundMtime(st.mtimeMs)
+    // Full-precision mtime: rounding collapses sub-ms rewrites into the same
+    // stamp, so a same-size rewrite within one millisecond looked unchanged.
+    const mtimeMs = st.mtimeMs
     const stamp = store.getFileStamp(rel)
     if (stamp && stamp.mtimeMs === mtimeMs && stamp.size === st.size) {
       seen.add(rel)

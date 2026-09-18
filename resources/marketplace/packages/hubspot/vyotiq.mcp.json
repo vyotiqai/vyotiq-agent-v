@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "hubspot",
+  "name": "HubSpot",
+  "version": "1.0.0",
+  "description": "CRM contacts, companies, and deals. Needs a HubSpot app you register.",
+  "transport": "http",
+  "url": "https://mcp.hubspot.com/anthropic",
+  "auth": "oauth-client",
+  "docsUrl": "https://developers.hubspot.com/mcp",
+  "setupUrl": "https://app.hubspot.com/developer"
+}

@@ -26,6 +26,9 @@ import {
 import {
   DEFAULT_MARKETPLACE_SETTINGS,
   MarketplaceSettingsSchema,
+  McpAuthKindSchema,
+  McpInputSchema,
+  McpRuntimeRequirementSchema,
   McpTransportSchema
 } from './marketplace'
 
@@ -93,7 +96,22 @@ export const McpServerSchema = z.preprocess(
       authScope: z.enum(['all-workspaces', 'this-workspace']).optional(),
       authWorkspacePath: z.string().min(1).optional(),
       /** Google hosted MCP: readonly vs full documented MCP scopes. */
-      googleAccess: z.enum(['read', 'read-write']).optional()
+      googleAccess: z.enum(['read', 'read-write']).optional(),
+      /**
+       * Manifest-owned connect metadata, copied from `vyotiq.mcp.json` on every
+       * marketplace sync (the manifest wins — these are not user-edited).
+       * Absent for manually added servers, which is why `auth` is optional here
+       * rather than defaulted; use `mcpSupportsOAuth` to read it.
+       */
+      auth: McpAuthKindSchema.optional(),
+      requires: z.array(McpRuntimeRequirementSchema).optional(),
+      inputs: z.array(McpInputSchema).optional(),
+      setupUrl: z.string().optional(),
+      /**
+       * User-chosen absolute path to the stdio binary, set from the "Locate
+       * binary" picker when the command is not on PATH. Survives manifest sync.
+       */
+      binaryPath: z.string().min(1).optional()
     })
     .superRefine((val, ctx) => {
       if (val.transport === 'stdio' && !(val.command ?? '').trim()) {
@@ -518,6 +536,12 @@ export const SettingsSchema = z.object({
    * When true, opening an interrupted chat resumes automatically instead of showing Continue.
    */
   autoResumeInterruptedRuns: z.boolean().default(true),
+  /**
+   * Maximum simultaneously visible chat panes (split session view). 0 = Auto:
+   * derived from the viewport (min 280px per pane, hard cap 6). 1–6 is a fixed
+   * limit that may exceed what fits — the pane row scrolls horizontally.
+   */
+  maxChatPanes: z.number().int().min(0).max(6).default(0),
   /** Packaged builds check GitHub Releases for app updates on launch. */
   autoCheckUpdates: z.boolean().default(true),
   /**
@@ -607,6 +631,7 @@ export const DEFAULT_SETTINGS: Settings = {
   diagnosticsCommand: '',
   autoModeSwitch: true,
   autoResumeInterruptedRuns: true,
+  maxChatPanes: 0,
   autoCheckUpdates: true,
   googleMcpClientId: '',
   marketplace: DEFAULT_MARKETPLACE_SETTINGS,

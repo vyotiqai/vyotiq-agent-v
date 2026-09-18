@@ -1,4 +1,7 @@
-import { CHAT_COLUMN_MIN_USABLE_PX } from '@renderer/lib/utils/layout'
+import {
+  CHAT_COLUMN_MIN_USABLE_PX,
+  MAX_CHAT_PANES_HARD_CAP
+} from '@renderer/lib/utils/layout'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 
 export const CHAT_PANE_LAYOUT_KEY = 'vyotiq.chatPaneLayout'
@@ -71,7 +74,10 @@ export function maxPaneCount(
   reservedPx = 0
 ): number {
   const available = Math.max(0, viewportWidth - reservedPx)
-  return Math.max(1, Math.floor(available / CHAT_COLUMN_MIN_USABLE_PX))
+  return Math.min(
+    MAX_CHAT_PANES_HARD_CAP,
+    Math.max(1, Math.floor(available / CHAT_COLUMN_MIN_USABLE_PX))
+  )
 }
 
 export function equalSizes(count: number): number[] {
@@ -185,6 +191,40 @@ export function insertPaneBeside(
     runId: session.runId
   }
   const insertAt = side === 'left' ? anchorIdx : anchorIdx + 1
+  const panes = [
+    ...layout.panes.slice(0, insertAt),
+    newPane,
+    ...layout.panes.slice(insertAt)
+  ]
+  const sizes = normalizeSizes([
+    ...layout.sizes.slice(0, insertAt),
+    1,
+    ...layout.sizes.slice(insertAt)
+  ])
+  return { panes, focusedPaneId: paneId, sizes }
+}
+
+/**
+ * Insert an empty draft pane (runId null) beside the anchor pane. Explicit
+ * user action, so no dedupe — but capacity is still enforced.
+ */
+export function insertDraftPaneBeside(
+  layout: ChatPaneLayout,
+  anchorPaneId: string,
+  maxPanes: number
+): ChatPaneLayout | null {
+  if (maxPanes <= 0) return null
+  const anchorIdx = layout.panes.findIndex((p) => p.paneId === anchorPaneId)
+  if (anchorIdx < 0) return null
+  if (layout.panes.length >= maxPanes) return null
+
+  const paneId = createPaneId()
+  const newPane: ChatPane = {
+    paneId,
+    workspacePath: layout.panes[anchorIdx]!.workspacePath,
+    runId: null
+  }
+  const insertAt = anchorIdx + 1
   const panes = [
     ...layout.panes.slice(0, insertAt),
     newPane,

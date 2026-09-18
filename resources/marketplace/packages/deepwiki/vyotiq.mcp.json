@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "deepwiki",
+  "name": "DeepWiki",
+  "version": "1.0.0",
+  "description": "Ask questions about any public GitHub repository and read its generated wiki.",
+  "transport": "http",
+  "url": "https://mcp.deepwiki.com/mcp",
+  "auth": "none",
+  "docsUrl": "https://deepwiki.com"
+}

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "playwright",
+  "name": "Playwright",
+  "version": "1.0.0",
+  "description": "Drive a real browser: navigate, click, fill forms, and assert against live pages.",
+  "transport": "stdio",
+  "command": "npx",
+  "args": [
+    "-y",
+    "@playwright/mcp@latest"
+  ],
+  "env": {},
+  "auth": "none",
+  "requires": [
+    "node"
+  ],
+  "docsUrl": "https://github.com/microsoft/playwright-mcp"
+}

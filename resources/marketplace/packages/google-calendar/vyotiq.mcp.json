@@ -6,5 +6,7 @@
   "version": "1.0.0",
   "description": "Official hosted Google Calendar MCP (HTTP).",
   "transport": "http",
-  "url": "https://calendarmcp.googleapis.com/mcp/v1"
+  "url": "https://calendarmcp.googleapis.com/mcp/v1",
+  "auth": "oauth",
+  "docsUrl": "https://developers.google.com/workspace/guides/configure-mcp-servers"
 }

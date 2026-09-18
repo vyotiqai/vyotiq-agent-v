@@ -12,13 +12,26 @@ export const McpServerStatusSchema = z.object({
   hasOAuthClientSecret: z.boolean().optional(),
   /** Fixed loopback URI when static OAuth client credentials are present. */
   oauthRedirectUrl: z.string().optional(),
-  error: z.string().optional()
+  error: z.string().optional(),
+  /**
+   * Launch binary that could not be found on PATH (e.g. `uvx`). Present instead
+   * of a raw ENOENT so the UI can offer an install link and a file picker.
+   */
+  missingBinary: z.string().optional(),
+  /** Vendor install page for `missingBinary`, when the manifest declared it. */
+  missingBinaryInstallUrl: z.string().optional()
 })
 export type McpServerStatus = z.infer<typeof McpServerStatusSchema>
 
 export const McpStatusResultSchema = z.object({
   servers: z.array(McpServerStatusSchema),
-  hasGoogleMcpClientSecret: z.boolean().optional()
+  hasGoogleMcpClientSecret: z.boolean().optional(),
+  /**
+   * A usable Google OAuth client exists — either one the user configured or the
+   * one shipped with this build. When true the connect wizard skips asking the
+   * user to create a Google Cloud project. The credential itself stays in main.
+   */
+  hasGoogleMcpClient: z.boolean().optional()
 })
 export type McpStatusResult = z.infer<typeof McpStatusResultSchema>
 
@@ -72,3 +85,16 @@ export const McpClearGoogleClientSecretRequestSchema = z.object({}).default({})
 export type McpClearGoogleClientSecretRequest = z.infer<
   typeof McpClearGoogleClientSecretRequestSchema
 >
+
+/** Ask the user to locate a launch binary (e.g. uvx) that is not on PATH. */
+export const McpPickBinaryRequestSchema = z.object({
+  /** Binary being located; used for the dialog title only. */
+  binary: z.string().min(1).max(128)
+})
+export type McpPickBinaryRequest = z.infer<typeof McpPickBinaryRequestSchema>
+
+/** Absolute path to the chosen executable, or null when the dialog was cancelled. */
+export const McpPickBinaryResultSchema = z.object({
+  path: z.string().min(1).nullable()
+})
+export type McpPickBinaryResult = z.infer<typeof McpPickBinaryResultSchema>

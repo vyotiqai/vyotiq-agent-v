@@ -5,6 +5,8 @@ import { needsDraftChatAfterWorkspaceAdd } from './workspaceAddHandoff'
 import { pinnedRunKey, prunePinnedRun, togglePinnedRun } from '../features/home/pinnedRuns'
 import { ChatView } from '../features/chat/ChatView'
 import { SessionChatColumn } from '../features/chat/SessionChatColumn'
+import { AgentInstancePane } from '../features/chat/components/AgentInstancePane'
+import { runTitle } from './sidebar/runTitle'
 import type { ChatPane } from '@renderer/lib/chat/chatPaneLayout'
 import type { PaneRenderOptions } from '../features/chat/ChatPaneHost'
 import type { SettingsSection } from '../features/settings'
@@ -13,6 +15,7 @@ import { useCustomSkinCss } from '@renderer/lib/hooks/useCustomSkinCss'
 import { pickAppearanceSettings, stepFontScale, DEFAULT_FONT_SCALE } from '@shared/appearance'
 import { useSettings } from '@renderer/lib/hooks/useSettings'
 import { useWorkspaceManager, resolveComposerDraft } from '@renderer/lib/hooks/useWorkspaceManager'
+import { useAgentProfiles } from '@renderer/lib/hooks/useAgentProfiles'
 import type { WorkspaceContext } from '@renderer/lib/hooks/useWorkspaceManager'
 import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
 import { ToastHost, pushToast } from '@renderer/lib/ui'
@@ -28,7 +31,7 @@ import type {
   AgentInteractionMode,
   ChatRewindPreviewResult
 } from '@shared/ipc'
-import { defaultModelFor } from '@shared/providers'
+import { defaultModelFor, isProviderConfigured, providerLabel } from '@shared/providers'
 import {
   resolveEffectiveSettings,
   type ChatSettingsPatch
@@ -41,6 +44,8 @@ import {
 } from '@shared/domain/modelSelection'
 import { logger } from '@shared/logger'
 import { workspacePathsEqual, findByWorkspacePath } from '@shared/workspacePathMatch'
+import { buildRunDeepLink } from '@shared/deepLink'
+import { copyText } from '@renderer/lib/markdown/copyText'
 import { normalizeRelPath } from '../features/chat/utils/turnFileDiffs'
 import { ToolApprovalOnboardingModal } from '../features/chat/components/ToolApprovalOnboardingModal'
 import { useOfflineSendQueue } from '@renderer/lib/hooks/useOfflineSendQueue'
@@ -173,9 +178,13 @@ function App() {
     },
     [settings]
   )
+  const { profiles: rosterProfiles, ready: rosterReady } = useAgentProfiles()
   const workspace = useWorkspaceManager({
     openInstanceRunIds,
-    getDefaultProviderModelForWorkspace
+    getDefaultProviderModelForWorkspace,
+    getAgentProfileModelPin: (profileId) =>
+      rosterProfiles.find((p) => p.id === profileId)?.model ?? null,
+    maxChatPanes: settings.maxChatPanes ?? 0
   })
   const {
     registry,
@@ -213,6 +222,9 @@ function App() {
     setComposerDraft,
     setComposerDraftForPane,
     setAgentMode,
+    setAgentProfileIdForRun,
+    getAgentProfileIdForRun,
+    pruneAgentProfileBindings,
     onMessageListScroll,
     onMessageListScrollForPane,
     setPaneCapacityContext,
@@ -234,8 +246,19 @@ function App() {
     getFocusedPane,
     getPaneById,
     openNewChatInPane,
+    splitFocusedPane,
+    isInstanceRun,
+    getInstanceParentRunId,
     focusedRunId
   } = workspace
+
+  // A deleted teammate must never ride a stale binding into chatStart — main
+  // rejects the whole send ('Unknown agent profile'). Prune every chat's
+  // binding that no longer resolves in the roster whenever the roster changes.
+  useEffect(() => {
+    if (!rosterReady) return
+    pruneAgentProfileBindings(new Set(rosterProfiles.map((p) => p.id)))
+  }, [rosterReady, rosterProfiles, pruneAgentProfileBindings])
 
   const focusedParentRunId = chat.runId ?? activeContext?.activeRunId ?? null
   contextsForModelRef.current = contexts
@@ -462,6 +485,27 @@ function App() {
     )?.settingsOverride
   )
 
+  // Home's Environment section reports the same missing-key condition the
+  // composer blocks sends on (`deriveModelReadiness` → `missing_key`), using
+  // the shared provider rules so local/LAN hosts are never flagged.
+  const homeProviderIssue = useMemo(
+    () =>
+      isProviderConfigured(effectiveChatSettings.provider, secrets, {
+        ollamaBaseUrl: effectiveChatSettings.ollamaBaseUrl,
+        customOpenAiBaseUrl: effectiveChatSettings.customOpenAiBaseUrl,
+        customProviders: settings.customProviders
+      })
+        ? null
+        : { label: providerLabel(effectiveChatSettings.provider, settings.customProviders) },
+    [
+      effectiveChatSettings.provider,
+      effectiveChatSettings.ollamaBaseUrl,
+      effectiveChatSettings.customOpenAiBaseUrl,
+      secrets,
+      settings.customProviders
+    ]
+  )
+
   // Session-pinned model: what this session actually uses and displays; falls back to
   // the shared effective settings until the session's first send (or a composer change
   // made in this session) pins it — a model change in a different session cannot bleed in.
@@ -561,6 +605,65 @@ function App() {
     }
   }, [onSelectRunInWorkspace])
 
+  /** Route a vyotiq:// payload to the right chat, adding the workspace if needed. */
+  const handleDeepLinkPayload = useCallback(
+    async (payload: import('@shared/ipc').DeepLinkPayload): Promise<void> => {
+      const { target } = payload
+      if (!target) {
+        pushToast('Unrecognized Vyotiq link.', 'error')
+        return
+      }
+      if (target.type !== 'open_run') return
+      let path = target.workspacePath
+      if (!path) {
+        // No ws hint: resolve the run against workspaces we already know about.
+        const match = Object.entries(contexts).find(([, ctx]) => {
+          const lists = [ctx.runs, ctx.olderRuns, ctx.instanceRuns ?? []]
+          return lists.some((runs) => runs.some((run) => run.runId === target.runId))
+        })
+        if (!match) {
+          pushToast('That chat is not in any open workspace.', 'error')
+          return
+        }
+        path = match[0]
+      }
+      const isOpen = openWorkspaces.some((open) => workspacePathsEqual(open, path))
+      if (!isOpen) {
+        const added = await addWorkspace(path)
+        if (!added) {
+          pushToast('Could not open the workspace for that link.', 'error')
+          return
+        }
+      }
+      await onSelectRunInWorkspace(path, target.runId)
+    },
+    [addWorkspace, contexts, onSelectRunInWorkspace, openWorkspaces]
+  )
+
+  // Consume a link that arrived before mount (cold start / recreate-window),
+  // then listen for warm deliveries.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const res = await window.vyotiq?.consumeDeepLink?.()
+      if (cancelled || !res?.ok || !res.data) return
+      void handleDeepLinkPayload(res.data)
+    })()
+    const unsub = window.vyotiq?.onDeepLinkOpened?.((payload) => {
+      void handleDeepLinkPayload(payload)
+    })
+    return () => {
+      cancelled = true
+      unsub?.()
+    }
+  }, [handleDeepLinkPayload])
+
+  const onCopyRunLinkInWorkspace = useCallback((path: string, runId: string): void => {
+    void copyText(buildRunDeepLink(path, runId)).then((copied) => {
+      pushToast(copied ? 'Link copied.' : 'Could not copy link.', copied ? 'success' : 'error')
+    })
+  }, [])
+
   const handleSessionDrop = useCallback(
     (
       anchorPaneId: string,
@@ -609,12 +712,32 @@ function App() {
     (pane: ChatPane): string => {
       if (!pane.runId) return 'New chat'
       const ctx = findByWorkspacePath(contexts, pane.workspacePath)
-      const run = ctx?.runs.find((r) => r.runId === pane.runId)
-      const goal = run?.goal?.trim()
-      return goal || 'Chat'
+      const run =
+        ctx?.runs.find((r) => r.runId === pane.runId) ??
+        ctx?.instanceRuns?.find((r) => r.runId === pane.runId)
+      if (!run) return 'Chat'
+      return runTitle(run) || 'Chat'
     },
     [contexts]
   )
+
+  // Ctrl/Cmd+\ and the pane-header "+" button. Pointerdown already focuses the
+  // clicked pane, so the header button splits beside the pane it sits on.
+  const onSplitPane = useCallback((): void => {
+    const focused = getFocusedPane()
+    // No hydrated layout yet — nothing to split; stay quiet instead of
+    // claiming the row is full.
+    if (!focused) return
+    if (focused.runId == null) {
+      pushToast('Send a message in this pane first.')
+      return
+    }
+    if (!splitFocusedPane()) {
+      pushToast('Not enough room for another chat pane.')
+      return
+    }
+    setView('chat')
+  }, [getFocusedPane, splitFocusedPane])
 
   const onNewChat = useCallback((): void => {
     setOpenInstanceForParent(focusedParentRunId, null)
@@ -642,6 +765,18 @@ function App() {
       window.setTimeout(tryFocus, 0)
     },
     [newChatInWorkspace]
+  )
+
+  // Teammate rows: fresh chat in the active workspace, bound to the profile so
+  // the first send already carries identity + the profile's memory namespace.
+  const onStartTeammateChat = useCallback(
+    (profileId: string): void => {
+      const path = workspace.focusedWorkspacePath ?? workspace.activeWorkspace
+      if (!path) return
+      setAgentProfileIdForRun(path, null, profileId)
+      onNewChatInWorkspace(path)
+    },
+    [workspace.focusedWorkspacePath, workspace.activeWorkspace, setAgentProfileIdForRun, onNewChatInWorkspace]
   )
 
   // Home start bar / workspace cards route here: same switch + focus flow as
@@ -1546,8 +1681,52 @@ function App() {
     (pane: ChatPane, options: PaneRenderOptions) => {
       const { focused, sideRailPad, onOpenChanges, onOpenWorkspaceFile } =
         options
-      const snap = getPaneChatSnapshot(pane.workspacePath, pane.runId)
       const paneContext = findByWorkspacePath(contexts, pane.workspacePath)
+      // Standalone instance pane: inspect + stop only (no composer) — the same
+      // contract as the inline view. The WM controller is adopted via
+      // getController so IPC is not dual-subscribed.
+      if (pane.runId && isInstanceRun(pane.workspacePath, pane.runId)) {
+        const parentRunId = getInstanceParentRunId(pane.workspacePath, pane.runId)
+        const parentCtrl = parentRunId
+          ? getRunController(parentRunId, pane.workspacePath)
+          : null
+        const paneChatSettings = resolveEffectiveSettings(
+          settings,
+          paneContext?.settingsOverride
+        )
+        return (
+          <AgentInstancePane
+            workspacePath={pane.workspacePath}
+            instanceRunId={pane.runId}
+            instanceMeta={parentCtrl?.agentInstances?.[pane.runId]}
+            getController={getRunController}
+            sideRailPad={sideRailPad}
+            showThinking={paneChatSettings.showThinking}
+            onOpenWorkspaceFile={onOpenWorkspaceFile}
+            approvalAutoFocus={focused}
+            onClose={() => {
+              if (!parentRunId) return
+              void (async () => {
+                try {
+                  await openRunInWorkspace(pane.workspacePath, parentRunId)
+                  const ctrl = getRunController(parentRunId, pane.workspacePath)
+                  if (!ctrl || ctrl.items.length === 0) {
+                    await loadRunTranscriptIntoTab(pane.workspacePath, parentRunId)
+                  }
+                } catch (err) {
+                  logger.warn('instance pane back to parent failed', {
+                    scope: 'chat',
+                    workspacePath: pane.workspacePath,
+                    parentRunId,
+                    err
+                  })
+                }
+              })()
+            }}
+          />
+        )
+      }
+      const snap = getPaneChatSnapshot(pane.workspacePath, pane.runId)
       const paneScrollKey = pane.runId ?? '__draft__'
       const paneScroll =
         paneContext && paneScrollKey in paneContext.ui.scrollTopByRunId
@@ -1699,6 +1878,10 @@ function App() {
           onAgentModeChange={(mode) => {
             setAgentMode(mode, { workspacePath: pane.workspacePath, runId: pane.runId })
           }}
+          agentProfileId={getAgentProfileIdForRun(pane.workspacePath, pane.runId)}
+          onAgentProfileChange={(profileId) =>
+            setAgentProfileIdForRun(pane.workspacePath, pane.runId, profileId)
+          }
           onSend={(text, images, files, extras) =>
             gateSendWithOnboarding(
               (sendText, sendImages, sendFiles, sendExtras) => {
@@ -1816,11 +1999,15 @@ function App() {
       contexts,
       confirmRevertToUserMessage,
       createSlashHandlers,
+      getInstanceParentRunId,
       getPaneChatSnapshot,
       getRunController,
+      isInstanceRun,
+      loadRunTranscriptIntoTab,
       mcpServerNames,
       focusPaneById,
       gateSendWithOnboarding,
+      openRunInWorkspace,
       sendWithOfflineQueue,
       modelsRefreshNonce,
       onDismissChatBanner,
@@ -1834,6 +2021,8 @@ function App() {
       operationalError,
       scrollRestoreToken,
       setAgentMode,
+      setAgentProfileIdForRun,
+      getAgentProfileIdForRun,
       settings,
       update,
       onChatSettingsChangeForWorkspace,
@@ -1852,6 +2041,7 @@ function App() {
       onClosePane: closePaneById,
       onSizesChange: setPaneSizesByIndex,
       onSessionDrop: handleSessionDrop,
+      onSplitPane,
       getPaneTitle,
       renderPane: renderPaneSession
     }
@@ -1860,6 +2050,7 @@ function App() {
     focusPaneById,
     getPaneTitle,
     handleSessionDrop,
+    onSplitPane,
     paneLayout,
     renderPaneSession,
     setPaneSizesByIndex
@@ -1959,6 +2150,31 @@ function App() {
     [getRunController, refreshActiveRuns, refreshWorkspaceRuns]
   )
 
+  /**
+   * Continues an interrupted run from outside the chat surface.
+   *
+   * Resuming is controller work — it reconciles the transcript, supersedes the
+   * dead invoke and restarts the stream — and a controller only exists for a
+   * run that is open. So this opens the session first and then resumes it.
+   * `resumeInterrupted` is self-guarding, so racing the auto-resume queue
+   * (when that setting is on) costs nothing: the loser returns false.
+   */
+  const onResumeRunInWorkspace = useCallback(
+    async (path: string, runId: string): Promise<void> => {
+      await onSelectRunInWorkspace(path, runId)
+      const controller = getRunController(runId, path)
+      if (!controller) {
+        pushToast('That session could not be opened.', 'error')
+        return
+      }
+      if (!(await controller.resumeInterrupted())) return
+      await refreshWorkspaceRuns(path)
+      await refreshActiveRuns()
+      setHomeRefreshVersion((version) => version + 1)
+    },
+    [getRunController, onSelectRunInWorkspace, refreshActiveRuns, refreshWorkspaceRuns]
+  )
+
   const onReviewChangesInWorkspace = useCallback(
     async (path: string, runId?: string): Promise<void> => {
       if (runId) {
@@ -2024,6 +2240,8 @@ function App() {
     onCloseWorkspace,
     onAddWorkspace: onPickWorkspace,
     onNewChatInWorkspace,
+    onStartTeammateChat,
+    onOpenTaskRun: (path: string, runId: string) => void onSelectRunInWorkspace(path, runId),
     workspaceHasBackgroundRun,
     expandedByPath: workspace.workspaceExpandedByPath,
     onSetWorkspaceExpanded: workspace.setWorkspaceExpanded,
@@ -2032,6 +2250,7 @@ function App() {
       void onRenameRunInWorkspace(path, runId, goal),
     onDeleteRunInWorkspace: (path: string, runId: string) => void onDeleteRunInWorkspace(path, runId),
     onExportRunInWorkspace: (path: string, runId: string) => void onExportRunInWorkspace(path, runId),
+    onCopyRunLinkInWorkspace,
     onLoadOlderRuns: (path: string) => void loadOlderWorkspaceRuns(path),
     isRunOpenInPane: isSessionOpenInPane,
     isRunFocusedInPane: isSessionFocusedInPane,
@@ -2101,6 +2320,7 @@ function App() {
         const id = chat.runId ?? getFocusedPane()?.runId
         if (id) closeRunTab(id)
       }}
+      onSplitPane={onSplitPane}
       {...shellWorkspaceProps}
     >
       {view === 'settings' ? (
@@ -2186,17 +2406,25 @@ function App() {
           <Suspense fallback={<ViewSuspenseFallback />}>
             <HomePage
               openWorkspaces={openWorkspaces}
+              activeWorkspace={activeWorkspace}
               runsByWorkspacePath={runsByWorkspacePath}
               activeRuns={shellWorkspaceProps.activeRuns}
               workspaceHasBackgroundRun={shellWorkspaceProps.workspaceHasBackgroundRun}
+              providerIssue={homeProviderIssue}
               onNewSessionInWorkspace={onNewSessionInWorkspace}
               onSelectRunInWorkspace={shellWorkspaceProps.onSelectRunInWorkspace}
               onSwitchWorkspace={shellWorkspaceProps.onSwitchWorkspace}
               onAddWorkspace={shellWorkspaceProps.onAddWorkspace}
-              onRenameRunInWorkspace={shellWorkspaceProps.onRenameRunInWorkspace}
-              onDeleteRunInWorkspace={shellWorkspaceProps.onDeleteRunInWorkspace}
-              onExportRunInWorkspace={shellWorkspaceProps.onExportRunInWorkspace}
+              onOpenProviderSettings={() => {
+                setSettingsSection('providers')
+                setView('settings')
+              }}
+              onOpenMcpServer={(serverId) => {
+                setMarketplaceFocusServerId(serverId)
+                setView('marketplace')
+              }}
               onStopRunInWorkspace={onStopRunInWorkspace}
+              onResumeRunInWorkspace={onResumeRunInWorkspace}
               onReviewChangesInWorkspace={(path, runId) => void onReviewChangesInWorkspace(path, runId)}
               onRefreshWorkspaceRuns={(path) => refreshWorkspaceRuns(path)}
               refreshVersion={homeRefreshVersion}
@@ -2273,6 +2501,17 @@ function App() {
                 workspacePath: focusedWorkspacePath ?? undefined,
                 runId: focusedRunId
               })
+            }
+            agentProfileId={getAgentProfileIdForRun(
+              focusedWorkspacePath ?? activeWorkspace,
+              focusedRunId
+            )}
+            onAgentProfileChange={(profileId) =>
+              setAgentProfileIdForRun(
+                focusedWorkspacePath ?? activeWorkspace,
+                focusedRunId,
+                profileId
+              )
             }
             onContinueInAgent={() => {
               setAgentMode('agent', {

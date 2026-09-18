@@ -6,5 +6,7 @@
   "version": "1.0.0",
   "description": "Official hosted Gmail MCP (HTTP).",
   "transport": "http",
-  "url": "https://gmailmcp.googleapis.com/mcp/v1"
+  "url": "https://gmailmcp.googleapis.com/mcp/v1",
+  "auth": "oauth",
+  "docsUrl": "https://developers.google.com/workspace/guides/configure-mcp-servers"
 }

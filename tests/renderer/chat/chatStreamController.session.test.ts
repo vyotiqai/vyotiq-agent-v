@@ -131,6 +131,35 @@ describe('createChatStreamController', () => {
     )
   })
 
+  it('editAndResend sends the original target at as targetUserAt, not the fresh edit timestamp', async () => {
+    const chatRewindAndStart = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { runId: 'r1', invokeId: 2 }
+    })
+    const chatCancel = vi.fn().mockResolvedValue({ ok: true, data: true })
+    // @ts-expect-error test bridge
+    window.vyotiq = { chatRewindAndStart, chatCancel }
+
+    const controller = createChatStreamController({ workspacePath: '/ws', runId: 'r1' })
+    controller.hydrateTranscript([
+      { role: 'user', content: 'first', at: '2026-01-01T00:00:00.000Z' },
+      { role: 'assistant', content: 'reply-1' },
+      { role: 'user', content: 'second', at: '2026-01-02T00:00:00.000Z' },
+      { role: 'assistant', content: 'reply-2' }
+    ])
+
+    const ok = await controller.editAndResend(2, 'second edited')
+    expect(ok).toBe(true)
+    expect(chatRewindAndStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        editMessageIndex: 2,
+        // Main resolves this against messages.jsonl; the edited message's fresh
+        // `at` does not exist on disk and would fail the rewind.
+        targetUserAt: '2026-01-02T00:00:00.000Z'
+      })
+    )
+  })
+
   it('editAndResend keeps prior user at timestamps for earlier turns', async () => {
     const chatRewindAndStart = vi.fn().mockResolvedValue({
       ok: true,

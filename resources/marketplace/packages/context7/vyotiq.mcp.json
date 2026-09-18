@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "context7",
+  "name": "Context7",
+  "version": "1.0.0",
+  "description": "Version-correct documentation and code examples for any library, fetched on demand.",
+  "transport": "http",
+  "url": "https://mcp.context7.com/mcp",
+  "auth": "none",
+  "docsUrl": "https://github.com/upstash/context7"
+}

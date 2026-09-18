@@ -15,10 +15,10 @@ describe('clampSidebarWidthPx', () => {
   })
 
   it('shrinks with the viewport so a usable chat column remains', () => {
-    // 500 viewport − 360 chat min = 140, but floor is SIDEBAR_WIDTH_MIN_PX (180)
-    expect(clampSidebarWidthPx(420, 500)).toBe(180)
-    // 700 − 360 = 340 → clamp max becomes 340
-    expect(clampSidebarWidthPx(420, 700)).toBe(340)
+    // 500 viewport − 280 chat min = 220 → clamp max becomes 220
+    expect(clampSidebarWidthPx(420, 500)).toBe(220)
+    // 700 − 280 = 420 → clamp max becomes 420
+    expect(clampSidebarWidthPx(420, 700)).toBe(420)
   })
 })
 
@@ -30,21 +30,21 @@ describe('clampDockWidthPx', () => {
   })
 
   it('reserves sidebar floor + chat min so three-pane stays usable', () => {
-    // 1000 − 360 chat − 180 sidebar (dock open, no rail) = 460
-    expect(clampDockWidthPx(480, 1000)).toBe(460)
+    // 1000 − 280 chat − 180 sidebar (dock open, no rail) = 540 → width wins
+    expect(clampDockWidthPx(480, 1000)).toBe(480)
     expect(clampDockWidthPx(DOCK_WIDTH_DEFAULT_PX, 1000)).toBe(DOCK_WIDTH_DEFAULT_PX)
-    // 700 − 360 − 180 = 160, but floor is DOCK_WIDTH_MIN_PX (280)
+    // 700 − 280 − 180 = 240, but floor is DOCK_WIDTH_MIN_PX (280)
     expect(clampDockWidthPx(400, 700)).toBe(DOCK_WIDTH_MIN_PX)
   })
 
   it('includes side rail when dock is closed', () => {
-    // 1000 − 360 − 180 − 40 rail = 420
-    expect(clampDockWidthPx(480, 1000, { dockOpen: false })).toBe(420)
+    // 1000 − 280 − 180 − 40 rail = 500 → width wins
+    expect(clampDockWidthPx(480, 1000, { dockOpen: false })).toBe(480)
   })
 
   it('reserves two chat columns when paneCount is 2', () => {
-    // 1600 − 2×360 − 180 sidebar (dock open, no rail) = 700
-    expect(clampDockWidthPx(800, 1600, { paneCount: 2, sidebarWidthPx: 180 })).toBe(700)
+    // 1600 − 2×280 − 180 sidebar (dock open, no rail) = 860 → width wins
+    expect(clampDockWidthPx(800, 1600, { paneCount: 2, sidebarWidthPx: 180 })).toBe(800)
   })
 })
 

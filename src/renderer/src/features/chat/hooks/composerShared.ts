@@ -265,6 +265,8 @@ export type BuildComposerSendPropsInput = {
   sideRailPad?: boolean
   onFocus?: () => void
   onEditLastUserMessage?: () => boolean
+  agentProfileId?: string | null
+  onAgentProfileChange?: (profileId: string | null) => void
 }
 
 /** Shared dock/hero composer prop bag for ChatView and SessionChatColumn. */
@@ -293,6 +295,8 @@ export function buildComposerSendProps(input: BuildComposerSendPropsInput) {
     onChatSettingsChange: input.onChatSettingsChange,
     agentMode: input.agentMode,
     onAgentModeChange: input.onAgentModeChange,
+    agentProfileId: input.agentProfileId,
+    onAgentProfileChange: input.onAgentProfileChange,
     onSend: input.onSend,
     onStop: input.onStop,
     pendingFollowUps: input.pendingFollowUps,

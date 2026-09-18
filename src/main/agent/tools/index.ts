@@ -193,6 +193,12 @@ export type ToolExecutionContext = {
    * Used to fail-fast after repeated retries of the same omitted tool.
    */
   mcpNotInCatalogCounts?: Map<string, number>
+  /**
+   * Agent-profile memory namespace — routes memory_* tools (and the injected
+   * <memory> prompt section) to `.vyotiq/agents/<namespace>/memory/` so
+   * teammate profiles never share one brain. Absent = shared workspace memory.
+   */
+  memoryNamespace?: string
   /** Paths the agent changed this run — scopes git_commit staging when present. */
   mutationPaths?: Set<string>
   /**
@@ -629,23 +635,27 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     return toolOk('switch_mode', mode, content)
   },
   ...terminalHandlers,
-  memory_list: (workspace, _args, signal) => {
+  memory_list: (workspace, _args, signal, context) => {
     throwIfAborted(signal)
-    return toolOk('memory_list', 'memory', toolMemoryList(workspace))
+    return toolOk('memory_list', 'memory', toolMemoryList(workspace, context.memoryNamespace))
   },
-  memory_read: (workspace, args, signal) => {
+  memory_read: (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const path = requirePathArg('memory_read', args)
-    const content = toolMemoryRead(workspace, path)
+    const content = toolMemoryRead(workspace, path, context.memoryNamespace)
     return toolOk('memory_read', path, content)
   },
-  memory_write: async (workspace, args, signal) => {
+  memory_write: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const path = requirePathArg('memory_write', args)
     const contents = readString(args, 'contents') ?? readString(args, 'content') ?? ''
-    const relUnderWorkspace = `.vyotiq/memory/${path.trim().replace(/^[/\\]+/, '').replace(/\\/g, '/')}`
+    const namespace = context.memoryNamespace
+    const memoryPrefix = namespace
+      ? `.vyotiq/agents/${namespace}/memory/`
+      : '.vyotiq/memory/'
+    const relUnderWorkspace = `${memoryPrefix}${path.trim().replace(/^[/\\]+/, '').replace(/\\/g, '/')}`
     const content = await withWorkspaceMutation(workspace, relUnderWorkspace, () =>
-      toolMemoryWrite(workspace, path, contents)
+      toolMemoryWrite(workspace, path, contents, namespace)
     )
     clearWorkspaceSnapshotCache(workspace)
     return toolOk('memory_write', path, content)
@@ -914,8 +924,13 @@ export async function executeTool(
       context.runEnabledMcpIds,
       workspace
     )
-    if (mcpResult.ok && context.mutationPaths) {
-      applyMcpFilesystemMutations(context.mutationPaths, mcp.serverId, mcp.toolName, parsed)
+    if (mcpResult.ok) {
+      const mutated = new Set<string>()
+      applyMcpFilesystemMutations(mutated, mcp.serverId, mcp.toolName, parsed)
+      if (mutated.size > 0) {
+        for (const p of mutated) context.mutationPaths?.add(p)
+        invalidateAfterWorkspaceMutation(workspace, [...mutated])
+      }
     }
     return mcpResult
   }

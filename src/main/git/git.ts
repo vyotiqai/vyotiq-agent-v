@@ -23,6 +23,8 @@ const WRITE_TIMEOUT_MS = 20_000
 const PUSH_TIMEOUT_MS = 120_000
 const MAX_BUFFER = 4 * 1024 * 1024
 const GIT_PROBE_TTL_MS = 60_000
+/** Per-file list ceiling in `readGitStatus`; totals (`fileCount`, +/-) stay complete. */
+export const GIT_STATUS_FILE_LIMIT = 200
 
 let gitBinaryCache: { ok: boolean; bin: string | null; checkedAt: number } | null = null
 
@@ -463,7 +465,10 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
   const all = [...tracked.values()]
     .filter((file) => !isNoisePath(file.path))
     .sort((a, b) => a.path.localeCompare(b.path))
-  const files = all
+  // The schema ships a bounded file list with complete totals (truncated +
+  // fileCount tell the UI); huge trees stay cheap over IPC and the Changes
+  // panel announces the cut instead of pretending the list is everything.
+  const files = all.slice(0, GIT_STATUS_FILE_LIMIT)
 
   let added = 0
   let removed = 0

@@ -3,6 +3,7 @@ import {
   applyPaneDrop,
   closePane,
   createPaneId,
+  insertDraftPaneBeside,
   insertPaneBeside,
   isSessionDragEvent,
   markSessionDragEnd,
@@ -21,9 +22,11 @@ import {
 
 describe('chatPaneLayout', () => {
   it('computes max pane count from viewport width', () => {
-    expect(maxPaneCount(1200)).toBe(3)
-    expect(maxPaneCount(700)).toBe(1)
-    expect(maxPaneCount(1200, 220)).toBe(2)
+    expect(maxPaneCount(1200)).toBe(4)
+    expect(maxPaneCount(700)).toBe(2)
+    expect(maxPaneCount(1200, 220)).toBe(3)
+    expect(maxPaneCount(20000)).toBe(6)
+    expect(maxPaneCount(20000, 0)).toBe(6)
   })
 
   it('maps drop X into left/center/right thirds', () => {
@@ -66,6 +69,24 @@ describe('chatPaneLayout', () => {
       2
     )
     expect(next).toBeNull()
+  })
+
+  it('inserts a draft pane (runId null) beside the anchor', () => {
+    const base = singlePaneLayout('/ws-a', 'run-a', 'pane-a')
+    const next = insertDraftPaneBeside(base, 'pane-a', 3)
+    expect(next).not.toBeNull()
+    expect(next?.panes).toHaveLength(2)
+    expect(next?.panes[1]?.runId).toBeNull()
+    expect(next?.panes[1]?.workspacePath).toBe('/ws-a')
+    expect(next?.focusedPaneId).toBe(next?.panes[1]?.paneId)
+    expect(next?.sizes).toHaveLength(2)
+  })
+
+  it('refuses draft-pane insert at capacity or with unknown anchor', () => {
+    const base = singlePaneLayout('/ws-a', 'run-a', 'pane-a')
+    expect(insertDraftPaneBeside(base, 'pane-a', 1)).toBeNull()
+    expect(insertDraftPaneBeside(base, 'missing-pane', 3)).toBeNull()
+    expect(insertDraftPaneBeside(base, 'pane-a', 0)).toBeNull()
   })
 
   it('replaces center drop target session', () => {

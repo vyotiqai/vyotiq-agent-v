@@ -178,6 +178,83 @@ describe('local filesystem skills', () => {
     expect(existsSync(personalSkill.path)).toBe(true)
   })
 
+  it('keeps a disambiguated slug within the 64-char skill-name limit', async () => {
+    const { createLocalSkill, loadLocalSkills, clearLocalSkillsCache } = await import(
+      '@main/agent/skills/local'
+    )
+    const longTitle = 'ab'.repeat(32)
+    expect(longTitle.length).toBe(64)
+
+    const first = createLocalSkill({
+      workspacePath: workspace,
+      title: longTitle,
+      scope: 'project'
+    })
+    const second = createLocalSkill({
+      workspacePath: workspace,
+      title: longTitle,
+      scope: 'project'
+    })
+
+    // A naive `${base}-2` would be 66 chars, which SkillNameSchema rejects —
+    // the stub would land on disk and then be dropped by every reader.
+    expect(second.name.length).toBeLessThanOrEqual(64)
+    expect(second.name).not.toBe(first.name)
+
+    clearLocalSkillsCache()
+    const names = loadLocalSkills(workspace).map((s) => s.name)
+    expect(names).toContain(first.name)
+    expect(names).toContain(second.name)
+  })
+
+  it('keeps a long title instead of falling back to a dated stub slug', async () => {
+    const { createLocalSkill } = await import('@main/agent/skills/local')
+    // Normalizes to a 79-char slug whose 64th character is a hyphen.
+    const title = 'aaaaaaa bbbbbbb ccccccc ddddddd eeeeeee fffffff ggggggg hhhhhhh iiiiiii jjjjjjj'
+    const created = createLocalSkill({ workspacePath: workspace, title, scope: 'project' })
+    expect(created.name).toMatch(/^aaaaaaa-bbbbbbb/)
+    expect(created.name).not.toMatch(/^skill-\d{4}-\d{2}-\d{2}$/)
+    expect(created.name.length).toBeLessThanOrEqual(64)
+  })
+
+  it('does not create a personal skill whose name a project skill already owns', async () => {
+    const { createLocalSkill, listLocalSkillItems, clearLocalSkillsCache } = await import(
+      '@main/agent/skills/local'
+    )
+    writeSkill(
+      join(workspace, '.vyotiq', 'skills', 'ship'),
+      'ship',
+      'Project ship skill that already owns the name.'
+    )
+    clearLocalSkillsCache()
+
+    const created = createLocalSkill({
+      workspacePath: workspace,
+      title: 'ship',
+      scope: 'personal'
+    })
+    // `scanSkillRoot` drops later duplicates by name, so reusing `ship` would
+    // write a file that never appears in the Marketplace list or the editor.
+    expect(created.name).toBe('ship-2')
+
+    clearLocalSkillsCache()
+    const items = listLocalSkillItems(workspace)
+    expect(items.some((i) => i.skillPath === created.path)).toBe(true)
+    expect(items.find((i) => i.name === 'ship')?.source).toBe('project')
+  })
+
+  it('does not create a skill whose slash trigger a builtin command already owns', async () => {
+    const { createLocalSkill } = await import('@main/agent/skills/local')
+    const { listSlashCommands } = await import('@main/agent/slashCommands')
+
+    const created = createLocalSkill({ workspacePath: workspace, title: 'help', scope: 'project' })
+    expect(created.name).toBe('help-2')
+
+    const commands = await listSlashCommands(workspace)
+    expect(commands.find((c) => c.trigger === 'help')?.kind).toBe('builtin')
+    expect(commands.find((c) => c.trigger === 'help-2')?.id).toBe('skill:local:project:help-2')
+  })
+
   it('prefers a project skill over a marketplace skill with the same name', async () => {
     writeSkill(
       join(workspace, '.vyotiq', 'skills', 'review-code'),
@@ -231,6 +308,27 @@ describe('local filesystem skills', () => {
     expect(created.source).toBe('project')
     expect(existsSync(created.path)).toBe(true)
     expect(shell.openPath).not.toHaveBeenCalled()
+  })
+
+  it('makes a created skill reachable from the list, the slash menu, and the Skill tool', async () => {
+    const { createWorkspaceSkill, listSlashCommands } = await import('@main/agent/slashCommands')
+    const created = await createWorkspaceSkill(workspace, 'Release notes', 'project')
+
+    const { listLocalSkillItems } = await import('@main/agent/skills/local')
+    expect(listLocalSkillItems(workspace).map((s) => s.name)).toContain('release-notes')
+
+    const command = (await listSlashCommands(workspace)).find((c) => c.trigger === 'release-notes')
+    expect(command?.id).toBe('skill:local:project:release-notes')
+    expect(command?.availability).toBe('ready')
+
+    const { findEnabledSkillByName, buildSkillsSection, loadEnabledSkills } = await import(
+      '@main/agent/skills'
+    )
+    expect(findEnabledSkillByName('release-notes', null, workspace)?.source).toBe('project')
+    expect(buildSkillsSection(loadEnabledSkills(null, workspace))).toContain('release-notes')
+
+    const { toolSkill } = await import('@main/agent/tools/skill')
+    expect(toolSkill(workspace, created.name)).toContain('Describe the workflow the agent should follow')
   })
 
   it('createWorkspaceRule writes alwaysApply frontmatter without opening the OS editor', async () => {
@@ -343,6 +441,48 @@ This body must not land in the original folder.
     ).toThrow(/already exists/)
     expect(readFileSync(created.path, 'utf8')).toBe(before)
     expect(existsSync(join(workspace, '.vyotiq', 'skills', 'release-notes', 'SKILL.md'))).toBe(true)
+  })
+
+  it('invalidates every workspace cache when a personal skill is edited or deleted', async () => {
+    const otherWorkspace = mkdtempSync(join(tmpdir(), 'vyotiq-ws-other-'))
+    try {
+      const { createLocalSkill, writeLocalSkillFile, deleteLocalSkillFile, loadLocalSkills } =
+        await import('@main/agent/skills/local')
+      const created = createLocalSkill({
+        workspacePath: workspace,
+        title: 'house style',
+        scope: 'personal'
+      })
+
+      // Warm both workspace cache keys.
+      expect(loadLocalSkills(workspace).map((s) => s.name)).toContain('house-style')
+      expect(loadLocalSkills(otherWorkspace).map((s) => s.name)).toContain('house-style')
+
+      writeLocalSkillFile({
+        skillPath: created.path,
+        content: `---
+name: house-style
+description: Edited personal skill that every open workspace must see.
+---
+
+# House style
+
+Prefer named exports.
+`,
+        workspacePath: workspace
+      })
+
+      // Rewriting a nested SKILL.md does not bump the personal root's mtime,
+      // so the other workspace's fingerprint alone would not invalidate it.
+      expect(
+        loadLocalSkills(otherWorkspace).find((s) => s.name === 'house-style')?.description
+      ).toMatch(/every open workspace must see/)
+
+      deleteLocalSkillFile(created.path, workspace)
+      expect(loadLocalSkills(otherWorkspace).map((s) => s.name)).not.toContain('house-style')
+    } finally {
+      rmSync(otherWorkspace, { recursive: true, force: true })
+    }
   })
 
   it('allows personal skill writes without a workspace and rejects escapes', async () => {

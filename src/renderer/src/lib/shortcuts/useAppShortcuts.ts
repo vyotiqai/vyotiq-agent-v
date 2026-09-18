@@ -23,6 +23,8 @@ export type AppShortcutHandlers = {
   onOpenSettings: () => void
   /** Close the current chat tab (no-op when drafting). */
   onCloseChat?: () => void
+  /** Ctrl/Cmd+\ — insert an empty pane beside the focused one (chat view only). */
+  onSplitPane?: () => void
   /** When false/undefined, Cmd/Ctrl+L is a no-op. */
   chatViewActive?: boolean
   running?: boolean
@@ -49,6 +51,7 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
     onSwitchWorkspaceByIndex,
     onOpenSettings,
     onCloseChat,
+    onSplitPane,
     chatViewActive,
     running,
     onStop,
@@ -118,6 +121,14 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
         return
       }
 
+      if (matchShortcut(e, 'splitPane')) {
+        if (!chatViewActive) return
+        if (shouldBlockAppShortcut(e.target)) return
+        e.preventDefault()
+        onSplitPane?.()
+        return
+      }
+
       if (matchShortcut(e, 'focusComposer')) {
         if (!chatViewActive) return
         if (isEditableShortcutTarget(e.target)) return
@@ -180,6 +191,7 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
     onSwitchWorkspaceByIndex,
     onOpenSettings,
     onCloseChat,
+    onSplitPane,
     chatViewActive,
     running,
     onStop,

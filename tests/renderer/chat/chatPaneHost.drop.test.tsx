@@ -79,12 +79,49 @@ describe('ChatPaneHost drop', () => {
     const shells = document.querySelectorAll('[data-chat-pane-shell]')
     expect(shells).toHaveLength(2)
     for (const shell of shells) {
-      expect((shell as HTMLElement).style.minWidth).toBe('360px')
+      expect((shell as HTMLElement).style.minWidth).toBe('280px')
     }
 
     const bodies = screen.getAllByTestId('pane-body')
     expect(bodies[0]!.getAttribute('data-rail')).toBe('0')
     expect(bodies[1]!.getAttribute('data-rail')).toBe('1')
+  })
+
+  it('omits the split button when onSplitPane is absent and calls it on click', () => {
+    const onSplitPane = vi.fn()
+    const { rerender } = render(
+      <ChatPaneHost
+        panes={[pane, { paneId: 'pane-2', workspacePath: '/ws/a', runId: null }]}
+        focusedPaneId="pane-1"
+        sizes={[0.5, 0.5]}
+        onFocusPane={() => {}}
+        onClosePane={() => {}}
+        onSizesChange={() => {}}
+        onSessionDrop={() => true}
+        getPaneTitle={(p) => (p.runId ? 'Chat A' : 'New chat')}
+        renderPane={() => <div data-testid="pane-body">body</div>}
+      />
+    )
+    expect(document.querySelector('[data-chat-pane-split]')).toBeNull()
+
+    rerender(
+      <ChatPaneHost
+        panes={[pane, { paneId: 'pane-2', workspacePath: '/ws/a', runId: null }]}
+        focusedPaneId="pane-1"
+        sizes={[0.5, 0.5]}
+        onFocusPane={() => {}}
+        onClosePane={() => {}}
+        onSplitPane={onSplitPane}
+        onSizesChange={() => {}}
+        onSessionDrop={() => true}
+        getPaneTitle={(p) => (p.runId ? 'Chat A' : 'New chat')}
+        renderPane={() => <div data-testid="pane-body">body</div>}
+      />
+    )
+    const splitButtons = document.querySelectorAll('[data-chat-pane-split]')
+    expect(splitButtons).toHaveLength(2)
+    fireEvent.click(splitButtons[1]!)
+    expect(onSplitPane).toHaveBeenCalledTimes(1)
   })
 
   it('splits on left-third drop', () => {

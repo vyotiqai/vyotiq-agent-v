@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { GitStatus } from '@shared/ipc'
 
 export type WorkspaceGitSummary = {
   branch: string | null
@@ -16,6 +17,50 @@ export type WorkspaceGitSummaryState = {
   refresh: () => void
 }
 
+type PathOutcome =
+  | { workspacePath: string; summary: WorkspaceGitSummary }
+  | { workspacePath: string; error: string }
+
+/** Burst of events (write resolution + a commit) should cost one re-pull. */
+const EVENT_DEBOUNCE_MS = 250
+
+function summarizeStatus(status: GitStatus): WorkspaceGitSummary {
+  const summary: WorkspaceGitSummary = {
+    branch: status.branch,
+    changedFiles: status.truncated ? status.fileCount : status.files.length,
+    ...(status.ahead != null && status.behind != null
+      ? { ahead: status.ahead, behind: status.behind }
+      : {}),
+    ...(status.truncated
+      ? {}
+      : {
+          topFiles: status.files
+            .map((file) => ({ path: file.path, lines: file.added + file.removed }))
+            .filter((file) => file.lines > 0)
+            .sort((a, b) => b.lines - a.lines || a.path.localeCompare(b.path))
+            .slice(0, 3)
+        })
+  }
+  if (summary.topFiles?.length === 0) delete summary.topFiles
+  return summary
+}
+
+async function fetchPathOutcome(workspacePath: string): Promise<PathOutcome> {
+  try {
+    const result = await window.vyotiq.gitStatus(workspacePath)
+    if (!result.ok) return { workspacePath, error: result.error }
+    if (result.data.kind !== 'ok') {
+      return { workspacePath, error: 'Repository status unavailable' }
+    }
+    return { workspacePath, summary: summarizeStatus(result.data.status) }
+  } catch (cause) {
+    return {
+      workspacePath,
+      error: cause instanceof Error ? cause.message : 'Repository status unavailable'
+    }
+  }
+}
+
 export function useWorkspaceGitSummaries(
   paths: string[],
   enabled: boolean,
@@ -27,6 +72,7 @@ export function useWorkspaceGitSummaries(
   const [updatedAt, setUpdatedAt] = useState<string | null>(null)
   const [refreshNonce, setRefreshNonce] = useState(0)
   const generationRef = useRef(0)
+  const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const pathsKey = enabled ? JSON.stringify([...new Set(paths)]) : ''
   const uniquePaths = useMemo<string[]>(() => (pathsKey ? JSON.parse(pathsKey) : []), [pathsKey])
   const refresh = useCallback(() => setRefreshNonce((value) => value + 1), [])
@@ -52,47 +98,13 @@ export function useWorkspaceGitSummaries(
     }
     const generation = ++generationRef.current
     setLoading(true)
-    void Promise.all(
-      uniquePaths.map(async (workspacePath) => {
-        try {
-          const result = await window.vyotiq.gitStatus(workspacePath)
-          if (!result.ok) return { workspacePath, error: result.error }
-          if (result.data.kind !== 'ok') {
-            return { workspacePath, error: 'Repository status unavailable' }
-          }
-          const status = result.data.status
-          const summary: WorkspaceGitSummary = {
-            branch: status.branch,
-            changedFiles: status.truncated ? status.fileCount : status.files.length,
-            ...(status.ahead != null && status.behind != null
-              ? { ahead: status.ahead, behind: status.behind }
-              : {}),
-            ...(status.truncated
-              ? {}
-              : {
-                  topFiles: status.files
-                    .map((file) => ({ path: file.path, lines: file.added + file.removed }))
-                    .filter((file) => file.lines > 0)
-                    .sort((a, b) => b.lines - a.lines || a.path.localeCompare(b.path))
-                    .slice(0, 3)
-                })
-          }
-          if (summary.topFiles?.length === 0) delete summary.topFiles
-          return { workspacePath, summary }
-        } catch (cause) {
-          return {
-            workspacePath,
-            error: cause instanceof Error ? cause.message : 'Repository status unavailable'
-          }
-        }
-      })
-    ).then((entries) => {
+    void Promise.all(uniquePaths.map(fetchPathOutcome)).then((entries) => {
       if (generation !== generationRef.current) return
       const nextData: Record<string, WorkspaceGitSummary> = {}
       const nextErrors: Record<string, string> = {}
       for (const entry of entries) {
-        if (entry.summary) nextData[entry.workspacePath] = entry.summary
-        if (entry.error) nextErrors[entry.workspacePath] = entry.error
+        if ('summary' in entry) nextData[entry.workspacePath] = entry.summary
+        else nextErrors[entry.workspacePath] = entry.error
       }
       setData(nextData)
       setErrors(nextErrors)
@@ -103,6 +115,61 @@ export function useWorkspaceGitSummaries(
       generationRef.current += 1
     }
   }, [enabled, pathsKey, refreshNonce, refreshVersion, uniquePaths])
+
+  const applyOutcome = useCallback((outcome: PathOutcome, generation: number) => {
+    if (generation !== generationRef.current) return
+    if ('summary' in outcome) {
+      const { workspacePath, summary } = outcome
+      setData((prev) => ({ ...prev, [workspacePath]: summary }))
+      setErrors((prev) => {
+        if (!(workspacePath in prev)) return prev
+        const next = { ...prev }
+        delete next[workspacePath]
+        return next
+      })
+    } else {
+      const { workspacePath, error } = outcome
+      setErrors((prev) => ({ ...prev, [workspacePath]: error }))
+      setData((prev) => {
+        if (!(workspacePath in prev)) return prev
+        const next = { ...prev }
+        delete next[workspacePath]
+        return next
+      })
+    }
+    setUpdatedAt(new Date().toISOString())
+  }, [])
+
+  /**
+   * Live changed-counts: main pushes `git:status-changed` after commits,
+   * staging, and agent write resolutions. Re-pull only the touched workspace,
+   * debounced, and merge it into the snapshot without touching its siblings.
+   */
+  useEffect(() => {
+    if (!enabled || uniquePaths.length === 0) return
+    const tracked = new Set(uniquePaths)
+    const unsubscribe = window.vyotiq?.onGitStatusChanged?.((payload) => {
+      const workspacePath = payload.workspacePath
+      if (!tracked.has(workspacePath)) return
+      const existing = timersRef.current.get(workspacePath)
+      if (existing) clearTimeout(existing)
+      const generation = generationRef.current
+      timersRef.current.set(
+        workspacePath,
+        setTimeout(() => {
+          timersRef.current.delete(workspacePath)
+          void fetchPathOutcome(workspacePath).then((outcome) => {
+            applyOutcome(outcome, generation)
+          })
+        }, EVENT_DEBOUNCE_MS)
+      )
+    })
+    return () => {
+      unsubscribe?.()
+      for (const timer of timersRef.current.values()) clearTimeout(timer)
+      timersRef.current.clear()
+    }
+  }, [enabled, uniquePaths, applyOutcome])
 
   return { data: enabled ? data : {}, loading, errors, updatedAt, refresh }
 }

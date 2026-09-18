@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "huggingface",
+  "name": "Hugging Face",
+  "version": "1.0.0",
+  "description": "Search models, datasets, and Spaces on the Hugging Face Hub.",
+  "transport": "http",
+  "url": "https://huggingface.co/mcp",
+  "auth": "none",
+  "docsUrl": "https://huggingface.co/settings/mcp"
+}

@@ -92,23 +92,32 @@ export function MarketplaceRulesPane({
     }
   }, [loadProjectRules])
 
+  const consumeFocusRef = useRef(onFocusRuleConsumed)
+  consumeFocusRef.current = onFocusRuleConsumed
+
   useEffect(() => {
     if (!focusRulePath) return
-    const match = projectRules.find(
-      (r) => r.path.replace(/\\/g, '/') === focusRulePath.replace(/\\/g, '/')
+    const wanted = focusRulePath.replace(/\\/g, '/')
+    const match = projectRules.find((r) => r.path.replace(/\\/g, '/') === wanted)
+    const path = match ? match.path : wanted
+    setSelection((prev) =>
+      prev?.kind === 'project' && prev.path === path ? prev : { kind: 'project', path }
     )
-    if (match) setSelection({ kind: 'project', path: match.path })
-    else setSelection({ kind: 'project', path: focusRulePath.replace(/\\/g, '/') })
-    const t = window.setTimeout(() => {
-      const el = document.querySelector<HTMLElement>(
-        `[data-rule-path="${CSS.escape(focusRulePath.replace(/\\/g, '/'))}"]`
-      )
-      el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-      el?.focus?.()
-    }, 50)
-    onFocusRuleConsumed?.()
-    return () => window.clearTimeout(t)
-  }, [focusRulePath, projectRules, onFocusRuleConsumed])
+    // A freshly created rule only reaches `projectRules` after the reload, so
+    // its row may not exist on this pass — re-run when the list lands instead
+    // of racing it on a timer. Consuming the focus only once the row is found
+    // is what keeps the prop flip from cancelling the scroll.
+    // Compare the attribute rather than interpolating a path into a selector:
+    // rule paths carry characters that need CSS escaping, and `CSS.escape` is
+    // not available everywhere the pane renders.
+    const el = Array.from(document.querySelectorAll<HTMLElement>('[data-rule-path]')).find(
+      (row) => (row.dataset.rulePath ?? '').replace(/\\/g, '/') === wanted
+    )
+    if (!el) return
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    el.focus?.()
+    consumeFocusRef.current?.()
+  }, [focusRulePath, projectRules])
 
   const createProjectRule = async (): Promise<void> => {
     if (!activeWorkspacePath) {

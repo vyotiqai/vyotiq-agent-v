@@ -189,6 +189,18 @@ function resolveUserMessageIndex(
   return messages.findIndex((m) => m.role === 'user' && m.at === targetUserAt)
 }
 
+/**
+ * Precise failure for an edit anchor the persisted transcript no longer
+ * contains — after auto-compaction the compacted-away turns cannot be edited.
+ * The generic 'out of range' read like a renderer bug; this tells the user why
+ * and what to do.
+ */
+function rewindAnchorMissingMessage(hadTimestampAnchor: boolean): string {
+  return hadTimestampAnchor
+    ? 'Edited message no longer exists in the saved transcript — it was compacted away. Reload the chat and edit a newer message.'
+    : 'editMessageIndex out of range'
+}
+
 /** Read-only preview of which files chatRewind to userMessageIndex would restore. */
 export async function planRewindToUserMessage(input: {
   workspacePath: string
@@ -198,6 +210,12 @@ export async function planRewindToUserMessage(input: {
 }): Promise<RewindWritesPlan> {
   const messages = await loadMessagesAsync(input.workspacePath, input.runId)
   const userMessageIndex = resolveUserMessageIndex(messages, input.userMessageIndex, input.targetUserAt)
+  if (userMessageIndex < 0) {
+    throw new Error(rewindAnchorMissingMessage(input.targetUserAt != null))
+  }
+  if (userMessageIndex >= messages.length) {
+    throw new Error('editMessageIndex out of range')
+  }
   const scopes = await collectRewindRunScopes({
     workspacePath: input.workspacePath,
     runId: input.runId,
@@ -233,7 +251,10 @@ export async function prepareRewindAndReplaceUserMessage(input: {
 
   const diskMessages = await loadMessagesAsync(workspacePath, runId)
   const editMessageIndex = resolveUserMessageIndex(diskMessages, input.editMessageIndex, input.targetUserAt)
-  if (editMessageIndex < 0 || editMessageIndex >= diskMessages.length) {
+  if (editMessageIndex < 0) {
+    throw new Error(rewindAnchorMissingMessage(input.targetUserAt != null))
+  }
+  if (editMessageIndex >= diskMessages.length) {
     throw new Error('editMessageIndex out of range')
   }
   if (diskMessages[editMessageIndex]?.role !== 'user') {

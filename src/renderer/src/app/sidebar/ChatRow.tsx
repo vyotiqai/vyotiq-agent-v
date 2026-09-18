@@ -56,6 +56,7 @@ export const ChatRow = memo(function ChatRow({
   onRenameRun,
   onDeleteRun,
   onExportRun,
+  onCopyRunLink,
   onForkRun,
   tabIndex,
   rowRef,
@@ -73,6 +74,7 @@ export const ChatRow = memo(function ChatRow({
   onRenameRun: (workspacePath: string, runId: string, goal: string) => void
   onDeleteRun: (workspacePath: string, runId: string) => void
   onExportRun?: (workspacePath: string, runId: string) => void
+  onCopyRunLink?: (workspacePath: string, runId: string) => void
   onForkRun?: (workspacePath: string, runId: string) => void
   tabIndex?: number
   rowRef?: RefCallback<HTMLElement>
@@ -171,7 +173,7 @@ export const ChatRow = memo(function ChatRow({
           ref={rowRef}
           tabIndex={tabIndex}
           data-session-row
-        draggable={!nested && !renaming && !confirmingDelete}
+        draggable={!renaming && !confirmingDelete}
         className={cn(
           'app-region-no-drag flex w-full min-w-0 items-center gap-1.5 pr-2 text-left vy-transition',
           'group-hover:pr-10 group-focus-within:pr-10 [@media(hover:none)]:pr-10',
@@ -207,7 +209,7 @@ export const ChatRow = memo(function ChatRow({
           setRenaming(true)
         }}
         onDragStart={(e) => {
-          if (nested || renaming || confirmingDelete) {
+          if (renaming || confirmingDelete) {
             e.preventDefault()
             return
           }
@@ -315,6 +317,23 @@ export const ChatRow = memo(function ChatRow({
                 onClick={(e) => {
                   e.stopPropagation()
                   onExportRun(workspacePath, run.runId)
+                }}
+              />
+            ) : null}
+            {onCopyRunLink ? (
+              <IconButton
+                icon="copy"
+                label={`Copy link to ${fullLabel}`}
+                size="xs"
+                variant="bare"
+                className="text-muted hover:text-fg"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onCopyRunLink(workspacePath, run.runId)
                 }}
               />
             ) : null}

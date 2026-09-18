@@ -1316,6 +1316,8 @@ export type CreateChatStreamControllerOptions = {
   onTerminal?: () => void
   /** Current Ask / Plan / Agent mode for chatStart. */
   getAgentMode?: () => AgentInteractionMode
+  /** Teammate profile bound to this chat (identity, memory namespace, model pin). */
+  getAgentProfileId?: () => string | null | undefined
   /** Live default provider/model (effective settings) until this session pins its own. */
   getDefaultProviderModel?: () => { provider: ProviderId; model: string } | null
   /** Sync composer mode when the agent calls switch_mode. */
@@ -1330,7 +1332,7 @@ export function createChatStreamController(
   options: CreateChatStreamControllerOptions
 ): ChatStreamController {
   const { workspacePath, onRunIdAssigned, onTerminal, getAgentMode, onAgentModeChange, getDefaultProviderModel } = options
-  const { initialExpansions, onExpansionsChange } = options
+  const { initialExpansions, onExpansionsChange, getAgentProfileId } = options
   let lastNotifiedAgentMode: AgentInteractionMode | null = null
   const notifyAgentMode = (mode: AgentInteractionMode | null | undefined): void => {
     if (!mode) return
@@ -3037,6 +3039,7 @@ export function createChatStreamController(
     const mode = getAgentMode?.() ?? 'agent'
     const focusedFile = getFocusedFile() ?? undefined
     const turnProviderModel = resolveTurnProviderModel()
+    const agentProfileId = getAgentProfileId?.() || undefined
     const startPayload = continuingRunId
       ? {
           incremental: true as const,
@@ -3049,7 +3052,8 @@ export function createChatStreamController(
           mode,
           focusedFile,
           provider: turnProviderModel?.provider,
-          model: turnProviderModel?.model
+          model: turnProviderModel?.model,
+          agentProfileId
         }
       : {
           messages: nextMessages,
@@ -3057,7 +3061,8 @@ export function createChatStreamController(
           mode,
           focusedFile,
           provider: turnProviderModel?.provider,
-          model: turnProviderModel?.model
+          model: turnProviderModel?.model,
+          agentProfileId
         }
     let res = await window.vyotiq.chatStart(startPayload)
     for (let attempt = 2; attempt <= CHAT_START_MAX_ATTEMPTS && !res.ok; attempt++) {
@@ -3274,6 +3279,10 @@ export function createChatStreamController(
     const sentAt = new Date().toISOString()
     const user: ChatMessage = { role: 'user', content, at: sentAt }
     const priorMessages = state.messages
+    // Resolve the rewind anchor from the pre-patch transcript: state.messages is
+    // replaced below, so reading it after the patch would send the edited
+    // message's fresh `at`, which does not exist on disk.
+    const targetUserAt = priorMessages[editMessageIndex]?.at
     const priorItems = state.items
     const priorFollowUps = state.pendingFollowUps
     const priorIncomplete = state.incomplete
@@ -3340,7 +3349,7 @@ export function createChatStreamController(
       workspacePath,
       runId: id,
       editMessageIndex,
-      targetUserAt: state.messages[editMessageIndex]?.at ?? undefined,
+      targetUserAt,
       editedUserMessage: user,
       mode,
       provider: turnProviderModel?.provider,
@@ -3465,6 +3474,8 @@ export function createChatStreamController(
     }
 
     const priorMessages = state.messages
+    // Read the rewind anchor before the patch — same invariant as editAndResend.
+    const targetUserAt = priorMessages[userMessageIndex]?.at
     const priorItems = state.items
     const priorFollowUps = state.pendingFollowUps
     const priorIncomplete = state.incomplete
@@ -3505,7 +3516,7 @@ export function createChatStreamController(
       workspacePath,
       runId: id,
       userMessageIndex,
-      targetUserAt: state.messages[userMessageIndex]?.at ?? undefined
+      targetUserAt
     })
 
     if (!res.ok) {

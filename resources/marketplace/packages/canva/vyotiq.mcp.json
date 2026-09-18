@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "canva",
+  "name": "Canva",
+  "version": "1.0.0",
+  "description": "Find and work with your Canva designs, folders, and brand assets.",
+  "transport": "http",
+  "url": "https://mcp.canva.com/mcp",
+  "auth": "oauth",
+  "docsUrl": "https://www.canva.dev/docs/apps/mcp-server/"
+}

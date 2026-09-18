@@ -11,6 +11,7 @@ import { volatileSessionMessage } from '@main/agent/providers/systemZones'
 import type { LlmProvider } from '@main/agent/providers/types'
 import { contentToText } from '@shared/ipc'
 import { SKILL_BODY_STUB } from '@shared/slashCommands'
+import type { ContextToolsDetail } from '@shared/utils/contextUsage'
 
 const mockProvider: LlmProvider = {
   id: 'ollama',
@@ -53,6 +54,64 @@ describe('assembleContext integration', () => {
         ? `${result.systemStable}\n\n${result.systemVolatile}`
         : result.systemStable
     )
+  })
+
+  it('emits a measured breakdown detail whose system rows sum to the system layer', async () => {
+    const toolsSplit: ContextToolsDetail = {
+      builtin: { tokens: 40, count: 4 },
+      mcp: { tokens: 60, count: 2 },
+      mcpByServer: [{ serverId: 'a', tokens: 60, toolCount: 2 }],
+      deferredBuiltin: { tokens: 12, count: 1 },
+      deferredMcp: { tokens: 0, count: 0 },
+      total: 100
+    }
+    const result = await assembleContext({
+      harness: '## Context\nAgent',
+      contract: '## Goal\nBuild feature',
+      skillsSection: '<available_skills>\n- **alpha**: does things\n</available_skills>',
+      messages: [{ role: 'user', content: 'hello' }],
+      workspacePath: null,
+      goal: 'hello',
+      model,
+      toolsJsonEstimate: 100,
+      toolsSplit,
+      compactionTrigger: 10_000,
+      providerId: 'ollama',
+      provider: mockProvider,
+      signal: new AbortController().signal
+    })
+    const detail = result.detail
+    expect(detail).toBeTruthy()
+    if (!detail) return
+    expect(detail.system.total).toBe(result.layers.system)
+    expect(detail.systemPrompt + detail.skills).toBe(result.layers.system)
+    expect(
+      detail.system.harness + detail.system.memory + detail.system.volatile + detail.skills
+    ).toBe(result.layers.system)
+    expect(detail.messages).toBe(result.layers.history)
+    expect(detail.tools).toEqual(toolsSplit)
+    expect(detail.skills).toBeGreaterThan(0)
+    expect(detail.systemPrompt).toBe(result.layers.system - detail.skills)
+  })
+
+  it('falls back to an aggregate tools detail when no split is provided', async () => {
+    const result = await assembleContext({
+      harness: 'harness',
+      messages: [{ role: 'user', content: 'hi' }],
+      workspacePath: null,
+      goal: 'hi',
+      model,
+      toolsJsonEstimate: 77,
+      providerId: 'ollama',
+      provider: mockProvider,
+      signal: new AbortController().signal
+    })
+    expect(result.detail?.tools.total).toBe(77)
+    expect(result.detail?.tools.builtin).toEqual({ tokens: 77, count: 0 })
+    expect(result.detail?.tools.mcp).toEqual({ tokens: 0, count: 0 })
+    expect(result.detail?.tools.mcpByServer).toEqual([])
+    expect(result.detail?.skills).toBe(0)
+    expect(result.detail?.systemPrompt).toBe(result.detail?.system.total)
   })
 
   it('elides stale ephemeral tool results once history crosses the compaction trigger', async () => {

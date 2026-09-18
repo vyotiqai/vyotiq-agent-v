@@ -7,6 +7,11 @@ import { toolMessageForIpc } from '../../shared/utils/toolResultIpc'
 import { computeToolCatalog, notifyToolCatalogChanged } from '../agent/toolsCatalog'
 import {
   ChatStartRequestSchema,
+  AgentProfileCreateRequestSchema,
+  AgentProfileUpdateRequestSchema,
+  AgentProfileDeleteRequestSchema,
+  TaskEnqueueRequestSchema,
+  TaskCancelRequestSchema,
   ChatUiSubscribeRequestSchema,
   ChatUiSubscribeAddRequestSchema,
   ComposerAttachmentsClearRequestSchema,
@@ -127,6 +132,7 @@ import {
   McpSetAuthTokenRequestSchema,
   McpSetGoogleClientSecretRequestSchema,
   McpSetOAuthClientSecretRequestSchema,
+  McpPickBinaryRequestSchema,
   McpStartOAuthRequestSchema,
   McpStatusRequestSchema,
   McpApplyDetectedRequestSchema,
@@ -234,9 +240,11 @@ import { formatError, AppError, isAbortError, isAppError } from '../../shared/er
 import { scrubString } from '../../shared/utils/scrub'
 import { logger, logErrorSummary } from '../../shared/logger'
 import { pickWorkspace } from '@main/workspace/workspace'
+import { consumePendingDeepLink } from '@main/app/deepLinks'
 import { resolveInsideWorkspace } from '@main/workspace/safePath'
 import { getSettings, setSettings, setMarketplaceRemoteInstallAcked, redactSettingsForIpc, enqueueSettingsMutation } from '@main/settings/settings'
 import { syncMcpServers, getMcpServerStatus, mcpStatusExtras, refreshMcpServers, startMcpOAuth, setMcpStdioWorkspace } from '@main/agent/mcp'
+import { isExecutableMcpBinary } from '@main/agent/mcp/binaries'
 import { headersWithoutAuthorization } from '../../shared/utils/mcpAuth'
 import {
   browseCatalog,
@@ -307,6 +315,7 @@ import {
   prepareRewindToUserMessage,
   planRewindToUserMessage
 } from '../agent/rewindRun'
+import { invalidateAfterWorkspaceMutation } from '../agent/tools'
 import { resolveRunDir, workspaceSessionsRoot, workspaceBrowserArtifactsDir } from '@main/storage/paths'
 import {
   collectStorageReport,
@@ -316,7 +325,17 @@ import {
 } from '@main/storage/retention'
 import { collectRunStats } from '../agent/runStats'
 import { collectHomeActivity } from '../agent/activityStats'
-  import { focusAgentBrowser, closeAgentBrowser, getAgentBrowserState, selectBrowserTab, browserGoBack, browserGoForward, setAgentBrowserBounds, navigateUrl, clearAgentBrowserData, takeBrowserScreenshot, disposeAgentBrowserForWorkspace, takeBrowserControl, releaseBrowserControl, manageTabs } from '@main/app/agentBrowser'
+import {
+  listAgentProfiles,
+  createAgentProfile,
+  updateAgentProfile,
+  deleteAgentProfile,
+  emitAgentProfilesChanged,
+  mutateAgentProfiles,
+  removeProfileOverridesForWorkspaces
+} from '../settings/agentProfiles'
+import { listTasks, enqueueTask, cancelTask, resumeTasksForWorkspaces, cancelTasksForProfile } from '../agent/taskScheduler'
+  import { focusAgentBrowser, closeAgentBrowser, getAgentBrowserState, selectBrowserTab, browserGoBack, browserGoForward, setAgentBrowserBounds, navigateUrl, clearAgentBrowserData, takeBrowserScreenshot, disposeAgentBrowserForWorkspace, takeBrowserControl, releaseBrowserControl, manageTabs, toggleAgentBrowserPip } from '@main/app/agentBrowser'
 import { extractAttachment } from '../attachments/extract'
 import {
   clearComposerAttachmentsForWorkspace,
@@ -339,6 +358,7 @@ import { clearModelCache } from '../agent/providers/modelCache'
 import { collectWorkspaceFiles } from '../agent/tools/walk'
 import {
   disposeWorkspaceIndexes,
+  scheduleWorkspaceIndexSync,
   warmWorkspaceIndexes,
   workspaceIndexAbortSignal
 } from '../agent/workspaceIndex'
@@ -354,6 +374,7 @@ import { toolDiagnosticsAsync } from '../agent/tools/diagnostics'
 import { disposeTerminalSessionsForWorkspace as disposeAgentTerminalSessionsForWorkspace } from '../agent/tools/terminalSessions'
 import {
   chatCancelResult,
+  cancelRun,
   listActiveRuns,
   tryRegisterRunAbort,
   clearRunAbort,
@@ -736,6 +757,11 @@ export function registerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.deepLinkConsume, (event): IpcResult<unknown> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    return ok(consumePendingDeepLink())
+  })
+
   ipcMain.handle(IPC.workspacesGet, async (event): Promise<IpcResult<WorkspacesState>> => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
@@ -753,6 +779,9 @@ export function registerIpc(): void {
         const req = WorkspacesAddRequestSchema.parse(raw ?? {})
         const win = BrowserWindow.fromWebContents(event.sender)
         const next = await addWorkspace(win, req.path)
+        // Load and arm the new workspace's persisted tasks (boot re-arm only
+        // covers workspaces open at startup).
+        if (req.path) resumeTasksForWorkspaces([req.path])
         invalidateMcpResolveCache()
         await syncMcpServers(resolveMcpServersForSessionMap())
         notifyToolCatalogChanged()
@@ -1083,7 +1112,7 @@ export function registerIpc(): void {
       }
       // Atomic register BEFORE return so cancel works during startup and concurrent
       // chatStart cannot overlap the same runDir (check+set with no await gap).
-      const registered = tryRegisterRunAbort(runId, req.workspacePath)
+      const registered = tryRegisterRunAbort(runId, req.workspacePath, req.agentProfileId)
       if (!registered.ok) {
         return failExpected(registered.error, IPC.chatStart, runId, registered.code)
       }
@@ -1111,7 +1140,8 @@ export function registerIpc(): void {
               mode: req.mode,
               focusedFile: req.focusedFile,
               provider: req.provider,
-              model: req.model
+              model: req.model,
+              agentProfileId: req.agentProfileId
             }
           : {
               runId,
@@ -1121,7 +1151,8 @@ export function registerIpc(): void {
               mode: req.mode,
               focusedFile: req.focusedFile,
               provider: req.provider,
-              model: req.model
+              model: req.model,
+              agentProfileId: req.agentProfileId
             }
       startAgentRunInBackground({
         runId,
@@ -1135,6 +1166,88 @@ export function registerIpc(): void {
       return ok({ runId, invokeId })
     } catch (err) {
       return failFrom(err, IPC.chatStart)
+    }
+  })
+
+  ipcMain.handle(IPC.agentProfilesList, async (event): Promise<IpcResult<ReturnType<typeof listAgentProfiles>>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    return ok(listAgentProfiles())
+  })
+
+  ipcMain.handle(IPC.agentProfilesCreate, async (event, raw): Promise<IpcResult<unknown>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = AgentProfileCreateRequestSchema.parse(raw)
+      const profile = await mutateAgentProfiles(() => createAgentProfile(req))
+      emitAgentProfilesChanged()
+      return ok(profile)
+    } catch (err) {
+      return failFrom(err, IPC.agentProfilesCreate)
+    }
+  })
+
+  ipcMain.handle(IPC.agentProfilesUpdate, async (event, raw): Promise<IpcResult<unknown>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = AgentProfileUpdateRequestSchema.parse(raw)
+      const profile = await mutateAgentProfiles(() => updateAgentProfile(req))
+      emitAgentProfilesChanged()
+      return ok(profile)
+    } catch (err) {
+      return failFrom(err, IPC.agentProfilesUpdate)
+    }
+  })
+
+  ipcMain.handle(IPC.agentProfilesDelete, async (event, raw): Promise<IpcResult<true>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = AgentProfileDeleteRequestSchema.parse(raw)
+      await mutateAgentProfiles(() => deleteAgentProfile(req))
+      // Deleting a teammate ends its work: queued/scheduled tasks are cancelled
+      // and any live run bound to the profile is stopped through the same
+      // cancel path the Stop button uses.
+      cancelTasksForProfile(req.id)
+      for (const run of listActiveRuns()) {
+        if (run.agentProfileId === req.id) cancelRun(run.runId)
+      }
+      // A recreated teammate with the same slug must not inherit dead overrides:
+      // cover every path this install knows (open, recent, persisted UI state) —
+      // not just open ones, or a closed workspace would revive the override.
+      const knownPaths = new Set<string>([
+        ...getWorkspaces().openPaths,
+        ...getWorkspaces().recentPaths
+      ])
+      for (const path of Object.keys(getWorkspaces().uiStateByPath ?? {})) knownPaths.add(path)
+      removeProfileOverridesForWorkspaces(req.id, [...knownPaths])
+      emitAgentProfilesChanged()
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.agentProfilesDelete)
+    }
+  })
+
+  ipcMain.handle(IPC.tasksList, async (event): Promise<IpcResult<ReturnType<typeof listTasks>>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    return ok(listTasks())
+  })
+
+  ipcMain.handle(IPC.tasksEnqueue, async (event, raw): Promise<IpcResult<unknown>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskEnqueueRequestSchema.parse(raw)
+      return ok(enqueueTask(req))
+    } catch (err) {
+      return failFrom(err, IPC.tasksEnqueue)
+    }
+  })
+
+  ipcMain.handle(IPC.tasksCancel, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskCancelRequestSchema.parse(raw)
+      return ok(cancelTask(req.id))
+    } catch (err) {
+      return failFrom(err, IPC.tasksCancel)
     }
   })
 
@@ -1168,7 +1281,11 @@ export function registerIpc(): void {
         // Register before mutating disk so a failed register cannot leave a
         // rewound transcript without a new invoke (matches chatStart ordering).
         const runId = req.runId
-        const registered = tryRegisterRunAbort(runId, req.workspacePath)
+        // Rewind requests carry no profile field; recover the run's durable
+        // teammate binding so the registry entry serves the one-run-per-teammate
+        // gate exactly like a normal resume.
+        const rewindProfileId = loadStatus(resolveRunDir(req.workspacePath, runId))?.agentProfileId
+        const registered = tryRegisterRunAbort(runId, req.workspacePath, rewindProfileId)
         if (!registered.ok) {
           return failExpected(registered.error, IPC.chatRewindAndStart, runId, registered.code)
         }
@@ -1188,7 +1305,7 @@ export function registerIpc(): void {
           throw err
         }
         if (prepared.writes.restored.length > 0) {
-          invalidateGitStatusCache(req.workspacePath)
+          invalidateAfterWorkspaceMutation(req.workspacePath)
         }
 
         const wc = event.sender
@@ -1260,7 +1377,7 @@ export function registerIpc(): void {
         targetUserAt: req.targetUserAt
       })
       if (prepared.writes.restored.length > 0) {
-        invalidateGitStatusCache(req.workspacePath)
+        invalidateAfterWorkspaceMutation(req.workspacePath)
       }
 
       logger.info('Chat rewind', {
@@ -1858,7 +1975,7 @@ export function registerIpc(): void {
           if (!isOpenWorkspace(p)) return fail('Workspace is not open')
         }
         return ok(
-          collectHomeActivity(req.workspacePaths, new Date(), req.windowDays)
+          await collectHomeActivity(req.workspacePaths, new Date(), req.windowDays)
         )
       } catch (err) {
         return failFrom(err, IPC.homeActivity)
@@ -1975,6 +2092,7 @@ export function registerIpc(): void {
             ? {
                 status: status.status,
                 ...(status.resumable ? { resumable: true as const } : {}),
+                ...(status.inlineInstance ? { inlineInstance: true as const } : {}),
                 ...(status.error ? { error: status.error } : {})
               }
             : {})
@@ -3145,6 +3263,40 @@ export function registerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.mcpPickBinary, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const { binary } = McpPickBinaryRequestSchema.parse(raw)
+      const win = BrowserWindow.fromWebContents(event.sender)
+      // Windows hides extensionless files behind a filter, and the default
+      // executable extensions differ per platform.
+      const options: Electron.OpenDialogOptions = {
+        title: `Locate ${binary}`,
+        properties: ['openFile'],
+        filters:
+          process.platform === 'win32'
+            ? [
+                { name: 'Executables', extensions: ['exe', 'cmd', 'bat', 'com'] },
+                { name: 'All', extensions: ['*'] }
+              ]
+            : [{ name: 'All', extensions: ['*'] }]
+      }
+      const result = win
+        ? await dialog.showOpenDialog(win, options)
+        : await dialog.showOpenDialog(options)
+      const picked = result.canceled ? undefined : result.filePaths[0]
+      if (!picked) return ok({ path: null })
+      // Reject a directory or a non-executable up front: persisting it would
+      // leave the server reporting the same missing binary with no explanation.
+      if (!isExecutableMcpBinary(picked)) {
+        return fail('That file is not an executable. Pick the program itself.')
+      }
+      return ok({ path: picked })
+    } catch (err) {
+      return failFrom(err, IPC.mcpPickBinary)
+    }
+  })
+
   ipcMain.handle(IPC.marketplaceListInstalled, async (event) => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
@@ -3683,6 +3835,7 @@ export function registerIpc(): void {
       const req = WorkspaceFileSaveRequestSchema.parse(raw ?? {})
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const result = await saveWorkspaceFile(req)
+      scheduleWorkspaceIndexSync(req.workspacePath)
       if (isSkillRelatedRelPath(req.path) || isRuleRelatedRelPath(req.path)) {
         if (isRuleRelatedRelPath(req.path)) clearRulesCache(req.workspacePath)
         notifySkillsChanged(req.workspacePath)
@@ -3699,6 +3852,7 @@ export function registerIpc(): void {
       const req = WorkspaceFileCreateRequestSchema.parse(raw ?? {})
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const result = await createWorkspaceFile(req)
+      scheduleWorkspaceIndexSync(req.workspacePath)
       const createdRel = [req.parentPath, req.name].filter(Boolean).join('/')
       if (isSkillRelatedRelPath(createdRel) || isRuleRelatedRelPath(createdRel)) {
         if (isRuleRelatedRelPath(createdRel)) clearRulesCache(req.workspacePath)
@@ -3716,6 +3870,7 @@ export function registerIpc(): void {
       const req = WorkspaceFileMoveRequestSchema.parse(raw ?? {})
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const result = await moveWorkspaceFile(req)
+      scheduleWorkspaceIndexSync(req.workspacePath)
       if (
         isSkillRelatedRelPath(req.fromPath) ||
         isSkillRelatedRelPath(req.toPath) ||
@@ -3739,6 +3894,7 @@ export function registerIpc(): void {
       const req = WorkspaceFileDeleteRequestSchema.parse(raw ?? {})
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const result = await deleteWorkspaceFile(req)
+      scheduleWorkspaceIndexSync(req.workspacePath)
       if (isSkillRelatedRelPath(req.path) || isRuleRelatedRelPath(req.path)) {
         if (isRuleRelatedRelPath(req.path)) clearRulesCache(req.workspacePath)
         notifySkillsChanged(req.workspacePath)
@@ -4169,6 +4325,18 @@ export function registerIpc(): void {
         return ok(true)
       } catch (err) {
         return failFrom(err, IPC.browserSetBounds)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.browserPipToggle,
+    async (event): Promise<IpcResult<{ pip: boolean }>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        return ok({ pip: toggleAgentBrowserPip() })
+      } catch (err) {
+        return failFrom(err, IPC.browserPipToggle)
       }
     }
   )

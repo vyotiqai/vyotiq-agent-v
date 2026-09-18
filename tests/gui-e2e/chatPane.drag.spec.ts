@@ -47,7 +47,8 @@ test.beforeAll(async () => {
   // Seed before addWorkspace so the first listRuns (and its cache) sees the runs.
   seedRunsInUserData(launched.userDataDir, workspacePath, [
     { runId: 'run-alpha', goal: 'Pane Session Alpha', updatedAt: '2026-08-08T00:00:10.000Z' },
-    { runId: 'run-beta', goal: 'Pane Session Beta', updatedAt: '2026-08-08T00:00:20.000Z' }
+    { runId: 'run-beta', goal: 'Pane Session Beta', updatedAt: '2026-08-08T00:00:20.000Z' },
+    { runId: 'run-gamma', goal: 'Pane Session Gamma', updatedAt: '2026-08-08T00:00:30.000Z' }
   ])
 
   const addRes = await launched.window.evaluate(async (path) => {
@@ -103,12 +104,17 @@ test('drag sidebar session onto right third splits into two panes', async () => 
   await expect(window.locator('[data-chat-pane-title="Pane Session Alpha"]')).toBeVisible()
   await expect(window.locator('[data-chat-pane-title="Pane Session Beta"]')).toBeVisible()
 
+  // The split must hydrate the dropped session's transcript: Beta's pane shows
+  // its seeded message and the composer leaves the draft placeholder.
+  const betaPane = window.locator('[data-chat-pane]').nth(1)
+  await expect(betaPane.getByText('Pane Session Beta')).toHaveCount(2, { timeout: 20_000 })
+  await expect(betaPane.getByText(/Send a follow-up/)).toBeVisible({ timeout: 20_000 })
+
   // Clicking an already-open session focuses its pane; does not add a third.
   await window.getByRole('button', { name: 'Pane Session Alpha', exact: true }).first().click()
   await expect(window.locator('[data-chat-pane]')).toHaveCount(2)
   await expect(window.locator('[data-chat-pane-focused="1"]')).toHaveCount(1)
 
-  const betaPane = window.locator('[data-chat-pane]').nth(1)
   await window.getByRole('button', { name: 'Pane Session Beta', exact: true }).first().click()
   await expect(betaPane).toHaveAttribute('data-chat-pane-focused', '1')
   await window.getByRole('button', { name: /Close Pane Session Beta/i }).click()
@@ -135,7 +141,7 @@ test('multi-pane polish: min widths, sidebar open state, docked empty, rail pad'
   )
   expect(shellWidths.length).toBe(2)
   for (const width of shellWidths) {
-    expect(width).toBeGreaterThanOrEqual(360)
+    expect(width).toBeGreaterThanOrEqual(280)
   }
 
   // Always-visible headers (not hover-only).
@@ -201,4 +207,81 @@ test('opening right dock panel keeps multi-pane layout', async () => {
   // With dock open the rail is gone — composer pad drops on the rightmost pane.
   const rightComposer = window.locator('[data-chat-pane]').nth(1).locator('[data-composer-dock]')
   await expect(rightComposer).toHaveAttribute('data-composer-side-rail-pad', '0')
+})
+
+test('Ctrl/Cmd+\\ splits the focused pane into an empty draft beside it', async () => {
+  const { window } = launched
+  await ensureSidebarExpanded()
+
+  await window.evaluate(() => {
+    localStorage.removeItem('vyotiq.chatPaneLayout')
+    localStorage.removeItem('vyotiq.rightPanel')
+  })
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await expect(window.locator('body')).toBeVisible({ timeout: 30_000 })
+  await ensureSidebarExpanded()
+
+  const alpha = window.getByRole('button', { name: 'Pane Session Alpha', exact: true }).first()
+  await alpha.click()
+  await expect(window.locator('[data-chat-pane]')).toHaveCount(1, { timeout: 15_000 })
+
+  await window.keyboard.press('ControlOrMeta+Backslash')
+  await expect(window.locator('[data-chat-pane]')).toHaveCount(2, { timeout: 15_000 })
+  const draft = window.locator('[data-chat-pane-title="New chat"]')
+  await expect(draft).toBeVisible({ timeout: 10_000 })
+  await expect(draft).toHaveAttribute('data-chat-pane-focused', '1')
+  await expect(draft.locator('[data-composer-dock]')).toBeVisible()
+
+  // The header "+" splits the pane it sits on — but the draft pane refuses
+  // (two drafts would share one composer): toast, count unchanged. This is
+  // viewport-independent, unlike a capacity-limited split.
+  await window.locator('[data-chat-pane-split]').nth(1).click()
+  await expect(window.getByText('Send a message in this pane first.')).toBeVisible({
+    timeout: 10_000
+  })
+  await expect(window.locator('[data-chat-pane]')).toHaveCount(2)
+})
+
+test('sessions clicked into empty draft panes hydrate their transcripts', async () => {
+  const { window } = launched
+  await ensureSidebarExpanded()
+
+  await window.evaluate(() => {
+    localStorage.removeItem('vyotiq.chatPaneLayout')
+    localStorage.removeItem('vyotiq.rightPanel')
+  })
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await expect(window.locator('body')).toBeVisible({ timeout: 30_000 })
+  await ensureSidebarExpanded()
+
+  // Pane 1: Alpha opened by click.
+  await window.getByRole('button', { name: 'Pane Session Alpha', exact: true }).first().click()
+  await expect(window.locator('[data-chat-pane]')).toHaveCount(1, { timeout: 15_000 })
+
+  // Pane 2: Cmd+\ draft, then click Beta into the focused draft.
+  await window.keyboard.press('ControlOrMeta+Backslash')
+  await expect(window.locator('[data-chat-pane-title="New chat"]')).toBeVisible({
+    timeout: 10_000
+  })
+  await window.getByRole('button', { name: 'Pane Session Beta', exact: true }).first().click()
+  await expect(window.locator('[data-chat-pane]')).toHaveCount(2)
+  const betaPane = window.locator('[data-chat-pane-title="Pane Session Beta"]')
+  await expect(betaPane).toBeVisible({ timeout: 15_000 })
+  await expect(betaPane.getByText('Pane Session Beta')).toHaveCount(2, { timeout: 20_000 })
+  await expect(betaPane.getByText(/Send a follow-up/)).toBeVisible({ timeout: 20_000 })
+
+  // Pane 3: Cmd+\ again (Beta pane focused), then click Gamma into the draft.
+  await window.keyboard.press('ControlOrMeta+Backslash')
+  await expect(window.locator('[data-chat-pane]')).toHaveCount(3, { timeout: 15_000 })
+  await window.getByRole('button', { name: 'Pane Session Gamma', exact: true }).first().click()
+  const gammaPane = window.locator('[data-chat-pane-title="Pane Session Gamma"]')
+  await expect(gammaPane).toBeVisible({ timeout: 15_000 })
+  await expect(gammaPane.getByText('Pane Session Gamma')).toHaveCount(2, { timeout: 20_000 })
+  await expect(gammaPane.getByText(/Send a follow-up/)).toBeVisible({ timeout: 20_000 })
+
+  // Pane 1 must still show Alpha's transcript.
+  const alphaPane = window.locator('[data-chat-pane-title="Pane Session Alpha"]')
+  await expect(alphaPane.getByText('Pane Session Alpha')).toHaveCount(2)
 })

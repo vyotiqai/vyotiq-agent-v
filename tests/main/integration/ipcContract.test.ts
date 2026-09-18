@@ -25,6 +25,7 @@ const VYOTIQ_INVOKE_MAP: Record<
     | 'onSkillsChanged'
     | 'onNotificationsChanged'
     | 'onNotificationActivate'
+    | 'onDeepLinkOpened'
     | 'onAppearanceCustomCssChanged'
     | 'updater'
     | 'feedback'
@@ -112,6 +113,14 @@ const VYOTIQ_INVOKE_MAP: Record<
   browserReload: IPC.browserReload,
   browserTakeScreenshot: IPC.browserTakeScreenshot,
   browserClearBrowsingData: IPC.browserClearBrowsingData,
+  browserPipToggle: IPC.browserPipToggle,
+  agentProfilesList: IPC.agentProfilesList,
+  agentProfilesCreate: IPC.agentProfilesCreate,
+  agentProfilesUpdate: IPC.agentProfilesUpdate,
+  agentProfilesDelete: IPC.agentProfilesDelete,
+  tasksList: IPC.tasksList,
+  tasksEnqueue: IPC.tasksEnqueue,
+  tasksCancel: IPC.tasksCancel,
   gitStatus: IPC.gitStatus,
   gitGenerateCommitMessage: IPC.gitGenerateCommitMessage,
   gitDiff: IPC.gitDiff,
@@ -192,6 +201,7 @@ const VYOTIQ_INVOKE_MAP: Record<
   mcpSetGoogleClientSecret: IPC.mcpSetGoogleClientSecret,
   mcpClearGoogleClientSecret: IPC.mcpClearGoogleClientSecret,
   mcpStartOAuth: IPC.mcpStartOAuth,
+  mcpPickBinary: IPC.mcpPickBinary,
   marketplaceListInstalled: IPC.marketplaceListInstalled,
   marketplaceBrowse: IPC.marketplaceBrowse,
   marketplaceRefreshCatalog: IPC.marketplaceRefreshCatalog,
@@ -223,7 +233,8 @@ const VYOTIQ_INVOKE_MAP: Record<
   processMetrics: IPC.processMetrics,
   listNotifications: IPC.notificationsList,
   markNotificationsRead: IPC.notificationsMarkRead,
-  dismissNotifications: IPC.notificationsDismiss
+  dismissNotifications: IPC.notificationsDismiss,
+  consumeDeepLink: IPC.deepLinkConsume
 }
 
 const PRELOAD_INTERNAL_INVOKE_CHANNELS = new Set<string>([IPC.agentQuestionReject])
@@ -246,12 +257,15 @@ const PUSH_CHANNELS = new Set<string>([
   IPC.dictationStatusEvent,
   IPC.githubAuthStatusEvent,
   IPC.skillsChanged,
+  IPC.agentProfilesChanged,
+  IPC.tasksChanged,
   IPC.notificationsChanged,
   IPC.notificationsActivate,
   IPC.appearanceCustomCssChanged,
   IPC.updaterState,
   IPC.accessibilitySupportChanged,
-  IPC.gitStatusChanged
+  IPC.gitStatusChanged,
+  IPC.deepLinkOpened
 ])
 
 const VYOTIQ_SYNC_SEND_MAP: Record<'updateWorkspaceUiStateSync', string> = {
@@ -272,8 +286,11 @@ const VYOTIQ_PUSH_MAP: Record<
   | 'onDictationStatus'
   | 'onGithubAuthStatus'
   | 'onSkillsChanged'
+  | 'onAgentProfilesChanged'
+  | 'onTasksChanged'
   | 'onNotificationsChanged'
   | 'onNotificationActivate'
+  | 'onDeepLinkOpened'
   | 'onAppearanceCustomCssChanged'
   | 'onAccessibilitySupportChanged'
   | 'onGitStatusChanged',
@@ -292,8 +309,11 @@ const VYOTIQ_PUSH_MAP: Record<
   onDictationStatus: IPC.dictationStatusEvent,
   onGithubAuthStatus: IPC.githubAuthStatusEvent,
   onSkillsChanged: IPC.skillsChanged,
+  onAgentProfilesChanged: IPC.agentProfilesChanged,
+  onTasksChanged: IPC.tasksChanged,
   onNotificationsChanged: IPC.notificationsChanged,
   onNotificationActivate: IPC.notificationsActivate,
+  onDeepLinkOpened: IPC.deepLinkOpened,
   onAppearanceCustomCssChanged: IPC.appearanceCustomCssChanged,
   onAccessibilitySupportChanged: IPC.accessibilitySupportChanged,
   onGitStatusChanged: IPC.gitStatusChanged
@@ -321,7 +341,7 @@ describe('main/renderer IPC contract', () => {
       expect(channels.has(channel)).toBe(true)
       expect(PUSH_CHANNELS.has(channel)).toBe(false)
     }
-    expect(Object.keys(VYOTIQ_INVOKE_MAP)).toHaveLength(190)
+    expect(Object.keys(VYOTIQ_INVOKE_MAP)).toHaveLength(200)
   })
 
   it('maps every VyotiqApi push listener to a push channel', () => {
@@ -333,7 +353,7 @@ describe('main/renderer IPC contract', () => {
       expect(channels.has(channel)).toBe(true)
       expect(PUSH_CHANNELS.has(channel)).toBe(true)
     }
-    expect(Object.keys(VYOTIQ_PUSH_MAP)).toHaveLength(18)
+    expect(Object.keys(VYOTIQ_PUSH_MAP)).toHaveLength(21)
   })
 
   it('accounts for every IPC channel as invoke or push', () => {

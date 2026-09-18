@@ -81,17 +81,17 @@ describe('TitleBar', () => {
     expect(screen.getByRole('button', { name: /open menu/i })).toBeTruthy()
   })
 
-  it('shows the brand mark in the mobile title bar when navigation is closed', () => {
+  it('does not render a brand mark in the mobile title bar', () => {
     const { container } = renderBar('win32', { desktop: false })
-    expect(container.querySelector('[data-titlebar-accessory] [data-brand-mark]')).toBeTruthy()
+    expect(container.querySelector('[data-titlebar-accessory] [data-brand-mark]')).toBeNull()
   })
 
-  it('shows the brand mark on desktop when the accessory is unoccupied', () => {
+  it('does not render a brand mark in the desktop title bar', () => {
     const { container } = renderBar('win32')
-    expect(container.querySelector('[data-titlebar-accessory] [data-brand-mark]')).toBeTruthy()
+    expect(container.querySelector('[data-titlebar-accessory] [data-brand-mark]')).toBeNull()
   })
 
-  it('hides the brand mark on desktop while the sidebar is expanded', () => {
+  it('keeps the title bar brand-free while the sidebar is expanded', () => {
     const { container } = renderBar('win32', { sidebarExpanded: true })
     expect(container.querySelector('[data-titlebar-accessory] [data-brand-mark]')).toBeNull()
   })

@@ -340,6 +340,9 @@ function scheduleDenseWarm(workspaceRoot: string): void {
     priority: 'warm',
     coalesceKey: `dense-warm:${key}`,
     run: async () => {
+      // Honor the disable flag at run time: a toggle mid-queue must not
+      // download the model or embed vectors.
+      if (readCodeIndexEnabled() === false) return
       const store = getOrOpenCodeIndexStore(workspaceRoot)
       const status = store.denseStatus()
       const model = store.getDenseModel()

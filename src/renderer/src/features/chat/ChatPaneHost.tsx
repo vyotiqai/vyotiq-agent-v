@@ -46,6 +46,7 @@ export function ChatPaneHost({
   sideRailPad = false,
   onFocusPane,
   onClosePane,
+  onSplitPane,
   onSizesChange,
   onSessionDrop,
   getPaneTitle,
@@ -58,6 +59,8 @@ export function ChatPaneHost({
   sideRailPad?: boolean
   onFocusPane: (paneId: string) => void
   onClosePane: (paneId: string) => void
+  /** Insert an empty draft pane beside this pane (pointerdown already focused it). */
+  onSplitPane?: () => void
   onSizesChange: (sizes: number[]) => void
   onSessionDrop: (anchorPaneId: string, zone: PaneDropZone, payload: {
     workspacePath: string
@@ -204,17 +207,33 @@ export function ChatPaneHost({
                   data-chat-pane-header
                 >
                   <span className="min-w-0 truncate text-xs text-fg/80">{paneTitle}</span>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface/70 hover:text-fg"
-                    aria-label={`Close ${paneTitle}`}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onClosePane(pane.paneId)
-                    }}
-                  >
-                    Close
-                  </button>
+                  <span className="flex shrink-0 items-center gap-0.5">
+                    {onSplitPane ? (
+                      <button
+                        type="button"
+                        className="shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface/70 hover:text-fg"
+                        aria-label={`Split pane beside ${paneTitle}`}
+                        data-chat-pane-split={pane.paneId}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onSplitPane()
+                        }}
+                      >
+                        +
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface/70 hover:text-fg"
+                      aria-label={`Close ${paneTitle}`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onClosePane(pane.paneId)
+                      }}
+                    >
+                      Close
+                    </button>
+                  </span>
                 </div>
               ) : null}
               <div

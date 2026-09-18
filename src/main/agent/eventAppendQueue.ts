@@ -38,6 +38,65 @@ const appendChains = new Map<string, Promise<void>>()
 const pendingBytes = new Map<string, number>()
 /** Dropped snapshot count per run dir — logged periodically, not per line. */
 const droppedSnapshotCounts = new Map<string, number>()
+
+/**
+ * Run dirs whose storage vanished mid-run (ENOENT on append). Persisting can
+ * never succeed again — nothing may silently recreate a run dir, so the run
+ * must stop. Logged once per dir; handlers trip the run's abort controller.
+ */
+const storageLostDirs = new Set<string>()
+const storageLostHandlers = new Map<string, Set<() => void>>()
+
+export function isRunStorageLostError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as NodeJS.ErrnoException).code === 'ENOENT'
+}
+
+/** @internal Shared with messageAppendQueue — both queues write under the run dir. */
+export function markRunStorageLost(dir: string, err: unknown): void {
+  if (!isRunStorageLostError(err)) return
+  if (!storageLostDirs.has(dir)) {
+    storageLostDirs.add(dir)
+    logger.error('Run storage directory has disappeared — the run can no longer persist anything', {
+      scope: 'state',
+      code: 'EVENTS_DIR_MISSING',
+      correlationId: basename(dir)
+    })
+  }
+  const handlers = storageLostHandlers.get(dir)
+  if (handlers) {
+    for (const handler of [...handlers]) {
+      try {
+        handler()
+      } catch {
+        /* handler errors never break the append chain */
+      }
+    }
+  }
+}
+
+/** Register a callback fired (immediately, if already lost) when the run dir vanishes. */
+export function onRunStorageLost(dir: string, handler: () => void): void {
+  if (storageLostDirs.has(dir)) {
+    handler()
+    return
+  }
+  const set = storageLostHandlers.get(dir) ?? new Set()
+  set.add(handler)
+  storageLostHandlers.set(dir, set)
+}
+
+export function clearRunStorageLostHandler(dir: string, handler: () => void): void {
+  const set = storageLostHandlers.get(dir)
+  if (!set) return
+  set.delete(handler)
+  if (set.size === 0) storageLostHandlers.delete(dir)
+}
+
+/** @internal Test hook. */
+export function resetRunStorageLostForTests(): void {
+  storageLostDirs.clear()
+  storageLostHandlers.clear()
+}
 /** Accumulated append failures per run dir, consumed by flushEventAppends (throws). */
 const failuresForFlush = new Map<string, DirAppendFailures>()
 /**
@@ -234,6 +293,7 @@ export function enqueueEventAppend(dir: string, event: unknown): void {
     })
     .catch((err) => {
       recordAppendError(dir, err)
+      markRunStorageLost(dir, err)
       logger.warn('Failed to append events.jsonl', {
         scope: 'state',
         correlationId: basename(dir),

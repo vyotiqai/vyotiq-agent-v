@@ -43,6 +43,7 @@ export const SHORTCUT_TITLES: Record<ShortcutId, string> = {
   panelPlan: 'Plan panel',
   panelPr: 'Pull request panel',
   closeChat: 'Close chat tab',
+  splitPane: 'Split chat pane',
   findInFiles: 'Find in files',
   commandPalette: 'Command palette',
   workspace1: 'Switch to workspace 1',

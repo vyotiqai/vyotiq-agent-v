@@ -41,10 +41,13 @@ export function Sidebar({
   onOpenHome,
   onOpenChat,
   onNewChatInWorkspace,
+  onStartTeammateChat,
+  onOpenTaskRun,
   onSelectRunInWorkspace,
   onRenameRunInWorkspace,
   onDeleteRunInWorkspace,
   onExportRunInWorkspace,
+  onCopyRunLinkInWorkspace,
   onLoadOlderRuns,
   isRunOpenInPane,
   isRunFocusedInPane,
@@ -199,6 +202,13 @@ export function Sidebar({
                   }
                 : undefined
             }
+            onStartTeammateChat={onStartTeammateChat}
+            onOpenTaskRun={(path, runId) => {
+              setExpanded(path, true)
+              onOpenTaskRun?.(path, runId)
+              onOpenChat()
+              afterNav()
+            }}
             onSelectRun={(path, runId) => {
               setExpanded(path, true)
               onSelectRunInWorkspace?.(path, runId)
@@ -213,6 +223,9 @@ export function Sidebar({
             }}
             onExportRun={(path, runId) => {
               onExportRunInWorkspace?.(path, runId)
+            }}
+            onCopyRunLink={(path, runId) => {
+              onCopyRunLinkInWorkspace?.(path, runId)
             }}
             onLoadOlderRuns={(path) => {
               setExpanded(path, true)

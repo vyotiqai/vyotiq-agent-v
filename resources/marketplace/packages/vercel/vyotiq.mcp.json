@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "vercel",
+  "name": "Vercel",
+  "version": "1.0.0",
+  "description": "Projects, deployments, and logs for your Vercel account.",
+  "transport": "http",
+  "url": "https://mcp.vercel.com",
+  "auth": "oauth",
+  "docsUrl": "https://vercel.com/docs/mcp/vercel-mcp"
+}

@@ -82,7 +82,7 @@ describe('ChatRow drag', () => {
     )
   })
 
-  it('does not mark nested instance rows as draggable', () => {
+  it('marks nested instance rows as draggable with the instance payload', () => {
     render(
       <ChatRow
         run={{ ...run, runId: 'child-1', inlineInstance: true, parentRunId: 'run-1' }}
@@ -95,7 +95,7 @@ describe('ChatRow drag', () => {
       />
     )
     const row = screen.getByRole('button', { name: 'List files' })
-    expect(row.getAttribute('draggable')).toBe('false')
+    expect(row.getAttribute('draggable')).toBe('true')
     const setData = vi.fn()
     fireEvent.dragStart(row, {
       dataTransfer: {
@@ -104,7 +104,10 @@ describe('ChatRow drag', () => {
         effectAllowed: 'copy'
       }
     })
-    expect(setData).not.toHaveBeenCalled()
+    expect(setData).toHaveBeenCalledWith(
+      SESSION_DRAG_MIME,
+      JSON.stringify({ workspacePath: '/ws/home', runId: 'child-1' })
+    )
   })
 
   it('cancels rename on Escape', () => {

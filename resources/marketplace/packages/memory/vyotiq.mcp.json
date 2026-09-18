@@ -7,6 +7,13 @@
   "description": "Official MCP knowledge-graph memory server (stdio via npx).",
   "transport": "stdio",
   "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-memory"],
-  "env": {}
+  "args": [
+    "-y",
+    "@modelcontextprotocol/server-memory"
+  ],
+  "env": {},
+  "auth": "none",
+  "requires": [
+    "node"
+  ]
 }

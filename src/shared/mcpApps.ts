@@ -63,6 +63,47 @@ export function mcpAuthAllowedForWorkspace(
   return workspacePathsEqual(bound, wp)
 }
 
+/**
+ * True when "Sign in" is a meaningful action for this server.
+ *
+ * Marketplace packages declare `auth` in their manifest. Manually added
+ * HTTP/SSE servers have no manifest, so their auth is unknown — offer sign-in
+ * anyway, since the alternative is the user having no way to start OAuth at
+ * all (connect-time auto-OAuth no longer opens a browser on its own).
+ * stdio never authenticates over OAuth: `startMcpOAuth` refuses it.
+ */
+export function mcpSupportsOAuth(server: {
+  auth?: string
+  transport?: string
+}): boolean {
+  if ((server.transport ?? 'stdio') === 'stdio') return false
+  if (server.auth === 'oauth' || server.auth === 'oauth-client') return true
+  return server.auth === undefined
+}
+
+/** True when the user must register an OAuth app and supply its client id/secret. */
+export function mcpNeedsOAuthClient(server: { auth?: string }): boolean {
+  return server.auth === 'oauth-client'
+}
+
+/**
+ * True when connecting without credentials is known to be pointless.
+ *
+ * Narrower than `mcpSupportsOAuth` on purpose: a manually added server has no
+ * manifest, so we do not know whether it needs auth and must still attempt the
+ * unauthenticated connect — a public endpoint like DeepWiki succeeds, and a
+ * private one surfaces "Sign in required" from the 401 handler.
+ */
+export function mcpRequiresOAuth(server: { auth?: string; transport?: string }): boolean {
+  if ((server.transport ?? 'stdio') === 'stdio') return false
+  return server.auth === 'oauth' || server.auth === 'oauth-client'
+}
+
+/** True when the server expects a pasted credential described by `inputs`. */
+export function mcpUsesTokenAuth(server: { auth?: string }): boolean {
+  return server.auth === 'token'
+}
+
 export function isGoogleMcpId(id: string): id is GoogleMcpId {
   return (GOOGLE_MCP_IDS as readonly string[]).includes(id)
 }

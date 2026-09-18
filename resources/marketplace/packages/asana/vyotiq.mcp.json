@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "asana",
+  "name": "Asana",
+  "version": "1.0.0",
+  "description": "Tasks, projects, and portfolios from your Asana workspace.",
+  "transport": "sse",
+  "url": "https://mcp.asana.com/sse",
+  "auth": "oauth",
+  "docsUrl": "https://developers.asana.com/docs/mcp-server"
+}

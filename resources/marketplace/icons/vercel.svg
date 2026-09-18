@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <title>Vercel</title>
+  <rect width="64" height="64" rx="14" fill="#000000"/>
+  <rect x=".5" y=".5" width="63" height="63" rx="13.5" stroke="#FFFFFF" stroke-opacity=".14"/>
+  <g transform="translate(15.0000 15.0000) scale(1.416667)">
+    <path d="m12 1.608 12 20.784H0Z" fill="#FFFFFF"/>
+  </g>
+</svg>

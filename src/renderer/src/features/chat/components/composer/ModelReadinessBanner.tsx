@@ -5,30 +5,24 @@ export function ModelReadinessBanner({
   issue,
   busy = false,
   onRecheck,
-  onAddKey,
-  onChooseModel
+  onAddKey
 }: {
   issue: ModelReadinessIssue
   busy?: boolean
   onRecheck: () => void
   onAddKey: () => void
-  onChooseModel: () => void
 }) {
   const title =
     issue.kind === 'missing_key'
       ? `Add an API key for ${issue.label}`
       : issue.kind === 'unreachable'
         ? `${issue.label} isn’t ready`
-        : issue.kind === 'manual_catalog'
-          ? `${issue.label}: no model list`
-          : `Model isn’t available`
+        : `${issue.label}: no model list`
 
   const body =
     issue.kind === 'missing_key'
       ? 'Keys stay encrypted on this device.'
-      : issue.kind === 'unreachable' || issue.kind === 'manual_catalog'
-        ? issue.detail
-        : `“${issue.model}” isn’t in the live ${issue.label} catalog. Pull or pick another model.`
+      : issue.detail
 
   return (
     <Alert variant="info" className="flex-col items-stretch gap-2 sm:flex-row sm:items-start">
@@ -66,26 +60,6 @@ export function ModelReadinessBanner({
           >
             Recheck
           </Button>
-        ) : null}
-        {issue.kind === 'model_missing' ? (
-          <>
-            <Button
-              type="button"
-              className="min-h-8 px-2 text-xs"
-              disabled={busy}
-              onClick={onRecheck}
-            >
-              Recheck
-            </Button>
-            <Button
-              type="button"
-              variant="subtle"
-              className="min-h-8 px-2 text-xs"
-              onClick={onChooseModel}
-            >
-              Choose model
-            </Button>
-          </>
         ) : null}
       </div>
     </Alert>

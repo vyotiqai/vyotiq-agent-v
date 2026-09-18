@@ -42,6 +42,7 @@ Call memory_list / memory_read before non-trivial answers; persist durable facts
 
 <output_format>
 Lead with the outcome in concise Markdown. Cite verified evidence; distinguish verified results from unknowns and blockers.
+Data viz: a \`\`\`chart fence whose body is one JSON spec renders as a chart — {"type":"line"|"bar","labels":[…],"values":[…]}, {"type":"donut","labels":[…],"values":[…]}, or {"type":"sparkline","values":[…]}; values may be null (a gap); optional "title". Invalid specs render as a plain code block.
 </output_format>
 `
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { LocalSkillItem, SkillFrontmatter, SkillsReadLocalResult } from '@shared/ipc'
 import { serializeSkillMarkdown } from '@shared/utils/skillMarkdown'
 import { ActionMenu, Button, IconButton, Input } from '@renderer/lib/ui'
@@ -46,19 +46,28 @@ export function MarketplaceSkillsPane({
     [localSkills]
   )
 
+  const consumeFocusRef = useRef(onFocusSkillConsumed)
+  consumeFocusRef.current = onFocusSkillConsumed
+
   useEffect(() => {
     if (!focusSkillPath) return
     setSelectedPath(focusSkillPath)
-    const t = window.setTimeout(() => {
-      const el = document.querySelector<HTMLElement>(
-        `[data-skill-path="${CSS.escape(focusSkillPath)}"]`
-      )
-      el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-      el?.focus?.()
-    }, 50)
-    onFocusSkillConsumed?.()
-    return () => window.clearTimeout(t)
-  }, [focusSkillPath, onFocusSkillConsumed])
+    // A freshly created skill only reaches `localSkills` after the
+    // skills-changed broadcast triggers a reload, so its row may not exist on
+    // this pass — re-run when the list lands instead of racing it on a timer.
+    // Consuming the focus here (and not before the row is found) is what keeps
+    // the prop flip from cancelling the scroll.
+    // Compare the attribute rather than interpolating a path into a selector:
+    // skill paths carry characters that need CSS escaping, and `CSS.escape` is
+    // not available everywhere the pane renders.
+    const el = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-skill-path]')
+    ).find((row) => row.dataset.skillPath === focusSkillPath)
+    if (!el) return
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    el.focus?.()
+    consumeFocusRef.current?.()
+  }, [focusSkillPath, localSkills])
 
   const selected =
     localSkills.find((s) => selectedPath != null && pathsEqual(s.skillPath, selectedPath)) ?? null
@@ -248,7 +257,8 @@ function SkillGroup({
             <div
               key={skill.id}
               data-skill-path={skill.skillPath}
-              className={`flex items-start gap-1 rounded-md border px-2 py-1.5 ${
+              tabIndex={-1}
+              className={`flex items-start gap-1 rounded-md border px-2 py-1.5 outline-none ${
                 selected ? 'border-border-strong bg-surface-2' : 'border-border bg-surface'
               }`}
             >

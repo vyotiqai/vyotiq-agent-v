@@ -20,11 +20,13 @@ import {
   CHAT_COLUMN,
   CHAT_GUTTER,
   CHAT_STAGE_INSET,
-  CHAT_STAGE_TOP_INSET,
+  CHAT_STAGE_TOP_SPACER,
   COMPOSER_DOCK_CLEARANCE_PX,
   COMPOSER_DOCK_RESERVE_VAR,
   COMPOSER_FLOAT_BOTTOM_INSET_PX,
   TRANSCRIPT_CONTAINER,
+  TURN_PROMPT_STACK,
+  TURN_PROMPT_STACK_PINNED,
   TOOL_BODY_CLAMP_PX,
   TOOL_GROUP_LIST_ESTIMATE_MIN_PX,
   TOOL_TERMINAL_VIEWPORT_MAX_PX,
@@ -266,9 +268,6 @@ export function transcriptRowsContentRevision(rows: readonly TranscriptRow[]): s
   if (rows.length === 1) return transcriptRowFingerprint(rows[0]!)
   return `${rows.length}:${rows.map((row) => transcriptRowFingerprint(row)).join('|')}`
 }
-
-/** Vertical inset of the pinned turn prompt below the scrollport's top edge. */
-const STICKY_TURN_TOP_PX = 10
 
 /** Minimum pin slack when no dock reserve is known yet. */
 const NEAR_BOTTOM_MIN_PX = 80
@@ -1954,9 +1953,10 @@ export function MessageList({
   /**
    * Turn-grouped flow rendering: rows are wrapped per turn so the turn's user
    * prompt bubble pins natively (position: sticky) while its content scrolls and
-   * releases when the next turn pushes it out. The original user prompt bubble pins
-   * inline with native scroll behavior, edge-to-edge floating without any complete
-   * row background fills.
+   * releases when the next turn pushes it out. The pinned stack (prompt + tasks
+   * band) is held behind a flat, page-colored cover pinned flush with the
+   * scrollport top (TURN_PROMPT_STACK_PINNED), so rows cannot scroll through
+   * it above or below without introducing a gradient or shadow.
    */
   const renderTurnGroups = (
     entries: readonly { row: TranscriptRow; index: number }[],
@@ -1982,6 +1982,12 @@ export function MessageList({
           const isUser = row.kind === 'user'
           const hasTasksBand =
             isUser && tasksAnchorUserId != null && row.item.id === tasksAnchorUserId
+          // A prompt swapped for the edit composer must not pin, or the composer
+          // sticks to the top of the transcript for as long as you are typing.
+          const isEditing =
+            isUser &&
+            editingUserMessageIndex != null &&
+            row.item.id === `user-${editingUserMessageIndex}`
           return (
             <div
               key={row.id}
@@ -1991,15 +1997,14 @@ export function MessageList({
               data-sticky-turn-prompt={isUser ? '' : undefined}
               className={cn(
                 isUser
-                  ? 'sticky z-sticky mb-2.5 bg-bg'
+                  ? cn(TURN_PROMPT_STACK, !isEditing && TURN_PROMPT_STACK_PINNED)
                   : rowSpacingClass(row, displayRows[index + 1]),
                 currentFindRow === index && 'rounded-md ring-1 ring-accent/40'
               )}
-              style={isUser ? { top: `${STICKY_TURN_TOP_PX}px` } : undefined}
             >
               {renderRow(row, isUser)}
               {hasTasksBand ? (
-                <div key={`${row.id}-tasks-band`} className="mt-1 pb-2.5">
+                <div key={`${row.id}-tasks-band`} className="mt-1">
                   <TasksCeilingBand key={row.item.id} running={running} />
                 </div>
               ) : null}
@@ -2070,14 +2075,18 @@ export function MessageList({
           }}
           className={cn(
             TRANSCRIPT_CONTAINER,
+            // No `padding-top` here — Chromium insets a sticky child's `top: 0`
+            // by the scroller's own top padding, which would leave a strip above
+            // the pinned turn prompt for rows to scroll through. The inset rides
+            // as a leading spacer child instead (CHAT_STAGE_TOP_SPACER).
             'relative min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]',
-            CHAT_STAGE_TOP_INSET,
             sideRailPad ? CHAT_STAGE_INSET : CHAT_GUTTER
           )}
           onScroll={(e) => handleScroll(e.currentTarget.scrollTop)}
           onPointerDownCapture={() => onActivate?.()}
           onFocus={() => onActivate?.()}
         >
+          <div aria-hidden="true" className={CHAT_STAGE_TOP_SPACER} data-transcript-top-spacer />
           <div className="sr-only" role="status" aria-live="polite">
             {streamingAnnouncement}
           </div>

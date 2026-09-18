@@ -49,7 +49,7 @@ describe('skills smoke (bundled + isolated marketplace)', () => {
   })
 
   it('finds the workflow skills plus UI/API skills with SKILL.md', () => {
-    expect(skillDirs.length).toBe(11)
+    expect(skillDirs.length).toBe(18)
     for (const dir of skillDirs) {
       expect(existsSync(join(dir, 'SKILL.md')), dir).toBe(true)
     }
@@ -67,13 +67,21 @@ describe('skills smoke (bundled + isolated marketplace)', () => {
       'accessibility',
       'api-design',
       'create-skill',
+      // Recurring-loop skills: each spans two connected tools on a cadence.
+      'dependency-upgrade',
       'explain-code',
       'fix-bug',
+      'flake-hunter',
       'frontend-design',
       'goal',
       'implement-feature',
+      'incident-triage',
       'persona-builder',
+      'pr-review-reply',
+      'release-notes',
+      'repo-onboarding',
       'review-code',
+      'standup-digest',
       'write-tests'
     ])
     expect(catalog.packages.filter((pkg) => pkg.kind === 'plugin').map((p) => p.id).sort()).toEqual([

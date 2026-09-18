@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "sentry",
+  "name": "Sentry",
+  "version": "1.0.0",
+  "description": "Investigate issues, stack traces, and release health from your Sentry projects.",
+  "transport": "http",
+  "url": "https://mcp.sentry.dev/mcp",
+  "auth": "oauth",
+  "docsUrl": "https://docs.sentry.io/product/sentry-mcp/"
+}

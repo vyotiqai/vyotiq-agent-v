@@ -12,8 +12,22 @@ export const SETTINGS_GUTTER = CHAT_GUTTER
  */
 export const CHAT_STAGE_INSET = 'pl-4 pr-10 sm:pl-5'
 
-/** Top inset for chat stage surfaces (transcript, side rail) — keeps vertical rhythm aligned. */
+/**
+ * Top inset for chat stage surfaces that carry no sticky child (side rail).
+ *
+ * The transcript scrollport must NOT use this: Chromium insets a sticky child's
+ * `top: 0` by the scroller's own `padding-top`, so the pinned turn prompt would
+ * rest 16px below the visible edge and rows would scroll through the strip above
+ * it. The transcript rides {@link CHAT_STAGE_TOP_SPACER} instead.
+ */
 export const CHAT_STAGE_TOP_INSET = 'pt-4'
+
+/**
+ * Scrolled equivalent of {@link CHAT_STAGE_TOP_INSET} (same 16px) for the
+ * transcript: a leading spacer row rather than scrollport padding, so the
+ * pinned turn prompt can pin flush with the scrollport's top edge.
+ */
+export const CHAT_STAGE_TOP_SPACER = 'h-4'
 
 /** Width of the floating chat side rail (icon strip) in pixels (`w-10`). */
 export const CHAT_SIDE_RAIL_WIDTH_PX = 40
@@ -30,7 +44,10 @@ export const CHAT_RIGHT_PANEL =
   'flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden border-l border-border/50 bg-bg'
 
 /** Minimum chat column width reserved when clamping the side dock. */
-export const CHAT_COLUMN_MIN_USABLE_PX = 360
+export const CHAT_COLUMN_MIN_USABLE_PX = 280
+
+/** Absolute ceiling on simultaneously visible chat panes, even on ultrawide viewports. */
+export const MAX_CHAT_PANES_HARD_CAP = 6
 
 /** Default / clamp bounds for the right dock (px). */
 /** 400 leaves a usable chat column beside the default sidebar (~220). */
@@ -68,18 +85,6 @@ export const COMPOSER_FLOAT_DOCK = 'pointer-events-none absolute inset-x-0 botto
 export const COMPOSER_FLOAT_BOTTOM_INSET_PX = 8
 
 /**
- * Fade painted above the floating composer so transcript rows dissolve behind
- * it into the stage background. Must start from `--vy-bg`, never the
- * composer's `--vy-chrome-surface`: skins where the two diverge (bench) paint
- * a floating band of composer surface above the shell that reads as a stray
- * shadow. Gradient layer only — wrap it in the stage gutters + chat column so
- * its width matches the composer shell, inside an `absolute inset-x-0
- * bottom-full` anchor that sits above the scroll-clipped dock body.
- */
-export const COMPOSER_FLOAT_FADE =
-  'h-full w-full bg-gradient-to-t from-[var(--vy-bg)] to-transparent'
-
-/**
  * Scroll-clipped dock body — reserves the same scrollbar gutter as the
  * transcript scrollport so the centered composer column lines up exactly with
  * the transcript column under classic (space-reserving) scrollbars.
@@ -95,20 +100,14 @@ export const COMPOSER_FLOAT_BODY =
 export const COMPOSER_DOCK_RESERVE_VAR = '--vy-composer-dock-height'
 
 /**
- * Height of the fade painted above the floating composer dock. Kept for
- * MessageList reserve math when `reserveComposerSpace` is enabled in tests.
+ * Extra clearance so the last transcript row sits fully above the reserved
+ * dock when scrolled to the bottom (not just flush with its edge).
  */
-export const COMPOSER_DOCK_FADE_PX = 24
-
-/**
- * Extra clearance so the last transcript row sits fully above a reserved dock
- * fade when scrolled to the bottom (not just flush with the fade edge).
- */
-export const COMPOSER_DOCK_CLEARANCE_PX = 20
+export const COMPOSER_DOCK_CLEARANCE_PX = 12
 
 /**
  * Extra bottom reserve while a run is live so streaming rows stay clear of a
- * reserved dock; idle chats keep only fade + {@link COMPOSER_DOCK_CLEARANCE_PX}.
+ * reserved dock; idle chats keep only {@link COMPOSER_DOCK_CLEARANCE_PX}.
  */
 export const COMPOSER_DOCK_LIVE_CLEARANCE_PX = 16
 
@@ -154,12 +153,37 @@ export const TRANSCRIPT_WORK_PAIR_GAP = 'pb-1.5'
 /** Lead-in above a user prompt that opens a new turn. */
 export const TRANSCRIPT_TURN_GAP = 'pt-8'
 
-/** User prompt typography. */
+/**
+ * User prompt typography — the prompt is the heading of its turn. It steps up
+ * from the 13px body to the heading scale with tighter tracking and the strong
+ * foreground.
+ * Keep in sync with the `[data-user-prompt] .markdown-body` rule in styles.css,
+ * which has to restate this because MarkdownContent styles its own root.
+ */
 export const USER_PROMPT_TEXT =
-  'text-sm leading-relaxed tracking-[var(--vy-tracking-body)] text-fg [overflow-wrap:anywhere]'
+  'text-heading leading-normal tracking-[var(--vy-tracking-tight)] text-fg-strong [overflow-wrap:anywhere]'
 
-/** User prompt block — thin border matching composer chrome. */
-export const USER_PROMPT_SURFACE = `vy-chrome w-full px-2.5 py-2 bg-[var(--vy-prompt-surface)] shadow-[var(--vy-shadow-chrome)] ${USER_PROMPT_TEXT}`
+/**
+ * User prompt block — its border and inset define a readable bubble without a
+ * fill or shadow. The pinned turn stack in MessageList carries scroll-through
+ * occlusion.
+ */
+export const USER_PROMPT_SURFACE = `w-full rounded-[var(--vy-radius-xl)] border border-border px-3 py-2 ${USER_PROMPT_TEXT}`
+
+/**
+ * Compact vertical rhythm of the pinned turn-prompt stack (prompt + tasks band).
+ * The page-colored cover prevents transcript rows from bleeding into the stack
+ * without a gradient or shadow-like edge.
+ */
+export const TURN_PROMPT_STACK = 'py-2.5'
+
+/**
+ * Pinned state of {@link TURN_PROMPT_STACK}: flush with the scrollport's top
+ * edge (see {@link CHAT_STAGE_TOP_SPACER}) over an opaque page-colored cover,
+ * so transcript rows cannot bleed into the pinned content. No gradient or
+ * shadow is applied.
+ */
+export const TURN_PROMPT_STACK_PINNED = 'sticky top-0 z-sticky vy-turn-prompt-cover'
 
 /** Quiet activity row — no fill, no border. */
 export const ACTIVITY_ROW = 'text-xs tracking-[var(--vy-tracking)]'
@@ -231,10 +255,6 @@ export const TOOL_FAMILY_DELETE = 'border-l-2 border-danger/50 pl-2'
 
 /** Subtle surface shared by the in-flow docked composer. */
 export const FLOATING_CHROME = 'vy-chrome bg-[var(--vy-chrome-surface)] motion-reduce:animate-none'
-
-/** Theme token `--vy-shadow-chrome` — soft in light, deeper in dark. */
-export const FLOATING_CHROME_SHADOW_BOTTOM =
-  'shadow-[var(--vy-shadow-chrome)] animate-chrome-drop-in'
 
 /** App chrome dimensions — sidebar header row aligns with title bar height. */
 export const SIDEBAR_WIDTH_PX = 248

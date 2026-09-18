@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "figma",
+  "name": "Figma",
+  "version": "1.0.0",
+  "description": "Read Figma files, frames, and design context while implementing UI.",
+  "transport": "http",
+  "url": "https://mcp.figma.com/mcp",
+  "auth": "oauth",
+  "docsUrl": "https://developers.figma.com/docs/figma-mcp-server/"
+}

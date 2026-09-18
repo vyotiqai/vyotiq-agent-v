@@ -109,18 +109,43 @@ describe('MessageList native turn prompt pinning', () => {
     const pinned = [...document.querySelectorAll('[data-sticky-turn-prompt]')]
     expect(pinned.length).toBe(2)
     for (const el of pinned) {
-      // The prompt bubble pins inline (position: sticky). The pinned stack is
-      // opaque: without a full-row fill, rows scrolling beneath the pinned
-      // prompt bleed through (bubble hover tint + transparent tasks band)
-      // and render as overlapping text.
+      // The prompt pins inline (position: sticky), flush with the scrollport
+      // top so nothing scrolls through the gap above it, and the stack's gaps
+      // ride as padding so nothing scrolls through below either.
       expect(el.className).toContain('sticky')
-      expect(el.className).toContain('bg-bg')
+      expect(el.className).toContain('top-0')
+      expect(el.className).toContain('py-2.5')
+      // Flat page-colored cover prevents rows scrolling beneath the pinned
+      // prompt from bleeding through, without a gradient or shadow.
+      expect(el.className).toContain('vy-turn-prompt-cover')
+      expect(el.className).not.toContain('border')
+      expect(el.className).not.toContain('shadow')
       const prompt = el.querySelector('[data-user-prompt]')
       expect(prompt).not.toBeNull()
-      // Edge-to-edge floating bubble styling with surface shadow
+      // The pinned prompt keeps its own stable border but stays unfilled and
+      // unshadowed.
       expect(prompt!.className).toContain('w-full')
-      expect(prompt!.className).toContain('shadow-[var(--vy-shadow-chrome)]')
+      expect(prompt!.className).toContain('border')
+      expect(prompt!.className).toContain('border-border')
+      expect(prompt!.className).not.toContain('shadow-')
+      expect(prompt!.className).not.toContain('bg-')
     }
+  })
+
+  it('keeps the scrollport free of top padding so the pin sits flush with its edge', () => {
+    render(<MessageList items={items} />)
+    const port = document.querySelector('[data-transcript-scroll]')
+    expect(port).not.toBeNull()
+    // Chromium insets a sticky child's `top: 0` by the scroll container's own
+    // padding-top. With `pt-4` here the pinned prompt rested 16px low and the
+    // previous turn's rows scrolled visibly through the strip above it.
+    expect(port!.className).not.toMatch(/(^|\s)pt-/)
+    // The inset rides as a scrolled spacer instead, so the resting layout keeps
+    // the same 16px of breathing room at the top of the transcript.
+    const spacer = port!.querySelector('[data-transcript-top-spacer]')
+    expect(spacer).not.toBeNull()
+    expect(spacer!.className).toContain('h-4')
+    expect(port!.firstElementChild).toBe(spacer)
   })
 
   it('wraps each turn so prompts release at turn boundaries', () => {

@@ -9,6 +9,7 @@ import type {
 } from '../../shared/ipc'
 import { DEFAULT_SETTINGS } from '../../shared/ipc'
 import { contentDisplayText, contentToText } from '../../shared/ipc'
+import { AgentProfileIdSchema } from '../../shared/ipc'
 import { DEFAULT_AGENT_IDENTITY, DEFAULT_AGENT_PERSONA, DEFAULT_AGENT_TONE } from '../../shared/agentPersona'
 import { runGoalFromUserText, findAbsolutePathsInText, outsideWorkspacePathGuidance, stubPastSkillInvocationsInMessages } from '../../shared/slashCommands'
 import { resolveProviderChatBaseUrl, seedModelsFor } from '../../shared/providers'
@@ -40,6 +41,7 @@ import { persistAlwaysAllow } from './toolApprovalStore'
 import { createLiveEventQueue, pushLiveEvent } from './liveEventQueue'
 import { getSecret, hasStoredSecretBlob, secretStatus } from '@main/settings/secrets'
 import { getSettings } from '@main/settings/settings'
+import { resolveAgentProfile } from '@main/settings/agentProfiles'
 import { findWorkspaceSettingsOverride, readWorkspacesState } from '@main/workspace/workspaces'
 import { preflightChatProviderAuth } from './providers/preflight'
 import {
@@ -49,9 +51,11 @@ import {
   contextWindowFor,
   applyFoldedMessagesWatermark,
   buildStepToolCatalog,
+  splitToolCatalogDetail,
   shouldTriggerAutoCompact,
   type CompactionRecord
 } from './context'
+import type { ContextToolsDetail } from '../../shared/utils/contextUsage'
 import { trimToolResults } from './context/toolTrim'
 import { KEEP_LAST_TOOL_RESULTS } from './context/types'
 import { autoCompactLlmEvents } from './compactRun'
@@ -135,6 +139,8 @@ import {
   flushMessageAppends,
   takeEventAppendFailureNotice,
   takeMessageAppendFailureNotice,
+  onRunStorageLost,
+  clearRunStorageLostHandler,
   flushStatusWrites,
   loadMessagesAsync,
   patchLatestTodoWriteMessage,
@@ -835,7 +841,7 @@ async function reconstructStreamSnapshotAssistant(
   appendEvent(runDir, { type: 'assistant_message', runId, content: snapshot })
 }
 
-export async function* runAgent(input: {
+export type RunAgentInput = {
   runId: string
   messages?: ChatMessage[]
   newMessages?: ChatMessage[]
@@ -850,11 +856,45 @@ export async function* runAgent(input: {
   provider?: ProviderId
   /** Session-pinned model — authoritative for this invoke. */
   model?: string
-}): AsyncGenerator<AgentEvent> {
+  /** Teammate profile binding — identity, memory namespace, model pin. */
+  agentProfileId?: string
+  /** Execution substrate (Phase 4 runtime seam) — local unless cloud is wired. */
+  runtime?: 'local' | 'cloud'
+}
+
+export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent> {
   const globalSettings = getSettings()
   const workspaces = readWorkspacesState()
   const override = findWorkspaceSettingsOverride(workspaces, input.workspacePath)
   const effective = resolveEffectiveSettings(globalSettings, override)
+  const profile = input.agentProfileId
+    ? resolveAgentProfile(input.workspacePath, input.agentProfileId)
+    : null
+  if (input.agentProfileId && !profile) {
+    throw new Error(`Unknown agent profile: ${input.agentProfileId}`)
+  }
+  // Resume without an explicit binding must recover the persisted one — a
+  // teammate chat resumed after restart keeps its memory namespace and identity.
+  let effectiveProfile = profile
+  /** Namespace retained by id when the roster entry is gone (deleted teammate). */
+  let persistedNamespaceId: string | undefined
+  if (!effectiveProfile && input.runId && runExists(input.workspacePath, input.runId)) {
+    const persistedStatus = loadStatus(resolveRunDir(input.workspacePath, input.runId))
+    const persistedProfileId = persistedStatus?.agentProfileId
+    if (persistedProfileId) {
+      effectiveProfile = resolveAgentProfile(input.workspacePath, persistedProfileId)
+      if (!effectiveProfile && AgentProfileIdSchema.safeParse(persistedProfileId).success) {
+        // The profile was deleted: never fall back to the shared memory brain —
+        // keep this run isolated in the teammate's own (id-keyed) namespace.
+        persistedNamespaceId = persistedProfileId
+        logger.warn('Resumed run binds a deleted teammate profile — memory namespace retained by id', {
+          scope: 'agent',
+          correlationId: input.runId,
+          profileId: persistedProfileId
+        })
+      }
+    }
+  }
   // Per-session model pinning: renderer turns pass their session's selection;
   // main-originated invokes (follow-up promote, goal relaunch) recall the run's
   // last selection so a model change in another session cannot bleed in here.
@@ -863,19 +903,30 @@ export async function* runAgent(input: {
     ...DEFAULT_SETTINGS,
     ...globalSettings,
     ...effective,
-    provider: input.provider ?? recalled?.provider ?? effective.provider,
-    model: input.model ?? recalled?.model ?? effective.model
+    provider:
+      input.provider ?? recalled?.provider ?? effectiveProfile?.model?.provider ?? effective.provider,
+    model: input.model ?? recalled?.model ?? effectiveProfile?.model?.model ?? effective.model
+  }
+  if (effectiveProfile) {
+    // Profile identity overrides the workspace/global persona chain per-field.
+    if (effectiveProfile.persona) settings.agentPersona = effectiveProfile.persona
+    if (effectiveProfile.tone) settings.agentTone = effectiveProfile.tone
+    if (effectiveProfile.identity) settings.agentIdentity = effectiveProfile.identity
+    if (effectiveProfile.autonomousMode === 'on') settings.autonomousMode = true
+    if (effectiveProfile.autonomousMode === 'off') settings.autonomousMode = false
   }
   rememberRunModelSelection(input.runId, settings.provider, settings.model)
   let agentMode: AgentInteractionMode = input.mode ?? 'agent'
   const workspace = input.workspacePath
   const runId = input.runId
-  const { controller, invokeId } = registerRunAbort(runId, workspace)
+  const { controller, invokeId } = registerRunAbort(runId, workspace, effectiveProfile?.id)
 
   // Entire body in try/finally so early returns (missing key, etc.) always clear the abort map.
   // Storage / session paths stay on `workspace`. File tools may use an instance worktree.
   let toolWorkspace = workspace
   let runDir: string | null = null
+  /** Trips the abort controller if the run dir vanishes mid-run (storage loss). */
+  let abortOnStorageLost: (() => void) | null = null
   let checkpointFlushed = false
   let runExitedNormally = false
   let messages: ChatMessage[] = []
@@ -1050,12 +1101,50 @@ export async function* runAgent(input: {
         agentMode = input.mode ?? persisted?.mode ?? agentMode
       } else {
         runDir = createRun(workspace, runId, goal, agentMode)
+        // Persist the substrate + identity snapshot before any async failure
+        // window — a fresh run that crashes during message flush must still
+        // resume with its teammate binding intact.
+        writeStatus({
+          runtime: input.runtime ?? 'local',
+          ...(effectiveProfile
+            ? {
+                agentProfileId: effectiveProfile.id,
+                agentProfileName: effectiveProfile.name
+              }
+            : {})
+        })
       }
       for (const m of messages) appendMessage(runDir, m)
       await flushMessageAppends(runDir)
     }
 
     const persistedForTools = loadStatus(runDir)
+    // Storage-loss tripwire: if the run dir vanishes mid-run (external cleanup
+    // gone wrong), append queues record ENOENT and fire this handler — trip the
+    // same abort the cancel path uses so an in-flight step unwinds immediately
+    // instead of streaming into an unpersistable void until the next boundary.
+    if (!abortOnStorageLost) {
+      abortOnStorageLost = (): void => {
+        try {
+          controller.abort(new Error('Run storage disappeared'))
+        } catch {
+          /* controller already settled */
+        }
+      }
+      onRunStorageLost(runDir, abortOnStorageLost)
+    }
+    // Durable substrate + identity snapshot. The runtime is taken from input on
+    // first start and preserved from the persisted status on resume — an invoke
+    // never rewrites the substrate a run was started with.
+    writeStatus({
+      runtime: input.runtime ?? persistedForTools?.runtime ?? 'local',
+      ...(effectiveProfile
+        ? {
+            agentProfileId: effectiveProfile.id,
+            agentProfileName: effectiveProfile.name
+          }
+        : {})
+    })
     const isInlineInstance = persistedForTools?.inlineInstance === true
     if (isInlineInstance && persistedForTools?.worktreePath) {
       const wt = persistedForTools.worktreePath
@@ -1446,6 +1535,8 @@ export async function* runAgent(input: {
     >()
     let toolDefs: { name: string; description: string; parameters: Record<string, unknown> }[] = []
     let toolsJsonEstimate = 0
+    /** Builtin/MCP/deferred split of the step catalog for the context meter. */
+    let toolsSplitDetail: ContextToolsDetail | undefined
     let lastMcpRefreshFp = ''
     let lastMcpCatalogFp = ''
     /** One forced reconnect attempt per run when enabled servers previously failed. */
@@ -1530,12 +1621,13 @@ export async function* runAgent(input: {
         if (policy && !isMcpToolPermitted(parsed.toolName, policy)) return false
         return true
       })
+      const fullToolDefs = [...AGENT_TOOLS, ...mcpToolDefs]
       const allToolDefs =
         modelInfo.supportsTools !== false
           ? filterToolDefsForCodeIndex(
               filterToolDefsForMode(
                 agentMode,
-                [...AGENT_TOOLS, ...mcpToolDefs],
+                fullToolDefs,
                 {
                 autoModeSwitch: settings.autoModeSwitch,
                 inlineInstance: isInlineInstance
@@ -1552,6 +1644,10 @@ export async function* runAgent(input: {
         parameters: t.parameters as Record<string, unknown>
       }))
       toolsJsonEstimate = fullCatalog.estimate
+      toolsSplitDetail = splitToolCatalogDetail(
+        modelInfo.supportsTools !== false ? fullToolDefs : [],
+        new Set(fullCatalog.tools.map((t) => t.name))
+      )
       const keptNameSet = new Set(fullCatalog.tools.map((t) => t.name))
       // A successful refresh that carries the tool should clear fail-fast history.
       for (const name of [...mcpNotInCatalogCounts.keys()]) {
@@ -1762,19 +1858,30 @@ export async function* runAgent(input: {
         outsidePathHint,
         compactionLoopHint
       )
+      const effectiveContentWindow = contentWindow(modelInfo, providerId)
+      const compactThresholdRatio =
+        settings.autoCompactThresholdRatio ?? DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO
+      const proactiveThreshold = proactiveCompactThresholdTokens(
+        effectiveContentWindow,
+        compactThresholdRatio
+      )
       const assembleBase = {
         harness,
         messages,
         workspacePath: toolWorkspace,
         // Worktree children read memory from the session (parent) workspace —
-        // their sparse worktree has no .vyotiq; matches memory-tool routing.
+        // their sparse worktree has no .vyotiq; snapshot and rules stay worktree-local.
         memoryWorkspacePath: isInlineInstance && toolWorkspace !== workspace ? workspace : undefined,
+        // Profile-bound runs read their own memory namespace (.vyotiq/agents/<id>/memory).
+        memoryNamespace: effectiveProfile?.id ?? persistedNamespaceId,
         goal,
         contract,
         plan: plan || undefined,
         sessionEnv: buildSessionEnvSection(settings.terminalShell),
         model: modelInfo,
         toolsJsonEstimate,
+        toolsSplit: toolsSplitDetail,
+        compactionTrigger: proactiveThreshold,
         lastUsage,
         priorCompaction: compaction,
         keepRecentTurns: settings.keepRecentTurns,
@@ -1808,13 +1915,6 @@ export async function* runAgent(input: {
 
       let assembled = await assembleContext(assembleBase)
 
-      const effectiveContentWindow = contentWindow(modelInfo, providerId)
-      const compactThresholdRatio =
-        settings.autoCompactThresholdRatio ?? DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO
-      const proactiveThreshold = proactiveCompactThresholdTokens(
-        effectiveContentWindow,
-        compactThresholdRatio
-      )
       // Proactive re-compaction is wasted work until history regrows: the same
       // summarizer and keepRecentTurns would fold the same tail again, so a tail
       // that alone exceeds the threshold would otherwise pay a summarizer call
@@ -2113,7 +2213,8 @@ export async function* runAgent(input: {
         compactionTrigger,
         source: usingProviderMeter ? 'provider' : 'estimate',
         ...(assembled.overflow ? { overflow: true } : {}),
-        layers: assembled.layers
+        layers: assembled.layers,
+        ...(assembled.detail ? { detail: assembled.detail } : {})
       }
       appendEvent(runDir, contextUsageEv)
       yield contextUsageEv
@@ -2461,7 +2562,8 @@ export async function* runAgent(input: {
                 toolDefCount: toolDefs.length,
                 toolResultCharsKept: countKeptToolResultChars(assembled.messages),
                 compactionCountThisRun,
-                layers
+                layers,
+                ...(assembled.detail ? { detail: assembled.detail } : {})
               }
               appendEvent(runDir, usageEv)
               yield usageEv
@@ -2541,6 +2643,7 @@ export async function* runAgent(input: {
                 compactionTrigger,
                 source: 'provider',
                 layers: assembled.layers,
+                ...(assembled.detail ? { detail: assembled.detail } : {}),
                 ...(assembled.overflow ? { overflow: true } : {})
               }
               appendEvent(runDir, providerContextEv)
@@ -3275,6 +3378,7 @@ export async function* runAgent(input: {
         terminalShell: settings.terminalShell,
         diagnosticsCommand: settings.diagnosticsCommand,
         invokeSettings: settings,
+        memoryNamespace: effectiveProfile?.id ?? persistedNamespaceId,
         runEnabledMcpIds,
         mcpToolPolicies,
         stepMcpToolNames,
@@ -3634,6 +3738,7 @@ export async function* runAgent(input: {
         setLateFollowUpDropped(runId, dropped)
       }
       clearRunAbort(runId, invokeId)
+      if (runDir && abortOnStorageLost) clearRunStorageLostHandler(runDir, abortOnStorageLost)
     }
   }
 }

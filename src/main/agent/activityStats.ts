@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'fs'
+import { readdir, stat } from 'fs/promises'
 import { join } from 'path'
 import {
   HomeActivityResultSchema,
@@ -9,22 +9,22 @@ import {
 } from '@shared/ipc'
 import type { RunReceipt } from '@shared/ipc'
 import { lastDayKeys, localDayKeyOf } from '../../shared/utils/localDay'
-import { readUsageLedger } from './usageLedger'
+import { readUsageLedgerAsync } from './usageLedger'
 import { workspaceSessionsRoot } from '../storage/paths'
 import { migrateLegacyReceipt } from './harnessReview'
 import { RUN_RECEIPT_FILENAME } from './runReceipt'
+import { readJsonDocCached } from './jsonDocCache'
 
 /** Activity window (local days) — the Home panel renders exactly this axis. */
 export const ACTIVITY_WINDOW_DAYS = 7
 
 /** Read one receipt best-effort — corrupt or foreign files are skipped. */
-function readReceipt(runDir: string): RunReceipt | null {
+async function readReceipt(runDir: string): Promise<RunReceipt | null> {
   const path = join(runDir, RUN_RECEIPT_FILENAME)
-  if (!existsSync(path)) return null
+  const doc = await readJsonDocCached(path)
+  if (!doc.ok) return null
   try {
-    const parsed = RunReceiptSchema.safeParse(
-      migrateLegacyReceipt(JSON.parse(readFileSync(path, 'utf8')))
-    )
+    const parsed = RunReceiptSchema.safeParse(migrateLegacyReceipt(doc.doc))
     return parsed.success ? parsed.data : null
   } catch {
     return null
@@ -37,19 +37,16 @@ function readReceipt(runDir: string): RunReceipt | null {
  * many "sessions" on Home (instances stay folded under the parent in the
  * sidebar — Home must match that view).
  */
-function readRunStatus(runDir: string) {
+async function readRunStatus(runDir: string) {
   const statusPath = join(runDir, 'status.json')
-  if (!existsSync(statusPath)) return null
+  const doc = await readJsonDocCached(statusPath)
+  if (!doc.ok) return null
   try {
-    const parsed = RunStatusSchema.safeParse(JSON.parse(readFileSync(statusPath, 'utf8')))
+    const parsed = RunStatusSchema.safeParse(doc.doc)
     return parsed.success ? parsed.data : null
   } catch {
     return null
   }
-}
-
-function isInlineInstance(runDir: string): boolean {
-  return readRunStatus(runDir)?.inlineInstance === true
 }
 
 /**
@@ -57,11 +54,12 @@ function isInlineInstance(runDir: string): boolean {
  * normally keeps its durable checkpoint (completed runs clear it) and may
  * predate the receipt cost field. Only a positive reported cost counts.
  */
-function readInterruptedCost(runDir: string): number | undefined {
+async function readInterruptedCost(runDir: string): Promise<number | undefined> {
   const path = join(runDir, 'loopCheckpoint.json')
-  if (!existsSync(path)) return undefined
+  const doc = await readJsonDocCached(path)
+  if (!doc.ok) return undefined
   try {
-    const raw = JSON.parse(readFileSync(path, 'utf8')) as { usageTotals?: unknown }
+    const raw = doc.doc as { usageTotals?: unknown }
     const t = raw?.usageTotals
     if (!t || typeof t !== 'object') return undefined
     const cost = (t as { billedCost?: unknown }).billedCost
@@ -76,11 +74,12 @@ function readInterruptedCost(runDir: string): number | undefined {
  * for runs whose provider never reported a bill. Checkpoints written before
  * estimate tracking simply lack the field → undefined, never a fake 0.
  */
-function readInterruptedEstimatedCost(runDir: string): number | undefined {
+async function readInterruptedEstimatedCost(runDir: string): Promise<number | undefined> {
   const path = join(runDir, 'loopCheckpoint.json')
-  if (!existsSync(path)) return undefined
+  const doc = await readJsonDocCached(path)
+  if (!doc.ok) return undefined
   try {
-    const raw = JSON.parse(readFileSync(path, 'utf8')) as { usageTotals?: unknown }
+    const raw = doc.doc as { usageTotals?: unknown }
     const t = raw?.usageTotals
     if (!t || typeof t !== 'object') return undefined
     const cost = (t as { estimatedCost?: unknown }).estimatedCost
@@ -109,11 +108,11 @@ function blankDay(date: string): HomeActivityDay {
  * keeps the panel current while they run. Days without activity never appear;
  * cost/cache appear only when reported — never fake zeros.
  */
-export function collectHomeActivity(
+export async function collectHomeActivity(
   workspacePaths: readonly string[],
   now = new Date(),
   windowDays: number = ACTIVITY_WINDOW_DAYS
-): HomeActivityResult {
+): Promise<HomeActivityResult> {
   const todayKey = localDayKeyOf(now.toISOString())
   const windowKeys = new Set(lastDayKeys(todayKey, windowDays))
   const days = new Map<string, HomeActivityDay>()
@@ -151,6 +150,25 @@ export function collectHomeActivity(
   /** Previous equal-length window totals — the trend signal (tokens). */
   const previousKeys = new Set(lastDayKeys(localDayKeyOf(new Date(now.getTime() - windowDays * 86_400_000).toISOString()), windowDays))
   let previousTokens = 0
+  /**
+   * Prune cutoff: the earliest local-day start the aggregation can still see
+   * (the previous window feeds the token trend). Run-dir files last written
+   * before it cannot contribute ledger days, receipt outcomes, or legacy
+   * usage — their only possible contribution is the receiptless-running
+   * rule, which the scan evaluates explicitly. Unparseable earliest key
+   * disables pruning rather than guessing.
+   */
+  let cutoffMs = Number.NaN
+  {
+    let earliest: string | null = null
+    for (const key of previousKeys) {
+      if (earliest === null || key < earliest) earliest = key
+    }
+    if (earliest) {
+      const parsed = new Date(`${earliest}T00:00:00`)
+      if (!Number.isNaN(parsed.getTime())) cutoffMs = parsed.getTime()
+    }
+  }
   /** Attention signals: unverified runs (receipt-scoped) + window tool usage. */
   let unverifiedRuns = 0
   const toolTotals = new Map<string, { ok: number; failed: number }>()
@@ -270,12 +288,28 @@ export function collectHomeActivity(
     }
   }
 
+  /**
+   * True when any aggregate-relevant file in the run dir was written on or
+   * after the cutoff. Everything older can only matter through the
+   * receiptless-running rule, which the caller evaluates explicitly.
+   */
+  const hasRecentDoc = async (runDir: string): Promise<boolean> => {
+    if (!Number.isFinite(cutoffMs)) return true
+    for (const name of ['status.json', RUN_RECEIPT_FILENAME, 'usage.json']) {
+      try {
+        if ((await stat(join(runDir, name))).mtimeMs >= cutoffMs) return true
+      } catch {
+        // Missing file — it cannot make the dir recent by itself.
+      }
+    }
+    return false
+  }
+
   for (const workspacePath of workspacePaths) {
     const root = workspaceSessionsRoot(workspacePath)
-    if (!existsSync(root)) continue
     let dirs: string[]
     try {
-      dirs = readdirSync(root, { withFileTypes: true })
+      dirs = (await readdir(root, { withFileTypes: true }))
         .filter((d) => d.isDirectory())
         .map((d) => d.name)
     } catch {
@@ -283,13 +317,25 @@ export function collectHomeActivity(
     }
     for (const runId of dirs) {
       const runDir = join(root, runId)
-      if (isInlineInstance(runDir)) continue
-      const receipt = readReceipt(runDir)
+      const status = await readRunStatus(runDir)
+      if (status?.inlineInstance === true) continue
+
+      // Window pruning: a dir whose aggregate files all predate the previous
+      // window's start contributes nothing except a receiptless `running`
+      // status (which counts regardless of window) — evaluate just that.
+      if (!(await hasRecentDoc(runDir))) {
+        if (status?.status === 'running' && !(await readReceipt(runDir))) {
+          outcomes.running += 1
+        }
+        continue
+      }
+
+      const receipt = await readReceipt(runDir)
       const slice = workspacePaths.length > 1 ? sliceFor(workspacePath) : undefined
 
       // Ledger-first attribution: per-day deltas recorded while the run
       // executed (live runs update this every step — the panel stays live).
-      const ledger = readUsageLedger(runDir)
+      const ledger = await readUsageLedgerAsync(runDir)
       if (ledger) {
         for (const [date, entry] of Object.entries(ledger.days)) {
           if (previousKeys.has(date)) {
@@ -318,7 +364,7 @@ export function collectHomeActivity(
       }
 
       if (!receipt) {
-        if (readRunStatus(runDir)?.status === 'running') outcomes.running += 1
+        if (status?.status === 'running') outcomes.running += 1
         continue
       }
       const receiptDate = localDayKeyOf(receipt.writtenAt)
@@ -337,10 +383,10 @@ export function collectHomeActivity(
           })
         }
         if (receipt.toolStats.totalCalls > 0) {
-          for (const [name, stat] of Object.entries(receipt.toolStats.byName)) {
+          for (const [name, toolStat] of Object.entries(receipt.toolStats.byName)) {
             const entry = toolTotals.get(name) ?? { ok: 0, failed: 0 }
-            entry.ok += stat.ok
-            entry.failed += stat.failed
+            entry.ok += toolStat.ok
+            entry.failed += toolStat.failed
             toolTotals.set(name, entry)
           }
         }
@@ -352,9 +398,9 @@ export function collectHomeActivity(
       // to the receipt field, then the interrupted-run checkpoint.
       const day = receiptDate ? bucketFor(receiptDate) : null
       const usage = receipt.tokenUsage
-      const billedCost = receipt.billedCost ?? readInterruptedCost(runDir)
+      const billedCost = receipt.billedCost ?? (await readInterruptedCost(runDir))
       const estimatedCost =
-        receipt.estimatedCost ?? readInterruptedEstimatedCost(runDir)
+        receipt.estimatedCost ?? (await readInterruptedEstimatedCost(runDir))
       if (day) {
         addUsage(
           day,

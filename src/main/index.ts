@@ -4,6 +4,8 @@ import { electronApp } from '@electron-toolkit/utils'
 import { watchWindowShortcuts } from '@main/app/windowShortcuts'
 import { createWindow, applyWindowChrome, getMainWindow } from '@main/app/window'
 import { planSecondInstanceAction } from '@main/app/secondInstance'
+import { handleDeepLinkArgv, registerDeepLinks } from '@main/app/deepLinks'
+import { applyBadgeNow, notifyBadgeChange, setBadgeProvider } from '@main/app/badges'
 import { initCustomCssWatchFromSettings } from '@main/appearance/customCss'
 import { configureChromiumDiskCache } from '@main/app/chromiumProfile'
 import { applyCertificateLogging, applyCsp } from '@main/app/security'
@@ -12,9 +14,11 @@ import { disposeAllPtySessions, replayPtySessionsToWindow } from '@main/app/ptyS
 import { disposeAllTerminalSessions } from '@main/agent/tools/terminalSessions'
 import { registerIpc } from './ipc/register'
 import { resumeActiveGoalsAndLoops } from './agent/resumeActiveGoals'
+import { resumeTasksForWorkspaces } from './agent/taskScheduler'
 import { initAutoUpdater, scheduleStartupUpdateCheck } from '@main/updater'
-import { initNotifications } from './notifications/service'
+import { initNotifications, unreadNotificationCount } from './notifications/service'
 import { shutdownMcpServers, syncMcpServers } from '@main/agent/mcp'
+import { primeLoginShellPath } from '@main/agent/mcp/binaries'
 import { resolveEffectiveMcpServers, syncMarketplaceMcpIntoSettings, purgeOrphanMarketplacePackageDirs } from '@main/marketplace'
 import { getSettings } from '@main/settings/settings'
 import { migrateLegacySessions } from '@main/storage/migrations/migrateSessions'
@@ -36,6 +40,8 @@ import {
   interruptOrphanRunsForWorkspaces
 } from '@main/workspace/workspaces'
 import { cancelAndWaitActiveRuns, listActiveRuns } from '@main/agent/runRegistry'
+import { countPendingToolApprovals } from '@main/agent/toolApproval'
+import { countPendingAgentQuestions } from '@main/agent/agentQuestion'
 import { pruneStaleInstanceWorktreesBestEffort } from '@main/git/instanceWorktree'
 import { initMainLogging, rendererUnresponsiveForMs } from './logging/init'
 import { initTraceAutoCapture } from './perf/traceAutoCapture'
@@ -141,7 +147,12 @@ if (!gotLock) {
   })
   app.quit()
 } else {
-  app.on('second-instance', () => {
+  registerDeepLinks()
+  app.on('second-instance', (_event, argv) => {
+    // Windows/Linux: a vyotiq:// activation arrives in the second instance's
+    // argv. Handle it before focusing so the link survives a wedged-window
+    // recreate (the pending slot is drained by the renderer on mount).
+    handleDeepLinkArgv(argv)
     const win = getMainWindow() ?? BrowserWindow.getAllWindows()[0]
     const unresponsiveForMs = rendererUnresponsiveForMs()
     const plan = planSecondInstanceAction({ hasWindow: !!win, unresponsiveForMs })
@@ -156,11 +167,14 @@ if (!gotLock) {
       // window-all-closed quits the app once the window count hits zero.
       const fresh = createWindow()
       applyWindowChrome(getSettings().theme, getSettings().skinId)
+      applyBadgeNow()
       fresh.webContents.once('did-finish-load', () => {
         replayPtySessionsToWindow(fresh)
         // Same rationale as boot resume: let first paint and hydration win.
         setTimeout(() => {
           if (!fresh.isDestroyed()) resumeActiveGoalsAndLoops(fresh.webContents)
+          // Queued tasks held for a missing window can start again now.
+          resumeTasksForWorkspaces(getWorkspaces().openPaths)
         }, RESUME_AFTER_FIRST_PAINT_MS)
       })
       win.destroy()
@@ -190,6 +204,10 @@ if (!gotLock) {
     electronApp.setAppUserModelId('com.vyotiq.agent')
     applyCsp()
     applyCertificateLogging()
+    // Recover the user's real PATH before any MCP server is spawned. A macOS app
+    // launched from Finder inherits only /usr/bin:/bin:/usr/sbin:/sbin, which
+    // hides nvm's node and uv. Bounded and best-effort; no-op off macOS.
+    await primeLoginShellPath()
     try {
       const migration = migrateLegacySessions()
       if (migration.migrated > 0) {
@@ -243,6 +261,15 @@ if (!gotLock) {
     }
     initNotifications()
     registerIpc()
+    // Taskbar badge: main-only computation over live stores; the stores push
+    // notifyBadgeChange() on their own mutations.
+    setBadgeProvider(() => ({
+      pendingApprovals: countPendingToolApprovals(),
+      pendingQuestions: countPendingAgentQuestions(),
+      unreadNotifications: unreadNotificationCount(),
+      activeRuns: listActiveRuns().length
+    }))
+    notifyBadgeChange()
     // Updater listeners + the deferred one-shot startup check (ready + idle
     // delay, packaged builds only). Never blocks first paint. The Settings
     // "Check for updates automatically" switch gates the startup check.
@@ -271,7 +298,10 @@ if (!gotLock) {
 
     createWindow()
     applyWindowChrome(getSettings().theme, getSettings().skinId)
+    applyBadgeNow()
     initCustomCssWatchFromSettings()
+    // Windows/Linux cold start: the OS launches us with the URL in our own argv.
+    handleDeepLinkArgv(process.argv)
     const bootWindow = getMainWindow()
     bootWindow?.webContents.once('did-finish-load', () => {
       const win = getMainWindow()
@@ -280,6 +310,9 @@ if (!gotLock) {
         // first paint and renderer hydration win first.
         setTimeout(() => {
           if (!win.isDestroyed()) resumeActiveGoalsAndLoops(win.webContents)
+          // Delegated tasks re-arm after goals: queued tasks need a free window
+          // to stream into, and scheduling must not stampede boot.
+          resumeTasksForWorkspaces(getWorkspaces().openPaths)
         }, RESUME_AFTER_FIRST_PAINT_MS)
       }
     })
@@ -298,12 +331,16 @@ if (!gotLock) {
       if (BrowserWindow.getAllWindows().length === 0) {
         const win = createWindow()
         applyWindowChrome(getSettings().theme, getSettings().skinId)
+        applyBadgeNow()
         win.webContents.once('did-finish-load', () => {
           replayPtySessionsToWindow(win)
           // Goal/loop resume adds provider+indexer load at window load; let
           // first paint and renderer hydration win first.
           setTimeout(() => {
             if (!win.isDestroyed()) resumeActiveGoalsAndLoops(win.webContents)
+            // Window recreation must re-pump queued tasks held while no
+            // window existed — same contract as the boot path above.
+            resumeTasksForWorkspaces(getWorkspaces().openPaths)
           }, RESUME_AFTER_FIRST_PAINT_MS)
         })
       }

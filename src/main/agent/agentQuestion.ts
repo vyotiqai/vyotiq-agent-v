@@ -6,6 +6,7 @@ import type {
 import { logger } from '../../shared/logger'
 import { sanitizeQuestionAnswers } from '../../shared/utils/agentQuestionForm'
 import { dismissLifecycleNotification } from '../notifications/bus'
+import { notifyBadgeChange } from '../app/badges'
 import { needsYouDedupeKey } from '../../shared/ipc'
 
 export type QuestionSender = (request: AgentQuestionRequest) => void
@@ -54,6 +55,11 @@ export function listPendingAgentQuestions(runId: string): AgentQuestionRequest[]
     if (entry.runId === runId) out.push(entry.request)
   }
   return out
+}
+
+/** Total questions waiting across all runs — drives the taskbar badge. */
+export function countPendingAgentQuestions(): number {
+  return pending.size
 }
 
 /** Returns false when the request is unknown or runId does not match. */
@@ -190,6 +196,7 @@ export function askQuestionThroughRenderer(
       if (settled || !pending.has(request.requestId)) return
       settled = true
       pending.delete(request.requestId)
+      notifyBadgeChange()
       clearWaiters()
       resolve(answers)
     }
@@ -197,6 +204,7 @@ export function askQuestionThroughRenderer(
       if (settled || !pending.has(request.requestId)) return
       settled = true
       pending.delete(request.requestId)
+      notifyBadgeChange()
       clearWaiters()
       reject(err)
     }
@@ -214,6 +222,7 @@ export function askQuestionThroughRenderer(
       invokeId,
       request
     })
+    notifyBadgeChange()
     signal.addEventListener('abort', onAbort, { once: true })
     logger.info('Agent question waiting for user', {
       scope: 'agent',

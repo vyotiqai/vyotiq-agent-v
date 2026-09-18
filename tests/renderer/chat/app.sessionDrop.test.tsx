@@ -108,6 +108,8 @@ const workspaceStub = {
   setComposerDraft: noop,
   setComposerDraftForPane: noop,
   setAgentMode: noop,
+  setAgentProfileIdForRun: noop,
+  getAgentProfileIdForRun: () => null,
   onMessageListScroll: noop,
   onMessageListScrollForPane: noop,
   setPaneCapacityContext: noop,

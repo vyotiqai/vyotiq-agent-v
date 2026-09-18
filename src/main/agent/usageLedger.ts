@@ -3,6 +3,7 @@ import { join } from 'path'
 import { atomicWriteJson } from '../storage/atomicWrite'
 import { localDayKeyOf } from '../../shared/utils/localDay'
 import type { StepUsageTotals } from '../../shared/utils/runTelemetry'
+import { readJsonDocCached } from './jsonDocCache'
 
 export const USAGE_LEDGER_FILENAME = 'usage.json'
 
@@ -57,6 +58,23 @@ export function readUsageLedger(runDir: string): UsageLedger | null {
     }
   } catch {
     return null
+  }
+}
+
+/**
+ * Same contract as `readUsageLedger` for aggregation callers (Home activity):
+ * the raw parse goes through the shared doc cache, so unchanged ledgers are
+ * never re-read across fetches. The write path keeps the sync read above.
+ */
+export async function readUsageLedgerAsync(runDir: string): Promise<UsageLedger | null> {
+  const path = join(runDir, USAGE_LEDGER_FILENAME)
+  const doc = await readJsonDocCached(path)
+  if (!doc.ok) return null
+  const raw = doc.doc as UsageLedger
+  if (raw?.version !== USAGE_LEDGER_VERSION || typeof raw.days !== 'object') return null
+  return {
+    ...raw,
+    lastTotals: { ...raw.lastTotals, estimatedCost: raw.lastTotals.estimatedCost ?? 0 }
   }
 }
 

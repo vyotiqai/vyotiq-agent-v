@@ -15,6 +15,11 @@ Vyotiq ("Agent V") is an Electron desktop app: a coding workspace for real repos
 - **MCP client** — connect Model Context Protocol servers, list their tools/resources/prompts, and pin their tools into the agent's catalog.
 - **Self-built agent tools** — when no existing tool fits, the agent can write its own at runtime with `build_tool`: a new tool becomes available immediately in the catalog as `agent__<name>` (no restart) and runs in an isolated child process; built tools are listed under Settings → "Agent tools".
 - **Long-term workspace memory** — the agent keeps notes under `.vyotiq/memory/` in the workspace and re-reads them on later runs.
+- **Teammates** — persistent agent identities with per-workspace private memory, pinned models, and delegated tasks that run on a schedule or queue — surviving app restarts, with auto-resume for interrupted runs. See [docs/teammates.md](docs/teammates.md).
+
+## Documentation
+
+- [Teammates — architecture, scheduler semantics, and user guide](docs/teammates.md)
 
 ## Platforms
 

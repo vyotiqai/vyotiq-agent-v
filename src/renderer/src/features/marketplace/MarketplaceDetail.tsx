@@ -8,7 +8,6 @@ import { MarketplaceFeedbackBanner } from './MarketplaceFeedbackBanner'
 import { kindLabel } from './marketplaceLabels'
 import { installedActionLabel, packageActivity } from './packageActivity'
 import type { MarketplaceController } from './useMarketplaceController'
-import { isHostedAppMcpId } from '@shared/mcpApps'
 
 function previewAsContents(entry: MarketplaceCatalogEntry): PackageContents | null {
   const preview = entry.contentsPreview
@@ -118,9 +117,9 @@ export function MarketplaceDetail({
                 <Button variant="subtle" disabled className={activity.className}>
                   {installedActionLabel(activity)}
                 </Button>
-                {isHostedAppMcpId(entry.id) ? (
+                {entry.kind === 'mcp' && entry.auth && entry.auth !== 'none' ? (
                   <Button variant="subtle" onClick={() => openConnectWizard(entry.id)}>
-                    Connect
+                    {activity.kind === 'connected' ? 'Reconnect' : 'Connect'}
                   </Button>
                 ) : null}
                 <Button variant="subtle" onClick={onOpenManage}>

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "slack",
+  "name": "Slack",
+  "version": "1.0.0",
+  "description": "Read and post to Slack channels and threads. Needs a Slack app you register.",
+  "transport": "http",
+  "url": "https://mcp.slack.com/mcp",
+  "auth": "oauth-client",
+  "docsUrl": "https://docs.slack.dev/mcp/",
+  "setupUrl": "https://api.slack.com/apps"
+}

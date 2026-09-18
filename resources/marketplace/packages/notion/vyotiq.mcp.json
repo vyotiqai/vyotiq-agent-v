@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "notion",
+  "name": "Notion",
+  "version": "1.0.0",
+  "description": "Search, read, and update Notion pages and databases you have access to.",
+  "transport": "http",
+  "url": "https://mcp.notion.com/mcp",
+  "auth": "oauth",
+  "docsUrl": "https://developers.notion.com/guides/mcp/mcp"
+}

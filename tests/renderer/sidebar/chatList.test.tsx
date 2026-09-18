@@ -270,7 +270,7 @@ describe('ChatList', () => {
     expect(screen.getByText('Audit-partition B (LLM client & config)')).toBeTruthy()
     expect(screen.getByLabelText('Instances of Orchestrate audit')).toBeTruthy()
     const nestedRow = screen.getByText('Audit-partition B (LLM client & config)').closest('button')
-    expect(nestedRow?.getAttribute('draggable')).toBe('false')
+    expect(nestedRow?.getAttribute('draggable')).toBe('true')
     const parentRow = screen.getByText('Orchestrate audit').closest('button')
     expect(parentRow?.getAttribute('draggable')).toBe('true')
   })

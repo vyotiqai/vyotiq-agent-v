@@ -55,6 +55,7 @@ import {
   closePane as closePaneInLayout,
   createPaneId,
   focusPane,
+  insertDraftPaneBeside,
   loadPaneLayoutFromStorage,
   maxPaneCount,
   openRunInFocusedPane,
@@ -327,6 +328,8 @@ export type WorkspaceUiSlice = {
   composerDraft: string
   composerDraftByRunId: Record<string, string>
   agentMode: AgentInteractionMode
+  /** Teammate profile bound per chat bucket (runId or draft key). */
+  agentProfileIdByRunId: Record<string, string>
   /** Whether this workspace's group is expanded in the sidebar (undefined = default). */
   expanded?: boolean
   /** Persisted per-run card expansion state (tool/group/thinking, collapsed turns). */
@@ -471,6 +474,7 @@ function defaultUiState(): WorkspaceUiState {
     composerDraft: '',
     composerDraftByRunId: {},
     agentMode: 'agent',
+    agentProfileIdByRunId: {},
     expansionsByRunId: {}
   }
 }
@@ -493,6 +497,7 @@ function uiStateFromContext(ctx: WorkspaceContext): WorkspaceUiState {
     composerDraft: ctx.ui.composerDraft,
     composerDraftByRunId: { ...ctx.ui.composerDraftByRunId },
     agentMode: ctx.ui.agentMode,
+    agentProfileIdByRunId: { ...ctx.ui.agentProfileIdByRunId },
     expanded: ctx.ui.expanded,
     expansionsByRunId: pruneExpansionsByRunId(ctx.ui.expansionsByRunId, {
       openRunIds: ctx.openRunIds,
@@ -544,6 +549,7 @@ function contextFromRegistry(path: string, registry: WorkspacesState): Workspace
       composerDraft: ui.composerDraft,
       composerDraftByRunId: { ...(ui.composerDraftByRunId ?? {}) },
       agentMode: ui.agentMode ?? 'agent',
+      agentProfileIdByRunId: { ...(ui.agentProfileIdByRunId ?? {}) },
       expanded: ui.expanded,
       expansionsByRunId: { ...(ui.expansionsByRunId ?? {}) }
     },
@@ -566,11 +572,19 @@ export function useWorkspaceManager(options?: {
   getDefaultProviderModelForWorkspace?: (
     workspacePath: string
   ) => { provider: ProviderId; model: string } | null
+  /** Teammate model pin lookup — seeds a session's provider/model from its bound profile. */
+  getAgentProfileModelPin?: (profileId: string) => { provider: ProviderId; model: string } | null
+  /** Settings `maxChatPanes`: 0 = auto (viewport-derived), 1–6 = fixed limit. */
+  maxChatPanes?: number
 }) {
   const openInstanceRunIdsRef = useRef<readonly string[]>(options?.openInstanceRunIds ?? [])
   openInstanceRunIdsRef.current = options?.openInstanceRunIds ?? []
   const getDefaultProviderModelRef = useRef(options?.getDefaultProviderModelForWorkspace)
   getDefaultProviderModelRef.current = options?.getDefaultProviderModelForWorkspace
+  const getAgentProfileModelPinRef = useRef(options?.getAgentProfileModelPin)
+  getAgentProfileModelPinRef.current = options?.getAgentProfileModelPin
+  const maxChatPanesRef = useRef(options?.maxChatPanes ?? 0)
+  maxChatPanesRef.current = options?.maxChatPanes ?? 0
   const [registry, setRegistry] = useState<WorkspacesState | null>(null)
   const [contexts, setContexts] = useState<Record<string, WorkspaceContext>>({})
   const [activeRuns, setActiveRuns] = useState<{ runId: string; workspacePath: string }[]>([])
@@ -586,6 +600,8 @@ export function useWorkspaceManager(options?: {
   const autoResumeDrainingRef = useRef(false)
   const paneLayoutRef = useRef<ChatPaneLayout | null>(null)
   const paneLayoutHydratedRef = useRef(false)
+  /** Pane sessions whose transcript load failed; retried on layout commits. */
+  const paneLoadRetryRef = useRef(new Set<string>())
   const paneCapacityContextRef = useRef<PaneCapacityContext>({
     dockOpen: false,
     dockWidthPx: 0
@@ -1068,13 +1084,49 @@ export function useWorkspaceManager(options?: {
       // draft key until a run id is assigned.
       let expansionRunId: string | null = runId
       const expansionBucketKey = (): string => expansionRunId ?? DRAFT_SCROLL_KEY
+      // Profile binding migrates with the same draft → run bucket transition.
+      let profileBindingRunId: string | null = runId
+      const profileBucketKey = (): string => profileBindingRunId ?? DRAFT_SCROLL_KEY
 
       const controller = createChatStreamController({
         workspacePath,
         runId,
-        onRunIdAssigned,
+        onRunIdAssigned: (assignedRunId) => {
+          // Migrate the draft's profile binding into the assigned run bucket —
+          // the closure bucket below changes with profileBindingRunId, but the
+          // persisted map only had the value under the draft key, so the
+          // composer picker reset and follow-up sends dropped the teammate.
+          const ctx0 = contextsRef.current[workspacePath]
+          const draftBinding = ctx0?.ui.agentProfileIdByRunId?.[DRAFT_SCROLL_KEY]
+          if (
+            ctx0 &&
+            draftBinding != null &&
+            ctx0.ui.agentProfileIdByRunId?.[assignedRunId] == null
+          ) {
+            const { [DRAFT_SCROLL_KEY]: _drop, ...restBindings } = ctx0.ui.agentProfileIdByRunId
+            const nextCtx0: WorkspaceContext = {
+              ...ctx0,
+              ui: {
+                ...ctx0.ui,
+                agentProfileIdByRunId: {
+                  ...restBindings,
+                  [assignedRunId]: draftBinding
+                }
+              }
+            }
+            contextsRef.current = { ...contextsRef.current, [workspacePath]: nextCtx0 }
+            setContexts((prev) => ({ ...prev, [workspacePath]: nextCtx0 }))
+            schedulePersistUiState(workspacePath, nextCtx0)
+          }
+          profileBindingRunId = assignedRunId
+          onRunIdAssigned(assignedRunId)
+        },
         onTerminal,
         getAgentMode: () => contextsRef.current[workspacePath]?.ui.agentMode ?? 'agent',
+        getAgentProfileId: () =>
+          contextsRef.current[workspacePath]?.ui.agentProfileIdByRunId?.[
+            profileBucketKey()
+          ] ?? null,
         getDefaultProviderModel: () =>
           getDefaultProviderModelRef.current?.(workspacePath) ?? null,
         onAgentModeChange: (mode) => {
@@ -1109,6 +1161,16 @@ export function useWorkspaceManager(options?: {
         }
       })
       controllersRef.current.set(key, controller)
+      // Seed the session's provider/model from the teammate pin at creation —
+      // session-scoped only: a later manual pick overrides it and nothing is
+      // written to the workspace/global default. Creation happens once per
+      // session, so remounts (dictation, panes) never re-fire it.
+      const boundProfileId =
+        contextsRef.current[workspacePath]?.ui.agentProfileIdByRunId?.[
+          runId ?? DRAFT_SCROLL_KEY
+        ] ?? null
+      const pin = boundProfileId ? getAgentProfileModelPinRef.current?.(boundProfileId) : null
+      if (pin) controller.setProviderModel(pin.provider, pin.model)
       if (runId) {
         registerRunId(runId, workspacePath)
         void restorePendingQuestions(controller, runId)
@@ -1243,10 +1305,10 @@ export function useWorkspaceManager(options?: {
       workspacePath: string,
       runId: string,
       opts?: { isCurrent?: () => boolean; allowAutoResume?: boolean }
-    ): Promise<void> => {
+    ): Promise<boolean> => {
       const ctrl = ensureController(workspacePath, runId)
-      if (ctrl.running || ctrl.pendingRun) return
-      if (!window.vyotiq?.loadRun) return
+      if (ctrl.running || ctrl.pendingRun) return true
+      if (!window.vyotiq?.loadRun) return true
       const stillCurrent = (): boolean => {
         if (opts?.isCurrent && !opts.isCurrent()) return false
         if (ctrl.disposed) return false
@@ -1256,7 +1318,7 @@ export function useWorkspaceManager(options?: {
       let autoResumeAfterLoad = false
       try {
         const res = await window.vyotiq.loadRun(workspacePath, runId)
-        if (!stillCurrent()) return
+        if (!stillCurrent()) return true
         if (!res.ok) {
           logger.warn('loadRun failed on restore', {
             scope: 'runs',
@@ -1272,12 +1334,12 @@ export function useWorkspaceManager(options?: {
             }
           })
           bump()
-          return
+          return false
         }
         let events: PersistedEvent[] = []
         if (window.vyotiq.loadRunEvents) {
           const eventsRes = await window.vyotiq.loadRunEvents(workspacePath, runId)
-          if (!stillCurrent()) return
+          if (!stillCurrent()) return true
           if (eventsRes.ok) {
             events = eventsRes.data
           } else {
@@ -1297,7 +1359,7 @@ export function useWorkspaceManager(options?: {
             bump()
           }
         }
-        if (!stillCurrent()) return
+        if (!stillCurrent()) return true
         ctrl.hydrateTranscript(res.data.messages, events, {
           hasEarlier: res.data.hasEarlier,
           earlierCursor: res.data.earlierCursor
@@ -1307,6 +1369,9 @@ export function useWorkspaceManager(options?: {
           stillCurrent() &&
           !ctrl.running &&
           !ctrl.pendingRun &&
+          // Inline instances are inspect-only: main never relaunches them
+          // (startAgentRun suppresses goal relaunch for inlineInstance runs).
+          res.data.inlineInstance !== true &&
           isResumableInterruptedRun(
             res.data.status
               ? {
@@ -1320,7 +1385,7 @@ export function useWorkspaceManager(options?: {
           opts?.allowAutoResume === true
         ) {
           const settingsRes = await window.vyotiq.getSettings()
-          if (!stillCurrent()) return
+          if (!stillCurrent()) return true
           if (settingsRes.ok && settingsRes.data.autoResumeInterruptedRuns) {
             autoResumeAttemptedRef.current.add(runId)
             autoResumeAfterLoad = true
@@ -1339,13 +1404,16 @@ export function useWorkspaceManager(options?: {
           scheduleAutoResumeDrain()
         }
       }
+      return true
     },
     [bump, drainAutoResumeQueue, ensureController]
   )
 
   const loadRunIntoTab = useCallback(
     async (workspacePath: string, runId: string): Promise<void> => {
-      await loadRunTranscript(workspacePath, runId, { allowAutoResume: true })
+      const ok = await loadRunTranscript(workspacePath, runId, { allowAutoResume: true })
+      if (!ok) paneLoadRetryRef.current.add(runId)
+      else paneLoadRetryRef.current.delete(runId)
     },
     [loadRunTranscript]
   )
@@ -1520,6 +1588,11 @@ export function useWorkspaceManager(options?: {
             composerDraft,
             composerDraftByRunId,
             agentMode: existing.ui.agentMode ?? refUi?.agentMode ?? ui.agentMode ?? 'agent',
+            agentProfileIdByRunId: {
+              ...(ui.agentProfileIdByRunId ?? {}),
+              ...existing.ui.agentProfileIdByRunId,
+              ...(refUi?.agentProfileIdByRunId ?? {})
+            },
             expanded: existing.ui.expanded ?? refUi?.expanded ?? ui.expanded,
             expansionsByRunId: {
               ...(ui.expansionsByRunId ?? {}),
@@ -1757,6 +1830,23 @@ export function useWorkspaceManager(options?: {
     [schedulePersistUiState]
   )
 
+  const getReservedPx = useCallback((): number => {
+    const ctx = paneCapacityContextRef.current
+    return paneCapacityReservedPx({
+      dockOpen: ctx.dockOpen,
+      dockWidthPx: ctx.dockWidthPx
+    })
+  }, [])
+
+  const getMaxPaneCount = useCallback((): number => {
+    const override = maxChatPanesRef.current
+    if (override > 0) return override
+    return maxPaneCount(
+      typeof window !== 'undefined' ? window.innerWidth : 1200,
+      getReservedPx()
+    )
+  }, [getReservedPx])
+
   useEffect(() => {
     if (paneLayoutHydratedRef.current || !activeWorkspace) return
     paneLayoutHydratedRef.current = true
@@ -1767,13 +1857,9 @@ export function useWorkspaceManager(options?: {
     )
     const stored = loadPaneLayoutFromStorage()
     const openPaths = registryRef.current?.openPaths ?? [activeWorkspace]
-    const maxPanes = maxPaneCount(
-      typeof window !== 'undefined' ? window.innerWidth : 1200,
-      paneCapacityReservedPx({
-        dockOpen: paneCapacityContextRef.current.dockOpen,
-        dockWidthPx: paneCapacityContextRef.current.dockWidthPx
-      })
-    )
+    // Same capacity source as drop-time splits — the maxChatPanes override
+    // must decide restores too, not just the viewport formula.
+    const maxPanes = getMaxPaneCount()
     const initial =
       (stored ? sanitizePaneLayout(stored, openPaths, maxPanes) : null) ?? fallback
     paneLayoutRef.current = initial
@@ -1785,15 +1871,48 @@ export function useWorkspaceManager(options?: {
       ensureController(pane.workspacePath, pane.runId)
       void loadRunTranscript(pane.workspacePath, pane.runId, {
         allowAutoResume: workspacePathsEqual(pane.workspacePath, activeWorkspace)
+      }).then((ok) => {
+        if (!ok && pane.runId) paneLoadRetryRef.current.add(pane.runId)
       })
     }
   }, [
     activeContext?.activeRunId,
     activeWorkspace,
     ensureController,
+    getMaxPaneCount,
     loadRunTranscript,
     suspendAllExceptVisible
   ])
+
+  // Every committed pane must show its session. Drop/click paths load the
+  // transcript fire-and-forget and can silently lose the race (a suspend
+  // window, an eviction re-key, a failed one-shot) — then the pane sits empty
+  // forever with no error anywhere. Guarantee it here: on every layout commit,
+  // hydrate any pane run whose controller is missing or has no content yet.
+  // Never touch controllers that are loading, live, or already hold state —
+  // an item-less controller can legitimately hold orphan-flushed usage meters.
+  useEffect(() => {
+    if (!paneLayout) return
+    for (const pane of paneLayout.panes) {
+      if (!pane.runId) continue
+      const ctrl = controllersRef.current.get(pane.runId)
+      if (
+        ctrl &&
+        (ctrl.running ||
+          ctrl.pendingRun ||
+          ctrl.transcriptLoading ||
+          ctrl.items.length > 0 ||
+          ctrl.getContextUsage() != null)
+      ) {
+        paneLoadRetryRef.current.delete(pane.runId)
+        continue
+      }
+      void loadRunTranscript(pane.workspacePath, pane.runId).then((ok) => {
+        if (!ok && pane.runId) paneLoadRetryRef.current.add(pane.runId)
+        else if (pane.runId) paneLoadRetryRef.current.delete(pane.runId)
+      })
+    }
+  }, [loadRunTranscript, paneLayout])
 
   useEffect(() => {
     if (!paneLayoutHydratedRef.current || !activeWorkspace || !paneLayoutRef.current) return
@@ -1836,21 +1955,6 @@ export function useWorkspaceManager(options?: {
     if (!layout) return null
     return layout.panes.find((p) => p.paneId === paneId) ?? null
   }, [])
-
-  const getReservedPx = useCallback((): number => {
-    const ctx = paneCapacityContextRef.current
-    return paneCapacityReservedPx({
-      dockOpen: ctx.dockOpen,
-      dockWidthPx: ctx.dockWidthPx
-    })
-  }, [])
-
-  const getMaxPaneCount = useCallback((): number => {
-    return maxPaneCount(
-      typeof window !== 'undefined' ? window.innerWidth : 1200,
-      getReservedPx()
-    )
-  }, [getReservedPx])
 
   const setPaneCapacityContext = useCallback((ctx: PaneCapacityContext): void => {
     paneCapacityContextRef.current = ctx
@@ -2165,6 +2269,30 @@ export function useWorkspaceManager(options?: {
     [activeWorkspace, commitPaneLayout, openRunTab, openRunTabInWorkspace]
   )
 
+  /**
+   * Insert an empty draft pane beside the focused one. Refuses when the
+   * focused pane is itself a draft — drafts share one composer/controller per
+   * workspace, so two of them would edit the same text.
+   */
+  const splitFocusedPane = useCallback((): boolean => {
+    const layout = paneLayoutRef.current
+    const focused = layout
+      ? (layout.panes.find((p) => p.paneId === layout.focusedPaneId) ??
+        layout.panes[0] ??
+        null)
+      : null
+    if (!focused || focused.runId == null) return false
+    const next = insertDraftPaneBeside(
+      layout!,
+      focused.paneId,
+      getMaxPaneCount()
+    )
+    if (!next) return false
+    openRunTabInWorkspace(focused.workspacePath, null, { syncLayout: false })
+    commitPaneLayout(next)
+    return true
+  }, [commitPaneLayout, getMaxPaneCount, openRunTabInWorkspace])
+
   const openRunInWorkspace = useCallback(
     async (path: string, runId: string): Promise<void> => {
       const multi = (paneLayoutRef.current?.panes.length ?? 0) > 1
@@ -2215,17 +2343,63 @@ export function useWorkspaceManager(options?: {
     [commitPaneLayout, openRunTabInWorkspace]
   )
 
+  /**
+   * True when runId is an inline agent instance: listed under the workspace,
+   * or live in any parent controller's agentInstances snapshot.
+   */
+  const isInstanceRun = useCallback(
+    (workspacePath: string | null, runId: string): boolean => {
+      if (workspacePath) {
+        const ctx =
+          contextsRef.current[workspacePath] ??
+          findByWorkspacePath(contextsRef.current, workspacePath)
+        if (ctx?.instanceRuns?.some((r) => r.runId === runId)) return true
+      }
+      for (const ctrl of controllersRef.current.values()) {
+        if (ctrl.agentInstances?.[runId]) return true
+      }
+      return false
+    },
+    []
+  )
+
+  /**
+   * Parent runId for an inline instance: from the workspace listing, else the
+   * controller whose agentInstances snapshot tracks it (that controller is the
+   * parent). Null when unknown.
+   */
+  const getInstanceParentRunId = useCallback(
+    (workspacePath: string | null, runId: string): string | null => {
+      if (workspacePath) {
+        const ctx =
+          contextsRef.current[workspacePath] ??
+          findByWorkspacePath(contextsRef.current, workspacePath)
+        const listed = ctx?.instanceRuns?.find((r) => r.runId === runId)
+        if (listed?.parentRunId) return listed.parentRunId
+      }
+      for (const ctrl of controllersRef.current.values()) {
+        if (ctrl.agentInstances?.[runId]) return ctrl.runId
+      }
+      return null
+    },
+    []
+  )
+
   const dropSessionOnPane = useCallback(
     (anchorPaneId: string, zone: PaneDropZone, payload: SessionDragPayload): boolean => {
       const layout = paneLayoutRef.current
       if (!layout) return false
       const next = applyPaneDrop(layout, anchorPaneId, zone, payload, getMaxPaneCount())
       if (!next) return false
-      openRunTabInWorkspace(payload.workspacePath, payload.runId, { syncLayout: false })
+      // Instance panes must not enter openRunIds/activeRunId — those are never
+      // pruned for instance ids and would resurrect dead tabs after restart.
+      if (!isInstanceRun(payload.workspacePath, payload.runId)) {
+        openRunTabInWorkspace(payload.workspacePath, payload.runId, { syncLayout: false })
+      }
       commitPaneLayout(next)
       return true
     },
-    [commitPaneLayout, getMaxPaneCount, openRunTabInWorkspace]
+    [commitPaneLayout, getMaxPaneCount, isInstanceRun, openRunTabInWorkspace]
   )
 
   const closePaneById = useCallback(
@@ -2307,7 +2481,28 @@ export function useWorkspaceManager(options?: {
       const ctx = contextsRef.current[workspacePath]
       const layout = paneLayoutRef.current
       if (layout) {
-        commitPaneLayout(removeSessionFromLayout(layout, { workspacePath, runId }))
+        // Deleting a parent cascades to its inline instances — close their
+        // panes too, in one composed commit. Children are found via the
+        // workspace listing; instances whose parent fell off the listing cap
+        // keep their pane (their content still loads by id).
+        const entryKey =
+          contextsRef.current[workspacePath] !== undefined
+            ? workspacePath
+            : (Object.keys(contextsRef.current).find((k) =>
+                workspacePathsEqual(k, workspacePath)
+              ) ?? workspacePath)
+        const childIds = new Set(
+          (ctx?.instanceRuns ?? [])
+            .filter((r) => r.parentRunId === runId)
+            .map((r) => r.runId)
+        )
+        let next = removeSessionFromLayout(layout, { workspacePath: entryKey, runId })
+        for (const pane of next.panes) {
+          if (pane.runId && childIds.has(pane.runId)) {
+            next = removeSessionFromLayout(next, { workspacePath: entryKey, runId: pane.runId })
+          }
+        }
+        commitPaneLayout(next)
       }
       if (!ctx) {
         clearWorkspaceHotComposerDraft(workspacePath, runId)
@@ -2423,6 +2618,84 @@ export function useWorkspaceManager(options?: {
       schedulePersistUiState(storedPath, nextCtx)
     },
     [activeWorkspace, getFocusedPane, schedulePersistUiState]
+  )
+
+  const setAgentProfileIdForRun = useCallback(
+    (workspacePath: string | null, runId: string | null, profileId: string | null) => {
+      if (!workspacePath) return
+      const ctx =
+        contextsRef.current[workspacePath] ??
+        findByWorkspacePath(contextsRef.current, workspacePath)
+      if (!ctx) return
+      const storedPath =
+        contextsRef.current[workspacePath] != null
+          ? workspacePath
+          : (Object.keys(contextsRef.current).find((key) =>
+              workspacePathsEqual(key, workspacePath)
+            ) ?? workspacePath)
+      const bucket = runId ?? DRAFT_SCROLL_KEY
+      const nextMap = { ...(ctx.ui.agentProfileIdByRunId ?? {}) }
+      if (profileId) nextMap[bucket] = profileId
+      else delete nextMap[bucket]
+      const nextCtx: WorkspaceContext = {
+        ...ctx,
+        ui: { ...ctx.ui, agentProfileIdByRunId: nextMap }
+      }
+      contextsRef.current = { ...contextsRef.current, [storedPath]: nextCtx }
+      setContexts((prev) => ({ ...prev, [storedPath]: nextCtx }))
+      schedulePersistUiState(storedPath, nextCtx)
+      // Bind-time adoption: a teammate with a model pin seeds the session's
+      // provider/model immediately (creation-time seeding already covers chats
+      // that mount pre-bound). Session-scoped only — never the global default.
+      if (profileId) {
+        const pin = getAgentProfileModelPinRef.current?.(profileId)
+        if (pin) ensureController(storedPath, runId).setProviderModel(pin.provider, pin.model)
+      }
+    },
+    [ensureController, schedulePersistUiState]
+  )
+
+  const getAgentProfileIdForRun = useCallback(
+    (workspacePath: string | null, runId: string | null): string | null => {
+      if (!workspacePath) return null
+      const ctx = contextsRef.current[workspacePath]
+      return ctx?.ui.agentProfileIdByRunId?.[runId ?? DRAFT_SCROLL_KEY] ?? null
+    },
+    []
+  )
+
+  /**
+   * Drop every chat binding whose profile id is no longer in the roster — a
+   * deleted teammate must never ride a stale id into chatStart (main rejects
+   * the whole send with 'Unknown agent profile'). Call when the roster loads
+   * or changes. Unknown-bucket bindings for not-yet-loaded rosters are safe:
+   * only pass the roster's own ids.
+   */
+  const pruneAgentProfileBindings = useCallback(
+    (validIds: ReadonlySet<string>): void => {
+      let changedAny = false
+      const nextContexts: Record<string, WorkspaceContext> = { ...contextsRef.current }
+      for (const [path, ctx] of Object.entries(nextContexts)) {
+        const map = ctx.ui.agentProfileIdByRunId
+        if (!map) continue
+        const stale = Object.keys(map).filter((bucket) => !validIds.has(map[bucket]!))
+        if (stale.length === 0) continue
+        const nextMap = { ...map }
+        for (const bucket of stale) delete nextMap[bucket]
+        const nextCtx: WorkspaceContext = {
+          ...ctx,
+          ui: { ...ctx.ui, agentProfileIdByRunId: nextMap }
+        }
+        nextContexts[path] = nextCtx
+        schedulePersistUiState(path, nextCtx)
+        changedAny = true
+      }
+      if (changedAny) {
+        contextsRef.current = nextContexts
+        setContexts(nextContexts)
+      }
+    },
+    [schedulePersistUiState]
   )
 
   const onMessageListScrollForPane = useCallback(
@@ -2824,6 +3097,9 @@ export function useWorkspaceManager(options?: {
     switchWorkspace,
     addWorkspace,
     removeWorkspace,
+    setAgentProfileIdForRun,
+    getAgentProfileIdForRun,
+    pruneAgentProfileBindings,
     workspaceExpandedByPath,
     setWorkspaceExpanded,
     getRunController,
@@ -2866,6 +3142,9 @@ export function useWorkspaceManager(options?: {
     closePaneById,
     setPaneSizesByIndex,
     dropSessionOnPane,
+    splitFocusedPane,
+    isInstanceRun,
+    getInstanceParentRunId,
     openSessionInFocusedPane,
     isSessionOpenInPane,
     isSessionFocusedInPane,

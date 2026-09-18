@@ -140,7 +140,7 @@ describe('MessageList', () => {
     expect(screen.queryByLabelText('Edit message')).toBeNull()
   })
 
-  it('marks editable user prompts with a click-to-edit title', () => {
+  it('groups editable user prompts so the actions reveal on hover', () => {
     const items: UiItem[] = [
       { kind: 'message', id: 'user-0', role: 'user', content: 'hover me' }
     ]
@@ -151,5 +151,34 @@ describe('MessageList', () => {
     const bubble = editBtn.closest('[aria-label="Edit user message"]')
     expect(bubble).toBeTruthy()
     expect(bubble?.className).toContain('group/prompt')
+  })
+
+  it('releases the sticky pin while a prompt is being edited', () => {
+    const items: UiItem[] = [
+      { kind: 'message', id: 'user-0', role: 'user', content: 'original prompt' },
+      { kind: 'message', id: 'a0', role: 'assistant', content: 'reply' }
+    ]
+
+    const { rerender } = render(
+      <MessageList items={items} onBeginEditUserMessage={() => {}} />
+    )
+    expect(document.querySelector('[data-sticky-turn-prompt]')!.className).toContain('sticky')
+
+    rerender(
+      <MessageList
+        items={items}
+        editingUserMessageIndex={0}
+        editComposer={<div data-testid="inline-composer">editing…</div>}
+        onBeginEditUserMessage={() => {}}
+      />
+    )
+
+    // Left pinned, the edit composer sticks to the top of the transcript for as
+    // long as you are typing. The row keeps its spacing, just not the pin.
+    const wrapper = document.querySelector('[data-sticky-turn-prompt]')!
+    expect(wrapper.className).not.toContain('sticky')
+    expect(wrapper.className).not.toContain('vy-turn-prompt-cover')
+    expect(wrapper.className).toContain('py-2.5')
+    expect(screen.getByTestId('inline-composer')).toBeTruthy()
   })
 })

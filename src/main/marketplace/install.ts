@@ -332,6 +332,10 @@ export function mcpServerFromManifest(root: string): McpServer {
     headers: manifest.headers,
     ...(manifest.allowedTools?.length ? { allowedTools: manifest.allowedTools } : {}),
     ...(manifest.deniedTools?.length ? { deniedTools: manifest.deniedTools } : {}),
+    auth: manifest.auth,
+    ...(manifest.requires?.length ? { requires: manifest.requires } : {}),
+    ...(manifest.inputs?.length ? { inputs: manifest.inputs } : {}),
+    ...(manifest.setupUrl ? { setupUrl: manifest.setupUrl } : {}),
     enabled: true,
     source: 'marketplace',
     packageId: manifest.id,
@@ -374,6 +378,10 @@ export async function syncMarketplaceMcpIntoSettings(): Promise<void> {
         if (prev.authScope) server.authScope = prev.authScope
         if (prev.authWorkspacePath) server.authWorkspacePath = prev.authWorkspacePath
         if (prev.googleAccess) server.googleAccess = prev.googleAccess
+        // `auth` / `requires` / `inputs` / `setupUrl` are deliberately NOT
+        // preserved: the manifest owns them, so an app update can correct a
+        // package's connect metadata. `binaryPath` is the user's own choice.
+        if (prev.binaryPath) server.binaryPath = prev.binaryPath
       }
       // Repair known-broken uvx launch args (mcp SDK v2 rename) even when settings
       // still hold the pre-pin args from an older install.

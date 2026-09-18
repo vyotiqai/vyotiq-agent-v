@@ -21,6 +21,7 @@ import type {
   ChatRewindResult,
   ChatRewindPreviewResult,
   CompactRunResult,
+  DeepLinkPayload,
   ResolveWritesResult,
   ReadRunArtifactResult,
   RunArtifactName,
@@ -85,6 +86,7 @@ import type {
   ExtractAttachmentResult,
   DictationTranscribeRequest,
   DictationTranscribeResult,
+  McpPickBinaryResult,
   McpStatusResult,
   ToolCatalogRequest,
   ToolCatalogResult,
@@ -481,6 +483,27 @@ export interface VyotiqApi {
     kind: 'history' | 'cookies' | 'cache' | 'all'
     workspacePath?: string
   }) => Promise<IpcResult<{ cleared: 'history' | 'cookies' | 'cache' | 'all' }>>
+  /** Toggle the floating always-on-top PiP window hosting the live browser view. */
+  browserPipToggle: () => Promise<IpcResult<{ pip: boolean }>>
+  agentProfilesList: () => Promise<IpcResult<import('./ipc').AgentProfile[]>>
+  agentProfilesCreate: (
+    profile: import('./ipc').AgentProfileCreateRequest
+  ) => Promise<IpcResult<import('./ipc').AgentProfile>>
+  agentProfilesUpdate: (
+    payload: import('./ipc').AgentProfileUpdateRequest
+  ) => Promise<IpcResult<import('./ipc').AgentProfile>>
+  agentProfilesDelete: (
+    payload: import('./ipc').AgentProfileDeleteRequest
+  ) => Promise<IpcResult<true>>
+  onAgentProfilesChanged: (
+    handler: (event: import('./ipc').AgentProfilesChangedEvent) => void
+  ) => () => void
+  tasksList: () => Promise<IpcResult<import('./ipc').DelegatedTask[]>>
+  tasksEnqueue: (
+    payload: import('./ipc').TaskEnqueueRequest
+  ) => Promise<IpcResult<import('./ipc').DelegatedTask>>
+  tasksCancel: (payload: import('./ipc').TaskCancelRequest) => Promise<IpcResult<boolean>>
+  onTasksChanged: (handler: (event: import('./ipc').TasksChangedEvent) => void) => () => void
   openLogsDir: () => Promise<IpcResult<true>>
   getLogsPath: () => Promise<IpcResult<string>>
   getCrashDiagnostics: () => Promise<IpcResult<CrashDiagnosticsSnapshot>>
@@ -529,6 +552,8 @@ export interface VyotiqApi {
       googleAccess?: 'read' | 'read-write'
     }
   ) => Promise<IpcResult<McpStatusResult>>
+  /** Locate an MCP launch binary that is not on PATH. Null path = cancelled. */
+  mcpPickBinary: (binary: string) => Promise<IpcResult<McpPickBinaryResult>>
   mcpSetOAuthClientSecret: (serverId: string, secret: string) => Promise<IpcResult<true>>
   mcpClearOAuthClientSecret: (serverId: string) => Promise<IpcResult<true>>
   mcpSetGoogleClientSecret: (secret: string) => Promise<IpcResult<true>>
@@ -712,6 +737,10 @@ export interface VyotiqApi {
   /** Pushed from main after a workspace's git status may have changed. */
   onGitStatusChanged: (handler: (payload: GitStatusChangedPayload) => void) => () => void
   onNotificationActivate: (handler: (action: NotificationAction) => void) => () => void
+  /** Pushed from main when a vyotiq:// deep link is activated (null target = unrecognized). */
+  onDeepLinkOpened: (handler: (payload: DeepLinkPayload) => void) => () => void
+  /** Drain a deep link that arrived before the renderer was listening (cold start). */
+  consumeDeepLink: () => Promise<IpcResult<DeepLinkPayload | null>>
   onSystemThemeChanged: (handler: (prefersDark: boolean) => void) => () => void
   /** Native OS clipboard write (sandboxed preload). Write-only. */
   writeClipboard: (text: string) => boolean

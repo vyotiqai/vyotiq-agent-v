@@ -26,6 +26,8 @@ type RunEntry = {
    * so Stop still cancels the whole turn while follow-ups only interrupt the stream.
    */
   streamInterrupt: AbortController | null
+  /** Teammate profile this run is bound to, when started with a binding. */
+  agentProfileId?: string
 }
 
 export type RunAbortHandle = {
@@ -150,11 +152,19 @@ export function takeLateFollowUpDropped(runId: string): AgentEvent | undefined {
 }
 
 /** Register abort controller before the async loop starts so cancel works immediately. */
-export function registerRunAbort(runId: string, workspacePath: string): RunAbortHandle {
+export function registerRunAbort(
+  runId: string,
+  workspacePath: string,
+  agentProfileId?: string
+): RunAbortHandle {
   const existing = active.get(runId)
   // Reuse the live invoke. Never replace a turnComplete entry still unwinding —
   // overlapping runAgent finally blocks corrupt the same runDir.
   if (existing) {
+    // Backfill the profile when the pre-registration lacked it (the loop
+    // resolves overrides later) — the scheduler's one-run-per-teammate gate
+    // reads this field, so a dropped binding blinds it for the run's lifetime.
+    if (agentProfileId && !existing.agentProfileId) existing.agentProfileId = agentProfileId
     return { controller: existing.controller, invokeId: existing.invokeId }
   }
 
@@ -167,7 +177,8 @@ export function registerRunAbort(runId: string, workspacePath: string): RunAbort
     turnComplete: false,
     forceFinishTimer: null,
     followUps: [],
-    streamInterrupt: null
+    streamInterrupt: null,
+    ...(agentProfileId ? { agentProfileId } : {})
   })
   // Fresh registration — stale late buffers from a prior finish of this id are
   // meaningless now, and a pending prune timer must not eat the new run's ones.
@@ -181,13 +192,14 @@ export function registerRunAbort(runId: string, workspacePath: string): RunAbort
  */
 export function tryRegisterRunAbort(
   runId: string,
-  workspacePath: string
+  workspacePath: string,
+  agentProfileId?: string
 ): { ok: true; controller: AbortController; invokeId: number } | { ok: false; error: string; code?: string } {
   if (active.has(runId)) {
     rejectedRunStarts++
     return { ok: false, error: 'Run is already active' }
   }
-  const handle = registerRunAbort(runId, workspacePath)
+  const handle = registerRunAbort(runId, workspacePath, agentProfileId)
   return { ok: true, controller: handle.controller, invokeId: handle.invokeId }
 }
 
@@ -469,6 +481,7 @@ export type ActiveRunInfo = {
   runId: string
   workspacePath: string
   invokeId: number
+  agentProfileId?: string
   pendingFollowUps: { id: string; preview: string }[]
 }
 
@@ -488,6 +501,7 @@ export function listActiveRuns(): ActiveRunInfo[] {
     runId,
     workspacePath: entry.workspacePath,
     invokeId: entry.invokeId,
+    ...(entry.agentProfileId ? { agentProfileId: entry.agentProfileId } : {}),
     pendingFollowUps: entry.followUps.map((item) => ({
       id: item.id,
       preview: followUpPreview(item.message)
@@ -497,6 +511,32 @@ export function listActiveRuns(): ActiveRunInfo[] {
 
 export function getRunInvokeId(runId: string): number | undefined {
   return active.get(runId)?.invokeId
+}
+
+type ProfileRunFinishListener = (profileId: string) => void
+const profileRunFinishListeners: ProfileRunFinishListener[] = []
+
+/**
+ * Observe when any run bound to a teammate profile ends, regardless of which
+ * subsystem started it (chat, delegated task, boot resume). Lets the task
+ * scheduler re-pump its queue without importing run-starting modules.
+ */
+export function registerProfileRunFinishListener(fn: ProfileRunFinishListener): () => void {
+  profileRunFinishListeners.push(fn)
+  return () => {
+    const index = profileRunFinishListeners.indexOf(fn)
+    if (index !== -1) profileRunFinishListeners.splice(index, 1)
+  }
+}
+
+export function notifyProfileRunFinished(profileId: string): void {
+  for (const fn of profileRunFinishListeners) {
+    try {
+      fn(profileId)
+    } catch (err) {
+      logger.warn('Profile run-finish listener failed', { scope: 'runRegistry', profileId, err })
+    }
+  }
 }
 
 export function clearRunAbort(runId: string, invokeId?: number): void {

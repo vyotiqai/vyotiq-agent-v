@@ -56,10 +56,13 @@ function AppShellInner({
   onOpenHome,
   onNewChat,
   onNewChatInWorkspace,
+  onStartTeammateChat,
+  onOpenTaskRun,
   onSelectRunInWorkspace,
   onRenameRunInWorkspace,
   onDeleteRunInWorkspace,
   onExportRunInWorkspace,
+  onCopyRunLinkInWorkspace,
   onLoadOlderRuns,
   isRunOpenInPane,
   isRunFocusedInPane,
@@ -73,6 +76,7 @@ function AppShellInner({
   running,
   onChatStop,
   onCloseChat,
+  onSplitPane,
   children,
   loading,
   navigationMode = 'sidebar'
@@ -95,10 +99,13 @@ function AppShellInner({
   onOpenHome: () => void
   onNewChat: () => void
   onNewChatInWorkspace?: (path: string) => void
+  onStartTeammateChat?: (profileId: string) => void
+  onOpenTaskRun?: (path: string, runId: string) => void
   onSelectRunInWorkspace?: (path: string, runId: string) => void
   onRenameRunInWorkspace?: (path: string, runId: string, goal: string) => void
   onDeleteRunInWorkspace?: (path: string, runId: string) => void
   onExportRunInWorkspace?: (path: string, runId: string) => void
+  onCopyRunLinkInWorkspace?: (path: string, runId: string) => void
   onLoadOlderRuns?: (path: string) => void
   isRunOpenInPane?: (path: string, runId: string) => boolean
   isRunFocusedInPane?: (path: string, runId: string) => boolean
@@ -115,6 +122,8 @@ function AppShellInner({
   onChatStop?: () => void
   /** Close the focused chat tab (Ctrl/Cmd+W). */
   onCloseChat?: () => void
+  /** Insert an empty pane beside the focused one (Ctrl/Cmd+\). */
+  onSplitPane?: () => void
   children: ReactNode
   loading?: boolean
   /** Navigation layout: 'home' hides the sidebar chat list behind the slim rail. */
@@ -326,6 +335,7 @@ function AppShellInner({
     running,
     onStop: onChatStop,
     onCloseChat,
+    onSplitPane,
     drawerOpen,
     hasSessionQuery,
     onOpenCommandPalette: () => setCommandPaletteOpen(true),
@@ -357,10 +367,13 @@ function AppShellInner({
     onOpenChat,
     onOpenHome,
     onNewChatInWorkspace,
+    onStartTeammateChat,
+    onOpenTaskRun,
     onSelectRunInWorkspace,
     onRenameRunInWorkspace,
     onDeleteRunInWorkspace,
     onExportRunInWorkspace,
+    onCopyRunLinkInWorkspace,
     onLoadOlderRuns,
     isRunOpenInPane,
     isRunFocusedInPane,
@@ -465,6 +478,7 @@ function AppShellInner({
           else if (id === 'focusComposer') focusComposerMessage()
           else if (id === 'stop') onChatStop?.()
           else if (id === 'closeChat') onCloseChat?.()
+          else if (id === 'splitPane') onSplitPane?.()
           else if (id === 'commandPalette') setCommandPaletteOpen(true)
           else if (/^workspace[1-9]$/.test(id))
             switchWorkspaceByIndex(Number(id.slice('workspace'.length)) - 1)

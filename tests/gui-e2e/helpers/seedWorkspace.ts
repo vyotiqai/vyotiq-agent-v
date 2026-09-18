@@ -30,6 +30,16 @@ function appCanonicalWorkspacePath(workspacePath: string): string {
   return canonicalizeWorkspacePath(resolved)
 }
 
+/**
+ * The sessions tree the app reads for a workspace, so specs can seed the
+ * per-run sidecars (goal.json, loop.json, receipt.json, usage.json) that
+ * aggregate surfaces are built from.
+ */
+export function sessionsRootFor(userDataDir: string, workspacePath: string): string {
+  const canonical = appCanonicalWorkspacePath(workspacePath)
+  return join(userDataDir, 'workspaces', workspaceIdFromPath(canonical), 'sessions')
+}
+
 /** Write run status files into the Electron userData sessions tree. */
 export function seedRunsInUserData(
   userDataDir: string,

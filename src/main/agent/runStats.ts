@@ -1,5 +1,5 @@
 import { existsSync } from 'fs'
-import { open, readFile, stat } from 'fs/promises'
+import { open, stat } from 'fs/promises'
 import { join } from 'path'
 import {
   RunReceiptSchema,
@@ -11,6 +11,7 @@ import { resolveRunDirInRoot } from '../storage/paths'
 import { listMessageArchives } from './messageAppendQueue'
 import { listEventArchives } from './eventAppendQueue'
 import { migrateLegacyReceipt } from './harnessReview'
+import { readJsonDocCached } from './jsonDocCache'
 
 const READ_CHUNK_BYTES = 64 * 1024
 
@@ -130,9 +131,10 @@ async function readFirstEventAt(runDir: string): Promise<string | undefined> {
 /** Best-effort lenient tokenUsage extraction — survives partial/corrupt receipts. */
 async function readLenientTokenUsage(runDir: string): Promise<RunTokenUsage | undefined> {
   const receiptPath = join(runDir, 'receipt.json')
-  if (!existsSync(receiptPath)) return undefined
+  const doc = await readJsonDocCached(receiptPath)
+  if (!doc.ok) return undefined
   try {
-    const raw = JSON.parse(await readFile(receiptPath, 'utf8')) as { tokenUsage?: unknown }
+    const raw = doc.doc as { tokenUsage?: unknown }
     const parsed = RunReceiptSchema.shape.tokenUsage.safeParse(raw?.tokenUsage)
     if (parsed.success && parsed.data != null) return parsed.data
   } catch {
@@ -146,9 +148,10 @@ export async function readLenientReceiptCost(
   runDir: string
 ): Promise<{ billedCost?: number; estimatedCost?: number } | undefined> {
   const receiptPath = join(runDir, 'receipt.json')
-  if (!existsSync(receiptPath)) return undefined
+  const doc = await readJsonDocCached(receiptPath)
+  if (!doc.ok) return undefined
   try {
-    const raw = JSON.parse(await readFile(receiptPath, 'utf8')) as {
+    const raw = doc.doc as {
       billedCost?: unknown
       estimatedCost?: unknown
     }
@@ -172,11 +175,10 @@ export async function readLenientReceiptCost(
 /** Full receipt when it parses strictly (post-migration), else undefined. */
 async function readReceiptDetail(runDir: string): Promise<RunReceipt | undefined> {
   const receiptPath = join(runDir, 'receipt.json')
-  if (!existsSync(receiptPath)) return undefined
+  const doc = await readJsonDocCached(receiptPath)
+  if (!doc.ok) return undefined
   try {
-    const parsed = RunReceiptSchema.safeParse(
-      migrateLegacyReceipt(JSON.parse(await readFile(receiptPath, 'utf8')))
-    )
+    const parsed = RunReceiptSchema.safeParse(migrateLegacyReceipt(doc.doc))
     if (parsed.success) return parsed.data
   } catch {
     // Corrupt or foreign receipt — the lenient path still carries tokenUsage.

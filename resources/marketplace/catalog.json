@@ -18,7 +18,8 @@
       "category": "developer",
       "featuredRank": 1,
       "iconPath": "icons/github.svg",
-      "installable": true
+      "installable": true,
+      "auth": "oauth-client"
     },
     {
       "id": "gmail",
@@ -37,7 +38,8 @@
       "category": "productivity",
       "featuredRank": 2,
       "iconPath": "icons/gmail.svg",
-      "installable": true
+      "installable": true,
+      "auth": "oauth"
     },
     {
       "id": "google-drive",
@@ -56,7 +58,8 @@
       "category": "productivity",
       "featuredRank": 3,
       "iconPath": "icons/google-drive.svg",
-      "installable": true
+      "installable": true,
+      "auth": "oauth"
     },
     {
       "id": "google-calendar",
@@ -75,7 +78,8 @@
       "category": "productivity",
       "featuredRank": 4,
       "iconPath": "icons/google-calendar.svg",
-      "installable": true
+      "installable": true,
+      "auth": "oauth"
     },
     {
       "id": "filesystem",
@@ -93,7 +97,11 @@
       "category": "infrastructure",
       "featuredRank": 5,
       "iconPath": "icons/filesystem.svg",
-      "installable": true
+      "installable": true,
+      "auth": "none",
+      "requires": [
+        "node"
+      ]
     },
     {
       "id": "memory",
@@ -111,7 +119,11 @@
       "category": "infrastructure",
       "featuredRank": 6,
       "iconPath": "icons/memory.svg",
-      "installable": true
+      "installable": true,
+      "auth": "none",
+      "requires": [
+        "node"
+      ]
     },
     {
       "id": "sequential-thinking",
@@ -129,7 +141,11 @@
       "category": "infrastructure",
       "featuredRank": 7,
       "iconPath": "icons/sequential-thinking.svg",
-      "installable": true
+      "installable": true,
+      "auth": "none",
+      "requires": [
+        "node"
+      ]
     },
     {
       "id": "fetch",
@@ -147,7 +163,11 @@
       "category": "infrastructure",
       "featuredRank": 8,
       "iconPath": "icons/fetch.svg",
-      "installable": true
+      "installable": true,
+      "auth": "none",
+      "requires": [
+        "uv"
+      ]
     },
     {
       "id": "git",
@@ -165,7 +185,12 @@
       "category": "infrastructure",
       "featuredRank": 9,
       "iconPath": "icons/git.svg",
-      "installable": true
+      "installable": true,
+      "auth": "none",
+      "requires": [
+        "uv",
+        "git"
+      ]
     },
     {
       "id": "time",
@@ -183,7 +208,11 @@
       "category": "infrastructure",
       "featuredRank": 10,
       "iconPath": "icons/time.svg",
-      "installable": true
+      "installable": true,
+      "auth": "none",
+      "requires": [
+        "uv"
+      ]
     },
     {
       "id": "implement-feature",
@@ -199,6 +228,7 @@
       ],
       "category": "skills",
       "featuredRank": 11,
+      "iconPath": "icons/implement-feature.svg",
       "installable": true
     },
     {
@@ -279,6 +309,7 @@
       "source": "bundled",
       "publisher": "Agent V",
       "category": "skills",
+      "iconPath": "icons/create-skill.svg",
       "installable": true
     },
     {
@@ -291,6 +322,7 @@
       "source": "bundled",
       "publisher": "Agent V",
       "category": "skills",
+      "iconPath": "icons/goal.svg",
       "installable": true
     },
     {
@@ -346,6 +378,7 @@
       ],
       "category": "skills",
       "featuredRank": 20,
+      "iconPath": "icons/persona-builder.svg",
       "installable": true
     },
     {
@@ -418,6 +451,492 @@
       "category": "plugins",
       "featuredRank": 19,
       "iconPath": "icons/shipping.svg",
+      "installable": true
+    },
+    {
+      "id": "context7",
+      "name": "Context7",
+      "version": "1.0.0",
+      "description": "Version-correct documentation and code examples for any library, fetched on demand.",
+      "kind": "mcp",
+      "bundledPath": "context7",
+      "source": "bundled",
+      "publisher": "Upstash",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "developer",
+      "featuredRank": 21,
+      "iconPath": "icons/context7.svg",
+      "installable": true,
+      "auth": "none"
+    },
+    {
+      "id": "deepwiki",
+      "name": "DeepWiki",
+      "version": "1.0.0",
+      "description": "Ask questions about any public GitHub repository and read its generated wiki.",
+      "kind": "mcp",
+      "bundledPath": "deepwiki",
+      "source": "bundled",
+      "publisher": "Devin",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "developer",
+      "featuredRank": 22,
+      "iconPath": "icons/deepwiki.png",
+      "installable": true,
+      "auth": "none"
+    },
+    {
+      "id": "huggingface",
+      "name": "Hugging Face",
+      "version": "1.0.0",
+      "description": "Search models, datasets, and Spaces on the Hugging Face Hub.",
+      "kind": "mcp",
+      "bundledPath": "huggingface",
+      "source": "bundled",
+      "publisher": "Hugging Face",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "developer",
+      "featuredRank": 23,
+      "iconPath": "icons/huggingface.svg",
+      "installable": true,
+      "auth": "none"
+    },
+    {
+      "id": "cloudflare-docs",
+      "name": "Cloudflare Docs",
+      "version": "1.0.0",
+      "description": "Search Cloudflare product documentation and migration guides.",
+      "kind": "mcp",
+      "bundledPath": "cloudflare-docs",
+      "source": "bundled",
+      "publisher": "Cloudflare",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "developer",
+      "featuredRank": 24,
+      "iconPath": "icons/cloudflare-docs.svg",
+      "installable": true,
+      "auth": "none"
+    },
+    {
+      "id": "linear",
+      "name": "Linear",
+      "version": "1.0.0",
+      "description": "Issues, projects, and cycles. Create, search, and update Linear work from a run.",
+      "kind": "mcp",
+      "bundledPath": "linear",
+      "source": "bundled",
+      "publisher": "Linear",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "productivity",
+      "featuredRank": 25,
+      "iconPath": "icons/linear.svg",
+      "installable": true,
+      "auth": "oauth"
+    },
+    {
+      "id": "notion",
+      "name": "Notion",
+      "version": "1.0.0",
+      "description": "Search, read, and update Notion pages and databases you have access to.",
+      "kind": "mcp",
+      "bundledPath": "notion",
+      "source": "bundled",
+      "publisher": "Notion",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "productivity",
+      "featuredRank": 26,
+      "iconPath": "icons/notion.svg",
+      "installable": true,
+      "auth": "oauth"
+    },
+    {
+      "id": "sentry",
+      "name": "Sentry",
+      "version": "1.0.0",
+      "description": "Investigate issues, stack traces, and release health from your Sentry projects.",
+      "kind": "mcp",
+      "bundledPath": "sentry",
+      "source": "bundled",
+      "publisher": "Sentry",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "developer",
+      "featuredRank": 27,
+      "iconPath": "icons/sentry.svg",
+      "installable": true,
+      "auth": "oauth"
+    },
+    {
+      "id": "asana",
+      "name": "Asana",
+      "version": "1.0.0",
+      "description": "Tasks, projects, and portfolios from your Asana workspace.",
+      "kind": "mcp",
+      "bundledPath": "asana",
+      "source": "bundled",
+      "publisher": "Asana",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "productivity",
+      "featuredRank": 28,
+      "iconPath": "icons/asana.svg",
+      "installable": true,
+      "auth": "oauth"
+    },
+    {
+      "id": "vercel",
+      "name": "Vercel",
+      "version": "1.0.0",
+      "description": "Projects, deployments, and logs for your Vercel account.",
+      "kind": "mcp",
+      "bundledPath": "vercel",
+      "source": "bundled",
+      "publisher": "Vercel",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "infrastructure",
+      "featuredRank": 29,
+      "iconPath": "icons/vercel.svg",
+      "installable": true,
+      "auth": "oauth"
+    },
+    {
+      "id": "supabase",
+      "name": "Supabase",
+      "version": "1.0.0",
+      "description": "Inspect and query your Supabase projects, tables, and edge functions.",
+      "kind": "mcp",
+      "bundledPath": "supabase",
+      "source": "bundled",
+      "publisher": "Supabase",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "infrastructure",
+      "featuredRank": 30,
+      "iconPath": "icons/supabase.svg",
+      "installable": true,
+      "auth": "oauth"
+    },
+    {
+      "id": "figma",
+      "name": "Figma",
+      "version": "1.0.0",
+      "description": "Read Figma files, frames, and design context while implementing UI.",
+      "kind": "mcp",
+      "bundledPath": "figma",
+      "source": "bundled",
+      "publisher": "Figma",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "productivity",
+      "featuredRank": 31,
+      "iconPath": "icons/figma.svg",
+      "installable": true,
+      "auth": "oauth"
+    },
+    {
+      "id": "canva",
+      "name": "Canva",
+      "version": "1.0.0",
+      "description": "Find and work with your Canva designs, folders, and brand assets.",
+      "kind": "mcp",
+      "bundledPath": "canva",
+      "source": "bundled",
+      "publisher": "Canva",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "productivity",
+      "featuredRank": 32,
+      "iconPath": "icons/canva.png",
+      "installable": true,
+      "auth": "oauth"
+    },
+    {
+      "id": "atlassian",
+      "name": "Atlassian",
+      "version": "1.0.0",
+      "description": "Jira issues and Confluence pages from your Atlassian sites.",
+      "kind": "mcp",
+      "bundledPath": "atlassian",
+      "source": "bundled",
+      "publisher": "Atlassian",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "productivity",
+      "featuredRank": 33,
+      "iconPath": "icons/atlassian.svg",
+      "installable": true,
+      "auth": "oauth"
+    },
+    {
+      "id": "intercom",
+      "name": "Intercom",
+      "version": "1.0.0",
+      "description": "Search customer conversations, contacts, and help-centre articles.",
+      "kind": "mcp",
+      "bundledPath": "intercom",
+      "source": "bundled",
+      "publisher": "Intercom",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "productivity",
+      "featuredRank": 34,
+      "iconPath": "icons/intercom.svg",
+      "installable": true,
+      "auth": "oauth"
+    },
+    {
+      "id": "stripe",
+      "name": "Stripe",
+      "version": "1.0.0",
+      "description": "Customers, payments, subscriptions, and invoices from your Stripe account.",
+      "kind": "mcp",
+      "bundledPath": "stripe",
+      "source": "bundled",
+      "publisher": "Stripe",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "productivity",
+      "featuredRank": 35,
+      "iconPath": "icons/stripe.svg",
+      "installable": true,
+      "auth": "oauth"
+    },
+    {
+      "id": "slack",
+      "name": "Slack",
+      "version": "1.0.0",
+      "description": "Read and post to Slack channels and threads. Needs a Slack app you register.",
+      "kind": "mcp",
+      "bundledPath": "slack",
+      "source": "bundled",
+      "publisher": "Slack",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "productivity",
+      "featuredRank": 36,
+      "iconPath": "icons/slack.svg",
+      "installable": true,
+      "auth": "oauth-client"
+    },
+    {
+      "id": "hubspot",
+      "name": "HubSpot",
+      "version": "1.0.0",
+      "description": "CRM contacts, companies, and deals. Needs a HubSpot app you register.",
+      "kind": "mcp",
+      "bundledPath": "hubspot",
+      "source": "bundled",
+      "publisher": "HubSpot",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "productivity",
+      "featuredRank": 37,
+      "iconPath": "icons/hubspot.svg",
+      "installable": true,
+      "auth": "oauth-client"
+    },
+    {
+      "id": "playwright",
+      "name": "Playwright",
+      "version": "1.0.0",
+      "description": "Drive a real browser: navigate, click, fill forms, and assert against live pages.",
+      "kind": "mcp",
+      "bundledPath": "playwright",
+      "source": "bundled",
+      "publisher": "Microsoft",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "developer",
+      "featuredRank": 38,
+      "iconPath": "icons/playwright.svg",
+      "installable": true,
+      "auth": "none",
+      "requires": [
+        "node"
+      ]
+    },
+    {
+      "id": "chrome-devtools",
+      "name": "Chrome DevTools",
+      "version": "1.0.0",
+      "description": "Inspect a live page: console, network, performance traces, and DOM.",
+      "kind": "mcp",
+      "bundledPath": "chrome-devtools",
+      "source": "bundled",
+      "publisher": "Google",
+      "verified": true,
+      "sections": [
+        "discover"
+      ],
+      "category": "developer",
+      "featuredRank": 39,
+      "iconPath": "icons/chrome-devtools.svg",
+      "installable": true,
+      "auth": "none",
+      "requires": [
+        "node"
+      ]
+    },
+    {
+      "id": "incident-triage",
+      "name": "Incident triage",
+      "version": "1.0.0",
+      "description": "Take a production error from alert to a reviewed fix, using the connected issue tracker and repo.",
+      "kind": "skill",
+      "bundledPath": "incident-triage",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "sections": [
+        "discover"
+      ],
+      "category": "skills",
+      "featuredRank": 40,
+      "iconPath": "icons/incident-triage.svg",
+      "installable": true
+    },
+    {
+      "id": "pr-review-reply",
+      "name": "PR review reply",
+      "version": "1.0.0",
+      "description": "Work through open review comments on your pull requests and draft the code changes and replies.",
+      "kind": "skill",
+      "bundledPath": "pr-review-reply",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "sections": [
+        "discover"
+      ],
+      "category": "skills",
+      "featuredRank": 41,
+      "iconPath": "icons/pr-review-reply.svg",
+      "installable": true
+    },
+    {
+      "id": "standup-digest",
+      "name": "Standup digest",
+      "version": "1.0.0",
+      "description": "Summarise what you shipped, what is in flight, and what is blocked, from git and your tracker.",
+      "kind": "skill",
+      "bundledPath": "standup-digest",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "sections": [
+        "discover"
+      ],
+      "category": "skills",
+      "featuredRank": 42,
+      "iconPath": "icons/standup-digest.svg",
+      "installable": true
+    },
+    {
+      "id": "dependency-upgrade",
+      "name": "Dependency upgrade",
+      "version": "1.0.0",
+      "description": "Upgrade dependencies one at a time, with tests between, and separate the risky ones.",
+      "kind": "skill",
+      "bundledPath": "dependency-upgrade",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "sections": [
+        "discover"
+      ],
+      "category": "skills",
+      "featuredRank": 43,
+      "iconPath": "icons/dependency-upgrade.svg",
+      "installable": true
+    },
+    {
+      "id": "release-notes",
+      "name": "Release notes",
+      "version": "1.0.0",
+      "description": "Turn merged pull requests since the last tag into notes written for the people who use the product.",
+      "kind": "skill",
+      "bundledPath": "release-notes",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "sections": [
+        "discover"
+      ],
+      "category": "skills",
+      "featuredRank": 44,
+      "iconPath": "icons/release-notes.svg",
+      "installable": true
+    },
+    {
+      "id": "repo-onboarding",
+      "name": "Repo onboarding",
+      "version": "1.0.0",
+      "description": "Get oriented in an unfamiliar codebase: what it does, how it runs, and where to start.",
+      "kind": "skill",
+      "bundledPath": "repo-onboarding",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "sections": [
+        "discover"
+      ],
+      "category": "skills",
+      "featuredRank": 45,
+      "iconPath": "icons/repo-onboarding.svg",
+      "installable": true
+    },
+    {
+      "id": "flake-hunter",
+      "name": "Flake hunter",
+      "version": "1.0.0",
+      "description": "Tell a flaky test from a real failure by rerunning it, then fix the flake at its source.",
+      "kind": "skill",
+      "bundledPath": "flake-hunter",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "sections": [
+        "discover"
+      ],
+      "category": "skills",
+      "featuredRank": 46,
+      "iconPath": "icons/flake-hunter.svg",
       "installable": true
     }
   ]

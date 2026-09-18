@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "supabase",
+  "name": "Supabase",
+  "version": "1.0.0",
+  "description": "Inspect and query your Supabase projects, tables, and edge functions.",
+  "transport": "http",
+  "url": "https://mcp.supabase.com/mcp",
+  "auth": "oauth",
+  "docsUrl": "https://supabase.com/docs/guides/getting-started/mcp"
+}

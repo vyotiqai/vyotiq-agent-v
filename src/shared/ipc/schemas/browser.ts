@@ -21,6 +21,8 @@ export const AgentBrowserStateSchema = z.object({
   navigating: z.boolean().optional(),
   agentBusy: z.boolean().optional(),
   userControl: z.boolean().optional(),
+  /** True while the live view floats in the always-on-top PiP mini window. */
+  pip: z.boolean().optional(),
   tabs: z.array(AgentBrowserTabSchema).optional(),
   canGoBack: z.boolean().optional(),
   canGoForward: z.boolean().optional()

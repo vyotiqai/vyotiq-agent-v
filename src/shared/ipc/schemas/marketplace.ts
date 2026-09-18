@@ -37,6 +37,48 @@ export type MarketplaceInstallSource = z.infer<typeof MarketplaceInstallSourceSc
 export const McpTransportSchema = z.enum(['stdio', 'http', 'sse'])
 export type McpTransport = z.infer<typeof McpTransportSchema>
 
+/**
+ * How a package expects to authenticate, which is what drives the Connect
+ * affordance in the UI.
+ * - `none`: connects on install (public endpoint or purely local stdio).
+ * - `oauth`: browser sign-in with nothing to configure, because the server
+ *   advertises RFC 7591 dynamic client registration.
+ * - `oauth-client`: browser sign-in, but the server has no registration
+ *   endpoint, so the user must register an OAuth app with that vendor and
+ *   supply its client id and secret first (Slack and HubSpot both work this
+ *   way — they advertise only `client_secret_post`).
+ * - `token`: a credential the user pastes, described by `inputs`.
+ */
+export const McpAuthKindSchema = z.enum(['none', 'oauth', 'oauth-client', 'token'])
+export type McpAuthKind = z.infer<typeof McpAuthKindSchema>
+
+/** External binaries a stdio package needs on PATH before it can be spawned. */
+export const McpRuntimeRequirementSchema = z.enum(['node', 'uv', 'git'])
+export type McpRuntimeRequirement = z.infer<typeof McpRuntimeRequirementSchema>
+
+/**
+ * A value the user must supply before a package can connect. Mirrors the
+ * official MCP registry `Input` shape (isRequired / isSecret / format /
+ * default / placeholder) so a registry adapter can map onto it unchanged.
+ * `target` says where the resolved value is applied at connect time: an
+ * environment variable for stdio, or a request header for http/sse.
+ */
+export const McpInputSchema = z.object({
+  /** Env var name or header name — also the storage key for secrets. */
+  name: z.string().min(1).max(128),
+  target: z.enum(['env', 'header']).default('env'),
+  /** Field label; falls back to `name` when omitted. */
+  label: z.string().min(1).max(128).optional(),
+  description: z.string().max(512).optional(),
+  placeholder: z.string().max(256).optional(),
+  /** Secrets go to OS secure storage and are never written into settings.json. */
+  isSecret: z.boolean().default(false),
+  isRequired: z.boolean().default(true),
+  /** Non-secret default prefilled into the field. */
+  default: z.string().max(512).optional()
+})
+export type McpInput = z.infer<typeof McpInputSchema>
+
 /** Manifest for a Vyotiq-native MCP package (`vyotiq.mcp.json`). */
 export const VyotiqMcpManifestSchema = z
   .object({
@@ -55,7 +97,17 @@ export const VyotiqMcpManifestSchema = z
     /** Optional default allow list (bare tool names) when installed. */
     allowedTools: z.array(z.string().min(1)).optional(),
     /** Optional default deny list (bare tool names) when installed. */
-    deniedTools: z.array(z.string().min(1)).optional()
+    deniedTools: z.array(z.string().min(1)).optional(),
+    /** Drives the Connect affordance. Legacy manifests default to `none`. */
+    auth: McpAuthKindSchema.default('none'),
+    /** Binaries checked before spawning stdio; missing ones fail with a fixable error. */
+    requires: z.array(McpRuntimeRequirementSchema).optional(),
+    /** Credentials/config the user supplies before connecting (see McpInputSchema). */
+    inputs: z.array(McpInputSchema).optional(),
+    /** Where to read about the server. */
+    docsUrl: z.string().url().optional(),
+    /** Where to obtain the credential described by `inputs`. */
+    setupUrl: z.string().url().optional()
   })
   .superRefine((val, ctx) => {
     if (val.transport === 'stdio' && !(val.command ?? '').trim()) {
@@ -78,6 +130,43 @@ export const VyotiqMcpManifestSchema = z
         message: 'url is required for http/sse transport',
         path: ['url']
       })
+    }
+    // startMcpOAuth refuses stdio, so an oauth stdio manifest would render a
+    // Connect button that can only ever fail.
+    if ((val.auth === 'oauth' || val.auth === 'oauth-client') && val.transport === 'stdio') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `auth "${val.auth}" requires http or sse transport`,
+        path: ['auth']
+      })
+    }
+    // The user has to register the app somewhere before they can paste its
+    // credentials, so a setup link is part of the contract, not a nicety.
+    if (val.auth === 'oauth-client' && !val.setupUrl) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'auth "oauth-client" requires setupUrl (where to register the OAuth app)',
+        path: ['setupUrl']
+      })
+    }
+    if (val.auth === 'token' && !(val.inputs ?? []).length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'auth "token" requires at least one entry in inputs',
+        path: ['inputs']
+      })
+    }
+    const seen = new Set<string>()
+    for (const input of val.inputs ?? []) {
+      const key = `${input.target}:${input.name.toLowerCase()}`
+      if (seen.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `duplicate input ${input.target} "${input.name}"`,
+          path: ['inputs']
+        })
+      }
+      seen.add(key)
     }
   })
 export type VyotiqMcpManifest = z.infer<typeof VyotiqMcpManifestSchema>
@@ -191,7 +280,15 @@ export const MarketplaceCatalogEntrySchema = z.object({
     }),
   /** When false, UI shows Coming soon instead of Install. Default true. */
   installable: z.boolean().optional(),
-  contentsPreview: MarketplaceContentsPreviewSchema.optional()
+  contentsPreview: MarketplaceContentsPreviewSchema.optional(),
+  /**
+   * Browse-time mirror of the package manifest's `auth`, so the catalog can
+   * offer Connect before anything is installed. Kept in sync with
+   * `vyotiq.mcp.json` by the bundled-catalog integrity test.
+   */
+  auth: McpAuthKindSchema.optional(),
+  /** Browse-time mirror of the manifest's `requires`. */
+  requires: z.array(McpRuntimeRequirementSchema).optional()
 })
 export type MarketplaceCatalogEntry = z.infer<typeof MarketplaceCatalogEntrySchema>
 

@@ -5,6 +5,7 @@ import {
 } from '../../../shared/mcpApps'
 import { getSettings } from '../../settings/settings'
 import { getGoogleMcpClientSecret, getMcpOAuthClientSecret } from '../../settings/secrets'
+import { bundledGoogleMcpClient } from './googleMcpClient'
 
 export type McpOAuthStaticClient = {
   client_id: string
@@ -21,6 +22,13 @@ export function resolveMcpOAuthStaticClient(
   if (isGoogleMcpId(server.id)) {
     if (!clientId) clientId = getSettings().googleMcpClientId?.trim() ?? ''
     if (!clientSecret) clientSecret = getGoogleMcpClientSecret()?.trim() ?? ''
+    // Last resort: the client shipped with the app. A user-supplied client
+    // still wins, so self-hosters keep full control. Both halves come from the
+    // bundle together — mixing a user id with the bundled secret cannot work.
+    if (!clientId && !clientSecret) {
+      const bundled = bundledGoogleMcpClient()
+      if (bundled) return bundled
+    }
   }
   if (!clientId) return undefined
   return clientSecret ? { client_id: clientId, client_secret: clientSecret } : { client_id: clientId }

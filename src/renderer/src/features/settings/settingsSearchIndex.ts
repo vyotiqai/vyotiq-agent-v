@@ -350,6 +350,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'tools'
   },
   {
+    id: 'max-chat-panes',
+    title: 'Max chat panes',
+    keywords: ['split', 'panes', 'sessions', 'columns', 'layout', 'view'],
+    section: 'tools'
+  },
+  {
     id: 'auto-mode-switch',
     title: 'Automatic mode switching',
     keywords: ['mode', 'ask', 'plan', 'agent', 'switch'],

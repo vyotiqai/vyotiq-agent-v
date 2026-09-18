@@ -8,7 +8,9 @@ import {
   EVENTS_FILE_KEEP_BYTES,
   EVENTS_FILE_MAX_BYTES,
   flushEventAppends,
+  onRunStorageLost,
   resetEventAppendQueueForTests,
+  resetRunStorageLostForTests,
   setEventAppendPendingMaxBytesForTests,
   takeEventAppendFailureNotice
 } from '@main/agent/eventAppendQueue'
@@ -43,6 +45,24 @@ describe('eventAppendQueue', () => {
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
     resetEventAppendQueueForTests()
+  })
+
+  it('trips storage-lost handlers when the run dir has vanished (ENOENT)', async () => {
+    resetRunStorageLostForTests()
+    const lost = vi.fn()
+    onRunStorageLost(dir, lost)
+
+    // The dir disappears before the append lands — the classic mid-run
+    // storage-loss signature from the field log (events.jsonl ENOENT).
+    rmSync(dir, { recursive: true, force: true })
+    enqueueEventAppend(dir, { type: 'status', status: 'running' })
+    await expect(flushEventAppends(dir)).rejects.toThrow()
+    expect(lost).toHaveBeenCalledTimes(1)
+
+    // Already-lost dirs fire handlers immediately on registration.
+    const late = vi.fn()
+    onRunStorageLost(dir, late)
+    expect(late).toHaveBeenCalledTimes(1)
   })
 
   it('appends events asynchronously in order', async () => {

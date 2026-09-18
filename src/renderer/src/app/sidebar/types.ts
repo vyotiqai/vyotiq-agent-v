@@ -31,10 +31,16 @@ export type SidebarProps = {
   onOpenChat: () => void
   /** Open a fresh chat in a specific workspace (switches there when needed). */
   onNewChatInWorkspace?: (path: string) => void
+  /** Start a new chat in the active workspace bound to a teammate profile. */
+  onStartTeammateChat?: (profileId: string) => void
+  /** Open a delegated task's session transcript. */
+  onOpenTaskRun?: (path: string, runId: string) => void
   onSelectRunInWorkspace?: (path: string, runId: string) => void
   onRenameRunInWorkspace?: (path: string, runId: string, goal: string) => void
   onDeleteRunInWorkspace?: (path: string, runId: string) => void
   onExportRunInWorkspace?: (path: string, runId: string) => void
+  /** Copy a vyotiq:// deep link for a run to the clipboard. */
+  onCopyRunLinkInWorkspace?: (path: string, runId: string) => void
   /** Load one older page of runs beyond the sidebar cap (runs beyond 30). */
   onLoadOlderRuns?: (path: string) => void
   isRunOpenInPane?: (path: string, runId: string) => boolean

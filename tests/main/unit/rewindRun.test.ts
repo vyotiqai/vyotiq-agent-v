@@ -169,6 +169,73 @@ describe('prepareRewindAndReplaceUserMessage', () => {
     expect(receipt.status).toBe('done')
     expect(existsSync(join(runDir, 'trajectory.jsonl'))).toBe(true)
   })
+
+  it('resolves targetUserAt against disk when the renderer index cannot match (windowed hydration)', async () => {
+    const messages = [
+      { role: 'user' as const, content: 'first', at: '2026-01-01T00:00:00.000Z' },
+      { role: 'assistant' as const, content: 'ok' },
+      { role: 'user' as const, content: 'second', at: '2026-01-02T00:00:00.000Z' },
+      { role: 'assistant' as const, content: 'ok2' }
+    ]
+    await syncMessagesAsync(runDir, messages)
+
+    // A windowed renderer sends its own view index; targetUserAt is the anchor.
+    const prepared = await prepareRewindAndReplaceUserMessage({
+      workspacePath: workspace,
+      runId,
+      editMessageIndex: 999,
+      targetUserAt: '2026-01-02T00:00:00.000Z',
+      editedUserMessage: { role: 'user', content: 'second-edited' }
+    })
+
+    expect(prepared.messages).toEqual([
+      { role: 'user', content: 'first', at: '2026-01-01T00:00:00.000Z' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'second-edited' }
+    ])
+    expect(loadMessages(workspace, runId)).toEqual(prepared.messages)
+  })
+
+  it('rejects a targetUserAt missing from disk without truncating history', async () => {
+    const messages = [
+      { role: 'user' as const, content: 'first', at: '2026-01-01T00:00:00.000Z' },
+      { role: 'assistant' as const, content: 'ok' }
+    ]
+    await syncMessagesAsync(runDir, messages)
+
+    await expect(
+      prepareRewindAndReplaceUserMessage({
+        workspacePath: workspace,
+        runId,
+        editMessageIndex: 0,
+        // The edit-and-resend bug used to send the edited message's fresh `at`,
+        // which never exists on disk.
+        targetUserAt: '2026-06-01T00:00:00.000Z',
+        editedUserMessage: { role: 'user', content: 'edited' }
+      })
+    ).rejects.toThrow(/compacted away/)
+
+    expect(loadMessages(workspace, runId)).toEqual(messages)
+  })
+
+  it('keeps the generic out-of-range error when no timestamp anchor was sent', async () => {
+    const messages = [
+      { role: 'user' as const, content: 'first', at: '2026-01-01T00:00:00.000Z' },
+      { role: 'assistant' as const, content: 'ok' }
+    ]
+    await syncMessagesAsync(runDir, messages)
+
+    await expect(
+      prepareRewindAndReplaceUserMessage({
+        workspacePath: workspace,
+        runId,
+        editMessageIndex: 99,
+        editedUserMessage: { role: 'user', content: 'edited' }
+      })
+    ).rejects.toThrow(/editMessageIndex out of range/)
+
+    expect(loadMessages(workspace, runId)).toEqual(messages)
+  })
 })
 
 describe('prepareRewindToUserMessage', () => {
@@ -399,6 +466,27 @@ describe('prepareRewindToUserMessage', () => {
 
     expect(existsSync(join(runDir, 'todos.json'))).toBe(false)
     expect(loadMessages(workspace, runId).some((m) => m.toolName === 'todo_write')).toBe(true)
+  })
+
+  it('resolves targetUserAt against disk and truncates the resolved turn', async () => {
+    const messages = [
+      { role: 'user' as const, content: 'first', at: '2026-01-01T00:00:00.000Z' },
+      { role: 'assistant' as const, content: 'ok' },
+      { role: 'user' as const, content: 'second', at: '2026-01-02T00:00:00.000Z' },
+      { role: 'assistant' as const, content: 'ok2' }
+    ]
+    await syncMessagesAsync(runDir, messages)
+
+    const prepared = await prepareRewindToUserMessage({
+      workspacePath: workspace,
+      runId,
+      userMessageIndex: 999,
+      targetUserAt: '2026-01-01T00:00:00.000Z'
+    })
+
+    // The target index is kept inclusive; everything after it is dropped.
+    expect(prepared.messages).toEqual([{ role: 'user', content: 'first', at: '2026-01-01T00:00:00.000Z' }])
+    expect(loadMessages(workspace, runId)).toEqual(prepared.messages)
   })
 
 })

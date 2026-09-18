@@ -109,6 +109,7 @@ export function ChatSideRail({
   workspacePath = null,
   runId = null,
   running = false,
+  browserBusy = false,
   className
 }: {
   activePanel: ChatRightPanelId | null
@@ -118,6 +119,8 @@ export function ChatSideRail({
   workspacePath?: string | null
   runId?: string | null
   running?: boolean
+  /** Agent is actively browsing — pulse the browser rail button so the dock stays discoverable. */
+  browserBusy?: boolean
   className?: string
 }) {
   return (
@@ -140,9 +143,8 @@ export function ChatSideRail({
           const baseLabel = open ? item.hideLabel : item.showLabel
           const title = chordId ? `${baseLabel} (${shortcutLabel(chordId)})` : baseLabel
           if (item.id !== 'plan') {
-            return (
+            const button = (
               <IconButton
-                key={item.id}
                 icon={item.icon}
                 label={baseLabel}
                 title={title}
@@ -152,6 +154,22 @@ export function ChatSideRail({
                 className={cn('text-muted hover:text-fg', open && RAIL_ICON_ACTIVE)}
                 onClick={() => onSelectPanel(item.id)}
               />
+            )
+            if (item.id === 'browser' && browserBusy && !open) {
+              return (
+                <div key={item.id} className="relative" data-browser-rail-row>
+                  {button}
+                  <span className="absolute right-0.5 top-0.5 z-10 flex size-2" aria-hidden>
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+                    <span className="relative inline-flex size-2 rounded-full bg-accent" />
+                  </span>
+                </div>
+              )
+            }
+            return (
+              <div key={item.id}>
+                {button}
+              </div>
             )
           }
           return (

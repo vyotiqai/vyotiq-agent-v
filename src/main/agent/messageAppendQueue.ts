@@ -8,6 +8,7 @@ import {
   withTransientAppendRetry,
   type DirAppendFailures
 } from './appendRetry'
+import { markRunStorageLost } from './eventAppendQueue'
 
 /** Rotate messages.jsonl once it grows past this size; the most recent tail is kept. */
 export const MESSAGES_FILE_MAX_BYTES = 8 * 1024 * 1024
@@ -62,6 +63,7 @@ export function enqueueMessageAppend(dir: string, line: string): Promise<void> {
     )
     .catch((err) => {
       recordAppendError(dir, err)
+      markRunStorageLost(dir, err)
       logger.warn('Failed to append messages.jsonl', {
         scope: 'state',
         correlationId: basename(dir),

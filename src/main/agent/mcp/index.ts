@@ -44,6 +44,14 @@ import {
   mcpOAuthCallbackListenOpts,
   resolveMcpOAuthStaticClient
 } from './oauthStaticClient'
+import { hasBundledGoogleMcpClient } from './googleMcpClient'
+import {
+  clearMcpBinaryCache,
+  findMissingMcpBinary,
+  mcpSearchPath,
+  missingMcpBinaryMessage,
+  type MissingMcpBinary
+} from './binaries'
 import { linkNativeGithubFromMcpToken } from '../../git/githubAuth'
 import {
   isGithubMcpId,
@@ -52,6 +60,7 @@ import {
   isThisWorkspaceMcpAuth,
   mcpAuthAllowedForWorkspace,
   mcpOAuthFixedRedirectUrl,
+  mcpRequiresOAuth,
   MCP_AUTH_SCOPE_THIS,
   type GoogleMcpAccess,
   type McpAuthScope
@@ -143,8 +152,19 @@ export function isMcpSignInRequiredError(message: string | null | undefined): bo
   return /sign in required/i.test(message)
 }
 
+export function isMcpMissingBinaryError(message: string | null | undefined): boolean {
+  if (!message) return false
+  return /was not found on PATH/i.test(message)
+}
+
 function quietMcpConnectSkip(message: string | null | undefined): boolean {
-  return isGitMcpNotARepoError(message) || isMcpSignInRequiredError(message)
+  return (
+    isGitMcpNotARepoError(message) ||
+    isMcpSignInRequiredError(message) ||
+    // Retrying cannot install a binary. The UI offers Install / Locate, and
+    // Refresh clears the resolver cache, so that is the path back.
+    isMcpMissingBinaryError(message)
+  )
 }
 
 function remoteSyncWorkspacePath(
@@ -208,7 +228,32 @@ export function buildMcpChildEnv(
   if (process.platform === 'win32' && !env.PYTHONIOENCODING) {
     env.PYTHONIOENCODING = 'utf-8'
   }
+  // Hand the child the same PATH we resolved the binary on. Without this a
+  // server launched from a Finder-started app finds `npx` but not the tools
+  // `npx` then shells out to. `sanitizeMcpManifestEnv` strips PATH from the
+  // overlay, so this can only come from us.
+  const searchPath = mcpSearchPath(source)
+  if (searchPath) {
+    env.PATH = searchPath
+    // Windows env vars are case-insensitive but the object is not; a leftover
+    // `Path` would shadow the value we just set.
+    delete env.Path
+  }
   return env
+}
+
+/** A stdio server whose launch binary is missing, carried so the UI can offer a fix. */
+export class McpMissingBinaryError extends Error {
+  readonly missing: MissingMcpBinary
+
+  constructor(serverId: string, missing: MissingMcpBinary) {
+    super(missingMcpBinaryMessage(missing))
+    this.name = 'McpMissingBinaryError'
+    this.missing = missing
+    this.serverId = serverId
+  }
+
+  readonly serverId: string
 }
 
 export const MCP_TOOL_PREFIX = 'mcp__'
@@ -665,6 +710,13 @@ export function getMcpServerStatus(
           return false
         }
       })()
+    // Report a missing launch binary from the server config rather than waiting
+    // for a connect attempt, so the fix is offered before the first failure and
+    // stays visible while the server sits disconnected.
+    const missing =
+      isStdioTransport(server.transport) && server.enabled
+        ? findMissingMcpBinary(server)
+        : null
     return {
       id: server.id,
       name: server.name,
@@ -674,20 +726,42 @@ export function getMcpServerStatus(
       hasAuthToken: authVisible && (hasMcpAuthToken(server.id) || hasMcpOAuthState(server.id)),
       hasOAuthClientSecret: hasPerServerSecret || hasSharedGoogleSecret,
       ...(staticClient ? { oauthRedirectUrl: mcpOAuthFixedRedirectUrl() } : {}),
-      ...(error && authVisible ? { error } : {})
+      ...(missing
+        ? {
+            missingBinary: missing.binary,
+            ...(missing.installUrl ? { missingBinaryInstallUrl: missing.installUrl } : {})
+          }
+        : {}),
+      ...(error && authVisible ? { error } : {}),
+      ...(missing && !error ? { error: missingMcpBinaryMessage(missing) } : {})
     }
   })
 }
 
-export function mcpStatusExtras(): { hasGoogleMcpClientSecret: boolean } {
+export function mcpStatusExtras(): {
+  hasGoogleMcpClientSecret: boolean
+  hasGoogleMcpClient: boolean
+} {
+  let storedSecret = false
   try {
-    return { hasGoogleMcpClientSecret: hasGoogleMcpClientSecret() }
+    storedSecret = hasGoogleMcpClientSecret()
   } catch {
-    return { hasGoogleMcpClientSecret: false }
+    storedSecret = false
+  }
+  // `hasGoogleMcpClient` is what the connect wizard reads to decide whether to
+  // ask the user to build a Google Cloud client. The secret itself never
+  // crosses the IPC boundary — only whether a usable client exists.
+  const userClient = Boolean(getSettings().googleMcpClientId?.trim()) && storedSecret
+  return {
+    hasGoogleMcpClientSecret: storedSecret,
+    hasGoogleMcpClient: userClient || hasBundledGoogleMcpClient()
   }
 }
 
 export async function refreshMcpServers(servers: McpServer[]): Promise<McpServerStatus[]> {
+  // Refresh is the natural "I just fixed it" action, so re-look-up binaries too:
+  // otherwise a user who installs uv and clicks Refresh still sees it missing.
+  clearMcpBinaryCache()
   // Force reconnect so dead stdio/HTTP sessions are recovered (sync alone skips existing entries).
   resetCircuitsByPrefix('mcp-connect:')
   resetCircuitsByPrefix('mcp-invoke:')
@@ -737,6 +811,11 @@ async function createTransport(
   if (transport === 'stdio') {
     const command = (server.command ?? '').trim()
     if (!command) throw new Error(`MCP server ${server.id}: command required for stdio`)
+    // Preflight before spawning: a raw `spawn uvx ENOENT` tells the user
+    // nothing actionable, and on macOS the cause is usually a GUI PATH rather
+    // than a genuinely missing install.
+    const missing = findMissingMcpBinary(server)
+    if (missing) throw new McpMissingBinaryError(server.id, missing)
     const cwd = resolveStdioWorkspacePath(opts?.workspacePath) ?? undefined
     const env = buildMcpChildEnv(server.env)
     const args = withWorkspaceRepositoryArgs(
@@ -744,7 +823,8 @@ async function createTransport(
       cwd ?? null
     )
     return new StdioClientTransport({
-      command,
+      // A located binary wins, so "Locate binary…" works without touching PATH.
+      command: server.binaryPath?.trim() || command,
       args,
       env,
       ...(cwd ? { cwd } : {})
@@ -820,10 +900,14 @@ async function connectWithOptionalOAuth(
   }
 
   const interactive = opts?.interactiveOAuth === true
-  const hostedUnconnected =
-    isHostedAppMcpId(server.id) && !hasMcpOAuthState(server.id) && !hasMcpAuthToken(server.id)
+  // An unconnected OAuth server has nothing to try: connecting would only
+  // produce a 401, and the browser flow must be user-initiated (see below).
+  const oauthUnconnected =
+    (isHostedAppMcpId(server.id) || mcpRequiresOAuth(server)) &&
+    !hasMcpOAuthState(server.id) &&
+    !hasMcpAuthToken(server.id)
 
-  if (hostedUnconnected && !interactive) {
+  if (oauthUnconnected && !interactive) {
     throw new Error(MCP_SIGN_IN_REQUIRED)
   }
 
@@ -852,11 +936,11 @@ async function connectWithOptionalOAuth(
     return connection
   } catch (err) {
     if (!(err instanceof UnauthorizedError)) throw err
-    if (isHostedAppMcpId(server.id)) {
-      await closePendingConnection(connection)
-      throw new Error(MCP_SIGN_IN_REQUIRED)
-    }
     await closePendingConnection(connection)
+    // Never open a browser the user did not ask for. A background sync that
+    // hits 401 surfaces "Sign in required" in the UI instead; the browser flow
+    // runs only from an explicit Connect (startMcpOAuth sets interactiveOAuth).
+    if (!interactive) throw new Error(MCP_SIGN_IN_REQUIRED)
     logger.info('MCP server requires OAuth — starting browser flow', {
       scope: 'mcp',
       serverId: server.id
@@ -874,6 +958,22 @@ async function maybeLinkNativeGithubAfterMcpAuth(serverId: string): Promise<void
   } catch (err) {
     logger.warn('Could not link native GitHub after MCP auth', { scope: 'mcp', serverId, err })
   }
+}
+
+/** Text the MCP SDK throws when an auth server advertises no registration endpoint. */
+const SDK_NO_DCR = 'does not support dynamic client registration'
+
+/**
+ * The SDK's wording is accurate but leaves the user nothing to do. Say what
+ * actually fixes it: this server needs an OAuth app registered once by hand.
+ */
+export function friendlyMcpOAuthError(err: unknown, server: McpServer): unknown {
+  if (!(err instanceof Error) || !err.message.includes(SDK_NO_DCR)) return err
+  const where = server.setupUrl?.trim() ? ` Register one at ${server.setupUrl.trim()}` : ''
+  return new Error(
+    `${server.name} cannot register this app automatically. ` +
+      `Add its OAuth client ID and secret, then connect again.${where}`
+  )
 }
 
 async function connectRemoteWithOAuth(
@@ -910,10 +1010,13 @@ async function connectRemoteWithOAuth(
       } catch {
         // ignore
       }
-      throw err
+      throw friendlyMcpOAuthError(err, server)
     }
 
-    if (!opts?.interactive && isHostedAppMcpId(server.id)) {
+    // Stored tokens were rejected (expired, revoked, scope change). Re-consent
+    // needs a browser, so it waits for an explicit Connect rather than opening
+    // one from whatever background sync happened to trigger this connect.
+    if (!opts?.interactive) {
       cancelMcpOAuthCallback(server.id)
       try {
         await client.close()
@@ -952,7 +1055,7 @@ async function connectRemoteWithOAuth(
       } catch {
         // ignore
       }
-      throw oauthErr
+      throw friendlyMcpOAuthError(oauthErr, server)
     }
   }
 }

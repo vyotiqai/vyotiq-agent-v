@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { AgentInteractionModeSchema } from './settings'
 import { ProviderIdSchema } from './providers'
+import { AgentProfileIdSchema } from './agentProfile'
 
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 export const MAX_IMAGE_DATA_URL_CHARS = Math.ceil(MAX_IMAGE_BYTES * (4 / 3)) + 128
@@ -124,7 +125,13 @@ export const RunStatusSchema = z.object({
   /** Git worktree checkout for write-capable inline instances. */
   worktreePath: z.string().min(1).optional(),
   /** Branch checked out in the instance worktree; used for sequential merge-back. */
-  worktreeBranch: z.string().min(1).optional()
+  worktreeBranch: z.string().min(1).optional(),
+  /** Teammate profile this run is bound to (identity + memory namespace). */
+  agentProfileId: z.string().min(1).optional(),
+  /** Snapshot of the profile name at run time (survives profile rename/delete). */
+  agentProfileName: z.string().min(1).max(64).optional(),
+  /** Execution substrate for this run (Phase 4 runtime seam). */
+  runtime: z.enum(['local', 'cloud']).optional()
 })
 export type RunStatus = z.infer<typeof RunStatusSchema>
 
@@ -199,6 +206,33 @@ export const RunLoopSchema = z.object({
   lastTickAt: z.string().optional()
 })
 export type RunLoop = z.infer<typeof RunLoopSchema>
+
+/** Measured context breakdown attached to context_usage / step_usage events (mirrors shared/utils/contextUsage.ts). */
+const ContextBreakdownDetailWireSchema = z.object({
+  messages: z.number().int().min(0),
+  systemPrompt: z.number().int().min(0),
+  skills: z.number().int().min(0),
+  system: z.object({
+    harness: z.number().int().min(0),
+    memory: z.number().int().min(0),
+    volatile: z.number().int().min(0),
+    total: z.number().int().min(0)
+  }),
+  tools: z.object({
+    builtin: z.object({ tokens: z.number().int().min(0), count: z.number().int().min(0) }),
+    mcp: z.object({ tokens: z.number().int().min(0), count: z.number().int().min(0) }),
+    mcpByServer: z.array(
+      z.object({
+        serverId: z.string().min(1),
+        tokens: z.number().int().min(0),
+        toolCount: z.number().int().min(0)
+      })
+    ),
+    deferredBuiltin: z.object({ tokens: z.number().int().min(0), count: z.number().int().min(0) }),
+    deferredMcp: z.object({ tokens: z.number().int().min(0), count: z.number().int().min(0) }),
+    total: z.number().int().min(0)
+  })
+})
 
 const AgentEventUnionSchema = z.discriminatedUnion('type', [
   z.object({
@@ -425,7 +459,8 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
         tools: z.number().int().min(0),
         buffer: z.number().int().min(0)
       })
-      .optional()
+      .optional(),
+    detail: ContextBreakdownDetailWireSchema.optional()
   }),
   z.object({
     type: z.literal('context_usage'),
@@ -447,7 +482,9 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
         tools: z.number().int().min(0),
         buffer: z.number().int().min(0)
       })
-      .optional()
+      .optional(),
+    /** Measured breakdown (estimate-time); consumers reconcile it against the billed total. */
+    detail: ContextBreakdownDetailWireSchema.optional()
   }),
   z.object({
     /** Agent switched Ask / Plan / Agent mid-run; composer syncs from this. */
@@ -592,7 +629,11 @@ export const RunSummarySchema = z.object({
   goal: z.string().optional(),
   /** Long-lived goal runtime status from goal.json — not the chat title. */
   goalStatus: RunGoalStatusSchema.optional(),
+  /** Goal continue count from goal.json — progress signal for list surfaces. */
+  goalContinueCount: z.number().int().min(1).optional(),
   loopArmed: z.boolean().optional(),
+  /** Armed loop's next scheduled tick from loop.json — absent when disarmed. */
+  loopNextAt: z.string().min(1).optional(),
   resumable: z.literal(true).optional(),
   error: z.string().optional(),
   /** Present when this run is an inline agent instance nested under a parent chat. */
@@ -605,7 +646,10 @@ export const RunSummarySchema = z.object({
   /** Provider-reported cost for the run when the provider bills it. */
   billedCost: z.number().nonnegative().optional(),
   /** Sum of token×price estimates for steps the provider didn't bill. */
-  estimatedCost: z.number().nonnegative().optional()
+  estimatedCost: z.number().nonnegative().optional(),
+  /** Teammate binding snapshot — mirrors RunStatus fields for list surfaces. */
+  agentProfileId: z.string().min(1).optional(),
+  agentProfileName: z.string().min(1).max(64).optional()
 })
 export type RunSummary = z.infer<typeof RunSummarySchema>
 
@@ -661,7 +705,9 @@ export const ChatStartRequestSchema = z
     /** Session's pinned provider — authoritative for this invoke. */
     provider: ProviderIdSchema.optional(),
     /** Session's pinned model — authoritative for this invoke. */
-    model: z.string().min(1).optional()
+    model: z.string().min(1).optional(),
+    /** Teammate profile binding: identity, per-profile memory namespace, model pin. */
+    agentProfileId: AgentProfileIdSchema.optional()
   })
   .superRefine((val, ctx) => {
     if (val.incremental) {
@@ -1472,6 +1518,8 @@ export const LoadRunResultSchema = z.object({
   pendingFollowUps: z.array(LoadRunPendingFollowUpSchema).default([]),
   status: z.enum(['running', 'cancelled', 'error', 'done']).optional(),
   resumable: z.literal(true).optional(),
+  /** Inline agent instance runs are never auto-resumed on open. */
+  inlineInstance: z.literal(true).optional(),
   error: z.string().optional(),
   hasEarlier: z.boolean(),
   earlierCursor: z.string().nullable()

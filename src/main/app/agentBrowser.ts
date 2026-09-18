@@ -1,4 +1,4 @@
-import { WebContentsView, session, type WebContents } from 'electron'
+import { BrowserWindow, WebContentsView, session, type WebContents } from 'electron'
 import { createHash } from 'crypto'
 import { mkdirSync, writeFileSync, existsSync } from 'fs'
 import { join, basename } from 'path'
@@ -150,6 +150,8 @@ export type AgentBrowserState = {
   agentBusy?: boolean
   /** True after the user clicked Take control during an agent op. */
   userControl?: boolean
+  /** True while the live view floats in the always-on-top PiP mini window. */
+  pip?: boolean
   tabs?: Array<{ id: string; title: string; url: string; active: boolean }>
   canGoBack?: boolean
   canGoForward?: boolean
@@ -179,6 +181,11 @@ let snapshotSeq = 0
 let agentBusyDepth = 0
 let userTookControl = false
 let embedBounds: EmbedBounds | null = null
+/** Floating always-on-top mini window hosting the visible tab (PiP mode). */
+let pipWindow: BrowserWindow | null = null
+let pipMode = false
+const PIP_MIN_WIDTH = 380
+const PIP_MIN_HEIGHT = 260
 
 function workspaceKey(workspacePath?: string): string {
   return workspacePath && workspacePath.length > 0 ? workspacePath : GLOBAL_WORKSPACE_KEY
@@ -252,15 +259,27 @@ function tabContents(tab: BrowserTab): WebContents {
   return tab.view.webContents
 }
 
-function destroyTab(tab: BrowserTab): void {
+/** Detach a view from every host window it may be parented to. */
+function detachViewFromHosts(view: WebContentsView): void {
   const main = getMainWindow()
   if (main && !main.isDestroyed()) {
     try {
-      main.contentView.removeChildView(tab.view)
+      main.contentView.removeChildView(view)
     } catch {
       // already detached
     }
   }
+  if (pipWindow && !pipWindow.isDestroyed()) {
+    try {
+      pipWindow.contentView.removeChildView(view)
+    } catch {
+      // already detached
+    }
+  }
+}
+
+function destroyTab(tab: BrowserTab): void {
+  detachViewFromHosts(tab.view)
   if (!isTabDestroyed(tab)) {
     tab.view.webContents.close()
   }
@@ -268,22 +287,20 @@ function destroyTab(tab: BrowserTab): void {
 }
 
 function attachTabView(tab: BrowserTab): void {
-  const main = getMainWindow()
-  if (!main || main.isDestroyed()) return
-  try {
-    main.contentView.removeChildView(tab.view)
-  } catch {
-    // not attached yet
-  }
+  detachViewFromHosts(tab.view)
+  // In PiP mode the visible tab is hosted by the floating mini window.
+  const host =
+    pipMode && pipWindow && !pipWindow.isDestroyed() ? pipWindow : getMainWindow()
+  if (!host || host.isDestroyed()) return
   // Later children paint above the window's main WebContentsView.
-  main.contentView.addChildView(tab.view)
+  host.contentView.addChildView(tab.view)
 }
 
 /** True while the guest must stay live (painted, or an agent browser tool is using it). */
 function tabNeedsLiveRenderer(tab: BrowserTab): boolean {
   if (tab.id !== visibleTabId) return false
   const boundsLive = embedBounds != null && embedBounds.width >= 1 && embedBounds.height >= 1
-  return boundsLive || agentBusyDepth > 0
+  return boundsLive || agentBusyDepth > 0 || pipMode
 }
 
 function applyGuestThrottling(tab: BrowserTab): void {
@@ -297,13 +314,23 @@ function applyGuestThrottling(tab: BrowserTab): void {
 }
 
 function applyActiveViewBounds(): void {
+  const pipHost = pipMode && pipWindow && !pipWindow.isDestroyed() ? pipWindow : null
   for (const tab of tabs.values()) {
     if (isTabDestroyed(tab)) continue
     const active = tab.id === visibleTabId && tabs.size > 0
+    if (active && pipHost) {
+      const [width, height] = pipHost.getContentSize()
+      attachTabView(tab)
+      tab.view.setBounds({ x: 0, y: 0, width, height })
+      tab.view.setVisible(true)
+      applyGuestThrottling(tab)
+      continue
+    }
     const bounds = embedBounds
     if (!active || !bounds || bounds.width < 1 || bounds.height < 1) {
       tab.view.setVisible(false)
       tab.view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+      if (pipMode) detachViewFromHosts(tab.view)
       applyGuestThrottling(tab)
       continue
     }
@@ -316,6 +343,11 @@ function applyActiveViewBounds(): void {
 }
 
 export function setAgentBrowserBounds(bounds: EmbedBounds | null): void {
+  // The dock panel reporting a live rect reclaims the view: PiP exits so the
+  // tab re-attaches to the main window exactly where the panel expects it.
+  if (bounds && bounds.width >= 2 && bounds.height >= 2 && pipMode) {
+    exitAgentBrowserPip()
+  }
   if (!bounds || bounds.width < 2 || bounds.height < 2) {
     // Keep prior bounds if the renderer reports a transient empty rect during layout.
     if (bounds != null && embedBounds) {
@@ -332,6 +364,68 @@ export function setAgentBrowserBounds(bounds: EmbedBounds | null): void {
     }
   }
   applyActiveViewBounds()
+}
+
+/** Host the visible tab in the floating always-on-top mini window. */
+export function enterAgentBrowserPip(): boolean {
+  if (pipMode) return true
+  const tab = visibleTabId ? tabs.get(visibleTabId) : undefined
+  if (!tab || isTabDestroyed(tab)) return false
+  const main = getMainWindow()
+  if (!main || main.isDestroyed()) return false
+  const win = new BrowserWindow({
+    width: 480,
+    height: 340,
+    minWidth: PIP_MIN_WIDTH,
+    minHeight: PIP_MIN_HEIGHT,
+    title: 'Vyotiq — Agent browser',
+    alwaysOnTop: true,
+    autoHideMenuBar: true,
+    show: false,
+    backgroundColor: '#141414'
+  })
+  win.setMenuBarVisibility(false)
+  pipWindow = win
+  pipMode = true
+  win.once('closed', () => {
+    if (pipWindow === win) {
+      pipWindow = null
+      if (pipMode) {
+        pipMode = false
+        emitCurrent()
+      }
+    }
+  })
+  win.on('resize', () => {
+    if (pipWindow === win) applyActiveViewBounds()
+  })
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) win.show()
+  })
+  emitCurrent()
+  return true
+}
+
+/** Return the view to the main window and close the mini window. */
+export function exitAgentBrowserPip(): boolean {
+  if (!pipMode) return false
+  const win = pipWindow
+  pipMode = false
+  pipWindow = null
+  if (win && !win.isDestroyed()) {
+    win.destroy()
+  }
+  emitCurrent()
+  return true
+}
+
+export function toggleAgentBrowserPip(): boolean {
+  if (pipMode) {
+    exitAgentBrowserPip()
+    return false
+  }
+  enterAgentBrowserPip()
+  return pipMode
 }
 
 function withBrowserLock<T>(
@@ -434,7 +528,7 @@ function navFlags(wc: WebContents | null): { canGoBack: boolean; canGoForward: b
 }
 
 function pushState(partial: Partial<AgentBrowserState>): void {
-  lastState = { ...lastState, ...partial }
+  lastState = { ...lastState, pip: pipMode, ...partial }
   const main = getMainWindow()
   if (!main || main.isDestroyed()) return
   main.webContents.send(IPC.browserState, lastState)
@@ -1730,6 +1824,7 @@ export function focusAgentBrowser(): boolean {
 }
 
 export function closeAgentBrowser(): void {
+  exitAgentBrowserPip()
   for (const tab of [...tabs.values()]) {
     destroyTab(tab)
   }
@@ -1766,6 +1861,9 @@ export function disposeAgentBrowserForWorkspace(workspacePath: string): number {
   }
   if (visibleTabId && !tabs.has(visibleTabId)) {
     visibleTabId = tabs.keys().next().value ?? null
+  }
+  if (tabs.size === 0 && pipMode) {
+    exitAgentBrowserPip()
   }
   emitCurrent({ navigating: false })
   return closed
@@ -1897,6 +1995,8 @@ export function resetAgentBrowserForTests(): void {
   activeTabIdByWorkspace.clear()
   downloadGuardedPartitions.clear()
   embedBounds = null
+  pipWindow = null
+  pipMode = false
   agentBusyDepth = 0
   userTookControl = false
   snapshotSeq = 0

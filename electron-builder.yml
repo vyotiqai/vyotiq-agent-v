@@ -1,6 +1,12 @@
 appId: com.vyotiq.agent
 productName: Vyotiq
 icon: resources/icon.png
+# vyotiq:// deep links: NSIS writes the registry handler on Windows; macOS gets
+# CFBundleURLTypes. Linux uses linux.mimeTypes below (deb/rpm .desktop entry).
+protocols:
+  - name: Vyotiq Deep Link
+    schemes:
+      - vyotiq
 directories:
   buildResources: build
   output: dist-package
@@ -186,6 +192,9 @@ linux:
   # fail. fpm accepts any string, so this still produces a buildable .deb.
   maintainer: "Vyotiq <support@vyotiq.com>"
   category: Development
+  # x-scheme-handler entry so deb/rpm installs resolve vyotiq:// links via xdg.
+  mimeTypes:
+    - x-scheme-handler/vyotiq
   # Same master PNG the other platforms use; stated explicitly because the
   # deb target renders the 512x512 hicolor slot from it.
   icon: resources/icon.png

@@ -1312,6 +1312,135 @@ describe('useWorkspaceManager', () => {
     ).toBe(false)
   })
 
+  it('hydrates a freshly dropped session into its pane (no empty split)', async () => {
+    listRuns.mockResolvedValue({
+      ok: true,
+      data: {
+        runs: [
+          { runId: 'run-alpha', status: 'done', updatedAt: '2026-01-01T00:00:00.000Z', goal: 'Alpha' },
+          { runId: 'run-beta', status: 'done', updatedAt: '2026-01-01T00:01:00.000Z', goal: 'Beta' }
+        ],
+        capped: false
+      }
+    })
+    loadRun.mockResolvedValue({
+      ok: true,
+      data: {
+        runId: 'run-beta',
+        messages: [{ role: 'user', content: 'hello beta' }],
+        hasEarlier: false,
+        earlierCursor: null
+      }
+    })
+    const { result } = renderHook(() => useWorkspaceManager())
+
+    await waitFor(() => {
+      expect(result.current.activeWorkspace).toBe('/ws-a')
+      expect(result.current.paneLayout?.panes.length).toBe(1)
+    })
+
+    const anchorPaneId = result.current.paneLayout!.panes[0]!.paneId
+    await act(async () => {
+      result.current.openRunTab('run-alpha')
+    })
+    let ok = false
+    await act(async () => {
+      ok = result.current.dropSessionOnPane(anchorPaneId, 'right', {
+        workspacePath: '/ws-a',
+        runId: 'run-beta'
+      })
+    })
+    expect(ok).toBe(true)
+    await waitFor(() => {
+      expect(result.current.paneLayout?.panes).toHaveLength(2)
+    })
+
+    // Mirror App.handleSessionDrop's post-drop transcript load verbatim.
+    await act(async () => {
+      const ctrl = result.current.getRunController('run-beta', '/ws-a')
+      if (!ctrl || ctrl.items.length === 0) {
+        await result.current.loadRunIntoTab('/ws-a', 'run-beta')
+      }
+    })
+
+    const snap = result.current.getPaneChatSnapshot('/ws-a', 'run-beta')
+    expect(snap.items.length).toBeGreaterThan(0)
+    expect(snap.transcriptLoading).toBe(false)
+  })
+
+  it('self-heals an empty pane transcript on the next layout commit', async () => {
+    listRuns.mockResolvedValue({
+      ok: true,
+      data: {
+        runs: [
+          { runId: 'run-alpha', status: 'done', updatedAt: '2026-01-01T00:00:00.000Z', goal: 'Alpha' },
+          { runId: 'run-beta', status: 'done', updatedAt: '2026-01-01T00:01:00.000Z', goal: 'Beta' }
+        ],
+        capped: false
+      }
+    })
+    // The drop's own hydrate and App's one-shot load both fail; the pane must
+    // not sit empty forever — the next layout commit retries and succeeds.
+    // Counted per runId so interleaved loadRun callers don't shift the script.
+    let betaFailures = 2
+    loadRun.mockImplementation(async (_ws: string, runId: string) => {
+      if (runId === 'run-beta' && betaFailures > 0) {
+        betaFailures -= 1
+        return { ok: false as const, error: 'transient load failure' }
+      }
+      return {
+        ok: true as const,
+        data: {
+          runId,
+          messages: [{ role: 'user' as const, content: 'hello' }],
+          hasEarlier: false,
+          earlierCursor: null
+        }
+      }
+    })
+    const { result } = renderHook(() => useWorkspaceManager())
+
+    await waitFor(() => {
+      expect(result.current.activeWorkspace).toBe('/ws-a')
+      expect(result.current.paneLayout?.panes.length).toBe(1)
+    })
+
+    const anchorPaneId = result.current.paneLayout!.panes[0]!.paneId
+    await act(async () => {
+      result.current.openRunTab('run-alpha')
+    })
+    await act(async () => {
+      expect(
+        result.current.dropSessionOnPane(anchorPaneId, 'right', {
+          workspacePath: '/ws-a',
+          runId: 'run-beta'
+        })
+      ).toBe(true)
+    })
+    await waitFor(() => {
+      expect(result.current.paneLayout?.panes).toHaveLength(2)
+    })
+
+    // Mirror App.handleSessionDrop's post-drop transcript load — it fails.
+    await act(async () => {
+      const ctrl = result.current.getRunController('run-beta', '/ws-a')
+      if (!ctrl || ctrl.items.length === 0) {
+        await result.current.loadRunIntoTab('/ws-a', 'run-beta')
+      }
+    })
+    expect(result.current.getPaneChatSnapshot('/ws-a', 'run-beta').items.length).toBe(0)
+
+    // Any later layout commit (here: a focus change) retries the hydrate.
+    await act(async () => {
+      result.current.focusPaneById(anchorPaneId)
+    })
+    await waitFor(() => {
+      expect(result.current.getPaneChatSnapshot('/ws-a', 'run-beta').items.length).toBeGreaterThan(
+        0
+      )
+    })
+  })
+
   it('refuses a pane drop beyond capacity and leaves the layout unchanged', async () => {
     const { result } = renderHook(() => useWorkspaceManager())
 
@@ -1336,7 +1465,7 @@ describe('useWorkspaceManager', () => {
       expect(result.current.paneLayout?.panes).toHaveLength(2)
     })
 
-    // jsdom viewport (1024px / 360px min column) caps the row at two panes;
+    // jsdom viewport (1024px / 280px min column) caps the row at two panes;
     // the third drop is refused without touching the committed layout.
     await act(async () => {
       expect(
@@ -1353,6 +1482,326 @@ describe('useWorkspaceManager', () => {
       'run-b'
     ])
     expect(result.current.paneLayout?.panes.some((p) => p.runId === 'run-c')).toBe(false)
+  })
+
+  it('splitFocusedPane inserts a draft pane beside the focused session', async () => {
+    const { result } = renderHook(() => useWorkspaceManager())
+
+    await waitFor(() => {
+      expect(result.current.activeWorkspace).toBe('/ws-a')
+      expect(result.current.paneLayout?.panes.length).toBe(1)
+    })
+
+    act(() => {
+      result.current.openRunTab('run-a')
+    })
+    await waitFor(() => {
+      expect(result.current.paneLayout?.panes[0]?.runId).toBe('run-a')
+    })
+
+    let ok = false
+    act(() => {
+      ok = result.current.splitFocusedPane()
+    })
+    expect(ok).toBe(true)
+    expect(result.current.paneLayout?.panes).toHaveLength(2)
+    expect(result.current.paneLayout?.panes[1]?.runId).toBeNull()
+    expect(result.current.paneLayout?.panes[1]?.workspacePath).toBe('/ws-a')
+    expect(result.current.paneLayout?.focusedPaneId).toBe(
+      result.current.paneLayout?.panes[1]?.paneId
+    )
+  })
+
+  it('splitFocusedPane refuses when the focused pane is a draft', async () => {
+    const { result } = renderHook(() => useWorkspaceManager())
+
+    await waitFor(() => {
+      expect(result.current.activeWorkspace).toBe('/ws-a')
+      expect(result.current.paneLayout?.panes.length).toBe(1)
+    })
+    expect(result.current.paneLayout?.panes[0]?.runId).toBeNull()
+
+    let ok = true
+    act(() => {
+      ok = result.current.splitFocusedPane()
+    })
+    expect(ok).toBe(false)
+    expect(result.current.paneLayout?.panes).toHaveLength(1)
+  })
+
+  it('splitFocusedPane respects the maxChatPanes override', async () => {
+    const { result } = renderHook(() => useWorkspaceManager({ maxChatPanes: 1 }))
+
+    await waitFor(() => {
+      expect(result.current.activeWorkspace).toBe('/ws-a')
+    })
+    act(() => {
+      result.current.openRunTab('run-a')
+    })
+    await waitFor(() => {
+      expect(result.current.paneLayout?.panes[0]?.runId).toBe('run-a')
+    })
+
+    let ok = true
+    act(() => {
+      ok = result.current.splitFocusedPane()
+    })
+    expect(ok).toBe(false)
+    expect(result.current.paneLayout?.panes).toHaveLength(1)
+  })
+
+  it('dropping an instance on a pane never enters openRunIds or activeRunId', async () => {
+    listRuns.mockResolvedValue({
+      ok: true,
+      data: {
+        runs: [{ runId: 'parent-1', status: 'done', updatedAt: '2026-01-01T00:00:00.000Z' }],
+        instanceRuns: [
+          {
+            runId: 'child-1',
+            status: 'done',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            inlineInstance: true,
+            parentRunId: 'parent-1'
+          }
+        ],
+        capped: false
+      }
+    })
+    const { result } = renderHook(() => useWorkspaceManager())
+
+    await waitFor(() => {
+      expect(result.current.activeWorkspace).toBe('/ws-a')
+      expect(result.current.activeContext?.instanceRuns.length).toBe(1)
+    })
+    const anchorPaneId = result.current.paneLayout!.panes[0]!.paneId
+
+    let ok = false
+    act(() => {
+      ok = result.current.dropSessionOnPane(anchorPaneId, 'right', {
+        workspacePath: '/ws-a',
+        runId: 'child-1'
+      })
+    })
+    expect(ok).toBe(true)
+    await waitFor(() => {
+      expect(result.current.paneLayout?.panes).toHaveLength(2)
+    })
+    expect(result.current.paneLayout?.panes[1]?.runId).toBe('child-1')
+    expect(result.current.activeContext?.activeRunId).not.toBe('child-1')
+    expect(result.current.activeContext?.openRunIds).not.toContain('child-1')
+
+      // Contrast: a parent session opened as a tab lands in the tab list.
+      act(() => {
+        result.current.openRunTab('parent-1')
+      })
+      expect(result.current.activeContext?.openRunIds).toContain('parent-1')
+  })
+
+  describe('teammate model pin + binding prune', () => {
+    function registryWithBindings(bindingsA: Record<string, string>): WorkspacesState {
+      return defaultRegistry({
+        uiStateByPath: {
+          '/ws-a': {
+            activeRunId: null,
+            openRunIds: [],
+            scrollTop: 0,
+            scrollTopByRunId: {},
+            composerDraft: '',
+            agentProfileIdByRunId: bindingsA
+          },
+          '/ws-b': {
+            activeRunId: null,
+            openRunIds: [],
+            scrollTop: 0,
+            scrollTopByRunId: {},
+            composerDraft: '',
+            agentProfileIdByRunId: {}
+          }
+        } as WorkspacesState['uiStateByPath']
+      })
+    }
+
+    it('seeds a pre-bound chat with the teammate model pin at controller creation', async () => {
+      getWorkspaces.mockResolvedValue({
+        ok: true,
+        data: registryWithBindings({ __draft__: 'scout' })
+      })
+      const { result } = renderHook(() =>
+        useWorkspaceManager({
+          getAgentProfileModelPin: (id) =>
+            id === 'scout' ? { provider: 'openai', model: 'gpt-pin' } : null
+        })
+      )
+      await waitFor(() => expect(result.current.activeWorkspace).toBe('/ws-a'))
+
+      chatStart.mockResolvedValueOnce({ ok: true, data: { runId: 'run-pin' } })
+      await act(async () => {
+        await result.current.chatActions?.send('pinned hello')
+      })
+      expect(chatStart).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'openai', model: 'gpt-pin', agentProfileId: 'scout' })
+      )
+    })
+
+    it('adopts the pin immediately when the user binds a teammate mid-session', async () => {
+      getWorkspaces.mockResolvedValue({ ok: true, data: registryWithBindings({}) })
+      const { result } = renderHook(() =>
+        useWorkspaceManager({
+          getAgentProfileModelPin: (id) =>
+            id === 'scout' ? { provider: 'openai', model: 'gpt-pin' } : null
+        })
+      )
+      await waitFor(() => expect(result.current.activeWorkspace).toBe('/ws-a'))
+
+      act(() => {
+        result.current.setAgentProfileIdForRun('/ws-a', null, 'scout')
+      })
+      expect(result.current.getAgentProfileIdForRun('/ws-a', null)).toBe('scout')
+
+      chatStart.mockResolvedValueOnce({ ok: true, data: { runId: 'run-bound' } })
+      await act(async () => {
+        await result.current.chatActions?.send('after bind')
+      })
+      expect(chatStart).toHaveBeenLastCalledWith(
+        expect.objectContaining({ provider: 'openai', model: 'gpt-pin', agentProfileId: 'scout' })
+      )
+    })
+
+    it('prunes chat bindings whose teammate no longer exists in the roster', async () => {
+      getWorkspaces.mockResolvedValue({
+        ok: true,
+        data: registryWithBindings({ __draft__: 'ghost', 'run-old': 'scout' })
+      })
+      const { result } = renderHook(() => useWorkspaceManager())
+      await waitFor(() => expect(result.current.activeWorkspace).toBe('/ws-a'))
+      expect(result.current.getAgentProfileIdForRun('/ws-a', null)).toBe('ghost')
+
+      act(() => {
+        result.current.pruneAgentProfileBindings(new Set(['scout']))
+      })
+      expect(result.current.getAgentProfileIdForRun('/ws-a', null)).toBeNull()
+      expect(result.current.getAgentProfileIdForRun('/ws-a', 'run-old')).toBe('scout')
+      await waitFor(() => expect(updateWorkspaceUiState).toHaveBeenCalled())
+    })
+  })
+
+  it('does not auto-resume inline instance runs on load', async () => {
+    const getSettings = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { autoResumeInterruptedRuns: true }
+    })
+    ;(window.vyotiq as Record<string, unknown>).getSettings = getSettings
+    loadRun.mockResolvedValue({
+      ok: true,
+      data: {
+        runId: 'child-1',
+        messages: [],
+        status: 'cancelled',
+        resumable: true,
+        error: 'Run interrupted',
+        inlineInstance: true
+      }
+    })
+    const { result } = renderHook(() => useWorkspaceManager())
+
+    await waitFor(() => {
+      expect(result.current.activeWorkspace).toBe('/ws-a')
+    })
+
+    await act(async () => {
+      await result.current.loadRunIntoTab('/ws-a', 'child-1')
+    })
+
+    // The inlineInstance guard short-circuits before settings are consulted.
+    expect(getSettings).not.toHaveBeenCalled()
+    expect(chatStart).not.toHaveBeenCalled()
+  })
+
+  it('purging a deleted parent also closes its instance panes', async () => {
+    listRuns.mockResolvedValue({
+      ok: true,
+      data: {
+        runs: [{ runId: 'parent-1', status: 'done', updatedAt: '2026-01-01T00:00:00.000Z' }],
+        instanceRuns: [
+          {
+            runId: 'child-1',
+            status: 'done',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            inlineInstance: true,
+            parentRunId: 'parent-1'
+          }
+        ],
+        capped: false
+      }
+    })
+    // jsdom caps the viewport-derived count at 2 — override so three panes fit.
+    const { result } = renderHook(() => useWorkspaceManager({ maxChatPanes: 3 }))
+
+    await waitFor(() => {
+      expect(result.current.activeWorkspace).toBe('/ws-a')
+      expect(result.current.activeContext?.instanceRuns.length).toBe(1)
+    })
+    const anchorPaneId = result.current.paneLayout!.panes[0]!.paneId
+    act(() => {
+      result.current.dropSessionOnPane(anchorPaneId, 'right', {
+        workspacePath: '/ws-a',
+        runId: 'child-1'
+      })
+    })
+    await waitFor(() => {
+      expect(result.current.paneLayout?.panes).toHaveLength(2)
+    })
+    const childPaneId = result.current.paneLayout!.panes[1]!.paneId
+    act(() => {
+      result.current.dropSessionOnPane(childPaneId, 'right', {
+        workspacePath: '/ws-a',
+        runId: 'parent-1'
+      })
+    })
+    await waitFor(() => {
+      expect(result.current.paneLayout?.panes).toHaveLength(3)
+    })
+
+    act(() => {
+      result.current.purgeDeletedRunUi('/ws-a', 'parent-1')
+    })
+
+    // Parent + child panes removed in one commit; layout collapses to a draft.
+    expect(result.current.paneLayout?.panes).toHaveLength(1)
+    expect(result.current.paneLayout?.panes[0]?.runId).toBeNull()
+  })
+
+  it('hydration honors the maxChatPanes override when clamping a stored layout', async () => {
+    const storedLayout = (): string =>
+      JSON.stringify({
+        panes: [
+          { paneId: 'pane-1', workspacePath: '/ws-a', runId: 'run-1' },
+          { paneId: 'pane-2', workspacePath: '/ws-a', runId: 'run-2' },
+          { paneId: 'pane-3', workspacePath: '/ws-a', runId: 'run-3' }
+        ],
+        focusedPaneId: 'pane-2',
+        sizes: [1 / 3, 1 / 3, 1 / 3]
+      })
+
+    // jsdom viewport derives 2 — the override must win so all three restore.
+    localStorage.setItem('vyotiq.chatPaneLayout', storedLayout())
+    const first = renderHook(() => useWorkspaceManager({ maxChatPanes: 3 }))
+    await waitFor(() => {
+      expect(first.result.current.activeWorkspace).toBe('/ws-a')
+      expect(first.result.current.paneLayout?.panes.length).toBe(3)
+    })
+    first.unmount()
+
+    // Override below the stored count clamps to one pane; the single-pane sync
+    // effect then mirrors the workspace's active run (null in this mock).
+    localStorage.setItem('vyotiq.chatPaneLayout', storedLayout())
+    const second = renderHook(() => useWorkspaceManager({ maxChatPanes: 1 }))
+    await waitFor(() => {
+      expect(second.result.current.activeWorkspace).toBe('/ws-a')
+      expect(second.result.current.paneLayout?.panes.length).toBe(1)
+    })
+    expect(second.result.current.paneLayout?.panes[0]?.runId).toBeNull()
+    second.unmount()
   })
 })
 

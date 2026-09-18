@@ -1,16 +1,18 @@
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Icon } from '@renderer/lib/icons'
-import { parseOpenableAttachmentPath } from '@shared/utils/linkableWorkspacePath'
-import { FileChip, ImageChip, MarkdownContent, Tooltip, cn } from '@renderer/lib/ui'
-import { useRunSession } from '../RunSessionContext'
+import { MarkdownContent, Tooltip, cn } from '@renderer/lib/ui'
 import { slashChipFromContent } from '@shared/slashCommands'
 import { TOOL_BODY_CLAMP_PX, USER_PROMPT_SURFACE } from '@renderer/lib/utils/layout'
 import type { UserItem } from '../utils/transcriptRows'
 import { SlashChip } from './SlashChip'
 
+/** One hover-revealed prompt action (edit / revert). */
+const PROMPT_ACTION =
+  'inline-grid size-6 shrink-0 place-items-center rounded-md text-muted vy-transition hover:bg-surface hover:text-fg focus-visible:vy-focus-ring'
+
 export function UserPrompt({
   item,
-  onImageClick,
+  onImageClick: _onImageClick,
   editing = false,
   editComposer,
   onBeginEdit,
@@ -25,7 +27,6 @@ export function UserPrompt({
   onRevert?: () => void
   canRevert?: boolean
 }) {
-  const { onOpenWorkspaceFile: openWorkspaceFile } = useRunSession()
   const bodyRef = useRef<HTMLDivElement>(null)
   const promptRef = useRef<HTMLDivElement>(null)
   const wasEditingRef = useRef(editing)
@@ -74,6 +75,7 @@ export function UserPrompt({
   const clamped = overflows && !expanded
   const editable = Boolean(onBeginEdit)
   const revertable = Boolean(onRevert && canRevert)
+  const hasActions = editable || revertable
   const hasBody = Boolean(content) || Boolean(slashChip)
 
   return (
@@ -83,18 +85,16 @@ export function UserPrompt({
       className={cn(
         USER_PROMPT_SURFACE,
         'relative',
-        (editable || revertable) &&
-          cn(
-            'group/prompt vy-transition',
-            editable &&
-              'cursor-text hover:border-border-strong hover:bg-surface/30 focus-visible:outline-none focus-visible:vy-focus-ring'
-          )
+        hasActions && 'group/prompt',
+        // Keep the bubble's border stable on hover. The actions fading in are
+        // the edit affordance; the surface owns the theme-aware corner radius.
+        editable &&
+          'cursor-text vy-transition focus-visible:outline-none focus-visible:vy-focus-ring'
       )}
       role={editable ? 'button' : undefined}
       tabIndex={editable ? 0 : undefined}
       aria-label={editable ? 'Edit user message' : undefined}
       aria-keyshortcuts={editable ? 'Enter Space' : undefined}
-      title={editable ? 'Click or press Enter to edit' : undefined}
       onClick={
         editable
           ? (e) => {
@@ -118,63 +118,10 @@ export function UserPrompt({
           : undefined
       }
     >
-      {editable ? (
-        <Tooltip content="Edit message">
-          <button
-            type="button"
-            className={cn(
-              'absolute top-1 z-sticky inline-grid size-6 place-items-center rounded-md',
-              revertable ? 'right-8' : 'right-1',
-              'text-muted hover:bg-surface hover:text-fg',
-              'opacity-0 vy-transition',
-              '[@media(hover:none)]:opacity-100',
-              'group-hover/prompt:opacity-100 group-focus-within/prompt:opacity-100',
-              'focus-visible:opacity-100 focus-visible:vy-focus-ring'
-            )}
-            aria-label="Edit message"
-            data-no-prompt-edit
-            onClick={(e) => {
-              e.stopPropagation()
-              onBeginEdit?.()
-            }}
-          >
-            <Icon name="edit" size={14} />
-          </button>
-        </Tooltip>
-      ) : null}
-      {revertable ? (
-        <Tooltip content="Restore files and chat as they were before this prompt">
-          <button
-            type="button"
-            className={cn(
-              'absolute right-1 top-1 z-sticky inline-grid size-6 place-items-center rounded-md',
-              'text-muted hover:bg-surface hover:text-fg',
-              'opacity-0 vy-transition',
-              '[@media(hover:none)]:opacity-100',
-              'group-hover/prompt:opacity-100 group-focus-within/prompt:opacity-100',
-              'focus-visible:opacity-100 focus-visible:vy-focus-ring'
-            )}
-            aria-label="Revert to before this prompt"
-            data-no-prompt-edit
-            onClick={(e) => {
-              e.stopPropagation()
-              onRevert?.()
-            }}
-          >
-            <Icon name="revert" size={14} />
-          </button>
-        </Tooltip>
-      ) : null}
-
       {hasBody ? (
         <div
           ref={bodyRef}
-          className={cn(
-            'relative overflow-hidden',
-            editable && (revertable ? 'pr-14' : 'pr-8'),
-            revertable && !editable && 'pr-8',
-            clamped && 'mask-fade-bottom'
-          )}
+          className={cn('relative overflow-hidden', clamped && 'mask-fade-bottom')}
           style={clamped ? { maxHeight: TOOL_BODY_CLAMP_PX } : undefined}
         >
           {slashChip ? (
@@ -190,6 +137,55 @@ export function UserPrompt({
         </div>
       ) : null}
 
+      {hasActions ? (
+        // Floats over the text rather than reserving a right gutter, so the
+        // prompt's words run the full width of the column like every other
+        // transcript row. Painted after the body so it covers what it overlaps;
+        // the page-colored fade masks the line underneath while it is shown.
+        <div
+          className={cn(
+            'absolute right-0 top-1 flex items-center gap-0.5 pl-8',
+            'bg-gradient-to-l from-bg via-bg to-transparent',
+            'opacity-0 vy-transition',
+            '[@media(hover:none)]:opacity-100',
+            'group-hover/prompt:opacity-100 group-focus-within/prompt:opacity-100',
+            'focus-within:opacity-100'
+          )}
+          data-no-prompt-edit
+        >
+          {editable ? (
+            <Tooltip content="Edit message">
+              <button
+                type="button"
+                className={PROMPT_ACTION}
+                aria-label="Edit message"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onBeginEdit?.()
+                }}
+              >
+                <Icon name="edit" size={14} />
+              </button>
+            </Tooltip>
+          ) : null}
+          {revertable ? (
+            <Tooltip content="Restore files and chat as they were before this prompt">
+              <button
+                type="button"
+                className={PROMPT_ACTION}
+                aria-label="Revert to before this prompt"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onRevert?.()
+                }}
+              >
+                <Icon name="revert" size={14} />
+              </button>
+            </Tooltip>
+          ) : null}
+        </div>
+      ) : null}
+
       {overflows ? (
         <button
           type="button"
@@ -201,42 +197,6 @@ export function UserPrompt({
         </button>
       ) : null}
 
-      {item.images?.length || item.attachments?.length ? (
-        <div
-          className={cn('flex flex-wrap items-center gap-1.5', hasBody ? 'mt-2' : null)}
-          data-no-prompt-edit
-        >
-          {item.images?.map((url, imageIndex) => (
-            <ImageChip
-              key={`${item.id}-${imageIndex}`}
-              url={url}
-              label={`Image ${imageIndex + 1}`}
-              onClick={() => onImageClick(url, `Image ${imageIndex + 1}`)}
-            />
-          ))}
-          {item.attachments?.map((file, fileIndex) => {
-            const parsed = openWorkspaceFile
-              ? parseOpenableAttachmentPath(file.name)
-              : null
-            return (
-              <FileChip
-                key={`${item.id}-file-${fileIndex}`}
-                name={file.name}
-                chars={file.chars}
-                onOpen={
-                  parsed && openWorkspaceFile
-                    ? () =>
-                        openWorkspaceFile(
-                          parsed.path,
-                          parsed.line ? { line: parsed.line } : undefined
-                        )
-                    : undefined
-                }
-              />
-            )
-          })}
-        </div>
-      ) : null}
     </div>
   )
 }

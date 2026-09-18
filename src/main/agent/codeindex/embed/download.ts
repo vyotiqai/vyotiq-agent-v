@@ -23,6 +23,19 @@ export type DownloadProgress = {
   total: number
 }
 
+/** One bounded retry for transient network failures; HTTP errors fail fast. */
+async function fetchWithRetry(url: string, signal?: AbortSignal): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    try {
+      return await fetch(url, { redirect: 'follow', signal })
+    } catch (err) {
+      if (signal?.aborted || attempt >= 1) throw err
+      await new Promise((r) => setTimeout(r, 300))
+    }
+  }
+}
+
 export async function downloadMissingFiles(
   dir: string,
   specs: DownloadFileSpec[],
@@ -40,7 +53,7 @@ export async function downloadMissingFiles(
       opts?.onProgress?.({ file: spec.relativePath, completed: i + 1, total })
       continue
     }
-    const res = await fetch(spec.url, { redirect: 'follow', signal: opts?.signal })
+    const res = await fetchWithRetry(spec.url, opts?.signal)
     if (!res.ok) {
       if (spec.optional && (res.status === 404 || res.status === 410)) {
         skipped.push(spec.relativePath)

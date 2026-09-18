@@ -4,10 +4,12 @@ import {
   writeMemoryFile
 } from '../context/memory'
 
-export function toolMemoryList(workspace: string): string {
+type MemoryNamespace = string | undefined
+
+export function toolMemoryList(workspace: string, namespace?: MemoryNamespace): string {
   // index.md is auto-injected into the system prompt every step — do not
   // duplicate it here. memory_read fetches the full file on demand.
-  const { notes, indexedNotes, hasState } = listMemoryNotes(workspace)
+  const { notes, indexedNotes, hasState } = listMemoryNotes(workspace, namespace)
   // Drift signal: notes on disk vs notes the injected index points at.
   // Unindexed notes are invisible to retrieval (the index is the map);
   // broken pointers would make memory_read fail. Zero injection cost —
@@ -32,7 +34,11 @@ export function toolMemoryList(workspace: string): string {
   ].join('\n')
 }
 
-export function toolMemoryRead(workspace: string, pathArg: string): string {
+export function toolMemoryRead(
+  workspace: string,
+  pathArg: string,
+  namespace?: MemoryNamespace
+): string {
   const cleaned = pathArg.trim().replace(/^[/\\]+/, '')
   if (!cleaned) throw new Error('path is required')
   if (cleaned.includes('..')) throw new Error('Invalid memory path')
@@ -50,7 +56,7 @@ export function toolMemoryRead(workspace: string, pathArg: string): string {
       throw new Error('note files must be notes/<name>.md with safe characters')
     }
   }
-  return readMemoryFile(workspace, cleaned)
+  return readMemoryFile(workspace, cleaned, namespace)
 }
 
 /** @deprecated Kept for callers that still import the former write cap. */
@@ -59,7 +65,8 @@ export const MEMORY_WRITE_CAP = Number.POSITIVE_INFINITY
 export function toolMemoryWrite(
   workspace: string,
   pathArg: string,
-  contents: string
+  contents: string,
+  namespace?: MemoryNamespace
 ): string {
   const cleaned = pathArg.trim().replace(/^[/\\]+/, '')
   if (!cleaned) throw new Error('path is required')
@@ -77,6 +84,6 @@ export function toolMemoryWrite(
       throw new Error('note files must be notes/<name>.md with safe characters')
     }
   }
-  const written = writeMemoryFile(workspace, cleaned, contents)
+  const written = writeMemoryFile(workspace, cleaned, contents, namespace)
   return `Wrote memory/${written}`
 }

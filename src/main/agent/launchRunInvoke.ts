@@ -2,7 +2,7 @@ import type { WebContents } from 'electron'
 import type { AgentInteractionMode, ChatMessage } from '../../shared/ipc'
 import { getMainWindow } from '../app/window'
 import { resolveRunDir } from '@main/storage/paths'
-import { runExists } from './state'
+import { loadStatus, runExists } from './state'
 import { hydrateFollowUpsFromDisk, syncFollowUpsToDisk } from './followUpStore'
 import {
   enqueueFollowUp,
@@ -43,10 +43,14 @@ export function launchRunFollowUpOrStart(input: {
     return { ok: false, error: 'Run not found' }
   }
 
-  const registered = tryRegisterRunAbort(input.runId, input.workspacePath)
+  // Recover the teammate binding so the registry entry carries the profile —
+  // the task scheduler's one-run-per-teammate gate reads it from here.
+  const runDir = resolveRunDir(input.workspacePath, input.runId)
+  const boundProfileId = loadStatus(runDir)?.agentProfileId
+  const registered = tryRegisterRunAbort(input.runId, input.workspacePath, boundProfileId)
   if (!registered.ok) return { ok: false, error: registered.error }
 
-  hydrateFollowUpsFromDisk(resolveRunDir(input.workspacePath, input.runId), input.runId)
+  hydrateFollowUpsFromDisk(runDir, input.runId)
   startAgentRunInBackground({
     runId: input.runId,
     workspacePath: input.workspacePath,

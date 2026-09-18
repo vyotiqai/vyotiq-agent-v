@@ -30,9 +30,7 @@ import {
   COMPOSER_DOCK_RESERVE_VAR,
   COMPOSER_FLOAT_BODY,
   COMPOSER_FLOAT_DOCK,
-  COMPOSER_FLOAT_FADE,
-  FLOATING_CHROME,
-  FLOATING_CHROME_SHADOW_BOTTOM
+  FLOATING_CHROME
 } from '@renderer/lib/utils/layout'
 import { ComposerMentionInput, type ComposerMentionInputHandle } from './ComposerMentionInput'
 import { ComposerToolbar, ComposerToolbarTools, type ComposerVariant } from './ComposerToolbar'
@@ -150,6 +148,8 @@ export function Composer({
   onChatSettingsChange,
   agentMode = 'agent',
   onAgentModeChange = () => {},
+  agentProfileId = null,
+  onAgentProfileChange = () => {},
   onSend,
   onStop,
   pendingFollowUps = [],
@@ -204,6 +204,8 @@ export function Composer({
   onChatSettingsChange: (patch: ChatSettingsPatch) => void
   agentMode?: AgentInteractionMode
   onAgentModeChange?: (mode: AgentInteractionMode) => void
+  agentProfileId?: string | null
+  onAgentProfileChange?: (profileId: string | null) => void
   onSend: (
     text: string,
     images?: string[],
@@ -932,7 +934,6 @@ export function Composer({
 
   const composerShellChrome = cn(
     FLOATING_CHROME,
-    FLOATING_CHROME_SHADOW_BOTTOM,
     isDock && 'pointer-events-auto'
   )
 
@@ -1086,13 +1087,6 @@ export function Composer({
           onAddKey={() => {
             slashHandlers?.onOpenSettings?.('providers')
           }}
-          onChooseModel={() => {
-            const trigger = document.querySelector<HTMLButtonElement>(
-              'button[aria-label="Select model"]'
-            )
-            trigger?.focus()
-            trigger?.click()
-          }}
         />
       ) : null}
 
@@ -1177,6 +1171,8 @@ export function Composer({
             catalogLoading={catalogLoading}
             agentMode={agentMode}
             onAgentModeChange={onAgentModeChange}
+            agentProfileId={agentProfileId}
+            onAgentProfileChange={onAgentProfileChange}
             running={running}
             focusInput={focusInput}
           />
@@ -1259,18 +1255,6 @@ export function Composer({
       data-composer-hero={variant === 'hero' ? true : undefined}
       data-composer-inline={isInline ? true : undefined}
     >
-      {/* Fade sits outside the scroll-clipped body so it can rise above the bar;
-          gutters + column keep its width matched to the shell. */}
-      {isDock ? (
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-full h-6"
-        >
-          <div className={cn('h-full', sideRailPad ? CHAT_STAGE_INSET : CHAT_GUTTER)}>
-            <div className={cn('mx-auto h-full w-full max-w-[840px]', COMPOSER_FLOAT_FADE)} />
-          </div>
-        </div>
-      ) : null}
       {/* Scroll-clipped body — reserves the transcript's scrollbar gutter so the
           centered column lines up exactly with the transcript column. */}
       <div className={cn(isDock && COMPOSER_FLOAT_BODY)}>

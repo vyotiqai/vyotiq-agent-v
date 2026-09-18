@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "cloudflare-docs",
+  "name": "Cloudflare Docs",
+  "version": "1.0.0",
+  "description": "Search Cloudflare product documentation and migration guides.",
+  "transport": "http",
+  "url": "https://docs.mcp.cloudflare.com/mcp",
+  "auth": "none",
+  "docsUrl": "https://developers.cloudflare.com/agents/model-context-protocol/"
+}

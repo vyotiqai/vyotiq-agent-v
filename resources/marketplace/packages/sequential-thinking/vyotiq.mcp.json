@@ -7,6 +7,13 @@
   "description": "Official MCP sequential-thinking server (stdio via npx).",
   "transport": "stdio",
   "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
-  "env": {}
+  "args": [
+    "-y",
+    "@modelcontextprotocol/server-sequential-thinking"
+  ],
+  "env": {},
+  "auth": "none",
+  "requires": [
+    "node"
+  ]
 }

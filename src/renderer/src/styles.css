@@ -18,7 +18,6 @@
   --vy-chrome-border-width: 1px;
   --vy-chrome-border-color: var(--vy-border);
   --vy-chrome-surface: var(--vy-bg);
-  --vy-prompt-surface: var(--vy-bg);
 }
 
 [data-skin="proof"] {
@@ -526,6 +525,15 @@
   -webkit-mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
 }
 
+/**
+ * Cover behind the pinned turn prompt. It uses the page background only to
+ * prevent scrolling transcript rows from bleeding into the pinned stack; it
+ * deliberately has no gradient, border, or shadow.
+ */
+@utility vy-turn-prompt-cover {
+  background-color: var(--vy-bg);
+}
+
 /** Diff rows: tint + gutter sign (+/−) mark add/del — never hue alone. */
 @utility diff-row-add {
   background: color-mix(in srgb, var(--color-success) 10%, transparent);
@@ -986,6 +994,22 @@
   scroll-margin-bottom: 0.5rem;
 }
 
+/*
+ * Turn prompt: the bordered, unshadowed bubble clearly separates the user's
+ * turn from the transcript. The prompt is the heading of its turn, so it steps
+ * up from the 13px body to the heading scale with tighter tracking and the
+ * strong foreground; the assistant's prose stays at
+ * --text-sm / --color-fg. Mirrors USER_PROMPT_TEXT, which styles the wrapper:
+ * MarkdownContent re-declares size, leading and color on its own root, and
+ * specificity (0,2,0) is what beats it — `cn()` only concatenates classes.
+ */
+[data-user-prompt] .markdown-body {
+  font-size: var(--text-heading);
+  line-height: 1.5;
+  letter-spacing: var(--vy-tracking-tight);
+  color: var(--color-fg-strong);
+}
+
 /* Plan dock: wide tables scroll horizontally (readable cells); task lists status-only. */
 [data-plan-panel] .markdown-body {
   h1,
@@ -1210,6 +1234,27 @@
   }
 }
 
+/* Day bars grow out of the axis once, left to right, when Activity first
+   paints. Reuses the tool timeline's --stagger-index so the app keeps a single
+   cadence, at a shorter step because a 30-day window has 30 columns. */
+@keyframes home-bar-rise {
+  from {
+    transform: scaleY(0);
+  }
+
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .home-bar-enter {
+    transform-origin: bottom;
+    animation: home-bar-rise var(--vy-duration) var(--vy-ease) both;
+    animation-delay: calc(min(var(--stagger-index, 0), 29) * 18ms);
+  }
+}
+
 /* Native <dialog> (useNativeDialog) has no entrance by default — showModal
    just appears. Animate the open transition so it matches the non-native
    panel. Exit stays instant (close() removes [open] immediately). */
@@ -1222,19 +1267,6 @@ dialog[open] {
     min-height: 2.75rem;
     font-size: 1rem;
   }
-}
-
-/* Hero empty-state mode atmosphere — subtle composer framing only. */
-[data-chat-hero][data-hero-mode='agent'] [data-composer-shell] {
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--color-accent) 18%, transparent),
-    var(--vy-shadow-floating-bottom, 0 8px 24px rgb(0 0 0 / 0.18));
-}
-
-[data-chat-hero][data-hero-mode='ask'] [data-composer-shell] {
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--color-border) 55%, transparent),
-    var(--vy-shadow-floating-bottom, 0 8px 24px rgb(0 0 0 / 0.18));
 }
 
 [data-chat-hero][data-hero-mode='plan'] [data-composer-hero] {
@@ -1262,11 +1294,6 @@ dialog[open] {
 }
 
 @media (prefers-contrast: more) {
-  [data-chat-hero][data-hero-mode='agent'] [data-composer-shell],
-  [data-chat-hero][data-hero-mode='ask'] [data-composer-shell] {
-    box-shadow: 0 0 0 2px var(--color-border);
-  }
-
   [data-chat-hero][data-hero-mode='plan'] [data-composer-hero]::before {
     color: color-mix(in srgb, var(--color-fg) 12%, transparent);
   }

@@ -19,13 +19,34 @@ import {
   type MarketplaceOverrideKind
 } from '@shared/domain/marketplaceEnablement'
 import { findByWorkspacePath } from '@shared/workspacePathMatch'
-import { GITHUB_MCP_ID, isHostedAppMcpId } from '@shared/mcpApps'
+import { GITHUB_MCP_ID } from '@shared/mcpApps'
 import { indexMcpStatusById } from './mcpStatus'
 
 export type MarketplaceFeedback = { kind: 'success' | 'error' | 'warning'; text: string }
 
 const REMOTE_INSTALL_SOURCES = new Set(['registry', 'git', 'npm', 'zip', 'remote', 'path'])
 const QUERY_DEBOUNCE_MS = 250
+
+/**
+ * Does the freshly installed server still need credentials?
+ *
+ * Read from main rather than the caller's `settings` prop, which is captured at
+ * render and is stale by the time an install finishes. Returns false when the
+ * lookup fails so a transient IPC error cannot pop a dialog for a package that
+ * connects on its own.
+ */
+async function serverNeedsConnect(serverId: string): Promise<boolean> {
+  try {
+    const latest = await window.vyotiq.getSettings()
+    if (!latest.ok) return false
+    const auth = latest.data.mcpServers.find((s) => s.id === serverId)?.auth
+    return auth === 'oauth' || auth === 'oauth-client' || auth === 'token'
+  } catch {
+    // The install itself already succeeded; failing to decide whether to offer
+    // the connect dialog must not turn that into a failed install.
+    return false
+  }
+}
 
 export function useMarketplaceController({
   settings,
@@ -80,6 +101,8 @@ export function useMarketplaceController({
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([])
   const [mcpStatusLoading, setMcpStatusLoading] = useState(false)
   const [hasGoogleMcpClientSecret, setHasGoogleMcpClientSecret] = useState(false)
+  /** A user-configured or app-bundled Google OAuth client exists. */
+  const [hasGoogleMcpClient, setHasGoogleMcpClient] = useState(false)
   const [connectWizardId, setConnectWizardId] = useState<string | null>(null)
   const mcpStatusReqIdRef = useRef(0)
   const reloadReqIdRef = useRef(0)
@@ -124,6 +147,7 @@ export function useMarketplaceController({
       if (res.ok) {
         setMcpStatus(res.data.servers)
         setHasGoogleMcpClientSecret(res.data.hasGoogleMcpClientSecret === true)
+        setHasGoogleMcpClient(res.data.hasGoogleMcpClient === true)
       }
       else {
         setFeedback({
@@ -235,7 +259,8 @@ export function useMarketplaceController({
   const runInstall = useCallback(
     async (
       payload: MarketplaceInstallRequest,
-      opts?: { busyTargetId?: string | null }
+      /** `needsConnect` swaps the success copy for packages that still need auth. */
+      opts?: { busyTargetId?: string | null; needsConnect?: boolean }
     ): Promise<boolean> => {
       beginBusy(opts?.busyTargetId)
       const epoch = setFeedback(null)
@@ -257,10 +282,9 @@ export function useMarketplaceController({
               ? ' Warning: Bearer token could not be stored in OS secure storage — configure auth under Installed.'
               : ' Bearer token stored in OS secure storage.'
         }
-        const hosted = isHostedAppMcpId(item.id)
         setFeedbackIfCurrent(epoch, {
           kind: authTokenStored === false ? 'error' : 'success',
-          text: hosted
+          text: opts?.needsConnect
             ? `Installed ${item.name} — sign in to connect.`
             : `Installed ${item.name} (${item.kind}) — enabled by default; tools load into the agent when connected.${tokenHint}`
         })
@@ -288,24 +312,21 @@ export function useMarketplaceController({
   const installFromCatalog = useCallback(
     async (entry: MarketplaceCatalogEntry): Promise<boolean> => {
       if (entry.installable === false) return false
-      const ok = entry.bundledPath
-        ? await runInstall(
-            {
-              source: 'bundled',
-              target: entry.bundledPath,
-              kind: entry.kind
-            },
-            { busyTargetId: entry.id }
-          )
-        : await runInstall(
-            {
-              source: 'registry',
-              target: entry.id,
-              kind: entry.kind
-            },
-            { busyTargetId: entry.id }
-          )
-      if (ok && isHostedAppMcpId(entry.id)) setConnectWizardId(entry.id)
+      // The catalog's `auth` is a browse-time mirror and may be absent on a
+      // remote entry, so it only pre-seeds the success copy. The installed
+      // server's own manifest decides whether to open the connect flow.
+      const ok = await runInstall(
+        entry.bundledPath
+          ? { source: 'bundled', target: entry.bundledPath, kind: entry.kind }
+          : { source: 'registry', target: entry.id, kind: entry.kind },
+        {
+          busyTargetId: entry.id,
+          needsConnect: entry.kind === 'mcp' && !!entry.auth && entry.auth !== 'none'
+        }
+      )
+      if (ok && entry.kind === 'mcp' && (await serverNeedsConnect(entry.id))) {
+        setConnectWizardId(entry.id)
+      }
       return ok
     },
     [runInstall]
@@ -524,6 +545,7 @@ export function useMarketplaceController({
     mcpStatusById,
     mcpStatusLoading,
     hasGoogleMcpClientSecret,
+    hasGoogleMcpClient,
     connectWizardId,
     openConnectWizard: setConnectWizardId,
     closeConnectWizard: () => setConnectWizardId(null),

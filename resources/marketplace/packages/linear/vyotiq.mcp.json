@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "linear",
+  "name": "Linear",
+  "version": "1.0.0",
+  "description": "Issues, projects, and cycles. Create, search, and update Linear work from a run.",
+  "transport": "http",
+  "url": "https://mcp.linear.app/mcp",
+  "auth": "oauth",
+  "docsUrl": "https://linear.app/docs/mcp"
+}

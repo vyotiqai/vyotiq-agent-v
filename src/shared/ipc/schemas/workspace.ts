@@ -31,6 +31,8 @@ export const WorkspaceUiStateSchema = z.object({
   composerDraftByRunId: z.record(z.string(), z.string()).default({}),
   /** Per-workspace composer Ask / Plan / Agent mode. */
   agentMode: AgentInteractionModeSchema.default('agent'),
+  /** Teammate profile bound per chat bucket (runId or draft key). */
+  agentProfileIdByRunId: z.record(z.string(), z.string()).default({}),
   /** Whether this workspace's group is expanded in the sidebar (persisted). */
   expanded: z.boolean().optional(),
   /**

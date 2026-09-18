@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "kind": "mcp",
+  "id": "atlassian",
+  "name": "Atlassian",
+  "version": "1.0.0",
+  "description": "Jira issues and Confluence pages from your Atlassian sites.",
+  "transport": "http",
+  "url": "https://mcp.atlassian.com/v1/mcp",
+  "auth": "oauth",
+  "docsUrl": "https://support.atlassian.com/atlassian-rovo-mcp-server/docs/getting-started-with-the-atlassian-remote-mcp-server/"
+}

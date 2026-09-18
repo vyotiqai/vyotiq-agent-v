@@ -38,7 +38,8 @@ import {
   setMcpStdioWorkspace,
   shutdownMcpServers,
   syncMcpServers,
-  buildMcpChildEnv
+  buildMcpChildEnv,
+  friendlyMcpOAuthError
 } from '@main/agent/mcp'
 import { executeTool } from '@main/agent/tools'
 
@@ -419,5 +420,34 @@ describe('MCP HTTP SSRF', () => {
         env: {}
       })
     ).rejects.toThrow(/private or loopback/i)
+  })
+})
+
+describe('friendlyMcpOAuthError', () => {
+  const dcr = () =>
+    new Error('Incompatible auth server: does not support dynamic client registration')
+  const server = { id: 'github', name: 'GitHub' } as never
+
+  it('rewrites the SDK DCR failure into something the user can act on', () => {
+    const out = friendlyMcpOAuthError(dcr(), {
+      id: 'github',
+      name: 'GitHub',
+      setupUrl: 'https://github.com/settings/applications/new'
+    } as never) as Error
+    expect(out.message).toContain('GitHub cannot register this app automatically')
+    expect(out.message).toContain('https://github.com/settings/applications/new')
+    expect(out.message).not.toContain('dynamic client registration')
+  })
+
+  it('still names the fix when the manifest declares no setup page', () => {
+    const out = friendlyMcpOAuthError(dcr(), server) as Error
+    expect(out.message).toContain('OAuth client ID and secret')
+    expect(out.message).not.toContain('Register one at')
+  })
+
+  it('passes every other value through untouched', () => {
+    const other = new Error('socket hang up')
+    expect(friendlyMcpOAuthError(other, server)).toBe(other)
+    expect(friendlyMcpOAuthError('not an error', server)).toBe('not an error')
   })
 })

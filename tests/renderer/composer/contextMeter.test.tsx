@@ -186,6 +186,87 @@ describe('ContextMeter', () => {
   })
 })
 
+describe('ContextMeter breakdown', () => {
+  const detailUsage: ContextUsageState = {
+    ...baseUsage,
+    window: 1_000_000,
+    contentWindow: 850_000,
+    compactionTrigger: 595_000,
+    used: 80_100,
+    estimatedTokens: 80_000,
+    inputTokens: 80_100,
+    layers: { system: 5_000, history: 42_400, tools: 32_700, buffer: 0 },
+    detail: {
+      messages: 42_400,
+      systemPrompt: 4_500,
+      skills: 4_400,
+      system: { harness: 3_800, memory: 700, volatile: 500, total: 5_000 },
+      tools: {
+        builtin: { tokens: 21_200, count: 45 },
+        mcp: { tokens: 11_500, count: 12 },
+        mcpByServer: [
+          { serverId: 'github', tokens: 7_000, toolCount: 8 },
+          { serverId: 'search', tokens: 4_500, toolCount: 4 }
+        ],
+        deferredBuiltin: { tokens: 3_300, count: 6 },
+        deferredMcp: { tokens: 2_400, count: 5 },
+        total: 32_700
+      },
+      autocompactBuffer: 850_000 - 595_000,
+      free: 595_000 - 80_100
+    }
+  }
+
+  it('renders every breakdown row with tokens and window shares', () => {
+    render(<ContextMeter usage={detailUsage} />)
+    fireEvent.click(screen.getByRole('button', { name: /context window/i }))
+    expect(screen.getByText(/^Messages$/)).toBeTruthy()
+    expect(screen.getByText(/^System tools$/)).toBeTruthy()
+    expect(screen.getByText(/^MCP tools$/)).toBeTruthy()
+    expect(screen.getByText(/^System prompt$/)).toBeTruthy()
+    expect(screen.getByText(/^Skills$/)).toBeTruthy()
+    expect(screen.getByText(/^Autocompact buffer$/)).toBeTruthy()
+    expect(screen.getByText(/^Free space$/)).toBeTruthy()
+    expect(screen.getByText(/^Deferred sys tools$/)).toBeTruthy()
+    expect(screen.getByText(/^Deferred MCP tools$/)).toBeTruthy()
+    expect(screen.getByText('42k')).toBeTruthy()
+    expect(screen.getByText('21k')).toBeTruthy()
+    expect(screen.getByText('12k')).toBeTruthy()
+    expect(screen.getByText('4.5k')).toBeTruthy()
+    expect(screen.getByText('4.4k')).toBeTruthy()
+    expect(screen.getByText('255k')).toBeTruthy()
+    expect(screen.getByText('515k')).toBeTruthy()
+    // Deferred rows show an em dash instead of a window share.
+    expect(screen.getAllByText('—').length).toBe(2)
+    expect(screen.getByText('4.2%')).toBeTruthy()
+  })
+
+  it('expands MCP tools into per-server rows', () => {
+    render(<ContextMeter usage={detailUsage} />)
+    fireEvent.click(screen.getByRole('button', { name: /context window/i }))
+    expect(screen.queryByText('github')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /MCP tools/i }))
+    expect(screen.getByText('github')).toBeTruthy()
+    expect(screen.getByText('search')).toBeTruthy()
+    expect(screen.getByText('8 tools')).toBeTruthy()
+    expect(screen.getByText('4 tools')).toBeTruthy()
+    expect(screen.getByText('7k')).toBeTruthy()
+    expect(screen.getAllByText('4.5k').length).toBeGreaterThanOrEqual(1)
+    fireEvent.click(screen.getByRole('button', { name: /MCP tools/i }))
+    expect(screen.queryByText('github')).toBeNull()
+  })
+
+  it('falls back to the legacy 3-layer split without detail', () => {
+    render(<ContextMeter usage={baseUsage} />)
+    fireEvent.click(screen.getByRole('button', { name: /context window/i }))
+    expect(screen.getByText(/^System$/)).toBeTruthy()
+    expect(screen.getByText(/^History$/)).toBeTruthy()
+    expect(screen.getByText(/^Tools$/)).toBeTruthy()
+    expect(screen.queryByText(/^Messages$/)).toBeNull()
+    expect(screen.queryByText(/^Skills$/)).toBeNull()
+  })
+})
+
 describe('cacheHitPct', () => {
   it('returns null without a hit', () => {
     expect(

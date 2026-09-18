@@ -308,6 +308,7 @@ export function MarketplaceView({
           settings={settings}
           status={controller.mcpStatusById.get(controller.connectWizardId)}
           hasGoogleMcpClientSecret={controller.hasGoogleMcpClientSecret}
+          hasGoogleMcpClient={controller.hasGoogleMcpClient}
           activeWorkspacePath={activeWorkspacePath}
           onUpdate={onUpdate}
           onReloadSettings={onReloadSettings}

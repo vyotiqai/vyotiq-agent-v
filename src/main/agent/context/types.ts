@@ -1,6 +1,10 @@
 import type { ChatMessage, ModelInfo, ResponseVerbosity, UserRule } from '../../../shared/ipc'
 import type { TokenUsage } from '../providers/types'
 import { DEFAULT_CONTEXT_WINDOW as SHARED_DEFAULT_CONTEXT_WINDOW } from '../../../shared/domain/contextBudget'
+import type {
+  ContextBreakdownDetailWire,
+  ContextToolsDetail
+} from '../../../shared/utils/contextUsage'
 
 export type BudgetLayers = {
   system: number
@@ -78,6 +82,16 @@ export type AssembleInput = {
   goal: string
   model: ModelInfo
   toolsJsonEstimate: number
+  /**
+   * Builtin/MCP/deferred split of the step tool catalog (loop-side, from
+   * splitToolCatalogDetail). When absent the tools layer stays one aggregate.
+   */
+  toolsSplit?: ContextToolsDetail
+  /**
+   * Auto-compact trigger tokens for the content window (loop-side, from
+   * settings.autoCompactThresholdRatio). Enables the derived buffer/free rows.
+   */
+  compactionTrigger?: number
   lastUsage?: TokenUsage
   keepRecentTurns?: number
   contract?: string
@@ -126,6 +140,8 @@ export type AssembleResult = {
   compaction?: CompactionRecord | null
   estimatedTokens: number
   layers: ContextLayerBreakdown
+  /** Measured breakdown for the context meter (window-derived fields added consumer-side). */
+  detail?: ContextBreakdownDetailWire
   overflow: boolean
   anthropicNative: {
     enableContextManagement: boolean

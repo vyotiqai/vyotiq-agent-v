@@ -82,7 +82,7 @@ export function TasksCeilingBand({
     <div className={cn('w-full min-w-0', className)} data-tasks-ceiling>
       <button
         type="button"
-        className="flex w-full min-w-0 items-center gap-2 px-2.5 py-1.5 text-left"
+        className="flex w-full min-w-0 items-center gap-2 py-1.5 text-left"
         aria-expanded={expanded}
         aria-label={expanded ? 'Collapse tasks' : 'Expand tasks'}
         onClick={() => setExpanded((v) => !v)}
@@ -110,7 +110,7 @@ export function TasksCeilingBand({
         />
       </button>
       {expanded ? (
-        <div className="px-2.5 pb-2" data-tasks-ceiling-progress>
+        <div className="pb-2" data-tasks-ceiling-progress>
           <TodoProgressBar done={done} total={total} />
           <TodoChecklist items={items} className="mt-1.5" />
         </div>

@@ -11,6 +11,24 @@ import {
 import type { UserItem } from '@renderer/features/chat/utils/transcriptRows'
 
 describe('UserPrompt slash chips', () => {
+  it('keeps submitted attachment rows out of the prompt bubble', () => {
+    const item: UserItem = {
+      kind: 'user',
+      id: 'u-attachment',
+      content: 'Review these files',
+      messageIndex: 0,
+      attachments: [
+        { name: 'RELEASE-RUNDOWN.md', mime: 'text/markdown', chars: 120 },
+        { name: 'LICENSE', mime: 'text/plain', chars: 40 }
+      ]
+    }
+
+    render(<UserPrompt item={item} onImageClick={() => {}} />)
+
+    expect(screen.queryByText('RELEASE-RUNDOWN.md')).toBeNull()
+    expect(screen.queryByText('LICENSE')).toBeNull()
+  })
+
   it('renders a skill chip and user request without the skill body', () => {
     const content = formatSkillInvocation(
       'code-review',
@@ -162,11 +180,54 @@ describe('UserPrompt slash chips', () => {
         canRevert
       />
     )
+    // Both actions share one hover-revealed overlay, so the reveal rules live on
+    // that group rather than being repeated on each button.
+    const overlay = screen.getByRole('button', { name: 'Edit message' }).parentElement!
+    expect(overlay).toBe(screen.getByRole('button', { name: 'Revert to before this prompt' }).parentElement)
     // Same fallback MessageFooter copy and sidebar row actions already carry.
-    for (const label of ['Edit message', 'Revert to before this prompt']) {
-      const button = screen.getByRole('button', { name: label })
-      expect(button.className).toMatch(/\[@media\(hover:none\)\]:opacity-100/)
-      expect(button.className).toMatch(/opacity-0/)
+    expect(overlay.className).toMatch(/\[@media\(hover:none\)\]:opacity-100/)
+    expect(overlay.className).toMatch(/opacity-0/)
+  })
+
+  it('floats the actions over the prompt instead of reserving a right gutter', () => {
+    const item: UserItem = {
+      kind: 'user',
+      id: 'u-gutter',
+      content: 'Words that should run the full width of the column',
+      messageIndex: 0
     }
+    render(
+      <UserPrompt
+        item={item}
+        onImageClick={() => {}}
+        onBeginEdit={() => {}}
+        onRevert={() => {}}
+        canRevert
+      />
+    )
+    // The actions are hover-only, so reserving padding for them narrowed every
+    // prompt's text column against the rest of the transcript.
+    const body = document.querySelector('[data-user-prompt] .markdown-body')!.parentElement!
+    expect(body.className).not.toMatch(/(^|\s)pr-\d/)
+    const overlay = screen.getByRole('button', { name: 'Edit message' }).parentElement!
+    expect(overlay.className).toContain('absolute')
+    // Page-colored fade masks whatever line the overlay covers while shown.
+    expect(overlay.className).toContain('from-bg')
+  })
+
+  it('leaves no hover fill on the frameless prompt', () => {
+    const item: UserItem = {
+      kind: 'user',
+      id: 'u-nofill',
+      content: 'No tint band under the cursor',
+      messageIndex: 0
+    }
+    render(<UserPrompt item={item} onImageClick={() => {}} onBeginEdit={() => {}} />)
+    const prompt = document.querySelector('[data-user-prompt]')!
+    expect(prompt.className).not.toContain('hover:bg-')
+    expect(prompt.className).not.toContain('hover:border-')
+    // A native tooltip over the whole message body is noise; the Edit button
+    // carries the explanation instead.
+    expect(prompt.getAttribute('title')).toBeNull()
   })
 })

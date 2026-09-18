@@ -124,11 +124,11 @@ describe('Sidebar chrome', () => {
     expect(onOpenSettings).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps the brand mark in the collapsed header with a hover toggle', () => {
+  it('keeps the collapsed header brand-free with a visible toggle', () => {
     const { container } = render(<Sidebar {...baseProps} collapsed />)
 
     expect(container.querySelector('[data-collapsed]')).toBeTruthy()
-    expect(container.querySelector('[data-sidebar-brand-toggle] [data-brand-mark]')).toBeTruthy()
+    expect(container.querySelector('[data-sidebar-brand-toggle] [data-brand-mark]')).toBeNull()
     expect(screen.getByRole('button', { name: /expand sidebar/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /home/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^settings$/i })).toBeTruthy()

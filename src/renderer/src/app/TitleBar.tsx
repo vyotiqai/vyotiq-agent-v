@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '@renderer/lib/icons'
-import { VyotiqMark } from '@renderer/lib/brand'
 import { IconButton, Tooltip, cn } from '@renderer/lib/ui'
 import { TITLE_BAR_HEIGHT, showsWindowControls } from '@renderer/lib/utils/layout'
 import { useIsDesktop } from '@renderer/lib/context/BreakpointProvider'
@@ -37,7 +36,7 @@ export function TitleBar({
 }: {
   drawerOpen: boolean
   onToggleSidebar: () => void
-  /** Desktop only: suppress the centered brand mark while the sidebar is expanded. */
+  /** Retained for call-site compatibility while the title bar carries no brand mark. */
   sidebarExpanded?: boolean
 }) {
   const isDesktop = useIsDesktop()
@@ -87,11 +86,6 @@ export function TitleBar({
           if (!occupied && showControls) void window.vyotiq?.windowMaximize()
         }}
       >
-        {!drawerOpen && !sidebarExpanded && !occupied ? (
-          <div className="pointer-events-none flex h-full items-center justify-center" aria-hidden>
-            <VyotiqMark size={17} className="text-fg/70" decorative />
-          </div>
-        ) : null}
       </div>
 
       {showControls ? (

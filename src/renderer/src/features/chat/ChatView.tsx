@@ -27,6 +27,7 @@ import {
 import { useGitChrome } from './components/GitChrome'
 import type { UiAgentQuestionAnswer, UiItem } from '@shared/transcript'
 import type {
+  AgentBrowserState,
   AgentInteractionMode,
   ChatMessage,
   ProviderId,
@@ -134,6 +135,8 @@ export function ChatView({
   onChatSettingsChange,
   agentMode = 'agent',
   onAgentModeChange = () => {},
+  agentProfileId = null,
+  onAgentProfileChange = () => {},
   onContinueInAgent,
   onSend,
   onStop,
@@ -233,6 +236,8 @@ export function ChatView({
   onChatSettingsChange: (patch: ChatSettingsPatch) => void
   agentMode?: AgentInteractionMode
   onAgentModeChange?: (mode: AgentInteractionMode) => void
+  agentProfileId?: string | null
+  onAgentProfileChange?: (profileId: string | null) => void
   onContinueInAgent?: () => void
   onSend: (
     text: string,
@@ -303,6 +308,7 @@ export function ChatView({
       zone: PaneDropZone,
       payload: { workspacePath: string; runId: string }
     ) => boolean
+    onSplitPane?: () => void
     getPaneTitle: (pane: ChatPane) => string
     renderPane: (pane: ChatPane, options: PaneRenderOptions) => React.ReactNode
   } | null
@@ -937,6 +943,37 @@ const runGoal = useRunGoal({
     }
   }, [mountedPanels, workspacePath, tryAutoOpenPanel])
 
+  // Live browser state for the watch affordances (banner + rail dot). The push
+  // channel updates regardless of whether the browser dock is mounted.
+  const [browserLive, setBrowserLive] = useState<AgentBrowserState | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    // Push events always win over a late browserGetState resolve — same guard
+    // as AgentBrowserPanel: a stale closed-state resolve must not clobber a
+    // push that already arrived.
+    let pushSeq = 0
+    let getStateSeq = 0
+    void window.vyotiq.browserGetState?.().then((res) => {
+      if (cancelled) return
+      const seq = ++getStateSeq
+      void Promise.resolve().then(() => {
+        if (cancelled || seq !== getStateSeq || pushSeq > 0) return
+        if (res?.ok) setBrowserLive(res.data)
+      })
+    })
+    const unsub = window.vyotiq.onBrowserState?.((next) => {
+      if (!cancelled) {
+        pushSeq += 1
+        getStateSeq += 1
+        setBrowserLive(next)
+      }
+    })
+    return () => {
+      cancelled = true
+      unsub?.()
+    }
+  }, [])
+
   const filesRecoveryData =
     pendingFilesRecovery?.workspacePath === workspacePath
       ? pendingFilesRecovery.data
@@ -947,6 +984,43 @@ const runGoal = useRunGoal({
       ? null
       : immersiveTab
     : activeRightPanel
+
+  const browserBusy = Boolean(browserLive?.open && browserLive?.agentBusy)
+  const browserWatchUrl = useMemo(() => {
+    const url = browserLive?.url?.trim() ?? ''
+    if (!url || url === 'about:blank') return ''
+    try {
+      return new URL(url).host
+    } catch {
+      return ''
+    }
+  }, [browserLive?.url])
+  // The panel itself shows the live view when visible; the banner covers every
+  // other case (panel closed, another panel focused, immersive on another tab).
+  const browserWatchBanner =
+    browserBusy && visiblePanelId !== 'browser' ? (
+      <div
+        className="flex shrink-0 items-center gap-2 border-b border-border/30 bg-accent/10 px-3 py-1.5 text-caption"
+        data-browser-watch-banner
+        role="status"
+      >
+        <span className="relative flex size-2 shrink-0" aria-hidden>
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+          <span className="relative inline-flex size-2 rounded-full bg-accent" />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-fg/90">
+          Agent is browsing
+          {browserWatchUrl ? <span className="text-muted"> · {browserWatchUrl}</span> : null}
+        </span>
+        <button
+          type="button"
+          className="shrink-0 rounded-md border border-border/50 bg-surface px-2 py-0.5 text-2xs font-medium text-fg hover:bg-surface-2"
+          onClick={() => setRightPanel('browser')}
+        >
+          Watch live
+        </button>
+      </div>
+    ) : null
 
   const terminalSessionBarHostRef = useRef<HTMLDivElement>(null)
   const [terminalSessions, setTerminalSessions] = useState<PtySessionInfo[]>([])
@@ -1020,6 +1094,8 @@ const runGoal = useRunGoal({
         onChatSettingsChange={onChatSettingsChange}
         agentMode={agentMode}
         onAgentModeChange={onAgentModeChange}
+        agentProfileId={agentProfileId}
+        onAgentProfileChange={onAgentProfileChange}
         onSend={submitPromptEdit}
         onStop={onStop}
         activeRunId={activeRunId}
@@ -1066,6 +1142,8 @@ const runGoal = useRunGoal({
     onChatSettingsChange,
     agentMode,
     onAgentModeChange,
+    agentProfileId,
+    onAgentProfileChange,
     onSend: sendFromDock,
     onStop,
     pendingFollowUps,
@@ -1112,6 +1190,7 @@ const runGoal = useRunGoal({
           onClosePane={multiPane.onClosePane}
           onSizesChange={multiPane.onSizesChange}
           onSessionDrop={multiPane.onSessionDrop}
+          onSplitPane={multiPane.onSplitPane}
           getPaneTitle={multiPane.getPaneTitle}
           renderPane={renderMultiPane}
         />
@@ -1263,6 +1342,7 @@ const runGoal = useRunGoal({
             activeRunId={activeRunId}
             visible={visiblePanelId === 'browser'}
             onClose={() => closeDockTab('browser')}
+            onPopOut={() => setRightPanel(null)}
           />
         </div>
       ) : null}
@@ -1383,7 +1463,7 @@ const runGoal = useRunGoal({
   )
 
   return (
-    <div className="flex h-full min-h-0 flex-col pt-9">
+    <div className={cn('flex h-full min-h-0 flex-col', (dockImmersive || dockSideTitleBar) && 'pt-9')}>
       {dockImmersive && titleBarHost
         ? createPortal(
             <DockTabBar
@@ -1474,13 +1554,17 @@ const runGoal = useRunGoal({
               inert={immersiveTab !== 'agent' ? true : undefined}
               data-immersive-agent
             >
+              {browserWatchBanner}
               {agentColumn}
             </div>
             {panelBodies}
           </div>
         ) : (
           <>
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">{agentColumn}</div>
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {browserWatchBanner}
+              {agentColumn}
+            </div>
             {activeRightPanel ? (
               <>
                 <PanelResizeHandle
@@ -1530,6 +1614,7 @@ const runGoal = useRunGoal({
                 workspacePath={workspacePath}
                 runId={activeRunId}
                 running={running}
+                browserBusy={browserBusy}
               />
             ) : null}
           </>

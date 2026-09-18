@@ -16,12 +16,12 @@ afterEach(() => {
 })
 
 describe('SidebarBrandToggle', () => {
-  it('shows the brand mark and a collapse control', () => {
+  it('shows the collapse control without a brand mark', () => {
     const { container } = render(
       <SidebarBrandToggle isDrawer={false} onToggleSidebar={vi.fn()} />
     )
 
-    expect(container.querySelector('[data-brand-mark]')).toBeTruthy()
+    expect(container.querySelector('[data-brand-mark]')).toBeNull()
     expect(screen.getByRole('button', { name: /collapse sidebar/i })).toBeTruthy()
   })
 

@@ -269,7 +269,9 @@ describe('harness tool catalog', () => {
   it('keeps the bundled spine under the token ceiling', () => {
     const harnessPath = join(process.cwd(), 'resources', 'harness', 'default.md')
     const harness = readFileSync(harnessPath, 'utf8')
-    expect(estimateTextTokens(harness)).toBeLessThan(2000)
+    // 2000 -> 2100: the ```chart data-viz capability line joined the spine
+    // (HEAD sat at 1992, leaving no headroom for any new capability).
+    expect(estimateTextTokens(harness)).toBeLessThan(2100)
   })
 
   it.skipIf(!existsSync(join(process.cwd(), 'docs', 'harness-handbook.md')))(

@@ -18,6 +18,7 @@ import {
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { ChatRow } from './ChatRow'
 import { InlineConfirmActions } from './InlineConfirmActions'
+import { TeammatesSection } from './TeammatesSection'
 import { runTitle, uniqueInstanceTitles } from './runTitle'
 import type { WorkspaceSidebarGroup } from './types'
 
@@ -273,6 +274,8 @@ export function ChatList({
   onCloseWorkspace,
   onAddWorkspace,
   onNewChatInWorkspace,
+  onStartTeammateChat,
+  onOpenTaskRun,
   activeRuns,
   workspaceHasBackgroundRun,
   onDismissRunsError,
@@ -280,6 +283,7 @@ export function ChatList({
   onRenameRun,
   onDeleteRun,
   onExportRun,
+  onCopyRunLink,
   onForkRun,
   onLoadOlderRuns,
   isRunOpenInPane,
@@ -296,6 +300,8 @@ export function ChatList({
   onCloseWorkspace: (path: string) => void
   onAddWorkspace: () => void
   onNewChatInWorkspace?: (path: string) => void
+  onStartTeammateChat?: (profileId: string) => void
+  onOpenTaskRun?: (path: string, runId: string) => void
   activeRuns: { runId: string; workspacePath: string }[]
   workspaceHasBackgroundRun: (path: string) => boolean
   onDismissRunsError?: (path?: string) => void
@@ -303,6 +309,7 @@ export function ChatList({
   onRenameRun: (path: string, runId: string, goal: string) => void
   onDeleteRun: (path: string, runId: string) => void
   onExportRun?: (path: string, runId: string) => void
+  onCopyRunLink?: (path: string, runId: string) => void
   onForkRun?: (path: string, runId: string) => void
   onLoadOlderRuns?: (path: string) => void
   isRunOpenInPane?: (path: string, runId: string) => boolean
@@ -527,6 +534,7 @@ export function ChatList({
                                     onRenameRun={onRenameRun}
                                     onDeleteRun={onDeleteRun}
                                     onExportRun={onExportRun}
+                                    onCopyRunLink={onCopyRunLink}
                                     onForkRun={onForkRun}
                                     tabIndex={
                                       parentNavIndex >= 0 ? tabIndexFor(parentNavIndex) : undefined
@@ -595,6 +603,14 @@ export function ChatList({
               </div>
             )})}
           </div>
+
+          <TeammatesSection
+            onStartTeammateChat={onStartTeammateChat}
+            onOpenTaskRun={onOpenTaskRun}
+            activeWorkspacePath={
+              workspaceGroups.find((group) => group.isActiveWorkspace)?.path ?? null
+            }
+          />
         </>
       )}
     </div>

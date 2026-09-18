@@ -9,7 +9,12 @@ import {
   formatMcpToolNameList,
   parseMcpToolNameList
 } from '@shared/utils/mcpToolPolicy'
-import { isGoogleMcpId, isHostedAppMcpId, mcpOAuthFixedRedirectUrl } from '@shared/mcpApps'
+import {
+  isGoogleMcpId,
+  mcpOAuthFixedRedirectUrl,
+  mcpSupportsOAuth,
+  mcpUsesTokenAuth
+} from '@shared/mcpApps'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { mcpArgsToText, mcpEnvToText, mcpTextToArgs, mcpTextToEnv } from './mcpText'
 import { mcpStatusClass, mcpStatusLabel } from './mcpStatus'
@@ -69,6 +74,37 @@ export function McpServerCard({
       ? mcpEnvToText(server.headers)
       : mcpEnvToText(headersWithoutAuthorization(server.headers))
   )
+  /**
+   * Raw connection config is collapsed by default. An always-open editor made
+   * every server look like something the user had to fill in by hand — expand
+   * only for a failure that editing could actually fix.
+   */
+  const [showAdvanced, setShowAdvanced] = useState(
+    () => Boolean(status?.error) && !status?.missingBinary
+  )
+  const [locating, setLocating] = useState(false)
+
+  /** Point this server at an existing binary when PATH does not find it. */
+  const locateBinary = async (): Promise<void> => {
+    const binary = status?.missingBinary
+    if (!binary) return
+    setLocating(true)
+    setAuthError(null)
+    try {
+      // Main validates the pick is a runnable file, so a directory or a stray
+      // document is rejected here rather than persisted and failing later.
+      const pick = await window.vyotiq.mcpPickBinary?.(binary)
+      if (!pick?.ok) {
+        setAuthError(pick?.error ?? 'Could not open the file picker.')
+        return
+      }
+      if (!pick.data.path) return
+      await persist({ binaryPath: pick.data.path })
+      onAuthChanged?.()
+    } finally {
+      setLocating(false)
+    }
+  }
 
   useEffect(() => {
     setName(server.name)
@@ -309,7 +345,73 @@ export function McpServerCard({
         )}
       </div>
 
-      <div className="mt-2.5 flex flex-col gap-2">
+      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
+        <p className={`m-0 ${mcpStatusClass(status, { workspaceEnabled })}`}>
+          {mcpStatusLabel(status, { workspaceEnabled })}
+        </p>
+        {/* Connect is the point of the card — it stays out of Advanced. */}
+        {(mcpSupportsOAuth(server) || mcpUsesTokenAuth(server)) && onOpenConnect ? (
+          <Button variant="subtle" disabled={disabled} onClick={onOpenConnect}>
+            {hasStoredToken || status?.connected ? 'Reconnect' : 'Connect'}
+          </Button>
+        ) : null}
+      </div>
+
+      {status?.missingBinary ? (
+        <div className="mt-2 flex flex-col gap-1.5 rounded-md border border-border bg-surface px-2.5 py-2">
+          <p className="m-0 text-xs text-fg">
+            <span className="font-mono">{status.missingBinary}</span> was not found on PATH, so
+            this server cannot start.
+          </p>
+          <p className="m-0 text-caption text-secondary">
+            Install it, or point Agent V at a copy you already have.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {status.missingBinaryInstallUrl ? (
+              <Button
+                variant="subtle"
+                disabled={disabled}
+                onClick={() =>
+                  void window.vyotiq.shellOpenExternal(status.missingBinaryInstallUrl as string)
+                }
+              >
+                Install {status.missingBinary}
+              </Button>
+            ) : null}
+            <Button
+              variant="subtle"
+              pending={locating}
+              disabled={disabled || locating}
+              onClick={() => void locateBinary()}
+            >
+              Locate binary…
+            </Button>
+          </div>
+          {server.binaryPath ? (
+            <p className="m-0 text-caption text-muted [overflow-wrap:anywhere]">
+              Using {server.binaryPath}
+            </p>
+          ) : null}
+        </div>
+      ) : status?.error ? (
+        <p className="m-0 mt-1 text-danger [overflow-wrap:anywhere]">{status.error}</p>
+      ) : null}
+
+      <button
+        type="button"
+        className="mt-2 self-start text-xs text-secondary underline-offset-2 hover:text-fg hover:underline"
+        aria-expanded={showAdvanced}
+        aria-controls={`mcp-advanced-${server.id}`}
+        onClick={() => setShowAdvanced((v) => !v)}
+      >
+        {showAdvanced ? 'Hide advanced' : 'Advanced'}
+      </button>
+
+      <div
+        id={`mcp-advanced-${server.id}`}
+        hidden={!showAdvanced}
+        className="mt-2.5 flex flex-col gap-2"
+      >
         <Input
           className="w-full"
           aria-label={`MCP server name for ${server.id}`}
@@ -389,11 +491,6 @@ export function McpServerCard({
                 if (e.key === 'Enter') e.currentTarget.blur()
               }}
             />
-            {isHostedAppMcpId(server.id) && onOpenConnect ? (
-              <Button variant="subtle" disabled={disabled} onClick={onOpenConnect}>
-                Connect
-              </Button>
-            ) : null}
             <Input
               className="w-full font-mono"
               aria-label={`OAuth client ID for ${server.id}`}
@@ -565,13 +662,6 @@ export function McpServerCard({
           />
         </div>
       </div>
-
-      <p className={`m-0 mt-2 ${mcpStatusClass(status, { workspaceEnabled })}`}>
-        {mcpStatusLabel(status, { workspaceEnabled })}
-      </p>
-      {status?.error ? (
-        <p className="m-0 mt-1 text-danger [overflow-wrap:anywhere]">{status.error}</p>
-      ) : null}
 
       {hideRemove ? null : (
         <Button variant="danger" className="mt-2" disabled={disabled} onClick={onRemove}>

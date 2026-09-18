@@ -10,6 +10,7 @@ import {
   commitEmpty,
   createBranch,
   currentGitBranch,
+  GIT_STATUS_FILE_LIMIT,
   gitRemoteUrl,
   isGitRepo,
   listLocalBranches,
@@ -516,6 +517,51 @@ describe.skipIf(!canGit)('git ahead/behind vs upstream', () => {
       expect(status.ahead).toBeUndefined()
       expect(status.behind).toBeUndefined()
       await expect(readGitAheadBehind(repo)).resolves.toBeNull()
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+})
+
+describe.skipIf(!canGit)('git status file-list cap', () => {
+  it('caps the file list while totals cover every change', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vyotiq-git-cap-'))
+    try {
+      git(repo, 'init', '--initial-branch=main')
+      git(repo, 'config', 'user.email', 'test@example.com')
+      git(repo, 'config', 'user.name', 'Test')
+      writeFileSync(join(repo, 'base.txt'), 'base\n', 'utf8')
+      git(repo, 'add', '-A')
+      git(repo, 'commit', '-m', 'base')
+      const extra = GIT_STATUS_FILE_LIMIT + 5
+      for (let index = 0; index < extra; index += 1) {
+        writeFileSync(join(repo, `f${String(index).padStart(3, '0')}.txt`), 'x\n', 'utf8')
+      }
+
+      const status = expectOk(await readGitStatus(repo))
+      expect(status.truncated).toBe(true)
+      expect(status.files).toHaveLength(GIT_STATUS_FILE_LIMIT)
+      expect(status.fileCount).toBe(extra)
+      // Untracked files count as wholly added — one line each.
+      expect(status.added).toBe(extra)
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+
+  it('leaves a small tree untruncated with totals matching the list', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vyotiq-git-cap-small-'))
+    try {
+      git(repo, 'init', '--initial-branch=main')
+      git(repo, 'config', 'user.email', 'test@example.com')
+      git(repo, 'config', 'user.name', 'Test')
+      writeFileSync(join(repo, 'a.txt'), 'a\n', 'utf8')
+      writeFileSync(join(repo, 'b.txt'), 'b\n', 'utf8')
+
+      const status = expectOk(await readGitStatus(repo))
+      expect(status.truncated).toBe(false)
+      expect(status.files).toHaveLength(2)
+      expect(status.fileCount).toBe(2)
     } finally {
       rmSync(repo, { recursive: true, force: true })
     }

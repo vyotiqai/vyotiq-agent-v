@@ -24,7 +24,8 @@ import { logger } from '../../shared/logger'
 import { appendEvent, loadStatus } from './state'
 import { hydrateFollowUpsFromDisk, loadFollowUps, saveFollowUps } from './followUpStore'
 import { registerParentInstanceEmitter, registerRunIpcSender, handleInlineInstanceFinished } from './agentInstances'
-import { runAgent } from './loop'
+import { notifyBadgeChange } from '../app/badges'
+import { getRuntime } from './runtimes'
 import {
   cancelPendingApprovals,
   registerApprovalSender
@@ -35,9 +36,11 @@ import {
 } from './agentQuestion'
 import { publishLifecycleNotification } from '../notifications/bus'
 import {
+  clearRunAbort,
   followUpPreview,
   isActive,
   markRunTurnComplete,
+  notifyProfileRunFinished,
   seedFollowUps,
   takeLateFollowUpDropped,
   takeLateWriteCheckpoint
@@ -108,6 +111,10 @@ export type StartAgentRunAgentInput = {
   provider?: ProviderId
   /** Session-pinned model — authoritative for this invoke. */
   model?: string
+  /** Teammate profile binding — identity, memory namespace, model pin. */
+  agentProfileId?: string
+  /** Execution substrate (Phase 4 runtime seam) — local unless cloud is wired. */
+  runtime?: 'local' | 'cloud'
 }
 
 export type StartAgentRunInput = {
@@ -158,6 +165,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
     const releaseInstanceEmitter = registerParentInstanceEmitter(runId, (ev) => {
       batcher.push(ev)
     })
+    notifyBadgeChange()
     try {
       const runSignal = controller.signal
       const eventStream = isChatFixtureReplayEnabled()
@@ -167,7 +175,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
             workspacePath,
             runSignal
           })
-        : runAgent(agentInput)
+        : getRuntime(agentInput.runtime ?? 'local').start(agentInput)
       for await (const ev of eventStream) {
         const terminal = isTerminalAgentRunEvent(ev as AgentEvent)
         if (terminal) terminalSent = true
@@ -221,6 +229,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
         terminalStatus = 'error'
       }
     } finally {
+      notifyBadgeChange()
       // Forward the loop finally's late events (writes_checkpoint,
       // follow_up_dropped) on EVERY exit path. Taking them only on the happy
       // path meant an abort/crash exit left the renderer without the final
@@ -355,6 +364,19 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
       // Storage retention run-end sweep (audit H4/H5): free pass + armed
       // policy per §8.1 ack. Fire-and-forget — never blocks the terminal path.
       void sweepRetentionAuto()
+      // Safety net: a generator that throws BEFORE the loop's try (e.g.
+      // 'Unknown agent profile' during binding resolution) never runs its own
+      // finally, leaking the registry slot — which would permanently blind the
+      // scheduler's one-run-per-teammate gate. Normal paths are already clear
+      // by the time this finally runs, so this is a no-op for them; the
+      // invokeId guard never clears a fresh re-registration of the same runId.
+      clearRunAbort(runId, invokeId)
+      // A teammate-bound run ending frees the identity for the task scheduler's
+      // queue (delegated tasks wait behind user chats and resumed runs) — but a
+      // delayed goal relaunch keeps the identity busy until it re-registers.
+      if (persisted?.agentProfileId && !relaunchedActiveGoal) {
+        notifyProfileRunFinished(persisted.agentProfileId)
+      }
     }
   })().catch((err) => {
     logger.error('Background agent run failed after terminal cleanup', {

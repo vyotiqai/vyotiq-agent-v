@@ -152,14 +152,20 @@ function parentDisplayTitle(goal: string): string {
   return plain || goal.trim()
 }
 
+/** Teammate-bound runs lead with the teammate name: `Scout · Fix the cart badge`. */
+function teammatePrefixTitle(run: RunSummary, goalBody: string): string {
+  if (!run.agentProfileName) return goalBody
+  return goalBody ? `${run.agentProfileName} · ${goalBody}` : run.agentProfileName
+}
+
 export function runTitle(run: RunSummary): string {
   const goal = run.goal?.trim()
   if (run.inlineInstance) {
     return instanceDisplayTitle(goal, run.runId, run.pathScope)
   }
-  if (!goal) return run.runId.slice(0, 8)
+  if (!goal) return run.agentProfileName ?? run.runId.slice(0, 8)
   // Full plain title — row CSS `truncate` + tooltip handle overflow (no dual cut).
-  return parentDisplayTitle(goal)
+  return teammatePrefixTitle(run, parentDisplayTitle(goal))
 }
 
 export function runTooltip(run: RunSummary): string {
@@ -171,17 +177,17 @@ export function runTooltip(run: RunSummary): string {
     const scope = pathScopeLabel(run.pathScope)
     return scope ? `Instance · ${plain} · ${scope}` : `Instance · ${plain}`
   }
-  if (!goal) return run.runId
-  return parentDisplayTitle(goal)
+  if (!goal) return run.agentProfileName ?? run.runId
+  return teammatePrefixTitle(run, parentDisplayTitle(goal))
 }
 
 /** Lowercase plain text for sidebar search — matches displayed title, not raw goal. */
 export function runSearchText(run: RunSummary): string {
   const goal = run.goal?.trim()
-  if (!goal) return run.runId.toLowerCase()
+  if (!goal) return (run.agentProfileName ?? run.runId).toLowerCase()
   const plain = (stripGoalMarkdown(goal) || goal).toLowerCase()
   if (run.inlineInstance) {
     return `${instanceDisplayTitle(goal, run.runId, run.pathScope).toLowerCase()} ${plain} ${run.runId.toLowerCase()}`
   }
-  return parentDisplayTitle(goal).toLowerCase()
+  return teammatePrefixTitle(run, parentDisplayTitle(goal)).toLowerCase()
 }

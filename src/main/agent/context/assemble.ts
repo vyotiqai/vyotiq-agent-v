@@ -10,6 +10,10 @@ import {
   estimateTextTokensAsync
 } from './estimate'
 import { stubPastSkillInvocationsInMessages } from '../../../shared/slashCommands'
+import type {
+  ContextBreakdownDetailWire,
+  ContextToolsDetail
+} from '../../../shared/utils/contextUsage'
 import {
   KEEP_LAST_TOOL_RESULTS,
   KEEP_RECENT_TURNS,
@@ -51,10 +55,15 @@ export type AssembleContextRequest = AssembleInput & {
    * sparse instance checkout has no .vyotiq; snapshot and rules stay worktree-local.
    */
   memoryWorkspacePath?: string | null
+  /**
+   * Agent-profile memory namespace — reads from `.vyotiq/agents/<namespace>/memory/`
+   * instead of the shared `.vyotiq/memory/` so teammate profiles never share a brain.
+   */
+  memoryNamespace?: string | null
 }
 
 /** In-process cache for the stable instruction prefix only (not the volatile tail). */
-type SystemCacheEntry = { fingerprint: string; stable: string }
+type SystemCacheEntry = { fingerprint: string; stable: string; sections: SystemSection[] }
 let systemPromptCache: SystemCacheEntry | null = null
 
 /** @internal — clear stable system-prefix cache (tests). */
@@ -82,6 +91,8 @@ function stableSystemFingerprint(parts: {
   compactionSummary: string
   compactionPinned: string
   systemBudget: number
+  /** Section caps are measured with the model's tokenizer — must be in the key. */
+  model: string
   planVerbatim?: boolean
 }): string {
   return [
@@ -98,6 +109,7 @@ function stableSystemFingerprint(parts: {
     parts.compactionSummary,
     parts.compactionPinned,
     String(parts.systemBudget),
+    parts.model,
     parts.planVerbatim ? 'plan-verbatim' : 'plan-capped'
   ].join('\0')
 }
@@ -259,6 +271,21 @@ export function capHarness(text: string, maxTokens: number): string {
   return out || capText(text, maxTokens)
 }
 
+type SystemSectionLabel =
+  | 'harness'
+  | 'mode'
+  | 'contract'
+  | 'plan'
+  | 'skills'
+  | 'pluginRules'
+  | 'userRules'
+  | 'responseStyle'
+  | 'rules'
+  | 'memory'
+  | 'priorSession'
+
+type SystemSection = { label: SystemSectionLabel; text: string }
+
 function buildStableSystem(parts: {
   harness: string
   userRules: string
@@ -274,7 +301,7 @@ function buildStableSystem(parts: {
   compaction?: CompactionRecord | null
   budgets: ReturnType<typeof allocateBudget>
   model: ModelInfo
-}): string {
+}): { stable: string; sections: SystemSection[] } {
   const fingerprint = stableSystemFingerprint({
     harness: parts.harness,
     userRules: parts.userRules,
@@ -289,13 +316,14 @@ function buildStableSystem(parts: {
     compactionSummary: parts.compaction?.summary ?? '',
     compactionPinned: JSON.stringify(parts.compaction?.pinnedFacts ?? null),
     systemBudget: parts.budgets.system,
+    model: parts.model.id,
     planVerbatim: parts.planVerbatim
   })
   if (systemPromptCache?.fingerprint === fingerprint) {
-    return systemPromptCache.stable
+    return { stable: systemPromptCache.stable, sections: systemPromptCache.sections }
   }
 
-  const sections: string[] = []
+  const sections: SystemSection[] = []
   let systemTokensLeft = parts.budgets.system
   function capWithinSystem(
     text: string,
@@ -315,14 +343,14 @@ function buildStableSystem(parts: {
     Math.floor(parts.budgets.system * 0.75),
     capHarness
   )
-  if (harness) sections.push(harness)
+  if (harness) sections.push({ label: 'harness', text: harness })
 
   if (parts.modeSection?.trim()) {
     const mode = capWithinSystem(
       parts.modeSection.trim(),
       Math.max(400, Math.floor(parts.budgets.system * 0.35))
     )
-    if (mode) sections.push(mode)
+    if (mode) sections.push({ label: 'mode', text: mode })
   }
 
   if (parts.contract?.trim()) {
@@ -331,7 +359,7 @@ function buildStableSystem(parts: {
       wrapPromptSection('run_contract', contractBody),
       Math.floor(parts.budgets.system * 0.4)
     )
-    if (contract) sections.push(contract)
+    if (contract) sections.push({ label: 'contract', text: contract })
   }
   if (parts.plan?.trim()) {
     const planBody = parts.planVerbatim
@@ -340,39 +368,39 @@ function buildStableSystem(parts: {
     const wrapped = wrapPromptSection('plan', planBody)
     if (parts.planVerbatim) {
       // Skip token cap so Plan-mode str_replace can quote on-disk text.
-      sections.push(wrapped)
+      sections.push({ label: 'plan', text: wrapped })
       systemTokensLeft -= estimateTextTokens(wrapped, parts.model)
     } else {
       const plan = capWithinSystem(wrapped, parts.budgets.system)
-      if (plan) sections.push(plan)
+      if (plan) sections.push({ label: 'plan', text: plan })
     }
   }
 
   if (parts.skillsSection?.trim()) {
     const skills = capWithinSystem(parts.skillsSection.trim(), Math.floor(parts.budgets.system * 0.35))
-    if (skills) sections.push(skills)
+    if (skills) sections.push({ label: 'skills', text: skills })
   }
   if (parts.pluginRulesSection?.trim()) {
     const plugins = capWithinSystem(parts.pluginRulesSection.trim(), Math.floor(parts.budgets.system * 0.25))
-    if (plugins) sections.push(plugins)
+    if (plugins) sections.push({ label: 'pluginRules', text: plugins })
   }
   if (parts.userRules.trim()) {
     const userRulesRaw = parts.userRules.trim()
     const userRules = capWithinSystem(userRulesRaw, Math.floor(parts.budgets.system * 0.35))
-    if (userRules) sections.push(userRules)
+    if (userRules) sections.push({ label: 'userRules', text: userRules })
   }
   if (parts.responseStyleSection?.trim()) {
     const style = capWithinSystem(
       parts.responseStyleSection.trim(),
       Math.max(120, Math.floor(parts.budgets.system * 0.05))
     )
-    if (style) sections.push(style)
+    if (style) sections.push({ label: 'responseStyle', text: style })
   }
   if (parts.rules.trim()) {
     const rulesRaw = parts.rules.trim()
     const rules = capWithinSystem(rulesRaw, Math.floor(parts.budgets.system * 0.5))
     if (rules) {
-      sections.push(rules)
+      sections.push({ label: 'rules', text: rules })
       if (rules.length < rulesRaw.length) {
         logger.warn('Workspace rules truncated from system prompt under budget pressure', {
           scope: 'assemble',
@@ -397,7 +425,7 @@ function buildStableSystem(parts: {
       Math.floor(parts.budgets.memoryWorkspace / 2)
     )
     if (memory) {
-      sections.push(memory)
+      sections.push({ label: 'memory', text: memory })
       if (memory.length < memoryRaw.length) {
         logger.warn('Memory section truncated from system prompt under budget pressure', {
           scope: 'assemble',
@@ -439,12 +467,15 @@ function buildStableSystem(parts: {
       pinnedBody ? capToTokenBudget(pinnedBody, Math.max(reserved, 1), parts.model) : '',
       capToTokenBudget(parts.compaction.summary, narrativeCap, parts.model)
     ].filter((piece) => piece.trim().length > 0)
-    sections.push(wrapPromptSection('prior_session', pieces.join('\n')))
+    sections.push({
+      label: 'priorSession',
+      text: wrapPromptSection('prior_session', pieces.join('\n'))
+    })
   }
 
-  const stable = sections.join('\n\n')
-  systemPromptCache = { fingerprint, stable }
-  return stable
+  const stable = sections.map((s) => s.text).join('\n\n')
+  systemPromptCache = { fingerprint, stable, sections }
+  return { stable, sections }
 }
 
 function buildVolatileSystem(parts: {
@@ -486,7 +517,14 @@ function buildVolatileSystem(parts: {
   return sections.join('\n\n')
 }
 
-type SystemZones = { stable: string; volatile: string; system: string }
+type SystemZones = {
+  stable: string
+  volatile: string
+  system: string
+  /** Per-section token sizes measured on the final composed (post-cap) strings. */
+  sectionTokens: { label: SystemSectionLabel; tokens: number }[]
+  volatileTokens: number
+}
 
 function buildSystemZones(parts: {
   harness: string
@@ -509,7 +547,7 @@ function buildSystemZones(parts: {
   activeGoal?: string
   model: ModelInfo
 }): SystemZones {
-  const stable = buildStableSystem({
+  const { stable, sections } = buildStableSystem({
     harness: parts.harness,
     userRules: parts.userRules,
     responseStyleSection: parts.responseStyleSection,
@@ -535,7 +573,12 @@ function buildSystemZones(parts: {
     model: parts.model
   })
   const system = !volatile ? stable : !stable ? volatile : `${stable}\n\n${volatile}`
-  return { stable, volatile, system }
+  const sectionTokens = sections.map((s) => ({
+    label: s.label,
+    tokens: estimateTextTokens(s.text, parts.model)
+  }))
+  const volatileTokens = volatile ? estimateTextTokens(volatile, parts.model) : 0
+  return { stable, volatile, system, sectionTokens, volatileTokens }
 }
 
 /**
@@ -543,11 +586,14 @@ function buildSystemZones(parts: {
  * zone so the <memory> continuation flow works without spending a memory_read
  * tool call on every run. Both files are char-capped by the memory readers.
  */
-async function buildMemorySection(workspacePath: string | null | undefined): Promise<string> {
+async function buildMemorySection(
+  workspacePath: string | null | undefined,
+  memoryNamespace?: string | null
+): Promise<string> {
   if (!workspacePath) return ''
   const [state, index] = await Promise.all([
-    readMemoryStateAsync(workspacePath),
-    readMemoryIndexAsync(workspacePath)
+    readMemoryStateAsync(workspacePath, undefined, memoryNamespace ?? undefined),
+    readMemoryIndexAsync(workspacePath, undefined, memoryNamespace ?? undefined)
   ])
   const stateBody = state.trim()
   const indexBody = index.trim()
@@ -585,6 +631,43 @@ function totalFromLayers(layers: ContextLayerBreakdown): number {
   return layers.system + layers.history + layers.tools
 }
 
+/**
+ * Build the measured context-meter breakdown from the final zone/layers data.
+ * Section-join residual (wraps, separators) is absorbed into the harness bucket
+ * so the system rows always sum to the measured whole-system total.
+ */
+function buildBreakdownDetail(args: {
+  layers: ContextLayerBreakdown
+  zones: SystemZones
+  toolsSplit?: ContextToolsDetail
+  toolsJsonEstimate: number
+}): ContextBreakdownDetailWire {
+  const { layers, zones, toolsSplit, toolsJsonEstimate } = args
+  const tokensFor = (label: SystemSectionLabel): number =>
+    zones.sectionTokens.find((s) => s.label === label)?.tokens ?? 0
+  const skills = tokensFor('skills')
+  const memory = tokensFor('memory')
+  // The harness bucket covers every remaining stable section (mode, contract,
+  // plan, rules, style, prior-session fold) plus join residual, so the system
+  // rows always sum to the measured whole-system total.
+  const harness = Math.max(0, layers.system - skills - memory - zones.volatileTokens)
+  const tools: ContextToolsDetail = toolsSplit ?? {
+    builtin: { tokens: toolsJsonEstimate, count: 0 },
+    mcp: { tokens: 0, count: 0 },
+    mcpByServer: [],
+    deferredBuiltin: { tokens: 0, count: 0 },
+    deferredMcp: { tokens: 0, count: 0 },
+    total: toolsJsonEstimate
+  }
+  return {
+    messages: layers.history,
+    systemPrompt: Math.max(0, layers.system - skills),
+    skills,
+    system: { harness, memory, volatile: zones.volatileTokens, total: layers.system },
+    tools
+  }
+}
+
 export async function assembleContext(
   input: AssembleContextRequest
 ): Promise<AssembleResult> {
@@ -596,7 +679,7 @@ export async function assembleContext(
   const [workspace, rules, memorySection] = await Promise.all([
     buildWorkspaceSnapshotAsync(input.workspacePath, input.goal),
     buildWorkspaceRulesSection(input.workspacePath, input.focusedFile),
-    buildMemorySection(memoryWorkspacePath)
+    buildMemorySection(memoryWorkspacePath, input.memoryNamespace)
   ])
 
   let messages = input.messages.map((message) =>
@@ -683,6 +766,13 @@ export async function assembleContext(
     estimated
   })
 
+  const detail = buildBreakdownDetail({
+    layers,
+    zones,
+    toolsSplit: input.toolsSplit,
+    toolsJsonEstimate: input.toolsJsonEstimate
+  })
+
   return {
     system: zones.system,
     systemStable: zones.stable,
@@ -691,6 +781,7 @@ export async function assembleContext(
     compaction,
     estimatedTokens: estimated,
     layers,
+    detail,
     overflow: estimated > window,
     anthropicNative: anthropicNativeOptions()
   }

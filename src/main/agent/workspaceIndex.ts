@@ -232,6 +232,7 @@ export function disposeWorkspaceIndexes(
   timers.delete(key)
   dropPendingByCoalesceKey(`warm:${key}`)
   dropPendingByCoalesceKey(`reindex:${key}`)
+  dropPendingByCoalesceKey(`dense-warm:${key}`)
   const ac = abortControllers.get(key)
   if (ac) {
     ac.abort()

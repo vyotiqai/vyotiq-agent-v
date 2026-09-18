@@ -18,6 +18,7 @@ export type ShortcutId =
   | 'panelPlan'
   | 'panelPr'
   | 'closeChat'
+  | 'splitPane'
   | 'findInFiles'
   | 'commandPalette'
   | 'workspace1'
@@ -62,6 +63,7 @@ export const SHORTCUT_BINDINGS: Record<ShortcutId, ShortcutBinding> = {
   panelPlan: { id: 'panelPlan', key: 'd', mod: true, shift: 'require' },
   panelPr: { id: 'panelPr', key: 'g', mod: true, shift: 'require' },
   closeChat: { id: 'closeChat', key: 'w', mod: true },
+  splitPane: { id: 'splitPane', key: '\\', mod: true },
   findInFiles: { id: 'findInFiles', key: 'f', mod: true, shift: 'require' },
   commandPalette: { id: 'commandPalette', key: 'p', mod: true, shift: 'require' },
   workspace1: { id: 'workspace1', key: '1', mod: true },

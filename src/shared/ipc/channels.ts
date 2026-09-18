@@ -86,6 +86,7 @@ export const IPC = {
   browserReload: 'browser:reload',
   browserTakeScreenshot: 'browser:takeScreenshot',
   browserClearBrowsingData: 'browser:clearBrowsingData',
+  browserPipToggle: 'browser:pipToggle',
   gitStatus: 'git:status',
   gitGenerateCommitMessage: 'git:generate-commit-message',
   gitCommit: 'git:commit',
@@ -135,6 +136,8 @@ export const IPC = {
   mcpSetGoogleClientSecret: 'mcp:setGoogleClientSecret',
   mcpClearGoogleClientSecret: 'mcp:clearGoogleClientSecret',
   mcpStartOAuth: 'mcp:startOAuth',
+  /** Locate an MCP launch binary on disk when it is not on PATH. */
+  mcpPickBinary: 'mcp:pickBinary',
   toolsCatalogGet: 'tools-catalog:get',
   toolsCatalogChanged: 'tools-catalog:changed',
   marketplaceListInstalled: 'marketplace:listInstalled',
@@ -161,6 +164,15 @@ export const IPC = {
   skillsWriteLocal: 'skills:writeLocal',
   skillsDeleteLocal: 'skills:deleteLocal',
   skillsChanged: 'skills:changed',
+  agentProfilesList: 'agent-profiles:list',
+  agentProfilesCreate: 'agent-profiles:create',
+  agentProfilesUpdate: 'agent-profiles:update',
+  agentProfilesDelete: 'agent-profiles:delete',
+  agentProfilesChanged: 'agent-profiles:changed',
+  tasksList: 'tasks:list',
+  tasksEnqueue: 'tasks:enqueue',
+  tasksCancel: 'tasks:cancel',
+  tasksChanged: 'tasks:changed',
   workspaceSuggestPaths: 'workspace:suggestPaths',
   workspaceReadText: 'workspace:readText',
   workspaceReadImage: 'workspace:readImage',
@@ -225,7 +237,10 @@ export const IPC = {
   storageReport: 'storage:report',
   storageCleanupPreview: 'storage:cleanup-preview',
   storageCleanupRun: 'storage:cleanup-run',
-  storageAckSurface: 'storage:ack-surface'
+  storageAckSurface: 'storage:ack-surface',
+  /** Deep links (vyotiq:// URLs): push on receipt, invoke to drain the pending slot. */
+  deepLinkOpened: 'deeplink:opened',
+  deepLinkConsume: 'deeplink:consume'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]
