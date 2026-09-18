@@ -183,8 +183,7 @@ const AUTH_LABEL: Record<string, string> = {
     padding: 0;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 1px;
-    background: var(--vy-border);
+    gap: 0;
     border: 1px solid var(--vy-border);
     border-radius: var(--vy-radius-xl);
     overflow: hidden;
@@ -192,6 +191,8 @@ const AUTH_LABEL: Record<string, string> = {
 
   .vy-pkg {
     background: var(--vy-bg);
+    border-right: 1px solid var(--vy-border);
+    border-bottom: 1px solid var(--vy-border);
     padding: 1.125rem 1.25rem;
     display: flex;
     flex-direction: column;

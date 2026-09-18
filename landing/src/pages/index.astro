@@ -376,8 +376,7 @@ const capabilities = [
   .vy-tool-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 1px;
-    background: var(--vy-border);
+    gap: 0;
     border: 1px solid var(--vy-border);
     border-radius: var(--vy-radius-xl);
     overflow: hidden;
@@ -385,6 +384,8 @@ const capabilities = [
 
   .vy-tool-group {
     background: var(--vy-bg);
+    border-right: 1px solid var(--vy-border);
+    border-bottom: 1px solid var(--vy-border);
     padding: 1.375rem 1.25rem;
   }
 
@@ -455,8 +456,7 @@ const capabilities = [
     padding: 0;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1px;
-    background: var(--vy-border);
+    gap: 0;
     border: 1px solid var(--vy-border);
     border-radius: var(--vy-radius-lg);
     overflow: hidden;
@@ -464,6 +464,8 @@ const capabilities = [
 
   .vy-provider {
     background: var(--vy-bg);
+    border-right: 1px solid var(--vy-border);
+    border-bottom: 1px solid var(--vy-border);
     padding: 0.8rem 1rem;
     font-size: 0.9375rem;
     font-weight: 500;
@@ -509,8 +511,7 @@ const capabilities = [
   .vy-stat-row {
     margin: 0;
     display: grid;
-    gap: 1px;
-    background: var(--vy-border);
+    gap: 0;
     border: 1px solid var(--vy-border);
     border-radius: var(--vy-radius-lg);
     overflow: hidden;
@@ -518,6 +519,8 @@ const capabilities = [
 
   .vy-stat {
     background: var(--vy-bg);
+    border-right: 1px solid var(--vy-border);
+    border-bottom: 1px solid var(--vy-border);
     display: flex;
     align-items: baseline;
     justify-content: space-between;

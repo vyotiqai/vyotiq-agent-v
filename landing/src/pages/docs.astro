@@ -125,13 +125,10 @@ cd vyotiq-agent-v
 pnpm install
 pnpm dev</code></pre>
           <p class="vy-code-note">
-            <span class="vy-mono">pnpm dev</span> runs the app in development.
-            <span class="vy-mono">pnpm build</span> produces a production build, and
-            <span class="vy-mono">pnpm pack:win</span> /<span class="vy-mono"> pack:mac</span> /<span
-              class="vy-mono"
-            >
-              pack:linux</span
-            > produce installers.
+            <span class="vy-mono">pnpm dev</span> runs the app in development.{' '}
+            <span class="vy-mono">pnpm build</span> produces a production build, and{' '}
+            <span class="vy-mono">pnpm pack:win</span>, <span class="vy-mono">pnpm pack:mac</span>
+            {' '}and <span class="vy-mono">pnpm pack:linux</span> produce installers.
           </p>
         </div>
       </div>
@@ -310,8 +307,7 @@ pnpm test:gui-e2e  # Playwright GUI end-to-end</code></pre>
     padding: 0;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 1px;
-    background: var(--vy-border);
+    gap: 0;
     border: 1px solid var(--vy-border);
     border-radius: var(--vy-radius-xl);
     overflow: hidden;
@@ -319,6 +315,8 @@ pnpm test:gui-e2e  # Playwright GUI end-to-end</code></pre>
 
   .vy-ref {
     background: var(--vy-bg);
+    border-right: 1px solid var(--vy-border);
+    border-bottom: 1px solid var(--vy-border);
   }
 
   .vy-ref-link {

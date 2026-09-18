@@ -57,9 +57,10 @@ const DESCRIPTIONS: Record<string, string> = {
         <p class="vy-eyebrow">Document</p>
         <h1 class="vy-h2">{doc.title}</h1>
         <p class="vy-doc-source">
-          Rendered verbatim from
-          <a href={doc.sourceUrl} class="vy-link vy-mono" rel="noopener noreferrer">{doc.sourceFile}</a>
-          in the repository.
+          Rendered verbatim from{' '}<a
+            href={doc.sourceUrl}
+            class="vy-link vy-mono"
+            rel="noopener noreferrer">{doc.sourceFile}</a>{' '}in the repository.
         </p>
       </header>
 

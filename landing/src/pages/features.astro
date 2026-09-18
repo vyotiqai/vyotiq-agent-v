@@ -340,8 +340,7 @@ const sections = [
     padding: 0;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 1px;
-    background: var(--vy-border);
+    gap: 0;
     border: 1px solid var(--vy-border);
     border-radius: var(--vy-radius-lg);
     overflow: hidden;
@@ -349,6 +348,8 @@ const sections = [
 
   .vy-provider-cell {
     background: var(--vy-bg);
+    border-right: 1px solid var(--vy-border);
+    border-bottom: 1px solid var(--vy-border);
     padding: 0.875rem 1rem;
     display: flex;
     align-items: center;

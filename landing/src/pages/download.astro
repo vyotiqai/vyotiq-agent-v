@@ -154,17 +154,17 @@ const signing = app.packaging.signing
           <article class="vy-firstrun-item">
             <h3 class="vy-h3">Windows</h3>
             <p>
-              SmartScreen shows “Windows protected your PC”. Choose <strong>More info</strong>, then
-              <strong>Run anyway</strong>. The installer is per-user and does not need administrator
-              rights.
+              SmartScreen shows “Windows protected your PC”. Choose <strong>More info</strong>,
+              then{' '}<strong>Run anyway</strong>. The installer is per-user and does not need
+              administrator rights.
             </p>
           </article>
           <article class="vy-firstrun-item">
             <h3 class="vy-h3">macOS</h3>
             <p>
               Gatekeeper refuses the first launch. Open <strong>System Settings → Privacy &amp;
-              Security</strong>, find the blocked app near the bottom, and choose
-              <strong>Open Anyway</strong>.
+              Security</strong>, find the blocked app near the bottom, and
+              choose{' '}<strong>Open Anyway</strong>.
             </p>
           </article>
           <article class="vy-firstrun-item">
@@ -325,8 +325,7 @@ const signing = app.packaging.signing
     margin: 0;
     padding: 0;
     display: grid;
-    gap: 1px;
-    background: var(--vy-border);
+    gap: 0;
     border: 1px solid var(--vy-border);
     border-radius: var(--vy-radius-lg);
     overflow: hidden;
@@ -339,6 +338,8 @@ const signing = app.packaging.signing
     gap: 1rem;
     padding: 0.75rem 1rem;
     background: var(--vy-bg);
+    border-right: 1px solid var(--vy-border);
+    border-bottom: 1px solid var(--vy-border);
   }
 
   .vy-asset-link {
