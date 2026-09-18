@@ -117,12 +117,17 @@ describe('findMissingMcpBinary', () => {
   })
 
   it('does not let a located binary satisfy a different requirement', () => {
-    const located = makeBinary(isWindows ? 'uvx.cmd' : 'uvx')
-    const missing = findMissingMcpBinary(
-      { command: 'npx', requires: ['node'], binaryPath: located },
+    // A located `git` must not count towards a uv requirement. Asserting that
+    // binaryPath changes nothing is platform-independent: mcpSearchPath always
+    // appends the POSIX fallback bin dirs, so whether uvx resolves depends on
+    // the host, but crediting the wrong binary would still diverge the two.
+    const located = makeBinary(isWindows ? 'git.cmd' : 'git')
+    const withLocated = findMissingMcpBinary(
+      { command: 'uvx', requires: ['uv'], binaryPath: located },
       envWith(dir)
     )
-    expect(missing).toMatchObject({ binary: 'npx', requirement: 'node' })
+    const withoutLocated = findMissingMcpBinary({ command: 'uvx', requires: ['uv'] }, envWith(dir))
+    expect(withLocated).toEqual(withoutLocated)
   })
 
   it('still checks the command when nothing is declared', () => {

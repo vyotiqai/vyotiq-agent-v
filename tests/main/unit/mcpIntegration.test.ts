@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach, vi } from 'vitest'
-import { join } from 'path'
+import { delimiter, join } from 'path'
 import { tmpdir } from 'os'
 import { mkdtempSync, rmSync } from 'fs'
 import { fileURLToPath } from 'url'
@@ -78,7 +78,9 @@ describe('MCP stdio integration', () => {
     expect(env.OPENAI_API_KEY).toBeUndefined()
     expect(env.ANTHROPIC_API_KEY).toBeUndefined()
     expect(env.CUSTOM_OK).toBe('1')
-    expect(env.PATH).toBe('/usr/bin')
+    // mcpSearchPath appends the fallback bin dirs on POSIX, so assert the
+    // parent's PATH still leads rather than pinning the whole string.
+    expect(env.PATH?.split(delimiter)[0]).toBe('/usr/bin')
     if (process.platform === 'win32') {
       expect(env.PYTHONIOENCODING).toBe('utf-8')
     }
@@ -94,7 +96,10 @@ describe('MCP stdio integration', () => {
       },
       { PATH: '/usr/bin' }
     )
-    expect(env.PATH).toBe('/usr/bin')
+    // The overlay's PATH must be ignored entirely: the parent's entry leads and
+    // "/evil" never appears, on any platform.
+    expect(env.PATH?.split(delimiter)[0]).toBe('/usr/bin')
+    expect(env.PATH?.split(delimiter)).not.toContain('/evil')
     expect(env.NODE_OPTIONS).toBeUndefined()
     expect(env.PYTHONPATH).toBeUndefined()
     expect(env.SAFE_TOKEN).toBe('ok')

@@ -64,6 +64,18 @@ resources/codeindex/wasm/
 # NOTE: only resources/marketplace .md stay generated.
 resources/marketplace/**/*.md
 
+# ...but these skills are authored directly as SKILL.md with no .md.docx source,
+# so the blanket rule above would leave a fresh checkout without them and the
+# bundled-skill tests would fail. A marketplace .md needs an entry here whenever
+# it has no .md.docx sibling to be generated from.
+!resources/marketplace/packages/dependency-upgrade/SKILL.md
+!resources/marketplace/packages/flake-hunter/SKILL.md
+!resources/marketplace/packages/incident-triage/SKILL.md
+!resources/marketplace/packages/pr-review-reply/SKILL.md
+!resources/marketplace/packages/release-notes/SKILL.md
+!resources/marketplace/packages/repo-onboarding/SKILL.md
+!resources/marketplace/packages/standup-digest/SKILL.md
+
 # Local agent / editor state (keep rules and skills)
 .vyotiq/memory/
 .cursor/hooks/state/
