@@ -3,17 +3,16 @@
 [![CI](https://github.com/vyotiqai/vyotiq-agent-v/actions/workflows/ci.yml/badge.svg)](https://github.com/vyotiqai/vyotiq-agent-v/actions/workflows/ci.yml)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-Vyotiq ("Agent V") is an Electron desktop app: a coding workspace for real repositories. It pairs a chat interface with multiple model providers with an agent that can act directly on your checked-out code — terminal, files, and repository tools — instead of only working from pasted snippets. Local voice dictation is built in via a Whisper model shipped with the app.
+Vyotiq ("Agent V") is an Electron desktop app: a coding workspace for real repositories. It pairs a chat interface with multiple model providers with an agent that can act directly on your checked-out code — terminal, files, and repository tools — instead of only working from pasted snippets. Voice dictation is built in and transcribes on-device with Whisper; the model weights are downloaded once on first use rather than shipped in the installer.
 
 ## Features
 
 - **Multi-provider chat** — talk to OpenAI, Anthropic, Google Gemini, Ollama (local models), DeepSeek, Groq, OpenRouter, xAI, Mistral, or any custom OpenAI-compatible endpoint, plus an OpenCode provider. Model lists are fetched per provider where the API supports it.
 - **An agent that acts on your checkout** — the built-in tool catalog includes a terminal, file tools (read, edit, search, glob, grep, codebase search), git tools (status, diff, commit, apply patch), GitHub tools (pull requests, issues), typecheck/lint/test runners, browser automation, notebook editing, and language-server queries.
 - **Agent runs and instance worktrees** — the agent can fan work out to child instances; each child runs on its own git worktree branch and the result is merged back into the parent branch.
-- **Local Whisper dictation** — voice dictation runs entirely on your machine (Whisper via transformers.js with the onnxruntime-node backend) in the Electron main process / a utility process. No audio leaves the app.
+- **Local Whisper dictation** — voice dictation is transcribed entirely on your machine (Whisper via transformers.js with the onnxruntime-node backend) in the Electron main process / a utility process. No audio leaves the app. The model weights are fetched from Hugging Face into the app's user data directory the first time you use dictation, so the feature needs one download before it works offline.
 - **Skills and marketplace** — skills ship with the app as marketplace resources and can be loaded into a run; plugin rules are supported alongside skill files.
 - **MCP client** — connect Model Context Protocol servers, list their tools/resources/prompts, and pin their tools into the agent's catalog.
-- **Self-built agent tools** — when no existing tool fits, the agent can write its own at runtime with `build_tool`: a new tool becomes available immediately in the catalog as `agent__<name>` (no restart) and runs in an isolated child process; built tools are listed under Settings → "Agent tools".
 - **Long-term workspace memory** — the agent keeps notes under `.vyotiq/memory/` in the workspace and re-reads them on later runs.
 - **Teammates** — persistent agent identities with per-workspace private memory, pinned models, and delegated tasks that run on a schedule or queue — surviving app restarts, with auto-resume for interrupted runs. See [docs/teammates.md](docs/teammates.md).
 

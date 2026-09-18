@@ -1,0 +1,31 @@
+{
+  "name": "@vyotiq/landing",
+  "version": "0.1.0",
+  "description": "Agent V website — vyotiq.com",
+  "type": "module",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "bake": "node scripts/bake-app-data.mjs && node scripts/bake-legal.mjs && node scripts/bake-brand.mjs && node scripts/bake-release.mjs && node scripts/bake-changelog.mjs",
+    "dev": "pnpm bake && astro dev",
+    "build": "pnpm bake && astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "capture": "node scripts/capture-shots.mjs",
+    "verify": "node scripts/verify-site.mjs"
+  },
+  "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/plus-jakarta-sans": "^5.3.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "astro": "^7.3.3",
+    "sharp": "^0.35.3",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@astrojs/sitemap": "^3.7.4",
+    "@types/node": "^22.20.2",
+    "typescript": "^7.0.2"
+  }
+}

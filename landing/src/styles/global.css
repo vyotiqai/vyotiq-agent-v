@@ -1,0 +1,421 @@
+@import 'tailwindcss';
+
+@import '@fontsource/plus-jakarta-sans/400.css';
+@import '@fontsource/plus-jakarta-sans/500.css';
+@import '@fontsource/plus-jakarta-sans/600.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+
+/*
+  The site runs on the application's own design tokens, copied from
+  src/renderer/src/styles.css so the website and the product cannot drift into
+  looking like two different things. Names are kept identical to make a diff
+  against the app trivial.
+*/
+
+:root {
+  color-scheme: light;
+
+  --vy-bg: #ffffff;
+  --vy-card: #f7fafc;
+  --vy-surface: #eef5f9;
+  --vy-surface-2: #dceaf2;
+  --vy-border: #c9dce8;
+  --vy-border-strong: #9dbccc;
+  --vy-muted: #4a5f6d;
+  --vy-secondary: #3a4e5a;
+  --vy-tertiary: #5e7484;
+  --vy-fg: #17232b;
+  --vy-fg-strong: #0b141a;
+  --vy-accent: #00638e;
+  --vy-accent-fg: #ffffff;
+  --vy-accent-hover: #004a6b;
+  --vy-focus: #00638e;
+  --vy-success: #15803d;
+  --vy-warning: #a16207;
+
+  --vy-font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --vy-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --vy-radius-sm: 4px;
+  --vy-radius-md: 6px;
+  --vy-radius-lg: 8px;
+  --vy-radius-xl: 10px;
+
+  --vy-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --vy-duration: 160ms;
+  --vy-tracking: -0.01em;
+  --vy-tracking-tight: -0.012em;
+  --vy-tracking-caps: 0.06em;
+
+  --vy-gutter: 1.5rem;
+  --vy-measure: 68ch;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --vy-bg: #141414;
+    --vy-card: #1a1e20;
+    --vy-surface: #202528;
+    --vy-surface-2: #293034;
+    --vy-border: #303a40;
+    --vy-border-strong: #46545c;
+    --vy-muted: #9fb3be;
+    --vy-secondary: #bccdd6;
+    --vy-tertiary: #7e939f;
+    --vy-fg: #e8edf0;
+    --vy-fg-strong: #f5f8fa;
+    --vy-accent: #4fb3e8;
+    --vy-accent-fg: #0a0a0a;
+    --vy-accent-hover: #8cb9cc;
+    --vy-focus: #8cb9cc;
+    --vy-success: #22c55e;
+    --vy-warning: #fbbf24;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --vy-bg: #141414;
+  --vy-card: #1a1e20;
+  --vy-surface: #202528;
+  --vy-surface-2: #293034;
+  --vy-border: #303a40;
+  --vy-border-strong: #46545c;
+  --vy-muted: #9fb3be;
+  --vy-secondary: #bccdd6;
+  --vy-tertiary: #7e939f;
+  --vy-fg: #e8edf0;
+  --vy-fg-strong: #f5f8fa;
+  --vy-accent: #4fb3e8;
+  --vy-accent-fg: #0a0a0a;
+  --vy-accent-hover: #8cb9cc;
+  --vy-focus: #8cb9cc;
+  --vy-success: #22c55e;
+  --vy-warning: #fbbf24;
+}
+
+* {
+  box-sizing: border-box;
+  border-color: var(--vy-border);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--vy-bg);
+  color: var(--vy-fg);
+  font-family: var(--vy-font-sans);
+  font-size: 1rem;
+  line-height: 1.6;
+  letter-spacing: var(--vy-tracking-body, -0.006em);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--vy-fg-strong);
+  font-weight: 600;
+  letter-spacing: var(--vy-tracking-tight);
+  line-height: 1.15;
+  margin: 0;
+  text-wrap: balance;
+}
+
+p {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+  transition: color var(--vy-duration) var(--vy-ease);
+}
+
+:where(a, button, input, select, summary):focus-visible {
+  outline: 2px solid var(--vy-focus);
+  outline-offset: 2px;
+  border-radius: var(--vy-radius-sm);
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+/* ------------------------------------------------------------- primitives - */
+
+.vy-shell {
+  width: 100%;
+  max-width: 1120px;
+  margin-inline: auto;
+  padding-inline: var(--vy-gutter);
+}
+
+/* Full-bleed hairlines carry the page structure instead of stacked cards. */
+.vy-rule {
+  border-top: 1px solid var(--vy-border);
+}
+
+.vy-section {
+  padding-block: clamp(3.5rem, 7vw, 6rem);
+}
+
+.vy-eyebrow {
+  font-family: var(--vy-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: var(--vy-tracking-caps);
+  text-transform: uppercase;
+  color: var(--vy-tertiary);
+}
+
+.vy-display {
+  font-size: clamp(2.25rem, 1.2rem + 3.4vw, 3.5rem);
+  letter-spacing: -0.03em;
+  line-height: 1.04;
+}
+
+.vy-h2 {
+  font-size: clamp(1.625rem, 1.1rem + 1.7vw, 2.125rem);
+  letter-spacing: -0.022em;
+}
+
+.vy-h3 {
+  font-size: 1.0625rem;
+  letter-spacing: -0.014em;
+}
+
+.vy-lede {
+  font-size: clamp(1.0625rem, 1rem + 0.35vw, 1.1875rem);
+  line-height: 1.6;
+  color: var(--vy-secondary);
+  max-width: var(--vy-measure);
+}
+
+.vy-prose-muted {
+  color: var(--vy-muted);
+  max-width: var(--vy-measure);
+}
+
+.vy-mono {
+  font-family: var(--vy-font-mono);
+  font-variant-ligatures: none;
+}
+
+/* ---------------------------------------------------------------- buttons - */
+
+.vy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding-inline: 1.125rem;
+  border: 1px solid transparent;
+  border-radius: var(--vy-radius-lg);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  letter-spacing: var(--vy-tracking);
+  cursor: pointer;
+  transition:
+    background-color var(--vy-duration) var(--vy-ease),
+    border-color var(--vy-duration) var(--vy-ease),
+    color var(--vy-duration) var(--vy-ease);
+}
+
+.vy-btn-primary {
+  background: var(--vy-accent);
+  color: var(--vy-accent-fg);
+}
+
+.vy-btn-primary:hover {
+  background: var(--vy-accent-hover);
+}
+
+.vy-btn-secondary {
+  background: transparent;
+  border-color: var(--vy-border-strong);
+  color: var(--vy-fg);
+}
+
+.vy-btn-secondary:hover {
+  background: var(--vy-surface);
+  border-color: var(--vy-fg-strong);
+}
+
+/* ------------------------------------------------------------------ links - */
+
+.vy-link {
+  color: var(--vy-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, var(--vy-accent) 35%, transparent);
+}
+
+.vy-link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* --------------------------------------------------------------- surfaces - */
+
+.vy-panel {
+  background: var(--vy-card);
+  border: 1px solid var(--vy-border);
+  border-radius: var(--vy-radius-xl);
+}
+
+.vy-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--vy-border);
+  border-radius: 999px;
+  background: var(--vy-surface);
+  font-family: var(--vy-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+  color: var(--vy-muted);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------- document styling - */
+
+/*
+  Applied to the rendered LICENSE / NOTICE / policy documents. These are real
+  files, so the styling has to survive whatever heading depth they happen to use.
+*/
+.vy-doc {
+  max-width: 74ch;
+  color: var(--vy-secondary);
+  line-height: 1.7;
+}
+
+.vy-doc > * + * {
+  margin-top: 1.1rem;
+}
+
+.vy-doc h1 {
+  font-size: 1.75rem;
+  margin-top: 2.5rem;
+}
+
+.vy-doc h2 {
+  font-size: 1.3125rem;
+  margin-top: 2.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--vy-border);
+}
+
+.vy-doc h3 {
+  font-size: 1.0625rem;
+  margin-top: 1.75rem;
+}
+
+.vy-doc > :first-child {
+  margin-top: 0;
+}
+
+.vy-doc a {
+  color: var(--vy-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  text-decoration-color: color-mix(in srgb, var(--vy-accent) 35%, transparent);
+}
+
+.vy-doc a:hover {
+  text-decoration-color: currentColor;
+}
+
+.vy-doc strong {
+  color: var(--vy-fg-strong);
+  font-weight: 600;
+}
+
+.vy-doc code {
+  font-family: var(--vy-font-mono);
+  font-size: 0.875em;
+  background: var(--vy-surface);
+  border: 1px solid var(--vy-border);
+  border-radius: var(--vy-radius-sm);
+  padding: 0.1em 0.35em;
+}
+
+.vy-doc ul,
+.vy-doc ol {
+  padding-left: 1.25rem;
+}
+
+.vy-doc li + li {
+  margin-top: 0.4rem;
+}
+
+.vy-doc table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+  display: block;
+  overflow-x: auto;
+}
+
+.vy-doc th,
+.vy-doc td {
+  border: 1px solid var(--vy-border);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.vy-doc th {
+  background: var(--vy-surface);
+  color: var(--vy-fg-strong);
+  font-weight: 600;
+}
+
+.vy-doc blockquote {
+  border-left: 2px solid var(--vy-border-strong);
+  padding-left: 1rem;
+  color: var(--vy-muted);
+}
+
+.vy-doc hr {
+  border: 0;
+  border-top: 1px solid var(--vy-border);
+}
+
+/* Hard-wrapped legal text (LICENSE, NOTICE) keeps its original line breaks. */
+.vy-doc-plain {
+  font-family: var(--vy-font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--vy-secondary);
+  margin: 0;
+}

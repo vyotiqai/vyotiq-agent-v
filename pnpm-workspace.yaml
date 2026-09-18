@@ -42,5 +42,6 @@ overrides:
   # svgo ^4.0.2, patched in 4.1.0 (2026-08-24, >24h old).
   svgo: '>=4.1.0'
 
-# Workspace packages: root Electron app.
+# Workspace packages: root Electron app + Astro website.
 packages:
+  - landing

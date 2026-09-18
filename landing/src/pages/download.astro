@@ -1,0 +1,510 @@
+---
+import Base from '../layouts/Base.astro'
+import { app, formatBytes, formatDate } from '../lib/site'
+import { HAS_RELEASE, PLATFORMS, FEEDS, RELEASE_META } from '../lib/download'
+
+const signing = app.packaging.signing
+---
+
+<Base
+  title="Download"
+  description="Download Agent V for Windows, macOS and Linux. Free and open source under GPL-3.0-or-later."
+>
+  <section class="vy-section vy-dl-head">
+    <div class="vy-shell">
+      <p class="vy-eyebrow">Download</p>
+      <h1 class="vy-h2 vy-dl-title">Get Agent V</h1>
+      <p class="vy-lede">
+        Free and open source. Pick your platform below — every file is served from the
+        {' '}<a href={app.repo.releases} class="vy-link" rel="noopener noreferrer">GitHub release</a>{' '}
+        the in-app updater also reads.
+      </p>
+
+      {
+        HAS_RELEASE && (
+          <dl class="vy-dl-meta">
+            <div>
+              <dt>Version</dt>
+              <dd class="vy-mono">{RELEASE_META.version}</dd>
+            </div>
+            <div>
+              <dt>Released</dt>
+              <dd class="vy-mono">{formatDate(RELEASE_META.publishedAt)}</dd>
+            </div>
+            <div>
+              <dt>Licence</dt>
+              <dd class="vy-mono">{app.license}</dd>
+            </div>
+          </dl>
+        )
+      }
+    </div>
+  </section>
+
+  {
+    !HAS_RELEASE && (
+      <section class="vy-rule vy-section">
+        <div class="vy-shell">
+          <div class="vy-empty">
+            <h2 class="vy-h3">No release is published yet</h2>
+            <p class="vy-prose-muted">
+              There is currently no published build to download. This page is generated from the
+              GitHub releases API at build time, so the moment a release is published and the site
+              is rebuilt, real download links appear here automatically — nothing is hard-coded.
+            </p>
+            <p class="vy-prose-muted">
+              In the meantime you can build from source, or watch the releases page.
+            </p>
+            <div class="vy-empty-actions">
+              <a class="vy-btn vy-btn-primary" href={app.repo.releases} rel="noopener noreferrer">
+                Releases on GitHub
+              </a>
+              <a class="vy-btn vy-btn-secondary" href="/docs">
+                Build from source
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  {
+    HAS_RELEASE && (
+      <>
+        {/* Detected-platform CTA. Hidden until JS confirms a match, so the
+            table below is always the complete, working fallback. */}
+        <section class="vy-rule vy-section vy-primary-wrap" data-primary-cta hidden>
+          <div class="vy-shell">
+            <div class="vy-primary vy-panel">
+              <div>
+                <p class="vy-eyebrow">Detected on your system</p>
+                <p class="vy-primary-name" data-primary-label></p>
+                <p class="vy-primary-sub vy-mono" data-primary-meta></p>
+              </div>
+              <a class="vy-btn vy-btn-primary vy-primary-btn" data-primary-link href="#all">
+                Download
+              </a>
+            </div>
+          </div>
+        </section>
+
+        <section class="vy-rule vy-section" id="all">
+          <div class="vy-shell">
+            <h2 class="vy-h2 vy-all-title">All downloads</h2>
+
+            <div class="vy-platforms">
+              {PLATFORMS.map((platform) => (
+                <section class="vy-platform">
+                  <header class="vy-platform-head">
+                    <h3 class="vy-h3">{platform.label}</h3>
+                    <p class="vy-platform-note">{platform.note}</p>
+                  </header>
+
+                  {platform.variants
+                    .filter((v) => v.installers.length > 0)
+                    .map((variant) => (
+                      <div class="vy-variant">
+                        <p class="vy-variant-head vy-eyebrow">
+                          {variant.heading} · {variant.arch}
+                        </p>
+                        <ul class="vy-asset-list">
+                          {variant.installers.map((installer) => (
+                            <li class="vy-asset">
+                              <a class="vy-asset-link" href={installer.url} data-download>
+                                {installer.label}
+                              </a>
+                              <span class="vy-asset-file vy-mono">{installer.name}</span>
+                              <span class="vy-asset-size vy-mono">{formatBytes(installer.size)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                </section>
+              ))}
+            </div>
+          </div>
+        </section>
+      </>
+    )
+  }
+
+  <!-- First launch: unsigned builds. Stated plainly rather than discovered later. -->
+  <section class="vy-rule vy-section">
+    <div class="vy-shell">
+      <div class="vy-split">
+        <div class="vy-sec-head vy-split-head">
+          <p class="vy-eyebrow">Before you install</p>
+          <h2 class="vy-h2">These builds are not code-signed</h2>
+          <p class="vy-prose-muted">
+            Agent V is built and published by CI without a code-signing certificate
+            {signing.windows === 'unsigned' ? ' on Windows' : ''}
+            {signing.macos === 'not-notarized' ? ' and without Apple notarization on macOS' : ''}.
+            Your operating system will say so on first launch. That warning is expected, and this
+            is what it looks like — read it, then decide for yourself.
+          </p>
+          <p class="vy-prose-muted">
+            You can verify what you are running: the source is public, the build is produced by a
+            GitHub Actions workflow in that repository, and you can build it yourself instead.
+          </p>
+        </div>
+
+        <div class="vy-firstrun">
+          <article class="vy-firstrun-item">
+            <h3 class="vy-h3">Windows</h3>
+            <p>
+              SmartScreen shows “Windows protected your PC”. Choose <strong>More info</strong>, then
+              <strong>Run anyway</strong>. The installer is per-user and does not need administrator
+              rights.
+            </p>
+          </article>
+          <article class="vy-firstrun-item">
+            <h3 class="vy-h3">macOS</h3>
+            <p>
+              Gatekeeper refuses the first launch. Open <strong>System Settings → Privacy &amp;
+              Security</strong>, find the blocked app near the bottom, and choose
+              <strong>Open Anyway</strong>.
+            </p>
+          </article>
+          <article class="vy-firstrun-item">
+            <h3 class="vy-h3">Linux</h3>
+            <p>
+              Mark the AppImage executable with <code class="vy-mono">chmod +x</code> before running
+              it. The deb and rpm packages install normally through your package manager.
+            </p>
+          </article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {
+    HAS_RELEASE && FEEDS.length > 0 && (
+      <section class="vy-rule vy-section">
+        <div class="vy-shell">
+          <div class="vy-sec-head">
+            <p class="vy-eyebrow">Update metadata</p>
+            <h2 class="vy-h2">Auto-update feeds</h2>
+            <p class="vy-prose-muted">
+              The app checks these manifests for new versions. Updates are opt-in — Agent V never
+              downloads or installs one without you asking it to.
+            </p>
+          </div>
+          <ul class="vy-feed-list">
+            {FEEDS.map((feed) => (
+              <li>
+                <a href={feed.url} class="vy-link vy-mono" rel="noopener noreferrer">
+                  {feed.name}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+    )
+  }
+</Base>
+
+<style>
+  .vy-dl-head {
+    padding-block: clamp(2.5rem, 5vw, 4rem) clamp(2rem, 4vw, 3rem);
+  }
+
+  .vy-dl-title {
+    margin-top: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .vy-dl-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.25rem 3rem;
+    margin: 2.5rem 0 0;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--vy-border);
+  }
+
+  .vy-dl-meta dt {
+    font-family: var(--vy-font-mono);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: var(--vy-tracking-caps);
+    color: var(--vy-tertiary);
+  }
+
+  .vy-dl-meta dd {
+    margin: 0.3rem 0 0;
+    font-size: 0.9375rem;
+    color: var(--vy-fg-strong);
+  }
+
+  /* --------------------------------------------------------------- empty - */
+
+  .vy-empty {
+    max-width: 62ch;
+  }
+
+  .vy-empty .vy-prose-muted {
+    margin-top: 0.875rem;
+    font-size: 0.9375rem;
+  }
+
+  .vy-empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1.75rem;
+  }
+
+  /* ------------------------------------------------------------- primary - */
+
+  .vy-primary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.25rem;
+    padding: 1.5rem;
+  }
+
+  .vy-primary-name {
+    margin-top: 0.5rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--vy-fg-strong);
+    letter-spacing: -0.018em;
+  }
+
+  .vy-primary-sub {
+    margin-top: 0.25rem;
+    font-size: 0.8125rem;
+    color: var(--vy-tertiary);
+  }
+
+  .vy-primary-btn {
+    flex-shrink: 0;
+  }
+
+  /* ------------------------------------------------------------ platforms - */
+
+  .vy-all-title {
+    margin-bottom: 2.5rem;
+  }
+
+  .vy-platforms {
+    display: grid;
+    gap: 2.5rem;
+  }
+
+  .vy-platform {
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--vy-border);
+  }
+
+  .vy-platform-head {
+    margin-bottom: 1.25rem;
+  }
+
+  .vy-platform-note {
+    margin-top: 0.375rem;
+    font-size: 0.875rem;
+    color: var(--vy-muted);
+  }
+
+  .vy-variant + .vy-variant {
+    margin-top: 1.5rem;
+  }
+
+  .vy-variant-head {
+    margin-bottom: 0.625rem;
+  }
+
+  .vy-asset-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 1px;
+    background: var(--vy-border);
+    border: 1px solid var(--vy-border);
+    border-radius: var(--vy-radius-lg);
+    overflow: hidden;
+  }
+
+  .vy-asset {
+    display: grid;
+    grid-template-columns: 14rem 1fr auto;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--vy-bg);
+  }
+
+  .vy-asset-link {
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--vy-accent);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+    text-decoration-color: color-mix(in srgb, var(--vy-accent) 35%, transparent);
+  }
+
+  .vy-asset-link:hover {
+    text-decoration-color: currentColor;
+  }
+
+  .vy-asset-file {
+    font-size: 0.75rem;
+    color: var(--vy-tertiary);
+    overflow-wrap: anywhere;
+  }
+
+  .vy-asset-size {
+    font-size: 0.8125rem;
+    color: var(--vy-muted);
+    white-space: nowrap;
+  }
+
+  @media (max-width: 680px) {
+    .vy-asset {
+      grid-template-columns: 1fr auto;
+      gap: 0.35rem 1rem;
+    }
+    .vy-asset-file {
+      grid-column: 1 / -1;
+      order: 3;
+    }
+  }
+
+  /* ------------------------------------------------------------ first run - */
+
+  .vy-firstrun {
+    display: grid;
+    gap: 1.5rem;
+  }
+
+  .vy-firstrun-item {
+    padding-top: 1.125rem;
+    border-top: 1px solid var(--vy-border);
+  }
+
+  .vy-firstrun-item p {
+    margin-top: 0.5rem;
+    font-size: 0.9375rem;
+    color: var(--vy-muted);
+  }
+
+  .vy-firstrun-item strong {
+    color: var(--vy-fg-strong);
+    font-weight: 600;
+  }
+
+  .vy-firstrun-item code {
+    font-size: 0.875em;
+    background: var(--vy-surface);
+    border: 1px solid var(--vy-border);
+    border-radius: var(--vy-radius-sm);
+    padding: 0.1em 0.35em;
+  }
+
+  .vy-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3rem;
+    align-items: start;
+  }
+
+  .vy-split-head {
+    max-width: 52ch;
+  }
+
+  .vy-sec-head .vy-h2 {
+    margin-top: 0.75rem;
+  }
+
+  .vy-sec-head .vy-prose-muted {
+    margin-top: 1rem;
+    font-size: 0.9375rem;
+  }
+
+  @media (max-width: 860px) {
+    .vy-split {
+      grid-template-columns: 1fr;
+      gap: 2rem;
+    }
+  }
+
+  /* ---------------------------------------------------------------- feeds - */
+
+  .vy-feed-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.5rem;
+    font-size: 0.875rem;
+  }
+</style>
+
+<script>
+  // Progressive enhancement only: the complete download table is already in the
+  // DOM. This just promotes the build that matches the visitor's platform.
+  type Row = { platform: string; arch: string; label: string; name: string; url: string; size: string }
+
+  const wrap = document.querySelector<HTMLElement>('[data-primary-cta]')
+  if (wrap) {
+    // Read the rendered rows directly rather than duplicating the release data
+    // into the script — the table is the single source of truth on this page.
+    const assets: Row[] = [...document.querySelectorAll<HTMLElement>('.vy-asset')].map((li) => {
+      const section = li.closest('.vy-platform')
+      const variant = li.closest('.vy-variant')
+      const link = li.querySelector<HTMLAnchorElement>('.vy-asset-link')!
+      const headingText = variant?.querySelector('.vy-variant-head')?.textContent ?? ''
+      return {
+        platform: section?.querySelector('.vy-h3')?.textContent?.trim().toLowerCase() ?? '',
+        arch: /arm64/i.test(headingText) ? 'arm64' : 'x64',
+        label: link.textContent?.trim() ?? '',
+        name: li.querySelector('.vy-asset-file')?.textContent?.trim() ?? '',
+        url: link.href,
+        size: li.querySelector('.vy-asset-size')?.textContent?.trim() ?? ''
+      }
+    })
+
+    const ua = navigator.userAgent
+    const uaData = (navigator as any).userAgentData
+    const platformHint: string = (uaData?.platform ?? '').toLowerCase()
+
+    let want: 'windows' | 'macos' | 'linux' | null = null
+    if (platformHint.includes('win') || /Windows/i.test(ua)) want = 'windows'
+    else if (platformHint.includes('mac') || /Mac OS X|Macintosh/i.test(ua)) want = 'macos'
+    else if (platformHint.includes('linux') || /Linux|X11/i.test(ua)) want = 'linux'
+
+    // Android reports "Linux" in the UA; there is no Android build, so bail out.
+    if (/Android/i.test(ua) || /iPhone|iPad|iPod/i.test(ua)) want = null
+
+    if (want) {
+      // Apple silicon cannot be read from the UA — Safari reports Intel either
+      // way — so only prefer arm64 when the UA-CH high-entropy hint says so.
+      const archHint = (uaData?.architecture ?? '').toLowerCase()
+      const preferArm = want === 'macos' ? archHint === 'arm' : archHint === 'arm'
+
+      const candidates = assets.filter((a) => a.platform === want)
+      const match =
+        candidates.find((a) => (preferArm ? a.arch === 'arm64' : a.arch === 'x64')) ?? candidates[0]
+
+      if (match) {
+        const labels: Record<string, string> = { windows: 'Windows', macos: 'macOS', linux: 'Linux' }
+        const archLabel = want === 'linux' ? 'x86_64' : match.arch
+        document.querySelector('[data-primary-label]')!.textContent =
+          `${labels[want]} · ${match.label}`
+        document.querySelector('[data-primary-meta]')!.textContent = `${archLabel} · ${match.size} · ${match.name}`
+        const link = document.querySelector<HTMLAnchorElement>('[data-primary-link]')!
+        link.href = match.url
+        link.textContent = `Download for ${labels[want]}`
+        wrap.hidden = false
+      }
+    }
+  }
+</script>

@@ -1,0 +1,15 @@
+dist/
+.astro/
+node_modules/
+
+# Baked at build time from repo sources / the GitHub API — never hand-edited,
+# never committed, so the site can't drift from what it claims to describe.
+src/data/app.json
+src/data/release.json
+src/data/changelog.json
+src/generated/legal/
+public/brand/
+
+# Captured by scripts/capture-shots.mjs from a real app boot. Not committed:
+# a first-run capture shows an empty workspace, which undersells the product.
+public/shots/

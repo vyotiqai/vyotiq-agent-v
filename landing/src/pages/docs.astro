@@ -1,0 +1,339 @@
+---
+import Base from '../layouts/Base.astro'
+import { app } from '../lib/site'
+
+const source = app.repo.source
+
+const steps = [
+  {
+    n: '01',
+    h: 'Install',
+    p: 'Download the build for your platform and run it. The Windows installer is per-user and needs no administrator rights. Builds are unsigned, so expect a first-launch warning from your OS.',
+    link: { href: '/download', label: 'Downloads' }
+  },
+  {
+    n: '02',
+    h: 'Add a model provider',
+    p: 'Open Settings → Providers and paste an API key for whichever provider you use. Keys are encrypted with your operating system keychain and never leave your machine. Running Ollama locally? Point Agent V at it and skip the key entirely.'
+  },
+  {
+    n: '03',
+    h: 'Open a repository',
+    p: 'Open the folder you want to work in. Agent V builds a local index of it in the background — you can watch progress in Settings → Indexing.'
+  },
+  {
+    n: '04',
+    h: 'Pick a mode and start',
+    p: 'Start in Ask to explore the codebase read-only, Plan to have it draft an approach first, or Agent to let it make changes. Settings → Tools controls which tools may run without asking you first.'
+  }
+]
+
+const reference = [
+  {
+    h: 'Teammates',
+    p: 'Architecture, scheduler semantics and a user guide for persistent agent identities and delegated tasks.',
+    href: `${source}/blob/main/docs/teammates.md`
+  },
+  {
+    h: 'README',
+    p: 'Project overview, prerequisites, development commands and the full verification suite.',
+    href: `${source}/blob/main/README.md`
+  },
+  {
+    h: 'Contributing',
+    p: 'Development workflow and the gates every change has to pass.',
+    href: '/contributing'
+  },
+  {
+    h: 'Release runbook',
+    p: 'How maintainers cut a release, and what the pipeline verifies before publishing.',
+    href: `${source}/blob/main/RELEASE-RUNBOOK.md`
+  },
+  {
+    h: 'Security policy',
+    p: 'How to report a vulnerability.',
+    href: '/security'
+  },
+  {
+    h: 'Issue tracker',
+    p: 'Bugs, feature requests and questions.',
+    href: app.repo.issues ?? `${source}/issues`
+  }
+]
+---
+
+<Base
+  title="Docs"
+  description="Getting started with Agent V — install, connect a model provider, open a repository, and build from source."
+>
+  <section class="vy-section vy-head">
+    <div class="vy-shell">
+      <p class="vy-eyebrow">Documentation</p>
+      <h1 class="vy-h2 vy-head-title">Getting started</h1>
+      <p class="vy-lede">
+        Agent V is a desktop application. There is no account to create and no service to sign up
+        for — install it, give it a model provider key, and point it at a repository.
+      </p>
+    </div>
+  </section>
+
+  <section class="vy-rule vy-section">
+    <div class="vy-shell">
+      <ol class="vy-steps">
+        {
+          steps.map((step) => (
+            <li class="vy-step">
+              <span class="vy-step-n vy-mono">{step.n}</span>
+              <div class="vy-step-body">
+                <h2 class="vy-h3">{step.h}</h2>
+                <p class="vy-prose-muted">{step.p}</p>
+                {step.link && (
+                  <p class="vy-step-link">
+                    <a href={step.link.href} class="vy-link">
+                      {step.link.label} →
+                    </a>
+                  </p>
+                )}
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <!-- Build from source -->
+  <section class="vy-rule vy-section">
+    <div class="vy-shell">
+      <div class="vy-split">
+        <header class="vy-sec-head vy-split-head">
+          <p class="vy-eyebrow">From source</p>
+          <h2 class="vy-h2">Build it yourself</h2>
+          <p class="vy-prose-muted">
+            Agent V is GPL-3.0-or-later. Everything the release pipeline builds, you can build
+            locally — which is also the answer if you would rather not run an unsigned binary.
+          </p>
+          <p class="vy-prose-muted">
+            Requires Node <span class="vy-mono">{app.node}</span> and pnpm, enabled once with
+            <span class="vy-mono"> corepack enable</span>.
+          </p>
+        </header>
+
+        <div class="vy-code">
+          <pre class="vy-mono"><code>git clone {source}.git
+cd vyotiq-agent-v
+pnpm install
+pnpm dev</code></pre>
+          <p class="vy-code-note">
+            <span class="vy-mono">pnpm dev</span> runs the app in development.
+            <span class="vy-mono">pnpm build</span> produces a production build, and
+            <span class="vy-mono">pnpm pack:win</span> /<span class="vy-mono"> pack:mac</span> /<span
+              class="vy-mono"
+            >
+              pack:linux</span
+            > produce installers.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Verification -->
+  <section class="vy-rule vy-section">
+    <div class="vy-shell">
+      <header class="vy-sec-head">
+        <p class="vy-eyebrow">Verification</p>
+        <h2 class="vy-h2">The gates every change passes</h2>
+        <p class="vy-prose-muted">
+          These run in CI on Ubuntu, Windows and macOS for every push and pull request, and again
+          before any release is built.
+        </p>
+      </header>
+      <div class="vy-code vy-code-wide">
+        <pre class="vy-mono"><code>pnpm typecheck     # tsc over the main and renderer configs
+pnpm lint          # eslint
+pnpm test          # vitest suite
+pnpm test:gui-e2e  # Playwright GUI end-to-end</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- Reference -->
+  <section class="vy-rule vy-section">
+    <div class="vy-shell">
+      <header class="vy-sec-head">
+        <p class="vy-eyebrow">Reference</p>
+        <h2 class="vy-h2">Deeper documentation</h2>
+        <p class="vy-prose-muted">
+          Agent V's reference documentation lives in the repository next to the code it describes,
+          so it stays honest.
+        </p>
+      </header>
+
+      <ul class="vy-ref-grid">
+        {
+          reference.map((r) => (
+            <li class="vy-ref">
+              <a
+                href={r.href}
+                class="vy-ref-link"
+                {...(r.href.startsWith('http') ? { rel: 'noopener noreferrer' } : {})}
+              >
+                <h3 class="vy-h3">{r.h}</h3>
+                <p class="vy-prose-muted">{r.p}</p>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .vy-head {
+    padding-block: clamp(2.5rem, 5vw, 4rem) clamp(2rem, 4vw, 3rem);
+  }
+
+  .vy-head-title {
+    margin-top: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .vy-sec-head {
+    max-width: 62ch;
+    margin-bottom: 2.5rem;
+  }
+
+  .vy-sec-head .vy-h2 {
+    margin-top: 0.75rem;
+  }
+
+  .vy-sec-head .vy-prose-muted {
+    margin-top: 1rem;
+    font-size: 0.9375rem;
+  }
+
+  /* --------------------------------------------------------------- steps - */
+
+  .vy-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0;
+  }
+
+  .vy-step {
+    display: grid;
+    grid-template-columns: 4rem 1fr;
+    gap: 1.5rem;
+    padding-block: 1.75rem;
+    border-top: 1px solid var(--vy-border);
+  }
+
+  .vy-step:last-child {
+    border-bottom: 1px solid var(--vy-border);
+  }
+
+  .vy-step-n {
+    font-size: 0.8125rem;
+    color: var(--vy-tertiary);
+    padding-top: 0.15rem;
+  }
+
+  .vy-step-body p {
+    margin-top: 0.5rem;
+    font-size: 0.9375rem;
+  }
+
+  .vy-step-link {
+    margin-top: 0.75rem;
+    font-size: 0.875rem;
+  }
+
+  @media (max-width: 560px) {
+    .vy-step {
+      grid-template-columns: 1fr;
+      gap: 0.5rem;
+    }
+  }
+
+  /* ---------------------------------------------------------------- code - */
+
+  .vy-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3rem;
+    align-items: start;
+  }
+
+  .vy-split-head {
+    margin-bottom: 0;
+  }
+
+  @media (max-width: 860px) {
+    .vy-split {
+      grid-template-columns: 1fr;
+      gap: 2rem;
+    }
+  }
+
+  .vy-code pre {
+    margin: 0;
+    padding: 1.125rem 1.25rem;
+    background: var(--vy-card);
+    border: 1px solid var(--vy-border);
+    border-radius: var(--vy-radius-lg);
+    font-size: 0.8125rem;
+    line-height: 1.7;
+    color: var(--vy-secondary);
+    overflow-x: auto;
+  }
+
+  .vy-code-wide {
+    max-width: 44rem;
+  }
+
+  .vy-code-note {
+    margin-top: 0.875rem;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--vy-tertiary);
+  }
+
+  /* ----------------------------------------------------------- reference - */
+
+  .vy-ref-grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1px;
+    background: var(--vy-border);
+    border: 1px solid var(--vy-border);
+    border-radius: var(--vy-radius-xl);
+    overflow: hidden;
+  }
+
+  .vy-ref {
+    background: var(--vy-bg);
+  }
+
+  .vy-ref-link {
+    display: block;
+    padding: 1.25rem;
+    height: 100%;
+    transition: background-color var(--vy-duration) var(--vy-ease);
+  }
+
+  .vy-ref-link:hover {
+    background: var(--vy-card);
+  }
+
+  .vy-ref-link p {
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+  }
+</style>

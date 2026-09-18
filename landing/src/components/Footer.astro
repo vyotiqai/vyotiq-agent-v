@@ -1,0 +1,152 @@
+---
+import { FOOTER, SITE, app, isExternal } from '../lib/site'
+
+const year = new Date().getFullYear()
+---
+
+<footer class="vy-footer">
+  <div class="vy-shell">
+    <div class="vy-footer-grid">
+      <div class="vy-footer-brand">
+        <a href="/" class="vy-footer-lockup" aria-label="Vyotiq — home">
+          <img src="/brand/vyotiq-mark-black.svg" alt="" width="26" height="26" class="vy-footer-mark" />
+          <span>Vyotiq</span>
+        </a>
+        <p class="vy-footer-blurb">
+          {SITE.product} — a coding workspace for real repositories. Free and open source under
+          <a href="/license" class="vy-link">GPL-3.0-or-later</a>.
+        </p>
+      </div>
+
+      {
+        FOOTER.map((column) => (
+          <nav class="vy-footer-col" aria-label={column.heading}>
+            <h2 class="vy-eyebrow vy-footer-heading">{column.heading}</h2>
+            <ul>
+              {column.items.map((item) => (
+                <li>
+                  <a
+                    href={item.href}
+                    class="vy-footer-link"
+                    {...(isExternal(item.href) ? { rel: 'noopener noreferrer' } : {})}
+                  >
+                    {item.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        ))
+      }
+    </div>
+
+    <div class="vy-footer-base">
+      <p class="vy-footer-meta">© {year} Vyotiq. Source available on <a href={app.repo.source} class="vy-link" rel="noopener noreferrer">GitHub</a>.</p>
+      <p class="vy-footer-meta vy-mono">
+        Electron {app.electron} · Node {app.node}
+      </p>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .vy-footer {
+    border-top: 1px solid var(--vy-border);
+    padding-block: 3.5rem 2rem;
+    margin-top: 2rem;
+  }
+
+  .vy-footer-grid {
+    display: grid;
+    grid-template-columns: 1.6fr repeat(3, 1fr);
+    gap: 2.5rem 2rem;
+  }
+
+  .vy-footer-lockup {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--vy-fg-strong);
+  }
+
+  .vy-footer-mark {
+    width: 24px;
+    height: 24px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :global(:root:not([data-theme='light'])) .vy-footer-mark {
+      filter: invert(1);
+    }
+  }
+
+  :global(:root[data-theme='dark']) .vy-footer-mark {
+    filter: invert(1);
+  }
+
+  :global(:root[data-theme='light']) .vy-footer-mark {
+    filter: none;
+  }
+
+  .vy-footer-blurb {
+    margin-top: 0.875rem;
+    max-width: 34ch;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--vy-muted);
+  }
+
+  .vy-footer-heading {
+    margin-bottom: 0.875rem;
+  }
+
+  .vy-footer-col ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .vy-footer-link {
+    font-size: 0.875rem;
+    color: var(--vy-muted);
+  }
+
+  .vy-footer-link:hover {
+    color: var(--vy-fg-strong);
+  }
+
+  .vy-footer-base {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.5rem;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--vy-border);
+  }
+
+  .vy-footer-meta {
+    font-size: 0.8125rem;
+    color: var(--vy-tertiary);
+  }
+
+  @media (max-width: 860px) {
+    .vy-footer-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+    .vy-footer-brand {
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .vy-footer-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

@@ -1,0 +1,254 @@
+---
+import Base from '../layouts/Base.astro'
+import { app } from '../lib/site'
+
+const ext = app.extensions
+
+const GROUPS = [
+  {
+    kind: 'mcp',
+    title: 'MCP servers',
+    blurb:
+      'Model Context Protocol servers. Connect one and its tools, resources and prompts become available to the agent. Several use OAuth, so you sign in to the vendor rather than pasting a token.'
+  },
+  {
+    kind: 'skill',
+    title: 'Skills',
+    blurb:
+      'Reusable instruction sets the agent loads into a run, invoked as slash commands. These ship with the app; you can also write your own.'
+  },
+  {
+    kind: 'plugin',
+    title: 'Plugin rule sets',
+    blurb: 'Bundles of standing rules that apply to every run in a workspace.'
+  }
+] as const
+
+const byKind = (kind: string) =>
+  ext.list
+    .filter((p) => p.kind === kind)
+    .sort((a, b) => {
+      if (a.featuredRank && b.featuredRank) return a.featuredRank - b.featuredRank
+      if (a.featuredRank) return -1
+      if (b.featuredRank) return 1
+      return a.name.localeCompare(b.name)
+    })
+
+const AUTH_LABEL: Record<string, string> = {
+  oauth: 'OAuth',
+  'oauth-client': 'OAuth'
+}
+---
+
+<Base
+  title="Extensions"
+  description={`${ext.total} extensions ship with Agent V — ${ext.counts.mcp} MCP servers, ${ext.counts.skill} skills and ${ext.counts.plugin} plugin rule sets.`}
+>
+  <section class="vy-section vy-head">
+    <div class="vy-shell">
+      <p class="vy-eyebrow">Extensions</p>
+      <h1 class="vy-h2 vy-head-title">{ext.total} packages, bundled with the app</h1>
+      <p class="vy-lede">
+        The marketplace ships inside Agent V. Browsing it makes no network request, and installing
+        is per workspace — there is no registry account and nothing to sign up for.
+      </p>
+
+      <dl class="vy-counts">
+        <div><dt>MCP servers</dt><dd class="vy-mono">{ext.counts.mcp}</dd></div>
+        <div><dt>Skills</dt><dd class="vy-mono">{ext.counts.skill}</dd></div>
+        <div><dt>Plugin rule sets</dt><dd class="vy-mono">{ext.counts.plugin}</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  {
+    GROUPS.map((group) => {
+      const items = byKind(group.kind)
+      return (
+        <section class="vy-rule vy-section">
+          <div class="vy-shell">
+            <header class="vy-sec-head">
+              <p class="vy-eyebrow">
+                {group.title} · {items.length}
+              </p>
+              <h2 class="vy-h2">{group.title}</h2>
+              <p class="vy-prose-muted">{group.blurb}</p>
+            </header>
+
+            <ul class="vy-pkg-grid">
+              {items.map((pkg) => (
+                <li class="vy-pkg">
+                  <div class="vy-pkg-head">
+                    {pkg.icon ? (
+                      <img
+                        class="vy-pkg-icon"
+                        src={`/brand/extensions/${pkg.icon}`}
+                        alt=""
+                        width="20"
+                        height="20"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <span class="vy-pkg-icon vy-pkg-icon-fallback" aria-hidden="true">
+                        {pkg.name.slice(0, 1)}
+                      </span>
+                    )}
+                    <h3 class="vy-pkg-name">{pkg.name}</h3>
+                    {AUTH_LABEL[pkg.auth] && <span class="vy-tag">{AUTH_LABEL[pkg.auth]}</span>}
+                  </div>
+                  <p class="vy-pkg-desc">{pkg.description}</p>
+                  {pkg.publisher && <p class="vy-pkg-pub">{pkg.publisher}</p>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )
+    })
+  }
+
+  <section class="vy-rule vy-section">
+    <div class="vy-shell">
+      <div class="vy-sec-head">
+        <p class="vy-eyebrow">Beyond the bundle</p>
+        <h2 class="vy-h2">Bring your own servers</h2>
+        <p class="vy-prose-muted">
+          Any MCP server works, not just the bundled ones. Point Agent V at a command or a URL, or
+          import servers you have already configured for another client. Trade marks and icons
+          above belong to their respective owners and are shown to identify the integration.
+        </p>
+      </div>
+      <div class="vy-cta-actions">
+        <a class="vy-btn vy-btn-primary" href="/download">Download</a>
+        <a class="vy-btn vy-btn-secondary" href="/docs">Documentation</a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .vy-head {
+    padding-block: clamp(2.5rem, 5vw, 4rem) clamp(2rem, 4vw, 3rem);
+  }
+
+  .vy-head-title {
+    margin-top: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .vy-counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.25rem 3rem;
+    margin: 2.5rem 0 0;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--vy-border);
+  }
+
+  .vy-counts dt {
+    font-family: var(--vy-font-mono);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: var(--vy-tracking-caps);
+    color: var(--vy-tertiary);
+  }
+
+  .vy-counts dd {
+    margin: 0.3rem 0 0;
+    font-size: 1.375rem;
+    font-weight: 500;
+    color: var(--vy-fg-strong);
+    letter-spacing: -0.02em;
+  }
+
+  .vy-sec-head {
+    max-width: 62ch;
+    margin-bottom: 2.5rem;
+  }
+
+  .vy-sec-head .vy-h2 {
+    margin-top: 0.75rem;
+  }
+
+  .vy-sec-head .vy-prose-muted {
+    margin-top: 1rem;
+    font-size: 0.9375rem;
+  }
+
+  /* ------------------------------------------------------------ packages - */
+
+  .vy-pkg-grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1px;
+    background: var(--vy-border);
+    border: 1px solid var(--vy-border);
+    border-radius: var(--vy-radius-xl);
+    overflow: hidden;
+  }
+
+  .vy-pkg {
+    background: var(--vy-bg);
+    padding: 1.125rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .vy-pkg-head {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+  }
+
+  .vy-pkg-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    object-fit: contain;
+  }
+
+  .vy-pkg-icon-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--vy-border);
+    border-radius: var(--vy-radius-sm);
+    background: var(--vy-surface);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--vy-muted);
+    text-transform: uppercase;
+  }
+
+  .vy-pkg-name {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--vy-fg-strong);
+    letter-spacing: -0.014em;
+    margin-right: auto;
+  }
+
+  .vy-pkg-desc {
+    margin-top: 0.625rem;
+    font-size: 0.8125rem;
+    line-height: 1.55;
+    color: var(--vy-muted);
+  }
+
+  .vy-pkg-pub {
+    margin-top: 0.75rem;
+    font-family: var(--vy-font-mono);
+    font-size: 0.6875rem;
+    color: var(--vy-tertiary);
+  }
+
+  .vy-cta-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+  }
+</style>

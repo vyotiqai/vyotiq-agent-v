@@ -35,7 +35,9 @@ const sharedRules = {
 
 export default [
   {
-    ignores: ['out/**', 'dist/**', 'node_modules/**', 'release/**', 'test-results/**', '**/*.d.ts', '.tmp/**']
+    // errand-main is a separate reference codebase (no node_modules of its own);
+    // linting it fails on unresolvable plugins and is out of scope.
+    ignores: ['out/**', 'dist/**', 'node_modules/**', 'release/**', 'test-results/**', '**/*.d.ts', '.tmp/**', 'errand-main/**', 'landing/**']
   },
   js.configs.recommended,
   {
