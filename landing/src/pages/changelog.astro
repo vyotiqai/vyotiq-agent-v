@@ -6,18 +6,14 @@ import { formatDate } from '../lib/site'
 const entries = changelog.entries
 ---
 
-<Base
-  title="Changelog"
-  description="Every published Agent V release, read from the GitHub releases API."
->
-  <section class="vy-section vy-head">
+<Base title="Changelog" description="Every published Agent V release.">
+  <section class="vy-page-head">
     <div class="vy-shell">
       <p class="vy-eyebrow">Changelog</p>
-      <h1 class="vy-h2 vy-head-title">Releases</h1>
+      <h1 class="vy-h1">Releases</h1>
       <p class="vy-lede">
-        Agent V has no separate changelog file — releases are cut from git tags and the release
-        notes are the record. This page lists what is actually published, read from the GitHub
-        releases API when the site is built.
+        Releases are cut from git tags; the release notes are the record.
+        {' '}<a href={changelog.releasesUrl} class="vy-link" rel="noopener noreferrer">All releases on GitHub</a>.
       </p>
     </div>
   </section>
@@ -28,39 +24,30 @@ const entries = changelog.entries
         entries.length === 0 ? (
           <div class="vy-empty">
             <h2 class="vy-h3">Nothing published yet</h2>
-            <p class="vy-prose-muted">
-              There are no published releases to show. When the first one is tagged and built, it
-              appears here on the next site build.
-            </p>
-            <p class="vy-step-link">
-              <a href={changelog.releasesUrl} class="vy-link" rel="noopener noreferrer">
-                Releases on GitHub →
-              </a>
-            </p>
+            <p class="vy-prose-muted">The first release appears here once it is tagged and built.</p>
           </div>
         ) : (
-          <ol class="vy-releases">
+          <ol class="vy-rows vy-releases">
             {entries.map((entry) => (
               <li class="vy-release">
                 <div class="vy-release-meta">
-                  <h2 class="vy-release-version vy-mono">{entry.tag}</h2>
+                  <h2 class="vy-release-tag vy-mono">{entry.tag}</h2>
                   <p class="vy-release-date">{formatDate(entry.publishedAt)}</p>
                   {entry.prerelease && <span class="vy-tag">pre-release</span>}
                 </div>
 
-                <div class="vy-release-body">
+                <div class="vy-item vy-panel-xl vy-release-card">
                   <h3 class="vy-h3">{entry.name}</h3>
                   {entry.body ? (
-                    <pre class="vy-release-notes">{entry.body}</pre>
+                    <pre class="vy-codeblock vy-release-notes">{entry.body}</pre>
                   ) : (
-                    <p class="vy-prose-muted">No release notes were written for this release.</p>
+                    <p>No release notes were written for this release.</p>
                   )}
                   <p class="vy-release-links">
                     <a href={entry.htmlUrl} class="vy-link" rel="noopener noreferrer">
                       Release on GitHub
                     </a>
-                    <span class="vy-release-sep" aria-hidden="true">·</span>
-                    <span class="vy-release-assets vy-mono">{entry.assetCount} files</span>
+                    <span class="vy-mono vy-release-assets">{entry.assetCount} files</span>
                   </p>
                 </div>
               </li>
@@ -73,49 +60,22 @@ const entries = changelog.entries
 </Base>
 
 <style>
-  .vy-head {
-    padding-block: clamp(2.5rem, 5vw, 4rem) clamp(2rem, 4vw, 3rem);
-  }
-
-  .vy-head-title {
-    margin-top: 0.75rem;
-    margin-bottom: 1.25rem;
-  }
-
-  .vy-empty {
-    max-width: 62ch;
-  }
-
-  .vy-empty .vy-prose-muted {
-    margin-top: 0.875rem;
-    font-size: 0.9375rem;
-  }
-
-  .vy-step-link {
-    margin-top: 1.25rem;
-    font-size: 0.9375rem;
-  }
-
-  .vy-releases {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-
-  .vy-release {
+  .vy-releases > .vy-release {
     display: grid;
-    grid-template-columns: 12rem 1fr;
-    gap: 2rem;
+    grid-template-columns: var(--vy-aside) minmax(0, 1fr);
+    gap: 1rem 3rem;
     padding-block: 2rem;
-    border-top: 1px solid var(--vy-border);
   }
 
-  .vy-release:first-child {
-    border-top: 0;
-    padding-top: 0;
+  .vy-release-card {
+    padding: 1.5rem;
   }
 
-  .vy-release-version {
+  .vy-release-card > :first-child {
+    margin-top: 0;
+  }
+
+  .vy-release-tag {
     font-size: 1rem;
     font-weight: 500;
     color: var(--vy-fg-strong);
@@ -132,30 +92,17 @@ const entries = changelog.entries
   }
 
   .vy-release-notes {
-    margin: 0.875rem 0 0;
-    padding: 1rem 1.125rem;
-    background: var(--vy-card);
-    border: 1px solid var(--vy-border);
-    border-radius: var(--vy-radius-lg);
-    font-family: var(--vy-font-mono);
-    font-size: 0.8125rem;
-    line-height: 1.65;
-    color: var(--vy-secondary);
+    margin-top: 0.875rem;
     white-space: pre-wrap;
     word-break: break-word;
-    overflow-x: auto;
   }
 
   .vy-release-links {
     margin-top: 1rem;
     display: flex;
-    align-items: center;
-    gap: 0.625rem;
+    align-items: baseline;
+    gap: 1rem;
     font-size: 0.875rem;
-  }
-
-  .vy-release-sep {
-    color: var(--vy-border-strong);
   }
 
   .vy-release-assets {
@@ -163,17 +110,17 @@ const entries = changelog.entries
     color: var(--vy-tertiary);
   }
 
-  @media (max-width: 720px) {
-    .vy-release {
-      grid-template-columns: 1fr;
-      gap: 0.875rem;
+  @media (max-width: 900px) {
+    .vy-releases > .vy-release {
+      grid-template-columns: minmax(0, 1fr);
     }
     .vy-release-meta {
       display: flex;
       align-items: baseline;
       gap: 0.875rem;
     }
-    .vy-release-date {
+    .vy-release-date,
+    .vy-release-meta .vy-tag {
       margin-top: 0;
     }
   }

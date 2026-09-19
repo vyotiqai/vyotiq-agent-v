@@ -1,0 +1,124 @@
+---
+/**
+ * What a teammate is, by contrast with the two things it is not.
+ *
+ * The three rows are docs/teammates.md §1, which states that everything in it
+ * reflects implemented behaviour. The vocabulary is the site's, not the
+ * document's: it says "inline instance" where the parallelism section above
+ * already says "child instance", and one page should not use both.
+ *
+ * The footnote is not decoration. §15 of that document records that a locally
+ * scheduled task cannot start while the application is fully closed, and that
+ * away-mode cloud execution is not shipped — so "unattended" has to say what it
+ * means here rather than let a reader supply the larger claim themselves.
+ */
+const rows = [
+  {
+    what: 'A chat',
+    lifetime: 'One conversation',
+    memory: 'The shared workspace brain',
+    unattended: 'No — you send, then wait'
+  },
+  {
+    what: 'A child instance',
+    lifetime: 'Inside one run',
+    memory: 'None — it is a worker',
+    unattended: 'No — it dies with the run'
+  },
+  {
+    what: 'A teammate',
+    lifetime: 'Across sessions',
+    memory: 'Private, per workspace',
+    unattended: 'Yes — queued and scheduled work'
+  }
+]
+---
+
+<div class="vy-compare-wrap">
+  <table class="vy-compare">
+    <thead>
+      <tr>
+        <td class="vy-compare-corner"></td>
+        <th scope="col">Lifetime</th>
+        <th scope="col">Memory</th>
+        <th scope="col">Unattended work</th>
+      </tr>
+    </thead>
+    <tbody>
+      {
+        rows.map((row, i) => (
+          <tr class:list={[i === rows.length - 1 && 'vy-compare-row-key']}>
+            <th scope="row">{row.what}</th>
+            <td>{row.lifetime}</td>
+            <td>{row.memory}</td>
+            <td>{row.unattended}</td>
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+  <p class="vy-footnote vy-compare-note">
+    Unattended means while Agent V is running. A scheduled task does not start with the
+    application fully closed — that would need a hosted service, and there is not one.
+  </p>
+</div>
+
+<style>
+  /* The table scrolls rather than reflows. Four columns of short phrases stay
+     comparable side by side; stacked into cards they stop being a comparison,
+     which is the only reason the table exists. */
+  .vy-compare-wrap {
+    overflow-x: auto;
+  }
+
+  .vy-compare {
+    width: 100%;
+    min-width: 34rem;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+    text-align: left;
+  }
+
+  .vy-compare th,
+  .vy-compare td {
+    padding: 0.875rem 1rem;
+    border-bottom: 1px solid var(--vy-border);
+    vertical-align: top;
+    font-weight: 400;
+    color: var(--vy-muted);
+  }
+
+  .vy-compare thead th {
+    font-family: var(--vy-font-mono);
+    letter-spacing: var(--vy-tracking-caps);
+    text-transform: uppercase;
+    font-size: 0.6875rem;
+    color: var(--vy-tertiary);
+  }
+
+  .vy-compare-corner {
+    border-bottom: 1px solid var(--vy-border);
+  }
+
+  .vy-compare tbody th {
+    color: var(--vy-fg-strong);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  /* The row the section is about. */
+  .vy-compare-row-key th,
+  .vy-compare-row-key td {
+    background: var(--vy-accent-wash);
+    border-bottom-color: transparent;
+    color: var(--vy-secondary);
+  }
+
+  .vy-compare-row-key th {
+    color: var(--vy-fg-strong);
+  }
+
+  .vy-compare-note {
+    margin-top: 1rem;
+  }
+</style>

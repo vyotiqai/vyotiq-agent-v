@@ -1,21 +1,25 @@
 ---
 import Base from '../layouts/Base.astro'
 import { NAV } from '../lib/site'
+
+const links = [{ href: '/', label: 'Home' }, ...NAV, { href: '/download', label: 'Download' }]
 ---
 
 <Base title="Page not found" description="That page does not exist on vyotiq.com." noindex>
-  <section class="vy-section vy-nf">
+  <section class="vy-page-head vy-nf">
     <div class="vy-shell">
+      <img
+        class="vy-nf-wordmark vy-dark-invert"
+        src="/brand/vyotiq-wordmark-black.svg"
+        alt=""
+        width="113"
+        height="20"
+      />
       <p class="vy-eyebrow">404</p>
-      <h1 class="vy-h2 vy-nf-title">That page does not exist</h1>
-      <p class="vy-lede">
-        The link may be out of date, or the page may have moved. Here is everything on the site.
-      </p>
-
-      <ul class="vy-nf-links">
-        <li><a href="/" class="vy-link">Home</a></li>
-        {NAV.map((item) => <li><a href={item.href} class="vy-link">{item.label}</a></li>)}
-        <li><a href="/download" class="vy-link">Download</a></li>
+      <h1 class="vy-display">That page does not exist</h1>
+      <p class="vy-lede">The link may be out of date, or the page may have moved.</p>
+      <ul class="vy-jump" aria-label="Site pages">
+        {links.map((l) => <li><a href={l.href}>{l.label}</a></li>)}
       </ul>
     </div>
   </section>
@@ -26,18 +30,16 @@ import { NAV } from '../lib/site'
     padding-block: clamp(4rem, 9vw, 7rem);
   }
 
-  .vy-nf-title {
-    margin-top: 0.75rem;
-    margin-bottom: 1.25rem;
+  .vy-nf-wordmark {
+    margin-bottom: 2rem;
+    opacity: 0.7;
   }
 
-  .vy-nf-links {
-    list-style: none;
-    margin: 2.5rem 0 0;
-    padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem 1.75rem;
-    font-size: 0.9375rem;
+  .vy-nf .vy-display {
+    max-width: 16ch;
+  }
+
+  .vy-nf .vy-lede {
+    margin-top: 1rem;
   }
 </style>

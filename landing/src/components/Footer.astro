@@ -9,8 +9,7 @@ const year = new Date().getFullYear()
     <div class="vy-footer-grid">
       <div class="vy-footer-brand">
         <a href="/" class="vy-footer-lockup" aria-label="Vyotiq — home">
-          <img src="/brand/vyotiq-mark-black.svg" alt="" width="26" height="26" class="vy-footer-mark" />
-          <span>Vyotiq</span>
+          <img src="/brand/vyotiq-wordmark-black.svg" alt="" width="90" height="16" class="vy-dark-invert" />
         </a>
         <p class="vy-footer-blurb">
           {SITE.product} — a coding workspace for real repositories. Free and open source under{' '}<a href="/license" class="vy-link">GPL-3.0-or-later</a>.
@@ -39,12 +38,7 @@ const year = new Date().getFullYear()
       }
     </div>
 
-    <div class="vy-footer-base">
-      <p class="vy-footer-meta">© {year} Vyotiq. Source available on <a href={app.repo.source} class="vy-link" rel="noopener noreferrer">GitHub</a>.</p>
-      <p class="vy-footer-meta vy-mono">
-        Electron {app.electron} · Node {app.node}
-      </p>
-    </div>
+    <p class="vy-footer-meta">© {year} Vyotiq. Source available on <a href={app.repo.source} class="vy-link" rel="noopener noreferrer">GitHub</a>.</p>
   </div>
 </footer>
 
@@ -70,25 +64,6 @@ const year = new Date().getFullYear()
     color: var(--vy-fg-strong);
   }
 
-  .vy-footer-mark {
-    width: 24px;
-    height: 24px;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :global(:root:not([data-theme='light'])) .vy-footer-mark {
-      filter: invert(1);
-    }
-  }
-
-  :global(:root[data-theme='dark']) .vy-footer-mark {
-    filter: invert(1);
-  }
-
-  :global(:root[data-theme='light']) .vy-footer-mark {
-    filter: none;
-  }
-
   .vy-footer-blurb {
     margin-top: 0.875rem;
     max-width: 34ch;
@@ -103,7 +78,6 @@ const year = new Date().getFullYear()
 
   .vy-footer-col ul {
     list-style: none;
-    margin: 0;
     padding: 0;
     display: grid;
     gap: 0.5rem;
@@ -118,18 +92,10 @@ const year = new Date().getFullYear()
     color: var(--vy-fg-strong);
   }
 
-  .vy-footer-base {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem 1.5rem;
-    justify-content: space-between;
-    align-items: center;
+  .vy-footer-meta {
     margin-top: 3rem;
     padding-top: 1.5rem;
     border-top: 1px solid var(--vy-border);
-  }
-
-  .vy-footer-meta {
     font-size: 0.8125rem;
     color: var(--vy-tertiary);
   }

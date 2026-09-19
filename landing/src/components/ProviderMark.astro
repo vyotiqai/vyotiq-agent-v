@@ -1,0 +1,66 @@
+---
+/**
+ * A model provider's own mark, baked into public/brand/providers by
+ * scripts/bake-logos.mjs.
+ *
+ * The file is inlined rather than loaded through <img>: an external SVG cannot
+ * inherit currentColor, so it could never follow the theme toggle. Inlining is
+ * a requirement here, not an optimisation.
+ */
+import { readFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
+import logos from '../data/logos.json'
+
+interface Props {
+  /** Provider id from src/data/app.json — e.g. "anthropic", "custom". */
+  id: string
+  /** Square size in px. 20 matches the application's own `md` logo size. */
+  size?: number
+  /** Paint the mark in the provider's brand colour where contrast allows. */
+  tint?: boolean
+}
+
+const { id, size = 20, tint = false } = Astro.props
+
+const file = join(process.cwd(), 'public', 'brand', 'providers', `${id}.svg`)
+if (!existsSync(file)) {
+  throw new Error(`ProviderMark "${id}": missing ${file}. Run \`pnpm bake\` in landing/.`)
+}
+const raw = readFileSync(file, 'utf8')
+
+const viewBox = raw.match(/viewBox="([^"]+)"/)?.[1]
+const fillRule = raw.match(/fill-rule="([^"]+)"/)?.[1]
+// The <title> is dropped: the wall renders a visible text label beside the
+// mark, so announcing the name twice would be noise.
+const body = raw
+  .match(/<svg[^>]*>([\s\S]*)<\/svg>/)?.[1]
+  .replace(/<title>[\s\S]*?<\/title>/, '')
+  .trim()
+
+if (!viewBox || !body) {
+  throw new Error(`ProviderMark "${id}": ${file} is not a mark this component can read`)
+}
+
+const entry = logos.providers.find((p) => p.id === id)
+const color = tint && entry?.tintSafe ? entry.colorPrimary : undefined
+---
+
+<svg
+  class="vy-logo-svg"
+  viewBox={viewBox}
+  fill="currentColor"
+  fill-rule={fillRule}
+  width={size}
+  height={size}
+  style={color ? `color: ${color}` : undefined}
+  aria-hidden="true"
+  focusable="false"
+  set:html={body}
+/>
+
+<style>
+  .vy-logo-svg {
+    display: block;
+    flex-shrink: 0;
+  }
+</style>

@@ -25,6 +25,8 @@ const REQUIRED = [
   'vyotiq-lockup-white.svg',
   'vyotiq-mark-black.svg',
   'vyotiq-mark-white.svg',
+  'vyotiq-wordmark-black.svg',
+  'vyotiq-wordmark-white.svg',
   'vyotiq-app-icon.svg',
   'vyotiq-app-icon.png',
   'vyotiq-social-card.png'
@@ -47,10 +49,32 @@ for (const file of REQUIRED) {
   copyFileSync(from, join(brandOut, file))
 }
 
-// The favicon is the mark on its own, recoloured to the accent so it reads at
-// 16px in both a light and a dark browser tab strip.
+/*
+ * The favicon is the mark recoloured to the accent so it reads at 16px. It
+ * carries its own <style>: a favicon has no inherited colour, so currentColor
+ * would resolve to black, and only a prefers-color-scheme query inside the SVG
+ * adapts to the tab strip.
+ */
+const ACCENT_LIGHT = '#00638e'
+const ACCENT_DARK = '#4fb3e8'
 const mark = readFileSync(join(brandSrc, 'vyotiq-mark-black.svg'), 'utf8')
-writeFileSync(join(brandOut, 'favicon.svg'), mark.replaceAll('#000000', 'currentColor'), 'utf8')
+if (!mark.includes('#000000')) {
+  console.error('[bake-brand] vyotiq-mark-black.svg no longer paints with #000000 — favicon recolour would silently do nothing')
+  process.exit(1)
+}
+const faviconStyle = `<style>
+    path { fill: ${ACCENT_LIGHT}; }
+    @media (prefers-color-scheme: dark) { path { fill: ${ACCENT_DARK}; } }
+  </style>`
+const favicon = mark
+  .replaceAll(' fill="#000000"', '')
+  .replace(/(<title>[^<]*<\/title>)/, `$1
+  ${faviconStyle}`)
+if (!favicon.includes('<style>')) {
+  console.error('[bake-brand] could not inject the favicon stylesheet — the mark SVG shape changed')
+  process.exit(1)
+}
+writeFileSync(join(brandOut, 'favicon.svg'), favicon, 'utf8')
 
 // Marketplace icons are third-party brand marks shipped with the app for its
 // own extension list. Only the ones the catalog actually references are copied.

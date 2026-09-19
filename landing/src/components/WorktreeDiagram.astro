@@ -1,0 +1,55 @@
+---
+/**
+ * One run branching into three git worktrees and merging back.
+ *
+ * A schematic of what the parallelism claims describe, not a depiction of the
+ * application's interface. It carries no text, so the shape has to be legible
+ * on its own and the aria-label has to say what it shows.
+ */
+---
+
+<svg
+  class="vy-diagram"
+  viewBox="0 0 400 200"
+  fill="none"
+  role="img"
+  aria-label="One run branching into three git worktrees, each on its own branch, merging back into the main line."
+>
+  <path class="vy-diagram-line" d="M20 100h70" />
+  <path class="vy-diagram-line" d="M90 100c30 0 30-60 60-60h100" />
+  <path class="vy-diagram-line" d="M90 100h160" />
+  <path class="vy-diagram-line" d="M90 100c30 0 30 60 60 60h100" />
+  <path class="vy-diagram-line" d="M250 40c30 0 30 60 60 60h70" />
+  <path class="vy-diagram-line" d="M250 160c30 0 30-60 60-60" />
+  <circle class="vy-diagram-node" cx="90" cy="100" r="5" />
+  <circle class="vy-diagram-node" cx="310" cy="100" r="5" />
+  <circle class="vy-diagram-node vy-diagram-node-branch" cx="150" cy="40" r="4" />
+  <circle class="vy-diagram-node vy-diagram-node-branch" cx="150" cy="100" r="4" />
+  <circle class="vy-diagram-node vy-diagram-node-branch" cx="150" cy="160" r="4" />
+  <circle class="vy-diagram-node vy-diagram-node-branch" cx="250" cy="40" r="4" />
+  <circle class="vy-diagram-node vy-diagram-node-branch" cx="250" cy="100" r="4" />
+  <circle class="vy-diagram-node vy-diagram-node-branch" cx="250" cy="160" r="4" />
+</svg>
+
+<style>
+  .vy-diagram {
+    width: 100%;
+    max-width: 26rem;
+    height: auto;
+  }
+
+  .vy-diagram-line {
+    stroke: var(--vy-border-strong);
+    stroke-width: 1.5;
+  }
+
+  .vy-diagram-node {
+    fill: var(--vy-bg);
+    stroke: var(--vy-accent);
+    stroke-width: 2;
+  }
+
+  .vy-diagram-node-branch {
+    stroke: var(--vy-border-strong);
+  }
+</style>
