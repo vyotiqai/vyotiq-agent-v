@@ -8,7 +8,7 @@ const isActive = (href: string) => path === href
 <header class="vy-nav">
   <div class="vy-shell vy-nav-inner">
     <a href="/" class="vy-brand" aria-label="Vyotiq — home">
-      <img src="/brand/vyotiq-mark-black.svg" alt="" width="24" height="24" class="vy-brand-mark" />
+      <img src="/brand/vyotiq-mark-black.svg" alt="" width="22" height="22" class="vy-dark-invert" />
       <span class="vy-brand-name">Vyotiq</span>
       <span class="vy-brand-sep" aria-hidden="true">/</span>
       <span class="vy-brand-product">Agent V</span>
@@ -70,7 +70,7 @@ const isActive = (href: string) => path === href
     display: flex;
     align-items: center;
     gap: 1.5rem;
-    height: 3.75rem;
+    height: var(--vy-nav-height);
   }
 
   .vy-brand {
@@ -81,32 +81,6 @@ const isActive = (href: string) => path === href
     letter-spacing: -0.02em;
     color: var(--vy-fg-strong);
     flex-shrink: 0;
-  }
-
-  .vy-brand-mark {
-    width: 22px;
-    height: 22px;
-  }
-
-  :global(:root[data-theme='dark']) .vy-brand-mark,
-  :global(:root:not([data-theme='light'])) .vy-brand-mark {
-    filter: none;
-  }
-
-  /* The mark ships as flat black artwork, so dark mode inverts it rather than
-     shipping a second file that could drift from the first. */
-  @media (prefers-color-scheme: dark) {
-    :global(:root:not([data-theme='light'])) .vy-brand-mark {
-      filter: invert(1);
-    }
-  }
-
-  :global(:root[data-theme='dark']) .vy-brand-mark {
-    filter: invert(1);
-  }
-
-  :global(:root[data-theme='light']) .vy-brand-mark {
-    filter: none;
   }
 
   .vy-brand-sep {
@@ -123,7 +97,7 @@ const isActive = (href: string) => path === href
     display: flex;
     align-items: center;
     gap: 1.375rem;
-    margin-right: auto;
+    margin-inline: auto;
   }
 
   .vy-nav-link {
@@ -133,10 +107,17 @@ const isActive = (href: string) => path === href
     letter-spacing: -0.008em;
   }
 
-  .vy-nav-link:hover {
-    color: var(--vy-fg-strong);
+  .vy-nav-link {
+    padding: 0.375rem 0.625rem;
+    border-radius: var(--vy-radius-md);
+    transition: background var(--vy-duration) var(--vy-ease);
   }
 
+  .vy-nav-links .vy-nav-link:hover {
+    background: var(--vy-accent-wash);
+  }
+
+  .vy-nav-link:hover,
   .vy-nav-link[aria-current='page'] {
     color: var(--vy-fg-strong);
   }
@@ -153,7 +134,8 @@ const isActive = (href: string) => path === href
     font-size: 0.875rem;
   }
 
-  .vy-theme-toggle {
+  .vy-theme-toggle,
+  .vy-menu-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -169,12 +151,13 @@ const isActive = (href: string) => path === href
       border-color var(--vy-duration) var(--vy-ease);
   }
 
-  .vy-theme-toggle:hover {
+  .vy-theme-toggle:hover,
+  .vy-menu-btn:hover {
     color: var(--vy-fg-strong);
     border-color: var(--vy-border-strong);
   }
 
-  /* Show whichever icon represents the theme you'd switch *to*. */
+  /* Show the icon of the theme you would switch to. */
   .vy-icon-moon {
     display: none;
   }
@@ -196,26 +179,9 @@ const isActive = (href: string) => path === href
     display: block;
   }
 
-  :global(:root[data-theme='light']) .vy-icon-sun {
-    display: block;
-  }
-
-  :global(:root[data-theme='light']) .vy-icon-moon {
-    display: none;
-  }
-
   .vy-menu-btn {
     display: none;
-    align-items: center;
-    justify-content: center;
-    width: 2.25rem;
-    height: 2.25rem;
-    margin-left: auto;
-    border: 1px solid var(--vy-border);
-    border-radius: var(--vy-radius-md);
-    background: transparent;
     color: var(--vy-fg);
-    cursor: pointer;
   }
 
   .vy-mobile-nav {
@@ -248,7 +214,6 @@ const isActive = (href: string) => path === href
     }
     .vy-menu-btn {
       display: inline-flex;
-      margin-left: 0;
     }
   }
 
@@ -260,9 +225,8 @@ const isActive = (href: string) => path === href
 </style>
 
 <script>
-  // Theme choice is a per-visitor convenience: it may be unavailable in a
-  // private window or with site data blocked, so every access is guarded and
-  // the page renders correctly from the OS preference when it fails.
+  // Storage can throw in private windows; the page still renders from the OS
+  // preference when it does.
   const root = document.documentElement
 
   document.querySelector('[data-theme-toggle]')?.addEventListener('click', () => {
@@ -272,9 +236,7 @@ const isActive = (href: string) => path === href
     root.dataset.theme = next
     try {
       localStorage.setItem('vy-theme', next)
-    } catch {
-      /* storage unavailable — the choice simply does not persist */
-    }
+    } catch {}
   })
 
   const menuBtn = document.querySelector('[data-menu-toggle]')

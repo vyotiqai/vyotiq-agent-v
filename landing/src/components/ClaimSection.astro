@@ -1,0 +1,75 @@
+---
+/**
+ * One approved section, in one of two treatments.
+ *
+ * 'rows' is the reading treatment — a heading column beside a list — and suits
+ * a catalogue. 'cards' gives the section the full width and sets each claim on
+ * its own surface; it is what the homepage showcases with. Which one a section
+ * gets is decided per page in showcase.ts, so the same claims can be showcased
+ * on the homepage and listed compactly on /features.
+ *
+ * Every word rendered here comes from src/lib/showcase.ts. Nothing is written
+ * into this file, so a claim can never appear on the page without being on the
+ * approved list — and a section whose claims are all unapproved never reaches
+ * this component, because showcase.ts drops it.
+ */
+import type { ShowcaseSection } from '../lib/showcase'
+import TeammateCompare from './TeammateCompare.astro'
+import WorktreeDiagram from './WorktreeDiagram.astro'
+
+interface Props {
+  section: ShowcaseSection
+}
+
+const { section } = Astro.props
+const cards = section.display === 'cards'
+---
+
+{
+  cards ? (
+    <section class="vy-rule vy-section" id={section.id}>
+      <div class="vy-shell vy-shell-wide">
+        <header class="vy-card-head">
+          <p class="vy-eyebrow">{section.eyebrow}</p>
+          <h2 class="vy-h2">{section.title}</h2>
+          {section.body && <p class="vy-lede vy-card-lede">{section.body}</p>}
+        </header>
+
+        {section.id === 'teammates' && <TeammateCompare />}
+
+        <ul class:list={['vy-cards', section.id === 'teammates' && 'vy-cards-after-visual']}>
+          {section.id === 'parallelism' && (
+            <li class="vy-card vy-card-visual">
+              <WorktreeDiagram />
+            </li>
+          )}
+          {section.claims.map((claim) => (
+            <li class="vy-card vy-item">
+              <h3 class="vy-h3">{claim.title}</h3>
+              <p>{claim.body}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  ) : (
+    <section class="vy-rule vy-section" id={section.id}>
+      <div class="vy-shell vy-section-grid">
+        <header class="vy-sec-head">
+          <p class="vy-eyebrow">{section.eyebrow}</p>
+          <h2 class="vy-h2">{section.title}</h2>
+          {section.body && <p class="vy-prose-muted">{section.body}</p>}
+        </header>
+
+        <ul class="vy-rows">
+          {section.claims.map((claim) => (
+            <li class:list={['vy-item', section.lead && 'vy-row-lead']}>
+              <h3 class="vy-h3">{claim.title}</h3>
+              <p>{claim.body}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  )
+}

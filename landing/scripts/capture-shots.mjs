@@ -1,31 +1,30 @@
 /**
- * Captures real screenshots of the running application for the website.
+ * Captures screenshots of the running application for the website. Only
+ * surfaces backed by shipped data are captured (marketplace, tool catalog);
+ * the chat surface would need invented output.
  *
- * The site shows the product, not a mockup, so these come from booting the
- * actual packaged main entry (out/main/index.js) under Playwright's Electron
- * driver — the same mechanism tests/gui-e2e uses — against a throwaway userData
- * directory so nothing from the developer's own install leaks into a public
- * image.
+ * The app is booted with the repository as its app path so that
+ * bundledMarketplaceRoot() resolves to resources/marketplace; a packaged build
+ * under dist-package/ is used when present.
  *
- *   pnpm --filter @vyotiq/landing capture
+ *   pnpm build && pnpm site:capture
  *
- * Requires a prior `pnpm build` at the repo root. Exits 0 with a warning when
- * capture is not possible, so a website build never depends on it; whatever is
- * in public/shots at build time is what ships.
+ * Exits 0 with a warning when capture is not possible; whatever is in
+ * public/shots at build time is what ships.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
+import { spawn } from 'node:child_process'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const landing = join(here, '..')
 const repo = join(landing, '..')
-const mainEntry = join(repo, 'out/main/index.js')
 const outDir = join(landing, 'public/shots')
 
-const require = createRequire(import.meta.url)
+const require = createRequire(join(repo, 'package.json'))
 
 const warn = (msg) => {
   console.warn(`[capture-shots] ${msg}`)
@@ -33,7 +32,26 @@ const warn = (msg) => {
   process.exit(0)
 }
 
-if (!existsSync(mainEntry)) warn(`missing ${mainEntry}; run \`pnpm build\` at the repo root first`)
+/** A packaged build, if `electron-builder --dir` has been run. */
+function packagedExecutable() {
+  const layouts = [
+    join('win-unpacked', 'Vyotiq.exe'),
+    join('linux-unpacked', 'vyotiq'),
+    join('mac-arm64', 'Vyotiq.app', 'Contents', 'MacOS', 'Vyotiq'),
+    join('mac', 'Vyotiq.app', 'Contents', 'MacOS', 'Vyotiq')
+  ]
+  for (const out of ['dist-package', 'dist-package-alt']) {
+    for (const layout of layouts) {
+      const candidate = join(repo, out, layout)
+      if (existsSync(candidate)) return candidate
+    }
+  }
+  return undefined
+}
+
+if (!existsSync(join(repo, 'out/main/index.js'))) {
+  warn('missing out/main/index.js — run `pnpm build` at the repo root first')
+}
 
 let electron
 try {
@@ -42,65 +60,141 @@ try {
   warn('@playwright/test is not installed at the repo root')
 }
 
+const packaged = packagedExecutable()
+console.log(
+  packaged
+    ? `[capture-shots] using the packaged build at ${packaged}`
+    : '[capture-shots] no packaged build found — booting the repository as the app path'
+)
+
 const userDataDir = mkdtempSync(join(tmpdir(), 'vyotiq-shots-'))
 mkdirSync(outDir, { recursive: true })
 
-// Land on the chat surface with the classic sidebar, which is what the site
-// describes, and keep first-run prompts out of the frame.
-writeFileSync(
-  join(userDataDir, 'settings.json'),
-  JSON.stringify({ navigationMode: 'sidebar', autoCheckUpdates: false, telemetryEnabled: false }),
-  'utf8'
-)
+const env = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
+// IDE shells export this as "1", which boots Electron as plain Node.
+delete env.ELECTRON_RUN_AS_NODE
 
-const SHOTS = [
-  { name: 'app-light', theme: 'light' },
-  { name: 'app-dark', theme: 'dark' }
-]
+const launchArgs = [`--user-data-dir=${userDataDir}`, '--force-device-scale-factor=2']
 
 let app
 try {
   app = await electron.launch({
-    args: [
-      mainEntry,
-      `--user-data-dir=${userDataDir}`,
-      '--no-sandbox',
-      '--disable-gpu-sandbox',
-      '--force-device-scale-factor=2'
-    ],
-    executablePath: require('electron'),
-    env: {
-      ...process.env,
-      ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
-      VYOTIQ_E2E_FIXTURE: '1'
-    },
-    timeout: 90_000
+    executablePath: packaged ?? require('electron'),
+    args: packaged ? launchArgs : [repo, ...launchArgs],
+    cwd: repo,
+    env,
+    timeout: 120_000
   })
 } catch (err) {
   rmSync(userDataDir, { recursive: true, force: true })
   warn(`could not launch the app: ${err.message}`)
 }
 
+/** Set the app's own appearance setting and reload; the DOM only reads it on boot. */
+async function setTheme(window, theme) {
+  await window.evaluate(async (value) => {
+    await window.vyotiq.setSettings({ theme: value })
+  }, theme)
+  await window.reload()
+  await window.locator('body').waitFor({ state: 'attached', timeout: 60_000 })
+  await window.waitForTimeout(4000)
+  const applied = await window.evaluate(() => document.documentElement.dataset.theme)
+  if (applied !== theme) {
+    throw new Error(`theme did not apply: asked for ${theme}, document reports ${applied}`)
+  }
+}
+
+/** Return to a neutral surface. Never match a bare /close/i: the titlebar's Close quits the app. */
+async function leaveOverlay(window) {
+  await window.keyboard.press('Escape')
+  await window.evaluate(() => document.activeElement?.blur?.())
+  const back = window.getByRole('button', { name: /^back$/i })
+  if (await back.isVisible().catch(() => false)) await back.click()
+  const home = window.getByRole('button', { name: /^home$/i }).first()
+  if (await home.isVisible().catch(() => false)) await home.click()
+  await window.waitForTimeout(600)
+}
+
+async function openSettingsSection(window, section) {
+  await window.getByRole('button', { name: /^settings$/i }).first().click()
+  await window
+    .getByRole('navigation', { name: /settings sections/i })
+    .waitFor({ timeout: 20_000 })
+  await window.getByRole('button', { name: section }).click()
+  await window.waitForTimeout(2000)
+}
+
+/** Each surface is reached the way the GUI e2e specs reach it. */
+const SURFACES = [
+  {
+    name: 'marketplace',
+    open: async (window) => {
+      await window.getByRole('button', { name: 'Marketplace' }).click()
+      await window
+        .getByRole('tablist', { name: 'Marketplace sections' })
+        .waitFor({ timeout: 20_000 })
+      await window.waitForTimeout(3000)
+    }
+  },
+  {
+    name: 'settings-tools',
+    open: (window) => openSettingsSection(window, /^tools$/i)
+  }
+]
+
+/** Park the pointer on the titlebar strip so no hover tooltip is in the frame. */
+async function settleCursor(window) {
+  await window.mouse.move(720, 20)
+  await window.waitForTimeout(1500)
+}
+
+const THEMES = ['light', 'dark']
+
+let wrote = 0
 try {
-  const window = await app.firstWindow({ timeout: 60_000 })
-  await window.setViewportSize({ width: 1440, height: 900 })
-  await window.waitForLoadState('domcontentloaded')
-  // Give fonts, icons and the workspace panes a beat to settle so the capture
-  // is not of a half-painted frame.
+  const window = await app.firstWindow({ timeout: 90_000 })
+  await window.waitForLoadState('domcontentloaded').catch(() => {})
+  await window.locator('body').waitFor({ state: 'attached', timeout: 60_000 })
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].setBounds({ x: 0, y: 0, width: 1440, height: 900 })
+  })
+  // Fonts, icons and the bundled catalog all settle before the first frame.
   await window.waitForTimeout(6000)
 
-  for (const shot of SHOTS) {
-    await window.evaluate((theme) => {
-      document.documentElement.dataset.theme = theme
-    }, shot.theme)
-    await window.waitForTimeout(1200)
-    const file = join(outDir, `${shot.name}.png`)
-    await window.screenshot({ path: file })
-    console.log(`[capture-shots] wrote ${shot.name}.png`)
+  for (const theme of THEMES) {
+    await leaveOverlay(window)
+    await setTheme(window, theme)
+    for (const surface of SURFACES) {
+      await leaveOverlay(window)
+      await surface.open(window)
+      await settleCursor(window)
+      const file = join(outDir, `${surface.name}-${theme}.png`)
+      await window.screenshot({ path: file })
+      console.log(`[capture-shots] wrote ${surface.name}-${theme}.png`)
+      wrote++
+    }
   }
 } catch (err) {
-  console.warn(`[capture-shots] capture failed: ${err.message}`)
+  // Failing part-way leaves a stale mix of frames on disk, so this is an error.
+  console.error(`[capture-shots] capture failed after ${wrote} shot(s): ${err.message}`)
+  process.exitCode = 1
 } finally {
-  await app.close().catch(() => {})
-  rmSync(userDataDir, { recursive: true, force: true })
+  // app.close() can hang; force the process down so the script always exits.
+  try {
+    const pid = app.process()?.pid
+    if (pid && process.platform === 'win32') {
+      spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
+    }
+  } catch {
+    /* already gone */
+  }
+  await Promise.race([
+    app.close().catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, 10_000))
+  ])
+  try {
+    rmSync(userDataDir, { recursive: true, force: true })
+  } catch {
+    /* best-effort cleanup */
+  }
 }

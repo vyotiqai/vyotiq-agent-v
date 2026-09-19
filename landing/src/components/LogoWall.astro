@@ -1,0 +1,81 @@
+---
+/**
+ * A grid of real marks with visible labels.
+ *
+ * "providers" are the model providers the application can talk to; the marks
+ * come from scripts/bake-logos.mjs. "integrations" are the MCP servers in the
+ * bundled catalogue — the packages whose icons are genuine third-party brands,
+ * as opposed to the skills and plugin rule sets, which carry generic glyphs.
+ *
+ * Nothing here is a link. An anchor wrapping only an image has no text for a
+ * screen reader to announce, so every item pairs its mark with a written name
+ * and the mark itself stays aria-hidden.
+ */
+import app from '../data/app.json'
+import ProviderMark from './ProviderMark.astro'
+
+interface Props {
+  kind: 'providers' | 'integrations'
+  /** Optional heading above the wall. */
+  title?: string
+  /** Heading level, so a page never skips one. */
+  level?: 2 | 3
+  /** Cap the number rendered; omit for all of them. */
+  limit?: number
+  /** Providers only: brand-colour the marks that clear contrast in both themes. */
+  tint?: boolean
+  /** Tighter cells, for long tails like the integration catalogue. */
+  dense?: boolean
+  /** Providers only: mark the ones the application never asks a key for. */
+  showKeyless?: boolean
+}
+
+const { kind, title, level = 2, limit, tint = false, dense = false, showKeyless = false } = Astro.props
+const Heading = `h${level}` as 'h2' | 'h3'
+
+const providers = app.providers.list.map((p) => ({
+  key: p.id,
+  // The application rewrites this one label in its own picker; the site follows.
+  label: p.id === 'custom' ? 'OpenAI-compatible' : p.label,
+  keyless: app.providers.keyless.includes(p.id)
+}))
+
+const integrations = app.extensions.list
+  .filter((p) => p.kind === 'mcp' && p.icon)
+  .map((p) => ({ key: p.id, label: p.name, icon: p.icon }))
+
+const items = kind === 'providers' ? providers : integrations
+const shown = limit ? items.slice(0, limit) : items
+---
+
+{title && <Heading class="vy-eyebrow vy-logowall-title">{title}</Heading>}
+
+<ul class:list={['vy-logowall', dense && 'vy-logowall-dense']}>
+  {
+    shown.map((item) => (
+      <li class="vy-logowall-item">
+        <span class="vy-logo">
+          {
+            kind === 'providers' ? (
+              <ProviderMark id={item.key} size={20} tint={tint} />
+            ) : (
+              <img src={`/brand/extensions/${item.icon}`} alt="" width="20" height="20" loading="lazy" decoding="async" />
+            )
+          }
+        </span>
+        <span class="vy-logowall-label">{item.label}</span>
+        {showKeyless && item.keyless && <span class="vy-tag">no key needed</span>}
+      </li>
+    ))
+  }
+</ul>
+
+<style>
+  .vy-logowall-title {
+    margin: 0 0 1rem;
+  }
+
+  .vy-logo img {
+    border-radius: var(--vy-radius-sm);
+  }
+</style>

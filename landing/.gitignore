@@ -7,9 +7,11 @@ node_modules/
 src/data/app.json
 src/data/release.json
 src/data/changelog.json
+src/data/logos.json
 src/generated/legal/
 public/brand/
 
-# Captured by scripts/capture-shots.mjs from a real app boot. Not committed:
-# a first-run capture shows an empty workspace, which undersells the product.
-public/shots/
+# public/shots/ IS committed. The images come from scripts/capture-shots.mjs
+# booting the real application, and the pages that use them assert the files
+# exist, so a clone has to carry them or the site loses its only product
+# imagery. Only surfaces backed by real shipped data are captured there.

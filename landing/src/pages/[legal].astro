@@ -2,13 +2,8 @@
 import Base from '../layouts/Base.astro'
 import manifest from '../generated/legal/manifest.json'
 
-/**
- * Renders the repository's real legal and community documents.
- *
- * The routes are generated from the bake manifest, so the set of pages is
- * exactly the set of files that exist at the repo root — there is no way to
- * publish a policy page here without a committed file behind it.
- */
+/** One route per document in the bake manifest; bake-legal.mjs lifts each
+ *  markdown title into the page heading and repoints repo-relative links. */
 
 const md = import.meta.glob('../generated/legal/*.md', { eager: true }) as Record<
   string,
@@ -51,19 +46,18 @@ const DESCRIPTIONS: Record<string, string> = {
 ---
 
 <Base title={doc.title} description={DESCRIPTIONS[doc.slug] ?? doc.title}>
-  <section class="vy-section vy-doc-page">
+  <section class="vy-page-head">
     <div class="vy-shell">
-      <header class="vy-doc-head">
-        <p class="vy-eyebrow">Document</p>
-        <h1 class="vy-h2">{doc.title}</h1>
-        <p class="vy-doc-source">
-          Rendered verbatim from{' '}<a
-            href={doc.sourceUrl}
-            class="vy-link vy-mono"
-            rel="noopener noreferrer">{doc.sourceFile}</a>{' '}in the repository.
-        </p>
-      </header>
+      <p class="vy-eyebrow">{doc.title}</p>
+      <h1 class="vy-h1">{doc.heading}</h1>
+      <p class="vy-lede vy-doc-source">
+        Source: <a href={doc.sourceUrl} class="vy-link vy-mono" rel="noopener noreferrer">{doc.sourceFile}</a>
+      </p>
+    </div>
+  </section>
 
+  <section class="vy-rule vy-section">
+    <div class="vy-shell">
       {
         doc.format === 'plain' ? (
           <pre class="vy-doc-plain">{plain}</pre>
@@ -78,23 +72,13 @@ const DESCRIPTIONS: Record<string, string> = {
 </Base>
 
 <style>
-  .vy-doc-page {
-    padding-block: clamp(2.5rem, 5vw, 4rem) clamp(3rem, 6vw, 5rem);
-  }
-
-  .vy-doc-head {
-    padding-bottom: 1.5rem;
-    margin-bottom: 2.5rem;
-    border-bottom: 1px solid var(--vy-border);
-  }
-
-  .vy-doc-head .vy-h2 {
-    margin-top: 0.75rem;
+  .vy-doc,
+  .vy-doc-plain {
+    padding-top: 0.5rem;
   }
 
   .vy-doc-source {
-    margin-top: 0.875rem;
-    font-size: 0.875rem;
+    font-size: 0.9375rem;
     color: var(--vy-tertiary);
   }
 </style>

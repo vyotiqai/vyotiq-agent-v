@@ -1,0 +1,68 @@
+---
+/**
+ * The most recent releases, compact enough to sit on another page. The full
+ * record, with notes and asset counts, stays on /changelog.
+ */
+import changelog from '../data/changelog.json'
+import { formatDate } from '../lib/site'
+
+interface Props {
+  /** How many entries to show. */
+  limit?: number
+  /** Heading level, so a page never skips one. */
+  level?: 2 | 3
+  title?: string
+}
+
+const { limit = 3, level = 2, title = 'Latest releases' } = Astro.props
+const Heading = `h${level}` as 'h2' | 'h3'
+const headingClass = level === 2 ? 'vy-h2' : 'vy-h3'
+
+const entries = changelog.entries.slice(0, limit)
+---
+
+<div class="vy-strip-head">
+  <Heading class={headingClass}>{title}</Heading>
+  <p class="vy-more">
+    <a href="/changelog" class="vy-link">Full changelog →</a>
+  </p>
+</div>
+
+{
+  entries.length === 0 ? (
+    <p class="vy-prose-muted">The first release appears here once it is tagged and built.</p>
+  ) : (
+    <ul class="vy-strip">
+      {entries.map((entry) => (
+        <li class="vy-strip-row">
+          <span class="vy-strip-date vy-mono">{formatDate(entry.publishedAt)}</span>
+          <span class="vy-strip-name">{entry.name}</span>
+          <a href={entry.htmlUrl} class="vy-link vy-strip-link" rel="noopener noreferrer">
+            {entry.tag}
+          </a>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+<style>
+  .vy-strip-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .vy-strip-head > * {
+    margin: 0;
+  }
+
+  .vy-strip-link {
+    font-family: var(--vy-font-mono);
+    font-size: 0.8125rem;
+    white-space: nowrap;
+  }
+</style>

@@ -1,9 +1,6 @@
 /**
- * Copies the repository's real legal and community documents into the site.
- *
- * Every /legal-ish route renders one of these files verbatim. Nothing is
- * paraphrased for the website, and a missing source is a hard build failure —
- * the site must never publish a policy page that has no file behind it.
+ * Copies the repository's legal and community documents into the site. A
+ * missing source is a hard build failure: no policy page without a file behind it.
  */
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -14,14 +11,10 @@ const landing = join(here, '..')
 const repo = join(landing, '..')
 const out = join(landing, 'src/generated/legal')
 
-/**
- * `format: 'markdown'` is rendered as prose; `'plain'` is rendered in a
- * monospace <pre> because the GPL text and the NOTICE file are hard-wrapped
- * and reflowing them as markdown mangles them.
- */
+/** 'markdown' renders as prose; 'plain' keeps the hard-wrapped GPL text in a <pre>. */
 const DOCS = [
   { slug: 'license', file: 'LICENSE', title: 'License', format: 'plain' },
-  { slug: 'notice', file: 'NOTICE', title: 'Third-party notices', format: 'plain' },
+  { slug: 'notice', file: 'NOTICE', title: 'Third-party notices', format: 'markdown' },
   { slug: 'security', file: 'SECURITY.md', title: 'Security', format: 'markdown' },
   { slug: 'privacy', file: 'PRIVACY.md', title: 'Privacy', format: 'markdown' },
   { slug: 'terms', file: 'TERMS.md', title: 'Terms', format: 'markdown' },
@@ -29,12 +22,7 @@ const DOCS = [
   { slug: 'code-of-conduct', file: 'CODE_OF_CONDUCT.md', title: 'Code of conduct', format: 'markdown' }
 ]
 
-/**
- * These documents cross-reference each other with repo-relative paths, which
- * resolve on GitHub but 404 on the website. Rewrite them to the site routes
- * that render the same file. Anything else pointing into the repo becomes an
- * absolute GitHub URL rather than a dead relative link.
- */
+/** Repo-relative links become site routes where one renders the file, else GitHub URLs. */
 const ROUTES = {
   LICENSE: '/license',
   NOTICE: '/notice',
@@ -76,13 +64,32 @@ for (const doc of DOCS) {
     process.exit(1)
   }
 
-  // Plain documents (LICENSE, NOTICE) are rendered verbatim in a <pre>; only
-  // markdown is link-rewritten, because only markdown has clickable links.
-  const web = doc.format === 'markdown' ? rewriteLinks(body) : body
+  let web = doc.format === 'markdown' ? rewriteLinks(body) : body
+
+  // Lift the document's own `# Title` into the page heading so each route has
+  // exactly one <h1>.
+  let heading = null
+  if (doc.format === 'markdown') {
+    // CONTRIBUTING.md is stored with a BOM.
+    const stripped = web.replace(/^\uFEFF/, '')
+    const match = stripped.match(/^#[ \t]*([^\n]+)\n+/)
+    if (!match) {
+      console.error(`[bake-legal] ${doc.file} does not start with a level-1 heading — the page would render no title`)
+      process.exit(1)
+    }
+    heading = match[1].trim()
+    web = stripped.slice(match[0].length)
+    if (/^#\s/m.test(web)) {
+      console.error(`[bake-legal] ${doc.file} has more than one level-1 heading — the page would render two <h1>`)
+      process.exit(1)
+    }
+  }
+
   writeFileSync(join(out, `${doc.slug}.${doc.format === 'markdown' ? 'md' : 'txt'}`), web, 'utf8')
   manifest.push({
     slug: doc.slug,
     title: doc.title,
+    heading: heading ?? doc.title,
     format: doc.format,
     sourceFile: doc.file,
     sourceUrl: `https://github.com/vyotiqai/vyotiq-agent-v/blob/main/${doc.file}`,

@@ -1,0 +1,60 @@
+---
+/**
+ * Windows / macOS / Linux marks, baked into public/brand/platforms by
+ * scripts/bake-logos.mjs. Inlined for the same reason as ProviderMark.
+ *
+ * Note for /download: the OS-detection script there reads the platform
+ * heading's textContent to match "windows" / "macos" / "linux". Render this
+ * as a SIBLING of that heading, never inside it.
+ */
+import { readFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
+
+interface Props {
+  os: 'windows' | 'macos' | 'linux'
+  size?: number
+  /** Visible text beside the mark. Omit when a sibling already names it. */
+  label?: string
+}
+
+const { os, size = 16, label } = Astro.props
+
+const file = join(process.cwd(), 'public', 'brand', 'platforms', `${os}.svg`)
+if (!existsSync(file)) {
+  throw new Error(`PlatformMark "${os}": missing ${file}. Run \`pnpm bake\` in landing/.`)
+}
+const raw = readFileSync(file, 'utf8')
+
+const viewBox = raw.match(/viewBox="([^"]+)"/)?.[1]
+const body = raw
+  .match(/<svg[^>]*>([\s\S]*)<\/svg>/)?.[1]
+  .replace(/<title>[\s\S]*?<\/title>/, '')
+  .trim()
+
+if (!viewBox || !body) {
+  throw new Error(`PlatformMark "${os}": ${file} is not a mark this component can read`)
+}
+
+const Tag = label ? 'span' : Fragment
+---
+
+<Tag class={label ? 'vy-platform-mark' : undefined}>
+  <svg
+    class="vy-platform-svg"
+    viewBox={viewBox}
+    fill="currentColor"
+    width={size}
+    height={size}
+    aria-hidden="true"
+    focusable="false"
+    set:html={body}
+  />
+  {label && <span>{label}</span>}
+</Tag>
+
+<style>
+  .vy-platform-svg {
+    display: block;
+    flex-shrink: 0;
+  }
+</style>

@@ -1,9 +1,6 @@
 /**
- * Bakes the release history from the GitHub API into the changelog page.
- *
- * There is no CHANGELOG file in this repo — releases are cut from tags and the
- * release body is the only authored note (see RELEASE-RUNBOOK.md). So the
- * changelog page is a view of real published releases, nothing more.
+ * Bakes the release history from the GitHub API. There is no CHANGELOG file;
+ * releases are cut from tags and the release body is the only authored note.
  */
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
