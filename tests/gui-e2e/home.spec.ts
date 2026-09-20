@@ -291,21 +291,36 @@ test('lays the reference rail beside the session lists, and fits the window', as
       .toBe(true)
 
     const box = await window.evaluate(() => {
-      const rect = (id: string): { top: number; left: number } | null => {
+      const rect = (id: string): { top: number; left: number; bottom: number } | null => {
         const el = document.getElementById(id)?.closest('section')
         if (!el) return null
         const r = el.getBoundingClientRect()
-        return { top: Math.round(r.top), left: Math.round(r.left) }
+        return {
+          top: Math.round(r.top),
+          left: Math.round(r.left),
+          bottom: Math.round(r.bottom)
+        }
       }
       const main = document
         .getElementById('home-repositories-heading')
         ?.closest('main') as HTMLElement | null
+      const attention = rect('home-attention-heading')
+      const repositories = rect('home-repositories-heading')
+      // The band the two session columns occupy together: side by side that is
+      // the taller of the two, stacked it is both of them end to end. Measured
+      // as a union rather than off a wrapper, so it does not depend on which
+      // element happens to be the row.
+      const listsRowHeight =
+        attention && repositories
+          ? Math.max(attention.bottom, repositories.bottom) -
+            Math.min(attention.top, repositories.top)
+          : 0
       return {
         environment: rect('home-environment-heading'),
-        attention: rect('home-attention-heading'),
-        repositories: rect('home-repositories-heading'),
-        clientHeight: main?.clientHeight ?? 0,
-        scrollHeight: main?.scrollHeight ?? 0
+        attention,
+        repositories,
+        listsRowHeight,
+        clientHeight: main?.clientHeight ?? 0
       }
     })
 
@@ -323,7 +338,13 @@ test('lays the reference rail beside the session lists, and fits the window', as
       expect(box.repositories!.top).toBe(box.attention!.top)
     }
     if (granted.height >= 950) {
-      expect(box.scrollHeight).toBeLessThanOrEqual(box.clientHeight)
+      // Scoped to the session columns, not the whole page. Home is taller than
+      // a screen on purpose now that Activity leads it full width, so asserting
+      // the page fits measured that decision rather than this layout. What must
+      // not happen is the rail dropping under Attention, which doubles this
+      // band — the two checks above put it beside them, and this keeps that
+      // true at a height where a stacked rail would still fit.
+      expect(box.listsRowHeight).toBeLessThanOrEqual(box.clientHeight)
     }
   } finally {
     await app.evaluate(({ BrowserWindow }, bounds) => {
