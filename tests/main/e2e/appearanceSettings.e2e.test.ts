@@ -93,7 +93,7 @@ describe('e2e: appearance settings persistence', () => {
     expect(loaded.theme).toBe('dark')
     expect(loaded.fontScale).toBe('default')
     expect(loaded.uiDensity).toBe('default')
-    expect(loaded.skinId).toBe('default')
+    expect(loaded.skinId).toBe('native')
     expect(loaded.customCssPath).toBe('')
   })
 })

@@ -489,14 +489,14 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'about-auto-check',
-    title: 'Check for updates on launch',
-    keywords: ['updates', 'auto check', 'upgrade', 'about'],
+    title: 'Check for updates automatically',
+    keywords: ['updates', 'auto check', 'background', 'periodic', 'upgrade', 'about'],
     section: 'about'
   },
   {
     id: 'about-updater',
     title: 'App updates',
-    keywords: ['updates', 'updater', 'upgrade', 'release', 'about'],
+    keywords: ['updates', 'updater', 'upgrade', 'release', 'version', 'about'],
     section: 'about'
   },
   {

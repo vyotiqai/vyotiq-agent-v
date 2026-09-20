@@ -26,6 +26,7 @@ const electronAppMock = electronApp as unknown as {
 const getAllWindows = BrowserWindow.getAllWindows as unknown as Mock
 
 const STARTUP_DELAY_MS = 10_000
+const PERIODIC_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 vi.mock('electron-updater', async () => {
   const { EventEmitter: Emitter } = await import('node:events')
@@ -91,10 +92,10 @@ describe('updater service', () => {
     expect(autoUpdater.disableWebInstaller).toBe(true)
   })
 
-  it('defers the startup check past ready + idle delay and never polls', async () => {
+  it('defers the startup check past ready + idle delay', async () => {
     const updater = await loadUpdater()
     updater.initAutoUpdater()
-    updater.scheduleStartupUpdateCheck()
+    updater.applyUpdateCheckSchedule(true)
     expect(electronAppMock.once).not.toHaveBeenCalled()
     expect(autoUpdater.checkForUpdates).not.toHaveBeenCalled()
 
@@ -103,17 +104,67 @@ describe('updater service', () => {
 
     await vi.advanceTimersByTimeAsync(1)
     expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1)
+  })
 
-    // Event-driven: no polling loop afterwards.
-    await vi.advanceTimersByTimeAsync(STARTUP_DELAY_MS * 100)
+  it('keeps re-checking on the periodic interval so a long session sees a release', async () => {
+    const updater = await loadUpdater()
+    updater.initAutoUpdater()
+    updater.applyUpdateCheckSchedule(true)
+
+    await vi.advanceTimersByTimeAsync(STARTUP_DELAY_MS)
     expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(PERIODIC_INTERVAL_MS)
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(PERIODIC_INTERVAL_MS)
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(3)
+  })
+
+  it('stops every background check when automatic checks are switched off', async () => {
+    const updater = await loadUpdater()
+    updater.initAutoUpdater()
+    updater.applyUpdateCheckSchedule(true)
+
+    // Off before the deferred startup check has even fired.
+    updater.applyUpdateCheckSchedule(false)
+    await vi.advanceTimersByTimeAsync(STARTUP_DELAY_MS + PERIODIC_INTERVAL_MS * 10)
+    expect(autoUpdater.checkForUpdates).not.toHaveBeenCalled()
+
+    // An explicit user check is still honoured with the switch off.
+    await updater.checkForAppUpdates({ force: true })
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-arms the schedule live, without stacking timers on repeat calls', async () => {
+    const updater = await loadUpdater()
+    updater.initAutoUpdater()
+    updater.applyUpdateCheckSchedule(true)
+    updater.applyUpdateCheckSchedule(true)
+    updater.applyUpdateCheckSchedule(true)
+
+    await vi.advanceTimersByTimeAsync(STARTUP_DELAY_MS)
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(PERIODIC_INTERVAL_MS)
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(2)
+
+    // Switching back on re-arms the short startup check too, so the user
+    // learns about a release promptly instead of waiting a full interval.
+    updater.applyUpdateCheckSchedule(false)
+    updater.applyUpdateCheckSchedule(true)
+    await vi.advanceTimersByTimeAsync(STARTUP_DELAY_MS)
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(3)
+
+    await vi.advanceTimersByTimeAsync(PERIODIC_INTERVAL_MS)
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(4)
   })
 
   it('skips the startup check entirely in dev (!app.isPackaged)', async () => {
     const updater = await loadUpdater()
     electronAppMock.isPackaged = false
     updater.initAutoUpdater()
-    updater.scheduleStartupUpdateCheck()
+    updater.applyUpdateCheckSchedule(true)
     await vi.advanceTimersByTimeAsync(STARTUP_DELAY_MS * 10)
     expect(autoUpdater.checkForUpdates).not.toHaveBeenCalled()
     await expect(updater.checkForAppUpdates()).resolves.toBeNull()
@@ -197,6 +248,51 @@ describe('updater service', () => {
       notesSections: []
     })
     expect(autoUpdater.checkForUpdates).not.toHaveBeenCalled()
+  })
+
+  it('force re-checks past the cached result so a second release is visible', async () => {
+    const updater = await loadUpdater()
+    updater.initAutoUpdater()
+    autoUpdater.emit('update-available', { version: '1.3.0', releaseNotes: null })
+
+    // Without force the cached answer is returned forever, which would hide
+    // 1.4.0 until the app restarts.
+    autoUpdater.checkForUpdates.mockImplementationOnce(async () => {
+      autoUpdater.emit('update-available', { version: '1.4.0', releaseNotes: null })
+      return null
+    })
+    await expect(updater.checkForAppUpdates({ force: true })).resolves.toMatchObject({
+      version: '1.4.0'
+    })
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1)
+  })
+
+  it('a silent background failure leaves the last good status alone', async () => {
+    const updater = await loadUpdater()
+    updater.initAutoUpdater()
+    autoUpdater.emit('update-available', { version: '1.3.0', releaseNotes: null })
+    expect(updater.updaterState().status).toBe('available')
+
+    autoUpdater.checkForUpdates.mockRejectedValueOnce(new Error('offline'))
+    await expect(
+      updater.checkForAppUpdates({ force: true, silent: true })
+    ).resolves.toBeNull()
+
+    // An offline poll must not replace a real update with "check failed".
+    expect(updater.updaterState()).toMatchObject({ status: 'available' })
+  })
+
+  it('does not start a second download while one is in flight', async () => {
+    const updater = await loadUpdater()
+    updater.initAutoUpdater()
+    autoUpdater.emit('update-available', { version: '1.3.0' })
+    autoUpdater.emit('download-progress', { percent: 42, transferred: 42, total: 100 })
+    expect(updater.updaterState().status).toBe('downloading')
+
+    await updater.downloadAppUpdate()
+    expect(autoUpdater.downloadUpdate).not.toHaveBeenCalled()
+    // Progress is preserved rather than flipped to an error.
+    expect(updater.updaterState().status).toBe('downloading')
   })
 
   it('check runs once when idle and resolves null when up to date', async () => {

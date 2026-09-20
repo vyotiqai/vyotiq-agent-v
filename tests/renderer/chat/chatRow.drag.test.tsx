@@ -121,7 +121,8 @@ describe('ChatRow drag', () => {
         onDeleteRun={noop}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Rename List files' }))
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for List files' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
     const input = screen.getByLabelText('Rename chat')
     fireEvent.keyDown(input, { key: 'Escape' })
     expect(screen.queryByLabelText('Rename chat')).toBeNull()
@@ -159,7 +160,8 @@ describe('ChatRow drag', () => {
         onDeleteRun={noop}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Rename List files' }))
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for List files' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
     // The row button is gone, so no dragstart can fire from a renaming row.
     expect(screen.queryByRole('button', { name: 'List files' })).toBeNull()
   })

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button, cn } from '@renderer/lib/ui'
 import { Icon } from '@renderer/lib/icons'
+import { AgentVSpinner } from '@renderer/lib/brand'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import type { GithubAuthStatus } from '@shared/ipc'
 
@@ -148,7 +149,7 @@ export function GithubAuthPanel({
         </div>
 
         <div className="mt-4 flex items-center gap-2 text-caption text-muted">
-          <Icon name="loader" size={14} className="motion-safe:animate-spin" />
+          <AgentVSpinner size={14} />
           <span>Waiting for authorization…</span>
         </div>
       </div>

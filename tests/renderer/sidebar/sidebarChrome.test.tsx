@@ -13,6 +13,10 @@ import {
   resetWorkspaceHotUiStoreForTests,
   setWorkspaceHotUi
 } from '@renderer/lib/hooks/workspaceHotUiStore'
+import {
+  resetUpdaterStoreForTests,
+  setUpdaterStateForTests
+} from '@renderer/features/updates/updaterStore'
 
 const searchRef = createRef<HTMLInputElement>()
 
@@ -114,6 +118,37 @@ describe('Sidebar chrome', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^home$/i }))
     expect(onOpenHome).toHaveBeenCalledTimes(1)
+  })
+
+  // The update surface lives in the footer rail beside Notifications. It is
+  // the app's only automatic update affordance, so its absence when current
+  // and its presence when not are both load-bearing.
+  it('keeps the footer rail free of an update entry while the install is current', () => {
+    render(<Sidebar {...baseProps} />)
+    expect(screen.queryByRole('button', { name: /is available/i })).toBeNull()
+  })
+
+  it('shows an update entry in the footer rail once main reports a new version', () => {
+    resetUpdaterStoreForTests()
+    setUpdaterStateForTests({
+      status: 'available',
+      info: {
+        version: '9.9.9',
+        releaseDate: '2026-09-01',
+        releaseName: 'Autumn release',
+        notesText: 'Autumn release',
+        notesSections: []
+      }
+    })
+    render(<Sidebar {...baseProps} />)
+
+    const entry = screen.getByRole('button', { name: /Version 9\.9\.9 is available/ })
+    // Same rail as Settings, so it can never overlap page content the way the
+    // old floating card did.
+    expect(entry.parentElement).toBe(
+      screen.getByRole('button', { name: /^settings$/i }).parentElement
+    )
+    resetUpdaterStoreForTests()
   })
 
   it('calls onOpenSettings from the footer', () => {

@@ -5,7 +5,14 @@ export type SkinId = z.infer<typeof SkinIdSchema>
 
 export const SKIN_IDS: readonly SkinId[] = ['default', 'proof', 'bench', 'native', 'gild']
 
-export const DEFAULT_SKIN_ID: SkinId = 'default'
+/**
+ * Shipped skin. `default` remains the Azure instrument look the base CSS
+ * tokens encode; Native is the skin the product picks for you.
+ */
+export const DEFAULT_SKIN_ID: SkinId = 'native'
+
+/** Previous product default, once written into settings.json. */
+export const LEGACY_SKIN_ID: SkinId = 'default'
 
 export type SkinCatalogEntry = {
   id: SkinId

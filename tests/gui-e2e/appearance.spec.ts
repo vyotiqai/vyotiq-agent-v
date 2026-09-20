@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
-import { APPEARANCE_LOCAL_STORAGE_KEY } from '../../src/shared/appearance'
+import { APPEARANCE_LOCAL_STORAGE_KEY, DEFAULT_SKIN_ID } from '../../src/shared/appearance'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
 import { seedAppSettings } from './helpers/seedWorkspace'
 import {
@@ -143,6 +143,11 @@ test('bench skin applies data-skin and persists', async () => {
 test('native skin applies data-skin and persists', async () => {
   const { window } = launched
   await openAppearanceSection(window)
+  // Native is the shipped skin, so the per-test reset already leaves it
+  // selected: move off it first or the click proves nothing.
+  await window.getByRole('button', { name: /^default$/i }).click()
+  await expect.poll(async () => readRootAppearance(window)).toMatchObject({ skin: 'default' })
+
   await window.getByRole('button', { name: /^native$/i }).click()
 
   await expect
@@ -177,8 +182,10 @@ test('custom CSS overlay injects user skin style tag', async () => {
   const cssPath = join(userDataDir, 'overlay.css')
   writeFileSync(cssPath, ':root { --vy-fg: #123456; }', 'utf8')
 
+  // No skinId here on purpose: the overlay has to beat the shipped skin's
+  // own [data-skin][data-theme] palette block, not just the base tokens.
   await window.evaluate(async (path) => {
-    await window.vyotiq.setSettings({ customCssPath: path, skinId: 'default' })
+    await window.vyotiq.setSettings({ customCssPath: path })
   }, cssPath)
 
   await expect
@@ -187,10 +194,13 @@ test('custom CSS overlay injects user skin style tag', async () => {
     )
     .toContain('--vy-fg')
 
-  const fg = await window.evaluate(() =>
-    getComputedStyle(document.documentElement).getPropertyValue('--vy-fg').trim()
-  )
-  expect(fg.toLowerCase()).toBe('#123456')
+  await expect
+    .poll(async () =>
+      window.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue('--vy-fg').trim().toLowerCase()
+      )
+    )
+    .toBe('#123456')
 })
 
 test('appearance boot cache survives reload before React hydrates', async () => {
@@ -301,5 +311,5 @@ test('corrupt appearance boot cache does not break startup', async () => {
   const attrs = await readRootAppearance(window)
   expect(attrs.fontScale).toBe('default')
   expect(attrs.density).toBe('default')
-  expect(attrs.skin).toBe('default')
+  expect(attrs.skin).toBe(DEFAULT_SKIN_ID)
 })

@@ -188,7 +188,7 @@ dependency's file layout:
        truncated downloads produce broken installers that fail with cryptic
        errors), silent-install, launch, confirm version + window + logs.
 9. [ ] Announce/state clearly: **v1.2.0-style broken releases cannot
-       self-update** (the app dies before the update card renders) — say so
+       self-update** (the app dies before the update panel renders) — say so
        in the release notes so users know to reinstall manually.
 
 ---

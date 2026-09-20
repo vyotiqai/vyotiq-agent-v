@@ -1,0 +1,9 @@
+{
+  "variant": "relay",
+  "frames": 16,
+  "durationMs": 1200,
+  "sizes": [
+    16,
+    32
+  ]
+}

@@ -17,3 +17,8 @@ landing/public/shots/*.png binary
 # dev checkout over the same userData.
 resources/marketplace/**/*.json text eol=lf
 resources/marketplace/**/*.md text eol=lf
+
+# Tray spinner frames are generated art (scripts/generate-spinner-frames.mjs).
+# The PNGs are binary; the manifest is emitted with LF, so pin it.
+resources/tray/**/*.png binary
+resources/tray/manifest.json text eol=lf

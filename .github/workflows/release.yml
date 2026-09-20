@@ -89,8 +89,8 @@ jobs:
       - name: Create the draft release in the public releases repo
         if: startsWith(github.ref, 'refs/tags/')
         env:
-          # Cross-repo publish: the release lives in the PUBLIC
-          # vyotiqai/vyotiq-agent-v-releases repo (source stays private).
+          # Cross-repo publish: the release lives in the separate
+          # vyotiqai/vyotiq-agent-v-releases repo, not this one.
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: |
@@ -194,8 +194,8 @@ jobs:
       - name: Package installers
         env:
           # Cross-repo publish: electron-builder creates the release in the
-          # PUBLIC vyotiqai/vyotiq-agent-v-releases repo (source stays
-          # private). GITHUB_TOKEN only covers this private repo.
+          # separate vyotiqai/vyotiq-agent-v-releases repo. The default
+          # GITHUB_TOKEN is scoped to this repo only, hence RELEASES_TOKEN.
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -238,7 +238,7 @@ jobs:
 
   finalize-release:
     # Post-publish verification: the release body must be non-empty (the stub
-    # body is written if the create step left it empty; the in-app update card
+    # body is written if the create step left it empty; the in-app update panel
     # parses it) and the three updater manifests
     # must all be present (a missing latest*.yml silently kills auto-update
     # on that OS — happened on v1.1.0).

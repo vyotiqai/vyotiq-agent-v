@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test'
-import { APPEARANCE_LOCAL_STORAGE_KEY } from '../../../src/shared/appearance'
+import { APPEARANCE_LOCAL_STORAGE_KEY, DEFAULT_SKIN_ID } from '../../../src/shared/appearance'
 
 export type RootAppearanceAttrs = {
   theme: string | null
@@ -67,15 +67,15 @@ export async function readAppearanceBootCache(window: Page): Promise<Record<stri
 }
 
 export async function resetAppearanceSettings(window: Page): Promise<void> {
-  await window.evaluate(async () => {
+  await window.evaluate(async (skinId) => {
     await window.vyotiq.setSettings({
       theme: 'system',
       fontScale: 'default',
       uiDensity: 'default',
-      skinId: 'default',
+      skinId,
       customCssPath: ''
     })
-  })
+  }, DEFAULT_SKIN_ID)
   await leaveSettingsIfOpen(window)
   await window.reload()
   await window.locator('body').waitFor({ state: 'attached', timeout: 45_000 })
@@ -84,7 +84,7 @@ export async function resetAppearanceSettings(window: Page): Promise<void> {
     .toMatchObject({
       fontScale: 'default',
       density: 'default',
-      skin: 'default'
+      skin: DEFAULT_SKIN_ID
     })
 }
 

@@ -33,7 +33,6 @@ import {
 } from '@renderer/lib/shortcuts'
 import { TitleBar } from './TitleBar'
 import { CommandPalette } from '@renderer/features/commandPalette/CommandPalette'
-import { UpdateCard } from '@renderer/features/updates/UpdateCard'
 import { WhatsNewModal } from '@renderer/features/whats-new/WhatsNewModal'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
@@ -492,7 +491,6 @@ function AppShellInner({
           else window.dispatchEvent(new CustomEvent('vyotiq:command', { detail: { id } }))
         }}
       />
-      <UpdateCard />
       <WhatsNewModal />
     </div>
   )

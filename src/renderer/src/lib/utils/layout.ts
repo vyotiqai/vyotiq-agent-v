@@ -280,6 +280,14 @@ export const TITLE_BAR_HEIGHT = 'h-9'
 export const TITLE_BAR_HEIGHT_PX = 36
 
 /**
+ * Bottom status bar — the Agent V working indicator and the run it belongs to.
+ * Deliberately shorter than {@link TITLE_BAR_HEIGHT}: it is a reading surface,
+ * not a hit target, and the chat stage is already tight for vertical room.
+ */
+export const STATUS_BAR_HEIGHT = 'h-6'
+export const STATUS_BAR_HEIGHT_PX = 24
+
+/**
  * Windows/Linux caption-button strip width (3 × `sm:w-11` = 132px).
  * Side-dock titlebar tabs shrink by this so their left edge lines up with the
  * dock column while controls stay a TitleBar sibling (no absolute overlay).
@@ -378,6 +386,32 @@ export const SIDEBAR_ROW_OPEN =
 /** Session in the focused pane — stronger fill + accent. */
 export const SIDEBAR_ROW_FOCUSED =
   'border-l-fg-strong text-fg-strong bg-surface/45 font-semibold'
+
+/**
+ * Right-hand clearance a sidebar row must hold open while its hover actions are
+ * showing, so the truncated label ends *before* the icon strip instead of being
+ * painted over by it.
+ *
+ * Sized against the widest cluster any row shows: the delete confirm's two
+ * `size-7` buttons plus their `gap-0.5` (58px). The steady-state strips are
+ * narrower (two `size-6` buttons + `gap-px` = 49px), so 64px leaves a visible
+ * gutter between the ellipsis and the first icon in both states.
+ *
+ * Applied only while the strip is visible — at rest the row keeps its own
+ * padding so the label (and the cost badge that shares that edge) get the full
+ * width. `vy-transition` does not animate padding, so the reserve snaps in as
+ * the icons fade and the two never overlap mid-transition.
+ */
+export const SIDEBAR_ROW_ACTIONS_RESERVE =
+  'group-hover:pr-16 group-focus-within:pr-16 [@media(hover:none)]:pr-16'
+
+/**
+ * Same idea as {@link SIDEBAR_ROW_ACTIONS_RESERVE} for a workspace header.
+ * Its strip is two `size-6` buttons with `gap-1` (52px), so 56px keeps a
+ * gutter after the truncated folder name.
+ */
+export const SIDEBAR_WORKSPACE_ROW_ACTIONS_RESERVE =
+  'group-hover:pr-14 group-focus-within:pr-14 [@media(hover:none)]:pr-14'
 
 /** Hover surface for sidebar rows. */
 export const SIDEBAR_ROW_HOVER = 'hover:bg-surface/30 hover:text-fg'

@@ -308,6 +308,7 @@ const VYOTIQ_PUSH_MAP: Record<
 
 /** Namespaced VyotiqApi surfaces (window.vyotiq.updater / .feedback). */
 const VYOTIQ_NAMESPACE_INVOKE_MAP: Record<string, string> = {
+  'updater.getState': IPC.updaterGetState,
   'updater.check': IPC.updaterCheck,
   'updater.download': IPC.updaterDownload,
   'updater.install': IPC.updaterInstall,

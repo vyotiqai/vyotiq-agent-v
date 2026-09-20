@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp } from '@electron-toolkit/utils'
 import { watchWindowShortcuts } from '@main/app/windowShortcuts'
 import { createWindow, applyWindowChrome, getMainWindow } from '@main/app/window'
+import { createTray, destroyTray } from '@main/app/tray'
 import { planSecondInstanceAction } from '@main/app/secondInstance'
 import { handleDeepLinkArgv, registerDeepLinks } from '@main/app/deepLinks'
 import { applyBadgeNow, notifyBadgeChange, setBadgeProvider } from '@main/app/badges'
@@ -16,7 +17,7 @@ import { disposeAllTerminalSessions } from '@main/agent/tools/terminalSessions'
 import { registerIpc } from './ipc/register'
 import { resumeActiveGoalsAndLoops } from './agent/resumeActiveGoals'
 import { resumeTasksForWorkspaces } from './agent/taskScheduler'
-import { initAutoUpdater, scheduleStartupUpdateCheck } from '@main/updater'
+import { initAutoUpdater, applyUpdateCheckSchedule } from '@main/updater'
 import { initNotifications, unreadNotificationCount } from './notifications/service'
 import { shutdownMcpServers, syncMcpServers } from '@main/agent/mcp'
 import { primeLoginShellPath } from '@main/agent/mcp/binaries'
@@ -283,11 +284,12 @@ if (!gotLock) {
       activeRuns: listActiveRuns().length
     }))
     notifyBadgeChange()
-    // Updater listeners + the deferred one-shot startup check (ready + idle
-    // delay, packaged builds only). Never blocks first paint. The Settings
-    // "Check for updates automatically" switch gates the startup check.
+    // Updater listeners + the background check schedule (deferred startup
+    // one-shot plus the periodic re-check, packaged builds only). Never blocks
+    // first paint. The Settings "Automatic checks" switch gates both, and
+    // re-applies live from the setSettings handler.
     initAutoUpdater()
-    scheduleStartupUpdateCheck({ autoCheckEnabled: getSettings().autoCheckUpdates !== false })
+    applyUpdateCheckSchedule(getSettings().autoCheckUpdates !== false)
     startLoadPerfMonitor()
     try {
       const orphan = purgeOrphanMarketplacePackageDirs()
@@ -312,6 +314,9 @@ if (!gotLock) {
     createWindow()
     applyWindowChrome(getSettings().theme, getSettings().skinId)
     applyBadgeNow()
+    // The tray polls the run registry rather than being pushed at: run starts
+    // and finishes are already chatty, and the tray only needs a count.
+    createTray({ getActiveRunCount: () => listActiveRuns().length })
     initCustomCssWatchFromSettings()
     // Windows/Linux cold start: the OS launches us with the URL in our own argv.
     handleDeepLinkArgv(process.argv)
@@ -396,6 +401,7 @@ if (!gotLock) {
         logger.warn('Failed to cancel active runs before quit', { scope: 'main', err })
       }
 
+      destroyTray()
       closeAgentBrowser()
       disposeAllTerminalSessions()
       disposeAllPtySessions()

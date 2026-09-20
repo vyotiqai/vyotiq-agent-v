@@ -1669,15 +1669,19 @@ describe('settings', () => {
     expect(screen.getByText('22.17.0')).toBeTruthy()
     expect(screen.getByText(/Windows x64 · 10\.0\.26200/)).toBeTruthy()
     expect(screen.getByText('Agent V. A product of Vyotiq.com.')).toBeTruthy()
-    const websiteField = document.querySelector('[data-settings-field="about-website"]')
-    expect(websiteField).toBeTruthy()
-    fireEvent.click(within(websiteField as HTMLElement).getByRole('button', { name: /^Open$/i }))
+    // The links live inline in the brand card now, not in their own group of
+    // full-width rows; the field ids stay so settings search still finds them.
+    expect(screen.queryByText('Links')).toBeNull()
+    const websiteLink = document.querySelector('[data-settings-field="about-website"]')
+    expect(websiteLink).toBeTruthy()
+    expect(websiteLink?.textContent).toBe('Website')
+    fireEvent.click(websiteLink as HTMLElement)
     await waitFor(() => {
       expect(window.vyotiq.shellOpenExternal).toHaveBeenCalledWith('https://vyotiq.com')
     })
-    const docsField = document.querySelector('[data-settings-field="about-docs"]')
-    expect(docsField).toBeTruthy()
-    fireEvent.click(within(docsField as HTMLElement).getByRole('button', { name: /^Open$/i }))
+    const docsLink = document.querySelector('[data-settings-field="about-docs"]')
+    expect(docsLink).toBeTruthy()
+    fireEvent.click(docsLink as HTMLElement)
     await waitFor(() => {
       expect(window.vyotiq.shellOpenExternal).toHaveBeenCalledWith(
         new URL('/docs', 'https://vyotiq.com').href
@@ -1749,7 +1753,9 @@ describe('settings', () => {
     expect(document.querySelector('[data-settings-field="about"]')).toBeTruthy()
     expect(screen.getByText('Build')).toBeTruthy()
     expect(screen.getByText('Updates')).toBeTruthy()
-    expect(screen.getByText('Links')).toBeTruthy()
+    // Links are inline in the brand card, not a group of their own.
+    expect(screen.queryByText('Links')).toBeNull()
+    expect(document.querySelector('[data-settings-field="about-source"]')).toBeTruthy()
 
     // Agent Section
     fireEvent.click(screen.getByRole('button', { name: /^Agent$/i }))

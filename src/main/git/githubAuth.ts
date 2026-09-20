@@ -174,21 +174,45 @@ async function emitGithubAuthStatus(): Promise<void> {
   }
 }
 
-async function ghAuthTokenAvailable(): Promise<boolean> {
-  if (!(await ghAvailable())) return false
+/**
+ * The token the GitHub CLI is holding, when it has one Agent V can use.
+ *
+ * Reading it — rather than only asking whether it exists — is what makes
+ * "already signed in" mean something. A user who has run `gh auth login`
+ * can finish Connect GitHub without a device code, and the GitHub MCP gets a
+ * Bearer, which it cannot otherwise: it reads Agent V's own storage, and a
+ * token that lives only in the CLI's credential store never reaches it.
+ *
+ * Returns null unless stdout is exactly one token, so a `gh` that decides to
+ * print a warning alongside it falls back to the device flow instead of
+ * storing the warning.
+ */
+export async function readGhAuthToken(): Promise<string | null> {
+  if (!(await ghAvailable())) return null
+  return readGhAuthTokenUnchecked()
+}
+
+async function readGhAuthTokenUnchecked(): Promise<string | null> {
   const executable = await resolveGhExecutable()
-  if (!executable) return false
+  if (!executable) return null
   try {
-    await execFile(executable, ['auth', 'token'], {
+    const { stdout } = await execFile(executable, ['auth', 'token'], {
       encoding: 'utf8',
       timeout: 10_000,
       windowsHide: true,
       env: ghCliEnv()
     })
-    return true
+    const token = stdout.trim()
+    if (!isGithubCliUsableToken(token) || token !== token.split(/\s+/u)[0]) return null
+    return token
   } catch {
-    return false
+    return null
   }
+}
+
+async function ghAuthTokenAvailable(): Promise<boolean> {
+  if (!(await ghAvailable())) return false
+  return (await readGhAuthTokenUnchecked()) !== null
 }
 
 function persistTokenToGhCli(token: string): Promise<boolean> {
@@ -344,9 +368,13 @@ function failPending(message: string): void {
   void emitGithubAuthStatus()
 }
 
-async function completeWithAccessToken(accessToken: string): Promise<void> {
+async function completeWithAccessToken(
+  accessToken: string,
+  opts?: { persistToCli?: boolean }
+): Promise<void> {
   setGithubAccessToken(accessToken)
-  void persistTokenToGhCli(accessToken)
+  // Nothing to hand back when the token came out of the CLI to begin with.
+  if (opts?.persistToCli !== false) void persistTokenToGhCli(accessToken)
   cancelGithubAuth()
   logger.info('GitHub device OAuth succeeded', { scope: 'github-auth' })
   await emitGithubAuthStatus()
@@ -378,11 +406,14 @@ async function pollOnce(): Promise<void> {
     if (err === 'authorization_pending') {
       pending.consecutiveFailures = 0
       schedulePoll()
-      void ghAuthTokenAvailable().then(async (signedIn) => {
-        if (!signedIn || !pending) return
-        cancelGithubAuth()
-        logger.info('GitHub CLI already signed in; ending device wait', { scope: 'github-auth' })
-        await emitGithubAuthStatus()
+      // The user may finish in a terminal instead. Take the token `gh` ends up
+      // with rather than dropping the flow: cancelling on its own left them
+      // signed in as far as `gh` was concerned and holding nothing, so the
+      // dialog waited for a token that was never going to arrive.
+      void readGhAuthToken().then(async (token) => {
+        if (!token || !pending) return
+        logger.info('Adopted the GitHub CLI sign-in mid-flow', { scope: 'github-auth' })
+        await completeWithAccessToken(token, { persistToCli: false })
       })
       return
     }
@@ -418,6 +449,20 @@ export async function startGithubAuth(): Promise<GithubAuthStatus> {
   const clientId = resolveGithubClientId()
 
   cancelGithubAuth()
+
+  // Someone who has already run `gh auth login` has done the sign-in. Asking
+  // them for a device code as well is theatre, and the flow used to notice six
+  // seconds in and abandon itself without keeping the token (see pollOnce) —
+  // a browser opened, the code went stale, and nothing was ever stored.
+  const fromCli = await readGhAuthToken()
+  if (fromCli) {
+    setGithubAccessToken(fromCli)
+    logger.info('Adopted the GitHub CLI sign-in; no device code needed', {
+      scope: 'github-auth'
+    })
+    await emitGithubAuthStatus()
+    return githubAuthStatus()
+  }
 
   logger.info('Starting GitHub device authorization', { scope: 'github-auth' })
 

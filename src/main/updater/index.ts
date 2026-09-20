@@ -113,62 +113,75 @@ export function initAutoUpdater(): void {
 }
 
 /**
- * Deferred one-shot startup check: after app ready + a short idle delay so it
- * never blocks first paint. Skipped entirely in dev (!app.isPackaged).
- * Later checks happen when the renderer invokes `updater:check` or on the
- * background interval from schedulePeriodicUpdateCheck.
+ * Arm or disarm every background update check. Idempotent: safe to call on
+ * boot and again whenever the Settings "Automatic checks" switch changes, so
+ * the setting takes effect live instead of only at the next launch.
+ *
+ * - Dev (`!app.isPackaged`) has no release feed, so nothing is ever armed.
+ * - `enabled === false` clears both timers: off means no background network
+ *   calls at all. An explicit `updater:check` still works — a manual action is
+ *   always honoured.
+ * - `enabled === true` arms the deferred one-shot startup check (app ready +
+ *   a short idle delay so it never blocks first paint) and the periodic check
+ *   that lets a long-running session learn about a release without a restart.
+ *   The interval is unref'd so it never keeps the process alive on shutdown.
  */
-export function scheduleStartupUpdateCheck(
-  options?: { autoCheckEnabled?: boolean }
-): void {
-  if (!app.isPackaged) return
-  // The Settings "Check for updates automatically" switch gates the startup
-  // check (absent setting = enabled).
-  if (options?.autoCheckEnabled === false) return
-  if (startupTimer) return
-  const run = (): void => {
-    startupTimer = null
-    void checkForAppUpdates().catch((err) => {
-      logger.warn('[updater] startup check failed', { error: errorMessage(err) })
-    })
+export function applyUpdateCheckSchedule(enabled: boolean): void {
+  if (!enabled || !app.isPackaged) {
+    if (startupTimer) {
+      clearTimeout(startupTimer)
+      startupTimer = null
+    }
+    if (periodicTimer) {
+      clearInterval(periodicTimer)
+      periodicTimer = null
+    }
+    return
   }
-  if (app.isReady()) {
-    startupTimer = setTimeout(run, STARTUP_CHECK_DELAY_MS)
-  } else {
-    app.once('ready', () => {
-      startupTimer = setTimeout(run, STARTUP_CHECK_DELAY_MS)
-    })
-  }
-}
 
-/**
- * Background interval check so a long-running session still learns about new
- * releases (the startup check is one-shot and other checks are renderer
- * driven). Same gates as the startup check: packaged builds only and the
- * Settings autoCheckUpdates switch (absent setting = enabled). The interval
- * is unref'd so it never keeps the process alive on shutdown.
- */
-export function schedulePeriodicUpdateCheck(
-  options?: { autoCheckEnabled?: boolean }
-): void {
-  if (!app.isPackaged) return
-  if (options?.autoCheckEnabled === false) return
-  if (periodicTimer) return
-  periodicTimer = setInterval(() => {
-    void checkForAppUpdates().catch((err) => {
-      logger.warn('[updater] periodic check failed', { error: errorMessage(err) })
+  const check = (label: string): void => {
+    void checkForAppUpdates({ silent: true }).catch((err) => {
+      logger.warn(`[updater] ${label} check failed`, { error: errorMessage(err) })
     })
-  }, PERIODIC_CHECK_INTERVAL_MS)
-  periodicTimer.unref?.()
+  }
+
+  if (!startupTimer) {
+    const armStartup = (): void => {
+      startupTimer = setTimeout(() => {
+        startupTimer = null
+        check('startup')
+      }, STARTUP_CHECK_DELAY_MS)
+    }
+    if (app.isReady()) armStartup()
+    else app.once('ready', armStartup)
+  }
+
+  if (!periodicTimer) {
+    periodicTimer = setInterval(() => check('periodic'), PERIODIC_CHECK_INTERVAL_MS)
+    periodicTimer.unref?.()
+  }
 }
 
 /**
  * `updater:check` — returns the current UpdateInfo when an update is already
  * available/downloaded, otherwise runs a check. Resolves null when up to
- * date, in dev, or on failure (failure also broadcasts status 'error').
+ * date, in dev, or on failure.
+ *
+ * - `force` skips the cached-info short-circuit. Without it, once one update
+ *   has been found the cached answer is returned forever and a newer release
+ *   is invisible until the app restarts — so the Settings button forces.
+ * - `silent` logs a failure instead of broadcasting `status: 'error'`. A
+ *   background poll that happens to run offline must not overwrite a
+ *   perfectly good `available` state with "Update check failed".
  */
-export async function checkForAppUpdates(): Promise<UpdateInfo | null> {
-  if (lastInfo && (current.status === 'available' || current.status === 'downloaded')) {
+export async function checkForAppUpdates(
+  options?: { force?: boolean; silent?: boolean }
+): Promise<UpdateInfo | null> {
+  if (
+    !options?.force &&
+    lastInfo &&
+    (current.status === 'available' || current.status === 'downloaded')
+  ) {
     return lastInfo
   }
   if (!app.isPackaged) return null
@@ -184,7 +197,11 @@ export async function checkForAppUpdates(): Promise<UpdateInfo | null> {
       ? lastInfo
       : null
   } catch (err) {
-    broadcast({ status: 'error', error: errorMessage(err) })
+    if (options?.silent) {
+      logger.warn('[updater] background check failed', { error: errorMessage(err) })
+    } else {
+      broadcast({ status: 'error', error: errorMessage(err) })
+    }
     return null
   } finally {
     checkInFlight = false
@@ -193,10 +210,9 @@ export async function checkForAppUpdates(): Promise<UpdateInfo | null> {
 
 /** `updater:download` — download failures surface as status 'error'. */
 export async function downloadAppUpdate(): Promise<void> {
-  if (
-    !app.isPackaged ||
-    (current.status !== 'available' && current.status !== 'downloading')
-  ) {
+  // Already downloading: report progress, never start a second transfer.
+  if (current.status === 'downloading') return
+  if (!app.isPackaged || current.status !== 'available') {
     broadcast({
       status: 'error',
       error: 'No update is available to download. Check for updates first.'

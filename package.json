@@ -1,6 +1,6 @@
 {
   "name": "vyotiq",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Agent V — coding workspace for real repositories",
   "packageManager": "pnpm@12.4.2",
   "engines": {
@@ -19,9 +19,9 @@
     "url": "https://github.com/vyotiqai/vyotiq-agent-v/issues"
   },
   "scripts": {
-    "dev": "pnpm sync:harness && pnpm sync:file-icons && electron-vite dev",
+    "dev": "pnpm sync:harness && pnpm sync:file-icons && pnpm sync:spinner && electron-vite dev",
     "build": "pnpm typecheck && pnpm build:vite",
-    "build:vite": "pnpm sync:harness && pnpm sync:docx-md && pnpm sync:app-icon && pnpm sync:file-icons && electron-vite build",
+    "build:vite": "pnpm sync:harness && pnpm sync:docx-md && pnpm sync:app-icon && pnpm sync:spinner && pnpm sync:file-icons && electron-vite build",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test": "pnpm sync:harness && pnpm sync:docx-md && node scripts/test-exit-wrapper.cjs",
     "test:coverage": "pnpm sync:harness && pnpm sync:docx-md && vitest run --coverage",
@@ -47,6 +47,7 @@
     "sync:docx-md": "node scripts/sync-docx-md.mjs",
     "sync:brand": "node scripts/generate-precision-mono-brand.mjs",
     "sync:app-icon": "node scripts/sync-app-icon.mjs",
+    "sync:spinner": "node scripts/generate-spinner-frames.mjs",
     "sync:file-icons": "node scripts/sync-file-icons.mjs",
     "sync:marketplace-icons": "node scripts/sync-marketplace-brand-icons.mjs",
     "postinstall": "node node_modules/electron/install.js && (electron-builder install-app-deps || node -e \"console.warn('[vyotiq] native module rebuild failed — node-pty will use pipe fallback if unavailable')\") && node scripts/sync-file-icons.mjs && node scripts/sync-harness.mjs && node scripts/sync-docx-md.mjs && node scripts/generate-precision-mono-brand.mjs"

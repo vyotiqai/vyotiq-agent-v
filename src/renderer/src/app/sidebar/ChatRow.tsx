@@ -1,8 +1,23 @@
-import { memo, useEffect, useRef, useState, type KeyboardEvent, type RefCallback } from 'react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type RefCallback
+} from 'react'
 import { Icon } from '@renderer/lib/icons'
 import { IconButton, Tooltip, cn } from '@renderer/lib/ui'
 import {
+  ContextMenu,
+  type ContextMenuAnchor,
+  type ContextMenuItem
+} from '@renderer/lib/ui/ContextMenu'
+import {
   SIDEBAR_ROW,
+  SIDEBAR_ROW_ACTIONS_RESERVE,
   SIDEBAR_ROW_FOCUSED,
   SIDEBAR_ROW_HOVER,
   SIDEBAR_ROW_OPEN
@@ -82,10 +97,20 @@ export const ChatRow = memo(function ChatRow({
 }) {
   const [renaming, setRenaming] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [menuAnchor, setMenuAnchor] = useState<ContextMenuAnchor | null>(null)
   const [dragging, setDragging] = useState(false)
   const [draft, setDraft] = useState(run.goal ?? '')
   const inputRef = useRef<HTMLInputElement>(null)
+  const rowButtonRef = useRef<HTMLButtonElement | null>(null)
   const renameCancelledRef = useRef(false)
+
+  // Live mirrors for the menu's focus-return check, which runs on a timer after
+  // the item has already flipped the row into rename / confirm-delete. Without
+  // them the menu would pull focus back off the input or the Cancel button.
+  const confirmingDeleteRef = useRef(confirmingDelete)
+  confirmingDeleteRef.current = confirmingDelete
+  const renamingRef = useRef(renaming)
+  renamingRef.current = renaming
 
   useEffect(() => {
     if (!renaming) return
@@ -116,6 +141,69 @@ export const ChatRow = memo(function ChatRow({
   const title = titleOverride ?? runTitle(run)
   const fullLabel = runTooltip(run)
   const cost = runCostDisplay(run)
+
+  // Tooltip composes refs, so the row can keep its own handle for menu focus
+  // return while the roving-tabindex parent keeps its callback ref.
+  const setRowRef = useCallback(
+    (node: HTMLButtonElement | null): void => {
+      rowButtonRef.current = node
+      rowRef?.(node)
+    },
+    [rowRef]
+  )
+
+  const closeMenu = useCallback((): void => setMenuAnchor(null), [])
+
+  const menuItems = useMemo<ContextMenuItem[]>(() => {
+    const items: ContextMenuItem[] = [
+      {
+        id: 'rename',
+        label: 'Rename',
+        icon: 'edit',
+        onSelect: () => {
+          setConfirmingDelete(false)
+          setRenaming(true)
+        }
+      }
+    ]
+    if (onForkRun) {
+      items.push({
+        id: 'fork',
+        label: 'Fork chat',
+        icon: 'branch',
+        onSelect: () => onForkRun(workspacePath, run.runId)
+      })
+    }
+    if (onExportRun) {
+      items.push({
+        id: 'export',
+        label: 'Export as Markdown',
+        icon: 'download',
+        onSelect: () => onExportRun(workspacePath, run.runId)
+      })
+    }
+    if (onCopyRunLink) {
+      items.push({
+        id: 'copy-link',
+        label: 'Copy link',
+        icon: 'copy',
+        onSelect: () => onCopyRunLink(workspacePath, run.runId)
+      })
+    }
+    items.push({ type: 'separator', id: 'sep-danger' })
+    items.push({
+      id: 'delete',
+      label: 'Delete',
+      icon: 'trash',
+      danger: true,
+      shortcut: 'Del',
+      onSelect: () => {
+        setRenaming(false)
+        setConfirmingDelete(true)
+      }
+    })
+    return items
+  }, [onCopyRunLink, onExportRun, onForkRun, run.runId, workspacePath])
 
   const runStatusLabel = ((): string | null => {
     if (run.status === 'running') return 'Running'
@@ -163,99 +251,116 @@ export const ChatRow = memo(function ChatRow({
   }
 
   return (
-    <div
-      role="listitem"
-      className={cn('group relative min-w-0', active ? 'text-fg-strong' : '')}
-    >
-      <Tooltip content={runTooltip(run)}>
+    <div role="listitem" className={cn('group relative min-w-0', active ? 'text-fg-strong' : '')}>
+      <Tooltip content={fullLabel}>
         <button
           type="button"
-          ref={rowRef}
+          ref={setRowRef}
           tabIndex={tabIndex}
           data-session-row
-        draggable={!renaming && !confirmingDelete}
-        className={cn(
-          'app-region-no-drag flex w-full min-w-0 items-center gap-1.5 pr-2 text-left vy-transition',
-          'group-hover:pr-10 group-focus-within:pr-10 [@media(hover:none)]:pr-10',
-          nested
-            ? 'rounded-md px-1.5 py-1 text-xs leading-snug border-l-2 border-l-transparent'
-            : SIDEBAR_ROW,
-          active
-            ? focused
-              ? SIDEBAR_ROW_FOCUSED
-              : SIDEBAR_ROW_OPEN
-            : SIDEBAR_ROW_HOVER,
-          !active && (nested ? 'text-muted' : 'text-fg/85'),
-          dragging && 'opacity-50'
-        )}
-        aria-current={focused ? 'page' : undefined}
-        aria-label={sessionAriaLabel}
-        data-session-open={active ? '1' : '0'}
-        data-session-focused={focused ? '1' : '0'}
-        onClick={onSelect}
-        onKeyDown={(e) => {
-          // Same Delete-to-close pattern as dock/session tab strips; Esc cancels
-          // inside InlineConfirmActions.
-          if (e.key === 'Delete' && !renaming && !confirmingDelete) {
+          draggable={!renaming && !confirmingDelete}
+          className={cn(
+            'app-region-no-drag flex w-full min-w-0 items-center gap-1.5 pr-2 text-left vy-transition',
+            SIDEBAR_ROW_ACTIONS_RESERVE,
+            nested
+              ? 'rounded-md px-1.5 py-1 text-xs leading-snug border-l-2 border-l-transparent'
+              : SIDEBAR_ROW,
+            active ? (focused ? SIDEBAR_ROW_FOCUSED : SIDEBAR_ROW_OPEN) : SIDEBAR_ROW_HOVER,
+            !active && (nested ? 'text-muted' : 'text-fg/85'),
+            dragging && 'opacity-50'
+          )}
+          aria-current={focused ? 'page' : undefined}
+          aria-label={sessionAriaLabel}
+          data-session-open={active ? '1' : '0'}
+          data-session-focused={focused ? '1' : '0'}
+          onClick={onSelect}
+          onContextMenu={(e) => {
             e.preventDefault()
-            setConfirmingDelete(true)
-          }
-          onNavKeyDown?.(e)
-        }}
-        onDoubleClick={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          setConfirmingDelete(false)
-          setRenaming(true)
-        }}
-        onDragStart={(e) => {
-          if (renaming || confirmingDelete) {
+            e.stopPropagation()
+            setMenuAnchor({ x: e.clientX, y: e.clientY })
+          }}
+          onKeyDown={(e) => {
+            // Same Delete-to-close pattern as dock/session tab strips; Esc cancels
+            // inside InlineConfirmActions.
+            if (e.key === 'Delete' && !renaming && !confirmingDelete) {
+              e.preventDefault()
+              setConfirmingDelete(true)
+              return
+            }
+            // Keyboard route to the same menu the ⋯ button and right-click open.
+            if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+              e.preventDefault()
+              const rect = e.currentTarget.getBoundingClientRect()
+              setMenuAnchor({ x: rect.left, y: rect.bottom })
+              return
+            }
+            onNavKeyDown?.(e)
+          }}
+          onDoubleClick={(e) => {
             e.preventDefault()
-            return
-          }
-          writeSessionDragPayload(e.dataTransfer, {
-            workspacePath,
-            runId: run.runId
-          })
-          markSessionDragStart()
-          setDragging(true)
-        }}
-        onDragEnd={() => {
-          markSessionDragEnd()
-          setDragging(false)
-        }}
-      >
-        <RunStatusDot run={run} />
-        {run.goalStatus === 'active' || run.goalStatus === 'paused' ? (
-          <span
-            className="inline-flex shrink-0"
-            title={run.goalStatus === 'paused' ? 'Goal paused' : 'Active goal'}
-            aria-hidden="true"
-          >
-            <Icon
-              name="flag"
-              size={12}
-              className={run.goalStatus === 'paused' ? 'text-muted' : 'text-fg'}
-            />
-          </span>
-        ) : null}
-        <span className="min-w-0 flex-1 truncate">{title}</span>
-        {cost ? (
-          <span
-            className="shrink-0 text-3xs tabular-nums text-muted group-hover:hidden [@media(hover:none)]:hidden"
-            title={cost.title}
-          >
-            {cost.text}
-          </span>
-        ) : null}
+            e.stopPropagation()
+            setConfirmingDelete(false)
+            setRenaming(true)
+          }}
+          onDragStart={(e) => {
+            if (renaming || confirmingDelete) {
+              e.preventDefault()
+              return
+            }
+            writeSessionDragPayload(e.dataTransfer, {
+              workspacePath,
+              runId: run.runId
+            })
+            markSessionDragStart()
+            setDragging(true)
+          }}
+          onDragEnd={() => {
+            markSessionDragEnd()
+            setDragging(false)
+          }}
+        >
+          <RunStatusDot run={run} />
+          {run.goalStatus === 'active' || run.goalStatus === 'paused' ? (
+            <span
+              className="inline-flex shrink-0"
+              title={run.goalStatus === 'paused' ? 'Goal paused' : 'Active goal'}
+              aria-hidden="true"
+            >
+              <Icon
+                name="flag"
+                size={12}
+                className={run.goalStatus === 'paused' ? 'text-muted' : 'text-fg'}
+              />
+            </span>
+          ) : null}
+          <span className="min-w-0 flex-1 truncate">{title}</span>
+          {cost ? (
+            <span
+              className="shrink-0 text-3xs tabular-nums text-muted group-hover:hidden [@media(hover:none)]:hidden"
+              title={cost.title}
+            >
+              {cost.text}
+            </span>
+          ) : null}
         </button>
       </Tooltip>
 
+      {/*
+        Two buttons wide at most — the overflow actions live in the menu rather
+        than in a strip that would out-measure the reserve and sit on the label.
+        Stays mounted while the menu is open so the ⋯ trigger keeps its hover
+        state under the portal.
+
+        Pointer events sit on the controls, not this container, so the gaps
+        fall through to the row. Gating them on group-hover instead would
+        make the strip unclickable: reaching it requires a hit test that the
+        row button underneath would win while the hover is still off.
+      */}
       <div
         className={cn(
-          'app-region-no-drag absolute inset-y-0 right-0 z-sticky flex items-center gap-px vy-transition pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100',
-          '[@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100',
-          confirmingDelete && 'pointer-events-auto opacity-100'
+          'app-region-no-drag absolute inset-y-0 right-0 z-sticky flex items-center gap-px vy-transition pointer-events-none opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+          '[@media(hover:none)]:opacity-100',
+          (confirmingDelete || menuAnchor) && 'pointer-events-auto opacity-100'
         )}
       >
         {confirmingDelete ? (
@@ -271,78 +376,33 @@ export const ChatRow = memo(function ChatRow({
         ) : (
           <>
             <IconButton
-              icon="edit"
-              label={`Rename ${fullLabel}`}
+              icon="more"
+              label={`More actions for ${fullLabel}`}
               size="xs"
               variant="bare"
-              className="text-muted hover:text-fg"
+              className="pointer-events-auto text-muted hover:text-fg"
+              aria-haspopup="menu"
+              aria-expanded={menuAnchor != null}
               onMouseDown={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
               }}
               onClick={(e) => {
                 e.stopPropagation()
-                setConfirmingDelete(false)
-                setRenaming(true)
+                if (menuAnchor) {
+                  setMenuAnchor(null)
+                  return
+                }
+                const rect = e.currentTarget.getBoundingClientRect()
+                setMenuAnchor({ x: rect.left, y: rect.bottom + 4 })
               }}
             />
-            {onForkRun ? (
-              <IconButton
-                icon="branch"
-                label={`Fork ${fullLabel}`}
-                size="xs"
-                variant="bare"
-                className="text-muted hover:text-fg"
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                }}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onForkRun(workspacePath, run.runId)
-                }}
-              />
-            ) : null}
-            {onExportRun ? (
-              <IconButton
-                icon="download"
-                label={`Export ${fullLabel} as Markdown`}
-                size="xs"
-                variant="bare"
-                className="text-muted hover:text-fg"
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                }}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onExportRun(workspacePath, run.runId)
-                }}
-              />
-            ) : null}
-            {onCopyRunLink ? (
-              <IconButton
-                icon="copy"
-                label={`Copy link to ${fullLabel}`}
-                size="xs"
-                variant="bare"
-                className="text-muted hover:text-fg"
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                }}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onCopyRunLink(workspacePath, run.runId)
-                }}
-              />
-            ) : null}
             <IconButton
               icon="trash"
               label={`Delete ${fullLabel}`}
               size="xs"
               variant="bare"
-              className="text-muted hover:text-danger"
+              className="pointer-events-auto text-muted hover:text-danger"
               onMouseDown={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
@@ -355,6 +415,17 @@ export const ChatRow = memo(function ChatRow({
           </>
         )}
       </div>
+
+      {menuAnchor ? (
+        <ContextMenu
+          anchor={menuAnchor}
+          items={menuItems}
+          onClose={closeMenu}
+          returnFocusRef={rowButtonRef}
+          shouldRestoreFocus={() => !confirmingDeleteRef.current && !renamingRef.current}
+          aria-label={`Actions for ${fullLabel}`}
+        />
+      ) : null}
     </div>
   )
 })
