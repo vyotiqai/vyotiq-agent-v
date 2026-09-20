@@ -1,0 +1,85 @@
+name: Deploy landing site
+
+# The site's /download and /changelog pages are baked from the GitHub Releases
+# API at build time, not read from the repo. A new release therefore changes
+# nothing on vyotiq.com until this workflow runs again — which is why
+# workflow_dispatch is here alongside the landing/** path trigger. Run it by
+# hand after every release, once the release is PUBLISHED (the bake reads
+# /releases/latest, which never returns a draft, so building against a draft
+# silently bakes the previous version).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'landing/**'
+      - '.github/workflows/deploy-landing.yml'
+  workflow_dispatch:
+
+# Never cancel an in-flight deploy: a half-replaced site is worse than a late
+# one. Queued runs coalesce instead.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # setup-node resolves the package manager for its cache, so pnpm must be
+      # on PATH before it runs.
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@12.4.2 --activate
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Build the site
+        # Authenticated so the bake is not subject to the 60-requests/hour
+        # unauthenticated limit. bake-release exits non-zero on a 429 or 5xx
+        # by design, rather than baking a false "no downloads" state.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm site:build
+
+      # Before the upload, never after: routes, banned copy (which now includes
+      # the release notes baked into /changelog), meta tags, internal links,
+      # accessibility, and sitemap/canonical agreement. The workflow this
+      # replaces deployed without this step, which is how a stale or invalid
+      # site could ship.
+      - name: Verify the built site
+        run: pnpm site:verify
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: landing/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
