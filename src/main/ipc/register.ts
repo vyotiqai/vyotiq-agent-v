@@ -31,6 +31,8 @@ import {
   RunStatsRequestSchema,
   HomeActivityRequestSchema,
   HarnessReviewRequestSchema,
+  RunFeedbackGetRequestSchema,
+  RunFeedbackSetRequestSchema,
   HarnessPreviewApplyRequestSchema,
   HarnessApplyRequestSchema,
   SetSettingsRequestSchema,
@@ -186,6 +188,8 @@ import {
   type RunStatsResult,
   type HomeActivityResult,
   type HarnessReviewResult,
+  type RunFeedbackGetResult,
+  type RunFeedbackSetResult,
   type HarnessPreviewApplyResult,
   type HarnessApplyResult,
   type ListRunsResult,
@@ -271,6 +275,7 @@ import {
   openSlashFile
 } from '@main/agent/slashCommands'
 import { runHarnessReviewWithSettings } from '@main/agent/harnessReviewRun'
+import { getRunFeedbackEntry, setRunFeedbackRating } from '@main/agent/feedback/runFeedbackStore'
 import {
   isAllowedLocalSkillPath,
   isSkillRelatedRelPath,
@@ -1945,6 +1950,41 @@ export function registerIpc(): void {
         return ok({ stats })
       } catch (err) {
         return failFrom(err, IPC.runStats)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.runFeedbackGet,
+    async (event, raw): Promise<IpcResult<RunFeedbackGetResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = RunFeedbackGetRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        return ok({ entry: getRunFeedbackEntry(req.workspacePath, req.runId) })
+      } catch (err) {
+        return failFrom(err, IPC.runFeedbackGet)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.runFeedbackSet,
+    async (event, raw): Promise<IpcResult<RunFeedbackSetResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = RunFeedbackSetRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        return ok({
+          entry: setRunFeedbackRating({
+            workspacePath: req.workspacePath,
+            runId: req.runId,
+            rating: req.rating,
+            note: req.note
+          })
+        })
+      } catch (err) {
+        return failFrom(err, IPC.runFeedbackSet)
       }
     }
   )

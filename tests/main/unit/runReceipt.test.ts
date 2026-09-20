@@ -976,4 +976,58 @@ describe('runReceipt', () => {
       outputTokens: 25
     })
   })
+
+  it('carries the live verification gate verdict when the loop supplies one', () => {
+    const status: RunStatus = {
+      status: 'done',
+      step: 1,
+      updatedAt: '2026-09-19T00:00:00.000Z'
+    }
+    const withGate = buildRunReceipt({
+      runId: 'run-gate',
+      status,
+      messages: [],
+      events: [],
+      contract: '',
+      verificationGate: { wouldFire: true, reason: 'never_checked', paths: ['src/a.ts'] }
+    })
+    expect(withGate.verificationGate).toEqual({
+      wouldFire: true,
+      reason: 'never_checked',
+      paths: ['src/a.ts']
+    })
+
+    // Reconcile and rewind rebuild the receipt with no live tracker; the
+    // field must simply be absent rather than a fabricated false.
+    const withoutGate = buildRunReceipt({
+      runId: 'run-gate',
+      status,
+      messages: [],
+      events: [],
+      contract: ''
+    })
+    expect(withoutGate.verificationGate).toBeUndefined()
+  })
+
+  it('keeps parsing a receipt written before the gate field existed', () => {
+    // The field is additive and optional, so it carries no version bump.
+    const legacy = {
+      version: RUN_RECEIPT_VERSION,
+      writtenAt: '2026-09-01T00:00:00.000Z',
+      runId: 'run-old',
+      status: 'done',
+      step: 3,
+      compactionCount: 0,
+      toolStats: { totalCalls: 0, ok: 0, failed: 0, byName: {} },
+      failureClusters: [],
+      unreadEditPaths: [],
+      wroteFiles: [],
+      diagnostics: { calls: 0, ok: 0, clean: 0 },
+      contractExcerpt: ''
+    }
+    const parsed = RunReceiptSchema.safeParse(legacy)
+    expect(parsed.success).toBe(true)
+    expect(parsed.success && parsed.data.verificationGate).toBeUndefined()
+  })
+
 })

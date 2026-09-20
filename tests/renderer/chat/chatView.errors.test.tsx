@@ -20,7 +20,8 @@ beforeEach(() => {
         data: { open: false, url: '', title: '' }
       }),
       onBrowserState: vi.fn().mockReturnValue(() => undefined),
-      readRunArtifact: vi.fn().mockResolvedValue({ ok: true, data: '' })
+      readRunArtifact: vi.fn().mockResolvedValue({ ok: true, data: '' }),
+      runFeedbackGet: vi.fn().mockResolvedValue({ ok: true, data: { entry: null } })
     }
   })
 })

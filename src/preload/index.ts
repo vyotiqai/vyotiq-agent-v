@@ -102,6 +102,8 @@ const api: VyotiqApi = {
   readRunArtifact: (payload) => ipcRenderer.invoke(IPC.runsReadArtifact, payload),
   runStats: (payload) => ipcRenderer.invoke(IPC.runStats, payload),
   homeActivity: (payload) => ipcRenderer.invoke(IPC.homeActivity, payload),  harnessReview: (payload) => ipcRenderer.invoke(IPC.harnessReview, payload),
+  runFeedbackGet: (payload) => ipcRenderer.invoke(IPC.runFeedbackGet, payload),
+  runFeedbackSet: (payload) => ipcRenderer.invoke(IPC.runFeedbackSet, payload),
   harnessPreviewApply: (payload) => ipcRenderer.invoke(IPC.harnessPreviewApply, payload),
   harnessApply: (payload) => ipcRenderer.invoke(IPC.harnessApply, payload),
   onChatEvent: (handler) => {

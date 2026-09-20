@@ -113,6 +113,8 @@ export function ActivitySection({
     [data?.attention?.topTools]
   )
 
+  const unverifiedRuns = data?.attention?.unverifiedRuns ?? 0
+
   const trailing = <WindowToggle value={windowDays} onChange={onWindowChange} />
 
   if (error) {
@@ -272,22 +274,44 @@ export function ActivitySection({
         <SpendPerDay days={data.days} windowDays={span} />
         {data.days.some((day) => day.byModel != null) ? <ModelMix days={data.days} /> : null}
 
-        {toolFailures.length > 0 ? (
+        {/* Both attention signals share one bordered band. A second band costs
+            a border plus its own vertical padding, and Home is laid out to fit
+            the window without scrolling — the gui-e2e `fits the window` check
+            holds it to that. */}
+        {unverifiedRuns > 0 || toolFailures.length > 0 ? (
           <div className="border-t border-border/40 px-3 py-3">
-            <p className="m-0 flex items-center gap-1.5 text-3xs uppercase tracking-[var(--vy-tracking-caps)] text-tertiary">
-              <Icon name="warning" size={10} className="text-warning" aria-hidden="true" />
-              Tool failures
-            </p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-muted">
-              {toolFailures.map((tool) => (
-                <span key={tool.name} className="inline-flex items-center gap-1.5">
-                  <span className="font-medium text-fg">{tool.name}</span>
-                  <span className="tabular-nums">
-                    {tool.failed} of {tool.total}
-                  </span>
-                </span>
-              ))}
-            </div>
+            {unverifiedRuns > 0 ? (
+              <>
+                <p className="m-0 flex items-center gap-1.5 text-3xs uppercase tracking-[var(--vy-tracking-caps)] text-tertiary">
+                  <Icon name="warning" size={10} className="text-warning" aria-hidden="true" />
+                  Unchecked runs
+                </p>
+                <p className="m-0 mt-1.5 text-2xs text-muted">
+                  <span className="font-medium tabular-nums text-fg">{unverifiedRuns}</span>
+                  {unverifiedRuns === 1 ? ' run' : ' runs'} changed files with no passing check
+                  afterwards.
+                </p>
+              </>
+            ) : null}
+
+            {toolFailures.length > 0 ? (
+              <div className={unverifiedRuns > 0 ? 'mt-2.5' : undefined}>
+                <p className="m-0 flex items-center gap-1.5 text-3xs uppercase tracking-[var(--vy-tracking-caps)] text-tertiary">
+                  <Icon name="warning" size={10} className="text-warning" aria-hidden="true" />
+                  Tool failures
+                </p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-muted">
+                  {toolFailures.map((tool) => (
+                    <span key={tool.name} className="inline-flex items-center gap-1.5">
+                      <span className="font-medium text-fg">{tool.name}</span>
+                      <span className="tabular-nums">
+                        {tool.failed} of {tool.total}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </HomeCard>

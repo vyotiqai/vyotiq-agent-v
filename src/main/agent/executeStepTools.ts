@@ -36,6 +36,7 @@ import { readPathArg } from './tools/argAccess'
 import { hasJavaScriptProject, hasTypeScriptProject } from './tools/diagnostics'
 import { ensureToolCallIds } from './dedupeToolCalls'
 import { yieldToEventLoop } from './tools/walk'
+import type { VerificationTracker } from './feedback/verification'
 export const SOFT_WARN_MUTATION_WITHOUT_DIAGNOSTICS =
   '[Soft warning: this step mutated file(s) without calling diagnostics. Run diagnostics (typecheck/lint) before treating the change as done.]'
 
@@ -199,6 +200,8 @@ export type ToolStepContext = {
   recentReadPaths?: Map<string, number>
   /** Current agent step — stamps recentReadPaths entries. */
   readStampStep?: number
+  /** Invoke-scoped mutation/check tracker feeding the turn-end verification gate. */
+  verification?: VerificationTracker
 }
 
 type ToolOutcome = {
@@ -435,6 +438,14 @@ async function runSingleTool(
       result.ok,
       result.ok ? result.content : undefined
     )
+    if (ctx.verification) {
+      // `content`, not `result.content`: this is the text that gets persisted,
+      // so the live verdict reads exactly what the receipt will re-read later.
+      if (isFileMutationToolName(call.name)) {
+        ctx.verification.noteMutation(readPathArg(toolArgs), result.ok)
+      }
+      ctx.verification.noteToolResult(call.name, content, result.ok)
+    }
     const resultSummary = result.summary || summary
     const toolMsg: ChatMessage = {
       role: 'tool',

@@ -336,6 +336,55 @@ describe('session retention (sweepRetentionAuto)', () => {
   })
 })
 
+describe('derived index-only free pass (orphan reaper)', () => {
+  /** An untracked storage dir with no `sessions/` and no `meta.json`. */
+  function bareDir(id: string, build: (root: string) => void): void {
+    const root = join(workspacesRoot(), id)
+    mkdirSync(root, { recursive: true })
+    build(root)
+    age(root, 2)
+  }
+
+  function indexIn(root: string): void {
+    mkdirSync(join(root, 'codeindex'), { recursive: true })
+    writeWithAge(join(root, 'codeindex', 'db.bin'), 100, 2)
+  }
+
+  it('is not stranded by a derived runFeedback.json, but real state still blocks it', async () => {
+    ackedSettings()
+    bareDir('wid-index-only', indexIn)
+    bareDir('wid-index-and-feedback', (root) => {
+      indexIn(root)
+      writeWithAge(join(root, 'runFeedback.json'), 50, 2)
+    })
+    bareDir('wid-feedback-only', (root) => {
+      writeWithAge(join(root, 'runFeedback.json'), 50, 2)
+    })
+    bareDir('wid-real-state', (root) => {
+      indexIn(root)
+      writeWithAge(join(root, 'notes.bin'), 50, 2)
+    })
+
+    const by = new Map((await collectStorageReport()).workspaces.map((w) => [w.workspaceId, w]))
+
+    // Baseline: an index-only dir is free-passed regardless of the grace window.
+    expect(by.get('wid-index-only')?.derivedOnly).toBe(true)
+    // The change: a rebuildable ratings file must not cost the free pass.
+    expect(by.get('wid-index-and-feedback')).toMatchObject({
+      derivedOnly: true,
+      reapable: true
+    })
+    // ...but it is not itself an index, so it cannot earn the pass alone.
+    expect(by.get('wid-feedback-only')?.derivedOnly).toBe(false)
+    // ...and anything unrecognised still blocks it. These dirs are 2 days old,
+    // well inside the 30-day grace window, so only the free pass could reap them.
+    expect(by.get('wid-real-state')).toMatchObject({
+      derivedOnly: false,
+      reapable: false
+    })
+  })
+})
+
 describe('collectStorageReport (rollup math + orphan flags)', () => {
   it('sums categories, flags untracked dirs reapable, computes cap state', async () => {
     ackedSettings({ sizeCapGb: 1 })

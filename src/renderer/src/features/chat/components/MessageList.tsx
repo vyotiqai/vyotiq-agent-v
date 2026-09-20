@@ -14,7 +14,7 @@ import {
   wrapMatchIndex
 } from '@renderer/lib/chat/transcriptFind'
 import type { TurnOutcome, UiAgentQuestionAnswer, UiItem } from '@shared/transcript'
-import type { ToolApprovalDecision } from '@shared/ipc'
+import type { RunFeedbackRating, ToolApprovalDecision } from '@shared/ipc'
 import { isRetryableTurnFailure } from '@shared/errors'
 import {
   CHAT_COLUMN,
@@ -315,6 +315,12 @@ const POST_LIVE_FLOW_HOLD_MS = 800
 
 type TranscriptLayoutMode = 'flow' | 'hybrid' | 'full-virtual'
 
+/** Per-run verdict control, threaded to the closing answer's footer. */
+export type MessageRunFeedback = {
+  value: RunFeedbackRating | null
+  onRate: (rating: RunFeedbackRating | null) => void
+}
+
 function distanceFromBottom(el: HTMLElement): number {
   return el.scrollHeight - el.scrollTop - el.clientHeight
 }
@@ -560,7 +566,8 @@ function AssistantTextRow({
   usage = null,
   turnStatus = null,
   omitReceipt = false,
-  omitDuration = false
+  omitDuration = false,
+  runFeedback
 }: {
   item: AssistantItem
   final: boolean
@@ -573,6 +580,7 @@ function AssistantTextRow({
   turnStatus?: TurnOutcome | null
   omitReceipt?: boolean
   omitDuration?: boolean
+  runFeedback?: MessageRunFeedback
 }) {
   const resolved = useMemo(
     () => resolveInlineCitations(item.content, catalog),
@@ -606,6 +614,7 @@ function AssistantTextRow({
             item.streaming === true ||
             (turnStatus != null && turnStatus !== 'done')
           }
+          runFeedback={runFeedback}
         />
       ) : null}
     </div>
@@ -645,7 +654,8 @@ const TranscriptRowBlock = memo(function TranscriptRowBlock({
   footerUsage = null,
   footerStatus = null,
   footerOmitReceipt = false,
-  footerOmitDuration = false
+  footerOmitDuration = false,
+  footerRunFeedback
 }: {
   row: TranscriptRow
   onImageClick: (url: string, label: string) => void
@@ -683,6 +693,8 @@ const TranscriptRowBlock = memo(function TranscriptRowBlock({
   footerStatus?: TurnOutcome | null
   footerOmitReceipt?: boolean
   footerOmitDuration?: boolean
+  /** Set only on the last answer of a finished run — see `renderRow`. */
+  footerRunFeedback?: MessageRunFeedback
 }) {
   const { onOpenWorkspaceFile } = useRunSession()
 
@@ -744,6 +756,7 @@ const TranscriptRowBlock = memo(function TranscriptRowBlock({
         turnStatus={footerStatus}
         omitReceipt={footerOmitReceipt}
         omitDuration={footerOmitDuration}
+        runFeedback={footerRunFeedback}
       />
     )
   }
@@ -883,7 +896,8 @@ export function MessageList({
   onRevertUserMessage,
   messageCount = 0,
   turnUsage,
-  metaStore
+  metaStore,
+  runFeedback
 }: {
   items: UiItem[]
   itemsStore?: ChatItemsStore
@@ -944,6 +958,8 @@ export function MessageList({
   turnUsage?: readonly StepUsageTotals[]
   /** Live meta store — receipt updates without waiting for ChatView to re-render. */
   metaStore?: ChatMetaStore
+  /** Per-run verdict control; rendered on the last answer once the run ends. */
+  runFeedback?: MessageRunFeedback
 }) {
   const items = useChatLiveItems(itemsStore, itemsProp)
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -1933,6 +1949,21 @@ export function MessageList({
         row.item.id === tasksAnchorUserId
       }
       citationCatalog={citationCatalogs.get(row.turnIndex) ?? EMPTY_CITATION_CATALOG}
+      footerRunFeedback={
+        // One control per run, on its closing answer — not one per turn, and
+        // never while the run is still going. `error` is included on purpose:
+        // a run that went wrong is the most useful thing to mark unhelpful,
+        // and the store records errored runs too. `cancelled` is excluded —
+        // the user stopping work is not a verdict on it, and teardown writes
+        // no entry for those.
+        runFeedback &&
+        footerSpan != null &&
+        row.turnIndex === latestTurnIndex &&
+        !footerSpan.active &&
+        (footerSpan.status === 'done' || footerSpan.status === 'error')
+          ? runFeedback
+          : undefined
+      }
       footerStartedAt={footerSpan?.startedAt ?? null}
       footerEndedAt={footerSpan?.endedAt ?? null}
       footerActive={footerSpan?.active ?? false}

@@ -64,6 +64,9 @@ import {
   proactiveCompactThresholdTokens
 } from '../../shared/domain/contextBudget'
 import { executeStepToolCalls } from './executeStepTools'
+import { createVerificationTracker, evaluateVerificationGate } from './feedback/verification'
+import type { VerificationGateVerdict } from './feedback/verification'
+import { recordRunFeedbackBestEffort } from './feedback/runFeedbackStore'
 import { GenerationRepetitionMonitor } from './generationRepetition'
 import { mergeOpenAiCompatToolArgDelta } from './toolArgWire'
 import { mergeStreamedToolName } from '../../shared/utils/toolName'
@@ -188,7 +191,7 @@ import {
 } from './mcp'
 import { resolveEffectiveMcpServers, resolveMcpServersForSessionMap, mcpSessionMapFingerprint } from '../marketplace/resolve'
 import { buildSkillsSection, loadEnabledSkills, loadPluginRules } from './skills'
-import { beginWriteCheckpoint, finalizeWriteCheckpoint } from './checkpoints'
+import { beginWriteCheckpoint, finalizeWriteCheckpoint, getWriteCheckpoint } from './checkpoints'
 import { isMcpToolPermitted } from '../../shared/utils/mcpToolPolicy'
 import { mcpAuthAllowedForWorkspace } from '../../shared/mcpApps'
 import {
@@ -929,6 +932,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
   let abortOnStorageLost: (() => void) | null = null
   let checkpointFlushed = false
   let runExitedNormally = false
+  /** Mirrors the in-try `isInlineInstance` so teardown can read it too. */
+  let runIsInlineInstance = false
   let messages: ChatMessage[] = []
   let costTotals: StepUsageTotals = emptyStepUsageTotals()
   let compactionCountThisRun = 0
@@ -936,6 +941,27 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
   let costLogModel = settings.model
   /** Context window in effect at the latest step — for the closeout receipt. */
   let costLogContextWindow: number | undefined
+  /**
+   * Invoke-scoped mutation/check tracker feeding the turn-end verification
+   * verdict. Declared before the try so teardown still gets an accurate
+   * reading on runs that were cancelled or errored before the turn-end branch.
+   *
+   * Deliberately not seeded from history: `mutationPaths` is re-seeded from
+   * earlier invokes on resume, and the verdict must only speak about work
+   * this turn actually did.
+   */
+  const verification = createVerificationTracker()
+  /**
+   * What the armed gate would have done this invoke, recorded for the receipt.
+   *
+   * Sticky: set at the turn-end branch, which is the only place an armed gate
+   * could fire, and never cleared by a later verified turn — the measurement
+   * being taken is "would arming this have cost a turn", and a nudge at turn 1
+   * costs one even if turn 2 then checks. Runs that never reach that branch
+   * (cancelled, errored, mid-stream failures) keep the default: the armed gate
+   * would not have fired on them either.
+   */
+  let verificationVerdict: VerificationGateVerdict = { wouldFire: false }
   /** Agent step counter — declared early so interim receipt can close over it. */
   let step = 0
   /** Last step that flushed an interim receipt.json (start writes at step 0). */
@@ -1146,6 +1172,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         : {})
     })
     const isInlineInstance = persistedForTools?.inlineInstance === true
+    runIsInlineInstance = isInlineInstance
     if (isInlineInstance && persistedForTools?.worktreePath) {
       const wt = persistedForTools.worktreePath
       if (!isSafeInstanceWorktreePath(workspace, wt) || !existsSync(wt)) {
@@ -3133,6 +3160,26 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           }
         }
 
+        // Verification gate — OBSERVE ONLY. The receipt has always computed
+        // "was the work checked after the last mutation" at teardown, too late
+        // for the turn to act on it. This is the same judgment taken while the
+        // turn can still be steered; it records the verdict and changes
+        // nothing, so the real fire rate is known before the gate is armed.
+        if (!incomplete && agentMode === 'agent' && !isInlineInstance) {
+          const verdict = evaluateVerificationGate(verification.state())
+          if (verdict.wouldFire) {
+            verificationVerdict = verdict
+            logger.info('Verification gate would fire', {
+              scope: 'agent',
+              code: 'VERIFY_GATE',
+              correlationId: runId,
+              step,
+              reason: verdict.reason,
+              paths: verdict.paths?.slice(0, 5)
+            })
+          }
+        }
+
         // Queued follow-ups at turn end auto-apply and continue the run.
         if (hasPendingFollowUps(runId)) {
           yield* applyDrainedFollowUps(runId, runDir, messages, 'next')
@@ -3359,6 +3406,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         mutationPaths,
         recentReadPaths,
         readStampStep: step,
+        verification,
         appendMessage: async (msg: ChatMessage) => {
           await appendMessage(runDir!, msg)
           // Surface persist failures before the next tool mutates the workspace.
@@ -3480,6 +3528,13 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           return
         }
         throw err
+      }
+      // Reconcile against the authoritative mutation signal — catches terminal
+      // writes, MCP writers and watched out-of-band edits that never pass
+      // through an edit-family tool call.
+      {
+        const cp = getWriteCheckpoint(runDir)
+        verification.noteCheckpointFileCount(cp?.writtenFileCount, cp?.id)
       }
       for (const ev of toolOutcome.events) {
         if (ev.type === 'tool_result') {
@@ -3625,7 +3680,13 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           billedCost: costTotals.billedCost,
           estimatedCost:
             costTotals.stepsWithEstimate > 0 ? costTotals.estimatedCost : undefined,
-          contextWindow: costLogContextWindow
+          contextWindow: costLogContextWindow,
+          // The verdict captured at the turn-end branch, NOT a fresh read of
+          // the tracker: only that branch applies the mode / inline-instance /
+          // incomplete guards an armed gate obeys. Recomputing here would
+          // report `wouldFire` for plan-mode and cancelled runs the gate can
+          // never fire on, inflating the rate this phase exists to measure.
+          verificationGate: verificationVerdict
         })
         // Final ledger record — bills the tail delta accumulated since the last
         // step write so the day buckets end complete after teardown.
@@ -3636,6 +3697,14 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           runId,
           loadEvents: () => finalEvents,
           receipt
+        })
+        // Durable per-workspace memory of how runs went. Folded from the
+        // in-memory final receipt, never a re-read: `receipt.json` is
+        // last-writer-wins and the reconcile/rewind paths overwrite it later.
+        recordRunFeedbackBestEffort({
+          workspacePath: workspace,
+          receipt,
+          inlineInstance: runIsInlineInstance
         })
         if (costTotals.steps > 0) {
           const avgInput =

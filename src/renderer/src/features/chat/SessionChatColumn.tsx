@@ -19,6 +19,7 @@ import { MessageList } from './components/MessageList'
 import { AgentInstancePane } from './components/AgentInstancePane'
 import { ChatTranscriptStage } from './components/ChatTranscriptStage'
 import { useRunGoal } from './hooks/useRunGoal'
+import { useRunFeedback } from './hooks/useRunFeedback'
 import { useInlineInstanceUi } from './hooks/useInlineInstanceUi'
 import {
   buildComposerSendProps,
@@ -318,6 +319,7 @@ export function SessionChatColumn({
       />
     ) : null
 
+  const runFeedback = useRunFeedback(workspacePath, activeRunId, !running)
   const composerProps = buildComposerSendProps({
     provider,
     model,
@@ -424,6 +426,7 @@ export function SessionChatColumn({
               transcript={
                 <MessageList
                   key={`transcript:${surfaceKey}`}
+                  runFeedback={runFeedback}
                   items={items}
                   itemsStore={itemsStore}
                   virtualizeLiveEarly

@@ -371,7 +371,15 @@ export async function collectHomeActivity(
       const receiptInWindow = windowKeys.has(receiptDate)
       if (receiptInWindow) {
         outcomes[receipt.status] += 1
-        if (receipt.verification?.verifiedAfterLastMutation === false) {
+        // Prefer the gate's verdict: it is the guarded one, so it excludes
+        // plan-mode and cancelled runs, and — unlike the raw receipt field —
+        // a read-only turn whose check merely failed, which mutated nothing
+        // and so has nothing to verify. Older receipts predate the field and
+        // keep the legacy reading rather than being back-inferred.
+        const unverified = receipt.verificationGate
+          ? receipt.verificationGate.wouldFire
+          : receipt.verification?.verifiedAfterLastMutation === false
+        if (unverified) {
           unverifiedRuns += 1
         }
         if (receipt.status === 'error') {

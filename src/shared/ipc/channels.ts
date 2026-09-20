@@ -67,6 +67,10 @@ export const IPC = {
   homeActivity: 'runs:activity',
   runsSetGoalStatus: 'runs:setGoalStatus',
   runsSetLoop: 'runs:setLoop',
+  // Per-run user verdict. Namespaced away from `feedback:compose`, which is
+  // the unrelated app-level bug report.
+  runFeedbackGet: 'runs:feedback:get',
+  runFeedbackSet: 'runs:feedback:set',
   harnessReview: 'harness:review',
   harnessPreviewApply: 'harness:previewApply',
   harnessApply: 'harness:apply',

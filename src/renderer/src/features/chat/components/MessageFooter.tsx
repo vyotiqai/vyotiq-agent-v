@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import type { RunFeedbackRating } from '@shared/ipc'
 import { Icon } from '@renderer/lib/icons'
 import { Tooltip, cn } from '@renderer/lib/ui'
 import { copyText } from '@renderer/lib/markdown/copyText'
@@ -18,7 +19,8 @@ export function MessageFooter({
   usage = null,
   omitDuration = false,
   omitReceipt = false,
-  copyHidden = false
+  copyHidden = false,
+  runFeedback
 }: {
   content: string
   at?: string
@@ -33,6 +35,14 @@ export function MessageFooter({
   omitReceipt?: boolean
   /** Hide copy until the closing answer finishes streaming. */
   copyHidden?: boolean
+  /**
+   * Per-run verdict. Supplied only for the last answer of a finished run, so
+   * one run gets one rating control rather than one per turn.
+   */
+  runFeedback?: {
+    value: RunFeedbackRating | null
+    onRate: (rating: RunFeedbackRating | null) => void
+  }
 }) {
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
@@ -91,7 +101,41 @@ export function MessageFooter({
     )
   ) : null
 
-  if (!caption && copyHidden) return null
+  if (!caption && copyHidden && !runFeedback) return null
+
+  const rateButton = (rating: RunFeedbackRating): ReactNode => {
+    if (!runFeedback) return null
+    const active = runFeedback.value === rating
+    const label =
+      rating === 'up'
+        ? active
+          ? 'Marked helpful'
+          : 'Mark helpful'
+        : active
+          ? 'Marked unhelpful'
+          : 'Mark unhelpful'
+    return (
+      <Tooltip content={label} describeChild={false}>
+        <button
+          type="button"
+          className={cn(
+            'inline-grid size-6 shrink-0 place-items-center rounded-sm vy-transition',
+            'opacity-0 hover:bg-surface hover:text-fg focus-visible:opacity-100',
+            'group-hover/message:opacity-100 [@media(hover:none)]:opacity-100',
+            active && 'opacity-100',
+            active && (rating === 'up' ? 'text-success' : 'text-danger')
+          )}
+          // Clicking the active verdict clears it — the rating is a toggle,
+          // and a mis-click must be undoable without a second control.
+          onClick={() => runFeedback.onRate(active ? null : rating)}
+          aria-label={label}
+          aria-pressed={active}
+        >
+          <Icon name={rating === 'up' ? 'thumbsUp' : 'thumbsDown'} size={14} />
+        </button>
+      </Tooltip>
+    )
+  }
 
   return (
     <div className="mt-1.5 flex min-w-0 items-center gap-1 text-2xs text-muted">
@@ -114,6 +158,8 @@ export function MessageFooter({
           </button>
         </Tooltip>
       )}
+      {rateButton('up')}
+      {rateButton('down')}
     </div>
   )
 }

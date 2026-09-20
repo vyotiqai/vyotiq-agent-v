@@ -1283,6 +1283,25 @@ export const RunReceiptSchema = z.object({
       verifiedAfterLastMutation: z.boolean()
     })
     .optional(),
+  /**
+   * Turn-end verification gate verdict. Observe-only for now: recorded so the
+   * real fire rate is known before the gate is armed. Unlike `verification`
+   * above, this is judged live from what THIS invoke did, so a resumed run
+   * never inherits an earlier turn's mutations.
+   *
+   * Additive and optional, so it carries no version bump — older receipts
+   * read as `undefined`, which is the truth: the gate never ran for them.
+   * Absent on the reconcile (state.ts) and rewind paths, which rebuild the
+   * receipt with no live tracker.
+   */
+  verificationGate: z
+    .object({
+      wouldFire: z.boolean(),
+      reason: z.enum(['never_checked', 'check_failed']).optional(),
+      /** Paths this invoke mutated, capped by the tracker. */
+      paths: z.array(z.string()).optional()
+    })
+    .optional(),
   contractExcerpt: z.string()
 })
 export type RunReceipt = z.infer<typeof RunReceiptSchema>

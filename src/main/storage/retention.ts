@@ -132,6 +132,11 @@ async function isDerivedIndexOnlyDir(id: string): Promise<boolean> {
       if (entry.isDirectory()) sawIndex = true
       continue
     }
+    // `runFeedback.json` is derived too — it is rebuilt from receipts and
+    // holds nothing the user authored except ratings, which die with the
+    // workspace anyway. Treating it as real state would strand an otherwise
+    // index-only orphan dir behind the full grace period.
+    if (name === 'runfeedback.json' && entry.isFile()) continue
     return false
   }
   return sawIndex

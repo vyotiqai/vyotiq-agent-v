@@ -77,6 +77,7 @@ beforeEach(() => {
       onPtyData: vi.fn().mockReturnValue(() => undefined),
       onPtyExit: vi.fn().mockReturnValue(() => undefined),
       readRunArtifact: vi.fn().mockResolvedValue({ ok: false, error: 'none' }),
+      runFeedbackGet: vi.fn().mockResolvedValue({ ok: true, data: { entry: null } }),
       browserGetState: vi.fn().mockResolvedValue({
         ok: true,
         data: { open: false, url: '', title: '' }

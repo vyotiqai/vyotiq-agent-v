@@ -28,6 +28,9 @@ import type {
   RunStatsResult,
   HomeActivityResult,
   HarnessReviewResult,
+  RunFeedbackGetResult,
+  RunFeedbackSetResult,
+  RunFeedbackRating,
   HarnessPreviewApplyResult,
   HarnessApplyResult,
   GitCommitResult,
@@ -269,6 +272,16 @@ export interface VyotiqApi {
     workspacePath: string
     limit?: number
   }) => Promise<IpcResult<HarnessReviewResult>>
+  runFeedbackGet: (payload: {
+    workspacePath: string
+    runId: string
+  }) => Promise<IpcResult<RunFeedbackGetResult>>
+  runFeedbackSet: (payload: {
+    workspacePath: string
+    runId: string
+    rating: RunFeedbackRating | null
+    note?: string
+  }) => Promise<IpcResult<RunFeedbackSetResult>>
   harnessPreviewApply: (payload: {
     workspacePath: string
     proposalPath?: string

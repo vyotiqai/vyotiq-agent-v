@@ -201,6 +201,13 @@ function ReceiptSummary({
   if (receipt.incomplete) {
     contextChips.push({ label: 'incomplete', value: receipt.incomplete.reason })
   }
+  if (receipt.verificationGate?.wouldFire) {
+    // Files changed with no passing check after them. Reported, not enforced.
+    contextChips.push({
+      label: 'unchecked',
+      value: receipt.verificationGate.reason === 'check_failed' ? 'check failed' : 'no check'
+    })
+  }
 
   return (
     <div className="space-y-4 text-sm" data-receipt-summary>
