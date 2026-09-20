@@ -2,19 +2,22 @@
  * Generate marketplace icons into `resources/marketplace/icons/` and point the
  * matching catalog entries at them. Three cases, all from real upstream art:
  *
- * - BRANDS : Simple Icons (CC0-1.0). A 64px tile filled with the brand's own
- *            hex, official mark centred on top. Glyph colour is whichever of
- *            white/near-black has the higher WCAG contrast against that hex,
- *            so light marks (Hugging Face, Intercom) stay legible with no
- *            per-brand special casing.
- * - MARKS  : official brand marks Simple Icons does not carry, taken from Font
- *            Awesome's free brand set (CC-BY-4.0). Rendered as a bare glyph
- *            because no verified brand hex ships with them — inventing a tile
- *            colour would be worse than leaving it neutral.
+ * Every icon is drawn the same way: a bare black glyph on no background. The
+ * identity is black and white only, so a brand's own hex is not ours to paint
+ * with — and once the tiles go, the three sources below stop being three
+ * visual families and become one grid.
+ *
+ * Black rather than `currentColor`: the app hands these to PackageIcon as
+ * `data:` URLs on an <img>, and an <img>-loaded SVG is its own document that
+ * cannot inherit a colour from the page. Both consumers invert instead —
+ * `dark:invert` in the app, `filter: var(--vy-invert)` on the site — which
+ * follows each one's real theme attribute rather than the OS setting.
+ *
+ * - BRANDS : Simple Icons (CC0-1.0), the official mark, centred.
+ * - MARKS  : official brand marks Simple Icons does not carry, from Font
+ *            Awesome's free brand set (CC-BY-4.0).
  * - GLYPHS : first-party Agent V skills and plugins, which are not brands.
- *            Phosphor (MIT) regular-weight glyphs, drawn bare so PackageIcon's
- *            themed `bg-surface` shows through exactly like the older
- *            hand-drawn art beside them.
+ *            Phosphor (MIT) regular-weight glyphs.
  *
  * Trademarks remain the property of their owners; only the path data is openly
  * licensed. Run via `pnpm sync:marketplace-icons`.
@@ -104,49 +107,32 @@ export const GLYPHS = {
   'dependency-upgrade': 'arrow-circle-up',
   'release-notes': 'rocket-launch',
   'repo-onboarding': 'compass',
-  'flake-hunter': 'bug-beetle'
+  'flake-hunter': 'bug-beetle',
+  'analyze-api': 'list-magnifying-glass'
 }
 
-const GLYPH_LIGHT = '#FFFFFF'
-const GLYPH_DARK = '#0B0B0C'
-/** Matches the lighter tone in the existing hand-drawn Agent V art. */
-const GLYPH_NEUTRAL = '#A3A3A3'
+/** The only colour in the kit. Consumers invert it for their dark theme. */
+const GLYPH_INK = '#000000'
 const TILE = 64
-const RADIUS = 14
-/** Mark size inside a brand tile; leaves an even 15px of padding. */
-const BRAND_BOX = 34
-/** Bare glyphs sit on PackageIcon's own tile, so they run a little wider. */
-const BARE_BOX = 40
+/**
+ * Two boxes, because the sources are drawn to different conventions and a
+ * single number would make one family look smaller than the other.
+ *
+ * Simple Icons and Font Awesome marks fill their viewBox edge to edge, so 40
+ * of 64 is 40 of real ink. Phosphor draws inside a 256 box with roughly an
+ * eighth of it as built-in padding, so 46 lands its ink at about 40 too.
+ *
+ * Both are wider than the old tile-bound 34: with no tile to sit inside, the
+ * glyph can use the box, which matters at the 20px both consumers render.
+ */
+const BRAND_BOX = 40
+const GLYPH_BOX = 46
 
 export function iconFor(slug) {
   const key = `si${slug.charAt(0).toUpperCase()}${slug.slice(1)}`
   const icon = simpleIcons[key]
   if (!icon) throw new Error(`simple-icons has no export ${key} (slug "${slug}")`)
   return icon
-}
-
-/** WCAG 2.1 relative luminance of an #RRGGBB colour. */
-function relativeLuminance(hex) {
-  const channels = [0, 2, 4].map((i) => {
-    const c = parseInt(hex.slice(i, i + 2), 16) / 255
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
-  })
-  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
-}
-
-function contrastRatio(aHex, bHex) {
-  const a = relativeLuminance(aHex)
-  const b = relativeLuminance(bHex)
-  const [hi, lo] = a > b ? [a, b] : [b, a]
-  return (hi + 0.05) / (lo + 0.05)
-}
-
-/** Pick whichever glyph colour reads better on the brand tile. */
-export function glyphColorFor(brandHex) {
-  const bare = brandHex.replace('#', '')
-  return contrastRatio(bare, GLYPH_LIGHT.slice(1)) >= contrastRatio(bare, GLYPH_DARK.slice(1))
-    ? GLYPH_LIGHT
-    : GLYPH_DARK
 }
 
 /** Centre a `src`-sized path inside `box` on the 64px canvas, keeping aspect. */
@@ -167,29 +153,16 @@ ${body}
 `
 }
 
-export function renderTile(icon) {
-  const brand = `#${icon.hex}`
-  const glyph = glyphColorFor(brand)
-  const { scale, x, y } = placement(24, 24, BRAND_BOX)
-  // The hairline ring keeps near-black tiles (GitHub, Notion, Vercel) from
-  // dissolving into the dark app background.
-  return svgDoc(
-    icon.title,
-    `  <rect width="${TILE}" height="${TILE}" rx="${RADIUS}" fill="${brand}"/>
-  <rect x=".5" y=".5" width="${TILE - 1}" height="${TILE - 1}" rx="${RADIUS - 0.5}" stroke="#FFFFFF" stroke-opacity=".14"/>
-  <g transform="translate(${x} ${y}) scale(${scale})">
-    <path d="${icon.path}" fill="${glyph}"/>
-  </g>`
-  )
-}
-
-/** A bare, themable glyph: no baked background, single neutral fill. */
-export function renderBare(title, pathData, srcW, srcH) {
-  const { scale, x, y } = placement(srcW, srcH, BARE_BOX)
+/**
+ * The one renderer. No tile, no background, no per-source colour: a single
+ * black path, centred, that either consumer inverts for its dark theme.
+ */
+export function renderGlyph(title, pathData, srcW, srcH, box) {
+  const { scale, x, y } = placement(srcW, srcH, box)
   return svgDoc(
     title,
     `  <g transform="translate(${x} ${y}) scale(${scale})">
-    <path d="${pathData}" fill="${GLYPH_NEUTRAL}"/>
+    <path d="${pathData}" fill="${GLYPH_INK}"/>
   </g>`
   )
 }
@@ -212,13 +185,16 @@ export async function phosphorPath(name) {
 /** Build every icon this script owns, keyed by catalog id. */
 export async function buildIcons() {
   const out = new Map()
-  for (const [id, slug] of Object.entries(BRANDS)) out.set(id, renderTile(iconFor(slug)))
+  for (const [id, slug] of Object.entries(BRANDS)) {
+    const icon = iconFor(slug)
+    out.set(id, renderGlyph(icon.title, icon.path, 24, 24, BRAND_BOX))
+  }
   for (const [id, exportName] of Object.entries(MARKS)) {
     const mark = faMark(exportName)
-    out.set(id, renderBare(mark.title, mark.path, mark.width, mark.height))
+    out.set(id, renderGlyph(mark.title, mark.path, mark.width, mark.height, BRAND_BOX))
   }
   for (const [id, name] of Object.entries(GLYPHS)) {
-    out.set(id, renderBare(name, await phosphorPath(name), 256, 256))
+    out.set(id, renderGlyph(name, await phosphorPath(name), 256, 256, GLYPH_BOX))
   }
   return out
 }

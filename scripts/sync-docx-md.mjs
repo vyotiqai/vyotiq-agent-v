@@ -13,7 +13,7 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { docxParagraphs } from './sync-harness.mjs'
+import { docxBlocks } from './sync-harness.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
@@ -102,21 +102,44 @@ function expandFlattenedSkillYaml(line) {
   return lines.join('\n')
 }
 
-function skillDocxToMarkdown(paragraphs) {
+/**
+ * Render a Word table back as a GitHub table. The conversion used to go through
+ * `docxParagraphs`, which emits one paragraph per cell, so every table a skill
+ * shipped arrived as a stack of stray lines with the columns gone.
+ */
+function renderTable(rows) {
+  if (!rows.length) return ''
+  const width = Math.max(...rows.map((row) => row.length))
+  const cells = (row) =>
+    Array.from({ length: width }, (_, i) => String(row[i] ?? '').replace(/[|]/g, '\\|').trim())
+  const [header, ...rest] = rows
+  return [
+    `| ${cells(header).join(' | ')} |`,
+    `| ${Array.from({ length: width }, () => '---').join(' | ')} |`,
+    ...rest.map((row) => `| ${cells(row).join(' | ')} |`)
+  ].join('\n')
+}
+
+function skillDocxToMarkdown(blocks) {
   const body = []
   let yaml = null
-  for (const paragraph of paragraphs) {
-    const text = paragraph.text?.trim() ?? ''
+  for (const block of blocks) {
+    if (block.type === 'table') {
+      const table = renderTable(block.rows)
+      if (table) body.push(table)
+      continue
+    }
+    const text = block.text?.trim() ?? ''
     if (!yaml && looksLikeFlattenedSkillYaml(text)) {
       yaml = expandFlattenedSkillYaml(text)
       continue
     }
-    if (paragraph.border && !text) {
+    if (block.border && !text) {
       body.push('---')
       continue
     }
     if (!text) continue
-    const level = headingLevel(paragraph.style)
+    const level = headingLevel(block.style)
     if (level > 0 && !looksLikeFlattenedSkillYaml(text)) {
       body.push(`${'#'.repeat(Math.min(level, 6))} ${text}`)
       continue
@@ -129,12 +152,12 @@ function skillDocxToMarkdown(paragraphs) {
 }
 
 function docxToText(docxPath) {
-  const buf = readFileSync(docxPath)
+  const blocks = docxBlocks(readFileSync(docxPath))
   if (path.basename(docxPath).toLowerCase() === 'skill.md.docx') {
-    return skillDocxToMarkdown(docxParagraphs(buf))
+    return skillDocxToMarkdown(blocks)
   }
-  return `${docxParagraphs(buf)
-    .map((p) => p.text)
+  return `${blocks
+    .map((block) => (block.type === 'table' ? renderTable(block.rows) : block.text))
     .filter(Boolean)
     .join('\n\n')}\n`
 }
@@ -165,9 +188,15 @@ function main() {
   console.log(`[sync-docx-md] complete (${written} file(s) updated)`)
 }
 
-try {
-  main()
-} catch (err) {
-  console.error('[sync-docx-md] failed:', err)
-  process.exit(1)
+export { renderTable, skillDocxToMarkdown }
+
+// Importing this module must not rewrite the tree, so the sync only runs when
+// the file is the entry point (tests/main/unit/docxSkillTables.test.ts).
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  try {
+    main()
+  } catch (err) {
+    console.error('[sync-docx-md] failed:', err)
+    process.exit(1)
+  }
 }

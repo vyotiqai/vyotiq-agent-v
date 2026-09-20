@@ -230,7 +230,9 @@ function main() {
   if (errors.length > 0) {
     throw new Error(`invalid canonical harness:\n- ${errors.join('\n- ')}`)
   }
-  console.log('[sync-harness] canonical resources/harness/default.md is valid')
+  if (!process.argv.includes('--quiet')) {
+    console.log('[sync-harness] canonical resources/harness/default.md is valid')
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
