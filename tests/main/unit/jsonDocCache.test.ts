@@ -35,6 +35,16 @@ describe('jsonDocCache', () => {
     await readJsonDocCached(path)
 
     writeFileSync(path, '"bbb"', 'utf8')
+    // Windows advances file timestamps in ~15ms steps, so two writes this
+    // close together can share both mtime and ctime; with the size unchanged
+    // the whole validity triple then matches and the cache correctly serves
+    // its entry. That is a limit of any stat-keyed cache, not a defect in this
+    // one, and production never reaches it — these files are written by
+    // atomicWriteJson, whose rename puts a different inode with its own ctime
+    // in place. Pin a distinct mtime so this asserts the cache's detection
+    // logic rather than the host clock's granularity.
+    const rewritten = new Date(Date.now() + 60_000)
+    utimesSync(path, rewritten, rewritten)
     const after = await readJsonDocCached(path)
 
     expect(after).toEqual({ ok: true, doc: 'bbb', mtimeMs: expect.any(Number) })
