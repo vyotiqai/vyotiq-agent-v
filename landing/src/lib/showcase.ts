@@ -789,6 +789,9 @@ export const APPROVED_PACKAGES: Record<string, string> = {
   'release-notes': 'Release notes',
   'repo-onboarding': 'Repo onboarding',
   'flake-hunter': 'Flake hunter',
+  docs: 'Docs',
+  refactor: 'Refactor',
+  'analyze-api': 'Analyze API',
   // plugin rule sets
   devtools: 'Devtools',
   'electron-app': 'Electron app',
