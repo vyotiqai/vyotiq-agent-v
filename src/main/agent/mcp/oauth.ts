@@ -1,5 +1,7 @@
 import { createServer, type Server } from 'http'
+import { randomBytes, timingSafeEqual } from 'crypto'
 import { shell } from 'electron'
+import { VYOTIQ_MARK_PATHS, VYOTIQ_MARK_VIEW_BOX } from '../../../shared/brand/vyotiqMark'
 import type {
   OAuthClientProvider,
   OAuthDiscoveryState
@@ -51,12 +53,16 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;')
 }
 
+/*
+ * Drawn inline rather than linked: this page is served from a throwaway
+ * localhost origin with no asset route, and the mark has to follow
+ * currentColor so it works on either colour scheme. The geometry is generated
+ * — this file used to carry its own snapshot of it, at a hexagon radius that
+ * matched neither the kit nor the in-app component.
+ */
 const MARK_SVG =
-  '<svg viewBox="0 0 1024 1024" width="40" height="40" aria-hidden="true">' +
-  '<path fill="currentColor" d="M 797.6256 512.0000 L 369.1872 759.3590 L 369.1872 264.6410 Z"/>' +
-  '<path fill="currentColor" d="M 837.6256 535.0940 L 837.6256 700.0000 L 512.0000 888.0000 L 369.1872 805.5470 Z"/>' +
-  '<path fill="currentColor" d="M 329.1872 782.4530 L 186.3744 700.0000 L 186.3744 324.0000 L 329.1872 241.5470 Z"/>' +
-  '<path fill="currentColor" d="M 369.1872 218.4530 L 512.0000 136.0000 L 837.6256 324.0000 L 837.6256 488.9060 Z"/>' +
+  `<svg viewBox="${VYOTIQ_MARK_VIEW_BOX}" width="40" height="40" aria-hidden="true">` +
+  VYOTIQ_MARK_PATHS.map((d) => `<path fill="currentColor" d="${d}"/>`).join('') +
   '</svg>'
 
 function htmlPage(title: string, body: string): string {
@@ -138,6 +144,12 @@ export async function beginMcpOAuthCallback(
     settleCode = resolve
     settleErr = reject
   })
+  // Several paths cancel a flow before anyone awaits `waitForCode()` — a
+  // connect that fails first, a non-interactive retry, a superseded attempt.
+  // An unobserved rejection in the main process is noisy at best and fatal
+  // under strict unhandled-rejection modes, so mark it handled up front; the
+  // real caller still sees the rejection through `waitForCode()`.
+  void codePromise.catch(() => undefined)
 
   const timer = setTimeout(() => {
     cancelMcpOAuthCallback(serverId, new Error('OAuth callback timed out'))
@@ -180,6 +192,25 @@ export async function beginMcpOAuthCallback(
         cancelMcpOAuthCallback(serverId, new Error('Missing authorization code'))
         return
       }
+      // The redirect lands on a fixed loopback port that any local process or
+      // web page can reach, so a bare `code` proves nothing: without this, an
+      // attacker could drop their own authorization code here and bind the
+      // user's client to the attacker's account. PKCE does not cover that.
+      if (!consumeMcpOAuthState(serverId, url.searchParams.get('state'))) {
+        res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(
+          htmlPage(
+            'Authorization failed',
+            'This response did not match the sign-in Vyotiq started. Try Sign in again.'
+          )
+        )
+        logger.warn('Rejected MCP OAuth callback with a bad state parameter', {
+          scope: 'mcp',
+          serverId
+        })
+        cancelMcpOAuthCallback(serverId, new Error('OAuth state mismatch'))
+        return
+      }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       res.end(htmlPage('Connected', 'You can close this window and return to Vyotiq.'))
       clearTimeout(timer)
@@ -215,6 +246,32 @@ export function cancelMcpOAuthCallback(serverId: string, err?: Error): void {
     // ignore
   }
   if (err) pending.reject(err)
+}
+
+/**
+ * Compare without leaking how much of the value matched.
+ * Different lengths are a mismatch, which `timingSafeEqual` would throw on.
+ */
+function statesMatch(expected: string, received: string): boolean {
+  const a = Buffer.from(expected, 'utf8')
+  const b = Buffer.from(received, 'utf8')
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
+/**
+ * Check the `state` on a redirect against the one we issued, and burn it so the
+ * same response cannot be replayed. Returns false when nothing was issued —
+ * every flow we start stores one first, so an absent value means this callback
+ * did not come from us.
+ */
+export function consumeMcpOAuthState(serverId: string, received: string | null): boolean {
+  const stored = getMcpOAuthState(serverId)
+  const expected = stored?.oauthState
+  if (!expected || !received) return false
+  const next = { ...stored }
+  delete next.oauthState
+  setMcpOAuthState(serverId, next)
+  return statesMatch(expected, received)
 }
 
 export type VyotiqMcpOAuthProvider = OAuthClientProvider & {
@@ -317,6 +374,16 @@ export function createMcpOAuthProvider(
         throw new Error('MCP OAuth authorization URL must be https')
       }
       await shell.openExternal(authorizationUrl.toString())
+    },
+    /**
+     * The SDK only sends `state` when the provider supplies one. Storing it
+     * here is what lets the loopback callback tell our own redirect apart from
+     * a code someone else pushed at the fixed port.
+     */
+    state(): string {
+      const value = randomBytes(32).toString('base64url')
+      patchMcpOAuthState(serverId, { oauthState: value })
+      return value
     },
     saveCodeVerifier(codeVerifier: string): void {
       patchMcpOAuthState(serverId, { codeVerifier })
