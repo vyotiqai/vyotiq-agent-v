@@ -33,7 +33,7 @@ describe('useAppearance DOM contract', () => {
     expect(document.documentElement.getAttribute('data-skin')).toBe('bench')
   })
 
-  it('defaults skin to default in pickAppearanceSettings when present on settings object', () => {
+  it('carries the shipped skin through pickAppearanceSettings', () => {
     const appearance = pickAppearanceSettings({
       theme: 'system',
       fontScale: 'default',
@@ -41,7 +41,7 @@ describe('useAppearance DOM contract', () => {
       skinId: DEFAULT_SKIN_ID,
       customCssPath: '/tmp/custom.css'
     })
-    expect(appearance.skinId).toBe('default')
+    expect(appearance.skinId).toBe('native')
     expect(appearance.customCssPath).toBe('/tmp/custom.css')
   })
 })

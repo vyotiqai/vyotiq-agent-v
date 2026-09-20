@@ -13,6 +13,7 @@ import {
   type StorageSettings
 } from '../../shared/ipc'
 import { DEFAULT_THINKING_EFFORT, LEGACY_THINKING_EFFORT } from '../../shared/ipc/schemas/providers'
+import { LEGACY_SKIN_ID } from '../../shared/skins'
 import {
   DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO,
   LEGACY_AUTO_COMPACT_THRESHOLD_RATIO
@@ -484,6 +485,12 @@ function migratePersistedSettingsDefaults(raw: Record<string, unknown>): {
   }
   if (rawVersion < 5 && raw.autoResumeInterruptedRuns === false) {
     next.autoResumeInterruptedRuns = DEFAULT_SETTINGS.autoResumeInterruptedRuns
+  }
+  // Same contract: Native is the shipped skin from v6 on, so only the exact
+  // previous product default ('default') is rewritten. A deliberate Default
+  // picked after the v6 stamp is a user choice and survives.
+  if (rawVersion < 6 && raw.skinId === LEGACY_SKIN_ID) {
+    next.skinId = DEFAULT_SETTINGS.skinId
   }
   return { data: next, persist: true }
 }

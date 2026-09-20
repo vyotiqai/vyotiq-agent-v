@@ -59,7 +59,7 @@ describe('appearance-bootstrap', () => {
   it('sets full default attrs when cache is empty', () => {
     runBootstrap()
     const root = document.documentElement
-    expect(root.getAttribute('data-skin')).toBe('default')
+    expect(root.getAttribute('data-skin')).toBe('native')
     expect(root.getAttribute('data-theme')).toBe('light')
     expect(root.getAttribute('data-font-scale')).toBe('default')
     expect(root.getAttribute('data-density')).toBe('default')
@@ -109,13 +109,13 @@ describe('appearance-bootstrap', () => {
     localStorage.setItem(APPEARANCE_LOCAL_STORAGE_KEY, '{not-json')
     runBootstrap()
     const root = document.documentElement
-    expect(root.getAttribute('data-skin')).toBe('default')
+    expect(root.getAttribute('data-skin')).toBe('native')
     expect(root.getAttribute('data-font-scale')).toBe('default')
     expect(root.getAttribute('data-density')).toBe('default')
     expect(root.getAttribute('data-theme')).toBe('light')
   })
 
-  it('defaults invalid skinId to default', () => {
+  it('defaults invalid skinId to the shipped skin', () => {
     localStorage.setItem(
       APPEARANCE_LOCAL_STORAGE_KEY,
       JSON.stringify({
@@ -126,16 +126,16 @@ describe('appearance-bootstrap', () => {
       })
     )
     runBootstrap()
-    expect(document.documentElement.getAttribute('data-skin')).toBe('default')
+    expect(document.documentElement.getAttribute('data-skin')).toBe('native')
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
   })
 
-  it('sets default skin when localStorage throws', () => {
+  it('sets the shipped skin when localStorage throws', () => {
     const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('denied')
     })
     runBootstrap()
-    expect(document.documentElement.getAttribute('data-skin')).toBe('default')
+    expect(document.documentElement.getAttribute('data-skin')).toBe('native')
     getItem.mockRestore()
   })
 })

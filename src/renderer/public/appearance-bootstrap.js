@@ -34,6 +34,9 @@
         : 'default'
     root.setAttribute('data-density', density)
 
+    // Keep the id list and the fallback in step with SKIN_IDS /
+    // DEFAULT_SKIN_ID in src/shared/skins.ts — this runs before any
+    // bundle loads, so it cannot import them.
     var skin =
       cache &&
       (cache.skinId === 'default' ||
@@ -42,7 +45,7 @@
         cache.skinId === 'native' ||
         cache.skinId === 'gild')
         ? cache.skinId
-        : 'default'
+        : 'native'
     root.setAttribute('data-skin', skin)
   }
 
