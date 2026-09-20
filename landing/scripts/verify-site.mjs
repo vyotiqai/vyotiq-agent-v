@@ -49,6 +49,7 @@ console.log(`[verify-site] ${htmlFiles.length} pages, ${files.length} files in d
 const EXPECTED_ROUTES = [
   '/',
   '/features',
+  '/use-cases',
   '/extensions',
   '/download',
   '/docs',

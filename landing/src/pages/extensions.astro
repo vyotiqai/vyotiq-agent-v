@@ -92,7 +92,7 @@ const AUTH_LABEL: Record<string, string> = {
                   <li class="vy-pkg">
                     {pkg.icon ? (
                       <img
-                        class="vy-pkg-icon"
+                        class:list={['vy-pkg-icon', pkg.iconMono && 'vy-dark-invert']}
                         src={`/brand/extensions/${pkg.icon}`}
                         alt=""
                         width="20"

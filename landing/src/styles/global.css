@@ -17,20 +17,20 @@
   color-scheme: light;
 
   --vy-bg: #ffffff;
-  --vy-card: #f7fafc;
-  --vy-surface: #eef5f9;
-  --vy-surface-2: #dceaf2;
-  --vy-border: #c9dce8;
-  --vy-border-strong: #9dbccc;
-  --vy-muted: #4a5f6d;
-  --vy-secondary: #3a4e5a;
-  --vy-tertiary: #5e7484;
-  --vy-fg: #17232b;
-  --vy-fg-strong: #0b141a;
-  --vy-accent: #00638e;
+  --vy-card: #fafafa;
+  --vy-surface: #f4f4f4;
+  --vy-surface-2: #e8e8e8;
+  --vy-border: #d9d9d9;
+  --vy-border-strong: #b7b7b7;
+  --vy-muted: #5c5c5c;
+  --vy-secondary: #4b4b4b;
+  --vy-tertiary: #717171;
+  --vy-fg: #212121;
+  --vy-fg-strong: #131313;
+  --vy-accent: #000000;
   --vy-accent-fg: #ffffff;
-  --vy-accent-hover: #004a6b;
-  --vy-focus: #00638e;
+  --vy-accent-hover: #3d3d3d;
+  --vy-focus: #000000;
   --vy-success: #15803d;
   --vy-warning: #a16207;
 
@@ -78,20 +78,20 @@
     color-scheme: dark;
 
     --vy-bg: #141414;
-    --vy-card: #1a1e20;
-    --vy-surface: #202528;
-    --vy-surface-2: #293034;
-    --vy-border: #303a40;
-    --vy-border-strong: #46545c;
-    --vy-muted: #9fb3be;
-    --vy-secondary: #bccdd6;
-    --vy-tertiary: #7e939f;
-    --vy-fg: #e8edf0;
-    --vy-fg-strong: #f5f8fa;
-    --vy-accent: #4fb3e8;
+    --vy-card: #1d1d1d;
+    --vy-surface: #242424;
+    --vy-surface-2: #2f2f2f;
+    --vy-border: #393939;
+    --vy-border-strong: #525252;
+    --vy-muted: #b0b0b0;
+    --vy-secondary: #cacaca;
+    --vy-tertiary: #909090;
+    --vy-fg: #ececec;
+    --vy-fg-strong: #f8f8f8;
+    --vy-accent: #ffffff;
     --vy-accent-fg: #0a0a0a;
-    --vy-accent-hover: #8cb9cc;
-    --vy-focus: #8cb9cc;
+    --vy-accent-hover: #c4c4c4;
+    --vy-focus: #ffffff;
     --vy-success: #22c55e;
     --vy-warning: #fbbf24;
 
@@ -105,20 +105,20 @@
   color-scheme: dark;
 
   --vy-bg: #141414;
-  --vy-card: #1a1e20;
-  --vy-surface: #202528;
-  --vy-surface-2: #293034;
-  --vy-border: #303a40;
-  --vy-border-strong: #46545c;
-  --vy-muted: #9fb3be;
-  --vy-secondary: #bccdd6;
-  --vy-tertiary: #7e939f;
-  --vy-fg: #e8edf0;
-  --vy-fg-strong: #f5f8fa;
-  --vy-accent: #4fb3e8;
+  --vy-card: #1d1d1d;
+  --vy-surface: #242424;
+  --vy-surface-2: #2f2f2f;
+  --vy-border: #393939;
+  --vy-border-strong: #525252;
+  --vy-muted: #b0b0b0;
+  --vy-secondary: #cacaca;
+  --vy-tertiary: #909090;
+  --vy-fg: #ececec;
+  --vy-fg-strong: #f8f8f8;
+  --vy-accent: #ffffff;
   --vy-accent-fg: #0a0a0a;
-  --vy-accent-hover: #8cb9cc;
-  --vy-focus: #8cb9cc;
+  --vy-accent-hover: #c4c4c4;
+  --vy-focus: #ffffff;
   --vy-success: #22c55e;
   --vy-warning: #fbbf24;
 
@@ -283,11 +283,6 @@ svg {
   max-width: var(--vy-shell-max);
   margin-inline: auto;
   padding-inline: var(--vy-gutter);
-}
-
-/* The hero and any section built around a large product panel. */
-.vy-shell-wide {
-  --vy-shell-max: 1320px;
 }
 
 .vy-rule {
@@ -651,7 +646,7 @@ svg {
   text-decoration: underline;
   text-underline-offset: 0.2em;
   text-decoration-thickness: 1px;
-  text-decoration-color: color-mix(in srgb, var(--vy-accent) 35%, transparent);
+  text-decoration-color: color-mix(in srgb, var(--vy-accent) 55%, transparent);
 }
 
 .vy-link:hover {
@@ -697,7 +692,7 @@ svg {
   color: var(--vy-accent);
   text-decoration: underline;
   text-underline-offset: 0.2em;
-  text-decoration-color: color-mix(in srgb, var(--vy-accent) 35%, transparent);
+  text-decoration-color: color-mix(in srgb, var(--vy-accent) 55%, transparent);
 }
 
 .vy-doc a:hover {
@@ -871,7 +866,7 @@ svg {
 
 .vy-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(var(--vy-card-min, 16rem), 1fr));
   gap: 1rem;
   margin: 0;
   padding: 0;
@@ -898,6 +893,57 @@ svg {
   margin-top: clamp(1.5rem, 3vw, 2.5rem);
 }
 
+/* Use-case cards carry a bullet list rather than a sentence, so they want a
+   wider track than the claim cards: three up in the shell rather than four. */
+.vy-uses {
+  --vy-card-min: 19rem;
+}
+
+/* A use case is named work, so its title sits a step above a claim title
+   without reaching .vy-h2, which is display-sized. */
+.vy-uses .vy-h3 {
+  font-size: 1.25rem;
+  letter-spacing: -0.016em;
+}
+
+.vy-uses-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vy-uses-list > li {
+  position: relative;
+  padding-left: 1rem;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--vy-muted);
+}
+
+/* A hanging rule rather than a disc: these read as clauses describing one job,
+   not as a checklist of things to tick off. */
+.vy-uses-list > li::before {
+  content: '';
+  position: absolute;
+  top: 0.8em;
+  left: 0;
+  width: 0.5rem;
+  height: 1px;
+  background: var(--vy-border-strong);
+}
+
+/* auto pushes the link to the card's bottom edge, so links line up across
+   cards holding different numbers of bullets. It outranks the margin reset on
+   .vy-card > * only because it is declared later. */
+.vy-use-link {
+  margin-top: auto;
+  padding-top: 0.75rem;
+  font-size: 0.9375rem;
+}
+
+
 /* A diagram takes two tracks, so a two-claim section still fills its row
    instead of leaving a gap where a third card would be. */
 .vy-card-visual {
@@ -910,8 +956,10 @@ svg {
 
 /* Below this the grid has fewer than four tracks, and a spanning diagram
    pushes the last card onto a row of its own with two empty tracks beside it.
-   1200px is where a 1320px shell still fits four 16rem tracks. */
-@media (max-width: 1199px) {
+   Four 16rem tracks and their three 1rem gaps need 1072px, and the shell is the
+   viewport less two 1.5rem gutters, so 1120px is the last width that fits them
+   — above it the diagram and two claims fill the row exactly. */
+@media (max-width: 1119px) {
   .vy-card-visual {
     grid-column: auto;
   }
@@ -1016,23 +1064,4 @@ svg {
     grid-template-columns: minmax(0, 1fr);
     gap: 0.375rem;
   }
-}
-
-/* ------------------------------------------------------- platform marks - */
-
-.vy-platform-marks {
-  display: flex;
-  align-items: center;
-  gap: 1.25rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  color: var(--vy-tertiary);
-}
-
-.vy-platform-mark {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4375rem;
-  font-size: 0.8125rem;
 }

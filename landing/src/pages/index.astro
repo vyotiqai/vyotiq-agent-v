@@ -2,11 +2,10 @@
 import Base from '../layouts/Base.astro'
 import ChangelogStrip from '../components/ChangelogStrip.astro'
 import ClaimSection from '../components/ClaimSection.astro'
+import UseCaseCard from '../components/UseCaseCard.astro'
 import LogoWall from '../components/LogoWall.astro'
-import PlatformMark from '../components/PlatformMark.astro'
 import { app } from '../lib/site'
-import { HOME_SECTIONS } from '../lib/showcase'
-import { HAS_RELEASE, RELEASE_META } from '../lib/download'
+import { FEATURED_USE_CASES, HOME_SECTIONS } from '../lib/showcase'
 
 /**
  * The homepage showcases the approved sections marked for it in showcase.ts —
@@ -14,28 +13,44 @@ import { HAS_RELEASE, RELEASE_META } from '../lib/download'
  * else it carries is baked data rather than prose: the provider and integration
  * marks and the release strip. showcase.ts gates which names that data is
  * allowed to contain.
+ *
+ * The use-case teaser between them is the three entries marked featured in
+ * showcase.ts. The full set lives on /use-cases.
+ *
+ * The hero is the exception: a centred block of hand-written copy and two
+ * links, and nothing else. Platforms, licence and version used to sit beside it
+ * in a spec column; /download states all three, so they are not repeated here.
  */
 ---
 
 <Base>
-  <section class="vy-page-head vy-hero">
-    <div class="vy-shell vy-shell-wide">
-      <p class="vy-eyebrow">Open source · GPL-3.0-or-later</p>
-      <h1 class="vy-display">A coding agent that works on your checkout.</h1>
+  <section class="vy-hero">
+    <div class="vy-shell vy-hero-inner">
+      <p class="vy-eyebrow">Agent V · Free and open source</p>
+      {/* The product's own line: package.json, the README and SITE.title all
+          say "a coding workspace for real repositories", and the h1 now
+          agrees with them. Workspace rather than agent is the accurate word —
+          the window ships an editor, a terminal, a diff viewer and git, and
+          the agent is one occupant of it.
+
+          "open-source" stays out of the headline and lives in the eyebrow: at
+          display size it breaks at its own hyphen, and it overflowed 320px. */}
+      <h1 class="vy-display">A coding workspace for real repositories.</h1>
+      {/* No "and" before the last item: the four beats are the point. Each
+          one is a tool in the catalog — read, edit, terminal, run_tests. The
+          second sentence is claims P1 and P2: a child instance gets its own
+          worktree and branch, so "at once" is isolation, not a race. */}
       <p class="vy-lede">
-        Agent V opens the repository you point it at and works there — editing files, running your
-        terminal, driving git and GitHub, with your own model key.
+        It reads your code, makes the change, runs it, checks its own work. Run several at once,
+        each on its own branch.
       </p>
       <div class="vy-cta-actions">
-        <a class="vy-btn vy-btn-primary" href="/download">Download for free</a>
+        <a class="vy-btn vy-btn-primary" href="/download">Download</a>
         <a class="vy-btn vy-btn-secondary" href={app.repo.source} rel="noopener noreferrer">View source</a>
       </div>
-      <ul class="vy-platform-marks vy-hero-platforms">
-        <li><PlatformMark os="windows" label="Windows" /></li>
-        <li><PlatformMark os="macos" label="macOS" /></li>
-        <li><PlatformMark os="linux" label="Linux" /></li>
-        {HAS_RELEASE && <li class="vy-mono vy-hero-version">v{RELEASE_META.version}</li>}
-      </ul>
+      {/* The headline already says free and open source; this adds the part
+          it does not — that there is nothing to sign up to. */}
+      <p class="vy-hero-note">No account, no usage metering, no service in the middle.</p>
     </div>
   </section>
 
@@ -62,6 +77,25 @@ import { HAS_RELEASE, RELEASE_META } from '../lib/download'
   </section>
 
   {HOME_SECTIONS.map((section) => <ClaimSection section={section} />)}
+
+  <section class="vy-rule vy-section">
+    <div class="vy-shell">
+      <header class="vy-card-head">
+        <p class="vy-eyebrow">Use cases</p>
+        <h2 class="vy-h2">What people point it at</h2>
+        <p class="vy-lede vy-card-lede">
+          Three of the jobs it does today. Each one ships as a skill in the box, installed per
+          workspace and invoked as a slash command.
+        </p>
+      </header>
+
+      <ul class="vy-cards vy-uses">
+        {FEATURED_USE_CASES.map((useCase) => <UseCaseCard useCase={useCase} level={3} />)}
+      </ul>
+
+      <p class="vy-more vy-uses-more"><a href="/use-cases" class="vy-link">All use cases →</a></p>
+    </div>
+  </section>
 
   <section class="vy-rule vy-section">
     <div class="vy-shell vy-section-grid">
@@ -102,30 +136,47 @@ import { HAS_RELEASE, RELEASE_META } from '../lib/download'
 </Base>
 
 <style>
-  .vy-hero .vy-display {
-    max-width: 20ch;
+  /* A centred column: eyebrow, headline, the sentence pair, two links. Each
+     part is capped at its own measure and centred on the shell, so the width of
+     the text is what composes the block — there is no second column to balance
+     against any more. */
+  .vy-hero {
+    padding-block: clamp(3.75rem, 7vw, 6rem) clamp(3.25rem, 5.5vw, 5rem);
+    text-align: center;
   }
 
+  /* The rule that spaces a title under its eyebrow lives on .vy-page-head,
+     which this section deliberately is not, so it is repeated here. */
+  .vy-hero .vy-display {
+    margin-top: 1rem;
+  }
+
+  /* Left at the global measure, which is about the width the two headline
+     lines occupy, so the block squares up. It also happens to be the width the
+     first sentence needs, so `pretty` breaks the lede at its full stop; capping
+     it any tighter splits "checks its / own work" instead. */
   .vy-hero .vy-lede {
-    margin-top: 1.125rem;
+    margin: 1.25rem auto 0;
   }
 
   .vy-hero .vy-cta-actions {
-    margin-top: 1.75rem;
+    justify-content: center;
+    margin-top: 2rem;
   }
 
-  .vy-hero-platforms {
-    margin-top: 1.25rem;
-  }
-
-  .vy-hero-version {
+  .vy-hero-note {
+    margin-top: 1.125rem;
+    font-size: 0.8125rem;
     color: var(--vy-tertiary);
-    font-size: 0.75rem;
   }
 
   .vy-provider-note {
     margin-top: 1.5rem;
     font-size: 0.9375rem;
+  }
+
+  .vy-uses-more {
+    margin-top: 1.5rem;
   }
 
   .vy-cta-canvas {

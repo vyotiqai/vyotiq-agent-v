@@ -91,6 +91,18 @@ export const CLAIMS: Claim[] = [
     title: 'Local by default',
     body: 'Code, chats, run history and memory stay on disk. Keys are held in the OS keychain. Crash reporting is off unless you turn it on. Point it at Ollama and nothing leaves the machine at all.'
   },
+  /* Deliberately describes the boundary and nothing more. The wrapper in
+     src/main/agent/untrustedContent.ts is applied to all five sources named
+     here, and it does neutralise close-tag sequences — but the system prompt
+     does not yet tell the model what the envelope means, so this must not be
+     read as "the agent ignores instructions it finds in a web page". */
+  {
+    id: 'A4',
+    approved: true,
+    section: 'principles',
+    title: 'Fetched text arrives fenced',
+    body: 'Whatever the agent reads from a web page, an MCP server, a skill or a workspace rule file is wrapped in a tagged envelope that records where it came from, and any closing sequence inside it is neutralised so the content cannot break out and pose as an instruction.'
+  },
 
   /* -- /features · modes --------------------------------------------------- */
   {
@@ -189,6 +201,16 @@ export const CLAIMS: Claim[] = [
     section: 'environment',
     title: 'Notebooks, PDFs and documents',
     body: 'Jupyter notebook cell editing, plus text extraction from PDFs and Word documents so they can be part of the context.'
+  },
+  /* The catalogue in src/shared/dictation.ts ships whisper-tiny.en and
+     whisper-small.en — both English-only, which is why this says so. The
+     weights are not in the installer; they are fetched once on first use. */
+  {
+    id: 'E5',
+    approved: true,
+    section: 'environment',
+    title: 'Dictation that never uploads audio',
+    body: 'Talk instead of typing. A Whisper model runs inside the app and transcribes on your own machine, so no recording is sent anywhere. The weights are downloaded once the first time you use it. English only.'
   },
   {
     id: 'I1',
@@ -376,6 +398,234 @@ const SECTION_META: {
   },
   { id: 'extensibility', eyebrow: 'Extensibility', title: 'MCP, skills and rules', pages: ['features'] }
 ]
+
+/* ------------------------------------------------------------- use cases - */
+
+/**
+ * What people use Agent V for, as opposed to what it is built out of.
+ *
+ * Every bullet traces to something already shipped: a bundled skill's own
+ * description or SKILL.md, a tool in the catalog, or an approved claim above.
+ * Nothing here is written ahead of the code.
+ *
+ * Two bullets describe a skill stopping short of an irreversible action — not
+ * posting a review reply, not resolving an incident. Those are instructions in
+ * the skill's own SKILL.md, which is what ships and what the agent follows.
+ * They are deliberately worded as what the skill does, because tool approval
+ * defaults to off and nothing in the runtime would block the action.
+ *
+ * `packages` is not decoration. It names the marketplace entries a use case
+ * leans on, and assertConsistent checks each against APPROVED_PACKAGES — so
+ * dropping Sentry from the catalog fails the build instead of leaving a card
+ * promising an integration nobody can install.
+ */
+export type UseCase = {
+  /** Stable handle. Quoted in review and in build errors; never rendered. */
+  id: string
+  /** false hides it from the site without discarding the copy. */
+  approved: boolean
+  /** Also shown in the homepage teaser. */
+  featured: boolean
+  title: string
+  bullets: string[]
+  /** Marketplace ids this use case relies on; checked against the catalog. */
+  packages: string[]
+  href?: string
+  linkLabel?: string
+  visual?: 'incident' | 'upgrade'
+}
+
+export const USE_CASES: UseCase[] = [
+  {
+    id: 'U1',
+    approved: true,
+    featured: true,
+    title: 'Review a pull request, and see it run',
+    bullets: [
+      'Review a diff for correctness, regressions, security, and the tests it is missing.',
+      'Work through unresolved review threads: make the change each one asks for, and draft the reply.',
+      'Drive the built-in browser to check the change renders — navigate, click, type, snapshot.',
+      'The skill stops short of sending. It shows you the replies and the diff, and leaves posting, resolving and pushing to you.'
+    ],
+    packages: ['review-code', 'pr-review-reply', 'github'],
+    href: '/features#tools',
+    linkLabel: 'Every tool →'
+  },
+  {
+    id: 'U2',
+    approved: true,
+    featured: false,
+    title: 'Upgrade a dependency without a big-bang weekend',
+    bullets: [
+      'One dependency at a time, with the test suite run between each, and the risky ones kept separate.',
+      'Pull version-correct documentation and examples for the library you are moving to.',
+      'Fan the attempts out across child instances, each on its own git worktree and branch.'
+    ],
+    packages: ['dependency-upgrade', 'context7'],
+    visual: 'upgrade'
+  },
+  {
+    id: 'U3',
+    approved: true,
+    featured: true,
+    title: 'Take an incident from alert to pull request',
+    bullets: [
+      'Read the issue, stack trace, release and affected-user count from your connected tracker.',
+      'Reproduce it against the code, and state the blast radius before touching anything.',
+      'Patch the smallest correct layer, and add a regression test that fails without the fix.',
+      'Rerun a suspect test to tell a flake from a real failure, then fix the flake at its source.',
+      'It opens the pull request, and leaves resolving or muting the incident to you.'
+    ],
+    packages: ['incident-triage', 'fix-bug', 'flake-hunter', 'sentry', 'linear'],
+    visual: 'incident'
+  },
+  {
+    id: 'U4',
+    approved: true,
+    featured: true,
+    /* Titled "routine" rather than "recurring", and the fourth bullet says each
+       task runs once. A delegated task carries a single optional scheduledAt
+       instant — there is no cron and no recurrence — so a title promising
+       recurring work would be read as a weekly standup that fires itself. */
+    title: 'Hand the routine work to a teammate',
+    bullets: [
+      'What shipped, what is in flight and what is blocked, assembled from git and your tracker.',
+      'Release notes written for the people who use the product, not scraped from commit subjects.',
+      'Set a goal and it works toward it across turns, pausing for you rather than running forever.',
+      'Queue a task for a named teammate now, or set it to start at a time you choose. Each one runs once.',
+      'Scheduled work runs while Agent V is open. There is no hosted service running it for you.'
+    ],
+    packages: ['standup-digest', 'release-notes', 'goal']
+  },
+  {
+    id: 'U5',
+    approved: true,
+    featured: false,
+    title: 'Land in a codebase you did not write',
+    bullets: [
+      'What it does, how it runs, and where to start reading.',
+      'How a path actually works, traced through its contracts, data flow and tests.',
+      'Ranked search over a local index of the repository, so it finds code before it guesses.',
+      'Ask questions about any public GitHub repository without cloning it.'
+    ],
+    packages: ['repo-onboarding', 'explain-code', 'deepwiki'],
+    href: '/features#environment',
+    linkLabel: 'Your environment →'
+  },
+  {
+    id: 'U6',
+    approved: true,
+    featured: false,
+    title: 'And the rest of what ships with it',
+    bullets: [
+      'Implement a feature in the architecture and conventions the project already has.',
+      'Add focused tests in the framework it already uses.',
+      'Audit accessibility: semantics, keyboard, focus, contrast, names and motion.',
+      'Design or change an HTTP, IPC or SDK contract.',
+      'Write your own skill, or give the agent a persona.'
+    ],
+    packages: [
+      'implement-feature',
+      'write-tests',
+      'accessibility',
+      'api-design',
+      'frontend-design',
+      'create-skill',
+      'persona-builder'
+    ],
+    href: '/extensions',
+    linkLabel: 'Every package →'
+  }
+]
+
+/* --------------------------------------------------- teammate scenarios - */
+
+/**
+ * When a teammate is worth the ceremony, written as the situation you are in
+ * rather than the feature that answers it.
+ *
+ * Source is docs/teammates.md §16, whose header states it describes implemented
+ * behaviour. The doc's own vocabulary is not always safe to lift: it titles one
+ * of these "Recurring ops teammate", but a delegated task carries a single
+ * optional scheduledAt instant and there is no cron, so W3 says outright that
+ * each task runs once.
+ *
+ * `limit` is a field rather than a footnote on the section. Every constraint
+ * here comes from §15 or §10 and belongs to one specific scenario — the closed
+ * app to the scheduled one, the hand-authored file to the per-repository one.
+ * Attaching it to the claim means the qualifier cannot drift away from the
+ * thing it qualifies, or be dropped by a later edit that keeps the promise.
+ */
+export type TeammateScenario = {
+  /** Stable handle. Quoted in review and in build errors; never rendered. */
+  id: string
+  /** false hides it from the site without discarding the copy. */
+  approved: boolean
+  /** The situation, in the reader's terms. */
+  when: string
+  /** What a teammate does about it. */
+  then: string
+  /** The constraint that keeps `then` honest. Rendered, never decorative. */
+  limit?: string
+}
+
+export const TEAMMATE_SCENARIOS: TeammateScenario[] = [
+  {
+    id: 'W1',
+    approved: true,
+    when: 'You keep re-explaining the same conventions',
+    then: 'Give the project its own teammate. It keeps a private memory tree per workspace, so what you established once is still there in the next session.',
+    limit: 'Two teammates in one repository never read each other’s notes, and neither writes into the shared workspace brain.'
+  },
+  {
+    id: 'W2',
+    approved: true,
+    when: 'You want work happening while you are away from the desk',
+    then: 'Assign a task now, or set it to start at a time you choose. When it needs a decision it notifies you rather than hanging silently.',
+    limit: 'Agent V has to still be running. A scheduled task cannot start with the application fully closed — that would need a hosted service, and there is not one.'
+  },
+  {
+    id: 'W3',
+    approved: true,
+    when: 'Friday’s release steps are the same every week',
+    then: 'Queue them up front. One teammate runs one task at a time, in order, and the queue is written to disk before it is acknowledged, so it survives a restart.',
+    limit: 'Each task runs once. There is no repeating schedule — you queue the next set yourself.'
+  },
+  {
+    id: 'W4',
+    approved: true,
+    when: 'A long run died when something restarted',
+    then: 'Switch on auto-resume and a teammate-bound run picks itself back up at launch, with its identity, checkpoints and memory intact.',
+    limit: 'A delegated task cut short by a restart is reported as failed instead, and waits for you to retry it, so a half-finished job never quietly runs twice.'
+  },
+  {
+    id: 'W5',
+    approved: true,
+    when: 'You want to leave a chat running and come back to it',
+    then: 'A chat message behaves like a task: you get a notification when it needs you, you can watch the browser it drives, and Stop always works.'
+  },
+  {
+    id: 'W6',
+    approved: true,
+    when: 'One client repository needs a different tone',
+    then: 'Commit a profile override into that repository, and everyone working in it gets the same house tone.',
+    limit: 'That file is hand-authored today. The edit dialog writes the global profile only.'
+  },
+  {
+    id: 'W7',
+    approved: true,
+    when: 'Not every job deserves your most expensive model',
+    then: 'Pin a strong model to one teammate and a cheap one to another. Their chats and tasks use it automatically, and a manual pick still wins.'
+  }
+]
+
+/**
+ * The counterpart to the list above, from the same section's "Honest verdict".
+ * It is deliberately not a scenario: the point of showing it is that it is the
+ * case where the answer is no.
+ */
+export const TEAMMATE_NOT_WORTH_IT =
+  'Not worth the ceremony when the work is a one-off you can explain fully in a single chat. A teammate earns its keep when you are repeating yourself, running workstreams that should not share a brain, or want work moving while you are away.'
 
 /** Blurbs for the tool-catalog groups. The grouping logic lives in tools.ts. */
 export const TOOL_GROUP_BLURBS: Record<string, string> = {
@@ -576,6 +826,42 @@ function assertConsistent(): void {
     }
   }
 
+  const useCaseIds = new Set<string>()
+  for (const useCase of USE_CASES) {
+    if (useCaseIds.has(useCase.id)) problems.push(`two use cases share the id ${useCase.id}`)
+    useCaseIds.add(useCase.id)
+
+    /* A link needs both halves. An <a> with no text content fails the
+       accessibility check in verify-site.mjs, and a label with nowhere to go
+       renders nothing at all. */
+    if (Boolean(useCase.href) !== Boolean(useCase.linkLabel)) {
+      problems.push(`use case ${useCase.id} sets only one of href and linkLabel; it needs both or neither`)
+    }
+
+    /* A use case naming a package the catalog no longer ships would promise an
+       integration nobody can install, so it is a build failure rather than a
+       card that quietly stops being true. */
+    for (const id of useCase.packages) {
+      if (APPROVED_PACKAGES[id] === undefined) {
+        problems.push(`use case ${useCase.id} names the package "${id}", which is not on the approved list`)
+      }
+    }
+  }
+
+  /* /use-cases is a hardcoded route in verify-site.mjs. Unapproving the last
+     use case would leave the page an empty shell rather than removing it. */
+  if (!USE_CASES.some((u) => u.approved)) {
+    problems.push('no use case is approved, which would leave /use-cases empty — remove the route instead')
+  }
+
+  const scenarioIds = new Set<string>()
+  for (const scenario of TEAMMATE_SCENARIOS) {
+    if (scenarioIds.has(scenario.id)) {
+      problems.push(`two teammate scenarios share the id ${scenario.id}`)
+    }
+    scenarioIds.add(scenario.id)
+  }
+
   if (problems.length > 0) {
     throw new Error(
       `\n\n  landing/src/lib/showcase.ts does not hold together:\n\n` +
@@ -658,6 +944,17 @@ function sectionsFor(page: Page): ShowcaseSection[] {
     }))
     .filter((section) => section.claims.length > 0)
 }
+
+/** Approved teammate scenarios. An empty list drops the section entirely. */
+export const LIVE_TEAMMATE_SCENARIOS: TeammateScenario[] = TEAMMATE_SCENARIOS.filter(
+  (s) => s.approved
+)
+
+/** Approved use cases, in declaration order. */
+export const LIVE_USE_CASES: UseCase[] = USE_CASES.filter((u) => u.approved)
+
+/** The subset the homepage teases; /use-cases carries the full set. */
+export const FEATURED_USE_CASES: UseCase[] = LIVE_USE_CASES.filter((u) => u.featured)
 
 export const HOME_SECTIONS: ShowcaseSection[] = sectionsFor('home')
 export const FEATURE_SECTIONS: ShowcaseSection[] = sectionsFor('features')

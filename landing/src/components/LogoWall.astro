@@ -42,7 +42,7 @@ const providers = app.providers.list.map((p) => ({
 
 const integrations = app.extensions.list
   .filter((p) => p.kind === 'mcp' && p.icon)
-  .map((p) => ({ key: p.id, label: p.name, icon: p.icon }))
+  .map((p) => ({ key: p.id, label: p.name, icon: p.icon, mono: p.iconMono }))
 
 const items = kind === 'providers' ? providers : integrations
 const shown = limit ? items.slice(0, limit) : items
@@ -59,7 +59,15 @@ const shown = limit ? items.slice(0, limit) : items
             kind === 'providers' ? (
               <ProviderMark id={item.key} size={20} tint={tint} />
             ) : (
-              <img src={`/brand/extensions/${item.icon}`} alt="" width="20" height="20" loading="lazy" decoding="async" />
+              <img
+                src={`/brand/extensions/${item.icon}`}
+                alt=""
+                width="20"
+                height="20"
+                loading="lazy"
+                decoding="async"
+                class:list={[item.mono && 'vy-dark-invert']}
+              />
             )
           }
         </span>

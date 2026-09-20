@@ -16,6 +16,7 @@ export type NavItem = { href: string; label: string }
 
 export const NAV: NavItem[] = [
   { href: '/features', label: 'Features' },
+  { href: '/use-cases', label: 'Use cases' },
   { href: '/extensions', label: 'Extensions' },
   { href: '/docs', label: 'Docs' },
   { href: '/changelog', label: 'Changelog' }
@@ -26,6 +27,7 @@ export const FOOTER: { heading: string; items: NavItem[] }[] = [
     heading: 'Product',
     items: [
       { href: '/features', label: 'Features' },
+      { href: '/use-cases', label: 'Use cases' },
       { href: '/extensions', label: 'Extensions' },
       { href: '/download', label: 'Download' },
       { href: '/changelog', label: 'Changelog' }

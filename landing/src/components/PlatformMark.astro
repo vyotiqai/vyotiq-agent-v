@@ -57,4 +57,13 @@ const Tag = label ? 'span' : Fragment
     display: block;
     flex-shrink: 0;
   }
+
+  /* Only rendered when `label` is set. It lives here rather than in global.css
+     so the class this component emits is never styled from a distance. */
+  .vy-platform-mark {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4375rem;
+    font-size: 0.8125rem;
+  }
 </style>

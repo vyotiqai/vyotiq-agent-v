@@ -13,6 +13,22 @@ const landing = join(here, '..')
 const repo = join(landing, '..')
 
 const read = (p) => readFileSync(join(repo, p), 'utf8')
+
+/**
+ * Whether the site may invert this icon for its dark theme: true only when the
+ * art is a single black ink. Read from the file rather than from a list of
+ * exceptions, so replacing a vendor's colour mark with a monochrome version
+ * flips it on by itself, and adding a new coloured one can never be forgotten
+ * into rendering as a negative.
+ *
+ * Mirrors isMonochrome() in src/main/marketplace/catalogIcons.ts — the app
+ * makes the same call about the same files for the same reason.
+ */
+const isMonochromeIcon = (abs) => {
+  if (!abs.toLowerCase().endsWith('.svg')) return false
+  const colours = new Set(readFileSync(abs, 'utf8').match(/#[0-9A-Fa-f]{3,6}/g) ?? [])
+  return colours.size > 0 && [...colours].every((c) => c.toLowerCase() === '#000000')
+}
 const fail = (msg) => {
   console.error(`[bake-app-data] ${msg}`)
   process.exit(1)
@@ -121,7 +137,12 @@ function extractExtensions() {
       auth: p.auth ?? 'none',
       featured: (p.sections ?? []).includes('featured'),
       featuredRank: p.featuredRank ?? null,
-      icon: iconOk ? p.iconPath.replace(/^icons\//, '') : null
+      icon: iconOk ? p.iconPath.replace(/^icons\//, '') : null,
+      // Whether the site may invert this icon for its dark theme. Read from
+      // the file rather than from a list of exceptions, so replacing a
+      // vendor's colour art with a monochrome version flips it on by itself.
+      // Mirrors isMonochrome() in src/main/marketplace/catalogIcons.ts.
+      iconMono: iconOk ? isMonochromeIcon(join(repo, 'resources/marketplace', p.iconPath)) : false
     }
   })
 
