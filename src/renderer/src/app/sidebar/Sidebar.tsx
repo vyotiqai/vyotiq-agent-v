@@ -18,6 +18,7 @@ import { SidebarCollapsedHeader, SidebarTopBar } from './SidebarTopBar'
 import type { SidebarProps } from './types'
 import { useSidebarChats } from './useSidebarChats'
 import { NotificationsInbox } from './NotificationsInbox'
+import { UpdateNavItem } from './UpdateNavItem'
 import { useNotifications } from '@renderer/lib/hooks/useNotifications'
 
 export function Sidebar({
@@ -262,6 +263,7 @@ export function Sidebar({
           isCollapsed ? 'items-center' : ''
         )}
       >
+        <UpdateNavItem collapsed={isCollapsed} />
         <NotificationsInbox
           items={notificationItems}
           unreadCount={unreadCount}

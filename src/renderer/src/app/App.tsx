@@ -1608,41 +1608,6 @@ function App() {
     }
   }, [setSettingsError])
 
-  // Surface available app updates outside Settings → About: one toast per
-  // available/downloaded state so users notice without opening settings.
-  // autoDownload stays off — the user starts the download from the update card.
-  useEffect(() => {
-    const seen = new Set<string>()
-    const updaterApi = window.vyotiq?.updater
-    if (!updaterApi) return
-    const stop = updaterApi.onState((payload) => {
-      if (payload.status !== 'available' && payload.status !== 'downloaded') return
-      const version = payload.info?.version ?? ''
-      const key = `${payload.status}:${version}`
-      if (seen.has(key)) return
-      seen.add(key)
-      if (payload.status === 'available') {
-        pushToast(
-          version
-            ? `Version ${version} is available. Open the update card to review and download.`
-            : 'An update is available. Open the update card to review and download.'
-        )
-      } else {
-        pushToast(
-          version
-            ? `Version ${version} downloaded. Click to restart and install now.`
-            : 'Update downloaded. Click to restart and install now.',
-          'success',
-          12000,
-          () => {
-            void window.vyotiq?.updater.install()
-          }
-        )
-      }
-    })
-    return stop
-  }, [])
-
   const [mcpServerNames, setMcpServerNames] = useState(() => new Map<string, string>())
 
   useEffect(() => {

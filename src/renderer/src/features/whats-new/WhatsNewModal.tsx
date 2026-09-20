@@ -75,7 +75,7 @@ export function WhatsNewModal(): ReactElement | null {
 
   if (!open || currentVersion == null) return null
 
-  const githubUrl = `${RELEASES_URL}/releases/tag/v${currentVersion}`
+  const releaseUrl = `${RELEASES_URL}/releases/tag/v${currentVersion}`
   const hasNotes =
     pendingNotes != null &&
     (pendingNotes.notesSections.length > 0 || pendingNotes.notesText.trim().length > 0)
@@ -127,7 +127,7 @@ export function WhatsNewModal(): ReactElement | null {
               )
             ) : (
               <p className="text-xs leading-relaxed text-muted">
-                Vyotiq was updated to v{currentVersion}. See the full release notes on GitHub for
+                Vyotiq was updated to v{currentVersion}. See the full release notes for
                 everything that changed.
               </p>
             )}
@@ -137,9 +137,9 @@ export function WhatsNewModal(): ReactElement | null {
             <button
               type="button"
               className="text-xs text-muted underline-offset-2 hover:text-fg hover:underline focus-visible:outline focus-visible:outline-accent"
-              onClick={() => void window.vyotiq?.shellOpenExternal(githubUrl).catch(() => {})}
+              onClick={() => void window.vyotiq?.shellOpenExternal(releaseUrl).catch(() => {})}
             >
-              Full Release Notes on GitHub
+              Full release notes
             </button>
             <button
               type="button"

@@ -4,11 +4,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { WhatsNewModal } from '@renderer/features/whats-new/WhatsNewModal'
-import { compareVersions } from '@renderer/features/whats-new/useWhatsNew'
 import {
-  LAST_SEEN_UPDATE_VERSION_KEY,
+  compareVersions,
+  LAST_SEEN_UPDATE_VERSION_KEY
+} from '@renderer/features/whats-new/useWhatsNew'
+import {
+  ANNOUNCED_VERSION_KEY,
   PENDING_NOTES_KEY
-} from '@renderer/features/updates/useUpdater'
+} from '@renderer/features/updates/updaterStore'
 import type { ReleaseNotesSection } from '@shared/ipc/schemas/updater'
 
 interface PendingNotesPayload {
@@ -107,7 +110,7 @@ describe('WhatsNewModal gate', () => {
     expect(screen.getByText('Something else')).toBeTruthy()
     expect(screen.queryByRole('heading', { name: '⚡ Performance Improvements' })).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Full Release Notes on GitHub' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Full release notes' }))
     await waitFor(() => expect(shellOpenExternal).toHaveBeenCalledWith(GITHUB_URL))
   })
 
@@ -144,6 +147,48 @@ describe('WhatsNewModal gate', () => {
       expect(window.localStorage.getItem(LAST_SEEN_UPDATE_VERSION_KEY)).toBe('1.2.0')
     )
   })
+
+  // The old update card wrote the *available* version into this key when
+  // dismissed, which is a different meaning from "version at the end of the
+  // previous run". Installs carrying such a value must be repaired, not
+  // silently left in a state where What's New never fires again.
+  it('repairs a legacy key left by the old dismiss, without showing the modal', async () => {
+    setLastSeen('1.9.0')
+    seedPendingNotes(null)
+    installBridge('1.2.0')
+    render(<WhatsNewModal />)
+
+    await waitFor(() =>
+      expect(window.localStorage.getItem(LAST_SEEN_UPDATE_VERSION_KEY)).toBe('1.2.0')
+    )
+    // Handed to the updater store so the user is not re-prompted for the
+    // version they already declined.
+    expect(window.localStorage.getItem(ANNOUNCED_VERSION_KEY)).toBe('1.9.0')
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('does not overwrite an announcement the updater store already recorded', async () => {
+    setLastSeen('1.9.0')
+    window.localStorage.setItem(ANNOUNCED_VERSION_KEY, '2.0.0')
+    seedPendingNotes(null)
+    installBridge('1.2.0')
+    render(<WhatsNewModal />)
+
+    await waitFor(() =>
+      expect(window.localStorage.getItem(LAST_SEEN_UPDATE_VERSION_KEY)).toBe('1.2.0')
+    )
+    expect(window.localStorage.getItem(ANNOUNCED_VERSION_KEY)).toBe('2.0.0')
+  })
+
+  it('still shows What’s New after a real update once the key is repaired', async () => {
+    // Post-repair state: the key means "previous run" again.
+    setLastSeen('1.2.0')
+    seedPendingNotes(null)
+    installBridge('1.3.0')
+    render(<WhatsNewModal />)
+
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+  })
 })
 
 describe('WhatsNewModal pending notes', () => {
@@ -156,7 +201,7 @@ describe('WhatsNewModal pending notes', () => {
     await screen.findByRole('dialog')
     expect(screen.getByText(/Vyotiq was updated to v1\.2\.0/)).toBeTruthy()
     expect(
-      screen.getByRole('button', { name: 'Full Release Notes on GitHub' })
+      screen.getByRole('button', { name: 'Full release notes' })
     ).toBeTruthy()
   })
 

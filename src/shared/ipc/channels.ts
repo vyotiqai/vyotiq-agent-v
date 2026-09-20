@@ -121,6 +121,7 @@ export const IPC = {
   telemetryStatus: 'telemetry:status',
   appInfo: 'app:info',
   updaterState: 'updater:state',
+  updaterGetState: 'updater:get-state',
   updaterCheck: 'updater:check',
   updaterDownload: 'updater:download',
   updaterInstall: 'updater:install',

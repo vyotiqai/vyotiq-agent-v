@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ParsedReleaseNotes } from '@shared/utils/releaseNotes'
 import {
-  LAST_SEEN_UPDATE_VERSION_KEY,
+  ANNOUNCED_VERSION_KEY,
   PENDING_NOTES_KEY,
-  PendingNotes
-} from '../updates/useUpdater'
+  type PendingNotes
+} from '../updates/updaterStore'
+
+/**
+ * localStorage key holding the app version at the end of the previous run.
+ *
+ * This key used to have a second writer: the old update card persisted the
+ * *available* version here when dismissed, which is a different and
+ * incompatible meaning. It is now written only here, and `migrateLegacyKey`
+ * below repairs installs that carry a value from the old writer.
+ */
+export const LAST_SEEN_UPDATE_VERSION_KEY = 'vyotiq.updates.lastSeenVersion'
 
 export interface UseWhatsNew {
   /** True while the post-restart modal is visible. */
@@ -108,9 +118,21 @@ export function useWhatsNew(): UseWhatsNew {
 
         const comparison = compareVersions(version, stored)
         if (comparison <= 0) {
-          // Equal: normal launch. Stored higher than the running version
-          // (downgrade): re-sync the key. No modal either way.
+          // Equal: normal launch. Stored higher than the running version:
+          // either a genuine downgrade, or — far more likely — a value left
+          // by the old update card's dismiss, which wrote the *available*
+          // version here. Hand it to the updater store as an already-seen
+          // announcement so that user is not re-prompted for a version they
+          // already declined, then re-sync this key to what is running.
+          // No modal either way.
           if (comparison < 0) {
+            try {
+              if (window.localStorage.getItem(ANNOUNCED_VERSION_KEY) == null) {
+                window.localStorage.setItem(ANNOUNCED_VERSION_KEY, stored)
+              }
+            } catch {
+              // Best-effort repair; the worst case is one extra panel.
+            }
             window.localStorage.setItem(LAST_SEEN_UPDATE_VERSION_KEY, version)
           }
           clearPending()

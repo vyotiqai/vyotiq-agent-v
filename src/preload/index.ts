@@ -399,6 +399,7 @@ const api: VyotiqApi = {
   stopTrace: () => ipcRenderer.invoke(IPC.traceStop),
   getAppInfo: () => ipcRenderer.invoke(IPC.appInfo),
   updater: {
+    getState: () => ipcRenderer.invoke(IPC.updaterGetState),
     check: () => ipcRenderer.invoke(IPC.updaterCheck),
     download: () => ipcRenderer.invoke(IPC.updaterDownload),
     install: () => ipcRenderer.invoke(IPC.updaterInstall),

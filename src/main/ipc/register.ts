@@ -209,6 +209,7 @@ import {
   type UpdaterStatePayload,
   type FeedbackComposeRequest,
   type FeedbackComposeResult,
+  UpdaterGetStateRequestSchema,
   UpdaterCheckRequestSchema,
   UpdaterDownloadRequestSchema,
   UpdaterInstallRequestSchema,
@@ -487,9 +488,11 @@ import {
 } from '@main/git/githubAuth'
 import { installGithubCli } from '@main/git/ghBinary'
 import {
+  applyUpdateCheckSchedule,
   checkForAppUpdates,
   downloadAppUpdate,
-  installAppUpdate
+  installAppUpdate,
+  updaterState
 } from '@main/updater'
 import { composeFeedback } from '@main/feedback'
 import { grepWorkspaceHits } from '@main/agent/tools/grep'
@@ -964,6 +967,11 @@ export function registerIpc(): void {
       }
       if (partial.telemetryEnabled !== undefined) {
         applySentryTelemetry(next.telemetryEnabled)
+      }
+      if (partial.autoCheckUpdates !== undefined) {
+        // Arm/disarm the background checks now instead of at the next launch,
+        // so switching it off stops network calls immediately.
+        applyUpdateCheckSchedule(next.autoCheckUpdates)
       }
       if (partial.mcpServers !== undefined || partial.marketplace !== undefined) {
         invalidateMcpResolveCache()
@@ -3025,12 +3033,28 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(
+    IPC.updaterGetState,
+    async (event, raw): Promise<IpcResult<UpdaterStatePayload>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        UpdaterGetStateRequestSchema.parse(raw ?? {})
+        return ok(updaterState())
+      } catch (err) {
+        return failFrom(err, IPC.updaterGetState)
+      }
+    }
+  )
+
+  ipcMain.handle(
     IPC.updaterCheck,
     async (event, raw): Promise<IpcResult<UpdateInfo | null>> => {
       if (!senderOk(event)) return fail('Invalid sender')
       try {
         UpdaterCheckRequestSchema.parse(raw ?? {})
-        return ok(await checkForAppUpdates())
+        // Only explicit user action reaches this channel now, so force past
+        // the cached result — otherwise a second release stays invisible
+        // until restart. Failures stay noisy here: the user asked.
+        return ok(await checkForAppUpdates({ force: true }))
       } catch (err) {
         return failFrom(err, IPC.updaterCheck)
       }

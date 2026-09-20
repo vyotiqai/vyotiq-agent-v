@@ -47,6 +47,10 @@ export const UpdaterStatePayloadSchema = z.object({
 })
 export type UpdaterStatePayload = z.infer<typeof UpdaterStatePayloadSchema>
 
+/** `updater:get-state` — pull the current state without touching the network. */
+export const UpdaterGetStateRequestSchema = z.object({})
+export type UpdaterGetStateRequest = z.infer<typeof UpdaterGetStateRequestSchema>
+
 export const UpdaterCheckRequestSchema = z.object({})
 export type UpdaterCheckRequest = z.infer<typeof UpdaterCheckRequestSchema>
 

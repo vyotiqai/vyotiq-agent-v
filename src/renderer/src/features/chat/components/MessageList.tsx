@@ -1,6 +1,7 @@
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAppVirtualizer } from '@renderer/lib/hooks/useAppVirtualizer'
 import { Icon } from '@renderer/lib/icons'
+import { AgentVSpinner } from '@renderer/lib/brand'
 import { Tooltip, cn, ImageLightbox, MarkdownContent } from '@renderer/lib/ui'
 import {
   focusComposerMessage,
@@ -2153,7 +2154,7 @@ export function MessageList({
               role="status"
               aria-busy="true"
             >
-              <Icon name="loader" size={16} className="motion-safe:animate-spin" />
+              <AgentVSpinner size={16} />
               <span>Loading chat…</span>
             </div>
           ) : items.length === 0 && !pendingRun && !running && emptyLabel ? (
@@ -2189,7 +2190,7 @@ export function MessageList({
                     aria-busy="true"
                   >
                     <span className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-1 text-caption text-muted shadow-sm">
-                      <Icon name="loader" size={12} className="motion-safe:animate-spin" />
+                      <AgentVSpinner size={12} />
                       Loading chat…
                     </span>
                   </div>

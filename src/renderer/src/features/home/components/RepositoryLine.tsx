@@ -1,5 +1,6 @@
 import { relativeTimeAgo } from '@shared/timeFormat'
 import { Icon } from '@renderer/lib/icons'
+import { AgentVSpinner } from '@renderer/lib/brand'
 import { Button, cn } from '@renderer/lib/ui'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import type { WorkspaceGitSummary } from '../useWorkspaceGitSummaries'
@@ -73,7 +74,7 @@ export function RepositoryLine({
             </button>
             {running ? (
               <span className="inline-flex shrink-0 items-center gap-1 text-2xs text-accent">
-                <Icon name="loader" size={10} className="animate-spin" aria-hidden="true" />
+                <AgentVSpinner size={10} />
                 Running
               </span>
             ) : null}

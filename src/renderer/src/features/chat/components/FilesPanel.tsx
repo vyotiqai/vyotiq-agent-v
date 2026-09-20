@@ -28,6 +28,7 @@ import {
 import { useAppVirtualizer } from '@renderer/lib/hooks/useAppVirtualizer'
 import { FileTypeIcon } from '@renderer/lib/fileIcons/FileTypeIcon'
 import { Icon } from '@renderer/lib/icons'
+import { AgentVSpinner } from '@renderer/lib/brand'
 import { isIgnoredWorkspaceEntryName } from '@shared/utils/workspaceIgnores'
 import {
   ActionMenu,
@@ -3965,7 +3966,7 @@ export const FilesPanel = memo(function FilesPanel({
                           className="flex shrink-0 items-center gap-0.5 text-2xs text-muted"
                           role="status"
                         >
-                          <Icon name="loader" size={10} className="animate-spin" />
+                          <AgentVSpinner size={10} />
                           Loading…
                         </span>
                       ) : null}

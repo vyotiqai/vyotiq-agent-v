@@ -1403,3 +1403,196 @@ dialog[open] {
     animation: none;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Agent V working spinner.
+
+   Eight interchangeable animations over the one brand mark — see
+   AgentVSpinner.tsx, which owns the markup these select against, and
+   AGENT_V_SPINNER for the app-wide default.
+
+   The whole set leans on one property of the mark: it has exact 3-fold
+   rotational symmetry. Rotating the geometry in vyotiqMark.ts by 120° reproduces
+   its own path data to the decimal. So every rotation here turns a THIRD of a
+   circle per cycle and still lands on itself — the loop has no seam, and costs a
+   third of the travel a 360° spinner would need.
+
+   Everything animates transform or opacity only: no layout, no repaint. That
+   matters because a sidebar can have twenty of these running at once.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.vy-agv {
+  display: block;
+  overflow: visible;
+  flex: none;
+}
+
+/* transform-box must be view-box, not the default border-box the SVG spec once
+   had: the mark's viewBox starts at 112, so a percentage origin measured off the
+   border box would pivot around (624, 624) instead of the mark's true centre. */
+.vy-agv-spin,
+.vy-agv-ring,
+.vy-agv-core {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+}
+
+/* 01 ratchet — one 120° snap per beat, then a hold. */
+@keyframes vy-agv-ratchet {
+  0% { transform: rotate(0); }
+  55%, 100% { transform: rotate(120deg); }
+}
+.vy-agv--ratchet .vy-agv-spin {
+  animation: vy-agv-ratchet 820ms cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+
+/* 02 orbit — the same third of a turn, taken at a constant speed.
+   Turning the FRAME against a fixed core was tried and rejected: the core
+   triangle reaches almost to the hexagon edge, so the two tear through each
+   other for most of the cycle. Pushing the frame out 14% and then 26% still did
+   not clear it. Turning the whole mark is the only version that cannot break. */
+@keyframes vy-agv-turn {
+  to { transform: rotate(120deg); }
+}
+.vy-agv--orbit .vy-agv-spin {
+  animation: vy-agv-turn 900ms linear infinite;
+}
+
+/* 03 relay — each facet takes the light in turn, clockwise from top-right.
+   Opacity only, so this is the cheapest of the set and the one that holds up
+   best at 10–12px. The 0.26 floor is deliberate: below about 0.2 the resting
+   facets disappear into a dark sidebar and the mark reads as a lone triangle. */
+@keyframes vy-agv-relay {
+  0%, 100% { opacity: 0.26; }
+  13% { opacity: 1; }
+  44% { opacity: 0.26; }
+}
+.vy-agv--relay .vy-agv-f {
+  animation: vy-agv-relay 1200ms ease-in-out infinite;
+}
+.vy-agv--relay .vy-agv-f-br { animation-delay: 400ms; }
+.vy-agv--relay .vy-agv-f-l { animation-delay: 800ms; }
+
+/* 04 pulse — the core breathes while the frame recedes. Slow enough to sit
+   under a run measured in minutes without nagging. */
+@keyframes vy-agv-breath {
+  0%, 100% { transform: scale(0.66); opacity: 0.45; }
+  50% { transform: scale(1); opacity: 1; }
+}
+@keyframes vy-agv-breath-ring {
+  0%, 100% { opacity: 0.52; }
+  50% { opacity: 0.26; }
+}
+.vy-agv--pulse .vy-agv-core {
+  animation: vy-agv-breath 1650ms cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+.vy-agv--pulse .vy-agv-ring {
+  animation: vy-agv-breath-ring 1650ms cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+
+/* 05 gleam — a band of light sweeps the silhouette, echoing vy-text-shimmer on
+   live text. Travel is trimmed to the span where the band actually overlaps the
+   mark, so the loop has no dead beat at either end. */
+@keyframes vy-agv-gleam {
+  from { transform: translateX(-540px) skewX(-14deg); }
+  to { transform: translateX(800px) skewX(-14deg); }
+}
+.vy-agv--gleam .vy-agv-gleam {
+  animation: vy-agv-gleam 1300ms linear infinite;
+}
+
+/* 06 bloom — facets push out along their own radius and settle. The delays are
+   a third of a cycle apart, so the expansion travels around the ring instead of
+   pulsing all at once. */
+@keyframes vy-agv-bloom-tr {
+  0%, 100% { transform: none; }
+  42% { transform: translate(38px, -66px); }
+}
+@keyframes vy-agv-bloom-br {
+  0%, 100% { transform: none; }
+  42% { transform: translate(38px, 66px); }
+}
+@keyframes vy-agv-bloom-l {
+  0%, 100% { transform: none; }
+  42% { transform: translate(-76px, 0); }
+}
+.vy-agv--bloom .vy-agv-f {
+  animation-duration: 1150ms;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation-iteration-count: infinite;
+}
+.vy-agv--bloom .vy-agv-f-tr { animation-name: vy-agv-bloom-tr; }
+.vy-agv--bloom .vy-agv-f-br { animation-name: vy-agv-bloom-br; animation-delay: 383ms; }
+.vy-agv--bloom .vy-agv-f-l { animation-name: vy-agv-bloom-l; animation-delay: 766ms; }
+
+/* 07 iris — the frame unseats a fraction and rocks around a fixed core.
+   The 1.16 push is load-bearing, not decoration: it buys exactly enough
+   clearance that a 10° rock reads as the frame loosening rather than as the
+   facets cutting through the V. `scale` and `rotate` are separate CSS
+   properties, so the static push and the animated rock compose without the two
+   fighting over a single `transform`. */
+@keyframes vy-agv-iris {
+  0%, 100% { rotate: -10deg; }
+  50% { rotate: 10deg; }
+}
+.vy-agv--iris .vy-agv-spin { scale: 0.9; }
+.vy-agv--iris .vy-agv-ring {
+  scale: 1.16;
+  animation: vy-agv-iris 1500ms ease-in-out infinite;
+}
+
+/* 08 vee — the core alone, scaled up to fill the box. Below about 12px the
+   facets fuse into a smudge; this is what survives down there. */
+@keyframes vy-agv-vee {
+  0% { transform: rotate(0) scale(1); }
+  50% { transform: rotate(60deg) scale(0.78); }
+  100% { transform: rotate(120deg) scale(1); }
+}
+.vy-agv--vee .vy-agv-ring { display: none; }
+.vy-agv--vee .vy-agv-spin { transform: scale(1.55); }
+.vy-agv--vee .vy-agv-core {
+  animation: vy-agv-vee 900ms cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+
+/* Idle, and reduced motion, land on the same place: a still mark, dimmed enough
+   to read as "not working" without vanishing. Stopping dead rather than slowing
+   down is what the app already does for motion-safe:animate-spin elsewhere. */
+.vy-agv--idle .vy-agv-spin,
+.vy-agv--idle .vy-agv-ring,
+.vy-agv--idle .vy-agv-core,
+.vy-agv--idle .vy-agv-f,
+.vy-agv--idle .vy-agv-gleam {
+  animation: none;
+}
+.vy-agv--idle {
+  opacity: 0.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vy-agv .vy-agv-spin,
+  .vy-agv .vy-agv-ring,
+  .vy-agv .vy-agv-core,
+  .vy-agv .vy-agv-f,
+  .vy-agv .vy-agv-gleam {
+    animation: none;
+  }
+
+  /* Variants that park mid-transform would otherwise freeze small, offset or
+     half-faded — reset them to the mark as drawn. */
+  .vy-agv--iris .vy-agv-spin,
+  .vy-agv--iris .vy-agv-ring {
+    scale: 1;
+  }
+
+  .vy-agv--vee .vy-agv-ring {
+    display: revert;
+  }
+
+  .vy-agv--vee .vy-agv-spin {
+    transform: none;
+  }
+
+  .vy-agv:not(.vy-agv--idle) {
+    opacity: 0.75;
+  }
+}

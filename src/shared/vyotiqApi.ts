@@ -159,6 +159,8 @@ export type HostPlatform = 'darwin' | 'win32' | 'linux' | string
  * State transitions arrive on the `updater:state` push channel.
  */
 export interface VyotiqUpdaterApi {
+  /** Current state, seeded without a network round trip. */
+  getState: () => Promise<IpcResult<UpdaterStatePayload>>
   /** Current UpdateInfo when a check already found one; otherwise runs a check. */
   check: () => Promise<IpcResult<UpdateInfo | null>>
   download: () => Promise<IpcResult<undefined>>

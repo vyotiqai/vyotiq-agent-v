@@ -3,8 +3,40 @@ import type { AppInfo, UpdaterStatePayload } from '@shared/ipc'
 import { VyotiqLockup } from '@renderer/lib/brand'
 import { Button, Switch } from '@renderer/lib/ui'
 import { copyText } from '@renderer/lib/markdown/copyText'
+import { checkForUpdates, useUpdaterState } from '@renderer/features/updates/updaterStore'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
+
+/**
+ * The three external links, as data. Each row was previously ~27 lines of
+ * identical open/pending/error handling; the ids are load-bearing for settings
+ * search, so they stay exactly as they were.
+ */
+const LINKS: readonly {
+  id: string
+  title: string
+  hint: (info: AppInfo | null) => string
+  href: (info: AppInfo) => string
+}[] = [
+  {
+    id: 'about-website',
+    title: 'Website',
+    hint: (info) => (info ? websiteHost(info.homepage) : 'vyotiq.com'),
+    href: (info) => info.homepage
+  },
+  {
+    id: 'about-docs',
+    title: 'Docs',
+    hint: (info) => (info ? `${websiteHost(info.homepage)}/docs` : 'vyotiq.com/docs'),
+    href: (info) => new URL('/docs', info.homepage).href
+  },
+  {
+    id: 'about-source',
+    title: 'Source',
+    hint: () => 'github.com/vyotiqai/vyotiq-agent-v',
+    href: () => 'https://github.com/vyotiqai/vyotiq-agent-v'
+  }
+]
 
 // Module-level so render stays pure under React Compiler annotation mode
 // (audit L3); Date access in a render body is an impurity.
@@ -48,8 +80,7 @@ function buildInfoText(info: AppInfo): string {
   ].join('\n')
 }
 
-function updaterHint(payload: UpdaterStatePayload | null): string {
-  if (!payload) return 'Check GitHub Releases for a newer install.'
+function updaterHint(payload: UpdaterStatePayload): string {
   switch (payload.status) {
     case 'checking':
       return 'Checking for updates…'
@@ -68,18 +99,18 @@ function updaterHint(payload: UpdaterStatePayload | null): string {
     case 'error':
       return payload.error ?? 'Update check failed. Try again.'
     default:
-      return 'Check GitHub Releases for a newer install.'
+      // Idle: nothing checked yet this session (before the startup check,
+      // or in dev). Say what the button does, not where the bits live.
+      return 'Check for a newer version.'
   }
 }
 
 export function AboutSection({ form }: { form: SettingsFormState }) {
   const [info, setInfo] = useState<AppInfo | null>(null)
   const [copied, setCopied] = useState(false)
-  const [openingSite, setOpeningSite] = useState(false)
-  const [openingDocs, setOpeningDocs] = useState(false)
-  const [openingSource, setOpeningSource] = useState(false)
-  const [updater, setUpdater] = useState<UpdaterStatePayload | null>(null)
-  const [updaterBusy, setUpdaterBusy] = useState(false)
+  const [openingId, setOpeningId] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
+  const updater = useUpdaterState()
   const setErrorMessage = form.setErrorMessage
   const setErrorRef = useRef(setErrorMessage)
   setErrorRef.current = setErrorMessage
@@ -107,51 +138,27 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
     }
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
-    const api = window.vyotiq
-    if (!api?.updater) return
-    // The push channel is schema-gated in preload; one explicit check seeds
-    // the current state (same as pressing the Check button).
-    void api.updater.check().catch((err: unknown) => {
-      if (!cancelled) setErrorRef.current(err instanceof Error ? err.message : String(err))
-    })
-    const stop = api.updater.onState((payload) => {
-      if (!cancelled) setUpdater(payload)
-    })
-    return () => {
-      cancelled = true
-      stop()
-    }
-  }, [])
-
   const dash = '—'
-  const status = updater?.status
+  const status = updater.status
   const canCheck = status !== 'checking' && status !== 'downloading'
-  const canDownload = status === 'available'
-  const canInstall = status === 'downloaded'
   const updateVersionShown =
     info?.version != null &&
-    updater?.info?.version != null &&
+    updater.info?.version != null &&
     (status === 'available' || status === 'downloading' || status === 'downloaded')
-  const downloadPct =
-    status === 'downloading' && updater?.progress != null
-      ? Math.max(0, Math.min(100, Math.round(updater.progress.percent)))
-      : null
 
-  const runUpdater = (fn: () => Promise<{ ok: boolean; error?: string }> | undefined): void => {
-    const task = fn()
-    if (!task) return
+  const openLink = (id: string, url: string): void => {
+    if (!window.vyotiq?.shellOpenExternal) return
     form.clearErrors()
-    setUpdaterBusy(true)
-    void task
+    setOpeningId(id)
+    void window.vyotiq
+      .shellOpenExternal(url)
       .then((res) => {
-        if (!res.ok) form.setErrorMessage(res.error ?? 'Update failed')
+        if (!res.ok) form.setErrorMessage(res.error)
       })
       .catch((err: unknown) => {
         form.setErrorMessage(err instanceof Error ? err.message : String(err))
       })
-      .finally(() => setUpdaterBusy(false))
+      .finally(() => setOpeningId(null))
   }
 
   return (
@@ -168,6 +175,24 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
           <p className="m-0 text-xs leading-snug tracking-[var(--vy-tracking)] text-muted">
             © {CURRENT_YEAR} Vyotiq. Agent V is free software licensed under GPL-3.0-or-later.
           </p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {LINKS.map((link) => (
+              <button
+                key={link.id}
+                type="button"
+                data-settings-field={link.id}
+                disabled={!info}
+                title={link.hint(info)}
+                className="m-0 rounded-sm text-xs tracking-[var(--vy-tracking)] text-secondary underline-offset-2 hover:text-fg hover:underline focus-visible:outline focus-visible:outline-accent disabled:opacity-60"
+                onClick={() => {
+                  if (!info) return
+                  openLink(link.id, link.href(info))
+                }}
+              >
+                {openingId === link.id ? 'Opening…' : link.title}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -235,7 +260,7 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
         <SettingsField
           id="about-auto-check"
           title="Automatic checks"
-          hint="Look for GitHub Releases when the app starts."
+          hint="Look for new releases at startup and every 6 hours. Nothing is ever downloaded on its own."
         >
           <Switch
             size="md"
@@ -250,138 +275,31 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
         <SettingsField id="about-updater" title="App updates" hint={updaterHint(updater)}>
           {updateVersionShown ? (
             <p className="m-0 text-xs tabular-nums tracking-[var(--vy-tracking)] text-muted">
-              {info?.version} <span aria-hidden="true">→</span> {updater?.info?.version}
+              {info?.version} <span aria-hidden="true">→</span> {updater.info?.version}
             </p>
           ) : null}
-          {downloadPct != null ? (
-            <div
-              className="h-1.5 w-full overflow-hidden rounded-sm bg-border"
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={downloadPct}
-              aria-label="Update download progress"
-            >
-              <div
-                className="h-full bg-accent transition-[width] duration-100 ease-linear"
-                style={{ width: `${downloadPct}%` }}
-              />
-            </div>
-          ) : null}
-          <div className="flex flex-wrap justify-end gap-1.5">
-            <Button
-              variant="subtle"
-              pending={updaterBusy && status === 'checking'}
-              disabled={!canCheck || updaterBusy || !window.vyotiq?.updater}
-              onClick={() => runUpdater(() => window.vyotiq?.updater.check())}
-            >
-              {status === 'checking' ? 'Checking…' : 'Check'}
-            </Button>
-            {canDownload || status === 'downloading' ? (
-              <Button
-                variant="subtle"
-                pending={status === 'downloading'}
-                disabled={!canDownload || updaterBusy || !window.vyotiq?.updater}
-                onClick={() => runUpdater(() => window.vyotiq?.updater.download())}
-              >
-                {status === 'downloading' ? 'Downloading…' : 'Download'}
-              </Button>
-            ) : null}
-            {canInstall ? (
-              <Button
-                variant="primary"
-                disabled={updaterBusy || !window.vyotiq?.updater}
-                onClick={() => runUpdater(() => window.vyotiq?.updater.install())}
-              >
-                Restart to install
-              </Button>
-            ) : null}
-          </div>
+          {/* Download and install live in the sidebar update panel, which is
+              showing exactly when those actions are available. One place to
+              start an irreversible restart is enough. */}
+          <Button
+            variant="subtle"
+            pending={checking || status === 'checking'}
+            disabled={!canCheck || checking || !window.vyotiq?.updater}
+            onClick={() => {
+              form.clearErrors()
+              setChecking(true)
+              void checkForUpdates()
+                .catch((err: unknown) => {
+                  form.setErrorMessage(err instanceof Error ? err.message : String(err))
+                })
+                .finally(() => setChecking(false))
+            }}
+          >
+            {status === 'checking' ? 'Checking…' : 'Check'}
+          </Button>
         </SettingsField>
       </SettingsGroup>
 
-      <SettingsGroup title="Links">
-        <SettingsField
-          id="about-website"
-          title="Website"
-          hint={info ? websiteHost(info.homepage) : 'vyotiq.com'}
-        >
-          <Button
-            variant="subtle"
-            pending={openingSite}
-            disabled={!info}
-            onClick={() => {
-              if (!info || !window.vyotiq?.shellOpenExternal) return
-              form.clearErrors()
-              setOpeningSite(true)
-              void window.vyotiq
-                .shellOpenExternal(info.homepage)
-                .then((res) => {
-                  if (!res.ok) form.setErrorMessage(res.error)
-                })
-                .catch((err: unknown) => {
-                  form.setErrorMessage(err instanceof Error ? err.message : String(err))
-                })
-                .finally(() => setOpeningSite(false))
-            }}
-          >
-            {openingSite ? 'Opening…' : 'Open'}
-          </Button>
-        </SettingsField>
-        <SettingsField
-          id="about-docs"
-          title="Docs"
-          hint={info ? `${websiteHost(info.homepage)}/docs` : 'vyotiq.com/docs'}
-        >
-          <Button
-            variant="subtle"
-            pending={openingDocs}
-            disabled={!info}
-            onClick={() => {
-              if (!info || !window.vyotiq?.shellOpenExternal) return
-              form.clearErrors()
-              setOpeningDocs(true)
-              void window.vyotiq
-                .shellOpenExternal(new URL('/docs', info.homepage).href)
-                .then((res) => {
-                  if (!res.ok) form.setErrorMessage(res.error)
-                })
-                .catch((err: unknown) => {
-                  form.setErrorMessage(err instanceof Error ? err.message : String(err))
-                })
-                .finally(() => setOpeningDocs(false))
-            }}
-          >
-            {openingDocs ? 'Opening…' : 'Open'}
-          </Button>
-        </SettingsField>
-        <SettingsField
-          id="about-source"
-          title="Source"
-          hint="github.com/vyotiqai/vyotiq-agent-v"
-        >
-          <Button
-            variant="subtle"
-            pending={openingSource}
-            onClick={() => {
-              if (!window.vyotiq?.shellOpenExternal) return
-              form.clearErrors()
-              setOpeningSource(true)
-              void window.vyotiq
-                .shellOpenExternal('https://github.com/vyotiqai/vyotiq-agent-v')
-                .then((res) => {
-                  if (!res.ok) form.setErrorMessage(res.error)
-                })
-                .catch((err: unknown) => {
-                  form.setErrorMessage(err instanceof Error ? err.message : String(err))
-                })
-                .finally(() => setOpeningSource(false))
-            }}
-          >
-            {openingSource ? 'Opening…' : 'Open'}
-          </Button>
-        </SettingsField>
-      </SettingsGroup>
     </SettingsStack>
   )
 }
