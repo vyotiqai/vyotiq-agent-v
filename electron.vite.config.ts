@@ -118,7 +118,10 @@ export default defineConfig(({ mode }) => {
               ) {
                 return 'markdown'
               }
-              if (id.includes('node_modules/shiki')) return 'shiki'
+              // No rule for shiki on purpose: markdownHighlight.ts imports
+              // shiki/core and each grammar and theme lazily, and a manual
+              // chunk folded all of them back into one 1.1 MB file that the
+              // first code block of any language had to load whole.
               if (id.includes('node_modules/@lobehub/icons')) return 'lobehub'
               return undefined
             }

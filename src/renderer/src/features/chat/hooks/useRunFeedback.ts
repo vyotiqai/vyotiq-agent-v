@@ -1,0 +1,92 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { RUN_FEEDBACK_NOTE_MAX, type RunFeedbackRating } from '@shared/ipc'
+import { pushToast } from '@renderer/lib/ui'
+
+/**
+ * The user's verdict on a run.
+ *
+ * No polling: the rating only ever changes because this control changed it,
+ * so it is fetched once per run and then held optimistically. A failed write
+ * rolls back rather than leaving the UI asserting something the store does
+ * not contain.
+ *
+ * Callers pass `enabled: !running`. Only a finished run has a verdict to load
+ * and the control stays hidden while one streams, so fetching earlier would
+ * spend an IPC round-trip and a disk read on every run start for nothing.
+ */
+export function useRunFeedback(
+  workspacePath: string | null | undefined,
+  runId: string | null | undefined,
+  enabled = true
+): {
+  value: RunFeedbackRating | null
+  note?: string
+  onRate: (rating: RunFeedbackRating | null, note?: string) => void
+} | undefined {
+  const [value, setValue] = useState<RunFeedbackRating | null>(null)
+  const [note, setNote] = useState<string | undefined>(undefined)
+  /** Guards against a slow fetch for a previous run landing on the current one. */
+  const loadedFor = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!enabled || !workspacePath || !runId) return
+    const key = `${workspacePath}\0${runId}`
+    if (loadedFor.current === key) return
+    loadedFor.current = key
+    setValue(null)
+    let cancelled = false
+    void window.vyotiq
+      .runFeedbackGet({ workspacePath, runId })
+      .then((res) => {
+        if (cancelled || loadedFor.current !== key) return
+        if (res.ok) {
+          setValue(res.data.entry?.rating ?? null)
+          setNote(res.data.entry?.note ?? undefined)
+        }
+      })
+      .catch(() => {
+        // A missing verdict is indistinguishable from an unrated run; both
+        // render as "not rated". Nothing to report.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [enabled, workspacePath, runId])
+
+  const onRate = useCallback(
+    (rating: RunFeedbackRating | null, noteText?: string) => {
+      if (!workspacePath || !runId) return
+      const previous = value
+      const previousNote = note
+      const trimmed = noteText?.trim()
+      const nextNote = trimmed ? trimmed.slice(0, RUN_FEEDBACK_NOTE_MAX) : undefined
+      setValue(rating)
+      // A cleared verdict drops the stored note — never send one alongside
+      // rating null, or the store would keep an orphaned note.
+      setNote(rating == null ? undefined : (nextNote ?? previousNote))
+      void window.vyotiq
+        .runFeedbackSet(
+          rating == null
+            ? { workspacePath, runId, rating }
+            : { workspacePath, runId, rating, note: nextNote }
+        )
+        .then((res) => {
+          if (res.ok) return
+          setValue(previous)
+          setNote(previousNote)
+          pushToast(`Could not save feedback: ${res.error}`, 'error')
+        })
+        .catch(() => {
+          setValue(previous)
+          setNote(previousNote)
+          pushToast('Could not save feedback', 'error')
+        })
+    },
+    [workspacePath, runId, value, note]
+  )
+
+  return useMemo(
+    () => (enabled && workspacePath && runId ? { value, note, onRate } : undefined),
+    [enabled, workspacePath, runId, value, note, onRate]
+  )
+}

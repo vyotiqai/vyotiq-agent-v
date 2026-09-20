@@ -1,4 +1,5 @@
-import type { ChatMessage } from '../../shared/ipc'
+import type { ChatMessage, ThinkingEffort } from '../../shared/ipc'
+import { isAbortStubText } from '../../shared/toolStubs'
 import { codebaseSearchHitPathsFromResult } from './codeindex/query'
 import { readPathArg } from './tools/argAccess'
 import { searchHitPathsFromResult } from './tools/search'
@@ -12,6 +13,105 @@ export const MCP_NOT_IN_CATALOG_FAIL_FAST_THRESHOLD = 2
 
 const WRITE_TOOLS = new Set(['edit', 'str_replace', 'edit_notebook'])
 const FILE_MUTATION_TOOLS = new Set([...WRITE_TOOLS, 'delete'])
+
+/** Effort tiers, weakest first — mirrors ThinkingEffortSchema's order. */
+const EFFORT_LADDER: readonly ThinkingEffort[] = [
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max'
+]
+
+/**
+ * Read-only lookups. A step that does nothing but these is navigating, not
+ * deciding: the thinking it emits is choosing the next path to open.
+ * Deliberately excludes `terminal`, `diagnostics`, `run_tests`, every mutation,
+ * and the interactive/delegation tools — those carry real consequences.
+ */
+const MECHANICAL_TOOLS = new Set([
+  'read',
+  'glob',
+  'list_dir',
+  'grep',
+  'search',
+  'codebase_search',
+  'concept_search',
+  'memory_read',
+  'memory_list',
+  'git_status',
+  'git_diff',
+  'todo_write'
+])
+
+/** Consecutive mechanical steps before effort steps down at all. */
+export const MECHANICAL_STREAK_BEFORE_STEPDOWN = 2
+
+/** Never drop more than this many tiers below the user's setting. */
+const MAX_EFFORT_STEPDOWN = 2
+
+/**
+ * True when a completed step only navigated: no visible answer, at least one
+ * tool call, and every call a read-only lookup.
+ */
+export function isMechanicalStep(
+  toolNames: readonly string[],
+  visibleText: string
+): boolean {
+  if (visibleText.trim()) return false
+  if (toolNames.length === 0) return false
+  return toolNames.every((name) => MECHANICAL_TOOLS.has(name))
+}
+
+/**
+ * Per-step thinking effort. The user's setting is a CEILING, never exceeded.
+ *
+ * Measured over 467 real steps: thinking is 99.4% of everything generated and
+ * latency is ~21ms per output token, yet steps whose only tools were reads
+ * carried the same effort as hard ones — 30.7% of all generation time, with a
+ * single step spending 100,165 chars of thinking to read three files. A step
+ * cannot be classified before it is generated, so this keys on the run of
+ * steps just completed: only a sustained navigation chain steps down, and any
+ * visible answer, mutation, terminal, or test run resets it immediately.
+ */
+/**
+ * Effort for a retry after an empty turn.
+ *
+ * An empty response is over-thinking that produced nothing: measured over 758
+ * real turns, empty ones carried 3.3x the reasoning of a productive step
+ * (median 10,858 vs 3,318 chars) and 86 of them burned 2.14 h of wall clock.
+ * Retrying at the same effort re-runs the conditions that just failed, so step
+ * down one rung per consecutive empty turn.
+ */
+export function emptyResponseRetryEffort(
+  ceiling: ThinkingEffort,
+  consecutiveEmpties: number
+): ThinkingEffort {
+  if (consecutiveEmpties <= 0) return ceiling
+  const top = EFFORT_LADDER.indexOf(ceiling)
+  if (top <= 0) return ceiling
+  return EFFORT_LADDER[Math.max(0, top - consecutiveEmpties)] ?? ceiling
+}
+
+/** The weaker of two efforts, for combining independent step-down signals. */
+export function weakestEffort(a: ThinkingEffort, b: ThinkingEffort): ThinkingEffort {
+  return EFFORT_LADDER.indexOf(a) <= EFFORT_LADDER.indexOf(b) ? a : b
+}
+
+export function adaptiveThinkingEffort(
+  ceiling: ThinkingEffort,
+  mechanicalStreak: number
+): ThinkingEffort {
+  if (mechanicalStreak < MECHANICAL_STREAK_BEFORE_STEPDOWN) return ceiling
+  const top = EFFORT_LADDER.indexOf(ceiling)
+  if (top <= 0) return ceiling
+  const steps = Math.min(
+    MAX_EFFORT_STEPDOWN,
+    mechanicalStreak - MECHANICAL_STREAK_BEFORE_STEPDOWN + 1
+  )
+  return EFFORT_LADDER[Math.max(0, top - steps)] ?? ceiling
+}
 
 const MCP_NOT_IN_CATALOG_MARKER = "is not in this step's tool catalog"
 
@@ -204,8 +304,7 @@ export function isBuildOutputRelPath(value: string): boolean {
 
 /** Run-cancel / steer stubs — not agent tool errors. */
 export function isAbortStubToolResult(content: string): boolean {
-  const text = content.trim()
-  return text === 'Cancelled' || text === 'Interrupted'
+  return isAbortStubText(content)
 }
 
 /**

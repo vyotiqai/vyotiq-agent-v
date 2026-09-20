@@ -190,7 +190,13 @@ export function FeedbackDialog({
   })
 
   return (
-    <Dialog open={open} onClose={close} labelledBy={headerId} initialFocusRef={titleInputRef}>
+    <Dialog
+      open={open}
+      onClose={close}
+      labelledBy={headerId}
+      padded={false}
+      initialFocusRef={titleInputRef}
+    >
       <form
         className="flex flex-col gap-4 p-5"
         onSubmit={handleSubmit}

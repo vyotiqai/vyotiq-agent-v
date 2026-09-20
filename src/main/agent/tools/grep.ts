@@ -39,7 +39,16 @@ function compile(pattern: string, caseSensitive: boolean): RegExp {
   return compileUserRegex(pattern, caseSensitive ? 'm' : 'im')
 }
 
-type GrepHitState = { out: string[]; matchCount: number; truncated: boolean }
+type GrepHitState = {
+  out: string[]
+  matchCount: number
+  truncated: boolean
+  /** Files skipped for size — reported, never silently dropped. */
+  oversized: number
+}
+
+/** Skipped for size, as opposed to unreadable, so the scan can say so. */
+const OVERSIZED = Symbol('grep-oversized')
 
 function isGrepDocx(file: WalkedFile): boolean {
   return isDocxPath(file.rel) || isDocxPath(file.full)
@@ -52,26 +61,32 @@ function shouldSkipGrepFile(file: WalkedFile, includeRegex: RegExp | null): bool
   return false
 }
 
-function loadGrepTextSync(file: WalkedFile): string | null {
+function loadGrepTextSync(file: WalkedFile): string | typeof OVERSIZED | null {
   try {
     const st = statSync(file.full)
     if (isGrepDocx(file)) {
-      if (st.size > MAX_DOCX_ARCHIVE_BYTES) return null
+      if (st.size > MAX_DOCX_ARCHIVE_BYTES) return OVERSIZED
       return extractDocxText(readFileSync(file.full))
     }
+    if (st.size > GREP_MAX_FILE_BYTES) return OVERSIZED
     return readFileSync(file.full, 'utf8')
   } catch {
     return null
   }
 }
 
-async function loadGrepTextAsync(file: WalkedFile): Promise<string | null> {
+async function loadGrepTextAsync(file: WalkedFile): Promise<string | typeof OVERSIZED | null> {
   try {
     const st = await fsp.stat(file.full)
     if (isGrepDocx(file)) {
-      if (st.size > MAX_DOCX_ARCHIVE_BYTES) return null
+      if (st.size > MAX_DOCX_ARCHIVE_BYTES) return OVERSIZED
       return extractDocxText(await fsp.readFile(file.full))
     }
+    // GREP_MAX_FILE_BYTES was declared but never enforced, so every scan read
+    // lockfiles and generated bundles in full (pnpm-lock.yaml alone is 556 KB
+    // in this repo). The stat above was already being paid for on every file
+    // while only the .docx branch used it — this makes it earn its keep.
+    if (st.size > GREP_MAX_FILE_BYTES) return OVERSIZED
     return await fsp.readFile(file.full, 'utf8')
   } catch {
     return null
@@ -127,6 +142,10 @@ function grepOneFile(
 ): void {
   if (shouldSkipGrepFile(file, includeRegex)) return
   const text = loadGrepTextSync(file)
+  if (text === OVERSIZED) {
+    state.oversized += 1
+    return
+  }
   if (text == null) return
   grepFileText(file.rel, text, regex, maxResults, contextLines, state)
 }
@@ -141,6 +160,10 @@ async function grepOneFileAsync(
 ): Promise<void> {
   if (shouldSkipGrepFile(file, includeRegex)) return
   const text = await loadGrepTextAsync(file)
+  if (text === OVERSIZED) {
+    state.oversized += 1
+    return
+  }
   if (text == null) return
   grepFileText(file.rel, text, regex, maxResults, contextLines, state)
 }
@@ -156,9 +179,9 @@ async function formatGrepHitsAsync(
   contextLines: number,
   includeRegex: RegExp | null,
   signal?: AbortSignal
-): Promise<{ out: string[]; matchCount: number; truncated: boolean }> {
+): Promise<GrepHitState> {
   const regex = compile(pattern, options.caseSensitive === true)
-  const state = { out: [] as string[], matchCount: 0, truncated: false }
+  const state: GrepHitState = { out: [], matchCount: 0, truncated: false, oversized: 0 }
   for (let i = 0; i < files.length && !state.truncated; i++) {
     if (i > 0 && i % YIELD_EVERY_FILES === 0) {
       throwIfAborted(signal)
@@ -176,13 +199,22 @@ function formatGrepHits(
   maxResults: number,
   contextLines: number,
   includeRegex: RegExp | null
-): { out: string[]; matchCount: number; truncated: boolean } {
+): GrepHitState {
   const regex = compile(pattern, options.caseSensitive === true)
-  const state = { out: [] as string[], matchCount: 0, truncated: false }
+  const state: GrepHitState = { out: [], matchCount: 0, truncated: false, oversized: 0 }
   for (let i = 0; i < files.length && !state.truncated; i++) {
     grepOneFile(files[i]!, regex, maxResults, contextLines, includeRegex, state)
   }
   return state
+}
+
+/**
+ * Coverage notice for files the size cap kept out of the scan. Leading `…`
+ * matches the other notices so result parsers skip it as a path candidate.
+ */
+export function formatOversizedNotice(count: number, capBytes = GREP_MAX_FILE_BYTES): string {
+  const kb = Math.round(capBytes / 1024)
+  return `… ${count} file${count === 1 ? '' : 's'} over ${kb}KB not scanned`
 }
 
 function resolveMaxResults(maxResults: number | undefined): number {
@@ -272,7 +304,7 @@ export async function toolGrep(
     throwIfAborted(signal)
   }
 
-  const { out, matchCount, truncated } = await formatGrepHitsAsync(
+  const { out, matchCount, truncated, oversized } = await formatGrepHitsAsync(
     files,
     trimmed,
     options,
@@ -290,6 +322,9 @@ export async function toolGrep(
     if (body) notices.push(body)
     if (truncated) notices.push(`… stopped at ${maxResults} matches`)
   }
+  // A size skip is a coverage gap, not an absence of matches: say so, or a
+  // symbol living in an oversized file reads back as "no such symbol".
+  if (oversized > 0) notices.push(formatOversizedNotice(oversized))
   if (indexSyncInProgress) {
     notices.push(`index sync in progress (${indexedFileCount} files indexed so far)`)
   }
@@ -312,7 +347,7 @@ export function grepFilesForTest(
     full: join(workspaceRoot, ...rel.split('/')),
     rel
   }))
-  const { out, matchCount, truncated } = formatGrepHits(
+  const { out, matchCount, truncated, oversized } = formatGrepHits(
     files,
     pattern.trim(),
     options,
@@ -320,9 +355,10 @@ export function grepFilesForTest(
     contextLines,
     includeRegex
   )
-  if (matchCount === 0) return `No matches for /${pattern.trim()}/`
+  const skipped = oversized > 0 ? `\n${formatOversizedNotice(oversized)}` : ''
+  if (matchCount === 0) return `No matches for /${pattern.trim()}/${skipped}`
   const suffix = truncated ? `\n… stopped at ${maxResults} matches` : ''
-  return `${out.join('\n').trimEnd()}${suffix}`
+  return `${out.join('\n').trimEnd()}${suffix}${skipped}`
 }
 
 export type GrepWorkspaceHit = { path: string; line: number; text: string }

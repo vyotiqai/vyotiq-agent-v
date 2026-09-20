@@ -308,4 +308,49 @@ describe('isGrepOverlapRel', () => {
     expect(isGrepOverlapRel('tests/main/unit/webFetch.test.ts')).toBe(true)
     expect(isGrepOverlapRel('src/webFetch.ts')).toBe(false)
   })
+
+  describe('nested checkouts', () => {
+    /**
+     * Measured on this repo before the skip: two git worktrees under
+     * .claude/worktrees were 3,602 of 5,497 walked files, and every grep paid
+     * for them (walk 2169ms -> 699ms, grep 3714ms -> 1088ms after).
+     */
+    it('does not descend into a subdirectory that has its own .git', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'vyotiq-nested-checkout-'))
+      try {
+        writeFileSync(join(root, 'own.ts'), 'export const a = 1\n', 'utf8')
+
+        // A git worktree marks itself with a .git FILE.
+        const wt = join(root, 'wt')
+        mkdirSync(wt, { recursive: true })
+        writeFileSync(join(wt, '.git'), 'gitdir: /elsewhere/.git/worktrees/wt\n', 'utf8')
+        writeFileSync(join(wt, 'copy.ts'), 'export const a = 1\n', 'utf8')
+
+        // A nested clone marks itself with a .git DIRECTORY.
+        const clone = join(root, 'vendored')
+        mkdirSync(join(clone, '.git'), { recursive: true })
+        writeFileSync(join(clone, 'copy.ts'), 'export const a = 1\n', 'utf8')
+
+        const rels = (await collectWorkspaceFiles(root, 1000)).map((f) => f.rel)
+        expect(rels).toContain('own.ts')
+        expect(rels.some((r) => r.startsWith('wt/'))).toBe(false)
+        expect(rels.some((r) => r.startsWith('vendored/'))).toBe(false)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    })
+
+    it('still walks an ordinary subdirectory with no .git', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'vyotiq-plain-subdir-'))
+      try {
+        const sub = join(root, 'packages', 'app')
+        mkdirSync(sub, { recursive: true })
+        writeFileSync(join(sub, 'index.ts'), 'export const a = 1\n', 'utf8')
+        const rels = (await collectWorkspaceFiles(root, 1000)).map((f) => f.rel)
+        expect(rels).toContain('packages/app/index.ts')
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    })
+  })
 })

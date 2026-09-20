@@ -34,6 +34,16 @@ const tickRetries = new Map<string, number>()
  * every LOOP_TICK_RETRY_MS until the run accepts the prompt.
  */
 const LOOP_TICK_RETRY_MS = 5_000
+/**
+ * Ceiling for the backoff below. Retries stay unbounded in count; only the
+ * spacing grows, so a run that cannot accept prompts for a long stretch stops
+ * re-attempting every 5s forever without ever dropping the tick.
+ */
+const LOOP_TICK_RETRY_MAX_MS = 60_000
+
+function retryDelayMs(retries: number): number {
+  return Math.min(LOOP_TICK_RETRY_MAX_MS, LOOP_TICK_RETRY_MS * 2 ** Math.max(0, retries - 1))
+}
 
 export function readLoop(runDir: string): RunLoop | null {
   const path = loopPath(runDir)
@@ -151,7 +161,7 @@ async function onTick(runId: string): Promise<void> {
     })
     const retry: RunLoop = {
       ...loop,
-      nextAt: new Date(Date.now() + LOOP_TICK_RETRY_MS).toISOString()
+      nextAt: new Date(Date.now() + retryDelayMs(retries)).toISOString()
     }
     writeLoop(info.runDir, retry)
     schedule(runId, retry)

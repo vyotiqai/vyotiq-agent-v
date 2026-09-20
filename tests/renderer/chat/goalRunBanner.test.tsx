@@ -85,4 +85,32 @@ describe('GoalRunBanner', () => {
     expect(onPause).toHaveBeenCalled()
     expect(onStopRun).toHaveBeenCalled()
   })
+  it('offers only start and dismiss for a proposed goal', () => {
+    const onActivate = vi.fn()
+    const onDismiss = vi.fn()
+    render(
+      <GoalRunBanner
+        goal={{ ...goal, status: 'proposed', origin: 'agent' }}
+        loop={null}
+        running={false}
+        onPause={vi.fn()}
+        onResume={vi.fn()}
+        onComplete={vi.fn()}
+        onActivate={onActivate}
+        onDismiss={onDismiss}
+        onStopLoop={vi.fn()}
+      />
+    )
+    expect(document.querySelector('[data-goal-banner][data-goal-status="proposed"]')).toBeTruthy()
+    expect(screen.getByText('Suggested goal')).toBeTruthy()
+    // None of the active-goal controls: a proposal is not running, so there is
+    // nothing to pause or mark complete.
+    expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Mark complete' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start goal' }))
+    expect(onActivate).toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(onDismiss).toHaveBeenCalled()
+  })
 })

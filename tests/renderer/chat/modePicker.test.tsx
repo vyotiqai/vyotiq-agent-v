@@ -35,6 +35,16 @@ describe('ModePicker', () => {
     expect(onModeChange).toHaveBeenCalledWith('ask')
   })
 
+  it('stays enabled and cycles while the agent is running', () => {
+    const onModeChange = vi.fn()
+    render(<ModePicker mode="agent" onModeChange={onModeChange} running />)
+    const button = screen.getByRole('button', { name: /Agent mode/i })
+
+    expect(button).toHaveProperty('disabled', false)
+    fireEvent.click(button)
+    expect(onModeChange).toHaveBeenCalledWith('ask')
+  })
+
   it('cycles with Ctrl+. and reverses with Shift', () => {
     const onModeChange = vi.fn()
     render(<ModePicker mode="agent" onModeChange={onModeChange} />)

@@ -45,10 +45,10 @@ export function usePrompt(): {
     <Dialog
       open={state !== null}
       onClose={() => finish(null)}
-      title={state?.message ?? 'Input'}
+      label={state?.message ?? 'Input'}
       initialFocusRef={inputRef}
       useNativeDialog={false}
-      className="w-[min(92vw,28rem)] rounded-xl border border-border bg-surface p-4 text-fg shadow-xl"
+      className="w-[min(92vw,28rem)] rounded-xl border border-border bg-surface text-fg shadow-menu"
     >
       <form
         className="flex flex-col gap-3"

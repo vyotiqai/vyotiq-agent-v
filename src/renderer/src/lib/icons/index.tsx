@@ -20,6 +20,8 @@ import {
   CornersOutIcon,
   DownloadSimpleIcon,
   FlagIcon,
+  ThumbsDownIcon,
+  ThumbsUpIcon,
   FileIcon,
   PlugsConnectedIcon,
   FileMagnifyingGlassIcon,
@@ -134,6 +136,8 @@ const ICONS = {
   listTodo: ListChecksIcon,
   download: DownloadSimpleIcon,
   flag: FlagIcon,
+  thumbsUp: ThumbsUpIcon,
+  thumbsDown: ThumbsDownIcon,
   stack: StackIcon,
   folderSearch: MagnifyingGlassIcon,
   scanSearch: ScanIcon,
@@ -141,6 +145,19 @@ const ICONS = {
 } as const satisfies Record<string, PhosphorIcon>
 
 export type IconName = keyof typeof ICONS
+
+/**
+ * Narrow a stored string to a real icon key.
+ *
+ * Persisted fields hold free text — `AgentProfile.avatar` is `z.string().max(32)`,
+ * so a roster written by an older build, hand-edited, or synced from another
+ * machine can name an icon this build does not have. Rendering that straight
+ * into `ICONS[name]` yields `undefined` and crashes the row, so callers test
+ * first and fall back.
+ */
+export function isIconName(value: string | null | undefined): value is IconName {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(ICONS, value)
+}
 
 export function Icon({
   name,

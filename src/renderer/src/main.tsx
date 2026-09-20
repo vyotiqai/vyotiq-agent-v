@@ -22,7 +22,13 @@ async function boot(): Promise<void> {
   } catch {
     // ignore — logger still works locally
   }
-  initRendererSentry(telemetryEnabled)
+  // Awaited so a telemetry-on launch renders behind a live client, exactly as
+  // the synchronous init did; a telemetry-off launch resolves at once.
+  try {
+    await initRendererSentry(telemetryEnabled)
+  } catch (err) {
+    console.warn('[boot] renderer Sentry init failed; continuing', err)
+  }
 
   createRoot(document.getElementById('root')!, {
     onUncaughtError: (error, errorInfo) => {

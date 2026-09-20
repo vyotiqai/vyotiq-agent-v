@@ -10,8 +10,12 @@ import {
   AgentProfileCreateRequestSchema,
   AgentProfileUpdateRequestSchema,
   AgentProfileDeleteRequestSchema,
+  AgentProfileOverridesListRequestSchema,
+  AgentProfileOverrideSetRequestSchema,
+  type AgentProfileDeleteResult,
   TaskEnqueueRequestSchema,
   TaskCancelRequestSchema,
+  TaskRetryRequestSchema,
   ChatUiSubscribeRequestSchema,
   ChatUiSubscribeAddRequestSchema,
   ComposerAttachmentsClearRequestSchema,
@@ -31,6 +35,8 @@ import {
   RunStatsRequestSchema,
   HomeActivityRequestSchema,
   HarnessReviewRequestSchema,
+  RunFeedbackGetRequestSchema,
+  RunFeedbackSetRequestSchema,
   HarnessPreviewApplyRequestSchema,
   HarnessApplyRequestSchema,
   SetSettingsRequestSchema,
@@ -186,6 +192,8 @@ import {
   type RunStatsResult,
   type HomeActivityResult,
   type HarnessReviewResult,
+  type RunFeedbackGetResult,
+  type RunFeedbackSetResult,
   type HarnessPreviewApplyResult,
   type HarnessApplyResult,
   type ListRunsResult,
@@ -271,6 +279,7 @@ import {
   openSlashFile
 } from '@main/agent/slashCommands'
 import { runHarnessReviewWithSettings } from '@main/agent/harnessReviewRun'
+import { getRunFeedbackEntry, setRunFeedbackRating } from '@main/agent/feedback/runFeedbackStore'
 import {
   isAllowedLocalSkillPath,
   isSkillRelatedRelPath,
@@ -302,8 +311,9 @@ import {
 } from '@main/settings/secrets'
 import { getChatEventDispatcher, setChatEventUiSubscriptions, addChatEventUiSubscription } from './streamBatch'
 import { installIpcTiming, timeSyncIpc } from '../perf/ipcTiming'
-import { createRunId } from '../agent/loop'
+import { createRunId, validateExistingRunStart } from '../agent/loop'
 import { hydrateRunFollowUps, startAgentRunInBackground } from '../agent/startAgentRun'
+import { launchRun } from '../agent/launchRun'
 import {
   compactRunNow,
   CompactionUnavailableError,
@@ -330,11 +340,15 @@ import {
   createAgentProfile,
   updateAgentProfile,
   deleteAgentProfile,
+  getAgentProfile,
   emitAgentProfilesChanged,
   mutateAgentProfiles,
-  removeProfileOverridesForWorkspaces
+  removeProfileArtifactsForWorkspaces,
+  listWorkspaceProfileOverrides,
+  writeWorkspaceProfileOverride,
+  emitAgentProfileOverridesChanged
 } from '../settings/agentProfiles'
-import { listTasks, enqueueTask, cancelTask, resumeTasksForWorkspaces, cancelTasksForProfile } from '../agent/taskScheduler'
+import { listTasks, enqueueTask, cancelTask, retryTask, resumeTasksForWorkspaces, cancelTasksForProfile } from '../agent/taskScheduler'
   import { focusAgentBrowser, closeAgentBrowser, getAgentBrowserState, selectBrowserTab, browserGoBack, browserGoForward, setAgentBrowserBounds, navigateUrl, clearAgentBrowserData, takeBrowserScreenshot, disposeAgentBrowserForWorkspace, takeBrowserControl, releaseBrowserControl, manageTabs, toggleAgentBrowserPip } from '@main/app/agentBrowser'
 import { extractAttachment } from '../attachments/extract'
 import {
@@ -411,7 +425,13 @@ import {
   appendEvent
 } from '../agent/state'
 import { forkRun } from '../agent/forkRun'
-import { pauseGoalIfActive, readGoal, updateGoalStatus } from '../agent/runGoal'
+import {
+  activateGoalByUser,
+  dismissGoalProposal,
+  pauseGoalIfActive,
+  readGoal,
+  updateGoalStatus
+} from '../agent/runGoal'
 import { emitGoalUpdate } from '../agent/goalEvents'
 import { armLoop, disarmLoop, readLoop } from '../agent/runLoopScheduler'
 import { launchRunFollowUpOrStart } from '../agent/launchRunInvoke'
@@ -781,7 +801,7 @@ export function registerIpc(): void {
         const next = await addWorkspace(win, req.path)
         // Load and arm the new workspace's persisted tasks (boot re-arm only
         // covers workspaces open at startup).
-        if (req.path) resumeTasksForWorkspaces([req.path])
+        if (req.path) await resumeTasksForWorkspaces([req.path])
         invalidateMcpResolveCache()
         await syncMcpServers(resolveMcpServersForSessionMap())
         notifyToolCatalogChanged()
@@ -1081,89 +1101,22 @@ export function registerIpc(): void {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
       const req = ChatStartRequestSchema.parse(raw)
-      const workspaces = getWorkspaces()
-      const open = workspaces.openPaths.some((p) => workspacePathsEqual(p, req.workspacePath))
-      if (!open) {
-        return failExpected('Workspace is not open', IPC.chatStart)
-      }
-      if (!existsSync(req.workspacePath)) {
-        return failExpected('Workspace path does not exist', IPC.chatStart)
-      }
-      const wc = event.sender
-      let runId: string
-      let resume = false
-      if (req.runId && runExists(req.workspacePath, req.runId)) {
-        if (isActive(req.runId)) {
-          // UI can show done while finally is still flushing; wait for unwind
-          // instead of failing a quick next send with "Run is already active".
-          if (isRunTurnComplete(req.runId)) {
-            const cleared = await waitUntilRunInactive(req.runId)
-            if (!cleared || isActive(req.runId)) {
-              return failExpected('Run is already active', IPC.chatStart, req.runId)
-            }
-          } else {
-            return failExpected('Run is already active', IPC.chatStart, req.runId)
-          }
-        }
-        runId = req.runId
-        resume = true
-      } else {
-        runId = createRunId()
-      }
-      // Atomic register BEFORE return so cancel works during startup and concurrent
-      // chatStart cannot overlap the same runDir (check+set with no await gap).
-      const registered = tryRegisterRunAbort(runId, req.workspacePath, req.agentProfileId)
-      if (!registered.ok) {
-        return failExpected(registered.error, IPC.chatStart, runId, registered.code)
-      }
-      const { invokeId } = registered
-      if (resume) {
-        // Dedupe against the freshly sent messages: a crash between enqueue and
-        // apply followed by a manual resend must not apply the text twice.
-        hydrateRunFollowUps(req.workspacePath, runId, req.newMessages)
-      }
-      logger.info('Chat start', {
-        scope: 'ipc',
-        correlationId: runId,
-        channel: IPC.chatStart,
-        resume
+      // Everything from workspace validation to background start lives in the
+      // shared launcher, so a chat send and a delegated task get an identical
+      // sequence of checks. This handler owns only trust: schema and sender.
+      const outcome = await launchRun({
+        ...req,
+        explicit: {
+          agentProfileId: Object.prototype.hasOwnProperty.call(raw, 'agentProfileId'),
+          runtime: Object.prototype.hasOwnProperty.call(raw, 'runtime')
+        },
+        wc: event.sender,
+        source: IPC.chatStart
       })
-
-      const agentInput =
-        req.incremental && req.runId && req.newMessages?.length
-          ? {
-              runId,
-              workspacePath: req.workspacePath,
-              resume,
-              newMessages: req.newMessages,
-              persistedMessageCount: req.persistedMessageCount,
-              mode: req.mode,
-              focusedFile: req.focusedFile,
-              provider: req.provider,
-              model: req.model,
-              agentProfileId: req.agentProfileId
-            }
-          : {
-              runId,
-              messages: req.messages ?? [],
-              workspacePath: req.workspacePath,
-              resume,
-              mode: req.mode,
-              focusedFile: req.focusedFile,
-              provider: req.provider,
-              model: req.model,
-              agentProfileId: req.agentProfileId
-            }
-      startAgentRunInBackground({
-        runId,
-        workspacePath: req.workspacePath,
-        invokeId,
-        controller: registered.controller,
-        wc,
-        agentInput
-      })
-
-      return ok({ runId, invokeId })
+      if (!outcome.ok) {
+        return failExpected(outcome.error, IPC.chatStart, req.runId, outcome.code)
+      }
+      return ok({ runId: outcome.runId, invokeId: outcome.invokeId })
     } catch (err) {
       return failFrom(err, IPC.chatStart)
     }
@@ -1198,33 +1151,117 @@ export function registerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.agentProfilesDelete, async (event, raw): Promise<IpcResult<true>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = AgentProfileDeleteRequestSchema.parse(raw)
-      await mutateAgentProfiles(() => deleteAgentProfile(req))
-      // Deleting a teammate ends its work: queued/scheduled tasks are cancelled
-      // and any live run bound to the profile is stopped through the same
-      // cancel path the Stop button uses.
-      cancelTasksForProfile(req.id)
-      for (const run of listActiveRuns()) {
-        if (run.agentProfileId === req.id) cancelRun(run.runId)
+  ipcMain.handle(
+    IPC.agentProfilesDelete,
+    async (event, raw): Promise<IpcResult<AgentProfileDeleteResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = AgentProfileDeleteRequestSchema.parse(raw)
+        if (!getAgentProfile(req.id)) {
+          return failExpected(`Unknown agent profile: ${req.id}`, IPC.agentProfilesDelete)
+        }
+        // Cover every path this install knows (open, recent, persisted UI
+        // state), not just open ones — a closed workspace would otherwise keep
+        // running the dead identity's tasks and revive its override.
+        const knownPaths = new Set<string>([
+          ...getWorkspaces().openPaths,
+          ...getWorkspaces().recentPaths
+        ])
+        for (const path of Object.keys(getWorkspaces().uiStateByPath ?? {})) knownPaths.add(path)
+        const paths = [...knownPaths]
+        const warnings: string[] = []
+
+        // Preflight: end the teammate's work BEFORE the roster entry goes away.
+        // Committing first leaves a window where tasks and runs reference a
+        // profile that no longer resolves, and they then fail as "profile no
+        // longer exists" instead of being cancelled with the teammate.
+        let cancelledTasks = 0
+        try {
+          cancelledTasks = cancelTasksForProfile(req.id, paths)
+        } catch (err) {
+          warnings.push(
+            `Some delegated tasks could not be cancelled: ${err instanceof Error ? err.message : String(err)}`
+          )
+        }
+        let cancelledRuns = 0
+        for (const run of listActiveRuns()) {
+          if (run.agentProfileId !== req.id) continue
+          try {
+            if (cancelRun(run.runId)) cancelledRuns += 1
+          } catch (err) {
+            warnings.push(
+              `Run ${run.runId} could not be stopped: ${err instanceof Error ? err.message : String(err)}`
+            )
+          }
+        }
+
+        await mutateAgentProfiles(() => deleteAgentProfile(req))
+
+        // Behavior overrides must not survive to re-skin a future teammate.
+        // Run history and the private memory namespace are preserved — the id
+        // is retired instead of reused, so nothing can inherit them.
+        const artifacts = removeProfileArtifactsForWorkspaces(req.id, paths)
+        for (const failure of artifacts.failures) {
+          warnings.push(`Could not remove ${failure.path}: ${failure.error}`)
+        }
+        emitAgentProfilesChanged()
+        for (const path of getWorkspaces().openPaths) emitAgentProfileOverridesChanged(path)
+        return ok({ deleted: true as const, cancelledTasks, cancelledRuns, warnings })
+      } catch (err) {
+        return failFrom(err, IPC.agentProfilesDelete)
       }
-      // A recreated teammate with the same slug must not inherit dead overrides:
-      // cover every path this install knows (open, recent, persisted UI state) —
-      // not just open ones, or a closed workspace would revive the override.
-      const knownPaths = new Set<string>([
-        ...getWorkspaces().openPaths,
-        ...getWorkspaces().recentPaths
-      ])
-      for (const path of Object.keys(getWorkspaces().uiStateByPath ?? {})) knownPaths.add(path)
-      removeProfileOverridesForWorkspaces(req.id, [...knownPaths])
-      emitAgentProfilesChanged()
-      return ok(true)
-    } catch (err) {
-      return failFrom(err, IPC.agentProfilesDelete)
     }
-  })
+  )
+
+  ipcMain.handle(
+    IPC.agentProfileOverridesList,
+    async (event, raw): Promise<IpcResult<unknown>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = AgentProfileOverridesListRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) {
+          return failExpected('Workspace is not open', IPC.agentProfileOverridesList)
+        }
+        return ok({
+          workspacePath: req.workspacePath,
+          overrides: listWorkspaceProfileOverrides(req.workspacePath)
+        })
+      } catch (err) {
+        return failFrom(err, IPC.agentProfileOverridesList)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.agentProfileOverrideSet,
+    async (event, raw): Promise<IpcResult<unknown>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = AgentProfileOverrideSetRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) {
+          return failExpected('Workspace is not open', IPC.agentProfileOverrideSet)
+        }
+        // getAgentProfile, not resolveAgentProfile: an override whose current
+        // contents make the profile resolve oddly must still be editable, and
+        // the override file belongs to the global profile either way.
+        if (!getAgentProfile(req.profileId)) {
+          return failExpected(
+            `Unknown agent profile: ${req.profileId}`,
+            IPC.agentProfileOverrideSet
+          )
+        }
+        // Serialized with roster mutations so a write cannot interleave with a
+        // delete that is removing this same profile's artifacts.
+        const next = await mutateAgentProfiles(() =>
+          writeWorkspaceProfileOverride(req.workspacePath, req.profileId, req.override)
+        )
+        emitAgentProfileOverridesChanged(req.workspacePath)
+        return ok(next)
+      } catch (err) {
+        return failFrom(err, IPC.agentProfileOverrideSet)
+      }
+    }
+  )
 
   ipcMain.handle(IPC.tasksList, async (event): Promise<IpcResult<ReturnType<typeof listTasks>>> => {
     if (!senderOk(event)) return fail('Invalid sender')
@@ -1248,6 +1285,18 @@ export function registerIpc(): void {
       return ok(cancelTask(req.id))
     } catch (err) {
       return failFrom(err, IPC.tasksCancel)
+    }
+  })
+
+  ipcMain.handle(IPC.tasksRetry, async (event, raw): Promise<IpcResult<unknown>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskRetryRequestSchema.parse(raw)
+      // Explicit, user-initiated re-run only. Auto-retrying a delegated task
+      // would replay whatever side effects the previous attempt already had.
+      return ok(retryTask(req.id))
+    } catch (err) {
+      return failFrom(err, IPC.tasksRetry)
     }
   })
 
@@ -1329,7 +1378,8 @@ export function registerIpc(): void {
             resume: true,
             mode: req.mode,
             provider: req.provider,
-            model: req.model
+            model: req.model,
+            modelExplicit: req.modelExplicit
           }
         })
 
@@ -1950,6 +2000,41 @@ export function registerIpc(): void {
   )
 
   ipcMain.handle(
+    IPC.runFeedbackGet,
+    async (event, raw): Promise<IpcResult<RunFeedbackGetResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = RunFeedbackGetRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        return ok({ entry: getRunFeedbackEntry(req.workspacePath, req.runId) })
+      } catch (err) {
+        return failFrom(err, IPC.runFeedbackGet)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.runFeedbackSet,
+    async (event, raw): Promise<IpcResult<RunFeedbackSetResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = RunFeedbackSetRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        return ok({
+          entry: setRunFeedbackRating({
+            workspacePath: req.workspacePath,
+            runId: req.runId,
+            rating: req.rating,
+            note: req.note
+          })
+        })
+      } catch (err) {
+        return failFrom(err, IPC.runFeedbackSet)
+      }
+    }
+  )
+
+  ipcMain.handle(
     IPC.harnessReview,
     async (event, raw): Promise<IpcResult<HarnessReviewResult>> => {
       if (!senderOk(event)) return fail('Invalid sender')
@@ -2273,8 +2358,27 @@ export function registerIpc(): void {
           }
           return ok({ goal })
         }
-        if (req.action === 'resume') {
-          const goal = updateGoalStatus(runDir, 'active')
+        if (req.action === 'dismiss') {
+          const current = readGoal(runDir)
+          if (!current) return fail('No goal on this run.')
+          if (current.status !== 'proposed') {
+            return fail('Only a goal awaiting confirmation can be dismissed.')
+          }
+          if (!dismissGoalProposal(runDir)) return fail('Could not dismiss the proposed goal.')
+          emitGoalUpdate({
+            workspacePath: req.workspacePath,
+            runId: req.runId,
+            runDir,
+            goal: null,
+            notice: 'Goal dismissed',
+            wc
+          })
+          return ok({ goal: null })
+        }
+        // `resume` (after a user pause) and `activate` (starting an agent
+        // proposal) are the same grant: the user putting the goal into `active`.
+        if (req.action === 'resume' || req.action === 'activate') {
+          const goal = activateGoalByUser(runDir)
           emitGoalUpdate({
             workspacePath: req.workspacePath,
             runId: req.runId,
@@ -3432,7 +3536,9 @@ export function registerIpc(): void {
       invalidateMcpResolveCache()
       const item = index.items.find((i) => i.id === id)
       if (item?.kind === 'mcp' || item?.kind === 'plugin') {
-        if (item.kind === 'mcp') await syncMarketplaceMcpIntoSettings()
+        // Plugins too: toggling one changes whether its nested MCP servers
+        // belong in settings.
+        await syncMarketplaceMcpIntoSettings()
         await syncMcpServers(resolveMcpServersForSessionMap())
         notifyToolCatalogChanged()
       }

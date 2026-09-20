@@ -1,14 +1,8 @@
 /**
- * Bakes the current release + its downloadable assets from the GitHub API.
- *
- * Installers live in the companion repo `vyotiqai/vyotiq-agent-v-releases`
- * (electron-builder.yml `publish:`), which is also the feed the in-app updater
- * reads. Asset URLs are never constructed from a filename pattern here — only
- * what the API actually returns is written out, so the download page cannot
- * render a button for a file that does not exist.
- *
- * When there is no published release the script writes an explicit empty state
- * rather than failing: the site then says so plainly instead of guessing.
+ * Bakes the latest release and its assets from the GitHub API. Installers live
+ * in vyotiqai/vyotiq-agent-v-releases (electron-builder.yml `publish:`), the
+ * feed the in-app updater also reads. Only what the API returns is written; with
+ * no published release an explicit empty state is written instead.
  */
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'

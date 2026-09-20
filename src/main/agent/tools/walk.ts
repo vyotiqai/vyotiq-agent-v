@@ -412,6 +412,24 @@ export function isDenseIndexPath(rel: string, full?: string): boolean {
 /** Yield the event loop so long scans stay responsive to abort/cancel. */
 const YIELD_EVERY_DIRS = 64
 
+/**
+ * A subdirectory holding its own `.git` is a separate checkout — a nested clone
+ * or a git worktree — not part of this workspace's tree. Walking it duplicates
+ * the whole repo: measured on this repo, two worktrees under `.claude/worktrees`
+ * were 4,770 of 8,030 scanned files (59%) and 39.2 of 64.9 MB (60%), which every
+ * grep/glob/search paid for on every call. A worktree marks itself with a `.git`
+ * file, a clone with a `.git` directory; either is enough to stop the descent.
+ * The workspace root is never tested, so its own `.git` is irrelevant here.
+ */
+async function isNestedCheckout(dir: string): Promise<boolean> {
+  try {
+    await fsp.access(join(dir, '.git'))
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))
 }
@@ -503,6 +521,9 @@ export async function collectWorkspaceFilesPage(
       await yieldToEventLoop()
       throwIfAborted(signal)
     }
+
+    // Root is always walked; any nested checkout below it is a separate repo.
+    if (next.relDir && (await isNestedCheckout(next.dir))) continue
 
     const dirMatcher = gitignoreMatcherForDir(workspaceRoot, next.relDir)
     let entries

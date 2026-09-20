@@ -12,9 +12,11 @@ Vyotiq ("Agent V") is an Electron desktop app: a coding workspace for real repos
 - **Agent runs and instance worktrees** — the agent can fan work out to child instances; each child runs on its own git worktree branch and the result is merged back into the parent branch.
 - **Local Whisper dictation** — voice dictation is transcribed entirely on your machine (Whisper via transformers.js with the onnxruntime-node backend) in the Electron main process / a utility process. No audio leaves the app. The model weights are fetched from Hugging Face into the app's user data directory the first time you use dictation, so the feature needs one download before it works offline.
 - **Skills and marketplace** — skills ship with the app as marketplace resources and can be loaded into a run; plugin rules are supported alongside skill files.
-- **MCP client** — connect Model Context Protocol servers, list their tools/resources/prompts, and pin their tools into the agent's catalog.
+- **MCP client** — connect Model Context Protocol servers, list their tools/resources/prompts, and pin their tools into the agent's catalog. Connection attempts widen Node's 250ms per-address window, so a reachable host that publishes several A/AAAA records is not reported as unreachable.
 - **Long-term workspace memory** — the agent keeps notes under `.vyotiq/memory/` in the workspace and re-reads them on later runs.
-- **Teammates** — persistent agent identities with per-workspace private memory, pinned models, and delegated tasks that run on a schedule or queue — surviving app restarts, with auto-resume for interrupted runs. See [docs/teammates.md](docs/teammates.md).
+- **Teammates** — persistent agent identities with per-workspace private memory, pinned models, and delegated tasks that run on a schedule or queue — surviving app restarts, with auto-resume for interrupted runs. A dedicated Teammates view carries the roster, each teammate's task inbox, and per-workspace behaviour overrides; a finished task can be retried as a new record so the attempt that failed stays in history. See [docs/teammates.md](docs/teammates.md).
+- **Verification gate** — the run loop tracks whether a check actually ran, and reported clean, after the last file the agent changed, so a turn that edited code without verifying it is caught while it can still act rather than at teardown.
+- **Run feedback** — each workspace remembers how its runs went under `runFeedback.json`, and messages can be rated in place. Receipts are per-run and pruned with their session, so this is what makes recurring trouble visible across runs.
 
 ## Documentation
 
@@ -33,7 +35,7 @@ Installers are published to the companion repository [vyotiqai/vyotiq-agent-v-re
 Prerequisites:
 
 - Node.js `>=22.18.0` (see `engines` in `package.json`)
-- pnpm 11.25.0, pinned by the `packageManager` field — enable it once with `corepack enable`
+- pnpm 12.4.2, pinned by the `packageManager` field — enable it once with `corepack enable`
 
 ```bash
 git clone https://github.com/vyotiqai/vyotiq-agent-v.git
@@ -92,12 +94,28 @@ Artifacts are written to `dist-package/` (see `electron-builder.yml`: appId `com
 - `src/shared` — code shared between main and renderer
 - `tests/` — vitest unit/e2e suites plus Playwright GUI e2e
 - `scripts/` — sync and build helper scripts wired into the package scripts
+- `landing/` — the [vyotiq.com](https://vyotiq.com) website, a workspace package
+
+## Website
+
+The website is a static Astro site in `landing/`, built from this repository's own data rather than restated prose — the tool names come from the tool registry, the providers from the provider defaults, the extensions from the bundled marketplace catalog, and the legal pages render the repository's own Markdown verbatim.
+
+```bash
+pnpm site:dev     # dev server
+pnpm site:build   # static build into landing/dist
+pnpm site:capture # re-capture the application screenshots
+pnpm site:verify  # post-build assertions over landing/dist
+```
+
+Which capabilities the site may name is gated by `landing/src/lib/showcase.ts`: adding a tool, provider, or marketplace package to the app fails `pnpm site:build` until it is approved there.
 
 ## Documentation
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development workflow and the standard gates
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — code of conduct
 - [SECURITY.md](SECURITY.md) — how to report vulnerabilities
+- [PRIVACY.md](PRIVACY.md) — what the app stores and what leaves your machine
+- [TERMS.md](TERMS.md) — terms of use
 - [RELEASE-RUNBOOK.md](RELEASE-RUNBOOK.md) — maintainer release procedure
 - [NOTICE](NOTICE) — third-party notices
 

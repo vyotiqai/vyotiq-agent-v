@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { Icon, type IconName } from '@renderer/lib/icons'
 import { Tooltip, cn } from '@renderer/lib/ui'
 import { DISCLOSURE_CHEVRON, DISCLOSURE_ROW } from '@renderer/lib/utils/layout'
@@ -6,7 +6,8 @@ import { formatElapsed } from '@shared/utils/timeFormat'
 import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import type { TurnSpan } from '../utils/transcriptRows'
-import { turnSummaryActiveLabel } from '../utils/runActivity'
+import { turnSummaryVoiceLabel } from '../utils/runActivity'
+import { runVoiceTick } from '../utils/runVoice'
 import { buildFooterStats } from '../utils/messageFooterStats'
 import { TextShimmer } from './TextShimmer'
 
@@ -43,7 +44,22 @@ export const TurnSummary = memo(function TurnSummary({
   )
 
   const hidePhase = suppressPhaseLabel && active && !collapsed
-  const phaseLabel = turnSummaryActiveLabel(activity)
+  // Rotation measures how long THIS phase has held, not how long the turn has
+  // run. Anchoring to the turn start instead would open a phase entered ten
+  // seconds in on a mid-pool word, and would drift out of step with the
+  // thought row's own rotation while both are on screen.
+  //
+  // Re-anchoring during render (rather than in an effect) is deliberate: an
+  // effect lands a frame late, so every phase change would flash the outgoing
+  // phase's word for up to a second. React discards this pass and re-runs with
+  // the new anchor, so nothing is committed with the stale one.
+  const phaseKey = activity?.kind ?? 'working'
+  const [phaseAnchor, setPhaseAnchor] = useState(() => ({ key: phaseKey, at: now }))
+  if (phaseAnchor.key !== phaseKey) setPhaseAnchor({ key: phaseKey, at: now })
+  // The 1 Hz clock above already re-renders this row, so the phrase costs no
+  // second timer and never reshuffles on a streamed token.
+  const phaseHeldMs = active ? Math.max(0, now - phaseAnchor.at) : 0
+  const phaseLabel = turnSummaryVoiceLabel(activity, runVoiceTick(phaseHeldMs))
   const receipt = useMemo(
     () =>
       buildFooterStats({

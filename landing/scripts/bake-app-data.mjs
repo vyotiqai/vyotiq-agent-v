@@ -1,11 +1,8 @@
 /**
- * Bakes every product fact the site states out of the repo sources that own it.
- *
- * Nothing here is transcribed by hand: tool names come from TOOL_REGISTRY,
- * providers from PROVIDER_DEFAULTS, extensions from the marketplace catalog,
- * packaging targets from electron-builder.yml. Every extraction asserts what it
- * found, so a refactor that moves or renames a source breaks the build instead
- * of quietly shipping a stale or empty claim on the website.
+ * Bakes the product facts the site states out of the repo sources that own
+ * them (TOOL_REGISTRY, PROVIDER_DEFAULTS, the marketplace catalog,
+ * electron-builder.yml). Every extraction asserts what it found, so a moved or
+ * renamed source breaks the build instead of shipping a stale claim.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -16,6 +13,22 @@ const landing = join(here, '..')
 const repo = join(landing, '..')
 
 const read = (p) => readFileSync(join(repo, p), 'utf8')
+
+/**
+ * Whether the site may invert this icon for its dark theme: true only when the
+ * art is a single black ink. Read from the file rather than from a list of
+ * exceptions, so replacing a vendor's colour mark with a monochrome version
+ * flips it on by itself, and adding a new coloured one can never be forgotten
+ * into rendering as a negative.
+ *
+ * Mirrors isMonochrome() in src/main/marketplace/catalogIcons.ts — the app
+ * makes the same call about the same files for the same reason.
+ */
+const isMonochromeIcon = (abs) => {
+  if (!abs.toLowerCase().endsWith('.svg')) return false
+  const colours = new Set(readFileSync(abs, 'utf8').match(/#[0-9A-Fa-f]{3,6}/g) ?? [])
+  return colours.size > 0 && [...colours].every((c) => c.toLowerCase() === '#000000')
+}
 const fail = (msg) => {
   console.error(`[bake-app-data] ${msg}`)
   process.exit(1)
@@ -23,9 +36,7 @@ const fail = (msg) => {
 
 /* ---------------------------------------------------------------- tools --- */
 
-// TOOL_REGISTRY is an object literal; its direct keys are the tool names the
-// agent can call. Walk the braces to find the literal's exact extent so nested
-// schema keys can never leak into the list.
+// Walk the braces of the TOOL_REGISTRY literal so nested schema keys never leak in.
 function extractTools() {
   const src = read('src/main/agent/schemas/tools.ts')
   const start = src.indexOf('export const TOOL_REGISTRY = {')
@@ -48,10 +59,26 @@ function extractTools() {
   if (end === -1) fail('TOOL_REGISTRY literal is unbalanced')
 
   const body = src.slice(open + 1, end)
-  // Direct members sit at exactly two spaces of indentation.
-  const names = [...body.matchAll(/^ {2}([a-z][a-z0-9_]*): \{$/gm)].map((m) => m[1])
+  // Direct members sit at two spaces of indentation; names are not all lower-case (`Skill`).
+  const names = []
+  let depthInBody = 0
+  for (const line of body.split(/\r?\n/)) {
+    if (depthInBody === 0) {
+      const match = line.match(/^ {2}([A-Za-z_$][A-Za-z0-9_$]*)\s*:/)
+      if (match) names.push(match[1])
+    }
+    for (const ch of line) {
+      if (ch === '{') depthInBody++
+      else if (ch === '}') depthInBody--
+    }
+  }
   if (names.length < 40) fail(`extracted only ${names.length} tools — the registry shape changed`)
   if (new Set(names).size !== names.length) fail('duplicate tool names extracted')
+
+  // The app reports Object.keys(TOOL_REGISTRY) in its Tools panel; keep that true.
+  if (!/export const BUILTIN_TOOL_NAMES = Object\.keys\(TOOL_REGISTRY\)/.test(src)) {
+    fail('BUILTIN_TOOL_NAMES is no longer Object.keys(TOOL_REGISTRY) — re-check the tool count')
+  }
   return names
 }
 
@@ -96,8 +123,7 @@ function extractExtensions() {
     counts[p.kind]++
   }
 
-  // Only surface icons that actually exist on disk, so the site can never
-  // render a broken image for a package it lists.
+  // Only icons that exist on disk, so the site never renders a broken image.
   const list = packages.map((p) => {
     const iconOk = p.iconPath && existsSync(join(repo, 'resources/marketplace', p.iconPath))
     return {
@@ -111,7 +137,12 @@ function extractExtensions() {
       auth: p.auth ?? 'none',
       featured: (p.sections ?? []).includes('featured'),
       featuredRank: p.featuredRank ?? null,
-      icon: iconOk ? p.iconPath.replace(/^icons\//, '') : null
+      icon: iconOk ? p.iconPath.replace(/^icons\//, '') : null,
+      // Whether the site may invert this icon for its dark theme. Read from
+      // the file rather than from a list of exceptions, so replacing a
+      // vendor's colour art with a monochrome version flips it on by itself.
+      // Mirrors isMonochrome() in src/main/marketplace/catalogIcons.ts.
+      iconMono: iconOk ? isMonochromeIcon(join(repo, 'resources/marketplace', p.iconPath)) : false
     }
   })
 
@@ -120,9 +151,8 @@ function extractExtensions() {
 
 /* ------------------------------------------------------------ packaging --- */
 
-// electron-builder.yml is the source of truth for what gets built. Rather than
-// depend on a YAML parser, assert that every target this site names is really
-// configured there, and read the signing posture off the same file.
+// Assert every target the site names is configured in electron-builder.yml,
+// and read the signing posture from it, without a YAML parser.
 function extractPackaging() {
   const yml = read('electron-builder.yml')
   for (const target of ['nsis', 'dmg', 'zip', 'AppImage', 'deb', 'rpm']) {
@@ -143,8 +173,6 @@ function extractPackaging() {
   const appId = yml.match(/^appId:\s*(\S+)/m)?.[1]
   if (!productName || !appId) fail('productName / appId missing from electron-builder.yml')
 
-  // Signing posture is stated on the download page rather than hidden, because
-  // it is what users actually hit on first launch.
   const macNotarized = !/^\s*notarize:\s*false\s*$/m.test(yml)
   const winSigned = /certificateFile|azureSignOptions|^\s*sign:/m.test(yml)
 

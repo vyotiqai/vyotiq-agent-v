@@ -1,11 +1,110 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
 import { TurnSummary } from '@renderer/features/chat/components/TurnSummary'
+import type { RunActivityPhase } from '@renderer/features/chat/utils/runActivity'
+import {
+  RUN_VOICE_PHRASES,
+  RUN_VOICE_ROTATE_MS
+} from '@renderer/features/chat/utils/runVoice'
 
 describe('TurnSummary', () => {
+  it('lets a live phase take on the transcript voice as the turn runs long', async () => {
+    vi.useFakeTimers()
+    try {
+      render(
+        <TurnSummary
+          span={{
+            startedAt: Date.now(),
+            endedAt: null,
+            active: true,
+            activity: { kind: 'working' }
+          }}
+          collapsed
+          onToggle={() => undefined}
+        />
+      )
+
+      // Opens plain, so a turn that ends in a beat never reads as a flourish.
+      expect(screen.getByRole('button').textContent).toContain(RUN_VOICE_PHRASES.working[0])
+
+      await act(async () => {
+        vi.advanceTimersByTime(RUN_VOICE_ROTATE_MS)
+      })
+      expect(screen.getByRole('button').textContent).toContain(RUN_VOICE_PHRASES.working[1])
+
+      await act(async () => {
+        vi.advanceTimersByTime(RUN_VOICE_ROTATE_MS)
+      })
+      expect(screen.getByRole('button').textContent).toContain(RUN_VOICE_PHRASES.working[2])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('restarts the rotation when the phase changes, not when the turn does', async () => {
+    vi.useFakeTimers()
+    try {
+      const startedAt = Date.now()
+      const span = (activity: RunActivityPhase) =>
+        ({ startedAt, endedAt: null, active: true, activity }) as const
+
+      const { rerender } = render(
+        <TurnSummary span={span({ kind: 'thinking' })} collapsed onToggle={() => undefined} />
+      )
+
+      // Three rotations into the turn, thinking has walked well past plain.
+      await act(async () => {
+        vi.advanceTimersByTime(RUN_VOICE_ROTATE_MS * 3)
+      })
+      expect(screen.getByRole('button').textContent).toContain(RUN_VOICE_PHRASES.thinking[3])
+
+      // A different phase begins here. It is one beat old, so it must read
+      // literally — anchoring to the turn would have opened it mid-pool.
+      rerender(
+        <TurnSummary span={span({ kind: 'writing' })} collapsed onToggle={() => undefined} />
+      )
+      expect(screen.getByRole('button').textContent).toContain(RUN_VOICE_PHRASES.writing[0])
+
+      // And it rotates on its own clock from there.
+      await act(async () => {
+        vi.advanceTimersByTime(RUN_VOICE_ROTATE_MS)
+      })
+      expect(screen.getByRole('button').textContent).toContain(RUN_VOICE_PHRASES.writing[1])
+
+      // Returning to an earlier phase restarts it too, rather than resuming.
+      rerender(
+        <TurnSummary span={span({ kind: 'thinking' })} collapsed onToggle={() => undefined} />
+      )
+      expect(screen.getByRole('button').textContent).toContain(RUN_VOICE_PHRASES.thinking[0])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('never voices a finished turn, whatever it ran for', () => {
+    render(
+      <TurnSummary
+        span={{
+          startedAt: Date.parse('2026-08-18T10:00:00.000Z'),
+          endedAt: Date.parse('2026-08-18T10:04:00.000Z'),
+          active: false,
+          activity: { kind: 'working' }
+        }}
+        collapsed
+        onToggle={() => undefined}
+      />
+    )
+
+    const text = screen.getByRole('button').textContent ?? ''
+    expect(text).toContain('Completed')
+    for (const phrase of RUN_VOICE_PHRASES.working.slice(1)) {
+      expect(text).not.toContain(phrase)
+    }
+  })
+
   it('suppresses phase label when live tools own the detail', () => {
     render(
       <TurnSummary
@@ -62,7 +161,7 @@ describe('TurnSummary', () => {
     expect(screen.queryByText('9s')).toBeNull()
   })
 
-  it('appends verified tokens on the live Working line without inventing $', () => {
+  it('appends verified tokens on the live phase line without inventing $', () => {
     render(
       <TurnSummary
         span={{
@@ -92,7 +191,10 @@ describe('TurnSummary', () => {
       />
     )
 
-    expect(screen.getByText('Working')).toBeTruthy()
+    // The live phase speaks in the transcript's voice, so assert the row opens
+    // on a working phrase rather than pinning the copy to one word.
+    const phase = screen.getByRole('button').textContent ?? ''
+    expect(RUN_VOICE_PHRASES.working.some((phrase) => phase.startsWith(phrase))).toBe(true)
     expect(screen.getByText(/tok/)).toBeTruthy()
     expect(screen.getByText(/16 output tok\/s/)).toBeTruthy()
     expect(screen.queryByText(/\$/)).toBeNull()

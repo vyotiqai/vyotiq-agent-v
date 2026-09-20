@@ -7,6 +7,7 @@ type ZodDef = {
   schema?: ZodTypeAny
   type?: ZodTypeAny
   shape?: () => Record<string, ZodTypeAny>
+  valueType?: ZodTypeAny
   values?: string[]
   checks?: Array<{ kind: string; value?: number | string }>
   minLength?: { value: number } | null
@@ -101,10 +102,10 @@ function stringSchema(s: ZodTypeAny, description: string | undefined): Record<st
 
 /** Minimal Zod → JSON Schema for tool / compaction definitions. */
 export function zodToJsonSchema(schema: ZodTypeAny): Record<string, unknown> {
-  return toJsonSchema(schema, true)
+  return toJsonSchema(schema, '(root)')
 }
 
-function toJsonSchema(schema: ZodTypeAny, root: boolean): Record<string, unknown> {
+function toJsonSchema(schema: ZodTypeAny, path: string): Record<string, unknown> {
   const { inner: s, description } = unwrapWithDescription(schema)
   const typeName = defOf(s).typeName
 
@@ -125,7 +126,7 @@ function toJsonSchema(schema: ZodTypeAny, root: boolean): Record<string, unknown
     const items = defOf(s).type as ZodTypeAny
     const out: Record<string, unknown> = {
       type: 'array',
-      items: toJsonSchema(items, false)
+      items: toJsonSchema(items, `${path}[]`)
     }
     const d = defOf(s)
     if (d.minLength && typeof d.minLength.value === 'number') out.minItems = d.minLength.value
@@ -137,7 +138,7 @@ function toJsonSchema(schema: ZodTypeAny, root: boolean): Record<string, unknown
     const properties: Record<string, unknown> = {}
     const required: string[] = []
     for (const [key, field] of Object.entries(shape)) {
-      properties[key] = toJsonSchema(field, false)
+      properties[key] = toJsonSchema(field, `${path}.${key}`)
       if (!isOptional(field)) required.push(key)
     }
     const out: Record<string, unknown> = {
@@ -150,9 +151,21 @@ function toJsonSchema(schema: ZodTypeAny, root: boolean): Record<string, unknown
     else if (Object.keys(properties).length === 0) out.required = []
     return withDescription(out, description)
   }
-  // A tool whose root schema converts to `{}` would accept anything — fail fast.
-  if (root) {
-    throw new Error(`zodToJsonSchema: unsupported root schema type "${typeName}"`)
+  if (typeName === 'ZodRecord') {
+    // Open-ended string keys: JSON Schema expresses them as additionalProperties.
+    const valueType = defOf(s).valueType as ZodTypeAny | undefined
+    return withDescription(
+      {
+        type: 'object',
+        additionalProperties: valueType
+          ? toJsonSchema(valueType, `${path}.*`)
+          : true
+      },
+      description
+    )
   }
-  return {}
+  // `{}` accepts anything and carries no description, so the model gets no
+  // guidance at all for that argument. Fail at import time — where a test or a
+  // dev build catches it — instead of shipping a silently erased tool schema.
+  throw new Error(`zodToJsonSchema: unsupported schema type "${typeName}" at ${path}`)
 }

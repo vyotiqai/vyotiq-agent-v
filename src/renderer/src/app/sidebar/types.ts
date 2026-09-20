@@ -2,7 +2,7 @@ import type { RefObject } from 'react'
 import type { RunSummary } from '@shared/ipc'
 import type { RunRecencyGroup } from '@renderer/lib/utils/groupRunsByRecency'
 
-export type SidebarView = 'chat' | 'settings' | 'marketplace' | 'home'
+export type SidebarView = 'chat' | 'settings' | 'marketplace' | 'teammates' | 'home'
 
 export type SidebarProps = {
   view: SidebarView
@@ -26,6 +26,7 @@ export type SidebarProps = {
   onOpenNotificationSettings?: () => void
   focusedRunId?: string | null
   onOpenMarketplace: () => void
+  onOpenTeammates: () => void
   /** Show the Home launch surface (Sidebar footer rail + Ctrl/Cmd+Shift+H). */
   onOpenHome?: () => void
   onOpenChat: () => void

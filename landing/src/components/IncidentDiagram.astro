@@ -1,0 +1,51 @@
+---
+/**
+ * An alert arriving, dipping into a reproduce-and-test loop, and leaving as a
+ * pull request.
+ *
+ * A schematic of the incident-triage sequence, not a depiction of the
+ * application's interface. It carries no text, so the shape has to read on its
+ * own and the aria-label has to say what it shows. The styles live here because
+ * a scoped rule in the page would not reach this SVG.
+ */
+---
+
+<svg
+  class="vy-diagram"
+  viewBox="0 0 400 120"
+  fill="none"
+  role="img"
+  aria-label="An alert entering a line of steps, dipping into a reproduce-and-test loop, and arriving at a pull request."
+>
+  <path class="vy-diagram-line" d="M24 48h296" />
+  <path class="vy-diagram-line" d="M140 48c22 0 22 44 44 44h32c22 0 22-44 44-44" />
+  <circle class="vy-diagram-node" cx="24" cy="48" r="6" />
+  <circle class="vy-diagram-node vy-diagram-node-branch" cx="140" cy="48" r="4" />
+  <circle class="vy-diagram-node vy-diagram-node-branch" cx="184" cy="92" r="4" />
+  <circle class="vy-diagram-node vy-diagram-node-branch" cx="216" cy="92" r="4" />
+  <circle class="vy-diagram-node vy-diagram-node-branch" cx="260" cy="48" r="4" />
+  <circle class="vy-diagram-node" cx="320" cy="48" r="6" />
+</svg>
+
+<style>
+  .vy-diagram {
+    width: 100%;
+    max-width: 22rem;
+    height: auto;
+  }
+
+  .vy-diagram-line {
+    stroke: var(--vy-border-strong);
+    stroke-width: 1.5;
+  }
+
+  .vy-diagram-node {
+    fill: var(--vy-bg);
+    stroke: var(--vy-accent);
+    stroke-width: 2;
+  }
+
+  .vy-diagram-node-branch {
+    stroke: var(--vy-border-strong);
+  }
+</style>

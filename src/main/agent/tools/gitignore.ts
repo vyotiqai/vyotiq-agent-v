@@ -53,14 +53,25 @@ function parseGitignoreLines(text: string): ParsedPattern[] {
 
 function matchesPattern(norm: string, isDirectory: boolean, pat: ParsedPattern): boolean {
   if (pat.dirOnly) {
-    if (norm === pat.raw || norm.startsWith(`${pat.raw}/`)) return true
-    return pat.regex.test(`${norm}/`) || pat.regex.test(norm)
+    // A trailing slash means directories only. Anything *inside* a matched
+    // directory is ignored whatever its own type, so test the ancestors
+    // separately from the entry itself — testing the whole path at once also
+    // matched a plain file sharing the directory's name (`build/` hid `build`).
+    const slash = norm.lastIndexOf('/')
+    if (slash > 0) {
+      const parent = norm.slice(0, slash)
+      if (pat.regex.test(`${parent}/`) || pat.regex.test(parent)) return true
+    }
+    if (!isDirectory) return false
+    return norm === pat.raw || pat.regex.test(`${norm}/`)
   }
   if (pat.rootOnly) {
     return pat.regex.test(norm)
   }
-  const base = norm.split('/').pop() ?? norm
-  return pat.regex.test(norm) || pat.regex.test(base)
+  // Testing the basename too is redundant: the regex is anchored with
+  // `(?:^|/)`, so anything matching the trailing segment already matches
+  // the full path at the preceding slash.
+  return pat.regex.test(norm)
 }
 
 type RuleSet = { patterns: ParsedPattern[] }
@@ -85,6 +96,12 @@ const EMPTY_MATCHER: GitignoreMatcher = {
 }
 
 const matcherCache = new Map<string, GitignoreMatcher>()
+
+/** True when a mutated workspace-relative path is a `.gitignore` file. */
+export function isGitignoreRelPath(relPath: string): boolean {
+  const n = relPath.replace(/\\/g, '/')
+  return n === '.gitignore' || n.endsWith('/.gitignore')
+}
 
 /** Drop cached matchers after `.gitignore` (or tree) mutations so walks see fresh rules. */
 export function clearGitignoreMatcherCache(workspaceRoot?: string): void {
@@ -124,15 +141,17 @@ export function gitignoreMatcherForDir(
   const matcher: GitignoreMatcher = {
     shouldIgnoreEntry(entryName: string, isDirectory: boolean): boolean {
       const suffix = relDir ? `${relDir}/${entryName}`.replace(/\\/g, '/') : entryName
-      let ignored = false
-      for (const { patterns } of ruleSets) {
-        for (const pat of patterns) {
-          if (matchesPattern(suffix, isDirectory, pat)) {
-            ignored = !pat.negated
-          }
+      // Last match wins (deepest .gitignore last, last line within it), so
+      // scanning newest-first and stopping at the first hit yields the same
+      // verdict without evaluating every remaining pattern.
+      for (let i = ruleSets.length - 1; i >= 0; i--) {
+        const { patterns } = ruleSets[i]!
+        for (let k = patterns.length - 1; k >= 0; k--) {
+          const pat = patterns[k]!
+          if (matchesPattern(suffix, isDirectory, pat)) return !pat.negated
         }
       }
-      return ignored
+      return false
     }
   }
   matcherCache.set(key, matcher)

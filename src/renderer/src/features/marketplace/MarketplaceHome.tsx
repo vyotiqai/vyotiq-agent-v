@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent, type RefObject } from 'react'
+import { useCallback, useMemo, useState, type KeyboardEvent, type RefObject } from 'react'
 import type {
   MarketplaceCatalogEntry,
   MarketplaceInstalledItem,
@@ -13,7 +13,8 @@ import { categoryTitle, kindLabel } from './marketplaceLabels'
 import {
   installedActionLabel,
   packageActivity,
-  type PackageActivity
+  type PackageActivity,
+  type PackageActivityAction
 } from './packageActivity'
 import type { MarketplaceController } from './useMarketplaceController'
 
@@ -75,10 +76,12 @@ function PackageCard({
   selected,
   formLocked,
   installing,
+  busy,
   showAdd,
   variant = 'default',
   onOpen,
-  onAdd
+  onAdd,
+  onAct
 }: {
   entry: MarketplaceCatalogEntry
   activity: PackageActivity
@@ -86,10 +89,13 @@ function PackageCard({
   formLocked?: boolean
   /** True only for the package currently being installed. */
   installing?: boolean
+  /** True while this card's own Sign in / Retry is running. */
+  busy?: boolean
   showAdd?: boolean
   variant?: 'default' | 'discover'
   onOpen: () => void
   onAdd?: () => void
+  onAct?: (action: PackageActivityAction) => void
 }) {
   const comingSoon = activity.kind === 'coming-soon'
   const installed = activity.kind !== 'available' && activity.kind !== 'coming-soon'
@@ -120,7 +126,12 @@ function PackageCard({
           'border-0 bg-transparent p-0 hover:bg-transparent'
         )}
       >
-        <PackageIcon name={entry.name} iconUrl={entry.iconUrl} size={iconSize} />
+        <PackageIcon
+          name={entry.name}
+          iconUrl={entry.iconUrl}
+          iconMono={entry.iconMono}
+          size={iconSize}
+        />
         <div className="min-w-0 flex-1">
           <p
             className={cn(
@@ -162,13 +173,32 @@ function PackageCard({
             Coming soon
           </span>
         ) : installed ? (
-          <Button
-            variant="subtle"
-            disabled
-            className={cn('shrink-0 self-center', activity.className)}
-          >
-            {installedActionLabel(activity)}
-          </Button>
+          // A state with a way out gets a live button. Everything installed
+          // used to render the same dead chip, so "Sign in required" and
+          // "Connect failed" were things you could only read, and the fix was
+          // four clicks away under Manage → Advanced.
+          activity.action && onAct ? (
+            <Button
+              variant={activity.kind === 'needs-auth' ? 'primary' : 'subtle'}
+              className="shrink-0 self-center"
+              pending={busy}
+              disabled={locked}
+              onClick={(e) => {
+                e.stopPropagation()
+                onAct(activity.action as PackageActivityAction)
+              }}
+            >
+              {activity.action.label}
+            </Button>
+          ) : (
+            <Button
+              variant="subtle"
+              disabled
+              className={cn('shrink-0 self-center', activity.className)}
+            >
+              {installedActionLabel(activity)}
+            </Button>
+          )
         ) : (
           <Button
             variant="subtle"
@@ -282,8 +312,32 @@ export function MarketplaceHome({
     formLocked,
     busyTargetId,
     installFromCatalog,
-    refreshCatalog
+    refreshCatalog,
+    loadMcpStatus,
+    openConnectWizard
   } = controller
+
+  /** The installed card whose own Sign in / Retry is running. */
+  const [actingId, setActingId] = useState<string | null>(null)
+
+  const runCardAction = useCallback(
+    async (entry: MarketplaceCatalogEntry, action: PackageActivityAction): Promise<void> => {
+      if (action.kind === 'sign-in') {
+        openConnectWizard(entry.id)
+        return
+      }
+      // Retry is the whole-map refresh: there is no reconnect-one IPC, and a
+      // user who asks for one server back is not harmed by the others being
+      // re-checked at the same time.
+      setActingId(entry.id)
+      try {
+        await loadMcpStatus(true)
+      } finally {
+        setActingId(null)
+      }
+    },
+    [loadMcpStatus, openConnectWizard]
+  )
 
   const installedById = useMemo(() => {
     const map = new Map<string, MarketplaceInstalledItem>()
@@ -447,7 +501,10 @@ export function MarketplaceHome({
                     )}
                     selected={selectedEntryId === entry.id}
                     showAdd
+                    busy={actingId === entry.id}
+                    formLocked={formLocked}
                     onOpen={() => onOpenDetail(entry)}
+                    onAct={(action) => void runCardAction(entry, action)}
                   />
                 ))}
               </div>

@@ -448,6 +448,52 @@ describe('Composer', () => {
     expect(screen.queryByRole('button', { name: /^Send$/i })).toBeNull()
   })
 
+  it('keeps mode, teammate, and model controls enabled while a run is in progress', async () => {
+    const onAgentModeChange = vi.fn()
+    const onAgentProfileChange = vi.fn()
+    const onProviderModel = vi.fn()
+    render(
+      <Composer
+        provider="ollama"
+        model="qwen2.5"
+        running
+        hasWorkspace
+        secrets={testSecrets}
+        chatSettings={chatSettings}
+        onChatSettingsChange={vi.fn()}
+        onProviderModel={onProviderModel}
+        onAgentModeChange={onAgentModeChange}
+        onAgentProfileChange={onAgentProfileChange}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />
+    )
+
+    const mode = screen.getByRole('button', { name: /Agent mode/i })
+    const teammate = screen.getByRole('button', { name: 'Teammate' })
+    const modelPicker = screen.getByRole('button', { name: 'Select model' })
+    expect(mode).toHaveProperty('disabled', false)
+    expect(teammate).toHaveProperty('disabled', false)
+    expect(modelPicker).toHaveProperty('disabled', false)
+
+    fireEvent.click(mode)
+    expect(onAgentModeChange).toHaveBeenCalledWith('ask')
+
+    fireEvent.click(teammate)
+    await waitFor(() => {
+      expect(screen.getByRole('listbox', { name: 'Teammate' })).toBeTruthy()
+    })
+    fireEvent.click(screen.getByRole('option', { name: /No teammate \(default agent\)/i }))
+    expect(onAgentProfileChange).toHaveBeenCalledWith(null)
+
+    fireEvent.click(modelPicker)
+    await waitFor(() => {
+      expect(screen.getByRole('listbox', { name: 'Select model' })).toBeTruthy()
+    })
+    fireEvent.click(screen.getByRole('option', { name: /llama3.2 Tools/i }))
+    expect(onProviderModel).toHaveBeenCalledWith('ollama', 'llama3.2')
+  })
+
   it('focuses an inline composer when it mounts for prompt editing', () => {
     render(
       <Composer

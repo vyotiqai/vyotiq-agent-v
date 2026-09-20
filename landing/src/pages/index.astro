@@ -1,556 +1,185 @@
 ---
 import Base from '../layouts/Base.astro'
-import { SITE, app, formatDate } from '../lib/site'
-import { TOOL_GROUPS, TOOL_TOTAL } from '../lib/tools'
-import { HAS_RELEASE, RELEASE_META } from '../lib/download'
+import ChangelogStrip from '../components/ChangelogStrip.astro'
+import ClaimSection from '../components/ClaimSection.astro'
+import UseCaseCard from '../components/UseCaseCard.astro'
+import LogoWall from '../components/LogoWall.astro'
+import { app } from '../lib/site'
+import { FEATURED_USE_CASES, HOME_SECTIONS } from '../lib/showcase'
 
-const providers = app.providers.list.filter((p) => p.id !== 'custom' && p.id !== 'opencode')
-const ext = app.extensions
-
-const pillars = [
-  {
-    title: 'It works on your checkout',
-    body: `Not a chat window you paste snippets into. Agent V opens the repository you point it at and works there — ${TOOL_TOTAL} built-in tools covering the file tree, a real terminal, git, GitHub, a browser and a language server.`
-  },
-  {
-    title: 'Your models, your keys',
-    body: `${app.providers.total} providers, configured with your own API keys. Requests go straight from your machine to the provider — there is no Vyotiq service in the middle, and nothing is metered or resold.`
-  },
-  {
-    title: 'Local by default',
-    body: 'Code, chats, run history and memory stay on disk. Keys are held in the OS keychain. Crash reporting is off unless you turn it on. Point it at Ollama and nothing leaves the machine at all.'
-  }
-]
-
-const capabilities = [
-  {
-    title: 'Ask, plan, agent',
-    body: 'Three modes with different tool access. Ask stays read-only, plan drafts the approach, agent executes. Switch mid-run without losing the thread.'
-  },
-  {
-    title: 'Parallel work on real branches',
-    body: 'Fan a task out to child instances. Each one gets its own git worktree and branch, so they never collide, and you merge the result back when it is ready.'
-  },
-  {
-    title: 'Checkpoints and rewind',
-    body: 'Every file write is checkpointed with a content hash. Rewind to any earlier point in the run, keep or discard individual writes, or fork the conversation and try a different approach.'
-  },
-  {
-    title: 'A code index it actually uses',
-    body: 'Per-workspace SQLite index with keyword ranking and local embeddings, so the agent finds the right file instead of guessing at paths. Embeddings are computed on your machine.'
-  },
-  {
-    title: 'Teammates',
-    body: 'Persistent agent identities with their own private memory, pinned models and delegated tasks that run on a schedule or a queue — surviving restarts, with interrupted runs auto-resumed.'
-  },
-  {
-    title: 'MCP and skills',
-    body: `Connect Model Context Protocol servers and pin their tools into the catalog. ${ext.counts.skill} skills and ${ext.counts.mcp} MCP packages ship with the app.`
-  }
-]
+/**
+ * The homepage showcases the approved sections marked for it in showcase.ts —
+ * today runs, parallelism and teammates, each as full-width cards. Everything
+ * else it carries is baked data rather than prose: the provider and integration
+ * marks and the release strip. showcase.ts gates which names that data is
+ * allowed to contain.
+ *
+ * The use-case teaser between them is the three entries marked featured in
+ * showcase.ts. The full set lives on /use-cases.
+ *
+ * The hero is the exception: a centred block of hand-written copy and two
+ * links, and nothing else. Platforms, licence and version used to sit beside it
+ * in a spec column; /download states all three, so they are not repeated here.
+ */
 ---
 
-<Base canonical={SITE.url}>
-  <!-- Hero -->
-  <section class="vy-section vy-hero">
-    <div class="vy-shell">
-      <p class="vy-eyebrow">
-        Open source · GPL-3.0-or-later · Windows, macOS, Linux
+<Base>
+  <section class="vy-hero">
+    <div class="vy-shell vy-hero-inner">
+      <p class="vy-eyebrow">Agent V · Free and open source</p>
+      {/* The product's own line: package.json, the README and SITE.title all
+          say "a coding workspace for real repositories", and the h1 now
+          agrees with them. Workspace rather than agent is the accurate word —
+          the window ships an editor, a terminal, a diff viewer and git, and
+          the agent is one occupant of it.
+
+          "open-source" stays out of the headline and lives in the eyebrow: at
+          display size it breaks at its own hyphen, and it overflowed 320px. */}
+      <h1 class="vy-display">A coding workspace for real repositories.</h1>
+      {/* No "and" before the last item: the four beats are the point. Each
+          one is a tool in the catalog — read, edit, terminal, run_tests. The
+          second sentence is claims P1 and P2: a child instance gets its own
+          worktree and branch, so "at once" is isolation, not a race. */}
+      <p class="vy-lede">
+        It reads your code, makes the change, runs it, checks its own work. Run several at once,
+        each on its own branch.
       </p>
-
-      <h1 class="vy-display vy-hero-title">
-        A coding agent that works<br class="vy-br" /> in your actual repository.
-      </h1>
-
-      <p class="vy-lede vy-hero-lede">
-        Agent V is a desktop workspace where an agent reads and edits your checked-out code,
-        runs your terminal, and drives git and GitHub — using the model provider and API key
-        you choose. Nothing routes through a server we run.
-      </p>
-
-      <div class="vy-hero-actions">
-        <a class="vy-btn vy-btn-primary" href="/download">Download for free</a>
-        <a class="vy-btn vy-btn-secondary" href={app.repo.source} rel="noopener noreferrer">
-          View source
-        </a>
+      <div class="vy-cta-actions">
+        <a class="vy-btn vy-btn-primary" href="/download">Download</a>
+        <a class="vy-btn vy-btn-secondary" href={app.repo.source} rel="noopener noreferrer">View source</a>
       </div>
-
-      <dl class="vy-hero-meta">
-        <div>
-          <dt>Version</dt>
-          <dd class="vy-mono">{HAS_RELEASE ? RELEASE_META.version : 'unreleased'}</dd>
-        </div>
-        <div>
-          <dt>Published</dt>
-          <dd class="vy-mono">{HAS_RELEASE ? formatDate(RELEASE_META.publishedAt) : '—'}</dd>
-        </div>
-        <div>
-          <dt>Licence</dt>
-          <dd class="vy-mono">{app.license}</dd>
-        </div>
-        <div>
-          <dt>Price</dt>
-          <dd class="vy-mono">Free</dd>
-        </div>
-      </dl>
+      {/* The headline already says free and open source; this adds the part
+          it does not — that there is nothing to sign up to. */}
+      <p class="vy-hero-note">No account, no usage metering, no service in the middle.</p>
     </div>
   </section>
 
-  <!-- Pillars -->
   <section class="vy-rule vy-section">
-    <div class="vy-shell">
-      <div class="vy-pillars">
-        {
-          pillars.map((p) => (
-            <article class="vy-pillar">
-              <h2 class="vy-h3">{p.title}</h2>
-              <p class="vy-prose-muted">{p.body}</p>
-            </article>
-          ))
-        }
-      </div>
-    </div>
-  </section>
-
-  <!-- Tool catalog -->
-  <section class="vy-rule vy-section">
-    <div class="vy-shell">
+    <div class="vy-shell vy-section-grid">
       <header class="vy-sec-head">
-        <p class="vy-eyebrow">The tool catalog</p>
-        <h2 class="vy-h2">{TOOL_TOTAL} tools, not a plugin you have to wire up</h2>
+        <p class="vy-eyebrow">Providers</p>
+        <h2 class="vy-h2">Bring your own key</h2>
         <p class="vy-prose-muted">
-          This is the complete built-in catalog, read straight from the app's tool registry at
-          build time. Each mode exposes a different subset, and you control which ones need
-          approval before they run.
+          Configure any of these with your own credentials. Model lists are fetched live from each
+          provider where the API supports it, so you see current models rather than a stale list.
+        </p>
+        <p class="vy-more"><a href="/features#providers" class="vy-link">Every provider →</a></p>
+      </header>
+
+      <div>
+        <LogoWall kind="providers" />
+        <p class="vy-prose-muted vy-note vy-provider-note">
+          Ollama and private or LAN endpoints need no API key at all. Run entirely local models and
+          keep every request on your own machine.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  {HOME_SECTIONS.map((section) => <ClaimSection section={section} />)}
+
+  <section class="vy-rule vy-section">
+    <div class="vy-shell">
+      <header class="vy-card-head">
+        <p class="vy-eyebrow">Use cases</p>
+        <h2 class="vy-h2">What people point it at</h2>
+        <p class="vy-lede vy-card-lede">
+          Three of the jobs it does today. Each one ships as a skill in the box, installed per
+          workspace and invoked as a slash command.
         </p>
       </header>
 
-      <div class="vy-tool-grid">
-        {
-          TOOL_GROUPS.map((group) => (
-            <section class="vy-tool-group">
-              <h3 class="vy-tool-title">
-                {group.title}
-                <span class="vy-tool-count vy-mono">{group.names.length}</span>
-              </h3>
-              <p class="vy-tool-blurb">{group.blurb}</p>
-              <ul class="vy-tool-names">
-                {group.names.map((n) => (
-                  <li class="vy-mono">{n}</li>
-                ))}
-              </ul>
-            </section>
-          ))
-        }
-      </div>
+      <ul class="vy-cards vy-uses">
+        {FEATURED_USE_CASES.map((useCase) => <UseCaseCard useCase={useCase} level={3} />)}
+      </ul>
+
+      <p class="vy-more vy-uses-more"><a href="/use-cases" class="vy-link">All use cases →</a></p>
     </div>
   </section>
 
-  <!-- Providers -->
   <section class="vy-rule vy-section">
-    <div class="vy-shell">
-      <div class="vy-split">
-        <header class="vy-sec-head vy-split-head">
-          <p class="vy-eyebrow">Providers</p>
-          <h2 class="vy-h2">Bring your own key</h2>
-          <p class="vy-prose-muted">
-            Configure any of these with your own credentials. Model lists are fetched live from
-            each provider where the API supports it, so you get the current models rather than a
-            hard-coded list that goes stale.
-          </p>
-          <p class="vy-prose-muted vy-note">
-            Ollama and private or LAN endpoints need no API key at all — run entirely local
-            models and keep every request on your own machine.
-          </p>
-        </header>
-
-        <ul class="vy-provider-list">
-          {providers.map((p) => <li class="vy-provider">{p.label}</li>)}
-          <li class="vy-provider vy-provider-alt">Any OpenAI-compatible endpoint</li>
-          <li class="vy-provider vy-provider-alt">OpenCode Go</li>
-        </ul>
-      </div>
-    </div>
-  </section>
-
-  <!-- Capabilities -->
-  <section class="vy-rule vy-section">
-    <div class="vy-shell">
+    <div class="vy-shell vy-section-grid">
       <header class="vy-sec-head">
-        <p class="vy-eyebrow">How it runs</p>
-        <h2 class="vy-h2">Built for work that takes more than one prompt</h2>
+        <p class="vy-eyebrow">Integrations</p>
+        <h2 class="vy-h2">Connect the tools you already use</h2>
+        <p class="vy-prose-muted">
+          Model Context Protocol servers ship with the app and install per workspace. Connect one
+          and its tools join the catalog, with OAuth handled for the hosted ones.
+        </p>
+        <p class="vy-more"><a href="/extensions" class="vy-link">Every package →</a></p>
       </header>
 
-      <div class="vy-cap-grid">
-        {
-          capabilities.map((c) => (
-            <article class="vy-cap">
-              <h3 class="vy-h3">{c.title}</h3>
-              <p class="vy-prose-muted">{c.body}</p>
-            </article>
-          ))
-        }
-      </div>
-
-      <p class="vy-more">
-        <a href="/features" class="vy-link">See everything in detail →</a>
-      </p>
+      <LogoWall kind="integrations" dense />
     </div>
   </section>
 
-  <!-- Extensions -->
   <section class="vy-rule vy-section">
     <div class="vy-shell">
-      <div class="vy-split">
-        <header class="vy-sec-head vy-split-head">
-          <p class="vy-eyebrow">Extensions</p>
-          <h2 class="vy-h2">{ext.total} packages ship with the app</h2>
-          <p class="vy-prose-muted">
-            MCP servers, skills and plugin rule sets are bundled in the marketplace and install
-            per workspace — no separate registry account, no network fetch to browse them.
-          </p>
-          <p class="vy-more"><a href="/extensions" class="vy-link">Browse the catalog →</a></p>
-        </header>
-
-        <dl class="vy-stat-row">
-          <div class="vy-stat">
-            <dt>MCP servers</dt>
-            <dd class="vy-mono">{ext.counts.mcp}</dd>
-          </div>
-          <div class="vy-stat">
-            <dt>Skills</dt>
-            <dd class="vy-mono">{ext.counts.skill}</dd>
-          </div>
-          <div class="vy-stat">
-            <dt>Plugin rule sets</dt>
-            <dd class="vy-mono">{ext.counts.plugin}</dd>
-          </div>
-        </dl>
-      </div>
+      <ChangelogStrip limit={3} />
     </div>
   </section>
 
-  <!-- Final CTA -->
   <section class="vy-rule vy-section">
-    <div class="vy-shell vy-cta">
-      <h2 class="vy-h2">Install it and point it at a repository.</h2>
-      <p class="vy-prose-muted">
-        Free, open source, and yours to fork. Builds for Windows, macOS and Linux.
-      </p>
-      <div class="vy-hero-actions">
-        <a class="vy-btn vy-btn-primary" href="/download">Download</a>
-        <a class="vy-btn vy-btn-secondary" href="/docs">Read the docs</a>
+    <div class="vy-shell">
+      <div class="vy-canvas vy-cta vy-cta-canvas">
+        <h2 class="vy-h2">Install it and point it at a repository.</h2>
+        <p class="vy-prose-muted">
+          Free, open source, and yours to fork. Builds for Windows, macOS and Linux.
+        </p>
+        <div class="vy-cta-actions">
+          <a class="vy-btn vy-btn-primary" href="/download">Download</a>
+          <a class="vy-btn vy-btn-secondary" href="/docs">Read the docs</a>
+        </div>
       </div>
     </div>
   </section>
 </Base>
 
 <style>
+  /* A centred column: eyebrow, headline, the sentence pair, two links. Each
+     part is capped at its own measure and centred on the shell, so the width of
+     the text is what composes the block — there is no second column to balance
+     against any more. */
   .vy-hero {
-    padding-block: clamp(4rem, 9vw, 7.5rem) clamp(3rem, 6vw, 5rem);
-  }
-
-  .vy-hero-title {
-    margin-top: 1.25rem;
-    max-width: 18ch;
-  }
-
-  .vy-br {
-    display: none;
-  }
-
-  @media (min-width: 720px) {
-    .vy-br {
-      display: inline;
-    }
-    .vy-hero-title {
-      max-width: none;
-    }
-  }
-
-  .vy-hero-lede {
-    margin-top: 1.5rem;
-  }
-
-  .vy-hero-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    margin-top: 2rem;
-  }
-
-  .vy-hero-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0 3rem;
-    margin: 3rem 0 0;
-    padding-top: 1.5rem;
-    border-top: 1px solid var(--vy-border);
-  }
-
-  .vy-hero-meta dt {
-    font-family: var(--vy-font-mono);
-    font-size: 0.6875rem;
-    text-transform: uppercase;
-    letter-spacing: var(--vy-tracking-caps);
-    color: var(--vy-tertiary);
-  }
-
-  .vy-hero-meta dd {
-    margin: 0.3rem 0 0;
-    font-size: 0.9375rem;
-    color: var(--vy-fg-strong);
-  }
-
-  @media (max-width: 560px) {
-    .vy-hero-meta {
-      gap: 1.25rem 2.5rem;
-    }
-  }
-
-  /* -------------------------------------------------------------- pillars - */
-
-  .vy-pillars {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 0;
-  }
-
-  .vy-pillar {
-    padding-inline: 2rem;
-    border-left: 1px solid var(--vy-border);
-  }
-
-  .vy-pillar:first-child {
-    padding-left: 0;
-    border-left: 0;
-  }
-
-  .vy-pillar:last-child {
-    padding-right: 0;
-  }
-
-  .vy-pillar p {
-    margin-top: 0.75rem;
-    font-size: 0.9375rem;
-  }
-
-  @media (max-width: 860px) {
-    .vy-pillars {
-      grid-template-columns: 1fr;
-      gap: 2rem;
-    }
-    .vy-pillar {
-      padding: 0 0 0 1.25rem;
-      border-left: 2px solid var(--vy-border);
-    }
-    .vy-pillar:first-child {
-      padding-left: 1.25rem;
-      border-left: 2px solid var(--vy-border);
-    }
-  }
-
-  /* ---------------------------------------------------------- section head - */
-
-  .vy-sec-head {
-    max-width: 62ch;
-    margin-bottom: 2.5rem;
-  }
-
-  .vy-sec-head .vy-h2 {
-    margin-top: 0.75rem;
-  }
-
-  .vy-sec-head .vy-prose-muted {
-    margin-top: 1rem;
-    font-size: 0.9375rem;
-  }
-
-  .vy-note {
-    padding-left: 0.875rem;
-    border-left: 2px solid var(--vy-border-strong);
-  }
-
-  /* ----------------------------------------------------------- tool catalog - */
-
-  .vy-tool-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 0;
-    border: 1px solid var(--vy-border);
-    border-radius: var(--vy-radius-xl);
-    overflow: hidden;
-  }
-
-  .vy-tool-group {
-    background: var(--vy-bg);
-    border-right: 1px solid var(--vy-border);
-    border-bottom: 1px solid var(--vy-border);
-    padding: 1.375rem 1.25rem;
-  }
-
-  .vy-tool-title {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.75rem;
-    font-size: 0.9375rem;
-    font-weight: 600;
-    color: var(--vy-fg-strong);
-  }
-
-  .vy-tool-count {
-    font-size: 0.6875rem;
-    color: var(--vy-tertiary);
-  }
-
-  .vy-tool-blurb {
-    margin-top: 0.4rem;
-    font-size: 0.8125rem;
-    line-height: 1.5;
-    color: var(--vy-tertiary);
-  }
-
-  .vy-tool-names {
-    list-style: none;
-    margin: 0.875rem 0 0;
-    padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-  }
-
-  .vy-tool-names li {
-    font-size: 0.75rem;
-    line-height: 1.4;
-    color: var(--vy-muted);
-    background: var(--vy-surface);
-    border: 1px solid var(--vy-border);
-    border-radius: var(--vy-radius-sm);
-    padding: 0.1rem 0.375rem;
-  }
-
-  /* --------------------------------------------------------------- splits - */
-
-  .vy-split {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 3rem;
-    align-items: start;
-  }
-
-  .vy-split-head {
-    margin-bottom: 0;
-  }
-
-  @media (max-width: 860px) {
-    .vy-split {
-      grid-template-columns: 1fr;
-      gap: 2rem;
-    }
-  }
-
-  .vy-provider-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0;
-    border: 1px solid var(--vy-border);
-    border-radius: var(--vy-radius-lg);
-    overflow: hidden;
-  }
-
-  .vy-provider {
-    background: var(--vy-bg);
-    border-right: 1px solid var(--vy-border);
-    border-bottom: 1px solid var(--vy-border);
-    padding: 0.8rem 1rem;
-    font-size: 0.9375rem;
-    font-weight: 500;
-    color: var(--vy-fg-strong);
-  }
-
-  .vy-provider-alt {
-    color: var(--vy-muted);
-    font-weight: 400;
-  }
-
-  @media (max-width: 420px) {
-    .vy-provider-list {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  /* --------------------------------------------------------- capabilities - */
-
-  .vy-cap-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 2rem 2.5rem;
-  }
-
-  .vy-cap {
-    padding-top: 1.25rem;
-    border-top: 1px solid var(--vy-border);
-  }
-
-  .vy-cap p {
-    margin-top: 0.5rem;
-    font-size: 0.9375rem;
-  }
-
-  .vy-more {
-    margin-top: 2.5rem;
-    font-size: 0.9375rem;
-  }
-
-  /* ---------------------------------------------------------------- stats - */
-
-  .vy-stat-row {
-    margin: 0;
-    display: grid;
-    gap: 0;
-    border: 1px solid var(--vy-border);
-    border-radius: var(--vy-radius-lg);
-    overflow: hidden;
-  }
-
-  .vy-stat {
-    background: var(--vy-bg);
-    border-right: 1px solid var(--vy-border);
-    border-bottom: 1px solid var(--vy-border);
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    padding: 1rem 1.25rem;
-  }
-
-  .vy-stat dt {
-    font-size: 0.9375rem;
-    color: var(--vy-secondary);
-  }
-
-  .vy-stat dd {
-    margin: 0;
-    font-size: 1.5rem;
-    font-weight: 500;
-    color: var(--vy-fg-strong);
-    letter-spacing: -0.02em;
-  }
-
-  /* ------------------------------------------------------------------ cta - */
-
-  .vy-cta {
+    padding-block: clamp(3.75rem, 7vw, 6rem) clamp(3.25rem, 5.5vw, 5rem);
     text-align: center;
   }
 
-  .vy-cta .vy-prose-muted {
-    margin: 0.875rem auto 0;
+  /* The rule that spaces a title under its eyebrow lives on .vy-page-head,
+     which this section deliberately is not, so it is repeated here. */
+  .vy-hero .vy-display {
+    margin-top: 1rem;
   }
 
-  .vy-cta .vy-hero-actions {
+  /* Left at the global measure, which is about the width the two headline
+     lines occupy, so the block squares up. It also happens to be the width the
+     first sentence needs, so `pretty` breaks the lede at its full stop; capping
+     it any tighter splits "checks its / own work" instead. */
+  .vy-hero .vy-lede {
+    margin: 1.25rem auto 0;
+  }
+
+  .vy-hero .vy-cta-actions {
     justify-content: center;
+    margin-top: 2rem;
+  }
+
+  .vy-hero-note {
+    margin-top: 1.125rem;
+    font-size: 0.8125rem;
+    color: var(--vy-tertiary);
+  }
+
+  .vy-provider-note {
+    margin-top: 1.5rem;
+    font-size: 0.9375rem;
+  }
+
+  .vy-uses-more {
+    margin-top: 1.5rem;
+  }
+
+  .vy-cta-canvas {
+    padding-block: clamp(3rem, 7vw, 5rem);
   }
 </style>

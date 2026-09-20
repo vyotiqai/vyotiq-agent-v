@@ -485,11 +485,13 @@ describe('bundled marketplace catalog', () => {
     const plugins = catalog.packages.filter((p) => p.kind === 'plugin')
     expect(skills.map((p) => p.id).sort()).toEqual([
       'accessibility',
+      'analyze-api',
       'api-design',
       'create-skill',
       // Recurring-loop skills: each spans two connected tools on a cadence,
       // rather than restating what the agent already does on request.
       'dependency-upgrade',
+      'docs',
       'explain-code',
       'fix-bug',
       'flake-hunter',
@@ -499,6 +501,7 @@ describe('bundled marketplace catalog', () => {
       'incident-triage',
       'persona-builder',
       'pr-review-reply',
+      'refactor',
       'release-notes',
       'repo-onboarding',
       'review-code',

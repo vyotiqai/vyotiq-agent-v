@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -6,9 +6,7 @@ import {
   GLYPHS,
   MARKS,
   VENDORED,
-  buildIcons,
-  glyphColorFor,
-  iconFor
+  buildIcons
 } from '../../../scripts/sync-marketplace-brand-icons.mjs'
 import { isAllowedMarketplaceIconUrl } from '@shared/utils/marketplaceIconUrl'
 
@@ -37,29 +35,39 @@ describe('marketplace icons', () => {
     }
   })
 
-  it('uses the official brand colour as the tile fill', () => {
-    for (const [id, slug] of Object.entries(BRANDS)) {
+  it('paints every generated icon in one ink and nothing else', () => {
+    // The identity is black and white, so a vendor's own hex is not ours to
+    // paint with. One ink also means a consumer can invert the whole set for
+    // its dark theme without knowing which source any icon came from.
+    for (const id of generatedIds) {
       const svg = readFileSync(join(root, 'icons', `${id}.svg`), 'utf8')
-      expect(svg).toContain(`fill="#${iconFor(slug).hex}"`)
+      const colours = new Set(svg.match(/#[0-9A-Fa-f]{3,6}/g) ?? [])
+      expect([...colours], `${id} may only use the ink`).toEqual(['#000000'])
     }
   })
 
-  it('picks a glyph colour that stays legible on the brand tile', () => {
-    // The two ends of the range: near-black brands need a white mark, bright
-    // ones need a dark mark. A single fixed colour would fail one of them.
-    expect(glyphColorFor('#000000')).toBe('#FFFFFF')
-    expect(glyphColorFor('#181717')).toBe('#FFFFFF') // GitHub
-    expect(glyphColorFor('#FFD21E')).toBe('#0B0B0C') // Hugging Face
-    expect(glyphColorFor('#6AFDEF')).toBe('#0B0B0C') // Intercom
-  })
-
-  it('leaves non-brand art themable instead of baking a background', () => {
-    // A first-party glyph sits on PackageIcon's own `bg-surface`, which follows
-    // the light/dark theme. Baking a tile here would freeze it to one theme.
-    for (const id of [...Object.keys(GLYPHS), ...Object.keys(MARKS)]) {
+  it('bakes no background, so the surface behind it stays theme-owned', () => {
+    // An icon sits on PackageIcon's own `bg-surface`, which follows the
+    // light/dark theme. Baking a tile here would freeze it to one of them —
+    // and a tile is also a second colour, which the ink rule above forbids.
+    for (const id of generatedIds) {
       const svg = readFileSync(join(root, 'icons', `${id}.svg`), 'utf8')
       expect(svg, `${id} must not bake a tile`).not.toContain('<rect')
-      expect(svg).toContain('fill="#A3A3A3"')
+    }
+  })
+
+  it('keeps the hand-drawn icons to the same ink, at two opacities', () => {
+    // These are not generated: they are committed line art with a silhouette
+    // and a lighter interior detail. The hierarchy survives as one black at
+    // two opacities rather than as two greys, so inverting still works.
+    const handDrawn = readdirSync(join(root, 'icons')).filter(
+      (f) => f.endsWith('.svg') && !generatedIds.includes(f.replace('.svg', ''))
+    )
+    for (const file of handDrawn) {
+      if (Object.values(VENDORED).some((v) => v.file === file)) continue
+      const svg = readFileSync(join(root, 'icons', file), 'utf8')
+      const colours = new Set(svg.match(/#[0-9A-Fa-f]{3,6}/g) ?? [])
+      expect([...colours], `${file} may only use the ink`).toEqual(['#000000'])
     }
   })
 
@@ -103,5 +111,20 @@ describe('marketplace icons', () => {
   it('leaves no catalog entry without an icon', () => {
     const without = catalog.packages.filter((p) => !p.iconPath).map((p) => p.id)
     expect(without).toEqual([])
+  })
+
+  /**
+   * Both directions, because neither fails loudly on its own: bake-app-data
+   * nulls an icon whose file is missing, so a typo'd iconPath ships as a bare
+   * letter tile, and a file nothing points at is dead weight in every build.
+   */
+  it('pairs every icon file with exactly one catalog entry', () => {
+    const referenced = new Set(
+      catalog.packages.flatMap((p) => (p.iconPath ? [p.iconPath.replace(/^icons\//, '')] : []))
+    )
+    const onDisk = new Set(readdirSync(join(root, 'icons')))
+
+    expect([...referenced].filter((file) => !onDisk.has(file))).toEqual([])
+    expect([...onDisk].filter((file) => !referenced.has(file))).toEqual([])
   })
 })

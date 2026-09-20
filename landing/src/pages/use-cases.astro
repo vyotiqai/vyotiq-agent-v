@@ -1,0 +1,115 @@
+---
+import Base from '../layouts/Base.astro'
+import Shot from '../components/Shot.astro'
+import TeammateScenarios from '../components/TeammateScenarios.astro'
+import UseCaseCard from '../components/UseCaseCard.astro'
+import { LIVE_TEAMMATE_SCENARIOS, LIVE_USE_CASES } from '../lib/showcase'
+
+/**
+ * What people use Agent V for, as opposed to what it is built out of — which
+ * is what /features covers.
+ *
+ * Every card is an approved entry in showcase.ts, and each one corresponds to
+ * skills that ship in the marketplace rather than to copy written for this
+ * page. The screenshot at the foot is a real capture of the application, not a
+ * rendering of one.
+ */
+---
+
+<Base
+  title="Use cases"
+  description="What people use Agent V for: reviewing pull requests, upgrading dependencies one at a time, taking an incident from alert to fix, and the routine work in between."
+>
+  <section class="vy-page-head">
+    <div class="vy-shell">
+      <p class="vy-eyebrow">Use cases</p>
+      <h1 class="vy-h1">What people use Agent V for</h1>
+      {/* The point of the second sentence is that this is not a roadmap: each
+          card names skills that are already in the marketplace, and the
+          build fails if one of them leaves the catalog. */}
+      <p class="vy-lede">
+        Each of these ships as a skill in the box, installed per workspace and invoked as a slash
+        command. Nothing on this page is a plan for later.
+      </p>
+    </div>
+  </section>
+
+  <section class="vy-section">
+    <div class="vy-shell">
+      <ul class="vy-cards vy-uses">
+        {LIVE_USE_CASES.map((useCase) => <UseCaseCard useCase={useCase} level={2} />)}
+      </ul>
+    </div>
+  </section>
+
+  {/* Dropped entirely when nothing is approved, the same way a claim-less
+      section disappears — a heading with no list under it is worse than no
+      section at all. */}
+  {
+    LIVE_TEAMMATE_SCENARIOS.length > 0 && (
+      <section class="vy-rule vy-section" id="teammates">
+        <div class="vy-shell vy-section-grid">
+          <header class="vy-sec-head">
+            <p class="vy-eyebrow">Teammates</p>
+            <h2 class="vy-h2">When a teammate earns its keep</h2>
+            <p class="vy-prose-muted">
+              A teammate is a named agent that outlives the conversation: its own memory, its own
+              queue, its own model. These are the situations it is for — and the one it is not.
+            </p>
+            <p class="vy-more">
+              <a href="/features#teammates" class="vy-link">
+                How teammates work →
+              </a>
+            </p>
+          </header>
+
+          <TeammateScenarios />
+        </div>
+      </section>
+    )
+  }
+
+  <section class="vy-rule vy-section">
+    <div class="vy-shell vy-section-grid">
+      <header class="vy-sec-head">
+        <p class="vy-eyebrow">In the box</p>
+        <h2 class="vy-h2">The integrations these lean on</h2>
+        <p class="vy-prose-muted">
+          The trackers, documentation servers and repository tools named above are Model Context
+          Protocol servers bundled with the app. Browsing and installing them needs no account and
+          no network fetch.
+        </p>
+        <p class="vy-more"><a href="/extensions" class="vy-link">Every package →</a></p>
+      </header>
+
+      <Shot
+        name="marketplace"
+        alt="The marketplace in Agent V, listing bundled Model Context Protocol servers with an Add button beside each one."
+        caption="The marketplace, showing bundled MCP servers. Skills and plugin rule sets install the same way."
+      />
+    </div>
+  </section>
+
+  <section class="vy-rule vy-section">
+    <div class="vy-shell">
+      <div class="vy-canvas vy-cta vy-cta-canvas">
+        <h2 class="vy-h2">Pick one and try it on a repository you know.</h2>
+        <p class="vy-prose-muted">
+          Free, open source, and yours to fork. Builds for Windows, macOS and Linux.
+        </p>
+        <div class="vy-cta-actions">
+          <a class="vy-btn vy-btn-primary" href="/download">Download</a>
+          <a class="vy-btn vy-btn-secondary" href="/features">Everything it can do</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  /* The head already carries the top rule, so the grid section does not repeat
+     one; the cards start straight under the lede. */
+  .vy-cta-canvas {
+    padding-block: clamp(3rem, 7vw, 5rem);
+  }
+</style>

@@ -1,13 +1,7 @@
 import app from '../data/app.json'
 import release from '../data/release.json'
 
-/**
- * One place that owns every route and link the site renders.
- *
- * `verify-site.mjs` reads these arrays back after the build and asserts each
- * internal path was actually emitted, so a nav entry can never point at a page
- * that does not exist.
- */
+/** Every route and link the site renders; verify-site.mjs checks each one resolves. */
 
 export const SITE = {
   name: 'Vyotiq',
@@ -22,6 +16,7 @@ export type NavItem = { href: string; label: string }
 
 export const NAV: NavItem[] = [
   { href: '/features', label: 'Features' },
+  { href: '/use-cases', label: 'Use cases' },
   { href: '/extensions', label: 'Extensions' },
   { href: '/docs', label: 'Docs' },
   { href: '/changelog', label: 'Changelog' }
@@ -32,6 +27,7 @@ export const FOOTER: { heading: string; items: NavItem[] }[] = [
     heading: 'Product',
     items: [
       { href: '/features', label: 'Features' },
+      { href: '/use-cases', label: 'Use cases' },
       { href: '/extensions', label: 'Extensions' },
       { href: '/download', label: 'Download' },
       { href: '/changelog', label: 'Changelog' }
@@ -59,23 +55,6 @@ export const FOOTER: { heading: string; items: NavItem[] }[] = [
     ]
   }
 ]
-
-/** Every internal route the site is expected to emit. Asserted post-build. */
-export const ROUTES = [
-  '/',
-  '/features',
-  '/extensions',
-  '/download',
-  '/docs',
-  '/changelog',
-  '/license',
-  '/notice',
-  '/privacy',
-  '/terms',
-  '/security',
-  '/contributing',
-  '/code-of-conduct'
-] as const
 
 export const isExternal = (href: string): boolean => /^https?:\/\//.test(href)
 

@@ -2,6 +2,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { describe, expect, it } from 'vitest'
 import { IPC } from '@shared/channels'
+import { PUSH_ONLY_CHANNEL_NAMES } from '../../helpers/ipcChannelRoles'
 
 /**
  * Every invoke channel in the IPC catalog must have a matching ipcMain
@@ -9,33 +10,7 @@ import { IPC } from '@shared/channels'
  * calls it, which is too late. Push-only channels (main → renderer events)
  * must stay unhandled.
  */
-const PUSH_ONLY = new Set<keyof typeof IPC>([
-  'chatEvent',
-  'toolApprovalRequest',
-  'agentQuestionRequest',
-  'browserState',
-  'windowMaximizedChanged',
-  'windowFocusChanged',
-  'ptyData',
-  'ptyExit',
-  'themeChanged',
-  'githubAuthStatusEvent',
-  'codeIndexStatusEvent',
-  'dictationStatusEvent',
-  'skillsChanged',
-  'agentProfilesChanged',
-  'tasksChanged',
-  'gitStatusChanged',
-  'workspaceEditorFlushRequest',
-  'workspaceEditorFlushResponse',
-  'notificationsChanged',
-  'notificationsActivate',
-  'appearanceCustomCssChanged',
-  'updaterState',
-  'accessibilitySupportChanged',
-  'toolsCatalogChanged',
-  'deepLinkOpened'
-])
+const PUSH_ONLY = PUSH_ONLY_CHANNEL_NAMES
 
 function registeredChannels(): Set<string> {
   const src = readFileSync(join(process.cwd(), 'src/main/ipc/register.ts'), 'utf8')

@@ -11,6 +11,7 @@ import {
   type WalkedFile
 } from './walk'
 import { compileUserRegex } from './safeUserRegex'
+import { formatOversizedNotice } from './grep'
 import { extractDocxText, isDocxPath, MAX_DOCX_ARCHIVE_BYTES } from './docxText'
 import {
   queryIndexCandidates,
@@ -22,20 +23,25 @@ export const SEARCH_SCAN_CAP = 5000
 export const SEARCH_MAX_FILE_BYTES = 256 * 1024
 export const SEARCH_DEFAULT_MAX_RESULTS = 40
 
+/** Skipped for size, as opposed to unreadable, so the scan can report it. */
+const OVERSIZED = Symbol('search-oversized')
+
 async function contentHit(
   file: string,
   rel: string,
   q: string,
   pattern: RegExp,
   regex: boolean
-): Promise<string | null> {
+): Promise<string | typeof OVERSIZED | null> {
   try {
     const st = await fsp.stat(file)
     let text: string
     if (isDocxPath(rel) || isDocxPath(file)) {
-      if (st.size > MAX_DOCX_ARCHIVE_BYTES) return null
+      if (st.size > MAX_DOCX_ARCHIVE_BYTES) return OVERSIZED
       text = extractDocxText(await fsp.readFile(file))
     } else {
+      // Declared but previously unenforced — see the same fix in grep.ts.
+      if (st.size > SEARCH_MAX_FILE_BYTES) return OVERSIZED
       text = await fsp.readFile(file, 'utf8')
     }
     if (regex) {
@@ -86,6 +92,7 @@ export async function toolSearch(
   const hits: string[] = []
   const fileHitRels = new Set<string>()
   let truncated = false
+  let oversized = 0
   let indexMode: 'trigram' | 'live' = 'live'
 
   const liveCap =
@@ -147,12 +154,16 @@ export async function toolSearch(
       const ext = extname(file).toLowerCase()
       if (!TEXT_EXTS.has(ext) && !isDocxPath(rel)) continue
       const hit = await contentHit(file, rel, q, pattern, regex)
-      if (hit) hits.push(hit)
+      if (hit === OVERSIZED) oversized += 1
+      else if (hit) hits.push(hit)
     }
   }
 
   const notices: string[] = []
   if (truncated) notices.push(`… stopped at ${limit} matches`)
+  // A size skip is a coverage gap, not an absence of matches — say so, or a
+  // symbol in an oversized file reads back as "no such symbol".
+  if (oversized > 0) notices.push(formatOversizedNotice(oversized, SEARCH_MAX_FILE_BYTES))
   if (liveHitCap) notices.push(formatLiveScanCapNotice(liveCap))
   notices.push(`index=${indexMode}`)
   if (hits.length === 0) {

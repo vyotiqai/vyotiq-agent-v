@@ -235,9 +235,12 @@ describe('modePolicy', () => {
     expect(modeSectionMarkdown('agent', opts)).toMatch(/Automatic mode switching is ON/)
     expect(modeSectionMarkdown('agent', opts)).toMatch(/switch_mode[\s\S]*`ask`/)
     expect(modeSectionMarkdown('agent', opts)).toMatch(/switch_mode[\s\S]*`plan`/)
+    // Publishing a plan must not demote an Agent run — the model used to spend
+    // a whole `switch_mode` step undoing it.
     expect(modeSectionMarkdown('agent', opts)).toMatch(
-      /calling `create_plan` switches the run to `plan` mode/
+      /`create_plan` does not change the mode/
     )
+    expect(modeSectionMarkdown('agent', opts)).not.toMatch(/switches the run to `plan`/)
     expect(modeSectionMarkdown('ask', opts)).toMatch(/switch_mode[\s\S]*`plan`/)
     expect(modeSectionMarkdown('ask', opts)).toMatch(/switch_mode[\s\S]*`agent`/)
     expect(modeSectionMarkdown('plan', opts)).toMatch(/switch_mode[\s\S]*`agent`/)

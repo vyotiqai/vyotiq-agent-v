@@ -25,7 +25,7 @@ import { appendEvent, loadStatus } from './state'
 import { hydrateFollowUpsFromDisk, loadFollowUps, saveFollowUps } from './followUpStore'
 import { registerParentInstanceEmitter, registerRunIpcSender, handleInlineInstanceFinished } from './agentInstances'
 import { notifyBadgeChange } from '../app/badges'
-import { getRuntime } from './runtimes'
+import { resolveAvailableRuntime, type RunHandle } from './runtimes'
 import {
   cancelPendingApprovals,
   registerApprovalSender
@@ -111,8 +111,12 @@ export type StartAgentRunAgentInput = {
   provider?: ProviderId
   /** Session-pinned model — authoritative for this invoke. */
   model?: string
+  /** True only when the user picked `model` by hand (see ChatStartRequestSchema). */
+  modelExplicit?: boolean
   /** Teammate profile binding — identity, memory namespace, model pin. */
   agentProfileId?: string
+  /** Delegated task that owns this run (scheduler-launched runs only). */
+  delegatedTaskId?: string
   /** Execution substrate (Phase 4 runtime seam) — local unless cloud is wired. */
   runtime?: 'local' | 'cloud'
 }
@@ -133,6 +137,9 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
   ;(async () => {
     let terminalSent = false
     let terminalStatus: 'done' | 'error' | 'cancelled' | undefined
+    // Held so the finally can detach listeners. dispose() is NOT cancel: a
+    // cloud turn must keep running after this window stops watching it.
+    let runHandle: RunHandle | null = null
     const sendEvent = (ev: AgentEvent): void => {
       sendChatEventToRenderer(runId, ev, invokeId, wc)
     }
@@ -168,14 +175,19 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
     notifyBadgeChange()
     try {
       const runSignal = controller.signal
-      const eventStream = isChatFixtureReplayEnabled()
-        ? replayChatFixture({
-            runId,
-            invokeId,
-            workspacePath,
-            runSignal
-          })
-        : getRuntime(agentInput.runtime ?? 'local').start(agentInput)
+      let eventStream: AsyncGenerator<AgentEvent>
+      if (isChatFixtureReplayEnabled()) {
+        eventStream = replayChatFixture({ runId, invokeId, workspacePath, runSignal })
+      } else {
+        // Confirm the substrate can take the work before anything observes this
+        // run as started. There is no fallback to local: a cloud-bound run that
+        // quietly executed in-process would put the user's code on a machine
+        // they may have chosen this runtime to avoid.
+        const resolved = await resolveAvailableRuntime(agentInput.runtime ?? 'local')
+        if (!resolved.ok) throw new Error(resolved.error)
+        runHandle = resolved.runtime.start(agentInput)
+        eventStream = runHandle.events()
+      }
       for await (const ev of eventStream) {
         const terminal = isTerminalAgentRunEvent(ev as AgentEvent)
         if (terminal) terminalSent = true
@@ -361,6 +373,13 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
       ) {
         clearGoalRelaunchState(runId)
       }
+      // Detach this window's listeners from the runtime. Deliberately NOT a
+      // cancel — a runtime whose work outlives the app must keep going.
+      try {
+        runHandle?.dispose()
+      } catch (err) {
+        logger.warn('Runtime dispose failed', { scope: 'agent', correlationId: runId, err })
+      }
       // Storage retention run-end sweep (audit H4/H5): free pass + armed
       // policy per §8.1 ack. Fire-and-forget — never blocks the terminal path.
       void sweepRetentionAuto()
@@ -375,7 +394,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
       // queue (delegated tasks wait behind user chats and resumed runs) — but a
       // delayed goal relaunch keeps the identity busy until it re-registers.
       if (persisted?.agentProfileId && !relaunchedActiveGoal) {
-        notifyProfileRunFinished(persisted.agentProfileId)
+        notifyProfileRunFinished(persisted.agentProfileId, runId)
       }
     }
   })().catch((err) => {

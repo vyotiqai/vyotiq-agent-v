@@ -320,7 +320,9 @@ describe('registerIpc', () => {
       IPC.workspaceEditorRecoverySave,
       IPC.workspaceEditorRecoveryLoad,
       IPC.workspaceEditorRecoveryClear,
-      IPC.gitBlame
+      IPC.gitBlame,
+      IPC.runFeedbackGet,
+      IPC.runFeedbackSet
     ] as const
 
     const validPayloads: Record<(typeof fileChannels)[number], unknown> = {
@@ -405,6 +407,12 @@ describe('registerIpc', () => {
       [IPC.gitBlame]: {
         workspacePath: '/not-open',
         path: 'note.ts'
+      },
+      [IPC.runFeedbackGet]: { workspacePath: '/not-open', runId: 'run-1' },
+      [IPC.runFeedbackSet]: {
+        workspacePath: '/not-open',
+        runId: 'run-1',
+        rating: 'up'
       }
     }
 

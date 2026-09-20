@@ -104,7 +104,11 @@ describe('builtin slash commands', () => {
     if (send?.action === 'send') {
       expect(send.message).toContain('[Goal]')
       expect(send.message).toContain('fix flaky tests')
-      expect(send.message).toContain('create_goal')
+      // /goal seeds the active goal itself (loop.ts parses this header), so the
+      // message states the grant rather than sending the model to create_goal —
+      // that tool only proposes, and a live user goal refuses to be replaced.
+      expect(send.message).not.toContain('create_goal')
+      expect(send.message).toContain('update_goal')
     }
     expect(resolveBuiltin('builtin:goal', 'pause', '')).toEqual({
       action: 'client',

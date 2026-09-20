@@ -172,7 +172,10 @@ const RETRYABLE_INCOMPLETE_REASONS = new Set([
   // Bounded goal auto-continue stop: the goal is still active but the model
   // finished twice without tools. A user continue re-issues a turn (the goal
   // loop resumes it), so listing it cannot create an auto-resend loop.
-  'goal_wait'
+  'goal_wait',
+  // Goal paused on its auto-continue budget. Same shape as goal_wait: the user
+  // decides whether to spend another stretch, and Continue is a user turn.
+  'goal_budget'
 ])
 
 /** Continue / retry affordance for transient provider, stream, and circuit-open failures. */

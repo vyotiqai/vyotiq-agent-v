@@ -8,7 +8,7 @@ import { emptySecretStatus } from '@shared/ipc'
 import { TitleBar } from '@renderer/app/TitleBar'
 import { BreakpointProvider } from '@renderer/lib/context/BreakpointProvider'
 import { TitleBarAccessoryProvider } from '@renderer/lib/context/TitleBarAccessory'
-import { clampDockWidthPx, DOCK_WIDTH_DEFAULT_PX, readSidebarWidthPxForCapacity } from '@renderer/lib/utils/layout'
+import { CHAT_SIDE_RAIL_TOP_INSET, clampDockWidthPx, DOCK_WIDTH_DEFAULT_PX, readSidebarWidthPxForCapacity, TITLE_BAR_HEIGHT_PX } from '@renderer/lib/utils/layout'
 import { resetDockImmersiveStore } from '@renderer/lib/hooks/dockImmersiveStore'
 import { minimalReadyPlanMarkdown } from '@renderer/features/chat/utils/planDraft'
 
@@ -77,6 +77,7 @@ beforeEach(() => {
       onPtyData: vi.fn().mockReturnValue(() => undefined),
       onPtyExit: vi.fn().mockReturnValue(() => undefined),
       readRunArtifact: vi.fn().mockResolvedValue({ ok: false, error: 'none' }),
+      runFeedbackGet: vi.fn().mockResolvedValue({ ok: true, data: { entry: null } }),
       browserGetState: vi.fn().mockResolvedValue({
         ok: true,
         data: { open: false, url: '', title: '' }
@@ -869,8 +870,23 @@ describe('ChatView composer placement', () => {
     render(<ChatView {...baseProps} items={[]} />)
     const rail = document.querySelector('[data-chat-side-rail]')
     expect(rail?.className).toMatch(/justify-start/)
-    expect(rail?.className).toMatch(/pt-4/)
+    expect(rail?.className).toMatch(/top-10/)
     expect(rail?.className).not.toMatch(/justify-center/)
+  })
+
+  it('starts the side rail below the title bar, clear of the window controls', () => {
+    render(<ChatView {...baseProps} items={[]} />)
+    const rail = document.querySelector('[data-chat-side-rail]')
+    // The rail and the caption buttons share the top-right column, so the rail
+    // must begin past the 36px title bar — `inset-y-0`/`pt-4` put the Files
+    // button (and the rail's gradient) under the Close button.
+    expect(rail?.className).toContain(CHAT_SIDE_RAIL_TOP_INSET)
+    expect(rail?.className).toMatch(/bottom-0/)
+    expect(rail?.className).not.toMatch(/inset-y-0/)
+    expect(rail?.className).not.toMatch(/\bh-full\b/)
+    expect(Number(CHAT_SIDE_RAIL_TOP_INSET.replace('top-', '')) * 4).toBeGreaterThanOrEqual(
+      TITLE_BAR_HEIGHT_PX
+    )
   })
 
   it('top-aligns the side rail when transcript is visible', () => {
@@ -890,7 +906,7 @@ describe('ChatView composer placement', () => {
     )
     const rail = document.querySelector('[data-chat-side-rail]')
     expect(rail?.className).toMatch(/justify-start/)
-    expect(rail?.className).toMatch(/pt-4/)
+    expect(rail?.className).toMatch(/top-10/)
   })
 
   it('aligns the floating composer with the transcript column under the rail', () => {

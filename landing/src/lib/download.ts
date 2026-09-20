@@ -2,8 +2,8 @@ import { release } from './site'
 
 /**
  * Shapes the baked release assets into the platform groups the download page
- * renders. Every entry originates from the GitHub API response — no filename is
- * ever constructed here, so the page cannot offer a file that was not published.
+ * renders. Every entry comes from the GitHub API response; no filename is
+ * constructed here.
  */
 
 export type Installer = {

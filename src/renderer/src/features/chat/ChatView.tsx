@@ -16,6 +16,7 @@ import { AgentInstancePane } from './components/AgentInstancePane'
 import { ChatTranscriptStage } from './components/ChatTranscriptStage'
 import { useInlineInstanceUi } from './hooks/useInlineInstanceUi'
 import { useRunGoal } from './hooks/useRunGoal'
+import { useRunFeedback } from './hooks/useRunFeedback'
 import {
   type AgentInstanceUiState
 } from '@shared/utils/agentInstance'
@@ -367,6 +368,7 @@ const runGoal = useRunGoal({
   running,
   active: true
 })
+  const runFeedback = useRunFeedback(workspacePath, activeRunId, !running)
   const onOpenAgentInstance = useMemo(
     () =>
       workspacePath != null
@@ -1227,6 +1229,8 @@ const runGoal = useRunGoal({
           onGoalPause={runGoal.pause}
           onGoalResume={runGoal.resume}
           onGoalComplete={runGoal.complete}
+          onGoalActivate={runGoal.activate}
+          onGoalDismiss={runGoal.dismiss}
           onStopLoop={runGoal.stopLoop}
           onStopRun={onStop}
           transcript={
@@ -1235,6 +1239,7 @@ const runGoal = useRunGoal({
                 key={`transcript:${surfaceKey}`}
                 emptyLabel={transcriptEmptyLabel}
                 workspacePath={workspacePath ?? undefined}
+                runFeedback={runFeedback}
                 items={items}
                 itemsStore={itemsStore}
                 virtualizeLiveEarly

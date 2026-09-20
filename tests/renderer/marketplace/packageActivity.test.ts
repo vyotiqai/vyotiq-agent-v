@@ -216,3 +216,101 @@ describe('packageActivity', () => {
   })
 })
 
+/**
+ * Every installed package used to render the same permanently disabled chip.
+ * A GitHub server waiting for a sign-in and a DeepWiki server that had timed
+ * out looked the same and behaved the same: red text, dead button, no way
+ * forward without going to Manage and expanding Advanced.
+ */
+describe('the control an installed package offers', () => {
+  const mcp = (status: Partial<McpServerStatus>, auth?: MarketplaceCatalogEntry['auth']) =>
+    packageActivity(
+      entry({ id: 'srv', kind: 'mcp', ...(auth ? { auth } : {}) }),
+      installed({ id: 'srv', enabled: true }),
+      { id: 'srv', name: 'Srv', enabled: true, connected: false, toolCount: 0, ...status }
+    )
+
+  it('asks for a sign-in instead of reporting a failure', () => {
+    const a = mcp({ error: 'Sign in required', errorKind: 'sign-in' }, 'oauth-client')
+    expect(a.kind).toBe('needs-auth')
+    expect(a.label).toBe('Sign in to connect')
+    expect(a.action).toEqual({ kind: 'sign-in', label: 'Sign in' })
+    // Needing a credential is the expected first state, not an error.
+    expect(a.className).toBeUndefined()
+  })
+
+  it('asks for a sign-in before the first connect has even been tried', () => {
+    // Freshly installed: no session, no error yet, no stored credential.
+    const a = mcp({}, 'oauth')
+    expect(a.kind).toBe('needs-auth')
+    expect(a.action?.kind).toBe('sign-in')
+  })
+
+  it('stops asking once a credential is stored', () => {
+    const a = mcp({ hasAuthToken: true }, 'oauth')
+    expect(a.kind).not.toBe('needs-auth')
+  })
+
+  it('offers a retry for a network failure', () => {
+    const a = mcp({
+      error: 'Timed out reaching mcp.deepwiki.com — check your network or proxy, then retry.',
+      errorKind: 'network'
+    })
+    expect(a.kind).toBe('connect-failed')
+    expect(a.action).toEqual({ kind: 'retry', label: 'Retry' })
+    expect(a.className).toBe('text-danger')
+  })
+
+  it('offers no retry for a failure a retry cannot fix', () => {
+    // Retrying cannot install uvx. The card says what is wrong and the fix
+    // lives where the Install / Locate controls are.
+    const a = mcp({ error: 'uvx was not found on PATH', errorKind: 'binary' })
+    expect(a.kind).toBe('connect-failed')
+    expect(a.action).toBeUndefined()
+  })
+
+  it('offers a retry to an enabled server that simply has no session', () => {
+    const a = mcp({})
+    expect(a.kind).toBe('not-connected')
+    expect(a.action?.kind).toBe('retry')
+  })
+
+  it('says it is dialling rather than offering to dial again', () => {
+    // During the first seconds of a launch every enabled server is
+    // not-connected with no error yet. A Retry here would restart the attempt
+    // that is already running.
+    const a = mcp({ connecting: true })
+    expect(a.label).toBe('Connecting…')
+    expect(a.action).toBeUndefined()
+    expect(a.className).toBe('text-secondary')
+  })
+
+  it('offers nothing once the server is connected or switched off', () => {
+    expect(mcp({ connected: true, toolCount: 2 }).action).toBeUndefined()
+    expect(mcp({ enabled: false }).action).toBeUndefined()
+  })
+
+  it('carries a nested plugin MCP sign-in up to the package card', () => {
+    const a = packageActivity(
+      entry({ id: 'devtools', kind: 'plugin' }),
+      installed({ id: 'devtools', kind: 'plugin', enabled: true }),
+      undefined,
+      {
+        nestedMcpStatuses: [
+          {
+            id: 'a',
+            name: 'A',
+            enabled: true,
+            connected: false,
+            toolCount: 0,
+            error: 'Sign in required',
+            errorKind: 'sign-in'
+          }
+        ]
+      }
+    )
+    expect(a.kind).toBe('needs-auth')
+    expect(a.action?.kind).toBe('sign-in')
+  })
+})
+

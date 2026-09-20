@@ -47,6 +47,41 @@ describe('createChatStreamController', () => {
     expect(currentAfter?.kind === 'message' ? currentAfter.reconnecting : undefined).toBe(true)
   })
 
+  it("carries the provider's reason for a wait into networkWait state", () => {
+    const controller = createChatStreamController({ workspacePath: '/ws', runId: 'r2' })
+    controller.handleEvent({ type: 'status', runId: 'r2', status: 'running', invokeId: 1 })
+    controller.handleEvent({
+      type: 'network_wait',
+      runId: 'r2',
+      attempt: 7,
+      maxAttempts: 0,
+      retryInMs: 30000,
+      code: 'PROVIDER_HTTP',
+      message: '5-hour usage limit reached. Resets in 3hr 16min.'
+    })
+
+    // Without this the UI shows an unexplained retry loop for hours.
+    expect(controller.networkWait?.message).toBe(
+      '5-hour usage limit reached. Resets in 3hr 16min.'
+    )
+    expect(controller.networkWait?.code).toBe('PROVIDER_HTTP')
+    expect(controller.networkWait?.maxAttempts).toBe(0)
+  })
+
+  it('leaves networkWait.message unset when the provider gave no reason', () => {
+    const controller = createChatStreamController({ workspacePath: '/ws', runId: 'r3' })
+    controller.handleEvent({ type: 'status', runId: 'r3', status: 'running', invokeId: 1 })
+    controller.handleEvent({
+      type: 'network_wait',
+      runId: 'r3',
+      attempt: 1,
+      maxAttempts: 5,
+      retryInMs: 1000
+    })
+    expect(controller.networkWait?.message).toBeUndefined()
+  })
+
+
   it('skips advisory token_cost_hint from runNotice', () => {
     const controller = createChatStreamController({ workspacePath: '/ws', runId: 'r1' })
 

@@ -1,29 +1,34 @@
 ---
 import Base from '../layouts/Base.astro'
 import { app } from '../lib/site'
+import Shot from '../components/Shot.astro'
 
 const ext = app.extensions
 
 const GROUPS = [
   {
     kind: 'mcp',
+    id: 'mcp-servers',
     title: 'MCP servers',
     blurb:
       'Model Context Protocol servers. Connect one and its tools, resources and prompts become available to the agent. Several use OAuth, so you sign in to the vendor rather than pasting a token.'
   },
   {
     kind: 'skill',
+    id: 'skills',
     title: 'Skills',
     blurb:
       'Reusable instruction sets the agent loads into a run, invoked as slash commands. These ship with the app; you can also write your own.'
   },
   {
     kind: 'plugin',
+    id: 'plugin-rule-sets',
     title: 'Plugin rule sets',
     blurb: 'Bundles of standing rules that apply to every run in a workspace.'
   }
 ] as const
 
+// Featured packages first, in the order the app's marketplace shows them.
 const byKind = (kind: string) =>
   ext.list
     .filter((p) => p.kind === kind)
@@ -44,20 +49,28 @@ const AUTH_LABEL: Record<string, string> = {
   title="Extensions"
   description={`${ext.total} extensions ship with Agent V — ${ext.counts.mcp} MCP servers, ${ext.counts.skill} skills and ${ext.counts.plugin} plugin rule sets.`}
 >
-  <section class="vy-section vy-head">
+  <section class="vy-page-head">
     <div class="vy-shell">
       <p class="vy-eyebrow">Extensions</p>
-      <h1 class="vy-h2 vy-head-title">{ext.total} packages, bundled with the app</h1>
+      <h1 class="vy-h1">{ext.total} packages, bundled with the app</h1>
       <p class="vy-lede">
         The marketplace ships inside Agent V. Browsing it makes no network request, and installing
-        is per workspace — there is no registry account and nothing to sign up for.
+        is per workspace. There is no registry account and nothing to sign up for.
       </p>
+      <ul class="vy-jump" aria-label="On this page">
+        <li><a href="#mcp-servers">{ext.counts.mcp} MCP servers</a></li>
+        <li><a href="#skills">{ext.counts.skill} skills</a></li>
+        <li><a href="#plugin-rule-sets">{ext.counts.plugin} plugin rule sets</a></li>
+      </ul>
 
-      <dl class="vy-counts">
-        <div><dt>MCP servers</dt><dd class="vy-mono">{ext.counts.mcp}</dd></div>
-        <div><dt>Skills</dt><dd class="vy-mono">{ext.counts.skill}</dd></div>
-        <div><dt>Plugin rule sets</dt><dd class="vy-mono">{ext.counts.plugin}</dd></div>
-      </dl>
+      <div class="vy-canvas vy-ext-canvas">
+        <Shot
+          name="marketplace"
+          alt="The Agent V marketplace listing bundled MCP servers with their publishers."
+          caption="Browsing the bundle, offline, inside the application."
+          eager
+        />
+      </div>
     </div>
   </section>
 
@@ -65,23 +78,21 @@ const AUTH_LABEL: Record<string, string> = {
     GROUPS.map((group) => {
       const items = byKind(group.kind)
       return (
-        <section class="vy-rule vy-section">
-          <div class="vy-shell">
+        <section class="vy-rule vy-section" id={group.id}>
+          <div class="vy-shell vy-section-grid">
             <header class="vy-sec-head">
-              <p class="vy-eyebrow">
-                {group.title} · {items.length}
-              </p>
+              <p class="vy-eyebrow">{items.length} packages</p>
               <h2 class="vy-h2">{group.title}</h2>
               <p class="vy-prose-muted">{group.blurb}</p>
             </header>
 
-            <ul class="vy-pkg-grid">
-              {items.map((pkg) => (
-                <li class="vy-pkg">
-                  <div class="vy-pkg-head">
+            <div class="vy-panel">
+              <ul class="vy-rows">
+                {items.map((pkg) => (
+                  <li class="vy-pkg">
                     {pkg.icon ? (
                       <img
-                        class="vy-pkg-icon"
+                        class:list={['vy-pkg-icon', pkg.iconMono && 'vy-dark-invert']}
                         src={`/brand/extensions/${pkg.icon}`}
                         alt=""
                         width="20"
@@ -93,14 +104,18 @@ const AUTH_LABEL: Record<string, string> = {
                         {pkg.name.slice(0, 1)}
                       </span>
                     )}
-                    <h3 class="vy-pkg-name">{pkg.name}</h3>
-                    {AUTH_LABEL[pkg.auth] && <span class="vy-tag">{AUTH_LABEL[pkg.auth]}</span>}
-                  </div>
-                  <p class="vy-pkg-desc">{pkg.description}</p>
-                  {pkg.publisher && <p class="vy-pkg-pub">{pkg.publisher}</p>}
-                </li>
-              ))}
-            </ul>
+                    <div class="vy-pkg-body">
+                      <h3 class="vy-pkg-name">{pkg.name}</h3>
+                      <p class="vy-pkg-desc">{pkg.description}</p>
+                    </div>
+                    <div class="vy-pkg-side">
+                      {pkg.publisher && <span class="vy-pkg-pub vy-mono">{pkg.publisher}</span>}
+                      {AUTH_LABEL[pkg.auth] && <span class="vy-tag">{AUTH_LABEL[pkg.auth]}</span>}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         </section>
       )
@@ -108,16 +123,27 @@ const AUTH_LABEL: Record<string, string> = {
   }
 
   <section class="vy-rule vy-section">
-    <div class="vy-shell">
-      <div class="vy-sec-head">
-        <p class="vy-eyebrow">Beyond the bundle</p>
-        <h2 class="vy-h2">Bring your own servers</h2>
+    <div class="vy-shell vy-section-grid">
+      <header class="vy-sec-head">
+        <p class="vy-eyebrow">Your own servers</p>
+        <h2 class="vy-h2">Not limited to the bundle</h2>
+      </header>
+      <div>
         <p class="vy-prose-muted">
           Any MCP server works, not just the bundled ones. Point Agent V at a command or a URL, or
-          import servers you have already configured for another client. Trade marks and icons
-          above belong to their respective owners and are shown to identify the integration.
+          import servers you have already configured for another client.
+        </p>
+        <p class="vy-footnote">
+          Trade marks and icons on this page belong to their respective owners and are shown to
+          identify the integration.
         </p>
       </div>
+    </div>
+  </section>
+
+  <section class="vy-rule vy-section">
+    <div class="vy-shell vy-cta">
+      <h2 class="vy-h2">Install it and open the marketplace.</h2>
       <div class="vy-cta-actions">
         <a class="vy-btn vy-btn-primary" href="/download">Download</a>
         <a class="vy-btn vy-btn-secondary" href="/docs">Documentation</a>
@@ -127,87 +153,22 @@ const AUTH_LABEL: Record<string, string> = {
 </Base>
 
 <style>
-  .vy-head {
-    padding-block: clamp(2.5rem, 5vw, 4rem) clamp(2rem, 4vw, 3rem);
+  .vy-ext-canvas {
+    margin-top: clamp(2rem, 4vw, 3rem);
   }
 
-  .vy-head-title {
-    margin-top: 0.75rem;
-    margin-bottom: 1.25rem;
-  }
-
-  .vy-counts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1.25rem 3rem;
-    margin: 2.5rem 0 0;
-    padding-top: 1.5rem;
-    border-top: 1px solid var(--vy-border);
-  }
-
-  .vy-counts dt {
-    font-family: var(--vy-font-mono);
-    font-size: 0.6875rem;
-    text-transform: uppercase;
-    letter-spacing: var(--vy-tracking-caps);
-    color: var(--vy-tertiary);
-  }
-
-  .vy-counts dd {
-    margin: 0.3rem 0 0;
-    font-size: 1.375rem;
-    font-weight: 500;
-    color: var(--vy-fg-strong);
-    letter-spacing: -0.02em;
-  }
-
-  .vy-sec-head {
-    max-width: 62ch;
-    margin-bottom: 2.5rem;
-  }
-
-  .vy-sec-head .vy-h2 {
-    margin-top: 0.75rem;
-  }
-
-  .vy-sec-head .vy-prose-muted {
-    margin-top: 1rem;
-    font-size: 0.9375rem;
-  }
-
-  /* ------------------------------------------------------------ packages - */
-
-  .vy-pkg-grid {
-    list-style: none;
-    margin: 0;
-    padding: 0;
+  .vy-rows > .vy-pkg {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 0;
-    border: 1px solid var(--vy-border);
-    border-radius: var(--vy-radius-xl);
-    overflow: hidden;
-  }
-
-  .vy-pkg {
-    background: var(--vy-bg);
-    border-right: 1px solid var(--vy-border);
-    border-bottom: 1px solid var(--vy-border);
-    padding: 1.125rem 1.25rem;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .vy-pkg-head {
-    display: flex;
-    align-items: center;
-    gap: 0.625rem;
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    gap: 0.875rem;
+    align-items: start;
+    padding-block: 1rem;
   }
 
   .vy-pkg-icon {
     width: 20px;
     height: 20px;
-    flex-shrink: 0;
+    margin-top: 0.1rem;
     object-fit: contain;
   }
 
@@ -226,30 +187,36 @@ const AUTH_LABEL: Record<string, string> = {
 
   .vy-pkg-name {
     font-size: 0.9375rem;
-    font-weight: 600;
-    color: var(--vy-fg-strong);
     letter-spacing: -0.014em;
-    margin-right: auto;
   }
 
   .vy-pkg-desc {
-    margin-top: 0.625rem;
-    font-size: 0.8125rem;
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
     line-height: 1.55;
     color: var(--vy-muted);
   }
 
-  .vy-pkg-pub {
-    margin-top: 0.75rem;
-    font-family: var(--vy-font-mono);
-    font-size: 0.6875rem;
-    color: var(--vy-tertiary);
+  .vy-pkg-side {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding-top: 0.15rem;
   }
 
-  .vy-cta-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    margin-top: 0.5rem;
+  .vy-pkg-pub {
+    font-size: 0.6875rem;
+    color: var(--vy-tertiary);
+    white-space: nowrap;
+  }
+
+  @media (max-width: 560px) {
+    .vy-pkg {
+      grid-template-columns: 20px minmax(0, 1fr);
+    }
+    .vy-pkg-side {
+      grid-column: 2;
+      padding-top: 0;
+    }
   }
 </style>

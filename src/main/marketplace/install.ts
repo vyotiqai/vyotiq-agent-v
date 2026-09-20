@@ -28,6 +28,10 @@ import {
   type McpServer
 } from '../../shared/ipc'
 import { parseSkillFrontmatter, skillPackageVersion } from '../agent/skills/parse'
+import {
+  listPluginNestedMcpServers,
+  mcpServerFromManifest
+} from './mcpManifest'
 import { resolveSkillMdPath, SKILL_MD, LEGACY_SKILL_MD } from '../agent/skills/paths'
 import { getSettings, setSettings, enqueueSettingsMutation } from '../settings/settings'
 import { formatError } from '../../shared/errors'
@@ -44,7 +48,9 @@ import { remoteMcpIdFromUrl, headersWithoutAuthorization } from '../../shared/ut
 import { setMcpAuthToken } from '../settings/secrets'
 import { synthesizeVyotiqMcpManifest } from './mcpImport'
 import { assertSafeGitCloneUrl } from './gitCloneUrl'
+import { tarBinary } from '../system/tarBinary'
 import { sanitizeMcpManifestEnv } from './sanitizeMcpEnv'
+import { resourceTextDrifted } from './resourceDrift'
 import { withCompatibleUvxArgs } from '../agent/mcp/uvxCompat'
 import { downloadPublicUrlToFile } from '@main/net/webFetch'
 
@@ -216,7 +222,7 @@ export function assertArchiveEntryNameContained(entry: string): void {
 async function assertArchiveEntriesContained(archivePath: string): Promise<void> {
   const ext = extname(archivePath).toLowerCase()
   const { stdout } = await execFileAsync(
-    'tar',
+    tarBinary(),
     ext === '.zip' ? ['-tf', archivePath] : ['-tzf', archivePath]
   )
   for (const line of stdout.split(/\r?\n/)) {
@@ -236,9 +242,9 @@ async function extractArchive(archivePath: string, destDir: string): Promise<voi
   // assertExtractContained call below is the post-extract backstop.
   // Avoid Expand-Archive / unzip which do not enforce zip-slip containment.
   if (ext === '.zip') {
-    await execFileAsync('tar', ['-xf', archivePath, '-C', destDir])
+    await execFileAsync(tarBinary(), ['-xf', archivePath, '-C', destDir])
   } else {
-    await execFileAsync('tar', ['-xzf', archivePath, '-C', destDir])
+    await execFileAsync(tarBinary(), ['-xzf', archivePath, '-C', destDir])
   }
   assertExtractContained(destDir)
 }
@@ -317,31 +323,9 @@ function commitStagedDirectory(staging: string, dest: string): void {
   }
 }
 
-export function mcpServerFromManifest(root: string): McpServer {
-  const manifest = VyotiqMcpManifestSchema.parse(
-    JSON.parse(readFileSync(join(root, 'vyotiq.mcp.json'), 'utf8'))
-  )
-  return {
-    id: manifest.id,
-    name: manifest.name,
-    transport: manifest.transport,
-    command: manifest.command,
-    args: manifest.args,
-    env: sanitizeMcpManifestEnv(manifest.env),
-    url: manifest.url,
-    headers: manifest.headers,
-    ...(manifest.allowedTools?.length ? { allowedTools: manifest.allowedTools } : {}),
-    ...(manifest.deniedTools?.length ? { deniedTools: manifest.deniedTools } : {}),
-    auth: manifest.auth,
-    ...(manifest.requires?.length ? { requires: manifest.requires } : {}),
-    ...(manifest.inputs?.length ? { inputs: manifest.inputs } : {}),
-    ...(manifest.setupUrl ? { setupUrl: manifest.setupUrl } : {}),
-    enabled: true,
-    source: 'marketplace',
-    packageId: manifest.id,
-    packageVersion: manifest.version
-  }
-}
+// Re-exported so existing callers keep their import site; the reader itself
+// lives beside the plugin-nested expansion so the two cannot drift.
+export { mcpServerFromManifest }
 
 /** Sync marketplace-sourced MCP entries in settings.mcpServers from installed packages. */
 export async function syncMarketplaceMcpIntoSettings(): Promise<void> {
@@ -356,44 +340,51 @@ export async function syncMarketplaceMcpIntoSettings(): Promise<void> {
       .map((s) => [s.id, s] as const)
   )
   const fromMarketplace: McpServer[] = []
+
+  /**
+   * Layer the user's own edits back over the manifest defaults.
+   *
+   * `auth` / `requires` / `inputs` / `setupUrl` are deliberately NOT preserved:
+   * the manifest owns them, so an app update can correct a package's connect
+   * metadata. `binaryPath` is the user's own choice and must survive.
+   */
+  const withUserEdits = (server: McpServer, enabled: boolean): McpServer => {
+    const next: McpServer = { ...server, enabled }
+    const prev = prevById.get(next.id)
+    if (prev) {
+      if (prev.allowedTools) next.allowedTools = prev.allowedTools
+      if (prev.deniedTools) next.deniedTools = prev.deniedTools
+      if (prev.transport) next.transport = prev.transport
+      if (prev.command !== undefined) next.command = prev.command
+      if (prev.args) next.args = prev.args
+      if (prev.env) next.env = sanitizeMcpManifestEnv(prev.env)
+      if (prev.url !== undefined) next.url = prev.url
+      if (prev.headers) next.headers = prev.headers
+      if (prev.oauthClientId) next.oauthClientId = prev.oauthClientId
+      if (prev.authScope) next.authScope = prev.authScope
+      if (prev.authWorkspacePath) next.authWorkspacePath = prev.authWorkspacePath
+      if (prev.googleAccess) next.googleAccess = prev.googleAccess
+      if (prev.binaryPath) next.binaryPath = prev.binaryPath
+    }
+    // Repair known-broken uvx launch args (mcp SDK v2 rename) even when settings
+    // still hold the pre-pin args from an older install.
+    next.args = withCompatibleUvxArgs(next.command, next.args)
+    // PYTHONIOENCODING is applied at spawn time in buildMcpChildEnv — do not
+    // put it in settings.env (it was being stored as a fake "secret" every boot).
+    if (prev?.env) {
+      const cleaned = { ...(sanitizeMcpManifestEnv(prev.env) ?? {}) }
+      delete cleaned.PYTHONIOENCODING
+      next.env = Object.keys(cleaned).length > 0 ? cleaned : undefined
+    }
+    return next
+  }
+
   for (const item of index.items) {
     if (item.kind !== 'mcp') continue
     const root = resolveInstalledPackageRoot(item.packagePath)
     if (!existsSync(join(root, 'vyotiq.mcp.json'))) continue
     try {
-      const server = mcpServerFromManifest(root)
-      server.enabled = item.enabled
-      // Preserve user-edited connection fields from settings (manifest = defaults).
-      const prev = prevById.get(server.id)
-      if (prev) {
-        if (prev.allowedTools) server.allowedTools = prev.allowedTools
-        if (prev.deniedTools) server.deniedTools = prev.deniedTools
-        if (prev.transport) server.transport = prev.transport
-        if (prev.command !== undefined) server.command = prev.command
-        if (prev.args) server.args = prev.args
-        if (prev.env) server.env = sanitizeMcpManifestEnv(prev.env)
-        if (prev.url !== undefined) server.url = prev.url
-        if (prev.headers) server.headers = prev.headers
-        if (prev.oauthClientId) server.oauthClientId = prev.oauthClientId
-        if (prev.authScope) server.authScope = prev.authScope
-        if (prev.authWorkspacePath) server.authWorkspacePath = prev.authWorkspacePath
-        if (prev.googleAccess) server.googleAccess = prev.googleAccess
-        // `auth` / `requires` / `inputs` / `setupUrl` are deliberately NOT
-        // preserved: the manifest owns them, so an app update can correct a
-        // package's connect metadata. `binaryPath` is the user's own choice.
-        if (prev.binaryPath) server.binaryPath = prev.binaryPath
-      }
-      // Repair known-broken uvx launch args (mcp SDK v2 rename) even when settings
-      // still hold the pre-pin args from an older install.
-      server.args = withCompatibleUvxArgs(server.command, server.args)
-      // PYTHONIOENCODING is applied at spawn time in buildMcpChildEnv — do not
-      // put it in settings.env (it was being stored as a fake "secret" every boot).
-      if (prev?.env) {
-        const cleaned = { ...(sanitizeMcpManifestEnv(prev.env) ?? {}) }
-        delete cleaned.PYTHONIOENCODING
-        server.env = Object.keys(cleaned).length > 0 ? cleaned : undefined
-      }
-      fromMarketplace.push(server)
+      fromMarketplace.push(withUserEdits(mcpServerFromManifest(root), item.enabled))
     } catch (err) {
       logger.warn('Skip invalid marketplace MCP package', {
         scope: 'marketplace',
@@ -402,7 +393,14 @@ export async function syncMarketplaceMcpIntoSettings(): Promise<void> {
       })
     }
   }
-  // Plugin-expanded MCP is handled in resolveEffectiveMcpServers.
+
+  // MCP nested inside plugins needs a settings entry too. Without one the
+  // connect wizard cannot find the server, so it showed neither the client-id
+  // step nor the credential inputs, and every save failed with "not in
+  // settings yet" — a plugin-bundled server could never be authenticated.
+  for (const { item, server } of listPluginNestedMcpServers()) {
+    fromMarketplace.push(withUserEdits(server, item.enabled))
+  }
   // Skip ack: untrusted sources are gated in installMarketplacePackage; bundled
   // sync must not fail assertMcpServersAcked (AppData: marketplace:install IPC).
   await enqueueSettingsMutation(() =>
@@ -433,7 +431,7 @@ function repairBundledSkillPackagesFromResources(): void {
         mkdirSync(dirname(dest), { recursive: true })
         const next = readFileSync(src, 'utf8')
         const prev = existsSync(dest) ? readFileSync(dest, 'utf8') : ''
-        if (next === prev) continue
+        if (!resourceTextDrifted(next, prev)) continue
         writeFileSync(dest, next, 'utf8')
         logger.info('Repaired bundled skill markdown from resources', {
           scope: 'marketplace',
@@ -454,7 +452,9 @@ function repairBundledSkillPackagesFromResources(): void {
 
 /**
  * Overwrite installed bundled MCP manifests from the app's resources when they
- * drift (e.g. after we ship uvx `--with mcp<2` pins for fetch/time).
+ * drift (e.g. after we ship uvx `--with mcp<2` pins for fetch/time). Drift is
+ * content, not line endings — see resourceTextDrifted for why that matters
+ * when a dev checkout and a packaged install share one userData dir.
  */
 function repairBundledMcpManifestsFromResources(): void {
   const index = readMarketplaceIndex()
@@ -467,7 +467,7 @@ function repairBundledMcpManifestsFromResources(): void {
     try {
       const next = readFileSync(src, 'utf8')
       const prev = readFileSync(dest, 'utf8')
-      if (next === prev) continue
+      if (!resourceTextDrifted(next, prev)) continue
       writeFileSync(dest, next, 'utf8')
       logger.info('Repaired bundled MCP manifest from resources', {
         scope: 'marketplace',
@@ -502,7 +502,8 @@ async function registerInstalled(
     packagePath: packageRelPath
   }
   upsertInstalledItem(item)
-  if (detected.kind === 'mcp') {
+  // Plugins count: their nested MCP servers need settings entries as well.
+  if (detected.kind === 'mcp' || detected.kind === 'plugin') {
     await syncMarketplaceMcpIntoSettings()
   }
   return item

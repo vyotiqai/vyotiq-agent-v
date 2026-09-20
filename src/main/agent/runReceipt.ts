@@ -234,20 +234,20 @@ function contractExcerpt(contract: string, cap = 600): string {
  * it verified nothing). Skipped checks and checks that reported errors must
  * not stamp the verified state.
  */
-const SKIPPED_CHECK_RE = /^No test runner detected/
+export const SKIPPED_CHECK_RE = /^No test runner detected/
 
-function isCheckResult(name: string | undefined): boolean {
+export function isCheckResult(name: string | undefined): boolean {
   return name === 'diagnostics' || name === 'run_tests'
 }
 
 /** run_tests cleanliness: parsed failed-count; header absent + ok → exit 0. */
-function runTestsCheckClean(content: string): boolean {
+export function runTestsCheckClean(content: string): boolean {
   const parsed = parseTestResultHeader(content)
   return parsed == null ? true : parsed.failed === 0
 }
 
 /** diagnostics cleanliness: no error-severity diagnostic lines. */
-function diagnosticsCheckClean(content: string): boolean {
+export function diagnosticsCheckClean(content: string): boolean {
   return !parseDiagnosticLines(content).some((d) => (d.severity ?? 'error') === 'error')
 }
 
@@ -468,6 +468,12 @@ export function buildRunReceipt(input: {
   estimatedCost?: number
   /** Raw model context window in effect at the final step (context pressure). */
   contextWindow?: number
+  /**
+   * Live turn-end gate verdict from the loop's verification tracker. Typed off
+   * the schema rather than imported from `feedback/verification` — that module
+   * imports the cleanliness predicates from here.
+   */
+  verificationGate?: RunReceipt['verificationGate']
 }): RunReceipt {
   const incomplete = lastIncompleteFromEvents(input.events, input.status.invokeId)
   const tokenUsage = tokenUsageFromEvents(input.events)
@@ -507,6 +513,7 @@ export function buildRunReceipt(input: {
     diagnostics: scan.diagnostics,
     ...(testStats.calls > 0 ? { tests: testStats } : {}),
     ...(verification ? { verification } : {}),
+    ...(input.verificationGate ? { verificationGate: input.verificationGate } : {}),
     contractExcerpt: contractExcerpt(input.contract)
   }
   return RunReceiptSchema.parse(receipt)
@@ -532,6 +539,8 @@ export async function writeRunReceiptBestEffort(input: {
   estimatedCost?: number
   /** Raw model context window in effect at the final step (context pressure). */
   contextWindow?: number
+  /** Live turn-end gate verdict from the loop's verification tracker. */
+  verificationGate?: RunReceipt['verificationGate']
 }): Promise<RunReceipt | null> {
   try {
     const status = input.loadStatus(input.runDir)
@@ -547,7 +556,8 @@ export async function writeRunReceiptBestEffort(input: {
       model: input.model,
       billedCost: input.billedCost,
       estimatedCost: input.estimatedCost,
-      contextWindow: input.contextWindow
+      contextWindow: input.contextWindow,
+      verificationGate: input.verificationGate
     })
     writeRunReceipt(input.runDir, receipt)
     return receipt

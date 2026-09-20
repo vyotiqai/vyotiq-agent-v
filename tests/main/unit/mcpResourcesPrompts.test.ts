@@ -433,7 +433,7 @@ describe('mcp_read_resource / mcp_get_prompt content and failures', () => {
     )
   })
 
-  it('propagates read_resource failures and disconnects the server', async () => {
+  it('propagates read_resource failures but keeps the session', async () => {
     const client = mockClient({
       readResource: vi.fn(async () => {
         throw new Error('resource backend on fire')
@@ -452,11 +452,33 @@ describe('mcp_read_resource / mcp_get_prompt content and failures', () => {
 
     expect(result.ok).toBe(false)
     expect(result.content).toContain('resource backend on fire')
+    // A backend that failed one read has not taken the transport with it.
+    expect(client.close).not.toHaveBeenCalled()
+    expect(listConnectedMcpServerIdsForTests()).toContain('docs')
+  })
+
+  it('drops the session when a resource read dies with the transport', async () => {
+    const client = mockClient({
+      readResource: vi.fn(async () => {
+        throw new Error('MCP error -32000: Connection closed')
+      })
+    })
+    registerMcpSessionForTests('docs', client)
+
+    const result = await executeTool(
+      'mcp_read_resource',
+      JSON.stringify({ serverId: 'docs', uri: 'file:///notes.md' }),
+      '/tmp/ws',
+      new AbortController().signal,
+      { runEnabledMcpIds: new Set(['docs']) }
+    )
+
+    expect(result.ok).toBe(false)
     expect(client.close).toHaveBeenCalled()
     expect(listConnectedMcpServerIdsForTests()).not.toContain('docs')
   })
 
-  it('propagates get_prompt failures and disconnects the server', async () => {
+  it('propagates get_prompt failures but keeps the session', async () => {
     const client = mockClient({
       getPrompt: vi.fn(async () => {
         throw new Error('prompt store unavailable')
@@ -474,8 +496,8 @@ describe('mcp_read_resource / mcp_get_prompt content and failures', () => {
 
     expect(result.ok).toBe(false)
     expect(result.content).toContain('prompt store unavailable')
-    expect(client.close).toHaveBeenCalled()
-    expect(listConnectedMcpServerIdsForTests()).not.toContain('docs')
+    expect(client.close).not.toHaveBeenCalled()
+    expect(listConnectedMcpServerIdsForTests()).toContain('docs')
   })
 
   it('returns transport errors on every MCP invoke (circuit never opens)', async () => {

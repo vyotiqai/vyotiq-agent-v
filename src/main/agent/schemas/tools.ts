@@ -728,7 +728,7 @@ const askQuestionItemCatalog = z.object({
     .describe('For single/multi, allow an Other text answer (default false)')
 })
 
-/** Model-facing schema (no z.union — zodToJsonSchema erases unions to {}). */
+/** Model-facing schema (no z.union — zodToJsonSchema has no union form). */
 const askQuestionArgs = z.object({
   title: z
     .string()
@@ -1064,12 +1064,12 @@ export const TOOL_REGISTRY = {
   },
   create_goal: {
     description:
-      'Create or replace this chat\'s long-lived goal (goal.json). Call only when the user explicitly asked for a goal. Work until update_goal complete or the user pauses. Never pause yourself.',
+      'Propose this chat\'s long-lived goal (goal.json). The goal lands awaiting user confirmation and grants nothing until the user starts it from the goal banner, so carry on with the current turn after calling it. Use when the user asks to keep working until a named outcome is done; `/goal` sets one directly without this tool.',
     schema: createGoalArgs
   },
   update_goal: {
     description:
-      'Set this chat\'s goal to active (resume after a user pause) or complete (objective done, no required work left). Requires an existing goal from create_goal; rejects pause — only the user can pause.',
+      'Mark this chat\'s goal complete (objective done, no required work left). Requires an existing goal. Rejects pause, and cannot start a goal that is awaiting user confirmation — only the user pauses, resumes, or starts a goal.',
     schema: updateGoalArgs
   },
   browser_search: {

@@ -2,10 +2,13 @@ import { randomUUID } from 'crypto'
 import type {
   AgentEvent,
   AgentInteractionMode,
+  AgentProfile,
+  AgentProfileSnapshot,
   ChatMessage,
   IncompleteReason,
   ModelInfo,
-  ProviderId
+  ProviderId,
+  RunStatus
 } from '../../shared/ipc'
 import { DEFAULT_SETTINGS } from '../../shared/ipc'
 import { contentDisplayText, contentToText } from '../../shared/ipc'
@@ -57,13 +60,16 @@ import {
 } from './context'
 import type { ContextToolsDetail } from '../../shared/utils/contextUsage'
 import { trimToolResults } from './context/toolTrim'
-import { KEEP_LAST_TOOL_RESULTS } from './context/types'
+import { KEEP_LAST_TOOL_RESULTS, TOOL_RESULT_TRIM_SLACK } from './context/types'
 import { autoCompactLlmEvents } from './compactRun'
 import {
   DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO,
   proactiveCompactThresholdTokens
 } from '../../shared/domain/contextBudget'
 import { executeStepToolCalls } from './executeStepTools'
+import { createVerificationTracker, evaluateVerificationGate } from './feedback/verification'
+import type { VerificationGateVerdict } from './feedback/verification'
+import { recordRunFeedbackBestEffort } from './feedback/runFeedbackStore'
 import { GenerationRepetitionMonitor } from './generationRepetition'
 import { mergeOpenAiCompatToolArgDelta } from './toolArgWire'
 import { mergeStreamedToolName } from '../../shared/utils/toolName'
@@ -71,6 +77,10 @@ import { loadHarness } from './harness'
 import {
   combineLoopHints,
   loopHintForCompactionFailure,
+  adaptiveThinkingEffort,
+  emptyResponseRetryEffort,
+  weakestEffort,
+  isMechanicalStep,
   loopHintForCompactionVerifyFailed,
   loopHintAfterCompaction,
   loopHintForMcpNotInCatalogFailFast,
@@ -168,10 +178,19 @@ import {
   topToolsByCallCount
 } from '../../shared/utils/tokenCost'
 import { finalizeTodosOnRunEnd, formatTodosContextSection, readTodos } from './tools/todo'
-import { createGoal, formatActiveGoalSection, readGoal, bumpGoalContinueCount } from './runGoal'
+import {
+  createGoal,
+  formatActiveGoalSection,
+  readGoal,
+  bumpGoalContinueCount,
+  clearGoalAutoResume,
+  pauseGoalIfActive
+} from './runGoal'
 import { emitGoalUpdate } from './goalEvents'
 import {
   formatGoalContinueMessage,
+  goalBudgetPauseMessage,
+  isGoalContinueMessage,
   parseGoalInvocation,
   shouldAutoContinueActiveGoal
 } from '../../shared/goalRuntime'
@@ -188,7 +207,7 @@ import {
 } from './mcp'
 import { resolveEffectiveMcpServers, resolveMcpServersForSessionMap, mcpSessionMapFingerprint } from '../marketplace/resolve'
 import { buildSkillsSection, loadEnabledSkills, loadPluginRules } from './skills'
-import { beginWriteCheckpoint, finalizeWriteCheckpoint } from './checkpoints'
+import { beginWriteCheckpoint, finalizeWriteCheckpoint, getWriteCheckpoint } from './checkpoints'
 import { isMcpToolPermitted } from '../../shared/utils/mcpToolPolicy'
 import { mcpAuthAllowedForWorkspace } from '../../shared/mcpApps'
 import {
@@ -246,6 +265,14 @@ const AUTO_COMPACT_MIN_REGROWTH_RATIO = 0.1
 const CONTEXT_OVERFLOW_VERIFY_FAILED =
   'Context still exceeds the model window. Compaction produced a summary that failed verification and was not applied. Start a new chat or compact manually.'
 
+/**
+ * Cap on back-to-back empty-response retries. The retry deliberately re-sends
+ * the unchanged history, so if the model is deterministically returning nothing
+ * the next attempt costs a full generation and returns nothing again. After this
+ * many, surface `empty_response` to the user instead of looping.
+ */
+const MAX_CONSECUTIVE_EMPTY_RESPONSES = 3
+
 const INCOMPLETE_MESSAGES: Record<Exclude<IncompleteReason, never>, string> = {
   truncated: 'The model hit its output token limit before finishing this turn.',
   empty_response: 'The model returned an empty response.',
@@ -258,6 +285,8 @@ const INCOMPLETE_MESSAGES: Record<Exclude<IncompleteReason, never>, string> = {
   provider_error: 'The provider returned an error. Review the error details, then retry.',
   goal_wait:
     'Goal is still active. Two finishes without tools — waiting for you to continue or mark complete.',
+  goal_budget:
+    'Goal paused: it used its auto-continue budget without finishing. Resume it to spend another stretch, or mark it complete.',
   repetition: 'The model kept repeating the same output text; the generation was cut off.'
 }
 
@@ -341,7 +370,8 @@ async function* yieldStreamRetryWait(
   streamAttempt: number,
   signal: AbortSignal,
   runDir: string | undefined,
-  errorCode: string
+  errorCode: string,
+  failureMessage: string
 ): AsyncGenerator<AgentEvent, void, unknown> {
   try {
     for await (const retryInMs of iterateNetworkWait({
@@ -356,6 +386,7 @@ async function* yieldStreamRetryWait(
         maxAttempts: 0,
         retryInMs,
         code: errorCode,
+        ...(failureMessage.trim() ? { message: failureMessage.trim() } : {}),
         step
       }
       if (runDir) appendEvent(runDir, waitEv)
@@ -374,6 +405,7 @@ async function* yieldStreamRetryWait(
     maxAttempts: 0,
     retryInMs: backoffMs,
     code: errorCode,
+    ...(failureMessage.trim() ? { message: failureMessage.trim() } : {}),
     step
   }
   if (runDir) appendEvent(runDir, backoffEv)
@@ -841,6 +873,74 @@ async function reconstructStreamSnapshotAssistant(
   appendEvent(runDir, { type: 'assistant_message', runId, content: snapshot })
 }
 
+export function createAgentProfileSnapshot(
+  profile: AgentProfile,
+  runtime: 'local' | 'cloud'
+): AgentProfileSnapshot {
+  const { createdAt: _createdAt, updatedAt: _updatedAt, ...behavior } = profile
+  return { version: 1, ...behavior, runtime }
+}
+
+export function validateExistingRunStart(
+  persisted: RunStatus,
+  requested: { agentProfileId?: string; runtime?: 'local' | 'cloud' },
+  explicit: { agentProfileId: boolean; runtime: boolean }
+): { agentProfileId?: string; runtime: 'local' | 'cloud' } {
+  if (explicit.agentProfileId && requested.agentProfileId !== persisted.agentProfileId) {
+    throw new Error('Existing run teammate binding cannot be changed')
+  }
+  const runtime = persisted.runtime ?? persisted.agentProfileSnapshot?.runtime ?? 'local'
+  if (explicit.runtime && requested.runtime !== runtime) {
+    throw new Error('Existing run runtime cannot be changed')
+  }
+  return {
+    ...(persisted.agentProfileId ? { agentProfileId: persisted.agentProfileId } : {}),
+    runtime
+  }
+}
+
+export type ProviderModelPair = { provider: ProviderId; model: string }
+
+/**
+ * Which provider/model a turn runs on.
+ *
+ * Precedence: a model the user picked by hand, then the selection this run
+ * already persisted, then the teammate's pin, then whatever the renderer
+ * resolved from the workspace/global chain.
+ *
+ * `requested` carries BOTH a hand-picked model and the renderer's ambient
+ * default, which are otherwise indistinguishable — so it may only outrank a
+ * teammate's pin when `explicit` says the user chose it. Without that
+ * distinction a teammate's pinned model never takes effect, because the
+ * renderer always sends something.
+ */
+export function resolveTurnModel(input: {
+  requested?: Partial<ProviderModelPair>
+  explicit?: boolean
+  /** This run's remembered selection (set on its first turn). */
+  recalled?: Partial<ProviderModelPair> | null
+  /** The bound teammate's pinned provider/model, when it has one. */
+  profilePin?: Partial<ProviderModelPair> | null
+  /** Workspace override merged over global settings. */
+  fallback: ProviderModelPair
+}): ProviderModelPair {
+  const explicit = input.explicit ? input.requested : undefined
+  return {
+    provider:
+      explicit?.provider ??
+      input.recalled?.provider ??
+      input.profilePin?.provider ??
+      input.requested?.provider ??
+      input.fallback.provider,
+    model:
+      explicit?.model ??
+      input.recalled?.model ??
+      input.profilePin?.model ??
+      input.requested?.model ??
+      input.fallback.model
+  }
+}
+
 export type RunAgentInput = {
   runId: string
   messages?: ChatMessage[]
@@ -856,8 +956,12 @@ export type RunAgentInput = {
   provider?: ProviderId
   /** Session-pinned model — authoritative for this invoke. */
   model?: string
+  /** True only when the user picked `model` by hand (see ChatStartRequestSchema). */
+  modelExplicit?: boolean
   /** Teammate profile binding — identity, memory namespace, model pin. */
   agentProfileId?: string
+  /** Delegated task that owns this run (scheduler-launched runs only). */
+  delegatedTaskId?: string
   /** Execution substrate (Phase 4 runtime seam) — local unless cloud is wired. */
   runtime?: 'local' | 'cloud'
 }
@@ -867,59 +971,69 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
   const workspaces = readWorkspacesState()
   const override = findWorkspaceSettingsOverride(workspaces, input.workspacePath)
   const effective = resolveEffectiveSettings(globalSettings, override)
-  const profile = input.agentProfileId
-    ? resolveAgentProfile(input.workspacePath, input.agentProfileId)
+  const existingStatus = runExists(input.workspacePath, input.runId)
+    ? loadStatus(resolveRunDir(input.workspacePath, input.runId))
     : null
-  if (input.agentProfileId && !profile) {
-    throw new Error(`Unknown agent profile: ${input.agentProfileId}`)
+  const existingInvariant = existingStatus
+    ? validateExistingRunStart(
+        existingStatus,
+        input,
+        {
+          agentProfileId: Object.prototype.hasOwnProperty.call(input, 'agentProfileId'),
+          runtime: Object.prototype.hasOwnProperty.call(input, 'runtime')
+        }
+      )
+    : null
+  const boundProfileId = existingInvariant?.agentProfileId ?? input.agentProfileId
+  const profile = boundProfileId
+    ? resolveAgentProfile(input.workspacePath, boundProfileId)
+    : null
+  if (boundProfileId && !profile && !existingStatus?.agentProfileSnapshot) {
+    throw new Error(`Unknown agent profile: ${boundProfileId}`)
   }
-  // Resume without an explicit binding must recover the persisted one — a
-  // teammate chat resumed after restart keeps its memory namespace and identity.
   let effectiveProfile = profile
-  /** Namespace retained by id when the roster entry is gone (deleted teammate). */
+  let effectiveProfileBehavior: AgentProfile | AgentProfileSnapshot | null =
+    profile ?? existingStatus?.agentProfileSnapshot ?? null
   let persistedNamespaceId: string | undefined
-  if (!effectiveProfile && input.runId && runExists(input.workspacePath, input.runId)) {
-    const persistedStatus = loadStatus(resolveRunDir(input.workspacePath, input.runId))
-    const persistedProfileId = persistedStatus?.agentProfileId
-    if (persistedProfileId) {
-      effectiveProfile = resolveAgentProfile(input.workspacePath, persistedProfileId)
-      if (!effectiveProfile && AgentProfileIdSchema.safeParse(persistedProfileId).success) {
-        // The profile was deleted: never fall back to the shared memory brain —
-        // keep this run isolated in the teammate's own (id-keyed) namespace.
-        persistedNamespaceId = persistedProfileId
-        logger.warn('Resumed run binds a deleted teammate profile — memory namespace retained by id', {
-          scope: 'agent',
-          correlationId: input.runId,
-          profileId: persistedProfileId
-        })
-      }
-    }
+  if (!effectiveProfile && boundProfileId && AgentProfileIdSchema.safeParse(boundProfileId).success) {
+    persistedNamespaceId = boundProfileId
+    logger.warn('Resumed run binds a deleted teammate profile — snapshot and memory namespace retained', {
+      scope: 'agent',
+      correlationId: input.runId,
+      profileId: boundProfileId
+    })
   }
+  const runRuntime = existingInvariant?.runtime ?? input.runtime ?? effectiveProfileBehavior?.runtime ?? 'local'
   // Per-session model pinning: renderer turns pass their session's selection;
   // main-originated invokes (follow-up promote, goal relaunch) recall the run's
   // last selection so a model change in another session cannot bleed in here.
-  const recalled = recallRunModelSelection(input.runId)
+  const turnModel = resolveTurnModel({
+    requested: { provider: input.provider, model: input.model },
+    explicit: input.modelExplicit === true,
+    recalled: recallRunModelSelection(input.runId),
+    profilePin: effectiveProfileBehavior?.model ?? null,
+    fallback: { provider: effective.provider, model: effective.model }
+  })
   const settings = {
     ...DEFAULT_SETTINGS,
     ...globalSettings,
     ...effective,
-    provider:
-      input.provider ?? recalled?.provider ?? effectiveProfile?.model?.provider ?? effective.provider,
-    model: input.model ?? recalled?.model ?? effectiveProfile?.model?.model ?? effective.model
+    provider: turnModel.provider,
+    model: turnModel.model
   }
-  if (effectiveProfile) {
+  if (effectiveProfileBehavior) {
     // Profile identity overrides the workspace/global persona chain per-field.
-    if (effectiveProfile.persona) settings.agentPersona = effectiveProfile.persona
-    if (effectiveProfile.tone) settings.agentTone = effectiveProfile.tone
-    if (effectiveProfile.identity) settings.agentIdentity = effectiveProfile.identity
-    if (effectiveProfile.autonomousMode === 'on') settings.autonomousMode = true
-    if (effectiveProfile.autonomousMode === 'off') settings.autonomousMode = false
+    if (effectiveProfileBehavior.persona) settings.agentPersona = effectiveProfileBehavior.persona
+    if (effectiveProfileBehavior.tone) settings.agentTone = effectiveProfileBehavior.tone
+    if (effectiveProfileBehavior.identity) settings.agentIdentity = effectiveProfileBehavior.identity
+    if (effectiveProfileBehavior.autonomousMode === 'on') settings.autonomousMode = true
+    if (effectiveProfileBehavior.autonomousMode === 'off') settings.autonomousMode = false
   }
   rememberRunModelSelection(input.runId, settings.provider, settings.model)
   let agentMode: AgentInteractionMode = input.mode ?? 'agent'
   const workspace = input.workspacePath
   const runId = input.runId
-  const { controller, invokeId } = registerRunAbort(runId, workspace, effectiveProfile?.id)
+  const { controller, invokeId } = registerRunAbort(runId, workspace, boundProfileId)
 
   // Entire body in try/finally so early returns (missing key, etc.) always clear the abort map.
   // Storage / session paths stay on `workspace`. File tools may use an instance worktree.
@@ -929,6 +1043,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
   let abortOnStorageLost: (() => void) | null = null
   let checkpointFlushed = false
   let runExitedNormally = false
+  /** Mirrors the in-try `isInlineInstance` so teardown can read it too. */
+  let runIsInlineInstance = false
   let messages: ChatMessage[] = []
   let costTotals: StepUsageTotals = emptyStepUsageTotals()
   let compactionCountThisRun = 0
@@ -936,6 +1052,27 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
   let costLogModel = settings.model
   /** Context window in effect at the latest step — for the closeout receipt. */
   let costLogContextWindow: number | undefined
+  /**
+   * Invoke-scoped mutation/check tracker feeding the turn-end verification
+   * verdict. Declared before the try so teardown still gets an accurate
+   * reading on runs that were cancelled or errored before the turn-end branch.
+   *
+   * Deliberately not seeded from history: `mutationPaths` is re-seeded from
+   * earlier invokes on resume, and the verdict must only speak about work
+   * this turn actually did.
+   */
+  const verification = createVerificationTracker()
+  /**
+   * What the armed gate would have done this invoke, recorded for the receipt.
+   *
+   * Sticky: set at the turn-end branch, which is the only place an armed gate
+   * could fire, and never cleared by a later verified turn — the measurement
+   * being taken is "would arming this have cost a turn", and a nudge at turn 1
+   * costs one even if turn 2 then checks. Runs that never reach that branch
+   * (cancelled, errored, mid-stream failures) keep the default: the armed gate
+   * would not have fired on them either.
+   */
+  let verificationVerdict: VerificationGateVerdict = { wouldFire: false }
   /** Agent step counter — declared early so interim receipt can close over it. */
   let step = 0
   /** Last step that flushed an interim receipt.json (start writes at step 0). */
@@ -1105,11 +1242,16 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         // window — a fresh run that crashes during message flush must still
         // resume with its teammate binding intact.
         writeStatus({
-          runtime: input.runtime ?? 'local',
+          runtime: runRuntime,
+          // Task ownership is durable: boot uses it to tell a scheduler-owned
+          // run from an ordinary teammate chat, so generic profile auto-resume
+          // cannot relaunch work the scheduler must reconcile instead.
+          ...(input.delegatedTaskId ? { delegatedTaskId: input.delegatedTaskId } : {}),
           ...(effectiveProfile
             ? {
                 agentProfileId: effectiveProfile.id,
-                agentProfileName: effectiveProfile.name
+                agentProfileName: effectiveProfile.name,
+                agentProfileSnapshot: createAgentProfileSnapshot(effectiveProfile, runRuntime)
               }
             : {})
         })
@@ -1137,15 +1279,20 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     // first start and preserved from the persisted status on resume — an invoke
     // never rewrites the substrate a run was started with.
     writeStatus({
-      runtime: input.runtime ?? persistedForTools?.runtime ?? 'local',
+      runtime: persistedForTools?.runtime ?? runRuntime,
       ...(effectiveProfile
         ? {
             agentProfileId: effectiveProfile.id,
-            agentProfileName: effectiveProfile.name
+            agentProfileName: effectiveProfile.name,
+            agentProfileSnapshot: createAgentProfileSnapshot(
+              effectiveProfile,
+              persistedForTools?.runtime ?? runRuntime
+            )
           }
         : {})
     })
     const isInlineInstance = persistedForTools?.inlineInstance === true
+    runIsInlineInstance = isInlineInstance
     if (isInlineInstance && persistedForTools?.worktreePath) {
       const wt = persistedForTools.worktreePath
       if (!isSafeInstanceWorktreePath(workspace, wt) || !existsSync(wt)) {
@@ -1167,6 +1314,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     }
 
     if (!isInlineInstance) {
+      // A turn the user actually drove (typed prompt, or a loop tick carrying
+      // their own loop prompt) proves someone is watching, so the app-start
+      // auto-resume ceiling starts over. Only the loop's own synthetic
+      // `[Goal continue]` messages leave it spent.
+      if (!isGoalContinueMessage(displayText)) clearGoalAutoResume(runDir)
       const invocation = parseGoalInvocation(displayText)
       if (invocation) {
         const seeded = createGoal(runDir, invocation.objective)
@@ -1688,6 +1840,19 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     const recentReadPaths = new Map<string, number>()
     /** Plan-mode chat-essay nudges this invoke (cap 2). */
     let planUnreadyNudges = 0
+    /**
+     * Consecutive empty-response retries. The retry re-sends a byte-identical
+     * request, so a deterministic empty turn would loop at full generation cost
+     * forever (34 empty_response events measured across 467 steps, observed
+     * back-to-back). Reset on any non-empty turn.
+     */
+    let consecutiveEmptyResponses = 0
+    /**
+     * Consecutive completed steps that only navigated (read-only lookups, no
+     * visible answer). Drives the per-step thinking step-down; any substantive
+     * step resets it. See adaptiveThinkingEffort in loopPolicy.
+     */
+    let mechanicalStepStreak = 0
     const costWarnOnce = new Set<string>()
     /** Rolling cache-hit samples from large steps (low_cache_hit_rate). */
     const recentLargeCacheHits: number[] = []
@@ -2288,7 +2453,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             attempt,
             streamSignalFor(runId, controller.signal),
             streamRunDir,
-            lastStreamFailureCode || 'PROVIDER_STREAM'
+            lastStreamFailureCode || 'PROVIDER_STREAM',
+            lastStreamFailureMessage
           )
         },
         onRetriableFailure: (err, attempt) => {
@@ -2326,7 +2492,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           thinking: thinkingEnabled
             ? {
                 enabled: true,
-                effort: settings.thinkingEffort,
+                effort: weakestEffort(
+                  adaptiveThinkingEffort(settings.thinkingEffort, mechanicalStepStreak),
+                  emptyResponseRetryEffort(settings.thinkingEffort, consecutiveEmptyResponses)
+                ),
                 display: settings.showThinking ? 'summarized' : 'omitted'
               }
             : { enabled: false },
@@ -3011,6 +3180,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           yield thinkingDoneEv
         }
         const scrubbedAssistantText = stripToolShapedAssistantText(assistantText)
+        // A step that called no tools is not navigation — end the chain so a
+        // retry or nudge resumes at the user's full effort.
+        mechanicalStepStreak = 0
         // Reasoning persists once (see the tool-call path above): `reasoningState`
         // on the message, with `thinking` kept only when the payload carries no
         // recoverable text.
@@ -3034,6 +3206,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         yield assistantMsgEv
 
         const incomplete = classifyIncompleteTurn(stepStopReason, scrubbedAssistantText)
+        // Only an unbroken run of empty turns is a stuck model; any other outcome
+        // clears the budget so a long run never trips the cap on stale counts.
+        if (incomplete !== 'empty_response') consecutiveEmptyResponses = 0
         if (incomplete === 'truncated' && !controller.signal.aborted) {
           const continueEv: AgentEvent = {
             type: 'incomplete',
@@ -3056,11 +3231,17 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           continue
         }
 
-        if (incomplete === 'empty_response' && !controller.signal.aborted) {
+        if (
+          incomplete === 'empty_response' &&
+          !controller.signal.aborted &&
+          consecutiveEmptyResponses < MAX_CONSECUTIVE_EMPTY_RESPONSES
+        ) {
+          consecutiveEmptyResponses += 1
           logger.info('Auto-continuing after empty response', {
             scope: 'agent',
             correlationId: runId,
-            step
+            step,
+            attempt: consecutiveEmptyResponses
           })
           const continueEv: AgentEvent = {
             type: 'incomplete',
@@ -3092,20 +3273,22 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           // working list is post-fold and a sync here would permanently drop the
           // folded head from messages.jsonl (breaking rewind indices and the
           // stitched transcript).
-          if (foldedMessages > 0) {
-            const diskMessages = await loadMessagesAsync(workspace, runId)
-            const diskLast = diskMessages[diskMessages.length - 1]
-            if (
-              diskLast?.role === 'assistant' &&
-              !contentToText(diskLast.content).trim() &&
-              !diskLast.toolCalls?.length
-            ) {
-              diskMessages.pop()
-            }
-            await syncMessagesAsync(runDir, diskMessages)
-          } else {
-            await syncMessagesAsync(runDir, messages)
+          // Always rewrite from DISK, never the working set. After a fold the
+          // working list is post-fold and would drop the folded head; after a
+          // tool trim its bodies are `[cleared]`, and syncing those wrote the
+          // erasure into durable history — 507 of 523 tool results on disk for
+          // run 356eefd5 read `[cleared]`, so even a resume could not recover
+          // what the agent had already read. Disk holds the full bodies.
+          const diskMessages = await loadMessagesAsync(workspace, runId)
+          const diskLast = diskMessages[diskMessages.length - 1]
+          if (
+            diskLast?.role === 'assistant' &&
+            !contentToText(diskLast.content).trim() &&
+            !diskLast.toolCalls?.length
+          ) {
+            diskMessages.pop()
           }
+          await syncMessagesAsync(runDir, diskMessages)
           continue
         }
 
@@ -3130,6 +3313,26 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             messages.push(nudge)
             appendMessage(runDir, nudge)
             continue
+          }
+        }
+
+        // Verification gate — OBSERVE ONLY. The receipt has always computed
+        // "was the work checked after the last mutation" at teardown, too late
+        // for the turn to act on it. This is the same judgment taken while the
+        // turn can still be steered; it records the verdict and changes
+        // nothing, so the real fire rate is known before the gate is armed.
+        if (!incomplete && agentMode === 'agent' && !isInlineInstance) {
+          const verdict = evaluateVerificationGate(verification.state())
+          if (verdict.wouldFire) {
+            verificationVerdict = verdict
+            logger.info('Verification gate would fire', {
+              scope: 'agent',
+              code: 'VERIFY_GATE',
+              correlationId: runId,
+              step,
+              reason: verdict.reason,
+              paths: verdict.paths?.slice(0, 5)
+            })
           }
         }
 
@@ -3188,7 +3391,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             goalStatus: activeGoal?.status,
             agentMode,
             incomplete: false,
-            consecutiveNoToolFinishes: nextStreak
+            consecutiveNoToolFinishes: nextStreak,
+            continueCount: activeGoal?.continueCount ?? 0
           })
           if (decision === 'continue' && activeGoal && reopenRunTurn(runId, invokeId)) {
             goalNoToolFinishes = nextStreak
@@ -3204,6 +3408,35 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             checkpointFlushed = false
             beginWriteCheckpoint(runDir, toolWorkspace, lastUserAnchorIndex(messages, foldedMessages))
             continue
+          }
+          if (decision === 'stop_budget' && activeGoal) {
+            // Hand the decision back to the user rather than stopping silently:
+            // pausing (not completing) keeps the objective and its loop intact,
+            // so Resume picks up exactly where this stretch left off.
+            const paused = pauseGoalIfActive(runDir) ?? activeGoal
+            const budgetMessage = goalBudgetPauseMessage(activeGoal.objective)
+            emitGoalUpdate({
+              workspacePath: workspace,
+              runId,
+              runDir,
+              goal: paused,
+              notice: budgetMessage
+            })
+            const budgetEv: AgentEvent = {
+              type: 'incomplete',
+              runId,
+              invokeId,
+              reason: 'goal_budget',
+              step,
+              message: budgetMessage
+            }
+            appendEvent(runDir, budgetEv)
+            yield budgetEv
+            logger.info('Goal paused on auto-continue budget', {
+              scope: 'goal',
+              correlationId: runId,
+              continueCount: activeGoal.continueCount ?? 0
+            })
           }
           if (decision === 'stop_wait' && activeGoal) {
             goalNoToolFinishes = nextStreak
@@ -3271,6 +3504,17 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         arguments: t.arguments
       }))
       const scrubbedAssistantText = stripToolShapedAssistantText(assistantText)
+      // Tool calls are an answer, so this turn was not empty: clear the retry
+      // budget here too (the no-tools path clears it after classifying).
+      consecutiveEmptyResponses = 0
+      // Track navigation chains for the next step's thinking effort. Counted
+      // from what this step actually did, which is only knowable now.
+      mechanicalStepStreak = isMechanicalStep(
+        mappedCalls.map((c) => c.name),
+        scrubbedAssistantText
+      )
+        ? mechanicalStepStreak + 1
+        : 0
       // Persist reasoning once: `reasoningState` is the wire-replay source of
       // truth (in memory and on disk); `thinking` is only its human-readable
       // view and is kept solely when the payload carries no recoverable text.
@@ -3359,6 +3603,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         mutationPaths,
         recentReadPaths,
         readStampStep: step,
+        verification,
         appendMessage: async (msg: ChatMessage) => {
           await appendMessage(runDir!, msg)
           // Surface persist failures before the next tool mutates the workspace.
@@ -3481,6 +3726,13 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         }
         throw err
       }
+      // Reconcile against the authoritative mutation signal — catches terminal
+      // writes, MCP writers and watched out-of-band edits that never pass
+      // through an edit-family tool call.
+      {
+        const cp = getWriteCheckpoint(runDir)
+        verification.noteCheckpointFileCount(cp?.writtenFileCount, cp?.id)
+      }
       for (const ev of toolOutcome.events) {
         if (ev.type === 'tool_result') {
           if (liveToolResultsEmitted.has(ev.toolCallId)) continue
@@ -3490,10 +3742,18 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       for (const toolMsg of toolOutcome.messages) {
         messages.push(toolMsg)
       }
-      // Mirror the wire trim in RAM: tool bodies past the keep window are full
-      // file/terminal dumps held until the next fold, so the working set grows
-      // monotonically on long runs. messages.jsonl keeps the full bodies.
-      messages = trimToolResults(messages, KEEP_LAST_TOOL_RESULTS)
+      // Mirror the wire trim in RAM — and, like the wire trim, only once the
+      // context is actually under pressure. Unconditional trimming capped the
+      // agent's working memory at the last few tool results however empty the
+      // window was: on run 356eefd5, 507 of 523 tool results were `[cleared]`
+      // at a peak of 57,758 tokens against a ~880k content window, and the
+      // model re-read docs/teammates.md 108 times because its own history kept
+      // vanishing underneath it. Trimmed with slack so the boundary does not
+      // move every step — a mid-history rewrite invalidates the cached prefix.
+      // messages.jsonl keeps the full bodies.
+      if (assembled.estimatedTokens >= proactiveThreshold) {
+        messages = trimToolResults(messages, KEEP_LAST_TOOL_RESULTS, TOOL_RESULT_TRIM_SLACK)
+      }
 
       if (
         !controller.signal.aborted &&
@@ -3625,7 +3885,13 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           billedCost: costTotals.billedCost,
           estimatedCost:
             costTotals.stepsWithEstimate > 0 ? costTotals.estimatedCost : undefined,
-          contextWindow: costLogContextWindow
+          contextWindow: costLogContextWindow,
+          // The verdict captured at the turn-end branch, NOT a fresh read of
+          // the tracker: only that branch applies the mode / inline-instance /
+          // incomplete guards an armed gate obeys. Recomputing here would
+          // report `wouldFire` for plan-mode and cancelled runs the gate can
+          // never fire on, inflating the rate this phase exists to measure.
+          verificationGate: verificationVerdict
         })
         // Final ledger record — bills the tail delta accumulated since the last
         // step write so the day buckets end complete after teardown.
@@ -3636,6 +3902,14 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           runId,
           loadEvents: () => finalEvents,
           receipt
+        })
+        // Durable per-workspace memory of how runs went. Folded from the
+        // in-memory final receipt, never a re-read: `receipt.json` is
+        // last-writer-wins and the reconcile/rewind paths overwrite it later.
+        recordRunFeedbackBestEffort({
+          workspacePath: workspace,
+          receipt,
+          inlineInstance: runIsInlineInstance
         })
         if (costTotals.steps > 0) {
           const avgInput =

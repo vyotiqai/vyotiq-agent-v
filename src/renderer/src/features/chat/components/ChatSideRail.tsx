@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { IconButton, cn } from '@renderer/lib/ui'
 import type { IconName } from '@renderer/lib/icons'
 import { shortcutLabel, type ShortcutId } from '@renderer/lib/shortcuts'
-import { CHAT_SIDE_RAIL_WIDTH, CHAT_STAGE_TOP_INSET, type ChatRightPanelId } from '@renderer/lib/utils/layout'
+import { CHAT_SIDE_RAIL_TOP_INSET, CHAT_SIDE_RAIL_WIDTH, type ChatRightPanelId } from '@renderer/lib/utils/layout'
 import { DOCK_PANELS } from '@renderer/lib/utils/dockPanels'
 import { useRunTodos } from '../hooks/useRunTodos'
 import { TasksRailButton } from './TasksFloatingList'
@@ -100,7 +100,8 @@ function PlanRailRow({
 /**
  * Floating right rail for toggling chat secondary panels.
  * Overlays the pane edge so the transcript can scroll edge-to-edge (scrollbar
- * sits under the rail rather than stopping short of it).
+ * sits under the rail rather than stopping short of it), starting below the
+ * title bar so it never reaches into the window controls' column.
  */
 export function ChatSideRail({
   activePanel,
@@ -126,8 +127,11 @@ export function ChatSideRail({
   return (
     <aside
       className={cn(
-        'pointer-events-none absolute inset-y-0 right-0 z-dropdown flex h-full flex-col items-center justify-start overflow-visible bg-gradient-to-l from-bg via-bg/70 to-transparent',
-        CHAT_STAGE_TOP_INSET,
+        'pointer-events-none absolute bottom-0 right-0 z-dropdown flex flex-col items-center justify-start overflow-visible bg-gradient-to-l from-bg via-bg/70 to-transparent',
+        // Anchored below the title bar rather than padded from the stage top:
+        // the rail shares its column with the caption buttons, and the gradient
+        // must not paint across them either.
+        CHAT_SIDE_RAIL_TOP_INSET,
         CHAT_SIDE_RAIL_WIDTH,
         className
       )}

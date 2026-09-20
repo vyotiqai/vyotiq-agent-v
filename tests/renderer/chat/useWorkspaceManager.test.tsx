@@ -58,6 +58,7 @@ describe('useWorkspaceManager', () => {
   const chatUiSubscribe = vi.fn()
   const getWorkspaces = vi.fn()
   const listRuns = vi.fn()
+  const listOlderRuns = vi.fn()
   const listActiveRuns = vi.fn()
   const setActiveWorkspace = vi.fn()
   const removeWorkspace = vi.fn()
@@ -79,6 +80,7 @@ describe('useWorkspaceManager', () => {
     chatUiSubscribe.mockResolvedValue({ ok: true, data: true })
     getWorkspaces.mockReset()
     listRuns.mockReset()
+    listOlderRuns.mockReset()
     listActiveRuns.mockReset()
     setActiveWorkspace.mockReset()
     removeWorkspace.mockReset()
@@ -90,6 +92,7 @@ describe('useWorkspaceManager', () => {
     chatCancel.mockResolvedValue({ ok: true, data: true })
     getWorkspaces.mockResolvedValue({ ok: true, data: defaultRegistry() })
     listRuns.mockResolvedValue({ ok: true, data: { runs: [], capped: false } })
+    listOlderRuns.mockResolvedValue({ ok: true, data: { runs: [], hasMore: false } })
     listActiveRuns.mockResolvedValue({ ok: true, data: [] })
     updateWorkspaceUiState.mockResolvedValue({ ok: true, data: true })
     loadRun.mockResolvedValue({
@@ -116,6 +119,7 @@ describe('useWorkspaceManager', () => {
       chatUiSubscribe,
       getWorkspaces,
       listRuns,
+      listOlderRuns,
       listActiveRuns,
       setActiveWorkspace,
       removeWorkspace,
@@ -1665,6 +1669,71 @@ describe('useWorkspaceManager', () => {
       expect(chatStart).toHaveBeenLastCalledWith(
         expect.objectContaining({ provider: 'openai', model: 'gpt-pin', agentProfileId: 'scout' })
       )
+    })
+
+    it('hydrates valid durable bindings from initial and older run summaries', async () => {
+      listRuns.mockResolvedValue({
+        ok: true,
+        data: {
+          runs: [
+            { runId: 'run-current', status: 'done', updatedAt: '2026-02-02T00:00:00.000Z', agentProfileId: 'scout' },
+            { runId: 'run-deleted', status: 'done', updatedAt: '2026-02-01T00:00:00.000Z', agentProfileId: 'ghost' }
+          ],
+          capped: true
+        }
+      })
+      listOlderRuns.mockResolvedValue({
+        ok: true,
+        data: {
+          runs: [{ runId: 'run-older', status: 'done', updatedAt: '2026-01-01T00:00:00.000Z', agentProfileId: 'scout' }],
+          hasMore: false
+        }
+      })
+      const { result } = renderHook(() =>
+        useWorkspaceManager({ getValidAgentProfileIds: () => new Set(['scout']) })
+      )
+      await waitFor(() => expect(result.current.activeContext?.runsLoaded).toBe(true))
+      expect(result.current.getAgentProfileIdForRun('/ws-a', 'run-current')).toBe('scout')
+      expect(result.current.getAgentProfileIdForRun('/ws-a', 'run-deleted')).toBeNull()
+
+      await act(async () => {
+        await result.current.loadOlderRuns('/ws-a')
+      })
+      expect(result.current.getAgentProfileIdForRun('/ws-a', 'run-older')).toBe('scout')
+      // Hydrating a durable binding persists through the debounced writer, so
+      // the write lands after this tick — same as the prune test below.
+      await waitFor(() => expect(updateWorkspaceUiState).toHaveBeenCalled())
+    })
+
+    it('keeps durable existing-run bindings immutable in the renderer', async () => {
+      listRuns.mockResolvedValue({
+        ok: true,
+        data: {
+          runs: [{ runId: 'run-bound', status: 'done', updatedAt: '2026-01-01T00:00:00.000Z', agentProfileId: 'scout' }],
+          capped: false
+        }
+      })
+      const { result } = renderHook(() =>
+        useWorkspaceManager({ getValidAgentProfileIds: () => new Set(['scout', 'other']) })
+      )
+      await waitFor(() => expect(result.current.getAgentProfileIdForRun('/ws-a', 'run-bound')).toBe('scout'))
+      act(() => result.current.setAgentProfileIdForRun('/ws-a', 'run-bound', 'other'))
+      act(() => result.current.setAgentProfileIdForRun('/ws-a', 'run-bound', null))
+      expect(result.current.getAgentProfileIdForRun('/ws-a', 'run-bound')).toBe('scout')
+    })
+
+    it('reads a binding through a differently spelled workspace path', async () => {
+      getWorkspaces.mockResolvedValue({
+        ok: true,
+        data: registryWithBindings({ __draft__: 'scout' })
+      })
+      const { result } = renderHook(() => useWorkspaceManager())
+      await waitFor(() => expect(result.current.activeWorkspace).toBe('/ws-a'))
+
+      // The setter already tolerates an equal-but-differently-spelled path;
+      // a direct key lookup in the getter would drop the teammate from the
+      // send instead.
+      expect(result.current.getAgentProfileIdForRun('/ws-a/', null)).toBe('scout')
     })
 
     it('prunes chat bindings whose teammate no longer exists in the roster', async () => {

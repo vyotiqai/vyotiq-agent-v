@@ -256,7 +256,8 @@ export function Composer({
   const workspacePathRef = useRef(workspacePath)
   workspacePathRef.current = workspacePath
   const inputLocked = Boolean(disabled)
-  const settingsLocked = Boolean(disabled || running)
+  // Settings apply to the next invocation, so remain editable while a run is active.
+  const settingsLocked = Boolean(disabled)
   const runIdForDraft = activeRunId ?? null
   const hotDraft = useWorkspaceHotComposerDraft(workspacePath, runIdForDraft)
   // Inline edit keeps its own draft. Dock uses per-run hot UI when a workspace is bound.
@@ -1144,6 +1145,7 @@ export function Composer({
         {!dictationActive && (
           <ComposerToolbarTools
             locked={settingsLocked}
+            workspacePath={workspacePath ?? null}
             attachDisabled={inputLocked}
             attachFull={imagesFull && filesFull && audioFull}
             attachHint={attachHint}

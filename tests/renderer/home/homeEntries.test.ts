@@ -219,6 +219,6 @@ describe('Home section selection', () => {
   })
 
   it('drops pins whose run is no longer listed', () => {
-    expect(pinnedHomeEntries(entries, ['/repo deleted'], new Set())).toEqual([])
+    expect(pinnedHomeEntries(entries, ['/repo\0deleted'], new Set())).toEqual([])
   })
 })

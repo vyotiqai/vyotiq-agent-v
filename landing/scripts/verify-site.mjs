@@ -1,14 +1,8 @@
 /**
- * Post-build assertions over landing/dist.
- *
- * The site makes factual claims about a product and links to real installers,
- * so the build is not considered done until these pass. Everything here is
- * checked against the emitted HTML — not against the source that produced it.
+ * Post-build assertions over landing/dist, checked against the emitted HTML.
  *
  *   node scripts/verify-site.mjs            static checks only
  *   node scripts/verify-site.mjs --network  also HEAD every external URL
- *
- * Exits non-zero on the first category of failure, printing every instance.
  */
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs'
 import { join, dirname, relative, resolve } from 'node:path'
@@ -50,11 +44,12 @@ console.log(`[verify-site] ${htmlFiles.length} pages, ${files.length} files in d
 
 /* ------------------------------------------------------- expected routes --- */
 
-// Mirrors ROUTES in src/lib/site.ts. Kept here as an independent list so a
-// mistake in one is caught by the other rather than agreeing with itself.
+// Listed by hand so that deleting a page fails this check; unexpected pages
+// are asserted below.
 const EXPECTED_ROUTES = [
   '/',
   '/features',
+  '/use-cases',
   '/extensions',
   '/download',
   '/docs',
@@ -75,7 +70,15 @@ for (const route of EXPECTED_ROUTES) {
   if (!distPaths.has(routeToFile(route))) fail('missing route', route)
 }
 if (!distPaths.has('/404.html')) fail('missing route', '/404 (404.html)')
-if (failures.length === 0) ok(`all ${EXPECTED_ROUTES.length} routes + 404 emitted`)
+
+const emittedRoutes = htmlFiles
+  .map((f) => '/' + relative(dist, f).replaceAll('\\', '/'))
+  .filter((r) => r !== '/404.html')
+  .map((r) => (r === '/index.html' ? '/' : r.replace(/\/index\.html$/, '')))
+for (const route of emittedRoutes) {
+  if (!EXPECTED_ROUTES.includes(route)) fail('unexpected route', `${route} was emitted but is not expected`)
+}
+if (failures.length === 0) ok(`all ${EXPECTED_ROUTES.length} routes + 404 emitted, and nothing else`)
 
 /* --------------------------------------------------------- placeholders --- */
 
@@ -211,6 +214,190 @@ for (const file of htmlFiles) {
 }
 if (internalBroken === 0) ok(`every internal link and image resolves to an emitted file`)
 
+/* -------------------------------------------------------- accessibility --- */
+
+// Structural accessibility: what is decidable from the HTML.
+let a11yProblems = 0
+for (const file of htmlFiles) {
+  const html = readFileSync(file, 'utf8')
+  const route = '/' + relative(dist, file).replaceAll('\\', '/')
+
+  const headings = [...html.matchAll(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/g)].map((m) => ({
+    level: Number(m[1]),
+    text: m[2].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+  }))
+  const h1Count = headings.filter((h) => h.level === 1).length
+  if (h1Count !== 1) {
+    fail('accessibility', `${route} has ${h1Count} <h1> (expected exactly 1)`)
+    a11yProblems++
+  }
+  let previous = 0
+  for (const heading of headings) {
+    if (previous && heading.level > previous + 1) {
+      fail(
+        'accessibility',
+        `${route} skips from h${previous} to h${heading.level} at "${heading.text.slice(0, 40)}"`
+      )
+      a11yProblems++
+    }
+    previous = heading.level
+  }
+
+  for (const m of html.matchAll(/<img\b[^>]*>/g)) {
+    if (!/\salt=/.test(m[0])) {
+      fail('accessibility', `${route} has an <img> with no alt: ${m[0].slice(0, 70)}`)
+      a11yProblems++
+    }
+  }
+
+  // A control whose only content is an icon needs an explicit name.
+  for (const [tag, pattern] of [
+    ['a', /<a\b([^>]*)>([\s\S]*?)<\/a>/g],
+    ['button', /<button\b([^>]*)>([\s\S]*?)<\/button>/g]
+  ]) {
+    for (const m of html.matchAll(pattern)) {
+      const text = m[2].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+      if (!text && !/aria-label(ledby)?=/.test(m[1])) {
+        fail('accessibility', `${route} has a <${tag}> with no accessible name: ${m[0].slice(0, 60)}`)
+        a11yProblems++
+      }
+    }
+  }
+
+  if (!/<html[^>]+lang=/.test(html)) {
+    fail('accessibility', `${route} has no lang on <html>`)
+    a11yProblems++
+  }
+  if (!/<main\b/.test(html)) {
+    fail('accessibility', `${route} has no <main> landmark`)
+    a11yProblems++
+  }
+}
+if (a11yProblems === 0) {
+  ok('one h1 per page, no heading skips, every image and control named, lang + main present')
+}
+
+/* -------------------------------------------------------------- sitemap --- */
+
+// Sitemap URLs and canonical tags must agree exactly (including trailing slashes).
+const sitemapPath = join(dist, 'sitemap-0.xml')
+if (!existsSync(sitemapPath)) {
+  fail('sitemap', 'sitemap-0.xml was not generated')
+} else {
+  const xml = readFileSync(sitemapPath, 'utf8')
+  const sitemapUrls = new Set([...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1].trim()))
+
+  const canonicalUrls = new Set()
+  for (const file of htmlFiles) {
+    const route = '/' + relative(dist, file).replaceAll('\\', '/')
+    if (route === '/404.html') continue
+    const href = readFileSync(file, 'utf8').match(/<link rel="canonical" href="([^"]+)"/)?.[1]
+    if (href) canonicalUrls.add(href)
+  }
+
+  let sitemapProblems = 0
+  for (const url of sitemapUrls) {
+    if (!canonicalUrls.has(url)) {
+      fail('sitemap', `${url} is listed but no page declares it as canonical`)
+      sitemapProblems++
+    }
+  }
+  for (const url of canonicalUrls) {
+    if (!sitemapUrls.has(url)) {
+      fail('sitemap', `${url} is canonical on a page but missing from the sitemap`)
+      sitemapProblems++
+    }
+  }
+  // 404 must never be advertised for indexing.
+  if ([...sitemapUrls].some((u) => u.includes('/404'))) {
+    fail('sitemap', 'the 404 page is listed in the sitemap')
+    sitemapProblems++
+  }
+  if (sitemapProblems === 0) {
+    ok(`sitemap lists exactly the ${sitemapUrls.size} canonical URLs, 404 excluded`)
+  }
+}
+
+/* ------------------------------------------------------- stylesheet refs --- */
+
+// url() references in CSS are not covered by the link check above.
+let cssRefs = 0
+let cssBroken = 0
+for (const file of files.filter((f) => f.endsWith('.css'))) {
+  const css = readFileSync(file, 'utf8')
+  for (const m of css.matchAll(/url\((['"]?)([^'")]+)\1\)/g)) {
+    const raw = m[2].trim()
+    if (raw.startsWith('data:') || /^https?:\/\//.test(raw)) continue
+    cssRefs++
+    const clean = raw.split('?')[0].split('#')[0]
+    const abs = clean.startsWith('/')
+      ? clean
+      : '/' + relative(dist, resolve(dirname(file), clean)).replaceAll('\\', '/')
+    if (!distPaths.has(abs)) {
+      fail('stylesheet asset', `${raw} in ${relative(dist, file)} was not emitted`)
+      cssBroken++
+    }
+  }
+}
+if (cssBroken === 0) ok(`all ${cssRefs} stylesheet url() references resolve`)
+
+/* --------------------------------------------------------------- claims --- */
+
+// Counts stated in prose must match the data the pages were built from.
+const appData = JSON.parse(readFileSync(join(landing, 'src/data/app.json'), 'utf8'))
+const toolNames = appData.tools.names
+const featuresHtml = readFileSync(join(dist, 'features/index.html'), 'utf8')
+
+let claimProblems = 0
+if (!featuresHtml.includes(`${toolNames.length} built-in tools`)) {
+  fail('claim', `/features does not state "${toolNames.length} built-in tools"`)
+  claimProblems++
+}
+// Any other count next to that phrase means a stale hardcoded number is live.
+for (const m of featuresHtml.matchAll(/(\d+) built-in tools/g)) {
+  if (Number(m[1]) !== toolNames.length) {
+    fail('claim', `/features claims ${m[1]} built-in tools, the registry has ${toolNames.length}`)
+    claimProblems++
+  }
+}
+const missingNames = toolNames.filter((n) => !featuresHtml.includes(`>${n}<`))
+if (missingNames.length > 0) {
+  fail('claim', `/features omits ${missingNames.length} tool name(s): ${missingNames.join(', ')}`)
+  claimProblems++
+}
+const extHtml = readFileSync(join(dist, 'extensions/index.html'), 'utf8')
+if (!extHtml.includes(`${appData.extensions.total} packages`)) {
+  fail('claim', `/extensions does not state ${appData.extensions.total} packages`)
+  claimProblems++
+}
+if (claimProblems === 0) {
+  ok(`stated counts match the baked data (${toolNames.length} tools, all named on /features)`)
+}
+
+/* ----------------------------------------------------------- screenshots --- */
+
+// Screenshots are optional, but a page that references one must not 404.
+let shotProblems = 0
+let shotRefs = 0
+for (const file of htmlFiles) {
+  const html = readFileSync(file, 'utf8')
+  const route = '/' + relative(dist, file).replaceAll('\\', '/')
+  for (const m of html.matchAll(/src="(\/shots\/[^"]+)"/g)) {
+    shotRefs++
+    if (!distPaths.has(m[1])) {
+      fail('screenshot', `${m[1]} referenced on ${route} but not emitted`)
+      shotProblems++
+    }
+  }
+}
+if (shotProblems === 0) {
+  ok(
+    shotRefs === 0
+      ? 'no screenshots referenced'
+      : `all ${shotRefs} screenshot references resolve to emitted files`
+  )
+}
+
 /* ------------------------------------------------------------ downloads --- */
 
 const release = JSON.parse(readFileSync(join(landing, 'src/data/release.json'), 'utf8'))
@@ -253,9 +440,7 @@ if (release.source !== 'github') {
     fail('download page', `does not state the published version ${release.version}`)
   }
 
-  // Strongest available proof that a button downloads a real installer: fetch
-  // each asset's headers and check the served length against the size the
-  // GitHub API reported. A redirect to a missing object shows up here.
+  // HEAD each asset and compare the served length with the size GitHub reported.
   if (NETWORK) {
     console.log(`  … checking ${release.installers.length} asset URLs`)
     const checks = await Promise.all(

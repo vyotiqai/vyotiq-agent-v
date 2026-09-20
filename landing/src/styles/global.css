@@ -1,36 +1,36 @@
-@import 'tailwindcss';
+/* Latin subsets only: nothing the site renders falls outside latin / latin-ext. */
+@import '@fontsource/plus-jakarta-sans/latin-400.css';
+@import '@fontsource/plus-jakarta-sans/latin-500.css';
+@import '@fontsource/plus-jakarta-sans/latin-600.css';
+@import '@fontsource/plus-jakarta-sans/latin-ext-400.css';
+@import '@fontsource/plus-jakarta-sans/latin-ext-500.css';
+@import '@fontsource/plus-jakarta-sans/latin-ext-600.css';
+@import '@fontsource/jetbrains-mono/latin-400.css';
+@import '@fontsource/jetbrains-mono/latin-500.css';
+@import '@fontsource/jetbrains-mono/latin-ext-400.css';
+@import '@fontsource/jetbrains-mono/latin-ext-500.css';
 
-@import '@fontsource/plus-jakarta-sans/400.css';
-@import '@fontsource/plus-jakarta-sans/500.css';
-@import '@fontsource/plus-jakarta-sans/600.css';
-@import '@fontsource/jetbrains-mono/400.css';
-@import '@fontsource/jetbrains-mono/500.css';
+/* ------------------------------------------------------------------ tokens - */
 
-/*
-  The site runs on the application's own design tokens, copied from
-  src/renderer/src/styles.css so the website and the product cannot drift into
-  looking like two different things. Names are kept identical to make a diff
-  against the app trivial.
-*/
-
+/* Copied from the application (src/renderer/src/styles.css); names are identical. */
 :root {
   color-scheme: light;
 
   --vy-bg: #ffffff;
-  --vy-card: #f7fafc;
-  --vy-surface: #eef5f9;
-  --vy-surface-2: #dceaf2;
-  --vy-border: #c9dce8;
-  --vy-border-strong: #9dbccc;
-  --vy-muted: #4a5f6d;
-  --vy-secondary: #3a4e5a;
-  --vy-tertiary: #5e7484;
-  --vy-fg: #17232b;
-  --vy-fg-strong: #0b141a;
-  --vy-accent: #00638e;
+  --vy-card: #fafafa;
+  --vy-surface: #f4f4f4;
+  --vy-surface-2: #e8e8e8;
+  --vy-border: #d9d9d9;
+  --vy-border-strong: #b7b7b7;
+  --vy-muted: #5c5c5c;
+  --vy-secondary: #4b4b4b;
+  --vy-tertiary: #717171;
+  --vy-fg: #212121;
+  --vy-fg-strong: #131313;
+  --vy-accent: #000000;
   --vy-accent-fg: #ffffff;
-  --vy-accent-hover: #004a6b;
-  --vy-focus: #00638e;
+  --vy-accent-hover: #3d3d3d;
+  --vy-focus: #000000;
   --vy-success: #15803d;
   --vy-warning: #a16207;
 
@@ -41,6 +41,8 @@
   --vy-radius-md: 6px;
   --vy-radius-lg: 8px;
   --vy-radius-xl: 10px;
+  --vy-radius-2xl: 16px;
+  --vy-radius-3xl: 22px;
 
   --vy-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --vy-duration: 160ms;
@@ -49,30 +51,53 @@
   --vy-tracking-caps: 0.06em;
 
   --vy-gutter: 1.5rem;
-  --vy-measure: 68ch;
+  --vy-measure: 64ch;
+  --vy-nav-height: 3.75rem;
+  --vy-aside: 17rem;
+  --vy-shell-max: 1200px;
+
+  /* Derived surfaces. Defined once: the tokens they mix are redefined per
+     theme below, and var() resolves at use time, so these follow along. */
+  --vy-elev-1: color-mix(in srgb, var(--vy-card) 88%, var(--vy-bg));
+  --vy-hairline: color-mix(in srgb, var(--vy-border) 65%, transparent);
+  --vy-accent-wash: color-mix(in srgb, var(--vy-accent) 10%, transparent);
+  --vy-accent-glow: color-mix(in srgb, var(--vy-accent) 20%, transparent);
+  --vy-canvas-top: color-mix(in srgb, var(--vy-card) 70%, var(--vy-bg));
+
+  /* Keyword tokens that drive every theme-swapped asset, so a new one never
+     needs another copy of the media-query/attribute pair. */
+  --vy-invert: none;
+  --vy-swap-light: block;
+  --vy-swap-dark: none;
 }
 
+/* Dark is the OS preference unless the toggle stored "light"; the toggle's
+   "dark" wins regardless of the OS. Every theme rule follows this shape. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     color-scheme: dark;
 
     --vy-bg: #141414;
-    --vy-card: #1a1e20;
-    --vy-surface: #202528;
-    --vy-surface-2: #293034;
-    --vy-border: #303a40;
-    --vy-border-strong: #46545c;
-    --vy-muted: #9fb3be;
-    --vy-secondary: #bccdd6;
-    --vy-tertiary: #7e939f;
-    --vy-fg: #e8edf0;
-    --vy-fg-strong: #f5f8fa;
-    --vy-accent: #4fb3e8;
+    --vy-card: #1d1d1d;
+    --vy-surface: #242424;
+    --vy-surface-2: #2f2f2f;
+    --vy-border: #393939;
+    --vy-border-strong: #525252;
+    --vy-muted: #b0b0b0;
+    --vy-secondary: #cacaca;
+    --vy-tertiary: #909090;
+    --vy-fg: #ececec;
+    --vy-fg-strong: #f8f8f8;
+    --vy-accent: #ffffff;
     --vy-accent-fg: #0a0a0a;
-    --vy-accent-hover: #8cb9cc;
-    --vy-focus: #8cb9cc;
+    --vy-accent-hover: #c4c4c4;
+    --vy-focus: #ffffff;
     --vy-success: #22c55e;
     --vy-warning: #fbbf24;
+
+    --vy-invert: invert(1);
+    --vy-swap-light: none;
+    --vy-swap-dark: block;
   }
 }
 
@@ -80,27 +105,32 @@
   color-scheme: dark;
 
   --vy-bg: #141414;
-  --vy-card: #1a1e20;
-  --vy-surface: #202528;
-  --vy-surface-2: #293034;
-  --vy-border: #303a40;
-  --vy-border-strong: #46545c;
-  --vy-muted: #9fb3be;
-  --vy-secondary: #bccdd6;
-  --vy-tertiary: #7e939f;
-  --vy-fg: #e8edf0;
-  --vy-fg-strong: #f5f8fa;
-  --vy-accent: #4fb3e8;
+  --vy-card: #1d1d1d;
+  --vy-surface: #242424;
+  --vy-surface-2: #2f2f2f;
+  --vy-border: #393939;
+  --vy-border-strong: #525252;
+  --vy-muted: #b0b0b0;
+  --vy-secondary: #cacaca;
+  --vy-tertiary: #909090;
+  --vy-fg: #ececec;
+  --vy-fg-strong: #f8f8f8;
+  --vy-accent: #ffffff;
   --vy-accent-fg: #0a0a0a;
-  --vy-accent-hover: #8cb9cc;
-  --vy-focus: #8cb9cc;
+  --vy-accent-hover: #c4c4c4;
+  --vy-focus: #ffffff;
   --vy-success: #22c55e;
   --vy-warning: #fbbf24;
+
+  --vy-invert: invert(1);
+  --vy-swap-light: none;
+  --vy-swap-dark: block;
 }
+
+/* ------------------------------------------------------------------ reset - */
 
 * {
   box-sizing: border-box;
-  border-color: var(--vy-border);
 }
 
 html {
@@ -127,7 +157,7 @@ body {
   font-family: var(--vy-font-sans);
   font-size: 1rem;
   line-height: 1.6;
-  letter-spacing: var(--vy-tracking-body, -0.006em);
+  letter-spacing: -0.006em;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -139,13 +169,23 @@ h4 {
   color: var(--vy-fg-strong);
   font-weight: 600;
   letter-spacing: var(--vy-tracking-tight);
-  line-height: 1.15;
+  line-height: 1.2;
   margin: 0;
   text-wrap: balance;
 }
 
-p {
+p,
+ul,
+ol,
+dl,
+dd,
+figure,
+blockquote,
+pre {
   margin: 0;
+}
+
+p {
   text-wrap: pretty;
 }
 
@@ -153,6 +193,19 @@ a {
   color: inherit;
   text-decoration: none;
   transition: color var(--vy-duration) var(--vy-ease);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+[id] {
+  scroll-margin-top: calc(var(--vy-nav-height) + 1rem);
 }
 
 :where(a, button, input, select, summary):focus-visible {
@@ -167,23 +220,12 @@ svg {
   max-width: 100%;
 }
 
-/* ------------------------------------------------------------- primitives - */
-
-.vy-shell {
-  width: 100%;
-  max-width: 1120px;
-  margin-inline: auto;
-  padding-inline: var(--vy-gutter);
+/* Flat black artwork (the brand mark, the wordmark) inverts on dark. */
+.vy-dark-invert {
+  filter: var(--vy-invert);
 }
 
-/* Full-bleed hairlines carry the page structure instead of stacked cards. */
-.vy-rule {
-  border-top: 1px solid var(--vy-border);
-}
-
-.vy-section {
-  padding-block: clamp(3.5rem, 7vw, 6rem);
-}
+/* ------------------------------------------------------------- typography - */
 
 .vy-eyebrow {
   font-family: var(--vy-font-mono);
@@ -195,23 +237,30 @@ svg {
 }
 
 .vy-display {
-  font-size: clamp(2.25rem, 1.2rem + 3.4vw, 3.5rem);
-  letter-spacing: -0.03em;
-  line-height: 1.04;
+  font-size: clamp(2.5rem, 1.55rem + 3.8vw, 4rem);
+  letter-spacing: -0.034em;
+  line-height: 1.03;
+}
+
+.vy-h1 {
+  font-size: clamp(2.25rem, 1.6rem + 2.6vw, 3.25rem);
+  letter-spacing: -0.028em;
+  line-height: 1.08;
 }
 
 .vy-h2 {
-  font-size: clamp(1.625rem, 1.1rem + 1.7vw, 2.125rem);
+  font-size: clamp(1.75rem, 1.3rem + 1.6vw, 2.375rem);
   letter-spacing: -0.022em;
+  line-height: 1.15;
 }
 
 .vy-h3 {
-  font-size: 1.0625rem;
+  font-size: 1.125rem;
   letter-spacing: -0.014em;
 }
 
 .vy-lede {
-  font-size: clamp(1.0625rem, 1rem + 0.35vw, 1.1875rem);
+  font-size: clamp(1.0625rem, 0.98rem + 0.45vw, 1.25rem);
   line-height: 1.6;
   color: var(--vy-secondary);
   max-width: var(--vy-measure);
@@ -225,6 +274,308 @@ svg {
 .vy-mono {
   font-family: var(--vy-font-mono);
   font-variant-ligatures: none;
+}
+
+/* ----------------------------------------------------------- page layout - */
+
+.vy-shell {
+  width: 100%;
+  max-width: var(--vy-shell-max);
+  margin-inline: auto;
+  padding-inline: var(--vy-gutter);
+}
+
+.vy-rule {
+  border-top: 1px solid var(--vy-border);
+}
+
+.vy-section {
+  padding-block: clamp(3.5rem, 7vw, 5.5rem);
+}
+
+/* Title block at the top of every page: eyebrow, title, lede, optional
+   facts panel to the right. */
+.vy-page-head {
+  padding-block: clamp(3rem, 6vw, 5rem) clamp(2.5rem, 5vw, 4rem);
+}
+
+.vy-page-head .vy-h1,
+.vy-page-head .vy-display {
+  margin-top: 1rem;
+}
+
+.vy-page-head .vy-lede {
+  margin-top: 1.25rem;
+}
+
+.vy-page-head .vy-cta-actions {
+  margin-top: 2rem;
+}
+
+/* Every content section: a heading column on the left, content on the right.
+   The heading stays in view while long content scrolls past it. */
+.vy-section-grid {
+  display: grid;
+  grid-template-columns: minmax(0, var(--vy-aside)) minmax(0, 1fr);
+  gap: 2rem 4rem;
+  align-items: start;
+}
+
+.vy-sec-head {
+  position: sticky;
+  top: calc(var(--vy-nav-height) + 1.5rem);
+}
+
+.vy-sec-head .vy-h2 {
+  margin-top: 0.75rem;
+}
+
+.vy-sec-head .vy-prose-muted {
+  margin-top: 0.875rem;
+  font-size: 0.9375rem;
+}
+
+.vy-sec-head .vy-more {
+  margin-top: 1.25rem;
+}
+
+@media (max-width: 900px) {
+  .vy-section-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.75rem;
+  }
+  .vy-sec-head {
+    position: static;
+  }
+}
+
+/* ------------------------------------------------------------- collections - */
+
+/* Hairline-separated rows. Inside a panel the outer edges come from the panel. */
+.vy-rows {
+  list-style: none;
+  padding: 0;
+}
+
+.vy-rows > * {
+  padding-block: 1.25rem;
+  border-top: 1px solid var(--vy-border);
+}
+
+.vy-rows > :last-child {
+  border-bottom: 1px solid var(--vy-border);
+}
+
+.vy-panel > .vy-rows > * {
+  padding-inline: 1.125rem;
+}
+
+.vy-panel > .vy-rows > :first-child {
+  border-top: 0;
+}
+
+.vy-panel > .vy-rows > :last-child {
+  border-bottom: 0;
+}
+
+/* A row with a fixed lead column (a name, a number) and flowing content. */
+.vy-row-lead {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 640px) {
+  .vy-row-lead {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+}
+
+/* A lead-column row keeps its paragraph on the heading's baseline. */
+.vy-row-lead.vy-item > p {
+  margin-top: 0;
+}
+
+.vy-row-lead > .vy-h3 {
+  line-height: 1.5;
+}
+
+/* Heading + paragraph unit used inside rows and grids. */
+.vy-item .vy-h3 + p,
+.vy-item p + p {
+  margin-top: 0.5rem;
+}
+
+.vy-item p {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--vy-muted);
+}
+
+/* Equal columns with a hairline above each item. */
+.vy-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
+  gap: 2rem 2.5rem;
+}
+
+.vy-grid > * {
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--vy-border);
+}
+
+.vy-grid-2 {
+  --cols: 2;
+}
+
+@media (max-width: 860px) {
+  .vy-grid {
+    --cols: 2;
+  }
+}
+
+@media (max-width: 560px) {
+  .vy-grid {
+    --cols: 1;
+  }
+}
+
+/* Wrapping list of labelled pills (providers, jump links). */
+.vy-pills {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.vy-pills > li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-height: 2.375rem;
+  padding: 0.375rem 0.875rem;
+  border: 1px solid var(--vy-border);
+  border-radius: var(--vy-radius-md);
+  background: var(--vy-card);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--vy-fg-strong);
+}
+
+/* Compact monospace chips (tool names). */
+.vy-chips {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  align-content: start;
+}
+
+.vy-chips > li {
+  font-family: var(--vy-font-mono);
+  font-variant-ligatures: none;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--vy-muted);
+  background: var(--vy-surface);
+  border: 1px solid var(--vy-border);
+  border-radius: var(--vy-radius-sm);
+  padding: 0.1rem 0.4rem;
+}
+
+/* In-page navigation under a page title. */
+.vy-jump {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--vy-border);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.vy-jump a {
+  color: var(--vy-muted);
+}
+
+.vy-jump a:hover {
+  color: var(--vy-fg-strong);
+}
+
+/* -------------------------------------------------------------- surfaces - */
+
+.vy-panel {
+  background: var(--vy-card);
+  border: 1px solid var(--vy-border);
+  border-radius: var(--vy-radius-xl);
+  overflow: hidden;
+}
+
+.vy-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--vy-border);
+  border-radius: 999px;
+  background: var(--vy-surface);
+  font-family: var(--vy-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+  color: var(--vy-muted);
+  white-space: nowrap;
+}
+
+.vy-codeblock,
+.vy-doc pre {
+  padding: 1rem 1.125rem;
+  background: var(--vy-card);
+  border: 1px solid var(--vy-border);
+  border-radius: var(--vy-radius-lg);
+  font-family: var(--vy-font-mono);
+  font-variant-ligatures: none;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  color: var(--vy-secondary);
+  overflow-x: auto;
+}
+
+.vy-code {
+  font-family: var(--vy-font-mono);
+  font-variant-ligatures: none;
+  font-size: 0.875em;
+  background: var(--vy-surface);
+  border: 1px solid var(--vy-border);
+  border-radius: var(--vy-radius-sm);
+  padding: 0.1em 0.35em;
+}
+
+.vy-note {
+  padding-left: 1rem;
+  border-left: 2px solid var(--vy-border-strong);
+}
+
+.vy-footnote {
+  margin-top: 1.25rem;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--vy-tertiary);
+  max-width: var(--vy-measure);
+}
+
+.vy-more {
+  font-size: 0.9375rem;
+}
+
+.vy-empty .vy-prose-muted {
+  margin-top: 0.75rem;
+  font-size: 0.9375rem;
 }
 
 /* ---------------------------------------------------------------- buttons - */
@@ -268,6 +619,26 @@ svg {
   border-color: var(--vy-fg-strong);
 }
 
+.vy-cta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+/* Closing call to action. */
+.vy-cta {
+  text-align: center;
+}
+
+.vy-cta .vy-prose-muted {
+  margin: 0.875rem auto 0;
+}
+
+.vy-cta .vy-cta-actions {
+  justify-content: center;
+  margin-top: 2rem;
+}
+
 /* ------------------------------------------------------------------ links - */
 
 .vy-link {
@@ -275,46 +646,21 @@ svg {
   text-decoration: underline;
   text-underline-offset: 0.2em;
   text-decoration-thickness: 1px;
-  text-decoration-color: color-mix(in srgb, var(--vy-accent) 35%, transparent);
+  text-decoration-color: color-mix(in srgb, var(--vy-accent) 55%, transparent);
 }
 
 .vy-link:hover {
   text-decoration-color: currentColor;
 }
 
-/* --------------------------------------------------------------- surfaces - */
-
-.vy-panel {
-  background: var(--vy-card);
-  border: 1px solid var(--vy-border);
-  border-radius: var(--vy-radius-xl);
-}
-
-.vy-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.125rem 0.5rem;
-  border: 1px solid var(--vy-border);
-  border-radius: 999px;
-  background: var(--vy-surface);
-  font-family: var(--vy-font-mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.02em;
-  color: var(--vy-muted);
-  white-space: nowrap;
-}
-
 /* ------------------------------------------------------- document styling - */
 
-/*
-  Applied to the rendered LICENSE / NOTICE / policy documents. These are real
-  files, so the styling has to survive whatever heading depth they happen to use.
-*/
+/* The repository's markdown documents (policies, contributing guide). */
 .vy-doc {
   max-width: 74ch;
   color: var(--vy-secondary);
   line-height: 1.7;
+  overflow-wrap: anywhere;
 }
 
 .vy-doc > * + * {
@@ -346,7 +692,7 @@ svg {
   color: var(--vy-accent);
   text-decoration: underline;
   text-underline-offset: 0.2em;
-  text-decoration-color: color-mix(in srgb, var(--vy-accent) 35%, transparent);
+  text-decoration-color: color-mix(in srgb, var(--vy-accent) 55%, transparent);
 }
 
 .vy-doc a:hover {
@@ -367,8 +713,20 @@ svg {
   padding: 0.1em 0.35em;
 }
 
-.vy-doc ul,
+.vy-doc pre code {
+  font-size: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.vy-doc ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+
 .vy-doc ol {
+  list-style: decimal;
   padding-left: 1.25rem;
 }
 
@@ -409,7 +767,7 @@ svg {
   border-top: 1px solid var(--vy-border);
 }
 
-/* Hard-wrapped legal text (LICENSE, NOTICE) keeps its original line breaks. */
+/* Hard-wrapped text (the GPL) keeps its original line breaks. */
 .vy-doc-plain {
   font-family: var(--vy-font-mono);
   font-size: 0.8125rem;
@@ -417,5 +775,293 @@ svg {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--vy-secondary);
+}
+
+/* ---------------------------------------------------------- screenshots - */
+
+/* Application screenshots ship as a light/dark pair, swapped with the same
+   rule shape as the tokens above. */
+.vy-shot {
+  border: 1px solid var(--vy-border);
+  border-radius: var(--vy-radius-xl);
+  overflow: hidden;
+  background: var(--vy-card);
+}
+
+.vy-shot img {
+  width: 100%;
+  height: auto;
+}
+
+.vy-shot figcaption {
+  border-top: 1px solid var(--vy-border);
+  padding: 0.75rem 1rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--vy-tertiary);
+}
+
+.vy-shot-light {
+  display: var(--vy-swap-light);
+}
+
+.vy-shot-dark {
+  display: var(--vy-swap-dark);
+}
+
+/* ------------------------------------------------------ product canvas - */
+
+/* The large framed surface a product panel sits on. The glow is decorative:
+   it carries no information, so reduced-motion and forced-colors can drop it. */
+.vy-canvas {
+  position: relative;
+  border: 1px solid var(--vy-border);
+  border-radius: var(--vy-radius-3xl);
+  background: linear-gradient(to bottom, var(--vy-canvas-top), var(--vy-bg));
+  padding: clamp(0.75rem, 2vw, 1.5rem);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.vy-canvas::before {
+  content: '';
+  position: absolute;
+  inset-inline: -20%;
+  top: -60%;
+  aspect-ratio: 2 / 1;
+  background: radial-gradient(ellipse at 50% 100%, var(--vy-accent-glow), transparent 70%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.vy-panel-xl {
+  border: 1px solid var(--vy-hairline);
+  border-radius: var(--vy-radius-2xl);
+  background: var(--vy-elev-1);
+  overflow: hidden;
+}
+
+/* ----------------------------------------------------------------- cards - */
+
+/* The full-width treatment for sections that describe how a run behaves rather
+   than list what is available. The heading spans the shell and each claim gets
+   its own surface, so the mechanism reads as a set of parts instead of as more
+   list. Cards carry .vy-item too, which is what gives their prose the same size
+   and colour as every other claim on the page. */
+.vy-card-head {
+  margin-bottom: clamp(2rem, 4vw, 3rem);
+}
+
+.vy-card-head > * {
   margin: 0;
+}
+
+.vy-card-head .vy-h2 {
+  margin-top: 0.75rem;
+}
+
+.vy-card-lede {
+  margin-top: 1rem;
+}
+
+.vy-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--vy-card-min, 16rem), 1fr));
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vy-card {
+  display: flex;
+  flex-direction: column;
+  /* The gap does the spacing, because the margin reset below outranks the
+     .vy-item rule that normally separates a claim title from its body. */
+  gap: 0.5rem;
+  padding: clamp(1.25rem, 2.5vw, 1.75rem);
+  border: 1px solid var(--vy-hairline);
+  border-radius: var(--vy-radius-2xl);
+  background: var(--vy-elev-1);
+}
+
+.vy-card > * {
+  margin: 0;
+}
+
+.vy-cards-after-visual {
+  margin-top: clamp(1.5rem, 3vw, 2.5rem);
+}
+
+/* Use-case cards carry a bullet list rather than a sentence, so they want a
+   wider track than the claim cards: three up in the shell rather than four. */
+.vy-uses {
+  --vy-card-min: 19rem;
+}
+
+/* A use case is named work, so its title sits a step above a claim title
+   without reaching .vy-h2, which is display-sized. */
+.vy-uses .vy-h3 {
+  font-size: 1.25rem;
+  letter-spacing: -0.016em;
+}
+
+.vy-uses-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vy-uses-list > li {
+  position: relative;
+  padding-left: 1rem;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--vy-muted);
+}
+
+/* A hanging rule rather than a disc: these read as clauses describing one job,
+   not as a checklist of things to tick off. */
+.vy-uses-list > li::before {
+  content: '';
+  position: absolute;
+  top: 0.8em;
+  left: 0;
+  width: 0.5rem;
+  height: 1px;
+  background: var(--vy-border-strong);
+}
+
+/* auto pushes the link to the card's bottom edge, so links line up across
+   cards holding different numbers of bullets. It outranks the margin reset on
+   .vy-card > * only because it is declared later. */
+.vy-use-link {
+  margin-top: auto;
+  padding-top: 0.75rem;
+  font-size: 0.9375rem;
+}
+
+
+/* A diagram takes two tracks, so a two-claim section still fills its row
+   instead of leaving a gap where a third card would be. */
+.vy-card-visual {
+  grid-column: span 2;
+  display: grid;
+  place-items: center;
+  padding: clamp(1.5rem, 3vw, 2.5rem);
+  background: linear-gradient(to bottom, var(--vy-canvas-top), var(--vy-bg));
+}
+
+/* Below this the grid has fewer than four tracks, and a spanning diagram
+   pushes the last card onto a row of its own with two empty tracks beside it.
+   Four 16rem tracks and their three 1rem gaps need 1072px, and the shell is the
+   viewport less two 1.5rem gutters, so 1120px is the last width that fits them
+   — above it the diagram and two claims fill the row exactly. */
+@media (max-width: 1119px) {
+  .vy-card-visual {
+    grid-column: auto;
+  }
+}
+
+/* -------------------------------------------------------------- logo wall - */
+
+/* Separators are each cell's own right and bottom hairline, drawn as a
+   box-shadow so they take no layout space. Painting the container and letting a
+   gap show through would fill a partial last row with a solid block of border
+   colour; an empty cell here simply stays page-coloured. */
+.vy-logowall {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--vy-border);
+  border-radius: var(--vy-radius-2xl);
+  overflow: hidden;
+}
+
+.vy-logowall-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.9375rem 1rem;
+  box-shadow: 1px 0 0 var(--vy-border), 0 1px 0 var(--vy-border);
+  font-size: 0.875rem;
+  line-height: 1.3;
+  color: var(--vy-secondary);
+  min-width: 0;
+}
+
+/* Labels wrap rather than truncate. They come from the marketplace and the
+   provider registry, so their length is not ours to control, and a mark beside
+   "Google Dri…" reads as a broken cell rather than a named integration. Grid
+   rows stretch to their tallest cell, so a two-line label keeps the wall even. */
+.vy-logowall-label {
+  min-width: 0;
+  /* break-word, never anywhere: `anywhere` also shrinks the min-content width
+     to one character, which lets a sibling tag squeeze the label to nothing and
+     stack it letter by letter. This keeps the longest word intact, so the cell
+     wraps the tag onto its own line instead. */
+  overflow-wrap: break-word;
+}
+
+.vy-logo {
+  flex-shrink: 0;
+  color: var(--vy-fg-strong);
+}
+
+.vy-logo svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Dense variant: marks only, for long tails like the extension catalogue. */
+.vy-logowall-dense {
+  grid-template-columns: repeat(auto-fill, minmax(8.75rem, 1fr));
+}
+
+.vy-logowall-dense .vy-logowall-item {
+  padding: 0.75rem 0.875rem;
+  font-size: 0.8125rem;
+}
+
+/* --------------------------------------------------------------- strip - */
+
+/* A compact dated list: changelog entries on the home and download pages. */
+.vy-strip {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--vy-border);
+}
+
+.vy-strip-row {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr) auto;
+  gap: 1.5rem;
+  align-items: baseline;
+  padding-block: 1rem;
+  border-bottom: 1px solid var(--vy-border);
+}
+
+.vy-strip-date {
+  font-size: 0.8125rem;
+  color: var(--vy-tertiary);
+}
+
+.vy-strip-name {
+  font-size: 0.9375rem;
+  color: var(--vy-fg);
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .vy-strip-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.375rem;
+  }
 }

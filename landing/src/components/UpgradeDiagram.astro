@@ -1,0 +1,64 @@
+---
+/**
+ * Upgrades applied one at a time, each followed by a test gate, with one risky
+ * upgrade taken off the main line.
+ *
+ * A schematic of the dependency-upgrade sequence, not a depiction of the
+ * application's interface. The short vertical strokes crossing the line are the
+ * gates — the test run between each upgrade. No text, so the aria-label has to
+ * carry the meaning. Styles live here because a scoped rule in the page would
+ * not reach this SVG.
+ */
+---
+
+<svg
+  class="vy-diagram"
+  viewBox="0 0 400 120"
+  fill="none"
+  role="img"
+  aria-label="Upgrades applied one at a time along a line, each followed by a test gate, with one risky upgrade branching off onto its own line."
+>
+  <path class="vy-diagram-line" d="M24 42h296" />
+  <path class="vy-diagram-line" d="M212 42c22 0 22 50 44 50h64" />
+
+  <path class="vy-diagram-gate" d="M84 30v24" />
+  <path class="vy-diagram-gate" d="M164 30v24" />
+  <path class="vy-diagram-gate" d="M268 30v24" />
+
+  <circle class="vy-diagram-node" cx="24" cy="42" r="6" />
+  <circle class="vy-diagram-node vy-diagram-node-branch" cx="124" cy="42" r="4" />
+  <circle class="vy-diagram-node vy-diagram-node-branch" cx="212" cy="42" r="4" />
+  <circle class="vy-diagram-node" cx="320" cy="42" r="6" />
+  <circle class="vy-diagram-node vy-diagram-node-branch" cx="320" cy="92" r="4" />
+</svg>
+
+<style>
+  .vy-diagram {
+    width: 100%;
+    max-width: 22rem;
+    height: auto;
+  }
+
+  .vy-diagram-line {
+    stroke: var(--vy-border-strong);
+    stroke-width: 1.5;
+  }
+
+  /* The test between each upgrade. Accent, because passing it is the condition
+     for going on to the next one. */
+  .vy-diagram-gate {
+    stroke: var(--vy-accent);
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  .vy-diagram-node {
+    fill: var(--vy-bg);
+    stroke: var(--vy-accent);
+    stroke-width: 2;
+  }
+
+  .vy-diagram-node-branch {
+    stroke: var(--vy-border-strong);
+  }
+</style>

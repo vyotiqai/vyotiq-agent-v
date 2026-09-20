@@ -316,7 +316,7 @@
       "id": "goal",
       "name": "Goal",
       "version": "1.0.0",
-      "description": "Keep working a long-lived chat objective until it is complete. Use when the user sets /goal or asks to persist until an outcome is done. Pair with /loop. Never pause yourself.",
+      "description": "Keep working a long-lived chat objective until it is complete. Use when the user sets /goal or asks to persist until an outcome is done. Pair with /loop. Never pause or start a goal yourself.",
       "kind": "skill",
       "bundledPath": "goal",
       "source": "bundled",
@@ -937,6 +937,45 @@
       "category": "skills",
       "featuredRank": 46,
       "iconPath": "icons/flake-hunter.svg",
+      "installable": true
+    },
+    {
+      "id": "docs",
+      "name": "Docs",
+      "version": "1.0.0",
+      "description": "Write or update project documentation (README, ADRs, API docs, guides) accurately and scannably.",
+      "kind": "skill",
+      "bundledPath": "docs",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "category": "skills",
+      "iconPath": "icons/docs.svg",
+      "installable": true
+    },
+    {
+      "id": "refactor",
+      "name": "Refactor",
+      "version": "1.0.0",
+      "description": "Restructure code while preserving behavior: extract, rename, simplify, and clean up in small reviewable steps.",
+      "kind": "skill",
+      "bundledPath": "refactor",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "category": "skills",
+      "iconPath": "icons/refactor.svg",
+      "installable": true
+    },
+    {
+      "id": "analyze-api",
+      "name": "Analyze API",
+      "version": "1.0.0",
+      "description": "Find every HTTP route in a codebase and produce a structured endpoint reference table.",
+      "kind": "skill",
+      "bundledPath": "analyze-api",
+      "source": "bundled",
+      "publisher": "Agent V",
+      "category": "skills",
+      "iconPath": "icons/analyze-api.svg",
       "installable": true
     }
   ]

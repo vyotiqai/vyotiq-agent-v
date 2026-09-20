@@ -1,11 +1,10 @@
-import { existsSync, readFileSync } from 'fs'
+import { existsSync } from 'fs'
 import { join } from 'path'
 import type {
   MarketplaceOverrides,
   McpServer,
   MarketplaceInstalledItem
 } from '../../shared/ipc'
-import { VyotiqMcpManifestSchema, VyotiqPluginManifestSchema } from '../../shared/ipc'
 import { effectiveMarketplaceEnabled } from '../../shared/domain/marketplaceEnablement'
 import { formatError } from '../../shared/errors'
 import { logger } from '../../shared/logger'
@@ -13,9 +12,11 @@ import { getSettings } from '../settings/settings'
 import { findWorkspaceSettingsOverride, readWorkspacesState } from '../workspace/workspaces'
 import { readMarketplaceIndex } from './indexStore'
 import { resolveInstalledPackageRoot } from './paths'
-import { resolveInsidePackageRoot } from './safePath'
-import { mcpServerFromManifest } from './install'
-import { sanitizeMcpManifestEnv } from './sanitizeMcpEnv'
+import {
+  applyMcpSettingsOverlay,
+  listPluginNestedMcpServers,
+  mcpServerFromManifest
+} from './mcpManifest'
 
 function packageRoot(item: MarketplaceInstalledItem): string {
   return resolveInstalledPackageRoot(item.packagePath)
@@ -166,40 +167,7 @@ export function resolveEffectiveMcpServers(
       const settingsOverlay = (settings.mcpServers ?? []).find(
         (s) => s.id === server.id && s.source === 'marketplace'
       )
-      byId.set(server.id, {
-        ...server,
-        enabled,
-        ...(settingsOverlay
-          ? {
-              ...(settingsOverlay.transport ? { transport: settingsOverlay.transport } : {}),
-              ...(settingsOverlay.command !== undefined
-                ? { command: settingsOverlay.command }
-                : {}),
-              ...(settingsOverlay.args ? { args: settingsOverlay.args } : {}),
-              ...(settingsOverlay.env
-                ? { env: sanitizeMcpManifestEnv(settingsOverlay.env) }
-                : {}),
-              ...(settingsOverlay.url !== undefined ? { url: settingsOverlay.url } : {}),
-              ...(settingsOverlay.headers ? { headers: settingsOverlay.headers } : {}),
-              ...(settingsOverlay.allowedTools?.length
-                ? { allowedTools: settingsOverlay.allowedTools }
-                : {}),
-              ...(settingsOverlay.deniedTools?.length
-                ? { deniedTools: settingsOverlay.deniedTools }
-                : {}),
-              ...(settingsOverlay.oauthClientId
-                ? { oauthClientId: settingsOverlay.oauthClientId }
-                : {}),
-              ...(settingsOverlay.authScope ? { authScope: settingsOverlay.authScope } : {}),
-              ...(settingsOverlay.authWorkspacePath
-                ? { authWorkspacePath: settingsOverlay.authWorkspacePath }
-                : {}),
-              ...(settingsOverlay.googleAccess
-                ? { googleAccess: settingsOverlay.googleAccess }
-                : {})
-            }
-          : {})
-      })
+      byId.set(server.id, { ...applyMcpSettingsOverlay(server, settingsOverlay), enabled })
     } catch (err) {
       logger.warn('Skipping invalid marketplace MCP package', {
         scope: 'marketplace',
@@ -209,9 +177,11 @@ export function resolveEffectiveMcpServers(
     }
   }
 
-  // Plugin-bundled MCP (plugin enable + optional per-nested mcp override)
-  for (const item of index.items) {
-    if (item.kind !== 'plugin') continue
+  // Plugin-bundled MCP (plugin enable + optional per-nested mcp override).
+  // Built by the shared manifest reader so `auth`, `requires`, `inputs` and
+  // `setupUrl` reach the connect flow exactly as they do for standalone
+  // packages — hand-rolling this mapping is what silently dropped them.
+  for (const { item, server } of listPluginNestedMcpServers()) {
     const pluginEnabled = effectiveMarketplaceEnabled(
       item.id,
       item.enabled,
@@ -219,69 +189,9 @@ export function resolveEffectiveMcpServers(
       'plugins'
     )
     if (!pluginEnabled) continue
-    const root = packageRoot(item)
-    const manifestPath = join(root, 'vyotiq.plugin.json')
-    if (!existsSync(manifestPath)) continue
-    try {
-      const plugin = VyotiqPluginManifestSchema.parse(
-        JSON.parse(readFileSync(manifestPath, 'utf8'))
-      )
-      for (const rel of plugin.mcp) {
-        let mcpRoot: string
-        try {
-          mcpRoot = resolveInsidePackageRoot(root, rel)
-        } catch {
-          continue
-        }
-        const mcpManifestPath = join(mcpRoot, 'vyotiq.mcp.json')
-        if (!existsSync(mcpManifestPath)) continue
-        const nested = VyotiqMcpManifestSchema.parse(
-          JSON.parse(readFileSync(mcpManifestPath, 'utf8'))
-        )
-        const id = `plugin-${plugin.id}-${nested.id}`.replace(/__/g, '-')
-        if (id.includes('__')) continue
-        const enabled = effectiveMarketplaceEnabled(id, true, marketplaceOverrides, 'mcp')
-        const settingsOverlay = (settings.mcpServers ?? []).find((s) => s.id === id)
-        byId.set(id, {
-          id,
-          name: `${plugin.name}: ${nested.name}`,
-          transport: nested.transport,
-          command: nested.command,
-          args: nested.args,
-          env: sanitizeMcpManifestEnv(nested.env),
-          url: nested.url,
-          headers: nested.headers,
-          ...(nested.allowedTools?.length ? { allowedTools: nested.allowedTools } : {}),
-          ...(nested.deniedTools?.length ? { deniedTools: nested.deniedTools } : {}),
-          ...(settingsOverlay?.allowedTools?.length
-            ? { allowedTools: settingsOverlay.allowedTools }
-            : {}),
-          ...(settingsOverlay?.deniedTools?.length
-            ? { deniedTools: settingsOverlay.deniedTools }
-            : {}),
-          ...(settingsOverlay?.oauthClientId
-            ? { oauthClientId: settingsOverlay.oauthClientId }
-            : {}),
-          ...(settingsOverlay?.authScope ? { authScope: settingsOverlay.authScope } : {}),
-          ...(settingsOverlay?.authWorkspacePath
-            ? { authWorkspacePath: settingsOverlay.authWorkspacePath }
-            : {}),
-          ...(settingsOverlay?.googleAccess
-            ? { googleAccess: settingsOverlay.googleAccess }
-            : {}),
-          enabled,
-          source: 'marketplace',
-          packageId: item.id,
-          packageVersion: item.version
-        })
-      }
-    } catch (err) {
-      logger.warn('Skipping invalid marketplace plugin MCP', {
-        scope: 'marketplace',
-        packageId: item.id,
-        err: formatError(err)
-      })
-    }
+    const enabled = effectiveMarketplaceEnabled(server.id, true, marketplaceOverrides, 'mcp')
+    const settingsOverlay = (settings.mcpServers ?? []).find((s) => s.id === server.id)
+    byId.set(server.id, { ...applyMcpSettingsOverlay(server, settingsOverlay), enabled })
   }
 
   const servers = [...byId.values()]

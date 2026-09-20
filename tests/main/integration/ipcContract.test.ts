@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { IPC } from '@shared/channels'
+import { PUSH_CHANNELS as SHARED_PUSH_CHANNELS } from '../../helpers/ipcChannelRoles'
 import type { VyotiqApi } from '@shared/vyotiqApi'
 
 /** Invoke channels exposed on VyotiqApi (push listeners + sync send excluded). */
@@ -27,6 +28,7 @@ const VYOTIQ_INVOKE_MAP: Record<
     | 'onNotificationActivate'
     | 'onDeepLinkOpened'
     | 'onAppearanceCustomCssChanged'
+    | 'onAgentProfileOverridesChanged'
     | 'updater'
     | 'feedback'
     | 'onAccessibilitySupportChanged'
@@ -75,6 +77,8 @@ const VYOTIQ_INVOKE_MAP: Record<
   homeActivity: IPC.homeActivity,
   setGoalStatus: IPC.runsSetGoalStatus,
   setLoop: IPC.runsSetLoop,
+  runFeedbackGet: IPC.runFeedbackGet,
+  runFeedbackSet: IPC.runFeedbackSet,
   harnessReview: IPC.harnessReview,
   harnessPreviewApply: IPC.harnessPreviewApply,
   harnessApply: IPC.harnessApply,
@@ -118,9 +122,12 @@ const VYOTIQ_INVOKE_MAP: Record<
   agentProfilesCreate: IPC.agentProfilesCreate,
   agentProfilesUpdate: IPC.agentProfilesUpdate,
   agentProfilesDelete: IPC.agentProfilesDelete,
+  agentProfileOverridesList: IPC.agentProfileOverridesList,
+  agentProfileOverrideSet: IPC.agentProfileOverrideSet,
   tasksList: IPC.tasksList,
   tasksEnqueue: IPC.tasksEnqueue,
   tasksCancel: IPC.tasksCancel,
+  tasksRetry: IPC.tasksRetry,
   gitStatus: IPC.gitStatus,
   gitGenerateCommitMessage: IPC.gitGenerateCommitMessage,
   gitDiff: IPC.gitDiff,
@@ -243,30 +250,8 @@ const EVENT_CHANNELS = new Set<string>([
   IPC.workspaceEditorFlushResponse
 ])
 
-const PUSH_CHANNELS = new Set<string>([
-  IPC.chatEvent,
-  IPC.toolApprovalRequest,
-  IPC.agentQuestionRequest,
-  IPC.windowMaximizedChanged,
-  IPC.windowFocusChanged,
-  IPC.themeChanged,
-  IPC.browserState,
-  IPC.ptyData,
-  IPC.ptyExit,
-  IPC.codeIndexStatusEvent,
-  IPC.dictationStatusEvent,
-  IPC.githubAuthStatusEvent,
-  IPC.skillsChanged,
-  IPC.agentProfilesChanged,
-  IPC.tasksChanged,
-  IPC.notificationsChanged,
-  IPC.notificationsActivate,
-  IPC.appearanceCustomCssChanged,
-  IPC.updaterState,
-  IPC.accessibilitySupportChanged,
-  IPC.gitStatusChanged,
-  IPC.deepLinkOpened
-])
+/** Preload push subscriptions — shared with the channel-parity suite. */
+const PUSH_CHANNELS = SHARED_PUSH_CHANNELS
 
 const VYOTIQ_SYNC_SEND_MAP: Record<'updateWorkspaceUiStateSync', string> = {
   updateWorkspaceUiStateSync: IPC.workspacesUpdateUiStateSync
@@ -287,6 +272,7 @@ const VYOTIQ_PUSH_MAP: Record<
   | 'onGithubAuthStatus'
   | 'onSkillsChanged'
   | 'onAgentProfilesChanged'
+  | 'onAgentProfileOverridesChanged'
   | 'onTasksChanged'
   | 'onNotificationsChanged'
   | 'onNotificationActivate'
@@ -310,6 +296,7 @@ const VYOTIQ_PUSH_MAP: Record<
   onGithubAuthStatus: IPC.githubAuthStatusEvent,
   onSkillsChanged: IPC.skillsChanged,
   onAgentProfilesChanged: IPC.agentProfilesChanged,
+  onAgentProfileOverridesChanged: IPC.agentProfileOverridesChanged,
   onTasksChanged: IPC.tasksChanged,
   onNotificationsChanged: IPC.notificationsChanged,
   onNotificationActivate: IPC.notificationsActivate,
@@ -334,6 +321,25 @@ const VYOTIQ_NAMESPACE_PUSH_MAP: Record<string, string> = {
 /** Preload source shows only the leaf names inside the namespace object. */
 const namespaceMethod = (key: string): string => key.split('.')[1] ?? key
 
+/**
+ * Everything the invoke map is NOT responsible for. Deriving the expected
+ * invoke count from this (instead of a hand-bumped literal) means adding a
+ * channel to IPC and to the map stays green, while adding it to only one
+ * side goes red — which is the whole point of the count.
+ */
+const NON_INVOKE_CHANNELS = new Set<string>([
+  ...Object.values(VYOTIQ_NAMESPACE_INVOKE_MAP),
+  ...Object.values(VYOTIQ_PUSH_MAP),
+  ...Object.values(VYOTIQ_NAMESPACE_PUSH_MAP),
+  ...Object.values(VYOTIQ_SYNC_SEND_MAP),
+  ...PRELOAD_INTERNAL_INVOKE_CHANNELS,
+  ...EVENT_CHANNELS,
+  IPC.runsFork,
+  IPC.loadEarlierMessages,
+  IPC.toolsCatalogGet,
+  IPC.toolsCatalogChanged
+])
+
 describe('main/renderer IPC contract', () => {
   it('maps every VyotiqApi invoke to a shared IPC channel', () => {
     const channels = new Set(Object.values(IPC))
@@ -341,7 +347,9 @@ describe('main/renderer IPC contract', () => {
       expect(channels.has(channel)).toBe(true)
       expect(PUSH_CHANNELS.has(channel)).toBe(false)
     }
-    expect(Object.keys(VYOTIQ_INVOKE_MAP)).toHaveLength(200)
+    expect(Object.keys(VYOTIQ_INVOKE_MAP)).toHaveLength(
+      Object.values(IPC).length - NON_INVOKE_CHANNELS.size
+    )
   })
 
   it('maps every VyotiqApi push listener to a push channel', () => {
@@ -353,7 +361,9 @@ describe('main/renderer IPC contract', () => {
       expect(channels.has(channel)).toBe(true)
       expect(PUSH_CHANNELS.has(channel)).toBe(true)
     }
-    expect(Object.keys(VYOTIQ_PUSH_MAP)).toHaveLength(21)
+    expect(Object.keys(VYOTIQ_PUSH_MAP)).toHaveLength(
+      PUSH_CHANNELS.size - Object.keys(VYOTIQ_NAMESPACE_PUSH_MAP).length
+    )
   })
 
   it('accounts for every IPC channel as invoke or push', () => {

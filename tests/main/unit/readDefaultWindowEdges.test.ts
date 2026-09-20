@@ -39,12 +39,24 @@ describe('read default window edge cases', () => {
     const lines = Array.from({ length: 2500 }, (_, i) => `L${i + 1}`)
     writeFileSync(join(root, 'over-cap-le.log'), utf16leBuf(lines))
     writeFileSync(join(root, 'over-cap-be.log'), utf16beBuf(lines))
-    // Binary guard past the cap: plain text lines with a NUL byte injected
-    // after line 2000, inside the default window's uncollected tail.
+    // Binary guard past the cap: the scan must keep reading beyond the default
+    // window's 2000 collected lines, so a dense NUL run in the uncollected tail
+    // still rejects the file.
     const head = lines.slice(0, 2000).join('\n') + '\n'
     const tail = lines.slice(2000).join('\n')
     writeFileSync(
       join(root, 'nul-past-cap.txt'),
+      Buffer.concat([
+        Buffer.from(head, 'utf8'),
+        Buffer.alloc(64, 0x00),
+        Buffer.from(tail, 'utf8')
+      ])
+    )
+    // Counterpart: one stray NUL in the same tail is sparse, not binary. A raw
+    // \0 in a template literal made a real 2.5 KB source file unreadable, which
+    // pushed the model onto the slower `terminal` path for plain reads.
+    writeFileSync(
+      join(root, 'stray-nul-past-cap.txt'),
       Buffer.concat([Buffer.from(head, 'utf8'), Buffer.from([0x00]), Buffer.from(tail, 'utf8')])
     )
     writeFileSync(
@@ -84,8 +96,14 @@ describe('read default window edge cases', () => {
     await expectDefaultUtf16Window('over-cap-be.log')
   })
 
-  it('rejects a NUL byte past line 2000 on the default path', async () => {
+  it('rejects dense NUL content past line 2000 on the default path', async () => {
     await expect(toolRead(root, 'nul-past-cap.txt')).rejects.toThrow(/Binary file detected/)
+  })
+
+  it('reads a text file with one stray NUL past line 2000, replacing the NUL', async () => {
+    const out = await toolRead(root, 'stray-nul-past-cap.txt')
+    expect(out.split('\n')[0]).toBe(`--- lines 1-${READ_DEFAULT_MAX_LINES} of 2500 ---`)
+    expect(out).not.toContain('\0')
   })
 
   it('still windows an over-cap plain ASCII file correctly (fixture sanity)', async () => {

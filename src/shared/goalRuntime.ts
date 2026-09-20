@@ -19,7 +19,10 @@ export function formatGoalInvocation(objective: string): string {
     GOAL_HEADER,
     text,
     '',
-    'Call `create_goal` with this objective now, then work until `update_goal` with status "complete" or the user pauses. Never pause yourself. Do not stop while required work remains.'
+    // The goal is already seeded active on this path (loop.ts reads this
+    // header), so asking for `create_goal` here would only collide with it:
+    // that tool proposes, and a live user-set goal refuses to be replaced.
+    'This goal is now active on this chat. Work until `update_goal` with status "complete", or the user pauses. Never pause yourself. Do not stop while required work remains.'
   ].join('\n')
 }
 
@@ -110,13 +113,22 @@ export function formatLoopStatusLine(loop: {
   return `Loop armed every ${formatLoopInterval(loop.intervalMs)}: ${loop.prompt} (next ${loop.nextAt})`
 }
 
-export type GoalAutoContinueDecision = 'continue' | 'stop_wait' | 'none'
+export type GoalAutoContinueDecision = 'continue' | 'stop_wait' | 'stop_budget' | 'none'
+
+/**
+ * Turn-end auto-continues one active goal may take before it pauses for the
+ * user. The no-tool-finish brake below only catches an agent that has stopped
+ * calling tools; a tool-calling agent resets that streak every turn, so without
+ * a budget an active goal can run unattended forever.
+ */
+export const GOAL_CONTINUE_BUDGET = 25
 
 export function shouldAutoContinueActiveGoal(input: {
   goalStatus: RunGoalStatus | null | undefined
   agentMode: AgentInteractionMode
   incomplete: boolean
   consecutiveNoToolFinishes: number
+  continueCount?: number
 }): GoalAutoContinueDecision {
   if (input.goalStatus !== 'active') return 'none'
   // Ask mode is read-only Q&A — auto-looping a goal there would churn Q&A
@@ -124,8 +136,16 @@ export function shouldAutoContinueActiveGoal(input: {
   // continue an active goal (bounded by the two-finish stop_wait cap).
   if (input.agentMode === 'ask') return 'none'
   if (input.incomplete) return 'none'
+  if ((input.continueCount ?? 0) >= GOAL_CONTINUE_BUDGET) return 'stop_budget'
   if (input.consecutiveNoToolFinishes >= 2) return 'stop_wait'
   return 'continue'
+}
+
+/** App-start relaunches allowed with no user turn in between. */
+export const GOAL_AUTO_RESUME_LIMIT = 1
+
+export function goalBudgetPauseMessage(objective: string): string {
+  return `Goal paused after ${GOAL_CONTINUE_BUDGET} auto-continues without finishing: ${objective.trim()}. Resume to keep going.`
 }
 
 export function serializeGoalContent(goal: RunGoal): string {

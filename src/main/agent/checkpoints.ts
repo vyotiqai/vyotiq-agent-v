@@ -173,6 +173,15 @@ export class InvokeWriteCheckpoint {
     this.anchorUserMessageIndex = anchorUserMessageIndex
   }
 
+  /**
+   * Distinct workspace files this invoke has touched. The authoritative
+   * mutation signal: unlike the edit-family tool names, it also covers
+   * terminal writes, MCP writers, merges and watched out-of-band changes.
+   */
+  get writtenFileCount(): number {
+    return this.files.size
+  }
+
   private realWorkspaceRoot(): string {
     return existsSync(this.workspaceRoot) ? realpathSync(this.workspaceRoot) : this.workspaceRoot
   }

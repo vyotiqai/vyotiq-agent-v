@@ -9,6 +9,7 @@ import { applyBadgeNow, notifyBadgeChange, setBadgeProvider } from '@main/app/ba
 import { initCustomCssWatchFromSettings } from '@main/appearance/customCss'
 import { configureChromiumDiskCache } from '@main/app/chromiumProfile'
 import { applyCertificateLogging, applyCsp } from '@main/app/security'
+import { widenHappyEyeballsWindow } from '@main/net/happyEyeballs'
 import { closeAgentBrowser } from '@main/app/agentBrowser'
 import { disposeAllPtySessions, replayPtySessionsToWindow } from '@main/app/ptySessions'
 import { disposeAllTerminalSessions } from '@main/agent/tools/terminalSessions'
@@ -28,6 +29,7 @@ import { purgeLegacyProjectHarness } from '@main/agent/harness'
 import { warmWorkspaceIndexes } from '@main/agent/workspaceIndex'
 import { compactModelCacheOnBoot } from '@main/agent/providers/modelCache'
 import {
+  collectProtectedInstanceRunIds,
   flushEventAppends,
   flushMessageAppends,
   flushStatusWrites
@@ -174,7 +176,7 @@ if (!gotLock) {
         setTimeout(() => {
           if (!fresh.isDestroyed()) resumeActiveGoalsAndLoops(fresh.webContents)
           // Queued tasks held for a missing window can start again now.
-          resumeTasksForWorkspaces(getWorkspaces().openPaths)
+          void resumeTasksForWorkspaces(getWorkspaces().openPaths)
         }, RESUME_AFTER_FIRST_PAINT_MS)
       })
       win.destroy()
@@ -183,6 +185,11 @@ if (!gotLock) {
     if (win.isMinimized()) win.restore()
     win.focus()
   })
+
+  // Before anything dials out. The runtime's 250ms per-address connect window
+  // is shorter than a transcontinental round trip, which stops a multi-homed
+  // host being reachable at all rather than merely being slow.
+  widenHappyEyeballsWindow()
 
   app.whenReady().then(async () => {
     // Accessibility is no longer forced on: Chromium auto-detects assistive
@@ -247,7 +254,13 @@ if (!gotLock) {
         const key = process.platform === 'win32' ? root.toLowerCase() : root
         if (pruneSeen.has(key)) continue
         pruneSeen.add(key)
-        pruneStaleInstanceWorktreesBestEffort(root, liveIds)
+        // Identify protected instance checkouts BEFORE pruning. `liveIds` holds
+        // only runs live in this process, and at boot that is empty — every
+        // resumable instance's checkout would otherwise look stale and be
+        // deleted right after the interrupt pass promised it a resume.
+        const keep = collectProtectedInstanceRunIds(root)
+        for (const id of liveIds) keep.add(id)
+        pruneStaleInstanceWorktreesBestEffort(root, keep)
       }
       compactModelCacheOnBoot()
       // Storage retention boot sweep (audit H4/H5): free resolved/undone
@@ -312,7 +325,7 @@ if (!gotLock) {
           if (!win.isDestroyed()) resumeActiveGoalsAndLoops(win.webContents)
           // Delegated tasks re-arm after goals: queued tasks need a free window
           // to stream into, and scheduling must not stampede boot.
-          resumeTasksForWorkspaces(getWorkspaces().openPaths)
+          void resumeTasksForWorkspaces(getWorkspaces().openPaths)
         }, RESUME_AFTER_FIRST_PAINT_MS)
       }
     })
@@ -340,7 +353,7 @@ if (!gotLock) {
             if (!win.isDestroyed()) resumeActiveGoalsAndLoops(win.webContents)
             // Window recreation must re-pump queued tasks held while no
             // window existed — same contract as the boot path above.
-            resumeTasksForWorkspaces(getWorkspaces().openPaths)
+            void resumeTasksForWorkspaces(getWorkspaces().openPaths)
           }, RESUME_AFTER_FIRST_PAINT_MS)
         })
       }

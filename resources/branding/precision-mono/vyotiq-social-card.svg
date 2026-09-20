@@ -2,10 +2,10 @@
   <title>Vyotiq social card</title>
   <rect width="1200" height="630" fill="#000000"/>
   <g transform="translate(258.050 315.000) scale(0.270) translate(-512 -512)">
-    <path d="M 802.410 512.000 L 366.795 763.503 L 366.795 260.497 Z" fill="#ffffff"/>
-  <path d="M 858.410 544.332 L 858.410 712.000 L 512.000 912.000 L 366.795 828.166 Z" fill="#ffffff"/>
-  <path d="M 310.795 795.834 L 165.590 712.000 L 165.590 312.000 L 310.795 228.166 Z" fill="#ffffff"/>
-  <path d="M 366.795 195.834 L 512.000 112.000 L 858.410 312.000 L 858.410 479.668 Z" fill="#ffffff"/>
+    <path d="M 794.908 512.000 L 370.546 757.005 L 370.546 266.995 Z" fill="#ffffff"/>
+  <path d="M 858.410 540.000 L 858.410 712.000 L 512.000 912.000 L 363.044 826.000 Z" fill="#ffffff"/>
+  <path d="M 314.546 798.000 L 165.590 712.000 L 165.590 312.000 L 314.546 226.000 Z" fill="#ffffff"/>
+  <path d="M 363.044 198.000 L 512.000 112.000 L 858.410 312.000 L 858.410 484.000 Z" fill="#ffffff"/>
   </g>
   <g transform="translate(427.580 263.526)">
     <g transform="scale(0.552000) translate(-1.667 -48.000)">

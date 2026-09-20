@@ -53,6 +53,7 @@ import {
   type MissingMcpBinary
 } from './binaries'
 import { linkNativeGithubFromMcpToken } from '../../git/githubAuth'
+import { getGithubAccessToken, hasGithubAccessToken } from '../../settings/secrets'
 import {
   isGithubMcpId,
   isGoogleMcpId,
@@ -74,6 +75,17 @@ import {
   withCompatibleUvxArgs,
   withWorkspaceRepositoryArgs
 } from './uvxCompat'
+import {
+  MCP_SIGN_IN_REQUIRED,
+  isMcpMissingBinaryError,
+  isMcpSignInRequiredError
+} from './errorKinds'
+import {
+  classifyMcpConnectError,
+  describeMcpConnectError,
+  isRetriableMcpConnectError
+} from './connectErrors'
+import { httpRetryBackoffMs, sleepAbortable } from '../providers/fetchWithRetry'
 import { isGitRepo } from '../../git/git'
 import { readWorkspacesState } from '../../workspace/workspaces'
 import { workspacePathsEqual } from '../../../shared/workspacePath'
@@ -145,17 +157,11 @@ function sessionMapKey(
   return server.id
 }
 
-export const MCP_SIGN_IN_REQUIRED = 'Sign in required'
-
-export function isMcpSignInRequiredError(message: string | null | undefined): boolean {
-  if (!message) return false
-  return /sign in required/i.test(message)
-}
-
-export function isMcpMissingBinaryError(message: string | null | undefined): boolean {
-  if (!message) return false
-  return /was not found on PATH/i.test(message)
-}
+export {
+  MCP_SIGN_IN_REQUIRED,
+  isMcpMissingBinaryError,
+  isMcpSignInRequiredError
+} from './errorKinds'
 
 function quietMcpConnectSkip(message: string | null | undefined): boolean {
   return (
@@ -262,6 +268,26 @@ export function mcpToolName(serverId: string, toolName: string): string {
   return `${MCP_TOOL_PREFIX}${serverId}__${toolName}`
 }
 
+/**
+ * Longest tool name any supported provider accepts. OpenAI-compatible
+ * endpoints cap lower (64), so a very long name can still be rejected there;
+ * this bound is about the unbounded case, where a single server would break
+ * every request.
+ */
+const MCP_TOOL_NAME_MAX = 128
+
+/**
+ * Is this name safe to put in front of a model?
+ *
+ * MCP does not constrain tool names, but every provider forwards them to the
+ * API verbatim and rejects anything outside `[A-Za-z0-9_-]` or past its length
+ * cap — with a 400 for the whole request, not just that tool. One unusual tool
+ * would therefore break every turn while the server itself looked healthy.
+ */
+export function isSupportedMcpToolName(fullName: string): boolean {
+  return fullName.length <= MCP_TOOL_NAME_MAX && /^[A-Za-z0-9_-]+$/.test(fullName)
+}
+
 export function parseMcpToolName(
   name: string
 ): { serverId: string; toolName: string } | null {
@@ -310,7 +336,11 @@ function capMcpText(text: string): string {
 }
 
 const ajv2020 = new Ajv2020({ allErrors: true, strict: false })
-/** Compiled per server/tool inputSchema; cleared when a server re-lists tools. */
+/**
+ * Compiled per server/tool inputSchema; cleared when a server re-lists tools.
+ * Keyed by the prefixed `mcp__server__tool` name — a bare key let two servers
+ * that both expose, say, `search` validate against each other's schema.
+ */
 const mcpArgValidatorCache = new Map<string, ValidateFunction | null>()
 
 /**
@@ -526,6 +556,77 @@ let syncChain: Promise<void> = Promise.resolve()
 let lastSyncedServersFp: string | null = null
 let lastSyncInflight: Promise<void> | null = null
 
+/** Per-call cap for MCP tool invocations; the SDK default of 60s is too low. */
+const MCP_INVOKE_TIMEOUT_MS = 120_000
+/** Hard bound even when a server keeps streaming progress notifications. */
+const MCP_INVOKE_MAX_TOTAL_TIMEOUT_MS = 600_000
+
+/**
+ * Forget the last synced fingerprint so the next `syncMcpServers` really runs.
+ *
+ * Dropping a session does not change the server list, so without this the
+ * fingerprint still matches and sync short-circuits: the session that was just
+ * torn down is never rebuilt. That is why a server killed by one failed tool
+ * call stayed dead until the user hit Refresh. `refreshMcpServers` has always
+ * done this by hand; every teardown path needs it.
+ */
+function invalidateSyncFingerprint(): void {
+  lastSyncedServersFp = ''
+}
+
+/**
+ * Does this error mean the session itself is gone, so a fresh connect is
+ * required before the tool can work again?
+ *
+ * Everything else keeps the session. A bad argument, a server-side 500, or a
+ * request timeout says nothing about the transport, and tearing the session
+ * down on those is what stranded servers: the drop was permanent because sync
+ * skipped the unchanged fingerprint. Auth failures count as fatal so the
+ * reconnect can refresh the token or surface "Sign in required" honestly,
+ * instead of leaving a server that silently answers nothing.
+ */
+export function isMcpSessionFatalError(message: string | null | undefined): boolean {
+  if (!message) return false
+  return (
+    /not connected/i.test(message) ||
+    /connection closed/i.test(message) ||
+    /transport (is )?closed/i.test(message) ||
+    /session (not found|terminated|expired)/i.test(message) ||
+    /\b(EPIPE|ECONNRESET|ECONNREFUSED|ENOTFOUND|ECONNABORTED)\b/i.test(message) ||
+    /socket hang up/i.test(message) ||
+    /unauthorized|invalid_token|\b401\b/i.test(message) ||
+    /fetch failed/i.test(message)
+  )
+}
+
+/** Reason recorded when a transport closes underneath us. */
+const MCP_TRANSPORT_CLOSED = 'MCP server closed the connection'
+
+/**
+ * A transport died on its own: a stdio child exited, or the remote expired the
+ * session. Without this the entry stays in `sessions` reporting `connected`
+ * with a full tool count, sync skips it because the key is present, and the
+ * model keeps being offered tools that cannot run.
+ */
+function handleMcpSessionClosed(sessionKey: string, client: Client): void {
+  const session = sessions.get(sessionKey)
+  // A deliberate teardown detaches this handler first, and a reconnect may
+  // already have replaced the entry, so only react to our own live session.
+  if (!session || session.client !== client) return
+  for (const tool of session.tools) {
+    mcpReadOnlyHints.delete(tool.name)
+  }
+  sessions.delete(sessionKey)
+  rebuildToolsByNameIndex()
+  sessionConfigKeys.delete(sessionKey)
+  connectErrors.set(sessionKey, MCP_TRANSPORT_CLOSED)
+  invalidateSyncFingerprint()
+  logger.warn('MCP session closed by transport; will reconnect on next sync', {
+    scope: 'mcp',
+    serverId: parseMcpStdioSessionKey(sessionKey)?.serverId ?? sessionKey
+  })
+}
+
 /** True only when the MCP server declared readOnlyHint for this tool. */
 export function getMcpReadOnlyHint(name: string): boolean | undefined {
   return mcpReadOnlyHints.get(name)
@@ -596,6 +697,53 @@ export function mcpServerConfigKey(
  * Resolve request headers for remote MCP: non-secret headers from settings plus
  * Bearer token from OS secure storage (wins over any leftover Authorization).
  */
+/**
+ * A Bearer the app can supply without asking the user to paste anything.
+ *
+ * GitHub advertises no dynamic client registration, so the documented route to
+ * its hosted MCP is: register an OAuth app by hand, copy a client id, paste a
+ * secret. But the app already signs in to GitHub on its own account — device
+ * flow, no secret, one click — and `api.githubcopilot.com` takes that same
+ * user token as a Bearer. Reusing it turns the one server that most needed
+ * manual setup into a server that needs none.
+ *
+ * Returns nothing unless the sign-in actually happened; a server-specific
+ * credential always wins over this (see `resolveMcpBearerToken`).
+ */
+export function inheritedMcpBearer(serverId: string): string | null {
+  if (!isGithubMcpId(serverId)) return null
+  // Stored OAuth for this server means the user chose a specific identity for
+  // it; inheriting the app's would silently connect them as someone else.
+  if (hasStoredMcpOAuthBlob(serverId) || hasMcpOAuthState(serverId)) return null
+  try {
+    const token = getGithubAccessToken()?.trim()
+    return token ? token : null
+  } catch {
+    // Secure storage unavailable is not a reason to fail the connect: the
+    // normal OAuth path is still there.
+    return null
+  }
+}
+
+/**
+ * Same question as `inheritedMcpBearer`, without decrypting. Status is polled
+ * on every settings change and install, and the answer only needs a yes/no.
+ */
+export function hasInheritedMcpBearer(serverId: string): boolean {
+  if (!isGithubMcpId(serverId)) return false
+  if (hasStoredMcpOAuthBlob(serverId) || hasMcpOAuthState(serverId)) return false
+  try {
+    return hasGithubAccessToken()
+  } catch {
+    return false
+  }
+}
+
+/** The Bearer to send, preferring a credential stored for this server. */
+export function resolveMcpBearerToken(serverId: string): string | null {
+  return getMcpAuthToken(serverId) ?? inheritedMcpBearer(serverId)
+}
+
 export function resolveMcpRequestHeaders(
   server: Pick<McpServer, 'id' | 'headers' | 'authScope' | 'authWorkspacePath'>,
   workspacePath?: string | null
@@ -604,7 +752,7 @@ export function resolveMcpRequestHeaders(
   if (!mcpAuthAllowedForWorkspace(server, workspacePath)) {
     return base && Object.keys(base).length > 0 ? base : undefined
   }
-  const token = getMcpAuthToken(server.id)
+  const token = resolveMcpBearerToken(server.id)
   if (token) return withBearerToken(base, token)
   return base && Object.keys(base).length > 0 ? base : undefined
 }
@@ -680,6 +828,28 @@ function findSessionForStatus(
   }
 }
 
+/**
+ * Is a connect for this server in flight right now?
+ *
+ * Without this the first seconds of every launch look like an outage: sync
+ * dials every enabled server, and until the first one answers each reports
+ * `enabled: true, connected: false` with no error, which Home renders as
+ * "<name> is not connected — the server is enabled but reported no
+ * connection." Four servers, four warnings, all of them premature.
+ *
+ * Mirrors the key resolution in `findSessionForStatus`: stdio servers are
+ * keyed per workspace, so a connect for any workspace counts.
+ */
+function isConnectingForStatus(server: McpServer, workspacePath?: string | null): boolean {
+  if (connecting.has(sessionMapKey(server, workspacePath))) return true
+  if (connecting.has(server.id)) return true
+  if (!isStdioTransport(server.transport)) return false
+  for (const key of connecting.keys()) {
+    if (parseMcpStdioSessionKey(key)?.serverId === server.id) return true
+  }
+  return false
+}
+
 export function getMcpServerStatus(
   servers: McpServer[],
   workspacePath?: string | null
@@ -717,13 +887,20 @@ export function getMcpServerStatus(
       isStdioTransport(server.transport) && server.enabled
         ? findMissingMcpBinary(server)
         : null
+    const connectingNow =
+      authVisible && !session && server.enabled && isConnectingForStatus(server, workspacePath)
     return {
       id: server.id,
       name: server.name,
       enabled: server.enabled,
       connected: authVisible && Boolean(session),
+      ...(connectingNow ? { connecting: true } : {}),
       toolCount: authVisible ? (session?.tools.length ?? 0) : 0,
-      hasAuthToken: authVisible && (hasMcpAuthToken(server.id) || hasMcpOAuthState(server.id)),
+      hasAuthToken:
+        authVisible &&
+        (hasMcpAuthToken(server.id) ||
+          hasMcpOAuthState(server.id) ||
+          hasInheritedMcpBearer(server.id)),
       hasOAuthClientSecret: hasPerServerSecret || hasSharedGoogleSecret,
       ...(staticClient ? { oauthRedirectUrl: mcpOAuthFixedRedirectUrl() } : {}),
       ...(missing
@@ -732,8 +909,10 @@ export function getMcpServerStatus(
             ...(missing.installUrl ? { missingBinaryInstallUrl: missing.installUrl } : {})
           }
         : {}),
-      ...(error && authVisible ? { error } : {}),
-      ...(missing && !error ? { error: missingMcpBinaryMessage(missing) } : {})
+      ...(error && authVisible ? { error, errorKind: classifyMcpConnectError(error) } : {}),
+      ...(missing && !error
+        ? { error: missingMcpBinaryMessage(missing), errorKind: 'binary' as const }
+        : {})
     }
   })
 }
@@ -769,8 +948,9 @@ export async function refreshMcpServers(servers: McpServer[]): Promise<McpServer
   for (const id of [...sessions.keys()]) {
     await disconnectMcpServer(id)
   }
-  // Disconnect does not change the sync fingerprint; clear so syncMcpServers reconnects.
-  lastSyncedServersFp = ''
+  // Belt and braces: disconnect already clears the fingerprint, but Refresh
+  // must reconnect even if a future teardown path forgets to.
+  invalidateSyncFingerprint()
   await syncMcpServers(servers)
   return getMcpServerStatus(servers)
 }
@@ -865,6 +1045,13 @@ async function createTransport(
 
 type PendingMcpConnection = { client: Client; transport: Transport }
 
+/** The server said no to the credential we sent, as opposed to failing to answer. */
+function isMcpAuthRejection(err: unknown): boolean {
+  if (err instanceof UnauthorizedError) return true
+  const message = err instanceof Error ? err.message : String(err ?? '')
+  return /(^|[^0-9])(401|403)([^0-9]|$)|unauthorized|forbidden|invalid_token/i.test(message)
+}
+
 async function closePendingConnection(connection: PendingMcpConnection): Promise<void> {
   try {
     await connection.client.close()
@@ -897,6 +1084,28 @@ async function connectWithOptionalOAuth(
     track({ client, transport })
     await client.connect(transport)
     return { client, transport }
+  }
+
+  // The app's own GitHub sign-in doubles as this server's credential. Try it
+  // first, but never let it become a dead end: a token the server rejects
+  // falls through to the OAuth path below instead of surfacing a 401 the user
+  // has no control to act on.
+  if (hasInheritedMcpBearer(server.id)) {
+    const transport = await createTransport(server, { workspacePath })
+    const client = createMcpClient(workspacePath)
+    const connection = { client, transport }
+    track(connection)
+    try {
+      await client.connect(transport)
+      return connection
+    } catch (err) {
+      if (!isMcpAuthRejection(err)) throw err
+      logger.info('App GitHub token rejected by MCP server; falling back to OAuth', {
+        scope: 'mcp',
+        serverId: server.id
+      })
+      await closePendingConnection(connection)
+    }
   }
 
   const interactive = opts?.interactiveOAuth === true
@@ -1060,6 +1269,82 @@ async function connectRemoteWithOAuth(
   }
 }
 
+/** OAuth browser flow may take minutes; non-OAuth still fails fast via server errors. */
+const MCP_CONNECT_TIMEOUT_MS = 120_000
+
+/**
+ * Attempts allowed when the failure says the request never reached the server.
+ *
+ * A remote MCP connect used to be one shot through the runtime's 10s connect
+ * timeout, so a DNS blip or a half-open Wi-Fi link left the server showing
+ * "Connect failed" until the user noticed and hit Refresh. Those clear in a
+ * second or two. Anything still failing on the third try is not transient, and
+ * the circuit breaker in `syncOne` takes over for the sustained case.
+ */
+const MCP_CONNECT_ATTEMPTS = 3
+
+async function connectWithTransientRetry(
+  server: McpServer,
+  pending: Set<PendingMcpConnection>,
+  connectAbort: AbortSignal,
+  workspacePath?: string | null,
+  opts?: { interactiveOAuth?: boolean }
+): Promise<{ client: Client; transport: Transport }> {
+  const deadline = new Promise<never>((_, reject) => {
+    connectAbort.addEventListener(
+      'abort',
+      () =>
+        reject(
+          new Error(
+            `MCP connect timed out after ${MCP_CONNECT_TIMEOUT_MS / 1000}s (${server.id})`
+          )
+        ),
+      { once: true }
+    )
+  })
+  // The race may settle on the connect side and leave this promise rejecting
+  // with nobody awaiting it, which main reports as an unhandled rejection.
+  deadline.catch(() => {})
+
+  let lastError: unknown
+  for (let attempt = 1; attempt <= MCP_CONNECT_ATTEMPTS; attempt++) {
+    try {
+      return await Promise.race([
+        connectWithOptionalOAuth(
+          server,
+          (connection) => pending.add(connection),
+          workspacePath,
+          opts
+        ),
+        deadline
+      ])
+    } catch (err) {
+      lastError = err
+      if (
+        connectAbort.aborted ||
+        attempt >= MCP_CONNECT_ATTEMPTS ||
+        !isRetriableMcpConnectError(err)
+      ) {
+        throw err
+      }
+      // The half-built client from this attempt still holds a socket — and for
+      // stdio a live child process. Close them before dialling again, or every
+      // retry leaks one for the lifetime of the app.
+      const stale = [...pending]
+      pending.clear()
+      await Promise.all(stale.map(closePendingConnection))
+      logger.info('Retrying MCP connect after a transient network failure', {
+        scope: 'mcp',
+        serverId: server.id,
+        attempt,
+        reason: formatError(err)
+      })
+      await sleepAbortable(httpRetryBackoffMs(attempt), connectAbort)
+    }
+  }
+  throw lastError ?? new Error('MCP connection failed')
+}
+
 export async function connectMcpServer(
   server: McpServer,
   workspacePath?: string | null,
@@ -1074,32 +1359,17 @@ export async function connectMcpServer(
   }
 
   const attempt = (async () => {
-    // OAuth browser flow may take minutes; non-OAuth still fails fast via server errors.
-    const CONNECT_TIMEOUT_MS = 120_000
-    const connectAbort = AbortSignal.timeout(CONNECT_TIMEOUT_MS)
+    const connectAbort = AbortSignal.timeout(MCP_CONNECT_TIMEOUT_MS)
     const pending = new Set<PendingMcpConnection>()
     let connected: { client: Client; transport: Transport }
     try {
-      connected = await Promise.race([
-        connectWithOptionalOAuth(
-          server,
-          (connection) => pending.add(connection),
-          workspacePath,
-          opts
-        ),
-        new Promise<never>((_, reject) => {
-          connectAbort.addEventListener(
-            'abort',
-            () =>
-              reject(
-                new Error(
-                  `MCP connect timed out after ${CONNECT_TIMEOUT_MS / 1000}s (${server.id})`
-                )
-              ),
-            { once: true }
-          )
-        })
-      ])
+      connected = await connectWithTransientRetry(
+        server,
+        pending,
+        connectAbort,
+        workspacePath,
+        opts
+      )
     } catch (err) {
       const failure = err instanceof Error ? err : new Error('MCP connection failed')
       cancelMcpOAuthCallback(server.id, failure)
@@ -1119,17 +1389,30 @@ export async function connectMcpServer(
 
     const { client, transport } = connected
     const listed = await client.listTools()
-    const tools: ToolDefinition[] = (listed.tools ?? []).map((t) => {
+    const tools: ToolDefinition[] = []
+    const skippedToolNames: string[] = []
+    for (const t of listed.tools ?? []) {
       const fullName = mcpToolName(server.id, t.name)
+      if (!isSupportedMcpToolName(fullName)) {
+        skippedToolNames.push(t.name)
+        continue
+      }
       mcpReadOnlyHints.set(fullName, t.annotations?.readOnlyHint === true)
-      return {
+      tools.push({
         name: fullName,
         description: neutralizeUntrustedBody(
           t.description ?? `MCP tool ${t.name} (${server.name})`
         ),
         parameters: (t.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} }
-      }
-    })
+      })
+    }
+    if (skippedToolNames.length > 0) {
+      logger.warn('Skipped MCP tools whose names no provider will accept', {
+        scope: 'mcp',
+        serverId: server.id,
+        tools: skippedToolNames.slice(0, 10)
+      })
+    }
     const { resources, prompts } = await probeResourcesAndPrompts(client)
     // If the server is still in the effective settings map, drop the session when
     // it was disabled or reconfigured mid-connect. Servers not in the map (explicit
@@ -1152,12 +1435,22 @@ export async function connectMcpServer(
     sessionConfigKeys.set(key, mcpServerConfigKey(server, workspacePath))
     connectErrors.delete(key)
     connectErrors.delete(server.id)
+    // Notice a dead transport when it dies, not when the model next calls it.
+    client.onclose = () => handleMcpSessionClosed(key, client)
+    client.onerror = (err) => {
+      logger.warn('MCP transport error', {
+        scope: 'mcp',
+        serverId: server.id,
+        err: formatError(err)
+      })
+    }
     logger.info('MCP server connected', {
       scope: 'mcp',
       serverId: server.id,
       transport: server.transport ?? 'stdio',
       workspacePath: isStdioTransport(server.transport) ? resolveStdioWorkspacePath(workspacePath) : undefined,
       toolCount: tools.length,
+      skippedToolCount: skippedToolNames.length,
       resourceCount: resources.length,
       promptCount: prompts.length
     })
@@ -1237,9 +1530,25 @@ export async function disconnectMcpServer(serverId: string): Promise<void> {
   }
 }
 
-async function disconnectMcpSessionByKey(sessionKey: string): Promise<void> {
+/**
+ * Tear a session down.
+ *
+ * `keepError` preserves the reason the caller just recorded. A failure-driven
+ * teardown must keep it: the UI has nothing else to show, and the run loop
+ * one-shot retry gates on a non-empty error, so clearing it left the server
+ * disconnected with no explanation and no retry. Routine teardowns (disabled,
+ * reconfigured, uninstalled) still clear it, because there is no failure.
+ */
+async function disconnectMcpSessionByKey(
+  sessionKey: string,
+  opts?: { keepError?: boolean }
+): Promise<void> {
   const session = sessions.get(sessionKey)
   if (!session) return
+  // Detach first: closing fires `onclose`, which would otherwise re-enter and
+  // overwrite the reason the caller just recorded with the generic one.
+  session.client.onclose = undefined
+  session.client.onerror = undefined
   try {
     await session.client.close()
   } catch {
@@ -1251,9 +1560,14 @@ async function disconnectMcpSessionByKey(sessionKey: string): Promise<void> {
   sessions.delete(sessionKey)
   rebuildToolsByNameIndex()
   sessionConfigKeys.delete(sessionKey)
-  connectErrors.delete(sessionKey)
-  const parsed = parseMcpStdioSessionKey(sessionKey)
-  if (parsed) connectErrors.delete(parsed.serverId)
+  if (!opts?.keepError) {
+    connectErrors.delete(sessionKey)
+    const parsed = parseMcpStdioSessionKey(sessionKey)
+    if (parsed) connectErrors.delete(parsed.serverId)
+  }
+  // The server list is unchanged, so sync would skip this key on fingerprint
+  // alone and never rebuild what we just removed.
+  invalidateSyncFingerprint()
 }
 
 export async function syncMcpServers(
@@ -1438,7 +1752,11 @@ async function syncMcpServersUnlocked(
       await connectMcpServer(server, workspacePath)
       recordCircuitSuccess(circuitKeyMcpConnect(key))
     } catch (err) {
-      const message = formatError(err)
+      // What the card will show. The raw text still reaches the log below, so
+      // the six IP addresses undici prints stay available for diagnosis
+      // without being the thing the user is asked to read.
+      const message = describeMcpConnectError(err, server)
+      const raw = formatError(err)
       const code = mcpConnectErrorCode(err)
       connectErrors.set(key, message)
       recordCircuitFailure(circuitKeyMcpConnect(key), MCP_CONNECT_CIRCUIT_POLICY)
@@ -1454,7 +1772,9 @@ async function syncMcpServersUnlocked(
         serverId: server.id,
         workspacePath: workspacePath ?? undefined,
         code,
+        kind: classifyMcpConnectError(err),
         reason: message,
+        ...(raw === message ? {} : { raw }),
         err: logged
       })
     }
@@ -1568,9 +1888,12 @@ export async function readMcpResource(
       throw err
     }
     recordCircuitFailure(circuitKeyMcpInvoke(access.sessionKey))
-    connectErrors.set(access.sessionKey, formatError(err))
-    await disconnectMcpSessionByKey(access.sessionKey)
-    return { ok: false, error: formatError(err) }
+    const message = formatError(err)
+    connectErrors.set(access.sessionKey, message)
+    if (isMcpSessionFatalError(message)) {
+      await disconnectMcpSessionByKey(access.sessionKey, { keepError: true })
+    }
+    return { ok: false, error: message }
   }
 }
 
@@ -1642,9 +1965,12 @@ export async function getMcpPrompt(
       throw err
     }
     recordCircuitFailure(circuitKeyMcpInvoke(access.sessionKey))
-    connectErrors.set(access.sessionKey, formatError(err))
-    await disconnectMcpSessionByKey(access.sessionKey)
-    return { ok: false, error: formatError(err) }
+    const message = formatError(err)
+    connectErrors.set(access.sessionKey, message)
+    if (isMcpSessionFatalError(message)) {
+      await disconnectMcpSessionByKey(access.sessionKey, { keepError: true })
+    }
+    return { ok: false, error: message }
   }
 }
 
@@ -1673,9 +1999,13 @@ export async function invokeMcpTool(
     return { ok: false, summary, content: gate.error }
   }
   try {
-    const toolDef = access.session.tools.find((tool) => tool.name === toolName)
+    // `session.tools` is keyed by the prefixed name the model calls, while
+    // `toolName` is the bare one the server knows. Comparing the two never
+    // matched, so this validation had never actually run.
+    const catalogName = mcpToolName(serverId, toolName)
+    const toolDef = access.session.tools.find((tool) => tool.name === catalogName)
     const argsError = toolDef
-      ? validateMcpToolArgs(toolName, args, toolDef.parameters)
+      ? validateMcpToolArgs(catalogName, args, toolDef.parameters)
       : null
     if (argsError) {
       return { ok: false, summary, content: argsError }
@@ -1683,7 +2013,16 @@ export async function invokeMcpTool(
     const result = await session.client.callTool(
       { name: toolName, arguments: args },
       undefined,
-      { signal }
+      {
+        signal,
+        // The SDK default is 60s, which real work exceeds routinely (browser
+        // automation, large tracker queries). Progress notifications extend
+        // the window; `maxTotalTimeout` still bounds a server that streams
+        // progress forever.
+        timeout: MCP_INVOKE_TIMEOUT_MS,
+        resetTimeoutOnProgress: true,
+        maxTotalTimeout: MCP_INVOKE_MAX_TOTAL_TIMEOUT_MS
+      }
     )
     const text = (result.content as Array<{ type?: string; text?: string }>)
       .map((c) => (c.type === 'text' ? c.text ?? '' : JSON.stringify(c)))
@@ -1702,19 +2041,17 @@ export async function invokeMcpTool(
     }
     recordCircuitFailure(circuitKeyMcpInvoke(access.sessionKey))
     const message = formatError(err)
-    const transient =
-      /timeout|ETIMEDOUT|ECONNRESET|socket hang up/i.test(message)
-    if (transient) {
-      // Keep the session; model can retry. Permanent protocol errors still drop it.
-      connectErrors.set(access.sessionKey, message)
+    connectErrors.set(access.sessionKey, message)
+    if (!isMcpSessionFatalError(message)) {
+      // The transport is fine, only this call failed. Keep the session so the
+      // model can retry or reach for another tool.
       return {
         ok: false,
         summary,
         content: `MCP invoke failed on "${serverId}" (session kept for retry): ${message}`
       }
     }
-    connectErrors.set(access.sessionKey, message)
-    await disconnectMcpSessionByKey(access.sessionKey)
+    await disconnectMcpSessionByKey(access.sessionKey, { keepError: true })
     return {
       ok: false,
       summary,

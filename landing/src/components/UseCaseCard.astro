@@ -1,0 +1,67 @@
+---
+/**
+ * One use case: the job, what it involves, and where to read more.
+ *
+ * Every word rendered here comes from src/lib/showcase.ts, so a use case can
+ * never reach a page without being on the approved list.
+ *
+ * The heading level is a prop rather than a fixed tag. /use-cases renders these
+ * directly under its h1 and the homepage teaser renders them under a section
+ * h2, and verify-site.mjs fails the build on a skipped level.
+ *
+ * The visual is a prop too. ClaimSection.astro picks its two visuals by
+ * hardcoding section ids, which means a third one needs a new branch in that
+ * file; naming the visual in the data avoids repeating that here.
+ */
+import type { UseCase } from '../lib/showcase'
+import IncidentDiagram from './IncidentDiagram.astro'
+import UpgradeDiagram from './UpgradeDiagram.astro'
+
+interface Props {
+  useCase: UseCase
+  level?: 2 | 3
+}
+
+const { useCase, level = 2 } = Astro.props
+const Heading = `h${level}` as 'h2' | 'h3'
+---
+
+<li class="vy-card">
+  <Heading class="vy-h3">{useCase.title}</Heading>
+
+  <ul class="vy-uses-list">
+    {useCase.bullets.map((bullet) => <li>{bullet}</li>)}
+  </ul>
+
+  {
+    useCase.visual && (
+      <div class="vy-use-visual">
+        {useCase.visual === 'incident' && <IncidentDiagram />}
+        {useCase.visual === 'upgrade' && <UpgradeDiagram />}
+      </div>
+    )
+  }
+
+  {/* Both halves are required together: an <a> with no text content fails the
+      accessibility check, so showcase.ts refuses one without the other. */}
+  {
+    useCase.href && useCase.linkLabel && (
+      <p class="vy-more vy-use-link">
+        <a class="vy-link" href={useCase.href}>
+          {useCase.linkLabel}
+        </a>
+      </p>
+    )
+  }
+</li>
+
+<style>
+  /* Scoped, so it outranks the `.vy-card > * { margin: 0 }` reset on
+     specificity rather than on source order. */
+  .vy-use-visual {
+    margin-top: 0.75rem;
+    display: grid;
+    place-items: center;
+    padding-block: 0.5rem;
+  }
+</style>

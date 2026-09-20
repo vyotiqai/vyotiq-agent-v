@@ -514,6 +514,63 @@ describe('collectHomeActivity', () => {
     })
   })
 
+  it('counts the gate verdict over the raw receipt field when both are present', async () => {
+    // A read-only turn whose check merely failed. The raw field reports
+    // `verifiedAfterLastMutation: false` because the last check was unclean,
+    // but nothing was mutated, so there is nothing to have verified — and the
+    // guarded gate says so. Counting it would inflate the rate that decides
+    // whether the gate is safe to arm.
+    makeRun('run-readonly', {
+      'receipt.json': receipt({
+        runId: 'run-readonly',
+        verification: {
+          lastCheckAt: '2026-09-09T09:00:00.000Z',
+          verifiedAfterLastMutation: false
+        },
+        verificationGate: { wouldFire: false },
+        // Present only so the attention block is emitted at all; without some
+        // signal it is omitted, which would make a 0 assertion vacuous.
+        toolStats: { totalCalls: 1, ok: 1, failed: 0, byName: { read: { ok: 1, failed: 0 } } }
+      })
+    })
+
+    const res = await collectHomeActivity([WS], NOW)
+
+    expect(res.attention).toMatchObject({ unverifiedRuns: 0 })
+  })
+
+  it('counts a run the gate flagged even when the raw field is absent', async () => {
+    makeRun('run-opaque', {
+      'receipt.json': receipt({
+        runId: 'run-opaque',
+        // A terminal write reaches the write checkpoint without an edit tool,
+        // so the gate fires on evidence the event-scan field never sees.
+        verificationGate: { wouldFire: true, reason: 'never_checked' }
+      })
+    })
+
+    const res = await collectHomeActivity([WS], NOW)
+
+    expect(res.attention?.unverifiedRuns).toBe(1)
+  })
+
+  it('keeps the legacy reading for receipts written before the gate existed', async () => {
+    makeRun('run-legacy', {
+      'receipt.json': receipt({
+        runId: 'run-legacy',
+        verification: {
+          lastMutationAt: '2026-09-09T09:00:00.000Z',
+          lastCheckAt: '2026-09-09T08:00:00.000Z',
+          verifiedAfterLastMutation: false
+        }
+      })
+    })
+
+    const res = await collectHomeActivity([WS], NOW)
+
+    expect(res.attention?.unverifiedRuns).toBe(1)
+  })
+
   it('omits the attention block when no receipt reports verification or tools', async () => {
     makeRun('run-a', { 'receipt.json': receipt({ runId: 'run-a' }) })
 

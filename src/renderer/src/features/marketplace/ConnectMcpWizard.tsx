@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import type { McpInput, McpServerStatus, Settings } from '@shared/ipc'
+import { useEffect, useMemo, useState } from 'react'
+import type { GithubAuthStatus, McpInput, McpServerStatus, Settings } from '@shared/ipc'
 import {
   GOOGLE_ACCESS_READ,
   GOOGLE_ACCESS_READ_WRITE,
@@ -19,7 +19,15 @@ import { copyText } from '@renderer/lib/markdown/copyText'
 
 const GOOGLE_MCP_DOCS = 'https://developers.google.com/workspace/guides/configure-mcp-servers'
 
-type GithubMethod = 'oauth' | 'pat'
+/**
+ * `app` reuses the GitHub sign-in Agent V already does for itself — device
+ * flow, no client secret, nothing to paste — and GitHub's hosted MCP accepts
+ * that same user token as a Bearer. It is the default because the other two
+ * both start with the user doing paperwork: `oauth` needs an OAuth app
+ * registered by hand (GitHub advertises no dynamic registration), and `pat`
+ * needs a token minted and pasted.
+ */
+type GithubMethod = 'app' | 'oauth' | 'pat'
 /**
  * `google-client` and `inputs` only appear when the package actually needs
  * them, so the common path is a single step: Add → Sign in. Method, workspace
@@ -64,8 +72,37 @@ export function ConnectMcpWizard({
   )
   const declaredInputs = useMemo(() => server?.inputs ?? [], [server?.inputs])
   const tokenAuth = mcpUsesTokenAuth(server ?? {})
+  const github = isGithubMcpId(serverId)
+  /**
+   * Prefer the app's own sign-in exactly where it saves the user work: when
+   * one already exists, or when the alternative is registering an OAuth app
+   * by hand. A GitHub endpoint that supports dynamic registration still gets
+   * the ordinary browser flow, which needs nothing either.
+   */
+  const [githubMethod, setGithubMethod] = useState<GithubMethod>(() => {
+    if (!github) return 'oauth'
+    // A credential the server has already rejected is not the one to offer
+    // again: proposing it would loop the user through "already signed in" →
+    // Connect → the same 401. Only the app sign-in can produce this pairing
+    // (a token exists, yet the server still wants one), so route around it.
+    if (status?.hasAuthToken && status.errorKind === 'sign-in') return 'oauth'
+    if (status?.hasAuthToken) return 'app'
+    return mcpNeedsOAuthClient(server ?? {}) && !status?.hasOAuthClientSecret ? 'app' : 'oauth'
+  })
+  const [githubAuth, setGithubAuth] = useState<GithubAuthStatus | null>(null)
+  /**
+   * True once this dialog started a device flow, so a sign-in that already
+   * existed when it opened does not make it close itself immediately.
+   */
+  const [githubFlowStarted, setGithubFlowStarted] = useState(false)
   /** Vendor has no dynamic registration — the user registers the app themselves. */
-  const needsOAuthClient = mcpNeedsOAuthClient(server ?? {}) && !status?.hasOAuthClientSecret
+  const needsOAuthClient =
+    mcpNeedsOAuthClient(server ?? {}) &&
+    !status?.hasOAuthClientSecret &&
+    // Not when Agent V can supply the credential itself. This is the step the
+    // whole flow was judged by: "Add" used to land the user on a form asking
+    // for a client ID and secret from an app they had not registered yet.
+    !(github && githubMethod === 'app')
 
   const [needsGoogleClient] = useState(
     () =>
@@ -94,7 +131,6 @@ export function ConnectMcpWizard({
   const [clientSecret, setClientSecret] = useState('')
   const [authScope, setAuthScope] = useState<McpAuthScope>(MCP_AUTH_SCOPE_ALL)
   const [googleAccess, setGoogleAccess] = useState<GoogleMcpAccess>(GOOGLE_ACCESS_READ_WRITE)
-  const [githubMethod, setGithubMethod] = useState<GithubMethod>('oauth')
   const [pat, setPat] = useState('')
   const [inputValues, setInputValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(declaredInputs.map((i) => [i.name, i.default ?? '']))
@@ -107,12 +143,38 @@ export function ConnectMcpWizard({
   const redirectUrl = status?.oauthRedirectUrl ?? mcpOAuthFixedRedirectUrl()
   const workspaceReady = Boolean(activeWorkspacePath?.trim())
   const title = `Connect ${serverName}`
-  const github = isGithubMcpId(serverId)
   const usingPat = github && githubMethod === 'pat'
+  const usingAppGithub = github && githubMethod === 'app'
+  const githubPending = Boolean(githubAuth?.pending)
 
   const missingRequiredInput = declaredInputs.some(
     (i) => i.isRequired && !(inputValues[i.name] ?? '').trim()
   )
+
+  // Follow the app's own GitHub sign-in: its state decides what this dialog
+  // shows, and the device flow finishes asynchronously in main.
+  useEffect(() => {
+    if (!github) return
+    void window.vyotiq.githubAuthStatus?.().then((res) => {
+      if (res?.ok) setGithubAuth(res.data)
+    })
+    return window.vyotiq.onGithubAuthStatus?.((next) => setGithubAuth(next))
+  }, [github])
+
+  useEffect(() => {
+    if (!usingAppGithub || !githubFlowStarted || !githubAuth || githubAuth.pending) return
+    if (githubAuth.error) {
+      setError(githubAuth.error)
+      setPending(false)
+      setGithubFlowStarted(false)
+      return
+    }
+    if (!githubAuth.hasAppToken) return
+    // The server reads this token straight out of the app's own storage, so
+    // there is nothing left to save — just reconnect and get out of the way.
+    onConnected()
+    onClose()
+  }, [githubAuth, githubFlowStarted, onClose, onConnected, usingAppGithub])
 
   const copyRedirect = (): void => {
     void copyText(redirectUrl).then((ok) => {
@@ -257,6 +319,23 @@ export function ConnectMcpWizard({
         return
       }
 
+      if (usingAppGithub) {
+        if (githubAuth?.hasAppToken) {
+          onConnected()
+          onClose()
+          return
+        }
+        const res = await window.vyotiq.githubAuthStart?.()
+        if (!res?.ok) {
+          setError(res?.error ?? 'Could not start GitHub sign-in.')
+          return
+        }
+        setGithubAuth(res.data)
+        setGithubFlowStarted(true)
+        // Stays open on the device code; the status listener above closes it.
+        return
+      }
+
       // Token packages have no browser flow — the inputs are the credential, so
       // saving them and refreshing status is the whole connect.
       if (tokenAuth) {
@@ -319,6 +398,9 @@ export function ConnectMcpWizard({
 
   const finishDisabled =
     pending ||
+    // The device flow runs in main and finishes on its own; pressing again
+    // would abandon the code the user is in the middle of typing.
+    (usingAppGithub && githubPending) ||
     googleSignInBlocked ||
     (usingPat && !pat.trim()) ||
     (tokenAuth && missingRequiredInput) ||
@@ -326,7 +408,9 @@ export function ConnectMcpWizard({
 
   const primaryLabel = (): string => {
     if (step !== 'finish') return 'Continue'
+    if (usingAppGithub && githubPending) return 'Waiting for GitHub…'
     if (pending) return tokenAuth || usingPat ? 'Connecting…' : 'Signing in…'
+    if (usingAppGithub) return githubAuth?.hasAppToken ? 'Connect' : 'Sign in with GitHub'
     return tokenAuth || usingPat ? 'Connect' : 'Sign in'
   }
 
@@ -335,18 +419,11 @@ export function ConnectMcpWizard({
       open
       onClose={onClose}
       title={title}
-      description="Sign in so Agent V can load this MCP’s tools."
+      description="Installed packages stay disconnected until you sign in. Agent V will not see these tools until connect succeeds."
       useNativeDialog
-      className="max-w-lg"
+      size="lg"
     >
-      <div className="flex flex-col gap-3 p-5">
-        <div>
-          <h2 className="m-0 text-md font-semibold text-fg-strong">{title}</h2>
-          <p className="m-0 mt-1 text-sm text-secondary">
-            Installed packages stay disconnected until you sign in. Agent V will not see these
-            tools until connect succeeds.
-          </p>
-        </div>
+      <div className="flex flex-col gap-3">
 
         {step === 'google-client' ? (
           <div className="flex flex-col gap-2">
@@ -489,6 +566,43 @@ export function ConnectMcpWizard({
                 autoComplete="off"
                 onChange={(e) => setPat(e.target.value)}
               />
+            ) : usingAppGithub ? (
+              <div className="flex flex-col gap-2">
+                {githubPending && githubAuth?.userCode ? (
+                  <>
+                    <p className="m-0 text-sm text-fg">
+                      Enter this code on GitHub to finish. This dialog closes itself when it
+                      goes through.
+                    </p>
+                    <p className="m-0 font-mono text-lg tracking-[0.2em] text-fg">
+                      {githubAuth.userCode}
+                    </p>
+                    {githubAuth.verificationUri ? (
+                      <Button
+                        variant="subtle"
+                        className="self-start"
+                        onClick={() =>
+                          void window.vyotiq.shellOpenExternal(
+                            githubAuth.verificationUri as string
+                          )
+                        }
+                      >
+                        Open GitHub again
+                      </Button>
+                    ) : null}
+                  </>
+                ) : githubAuth?.hasAppToken ? (
+                  <p className="m-0 text-sm text-secondary">
+                    Agent V is already signed in to GitHub. {serverName} uses that sign-in —
+                    there is nothing to register and nothing to paste.
+                  </p>
+                ) : (
+                  <p className="m-0 text-sm text-secondary">
+                    Sign in to GitHub once and {serverName} uses the same sign-in. Opens your
+                    browser with a code to confirm.
+                  </p>
+                )}
+              </div>
             ) : (
               <p className="m-0 text-sm text-secondary">
                 {tokenAuth
@@ -520,13 +634,29 @@ export function ConnectMcpWizard({
                         type="radio"
                         name="github-method"
                         className="mt-0.5"
+                        checked={githubMethod === 'app'}
+                        onChange={() => setGithubMethod('app')}
+                      />
+                      <span>
+                        Use the Agent V GitHub sign-in
+                        <span className="block text-xs text-secondary">
+                          Nothing to register. Reuses the sign-in Agent V already uses for Git
+                          and pull requests.
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2 text-sm text-fg">
+                      <input
+                        type="radio"
+                        name="github-method"
+                        className="mt-0.5"
                         checked={githubMethod === 'oauth'}
                         onChange={() => setGithubMethod('oauth')}
                       />
                       <span>
-                        Sign in with OAuth
+                        Sign in with your own OAuth app
                         <span className="block text-xs text-secondary">
-                          Copilot-capable GitHub accounts. Opens the browser.
+                          Needs an app registered with GitHub and its client ID and secret.
                         </span>
                       </span>
                     </label>

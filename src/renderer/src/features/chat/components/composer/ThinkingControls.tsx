@@ -181,19 +181,15 @@ export function ThinkingControls({
 
   if (!modelShowsThinkingControls(provider, model, modelMeta)) return null
 
-  const locked = Boolean(disabled || running)
+  const locked = Boolean(disabled)
   const index = modeIndex(modes, chatSettings.thinkingEnabled, chatSettings.thinkingEffort)
   const current = modes[index]!
   const upcoming = nextMode(modes, index, false)
   const on = current.enabled
 
-  const ariaLabel = running
-    ? on
-      ? `Thinking ${current.label} (locked while running)`
-      : 'Thinking off (locked while running)'
-    : on
-      ? `Thinking ${current.label}. Click for ${upcoming.label}.`
-      : `Thinking off. Click for ${upcoming.label}.`
+  const ariaLabel = on
+    ? `Thinking ${current.label}. Click for ${upcoming.label}.`
+    : `Thinking off. Click for ${upcoming.label}.`
 
   const costHint =
     on &&
@@ -244,9 +240,7 @@ export function ThinkingControls({
     ? `Queue ${lowerLabel} for the next message — this run keeps its current effort (never auto-changed).`
     : `Lower thinking to ${lowerLabel}. Applies only when you click — never automatic.`
 
-  const tip = running
-    ? ariaLabel
-    : `${ariaLabel} Shift-click for previous.${costHint}`
+  const tip = `${ariaLabel} Shift-click for previous.${costHint}`
 
   const button = (
     <button

@@ -6,6 +6,13 @@ export const McpServerStatusSchema = z.object({
   enabled: z.boolean(),
   connected: z.boolean(),
   toolCount: z.number().int().min(0),
+  /**
+   * A connect attempt is in flight. Distinguishes "still dialling" from
+   * "tried and failed", which the UI otherwise cannot tell apart: during the
+   * first seconds of a launch every enabled server is not-connected with no
+   * error yet, and reporting that as a fault is both wrong and alarming.
+   */
+  connecting: z.boolean().optional(),
   /** True when a Bearer token is stored in OS secure storage for this server. */
   hasAuthToken: z.boolean().optional(),
   /** True when a static OAuth client secret is stored (per-server or shared Google). */
@@ -13,6 +20,14 @@ export const McpServerStatusSchema = z.object({
   /** Fixed loopback URI when static OAuth client credentials are present. */
   oauthRedirectUrl: z.string().optional(),
   error: z.string().optional(),
+  /**
+   * What kind of failure `error` is, decided in main where the original error
+   * object (and its `cause` chain) still exists. The card picks its control
+   * from this: `sign-in` offers Sign in, `network` offers Retry, `binary`
+   * offers Install / Locate. Without it the renderer would be re-deriving the
+   * cause by pattern-matching a sentence written for a human.
+   */
+  errorKind: z.enum(['sign-in', 'network', 'binary', 'workspace', 'config']).optional(),
   /**
    * Launch binary that could not be found on PATH (e.g. `uvx`). Present instead
    * of a raw ENOENT so the UI can offer an install link and a file picker.

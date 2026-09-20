@@ -1,0 +1,97 @@
+---
+/**
+ * When a teammate is worth setting up, as a list of situations rather than a
+ * list of features — someone deciding whether to bother recognises the
+ * situation faster than they recognise the capability that answers it.
+ *
+ * A definition list is the honest markup here: each row really is a term and
+ * its description, and it needs no headings, so the section cannot disturb the
+ * page's heading ladder however many scenarios are approved.
+ *
+ * Every word comes from src/lib/showcase.ts. The qualifier on a row is the
+ * scenario's own `limit` field, so it cannot be separated from the promise it
+ * qualifies — which is the whole reason it is data rather than a footnote.
+ */
+import { LIVE_TEAMMATE_SCENARIOS, TEAMMATE_NOT_WORTH_IT } from '../lib/showcase'
+---
+
+{/* One wrapper, because the caller places this in .vy-section-grid. Returning
+    the list and the verdict as two roots makes them two grid children, and the
+    second wraps onto a new row in the heading column. */}
+<div>
+  <dl class="vy-when">
+    {
+      LIVE_TEAMMATE_SCENARIOS.map((scenario) => (
+        <div class="vy-when-row">
+          <dt class="vy-when-q">{scenario.when}</dt>
+          <dd class="vy-when-a">
+            <p>{scenario.then}</p>
+            {scenario.limit && <p class="vy-when-limit">{scenario.limit}</p>}
+          </dd>
+        </div>
+      ))
+    }
+  </dl>
+
+  <p class="vy-footnote vy-when-verdict">{TEAMMATE_NOT_WORTH_IT}</p>
+</div>
+
+<style>
+  .vy-when {
+    margin: 0;
+  }
+
+  /* The situation sits in a fixed column so the left edge reads as a list of
+     problems you can scan without reading the answers. */
+  .vy-when-row {
+    display: grid;
+    grid-template-columns: minmax(0, 16rem) minmax(0, 1fr);
+    gap: 0.5rem 2.5rem;
+    padding-block: 1.25rem;
+    border-top: 1px solid var(--vy-border);
+  }
+
+  .vy-when-row:last-child {
+    border-bottom: 1px solid var(--vy-border);
+  }
+
+  .vy-when-q {
+    font-weight: 500;
+    color: var(--vy-fg-strong);
+    text-wrap: balance;
+  }
+
+  .vy-when-a {
+    margin: 0;
+  }
+
+  .vy-when-a p {
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--vy-muted);
+  }
+
+  /* Set apart rather than tucked away: the constraint is part of the answer,
+     so it reads at the same moment as the promise it qualifies.
+     Selected through .vy-when-a so it outranks the `p` rule above on
+     specificity — the site keeps !important for the reduced-motion block. */
+  .vy-when-a .vy-when-limit {
+    margin-top: 0.625rem;
+    padding-left: 0.875rem;
+    border-left: 2px solid var(--vy-border-strong);
+    font-size: 0.8125rem;
+    color: var(--vy-tertiary);
+  }
+
+  .vy-when-verdict {
+    max-width: var(--vy-measure);
+  }
+
+  /* One column before the answer column gets too narrow to hold a sentence. */
+  @media (max-width: 760px) {
+    .vy-when-row {
+      grid-template-columns: 1fr;
+      gap: 0.375rem;
+    }
+  }
+</style>

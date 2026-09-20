@@ -333,6 +333,8 @@ export type McpOAuthStoredState = {
     refresh_token?: string
   }
   codeVerifier?: string
+  /** CSRF `state` issued for the in-flight authorization request. */
+  oauthState?: string
   clientInformation?: Record<string, unknown>
   discoveryState?: Record<string, unknown>
 }

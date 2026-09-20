@@ -574,6 +574,7 @@ export function useWorkspaceManager(options?: {
   ) => { provider: ProviderId; model: string } | null
   /** Teammate model pin lookup — seeds a session's provider/model from its bound profile. */
   getAgentProfileModelPin?: (profileId: string) => { provider: ProviderId; model: string } | null
+  getValidAgentProfileIds?: () => ReadonlySet<string> | null
   /** Settings `maxChatPanes`: 0 = auto (viewport-derived), 1–6 = fixed limit. */
   maxChatPanes?: number
 }) {
@@ -583,6 +584,8 @@ export function useWorkspaceManager(options?: {
   getDefaultProviderModelRef.current = options?.getDefaultProviderModelForWorkspace
   const getAgentProfileModelPinRef = useRef(options?.getAgentProfileModelPin)
   getAgentProfileModelPinRef.current = options?.getAgentProfileModelPin
+  const getValidAgentProfileIdsRef = useRef(options?.getValidAgentProfileIds)
+  getValidAgentProfileIdsRef.current = options?.getValidAgentProfileIds
   const maxChatPanesRef = useRef(options?.maxChatPanes ?? 0)
   maxChatPanesRef.current = options?.maxChatPanes ?? 0
   const [registry, setRegistry] = useState<WorkspacesState | null>(null)
@@ -1197,6 +1200,21 @@ export function useWorkspaceManager(options?: {
             runIds,
             ctx.runs.map((r) => r.runId)
           )
+          const validProfileIds = getValidAgentProfileIdsRef.current?.() ?? null
+          const hydratedBindings = { ...ctx.ui.agentProfileIdByRunId }
+          let bindingsChanged = false
+          if (validProfileIds) {
+            for (const run of [...res.data.runs, ...(res.data.instanceRuns ?? [])]) {
+              if (
+                run.agentProfileId &&
+                validProfileIds.has(run.agentProfileId) &&
+                hydratedBindings[run.runId] == null
+              ) {
+                hydratedBindings[run.runId] = run.agentProfileId
+                bindingsChanged = true
+              }
+            }
+          }
           const nextCtx: WorkspaceContext = {
             ...ctx,
             runs: res.data.runs,
@@ -1204,12 +1222,16 @@ export function useWorkspaceManager(options?: {
             runsCapped: res.data.capped,
             runsError: null,
             runsLoaded: true,
+            ...(bindingsChanged
+              ? { ui: { ...ctx.ui, agentProfileIdByRunId: hydratedBindings } }
+              : {}),
             ...(reconciled.changed
               ? {
                   openRunIds: reconciled.openRunIds,
                   activeRunId: reconciled.activeRunId,
                   ui: {
                     ...ctx.ui,
+                    agentProfileIdByRunId: hydratedBindings,
                     scrollTopByRunId: pruneScrollTopByRunId(ctx.ui.scrollTopByRunId, {
                       openRunIds: reconciled.openRunIds,
                       activeRunId: reconciled.activeRunId
@@ -1219,7 +1241,7 @@ export function useWorkspaceManager(options?: {
               : {})
           }
           contextsRef.current = { ...contextsRef.current, [workspacePath]: nextCtx }
-          if (reconciled.changed) {
+          if (reconciled.changed || bindingsChanged) {
             schedulePersistUiState(workspacePath, nextCtx)
           }
           return {
@@ -2634,7 +2656,14 @@ export function useWorkspaceManager(options?: {
               workspacePathsEqual(key, workspacePath)
             ) ?? workspacePath)
       const bucket = runId ?? DRAFT_SCROLL_KEY
+      if (runId) {
+        const durable = [...ctx.runs, ...ctx.olderRuns, ...ctx.instanceRuns].find(
+          (run) => run.runId === runId
+        )?.agentProfileId
+        if (durable && durable !== profileId) return
+      }
       const nextMap = { ...(ctx.ui.agentProfileIdByRunId ?? {}) }
+      if ((nextMap[bucket] ?? null) === profileId) return
       if (profileId) nextMap[bucket] = profileId
       else delete nextMap[bucket]
       const nextCtx: WorkspaceContext = {
@@ -2658,7 +2687,12 @@ export function useWorkspaceManager(options?: {
   const getAgentProfileIdForRun = useCallback(
     (workspacePath: string | null, runId: string | null): string | null => {
       if (!workspacePath) return null
-      const ctx = contextsRef.current[workspacePath]
+      // Match the setter (and the rest of the codebase): a context stored
+      // under a different spelling of the same path must still be found, or
+      // the send silently drops the teammate binding.
+      const ctx =
+        contextsRef.current[workspacePath] ??
+        findByWorkspacePath(contextsRef.current, workspacePath)
       return ctx?.ui.agentProfileIdByRunId?.[runId ?? DRAFT_SCROLL_KEY] ?? null
     },
     []
@@ -2948,16 +2982,34 @@ export function useWorkspaceManager(options?: {
       const seen = new Set(current.runs.map((r) => r.runId))
       for (const r of current.olderRuns) seen.add(r.runId)
       const deduped = res.data.runs.filter((r) => !seen.has(r.runId))
-      return {
-        ...prev,
-        [workspacePath]: {
-          ...current,
-          olderRuns: [...current.olderRuns, ...deduped],
-          runsCapped: res.data.hasMore
+      const validProfileIds = getValidAgentProfileIdsRef.current?.() ?? null
+      const hydratedBindings = { ...current.ui.agentProfileIdByRunId }
+      let bindingsChanged = false
+      if (validProfileIds) {
+        for (const run of deduped) {
+          if (
+            run.agentProfileId &&
+            validProfileIds.has(run.agentProfileId) &&
+            hydratedBindings[run.runId] == null
+          ) {
+            hydratedBindings[run.runId] = run.agentProfileId
+            bindingsChanged = true
+          }
         }
       }
+      const nextCtx: WorkspaceContext = {
+        ...current,
+        olderRuns: [...current.olderRuns, ...deduped],
+        runsCapped: res.data.hasMore,
+        ...(bindingsChanged
+          ? { ui: { ...current.ui, agentProfileIdByRunId: hydratedBindings } }
+          : {})
+      }
+      contextsRef.current = { ...contextsRef.current, [workspacePath]: nextCtx }
+      if (bindingsChanged) schedulePersistUiState(workspacePath, nextCtx)
+      return { ...prev, [workspacePath]: nextCtx }
     })
-  }, [])
+  }, [schedulePersistUiState])
 
   useEffect(() => {
     if (!activeWorkspace) return

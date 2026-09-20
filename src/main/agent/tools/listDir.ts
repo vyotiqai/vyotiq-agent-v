@@ -56,7 +56,15 @@ function formatSize(bytes: number): string {
 }
 
 /** List one directory level, skipping ignored and gitignored entries. */
-export function toolListDir(workspaceRoot: string, pathArg = '.', cap?: number): string {
+export function toolListDir(
+  workspaceRoot: string,
+  pathArg = '.',
+  // LIST_DIR_CAP was declared but never reached the default: `cap` arrived
+  // undefined from the tool handler and the limit fell back to entries.length,
+  // so one call on a large directory emptied its whole listing into context.
+  // The "… N more entries" line below already reports the cut.
+  cap: number = LIST_DIR_CAP
+): string {
   const relDir = normalizeRelDir(pathArg)
   const resolved = resolveInsideWorkspace(workspaceRoot, relDir || '.')
   if (!existsSync(resolved)) {
@@ -80,7 +88,7 @@ export function toolListDir(workspaceRoot: string, pathArg = '.', cap?: number):
       return a.name.localeCompare(b.name)
     })
 
-  const limit = cap == null ? entries.length : Math.max(0, cap)
+  const limit = Math.max(0, cap)
   const shown = entries.slice(0, limit).map((entry) => {
     if (entry.isDirectory()) return `[dir]  ${entry.name}/`
     let size = ''

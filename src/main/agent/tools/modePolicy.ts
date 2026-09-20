@@ -102,7 +102,7 @@ function autoModeSwitchBanner(mode: AgentInteractionMode, auto: boolean): string
   switch (mode) {
     case 'agent':
       return [
-        'Automatic mode switching is ON. Use `switch_mode` when the task changes to read-only Q&A (`ask`); calling `create_plan` switches the run to `plan` mode — switch back to `agent` to implement.'
+        'Automatic mode switching is ON. Use `switch_mode` when the task changes — `ask` for read-only Q&A, or `plan` to work an approach up before implementing. Publishing with `create_plan` does not change the mode, so an `agent` run carries straight on and implements its plan.'
       ]
     case 'ask':
       return [

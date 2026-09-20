@@ -7,17 +7,17 @@ import { SITE } from '../lib/site'
 interface Props {
   title?: string
   description?: string
-  /** Overrides the derived canonical, e.g. for the home page. */
-  canonical?: string
   /** Error pages: no canonical, and keep them out of the index. */
   noindex?: boolean
 }
 
-const { title, description = SITE.description, canonical, noindex = false } = Astro.props
+const { title, description = SITE.description, noindex = false } = Astro.props
 
 const pageTitle = title ? `${title} — ${SITE.name}` : SITE.title
-const derivedCanonical = new URL(Astro.url.pathname, SITE.url).href.replace(/\/$/, '') || SITE.url
-const canonicalUrl = canonical ?? derivedCanonical
+// The root keeps its trailing slash (a bare origin cannot be expressed without
+// one); every other route drops it. The sitemap is normalised the same way.
+const url = new URL(Astro.url.pathname, SITE.url)
+const canonicalUrl = url.pathname === '/' ? url.href : url.href.replace(/\/$/, '')
 const ogImage = new URL('/brand/vyotiq-social-card.png', SITE.url).href
 ---
 
@@ -48,8 +48,7 @@ const ogImage = new URL('/brand/vyotiq-social-card.png', SITE.url).href
     <meta name="color-scheme" content="light dark" />
 
     <script is:inline>
-      // Applied before first paint so a stored preference never flashes the
-      // wrong theme. Guarded because storage throws in some privacy modes.
+      // Applied before first paint so a stored theme never flashes.
       try {
         var stored = localStorage.getItem('vy-theme')
         if (stored === 'light' || stored === 'dark') document.documentElement.dataset.theme = stored

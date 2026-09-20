@@ -1,7 +1,11 @@
 import { z } from 'zod'
 import { AgentInteractionModeSchema } from './settings'
 import { ProviderIdSchema } from './providers'
-import { AgentProfileIdSchema } from './agentProfile'
+import {
+  AgentProfileIdSchema,
+  AgentProfileRuntimeSchema,
+  AgentProfileSnapshotSchema
+} from './agentProfile'
 
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 export const MAX_IMAGE_DATA_URL_CHARS = Math.ceil(MAX_IMAGE_BYTES * (4 / 3)) + 128
@@ -127,11 +131,18 @@ export const RunStatusSchema = z.object({
   /** Branch checked out in the instance worktree; used for sequential merge-back. */
   worktreeBranch: z.string().min(1).optional(),
   /** Teammate profile this run is bound to (identity + memory namespace). */
-  agentProfileId: z.string().min(1).optional(),
+  agentProfileId: AgentProfileIdSchema.optional(),
   /** Snapshot of the profile name at run time (survives profile rename/delete). */
   agentProfileName: z.string().min(1).max(64).optional(),
+  agentProfileSnapshot: AgentProfileSnapshotSchema.optional(),
+  /**
+   * Delegated task that owns this run. Lets boot tell a task's run apart from
+   * an ordinary teammate chat, so generic profile auto-resume cannot relaunch
+   * work the scheduler is responsible for reconciling.
+   */
+  delegatedTaskId: z.string().min(1).max(80).optional(),
   /** Execution substrate for this run (Phase 4 runtime seam). */
-  runtime: z.enum(['local', 'cloud']).optional()
+  runtime: AgentProfileRuntimeSchema.optional()
 })
 export type RunStatus = z.infer<typeof RunStatusSchema>
 
@@ -166,6 +177,7 @@ export const IncompleteReasonSchema = z.enum([
   'circuit_open',
   'provider_error',
   'goal_wait',
+  'goal_budget',
   'repetition'
 ])
 export type IncompleteReason = z.infer<typeof IncompleteReasonSchema>
@@ -180,15 +192,28 @@ const eventBase = {
   invokeId: z.number().int().min(1).optional()
 }
 
-export const RunGoalStatusSchema = z.enum(['active', 'paused', 'complete'])
+/**
+ * `proposed` is an agent-created goal awaiting user confirmation. It is inert:
+ * every unattended power (turn-end auto-continue, resumable-error relaunch,
+ * app-start relaunch) gates on `active`, so a proposal grants nothing until the
+ * user starts it. Only a user action can produce `active`.
+ */
+export const RunGoalStatusSchema = z.enum(['proposed', 'active', 'paused', 'complete'])
 export type RunGoalStatus = z.infer<typeof RunGoalStatusSchema>
+
+export const RunGoalOriginSchema = z.enum(['user', 'agent'])
+export type RunGoalOrigin = z.infer<typeof RunGoalOriginSchema>
 
 export const RunGoalSchema = z.object({
   objective: z.string().min(1),
   status: RunGoalStatusSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
-  continueCount: z.number().int().min(0).optional()
+  continueCount: z.number().int().min(0).optional(),
+  /** Who created it. Absent on goal.json written before proposals existed — read as `user`. */
+  origin: RunGoalOriginSchema.optional(),
+  /** App-start relaunches since the last real user turn (auto-resume ceiling). */
+  autoResumeCount: z.number().int().min(0).optional()
 })
 export type RunGoal = z.infer<typeof RunGoalSchema>
 
@@ -416,6 +441,8 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     maxAttempts: z.number().int().min(0),
     retryInMs: z.number().int().min(0),
     code: z.string().optional(),
+    /** Provider's own reason, already scrubbed and capped, for the UI to show. */
+    message: z.string().max(400).optional(),
     step: z.number().int().min(1).optional()
   }),
   z.object({
@@ -648,8 +675,10 @@ export const RunSummarySchema = z.object({
   /** Sum of token×price estimates for steps the provider didn't bill. */
   estimatedCost: z.number().nonnegative().optional(),
   /** Teammate binding snapshot — mirrors RunStatus fields for list surfaces. */
-  agentProfileId: z.string().min(1).optional(),
-  agentProfileName: z.string().min(1).max(64).optional()
+  agentProfileId: AgentProfileIdSchema.optional(),
+  agentProfileName: z.string().min(1).max(64).optional(),
+  agentProfileSnapshot: AgentProfileSnapshotSchema.optional(),
+  runtime: AgentProfileRuntimeSchema.optional()
 })
 export type RunSummary = z.infer<typeof RunSummarySchema>
 
@@ -706,8 +735,16 @@ export const ChatStartRequestSchema = z
     provider: ProviderIdSchema.optional(),
     /** Session's pinned model — authoritative for this invoke. */
     model: z.string().min(1).optional(),
+    /**
+     * True only when the user picked this model by hand. The renderer also
+     * sends its ambient default in `model`, which must NOT outrank a teammate's
+     * pinned model on that teammate's first turn — without this flag the two
+     * are indistinguishable and the pin never takes effect.
+     */
+    modelExplicit: z.boolean().optional(),
     /** Teammate profile binding: identity, per-profile memory namespace, model pin. */
-    agentProfileId: AgentProfileIdSchema.optional()
+    agentProfileId: AgentProfileIdSchema.optional(),
+    runtime: AgentProfileRuntimeSchema.optional()
   })
   .superRefine((val, ctx) => {
     if (val.incremental) {
@@ -757,7 +794,9 @@ export const ChatRewindAndStartRequestSchema = z.object({
   }),
   mode: AgentInteractionModeSchema.optional(),
   provider: ProviderIdSchema.optional(),
-  model: z.string().min(1).optional()
+  model: z.string().min(1).optional(),
+  /** True only when the user picked `model` by hand (see ChatStartRequestSchema). */
+  modelExplicit: z.boolean().optional()
 })
 export type ChatRewindAndStartRequest = z.infer<typeof ChatRewindAndStartRequestSchema>
 
@@ -1283,6 +1322,25 @@ export const RunReceiptSchema = z.object({
       verifiedAfterLastMutation: z.boolean()
     })
     .optional(),
+  /**
+   * Turn-end verification gate verdict. Observe-only for now: recorded so the
+   * real fire rate is known before the gate is armed. Unlike `verification`
+   * above, this is judged live from what THIS invoke did, so a resumed run
+   * never inherits an earlier turn's mutations.
+   *
+   * Additive and optional, so it carries no version bump — older receipts
+   * read as `undefined`, which is the truth: the gate never ran for them.
+   * Absent on the reconcile (state.ts) and rewind paths, which rebuild the
+   * receipt with no live tracker.
+   */
+  verificationGate: z
+    .object({
+      wouldFire: z.boolean(),
+      reason: z.enum(['never_checked', 'check_failed']).optional(),
+      /** Paths this invoke mutated, capped by the tracker. */
+      paths: z.array(z.string()).optional()
+    })
+    .optional(),
   contractExcerpt: z.string()
 })
 export type RunReceipt = z.infer<typeof RunReceiptSchema>
@@ -1352,7 +1410,9 @@ export type ReadRunArtifactResult = z.infer<typeof ReadRunArtifactResultSchema>
 export const SetGoalStatusRequestSchema = z.object({
   workspacePath: z.string().min(1),
   runId: RunIdSchema,
-  action: z.enum(['pause', 'resume', 'complete']),
+  // `activate` starts an agent-proposed goal; `dismiss` discards it. Both are
+  // user-only actions — there is no tool that reaches this channel.
+  action: z.enum(['pause', 'resume', 'complete', 'activate', 'dismiss']),
   objective: z.string().min(1).optional()
 })
 export type SetGoalStatusRequest = z.infer<typeof SetGoalStatusRequestSchema>

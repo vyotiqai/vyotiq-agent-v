@@ -1,182 +1,53 @@
 ---
 import Base from '../layouts/Base.astro'
+import ClaimSection from '../components/ClaimSection.astro'
+import LogoWall from '../components/LogoWall.astro'
+import Shot from '../components/Shot.astro'
 import { app } from '../lib/site'
+import { FEATURE_SECTIONS } from '../lib/showcase'
 import { TOOL_GROUPS, TOOL_TOTAL } from '../lib/tools'
 
-const modes = [
-  {
-    name: 'Ask',
-    body: 'Read-only. The agent can search and read the repository and answer questions, but cannot edit files, run the terminal or touch git. Use it to understand code you did not write.'
-  },
-  {
-    name: 'Plan',
-    body: 'Investigates, then writes a plan you approve before anything changes. The plan is a real artefact in the run, not a throwaway message.'
-  },
-  {
-    name: 'Agent',
-    body: 'Full catalog. Edits files, runs commands, commits, opens pull requests. Per-tool approval decides what it may do without asking first.'
-  }
-]
+/**
+ * Every capability claim on this page comes from src/lib/showcase.ts. The two
+ * sections written out below — providers and the tool catalog — render baked
+ * data rather than prose, and showcase.ts gates which names that data may
+ * contain.
+ *
+ * The providers and tools sections sit between the opening claim sections and
+ * the rest, so the page reads positioning → modes → what it runs on → what it
+ * can do, rather than burying the catalogue at the bottom.
+ */
+const INTRO: string[] = ['principles', 'modes']
+const intro = FEATURE_SECTIONS.filter((s) => INTRO.includes(s.id))
+const rest = FEATURE_SECTIONS.filter((s) => !INTRO.includes(s.id))
 
-const sections = [
-  {
-    eyebrow: 'Runs',
-    title: 'Long work, not single answers',
-    items: [
-      {
-        h: 'Checkpoints on every write',
-        p: 'Each file the agent writes is checkpointed with a SHA-256 of its contents. If something drifts underneath the run, the conflict is detected rather than silently overwritten.'
-      },
-      {
-        h: 'Rewind and fork',
-        p: 'Go back to any earlier point in a run and resume from there, keeping or discarding individual writes. Or fork the run and take a different approach without losing the original.'
-      },
-      {
-        h: 'Goals and loops',
-        p: 'Give the agent a goal it works toward across multiple turns. Interrupted runs resume automatically after a restart instead of being abandoned mid-task.'
-      },
-      {
-        h: 'Context compaction',
-        p: 'Long runs compact their own history rather than hitting a wall, with a live context meter so you can see how much headroom is left.'
-      }
-    ]
-  },
-  {
-    eyebrow: 'Parallelism',
-    title: 'Child instances on real git worktrees',
-    items: [
-      {
-        h: 'Isolated by construction',
-        p: 'A child instance gets its own git worktree and branch. Two children editing the same file cannot corrupt each other, because they are not in the same working tree.'
-      },
-      {
-        h: 'Spawn, await, pull, merge',
-        p: 'Five tools drive the lifecycle — spawn, await, pull, merge and cancel. The parent decides when a child’s work comes back and merges the branch when it is ready.'
-      }
-    ]
-  },
-  {
-    eyebrow: 'Understanding code',
-    title: 'An index built for your repository',
-    items: [
-      {
-        h: 'Keyword search that ranks',
-        p: 'A per-workspace SQLite index with a trigram index and BM25 ranking. camelCase identifiers work as typed, and it is gitignore-aware.'
-      },
-      {
-        h: 'Semantic search, computed locally',
-        p: 'Dense embeddings with a MiniLM model that runs on your machine. Useful when you know the concept but not the wording. Your code is never sent anywhere to be embedded.'
-      },
-      {
-        h: 'Language server queries',
-        p: 'Definitions, references and diagnostics through a real LSP rather than guessing from text matches.'
-      }
-    ]
-  },
-  {
-    eyebrow: 'Your environment',
-    title: 'The tools you already use',
-    items: [
-      {
-        h: 'A real terminal',
-        p: 'A PTY-backed shell in the workspace, shared between you and the agent. Configure which shell it uses.'
-      },
-      {
-        h: 'Git and GitHub',
-        p: 'Status, diff, stage, commit with a generated message, branches, blame and conflict resolution — plus pull requests and issues through the GitHub CLI you are already signed into.'
-      },
-      {
-        h: 'A built-in browser',
-        p: 'The agent can navigate, click, fill forms and read pages back. You can watch it, take control at any time, and restrict it to an allowlist of domains.'
-      },
-      {
-        h: 'Notebooks, PDFs and documents',
-        p: 'Jupyter notebook cell editing, plus text extraction from PDFs and Word documents so they can be part of the context.'
-      }
-    ]
-  },
-  {
-    eyebrow: 'Persistence',
-    title: 'It remembers between sessions',
-    items: [
-      {
-        h: 'Workspace memory',
-        p: 'Notes kept under .vyotiq/memory/ in the repository and re-read on later runs, so context you established once does not have to be re-explained.'
-      },
-      {
-        h: 'Teammates',
-        p: 'Persistent agent identities with their own private memory, a pinned model and their own delegated tasks. They survive restarts and pick interrupted work back up.'
-      },
-      {
-        h: 'Delegated tasks',
-        p: 'Hand a teammate work to run on a schedule or a queue, and collect the result later.'
-      }
-    ]
-  },
-  {
-    eyebrow: 'Extensibility',
-    title: 'MCP, skills and rules',
-    items: [
-      {
-        h: 'MCP client',
-        p: 'Connect Model Context Protocol servers over stdio or HTTP, including OAuth flows. List their tools, resources and prompts, and pin the ones you want into the catalog.'
-      },
-      {
-        h: 'Skills',
-        p: 'Reusable instructions the agent can load into a run, invoked as slash commands. Write your own or install bundled ones.'
-      },
-      {
-        h: 'Rules',
-        p: 'Per-workspace standing instructions under .vyotiq/rules/ that apply to every run in that repository.'
-      }
-    ]
-  }
+const jump = [
+  ...intro.map((s) => ({ href: `#${s.id}`, label: s.eyebrow })),
+  { href: '#providers', label: 'Providers' },
+  { href: '#tools', label: 'Tools' },
+  ...rest.map((s) => ({ href: `#${s.id}`, label: s.eyebrow }))
 ]
 ---
 
 <Base
   title="Features"
-  description="What Agent V does: 60 built-in tools, 11 model providers, git worktree parallelism, checkpoints and rewind, a local code index, MCP and skills."
+  description={`What Agent V does: ${TOOL_TOTAL} built-in tools, ${app.providers.total} model providers, git worktree parallelism, checkpoints and rewind, a local code index, MCP and skills.`}
 >
-  <section class="vy-section vy-head">
+  <section class="vy-page-head">
     <div class="vy-shell">
       <p class="vy-eyebrow">Features</p>
-      <h1 class="vy-h2 vy-head-title">Everything Agent V can do</h1>
-      <p class="vy-lede">
-        This page describes what is actually implemented and shipping. Counts and tool names are
-        read from the application source when the site is built, so they cannot drift out of date.
-      </p>
+      <h1 class="vy-h1">Everything Agent V can do</h1>
+      <p class="vy-lede">What is implemented and shipping today.</p>
+      <ul class="vy-jump" aria-label="On this page">
+        {jump.map((j) => <li><a href={j.href}>{j.label}</a></li>)}
+      </ul>
     </div>
   </section>
 
-  <!-- Modes -->
-  <section class="vy-rule vy-section">
-    <div class="vy-shell">
-      <header class="vy-sec-head">
-        <p class="vy-eyebrow">Modes</p>
-        <h2 class="vy-h2">Three levels of autonomy</h2>
-        <p class="vy-prose-muted">
-          Each mode exposes a different slice of the tool catalog. Switch between them mid-run
-          without losing the conversation.
-        </p>
-      </header>
+  {intro.map((section) => <ClaimSection section={section} />)}
 
-      <div class="vy-modes">
-        {
-          modes.map((m) => (
-            <article class="vy-mode">
-              <h3 class="vy-h3">{m.name}</h3>
-              <p class="vy-prose-muted">{m.body}</p>
-            </article>
-          ))
-        }
-      </div>
-    </div>
-  </section>
-
-  <!-- Providers -->
-  <section class="vy-rule vy-section">
-    <div class="vy-shell">
+  <section class="vy-rule vy-section" id="providers">
+    <div class="vy-shell vy-section-grid">
       <header class="vy-sec-head">
         <p class="vy-eyebrow">Providers</p>
         <h2 class="vy-h2">{app.providers.total} providers, your own keys</h2>
@@ -186,81 +57,60 @@ const sections = [
         </p>
       </header>
 
-      <ul class="vy-provider-grid">
-        {
-          app.providers.list.map((p) => (
-            <li class="vy-provider-cell">
-              <span class="vy-provider-name">{p.label}</span>
-              {app.providers.keyless.includes(p.id) && <span class="vy-tag">no key needed</span>}
-            </li>
-          ))
-        }
-      </ul>
-
-      <p class="vy-foot-note">
-        Model lists are fetched live per provider where the API supports it. Context windows and
-        pricing metadata come from a public model registry.
-      </p>
-    </div>
-  </section>
-
-  <!-- Tools -->
-  <section class="vy-rule vy-section">
-    <div class="vy-shell">
-      <header class="vy-sec-head">
-        <p class="vy-eyebrow">Tool catalog</p>
-        <h2 class="vy-h2">{TOOL_TOTAL} built-in tools</h2>
-        <p class="vy-prose-muted">
-          The full catalog, extracted from the application's tool registry at build time. Every
-          name below is a tool the agent can actually call.
+      <div>
+        <LogoWall kind="providers" showKeyless />
+        <p class="vy-footnote">
+          Model lists are fetched live per provider where the API supports it. Context windows and
+          pricing metadata come from a public model registry.
         </p>
-      </header>
-
-      <div class="vy-tool-list">
-        {
-          TOOL_GROUPS.map((group) => (
-            <section class="vy-tool-row">
-              <div class="vy-tool-meta">
-                <h3 class="vy-h3">{group.title}</h3>
-                <p class="vy-tool-blurb">{group.blurb}</p>
-              </div>
-              <ul class="vy-tool-names">
-                {group.names.map((n) => (
-                  <li class="vy-mono">{n}</li>
-                ))}
-              </ul>
-            </section>
-          ))
-        }
       </div>
     </div>
   </section>
 
-  {
-    sections.map((section) => (
-      <section class="vy-rule vy-section">
-        <div class="vy-shell">
-          <header class="vy-sec-head">
-            <p class="vy-eyebrow">{section.eyebrow}</p>
-            <h2 class="vy-h2">{section.title}</h2>
-          </header>
-          <div class="vy-item-grid">
-            {section.items.map((item) => (
-              <article class="vy-item">
-                <h3 class="vy-h3">{item.h}</h3>
-                <p class="vy-prose-muted">{item.p}</p>
-              </article>
-            ))}
-          </div>
+  <section class="vy-rule vy-section" id="tools">
+    <div class="vy-shell vy-section-grid">
+      <header class="vy-sec-head">
+        <p class="vy-eyebrow">Tool catalog</p>
+        <h2 class="vy-h2">{TOOL_TOTAL} built-in tools</h2>
+        <p class="vy-prose-muted">Every name below is a tool the agent can call.</p>
+      </header>
+
+      <div>
+        <ol class="vy-rows">
+          {
+            TOOL_GROUPS.map((group) => (
+              <li class="vy-row-lead vy-tool-row">
+                <div class="vy-item">
+                  <h3 class="vy-h3">
+                    {group.title} <span class="vy-tool-count vy-mono">{group.names.length}</span>
+                  </h3>
+                  <p>{group.blurb}</p>
+                </div>
+                <ul class="vy-chips">
+                  {group.names.map((n) => (
+                    <li>{n}</li>
+                  ))}
+                </ul>
+              </li>
+            ))
+          }
+        </ol>
+        <div class="vy-tools-shot">
+          <Shot
+            name="settings-tools"
+            alt="The Agent V settings screen listing the built-in tools with their approval state."
+            caption="The same catalog, in Settings → Tools."
+          />
         </div>
-      </section>
-    ))
-  }
+      </div>
+    </div>
+  </section>
+
+  {rest.map((section) => <ClaimSection section={section} />)}
 
   <section class="vy-rule vy-section">
     <div class="vy-shell vy-cta">
       <h2 class="vy-h2">Try it on a repository you know well.</h2>
-      <p class="vy-prose-muted">That is the fastest way to judge whether it is any good.</p>
       <div class="vy-cta-actions">
         <a class="vy-btn vy-btn-primary" href="/download">Download</a>
         <a class="vy-btn vy-btn-secondary" href="/extensions">Browse extensions</a>
@@ -270,190 +120,24 @@ const sections = [
 </Base>
 
 <style>
-  .vy-head {
-    padding-block: clamp(2.5rem, 5vw, 4rem) clamp(2rem, 4vw, 3rem);
+  .vy-rows > .vy-tool-row {
+    grid-template-columns: 14rem minmax(0, 1fr);
   }
 
-  .vy-head-title {
-    margin-top: 0.75rem;
-    margin-bottom: 1.25rem;
-  }
-
-  .vy-sec-head {
-    max-width: 62ch;
-    margin-bottom: 2.5rem;
-  }
-
-  .vy-sec-head .vy-h2 {
-    margin-top: 0.75rem;
-  }
-
-  .vy-sec-head .vy-prose-muted {
-    margin-top: 1rem;
-    font-size: 0.9375rem;
-  }
-
-  /* --------------------------------------------------------------- modes - */
-
-  .vy-modes {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 0;
-  }
-
-  .vy-mode {
-    padding-inline: 2rem;
-    border-left: 1px solid var(--vy-border);
-  }
-
-  .vy-mode:first-child {
-    padding-left: 0;
-    border-left: 0;
-  }
-
-  .vy-mode:last-child {
-    padding-right: 0;
-  }
-
-  .vy-mode p {
-    margin-top: 0.75rem;
-    font-size: 0.9375rem;
-  }
-
-  @media (max-width: 860px) {
-    .vy-modes {
-      grid-template-columns: 1fr;
-      gap: 1.75rem;
-    }
-    .vy-mode,
-    .vy-mode:first-child {
-      padding: 0 0 0 1.25rem;
-      border-left: 2px solid var(--vy-border);
+  @media (max-width: 640px) {
+    .vy-rows > .vy-tool-row {
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 
-  /* ----------------------------------------------------------- providers - */
-
-  .vy-provider-grid {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 0;
-    border: 1px solid var(--vy-border);
-    border-radius: var(--vy-radius-lg);
-    overflow: hidden;
-  }
-
-  .vy-provider-cell {
-    background: var(--vy-bg);
-    border-right: 1px solid var(--vy-border);
-    border-bottom: 1px solid var(--vy-border);
-    padding: 0.875rem 1rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-  }
-
-  .vy-provider-name {
-    font-size: 0.9375rem;
-    font-weight: 500;
-    color: var(--vy-fg-strong);
-  }
-
-  .vy-foot-note {
-    margin-top: 1.25rem;
-    font-size: 0.875rem;
-    color: var(--vy-tertiary);
-    max-width: 62ch;
-  }
-
-  /* --------------------------------------------------------------- tools - */
-
-  .vy-tool-list {
-    display: grid;
-    gap: 0;
-  }
-
-  .vy-tool-row {
-    display: grid;
-    grid-template-columns: 16rem 1fr;
-    gap: 2rem;
-    padding-block: 1.5rem;
-    border-top: 1px solid var(--vy-border);
-  }
-
-  .vy-tool-row:last-child {
-    border-bottom: 1px solid var(--vy-border);
-  }
-
-  .vy-tool-blurb {
-    margin-top: 0.4rem;
-    font-size: 0.875rem;
-    color: var(--vy-tertiary);
-  }
-
-  .vy-tool-names {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.375rem;
-    align-content: start;
-  }
-
-  .vy-tool-names li {
-    font-size: 0.75rem;
-    color: var(--vy-muted);
-    background: var(--vy-surface);
-    border: 1px solid var(--vy-border);
-    border-radius: var(--vy-radius-sm);
-    padding: 0.15rem 0.4rem;
-  }
-
-  @media (max-width: 720px) {
-    .vy-tool-row {
-      grid-template-columns: 1fr;
-      gap: 0.875rem;
-    }
-  }
-
-  /* ---------------------------------------------------------------- items - */
-
-  .vy-item-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 2rem 2.5rem;
-  }
-
-  .vy-item {
-    padding-top: 1.25rem;
-    border-top: 1px solid var(--vy-border);
-  }
-
-  .vy-item p {
-    margin-top: 0.5rem;
-    font-size: 0.9375rem;
-  }
-
-  /* ------------------------------------------------------------------ cta - */
-
-  .vy-cta {
-    text-align: center;
-  }
-
-  .vy-cta .vy-prose-muted {
-    margin: 0.875rem auto 0;
-  }
-
-  .vy-cta-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    justify-content: center;
+  .vy-tools-shot {
     margin-top: 2rem;
+  }
+
+  .vy-tool-count {
+    margin-left: 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--vy-tertiary);
   }
 </style>

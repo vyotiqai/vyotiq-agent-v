@@ -83,6 +83,17 @@ export function workspaceBrowserArtifactsDir(workspacePath: string): string {
 }
 
 /** Persisted composer-attachment sidecar dir (user state, never in the project tree). */
+/**
+ * Durable per-workspace run feedback — outlives the session dirs it is built
+ * from, so it is a sibling of `meta.json` rather than anything under
+ * `sessions/`. Removed with the workspace storage dir like every other
+ * sibling.
+ */
+export function workspaceRunFeedbackPath(workspacePath: string): string {
+  const canonical = canonicalizeWorkspacePath(workspacePath)
+  return join(workspaceMetaDir(workspaceId(canonical)), 'runFeedback.json')
+}
+
 export function workspaceAttachmentsDir(workspacePath: string): string {
   const canonical = canonicalizeWorkspacePath(workspacePath)
   return join(workspaceMetaDir(workspaceId(canonical)), 'attachments')

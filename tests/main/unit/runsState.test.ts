@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { TOOL_STUB_RESTART_INTERRUPTED } from '@shared/toolStubs'
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -20,6 +21,7 @@ import {
   appendMessage,
   listRuns,
   listRunsOlder,
+  collectProtectedInstanceRunIds,
   interruptOrphanRuns,
   loadEvents,
   loadMessages,
@@ -36,7 +38,18 @@ import { registerRunAbort, clearRunAbort } from '@main/agent/runRegistry'
 
 function writeStatus(
   dir: string,
-  status: { status: string; step?: number; updatedAt: string; goal?: string; error?: string; workspacePath?: string }
+  status: {
+    status: string
+    step?: number
+    updatedAt: string
+    goal?: string
+    error?: string
+    workspacePath?: string
+    agentProfileId?: string
+    agentProfileName?: string
+    agentProfileSnapshot?: Record<string, unknown>
+    runtime?: 'local' | 'cloud'
+  }
 ): void {
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'status.json'), JSON.stringify(status, null, 2), 'utf8')
@@ -72,6 +85,34 @@ describe('listRuns / interruptOrphanRuns', () => {
     const result = await listRuns(workspace)
     expect(result.runs.map((r) => r.runId)).toEqual(['ws-run'])
     expect(result.capped).toBe(false)
+  })
+
+  it('includes profile snapshot and runtime in run summaries', async () => {
+    const snapshot = {
+      version: 1,
+      id: 'scout',
+      name: 'Scout',
+      persona: 'Investigate carefully.',
+      scope: 'global',
+      runtime: 'cloud'
+    }
+    writeStatus(resolveRunDir(workspace, 'profile-run'), {
+      status: 'done',
+      updatedAt: '2026-01-03T00:00:00.000Z',
+      workspacePath: workspace,
+      agentProfileId: 'scout',
+      agentProfileName: 'Scout',
+      agentProfileSnapshot: snapshot,
+      runtime: 'cloud'
+    })
+
+    const result = await listRuns(workspace)
+    expect(result.runs[0]).toMatchObject({
+      runId: 'profile-run',
+      agentProfileId: 'scout',
+      agentProfileSnapshot: snapshot,
+      runtime: 'cloud'
+    })
   })
 
   it('reports capped when more than 30 runs exist', async () => {
@@ -253,6 +294,96 @@ describe('listRuns / interruptOrphanRuns', () => {
     })
   })
 
+  it('protects running and resumable instance checkouts from stale-worktree pruning', () => {
+    // Pruning protects only runs live in THIS process, and at boot nothing is
+    // live — so without a durable protection set every instance checkout looks
+    // stale and gets deleted right after the interrupt pass promised a resume.
+    writeStatus(resolveRunDir(workspace, 'inst-running'), {
+      status: 'running',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      workspacePath: workspace,
+      inlineInstance: true,
+      parentRunId: 'p'
+    })
+    writeStatus(resolveRunDir(workspace, 'inst-resumable'), {
+      status: 'cancelled',
+      resumable: true,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      workspacePath: workspace,
+      inlineInstance: true,
+      parentRunId: 'p'
+    })
+    writeStatus(resolveRunDir(workspace, 'inst-done'), {
+      status: 'done',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      workspacePath: workspace,
+      inlineInstance: true,
+      parentRunId: 'p'
+    })
+    // A finished ordinary run is not an instance and owns no checkout.
+    writeStatus(resolveRunDir(workspace, 'plain-run'), {
+      status: 'running',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      workspacePath: workspace
+    })
+
+    const keep = collectProtectedInstanceRunIds(workspace)
+    expect([...keep].sort()).toEqual(['inst-resumable', 'inst-running'])
+  })
+
+  it('keeps an isolated instance branch when interrupt marks it resumable', async () => {
+    const dir = resolveRunDir(workspace, 'instance-isolated')
+    writeStatus(dir, {
+      status: 'running',
+      step: 2,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      workspacePath: workspace,
+      inlineInstance: true,
+      parentRunId: 'parent-run',
+      worktreePath: join(workspace, '.vyotiq', 'instance-worktrees', 'instance-isolated'),
+      worktreeBranch: 'vyotiq/instance/instance-isolated'
+    })
+
+    await interruptOrphanRuns([workspace])
+
+    const status = JSON.parse(readFileSync(join(dir, 'status.json'), 'utf8')) as {
+      status: string
+      resumable?: true
+      worktreeBranch?: string
+    }
+    expect(status.status).toBe('cancelled')
+    // The branch IS the work: committing the instance's edits and then deleting
+    // the branch while promising a resume destroys what the resume restores.
+    expect(status.resumable).toBe(true)
+    expect(status.worktreeBranch).toBe('vyotiq/instance/instance-isolated')
+  })
+
+  it('marks an isolated instance non-resumable when its branch was never recorded', async () => {
+    const dir = resolveRunDir(workspace, 'instance-nobranch')
+    writeStatus(dir, {
+      status: 'running',
+      step: 1,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      workspacePath: workspace,
+      inlineInstance: true,
+      parentRunId: 'parent-run',
+      worktreePath: join(workspace, '.vyotiq', 'instance-worktrees', 'instance-nobranch')
+    })
+
+    await interruptOrphanRuns([workspace])
+
+    const status = JSON.parse(readFileSync(join(dir, 'status.json'), 'utf8')) as {
+      status: string
+      error?: string
+      resumable?: true
+    }
+    expect(status.status).toBe('cancelled')
+    // No recovery handle exists, so offering Resume would be a lie. The real
+    // reason is reported instead.
+    expect(status.resumable).toBeUndefined()
+    expect(status.error).toContain('cannot resume because')
+  })
+
   it('writes tool_result stubs for unfinished tool calls on interrupt', async () => {
     const runId = 'orphan-tools'
     const dir = resolveRunDir(workspace, runId)
@@ -280,7 +411,8 @@ describe('listRuns / interruptOrphanRuns', () => {
       role: 'tool',
       toolCallId: 'tc1',
       toolName: 'read',
-      content: 'Cancelled',
+      // A crash between dispatch and result cannot claim the tool did not run.
+      content: TOOL_STUB_RESTART_INTERRUPTED,
       ok: false
     })
 
@@ -437,7 +569,7 @@ describe('listRuns / interruptOrphanRuns', () => {
         role: 'tool',
         toolCallId: 'tool-1',
         toolName: 'read',
-        content: 'Cancelled',
+        content: TOOL_STUB_RESTART_INTERRUPTED,
         ok: false
       },
       expect.objectContaining({ role: 'user', content: 'continue' })

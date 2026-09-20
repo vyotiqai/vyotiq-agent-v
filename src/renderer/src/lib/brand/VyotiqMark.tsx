@@ -1,6 +1,12 @@
 import { cn } from '@renderer/lib/ui/cn'
+import { VYOTIQ_MARK_PATHS, VYOTIQ_MARK_VIEW_BOX } from '@shared/brand/vyotiqMark'
 
-/** Vyotiq mark — in-app chrome. Fill follows `currentColor`. */
+/**
+ * Vyotiq mark — in-app chrome. Fill follows `currentColor`, which is why this
+ * draws the geometry rather than loading the SVG the kit ships: an <img>
+ * cannot inherit a colour. The path data is generated, not copied — see
+ * scripts/generate-precision-mono-brand.mjs.
+ */
 export function VyotiqMark({
   size = 24,
   className,
@@ -12,7 +18,7 @@ export function VyotiqMark({
 }) {
   return (
     <svg
-      viewBox="0 0 1024 1024"
+      viewBox={VYOTIQ_MARK_VIEW_BOX}
       width={size}
       height={size}
       className={cn('shrink-0', className)}
@@ -22,22 +28,9 @@ export function VyotiqMark({
       aria-hidden={decorative || undefined}
       focusable="false"
     >
-      <path
-        fill="currentColor"
-        d="M 802.410 512.000 L 366.795 763.503 L 366.795 260.497 Z"
-      />
-      <path
-        fill="currentColor"
-        d="M 858.410 544.332 L 858.410 712.000 L 512.000 912.000 L 366.795 828.166 Z"
-      />
-      <path
-        fill="currentColor"
-        d="M 310.795 795.834 L 165.590 712.000 L 165.590 312.000 L 310.795 228.166 Z"
-      />
-      <path
-        fill="currentColor"
-        d="M 366.795 195.834 L 512.000 112.000 L 858.410 312.000 L 858.410 479.668 Z"
-      />
+      {VYOTIQ_MARK_PATHS.map((d) => (
+        <path key={d} fill="currentColor" d={d} />
+      ))}
     </svg>
   )
 }

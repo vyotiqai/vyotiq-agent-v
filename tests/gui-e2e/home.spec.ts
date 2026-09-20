@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
+import { namedGitBranch } from '../../src/shared/utils/gitBranch'
 import {
   RUN_INTERRUPTED_ERROR,
   seedAppSettings,
@@ -22,10 +23,18 @@ import {
 
 let launched: LaunchedApp
 const workspacePath = process.cwd()
-const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-  cwd: workspacePath,
-  encoding: 'utf8'
-}).trim()
+// Read through namedGitBranch, the same helper the app resolves a branch with,
+// so the expectation matches the product rather than raw git. `--abbrev-ref`
+// answers the literal "HEAD" on a detached checkout, which is what
+// actions/checkout leaves behind on a pull_request run — and the app
+// deliberately reports no branch there. Asserting the raw string made this
+// test pass on push-to-main and fail on every PR.
+const branch = namedGitBranch(
+  execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    cwd: workspacePath,
+    encoding: 'utf8'
+  })
+)
 
 const RECEIPT_VERSION = 5
 const LOOP_NEXT_AT = new Date(Date.now() + 4 * 3_600_000).toISOString()
@@ -353,8 +362,15 @@ test('Activity outcomes match the seeded receipt statuses exactly', async () => 
 
 test('Repositories reports the branch git reports', async () => {
   const region = launched.window.getByRole('region', { name: /Repositories/ })
-  await expect(region.getByText(branch, { exact: true })).toBeVisible({ timeout: 20_000 })
-  await expect(region.getByRole('button', { name: /New chat/ })).toBeVisible()
+  // The row itself must render either way; only the branch label is
+  // conditional, so a detached checkout still exercises the section.
+  await expect(region.getByRole('button', { name: /New chat/ })).toBeVisible({ timeout: 20_000 })
+  if (branch) {
+    await expect(region.getByText(branch, { exact: true })).toBeVisible({ timeout: 20_000 })
+  } else {
+    // Detached HEAD: the app reports no branch, so it must not invent one.
+    await expect(region.getByText('HEAD', { exact: true })).toHaveCount(0)
+  }
 })
 
 test('Activity totals come from the seeded receipts and usage ledgers', async () => {

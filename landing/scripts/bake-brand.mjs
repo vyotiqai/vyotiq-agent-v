@@ -25,6 +25,8 @@ const REQUIRED = [
   'vyotiq-lockup-white.svg',
   'vyotiq-mark-black.svg',
   'vyotiq-mark-white.svg',
+  'vyotiq-wordmark-black.svg',
+  'vyotiq-wordmark-white.svg',
   'vyotiq-app-icon.svg',
   'vyotiq-app-icon.png',
   'vyotiq-social-card.png'
@@ -47,10 +49,45 @@ for (const file of REQUIRED) {
   copyFileSync(from, join(brandOut, file))
 }
 
-// The favicon is the mark on its own, recoloured to the accent so it reads at
-// 16px in both a light and a dark browser tab strip.
+/*
+ * The favicon is the mark flipped to whichever of black or white the tab strip
+ * needs. It carries its own <style> because a favicon has no inherited colour:
+ * currentColor would resolve to black in both schemes, and only a
+ * prefers-color-scheme query inside the SVG can follow the strip.
+ *
+ * The kit is black and white, so there is no accent to recolour to and the
+ * query is the whole job. Nothing is lost at 16px by dropping the accent —
+ * black clears 21:1 on a light strip where the old #00638e cleared 6.9:1.
+ *
+ * Those rules are scoped to a class the <svg> itself carries rather than
+ * written as a bare `path {}`. As a <link rel="icon"> the file is its own
+ * document and either would work — but ProviderMark and PlatformMark inline
+ * sibling marks with set:html, and a bare selector arriving that way would
+ * repaint every <path> on the page, including the diagrams and the other logos.
+ * The class costs nothing and makes the file safe to inline.
+ */
+const FAVICON_ON_LIGHT = '#000000'
+const FAVICON_ON_DARK = '#ffffff'
 const mark = readFileSync(join(brandSrc, 'vyotiq-mark-black.svg'), 'utf8')
-writeFileSync(join(brandOut, 'favicon.svg'), mark.replaceAll('#000000', 'currentColor'), 'utf8')
+if (!mark.includes('#000000')) {
+  console.error('[bake-brand] vyotiq-mark-black.svg no longer paints with #000000 — favicon recolour would silently do nothing')
+  process.exit(1)
+}
+const FAVICON_CLASS = 'vy-favicon'
+const faviconStyle = `<style>
+    .${FAVICON_CLASS} path { fill: ${FAVICON_ON_LIGHT}; }
+    @media (prefers-color-scheme: dark) { .${FAVICON_CLASS} path { fill: ${FAVICON_ON_DARK}; } }
+  </style>`
+const favicon = mark
+  .replaceAll(' fill="#000000"', '')
+  .replace('<svg ', `<svg class="${FAVICON_CLASS}" `)
+  .replace(/(<title>[^<]*<\/title>)/, `$1
+  ${faviconStyle}`)
+if (!favicon.includes('<style>') || !favicon.includes(`class="${FAVICON_CLASS}"`)) {
+  console.error('[bake-brand] could not inject the favicon stylesheet — the mark SVG shape changed')
+  process.exit(1)
+}
+writeFileSync(join(brandOut, 'favicon.svg'), favicon, 'utf8')
 
 // Marketplace icons are third-party brand marks shipped with the app for its
 // own extension list. Only the ones the catalog actually references are copied.

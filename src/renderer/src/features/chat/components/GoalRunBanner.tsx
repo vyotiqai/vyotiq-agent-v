@@ -19,6 +19,8 @@ export function GoalRunBanner({
   onPause,
   onResume,
   onComplete,
+  onActivate,
+  onDismiss,
   onStopLoop,
   onStopRun
 }: {
@@ -28,6 +30,8 @@ export function GoalRunBanner({
   onPause: () => void | Promise<boolean>
   onResume: () => void | Promise<boolean>
   onComplete: () => void | Promise<boolean>
+  onActivate?: () => void | Promise<boolean>
+  onDismiss?: () => void | Promise<boolean>
   onStopLoop: () => void | Promise<boolean>
   onStopRun?: () => void
 }) {
@@ -42,23 +46,29 @@ export function GoalRunBanner({
   if (!goal || goal.status === 'complete') return null
 
   const paused = goal.status === 'paused'
+  // A proposal is the agent asking, not a running goal: it shows what would be
+  // pursued and offers the grant, with none of the active-goal controls.
+  const proposed = goal.status === 'proposed'
   return (
     <div
       data-goal-banner=""
       data-goal-status={goal.status}
       role="region"
-      aria-label={paused ? 'Goal paused' : 'Active goal'}
+      aria-label={proposed ? 'Suggested goal' : paused ? 'Goal paused' : 'Active goal'}
       className={cn(
         'flex items-center gap-2 rounded-md border px-2 py-1',
-        paused ? 'border-border bg-surface' : 'border-accent/30 bg-accent/5'
+        paused || proposed ? 'border-border bg-surface' : 'border-accent/30 bg-accent/5'
       )}
     >
       <Icon
         name="flag"
         size={13}
-        className={cn('shrink-0', paused ? 'text-muted' : 'text-accent')}
+        className={cn('shrink-0', paused || proposed ? 'text-muted' : 'text-accent')}
         aria-hidden
       />
+      {proposed ? (
+        <span className="shrink-0 text-[11px] font-medium text-muted">Suggested goal</span>
+      ) : null}
       <Tooltip content={goal.objective}>
         <span className="min-w-0 flex-1 truncate text-xs text-fg [overflow-wrap:anywhere]">
           {goal.objective}
@@ -70,7 +80,18 @@ export function GoalRunBanner({
         </span>
       ) : null}
       <div className="flex shrink-0 items-center gap-1">
-        {paused ? (
+        {proposed ? (
+          <>
+            <Tooltip content="Keep working on this objective until it is complete, including across restarts">
+              <Button type="button" variant="subtle" onClick={() => void onActivate?.()}>
+                Start goal
+              </Button>
+            </Tooltip>
+            <Button type="button" variant="ghost" onClick={() => void onDismiss?.()}>
+              Dismiss
+            </Button>
+          </>
+        ) : paused ? (
           <Button type="button" variant="subtle" onClick={() => void onResume()}>
             Resume
           </Button>
@@ -89,9 +110,11 @@ export function GoalRunBanner({
             Pause
           </Button>
         )}
-        <Button type="button" variant="subtle" onClick={() => void onComplete()}>
-          Mark complete
-        </Button>
+        {proposed ? null : (
+          <Button type="button" variant="subtle" onClick={() => void onComplete()}>
+            Mark complete
+          </Button>
+        )}
         {armed ? (
           <Button type="button" variant="ghost" onClick={() => void onStopLoop()}>
             Stop loop

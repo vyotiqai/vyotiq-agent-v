@@ -161,3 +161,21 @@ tmp-merge/
 /_*.diff
 /artifacts/
 tests/**/_tmp-*.test.ts
+
+# Machine-local working-tree artifacts (2026-09-19). None of these belong to
+# the project, and all of them would be staged by a blanket `git add -A`.
+# Append-only block — nothing above is modified, reordered, or weakened.
+#
+# Live delegated-task queue for THIS machine. It is real runtime state, not
+# config: the scheduler reads exactly this path, so a committed copy would
+# become every cloner's task queue and leak local workspace paths and prompts.
+/.vyotiq/tasks.json
+# Separate reference codebase, deliberately kept on disk and already ignored by
+# eslint.config.mjs. 2.1 MB of another project — keep it, never commit it.
+/errand-main/
+# Shell-redirect artifact: a literal file named $null created by `>$null` /
+# `2>$null` outside PowerShell.
+/$null
+# Loose patch dumps and their one-off apply scripts at the repo root.
+/[0-9][0-9][0-9][0-9]-*.patch
+/_apply_*.ps1
