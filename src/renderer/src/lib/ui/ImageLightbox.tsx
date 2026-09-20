@@ -17,7 +17,8 @@ export function ImageLightbox({
     <Dialog
       open
       onClose={onClose}
-      title={label}
+      label={label}
+      padded={false}
       useNativeDialog={false}
       overlayClassName="bg-overlay"
       className="flex items-center justify-center"

@@ -17,6 +17,52 @@ type EnvironmentRow = {
 }
 
 /**
+ * What to say and what to offer, per kind of failure.
+ *
+ * Every row used to read "<name> is not connected — the server is enabled but
+ * reported no connection" above a Manage button, which is the same sentence
+ * whether the server wants a sign-in, timed out, or is missing a binary, and
+ * the same two-hop route to the fix in all three cases. Main now classifies
+ * the failure where the original error still exists, so the row can name it
+ * and offer the one control that resolves it.
+ */
+function mcpRow(
+  server: McpHealthIssue,
+  onOpenMcpServer?: (serverId: string) => void,
+  onRetry?: () => void
+): EnvironmentRow {
+  const base = { id: `mcp:${server.id}`, icon: 'plug' as IconName }
+  const manage = onOpenMcpServer
+    ? { action: { label: 'Manage', onClick: () => onOpenMcpServer(server.id) } }
+    : {}
+
+  if (server.errorKind === 'sign-in') {
+    return {
+      ...base,
+      title: `Sign in to ${server.name}`,
+      detail: `${server.name} is installed and enabled. Its tools load once you sign in.`,
+      ...(onOpenMcpServer
+        ? { action: { label: 'Sign in', onClick: () => onOpenMcpServer(server.id) } }
+        : {})
+    }
+  }
+  if (server.errorKind === 'network') {
+    return {
+      ...base,
+      title: `${server.name} could not be reached`,
+      detail: server.error ?? 'The connection failed.',
+      ...(onRetry ? { action: { label: 'Retry', onClick: onRetry } } : manage)
+    }
+  }
+  return {
+    ...base,
+    title: `${server.name} is not connected`,
+    detail: server.error ?? 'The server is enabled but reported no connection.',
+    ...manage
+  }
+}
+
+/**
  * Renders only when something is actually wrong: a provider with no API key,
  * or an enabled MCP server that is not connected. A healthy environment shows
  * nothing at all rather than a row of green ticks. Each row routes to the
@@ -27,12 +73,15 @@ export function EnvironmentSection({
   providerIssue,
   mcpIssues,
   onOpenProviderSettings,
-  onOpenMcpServer
+  onOpenMcpServer,
+  onRetryMcp
 }: {
   providerIssue: ProviderIssue | null
   mcpIssues: readonly McpHealthIssue[]
   onOpenProviderSettings?: () => void
   onOpenMcpServer?: (serverId: string) => void
+  /** Drops the sessions and reconnects — only ever from a press. */
+  onRetryMcp?: () => void
 }) {
   const rows: EnvironmentRow[] = []
   if (providerIssue) {
@@ -47,15 +96,7 @@ export function EnvironmentSection({
     })
   }
   for (const server of mcpIssues) {
-    rows.push({
-      id: `mcp:${server.id}`,
-      icon: 'plug',
-      title: `${server.name} is not connected`,
-      detail: server.error ?? 'The server is enabled but reported no connection.',
-      ...(onOpenMcpServer
-        ? { action: { label: 'Manage', onClick: () => onOpenMcpServer(server.id) } }
-        : {})
-    })
+    rows.push(mcpRow(server, onOpenMcpServer, onRetryMcp))
   }
 
   if (rows.length === 0) return null

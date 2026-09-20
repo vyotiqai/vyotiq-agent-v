@@ -1,8 +1,9 @@
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, readFileSync, rmSync } from 'fs'
 import { basename, join } from 'path'
 import {
   RunGoalSchema,
   type RunGoal,
+  type RunGoalOrigin,
   type RunGoalStatus
 } from '../../shared/ipc'
 import { isGenericRunTitle, serializeGoalContent } from '../../shared/goalRuntime'
@@ -44,6 +45,15 @@ export function writeGoal(runDir: string, goal: RunGoal): RunGoal {
   return next
 }
 
+/** Absent origin = written before proposals existed; treat as user-set. */
+export function goalOrigin(goal: RunGoal): RunGoalOrigin {
+  return goal.origin ?? 'user'
+}
+
+/**
+ * User-set goal (the `/goal` path): active immediately, because the user asking
+ * for a goal *is* the grant of the unattended powers an active goal unlocks.
+ */
 export function createGoal(runDir: string, objective: string): RunGoal {
   const text = objective.trim()
   if (!text) throw new Error('create_goal requires objective')
@@ -51,6 +61,7 @@ export function createGoal(runDir: string, objective: string): RunGoal {
   const goal: RunGoal = {
     objective: text,
     status: 'active',
+    origin: 'user',
     createdAt: at,
     updatedAt: at
   }
@@ -58,6 +69,69 @@ export function createGoal(runDir: string, objective: string): RunGoal {
   seedRunTitleIfGeneric(runDir, text)
   invalidateListRunsCache()
   return goal
+}
+
+/**
+ * Agent-created goal: lands `proposed` and stays inert until the user starts it.
+ * Never overwrites a live user-set goal — silently replacing the user's own
+ * objective would be the same authority grab by another route.
+ */
+export function proposeGoal(runDir: string, objective: string): RunGoal {
+  const text = objective.trim()
+  if (!text) throw new Error('create_goal requires objective')
+  const current = readGoal(runDir)
+  if (current && current.status !== 'complete' && goalOrigin(current) === 'user') {
+    throw new Error(
+      `This chat already has a user-set goal: "${current.objective}". Ask the user to change it instead of replacing it.`
+    )
+  }
+  const at = nowIso()
+  const goal: RunGoal = {
+    objective: text,
+    status: 'proposed',
+    origin: 'agent',
+    createdAt: at,
+    updatedAt: at
+  }
+  atomicWriteJson(goalPath(runDir), goal)
+  invalidateListRunsCache()
+  return goal
+}
+
+/**
+ * The only promotion into `active` — reachable from the IPC channel the banner
+ * and slash commands use, never from a tool. Covers both starting a proposal
+ * and resuming a user pause.
+ */
+export function activateGoalByUser(runDir: string): RunGoal {
+  const current = readGoal(runDir)
+  if (!current) throw new Error('No goal on this run.')
+  if (current.status === 'complete') {
+    throw new Error('Cannot resume a completed goal. Set a new goal instead.')
+  }
+  if (current.status === 'active') return current
+  // A fresh grant starts a fresh stretch: both the auto-continue budget and the
+  // auto-resume ceiling reset. Without the continueCount reset, resuming a goal
+  // that paused on its budget would re-pause on the very next turn end.
+  return writeGoal(runDir, {
+    ...current,
+    status: 'active',
+    continueCount: 0,
+    autoResumeCount: 0
+  })
+}
+
+/** Discard an agent proposal outright — a declined suggestion leaves no trace. */
+export function dismissGoalProposal(runDir: string): boolean {
+  const current = readGoal(runDir)
+  if (!current || current.status !== 'proposed') return false
+  try {
+    rmSync(goalPath(runDir), { force: true })
+  } catch {
+    return false
+  }
+  invalidateListRunsCache()
+  return true
 }
 
 export function updateGoalStatus(
@@ -69,6 +143,13 @@ export function updateGoalStatus(
   if (status === 'active') {
     if (current.status === 'complete') {
       throw new Error('Cannot resume a completed goal. Call create_goal to start a new one.')
+    }
+    // The proposal gate: without this, create_goal + update_goal("active")
+    // would promote an agent's own proposal and route around the user entirely.
+    if (current.status === 'proposed') {
+      throw new Error(
+        'This goal is awaiting user confirmation. Only the user can start it — keep working on the current turn.'
+      )
     }
     if (current.status === 'active') return current
   }
@@ -99,8 +180,24 @@ export function bumpGoalContinueCount(runDir: string): RunGoal | null {
   })
 }
 
+/** App-start relaunch bookkeeping — the ceiling lives in resumeActiveGoals. */
+export function bumpGoalAutoResume(runDir: string): RunGoal | null {
+  const current = readGoal(runDir)
+  if (!current || current.status !== 'active') return current
+  return writeGoal(runDir, { ...current, autoResumeCount: (current.autoResumeCount ?? 0) + 1 })
+}
+
+/** A real user turn proves someone is watching — spend the ceiling again. */
+export function clearGoalAutoResume(runDir: string): void {
+  const current = readGoal(runDir)
+  if (!current || !current.autoResumeCount) return
+  writeGoal(runDir, { ...current, autoResumeCount: 0 })
+}
+
 export function formatActiveGoalSection(goal: RunGoal | null): string {
-  if (!goal || goal.status === 'complete') return ''
+  // A proposal carries no standing instruction: it must not inject the
+  // "do not stop" overlay before the user has agreed to it.
+  if (!goal || goal.status === 'complete' || goal.status === 'proposed') return ''
   const lines =
     goal.status === 'paused'
       ? [

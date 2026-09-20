@@ -16,6 +16,8 @@ export function ChatTranscriptStage({
   onGoalPause,
   onGoalResume,
   onGoalComplete,
+  onGoalActivate,
+  onGoalDismiss,
   onStopLoop,
   onStopRun,
   transcript,
@@ -30,6 +32,8 @@ export function ChatTranscriptStage({
   onGoalPause?: () => void | Promise<boolean>
   onGoalResume?: () => void | Promise<boolean>
   onGoalComplete?: () => void | Promise<boolean>
+  onGoalActivate?: () => void | Promise<boolean>
+  onGoalDismiss?: () => void | Promise<boolean>
   onStopLoop?: () => void | Promise<boolean>
   onStopRun?: () => void
   transcript: ReactNode
@@ -66,6 +70,8 @@ export function ChatTranscriptStage({
               onPause={onGoalPause!}
               onResume={onGoalResume!}
               onComplete={onGoalComplete!}
+              onActivate={onGoalActivate}
+              onDismiss={onGoalDismiss}
               onStopLoop={onStopLoop ?? (async () => false)}
               onStopRun={onStopRun}
             />

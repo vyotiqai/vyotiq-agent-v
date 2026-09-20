@@ -1,79 +1,106 @@
-import { useEffect, useRef, useState } from 'react'
-import { Menu } from '@renderer/lib/ui/Menu'
+import { useMemo, useRef, useState } from 'react'
+import { Button, Input, Menu, cn, pushToast } from '@renderer/lib/ui'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
-import { Icon } from '@renderer/lib/icons'
-import { pushToast } from '@renderer/lib/ui'
-import { cn } from '@renderer/lib/ui/cn'
-import { chromePillButton } from './composerChrome'
+import { IconButton } from '@renderer/lib/ui/IconButton'
+import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { useAgentProfiles } from '@renderer/lib/hooks/useAgentProfiles'
+import {
+  isProfileUsableIn,
+  unusableReason
+} from '@renderer/features/teammates/teammatePresentation'
+import { chromePillButton } from './composerChrome'
 
 /**
- * Teammate profile picker — binds the current chat to a persistent agent
- * profile (identity + per-profile memory). Also creates teammates inline.
+ * Teammate pill — binds the current chat to a persistent agent profile.
+ *
+ * Creating here asks only for a name and binds immediately; persona, identity,
+ * tone, the model pin and availability live in the Teammates pane. This used
+ * to be a second four-field form that silently omitted auto-resume, so the two
+ * create paths produced different teammates.
  */
 export function AgentProfilePicker({
   profileId,
   onProfileChange,
+  workspacePath = null,
   disabled,
   className
 }: {
   profileId: string | null
   onProfileChange: (profileId: string | null) => void
+  /** Used to hide teammates that cannot run in this workspace. */
+  workspacePath?: string | null
   disabled?: boolean
   className?: string
 }) {
   const { profiles, createProfile, deleteProfile } = useAgentProfiles()
+  const { confirm, dialog: confirmDialog } = useConfirm()
   const [createOpen, setCreateOpen] = useState(false)
-  const nameInputRef = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    if (createOpen) nameInputRef.current?.focus()
-  }, [createOpen])
   const [name, setName] = useState('')
-  const [persona, setPersona] = useState('')
-  const [tone, setTone] = useState('')
-  const [identity, setIdentity] = useState('')
   const [saving, setSaving] = useState(false)
+  const nameInputRef = useRef<HTMLInputElement>(null)
 
   const bound = profiles.find((p) => p.id === profileId) ?? null
+
+  /**
+   * Only teammates that can actually run here. `resolveAgentProfile` returns
+   * null for a workspace-scoped profile outside its own workspace, so binding
+   * one would fail the whole send with `Unknown agent profile` — about a
+   * teammate this menu had just offered.
+   */
+  const selectable = useMemo(
+    () => profiles.filter((p) => isProfileUsableIn(p, workspacePath)),
+    [profiles, workspacePath]
+  )
+
   const options = [
     { value: '__none__', label: 'No teammate (default agent)' },
-    ...profiles.map((p) => ({ value: p.id, label: p.name, group: 'Teammates' })),
+    ...selectable.map((p) => ({ value: p.id, label: p.name, group: 'Teammates' })),
     { value: '__create__', label: 'New teammate…' }
   ]
+  // A binding made before the teammate was narrowed to another workspace still
+  // has to be visible, or the pill would read as unbound while the run is not.
+  if (bound && !selectable.some((p) => p.id === bound.id)) {
+    options.splice(1, 0, { value: bound.id, label: bound.name, group: 'Teammates' })
+  }
 
   const submitCreate = async (): Promise<void> => {
     const trimmed = name.trim()
     if (!trimmed || saving) return
     setSaving(true)
-    const created = await createProfile({
-      name: trimmed,
-      scope: 'global',
-      ...(persona.trim() ? { persona: persona.trim() } : {}),
-      ...(tone.trim() ? { tone: tone.trim() } : {}),
-      ...(identity.trim() ? { identity: identity.trim() } : {})
-    })
-    setSaving(false)
-    if (created) {
+    try {
+      const created = await createProfile({ name: trimmed, scope: 'global' })
+      if (!created) {
+        pushToast('Could not create teammate', 'error')
+        return
+      }
       pushToast(`Teammate "${created.name}" created`)
       onProfileChange(created.id)
       setCreateOpen(false)
       setName('')
-      setPersona('')
-      setTone('')
-      setIdentity('')
-    } else {
-      pushToast('Could not create teammate')
+    } finally {
+      setSaving(false)
     }
   }
 
   const removeProfile = async (id: string): Promise<void> => {
     const target = profiles.find((p) => p.id === id)
-    const ok = await deleteProfile(id)
-    if (ok) {
-      pushToast(`Teammate "${target?.name ?? id}" deleted`)
-      if (profileId === id) onProfileChange(null)
+    // Deletion stops queued and running work. It used to happen on one
+    // unconfirmed click, next to the pill you use constantly.
+    const ok = await confirm(
+      `Delete ${target?.name ?? 'this teammate'}? Queued and running work stops. Its memory and past runs are kept.`,
+      { title: `Delete ${target?.name ?? 'teammate'}`, confirmLabel: 'Delete', danger: true }
+    )
+    if (!ok) return
+    const result = await deleteProfile(id)
+    if (!result) {
+      pushToast('Could not delete teammate', 'error')
+      return
     }
+    pushToast(`Teammate "${target?.name ?? id}" deleted`)
+    if (profileId === id) onProfileChange(null)
   }
+
+  const boundBlocked = bound ? unusableReason(bound, workspacePath) : null
 
   return (
     <div className={cn('relative flex h-7 shrink-0 items-center', className)}>
@@ -88,44 +115,41 @@ export function AgentProfilePicker({
             setCreateOpen(true)
             return
           }
-          if (next === '__none__') {
-            onProfileChange(null)
-            return
-          }
-          onProfileChange(next)
+          onProfileChange(next === '__none__' ? null : next)
         }}
       />
       {bound ? (
         <span
-          className="ml-0.5 inline-block size-1.5 shrink-0 rounded-full bg-accent"
+          className={cn(
+            'ml-0.5 inline-block size-1.5 shrink-0 rounded-full',
+            boundBlocked ? 'bg-warning' : 'bg-accent'
+          )}
           aria-hidden
-          title={`Bound to ${bound.name}`}
+          title={boundBlocked ?? `Bound to ${bound.name}`}
         />
       ) : null}
       {bound ? (
-        <button
-          type="button"
-          className="ml-0.5 inline-grid size-5 shrink-0 place-items-center rounded text-muted vy-transition hover:text-danger"
-          aria-label={`Delete teammate ${bound.name}`}
+        <IconButton
+          icon="trash"
+          size="xs"
+          label={`Delete teammate ${bound.name}`}
+          className="ml-0.5 hover:!text-danger"
           disabled={disabled}
-          onClick={() => {
-            void removeProfile(bound.id)
-          }}
-        >
-          <Icon name="trash" size={12} />
-        </button>
+          onClick={() => void removeProfile(bound.id)}
+        />
       ) : null}
+
       <Dialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="New teammate"
+        initialFocusRef={nameInputRef}
       >
-        <div className="flex min-w-80 flex-col gap-3 p-1">
+        <div className="flex flex-col gap-3">
           <label className="flex flex-col gap-1 text-xs text-muted">
             Name
-            <input
+            <Input
               ref={nameInputRef}
-              className="min-h-8 rounded-md border border-border bg-surface px-2 text-sm text-fg outline-none focus:border-accent"
               value={name}
               placeholder="Frontend Fixer"
               onChange={(e) => setName(e.target.value)}
@@ -134,52 +158,21 @@ export function AgentProfilePicker({
               }}
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
-            Persona (what this teammate is)
-            <textarea
-              className="min-h-16 resize-y rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
-              value={persona}
-              placeholder="A terse senior frontend engineer who never touches backend files."
-              onChange={(e) => setPersona(e.target.value)}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
-            Identity (long-term context it should remember)
-            <textarea
-              className="min-h-16 resize-y rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
-              value={identity}
-              placeholder="Owns the design system. Prefers pnpm. Runs vitest before claiming done."
-              onChange={(e) => setIdentity(e.target.value)}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
-            Tone (how it responds)
-            <input
-              className="min-h-8 rounded-md border border-border bg-surface px-2 text-sm text-fg outline-none focus:border-accent"
-              value={tone}
-              placeholder="Direct, no filler, code first."
-              onChange={(e) => setTone(e.target.value)}
-            />
-          </label>
+          <p className="m-0 text-2xs text-muted">
+            Binds to this chat straight away. Persona, model and availability are in
+            Teammates.
+          </p>
           <div className="flex items-center justify-end gap-2">
-            <button
-              type="button"
-              className="min-h-8 rounded-md border border-border px-3 text-xs text-fg vy-transition hover:bg-surface-2"
-              onClick={() => setCreateOpen(false)}
-            >
+            <Button variant="subtle" onClick={() => setCreateOpen(false)}>
               Cancel
-            </button>
-            <button
-              type="button"
-              className="min-h-8 rounded-md bg-accent px-3 text-xs font-medium text-fg vy-transition hover:opacity-90 disabled:opacity-50"
-              disabled={!name.trim() || saving}
-              onClick={() => void submitCreate()}
-            >
+            </Button>
+            <Button onClick={() => void submitCreate()} disabled={!name.trim() || saving}>
               Create teammate
-            </button>
+            </Button>
           </div>
         </div>
       </Dialog>
+      {confirmDialog}
     </div>
   )
 }

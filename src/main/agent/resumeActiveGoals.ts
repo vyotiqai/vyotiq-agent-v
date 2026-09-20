@@ -4,11 +4,11 @@ import type { WebContents } from 'electron'
 import { getWorkspaces } from '../workspace/workspaces'
 import { workspaceSessionsRoot, resolveRunDir } from '@main/storage/paths'
 import { loadStatus } from './state'
-import { readGoal } from './runGoal'
+import { bumpGoalAutoResume, readGoal } from './runGoal'
 import { emitGoalUpdate } from './goalEvents'
 import { rearmLoopFromDisk } from './runLoopScheduler'
 import { launchRunFollowUpOrStart } from './launchRunInvoke'
-import { formatGoalContinueMessage } from '../../shared/goalRuntime'
+import { formatGoalContinueMessage, GOAL_AUTO_RESUME_LIMIT } from '../../shared/goalRuntime'
 import { isQuotaExhaustedMessage } from './quotaGate'
 import { isActive } from './runRegistry'
 import { resolveAgentProfile } from '@main/settings/agentProfiles'
@@ -48,6 +48,12 @@ export function resumeActiveGoalsAndLoops(wc: WebContents): void {
       if (loop?.status === 'armed') {
         logger.info('Re-armed chat loop', { scope: 'loop', correlationId: runId })
       }
+
+      // A delegated task owns its run's lifecycle. The scheduler's boot pass
+      // either rebuilds the watcher for a still-live run or finalizes it from
+      // durable status; relaunching the same run here would put two owners on
+      // one teammate and re-run delegated work the task already accounted for.
+      if (status.delegatedTaskId) continue
 
       // Quota exhaustion is a billing gate, not an outage (quotaGate contract):
       // relaunching cannot succeed until the plan resets, so an app-start
@@ -112,6 +118,29 @@ export function resumeActiveGoalsAndLoops(wc: WebContents): void {
         continue
       }
       if (isActive(runId)) continue
+
+      // Ceiling on unattended restarts: a goal that has already been relaunched
+      // at boot without a single user turn since is not making progress anyone
+      // is watching (a crash loop relaunches it at every launch and drains the
+      // plan). Leave it active and visible so the banner's Resume is the way
+      // back in. Any real user turn clears the counter (loop.ts).
+      if ((goal.autoResumeCount ?? 0) >= GOAL_AUTO_RESUME_LIMIT) {
+        logger.warn('Goal already auto-resumed without a user turn — waiting for Resume', {
+          scope: 'goal',
+          correlationId: runId,
+          autoResumeCount: goal.autoResumeCount ?? 0
+        })
+        emitGoalUpdate({
+          workspacePath,
+          runId,
+          runDir,
+          goal,
+          notice: `Goal not auto-resumed after restart: ${goal.objective}. Resume it to continue.`,
+          wc
+        })
+        continue
+      }
+      bumpGoalAutoResume(runDir)
 
       const launched = launchRunFollowUpOrStart({
         workspacePath,

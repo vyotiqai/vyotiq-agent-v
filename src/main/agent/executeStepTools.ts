@@ -250,8 +250,24 @@ export const TOOL_SOFT_DEADLINE_MS = resolveSoftDeadlineMs()
  * human answers, so "stuck" is the normal state while it waits — deadline-
  * killing it registers every long wait as a tool failure. Only the run's own
  * AbortSignal (cancel/interrupt) ends it.
+ *
+ * await_agent_instance waits on a child run for the same reason, and carries its
+ * own bounded `timeout_ms` (AWAIT_AGENT_INSTANCE_MAX_MS). The generic deadline
+ * always pre-empted it — measured 18 of 21 awaits failing at a median 600031ms,
+ * exactly this deadline, burning ~3h — and reported "the tool is stuck" for a
+ * child that was running normally, while the child itself kept going. Its own
+ * timeout returns the truthful message (child still running; cancel, re-await,
+ * or pull), so let that be the bound.
  */
-const DEADLINE_EXEMPT_TOOLS: ReadonlySet<string> = new Set(['ask_question'])
+const DEADLINE_EXEMPT_TOOLS: ReadonlySet<string> = new Set([
+  'ask_question',
+  'await_agent_instance'
+])
+
+/** A tool whose own bound governs it; the generic soft deadline does not apply. */
+export function isDeadlineExemptTool(name: string): boolean {
+  return DEADLINE_EXEMPT_TOOLS.has(name)
+}
 
 function resolveSoftDeadlineMs(): number {
   const raw = process.env.VYOTIQ_TOOL_SOFT_DEADLINE_MS

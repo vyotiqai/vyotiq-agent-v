@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { McpServerStatus } from '@shared/ipc'
 
 export type McpHealthIssue = {
   id: string
   name: string
   /** Connection error the server last reported, when it reported one. */
   error?: string
+  /** What kind of failure it is, so the row can offer the matching control. */
+  errorKind?: McpServerStatus['errorKind']
 }
 
 /**
@@ -17,12 +20,24 @@ export function useMcpHealth(
   workspacePath: string | null,
   enabled: boolean,
   refreshVersion = 0
-): { issues: McpHealthIssue[]; refresh: () => void } {
+): { issues: McpHealthIssue[]; refresh: () => void; retry: () => Promise<void> } {
   const [issues, setIssues] = useState<McpHealthIssue[]>([])
   const [refreshNonce, setRefreshNonce] = useState(0)
   const generationRef = useRef(0)
 
   const refresh = useCallback(() => setRefreshNonce((value) => value + 1), [])
+
+  /**
+   * Unlike `refresh`, this one dials: `mcpRefresh` drops the sessions and
+   * reconnects. It is only ever called from a button the user pressed.
+   */
+  const retry = useCallback(async (): Promise<void> => {
+    try {
+      await window.vyotiq?.mcpRefresh?.({ workspacePath })
+    } finally {
+      refresh()
+    }
+  }, [refresh, workspacePath])
 
   useEffect(() => {
     const onRegainAttention = (): void => {
@@ -52,11 +67,14 @@ export function useMcpHealth(
       }
       setIssues(
         result.data.servers
-          .filter((server) => server.enabled && !server.connected)
+          // A connect still in flight is not a fault. Without this the first
+          // seconds of a launch render every enabled server as broken.
+          .filter((server) => server.enabled && !server.connected && !server.connecting)
           .map((server) => ({
             id: server.id,
             name: server.name,
-            ...(server.error ? { error: server.error } : {})
+            ...(server.error ? { error: server.error } : {}),
+            ...(server.errorKind ? { errorKind: server.errorKind } : {})
           }))
       )
     })
@@ -65,5 +83,5 @@ export function useMcpHealth(
     }
   }, [workspacePath, enabled, refreshNonce, refreshVersion])
 
-  return { issues, refresh }
+  return { issues, refresh, retry }
 }

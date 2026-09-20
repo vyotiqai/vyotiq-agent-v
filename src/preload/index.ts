@@ -12,6 +12,7 @@ import {
   GithubAuthStatusSchema,
   SkillsChangedPayloadSchema,
   AgentProfilesChangedEventSchema,
+  AgentProfileOverridesChangedEventSchema,
   TasksChangedEventSchema,
   ToolCatalogResultSchema,
   GitStatusChangedPayloadSchema,
@@ -101,7 +102,8 @@ const api: VyotiqApi = {
   resolveWrites: (payload) => ipcRenderer.invoke(IPC.runsResolveWrites, payload),
   readRunArtifact: (payload) => ipcRenderer.invoke(IPC.runsReadArtifact, payload),
   runStats: (payload) => ipcRenderer.invoke(IPC.runStats, payload),
-  homeActivity: (payload) => ipcRenderer.invoke(IPC.homeActivity, payload),  harnessReview: (payload) => ipcRenderer.invoke(IPC.harnessReview, payload),
+  homeActivity: (payload) => ipcRenderer.invoke(IPC.homeActivity, payload),
+  harnessReview: (payload) => ipcRenderer.invoke(IPC.harnessReview, payload),
   runFeedbackGet: (payload) => ipcRenderer.invoke(IPC.runFeedbackGet, payload),
   runFeedbackSet: (payload) => ipcRenderer.invoke(IPC.runFeedbackSet, payload),
   harnessPreviewApply: (payload) => ipcRenderer.invoke(IPC.harnessPreviewApply, payload),
@@ -531,9 +533,25 @@ const api: VyotiqApi = {
       ipcRenderer.removeListener(IPC.agentProfilesChanged, listener)
     }
   },
+  agentProfileOverridesList: (payload) =>
+    ipcRenderer.invoke(IPC.agentProfileOverridesList, payload),
+  agentProfileOverrideSet: (payload) =>
+    ipcRenderer.invoke(IPC.agentProfileOverrideSet, payload),
+  onAgentProfileOverridesChanged: (handler) => {
+    const listener = (_: IpcRendererEvent, raw: unknown): void => {
+      const parsed = AgentProfileOverridesChangedEventSchema.safeParse(raw)
+      if (!parsed.success) return
+      handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.agentProfileOverridesChanged, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.agentProfileOverridesChanged, listener)
+    }
+  },
   tasksList: () => ipcRenderer.invoke(IPC.tasksList),
   tasksEnqueue: (payload) => ipcRenderer.invoke(IPC.tasksEnqueue, payload),
   tasksCancel: (payload) => ipcRenderer.invoke(IPC.tasksCancel, payload),
+  tasksRetry: (payload) => ipcRenderer.invoke(IPC.tasksRetry, payload),
   onTasksChanged: (handler) => {
     const listener = (_: IpcRendererEvent, raw: unknown): void => {
       const parsed = TasksChangedEventSchema.safeParse(raw)

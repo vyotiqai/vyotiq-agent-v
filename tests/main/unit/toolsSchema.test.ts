@@ -271,7 +271,11 @@ describe('harness tool catalog', () => {
     const harness = readFileSync(harnessPath, 'utf8')
     // 2000 -> 2100: the ```chart data-viz capability line joined the spine
     // (HEAD sat at 1992, leaving no headroom for any new capability).
-    expect(estimateTextTokens(harness)).toBeLessThan(2100)
+    // 2100 -> 2150: the tool-fallback ranking joined tool_policy (25 tokens).
+    // The unranked fallback let a broken `read` send the model to PowerShell
+    // paging for hours, and the silent detour hid the defect; HEAD sat at 2073
+    // with only 4 tokens free, so the clause could not fit under 2100.
+    expect(estimateTextTokens(harness)).toBeLessThan(2150)
   })
 
   it.skipIf(!existsSync(join(process.cwd(), 'docs', 'harness-handbook.md')))(

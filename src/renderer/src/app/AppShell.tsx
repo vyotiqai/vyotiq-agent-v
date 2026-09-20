@@ -52,6 +52,7 @@ function AppShellInner({
   onOpenFeedback,
   focusedRunId = null,
   onOpenMarketplace,
+  onOpenTeammates,
   onOpenChat,
   onOpenHome,
   onNewChat,
@@ -81,7 +82,7 @@ function AppShellInner({
   loading,
   navigationMode = 'sidebar'
 }: {
-  view: 'chat' | 'settings' | 'marketplace' | 'home'
+  view: 'chat' | 'settings' | 'marketplace' | 'teammates' | 'home'
   workspacePath: string | null
   openWorkspaces?: string[]
   runsByWorkspacePath?: Record<string, WorkspaceSidebarRuns>
@@ -95,6 +96,7 @@ function AppShellInner({
   onOpenFeedback?: () => void
   focusedRunId?: string | null
   onOpenMarketplace: () => void
+  onOpenTeammates: () => void
   onOpenChat: () => void
   onOpenHome: () => void
   onNewChat: () => void
@@ -364,6 +366,7 @@ function AppShellInner({
     onOpenNotificationSettings,
     focusedRunId,
     onOpenMarketplace,
+    onOpenTeammates,
     onOpenChat,
     onOpenHome,
     onNewChatInWorkspace,

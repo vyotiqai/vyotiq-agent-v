@@ -197,7 +197,7 @@ export function MarketplaceRulesPane({
         description="User Rules apply to all of your chats."
         initialFocusRef={newUserInputRef}
         useNativeDialog={false}
-        className="w-[min(92vw,28rem)] rounded-xl border border-border bg-surface p-4 text-fg shadow-xl"
+        className="w-[min(92vw,28rem)] rounded-xl border border-border bg-surface text-fg shadow-menu"
       >
         <form
           className="flex flex-col gap-3"
@@ -206,8 +206,6 @@ export function MarketplaceRulesPane({
             void confirmNewUser()
           }}
         >
-          <h2 className="m-0 text-sm font-medium text-fg">New User Rule</h2>
-          <p className="m-0 text-xs text-secondary">User Rules apply to all of your chats.</p>
           <label className="flex flex-col gap-1 text-xs text-secondary">
             Name
             <Input

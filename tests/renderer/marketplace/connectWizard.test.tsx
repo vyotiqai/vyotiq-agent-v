@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MarketplaceView } from '@renderer/features/marketplace'
 import { DEFAULT_SETTINGS, type Settings } from '@shared/ipc'
 
@@ -70,13 +70,29 @@ const githubServer = {
   auth: 'oauth' as const
 }
 
+const NO_GITHUB_AUTH = {
+  ghAvailable: true,
+  ghAuthenticated: false,
+  hasAppToken: false,
+  pending: false,
+  userCode: null,
+  verificationUri: null,
+  error: null
+}
+
+/** Pushed to whatever the wizard subscribed with, to finish a device flow. */
+let githubAuthListeners: Array<(s: unknown) => void> = []
+
 function mockVyotiq(opts?: {
   packages?: unknown[]
   installed?: unknown[]
   mcpServersStatus?: unknown[]
   /** What `getSettings` reports — drives the post-install connect decision. */
   serversAfterInstall?: unknown[]
+  /** The app's own GitHub sign-in, which GitHub MCP can borrow. */
+  githubAuth?: typeof NO_GITHUB_AUTH
 }): void {
+  githubAuthListeners = []
   const packages = opts?.packages ?? [githubCatalog]
   // @ts-expect-error test bridge
   window.vyotiq = {
@@ -128,7 +144,27 @@ function mockVyotiq(opts?: {
     mcpSetGoogleClientSecret: vi.fn(async () => ({ ok: true as const, data: true as const })),
     mcpSetOAuthClientSecret: vi.fn(async () => ({ ok: true as const, data: true as const })),
     skillsListLocal: vi.fn(async () => ({ ok: true as const, data: { skills: [] } })),
-    onSkillsChanged: vi.fn(() => () => {})
+    onSkillsChanged: vi.fn(() => () => {}),
+    shellOpenExternal: vi.fn(async () => ({ ok: true as const, data: true as const })),
+    githubAuthStatus: vi.fn(async () => ({
+      ok: true as const,
+      data: opts?.githubAuth ?? NO_GITHUB_AUTH
+    })),
+    githubAuthStart: vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        ...NO_GITHUB_AUTH,
+        pending: true,
+        userCode: 'ABCD-1234',
+        verificationUri: 'https://github.com/login/device'
+      }
+    })),
+    onGithubAuthStatus: vi.fn((fn: (s: unknown) => void) => {
+      githubAuthListeners.push(fn)
+      return () => {
+        githubAuthListeners = githubAuthListeners.filter((l) => l !== fn)
+      }
+    })
   }
 }
 
@@ -158,7 +194,8 @@ describe('Connect MCP wizard', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^Add$/i }))
     expect(await screen.findByRole('dialog', { name: /Connect GitHub/i })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /^Options$/i }))
-    expect(screen.getByText(/Sign in with OAuth/i)).toBeTruthy()
+    expect(screen.getByText(/Use the Agent V GitHub sign-in/i)).toBeTruthy()
+    expect(screen.getByText(/Sign in with your own OAuth app/i)).toBeTruthy()
     expect(screen.getByText(/Paste a personal access token/i)).toBeTruthy()
     expect(screen.getByText(/Where can Agent V use this/i)).toBeTruthy()
   })
@@ -480,5 +517,145 @@ describe('Connect MCP wizard', () => {
         workspacePath: WORKSPACE
       })
     })
+  })
+})
+
+/**
+ * The complaint that started this: "MCPs are not one-click install — you have
+ * to manually add client IDs." GitHub advertises no dynamic client
+ * registration, so `auth: "oauth-client"` (what the bundled manifest actually
+ * declares) used to open this dialog on a form asking for the client ID and
+ * secret of an OAuth app the user had not registered yet. Agent V already
+ * signs in to GitHub for Git and pull requests, and GitHub's hosted MCP takes
+ * that same user token as a Bearer.
+ */
+describe('GitHub MCP without registering an OAuth app', () => {
+  const oauthClientServer = { ...githubServer, auth: 'oauth-client' as const }
+
+  const openWizard = async (opts?: Parameters<typeof mockVyotiq>[0]): Promise<void> => {
+    mockVyotiq({ serversAfterInstall: [oauthClientServer], ...opts })
+    // The wizard reads the server's manifest fields off the settings prop,
+    // which in the app is refreshed by `onReloadSettings` once install lands.
+    render(
+      <MarketplaceView
+        settings={{ ...baseSettings, mcpServers: [oauthClientServer] }}
+        onUpdate={vi.fn(async () => ({ ok: true as const }))}
+      />
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /^Add$/i }))
+    expect(await screen.findByRole('dialog', { name: /Connect GitHub/i })).toBeTruthy()
+  }
+
+  it('asks for no credentials at all', async () => {
+    await openWizard()
+
+    // No Continue means no client-ID step in front of the user.
+    expect(screen.queryByRole('button', { name: /^Continue$/i })).toBeNull()
+    expect(screen.queryByPlaceholderText(/Client ID/i)).toBeNull()
+    expect(screen.getByRole('button', { name: /Sign in with GitHub/i })).toBeTruthy()
+  })
+
+  it('runs the app device flow and shows the code to enter', async () => {
+    await openWizard()
+
+    fireEvent.click(screen.getByRole('button', { name: /Sign in with GitHub/i }))
+
+    await waitFor(() => {
+      expect(window.vyotiq.githubAuthStart).toHaveBeenCalled()
+    })
+    expect(await screen.findByText('ABCD-1234')).toBeTruthy()
+    // Pressing again would abandon the code the user is mid-way through typing.
+    expect(screen.getByRole('button', { name: /Waiting for GitHub/i }).hasAttribute('disabled')).toBe(
+      true
+    )
+    // Nothing vendor-specific was registered to get here.
+    expect(window.vyotiq.mcpSetOAuthClientSecret).not.toHaveBeenCalled()
+    expect(window.vyotiq.mcpStartOAuth).not.toHaveBeenCalled()
+  })
+
+  it('reconnects and closes once the device flow lands', async () => {
+    await openWizard()
+    fireEvent.click(screen.getByRole('button', { name: /Sign in with GitHub/i }))
+    await screen.findByText('ABCD-1234')
+
+    act(() => {
+      for (const notify of githubAuthListeners) {
+        notify({ ...NO_GITHUB_AUTH, ghAuthenticated: true, hasAppToken: true })
+      }
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Connect GitHub/i })).toBeNull()
+    })
+    // The server reads the token out of the app's own storage, so reconnecting
+    // is the whole of "connect".
+    expect(window.vyotiq.mcpRefresh).toHaveBeenCalled()
+  })
+
+  it('skips the sign-in entirely when the app is already signed in', async () => {
+    await openWizard({
+      githubAuth: { ...NO_GITHUB_AUTH, ghAuthenticated: true, hasAppToken: true }
+    })
+
+    expect(await screen.findByText(/already signed in to GitHub/i)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Connect$/i })).toBeTruthy()
+  })
+
+  it('stops offering the app sign-in once the server has rejected it', async () => {
+    // A token exists and the server still wants one: only the borrowed
+    // sign-in can produce that pairing. Offering it again would loop the user
+    // through "already signed in" → Connect → the same 401. Reached the way
+    // the user would: the installed card, not a fresh install.
+    mockVyotiq({
+      serversAfterInstall: [oauthClientServer],
+      githubAuth: { ...NO_GITHUB_AUTH, ghAuthenticated: true, hasAppToken: true },
+      installed: [
+        {
+          id: 'github',
+          kind: 'mcp' as const,
+          name: 'GitHub',
+          version: '1.0.0',
+          description: '',
+          enabled: true,
+          installSource: 'bundled' as const,
+          installedAt: new Date().toISOString(),
+          packagePath: 'github/1.0.0'
+        }
+      ],
+      mcpServersStatus: [
+        {
+          id: 'github',
+          name: 'GitHub',
+          enabled: true,
+          connected: false,
+          toolCount: 0,
+          hasAuthToken: true,
+          error: 'Sign in required',
+          errorKind: 'sign-in'
+        }
+      ]
+    })
+    render(
+      <MarketplaceView
+        settings={{ ...baseSettings, mcpServers: [oauthClientServer] }}
+        onUpdate={vi.fn(async () => ({ ok: true as const }))}
+      />
+    )
+
+    // The installed card offers the way back in — it used to be a dead chip.
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign in$/i }))
+    expect(await screen.findByRole('dialog', { name: /Connect GitHub/i })).toBeTruthy()
+
+    expect(screen.queryByRole('button', { name: /Sign in with GitHub/i })).toBeNull()
+    expect(await screen.findByRole('button', { name: /^Continue$/i })).toBeTruthy()
+  })
+
+  it('still offers registering your own OAuth app', async () => {
+    // Self-hosters and anyone who wants a separate identity keep the old route.
+    await openWizard()
+    fireEvent.click(screen.getByRole('button', { name: /^Options$/i }))
+    fireEvent.click(screen.getByLabelText(/Sign in with your own OAuth app/i))
+
+    expect(await screen.findByRole('button', { name: /^Continue$/i })).toBeTruthy()
   })
 })

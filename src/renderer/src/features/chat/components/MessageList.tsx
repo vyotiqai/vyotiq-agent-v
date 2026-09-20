@@ -318,7 +318,8 @@ type TranscriptLayoutMode = 'flow' | 'hybrid' | 'full-virtual'
 /** Per-run verdict control, threaded to the closing answer's footer. */
 export type MessageRunFeedback = {
   value: RunFeedbackRating | null
-  onRate: (rating: RunFeedbackRating | null) => void
+  note?: string
+  onRate: (rating: RunFeedbackRating | null, note?: string) => void
 }
 
 function distanceFromBottom(el: HTMLElement): number {

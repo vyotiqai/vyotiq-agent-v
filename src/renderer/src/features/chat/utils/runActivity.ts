@@ -1,12 +1,13 @@
 import { getToolHeaderMeta } from '../toolUi'
 import { truncateText } from '../toolUi/parsers/common'
+import { runVoicePhrase } from './runVoice'
 import { mapToolGroupProps } from './toolGroupAdapter'
 import type { TranscriptRow } from './transcriptRows'
 
 export type RunActivityPhase =
   | { kind: 'planning' }
   | { kind: 'working' }
-  | { kind: 'reconnecting'; attempt: number; maxAttempts: number }
+  | { kind: 'reconnecting'; attempt: number; maxAttempts: number; reason?: string }
   | { kind: 'compacting' }
   | { kind: 'verifying_compact' }
   | { kind: 'retrying_compact' }
@@ -62,23 +63,51 @@ function toolPhaseFromActivity(row: Extract<TranscriptRow, { kind: 'activity' }>
 }
 
 /**
- * Live turn-summary label. Always use the specific phase so collapsed and
- * expanded chrome stay aligned with aria-live announcements.
+ * Live turn-summary label, in the transcript's voice. Always use the specific
+ * phase so collapsed and expanded chrome stay aligned; announcements keep the
+ * literal `formatRunActivityLabel` so a rotating phrase never re-announces.
  */
-export function turnSummaryActiveLabel(
-  activity: RunActivityPhase | null | undefined
+export function turnSummaryVoiceLabel(
+  activity: RunActivityPhase | null | undefined,
+  tick: number
 ): string {
-  return activity ? formatRunActivityLabel(activity) : 'Working'
+  return activity ? runActivityVoiceLabel(activity, tick) : runVoicePhrase('working', tick)
 }
 
+/**
+ * What the timeline shows. Same phase and same detail as the literal label,
+ * except that the four phases with no verb of their own speak in the
+ * transcript's voice. Gates, failures, and compaction stay literal: a clever
+ * word there would hide what the user has to answer or what went wrong.
+ */
+export function runActivityVoiceLabel(phase: RunActivityPhase, tick: number): string {
+  switch (phase.kind) {
+    case 'working':
+    case 'thinking':
+    case 'planning':
+    case 'writing':
+      return runVoicePhrase(phase.kind, tick)
+    default:
+      return formatRunActivityLabel(phase)
+  }
+}
+
+/** The literal phase wording: what announcements say, and what unvoiced phases render. */
 export function formatRunActivityLabel(phase: RunActivityPhase): string {
   switch (phase.kind) {
     case 'planning':
       return 'Planning'
     case 'working':
       return 'Working'
-    case 'reconnecting':
-      return `Reconnecting (${phase.attempt}/${phase.maxAttempts})`
+    case 'reconnecting': {
+      // maxAttempts 0 means "retry until it recovers" — "(17/0)" reads as a bug.
+      const count =
+        phase.maxAttempts > 0
+          ? `${phase.attempt}/${phase.maxAttempts}`
+          : `attempt ${phase.attempt}`
+      const why = truncateDetail(phase.reason)
+      return why ? `Reconnecting (${count}) — ${why}` : `Reconnecting (${count})`
+    }
     case 'compacting':
       return 'Compacting…'
     case 'verifying_compact':

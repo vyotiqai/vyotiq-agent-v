@@ -164,10 +164,10 @@ export function ActivitySection({
       <HomeCard className="animate-fade-in">
         {/* Two up in a narrow column, four across once the card is wide enough
             for four numbers not to collide. Driven by the card, not the window:
-            Activity sits in the rail on a wide screen, and that rail measures
-            about 550-600px on a real display — so the threshold has to sit
-            below that band, not inside it. Four 128px cells hold a caps label
-            and a short number without touching. */}
+            Activity now spans the full width at the top of Home, so four-across
+            is what any real display gets and the two-up stack only covers a
+            deliberately narrow window. Four 128px cells hold a caps label and a
+            short number without touching. */}
         <div className="grid grid-cols-2 divide-border/40 [&>*:nth-child(-n+2)]:border-b [&>*:nth-child(-n+2)]:border-border/40 @lg:grid-cols-4 @lg:divide-x @lg:[&>*]:border-b-0">
           <Tile label="Sessions" value={formatCount(totals.runs)} />
           <Tile

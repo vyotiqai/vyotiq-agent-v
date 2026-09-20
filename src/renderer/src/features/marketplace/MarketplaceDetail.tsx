@@ -36,8 +36,9 @@ export function MarketplaceDetail({
   onBack: () => void
   onOpenManage: () => void
 }) {
-  const { installed, mcpStatusById, workspaceEnabledForId, formLocked, busyTargetId, installFromCatalog, feedback, setFeedback, openConnectWizard } =
+  const { installed, mcpStatusById, workspaceEnabledForId, formLocked, busyTargetId, installFromCatalog, feedback, setFeedback, openConnectWizard, loadMcpStatus } =
     controller
+  const [retrying, setRetrying] = useState(false)
   const installedItem = useMemo(
     () => installed.items.find((i) => i.id === entry.id),
     [installed.items, entry.id]
@@ -87,7 +88,7 @@ export function MarketplaceDetail({
       </nav>
 
       <div className="flex flex-wrap items-start gap-4">
-        <PackageIcon name={entry.name} iconUrl={entry.iconUrl} size={56} />
+        <PackageIcon name={entry.name} iconUrl={entry.iconUrl} iconMono={entry.iconMono} size={56} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="m-0 text-xl font-medium tracking-[var(--vy-tracking)] text-fg-strong">
@@ -114,9 +115,30 @@ export function MarketplaceDetail({
               </span>
             ) : isInstalled ? (
               <>
-                <Button variant="subtle" disabled className={activity.className}>
-                  {installedActionLabel(activity)}
-                </Button>
+                {/* A state with a way out is a button, not a label. A public
+                    server like DeepWiki declares no auth, so before this it
+                    got a dead "Connect failed" chip and no Connect button
+                    either — nothing on the page moved it forward. */}
+                {activity.action ? (
+                  <Button
+                    variant={activity.kind === 'needs-auth' ? 'primary' : 'subtle'}
+                    pending={retrying}
+                    onClick={() => {
+                      if (activity.action?.kind === 'sign-in') {
+                        openConnectWizard(entry.id)
+                        return
+                      }
+                      setRetrying(true)
+                      void loadMcpStatus(true).finally(() => setRetrying(false))
+                    }}
+                  >
+                    {activity.action.label}
+                  </Button>
+                ) : (
+                  <Button variant="subtle" disabled className={activity.className}>
+                    {installedActionLabel(activity)}
+                  </Button>
+                )}
                 {entry.kind === 'mcp' && entry.auth && entry.auth !== 'none' ? (
                   <Button variant="subtle" onClick={() => openConnectWizard(entry.id)}>
                     {activity.kind === 'connected' ? 'Reconnect' : 'Connect'}

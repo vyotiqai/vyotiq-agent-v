@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { RunFeedbackRating } from '@shared/ipc'
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { RUN_FEEDBACK_NOTE_MAX, type RunFeedbackRating } from '@shared/ipc'
 import { Icon } from '@renderer/lib/icons'
 import { Tooltip, cn } from '@renderer/lib/ui'
 import { copyText } from '@renderer/lib/markdown/copyText'
@@ -41,12 +41,24 @@ export function MessageFooter({
    */
   runFeedback?: {
     value: RunFeedbackRating | null
-    onRate: (rating: RunFeedbackRating | null) => void
+    note?: string
+    onRate: (rating: RunFeedbackRating | null, note?: string) => void
   }
 }) {
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
   const nowMs = useSharedNow(!omitReceipt && !omitDuration && active && startedAt != null)
+
+  const savedNote = runFeedback?.note ?? ''
+  const noteActive = runFeedback != null && runFeedback.value != null
+  const [noteDraft, setNoteDraft] = useState('')
+
+  // The note input only exists while a verdict is active; the draft tracks
+  // the stored note so an optimistic rollback snaps the text back too.
+  useEffect(() => {
+    if (!noteActive) return
+    setNoteDraft(savedNote)
+  }, [noteActive, savedNote])
 
   const stats = useMemo(
     () =>
@@ -83,6 +95,20 @@ export function MessageFooter({
       }
     })
   }, [content, copyContent])
+
+  // Enter and blur both submit; an unchanged draft never re-fires the IPC.
+  const submitNote = () => {
+    if (!noteActive || !runFeedback) return
+    const trimmed = noteDraft.trim()
+    if (trimmed === savedNote) return
+    runFeedback.onRate(runFeedback.value, trimmed || undefined)
+  }
+
+  const onNoteKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Escape') return
+    setNoteDraft(savedNote)
+    e.currentTarget.blur()
+  }
 
   if (!content.trim()) return null
 
@@ -160,6 +186,19 @@ export function MessageFooter({
       )}
       {rateButton('up')}
       {rateButton('down')}
+      {noteActive && runFeedback ? (
+        <input
+          type="text"
+          className="min-w-0 flex-1 bg-transparent text-2xs text-muted focus:outline-none"
+          maxLength={RUN_FEEDBACK_NOTE_MAX}
+          value={noteDraft}
+          onChange={(e) => setNoteDraft(e.target.value)}
+          onBlur={submitNote}
+          onKeyDown={onNoteKeyDown}
+          placeholder="Add a note…"
+          aria-label="Feedback note"
+        />
+      ) : null}
     </div>
   )
 }

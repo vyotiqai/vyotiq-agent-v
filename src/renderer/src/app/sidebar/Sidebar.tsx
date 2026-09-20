@@ -13,6 +13,7 @@ import {
   SIDEBAR_WIDTH_PX
 } from '@renderer/lib/utils/layout'
 import { ChatList } from './ChatList'
+import { TeammatesSection } from './TeammatesSection'
 import { SidebarCollapsedHeader, SidebarTopBar } from './SidebarTopBar'
 import type { SidebarProps } from './types'
 import { useSidebarChats } from './useSidebarChats'
@@ -38,6 +39,7 @@ export function Sidebar({
   onOpenNotificationSettings,
   focusedRunId = null,
   onOpenMarketplace,
+  onOpenTeammates,
   onOpenHome,
   onOpenChat,
   onNewChatInWorkspace,
@@ -123,6 +125,12 @@ export function Sidebar({
     focusedRunId
   })
 
+  const openTeammates = (): void => {
+    clearSearch()
+    onOpenTeammates()
+    afterNav()
+  }
+
   const openMarketplace = (): void => {
     clearSearch()
     onOpenMarketplace()
@@ -202,13 +210,6 @@ export function Sidebar({
                   }
                 : undefined
             }
-            onStartTeammateChat={onStartTeammateChat}
-            onOpenTaskRun={(path, runId) => {
-              setExpanded(path, true)
-              onOpenTaskRun?.(path, runId)
-              onOpenChat()
-              afterNav()
-            }}
             onSelectRun={(path, runId) => {
               setExpanded(path, true)
               onSelectRunInWorkspace?.(path, runId)
@@ -235,6 +236,20 @@ export function Sidebar({
             isRunFocusedInPane={isRunFocusedInPane}
             openInstanceRunId={openInstanceRunId}
             hideSessionRuns={dockImmersive && !sessionQuery.trim()}
+          />
+          {/* A sibling of the chat list, not its last child: inside ChatList
+              the roster sat below every workspace and every chat, and it was
+              hidden entirely whenever no workspace was open. */}
+          <TeammatesSection
+            onStartTeammateChat={onStartTeammateChat}
+            onOpenTeammates={onOpenTeammates}
+            onOpenTaskRun={(path, runId) => {
+              setExpanded(path, true)
+              onOpenTaskRun?.(path, runId)
+              onOpenChat()
+              afterNav()
+            }}
+            activeWorkspacePath={activePath ?? null}
           />
         </div>
       )}
@@ -276,6 +291,14 @@ export function Sidebar({
             }
           }}
           onOpenSettings={openNotificationSettings}
+        />
+        <NavItem
+          label="Teammates"
+          icon="bot"
+          variant={isCollapsed ? 'icon' : 'sidebar'}
+          current={view === 'teammates'}
+          className={isCollapsed ? undefined : "w-full"}
+          onClick={openTeammates}
         />
         <NavItem
           label="Settings"

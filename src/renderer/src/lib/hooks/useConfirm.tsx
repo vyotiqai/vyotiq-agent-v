@@ -62,7 +62,7 @@ export function useConfirm(): {
       onClose={() => finish(false)}
       title={state?.title ?? 'Confirm action'}
       useNativeDialog={false}
-      className="w-[min(92vw,28rem)] rounded-xl border border-border bg-surface p-4 text-fg shadow-xl"
+      className="w-[min(92vw,28rem)] rounded-xl border border-border bg-surface text-fg shadow-menu"
     >
       <div className="flex flex-col gap-4">
         <p className="m-0 text-sm text-fg">{state?.message}</p>

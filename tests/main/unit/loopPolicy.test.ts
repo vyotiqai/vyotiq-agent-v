@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  adaptiveThinkingEffort,
+  emptyResponseRetryEffort,
+  weakestEffort,
+  isMechanicalStep,
+  MECHANICAL_STREAK_BEFORE_STEPDOWN,
   applyToolCallToKnownPaths,
   combineLoopHints,
   deletePathFromToolCall,
@@ -257,5 +262,107 @@ export function validateAuthToken`
       () => true
     )
     expect(unread).toHaveLength(0)
+  })
+})
+
+describe('adaptive thinking effort', () => {
+  describe('isMechanicalStep', () => {
+    it('is true for a step that only ran read-only lookups', () => {
+      expect(isMechanicalStep(['read', 'read', 'grep'], '')).toBe(true)
+      expect(isMechanicalStep(['glob'], '   ')).toBe(true)
+    })
+
+    it('is false as soon as the step produced a visible answer', () => {
+      expect(isMechanicalStep(['read'], 'Here is what I found.')).toBe(false)
+    })
+
+    it('is false for consequential tools mixed into the step', () => {
+      expect(isMechanicalStep(['read', 'terminal'], '')).toBe(false)
+      expect(isMechanicalStep(['read', 'edit'], '')).toBe(false)
+      expect(isMechanicalStep(['run_tests'], '')).toBe(false)
+      expect(isMechanicalStep(['diagnostics'], '')).toBe(false)
+      expect(isMechanicalStep(['spawn_agent_instance'], '')).toBe(false)
+      expect(isMechanicalStep(['ask_question'], '')).toBe(false)
+    })
+
+    it('is false for a step with no tool calls at all', () => {
+      expect(isMechanicalStep([], '')).toBe(false)
+    })
+  })
+
+  describe('adaptiveThinkingEffort', () => {
+    it('never exceeds the user setting', () => {
+      for (const streak of [0, 1, 2, 5, 50]) {
+        expect(adaptiveThinkingEffort('low', streak)).not.toBe('max')
+        expect(adaptiveThinkingEffort('medium', streak)).not.toBe('high')
+      }
+    })
+
+    it('holds the ceiling until the streak threshold', () => {
+      expect(adaptiveThinkingEffort('max', 0)).toBe('max')
+      expect(adaptiveThinkingEffort('max', MECHANICAL_STREAK_BEFORE_STEPDOWN - 1)).toBe('max')
+    })
+
+    it('steps down one tier at the threshold and two at the floor', () => {
+      expect(adaptiveThinkingEffort('max', 2)).toBe('xhigh')
+      expect(adaptiveThinkingEffort('max', 3)).toBe('high')
+      // Floored at two tiers — a long chain never collapses to minimal.
+      expect(adaptiveThinkingEffort('max', 9)).toBe('high')
+      expect(adaptiveThinkingEffort('max', 100)).toBe('high')
+    })
+
+    it('cannot go below the weakest tier', () => {
+      expect(adaptiveThinkingEffort('minimal', 50)).toBe('minimal')
+      expect(adaptiveThinkingEffort('low', 50)).toBe('minimal')
+    })
+
+    it('scales from whatever ceiling the user chose', () => {
+      expect(adaptiveThinkingEffort('high', 2)).toBe('medium')
+      expect(adaptiveThinkingEffort('high', 3)).toBe('low')
+      expect(adaptiveThinkingEffort('medium', 3)).toBe('minimal')
+    })
+  })
+
+  describe('emptyResponseRetryEffort', () => {
+    it('holds the ceiling while no turn has come back empty', () => {
+      expect(emptyResponseRetryEffort('max', 0)).toBe('max')
+      expect(emptyResponseRetryEffort('max', -1)).toBe('max')
+    })
+
+    it('steps down one rung per consecutive empty turn', () => {
+      expect(emptyResponseRetryEffort('max', 1)).toBe('xhigh')
+      expect(emptyResponseRetryEffort('max', 2)).toBe('high')
+      expect(emptyResponseRetryEffort('max', 3)).toBe('medium')
+    })
+
+    it('never drops below the bottom of the ladder', () => {
+      expect(emptyResponseRetryEffort('low', 5)).toBe('minimal')
+      expect(emptyResponseRetryEffort('minimal', 5)).toBe('minimal')
+    })
+
+    it('never raises a lower ceiling the user chose', () => {
+      for (const n of [0, 1, 2, 3, 9]) {
+        expect(emptyResponseRetryEffort('medium', n)).not.toBe('high')
+        expect(emptyResponseRetryEffort('medium', n)).not.toBe('max')
+      }
+    })
+  })
+
+  describe('weakestEffort', () => {
+    it('returns the lower rung either way round', () => {
+      expect(weakestEffort('max', 'low')).toBe('low')
+      expect(weakestEffort('low', 'max')).toBe('low')
+      expect(weakestEffort('high', 'high')).toBe('high')
+      expect(weakestEffort('minimal', 'xhigh')).toBe('minimal')
+    })
+
+    it('combines a navigation step-down with an empty-retry step-down', () => {
+      // Two independent signals must not cancel out: the weaker one wins.
+      const navigation = adaptiveThinkingEffort('max', 3)
+      const retry = emptyResponseRetryEffort('max', 1)
+      expect(navigation).toBe('high')
+      expect(retry).toBe('xhigh')
+      expect(weakestEffort(navigation, retry)).toBe('high')
+    })
   })
 })

@@ -105,7 +105,12 @@ Instructions.
 `
     )
     const tgz = join(srcDir, 'pkg.tgz')
-    await execFileAsync('tar', ['-czf', tgz, '-C', srcDir, 'SKILL.md'])
+    // Every path is relative, resolved through cwd. GNU tar (Git Bash on
+    // Windows) parses an argument like `C:\tmp\pkg.tgz` as host:path and dies
+    // with "Cannot connect to C"; --force-local would fix that but bsdtar
+    // (macOS, and Windows' own tar.exe) does not accept the flag. Relative
+    // names are the one form both implementations read the same way.
+    await execFileAsync('tar', ['-czf', 'pkg.tgz', 'SKILL.md'], { cwd: srcDir })
     archiveBytes = readFileSync(tgz)
     archiveSha256 = createHash('sha256').update(archiveBytes).digest('hex')
   } finally {

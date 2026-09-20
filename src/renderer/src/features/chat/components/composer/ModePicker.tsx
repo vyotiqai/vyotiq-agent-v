@@ -34,6 +34,7 @@ export function ModePicker({
   mode: AgentInteractionMode
   onModeChange: (mode: AgentInteractionMode) => void
   disabled?: boolean
+  /** Settings can change for the next invocation while the current run continues. */
   running?: boolean
   className?: string
 }) {
@@ -45,7 +46,7 @@ export function ModePicker({
     [mode, onModeChange]
   )
 
-  const locked = Boolean(disabled || running)
+  const locked = Boolean(disabled)
 
   useEffect(() => {
     if (locked) return undefined
@@ -85,11 +86,10 @@ export function ModePicker({
   const upcoming = MODES.find((m) => m.value === nextMode(mode, false))!
   const chord = shortcutLabel('cycleMode')
 
-  const ariaLabel = running
-    ? `${current.label} mode (locked while running)`
-    : `${current.label} mode. Click for ${upcoming.label}.`
-
-  const tip = running ? ariaLabel : `${ariaLabel} Shift-click or ${chord} (Shift for previous).`
+  const ariaLabel = `${current.label} mode. Click for ${upcoming.label}.`
+  const tip = running
+    ? `${ariaLabel} Changes apply to the next message while this run continues. Shift-click or ${chord} (Shift for previous).`
+    : `${ariaLabel} Shift-click or ${chord} (Shift for previous).`
   const button = (
     <button
       type="button"

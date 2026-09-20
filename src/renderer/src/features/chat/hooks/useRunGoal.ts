@@ -10,14 +10,22 @@ function parseGoal(content: string | null | undefined): RunGoal | null {
   try {
     const raw = JSON.parse(content) as Partial<RunGoal>
     if (typeof raw.objective !== 'string' || !raw.objective.trim()) return null
-    if (raw.status !== 'active' && raw.status !== 'paused' && raw.status !== 'complete') return null
+    if (
+      raw.status !== 'proposed' &&
+      raw.status !== 'active' &&
+      raw.status !== 'paused' &&
+      raw.status !== 'complete'
+    ) {
+      return null
+    }
     if (typeof raw.createdAt !== 'string' || typeof raw.updatedAt !== 'string') return null
     return {
       objective: raw.objective,
       status: raw.status,
       createdAt: raw.createdAt,
       updatedAt: raw.updatedAt,
-      ...(typeof raw.continueCount === 'number' ? { continueCount: raw.continueCount } : {})
+      ...(typeof raw.continueCount === 'number' ? { continueCount: raw.continueCount } : {}),
+      ...(raw.origin === 'user' || raw.origin === 'agent' ? { origin: raw.origin } : {})
     }
   } catch {
     return null
@@ -57,7 +65,8 @@ function sameGoal(a: RunGoal | null, b: RunGoal | null): boolean {
     a.status === b.status &&
     a.createdAt === b.createdAt &&
     a.updatedAt === b.updatedAt &&
-    a.continueCount === b.continueCount
+    a.continueCount === b.continueCount &&
+    a.origin === b.origin
   )
 }
 
@@ -84,6 +93,8 @@ export function useRunGoal(opts: {
   pause: () => Promise<boolean>
   resume: () => Promise<boolean>
   complete: () => Promise<boolean>
+  activate: () => Promise<boolean>
+  dismiss: () => Promise<boolean>
   stopLoop: () => Promise<boolean>
 } {
   const { workspacePath, runId, running = false, active = true } = opts
@@ -186,6 +197,38 @@ export function useRunGoal(opts: {
     return true
   }, [workspacePath, runId])
 
+  // Start an agent-proposed goal. This is the user grant that turns a proposal
+  // into an active goal, so it exists only as a UI action.
+  const activate = useCallback(async (): Promise<boolean> => {
+    if (!workspacePath || !runId || !window.vyotiq?.setGoalStatus) return false
+    const res = await window.vyotiq.setGoalStatus({
+      workspacePath,
+      runId,
+      action: 'activate'
+    })
+    if (!res.ok) {
+      pushToast(res.error, 'error')
+      return false
+    }
+    setGoal((prev) => (sameGoal(prev, res.data.goal) ? prev : res.data.goal))
+    return true
+  }, [workspacePath, runId])
+
+  const dismiss = useCallback(async (): Promise<boolean> => {
+    if (!workspacePath || !runId || !window.vyotiq?.setGoalStatus) return false
+    const res = await window.vyotiq.setGoalStatus({
+      workspacePath,
+      runId,
+      action: 'dismiss'
+    })
+    if (!res.ok) {
+      pushToast(res.error, 'error')
+      return false
+    }
+    setGoal(null)
+    return true
+  }, [workspacePath, runId])
+
   const stopLoop = useCallback(async (): Promise<boolean> => {
     if (!workspacePath || !runId || !window.vyotiq?.setLoop) return false
     const res = await window.vyotiq.setLoop({
@@ -201,5 +244,5 @@ export function useRunGoal(opts: {
     return true
   }, [workspacePath, runId])
 
-  return { goal, loop, pause, resume, complete, stopLoop }
+  return { goal, loop, pause, resume, complete, activate, dismiss, stopLoop }
 }

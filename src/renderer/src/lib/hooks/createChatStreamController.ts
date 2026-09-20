@@ -1134,6 +1134,8 @@ export type ChatStreamState = {
     maxAttempts: number
     retryInMs: number
     code?: string
+    /** Provider's own reason for the wait, when it gave one. */
+    message?: string
   } | null
   contextUsage: ContextUsageState | null
   /** Per UI-turn step usage, aligned with user-turn index. */
@@ -1160,6 +1162,13 @@ export type ChatStreamState = {
   agentInstances: Record<string, AgentInstanceUiState>
   /** Session-pinned provider/model — set on first send; other sessions' model changes cannot bleed in. */
   providerModel: { provider: ProviderId; model: string } | null
+  /**
+   * True once the user picks a model by hand. `providerModel` is also filled
+   * from the ambient default on first send, so without this flag main cannot
+   * tell a deliberate choice from a default — and a teammate's pinned model
+   * would lose to a default the user never chose.
+   */
+  providerModelExplicit: boolean
 }
 
 export type ChatStreamController = ChatStreamState & {
@@ -1844,7 +1853,8 @@ export function createChatStreamController(
     writeCheckpoint: null,
     pendingFollowUps: [],
     agentInstances: {},
-    providerModel: null
+    providerModel: null,
+    providerModelExplicit: false
   }
 
   const notify = (): void => {
@@ -1947,7 +1957,8 @@ export function createChatStreamController(
       writeCheckpoint: null,
       pendingFollowUps: [],
       agentInstances: {},
-      providerModel: null
+      providerModel: null,
+      providerModelExplicit: false
     })
   }
 
@@ -1956,12 +1967,18 @@ export function createChatStreamController(
    * the first send so a model change in a different session (which only updates
    * the shared global settings) cannot bleed into this one.
    */
-  const resolveTurnProviderModel = (): { provider: ProviderId; model: string } | null => {
-    if (state.providerModel) return state.providerModel
+  const resolveTurnProviderModel = ():
+    | { provider: ProviderId; model: string; explicit: boolean }
+    | null => {
+    if (state.providerModel) {
+      return { ...state.providerModel, explicit: state.providerModelExplicit }
+    }
     const fallback = getDefaultProviderModel?.() ?? null
     if (!fallback) return null
+    // Pinning the ambient default still keeps another session's model change
+    // from bleeding in, but it stays non-explicit so a teammate's pin wins.
     patch({ providerModel: fallback })
-    return fallback
+    return { ...fallback, explicit: false }
   }
 
   const assignRunId = (id: string): void => {
@@ -2588,7 +2605,8 @@ export function createChatStreamController(
           attempt: event.attempt,
           maxAttempts: event.maxAttempts,
           retryInMs: event.retryInMs,
-          ...(event.code ? { code: event.code } : {})
+          ...(event.code ? { code: event.code } : {}),
+          ...(event.message ? { message: event.message } : {})
         },
         items: state.items.map((item) =>
           item.kind === 'message' && reconnectIds.has(item.id)
@@ -3053,6 +3071,7 @@ export function createChatStreamController(
           focusedFile,
           provider: turnProviderModel?.provider,
           model: turnProviderModel?.model,
+          modelExplicit: turnProviderModel?.explicit,
           agentProfileId
         }
       : {
@@ -3062,6 +3081,7 @@ export function createChatStreamController(
           focusedFile,
           provider: turnProviderModel?.provider,
           model: turnProviderModel?.model,
+          modelExplicit: turnProviderModel?.explicit,
           agentProfileId
         }
     let res = await window.vyotiq.chatStart(startPayload)
@@ -3181,7 +3201,8 @@ export function createChatStreamController(
       mode,
       focusedFile: getFocusedFile() ?? undefined,
       provider: resumeProviderModel?.provider,
-      model: resumeProviderModel?.model
+      model: resumeProviderModel?.model,
+      modelExplicit: resumeProviderModel?.explicit
     }
     let res = await window.vyotiq.chatStart(startPayload)
     for (let attempt = 2; attempt <= CHAT_START_MAX_ATTEMPTS && !res.ok; attempt++) {
@@ -3353,7 +3374,8 @@ export function createChatStreamController(
       editedUserMessage: user,
       mode,
       provider: turnProviderModel?.provider,
-      model: turnProviderModel?.model
+      model: turnProviderModel?.model,
+      modelExplicit: turnProviderModel?.explicit
     })
 
     if (!res.ok) {
@@ -4589,7 +4611,7 @@ export function createChatStreamController(
     if (disposed) return
     const trimmed = model.trim()
     if (!trimmed) return
-    patch({ providerModel: { provider, model: trimmed } })
+    patch({ providerModel: { provider, model: trimmed }, providerModelExplicit: true })
   }
 
   const applyWriteCheckpointResolution = (result: {
@@ -4706,6 +4728,9 @@ export function createChatStreamController(
     },
     get providerModel() {
       return state.providerModel
+    },
+    get providerModelExplicit() {
+      return state.providerModelExplicit
     },
     get disposed() {
       return disposed

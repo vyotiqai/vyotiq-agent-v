@@ -34,7 +34,7 @@ import {
   assertInlineInstanceUnscopedToolAllowed
 } from './writeGuard'
 import { toolTodoWrite, type TodoItem } from './todo'
-import { createGoal, updateGoalStatus, goalToolContent } from '../runGoal'
+import { proposeGoal, updateGoalStatus, goalToolContent } from '../runGoal'
 import { emitGoalUpdate } from '../goalEvents'
 import { truncateGoalObjective } from '../../../shared/goalRuntime'
 import { executeCreatePlan } from './createPlan'
@@ -61,7 +61,7 @@ import { withWorkspaceMutation } from '@main/workspace/mutationQueue'
 import { clearWorkspaceSnapshotCache } from '../context/workspaceSnapshot'
 import { invalidateGitStatusCache } from '@main/git/gitStatusCache'
 import { invalidateSlashCommandsCache } from '../slashCommands/listCache'
-import { clearGitignoreMatcherCache } from './gitignore'
+import { clearGitignoreMatcherCache, isGitignoreRelPath } from './gitignore'
 import { browserHandlers } from './browserTools'
 import { mcpHandlers } from './mcpTools'
 import { terminalHandlers } from './terminalHandlers'
@@ -87,6 +87,7 @@ import type {
   AgentInteractionMode,
   AgentQuestionAnswer,
   AgentQuestionRequest,
+  RunGoal,
   Settings,
   TerminalShell
 } from '../../../shared/ipc'
@@ -323,10 +324,15 @@ export function invalidateAfterWorkspaceMutation(
 ): void {
   invalidateGitStatusCache(workspace)
   clearWorkspaceSnapshotCache(workspace)
-  clearGitignoreMatcherCache(workspace)
   scheduleWorkspaceIndexSync(workspace)
   const paths =
     mutatedRelPath == null ? [] : Array.isArray(mutatedRelPath) ? mutatedRelPath : [mutatedRelPath]
+  // Rebuilding every matcher costs the next walk of this repo ~150ms, so only
+  // drop them when a `.gitignore` actually changed. Unknown mutations
+  // (terminal/git) may have rewritten one, so those still flush.
+  if (paths.length === 0 || paths.some(isGitignoreRelPath)) {
+    clearGitignoreMatcherCache(workspace)
+  }
   // Unknown mutations (terminal/git) may write SKILL.md; skill-related paths always refresh.
   if (
     paths.length === 0 ||
@@ -477,7 +483,18 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       return toolFail('create_goal', 'Root chat only', 'create_goal is only available on the root chat.')
     }
     const objective = typeof args.objective === 'string' ? args.objective : ''
-    const goal = createGoal(context.runDir ?? '', objective)
+    // Agent-created goals are proposals: inert until the user starts one from
+    // the banner. `/goal` seeds an active goal on its own path (loop.ts).
+    let goal: RunGoal
+    try {
+      goal = proposeGoal(context.runDir ?? '', objective)
+    } catch (err) {
+      return toolFail(
+        'create_goal',
+        'Not proposed',
+        err instanceof Error ? err.message : String(err)
+      )
+    }
     if (context.runId) {
       emitGoalUpdate({
         workspacePath: context.sessionWorkspace ?? _workspace,
@@ -486,7 +503,11 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
         goal
       })
     }
-    return toolOk('create_goal', truncateGoalObjective(goal.objective), goalToolContent(goal))
+    return toolOk(
+      'create_goal',
+      truncateGoalObjective(goal.objective),
+      `${goalToolContent(goal)}\nAwaiting user confirmation — it grants nothing until the user starts it. Continue this turn on your own; do not wait for it and do not try to activate it.`
+    )
   },
   update_goal: (_workspace, args, signal, context) => {
     throwIfAborted(signal)
@@ -501,7 +522,16 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
         'update_goal accepts only "active" (resume) or "complete" (objective done).'
       )
     }
-    const goal = updateGoalStatus(context.runDir ?? '', statusArg)
+    let goal: RunGoal
+    try {
+      goal = updateGoalStatus(context.runDir ?? '', statusArg)
+    } catch (err) {
+      return toolFail(
+        'update_goal',
+        'Not updated',
+        err instanceof Error ? err.message : String(err)
+      )
+    }
     if (context.runId) {
       emitGoalUpdate({
         workspacePath: context.sessionWorkspace ?? _workspace,
@@ -520,32 +550,14 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     if (!result.ok) {
       return toolFail('create_plan', result.summary, result.content)
     }
-    // Deterministic mode contract: publishing the plan switches the run to
-    // Plan mode when automatic mode switching is on — no deny/retry loop.
-    let switched = false
-    if (
-      context.autoModeSwitch &&
-      resolveAgentMode(context) === 'agent' &&
-      context.setAgentMode
-    ) {
-      await context.setAgentMode('plan')
-      switched = true
-      if (context.runId) {
-        context.emitAgentEvent?.({
-          type: 'mode_changed',
-          runId: context.runId,
-          mode: 'plan',
-          ...(context.invokeId != null ? { invokeId: context.invokeId } : {})
-        })
-      }
-    }
-    return toolOk(
-      'create_plan',
-      result.summary,
-      switched
-        ? `${result.content} Switched to Plan mode; switch back to \`agent\` to implement.`
-        : result.content
-    )
+    // `create_plan` publishes a FINISHED plan, so a run already in Agent mode
+    // stays there and implements it. Demoting to Plan mode here cost a whole
+    // model step to undo: measured across every plan in the telemetry, 4 of 4
+    // switched straight back, and 3 of those spent a dedicated step doing
+    // nothing else (10,744 / 9,972 / 2,065 ms). `plan.md` keeps remapping to
+    // the run directory in Agent mode once the artifact exists, so nothing
+    // else depended on the switch.
+    return toolOk('create_plan', result.summary, result.content)
   },
   ...browserHandlers,
   ...mcpHandlers,

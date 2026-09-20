@@ -77,9 +77,12 @@ export const instanceHandlers = {
         'run_id is not an inline instance spawned by this parent run'
       )
     }
+    // This is the only bound on the wait (await_agent_instance is exempt from the
+    // generic tool soft deadline), so clamp both ends: an unbounded timeout_ms
+    // would park the run indefinitely on a wedged child.
     const timeoutMs =
       typeof args.timeout_ms === 'number' && Number.isFinite(args.timeout_ms)
-        ? Math.max(1_000, Math.floor(args.timeout_ms))
+        ? Math.min(AWAIT_AGENT_INSTANCE_MAX_MS, Math.max(1_000, Math.floor(args.timeout_ms)))
         : AWAIT_AGENT_INSTANCE_MAX_MS
     try {
       const terminal = await waitForChildTerminal(childRunId, workspace, timeoutMs, signal)

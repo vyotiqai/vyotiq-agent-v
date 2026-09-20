@@ -183,7 +183,7 @@ describe('switch_mode', () => {
     }
   })
 
-  it('create_plan switches the run to plan mode and publishes when autoModeSwitch is on', async () => {
+  it('create_plan publishes without moving the run out of Agent mode', async () => {
     const plan = [
       '## Goal',
       '',
@@ -191,7 +191,7 @@ describe('switch_mode', () => {
       '',
       '## Steps',
       '',
-      '1. Call `create_plan` in Agent mode and verify the run switches to Plan mode.',
+      '1. Call `create_plan` in Agent mode and verify the run stays in Agent mode.',
       '',
       '## Done when',
       '',
@@ -216,26 +216,32 @@ describe('switch_mode', () => {
         autoModeSwitch: true
       })
       expect(result.ok).toBe(true)
-      expect(mode).toBe('plan')
-      expect(events).toEqual([
-        { type: 'mode_changed', runId: 'gate-run-agent', mode: 'plan', invokeId: 7 }
-      ])
-      expect(result.content).toMatch(/Switched to Plan mode/)
       expect(existsSync(join(runDir, 'plan.md'))).toBe(true)
+      // The plan is finished when this tool runs, so demoting the run here only
+      // bought a wasted `switch_mode` step: 4 of 4 plans in the telemetry
+      // switched straight back, 3 of them in a step that did nothing else.
+      expect(mode).toBe('agent')
+      expect(events).toEqual([])
+      expect(result.content).not.toMatch(/Switched to Plan mode/)
 
-      // Already in plan mode: publishes without a redundant switch.
+      // Already in plan mode: publishes, and still does not move the run.
+      let planMode: 'ask' | 'plan' | 'agent' = 'plan'
       const planEvents: { type: string }[] = []
       const again = await executeTool('create_plan', argsJson, workspace, new AbortController().signal, {
         runId: 'gate-run-plan',
         runDir,
-        getAgentMode: () => 'plan',
+        getAgentMode: () => planMode,
+        setAgentMode: (next) => {
+          planMode = next
+        },
         emitAgentEvent: (ev) => planEvents.push(ev),
         autoModeSwitch: true
       })
       expect(again.ok).toBe(true)
+      expect(planMode).toBe('plan')
       expect(planEvents).toHaveLength(0)
 
-      // Auto off: publishes in agent mode without switching.
+      // Auto off: unchanged, as before.
       let autoOffMode: 'ask' | 'plan' | 'agent' = 'agent'
       const autoOffEvents: { type: string }[] = []
       const autoOff = await executeTool('create_plan', argsJson, workspace, new AbortController().signal, {

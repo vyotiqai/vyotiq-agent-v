@@ -16,6 +16,14 @@ export type BudgetLayers = {
 
 export const KEEP_RECENT_TURNS = 12
 export const KEEP_LAST_TOOL_RESULTS = 6
+
+/**
+ * Extra un-stubbed tool results tolerated in RAM before the loop re-trims, so
+ * the trim boundary does not move on every step and bust the provider's cached
+ * prefix. Only the loop's steady-state trim uses this; the pre-compaction wire
+ * trim in assemble.ts stays exact (slack 0) because it runs to reclaim tokens.
+ */
+export const TOOL_RESULT_TRIM_SLACK = 6
 export const MEMORY_INDEX_CAP = 3000
 export const MEMORY_STATE_CAP = 3000
 export const DEFAULT_CONTEXT_WINDOW = SHARED_DEFAULT_CONTEXT_WINDOW

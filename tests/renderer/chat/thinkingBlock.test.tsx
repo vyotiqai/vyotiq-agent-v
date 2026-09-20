@@ -1,15 +1,44 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ThinkingBlock } from '@renderer/features/chat/components/ThinkingBlock'
+import {
+  RUN_VOICE_PHRASES,
+  RUN_VOICE_ROTATE_MS
+} from '@renderer/features/chat/utils/runVoice'
 
 afterEach(() => {
   cleanup()
 })
 
 describe('ThinkingBlock', () => {
+  it('lets a long live thought take on the transcript voice as it runs', async () => {
+    vi.useFakeTimers()
+    try {
+      render(<ThinkingBlock content="Still reasoning." streaming />)
+      const row = screen.getByRole('button')
+
+      // A short thought only ever shows the plain word.
+      expect(row.textContent).toContain(RUN_VOICE_PHRASES.thinking[0])
+
+      await act(async () => {
+        vi.advanceTimersByTime(RUN_VOICE_ROTATE_MS)
+      })
+      expect(row.textContent).toContain(RUN_VOICE_PHRASES.thinking[1])
+      // The visible phrase is the accessible name too, never a stale "Thinking".
+      expect(row.getAttribute('aria-label')).toBe(RUN_VOICE_PHRASES.thinking[1])
+
+      await act(async () => {
+        vi.advanceTimersByTime(RUN_VOICE_ROTATE_MS)
+      })
+      expect(row.textContent).toContain(RUN_VOICE_PHRASES.thinking[2])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps finished thought collapsed by default (minimal chrome)', () => {
     render(<ThinkingBlock content="Let me reason about this." />)
     const button = screen.getByRole('button', { name: /thought/i })

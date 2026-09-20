@@ -15,6 +15,7 @@ import { promisify } from 'util'
 import { app } from 'electron'
 import { commandOnPath, invalidateCommandOnPathCache, sanitizedTerminalEnv } from '../agent/tools/terminal'
 import { atomicWriteJson } from '../storage/atomicWrite'
+import { tarBinary } from '../system/tarBinary'
 import { logger } from '../../shared/logger'
 
 const execFile = promisify(execFileCb)
@@ -459,7 +460,7 @@ async function extractArchive(archivePath: string, destDir: string): Promise<voi
     await runCommand('unzip', ['-o', archivePath, '-d', destDir])
     return
   }
-  await runCommand('tar', ['-xzf', archivePath, '-C', destDir])
+  await runCommand(tarBinary(), ['-xzf', archivePath, '-C', destDir])
 }
 
 async function installFromRelease(): Promise<string> {

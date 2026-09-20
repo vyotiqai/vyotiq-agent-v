@@ -55,7 +55,7 @@ export function useSettings() {
       setSettings(res.data)
       setError(null)
       if (partial.telemetryEnabled !== undefined) {
-        initRendererSentry(res.data.telemetryEnabled)
+        void initRendererSentry(res.data.telemetryEnabled)
       }
     } else {
       logger.error('setSettings failed', { scope: 'settings', err: res.error })

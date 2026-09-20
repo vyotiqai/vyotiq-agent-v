@@ -20,10 +20,15 @@ import {
   sleepStreamRetryBackoff,
   streamRetryBackoffMs,
   streamRetryBackoffMsFor,
+  isTransientHttpFailure,
   STREAM_HTTP_RETRY_MAX_MS,
   STREAM_RETRY_BASE_MS,
   STREAM_RETRY_MAX_MS
 } from '@main/agent/streamRetry'
+
+/** Verbatim from the live gateway (run log 2026-09-19). */
+const QUOTA_429 =
+  '5-hour usage limit reached. Resets in 3hr 4min. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_01M2VV4MEG5G6FTWEZYVSBPHY2/go'
 
 describe('streamRetry', () => {
   it('exports shared retry constants', () => {
@@ -353,5 +358,31 @@ describe('streamRetry', () => {
     } finally {
       resetCircuitBreakersForTests()
     }
+  })
+
+  describe('quota 429s keep retrying by design', () => {
+    /**
+     * A usage-limit 429 is a WAIT, not a wall: quota is no longer a terminal
+     * class and the attempt ceiling was removed, so the run survives the quota
+     * window and resumes when it reopens instead of dying (see
+     * loopStopReason.test.ts "retries a usage-limit 429 until recovery").
+     * The 30s STREAM_HTTP_RETRY_MAX_MS backoff is what keeps that cheap —
+     * measured ~45-90s spacing in the live log, not a retry storm. Do not
+     * "fix" this into a permanent failure.
+     */
+    it('retries a multi-hour usage-limit 429 rather than failing the run', () => {
+      expect(shouldRetryStreamErrorChunk('PROVIDER_HTTP', QUOTA_429, 1, 429)).toBe(true)
+      expect(isTransientHttpFailure('PROVIDER_HTTP', 429)).toBe(true)
+    })
+
+    it('bounds the wait with the HTTP backoff cap so waiting stays cheap', () => {
+      expect(STREAM_HTTP_RETRY_MAX_MS).toBe(30_000)
+      expect(streamRetryBackoffMsFor(20, 429)).toBeLessThanOrEqual(STREAM_HTTP_RETRY_MAX_MS)
+    })
+
+    it('still refuses permanent request errors', () => {
+      expect(isTransientHttpFailure('PROVIDER_HTTP', 400)).toBe(false)
+      expect(shouldRetryStreamErrorChunk('PROVIDER_HTTP', 'invalid api key', 1, 401)).toBe(false)
+    })
   })
 })

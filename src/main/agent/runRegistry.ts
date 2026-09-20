@@ -186,6 +186,29 @@ export function registerRunAbort(
   return { controller, invokeId }
 }
 
+export type TryRegisterRunOptions = {
+  /**
+   * Refuse the registration when another live run already holds this teammate.
+   * A teammate is one identity with one memory namespace: two concurrent runs
+   * would interleave writes to it. The check and the insert happen together
+   * here — a scheduler-side precheck followed by a separate register leaves a
+   * window where two callers both see the slot free.
+   */
+  requireProfileSlot?: boolean
+}
+
+export type TryRegisterRunResult =
+  | { ok: true; controller: AbortController; invokeId: number }
+  | { ok: false; error: string; code?: string }
+
+/** The run currently holding a teammate's identity slot, if any. */
+export function findActiveRunForProfile(agentProfileId: string): string | undefined {
+  for (const [runId, entry] of active) {
+    if (entry.agentProfileId === agentProfileId) return runId
+  }
+  return undefined
+}
+
 /**
  * Atomic register for IPC chatStart — rejects if a run slot already exists.
  * Single-threaded: check+set with no await in between.
@@ -193,11 +216,23 @@ export function registerRunAbort(
 export function tryRegisterRunAbort(
   runId: string,
   workspacePath: string,
-  agentProfileId?: string
-): { ok: true; controller: AbortController; invokeId: number } | { ok: false; error: string; code?: string } {
+  agentProfileId?: string,
+  options: TryRegisterRunOptions = {}
+): TryRegisterRunResult {
   if (active.has(runId)) {
     rejectedRunStarts++
     return { ok: false, error: 'Run is already active' }
+  }
+  if (options.requireProfileSlot && agentProfileId) {
+    const holder = findActiveRunForProfile(agentProfileId)
+    if (holder) {
+      rejectedRunStarts++
+      return {
+        ok: false,
+        error: `Teammate is already working on run ${holder}`,
+        code: 'profile_busy'
+      }
+    }
   }
   const handle = registerRunAbort(runId, workspacePath, agentProfileId)
   return { ok: true, controller: handle.controller, invokeId: handle.invokeId }
@@ -321,69 +356,14 @@ function disarmCancelForceFinish(runId: string): void {
 }
 
 /**
- * A cancelled run whose loop never unwound (stuck on a tool that ignores the
- * abort) leaves status.json `running` — a zombie the sidebar renders as a live
- * spinner, and one `reconcileStaleRuns` skips forever because isActive stays
- * true. Persist the terminal status the loop will never write, and notify the
- * parent run so its sidebar instance row stops spinning. Safe to run after a
- * late normal unwind: both paths write the same terminal status, and
- * notifyChildTerminal is idempotent for already-resolved waiters.
+ * Keep force-finish implementation lazy: runRegistry is imported by state and
+ * agentInstances, while paths must remain lazy until test-level Electron mocks
+ * are registered. The helper owns the static edges to those modules, so the
+ * build has one consistent edge for each affected module.
  */
 export async function forceFinishCancelledRun(runId: string): Promise<boolean> {
-  if (!isActive(runId)) return false
-  const workspacePath = getRunWorkspace(runId)
-  if (!workspacePath) return false
-  try {
-    // state and agentInstances statically import this module (state.ts ->
-    // isActive, and agentInstances -> state/startAgentRun), so importing them
-    // at top level would close a module cycle; keep those two lazy. Plain
-    // require() here would resolve in the built CJS bundle but not under the
-    // vitest ESM loader, which would silently skip the force-finish.
-    // resolveRunDir must ALSO stay lazy: tests/setup.ts imports this module
-    // before any test file registers its vi.mock('electron'), so a static
-    // import of ../storage/paths would evaluate electron (a plain string path
-    // under Node, i.e. `app` undefined) during setup and cache an unmocked
-    // paths module for every test file (26 failures in activityStats +
-    // agentLoopSteps suites — verified 2026-09-14).
-    const { resolveRunDir } = await import('../storage/paths')
-    const { loadStatus, updateStatus, appendEvent } = await import('./state')
-    const runDir = resolveRunDir(workspacePath, runId)
-    const status = loadStatus(runDir)
-    if (!status) return false
-    if (status.status === 'done' || status.status === 'error' || status.status === 'cancelled') {
-      return false
-    }
-    // Match the loop's own user-cancel contract (loop.ts writeStatus): a plain
-    // terminal patch, no resumable flag — this was a cancel, not a crash.
-    await updateStatus(runDir, { status: 'cancelled' }, { sync: true })
-    appendEvent(runDir, {
-      type: 'status',
-      runId,
-      status: 'cancelled',
-      ...(status.invokeId != null ? { invokeId: status.invokeId } : {})
-    })
-    if (status.inlineInstance && status.parentRunId) {
-      const { notifyChildTerminal } = await import('./agentInstances')
-      notifyChildTerminal(runId, 'cancelled', undefined, {
-        goal: status.goal,
-        pathScope: status.pathScope
-      })
-    }
-    invalidateListRunsCache(workspacePath)
-    logger.warn('Cancelled run never unwound — force-finalized on disk', {
-      scope: 'agent',
-      runId,
-      correlationId: runId
-    })
-    return true
-  } catch (err) {
-    logger.warn('Cancelled run force-finish failed', {
-      scope: 'agent',
-      runId,
-      err
-    })
-    return false
-  }
+  const { forceFinishCancelledRun: forceFinish } = await import('./forceFinishCancelledRun')
+  return forceFinish(runId, { isActive, getRunWorkspace })
 }
 
 function cancelRunCore(runId: string, cascadeChildren = true): boolean {
@@ -513,7 +493,7 @@ export function getRunInvokeId(runId: string): number | undefined {
   return active.get(runId)?.invokeId
 }
 
-type ProfileRunFinishListener = (profileId: string) => void
+type ProfileRunFinishListener = (profileId: string, runId: string) => void
 const profileRunFinishListeners: ProfileRunFinishListener[] = []
 
 /**
@@ -529,10 +509,10 @@ export function registerProfileRunFinishListener(fn: ProfileRunFinishListener): 
   }
 }
 
-export function notifyProfileRunFinished(profileId: string): void {
+export function notifyProfileRunFinished(profileId: string, runId: string): void {
   for (const fn of profileRunFinishListeners) {
     try {
-      fn(profileId)
+      fn(profileId, runId)
     } catch (err) {
       logger.warn('Profile run-finish listener failed', { scope: 'runRegistry', profileId, err })
     }

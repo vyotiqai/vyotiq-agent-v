@@ -35,12 +35,23 @@ const QUERY_DEBOUNCE_MS = 250
  * lookup fails so a transient IPC error cannot pop a dialog for a package that
  * connects on its own.
  */
-async function serverNeedsConnect(serverId: string): Promise<boolean> {
+async function serverNeedsConnect(
+  serverId: string,
+  workspacePath: string | null
+): Promise<boolean> {
   try {
     const latest = await window.vyotiq.getSettings()
     if (!latest.ok) return false
     const auth = latest.data.mcpServers.find((s) => s.id === serverId)?.auth
-    return auth === 'oauth' || auth === 'oauth-client' || auth === 'token'
+    if (auth !== 'oauth' && auth !== 'oauth-client' && auth !== 'token') return false
+    // Declaring an auth kind is not the same as still needing one. GitHub MCP
+    // reuses the app's own GitHub sign-in, so it can arrive already connected
+    // — and putting a credential dialog in front of someone who has nothing
+    // left to supply is the step this whole flow exists to remove.
+    const status = await window.vyotiq.mcpStatus({ workspacePath })
+    if (!status.ok) return true
+    const row = status.data.servers.find((s) => s.id === serverId)
+    return !(row?.connected || row?.hasAuthToken)
   } catch {
     // The install itself already succeeded; failing to decide whether to offer
     // the connect dialog must not turn that into a failed install.
@@ -324,12 +335,16 @@ export function useMarketplaceController({
           needsConnect: entry.kind === 'mcp' && !!entry.auth && entry.auth !== 'none'
         }
       )
-      if (ok && entry.kind === 'mcp' && (await serverNeedsConnect(entry.id))) {
+      if (
+        ok &&
+        entry.kind === 'mcp' &&
+        (await serverNeedsConnect(entry.id, activeWorkspacePath ?? null))
+      ) {
         setConnectWizardId(entry.id)
       }
       return ok
     },
-    [runInstall]
+    [activeWorkspacePath, runInstall]
   )
 
   const setEnabled = useCallback(

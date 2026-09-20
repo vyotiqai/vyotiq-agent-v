@@ -67,6 +67,14 @@ function refineProfileScope(
 export const AgentProfileSchema = AgentProfileBaseSchema.superRefine(refineProfileScope)
 export type AgentProfile = z.infer<typeof AgentProfileSchema>
 
+export const AgentProfileSnapshotSchema = AgentProfileBaseSchema.omit({
+  createdAt: true,
+  updatedAt: true
+})
+  .extend({ version: z.literal(1), runtime: AgentProfileRuntimeSchema })
+  .superRefine(refineProfileScope)
+export type AgentProfileSnapshot = z.infer<typeof AgentProfileSnapshotSchema>
+
 export const AgentProfileCreateRequestSchema = AgentProfileBaseSchema
   .omit({ id: true, createdAt: true, updatedAt: true })
   .superRefine(refineProfileScope)
@@ -80,6 +88,86 @@ export type AgentProfileUpdateRequest = z.infer<typeof AgentProfileUpdateRequest
 
 export const AgentProfileDeleteRequestSchema = z.object({ id: AgentProfileIdSchema })
 export type AgentProfileDeleteRequest = z.infer<typeof AgentProfileDeleteRequestSchema>
+
+/**
+ * Outcome of deleting a teammate. Deletion touches several stores (tasks, live
+ * runs, per-workspace overrides), so a bare `true` would report success after
+ * swallowing a failed cleanup. `warnings` names what could not be finished; the
+ * roster entry is gone in every case where `deleted` is true.
+ */
+export const AgentProfileDeleteResultSchema = z.object({
+  deleted: z.literal(true),
+  cancelledTasks: z.number().int().min(0),
+  cancelledRuns: z.number().int().min(0),
+  warnings: z.array(z.string())
+})
+export type AgentProfileDeleteResult = z.infer<typeof AgentProfileDeleteResultSchema>
+
+/**
+ * Fields a workspace may override on a global profile.
+ *
+ * A `pick`, deliberately not an `omit`: identity and ownership — `id`, `name`,
+ * timestamps, `scope`, `workspacePath` — stay global-owned, and picking means
+ * a field added to the base schema later is not silently made
+ * workspace-writable by default.
+ */
+export const AgentProfileOverrideSchema = AgentProfileBaseSchema.pick({
+  avatar: true,
+  persona: true,
+  tone: true,
+  identity: true,
+  model: true,
+  autonomousMode: true,
+  autoResumeOnLaunch: true,
+  runtime: true
+}).partial()
+export type AgentProfileOverride = z.infer<typeof AgentProfileOverrideSchema>
+
+export const AgentProfileOverridesListRequestSchema = z.object({
+  workspacePath: z.string().min(1)
+})
+export type AgentProfileOverridesListRequest = z.infer<
+  typeof AgentProfileOverridesListRequestSchema
+>
+
+/**
+ * Write or clear one workspace's override of one profile.
+ *
+ * `null` deletes the file — there is no separate clear channel, matching
+ * `workspacesSetSettingsOverride`. Unlike that one this REPLACES rather than
+ * merges: a single form owns the whole override, and merging would make
+ * clearing one field impossible.
+ *
+ * `.strict()` where the reader is lenient. The reader parses a hand-authored,
+ * git-shared file and tolerating a stray key there is correct; this parses a
+ * payload the app itself just built, so an unexpected key is our own bug and
+ * should fail loudly rather than be stripped in silence.
+ */
+export const AgentProfileOverrideSetRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  profileId: AgentProfileIdSchema,
+  override: AgentProfileOverrideSchema.strict().nullable()
+})
+export type AgentProfileOverrideSetRequest = z.infer<typeof AgentProfileOverrideSetRequestSchema>
+
+/** Every override stored in one workspace, keyed by profile id. */
+export const AgentProfileOverridesResultSchema = z.object({
+  workspacePath: z.string().min(1),
+  overrides: z.record(AgentProfileIdSchema, AgentProfileOverrideSchema)
+})
+export type AgentProfileOverridesResult = z.infer<typeof AgentProfileOverridesResultSchema>
+
+/**
+ * Push payload: one workspace's overrides, replaced wholesale.
+ *
+ * Separate from `agentProfilesChanged` because that event carries the global
+ * roster and has no workspace key, so it cannot say which workspace's
+ * overrides moved — reusing it would tell the renderer nothing.
+ */
+export const AgentProfileOverridesChangedEventSchema = AgentProfileOverridesResultSchema
+export type AgentProfileOverridesChangedEvent = z.infer<
+  typeof AgentProfileOverridesChangedEventSchema
+>
 
 /** Push payload: full-list replace (rosters are small; avoids client-side diffing). */
 export const AgentProfilesChangedEventSchema = z.object({

@@ -18,7 +18,8 @@ function clearedToolStub(_text: string): string {
  */
 export function trimToolResults(
   messages: ChatMessage[],
-  keepLast = KEEP_LAST_TOOL_RESULTS
+  keepLast = KEEP_LAST_TOOL_RESULTS,
+  slack = 0
 ): ChatMessage[] {
   const toolIndexes: number[] = []
   for (let i = 0; i < messages.length; i++) {
@@ -28,6 +29,23 @@ export function trimToolResults(
     if (isDurableToolResultName(m.toolName)) continue
     toolIndexes.push(i)
   }
+
+  // Hysteresis. Stubbing on every step rewrites history mid-array — the result
+  // that was full text last step becomes `[cleared]` this step — which
+  // invalidates the provider's cached prefix from that point on. Measured on
+  // live runs: cachedInputTokens pinned near the system+tools prefix (9728)
+  // while inputTokens grew 22k -> 30k, with hit rate decaying to 7-10% on large
+  // steps. With slack, the boundary moves once every `slack` results instead of
+  // every step, so history stays byte-identical in between and the prefix keeps
+  // caching. The ceiling is still bounded, just at keepLast + slack.
+  if (slack > 0) {
+    const unstubbed = toolIndexes.filter((i) => {
+      const text = contentToText(messages[i]!.content)
+      return text !== '' && !text.endsWith(CLEARED_TOOL_RESULT_STUB)
+    })
+    if (unstubbed.length <= keepLast + slack) return messages
+  }
+
   const keep = new Set(toolIndexes.slice(-Math.max(0, keepLast)))
 
   return messages.map((m, i) => {

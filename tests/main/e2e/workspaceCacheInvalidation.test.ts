@@ -115,4 +115,45 @@ describe('e2e workspace mutation caches', () => {
 
     expect(await toolGlob(workspace, '**/*.ts')).not.toContain('secret.ts')
   })
+
+  it('an unrelated edit keeps the gitignore matchers it did not invalidate', async () => {
+    const signal = new AbortController().signal
+    const ctx = { skipWriteCheckpoint: true, agentMode: 'agent' as const, runDir: workspace }
+
+    // Warm the matcher with a real rule, through the same path a tool uses.
+    const edited = await executeTool(
+      'edit',
+      JSON.stringify({ path: '.gitignore', contents: 'hidden/\n' }),
+      workspace,
+      signal,
+      ctx
+    )
+    expect(edited.ok).toBe(true)
+    expect(await toolGlob(workspace, '**/*.ts')).not.toContain('secret.ts')
+
+    // Change the rules behind the tools' back, then mutate something else.
+    // Rebuilding every matcher costs the next walk real time, so an edit that
+    // cannot have changed the rules must leave the cache alone.
+    writeFileSync(join(workspace, '.gitignore'), '', 'utf8')
+    const unrelated = await executeTool(
+      'edit',
+      JSON.stringify({ path: 'visible.ts', contents: 'export const visible = 2\n' }),
+      workspace,
+      signal,
+      ctx
+    )
+    expect(unrelated.ok).toBe(true)
+    expect(await toolGlob(workspace, '**/*.ts')).not.toContain('secret.ts')
+
+    // A write that touches .gitignore still refreshes them.
+    const touched = await executeTool(
+      'edit',
+      JSON.stringify({ path: '.gitignore', contents: '\n' }),
+      workspace,
+      signal,
+      ctx
+    )
+    expect(touched.ok).toBe(true)
+    expect(await toolGlob(workspace, '**/*.ts')).toContain('secret.ts')
+  })
 })

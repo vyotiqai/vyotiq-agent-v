@@ -73,6 +73,9 @@ const SettingsView = lazy(() =>
 const MarketplaceView = lazy(() =>
   import('../features/marketplace').then((m) => ({ default: m.MarketplaceView }))
 )
+const TeammatesView = lazy(() =>
+  import('../features/teammates').then((m) => ({ default: m.TeammatesView }))
+)
 const HomePage = lazy(() =>
   import('../features/home/HomePage').then((m) => ({ default: m.HomePage }))
 )
@@ -184,6 +187,8 @@ function App() {
     getDefaultProviderModelForWorkspace,
     getAgentProfileModelPin: (profileId) =>
       rosterProfiles.find((p) => p.id === profileId)?.model ?? null,
+    getValidAgentProfileIds: () =>
+      rosterReady ? new Set(rosterProfiles.map((profile) => profile.id)) : null,
     maxChatPanes: settings.maxChatPanes ?? 0
   })
   const {
@@ -265,7 +270,7 @@ function App() {
   const focusedOpenInstance =
     focusedParentRunId != null ? (openInstanceByParent[focusedParentRunId] ?? null) : null
 
-  const [view, setView] = useState<'chat' | 'settings' | 'marketplace' | 'home'>('chat')
+  const [view, setView] = useState<'chat' | 'settings' | 'marketplace' | 'teammates' | 'home'>('chat')
   const previousViewRef = useRef(view)
   const [marketplaceFocusServerId, setMarketplaceFocusServerId] = useState<string | null>(null)
   const [marketplaceFocusSkillPath, setMarketplaceFocusSkillPath] = useState<string | null>(null)
@@ -294,7 +299,8 @@ function App() {
     } else if (view === 'chat') {
       // Returning from settings/marketplace must not steal the first Tab stop
       // (skip link). New chat focuses the composer explicitly in onNewChat.
-      if (previous === 'settings' || previous === 'marketplace') return
+      if (previous === 'settings' || previous === 'marketplace' || previous === 'teammates')
+        return
       requestAnimationFrame(() => requestAnimationFrame(() => {
         focusComposerMessage()
       }))
@@ -2266,6 +2272,7 @@ function App() {
         onSessionQuery={() => {}}
         onOpenSettings={() => {}}
         onOpenMarketplace={() => {}}
+        onOpenTeammates={() => {}}
         onOpenChat={() => {}}
         onOpenHome={() => {}}
         onNewChat={() => {}}
@@ -2311,6 +2318,7 @@ function App() {
       }}
       focusedRunId={focusedRunId}
       onOpenMarketplace={() => setView('marketplace')}
+      onOpenTeammates={() => setView('teammates')}
       onOpenChat={() => setView('chat')}
       onOpenHome={() => setView('home')}
       onNewChat={onNewChat}
@@ -2399,6 +2407,21 @@ function App() {
             onFocusRuleConsumed={() => setMarketplaceFocusRulePath(null)}
             onClose={() => setView('chat')}
           />
+          </Suspense>
+        </ErrorBoundary>
+      ) : view === 'teammates' ? (
+        <ErrorBoundary title="Teammates couldn't render" resetKey="teammates">
+          <Suspense fallback={<ViewSuspenseFallback />}>
+            <TeammatesView
+              secrets={secrets}
+              ollamaBaseUrl={settings.ollamaBaseUrl}
+              customOpenAiBaseUrl={settings.customOpenAiBaseUrl}
+              openWorkspaces={openWorkspaces}
+              activeWorkspacePath={focusedWorkspacePath ?? activeWorkspace}
+              onClose={() => setView('chat')}
+              onStartTeammateChat={onStartTeammateChat}
+              onOpenTaskRun={(path, runId) => void onSelectRunInWorkspace(path, runId)}
+            />
           </Suspense>
         </ErrorBoundary>
       ) : view === 'home' ? (

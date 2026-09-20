@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { zodToJsonSchema } from '@main/agent/schemas/zodToJsonSchema'
+import { AGENT_TOOLS } from '@main/agent/schemas/tools'
+import { toCompactionJsonSchema } from '@main/agent/schemas/compaction'
 
 describe('zodToJsonSchema', () => {
   it('preserves description on .optional().describe()', () => {
@@ -90,5 +92,64 @@ describe('zodToJsonSchema', () => {
     expect(json.properties.session_id.description).toBe('Session UUID')
     expect(json.properties.pattern.minLength).toBe(1)
     expect(json.properties.pattern.maxLength).toBe(200)
+  })
+
+  it('emits ZodRecord as an open object with a typed value schema', () => {
+    const schema = z.object({
+      arguments: z
+        .record(z.string(), z.string())
+        .describe('Prompt argument values')
+        .optional()
+    })
+    const json = zodToJsonSchema(schema) as {
+      properties: {
+        arguments: {
+          type: string
+          additionalProperties: { type: string }
+          description?: string
+        }
+      }
+      required?: string[]
+    }
+    // Before this, a record erased to `{}`: no type and no description, so the
+    // model saw nothing at all for the argument.
+    expect(json.properties.arguments).toEqual({
+      type: 'object',
+      additionalProperties: { type: 'string' },
+      description: 'Prompt argument values'
+    })
+    expect(json.required).toBeUndefined()
+  })
+
+  it('throws on an unsupported nested type instead of erasing it to {}', () => {
+    const schema = z.object({ mode: z.union([z.literal('a'), z.literal('b')]) })
+    expect(() => zodToJsonSchema(schema)).toThrow(/ZodUnion.*\(root\)\.mode/)
+  })
+})
+
+describe('shipped schemas', () => {
+  /** Every `{}` in a tool schema is an argument the model gets no guidance for. */
+  function emptyPaths(node: unknown, path: string, out: string[]): void {
+    if (!node || typeof node !== 'object') return
+    const o = node as Record<string, unknown>
+    if (Object.keys(o).length === 0) {
+      out.push(path)
+      return
+    }
+    const props = o.properties as Record<string, unknown> | undefined
+    if (props) for (const [k, v] of Object.entries(props)) emptyPaths(v, `${path}.${k}`, out)
+    if (o.items) emptyPaths(o.items, `${path}[]`, out)
+    if (o.additionalProperties && typeof o.additionalProperties === 'object') {
+      emptyPaths(o.additionalProperties, `${path}.*`, out)
+    }
+  }
+
+  it('converts every builtin tool and the compaction schema with nothing erased', () => {
+    const empties: string[] = []
+    for (const tool of AGENT_TOOLS) emptyPaths(tool.parameters, tool.name, empties)
+    emptyPaths(toCompactionJsonSchema(), 'compaction', empties)
+    expect(empties).toEqual([])
+    // Non-vacuous: the registry really was walked.
+    expect(AGENT_TOOLS.length).toBeGreaterThan(50)
   })
 })

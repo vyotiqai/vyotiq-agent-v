@@ -18,7 +18,6 @@ import {
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { ChatRow } from './ChatRow'
 import { InlineConfirmActions } from './InlineConfirmActions'
-import { TeammatesSection } from './TeammatesSection'
 import { runTitle, uniqueInstanceTitles } from './runTitle'
 import type { WorkspaceSidebarGroup } from './types'
 
@@ -274,8 +273,6 @@ export function ChatList({
   onCloseWorkspace,
   onAddWorkspace,
   onNewChatInWorkspace,
-  onStartTeammateChat,
-  onOpenTaskRun,
   activeRuns,
   workspaceHasBackgroundRun,
   onDismissRunsError,
@@ -300,8 +297,6 @@ export function ChatList({
   onCloseWorkspace: (path: string) => void
   onAddWorkspace: () => void
   onNewChatInWorkspace?: (path: string) => void
-  onStartTeammateChat?: (profileId: string) => void
-  onOpenTaskRun?: (path: string, runId: string) => void
   activeRuns: { runId: string; workspacePath: string }[]
   workspaceHasBackgroundRun: (path: string) => boolean
   onDismissRunsError?: (path?: string) => void
@@ -603,14 +598,6 @@ export function ChatList({
               </div>
             )})}
           </div>
-
-          <TeammatesSection
-            onStartTeammateChat={onStartTeammateChat}
-            onOpenTaskRun={onOpenTaskRun}
-            activeWorkspacePath={
-              workspaceGroups.find((group) => group.isActiveWorkspace)?.path ?? null
-            }
-          />
         </>
       )}
     </div>

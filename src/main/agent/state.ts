@@ -53,10 +53,12 @@ import { readJsonDocCached } from './jsonDocCache'
 import { finalizeTodoContentOnRunEnd, type TodoFinalizeOutcome } from '../../shared/utils/todoContent'
 import { DEFAULT_PLAN_STUB, stripPlanStubChrome } from '../../shared/planStub'
 import { ensureWorkspaceStorage, resolveRunDir, workspaceSessionsRoot } from '../storage/paths'
+import { TOOL_STUB_RESTART_INTERRUPTED } from '../../shared/toolStubs'
 import { isActive } from './runRegistry'
 import { dismissLifecycleNotification } from '../notifications/bus'
 import {
   finalizeInstanceWorktree,
+  isSafeInstanceBranch,
   isSafeInstanceWorktreePath
 } from '../git/instanceWorktree'
 import { CompactionRecordSchema, type CompactionRecord } from './context/types'
@@ -1176,7 +1178,11 @@ async function collectRunsFromRoot(root: string): Promise<{
         ...(status.worktreePath ? { worktreePath: status.worktreePath } : {}),
         ...(status.worktreeBranch ? { worktreeBranch: status.worktreeBranch } : {}),
         ...(status.agentProfileId ? { agentProfileId: status.agentProfileId } : {}),
-        ...(status.agentProfileName ? { agentProfileName: status.agentProfileName } : {})
+        ...(status.agentProfileName ? { agentProfileName: status.agentProfileName } : {}),
+        ...(status.agentProfileSnapshot
+          ? { agentProfileSnapshot: status.agentProfileSnapshot }
+          : {}),
+        ...(status.runtime ? { runtime: status.runtime } : {})
       }
       const receiptCost = await readLenientReceiptCost(dir)
       if (receiptCost) Object.assign(summary, receiptCost)
@@ -1301,7 +1307,9 @@ function appendOrphanToolStubs(dir: string, runId: string): void {
   for (const message of messages) {
     if (message.role === 'tool' && message.toolCallId) completedIds.add(message.toolCallId)
   }
-  const stub = 'Cancelled'
+  // A crash between dispatch and result cannot honestly claim the tool did not
+  // run — see TOOL_STUB_RESTART_INTERRUPTED. The resumed turn reads this.
+  const stub = TOOL_STUB_RESTART_INTERRUPTED
   const repaired: ChatMessage[] = []
   let changed = false
   for (const message of messages) {
@@ -1325,7 +1333,7 @@ function appendOrphanToolStubs(dir: string, runId: string): void {
           runId,
           toolCallId: call.id,
           name: call.name,
-          summary: 'cancelled',
+          summary: 'interrupted',
           ok: false,
           content: stub
         })
@@ -1368,6 +1376,54 @@ export async function patchLatestTodoWriteMessage(
     }
     if (changed) syncMessages(dir, messages)
   })
+}
+
+/**
+ * Run ids whose instance worktree must survive stale-worktree pruning.
+ *
+ * Pruning protects only runs live in THIS process, and at boot nothing is live
+ * yet — so every instance checkout looks stale. An instance that is still
+ * running (re-adding an open workspace mid-run) or that was interrupted and
+ * marked resumable would have its checkout deleted out from under the resume
+ * it was just promised. Read from durable status rather than process-local
+ * maps: at boot they are the only record that these runs exist.
+ *
+ * Callers build this BEFORE pruning; the branch survives either way
+ * (interruptRunningRunOnDisk keeps it), but reusing an intact checkout avoids
+ * recreating one from the branch.
+ */
+export function collectProtectedInstanceRunIds(workspacePath: string): Set<string> {
+  const protectedIds = new Set<string>()
+  const runs = workspaceSessionsRoot(workspacePath)
+  if (!existsSync(runs)) return protectedIds
+  let names: string[]
+  try {
+    names = readdirSync(runs)
+  } catch (err) {
+    // Unreadable sessions root: protect nothing rather than guess, but say so —
+    // a silent empty set here becomes a deleted worktree.
+    logger.warn('Protected-instance scan skipped workspace sessions root', {
+      scope: 'runs',
+      workspacePath,
+      err
+    })
+    return protectedIds
+  }
+  for (const name of names) {
+    try {
+      const statusPath = join(runs, name, 'status.json')
+      if (!existsSync(statusPath)) continue
+      const parsed = RunStatusSchema.safeParse(JSON.parse(readFileSync(statusPath, 'utf8')))
+      if (!parsed.success) continue
+      const status = parsed.data
+      if (!status.inlineInstance) continue
+      if (status.status === 'running' || status.resumable === true) protectedIds.add(name)
+    } catch {
+      // A single unreadable run must not blind the whole protection set.
+      continue
+    }
+  }
+  return protectedIds
 }
 
 /**
@@ -1450,6 +1506,40 @@ async function finalizeInlineInstanceWorktreeBestEffort(
   }
 }
 
+/**
+ * Can this interrupted run honestly be resumed?
+ *
+ * "Resume" here means a NEW invocation rebuilt from durable state, not a
+ * revived process. That only holds when the state it would rebuild from still
+ * exists — so an isolated instance needs its branch, and a shared-workspace
+ * instance needs its workspace. Marking a run resumable when neither is true
+ * is the worst outcome: the user is offered a Resume that cannot restore the
+ * work, and the real reason it is gone never gets reported.
+ */
+function describeInstanceResumability(
+  workspacePath: string,
+  status: RunStatus
+): { resumable: true } | { resumable: false; reason: string } {
+  if (!status.inlineInstance) return { resumable: true }
+  if (status.worktreePath) {
+    // Isolated instance: the checkout is unusable after a crash, but its
+    // committed branch is the work. Recovery recreates a checkout from it.
+    const branch = status.worktreeBranch?.trim()
+    if (!branch || !isSafeInstanceBranch(branch)) {
+      return {
+        resumable: false,
+        reason: 'the isolated branch for this instance was not recorded'
+      }
+    }
+    return { resumable: true }
+  }
+  // Shared-workspace instance: its edits live in the workspace itself.
+  if (!existsSync(workspacePath)) {
+    return { resumable: false, reason: 'its workspace no longer exists' }
+  }
+  return { resumable: true }
+}
+
 async function interruptRunningRunOnDisk(
   workspacePath: string,
   runId: string,
@@ -1462,13 +1552,19 @@ async function interruptRunningRunOnDisk(
   appendOrphanToolStubs(dir, runId)
   finalizeInterruptedTodos(dir)
   await patchLatestTodoWriteMessage(dir, 'cancelled')
-  await finalizeInlineInstanceWorktreeBestEffort(workspacePath, status, { keepBranch: false })
+  // Keep the branch. finalizeInstanceWorktree commits the instance's dirty
+  // edits and then removes the checkout; deleting the branch too would destroy
+  // the very work a `resumable: true` run promises to come back to.
+  await finalizeInlineInstanceWorktreeBestEffort(workspacePath, status, { keepBranch: true })
+  const resumability = describeInstanceResumability(workspacePath, status)
   await updateStatus(
     dir,
     {
       status: 'cancelled',
-      error: RUN_INTERRUPTED_ERROR,
-      resumable: true,
+      error: resumability.resumable
+        ? RUN_INTERRUPTED_ERROR
+        : `${RUN_INTERRUPTED_ERROR} — cannot resume because ${resumability.reason}`,
+      ...(resumability.resumable ? { resumable: true as const } : {}),
       interruptedAt: new Date().toISOString(),
       step: status.step,
       ...(status.invokeId != null ? { invokeId: status.invokeId } : {})

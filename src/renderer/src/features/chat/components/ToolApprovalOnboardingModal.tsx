@@ -1,4 +1,4 @@
-import { useId, useRef } from 'react'
+import { useRef } from 'react'
 import type { ToolApprovalMode } from '@shared/ipc'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
 import { Alert, Button } from '@renderer/lib/ui'
@@ -38,29 +38,18 @@ export function ToolApprovalOnboardingModal({
   onDismiss: () => void
   error?: string | null
 }) {
-  const titleId = useId()
-  const descId = useId()
   const initialFocusRef = useRef<HTMLButtonElement>(null)
 
   return (
     <Dialog
       open={open}
       onClose={onDismiss}
-      labelledBy={titleId}
-      describedBy={descId}
+      title="Tool approval"
+      description="Choose when Agent V should ask before running tools on this workspace. You can change this anytime in Settings → Tools."
       initialFocusRef={initialFocusRef}
       useNativeDialog
     >
-      <div className="flex flex-col gap-3 p-5">
-        <div>
-          <h2 id={titleId} className="m-0 text-md font-semibold text-fg-strong">
-            Tool approval
-          </h2>
-          <p id={descId} className="m-0 mt-1 text-sm text-secondary">
-            Choose when Agent V should ask before running tools on this workspace. You can change
-            this anytime in Settings → Tools.
-          </p>
-        </div>
+      <div className="flex flex-col gap-3">
         {error ? <Alert>{error}</Alert> : null}
         <div className="flex flex-col gap-2">
           {MODES.map((item) => (

@@ -211,4 +211,19 @@ describe('harness', () => {
     // The old clause actively steered every symbol-aware query to grep.
     expect(text).not.toContain('heavyweight index search')
   })
+
+  it('ranks the tool fallback and makes a repeatedly failing tool reportable', () => {
+    const text = readFileSync(join(process.cwd(), 'resources', 'harness', 'default.md'), 'utf8')
+    // Measured 2026-09-20 on run 356eefd5: `terminal`'s own description already
+    // said not to use it for Get-Content/cat/findstr, yet a broken `read` sent
+    // the model straight to PowerShell paging of the same file (523 tool calls,
+    // 39% distinct). The unranked fallback clause spoke to the exact situation
+    // and beat the general prohibition, and the silent detour hid the `read`
+    // defect for hours. Rank the fallback here, not by adding another ban.
+    expect(text).toMatch(/Prefer another catalog tool over the shell/)
+    expect(text).toMatch(/rather than routing around it silently/)
+    // Concurrency numbers stay runtime-enforced — see the spine token ceiling
+    // and the "capped at 4" guard in toolsSchema.test.ts.
+    expect(text).not.toMatch(/run up to eight at once/)
+  })
 })

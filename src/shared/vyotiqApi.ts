@@ -507,15 +507,27 @@ export interface VyotiqApi {
   ) => Promise<IpcResult<import('./ipc').AgentProfile>>
   agentProfilesDelete: (
     payload: import('./ipc').AgentProfileDeleteRequest
-  ) => Promise<IpcResult<true>>
+  ) => Promise<IpcResult<import('./ipc').AgentProfileDeleteResult>>
   onAgentProfilesChanged: (
     handler: (event: import('./ipc').AgentProfilesChangedEvent) => void
+  ) => () => void
+  agentProfileOverridesList: (
+    payload: import('./ipc').AgentProfileOverridesListRequest
+  ) => Promise<IpcResult<import('./ipc').AgentProfileOverridesResult>>
+  agentProfileOverrideSet: (
+    payload: import('./ipc').AgentProfileOverrideSetRequest
+  ) => Promise<IpcResult<import('./ipc').AgentProfileOverride | null>>
+  onAgentProfileOverridesChanged: (
+    handler: (event: import('./ipc').AgentProfileOverridesChangedEvent) => void
   ) => () => void
   tasksList: () => Promise<IpcResult<import('./ipc').DelegatedTask[]>>
   tasksEnqueue: (
     payload: import('./ipc').TaskEnqueueRequest
   ) => Promise<IpcResult<import('./ipc').DelegatedTask>>
   tasksCancel: (payload: import('./ipc').TaskCancelRequest) => Promise<IpcResult<boolean>>
+  tasksRetry: (
+    payload: import('./ipc').TaskRetryRequest
+  ) => Promise<IpcResult<import('./ipc').DelegatedTask>>
   onTasksChanged: (handler: (event: import('./ipc').TasksChangedEvent) => void) => () => void
   openLogsDir: () => Promise<IpcResult<true>>
   getLogsPath: () => Promise<IpcResult<string>>

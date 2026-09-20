@@ -13,7 +13,7 @@ export const SETTINGS_GUTTER = CHAT_GUTTER
 export const CHAT_STAGE_INSET = 'pl-4 pr-10 sm:pl-5'
 
 /**
- * Top inset for chat stage surfaces that carry no sticky child (side rail).
+ * Top inset for chat stage surfaces that carry no sticky child.
  *
  * The transcript scrollport must NOT use this: Chromium insets a sticky child's
  * `top: 0` by the scroller's own `padding-top`, so the pinned turn prompt would
@@ -28,6 +28,19 @@ export const CHAT_STAGE_TOP_INSET = 'pt-4'
  * pinned turn prompt can pin flush with the scrollport's top edge.
  */
 export const CHAT_STAGE_TOP_SPACER = 'h-4'
+
+/**
+ * Top edge of the floating chat side rail.
+ *
+ * The rail is pinned to the top-right corner — the corner the Windows/Linux
+ * caption buttons own — so it must clear the whole title bar
+ * ({@link TITLE_BAR_HEIGHT_PX}), not just the stage's 16px
+ * ({@link CHAT_STAGE_TOP_INSET}). At `pt-4` the Files button started 18px down
+ * while Close owned the top 36px, so Close covered two thirds of it: the strip
+ * read as colliding with the window controls and most of Files was unclickable.
+ * `top-10` leaves the 36px bar plus a 4px gap.
+ */
+export const CHAT_SIDE_RAIL_TOP_INSET = 'top-10'
 
 /** Width of the floating chat side rail (icon strip) in pixels (`w-10`). */
 export const CHAT_SIDE_RAIL_WIDTH_PX = 40

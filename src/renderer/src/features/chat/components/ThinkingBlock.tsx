@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, type UIEvent } from 'react'
 import { Icon } from '@renderer/lib/icons'
 import { MarkdownContent, cn } from '@renderer/lib/ui'
 import { DISCLOSURE_CHEVRON, DISCLOSURE_ROW } from '@renderer/lib/utils/layout'
+import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
 import { ExpandPanel } from '../toolUi/ExpandPanel'
 import { firstLinePreview } from '../utils/firstLinePreview'
+import { runVoicePhrase, runVoiceTick } from '../utils/runVoice'
 import { TextShimmer } from './TextShimmer'
 
 /**
@@ -42,11 +44,32 @@ export function ThinkingBlock({
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const pinnedRef = useRef(true)
   const preview = firstLinePreview(content, THINKING_PREVIEW_MAX)
-  const label = streaming ? 'Thinking' : 'Thought'
+  // A live thought opens on the plain word and takes on the transcript's voice
+  // only as it runs long, so a one-beat thought never reads as a flourish.
+  // A finished one stays "Thought": the collapsed rows are a list to scan.
+  //
+  // TurnSummary re-anchors its phase during render, off a clock that runs for
+  // the whole turn. This row cannot: its shared clock only ticks while the
+  // thought is live, so the moment one starts, the last `now` seen here is as
+  // old as the mount. The anchor is taken in an effect instead, and until it
+  // lands the anchor and `live` disagree — read as a brand-new rotation, which
+  // is exactly right for a thought that just began. So no stale word is ever
+  // shown, and render stays pure.
+  const now = useSharedNow(streaming === true)
+  const live = streaming === true
+  const [streamAnchor, setStreamAnchor] = useState(() => ({ live, at: now }))
+  const heldMs = streamAnchor.live === live ? Math.max(0, now - streamAnchor.at) : 0
+  const label = live ? runVoicePhrase('thinking', runVoiceTick(heldMs)) : 'Thought'
 
   useEffect(() => {
-    if (streaming) pinnedRef.current = true
-  }, [streaming])
+    if (live) pinnedRef.current = true
+  }, [live])
+
+  useEffect(() => {
+    // Same object when the anchor already matches, so React bails out and a
+    // mounting row does not pay for an extra render.
+    setStreamAnchor((prev) => (prev.live === live ? prev : { live, at: Date.now() }))
+  }, [live])
 
   useEffect(() => {
     if (!isExpanded || !streaming) return
@@ -74,11 +97,7 @@ export function ThinkingBlock({
         className={cn(DISCLOSURE_ROW, 'group w-full text-left text-secondary')}
         aria-expanded={isExpanded}
         aria-label={
-          streaming
-            ? 'Thinking'
-            : preview && !isExpanded
-              ? `${label}: ${preview}`
-              : label
+          streaming ? label : preview && !isExpanded ? `${label}: ${preview}` : label
         }
         title={!streaming && !isExpanded && preview ? preview : undefined}
         onClick={toggle}

@@ -64,6 +64,35 @@ function suggestSimilarPaths(workspaceRoot: string, relPath: string): string[] {
   }
 }
 
+/**
+ * Binary heuristic. A stray NUL in otherwise textual content — a raw `\0` inside
+ * a template literal, a half-finished write — must not make a source file
+ * unreadable: 26 of 27 measured `read` failures were a single NUL in a real
+ * TypeScript file, and the model routed around them through the far slower,
+ * always-serial `terminal` path for plain file reads. Genuine binaries are dense
+ * in NULs (UTF-16 without a BOM is ~50%), so gate on density, not presence.
+ */
+function isBinaryContent(nulCount: number, byteLength: number): boolean {
+  if (nulCount === 0) return false
+  // More than one NUL per KiB. A 2.5 KB source file with one stray NUL reads as
+  // text (1/2569); a short binary blob like "A\0BC" does not (1/4), and UTF-16
+  // without a BOM is ~1 in 2.
+  return nulCount * 1024 > byteLength
+}
+
+function countNuls(buf: Buffer): number {
+  let count = 0
+  for (let i = 0; i < buf.length; i += 1) {
+    if (buf[i] === 0) count += 1
+  }
+  return count
+}
+
+/** Sparse NULs survive the density gate; keep them out of the model's view. */
+function stripNuls(text: string): string {
+  return text.includes('\0') ? text.replace(/\0/g, '�') : text
+}
+
 /** Decode text files; UTF-16 BOM (common for PowerShell logs) before binary rejection. */
 function isUtf16Bom(buf: Buffer): boolean {
   return (
@@ -90,10 +119,10 @@ function decodeTextBuffer(buf: Buffer, pathArg: string, encoding: 'utf8' | 'utf1
       return le.toString('utf16le')
     }
   }
-  if (buf.includes(0)) {
+  if (isBinaryContent(countNuls(buf), buf.length)) {
     throw new Error(`Binary file detected: ${pathArg}. Read is text-only.`)
   }
-  return buf.toString('utf8')
+  return stripNuls(buf.toString('utf8'))
 }
 
 function formatMissingFileHint(workspaceRoot: string, relPath: string): string {
@@ -262,11 +291,11 @@ async function readByteRange(
   const slice = buf.subarray(0, read)
   // A window starting mid-file has no BOM to inspect; only offset 0 can be UTF-16.
   const utf16 = offset === 0 && isUtf16Bom(slice)
-  if (!utf16 && slice.includes(0)) {
+  if (!utf16 && isBinaryContent(countNuls(slice), slice.length)) {
     throw new Error(`Binary file detected: ${pathArg}. Read is text-only.`)
   }
   const header = `--- offset ${offset}${limit !== undefined ? `, limit ${limit}` : ''} of ${size} bytes ---\n`
-  const body = utf16 ? decodeTextBuffer(slice, pathArg) : slice.toString('utf8')
+  const body = utf16 ? decodeTextBuffer(slice, pathArg) : stripNuls(slice.toString('utf8'))
   return header + body
 }
 
@@ -348,13 +377,14 @@ async function streamLines(
     let lineNo = 0
     let total = 0
     let sawNul = false
+    let nulCount = 0
     let trailingNewline = false
     const collected: string[] = []
     const pushLine = (line: string): void => {
       lineNo += 1
       total = lineNo
       if (lineNo >= start && lineNo <= endLimit && collected.length < maxCollected) {
-        collected.push(line)
+        collected.push(stripNuls(line))
       }
     }
 
@@ -367,9 +397,14 @@ async function streamLines(
       if (n <= 0) break
       offset += n
       const raw = Buffer.concat([leftoverBytes, buf.subarray(0, n)])
-      if (encoding === 'utf8' && raw.includes(0)) {
-        sawNul = true
-        break
+      if (encoding === 'utf8') {
+        // Count only the freshly read bytes — leftoverBytes carry over from the
+        // previous chunk and were already counted.
+        nulCount += countNuls(buf.subarray(0, n))
+        if (isBinaryContent(nulCount, offset - skip)) {
+          sawNul = true
+          break
+        }
       }
       const cut = lastNewlineStart(raw, encoding)
       if (cut >= 0) {
@@ -396,10 +431,6 @@ async function streamLines(
     }
 
     if (sawNul) {
-      throw new Error(`Binary file detected: ${pathArg}. Read is text-only.`)
-    }
-
-    if (leftoverBytes.length > 0 && encoding === 'utf8' && leftoverBytes.includes(0)) {
       throw new Error(`Binary file detected: ${pathArg}. Read is text-only.`)
     }
 

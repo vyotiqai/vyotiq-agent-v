@@ -270,6 +270,13 @@ export const MarketplaceCatalogEntrySchema = z.object({
   featuredRank: z.number().int().optional(),
   /** Relative path under resources/marketplace/ (e.g. icons/filesystem.svg). */
   iconPath: MarketplaceRelPathSchema.optional(),
+  /**
+   * The art is a single black ink, so the UI may invert it for a dark theme.
+   * Set from the file itself when the icon is read, never authored by hand —
+   * see enrichCatalogEntryIcons. Icons that carry their own colours (a vendor
+   * mark we have no monochrome source for) leave it unset and are shown as-is.
+   */
+  iconMono: z.boolean().optional(),
   /** Image data URL only; invalid/remote schemes are dropped (not a catalog parse failure). */
   iconUrl: z
     .string()

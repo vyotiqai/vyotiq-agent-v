@@ -39,19 +39,25 @@ describe('ThinkingControls', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('stays visible but locked while the agent is running', () => {
+  it('stays enabled and changes the next message while the agent is running', () => {
+    const onChatSettingsChange = vi.fn()
     render(
       <ThinkingControls
         provider="openai"
         model="gpt-5.6"
         chatSettings={chatSettings}
-        onChatSettingsChange={vi.fn()}
+        onChatSettingsChange={onChatSettingsChange}
         running
       />
     )
-    const button = screen.getByRole('button', { name: /locked while running/i })
-    expect(button).toBeTruthy()
-    expect(button).toHaveProperty('disabled', true)
+    const button = thinkingButton()
+    expect(button).toHaveProperty('disabled', false)
+
+    fireEvent.click(button)
+    expect(onChatSettingsChange).toHaveBeenCalledWith({
+      thinkingEnabled: true,
+      thinkingEffort: 'high'
+    })
   })
 
   it('cycles effort forward on click', () => {
@@ -528,7 +534,7 @@ describe('ThinkingControls', () => {
     expect(screen.queryByRole('button', { name: /Lower thinking effort/i })).toBeNull()
   })
 
-  it('allows Lower while running so next message can use queued effort', () => {
+  it('allows Thinking and Lower while running so the next message can use queued effort', () => {
     const onChatSettingsChange = vi.fn()
     render(
       <ThinkingControls
@@ -540,9 +546,9 @@ describe('ThinkingControls', () => {
         runSteps={15}
       />
     )
-    expect(screen.getByRole('button', { name: /locked while running/i })).toHaveProperty(
+    expect(screen.getByRole('button', { name: /Thinking Extra high/i })).toHaveProperty(
       'disabled',
-      true
+      false
     )
     fireEvent.click(screen.getByRole('button', { name: /Lower thinking effort to High/i }))
     expect(onChatSettingsChange).toHaveBeenCalledWith({

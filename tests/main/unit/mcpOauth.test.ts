@@ -27,9 +27,24 @@ vi.mock('@main/settings/secrets', () => ({
 import {
   beginMcpOAuthCallback,
   cancelMcpOAuthCallback,
+  consumeMcpOAuthState,
   createMcpOAuthProvider,
   googleMcpOAuthScope
 } from '@main/agent/mcp/oauth'
+
+/** Back the mocked secrets store with real storage for the state round-trip. */
+function useInMemoryOAuthState(): { read: () => Record<string, unknown> } {
+  let store: Record<string, unknown> = {}
+  getMcpOAuthState.mockImplementation(() => store)
+  patchMcpOAuthState.mockImplementation((_id: unknown, patch: Record<string, unknown>) => {
+    store = { ...store, ...patch }
+    return store
+  })
+  setMcpOAuthState.mockImplementation((_id: unknown, next: Record<string, unknown>) => {
+    store = { ...next }
+  })
+  return { read: () => store }
+}
 
 describe('createMcpOAuthProvider', () => {
   it('exposes the redirect URL verbatim', () => {
@@ -187,6 +202,69 @@ describe('beginMcpOAuthCallback fixed port', () => {
       expect(redirectUrl).toBe(`http://127.0.0.1:${port}/oauth/callback`)
     } finally {
       cancelMcpOAuthCallback('fixed')
+    }
+  })
+})
+
+
+describe('OAuth state (CSRF) on the loopback callback', () => {
+  it('issues a state and burns it after one use', () => {
+    const state = useInMemoryOAuthState()
+    const provider = createMcpOAuthProvider('srv-state', 'http://127.0.0.1:9999/oauth/callback')
+
+    const issued = provider.state?.()
+    expect(typeof issued).toBe('string')
+    expect((issued as string).length).toBeGreaterThan(20)
+    expect(state.read().oauthState).toBe(issued)
+
+    expect(consumeMcpOAuthState('srv-state', issued as string)).toBe(true)
+    // Burned, so the same redirect cannot be replayed.
+    expect(state.read().oauthState).toBeUndefined()
+    expect(consumeMcpOAuthState('srv-state', issued as string)).toBe(false)
+  })
+
+  it('refuses a wrong, missing, or never-issued state', () => {
+    useInMemoryOAuthState()
+    const provider = createMcpOAuthProvider('srv-bad', 'http://127.0.0.1:9999/oauth/callback')
+
+    // Nothing issued yet: a callback arriving now did not come from us.
+    expect(consumeMcpOAuthState('srv-bad', 'anything')).toBe(false)
+
+    provider.state?.()
+    expect(consumeMcpOAuthState('srv-bad', null)).toBe(false)
+    expect(consumeMcpOAuthState('srv-bad', 'not-the-one')).toBe(false)
+  })
+
+  it('rejects a code delivered to the callback without the right state', async () => {
+    const state = useInMemoryOAuthState()
+    const { redirectUrl, waitForCode } = await beginMcpOAuthCallback('srv-http')
+    const provider = createMcpOAuthProvider('srv-http', redirectUrl)
+    provider.state?.()
+
+    try {
+      // What an injected authorization code looks like: a valid-shaped code
+      // with a state the attacker cannot know.
+      const res = await fetch(`${redirectUrl}?code=attacker-code&state=guessed`)
+      expect(res.status).toBe(400)
+      await expect(waitForCode()).rejects.toThrow(/state mismatch/i)
+      expect(state.read().oauthState).toBeUndefined()
+    } finally {
+      cancelMcpOAuthCallback('srv-http')
+    }
+  })
+
+  it('accepts the code when the state matches', async () => {
+    useInMemoryOAuthState()
+    const { redirectUrl, waitForCode } = await beginMcpOAuthCallback('srv-good')
+    const provider = createMcpOAuthProvider('srv-good', redirectUrl)
+    const issued = provider.state?.() as string
+
+    try {
+      const res = await fetch(`${redirectUrl}?code=real-code&state=${encodeURIComponent(issued)}`)
+      expect(res.status).toBe(200)
+      await expect(waitForCode()).resolves.toBe('real-code')
+    } finally {
+      cancelMcpOAuthCallback('srv-good')
     }
   })
 })

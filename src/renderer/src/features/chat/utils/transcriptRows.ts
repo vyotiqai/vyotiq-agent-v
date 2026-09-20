@@ -149,6 +149,8 @@ export function buildTranscriptRows(
       maxAttempts: number
       retryInMs: number
       code?: string
+      /** Provider's own reason for the wait, when it gave one. */
+      message?: string
     } | null
     compacting?: boolean
     turnFailed?: boolean
@@ -722,6 +724,8 @@ function withTurnSummaries(
       maxAttempts: number
       retryInMs: number
       code?: string
+      /** Provider's own reason for the wait, when it gave one. */
+      message?: string
     } | null
     compacting?: boolean
     turnFailed?: boolean
@@ -798,7 +802,10 @@ function withTurnSummaries(
             ? {
                 kind: 'reconnecting' as const,
                 attempt: options.networkWait.attempt,
-                maxAttempts: options.networkWait.maxAttempts
+                maxAttempts: options.networkWait.maxAttempts,
+                ...(options.networkWait.message
+                  ? { reason: options.networkWait.message }
+                  : {})
               }
             : deriveRunActivity(turnRows, isLiveTurn && !rowActive && turnRows.length === 0, {
                 hiddenThinkingStreaming: hiddenThinkingStreamingTurns?.has(turnIndex) === true,

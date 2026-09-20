@@ -17,6 +17,13 @@ export function mcpStatusLabel(
     const n = status.toolCount
     return `Connected · ${n} tool${n === 1 ? '' : 's'}`
   }
+  // An OAuth server that has never been signed into reports "Sign in
+  // required" as its connect error. That is the state working as designed,
+  // so it reads as a next step rather than a failure.
+  if (status.errorKind === 'sign-in') return 'Sign in to connect'
+  // Still dialling. Reporting the previous attempt's failure here would make
+  // every launch look like an outage for its first few seconds.
+  if (status.connecting) return 'Connecting…'
   if (status.error) return 'Connection failed'
   return 'Not connected'
 }
@@ -28,6 +35,7 @@ export function mcpStatusClass(
   if (opts?.workspaceEnabled === false) return 'text-secondary'
   if (!status || !status.enabled) return 'text-secondary'
   if (status.connected) return 'text-success'
+  if (status.errorKind === 'sign-in' || status.connecting) return 'text-secondary'
   if (status.error) return 'text-danger'
   return 'text-secondary'
 }

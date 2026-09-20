@@ -7,7 +7,13 @@ vi.mock('@main/agent/tools', () => ({
   executeTool: (...args: unknown[]) => executeTool(...args)
 }))
 
-import { executeStepToolCalls, groupStepToolCalls } from '@main/agent/executeStepTools'
+import {
+  executeStepToolCalls,
+  groupStepToolCalls,
+  isDeadlineExemptTool,
+  TOOL_SOFT_DEADLINE_MS
+} from '@main/agent/executeStepTools'
+import { AWAIT_AGENT_INSTANCE_MAX_MS } from '@main/agent/schemas/tools'
 
 type TestCtx = Parameters<typeof executeStepToolCalls>[1]
 
@@ -1068,5 +1074,26 @@ describe('groupStepToolCalls', () => {
     const fields = failLog?.[1] as { reason?: string }
     expect(fields.reason).toBe('first line')
     warnSpy.mockRestore()
+  })
+
+  describe('soft-deadline exemptions', () => {
+    it('exempts the tools whose own bound governs them', () => {
+      // Waiting is the normal state for both; the generic deadline reported
+      // "the tool is stuck" for a child that was running fine, and measured
+      // 18 of 21 awaits failing at exactly TOOL_SOFT_DEADLINE_MS.
+      expect(isDeadlineExemptTool('ask_question')).toBe(true)
+      expect(isDeadlineExemptTool('await_agent_instance')).toBe(true)
+    })
+
+    it('still deadlines ordinary tools', () => {
+      expect(isDeadlineExemptTool('terminal')).toBe(false)
+      expect(isDeadlineExemptTool('read')).toBe(false)
+      expect(isDeadlineExemptTool('spawn_agent_instance')).toBe(false)
+    })
+
+    it('await keeps a longer bound than the deadline it replaces', () => {
+      // If this ever inverts, the generic deadline silently governs again.
+      expect(AWAIT_AGENT_INSTANCE_MAX_MS).toBeGreaterThan(TOOL_SOFT_DEADLINE_MS)
+    })
   })
 })

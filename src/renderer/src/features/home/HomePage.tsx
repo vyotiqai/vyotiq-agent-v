@@ -394,16 +394,30 @@ export function HomePage({
         ) : null}
 
         <div className="mt-8 flex flex-col gap-7">
+          {/* The briefing opens with what the work actually looked like: usage
+              across the window, full width, before anything asks for a
+              decision. */}
+          <ActivitySection
+            data={activity.data}
+            loading={activity.loading}
+            error={activity.error}
+            windowDays={windowDays}
+            onWindowChange={setWindowDays}
+            onRetry={activity.refresh}
+          />
+
           {/* Environment is a blocking condition, not a footnote: a provider
               with no key means no run can start at all. It used to render last,
               which put it below the fold on every window size — the one thing
-              on the page you were guaranteed not to see. It leads now, and
-              spans both columns because it is about the app, not a session. */}
+              on the page you were guaranteed not to see. It stays above the
+              session columns and spans both, because it is about the app, not
+              a session — Activity leads the page ahead of it. */}
           <EnvironmentSection
             providerIssue={providerIssue ?? null}
             mcpIssues={mcp.issues}
             onOpenProviderSettings={onOpenProviderSettings}
             onOpenMcpServer={onOpenMcpServer}
+            onRetryMcp={() => void mcp.retry()}
           />
 
           {/* Two columns once Home has the room: the session lists people act
@@ -515,15 +529,6 @@ export function HomePage({
                   ))}
                 </HomeCard>
               </HomeSection>
-
-              <ActivitySection
-                data={activity.data}
-                loading={activity.loading}
-                error={activity.error}
-                windowDays={windowDays}
-                onWindowChange={setWindowDays}
-                onRetry={activity.refresh}
-              />
             </div>
           </div>
         </div>

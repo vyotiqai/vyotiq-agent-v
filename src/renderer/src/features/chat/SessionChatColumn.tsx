@@ -421,6 +421,8 @@ export function SessionChatColumn({
               onGoalPause={runGoal.pause}
               onGoalResume={runGoal.resume}
               onGoalComplete={runGoal.complete}
+              onGoalActivate={runGoal.activate}
+              onGoalDismiss={runGoal.dismiss}
               onStopLoop={runGoal.stopLoop}
               onStopRun={onStop}
               transcript={
