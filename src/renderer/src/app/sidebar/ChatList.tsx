@@ -224,12 +224,19 @@ function WorkspaceHeader({
         Overlaid rather than laid out inline: as siblings these stayed in flow
         while invisible, so the workspace name truncated ~56px early even with
         the row at rest and nothing to show for the gap.
+
+        The container never takes pointer events and each control re-enables
+        them for itself, so the gaps still fall through to the row. Do not
+        move that onto the container behind group-hover: the pointer has to
+        land on the strip to trigger the hover, so a hover-gated hit area
+        can never be hit — the full-width name button under it wins every
+        hit test, and the buttons become unclickable rather than hidden.
       */}
       <div
         className={cn(
           'app-region-no-drag absolute inset-y-0 right-1.5 flex items-center gap-1 vy-transition pointer-events-none opacity-0',
-          'group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100',
-          '[@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100',
+          'group-hover:opacity-100 group-focus-within:opacity-100',
+          '[@media(hover:none)]:opacity-100',
           confirmingClose && 'pointer-events-auto opacity-100'
         )}
       >
@@ -250,7 +257,7 @@ function WorkspaceHeader({
               <Tooltip content={`New chat in ${name}`}>
                 <button
                   type="button"
-                  className="app-region-no-drag inline-grid size-6 place-items-center rounded-md text-muted vy-transition hover:bg-surface/70 hover:text-fg"
+                  className="app-region-no-drag pointer-events-auto inline-grid size-6 place-items-center rounded-md text-muted vy-transition hover:bg-surface/70 hover:text-fg"
                   aria-label={`New chat in ${name}`}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -264,7 +271,7 @@ function WorkspaceHeader({
             <Tooltip content={`Close ${name}`}>
               <button
                 type="button"
-                className="app-region-no-drag inline-grid size-6 place-items-center rounded-md text-muted vy-transition hover:bg-surface/70 hover:text-danger"
+                className="app-region-no-drag pointer-events-auto inline-grid size-6 place-items-center rounded-md text-muted vy-transition hover:bg-surface/70 hover:text-danger"
                 aria-label={`Close ${name}`}
                 onClick={(e) => {
                   e.stopPropagation()

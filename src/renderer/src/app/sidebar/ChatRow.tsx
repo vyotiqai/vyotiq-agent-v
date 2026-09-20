@@ -350,11 +350,16 @@ export const ChatRow = memo(function ChatRow({
         than in a strip that would out-measure the reserve and sit on the label.
         Stays mounted while the menu is open so the ⋯ trigger keeps its hover
         state under the portal.
+
+        Pointer events sit on the controls, not this container, so the gaps
+        fall through to the row. Gating them on group-hover instead would
+        make the strip unclickable: reaching it requires a hit test that the
+        row button underneath would win while the hover is still off.
       */}
       <div
         className={cn(
-          'app-region-no-drag absolute inset-y-0 right-0 z-sticky flex items-center gap-px vy-transition pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100',
-          '[@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100',
+          'app-region-no-drag absolute inset-y-0 right-0 z-sticky flex items-center gap-px vy-transition pointer-events-none opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+          '[@media(hover:none)]:opacity-100',
           (confirmingDelete || menuAnchor) && 'pointer-events-auto opacity-100'
         )}
       >
@@ -375,7 +380,7 @@ export const ChatRow = memo(function ChatRow({
               label={`More actions for ${fullLabel}`}
               size="xs"
               variant="bare"
-              className="text-muted hover:text-fg"
+              className="pointer-events-auto text-muted hover:text-fg"
               aria-haspopup="menu"
               aria-expanded={menuAnchor != null}
               onMouseDown={(e) => {
@@ -397,7 +402,7 @@ export const ChatRow = memo(function ChatRow({
               label={`Delete ${fullLabel}`}
               size="xs"
               variant="bare"
-              className="text-muted hover:text-danger"
+              className="pointer-events-auto text-muted hover:text-danger"
               onMouseDown={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
