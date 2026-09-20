@@ -201,7 +201,7 @@ export function ContextMenu({
               }
               title={item.disabled ? item.disabledReason : undefined}
               className={cn(
-                'flex min-h-8 w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-xs leading-5 outline-none focus-visible:vy-focus-ring vy-transition',
+                'flex min-h-8 w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs leading-5 outline-none focus-visible:vy-focus-ring vy-transition',
                 item.disabled
                   ? 'cursor-not-allowed text-muted/60'
                   : item.danger

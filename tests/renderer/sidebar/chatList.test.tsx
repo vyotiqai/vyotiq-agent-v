@@ -4,6 +4,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { ChatList } from '@renderer/app/sidebar/ChatList'
+import { SIDEBAR_WORKSPACE_ROW_ACTIONS_RESERVE } from '@renderer/lib/utils/layout'
 import { RUN_LIST_CAP } from '@shared/domain/runs'
 import type { WorkspaceSidebarGroup } from '@renderer/app/sidebar/types'
 
@@ -27,6 +28,41 @@ const workspaceGroup = (overrides: Partial<WorkspaceSidebarGroup> = {}): Workspa
 const noop = (): void => {}
 
 describe('ChatList', () => {
+  it('keeps the workspace name off the hover actions without paying for them at rest', () => {
+    render(
+      <ChatList
+        workspaceReady
+        sessionQuery=""
+        filteredRunsCount={0}
+        workspaceGroups={[workspaceGroup({ label: 'a-very-long-workspace-folder-name' })]}
+        onToggleWorkspace={noop}
+        onSwitchWorkspace={noop}
+        onCloseWorkspace={noop}
+        onAddWorkspace={noop}
+        onNewChatInWorkspace={noop}
+        activeRuns={[]}
+        workspaceHasBackgroundRun={() => false}
+        onSelectRun={noop}
+        onRenameRun={noop}
+        onDeleteRun={noop}
+      />
+    )
+
+    const name = screen.getByText('a-very-long-workspace-folder-name')
+    const nameButton = name.closest('button')!
+    // Reserved only while the strip shows — otherwise the name truncates early
+    // against buttons nobody can see.
+    for (const cls of SIDEBAR_WORKSPACE_ROW_ACTIONS_RESERVE.split(' ')) {
+      expect(nameButton.className).toContain(cls)
+    }
+
+    // The strip is lifted out of the name's flex line entirely.
+    const close = screen.getByRole('button', { name: 'Close a-very-long-workspace-folder-name' })
+    const strip = close.closest('div')!
+    expect(strip.className).toContain('absolute')
+    expect(strip.contains(nameButton)).toBe(false)
+  })
+
   it('offers an Open workspace action when no workspace is open', () => {
     const onAddWorkspace = vi.fn()
     render(

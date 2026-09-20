@@ -12,6 +12,7 @@ import {
   SIDEBAR_SECTION_LABEL,
   SIDEBAR_WORKSPACE_GROUP,
   SIDEBAR_WORKSPACE_ROW,
+  SIDEBAR_WORKSPACE_ROW_ACTIONS_RESERVE,
   SIDEBAR_WORKSPACE_ROW_ACTIVE,
   SIDEBAR_WORKSPACE_ROW_HOVER
 } from '@renderer/lib/utils/layout'
@@ -175,7 +176,7 @@ function WorkspaceHeader({
   return (
     <div
       className={cn(
-        'group flex items-center gap-1',
+        'group relative flex min-w-0 items-center gap-1',
         SIDEBAR_WORKSPACE_ROW,
         active
           ? SIDEBAR_WORKSPACE_ROW_ACTIVE
@@ -210,29 +211,29 @@ function WorkspaceHeader({
       <Tooltip content={path}>
         <button
           type="button"
-          className="app-region-no-drag flex min-w-0 flex-1 items-center gap-1 text-left"
+          className={cn(
+            'app-region-no-drag flex min-w-0 flex-1 items-center gap-1 text-left vy-transition',
+            SIDEBAR_WORKSPACE_ROW_ACTIONS_RESERVE
+          )}
           onClick={onSelectWorkspace}
         >
           <span className="truncate font-medium">{name}</span>
         </button>
       </Tooltip>
-      {onNewChat ? (
-        <Tooltip content={`New chat in ${name}`}>
-          <button
-            type="button"
-            className="app-region-no-drag inline-grid size-6 place-items-center rounded-md text-muted opacity-0 vy-transition hover:bg-surface/70 hover:text-fg group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
-            aria-label={`New chat in ${name}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              onNewChat()
-            }}
-          >
-            <Icon name="plus" size={12} />
-          </button>
-        </Tooltip>
-      ) : null}
-      {confirmingClose ? (
-        <div className="app-region-no-drag">
+      {/*
+        Overlaid rather than laid out inline: as siblings these stayed in flow
+        while invisible, so the workspace name truncated ~56px early even with
+        the row at rest and nothing to show for the gap.
+      */}
+      <div
+        className={cn(
+          'app-region-no-drag absolute inset-y-0 right-1.5 flex items-center gap-1 vy-transition pointer-events-none opacity-0',
+          'group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100',
+          '[@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100',
+          confirmingClose && 'pointer-events-auto opacity-100'
+        )}
+      >
+        {confirmingClose ? (
           <InlineConfirmActions
             size="sm"
             confirmLabel={closeConfirmLabel}
@@ -243,22 +244,39 @@ function WorkspaceHeader({
             }}
             onCancel={() => setConfirmingClose(false)}
           />
-        </div>
-      ) : (
-        <Tooltip content={`Close ${name}`}>
-          <button
-            type="button"
-            className="app-region-no-drag inline-grid size-6 place-items-center rounded-md text-muted opacity-0 vy-transition hover:bg-surface/70 hover:text-danger group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
-            aria-label={`Close ${name}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              setConfirmingClose(true)
-            }}
-          >
-            <Icon name="close" size={12} />
-          </button>
-        </Tooltip>
-      )}
+        ) : (
+          <>
+            {onNewChat ? (
+              <Tooltip content={`New chat in ${name}`}>
+                <button
+                  type="button"
+                  className="app-region-no-drag inline-grid size-6 place-items-center rounded-md text-muted vy-transition hover:bg-surface/70 hover:text-fg"
+                  aria-label={`New chat in ${name}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onNewChat()
+                  }}
+                >
+                  <Icon name="plus" size={12} />
+                </button>
+              </Tooltip>
+            ) : null}
+            <Tooltip content={`Close ${name}`}>
+              <button
+                type="button"
+                className="app-region-no-drag inline-grid size-6 place-items-center rounded-md text-muted vy-transition hover:bg-surface/70 hover:text-danger"
+                aria-label={`Close ${name}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setConfirmingClose(true)
+                }}
+              >
+                <Icon name="close" size={12} />
+              </button>
+            </Tooltip>
+          </>
+        )}
+      </div>
     </div>
   )
 }
