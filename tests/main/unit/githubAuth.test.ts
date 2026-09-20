@@ -282,6 +282,86 @@ describe('githubAuth helpers', () => {
     expect(status.error).toBeNull()
   })
 
+  /**
+   * Connect GitHub opened a browser and then hung, twice, on a machine where
+   * `gh auth login` had already been run:
+   *
+   *   22:01:04 [github-auth] Starting GitHub device authorization
+   *   22:01:10 [github-auth] GitHub CLI already signed in; ending device wait
+   *
+   * The flow noticed the CLI six seconds in and cancelled itself — without
+   * keeping the token. `ghAuthenticated` went true, `hasAppToken` stayed
+   * false, so the dialog waited for a token nothing was going to produce and
+   * the GitHub MCP, which reads Agent V's own storage, still had no Bearer.
+   */
+  describe('a machine where the GitHub CLI is already signed in', () => {
+    it('takes that sign-in instead of asking for a device code', async () => {
+      execFileAsync.mockResolvedValue({ stdout: 'gho_alreadysignedinwithgh\n', stderr: '' })
+      const fetchMock = vi.fn()
+      vi.stubGlobal('fetch', fetchMock)
+
+      const status = await startGithubAuth()
+
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(openExternalMock).not.toHaveBeenCalled()
+      expect(vi.mocked(setGithubAccessToken)).toHaveBeenCalledWith('gho_alreadysignedinwithgh')
+      expect(status.hasAppToken).toBe(true)
+      expect(status.pending).toBe(false)
+    })
+
+    it('keeps the token when the user signs in with gh mid-flow', async () => {
+      injectPendingGithubAuthForTests({})
+      execFileAsync.mockResolvedValue({ stdout: 'gho_fromtheterminal', stderr: '' })
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          text: async () => JSON.stringify({ error: 'authorization_pending' }),
+          headers: { get: () => 'application/json' }
+        })
+      )
+
+      await pollGithubAuthForTests()
+      // Adoption runs off the poll, so the token lands a tick later.
+      await vi.waitFor(() => {
+        expect(vi.mocked(setGithubAccessToken)).toHaveBeenCalledWith('gho_fromtheterminal')
+      })
+
+      const status = await githubAuthStatus()
+      expect(status.pending).toBe(false)
+      // What the cancel-and-forget version lost.
+      expect(status.hasAppToken).toBe(true)
+      // No point handing the CLI back the token it just gave us.
+      expect(spawnMock).not.toHaveBeenCalled()
+    })
+
+    it('falls back to the device code when gh prints more than a token', async () => {
+      execFileAsync.mockResolvedValue({
+        stdout: 'gho_token\nwarning: your token is about to expire\n',
+        stderr: ''
+      })
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            device_code: 'd',
+            user_code: 'ABCD-1234',
+            verification_uri: 'https://github.com/login/device',
+            expires_in: 900,
+            interval: 5
+          }),
+        headers: { get: () => 'application/json' }
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const status = await startGithubAuth()
+
+      expect(fetchMock).toHaveBeenCalled()
+      expect(status.pending).toBe(true)
+      expect(vi.mocked(setGithubAccessToken)).not.toHaveBeenCalled()
+    })
+  })
+
   it('treats classic PATs as gh-usable and Copilot tokens as not', () => {
     expect(isGithubCliUsableToken('ghp_abc')).toBe(true)
     expect(isGithubCliUsableToken('github_pat_abc')).toBe(true)

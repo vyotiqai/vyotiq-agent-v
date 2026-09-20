@@ -31,7 +31,8 @@ type GithubMethod = 'app' | 'oauth' | 'pat'
 /**
  * `google-client` and `inputs` only appear when the package actually needs
  * them, so the common path is a single step: Add → Sign in. Method, workspace
- * scope and Google access all have working defaults and live under Options.
+ * scope and Google access all have working defaults, and are shown rather
+ * than folded away — they are what the sign-in button is about to act on.
  */
 type WizardStep = 'google-client' | 'oauth-client' | 'inputs' | 'finish'
 
@@ -135,7 +136,14 @@ export function ConnectMcpWizard({
   const [inputValues, setInputValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(declaredInputs.map((i) => [i.name, i.default ?? '']))
   )
-  const [showOptions, setShowOptions] = useState(false)
+  /**
+   * Open. The choices here decide what the primary button is about to do —
+   * which GitHub identity it signs in with, whether the credential covers
+   * every workspace — and hiding them behind a link meant the user pressed
+   * "Sign in with GitHub" without being shown that there were three ways to,
+   * or that the default was the one needing no setup.
+   */
+  const [showOptions, setShowOptions] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -169,7 +177,16 @@ export function ConnectMcpWizard({
       setGithubFlowStarted(false)
       return
     }
-    if (!githubAuth.hasAppToken) return
+    if (!githubAuth.hasAppToken) {
+      // Flow over, no error, no token. Main used to reach this by cancelling
+      // itself when it spotted the GitHub CLI was signed in, and the dialog
+      // sat here waiting for something that was never coming. Say so rather
+      // than wait, whatever ends a flow empty in future.
+      setError('GitHub sign-in did not finish. Try again, or paste a personal access token.')
+      setPending(false)
+      setGithubFlowStarted(false)
+      return
+    }
     // The server reads this token straight out of the app's own storage, so
     // there is nothing left to save — just reconnect and get out of the way.
     onConnected()
@@ -595,6 +612,11 @@ export function ConnectMcpWizard({
                   <p className="m-0 text-sm text-secondary">
                     Agent V is already signed in to GitHub. {serverName} uses that sign-in —
                     there is nothing to register and nothing to paste.
+                  </p>
+                ) : githubAuth?.ghAuthenticated ? (
+                  <p className="m-0 text-sm text-secondary">
+                    The GitHub CLI on this machine is already signed in. {serverName} can use
+                    that sign-in — no browser and no code.
                   </p>
                 ) : (
                   <p className="m-0 text-sm text-secondary">

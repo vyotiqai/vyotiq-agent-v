@@ -181,19 +181,19 @@ describe('Connect MCP wizard', () => {
     // The whole journey is Add → Sign in. Nothing to click past first.
     expect(screen.getByRole('button', { name: /^Sign in$/i })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Continue$/i })).toBeNull()
-    // Defaulted choices stay out of the way until asked for.
-    expect(screen.queryByText(/Sign in with OAuth/i)).toBeNull()
-    expect(screen.queryByText(/Where can Agent V use this/i)).toBeNull()
+    // Defaulted, but shown: these decide what Sign in is about to do.
+    expect(screen.getByText(/Where can Agent V use this/i)).toBeTruthy()
   })
 
-  it('exposes the PAT and scope choices under Options', async () => {
+  it('shows the PAT and scope choices without being asked', async () => {
+    // They were behind an "Options" link, so the button was pressed without
+    // the user being shown that there were three ways to sign in.
     mockVyotiq()
     render(
       <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
     )
     fireEvent.click(await screen.findByRole('button', { name: /^Add$/i }))
     expect(await screen.findByRole('dialog', { name: /Connect GitHub/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Options$/i }))
     expect(screen.getByText(/Use the Agent V GitHub sign-in/i)).toBeTruthy()
     expect(screen.getByText(/Sign in with your own OAuth app/i)).toBeTruthy()
     expect(screen.getByText(/Paste a personal access token/i)).toBeTruthy()
@@ -404,7 +404,6 @@ describe('Connect MCP wizard', () => {
     expect(await screen.findByRole('dialog', { name: /Connect Gmail/i })).toBeTruthy()
     expect(screen.queryByLabelText(/Google Cloud client ID/i)).toBeNull()
     expect(screen.getByRole('button', { name: /^Sign in$/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Options$/i }))
     expect(screen.getByText(/Where can Agent V use this/i)).toBeTruthy()
     expect(screen.getByText(/Read and write/i)).toBeTruthy()
   })
@@ -508,7 +507,6 @@ describe('Connect MCP wizard', () => {
     )
     fireEvent.click(await screen.findByRole('button', { name: /^Add$/i }))
     expect(await screen.findByRole('dialog', { name: /Connect GitHub/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Options$/i }))
     fireEvent.click(screen.getByLabelText(/This workspace only/i))
     fireEvent.click(screen.getByRole('button', { name: /^Sign in$/i }))
     await waitFor(() => {
@@ -653,9 +651,54 @@ describe('GitHub MCP without registering an OAuth app', () => {
   it('still offers registering your own OAuth app', async () => {
     // Self-hosters and anyone who wants a separate identity keep the old route.
     await openWizard()
-    fireEvent.click(screen.getByRole('button', { name: /^Options$/i }))
     fireEvent.click(screen.getByLabelText(/Sign in with your own OAuth app/i))
 
     expect(await screen.findByRole('button', { name: /^Continue$/i })).toBeTruthy()
+  })
+
+  /**
+   * Main used to open a browser, notice six seconds later that the GitHub CLI
+   * was signed in, and cancel the flow without keeping a token. The dialog had
+   * nothing to react to and waited forever. Main now adopts that token, so
+   * `githubAuthStart` can come back already done — and if a flow ever does end
+   * empty again, the dialog says so instead of sitting there.
+   */
+  it('closes straight away when the sign-in comes back already done', async () => {
+    await openWizard()
+    ;(window.vyotiq.githubAuthStart as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true as const,
+      data: { ...NO_GITHUB_AUTH, ghAuthenticated: true, hasAppToken: true }
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /Sign in with GitHub/i }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Connect GitHub/i })).toBeNull()
+    })
+    expect(window.vyotiq.mcpRefresh).toHaveBeenCalled()
+    // No code was ever shown, because none was needed.
+    expect(screen.queryByText('ABCD-1234')).toBeNull()
+  })
+
+  it('says so when a flow ends without a token, rather than waiting', async () => {
+    await openWizard()
+    ;(window.vyotiq.githubAuthStart as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true as const,
+      data: NO_GITHUB_AUTH
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /Sign in with GitHub/i }))
+
+    expect(await screen.findByText(/did not finish/i)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Sign in with GitHub/i })).toBeTruthy()
+  })
+
+  it('tells the user the GitHub CLI sign-in is the one it will use', async () => {
+    await openWizard({
+      githubAuth: { ...NO_GITHUB_AUTH, ghAuthenticated: true, hasAppToken: false }
+    })
+
+    expect(await screen.findByText(/GitHub CLI on this machine is already signed in/i)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Sign in with GitHub/i })).toBeTruthy()
   })
 })
