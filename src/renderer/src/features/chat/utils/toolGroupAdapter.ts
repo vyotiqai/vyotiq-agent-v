@@ -1,3 +1,4 @@
+import type { ChatRightPanelId } from '@renderer/lib/utils/layout'
 import type { UiGroupTiming, UiToolRow } from '@shared/transcript'
 import { mcpDoneLabel, mcpRunningLabel } from '@shared/utils/mcpToolMeta'
 import {
@@ -37,6 +38,10 @@ export type ToolGroupNestedTool = {
   status: UiToolRow['status']
   /** Material file-type icon path when the tool targets a real file. */
   filePath?: string
+  /** 1-based line the badge opens at, when the tool reported one. */
+  fileLine?: number
+  /** Dock panel the leading icon reveals, when the result lives in one. */
+  opensPanel?: ChatRightPanelId
 }
 
 export type ToolGroupState = 'pending' | 'completed' | 'interrupted'
@@ -330,7 +335,9 @@ export function mapToolGroupProps(
       title: nestedRowTitle(tool, subtitle, inGroup),
       subtitle: inGroup && tool.name !== 'list_dir' ? '' : subtitle,
       status: tool.status,
-      ...(meta.filePath ? { filePath: meta.filePath } : {})
+      ...(meta.filePath ? { filePath: meta.filePath } : {}),
+      ...(meta.fileLine != null ? { fileLine: meta.fileLine } : {}),
+      ...(meta.opensPanel ? { opensPanel: meta.opensPanel } : {})
     }
   })
 

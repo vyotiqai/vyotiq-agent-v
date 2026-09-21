@@ -290,6 +290,39 @@ describe('ChatView composer placement', () => {
     })
   })
 
+  // Files / Plan / Pull request shipped bindings that the Shortcuts settings
+  // page and the command palette both advertised while nothing listened for
+  // them. Every panel the dock can open answers its own chord.
+  it.each([
+    ['files', { key: 'e', ctrlKey: true, shiftKey: true }],
+    ['plan', { key: 'd', ctrlKey: true, shiftKey: true }],
+    ['pr', { key: 'g', ctrlKey: true, shiftKey: true }],
+    ['changes', { key: 'e', ctrlKey: true }],
+    ['browser', { key: 'b', ctrlKey: true, shiftKey: true }]
+  ] as const)('toggles the %s panel with its advertised chord', async (panel, chord) => {
+    render(<ChatView {...baseProps} items={[]} />)
+    fireEvent.keyDown(window, chord)
+    await waitFor(() => {
+      expect(document.getElementById(`dock-panel-${panel}`)).toBeTruthy()
+    })
+    // Same chord again closes it — the rail's tooltip calls it a toggle.
+    fireEvent.keyDown(window, chord)
+    await waitFor(() => {
+      expect(document.getElementById(`dock-panel-${panel}`)).toBeNull()
+    })
+  })
+
+  it('opens a panel from a command palette entry', async () => {
+    render(<ChatView {...baseProps} items={[]} />)
+    fireEvent(
+      window,
+      new CustomEvent('vyotiq:command', { detail: { id: 'panelFiles' } })
+    )
+    await waitFor(() => {
+      expect(document.getElementById('dock-panel-files')).toBeTruthy()
+    })
+  })
+
   it('closes one dock tab without clearing the remaining tabs', async () => {
     render(<ChatView {...baseProps} items={[]} />)
     fireEvent.click(screen.getByRole('button', { name: /Show terminal panel/i }))

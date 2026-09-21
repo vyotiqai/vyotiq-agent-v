@@ -24,6 +24,21 @@ export function shortcutLabel(id: ShortcutId): string {
   return shift ? `Ctrl+Shift+${glyph}` : `Ctrl+${glyph}`
 }
 
+/**
+ * `aria-keyshortcuts` form of a chord (`Control+Shift+E`), which is a fixed
+ * WAI-ARIA syntax rather than the platform label a reader sees: assistive tech
+ * announces the chord from this, so a control that shows one in its tooltip
+ * must carry the same one here.
+ */
+export function shortcutAriaKeys(id: ShortcutId): string {
+  const binding = SHORTCUT_BINDINGS[id]
+  const parts: string[] = []
+  if (binding.mod) parts.push(isDarwin() ? 'Meta' : 'Control')
+  if (binding.shift === 'require') parts.push('Shift')
+  parts.push(binding.key === 'escape' ? 'Escape' : binding.key.toUpperCase())
+  return parts.join('+')
+}
+
 export const SHORTCUT_TITLES: Record<ShortcutId, string> = {
   sidebar: 'Toggle sidebar',
   search: 'Search chats',

@@ -12,6 +12,7 @@ import type {
 } from '@shared/ipc'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import type { ChatStreamController } from '@renderer/lib/hooks/createChatStreamController'
+import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { Composer } from './components/composer'
 import { useHasChatItems } from './components/ChatStreamLeaves'
 import { RunSessionProvider } from './RunSessionContext'
@@ -319,6 +320,14 @@ export function SessionChatColumn({
       />
     ) : null
 
+  // Same empty-session surface as the single-pane ChatView path: without
+  // these two props MessageList skips the empty block entirely, so a new
+  // chat in a pane showed neither the label nor the agent-context card.
+  const transcriptEmptyLabel =
+    activeRunId == null && workspacePath
+      ? `New chat in ${formatWorkspaceName(workspacePath)}`
+      : undefined
+
   const runFeedback = useRunFeedback(workspacePath, activeRunId, !running)
   const composerProps = buildComposerSendProps({
     provider,
@@ -428,6 +437,8 @@ export function SessionChatColumn({
               transcript={
                 <MessageList
                   key={`transcript:${surfaceKey}`}
+                  emptyLabel={transcriptEmptyLabel}
+                  workspacePath={workspacePath ?? undefined}
                   runFeedback={runFeedback}
                   items={items}
                   itemsStore={itemsStore}

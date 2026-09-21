@@ -88,6 +88,8 @@ function NestedToolRow({
         hasBody={hasBody}
         interrupted={rowInterrupted}
         filePath={nested.filePath}
+        fileLine={nested.fileLine}
+        opensPanel={nested.opensPanel}
         onToggle={toggle}
       />
       <ExpandPanel open={hasBody && open}>
@@ -276,6 +278,8 @@ export const ToolGroup = memo(function ToolGroup({
           hasBody={hasBody}
           interrupted={isInterrupted}
           filePath={nested.filePath}
+          fileLine={nested.fileLine}
+          opensPanel={nested.opensPanel}
           onToggle={toggleSingle}
         />
         <ExpandPanel open={hasBody && isToolExpanded}>

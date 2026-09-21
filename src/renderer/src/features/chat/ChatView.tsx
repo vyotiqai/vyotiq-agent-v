@@ -7,7 +7,11 @@ import type { WorkspaceFileOpenRequest } from './components/FilesPanel'
 import { ChangesPanel } from './components/ChangesPanel'
 import { ConfirmFileList } from './components/ConfirmFileList'
 import { PlanPanel } from './components/PlanPanel'
-import { ChatSideRail } from './components/ChatSideRail'
+import {
+  ChatSideRail,
+  RAIL_DETAIL_MAX,
+  type RailPanelState
+} from './components/ChatSideRail'
 import { DockTabBar, AGENT_DOCK_TAB, defaultDockTab } from './components/DockTabBar'
 import { isPlanDraftReady } from './utils/planDraft'
 import { Composer } from './components/composer'
@@ -22,6 +26,8 @@ import {
 } from '@shared/utils/agentInstance'
 import {
   useControllerWriteCheckpoint,
+  useAgentFileFocus,
+  useAgentLiveActivity,
   useGitRevision,
   useHasChatItems
 } from './components/ChatStreamLeaves'
@@ -47,6 +53,7 @@ import { useTitleBarAccessory } from '@renderer/lib/context/TitleBarAccessory'
 import {
   BROWSER_PANEL_OPEN_KEY,
   CHAT_RIGHT_PANEL,
+  CHAT_RIGHT_PANEL_IDS,
   DOCK_EXPANDED_KEY,
   DOCK_WIDTH_DEFAULT_PX,
   DOCK_WIDTH_KEY,
@@ -62,6 +69,9 @@ import {
   type ChatRightPanelId,
   type DockImmersiveTabId
 } from '@renderer/lib/utils/layout'
+import { PANEL_SHORTCUT } from '@renderer/lib/utils/dockPanels'
+import { formatPathLabel, truncateMiddle } from '@shared/utils/displayPath'
+import { toWorkspaceRelPath } from '@shared/utils/workspacePath'
 import { cn } from '@renderer/lib/ui/cn'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { matchShortcut, shouldBlockPanelShortcut } from '@renderer/lib/shortcuts'
@@ -496,6 +506,10 @@ const runGoal = useRunGoal({
     items,
     itemsStore
   )
+  /** Drives the Files panel's follow mode: the file the run is writing now. */
+  const agentFileFocus = useAgentFileFocus(running, items, itemsStore)
+  /** Drives the side rail's live markers: what the run has in flight. */
+  const liveActivity = useAgentLiveActivity(running, items, itemsStore)
   const filesFlushRef = useRef<(() => Promise<boolean>) | null>(null)
   const registerFilesFlush = useCallback(
     (flush: (() => Promise<boolean>) | null): void => {
@@ -636,9 +650,18 @@ const runGoal = useRunGoal({
       agentMode,
       agentInstances,
       onOpenAgentInstance,
-      onOpenWorkspaceFile: openWorkspaceFile
+      onOpenWorkspaceFile: openWorkspaceFile,
+      onOpenPanel: setRightPanel
     }),
-    [workspacePath, activeRunId, agentMode, agentInstances, onOpenAgentInstance, openWorkspaceFile]
+    [
+      workspacePath,
+      activeRunId,
+      agentMode,
+      agentInstances,
+      onOpenAgentInstance,
+      openWorkspaceFile,
+      setRightPanel
+    ]
   )
   const transcriptEmptyLabel =
     activeRunId == null && workspacePath
@@ -651,7 +674,8 @@ const runGoal = useRunGoal({
       agentMode,
       agentInstances,
       onOpenAgentInstance,
-      onOpenWorkspaceFile: openWorkspaceFile
+      onOpenWorkspaceFile: openWorkspaceFile,
+      onOpenPanel: setRightPanel
     }),
     [
       workspacePath,
@@ -659,7 +683,8 @@ const runGoal = useRunGoal({
       agentMode,
       agentInstances,
       onOpenAgentInstance,
-      openWorkspaceFile
+      openWorkspaceFile,
+      setRightPanel
     ]
   )
   const handleWorkspaceFileOpened = useCallback((request: WorkspaceFileOpenRequest): void => {
@@ -776,22 +801,17 @@ const runGoal = useRunGoal({
     [activeRightPanel, closeDockTab, setRightPanel]
   )
 
+  // Both panel entry points read the same table as the rail's tooltips, the
+  // Shortcuts settings page and the command palette, so a panel can never
+  // advertise a chord nothing answers (Files / Plan / Pull request did).
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (shouldBlockPanelShortcut(e.target)) return
-      if (matchShortcut(e, 'panelTerminal')) {
+      for (const panel of CHAT_RIGHT_PANEL_IDS) {
+        if (!matchShortcut(e, PANEL_SHORTCUT[panel])) continue
         e.preventDefault()
-        toggleRightPanel('terminal')
+        toggleRightPanel(panel)
         return
-      }
-      if (matchShortcut(e, 'panelChanges')) {
-        e.preventDefault()
-        toggleRightPanel('changes')
-        return
-      }
-      if (matchShortcut(e, 'panelBrowser')) {
-        e.preventDefault()
-        toggleRightPanel('browser')
       }
     }
     window.addEventListener('keydown', onKey)
@@ -801,9 +821,8 @@ const runGoal = useRunGoal({
   useEffect(() => {
     const onCommand = (event: Event): void => {
       const id = (event as CustomEvent<{ id?: string }>).detail?.id
-      if (id === 'panelTerminal') toggleRightPanel('terminal')
-      else if (id === 'panelChanges') toggleRightPanel('changes')
-      else if (id === 'panelBrowser') toggleRightPanel('browser')
+      const panel = CHAT_RIGHT_PANEL_IDS.find((p) => PANEL_SHORTCUT[p] === id)
+      if (panel) toggleRightPanel(panel)
     }
     window.addEventListener('vyotiq:command', onCommand)
     return () => window.removeEventListener('vyotiq:command', onCommand)
@@ -997,6 +1016,48 @@ const runGoal = useRunGoal({
       return ''
     }
   }, [browserLive?.url])
+  const pendingChangeCount =
+    (instancePaneController ? instanceWriteCheckpointFiles : writeCheckpointFiles)?.length ?? 0
+
+  /**
+   * Live markers for the side rail. A pulse means the run is working in that
+   * panel right now; a count means something there is waiting for the reader.
+   * Every value is state this surface already holds, so a rail that is closed
+   * costs nothing extra — no panel is mounted and no IPC is issued for it.
+   */
+  const railPanelState = useMemo<Partial<Record<ChatRightPanelId, RailPanelState>>>(() => {
+    const state: Partial<Record<ChatRightPanelId, RailPanelState>> = {}
+    const writing = liveActivity.writingPath
+    if (writing !== null) {
+      // A call whose arguments are still streaming is doing work it cannot
+      // name yet; the marker leads, the label catches up.
+      const target = writing
+        ? formatPathLabel(toWorkspaceRelPath(workspacePath, writing) ?? writing, RAIL_DETAIL_MAX)
+        : 'a file'
+      state.files = { active: true, detail: `Editing ${target}` }
+    }
+    const command = liveActivity.command
+    if (command !== null) {
+      state.terminal = {
+        active: true,
+        detail: `Running ${command ? truncateMiddle(command, RAIL_DETAIL_MAX) : 'a command'}`
+      }
+    }
+    if (browserBusy) {
+      state.browser = {
+        active: true,
+        detail: browserWatchUrl ? `Browsing ${browserWatchUrl}` : 'Agent is browsing'
+      }
+    }
+    if (pendingChangeCount > 0) {
+      state.changes = {
+        count: pendingChangeCount,
+        detail: `${pendingChangeCount} ${pendingChangeCount === 1 ? 'file' : 'files'} to review`
+      }
+    }
+    return state
+  }, [browserBusy, browserWatchUrl, liveActivity, pendingChangeCount, workspacePath])
+
   // The panel itself shows the live view when visible; the banner covers every
   // other case (panel closed, another panel focused, immersive on another tab).
   const browserWatchBanner =
@@ -1323,6 +1384,7 @@ const runGoal = useRunGoal({
               onGitMutated={notifyGitMutated}
               onFlushReady={registerFilesFlush}
               openPath={requestedFilePath}
+              agentFocus={agentFileFocus}
               onOpenPathHandled={handleWorkspaceFileOpened}
               recoveryData={filesRecoveryData}
               onRecoveryDataConsumed={handleFilesRecoveryConsumed}
@@ -1619,7 +1681,7 @@ const runGoal = useRunGoal({
                 workspacePath={workspacePath}
                 runId={activeRunId}
                 running={running}
-                browserBusy={browserBusy}
+                panelState={railPanelState}
               />
             ) : null}
           </>

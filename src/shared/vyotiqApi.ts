@@ -464,6 +464,8 @@ export interface VyotiqApi {
   ptyKill: (id: string, workspacePath: string) => Promise<IpcResult<boolean>>
   onPtyData: (handler: (event: { id: string; data: string }) => void) => () => void
   onPtyExit: (handler: (event: { id: string; exitCode: number | null }) => void) => () => void
+  /** The set of live PTY sessions changed (e.g. the agent mirror appeared). */
+  onPtySessionsChanged: (handler: () => void) => () => void
   windowMinimize: () => Promise<IpcResult<true>>
   windowMaximize: () => Promise<IpcResult<boolean>>
   windowClose: () => Promise<IpcResult<true>>

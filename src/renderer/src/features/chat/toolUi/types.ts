@@ -1,4 +1,5 @@
 import type { IconName } from '@renderer/lib/icons'
+import type { ChatRightPanelId } from '@renderer/lib/utils/layout'
 import type { UiGroupTiming, UiToolProgressEntry, UiToolRow } from '@shared/transcript'
 
 export type ToolPresentation = 'prominent' | 'compact'
@@ -14,6 +15,16 @@ export type ToolHeaderMeta = {
   exitCode?: number | null
   statusDot?: 'running' | 'done' | 'fail'
   filePath?: string
+  /**
+   * 1-based line to land on when `filePath` is opened. Only set when the tool
+   * genuinely reported one (a read range, a unified-diff hunk) — never guessed.
+   */
+  fileLine?: number
+  /**
+   * Dock panel this card's leading icon reveals, for tools whose result lives
+   * in a panel rather than a file (a PR card opens the pull request panel).
+   */
+  opensPanel?: ChatRightPanelId
   added?: number
   removed?: number
 }

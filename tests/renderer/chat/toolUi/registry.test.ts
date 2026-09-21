@@ -139,13 +139,13 @@ describe('tool UI registry coverage', () => {
     const pin: UiToolRow = {
       id: 'p1',
       name: 'request_mcp_tools',
-      summary: '2 pinned',
+      summary: '2 loaded',
       status: 'done',
       argsPreview: JSON.stringify({ serverId: 'gh' }),
-      content: 'Pinned for next step (2): mcp__gh__a, mcp__gh__b'
+      content: "Loaded into the next step's tool catalog (2): mcp__gh__a, mcp__gh__b"
     }
     expect(getToolHeaderMeta(pin)).toMatchObject({
-      verb: 'Pinned MCP',
+      verb: 'Loaded MCP',
       target: 'gh',
       icon: 'plug'
     })

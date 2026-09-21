@@ -318,6 +318,15 @@ const api: VyotiqApi = {
       ipcRenderer.removeListener(IPC.ptyExit, listener)
     }
   },
+  onPtySessionsChanged: (handler) => {
+    const listener = (): void => {
+      handler()
+    }
+    ipcRenderer.on(IPC.ptySessionsChanged, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.ptySessionsChanged, listener)
+    }
+  },
   windowMinimize: () => ipcRenderer.invoke(IPC.windowMinimize),
   windowMaximize: () => ipcRenderer.invoke(IPC.windowMaximize),
   windowClose: () => ipcRenderer.invoke(IPC.windowClose),

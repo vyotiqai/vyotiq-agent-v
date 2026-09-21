@@ -1,7 +1,9 @@
-import { memo } from 'react'
+import { memo, useMemo } from 'react'
 import { Icon, type IconName } from '@renderer/lib/icons'
+import type { ChatRightPanelId } from '@renderer/lib/utils/layout'
 import { cn } from '@renderer/lib/ui'
 import { formatUrlLabel } from '@shared/utils/displayPath'
+import { toWorkspaceRelPath } from '@shared/utils/workspacePath'
 import {
   DISCLOSURE_CHEVRON,
   DISCLOSURE_ROW,
@@ -17,8 +19,90 @@ import { useRunSession } from '../RunSessionContext'
 
 export type ToolCardFoldMode = 'peek' | 'panel'
 
+/**
+ * File-type badge that opens the tool's target in the Files panel.
+ *
+ * The tool reports whatever path the model sent, which may be absolute; the
+ * workspace file IPC only accepts workspace-relative paths. Anything that will
+ * not resolve inside the open workspace renders as an inert badge rather than
+ * a link that fails on click.
+ */
+export function ToolFileBadge({
+  filePath,
+  fileLine,
+  size = 14
+}: {
+  filePath: string
+  /** 1-based line to land on, when the tool reported one. */
+  fileLine?: number
+  size?: number
+}) {
+  const { workspacePath, onOpenWorkspaceFile } = useRunSession()
+  const relPath = useMemo(
+    () => toWorkspaceRelPath(workspacePath, filePath),
+    [workspacePath, filePath]
+  )
+
+  if (!relPath || !onOpenWorkspaceFile) {
+    return <FileBadge path={filePath} size={size} />
+  }
+
+  const target = fileLine != null ? `${relPath}:${fileLine}` : relPath
+  return (
+    <button
+      type="button"
+      className="shrink-0 rounded-sm vy-transition hover:bg-surface-2/80 focus-visible:vy-focus-ring"
+      aria-label={`Open ${target}`}
+      title={`Open ${target}`}
+      onClick={() => {
+        // Keep the no-line call single-argument: that is the existing contract
+        // every other caller of onOpenWorkspaceFile uses.
+        if (fileLine != null) onOpenWorkspaceFile(relPath, { line: fileLine })
+        else onOpenWorkspaceFile(relPath)
+      }}
+    >
+      <FileBadge path={relPath} size={size} />
+    </button>
+  )
+}
+
+/**
+ * Leading icon that reveals a dock panel — for tools whose result lives in a
+ * panel rather than a file. Falls back to a plain icon when the host provides
+ * no panel opener (instance panes, tests).
+ */
+export function ToolPanelIcon({
+  icon,
+  panel,
+  label,
+  className
+}: {
+  icon: IconName
+  panel: ChatRightPanelId
+  /** Accessible name, e.g. "Open pull request panel". */
+  label: string
+  className?: string
+}) {
+  const { onOpenPanel } = useRunSession()
+  if (!onOpenPanel) {
+    return <Icon name={icon} size={14} className={cn('shrink-0 text-tertiary', className)} />
+  }
+  return (
+    <button
+      type="button"
+      className="shrink-0 rounded-sm vy-transition hover:bg-surface-2/80 focus-visible:vy-focus-ring"
+      aria-label={label}
+      title={label}
+      onClick={() => onOpenPanel(panel)}
+    >
+      <Icon name={icon} size={14} className={cn('shrink-0 text-tertiary', className)} />
+    </button>
+  )
+}
+
 export function ProminentChrome({
   header,
+  leading,
   body,
   expanded,
   hasBody,
@@ -29,6 +113,11 @@ export function ProminentChrome({
   onToggle
 }: {
   header: React.ReactNode
+  /**
+   * Interactive chrome that sits before the header, outside the disclosure
+   * button — a nested button would be invalid HTML.
+   */
+  leading?: React.ReactNode
   body: React.ReactNode
   expanded: boolean
   hasBody: boolean
@@ -67,27 +156,36 @@ export function ProminentChrome({
 
   return (
     <div className={cn(TOOL_CARD_SURFACE, 'w-full')} aria-busy={running || undefined}>
-      <button
-        type="button"
+      <div
         className={cn(
-          TOOL_CARD_HEADER,
-          'group flex w-full items-center gap-2 text-left vy-transition',
+          'group flex w-full items-center vy-transition',
           hasBody && 'hover:bg-surface/60'
         )}
-        onClick={onToggle}
-        aria-label={ariaLabel}
-        aria-expanded={hasBody ? expanded : undefined}
-        disabled={!hasBody}
       >
-        {header}
-        {hasBody ? (
-          <Icon
-            name="chevronRight"
-            size={14}
-            className={cn(DISCLOSURE_CHEVRON, expanded && 'rotate-90')}
-          />
-        ) : null}
-      </button>
+        {leading ? <span className="flex shrink-0 items-center pl-3">{leading}</span> : null}
+        <button
+          type="button"
+          className={cn(
+            TOOL_CARD_HEADER,
+            'flex min-w-0 flex-1 items-center gap-2 text-left',
+            // The badge already carries the left inset; keep the 8px gap only.
+            Boolean(leading) && 'pl-2'
+          )}
+          onClick={onToggle}
+          aria-label={ariaLabel}
+          aria-expanded={hasBody ? expanded : undefined}
+          disabled={!hasBody}
+        >
+          {header}
+          {hasBody ? (
+            <Icon
+              name="chevronRight"
+              size={14}
+              className={cn(DISCLOSURE_CHEVRON, expanded && 'rotate-90')}
+            />
+          ) : null}
+        </button>
+      </div>
       {bodyShell}
     </div>
   )
@@ -102,6 +200,8 @@ export const CompactRow = memo(function CompactRow({
   interrupted = false,
   icon,
   filePath,
+  fileLine,
+  opensPanel,
   statusDot,
   onToggle
 }: {
@@ -114,29 +214,23 @@ export const CompactRow = memo(function CompactRow({
   icon?: IconName
   /** Material file-type icon when the row targets a real path. */
   filePath?: string
+  /** 1-based line to land on when the badge opens the file. */
+  fileLine?: number
+  /** Dock panel the leading icon reveals, when the result lives in one. */
+  opensPanel?: ChatRightPanelId
   statusDot?: 'running' | 'done' | 'fail'
   onToggle: () => void
 }) {
-  const { onOpenWorkspaceFile } = useRunSession()
   const disclosureLabel = hasBody
     ? `${expanded ? 'Collapse' : 'Expand'} ${title}${subtitle ? `: ${subtitle}` : ''}`
     : title
-  const fileBadge =
-    filePath && onOpenWorkspaceFile ? (
-      <button
-        type="button"
-        className="shrink-0 rounded-sm vy-transition hover:bg-surface-2/80"
-        aria-label={`Open ${filePath}`}
-        title={filePath}
-        onClick={() => onOpenWorkspaceFile(filePath)}
-      >
-        <FileBadge path={filePath} />
-      </button>
-    ) : filePath ? (
-      <FileBadge path={filePath} />
-    ) : icon ? (
-      <Icon name={icon} size={14} className="shrink-0 text-tertiary" />
-    ) : null
+  const fileBadge = filePath ? (
+    <ToolFileBadge filePath={filePath} fileLine={fileLine} />
+  ) : icon && opensPanel ? (
+    <ToolPanelIcon icon={icon} panel={opensPanel} label={`${title} — open panel`} />
+  ) : icon ? (
+    <Icon name={icon} size={14} className="shrink-0 text-tertiary" />
+  ) : null
   return (
     <div className={cn(DISCLOSURE_ROW, 'group w-full', !hasBody && 'cursor-default')}>
       {fileBadge}

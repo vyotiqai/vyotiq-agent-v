@@ -2,12 +2,13 @@ import { memo, useMemo, useState } from 'react'
 import { Icon } from '@renderer/lib/icons'
 import { cn } from '@renderer/lib/ui'
 import { formatUrlLabel } from '@shared/utils/displayPath'
-import { FileBadge } from './FileBadge'
 import { TextShimmer } from './TextShimmer'
 import type { ToolItem } from '../utils/transcriptRows'
 import {
   ProminentChrome,
   ToolBodyView,
+  ToolFileBadge,
+  ToolPanelIcon,
   getToolHeaderMeta,
   toolDefaultExpanded,
   toolHasBody,
@@ -79,11 +80,23 @@ export const ToolCard = memo(function ToolCard({
       }`
     : `${headerMeta.verb}${headerMeta.target ? ` ${headerMeta.target}` : ''}`
 
+  /**
+   * Rendered outside the disclosure button by ProminentChrome: the badge is
+   * itself a button (open in Files), and nesting one is invalid HTML.
+   */
+  const leading = headerMeta.filePath ? (
+    <ToolFileBadge filePath={headerMeta.filePath} fileLine={headerMeta.fileLine} size={16} />
+  ) : headerMeta.icon && headerMeta.opensPanel ? (
+    <ToolPanelIcon
+      icon={headerMeta.icon}
+      panel={headerMeta.opensPanel}
+      label={`${headerMeta.verb} — open panel`}
+    />
+  ) : null
+
   const header = (
     <>
-      {headerMeta.filePath ? (
-        <FileBadge path={headerMeta.filePath} size={16} />
-      ) : headerMeta.icon ? (
+      {!headerMeta.filePath && !headerMeta.opensPanel && headerMeta.icon ? (
         <Icon
           name={headerMeta.icon}
           size={14}
@@ -152,6 +165,7 @@ export const ToolCard = memo(function ToolCard({
   return (
     <ProminentChrome
       header={header}
+      leading={leading}
       foldMode={foldMode}
       // Peek only: live diffs use followEnd — clamping would hide newest lines.
       // DiffPreview still self-limits to the 14-line peek while collapsed.

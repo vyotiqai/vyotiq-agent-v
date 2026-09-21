@@ -43,6 +43,7 @@ function AppShellInner({
   openWorkspaces,
   runsByWorkspacePath,
   activeRuns,
+  activeRunsLoaded,
   onDismissRunsError,
   sessionQuery,
   onSessionQuery,
@@ -86,6 +87,7 @@ function AppShellInner({
   openWorkspaces?: string[]
   runsByWorkspacePath?: Record<string, WorkspaceSidebarRuns>
   activeRuns?: { runId: string; workspacePath: string }[]
+  activeRunsLoaded?: boolean
   onDismissRunsError?: (path?: string) => void
   sessionQuery: string
   onSessionQuery: (q: string) => void
@@ -354,6 +356,7 @@ function AppShellInner({
     activePath: workspacePath,
     runsByWorkspacePath,
     activeRuns,
+    activeRunsLoaded,
     onSwitchWorkspace,
     onCloseWorkspace,
     onAddWorkspace,

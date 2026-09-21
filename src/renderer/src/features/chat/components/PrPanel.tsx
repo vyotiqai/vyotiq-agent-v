@@ -59,6 +59,11 @@ function viewedStorageKey(workspacePath: string, prNumber: number): string {
   return `vyotiq.prViewed:${workspacePath}:${prNumber}`
 }
 
+/** How often to re-ask gh while a check is in flight. */
+const PR_CHECKS_POLL_MS = 15_000
+/** Give up watching one head commit after this long. */
+const PR_CHECKS_POLL_MAX_MS = 30 * 60_000
+
 function loadViewed(workspacePath: string, prNumber: number): Set<string> {
   try {
     const raw = localStorage.getItem(viewedStorageKey(workspacePath, prNumber))
@@ -179,6 +184,32 @@ function checksLabel(pr: PrView): string {
   if (total === 0) return 'Checks'
   const passed = checksPassedCount(pr)
   return `Checks ${passed}/${total}`
+}
+
+/**
+ * States GitHub reports while a check has not finished.
+ *
+ * The rollup mixes two node shapes: a CheckRun reports its status here
+ * (QUEUED / IN_PROGRESS) with a null conclusion, while a StatusContext reports
+ * PENDING / EXPECTED and never carries one. Anything else — including a value
+ * this list does not know — counts as settled, so a malformed rollup can never
+ * keep the poller alive indefinitely.
+ */
+const PENDING_CHECK_STATES = new Set([
+  'QUEUED',
+  'IN_PROGRESS',
+  'PENDING',
+  'WAITING',
+  'REQUESTED',
+  'EXPECTED'
+])
+
+/** Checks still running: a finished run always reports some conclusion. */
+export function checksPendingCount(pr: PrView): number {
+  return pr.checks.filter((c) => {
+    if ((c.conclusion ?? '').trim()) return false
+    return PENDING_CHECK_STATES.has(c.state.trim().toUpperCase())
+  }).length
 }
 
 /** Count checks that actually passed — not bare COMPLETED without a success conclusion. */
@@ -426,6 +457,42 @@ export function PrPanel({
     if (tab !== 'issues') return
     void loadIssues()
   }, [tab, loadIssues])
+
+  const loadRef = useRef(load)
+  loadRef.current = load
+  /** Poll budget per head commit, so re-renders cannot extend it forever. */
+  const pollStartRef = useRef<{ key: string; at: number } | null>(null)
+
+  /**
+   * Watch CI while it is actually running.
+   *
+   * `prView` shells out to `gh` over the network, so this only ticks when a
+   * check is genuinely in flight on an open PR and the window is visible, and
+   * it gives up after PR_CHECKS_POLL_MAX_MS on one head commit — a check wedged
+   * in QUEUED must not poll GitHub for the rest of the session. Pushing a new
+   * commit changes the head oid and starts a fresh budget.
+   */
+  useEffect(() => {
+    if (!pr) {
+      pollStartRef.current = null
+      return undefined
+    }
+    const prState = pr.state.trim().toUpperCase()
+    if (prState === 'MERGED' || prState === 'CLOSED') return undefined
+    if (checksPendingCount(pr) === 0) return undefined
+
+    const key = `${pr.number}:${pr.headRefOid}`
+    if (pollStartRef.current?.key !== key) {
+      pollStartRef.current = { key, at: Date.now() }
+    }
+    if (Date.now() - pollStartRef.current.at > PR_CHECKS_POLL_MAX_MS) return undefined
+
+    const timer = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      void loadRef.current({ quiet: true })
+    }, PR_CHECKS_POLL_MS)
+    return () => window.clearInterval(timer)
+  }, [pr])
 
   const hadGhAuthRef = useRef(false)
 

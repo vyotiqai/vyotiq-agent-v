@@ -76,6 +76,26 @@ export function seedRunsInUserData(
   }
 }
 
+/**
+ * Append rows to a seeded run's `events.jsonl`.
+ *
+ * The transcript controller rebuilds state (including the unresolved write
+ * checkpoint) from these rows on load, so a spec can put a run into a state
+ * that only a completed turn normally produces.
+ */
+export function seedRunEvents(
+  userDataDir: string,
+  workspacePath: string,
+  runId: string,
+  events: unknown[]
+): void {
+  const dir = join(sessionsRootFor(userDataDir, workspacePath), runId)
+  mkdirSync(dir, { recursive: true })
+  const at = '2026-08-08T00:00:00.000Z'
+  const rows = events.map((event) => JSON.stringify({ at, event }))
+  writeFileSync(join(dir, 'events.jsonl'), `${rows.join('\n')}\n`, 'utf8')
+}
+
 /** Seed a run that may be running or interrupted (cancelled + resumable). */
 export function seedInterruptedRun(
   userDataDir: string,
