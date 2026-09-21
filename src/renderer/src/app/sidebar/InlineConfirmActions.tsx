@@ -23,7 +23,10 @@ function ConfirmActionButton({
         ref={buttonRef}
         type="button"
         className={cn(
-          'app-region-no-drag relative inline-grid place-items-center rounded-md text-muted vy-transition hover:bg-surface/60 hover:text-fg',
+          // Self-sufficient hit target: these render inside overlay strips that
+          // leave their own gaps click-through, so the button carries its own
+          // pointer events rather than inheriting a container's.
+          'app-region-no-drag pointer-events-auto relative inline-grid place-items-center rounded-md text-muted vy-transition hover:bg-surface/60 hover:text-fg',
           size === 'sm' ? 'size-6' : 'size-7',
           className
         )}

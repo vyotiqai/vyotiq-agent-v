@@ -96,6 +96,38 @@ describe('ChatRow hover actions', () => {
     expect(onSelectRun).not.toHaveBeenCalled()
   })
 
+  /**
+   * `cn` only joins strings and Tailwind emits `pointer-events-none` after
+   * `pointer-events-auto` at equal specificity, so a container that carries
+   * both resolves to `none` and the row button underneath wins every click.
+   * That is what made the delete confirm unclickable.
+   */
+  it('never leaves the strip carrying both pointer-events utilities', () => {
+    renderRow()
+    const strip = (): HTMLElement =>
+      screen
+        .getByRole('button', { name: 'List files' })
+        .closest('[role="listitem"]')!
+        .querySelector('.absolute') as HTMLElement
+
+    expect(strip().className).toContain('pointer-events-none')
+    expect(strip().className).not.toContain('pointer-events-auto')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete List files' }))
+    expect(strip().className).toContain('pointer-events-auto')
+    expect(strip().className).not.toContain('pointer-events-none')
+  })
+
+  it('lands the confirm click on the confirm button, not the row', () => {
+    const onDeleteRun = vi.fn()
+    const onSelectRun = vi.fn()
+    renderRow({ onDeleteRun, onSelectRun })
+    fireEvent.click(screen.getByRole('button', { name: 'Delete List files' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm delete List files' }))
+    expect(onDeleteRun).toHaveBeenCalledWith('/ws/home', 'run-1')
+    expect(onSelectRun).not.toHaveBeenCalled()
+  })
+
   it('routes menu delete through the inline confirm rather than deleting outright', () => {
     const onDeleteRun = vi.fn()
     renderRow({ onDeleteRun })
