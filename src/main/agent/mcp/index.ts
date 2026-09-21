@@ -92,6 +92,7 @@ import { workspacePathsEqual } from '../../../shared/workspacePath'
 import { listActiveRuns } from '../runRegistry'
 import { AppError, formatError, isAbortError, mcpConnectErrorCode } from '../../../shared/errors'
 import { assertPublicUrl } from '@main/net/webFetch'
+import { recordEgress } from '@main/net/egress'
 import {
   assertCircuitClosed,
   circuitKeyMcpConnect,
@@ -1015,7 +1016,22 @@ async function createTransport(
   if (!urlRaw) throw new Error(`MCP server ${server.id}: url required for ${transport}`)
   // Same SSRF posture as marketplace/catalog fetchPublicResponse — remote MCP is
   // public HTTP(S) only. Local MCP uses stdio; no product exception for loopback HTTP/SSE.
-  const url = await assertPublicUrl(urlRaw)
+  // Enforcement stays with assertPublicUrl; the egress ledger is recorded either
+  // way so a run's outbound origins are answerable from one place.
+  let url: URL
+  try {
+    url = await assertPublicUrl(urlRaw)
+  } catch (err) {
+    recordEgress(
+      { url: urlRaw, purpose: 'mcp_remote', workspacePath: opts?.workspacePath ?? undefined },
+      { allowed: false, reason: 'blocked_host', detail: `remote MCP ${server.id} refused` }
+    )
+    throw err
+  }
+  recordEgress(
+    { url: url.href, purpose: 'mcp_remote', workspacePath: opts?.workspacePath ?? undefined },
+    { allowed: true, reason: 'allowed' }
+  )
 
   // Static Bearer takes precedence. With OAuth authProvider, do not set Authorization
   // via requestInit (SDK docs: headers + authProvider conflict).

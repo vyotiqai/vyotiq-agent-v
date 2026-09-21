@@ -17,7 +17,7 @@ vi.mock('electron', () => ({
     fromPartition: () => ({
       setPermissionRequestHandler: vi.fn(),
       setPermissionCheckHandler: vi.fn(),
-      webRequest: { onHeadersReceived: vi.fn() },
+      webRequest: { onHeadersReceived: vi.fn(), onBeforeRequest: vi.fn() },
       on: sessionOn
     })
   },
