@@ -3,9 +3,13 @@
 Operating manual for cutting a release. Every job/step name below is quoted
 verbatim from `.github/workflows/release.yml`, with the line numbers that define
 them (tree at `a848f70`). Versioning rules live in
-`.github/AGENT-CHECKLIST.md` §0. The release flow is **tag-only**: no
-changelog entry is part of the procedure — the release body set by
-`release.yml` is the release notes.
+`.github/AGENT-CHECKLIST.md` §0, in full in `.github/RELEASE-AGENT-PROMPT.md`
+§4; the project follows semantic versioning from `1.0.0` onward. The release
+flow is **tag-only**: there is no `CHANGELOG.md` and no changelog gate in the
+pipeline. The release body *is* the changelog, and it is **authored** — the
+stub body `release.yml` writes is a starting point to replace, never the
+notes that ship. See `.github/RELEASE-AGENT-PROMPT.md` §5 for the format the
+update panel can actually parse.
 
 ## 1. Purpose
 
@@ -105,10 +109,15 @@ jobs rather than re-tagging.
    running older app offers the new version.
 5. Pointer release `vX.Y.Z` on the source repo, marked Latest
    (release.yml:314-338).
-6. Install-launch the released artifact: SHA512 of the downloaded file
-   matches `latest.yml` (`certutil -hashfile <file> SHA512` against the
-   manifest's base64 value), silent install, launch, window title `Vyotiq`,
-   `%APPDATA%\Vyotiq\logs\vyotiq.log` gets fresh entries.
+6. Verify the released artifact **without running it**: SHA512 of the
+   downloaded file matches `latest.yml` (`certutil -hashfile <file> SHA512`
+   against the manifest's base64 value), and unpacking it with 7z shows the
+   expected `X.Y.Z` payload. The launch smoke test is the unpacked build
+   (`dist-package*/win-unpacked/Vyotiq.exe`), which touches no installed state.
+   **Do not silent-install on a machine that has a real install** — it replaces
+   someone's working app with no prompt and rewrites the shared per-user
+   uninstall entry. An install test needs an explicit human yes, ideally on a
+   clean VM.
 
 ## 7. Known-allowed test failures
 

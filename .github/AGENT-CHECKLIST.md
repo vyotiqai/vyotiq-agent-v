@@ -24,6 +24,22 @@ in-app updater chain never breaks.**
 - [ ] **`package.json` `"version"` is the single version source.** A tag
       `vX.Y.Z` must equal the package.json version. The Release workflow's
       `verify` job enforces this — do not bypass it.
+- [ ] **Semantic versioning, from `1.0.0` onward.** The `0.x` line was retired
+      and its releases and tags deleted when the project restarted at `1.0.0`;
+      that was a one-time reset, not precedent. Nothing in this codebase
+      branches on *which* component changed — electron-updater and What's New
+      both compare ordinally — so the mechanical invariant is only that a
+      version is **strictly greater than the last published one**. The
+      components are a message to the person deciding whether to take the
+      update:
+      **patch** = fixes and internal work only, nothing new to learn;
+      **minor** = new capability, a changed default, a removal with a
+      replacement, or a new confirmation the user will be asked for;
+      **major** = the update cannot be quietly taken back (data migrated
+      beyond an older build's reach, a capability removed with no replacement,
+      userData moved, or no self-update path from the previous major).
+      When torn, pick the higher one. Never justify a bump by effort. `major`
+      needs the user to agree. Full policy: `.github/RELEASE-AGENT-PROMPT.md` §4.
 - [ ] **Never merge a grouped Dependabot major bump.** Major upgrades
       (zod, electron, vite, vitest, react, gpt-tokenizer, onnxruntime) are
       done **one at a time**, each with the full verification suite and a
@@ -41,10 +57,14 @@ in-app updater chain never breaks.**
 - [ ] **`@xmldom/xmldom` stays pinned to exactly `0.8.15`** in
       `pnpm-workspace.yaml` overrides; `>=0.8.15` resolves 0.9.x which breaks
       `plist@3.1.0` mac packaging.
-- [ ] **Release notes are the tag-only flow — no changelog gate.** The
-      release body is set by `release.yml` (a stub body is acceptable); a
-      release does not require a `CHANGELOG.md` entry. Do not re-add a
-      changelog requirement to the release pipeline.
+- [ ] **Release notes are authored, and the release body is the changelog.**
+      The flow stays tag-only and there is no `CHANGELOG.md` — do not re-add a
+      changelog file or a changelog gate to the pipeline. But the stub body
+      `release.yml` writes (`Vyotiq vX.Y.Z installers and update metadata.`) is
+      a failure state, not an acceptable default: every release ships authored
+      `## ` / `- ` sections, because that body is what the website's
+      `/changelog` and the in-app update panel both render.
+      Format and house style: `.github/RELEASE-AGENT-PROMPT.md` §5.
 - [ ] **Installers live on the releases-only repo**
       (`vyotiqai/vyotiq-agent-v-releases`); the updater and website point
       there. The source repo (`vyotiqai/vyotiq-agent-v`) only receives a
@@ -100,12 +120,17 @@ dependency's file layout:
       (title `Vyotiq`, not `Error`), 4+ processes, and that
       `%APPDATA%\Vyotiq\logs\vyotiq.log` is created with fresh entries.
       An "Error"-titled window = main-process crash = **do not ship**.
-- [ ] **Install-launch test for release candidates**: run the built
-      `setup.exe /S`, verify
-      `(Get-Item "$env:LOCALAPPDATA\Programs\Vyotiq\Vyotiq.exe").VersionInfo.ProductVersion`
-      equals the release version, then launch and re-check the window/logs.
-- [ ] Kill any running `Vyotiq.exe` **before** silent-installing over it —
-      the NSIS installer exits 0 even when it cannot replace locked files.
+- [ ] **Release candidates: verify the installer without running it.** SHA512
+      against `latest.yml`, then unpack the payload with the bundled 7z
+      (`7z l <setup.exe>`) to confirm it carries the expected version. The
+      `win-unpacked` launch above already smoke-tests the same binaries.
+- [ ] **Never** run `setup.exe /S` on a machine that has a real install, and
+      never `Stop-Process` a running `Vyotiq.exe` to unlock files. A silent
+      install replaces someone's working app with no chance to decline and
+      kills their in-flight agent runs. `/D=` into a temp dir is not a way
+      around it: `perMachine: false` keys the uninstall entry by a stable
+      per-user GUID, so a second install rewrites the real one's entry.
+      An install smoke test needs an explicit human yes, ideally on a clean VM.
 - [ ] For dependency/file-layout changes: re-run
       `node scripts/bundle-size-report.mjs --unpacked <dir> --asar <asar>` if
       sizes look off (assets must stay ≤ 500 MB).
