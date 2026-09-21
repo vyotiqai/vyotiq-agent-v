@@ -80,13 +80,31 @@ routinely carry tokens such as `?access_token=`, and this ledger is meant to be
 safe to surface. Read it with `listEgress()`, filtered by run, workspace,
 purpose, or refusals only.
 
-The ledger is in memory and does not survive a restart. It is not yet surfaced
-in the UI.
+That ledger is bounded and dies with the process, which is the wrong lifetime
+for an audit trail — what a run talked to is usually asked after something went
+wrong, often after a crash. So `src/main/agent/egressRunLedger.ts` subscribes to
+it and writes a per-run summary to `egress.json` in the run directory, beside
+`usage.json`.
+
+The run file aggregates per origin rather than appending per request: one page
+load can issue hundreds of requests to the same CDN, and five hundred identical
+rows answer no question that one row with a count does not. Each origin carries
+allowed and denied counts, the distinct purposes and deny reasons, and first and
+last timestamps. Writes are debounced and serialized per run; a failed write
+costs a log line, never the run. Origins are capped per run, and a truncated
+file says how many it dropped.
+
+Egress that belongs to no run — you browsing by hand, app-level fetches — stays
+in the in-memory ledger only, since there is no run file for it to belong to.
+
+Neither ledger is surfaced in the UI yet.
 
 ## Tests
 
-- `tests/main/unit/egressPolicy.test.ts` — the policy and the ledger
+- `tests/main/unit/egressPolicy.test.ts` — the policy and the in-memory ledger
 - `tests/main/unit/agentBrowserEgressHook.test.ts` — the wiring, driven through
   real tab creation; asserts one listener per partition
+- `tests/main/unit/egressRunLedger.test.ts` — aggregation, run attribution and
+  the durable file
 
-Run both after any change to browser egress.
+Run all three after any change to browser egress.
