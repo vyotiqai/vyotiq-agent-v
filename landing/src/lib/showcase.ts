@@ -719,7 +719,26 @@ export const APPROVED_TOOLS: string[] = [
   'switch_mode',
   'memory_list',
   'memory_read',
-  'memory_write'
+  'memory_write',
+  // teammates — the agent creates and directs durable identities of its own.
+  // Approved knowing what it claims: a run can create a teammate that never
+  // asks before running tools, and hand it work. That is the documented
+  // decision, not an oversight, and the high-risk gate (edits, deletes,
+  // terminal, commits, patches, connected servers) holds for every teammate
+  // whatever its autonomy is set to. The site may say the agent runs the team;
+  // it may not imply the team runs unsupervised.
+  'teammate_list',
+  'teammate_create',
+  'teammate_update',
+  'teammate_delete',
+  'teammate_assign_task',
+  'teammate_task',
+  // agent-written tools — a run writes a module that later executes as Node in
+  // a utility process. Approved because the claim is bounded by an approval
+  // card on every call whose file changed, and by Node builtins only. The site
+  // may say the agent can write itself a tool; it may not imply that tool runs
+  // without the user seeing its code.
+  'build_tool'
 ]
 
 /** Model providers the site may show a logo and a name for. */
