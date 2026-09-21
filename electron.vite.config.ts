@@ -1,5 +1,7 @@
 import { resolve } from 'path'
+import { readdirSync, rmSync, statSync } from 'node:fs'
 import { defineConfig, loadEnv } from 'electron-vite'
+import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -17,6 +19,58 @@ import tailwindcss from '@tailwindcss/vite'
 process.env.NODE_OPTIONS = [process.env.NODE_OPTIONS, '--max-old-space-size=8192']
   .filter(Boolean)
   .join(' ')
+
+/**
+ * How long a superseded renderer chunk stays on disk.
+ *
+ * Long enough to outlive any app instance started earlier in the same working
+ * session — that instance is the reason the chunk is kept at all.
+ */
+const RENDERER_ASSET_RETENTION_MS = 12 * 60 * 60 * 1000
+
+/**
+ * Drop superseded renderer chunks once nothing can still be running them.
+ *
+ * The renderer builds with `emptyOutDir: false`, so a rebuild adds the new
+ * content-hashed chunks beside the old ones instead of deleting them. Without
+ * that, a `pnpm build` while the app is running (an agent building this very
+ * repo, say) pulls the chunks out from under the live window: its next lazy
+ * import cannot resolve and the surface dies mid-session, which is what the
+ * renderer's stale-chunk reload exists to survive. Keeping the old chunks means
+ * a running window simply carries on with the build it started on.
+ *
+ * They still have to be collected, or `out/renderer/assets` grows by a whole
+ * build every time. Age is the safe measure: the build just written is newest,
+ * and anything past the retention window predates every live instance.
+ */
+function pruneSupersededRendererAssets(outDir: string): Plugin {
+  return {
+    name: 'vyotiq:prune-superseded-renderer-assets',
+    apply: 'build',
+    closeBundle() {
+      const assetsDir = resolve(outDir, 'assets')
+      const cutoff = Date.now() - RENDERER_ASSET_RETENTION_MS
+      let pruned = 0
+      let entries: string[]
+      try {
+        entries = readdirSync(assetsDir)
+      } catch {
+        return // nothing built yet
+      }
+      for (const entry of entries) {
+        const full = resolve(assetsDir, entry)
+        try {
+          if (statSync(full).mtimeMs >= cutoff) continue
+          rmSync(full, { force: true })
+          pruned += 1
+        } catch {
+          // A file that vanished or is locked is not worth failing a build over.
+        }
+      }
+      if (pruned > 0) console.log(`[vyotiq] pruned ${pruned} superseded renderer asset(s)`)
+    }
+  }
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -41,6 +95,8 @@ export default defineConfig(({ mode }) => {
       env.VYOTIQ_GOOGLE_MCP_CLIENT_SECRET || ''
     )
   }
+
+  const rendererOutDir = resolve('out/renderer')
 
   return {
     main: {
@@ -100,13 +156,18 @@ export default defineConfig(({ mode }) => {
             plugins: [['babel-plugin-react-compiler', { compilationMode: 'annotation' }]]
           }
         }),
-        tailwindcss()
+        tailwindcss(),
+        pruneSupersededRendererAssets(rendererOutDir)
       ],
       define: {
         'import.meta.env.VITE_SENTRY_DSN': JSON.stringify(sentryDsn)
       },
       build: {
         minify: 'esbuild',
+        // Never delete the chunks a running window is still lazily importing;
+        // pruneSupersededRendererAssets collects them once they are old enough,
+        // and `pack:*` clears the tree outright so no installer ships them.
+        emptyOutDir: false,
         rollupOptions: {
           output: {
             manualChunks(id) {

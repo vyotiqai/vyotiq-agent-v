@@ -7,7 +7,7 @@ import {
   errorMessageFromUnknown,
   isReactMaxUpdateDepth
 } from './reactMaxUpdateDepth'
-import { isStaleChunkFailure, reloadWindow, takeStaleChunkReload } from '@renderer/lib/staleChunk'
+import { handleStaleChunkFailure, recoverFromStaleChunk } from '@renderer/lib/staleChunk'
 
 let installed = false
 
@@ -23,10 +23,22 @@ export function installRendererErrorHandlers(): void {
   if (installed || typeof window === 'undefined') return
   installed = true
 
+  // Vite's preload helper raises this before it rethrows, for a lazy chunk and
+  // for its CSS alike — the one signal that does not depend on matching a
+  // Chromium error string. Start recovery here but leave the event uncancelled:
+  // cancelling makes the helper resolve the import with `undefined`, and React
+  // then raises an unrecognisable "Element type is invalid" in place of the
+  // failure we started from. Letting it through costs nothing — the paths below
+  // see the reload is already pending and stay quiet.
+  window.addEventListener('vite:preloadError', () => {
+    recoverFromStaleChunk()
+  })
+
   window.addEventListener('error', (event) => {
     const rawMessage = event.message || ''
     if (isBenignScriptError(rawMessage)) return
     const err = event.error ?? new Error(rawMessage || 'Unknown error')
+    if (handleStaleChunkFailure(err) !== 'not-stale') return
     reportRendererFatal(
       err,
       rawMessage,
@@ -37,16 +49,9 @@ export function installRendererErrorHandlers(): void {
 
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event.reason
-    if (isStaleChunkFailure(reason) && takeStaleChunkReload()) {
-      // Rebuild replaced out/ under the running window — reload onto the
-      // fresh entry chunk instead of logging a fatal and dying.
-      logger.warn('Stale renderer chunk after rebuild — reloading window', {
-        scope: 'renderer',
-        code: 'STALE_CHUNK'
-      })
-      reloadWindow()
-      return
-    }
+    // A rebuild replaced out/ under the running window. Recovery logs its own
+    // record; either way this is not a crash and must not be reported as one.
+    if (handleStaleChunkFailure(reason) !== 'not-stale') return
     const err = reason instanceof Error ? reason : new Error(String(reason))
     const message = errorMessageFromUnknown(reason) || err.message
     reportRendererFatal(
@@ -95,6 +100,7 @@ export function reportUncaughtRendererError(
   componentStack?: string | null
 ): void {
   const err = error instanceof Error ? error : new Error(String(error))
+  if (handleStaleChunkFailure(error) !== 'not-stale') return
   reportRendererFatal(
     err,
     errorMessageFromUnknown(error) || err.message,

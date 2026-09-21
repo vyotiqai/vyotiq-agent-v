@@ -18,7 +18,9 @@ import {
   resetCrashSnippetDedupeForTests,
   sanitizeCrashUrl,
   setCrashHistoryPathForTests,
-  shouldReloadRendererAfterCrash
+  shouldReloadRendererAfterCrash,
+  planRendererLoadRetry,
+  RENDERER_LOAD_RETRY_DELAYS_MS
 } from '@main/logging/crashDiagnostics'
 
 describe('formatWindowsExitCode', () => {
@@ -346,5 +348,42 @@ describe('pruneCrashpadReports', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('planRendererLoadRetry', () => {
+  it('retries a failed top-frame load with a growing back-off', () => {
+    // A load issued while out/renderer is being replaced gets ERR_FILE_NOT_FOUND
+    // with no script left in the renderer to retry it.
+    expect(planRendererLoadRetry({ errorCode: -6, isMainFrame: true, attempts: 0 })).toEqual({
+      action: 'retry',
+      waitMs: RENDERER_LOAD_RETRY_DELAYS_MS[0],
+      attempt: 1
+    })
+    expect(planRendererLoadRetry({ errorCode: -6, isMainFrame: true, attempts: 2 })).toEqual({
+      action: 'retry',
+      waitMs: RENDERER_LOAD_RETRY_DELAYS_MS[2],
+      attempt: 3
+    })
+  })
+
+  it('ignores subframes and superseded navigations', () => {
+    expect(planRendererLoadRetry({ errorCode: -6, isMainFrame: false, attempts: 0 })).toEqual({
+      action: 'ignore'
+    })
+    // ERR_ABORTED: another navigation took over, so the load did not fail.
+    expect(planRendererLoadRetry({ errorCode: -3, isMainFrame: true, attempts: 0 })).toEqual({
+      action: 'ignore'
+    })
+  })
+
+  it('gives up once the back-off is exhausted', () => {
+    expect(
+      planRendererLoadRetry({
+        errorCode: -6,
+        isMainFrame: true,
+        attempts: RENDERER_LOAD_RETRY_DELAYS_MS.length
+      })
+    ).toEqual({ action: 'give-up' })
   })
 })

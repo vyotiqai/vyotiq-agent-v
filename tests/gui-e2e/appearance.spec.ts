@@ -16,9 +16,10 @@ import {
 
 let launched: LaunchedApp
 
+// No options overload on beforeAll — the hook inherits the config timeout.
 test.beforeAll(async () => {
   launched = await launchApp()
-}, { timeout: 90_000 })
+})
 
 test.afterAll(async () => {
   if (launched) await closeApp(launched)

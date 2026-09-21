@@ -4,10 +4,15 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
 import { cleanup, render, screen, fireEvent } from '@testing-library/react'
 import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
-import { resetStaleChunkReloadFlagForTests, takeStaleChunkReload } from '@renderer/lib/staleChunk'
+import {
+  resetStaleChunkReloadFlagForTests,
+  takeStaleChunkReload,
+  STALE_CHUNK_RELOAD_DELAYS_MS
+} from '@renderer/lib/staleChunk'
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
 })
 
 function Boom(): never {
@@ -65,7 +70,8 @@ describe('ErrorBoundary', () => {
     expect(screen.getByText('recovered')).toBeTruthy()
   })
 
-  it('reloads the window once when a child throws a stale-chunk failure', () => {
+  it('reloads the window when a child throws a stale-chunk failure', () => {
+    vi.useFakeTimers()
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const reload = vi.fn()
     Object.defineProperty(window, 'location', {
@@ -85,15 +91,22 @@ describe('ErrorBoundary', () => {
     )
     spy.mockRestore()
 
-    // Reload fires during componentDidCatch; the fallback state is already
-    // committed (getDerivedStateFromError runs first) — the real window
-    // navigates before it is ever seen.
+    // The reload waits out the rest of the build's write burst, so the crash UI
+    // must not flash in the meantime — a rebuild is not a crash.
+    expect(reload).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('status').textContent).toMatch(/reloading the window/i)
+
+    vi.advanceTimersByTime(STALE_CHUNK_RELOAD_DELAYS_MS[0])
     expect(reload).toHaveBeenCalledTimes(1)
   })
 
-  it('shows recovery UI instead of reloading twice (loop guard)', () => {
-    // Simulate the allowance already consumed earlier in this window session.
-    expect(takeStaleChunkReload()).toBe(true)
+  it('shows recovery UI once reloads stop clearing the failure (loop guard)', () => {
+    vi.useFakeTimers()
+    // Simulate the budget already spent by reloads earlier in this window.
+    for (let attempt = 1; attempt <= STALE_CHUNK_RELOAD_DELAYS_MS.length; attempt += 1) {
+      expect(takeStaleChunkReload()).toBe(attempt)
+    }
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const reload = vi.fn()
     Object.defineProperty(window, 'location', {
@@ -111,6 +124,7 @@ describe('ErrorBoundary', () => {
     )
     spy.mockRestore()
 
+    vi.runAllTimers()
     expect(reload).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toBeTruthy()
   })
