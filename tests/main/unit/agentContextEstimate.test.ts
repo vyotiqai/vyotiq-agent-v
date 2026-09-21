@@ -90,3 +90,91 @@ describe('agent context estimate (resume anchor)', () => {
     })
   })
 })
+
+/**
+ * Every part kind a message can carry, in one object. The two estimators —
+ * the synchronous incremental path and the batched worker path — used to walk
+ * this shape in two separately-maintained copies of the same branch set; they
+ * now share `messageParts`, and these tests are what keeps them honest.
+ */
+function richMessages(): ChatMessage[] {
+  return [
+    { role: 'user', content: 'plain string content' },
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'a text part' },
+        { type: 'image_url', url: 'https://example.com/photo.jpg' },
+        { type: 'audio', url: 'data:audio/wav;base64,' + 'A'.repeat(4000) },
+        { type: 'file_native', name: 'a.pdf', mime: 'application/pdf', data: 'B'.repeat(4000) },
+        { type: 'file', name: 'notes.md', mime: 'text/markdown', text: 'file part text' }
+      ]
+    },
+    {
+      role: 'assistant',
+      content: 'calling a tool',
+      thinking: 'ui-only thinking',
+      reasoningState: { kind: 'openai_compat', text: 'wire replay reasoning' },
+      toolCalls: [{ id: 'c1', name: 'read', arguments: '{"path":"src/index.ts"}' }]
+    },
+    { role: 'tool', toolName: 'read', toolCallId: 'c1', content: 'file body' }
+  ] as unknown as ChatMessage[]
+}
+
+describe('agent context estimate (one walk, two paths)', () => {
+  it('agrees between the batched cold path and the incremental sync path', async () => {
+    // Fresh objects each time: the per-message cache is a WeakMap keyed by
+    // identity, so distinct objects force a real re-count down each path.
+    const cold = await estimateMessagesTokensAsync(richMessages())
+
+    const growing = richMessages()
+    let incremental = 0
+    for (let n = 1; n <= growing.length; n++) {
+      incremental = await estimateMessagesTokensAsync(growing.slice(0, n))
+    }
+    expect(incremental).toBe(cold)
+  })
+
+  it('agrees on both paths with reasoning replay switched off', async () => {
+    const opts = { countReasoningReplay: false }
+    const cold = await estimateMessagesTokensAsync(richMessages(), undefined, opts)
+
+    const growing = richMessages()
+    let incremental = 0
+    for (let n = 1; n <= growing.length; n++) {
+      incremental = await estimateMessagesTokensAsync(growing.slice(0, n), undefined, opts)
+    }
+    expect(incremental).toBe(cold)
+    expect(cold).toBeLessThan(await estimateMessagesTokensAsync(richMessages()))
+  })
+
+  it('counts every part kind — dropping any one lowers the total', async () => {
+    const full = await estimateMessagesTokensAsync(richMessages())
+    const partKinds = ['text', 'image_url', 'audio', 'file_native', 'file'] as const
+
+    for (const kind of partKinds) {
+      const without = richMessages()
+      const rich = without[1] as unknown as { content: { type: string }[] }
+      rich.content = rich.content.filter((part) => part.type !== kind)
+      expect(await estimateMessagesTokensAsync(without)).toBeLessThan(full)
+    }
+
+    const withoutToolCalls = richMessages()
+    delete (withoutToolCalls[2] as unknown as { toolCalls?: unknown }).toolCalls
+    expect(await estimateMessagesTokensAsync(withoutToolCalls)).toBeLessThan(full)
+
+    const withoutToolName = richMessages()
+    ;(withoutToolName[3] as unknown as { toolName?: string }).toolName = ''
+    expect(await estimateMessagesTokensAsync(withoutToolName)).toBeLessThan(full)
+  })
+
+  it('prefers wire reasoning replay over the UI thinking field', async () => {
+    const both = richMessages()
+    const replayOnly = richMessages()
+    delete (replayOnly[2] as unknown as { thinking?: string }).thinking
+    // Counting both would double-count the same reasoning and compact early.
+    expect(await estimateMessagesTokensAsync(both)).toBe(
+      await estimateMessagesTokensAsync(replayOnly)
+    )
+  })
+})

@@ -1,8 +1,11 @@
 import { readFileSync } from 'fs'
 import { isAbsolute, join } from 'path'
-import type { AgentEvent } from '../../shared/ipc'
+import type { AgentEvent, AgentInteractionMode } from '../../shared/ipc'
 import { isAbortError } from '../../shared/errors'
+import { logger } from '../../shared/logger'
 import { clearRunAbort, streamSignalFor } from '../agent/runRegistry'
+import { createRun, runExists, updateStatus } from '../agent/state'
+import { resolveRunDir } from '../storage/paths'
 
 type FixtureFile = {
   events: unknown[]
@@ -57,8 +60,41 @@ export async function* replayChatFixture(input: {
   invokeId: number
   workspacePath: string
   runSignal: AbortSignal
+  goal?: string
+  mode?: AgentInteractionMode
+  agentProfileId?: string
+  delegatedTaskId?: string
 }): AsyncGenerator<AgentEvent> {
   const signal = streamSignalFor(input.runId, input.runSignal)
+  // The fixture replaces the whole event stream, so `runAgent` — and with it
+  // `createRun` and every `writeStatus` — never executes. Without this a
+  // fixture run leaves no run directory and no status.json at all, and anything
+  // that reads a run's durable outcome sees nothing: a delegated task falls
+  // through to the scheduler's MISSING_STATUS_SWEEP_LIMIT and is reported as
+  // failed sixty seconds after it streamed perfectly.
+  const runDir = resolveRunDir(input.workspacePath, input.runId)
+  if (!runExists(input.workspacePath, input.runId)) {
+    createRun(input.workspacePath, input.runId, input.goal ?? 'chat', input.mode ?? 'agent')
+  }
+  const persistStatus = async (status: 'done' | 'error' | 'cancelled'): Promise<void> => {
+    try {
+      await updateStatus(
+        runDir,
+        {
+          status,
+          ...(input.agentProfileId ? { agentProfileId: input.agentProfileId } : {}),
+          ...(input.delegatedTaskId ? { delegatedTaskId: input.delegatedTaskId } : {})
+        },
+        { sync: true }
+      )
+    } catch (err) {
+      logger.warn('Fixture replay could not persist run status', {
+        scope: 'e2e',
+        correlationId: input.runId,
+        err
+      })
+    }
+  }
   try {
     const templates = loadFixtureTemplates()
     for (const template of templates) {
@@ -78,6 +114,14 @@ export async function* replayChatFixture(input: {
         // Wide enough for the renderer + Playwright to observe mid-stream paints.
         await sleep(350)
       }
+      if (
+        event.type === 'status' &&
+        (event.status === 'done' || event.status === 'error' || event.status === 'cancelled')
+      ) {
+        // Written BEFORE the event is yielded, so anything that reacts to the
+        // terminal event finds the durable status already in place.
+        await persistStatus(event.status)
+      }
       yield event
       if (signal.aborted) {
         const err = new Error('Aborted')
@@ -87,6 +131,7 @@ export async function* replayChatFixture(input: {
     }
   } catch (err) {
     if (isAbortError(err)) {
+      await persistStatus('cancelled')
       yield { type: 'status', runId: input.runId, invokeId: input.invokeId, status: 'cancelled' }
       return
     }

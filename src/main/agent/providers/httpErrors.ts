@@ -195,6 +195,31 @@ export function shouldRetrySanitizeToolSchema(status: number, body: string): boo
   return UNSUPPORTED_TOOL_SCHEMA_RE.test(message)
 }
 
+/**
+ * Hosts that keep the conversation server-side (OpenAI Responses
+ * `previous_response_id`, Gemini Interactions `previous_interaction_id`)
+ * reject a chain whose stored turn they no longer hold — expired, evicted, or
+ * written under another key. Console Go relays OpenAI's wording as
+ * `[invalid_request_error] referenced response not found or expired`
+ * (live 2026-09-21).
+ *
+ * Resending the same id can only fail again, and a continuation body carries
+ * only the turns after the chained response — so callers rebuild the request
+ * statelessly with the full history instead of failing the run.
+ */
+const STALE_CONTINUATION_PATTERNS: readonly RegExp[] = [
+  /referenced (?:response|interaction) (?:was )?not found or expired/i,
+  /previous (?:response|interaction) with id [^.]{0,160}not found/i,
+  /previous_(?:response|interaction)_id[^.]{0,160}(?:not found|expired|invalid|does not exist)/i
+]
+
+/** True when the host disowns the continuation id itself (not the body around it). */
+export function isStaleContinuationError(status: number, body: string): boolean {
+  if (status !== 400 && status !== 404 && status !== 422) return false
+  const message = parseProviderErrorMessage(body) ?? body
+  return STALE_CONTINUATION_PATTERNS.some((pattern) => pattern.test(message))
+}
+
 const PROVIDER_SECRET_RE =
   /\b(?:sk-[a-zA-Z0-9_-]+|Bearer\s+[a-zA-Z0-9._/=+~-]+|wk-[A-Za-z0-9_-]{4,}\.ws-[A-Za-z0-9_-]{4,}|AIza[0-9A-Za-z_-]{20,}|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|api[_-]?key["\\\s:=]+[a-zA-Z0-9._-]+)/gi
 

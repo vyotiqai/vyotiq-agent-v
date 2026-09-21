@@ -1,7 +1,7 @@
-import type { ChatMessage, MessageContent } from '../../../shared/ipc'
+import type { ChatMessage } from '../../../shared/ipc'
 import { attachedFileToText } from '../../../shared/ipc'
 import type { ModelInfo } from '../../../shared/ipc/schemas/providers'
-import { estimateImageTokens, estimateImageTokensWithExpansion } from './imageTokens'
+import { estimateImageTokensWithExpansion } from './imageTokens'
 import {
   countTextTokens,
   countTextTokensAsync,
@@ -28,18 +28,58 @@ function estimateBinaryPartTokens(bytesApprox: number): number {
   return Math.max(256, Math.ceil(bytesApprox / 750))
 }
 
-function countContentTokens(content: MessageContent, encoding: EncodingName): number {
-  if (typeof content === 'string') return countTextTokens(content, encoding)
-  let n = 0
-  for (const part of content) {
-    if (part.type === 'image_url') n += estimateImageTokensWithExpansion(part.url)
-    else if (part.type === 'file') n += countTextTokens(attachedFileToText(part), encoding)
-    else if (part.type === 'audio') n += estimateBinaryPartTokens(Math.ceil((dataUrlBase64Length(part.url) * 3) / 4))
-    else if (part.type === 'file_native')
-      n += estimateBinaryPartTokens(Math.ceil((part.data.length * 3) / 4))
-    else n += countTextTokens(part.text, encoding)
+/**
+ * One message, split into what needs BPE and what does not.
+ *
+ * Both estimators read this: the incremental fast path counts `texts` on the
+ * main thread, the cold path pushes them into a single worker batch. Keeping
+ * one description of a message means the two can no longer drift — they used to
+ * be two hand-maintained copies of the same branch set.
+ */
+function messageParts(
+  message: ChatMessage,
+  countReasoningReplay: boolean
+): { texts: string[]; nonTextTokens: number } {
+  const texts: string[] = []
+  let nonTextTokens = 0
+
+  if (typeof message.content === 'string') {
+    texts.push(message.content)
+  } else {
+    for (const part of message.content) {
+      if (part.type === 'image_url') nonTextTokens += estimateImageTokensWithExpansion(part.url)
+      else if (part.type === 'file') texts.push(attachedFileToText(part))
+      else if (part.type === 'audio')
+        nonTextTokens += estimateBinaryPartTokens(
+          Math.ceil((dataUrlBase64Length(part.url) * 3) / 4)
+        )
+      else if (part.type === 'file_native')
+        nonTextTokens += estimateBinaryPartTokens(Math.ceil((part.data.length * 3) / 4))
+      else texts.push(part.text)
+    }
   }
-  return n
+
+  // Prefer reasoningState (wire replay) over UI thinking when both exist —
+  // counting both double-counts the same reasoning and triggers compaction early.
+  // When the provider does not replay reasoning on the wire (it strips prior-turn
+  // reasoning and regenerates thinking from context), skip replay-only fields
+  // entirely: counting them inflates the wire estimate severalfold above the
+  // real request.
+  if (countReasoningReplay) {
+    if (message.reasoningState) texts.push(JSON.stringify(message.reasoningState))
+    else if (message.thinking) texts.push(message.thinking)
+  }
+
+  if (message.toolCalls) {
+    for (const toolCall of message.toolCalls) {
+      texts.push(toolCall.name, toolCall.arguments)
+    }
+  }
+
+  // toolName is not part of `content`, so it is counted separately.
+  if (message.role === 'tool') texts.push(message.toolName ?? '')
+
+  return { texts, nonTextTokens }
 }
 
 export interface EstimateMessagesOptions {
@@ -98,7 +138,12 @@ export async function estimateMessagesTokensAsync(
 
   // Single worker round-trip for all uncached messages (not one await per message).
   const texts: Array<{ text: string; encoding: EncodingName }> = []
-  const spans: Array<{ message: ChatMessage; images: number; start: number; end: number }> = []
+  const spans: Array<{
+    message: ChatMessage
+    nonTextTokens: number
+    start: number
+    end: number
+  }> = []
   let total = 0
 
   for (const message of messages) {
@@ -108,42 +153,9 @@ export async function estimateMessagesTokensAsync(
       continue
     }
     const start = texts.length
-    let images = 0
-    if (typeof message.content === 'string') {
-      texts.push({ text: message.content, encoding })
-    } else {
-      for (const part of message.content) {
-        if (part.type === 'image_url') images += estimateImageTokensWithExpansion(part.url)
-        else if (part.type === 'file') texts.push({ text: attachedFileToText(part), encoding })
-        else if (part.type === 'audio')
-          images += estimateBinaryPartTokens(Math.ceil((dataUrlBase64Length(part.url) * 3) / 4))
-        else if (part.type === 'file_native')
-          images += estimateBinaryPartTokens(Math.ceil((part.data.length * 3) / 4))
-        else texts.push({ text: part.text, encoding })
-      }
-    }
-    // Prefer reasoningState (wire replay) over UI thinking when both exist —
-    // counting both double-counts the same reasoning and triggers compaction early.
-    // When the provider does not replay reasoning on the wire (it strips prior-turn
-    // reasoning and regenerates thinking from context), skip replay-only fields
-    // entirely: counting them inflates the wire estimate severalfold above the
-    // real request.
-    if (countReasoningReplay) {
-      if (message.reasoningState) {
-        texts.push({ text: JSON.stringify(message.reasoningState), encoding })
-      } else if (message.thinking) {
-        texts.push({ text: message.thinking, encoding })
-      }
-    }
-    if (message.toolCalls) {
-      for (const toolCall of message.toolCalls) {
-        texts.push({ text: toolCall.name, encoding }, { text: toolCall.arguments, encoding })
-      }
-    }
-    if (message.role === 'tool') {
-      texts.push({ text: message.toolName ?? '', encoding })
-    }
-    spans.push({ message, images, start, end: texts.length })
+    const { texts: messageTexts, nonTextTokens } = messageParts(message, countReasoningReplay)
+    for (const text of messageTexts) texts.push({ text, encoding })
+    spans.push({ message, nonTextTokens, start, end: texts.length })
   }
 
   if (spans.length === 0) {
@@ -159,7 +171,7 @@ export async function estimateMessagesTokensAsync(
 
   const counts = await countTextsTokensAsync(texts)
   for (const span of spans) {
-    let n = span.images
+    let n = span.nonTextTokens
     for (let i = span.start; i < span.end; i++) n += counts[i] ?? 0
     messageTokenCache.set(span.message, { encoding, replay: countReasoningReplay, tokens: n })
     total += n
@@ -201,24 +213,9 @@ function estimateOneMessageTokens(
     return cached.tokens
   }
 
-  let n = countContentTokens(message.content, encoding)
-  if (countReasoningReplay) {
-    if (message.reasoningState) {
-      n += countTextTokens(JSON.stringify(message.reasoningState), encoding)
-    } else if (message.thinking) {
-      n += countTextTokens(message.thinking, encoding)
-    }
-  }
-  if (message.toolCalls) {
-    for (const toolCall of message.toolCalls) {
-      n +=
-        countTextTokens(toolCall.name, encoding) + countTextTokens(toolCall.arguments, encoding)
-    }
-  }
-  if (message.role === 'tool') {
-    // toolName is not in `content`; do not re-count content (already counted above).
-    n += countTextTokens(message.toolName ?? '', encoding)
-  }
+  const { texts, nonTextTokens } = messageParts(message, countReasoningReplay)
+  let n = nonTextTokens
+  for (const text of texts) n += countTextTokens(text, encoding)
   messageTokenCache.set(message, { encoding, replay: countReasoningReplay, tokens: n })
   return n
 }

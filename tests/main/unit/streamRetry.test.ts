@@ -12,6 +12,7 @@ import {
   describeLocalEndpointDown,
   isLocalEndpointDownError,
   isLocalEndpointDownMessage,
+  isStalePriorResponseError,
   runWithStreamRetry,
   runWithStreamRetryGen,
   shouldRetryProviderStreamError,
@@ -383,6 +384,33 @@ describe('streamRetry', () => {
     it('still refuses permanent request errors', () => {
       expect(isTransientHttpFailure('PROVIDER_HTTP', 400)).toBe(false)
       expect(shouldRetryStreamErrorChunk('PROVIDER_HTTP', 'invalid api key', 1, 401)).toBe(false)
+    })
+  })
+
+  describe('isStalePriorResponseError', () => {
+    /** Verbatim from the live gateway (run 859925aa, 2026-09-21). */
+    const OBSERVED =
+      'Error from provider (Console Go): Upstream request failed: [invalid_request_error] referenced response not found or expired'
+
+    it('recognises the gateway wording that ended a run', () => {
+      expect(isStalePriorResponseError(OBSERVED)).toBe(true)
+    })
+
+    it("recognises OpenAI's own wording for the same condition", () => {
+      expect(
+        isStalePriorResponseError("Previous response with id 'resp_abc123' not found.")
+      ).toBe(true)
+    })
+
+    it('leaves other invalid-request errors permanent', () => {
+      // These must keep ending the run: retrying cannot fix them, and a
+      // stateless resend would just burn the same tokens again.
+      expect(isStalePriorResponseError('invalid api key')).toBe(false)
+      expect(isStalePriorResponseError('model not found')).toBe(false)
+      expect(isStalePriorResponseError('[invalid_request_error] unsupported parameter')).toBe(
+        false
+      )
+      expect(isStalePriorResponseError('404 not found')).toBe(false)
     })
   })
 })

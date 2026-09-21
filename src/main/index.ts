@@ -21,7 +21,7 @@ import { initAutoUpdater, applyUpdateCheckSchedule } from '@main/updater'
 import { initNotifications, unreadNotificationCount } from './notifications/service'
 import { shutdownMcpServers, syncMcpServers } from '@main/agent/mcp'
 import { primeLoginShellPath } from '@main/agent/mcp/binaries'
-import { resolveEffectiveMcpServers, syncMarketplaceMcpIntoSettings, purgeOrphanMarketplacePackageDirs } from '@main/marketplace'
+import { resolveEffectiveMcpServers, repairMissingPackageDependencies, syncMarketplaceMcpIntoSettings, purgeOrphanMarketplacePackageDirs } from '@main/marketplace'
 import { getSettings } from '@main/settings/settings'
 import { migrateLegacySessions } from '@main/storage/migrations/migrateSessions'
 import { migrateWorkspaceRuns } from './storage/migrateWorkspaceRuns'
@@ -333,6 +333,15 @@ if (!gotLock) {
         logger.info('Purged orphan marketplace package directories', {
           scope: 'main',
           removed: orphan.removed
+        })
+      }
+      // Before the MCP sync: a dependency restored here may itself be an MCP
+      // package that then needs a settings entry.
+      const restored = await repairMissingPackageDependencies()
+      if (restored.length > 0) {
+        logger.info('Restored missing marketplace dependencies', {
+          scope: 'main',
+          packages: restored
         })
       }
       await syncMarketplaceMcpIntoSettings()

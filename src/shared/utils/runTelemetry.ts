@@ -40,6 +40,43 @@ export type StepUsageTotals = {
   generationMs: number
 }
 
+/**
+ * Total prompt tokens actually sent on the wire.
+ *
+ * Providers disagree on what `inputTokens` covers. OpenAI-compatible and Gemini
+ * report the whole prompt, cached reads included; Anthropic reports only the
+ * uncached slice and splits the rest into `cachedInputTokens` /
+ * `cacheCreationInputTokens` (providers/anthropic.ts sets
+ * `inputTokensIncludesCache: false`). Context sizing needs one number — the
+ * whole prompt — or a cache-warm step looks nearly empty and the auto-compact
+ * trigger never fires. Observed on a real run: `inputTokens: 6` alongside
+ * `cacheCreationInputTokens: 15900`, against a 13,070-token local estimate.
+ *
+ * Only an explicit `false` adds the cache slices. A provider that omits the flag
+ * is assumed to report the full prompt: adding there would double-count a cached
+ * prefix and compact far too early.
+ *
+ * Billing is the opposite — `estimateStepCost` prices each slice at its own rate
+ * — so `step_usage.inputTokens` must keep the provider's raw figure. This helper
+ * is for context sizing only.
+ */
+export function promptTokensFromUsage(usage: {
+  inputTokens?: number
+  inputTokensIncludesCache?: boolean
+  cachedInputTokens?: number
+  cacheCreationInputTokens?: number
+}): number {
+  const input = positiveTokens(usage.inputTokens)
+  if (usage.inputTokensIncludesCache !== false) return input
+  return (
+    input + positiveTokens(usage.cachedInputTokens) + positiveTokens(usage.cacheCreationInputTokens)
+  )
+}
+
+function positiveTokens(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+}
+
 export function emptyStepUsageTotals(): StepUsageTotals {
   return {
     inputTokens: 0,

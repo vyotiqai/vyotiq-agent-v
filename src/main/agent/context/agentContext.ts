@@ -1,7 +1,8 @@
-import { readdir, stat } from 'fs/promises'
+import { readdir } from 'fs/promises'
 import type { Dirent } from 'fs'
 import { basename, join } from 'path'
 import { readGitStatusCached } from '../../git/gitStatusCache'
+import { countWorkspaceRuleSources } from './rules'
 import type { CodeIndexModelPhase, WorkspaceAgentContextResult } from '../../../shared/ipc'
 
 /** Card-facing code-index state (workspace:agentContext payload). */
@@ -30,40 +31,6 @@ export function mapCodeIndexState(
     case 'idle':
       return 'off'
   }
-}
-
-async function existsAsync(p: string): Promise<boolean> {
-  try {
-    await stat(p)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** Mirrors the rules service walker (context/rules.ts): `.md`, depth ≤ 3, cap 24. */
-const MAX_DIR_DEPTH = 3
-const MAX_RULE_FILES = 24
-
-async function countRuleFiles(dirPath: string, depth: number): Promise<number> {
-  if (depth > MAX_DIR_DEPTH) return 0
-  let entries: Dirent[]
-  try {
-    entries = await readdir(dirPath, { withFileTypes: true, encoding: 'utf8' })
-  } catch {
-    return 0
-  }
-  let count = 0
-  const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name))
-  for (const entry of sorted) {
-    if (count >= MAX_RULE_FILES) break
-    if (entry.isDirectory()) {
-      count += await countRuleFiles(join(dirPath, entry.name), depth + 1)
-      continue
-    }
-    if (entry.name.toLowerCase().endsWith('.md')) count++
-  }
-  return count
 }
 
 async function countMarkdownFiles(dirPath: string): Promise<number> {
@@ -103,17 +70,20 @@ export async function buildWorkspaceAgentContext(
   workspacePath: string,
   codeIndex: { enabled: boolean; phase: CodeIndexModelPhase }
 ): Promise<WorkspaceAgentContextResult> {
-  const [agentsMd, cursorrules, vyotiqRulesCount, memoryNotes, branch] = await Promise.all([
-    existsAsync(join(workspacePath, 'AGENTS.md')),
-    existsAsync(join(workspacePath, '.cursorrules')),
-    countRuleFiles(join(workspacePath, '.vyotiq', 'rules'), 0),
+  const [ruleSources, memoryNotes, branch] = await Promise.all([
+    countWorkspaceRuleSources(workspacePath),
     countMarkdownFiles(join(workspacePath, '.vyotiq', 'memory')),
     currentBranch(workspacePath)
   ])
   return {
     workspaceName: basename(workspacePath),
     branch,
-    rules: { agentsMd, cursorrules, vyotiqRulesCount },
+    rules: {
+      agentsMd: ruleSources.rootFiles.includes('AGENTS.md'),
+      claudeMd: ruleSources.rootFiles.includes('CLAUDE.md'),
+      cursorrules: ruleSources.rootFiles.includes('.cursorrules'),
+      ruleFileCount: ruleSources.ruleFileCount
+    },
     memoryNotes,
     codeIndex: { state: mapCodeIndexState(codeIndex.phase, codeIndex.enabled) }
   }

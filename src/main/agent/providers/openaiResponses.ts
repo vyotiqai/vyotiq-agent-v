@@ -8,6 +8,7 @@ import { contentToText, providerContentParts } from '../../../shared/ipc'
 import { formatError } from '../../../shared/errors'
 import {
   continuationPromptKeys,
+  forgetContinuationPrompt,
   rememberContinuationPrompt,
   stablePromptKey
 } from './promptKeys'
@@ -23,7 +24,7 @@ import { normalizeStopReason } from './stopReason'
 import { iterateSseJson } from './sse'
 import { logProviderFailure, providerFetchFailureChunk } from './log'
 import { CHAT_FETCH_MAX_ATTEMPTS, fetchWithRetry } from './fetchWithRetry'
-import { formatProviderHttpError, parseRejectedBodyField, scrubProviderErrorSnippet, shouldRetrySanitizeToolSchema, stripRejectedBodyField } from './httpErrors'
+import { formatProviderHttpError, isStaleContinuationError, parseRejectedBodyField, scrubProviderErrorSnippet, shouldRetrySanitizeToolSchema, stripRejectedBodyField } from './httpErrors'
 import { sanitizeToolParameters } from './toolSchemaSanitize'
 import {
   resolveSystemZones,
@@ -276,6 +277,9 @@ export async function* streamOpenAiResponses(
       continuationPromptKeys.get(candidatePriorState.responseId) === promptKey)
       ? candidatePriorState
       : undefined
+  // Cleared when the host says it no longer holds that response, so buildBody
+  // must read the live value rather than close over the initial one.
+  let statefulPrior = priorState
   // Omitted thinking means off; match the OpenAI-compat body builder instead
   // of silently paying reasoning tokens.
   const thinkingOn = req.thinking?.enabled === true
@@ -289,7 +293,7 @@ export async function* streamOpenAiResponses(
   ): Record<string, unknown> => {
     const body: Record<string, unknown> = {
       model: req.model,
-      input: toResponsesInput(req.messages, req.system, priorState, {
+      input: toResponsesInput(req.messages, req.system, statefulPrior, {
         explicitPromptCache: explicitCache,
         systemStable: req.systemStable,
         systemVolatile: req.systemVolatile
@@ -320,7 +324,9 @@ export async function* streamOpenAiResponses(
               }
             }
           : {}),
-      ...(priorState?.responseId ? { previous_response_id: priorState.responseId } : {}),
+      ...(statefulPrior?.responseId
+        ? { previous_response_id: statefulPrior.responseId }
+        : {}),
       ...(req.promptCacheKey ? { prompt_cache_key: req.promptCacheKey } : {}),
       ...(explicitCache
         ? { prompt_cache_options: { mode: 'explicit', ttl: '30m' } }
@@ -373,6 +379,17 @@ export async function* streamOpenAiResponses(
 
     const text = await res.text().catch(() => '')
     lastHttpErrorText = text
+
+    const staleContinuationId = statefulPrior?.responseId
+    if (staleContinuationId && isStaleContinuationError(res.status, text)) {
+      // The chained response is gone from the host and the body we just sent
+      // held only the turns after it. Retry stateless with the whole
+      // conversation — keeping the id would fail identically, and the loop
+      // would surface a permanent error for a recoverable one.
+      forgetContinuationPrompt(staleContinuationId)
+      statefulPrior = undefined
+      continue
+    }
 
     const rejectedField = parseRejectedBodyField(res.status, text)
     if (rejectedField && !omitFields.includes(rejectedField)) {

@@ -55,7 +55,7 @@
     {
       "id": "faithful",
       "expectOk": true,
-      "text": "## Session Intent\nRewrite auth to JWT\n\n## Files Touched\n- src/auth/rewrite.ts\n\n## Key Decisions\n- Use the planted-choice-9f3a\n\n## Next Steps\n- Execute the JWT choice"
+      "text": "## Session Intent\nRewrite auth to JWT\n\n## Files Touched\n- src/auth/rewrite.ts\n\n## Key Decisions\n- Use the planted-choice-9f3a\n\n## Next Steps\n- Execute the JWT choice\n- Login uses JWT"
     },
     {
       "id": "invented-path",

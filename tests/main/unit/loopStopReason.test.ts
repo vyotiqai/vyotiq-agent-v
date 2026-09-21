@@ -56,7 +56,6 @@ const { streamChat, executeTool, assembleContext } = vi.hoisted(() => ({
     estimatedTokens: 100,
     layers: { system: 10, history: 50, tools: 20, buffer: 20 },
     overflow: false,
-    anthropicNative: undefined,
     compaction: null
   }))
 }))
@@ -161,7 +160,6 @@ describe('runAgent stop-reason classification', () => {
       estimatedTokens: 100,
       layers: { system: 10, history: 50, tools: 20, buffer: 20 },
       overflow: false,
-      anthropicNative: undefined,
       compaction: null
     }))
   })
@@ -523,7 +521,6 @@ describe('runAgent stop-reason classification', () => {
       estimatedTokens: 200_000,
       layers: { system: 10, history: 50, tools: 20, buffer: 20 },
       overflow: true,
-      anthropicNative: undefined,
       compaction: null
     }))
 
@@ -571,7 +568,6 @@ describe('runAgent stop-reason classification', () => {
       estimatedTokens: 200_000,
       layers: { system: 10, history: 50, tools: 20, buffer: 20 },
       overflow: true,
-      anthropicNative: undefined,
       compaction: null
     }))
     streamChat.mockImplementation(async function* (req: StreamChatReq): AsyncGenerator<StreamChunk> {
@@ -620,7 +616,6 @@ describe('runAgent stop-reason classification', () => {
         estimatedTokens: 200_000,
         layers: { system: 10, history: 50, tools: 20, buffer: 20 },
         overflow: true,
-        anthropicNative: undefined,
         compaction: null
       }
     })
@@ -675,7 +670,6 @@ describe('runAgent partial persistence', () => {
       estimatedTokens: 100,
       layers: { system: 10, history: 50, tools: 20, buffer: 20 },
       overflow: false,
-      anthropicNative: undefined,
       compaction: null
     }))
   })

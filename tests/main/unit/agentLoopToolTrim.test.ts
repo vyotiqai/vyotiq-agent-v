@@ -158,7 +158,6 @@ describe('tool-result trimming is gated on context pressure', () => {
       system: 'system',
       estimatedTokens,
       layers: { system: 10, history: 50, tools: 20, buffer: 20 },
-      anthropicNative: undefined,
       compaction: null
     }))
     saveWorkspacesState({

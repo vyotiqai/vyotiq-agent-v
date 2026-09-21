@@ -112,6 +112,7 @@ function shouldRetryChatStart(code: string | undefined): boolean {
 }
 import {
   contentWindowFromRaw,
+  proactiveCompactThresholdTokens,
   remainingContentTokens
 } from '@shared/domain/contextBudget'
 import { recordUiResume, recordUiSuspendSkip } from './chatUiPerf'
@@ -4641,7 +4642,11 @@ export function createChatStreamController(
               estimatedTokens: estimated,
               window: result.contextWindow,
               contentWindow: result.contentWindow,
-              compactionTrigger: contentWindowFromRaw(result.contextWindow),
+              // The auto-compact trigger, not the content window: the detail rows
+              // derive "free before auto-compact" from this field.
+              compactionTrigger: proactiveCompactThresholdTokens(
+                contentWindowFromRaw(result.contextWindow)
+              ),
               source: 'estimate',
               layers: compactLayers,
               stepUsage: emptyStepUsageTotals(),

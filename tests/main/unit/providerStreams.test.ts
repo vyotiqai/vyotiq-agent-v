@@ -346,6 +346,75 @@ describe('openai responses stream', () => {
     expect(chunks.some((c) => c.type === 'text' && c.text === 'ok')).toBe(true)
   })
 
+  it('resends the whole conversation when the host disowns previous_response_id', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              message:
+                'Upstream request failed: [invalid_request_error] referenced response not found or expired',
+              type: 'invalid_request_error'
+            }
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        sseBody([
+          'data: {"type":"response.output_text.delta","delta":"ok"}\n\n',
+          'data: {"type":"response.completed","response":{"id":"resp_2"}}\n\n'
+        ])
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const priorTurn = {
+      kind: 'openai_responses' as const,
+      responseId: 'resp_expired',
+      outputItems: []
+    }
+    const chunks = await collect(
+      streamOpenAiResponses(
+        baseReq({
+          model: 'gpt-5',
+          system: 'be brief',
+          messages: [
+            { role: 'user', content: 'read file' },
+            { role: 'assistant', content: 'done', reasoningState: priorTurn },
+            { role: 'user', content: 'now summarize it' }
+          ],
+          reasoningState: priorTurn
+        }),
+        'https://opencode.ai/zen/go/v1/responses',
+        { 'x-opencode-session': 'run-x' },
+        'opencode'
+      )
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)) as Record<
+      string,
+      unknown
+    >
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]![1]?.body)) as Record<
+      string,
+      unknown
+    >
+    expect(firstBody.previous_response_id).toBe('resp_expired')
+    expect(firstBody.input).toEqual([{ role: 'user', content: 'now summarize it' }])
+    // The retry must carry the history the dead id was standing in for.
+    expect(secondBody.previous_response_id).toBeUndefined()
+    expect(secondBody.input).toEqual([
+      { role: 'developer', content: 'be brief' },
+      { role: 'user', content: 'read file' },
+      { role: 'assistant', content: 'done' },
+      { role: 'user', content: 'now summarize it' }
+    ])
+    expect(chunks.some((c) => c.type === 'text' && c.text === 'ok')).toBe(true)
+    expect(chunks.some((c) => c.type === 'error')).toBe(false)
+  })
+
   it('streams tool call argument deltas keyed by item_id', async () => {
     vi.stubGlobal(
       'fetch',

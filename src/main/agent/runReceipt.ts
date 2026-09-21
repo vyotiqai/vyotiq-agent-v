@@ -197,7 +197,8 @@ function tokenUsageFromEvents(
         : {}),
       ...(totals.cacheCreationInputTokens > 0
         ? { cacheCreationInputTokens: totals.cacheCreationInputTokens }
-        : {})
+        : {}),
+      ...(totals.generationMs > 0 ? { generationMs: totals.generationMs } : {})
     }
   }
   let lastContextInput: number | undefined

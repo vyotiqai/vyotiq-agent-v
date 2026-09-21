@@ -51,6 +51,35 @@ import { emitGoalUpdate } from './goalEvents'
 import { planGoalRelaunch } from './goalRelaunchPlan'
 
 /**
+ * Title and body for a run's terminal notification.
+ *
+ * Says who finished, not just that something did. A delegated run sets no
+ * goal, so the only identifying field the old title could use was always
+ * empty for exactly the runs the user had walked away from — "assign and walk
+ * away" notified with a bare "Finished", naming neither teammate nor task.
+ *
+ * Exported for its own test: composed inline, the only way to exercise it was
+ * to drive a whole run to completion, which is why it went untested.
+ */
+export function runFinishedNotificationText(input: {
+  failed: boolean
+  goal?: string | undefined
+  teammateName?: string | undefined
+  delegated: boolean
+}): { title: string; body: string } {
+  const goal = input.goal?.trim() ?? ''
+  const teammate = input.teammateName?.trim() ?? ''
+  const verb = input.failed ? 'failed' : 'finished'
+  const suffix = goal ? `: ${goal}` : ''
+  return {
+    title: teammate
+      ? `${teammate} ${verb}${suffix}`
+      : `${input.failed ? 'Failed' : 'Finished'}${suffix}`,
+    body: input.delegated ? `Delegated task ${verb}` : `Agent run ${verb}`
+  }
+}
+
+/**
  * Per-run relaunch budget + pending delayed-relaunch timers (module scope so
  * they survive across invokes of the same runId within one app session).
  * Timers are cleared when the run is intentionally aborted (see clearGoalRelaunchState).
@@ -130,6 +159,14 @@ export type StartAgentRunInput = {
   agentInput: StartAgentRunAgentInput
 }
 
+/** Goal text for a fixture-created run: the first user message, as runAgent uses. */
+function firstUserMessageText(agentInput: StartAgentRunAgentInput): string {
+  const messages = agentInput.newMessages ?? agentInput.messages ?? []
+  const first = messages.find((m) => m.role === 'user')
+  const content = typeof first?.content === 'string' ? first.content : ''
+  return content.trim().slice(0, 200) || 'chat'
+}
+
 export function startAgentRunInBackground(input: StartAgentRunInput): void {
   const { runId, workspacePath, invokeId, wc, controller, agentInput } = input
   const releaseIpcSender = registerRunIpcSender(runId, wc)
@@ -177,7 +214,16 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
       const runSignal = controller.signal
       let eventStream: AsyncGenerator<AgentEvent>
       if (isChatFixtureReplayEnabled()) {
-        eventStream = replayChatFixture({ runId, invokeId, workspacePath, runSignal })
+        eventStream = replayChatFixture({
+          runId,
+          invokeId,
+          workspacePath,
+          runSignal,
+          goal: firstUserMessageText(agentInput),
+          mode: agentInput.mode,
+          ...(agentInput.agentProfileId ? { agentProfileId: agentInput.agentProfileId } : {}),
+          ...(agentInput.delegatedTaskId ? { delegatedTaskId: agentInput.delegatedTaskId } : {})
+        })
       } else {
         // Confirm the substrate can take the work before anything observes this
         // run as started. There is no fallback to local: a cloud-bound run that
@@ -336,19 +382,18 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
         (terminalStatus === 'done' || terminalStatus === 'error') &&
         !relaunchedActiveGoal
       ) {
-        const goal = persisted?.goal?.trim() ?? ''
         const failed = terminalStatus === 'error'
+        const text = runFinishedNotificationText({
+          failed,
+          goal: persisted?.goal,
+          teammateName: persisted?.agentProfileName,
+          delegated: Boolean(persisted?.delegatedTaskId)
+        })
         publishLifecycleNotification({
           source: 'agent',
           kind: failed ? 'run_error' : 'run_done',
-          title: failed
-            ? goal
-              ? `Failed: ${goal}`
-              : 'Failed'
-            : goal
-              ? `Finished: ${goal}`
-              : 'Finished',
-          body: failed ? 'Agent run failed' : 'Agent run finished',
+          title: text.title,
+          body: text.body,
           dedupeKey: failed ? runErrorDedupeKey(runId) : runDoneDedupeKey(runId),
           action: { type: 'open_run', workspacePath, runId }
         })

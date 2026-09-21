@@ -100,6 +100,13 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   pull_agent_instance: { running: 'Pulling instance', done: 'Pulled instance' },
   merge_agent_instance: { running: 'Merging instance', done: 'Merged instance' },
   cancel_agent_instance: { running: 'Cancelling instance', done: 'Cancelled instance' },
+  teammate_list: { running: 'Reading teammates', done: 'Read teammates' },
+  teammate_create: { running: 'Creating teammate', done: 'Created teammate' },
+  teammate_update: { running: 'Updating teammate', done: 'Updated teammate' },
+  teammate_delete: { running: 'Deleting teammate', done: 'Deleted teammate' },
+  teammate_assign_task: { running: 'Assigning task', done: 'Assigned task' },
+  teammate_task: { running: 'Checking task', done: 'Checked task' },
+  build_tool: { running: 'Building a tool', done: 'Built a tool' },
   ask_question: { running: 'Asking', done: 'Asked' },
   switch_mode: { running: 'Switching mode', done: 'Switched mode' }
 }

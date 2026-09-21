@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync
+} from 'fs'
 import { readFile } from 'fs/promises'
 import { dirname, join, relative, resolve, basename } from 'path'
 import { canonicalizeWorkspacePath } from '../../../shared/utils/workspacePath'
@@ -70,6 +78,36 @@ export function ensureMemoryLayout(workspacePath: string, namespace?: string): v
       'utf8'
     )
   }
+}
+
+/**
+ * True once this namespace has been written to. The memory panel shows an
+ * empty state rather than inventing a layout for a teammate that has never run.
+ */
+export function memoryNamespaceExists(workspacePath: string, namespace?: string): boolean {
+  return existsSync(memoryRoot(workspacePath, namespace))
+}
+
+/**
+ * Delete a namespace's memory directory. Returns false when there was nothing
+ * to delete.
+ *
+ * Narrower than `removeProfileArtifactsForWorkspaces({ purgeMemory: true })`,
+ * which also unlinks the teammate's workspace override file — a sibling of
+ * this directory, not a child. Clearing what a teammate remembers must not
+ * also discard how a project retuned it.
+ */
+export function clearMemoryNamespace(workspacePath: string, namespace?: string): boolean {
+  // Validate the slug BEFORE it becomes a path segment. The containment check
+  // below only proves the result is inside the workspace, and `../..` resolves
+  // to a directory that is — so a recursive delete would have landed on real
+  // project files. `memoryRoot` guards its own callers this way; the private
+  // `memoryDir` that the containment walk uses does not.
+  if (namespace !== undefined) assertSafeMemoryNamespace(namespace)
+  const root = assertMemoryRootInsideWorkspace(workspacePath, namespace)
+  if (!existsSync(root)) return false
+  rmSync(root, { recursive: true, force: true })
+  return true
 }
 
 function assertUnderMemory(

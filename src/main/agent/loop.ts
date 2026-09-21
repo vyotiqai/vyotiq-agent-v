@@ -13,7 +13,6 @@ import type {
 import { DEFAULT_SETTINGS } from '../../shared/ipc'
 import { contentDisplayText, contentToText } from '../../shared/ipc'
 import { AgentProfileIdSchema } from '../../shared/ipc'
-import { DEFAULT_AGENT_IDENTITY, DEFAULT_AGENT_PERSONA, DEFAULT_AGENT_TONE } from '../../shared/agentPersona'
 import { runGoalFromUserText, findAbsolutePathsInText, outsideWorkspacePathGuidance, stubPastSkillInvocationsInMessages } from '../../shared/slashCommands'
 import { resolveProviderChatBaseUrl, seedModelsFor } from '../../shared/providers'
 import { formatError, isAbortError } from '../../shared/errors'
@@ -27,6 +26,7 @@ import { circuitKeyProvider } from './circuitBreaker'
 import { waitForHeapPressureRelief } from '../perf/heapPressure'
 import {
   isRetriableStreamFailure,
+  isStalePriorResponseError,
   isTransientHttpFailure,
   runWithStreamRetryGen,
   shouldRetryStreamErrorChunk,
@@ -165,6 +165,7 @@ import { writeTrajectoryArtifactsBestEffort } from './runTrajectory'
 import {
   emptyStepUsageTotals,
   mergeStepUsageTotals,
+  promptTokensFromUsage,
   stepUsageFromEvent,
   type StepUsageTotals
 } from '../../shared/utils/runTelemetry'
@@ -198,6 +199,7 @@ import {
 import { toolResultEventForIpc, toolResultEventForPersistence } from '../../shared/utils/toolResultIpc'
 import { AGENT_TOOLS } from './types'
 import { canonicalizeAgentToolName } from './schemas/tools'
+import { agentBuiltToolDefinitions } from './agentTools/loader'
 import {
   getMcpServerStatus,
   isGitMcpNotARepoError,
@@ -1698,10 +1700,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         tokenEstimate: record.tokenEstimate,
         kind: 'summary',
         ...(record.verified != null ? { verified: record.verified } : {}),
-        ...(record.verifyCoverage != null ? { verifyCoverage: record.verifyCoverage } : {}),
-        ...(record.verifyFailures && record.verifyFailures.length > 0
-          ? { verifyFailures: record.verifyFailures }
-          : {})
+        ...(record.verifyCoverage != null ? { verifyCoverage: record.verifyCoverage } : {})
       }
       appendEvent(runDir, ev)
       return { saved: true, event: ev }
@@ -1889,8 +1888,12 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         attachedServerIds: runAttachedMcpServerIds,
         pinnedToolNames: runPinnedMcpToolNames
       })
-      const fullToolDefs = [...AGENT_TOOLS, ...mcpCandidateDefs]
-      const wireToolDefs = [...AGENT_TOOLS, ...mcpSelection.active]
+      // Tools this user's own runs wrote (build_tool). Never deferred: the set
+      // is small, and a tool written this step has to be callable on the next
+      // one for build_tool to be worth having.
+      const agentBuiltDefs = await agentBuiltToolDefinitions()
+      const fullToolDefs = [...AGENT_TOOLS, ...agentBuiltDefs, ...mcpCandidateDefs]
+      const wireToolDefs = [...AGENT_TOOLS, ...agentBuiltDefs, ...mcpSelection.active]
       const allToolDefs =
         modelInfo.supportsTools !== false
           ? filterToolDefsForCodeIndex(
@@ -1937,7 +1940,22 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     }
 
     await refreshMcpToolsForStep()
-    let compactionLoopHint: string | undefined
+    /**
+     * Post-compaction `<run_notice>`, delivered once and then dropped.
+     *
+     * These are transition notices ("a fold just happened", "the fold had
+     * nothing to take"), not standing instructions. Held across steps they rode
+     * every remaining request of the run, and the retained-decisions variant
+     * duplicated the `Decision:` lines that `<prior_session>` already pins
+     * permanently — so the model was told to "execute these next, do not stop at
+     * inspecting files" dozens of steps after it had.
+     */
+    let pendingCompactionHint: string | undefined
+    const takeCompactionHint = (): string | undefined => {
+      const hint = pendingCompactionHint
+      pendingCompactionHint = undefined
+      return hint
+    }
     /** Estimated tokens left by the last auto-compaction (re-compaction throttle). */
     let postCompactEstimateFloor: number | null = null
     /**
@@ -2147,7 +2165,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       const assembleLoopHint = combineLoopHints(
         mcpNotInCatalogFailFastHint(),
         outsidePathHint,
-        compactionLoopHint
+        takeCompactionHint()
       )
       const effectiveContentWindow = contentWindow(modelInfo, providerId)
       const compactThresholdRatio =
@@ -2170,21 +2188,25 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         plan: plan || undefined,
         sessionEnv: buildSessionEnvSection(settings.terminalShell),
         model: modelInfo,
+        proactiveThreshold,
         toolsJsonEstimate,
         toolsSplit: toolsSplitDetail,
-        compactionTrigger: proactiveThreshold,
-        lastUsage,
         priorCompaction: compaction,
-        keepRecentTurns: settings.keepRecentTurns,
         skillsSection,
         mcpSection: mcpServersSection,
         pluginRulesSection,
         userRules: getSettings().userRules ?? [],
-        persona: settings.agentPersona || DEFAULT_AGENT_PERSONA,
-        identity:
-          settings.agentIdentity ||
-          (settings.agentPersona ? undefined : DEFAULT_AGENT_IDENTITY),
-        tone: settings.agentTone || DEFAULT_AGENT_TONE,
+        // `effectiveProfileBehavior`, not `effectiveProfile`: a run whose
+        // teammate was deleted mid-flight resumes from its persisted snapshot,
+        // which keeps the name — losing it there would make the run forget who
+        // it was exactly when nothing else can tell it.
+        teammateName: effectiveProfileBehavior?.name,
+        // No built-in fallback: persona, identity and tone are the user's to
+        // set. Left empty they emit nothing, so the model arrives with no
+        // imposed name, character or voice.
+        persona: settings.agentPersona || undefined,
+        identity: settings.agentIdentity || undefined,
+        tone: settings.agentTone || undefined,
         responseLanguage: settings.responseLanguage || undefined,
         responseVerbosity: settings.responseVerbosity,
         focusedFile: input.focusedFile,
@@ -2198,11 +2220,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         taskList: formatTodosContextSection(readTodos(runDir)),
         activeGoal: isInlineInstance ? undefined : formatActiveGoalSection(readGoal(runDir)),
         providerId,
-        countReasoningReplay,
-        provider,
-        apiKey,
-        baseUrl,
-        signal: controller.signal
+        countReasoningReplay
       }
 
       let assembled = await assembleContext(assembleBase)
@@ -2259,8 +2277,6 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           settings,
           signal: controller.signal,
           triggerReason: assembled.overflow ? 'overflow' : 'proactive',
-          systemStable: assembled.systemStable,
-          toolDefs,
           ...(invokeId != null ? { invokeId } : {})
         })
         if (!autoOutcome.ok && autoOutcome.reason === 'aborted') break
@@ -2293,7 +2309,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               reason: autoOutcome.message
             }
           )
-          compactionLoopHint = verifyFailed
+          // This step's request is already assembled, so the notice lands on the
+          // next one — and is dropped after that. A fold that is still blocked
+          // re-arms it here.
+          pendingCompactionHint = verifyFailed
             ? loopHintForCompactionVerifyFailed()
             : loopHintForCompactionFailure()
           // Same-size history would otherwise re-pay a summarizer call every step.
@@ -2317,7 +2336,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           // would make its dedupe guard compare the record against itself and drop
           // the event, so auto-compaction would never reach the UI or the receipt.
           const { saved: autoSaved, event: autoCompactionEv } = emitCompaction(nextCompaction)
-          compactionLoopHint = loopHintAfterCompaction(nextCompaction.retainedDecisions)
+          // Delivered by this step's re-assemble below and not held past it —
+          // the decisions themselves stay permanently in `<prior_session>`.
+          const postFoldHint = loopHintAfterCompaction(nextCompaction.retainedDecisions)
           compactionCountThisRun++
           if (autoCompactionEv) yield autoCompactionEv
           if (!autoSaved) {
@@ -2343,7 +2364,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             loopHint: combineLoopHints(
               mcpNotInCatalogFailFastHint(),
               outsidePathHint,
-              compactionLoopHint,
+              postFoldHint,
               loopHintWhenContextStillLarge(postCompactEstimate ?? 0, proactiveThreshold)
             )
           })
@@ -2379,8 +2400,6 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             settings,
             signal: controller.signal,
             triggerReason: 'overflow',
-            systemStable: assembled.systemStable,
-            toolDefs,
             ...(invokeId != null ? { invokeId } : {})
           })
           if (!retryOutcome.ok && retryOutcome.reason === 'aborted') break
@@ -2416,7 +2435,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               return
             }
             const { saved: retrySaved, event: retryEv } = emitCompaction(retryCompaction)
-            compactionLoopHint = loopHintAfterCompaction(retryCompaction.retainedDecisions)
+            const retryFoldHint = loopHintAfterCompaction(retryCompaction.retainedDecisions)
             compactionCountThisRun++
             if (retryEv) yield retryEv
             if (!retrySaved) {
@@ -2442,7 +2461,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               loopHint: combineLoopHints(
                 mcpNotInCatalogFailFastHint(),
                 outsidePathHint,
-                compactionLoopHint,
+                retryFoldHint,
                 loopHintWhenContextStillLarge(retryPostCompactEstimate ?? 0, proactiveThreshold)
               )
             })
@@ -2490,8 +2509,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       const contextWindow = contextWindowFor(modelInfo, providerId)
       costLogContextWindow = contextWindow
       const compactionTrigger = proactiveThreshold
-      const priorProviderInput =
-        lastUsage?.inputTokens && lastUsage.inputTokens > 0 ? lastUsage.inputTokens : undefined
+      // Whole-prompt tokens, not the provider's uncached slice (see promptTokensFromUsage).
+      const priorPromptTokens = lastUsage ? promptTokensFromUsage(lastUsage) : 0
+      const priorProviderInput = priorPromptTokens > 0 ? priorPromptTokens : undefined
       const usingProviderMeter =
         priorProviderInput != null && compaction?.summary === priorSummary
       const contextUsageEv: AgentEvent = {
@@ -2527,6 +2547,13 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       let lastSnapshotText = ''
       let lastStreamFailureMessage = ''
       let lastStreamFailureCode = 'PROVIDER_STREAM'
+      /**
+       * The server lost the response this step chains from, so this step's
+       * remaining attempts send the whole history instead. Per step on purpose:
+       * a stateless attempt that succeeds writes a fresh response id, which the
+       * next step picks up as usual.
+       */
+      let droppedPriorResponseState = false
       let lastStreamFailureHttpStatus: number | undefined = undefined
       // Const capture so nested generators keep `string` (outer `runDir` is `string | null`).
       const streamRunDir = runDir
@@ -2610,12 +2637,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           apiKey,
           baseUrl,
           maxOutputTokens: requestMaxOutputTokens(providerId, modelInfo),
-          anthropicNative: assembled.anthropicNative,
           toolChoice: toolDefs.length > 0 ? 'auto' : undefined,
           parallelToolCalls: toolDefs.length > 0 ? true : undefined,
           promptCacheKey: runId,
           modelInfo,
-          reasoningState: lastReasoningState(messages),
+          reasoningState: droppedPriorResponseState ? undefined : lastReasoningState(messages),
           thinking: thinkingEnabled
             ? {
                 enabled: true,
@@ -2777,8 +2803,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             if (chunk.stopReason) stepStopReason = chunk.stopReason
             if (chunk.usage) {
               lastUsage = chunk.usage
-              if (chunk.usage.inputTokens && chunk.usage.inputTokens > 0) {
-                providerInputTokens = chunk.usage.inputTokens
+              // Context sizing uses the whole prompt; billing below keeps the raw slices.
+              const promptTokens = promptTokensFromUsage(chunk.usage)
+              if (promptTokens > 0) {
+                providerInputTokens = promptTokens
               }
               const generationMs = Math.max(0, Date.now() - streamStartedAt)
               // Estimated cost only when the provider did NOT report a cost
@@ -2834,6 +2862,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 type: 'step_usage',
                 runId,
                 step,
+                // Attribution for offline analysis: events.jsonl is the only
+                // per-step record, and the run-level receipt carries whichever
+                // model the LAST invoke of this run used.
+                provider: providerId,
+                model: settings.model,
                 inputTokens: chunk.usage.inputTokens,
                 ...(chunk.usage.inputTokensIncludesCache !== undefined
                   ? { inputTokensIncludesCache: chunk.usage.inputTokensIncludesCache }
@@ -2933,7 +2966,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 runId,
                 step,
                 estimatedTokens: assembled.estimatedTokens,
-                inputTokens: chunk.usage.inputTokens ?? assembled.estimatedTokens,
+                inputTokens: promptTokensFromUsage(chunk.usage) || assembled.estimatedTokens,
                 contextWindow,
                 contentWindow: effectiveContentWindow,
                 compactionTrigger,
@@ -2979,6 +3012,23 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               // classifies as networkRelated (interrupted, not hard error).
               lastStreamFailureMessage = message
               lastStreamFailureCode = errorCode
+            }
+            // Recoverable without user action, and only once: the retry carries
+            // no previous_response_id, so the same cause cannot repeat. Without
+            // the guard a server that keeps returning it would retry forever.
+            if (!droppedPriorResponseState && isStalePriorResponseError(message)) {
+              droppedPriorResponseState = true
+              lastStreamFailureMessage = message
+              lastStreamFailureCode = errorCode
+              logger.warn('Prior response gone upstream — retrying with full history', {
+                scope: 'agent',
+                code: errorCode,
+                correlationId: runId,
+                provider: providerId,
+                step,
+                attempt
+              })
+              return 'retry'
             }
             if (shouldRetryStreamErrorChunk(errorCode, message, attempt, chunk.httpStatus)) {
               lastStreamFailureMessage = message

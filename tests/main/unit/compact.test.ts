@@ -9,8 +9,7 @@ import {
 import type {
   LlmProvider,
   ProviderChatRequest,
-  StreamChunk,
-  ToolDefinition
+  StreamChunk
 } from '@main/agent/providers/types'
 import type { ChatMessage } from '@shared/ipc'
 
@@ -57,12 +56,6 @@ function capturingProvider(handlers: Array<() => StreamChunk[]>): {
     }
   }
 }
-
-const parentToolDefs: ToolDefinition[] = [
-  { name: 'read', description: 'Read a file', parameters: { type: 'object', properties: { path: { type: 'string' } } } },
-  { name: 'write', description: 'Write a file', parameters: { type: 'object', properties: { path: { type: 'string' } } } },
-  { name: 'shell', description: 'Run a command', parameters: { type: 'object', properties: { command: { type: 'string' } } } }
-]
 
 const history: ChatMessage[] = [
   { role: 'user', content: 'Fix the search tool' },
@@ -312,7 +305,7 @@ describe('compactMessages', () => {
       signal: new AbortController().signal,
       messages: history,
       supportsStructuredOutput: true,
-      forkPrefix: { systemStable: parentStable, toolDefs: parentToolDefs },
+      allowMessageFork: true,
       promptCacheKey: 'run-fork-1'
     })
     expect(result?.summary).toMatch(/Forked summary/i)
@@ -345,7 +338,7 @@ describe('compactMessages', () => {
       signal: new AbortController().signal,
       messages: history,
       supportsStructuredOutput: true,
-      forkPrefix: { systemStable: 'PARENT_STABLE_HARNESS_UNIQUE', toolDefs: parentToolDefs }
+      allowMessageFork: true
     })
     expect(result?.summary).toMatch(/Fix search/i)
     expect(requests.length).toBeGreaterThanOrEqual(2)
@@ -382,7 +375,7 @@ describe('compactMessages', () => {
         signal: new AbortController().signal,
         messages: history,
         supportsStructuredOutput: true,
-        forkPrefix: { systemStable: 'PARENT_STABLE_HARNESS_UNIQUE', toolDefs: parentToolDefs }
+        allowMessageFork: true
       })
     ).rejects.toThrow(/unknown inference model/)
     expect(requests).toHaveLength(1)

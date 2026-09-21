@@ -62,11 +62,24 @@ describe('compaction persistence', () => {
       contentWindowAtCompact: 128_000,
       retainedDecisions: ['Use JWT'],
       verified: true,
-      verifyCoverage: 1,
-      verifyFailures: []
+      verifyCoverage: 1
     }
     saveCompaction(dir, record)
     expect(loadCompaction(dir)).toEqual(record)
+  })
+
+  it('drops a verifyFailures field: a saved record is always an accepted fold', () => {
+    // Nothing writes this — a summary that fails verification is never saved.
+    // The failure list reaches the UI on the compaction_verify_failed event.
+    const runId = 'run-verify-failures'
+    const dir = createRun(workspace, runId, 'meta goal')
+    saveCompaction(dir, {
+      summary: '## Session Intent',
+      createdAt: new Date().toISOString(),
+      tokenEstimate: 120,
+      verifyFailures: ['stale']
+    } as never)
+    expect(loadCompaction(dir)).not.toHaveProperty('verifyFailures')
   })
 
   it('reads contract.md with cap', () => {

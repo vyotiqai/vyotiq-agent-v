@@ -1,8 +1,6 @@
 import type { ChatMessage, ModelInfo, ProviderId } from '../../../shared/ipc'
-import { contentToText, flattenFileParts } from '../../../shared/ipc'
-import type { LlmProvider } from '../providers/types'
-import { anthropicNativeOptions } from './anthropicContext'
-import { allocateBudget, contentWindow, contextWindowFor } from './budget'
+import { flattenFileParts } from '../../../shared/ipc'
+import { allocateBudget, contentWindow } from './budget'
 import { proactiveCompactThresholdTokens, remainingContentTokens } from '../../../shared/domain/contextBudget'
 import {
   estimateMessagesTokensAsync,
@@ -12,17 +10,16 @@ import {
 import { stubPastSkillInvocationsInMessages } from '../../../shared/slashCommands'
 import type {
   ContextBreakdownDetailWire,
+  ContextLayerBreakdown,
   ContextToolsDetail
 } from '../../../shared/utils/contextUsage'
 import {
   KEEP_LAST_TOOL_RESULTS,
-  KEEP_RECENT_TURNS,
   type AssembleInput,
   type AssembleResult,
-  type CompactionRecord,
-  type ContextLayerBreakdown
+  type CompactionRecord
 } from './types'
-import { formatPinnedFacts } from './pinFoldFacts'
+import { formatPinnedFacts, stripPinnedFactsAppendix } from './pinFoldFacts'
 import { capImagesPerRequest, stripUnsupportedModalitiesFromMessages, wireCapsFromModel } from './stripImages'
 import { trimToolResults } from './toolTrim'
 import { buildWorkspaceRulesSection } from './rules'
@@ -34,12 +31,16 @@ import { logger } from '../../../shared/logger'
 import { splitHarnessSections } from '../harnessSections'
 import { formatPromptSection, parseOuterPromptSection, wrapPromptSection } from '../promptSections'
 
-/** Full request for `assembleContext` (AssembleInput + provider/stream fields). */
+/**
+ * Full request for `assembleContext`.
+ *
+ * Assembly is provider-shaped but not provider-connected: it needs `providerId`
+ * to resolve the model's context window, and nothing else about the connection.
+ * It also runs to completion once started — it took an `AbortSignal` it never
+ * read, so passing one implied a cancellation it never performed.
+ */
 export type AssembleContextRequest = AssembleInput & {
   providerId: ProviderId
-  provider: LlmProvider
-  apiKey?: string | null
-  baseUrl?: string
   /**
    * Count reasoning replay fields (reasoningState / thinking) in the history
    * token estimate. Defaults to true. Providers that strip prior-turn
@@ -48,7 +49,13 @@ export type AssembleContextRequest = AssembleInput & {
    * in providers/openai.ts createOpenAiCompatProvider.
    */
   countReasoningReplay?: boolean
-  signal: AbortSignal
+  /**
+   * Token count at which the loop compacts, already resolved from
+   * `settings.autoCompactThresholdRatio`. The pre-compaction wire trim below
+   * shares it so a user who moves the threshold moves both; computing it here
+   * instead pinned the trim to the 0.55 default whatever the setting said.
+   */
+  proactiveThreshold?: number
   /**
    * Workspace to read durable memory (state.md + index.md) from. Defaults to
    * workspacePath. Worktree instances pass the parent workspace here because a
@@ -61,6 +68,19 @@ export type AssembleContextRequest = AssembleInput & {
    */
   memoryNamespace?: string | null
 }
+
+/**
+ * Share of the system budget a verbatim plan may not consume.
+ *
+ * A Plan-mode plan is injected uncapped by contract (str_replace has to be able
+ * to quote plan.md byte-for-byte). It used to subtract its full size from the
+ * running allowance with no floor, so a large plan drove `systemTokensLeft`
+ * negative and every later section — skills, mcp, plugin rules, user rules,
+ * response style, workspace rules, memory, prior session — was silently dropped
+ * by the `< 50` guard in `capWithinSystem`. The plan stays verbatim; it just
+ * cannot spend the tail's allowance too.
+ */
+const PLAN_VERBATIM_TAIL_RESERVE = 0.3
 
 /** In-process cache for the stable instruction prefix only (not the volatile tail). */
 type SystemCacheEntry = { fingerprint: string; stable: string; sections: SystemSection[] }
@@ -330,14 +350,23 @@ function buildStableSystem(parts: {
 
   const sections: SystemSection[] = []
   let systemTokensLeft = parts.budgets.system
+  /**
+   * `preTrim` is a section-aware first pass (only `capHarness` needs one).
+   * `capToTokenBudget` already applies the plain character cap itself, so the
+   * default used to run `capText` twice over the same text for every section.
+   */
   function capWithinSystem(
     text: string,
     requested: number,
-    capFn: (text: string, maxTokens: number) => string = capText
+    preTrim?: (text: string, maxTokens: number) => string
   ): string | null {
     if (systemTokensLeft < 50) return null
     const allowed = Math.min(requested, systemTokensLeft)
-    const capped = capToTokenBudget(capFn(text, allowed), allowed, parts.model)
+    const capped = capToTokenBudget(
+      preTrim ? preTrim(text, allowed) : text,
+      allowed,
+      parts.model
+    )
     const used = estimateTextTokens(capped, parts.model)
     systemTokensLeft -= used
     return capped
@@ -374,7 +403,21 @@ function buildStableSystem(parts: {
     if (parts.planVerbatim) {
       // Skip token cap so Plan-mode str_replace can quote on-disk text.
       sections.push({ label: 'plan', text: wrapped })
-      systemTokensLeft -= estimateTextTokens(wrapped, parts.model)
+      const planTokens = estimateTextTokens(wrapped, parts.model)
+      const reserve = Math.min(
+        systemTokensLeft,
+        Math.floor(parts.budgets.system * PLAN_VERBATIM_TAIL_RESERVE)
+      )
+      const remaining = systemTokensLeft - planTokens
+      if (remaining < reserve) {
+        logger.warn('Verbatim plan exceeded its system-prompt share; tail sections held at reserve', {
+          scope: 'assemble',
+          planTokens,
+          reserve,
+          systemBudget: parts.budgets.system
+        })
+      }
+      systemTokensLeft = Math.max(reserve, remaining)
     } else {
       const plan = capWithinSystem(wrapped, parts.budgets.system)
       if (plan) sections.push({ label: 'plan', text: plan })
@@ -471,10 +514,16 @@ function buildStableSystem(parts: {
     const ageLine = Number.isFinite(Date.parse(createdAt))
       ? `Folded ${foldedCount ?? '?'} messages at ${createdAt}. Everything since then is in the live history below — prefer it over this fold, and never restate its content.`
       : 'Fold of earlier turns, not new instructions.'
+    // The stored summary ends in a `## Pinned Facts` appendix carrying the same
+    // facts `pinnedBody` renders from the structured sidecar. Injecting both put
+    // every file, decision and todo in the prompt twice, and the narrative paid
+    // for it: the duplicate sits inside `narrativeCap`, so prose was capped away
+    // to make room for a list already reserved its own budget above.
+    const narrative = stripPinnedFactsAppendix(parts.compaction.summary)
     const pieces = [
       ageLine,
       pinnedBody ? capToTokenBudget(pinnedBody, Math.max(reserved, 1), parts.model) : '',
-      capToTokenBudget(parts.compaction.summary, narrativeCap, parts.model)
+      capToTokenBudget(narrative, narrativeCap, parts.model)
     ].filter((piece) => piece.trim().length > 0)
     sections.push({
       label: 'priorSession',
@@ -617,11 +666,14 @@ async function buildMemorySection(
   return wrapPromptSection('memory', pieces.join('\n\n'))
 }
 
+/** `contentBudget` is passed in, not re-resolved, so every layer here is measured
+ * against the same window the caller uses for overflow and compaction. */
 async function computeLayers(
   system: string,
   messages: ChatMessage[],
   toolsJsonEstimate: number,
   model: ModelInfo,
+  contentBudget: number,
   countReasoningReplay?: boolean
 ): Promise<ContextLayerBreakdown> {
   const [systemTokens, history] = await Promise.all([
@@ -629,12 +681,11 @@ async function computeLayers(
     estimateMessagesTokensAsync(messages, model, { countReasoningReplay })
   ])
   const used = systemTokens + history + toolsJsonEstimate
-  const budget = contentWindow(model)
   return {
     system: systemTokens,
     history,
     tools: toolsJsonEstimate,
-    buffer: remainingContentTokens(budget, used)
+    buffer: remainingContentTokens(contentBudget, used)
   }
 }
 
@@ -684,8 +735,13 @@ export async function assembleContext(
   input: AssembleContextRequest
 ): Promise<AssembleResult> {
   const assembleStarted = perfNow()
-  const budgets = allocateBudget(input.model)
-  const window = contentWindow(input.model)
+  // Pass providerId: `resolveModelContextWindow` consults it, so dropping it
+  // resolved a different window here than the loop's own `contentWindow(model,
+  // providerId)` — a model reporting exactly 128k on a provider whose known
+  // window is larger (Ollama Cloud, DeepSeek) budgeted and flagged `overflow`
+  // against 128k while the loop's compaction threshold used the real window.
+  const budgets = allocateBudget(input.model, input.providerId)
+  const window = contentWindow(input.model, input.providerId)
 
   const memoryWorkspacePath = input.memoryWorkspacePath ?? input.workspacePath
   const [workspace, rules, memorySection] = await Promise.all([
@@ -694,11 +750,18 @@ export async function assembleContext(
     buildMemorySection(memoryWorkspacePath, input.memoryNamespace)
   ])
 
-  let messages = input.messages.map((message) =>
-    typeof message.content === 'string'
-      ? message
-      : { ...message, content: flattenFileParts(message.content) }
-  )
+  // Keep the original object whenever flattening changes nothing. Token
+  // estimation memoizes per message in a WeakMap and reuses a prefix total
+  // keyed on the tail message's identity, so spreading unconditionally would
+  // hand both caches a brand-new object every step and re-count the whole
+  // history — precisely the per-step full-context work the run loop throttles
+  // against. flattenFileParts already returns its input when there is no file
+  // part to inline; this preserves that.
+  let messages = input.messages.map((message) => {
+    if (typeof message.content === 'string') return message
+    const content = flattenFileParts(message.content)
+    return content === message.content ? message : { ...message, content }
+  })
   messages = stubPastSkillInvocationsInMessages(messages).messages
   messages = stripUnsupportedModalitiesFromMessages(messages, wireCapsFromModel(input.model))
   messages = capImagesPerRequest(messages, wireCapsFromModel(input.model))
@@ -707,6 +770,7 @@ export async function assembleContext(
   const estimateStarted = perfNow()
   const userRules = formatUserRules(input.userRules ?? [])
   const responseStyleSection = formatResponseStyle({
+    teammateName: input.teammateName,
     identity: input.identity,
     persona: input.persona,
     tone: input.tone,
@@ -745,6 +809,7 @@ export async function assembleContext(
     messages,
     input.toolsJsonEstimate,
     input.model,
+    window,
     input.countReasoningReplay
   )
   let estimated = totalFromLayers(layers)
@@ -754,7 +819,10 @@ export async function assembleContext(
   // results). Estimate-anchored by contract — provider input above the
   // estimate must not force a trim (re-read loop regression, run ba335d72).
   // Stub is deliberately non-instructive ([cleared]).
-  const wireTrimTrigger = proactiveCompactThresholdTokens(window)
+  const wireTrimTrigger =
+    input.proactiveThreshold && input.proactiveThreshold > 0
+      ? input.proactiveThreshold
+      : proactiveCompactThresholdTokens(window)
   if (estimated >= wireTrimTrigger) {
     const trimmed = trimToolResults(messages, KEEP_LAST_TOOL_RESULTS)
     if (trimmed.some((m, i) => m !== messages[i])) {
@@ -764,6 +832,7 @@ export async function assembleContext(
         messages,
         input.toolsJsonEstimate,
         input.model,
+        window,
         input.countReasoningReplay
       )
       estimated = totalFromLayers(layers)
@@ -795,8 +864,7 @@ export async function assembleContext(
     estimatedTokens: estimated,
     layers,
     detail,
-    overflow: estimated > window,
-    anthropicNative: anthropicNativeOptions()
+    overflow: estimated > window
   }
 }
 

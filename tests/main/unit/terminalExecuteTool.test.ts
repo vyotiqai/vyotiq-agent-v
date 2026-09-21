@@ -247,7 +247,11 @@ describe('executeTool terminal', () => {
         command:
           "node -e \"setTimeout(() => { console.log('vyotiq-wait-larger'); process.exit(0) }, 250)\"",
         block_until_ms: 50,
-        timeoutMs: 8_000
+        // Well clear of PowerShell + node cold start under a loaded parallel
+        // suite (observed: a 250ms command reported `status: timeout` at 8s).
+        // The assertion is about which wait wins, not the exact ceiling, and
+        // the 20s test timeout still catches a genuine hang.
+        timeoutMs: 15_000
       }),
       workspace,
       signal,

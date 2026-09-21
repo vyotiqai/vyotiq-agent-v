@@ -22,15 +22,11 @@ export function allocateBudget(
   >
 }
 
-export function effectiveWindow(model: ModelInfo, providerId?: ProviderId): number {
-  return contentWindowFromRaw(contextWindowFor(model, providerId))
-}
-
 /**
  * Window available for content after reserving the buffer layer.
  * Equals the non-buffer budget shares (85% of the raw model window).
  */
 export function contentWindow(model: ModelInfo, providerId?: ProviderId): number {
-  return effectiveWindow(model, providerId)
+  return contentWindowFromRaw(contextWindowFor(model, providerId))
 }
 

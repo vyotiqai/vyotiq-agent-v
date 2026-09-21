@@ -5,6 +5,7 @@ import type { ChatMessage } from '@shared/ipc'
 import { extractFoldFacts } from '@main/agent/context/foldFacts'
 import { pinFoldFacts } from '@main/agent/context/pinFoldFacts'
 import {
+  untrustworthy,
   verifyCompactionSummary,
   type CompactionVerifyFailureKind
 } from '@main/agent/context/verifyCompaction'
@@ -65,9 +66,11 @@ describe('compact golden fixtures', () => {
       })
 
       for (const summary of golden.summaries) {
+        // Scored as the model wrote it. Pinning used to run first for the
+        // `expectOk` cases, which made every `missing_*` kind unreachable and
+        // the assertion a test of the pinner rather than the scorer.
         it(`summary ${summary.id} ${summary.expectOk ? 'passes' : 'fails'} the extractive scorer`, () => {
-          const text = summary.expectOk ? pinFoldFacts(summary.text, facts) : summary.text
-          const result = verifyCompactionSummary(text, facts)
+          const result = verifyCompactionSummary(summary.text, facts)
           expect(result.ok).toBe(summary.expectOk)
           if (summary.failKinds) {
             for (const kind of summary.failKinds) {
@@ -79,6 +82,17 @@ describe('compact golden fixtures', () => {
               expect(result.failures.some((f) => f.kind === 'invented_path')).toBe(true)
             }
           }
+        })
+
+        // The pipeline contract: omissions are repaired from the extracted
+        // facts, hallucinations are not — those are what earn a retry.
+        it(`summary ${summary.id} pins to a clean summary unless it invented a path`, () => {
+          const scored = verifyCompactionSummary(summary.text, facts)
+          const pinned = pinFoldFacts(summary.text, facts)
+          const after = verifyCompactionSummary(pinned, facts)
+          const hallucinated = untrustworthy(scored).length > 0
+          expect(after.ok).toBe(!hallucinated)
+          expect(untrustworthy(after).length > 0).toBe(hallucinated)
         })
       }
     })

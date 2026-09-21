@@ -4,7 +4,8 @@ import {
   foldFactsToPinned,
   formatPinnedFacts,
   mergeFoldFacts,
-  pinFoldFacts
+  pinFoldFacts,
+  stripPinnedFactsAppendix
 } from '@main/agent/context/pinFoldFacts'
 import { verifyCompactionSummary } from '@main/agent/context/verifyCompaction'
 
@@ -93,5 +94,60 @@ Worked on auth
     expect(text).toContain('`src/auth.ts`')
     expect(text).toContain('Decision: Use JWT')
     expect(text).toContain('Constraint: Do not log secrets')
+  })
+})
+
+describe('stripPinnedFactsAppendix', () => {
+  it('keeps the new narrative when a rolling fold carries the prior appendix', () => {
+    // compactMessages merges `<prior summary>\n---\n<new summary>`, and the prior
+    // half ends in its own `## Pinned Facts`. An end-anchored strip took the new
+    // narrative with it, so every fold after the first kept only fold #1's prose.
+    const rolling = [
+      '## Session Intent',
+      'Fold 1: started the auth rewrite.',
+      '',
+      '## Pinned Facts',
+      '- Wrote: `src/auth.ts`',
+      '',
+      '---',
+      '',
+      '## Session Intent',
+      'Fold 2: migrated the token store and fixed the refresh loop.',
+      '',
+      '## Files Touched',
+      '- `src/token.ts`'
+    ].join('\n')
+
+    const stripped = stripPinnedFactsAppendix(rolling)
+
+    expect(stripped).toContain('Fold 1: started the auth rewrite.')
+    expect(stripped).toContain('Fold 2: migrated the token store and fixed the refresh loop.')
+    expect(stripped).toContain('`src/token.ts`')
+    expect(stripped).toContain('---')
+    expect(stripped).not.toContain('Pinned Facts')
+  })
+
+  it('removes every appendix in a summary merged across several folds', () => {
+    const merged = 'A.\n\n## Pinned Facts\n- Wrote: `a.ts`\n\n---\n\nB.\n\n## Pinned Facts\n- Wrote: `b.ts`'
+    expect(stripPinnedFactsAppendix(merged)).toBe('A.\n\n---\n\nB.')
+  })
+
+  it('leaves a summary without an appendix alone', () => {
+    const summary = '## Session Intent\nJust prose.'
+    expect(stripPinnedFactsAppendix(summary)).toBe(summary)
+  })
+
+  it('is stable across CRLF line endings', () => {
+    const summary = 'A.\n\n## Pinned Facts\n- Wrote: `a.ts`\n\n---\n\nB.'
+    expect(stripPinnedFactsAppendix(summary.replace(/\n/g, '\r\n'))).toBe(
+      stripPinnedFactsAppendix(summary)
+    )
+  })
+
+  it('round-trips with pinFoldFacts: re-pinning yields one current block', () => {
+    const once = pinFoldFacts('## Session Intent\nWorked on auth.', facts)
+    const twice = pinFoldFacts(once, facts)
+    expect(twice).toBe(once)
+    expect(twice.match(/## Pinned Facts/g)).toHaveLength(1)
   })
 })

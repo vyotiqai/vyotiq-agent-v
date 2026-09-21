@@ -10,6 +10,15 @@ export type BudgetLayerShares = {
   buffer: number
 }
 
+/**
+ * Layer shares of the raw model window.
+ *
+ * `tools` is accounting, not a ceiling: `buildStepToolCatalog` ships every
+ * builtin and admitted MCP tool and never evicts, so nothing compares the tools
+ * layer against its share. The number still matters — `contentWindowFromRaw` is
+ * the sum of the non-buffer shares, so every meter, compaction trigger and
+ * overflow test is derived from it. Change it only with that in mind.
+ */
 export const BUDGET_SHARES: BudgetLayerShares = {
   system: 0.12,
   tools: 0.18,
@@ -41,16 +50,6 @@ export function contentWindowFromRaw(window: number): number {
   return b.system + b.tools + b.memoryWorkspace + b.history
 }
 
-/** Tools-layer budget = full window share (no soft ceiling). */
-export function toolsBudgetFromRaw(window: number): number {
-  return allocateBudgetShares(window).tools
-}
-
-/** Meter / event field: hard content window (no soft auto-summarize trigger). */
-export function compactionTriggerFromRaw(window: number): number {
-  return contentWindowFromRaw(window)
-}
-
 /** Default fraction of content window that triggers proactive LLM compaction. */
 export const DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO = 0.55
 
@@ -65,13 +64,6 @@ export function proactiveCompactThresholdTokens(
   if (!Number.isFinite(contentWindow) || contentWindow <= 0) return 0
   const clamped = Math.min(0.95, Math.max(0.05, ratio))
   return Math.floor(contentWindow * clamped)
-}
-
-/** Remaining tokens on the raw provider window after measured layer usage. */
-export function remainingWindowTokens(rawWindow: number, usedTokens: number): number {
-  if (!Number.isFinite(rawWindow) || rawWindow <= 0) return 0
-  const used = Number.isFinite(usedTokens) && usedTokens > 0 ? usedTokens : 0
-  return Math.max(0, rawWindow - used)
 }
 
 /** Remaining tokens in the content budget after measured usage (meter headroom). */

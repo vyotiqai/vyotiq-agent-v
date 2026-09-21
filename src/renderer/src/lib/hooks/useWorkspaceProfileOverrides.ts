@@ -16,13 +16,25 @@ import type { AgentProfileOverride } from '@shared/ipc'
 
 type OverrideMap = Record<string, AgentProfileOverride>
 
+/** Profile id -> the privileged fields its override asks for but has not been granted. */
+type UnacceptedMap = Record<string, string[]>
+
 type OverridesState = {
   /** Workspace path -> profile id -> override. Absent = not loaded yet. */
   byWorkspace: Record<string, OverrideMap>
+  /**
+   * Workspace path -> what the run path is withholding.
+   *
+   * An override file arrives over git, so it may ask to run a teammate
+   * autonomously in a repository the user merely cloned. Those fields are
+   * dropped until accepted, and this is how the UI can say so instead of
+   * leaving the user to wonder why a committed setting has no effect.
+   */
+  unacceptedByWorkspace: Record<string, UnacceptedMap>
   error: string | null
 }
 
-const EMPTY: OverridesState = { byWorkspace: {}, error: null }
+const EMPTY: OverridesState = { byWorkspace: {}, unacceptedByWorkspace: {}, error: null }
 
 let state: OverridesState = EMPTY
 const listeners = new Set<() => void>()
@@ -34,15 +46,26 @@ function getSnapshot(): OverridesState {
 }
 
 function publish(next: OverridesState): void {
-  if (next.byWorkspace === state.byWorkspace && next.error === state.error) return
+  if (
+    next.byWorkspace === state.byWorkspace &&
+    next.unacceptedByWorkspace === state.unacceptedByWorkspace &&
+    next.error === state.error
+  ) {
+    return
+  }
   state = next
   for (const listener of listeners) listener()
 }
 
-function applyWorkspace(workspacePath: string, overrides: OverrideMap): void {
+function applyWorkspace(
+  workspacePath: string,
+  overrides: OverrideMap,
+  unaccepted: UnacceptedMap
+): void {
   publish({
     ...state,
-    byWorkspace: { ...state.byWorkspace, [workspacePath]: overrides }
+    byWorkspace: { ...state.byWorkspace, [workspacePath]: overrides },
+    unacceptedByWorkspace: { ...state.unacceptedByWorkspace, [workspacePath]: unaccepted }
   })
 }
 
@@ -54,7 +77,7 @@ function subscribeToPush(): void {
   // and task stores. A workspace whose overrides changed while no consumer was
   // mounted must not be left stale for the next one.
   window.vyotiq.onAgentProfileOverridesChanged((event) => {
-    applyWorkspace(event.workspacePath, event.overrides)
+    applyWorkspace(event.workspacePath, event.overrides, event.unaccepted ?? {})
   })
 }
 
@@ -76,7 +99,7 @@ function ensureLoaded(workspacePath: string): void {
   requested.add(workspacePath)
   void window.vyotiq.agentProfileOverridesList({ workspacePath }).then((res) => {
     if (res?.ok) {
-      applyWorkspace(res.data.workspacePath, res.data.overrides)
+      applyWorkspace(res.data.workspacePath, res.data.overrides, res.data.unaccepted ?? {})
       return
     }
     // Let it be retried: a workspace that was not open yet is an ordinary
@@ -105,6 +128,22 @@ async function setOverride(
   return false
 }
 
+/**
+ * Grant this workspace's override file its privileged fields as written.
+ *
+ * Main re-hashes the file itself rather than trusting anything from here, so
+ * this cannot approve bytes the renderer invented.
+ */
+async function acceptOverride(workspacePath: string, profileId: string): Promise<boolean> {
+  const res = await window.vyotiq?.agentProfileOverrideAccept?.({ workspacePath, profileId })
+  if (res?.ok) {
+    applyWorkspace(res.data.workspacePath, res.data.overrides, res.data.unaccepted ?? {})
+    return true
+  }
+  publish({ ...state, error: res?.error ?? 'Workspace overrides are unavailable' })
+  return false
+}
+
 function clearError(): void {
   publish({ ...state, error: null })
 }
@@ -119,6 +158,7 @@ export function resetWorkspaceProfileOverridesForTests(): void {
 
 export function useWorkspaceProfileOverrides(): {
   byWorkspace: Record<string, OverrideMap>
+  unacceptedByWorkspace: Record<string, UnacceptedMap>
   error: string | null
   ensureLoaded: (workspacePath: string) => void
   setOverride: (
@@ -126,14 +166,17 @@ export function useWorkspaceProfileOverrides(): {
     profileId: string,
     override: AgentProfileOverride | null
   ) => Promise<boolean>
+  acceptOverride: (workspacePath: string, profileId: string) => Promise<boolean>
   clearError: () => void
 } {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
   return {
     byWorkspace: snapshot.byWorkspace,
+    unacceptedByWorkspace: snapshot.unacceptedByWorkspace,
     error: snapshot.error,
     ensureLoaded,
     setOverride,
+    acceptOverride,
     clearError
   }
 }

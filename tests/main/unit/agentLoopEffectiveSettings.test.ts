@@ -110,7 +110,6 @@ describe('runAgent effective workspace settings', () => {
       system: 'system',
       estimatedTokens: 100,
       layers: { system: 10, history: 50, tools: 20, buffer: 20 },
-      anthropicNative: undefined,
       compaction: null
     }))
     saveWorkspacesState({
@@ -287,5 +286,74 @@ describe('runAgent effective workspace settings', () => {
     expect(input.tone).toBe('terse')
     expect(input.responseLanguage).toBe('German')
     expect(input.responseVerbosity).toBe('balanced')
+  })
+
+  it('passes the bound teammate name to the context assembler', async () => {
+    // `agentProfileName` was persisted to status.json for the UI and never
+    // handed to the model, so a teammate could not refer to itself by name.
+    const { createAgentProfile, clearAgentProfilesCacheForTests } = await import(
+      '@main/settings/agentProfiles'
+    )
+    clearAgentProfilesCacheForTests()
+    const profile = createAgentProfile({
+      name: 'Scout',
+      scope: 'global',
+      persona: 'A terse senior frontend engineer.'
+    })
+
+    saveWorkspacesState({
+      ...defaultWorkspacesState(),
+      openPaths: [workspace],
+      activePath: workspace,
+      recentPaths: [],
+      settingsOverridesByPath: {}
+    })
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'text', text: 'hello' }
+      yield { type: 'done' }
+    })
+
+    for await (const _ev of runAgent({
+      runId: 'teammate-name',
+      messages: [{ role: 'user', content: 'hi' }],
+      workspacePath: workspace,
+      agentProfileId: profile.id
+    })) {
+      void _ev
+    }
+
+    const input = assembleContextMock.mock.calls[0]?.[0] as {
+      teammateName?: string
+      persona?: string
+    }
+    expect(input.teammateName).toBe('Scout')
+    // The persona still rides its own field; the split into name vs. role
+    // happens in formatResponseStyle, not here.
+    expect(input.persona).toBe('A terse senior frontend engineer.')
+  })
+
+  it('leaves an unbound chat with no teammate name', async () => {
+    saveWorkspacesState({
+      ...defaultWorkspacesState(),
+      openPaths: [workspace],
+      activePath: workspace,
+      recentPaths: [],
+      settingsOverridesByPath: {}
+    })
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'text', text: 'hello' }
+      yield { type: 'done' }
+    })
+
+    for await (const _ev of runAgent({
+      runId: 'no-teammate',
+      messages: [{ role: 'user', content: 'hi' }],
+      workspacePath: workspace
+    })) {
+      void _ev
+    }
+
+    const input = assembleContextMock.mock.calls[0]?.[0] as { teammateName?: string }
+    expect(input.teammateName).toBeUndefined()
   })
 })

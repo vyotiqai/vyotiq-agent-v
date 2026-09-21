@@ -210,10 +210,17 @@ function capChildText(text: string, max: number): string {
   return `${text.slice(0, max)}\n[...truncated ${text.length - max} chars]`
 }
 
+/**
+ * `noun` exists because delegated teammate tasks read back through this same
+ * function. The body — the run's last assistant message plus what it wrote — is
+ * identical for both; only the bare fallback, reached when a run produced
+ * neither, would otherwise call a teammate's task an "Instance".
+ */
 function formatChildSummary(
   workspacePath: string,
   childRunId: string,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
+  noun = 'Instance'
 ): string {
   const runDir = resolveRunDir(workspacePath, childRunId)
   const status = loadStatus(runDir)
@@ -230,16 +237,21 @@ function formatChildSummary(
   const wroteBlock = formatWroteFilesBlock(wroteFilesFromReceipt(runDir))
   if (wroteBlock) parts.push(wroteBlock)
   if (parts.length > 0) return parts.join('\n\n')
-  if (status?.status === 'cancelled') return 'Instance cancelled.'
-  if (status?.status === 'error') return status.error ?? 'Instance failed.'
-  return 'Instance finished.'
+  if (status?.status === 'cancelled') return `${noun} cancelled.`
+  if (status?.status === 'error') return status.error ?? `${noun} failed.`
+  return `${noun} finished.`
 }
 
-export async function summarizeChildRunAsync(workspacePath: string, childRunId: string): Promise<string> {
+export async function summarizeChildRunAsync(
+  workspacePath: string,
+  childRunId: string,
+  noun?: string
+): Promise<string> {
   const summary = formatChildSummary(
     workspacePath,
     childRunId,
-    await loadMessagesAsync(workspacePath, childRunId)
+    await loadMessagesAsync(workspacePath, childRunId),
+    noun
   )
   return capChildText(summary, CHILD_SUMMARY_MAX_CHARS)
 }
