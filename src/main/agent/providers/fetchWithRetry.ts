@@ -222,6 +222,46 @@ function connectDeadlineSignal(
   return { signal: controller.signal, dispose, get fired(): boolean { return fired } }
 }
 
+/** Same-origin hops only — see fetchSameOriginRedirects. */
+const MAX_PROVIDER_REDIRECTS = 3
+
+/**
+ * Follow same-origin redirects; refuse the rest.
+ *
+ * Provider credentials travel as `x-api-key` as well as `Authorization`, and
+ * the platform's cross-origin redirect stripping only covers the latter — so
+ * with the default `redirect: 'follow'` a 302 could hand an API key to another
+ * host. This is the main chat egress path and was the only network path in the
+ * codebase with no redirect discipline at all.
+ */
+async function followSameOriginRedirects(
+  url: string,
+  init: RequestInit & { signal?: AbortSignal },
+  first: Response
+): Promise<Response> {
+  let target = url
+  let res = first
+  for (let hop = 0; hop < MAX_PROVIDER_REDIRECTS; hop++) {
+    const location = res.headers.get('location')
+    if (!location) return res
+    const current = new URL(target)
+    const next = new URL(location, current)
+    if (next.origin !== current.origin) {
+      throw new Error(
+        `Refusing cross-origin redirect from ${current.origin} to ${next.origin}`
+      )
+    }
+    target = next.href
+    res = await fetch(target, { ...init, redirect: 'manual' })
+    if (res.status < 300 || res.status >= 400) return res
+  }
+  return res
+}
+
+function isRedirect(res: Response): boolean {
+  return res.status >= 300 && res.status < 400
+}
+
 export async function fetchWithRetry(
   url: string,
   init: RequestInit & { signal?: AbortSignal },
@@ -243,7 +283,12 @@ export async function fetchWithRetry(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const deadline = connectDeadlineSignal(init.signal, connectTimeoutMs)
     try {
-      const response = await fetch(url, { ...init, signal: deadline.signal })
+      // One await on the hot path; redirects are followed only when one arrives.
+      const attemptInit = { ...init, redirect: 'manual' as const, signal: deadline.signal }
+      const first = await fetch(url, attemptInit)
+      const response = isRedirect(first)
+        ? await followSameOriginRedirects(url, attemptInit, first)
+        : first
       // Headers arrived — stop the connect deadline; the body streams on freely.
       deadline.dispose()
       if (isRetriableHttpStatus(response.status) && attempt < maxAttempts) {

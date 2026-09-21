@@ -120,7 +120,7 @@ describe('egress policy', () => {
   })
 
   it('refuses a URL that does not parse', () => {
-    const decision = evaluateEgress({ url: 'not a url', purpose: 'web_fetch' })
+    const decision = evaluateEgress({ url: 'not a url', purpose: 'mcp_remote' })
     expect(decision.allowed).toBe(false)
     expect(decision.reason).toBe('unparseable')
   })
@@ -157,7 +157,7 @@ describe('egress ledger', () => {
   })
 
   it('filters by run, purpose and refusal', () => {
-    checkEgress({ url: 'https://example.com/a', purpose: 'web_fetch', runId: 'run-1' })
+    checkEgress({ url: 'https://example.com/a', purpose: 'mcp_remote', runId: 'run-1' })
     checkEgress({ url: 'https://other.com/b', purpose: 'browser_subresource', runId: 'run-2' })
     checkEgress({
       url: 'https://evil.com/c',
@@ -168,7 +168,7 @@ describe('egress ledger', () => {
 
     expect(listEgress({ runId: 'run-1' })).toHaveLength(1)
     expect(listEgress({ runId: 'run-2' })).toHaveLength(2)
-    expect(listEgress({ purpose: 'web_fetch' })).toHaveLength(1)
+    expect(listEgress({ purpose: 'mcp_remote' })).toHaveLength(1)
 
     const denied = listEgress({ deniedOnly: true })
     expect(denied).toHaveLength(1)
@@ -179,7 +179,7 @@ describe('egress ledger', () => {
   it('drops the oldest entries once the cap is reached', () => {
     const overflow = 10
     for (let i = 0; i < MAX_EGRESS_LEDGER_ENTRIES + overflow; i += 1) {
-      checkEgress({ url: `https://host-${i}.example/`, purpose: 'web_fetch' })
+      checkEgress({ url: `https://host-${i}.example/`, purpose: 'mcp_remote' })
     }
 
     expect(egressLedgerSize()).toBe(MAX_EGRESS_LEDGER_ENTRIES)
@@ -191,7 +191,7 @@ describe('egress ledger', () => {
   })
 
   it('clearEgressLedger empties the ledger', () => {
-    checkEgress({ url: 'https://example.com/a', purpose: 'web_fetch' })
+    checkEgress({ url: 'https://example.com/a', purpose: 'mcp_remote' })
     expect(egressLedgerSize()).toBe(1)
     clearEgressLedger()
     expect(egressLedgerSize()).toBe(0)
@@ -212,10 +212,10 @@ describe('egress observers', () => {
     const seen: string[] = []
     const stop = onEgressRecorded((recorded) => seen.push(recorded.origin))
 
-    checkEgress({ url: 'https://one.example/a', purpose: 'web_fetch' })
-    checkEgress({ url: 'https://two.example/b', purpose: 'web_fetch' })
+    checkEgress({ url: 'https://one.example/a', purpose: 'mcp_remote' })
+    checkEgress({ url: 'https://two.example/b', purpose: 'mcp_remote' })
     stop()
-    checkEgress({ url: 'https://three.example/c', purpose: 'web_fetch' })
+    checkEgress({ url: 'https://three.example/c', purpose: 'mcp_remote' })
 
     expect(seen).toEqual(['https://one.example', 'https://two.example'])
   })
@@ -239,9 +239,9 @@ describe('egress observers', () => {
   })
 
   it('issues a monotonic seq that brackets an operation exactly', () => {
-    checkEgress({ url: 'https://before.example/a', purpose: 'web_fetch' })
+    checkEgress({ url: 'https://before.example/a', purpose: 'mcp_remote' })
     const mark = currentEgressSeq()
-    checkEgress({ url: 'https://during.example/b', purpose: 'web_fetch' })
+    checkEgress({ url: 'https://during.example/b', purpose: 'mcp_remote' })
 
     const after = listEgress().filter((recorded) => recorded.seq > mark)
     expect(after.map((recorded) => recorded.origin)).toEqual(['https://during.example'])

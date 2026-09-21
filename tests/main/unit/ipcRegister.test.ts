@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+// Imported before '@main/ipc/register' below: the '@main/agent/loop' mock
+// factory runs while that module graph loads, and closes over this binding.
+import { AppError } from '@shared/utils/errors'
 import { IPC } from '@shared/channels'
 import type { AgentEvent } from '@shared/ipc'
+import { join } from 'path'
+import { tmpdir } from 'os'
 
 const handlers = vi.hoisted(() => new Map<string, (...args: unknown[]) => unknown>())
 
@@ -34,6 +39,7 @@ const waitUntilRunInactiveMock = vi.hoisted(() => vi.fn(async () => true))
 const runAgentMock = vi.hoisted(() => vi.fn())
 const transcribeDictationMock = vi.hoisted(() => vi.fn())
 const runExistsMock = vi.hoisted(() => vi.fn())
+const validateExistingRunStartMock = vi.hoisted(() => vi.fn(() => ({ runtime: 'local' as const })))
 const isActiveMock = vi.hoisted(() => vi.fn(() => false))
 const resolveWritesMock = vi.hoisted(() => vi.fn())
 const planRewindPreviewMock = vi.hoisted(() => vi.fn(async () => ({ checkpointIds: [], files: [] })))
@@ -80,7 +86,8 @@ vi.mock('electron', () => ({
     getPath: vi.fn(() => '/tmp/vyotiq-userdata')
   },
   dialog: {
-    showOpenDialog: vi.fn()
+    showOpenDialog: vi.fn(),
+    showMessageBox: vi.fn()
   },
   Notification: class {
     static isSupported(): boolean {
@@ -122,6 +129,9 @@ vi.mock('@main/dictation/transcribe', () => ({
 vi.mock('@main/agent/loop', () => ({
   runAgent: runAgentMock,
   createRunId: () => 'run-test',
+  validateExistingRunStart: validateExistingRunStartMock,
+  runBindingRefusal: (message: string) =>
+    new AppError(message, { code: 'IPC_CLIENT', retriable: false })
 }))
 
 vi.mock('@main/agent/rewindRun', () => ({
@@ -248,6 +258,7 @@ vi.mock('@main/logging/sentry', () => ({
 }))
 
 import { registerIpc } from '@main/ipc/register'
+import { loadStatus } from '@main/agent/state'
 
 async function flushAsync(): Promise<void> {
   for (let i = 0; i < 5; i++) {
@@ -470,6 +481,140 @@ describe('registerIpc', () => {
     })
   })
 
+  // The renderer-supplied base decides where the stored API key is sent as a
+  // Bearer token. Only providers whose base is genuinely user-configurable may
+  // supply one; for the rest it used to be forwarded verbatim, so a compromised
+  // renderer could point any provider's key at a host it chose.
+  describe('listModels base URL boundary', () => {
+    async function callListModels(payload: Record<string, unknown>) {
+      const handler = handlers.get(IPC.listModels)
+      expect(handler).toBeTypeOf('function')
+      return handler!({ sender: mockWc, senderFrame: mockMainFrame }, payload)
+    }
+
+    it('refuses a caller-supplied base URL for a fixed-base provider', async () => {
+      const { listProviderModels } = await import('@main/agent/providers')
+      const result = await callListModels({
+        provider: 'openai',
+        baseUrl: 'https://evil.example/v1',
+        forceRefresh: true
+      })
+
+      expect(result).toEqual({
+        ok: false,
+        error: 'Provider openai does not accept a custom base URL'
+      })
+      expect(listProviderModels).not.toHaveBeenCalled()
+    })
+
+    it('never forwards a caller base URL for a fixed-base provider', async () => {
+      const { listProviderModels } = await import('@main/agent/providers')
+      vi.mocked(listProviderModels).mockResolvedValue({ models: [] } as never)
+
+      await callListModels({ provider: 'anthropic' })
+
+      expect(listProviderModels).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'anthropic', baseUrl: undefined })
+      )
+    })
+
+    it('rejects a malformed base URL for a configurable provider', async () => {
+      const { listProviderModels } = await import('@main/agent/providers')
+      vi.mocked(listProviderModels).mockClear()
+
+      const result = (await callListModels({
+        provider: 'ollama',
+        baseUrl: 'not a url'
+      })) as { ok: boolean }
+
+      expect(result.ok).toBe(false)
+      expect(listProviderModels).not.toHaveBeenCalled()
+    })
+  })
+
+  // appearanceReadCustomCss returns the bytes of whatever path settings names,
+  // so an unconstrained customCssPath is an arbitrary file read.
+  describe('customCssPath consent boundary', () => {
+    const CSS_CONSENT_REFUSAL = {
+      ok: false,
+      error: 'Choose a custom CSS file with the file picker'
+    }
+
+    async function setCustomCss(path: string) {
+      const handler = handlers.get(IPC.setSettings)
+      expect(handler).toBeTypeOf('function')
+      return handler!({ sender: mockWc, senderFrame: mockMainFrame }, { customCssPath: path })
+    }
+
+    it('refuses a path the user never chose in the picker', async () => {
+      expect(await setCustomCss('C:\\Users\\victim\\.ssh\\id_rsa')).toEqual(CSS_CONSENT_REFUSAL)
+    })
+
+    it('admits a path the user chose in the picker', async () => {
+      const { dialog } = await import('electron')
+      const chosen = join(tmpdir(), 'vyotiq-theme.css')
+      vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+        canceled: false,
+        filePaths: [chosen]
+      } as never)
+
+      const pick = handlers.get(IPC.appearancePickCustomCss)
+      const picked = (await pick!({ sender: mockWc, senderFrame: mockMainFrame })) as {
+        ok: boolean
+        data: string
+      }
+      expect(picked.ok).toBe(true)
+
+      expect(await setCustomCss(picked.data)).not.toEqual(CSS_CONSENT_REFUSAL)
+    })
+
+    it('admits clearing the path', async () => {
+      expect(await setCustomCss('')).not.toEqual(CSS_CONSENT_REFUSAL)
+    })
+  })
+
+  // A stdio MCP entry is a command line main launches on the same tick.
+  describe('stdio MCP spawn confirmation', () => {
+    const stdioServer = {
+      id: 'evil',
+      name: 'evil',
+      transport: 'stdio' as const,
+      enabled: true,
+      command: 'cmd.exe',
+      args: ['/c', 'calc.exe']
+    }
+
+    async function setMcpServers(servers: unknown[]) {
+      const handler = handlers.get(IPC.setSettings)
+      return handler!({ sender: mockWc, senderFrame: mockMainFrame }, { mcpServers: servers })
+    }
+
+    it('does not persist or launch a new stdio command when the user cancels', async () => {
+      const { dialog } = await import('electron')
+      const { setSettings } = await import('@main/settings/settings')
+      vi.mocked(setSettings).mockClear()
+      vi.mocked(dialog.showMessageBox).mockResolvedValue({ response: 0 } as never)
+
+      await setMcpServers([stdioServer])
+
+      expect(dialog.showMessageBox).toHaveBeenCalled()
+      // Cancelling returns before the write, so syncMcpServers never runs.
+      expect(setSettings).not.toHaveBeenCalled()
+    })
+
+    it('names the exact command line in the confirmation', async () => {
+      const { dialog } = await import('electron')
+      vi.mocked(dialog.showMessageBox).mockResolvedValue({ response: 0 } as never)
+
+      await setMcpServers([stdioServer])
+
+      const options = vi.mocked(dialog.showMessageBox).mock.calls.at(-1)?.at(-1) as {
+        detail?: string
+      }
+      expect(options.detail).toContain('cmd.exe /c calc.exe')
+    })
+  })
+
   describe('chatStart defensive catch', () => {
     const chatStartPayload = {
       messages: [{ role: 'user' as const, content: 'hello' }],
@@ -595,8 +740,103 @@ describe('registerIpc', () => {
         }
       )
 
-      expect(result).toEqual({ ok: false, error: 'Run is already active' })
+      // Coded: unlike a settled refusal, a busy run is a transient race the
+      // caller may retry, and the renderer needs the code to tell them apart.
+      expect(result).toEqual({
+        ok: false,
+        error: 'Run is already active',
+        code: 'run_active'
+      })
       expect(runAgentMock).not.toHaveBeenCalled()
+    })
+
+    describe('teammate binding on an existing run', () => {
+      beforeEach(() => {
+        vi.mocked(loadStatus).mockReturnValue(null)
+        validateExistingRunStartMock.mockReset()
+        validateExistingRunStartMock.mockReturnValue({ runtime: 'local' as const })
+      })
+
+      // Sends go through the payload shape the composer actually produces —
+      // `agentProfileId` always spelled out, sometimes with no value.
+      const sendWithBinding = async (
+        agentProfileId: string | undefined
+      ): Promise<{ ok: boolean; error?: string; code?: string }> => {
+        runExistsMock.mockReturnValue(true)
+        isActiveMock.mockReturnValue(false)
+        runAgentMock.mockImplementation(async function* () {
+          yield { type: 'status', runId: 'existing-run', status: 'done' } satisfies AgentEvent
+        })
+        const handler = handlers.get(IPC.chatStart)
+        return (await handler!(
+          { sender: mockWc, senderFrame: mockMainFrame },
+          {
+            incremental: true,
+            newMessages: [{ role: 'user' as const, content: 'follow up' }],
+            workspacePath: '/ws',
+            runId: 'existing-run',
+            agentProfileId
+          }
+        )) as { ok: boolean; error?: string; code?: string }
+      }
+
+      const persistedRun = {
+        status: 'done',
+        step: 3,
+        updatedAt: 'now',
+        runtime: 'local'
+      } as ReturnType<typeof loadStatus>
+
+      it('reads a stated binding from the value, not from key presence', async () => {
+        // The composer spells `agentProfileId` out on every send and structured
+        // clone keeps the key when the value is `undefined`. Reading presence
+        // made every send claim to state a binding, so "absent inherits the
+        // run's binding" never applied and ordinary sends were refused.
+        vi.mocked(loadStatus).mockReturnValueOnce(persistedRun)
+        await sendWithBinding(undefined)
+        expect(validateExistingRunStartMock).toHaveBeenLastCalledWith(
+          persistedRun,
+          expect.anything(),
+          { agentProfileId: false, runtime: false }
+        )
+
+        vi.mocked(loadStatus).mockReturnValueOnce(persistedRun)
+        await sendWithBinding('auditer')
+        expect(validateExistingRunStartMock).toHaveBeenLastCalledWith(
+          persistedRun,
+          expect.objectContaining({ agentProfileId: 'auditer' }),
+          { agentProfileId: true, runtime: false }
+        )
+      })
+
+      it('refuses a binding conflict as a client failure, without starting the run', async () => {
+        vi.mocked(loadStatus).mockReturnValueOnce(persistedRun)
+        validateExistingRunStartMock.mockImplementationOnce(() => {
+          throw new AppError('Existing run teammate binding cannot be changed', {
+            code: 'IPC_CLIENT',
+            retriable: false
+          })
+        })
+
+        expect(await sendWithBinding('auditer')).toEqual({
+          ok: false,
+          error: 'Existing run teammate binding cannot be changed',
+          code: 'run_binding_immutable'
+        })
+        expect(runAgentMock).not.toHaveBeenCalled()
+      })
+
+      it('lets a real fault keep its own reporting', async () => {
+        vi.mocked(loadStatus).mockReturnValueOnce(persistedRun)
+        validateExistingRunStartMock.mockImplementationOnce(() => {
+          throw new TypeError('bug in the check')
+        })
+
+        const result = await sendWithBinding('auditer')
+        expect(result.ok).toBe(false)
+        expect(result.code).not.toBe('run_binding_immutable')
+        expect(runAgentMock).not.toHaveBeenCalled()
+      })
     })
 
     it('marks turn complete on terminal status; clearRunAbort guarded by invokeId', async () => {

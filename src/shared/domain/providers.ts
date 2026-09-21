@@ -482,7 +482,11 @@ export function resolveProviderListBaseUrl(
       ? normalizeCustomOpenAiBaseUrl(reqBase)
       : resolveCustomProviderBaseUrl(providerId, settings)
   }
-  return reqBase
+  // First-party providers have a fixed base. Returning `reqBase` here sent the
+  // stored API key, as `Authorization: Bearer`, to whatever host the caller
+  // named. Their base is not user-configurable — that is what `customProviders`
+  // is for — so ignore it and let the provider use its own default.
+  return undefined
 }
 
 export type ProviderConfiguredOpts = {

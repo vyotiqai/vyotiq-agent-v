@@ -16,11 +16,17 @@ import { isSyncBlockedUrl } from './webFetch'
  * `browser_subresource` closes that path.
  */
 
-/** Where an outbound request came from. Recorded so the ledger is attributable. */
+/**
+ * Where an outbound request came from. Recorded so the ledger is attributable.
+ *
+ * Only purposes the gate actually sees belong here: the agent's own `web_fetch`
+ * tool does NOT route through checkEgress/recordEgress (it has its own SSRF
+ * path in net/webFetch.ts), and listing it implied a coverage this module does
+ * not have. docs/egress.md states the real boundary.
+ */
 export type EgressPurpose =
   | 'browser_navigation'
   | 'browser_subresource'
-  | 'web_fetch'
   | 'mcp_remote'
 
 export type EgressDenyReason = 'unparseable' | 'scheme' | 'blocked_host' | 'not_in_allowlist'

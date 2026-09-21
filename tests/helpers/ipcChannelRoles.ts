@@ -21,6 +21,7 @@ export const PUSH_CHANNEL_NAMES = [
   'browserState',
   'ptyData',
   'ptyExit',
+  'ptySessionsChanged',
   'codeIndexStatusEvent',
   'dictationStatusEvent',
   'githubAuthStatusEvent',

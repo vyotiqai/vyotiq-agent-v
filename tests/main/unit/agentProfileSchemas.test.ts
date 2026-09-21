@@ -55,6 +55,28 @@ describe('existing run profile invariants', () => {
     expect(() => validateExistingRunStart(persisted, { agentProfileId: 'other' }, { agentProfileId: true, runtime: false })).toThrow('teammate binding cannot be changed')
     expect(() => validateExistingRunStart(persisted, { runtime: 'cloud' }, { agentProfileId: false, runtime: true })).toThrow('runtime cannot be changed')
   })
+
+  it('adopts a teammate onto a run that never bound one', () => {
+    // Picking a teammate on an idle chat is offered by the composer and allowed
+    // by the renderer's own setter. There is no snapshot or memory namespace to
+    // contradict, so main must bind it rather than refuse the send — refusing
+    // left the chat unable to send anything again.
+    const unbound = RunStatusSchema.parse({ status: 'done', step: 3, updatedAt: 'now', runtime: 'local' })
+    expect(
+      validateExistingRunStart(unbound, { agentProfileId: 'scout' }, { agentProfileId: true, runtime: false })
+    ).toEqual({ agentProfileId: 'scout', runtime: 'local' })
+  })
+
+  it('treats an unstated teammate as inherit, never as unbind', () => {
+    // A resumed run whose teammate was deleted arrives with nothing stated: the
+    // renderer prunes bindings that no longer resolve. The run keeps its own.
+    expect(
+      validateExistingRunStart(persisted, { agentProfileId: undefined }, { agentProfileId: true, runtime: false })
+    ).toEqual({ agentProfileId: 'scout', runtime: 'local' })
+    expect(
+      validateExistingRunStart(persisted, { runtime: undefined }, { agentProfileId: false, runtime: true })
+    ).toEqual({ agentProfileId: 'scout', runtime: 'local' })
+  })
 })
 
 describe('turn model precedence', () => {
