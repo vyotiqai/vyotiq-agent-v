@@ -36,6 +36,31 @@ Until this gate existed the allowlist was enforced on navigation only, so a
 page served from an allowed host could `fetch()` or POST to any host in the
 world. That is the path `browser_subresource` closes.
 
+## Telling the agent it was refused
+
+A navigation refusal throws, and the message names the allowlist, so the agent
+learns about it. A subresource refusal does not: the page loads, its XHRs are
+cancelled, and what the agent sees is a page that merely looks broken. It then
+retries, or reports the site as down, while the one fact that explains the page
+sits in a ledger nothing reads mid-run.
+
+So every browser tool result carries a note when the gate refused anything
+during that call:
+
+```
+[egress policy] Refused 4 request(s) from this page to: https://tracker.example (3),
+https://ads.example. The page may be incomplete. This is the host allowlist
+refusing the request, not the site failing.
+```
+
+The note is attached by wrapping every handler in `browserTools.ts`, not by
+each handler remembering to add it, so a new browser tool cannot omit it.
+
+Bracketing uses the ledger's monotonic `seq`, not a timestamp: `Date.now()` has
+millisecond resolution, so a refusal recorded in the same millisecond as the
+start of a call is indistinguishable from one inside it, and the note would
+blame a page for a previous call's refusals.
+
 ## What is deliberately not covered
 
 **stdio MCP servers** run as child processes with their own sockets. Nothing in
@@ -106,5 +131,7 @@ Neither ledger is surfaced in the UI yet.
   real tab creation; asserts one listener per partition
 - `tests/main/unit/egressRunLedger.test.ts` — aggregation, run attribution and
   the durable file
+- `tests/main/unit/browserEgressNote.test.ts` — the refusal note and its
+  bracketing
 
-Run all three after any change to browser egress.
+Run all four after any change to browser egress.

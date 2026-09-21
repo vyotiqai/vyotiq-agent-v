@@ -164,6 +164,13 @@ export function evaluateEgress(request: EgressRequest): EgressDecision {
 }
 
 export type EgressLedgerEntry = {
+  /**
+   * Monotonic record number. Callers that need "what was refused while my
+   * operation ran" must bracket on this rather than on `at`: `Date.now()` has
+   * millisecond resolution, so a decision recorded in the same millisecond as
+   * the bracket is indistinguishable from one inside it.
+   */
+  seq: number
   at: number
   purpose: EgressPurpose
   method: string
@@ -187,6 +194,15 @@ export type EgressLedgerEntry = {
 export const MAX_EGRESS_LEDGER_ENTRIES = 1000
 
 const ledger: EgressLedgerEntry[] = []
+let seqCounter = 0
+
+/**
+ * The highest record number issued so far. Capture it before an operation and
+ * filter on `seq > captured` to get exactly that operation's decisions.
+ */
+export function currentEgressSeq(): number {
+  return seqCounter
+}
 
 /** Scheme + host, or a placeholder when the URL never parsed. */
 function originOf(raw: string): string {
@@ -215,7 +231,9 @@ export function onEgressRecorded(listener: EgressListener): () => void {
 }
 
 export function recordEgress(request: EgressRequest, decision: EgressDecision): EgressLedgerEntry {
+  seqCounter += 1
   const entry: EgressLedgerEntry = {
+    seq: seqCounter,
     at: Date.now(),
     purpose: request.purpose,
     method: (request.method ?? 'GET').toUpperCase(),

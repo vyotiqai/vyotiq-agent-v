@@ -27,8 +27,12 @@ import { checkEgress, clearEgressLedger, type EgressLedgerEntry } from '@main/ne
 
 let workspace = ''
 
+let seq = 0
+
 function entry(partial: Partial<EgressLedgerEntry> = {}): EgressLedgerEntry {
+  seq += 1
   return {
+    seq,
     at: 1_000,
     purpose: 'browser_subresource',
     method: 'GET',
