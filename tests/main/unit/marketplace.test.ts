@@ -481,7 +481,10 @@ describe('bundled marketplace catalog', () => {
       JSON.parse(readFileSync(join(root, 'catalog.json'), 'utf8'))
     )
 
-    const skills = catalog.packages.filter((p) => p.kind === 'skill')
+    // Ours only. Vendored third-party skills have their own inventory in
+    // tests/main/unit/skillsSmoke.test.ts, keyed by publisher so a re-sync
+    // shows up there rather than churning this list.
+    const skills = catalog.packages.filter((p) => p.kind === 'skill' && p.publisher === 'Agent V')
     const plugins = catalog.packages.filter((p) => p.kind === 'plugin')
     expect(skills.map((p) => p.id).sort()).toEqual([
       'accessibility',

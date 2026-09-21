@@ -76,6 +76,38 @@ resources/marketplace/**/*.md
 !resources/marketplace/packages/repo-onboarding/SKILL.md
 !resources/marketplace/packages/standup-digest/SKILL.md
 
+# Skills vendored from github.com/mattpocock/skills (MIT — see NOTICE). Each
+# carries supporting Markdown its SKILL.md links to, so these are whole-package
+# rules rather than a file list: re-syncing upstream must not silently drop a
+# newly added reference file that nothing here names. There is no .md.docx
+# anywhere under them, so nothing generated is un-ignored by the glob.
+!resources/marketplace/packages/ask-matt/**/*.md
+!resources/marketplace/packages/codebase-design/**/*.md
+!resources/marketplace/packages/diagnosing-bugs/**/*.md
+!resources/marketplace/packages/domain-modeling/**/*.md
+!resources/marketplace/packages/grill-me/**/*.md
+!resources/marketplace/packages/grill-with-docs/**/*.md
+!resources/marketplace/packages/grilling/**/*.md
+!resources/marketplace/packages/handoff/**/*.md
+!resources/marketplace/packages/implement/**/*.md
+!resources/marketplace/packages/improve-codebase-architecture/**/*.md
+!resources/marketplace/packages/prototype/**/*.md
+!resources/marketplace/packages/research/**/*.md
+!resources/marketplace/packages/resolving-merge-conflicts/**/*.md
+!resources/marketplace/packages/review-changes/**/*.md
+!resources/marketplace/packages/setup-matt-pocock-skills/**/*.md
+!resources/marketplace/packages/setup-pre-commit/**/*.md
+!resources/marketplace/packages/tdd/**/*.md
+!resources/marketplace/packages/teach/**/*.md
+!resources/marketplace/packages/to-questionnaire/**/*.md
+!resources/marketplace/packages/to-spec/**/*.md
+!resources/marketplace/packages/to-tickets/**/*.md
+!resources/marketplace/packages/triage/**/*.md
+!resources/marketplace/packages/wait-what/**/*.md
+!resources/marketplace/packages/wayfinder/**/*.md
+!resources/marketplace/packages/wizard/**/*.md
+!resources/marketplace/packages/writing-for-agents/**/*.md
+
 # Local agent / editor state (keep rules and skills)
 .vyotiq/memory/
 .cursor/hooks/state/
@@ -130,6 +162,10 @@ venv/
 # Same: hand-authored, no .docx source, linked from the README. States the
 # egress gate's coverage boundary, so it has to ship with the code it describes.
 !/docs/egress.md
+# Same again. Describes what an agent-authored tool module is actually allowed
+# to do, and what bounds it; a security boundary documented only on one machine
+# is no boundary at all.
+!/docs/agent-tools.md
 .cursorrules
 AGENTS.md
 scripts/remove-coauthors-from-history.sh

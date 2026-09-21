@@ -189,7 +189,25 @@ export const SkillFrontmatterSchema = z.object({
   license: z.string().min(1).optional(),
   compatibility: z.string().min(1).max(500).optional(),
   metadata: z.record(z.string(), z.string()).optional(),
-  'allowed-tools': z.string().min(1).optional()
+  'allowed-tools': z.string().min(1).optional(),
+  /**
+   * `true` keeps the skill out of the model's available-skills list: it is an
+   * entry point for a person to reach for, not one the agent should pick from a
+   * description. Slash invocation and the Skill tool still resolve it, so a skill
+   * the user asks for by name always loads.
+   *
+   * Frontmatter is read by a line parser rather than a YAML library, so the value
+   * arrives as text and only the two spellings YAML would call true are honoured.
+   */
+  'disable-model-invocation': z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .transform((v) => {
+      if (v == null) return undefined
+      if (typeof v === 'boolean') return v
+      const t = v.trim().toLowerCase()
+      return t === 'true' || t === 'yes' ? true : undefined
+    })
 })
 export type SkillFrontmatter = z.infer<typeof SkillFrontmatterSchema>
 
@@ -295,7 +313,17 @@ export const MarketplaceCatalogEntrySchema = z.object({
    */
   auth: McpAuthKindSchema.optional(),
   /** Browse-time mirror of the manifest's `requires`. */
-  requires: z.array(McpRuntimeRequirementSchema).optional()
+  requires: z.array(McpRuntimeRequirementSchema).optional(),
+  /**
+   * Other catalog ids this package hands control to — a skill whose body calls
+   * the Skill tool with another skill's name cannot do its job alone. Installing
+   * pulls these in first (bundled only, never a download), so a one-card install
+   * of an interlinked suite is not a dead end. Not a dependency on a *version*:
+   * an already-installed id is left exactly as the user has it, disabled ones
+   * included. Ids must resolve to installable catalog entries and the graph must
+   * be acyclic — both asserted by the bundled-catalog integrity test.
+   */
+  dependsOn: z.array(MarketplaceSegmentSchema).optional()
 })
 export type MarketplaceCatalogEntry = z.infer<typeof MarketplaceCatalogEntrySchema>
 
@@ -336,7 +364,13 @@ export type MarketplaceInstalledItem = z.infer<typeof MarketplaceInstalledItemSc
 export const MarketplaceInstallResultSchema = z.object({
   item: MarketplaceInstalledItemSchema,
   /** Present when a Bearer token was requested; false if secure storage failed. */
-  authTokenStored: z.boolean().optional()
+  authTokenStored: z.boolean().optional(),
+  /**
+   * Ids pulled in from the entry's `dependsOn` because they were missing. Empty
+   * when nothing extra was needed. The UI names them, so an install that quietly
+   * grew from one package to several is still something the user can see.
+   */
+  dependencies: z.array(z.string().min(1)).optional()
 })
 export type MarketplaceInstallResult = z.infer<typeof MarketplaceInstallResultSchema>
 

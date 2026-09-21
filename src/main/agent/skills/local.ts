@@ -32,6 +32,8 @@ export type LocalSkill = {
   source: LocalSkillSource
   origin?: LocalSkillOrigin
   relativePath: string
+  /** False when frontmatter sets `disable-model-invocation` — user-invoked only. */
+  modelInvocable: boolean
 }
 
 export type LocalSkillListItem = {
@@ -136,9 +138,13 @@ export function clearLocalSkillsCache(workspacePath?: string | null): void {
   if (workspacePath) cache.delete('')
 }
 
-function tryLoadSkillFromDir(
-  skillDir: string
-): { name: string; description: string; body: string; skillPath: string } | null {
+function tryLoadSkillFromDir(skillDir: string): {
+  name: string
+  description: string
+  body: string
+  skillPath: string
+  modelInvocable: boolean
+} | null {
   const skillPath = resolveSkillMdPath(skillDir)
   if (!skillPath) return null
   try {
@@ -147,7 +153,8 @@ function tryLoadSkillFromDir(
       name: parsed.name,
       description: parsed.description,
       body: parsed.body,
-      skillPath
+      skillPath,
+      modelInvocable: parsed['disable-model-invocation'] !== true
     }
   } catch {
     return null
@@ -195,7 +202,8 @@ function scanSkillRoot(
       skillPath: loaded.skillPath,
       source,
       origin,
-      relativePath: `${relativePrefix}/${name}/${fileName}`.replace(/\\/g, '/')
+      relativePath: `${relativePrefix}/${name}/${fileName}`.replace(/\\/g, '/'),
+      modelInvocable: loaded.modelInvocable
     })
   }
 }

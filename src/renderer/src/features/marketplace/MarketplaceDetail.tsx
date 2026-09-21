@@ -48,6 +48,13 @@ export function MarketplaceDetail({
   })
   const comingSoon = activity.kind === 'coming-soon'
   const isInstalled = Boolean(installedItem)
+  // What Add would pull in besides this card. Only the part that is still
+  // missing: listing siblings the user already has would read as a warning
+  // about nothing.
+  const pendingDependencies = useMemo(() => {
+    const have = new Set(installed.items.map((i) => i.id))
+    return (entry.dependsOn ?? []).filter((id) => !have.has(id))
+  }, [entry.dependsOn, installed.items])
   const [contents, setContents] = useState<PackageContents | null>(null)
   const [loadingContents, setLoadingContents] = useState(true)
   const [contentsError, setContentsError] = useState<string | null>(null)
@@ -108,6 +115,11 @@ export function MarketplaceDetail({
             {` · ${entry.id}@${entry.version}`}
             {isInstalled ? ` · ${activity.label}` : ''}
           </p>
+          {!isInstalled && !comingSoon && pendingDependencies.length > 0 ? (
+            <p className="m-0 mt-1.5 text-xs text-muted">
+              Also installs {pendingDependencies.join(', ')} — this one hands work to them.
+            </p>
+          ) : null}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {comingSoon ? (
               <span className="rounded-full bg-black/5 px-2 py-0.5 text-caption text-muted dark:bg-white/10">

@@ -17,6 +17,9 @@ landing/public/shots/*.png binary
 # dev checkout over the same userData.
 resources/marketplace/**/*.json text eol=lf
 resources/marketplace/**/*.md text eol=lf
+# Shell templates a skill tells the agent to run. CRLF would make the shebang
+# line fail with "bad interpreter" on every non-Windows host.
+resources/marketplace/**/*.sh text eol=lf
 
 # Tray spinner frames are generated art (scripts/generate-spinner-frames.mjs).
 # The PNGs are binary; the manifest is emitted with LF, so pin it.

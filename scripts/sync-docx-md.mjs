@@ -33,12 +33,15 @@ function walkDocx(dir, out = []) {
   return out
 }
 
+// Mirrors FLATTENED_SKILL_KEYS in src/main/agent/skills/parse.ts — a key missing
+// here is a key Word's one-line frontmatter cannot be split back apart on.
 const SKILL_YAML_KEYS = [
   'name',
   'description',
   'license',
   'compatibility',
   'allowed-tools',
+  'disable-model-invocation',
   'metadata',
   'version'
 ]

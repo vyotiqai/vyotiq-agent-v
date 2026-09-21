@@ -101,6 +101,7 @@ const FLATTENED_SKILL_KEYS = [
   'license',
   'compatibility',
   'allowed-tools',
+  'disable-model-invocation',
   'metadata',
   'version'
 ] as const
@@ -216,7 +217,11 @@ export function parseSkillFrontmatter(raw: string): SkillFrontmatter & { body: s
     compatibility: typeof fields.compatibility === 'string' ? fields.compatibility : undefined,
     metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     'allowed-tools':
-      typeof fields['allowed-tools'] === 'string' ? fields['allowed-tools'] : undefined
+      typeof fields['allowed-tools'] === 'string' ? fields['allowed-tools'] : undefined,
+    'disable-model-invocation':
+      typeof fields['disable-model-invocation'] === 'string'
+        ? fields['disable-model-invocation']
+        : undefined
   })
   return { ...parsed, body }
 }

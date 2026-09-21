@@ -86,12 +86,25 @@ const catalogPackages = [
     publisher: 'Agent V',
     installable: true,
     bundledPath: 'create-skill'
+  },
+  {
+    id: 'grill-me',
+    name: 'Grill me',
+    version: '1.0.0',
+    description: 'A relentless interview',
+    kind: 'skill' as const,
+    source: 'bundled' as const,
+    category: 'skills',
+    publisher: 'Matt Pocock',
+    installable: true,
+    bundledPath: 'grill-me',
+    // Hands off to a skill that ships as its own card, so Add pulls it in too.
+    dependsOn: ['grilling', 'memory']
   }
 ]
 
 describe('MarketplaceView', () => {
   beforeEach(() => {
-    // @ts-expect-error test bridge
     window.vyotiq = {
       marketplaceBrowse: vi.fn(async (opts?: { q?: string; kind?: string }) => {
         const q = opts?.q?.trim().toLowerCase()
@@ -331,7 +344,6 @@ describe('MarketplaceView', () => {
 
   it('shows Installing… only on the Featured card being installed', async () => {
     let resolveInstall: ((value: unknown) => void) | undefined
-    // @ts-expect-error test bridge
     window.vyotiq.marketplaceListInstalled = vi.fn(async () => ({
       ok: true as const,
       data: { schemaVersion: 1 as const, items: [] }
@@ -489,7 +501,6 @@ describe('MarketplaceView', () => {
   })
 
   it('does not show connected on Browse when the MCP is disabled', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.marketplaceListInstalled = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -509,7 +520,6 @@ describe('MarketplaceView', () => {
         ]
       }
     }))
-    // @ts-expect-error test bridge
     window.vyotiq.mcpStatus = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -555,7 +565,6 @@ describe('MarketplaceView', () => {
   })
 
   it('does not show connected on Featured catalog MCPs that are not installed', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.mcpStatus = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -610,6 +619,22 @@ describe('MarketplaceView', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /^MCP$/i })).toBeTruthy()
     })
+  })
+
+  /**
+   * Add on an interlinked skill installs more than the card names. Say so
+   * before the click, and only for the part the user does not already have —
+   * `memory` is installed in this fixture, so it must not be listed.
+   */
+  it('names the packages an install will pull in with it', async () => {
+    render(
+      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
+    )
+    await screen.findByRole('heading', { name: /^Featured$/i })
+    fireEvent.click(screen.getByText('Grill me'))
+    const note = await screen.findByText(/^Also installs/i)
+    expect(note.textContent).toContain('grilling')
+    expect(note.textContent).not.toContain('memory')
   })
 
   it('opens Manage from header Browse/Manage tabs', async () => {
@@ -816,7 +841,6 @@ describe('MarketplaceView', () => {
         ]
       }
     }))
-    // @ts-expect-error test bridge
     window.vyotiq.marketplaceListInstalled = vi.fn(async () => ({
       ok: true as const,
       data: { schemaVersion: 1 as const, items: [] }

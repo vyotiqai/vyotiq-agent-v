@@ -94,7 +94,6 @@ function mockVyotiq(opts?: {
 }): void {
   githubAuthListeners = []
   const packages = opts?.packages ?? [githubCatalog]
-  // @ts-expect-error test bridge
   window.vyotiq = {
     marketplaceBrowse: vi.fn(async () => ({ ok: true as const, data: { packages } })),
     marketplaceListInstalled: vi.fn(async () => ({
@@ -358,7 +357,6 @@ describe('Connect MCP wizard', () => {
         }
       ]
     })
-    // @ts-expect-error test bridge
     window.vyotiq.mcpStatus = vi.fn(async () => ({
       ok: true as const,
       data: {

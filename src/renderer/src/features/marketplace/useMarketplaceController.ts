@@ -285,7 +285,13 @@ export function useMarketplaceController({
           setFeedbackIfCurrent(epoch, { kind: 'error', text: res.error })
           return false
         }
-        const { item, authTokenStored } = res.data
+        const { item, authTokenStored, dependencies } = res.data
+        // An interlinked skill can pull siblings in with it. Name them: an
+        // install that grew from one package to several should not be silent.
+        const dependencyHint =
+          dependencies && dependencies.length > 0
+            ? ` Also installed ${dependencies.join(', ')}, which it hands work to.`
+            : ''
         let tokenHint = ''
         if (payload.source === 'remote' && payload.bearerToken?.trim()) {
           tokenHint =
@@ -296,8 +302,8 @@ export function useMarketplaceController({
         setFeedbackIfCurrent(epoch, {
           kind: authTokenStored === false ? 'error' : 'success',
           text: opts?.needsConnect
-            ? `Installed ${item.name} — sign in to connect.`
-            : `Installed ${item.name} (${item.kind}) — enabled by default; tools load into the agent when connected.${tokenHint}`
+            ? `Installed ${item.name} — sign in to connect.${dependencyHint}`
+            : `Installed ${item.name} (${item.kind}) — enabled by default; tools load into the agent when connected.${tokenHint}${dependencyHint}`
         })
         await reload()
         await onReloadSettings?.()

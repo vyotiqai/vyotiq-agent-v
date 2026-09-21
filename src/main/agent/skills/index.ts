@@ -6,6 +6,7 @@ import { effectiveMarketplaceEnabled } from '../../../shared/domain/marketplaceE
 import { parseSkillFrontmatter } from './parse'
 import { isSkillMdFilename, resolveSkillMdPath } from './paths'
 import { loadLocalSkills } from './local'
+import { loadBundledCatalog } from '../../marketplace/catalog'
 import { readMarketplaceIndex } from '../../marketplace/indexStore'
 import { resolveInstalledPackageRoot } from '../../marketplace/paths'
 import { resolveInsidePackageRoot } from '../../marketplace/safePath'
@@ -23,11 +24,21 @@ export type LoadedSkill = {
   /** Absolute path to the resolved SKILL.md (or legacy skill.md) */
   skillPath: string
   source: LoadedSkillSource
+  /**
+   * False when frontmatter sets `disable-model-invocation`. Such a skill is kept
+   * out of the prompt's available-skills list but stays fully resolvable, so
+   * `/name` and an explicit Skill call still load it.
+   */
+  modelInvocable: boolean
 }
 
-function loadSkillFromDir(
-  skillDir: string
-): { name: string; description: string; body: string; skillPath: string } | null {
+function loadSkillFromDir(skillDir: string): {
+  name: string
+  description: string
+  body: string
+  skillPath: string
+  modelInvocable: boolean
+} | null {
   const skillPath = resolveSkillMdPath(skillDir)
   if (!skillPath) return null
   try {
@@ -36,7 +47,8 @@ function loadSkillFromDir(
       name: parsed.name,
       description: parsed.description,
       body: parsed.body,
-      skillPath
+      skillPath,
+      modelInvocable: parsed['disable-model-invocation'] !== true
     }
   } catch {
     return null
@@ -95,7 +107,8 @@ export function loadEnabledSkills(
       body: local.body,
       root: local.root,
       skillPath: local.skillPath,
-      source: local.source
+      source: local.source,
+      modelInvocable: local.modelInvocable
     })
   }
 
@@ -114,7 +127,8 @@ export function loadEnabledSkills(
       body: loaded.body,
       root,
       skillPath: loaded.skillPath,
-      source: 'skill'
+      source: 'skill',
+      modelInvocable: loaded.modelInvocable
     })
   }
 
@@ -142,7 +156,8 @@ export function loadEnabledSkills(
           body: loaded.body,
           root: skillDir,
           skillPath: loaded.skillPath,
-          source: 'plugin'
+          source: 'plugin',
+          modelInvocable: loaded.modelInvocable
         })
       }
     } catch {
@@ -174,7 +189,11 @@ export function dedupeSkillsByName(skills: LoadedSkill[]): LoadedSkill[] {
  * Full SKILL.md body is loaded on demand via the Skill tool or slash invocation.
  */
 export function buildSkillsSection(skills: LoadedSkill[], maxChars = 12_000): string {
-  const unique = dedupeSkillsByName(skills)
+  // Dedupe first: a project skill shadowing a marketplace one decides the
+  // question for that name, so a shadowed entry cannot smuggle itself back in.
+  // Only an explicit `false` hides a skill — absent means invocable, so a caller
+  // assembling its own LoadedSkill does not silently empty the list.
+  const unique = dedupeSkillsByName(skills).filter((s) => s.modelInvocable !== false)
   if (unique.length === 0) return ''
   const header = [
     'Match: call the `Skill` tool with that `name`, then the same `name` plus a relative `path` for bundled files. Users may also `/name`.',
@@ -245,6 +264,62 @@ export function findEnabledSkillByName(
   if (!key) return undefined
   const unique = dedupeSkillsByName(loadEnabledSkills(marketplaceOverrides, workspacePath))
   return unique.find((s) => s.name.toLowerCase() === key)
+}
+
+/**
+ * Why a skill name did not resolve — the three states already named by the
+ * slash catalog, so a failure says the one thing that moves it forward.
+ *
+ * "Unknown or disabled" was wrong in both directions: a skill sitting in the
+ * catalog uninstalled was reported as disabled, sending the user to a toggle
+ * that does not exist yet, and a genuine typo looked like a settings problem.
+ */
+export type MissingSkillReason =
+  | { kind: 'disabled'; packageId: string; label: string }
+  | { kind: 'not_installed'; packageId: string; label: string }
+  | { kind: 'unknown'; suggestions: string[] }
+
+export function describeMissingSkill(
+  name: string,
+  marketplaceOverrides?: MarketplaceOverrides | null,
+  workspacePath?: string | null
+): MissingSkillReason {
+  const key = name.trim().toLowerCase()
+  const index = readMarketplaceIndex()
+
+  for (const item of index.items) {
+    if (item.kind !== 'skill') continue
+    const loaded = loadSkillFromDir(resolveInstalledPackageRoot(item.packagePath))
+    if (loaded?.name.toLowerCase() !== key) continue
+    // Installed and named right, so the only way it missed the enabled set is
+    // the global toggle or a workspace override.
+    return { kind: 'disabled', packageId: item.id, label: item.name }
+  }
+
+  // Bundled skill packages are keyed by name: `bundledSkills.test.ts` holds the
+  // catalog id and the SKILL.md `name` equal, which is what makes this lookup
+  // exact rather than a guess.
+  const installedIds = new Set(index.items.map((i) => i.id))
+  const candidate = loadBundledCatalog().packages.find(
+    (entry) =>
+      entry.kind === 'skill' &&
+      entry.installable !== false &&
+      entry.id.toLowerCase() === key &&
+      !installedIds.has(entry.id)
+  )
+  if (candidate) {
+    return { kind: 'not_installed', packageId: candidate.id, label: candidate.name }
+  }
+
+  const enabled = dedupeSkillsByName(loadEnabledSkills(marketplaceOverrides, workspacePath))
+  const suggestions = enabled
+    .map((s) => s.name)
+    .filter((n) => {
+      const other = n.toLowerCase()
+      return other.includes(key) || key.includes(other)
+    })
+    .slice(0, 5)
+  return { kind: 'unknown', suggestions }
 }
 
 export type LoadedPluginRule = {
