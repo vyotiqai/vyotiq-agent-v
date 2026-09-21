@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -8,6 +8,10 @@ import {
 } from '@main/app/browserActionPolicy'
 
 describe('browser action policy', () => {
+  // Upload paths resolve through realpath now, so a symlink committed into the
+  // repo cannot point outside it. The temp root has to be resolved the same way
+  // or these compare against the wrong string on macOS, where /var is itself a
+  // symlink to /private/var.
   let dir: string
 
   afterEach(() => {
@@ -21,7 +25,7 @@ describe('browser action policy', () => {
   })
 
   it('resolves workspace files and rejects escapes', () => {
-    dir = mkdtempSync(join(tmpdir(), 'vyotiq-upload-'))
+    dir = realpathSync(mkdtempSync(join(tmpdir(), 'vyotiq-upload-')))
     const inside = join(dir, 'photo.png')
     writeFileSync(inside, 'x')
     expect(resolveBrowserUploadPath(dir, 'photo.png')).toBe(inside)
@@ -31,7 +35,7 @@ describe('browser action policy', () => {
   })
 
   it('accepts an absolute path still inside the workspace', () => {
-    dir = mkdtempSync(join(tmpdir(), 'vyotiq-upload-abs-'))
+    dir = realpathSync(mkdtempSync(join(tmpdir(), 'vyotiq-upload-abs-')))
     mkdirSync(join(dir, 'assets'))
     const inside = join(dir, 'assets', 'a.txt')
     writeFileSync(inside, 'ok')

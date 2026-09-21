@@ -177,30 +177,47 @@ test('gild skin applies data-skin and persists', async () => {
   expect(settings?.skinId).toBe('gild')
 })
 
-test('custom CSS overlay injects user skin style tag', async () => {
-  const { window, userDataDir } = launched
-  const cssPath = join(userDataDir, 'overlay.css')
-  writeFileSync(cssPath, ':root { --vy-fg: #123456; }', 'utf8')
+test.describe('custom CSS overlay', () => {
+  let overlay: LaunchedApp
 
-  // No skinId here on purpose: the overlay has to beat the shipped skin's
-  // own [data-skin][data-theme] palette block, not just the base tokens.
-  await window.evaluate(async (path) => {
-    await window.vyotiq.setSettings({ customCssPath: path })
-  }, cssPath)
+  test.afterAll(async () => {
+    if (overlay) await closeApp(overlay)
+  })
 
-  await expect
-    .poll(async () =>
-      window.evaluate(() => document.getElementById('vyotiq-user-skin')?.textContent ?? '')
-    )
-    .toContain('--vy-fg')
+  // The renderer cannot name an arbitrary stylesheet any more: a path is
+  // honoured only once the user has chosen it in the picker, or when it is
+  // already the saved one. Booting with it saved is what a user who picked it
+  // once has on every launch after, and it is the route this can still take.
+  test('injects a saved user skin style tag', async () => {
+    overlay = await launchApp({
+      preLaunchSeed: (userDataDir) => {
+        const cssPath = join(userDataDir, 'overlay.css')
+        writeFileSync(cssPath, ':root { --vy-fg: #123456; }', 'utf8')
+        // No skinId here on purpose: the overlay has to beat the shipped skin's
+        // own [data-skin][data-theme] palette block, not just the base tokens.
+        seedAppSettings(userDataDir, { customCssPath: cssPath })
+      }
+    })
 
-  await expect
-    .poll(async () =>
-      window.evaluate(() =>
-        getComputedStyle(document.documentElement).getPropertyValue('--vy-fg').trim().toLowerCase()
+    await expect
+      .poll(async () =>
+        overlay.window.evaluate(
+          () => document.getElementById('vyotiq-user-skin')?.textContent ?? ''
+        )
       )
-    )
-    .toBe('#123456')
+      .toContain('--vy-fg')
+
+    await expect
+      .poll(async () =>
+        overlay.window.evaluate(() =>
+          getComputedStyle(document.documentElement)
+            .getPropertyValue('--vy-fg')
+            .trim()
+            .toLowerCase()
+        )
+      )
+      .toBe('#123456')
+  })
 })
 
 test('appearance boot cache survives reload before React hydrates', async () => {
