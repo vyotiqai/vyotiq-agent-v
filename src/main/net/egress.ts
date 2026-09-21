@@ -198,6 +198,22 @@ function originOf(raw: string): string {
   }
 }
 
+export type EgressListener = (entry: EgressLedgerEntry) => void
+
+const listeners = new Set<EgressListener>()
+
+/**
+ * Observe every recorded decision. Kept here rather than having a consumer poll
+ * `listEgress()` so this module stays free of Electron and of any knowledge of
+ * runs or storage — the durable per-run ledger subscribes from the outside.
+ */
+export function onEgressRecorded(listener: EgressListener): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
 export function recordEgress(request: EgressRequest, decision: EgressDecision): EgressLedgerEntry {
   const entry: EgressLedgerEntry = {
     at: Date.now(),
@@ -213,6 +229,13 @@ export function recordEgress(request: EgressRequest, decision: EgressDecision): 
   ledger.push(entry)
   if (ledger.length > MAX_EGRESS_LEDGER_ENTRIES) {
     ledger.splice(0, ledger.length - MAX_EGRESS_LEDGER_ENTRIES)
+  }
+  for (const listener of listeners) {
+    try {
+      listener(entry)
+    } catch {
+      // A failing observer must not break the request it is observing.
+    }
   }
   return entry
 }

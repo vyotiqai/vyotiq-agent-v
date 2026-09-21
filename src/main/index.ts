@@ -47,6 +47,7 @@ import { countPendingToolApprovals } from '@main/agent/toolApproval'
 import { countPendingAgentQuestions } from '@main/agent/agentQuestion'
 import { pruneStaleInstanceWorktreesBestEffort } from '@main/git/instanceWorktree'
 import { initMainLogging, rendererUnresponsiveForMs } from './logging/init'
+import { startEgressRunLedger } from './agent/egressRunLedger'
 import { initTraceAutoCapture } from './perf/traceAutoCapture'
 import { initCrashReporter } from './logging/crashReporter'
 import { logger } from '../shared/logger'
@@ -208,6 +209,9 @@ if (!gotLock) {
     initTraceAutoCapture()
     // After userData path switches; before IPC / windows (Sentry + electron-log).
     initMainLogging()
+    // Subscribe before anything can egress, so a run's outbound origins are
+    // recorded from its first request rather than from whenever this ran.
+    startEgressRunLedger()
 
     electronApp.setAppUserModelId('com.vyotiq.agent')
     applyCsp()
