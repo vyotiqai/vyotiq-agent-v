@@ -3,7 +3,8 @@ import {
   LIVE_EVENTS_MAX,
   LIVE_EVENTS_MAX_BYTES,
   createLiveEventQueue,
-  pushLiveEvent
+  pushLiveEvent,
+  shiftLiveEvent
 } from '@main/agent/liveEventQueue'
 import type { AgentEvent } from '@shared/ipc'
 
@@ -126,5 +127,37 @@ describe('liveEventQueue', () => {
     expect(queue.events[0]).toEqual(toolProgress('p0'))
     expect(queue.events[queue.events.length - 1]).toEqual(toolProgress(`p${LIVE_EVENTS_MAX + 4}`))
     expect(queue.dropped).toBe(0)
+  })
+
+  // The production drain is push-then-shift, which every test above omits.
+  // Without shiftLiveEvent maintaining `bytes`, the counter climbs forever.
+  it('returns events in order and gives their bytes back on drain', () => {
+    const queue = createLiveEventQueue()
+    pushLiveEvent(queue, textDelta('abc'))
+    pushLiveEvent(queue, toolProgress('pp'))
+    expect(queue.bytes).toBe(5)
+
+    expect(shiftLiveEvent(queue)).toEqual(textDelta('abc'))
+    expect(queue.bytes).toBe(2)
+    expect(shiftLiveEvent(queue)).toEqual(toolProgress('pp'))
+    expect(queue.bytes).toBe(0)
+    expect(shiftLiveEvent(queue)).toBeUndefined()
+    expect(queue.bytes).toBe(0)
+  })
+
+  it('never drops while a drained queue streams far past the byte cap', () => {
+    const queue = createLiveEventQueue()
+    const chunk = 'x'.repeat(64 * 1024)
+    // 4x the byte cap, drained as it goes — the shape of a long terminal step.
+    const pushes = (LIVE_EVENTS_MAX_BYTES / chunk.length) * 4
+    let dropped = 0
+    for (let i = 0; i < pushes; i += 1) {
+      dropped += pushLiveEvent(queue, terminalOutputDelta(chunk))
+      expect(shiftLiveEvent(queue)).toEqual(terminalOutputDelta(chunk))
+    }
+    expect(dropped).toBe(0)
+    expect(queue.dropped).toBe(0)
+    expect(queue.events).toHaveLength(0)
+    expect(queue.bytes).toBe(0)
   })
 })

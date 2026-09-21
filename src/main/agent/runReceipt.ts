@@ -1,5 +1,5 @@
 import { join } from 'path'
-import { atomicWriteJson } from '../storage/atomicWrite'
+import { atomicWriteJson, atomicWriteJsonAsync } from '../storage/atomicWrite'
 import type {
   ChatMessage,
   MessageContent,
@@ -523,6 +523,23 @@ export function writeRunReceipt(runDir: string, receipt: RunReceipt): void {
   atomicWriteJson(join(runDir, RUN_RECEIPT_FILENAME), receipt)
 }
 
+/**
+ * Async twin, used on the best-effort path.
+ *
+ * The sync writer's Windows rename backoff totals ~18ms (deliberately shrunk so
+ * per-step checkpoint writes stop freezing the main thread), which is not
+ * enough for AV/indexer contention: the field log shows
+ * `EPERM: rename receipt.json.<pid>.<hex>.tmp -> receipt.json` losing a run's
+ * receipt outright. The async ladder retries for ~385ms and blocks nothing,
+ * and a receipt write is not on any latency path.
+ */
+export async function writeRunReceiptAsync(
+  runDir: string,
+  receipt: RunReceipt
+): Promise<void> {
+  await atomicWriteJsonAsync(join(runDir, RUN_RECEIPT_FILENAME), receipt)
+}
+
 /** Best-effort: load run state pieces and write receipt.json. Never throws to callers. */
 export async function writeRunReceiptBestEffort(input: {
   runDir: string
@@ -559,7 +576,7 @@ export async function writeRunReceiptBestEffort(input: {
       contextWindow: input.contextWindow,
       verificationGate: input.verificationGate
     })
-    writeRunReceipt(input.runDir, receipt)
+    await writeRunReceiptAsync(input.runDir, receipt)
     return receipt
   } catch (err) {
     logger.warn('Failed to write run receipt', {

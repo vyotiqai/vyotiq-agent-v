@@ -2,6 +2,7 @@ import { existsSync } from 'fs'
 import type { WebContents } from 'electron'
 import type { AgentInteractionMode, ChatMessage, ProviderId } from '../../shared/ipc'
 import { logger } from '../../shared/logger'
+import { AppError } from '../../shared/utils/errors'
 import { workspacePathsEqual } from '../../shared/workspacePath'
 import { getWorkspaces } from '../workspace/workspaces'
 import { loadStatus, runExists } from './state'
@@ -91,23 +92,37 @@ function refuse(error: string, code?: string): LaunchRunOutcome {
 export function launchRunSync(request: LaunchRunRequest): LaunchRunOutcome {
   const { workspacePath, wc } = request
   const open = getWorkspaces().openPaths.some((p) => workspacePathsEqual(p, workspacePath))
-  if (!open) return refuse('Workspace is not open')
-  if (!existsSync(workspacePath)) return refuse('Workspace path does not exist')
+  if (!open) return refuse('Workspace is not open', 'workspace_not_open')
+  if (!existsSync(workspacePath)) {
+    return refuse('Workspace path does not exist', 'workspace_missing')
+  }
 
   let runId: string
   let resume = false
   if (request.runId && runExists(workspacePath, request.runId)) {
-    if (isActive(request.runId)) return refuse('Run is already active')
+    // Retryable: the previous invoke may still be unwinding. launchRunSync
+    // refuses rather than waits (launchRun is the variant that waits), so the
+    // caller's bounded retry is what covers that race.
+    if (isActive(request.runId)) return refuse('Run is already active', 'run_active')
     // Early reject on an immutable-binding violation so the caller gets a clear
     // error before a run slot is taken. A run dir with no readable status still
     // resumes: there is no persisted binding to contradict, and runAgent
     // re-derives (and re-validates) whatever it can from disk.
     const persisted = loadStatus(resolveRunDir(workspacePath, request.runId))
     if (persisted) {
-      validateExistingRunStart(persisted, request, {
-        agentProfileId: request.explicit?.agentProfileId === true,
-        runtime: request.explicit?.runtime === true
-      })
+      try {
+        validateExistingRunStart(persisted, request, {
+          agentProfileId: request.explicit?.agentProfileId === true,
+          runtime: request.explicit?.runtime === true
+        })
+      } catch (err) {
+        // A settled fact about the run, not a fault: refuse with a code so the
+        // IPC layer logs it as an expected client failure and the caller can
+        // tell it apart from a transient one worth retrying. Anything else
+        // thrown here is a real fault and must keep its own reporting.
+        if (!(err instanceof AppError)) throw err
+        return refuse(err.message, 'run_binding_immutable')
+      }
     }
     runId = request.runId
     resume = true
@@ -130,7 +145,7 @@ export function launchRunSync(request: LaunchRunRequest): LaunchRunOutcome {
       // Release the claim: the run never started, so the teammate must not
       // stay blocked and the id must stay reusable.
       clearRunAbort(runId, invokeId)
-      return refuse(err instanceof Error ? err.message : String(err))
+      return refuse(err instanceof Error ? err.message : String(err), 'claim_failed')
     }
   }
 

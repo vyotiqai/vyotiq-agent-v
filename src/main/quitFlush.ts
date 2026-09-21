@@ -46,6 +46,11 @@ function beginFlush(deps: QuitFlushDeps): Promise<FlushSettle> {
   )
 }
 
+/** Only a settled, fully acknowledged flush means there is nothing left to wait for. */
+function isCleanSettle(settle: FlushSettle | undefined): boolean {
+  return settle?.kind === 'ok' && settle.status === 'acknowledged'
+}
+
 function resultFromSettle(settle: FlushSettle, deps: QuitFlushDeps): QuitFlushResult {
   switch (settle.kind) {
     case 'rejected':
@@ -95,7 +100,16 @@ export async function flushBeforeQuit(deps: QuitFlushDeps): Promise<QuitFlushRes
     return { flushTimedOut: true }
   }
 
-  if (lastSettle?.kind === 'rejected') {
+  // Wait means "keep trying", so any settle that is not a clean acknowledgement
+  // has to be re-issued. A settled promise cannot be waited on again: the hard
+  // race below would resolve from it on the next microtask and Wait would quit
+  // immediately. That is the common case, not an edge case — the renderer
+  // editor flush times out at 4.5s, always before this 5s dialog, and its
+  // `{kind:'ok', status:'timeout'}` is not a rejection.
+  //
+  // `undefined` means the first flush is still in flight; keep awaiting it
+  // rather than starting a second one alongside.
+  if (lastSettle !== undefined && !isCleanSettle(lastSettle)) {
     lastSettle = undefined
     flushPromise = beginFlush(deps).then((settle) => {
       lastSettle = settle

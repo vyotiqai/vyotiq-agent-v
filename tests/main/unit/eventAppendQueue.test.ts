@@ -65,6 +65,33 @@ describe('eventAppendQueue', () => {
     expect(late).toHaveBeenCalledTimes(1)
   })
 
+  // A run that misses the 15s quit quiesce keeps appending. Those appends chain
+  // onto a NEW promise in the map, which a single-snapshot flush never sees —
+  // so quit returned with the run's last writes still outstanding.
+  it('flushes appends enqueued while the flush is already awaiting', async () => {
+    const path = join(dir, 'events.jsonl')
+    const realAppend = appendFileMock.getMockImplementation()!
+    let enqueuedLate = false
+    appendFileMock.mockImplementation(async (...args) => {
+      if (!enqueuedLate) {
+        enqueuedLate = true
+        enqueueEventAppend(dir, { type: 'status', status: 'done' })
+      }
+      return realAppend(...args)
+    })
+
+    try {
+      enqueueEventAppend(dir, { type: 'status', status: 'running' })
+      await flushEventAppends(dir)
+
+      const lines = readFileSync(path, 'utf8').trim().split('\n')
+      expect(lines).toHaveLength(2)
+      expect(JSON.parse(lines[1])).toMatchObject({ event: { status: 'done' } })
+    } finally {
+      appendFileMock.mockImplementation(realAppend)
+    }
+  })
+
   it('appends events asynchronously in order', async () => {
     const path = join(dir, 'events.jsonl')
     enqueueEventAppend(dir, { type: 'status', status: 'running' })

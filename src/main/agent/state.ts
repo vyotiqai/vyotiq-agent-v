@@ -514,8 +514,12 @@ export async function loadMessagesAsync(
   runId: string
 ): Promise<ChatMessage[]> {
   const dir = resolveRunDir(workspacePath, runId)
-  await flushMessageAppends(dir)
   try {
+    // Inside the try: flushMessageAppends THROWS on a recorded append failure,
+    // and outside it that turned a transcript-write problem into a receipt that
+    // was never written at all — losing the forensic record of the very run
+    // that had the problem (writeRunReceiptBestEffort catches and returns null).
+    await flushMessageAppends(dir)
     const content = await stitchedMessagesContentAsync(dir)
     if (content == null) return []
     return parseMessagesJsonl(content)

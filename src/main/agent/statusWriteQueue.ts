@@ -71,7 +71,20 @@ function shouldInvalidateList(patch: Partial<RunStatus>): boolean {
   return false
 }
 
+/**
+ * Run dirs deleted while a status write was in flight.
+ *
+ * `clearStatusWritesForDir` drops the timer and the map entry, but a `flushOp`
+ * already running inside `flushDir` closed over its own `entry` and still
+ * reaches `atomicWriteJsonAsync`, which recreates the directory it is writing
+ * into — resurrecting the deleted run as a status.json-only phantom in the
+ * sidebar, the exact failure that function exists to prevent. Its catch would
+ * also re-arm a retry against the deleted dir.
+ */
+const abandonedDirs = new Set<string>()
+
 function mergePendingPatch(dir: string, patch: Partial<RunStatus>, invalidateList: boolean): void {
+  if (abandonedDirs.has(dir)) return
   const entry = ensurePending(dir)
   entry.patch = { ...entry.patch, ...patch }
   if (invalidateList) entry.invalidateList = true
@@ -110,9 +123,14 @@ async function flushDir(dir: string): Promise<void> {
     entry.invalidateList = false
     if (Object.keys(patch).length === 0) return
 
+    // Re-check after every await: the run may have been deleted while this
+    // flush was queued, and writing now would recreate its directory.
+    if (abandonedDirs.has(dir)) return
+
     try {
       const path = join(dir, 'status.json')
       const current = await readStatusFile(path)
+      if (abandonedDirs.has(dir)) return
       const next: RunStatus = {
         ...current,
         ...patch,
@@ -150,6 +168,7 @@ async function flushDir(dir: string): Promise<void> {
 }
 
 function scheduleStatusRetry(dir: string): void {
+  if (abandonedDirs.has(dir)) return
   const entry = pendingByDir.get(dir)
   if (!entry || entry.timer) return
   if (Object.keys(entry.patch).length === 0) return
@@ -196,6 +215,8 @@ function ensurePending(dir: string): Pending {
  * only on meaningful changes.
  */
 export function enqueueStatusPatch(dir: string, patch: Partial<RunStatus>): void {
+  // A late patch for a deleted run must not recreate its directory.
+  if (abandonedDirs.has(dir)) return
   const entry = ensurePending(dir)
   const hadPendingKeys = Object.keys(entry.patch).length > 0
   statusStats.enqueued += 1
@@ -242,6 +263,10 @@ export async function flushStatusWrites(dir?: string): Promise<void> {
  * directory containing only a status.json — a phantom run in the sidebar.
  */
 export function clearStatusWritesForDir(dir: string): void {
+  // Mark first, and unconditionally: an in-flight flushOp holds its own `entry`
+  // reference and checks this on the way to the write, so the mark must land
+  // even when there is no pending entry left to drop.
+  abandonedDirs.add(dir)
   const entry = pendingByDir.get(dir)
   if (!entry) return
   if (entry.timer) {
@@ -249,6 +274,11 @@ export function clearStatusWritesForDir(dir: string): void {
     entry.timer = null
   }
   pendingByDir.delete(dir)
+}
+
+/** A run dir is writable again (re-created, or the id reused). */
+export function allowStatusWritesForDir(dir: string): void {
+  abandonedDirs.delete(dir)
 }
 
 /** Immediate write — serialized through the per-dir chain (createRun / orphan interrupt). */
@@ -259,6 +289,9 @@ export async function writeStatusImmediate(
   readSync: (path: string) => RunStatus
 ): Promise<void> {
   statusStats.immediateSync += 1
+  // createRun / orphan-interrupt: this dir is being written on purpose, so a
+  // stale abandon mark from a previous run at the same path must not stick.
+  abandonedDirs.delete(dir)
   const entry = ensurePending(dir)
   if (entry.timer) {
     clearTimeout(entry.timer)
@@ -311,6 +344,7 @@ export function resetStatusWriteQueueForTests(): void {
     if (entry.timer) clearTimeout(entry.timer)
   }
   pendingByDir.clear()
+  abandonedDirs.clear()
   resetStatusWriteQueueStats()
 }
 

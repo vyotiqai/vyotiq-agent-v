@@ -96,8 +96,40 @@ if (process.platform === 'win32') {
   process.on('SIGBREAK', requestGracefulQuit)
 }
 
+/** Editor-flush result captured while the window still existed (close path). */
+let editorFlushFromClose: EditorFlushStatus | null = null
+/** Windows already flushed by their own `close` handler. */
+const flushedOnClose = new WeakSet<BrowserWindow>()
+
+/**
+ * Flush renderer editor state while the window can still answer.
+ *
+ * On Windows/Linux the X button destroys the window, `closed` nulls
+ * `mainWindow`, and only then does `window-all-closed` reach `before-quit` —
+ * by which point there is nothing left to ask, and the quit path used to
+ * report a clean 'acknowledged' without the renderer ever having been asked to
+ * save. Ask here, before teardown, and remember the answer for `before-quit`.
+ */
+function attachEditorFlushOnClose(win: BrowserWindow): BrowserWindow {
+  editorFlushFromClose = null
+  win.on('close', (event) => {
+    // `before-quit` owns the flush on the quit path, and our own second close
+    // must fall through.
+    if (quitting || flushedOnClose.has(win) || win.isDestroyed()) return
+    event.preventDefault()
+    flushedOnClose.add(win)
+    void (async () => {
+      editorFlushFromClose = await requestRendererEditorFlush(win)
+      if (!win.isDestroyed()) win.close()
+    })()
+  })
+  return win
+}
+
 function requestRendererEditorFlush(win: BrowserWindow | null): Promise<EditorFlushStatus> {
-  if (!win || win.isDestroyed()) return Promise.resolve('acknowledged')
+  // No window to ask. A flush done on the way out stands; otherwise we do not
+  // know whether the renderer saved, and must not claim that it did.
+  if (!win || win.isDestroyed()) return Promise.resolve(editorFlushFromClose ?? 'timeout')
   const requestId = `editor-flush-${Date.now()}-${++editorFlushSequence}`
   return new Promise<EditorFlushStatus>((resolve) => {
     let finished = false
@@ -169,7 +201,7 @@ if (!gotLock) {
       })
       // Create the replacement BEFORE destroying the wedged window:
       // window-all-closed quits the app once the window count hits zero.
-      const fresh = createWindow()
+      const fresh = attachEditorFlushOnClose(createWindow())
       applyWindowChrome(getSettings().theme, getSettings().skinId)
       applyBadgeNow()
       fresh.webContents.once('did-finish-load', () => {
@@ -315,7 +347,7 @@ if (!gotLock) {
       watchWindowShortcuts(window)
     })
 
-    createWindow()
+    attachEditorFlushOnClose(createWindow())
     applyWindowChrome(getSettings().theme, getSettings().skinId)
     applyBadgeNow()
     // The tray polls the run registry rather than being pushed at: run starts
@@ -351,7 +383,7 @@ if (!gotLock) {
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        const win = createWindow()
+        const win = attachEditorFlushOnClose(createWindow())
         applyWindowChrome(getSettings().theme, getSettings().skinId)
         applyBadgeNow()
         win.webContents.once('did-finish-load', () => {

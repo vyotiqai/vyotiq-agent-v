@@ -255,6 +255,16 @@ const ContextBreakdownDetailWireSchema = z.object({
     ),
     deferredBuiltin: z.object({ tokens: z.number().int().min(0), count: z.number().int().min(0) }),
     deferredMcp: z.object({ tokens: z.number().int().min(0), count: z.number().int().min(0) }),
+    /** Optional: absent in events written before load-on-demand MCP. */
+    deferredMcpByServer: z
+      .array(
+        z.object({
+          serverId: z.string().min(1),
+          tokens: z.number().int().min(0),
+          toolCount: z.number().int().min(0)
+        })
+      )
+      .optional(),
     total: z.number().int().min(0)
   })
 })
