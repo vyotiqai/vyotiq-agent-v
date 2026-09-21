@@ -22,6 +22,26 @@ pnpm exec vitest run tests/main/unit/loopPolicy.test.ts
 
 Watch mode: `pnpm test:watch`. Coverage gate: `pnpm test:coverage`.
 
+### Typechecking the tests
+
+`pnpm typecheck` covers `src/main`, `src/preload` and `src/renderer` only — **test
+files are not typechecked by the standard gate**, so a type error in a test
+surfaces as a runtime failure, or not at all.
+
+`pnpm typecheck:tests` checks them:
+
+```
+pnpm typecheck:tests
+```
+
+It is deliberately **not** part of `pnpm typecheck` or CI yet. As of
+2026-09-21 the suites carry **896 pre-existing type errors across 221 files**,
+none of them in production `src/` — turning it into a gate today would fail
+every build for reasons unrelated to the change being made.
+
+Treat it as a burn-down list: when you touch a test file, leave it clean. Wire
+this into `pnpm typecheck` and CI once the count reaches zero.
+
 ## Dev and build
 
 - Dev app: `pnpm dev`

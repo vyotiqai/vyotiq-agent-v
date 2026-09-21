@@ -23,6 +23,7 @@
     "build": "pnpm typecheck && pnpm build:vite",
     "build:vite": "pnpm sync:harness && pnpm sync:docx-md && pnpm sync:app-icon && pnpm sync:spinner && pnpm sync:file-icons && electron-vite build",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.tests-node.json --noEmit && tsc -p tsconfig.tests-web.json --noEmit",
     "test": "pnpm sync:harness && pnpm sync:docx-md && node scripts/test-exit-wrapper.cjs",
     "test:coverage": "pnpm sync:harness && pnpm sync:docx-md && vitest run --coverage",
     "test:reliability": "vitest run tests/main/unit/runsState.test.ts tests/main/unit/agentLoopResume.test.ts tests/main/unit/followUpStore.test.ts tests/main/unit/loopCheckpoint.test.ts tests/main/unit/runRegistry.test.ts tests/main/unit/eventAppendQueue.test.ts tests/main/unit/networkMonitor.test.ts tests/main/unit/codeindex.search.test.ts tests/main/unit/globIndex.test.ts tests/main/audit/enduranceRun.audit.test.ts tests/main/audit/largeRepoScanCap.audit.test.ts tests/renderer/chat/autoResume.test.tsx tests/renderer/chat/chatStreamController",
