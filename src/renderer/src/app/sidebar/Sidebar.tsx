@@ -31,6 +31,7 @@ export function Sidebar({
   activePath,
   runsByWorkspacePath,
   activeRuns,
+  activeRunsLoaded,
   onSwitchWorkspace,
   onCloseWorkspace,
   onAddWorkspace,
@@ -201,6 +202,7 @@ export function Sidebar({
             onCloseWorkspace={(path) => onCloseWorkspace?.(path)}
             onAddWorkspace={() => onAddWorkspace?.()}
             activeRuns={activeRuns ?? []}
+            activeRunsLoaded={activeRunsLoaded}
             workspaceHasBackgroundRun={(path) => workspaceHasBackgroundRun?.(path) ?? false}
             onDismissRunsError={(path) => onDismissRunsError?.(path)}
             onNewChatInWorkspace={

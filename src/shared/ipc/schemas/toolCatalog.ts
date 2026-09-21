@@ -39,7 +39,13 @@ export const ToolCatalogResultSchema = z.object({
       id: z.string().min(1),
       name: z.string().min(1),
       enabled: z.boolean(),
-      connected: z.boolean()
+      connected: z.boolean(),
+      /**
+       * How this server's schemas reach a run: `on-demand` means the agent
+       * loads them with request_mcp_tools (or by calling one), `every-step`
+       * means they ride in every request.
+       */
+      loading: z.enum(['on-demand', 'every-step'])
     })
   ),
   codeIndexEnabled: z.boolean(),

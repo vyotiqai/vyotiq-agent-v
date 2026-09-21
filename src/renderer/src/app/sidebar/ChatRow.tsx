@@ -33,10 +33,18 @@ import {
 import { InlineConfirmActions } from './InlineConfirmActions'
 import { runTitle, runTooltip } from './runTitle'
 
-function RunStatusDot({ run }: { run: RunSummary }) {
+function RunStatusDot({ run, live }: { run: RunSummary; live?: boolean }) {
   // Shape carries the state, not hue alone: a spinner vs a warning vs an X.
   // Color is a redundant cue; the button aria-label already names the state for AT.
-  if (run.status === 'running') {
+  //
+  // `status` is a snapshot on disk, not a live fact: main drops a run from its
+  // active registry before the terminal status.json write has flushed, and the
+  // renderer refreshes the run list exactly once on that transition, so a
+  // refresh that loses the race leaves `running` pinned forever and the row
+  // spins for a chat that finished. `live` is the authoritative answer polled
+  // from main — when it says the run is gone, the snapshot is stale, not the
+  // truth. `undefined` means nobody asked, so the snapshot stands.
+  if (run.status === 'running' && live !== false) {
     return (
       <span className="inline-flex shrink-0" title="Running">
         <Icon name="loader" size={12} className="animate-spin text-fg" />
@@ -73,6 +81,7 @@ export const ChatRow = memo(function ChatRow({
   onExportRun,
   onCopyRunLink,
   onForkRun,
+  live,
   tabIndex,
   rowRef,
   onNavKeyDown
@@ -81,6 +90,8 @@ export const ChatRow = memo(function ChatRow({
   workspacePath: string
   active: boolean
   focused?: boolean
+  /** Main still lists this run as active. `undefined` when unknown. */
+  live?: boolean
   /** Denser chrome for nested inline instances. */
   nested?: boolean
   /** Precomputed label (sibling-disambiguated instance titles). */
@@ -206,7 +217,7 @@ export const ChatRow = memo(function ChatRow({
   }, [onCopyRunLink, onExportRun, onForkRun, run.runId, workspacePath])
 
   const runStatusLabel = ((): string | null => {
-    if (run.status === 'running') return 'Running'
+    if (run.status === 'running' && live !== false) return 'Running'
     if (isResumableInterruptedRun(run)) return 'Interrupted'
     if (run.status === 'error') return 'Error'
     return null
@@ -319,7 +330,7 @@ export const ChatRow = memo(function ChatRow({
             setDragging(false)
           }}
         >
-          <RunStatusDot run={run} />
+          <RunStatusDot run={run} live={live} />
           {run.goalStatus === 'active' || run.goalStatus === 'paused' ? (
             <span
               className="inline-flex shrink-0"
@@ -355,12 +366,18 @@ export const ChatRow = memo(function ChatRow({
         fall through to the row. Gating them on group-hover instead would
         make the strip unclickable: reaching it requires a hit test that the
         row button underneath would win while the hover is still off.
+
+        The two states are a ternary, not a base plus an override: `cn` only
+        joins strings, and Tailwind emits `pointer-events-none` after
+        `pointer-events-auto` at equal specificity, so appending the latter
+        never won and the confirm buttons sat under a dead container.
       */}
       <div
         className={cn(
-          'app-region-no-drag absolute inset-y-0 right-0 z-sticky flex items-center gap-px vy-transition pointer-events-none opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
-          '[@media(hover:none)]:opacity-100',
-          (confirmingDelete || menuAnchor) && 'pointer-events-auto opacity-100'
+          'app-region-no-drag absolute inset-y-0 right-0 z-sticky flex items-center gap-px vy-transition',
+          confirmingDelete || menuAnchor
+            ? 'pointer-events-auto opacity-100'
+            : 'pointer-events-none opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100'
         )}
       >
         {confirmingDelete ? (

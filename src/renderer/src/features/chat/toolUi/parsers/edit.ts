@@ -14,6 +14,11 @@ export type EditCardData = {
   added: number
   removed: number
   changeLabel: string
+  /**
+   * 1-based file line the edit lands on, or null when this edit shape does not
+   * report one (`str_replace`, full-contents write). Never inferred.
+   */
+  changedLine: number | null
 }
 
 /** Prefer a concrete file path for icons; reject placeholders / joined lists. */
@@ -48,6 +53,44 @@ export function countDiffLines(diff: string): { added: number; removed: number }
   return { added, removed }
 }
 
+const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/
+
+/**
+ * 1-based line in the new file where the first hunk's first change lands.
+ *
+ * Only a unified diff carries real file line numbers. A `str_replace` body
+ * knows the replacement text but not where it sits in the file, and a
+ * full-contents write replaces the file wholesale — both are handled by the
+ * caller returning null rather than pointing an editor at a guessed line.
+ */
+export function firstChangedLineInDiff(diff: string): number | null {
+  const lines = diff.split('\n')
+  for (let i = 0; i < lines.length; i += 1) {
+    const header = HUNK_HEADER_RE.exec(lines[i] ?? '')
+    if (!header) continue
+    const start = Number(header[1])
+    if (!Number.isFinite(start) || start < 1) return null
+    let lineNumber = start
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const raw = lines[j] ?? ''
+      // A deletion does not advance the new-file cursor, but the gap it leaves
+      // is where the change reads, so both edge kinds land on lineNumber.
+      if (raw.startsWith('+') || raw.startsWith('-')) return lineNumber
+      // "\ No newline at end of file" annotates the previous line.
+      if (raw.startsWith('\\')) continue
+      if (raw.startsWith(' ') || raw === '') {
+        lineNumber += 1
+        continue
+      }
+      break
+    }
+    // A hunk header with no change body is malformed; its start is still the
+    // best honest answer for where the edit was aimed.
+    return start
+  }
+  return null
+}
+
 function changeLabelFor(added: number, removed: number): string {
   const parts: string[] = []
   if (added > 0) parts.push(`+${added}`)
@@ -73,21 +116,53 @@ export function parseEditCardData(tool: UiToolRow): EditCardData {
     if (oldString || newString) {
       const removed = countLines(oldString)
       const added = countLines(newString)
-      return { path, iconPath, fileCount, added, removed, changeLabel: changeLabelFor(added, removed) }
+      return {
+        path,
+        iconPath,
+        fileCount,
+        added,
+        removed,
+        changeLabel: changeLabelFor(added, removed),
+        changedLine: null
+      }
     }
   }
 
   if (typeof args?.contents === 'string') {
     const added = countLines(args.contents)
-    return { path, iconPath, fileCount, added, removed: 0, changeLabel: changeLabelFor(added, 0) }
+    return {
+      path,
+      iconPath,
+      fileCount,
+      added,
+      removed: 0,
+      changeLabel: changeLabelFor(added, 0),
+      changedLine: null
+    }
   }
 
   if (typeof args?.diff === 'string' && args.diff.trim()) {
     const { added, removed } = countDiffLines(args.diff)
-    return { path, iconPath, fileCount, added, removed, changeLabel: changeLabelFor(added, removed) }
+    return {
+      path,
+      iconPath,
+      fileCount,
+      added,
+      removed,
+      changeLabel: changeLabelFor(added, removed),
+      changedLine: firstChangedLineInDiff(args.diff)
+    }
   }
 
-  return { path, iconPath, fileCount, added: 0, removed: 0, changeLabel: '' }
+  return {
+    path,
+    iconPath,
+    fileCount,
+    added: 0,
+    removed: 0,
+    changeLabel: '',
+    changedLine: null
+  }
 }
 
 function diffLinesFromStrReplace(args: Record<string, unknown>): DiffLine[] {

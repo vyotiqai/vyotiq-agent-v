@@ -5,7 +5,8 @@ export const PtySessionSchema = z.object({
   title: z.string(),
   cwd: z.string(),
   running: z.boolean(),
-  backend: z.enum(['pty', 'pipe']).optional()
+  /** 'agent' is a read-only mirror of the run's own commands — no process. */
+  backend: z.enum(['pty', 'pipe', 'agent']).optional()
 })
 export type PtySessionInfo = z.infer<typeof PtySessionSchema>
 

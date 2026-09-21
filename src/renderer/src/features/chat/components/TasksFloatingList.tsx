@@ -43,6 +43,8 @@ export function TasksRailButton({
   autoOpen = false,
   onOpenPlan,
   pressed,
+  tabIndex,
+  keyShortcuts,
   labelSuffix,
   className
 }: {
@@ -53,6 +55,10 @@ export function TasksRailButton({
   onOpenPlan: () => void
   /** True while the plan dock panel is open (rail hosts that stay visible). */
   pressed?: boolean
+  /** Roving tab stop when hosted in a toolbar (the side rail). */
+  tabIndex?: number
+  /** `aria-keyshortcuts` form of the chord that opens the plan panel. */
+  keyShortcuts?: string
   /** Appended to the accessible name, e.g. " · Show plan panel (Alt+6)". */
   labelSuffix?: string
   className?: string
@@ -289,6 +295,8 @@ export function TasksRailButton({
         aria-controls={open ? cardId : undefined}
         aria-label={ariaLabel}
         aria-pressed={pressed}
+        aria-keyshortcuts={keyShortcuts}
+        tabIndex={tabIndex}
         className={cn(
           'relative inline-grid size-7 place-items-center rounded-md text-muted vy-transition hover:bg-surface hover:text-fg active:bg-surface-2',
           (open || pressed) && 'bg-surface text-fg ring-1 ring-inset ring-border/50',

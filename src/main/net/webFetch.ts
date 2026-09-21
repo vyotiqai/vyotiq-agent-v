@@ -502,6 +502,31 @@ export type PinnedFetchRequest = {
   body?: string
 }
 
+/**
+ * Headers that authenticate the caller. This is a hand-rolled redirect loop
+ * over http(s).request, so the platform rule that drops these on a cross-origin
+ * redirect does not apply — without this set, a 302 from a provider host (or
+ * any hop able to inject one) hands the API key to the redirect target.
+ */
+const CREDENTIAL_HEADERS = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'x-api-key',
+  'api-key',
+  'x-goog-api-key'
+])
+
+function withoutCredentialHeaders(
+  headers: Record<string, string> | undefined
+): Record<string, string> | undefined {
+  if (!headers) return headers
+  const kept = Object.entries(headers).filter(
+    ([name]) => !CREDENTIAL_HEADERS.has(name.toLowerCase())
+  )
+  return kept.length === Object.keys(headers).length ? headers : Object.fromEntries(kept)
+}
+
 export async function fetchWithValidatedRedirects(
   startUrl: URL,
   signal: AbortSignal,
@@ -510,6 +535,7 @@ export async function fetchWithValidatedRedirects(
   request?: PinnedFetchRequest
 ): Promise<{ response: Response; finalUrl: URL }> {
   let currentUrl = startUrl
+  let currentHeaders = headers
   const method = (request?.method ?? 'GET').toUpperCase()
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
@@ -518,7 +544,7 @@ export async function fetchWithValidatedRedirects(
       validated,
       addresses,
       signal,
-      headers,
+      currentHeaders,
       allowLocal,
       request
     )
@@ -534,7 +560,14 @@ export async function fetchWithValidatedRedirects(
       if (hop === MAX_REDIRECTS) {
         throw new Error(`Too many redirects while fetching ${startUrl.href}`)
       }
-      currentUrl = new URL(location, validated)
+      const nextUrl = new URL(location, validated)
+      // Each hop is already re-validated for ADDRESS; this re-validates it for
+      // IDENTITY. Same reasoning as the non-GET refusal above, applied to who
+      // the request proves it is rather than which method it uses.
+      if (nextUrl.origin !== validated.origin) {
+        currentHeaders = withoutCredentialHeaders(currentHeaders)
+      }
+      currentUrl = nextUrl
       continue
     }
 

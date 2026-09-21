@@ -198,6 +198,7 @@ function App() {
     activeContext,
     contexts,
     activeRuns,
+    activeRunsLoaded,
     chat,
     chatActions,
     onLoadToolContent,
@@ -2045,6 +2046,10 @@ function App() {
     if (!window.vyotiq?.deleteRun) return
     const res = await window.vyotiq.deleteRun(path, runId)
     if (!res.ok) {
+      // The sidebar is global chrome, so a refusal ("Cancel run first") has to
+      // answer where the click was. The operational banner lives inside the
+      // focused chat pane — from a sidebar row that reads as nothing happening.
+      pushToast(`Could not delete chat: ${res.error}`, 'error')
       setSettingsError(res.error)
       return
     }
@@ -2203,6 +2208,7 @@ function App() {
   const shellWorkspaceProps = {
     openWorkspaces,
     activeRuns,
+    activeRunsLoaded,
     runsByWorkspacePath,
     onSwitchWorkspace: (path: string) => {
       setOpenInstanceByParent({})

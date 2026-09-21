@@ -38,7 +38,10 @@ import {
   cn,
   type ActionMenuItem
 } from '@renderer/lib/ui'
+import { usePersistedBoolean } from '@renderer/lib/hooks/usePersistedBoolean'
 import { usePersistedNumber } from '@renderer/lib/hooks/usePersistedNumber'
+import { toWorkspaceRelPath } from '@shared/utils/workspacePath'
+import type { AgentFileFocus } from './ChatStreamLeaves'
 import { setFocusedFile } from '@renderer/lib/focusedFile'
 import { handleTabListKeyDown } from '@renderer/lib/utils/tabListKeyboard'
 import { HexEditor } from './HexEditor'
@@ -174,6 +177,7 @@ type SaveMode = 'manual' | 'auto' | 'overwrite'
 
 const PAGE_SIZE = 200
 const FILES_EXPLORER_WIDTH_KEY = 'vyotiq.files.explorerWidthPx'
+const FILES_FOLLOW_AGENT_KEY = 'vyotiq.files.followAgent'
 const FILES_EXPLORER_WIDTH_MIN = 176
 const FILES_EXPLORER_WIDTH_MAX = 360
 const FILES_EXPLORER_WIDTH_DEFAULT = 260
@@ -476,6 +480,7 @@ export const FilesPanel = memo(function FilesPanel({
   onFlushReady,
   openPath,
   onOpenPathHandled,
+  agentFocus = null,
   recoveryData,
   onRecoveryDataConsumed,
   findInFilesNonce = 0
@@ -487,12 +492,16 @@ export const FilesPanel = memo(function FilesPanel({
   onFlushReady?: (flush: (() => Promise<boolean>) | null) => void
   openPath?: WorkspaceFileOpenRequest | null
   onOpenPathHandled?: (request: WorkspaceFileOpenRequest) => void
+  /** File the run is writing right now; drives follow mode. */
+  agentFocus?: AgentFileFocus | null
   findInFilesNonce?: number
   recoveryData?: WorkspaceEditorRecoveryLoadResult
   onRecoveryDataConsumed?: (workspacePath: string) => void
 }) {
   const sessionRef = useRef<FileSession | null>(null)
   const wasActiveRef = useRef(false)
+  /** Last tab id the external-change probe ran for, so a switch re-probes. */
+  const lastCheckedTabRef = useRef<string | null>(null)
   const workspacePathRef = useRef(workspacePath)
   const workspaceEpochRef = useRef(0)
   const directoryRequestRef = useRef(new Map<string, number>())
@@ -528,6 +537,8 @@ export const FilesPanel = memo(function FilesPanel({
   recoveryDataRef.current = recoveryData
   const [treeFilter, setTreeFilter] = useState('')
   const [treeFocusPath, setTreeFocusPath] = useState<string | null>(null)
+  const [followAgent, setFollowAgent] = usePersistedBoolean(FILES_FOLLOW_AGENT_KEY, false)
+  const followTokenRef = useRef<number | null>(null)
   const [explorerWidthPx, setExplorerWidthPx] = usePersistedNumber(
     FILES_EXPLORER_WIDTH_KEY,
     FILES_EXPLORER_WIDTH_DEFAULT,
@@ -1476,9 +1487,14 @@ export const FilesPanel = memo(function FilesPanel({
     workspacePath
   ])
 
-  const checkExternalChangeForActiveTab = useCallback(async (): Promise<void> => {
+  /**
+   * Re-read one open tab when the file may have changed underneath it.
+   * Defaults to the active tab; callers pass an id to sweep background tabs,
+   * which an agent edits just as often as the one you happen to be looking at.
+   */
+  const checkExternalChangeForTab = useCallback(async (tabId?: string): Promise<void> => {
     const operation = captureWorkspaceOperation()
-    const watchedTabId = sessionRef.current?.activeTabId
+    const watchedTabId = tabId ?? sessionRef.current?.activeTabId
     if (!operation || !watchedTabId || !window.vyotiq?.workspaceFileRead) return
     const current = getFileSession(operation.path).tabs.find((tab) => tab.id === watchedTabId)
     if (!current || saveStatesRef.current[current.id] === 'saving') return
@@ -1556,6 +1572,26 @@ export const FilesPanel = memo(function FilesPanel({
     setTabSaveState
   ])
 
+  const checkExternalChangeForActiveTab = useCallback(
+    (): Promise<void> => checkExternalChangeForTab(),
+    [checkExternalChangeForTab]
+  )
+
+  /**
+   * Sweep every open tab, sequentially — each one opens with a cheap stat probe
+   * and only pays for content when it actually changed, but firing N reads at
+   * once on a big edit would still contend with the run's own IPC.
+   */
+  const checkExternalChangeForOpenTabs = useCallback(async (): Promise<void> => {
+    const operation = captureWorkspaceOperation()
+    if (!operation) return
+    const ids = getFileSession(operation.path).tabs.map((tab) => tab.id)
+    for (const id of ids) {
+      if (!isCurrentWorkspaceOperation(operation)) return
+      await checkExternalChangeForTab(id)
+    }
+  }, [captureWorkspaceOperation, checkExternalChangeForTab, isCurrentWorkspaceOperation])
+
   useEffect(() => {
     const watchedTabId = activeTab?.id
     const becameActive = active && !wasActiveRef.current
@@ -1568,7 +1604,13 @@ export const FilesPanel = memo(function FilesPanel({
       if (cancelled) return
       await checkExternalChangeForActiveTab()
     }
-    if (becameActive) void checkExternalChange()
+    // Also on a tab switch: the effect already re-runs for a new activeTab.id,
+    // but becameActive is false then, so a background tab the agent touched
+    // used to surface its stale content until the window lost focus.
+    if (becameActive || lastCheckedTabRef.current !== watchedTabId) {
+      lastCheckedTabRef.current = watchedTabId
+      void checkExternalChange()
+    }
 
     const documentVisible = (): boolean =>
       typeof document === 'undefined' || document.visibilityState === 'visible'
@@ -1763,6 +1805,10 @@ export const FilesPanel = memo(function FilesPanel({
         revision: 0
       }
       const current = sessionRef.current
+      // This tab's content came straight off disk a moment ago, so the
+      // external-change probe has nothing to find — mark it checked or every
+      // file open would pay for an immediate second read.
+      lastCheckedTabRef.current = tab.id
       updateSession({
         tabs: [...(current?.tabs ?? []), tab],
         activeTabId: tab.id,
@@ -1777,6 +1823,13 @@ export const FilesPanel = memo(function FilesPanel({
       updateSession
     ]
   )
+
+  // Follow mode reads these through refs: the effect must fire on a new focus
+  // token only, not every time openFile's identity changes mid-run.
+  const openFileRef = useRef(openFile)
+  openFileRef.current = openFile
+  const activeTabRef = useRef(activeTab)
+  activeTabRef.current = activeTab
 
   const toggleDirectory = useCallback(
     (path: string): void => {
@@ -1897,15 +1950,16 @@ export const FilesPanel = memo(function FilesPanel({
 
   const refreshTreeRef = useRef(refreshTree)
   refreshTreeRef.current = refreshTree
-  const checkExternalChangeForActiveTabRef = useRef(checkExternalChangeForActiveTab)
-  checkExternalChangeForActiveTabRef.current = checkExternalChangeForActiveTab
+  const checkExternalChangeForOpenTabsRef = useRef(checkExternalChangeForOpenTabs)
+  checkExternalChangeForOpenTabsRef.current = checkExternalChangeForOpenTabs
 
   useEffect(() => {
     if (!active) return
     if (prevGitRevisionRef.current === gitRevision) return
     prevGitRevisionRef.current = gitRevision
     refreshTreeRef.current()
-    void checkExternalChangeForActiveTabRef.current()
+    // A run edits whatever it needs to, not just the tab in front of you.
+    void checkExternalChangeForOpenTabsRef.current()
   }, [active, gitRevision])
 
   const revealPathInTree = useCallback(
@@ -2597,6 +2651,23 @@ export const FilesPanel = memo(function FilesPanel({
     if (!activeTab) return
     await showDiffForPath(activeTab.path)
   }, [activeTab, showDiffForPath])
+
+  /**
+   * Follow mode: open whatever file the run is writing.
+   *
+   * Never while the open tab is dirty — openFile would raise the unsaved-changes
+   * confirm, so following would interrupt you with a dialog you did not ask for.
+   * The token is consumed either way; the next file the run touches re-follows.
+   */
+  useEffect(() => {
+    if (!followAgent || !active || !workspacePath || !agentFocus) return
+    if (followTokenRef.current === agentFocus.token) return
+    followTokenRef.current = agentFocus.token
+    if (activeTabRef.current?.dirty) return
+    const rel = toWorkspaceRelPath(workspacePath, agentFocus.path)
+    if (!rel) return
+    void openFileRef.current(rel)
+  }, [followAgent, active, workspacePath, agentFocus])
 
   useEffect(() => {
     if (!openPath) {
@@ -3725,6 +3796,24 @@ export const FilesPanel = memo(function FilesPanel({
                   />
                 )}
               />
+              <button
+                type="button"
+                className={cn(
+                  DOCK_TOOLBAR_BTN,
+                  'ml-0.5 px-1.5',
+                  followAgent && DOCK_TOOLBAR_BTN_PRESSED
+                )}
+                aria-pressed={followAgent}
+                aria-label="Follow agent edits"
+                title={
+                  followAgent
+                    ? 'Following the agent — opens each file it writes'
+                    : 'Follow the agent — open each file it writes'
+                }
+                onClick={() => setFollowAgent((prev) => !prev)}
+              >
+                Follow
+              </button>
               {dirtyTabCount > 0 ? (
                 <button
                   type="button"

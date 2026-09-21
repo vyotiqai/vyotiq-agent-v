@@ -19,6 +19,7 @@ const VYOTIQ_INVOKE_MAP: Record<
     | 'onBrowserState'
     | 'onPtyData'
     | 'onPtyExit'
+    | 'onPtySessionsChanged'
     | 'onWorkspaceEditorFlushRequest'
     | 'onCodeIndexStatus'
     | 'onDictationStatus'
@@ -267,6 +268,7 @@ const VYOTIQ_PUSH_MAP: Record<
   | 'onBrowserState'
   | 'onPtyData'
   | 'onPtyExit'
+  | 'onPtySessionsChanged'
   | 'onCodeIndexStatus'
   | 'onDictationStatus'
   | 'onGithubAuthStatus'
@@ -291,6 +293,7 @@ const VYOTIQ_PUSH_MAP: Record<
   onBrowserState: IPC.browserState,
   onPtyData: IPC.ptyData,
   onPtyExit: IPC.ptyExit,
+  onPtySessionsChanged: IPC.ptySessionsChanged,
   onCodeIndexStatus: IPC.codeIndexStatusEvent,
   onDictationStatus: IPC.dictationStatusEvent,
   onGithubAuthStatus: IPC.githubAuthStatusEvent,

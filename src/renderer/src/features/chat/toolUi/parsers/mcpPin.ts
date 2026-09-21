@@ -20,8 +20,8 @@ export type McpPinParsed = {
 }
 
 const SECTION_LABELS: Record<McpPinSectionKind, string> = {
-  pinned: 'Pinned for next step',
-  already: 'Already pinned',
+  pinned: 'Loaded for next step',
+  already: 'Already available',
   released: 'Released',
   unknown: 'Unknown / unresolved'
 }
@@ -89,11 +89,18 @@ export function parseMcpPinData(tool: UiToolRow): McpPinParsed {
     const line = rawLine.trim()
     if (!line) continue
     let m: RegExpExecArray | null
-    if ((m = /^Pinned for next step \((\d+)\):\s*(.+)$/.exec(line))) {
+    // Both spellings stay live: the earlier "pinned" wording is what stored
+    // transcripts hold, and they still replay through this parser.
+    if (
+      (m =
+        /^(?:Loaded into the next step's tool catalog|Pinned for next step) \((\d+)\):\s*(.+)$/.exec(
+          line
+        ))
+    ) {
       parsed.pinnedCount = Number(m[1])
       pushSection('pinned', m[2]!)
       matched = true
-    } else if ((m = /^Already pinned:\s*(.+)$/.exec(line))) {
+    } else if ((m = /^(?:Already available|Already pinned):\s*(.+)$/.exec(line))) {
       pushSection('already', m[1]!)
       matched = true
     } else if ((m = /^Released \((\d+)\):\s*(.+)$/.exec(line))) {
@@ -103,13 +110,18 @@ export function parseMcpPinData(tool: UiToolRow): McpPinParsed {
     } else if ((m = /^Unknown \/ unresolved:\s*(.+)$/.exec(line))) {
       pushSection('unknown', m[1]!)
       matched = true
-    } else if (/^No new tools pinned\.?$/.test(line) || /^No pinned tools released\.?$/.test(line)) {
+    } else if (
+      /^(?:Nothing new loaded|Nothing released|No new tools pinned|No pinned tools released)\.?$/.test(
+        line
+      )
+    ) {
       parsed.noneMessage = line
       matched = true
     } else if (
-      /^(Definitions are append-admitted|Schemas drop from the sticky catalog|Connected MCP tools are already in the step catalog|Pins are optional bookkeeping|No connected MCP tools for serverId=|No pinned MCP tools for serverId=)/.test(
+      /^(They are on the wire from the next model step|Call release_mcp_tools when finished|Released schemas leave the catalog|Definitions are append-admitted|Schemas drop from the sticky catalog|Connected MCP tools are already in the step catalog|Pins are optional bookkeeping|No connected MCP tools for serverId=|No loaded MCP tools for serverId=|No pinned MCP tools for serverId=)/.test(
         line
-      )
+      ) ||
+      /\bis on the wire because server .+ is loaded\b/.test(line)
     ) {
       parsed.note = parsed.note ? `${parsed.note} ${line}` : line
       matched = true

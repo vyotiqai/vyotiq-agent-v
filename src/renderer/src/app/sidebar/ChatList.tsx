@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefCallback } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type RefCallback
+} from 'react'
 import type { RunSummary } from '@shared/ipc'
 import { Icon } from '@renderer/lib/icons'
 import { Button, Tooltip, cn } from '@renderer/lib/ui'
@@ -44,6 +52,7 @@ function FoldableInstanceChildren({
   parentRunId,
   parentTitle,
   childRuns,
+  isRunLive,
   openInstanceRunId,
   expanded,
   onToggle,
@@ -61,6 +70,7 @@ function FoldableInstanceChildren({
   parentRunId: string
   parentTitle: string
   childRuns: RunSummary[]
+  isRunLive: (runId: string) => boolean | undefined
   openInstanceRunId: string | null | undefined
   expanded: boolean
   onToggle: () => void
@@ -129,6 +139,7 @@ function FoldableInstanceChildren({
                 workspacePath={workspacePath}
                 active={childSelected}
                 focused={childSelected}
+                live={isRunLive(child.runId)}
                 nested
                 titleOverride={titles.get(child.runId)}
                 onSelectRun={onSelectRun}
@@ -234,10 +245,10 @@ function WorkspaceHeader({
       */}
       <div
         className={cn(
-          'app-region-no-drag absolute inset-y-0 right-1.5 flex items-center gap-1 vy-transition pointer-events-none opacity-0',
-          'group-hover:opacity-100 group-focus-within:opacity-100',
-          '[@media(hover:none)]:opacity-100',
-          confirmingClose && 'pointer-events-auto opacity-100'
+          'app-region-no-drag absolute inset-y-0 right-1.5 flex items-center gap-1 vy-transition',
+          confirmingClose
+            ? 'pointer-events-auto opacity-100'
+            : 'pointer-events-none opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100'
         )}
       >
         {confirmingClose ? (
@@ -299,6 +310,7 @@ export function ChatList({
   onAddWorkspace,
   onNewChatInWorkspace,
   activeRuns,
+  activeRunsLoaded = false,
   workspaceHasBackgroundRun,
   onDismissRunsError,
   onSelectRun,
@@ -323,6 +335,12 @@ export function ChatList({
   onAddWorkspace: () => void
   onNewChatInWorkspace?: (path: string) => void
   activeRuns: { runId: string; workspacePath: string }[]
+  /**
+   * False until main has answered `listActiveRuns` once — an empty
+   * {@link activeRuns} before that means "unknown", so rows keep trusting
+   * their persisted status rather than blinking every live spinner off.
+   */
+  activeRunsLoaded?: boolean
   workspaceHasBackgroundRun: (path: string) => boolean
   onDismissRunsError?: (path?: string) => void
   onSelectRun: (path: string, runId: string) => void
@@ -341,6 +359,28 @@ export function ChatList({
 }) {
   const [instanceManualExpand, setInstanceManualExpand] = useState<Record<string, boolean>>({})
   const [navIndex, setNavIndex] = useState(0)
+
+  /**
+   * Live run ids straight from main's registry — the same `active` map that
+   * `deleteRun` consults, so a row without a spinner is exactly a row that
+   * will delete rather than answer "Cancel run first".
+   *
+   * Keyed by run id alone, not workspace + id. Run ids are uuids, and a path
+   * key would have to canonicalize the way `workspacePathsEqual` does; getting
+   * that wrong on Windows would read a live run as finished and drop a spinner
+   * mid-run, which is the worse failure of the two.
+   */
+  const liveRunKeys = useMemo(() => {
+    const keys = new Set<string>()
+    for (const entry of activeRuns) keys.add(entry.runId)
+    return keys
+  }, [activeRuns])
+
+  const isRunLive = useCallback(
+    (runId: string): boolean | undefined =>
+      activeRunsLoaded ? liveRunKeys.has(runId) : undefined,
+    [activeRunsLoaded, liveRunKeys]
+  )
 
   const sessionRows = useMemo(() => {
     const rows: { workspacePath: string; runId: string }[] = []
@@ -550,6 +590,7 @@ export function ChatList({
                                     workspacePath={workspace.path}
                                     active={parentOpen}
                                     focused={parentFocused}
+                                    live={isRunLive(run.runId)}
                                     onSelectRun={onSelectRun}
                                     onRenameRun={onRenameRun}
                                     onDeleteRun={onDeleteRun}
@@ -570,6 +611,7 @@ export function ChatList({
                                       parentRunId={run.runId}
                                       parentTitle={runTitle(run)}
                                       childRuns={children}
+                                      isRunLive={isRunLive}
                                       openInstanceRunId={openInstanceRunId}
                                       expanded={instancesExpanded}
                                       autoExpand={autoExpand}

@@ -4,7 +4,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
+import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { pathToFileURL } from 'url'
 import { basename } from 'path'
 import Ajv2020 from 'ajv/dist/2020'
@@ -92,6 +92,7 @@ import { workspacePathsEqual } from '../../../shared/workspacePath'
 import { listActiveRuns } from '../runRegistry'
 import { AppError, formatError, isAbortError, mcpConnectErrorCode } from '../../../shared/errors'
 import { assertPublicUrl } from '@main/net/webFetch'
+import { recordEgress } from '@main/net/egress'
 import {
   assertCircuitClosed,
   circuitKeyMcpConnect,
@@ -983,6 +984,46 @@ function createMcpClient(workspacePath?: string | null): Client {
   return client
 }
 
+/** Same-origin hops only (http→https, trailing slash); see createMcpFetch. */
+const MAX_MCP_REDIRECTS = 3
+
+/**
+ * Fetch for remote MCP transports.
+ *
+ * Without it the SDK uses global fetch, so `assertPublicUrl` guarded only the
+ * connect URL: every later request re-resolved DNS unchecked, and redirects
+ * were followed with `requestInit.headers` — which carry the MCP bearer token —
+ * to whatever host the server named. Validate each request URL, and follow only
+ * same-origin redirects, so a credential can never cross an origin boundary.
+ *
+ * The transfer itself stays on global fetch so streamable HTTP and SSE keep
+ * their streaming semantics. This re-checks the address on every request but
+ * does not pin it into the connect, so it narrows the rebinding window rather
+ * than closing it the way `fetchPinnedPublic` does for buffered reads.
+ */
+function createMcpFetch(serverId: string): FetchLike {
+  return async (input, init) => {
+    let target = typeof input === 'string' ? input : input.href
+    for (let hop = 0; ; hop++) {
+      const validated = await assertPublicUrl(target)
+      const res = await fetch(validated, { ...init, redirect: 'manual' })
+      if (res.status < 300 || res.status >= 400) return res
+      const location = res.headers.get('location')
+      if (!location) return res
+      if (hop >= MAX_MCP_REDIRECTS) {
+        throw new Error(`MCP server ${serverId}: too many redirects from ${validated.origin}`)
+      }
+      const next = new URL(location, validated)
+      if (next.origin !== validated.origin) {
+        throw new Error(
+          `MCP server ${serverId}: refusing cross-origin redirect to ${next.origin}`
+        )
+      }
+      target = next.href
+    }
+  }
+}
+
 async function createTransport(
   server: McpServer,
   opts?: { authProvider?: ReturnType<typeof createMcpOAuthProvider>; workspacePath?: string | null }
@@ -1015,7 +1056,24 @@ async function createTransport(
   if (!urlRaw) throw new Error(`MCP server ${server.id}: url required for ${transport}`)
   // Same SSRF posture as marketplace/catalog fetchPublicResponse — remote MCP is
   // public HTTP(S) only. Local MCP uses stdio; no product exception for loopback HTTP/SSE.
-  const url = await assertPublicUrl(urlRaw)
+  // Enforcement stays with assertPublicUrl; the egress ledger is recorded either
+  // way so a run's outbound origins are answerable from one place.
+  let url: URL
+  try {
+    url = await assertPublicUrl(urlRaw)
+  } catch (err) {
+    recordEgress(
+      { url: urlRaw, purpose: 'mcp_remote', workspacePath: opts?.workspacePath ?? undefined },
+      { allowed: false, reason: 'blocked_host', detail: `remote MCP ${server.id} refused` }
+    )
+    throw err
+  }
+  recordEgress(
+    { url: url.href, purpose: 'mcp_remote', workspacePath: opts?.workspacePath ?? undefined },
+    { allowed: true, reason: 'allowed' }
+  )
+
+  const fetchImpl = createMcpFetch(server.id)
 
   // Static Bearer takes precedence. With OAuth authProvider, do not set Authorization
   // via requestInit (SDK docs: headers + authProvider conflict).
@@ -1025,12 +1083,14 @@ async function createTransport(
     if (transport === 'http') {
       return new StreamableHTTPClientTransport(url, {
         requestInit,
-        authProvider: opts.authProvider
+        authProvider: opts.authProvider,
+        fetch: fetchImpl
       })
     }
     return new SSEClientTransport(url, {
       requestInit,
-      authProvider: opts.authProvider
+      authProvider: opts.authProvider,
+      fetch: fetchImpl
     })
   }
 
@@ -1038,9 +1098,9 @@ async function createTransport(
   const requestInit = headers ? { headers } : undefined
 
   if (transport === 'http') {
-    return new StreamableHTTPClientTransport(url, { requestInit })
+    return new StreamableHTTPClientTransport(url, { requestInit, fetch: fetchImpl })
   }
-  return new SSEClientTransport(url, { requestInit })
+  return new SSEClientTransport(url, { requestInit, fetch: fetchImpl })
 }
 
 type PendingMcpConnection = { client: Client; transport: Transport }

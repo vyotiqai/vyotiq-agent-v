@@ -387,6 +387,11 @@ export class ChatEventDispatcher {
         // Forcing one here emitted every pending delta early and restarted the
         // coalescing window up to three times per step for the meters alone.
         slot.pendingSegments.push({ kind: 'event', event: ev })
+        // Every other append runs the cap; this one skipped it, so a wedged
+        // renderer could grow the queue past PENDING_SEGMENTS_MAX unchecked.
+        // `event` segments are never evicted (they are not reconstructable),
+        // so this evicts droppable deltas to make room — the intended fail-open.
+        this.enforcePendingCap(slot)
         this.schedule(slot)
         return
       }

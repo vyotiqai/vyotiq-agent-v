@@ -32,11 +32,6 @@ function recordAppendError(dir: string, err: unknown): void {
   bumpFailure(pendingNotices, dir, err)
 }
 
-function takeAppendError(dir: string): DirAppendFailures | undefined {
-  const err = failuresForFlush.get(dir)
-  if (err) failuresForFlush.delete(dir)
-  return err
-}
 
 /** Consume the accumulated mid-run append failures for a run dir, if any. */
 export function takeMessageAppendFailureNotice(dir: string): Error | undefined {
@@ -46,10 +41,6 @@ export function takeMessageAppendFailureNotice(dir: string): Error | undefined {
   return formatAppendFailure('messages.jsonl', [f])
 }
 
-function throwIfAppendError(dir: string): void {
-  const f = takeAppendError(dir)
-  if (f) throw formatAppendFailure('messages.jsonl', [f])
-}
 
 export function enqueueMessageAppend(dir: string, line: string): Promise<void> {
   const path = join(dir, 'messages.jsonl')
@@ -103,9 +94,17 @@ export function enqueueMessageRewrite(dir: string, rewrite: () => void): Promise
   return next
 }
 
+/** See eventAppendQueue's FLUSH_DRAIN_MAX_PASSES — appends enqueued during the
+ * await chain onto a new promise a single snapshot never sees. */
+const FLUSH_DRAIN_MAX_PASSES = 20
+
 export async function flushMessageAppends(dir?: string): Promise<void> {
   if (dir) {
-    await appendChains.get(dir)
+    for (let pass = 0; pass < FLUSH_DRAIN_MAX_PASSES; pass += 1) {
+      const chain = appendChains.get(dir)
+      if (!chain) break
+      await chain
+    }
     const f = failuresForFlush.get(dir)
     if (f) {
       failuresForFlush.delete(dir)
@@ -113,7 +112,9 @@ export async function flushMessageAppends(dir?: string): Promise<void> {
     }
     return
   }
-  await Promise.all([...appendChains.values()])
+  for (let pass = 0; pass < FLUSH_DRAIN_MAX_PASSES && appendChains.size > 0; pass += 1) {
+    await Promise.all([...appendChains.values()])
+  }
   if (failuresForFlush.size === 0) return
   const all = [...failuresForFlush.values()]
   failuresForFlush.clear()

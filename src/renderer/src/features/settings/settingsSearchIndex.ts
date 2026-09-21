@@ -362,6 +362,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'tools'
   },
   {
+    id: 'mcp-tool-loading',
+    title: 'Preload every MCP tool',
+    keywords: ['mcp', 'tools', 'context', 'window', 'tokens', 'schemas', 'on demand', 'load'],
+    section: 'tools'
+  },
+  {
     id: 'tools-catalog',
     title: 'Live tool catalog',
     keywords: ['tools', 'catalog', 'mcp', 'active', 'available', 'servers'],

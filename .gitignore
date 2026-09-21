@@ -127,6 +127,9 @@ venv/
 # Authored directly, with no .docx source to regenerate it from, and linked
 # from the README and the website — it has to be in the repository.
 !/docs/teammates.md
+# Same: hand-authored, no .docx source, linked from the README. States the
+# egress gate's coverage boundary, so it has to ship with the code it describes.
+!/docs/egress.md
 .cursorrules
 AGENTS.md
 scripts/remove-coauthors-from-history.sh

@@ -28,6 +28,41 @@ const workspaceGroup = (overrides: Partial<WorkspaceSidebarGroup> = {}): Workspa
 const noop = (): void => {}
 
 describe('ChatList', () => {
+  it('flips the workspace strip to clickable while the close confirm is up', () => {
+    render(
+      <ChatList
+        workspaceReady
+        sessionQuery=""
+        filteredRunsCount={0}
+        workspaceGroups={[workspaceGroup({ label: 'demo' })]}
+        onToggleWorkspace={noop}
+        onSwitchWorkspace={noop}
+        onCloseWorkspace={noop}
+        onAddWorkspace={noop}
+        onNewChatInWorkspace={noop}
+        activeRuns={[]}
+        workspaceHasBackgroundRun={() => false}
+        onSelectRun={noop}
+        onRenameRun={noop}
+        onDeleteRun={noop}
+      />
+    )
+
+    const strip = (): HTMLElement =>
+      document.querySelector('[aria-label="Close demo"], [data-inline-confirm]')!.closest(
+        '.absolute'
+      ) as HTMLElement
+
+    // Carrying both resolves to `none` — Tailwind emits none last at equal
+    // specificity — which leaves the confirm buttons dead under the row.
+    expect(strip().className).toContain('pointer-events-none')
+    expect(strip().className).not.toContain('pointer-events-auto')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close demo' }))
+    expect(strip().className).toContain('pointer-events-auto')
+    expect(strip().className).not.toContain('pointer-events-none')
+  })
+
   it('keeps the workspace name off the hover actions without paying for them at rest', () => {
     render(
       <ChatList

@@ -37,7 +37,8 @@ function PtySessionView({
   sessionId,
   workspacePath,
   visible,
-  focused = true
+  focused = true,
+  isReadOnly
 }: {
   sessionId: string
   workspacePath: string
@@ -45,6 +46,13 @@ function PtySessionView({
   visible: boolean
   /** In split mode, only the focused pane should call term.focus(). */
   focused?: boolean
+  /**
+   * Whether the given session is a read-only view. Asked about this terminal's
+   * own sessionId, never the panel's activeId: those disagree for a render
+   * after createSession, and treating the mirror as writable in that window
+   * would send its keystrokes to a session with nothing behind it.
+   */
+  isReadOnly?: (sessionId: string) => boolean
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -53,6 +61,8 @@ function PtySessionView({
   visibleRef.current = visible
   const focusedRef = useRef(focused)
   focusedRef.current = focused
+  const isReadOnlyRef = useRef(isReadOnly)
+  isReadOnlyRef.current = isReadOnly
 
   useEffect(() => {
     const el = hostRef.current
@@ -68,6 +78,8 @@ function PtySessionView({
 
     const term = new Terminal({
       convertEol: true,
+      disableStdin: isReadOnlyRef.current?.(sessionId) ?? false,
+      cursorBlink: !(isReadOnlyRef.current?.(sessionId) ?? false),
       fontFamily: readCssColor('--vy-font-mono', '"JetBrains Mono", ui-monospace, monospace'),
       fontSize: 12,
       theme: readTerminalTheme(),
@@ -167,6 +179,7 @@ function PtySessionView({
     }
 
     const onData = term.onData((data) => {
+      if (isReadOnlyRef.current?.(sessionId)) return
       void window.vyotiq?.ptyWrite?.(sessionId, data, workspacePath)
     })
 
@@ -289,6 +302,11 @@ export function TerminalPanel({
   onActiveSessionChangeRef.current = onActiveSessionChange
 
   const usingPipeFallback = sessions.some((s) => s.backend === 'pipe')
+  /** The run's mirrored output — a view of a spawn, with no shell behind it. */
+  const isMirrorSession = useCallback(
+    (id: string): boolean => sessions.some((s) => s.id === id && s.backend === 'agent'),
+    [sessions]
+  )
   const activeSession = sessions.find((s) => s.id === activeId) ?? null
 
   useEffect(() => {
@@ -417,22 +435,29 @@ export function TerminalPanel({
   useEffect(() => {
     if (!visible) return
     if (!listReady) return
-    if (sessions.length > 0) return
+    // The agent mirror is read-only, so its presence must not stand in for the
+    // shell the user still needs.
+    if (sessions.some((s) => s.backend !== 'agent')) return
     if (!workspacePath || autoCreateAttemptedRef.current || suppressAutoCreateRef.current) {
       return
     }
     autoCreateAttemptedRef.current = true
     void createSession()
-  }, [visible, listReady, sessions.length, workspacePath, createSession])
+  }, [visible, listReady, sessions, workspacePath, createSession])
 
-  // Buffering is owned by ptyOutputBuffers.ts (survives unmount). Panel only
-  // refreshes the session list when a process exits.
+  // Buffering is owned by ptyOutputBuffers.ts (survives unmount). Panel
+  // re-lists when a process exits, and when the set of sessions changes
+  // out from under it — the agent mirror appears mid-run with no exit event.
   useEffect(() => {
     const unsubExit = window.vyotiq?.onPtyExit?.(() => {
       void refreshList()
     })
+    const unsubChanged = window.vyotiq?.onPtySessionsChanged?.(() => {
+      void refreshList()
+    })
     return () => {
       unsubExit?.()
+      unsubChanged?.()
     }
   }, [refreshList])
 
@@ -526,6 +551,7 @@ export function TerminalPanel({
                     workspacePath={workspacePath}
                     visible={visible}
                     focused={visible}
+                    isReadOnly={isMirrorSession}
                   />
                 </div>
                 <div className="w-px shrink-0 bg-border/50" />
@@ -535,6 +561,7 @@ export function TerminalPanel({
                     workspacePath={workspacePath}
                     visible={visible}
                     focused={false}
+                    isReadOnly={isMirrorSession}
                   />
                 </div>
               </div>
@@ -544,6 +571,7 @@ export function TerminalPanel({
                 workspacePath={workspacePath}
                 visible={visible}
                 focused={visible}
+                isReadOnly={isMirrorSession}
               />
             )
           ) : (

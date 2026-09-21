@@ -11,8 +11,14 @@ const payload: ToolCatalogResult = {
   autoModeSwitch: true,
   fingerprint: 'tc1',
   servers: [
-    { id: 'gh', name: 'GitHub', enabled: true, connected: true },
-    { id: 'ctx', name: 'Context', enabled: false, connected: false }
+    { id: 'gh', name: 'GitHub', enabled: true, connected: true, loading: 'on-demand' as const },
+    {
+      id: 'ctx',
+      name: 'Context',
+      enabled: false,
+      connected: false,
+      loading: 'every-step' as const
+    }
   ],
   entries: [
     {
@@ -71,8 +77,8 @@ describe('ToolCatalogCard', () => {
     render(<ToolCatalogCard />)
     await waitFor(() => expect(screen.getByText(/Built-in tools \(2\)/)).toBeTruthy())
     expect(screen.getByText(/2 of 4 tools active/)).toBeTruthy()
-    expect(screen.getByText(/\(connected\)/)).toBeTruthy()
-    expect(screen.getByText(/\(disabled\)/)).toBeTruthy()
+    expect(screen.getByText(/connected . loaded on demand/)).toBeTruthy()
+    expect(screen.getByText(/disabled . loaded every step/)).toBeTruthy()
     expect(screen.getByText('mcp__gh__get_file_contents')).toBeTruthy()
     expect(screen.getByText('mcp__ctx__expand_chunk')).toBeTruthy()
     expect(screen.getByText('code index disabled')).toBeTruthy()

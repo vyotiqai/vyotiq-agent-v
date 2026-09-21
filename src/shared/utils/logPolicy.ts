@@ -73,7 +73,10 @@ export const ALLOWED_LOG_FIELD_KEYS = new Set([
   /** Top-level tool-arg key names only (comma-separated; not values). */
   'argsKeys',
   'circuitKey',
-  'retryAfterMs'
+  'retryAfterMs',
+  /** Live/batch queue backpressure counters (event counts, never content). */
+  'dropped',
+  'queued'
 ])
 
 const PATH_IN_TEXT =

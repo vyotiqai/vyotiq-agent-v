@@ -332,4 +332,101 @@ describe('createChatStreamController', () => {
       vi.useRealTimers()
     }
   })
+
+  it('retries a transient chatStart failure but not a settled refusal', async () => {
+    vi.useFakeTimers()
+    try {
+      const transient = vi.fn().mockResolvedValue({ ok: false, error: 'boom' })
+      // @ts-expect-error test bridge
+      window.vyotiq = { ...(window.vyotiq as object), chatStart: transient }
+      const a = createChatStreamController({ workspacePath: '/ws', runId: 'r1' })
+      const transientSend = a.send('hello')
+      await vi.runAllTimersAsync()
+      await transientSend
+      expect(transient).toHaveBeenCalledTimes(3)
+
+      // A binding refusal is a fact about the run: the same payload gets the
+      // same answer, so re-sending it only repeats the error in the log.
+      const settled = vi.fn().mockResolvedValue({
+        ok: false,
+        error: 'Existing run teammate binding cannot be changed',
+        code: 'run_binding_immutable'
+      })
+      // @ts-expect-error test bridge
+      window.vyotiq = { ...(window.vyotiq as object), chatStart: settled }
+      const b = createChatStreamController({ workspacePath: '/ws', runId: 'r2' })
+      const settledSend = b.send('hello')
+      await vi.runAllTimersAsync()
+      await settledSend
+      expect(settled).toHaveBeenCalledTimes(1)
+      expect(b.errorCode).toBe('run_binding_immutable')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // A refusal that states a settled fact is just as true 500ms later; retrying
+  // it three times only delays the error the user needed on the first attempt.
+  // Unclassified failures (no code) still retry — see shouldRetryChatStart.
+  it('does not retry a named deterministic refusal', async () => {
+    const chatStart = vi
+      .fn()
+      .mockResolvedValue({ ok: false, error: 'Workspace is not open', code: 'workspace_not_open' })
+    const chatCancel = vi.fn().mockResolvedValue({ ok: true, data: true })
+    // @ts-expect-error test bridge
+    window.vyotiq = { chatStart, chatCancel }
+
+    const controller = createChatStreamController({ workspacePath: '/ws' })
+    await controller.send('hello')
+
+    expect(chatStart).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not retry a settled binding refusal', async () => {
+    const chatStart = vi
+      .fn()
+      .mockResolvedValue({ ok: false, error: 'bound elsewhere', code: 'run_binding_immutable' })
+    const chatCancel = vi.fn().mockResolvedValue({ ok: true, data: true })
+    // @ts-expect-error test bridge
+    window.vyotiq = { chatStart, chatCancel }
+
+    const controller = createChatStreamController({ workspacePath: '/ws' })
+    await controller.send('hello')
+
+    expect(chatStart).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears the refused teammate binding so the next send is not refused again', async () => {
+    const chatStart = vi
+      .fn()
+      .mockResolvedValue({ ok: false, error: 'bound elsewhere', code: 'run_binding_immutable' })
+    const chatCancel = vi.fn().mockResolvedValue({ ok: true, data: true })
+    // @ts-expect-error test bridge
+    window.vyotiq = { chatStart, chatCancel }
+
+    const onAgentProfileRefused = vi.fn()
+    const controller = createChatStreamController({
+      workspacePath: '/ws',
+      getAgentProfileId: () => 'auditer',
+      onAgentProfileRefused
+    })
+    await controller.send('hello')
+
+    expect(onAgentProfileRefused).toHaveBeenCalledTimes(1)
+  })
+
+  it('still retries a run that is only transiently busy', async () => {
+    const chatStart = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, error: 'Run is already active', code: 'run_active' })
+      .mockResolvedValue({ ok: true, data: { runId: 'r-busy', invokeId: 1 } })
+    const chatCancel = vi.fn().mockResolvedValue({ ok: true, data: true })
+    // @ts-expect-error test bridge
+    window.vyotiq = { chatStart, chatCancel }
+
+    const controller = createChatStreamController({ workspacePath: '/ws' })
+    await controller.send('hello')
+
+    expect(chatStart).toHaveBeenCalledTimes(2)
+  })
 })

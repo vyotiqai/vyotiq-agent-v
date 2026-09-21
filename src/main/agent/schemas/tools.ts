@@ -636,12 +636,12 @@ const requestMcpToolsArgs = z
     tools: z
       .array(z.string().min(1))
       .describe(
-        'Full MCP tool names (mcp__server__tool), bare MCP names, and/or builtins to pin for the next step'
+        'Full MCP tool names (mcp__server__tool), bare MCP names, and/or optional builtins to load into the next step'
       )
       .optional(),
     serverId: z
       .string()
-      .describe('Pin every connected tool from this MCP server id for the next step')
+      .describe('Load every connected tool from this MCP server id into the next step')
       .optional()
   })
   .refine((v) => (v.tools?.length ?? 0) > 0 || Boolean(v.serverId?.trim()), {
@@ -653,12 +653,12 @@ const releaseMcpToolsArgs = z
     tools: z
       .array(z.string().min(1))
       .describe(
-        'Full MCP tool names (mcp__server__tool), bare MCP names, and/or builtins to release from the sticky catalog'
+        'Full MCP tool names (mcp__server__tool), bare MCP names, and/or optional builtins to drop from the catalog'
       )
       .optional(),
     serverId: z
       .string()
-      .describe('Release every pinned tool from this MCP server id')
+      .describe('Drop this MCP server id from the catalog, with any single tools loaded from it')
       .optional()
   })
   .refine((v) => (v.tools?.length ?? 0) > 0 || Boolean(v.serverId?.trim()), {
@@ -1153,17 +1153,17 @@ export const TOOL_REGISTRY = {
   },
   mcp_list_tools: {
     description:
-      'List connected MCP tools (name, description, readOnlyHint).',
+      'List connected MCP tools (name, description, readOnlyHint), marking the ones [not loaded] into this step.',
     schema: mcpListToolsArgs
   },
   request_mcp_tools: {
     description:
-      'Optional pin of MCP or built-in names (connected MCP is already in the catalog). Pass full mcp__ names, bare MCP names, builtins, and/or serverId. Succeeds even if nothing new is pinned or the server has no tools.',
+      'Load connected MCP tools into the NEXT step (they load on demand — see <mcp_servers>). Pass serverId for a whole server, full mcp__ names, bare MCP names, and/or optional builtins. Loaded tools are callable from the next step, not this one.',
     schema: requestMcpToolsArgs
   },
   release_mcp_tools: {
     description:
-      'Optional unpin of MCP/deferred built-ins. Pass full mcp__ names, bare names, deferred builtins, and/or serverId. Succeeds even if nothing was pinned.',
+      'Drop MCP tools/servers loaded earlier this run, handing their schemas back to the context window. Pass serverId, full mcp__ names, bare names, and/or optional builtins.',
     schema: releaseMcpToolsArgs
   },
   mcp_list_resources: {

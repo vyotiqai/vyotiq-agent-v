@@ -39,6 +39,17 @@ function startSentry(dsn: string): void {
     beforeSend(event) {
       return scrubSentryEvent(scrubEventLike(event as unknown as Record<string, unknown>)) as unknown as typeof event
     },
+    // `beforeSend` is error-only in this SDK, and @sentry/node captures
+    // outgoing-HTTP spans by default — so without these, transaction payloads
+    // left with full `http.url` / `url.full` values, bypassing the strict
+    // allow-list every other log path goes through. Paths and query strings
+    // routinely carry tokens (see net/egress.ts).
+    beforeSendTransaction(event) {
+      return scrubSentryEvent(scrubEventLike(event as unknown as Record<string, unknown>)) as unknown as typeof event
+    },
+    beforeSendSpan(span) {
+      return scrubSentryEvent(scrubEventLike(span as unknown as Record<string, unknown>)) as unknown as typeof span
+    },
     beforeSendLog(log) {
       if (log.message) log.message = scrubString(String(log.message))
       if (log.attributes) {

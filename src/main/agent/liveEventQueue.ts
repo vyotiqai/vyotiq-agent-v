@@ -3,15 +3,33 @@ import type { AgentEvent } from '../../shared/ipc'
 /**
  * Backstop caps for the in-loop live-event queue. While a tool step's await is
  * blocked, `emitLiveEvent` appends progress to a main-thread array with no
- * bound. Delta events are reconstructable via events.jsonl catch-up, so once a
- * cap is exceeded the OLDEST delta events are dropped instead of letting the
- * queue balloon the main heap — the same fail-open policy
+ * bound, so once a cap is exceeded the OLDEST delta events are dropped instead
+ * of letting the queue balloon the main heap — the same fail-open policy
  * src/main/ipc/streamBatch.ts applies to the renderer-bound batch queue.
+ *
+ * Dropping loses live output (see LIVE_DELTA_TYPES), so both caps must measure
+ * what is actually RETAINED. Every removal therefore goes through
+ * `shiftLiveEvent` or `dropOldestDelta`; draining `events` directly desyncs
+ * `bytes` and permanently trips the byte cap.
  */
 export const LIVE_EVENTS_MAX = 1024
 export const LIVE_EVENTS_MAX_BYTES = 4 * 1024 * 1024
 
-/** Delta events whose loss the renderer repairs via events.jsonl catch-up. */
+/**
+ * Delta types this queue may drop under backpressure.
+ *
+ * NOT "reconstructable via events.jsonl catch-up", as this previously claimed.
+ * Only `terminal_output_delta` ever reaches this queue — the other three are
+ * yielded straight out of the stream loop — and it is persisted nowhere:
+ * `loop.ts` appends only tool_progress/mode_changed/agent_instance_update/
+ * goal_update/loop_update, and `toolResultEventForPersistence` strips
+ * tool_result content past 200 chars. A dropped chunk is a real gap in the
+ * live terminal row until the tool's result message renders from
+ * messages.jsonl, which is the only durable copy.
+ *
+ * The gap is bounded in practice: the renderer stops accumulating a terminal
+ * row at TERMINAL_UI_MAX (64 KB), far below this queue's 4 MB cap.
+ */
 const LIVE_DELTA_TYPES = new Set<string>([
   'text_delta',
   'thinking_delta',
@@ -38,6 +56,23 @@ function liveEventBytes(ev: AgentEvent): number {
 
 export function createLiveEventQueue(): LiveEventQueue {
   return { events: [], bytes: 0, dropped: 0 }
+}
+
+/**
+ * Take the oldest queued event, keeping `bytes` in step with `events`.
+ *
+ * Draining with a bare `queue.events.shift()` leaves `bytes` counting events
+ * that are already gone, so it only ever climbs. Once it passes
+ * LIVE_EVENTS_MAX_BYTES the cap is permanently tripped and every later push
+ * drops the delta it just appended — an "overflow" on an empty queue, which is
+ * how this surfaced: 43,934 `dropped 1 … queued=0` warnings in 58 seconds,
+ * with live terminal output going dark for the rest of the step.
+ */
+export function shiftLiveEvent(queue: LiveEventQueue): AgentEvent | undefined {
+  const ev = queue.events.shift()
+  if (!ev) return undefined
+  queue.bytes = Math.max(0, queue.bytes - liveEventBytes(ev))
+  return ev
 }
 
 /**

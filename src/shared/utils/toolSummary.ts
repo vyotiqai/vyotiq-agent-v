@@ -73,7 +73,7 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   browser_press_key: { running: 'Pressing', done: 'Pressed' },
   browser_select_option: { running: 'Selecting', done: 'Selected' },
   mcp_list_tools: { running: 'Listing MCP', done: 'MCP tools' },
-  request_mcp_tools: { running: 'Pinning MCP', done: 'Pinned MCP' },
+  request_mcp_tools: { running: 'Loading MCP', done: 'Loaded MCP' },
   release_mcp_tools: { running: 'Releasing MCP', done: 'Released MCP' },
   mcp_list_resources: { running: 'Listing MCP resources', done: 'MCP resources' },
   mcp_read_resource: { running: 'Reading MCP resource', done: 'MCP resource' },

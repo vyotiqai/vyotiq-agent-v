@@ -93,6 +93,14 @@ export async function initRendererSentry(telemetryEnabled: boolean): Promise<voi
       beforeSend(event) {
         return scrubSentryEvent(scrubEventLike(event as unknown as Record<string, unknown>)) as unknown as typeof event
       },
+      // `beforeSend` is error-only; transaction and span payloads carry full
+      // URLs and must go through the same scrubber. See main/logging/sentry.ts.
+      beforeSendTransaction(event) {
+        return scrubSentryEvent(scrubEventLike(event as unknown as Record<string, unknown>)) as unknown as typeof event
+      },
+      beforeSendSpan(span) {
+        return scrubSentryEvent(scrubEventLike(span as unknown as Record<string, unknown>)) as unknown as typeof span
+      },
       beforeSendLog(log) {
         if (log.message) log.message = scrubString(String(log.message))
         if (log.attributes) {

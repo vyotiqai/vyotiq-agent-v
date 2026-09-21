@@ -19,11 +19,71 @@ import {
   handleDialog
 } from '@main/app/agentBrowser'
 import { getSettings } from '@main/settings/settings'
+import { currentEgressSeq, listEgress } from '@main/net/egress'
 import { readTrimmed } from './argAccess'
 import { throwIfAborted, toolOk, toolFail, resolveAgentMode } from './index'
 import type { ToolHandler } from './index'
 
-export const browserHandlers = {
+/** Origins named in a refusal note before it summarizes the rest. */
+const REFUSAL_NOTE_MAX_ORIGINS = 5
+
+/**
+ * Describe refusals the egress gate made while a browser op ran.
+ *
+ * Navigation refusals already surface: they throw, and the message names the
+ * allowlist. Subresource refusals do not — the page loads, its XHRs are
+ * cancelled, and the agent sees something that merely looks broken. It then
+ * retries, or reports the site as down, while the one fact that explains the
+ * page sits in a ledger nothing reads mid-run. A policy control that fails
+ * silently is worse than one that refuses loudly.
+ */
+export function egressRefusalNote(workspace: string | undefined, sinceSeq: number): string {
+  const denied = listEgress({ deniedOnly: true, purpose: 'browser_subresource' }).filter(
+    (entry) =>
+      entry.seq > sinceSeq &&
+      // Entries recorded without a workspace cannot be excluded on that basis.
+      (!entry.workspacePath || !workspace || entry.workspacePath === workspace)
+  )
+  if (denied.length === 0) return ''
+
+  const byOrigin = new Map<string, number>()
+  for (const entry of denied) {
+    byOrigin.set(entry.origin, (byOrigin.get(entry.origin) ?? 0) + 1)
+  }
+  const ranked = [...byOrigin.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  const shown = ranked
+    .slice(0, REFUSAL_NOTE_MAX_ORIGINS)
+    .map(([origin, count]) => (count > 1 ? `${origin} (${count})` : origin))
+  const rest = ranked.length - shown.length
+  const more = rest > 0 ? `, and ${rest} more` : ''
+
+  return (
+    `[egress policy] Refused ${denied.length} request(s) from this page to: ` +
+    `${shown.join(', ')}${more}. The page may be incomplete. This is the host ` +
+    `allowlist refusing the request, not the site failing.`
+  )
+}
+
+/**
+ * Append the note to every browser tool result, so no handler can forget it.
+ * Only successful results are annotated: when the op itself failed, the thrown
+ * message already explains why.
+ */
+function withEgressNotes<T extends Partial<Record<AgentToolName, ToolHandler>>>(handlers: T): T {
+  const wrapped: Partial<Record<AgentToolName, ToolHandler>> = {}
+  for (const [name, handler] of Object.entries(handlers) as [AgentToolName, ToolHandler][]) {
+    wrapped[name] = async (workspace, args, signal, context) => {
+      const sinceSeq = currentEgressSeq()
+      const result = await handler(workspace, args, signal, context)
+      if (!result.ok) return result
+      const note = egressRefusalNote(workspace, sinceSeq)
+      return note ? { ...result, content: `${result.content}\n\n${note}` } : result
+    }
+  }
+  return wrapped as T
+}
+
+const rawBrowserHandlers = {
   browser_search: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const query = readTrimmed(args, 'query')
@@ -328,3 +388,5 @@ export const browserHandlers = {
     return toolOk('browser_handle_dialog', action, content)
   }
 } satisfies Partial<Record<AgentToolName, ToolHandler>>
+
+export const browserHandlers = withEgressNotes(rawBrowserHandlers)

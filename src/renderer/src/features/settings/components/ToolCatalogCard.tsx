@@ -96,7 +96,11 @@ export function ToolCatalogCard() {
             <p className="m-0 mb-1 text-xs font-medium text-fg-strong">
               {server?.name ?? serverId}{' '}
               <span className="font-normal text-tertiary">
-                ({server?.connected ? 'connected' : server?.enabled === false ? 'disabled' : 'not connected'})
+                ({server?.connected ? 'connected' : server?.enabled === false ? 'disabled' : 'not connected'}
+                {server?.loading === 'every-step'
+                  ? ' · loaded every step'
+                  : ' · loaded on demand'}
+                )
               </span>
             </p>
             <ul className="m-0 list-none divide-y divide-border/60 rounded-lg border border-border/60 p-0">
@@ -110,8 +114,10 @@ export function ToolCatalogCard() {
 
       <p className="m-0 text-xs text-tertiary">
         Built-in tools ship with the app and cannot be removed. Add or remove MCP tools from the
-        server cards — enable/disable a server, or edit its allowed/denied tool lists. This list
-        updates live; no restart needed.
+        server cards — enable/disable a server, or edit its allowed/denied tool lists. A server
+        loaded on demand is fully available to the agent; its schemas reach a run only once that
+        run asks for them, which keeps the context window free. This list updates live; no restart
+        needed.
       </p>
     </div>
   )

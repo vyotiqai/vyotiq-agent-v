@@ -136,6 +136,103 @@ describe('executeTool MCP run gating', () => {
     expect(result.content).toMatch(/already pinned/i)
   })
 
+  it('loads a deferred tool for the next step on the first call', async () => {
+    const pinned = new Set<string>()
+    const counts = new Map<string, number>()
+    const lastUsed = new Map<string, number>()
+    let invalidated = false
+    const result = await executeTool(
+      'mcp__fs__read_file',
+      '{}',
+      '/tmp/ws',
+      new AbortController().signal,
+      {
+        runEnabledMcpIds: new Set(['fs']),
+        stepMcpToolNames: new Set<string>(),
+        runPinnedMcpToolNames: pinned,
+        mcpNotInCatalogCounts: counts,
+        mcpLastUsedByName: lastUsed,
+        currentStep: 7,
+        invalidateMcpToolCatalogCache: () => {
+          invalidated = true
+        }
+      }
+    )
+    expect(result.ok).toBe(false)
+    expect(result.content).toMatch(/loaded for the next step/)
+    expect(pinned.has('mcp__fs__read_file')).toBe(true)
+    expect(lastUsed.get('mcp__fs__read_file')).toBe(7)
+    expect(invalidated).toBe(true)
+    // A self-healing miss is not a failure to count against fail-fast.
+    expect(counts.get('mcp__fs__read_file')).toBeUndefined()
+    expect(invokeMcpTool).not.toHaveBeenCalled()
+  })
+
+  it('does not load a denied tool even when it is connected', async () => {
+    const pinned = new Set<string>()
+    const result = await executeTool(
+      'mcp__fs__write_file',
+      '{}',
+      '/tmp/ws',
+      new AbortController().signal,
+      {
+        runEnabledMcpIds: new Set(['fs']),
+        mcpToolPolicies: new Map([['fs', { deniedTools: ['write_file'] }]]),
+        stepMcpToolNames: new Set<string>(),
+        runPinnedMcpToolNames: pinned
+      }
+    )
+    expect(result.ok).toBe(false)
+    expect(result.content).toMatch(/allow\/deny list/)
+    expect(pinned.size).toBe(0)
+  })
+
+  it('does not load a name no connected server offers', async () => {
+    getMcpToolDefinition.mockReturnValueOnce(undefined as never)
+    const pinned = new Set<string>()
+    const result = await executeTool(
+      'mcp__fs__hallucinated',
+      '{}',
+      '/tmp/ws',
+      new AbortController().signal,
+      {
+        runEnabledMcpIds: new Set(['fs']),
+        stepMcpToolNames: new Set<string>(),
+        runPinnedMcpToolNames: pinned
+      }
+    )
+    expect(result.ok).toBe(false)
+    expect(result.content).toMatch(/Unknown or unavailable MCP tool/)
+    expect(pinned.size).toBe(0)
+  })
+
+  it('falls back to fail-fast when an already-loaded tool stays out of the catalog', async () => {
+    const pinned = new Set(['mcp__fs__read_file'])
+    const counts = new Map<string, number>()
+    const ctx = {
+      runEnabledMcpIds: new Set(['fs']),
+      stepMcpToolNames: new Set<string>(),
+      runPinnedMcpToolNames: pinned,
+      mcpNotInCatalogCounts: counts
+    }
+    const first = await executeTool(
+      'mcp__fs__read_file',
+      '{}',
+      '/tmp/ws',
+      new AbortController().signal,
+      ctx
+    )
+    expect(first.content).toMatch(/already pinned/i)
+    const second = await executeTool(
+      'mcp__fs__read_file',
+      '{}',
+      '/tmp/ws',
+      new AbortController().signal,
+      ctx
+    )
+    expect(second.content).toMatch(/FAIL-FAST/)
+  })
+
   it('invokes when tool is in the step catalog', async () => {
     await executeTool(
       'mcp__fs__read_file',

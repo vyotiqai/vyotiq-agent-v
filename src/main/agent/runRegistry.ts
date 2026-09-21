@@ -221,7 +221,9 @@ export function tryRegisterRunAbort(
 ): TryRegisterRunResult {
   if (active.has(runId)) {
     rejectedRunStarts++
-    return { ok: false, error: 'Run is already active' }
+    // Coded so the caller can tell this transient race apart from a settled
+    // refusal and retry it; an uncoded failure is treated as final.
+    return { ok: false, error: 'Run is already active', code: 'run_active' }
   }
   if (options.requireProfileSlot && agentProfileId) {
     const holder = findActiveRunForProfile(agentProfileId)

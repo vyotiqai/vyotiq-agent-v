@@ -227,6 +227,7 @@ export const IPC = {
   ptyKill: 'pty:kill',
   ptyData: 'pty:data',
   ptyExit: 'pty:exit',
+  ptySessionsChanged: 'pty:sessions-changed',
   themeChanged: 'theme:changed',
   getSystemTheme: 'theme:get-system',
   appearancePickCustomCss: 'appearance:pickCustomCss',

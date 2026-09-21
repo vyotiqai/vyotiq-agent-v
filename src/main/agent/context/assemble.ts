@@ -83,6 +83,7 @@ function stableSystemFingerprint(parts: {
   responseStyleSection: string
   rules: string
   skillsSection: string
+  mcpSection: string
   pluginRulesSection: string
   contract: string
   plan: string
@@ -101,6 +102,7 @@ function stableSystemFingerprint(parts: {
     parts.responseStyleSection,
     parts.rules,
     parts.skillsSection,
+    parts.mcpSection,
     parts.pluginRulesSection,
     parts.contract,
     parts.plan,
@@ -277,6 +279,7 @@ type SystemSectionLabel =
   | 'contract'
   | 'plan'
   | 'skills'
+  | 'mcpServers'
   | 'pluginRules'
   | 'userRules'
   | 'responseStyle'
@@ -292,6 +295,7 @@ function buildStableSystem(parts: {
   responseStyleSection?: string
   rules: string
   skillsSection?: string
+  mcpSection?: string
   pluginRulesSection?: string
   contract?: string
   plan?: string
@@ -308,6 +312,7 @@ function buildStableSystem(parts: {
     responseStyleSection: parts.responseStyleSection ?? '',
     rules: parts.rules,
     skillsSection: parts.skillsSection ?? '',
+    mcpSection: parts.mcpSection ?? '',
     pluginRulesSection: parts.pluginRulesSection ?? '',
     contract: parts.contract ?? '',
     plan: parts.plan ?? '',
@@ -379,6 +384,10 @@ function buildStableSystem(parts: {
   if (parts.skillsSection?.trim()) {
     const skills = capWithinSystem(parts.skillsSection.trim(), Math.floor(parts.budgets.system * 0.35))
     if (skills) sections.push({ label: 'skills', text: skills })
+  }
+  if (parts.mcpSection?.trim()) {
+    const mcp = capWithinSystem(parts.mcpSection.trim(), Math.floor(parts.budgets.system * 0.2))
+    if (mcp) sections.push({ label: 'mcpServers', text: mcp })
   }
   if (parts.pluginRulesSection?.trim()) {
     const plugins = capWithinSystem(parts.pluginRulesSection.trim(), Math.floor(parts.budgets.system * 0.25))
@@ -532,6 +541,7 @@ function buildSystemZones(parts: {
   userRules: string
   rules: string
   skillsSection?: string
+  mcpSection?: string
   pluginRulesSection?: string
   contract?: string
   plan?: string
@@ -553,6 +563,7 @@ function buildSystemZones(parts: {
     responseStyleSection: parts.responseStyleSection,
     rules: parts.rules,
     skillsSection: parts.skillsSection,
+    mcpSection: parts.mcpSection,
     pluginRulesSection: parts.pluginRulesSection,
     contract: parts.contract,
     plan: parts.plan,
@@ -657,6 +668,7 @@ function buildBreakdownDetail(args: {
     mcpByServer: [],
     deferredBuiltin: { tokens: 0, count: 0 },
     deferredMcp: { tokens: 0, count: 0 },
+    deferredMcpByServer: [],
     total: toolsJsonEstimate
   }
   return {
@@ -708,6 +720,7 @@ export async function assembleContext(
     responseStyleSection,
     rules,
     skillsSection: input.skillsSection,
+    mcpSection: input.mcpSection,
     pluginRulesSection: input.pluginRulesSection,
     contract: input.contract,
     plan: input.plan,

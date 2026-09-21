@@ -53,8 +53,15 @@ function pathKey(path: string): string {
 }
 
 /**
- * Resolve `relPath` against the workspace root and reject anything that lands outside it.
- * Throws rather than returning null so no caller can accidentally ignore the check.
+ * Resolve `relPath` against the workspace root and reject anything whose
+ * RESOLVED STRING lands outside it. Throws rather than returning null so no
+ * caller can accidentally ignore the check.
+ *
+ * This is the string layer only: it does not read the filesystem, so a symlink
+ * inside the workspace that points outside it passes. Any caller that then
+ * touches the path must use `resolveInsideWorkspace`
+ * (src/main/workspace/safePath.ts), which realpaths and re-checks; this
+ * function is what that wrapper is built on.
  */
 export function assertInsideWorkspace(workspaceRoot: string, relPath: string): string {
   const root = canonicalizeWorkspacePath(workspaceRoot)
@@ -105,4 +112,50 @@ export function isCuratedDocPath(rel: string): boolean {
   }
   if (!n.includes('/') && (base.endsWith('.md') || base.endsWith('.mdx'))) return true
   return false
+}
+
+/**
+ * Normalize a tool-reported path into one the workspace file IPC can open.
+ *
+ * The two sides disagree on form: agent tools take whatever the model sent
+ * (`readPathArg` does not normalize, and `assertInsideWorkspace` has an
+ * explicit branch for rooted paths), while the workspace file service runs
+ * every path through `isSafeWorkspaceRelPath`, which rejects drive letters,
+ * UNC prefixes and leading slashes. A tool card holding an absolute path
+ * would therefore render a link that always fails to open.
+ *
+ * Returns null when the path escapes the workspace, names the root itself, or
+ * cannot be expressed relative to it — callers render inert chrome instead.
+ */
+export function toWorkspaceRelPath(
+  workspaceRoot: string | null | undefined,
+  pathArg: string | null | undefined
+): string | null {
+  const raw = (pathArg ?? '').trim()
+  if (!raw || raw.includes('\0')) return null
+
+  // Already relative: normalize separators, `./` and trailing slashes only.
+  const slashed = raw.replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/\/+$/, '')
+  if (isSafeWorkspaceRelPath(slashed)) return slashed
+
+  const root = canonicalizeWorkspacePath(workspaceRoot ?? '')
+  if (!root) return null
+
+  let absolute: string
+  try {
+    absolute = assertInsideWorkspace(root, raw)
+  } catch {
+    return null
+  }
+
+  const windows = isWindowsStylePath(root)
+  const separator = windows ? '\\' : '/'
+  const prefix = root.endsWith(separator) ? root : root + separator
+  const absoluteKey = windows ? absolute.toLowerCase() : absolute
+  const prefixKey = windows ? prefix.toLowerCase() : prefix
+  // Equal to the root (a directory, not a file) fails this too, by design.
+  if (!absoluteKey.startsWith(prefixKey)) return null
+
+  const rel = absolute.slice(prefix.length).replace(/\\/g, '/')
+  return isSafeWorkspaceRelPath(rel) ? rel : null
 }

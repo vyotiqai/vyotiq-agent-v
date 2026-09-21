@@ -234,7 +234,10 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
       return {
         verb: toolLabel(tool.name, tool.status),
         target,
-        filePath: data.path
+        filePath: data.path,
+        // Only a real requested range is worth a jump; a whole-file read
+        // starts at 1, which is where the editor opens anyway.
+        ...(data.startLine > 1 ? { fileLine: data.startLine } : {})
       }
     }
   },
@@ -248,6 +251,7 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
         target: basename(edit.path) || edit.path,
         added: edit.added,
         removed: edit.removed,
+        ...(edit.changedLine != null ? { fileLine: edit.changedLine } : {}),
         ...(edit.iconPath
           ? { filePath: edit.iconPath }
           : { icon: toolIconName(tool.name) })
@@ -264,6 +268,7 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
         target: basename(edit.path) || edit.path,
         added: edit.added,
         removed: edit.removed,
+        ...(edit.changedLine != null ? { fileLine: edit.changedLine } : {}),
         ...(edit.iconPath
           ? { filePath: edit.iconPath }
           : { icon: toolIconName(tool.name) })
@@ -653,7 +658,8 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
     headerMeta: (tool) => ({
       verb: toolLabel(tool.name, tool.status),
       target: tool.summary,
-      icon: 'branch'
+      icon: 'pullRequest',
+      opensPanel: 'pr'
     })
   },
   github_pr_review: {
@@ -662,7 +668,8 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
     headerMeta: (tool) => ({
       verb: toolLabel(tool.name, tool.status),
       target: tool.summary,
-      icon: 'branch'
+      icon: 'pullRequest',
+      opensPanel: 'pr'
     })
   },
   github_issue: {

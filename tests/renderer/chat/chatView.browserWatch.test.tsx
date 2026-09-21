@@ -76,7 +76,7 @@ describe('ChatView browser watch affordance', () => {
   it('shows no banner while the agent is not browsing', () => {
     render(<ChatView {...baseProps} />)
     expect(q('[data-browser-watch-banner]')).toBeNull()
-    expect(q('[data-browser-rail-row]')).toBeNull()
+    expect(q('[data-rail-row="browser"][data-rail-active]')).toBeNull()
   })
 
   it('shows the watch banner and pulses the rail while the agent browses with the panel closed', async () => {
@@ -94,7 +94,10 @@ describe('ChatView browser watch affordance', () => {
     expect(banner.textContent).toContain('github.com')
     expect(screen.getByRole('button', { name: /watch live/i })).toBeTruthy()
     // Dock is closed → the floating rail renders with the busy marker.
-    expect(q('[data-browser-rail-row]')).toBeTruthy()
+    expect(q('[data-rail-row="browser"][data-rail-active]')).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: /show browser panel.*Browsing github\.com/i })
+    ).toBeTruthy()
   })
 
   it('hides the banner when the browser panel is already the visible dock', async () => {

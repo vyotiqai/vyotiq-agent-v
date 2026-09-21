@@ -13,6 +13,7 @@ import {
   shouldBlockPanelShortcut,
   shouldDeferAppEscapeStop,
   shortcutCatalog,
+  shortcutAriaKeys,
   shortcutLabel,
   useAppShortcuts
 } from '@renderer/lib/shortcuts'
@@ -141,6 +142,10 @@ describe('shortcutLabel', () => {
     expect(shortcutLabel('panelPlan')).toBe('Ctrl+Shift+D')
     expect(shortcutLabel('panelPr')).toBe('Ctrl+Shift+G')
     expect(shortcutLabel('closeChat')).toBe('Ctrl+W')
+    // aria-keyshortcuts is a fixed WAI-ARIA syntax, not the platform label.
+    expect(shortcutAriaKeys('panelFiles')).toBe('Control+Shift+E')
+    expect(shortcutAriaKeys('panelTerminal')).toBe('Control+`')
+    expect(shortcutAriaKeys('stop')).toBe('Escape')
     expect(shortcutLabel('workspace1')).toBe('Ctrl+1')
     expect(shortcutLabel('workspace9')).toBe('Ctrl+9')
     expect(shortcutCatalog().some((row) => row.id === 'search' && row.label === 'Ctrl+K')).toBe(

@@ -13,6 +13,7 @@ import {
 } from '@main/net/webFetch'
 
 const PUBLIC_IP = '93.184.216.34'
+const OTHER_PUBLIC_IP = '93.184.216.35'
 const PUBLIC_IPV6 = '2606:2800:220:1:248:1893:25c8:1946'
 
 afterEach(() => {
@@ -145,6 +146,52 @@ describe('fetchWithValidatedRedirects', () => {
     expect(finalUrl.href).toBe(`https://${PUBLIC_IP}/final`)
     expect(await response.text()).toContain('hello')
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  // This is a hand-rolled redirect loop over http(s).request, so the platform
+  // rule that drops credentials cross-origin does not apply on its own.
+  it('drops credential headers when a redirect crosses origin', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { location: `https://${OTHER_PUBLIC_IP}/final` }
+        })
+      )
+      .mockResolvedValueOnce(new Response('ok', { status: 200 }))
+    setPublicFetchForTests(fetchMock)
+
+    await fetchWithValidatedRedirects(
+      new URL(`https://${PUBLIC_IP}/start`),
+      new AbortController().signal,
+      { Authorization: 'Bearer sk-secret', 'x-api-key': 'sk-secret', accept: 'text/html' }
+    )
+
+    expect(fetchMock.mock.calls[0]?.[3]).toMatchObject({ Authorization: 'Bearer sk-secret' })
+    const secondHopHeaders = fetchMock.mock.calls[1]?.[3] as Record<string, string>
+    expect(secondHopHeaders).toEqual({ accept: 'text/html' })
+  })
+
+  it('keeps credential headers on a same-origin redirect', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { location: `https://${PUBLIC_IP}/final` }
+        })
+      )
+      .mockResolvedValueOnce(new Response('ok', { status: 200 }))
+    setPublicFetchForTests(fetchMock)
+
+    await fetchWithValidatedRedirects(
+      new URL(`https://${PUBLIC_IP}/start`),
+      new AbortController().signal,
+      { Authorization: 'Bearer sk-secret' }
+    )
+
+    expect(fetchMock.mock.calls[1]?.[3]).toMatchObject({ Authorization: 'Bearer sk-secret' })
   })
 
   it('appends SPA shell warning for nav-heavy markdown', () => {

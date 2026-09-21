@@ -111,11 +111,6 @@ function recordAppendError(dir: string, err: unknown): void {
   bumpFailure(pendingNotices, dir, err)
 }
 
-function takeAppendError(dir: string): DirAppendFailures | undefined {
-  const err = failuresForFlush.get(dir)
-  if (err) failuresForFlush.delete(dir)
-  return err
-}
 
 /** Consume the accumulated mid-run append failures for a run dir, if any. */
 export function takeEventAppendFailureNotice(dir: string): Error | undefined {
@@ -125,10 +120,6 @@ export function takeEventAppendFailureNotice(dir: string): Error | undefined {
   return formatAppendFailure('events.jsonl', [f])
 }
 
-function throwIfAppendError(dir: string): void {
-  const f = takeAppendError(dir)
-  if (f) throw formatAppendFailure('events.jsonl', [f])
-}
 
 function archiveFilename(): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -310,9 +301,25 @@ export function enqueueEventAppend(dir: string, event: unknown): void {
   appendChains.set(dir, next)
 }
 
+/**
+ * Bound on flush drain passes.
+ *
+ * An append enqueued while we await chains onto a NEW promise in the map, which
+ * a single snapshot never sees — so one pass can return with writes still
+ * outstanding. That is reachable on quit: a run that misses the 15s quiesce is
+ * only logged, then keeps appending, and its last writes are the ones worth
+ * keeping. Drain until the map is empty, but never spin forever on a run that
+ * is still producing.
+ */
+const FLUSH_DRAIN_MAX_PASSES = 20
+
 export async function flushEventAppends(dir?: string): Promise<void> {
   if (dir) {
-    await appendChains.get(dir)
+    for (let pass = 0; pass < FLUSH_DRAIN_MAX_PASSES; pass += 1) {
+      const chain = appendChains.get(dir)
+      if (!chain) break
+      await chain
+    }
     const f = failuresForFlush.get(dir)
     if (f) {
       failuresForFlush.delete(dir)
@@ -320,7 +327,9 @@ export async function flushEventAppends(dir?: string): Promise<void> {
     }
     return
   }
-  await Promise.all([...appendChains.values()])
+  for (let pass = 0; pass < FLUSH_DRAIN_MAX_PASSES && appendChains.size > 0; pass += 1) {
+    await Promise.all([...appendChains.values()])
+  }
   if (failuresForFlush.size === 0) return
   const all = [...failuresForFlush.values()]
   failuresForFlush.clear()

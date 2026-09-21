@@ -11,7 +11,7 @@ export {
 } from './meta'
 export { getToolEntry, getToolBody, toolHasBody, getToolHeaderMeta } from './registry'
 export { ToolBodyView } from './presentation'
-export { CompactRow, ProminentChrome } from './chrome'
+export { CompactRow, ProminentChrome, ToolFileBadge, ToolPanelIcon } from './chrome'
 export { ExpandPanel } from './ExpandPanel'
 export { useExpandMotion, EXPAND_CLOSE_FALLBACK_MS } from './useExpandMotion'
 export {
@@ -43,6 +43,7 @@ export {
   parseDiffPreview,
   parseUnifiedDiff,
   countDiffLines,
+  firstChangedLineInDiff,
   countLines,
   collectWritingChanges,
   iconPathForFile,

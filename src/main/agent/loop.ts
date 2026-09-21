@@ -17,6 +17,7 @@ import { DEFAULT_AGENT_IDENTITY, DEFAULT_AGENT_PERSONA, DEFAULT_AGENT_TONE } fro
 import { runGoalFromUserText, findAbsolutePathsInText, outsideWorkspacePathGuidance, stubPastSkillInvocationsInMessages } from '../../shared/slashCommands'
 import { resolveProviderChatBaseUrl, seedModelsFor } from '../../shared/providers'
 import { formatError, isAbortError } from '../../shared/errors'
+import { AppError } from '../../shared/utils/errors'
 import { logger, logErrorSummary } from '../../shared/logger'
 import { workspaceIdFromPath } from '../../shared/workspaceId'
 import { isNetworkFailureCode, iterateNetworkWait, resolveOfflineWaitMs } from './networkMonitor'
@@ -41,7 +42,7 @@ import { recallRunModelSelection, rememberRunModelSelection } from './runModelSe
 import { stripToolShapedAssistantText } from '../../shared/transcript'
 import { createApprovalGate } from './toolApproval'
 import { persistAlwaysAllow } from './toolApprovalStore'
-import { createLiveEventQueue, pushLiveEvent } from './liveEventQueue'
+import { createLiveEventQueue, pushLiveEvent, shiftLiveEvent } from './liveEventQueue'
 import { getSecret, hasStoredSecretBlob, secretStatus } from '@main/settings/secrets'
 import { getSettings } from '@main/settings/settings'
 import { resolveAgentProfile } from '@main/settings/agentProfiles'
@@ -101,7 +102,7 @@ import {
   quarantineReasoningState,
   thinkingFromReasoningState
 } from '../../shared/reasoning'
-import type { StopReason, TokenUsage, ToolCall } from './providers/types'
+import type { StopReason, TokenUsage, ToolCall, ToolDefinition } from './providers/types'
 import {
   cancelRun,
   clearFollowUps,
@@ -209,6 +210,11 @@ import { resolveEffectiveMcpServers, resolveMcpServersForSessionMap, mcpSessionM
 import { buildSkillsSection, loadEnabledSkills, loadPluginRules } from './skills'
 import { beginWriteCheckpoint, finalizeWriteCheckpoint, getWriteCheckpoint } from './checkpoints'
 import { isMcpToolPermitted } from '../../shared/utils/mcpToolPolicy'
+import {
+  buildMcpServersSection,
+  mcpToolNamesMentionedIn,
+  selectMcpToolDefs
+} from './context/mcpToolLoading'
 import { mcpAuthAllowedForWorkspace } from '../../shared/mcpApps'
 import {
   filterToolDefsForMode,
@@ -230,6 +236,18 @@ function lastUserMessageIndex(messages: ChatMessage[]): number | undefined {
     if (messages[i]?.role === 'user') return i
   }
   return undefined
+}
+
+/** Plain text of the latest user message (text parts only, files ignored). */
+function lastUserMessageText(messages: ChatMessage[]): string {
+  const index = lastUserMessageIndex(messages)
+  const content = index === undefined ? undefined : messages[index]?.content
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((part) => (part.type === 'text' ? part.text : ''))
+    .filter(Boolean)
+    .join(' ')
 }
 
 /**
@@ -881,20 +899,54 @@ export function createAgentProfileSnapshot(
   return { version: 1, ...behavior, runtime }
 }
 
+/**
+ * A launch that contradicts what the run is already bound to. Typed, so the
+ * launcher can recognise this refusal for what it is — a settled fact about
+ * the run, worth a client-level log and no retry — instead of catching every
+ * throw from the check and labelling it a binding conflict.
+ */
+export function runBindingRefusal(message: string): AppError {
+  return new AppError(message, { code: 'IPC_CLIENT', retriable: false })
+}
+
+/**
+ * What an existing run will bind this turn, refusing only a real contradiction.
+ *
+ * The invariant is that a binding cannot be CHANGED — not that it cannot be
+ * set, and not that it must be restated. Two cases are therefore not
+ * violations, and treating them as such bricked whole chats, because every
+ * later send repeated the same refusal:
+ *
+ *  - Adoption. A run that never bound a teammate has no snapshot and no memory
+ *    namespace to contradict, so picking one mid-chat is exactly as safe as
+ *    picking it on the run's first turn. The composer offers that on any idle
+ *    chat, and the renderer's own setter already allows it (it refuses only
+ *    when a DURABLE binding differs) — main was the one surface disagreeing.
+ *  - Omission. An unstated teammate means "leave the run's own binding alone",
+ *    never "unbind". A resumed run whose teammate was since deleted comes
+ *    through here with nothing stated, by design: the renderer prunes bindings
+ *    that no longer resolve, and runAgent keeps such a run alive on its
+ *    persisted snapshot and namespace.
+ */
 export function validateExistingRunStart(
   persisted: RunStatus,
   requested: { agentProfileId?: string; runtime?: 'local' | 'cloud' },
   explicit: { agentProfileId: boolean; runtime: boolean }
 ): { agentProfileId?: string; runtime: 'local' | 'cloud' } {
-  if (explicit.agentProfileId && requested.agentProfileId !== persisted.agentProfileId) {
-    throw new Error('Existing run teammate binding cannot be changed')
+  const bound = persisted.agentProfileId
+  const stated = explicit.agentProfileId ? requested.agentProfileId : undefined
+  if (bound && stated && stated !== bound) {
+    throw runBindingRefusal('Existing run teammate binding cannot be changed')
   }
   const runtime = persisted.runtime ?? persisted.agentProfileSnapshot?.runtime ?? 'local'
-  if (explicit.runtime && requested.runtime !== runtime) {
-    throw new Error('Existing run runtime cannot be changed')
+  // Runtime has no unbound state (it resolves to 'local'), so only a stated
+  // value can contradict it.
+  if (explicit.runtime && requested.runtime != null && requested.runtime !== runtime) {
+    throw runBindingRefusal('Existing run runtime cannot be changed')
   }
+  const agentProfileId = bound ?? stated
   return {
-    ...(persisted.agentProfileId ? { agentProfileId: persisted.agentProfileId } : {}),
+    ...(agentProfileId ? { agentProfileId } : {}),
     runtime
   }
 }
@@ -979,8 +1031,12 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         existingStatus,
         input,
         {
-          agentProfileId: Object.prototype.hasOwnProperty.call(input, 'agentProfileId'),
-          runtime: Object.prototype.hasOwnProperty.call(input, 'runtime')
+          // A stated field is one that carries a value. Key presence cannot
+          // stand in for it: structured clone preserves own properties whose
+          // value is `undefined`, so an IPC payload that always spells the key
+          // out would read as stated on every send.
+          agentProfileId: input.agentProfileId !== undefined,
+          runtime: input.runtime !== undefined
         }
       )
     : null
@@ -1693,13 +1749,27 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     let lastMcpCatalogFp = ''
     /** One forced reconnect attempt per run when enabled servers previously failed. */
     let mcpFailureRetried = false
-    /** MCP tool names in the current step's provider catalog (post budget trim). */
+    /** MCP tool names in the current step's provider catalog (post admission). */
     let stepMcpToolNames = new Set<string>()
-    /** Optional pin bookkeeping for request_mcp_tools / release_mcp_tools.
-     * The step catalog always carries every connected MCP tool and builtin, so
-     * pins never change the catalog — they exist so request/release respond
-     * honestly and so not-in-catalog fail-fast stays real for mode-denied MCP. */
+    /** `<mcp_servers>` directory: connected servers and the names they offer. */
+    let mcpServersSection = ''
+    /** Message-named MCP tools are pre-loaded once per invoke, not every step. */
+    let mcpSeedApplied = false
+    /**
+     * Whole servers this run loaded with `request_mcp_tools`. Append-only until
+     * `release_mcp_tools`: every change rewrites the wire tool array, which sits
+     * ahead of everything else in the request and so voids the provider prompt
+     * cache for the entire prompt. Load-on-demand is worth one such break;
+     * churning the catalog per step would not be.
+     */
+    const runAttachedMcpServerIds = new Set<string>()
+    /** Single MCP tools admitted by `request_mcp_tools` or by a first call. */
     const runPinnedMcpToolNames = new Set<string>()
+    // Both are per-invoke on purpose. A follow-up turn clears the loop
+    // checkpoint anyway, so persisting them would only cover the interrupted
+    // resume; a new invoke that still needs a server re-loads it on the first
+    // call it makes (executeTool admits it), which costs one step and never
+    // leaves a run wondering why a tool it used is gone.
     const mcpLastUsedByName = new Map<string, number>()
     /** Per-tool not-in-catalog rejection counts (fail-fast after repeats). */
     const mcpNotInCatalogCounts = new Map<string, number>()
@@ -1759,27 +1829,74 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             }
           ])
       )
-      const liveCodeIndexEnabled = getSettings().codeIndex?.enabled !== false
-      const catalogFp = `${refreshFp}::${agentMode}::${settings.autoModeSwitch ? 1 : 0}::${modelInfo.supportsTools === false ? 0 : 1}::ci${liveCodeIndexEnabled ? 1 : 0}`
+      /**
+       * Connected tools this run may reach: enabled server, permitted by its
+       * allow/deny policy. The universe the context meter measures — not what
+       * goes on the wire.
+       */
+      const mcpCandidates = (): ToolDefinition[] =>
+        listMcpToolDefinitions().filter((t) => {
+          const parsed = parseMcpToolName(t.name)
+          if (parsed == null || !runEnabledMcpIds.has(parsed.serverId)) return false
+          const policy = mcpToolPolicies.get(parsed.serverId)
+          if (policy && !isMcpToolPermitted(parsed.toolName, policy)) return false
+          return true
+        })
+      if (!mcpSeedApplied) {
+        mcpSeedApplied = true
+        // The composer's /mcp picker writes the chosen tool's full name into
+        // the message, so the user has already said which server this run
+        // needs. Loading it now spends nothing and saves the run a step.
+        const asked = mcpToolNamesMentionedIn(lastUserMessageText(messages))
+        if (asked.length > 0) {
+          const connected = new Set(mcpCandidates().map((t) => t.name))
+          for (const name of asked) {
+            if (connected.has(name)) runPinnedMcpToolNames.add(name)
+          }
+        }
+      }
+      const liveSettings = getSettings()
+      const liveCodeIndexEnabled = liveSettings.codeIndex?.enabled !== false
+      const mcpToolLoading = liveSettings.mcpToolLoading ?? 'on-demand'
+      const autoLoadMcpServerIds = new Set(
+        runMcpServers.filter((s) => s.enabled && s.autoLoad === true).map((s) => s.id)
+      )
+      // Admission state belongs in the fingerprint, not only in the
+      // invalidate hook: a pin that failed to invalidate would otherwise be
+      // swallowed by this early return and the agent would be told to wait for
+      // a step that never admits its tool.
+      const admissionFp = `${mcpToolLoading}::${[...autoLoadMcpServerIds].sort().join(',')}::${[
+        ...runAttachedMcpServerIds
+      ]
+        .sort()
+        .join(',')}::${[...runPinnedMcpToolNames].sort().join(',')}`
+      const catalogFp = `${refreshFp}::${agentMode}::${settings.autoModeSwitch ? 1 : 0}::${modelInfo.supportsTools === false ? 0 : 1}::ci${liveCodeIndexEnabled ? 1 : 0}::${admissionFp}`
       if (configUnchanged && catalogFp === lastMcpCatalogFp && lastMcpCatalogFp !== '') {
         // Servers/mode/switch availability/tools support unchanged — reuse prior defs.
         return
       }
       lastMcpCatalogFp = catalogFp
-      const mcpToolDefs = listMcpToolDefinitions().filter((t) => {
-        const parsed = parseMcpToolName(t.name)
-        if (parsed == null || !runEnabledMcpIds.has(parsed.serverId)) return false
-        const policy = mcpToolPolicies.get(parsed.serverId)
-        if (policy && !isMcpToolPermitted(parsed.toolName, policy)) return false
-        return true
+      const mcpCandidateDefs = mcpCandidates()
+      // Load-on-demand: an installed server rides in the `<mcp_servers>`
+      // directory as a line of names, and only reaches the wire once this run
+      // asks for it. Shipping every connected schema every step measured 67,020
+      // tokens across 95 tools on a four-server install — re-read on every step
+      // of every run, whether or not the run ever touched MCP.
+      const mcpSelection = selectMcpToolDefs({
+        candidates: mcpCandidateDefs,
+        loading: mcpToolLoading,
+        autoLoadServerIds: autoLoadMcpServerIds,
+        attachedServerIds: runAttachedMcpServerIds,
+        pinnedToolNames: runPinnedMcpToolNames
       })
-      const fullToolDefs = [...AGENT_TOOLS, ...mcpToolDefs]
+      const fullToolDefs = [...AGENT_TOOLS, ...mcpCandidateDefs]
+      const wireToolDefs = [...AGENT_TOOLS, ...mcpSelection.active]
       const allToolDefs =
         modelInfo.supportsTools !== false
           ? filterToolDefsForCodeIndex(
               filterToolDefsForMode(
                 agentMode,
-                fullToolDefs,
+                wireToolDefs,
                 {
                 autoModeSwitch: settings.autoModeSwitch,
                 inlineInstance: isInlineInstance
@@ -1787,8 +1904,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               liveCodeIndexEnabled
             )
           : []
-      // Full catalog every step: nothing is trimmed, deferred, or evicted —
-      // request_mcp_tools pins are bookkeeping only (see toolsBudget.ts).
+      // Builtins are never deferred; only MCP is admitted on demand.
       const fullCatalog = buildStepToolCatalog(allToolDefs)
       toolDefs = fullCatalog.tools.map((t) => ({
         name: t.name,
@@ -1800,6 +1916,16 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         modelInfo.supportsTools !== false ? fullToolDefs : [],
         new Set(fullCatalog.tools.map((t) => t.name))
       )
+      // Ask and Plan cannot call MCP at all (isMcpAllowedInMode), so naming a
+      // load path there would be a dead instruction.
+      mcpServersSection =
+        modelInfo.supportsTools !== false && agentMode === 'agent'
+          ? buildMcpServersSection({
+              candidates: mcpCandidateDefs,
+              loadedServerIds: mcpSelection.loadedServerIds,
+              deferredServerIds: mcpSelection.deferredServerIds
+            })
+          : ''
       const keptNameSet = new Set(fullCatalog.tools.map((t) => t.name))
       // A successful refresh that carries the tool should clear fail-fast history.
       for (const name of [...mcpNotInCatalogCounts.keys()]) {
@@ -2051,6 +2177,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         priorCompaction: compaction,
         keepRecentTurns: settings.keepRecentTurns,
         skillsSection,
+        mcpSection: mcpServersSection,
         pluginRulesSection,
         userRules: getSettings().userRules ?? [],
         persona: settings.agentPersona || DEFAULT_AGENT_PERSONA,
@@ -3586,6 +3713,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       const liveEvents = createLiveEventQueue()
       const liveToolResultsEmitted = new Set<string>()
       let wakeLiveEvents: (() => void) | null = null
+      /** Drop-storm log throttle — see emitLiveEvent below. */
+      const LIVE_DROP_LOG_INTERVAL_MS = 1000
+      let liveDropLoggedAt = 0
+      let liveDropsSinceLog = 0
 
       // Execute tool calls as streamed from the provider.
       const callsToExecute = uniqueToolCalls
@@ -3627,6 +3758,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         runEnabledMcpIds,
         mcpToolPolicies,
         stepMcpToolNames,
+        runAttachedMcpServerIds,
         runPinnedMcpToolNames,
         runStickyToolNames,
         mcpLastUsedByName,
@@ -3636,7 +3768,23 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         emitLiveEvent: (ev: AgentEvent) => {
           const dropped = pushLiveEvent(liveEvents, ev)
           if (dropped > 0) {
-            logger.warn(`live event queue overflow: dropped ${dropped} delta event(s), queued=${liveEvents.events.length}`)
+            // Rate-limited and attributable. Unthrottled and unscoped, this
+            // wrote 43,934 lines (4.3 MB) in 58 seconds with no run id, so the
+            // drop storm was both unreadable and untraceable. The per-step
+            // total is logged once the drain ends.
+            liveDropsSinceLog += dropped
+            const now = Date.now()
+            if (now - liveDropLoggedAt >= LIVE_DROP_LOG_INTERVAL_MS) {
+              liveDropLoggedAt = now
+              logger.warn('Live event queue overflow; dropped delta events', {
+                scope: 'agent',
+                correlationId: runId,
+                step,
+                dropped: liveDropsSinceLog,
+                queued: liveEvents.events.length
+              })
+              liveDropsSinceLog = 0
+            }
           }
           if (ev.type === 'tool_progress' || ev.type === 'mode_changed' || ev.type === 'agent_instance_update' || ev.type === 'goal_update' || ev.type === 'loop_update') {
             appendEvent(runDir!, ev)
@@ -3665,7 +3813,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
 
       for (;;) {
         while (liveEvents.events.length) {
-          const ev = liveEvents.events.shift()!
+          const ev = shiftLiveEvent(liveEvents)!
           yield ev.type === 'tool_result' ? toolResultEventForIpc(ev) : ev
         }
         if (toolsSettled) break
@@ -3685,6 +3833,14 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           })
         ])
         wakeLiveEvents = null
+      }
+      if (liveEvents.dropped > 0) {
+        logger.warn('Live event queue dropped delta events during this step', {
+          scope: 'agent',
+          correlationId: runId,
+          step,
+          dropped: liveEvents.dropped
+        })
       }
       let toolOutcome: Awaited<typeof settledWork>
       try {

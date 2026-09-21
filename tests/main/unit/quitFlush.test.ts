@@ -153,4 +153,61 @@ describe('flushBeforeQuit', () => {
     expect(deps.showQuitAnywayDialog).toHaveBeenCalledTimes(1)
     expect(attempts).toBe(2)
   })
+
+  // The editor flush times out at 4.5s, always before the 5s dialog, so this is
+  // the path every observed "did not acknowledge before quit" log line takes.
+  // It settles as {kind:'ok', status:'timeout'} — not a rejection — which used
+  // to skip the re-issue and make Wait quit immediately.
+  it('retries the flush when the user waits after an editor-flush timeout', async () => {
+    let attempts = 0
+    const deps = createDeps({
+      flushEditorState: vi.fn(async () => {
+        attempts += 1
+        return attempts === 1 ? ('timeout' as const) : ('acknowledged' as const)
+      }),
+      showQuitAnywayDialog: vi.fn(async () => 'wait' as const)
+    })
+
+    const resultPromise = flushBeforeQuit(deps)
+    await vi.runAllTimersAsync()
+
+    expect(deps.showQuitAnywayDialog).toHaveBeenCalledTimes(1)
+    expect(attempts).toBe(2)
+    await expect(resultPromise).resolves.toEqual({ flushTimedOut: false })
+  })
+
+  // An explicit renderer 'failed' settles the soft race as 'done' and returns
+  // before the dialog (see 'preserves an explicit renderer editor-flush
+  // failure'), so it never reaches the re-issue. Only 'timeout' does.
+  it('still honours the hard cap when the re-issued flush also never completes', async () => {
+    const deps = createDeps({
+      flushEditorState: vi.fn(async () => 'timeout' as const),
+      showQuitAnywayDialog: vi.fn(async () => 'wait' as const)
+    })
+
+    const resultPromise = flushBeforeQuit(deps)
+    await vi.runAllTimersAsync()
+
+    // Re-issued flush settles as 'timeout' again: a real answer, not the hard cap.
+    await expect(resultPromise).resolves.toEqual({ flushTimedOut: true })
+    expect(deps.showQuitAnywayDialog).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not start a second flush while the first is still in flight', async () => {
+    let attempts = 0
+    const deps = createDeps({
+      flushMessageAppends: vi.fn(() => {
+        attempts += 1
+        return new Promise<void>(() => {})
+      }),
+      showQuitAnywayDialog: vi.fn(async () => 'wait' as const)
+    })
+
+    const resultPromise = flushBeforeQuit(deps)
+    await vi.advanceTimersByTimeAsync(QUIT_FLUSH_SOFT_MS + QUIT_FLUSH_HARD_MS)
+    await resultPromise
+
+    expect(attempts).toBe(1)
+    expect(await resultPromise).toEqual({ flushTimedOut: true })
+  })
 })

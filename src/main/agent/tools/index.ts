@@ -174,6 +174,11 @@ export type ToolExecutionContext = {
    */
   stepMcpToolNames?: ReadonlySet<string>
   /**
+   * Whole MCP servers this run loaded with request_mcp_tools. Their tools join
+   * the catalog on the next refresh (not mid-stream).
+   */
+  runAttachedMcpServerIds?: Set<string>
+  /**
    * Run-scoped MCP tools the agent pinned via request_mcp_tools.
    * Applied on the next refresh/trim (not mid-stream).
    */
@@ -893,22 +898,6 @@ export async function executeTool(
         `MCP server "${mcp.serverId}" is not enabled for this workspace run`
       )
     }
-    if (context.stepMcpToolNames && !context.stepMcpToolNames.has(name)) {
-      const counts = context.mcpNotInCatalogCounts
-      const failureCount = counts
-        ? recordMcpNotInCatalogFailure(counts, name)
-        : 1
-      if (failureCount >= MCP_NOT_IN_CATALOG_FAIL_FAST_THRESHOLD) {
-        return toolFail(name, name, mcpNotInCatalogFailFastMessage(name, failureCount))
-      }
-      return toolFail(
-        name,
-        name,
-        mcpNotInCatalogErrorMessage(name, {
-          alreadyPinned: context.runPinnedMcpToolNames?.has(name) === true
-        })
-      )
-    }
     const policy = context.mcpToolPolicies?.get(mcp.serverId)
     if (policy && !isMcpToolPermitted(mcp.toolName, policy)) {
       return toolFail(
@@ -920,6 +909,37 @@ export async function executeTool(
     const def = getMcpToolDefinition(name)
     if (!def) {
       return toolFail(name, name, `Unknown or unavailable MCP tool: ${name}`)
+    }
+    // Catalog gate last: server enabled, name permitted and the tool really
+    // exists, so a miss here means only that its schema was deferred. Admit it
+    // for the next step instead of charging the agent a round trip through
+    // request_mcp_tools to ask for something it just demonstrated it wants.
+    // Policy and existence are checked first so a hallucinated or blocked name
+    // can never load itself into the catalog.
+    if (context.stepMcpToolNames && !context.stepMcpToolNames.has(name)) {
+      const pinned = context.runPinnedMcpToolNames
+      if (pinned && !pinned.has(name)) {
+        pinned.add(name)
+        context.mcpLastUsedByName?.set(name, Math.max(context.currentStep ?? 1, 1))
+        context.invalidateMcpToolCatalogCache?.()
+        return toolFail(name, name, mcpNotInCatalogErrorMessage(name, { autoLoaded: true }))
+      }
+      // Already admitted and still absent (or no run to admit into): this is
+      // the same-step retry the fail-fast counter exists for.
+      const counts = context.mcpNotInCatalogCounts
+      const failureCount = counts
+        ? recordMcpNotInCatalogFailure(counts, name)
+        : 1
+      if (failureCount >= MCP_NOT_IN_CATALOG_FAIL_FAST_THRESHOLD) {
+        return toolFail(name, name, mcpNotInCatalogFailFastMessage(name, failureCount))
+      }
+      return toolFail(
+        name,
+        name,
+        mcpNotInCatalogErrorMessage(name, {
+          alreadyPinned: pinned?.has(name) === true
+        })
+      )
     }
     const stamp = Math.max(context.currentStep ?? 1, 1)
     context.mcpLastUsedByName?.set(name, stamp)

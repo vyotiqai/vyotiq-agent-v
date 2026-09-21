@@ -242,6 +242,16 @@ const UI_PERSIST_DEBOUNCE_MS = 300
 const LIST_RUNS_DEBOUNCE_MS = 300
 
 /**
+ * Second look after a run leaves main's active registry.
+ *
+ * Main clears the registry entry before the terminal `status.json` write has
+ * flushed, and `listRuns` serves a 3s cache, so the refresh fired on that
+ * transition can legitimately still read `running` and pin it there — nothing
+ * refreshes again. Longer than that cache window so the retry reads disk.
+ */
+const RUN_SETTLE_REFRESH_MS = 3_500
+
+/**
  * Under orphan backpressure, drop an older usage event only when a later
  * same-type usage remains (latest meter wins). Never sacrifice the sole meter.
  */
@@ -591,6 +601,13 @@ export function useWorkspaceManager(options?: {
   const [registry, setRegistry] = useState<WorkspacesState | null>(null)
   const [contexts, setContexts] = useState<Record<string, WorkspaceContext>>({})
   const [activeRuns, setActiveRuns] = useState<{ runId: string; workspacePath: string }[]>([])
+  /**
+   * False until main has answered `listActiveRuns` once. Consumers reconcile a
+   * run's persisted `running` status against {@link activeRuns}; before the
+   * first answer an empty list means "unknown", not "nothing is running", and
+   * treating it as the latter would blink every live run's spinner at boot.
+   */
+  const [activeRunsLoaded, setActiveRunsLoaded] = useState(false)
   const [revision, setRevision] = useState(0)
   const [scrollRestoreToken, setScrollRestoreToken] = useState(0)
   const [chatSurfaceEpoch, setChatSurfaceEpoch] = useState(0)
@@ -1127,9 +1144,40 @@ export function useWorkspaceManager(options?: {
         onTerminal,
         getAgentMode: () => contextsRef.current[workspacePath]?.ui.agentMode ?? 'agent',
         getAgentProfileId: () =>
-          contextsRef.current[workspacePath]?.ui.agentProfileIdByRunId?.[
+          // Match the setter and the composer's reader: a context stored under
+          // a different spelling of the same path must still be found, or the
+          // send silently drops the teammate the picker is visibly showing.
+          (contextsRef.current[workspacePath] ??
+            findByWorkspacePath(contextsRef.current, workspacePath))?.ui.agentProfileIdByRunId?.[
             profileBucketKey()
           ] ?? null,
+        onAgentProfileRefused: () => {
+          // Main refused this teammate: the run is durably bound to another.
+          // Cleared directly rather than through setAgentProfileIdForRun,
+          // whose own guard ("a durable binding differs") would block the
+          // clear and leave the refusal repeating on every later send.
+          const ctx =
+            contextsRef.current[workspacePath] ??
+            findByWorkspacePath(contextsRef.current, workspacePath)
+          if (!ctx) return
+          const storedPath =
+            contextsRef.current[workspacePath] != null
+              ? workspacePath
+              : (Object.keys(contextsRef.current).find((key) =>
+                  workspacePathsEqual(key, workspacePath)
+                ) ?? workspacePath)
+          const bucket = profileBucketKey()
+          const nextMap = { ...(ctx.ui.agentProfileIdByRunId ?? {}) }
+          if (nextMap[bucket] == null) return
+          delete nextMap[bucket]
+          const nextCtx: WorkspaceContext = {
+            ...ctx,
+            ui: { ...ctx.ui, agentProfileIdByRunId: nextMap }
+          }
+          contextsRef.current = { ...contextsRef.current, [storedPath]: nextCtx }
+          setContexts((prev) => ({ ...prev, [storedPath]: nextCtx }))
+          schedulePersistUiState(storedPath, nextCtx)
+        },
         getDefaultProviderModel: () =>
           getDefaultProviderModelRef.current?.(workspacePath) ?? null,
         onAgentModeChange: (mode) => {
@@ -1169,7 +1217,8 @@ export function useWorkspaceManager(options?: {
       // written to the workspace/global default. Creation happens once per
       // session, so remounts (dictation, panes) never re-fire it.
       const boundProfileId =
-        contextsRef.current[workspacePath]?.ui.agentProfileIdByRunId?.[
+        (contextsRef.current[workspacePath] ??
+          findByWorkspacePath(contextsRef.current, workspacePath))?.ui.agentProfileIdByRunId?.[
           runId ?? DRAFT_SCROLL_KEY
         ] ?? null
       const pin = boundProfileId ? getAgentProfileModelPinRef.current?.(boundProfileId) : null
@@ -1461,6 +1510,30 @@ export function useWorkspaceManager(options?: {
     [applyUiSuspendForController, bump, ensureController, isRunUiVisible, syncChatUiSubscriptions]
   )
 
+  /** One pending settle-refresh per workspace — a burst of finishing runs must
+   *  not queue a refresh each. */
+  const settleRefreshTimersRef = useRef(new Map<string, number>())
+  const scheduleSettleRefresh = useCallback((workspacePath: string): void => {
+    const timers = settleRefreshTimersRef.current
+    const pending = timers.get(workspacePath)
+    if (pending != null) window.clearTimeout(pending)
+    timers.set(
+      workspacePath,
+      window.setTimeout(() => {
+        timers.delete(workspacePath)
+        void refreshRunsRef.current(workspacePath)
+      }, RUN_SETTLE_REFRESH_MS)
+    )
+  }, [])
+
+  useEffect(() => {
+    const timers = settleRefreshTimersRef.current
+    return () => {
+      for (const timer of timers.values()) window.clearTimeout(timer)
+      timers.clear()
+    }
+  }, [])
+
   const pollActiveRuns = useCallback(async (): Promise<void> => {
     if (!window.vyotiq?.listActiveRuns) return
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
@@ -1483,6 +1556,7 @@ export function useWorkspaceManager(options?: {
           !workspacePathsEqual(entry.workspacePath, nextActive[i]!.workspacePath)
       )
     activeRunsRef.current = nextActive
+    setActiveRunsLoaded(true)
     if (activeChanged) {
       setActiveRuns(nextActive)
     }
@@ -1495,6 +1569,10 @@ export function useWorkspaceManager(options?: {
         continue
       }
       void refreshRunsRef.current(entry.workspacePath)
+      // The first refresh can beat the terminal status to disk; take a second
+      // look once that write and the list cache have both settled, or the row
+      // keeps a spinner for a run that already finished.
+      scheduleSettleRefresh(entry.workspacePath)
     }
     for (const entry of finishedBackgroundRuns(
       prevActive,
@@ -1720,6 +1798,7 @@ export function useWorkspaceManager(options?: {
         if (cancelled) return
         if (activeRes.ok) {
           setActiveRuns(activeRes.data)
+          setActiveRunsLoaded(true)
           await reattachActiveRuns(activeRes.data)
         }
       }
@@ -3145,6 +3224,7 @@ export function useWorkspaceManager(options?: {
     contexts,
     activeController,
     activeRuns,
+    activeRunsLoaded,
     chat: chatSnapshot,
     switchWorkspace,
     addWorkspace,

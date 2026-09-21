@@ -9,7 +9,13 @@ const isActive = (href: string) => path === href
   <div class="vy-shell vy-nav-inner">
     <a href="/" class="vy-brand" aria-label="Vyotiq — home">
       <img src="/brand/vyotiq-mark-black.svg" alt="" width="22" height="22" class="vy-dark-invert" />
-      <span class="vy-brand-name">Vyotiq</span>
+      <img
+        src="/brand/vyotiq-wordmark-black.svg"
+        alt=""
+        width="62"
+        height="11"
+        class="vy-brand-name vy-dark-invert"
+      />
       <span class="vy-brand-sep" aria-hidden="true">/</span>
       <span class="vy-brand-product">Agent V</span>
     </a>
@@ -81,6 +87,14 @@ const isActive = (href: string) => path === href
     letter-spacing: -0.02em;
     color: var(--vy-fg-strong);
     flex-shrink: 0;
+  }
+
+  /* The company name is artwork, not type. The kit's lockup sets the wordmark's
+     cap height at 0.46 of the mark, so a 22px mark gives 10.12px of cap — 11px
+     of box once the Q's tail is counted — and the width follows the file. */
+  .vy-brand-name {
+    height: 11px;
+    width: auto;
   }
 
   .vy-brand-sep {

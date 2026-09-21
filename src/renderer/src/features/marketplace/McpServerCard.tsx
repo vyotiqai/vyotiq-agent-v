@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { McpServer, McpServerStatus, McpTransport } from '@shared/ipc'
-import { Input, Textarea, Button, selectClass } from '@renderer/lib/ui'
+import { Input, Textarea, Button, Switch, selectClass } from '@renderer/lib/ui'
 import {
   hasNonBearerAuthorization,
   headersWithoutAuthorization
@@ -647,6 +647,24 @@ export function McpServerCard({
             value={allowedText}
             onChange={(e) => setAllowedText(e.target.value)}
             onBlur={commitAllowed}
+          />
+        </div>
+        <div className="flex items-start justify-between gap-3 rounded-md border border-border bg-surface px-2.5 py-2">
+          <div className="min-w-0">
+            <p className="m-0 text-caption">Load tools into every step</p>
+            <p className="m-0 mt-0.5 text-caption text-secondary">
+              {server.autoLoad
+                ? `Every ${server.id} tool schema rides in every request of every run.`
+                : `On demand: the agent sees ${server.id}'s tool names and loads the schemas when it needs them.`}
+            </p>
+          </div>
+          <Switch
+            checked={server.autoLoad === true}
+            disabled={disabled}
+            label={`${server.autoLoad ? 'Load' : 'Do not load'} ${server.id} tools into every step`}
+            onCheckedChange={(autoLoad) => {
+              void persist({ autoLoad: autoLoad ? true : undefined })
+            }}
           />
         </div>
         <div className="rounded-md border border-border bg-surface px-2.5 py-1">

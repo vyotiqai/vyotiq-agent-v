@@ -1,5 +1,5 @@
 import { existsSync } from 'fs'
-import { assertInsideWorkspace } from '../../shared/workspacePath'
+import { resolveInsideWorkspace } from '@main/workspace/safePath'
 
 /**
  * Action policy for high-risk browser capabilities.
@@ -52,7 +52,9 @@ export function resolveBrowserUploadPath(
   if (!decision.allowed) throw new Error(decision.reason)
   const root = workspacePath?.trim()
   if (!root) throw new Error('File uploads require a workspace')
-  const abs = assertInsideWorkspace(root, relOrAbs)
+  // Symlink-aware: this path is handed to a web page's file input, and string
+  // containment alone lets a symlink committed into the repo point outside it.
+  const abs = resolveInsideWorkspace(root, relOrAbs)
   if (!existsSync(abs)) throw new Error(`Upload file not found: ${relOrAbs}`)
   return abs
 }

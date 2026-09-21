@@ -12,7 +12,8 @@ import {
   parseBrowserTarget,
   type BrowserElementRef
 } from './agentBrowserRefs'
-import { assertAllowedUrl, isSyncBlockedUrl } from '@main/net/webFetch'
+import { assertAllowedUrl } from '@main/net/webFetch'
+import { checkEgress, hostAllowedByAllowlist } from '@main/net/egress'
 import {
   DEFAULT_NAV_TIMEOUT_MS,
   DEFAULT_WAIT_TIMEOUT_MS,
@@ -46,6 +47,7 @@ export const MAX_BROWSER_TABS = 16
 
 const PARTITION_PREFIX = 'persist:vyotiq-agent-browser'
 const downloadGuardedPartitions = new Set<string>()
+const egressGuardedPartitions = new Set<string>()
 const partitionWorkspacePaths = new Map<string, string>()
 
 function partitionForWorkspace(workspacePath?: string): string {
@@ -97,22 +99,11 @@ function denyPartitionDownloads(
   })
 }
 
-/** Host allowlist: exact match or `*.example.com` suffix. Empty list = unrestricted. */
-export function hostAllowedByAllowlist(hostname: string, allowlist: string[]): boolean {
-  if (allowlist.length === 0) return true
-  const host = hostname.toLowerCase().replace(/\.$/, '')
-  for (const raw of allowlist) {
-    const entry = raw.trim().toLowerCase().replace(/\.$/, '')
-    if (!entry) continue
-    if (entry.startsWith('*.')) {
-      const suffix = entry.slice(2)
-      if (host === suffix || host.endsWith(`.${suffix}`)) return true
-    } else if (host === entry) {
-      return true
-    }
-  }
-  return false
-}
+/**
+ * Re-exported: the rule now lives in the egress policy module so navigation
+ * and per-request subresource checks cannot drift apart.
+ */
+export { hostAllowedByAllowlist }
 
 function assertDomainAllowlist(url: URL): void {
   const list = getSettings().browserDomainAllowlist ?? []
@@ -232,14 +223,20 @@ async function assertPostNavigationPolicy(url: string, allowLocal: boolean): Pro
   }
 }
 
+/**
+ * Navigation gate for `will-redirect` and popup opens. Delegates to the egress
+ * policy so navigation and subresource checks share one rule set; the
+ * `browser_navigation` purpose keeps the original contract of http(s) only.
+ * Recorded rather than merely evaluated, so the ledger shows where a run went
+ * as well as what it was refused.
+ */
 function isSyncBlockedNavigation(url: string, allowLocal: boolean): boolean {
-  if (isSyncBlockedUrl(url, allowLocal)) return true
-  try {
-    assertDomainAllowlist(new URL(url))
-    return false
-  } catch {
-    return true
-  }
+  return !checkEgress({
+    url,
+    purpose: 'browser_navigation',
+    allowLocal,
+    allowlist: getSettings().browserDomainAllowlist ?? []
+  }).allowed
 }
 
 type BrowserLockOpts = {
@@ -713,9 +710,80 @@ function installDialogHooks(wc: WebContents): void {
   wc.on('did-finish-load', inject)
 }
 
+/**
+ * Allowlist snapshot for the per-request egress hook.
+ *
+ * `getSettings()` re-reads every configured MCP server's secrets from disk on
+ * each call, and a single page can issue hundreds of subresource requests — so
+ * the hot path must not call it per request. Navigation still reads live
+ * settings: it is infrequent, and a host the user just removed should stop
+ * being reachable immediately.
+ */
+let browserAllowlistCache: { at: number; value: readonly string[] } | null = null
+const BROWSER_ALLOWLIST_CACHE_MS = 1000
+
+function browserAllowlistSnapshot(): readonly string[] {
+  const now = Date.now()
+  if (browserAllowlistCache && now - browserAllowlistCache.at < BROWSER_ALLOWLIST_CACHE_MS) {
+    return browserAllowlistCache.value
+  }
+  const value = getSettings().browserDomainAllowlist ?? []
+  browserAllowlistCache = { at: now, value }
+  return value
+}
+
+function tabForWebContentsId(id?: number): BrowserTab | undefined {
+  if (typeof id !== 'number') return undefined
+  for (const tab of tabs.values()) {
+    try {
+      const wc = tab.view.webContents
+      if (!wc.isDestroyed() && wc.id === id) return tab
+    } catch {
+      // Racing a tab teardown — treat as no match and keep scanning.
+    }
+  }
+  return undefined
+}
+
+/**
+ * Per-request network egress gate for browsed pages, registered once per
+ * partition session (same shape as `denyPartitionDownloads`).
+ *
+ * Navigation was already gated, but subresources were not: a page served from
+ * an allowed host could `fetch()` or POST anywhere. Every request now gets a
+ * decision and a ledger entry.
+ */
+function guardPartitionEgress(ses: Electron.Session, partition: string): void {
+  if (egressGuardedPartitions.has(partition)) return
+  egressGuardedPartitions.add(partition)
+  ses.webRequest.onBeforeRequest((details, callback) => {
+    try {
+      const tab = tabForWebContentsId(details.webContentsId)
+      const decision = checkEgress({
+        url: details.url,
+        purpose: 'browser_subresource',
+        method: details.method,
+        resourceType: details.resourceType,
+        // Requests with no attributable tab (service workers, for instance)
+        // get the strict posture rather than the permissive tab default.
+        allowLocal: tab?.allowLocalHosts ?? false,
+        allowlist: browserAllowlistSnapshot(),
+        workspacePath: tab?.workspacePath ?? partitionWorkspacePaths.get(partition)
+      })
+      callback(decision.allowed ? {} : { cancel: true })
+    } catch {
+      // The gate must answer exactly once or the request hangs forever, and a
+      // security control must not fail open: refuse the one request that could
+      // not be judged.
+      callback({ cancel: true })
+    }
+  })
+}
+
 function createTab(workspacePath?: string, allowLocalHosts = true): BrowserTab {
   const ses = session.fromPartition(partitionForWorkspace(workspacePath))
   denyPartitionDownloads(ses, partitionForWorkspace(workspacePath), workspacePath)
+  guardPartitionEgress(ses, partitionForWorkspace(workspacePath))
   const id = nextTabId()
   const view = new WebContentsView({
     webPreferences: {
@@ -1994,6 +2062,8 @@ export function resetAgentBrowserForTests(): void {
   visibleTabId = null
   activeTabIdByWorkspace.clear()
   downloadGuardedPartitions.clear()
+  egressGuardedPartitions.clear()
+  browserAllowlistCache = null
   embedBounds = null
   pipWindow = null
   pipMode = false

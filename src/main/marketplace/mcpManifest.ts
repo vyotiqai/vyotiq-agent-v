@@ -134,6 +134,9 @@ export function applyMcpSettingsOverlay(
     ...(overlay.headers ? { headers: overlay.headers } : {}),
     ...(overlay.allowedTools?.length ? { allowedTools: overlay.allowedTools } : {}),
     ...(overlay.deniedTools?.length ? { deniedTools: overlay.deniedTools } : {}),
+    // Boolean, so test for presence: `? :` on the value alone would make
+    // turning the toggle back off indistinguishable from never setting it.
+    ...(overlay.autoLoad !== undefined ? { autoLoad: overlay.autoLoad } : {}),
     ...(overlay.oauthClientId ? { oauthClientId: overlay.oauthClientId } : {}),
     ...(overlay.authScope ? { authScope: overlay.authScope } : {}),
     ...(overlay.authWorkspacePath ? { authWorkspacePath: overlay.authWorkspacePath } : {}),

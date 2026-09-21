@@ -243,6 +243,7 @@ import {
   validateCustomOpenAiBaseUrl,
   validateOllamaBaseUrl
 } from '../../shared/providers'
+import { isCustomProviderId } from '../../shared/ipc/schemas/providers'
 import { existsSync, mkdirSync, readFileSync } from 'fs'
 import { writeFile } from 'fs/promises'
 import { formatError, AppError, isAbortError, isAppError } from '../../shared/errors'
@@ -448,7 +449,7 @@ import {
   enqueueWorkspaceMutation
 } from '@main/workspace/workspaces'
 import { canonicalizeWorkspacePath, isCuratedDocPath, isSafeWorkspaceRelPath, workspacePathsEqual } from '../../shared/workspacePath'
-import { relative, isAbsolute, join } from 'path'
+import { relative, isAbsolute, join, resolve } from 'path'
 import {
   checkoutBranch,
   commitAll,
@@ -598,6 +599,74 @@ const EXT_MIME: Record<string, string> = {
   avif: 'image/avif',
   ico: 'image/x-icon',
   bmp: 'image/bmp'
+}
+
+/**
+ * Custom-CSS paths the user chose through the native picker this session.
+ *
+ * `appearanceReadCustomCss` reads whatever path settings names and hands the
+ * bytes to the renderer, so an unconstrained `customCssPath` is an arbitrary
+ * file read (`~/.ssh/id_rsa`, `.env`, `secrets.json` — anything under 256 KB).
+ * A path is only honoured once the user has picked it in the OS dialog, or if
+ * it is the one already persisted (so a saved setting survives restart).
+ */
+const pickedCustomCssPaths = new Set<string>()
+
+function rememberPickedCustomCssPath(path: string): void {
+  pickedCustomCssPaths.add(resolve(path))
+}
+
+function customCssPathAllowed(next: string, current: string | undefined): boolean {
+  const trimmed = next.trim()
+  if (!trimmed) return true
+  if (trimmed === (current ?? '').trim()) return true
+  return pickedCustomCssPaths.has(resolve(trimmed))
+}
+
+/** Identity of an stdio MCP entry's command line — what actually gets spawned. */
+function stdioCommandLine(s: {
+  transport?: string
+  command?: string
+  args?: string[]
+  binaryPath?: string
+}): string | null {
+  if ((s.transport ?? 'stdio').toLowerCase() !== 'stdio') return null
+  const command = (s.binaryPath ?? '').trim() || (s.command ?? '').trim()
+  if (!command) return null
+  return [command, ...(s.args ?? [])].join(' ')
+}
+
+/** Command lines the patch would newly launch (added entries, or changed ones). */
+function newStdioCommands(
+  prev: NonNullable<Settings['mcpServers']>,
+  next: NonNullable<Settings['mcpServers']>
+): string[] {
+  const before = new Map(prev.map((s) => [s.id, stdioCommandLine(s)]))
+  const introduced: string[] = []
+  for (const server of next) {
+    const line = stdioCommandLine(server)
+    if (!line) continue
+    if (before.get(server.id) === line) continue
+    introduced.push(line)
+  }
+  return introduced
+}
+
+async function confirmStdioMcpSpawn(event: IpcSender, commands: string[]): Promise<boolean> {
+  const win = BrowserWindow.fromWebContents(event.sender as Electron.WebContents)
+  const options: Electron.MessageBoxOptions = {
+    type: 'warning',
+    buttons: ['Cancel', 'Run'],
+    defaultId: 0,
+    cancelId: 0,
+    title: 'Run a local MCP command?',
+    message: 'Vyotiq is about to run this on your machine as you:',
+    detail: commands.join('\n')
+  }
+  const result = win
+    ? await dialog.showMessageBox(win, options)
+    : await dialog.showMessageBox(options)
+  return result.response === 1
 }
 
 function isExpectedIpcFailure(err: unknown): boolean {
@@ -957,6 +1026,24 @@ export function registerIpc(): void {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
       const partial = SetSettingsRequestSchema.parse(raw)
+      if (
+        partial.customCssPath !== undefined &&
+        !customCssPathAllowed(partial.customCssPath, getSettings().customCssPath)
+      ) {
+        return fail('Choose a custom CSS file with the file picker')
+      }
+      // A stdio MCP entry is a command line this handler launches on the same
+      // tick (syncMcpServers below). `assertMcpServersAcked` stops that until
+      // the user acks marketplace risk once — but that one ack then authorises
+      // every later spawn. Confirm the actual command instead, naming it, so a
+      // renderer cannot turn a past marketplace ack into arbitrary execution.
+      if (partial.mcpServers !== undefined) {
+        const introduced = newStdioCommands(getSettings().mcpServers ?? [], partial.mcpServers)
+        if (introduced.length > 0) {
+          const confirmed = await confirmStdioMcpSpawn(event, introduced)
+          if (!confirmed) return ok(redactSettingsForIpc(getSettings()))
+        }
+      }
       const next = await enqueueSettingsMutation(() => setSettings(partial))
       if (partial.theme !== undefined || partial.skinId !== undefined) {
         applyWindowChrome(next.theme, next.skinId)
@@ -1074,14 +1161,21 @@ export function registerIpc(): void {
       if (!senderOk(event)) return fail('Invalid sender')
       try {
         const req = ListModelsRequestSchema.parse(raw ?? {})
-        if (req.baseUrl && (req.provider === 'custom' || req.provider === 'ollama')) {
-          // Gate direct catalog requests too: a bad base must error clearly
-          // instead of silently falling back to the local default.
-          const check =
-            req.provider === 'custom'
-              ? validateCustomOpenAiBaseUrl(req.baseUrl)
-              : validateOllamaBaseUrl(req.baseUrl)
-          if (!check.ok) return fail(check.error)
+        if (req.baseUrl) {
+          // This base decides where the stored API key is sent as a Bearer
+          // token, so honour it only for providers whose base is genuinely
+          // user-configurable, and only after the same validation the settings
+          // writer applies. Gate direct catalog requests too: a bad base must
+          // error clearly instead of silently falling back to the local default.
+          if (req.provider === 'ollama') {
+            const check = validateOllamaBaseUrl(req.baseUrl)
+            if (!check.ok) return fail(check.error)
+          } else if (req.provider === 'custom' || isCustomProviderId(req.provider)) {
+            const check = validateCustomOpenAiBaseUrl(req.baseUrl)
+            if (!check.ok) return fail(check.error)
+          } else {
+            return fail(`Provider ${req.provider} does not accept a custom base URL`)
+          }
         }
         const settings = getSettings()
         const apiKey = getSecret(req.provider)
@@ -1114,9 +1208,14 @@ export function registerIpc(): void {
       // sequence of checks. This handler owns only trust: schema and sender.
       const outcome = await launchRun({
         ...req,
+        // Read the parsed value, not key presence on `raw`: Electron's
+        // structured clone keeps own properties whose value is `undefined`,
+        // and the composer spells both keys out on every send — so presence
+        // marked every send as stating a binding, and the "absent field
+        // inherits the run's binding" contract never applied to chat at all.
         explicit: {
-          agentProfileId: Object.prototype.hasOwnProperty.call(raw, 'agentProfileId'),
-          runtime: Object.prototype.hasOwnProperty.call(raw, 'runtime')
+          agentProfileId: req.agentProfileId !== undefined,
+          runtime: req.runtime !== undefined
         },
         wc: event.sender,
         source: IPC.chatStart
@@ -1126,7 +1225,12 @@ export function registerIpc(): void {
       }
       return ok({ runId: outcome.runId, invokeId: outcome.invokeId })
     } catch (err) {
-      return failFrom(err, IPC.chatStart)
+      // Correlate: without the run id these failures were unattributable in the
+      // log, and the 00:11 chat:start burst could only be tied to its run by
+      // timestamp-matching against status.json. Read it off `raw` so a schema
+      // failure — which never reaches `req` — is correlated too.
+      const rawRunId = (raw as { runId?: unknown } | null)?.runId
+      return failFrom(err, IPC.chatStart, typeof rawRunId === 'string' ? rawRunId : undefined)
     }
   })
 
@@ -3607,6 +3711,9 @@ export function registerIpc(): void {
         ? await dialog.showOpenDialog(win, options)
         : await dialog.showOpenDialog(options)
       if (result.canceled || !result.filePaths[0]) return ok(null)
+      // The user consented to this exact file in the OS dialog; setSettings
+      // accepts customCssPath only for paths that reached this point.
+      rememberPickedCustomCssPath(result.filePaths[0])
       return ok(result.filePaths[0])
     } catch (err) {
       return failFrom(err, IPC.appearancePickCustomCss)

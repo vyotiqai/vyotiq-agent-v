@@ -85,6 +85,31 @@ import {
 
 const CHAT_START_MAX_ATTEMPTS = 3
 const CHAT_START_RETRY_MS = 500
+/**
+ * Refusals worth a second attempt — a transient race, not a settled fact.
+ *
+ * An allowlist, not a denylist: most refusals state something that will be
+ * just as true 500ms later ('Workspace is not open', 'Workspace path does not
+ * exist', a binding conflict), and retrying one only repeats it three times,
+ * half a second apart, filling the log and delaying the error the user needed
+ * on the first attempt. Anything uncoded or unrecognised is therefore final,
+ * matching how `isRetryableTurnFailure` fails closed on unknown codes.
+ *
+ * Both entries cover a run still unwinding: `launchRunSync` refuses rather
+ * than waits, so this retry is what absorbs that gap.
+ */
+const CHAT_START_RETRYABLE_CODES: ReadonlySet<string> = new Set(['run_active', 'profile_busy'])
+
+/**
+ * An *unclassified* failure (no code) still retries: that covers transient
+ * IPC-layer problems main never labelled. Every refusal main states
+ * deliberately now carries a code, so anything named is judged on its merits
+ * and a newly added refusal is final by default rather than silently retried.
+ */
+function shouldRetryChatStart(code: string | undefined): boolean {
+  if (!code) return true
+  return CHAT_START_RETRYABLE_CODES.has(code)
+}
 import {
   contentWindowFromRaw,
   remainingContentTokens
@@ -1327,6 +1352,13 @@ export type CreateChatStreamControllerOptions = {
   getAgentMode?: () => AgentInteractionMode
   /** Teammate profile bound to this chat (identity, memory namespace, model pin). */
   getAgentProfileId?: () => string | null | undefined
+  /**
+   * Main refused this chat's teammate because the run is durably bound to a
+   * different one. The local binding is persisted, so without dropping it here
+   * every later send repeats the same refusal — the chat stays unusable across
+   * restarts with no hint that the teammate picker is the cause.
+   */
+  onAgentProfileRefused?: () => void
   /** Live default provider/model (effective settings) until this session pins its own. */
   getDefaultProviderModel?: () => { provider: ProviderId; model: string } | null
   /** Sync composer mode when the agent calls switch_mode. */
@@ -1342,6 +1374,7 @@ export function createChatStreamController(
 ): ChatStreamController {
   const { workspacePath, onRunIdAssigned, onTerminal, getAgentMode, onAgentModeChange, getDefaultProviderModel } = options
   const { initialExpansions, onExpansionsChange, getAgentProfileId } = options
+  const { onAgentProfileRefused } = options
   let lastNotifiedAgentMode: AgentInteractionMode | null = null
   const notifyAgentMode = (mode: AgentInteractionMode | null | undefined): void => {
     if (!mode) return
@@ -3085,7 +3118,13 @@ export function createChatStreamController(
           agentProfileId
         }
     let res = await window.vyotiq.chatStart(startPayload)
-    for (let attempt = 2; attempt <= CHAT_START_MAX_ATTEMPTS && !res.ok; attempt++) {
+    for (
+      let attempt = 2;
+      attempt <= CHAT_START_MAX_ATTEMPTS &&
+      !res.ok &&
+      shouldRetryChatStart(res.code);
+      attempt++
+    ) {
       await new Promise((resolve) => setTimeout(resolve, CHAT_START_RETRY_MS))
       res = await window.vyotiq.chatStart(startPayload)
     }
@@ -3094,6 +3133,9 @@ export function createChatStreamController(
       const message = res.error
       // Detail in the log line — string `err` keeps scrubbed text; AppError would not.
       logger.error(`chatStart failed: ${message}`, { scope: 'chat', err: res.error, code: res.code })
+      // Drop the local teammate binding main just refused, so the next send
+      // uses the run's own binding instead of repeating this refusal forever.
+      if (res.code === 'run_binding_immutable') onAgentProfileRefused?.()
       turnUsageSlots = priorTurnUsage
       patch({
         error: message,
@@ -3205,7 +3247,13 @@ export function createChatStreamController(
       modelExplicit: resumeProviderModel?.explicit
     }
     let res = await window.vyotiq.chatStart(startPayload)
-    for (let attempt = 2; attempt <= CHAT_START_MAX_ATTEMPTS && !res.ok; attempt++) {
+    for (
+      let attempt = 2;
+      attempt <= CHAT_START_MAX_ATTEMPTS &&
+      !res.ok &&
+      shouldRetryChatStart(res.code);
+      attempt++
+    ) {
       await new Promise((resolve) => setTimeout(resolve, CHAT_START_RETRY_MS))
       res = await window.vyotiq.chatStart(startPayload)
     }
@@ -3213,6 +3261,9 @@ export function createChatStreamController(
       awaitingRun = false
       const message = res.error
       logger.error(`chatStart failed: ${message}`, { scope: 'chat', err: res.error, code: res.code })
+      // Drop the local teammate binding main just refused, so the next send
+      // uses the run's own binding instead of repeating this refusal forever.
+      if (res.code === 'run_binding_immutable') onAgentProfileRefused?.()
       // Append the box here too — without it the banner is not suppressed and
       // the turn summary would repeat the message (the duplicate-error path).
       const runErrorItem: UiItem = {

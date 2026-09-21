@@ -14,12 +14,23 @@ import {
 } from '../agent/tools/terminal'
 import type { PtySessionInfo } from '../../shared/ipc'
 import { getMainWindow } from './window'
+import { setTerminalMirrorSink } from '../agent/tools/terminalMirrorSink'
 
 // `IPty` is a type-only import — erased at runtime, so the optional node-pty
 // dependency still loads lazily via tryLoadPty() with the pipe fallback.
 type SessionBackend =
   | { kind: 'pty'; pty: IPty }
   | { kind: 'pipe'; child: ChildProcessWithoutNullStreams }
+  /**
+   * Read-only mirror of the run's own commands — there is no process behind it.
+   *
+   * The agent tool keeps running through child_process.spawn: the result the
+   * model reads is built from separate stdout and stderr plus a real exit code
+   * (formatTerminalOutput and its classifiers all depend on that), and a PTY
+   * merges the streams and reports neither. This session carries a copy of the
+   * same bytes so the Terminal panel can show the run as it happens.
+   */
+  | { kind: 'agent' }
 
 type PtyHandle = {
   id: string
@@ -269,6 +280,64 @@ export function seedPtyScrollbackForTests(id: string, data: string): void {
   if (handle) appendScrollback(handle, data)
 }
 
+/** Session title for the run's mirrored commands. */
+export const AGENT_MIRROR_TITLE = 'agent'
+
+function sendToMainWindow(channel: string, payload: unknown): void {
+  const win = getMainWindow()
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
+  win.webContents.send(channel, payload)
+}
+
+function findAgentMirror(workspacePath: string): PtyHandle | null {
+  for (const s of sessions.values()) {
+    if (s.backend.kind !== 'agent') continue
+    if (workspacePathsEqual(s.workspacePath, workspacePath)) return s
+  }
+  return null
+}
+
+export function agentMirrorSessionId(workspacePath: string): string | null {
+  return findAgentMirror(workspacePath)?.id ?? null
+}
+
+/**
+ * Append to the workspace's read-only agent terminal session, creating it on
+ * the first write.
+ *
+ * Emits `ptySessionsChanged` on creation: the Terminal panel otherwise only
+ * re-lists on a process exit, so a mirror that appeared mid-run would stay
+ * invisible until something unrelated happened.
+ */
+export function writeAgentTerminalMirror(workspacePath: string, text: string): string | null {
+  if (!text || !workspacePath) return null
+  // No window means nothing to mirror to (headless tool runs, tests). Creating
+  // the session anyway would leave a phantom entry in the session list.
+  const win = getMainWindow()
+  if (!win || win.isDestroyed()) return null
+  let handle = findAgentMirror(workspacePath)
+  if (!handle) {
+    handle = {
+      id: randomUUID(),
+      title: AGENT_MIRROR_TITLE,
+      cwd: workspacePath,
+      workspacePath,
+      running: true,
+      backend: { kind: 'agent' },
+      scrollbackChunks: [],
+      scrollbackLength: 0
+    }
+    sessions.set(handle.id, handle)
+    sendToMainWindow(IPC.ptySessionsChanged, { workspacePath })
+  }
+  appendScrollback(handle, text)
+  sendToMainWindow(IPC.ptyData, { id: handle.id, data: text })
+  return handle.id
+}
+
+// Agent tools call the sink; this module is what gives it somewhere to go.
+setTerminalMirrorSink(writeAgentTerminalMirror)
+
 export function ptySessionMatchesWorkspace(id: string, workspacePath: string): boolean {
   const s = sessions.get(id)
   return s != null && workspacePathsEqual(s.workspacePath, workspacePath)
@@ -278,6 +347,8 @@ export function writePty(id: string, data: string, workspacePath?: string): bool
   const s = sessions.get(id)
   if (!s?.running) return false
   if (workspacePath && !workspacePathsEqual(s.workspacePath, workspacePath)) return false
+  // Nothing is listening on the other end of a mirror.
+  if (s.backend.kind === 'agent') return false
   if (s.backend.kind === 'pty') {
     s.backend.pty.write(data)
     return true
@@ -304,6 +375,7 @@ export function resizePty(id: string, cols: number, rows: number, workspacePath?
 }
 
 function backendPid(backend: SessionBackend): number | undefined {
+  if (backend.kind === 'agent') return undefined
   if (backend.kind === 'pty') {
     const pid = backend.pty.pid
     return typeof pid === 'number' && Number.isFinite(pid) && pid > 0 ? pid : undefined
@@ -318,7 +390,7 @@ export function killPty(id: string, workspacePath?: string): boolean {
   if (workspacePath && !workspacePathsEqual(s.workspacePath, workspacePath)) return false
   try {
     if (s.backend.kind === 'pty') s.backend.pty.kill()
-    else s.backend.child.kill()
+    else if (s.backend.kind === 'pipe') s.backend.child.kill()
   } catch {
     /* ignore */
   }

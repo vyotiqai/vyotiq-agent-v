@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.node.json",
+  "include": [
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/shared/**/*",
+    "tests/main/**/*",
+    "tests/shared/**/*",
+    "tests/helpers/**/*",
+    "tests/gui-e2e/**/*"
+  ]
+}

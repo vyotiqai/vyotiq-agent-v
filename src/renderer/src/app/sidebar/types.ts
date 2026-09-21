@@ -14,6 +14,9 @@ export type SidebarProps = {
   activePath?: string | null
   runsByWorkspacePath?: Record<string, WorkspaceSidebarRuns>
   activeRuns?: { runId: string; workspacePath: string }[]
+  /** True once main has answered `listActiveRuns`; before that an empty
+   *  {@link activeRuns} means "unknown", not "nothing is running". */
+  activeRunsLoaded?: boolean
   onSwitchWorkspace?: (path: string) => void
   onCloseWorkspace?: (path: string) => void
   onAddWorkspace?: () => void

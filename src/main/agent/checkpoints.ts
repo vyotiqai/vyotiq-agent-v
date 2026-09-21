@@ -259,6 +259,7 @@ export class InvokeWriteCheckpoint {
       const maxDirRestoreFiles = 20000
       let fileCount = 0
       let overflow = false
+      const recordedChildren: string[] = []
       const snapshotTree = async (absDir: string): Promise<void> => {
         if (overflow) return
         let entries
@@ -290,11 +291,21 @@ export class InvokeWriteCheckpoint {
           } catch {
             continue
           }
+          recordedChildren.push(childRel)
           this.files.set(childRel, { path: childRel, action: 'deleted', undoable: true })
         }
       }
       await snapshotTree(resolved)
       if (overflow) {
+        // `overflow` can flip true only AFTER up to maxDirRestoreFiles children
+        // were already recorded as undoable. Marking just the parent
+        // non-undoable left Undo restoring that partial subtree and reporting
+        // it as a completed undo — a directory silently missing most of its
+        // files. If the tree cannot be restored whole, none of it is undoable.
+        for (const childRel of recordedChildren) {
+          const entry = this.files.get(childRel)
+          if (entry) this.files.set(childRel, { ...entry, undoable: false })
+        }
         logger.warn('Directory delete too large to snapshot for undo; marked non-undoable', {
           scope: 'agent',
           path: rel
@@ -450,7 +461,30 @@ export function beginWriteCheckpoint(
   anchorUserMessageIndex?: number
 ): InvokeWriteCheckpoint {
   const existing = activeSessions.get(runDir)
-  if (existing) return existing
+  if (existing) {
+    // Same turn, or no new anchor stated: keep accumulating into it.
+    if (
+      anchorUserMessageIndex === undefined ||
+      existing.anchorUserMessageIndex === anchorUserMessageIndex
+    ) {
+      return existing
+    }
+    // A different anchor means a new turn started without the previous invoke
+    // finalizing. Reusing the old session would file THIS turn's undo records
+    // under the PREVIOUS turn's anchor, and report the previous turn's files
+    // as this turn's mutations (writtenFileCount). Close it out under its own
+    // anchor so both turns stay separately undoable.
+    activeSessions.delete(runDir)
+    try {
+      existing.finalize()
+    } catch (err) {
+      logger.warn('Failed to finalize a stale write checkpoint before a new turn', {
+        scope: 'agent',
+        correlationId: basename(runDir),
+        err
+      })
+    }
+  }
   const session = new InvokeWriteCheckpoint(runDir, workspaceRoot, anchorUserMessageIndex)
   activeSessions.set(runDir, session)
   return session

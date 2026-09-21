@@ -188,9 +188,9 @@ describe('McpPinBody', () => {
       />
     )
     expect(screen.getByText('gh')).toBeTruthy()
-    expect(screen.getByText('2 pinned')).toBeTruthy()
-    expect(screen.getByText(/Pinned for next step/)).toBeTruthy()
-    expect(screen.getByText(/Already pinned/)).toBeTruthy()
+    expect(screen.getByText('2 loaded')).toBeTruthy()
+    expect(screen.getByText(/Loaded for next step/)).toBeTruthy()
+    expect(screen.getByText(/Already available/)).toBeTruthy()
     expect(screen.getByText(/Unknown \/ unresolved/)).toBeTruthy()
     expect(screen.getByText('mcp__gh__list_issues')).toBeTruthy()
     expect(screen.getByText('mcp__gh__get_issue')).toBeTruthy()
