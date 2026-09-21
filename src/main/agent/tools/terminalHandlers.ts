@@ -13,6 +13,12 @@ import {
 import { parseTerminalOutput } from '../../../shared/utils/terminalFormat'
 import { getSettings } from '@main/settings/settings'
 import { resolveInsideWorkspace } from '@main/workspace/safePath'
+import {
+  mirrorAgentCommandAborted,
+  mirrorAgentCommandEnd,
+  mirrorAgentCommandStart,
+  mirrorAgentOutput
+} from './terminalMirror'
 import { needsOpaqueWatch, recordTerminalCommandPriors } from './terminalCheckpoint'
 import { startWatch, applyWatchDiffToCheckpoint, diffSince, disposeWatch } from '../workspaceMutationWatch'
 import { invalidateAfterWorkspaceMutation, terminalResultOk, toolOk, toolFail } from './index'
@@ -100,7 +106,16 @@ export const terminalHandlers = {
           : ''
     const shell = context.terminalShell ?? getSettings().terminalShell ?? 'auto'
     const pattern = typeof args.pattern === 'string' ? args.pattern : undefined
-    const onOutput = context.onTerminalOutput
+    const rawOnOutput = context.onTerminalOutput
+    /**
+     * Everything the command prints also goes to the read-only `agent` session
+     * so the Terminal panel shows the run live. The model still receives the
+     * separately captured stdout/stderr frame — see terminalMirror.ts.
+     */
+    const onOutput = (chunk: { text: string; stream: 'stdout' | 'stderr' }): void => {
+      mirrorAgentOutput(workspace, chunk.text)
+      rawOnOutput?.(chunk)
+    }
     const workingDirectory =
       typeof args.working_directory === 'string' && args.working_directory.trim()
         ? args.working_directory.trim()
@@ -137,6 +152,7 @@ export const terminalHandlers = {
         runDir: context.runDir,
         skipWriteCheckpoint: context.skipWriteCheckpoint
       }
+      mirrorAgentCommandStart(workspace, command, cwd)
       const content = sessionId
         ? await pollTerminalSession({
             runId,
@@ -168,6 +184,7 @@ export const terminalHandlers = {
                 onStillRunning: registerExitFinalize
               })
           )
+      mirrorAgentCommandEnd(workspace, command, content)
       // New background command may mutate the tree; pure session polls do not.
       if (!sessionId) {
         invalidateAfterWorkspaceMutation(workspace)
@@ -182,14 +199,28 @@ export const terminalHandlers = {
       runDir: context.runDir,
       skipWriteCheckpoint: context.skipWriteCheckpoint
     }
-    const content = await withTerminalCheckpointWatch(workspace, command, watchCtx, () =>
-      toolTerminal(workspace, command, signal, {
-        timeoutMs,
-        shell,
-        cwd,
-        onOutput
-      })
-    )
+    mirrorAgentCommandStart(workspace, command, cwd)
+    let content: string
+    try {
+      content = await withTerminalCheckpointWatch(workspace, command, watchCtx, () =>
+        toolTerminal(workspace, command, signal, {
+          timeoutMs,
+          shell,
+          cwd,
+          onOutput
+        })
+      )
+    } catch (err) {
+      // Timeout and abort reject instead of returning a frame, so the mirror
+      // would otherwise trail off with no ending.
+      mirrorAgentCommandAborted(
+        workspace,
+        command,
+        err instanceof Error ? err.message : String(err)
+      )
+      throw err
+    }
+    mirrorAgentCommandEnd(workspace, command, content)
     invalidateAfterWorkspaceMutation(workspace)
     const summary = command.slice(0, 80)
     const ok = terminalResultOk(command, content)

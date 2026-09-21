@@ -31,12 +31,20 @@ export function killProcessTreeAndWait(
     kill(pid, (err) => {
       clearTimeout(timer)
       if (err) {
-        logger.warn('Failed to kill terminal process tree', {
-          scope: 'terminal',
-          pid,
-          reason,
-          err: err instanceof Error ? err.message : String(err)
-        })
+        const message = err instanceof Error ? err.message : String(err)
+        // The process exiting on its own between our decision to kill it and
+        // the kill landing is the normal race, not a failure — taskkill says
+        // "not found", kill(2) says ESRCH. Either way the tree is gone, which
+        // is the outcome we wanted.
+        const alreadyGone = /not found|ESRCH|No such process/i.test(message)
+        if (!alreadyGone) {
+          logger.warn('Failed to kill terminal process tree', {
+            scope: 'terminal',
+            pid,
+            reason,
+            err: message
+          })
+        }
       }
       finish()
     })
@@ -709,6 +717,15 @@ export function isCommandProbeNoTarget(
  * match so classified frames keep their exit code (exit_code appears exactly
  * once; the masked-exit correction rewrites it in place).
  */
+/**
+ * Exit code out of a formatted terminal frame, or null when it carries none.
+ * Shares parseTerminalFrame's reading of the format so the mirror cannot drift
+ * from what the model is told.
+ */
+export function parseTerminalExitCode(content: string): number | null {
+  return parseTerminalFrame(content).exitCode
+}
+
 function parseTerminalFrame(content: string): {
   stdout: string
   stderr: string
