@@ -119,6 +119,13 @@ last timestamps. Writes are debounced and serialized per run; a failed write
 costs a log line, never the run. Origins are capped per run, and a truncated
 file says how many it dropped.
 
+Pending writes are flushed on quit, so a quit inside the debounce window does
+not drop the tail of a record — usually the part worth reading, since it covers
+whatever the run was doing when it stopped. That flush rides the bounded
+child-teardown list rather than `flushBeforeQuit`: the latter can ask the user
+to keep waiting, and a diagnostic write must never be the reason for that
+prompt.
+
 Egress that belongs to no run — you browsing by hand, app-level fetches — stays
 in the in-memory ledger only, since there is no run file for it to belong to.
 

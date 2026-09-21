@@ -47,7 +47,7 @@ import { countPendingToolApprovals } from '@main/agent/toolApproval'
 import { countPendingAgentQuestions } from '@main/agent/agentQuestion'
 import { pruneStaleInstanceWorktreesBestEffort } from '@main/git/instanceWorktree'
 import { initMainLogging, rendererUnresponsiveForMs } from './logging/init'
-import { startEgressRunLedger } from './agent/egressRunLedger'
+import { flushEgressRunLedgers, startEgressRunLedger } from './agent/egressRunLedger'
 import { initTraceAutoCapture } from './perf/traceAutoCapture'
 import { initCrashReporter } from './logging/crashReporter'
 import { logger } from '../shared/logger'
@@ -411,8 +411,16 @@ if (!gotLock) {
       disposeAllPtySessions()
       shutdownTokenizerPool()
       // Await child-process teardown so quit cannot land mid-shutdown, but bound
-      // each wait so a stuck child cannot hang quit on the fatal path.
+      // each wait so a stuck child cannot hang quit on the fatal path. Bounded
+      // best-effort flushes ride here too: user data is flushed by
+      // flushBeforeQuit below, which may ask the user to keep waiting, and a
+      // diagnostic write must never be the reason for that prompt.
       const shutdowns: Array<[string, Promise<void>]> = [
+        // Pending egress writes are debounced by a second, so a quit inside
+        // that window would drop the tail of a run's record — usually the part
+        // worth reading, since it covers whatever the run was doing when it
+        // stopped.
+        ['egress ledger', flushEgressRunLedgers()],
         ['MCP servers', shutdownMcpServers()],
         ['dictation utility', getDictationUtilityClient().shutdown()]
       ]

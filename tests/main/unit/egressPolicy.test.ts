@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   MAX_EGRESS_LEDGER_ENTRIES,
   checkEgress,
+  currentEgressSeq,
   clearEgressLedger,
   egressLedgerSize,
   evaluateEgress,
   hostAllowedByAllowlist,
-  listEgress
+  listEgress,
+  onEgressRecorded
 } from '@main/net/egress'
 
 const ALLOWLIST = ['example.com', '*.allowed.dev']
@@ -194,5 +196,54 @@ describe('egress ledger', () => {
     clearEgressLedger()
     expect(egressLedgerSize()).toBe(0)
     expect(listEgress()).toEqual([])
+  })
+})
+
+describe('egress observers', () => {
+  beforeEach(() => {
+    clearEgressLedger()
+  })
+
+  afterEach(() => {
+    clearEgressLedger()
+  })
+
+  it('hands every recorded decision to a listener, and stops on unsubscribe', () => {
+    const seen: string[] = []
+    const stop = onEgressRecorded((recorded) => seen.push(recorded.origin))
+
+    checkEgress({ url: 'https://one.example/a', purpose: 'web_fetch' })
+    checkEgress({ url: 'https://two.example/b', purpose: 'web_fetch' })
+    stop()
+    checkEgress({ url: 'https://three.example/c', purpose: 'web_fetch' })
+
+    expect(seen).toEqual(['https://one.example', 'https://two.example'])
+  })
+
+  it('a failing observer cannot break the request it is observing', () => {
+    const stop = onEgressRecorded(() => {
+      throw new Error('observer blew up')
+    })
+    const seen: string[] = []
+    const stopSecond = onEgressRecorded((recorded) => seen.push(recorded.origin))
+
+    expect(() =>
+      checkEgress({ url: 'https://example.com/a', purpose: 'browser_subresource' })
+    ).not.toThrow()
+    // The throwing observer must not stop the ones registered after it.
+    expect(seen).toEqual(['https://example.com'])
+    expect(egressLedgerSize()).toBe(1)
+
+    stop()
+    stopSecond()
+  })
+
+  it('issues a monotonic seq that brackets an operation exactly', () => {
+    checkEgress({ url: 'https://before.example/a', purpose: 'web_fetch' })
+    const mark = currentEgressSeq()
+    checkEgress({ url: 'https://during.example/b', purpose: 'web_fetch' })
+
+    const after = listEgress().filter((recorded) => recorded.seq > mark)
+    expect(after.map((recorded) => recorded.origin)).toEqual(['https://during.example'])
   })
 })
