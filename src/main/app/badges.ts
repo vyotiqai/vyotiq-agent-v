@@ -2,7 +2,13 @@ import { app, nativeImage, type BrowserWindow } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { computeBadgeState, dockBadgeTextFor, type BadgeInput, type BadgeState } from './badgeState'
+import {
+  badgeAssetFileFor,
+  computeBadgeState,
+  dockBadgeTextFor,
+  type BadgeInput,
+  type BadgeState
+} from './badgeState'
 import { logger } from '../../shared/logger'
 import { getMainWindow } from './window'
 
@@ -79,14 +85,11 @@ function descriptionFor(state: BadgeState): string {
 }
 
 function applyOverlay(win: BrowserWindow, state: BadgeState): void {
-  if (state.kind === 'idle') {
+  const fileName = badgeAssetFileFor(state)
+  if (!fileName) {
     win.setOverlayIcon(null, '')
     return
   }
-  const fileName =
-    state.kind === 'working'
-      ? 'working.png'
-      : `${state.kind}-${state.count}.png`
   const image = loadBadgeImage(fileName)
   if (!image) {
     win.setOverlayIcon(null, '')

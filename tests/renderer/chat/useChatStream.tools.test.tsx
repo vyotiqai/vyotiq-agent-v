@@ -422,11 +422,8 @@ describe('useChatStream', () => {
       }
     })
     const loadRunEvents = vi.fn().mockResolvedValue({ ok: true, data: [] })
-    // @ts-expect-error test bridge
     window.vyotiq.loadRun = loadRun
-    // @ts-expect-error test bridge
     window.vyotiq.loadRunEvents = loadRunEvents
-    // @ts-expect-error test bridge
     window.vyotiq.loadToolResult = loadToolResult
 
     const { result } = renderHook(() => useChatStream('/ws'))
@@ -471,11 +468,8 @@ describe('useChatStream', () => {
       }
     })
     const loadRunEvents = vi.fn().mockResolvedValue({ ok: true, data: [] })
-    // @ts-expect-error test bridge
     window.vyotiq.loadRun = loadRun
-    // @ts-expect-error test bridge
     window.vyotiq.loadRunEvents = loadRunEvents
-    // @ts-expect-error test bridge
     window.vyotiq.loadToolResult = loadToolResult
 
     const { result } = renderHook(() => useChatStream('/ws'))

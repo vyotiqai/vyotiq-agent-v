@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { cn, Switch, Tooltip } from '@renderer/lib/ui'
+import { Button, cn, Switch, Tooltip } from '@renderer/lib/ui'
 import { isEditableShortcutTarget, matchShortcut, shortcutLabel } from '@renderer/lib/shortcuts'
 import { Icon, type IconName } from '@renderer/lib/icons'
 import { CHAT_RIGHT_PANEL_BODY } from '@renderer/lib/utils/layout'
@@ -23,6 +23,7 @@ import {
   type BrowserFileEntry
 } from './ChangedFilesBrowser'
 import { useGitChrome, type GitChrome } from './GitChrome'
+import { useGitInit } from './useGitInit'
 import { CommitComposer, defaultCommitMessage } from './CommitComposer'
 import {
   collectLastTurnChangedFiles,
@@ -743,6 +744,15 @@ export const ChangesPanel = memo(function ChangesPanel({
       })
   }, [chrome, commitMode, onGitMutated, onViewPr, refreshCommits, visibleGitFiles, workspacePath])
 
+  // `git init`, offered only where git itself says there is no repository.
+  // Never automatic: this runs from the empty-state button and nowhere else.
+  const onRepoCreated = useCallback(() => {
+    chrome.refresh()
+    void refreshCommits()
+    onGitMutated?.()
+  }, [chrome, onGitMutated, refreshCommits])
+  const gitInit = useGitInit(workspacePath, onRepoCreated)
+
   const sendStageAll = useCallback(() => {
     void chrome.stageAll().then((ok) => {
       if (!ok) return
@@ -875,6 +885,25 @@ export const ChangesPanel = memo(function ChangesPanel({
       : chrome.result?.kind === 'unavailable'
         ? chrome.result.detail
         : 'Commits on this branch will appear here after the first git commit.'
+
+  const gitInitAction =
+    workspacePath && chrome.result?.kind === 'not_repo' ? (
+      <span className="flex flex-col items-center gap-1.5">
+        <Button
+          variant="subtle"
+          className="h-7 px-2.5 text-caption"
+          disabled={gitInit.busy}
+          onClick={() => void gitInit.init()}
+        >
+          {gitInit.busy ? 'Initializing…' : 'Initialize repository'}
+        </Button>
+        {gitInit.error ? (
+          <span className="max-w-[16rem] text-caption text-danger" role="alert">
+            {gitInit.error}
+          </span>
+        ) : null}
+      </span>
+    ) : null
 
   const showGitEmpty =
     empty &&
@@ -1387,7 +1416,12 @@ export const ChangesPanel = memo(function ChangesPanel({
               body="Reading git history for this branch."
             />
           ) : commits.length === 0 ? (
-            <EmptyPanel icon="branch" title={commitsEmptyTitle} body={commitsEmptyBody} />
+            <EmptyPanel
+              icon="branch"
+              title={commitsEmptyTitle}
+              body={commitsEmptyBody}
+              actions={gitInitAction}
+            />
           ) : (
           <ul className="m-0 min-h-0 flex-1 list-none overflow-auto rounded-md border border-border/50 bg-surface p-0">
             <li className="border-b border-border/40 px-3 py-1.5 text-caption text-fg">
@@ -1423,7 +1457,12 @@ export const ChangesPanel = memo(function ChangesPanel({
             body="Reading git status for this workspace."
           />
         ) : showGitEmpty ? (
-          <EmptyPanel icon="branch" title={emptyTitle} body={emptyBody} />
+          <EmptyPanel
+            icon="branch"
+            title={emptyTitle}
+            body={emptyBody}
+            actions={gitInitAction}
+          />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto" data-diff-scroll-root>
             {displayScope === 'commits' && selectedCommit ? (

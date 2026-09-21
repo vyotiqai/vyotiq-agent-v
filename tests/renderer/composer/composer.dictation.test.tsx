@@ -114,7 +114,6 @@ describe('Composer dictation', () => {
       }))
     })
     installMediaMocks()
-    // @ts-expect-error test bridge
     window.vyotiq = {
       platform: 'win32',
       listModels: vi.fn(async () => ({
@@ -445,7 +444,6 @@ describe('Composer dictation', () => {
 
   it('surfaces transcribe errors in the strip with a Providers control', async () => {
     const onOpenSettings = vi.fn()
-    // @ts-expect-error test bridge
     window.vyotiq.transcribeDictation = vi.fn(async () => ({
       ok: false as const,
       error: 'Add an OpenAI API key in Settings to use dictation'
@@ -533,7 +531,6 @@ describe('Composer dictation', () => {
         }
       }
     }))
-    // @ts-expect-error test bridge
     window.vyotiq.dictationStatus = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -548,7 +545,6 @@ describe('Composer dictation', () => {
         loadedModelId: 'whisper-tiny.en' as const
       }
     }))
-    // @ts-expect-error test bridge
     window.vyotiq.transcribeDictation = vi.fn(async () => ({
       ok: true as const,
       data: { text: 'local transcript' }
@@ -579,7 +575,6 @@ describe('Composer dictation', () => {
     cleanup()
     vi.unstubAllGlobals()
     installMediaMocks({ largeChunkBytes: MAX_DICTATION_BYTES - 128 * 1024 })
-    // @ts-expect-error test bridge
     window.vyotiq = {
       platform: 'win32',
       listModels: vi.fn(async () => ({

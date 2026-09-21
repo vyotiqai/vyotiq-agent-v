@@ -49,7 +49,11 @@ import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { usePersistedBoolean } from '@renderer/lib/hooks/usePersistedBoolean'
 import { usePersistedNumber } from '@renderer/lib/hooks/usePersistedNumber'
 import { setDockImmersive } from '@renderer/lib/hooks/dockImmersiveStore'
-import { useTitleBarAccessory } from '@renderer/lib/context/TitleBarAccessory'
+import {
+  TitleBarBandSpent,
+  useTitleBarAccessory,
+  useTitleBarBand
+} from '@renderer/lib/context/TitleBarAccessory'
 import {
   BROWSER_PANEL_OPEN_KEY,
   CHAT_RIGHT_PANEL,
@@ -61,11 +65,13 @@ import {
   DOCK_WIDTH_MIN_PX,
   IMMERSIVE_TAB_KEY,
   RIGHT_PANEL_KEY,
+  TITLE_BAR_HEIGHT,
   WINDOW_CONTROLS_WIDTH_PX,
   clampDockWidthPx,
   readSidebarWidthPxForCapacity,
   isChatRightPanelId,
   showsWindowControls,
+  windowControlsReservePx,
   type ChatRightPanelId,
   type DockImmersiveTabId
 } from '@renderer/lib/utils/layout'
@@ -491,9 +497,17 @@ const runGoal = useRunGoal({
     dockWidthPx - (showsWindowControls() ? WINDOW_CONTROLS_WIDTH_PX : 0)
   )
 
+  /**
+   * Dock tabs live in the title-bar band, so the chat surface starts below it.
+   * With no tabs the band stays empty and the surface runs to the window's top
+   * edge — which is what any chrome pinned there has to reckon with
+   * (`useTitleBarBand`).
+   */
+  const titleBarBandTaken = dockImmersive || dockSideTitleBar
+
   useLayoutEffect(() => {
-    setTitleBarOccupied(dockImmersive || dockSideTitleBar)
-  }, [dockImmersive, dockSideTitleBar, setTitleBarOccupied])
+    setTitleBarOccupied(titleBarBandTaken)
+  }, [titleBarBandTaken, setTitleBarOccupied])
   useEffect(() => {
     return () => setTitleBarOccupied(false)
   }, [setTitleBarOccupied])
@@ -1060,30 +1074,50 @@ const runGoal = useRunGoal({
 
   // The panel itself shows the live view when visible; the banner covers every
   // other case (panel closed, another panel focused, immersive on another tab).
-  const browserWatchBanner =
-    browserBusy && visiblePanelId !== 'browser' ? (
-      <div
-        className="flex shrink-0 items-center gap-2 border-b border-border/30 bg-accent/10 px-3 py-1.5 text-caption"
-        data-browser-watch-banner
-        role="status"
+  const showBrowserWatchBanner = browserBusy && visiblePanelId !== 'browser'
+  // With no dock tabs above it the banner is the window's top row, so it owns
+  // the title-bar band: Watch live has to clear the caption buttons, and the
+  // band has to stop being a drag region or the button is dead to the mouse.
+  const bandFreeAboveChat = useTitleBarBand(showBrowserWatchBanner)
+  const browserWatchBannerInBand = showBrowserWatchBanner && bandFreeAboveChat
+  const browserWatchBanner = showBrowserWatchBanner ? (
+    <div
+      className={cn(
+        'flex shrink-0 items-center gap-2 border-b border-border/30 bg-accent/10 px-3 text-caption',
+        browserWatchBannerInBand ? TITLE_BAR_HEIGHT : 'py-1.5'
+      )}
+      // Inline, not a `pr-*` class: cn() has no tailwind-merge, so an appended
+      // utility would lose to the `px-3` already on the row.
+      style={
+        browserWatchBannerInBand && windowControlsReservePx() > 0
+          ? { paddingRight: windowControlsReservePx() }
+          : undefined
+      }
+      data-browser-watch-banner
+      role="status"
+    >
+      <span className="relative flex size-2 shrink-0" aria-hidden>
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+        <span className="relative inline-flex size-2 rounded-full bg-accent" />
+      </span>
+      <span
+        className={cn(
+          'min-w-0 flex-1 truncate text-fg/90',
+          browserWatchBannerInBand && 'app-region-drag'
+        )}
       >
-        <span className="relative flex size-2 shrink-0" aria-hidden>
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
-          <span className="relative inline-flex size-2 rounded-full bg-accent" />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-fg/90">
-          Agent is browsing
-          {browserWatchUrl ? <span className="text-muted"> · {browserWatchUrl}</span> : null}
-        </span>
-        <button
-          type="button"
-          className="shrink-0 rounded-md border border-border/50 bg-surface px-2 py-0.5 text-2xs font-medium text-fg hover:bg-surface-2"
-          onClick={() => setRightPanel('browser')}
-        >
-          Watch live
-        </button>
-      </div>
-    ) : null
+        Agent is browsing
+        {browserWatchUrl ? <span className="text-muted"> · {browserWatchUrl}</span> : null}
+      </span>
+      <button
+        type="button"
+        className="app-region-no-drag shrink-0 rounded-md border border-border/50 bg-surface px-2 py-0.5 text-2xs font-medium text-fg hover:bg-surface-2"
+        onClick={() => setRightPanel('browser')}
+      >
+        Watch live
+      </button>
+    </div>
+  ) : null
 
   const terminalSessionBarHostRef = useRef<HTMLDivElement>(null)
   const [terminalSessions, setTerminalSessions] = useState<PtySessionInfo[]>([])
@@ -1362,6 +1396,17 @@ const runGoal = useRunGoal({
     </>
     )
 
+  /**
+   * The banner, when it shows, is the row that spent the band — so the column
+   * under it is an ordinary surface again and its own headers must not reserve
+   * the caption strip a second time.
+   */
+  const agentColumnBelowBanner = browserWatchBannerInBand ? (
+    <TitleBarBandSpent>{agentColumn}</TitleBarBandSpent>
+  ) : (
+    agentColumn
+  )
+
   const panelBodies = (
     <>
       {mountedPanels.includes('files') ? (
@@ -1530,7 +1575,7 @@ const runGoal = useRunGoal({
   )
 
   return (
-    <div className={cn('flex h-full min-h-0 flex-col', (dockImmersive || dockSideTitleBar) && 'pt-9')}>
+    <div className={cn('flex h-full min-h-0 flex-col', titleBarBandTaken && 'pt-9')}>
       {dockImmersive && titleBarHost
         ? createPortal(
             <DockTabBar
@@ -1622,7 +1667,7 @@ const runGoal = useRunGoal({
               data-immersive-agent
             >
               {browserWatchBanner}
-              {agentColumn}
+              {agentColumnBelowBanner}
             </div>
             {panelBodies}
           </div>
@@ -1630,7 +1675,7 @@ const runGoal = useRunGoal({
           <>
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               {browserWatchBanner}
-              {agentColumn}
+              {agentColumnBelowBanner}
             </div>
             {activeRightPanel ? (
               <>

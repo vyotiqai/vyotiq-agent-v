@@ -67,6 +67,7 @@ export function ToolCatalogCard() {
     if (list) list.push(entry)
     else mcpByServer.set(entry.serverId, [entry])
   }
+  const agentBuilt = catalog.entries.filter((entry) => entry.source === 'agent')
   const activeCount = catalog.entries.filter((entry) => entry.active).length
   const serverMetaById = new Map(catalog.servers.map((s) => [s.id, s]))
 
@@ -88,6 +89,23 @@ export function ToolCatalogCard() {
           ))}
         </ul>
       </div>
+
+      {agentBuilt.length > 0 ? (
+        <div>
+          <p className="m-0 mb-1 text-xs font-medium text-fg-strong">
+            Agent-built tools ({agentBuilt.length}){' '}
+            <span className="font-normal text-tertiary">
+              (written by a run — each call asks you, and asks again whenever the code
+              changes)
+            </span>
+          </p>
+          <ul className="m-0 list-none divide-y divide-border/60 rounded-lg border border-border/60 p-0">
+            {agentBuilt.map((entry) => (
+              <ToolRow key={entry.name} entry={entry} />
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {[...mcpByServer.entries()].map(([serverId, entries]) => {
         const server = serverMetaById.get(serverId)

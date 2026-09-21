@@ -123,6 +123,11 @@
 
   --z-base: 0;
   --z-sticky: 10;
+  /* Window chrome. Above sticky page content — the pinned turn prompt is also
+     z-sticky and, being later in the DOM, used to paint straight over the
+     caption buttons — and below menus, drawers and toasts, which must still
+     open on top of the bar. */
+  --z-titlebar: 15;
   --z-dropdown: 20;
   --z-tooltip: 50;
   --z-drawer: 30;
@@ -201,6 +206,11 @@
 
   --z-base: 0;
   --z-sticky: 10;
+  /* Window chrome. Above sticky page content — the pinned turn prompt is also
+     z-sticky and, being later in the DOM, used to paint straight over the
+     caption buttons — and below menus, drawers and toasts, which must still
+     open on top of the bar. */
+  --z-titlebar: 15;
   --z-dropdown: 20;
   --z-tooltip: 50;
   --z-drawer: 30;
@@ -479,6 +489,7 @@
   --animate-dialog-in: vy-dialog-in 200ms var(--vy-ease) both;
 
   --z-index-sticky: var(--z-sticky);
+  --z-index-titlebar: var(--z-titlebar);
   --z-index-dropdown: var(--z-dropdown);
   --z-index-tooltip: var(--z-tooltip);
   --z-index-drawer: var(--z-drawer);
@@ -1305,67 +1316,161 @@ dialog[open] {
   }
 }
 
-/* Agent context card — empty-session "what the agent knows" strip. */
+/* Agent context card — empty-session "what the agent knows" strip.
+
+   One frame, four label/value readings, hairline dividers. Deliberately NOT
+   chips inside a chip: per-item borders nested in a bordered card read as
+   noise at this size, and the workspace name that used to lead the strip is
+   already in the empty-state heading directly above it.
+
+   The strip never wraps. Wrapping is what made it ragged — a full row of
+   readings, then one orphan on a second line. Instead the two
+   variable-length readings (branch, rules) are width-capped and truncate,
+   with the full text in each item's title. */
 .agent-context-card {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: stretch;
-  gap: 4px;
-  max-width: 40rem;
-  padding: 4px;
-  border: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-surface, var(--vy-surface-2)) 65%, transparent);
+  max-width: 100%;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-surface, var(--vy-surface-2)) 55%, transparent);
   box-shadow: var(--vy-shadow-chrome);
 }
 
-.acc-segment {
-  display: inline-flex;
+.acc-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px 14px;
+}
+
+/* Only these two carry unbounded strings, so only these two need a cap. */
+[data-acc-item='branch'] {
+  max-width: 13rem;
+}
+
+[data-acc-item='rules'] {
+  max-width: 15rem;
+}
+
+.acc-label {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: color-mix(in srgb, var(--color-muted) 75%, transparent);
+}
+
+.acc-value {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
   align-items: center;
   gap: 5px;
-  padding: 3px 10px;
-  border: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--color-border) 7%, transparent);
   font-size: 0.75rem;
-  line-height: 1.35;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--color-secondary);
+}
+
+.acc-value > * {
+  min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.acc-sep {
-  width: 1px;
-  align-self: center;
-  background: color-mix(in srgb, var(--color-border) 70%, transparent);
-}
-
-.acc-icon,
-.acc-text {
+.acc-value-empty {
+  font-weight: 400;
   color: var(--color-muted);
 }
 
-.acc-text-primary {
-  color: var(--color-secondary);
+.acc-value-error {
+  color: var(--color-danger);
+}
+
+/* The strip's one action: git init, offered only when there is no repository.
+   Sized to sit inside a reading without changing the row height. */
+.acc-action {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 75%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-border) 12%, transparent);
+  font-size: 0.6875rem;
   font-weight: 500;
+  line-height: 1.45;
+  color: var(--color-secondary);
+  cursor: pointer;
+  transition:
+    background var(--vy-duration, 160ms) var(--vy-ease, ease),
+    border-color var(--vy-duration, 160ms) var(--vy-ease, ease),
+    color var(--vy-duration, 160ms) var(--vy-ease, ease);
+}
+
+.acc-action:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  background: color-mix(in srgb, var(--color-border) 26%, transparent);
+  color: var(--color-fg);
+}
+
+.acc-action:disabled {
+  cursor: default;
+  opacity: var(--vy-disabled-opacity, 0.45);
+}
+
+.acc-dim {
+  flex: none;
+  color: var(--color-muted);
+  opacity: 0.55;
+}
+
+/* Fades out at both ends so it reads as a divider, not a table rule. */
+.acc-sep {
+  flex: none;
+  width: 1px;
+  align-self: stretch;
+  margin: 7px 0;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--color-border) 80%, transparent) 22%,
+    color-mix(in srgb, var(--color-border) 80%, transparent) 78%,
+    transparent
+  );
 }
 
 .acc-dot {
-  width: 7px;
-  height: 7px;
+  flex: none;
+  width: 6px;
+  height: 6px;
   border-radius: 9999px;
   background: var(--color-muted);
 }
 
 .acc-dot-ready {
   background: var(--color-success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 15%, transparent);
 }
 
 .acc-dot-building {
   background: var(--color-warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-warning) 15%, transparent);
   animation: acc-dot-pulse 1.6s var(--vy-ease, ease) infinite;
 }
 
 .acc-dot-degraded {
   background: var(--color-warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-warning) 15%, transparent);
 }
 
 .acc-dot-off {
@@ -1382,19 +1487,36 @@ dialog[open] {
   }
 }
 
-[data-agent-context-card-skeleton] .acc-skel-chip {
-  border-color: transparent;
-  background: color-mix(in srgb, var(--color-border) 16%, transparent);
-  color: transparent;
+[data-agent-context-card-skeleton] .acc-skel {
+  display: block;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-border) 20%, transparent);
+}
+
+[data-agent-context-card-skeleton] .acc-skel-label {
+  width: 2.5rem;
+  height: 7px;
+}
+
+[data-agent-context-card-skeleton] .acc-skel-value {
+  height: 11px;
 }
 
 @media (prefers-contrast: more) {
   .agent-context-card {
-    border: 1px solid var(--color-border-strong);
+    border-color: var(--color-border-strong);
   }
 
-  .acc-segment {
-    border: 1px solid var(--color-border);
+  .acc-sep {
+    background: var(--color-border-strong);
+  }
+
+  .acc-label {
+    color: var(--color-muted);
+  }
+
+  .acc-action {
+    border-color: var(--color-border-strong);
   }
 }
 

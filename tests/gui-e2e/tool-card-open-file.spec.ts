@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
+import { requireActivePath } from './helpers/seedWorkspace'
 
 let launched: LaunchedApp
 let workspacePath: string
@@ -27,7 +28,7 @@ test.beforeAll(async () => {
   )
   expect(addRes.ok).toBe(true)
   if (!addRes.ok) throw new Error(addRes.error)
-  workspacePath = addRes.data.activePath
+  workspacePath = requireActivePath(addRes.data.activePath)
 
   await launched.window.evaluate(async () => {
     await window.vyotiq.setSettings({ toolApprovalOnboardingDone: true })

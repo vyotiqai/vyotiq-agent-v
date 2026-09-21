@@ -226,7 +226,6 @@ beforeEach(() => {
           : []
   }))
 
-  // @ts-expect-error test bridge
   window.vyotiq = {
     getSettings: vi.fn(async () => ({
       ok: true as const,

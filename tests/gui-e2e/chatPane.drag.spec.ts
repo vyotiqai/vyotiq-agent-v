@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
-import { seedRunsInUserData } from './helpers/seedWorkspace'
+import { seedRunsInUserData, requireActivePath } from './helpers/seedWorkspace'
 
 let launched: LaunchedApp
 let workspacePath: string
@@ -56,8 +56,7 @@ test.beforeAll(async () => {
   }, workspacePath)
   expect(addRes.ok).toBe(true)
   if (!addRes.ok) throw new Error(addRes.error)
-  const openPath = addRes.data.activePath
-  expect(openPath).toBeTruthy()
+  const openPath = requireActivePath(addRes.data.activePath)
 
   const listed = await launched.window.evaluate(async (path) => {
     return window.vyotiq.listRuns(path)

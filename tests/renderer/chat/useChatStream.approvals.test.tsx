@@ -52,7 +52,6 @@ describe('useChatStream', () => {
 
   it('clears approval only after respondToolApproval succeeds', async () => {
     const respondToolApproval = vi.fn().mockResolvedValue({ ok: true, data: true })
-    // @ts-expect-error test bridge
     window.vyotiq.respondToolApproval = respondToolApproval
 
     const { result } = renderHook(() => useChatStream('/ws'))
@@ -95,7 +94,6 @@ describe('useChatStream', () => {
     const respondToolApproval = vi
       .fn()
       .mockResolvedValue({ ok: false, error: 'approval expired' })
-    // @ts-expect-error test bridge
     window.vyotiq.respondToolApproval = respondToolApproval
 
     const { result } = renderHook(() => useChatStream('/ws'))
@@ -137,7 +135,6 @@ describe('useChatStream', () => {
 
   it('keeps approval visible when respondToolApproval returns data false', async () => {
     const respondToolApproval = vi.fn().mockResolvedValue({ ok: true, data: false })
-    // @ts-expect-error test bridge
     window.vyotiq.respondToolApproval = respondToolApproval
 
     const { result } = renderHook(() => useChatStream('/ws'))
@@ -261,7 +258,6 @@ describe('useChatStream', () => {
 
   it('clears question only after respondAgentQuestion succeeds with data true', async () => {
     const respondAgentQuestion = vi.fn().mockResolvedValue({ ok: true, data: true })
-    // @ts-expect-error test bridge
     window.vyotiq.respondAgentQuestion = respondAgentQuestion
 
     const { result } = renderHook(() => useChatStream('/ws'))
@@ -297,7 +293,6 @@ describe('useChatStream', () => {
 
   it('keeps question visible when respondAgentQuestion returns data false', async () => {
     const respondAgentQuestion = vi.fn().mockResolvedValue({ ok: true, data: false })
-    // @ts-expect-error test bridge
     window.vyotiq.respondAgentQuestion = respondAgentQuestion
 
     const { result } = renderHook(() => useChatStream('/ws'))

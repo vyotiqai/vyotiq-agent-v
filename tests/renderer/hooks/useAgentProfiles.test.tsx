@@ -107,7 +107,6 @@ describe('useAgentProfiles shared store', () => {
   })
 
   it('surfaces a partial-delete warning where the roster is actually shown', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.agentProfilesDelete = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -135,7 +134,6 @@ describe('useAgentProfiles shared store', () => {
   it('clears a warning once it has been read', async () => {
     const hook = renderHook(() => useAgentProfiles())
     await waitFor(() => expect(hook.result.current.ready).toBe(true))
-    // @ts-expect-error test bridge
     window.vyotiq.agentProfilesDelete = vi.fn(async () => ({
       ok: false as const,
       error: 'Teammate is running'
@@ -161,7 +159,6 @@ describe('useAgentProfiles shared store', () => {
     expect(listCalls).toBe(0)
     early.unmount()
 
-    // @ts-expect-error test bridge
     window.vyotiq = bridge
     const later = renderHook(() => useAgentProfiles())
     await waitFor(() => expect(later.result.current.ready).toBe(true))

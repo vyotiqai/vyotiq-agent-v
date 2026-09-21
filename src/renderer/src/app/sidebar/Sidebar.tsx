@@ -253,6 +253,7 @@ export function Sidebar({
               afterNav()
             }}
             activeWorkspacePath={activePath ?? null}
+            current={view === 'teammates'}
           />
         </div>
       )}
@@ -296,14 +297,19 @@ export function Sidebar({
           }}
           onOpenSettings={openNotificationSettings}
         />
-        <NavItem
-          label="Teammates"
-          icon="bot"
-          variant={isCollapsed ? 'icon' : 'sidebar'}
-          current={view === 'teammates'}
-          className={isCollapsed ? undefined : "w-full"}
-          onClick={openTeammates}
-        />
+        {/* Teammates is not listed here. The roster section above is already
+            the way in — it names the same destination, and carrying both meant
+            the sidebar offered the word twice, three rows apart, for one pane.
+            Collapsed, the roster is hidden, so the rail keeps its entry. */}
+        {isCollapsed ? (
+          <NavItem
+            label="Teammates"
+            icon="bot"
+            variant="icon"
+            current={view === 'teammates'}
+            onClick={openTeammates}
+          />
+        ) : null}
         <NavItem
           label="Settings"
           icon="gear"

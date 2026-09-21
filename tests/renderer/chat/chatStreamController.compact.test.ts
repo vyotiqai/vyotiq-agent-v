@@ -51,6 +51,23 @@ describe('createChatStreamController', () => {
     expect(usage?.source).toBe('estimate')
   })
 
+  it('derives the auto-compact trigger, not the content window, on a cold manual compact', () => {
+    // No prior context_usage, so this takes the cold branch that builds the
+    // meter state from scratch. It used to store the content window here, which
+    // overstates "free before auto-compact" by ~1.8x.
+    const controller = createChatStreamController({ workspacePath: '/ws', runId: 'r1' })
+    controller.applyManualCompaction({
+      summary: 'Folded the auth refactor.',
+      tokenEstimate: 800,
+      estimatedTokens: 12_000,
+      contextWindow: 1_000_000,
+      contentWindow: 850_000
+    })
+    const usage = controller.getContextUsage()
+    expect(usage?.contentWindow).toBe(850_000)
+    expect(usage?.compactionTrigger).toBe(467_500)
+  })
+
   it('does not keep idle hydrate compacting from a leftover compaction_started', () => {
     const controller = createChatStreamController({ workspacePath: '/ws', runId: 'r1' })
     controller.hydrateTranscript([{ role: 'user', content: 'hi' }], [

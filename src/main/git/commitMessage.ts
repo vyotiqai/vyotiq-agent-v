@@ -218,6 +218,7 @@ export async function generateCommitMessage(
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), GENERATION_TIMEOUT_MS)
+  const startedAt = Date.now()
   let raw = ''
   try {
     const provider = getProvider(settings.provider)
@@ -239,6 +240,24 @@ export async function generateCommitMessage(
     })) {
       if (controller.signal.aborted) {
         return fallbackResult('Generation timed out')
+      }
+      if (chunk.type === 'done' && chunk.usage) {
+        // Commit-message generation is a billed LLM call with no run behind it,
+        // so there is no run-scoped `usage.json` to record into. Its output is
+        // capped at 256 tokens, making it a rounding error next to compaction —
+        // log it structurally so the spend is at least attributable, and give it
+        // real storage only if these numbers turn out to matter.
+        logger.info('Token cost aux call', {
+          scope: 'agent',
+          code: 'AUX_USAGE',
+          site: 'commit_message',
+          provider: settings.provider,
+          model: settings.model,
+          inputTokens: chunk.usage.inputTokens,
+          outputTokens: chunk.usage.outputTokens,
+          cachedInputTokens: chunk.usage.cachedInputTokens,
+          generationMs: Math.max(0, Date.now() - startedAt)
+        })
       }
       if (chunk.type === 'text' && chunk.text) raw += chunk.text
       if (chunk.type === 'error') return fallbackResult('The model returned an error')

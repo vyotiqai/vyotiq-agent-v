@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
@@ -12,6 +12,7 @@ import {
   currentGitBranch,
   GIT_STATUS_FILE_LIMIT,
   gitRemoteUrl,
+  initGitRepo,
   isGitRepo,
   listLocalBranches,
   readGitAheadBehind,
@@ -524,7 +525,7 @@ describe.skipIf(!canGit)('git ahead/behind vs upstream', () => {
 })
 
 describe.skipIf(!canGit)('git status file-list cap', () => {
-  it('caps the file list while totals cover every change', async () => {
+  it('caps the file list and the untracked measurement feeding the totals', async () => {
     const repo = mkdtempSync(join(tmpdir(), 'vyotiq-git-cap-'))
     try {
       git(repo, 'init', '--initial-branch=main')
@@ -542,8 +543,13 @@ describe.skipIf(!canGit)('git status file-list cap', () => {
       expect(status.truncated).toBe(true)
       expect(status.files).toHaveLength(GIT_STATUS_FILE_LIMIT)
       expect(status.fileCount).toBe(extra)
-      // Untracked files count as wholly added — one line each.
-      expect(status.added).toBe(extra)
+      // Untracked files count as wholly added — one line each — but only the
+      // files that actually ship are measured. Measuring one means reading it
+      // synchronously (~2ms), so counting every untracked path blocked the
+      // main process for minutes on a workspace carrying a large untracked
+      // tree. Tracked totals still cover every change; they come from a single
+      // numstat call. `truncated` announces that the count stops at the cap.
+      expect(status.added).toBe(GIT_STATUS_FILE_LIMIT)
     } finally {
       rmSync(repo, { recursive: true, force: true })
     }
@@ -562,6 +568,63 @@ describe.skipIf(!canGit)('git status file-list cap', () => {
       expect(status.truncated).toBe(false)
       expect(status.files).toHaveLength(2)
       expect(status.fileCount).toBe(2)
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+})
+
+describe.skipIf(!canGit)('initGitRepo', () => {
+  it('creates a real repository and reports the branch git chose', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vyotiq-git-init-'))
+    try {
+      expect(isGitRepo(dir)).toBe(false)
+      expect((await readGitStatus(dir)).kind).toBe('not_repo')
+
+      const result = await initGitRepo(dir)
+      expect(result.ok).toBe(true)
+      if (!result.ok) throw new Error(result.error)
+      // Whatever init.defaultBranch says — the value is read back, not assumed.
+      expect(result.branch).toBe(await currentGitBranch(dir))
+      expect(result.branch).toBeTruthy()
+
+      expect(isGitRepo(dir)).toBe(true)
+      const status = expectOk(await readGitStatus(dir))
+      // Before the first commit HEAD is unborn; the branch is still known, and
+      // reporting null here is what made a just-created repo look like none.
+      expect(status.branch).toBe(result.branch)
+      expect(status.hasCommits).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a directory that is already a repository', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vyotiq-git-init-twice-'))
+    try {
+      git(dir, 'init', '--initial-branch=main')
+      const result = await initGitRepo(dir)
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('expected a refusal')
+      expect(result.error).toMatch(/already inside a git repository/i)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('never nests a repository inside an existing one', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vyotiq-git-init-nested-'))
+    try {
+      git(repo, 'init', '--initial-branch=main')
+      const child = join(repo, 'packages', 'app')
+      mkdirSync(child, { recursive: true })
+
+      const result = await initGitRepo(child)
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('expected a refusal')
+      // The outer repo still owns the subdirectory.
+      expect(existsSync(join(child, '.git'))).toBe(false)
+      expect(await currentGitBranch(child)).toBe('main')
     } finally {
       rmSync(repo, { recursive: true, force: true })
     }

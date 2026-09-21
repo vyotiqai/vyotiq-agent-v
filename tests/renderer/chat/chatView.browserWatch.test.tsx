@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { ChatView } from '@renderer/features/chat/ChatView'
 import { emptySecretStatus } from '@shared/ipc'
 import type { AgentBrowserState } from '@shared/ipc'
+import { WINDOW_CONTROLS_WIDTH_PX } from '@renderer/lib/utils/layout'
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
@@ -130,6 +131,25 @@ describe('ChatView browser watch affordance', () => {
     })
     // Panel visible → banner no longer needed.
     expect(q('[data-browser-watch-banner]')).toBeNull()
+  })
+
+  it('clears the caption buttons while it is the window top row', async () => {
+    // No dock tabs above it, so the banner sits in the title-bar band: its
+    // Watch live button used to render under minimize/maximize, inside the
+    // drag region that swallows the click.
+    vi.mocked(window.vyotiq.browserGetState!).mockResolvedValue({
+      ok: true,
+      data: busyBrowserState()
+    })
+    render(<ChatView {...baseProps} />)
+    await vi.waitFor(() => {
+      expect(q('[data-browser-watch-banner]')).toBeTruthy()
+    })
+    const banner = q('[data-browser-watch-banner]') as HTMLElement
+    expect(banner.style.paddingRight).toBe(`${WINDOW_CONTROLS_WIDTH_PX}px`)
+    expect(screen.getByRole('button', { name: /watch live/i }).className).toContain(
+      'app-region-no-drag'
+    )
   })
 
   it('reacts to browser state pushes, not just the initial getState', async () => {

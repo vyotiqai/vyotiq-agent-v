@@ -8,45 +8,45 @@ export type RootAppearanceAttrs = {
   skin: string | null
 }
 
-async function blurActiveElement(window: Page): Promise<void> {
-  await window.evaluate(() => {
+async function blurActiveElement(page: Page): Promise<void> {
+  await page.evaluate(() => {
     const active = document.activeElement as HTMLElement | null
     active?.blur?.()
   })
 }
 
-export async function openSettings(window: Page): Promise<void> {
-  const nav = window.getByRole('navigation', { name: /settings sections/i })
+export async function openSettings(page: Page): Promise<void> {
+  const nav = page.getByRole('navigation', { name: /settings sections/i })
   if (await nav.isVisible().catch(() => false)) return
 
-  await blurActiveElement(window)
+  await blurActiveElement(page)
   const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
-  await window.keyboard.press(`${mod}+Comma`)
+  await page.keyboard.press(`${mod}+Comma`)
   await expect(nav).toBeVisible({ timeout: 15_000 })
 }
 
-export async function openAppearanceSection(window: Page): Promise<void> {
-  await openSettings(window)
-  await window.getByRole('button', { name: /^appearance$/i }).click()
-  await expect(window.getByText('Color mode')).toBeVisible({ timeout: 10_000 })
+export async function openAppearanceSection(page: Page): Promise<void> {
+  await openSettings(page)
+  await page.getByRole('button', { name: /^appearance$/i }).click()
+  await expect(page.getByText('Color mode')).toBeVisible({ timeout: 10_000 })
 }
 
 export async function selectSettingsMenu(
-  window: Page,
+  page: Page,
   menuAriaLabel: string | RegExp,
   optionLabel: string | RegExp
 ): Promise<void> {
-  const trigger = window.getByRole('button', { name: menuAriaLabel })
+  const trigger = page.getByRole('button', { name: menuAriaLabel })
   await expect(trigger).toBeVisible()
   await trigger.click()
-  const listbox = window.getByRole('listbox', { name: menuAriaLabel })
+  const listbox = page.getByRole('listbox', { name: menuAriaLabel })
   await expect(listbox).toBeVisible()
   await listbox.getByRole('option', { name: optionLabel }).click()
   await expect(listbox).toBeHidden({ timeout: 5_000 })
 }
 
-export async function readRootAppearance(window: Page): Promise<RootAppearanceAttrs> {
-  return window.evaluate(() => ({
+export async function readRootAppearance(page: Page): Promise<RootAppearanceAttrs> {
+  return page.evaluate(() => ({
     theme: document.documentElement.getAttribute('data-theme'),
     fontScale: document.documentElement.getAttribute('data-font-scale'),
     density: document.documentElement.getAttribute('data-density'),
@@ -54,8 +54,8 @@ export async function readRootAppearance(window: Page): Promise<RootAppearanceAt
   }))
 }
 
-export async function readAppearanceBootCache(window: Page): Promise<Record<string, unknown> | null> {
-  return window.evaluate((key) => {
+export async function readAppearanceBootCache(page: Page): Promise<Record<string, unknown> | null> {
+  return page.evaluate((key) => {
     const raw = localStorage.getItem(key)
     if (!raw) return null
     try {
@@ -66,8 +66,8 @@ export async function readAppearanceBootCache(window: Page): Promise<Record<stri
   }, APPEARANCE_LOCAL_STORAGE_KEY)
 }
 
-export async function resetAppearanceSettings(window: Page): Promise<void> {
-  await window.evaluate(async (skinId) => {
+export async function resetAppearanceSettings(page: Page): Promise<void> {
+  await page.evaluate(async (skinId) => {
     await window.vyotiq.setSettings({
       theme: 'system',
       fontScale: 'default',
@@ -76,11 +76,11 @@ export async function resetAppearanceSettings(window: Page): Promise<void> {
       customCssPath: ''
     })
   }, DEFAULT_SKIN_ID)
-  await leaveSettingsIfOpen(window)
-  await window.reload()
-  await window.locator('body').waitFor({ state: 'attached', timeout: 45_000 })
+  await leaveSettingsIfOpen(page)
+  await page.reload()
+  await page.locator('body').waitFor({ state: 'attached', timeout: 45_000 })
   await expect
-    .poll(async () => readRootAppearance(window), { timeout: 15_000 })
+    .poll(async () => readRootAppearance(page), { timeout: 15_000 })
     .toMatchObject({
       fontScale: 'default',
       density: 'default',
@@ -88,10 +88,10 @@ export async function resetAppearanceSettings(window: Page): Promise<void> {
     })
 }
 
-export async function leaveSettingsIfOpen(window: Page): Promise<void> {
-  await window.keyboard.press('Escape')
-  await blurActiveElement(window)
-  const back = window.getByRole('button', { name: /^back$/i })
+export async function leaveSettingsIfOpen(page: Page): Promise<void> {
+  await page.keyboard.press('Escape')
+  await blurActiveElement(page)
+  const back = page.getByRole('button', { name: /^back$/i })
   if (await back.isVisible().catch(() => false)) {
     await back.click()
     await expect(back).toBeHidden({ timeout: 10_000 })

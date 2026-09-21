@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { Icon } from '@renderer/lib/icons'
+import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import type { WorkspaceAgentContextResult } from '@shared/ipc/schemas/agent'
+import { workspacePathsEqual } from '@shared/workspacePathMatch'
+import { useGitInit } from './useGitInit'
 
 type CodeIndexState = WorkspaceAgentContextResult['codeIndex']['state']
 
@@ -11,12 +12,36 @@ const INDEX_STATE_LABEL: Record<CodeIndexState, string> = {
   off: 'Off'
 }
 
-const SKELETON_WIDTHS = ['7.5rem', '9rem', '6.5rem', '7rem']
+const INDEX_STATE_HINT: Record<CodeIndexState, string> = {
+  ready: 'Code index is built — the agent can search this workspace by symbol.',
+  building: 'Code index is still syncing — recent edits may be missing.',
+  degraded: 'Code index is incomplete — the agent falls back to plain file search.',
+  off: 'Code index is off for this workspace.'
+}
+
+/** Uneven on purpose, so the pending state reads as text rather than as bars. */
+const SKELETON_WIDTHS = ['6.5rem', '5.5rem', '3.75rem', '3rem']
+
+type Reading = {
+  key: string
+  label: string
+  title: string
+  value: ReactNode
+}
 
 /**
- * Read-only "what the agent knows" strip for the empty-session state.
- * ONE bridge fetch on mount — no polling, no event subscriptions.
+ * Live "what the agent knows" strip for the empty-session state.
+ * One bridge fetch on mount, then main pushes a new summary whenever one of
+ * the five watched paths actually changes it — no polling, no timers.
  * IPC failure renders nothing (never fake data).
+ *
+ * Read-only with one exception: when the workspace is not a repository the
+ * branch reading offers `git init`, on an explicit click. The strip then
+ * updates from the watcher like any other change.
+ *
+ * Four label/value readings in one frame. The workspace name is deliberately
+ * absent: the empty-state heading directly above already says
+ * "New chat in <workspace>", and this strip sits under it.
  */
 export function AgentContextCard({ workspacePath }: { workspacePath: string }) {
   const [context, setContext] = useState<WorkspaceAgentContextResult | null>(null)
@@ -24,47 +49,155 @@ export function AgentContextCard({ workspacePath }: { workspacePath: string }) {
 
   useEffect(() => {
     let cancelled = false
+    let pushed = false
+
+    // Subscribe before requesting, so a change landing while the first read is
+    // in flight is not lost. Panes can show different workspaces, so filter.
+    const off = window.vyotiq.onAgentContextChanged?.((payload) => {
+      if (cancelled || !workspacePathsEqual(payload.workspacePath, workspacePath)) return
+      pushed = true
+      setFailed(false)
+      setContext(payload.context)
+    })
+    const stop = (): void => {
+      cancelled = true
+      off?.()
+    }
+
     // Bridge surface is versioned — an older/partial preload without the
     // method must render nothing (never throw inside the effect).
     const request = window.vyotiq.agentContext?.({ workspacePath })
     if (!request) {
       setFailed(true)
-      return
+      return stop
     }
     request
       .then((res) => {
-        if (cancelled) return
+        // A push that got here first is newer than this reply — never regress.
+        if (cancelled || pushed) return
         if (res.ok) setContext(res.data)
         else setFailed(true)
       })
       .catch(() => {
-        if (!cancelled) setFailed(true)
+        if (!cancelled && !pushed) setFailed(true)
       })
-    return () => {
-      cancelled = true
-    }
+    return stop
   }, [workspacePath])
+
+  // The watcher pushes the new branch once `.git` lands, so there is nothing
+  // to re-read here on success.
+  const gitInit = useGitInit(workspacePath)
 
   if (failed) return null
 
   if (!context) {
     return (
       <div className="agent-context-card" data-agent-context-card-skeleton aria-hidden>
-        {SKELETON_WIDTHS.map((width) => (
-          <span key={width} className="acc-segment acc-skel-chip" style={{ width }} />
+        {SKELETON_WIDTHS.map((width, index) => (
+          <Fragment key={width}>
+            {index > 0 ? <span className="acc-sep" /> : null}
+            <span className="acc-item">
+              <span className="acc-skel acc-skel-label" />
+              <span className="acc-skel acc-skel-value" style={{ width }} />
+            </span>
+          </Fragment>
         ))}
       </div>
     )
   }
 
-  const { rules } = context
-  const ruleChips: string[] = []
-  if (rules.agentsMd) ruleChips.push('AGENTS.md')
-  if (rules.cursorrules) ruleChips.push('.cursorrules')
-  if (rules.vyotiqRulesCount > 0) ruleChips.push(`${rules.vyotiqRulesCount} rules`)
-
+  const { branch, memoryNotes, rules } = context
   const state = context.codeIndex.state
-  const branch = context.branch
+
+  const ruleNames: string[] = []
+  if (rules.agentsMd) ruleNames.push('AGENTS.md')
+  if (rules.claudeMd) ruleNames.push('CLAUDE.md')
+  if (rules.cursorrules) ruleNames.push('.cursorrules')
+  if (rules.ruleFileCount > 0) ruleNames.push(`${rules.ruleFileCount} rules`)
+
+  const readings: Reading[] = [
+    {
+      key: 'branch',
+      label: 'Branch',
+      title: branch
+        ? `Git branch: ${branch}`
+        : `${context.workspaceName} is not a git repository`,
+      value: branch ? (
+        <span>{branch}</span>
+      ) : (
+        <>
+          <span
+            className={gitInit.error ? 'acc-value-error' : 'acc-value-empty'}
+            title={gitInit.error ?? undefined}
+          >
+            {gitInit.error ? 'Init failed' : 'Not a repo'}
+          </span>
+          <button
+            type="button"
+            className="acc-action"
+            disabled={gitInit.busy}
+            aria-busy={gitInit.busy || undefined}
+            title={`Run git init in ${context.workspaceName}`}
+            onClick={() => {
+              void gitInit.init()
+            }}
+          >
+            Initialize
+          </button>
+        </>
+      )
+    },
+    {
+      key: 'rules',
+      label: 'Rules',
+      title:
+        ruleNames.length > 0
+          ? `Project rules the agent reads: ${ruleNames.join(', ')}`
+          : 'No project rules found in this workspace',
+      value:
+        ruleNames.length > 0 ? (
+          ruleNames.map((name, index) => (
+            <Fragment key={name}>
+              {index > 0 ? (
+                <span className="acc-dim" aria-hidden>
+                  ·
+                </span>
+              ) : null}
+              <span>{name}</span>
+            </Fragment>
+          ))
+        ) : (
+          <span className="acc-value-empty">None</span>
+        )
+    },
+    {
+      key: 'memory',
+      label: 'Memory',
+      title:
+        memoryNotes > 0
+          ? `${memoryNotes} memory note${memoryNotes === 1 ? '' : 's'} stored for this workspace`
+          : 'No memory notes stored for this workspace yet',
+      value:
+        memoryNotes > 0 ? (
+          <span>
+            {memoryNotes} note{memoryNotes === 1 ? '' : 's'}
+          </span>
+        ) : (
+          <span className="acc-value-empty">None</span>
+        )
+    },
+    {
+      key: 'index',
+      label: 'Index',
+      title: INDEX_STATE_HINT[state],
+      value: (
+        <>
+          <span className={`acc-dot acc-dot-${state}`} aria-hidden />
+          <span>{INDEX_STATE_LABEL[state]}</span>
+        </>
+      )
+    }
+  ]
 
   return (
     <div
@@ -73,63 +206,15 @@ export function AgentContextCard({ workspacePath }: { workspacePath: string }) {
       data-agent-context-card
       className="agent-context-card"
     >
-      <div
-        className="acc-segment"
-        title={`Workspace: ${context.workspaceName}${branch ? ` · branch ${branch}` : ''}`}
-      >
-        <Icon name="folder" size={12} className="acc-icon" />
-        <span className="acc-text acc-text-primary">{context.workspaceName}</span>
-        {branch ? (
-          <>
-            <span className="acc-text" aria-hidden>
-              ·
-            </span>
-            <Icon name="branch" size={12} className="acc-icon" />
-            <span className="acc-text">{branch}</span>
-          </>
-        ) : null}
-      </div>
-
-      <span className="acc-sep" aria-hidden />
-
-      <div
-        className="acc-segment"
-        title={`Project rules the agent reads: ${ruleChips.length > 0 ? ruleChips.join(', ') : 'none detected'}`}
-      >
-        <Icon name="check" size={12} className="acc-icon" />
-        {ruleChips.length > 0 ? (
-          ruleChips.map((chip) => (
-            <span key={chip} className="acc-text">
-              {chip}
-            </span>
-          ))
-        ) : (
-          <span className="acc-text">None</span>
-        )}
-      </div>
-
-      <span className="acc-sep" aria-hidden />
-
-      <div
-        className="acc-segment"
-        title={`${context.memoryNotes} memory note${context.memoryNotes === 1 ? '' : 's'} stored for this workspace`}
-      >
-        <Icon name="memory" size={12} className="acc-icon" />
-        <span className="acc-text">
-          {context.memoryNotes} memory note{context.memoryNotes === 1 ? '' : 's'}
-        </span>
-      </div>
-
-      <span className="acc-sep" aria-hidden />
-
-      <div
-        className="acc-segment"
-        title={`Code index: ${INDEX_STATE_LABEL[state]}${state === 'building' ? ' (sync in progress)' : ''}`}
-      >
-        <Icon name="scanSearch" size={12} className="acc-icon" />
-        <span className={`acc-dot acc-dot-${state}`} aria-hidden />
-        <span className="acc-text">Index: {INDEX_STATE_LABEL[state]}</span>
-      </div>
+      {readings.map((reading, index) => (
+        <Fragment key={reading.key}>
+          {index > 0 ? <span className="acc-sep" aria-hidden /> : null}
+          <div className="acc-item" data-acc-item={reading.key} title={reading.title}>
+            <span className="acc-label">{reading.label}</span>
+            <span className="acc-value">{reading.value}</span>
+          </div>
+        </Fragment>
+      ))}
     </div>
   )
 }

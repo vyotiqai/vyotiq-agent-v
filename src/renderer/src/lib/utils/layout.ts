@@ -30,6 +30,16 @@ export const CHAT_STAGE_TOP_INSET = 'pt-4'
 export const CHAT_STAGE_TOP_SPACER = 'h-4'
 
 /**
+ * Top inset for a chat-stage row that has to sit clear of the title-bar band —
+ * {@link TITLE_BAR_HEIGHT_PX} plus the same 8px lead-in a banner normally gets.
+ *
+ * Content drops below the band rather than claiming it: a claim would hand the
+ * strip to the main column and take away the only window-drag handle the plain
+ * transcript has.
+ */
+export const CHAT_STAGE_TOP_BAND_INSET = 'pt-11'
+
+/**
  * Top edge of the floating chat side rail.
  *
  * The rail is pinned to the top-right corner — the corner the Windows/Linux
@@ -147,6 +157,16 @@ export const MARKETPLACE_COLUMN_MAX = 'max-w-[1040px]'
 
 /** Centered marketplace column. */
 export const MARKETPLACE_COLUMN = `mx-auto w-full ${MARKETPLACE_COLUMN_MAX}`
+
+/**
+ * Teammates rail — the task inbox entry plus the roster, beside the detail
+ * pane. Fixed rather than fluid: it holds an avatar, a name and one badge, and
+ * a fluid track would stretch that to half the window on a wide display.
+ */
+export const TEAMMATES_RAIL_WIDTH = 'w-[264px]'
+
+/** Content column inside the teammates detail pane. */
+export const TEAMMATES_DETAIL_COLUMN = 'w-full max-w-[720px]'
 
 /**
  * Vertical rhythm. Applied as padding on each row rather than flex gap so
@@ -304,6 +324,21 @@ export function showsWindowControls(
     : undefined
 ): boolean {
   return platform === 'win32' || platform === 'linux' || !platform
+}
+
+/**
+ * Pixels a surface pinned to the top of the main column must hold open on its
+ * right edge so its own controls never end up underneath the caption buttons.
+ *
+ * Zero on macOS: the traffic lights sit on the left and the shell insets them
+ * out of the content's way already ({@link MACOS_TITLEBAR_INSET_PX}).
+ */
+export function windowControlsReservePx(
+  platform: string | undefined = typeof window !== 'undefined'
+    ? window.vyotiq?.platform
+    : undefined
+): number {
+  return showsWindowControls(platform) ? WINDOW_CONTROLS_WIDTH_PX : 0
 }
 
 /**

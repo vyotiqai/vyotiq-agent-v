@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SettingsView } from '@renderer/features/settings'
 import { DEFAULT_SETTINGS, emptySecretStatus, type Settings } from '@shared/ipc'
-import { DEFAULT_AGENT_IDENTITY, DEFAULT_AGENT_PERSONA, DEFAULT_AGENT_TONE } from '@shared/agentPersona'
 
 afterEach(() => {
   cleanup()
@@ -97,7 +96,9 @@ describe('Agent section — Persona & style fields', () => {
     )
   })
 
-  it('shows the built-in default persona/tone as placeholder when fields are empty', () => {
+  it('leaves persona/tone empty with an example placeholder, not a built-in default', () => {
+    // The placeholder is an example of what the user could type. It must not
+    // name or describe an assistant the app ships with — there is none.
     const onUpdate = vi.fn<Parameters<Update>, ReturnType<Update>>(
       async () => ({ ok: true })
     )
@@ -105,11 +106,12 @@ describe('Agent section — Persona & style fields', () => {
 
     const persona = screen.getByLabelText('Persona') as HTMLTextAreaElement
     expect(persona.value).toBe('')
-    expect(persona.placeholder).toBe(DEFAULT_AGENT_PERSONA)
+    expect(persona.placeholder).toMatch(/^e\.g\. /)
+    expect(persona.placeholder).not.toContain('Agent V')
 
     const tone = screen.getByLabelText('Tone') as HTMLTextAreaElement
     expect(tone.value).toBe('')
-    expect(tone.placeholder).toBe(DEFAULT_AGENT_TONE)
+    expect(tone.placeholder).toMatch(/^e\.g\. /)
     expect(onUpdate).not.toHaveBeenCalled()
   })
 
@@ -124,14 +126,12 @@ describe('Agent section — Persona & style fields', () => {
 
     const persona = screen.getByLabelText('Persona') as HTMLTextAreaElement
     expect(persona.value).toBe('Nova')
-    expect(persona.placeholder).toBe(DEFAULT_AGENT_PERSONA)
 
     const tone = screen.getByLabelText('Tone') as HTMLTextAreaElement
     expect(tone.value).toBe('Blunt, warm')
-    expect(tone.placeholder).toBe(DEFAULT_AGENT_TONE)
   })
 
-  it('shows the built-in identity as placeholder when empty and the saved identity when set', () => {
+  it('leaves identity empty with an example placeholder, and shows the saved identity when set', () => {
     const onUpdate = vi.fn<Parameters<Update>, ReturnType<Update>>(
       async () => ({ ok: true })
     )
@@ -139,7 +139,8 @@ describe('Agent section — Persona & style fields', () => {
 
     const identity = screen.getByLabelText('Identity') as HTMLTextAreaElement
     expect(identity.value).toBe('')
-    expect(identity.placeholder).toBe(DEFAULT_AGENT_IDENTITY)
+    expect(identity.placeholder).toMatch(/^e\.g\. /)
+    expect(identity.placeholder).not.toContain('Agent V')
     expect(onUpdate).not.toHaveBeenCalled()
 
     cleanup()

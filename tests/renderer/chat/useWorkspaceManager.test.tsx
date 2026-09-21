@@ -306,7 +306,6 @@ describe('useWorkspaceManager', () => {
 
   it('queues mode on a live run unless syncOnly (switch_mode echo)', async () => {
     const chatQueueMode = vi.fn().mockResolvedValue({ ok: true, data: true })
-    // @ts-expect-error test bridge
     window.vyotiq.chatQueueMode = chatQueueMode
 
     const { result } = renderHook(() => useWorkspaceManager())

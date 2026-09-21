@@ -173,7 +173,6 @@ beforeEach(() => {
   notifications = []
   mcpServers = []
   homeActivity = vi.fn(async () => ({ ok: true as const, data: ACTIVITY }))
-  // @ts-expect-error test bridge
   window.vyotiq = {
     runStats: vi.fn(async ({ runIds }: { runIds: string[] }) => ({
       ok: true as const,

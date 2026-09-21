@@ -43,12 +43,28 @@ export function TitleBar({
   const showControls = useShowWindowControls()
   const maximized = useMaximized()
   const isDarwin = window.vyotiq?.platform === 'darwin'
-  const { setHost, occupied } = useTitleBarAccessory()
+  const { setHost, occupied, bandClaimed } = useTitleBarAccessory()
+  /**
+   * A surface in the main column draws its own chrome across the band, so this
+   * overlay has to get out of the way of BOTH hit tests, not one:
+   *
+   * - the DOM one — the bar is `z-sticky` over `<main>`, so without
+   *   `pointer-events-none` its empty accessory span swallows every click in
+   *   the band and the chrome underneath does nothing;
+   * - Electron's — a `-webkit-app-region: drag` rect is resolved at the window
+   *   level before the renderer sees the event, so the bar drops the region
+   *   entirely rather than relying on a nested `no-drag` to subtract from it.
+   *
+   * The claiming chrome re-declares `app-region-drag` over its own inert text,
+   * so the window keeps a drag handle up here.
+   */
+  const bandReleased = !occupied && bandClaimed
 
   return (
     <header
       className={cn(
-        'app-region-drag absolute inset-x-0 top-0 z-sticky flex items-stretch bg-transparent',
+        'absolute inset-x-0 top-0 z-titlebar flex items-stretch bg-transparent',
+        bandReleased ? 'pointer-events-none' : 'app-region-drag',
         TITLE_BAR_HEIGHT,
         showControls ? 'pr-0' : 'pr-2'
       )}
@@ -58,7 +74,7 @@ export function TitleBar({
     >
       {/* Mobile only: open navigation when the drawer is closed.
           Desktop toggle lives inside the sidebar header. */}
-      <div className="app-region-no-drag flex shrink-0 items-center pl-1.5">
+      <div className="app-region-no-drag pointer-events-auto flex shrink-0 items-center pl-1.5">
         {!isDesktop ? (
           <IconButton
             icon="menu"
@@ -77,19 +93,23 @@ export function TitleBar({
           'min-w-0 flex-1 self-stretch',
           // Keep the host draggable; DockTabBar marks only interactive clusters no-drag
           // so the middle spacer remains a real window-drag region.
-          occupied && 'flex items-stretch'
+          occupied && 'pointer-events-auto flex items-stretch'
         )}
         data-titlebar-accessory
+        data-titlebar-band-released={bandReleased ? '' : undefined}
         role={occupied ? undefined : 'presentation'}
         aria-hidden={occupied ? undefined : true}
         onDoubleClick={() => {
-          if (!occupied && showControls) void window.vyotiq?.windowMaximize()
+          if (!occupied && !bandReleased && showControls) void window.vyotiq?.windowMaximize()
         }}
       >
       </div>
 
       {showControls ? (
-        <div className="app-region-no-drag flex shrink-0 items-stretch" data-titlebar-controls>
+        <div
+          className="app-region-no-drag pointer-events-auto flex shrink-0 items-stretch"
+          data-titlebar-controls
+        >
           <Tooltip content="Minimize">
             <button
               type="button"

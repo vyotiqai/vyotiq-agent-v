@@ -22,6 +22,7 @@ Vyotiq ("Agent V") is an Electron desktop app: a coding workspace for real repos
 
 - [Teammates — architecture, scheduler semantics, and user guide](docs/teammates.md)
 - [Outbound network egress — what the gate covers, and what it deliberately does not](docs/egress.md)
+- [Agent-built tools — what `build_tool` permits, and the four things that bound it](docs/agent-tools.md)
 
 ## Platforms
 

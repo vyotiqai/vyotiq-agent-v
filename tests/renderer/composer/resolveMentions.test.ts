@@ -7,7 +7,6 @@ import { mentionMarker } from '@renderer/features/chat/components/composer/menti
 
 describe('resolveComposerMentions', () => {
   beforeEach(() => {
-    // @ts-expect-error test bridge
     window.vyotiq = {
       workspaceReadText: vi.fn(async ({ path }: { path: string }) => ({
         ok: true as const,

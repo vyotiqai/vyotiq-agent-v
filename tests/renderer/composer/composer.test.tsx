@@ -27,7 +27,6 @@ const chatSettings: EffectiveChatSettings = {
 }
 
 beforeEach(() => {
-  // @ts-expect-error test bridge
   window.vyotiq = {
     listModels: vi.fn(async () => ({
       ok: true as const,
@@ -198,7 +197,6 @@ describe('Composer', () => {
   })
 
   it('does not send partial text when a referenced mention cannot be resolved', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.workspaceReadText = vi.fn(async () => ({
       ok: false as const,
       error: 'Referenced file no longer exists'
@@ -357,7 +355,6 @@ describe('Composer', () => {
       ok: true as const,
       data: { name: 'spec.md', mime: 'text/markdown', text: 'rules here', truncated: false }
     }))
-    // @ts-expect-error test bridge
     window.vyotiq.extractAttachment = extractAttachment
     const onSend = vi.fn()
     render(
@@ -396,7 +393,6 @@ describe('Composer', () => {
   })
 
   it('surfaces the reason a document could not be read', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.extractAttachment = vi.fn(async () => ({
       ok: false as const,
       error: 'scan.pdf has no extractable text (it may be a scan)'

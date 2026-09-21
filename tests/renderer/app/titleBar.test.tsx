@@ -32,7 +32,6 @@ function renderBar(
     sidebarExpanded?: boolean
   } = {}
 ) {
-  // @ts-expect-error test bridge
   window.vyotiq = {
     platform,
     windowIsMaximized: vi.fn(async () => ({ ok: true as const, data: false }))

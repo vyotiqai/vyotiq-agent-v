@@ -23,7 +23,6 @@ const baseSettings: Settings = {
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
-  // @ts-expect-error test bridge
   window.vyotiq = {
     listModels: vi.fn(async () => ({
       ok: true as const,
@@ -637,7 +636,6 @@ describe('settings', () => {
   })
 
   it('surfaces refresh model errors', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.listModels = vi.fn(async () => ({
       ok: false as const,
       error: 'catalog unavailable'
@@ -909,10 +907,8 @@ describe('settings', () => {
         ]
       }
     }
-    // @ts-expect-error test bridge
     window.vyotiq.mcpStatus = vi.fn(async () => statusPayload)
     // Manage view loads status via mcpStatus on open. Refresh MCP is explicit.
-    // @ts-expect-error test bridge
     window.vyotiq.mcpRefresh = vi.fn(async () => statusPayload)
 
     const { MarketplaceView } = await import('@renderer/features/marketplace')
@@ -1186,11 +1182,8 @@ describe('settings', () => {
       }
     }))
     const deleteCache = vi.fn(async () => ({ ok: true as const, data: idle }))
-    // @ts-expect-error test bridge
     window.vyotiq.dictationInstall = install
-    // @ts-expect-error test bridge
     window.vyotiq.dictationUnload = unload
-    // @ts-expect-error test bridge
     window.vyotiq.dictationDeleteCache = deleteCache
 
     render(
@@ -1265,7 +1258,6 @@ describe('settings', () => {
   })
 
   it('switching to Local does not send empty localModelId from stale form state', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.dictationStatus = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -1311,7 +1303,6 @@ describe('settings', () => {
   })
 
   it('Voice cards prefer Error over Ready when load failed with files on disk', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.dictationStatus = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -1353,7 +1344,6 @@ describe('settings', () => {
   })
 
   it('shows an indeterminate load bar without a stuck 0%', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.dictationStatus = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -1398,11 +1388,8 @@ describe('settings', () => {
   it('Use on an installed card sets localModelId without changing engine or loading', async () => {
     const install = vi.fn(async () => ({ ok: false as const, error: 'not used' }))
     const unload = vi.fn(async () => ({ ok: false as const, error: 'not used' }))
-    // @ts-expect-error test bridge
     window.vyotiq.dictationInstall = install
-    // @ts-expect-error test bridge
     window.vyotiq.dictationUnload = unload
-    // @ts-expect-error test bridge
     window.vyotiq.dictationStatus = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -1798,14 +1785,12 @@ describe('settings', () => {
       loadedModelId: null
     }
     let pushStatus: ((s: Record<string, unknown>) => void) | undefined
-    // @ts-expect-error test bridge
     window.vyotiq.dictationStatus = vi.fn(async () => ({ ok: true as const, data: status }))
     // @ts-expect-error test bridge
     window.vyotiq.onDictationStatus = vi.fn((cb: (s: Record<string, unknown>) => void) => {
       pushStatus = cb
       return () => {}
     })
-    // @ts-expect-error test bridge
     window.vyotiq.dictationDeleteCache = vi.fn(async () => ({
       ok: false as const,
       error: 'cache delete boom'
@@ -1844,7 +1829,6 @@ describe('settings', () => {
       loadedModelId: null
     }
     let pushStatus: ((s: Record<string, unknown>) => void) | undefined
-    // @ts-expect-error test bridge
     window.vyotiq.dictationStatus = vi.fn(async () => ({
       ok: false as const,
       error: 'status endpoint down'

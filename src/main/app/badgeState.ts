@@ -37,6 +37,29 @@ export function computeBadgeState(input: BadgeInput): BadgeState {
 }
 
 /**
+ * Overlay PNG for a badge state, or null when nothing should be drawn.
+ *
+ * The asset set names the blocked kind `attention`, the state machine names it
+ * `needsyou` (matching the `agentNeedsYou` notification setting). Deriving the
+ * filename straight from `state.kind` therefore asked for `needsyou-N.png`,
+ * which does not exist — so the single most urgent badge silently cleared
+ * itself instead of drawing. Kept here, beside the state machine, so a test can
+ * pin state → file without loading Electron.
+ */
+export function badgeAssetFileFor(state: BadgeState): string | null {
+  switch (state.kind) {
+    case 'needsyou':
+      return `attention-${state.count}.png`
+    case 'unread':
+      return `unread-${state.count}.png`
+    case 'working':
+      return 'working.png'
+    case 'idle':
+      return null
+  }
+}
+
+/**
  * macOS dock dialect: the dock badge is text-only and conventionally red, so
  * state rides on content — a number for unread, "!" for attention, a dot for
  * working. Empty string clears the badge.

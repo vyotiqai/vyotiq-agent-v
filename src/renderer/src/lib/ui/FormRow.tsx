@@ -60,16 +60,35 @@ export function FormCard({
 /** Group label + card. Pass `title` for the muted heading above the card. */
 export function FormGroup({
   title,
+  description,
   children,
   cardDataAttribute
 }: {
   title?: string
+  /**
+   * One sentence under the heading, for a group whose rows only make sense
+   * together — three prompt fields that are all handed to the model, say.
+   * A per-row `hint` cannot carry that, because the point is what the rows
+   * share.
+   */
+  description?: string
   children: ReactNode
   cardDataAttribute?: string
 }) {
   return (
     <section className="flex flex-col">
-      {title ? <FormGroupLabel>{title}</FormGroupLabel> : null}
+      {title ? (
+        description ? (
+          <div className="mb-2 flex flex-col gap-0.5 px-0.5">
+            <h2 className="m-0 text-xs font-normal leading-snug tracking-[var(--vy-tracking)] text-muted">
+              {title}
+            </h2>
+            <p className="m-0 max-w-[38rem] text-2xs leading-snug text-tertiary">{description}</p>
+          </div>
+        ) : (
+          <FormGroupLabel>{title}</FormGroupLabel>
+        )
+      ) : null}
       <FormCard dataAttribute={cardDataAttribute}>{children}</FormCard>
     </section>
   )

@@ -5,6 +5,20 @@ import { workspaceIdFromPath } from '../../../src/shared/utils/workspaceId'
 import { canonicalizeWorkspacePath } from '../../../src/shared/utils/workspacePath'
 import { RUN_INTERRUPTED_ERROR } from '../../../src/shared/runInterrupt'
 
+/**
+ * The active workspace path after `addWorkspace`, or a loud failure.
+ *
+ * `activePath` is `string | null` on the wire — null when the registry has no
+ * active workspace. Specs were assigning it straight into a `string` and
+ * carrying a null into `join()` and `evaluate()` arguments, where it surfaces
+ * much later as an unreadable path error. Fail here, where the cause is still
+ * on screen.
+ */
+export function requireActivePath(activePath: string | null): string {
+  if (!activePath) throw new Error('addWorkspace returned no activePath')
+  return activePath
+}
+
 export type SeededRun = {
   runId: string
   goal: string

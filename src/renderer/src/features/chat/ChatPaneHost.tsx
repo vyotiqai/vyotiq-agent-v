@@ -5,7 +5,13 @@ import {
   parseSessionDragPayload,
   resolvePaneDropZone
 } from '@renderer/lib/chat/chatPaneLayout'
-import { CHAT_COLUMN_MIN_USABLE_PX } from '@renderer/lib/utils/layout'
+import {
+  CHAT_COLUMN_MIN_USABLE_PX,
+  CHAT_SIDE_RAIL_WIDTH_PX,
+  TITLE_BAR_HEIGHT,
+  windowControlsReservePx
+} from '@renderer/lib/utils/layout'
+import { TitleBarBandSpent, useTitleBarBand } from '@renderer/lib/context/TitleBarAccessory'
 import { PanelResizeHandle } from '@renderer/lib/ui'
 import { cn } from '@renderer/lib/ui/cn'
 import type { WorkspaceFileOpenOptions } from './components/FilesPanel'
@@ -23,6 +29,22 @@ export type PaneRenderOptions = {
   onOpenChanges?: (path?: string) => void
   /** Open a workspace path in the Files dock — injected by ChatView. */
   onOpenWorkspaceFile?: (path: string, options?: WorkspaceFileOpenOptions) => void
+}
+
+/**
+ * Where the rightmost pane header's right edge stops. It is `absolute
+ * inset-x-0`, so padding alone would leave a transparent strip lying across the
+ * caption buttons and stealing their clicks — the edge itself has to move.
+ *
+ * The side rail overlays the pane edge below the band; the caption buttons own
+ * the corner inside it, so the header clears whichever is wider.
+ */
+function paneHeaderRightInsetPx(
+  controlsReserve: number,
+  sideRailPad: boolean
+): { right: number } | undefined {
+  const reserve = Math.max(controlsReserve, sideRailPad ? CHAT_SIDE_RAIL_WIDTH_PX : 0)
+  return reserve > 0 ? { right: reserve } : undefined
 }
 
 function zoneFromEvent(e: React.DragEvent): PaneDropZone {
@@ -142,6 +164,12 @@ export function ChatPaneHost({
 
   const minPanePx = CHAT_COLUMN_MIN_USABLE_PX
   const multi = panes.length > 1
+  // Pane headers are the top row of the window unless dock tabs already took
+  // the band. Claim it only when those headers actually exist — a single pane
+  // renders none, and its content decides for itself.
+  const bandFree = useTitleBarBand(multi)
+  const inTitleBarBand = multi && bandFree
+  const controlsReserve = inTitleBarBand ? windowControlsReservePx() : 0
 
   return (
     <div
@@ -161,6 +189,10 @@ export function ChatPaneHost({
           index < panes.length - 1
             ? (sizes[index] ?? 0) + (sizes[index + 1] ?? 0)
             : 0
+        const paneBody = renderPane(pane, {
+          focused,
+          sideRailPad: Boolean(sideRailPad && isRightmost)
+        })
         return (
           <div
             key={pane.paneId}
@@ -201,17 +233,29 @@ export function ChatPaneHost({
               {multi ? (
                 <div
                   className={cn(
-                    'absolute inset-x-0 top-0 z-dropdown flex h-7 items-center justify-between gap-2 border-b border-border/40 bg-transparent px-2',
-                    isRightmost && sideRailPad && 'pr-10'
+                    'absolute inset-x-0 top-0 z-dropdown flex items-center justify-between gap-2 border-b border-border/40 bg-transparent px-2',
+                    inTitleBarBand ? TITLE_BAR_HEIGHT : 'h-7'
                   )}
+                  style={
+                    isRightmost
+                      ? paneHeaderRightInsetPx(controlsReserve, sideRailPad)
+                      : undefined
+                  }
                   data-chat-pane-header
                 >
-                  <span className="min-w-0 truncate text-xs text-fg/80">{paneTitle}</span>
+                  <span
+                    className={cn(
+                      'min-w-0 truncate text-xs text-fg/80',
+                      inTitleBarBand && 'app-region-drag'
+                    )}
+                  >
+                    {paneTitle}
+                  </span>
                   <span className="flex shrink-0 items-center gap-0.5">
                     {onSplitPane ? (
                       <button
                         type="button"
-                        className="shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface/70 hover:text-fg"
+                        className="app-region-no-drag shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface/70 hover:text-fg"
                         aria-label={`Split pane beside ${paneTitle}`}
                         data-chat-pane-split={pane.paneId}
                         onClick={(e) => {
@@ -224,7 +268,7 @@ export function ChatPaneHost({
                     ) : null}
                     <button
                       type="button"
-                      className="shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface/70 hover:text-fg"
+                      className="app-region-no-drag shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface/70 hover:text-fg"
                       aria-label={`Close ${paneTitle}`}
                       onClick={(e) => {
                         e.stopPropagation()
@@ -239,13 +283,10 @@ export function ChatPaneHost({
               <div
                 className={cn(
                   'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
-                  multi && 'pt-7'
+                  multi && (inTitleBarBand ? 'pt-9' : 'pt-7')
                 )}
               >
-                {renderPane(pane, {
-                  focused,
-                  sideRailPad: Boolean(sideRailPad && isRightmost)
-                })}
+                {multi ? <TitleBarBandSpent>{paneBody}</TitleBarBandSpent> : paneBody}
               </div>
             </div>
             {index < panes.length - 1 ? (

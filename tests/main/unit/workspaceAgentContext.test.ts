@@ -31,7 +31,7 @@ describe('workspace:agentContext', () => {
     const valid = {
       workspaceName: 'repo',
       branch: 'main',
-      rules: { agentsMd: true, cursorrules: false, vyotiqRulesCount: 2 },
+      rules: { agentsMd: true, claudeMd: false, cursorrules: false, ruleFileCount: 2 },
       memoryNotes: 3,
       codeIndex: { state: 'ready' }
     }
@@ -42,29 +42,47 @@ describe('workspace:agentContext', () => {
     expect(() =>
       WorkspaceAgentContextResultSchema.parse({
         ...valid,
-        rules: { agentsMd: true, cursorrules: false, vyotiqRulesCount: -1 }
+        rules: { agentsMd: true, claudeMd: false, cursorrules: false, ruleFileCount: -1 }
       })
     ).toThrow()
   })
 
-  it('detects AGENTS.md / .cursorrules and counts vyotiq rule files', async () => {
+  it('reports every rule source the prompt injects, including CLAUDE.md and .cursor/rules', async () => {
     const dir = await makeWorkspace({
       'AGENTS.md': '# rules\n',
+      'CLAUDE.md': '# more rules\n',
       '.cursorrules': 'use tabs\n',
       '.vyotiq/rules/a.md': 'rule a\n',
-      '.vyotiq/rules/sub/b.md': 'rule b\n'
+      '.vyotiq/rules/sub/b.md': 'rule b\n',
+      '.cursor/rules/c.mdc': 'rule c\n'
     })
     const ctx = await buildWorkspaceAgentContext(dir, { enabled: true, phase: 'ready' })
     expect(ctx.rules.agentsMd).toBe(true)
+    expect(ctx.rules.claudeMd).toBe(true)
     expect(ctx.rules.cursorrules).toBe(true)
-    expect(ctx.rules.vyotiqRulesCount).toBe(2)
+    // Both rule directories, nested files included — rules.ts injects all three.
+    expect(ctx.rules.ruleFileCount).toBe(3)
     await expect(WorkspaceAgentContextResultSchema.parseAsync(ctx)).resolves.toEqual(ctx)
+  })
+
+  it('does not count a rule the prompt would skip (alwaysApply: false)', async () => {
+    const dir = await makeWorkspace({
+      '.vyotiq/rules/always.md': 'always\n',
+      '.vyotiq/rules/opt-in.md': '---\nalwaysApply: false\n---\nonly on request\n'
+    })
+    const ctx = await buildWorkspaceAgentContext(dir, { enabled: true, phase: 'ready' })
+    expect(ctx.rules.ruleFileCount).toBe(1)
   })
 
   it('returns neutral values for an empty workspace', async () => {
     const dir = await makeWorkspace({})
     const ctx = await buildWorkspaceAgentContext(dir, { enabled: false, phase: 'idle' })
-    expect(ctx.rules).toEqual({ agentsMd: false, cursorrules: false, vyotiqRulesCount: 0 })
+    expect(ctx.rules).toEqual({
+      agentsMd: false,
+      claudeMd: false,
+      cursorrules: false,
+      ruleFileCount: 0
+    })
     expect(ctx.memoryNotes).toBe(0)
     expect(ctx.codeIndex.state).toBe('off')
   })

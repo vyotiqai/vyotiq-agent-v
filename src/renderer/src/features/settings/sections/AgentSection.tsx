@@ -3,11 +3,6 @@ import type {
   OfflineWaitMode,
   ResponseVerbosity
 } from '@shared/ipc'
-import {
-  DEFAULT_AGENT_IDENTITY,
-  DEFAULT_AGENT_PERSONA,
-  DEFAULT_AGENT_TONE
-} from '@shared/agentPersona'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import { Input, Menu, Switch } from '@renderer/lib/ui'
 import { AutoTextarea } from '../components/AutoTextarea'
@@ -92,13 +87,13 @@ export function AgentSection({ form }: { form: SettingsFormState }) {
           help={
             form.workspaceOverrideActive
               ? 'With workspace override on, this applies to the active workspace only.'
-              : 'Leave blank to keep the default Agent V identity. Per-workspace via Workspace Override.'
+              : 'Leave blank for no persona. Per-workspace via Workspace Override.'
           }
           wide
         >
           <div className="flex w-full flex-col gap-1.5">
             <AutoTextarea
-              placeholder={DEFAULT_AGENT_PERSONA}
+              placeholder="e.g. Nova"
               aria-label="Persona"
               maxLength={PERSONA_MAX_LENGTH}
               maxRows={6}
@@ -127,13 +122,13 @@ export function AgentSection({ form }: { form: SettingsFormState }) {
           help={
             form.workspaceOverrideActive
               ? 'With workspace override on, this applies to the active workspace only.'
-              : 'Leave blank to use the built-in Agent V blurb. Per-workspace via Workspace Override.'
+              : 'Leave blank for no identity. Per-workspace via Workspace Override.'
           }
           wide
         >
           <div className="flex w-full flex-col gap-1.5">
             <AutoTextarea
-              placeholder={DEFAULT_AGENT_IDENTITY}
+              placeholder="e.g. Reads the code before acting; reports what it verified separately from what it assumes."
               aria-label="Identity"
               maxLength={IDENTITY_MAX_LENGTH}
               maxRows={6}
@@ -162,13 +157,13 @@ export function AgentSection({ form }: { form: SettingsFormState }) {
           help={
             form.workspaceOverrideActive
               ? 'With workspace override on, this applies to the active workspace only.'
-              : 'Examples: friendly, blunt, playful, formal. Leave blank for the default tone.'
+              : 'Examples: friendly, blunt, playful, formal. Leave blank for no tone directive.'
           }
           wide
         >
           <div className="flex w-full flex-col gap-1.5">
             <AutoTextarea
-              placeholder={DEFAULT_AGENT_TONE}
+              placeholder="e.g. Blunt and concise; lead with the outcome."
               aria-label="Tone"
               maxLength={TONE_MAX_LENGTH}
               maxRows={6}
