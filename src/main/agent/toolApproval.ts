@@ -12,6 +12,8 @@ import { scrubString } from '../../shared/utils/scrub'
 import { isMcpServerToolName } from '../../shared/mcpApps'
 import { BUILTIN_TOOL_NAMES, canonicalizeAgentToolName } from './schemas/tools'
 import { isApprovalExemptTool } from './tools/classify'
+import { agentBuiltToolAllowKey } from './agentTools/loader'
+import { resolveAgentToolsDir } from './agentTools/paths'
 import { ASK_SAFE_BUILTIN } from './tools/modePolicy'
 import { streamSignalFor } from './runRegistry'
 import { dismissLifecycleNotification } from '../notifications/bus'
@@ -103,19 +105,46 @@ export function cancelPendingApprovals(runId: string, invokeId?: number): void {
   dismissLifecycleNotification(needsYouDedupeKey(runId))
 }
 
+/**
+ * Allowlist key for an agent-built tool, or undefined for everything else.
+ *
+ * Builtins and MCP names short-circuit without touching disk, so the scan only
+ * runs for a name nothing else claims — which is exactly the agent-built case.
+ */
+async function agentBuiltAllowKeyFor(name: string): Promise<string | undefined> {
+  if (BUILTIN_NAME_SET.has(name) || isMcpServerToolName(name)) return undefined
+  try {
+    return (await agentBuiltToolAllowKey(await resolveAgentToolsDir(), name)) ?? undefined
+  } catch {
+    // A tool we cannot identify is not one we can grant a standing allow to;
+    // falling through leaves it gated under its bare name.
+    return undefined
+  }
+}
+
 export function isToolGated(
   name: string,
   mode: ToolApprovalMode,
   sessionAllowlist: ReadonlySet<string>,
   workspaceAllowlist: readonly string[],
   argsJson?: string,
-  opts?: { mcpProtection?: boolean }
+  opts?: { mcpProtection?: boolean; agentBuiltAllowKey?: string }
 ): boolean {
   const canonical = canonicalizeAgentToolName(name)
-  if (sessionAllowlist.has(canonical) || sessionAllowlist.has(name)) return false
-  if (workspaceAllowlist.includes(canonical) || workspaceAllowlist.includes(name)) return false
+  // An agent-built tool is allowlisted under `<name>@<contentHash>`, never its
+  // bare name — the file behind the name can be rewritten by a later
+  // build_tool call, and a standing allow must not follow it.
+  const allowKey = opts?.agentBuiltAllowKey
+  const allowNames = allowKey ? [allowKey] : [canonical, name]
+  if (allowNames.some((entry) => sessionAllowlist.has(entry))) return false
+  if (allowNames.some((entry) => workspaceAllowlist.includes(entry))) return false
   const mcpProtection = opts?.mcpProtection !== false
-  if (mode === 'off') return mcpProtection && isMcpServerToolName(canonical)
+  if (mode === 'off') {
+    // "Approvals off" is a judgement about the tools that shipped with the app.
+    // An agent-built module is arbitrary Node this run wrote minutes ago, so it
+    // stays gated here for the same reason an MCP server tool does.
+    return Boolean(allowKey) || (mcpProtection && isMcpServerToolName(canonical))
+  }
   if (mode === 'all') return true
   let args: Record<string, unknown> | undefined
   if (argsJson) {
@@ -132,6 +161,8 @@ export function isToolGated(
 }
 
 /** High-risk tools that stay gated in autonomous mode unless workspace-allowlisted. */
+const BUILTIN_NAME_SET: ReadonlySet<string> = new Set<string>(BUILTIN_TOOL_NAMES)
+
 export function isAutonomousHighRiskTool(name: string, argsJson?: string): boolean {
   const canonical = canonicalizeAgentToolName(name)
   if (canonical === 'lsp') {
@@ -155,10 +186,19 @@ export function isAutonomousHighRiskTool(name: string, argsJson?: string): boole
     canonical === 'str_replace' ||
     canonical === 'edit_notebook' ||
     canonical === 'git_commit' ||
+    // `git_apply` writes arbitrary files into the working tree, so leaving it
+    // out made autonomy's promise false: an autonomous run refused `edit` and
+    // `str_replace` at the prompt, then rewrote the same files through a patch
+    // with no prompt at all.
+    canonical === 'git_apply' ||
     canonical === 'github_pr_create' ||
     canonical === 'github_pr_review' ||
     canonical === 'github_issue' ||
     canonical === 'merge_agent_instance' ||
+    // Writing a module that later runs as arbitrary Node in a utility process
+    // is at least as consequential as an edit, and the approval card is the
+    // only place anyone reads the code before it exists.
+    canonical === 'build_tool' ||
     canonical.startsWith('mcp__') ||
     !(BUILTIN_TOOL_NAMES as readonly string[]).includes(canonical)
   )
@@ -288,9 +328,11 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
   return {
     async authorize(call): Promise<AuthorizeResult> {
       const name = canonicalizeAgentToolName(call.name)
+      const agentBuiltAllowKey = await agentBuiltAllowKeyFor(name)
       if (
         !isToolGated(name, options.mode, sessionAllowlist, workspaceAllowlist, call.arguments, {
-          mcpProtection: options.mcpProtection
+          mcpProtection: options.mcpProtection,
+          agentBuiltAllowKey
         })
       ) {
         return { allowed: true }
@@ -315,7 +357,9 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         runId: options.runId,
         toolCallId: call.id,
         name,
-        summary: summarizeToolArgs(name, call.arguments),
+        summary: agentBuiltAllowKey
+          ? `${name} — a tool this run wrote`
+          : summarizeToolArgs(name, call.arguments),
         argsPreview: scrubString(call.arguments.slice(0, 4000)),
         mutating: isNetworkBrowseTool(name)
           ? false
@@ -363,11 +407,12 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
             reason: `The user denied permission to run ${name}. Do not retry it; ask what to do instead or continue without it.`
           }
         case 'session':
-          sessionAllowlist.add(name)
+          sessionAllowlist.add(agentBuiltAllowKey ?? name)
           return { allowed: true }
         case 'always':
-          workspaceAllowlist.push(name)
-          options.persistAlways?.(name)
+          // The key, not the name: rewriting the module withdraws the allow.
+          workspaceAllowlist.push(agentBuiltAllowKey ?? name)
+          options.persistAlways?.(agentBuiltAllowKey ?? name)
           return { allowed: true }
         case 'once':
           return { allowed: true }

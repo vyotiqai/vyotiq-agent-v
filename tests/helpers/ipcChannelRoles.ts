@@ -35,6 +35,7 @@ export const PUSH_CHANNEL_NAMES = [
   'updaterState',
   'accessibilitySupportChanged',
   'gitStatusChanged',
+  'agentContextChanged',
   'deepLinkOpened'
 ] as const satisfies readonly IpcChannelName[]
 

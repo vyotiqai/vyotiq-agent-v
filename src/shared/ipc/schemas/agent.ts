@@ -459,6 +459,18 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     type: z.literal('step_usage'),
     ...eventBase,
     step: z.number().int().min(1),
+    /**
+     * Provider and model that served THIS step. Optional because events written
+     * before these fields existed must still parse.
+     *
+     * Fixed within one invoke (`resolveTurnModel` runs once, before the step
+     * loop), but a later turn of the SAME run can resolve a different model —
+     * and each invoke overwrites the run-level provider/model that reaches
+     * `receipt.json`. So the receipt cannot attribute an individual step, and
+     * `events.jsonl` carried no model at all before this field.
+     */
+    provider: z.string().max(64).optional(),
+    model: z.string().max(200).optional(),
     /** Latest step context window size (not cumulative bill). */
     inputTokens: z.number().int().min(0).optional(),
     outputTokens: z.number().int().min(0).optional(),
@@ -498,6 +510,55 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
       })
       .optional(),
     detail: ContextBreakdownDetailWireSchema.optional()
+  }),
+  z.object({
+    /**
+     * Spend from an LLM call that is NOT an agent turn — compaction, commit-message
+     * generation. These cost real money but were previously invisible: no event, no
+     * ledger entry, nothing.
+     *
+     * Deliberately NOT a `step_usage` variant and deliberately carries no `step`:
+     * `stepUsageFromEvent` gates on `type === 'step_usage'` and stamps `steps: 1`,
+     * so reusing that type would inflate `billedInputTokens` and `steps`, which in
+     * turn makes `messageFooterStats.turnCost` return null (it requires
+     * `stepsWithCostReport === steps`) and silently drop per-turn cost from the UI.
+     * Having no `step` also keeps these rows out of the `(type, step)` coalescing in
+     * `streamBatch` and out of `turnUsage` binning.
+     */
+    type: z.literal('aux_usage'),
+    ...eventBase,
+    /** Which non-turn call site spent this — the "endpoint" for spend attribution. */
+    site: z.enum([
+      'compaction_fork',
+      'compaction_structured',
+      'compaction_freeform',
+      'commit_message'
+    ]),
+    /** Always known at every emit site; an aux row without them cannot be attributed. */
+    provider: z.string().min(1).max(64),
+    model: z.string().min(1).max(200),
+    /**
+     * Loop step this call happened alongside, for correlation only. Named `atStep`
+     * and NOT `step` on purpose: it must stay structurally impossible for a later
+     * edit to feed these rows into `streamBatch`'s `(type, step)` coalescer, which
+     * keeps only the newest per key and would evict the real `step_usage`.
+     */
+    atStep: z.number().int().min(0).optional(),
+    /** 1-based provider attempt; >1 means a retry that was still billed. */
+    attempt: z.number().int().min(1).optional(),
+    inputTokens: z.number().int().min(0).optional(),
+    outputTokens: z.number().int().min(0).optional(),
+    cachedInputTokens: z.number().int().min(0).optional(),
+    cacheCreationInputTokens: z.number().int().min(0).optional(),
+    reasoningTokens: z.number().int().min(0).optional(),
+    inputTokensIncludesCache: z.boolean().optional(),
+    /** Provider-reported account charge in USD when the stream included a cost field. */
+    billedCost: z.number().finite().optional(),
+    billedCostSaved: z.number().finite().optional(),
+    /** Estimated USD (tokens × published price) when the provider reported no cost. */
+    estimatedCost: z.number().finite().optional(),
+    /** Wall-clock ms of the provider stream behind this call. */
+    generationMs: z.number().int().min(0).optional()
   }),
   z.object({
     type: z.literal('context_usage'),
@@ -1089,7 +1150,14 @@ export const RunTokenUsageSchema = z.object({
   reasoningTokens: z.number().int().min(0).optional(),
   cachedInputTokens: z.number().int().min(0).optional(),
   billedCachedInputTokens: z.number().int().min(0).optional(),
-  cacheCreationInputTokens: z.number().int().min(0).optional()
+  cacheCreationInputTokens: z.number().int().min(0).optional(),
+  /**
+   * Summed per-step provider wall-clock for the run's turns. Additive and
+   * optional, so this still parses as a version-5 receipt. Previously this only
+   * existed on `events.jsonl` (which rotates) and as a cumulative field in
+   * `loopCheckpoint.json`, so a finished run kept no durable latency record.
+   */
+  generationMs: z.number().int().min(0).optional()
 })
 export type RunTokenUsage = z.infer<typeof RunTokenUsageSchema>
 
@@ -1846,8 +1914,10 @@ export const WorkspaceAgentContextResultSchema = z.object({
   branch: z.string().nullable(),
   rules: z.object({
     agentsMd: z.boolean(),
+    claudeMd: z.boolean(),
     cursorrules: z.boolean(),
-    vyotiqRulesCount: z.number().int().nonnegative()
+    /** Files from `.cursor/rules` and `.vyotiq/rules` that reach the prompt. */
+    ruleFileCount: z.number().int().nonnegative()
   }),
   memoryNotes: z.number().int().nonnegative(),
   codeIndex: z.object({
@@ -1855,6 +1925,13 @@ export const WorkspaceAgentContextResultSchema = z.object({
   })
 })
 export type WorkspaceAgentContextResult = z.infer<typeof WorkspaceAgentContextResultSchema>
+
+/** Pushed from main when a watched workspace's summary changed on disk. */
+export const WorkspaceAgentContextChangedSchema = z.object({
+  workspacePath: z.string().min(1),
+  context: WorkspaceAgentContextResultSchema
+})
+export type WorkspaceAgentContextChanged = z.infer<typeof WorkspaceAgentContextChangedSchema>
 
 export const WorkspaceDiagnosticsRequestSchema = z.object({
   workspacePath: z.string().min(1),

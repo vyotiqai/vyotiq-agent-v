@@ -96,6 +96,12 @@ async function openDetail(): Promise<void> {
   await waitFor(() => expect(screen.getByRole('option', { name: /Scout/ })).toBeTruthy())
 }
 
+async function deleteFromHeader(): Promise<void> {
+  fireEvent.click(screen.getByRole('button', { name: 'More actions for Scout' }))
+  const menu = await screen.findByRole('menu', { name: 'More actions for Scout' })
+  fireEvent.click(within(menu).getByRole('menuitem', { name: 'Delete teammate' }))
+}
+
 describe('TeammatesView roster', () => {
   it('selects the first teammate so the pane is never an empty frame', async () => {
     await openDetail()
@@ -116,7 +122,7 @@ describe('TeammatesView roster', () => {
 
   it('lands a newly created teammate in the editor, not back on the list', async () => {
     await openDetail()
-    fireEvent.click(screen.getByRole('button', { name: 'New' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New teammate' }))
     fireEvent.change(screen.getByPlaceholderText('Frontend Fixer'), {
       target: { value: 'Newbie' }
     })
@@ -151,8 +157,13 @@ describe('TeammatesView identity editing', () => {
     expect((updateCalls[0] as { patch: Record<string, unknown> }).patch.persona).toBeUndefined()
   })
 
-  it('stores a chosen avatar icon', async () => {
+  it('stores an avatar chosen from the picker beside the name', async () => {
     await openDetail()
+    // Twenty-one icon squares inline made the least important field the
+    // loudest control in the form; they belong behind the chip.
+    expect(screen.queryByRole('group', { name: 'Avatar' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change avatar' }))
     fireEvent.click(within(screen.getByRole('group', { name: 'Avatar' })).getByLabelText('sparkles'))
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
 
@@ -160,13 +171,32 @@ describe('TeammatesView identity editing', () => {
     expect(updateCalls[0]).toMatchObject({ patch: { avatar: 'sparkles' } })
   })
 
-  it('keeps Save unavailable until something actually changed', async () => {
+  it('offers no save affordance at all until something actually changed', async () => {
     await openDetail()
-    expect(screen.getByRole('button', { name: 'Save changes' }).hasAttribute('disabled')).toBe(true)
+    // A permanently docked bar with two dead buttons is chrome, and it used to
+    // sit inside the scroll and paint over the last row of the form.
+    expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Discard' })).toBeNull()
+
     fireEvent.change(screen.getByLabelText('Tone'), { target: { value: 'Terse.' } })
+
     expect(screen.getByRole('button', { name: 'Save changes' }).hasAttribute('disabled')).toBe(
       false
     )
+    expect(screen.getByText('Unsaved changes')).toBeTruthy()
+  })
+
+  it('keeps an unsaved edit and says so while the Activity tab is open', async () => {
+    await openDetail()
+    fireEvent.change(screen.getByLabelText('Tone'), { target: { value: 'Terse.' } })
+    fireEvent.click(screen.getByRole('tab', { name: 'Activity' }))
+
+    expect(screen.queryByLabelText('Tone')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }))
+    expect((screen.getByLabelText('Tone') as HTMLInputElement).value).toBe('Terse.')
+    expect(updateCalls).toHaveLength(0)
   })
 
   it('discards an edit without touching main', async () => {
@@ -242,7 +272,8 @@ describe('TeammatesView scope', () => {
 describe('TeammatesView deletion', () => {
   it('reports the work the delete actually stopped', async () => {
     await openDetail()
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    // No danger-zone card at the end of the form: deleting is a header action.
+    await deleteFromHeader()
     // useConfirm renders its own dialog.
     const confirmDialog = await screen.findByRole('dialog')
     fireEvent.click(within(confirmDialog).getByRole('button', { name: 'Delete' }))
@@ -255,7 +286,6 @@ describe('TeammatesView deletion', () => {
 
 describe('TeammatesView roster warnings', () => {
   it('shows a partial-delete warning and lets it be dismissed', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.agentProfilesDelete = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -266,7 +296,7 @@ describe('TeammatesView roster warnings', () => {
       }
     }))
     await openDetail()
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await deleteFromHeader()
     const confirmDialog = await screen.findByRole('dialog')
     fireEvent.click(within(confirmDialog).getByRole('button', { name: 'Delete' }))
 
@@ -275,5 +305,22 @@ describe('TeammatesView roster warnings', () => {
 
     fireEvent.click(screen.getByLabelText('Dismiss teammate warning'))
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+  })
+})
+
+describe('TeammatesView navigation', () => {
+  it('reaches the task inbox without giving up the selected teammate', async () => {
+    await openDetail()
+    fireEvent.click(screen.getByRole('button', { name: 'All tasks' }))
+
+    // The detail pane is the inbox now...
+    expect(screen.queryByRole('tab', { name: 'Settings' })).toBeNull()
+    expect(screen.getByRole('heading', { name: 'All tasks' })).toBeTruthy()
+    // ...but the rail still knows which teammate was open, so going back is
+    // one click rather than a re-selection.
+    expect(screen.getByRole('option', { name: /Scout/ }).getAttribute('aria-selected')).toBe('true')
+
+    fireEvent.click(screen.getByRole('option', { name: /Scout/ }))
+    expect(screen.getByRole('heading', { name: 'Scout' })).toBeTruthy()
   })
 })

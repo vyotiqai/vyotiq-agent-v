@@ -35,18 +35,31 @@ async function electronUserDataDir(): Promise<string | null> {
   return null
 }
 
-/** Directory holding agent-built tool modules (resolved lazily). */
+/**
+ * Directory holding agent-built tool modules, as currently known.
+ *
+ * Synchronous, so it answers with the tmpdir fallback until something has
+ * resolved userData. Read paths must use `resolveAgentToolsDir()` instead:
+ * calling this one directly meant a fresh process scanned the fallback and
+ * found nothing, so every tool written by an earlier session stayed invisible
+ * until `build_tool` happened to run again and resolve the real directory.
+ */
 export function agentToolsDir(): string {
   return agentToolsDirOverride ?? resolvedAgentToolsDir ?? FALLBACK_AGENT_TOOLS_DIR
 }
 
-/** Create the tools dir if missing (fs/promises only); resolves userData on first call. */
-export async function ensureAgentToolsDir(): Promise<string> {
+/** Resolve the tools dir (userData inside Electron) WITHOUT creating it. */
+export async function resolveAgentToolsDir(): Promise<string> {
   if (!agentToolsDirOverride && !resolvedAgentToolsDir) {
     const userData = await electronUserDataDir()
     if (userData) resolvedAgentToolsDir = join(userData, 'agent-tools')
   }
-  const dir = agentToolsDir()
+  return agentToolsDir()
+}
+
+/** Create the tools dir if missing (fs/promises only); resolves userData on first call. */
+export async function ensureAgentToolsDir(): Promise<string> {
+  const dir = await resolveAgentToolsDir()
   await mkdir(dir, { recursive: true })
   return dir
 }

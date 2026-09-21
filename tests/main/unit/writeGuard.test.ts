@@ -19,6 +19,7 @@ vi.mock('electron', () => ({
 import { toolEdit } from '@main/agent/tools/edit'
 import {
   assertInlineInstancePathScope,
+  assertMemoryNamespaceAccess,
   assertInlineInstancePushDenied,
   assertInlineInstanceTerminalAllowed,
   assertInlineInstanceUnscopedToolAllowed,
@@ -181,5 +182,64 @@ describe('writeGuard', () => {
       expect(() => assertInlineInstancePathScope(dir, ['src/other/x.ts'])).toThrow(/path_scope/)
       expect(() => assertInlineInstancePathScope(dir, ['src/allowed/x.ts'])).not.toThrow()
     })
+  })
+})
+
+describe('assertMemoryNamespaceAccess', () => {
+  it('lets a teammate read its own namespace', () => {
+    expect(() =>
+      assertMemoryNamespaceAccess('scout', ['.vyotiq/agents/scout/memory/index.md'])
+    ).not.toThrow()
+  })
+
+  it("refuses another teammate's namespace", () => {
+    // Ids are slugified display names, so they are guessable — this is the
+    // whole reason a direct-path read needed a guard at all.
+    expect(() =>
+      assertMemoryNamespaceAccess('scout', ['.vyotiq/agents/ops/memory/index.md'])
+    ).toThrow(/another teammate's private memory \(ops\)/)
+  })
+
+  it('refuses every namespace for a run with no teammate', () => {
+    // An ordinary chat runs on the shared brain and has no business in
+    // .vyotiq/agents/ at all.
+    expect(() =>
+      assertMemoryNamespaceAccess(undefined, ['.vyotiq/agents/scout/memory/index.md'])
+    ).toThrow(/private memory/)
+  })
+
+  it('ignores paths outside the agents directory', () => {
+    expect(() =>
+      assertMemoryNamespaceAccess(undefined, [
+        'src/main/index.ts',
+        '.vyotiq/memory/index.md',
+        '.vyotiq/tasks.json'
+      ])
+    ).not.toThrow()
+  })
+
+  it('does not claim the workspace override file, which is a sibling', () => {
+    // `.vyotiq/agents/<id>.profile.json` is git-shareable project config, not
+    // a namespace directory — treating it as one would block reading a file
+    // the repository ships on purpose.
+    expect(() =>
+      assertMemoryNamespaceAccess('scout', ['.vyotiq/agents/ops.profile.json'])
+    ).not.toThrow()
+  })
+
+  it('normalizes separators and leading ./ before matching', () => {
+    expect(() =>
+      assertMemoryNamespaceAccess('scout', ['./.vyotiq\\agents\\ops\\memory\\index.md'])
+    ).toThrow(/private memory/)
+  })
+
+  it('checks every path it is handed, not just the first', () => {
+    expect(() =>
+      assertMemoryNamespaceAccess('scout', [
+        'src/app.ts',
+        '.vyotiq/agents/scout/memory/index.md',
+        '.vyotiq/agents/ops/memory/index.md'
+      ])
+    ).toThrow(/\(ops\)/)
   })
 })

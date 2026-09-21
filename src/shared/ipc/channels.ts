@@ -102,6 +102,8 @@ export const IPC = {
   gitLog: 'git:log',
   gitCommitFiles: 'git:commit-files',
   gitBlame: 'git:blame',
+  /** Manual, user-initiated `git init` for an open workspace. */
+  gitInit: 'git:init',
   gitStatusChanged: 'git:status-changed',
   windowMinimize: 'window:minimize',
   windowMaximize: 'window:maximize',
@@ -176,7 +178,13 @@ export const IPC = {
   agentProfilesChanged: 'agent-profiles:changed',
   agentProfileOverridesList: 'agent-profiles:overrides-list',
   agentProfileOverrideSet: 'agent-profiles:override-set',
+  agentProfileOverrideAccept: 'agent-profiles:override-accept',
   agentProfileOverridesChanged: 'agent-profiles:overrides-changed',
+  // Invoke-only: memory is read when the panel opens, not streamed. Nothing
+  // else writes a namespace while the panel is showing it.
+  agentMemoryList: 'agent-memory:list',
+  agentMemoryRead: 'agent-memory:read',
+  agentMemoryWrite: 'agent-memory:write',
   tasksList: 'tasks:list',
   tasksEnqueue: 'tasks:enqueue',
   tasksCancel: 'tasks:cancel',
@@ -205,6 +213,8 @@ export const IPC = {
   workspaceListDocs: 'workspace:listDocs',
   workspaceListRules: 'workspace:listRules',
   agentContext: 'workspace:agentContext',
+  /** Live push: a watched workspace's agent-context summary actually changed. */
+  agentContextChanged: 'workspace:agent-context-changed',
   workspaceDiagnostics: 'workspace:diagnostics',
   gitDiff: 'git:diff',
   prView: 'pr:view',

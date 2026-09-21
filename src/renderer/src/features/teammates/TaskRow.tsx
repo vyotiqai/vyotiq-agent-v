@@ -3,6 +3,8 @@ import { workspaceLabel } from './teammatePresentation'
 import {
   TASK_STATUS_LABEL,
   TASK_STATUS_TONE,
+  isTaskActive,
+  isTaskWorkspaceOpen,
   taskControls,
   taskHeadline,
   taskTiming
@@ -21,6 +23,7 @@ export function TaskRow({
   teammateName,
   teammateAvatar,
   showWorkspace = false,
+  openWorkspaces,
   onOpenRun,
   onRetry,
   onCancel
@@ -30,13 +33,19 @@ export function TaskRow({
   teammateName?: string
   teammateAvatar?: string
   showWorkspace?: boolean
+  /**
+   * Workspaces currently open. Omitted where every row is known to be in the
+   * active workspace; supplied by the pane, which lists closed ones too.
+   */
+  openWorkspaces?: readonly string[]
   onOpenRun?: (workspacePath: string, runId: string) => void
   onRetry?: (task: DelegatedTask) => void
   onCancel?: (task: DelegatedTask) => void
 }) {
   const headline = taskHeadline(task)
   const timing = taskTiming(task)
-  const controls = taskControls(task)
+  const workspaceOpen = isTaskWorkspaceOpen(task, openWorkspaces)
+  const controls = taskControls(task, workspaceOpen)
   const openable = Boolean(task.runId && onOpenRun)
 
   return (
@@ -103,6 +112,18 @@ export function TaskRow({
             data-testid="delegated-task-retry"
             onClick={() => onRetry(task)}
           />
+        ) : !workspaceOpen && isTaskActive(task) === false && onRetry ? (
+          // Disabled rather than absent: a control that quietly disappears
+          // when a project is closed reads as a missing feature. Saying why is
+          // the same instinct as the `cancelling` row offering neither button.
+          <IconButton
+            icon="refresh"
+            size="xs"
+            disabled
+            label={`Retry unavailable: ${workspaceLabel(task.workspacePath)} is closed`}
+            title={`Open ${workspaceLabel(task.workspacePath)} to run this again`}
+            data-testid="delegated-task-retry-blocked"
+          />
         ) : null}
         {controls.cancel && onCancel ? (
           <IconButton
@@ -110,6 +131,7 @@ export function TaskRow({
             size="xs"
             label={`Cancel task: ${headline}`}
             title="Stop this task"
+            data-testid="delegated-task-cancel"
             onClick={() => onCancel(task)}
           />
         ) : null}

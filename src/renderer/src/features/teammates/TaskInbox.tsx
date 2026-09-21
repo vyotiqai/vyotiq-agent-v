@@ -1,8 +1,9 @@
 import { useMemo, useState, type ReactElement } from 'react'
-import { EmptyState, Menu, SearchInput } from '@renderer/lib/ui'
+import { EmptyState, Menu, SearchInput, cn } from '@renderer/lib/ui'
+import { TEAMMATES_DETAIL_COLUMN } from '@renderer/lib/utils/layout'
 import type { AgentProfile, DelegatedTask } from '@shared/ipc'
 import { TaskRow } from './TaskRow'
-import { compareTasksForDisplay, isTaskActive } from './taskPresentation'
+import { activeWorkSummary, compareTasksForDisplay, isTaskActive } from './taskPresentation'
 import { workspaceLabel } from './teammatePresentation'
 
 const ALL = '__all__'
@@ -16,12 +17,13 @@ const ALL = '__all__'
  *
  * Scope note: main's cache holds the workspaces this session has opened, so
  * this is "across your open workspaces" — not every queue that exists on disk.
- * The empty state says so rather than implying coverage it does not have.
+ * The subtitle says so rather than implying coverage it does not have.
  */
 export function TaskInbox({
   tasks,
   profiles,
   ready,
+  openWorkspaces,
   onOpenRun,
   onRetry,
   onCancel
@@ -29,6 +31,8 @@ export function TaskInbox({
   tasks: DelegatedTask[]
   profiles: AgentProfile[]
   ready: boolean
+  /** Retry re-enqueues, which main refuses for a workspace that is not open. */
+  openWorkspaces?: readonly string[]
   onOpenRun?: (workspacePath: string, runId: string) => void
   onRetry: (task: DelegatedTask) => void
   onCancel: (task: DelegatedTask) => void
@@ -56,6 +60,8 @@ export function TaskInbox({
 
   const active = filtered.filter(isTaskActive)
   const recent = filtered.filter((t) => !isTaskActive(t))
+  const overall = activeWorkSummary(tasks)
+  const filtering = Boolean(query.trim()) || teammate !== ALL
 
   const row = (task: DelegatedTask): ReactElement => {
     const profile = byId.get(task.profileId)
@@ -68,6 +74,7 @@ export function TaskInbox({
         teammateName={profile?.name ?? 'Deleted teammate'}
         teammateAvatar={profile?.avatar}
         showWorkspace
+        openWorkspaces={openWorkspaces}
         onOpenRun={onOpenRun}
         onRetry={onRetry}
         onCancel={onCancel}
@@ -76,71 +83,83 @@ export function TaskInbox({
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <SearchInput
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onClear={() => setQuery('')}
-          placeholder="Search tasks"
-          aria-label="Search tasks"
-          className="min-w-[12rem] flex-1"
-        />
-        <Menu
-          value={teammate}
-          options={[
-            { value: ALL, label: 'All teammates' },
-            ...profiles.map((p) => ({ value: p.id, label: p.name }))
-          ]}
-          aria-label="Filter by teammate"
-          placement="down"
-          onChange={setTeammate}
-        />
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-task-inbox>
+      <header className="shrink-0 border-b border-border/40 px-5 pb-3 pt-4">
+        <div className={TEAMMATES_DETAIL_COLUMN}>
+          <h2 className="m-0 text-heading font-medium tracking-[var(--vy-tracking)] text-fg-strong">
+            All tasks
+          </h2>
+          <p className="m-0 mt-0.5 text-2xs text-muted">
+            {overall.label
+              ? `${overall.label} across your open workspaces`
+              : 'Across your open workspaces'}
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <SearchInput
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onClear={() => setQuery('')}
+              placeholder="Search tasks"
+              aria-label="Search tasks"
+              className="min-w-[12rem] flex-1"
+            />
+            <Menu
+              value={teammate}
+              options={[
+                { value: ALL, label: 'All teammates' },
+                ...profiles.map((p) => ({ value: p.id, label: p.name }))
+              ]}
+              aria-label="Filter by teammate"
+              placement="down"
+              onChange={setTeammate}
+            />
+          </div>
+        </div>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className={cn(TEAMMATES_DETAIL_COLUMN, 'flex flex-col gap-4')}>
+          {filtered.length === 0 ? (
+            <EmptyState
+              icon="listTodo"
+              title={
+                ready ? (filtering ? 'No task matches that' : 'No tasks yet') : 'Loading tasks…'
+              }
+              description={
+                ready && !filtering
+                  ? 'Pick a teammate on the left and hand it a brief — it runs on its own, now or at a time you choose.'
+                  : undefined
+              }
+            />
+          ) : (
+            <>
+              {active.length ? (
+                <section aria-label="Active tasks" className="flex flex-col gap-1">
+                  <h3 className="m-0 px-0.5 text-xs font-normal tracking-[var(--vy-tracking)] text-muted">
+                    Active
+                    <span className="ml-1.5 tabular-nums text-tertiary">{active.length}</span>
+                  </h3>
+                  <div className="flex flex-col divide-y divide-border/40 rounded-xl bg-surface">
+                    {active.map(row)}
+                  </div>
+                </section>
+              ) : null}
+
+              {recent.length ? (
+                <section aria-label="Finished tasks" className="flex flex-col gap-1">
+                  <h3 className="m-0 px-0.5 text-xs font-normal tracking-[var(--vy-tracking)] text-muted">
+                    Finished
+                    <span className="ml-1.5 tabular-nums text-tertiary">{recent.length}</span>
+                  </h3>
+                  <div className="flex flex-col divide-y divide-border/40 rounded-xl bg-surface">
+                    {recent.map(row)}
+                  </div>
+                </section>
+              ) : null}
+            </>
+          )}
+        </div>
       </div>
-
-      {filtered.length === 0 ? (
-        <EmptyState
-          icon="listTodo"
-          title={
-            ready
-              ? query.trim() || teammate !== ALL
-                ? 'No task matches that'
-                : 'No tasks yet'
-              : 'Loading tasks…'
-          }
-          description={
-            ready && !query.trim() && teammate === ALL
-              ? 'Tasks you hand to a teammate appear here, across your open workspaces.'
-              : undefined
-          }
-        />
-      ) : (
-        <>
-          {active.length ? (
-            <section aria-label="Active tasks" className="flex flex-col gap-1">
-              <h3 className="m-0 px-0.5 text-xs font-normal tracking-[var(--vy-tracking)] text-muted">
-                Active
-                <span className="ml-1.5 tabular-nums text-tertiary">{active.length}</span>
-              </h3>
-              <div className="flex flex-col divide-y divide-border/40 rounded-xl bg-surface">
-                {active.map(row)}
-              </div>
-            </section>
-          ) : null}
-
-          {recent.length ? (
-            <section aria-label="Finished tasks" className="flex flex-col gap-1">
-              <h3 className="m-0 px-0.5 text-xs font-normal tracking-[var(--vy-tracking)] text-muted">
-                Finished
-                <span className="ml-1.5 tabular-nums text-tertiary">{recent.length}</span>
-              </h3>
-              <div className="flex flex-col divide-y divide-border/40 rounded-xl bg-surface">
-                {recent.map(row)}
-              </div>
-            </section>
-          ) : null}
-        </>
-      )}
     </div>
   )
 }

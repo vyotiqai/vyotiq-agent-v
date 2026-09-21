@@ -95,14 +95,25 @@ export function AssignTaskDialog({
       <div className="flex flex-col gap-3">
         <label className="flex flex-col gap-1 text-xs text-muted">
           Task
-          <Textarea
-            value={prompt}
-            rows={5}
-            className="resize-y rounded-md border border-border bg-surface px-2 py-1.5"
-            placeholder="Research the top 5 competitor pricing pages and write a comparison into docs/pricing.md."
-            aria-invalid={overLimit || undefined}
-            onChange={(e) => setPrompt(e.target.value)}
-          />
+          {/* Border on the wrapper — Textarea's own chrome is `border-none`
+              and `cn` does not merge Tailwind classes, so a `border` appended
+              to it sets a width against a style of none and draws nothing. */}
+          <div
+            className={cn(
+              'rounded-md border border-border bg-surface px-2.5 py-1 vy-transition',
+              overLimit ? 'border-danger' : 'focus-within:border-border-strong',
+              'focus-within:vy-focus-ring'
+            )}
+          >
+            <Textarea
+              value={prompt}
+              rows={5}
+              className="max-h-60"
+              placeholder="Research the top 5 competitor pricing pages and write a comparison into docs/pricing.md."
+              aria-invalid={overLimit || undefined}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+          </div>
           {showLength ? (
             <span
               data-testid="task-prompt-length"

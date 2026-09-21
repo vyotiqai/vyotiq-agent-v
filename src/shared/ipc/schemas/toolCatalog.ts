@@ -13,7 +13,8 @@ export type ToolCatalogReason = (typeof TOOL_CATALOG_REASONS)[number]
 const ToolCatalogEntrySchema = z.object({
   name: z.string().min(1),
   description: z.string(),
-  source: z.enum(['builtin', 'mcp']),
+  /** `agent` = written by a run with build_tool, living under userData. */
+  source: z.enum(['builtin', 'mcp', 'agent']),
   /** Present for `source: 'mcp'` (the `mcp__<serverId>__<tool>` server id). */
   serverId: z.string().min(1).optional(),
   serverName: z.string().min(1).optional(),

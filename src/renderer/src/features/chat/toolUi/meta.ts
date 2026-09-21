@@ -25,7 +25,10 @@ const EDIT_TOOLS = new Set([
   'str_replace',
   'memory_write',
   'delete',
-  'edit_notebook'
+  'edit_notebook',
+  // Writes a module to disk; grouped with the other writers rather than the
+  // teammate tools, which only change records.
+  'build_tool'
 ])
 const SEARCH_TOOLS = new Set([
   'search',
@@ -52,6 +55,12 @@ const SEARCH_TOOLS = new Set([
   'pull_agent_instance',
   'merge_agent_instance',
   'cancel_agent_instance',
+  'teammate_list',
+  'teammate_create',
+  'teammate_update',
+  'teammate_delete',
+  'teammate_assign_task',
+  'teammate_task',
   'git_status',
   'git_diff',
   'Skill',
@@ -277,6 +286,13 @@ const TOOL_ICON_BY_NAME: Record<string, IconName> = {
   git_diff: 'branch',
   git_commit: 'branch',
   spawn_agent_instance: 'bot',
+  teammate_list: 'bot',
+  teammate_create: 'bot',
+  teammate_update: 'bot',
+  teammate_delete: 'trash',
+  teammate_assign_task: 'listTodo',
+  teammate_task: 'listTodo',
+  build_tool: 'plug',
   await_agent_instance: 'cpu',
   pull_agent_instance: 'cpu',
   merge_agent_instance: 'branch',

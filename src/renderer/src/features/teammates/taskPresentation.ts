@@ -1,4 +1,5 @@
 import { formatDisplayTime, formatElapsed, relativeTimeAgo } from '@shared/utils/timeFormat'
+import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { isTerminalDelegatedTaskStatus, type DelegatedTask, type DelegatedTaskStatus } from '@shared/ipc'
 
 /**
@@ -96,11 +97,58 @@ export function compareTasksForDisplay(a: DelegatedTask, b: DelegatedTask): numb
   return (b.finishedAt ?? b.createdAt).localeCompare(a.finishedAt ?? a.createdAt)
 }
 
-/** Which controls a row may offer, given what main will actually accept. */
-export function taskControls(task: DelegatedTask): { retry: boolean; cancel: boolean } {
-  if (isTerminalDelegatedTaskStatus(task.status)) return { retry: true, cancel: false }
+/**
+ * Which controls a row may offer, given what main will actually accept.
+ *
+ * `workspaceOpen` defaults to true so a caller that cannot know — the sidebar,
+ * whose rows are already filtered to the active workspace — behaves as before.
+ */
+export function taskControls(
+  task: DelegatedTask,
+  workspaceOpen = true
+): { retry: boolean; cancel: boolean } {
+  if (isTerminalDelegatedTaskStatus(task.status)) {
+    // `retryTask` re-enqueues, and `enqueueTask` refuses a workspace that is
+    // not open. Offering Retry there is a button that reliably errors — the
+    // same reason `cancelling` offers neither control below.
+    return { retry: workspaceOpen, cancel: false }
+  }
   // A stop is already in flight: `cancelTask` refuses a second one, so offering
   // the button would be a control that silently does nothing.
   if (task.status === 'cancelling') return { retry: false, cancel: false }
   return { retry: false, cancel: true }
+}
+
+/** True when this task's workspace is among the ones currently open. */
+export function isTaskWorkspaceOpen(
+  task: DelegatedTask,
+  openWorkspaces: readonly string[] | undefined
+): boolean {
+  if (!openWorkspaces) return true
+  return openWorkspaces.some((path) => workspacePathsEqual(path, task.workspacePath))
+}
+
+/**
+ * A teammate's live queue in a few words, for the rail row and the detail
+ * header: null when nothing is outstanding, so callers can fall back to
+ * something else rather than printing "0 running".
+ */
+export function activeWorkSummary(tasks: DelegatedTask[]): {
+  active: number
+  running: number
+  label: string | null
+} {
+  let active = 0
+  let running = 0
+  for (const task of tasks) {
+    if (!isTaskActive(task)) continue
+    active += 1
+    if (task.status === 'running' || task.status === 'cancelling') running += 1
+  }
+  if (active === 0) return { active: 0, running: 0, label: null }
+  if (running > 0 && running < active) {
+    return { active, running, label: `${running} running, ${active - running} waiting` }
+  }
+  if (running > 0) return { active, running, label: `${running} running` }
+  return { active, running, label: `${active} waiting` }
 }

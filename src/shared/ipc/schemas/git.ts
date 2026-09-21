@@ -25,7 +25,14 @@ export const GitStatusSchema = z.object({
   /** Null when the branch cannot be named, e.g. a detached HEAD. */
   branch: z.string().nullable(),
   files: z.array(GitChangedFileSchema),
-  /** The file list is capped; totals below still cover every change. */
+  /**
+   * The reported view is incomplete: either the file list hit its cap, or the
+   * untracked listing could not be read at all (a workspace holding a large
+   * untracked tree overruns git's output buffer). Tracked totals below always
+   * cover every change — they come from a single numstat read — but untracked
+   * lines are only measured for the files that ship, because measuring one
+   * means reading it synchronously.
+   */
   truncated: z.boolean(),
   fileCount: z.number().int().min(0),
   added: z.number().int().min(0),
@@ -243,6 +250,17 @@ export type GitCommitFilesResult = z.infer<typeof GitCommitFilesResultSchema>
  * Subscribers re-pull a fresh snapshot via IPC.gitStatus, so the payload only
  * identifies the workspace.
  */
+export const GitInitRequestSchema = z.object({
+  workspacePath: z.string().min(1)
+})
+export type GitInitRequest = z.infer<typeof GitInitRequestSchema>
+
+/** The branch `git init` landed on — whatever the user's init.defaultBranch is. */
+export const GitInitResultSchema = z.object({
+  branch: z.string().nullable()
+})
+export type GitInitResult = z.infer<typeof GitInitResultSchema>
+
 export const GitStatusChangedPayloadSchema = z.object({
   workspacePath: z.string().min(1)
 })

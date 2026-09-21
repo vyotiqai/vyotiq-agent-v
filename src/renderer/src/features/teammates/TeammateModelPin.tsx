@@ -22,6 +22,20 @@ export type ModelPin = { provider: ProviderId; model: string }
 
 const NO_PIN = '__none__'
 
+/**
+ * A half-made pin — a provider chosen, no model id yet — resolved to "no pin".
+ *
+ * Picking a provider emits `{ provider, model: '' }` so the model menu has
+ * something to hang off, and the control says out loud that such a pin is
+ * ignored. `AgentProfileModelSchema` disagrees: it requires a non-empty
+ * `model`, so sending one fails the entire save on a Zod error rather than
+ * being ignored. Every writer runs its draft through this first, so the
+ * contract the control advertises is the one the save honours.
+ */
+export function usablePin(pin: ModelPin | undefined): ModelPin | undefined {
+  return pin && pin.model.trim() ? pin : undefined
+}
+
 export function TeammateModelPin({
   value,
   onChange,

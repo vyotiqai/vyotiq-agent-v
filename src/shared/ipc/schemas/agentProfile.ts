@@ -29,6 +29,42 @@ export const AgentProfileModelSchema = z.object({
   model: z.string().min(1).max(200)
 })
 
+/**
+ * Avatar keys the picker offers, and the only ones the agent is told about.
+ *
+ * `avatar` stays a plain string on the profile: a roster written by another
+ * build may name a key this list does not have, and the chip falls back to the
+ * teammate's initial rather than failing. But the agent had only three examples
+ * in a tool description to go on, so anything it invented degraded silently to
+ * that fallback. Naming the set is what makes the choice real.
+ *
+ * The renderer assigns this to `readonly IconName[]`, so a key that is not a
+ * real icon fails to compile there.
+ */
+export const TEAMMATE_AVATAR_KEYS = [
+  'bot',
+  'sparkles',
+  'cpu',
+  'terminal',
+  'branch',
+  'flag',
+  'memory',
+  'stack',
+  'scanSearch',
+  'listTodo',
+  'chat',
+  'doc',
+  'globe',
+  'star',
+  'plug',
+  'monitor',
+  'search',
+  'image',
+  'mic',
+  'gear'
+] as const
+export type TeammateAvatarKey = (typeof TEAMMATE_AVATAR_KEYS)[number]
+
 export const AgentProfileBaseSchema = z.object({
   id: AgentProfileIdSchema,
   name: z.string().min(1).max(64),
@@ -123,6 +159,23 @@ export const AgentProfileOverrideSchema = AgentProfileBaseSchema.pick({
 }).partial()
 export type AgentProfileOverride = z.infer<typeof AgentProfileOverrideSchema>
 
+/**
+ * Override fields a project may not grant itself.
+ *
+ * These three decide *when* and *how autonomously* code runs, so a
+ * `.vyotiq/agents/<id>.profile.json` that arrives over git can otherwise flip a
+ * teammate to autonomous in a repository you merely cloned — and ids are
+ * slugified display names, so they are guessable. Until the file is accepted
+ * these are dropped; everything the feature actually exists for (persona,
+ * identity, tone, avatar, model pin) still applies unchanged.
+ */
+export const PRIVILEGED_OVERRIDE_FIELDS = [
+  'autonomousMode',
+  'autoResumeOnLaunch',
+  'runtime'
+] as const
+export type PrivilegedOverrideField = (typeof PRIVILEGED_OVERRIDE_FIELDS)[number]
+
 export const AgentProfileOverridesListRequestSchema = z.object({
   workspacePath: z.string().min(1)
 })
@@ -150,10 +203,27 @@ export const AgentProfileOverrideSetRequestSchema = z.object({
 })
 export type AgentProfileOverrideSetRequest = z.infer<typeof AgentProfileOverrideSetRequestSchema>
 
-/** Every override stored in one workspace, keyed by profile id. */
+/** Accept this workspace's override file for one profile, as it stands today. */
+export const AgentProfileOverrideAcceptRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  profileId: AgentProfileIdSchema
+})
+export type AgentProfileOverrideAcceptRequest = z.infer<
+  typeof AgentProfileOverrideAcceptRequestSchema
+>
+
+/**
+ * Every override stored in one workspace, keyed by profile id.
+ *
+ * `overrides` is the file as written — the listing must show what the user is
+ * being asked to accept, so it is never filtered. `unaccepted` names the
+ * privileged fields that are present but not yet granted, which is exactly
+ * what the run path is dropping.
+ */
 export const AgentProfileOverridesResultSchema = z.object({
   workspacePath: z.string().min(1),
-  overrides: z.record(AgentProfileIdSchema, AgentProfileOverrideSchema)
+  overrides: z.record(AgentProfileIdSchema, AgentProfileOverrideSchema),
+  unaccepted: z.record(AgentProfileIdSchema, z.array(z.string())).default({})
 })
 export type AgentProfileOverridesResult = z.infer<typeof AgentProfileOverridesResultSchema>
 

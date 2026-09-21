@@ -596,11 +596,11 @@ export const SettingsSchema = z.object({
    * Disabled rules are omitted. Workspace rules override these on conflict.
    */
   userRules: z.array(UserRuleSchema).max(MAX_USER_RULES).default([]),
-  /** Optional assistant identity surfaced in the stable prompt zone. Empty = default. */
+  /** Optional assistant name surfaced in the stable prompt zone. Empty = unnamed. */
   agentPersona: z.string().max(1000).default(''),
-  /** Optional tone directive for replies. Empty = default spine tone. */
+  /** Optional tone directive for replies. Empty = no tone directive. */
   agentTone: z.string().max(2000).default(''),
-  /** Optional identity blurb for replies. Empty = built-in fallback (unless a custom persona suppresses it). */
+  /** Optional identity blurb for replies. Empty = no identity. */
   agentIdentity: z.string().max(1000).default(''),
   /** Preferred response language. Empty = follow the user's language. */
   responseLanguage: z.string().max(64).default(''),

@@ -164,6 +164,18 @@ function toJsonSchema(schema: ZodTypeAny, path: string): Record<string, unknown>
       description
     )
   }
+  if (typeName === 'ZodUnknown' || typeName === 'ZodAny') {
+    // A genuinely free-form value — build_tool's `schema` really is arbitrary
+    // JSON Schema. Allowed only WITH a description, which is precisely the
+    // condition the guard below exists to enforce: the objection to `{}` is
+    // that it tells the model nothing, not that open values are never valid.
+    if (!description) {
+      throw new Error(
+        `zodToJsonSchema: "${typeName}" at ${path} needs a .describe() — an open value with no description tells the model nothing`
+      )
+    }
+    return withDescription({}, description)
+  }
   // `{}` accepts anything and carries no description, so the model gets no
   // guidance at all for that argument. Fail at import time — where a test or a
   // dev build catches it — instead of shipping a silently erased tool schema.

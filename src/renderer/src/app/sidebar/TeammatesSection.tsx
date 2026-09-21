@@ -18,6 +18,7 @@ import {
   isProfileUsableIn,
   unusableReason
 } from '@renderer/features/teammates/teammatePresentation'
+import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { isTerminalDelegatedTaskStatus, type AgentProfile, type DelegatedTask } from '@shared/ipc'
 
 /**
@@ -40,7 +41,11 @@ function sidebarTasksFor(
 ): DelegatedTask[] {
   return tasks
     .filter((t) => t.profileId === profileId)
-    .filter((t) => !workspacePath || t.workspacePath === workspacePath)
+    // `workspacePathsEqual`, not `===`: a task stores the first spelling main
+    // happened to see (`cacheKeyFor`), which need not match the renderer's
+    // active path character for character. Raw equality silently hid a
+    // teammate's live work from the one surface whose job is showing it.
+    .filter((t) => !workspacePath || workspacePathsEqual(t.workspacePath, workspacePath))
     .filter((t) => !isTerminalDelegatedTaskStatus(t.status) || t.status === 'failed')
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
@@ -49,7 +54,8 @@ export function TeammatesSection({
   onStartTeammateChat,
   onOpenTaskRun,
   onOpenTeammates,
-  activeWorkspacePath = null
+  activeWorkspacePath = null,
+  current = false
 }: {
   /** Start a new chat in the active workspace bound to this teammate. */
   onStartTeammateChat?: (profileId: string) => void
@@ -59,6 +65,8 @@ export function TeammatesSection({
   onOpenTeammates?: () => void
   /** Workspace new delegated tasks run against (the active one). */
   activeWorkspacePath?: string | null
+  /** The Teammates pane is the open view — this section is the nav entry for it. */
+  current?: boolean
 }) {
   const { profiles, ready, error, clearError } = useAgentProfiles()
   const { tasks, error: taskError, enqueueTask, cancelTask, retryTask, clearError: clearTaskError } =
@@ -81,17 +89,24 @@ export function TeammatesSection({
 
   return (
     <div className="mt-1" data-teammates-section>
-      <div className="mb-2 flex items-center justify-between gap-2 px-1">
+      <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
         <p className={SIDEBAR_SECTION_LABEL}>Teammates</p>
         {onOpenTeammates ? (
-          <IconButton
-            icon="panels"
-            size="xs"
-            label="Open teammates"
+          // A word, not a `panels` glyph: this is the only entry to the pane
+          // now, and an ambiguous icon is a poor thing to hang that on.
+          <button
+            type="button"
+            className={cn(
+              'app-region-no-drag shrink-0 rounded-md px-1.5 py-0.5 text-2xs vy-transition',
+              current ? 'font-medium text-fg-strong' : 'text-muted hover:text-fg'
+            )}
+            aria-label="Open teammates"
+            aria-current={current ? 'page' : undefined}
             title="Manage teammates"
-            className="app-region-no-drag"
             onClick={onOpenTeammates}
-          />
+          >
+            Manage
+          </button>
         ) : null}
       </div>
 

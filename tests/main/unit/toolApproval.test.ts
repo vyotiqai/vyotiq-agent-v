@@ -43,6 +43,40 @@ describe('isToolGated', () => {
     ).toBe(true)
   })
 
+  it('gates an agent-built tool even when approvals are off', () => {
+    // "Approvals off" is a judgement about the tools that shipped with the app.
+    // A module a run wrote minutes ago is not one of them.
+    const key = 'my-tool@0123456789abcdef'
+    expect(isToolGated('my-tool', 'off', none, [], undefined, { agentBuiltAllowKey: key })).toBe(
+      true
+    )
+    expect(isToolGated('my-tool', 'off', none, [])).toBe(false)
+  })
+
+  it('matches an agent-built allow on its content key, never its bare name', () => {
+    const key = 'my-tool@0123456789abcdef'
+    // Allowed under the exact key it was granted against.
+    expect(
+      isToolGated('my-tool', 'all', new Set([key]), [], undefined, { agentBuiltAllowKey: key })
+    ).toBe(false)
+    expect(isToolGated('my-tool', 'all', none, [key], undefined, { agentBuiltAllowKey: key })).toBe(
+      false
+    )
+    // A standing allow on the bare name buys nothing: that is what stops an
+    // "always allow" carrying over to code the user never read.
+    expect(
+      isToolGated('my-tool', 'all', new Set(['my-tool']), ['my-tool'], undefined, {
+        agentBuiltAllowKey: key
+      })
+    ).toBe(true)
+    // And the old key stops matching once the module is rewritten.
+    expect(
+      isToolGated('my-tool', 'all', new Set([key]), [], undefined, {
+        agentBuiltAllowKey: 'my-tool@fedcba9876543210'
+      })
+    ).toBe(true)
+  })
+
   it('does not gate builtin MCP meta tools when mode is off', () => {
     for (const name of ['mcp_list_tools', 'request_mcp_tools', 'release_mcp_tools']) {
       expect(isToolGated(name, 'off', none, [])).toBe(false)
@@ -343,6 +377,12 @@ describe('createApprovalGate', () => {
     expect(isAutonomousHighRiskTool('bash')).toBe(true)
     expect(isAutonomousHighRiskTool('Write')).toBe(true)
     expect(isAutonomousHighRiskTool('git_commit')).toBe(true)
+    expect(isAutonomousHighRiskTool('str_replace')).toBe(true)
+    // A patch is a file write. Autonomy gates `edit`, so gating this too is
+    // what keeps "autonomy buys browsing, not silent file access" true.
+    expect(isAutonomousHighRiskTool('git_apply')).toBe(true)
+    // Writing a module that later runs as arbitrary Node in a utility process.
+    expect(isAutonomousHighRiskTool('build_tool')).toBe(true)
     expect(isAutonomousHighRiskTool('github_pr_create')).toBe(true)
     expect(isAutonomousHighRiskTool('github_pr_review')).toBe(true)
     expect(isAutonomousHighRiskTool('github_issue')).toBe(true)

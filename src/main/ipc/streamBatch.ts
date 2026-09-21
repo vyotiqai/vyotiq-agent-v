@@ -381,6 +381,21 @@ export class ChatEventDispatcher {
       return
     }
 
+    if (ev.type === 'aux_usage') {
+      // Ride the batch timer rather than falling through to the forced flush
+      // below: compaction emits these in bursts (one per history chunk, plus
+      // retries), and each forced flush restarts the coalescing window.
+      //
+      // Deliberately NOT coalesced the way the meters below are. A usage meter
+      // is a replaceable latest-value reading; every aux row is a distinct
+      // billed call, so dropping one loses real spend. It also has no `step` to
+      // key on, by design.
+      slot.pendingSegments.push({ kind: 'event', event: ev })
+      this.enforcePendingCap(slot)
+      this.schedule(slot)
+      return
+    }
+
     if (ev.type === 'step_usage' || ev.type === 'context_usage') {
       if (isActiveWorkspace(slot.workspacePath)) {
         // Ride the batch timer in emission order instead of forcing a flush.

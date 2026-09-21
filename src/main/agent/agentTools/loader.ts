@@ -2,11 +2,13 @@
  * Pure text scanning of agent-built tool modules. Never imports or executes
  * tool code at scan time — the module header comment is the only input.
  */
+import { createHash } from 'crypto'
 import { readdir, readFile, stat } from 'fs/promises'
 import type { Dirent } from 'fs'
 import { join } from 'path'
 import type { AgentToolDef } from './types'
-import { pathSafeName } from './paths'
+import { pathSafeName, resolveAgentToolsDir } from './paths'
+import { BUILTIN_TOOL_NAMES } from '../schemas/tools'
 
 const HEADER_MARKER = '/* @agent-tool'
 const HEADER_RE = /\/\* @agent-tool\s+([\s\S]*?)\*\//
@@ -58,7 +60,8 @@ export async function scanAgentTools(dir: string): Promise<AgentToolDef[]> {
         description: header.description,
         inputSchema: header.inputSchema as Record<string, unknown>,
         modulePath,
-        fingerprint: `${modulePath}:${info.mtimeMs}`
+        fingerprint: `${modulePath}:${info.mtimeMs}`,
+        contentHash: createHash('sha256').update(source).digest('hex')
       })
     } catch {
       // Unreadable file — skip, never crash the scan.
@@ -127,4 +130,51 @@ export async function loadAgentToolsSnapshot(dir: string): Promise<AgentToolDef[
   const defs = await scanAgentTools(dir)
   cachedSnapshot = { dir, dirFingerprint: listing ?? '', defs }
   return defs
+}
+
+/**
+ * Allowlist key for one agent-built tool, or null when the name is not one.
+ *
+ * `<name>@<hash>` rather than the bare name, because `build_tool` can rewrite
+ * the module behind a stable name: an "always allow" keyed on the name alone
+ * would silently carry over to code the user never saw. This is the same shape
+ * as `acceptedOverrides` in settings/agentProfiles, which hashes an override
+ * file's bytes so editing it withdraws consent.
+ */
+export async function agentBuiltToolAllowKey(dir: string, name: string): Promise<string | null> {
+  const defs = await loadAgentToolsSnapshot(dir)
+  const def = defs.find((d) => d.name === name)
+  return def ? `${def.name}@${def.contentHash.slice(0, 16)}` : null
+}
+
+const RESERVED_TOOL_NAMES: ReadonlySet<string> = new Set<string>(BUILTIN_TOOL_NAMES)
+
+/**
+ * Agent-built tools as model-facing definitions.
+ *
+ * Returned every step rather than loaded on demand like MCP: the set is small,
+ * it is this user's own code, and a tool written earlier in the run has to be
+ * callable on the next step for `build_tool` to be worth anything. A failed
+ * scan yields an empty catalog rather than failing the step.
+ *
+ * It lives here rather than beside the dispatcher in `tools/index.ts` because
+ * the run loop needs it: importing that barrel from `loop.ts` closes the cycle
+ * loop → tools → instanceTools → agentInstances → loop, which leaves
+ * `AGENT_TOOLS` empty at module-init time and strips every builtin off the wire.
+ */
+export async function agentBuiltToolDefinitions(): Promise<
+  { name: string; description: string; parameters: Record<string, unknown> }[]
+> {
+  try {
+    const defs = await loadAgentToolsSnapshot(await resolveAgentToolsDir())
+    return defs
+      .filter((def) => !RESERVED_TOOL_NAMES.has(def.name) && !def.name.startsWith('mcp__'))
+      .map((def) => ({
+        name: def.name,
+        description: def.description,
+        parameters: def.inputSchema
+      }))
+  } catch {
+    return []
+  }
 }

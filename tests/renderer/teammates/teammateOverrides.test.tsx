@@ -30,6 +30,9 @@ const profile: AgentProfile = {
 } as AgentProfile
 
 let stored: Record<string, Record<string, AgentProfileOverride>> = {}
+/** Privileged fields main is withholding, per workspace then profile id. */
+let unaccepted: Record<string, Record<string, string[]>> = {}
+let accepts: { workspacePath: string; profileId: string }[] = []
 let writes: { workspacePath: string; profileId: string; override: AgentProfileOverride | null }[] =
   []
 
@@ -46,6 +49,8 @@ function renderOverrides(): ReturnType<typeof render> {
 beforeEach(() => {
   resetWorkspaceProfileOverridesForTests()
   stored = { '/ws-a': {}, '/ws-b': {} }
+  unaccepted = {}
+  accepts = []
   writes = []
   HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
     this.open = true
@@ -57,8 +62,29 @@ beforeEach(() => {
   window.vyotiq = {
     agentProfileOverridesList: vi.fn(async ({ workspacePath }: { workspacePath: string }) => ({
       ok: true as const,
-      data: { workspacePath, overrides: stored[workspacePath] ?? {} }
+      data: {
+        workspacePath,
+        overrides: stored[workspacePath] ?? {},
+        unaccepted: unaccepted[workspacePath] ?? {}
+      }
     })),
+    agentProfileOverrideAccept: vi.fn(
+      async (req: { workspacePath: string; profileId: string }) => {
+        accepts.push(req)
+        // Main re-reads the file and answers with the refreshed listing.
+        const remaining = { ...(unaccepted[req.workspacePath] ?? {}) }
+        delete remaining[req.profileId]
+        unaccepted[req.workspacePath] = remaining
+        return {
+          ok: true as const,
+          data: {
+            workspacePath: req.workspacePath,
+            overrides: stored[req.workspacePath] ?? {},
+            unaccepted: remaining
+          }
+        }
+      }
+    ),
     agentProfileOverrideSet: vi.fn(async (req: (typeof writes)[number]) => {
       writes.push(req)
       return { ok: true as const, data: req.override }
@@ -93,6 +119,42 @@ describe('workspace overrides', () => {
     // Switching an override on must not silently blank the field for that
     // workspace — it starts from what the teammate already does.
     expect((screen.getByLabelText('Tone override') as HTMLInputElement).value).toBe('Global tone.')
+  })
+
+  it('switches the model override on for a teammate with no global pin', async () => {
+    // Regression: the switched-on set used to be inferred from
+    // `draft[key] !== undefined`, and the model row seeds from
+    // `profile.model` — `undefined` here. So the switch read back as off and
+    // flipped itself straight down again, leaving the row permanently dead.
+    // Every other field seeds to a defined value, which is why only this one
+    // broke and why no test caught it.
+    expect(profile.model).toBeUndefined()
+    renderOverrides()
+    await waitFor(() => expect(screen.getByLabelText('Edit override for ws-a')).toBeTruthy())
+    fireEvent.click(screen.getByLabelText('Edit override for ws-a'))
+
+    fireEvent.click(screen.getByLabelText('Override Pinned model'))
+
+    expect(screen.getByLabelText('Override Pinned model').getAttribute('aria-checked')).toBe('true')
+    // The switch being on has to actually reveal the editor it gates.
+    expect(screen.getByLabelText('Pinned provider')).toBeTruthy()
+  })
+
+  it('does not write a pin that names a provider but no model', async () => {
+    // `TeammateModelPin` says such a pin is ignored ("Pick a model, or the pin
+    // is ignored"), but AgentProfileModelSchema requires a non-empty model, so
+    // sending one fails the whole save on a Zod error. A hand-authored file can
+    // carry one too, which is how this reaches the form.
+    stored['/ws-a'] = { scout: { model: { provider: 'openai', model: '' } } }
+    renderOverrides()
+    await waitFor(() => expect(screen.getByLabelText('Edit override for ws-a')).toBeTruthy())
+    fireEvent.click(screen.getByLabelText('Edit override for ws-a'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save override' }))
+
+    await waitFor(() => expect(writes).toHaveLength(1))
+    // Nothing usable was overridden, so the file goes rather than being
+    // rewritten as `{}` — the old gate counted the undefined-valued key.
+    expect(writes[0].override).toBeNull()
   })
 
   it('writes only the fields that were switched on', async () => {
@@ -165,7 +227,6 @@ describe('workspace overrides', () => {
   })
 
   it('surfaces a refusal from main instead of claiming success', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.agentProfileOverrideSet = vi.fn(async () => ({
       ok: false as const,
       error: 'Workspace is not open'
@@ -180,6 +241,86 @@ describe('workspace overrides', () => {
       expect(pushToastMock).not.toHaveBeenCalledWith(expect.stringContaining('Override saved'))
     )
     // The dialog stays open so the edit is not lost with the failure.
-    expect(within(screen.getByRole('dialog')).getByLabelText('Override Tone')).toBeTruthy()
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByLabelText('Override Tone')).toBeTruthy()
+    // Asserting only the ABSENCE of a success toast locked in the silence: the
+    // store published this reason and nothing rendered it. The banner belongs
+    // inside the dialog, because that is what is on screen when a save fails.
+    expect(within(dialog).getByText('Workspace is not open')).toBeTruthy()
+  })
+
+  it('surfaces a refused accept on the row, where the click happened', async () => {
+    stored['/ws-a'] = { scout: { autonomousMode: 'on' } }
+    unaccepted['/ws-a'] = { scout: ['autonomousMode'] }
+    window.vyotiq.agentProfileOverrideAccept = vi.fn(async () => ({
+      ok: false as const,
+      error: 'Override file changed while you were reading it'
+    }))
+    renderOverrides()
+    await waitFor(() => expect(screen.getByLabelText('Accept override for ws-a')).toBeTruthy())
+    fireEvent.click(screen.getByLabelText('Accept override for ws-a'))
+    const confirmDialog = await screen.findByRole('dialog')
+    fireEvent.click(within(confirmDialog).getByRole('button', { name: 'Accept' }))
+
+    // No dialog is open on this path, so the banner belongs above the group.
+    await waitFor(() =>
+      expect(screen.getByText('Override file changed while you were reading it')).toBeTruthy()
+    )
+  })
+})
+
+describe('override trust', () => {
+  it('says a project change is not applied, and names it', async () => {
+    // These files arrive over git, so the row has to distinguish "this project
+    // retunes the teammate" from "this project is ASKING to, and we said no".
+    stored['/ws-a'] = { scout: { tone: 'Workspace tone.', autonomousMode: 'on' } }
+    unaccepted['/ws-a'] = { scout: ['autonomousMode'] }
+    renderOverrides()
+
+    await waitFor(() => expect(screen.getByText('1 change not applied')).toBeTruthy())
+    expect(screen.getByText(/asking to change tool approvals/)).toBeTruthy()
+  })
+
+  it('accepts the file behind a confirmation', async () => {
+    stored['/ws-a'] = { scout: { autonomousMode: 'on' } }
+    unaccepted['/ws-a'] = { scout: ['autonomousMode'] }
+    renderOverrides()
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Accept override for ws-a')).toBeTruthy()
+    )
+    fireEvent.click(screen.getByLabelText('Accept override for ws-a'))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Accept' }))
+
+    await waitFor(() => expect(accepts).toHaveLength(1))
+    expect(accepts[0]).toEqual({ workspacePath: '/ws-a', profileId: 'scout' })
+    // The warning clears once main answers with the refreshed listing.
+    await waitFor(() => expect(screen.queryByText('1 change not applied')).toBeNull())
+  })
+
+  it('accepts nothing when the confirmation is declined', async () => {
+    stored['/ws-a'] = { scout: { autonomousMode: 'on' } }
+    unaccepted['/ws-a'] = { scout: ['autonomousMode'] }
+    renderOverrides()
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Accept override for ws-a')).toBeTruthy()
+    )
+    fireEvent.click(screen.getByLabelText('Accept override for ws-a'))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    expect(accepts).toHaveLength(0)
+  })
+
+  it('offers nothing to accept for an ordinary override', async () => {
+    // A persona-only file is the common case and must never look like a
+    // pending security decision.
+    stored['/ws-a'] = { scout: { tone: 'Workspace tone.' } }
+    renderOverrides()
+
+    await waitFor(() => expect(screen.getByText('1 field overridden')).toBeTruthy())
+    expect(screen.queryByLabelText('Accept override for ws-a')).toBeNull()
   })
 })

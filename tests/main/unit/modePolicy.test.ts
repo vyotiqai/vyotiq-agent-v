@@ -357,7 +357,20 @@ describe('modePolicy', () => {
       'github_pr_create',
       'github_pr_review',
       'github_issue',
-      'edit_notebook'
+      'edit_notebook',
+      // Teammate management is Agent-only by omission: creating an identity,
+      // changing its autonomy or handing it unattended work is not a read and
+      // not a planning step. Inline instances keep them — a child may create a
+      // teammate, by deliberate decision rather than oversight.
+      'teammate_list',
+      'teammate_create',
+      'teammate_update',
+      'teammate_delete',
+      'teammate_assign_task',
+      'teammate_task',
+      // Writing a module that later runs as arbitrary Node is neither a read
+      // nor a planning step.
+      'build_tool'
     ] as const
 
     const classified = [

@@ -51,7 +51,18 @@ const SERIAL_APPROVAL_EXEMPT_BUILTIN = new Set([
   'update_goal',
   'await_agent_instance',
   'spawn_agent_instance',
-  'cancel_agent_instance'
+  'cancel_agent_instance',
+  // Teammate management is approval-exempt by product decision, matching
+  // `spawn_agent_instance`: the agent already creates workers without asking,
+  // and a teammate is the durable form of the same act. Note this includes
+  // setting a teammate's own `autonomousMode` — the high-risk gate
+  // (isAutonomousHighRiskTool) is what still holds for every teammate.
+  'teammate_list',
+  'teammate_create',
+  'teammate_update',
+  'teammate_delete',
+  'teammate_assign_task',
+  'teammate_task'
 ])
 
 /** Agent-mode-only builtins (inline instance delegation). */

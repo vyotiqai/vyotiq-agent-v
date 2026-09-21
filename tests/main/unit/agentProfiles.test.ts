@@ -23,6 +23,9 @@ import {
   removeProfileArtifactsForWorkspaces,
   listRetiredAgentProfileIds,
   resolveAgentProfile,
+  unacceptedOverrideFields,
+  listUnacceptedOverrideFields,
+  acceptWorkspaceProfileOverride,
   updateAgentProfile
 } from '@main/settings/agentProfiles'
 import {
@@ -31,7 +34,10 @@ import {
   writeMemoryFile,
   readMemoryFile
 } from '@main/agent/context/memory'
-import { AgentProfileOverrideSetRequestSchema } from '@shared/ipc'
+import {
+  AgentProfileOverrideSetRequestSchema,
+  type AgentProfileCreateRequest
+} from '@shared/ipc'
 
 const workspace = mkdtempSync(join(tmpdir(), 'vyotiq-profiles-ws-'))
 
@@ -44,7 +50,9 @@ afterEach(() => {
   rmSync(join(workspace, '.vyotiq', 'agents'), { recursive: true, force: true })
 })
 
-function baseCreate(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function baseCreate(
+  overrides: Partial<AgentProfileCreateRequest> = {}
+): AgentProfileCreateRequest {
   return { name: 'Scout', scope: 'global', ...overrides }
 }
 
@@ -431,5 +439,136 @@ describe('profile memory namespaces', () => {
       rmSync(junction, { force: true, recursive: false })
       rmSync(ws, { recursive: true, force: true })
     }
+  })
+})
+
+describe('override trust: accept on first sight', () => {
+  function writeOverride(profileId: string, body: Record<string, unknown>): string {
+    const dir = join(workspace, '.vyotiq', 'agents')
+    mkdirSync(dir, { recursive: true })
+    const path = join(dir, `${profileId}.profile.json`)
+    writeFileSync(path, JSON.stringify(body), 'utf8')
+    return path
+  }
+
+  it('withholds privileged fields from an unaccepted file but applies the rest', () => {
+    // The file arrives over git. Retuning how a teammate writes is what
+    // overrides are for; deciding it no longer asks before running tools is
+    // not something a cloned repository gets to do on its own.
+    const created = createAgentProfile(baseCreate({ persona: 'Global persona.' }))
+    writeOverride(created.id, {
+      persona: 'Workspace persona.',
+      autonomousMode: 'on',
+      autoResumeOnLaunch: true
+    })
+
+    const resolved = resolveAgentProfile(workspace, created.id)
+    expect(resolved?.persona).toBe('Workspace persona.')
+    expect(resolved?.autonomousMode).toBeUndefined()
+    expect(resolved?.autoResumeOnLaunch).toBeUndefined()
+  })
+
+  it('reports exactly which fields are being withheld', () => {
+    const created = createAgentProfile(baseCreate())
+    writeOverride(created.id, { tone: 'Terse.', autonomousMode: 'on' })
+
+    expect(unacceptedOverrideFields(workspace, created.id)).toEqual(['autonomousMode'])
+    expect(listUnacceptedOverrideFields(workspace)).toEqual({ [created.id]: ['autonomousMode'] })
+  })
+
+  it('applies them once the file is accepted', () => {
+    const created = createAgentProfile(baseCreate())
+    writeOverride(created.id, { autonomousMode: 'on' })
+
+    acceptWorkspaceProfileOverride(workspace, created.id)
+
+    expect(resolveAgentProfile(workspace, created.id)?.autonomousMode).toBe('on')
+    expect(unacceptedOverrideFields(workspace, created.id)).toEqual([])
+  })
+
+  it('withdraws consent when the file changes', () => {
+    // Acceptance is recorded against the bytes, which is what makes it
+    // first-SIGHT: pulling a change to a file you once accepted must re-ask.
+    const created = createAgentProfile(baseCreate())
+    writeOverride(created.id, { autonomousMode: 'on' })
+    acceptWorkspaceProfileOverride(workspace, created.id)
+    expect(resolveAgentProfile(workspace, created.id)?.autonomousMode).toBe('on')
+
+    writeOverride(created.id, { autonomousMode: 'on', autoResumeOnLaunch: true })
+
+    expect(resolveAgentProfile(workspace, created.id)?.autonomousMode).toBeUndefined()
+    expect(unacceptedOverrideFields(workspace, created.id)).toEqual([
+      'autonomousMode',
+      'autoResumeOnLaunch'
+    ])
+  })
+
+  it('leaves a file with no privileged fields alone', () => {
+    // Persona-only overrides are the common case and must never prompt.
+    const created = createAgentProfile(baseCreate())
+    writeOverride(created.id, { persona: 'Workspace persona.', tone: 'Terse.' })
+
+    expect(unacceptedOverrideFields(workspace, created.id)).toEqual([])
+    expect(listUnacceptedOverrideFields(workspace)).toEqual({})
+    expect(resolveAgentProfile(workspace, created.id)?.persona).toBe('Workspace persona.')
+  })
+
+  it('scopes consent to one workspace', () => {
+    const created = createAgentProfile(baseCreate())
+    writeOverride(created.id, { autonomousMode: 'on' })
+    acceptWorkspaceProfileOverride(workspace, created.id)
+
+    const other = mkdtempSync(join(tmpdir(), 'vyotiq-profiles-other-'))
+    try {
+      mkdirSync(join(other, '.vyotiq', 'agents'), { recursive: true })
+      writeFileSync(
+        join(other, '.vyotiq', 'agents', `${created.id}.profile.json`),
+        JSON.stringify({ autonomousMode: 'on' }),
+        'utf8'
+      )
+      // Same bytes, different project — accepting one repository says nothing
+      // about another.
+      expect(resolveAgentProfile(other, created.id)?.autonomousMode).toBeUndefined()
+    } finally {
+      rmSync(other, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses to accept when there is no file', () => {
+    const created = createAgentProfile(baseCreate())
+    expect(() => acceptWorkspaceProfileOverride(workspace, created.id)).toThrow(
+      /no override file to accept/i
+    )
+  })
+
+  it('drops a deleted teammate acceptances rather than growing the ledger', () => {
+    const created = createAgentProfile(baseCreate())
+    writeOverride(created.id, { autonomousMode: 'on' })
+    acceptWorkspaceProfileOverride(workspace, created.id)
+    expect(readFileSync(join(tmpRoot, 'agents.json'), 'utf8')).toContain('acceptedOverrides')
+
+    deleteAgentProfile({ id: created.id })
+
+    const onDisk = JSON.parse(readFileSync(join(tmpRoot, 'agents.json'), 'utf8')) as {
+      acceptedOverrides: Record<string, string>
+    }
+    expect(Object.keys(onDisk.acceptedOverrides)).toEqual([])
+  })
+
+  it('reads a roster written before this existed as nothing accepted', () => {
+    // No version bump: a v2 file without the key already means the right
+    // thing, and bumping would trip the "future version is rejected" guard.
+    const created = createAgentProfile(baseCreate())
+    const raw = JSON.parse(readFileSync(join(tmpRoot, 'agents.json'), 'utf8')) as Record<
+      string,
+      unknown
+    >
+    delete raw.acceptedOverrides
+    writeFileSync(join(tmpRoot, 'agents.json'), JSON.stringify(raw), 'utf8')
+    clearAgentProfilesCacheForTests()
+    writeOverride(created.id, { autonomousMode: 'on' })
+
+    expect(raw.version).toBe(2)
+    expect(resolveAgentProfile(workspace, created.id)?.autonomousMode).toBeUndefined()
   })
 })

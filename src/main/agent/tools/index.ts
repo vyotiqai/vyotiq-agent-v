@@ -29,6 +29,7 @@ import { toolStrReplaceAsync } from './strReplace'
 import { toolDeleteAsync } from './deletePath'
 import {
   assertInlineInstancePathScope,
+  assertMemoryNamespaceAccess,
   assertInlineInstancePushDenied,
   assertInlineInstanceTerminalAllowed,
   assertInlineInstanceUnscopedToolAllowed
@@ -67,6 +68,13 @@ import { mcpHandlers } from './mcpTools'
 import { terminalHandlers } from './terminalHandlers'
 import { gitGithubHandlers } from './gitGithubTools'
 import { instanceHandlers } from './instanceTools'
+import { teammateHandlers } from './teammateTools'
+import { handler as buildToolHandler } from './buildTool'
+import { resolveAgentToolsDir } from '../agentTools/paths'
+import { loadAgentToolsSnapshot } from '../agentTools/loader'
+import { BUILTIN_TOOL_NAMES as BUILTIN_TOOL_NAMES_FOR_SCAN } from '../schemas/tools'
+import { runAgentTool } from '../agentTools/runner'
+import type { AgentToolDef } from '../agentTools/types'
 import type { ToolApprovalGate } from '../toolApproval'
 import {
   MCP_NOT_IN_CATALOG_FAIL_FAST_THRESHOLD,
@@ -750,7 +758,17 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     if (!result.ok) return toolFail('lsp', result.summary, result.content)
     return toolOk('lsp', result.summary, result.content)
   },
-  ...instanceHandlers
+  ...instanceHandlers,
+  ...teammateHandlers,
+  build_tool: async (_workspace, args, signal) => {
+    throwIfAborted(signal)
+    const written = await buildToolHandler(args)
+    return toolOk(
+      'build_tool',
+      `built ${String(args.name ?? '')}`,
+      `Wrote ${written.written}.\n\nIt joins the tool catalog on your next step. Calling it asks the user — every time the file changes, because the approval is granted against the code, not the name.`
+    )
+  }
 }
 
 export { BUILTIN_TOOL_NAMES, canonicalizeAgentToolName } from '../schemas/tools'
@@ -853,6 +871,35 @@ function parseToolArgs(name: string, argsJson: string | undefined): Record<strin
   return {}
 }
 
+/**
+ * One agent-built tool by name, or null.
+ *
+ * The snapshot is mtime-cached, so this is a cheap directory sweep rather than
+ * a rescan, and a tool written earlier in this run is found on the next step
+ * without a restart.
+ */
+const BUILTIN_NAME_SET: ReadonlySet<string> = new Set<string>(BUILTIN_TOOL_NAMES_FOR_SCAN)
+
+/**
+ * One agent-built tool by name, or null.
+ *
+ * Builtins and MCP names short-circuit before any I/O, so the directory sweep
+ * only runs for a name nothing else claims — which is exactly the agent-built
+ * case. The snapshot is mtime-cached, so a tool written earlier in this run is
+ * found on the next step without a restart.
+ */
+async function findAgentBuiltTool(name: string): Promise<AgentToolDef | null> {
+  if (BUILTIN_NAME_SET.has(name)) return null
+  if (name.startsWith('mcp__')) return null
+  try {
+    const defs = await loadAgentToolsSnapshot(await resolveAgentToolsDir())
+    return defs.find((def) => def.name === name) ?? null
+  } catch (err) {
+    logger.warn('Agent tool scan failed', { scope: 'tools', tool: name, err })
+    return null
+  }
+}
+
 export async function executeTool(
   rawName: string,
   argsJson: string | undefined,
@@ -873,6 +920,46 @@ export async function executeTool(
   }
 
   const agentMode: AgentInteractionMode = resolveAgentMode(context)
+
+  // Agent-built tools (`build_tool`). Resolved before the builtin lookup
+  // because the name is not in the registry and never can be — build_tool
+  // refuses a name that shadows one. The module's own JSON Schema is its
+  // contract, so args go through as parsed rather than through
+  // validateParsedToolArgs, which only knows builtin schemas.
+  const agentBuilt = await findAgentBuiltTool(name)
+  if (agentBuilt) {
+    const parsed = parseToolArgs(name, argsJson)
+    const modeGate = assertToolAllowedInMode(agentMode, name, parsed, {
+      autoModeSwitch: context.autoModeSwitch,
+      inlineInstance: context.inlineInstance === true
+    })
+    if (!modeGate.ok) return toolFail(name, name, modeGate.error)
+    try {
+      // Same guard MCP gets: an agent-built module is arbitrary Node with no
+      // path scope, so a scope-shared instance running one would write straight
+      // past the boundary its worktree exists to enforce.
+      assertInlineInstanceUnscopedToolAllowed(context.runDir, 'Agent-built tool', {
+        inlineInstance: context.inlineInstance
+      })
+    } catch (err) {
+      return toolFail(name, name, formatError(err))
+    }
+    const summary = `${name} (agent-built)`
+    try {
+      const outcome = await runAgentTool(agentBuilt, parsed)
+      if (!outcome.ok) {
+        return toolFail(name, summary, outcome.error ?? `${name} failed with no error message`)
+      }
+      const rendered =
+        typeof outcome.result === 'string'
+          ? outcome.result
+          : JSON.stringify(outcome.result ?? null, null, 2)
+      return toolOk(name, summary, rendered)
+    } catch (err) {
+      // A timeout or a child that died without answering arrives here.
+      return toolFail(name, summary, formatError(err))
+    }
+  }
 
   const mcp = parseMcpToolName(name)
   if (mcp) {
@@ -1059,6 +1146,26 @@ export async function executeTool(
     effectiveArgs = { ...args, path: remapPathArg(pathArg) }
     if (name === 'edit' || name === 'str_replace') {
       effectiveContext = { ...context, skipWriteCheckpoint: true }
+    }
+  }
+
+  // Teammates do not read each other's memory. `read` is included where the
+  // path_scope block below cannot reach it: `.vyotiq` is skipped by the
+  // walkers, so glob/grep/search/list_dir never surface these files, but a
+  // direct path read had nothing stopping it.
+  if (
+    effectiveWorkspace === workspace &&
+    (name === 'read' ||
+      name === 'edit' ||
+      name === 'str_replace' ||
+      name === 'delete' ||
+      name === 'edit_notebook')
+  ) {
+    const p = readPathArg(effectiveArgs)
+    try {
+      assertMemoryNamespaceAccess(effectiveContext.memoryNamespace, p ? [p] : [])
+    } catch (err) {
+      return toolFail(name, summary, formatToolResultError(err))
     }
   }
 

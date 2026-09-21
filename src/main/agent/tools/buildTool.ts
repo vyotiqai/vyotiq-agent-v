@@ -7,6 +7,7 @@
 import { mkdir, stat, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { ensureAgentToolsDir, pathSafeName } from '../agentTools/paths'
+import { BUILTIN_TOOL_NAMES, canonicalizeAgentToolName } from '../schemas/tools'
 
 export type BuildToolInput = {
   name: string
@@ -59,6 +60,20 @@ export async function handler(input: unknown): Promise<BuildToolResult> {
   if (!safe) {
     throw new Error(
       `Invalid tool name ${JSON.stringify(name ?? '')}: use lowercase [a-z0-9_-], max 32 chars`
+    )
+  }
+  // A built tool reaches the model through the same catalog as the builtins and
+  // is dispatched by name, so `read` or `terminal` here would shadow the real
+  // thing with arbitrary code. `mcp__` is refused for the same reason: it is the
+  // prefix the gate keys MCP protection on, and impersonating it is not
+  // something an agent-authored file gets to do.
+  if (safe.startsWith('mcp__')) {
+    throw new Error(`Tool name "${safe}" is reserved: mcp__ names belong to MCP servers`)
+  }
+  const shadowed = canonicalizeAgentToolName(safe)
+  if ((BUILTIN_TOOL_NAMES as readonly string[]).includes(shadowed)) {
+    throw new Error(
+      `Tool name "${safe}" is reserved: it is${shadowed === safe ? '' : ` an alias of`} the built-in "${shadowed}". Pick a name of your own.`
     )
   }
   if (typeof description !== 'string' || !description.trim()) {

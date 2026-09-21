@@ -84,6 +84,41 @@ describe('build_tool handler', () => {
     await expect(handler(null)).rejects.toThrow(/requires an input object/)
   })
 
+  it('refuses a name that would shadow a built-in, or impersonate an MCP server', async () => {
+    // An agent-built tool is dispatched by name through the same catalog as the
+    // builtins, so `read` here would put arbitrary Node behind the tool the
+    // model reaches for a thousand times a day.
+    const { handler } = await import('@main/agent/tools/buildTool')
+    await expect(handler(validInput({ name: 'read' }))).rejects.toThrow(/reserved/)
+    await expect(handler(validInput({ name: 'terminal' }))).rejects.toThrow(/reserved/)
+    // Aliases too: canonicalizeAgentToolName maps `write` onto `edit`.
+    await expect(handler(validInput({ name: 'write' }))).rejects.toThrow(/alias of.*edit/s)
+    await expect(handler(validInput({ name: 'mcp__x__y' }))).rejects.toThrow(
+      /reserved: mcp__ names/
+    )
+  })
+
+  it('hashes the module so an approval can be bound to its contents', async () => {
+    const { handler } = await import('@main/agent/tools/buildTool')
+    const { agentBuiltToolAllowKey } = await import('@main/agent/agentTools/loader')
+    const dir = join(tempRoot, 'agent-tools')
+
+    await handler(validInput())
+    const first = await agentBuiltToolAllowKey(dir, 'my-tool')
+    expect(first).toMatch(/^my-tool@[0-9a-f]{16}$/)
+
+    // Rewriting the module must change the key — that is what withdraws a
+    // standing "always allow" from code the user never read.
+    await handler(
+      validInput({
+        overwrite: true,
+        code: 'export async function handler() {\n  return { sum: 0 }\n}\n'
+      })
+    )
+    expect(await agentBuiltToolAllowKey(dir, 'my-tool')).not.toBe(first)
+    expect(await agentBuiltToolAllowKey(dir, 'never-written')).toBeNull()
+  })
+
   it('refuses a description that would break the header comment', async () => {
     const { handler } = await import('@main/agent/tools/buildTool')
     await expect(handler(validInput({ description: 'ends with */' }))).rejects.toThrow(

@@ -259,6 +259,22 @@ describe('TeammatesSection live work', () => {
     expect(screen.getByText('local job')).toBeTruthy()
     expect(screen.queryByText('other job')).toBeNull()
   })
+
+  it('matches the active workspace by path equality, not string equality', () => {
+    // A task stores the first spelling main happened to see (`cacheKeyFor`),
+    // which need not match the renderer's active path character for character
+    // — drive casing and separators differ freely on Windows. Comparing with
+    // `===` hid a teammate's live work from the surface whose job is showing
+    // it; every other surface uses `workspacePathsEqual`.
+    queue = [
+      task({ id: 'here', prompt: 'local job', workspacePath: 'C:\\ws-a' }),
+      task({ id: 'elsewhere', prompt: 'other job', workspacePath: 'C:\\ws-b' })
+    ]
+    setup({ activeWorkspacePath: 'c:/ws-a' })
+
+    expect(screen.getByText('local job')).toBeTruthy()
+    expect(screen.queryByText('other job')).toBeNull()
+  })
 })
 
 describe('TeammatesSection assign dialog', () => {

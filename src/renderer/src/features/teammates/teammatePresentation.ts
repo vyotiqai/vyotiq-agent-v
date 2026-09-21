@@ -1,7 +1,7 @@
 import type { IconName } from '@renderer/lib/icons'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
-import type { AgentProfile } from '@shared/ipc'
+import { TEAMMATE_AVATAR_KEYS, type AgentProfile } from '@shared/ipc'
 
 /**
  * Shared vocabulary for the teammates surfaces: which avatars can be picked,
@@ -11,33 +11,12 @@ import type { AgentProfile } from '@shared/ipc'
 /**
  * Avatar keys offered in the picker.
  *
- * `AgentProfile.avatar` stores a plain string, so any icon key is legal and a
- * roster from another build may name one that is not here — `Avatar` falls
- * back to the initial rather than failing. This list is only what the picker
- * offers.
+ * The list itself lives in shared so the agent's `teammate_create` schema can
+ * name the same keys instead of guessing from three examples. Typing it as
+ * `IconName[]` here is what keeps that list honest: a key that is not a real
+ * icon fails to compile.
  */
-export const TEAMMATE_AVATARS: readonly IconName[] = [
-  'bot',
-  'sparkles',
-  'cpu',
-  'terminal',
-  'branch',
-  'flag',
-  'memory',
-  'stack',
-  'scanSearch',
-  'listTodo',
-  'chat',
-  'doc',
-  'globe',
-  'star',
-  'plug',
-  'monitor',
-  'search',
-  'image',
-  'mic',
-  'gear'
-]
+export const TEAMMATE_AVATARS: readonly IconName[] = TEAMMATE_AVATAR_KEYS
 
 /** Human label for a workspace path, for scope badges and pickers. */
 export function workspaceLabel(path: string | null): string {

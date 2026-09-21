@@ -7,6 +7,7 @@ import {
   AgentQuestionRejectSchema,
   AgentBrowserStateSchema,
   CodeIndexRuntimeStatusSchema,
+  WorkspaceAgentContextChangedSchema,
   UpdaterStatePayloadSchema,
   DictationRuntimeStatusSchema,
   GithubAuthStatusSchema,
@@ -241,6 +242,7 @@ const api: VyotiqApi = {
   setLoop: (payload) => ipcRenderer.invoke(IPC.runsSetLoop, payload),
   listActiveRuns: () => ipcRenderer.invoke(IPC.runsActive),
   gitStatus: (workspacePath) => ipcRenderer.invoke(IPC.gitStatus, { workspacePath }),
+  gitInit: (payload) => ipcRenderer.invoke(IPC.gitInit, payload),
   gitGenerateCommitMessage: (payload) =>
     ipcRenderer.invoke(IPC.gitGenerateCommitMessage, payload),
   gitCommit: (workspacePath, message, push, mode) =>
@@ -480,6 +482,17 @@ const api: VyotiqApi = {
   },
   probeNetwork: () => ipcRenderer.invoke(IPC.networkProbe),
   agentContext: (payload) => ipcRenderer.invoke(IPC.agentContext, payload),
+  onAgentContextChanged: (handler) => {
+    const listener = (_: IpcRendererEvent, raw: unknown): void => {
+      const parsed = WorkspaceAgentContextChangedSchema.safeParse(raw)
+      if (!parsed.success) return
+      handler(parsed.data)
+    }
+    ipcRenderer.on(IPC.agentContextChanged, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.agentContextChanged, listener)
+    }
+  },
   codeIndexStatus: () => ipcRenderer.invoke(IPC.codeIndexStatus),
   codeIndexReindex: (payload) => ipcRenderer.invoke(IPC.codeIndexReindex, payload ?? {}),
   processMetrics: () => ipcRenderer.invoke(IPC.processMetrics),
@@ -547,6 +560,8 @@ const api: VyotiqApi = {
     ipcRenderer.invoke(IPC.agentProfileOverridesList, payload),
   agentProfileOverrideSet: (payload) =>
     ipcRenderer.invoke(IPC.agentProfileOverrideSet, payload),
+  agentProfileOverrideAccept: (payload) =>
+    ipcRenderer.invoke(IPC.agentProfileOverrideAccept, payload),
   onAgentProfileOverridesChanged: (handler) => {
     const listener = (_: IpcRendererEvent, raw: unknown): void => {
       const parsed = AgentProfileOverridesChangedEventSchema.safeParse(raw)
@@ -558,6 +573,9 @@ const api: VyotiqApi = {
       ipcRenderer.removeListener(IPC.agentProfileOverridesChanged, listener)
     }
   },
+  agentMemoryList: (payload) => ipcRenderer.invoke(IPC.agentMemoryList, payload),
+  agentMemoryRead: (payload) => ipcRenderer.invoke(IPC.agentMemoryRead, payload),
+  agentMemoryWrite: (payload) => ipcRenderer.invoke(IPC.agentMemoryWrite, payload),
   tasksList: () => ipcRenderer.invoke(IPC.tasksList),
   tasksEnqueue: (payload) => ipcRenderer.invoke(IPC.tasksEnqueue, payload),
   tasksCancel: (payload) => ipcRenderer.invoke(IPC.tasksCancel, payload),

@@ -1,10 +1,12 @@
 import { app } from 'electron'
+import { createHash } from 'crypto'
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from 'fs'
 import { join } from 'path'
 import {
   AgentProfileIdSchema,
   AgentProfileOverrideSchema,
   AgentProfileSchema,
+  PRIVILEGED_OVERRIDE_FIELDS,
   IPC,
   type AgentProfile,
   type AgentProfileCreateRequest,
@@ -14,6 +16,7 @@ import {
 } from '../../shared/ipc'
 import { logger } from '../../shared/logger'
 import { workspacePathsEqual } from '../../shared/workspacePath'
+import { canonicalizeWorkspacePath, isWindowsStylePath } from '../../shared/utils/workspacePath'
 import { assertSafeMemoryNamespace } from '../agent/context/memory'
 import { assertResolvedInsideWorkspace } from '../workspace/safePath'
 import { atomicWriteJson } from '../storage/atomicWrite'
@@ -42,6 +45,16 @@ type AgentProfilesFile = {
    * memory are never erased on delete), so the id is retired instead.
    */
   retiredIds: string[]
+  /**
+   * Override files the user has accepted, `<workspace>\0<profileId>` → SHA-256
+   * of the file's bytes.
+   *
+   * Hashing the bytes is what makes acceptance mean "this file, as I read it":
+   * editing it — or pulling a change to it — withdraws consent automatically.
+   * Absent from a file written by an older build, which reads as "nothing
+   * accepted yet" and is already the correct fail-safe default.
+   */
+  acceptedOverrides: Record<string, string>
 }
 
 let profilesCache: AgentProfilesFile | null = null
@@ -51,7 +64,7 @@ function profilesPath(): string {
 }
 
 function emptyFile(): AgentProfilesFile {
-  return { version: PROFILES_VERSION, profiles: [], retiredIds: [] }
+  return { version: PROFILES_VERSION, profiles: [], retiredIds: [], acceptedOverrides: {} }
 }
 
 function parseProfileArray(raw: unknown, version: number): AgentProfile[] {
@@ -75,15 +88,40 @@ function parseProfileArray(raw: unknown, version: number): AgentProfile[] {
 
 /** v1 had no retired-id ledger: every id a v1 install freed was already reused. */
 function parseVersion1ProfilesFile(raw: unknown): AgentProfilesFile {
-  return { version: PROFILES_VERSION, profiles: parseProfileArray(raw, 1), retiredIds: [] }
+  return {
+    version: PROFILES_VERSION,
+    profiles: parseProfileArray(raw, 1),
+    retiredIds: [],
+    acceptedOverrides: {}
+  }
 }
 
+/**
+ * `acceptedOverrides` is read leniently rather than behind a version bump.
+ *
+ * A v2 file without the key reads as `{}`, which is already the correct
+ * fail-safe default — there is no migration semantics to express. The v1→v2
+ * bump existed because a v1 install had *already* reused freed ids, so the
+ * reader had to know that; nothing equivalent is true here.
+ */
 function parseVersion2ProfilesFile(raw: unknown): AgentProfilesFile {
   const retired = (raw as { retiredIds?: unknown } | null)?.retiredIds
   const retiredIds = Array.isArray(retired)
     ? [...new Set(retired.filter((id): id is string => typeof id === 'string' && id.length > 0))]
     : []
-  return { version: PROFILES_VERSION, profiles: parseProfileArray(raw, 2), retiredIds }
+  const accepted = (raw as { acceptedOverrides?: unknown } | null)?.acceptedOverrides
+  const acceptedOverrides: Record<string, string> = {}
+  if (accepted && typeof accepted === 'object' && !Array.isArray(accepted)) {
+    for (const [key, value] of Object.entries(accepted as Record<string, unknown>)) {
+      if (typeof value === 'string' && value.length > 0) acceptedOverrides[key] = value
+    }
+  }
+  return {
+    version: PROFILES_VERSION,
+    profiles: parseProfileArray(raw, 2),
+    retiredIds,
+    acceptedOverrides
+  }
 }
 
 function parseProfilesFile(raw: unknown): AgentProfilesFile {
@@ -204,10 +242,18 @@ export function deleteAgentProfile(request: AgentProfileDeleteRequest): true {
   if (profiles.length === file.profiles.length) {
     throw new Error(`Unknown agent profile: ${request.id}`)
   }
+  // Drop this teammate's override acceptances. Its override files are removed
+  // with it and its id is retired, so the entries can never grant anything
+  // again — keeping them would only grow the ledger forever.
+  const suffix = `\u0000${request.id}`
+  const acceptedOverrides = Object.fromEntries(
+    Object.entries(file.acceptedOverrides).filter(([key]) => !key.endsWith(suffix))
+  )
   writeProfiles({
     version: PROFILES_VERSION,
     profiles,
-    retiredIds: [...new Set([...file.retiredIds, request.id])]
+    retiredIds: [...new Set([...file.retiredIds, request.id])],
+    acceptedOverrides
   })
   return true
 }
@@ -295,15 +341,25 @@ function workspaceProfileDir(workspacePath: string, profileId: string): string {
  * `.vyotiq/agents/<profileId>.profile.json`. Only identity/behavior fields may
  * be overridden — id, timestamps, scope, and workspacePath stay global-owned.
  */
-export function readWorkspaceProfileOverride(
-  workspacePath: string | null | undefined,
-  profileId: string
-): AgentProfileOverride | null {
-  if (!workspacePath) return null
+/**
+ * One read of the override file, yielding both its parsed contents and the
+ * digest consent is recorded against — two reads would let the bytes change
+ * between parsing them and hashing them.
+ */
+type OverrideFile = { digest: string; override: AgentProfileOverride | null }
+
+function readOverrideFile(workspacePath: string, profileId: string): OverrideFile | null {
   const path = workspaceOverridePath(workspacePath, profileId)
-  if (!existsSync(path)) return null
+  let bytes: Buffer
   try {
-    const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+    bytes = readFileSync(path)
+  } catch {
+    // No file is the ordinary case, not a fault.
+    return null
+  }
+  const digest = createHash('sha256').update(bytes).digest('hex')
+  try {
+    const raw = JSON.parse(bytes.toString('utf8')) as Record<string, unknown>
     // Identity/ownership fields are global-owned: a workspace file can never
     // rename a teammate, change its id/timestamps, or move its scope.
     delete raw.id
@@ -313,15 +369,72 @@ export function readWorkspaceProfileOverride(
     delete raw.scope
     delete raw.workspacePath
     const patch = AgentProfileOverrideSchema.parse(raw)
-    return Object.keys(patch).length > 0 ? patch : null
+    return { digest, override: Object.keys(patch).length > 0 ? patch : null }
   } catch (err) {
     logger.warn('Ignoring invalid workspace profile override', {
       scope: 'agentProfiles',
       path,
       err
     })
-    return null
+    return { digest, override: null }
   }
+}
+
+/**
+ * Consent key. Mirrors `workspacePathsEqual`, so a workspace reopened under a
+ * different spelling — drive casing, separators — is still the same consent
+ * rather than silently re-prompting.
+ */
+function overrideAcceptKey(workspacePath: string, profileId: string): string {
+  const canonical = canonicalizeWorkspacePath(workspacePath)
+  const ws = isWindowsStylePath(canonical) ? canonical.toLowerCase() : canonical
+  return `${ws}\u0000${profileId}`
+}
+
+function isOverrideAccepted(workspacePath: string, profileId: string, digest: string): boolean {
+  return loadProfiles().acceptedOverrides[overrideAcceptKey(workspacePath, profileId)] === digest
+}
+
+/**
+ * Privileged fields this workspace's override asks for but has not been
+ * granted — exactly what `resolveAgentProfile` is dropping.
+ */
+export function unacceptedOverrideFields(workspacePath: string, profileId: string): string[] {
+  const read = readOverrideFile(workspacePath, profileId)
+  if (!read?.override) return []
+  const wanted = PRIVILEGED_OVERRIDE_FIELDS.filter((f) => read.override?.[f] !== undefined)
+  if (wanted.length === 0) return []
+  return isOverrideAccepted(workspacePath, profileId, read.digest) ? [] : [...wanted]
+}
+
+/**
+ * Record consent for this workspace's override file as it stands right now.
+ *
+ * Main-only, like `setMarketplaceRemoteInstallAcked`: nothing reachable from a
+ * generic setter may grant a project the right to run a teammate
+ * autonomously. The digest is taken here rather than accepted from the caller,
+ * so a renderer cannot approve bytes it invented.
+ */
+export function acceptWorkspaceProfileOverride(workspacePath: string, profileId: string): void {
+  assertSafeMemoryNamespace(profileId)
+  const read = readOverrideFile(workspacePath, profileId)
+  if (!read) throw new Error('There is no override file to accept')
+  const file = loadProfiles()
+  writeProfiles({
+    ...file,
+    acceptedOverrides: {
+      ...file.acceptedOverrides,
+      [overrideAcceptKey(workspacePath, profileId)]: read.digest
+    }
+  })
+}
+
+export function readWorkspaceProfileOverride(
+  workspacePath: string | null | undefined,
+  profileId: string
+): AgentProfileOverride | null {
+  if (!workspacePath) return null
+  return readOverrideFile(workspacePath, profileId)?.override ?? null
 }
 
 /**
@@ -350,6 +463,21 @@ export function listWorkspaceProfileOverrides(
     if (!AgentProfileIdSchema.safeParse(profileId).success) continue
     const override = readWorkspaceProfileOverride(workspacePath, profileId)
     if (override) out[profileId] = override
+  }
+  return out
+}
+
+/**
+ * Privileged fields each override in this workspace is asking for but has not
+ * been granted, keyed by profile id. Ids with nothing withheld are omitted.
+ */
+export function listUnacceptedOverrideFields(
+  workspacePath: string
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const profileId of Object.keys(listWorkspaceProfileOverrides(workspacePath))) {
+    const fields = unacceptedOverrideFields(workspacePath, profileId)
+    if (fields.length > 0) out[profileId] = fields
   }
   return out
 }
@@ -401,11 +529,35 @@ export function resolveAgentProfile(
   ) {
     return null
   }
-  const override = readWorkspaceProfileOverride(workspacePath, profileId)
-  if (!override) return base
+  const read = workspacePath ? readOverrideFile(workspacePath, profileId) : null
+  const override = read?.override
+  if (!read || !override) return base
+  const applied: AgentProfileOverride = { ...override }
+  // Accept-on-first-sight: until the user has granted THIS file, the fields
+  // that decide when and how autonomously code runs are dropped. A cloned
+  // repository can still retune persona, tone and the model pin — that is what
+  // overrides are for — but it cannot lower the approval bar on its own.
+  //
+  // Dropping rather than refusing the run, and checking here rather than
+  // prompting, because every caller of this function is a synchronous run or
+  // queue path — `taskScheduler.startTask` runs inside `launchRunSync`'s
+  // no-await claim window. There is nowhere here to await a dialog.
+  if (workspacePath && !isOverrideAccepted(workspacePath, profileId, read.digest)) {
+    const withheld = PRIVILEGED_OVERRIDE_FIELDS.filter((f) => applied[f] !== undefined)
+    if (withheld.length > 0) {
+      for (const field of withheld) delete applied[field]
+      logger.warn('Withholding unaccepted privileged override fields', {
+        scope: 'agentProfiles',
+        workspacePath,
+        profileId,
+        fields: withheld
+      })
+    }
+  }
+  if (Object.keys(applied).length === 0) return base
   return AgentProfileSchema.parse({
     ...base,
-    ...override,
+    ...applied,
     id: base.id,
     createdAt: base.createdAt,
     updatedAt: base.updatedAt
@@ -445,7 +597,8 @@ export function emitAgentProfileOverridesChanged(workspacePath: string): void {
     if (!main || main.isDestroyed()) return
     main.webContents.send(IPC.agentProfileOverridesChanged, {
       workspacePath,
-      overrides: listWorkspaceProfileOverrides(workspacePath)
+      overrides: listWorkspaceProfileOverrides(workspacePath),
+      unaccepted: listUnacceptedOverrideFields(workspacePath)
     })
   } catch (err) {
     logger.warn('Failed to emit agent profile overrides change', { scope: 'agentProfiles', err })

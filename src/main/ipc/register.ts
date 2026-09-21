@@ -12,6 +12,11 @@ import {
   AgentProfileDeleteRequestSchema,
   AgentProfileOverridesListRequestSchema,
   AgentProfileOverrideSetRequestSchema,
+  AgentProfileOverrideAcceptRequestSchema,
+  AgentMemoryListRequestSchema,
+  AgentMemoryReadRequestSchema,
+  AgentMemoryWriteRequestSchema,
+  type AgentMemoryListResult,
   type AgentProfileDeleteResult,
   TaskEnqueueRequestSchema,
   TaskCancelRequestSchema,
@@ -65,6 +70,7 @@ import {
   WorkspacesUpdateUiStateRequestSchema,
   WorkspacesSetSettingsOverrideRequestSchema,
   GitStatusRequestSchema,
+  GitInitRequestSchema,
   GitGenerateCommitMessageRequestSchema,
   GitCommitRequestSchema,
   GitStageAllRequestSchema,
@@ -225,6 +231,7 @@ import {
   type ActiveRunsResult,
   type GitStatusResult,
   type GitCommitResult,
+  type GitInitResult,
   type AgentBrowserState,
   BrowserNavigateRequestSchema,
   BrowserWorkspaceScopeSchema,
@@ -347,9 +354,21 @@ import {
   mutateAgentProfiles,
   removeProfileArtifactsForWorkspaces,
   listWorkspaceProfileOverrides,
+  listUnacceptedOverrideFields,
+  acceptWorkspaceProfileOverride,
   writeWorkspaceProfileOverride,
   emitAgentProfileOverridesChanged
 } from '../settings/agentProfiles'
+import {
+  clearMemoryNamespace,
+  ensureMemoryLayout,
+  listMemoryNotes,
+  memoryNamespaceExists,
+  readMemoryFile,
+  writeMemoryFile
+} from '../agent/context/memory'
+import { normalizeMemoryRelPath } from '../agent/tools/memory'
+import { deleteTeammateCascade } from '../agent/teammateAdmin'
 import { listTasks, enqueueTask, cancelTask, retryTask, resumeTasksForWorkspaces, cancelTasksForProfile } from '../agent/taskScheduler'
   import { focusAgentBrowser, closeAgentBrowser, getAgentBrowserState, selectBrowserTab, browserGoBack, browserGoForward, setAgentBrowserBounds, navigateUrl, clearAgentBrowserData, takeBrowserScreenshot, disposeAgentBrowserForWorkspace, takeBrowserControl, releaseBrowserControl, manageTabs, toggleAgentBrowserPip } from '@main/app/agentBrowser'
 import { extractAttachment } from '../attachments/extract'
@@ -386,6 +405,10 @@ import {
 import { pruneStaleInstanceWorktreesBestEffort } from '../git/instanceWorktree'
 import { listWorkspaceRulesForMention, clearRulesCache, isRuleRelatedRelPath } from '../agent/context/rules'
 import { buildWorkspaceAgentContext } from '../agent/context/agentContext'
+import {
+  armAgentContextWatch,
+  stopAgentContextWatch
+} from '../agent/context/agentContextWatcher'
 import { toolDiagnosticsAsync } from '../agent/tools/diagnostics'
 import { disposeTerminalSessionsForWorkspace as disposeAgentTerminalSessionsForWorkspace } from '../agent/tools/terminalSessions'
 import {
@@ -453,6 +476,7 @@ import { relative, isAbsolute, join, resolve } from 'path'
 import {
   checkoutBranch,
   commitAll,
+  initGitRepo,
   listLocalBranches,
   readGitCommitFiles,
   readGitBlame,
@@ -916,6 +940,7 @@ export function registerIpc(): void {
         // Same mutation queue as UI state / setActive — flushPersistUiState sync
         // IPC otherwise races remove and can rewrite openPaths from a stale read.
         disposeWorkspaceIndexes(path)
+        stopAgentContextWatch(path)
         const next = await enqueueWorkspaceMutation(() => removeWorkspace(path))
         // Storage retention (audit H5): renderer-confirmed storage-dir delete
         // on workspace removal. Skip silently when the dir is gone already.
@@ -1272,53 +1297,10 @@ export function registerIpc(): void {
         if (!getAgentProfile(req.id)) {
           return failExpected(`Unknown agent profile: ${req.id}`, IPC.agentProfilesDelete)
         }
-        // Cover every path this install knows (open, recent, persisted UI
-        // state), not just open ones — a closed workspace would otherwise keep
-        // running the dead identity's tasks and revive its override.
-        const knownPaths = new Set<string>([
-          ...getWorkspaces().openPaths,
-          ...getWorkspaces().recentPaths
-        ])
-        for (const path of Object.keys(getWorkspaces().uiStateByPath ?? {})) knownPaths.add(path)
-        const paths = [...knownPaths]
-        const warnings: string[] = []
-
-        // Preflight: end the teammate's work BEFORE the roster entry goes away.
-        // Committing first leaves a window where tasks and runs reference a
-        // profile that no longer resolves, and they then fail as "profile no
-        // longer exists" instead of being cancelled with the teammate.
-        let cancelledTasks = 0
-        try {
-          cancelledTasks = cancelTasksForProfile(req.id, paths)
-        } catch (err) {
-          warnings.push(
-            `Some delegated tasks could not be cancelled: ${err instanceof Error ? err.message : String(err)}`
-          )
-        }
-        let cancelledRuns = 0
-        for (const run of listActiveRuns()) {
-          if (run.agentProfileId !== req.id) continue
-          try {
-            if (cancelRun(run.runId)) cancelledRuns += 1
-          } catch (err) {
-            warnings.push(
-              `Run ${run.runId} could not be stopped: ${err instanceof Error ? err.message : String(err)}`
-            )
-          }
-        }
-
-        await mutateAgentProfiles(() => deleteAgentProfile(req))
-
-        // Behavior overrides must not survive to re-skin a future teammate.
-        // Run history and the private memory namespace are preserved — the id
-        // is retired instead of reused, so nothing can inherit them.
-        const artifacts = removeProfileArtifactsForWorkspaces(req.id, paths)
-        for (const failure of artifacts.failures) {
-          warnings.push(`Could not remove ${failure.path}: ${failure.error}`)
-        }
-        emitAgentProfilesChanged()
-        for (const path of getWorkspaces().openPaths) emitAgentProfileOverridesChanged(path)
-        return ok({ deleted: true as const, cancelledTasks, cancelledRuns, warnings })
+        // Shared with the agent's `teammate_delete` tool: the cancel-then-remove
+        // ordering is what keeps live work from failing as "profile no longer
+        // exists", and two copies of it would drift.
+        return ok(await deleteTeammateCascade(req.id))
       } catch (err) {
         return failFrom(err, IPC.agentProfilesDelete)
       }
@@ -1336,7 +1318,11 @@ export function registerIpc(): void {
         }
         return ok({
           workspacePath: req.workspacePath,
-          overrides: listWorkspaceProfileOverrides(req.workspacePath)
+          // The listing is deliberately unfiltered: the UI has to show what
+          // the user is being asked to accept. `unaccepted` names what the
+          // run path is withholding meanwhile.
+          overrides: listWorkspaceProfileOverrides(req.workspacePath),
+          unaccepted: listUnacceptedOverrideFields(req.workspacePath)
         })
       } catch (err) {
         return failFrom(err, IPC.agentProfileOverridesList)
@@ -1374,6 +1360,127 @@ export function registerIpc(): void {
       }
     }
   )
+
+  ipcMain.handle(
+    IPC.agentProfileOverrideAccept,
+    async (event, raw): Promise<IpcResult<unknown>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = AgentProfileOverrideAcceptRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) {
+          return failExpected('Workspace is not open', IPC.agentProfileOverrideAccept)
+        }
+        if (!getAgentProfile(req.profileId)) {
+          return failExpected(
+            `Unknown agent profile: ${req.profileId}`,
+            IPC.agentProfileOverrideAccept
+          )
+        }
+        // Serialized with roster mutations, like the override write: consent
+        // must not interleave with a delete clearing this profile's entries.
+        await mutateAgentProfiles(() =>
+          acceptWorkspaceProfileOverride(req.workspacePath, req.profileId)
+        )
+        emitAgentProfileOverridesChanged(req.workspacePath)
+        return ok({
+          workspacePath: req.workspacePath,
+          overrides: listWorkspaceProfileOverrides(req.workspacePath),
+          unaccepted: listUnacceptedOverrideFields(req.workspacePath)
+        })
+      } catch (err) {
+        return failFrom(err, IPC.agentProfileOverrideAccept)
+      }
+    }
+  )
+
+  /**
+   * One teammate's memory namespace, as the panel needs it. Returned by both
+   * the list and the write handlers so a write refreshes the panel without a
+   * second round trip.
+   */
+  const memorySnapshot = (workspacePath: string, profileId: string): AgentMemoryListResult => {
+    if (!memoryNamespaceExists(workspacePath, profileId)) {
+      // Never written to. Reporting an empty layout instead of `exists: false`
+      // would have the panel offer to edit files that do not exist.
+      return {
+        workspacePath,
+        profileId,
+        notes: [],
+        indexedNotes: [],
+        hasState: false,
+        exists: false
+      }
+    }
+    const { notes, indexedNotes, hasState } = listMemoryNotes(workspacePath, profileId)
+    return { workspacePath, profileId, notes, indexedNotes, hasState, exists: true }
+  }
+
+  /** Shared gate: an open workspace and a teammate that still exists. */
+  const memoryGate = (
+    channel: string,
+    req: { workspacePath: string; profileId: string }
+  ): IpcResult<never> | null => {
+    if (!isOpenWorkspace(req.workspacePath)) {
+      return failExpected('Workspace is not open', channel)
+    }
+    // `getAgentProfile`, not `resolveAgentProfile`: a workspace-scoped teammate
+    // viewed from elsewhere still owns memory here, and the namespace is keyed
+    // by id regardless of where the profile resolves.
+    if (!getAgentProfile(req.profileId)) {
+      return failExpected(`Unknown agent profile: ${req.profileId}`, channel)
+    }
+    return null
+  }
+
+  ipcMain.handle(IPC.agentMemoryList, async (event, raw): Promise<IpcResult<unknown>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = AgentMemoryListRequestSchema.parse(raw)
+      const refused = memoryGate(IPC.agentMemoryList, req)
+      if (refused) return refused
+      return ok(memorySnapshot(req.workspacePath, req.profileId))
+    } catch (err) {
+      return failFrom(err, IPC.agentMemoryList)
+    }
+  })
+
+  ipcMain.handle(IPC.agentMemoryRead, async (event, raw): Promise<IpcResult<unknown>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = AgentMemoryReadRequestSchema.parse(raw)
+      const refused = memoryGate(IPC.agentMemoryRead, req)
+      if (refused) return refused
+      // The same validator the agent's memory tools use, so the panel can open
+      // exactly the files the teammate can write and no others.
+      const path = normalizeMemoryRelPath(req.path)
+      return ok({ path, contents: readMemoryFile(req.workspacePath, path, req.profileId) })
+    } catch (err) {
+      return failFrom(err, IPC.agentMemoryRead)
+    }
+  })
+
+  ipcMain.handle(IPC.agentMemoryWrite, async (event, raw): Promise<IpcResult<unknown>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = AgentMemoryWriteRequestSchema.parse(raw)
+      const refused = memoryGate(IPC.agentMemoryWrite, req)
+      if (refused) return refused
+      if (req.path === null) {
+        // The only path in the app that deletes a teammate's memory. Deleting
+        // the teammate itself still does not — the id is retired instead.
+        clearMemoryNamespace(req.workspacePath, req.profileId)
+        return ok(memorySnapshot(req.workspacePath, req.profileId))
+      }
+      const path = normalizeMemoryRelPath(req.path)
+      // A teammate that has never run has no layout yet; writing its first note
+      // from the panel must create index.md and notes/ the same way a run does.
+      ensureMemoryLayout(req.workspacePath, req.profileId)
+      writeMemoryFile(req.workspacePath, path, req.contents ?? '', req.profileId)
+      return ok(memorySnapshot(req.workspacePath, req.profileId))
+    } catch (err) {
+      return failFrom(err, IPC.agentMemoryWrite)
+    }
+  })
 
   ipcMain.handle(IPC.tasksList, async (event): Promise<IpcResult<ReturnType<typeof listTasks>>> => {
     if (!senderOk(event)) return fail('Invalid sender')
@@ -2605,6 +2712,21 @@ export function registerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.gitInit, async (event, raw): Promise<IpcResult<GitInitResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GitInitRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      const result = await initGitRepo(req.workspacePath)
+      if (!result.ok) return fail(result.error)
+      invalidateGitStatusCache(req.workspacePath)
+      emitGitStatusChanged(req.workspacePath)
+      return ok({ branch: result.branch })
+    } catch (err) {
+      return failFrom(err, IPC.gitInit)
+    }
+  })
+
   ipcMain.handle(IPC.gitCommit, async (event, raw): Promise<IpcResult<GitCommitResult>> => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
@@ -3342,7 +3464,7 @@ export function registerIpc(): void {
         return fail('Workspace is not open')
       }
       const workspacePath = requestedPath !== undefined ? requestedPath : workspaces.activePath
-      return ok(computeToolCatalog(workspacePath))
+      return ok(await computeToolCatalog(workspacePath))
     } catch (err) {
       return failFrom(err, IPC.toolsCatalogGet)
     }
@@ -4275,12 +4397,14 @@ export function registerIpc(): void {
     try {
       const req = WorkspaceAgentContextRequestSchema.parse(raw ?? {})
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
-      return ok(
-        await buildWorkspaceAgentContext(req.workspacePath, {
-          enabled: getSettings().codeIndex?.enabled !== false,
-          phase: getCodeIndexRuntimeStatus().phase
-        })
-      )
+      const context = await buildWorkspaceAgentContext(req.workspacePath, {
+        enabled: getSettings().codeIndex?.enabled !== false,
+        phase: getCodeIndexRuntimeStatus().phase
+      })
+      // Reading the summary is what says someone is looking at it: keep this
+      // workspace live from here until it is removed.
+      armAgentContextWatch(req.workspacePath, context)
+      return ok(context)
     } catch (err) {
       return failFrom(err, IPC.agentContext)
     }

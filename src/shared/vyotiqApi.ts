@@ -38,6 +38,8 @@ import type {
   GitGenerateCommitMessageResult,
   GitStatusChangedPayload,
   GitStatusResult,
+  GitInitRequest,
+  GitInitResult,
   IpcResult,
   ListModelsResult,
   ListRunsResult,
@@ -71,6 +73,7 @@ import type {
   FeedbackComposeResult,
   WorkspaceAgentContextRequest,
   WorkspaceAgentContextResult,
+  WorkspaceAgentContextChanged,
   WorkspaceGrepRequest,
   WorkspaceGrepResult,
   GitConflictFileResult,
@@ -369,6 +372,11 @@ export interface VyotiqApi {
   listActiveRuns: () => Promise<IpcResult<ActiveRunsResult>>
   /** Discriminated: ok | not_repo | unavailable (git missing from PATH). */
   gitStatus: (workspacePath: string) => Promise<IpcResult<GitStatusResult>>
+  /**
+   * `git init` in an open workspace. Manual only — the UI calls this from an
+   * explicit button, never on open and never for the agent.
+   */
+  gitInit: (payload: GitInitRequest) => Promise<IpcResult<GitInitResult>>
   gitGenerateCommitMessage: (payload: {
     workspacePath: string
     mode?: 'all' | 'staged'
@@ -521,9 +529,23 @@ export interface VyotiqApi {
   agentProfileOverrideSet: (
     payload: import('./ipc').AgentProfileOverrideSetRequest
   ) => Promise<IpcResult<import('./ipc').AgentProfileOverride | null>>
+  /** Grant this workspace's override file its privileged fields, as written. */
+  agentProfileOverrideAccept: (
+    payload: import('./ipc').AgentProfileOverrideAcceptRequest
+  ) => Promise<IpcResult<import('./ipc').AgentProfileOverridesResult>>
   onAgentProfileOverridesChanged: (
     handler: (event: import('./ipc').AgentProfileOverridesChangedEvent) => void
   ) => () => void
+  agentMemoryList: (
+    payload: import('./ipc').AgentMemoryListRequest
+  ) => Promise<IpcResult<import('./ipc').AgentMemoryListResult>>
+  agentMemoryRead: (
+    payload: import('./ipc').AgentMemoryReadRequest
+  ) => Promise<IpcResult<import('./ipc').AgentMemoryReadResult>>
+  /** Resolves to the refreshed namespace, so a write needs no follow-up list. */
+  agentMemoryWrite: (
+    payload: import('./ipc').AgentMemoryWriteRequest
+  ) => Promise<IpcResult<import('./ipc').AgentMemoryListResult>>
   tasksList: () => Promise<IpcResult<import('./ipc').DelegatedTask[]>>
   tasksEnqueue: (
     payload: import('./ipc').TaskEnqueueRequest
@@ -745,6 +767,14 @@ export interface VyotiqApi {
   agentContext: (payload: WorkspaceAgentContextRequest) => Promise<
     IpcResult<WorkspaceAgentContextResult>
   >
+  /**
+   * Live push: a watched workspace's agent-context summary changed on disk
+   * (branch, rules, memory notes) or the code index changed phase. Only fires
+   * on a real difference, and only for workspaces `agentContext` was read for.
+   */
+  onAgentContextChanged: (
+    handler: (payload: WorkspaceAgentContextChanged) => void
+  ) => () => void
   /** Local codebase index embedder / download status. */
   codeIndexStatus: () => Promise<
     IpcResult<CodeIndexRuntimeStatus & { settings: CodeIndexSettings }>

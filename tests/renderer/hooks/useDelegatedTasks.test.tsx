@@ -98,7 +98,6 @@ describe('useDelegatedTasks shared store', () => {
     // main's listTasks sorts by createdAt descending. A bare prepend would put
     // an older record above a newer one until the next push re-sorted it, and
     // the row would visibly jump.
-    // @ts-expect-error test bridge
     window.vyotiq.tasksEnqueue = vi.fn(async () => ({
       ok: true as const,
       data: task('task-old', '2020-01-01T00:00:00.000Z')
@@ -155,7 +154,6 @@ describe('useDelegatedTasks shared store', () => {
     // Main answers `false` when the task was already terminal, and emits no
     // push in that case. Callers discard the boolean, so without this the
     // click does nothing and explains nothing.
-    // @ts-expect-error test bridge
     window.vyotiq.tasksCancel = vi.fn(async () => ({ ok: true as const, data: false }))
     const sidebar = renderHook(() => useDelegatedTasks())
     const inbox = renderHook(() => useDelegatedTasks())
@@ -173,7 +171,6 @@ describe('useDelegatedTasks shared store', () => {
   })
 
   it('passes a failed cancel call through with main own reason', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.tasksCancel = vi.fn(async () => ({
       ok: false as const,
       error: 'Workspace is not open'
@@ -193,7 +190,6 @@ describe('useDelegatedTasks shared store', () => {
   it('returns an assign failure to the caller instead of storing it twice', async () => {
     // enqueue/retry hand the reason back through EnqueueTaskOutcome and the
     // caller reports it, so storing it as well would show one failure twice.
-    // @ts-expect-error test bridge
     window.vyotiq.tasksEnqueue = vi.fn(async () => ({
       ok: false as const,
       error: 'Workspace is not open'
@@ -229,7 +225,6 @@ describe('useDelegatedTasks shared store', () => {
 
   it('reports a failed load instead of spinning forever', async () => {
     resetDelegatedTasksStoreForTests()
-    // @ts-expect-error test bridge
     window.vyotiq.tasksList = vi.fn(async () => ({
       ok: false as const,
       error: 'Task service unavailable'
@@ -251,7 +246,6 @@ describe('useDelegatedTasks shared store', () => {
     expect(listCalls).toBe(0)
     early.unmount()
 
-    // @ts-expect-error test bridge
     window.vyotiq = bridge
     const later = renderHook(() => useDelegatedTasks())
     await waitFor(() => expect(later.result.current.ready).toBe(true))

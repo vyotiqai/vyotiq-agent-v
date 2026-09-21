@@ -114,10 +114,12 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-async function openTasksTab(): Promise<void> {
+// The Roster/Tasks tab pair is gone: the inbox is a row in the rail, above
+// the roster, and it is the only way there.
+async function openInbox(): Promise<void> {
   renderView()
   await waitFor(() => expect(screen.getByRole('heading', { name: 'Scout' })).toBeTruthy())
-  fireEvent.click(screen.getByRole('tab', { name: 'Tasks' }))
+  fireEvent.click(screen.getByRole('button', { name: 'All tasks' }))
 }
 
 describe('task rows', () => {
@@ -223,8 +225,45 @@ describe('task controls', () => {
     expect(screen.queryByLabelText(/^Cancel task:/)).toBeNull()
   })
 
+  it('blocks retry for a task whose workspace is closed, and says why', async () => {
+    // `retryTask` re-enqueues and `enqueueTask` refuses a closed workspace, so
+    // an enabled Retry here is a button that reliably errors. The pane lists
+    // rows from workspaces this session opened and later closed.
+    queue = [
+      task({
+        status: 'failed',
+        workspacePath: '/ws-closed',
+        error: 'boom',
+        finishedAt: '2026-09-18T01:00:00.000Z'
+      })
+    ]
+    renderView()
+
+    await screen.findByText('audit and analyze the codebase end to end')
+    expect(screen.queryByTestId('delegated-task-retry')).toBeNull()
+    // Disabled rather than absent — a control that vanishes reads as missing.
+    const blocked = screen.getByTestId('delegated-task-retry-blocked')
+    expect(blocked.getAttribute('aria-label')).toContain('is closed')
+    expect((blocked as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('still offers retry when the workspace is open under another spelling', async () => {
+    // Stored paths come from `cacheKeyFor`, which need not match the open path
+    // character for character.
+    queue = [
+      task({
+        status: 'failed',
+        workspacePath: '/ws-a/',
+        error: 'boom',
+        finishedAt: '2026-09-18T01:00:00.000Z'
+      })
+    ]
+    renderView()
+
+    expect(await screen.findByTestId('delegated-task-retry')).toBeTruthy()
+  })
+
   it('surfaces a refused stop instead of swallowing it', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.tasksCancel = vi.fn(async () => ({ ok: true as const, data: false }))
     queue = [task({ status: 'running', runId: 'run-1', startedAt: '2026-09-18T00:00:10.000Z' })]
     renderView()
@@ -349,7 +388,7 @@ describe('task inbox', () => {
       task({ id: 't1', prompt: 'scout job', workspacePath: '/ws-a' }),
       task({ id: 't2', prompt: 'ace job', profileId: 'ace', workspacePath: '/ws-b' })
     ]
-    await openTasksTab()
+    await openInbox()
 
     expect(await screen.findByText('scout job')).toBeTruthy()
     expect(screen.getByText('ace job')).toBeTruthy()
@@ -363,7 +402,7 @@ describe('task inbox', () => {
       task({ id: 't1', prompt: 'scout job' }),
       task({ id: 't2', prompt: 'ace job', profileId: 'ace' })
     ]
-    await openTasksTab()
+    await openInbox()
     await screen.findByText('scout job')
 
     fireEvent.click(screen.getByRole('button', { name: 'Filter by teammate' }))
@@ -379,7 +418,7 @@ describe('task inbox', () => {
       task({ id: 't1', prompt: 'rewrite the pricing page' }),
       task({ id: 't2', prompt: 'upgrade the toolchain' })
     ]
-    await openTasksTab()
+    await openInbox()
     await screen.findByText('rewrite the pricing page')
 
     fireEvent.change(screen.getByLabelText('Search tasks'), { target: { value: 'toolchain' } })
@@ -393,7 +432,7 @@ describe('task inbox', () => {
       task({ id: 't1', prompt: 'live job', status: 'running', runId: 'r', startedAt: '2026-09-18T00:00:01.000Z' }),
       task({ id: 't2', prompt: 'old job', status: 'done', finishedAt: '2026-09-18T01:00:00.000Z' })
     ]
-    await openTasksTab()
+    await openInbox()
 
     const active = await screen.findByRole('region', { name: 'Active tasks' })
     expect(within(active).getByText('live job')).toBeTruthy()
@@ -407,7 +446,7 @@ describe('task inbox', () => {
     roster = []
     queue = [task({ id: 't1', prompt: 'orphan job', profileId: 'ghost', status: 'done', finishedAt: '2026-09-18T01:00:00.000Z' })]
     renderView()
-    fireEvent.click(await screen.findByRole('tab', { name: 'Tasks' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'All tasks' }))
 
     expect(await screen.findByText('orphan job')).toBeTruthy()
     expect(screen.getByText('Deleted teammate')).toBeTruthy()

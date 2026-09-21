@@ -125,11 +125,16 @@ const VYOTIQ_INVOKE_MAP: Record<
   agentProfilesDelete: IPC.agentProfilesDelete,
   agentProfileOverridesList: IPC.agentProfileOverridesList,
   agentProfileOverrideSet: IPC.agentProfileOverrideSet,
+  agentProfileOverrideAccept: IPC.agentProfileOverrideAccept,
+  agentMemoryList: IPC.agentMemoryList,
+  agentMemoryRead: IPC.agentMemoryRead,
+  agentMemoryWrite: IPC.agentMemoryWrite,
   tasksList: IPC.tasksList,
   tasksEnqueue: IPC.tasksEnqueue,
   tasksCancel: IPC.tasksCancel,
   tasksRetry: IPC.tasksRetry,
   gitStatus: IPC.gitStatus,
+  gitInit: IPC.gitInit,
   gitGenerateCommitMessage: IPC.gitGenerateCommitMessage,
   gitDiff: IPC.gitDiff,
   gitBlame: IPC.gitBlame,
@@ -306,7 +311,8 @@ const VYOTIQ_PUSH_MAP: Record<
   onDeepLinkOpened: IPC.deepLinkOpened,
   onAppearanceCustomCssChanged: IPC.appearanceCustomCssChanged,
   onAccessibilitySupportChanged: IPC.accessibilitySupportChanged,
-  onGitStatusChanged: IPC.gitStatusChanged
+  onGitStatusChanged: IPC.gitStatusChanged,
+  onAgentContextChanged: IPC.agentContextChanged
 }
 
 /** Namespaced VyotiqApi surfaces (window.vyotiq.updater / .feedback). */

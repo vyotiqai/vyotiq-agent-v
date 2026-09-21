@@ -23,6 +23,7 @@
 14. [Testing map](#14-testing-map)
 15. [Known limitations & non-goals](#15-known-limitations--non-goals)
 16. [User guide & use cases](#16-user-guide--use-cases)
+17. [Agent-managed teammates](#17-agent-managed-teammates)
 
 ---
 
@@ -124,9 +125,14 @@ Packaged app root: `%APPDATA%\vyotiq` (dev profile: `%APPDATA%\vyotiq-dev`).
 ```
 %APPDATA%\vyotiq\
   agents.json                          global roster, version 2 (corrupt → backed up,
-                                       empty start). Holds `profiles` plus `retiredIds`
-                                       — ids of deleted teammates, never handed out again.
-                                       A version-1 file migrates forward on read.
+                                       empty start). Holds `profiles`, `retiredIds`
+                                       — ids of deleted teammates, never handed out again —
+                                       and `acceptedOverrides`, the workspace+profile →
+                                       file-digest consent ledger for privileged override
+                                       fields (§5). A version-1 file migrates forward on
+                                       read; `acceptedOverrides` is parsed leniently at
+                                       version 2 rather than behind a bump, because its
+                                       absence already means "nothing accepted".
   workspaces.json                      registry: openPaths, recentPaths,
                                        uiStateByPath (incl. agentProfileIdByRunId)
   logs\vyotiq.log                      main+renderer runtime log
@@ -164,9 +170,74 @@ Invariants:
   write **replaces** the file rather than merging into it (one form owns the whole
   override, and merging would leave no way to clear a single field), so the editor
   carries through any field it does not itself expose.
-- **Deletion** removes the roster entry and cancels everything downstream (§11).
+- **Privileged override fields need accepting (accept-on-first-sight).** An
+  override file travels with the repository, so it can ask to change **when and
+  how autonomously code runs**: `autonomousMode`, `autoResumeOnLaunch`,
+  `runtime` (`PRIVILEGED_OVERRIDE_FIELDS`, schemas/agentProfile.ts). Until the
+  user accepts *that file*, those three are **dropped** by `resolveAgentProfile`
+  and everything else in it still applies — cloning a repo can retune a
+  teammate's voice, never lower its approval bar. Consent is recorded in
+  `agents.json` as `acceptedOverrides`, keyed by workspace+profile and valued
+  with the **SHA-256 of the file's bytes**, so editing or pulling a change to an
+  accepted file withdraws consent automatically. The gate lives in
+  `resolveAgentProfile`, not in the reader: `listWorkspaceProfileOverrides`
+  keeps returning the whole file because the UI has to show what it is asking
+  for. Granting is `agentProfileOverrideAccept`, a main-only writer that
+  re-hashes the file itself (the renderer cannot approve bytes it invented),
+  mirroring `setMarketplaceRemoteInstallAcked`. **There is no prompt at run
+  time and there cannot be** — every `resolveAgentProfile` caller is a
+  synchronous run or queue path, and `taskScheduler.startTask` sits inside
+  `launchRunSync`'s no-await claim window.
+- **Deletion** removes the roster entry and cancels everything downstream (§11),
+  and drops that teammate's `acceptedOverrides` entries — its override files go
+  with it and its id is retired, so they could never grant anything again.
+
+- **A teammate is told its own name.** `effectiveProfileBehavior.name` rides
+  `AssembleInput.teammateName` into the `response_style` section
+  (context/userRules.ts), so a teammate can refer to itself, sign its work and
+  be addressed by name. It comes from `effectiveProfileBehavior`, not
+  `effectiveProfile`, so a run whose teammate was deleted mid-flight keeps the
+  name from its persisted snapshot. The line is **static for the life of a run**
+  by necessity: `response_style` sits in `systemStable`, the marked cacheable
+  prefix on every adapter, so a name costs one cache miss on a run's first step
+  and nothing after — anything step-varying there would bust system + history
+  every step.
+- **Persona means the role for a teammate, the name for everyone else.**
+  `formatResponseStyle` renders an unbound chat's persona as
+  `Identity: this assistant is "<persona>"` — correct, because for an unbound
+  chat that slot holds the name the user typed in Settings → Agent → Persona.
+  loop.ts routes a *teammate's* persona through that same `settings.agentPersona`
+  slot, so a teammate was being told its name was a sentence describing its job.
+  With a name present the persona renders as `Role:` instead. There is no
+  built-in persona, identity or tone behind any of this: unset fields emit
+  nothing, so an unbound chat with nothing configured gets no `response_style`
+  section at all.
 
 ## 6. Memory namespaces
+
+- **The pane can read, edit and clear a namespace** (Teammates → a teammate →
+  *Memory*). Channels `agentMemoryList` / `agentMemoryRead` / `agentMemoryWrite`
+  (`path: null` clears), all invoke-only — memory is read when the panel opens,
+  and nothing in main writes a namespace while a panel is showing one, so a push
+  would imply a watcher that does not exist. Paths go through
+  `normalizeMemoryRelPath`, the **same** validator the agent's memory tools use,
+  so the panel and the teammate can never disagree about which files exist. The
+  clear is `clearMemoryNamespace`, which is deliberately narrower than
+  `removeProfileArtifactsForWorkspaces({ purgeMemory: true })`: that one also
+  unlinks the workspace override file, a *sibling* of the namespace directory,
+  and resetting what a teammate remembers must not discard how a project retuned
+  it. This is the only path in the app that deletes a teammate's memory —
+  deleting the teammate still does not.
+- **A run cannot read another teammate's namespace.**
+  `assertMemoryNamespaceAccess` (tools/writeGuard.ts) is enforced at the tool
+  dispatcher for `read`, `edit`, `str_replace`, `delete` and `edit_notebook`.
+  `.vyotiq` is in `IGNORED_DIRS`, so the walkers never *surface* these files, but
+  `read` resolved its path with `resolveInsideWorkspace` alone and had no deny
+  list — a direct path reached another teammate's notes, and ids are slugified
+  display names, so they are guessable. A run with **no** namespace (an ordinary
+  chat on the shared brain) is denied every namespace. `<id>.profile.json` is a
+  sibling file, not a namespace, and stays readable — it is project config the
+  repository ships on purpose.
 
 - Every memory tool call validates that the target resolves inside the workspace's
   teammate memory root via a **nearest-existing-ancestor realpath walk**
@@ -219,6 +290,12 @@ A profile may pin `{ provider, model }`. Semantics (implemented in the renderer)
 - Pins unknown to the live catalog still send (by explicit design, `modelReadiness.ts`
   — catalogs omit servable models); failures surface through the chat error banner.
   An unknown pin renders via the raw-id display fallback.
+- **A half-made pin is ignored, as the control already promised.** Picking a
+  provider emits `{ provider, model: '' }` so the model menu has something to
+  hang off, and `TeammateModelPin` says such a pin is ignored — but
+  `AgentProfileModelSchema` requires a non-empty `model`, so sending one failed
+  the entire save on a Zod error. Every writer now runs its draft through
+  `usablePin` first.
 - Delegated tasks use the pinned model automatically.
 
 > History: an earlier component-level hook (`useTeammateModelPin`) adopted the pin
@@ -291,6 +368,12 @@ then vanish on the next launch.
   retention cannot prune the attempt that failed while keeping the one that replaced
   it. `retryOf` is an **internal** argument, never a field on `TaskEnqueueRequest`:
   a renderer that could set it could forge the audit chain.
+- **Retry is offered only where it can succeed.** `retryTask` re-enqueues and
+  `enqueueTask` refuses a workspace that is not open, so a terminal row whose
+  workspace is closed shows Retry **disabled, naming the workspace** rather than
+  enabled-and-erroring or silently absent. `taskControls(task, workspaceOpen)`
+  is where the rule lives, so both surfaces still share it; the sidebar filters
+  to the active workspace and passes the default.
 - **Retention** — terminal rows are capped (200 per workspace, newest first); active
   work is never trimmed.
 - **Two control surfaces, one rule.** The sidebar shows work that is running or
@@ -486,12 +569,22 @@ Suites mirror `src/` under `tests/`:
 | Append queues + storage-loss tripwire | `tests/main/unit/eventAppendQueue.test.ts`, `messageAppendQueue.test.ts` |
 | Memory escape guard | profiles/memory suites (`tests/main/unit/...`) |
 | Renderer binding/prune/pin seeding + adoption | `tests/renderer/chat/useWorkspaceManager.test.tsx` |
-| Profiles store (corrupt backup, override removal, override write/clear, memory preserved on reset, unsafe-id refusal) | `tests/main/unit/agentProfiles.test.ts` |
+| Profiles store (corrupt backup, override removal, override write/clear, memory preserved on reset, unsafe-id refusal, **override trust: withheld fields, accept, digest withdrawal, per-workspace scope, ledger cleanup, legacy roster**) | `tests/main/unit/agentProfiles.test.ts` |
+| Memory namespace surface (exists, narrow clear, override file preserved, unsafe namespace refusal) + `normalizeMemoryRelPath` parity with the tools | `tests/main/unit/memory.test.ts` |
+| Cross-teammate memory read guard | `tests/main/unit/writeGuard.test.ts` |
+| Teammate name + role split in the system prompt | `tests/main/unit/agentPersona.test.ts`, `agentLoopEffectiveSettings.test.ts` |
+| Finished-run notification text (teammate named, delegated vs. chat) | `tests/main/unit/runFinishedNotification.test.ts` |
+| Memory panel (listing, index drift, edit/save, confirmed clear, empty states) | `tests/renderer/teammates/teammateMemory.test.tsx` |
+| Agent-managed teammates (registration, approval exemption, Agent-mode only, create/update/delete/assign through the real stores, full autonomy honoured, no roster cap, **finished-work reporting, task result/cancel/retry, memory seeding, refused cloud pin**) | `tests/main/unit/teammateTools.test.ts` |
+| **End to end, through the real app** (create in the pane → assign → the scheduler runs it → Done from the durable status → transcript link; schedule → cancel) | `tests/gui-e2e/teammates.spec.ts` |
 | IPC surface parity for the override channels | `tests/main/integration/ipcContract.test.ts`, `tests/main/unit/ipcChannelParity.test.ts` |
 
-Run the suite in halves to stay under the 10-minute window:
-`pnpm vitest run tests/main tests/shared` then
-`pnpm vitest run tests/renderer tests/agent tests/gui-e2e`.
+Run the Vitest suite in halves to stay under the 10-minute window:
+`pnpm vitest run tests/main tests/shared` then `pnpm vitest run tests/renderer`.
+
+The GUI e2e suite is Playwright, not Vitest, and needs a prior `pnpm build`:
+`pnpm test:gui-e2e`. It drives the real Electron app, so it is the only place
+the pane, the scheduler and the run path are exercised together.
 
 ## 15. Known limitations & non-goals
 
@@ -508,7 +601,10 @@ Run the suite in halves to stay under the 10-minute window:
   is registered, `resolveAvailableRuntime` **refuses** such a run rather than falling
   back to local: a profile pinned to cloud fails visibly instead of quietly executing
   on this machine, which is the outcome someone choosing a non-local runtime is trying
-  to avoid.
+  to avoid. The **agent cannot set it**: `runtime` is not in `teammateIdentityFields`,
+  because the only thing a run could achieve by writing it is a teammate that refuses
+  every task it is ever given. Hand-authored override files and the schema are
+  unchanged.
 - **A scheduled task cannot start while the app is fully closed.** This app is the
   scheduling control plane; closed-app scheduling and closed-app notifications would
   need a separately operated hosted service.
@@ -518,6 +614,43 @@ Run the suite in halves to stay under the 10-minute window:
   git-shareable and still hand-editable; the Teammates pane simply writes them too.
   A file edited on disk outside the app is picked up the next time the workspace is
   read, not pushed: there is no watcher.
+- **Upgrade behaviour — privileged override fields stop applying until accepted.**
+  On first launch after the accept-on-first-sight gate (§5), every existing
+  `.vyotiq/agents/<id>.profile.json` that sets `autonomousMode`,
+  `autoResumeOnLaunch` or `runtime` stops applying **those fields** until the
+  user accepts it in Teammates → the teammate → *Per-workspace tuning* → *Review
+  and accept*. Everything else in the file keeps working untouched. This is the
+  intended fail-safe direction, but it is a real behaviour change for anyone
+  relying on a hand-authored autonomy override, and it is deliberately not
+  grandfathered: the whole point is that a file you never consciously read
+  cannot grant itself autonomy, and an install cannot tell its own
+  hand-authored file from one that arrived with a clone.
+- **Consent is per file, not per teammate or per project.** Editing an accepted
+  override withdraws consent, because the record is a hash of the bytes. That
+  is the intended cost of "first sight" — a file whose autonomy line changed is
+  a new decision.
+- **The agent can widen its own autonomy, by decision.** `teammate_create` /
+  `teammate_update` (§17) accept `autonomousMode`, so a run can create an
+  identity that never asks before running tools and then hand it work. The
+  safer design — refusing the autonomy fields from the tool and leaving that
+  decision to a human — was considered and rejected in favour of full control.
+  What bounds it is `isAutonomousHighRiskTool`, which keeps edit, str_replace,
+  delete, edit_notebook, terminal, git_commit, **git_apply**, GitHub and MCP
+  gated for every teammate regardless. Reversing this is a one-line change:
+  drop the autonomy fields in `readIdentityFields`.
+- **`git_apply` used to escape that gate.** It applies a unified diff to the
+  working tree — an arbitrary file write — and was absent from
+  `isAutonomousHighRiskTool`, so an autonomous teammate refused `edit` at the
+  prompt could rewrite the same files through a patch with no prompt at all. It
+  is gated now, and pinned by `tests/main/unit/toolApproval.test.ts`.
+- **A workspace allowlist still outranks the high-risk gate.** `authorize` skips
+  the autonomous check when `workspaceAllowlist.includes(name)`, so "gated for
+  every teammate whatever its `autonomousMode` says" holds for the default
+  configuration, not for a project that has explicitly allowlisted a tool. That
+  is a deliberate, user-controlled escape hatch, not an oversight.
+- **No cap on how many teammates a run may create**, also by decision. A
+  confused loop can fill the roster, and ids are retired on delete so the slugs
+  it burns never come back.
 - **No fsync on atomic writes** — systemic to all run artifacts (crash may lose the
   last write); a separate blast-radius decision, not teammates-specific.
 - **One running task per teammate** — the identity is single-threaded by design.
@@ -542,12 +675,22 @@ also create one inline and binds it to the current chat immediately.
 the composer's teammate pill. The model pill snaps to the teammate's pin (if set);
 a manual pick still wins; rebinding re-adopts.
 
+**Memory** — the teammate's *Memory* tab shows what it remembers in the open
+project: `index.md` (injected into every step), `state.md`, and the notes
+`index.md` points at, with a warning when notes exist that the index does not
+reference — those are on disk but invisible to the teammate. You can edit any of
+them, or clear the namespace outright. This is the only thing in the app that
+deletes a teammate's memory; deleting the teammate does not.
+
 **Tune** — in the pane: *Identity* (name, avatar, persona, identity, tone),
 *Model and behaviour* (a pinned provider/model, and whether this teammate asks
 before running tools), *Availability* (every workspace, or one), then
 *Per-workspace overrides* — a shareable file committed with the repo that retunes
 this teammate for that project only. Edits are explicit: nothing is written until
-you press *Save changes*.
+you press *Save changes*. If a project's file asks to change tool approvals,
+auto-resume or where runs execute, the row says so and those changes do **not**
+apply until you press *Review and accept* — a repository you cloned can retune
+how a teammate writes, but not how freely it acts.
 
 **Assign & walk away** — hover a teammate in the sidebar → `+`, or use *Assign
 task* in the pane → brief + optional schedule → Assign. Status
@@ -589,3 +732,86 @@ no future teammate inherits them.
 workstreams that shouldn't share a brain, want work while away, or want day-to-day
 behavioral consistency. For one-off, fully-contextualized one-chat work, they add
 ceremony without payoff.
+
+---
+
+## 17. Agent-managed teammates
+
+The agent creates and runs teammates itself, through six builtin tools
+(`src/main/agent/tools/teammateTools.ts`, registered in
+`agent/schemas/tools.ts`):
+
+| Tool | Does |
+| --- | --- |
+| `teammate_list` | roster with persona, scope, pin, autonomy, live work **and recently finished work** |
+| `teammate_create` | new teammate, every profile field writable except `runtime`; optional `memory` seeds its `index.md` |
+| `teammate_update` | patch a teammate; unlisted fields are untouched |
+| `teammate_delete` | the full §11 cascade, reporting what it stopped |
+| `teammate_assign_task` | enqueue a brief, immediately or scheduled |
+| `teammate_task` | `result` reads what a teammate produced; `cancel` stops work; `retry` re-runs a finished task |
+
+**Delegated work comes back.** `teammate_assign_task` used to close by telling
+the model to "check on it with `teammate_list`", which filtered every terminal
+status out — so a run could hand work over and never learn a thing about it, not
+even that it had failed. `teammate_list` now names recently finished tasks, and
+`teammate_task result` reads the run's own closing message and the files it
+wrote, through the same `summarizeChildRunAsync` an instance pull uses. Two
+guards, both stricter than the instance one: the run id must be one the
+scheduler recorded on a delegated task, and the task must belong to the project
+this run is working in. A teammate is global and its work is not, so without the
+second a run could read back whatever that teammate did in an unrelated
+repository — the record's status and error still come back, only the contents
+are withheld.
+
+**A teammate can start with something in its head.** `teammate_create` takes an
+optional `memory`, written to `index.md` in the new teammate's namespace for the
+open project. This is the only way the agent can put anything there:
+`memory_write` always targets the *calling* run's namespace and
+`assertMemoryNamespaceAccess` refuses to reach into another teammate's. Seeding
+happens at create time, on a namespace that did not exist a moment earlier, so
+it grants no ability to read or rewrite an existing teammate's memory. A failed
+seed is reported, never thrown — losing the teammate to it would be worse.
+
+They call the same store functions the IPC handlers do and fire the same
+`agentProfilesChanged` / `tasksChanged` pushes, so a teammate the agent creates
+is indistinguishable from one made in the pane and appears in the roster with no
+reload.
+
+**Full control, by decision.** Every field is writable including
+`autonomousMode` and `autoResumeOnLaunch`, and there is no cap on how many
+teammates a run may create. (`runtime` is the one exception, and not a safety
+one: nothing registers a cloud runtime, so writing it could only produce a
+teammate that refuses every task — see §15.) A run can therefore create an identity that
+never asks before running tools, and hand it work. This was chosen deliberately
+over the safer default; the note in §15 records what it costs.
+
+What still holds regardless:
+
+- **The high-risk gate holds.** `edit`, `str_replace`, `delete`, `edit_notebook`,
+  `terminal`, `git_commit`, **`git_apply`**, the GitHub tools,
+  `merge_agent_instance` and every `mcp__*` call stay approval-gated for **every**
+  teammate whatever its `autonomousMode` says, unless the workspace itself has
+  allowlisted that tool. Autonomy buys browsing and the other low-risk builtins,
+  not silent file or shell access — which was not quite true before `git_apply`
+  was added to the list (§15).
+- **The override trust gate (§5) is untouched.** It guards a different threat —
+  a `.profile.json` that arrives with a cloned repository — and is not weakened
+  by the agent having tools of its own.
+- **Ids are still retired on delete.** An agent that deletes a teammate cannot
+  recreate it and inherit its memory; the slug is gone for good.
+- **Agent mode only.** These are absent from Ask and Plan by omission, pinned by
+  the exhaustive classification test in `tests/main/unit/modePolicy.test.ts`.
+- **Approval-exempt**, matching `spawn_agent_instance` — the agent already
+  creates workers without asking, and a teammate is the durable form of that.
+
+**Cost.** The schemas ride the tool catalog on every request. Tool schemas are a
+small share of spend next to output tokens, but it is a permanent per-step cost
+and the descriptions are where to trim if it matters. `teammate_task` is one
+schema with three verbs rather than three tools for exactly this reason.
+
+**Delete is shared code.** `deleteTeammateCascade` (`agent/teammateAdmin.ts`) is
+used by both `teammate_delete` and `agentProfilesDelete`. The
+cancel-work-then-remove ordering is what keeps live runs from failing as
+"profile no longer exists", and two copies of it would drift. It lives under
+`agent/` rather than `settings/` because it reaches into the run registry and
+the scheduler, and `settings/agentProfiles` is imported *by* the scheduler.

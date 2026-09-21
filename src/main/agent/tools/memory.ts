@@ -34,20 +34,20 @@ export function toolMemoryList(workspace: string, namespace?: MemoryNamespace): 
   ].join('\n')
 }
 
-export function toolMemoryRead(
-  workspace: string,
-  pathArg: string,
-  namespace?: MemoryNamespace
-): string {
+/**
+ * Validate a memory-relative path and return its canonical form.
+ *
+ * One implementation for every caller. The agent's tools and the Teammates
+ * pane's memory panel write into the same namespace, so a path one accepts and
+ * the other rejects means a note the agent can never read back — or a panel
+ * that cannot open a file the agent just wrote.
+ */
+export function normalizeMemoryRelPath(pathArg: string): string {
   const cleaned = pathArg.trim().replace(/^[/\\]+/, '')
   if (!cleaned) throw new Error('path is required')
   if (cleaned.includes('..')) throw new Error('Invalid memory path')
   // Allow index.md, state.md, notes/foo.md
-  if (
-    cleaned !== 'index.md' &&
-    cleaned !== 'state.md' &&
-    !cleaned.startsWith('notes/')
-  ) {
+  if (cleaned !== 'index.md' && cleaned !== 'state.md' && !cleaned.startsWith('notes/')) {
     throw new Error('path must be index.md, state.md, or notes/<name>.md')
   }
   if (cleaned.startsWith('notes/')) {
@@ -56,7 +56,15 @@ export function toolMemoryRead(
       throw new Error('note files must be notes/<name>.md with safe characters')
     }
   }
-  return readMemoryFile(workspace, cleaned, namespace)
+  return cleaned
+}
+
+export function toolMemoryRead(
+  workspace: string,
+  pathArg: string,
+  namespace?: MemoryNamespace
+): string {
+  return readMemoryFile(workspace, normalizeMemoryRelPath(pathArg), namespace)
 }
 
 /** @deprecated Kept for callers that still import the former write cap. */
@@ -68,22 +76,6 @@ export function toolMemoryWrite(
   contents: string,
   namespace?: MemoryNamespace
 ): string {
-  const cleaned = pathArg.trim().replace(/^[/\\]+/, '')
-  if (!cleaned) throw new Error('path is required')
-  if (cleaned.includes('..')) throw new Error('Invalid memory path')
-  if (
-    cleaned !== 'index.md' &&
-    cleaned !== 'state.md' &&
-    !cleaned.startsWith('notes/')
-  ) {
-    throw new Error('path must be index.md, state.md, or notes/<name>.md')
-  }
-  if (cleaned.startsWith('notes/')) {
-    const noteName = cleaned.slice('notes/'.length)
-    if (!noteName || !/^[a-zA-Z0-9._-]+\.md$/.test(noteName)) {
-      throw new Error('note files must be notes/<name>.md with safe characters')
-    }
-  }
-  const written = writeMemoryFile(workspace, cleaned, contents, namespace)
+  const written = writeMemoryFile(workspace, normalizeMemoryRelPath(pathArg), contents, namespace)
   return `Wrote memory/${written}`
 }
