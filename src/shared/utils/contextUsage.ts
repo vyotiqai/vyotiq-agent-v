@@ -44,8 +44,10 @@ export type ContextToolsDetail = {
   mcpByServer: ContextToolGroupDetail[]
   /** Builtins present in the full catalog but excluded from the wire by mode/index policy. */
   deferredBuiltin: ContextToolGroupTokens
-  /** MCP tools excluded from the wire (MCP is Agent-mode-only). */
+  /** MCP tools excluded from the wire: load-on-demand, or not Agent mode. */
   deferredMcp: ContextToolGroupTokens
+  /** Per-server split of `deferredMcp` — what a run would pay to load each. */
+  deferredMcpByServer?: ContextToolGroupDetail[]
   /** Active (sent) tool tokens — == layers.tools. */
   total: number
 }

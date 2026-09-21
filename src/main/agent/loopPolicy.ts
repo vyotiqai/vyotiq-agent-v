@@ -133,11 +133,21 @@ export function recordMcpNotInCatalogFailure(
   return next
 }
 
-/** First rejection: steer toward pin-once-then-wait. */
+/** First rejection: steer toward load-once-then-wait. */
 export function mcpNotInCatalogErrorMessage(
   toolName: string,
-  opts?: { alreadyPinned?: boolean }
+  opts?: { alreadyPinned?: boolean; autoLoaded?: boolean }
 ): string {
+  // The call itself is the request: the tool is real, its server is enabled
+  // and the name is permitted, so the only thing missing was the schema. Say
+  // it is handled rather than sending the agent to request_mcp_tools for
+  // something the harness already knows it wants.
+  if (opts?.autoLoaded) {
+    return [
+      `MCP tool "${toolName}" ${MCP_NOT_IN_CATALOG_MARKER} — connected MCP servers load on demand, so its schema was not on the wire.`,
+      'It is loaded for the next step: call it again then. Do not retry it in this step, and there is nothing to pin.'
+    ].join(' ')
+  }
   const pinNote = opts?.alreadyPinned
     ? `It is already pinned — wait for the next model step so the sticky catalog can admit it.`
     : `Use mcp_list_tools then request_mcp_tools to pin it once, then wait for the next model step (do not keep calling it this step).`

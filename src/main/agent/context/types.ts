@@ -106,6 +106,12 @@ export type AssembleInput = {
   priorCompaction?: CompactionRecord | null
   loopHint?: string
   skillsSection?: string
+  /**
+   * `<mcp_servers>` directory — connected servers, which are already in the
+   * tool catalog, and the bare tool names of the ones held back for
+   * `request_mcp_tools`. Names only; schemas never ride here.
+   */
+  mcpSection?: string
   pluginRulesSection?: string
   /** User-global rules from settings; assembled before workspace rules. */
   userRules?: UserRule[]

@@ -66,6 +66,7 @@ function settingsMcpFingerprint(): string {
         headerFp,
         allowed,
         denied,
+        s.autoLoad === true ? 'autoload' : '',
         s.oauthClientId ?? '',
         s.authScope ?? '',
         s.authWorkspacePath ?? '',

@@ -181,6 +181,8 @@ export type ToolStepContext = {
    * When set, MCP invokes outside this set are rejected.
    */
   stepMcpToolNames?: ReadonlySet<string>
+  /** Whole MCP servers loaded this run via request_mcp_tools. */
+  runAttachedMcpServerIds?: Set<string>
   /** Run-scoped MCP tools pinned via request_mcp_tools. */
   runPinnedMcpToolNames?: Set<string>
   /** Sticky catalog names — also admits deferred optional builtins after pin. */
@@ -397,6 +399,7 @@ async function runSingleTool(
       runEnabledMcpIds: ctx.runEnabledMcpIds,
       mcpToolPolicies: ctx.mcpToolPolicies,
       stepMcpToolNames: ctx.stepMcpToolNames,
+      runAttachedMcpServerIds: ctx.runAttachedMcpServerIds,
       runPinnedMcpToolNames: ctx.runPinnedMcpToolNames,
       runStickyToolNames: ctx.runStickyToolNames,
       mcpLastUsedByName: ctx.mcpLastUsedByName,

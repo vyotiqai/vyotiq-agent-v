@@ -56,6 +56,24 @@ describe('splitToolCatalogDetail', () => {
     expect(detail.total).toBe(detail.builtin.tokens)
   })
 
+  it('splits deferred MCP per server so the meter can price each one', () => {
+    const allDefs = [
+      tool('read', 'read'),
+      tool('mcp__notion__search', 'n'.repeat(600)),
+      tool('mcp__notion__create_pages', 'n'.repeat(600)),
+      tool('mcp__github__list_prs', 'g'.repeat(100)),
+      tool('mcp__context7__docs', 'c'.repeat(50))
+    ]
+    // Only github was loaded this step.
+    const detail = splitToolCatalogDetail(allDefs, new Set(['read', 'mcp__github__list_prs']))
+    expect(detail.mcpByServer.map((g) => g.serverId)).toEqual(['github'])
+    expect(detail.deferredMcpByServer?.map((g) => g.serverId)).toEqual(['notion', 'context7'])
+    expect(detail.deferredMcpByServer?.[0]?.toolCount).toBe(2)
+    expect(
+      (detail.deferredMcpByServer ?? []).reduce((n, g) => n + g.tokens, 0)
+    ).toBe(detail.deferredMcp.tokens)
+  })
+
   it('returns an empty catalog split for empty input', () => {
     const detail = splitToolCatalogDetail([], new Set())
     expect(detail.builtin).toEqual({ tokens: 0, count: 0 })
@@ -63,6 +81,7 @@ describe('splitToolCatalogDetail', () => {
     expect(detail.mcpByServer).toEqual([])
     expect(detail.deferredBuiltin).toEqual({ tokens: 0, count: 0 })
     expect(detail.deferredMcp).toEqual({ tokens: 0, count: 0 })
+    expect(detail.deferredMcpByServer).toEqual([])
     expect(detail.total).toBe(0)
   })
 })

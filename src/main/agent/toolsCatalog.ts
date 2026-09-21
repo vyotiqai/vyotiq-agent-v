@@ -7,6 +7,7 @@ import { isMcpToolPermitted } from '../../shared/utils/mcpToolPolicy'
 import { getSettings } from '../settings/settings'
 import { findWorkspaceSettingsOverride, getWorkspaces } from '../workspace/workspaces'
 import { listMcpToolDefinitions, parseMcpToolName } from './mcp'
+import type { McpToolLoading } from './context/mcpToolLoading'
 import { BUILTIN_TOOL_NAMES, TOOL_REGISTRY } from './schemas/tools'
 import { filterToolDefsForCodeIndex, isBuiltinAllowedInMode } from './tools/modePolicy'
 
@@ -38,8 +39,11 @@ export function buildToolCatalog(inputs: {
   mcpToolDefs: readonly CatalogToolDef[]
   servers: readonly McpServer[]
   authAllowedServerIds: ReadonlySet<string>
+  /** Settings default; a server's own `autoLoad` overrides it. */
+  mcpToolLoading?: McpToolLoading
 }): ToolCatalogResult {
   const { autoModeSwitch, codeIndexEnabled, mcpToolDefs, servers, authAllowedServerIds } = inputs
+  const eagerMcp = inputs.mcpToolLoading === 'eager'
   const serverById = new Map(servers.map((s) => [s.id, s]))
   const entries: ToolCatalogEntry[] = []
 
@@ -94,9 +98,12 @@ export function buildToolCatalog(inputs: {
 
   return {
     entries,
-    servers: servers.map((s) => ({ id: s.id, name: s.name, enabled: s.enabled, connected: false })).map((s, i) => ({
-      ...s,
-      connected: mcpToolDefs.some((def) => parseMcpToolName(def.name)?.serverId === servers[i]?.id)
+    servers: servers.map((s) => ({
+      id: s.id,
+      name: s.name,
+      enabled: s.enabled,
+      connected: mcpToolDefs.some((def) => parseMcpToolName(def.name)?.serverId === s.id),
+      loading: eagerMcp || s.autoLoad === true ? ('every-step' as const) : ('on-demand' as const)
     })),
     codeIndexEnabled,
     autoModeSwitch,
@@ -125,7 +132,8 @@ export function computeToolCatalog(workspacePath?: string | null): ToolCatalogRe
     codeIndexEnabled: settings.codeIndex?.enabled !== false,
     mcpToolDefs: listMcpToolDefinitions(),
     servers,
-    authAllowedServerIds
+    authAllowedServerIds,
+    mcpToolLoading: settings.mcpToolLoading ?? 'on-demand'
   })
 }
 

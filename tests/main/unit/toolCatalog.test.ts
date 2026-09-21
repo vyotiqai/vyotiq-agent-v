@@ -118,9 +118,9 @@ describe('buildToolCatalog', () => {
     const first = buildToolCatalog(inputs)
     expect(first.fingerprint).toBe(buildToolCatalog(inputs).fingerprint)
     expect(first.servers).toEqual([
-      { id: 'gh', name: 'GitHub', enabled: true, connected: true },
-      { id: 'ctx', name: 'Context', enabled: true, connected: true },
-      { id: 'web', name: 'Web', enabled: true, connected: true }
+      { id: 'gh', name: 'GitHub', enabled: true, connected: true, loading: 'on-demand' },
+      { id: 'ctx', name: 'Context', enabled: true, connected: true, loading: 'on-demand' },
+      { id: 'web', name: 'Web', enabled: true, connected: true, loading: 'on-demand' }
     ])
     const changed = buildToolCatalog({
       ...inputs,
@@ -128,5 +128,20 @@ describe('buildToolCatalog', () => {
     })
     expect(changed.fingerprint).not.toBe(first.fingerprint)
     expect(changed.entries.filter((e) => e.source === 'mcp').length).toBe(1)
+  })
+
+  it('reports how each server loads: per-server autoLoad, then the settings default', () => {
+    const perServer = buildToolCatalog({
+      ...inputs,
+      servers: inputs.servers.map((s) => (s.id === 'ctx' ? { ...s, autoLoad: true } : s))
+    })
+    expect(perServer.servers.map((s) => [s.id, s.loading])).toEqual([
+      ['gh', 'on-demand'],
+      ['ctx', 'every-step'],
+      ['web', 'on-demand']
+    ])
+
+    const eager = buildToolCatalog({ ...inputs, mcpToolLoading: 'eager' })
+    expect(eager.servers.every((s) => s.loading === 'every-step')).toBe(true)
   })
 })

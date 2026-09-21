@@ -13,6 +13,7 @@ import {
   assertMcpServerAccess
 } from '../mcp'
 import { resolveEffectiveMcpServers } from '@main/marketplace'
+import { isMcpToolPermitted } from '@shared/utils/mcpToolPolicy'
 import { throwIfAborted, toolOk, toolFail } from './index'
 import type { ToolExecutionContext, ToolResult, ToolHandler } from './index'
 
@@ -38,6 +39,24 @@ function mcpServerGate(
     return { ok: false, result: toolFail(toolName, summary, access.error) }
   }
   return { ok: true }
+}
+
+/**
+ * Connected tools this run may reach: enabled server, permitted by the
+ * server's allow/deny policy. Listing or loading a denied tool would only
+ * promise something executeTool then refuses.
+ */
+function reachableMcpTools(context: ToolExecutionContext): ReturnType<typeof listMcpToolDefinitions> {
+  const enabled = context.runEnabledMcpIds
+  const policies = context.mcpToolPolicies
+  return listMcpToolDefinitions().filter((t) => {
+    const parsed = parseMcpToolName(t.name)
+    if (!parsed) return false
+    if (enabled && !enabled.has(parsed.serverId)) return false
+    const policy = policies?.get(parsed.serverId)
+    if (policy && !isMcpToolPermitted(parsed.toolName, policy)) return false
+    return true
+  })
 }
 
 function formatMcpResourceLines(entries: Awaited<ReturnType<typeof listMcpResources>>): string {
@@ -69,12 +88,10 @@ export const mcpHandlers = {
     const filter = optionalMcpServerId(args)?.toLowerCase() ?? ''
     const enabled = context.runEnabledMcpIds
     const stepCatalog = context.stepMcpToolNames
-    const defs = listMcpToolDefinitions().filter((t) => {
+    const defs = reachableMcpTools(context).filter((t) => {
       const parsed = parseMcpToolName(t.name)
       if (!parsed) return false
-      if (filter && parsed.serverId.toLowerCase() !== filter) return false
-      if (enabled && !enabled.has(parsed.serverId)) return false
-      return true
+      return !filter || parsed.serverId.toLowerCase() === filter
     })
     if (defs.length === 0) {
       const statuses = getMcpServerStatus(resolveEffectiveMcpServers()).filter((s) => {
@@ -104,15 +121,22 @@ export const mcpHandlers = {
         : 'No MCP tools connected.'
       return toolOk('mcp_list_tools', filter || 'none', none)
     }
+    let deferredCount = 0
     const lines = defs.map((t) => {
       const hint = getMcpReadOnlyHint(t.name)
       const hintNote =
         hint === true ? ' readOnlyHint=true' : hint === false ? ' readOnlyHint=false' : ''
-      const omitted =
-        stepCatalog && !stepCatalog.has(t.name) ? ' [omitted from this step catalog]' : ''
+      const deferred = stepCatalog != null && !stepCatalog.has(t.name)
+      if (deferred) deferredCount++
       const desc = (t.description || '').replace(/\s+/g, ' ').trim().slice(0, 160)
-      return `- ${t.name}${hintNote}${omitted}${desc ? `: ${desc}` : ''}`
+      return `- ${t.name}${hintNote}${deferred ? ' [not loaded]' : ''}${desc ? `: ${desc}` : ''}`
     })
+    if (deferredCount > 0) {
+      lines.push(
+        '',
+        `${deferredCount} of these are connected but not in this step's catalog — their schemas load only when asked for. Load what you need with request_mcp_tools (serverId, or tools: [...]), then call it on the next step.`
+      )
+    }
     return toolOk('mcp_list_tools', `${defs.length} tools`, lines.join('\n'))
   },
   request_mcp_tools: (_workspace, args, signal, context) => {
@@ -121,10 +145,11 @@ export const mcpHandlers = {
     if (!pinned) {
       return toolFail(
         'request_mcp_tools',
-        'pin',
+        'load',
         'request_mcp_tools requires an active agent run.'
       )
     }
+    const attached = context.runAttachedMcpServerIds
     const serverId =
       (typeof args.serverId === 'string' && args.serverId.trim()) ||
       (typeof args.server_id === 'string' && args.server_id.trim()) ||
@@ -135,17 +160,11 @@ export const mcpHandlers = {
     if (!serverId && requested.length === 0) {
       return toolFail(
         'request_mcp_tools',
-        'pin',
-        'Provide tools: string[] and/or serverId to pin MCP tools for the next step.'
+        'load',
+        'Provide tools: string[] and/or serverId to load MCP tools into the next step.'
       )
     }
-    const enabled = context.runEnabledMcpIds
-    const connected = listMcpToolDefinitions().filter((t) => {
-      const parsed = parseMcpToolName(t.name)
-      if (!parsed) return false
-      if (enabled && !enabled.has(parsed.serverId)) return false
-      return true
-    })
+    const connected = reachableMcpTools(context)
     const byFull = new Map(connected.map((t) => [t.name, t]))
     const byBare = new Map<string, string[]>()
     for (const t of connected) {
@@ -155,25 +174,41 @@ export const mcpHandlers = {
       list.push(t.name)
       byBare.set(parsed.toolName, list)
     }
+    /** Already on the wire, so nothing to load for it. */
+    const inCatalog = (full: string): boolean => context.stepMcpToolNames?.has(full) === true
+    const serverOf = (full: string): string | undefined => parseMcpToolName(full)?.serverId
+    const isLoadedServer = (id: string): boolean => attached?.has(id) === true
 
+    const loadedServers: string[] = []
     const newlyPinned: string[] = []
     const unknown: string[] = []
     const already: string[] = []
 
     const notes: string[] = []
     if (serverId) {
-      const fromServer = connected.filter((t) => {
-        const parsed = parseMcpToolName(t.name)
-        return parsed?.serverId.toLowerCase() === serverId.toLowerCase()
-      })
-      if (fromServer.length === 0) {
+      // Case-insensitive so the directory's ids and the agent's echo of them
+      // never disagree; the canonical id is what gets stored.
+      const needle = serverId.toLowerCase()
+      const canonical = connected
+        .map((t) => parseMcpToolName(t.name)?.serverId)
+        .find((id): id is string => id != null && id.toLowerCase() === needle)
+      if (!canonical) {
         notes.push(`No connected MCP tools for serverId=${serverId}.`)
-      }
-      for (const t of fromServer) {
-        if (pinned.has(t.name)) already.push(t.name)
-        else {
-          pinned.add(t.name)
-          newlyPinned.push(t.name)
+      } else if (isLoadedServer(canonical)) {
+        already.push(`server ${canonical}`)
+      } else if (attached) {
+        attached.add(canonical)
+        const count = connected.filter((t) => serverOf(t.name) === canonical).length
+        loadedServers.push(`${canonical} (${count} tool${count === 1 ? '' : 's'})`)
+      } else {
+        // No run-scoped server set (nested/inline caller): fall back to pinning
+        // the server's tools one by one so the request still does something.
+        for (const t of connected.filter((tool) => serverOf(tool.name) === canonical)) {
+          if (pinned.has(t.name) || inCatalog(t.name)) already.push(t.name)
+          else {
+            pinned.add(t.name)
+            newlyPinned.push(t.name)
+          }
         }
       }
     }
@@ -181,24 +216,25 @@ export const mcpHandlers = {
     const sticky = context.runStickyToolNames
     const newlyPinnedBuiltins: string[] = []
 
+    const admit = (full: string): void => {
+      const server = serverOf(full)
+      if ((server && isLoadedServer(server)) || pinned.has(full) || inCatalog(full)) {
+        already.push(full)
+        return
+      }
+      pinned.add(full)
+      newlyPinned.push(full)
+    }
+
     for (const raw of requested) {
       const name = raw.trim()
       if (byFull.has(name)) {
-        if (pinned.has(name)) already.push(name)
-        else {
-          pinned.add(name)
-          newlyPinned.push(name)
-        }
+        admit(name)
         continue
       }
       const bareMatches = byBare.get(name) ?? []
       if (bareMatches.length === 1) {
-        const full = bareMatches[0]!
-        if (pinned.has(full)) already.push(full)
-        else {
-          pinned.add(full)
-          newlyPinned.push(full)
-        }
+        admit(bareMatches[0]!)
         continue
       }
       if (bareMatches.length > 1) {
@@ -228,23 +264,31 @@ export const mcpHandlers = {
         for (const name of newlyPinned) lastUsed.set(name, stamp)
       }
     }
-    if (newlyPinned.length > 0 || newlyPinnedBuiltins.length > 0) {
+    const loadedAnything =
+      loadedServers.length > 0 || newlyPinned.length > 0 || newlyPinnedBuiltins.length > 0
+    if (loadedAnything) {
       context.invalidateMcpToolCatalogCache?.()
     }
 
-    const allNew = [...newlyPinned, ...newlyPinnedBuiltins]
+    const allNew = [
+      ...loadedServers.map((s) => `server ${s}`),
+      ...newlyPinned,
+      ...newlyPinnedBuiltins
+    ]
     const lines = [
       allNew.length
-        ? `Pinned for next step (${allNew.length}): ${allNew.join(', ')}`
-        : 'No new tools pinned.',
-      already.length ? `Already pinned: ${already.join(', ')}` : '',
+        ? `Loaded into the next step's tool catalog (${allNew.length}): ${allNew.join(', ')}`
+        : 'Nothing new loaded.',
+      already.length ? `Already available: ${already.join(', ')}` : '',
       unknown.length ? `Unknown / unresolved: ${unknown.join(', ')}` : '',
       ...notes,
-      'Connected MCP tools are already in the step catalog. Pins are optional bookkeeping; call release_mcp_tools when finished.'
+      loadedAnything
+        ? 'They are on the wire from the next model step — do not call them in this one. Call release_mcp_tools when finished so the window goes back to the task.'
+        : 'Call release_mcp_tools when finished with a loaded server so the window goes back to the task.'
     ].filter(Boolean)
     return toolOk(
       'request_mcp_tools',
-      `${allNew.length} pinned`,
+      `${allNew.length} loaded`,
       lines.join('\n')
     )
   },
@@ -258,6 +302,7 @@ export const mcpHandlers = {
         'release_mcp_tools requires an active agent run.'
       )
     }
+    const attached = context.runAttachedMcpServerIds
     const serverId =
       (typeof args.serverId === 'string' && args.serverId.trim()) ||
       (typeof args.server_id === 'string' && args.server_id.trim()) ||
@@ -269,17 +314,26 @@ export const mcpHandlers = {
       return toolFail(
         'release_mcp_tools',
         'release',
-        'Provide tools: string[] and/or serverId to release pinned MCP tools.'
+        'Provide tools: string[] and/or serverId to release loaded MCP tools.'
       )
     }
 
     const toRelease = new Set<string>()
+    const releasedServers: string[] = []
     const unknown: string[] = []
     const notes: string[] = []
 
     if (serverId) {
       const needle = serverId.toLowerCase()
       let found = 0
+      for (const id of attached ?? []) {
+        if (id.toLowerCase() !== needle) continue
+        attached?.delete(id)
+        releasedServers.push(id)
+        found++
+      }
+      // Single tools pinned from the same server go with it — otherwise
+      // "release notion" would leave half of notion on the wire.
       for (const name of pinned) {
         const parsed = parseMcpToolName(name)
         if (parsed?.serverId.toLowerCase() === needle) {
@@ -288,7 +342,7 @@ export const mcpHandlers = {
         }
       }
       if (found === 0) {
-        notes.push(`No pinned MCP tools for serverId=${serverId}.`)
+        notes.push(`No loaded MCP tools for serverId=${serverId}.`)
       }
     }
 
@@ -323,6 +377,16 @@ export const mcpHandlers = {
         }
         continue
       }
+      // A tool the run never pinned may still be on the wire because its whole
+      // server is loaded; say so instead of "unknown", which reads as a typo.
+      const parsed = parseMcpToolName(name)
+      const holder = parsed && attached?.has(parsed.serverId) ? parsed.serverId : undefined
+      if (holder) {
+        notes.push(
+          `${name} is on the wire because server ${holder} is loaded — release the server to drop it.`
+        )
+        continue
+      }
       unknown.push(name)
     }
 
@@ -334,16 +398,20 @@ export const mcpHandlers = {
       released.push(name)
     }
 
-    const allReleased = [...released, ...releasedBuiltins]
+    const allReleased = [
+      ...releasedServers.map((id) => `server ${id}`),
+      ...released,
+      ...releasedBuiltins
+    ]
     if (allReleased.length > 0) context.invalidateMcpToolCatalogCache?.()
 
     const lines = [
       allReleased.length
         ? `Released (${allReleased.length}): ${allReleased.join(', ')}`
-        : 'No pinned tools released.',
+        : 'Nothing released.',
       unknown.length ? `Unknown / unresolved: ${unknown.join(', ')}` : '',
       ...notes,
-      'Pins are optional bookkeeping. Re-pin with request_mcp_tools if needed.'
+      'Released schemas leave the catalog on the next step. Load them again with request_mcp_tools if needed.'
     ].filter(Boolean)
     return toolOk(
       'release_mcp_tools',

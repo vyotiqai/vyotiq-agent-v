@@ -68,7 +68,7 @@ describe('mcp_list_tools filtering', () => {
     expect(result.content).not.toContain('mcp__gitlab__')
   })
 
-  it('lists connected tools and marks those omitted from the step catalog', async () => {
+  it('lists connected tools and marks the ones not loaded into the step catalog', async () => {
     const result = await executeTool(
       'mcp_list_tools',
       '{}',
@@ -82,8 +82,11 @@ describe('mcp_list_tools filtering', () => {
     expect(result.ok).toBe(true)
     expect(result.content).toContain('mcp__github__list_issues')
     expect(result.content).toContain('mcp__github__create_issue')
-    expect(result.content).toContain('[omitted from this step catalog]')
+    expect(result.content).toContain('[not loaded]')
     expect(result.content).toContain('mcp__gitlab__list_issues')
+    // The listing has to say how to get them, or a deferred catalog is a dead end.
+    expect(result.content).toMatch(/2 of these are connected but not in this step's catalog/)
+    expect(result.content).toMatch(/request_mcp_tools/)
   })
 
   it('fails when enabled servers are configured but not connected', async () => {
@@ -251,6 +254,133 @@ describe('mcp_list_tools filtering', () => {
       { runPinnedMcpToolNames: new Set() }
     )
     expect(result.ok).toBe(true)
-    expect(result.content).toMatch(/No pinned MCP tools for serverId=github/)
+    expect(result.content).toMatch(/No loaded MCP tools for serverId=github/)
+  })
+
+  it('loads a whole server for the next step instead of pinning tool by tool', async () => {
+    const attached = new Set<string>()
+    const pinned = new Set<string>()
+    let invalidated = false
+    const result = await executeTool(
+      'request_mcp_tools',
+      JSON.stringify({ serverId: 'GitHub' }),
+      '/tmp/ws',
+      new AbortController().signal,
+      {
+        runEnabledMcpIds: new Set(['github', 'gitlab']),
+        runAttachedMcpServerIds: attached,
+        runPinnedMcpToolNames: pinned,
+        invalidateMcpToolCatalogCache: () => {
+          invalidated = true
+        }
+      }
+    )
+    expect(result.ok).toBe(true)
+    // Case-insensitive in, canonical id out.
+    expect([...attached]).toEqual(['github'])
+    expect(pinned.size).toBe(0)
+    expect(invalidated).toBe(true)
+    expect(result.content).toMatch(/server github \(2 tools\)/)
+    expect(result.content).toMatch(/next model step/)
+  })
+
+  it('reports a server that is already loaded instead of loading it twice', async () => {
+    const attached = new Set(['github'])
+    const result = await executeTool(
+      'request_mcp_tools',
+      JSON.stringify({ serverId: 'github' }),
+      '/tmp/ws',
+      new AbortController().signal,
+      {
+        runEnabledMcpIds: new Set(['github']),
+        runAttachedMcpServerIds: attached,
+        runPinnedMcpToolNames: new Set()
+      }
+    )
+    expect(result.ok).toBe(true)
+    expect(result.content).toMatch(/Already available: server github/)
+    expect(result.content).toMatch(/Nothing new loaded/)
+  })
+
+  it('does not re-load a tool whose server is already loaded', async () => {
+    const pinned = new Set<string>()
+    const result = await executeTool(
+      'request_mcp_tools',
+      JSON.stringify({ tools: ['mcp__github__create_issue'] }),
+      '/tmp/ws',
+      new AbortController().signal,
+      {
+        runEnabledMcpIds: new Set(['github']),
+        runAttachedMcpServerIds: new Set(['github']),
+        runPinnedMcpToolNames: pinned
+      }
+    )
+    expect(result.ok).toBe(true)
+    expect(pinned.size).toBe(0)
+    expect(result.content).toMatch(/Already available: mcp__github__create_issue/)
+  })
+
+  it('releases a loaded server and the single tools loaded from it', async () => {
+    const attached = new Set(['github', 'gitlab'])
+    const pinned = new Set(['mcp__github__create_issue', 'mcp__gitlab__list_issues'])
+    const result = await executeTool(
+      'release_mcp_tools',
+      JSON.stringify({ serverId: 'github' }),
+      '/tmp/ws',
+      new AbortController().signal,
+      {
+        runAttachedMcpServerIds: attached,
+        runPinnedMcpToolNames: pinned
+      }
+    )
+    expect(result.ok).toBe(true)
+    expect([...attached]).toEqual(['gitlab'])
+    expect(pinned.has('mcp__github__create_issue')).toBe(false)
+    expect(pinned.has('mcp__gitlab__list_issues')).toBe(true)
+    expect(result.content).toMatch(/server github/)
+  })
+
+  it('will not list or load a tool the server policy denies', async () => {
+    const ctx = {
+      runEnabledMcpIds: new Set(['github']),
+      mcpToolPolicies: new Map([['github', { deniedTools: ['create_issue'] }]]),
+      runPinnedMcpToolNames: new Set<string>()
+    }
+    const listed = await executeTool(
+      'mcp_list_tools',
+      JSON.stringify({ serverId: 'github' }),
+      '/tmp/ws',
+      new AbortController().signal,
+      ctx
+    )
+    expect(listed.content).toContain('mcp__github__list_issues')
+    expect(listed.content).not.toContain('mcp__github__create_issue')
+
+    const requested = await executeTool(
+      'request_mcp_tools',
+      JSON.stringify({ tools: ['mcp__github__create_issue'] }),
+      '/tmp/ws',
+      new AbortController().signal,
+      ctx
+    )
+    // Promising a load that executeTool would then refuse is worse than saying no.
+    expect(requested.content).toMatch(/Unknown \/ unresolved: mcp__github__create_issue/)
+    expect(ctx.runPinnedMcpToolNames.size).toBe(0)
+  })
+
+  it('explains that a tool is on the wire via its loaded server rather than calling it unknown', async () => {
+    const result = await executeTool(
+      'release_mcp_tools',
+      JSON.stringify({ tools: ['mcp__github__create_issue'] }),
+      '/tmp/ws',
+      new AbortController().signal,
+      {
+        runAttachedMcpServerIds: new Set(['github']),
+        runPinnedMcpToolNames: new Set()
+      }
+    )
+    expect(result.ok).toBe(true)
+    expect(result.content).toMatch(/is on the wire because server github is loaded/)
+    expect(result.content).not.toMatch(/Unknown \/ unresolved/)
   })
 })

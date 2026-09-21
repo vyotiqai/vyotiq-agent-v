@@ -292,6 +292,23 @@ export function ToolsSection({ form }: { form: SettingsFormState }) {
             }}
           />
         </SettingsField>
+
+        <SettingsField
+          id="mcp-tool-loading"
+          title="Preload every MCP tool"
+          hint="Off (default): the agent sees each connected server's tool names and loads the schemas it needs. Applies at the next step of a live run."
+          help="Tool schemas are re-sent on every step. Four connected servers measured 67k tokens — 8% of a 850k window — whether or not the run touched MCP. On demand keeps that out of the window until a run asks; the agent loads a server with request_mcp_tools, and calling a tool directly loads it too. Marketplace has a per-server override for a server you want available with no wait."
+        >
+          <Switch
+            size="md"
+            checked={form.settings.mcpToolLoading === 'eager'}
+            disabled={form.formLocked}
+            label="Preload every MCP tool"
+            onCheckedChange={(checked) => {
+              void form.runUpdate({ mcpToolLoading: checked ? 'eager' : 'on-demand' })
+            }}
+          />
+        </SettingsField>
       </SettingsGroup>
     </SettingsStack>
   )

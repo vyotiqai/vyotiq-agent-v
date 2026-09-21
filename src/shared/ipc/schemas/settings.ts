@@ -83,6 +83,14 @@ export const McpServerSchema = z.preprocess(
       allowedTools: z.array(z.string().min(1)).optional(),
       /** Bare MCP tool names that are never exposed or invokable. */
       deniedTools: z.array(z.string().min(1)).optional(),
+      /**
+       * Put this server's tool schemas in every step's catalog instead of
+       * waiting for `request_mcp_tools`. Off by default: a connected server
+       * costs a line of names in the `<mcp_servers>` directory until the agent
+       * asks for it. Turn on for a server the agent uses in nearly every run
+       * and whose schemas are small.
+       */
+      autoLoad: z.boolean().optional(),
       enabled: z.boolean().default(true),
       source: z.enum(['manual', 'marketplace']).optional(),
       packageId: z.string().optional(),
@@ -481,6 +489,15 @@ export const SettingsSchema = z.object({
   customCssPath: z.string().default(''),
   telemetryEnabled: z.boolean().default(false),
   mcpServers: z.array(McpServerSchema).default([]),
+  /**
+   * How connected MCP tool schemas reach the model.
+   * `on-demand` (default): held back until the agent loads them with
+   * `request_mcp_tools` (or calls one, which loads it), so an install the run
+   * never touches costs nothing but its names. `eager`: the earlier behaviour —
+   * every connected tool in every step, measured at 67k tokens on a four-server
+   * install. Per-server `autoLoad` overrides `on-demand` for that server.
+   */
+  mcpToolLoading: z.enum(['on-demand', 'eager']).default('on-demand'),
   keepRecentTurns: z.number().int().min(4).max(50).default(12),
   autoCompactThresholdRatio: z
     .number()
@@ -610,6 +627,7 @@ export const DEFAULT_SETTINGS: Settings = {
   customCssPath: '',
   telemetryEnabled: false,
   mcpServers: [],
+  mcpToolLoading: 'on-demand',
   keepRecentTurns: 12,
   autoCompactThresholdRatio: DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO,
   settingsVersion: SETTINGS_FORMAT_VERSION,

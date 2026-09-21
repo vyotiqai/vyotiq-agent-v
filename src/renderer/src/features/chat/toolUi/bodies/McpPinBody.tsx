@@ -12,7 +12,7 @@ export function McpPinBody({ tool, loading, loadFailed }: ToolBodyProps) {
       <div className={`${TOOL_BODY_PAD} flex flex-wrap items-center gap-2 pb-1`}>
         {data.filter ? <Chip>{data.filter}</Chip> : null}
         {data.pinnedCount !== null ? (
-          <span className="text-2xs tabular-nums text-tertiary">{data.pinnedCount} pinned</span>
+          <span className="text-2xs tabular-nums text-tertiary">{data.pinnedCount} loaded</span>
         ) : null}
         {data.releasedCount !== null ? (
           <span className="text-2xs tabular-nums text-tertiary">

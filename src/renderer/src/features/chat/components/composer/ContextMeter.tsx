@@ -256,6 +256,7 @@ function McpServerRows({ groups }: { groups: ContextToolGroupDetail[] }) {
  */
 function BreakdownRows({ usage }: { usage: ContextUsageState }) {
   const [mcpOpen, setMcpOpen] = useState(false)
+  const [deferredMcpOpen, setDeferredMcpOpen] = useState(false)
   const detail = usage.detail
   if (!detail) {
     const contentTotal = usage.layers.system + usage.layers.history + usage.layers.tools
@@ -284,6 +285,7 @@ function BreakdownRows({ usage }: { usage: ContextUsageState }) {
   }
   const base = usage.window
   const hasMcpServers = detail.tools.mcpByServer.length > 0
+  const deferredMcpServers = detail.tools.deferredMcpByServer ?? []
   return (
     <>
       <BreakdownRow
@@ -336,7 +338,14 @@ function BreakdownRows({ usage }: { usage: ContextUsageState }) {
         color="bg-fg/15"
         muted
         pctOverride={null}
+        onToggle={
+          deferredMcpServers.length > 0 ? () => setDeferredMcpOpen((v) => !v) : undefined
+        }
+        expanded={deferredMcpServers.length > 0 ? deferredMcpOpen : undefined}
       />
+      {deferredMcpOpen && deferredMcpServers.length > 0 ? (
+        <McpServerRows groups={deferredMcpServers} />
+      ) : null}
     </>
   )
 }
