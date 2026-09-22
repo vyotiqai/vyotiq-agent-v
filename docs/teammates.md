@@ -809,6 +809,16 @@ small share of spend next to output tokens, but it is a permanent per-step cost
 and the descriptions are where to trim if it matters. `teammate_task` is one
 schema with three verbs rather than three tools for exactly this reason.
 
+**The judgement is a skill, not a tool description.** `create-teammate`
+(`resources/marketplace/packages/create-teammate/`) is the bundled playbook for
+this family: when a teammate beats an instance or just doing the work, how to
+write a `persona` that is a role with a boundary rather than an adjective, what
+belongs in `identity` instead, what to seed into `index.md`, and what cannot be
+undone (a retired id, a narrowed scope). The tools already refuse what is
+invalid; this is the part that decides whether the teammate is worth keeping.
+It is a skill rather than longer tool descriptions because the descriptions ride
+every request and this is read once, when someone is actually creating one.
+
 **Delete is shared code.** `deleteTeammateCascade` (`agent/teammateAdmin.ts`) is
 used by both `teammate_delete` and `agentProfilesDelete`. The
 cancel-work-then-remove ordering is what keeps live runs from failing as

@@ -103,7 +103,7 @@ describe('skills smoke (bundled + isolated marketplace)', () => {
   })
 
   it('finds the workflow skills plus UI/API skills with SKILL.md', () => {
-    expect(firstPartyDirs.length).toBe(21)
+    expect(firstPartyDirs.length).toBe(22)
     for (const dir of skillDirs) {
       expect(existsSync(join(dir, 'SKILL.md')), dir).toBe(true)
     }
@@ -119,6 +119,7 @@ describe('skills smoke (bundled + isolated marketplace)', () => {
       'analyze-api',
       'api-design',
       'create-skill',
+      'create-teammate',
       // Recurring-loop skills: each spans two connected tools on a cadence.
       'dependency-upgrade',
       'docs',
@@ -297,6 +298,17 @@ describe('skills smoke (bundled + isolated marketplace)', () => {
         '.vyotiq/skills',
         '/create-skill personal'
       ],
+      'create-teammate': [
+        '## instructions',
+        '## verify',
+        '## output',
+        '## when not to use this skill',
+        // The judgement the skill exists to make: a teammate is not an instance,
+        // and most work is neither.
+        'spawn_agent_instance',
+        'teammate_task',
+        'retires the id forever'
+      ],
       goal: [
         '## when to use',
         '## when not to use',
@@ -328,6 +340,7 @@ describe('skills smoke (bundled + isolated marketplace)', () => {
       'persona-builder',
       'review-code',
       'create-skill',
+      'create-teammate',
       'write-tests'
     ]
     for (const id of standalone) {

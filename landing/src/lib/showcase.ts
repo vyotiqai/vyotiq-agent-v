@@ -796,6 +796,7 @@ export const APPROVED_PACKAGES: Record<string, string> = {
   'write-tests': 'Write tests',
   'explain-code': 'Explain code',
   'create-skill': 'Create skill',
+  'create-teammate': 'Create teammate',
   goal: 'Goal',
   'frontend-design': 'Frontend design',
   accessibility: 'Accessibility',
