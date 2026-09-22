@@ -105,3 +105,9 @@ enforce.
 | Fork, result, timeout, exit-before-result | `tests/main/agent/agentTools.runner.test.ts`, `agentTools.bootstrap.integration.test.ts` |
 | Write → catalog → dispatch through `executeTool`, failure and timeout reporting, Agent-mode only | `tests/main/agent/agentTools.dispatch.test.ts` |
 | Gating when approvals are off, content-bound allow, high-risk classification | `tests/main/unit/toolApproval.test.ts` |
+| **In the real app**: a previous session's tool is in the catalog on a fresh launch, and Settings names it | `tests/gui-e2e/agent-built-tools.spec.ts` |
+
+The e2e one earns its place: every other suite calls `build_tool` first, which
+is what resolved the directory and hid the bug above. Reverting
+`resolveAgentToolsDir()` to the synchronous call fails it with an empty
+catalog — verified, not assumed.
