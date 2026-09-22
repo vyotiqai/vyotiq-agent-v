@@ -446,7 +446,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
     logger.error('Background agent run failed after terminal cleanup', {
       scope: 'agent',
       correlationId: runId,
-      error: formatError(err)
+      err
     })
   })
 }

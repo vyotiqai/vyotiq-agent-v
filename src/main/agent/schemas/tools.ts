@@ -871,7 +871,7 @@ const spawnAgentInstanceArgs = z.object({
     .trim()
     .min(1)
     .describe(
-      'Child-only user prompt: complete workstream (outcome, dependent sub-tasks, done-when). No parent transcript.'
+      'Child-only user prompt: the background this workstream needs, since the child sees no parent transcript. The brief fields — outcome, sub-tasks, done-when — are separate arguments composed ahead of this text, so send each of them rather than folding them in here.'
     ),
   outcome: z
     .string()
@@ -1601,6 +1601,12 @@ function formatToolArgsError(name: string, detail: string): string {
   }
   if (name === 'spawn_agent_instance' && /path_scope/i.test(detail)) {
     return `${detail}. path_scope only accepts workspace-relative prefixes inside this workspace — omit it entirely when git worktree isolation is available.`
+  }
+  if (
+    name === 'spawn_agent_instance' &&
+    /(outcome|done_when|sub_tasks)\s*:\s*(Required|Invalid input: expected)/i.test(detail)
+  ) {
+    return `${detail}. spawn_agent_instance takes the brief as four separate arguments: goal (background context), outcome (the one deliverable, a string), sub_tasks (ordered array of strings), done_when (how completion is checked, a string). Resending the same payload fails the same way.`
   }
   return detail || 'Invalid tool arguments'
 }

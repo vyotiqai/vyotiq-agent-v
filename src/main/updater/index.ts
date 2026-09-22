@@ -52,7 +52,8 @@ function broadcast(next: UpdaterStatePayload): void {
       // A destroyed-mid-send window races the isDestroyed() check routinely;
       // record it instead of swallowing silently.
       logger.debug('[updater] broadcast to window failed', {
-        error: errorMessage(err)
+        scope: 'updater',
+        err
       })
     }
   }
@@ -141,7 +142,7 @@ export function applyUpdateCheckSchedule(enabled: boolean): void {
 
   const check = (label: string): void => {
     void checkForAppUpdates({ silent: true }).catch((err) => {
-      logger.warn(`[updater] ${label} check failed`, { error: errorMessage(err) })
+      logger.warn(`[updater] ${label} check failed`, { scope: 'updater', err })
     })
   }
 
@@ -198,7 +199,7 @@ export async function checkForAppUpdates(
       : null
   } catch (err) {
     if (options?.silent) {
-      logger.warn('[updater] background check failed', { error: errorMessage(err) })
+      logger.warn('[updater] background check failed', { scope: 'updater', err })
     } else {
       broadcast({ status: 'error', error: errorMessage(err) })
     }

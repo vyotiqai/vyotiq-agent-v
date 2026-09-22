@@ -595,3 +595,85 @@ describe('write checkpoints', async () => {
     expect(full.files.map((f) => f.path).sort()).toEqual(['a.txt', 'b.txt'])
   })
 })
+
+/**
+ * Run 874dad8f: `str_replace index.md` failed with "File not found", but
+ * `recordPrior` had already run — it has to, since the prior content must be
+ * captured before the write. The speculative entry stayed, so the finalized
+ * checkpoint carried `index.md` as created and undoable for a file that never
+ * existed. The receipt reported it in `wroteFiles`, and Undo deletes what a
+ * `created` entry names.
+ */
+describe('write checkpoint drops entries nothing changed', () => {
+  const signal = new AbortController().signal
+
+  it('does not record a created entry for a failed edit of a missing file', async () => {
+    beginWriteCheckpoint(runDir, workspace)
+    const result = await executeTool(
+      'str_replace',
+      JSON.stringify({ path: 'index.md', old_string: 'a', new_string: 'b' }),
+      workspace,
+      signal,
+      { runDir }
+    )
+    expect(result.ok).toBe(false)
+    expect(result.content).toMatch(/File not found/)
+    expect(finalizeWriteCheckpoint(runDir)).toBeNull()
+    expect(existsSync(join(workspace, 'index.md'))).toBe(false)
+  })
+
+  it('keeps a real write recorded alongside a failed one', async () => {
+    beginWriteCheckpoint(runDir, workspace)
+    await executeTool(
+      'str_replace',
+      JSON.stringify({ path: 'index.md', old_string: 'a', new_string: 'b' }),
+      workspace,
+      signal,
+      { runDir }
+    )
+    const ok = await executeTool(
+      'edit',
+      JSON.stringify({ path: 'real.txt', contents: 'written\n' }),
+      workspace,
+      signal,
+      { runDir }
+    )
+    expect(ok.ok).toBe(true)
+    const meta = finalizeWriteCheckpoint(runDir)
+    expect(meta).not.toBeNull()
+    expect(meta!.files.map((f) => f.path)).toEqual(['real.txt'])
+  })
+
+  it('drops a modified entry when every edit of that file failed', async () => {
+    beginWriteCheckpoint(runDir, workspace)
+    const before = readFileSync(join(workspace, 'a.txt'), 'utf8')
+    const result = await executeTool(
+      'str_replace',
+      JSON.stringify({ path: 'a.txt', old_string: 'nowhere in the file', new_string: 'x' }),
+      workspace,
+      signal,
+      { runDir }
+    )
+    expect(result.ok).toBe(false)
+    expect(finalizeWriteCheckpoint(runDir)).toBeNull()
+    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe(before)
+  })
+
+  it('leaves no index entry behind when every entry was a phantom', async () => {
+    beginWriteCheckpoint(runDir, workspace)
+    await executeTool(
+      'str_replace',
+      JSON.stringify({ path: 'index.md', old_string: 'a', new_string: 'b' }),
+      workspace,
+      signal,
+      { runDir }
+    )
+    finalizeWriteCheckpoint(runDir)
+    const indexPath = join(runDir, 'checkpoints', 'index.json')
+    if (!existsSync(indexPath)) return
+    const index = JSON.parse(readFileSync(indexPath, 'utf8')) as {
+      checkpoints: { id: string }[]
+    }
+    expect(index.checkpoints).toEqual([])
+  })
+})

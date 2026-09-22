@@ -35,6 +35,7 @@ import { codebaseSearchHitPathsFromResult } from './codeindex/query'
 import { readPathArg } from './tools/argAccess'
 import { hasJavaScriptProject, hasTypeScriptProject } from './tools/diagnostics'
 import { ensureToolCallIds } from './dedupeToolCalls'
+import { parseTerminalOutput } from '../../shared/utils/terminalFormat'
 import { yieldToEventLoop } from './tools/walk'
 import type { VerificationTracker } from './feedback/verification'
 export const SOFT_WARN_MUTATION_WITHOUT_DIAGNOSTICS =
@@ -487,7 +488,11 @@ async function runSingleTool(
       // error text lives in content — log its first line, bounded, so logs
       // and chips are actionable without dumping full tool output.
       const firstLine = result.content.split('\n', 1)[0]!.trim()
-      const failureReason = (firstLine || result.summary).slice(0, 300)
+      const failureReason = (
+        toolFailureReasonForLog(call.name, result.content) ||
+        firstLine ||
+        result.summary
+      ).slice(0, 300)
       logger.warn('Tool returned failure', {
         scope: 'agent',
         code: 'TOOL_EXEC',
@@ -532,6 +537,27 @@ function persistToolResult(ctx: ToolStepContext, outcome: ToolOutcome): void {
   for (const ev of outcome.events) {
     if (ev.type === 'tool_result') ctx.appendEvent(toolResultEventForPersistence(ev))
   }
+}
+
+/**
+ * A log-safe failure reason for a handler-returned failure.
+ *
+ * A terminal frame opens with a unique `session_id:` and carries its verdict on
+ * the last line, so the generic first-line rule logged a bare UUID for every
+ * terminal failure — twice in run 874dad8f, and terminal is the run's
+ * most-failed tool. Report the exit code and session status instead, and never
+ * the command: that is a tool argument, which the logging policy keeps off disk.
+ *
+ * Returns '' when the generic first line is already the better reason.
+ */
+function toolFailureReasonForLog(toolName: string, content: string): string {
+  if (toolName !== 'terminal') return ''
+  const parsed = parseTerminalOutput(content)
+  const parts = [
+    parsed.exitCode != null ? `exit ${parsed.exitCode}` : null,
+    parsed.sessionStatus ? `status ${parsed.sessionStatus}` : null
+  ].filter((part): part is string => Boolean(part))
+  return parts.join(' · ')
 }
 
 function abortedToolResult(

@@ -14,7 +14,7 @@ import { invokeMcpTool, parseMcpToolName, getMcpToolDefinition } from '../mcp'
 import { isMcpToolPermitted } from '../../../shared/utils/mcpToolPolicy'
 import { toolRead } from './read'
 import { toolEditAsync } from './edit'
-import { readPathArg, readEditBody, requirePathArg, readString } from './argAccess'
+import { readPathArg, readEditBody, requirePathArg, readString, readTrimmed } from './argAccess'
 import { toolSearch } from './search'
 import { toolGlob } from './glob'
 import { toolGrep } from './grep'
@@ -256,29 +256,34 @@ export function toolFail(
 }
 
 function logToolFailure(name: string, err: unknown): void {
-  const fields: {
-    scope: 'tools'
-    code: 'TOOL_EXEC'
-    tool: string
-    err: unknown
-    kind?: string
-  } = {
-    scope: 'tools',
-    code: 'TOOL_EXEC',
-    tool: name,
-    err
-  }
   const kind = toolFailureKind(err)
-  if (kind) fields.kind = kind
-  const summary = logErrorSummary(err, 'TOOL_EXEC')
-  const line = kind
-    ? `Tool execution failed: ${summary} (${kind})`
-    : `Tool execution failed: ${summary}`
+  // Expected failures are the model exploring or mis-aiming: their messages are
+  // the model-facing remedy, which deliberately carries workspace content (the
+  // path it asked for, the closest matching line, an expected-context preview).
+  // An operator needs the class, not that prose — and the full text is already
+  // in messages.jsonl — so drop the message and the `err` field entirely rather
+  // than trusting the scrubber with file content. Unexpected failures are real
+  // app faults and keep their summary and captured exception.
   if (isExpectedToolError(formatError(err))) {
-    logger.warn(line, fields)
-  } else {
-    logger.error(line, fields)
+    logger.warn(`Tool failed as expected (${kind ?? 'unclassified'})`, {
+      scope: 'tools',
+      code: 'TOOL_EXEC',
+      tool: name,
+      ...(kind ? { kind } : {})
+    })
+    return
   }
+  const summary = logErrorSummary(err, 'TOOL_EXEC')
+  logger.error(
+    kind ? `Tool execution failed: ${summary} (${kind})` : `Tool execution failed: ${summary}`,
+    {
+      scope: 'tools',
+      code: 'TOOL_EXEC',
+      tool: name,
+      err,
+      ...(kind ? { kind } : {})
+    }
+  )
 }
 
 /** Stable, path-free classifier for tool failures (safe for structured logs). */
@@ -292,6 +297,13 @@ function toolFailureKind(err: unknown): string | undefined {
   if (/File too large/i.test(message)) return 'too_large'
   if (/Path escapes workspace/i.test(message)) return 'path_escape'
   if (/Failed to parse tool arguments/i.test(message)) return 'bad_args'
+  // Edit-family aim misses. Classified so the expected-failure line still says
+  // which way the edit missed once its message is dropped.
+  if (/old_string not found/i.test(message)) return 'old_string_no_match'
+  if (/old_string matched \d+ times/i.test(message)) return 'old_string_ambiguous'
+  if (/str_replace left .+ unchanged/i.test(message)) return 'edit_no_change'
+  if (/context\/removal mismatch/i.test(message)) return 'hunk_mismatch'
+  if (/No unified-diff hunks found/i.test(message)) return 'no_hunks'
   if (err.name === 'AbortError') return 'aborted'
   const code = (err as Error & { code?: unknown }).code
   if (typeof code === 'string') return code
@@ -825,17 +837,27 @@ function normalizeParsedToolArgs(
   if (typeof normalized.serverId !== 'string' && typeof normalized.server_id === 'string') {
     normalized.serverId = normalized.server_id
   }
-  if (name === 'spawn_agent_instance' && typeof normalized.goal !== 'string') {
-    const prompt = readString(normalized, 'prompt') ?? readString(normalized, 'description')
-    if (prompt) {
-      normalized.goal = prompt
-      // Legacy alias calls (Task/subagent) carry only a free-form prompt.
-      // Derive the structured fields the strict schema requires so the call
-      // reaches the handler, which re-validates with its own actionable errors.
-      if (typeof normalized.outcome !== 'string') normalized.outcome = prompt
-      if (typeof normalized.done_when !== 'string') normalized.done_when = prompt
-      if (!Array.isArray(normalized.sub_tasks) || normalized.sub_tasks.length === 0) {
-        normalized.sub_tasks = [prompt]
+  if (name === 'spawn_agent_instance') {
+    // Two callers arrive without the full structured brief. Legacy alias calls
+    // (Task/subagent) carry only a free-form prompt; models that read `goal` as
+    // "the whole brief" send a rich goal and omit its siblings (run 874dad8f:
+    // 6/6 spawns rejected with `outcome: Required`, the model re-sending the
+    // identical payload because a bare Zod complaint names no remedy). Derive
+    // whatever is missing from the goal text so the brief still composes — the
+    // handler re-validates with its own actionable errors.
+    const goal =
+      readTrimmed(normalized, 'goal') ||
+      readTrimmed(normalized, 'prompt') ||
+      readTrimmed(normalized, 'description')
+    if (goal) {
+      normalized.goal = goal
+      if (!readTrimmed(normalized, 'outcome')) normalized.outcome = goal
+      if (!readTrimmed(normalized, 'done_when')) normalized.done_when = goal
+      if (
+        !Array.isArray(normalized.sub_tasks) ||
+        normalized.sub_tasks.filter((t) => typeof t === 'string' && t.trim()).length === 0
+      ) {
+        normalized.sub_tasks = [goal]
       }
     }
   }

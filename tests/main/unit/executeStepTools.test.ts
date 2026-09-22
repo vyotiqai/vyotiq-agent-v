@@ -1057,6 +1057,40 @@ describe('groupStepToolCalls', () => {
     warnSpy.mockRestore()
   })
 
+  /**
+   * A terminal frame opens with a unique `session_id:` and puts its verdict on
+   * the last line, so first-line logging recorded a bare UUID as the reason for
+   * every terminal failure (run 874dad8f, twice). The command must stay out —
+   * it is a tool argument, which the logging policy keeps off disk.
+   */
+  it('logs exit code and status for a terminal failure, never the session id or command', async () => {
+    const { logger } = await import('@shared/logger')
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    executeTool.mockResolvedValue({
+      ok: false,
+      summary: 'cd aether; cargo build --release',
+      content: `session_id: b757085e-377a-498a-bc77-118b4691cc2b
+status: done
+command: cd aether; cargo build --release
+cwd: /home/me/OS
+shell: powershell
+BUILD_EXIT=101
+
+exit_code: 101`
+    })
+    const { ctx } = makeCtx(new AbortController().signal)
+    await executeStepToolCalls(
+      [{ id: 'x2', name: 'terminal', arguments: '{"command":"cargo build"}' }],
+      ctx
+    )
+    const failLog = warnSpy.mock.calls.find(([msg]) => msg === 'Tool returned failure')
+    const fields = failLog?.[1] as { reason?: string }
+    expect(fields.reason).toBe('exit 101 · status done')
+    expect(fields.reason).not.toMatch(/session_id|b757085e/)
+    expect(fields.reason).not.toMatch(/cargo build/)
+    warnSpy.mockRestore()
+  })
+
   it('bounds a multi-line failure log to its first line and falls back to summary', async () => {
     const { logger } = await import('@shared/logger')
     const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})

@@ -48,9 +48,18 @@ const YIELD_EVERY_DIRS = 64
 /** Effective walk cap — overridable by tests so truncation is reachable cheaply. */
 let snapshotFileCap = SNAPSHOT_FILE_CAP
 
+/**
+ * Roots already reported as over the cap. Truncation is a property of the tree,
+ * not of the step, and both walks of every mutating tool call re-derive it — 25
+ * of one session's 49 warnings were this one line repeating. Say it once per
+ * root so it stays findable.
+ */
+const truncationWarnedRoots = new Set<string>()
+
 /** @internal Test hook. */
 export function setSnapshotFileCapForTests(cap: number | null): void {
   snapshotFileCap = cap ?? SNAPSHOT_FILE_CAP
+  truncationWarnedRoots.clear()
 }
 
 /**
@@ -146,12 +155,15 @@ async function walkWorkspace(root: string, cap: number): Promise<WalkResult> {
       }
     }
   }
-  if (out.length >= cap) truncated = true
-  if (truncated) {
+  // Directories still queued are directories never walked. Testing `out.length`
+  // instead flagged a tree of exactly `cap` files, which the walk covered in
+  // full, as partial — and a partial diff suppresses genuine creates.
+  if (queue.length > 0) truncated = true
+  if (truncated && !truncationWarnedRoots.has(realRoot)) {
+    truncationWarnedRoots.add(realRoot)
     logger.warn('Workspace snapshot file cap reached; checkpoint diff may be incomplete', {
       scope: 'workspaceMutationWatch',
-      cap,
-      root: realRoot
+      cap
     })
   }
   return { files: out, truncated }

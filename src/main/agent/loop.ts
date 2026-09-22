@@ -3049,7 +3049,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               correlationId: runId,
               provider: providerId,
               step,
-              message: message.slice(0, 280)
+              providerMessage: message.slice(0, 280)
             })
             // A retriable status that exhausted its attempts (429/408/5xx) is a
             // transient provider-side wait — interrupted + Continue, not a hard error.

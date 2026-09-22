@@ -426,11 +426,86 @@ export class InvokeWriteCheckpoint {
     }
   }
 
+  /**
+   * Drop entries the turn proved changed nothing.
+   *
+   * `recordPrior` runs *before* the write it is protecting, because the prior
+   * content has to be captured while it still exists. When the write then
+   * fails, the speculative entry stays: run 874dad8f's `str_replace index.md`
+   * failed with "File not found" and left `index.md` recorded created and
+   * undoable for a file that never existed. It reached the Changes panel, and
+   * the receipt told the user (and any awaiting parent) the run wrote it. Undo
+   * deletes what a `created` entry names, so had anything else produced that
+   * path later, Undo would have destroyed it.
+   *
+   * Only disk state decides — an entry survives unless the workspace itself
+   * shows no net change, so a real mutation can never be dropped here. Two
+   * kinds are deliberately left alone: non-undoable entries (a directory delete
+   * too large to snapshot) are real changes that simply cannot be reverted, and
+   * `deleted` entries are recorded by callers with their own lifecycles
+   * (`recordObservedMutation` from the post-tool watcher, instance merges)
+   * rather than by a snapshot taken ahead of a write that might fail.
+   */
+  private dropUnchangedEntries(): void {
+    for (const [rel, file] of [...this.files]) {
+      if (!file.undoable) continue
+      if (file.action === 'deleted') continue
+      let resolved: string
+      try {
+        resolved = resolveInsideWorkspace(this.workspaceRoot, file.path)
+      } catch {
+        continue
+      }
+      if (file.action === 'created') {
+        // Nothing at the path it claims to have created.
+        if (!existsSync(resolved)) this.files.delete(rel)
+        continue
+      }
+      // `modified` snapshotted the prior content, so identical bytes on disk
+      // mean the write never landed.
+      let priorHash: string | undefined
+      try {
+        priorHash = hashExistingFile(blobPathFor(this.checkpointDir(), file.path))
+      } catch {
+        continue
+      }
+      if (!priorHash) continue
+      if (hashExistingFile(resolved) === priorHash) this.files.delete(rel)
+    }
+  }
+
+  /** Remove a mid-turn persisted checkpoint that finalize found to be empty. */
+  private discardPersistedCheckpoint(): void {
+    try {
+      const index = loadIndex(this.runDir)
+      const next = index.checkpoints.filter((c) => c.id !== this.id)
+      if (next.length !== index.checkpoints.length) {
+        saveIndex(this.runDir, { ...index, checkpoints: next })
+      }
+      rmSync(this.checkpointDir(), { recursive: true, force: true })
+    } catch (err) {
+      logger.warn('Failed to discard an empty write checkpoint', {
+        scope: 'agent',
+        correlationId: basename(this.runDir),
+        checkpointId: this.id,
+        err
+      })
+    }
+  }
+
   /** Persist if any files were recorded; returns meta or null. */
   finalize(): WriteCheckpointMeta | null {
     if (this.finalized) return null
     this.finalized = true
     if (this.files.size === 0) return null
+    this.dropUnchangedEntries()
+    if (this.files.size === 0) {
+      // persistIncremental may already have written this id to disk mid-turn.
+      // Leaving it there would keep the phantom in the Changes panel under a
+      // checkpoint finalize has disowned.
+      this.discardPersistedCheckpoint()
+      return null
+    }
     this.stampPostWriteHashes()
 
     const meta: WriteCheckpointMeta = {

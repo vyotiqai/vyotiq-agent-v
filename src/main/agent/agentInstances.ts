@@ -573,7 +573,13 @@ export async function spawnAgentInstance(
   if (pathScope?.length) {
     briefLines.push(`Paths: ${pathScope.join(', ')}`)
   }
-  briefLines.push(goalText)
+  // The goal is appended verbatim as the child's background. When the caller's
+  // goal *was* the brief — the Task/subagent alias sends a single prompt and the
+  // arg normalizer backfills the missing brief fields from it — appending it
+  // again would compose the same text into the child prompt up to four times.
+  if (goalText !== outcome && goalText !== doneWhen && !subTasks.includes(goalText)) {
+    briefLines.push(goalText)
+  }
   const composedGoal = briefLines.join('\n')
   registerChildInstance(input.parentRunId, childRunId, input.workspacePath)
   const releaseChildIpc = registerRunIpcSender(childRunId, wc)
