@@ -248,22 +248,40 @@ describe('AgentContextCard', () => {
     expect(gitInitSpy).not.toHaveBeenCalled()
   })
 
-  it('runs git init for this workspace on click, and waits for the push', async () => {
+  it('runs git init for this workspace on click, then re-reads instead of waiting on a push', async () => {
     agentContextSpy.mockResolvedValue({ ok: true, data: { ...fixture, branch: null } })
     render(<AgentContextCard workspacePath="C:/code/demo" />)
     await screen.findByText('Not a repo')
 
+    // The watcher does not reliably carry a `.git` that has just been created:
+    // on Windows this strip sat on "Not a repo" for the full timeout over a
+    // repository that existed on disk. So the click re-reads what it changed.
+    agentContextSpy.mockResolvedValue({ ok: true, data: { ...fixture, branch: 'main' } })
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Initialize' }))
     })
     expect(gitInitSpy).toHaveBeenCalledWith({ workspacePath: 'C:/code/demo' })
-    // The card does not invent the new branch; it renders what main pushes.
-    expect(agentContextSpy).toHaveBeenCalledTimes(1)
-    expect(screen.queryByText('main')).toBeNull()
+    expect(agentContextSpy).toHaveBeenCalledTimes(2)
+    expect(await screen.findByText('main')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Initialize' })).toBeNull()
+  })
 
+  it('renders only what main answers after an init, never a branch it assumed', async () => {
+    agentContextSpy.mockResolvedValue({ ok: true, data: { ...fixture, branch: null } })
+    render(<AgentContextCard workspacePath="C:/code/demo" />)
+    await screen.findByText('Not a repo')
+
+    // Init reported success but the re-read still says there is no repository.
+    // The card has no business inventing a branch to cover that gap.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Initialize' }))
+    })
+    expect(screen.queryByText('main')).toBeNull()
+    expect(screen.getByText('Not a repo')).toBeTruthy()
+
+    // A push arriving afterwards is still applied.
     emit({ workspacePath: 'C:/code/demo', context: { ...fixture, branch: 'main' } })
     expect(screen.getByText('main')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Initialize' })).toBeNull()
   })
 
   it('shows the real reason a git init failed and keeps the button', async () => {

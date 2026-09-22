@@ -18,9 +18,23 @@ let launched: LaunchedApp
 let stripWorkspace: string
 let panelWorkspace: string
 
-/** The branch git actually chose, read from disk instead of assumed. */
-function branchOnDisk(workspacePath: string): string {
-  const head = readFileSync(join(workspacePath, '.git', 'HEAD'), 'utf8').trim()
+/**
+ * The branch git actually chose, read from disk instead of assumed, or null
+ * while the repository is still being written.
+ *
+ * `.git` appears before `HEAD` is written inside it, and the click that starts
+ * the init is awaited only as far as dispatch — so waiting on the directory is
+ * a weaker precondition than reading the file. On Windows that gap is wide
+ * enough to observe: polling on `.git` alone failed here with ENOENT on
+ * `.git\HEAD`. Poll on this instead, so the wait matches the read.
+ */
+function branchOnDisk(workspacePath: string): string | null {
+  let head: string
+  try {
+    head = readFileSync(join(workspacePath, '.git', 'HEAD'), 'utf8').trim()
+  } catch {
+    return null
+  }
   const match = /^ref: refs\/heads\/(.+)$/.exec(head)
   if (!match) throw new Error(`unexpected HEAD: ${head}`)
   return match[1]!
@@ -91,9 +105,9 @@ test('the context strip initializes a repository on click', async () => {
 
   // Real repository on disk, and the strip reports the branch git chose.
   await expect
-    .poll(() => existsSync(join(stripWorkspace, '.git')), { timeout: 15_000 })
-    .toBe(true)
-  const branch = branchOnDisk(stripWorkspace)
+    .poll(() => branchOnDisk(stripWorkspace), { timeout: 15_000 })
+    .not.toBeNull()
+  const branch = branchOnDisk(stripWorkspace)!
   await expect(card).toContainText(branch, { timeout: 15_000 })
   await expect(card).not.toContainText('Not a repo')
   await expect(card.getByRole('button', { name: 'Initialize' })).toHaveCount(0)

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { WorkspaceAgentContextResult } from '@shared/ipc/schemas/agent'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { useGitInit } from './useGitInit'
@@ -36,8 +36,10 @@ type Reading = {
  * IPC failure renders nothing (never fake data).
  *
  * Read-only with one exception: when the workspace is not a repository the
- * branch reading offers `git init`, on an explicit click. The strip then
- * updates from the watcher like any other change.
+ * branch reading offers `git init`, on an explicit click. That click re-reads
+ * the summary itself — a watcher does not reliably carry a `.git` that has
+ * just been created, which left the strip reading "Not a repo" over a
+ * repository that existed.
  *
  * Four label/value readings in one frame. The workspace name is deliberately
  * absent: the empty-state heading directly above already says
@@ -46,6 +48,10 @@ type Reading = {
 export function AgentContextCard({ workspacePath }: { workspacePath: string }) {
   const [context, setContext] = useState<WorkspaceAgentContextResult | null>(null)
   const [failed, setFailed] = useState(false)
+  // Bumped to re-run the read below. Re-running it rather than firing a second
+  // fetch keeps one code path, with its cancelled/pushed guards, as the only
+  // thing that writes `context`.
+  const [reloadToken, setReloadToken] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -82,11 +88,19 @@ export function AgentContextCard({ workspacePath }: { workspacePath: string }) {
         if (!cancelled && !pushed) setFailed(true)
       })
     return stop
-  }, [workspacePath])
+  }, [workspacePath, reloadToken])
 
-  // The watcher pushes the new branch once `.git` lands, so there is nothing
-  // to re-read here on success.
-  const gitInit = useGitInit(workspacePath)
+  // Re-read after an init instead of waiting for the watcher to notice `.git`.
+  // The watcher is the only refresh on every other path, but it does not carry
+  // a directory that has just been created: on Windows the strip still read
+  // "Not a repo" fifteen seconds after the repository existed on disk, so the
+  // one surface that caused the change refreshes what it changed. The
+  // ChangesPanel already did this; only this strip assumed the push. A push
+  // that arrives afterwards still applies.
+  const gitInit = useGitInit(
+    workspacePath,
+    useCallback(() => setReloadToken((token) => token + 1), [])
+  )
 
   if (failed) return null
 
