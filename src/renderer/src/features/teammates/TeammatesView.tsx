@@ -155,7 +155,7 @@ export function TeammatesView({
     >
       <PageHeader
         bordered={false}
-        className={cn('shrink-0 border-b border-border/30 bg-bg py-3', CHAT_GUTTER)}
+        className={cn('shrink-0 border-b border-border/40 bg-bg py-3', CHAT_GUTTER)}
         title="Teammates"
         description="Persistent agents with their own memory, model and queue."
         trailing={

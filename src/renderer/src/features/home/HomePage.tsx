@@ -252,7 +252,7 @@ export function HomePage({
         <div className="mx-auto w-full max-w-3xl px-5 py-10">
           <section
             aria-labelledby="home-empty-heading"
-            className="rounded-lg border border-border/50 bg-card/40 px-6 py-16 text-center"
+            className="rounded-lg border border-border bg-card/40 px-6 py-16 text-center"
           >
             <Icon name="folderPlus" size={26} className="mx-auto text-muted" aria-hidden="true" />
             <h1 id="home-empty-heading" className="mt-4 text-heading font-medium text-fg-strong">

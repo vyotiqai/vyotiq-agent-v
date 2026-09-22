@@ -37,7 +37,7 @@ export function SettingsBackButton({
     <button
       ref={backRef}
       type="button"
-      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-muted vy-transition hover:bg-surface/50 hover:text-fg"
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-muted vy-transition hover:bg-surface hover:text-fg"
       onClick={onClose}
     >
       <Icon name="chevron" size={14} className="rotate-90" />

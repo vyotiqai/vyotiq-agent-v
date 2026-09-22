@@ -131,7 +131,10 @@ describe('ChangeSummary resolve mode', () => {
     const root = container.querySelector('[data-change-summary="panel"]')
     expect(root).toBeTruthy()
     expect(root?.className).toContain('rounded-md')
-    expect(root?.className).toContain('border-border/50')
+    // Full-strength `border border-border` is the house container outline, and
+    // the Changes panel this is meant to match now uses it too. The old `/50`
+    // pinned one of eight border opacities, not the thing being asserted.
+    expect(root?.className).toContain('border border-border')
     expect(root?.className).toContain('bg-surface')
   })
 

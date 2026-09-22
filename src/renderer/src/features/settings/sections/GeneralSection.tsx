@@ -121,7 +121,7 @@ export function GeneralSection({
                     'rounded-md border px-3 py-2 text-sm vy-transition',
                     selected
                       ? 'border-fg bg-surface text-fg-strong ring-1 ring-inset ring-border-strong'
-                      : 'border-border text-fg hover:bg-surface/50'
+                      : 'border-border text-fg hover:bg-surface'
                   )}
                 >
                   {option.label}
@@ -356,7 +356,7 @@ export function GeneralSection({
               {form.crashSnippets.map((snippet, i) => (
                 <li
                   key={`${snippet.at}-${snippet.kind}-${i}`}
-                  className="rounded-md border border-border/60 bg-bg px-2.5 py-1.5 text-caption text-secondary"
+                  className="rounded-md border border-border bg-bg px-2.5 py-1.5 text-caption text-secondary"
                 >
                   <span className="font-medium text-fg">
                     {snippet.kind === 'renderer' ? 'Renderer' : 'Child'} · {snippet.reason}

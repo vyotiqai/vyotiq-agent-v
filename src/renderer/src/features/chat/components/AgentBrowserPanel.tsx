@@ -374,13 +374,13 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         address bar and toolbar for manual navigation when user control is enabled.
       </p>
       {tabs.length > 0 ? (
-        <div className="flex items-center gap-0.5 overflow-x-auto border-b border-border/30 bg-bg px-1.5 pt-1.5">
+        <div className="flex items-center gap-0.5 overflow-x-auto border-b border-border/40 bg-bg px-1.5 pt-1.5">
           {tabs.map((tab) => (
             <div
               key={tab.id}
               className={cn(
                 'group flex max-w-[10rem] shrink-0 items-center gap-0.5 rounded-t-md pr-0.5',
-                tab.active ? 'bg-surface' : 'hover:bg-surface/60'
+                tab.active ? 'bg-surface' : 'hover:bg-surface'
               )}
             >
               <button
@@ -543,7 +543,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
 
           {historyOpen && recentGroups.length > 0 ? (
             <div
-              className="absolute left-0 right-0 top-full z-dropdown mt-1 max-h-[min(50vh,320px)] overflow-auto rounded-lg border border-border/60 bg-surface py-1 shadow-menu"
+              className="absolute left-0 right-0 top-full z-dropdown mt-1 max-h-[min(50vh,320px)] overflow-auto rounded-lg border border-border bg-surface py-1 shadow-menu"
               data-browser-history-dropdown
             >
               {recentGroups.map((group) => (
@@ -577,7 +577,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         </label>
         <select
           id="agent-browser-viewport"
-          className="h-7 max-w-[7.5rem] shrink-0 rounded-md border border-border/40 bg-surface px-1.5 text-xs text-fg"
+          className="h-7 max-w-[7.5rem] shrink-0 rounded-md border border-border bg-surface px-1.5 text-xs text-fg"
           value={viewportPreset}
           aria-label="Viewport size"
           onChange={(event) => {
@@ -612,14 +612,14 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
             </svg>
           </button>
           {menuOpen ? (
-            <div className="absolute right-0 top-full z-dropdown mt-1 min-w-[13rem] rounded-lg border border-border/60 bg-surface py-1 shadow-menu">
+            <div className="absolute right-0 top-full z-dropdown mt-1 min-w-[13rem] rounded-lg border border-border bg-surface py-1 shadow-menu">
               <MenuButton
                 onClick={() => handleMenuAction('screenshot')}
                 disabled={!hasPage}
               >
                 Take Screenshot
               </MenuButton>
-              <div className="my-1 border-t border-border/30" />
+              <div className="my-1 border-t border-border/40" />
               <MenuButton onClick={() => handleMenuAction('reload')} disabled={!hasPage}>
                 Reload
               </MenuButton>
@@ -632,7 +632,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
               >
                 {state.pip ? 'Return browser to panel' : 'Pop out to floating window'}
               </MenuButton>
-              <div className="my-1 border-t border-border/30" />
+              <div className="my-1 border-t border-border/40" />
               <MenuButton onClick={() => handleMenuAction('recents-bar')}>
                 <span className="flex-1">Show Recents Bar</span>
                 <span
@@ -650,7 +650,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
                   />
                 </span>
               </MenuButton>
-              <div className="my-1 border-t border-border/30" />
+              <div className="my-1 border-t border-border/40" />
               <MenuButton onClick={() => handleMenuAction('clear-history')}>
                 Clear Browsing History
               </MenuButton>
@@ -658,7 +658,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
                 Clear Cookies
               </MenuButton>
               <MenuButton onClick={() => handleMenuAction('clear-cache')}>Clear Cache</MenuButton>
-              <div className="my-1 border-t border-border/30" />
+              <div className="my-1 border-t border-border/40" />
               <MenuButton onClick={() => handleMenuAction('close')}>Close browser</MenuButton>
             </div>
           ) : null}
@@ -667,7 +667,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
 
       {showAgentBanner ? (
         <div
-          className="flex items-center justify-between gap-2 border-b border-border/30 bg-accent/10 px-2.5 py-1.5 text-caption"
+          className="flex items-center justify-between gap-2 border-b border-border/40 bg-accent/10 px-2.5 py-1.5 text-caption"
           role="status"
         >
           <span className="text-fg/90">
@@ -676,7 +676,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
           {state.userControl ? (
             <button
               type="button"
-              className="shrink-0 rounded-md border border-border/50 bg-surface px-2 py-0.5 text-2xs font-medium text-fg hover:bg-surface-2"
+              className="shrink-0 rounded-md border border-border bg-surface px-2 py-0.5 text-2xs font-medium text-fg hover:bg-surface-2"
               onClick={() => void window.vyotiq.browserReleaseControl?.()}
             >
               Return to agent
@@ -684,7 +684,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
           ) : (
             <button
               type="button"
-              className="shrink-0 rounded-md border border-border/50 bg-surface px-2 py-0.5 text-2xs font-medium text-fg hover:bg-surface-2"
+              className="shrink-0 rounded-md border border-border bg-surface px-2 py-0.5 text-2xs font-medium text-fg hover:bg-surface-2"
               onClick={() => void window.vyotiq.browserTakeControl?.()}
             >
               Take control
@@ -694,7 +694,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
       ) : null}
 
       {recentsBar ? (
-        <div className="flex items-center gap-1 border-b border-border/30 px-2 py-1 text-caption text-muted">
+        <div className="flex items-center gap-1 border-b border-border/40 px-2 py-1 text-caption text-muted">
           <span className="px-1">Recents</span>
           {recents.slice(0, 5).map((item) => (
             <button
@@ -732,7 +732,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         ref={viewportRef}
         className={cn(
           'relative bg-bg',
-          viewportFitted ? 'min-h-0 h-full' : 'shrink-0 overflow-hidden border border-border/40'
+          viewportFitted ? 'min-h-0 h-full' : 'shrink-0 overflow-hidden border border-border'
         )}
         style={
           viewportFitted

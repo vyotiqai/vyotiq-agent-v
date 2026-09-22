@@ -182,7 +182,7 @@ export function ContextMenu({
     >
       {items.map((item, index) =>
         item.type === 'separator' ? (
-          <li key={item.id} role="separator" className="my-1 border-t border-border/60" />
+          <li key={item.id} role="separator" className="my-1 border-t border-border/40" />
         ) : (
           <li key={item.id} role="none">
             <button

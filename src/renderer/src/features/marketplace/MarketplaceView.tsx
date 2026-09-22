@@ -178,7 +178,7 @@ export function MarketplaceView({
       <PageHeader
         bordered={false}
         className={cn(
-          'shrink-0 border-b border-border/30 bg-bg py-3',
+          'shrink-0 border-b border-border/40 bg-bg py-3',
           CHAT_GUTTER
         )}
         title="Marketplace"
@@ -229,7 +229,7 @@ export function MarketplaceView({
             {onClose ? (
               <button
                 type="button"
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm text-muted vy-transition hover:bg-surface/50 hover:text-fg focus-visible:vy-focus-ring"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm text-muted vy-transition hover:bg-surface hover:text-fg focus-visible:vy-focus-ring"
                 onClick={onClose}
               >
                 <Icon name="chevron" size={14} className="-rotate-90" />

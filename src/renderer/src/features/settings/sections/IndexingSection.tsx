@@ -42,7 +42,7 @@ function IndexProgressPanel({ status }: { status: CodeIndexRuntimeStatus | null 
       <p className="m-0 text-xs text-secondary">{phaseLabel(status)}</p>
       {showBar && pct != null ? (
         <div
-          className="h-1.5 w-full overflow-hidden rounded-sm bg-border"
+          className="h-1.5 w-full overflow-hidden rounded-sm bg-border/40"
           role="progressbar"
           aria-valuemin={0}
           aria-valuemax={100}

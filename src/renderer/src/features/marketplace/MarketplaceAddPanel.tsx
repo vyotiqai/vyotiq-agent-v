@@ -130,7 +130,7 @@ export function MarketplaceAddPanel({
         </Button>
 
         {detectResult ? (
-          <div className="flex flex-col gap-2 rounded-md border border-border/60 bg-bg px-2 py-2">
+          <div className="flex flex-col gap-2 rounded-md border border-border bg-bg px-2 py-2">
             <p className="m-0 text-caption text-secondary">
               Kind: {detectResult.kind} · confidence: {detectResult.confidence}
               {detectResult.duplicate ? ' · already configured' : ''}

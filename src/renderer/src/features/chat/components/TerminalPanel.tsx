@@ -554,7 +554,7 @@ export function TerminalPanel({
                     isReadOnly={isMirrorSession}
                   />
                 </div>
-                <div className="w-px shrink-0 bg-border/50" />
+                <div className="w-px shrink-0 bg-border/40" />
                 <div className="min-h-0 min-w-0 flex-1">
                   <PtySessionView
                     sessionId={splitId}

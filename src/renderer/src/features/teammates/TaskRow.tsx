@@ -50,7 +50,7 @@ export function TaskRow({
 
   return (
     <div
-      className="group flex items-start gap-2 rounded-lg px-2 py-2 vy-transition hover:bg-surface/40"
+      className="group flex items-start gap-2 rounded-lg px-2 py-2 vy-transition hover:bg-surface/30"
       data-delegated-task={task.status}
     >
       {teammateName ? (

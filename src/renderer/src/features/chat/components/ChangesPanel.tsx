@@ -1423,7 +1423,7 @@ export const ChangesPanel = memo(function ChangesPanel({
               actions={gitInitAction}
             />
           ) : (
-          <ul className="m-0 min-h-0 flex-1 list-none overflow-auto rounded-md border border-border/50 bg-surface p-0">
+          <ul className="m-0 min-h-0 flex-1 list-none overflow-auto rounded-md border border-border bg-surface p-0">
             <li className="border-b border-border/40 px-3 py-1.5 text-caption text-fg">
               {commits.length} {commits.length === 1 ? 'Commit' : 'Commits'}
             </li>
@@ -1431,7 +1431,7 @@ export const ChangesPanel = memo(function ChangesPanel({
               <li key={c.sha} className="border-b border-border/40 last:border-b-0">
                 <button
                   type="button"
-                  className="flex w-full min-w-0 flex-col gap-0.5 px-3 py-1.5 text-left text-caption hover:bg-surface/60"
+                  className="flex w-full min-w-0 flex-col gap-0.5 px-3 py-1.5 text-left text-caption hover:bg-surface/30"
                   onClick={() => {
                     setSelectedCommit(c)
                     setExpanded(new Set())
@@ -1466,7 +1466,7 @@ export const ChangesPanel = memo(function ChangesPanel({
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto" data-diff-scroll-root>
             {displayScope === 'commits' && selectedCommit ? (
-              <div className="flex shrink-0 items-center gap-2 rounded-md border border-border/50 bg-surface px-3 py-1.5 text-caption">
+              <div className="flex shrink-0 items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-caption">
                 <button
                   type="button"
                   className="shrink-0 text-muted hover:text-fg"
@@ -1617,15 +1617,15 @@ export const ChangesPanel = memo(function ChangesPanel({
                 </div>
                 {conflictSides?.path === selectedPath ? (
                   <div className="grid max-h-56 grid-cols-1 gap-1 overflow-auto md:grid-cols-3">
-                    <pre className="m-0 overflow-auto whitespace-pre-wrap rounded border border-border/50 bg-bg p-1.5 font-mono text-2xs text-fg">
+                    <pre className="m-0 overflow-auto whitespace-pre-wrap rounded border border-border bg-bg p-1.5 font-mono text-2xs text-fg">
                       <span className="block font-medium text-muted">Ours</span>
                       {conflictSides.ours || '∅'}
                     </pre>
-                    <pre className="m-0 overflow-auto whitespace-pre-wrap rounded border border-border/50 bg-bg p-1.5 font-mono text-2xs text-fg">
+                    <pre className="m-0 overflow-auto whitespace-pre-wrap rounded border border-border bg-bg p-1.5 font-mono text-2xs text-fg">
                       <span className="block font-medium text-muted">Theirs</span>
                       {conflictSides.theirs || '∅'}
                     </pre>
-                    <pre className="m-0 overflow-auto whitespace-pre-wrap rounded border border-border/50 bg-bg p-1.5 font-mono text-2xs text-fg">
+                    <pre className="m-0 overflow-auto whitespace-pre-wrap rounded border border-border bg-bg p-1.5 font-mono text-2xs text-fg">
                       <span className="block font-medium text-muted">Base</span>
                       {conflictSides.base || '∅'}
                     </pre>

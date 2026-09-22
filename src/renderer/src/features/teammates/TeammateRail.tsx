@@ -113,7 +113,7 @@ export function TeammateRail({
           className={cn(
             'flex items-center gap-2 rounded-lg px-2 py-2 text-left text-sm vy-transition',
             'focus-visible:vy-focus-ring',
-            inboxActive ? SIDEBAR_NAV_ACTIVE : 'text-secondary hover:bg-surface/40 hover:text-fg'
+            inboxActive ? SIDEBAR_NAV_ACTIVE : 'text-secondary hover:bg-surface hover:text-fg'
           )}
           onClick={onOpenInbox}
         >
@@ -179,7 +179,7 @@ export function TeammateRail({
                       ? SIDEBAR_NAV_ACTIVE
                       : selected
                         ? 'bg-surface/40 text-fg'
-                        : 'hover:bg-surface/40'
+                        : 'hover:bg-surface/30'
                   )}
                   onClick={() => onSelect(profile.id)}
                 >

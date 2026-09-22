@@ -219,7 +219,7 @@ function BreakdownRow({
       type="button"
       onClick={onToggle}
       aria-expanded={expanded}
-      className="flex w-full items-center gap-2 rounded text-left vy-transition hover:bg-surface/60"
+      className="flex w-full items-center gap-2 rounded text-left vy-transition hover:bg-surface"
     >
       {row}
     </button>

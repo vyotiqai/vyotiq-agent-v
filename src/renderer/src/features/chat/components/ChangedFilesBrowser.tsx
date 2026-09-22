@@ -288,7 +288,7 @@ function FileRow({
         className={cn(
           'sticky top-0 z-sticky flex w-full min-w-0 items-center gap-1.5 border-b border-transparent bg-surface px-3 py-1.5 text-xs',
           expanded && 'border-border/40',
-          selected ? 'bg-accent/10' : 'hover:bg-surface-2/80'
+          selected ? 'bg-accent/10' : 'hover:bg-surface-2'
         )}
       >
         <button
@@ -346,7 +346,7 @@ function FileRow({
         {file.statusLabel ? (
           <span
             className={cn(
-              'shrink-0 rounded-sm border border-border/60 bg-surface-2/40 px-1 leading-4 text-2xs',
+              'shrink-0 rounded-sm border border-border bg-surface-2/40 px-1 leading-4 text-2xs',
               file.statusTone === 'success' ? 'text-success' : 'text-muted'
             )}
           >
@@ -449,7 +449,7 @@ export function ChangedFilesBrowser({
   return (
     <div
       className={cn(
-        'flex flex-col overflow-hidden rounded-md border border-border/50 bg-surface',
+        'flex flex-col overflow-hidden rounded-md border border-border bg-surface',
         ownScroll ? 'min-h-0' : 'shrink-0',
         className
       )}

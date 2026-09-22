@@ -166,7 +166,7 @@ export const ChangeSummary = memo(function ChangeSummary({
       : `${visibleFiles.length} ${visibleFiles.length === 1 ? 'File Changed' : 'Files Changed'}`
   /** Match ChangedFilesBrowser shell when embedded in the Changes panel. */
   const panelSurface =
-    'w-full overflow-hidden rounded-md border border-border/50 bg-surface'
+    'w-full overflow-hidden rounded-md border border-border bg-surface'
   const panelHeader =
     'flex shrink-0 items-center border-b border-border/40 px-3 py-1.5 text-caption text-fg'
 
@@ -192,7 +192,7 @@ export const ChangeSummary = memo(function ChangeSummary({
         </div>
         <ul className="m-0 list-none p-0">
           {visible.map((file) => (
-            <li key={file.path} className="min-w-0 [&+&]:border-t [&+&]:border-border/60">
+            <li key={file.path} className="min-w-0 [&+&]:border-t [&+&]:border-border/40">
               <div className="flex min-w-0 items-center gap-2 px-3 py-1.5 text-xs">
                 <FileBadge path={file.path} />
                 {onOpenChanges ? (
@@ -219,7 +219,7 @@ export const ChangeSummary = memo(function ChangeSummary({
         {canToggleMore ? (
           <button
             type="button"
-            className="flex w-full items-center border-t border-border/60 px-3 py-1.5 text-left text-xs text-tertiary vy-transition hover:bg-surface/40 hover:text-fg"
+            className="flex w-full items-center border-t border-border/40 px-3 py-1.5 text-left text-xs text-tertiary vy-transition hover:bg-surface hover:text-fg"
             onClick={() => setShowAll((prev) => !prev)}
             aria-expanded={showAll}
           >
@@ -301,7 +301,7 @@ export const ChangeSummary = memo(function ChangeSummary({
           const showResolve = canResolve && isResolvablePath(file.path) && !conflicted
 
           return (
-            <li key={file.path} className="min-w-0 [&+&]:border-t [&+&]:border-border/60">
+            <li key={file.path} className="min-w-0 [&+&]:border-t [&+&]:border-border/40">
               <div
                 className={cn(
                   'sticky top-0 z-sticky flex min-w-0 items-center gap-2 bg-surface px-3 py-1.5 text-xs',

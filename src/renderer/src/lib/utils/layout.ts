@@ -64,7 +64,7 @@ export const CHAT_SIDE_RAIL_WIDTH = 'w-10'
  * `min-w-0` lets the flex child shrink instead of overflowing the chat row.
  */
 export const CHAT_RIGHT_PANEL =
-  'flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden border-l border-border/50 bg-bg'
+  'flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden border-l border-border/40 bg-bg'
 
 /** Minimum chat column width reserved when clamping the side dock. */
 export const CHAT_COLUMN_MIN_USABLE_PX = 280
@@ -448,11 +448,53 @@ export const SIDEBAR_ROW_ACTIONS_RESERVE =
 export const SIDEBAR_WORKSPACE_ROW_ACTIONS_RESERVE =
   'group-hover:pr-14 group-focus-within:pr-14 [@media(hover:none)]:pr-14'
 
-/** Hover surface for sidebar rows. */
-export const SIDEBAR_ROW_HOVER = 'hover:bg-surface/30 hover:text-fg'
+/**
+ * Hover fills — three weights, chosen by what sits under the pointer.
+ *
+ * These had grown into eight ad-hoc opacities (25/30/40/50/55/60/70 plus a bare
+ * `bg-surface`) for one affordance, which is the same as having none: a reader
+ * cannot learn what a heavier fill means, because it does not mean anything.
+ * Pick by role, never by how a particular row happens to look.
+ */
+/** A row in a scrollable list. Quiet — it sits behind dense text. */
+export const ROW_HOVER = 'hover:bg-surface/30'
+/**
+ * A discrete control: button, nav item, tab, icon target. Full strength,
+ * because that is what `Button`/`IconButton`'s `ghost` variants already use —
+ * a control that dims itself below them only looks broken next to one.
+ */
+export const CONTROL_HOVER = 'hover:bg-surface'
+/**
+ * Either of the above where the element already sits on `bg-surface` — there a
+ * `bg-surface` fill is invisible, so the step has to come off `surface-2`, the
+ * way the `subtle` button variants do. One weight covers both roles: the
+ * contrast is already doing the work.
+ */
+export const HOVER_ON_SURFACE = 'hover:bg-surface-2'
 
-/** Hover surface for workspace headers. */
-export const SIDEBAR_WORKSPACE_ROW_HOVER = 'hover:bg-surface/25 hover:text-fg'
+/**
+ * Borders — two weights, and the opacity is the whole distinction.
+ *
+ * Full-strength `border-border` **outlines a thing** (panel, card, menu, input)
+ * and is the house default at ~240 call sites. {@link BORDER_DIVIDER}
+ * **separates two things inside it** (a row from the next, a header from a
+ * body). Anything else invents a weight that has to be re-learned on sight.
+ *
+ * {@link DIVIDER_FILL} is the same grey as a background rather than a border:
+ * a rule drawn as a 1px element, a progress track, a zero-value chart bar.
+ * One value covers all of them — "quiet grey" is a single idea, and the
+ * /40-vs-/50-vs-full spread these had carried no meaning to read.
+ */
+export const BORDER_DIVIDER = 'border-border/40'
+export const DIVIDER_FILL = 'bg-border/40'
+
+/**
+ * Hover surface for sidebar rows — chat rows and workspace headers alike.
+ * These were two constants at two weights (/30 and /25); nothing distinguished
+ * a workspace header from the chats under it except that nobody had compared
+ * them side by side.
+ */
+export const SIDEBAR_ROW_HOVER = `${ROW_HOVER} hover:text-fg`
 
 export { RUN_LIST_CAP } from '@shared/domain/runs'
 

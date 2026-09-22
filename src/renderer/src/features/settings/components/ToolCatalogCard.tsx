@@ -83,7 +83,7 @@ export function ToolCatalogCard() {
         <p className="m-0 mb-1 text-xs font-medium text-fg-strong">
           Built-in tools ({builtins.length})
         </p>
-        <ul className="m-0 list-none divide-y divide-border/60 rounded-lg border border-border/60 p-0">
+        <ul className="m-0 list-none divide-y divide-border/40 rounded-lg border border-border p-0">
           {builtins.map((entry) => (
             <ToolRow key={entry.name} entry={entry} />
           ))}
@@ -99,7 +99,7 @@ export function ToolCatalogCard() {
               changes)
             </span>
           </p>
-          <ul className="m-0 list-none divide-y divide-border/60 rounded-lg border border-border/60 p-0">
+          <ul className="m-0 list-none divide-y divide-border/40 rounded-lg border border-border p-0">
             {agentBuilt.map((entry) => (
               <ToolRow key={entry.name} entry={entry} />
             ))}
@@ -121,7 +121,7 @@ export function ToolCatalogCard() {
                 )
               </span>
             </p>
-            <ul className="m-0 list-none divide-y divide-border/60 rounded-lg border border-border/60 p-0">
+            <ul className="m-0 list-none divide-y divide-border/40 rounded-lg border border-border p-0">
               {entries.map((entry) => (
                 <ToolRow key={entry.name} entry={entry} />
               ))}

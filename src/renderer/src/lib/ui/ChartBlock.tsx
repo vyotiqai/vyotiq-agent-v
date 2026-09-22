@@ -63,7 +63,7 @@ function BarChart({
         {values.map((value, index) => (
           <div key={index} className="flex h-full min-w-0 flex-1 items-end">
             {value == null ? null : value === 0 ? (
-              <div className="h-[2px] w-full rounded-t-sm bg-border/50" />
+              <div className="h-[2px] w-full rounded-t-sm bg-border/40" />
             ) : (
               <div
                 className="w-full rounded-t-sm bg-accent/55 vy-transition"

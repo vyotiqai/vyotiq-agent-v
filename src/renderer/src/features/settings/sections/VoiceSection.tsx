@@ -87,7 +87,7 @@ function VoiceProgressBar({
       : `${modelId} download progress`
   return (
     <div
-      className="h-1.5 w-full overflow-hidden rounded-sm bg-border"
+      className="h-1.5 w-full overflow-hidden rounded-sm bg-border/40"
       role="progressbar"
       aria-valuemin={pct == null ? undefined : 0}
       aria-valuemax={pct == null ? undefined : 100}

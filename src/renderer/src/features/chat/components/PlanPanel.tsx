@@ -239,7 +239,7 @@ function ReceiptSummary({
           </p>
         ) : null}
         {receipt.contractExcerpt.trim() ? (
-          <div className="mt-2 rounded-md border border-border/40 bg-surface/60 px-2.5 py-2">
+          <div className="mt-2 rounded-md border border-border bg-surface/60 px-2.5 py-2">
             <p className="m-0 text-2xs font-medium uppercase tracking-wide text-muted">
               Contract
             </p>
@@ -273,7 +273,7 @@ function ReceiptSummary({
             {failTop.map((f) => (
               <li
                 key={f.key}
-                className="min-w-0 rounded-md border border-border/30 bg-surface/40 px-2 py-1.5 font-mono text-caption text-muted [overflow-wrap:anywhere]"
+                className="min-w-0 rounded-md border border-border bg-surface/40 px-2 py-1.5 font-mono text-caption text-muted [overflow-wrap:anywhere]"
               >
                 <span className="text-fg/80">{f.count}×</span> {f.key}
               </li>
@@ -663,7 +663,7 @@ export const PlanPanel = memo(function PlanPanel({
                 {planOutline.headings.length > 0 ||
                 (!hasTodos && planOutline.checked + planOutline.unchecked > 0) ? (
                   <nav
-                    className="mb-3 rounded-md border border-border/40 bg-surface px-2.5 py-2"
+                    className="mb-3 rounded-md border border-border bg-surface px-2.5 py-2"
                     aria-label="Plan outline"
                   >
                     <p className="m-0 text-2xs font-medium uppercase tracking-[var(--vy-tracking-caps)] text-muted">

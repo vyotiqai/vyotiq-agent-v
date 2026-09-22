@@ -27,7 +27,7 @@ export const ConfirmFileList = memo(function ConfirmFileList({
   files: readonly ConfirmFileListEntry[]
 }) {
   return (
-    <ul className="m-0 max-h-48 list-none overflow-y-auto rounded-md border border-border/50 bg-surface p-0 text-xs">
+    <ul className="m-0 max-h-48 list-none overflow-y-auto rounded-md border border-border bg-surface p-0 text-xs">
       {files.map((file) => (
         <li
           key={file.path}

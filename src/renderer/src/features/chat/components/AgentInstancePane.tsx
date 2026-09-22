@@ -27,7 +27,7 @@ import type { ContextUsageState } from '@shared/utils/contextUsage'
 import { ContextMeter } from './composer/ContextMeter'
 
 const HEADER_ACTION =
-  'app-region-no-drag shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface/70 hover:text-fg'
+  'app-region-no-drag shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface hover:text-fg'
 
 /** Matches spawn note in agentInstances + runTitle.PATH_SCOPE_FOOTER. */
 const PATH_SCOPE_FOOTER_SPLIT = /\n\nPath scope \(writes must stay within/i

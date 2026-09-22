@@ -262,7 +262,7 @@ function reviewsLabel(pr: PrView): string {
 
 function ReviewCard({ review }: { review: PrReview }) {
   return (
-    <li className="rounded-md border border-border/40 px-2.5 py-2 text-caption">
+    <li className="rounded-md border border-border px-2.5 py-2 text-caption">
       <div className="flex items-center gap-2">
         <span className="font-medium text-fg">{review.author}</span>
         <span className="rounded bg-surface-2 px-1.5 py-0.5 text-2xs text-muted">
@@ -976,7 +976,7 @@ export function PrPanel({
                         label="Word Wrap"
                       />
                     </label>
-                    <div className="my-1 border-t border-border/50" />
+                    <div className="my-1 border-t border-border/40" />
                     <button
                       type="button"
                       className="flex w-full px-2.5 py-1.5 text-left text-caption hover:bg-surface"
@@ -1042,7 +1042,7 @@ export function PrPanel({
                       <span>Edit Title</span>
                       <span className="text-muted">Shift+Alt+T</span>
                     </button>
-                    <div className="my-1 border-t border-border/50" />
+                    <div className="my-1 border-t border-border/40" />
                     {auth?.hasAppToken ? (
                       <button
                         type="button"
@@ -1333,7 +1333,7 @@ export function PrPanel({
                 {issues.map((issue) => (
                   <li
                     key={issue.number}
-                    className="flex items-center gap-2 rounded-md border border-border/40 px-2.5 py-1.5 text-caption"
+                    className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-caption"
                   >
                     <span className="shrink-0 text-muted">#{issue.number}</span>
                     <span className="min-w-0 flex-1 truncate text-fg">{issue.title}</span>
@@ -1403,7 +1403,7 @@ export function PrPanel({
           ) : (
             <ul className="m-0 list-none space-y-1.5 p-0">
               {pr.commits.map((c) => (
-                <li key={c.oid} className="rounded-md border border-border/40 px-2.5 py-1.5 text-caption">
+                <li key={c.oid} className="rounded-md border border-border px-2.5 py-1.5 text-caption">
                   <p className="m-0 text-fg">{c.messageHeadline}</p>
                   <p className="m-0 mt-0.5 truncate text-muted">
                     {c.oid.slice(0, 7)}
@@ -1425,7 +1425,7 @@ export function PrPanel({
               pr.checks.map((c, i) => (
                 <li
                   key={`${c.name}-${i}`}
-                  className="flex items-center gap-2 rounded-md border border-border/40 px-2.5 py-1.5 text-caption"
+                  className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-caption"
                 >
                   <span className="min-w-0 flex-1 truncate text-fg">{c.name}</span>
                   <span className="shrink-0 text-muted">{c.conclusion ?? c.state}</span>

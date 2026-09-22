@@ -66,7 +66,7 @@ export function AttentionLane({
         <button
           type="button"
           aria-expanded={expanded}
-          className="w-full border-t border-border/40 px-3 py-2 text-left text-2xs text-muted vy-transition hover:bg-surface/40 hover:text-fg focus-visible:vy-focus-ring"
+          className="w-full border-t border-border/40 px-3 py-2 text-left text-2xs text-muted vy-transition hover:bg-surface hover:text-fg focus-visible:vy-focus-ring"
           onClick={() => setExpanded((value) => !value)}
         >
           {expanded ? 'Show fewer' : `Show ${hidden} more`}

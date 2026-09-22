@@ -165,7 +165,7 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
     <SettingsStack>
       <div
         data-settings-field="about"
-        className="rounded-xl border border-border/70 bg-surface p-5"
+        className="rounded-xl border border-border bg-surface p-5"
       >
         <div className="flex flex-col gap-2">
           <VyotiqLockup markSize={36} />

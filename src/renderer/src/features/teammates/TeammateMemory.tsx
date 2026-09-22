@@ -222,7 +222,7 @@ export function TeammateMemory({
               'rounded-md px-2 py-1 text-2xs vy-transition focus-visible:vy-focus-ring',
               selected === path
                 ? 'bg-surface text-fg-strong'
-                : 'text-muted hover:bg-surface/60 hover:text-fg'
+                : 'text-muted hover:bg-surface hover:text-fg'
             )}
             onClick={() => setSelected(path)}
           >

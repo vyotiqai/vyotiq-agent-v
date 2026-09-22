@@ -192,9 +192,16 @@ export function PanelResizeHandle({
       <span
         aria-hidden
         className={cn(
-          'pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/50',
-          'group-hover:bg-border-strong group-focus-visible:bg-accent',
-          dragging && 'bg-accent'
+          'pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2',
+          // The drag state is a branch, not a base plus an override: `cn` only
+          // joins strings, and Tailwind emits group-hover as
+          // `.group-hover\:bg-border-strong:is(:where(.group):hover *)` — (0,2,0)
+          // against a bare `.bg-accent` (0,1,0). Appended, it lost on specificity
+          // no matter the order, and since pointer capture keeps `:hover` on the
+          // handle for the whole drag, the gutter never changed colour at all.
+          dragging
+            ? 'bg-accent'
+            : 'bg-border/40 group-hover:bg-border-strong group-focus-visible:bg-accent'
         )}
       />
     </div>

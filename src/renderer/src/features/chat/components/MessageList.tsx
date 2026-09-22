@@ -2329,7 +2329,7 @@ export function MessageList({
                       ? `Jump to latest messages, ${unpinnedNewCount} new`
                       : 'Jump to latest messages'
                   }
-                  className="pointer-events-auto inline-flex -translate-y-full items-center gap-1.5 rounded-full border border-border/80 bg-surface py-1.5 px-2.5 text-caption font-medium text-secondary shadow-md vy-transition hover:border-border hover:bg-surface hover:text-fg focus-visible:vy-focus-ring"
+                  className="pointer-events-auto inline-flex -translate-y-full items-center gap-1.5 rounded-full border border-border bg-surface py-1.5 px-2.5 text-caption font-medium text-secondary shadow-md vy-transition hover:border-border hover:bg-surface hover:text-fg focus-visible:vy-focus-ring"
                 >
                   <Icon name="chevron" size={12} />
                   <span className="tracking-[var(--vy-tracking-tight)]">Latest</span>

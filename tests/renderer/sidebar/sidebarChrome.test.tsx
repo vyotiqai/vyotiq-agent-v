@@ -17,6 +17,7 @@ import {
   resetUpdaterStoreForTests,
   setUpdaterStateForTests
 } from '@renderer/features/updates/updaterStore'
+import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
 
 const searchRef = createRef<HTMLInputElement>()
 
@@ -180,7 +181,10 @@ describe('Sidebar chrome', () => {
     const footer = screen.getByRole('button', { name: /^settings$/i }).parentElement
     expect(footer).toBeTruthy()
     expect(footer!.className).toContain('border-t')
-    expect(footer!.className).toContain('border-border/30')
+    // The constant, not a literal weight: this used to pin `/30`, which was one
+    // of eight ad-hoc border opacities and nothing to do with what the test is
+    // about — that the footer is a plain rule, not tray chrome.
+    expect(footer!.className).toContain(BORDER_DIVIDER)
     expect(footer!.className).not.toContain('rounded-xl')
   })
 

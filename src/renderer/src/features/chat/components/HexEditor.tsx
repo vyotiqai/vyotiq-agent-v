@@ -604,7 +604,7 @@ export function HexEditor({
             return (
               <div
                 key={virtualRow.key}
-                className="absolute left-0 right-0 flex min-w-[26rem] items-center gap-2 border-b border-border/20 py-0.5"
+                className="absolute left-0 right-0 flex min-w-[26rem] items-center gap-2 border-b border-border/40 py-0.5"
                 style={{ transform: `translateY(${virtualRow.start}px)` }}
                 role="listitem"
               >
@@ -652,7 +652,7 @@ export function HexEditor({
                     )
                   })}
                 </div>
-                <div className="flex shrink-0 gap-0.5 border-l border-border/30 pl-2">
+                <div className="flex shrink-0 gap-0.5 border-l border-border/40 pl-2">
                   {Array.from({ length: BYTES_PER_ROW }, (_, offset) => {
                     const index = rowStart + offset
                     const exists = index < bytes.length
@@ -688,7 +688,7 @@ export function HexEditor({
         </div>
       </div>
       {templateFields.length > 0 ? (
-        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/30 px-2 py-1 text-2xs text-muted">
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/40 px-2 py-1 text-2xs text-muted">
           <span className="font-medium text-fg">Template</span>
           {templateFields.map((field) => (
             <span key={`${field.name}:${field.offset}`}>
@@ -697,7 +697,7 @@ export function HexEditor({
           ))}
         </div>
       ) : null}
-      <div className="flex shrink-0 items-center gap-1 border-t border-border/30 px-2 py-1 text-2xs text-muted">
+      <div className="flex shrink-0 items-center gap-1 border-t border-border/40 px-2 py-1 text-2xs text-muted">
         <span>{bytes.length.toLocaleString()} bytes</span>
         <span className="ml-auto">{activeBookmarks.length} bookmarks</span>
         {activeTemplate ? <span className="truncate">Template: {activeTemplate}</span> : null}

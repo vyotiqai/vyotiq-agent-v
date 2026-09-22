@@ -17,7 +17,7 @@ export function panelSubtabClass(selected: boolean): string {
     'inline-flex h-7 max-w-[12rem] shrink-0 items-center rounded-md px-2.5 text-xs leading-tight vy-transition focus-visible:vy-focus-ring',
     selected
       ? 'bg-surface font-medium text-fg shadow-sm'
-      : 'bg-surface/25 text-secondary hover:bg-surface/55 hover:text-fg'
+      : 'bg-surface/25 text-secondary hover:bg-surface hover:text-fg'
   )
 }
 
@@ -25,7 +25,7 @@ export function panelSubtabClass(selected: boolean): string {
 export function dockPanelTabShellClass(selected: boolean, closable: boolean): string {
   return cn(
     'group inline-flex h-7 max-w-[12rem] shrink-0 items-center gap-0.5 rounded-md vy-transition',
-    selected ? 'bg-surface shadow-sm' : 'bg-surface/25 hover:bg-surface/55',
+    selected ? 'bg-surface shadow-sm' : 'bg-surface/25 hover:bg-surface',
     closable ? 'pl-2.5 pr-1' : 'px-2.5'
   )
 }

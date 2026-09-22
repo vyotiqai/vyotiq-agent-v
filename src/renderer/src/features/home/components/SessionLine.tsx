@@ -76,7 +76,7 @@ export function SessionLine({
       role="listitem"
       className={cn(
         'group grid min-w-0 gap-2 px-3 py-2.5 @md:grid-cols-[minmax(0,1fr)_auto] @md:items-center',
-        focused ? 'bg-surface-2/70' : open ? 'bg-surface/50' : 'hover:bg-surface/40'
+        focused ? 'bg-surface-2/70' : open ? 'bg-surface/50' : 'hover:bg-surface/30'
       )}
     >
       <div className="flex min-w-0 items-start gap-2.5">

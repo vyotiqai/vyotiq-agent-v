@@ -64,7 +64,7 @@ export function HomeCard({
       role={role}
       aria-label={ariaLabel}
       className={cn(
-        '@container overflow-hidden rounded-lg border border-border/50 bg-card/40',
+        '@container overflow-hidden rounded-lg border border-border bg-card/40',
         role === 'list' && 'divide-y divide-border/40',
         className
       )}

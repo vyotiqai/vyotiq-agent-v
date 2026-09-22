@@ -61,7 +61,7 @@ function WindowToggle({
     <div
       role="group"
       aria-label="Activity window"
-      className="flex items-center gap-0.5 rounded-md border border-border/50 p-0.5"
+      className="flex items-center gap-0.5 rounded-md border border-border p-0.5"
     >
       {([7, 30] as const).map((days) => (
         <button
@@ -215,7 +215,7 @@ export function ActivitySection({
                   className={cn(
                     'home-bar-enter mx-auto w-full max-w-10 rounded-t-sm vy-transition',
                     bar.runs === 0
-                      ? 'bg-border/50'
+                      ? 'bg-border/40'
                       : bar.date === todayKey
                         ? 'bg-accent/85'
                         : 'bg-accent/55'

@@ -39,7 +39,7 @@ function MetricToggle({
     <div
       role="group"
       aria-label="Spend chart metric"
-      className="flex items-center gap-0.5 rounded-md border border-border/50 p-0.5"
+      className="flex items-center gap-0.5 rounded-md border border-border p-0.5"
     >
       {(['cost', 'tokens'] as const).map((metric) => (
         <button

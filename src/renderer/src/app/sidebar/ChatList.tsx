@@ -21,8 +21,7 @@ import {
   SIDEBAR_WORKSPACE_GROUP,
   SIDEBAR_WORKSPACE_ROW,
   SIDEBAR_WORKSPACE_ROW_ACTIONS_RESERVE,
-  SIDEBAR_WORKSPACE_ROW_ACTIVE,
-  SIDEBAR_WORKSPACE_ROW_HOVER
+  SIDEBAR_WORKSPACE_ROW_ACTIVE
 } from '@renderer/lib/utils/layout'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { ChatRow } from './ChatRow'
@@ -191,12 +190,12 @@ function WorkspaceHeader({
         SIDEBAR_WORKSPACE_ROW,
         active
           ? SIDEBAR_WORKSPACE_ROW_ACTIVE
-          : cn('text-muted', SIDEBAR_WORKSPACE_ROW_HOVER)
+          : cn('text-muted', SIDEBAR_ROW_HOVER)
       )}
     >
       <button
         type="button"
-        className="app-region-no-drag inline-grid size-6 shrink-0 place-items-center rounded-md vy-transition hover:bg-surface/50"
+        className="app-region-no-drag inline-grid size-6 shrink-0 place-items-center rounded-md vy-transition hover:bg-surface"
         aria-label={expanded ? `Collapse ${name}` : `Expand ${name}`}
         aria-expanded={expanded}
         onClick={(e) => {
@@ -268,7 +267,7 @@ function WorkspaceHeader({
               <Tooltip content={`New chat in ${name}`}>
                 <button
                   type="button"
-                  className="app-region-no-drag pointer-events-auto inline-grid size-6 place-items-center rounded-md text-muted vy-transition hover:bg-surface/70 hover:text-fg"
+                  className="app-region-no-drag pointer-events-auto inline-grid size-6 place-items-center rounded-md text-muted vy-transition hover:bg-surface hover:text-fg"
                   aria-label={`New chat in ${name}`}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -282,7 +281,7 @@ function WorkspaceHeader({
             <Tooltip content={`Close ${name}`}>
               <button
                 type="button"
-                className="app-region-no-drag pointer-events-auto inline-grid size-6 place-items-center rounded-md text-muted vy-transition hover:bg-surface/70 hover:text-danger"
+                className="app-region-no-drag pointer-events-auto inline-grid size-6 place-items-center rounded-md text-muted vy-transition hover:bg-surface hover:text-danger"
                 aria-label={`Close ${name}`}
                 onClick={(e) => {
                   e.stopPropagation()
@@ -471,7 +470,7 @@ export function ChatList({
             <Tooltip content="Add workspace">
               <button
                 type="button"
-                className="app-region-no-drag inline-grid size-7 place-items-center rounded-md text-muted vy-transition hover:bg-surface/50 hover:text-fg"
+                className="app-region-no-drag inline-grid size-7 place-items-center rounded-md text-muted vy-transition hover:bg-surface hover:text-fg"
                 aria-label="Add workspace"
                 onClick={onAddWorkspace}
               >
@@ -648,7 +647,10 @@ export function ChatList({
                         onLoadOlderRuns ? (
                           <button
                             type="button"
-                            className="app-region-no-drag w-full rounded-md px-1.5 py-1 text-left text-caption text-muted vy-transition hover:bg-surface-hover hover:text-fg"
+                            className={cn(
+                              'app-region-no-drag w-full rounded-md px-1.5 py-1 text-left text-caption text-muted vy-transition',
+                              SIDEBAR_ROW_HOVER
+                            )}
                             onClick={() => onLoadOlderRuns(workspace.path)}
                           >
                             Show older chats

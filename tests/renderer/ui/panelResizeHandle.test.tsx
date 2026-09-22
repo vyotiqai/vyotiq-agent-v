@@ -67,6 +67,42 @@ describe('PanelResizeHandle', () => {
     expect(onChange).toHaveBeenCalledWith(180)
   })
 
+  /**
+   * The drag colour has to REPLACE the hover colour, not sit beside it. As an
+   * appended class it lost on specificity — Tailwind emits group-hover as
+   * `:is(:where(.group):hover *)`, which outranks a bare `.bg-accent` — and
+   * pointer capture keeps `:hover` on the handle for the whole gesture, so the
+   * gutter stayed `border-strong` from mousedown to mouseup.
+   */
+  it('swaps the hover colour out for the drag colour, rather than adding to it', () => {
+    render(
+      <PanelResizeHandle
+        label="Resize sidebar"
+        value={220}
+        min={180}
+        max={420}
+        edge="end"
+        onChange={vi.fn()}
+      />
+    )
+    const handle = screen.getByRole('separator', { name: /Resize sidebar/i })
+    const indicator = handle.querySelector('span')
+    if (!indicator) throw new Error('resize handle rendered no indicator')
+
+    // classList, not the className string: `bg-accent` is a substring of the
+    // resting `group-focus-visible:bg-accent`, so only whole-token matching
+    // can tell the two states apart.
+    expect(indicator.classList.contains('group-hover:bg-border-strong')).toBe(true)
+    expect(indicator.classList.contains('bg-accent')).toBe(false)
+
+    fireEvent.mouseDown(handle, { clientX: 100, button: 0 })
+    expect(indicator.classList.contains('bg-accent')).toBe(true)
+    expect(indicator.classList.contains('group-hover:bg-border-strong')).toBe(false)
+
+    fireEvent.mouseUp(window)
+    expect(indicator.classList.contains('group-hover:bg-border-strong')).toBe(true)
+  })
+
   it('locks body selection and cursor while dragging', () => {
     const onChange = vi.fn()
     render(

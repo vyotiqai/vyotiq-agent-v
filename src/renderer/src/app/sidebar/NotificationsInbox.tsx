@@ -73,11 +73,11 @@ export function NotificationsInbox({
           top: position.placement === 'up' ? undefined : position.top,
           bottom:
             position.placement === 'up' ? window.innerHeight - position.top : undefined,
-          left: collapsed ? position.left : position.left,
+          left: position.left,
           minWidth: 240
         }}
       >
-        <div className="flex items-center justify-between gap-2 border-b border-border/60 px-2.5 py-2">
+        <div className="flex items-center justify-between gap-2 border-b border-border/40 px-2.5 py-2">
           <p className="m-0 text-sm font-medium text-fg">Notifications</p>
           <div className="flex items-center gap-1">
             <Button
@@ -142,7 +142,7 @@ export function NotificationsInbox({
             ))
           )}
         </ul>
-        <div className="border-t border-border/60 p-1">
+        <div className="border-t border-border/40 p-1">
           <button
             type="button"
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-secondary hover:bg-surface hover:text-fg"

@@ -70,69 +70,76 @@ export function SidebarTopBar({
   )
 }
 
+/**
+ * The rail header. Its only call site is already behind `isCollapsed ?`, so it
+ * took an `isCollapsed` prop that was always `true` — which left a dead
+ * `paddingLeft` branch below and a redundant term in the row's height class.
+ * Collapsed is the component's whole premise; it does not need to be told.
+ */
 export function SidebarCollapsedHeader({
   isDrawer,
-  isCollapsed,
   isDarwin,
   onToggleSidebar,
   onOpenHome,
   onAddWorkspace
 }: {
   isDrawer: boolean
-  isCollapsed: boolean
   isDarwin: boolean
   onToggleSidebar: () => void
   onOpenHome: () => void
   onAddWorkspace?: () => void
 }) {
-  const headerStyle = isDarwin
-    ? isCollapsed
-      ? { paddingTop: MACOS_TRAFFIC_LIGHT_Y + 10 }
-      : { paddingLeft: MACOS_TITLEBAR_INSET_PX }
-    : undefined
+  const headerStyle = isDarwin ? { paddingTop: MACOS_TRAFFIC_LIGHT_Y + 10 } : undefined
 
   return (
     <header
       className="app-region-drag flex shrink-0 flex-col items-center px-2 pb-1"
       style={headerStyle}
     >
+      {/*
+        Centred, not `justify-start`: the header is a `flex-col items-center`
+        column, so its other two controls centre themselves. A full-width row
+        that started its content left gave the rail two left edges — invisible
+        on the 44px Win/Linux rail, where `px-2` leaves a 28px box the toggle
+        fills exactly, but a ~14px stagger on the 72px darwin one.
+      */}
       <div
         className={cn(
-          'flex w-full items-center justify-start',
-          isCollapsed && isDarwin ? 'min-h-9' : TITLE_BAR_HEIGHT
+          'flex w-full items-center justify-center',
+          isDarwin ? 'min-h-9' : TITLE_BAR_HEIGHT
         )}
       >
         <div className="app-region-no-drag">
           <SidebarBrandToggle
             isDrawer={isDrawer}
-            isCollapsed={isCollapsed}
+            isCollapsed
             onToggleSidebar={onToggleSidebar}
             size="md"
           />
         </div>
       </div>
+      <div className="app-region-no-drag">
+        <IconButton
+          icon="home"
+          label="Home"
+          size="sm"
+          variant="bare"
+          title={`Home (${shortcutLabel('goHome')})`}
+          onClick={onOpenHome}
+        />
+      </div>
+      {onAddWorkspace ? (
         <div className="app-region-no-drag">
           <IconButton
-            icon="home"
-            label="Home"
+            icon="folderPlus"
+            label="Add workspace"
             size="sm"
             variant="bare"
-            title={`Home (${shortcutLabel('goHome')})`}
-            onClick={onOpenHome}
+            title="Add workspace"
+            onClick={onAddWorkspace}
           />
         </div>
-        {onAddWorkspace ? (
-          <div className="app-region-no-drag">
-            <IconButton
-              icon="folderPlus"
-              label="Add workspace"
-              size="sm"
-              variant="bare"
-              title="Add workspace"
-              onClick={onAddWorkspace}
-            />
-          </div>
-        ) : null}
+      ) : null}
     </header>
   )
 }

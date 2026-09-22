@@ -208,7 +208,7 @@ export function ChatPaneHost({
               aria-label={paneTitle}
               className={cn(
                 'relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent',
-                index > 0 && 'border-l border-border/50',
+                index > 0 && 'border-l border-border/40',
                 focused && multi && 'ring-1 ring-inset ring-border-strong/60'
               )}
               data-chat-pane
@@ -255,7 +255,7 @@ export function ChatPaneHost({
                     {onSplitPane ? (
                       <button
                         type="button"
-                        className="app-region-no-drag shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface/70 hover:text-fg"
+                        className="app-region-no-drag shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface hover:text-fg"
                         aria-label={`Split pane beside ${paneTitle}`}
                         data-chat-pane-split={pane.paneId}
                         onClick={(e) => {
@@ -268,7 +268,7 @@ export function ChatPaneHost({
                     ) : null}
                     <button
                       type="button"
-                      className="app-region-no-drag shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface/70 hover:text-fg"
+                      className="app-region-no-drag shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface hover:text-fg"
                       aria-label={`Close ${paneTitle}`}
                       onClick={(e) => {
                         e.stopPropagation()

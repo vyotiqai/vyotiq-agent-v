@@ -3730,7 +3730,7 @@ export const FilesPanel = memo(function FilesPanel({
               : 'w-[var(--files-explorer-width)] max-w-[45%] border-r'
           )}
         >
-          <div className="flex min-w-0 shrink-0 items-center gap-1 border-b border-border/30 px-2 py-1" role="toolbar" aria-label="Workspace files">
+          <div className="flex min-w-0 shrink-0 items-center gap-1 border-b border-border/40 px-2 py-1" role="toolbar" aria-label="Workspace files">
             <div className="flex min-w-0 flex-1 items-center">
               <span className="min-w-0 truncate text-caption font-medium tracking-normal text-fg" title={workspacePath}>
                 {workspaceName(workspacePath)}
@@ -3833,17 +3833,17 @@ export const FilesPanel = memo(function FilesPanel({
           </div>
           {nestedWorkspaceMessage && !treeFilter.trim() ? (
             <div
-              className={cn(FILES_PANEL_ALERT, 'border-border/30 bg-warning/10 text-warning')}
+              className={cn(FILES_PANEL_ALERT, 'border-border/40 bg-warning/10 text-warning')}
               role="status"
             >
               <Icon name="info" size={14} className="shrink-0" />
               <span className="min-w-0 flex-1">{nestedWorkspaceMessage}</span>
             </div>
           ) : null}
-          <div className="flex min-w-0 shrink-0 items-center gap-1.5 border-b border-border/30 px-2 py-1">
+          <div className="flex min-w-0 shrink-0 items-center gap-1.5 border-b border-border/40 px-2 py-1">
             <SearchInput
               aria-label="Filter workspace files"
-              className="h-7 min-h-0 min-w-0 flex-1 gap-1 rounded-md border-border/50 bg-bg px-2"
+              className="h-7 min-h-0 min-w-0 flex-1 gap-1 rounded-md border-border bg-bg px-2"
               inputClassName="min-h-0 py-0 text-caption"
               placeholder="Filter files"
               tone="quiet"
@@ -3941,7 +3941,7 @@ export const FilesPanel = memo(function FilesPanel({
                     >
                       <button
                         type="button"
-                        className="flex h-full min-w-0 items-center gap-1 rounded px-1.5 text-left text-xs text-accent outline-none hover:bg-surface/60 focus-visible:vy-focus-ring"
+                        className="flex h-full min-w-0 items-center gap-1 rounded px-1.5 text-left text-xs text-accent outline-none hover:bg-surface/30 focus-visible:vy-focus-ring"
                         style={treeIndentStyle(visible.level)}
                         onClick={() => void loadDirectory(visible.parentPath, true)}
                       >
@@ -4001,7 +4001,7 @@ export const FilesPanel = memo(function FilesPanel({
                       tabIndex={-1}
                       aria-haspopup="menu"
                       className={cn(
-                        'flex h-full min-w-0 items-center gap-1 overflow-hidden rounded px-1.5 text-left text-xs outline-none hover:bg-surface/60 focus-visible:vy-focus-ring',
+                        'flex h-full min-w-0 items-center gap-1 overflow-hidden rounded px-1.5 text-left text-xs outline-none hover:bg-surface/30 focus-visible:vy-focus-ring',
                         highlighted
                           ? TREE_ROW_ACTIVE_FILE
                           : focused
@@ -4198,7 +4198,7 @@ export const FilesPanel = memo(function FilesPanel({
                 openContextMenu(event, { kind: 'tab', tabId: activeTab.id })
               }
             >
-              <div className="flex min-w-0 shrink-0 items-center gap-1 border-b border-border/30 px-2 py-1 text-caption text-muted">
+              <div className="flex min-w-0 shrink-0 items-center gap-1 border-b border-border/40 px-2 py-1 text-caption text-muted">
                 <EditorBreadcrumb path={activeTab.path} />
                 {activeTextPosition ? (
                   <span className="shrink-0 tabular-nums text-muted">
@@ -4313,7 +4313,7 @@ export const FilesPanel = memo(function FilesPanel({
                 <div className="flex flex-1 items-center justify-center text-caption text-muted">Loading file…</div>
               ) : editorMode === 'diff' ? (
                 <div className="min-h-0 min-w-0 flex-1 overflow-auto" data-editor-integration="diff">
-                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/30 bg-bg/95 px-2 py-1 text-caption">
+                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/40 bg-bg/95 px-2 py-1 text-caption">
                     <strong className="font-medium text-fg">Diff View</strong>
                     <span className="min-w-0 flex-1 truncate text-muted">{activeTab.path}</span>
                     <button
@@ -4337,7 +4337,7 @@ export const FilesPanel = memo(function FilesPanel({
                 </div>
               ) : editorMode === 'blame' ? (
                 <div className="min-h-0 min-w-0 flex-1 overflow-auto" data-editor-integration="blame">
-                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/30 bg-bg/95 px-2 py-1 text-caption">
+                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/40 bg-bg/95 px-2 py-1 text-caption">
                     <strong className="font-medium text-fg">Git Blame</strong>
                     <span className="min-w-0 flex-1 truncate text-muted">{activeTab.path}</span>
                     <button
@@ -4351,7 +4351,7 @@ export const FilesPanel = memo(function FilesPanel({
                   {blameResult?.kind === 'ok' ? (
                     <div className="min-w-max font-mono text-caption leading-5">
                       {blameResult.lines.map((line) => (
-                        <div key={line.line} className="flex min-w-0 border-b border-border/15">
+                        <div key={line.line} className="flex min-w-0 border-b border-border/40">
                           <span className="w-20 shrink-0 truncate px-2 text-muted" title={line.author}>
                             {line.shortSha ?? 'working'}
                           </span>
@@ -4382,7 +4382,7 @@ export const FilesPanel = memo(function FilesPanel({
                 </div>
               ) : editorMode === 'lsp' ? (
                 <div className="min-h-0 min-w-0 flex-1 overflow-auto" data-editor-integration="lsp">
-                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/30 bg-bg/95 px-2 py-1 text-caption">
+                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/40 bg-bg/95 px-2 py-1 text-caption">
                     <strong className="font-medium text-fg">Language Server</strong>
                     <span className="min-w-0 flex-1 truncate text-muted">{activeTab.path}</span>
                     <button
@@ -4418,7 +4418,7 @@ export const FilesPanel = memo(function FilesPanel({
                                     ? 'border-danger/40 text-danger'
                                     : item.severity === 'warning'
                                       ? 'border-warning/40 text-warning'
-                                      : 'border-border/50 text-muted'
+                                      : 'border-border/40 text-muted'
                                 )}
                               >
                                 Ln {item.line + 1}, Col {item.character + 1}: {item.message}
@@ -4537,7 +4537,7 @@ export const FilesPanel = memo(function FilesPanel({
           )}
         </div>
       </div>
-      <div className="flex min-h-8 shrink-0 items-center justify-between gap-3 border-t border-border/30 px-3 py-1 text-caption text-muted">
+      <div className="flex min-h-8 shrink-0 items-center justify-between gap-3 border-t border-border/40 px-3 py-1 text-caption text-muted">
         <div className="flex min-w-0 items-center gap-1.5">
           {dirtyTabCount > 0 ? (
             <span className="text-warning" role="status">

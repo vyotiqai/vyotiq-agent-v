@@ -1083,7 +1083,7 @@ const runGoal = useRunGoal({
   const browserWatchBanner = showBrowserWatchBanner ? (
     <div
       className={cn(
-        'flex shrink-0 items-center gap-2 border-b border-border/30 bg-accent/10 px-3 text-caption',
+        'flex shrink-0 items-center gap-2 border-b border-border/40 bg-accent/10 px-3 text-caption',
         browserWatchBannerInBand ? TITLE_BAR_HEIGHT : 'py-1.5'
       )}
       // Inline, not a `pr-*` class: cn() has no tailwind-merge, so an appended
@@ -1111,7 +1111,7 @@ const runGoal = useRunGoal({
       </span>
       <button
         type="button"
-        className="app-region-no-drag shrink-0 rounded-md border border-border/50 bg-surface px-2 py-0.5 text-2xs font-medium text-fg hover:bg-surface-2"
+        className="app-region-no-drag shrink-0 rounded-md border border-border bg-surface px-2 py-0.5 text-2xs font-medium text-fg hover:bg-surface-2"
         onClick={() => setRightPanel('browser')}
       >
         Watch live

@@ -71,7 +71,7 @@ export function AppearanceSection({
                     'flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm vy-transition',
                     selected
                       ? 'border-fg bg-surface text-fg-strong ring-1 ring-inset ring-border-strong'
-                      : 'border-border text-fg hover:bg-surface/50'
+                      : 'border-border text-fg hover:bg-surface'
                   )}
                 >
                   <span

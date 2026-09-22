@@ -239,7 +239,7 @@ export const ChatRow = memo(function ChatRow({
           type="text"
           data-vy-text-entry
           className={cn(
-            'app-region-no-drag w-full rounded-lg border border-border/50 bg-surface/60 text-fg outline-none focus:border-border-strong focus:bg-surface focus:vy-focus-ring',
+            'app-region-no-drag w-full rounded-lg border border-border bg-surface/60 text-fg outline-none focus:border-border-strong focus:bg-surface focus:vy-focus-ring',
             nested ? 'px-1.5 py-1 text-xs' : 'px-2 py-1.5 text-sm'
           )}
           value={draft}
