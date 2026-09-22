@@ -85,6 +85,18 @@ async function topmostAt(x: number, y: number): Promise<string> {
   )
 }
 
+/**
+ * macOS has no in-app caption buttons to aim at.
+ *
+ * `showsWindowControls()` is win32/linux only — macOS keeps the native traffic
+ * lights — so `[data-titlebar-controls]` never renders there and the three
+ * tests that probe z-order at the Close button wait out their timeout on an
+ * element that cannot exist. The band logic they cover is the same code on
+ * every platform; only whether the app draws that strip differs, and the tests
+ * that do not touch it still run here.
+ */
+const NO_IN_APP_CAPTION_BUTTONS = process.platform === 'darwin'
+
 async function centerOf(selector: string): Promise<{ x: number; y: number }> {
   const box = await launched.window.locator(selector).first().boundingBox()
   if (!box) throw new Error(`no box for ${selector}`)
@@ -170,6 +182,7 @@ test.afterAll(async () => {
 
 test('instance header controls are the topmost thing at their own coordinates', async () => {
   const { window } = launched
+  test.skip(NO_IN_APP_CAPTION_BUTTONS, 'no in-app caption buttons on macOS')
   await openInstancePane()
   const header = window.locator('[data-instance-header]')
 
@@ -224,6 +237,7 @@ test('Back actually navigates out of the instance pane', async () => {
 
 test('with no chrome in the band the title bar outranks the pinned prompt', async () => {
   const { window } = launched
+  test.skip(NO_IN_APP_CAPTION_BUTTONS, 'no in-app caption buttons on macOS')
   // The pane now holds the parent run: an ordinary transcript with no top-row
   // chrome, so the bar must still own the band as a window-drag region. The
   // transcript's pinned turn prompt is `sticky z-sticky` and sits later in the
@@ -244,6 +258,7 @@ test('with no chrome in the band the title bar outranks the pinned prompt', asyn
 
 test('pane headers claim the band without lying across the caption buttons', async () => {
   const { window } = launched
+  test.skip(NO_IN_APP_CAPTION_BUTTONS, 'no in-app caption buttons on macOS')
   await window.keyboard.press('Control+Backslash')
   const headers = window.locator('[data-chat-pane-header]')
   await expect(headers).toHaveCount(2, { timeout: 15_000 })
