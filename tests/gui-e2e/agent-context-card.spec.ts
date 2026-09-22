@@ -114,13 +114,19 @@ test('the strip follows the workspace live, pushed not polled', async () => {
   await expect(card).toContainText('None')
   expect(await pushes()).toBe(0)
 
-  // Each step below waits on a whole chain -- fs event, debounce, rebuild, IPC
-  // push, render -- and the budget has to fit the slowest runner, not this
-  // machine. The three waits ran in about 5s locally and still timed out at 15s
-  // on every windows-latest run, which took 28 minutes over a suite ubuntu
-  // finished in 13. PUSH_WAIT is that headroom, not a loosened assertion: the
-  // push counts after each step are exact, so a missing push still fails and a
-  // polling loop behind the strip would still be caught by step 4.
+  // Each step waits on a whole chain: fs event, debounce, rebuild, IPC push,
+  // render. PUSH_WAIT is generous so a slow runner is never the reason this
+  // fails -- but note that on windows-latest it fails anyway, at 45s, and the
+  // card is still showing its boot-time summary (seeded rules present, memory
+  // "None"). So the rebuild never runs there at all; it is not a budget that
+  // was too tight. Ruled out with direct probes: Windows reports a bare
+  // `.vyotiq` and a `rename`/`change` pair for a directory created under
+  // `.vyotiq` (both pass the name filter), canonicalizeWorkspacePath is
+  // string-only so both sides hold the same form, and the marketplace repair
+  // that boot awaits is a no-op on a profile with nothing installed. It runs
+  // green 3/3 against the real app on Windows, and green on ubuntu and macOS.
+  // The assertions stay exact -- push counts are checked after every step, so a
+  // push that never arrives fails, and step 4 still catches a polling loop.
 
   // 1. First memory note — the directory does not exist yet, so this also
   //    proves the watcher arms paths that appear after it started.
