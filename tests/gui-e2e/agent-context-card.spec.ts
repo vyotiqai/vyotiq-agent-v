@@ -18,6 +18,9 @@ import { requireActivePath } from './helpers/seedWorkspace'
 let launched: LaunchedApp
 let workspacePath: string
 
+/** Budget for one watcher-to-render round trip on the slowest CI runner. */
+const PUSH_WAIT = 45_000
+
 test.beforeAll(async () => {
   workspacePath = mkdtempSync(join(tmpdir(), 'vyotiq-agent-context-ws-'))
   mkdirSync(join(workspacePath, '.vyotiq', 'rules'), { recursive: true })
@@ -111,16 +114,24 @@ test('the strip follows the workspace live, pushed not polled', async () => {
   await expect(card).toContainText('None')
   expect(await pushes()).toBe(0)
 
+  // Each step below waits on a whole chain -- fs event, debounce, rebuild, IPC
+  // push, render -- and the budget has to fit the slowest runner, not this
+  // machine. The three waits ran in about 5s locally and still timed out at 15s
+  // on every windows-latest run, which took 28 minutes over a suite ubuntu
+  // finished in 13. PUSH_WAIT is that headroom, not a loosened assertion: the
+  // push counts after each step are exact, so a missing push still fails and a
+  // polling loop behind the strip would still be caught by step 4.
+
   // 1. First memory note — the directory does not exist yet, so this also
   //    proves the watcher arms paths that appear after it started.
   mkdirSync(join(workspacePath, '.vyotiq', 'memory'), { recursive: true })
   writeFileSync(join(workspacePath, '.vyotiq', 'memory', 'note.md'), '- remembered\n', 'utf8')
-  await expect(card).toContainText('1 note', { timeout: 15_000 })
+  await expect(card).toContainText('1 note', { timeout: PUSH_WAIT })
   expect(await pushes()).toBe(1)
 
   // 2. A rule file appearing at the workspace root.
   writeFileSync(join(workspacePath, '.cursorrules'), 'be brief\n', 'utf8')
-  await expect(card).toContainText('.cursorrules', { timeout: 15_000 })
+  await expect(card).toContainText('.cursorrules', { timeout: PUSH_WAIT })
   expect(await pushes()).toBe(2)
 
   // 3. `git init` in a workspace that was not a repo: the branch reading has
@@ -136,7 +147,7 @@ test('the strip follows the workspace live, pushed not polled', async () => {
   git('checkout', '-q', '-b', 'live-branch')
   git('add', '-A')
   git('commit', '-q', '-m', 'seed')
-  await expect(card).toContainText('live-branch', { timeout: 20_000 })
+  await expect(card).toContainText('live-branch', { timeout: PUSH_WAIT })
 
   // 4. Quiet workspace stays quiet — no polling loop behind the strip.
   const settled = await pushes()

@@ -72,5 +72,11 @@ test('auto-resumes interrupted run without manual Continue click', async () => {
   // the Home "Running now" panel); open the session to watch it stream.
   await window.getByRole('button', { name: /Auto resume test/i }).first().click()
 
-  await expect(window.getByText(FIXTURE_ASSISTANT_TEXT)).toBeVisible({ timeout: 25_000 })
+  // Boot, notice the interrupted run, restart it, replay the fixture and paint
+  // it -- and the budget has to fit the slowest runner. At 25s this flaked on
+  // three of four platform runs, including ubuntu passing and then failing on
+  // byte-identical code, which is a budget too close to the real duration
+  // rather than a broken resume. The assertion itself is unchanged: the text
+  // only ever appears if auto-resume actually ran.
+  await expect(window.getByText(FIXTURE_ASSISTANT_TEXT)).toBeVisible({ timeout: 60_000 })
 })
