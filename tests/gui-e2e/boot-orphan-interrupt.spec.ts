@@ -18,7 +18,18 @@ test.beforeAll(async () => {
 
   launched = await launchApp({
     preLaunchSeed: (userDataDir) => {
-      seedAppSettings(userDataDir, { toolApprovalOnboardingDone: true })
+      // Auto-resume is on by default and would immediately consume the state
+      // this spec exists to observe: boot interrupts the orphan, auto-resume
+      // restarts it, and under the e2e fixture that replay now persists its own
+      // terminal status — so the run reaches `done` and the interrupted dot
+      // never renders. That sequence is correct product behaviour (a run that
+      // finished has nothing left to continue) and it has its own spec in
+      // auto-resume-interrupted.spec.ts. Hold it off here so the assertion is
+      // about the interrupt, not about which of the two wins the race.
+      seedAppSettings(userDataDir, {
+        toolApprovalOnboardingDone: true,
+        autoResumeInterruptedRuns: false
+      })
       seedInterruptedRun(userDataDir, workspacePath, {
         runId: 'orphan-boot-run',
         goal: 'Orphan boot test',
