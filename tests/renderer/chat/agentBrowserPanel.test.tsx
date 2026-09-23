@@ -2,8 +2,8 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
-import { AgentBrowserPanel } from '@renderer/features/chat/components/AgentBrowserPanel'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { AgentBrowserPanel, splitBrowserUrl } from '@renderer/features/chat/components/AgentBrowserPanel'
 import { BROWSER_RECENTS_KEY } from '@renderer/features/chat/components/browserRecents'
 
 describe('AgentBrowserPanel visibility', () => {
@@ -84,9 +84,46 @@ describe('AgentBrowserPanel visibility', () => {
       }
     })
     const { findByText, findByLabelText } = render(<AgentBrowserPanel visible={true} />)
-    expect(await findByText('Agent is browsing…')).toBeTruthy()
+    expect(await findByText('Agent is browsing')).toBeTruthy()
+    // With no browser call in flight, the page it is on says where.
+    expect(document.querySelector('[data-browser-agent-banner]')?.textContent).toContain('Agent is browsing — Example')
     expect(await findByText('Take control')).toBeTruthy()
     expect(await findByLabelText('Search or enter URL')).toBeTruthy()
+  })
+
+  it('says what the agent is doing in the browser when a call is in flight', async () => {
+    Object.defineProperty(window, 'vyotiq', {
+      configurable: true,
+      writable: true,
+      value: {
+        browserGetState: vi.fn().mockResolvedValue({
+          ok: true,
+          data: {
+            open: true,
+            url: 'http://localhost:4321/use-cases',
+            title: 'Use cases',
+            navigating: false,
+            agentBusy: true,
+            userControl: false,
+            tabs: [{ id: 't1', title: 'Use cases', url: 'http://localhost:4321/use-cases', active: true }],
+            canGoBack: false,
+            canGoForward: false
+          }
+        }),
+        onBrowserState: vi.fn().mockReturnValue(() => {}),
+        browserSetBounds: vi.fn().mockResolvedValue({ ok: true, data: true })
+      }
+    })
+    render(<AgentBrowserPanel visible={true} agentAction="Clicking Incident to PR" />)
+    await waitFor(() => {
+      expect(document.querySelector('[data-browser-agent-banner]')?.textContent).toContain(
+        'Agent is browsing — Clicking Incident to PR'
+      )
+    })
+    // The address shows its host quiet and its path in full.
+    const address = document.querySelector('[data-browser-address]')
+    expect(address?.textContent).toBe('localhost:4321/use-cases')
+    expect(address?.querySelector('.text-fg')?.textContent).toBe('/use-cases')
   })
 
   it('updates recents title when title arrives for the same URL', async () => {
@@ -199,8 +236,12 @@ describe('AgentBrowserPanel visibility', () => {
         browserBack
       }
     })
-    const { findByLabelText, findByText } = render(<AgentBrowserPanel visible={true} />)
-    fireEvent.click(await findByLabelText('Back'))
+    const { findByText } = render(<AgentBrowserPanel visible={true} />)
+    // Back enables once the page state says there is somewhere to go.
+    await waitFor(() => {
+      expect((screen.getByRole('button', { name: 'Back' }) as HTMLButtonElement).disabled).toBe(false)
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(browserBack).toHaveBeenCalled()
     expect(await findByText('Workspace is closed')).toBeTruthy()
   })
@@ -244,11 +285,32 @@ describe('AgentBrowserPanel visibility', () => {
     })
   })
 
-  it('exposes viewport size presets', async () => {
-    const { findByLabelText } = render(<AgentBrowserPanel visible={true} />)
-    const select = (await findByLabelText('Viewport size')) as HTMLSelectElement
-    fireEvent.change(select, { target: { value: 'iphone' } })
-    expect(select.value).toBe('iphone')
+  it('switches between Fit and a phone width, with every preset in the menu', async () => {
+    localStorage.removeItem('vyotiq.browserViewport')
+    render(<AgentBrowserPanel visible={true} />)
+    const group = await screen.findByRole('radiogroup', { name: 'Viewport size' })
+    expect(group.textContent).toBe('Fit390')
+    fireEvent.click(screen.getByRole('radio', { name: '390' }))
     expect(document.querySelector('[data-browser-viewport="iphone"]')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+    fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: /768×1024/ }))
+    expect(document.querySelector('[data-browser-viewport="ipad"]')).toBeTruthy()
+    // The segmented control follows the width in use.
+    expect(screen.getByRole('radio', { name: '768' }).getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(screen.getByRole('radio', { name: 'Fit' }))
+    expect(document.querySelector('[data-browser-viewport="fit"]')).toBeTruthy()
+  })
+})
+
+describe('splitBrowserUrl', () => {
+  it('splits an address into its host and the rest', () => {
+    expect(splitBrowserUrl('https://github.com/vyotiq/agent-v?tab=readme#top')).toEqual({
+      host: 'github.com',
+      rest: '/vyotiq/agent-v?tab=readme#top'
+    })
+    expect(splitBrowserUrl('http://localhost:4321/')).toEqual({ host: 'localhost:4321', rest: '' })
+    expect(splitBrowserUrl('about:blank')).toBeNull()
+    expect(splitBrowserUrl('')).toBeNull()
   })
 })

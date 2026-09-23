@@ -816,7 +816,7 @@ const TranscriptRowBlock = memo(function TranscriptRowBlock({
 
   if (row.kind === 'changes') {
     // Receipt only — Keep/Discard lives in the Changes panel (Review).
-    return <ChangeSummary files={row.files} compact onOpenChanges={onOpenChanges} />
+    return <ChangeSummary files={row.files} onOpenChanges={onOpenChanges} />
   }
 
   if (row.kind === 'approval') {

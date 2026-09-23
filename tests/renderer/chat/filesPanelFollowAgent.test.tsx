@@ -196,11 +196,11 @@ describe('FilesPanel follow mode', () => {
     expect(api.workspaceFileRead).not.toHaveBeenCalled()
   })
 
-  it('exposes the toggle as a pressed-state control', async () => {
+  it('exposes the toggle as a switch', async () => {
     localStorage.setItem('vyotiq.files.followAgent', '1')
     const { findByRole } = renderPanel({})
-    const toggle = await findByRole('button', { name: 'Follow agent edits' })
-    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    const toggle = await findByRole('switch', { name: 'Follow agent edits' })
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
   })
 })
 

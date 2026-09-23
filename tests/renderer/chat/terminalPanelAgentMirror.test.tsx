@@ -2,8 +2,9 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { TerminalPanel } from '@renderer/features/chat/components/TerminalPanel'
+import { commandProgram } from '@renderer/features/chat/components/TerminalSessionBar'
 import type { PtySessionInfo } from '@shared/ipc'
 
 type CapturedTerm = {
@@ -201,5 +202,59 @@ describe('TerminalPanel renders the agent mirror as a read-only session', () => 
     render(<TerminalPanel workspacePath="/ws" visible />)
     await waitFor(() => expect(termMocks.length).toBeGreaterThan(0))
     expect(api.ptyCreate).not.toHaveBeenCalled()
+  })
+})
+
+describe('TerminalPanel says what the agent is running', () => {
+  it('names the program on the agent tab with a live dot, and times it in the status bar', async () => {
+    installApi({ ptyList: vi.fn().mockResolvedValue({ ok: true, data: [mirrorSession, shellSession] }) })
+    const at = new Date(Date.now() - 41_000).toISOString()
+    render(<TerminalPanel workspacePath="/ws" visible agentCommand="pnpm vitest run tests/main" agentCommandAt={at} />)
+
+    const agentTab = await screen.findByRole('tab', { name: /^Agent · vitest/ })
+    expect(agentTab.textContent).toContain('working now')
+    expect(screen.getByRole('tab', { name: 'cmd' })).toBeTruthy()
+    await waitFor(() => {
+      expect(document.querySelector('[data-terminal-status]')?.textContent).toMatch(/running · 4\ds/)
+    })
+  })
+
+  it('shows the agent tab still when nothing runs, without a dot', async () => {
+    installApi({ ptyList: vi.fn().mockResolvedValue({ ok: true, data: [mirrorSession, shellSession] }) })
+    render(<TerminalPanel workspacePath="/ws" visible />)
+    const agentTab = await screen.findByRole('tab', { name: 'Agent' })
+    expect(agentTab.textContent).not.toContain('working now')
+    expect(document.querySelector('[data-terminal-status]')?.textContent).not.toContain('running')
+  })
+
+  it('says the agent session is read-only and opens a shell beside it', async () => {
+    const api = installApi({ ptyList: vi.fn().mockResolvedValue({ ok: true, data: [mirrorSession, shellSession] }) })
+    render(<TerminalPanel workspacePath="/ws" visible />)
+    expect(await screen.findByText('Agent session · read-only')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Open a shell here' }))
+    await waitFor(() => expect(api.ptyCreate).toHaveBeenCalled())
+  })
+
+  it('puts the shell and the workspace in the status bar of a shell session', async () => {
+    installApi({ ptyList: vi.fn().mockResolvedValue({ ok: true, data: [shellSession] }) })
+    render(<TerminalPanel workspacePath="/ws/my-project" visible />)
+    await waitFor(() => {
+      expect(document.querySelector('[data-terminal-status]')?.textContent).toContain('cmd · my-project')
+    })
+    expect(screen.queryByText('Agent session · read-only')).toBeNull()
+  })
+})
+
+describe('commandProgram', () => {
+  it.each([
+    ['pnpm vitest run tests/x', 'vitest'],
+    ['npm run test', 'test'],
+    ['npx tsc -p tsconfig.json', 'tsc'],
+    ['git status --short', 'git'],
+    ['FOO=1 node a.js', 'node'],
+    [String.raw`C:\tools\rg.exe needle`, 'rg'],
+    ['pnpm', 'pnpm']
+  ])('%s → %s', (command, program) => {
+    expect(commandProgram(command)).toBe(program)
   })
 })

@@ -409,6 +409,7 @@ describe('ChatView composer placement', () => {
     expect(
       document.querySelector('[data-changes-panel]')?.parentElement?.className
     ).toMatch(/\bflex\b/)
+    // Nothing changed by this task, and no git to review with: it says which.
     expect(await screen.findByText('Not a git repository', {}, { timeout: 5000 })).toBeTruthy()
 
     fireEvent.click(inspectorTab(/^Terminal/))

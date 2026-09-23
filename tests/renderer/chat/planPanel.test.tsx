@@ -2,8 +2,8 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { PlanPanel, parsePlanOutline, outlineIndentRem } from '@renderer/features/chat/components/PlanPanel'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { PlanPanel, planDocument } from '@renderer/features/chat/components/PlanPanel'
 import { minimalReadyPlanMarkdown } from '@renderer/features/chat/utils/planDraft'
 
 afterEach(() => {
@@ -11,28 +11,34 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('parsePlanOutline', () => {
-  it('skips h1 when deeper headings exist and allocates collision-safe ids', () => {
-    const outline = parsePlanOutline(
-      '# Title\n\n## Goal\n\n## Goal\n\n### Detail\n\n- [x] done\n- [ ] todo\n'
+/** The contract and the full receipt sit one menu away from the plan. */
+async function openView(name: 'Plan' | 'Contract' | 'Receipt'): Promise<void> {
+  fireEvent.click(screen.getByRole('button', { name: 'More — contract, receipt' }))
+  fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: new RegExp(`^${name}`) }))
+}
+
+describe('planDocument', () => {
+  it('takes the title from the first # heading and one section per ## heading', () => {
+    const doc = planDocument(
+      '# Ship the parser\n\nWhy it matters.\n\n## Goal\n\nParse it.\n\n### Detail\n\nDeeper.\n\n## Risks\n\n- One\n'
     )
-    expect(outline.headings.map((h) => h.text)).toEqual(['Goal', 'Goal', 'Detail'])
-    expect(outline.headings.map((h) => h.level)).toEqual([2, 2, 3])
-    // Ids still allocate the h1 slug so they match MarkdownContent headingIds.
-    expect(outline.headings.map((h) => h.id)).toEqual(['goal', 'goal-1', 'detail'])
-    expect(outline.checked).toBe(1)
-    expect(outline.unchecked).toBe(1)
+    expect(doc.title).toBe('Ship the parser')
+    expect(doc.lead).toBe('Why it matters.')
+    expect(doc.sections.map((s) => s.heading)).toEqual(['Goal', 'Risks'])
+    // Deeper headings stay inside their section.
+    expect(doc.sections[0]!.body).toBe('Parse it.\n\n### Detail\n\nDeeper.')
   })
 
-  it('keeps h1 when it is the only heading level', () => {
-    const outline = parsePlanOutline('# Solo\n\nBody text here.\n')
-    expect(outline.headings).toEqual([{ text: 'Solo', id: 'solo', level: 1 }])
+  it('keeps a heading inside fenced code as code', () => {
+    const doc = planDocument('# T\n\n## Steps\n\n```md\n## not a section\n```\n\n## Risks\n\nNone\n')
+    expect(doc.sections.map((s) => s.heading)).toEqual(['Steps', 'Risks'])
+    expect(doc.sections[0]!.body).toContain('## not a section')
   })
 
-  it('indents relative to the shallowest visible level', () => {
-    expect(outlineIndentRem(2, 2)).toBe(0)
-    expect(outlineIndentRem(3, 2)).toBe(0.65)
-    expect(outlineIndentRem(1, 1)).toBe(0)
+  it('has no title when the plan does not start with one', () => {
+    const doc = planDocument('Intro first.\n\n# Late title\n\n## Goal\n\nG\n')
+    expect(doc.title).toBeNull()
+    expect(doc.lead).toContain('# Late title')
   })
 })
 
@@ -53,7 +59,7 @@ describe('PlanPanel', () => {
       <PlanPanel workspacePath="/ws" runId={null} running={false} />
     )
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Contract' }))
+    await openView('Contract')
 
     await waitFor(() => {
       expect(screen.getByText('No contract yet')).toBeTruthy()
@@ -72,7 +78,7 @@ describe('PlanPanel', () => {
       <PlanPanel workspacePath="/ws" runId="run-1" running={false} />
     )
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Contract' }))
+    await openView('Contract')
 
     await waitFor(() => {
       expect(window.vyotiq.readRunArtifact).toHaveBeenCalledWith({
@@ -112,74 +118,75 @@ describe('PlanPanel', () => {
     })
   })
 
-  it('outline click scrolls to matching heading id', async () => {
-    const scrollIntoView = vi.fn()
-    Element.prototype.scrollIntoView = scrollIntoView
-
+  it('lays the plan out as a document: its title, then each section under a caps label', async () => {
     window.vyotiq.readRunArtifact = vi.fn().mockResolvedValue({
       ok: true,
       data: {
         name: 'plan.md',
         exists: true,
-        content:
-          `${minimalReadyPlanMarkdown()}\n## Scope\n\nDocument the verified scope thoroughly.\n\n## Findings\n\n- [x] first checklist item here\n- [ ] second checklist item here\n`
+        content: '# Comprehensive plan\n\n## Goal\n\nAudit the app\n\n## Risks\n\n- Large files\n'
       }
     })
 
-    render(<PlanPanel workspacePath="/ws" runId="run-outline" running={false} />)
+    render(<PlanPanel workspacePath="/ws" runId="run-doc" running={false} />)
 
-    await waitFor(() => {
-      expect(screen.getByLabelText('Plan outline')).toBeTruthy()
-    })
-    expect(screen.getByText('Outline')).toBeTruthy()
-    // The stub's Done-when `- [ ]` counts as the first unchecked item; the
-    // appended Findings section adds one checked and one unchecked.
-    expect(screen.getByText('Checklist 1/3')).toBeTruthy()
-    // H1 omitted from nav when H2s exist.
-    const outline = screen.getByLabelText('Plan outline')
-    expect(within(outline).queryByRole('button', { name: 'Comprehensive plan' })).toBeNull()
-
-    fireEvent.click(within(outline).getByRole('button', { name: 'Findings' }))
-
-    await waitFor(() => {
-      expect(scrollIntoView).toHaveBeenCalled()
-    })
-    expect(document.getElementById('findings')).toBeTruthy()
+    const title = await screen.findByRole('heading', { level: 2, name: 'Comprehensive plan' })
+    expect(title).toBeTruthy()
+    const labels = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)
+    expect(labels).toEqual(['Goal', 'Risks'])
+    expect(screen.getByRole('heading', { level: 3, name: 'Goal' }).className).toContain('uppercase')
+    expect(screen.getByText('Large files')).toBeTruthy()
+    // No outline box and no second copy of the tasks: the record has them.
+    expect(screen.queryByLabelText('Plan outline')).toBeNull()
+    expect(document.querySelector('[data-plan-tasks]')).toBeNull()
   })
 
-  it('hides the outline checklist count when the run has todos', async () => {
-    window.vyotiq.readRunArtifact = vi.fn().mockImplementation(async (req: { name?: string }) => {
-      if (req.name === 'todos.json') {
-        return {
-          ok: true,
-          data: {
-            name: 'todos.json',
-            exists: true,
-            content: JSON.stringify({
-              updatedAt: '2026-01-01T00:00:00.000Z',
-              todos: [{ id: '1', content: 'Ship it', status: 'in_progress' }]
-            })
-          }
-        }
-      }
-      return {
-        ok: true,
-        data: {
-          name: 'plan.md',
-          exists: true,
-          content: `${minimalReadyPlanMarkdown()}\n## Scope\n\nDocument the verified scope thoroughly.\n\n## Findings\n\n- [x] first checklist item here\n- [ ] second checklist item here\n`
-        }
-      }
+  it('leaves out Steps and Done when only once the record shows them live', async () => {
+    const plan = '# Plan\n\n## Goal\n\nG\n\n## Steps\n\n1. First step\n\n## Done when\n\n- Tests pass\n'
+    const artifacts: Record<string, string | null> = { 'plan.md': plan, 'todos.json': null, 'checks.json': null }
+    window.vyotiq.readRunArtifact = vi.fn().mockImplementation(async (req: { name: string }) => {
+      const content = artifacts[req.name] ?? null
+      return { ok: true, data: { name: req.name, exists: content !== null, content } }
     })
 
-    render(<PlanPanel workspacePath="/ws" runId="run-outline-todos" running={false} />)
+    const view = render(<PlanPanel workspacePath="/ws" runId="run-a" running={false} />)
+    await screen.findByText('First step')
+    expect(screen.getByText('Tests pass')).toBeTruthy()
+    view.unmount()
 
+    artifacts['todos.json'] = JSON.stringify({ todos: [{ id: '1', content: 'First step', status: 'pending' }] })
+    artifacts['checks.json'] = JSON.stringify({
+      checks: [{ id: 'c1', text: 'Tests pass', source: 'plan', verdict: null, createdAt: '2026-09-24T09:00:00.000Z' }]
+    })
+    render(<PlanPanel workspacePath="/ws" runId="run-b" running={false} />)
+    await screen.findByRole('heading', { level: 3, name: 'Goal' })
     await waitFor(() => {
-      expect(screen.getByText('Ship it')).toBeTruthy()
+      expect(screen.queryByRole('heading', { level: 3, name: 'Steps' })).toBeNull()
+      expect(screen.queryByRole('heading', { level: 3, name: 'Done when' })).toBeNull()
     })
-    expect(screen.getByLabelText('Plan outline')).toBeTruthy()
-    // The Tasks section is the live count; the markdown-checkbox count is hidden.
-    expect(screen.queryByText(/Checklist /)).toBeNull()
+  })
+
+  it('opens plan.md in the reader\'s own editor, and says so when it cannot', async () => {
+    window.vyotiq.readRunArtifact = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { name: 'plan.md', exists: true, content: '# P\n\n## Goal\n\nG\n' }
+    })
+    const openRunArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, data: true })
+      .mockResolvedValueOnce({ ok: false, error: 'No application is associated with .md' })
+    Object.assign(window.vyotiq, { openRunArtifact })
+
+    render(<PlanPanel workspacePath="/ws" runId="run-open" running={false} />)
+    const open = await screen.findByRole('button', { name: 'Open plan.md' })
+    fireEvent.click(open)
+    await waitFor(() => {
+      expect(openRunArtifact).toHaveBeenCalledWith({ workspacePath: '/ws', runId: 'run-open', name: 'plan.md' })
+    })
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    fireEvent.click(open)
+    expect((await screen.findByRole('alert')).textContent).toBe('No application is associated with .md')
   })
 
   it('loads and renders receipt.json summary', async () => {
@@ -214,7 +221,7 @@ describe('PlanPanel', () => {
 
     const openFile = vi.fn()
     render(<PlanPanel workspacePath="/ws" runId="run-err" running={false} onOpenFile={openFile} />)
-    fireEvent.click(screen.getByRole('tab', { name: 'Receipt' }))
+    await openView('Receipt')
 
     await waitFor(() => {
       expect(screen.getByText('Insufficient Balance')).toBeTruthy()
@@ -263,7 +270,7 @@ describe('PlanPanel', () => {
     })
 
     render(<PlanPanel workspacePath="/ws" runId="run-verify" running={false} />)
-    fireEvent.click(screen.getByRole('tab', { name: 'Receipt' }))
+    await openView('Receipt')
 
     await waitFor(() => {
       expect(screen.getByText(/File mutations after last successful check/)).toBeTruthy()
@@ -288,7 +295,7 @@ describe('PlanPanel', () => {
 
     render(<PlanPanel workspacePath="/ws" runId="run-race" running={false} />)
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Contract' }))
+    await openView('Contract')
 
     await waitFor(() => {
       expect(screen.getByText('Contract win')).toBeTruthy()
@@ -308,6 +315,9 @@ describe('PlanPanel', () => {
       expect(screen.getByText('Contract win')).toBeTruthy()
     })
     expect(screen.getByLabelText('Contract panel')).toBeTruthy()
+    // Back to the plan in one step.
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the plan' }))
+    expect(screen.getByLabelText('Plan panel')).toBeTruthy()
   })
 
   it('hides a prior done receipt while the run is live', async () => {
@@ -337,7 +347,7 @@ describe('PlanPanel', () => {
     render(
       <PlanPanel workspacePath="/ws" runId="run-stale" running invokeId={2} />
     )
-    fireEvent.click(screen.getByRole('tab', { name: 'Receipt' }))
+    await openView('Receipt')
 
     await waitFor(() => {
       expect(window.vyotiq.readRunArtifact).toHaveBeenCalled()
@@ -377,7 +387,7 @@ describe('PlanPanel', () => {
     render(
       <PlanPanel workspacePath="/ws" runId="run-mismatch" running invokeId={2} />
     )
-    fireEvent.click(screen.getByRole('tab', { name: 'Receipt' }))
+    await openView('Receipt')
 
     await waitFor(() => {
       expect(screen.getByText('Receipt updating')).toBeTruthy()
@@ -395,7 +405,7 @@ describe('PlanPanel', () => {
     })
 
     render(<PlanPanel workspacePath="/ws" runId="run-bad" running={false} />)
-    fireEvent.click(screen.getByRole('tab', { name: 'Receipt' }))
+    await openView('Receipt')
 
     await waitFor(() => {
       expect(screen.getByText('Invalid receipt.json')).toBeTruthy()
@@ -616,54 +626,7 @@ describe('PlanPanel', () => {
     expect(screen.queryByText(/Switch to Plan mode/)).toBeNull()
   })
 
-  it('renders Tasks checklist from todos.json above plan narrative', async () => {
-    window.vyotiq.readRunArtifact = vi.fn().mockImplementation(async (req: { name?: string }) => {
-      if (req.name === 'todos.json') {
-        return {
-          ok: true,
-          data: {
-            name: 'todos.json',
-            exists: true,
-            content: JSON.stringify({
-              updatedAt: '2026-01-01T00:00:00.000Z',
-              todos: [
-                { id: '1', content: 'Map project', status: 'completed' },
-                { id: '2', content: 'Run tests', status: 'in_progress' }
-              ]
-            })
-          }
-        }
-      }
-      if (req.name === 'plan.md') {
-        return {
-          ok: true,
-          data: {
-            name: 'plan.md',
-            exists: true,
-            content: '# Comprehensive plan\n\n## Goal\n\nAudit the app\n'
-          }
-        }
-      }
-      if (req.name === 'receipt.json') {
-        return { ok: true, data: { name: 'receipt.json', exists: false, content: null } }
-      }
-      return { ok: false, error: 'unexpected' }
-    })
-
-    render(<PlanPanel workspacePath="/ws" runId="run-tasks" running={false} />)
-
-    await waitFor(() => {
-      expect(document.querySelector('[data-plan-tasks]')).toBeTruthy()
-    })
-    expect(screen.getByText('Map project')).toBeTruthy()
-    expect(screen.getByText('Run tests')).toBeTruthy()
-    expect(screen.getByText('1/2')).toBeTruthy()
-    await waitFor(() => {
-      expect(screen.getByText('Audit the app')).toBeTruthy()
-    })
-  })
-
-  it('shows Tasks section when only todos.json exists (no plan draft)', async () => {
+  it('shows the empty plan state when only todos.json exists — the record shows the steps', async () => {
     window.vyotiq.readRunArtifact = vi.fn().mockImplementation(async (req: { name?: string }) => {
       if (req.name === 'todos.json') {
         return {
@@ -683,10 +646,9 @@ describe('PlanPanel', () => {
     render(<PlanPanel workspacePath="/ws" runId="run-todos-only" running={false} />)
 
     await waitFor(() => {
-      expect(screen.getByText('Only task')).toBeTruthy()
+      expect(screen.getByText('No plan yet')).toBeTruthy()
     })
-    expect(document.querySelector('[data-plan-tasks]')).toBeTruthy()
-    expect(screen.queryByText('No plan drafted yet')).toBeNull()
+    expect(screen.queryByText('Only task')).toBeNull()
   })
 
   it('renders in-progress plan stub instead of empty state', async () => {
@@ -713,6 +675,6 @@ describe('PlanPanel', () => {
     await waitFor(() => {
       expect(screen.getByText(/Draft the plan here/i)).toBeTruthy()
     })
-    expect(screen.queryByText('No plan drafted yet')).toBeNull()
+    expect(screen.queryByText('No plan yet')).toBeNull()
   })
 })

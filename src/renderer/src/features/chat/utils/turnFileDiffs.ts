@@ -117,7 +117,7 @@ function mergeToolDiffs(
   }
 }
 
-/** Per-turn, per-path diff lines from writing tool args (for ChangeSummary expand). */
+/** Per-turn, per-path diff lines from writing tool args. */
 export function collectTurnFileDiffs(
   rows: readonly TranscriptRow[]
 ): Map<number, Map<string, DiffLine[]>> {

@@ -61,11 +61,11 @@ test('follow mode opens the file the run writes', async () => {
   await window.getByRole('tablist', { name: 'Inspector' }).getByRole('tab', { name: /^Files/ }).click()
   await expect(window.getByRole('tabpanel', { name: 'Files' })).toBeVisible({ timeout: 20_000 })
 
-  const follow = window.getByRole('button', { name: 'Follow agent edits' })
+  const follow = window.getByRole('switch', { name: 'Follow agent edits' })
   await expect(follow).toBeVisible({ timeout: 20_000 })
-  expect(await follow.getAttribute('aria-pressed')).toBe('false')
+  expect(await follow.getAttribute('aria-checked')).toBe('false')
   await follow.click()
-  expect(await follow.getAttribute('aria-pressed')).toBe('true')
+  expect(await follow.getAttribute('aria-checked')).toBe('true')
 
   // Nothing is open yet — the run is what puts a file on screen.
   await expect(window.getByRole('tab', { name: /target\.ts/i })).toHaveCount(0)

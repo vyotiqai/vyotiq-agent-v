@@ -49,6 +49,7 @@ import {
   prDiff,
   prEditTitle,
   prMerge,
+  prReady,
   prView,
   resetGhAvailableCacheForTests
 } from '@main/git/gh'
@@ -165,7 +166,18 @@ describe('gh helpers', () => {
           deletions: 1,
           files: [{ path: 'a.ts', additions: 3, deletions: 1, changeType: 'ADDED' }],
           commits: [{ oid: 'abc', messageHeadline: 'wip', authors: [{ login: 'u' }] }],
-          statusCheckRollup: [{ name: 'ci', state: 'SUCCESS', conclusion: 'SUCCESS' }],
+          statusCheckRollup: [
+            {
+              name: 'ci',
+              status: 'COMPLETED',
+              conclusion: 'FAILURE',
+              detailsUrl: 'https://github.com/o/r/actions/runs/1',
+              startedAt: '2026-01-01T00:00:00Z',
+              completedAt: '2026-01-01T00:01:05Z'
+            },
+            { context: 'deploy', state: 'PENDING', targetUrl: 'http://insecure.example', description: ' Waiting ' }
+          ],
+          mergeStateStatus: 'BLOCKED',
           reviews: [
             {
               author: { login: 'rev' },
@@ -192,7 +204,18 @@ describe('gh helpers', () => {
     expect(view?.files[0]?.path).toBe('a.ts')
     expect(view?.files[0]?.changeType).toBe('ADDED')
     expect(view?.commits[0]?.authors).toEqual(['u'])
-    expect(view?.checks[0]?.name).toBe('ci')
+    expect(view?.checks[0]).toEqual({
+      name: 'ci',
+      state: 'COMPLETED',
+      conclusion: 'FAILURE',
+      url: 'https://github.com/o/r/actions/runs/1',
+      startedAt: '2026-01-01T00:00:00Z',
+      completedAt: '2026-01-01T00:01:05Z',
+      description: null
+    })
+    // A status context names itself by `context`; only https links are kept.
+    expect(view?.checks[1]).toMatchObject({ name: 'deploy', state: 'PENDING', url: null, description: 'Waiting' })
+    expect(view?.mergeStateStatus).toBe('BLOCKED')
     expect(view?.reviews[0]?.author).toBe('rev')
     expect(view?.reviewDecision).toBe('APPROVED')
     expect(view?.reviewRequests).toEqual(['alice'])
@@ -518,6 +541,16 @@ describe('gh helpers', () => {
     await expect(prClose('/ws', 12)).resolves.toEqual({ detail: 'closed' })
     const closeArgs = execFileAsync.mock.calls.find((c) => (c[1] as string[])[1] === 'close')
     expect(closeArgs?.[1]).toEqual(expect.arrayContaining(['close', '12']))
+  })
+
+  it('prReady marks the numbered PR ready for review', async () => {
+    mockGhInstalled()
+    execFileAsync
+      .mockResolvedValueOnce({ stdout: 'gh version 2.0', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+    await expect(prReady('/ws', 12)).resolves.toEqual({ detail: 'Marked ready for review' })
+    const readyArgs = execFileAsync.mock.calls.find((c) => (c[1] as string[])[1] === 'ready')
+    expect(readyArgs?.[1]).toEqual(expect.arrayContaining(['pr', 'ready', '12']))
   })
 
   it('prEditTitle includes the PR number', async () => {

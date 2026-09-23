@@ -37,6 +37,7 @@ import {
   CompactRunRequestSchema,
   ResolveWritesRequestSchema,
   ReadRunArtifactRequestSchema,
+  OpenRunArtifactRequestSchema,
   RunStatsRequestSchema,
   HomeActivityRequestSchema,
   HarnessReviewRequestSchema,
@@ -87,6 +88,7 @@ import {
   PrMergeRequestSchema,
   PrDiffRequestSchema,
   PrCloseRequestSchema,
+  PrReadyRequestSchema,
   PrEditTitleRequestSchema,
   ShellOpenExternalRequestSchema,
   PtyCreateRequestSchema,
@@ -495,6 +497,7 @@ import { emitGitStatusChanged } from '@main/git/gitStatusEvents'
 import { generateCommitMessage } from '@main/git/commitMessage'
 import {
   prClose,
+  prReady,
   prCreate,
   prCreateFromChanges,
   prDiff,
@@ -2204,6 +2207,22 @@ export function registerIpc(): void {
     }
   )
 
+  ipcMain.handle(IPC.runsOpenArtifact, async (event, raw): Promise<IpcResult<true>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = OpenRunArtifactRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
+      const filePath = join(resolveRunDir(req.workspacePath, req.runId), req.name)
+      if (!existsSync(filePath)) return fail(`This task has no ${req.name} yet`)
+      // Opens with whatever the OS uses for .md; the reply is its error text.
+      const error = await shell.openPath(filePath)
+      return error ? fail(error) : ok(true as const)
+    } catch (err) {
+      return failFrom(err, IPC.runsOpenArtifact)
+    }
+  })
+
   ipcMain.handle(
     IPC.runStats,
     async (event, raw): Promise<IpcResult<RunStatsResult>> => {
@@ -2951,6 +2970,17 @@ export function registerIpc(): void {
       return ok(await prClose(req.workspacePath, req.number))
     } catch (err) {
       return failFrom(err, IPC.prClose)
+    }
+  })
+
+  ipcMain.handle(IPC.prReady, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = PrReadyRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await prReady(req.workspacePath, req.number))
+    } catch (err) {
+      return failFrom(err, IPC.prReady)
     }
   })
 

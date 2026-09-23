@@ -109,12 +109,20 @@ test('keeps the active file highlighted while browsing folders', async () => {
   await window.getByText('src').click()
   await window.getByText('note.ts').click()
   await expect(window.getByRole('tab', { name: /note\.ts/i })).toBeVisible()
+  const activeNote = window.locator('[role="treeitem"][aria-selected="true"]').filter({ hasText: 'note.ts' })
+  await expect(activeNote).toBeVisible()
 
-  await window.locator('[role="treeitem"]').filter({ hasText: /^src$/ }).click()
+  // The whole row is the target, so browse a folder the open file isn't in —
+  // clicking `src` itself would fold note.ts out of view.
+  const vault = window.locator('[role="treeitem"]').filter({ hasText: /^vault$/ })
+  await vault.click()
+  await expect(vault).toHaveAttribute('aria-expanded', 'true')
+  await expect(vault).toHaveAttribute('aria-selected', 'false')
+  await expect(activeNote).toBeVisible()
 
-  await expect(
-    window.locator('[role="treeitem"][aria-selected="true"]').filter({ hasText: 'note.ts' })
-  ).toBeVisible()
+  await vault.click()
+  await expect(vault).toHaveAttribute('aria-expanded', 'false')
+  await expect(activeNote).toBeVisible()
 })
 
 test('filter reveals deeply nested files', async () => {
@@ -143,11 +151,9 @@ test('word wrap removes horizontal editor scrolling', async () => {
   const scroller = window.locator('[data-code-editor] .cm-scroller')
   await expect(scroller).toBeVisible()
 
-  await window.getByRole('button', { name: 'Wrap', exact: true }).click()
-  await expect(window.getByRole('button', { name: 'Wrap', exact: true })).toHaveAttribute(
-    'aria-pressed',
-    'true'
-  )
+  // Word wrap lives in the editor options, with the file's other view settings.
+  await window.getByRole('button', { name: 'Editor actions', exact: true }).click()
+  await window.getByRole('menuitemcheckbox', { name: 'Word wrap' }).click()
 
   await expect(window.locator('[data-code-editor]')).toHaveAttribute('data-word-wrap', 'true')
   await expect

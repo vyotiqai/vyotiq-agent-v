@@ -5,8 +5,9 @@ import {
   useState,
   useSyncExternalStore
 } from 'react'
-import type { UiItem } from '@shared/transcript'
+import type { UiItem, UiToolRow } from '@shared/transcript'
 import { extractPartialEditArgs } from '@shared/utils/partialJson'
+import { TOOL_LABELS } from '@shared/utils/toolSummary'
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import type { ChatItemsStore, ChatMetaStore } from '../chatStores'
 import type { ChatStreamController } from '@renderer/lib/hooks/createChatStreamController'
@@ -184,13 +185,38 @@ export type AgentLiveActivity = {
    * the work is real either way, only the label is missing.
    */
   writingPath: string | null
-  /** Command a terminal call is running right now, as the transcript labels it. */
+  /**
+   * Command line a terminal call is running right now — its `command`
+   * argument, else the transcript's label for the call.
+   */
   command: string | null
+  /** When that call started (ISO), for a running clock. */
+  commandAt: string | null
   /** A `create_plan` call is writing the plan right now. */
   planning: boolean
+  /** What a browser call is doing right now: "Clicking Sign in". */
+  browsing: string | null
 }
 
-const NO_ACTIVITY: AgentLiveActivity = { writingPath: null, command: null, planning: false }
+const NO_ACTIVITY: AgentLiveActivity = {
+  writingPath: null,
+  command: null,
+  commandAt: null,
+  planning: false,
+  browsing: null
+}
+
+function browserAction(tool: UiToolRow): string {
+  const verb = TOOL_LABELS[tool.name]?.running ?? 'Using the browser'
+  const target = tool.summary?.trim()
+  return target ? `${verb} ${target}` : verb
+}
+
+function terminalCommandLine(tool: UiToolRow): string {
+  const args = extractPartialEditArgs(tool.argsPreview) as Record<string, unknown> | null
+  const command = args?.command ?? args?.cmd
+  return typeof command === 'string' && command.trim() ? command.trim() : (tool.summary?.trim() ?? '')
+}
 
 export function useAgentLiveActivity(
   running: boolean,
@@ -214,7 +240,9 @@ export function useAgentLiveActivity(
       const stop = Math.max(0, list.length - FOLLOW_SCAN_WINDOW)
       let writingPath: string | null = null
       let command: string | null = null
+      let commandAt: string | null = null
       let planning = false
+      let browsing: string | null = null
       for (let i = list.length - 1; i >= stop; i -= 1) {
         const item = list[i]
         if (!item || item.kind !== 'tool') continue
@@ -222,8 +250,11 @@ export function useAgentLiveActivity(
         if (tool.status !== 'running') continue
         if (tool.name === 'create_plan') {
           planning = true
+        } else if (browsing === null && tool.name.startsWith('browser_')) {
+          browsing = browserAction(tool)
         } else if (command === null && tool.name === 'terminal') {
-          command = tool.summary?.trim() ?? ''
+          command = terminalCommandLine(tool)
+          commandAt = item.at ?? null
         } else if (writingPath === null && FOLLOW_WRITE_TOOLS.has(tool.name)) {
           // Partial-JSON aware for the same reason follow mode is: a streaming
           // edit names its path well before its arguments finish arriving.
@@ -231,14 +262,18 @@ export function useAgentLiveActivity(
           const fromArgs = typeof args?.path === 'string' ? args.path.trim() : ''
           writingPath = fromArgs || (tool.summary?.trim() ?? '')
         }
-        if (writingPath !== null && command !== null && planning) break
+        if (writingPath !== null && command !== null && planning && browsing !== null) break
       }
       setActivity((prev) =>
-        prev.writingPath === writingPath && prev.command === command && prev.planning === planning
+        prev.writingPath === writingPath &&
+        prev.command === command &&
+        prev.commandAt === commandAt &&
+        prev.planning === planning &&
+        prev.browsing === browsing
           ? prev
-          : writingPath === null && command === null && !planning
+          : writingPath === null && command === null && !planning && browsing === null
             ? NO_ACTIVITY
-            : { writingPath, command, planning }
+            : { writingPath, command, commandAt, planning, browsing }
       )
     }
     scan()

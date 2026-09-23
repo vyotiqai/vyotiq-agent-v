@@ -1,18 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, cn, Switch, Tooltip } from '@renderer/lib/ui'
-import { isEditableShortcutTarget, matchShortcut, shortcutLabel } from '@renderer/lib/shortcuts'
-import { Icon, type IconName } from '@renderer/lib/icons'
+import {
+  ActionMenu,
+  Badge,
+  Button,
+  IconButton,
+  Segmented,
+  StatusGlyph,
+  Tabs,
+  Textarea,
+  cn,
+  type ActionMenuItem,
+  type BadgeTone,
+  type TaskState
+} from '@renderer/lib/ui'
+import { isEditableShortcutTarget, matchShortcut } from '@renderer/lib/shortcuts'
+import { Icon } from '@renderer/lib/icons'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { MarkdownContent } from '@renderer/lib/ui'
-import { CHAT_RIGHT_PANEL_BODY } from '@renderer/lib/utils/layout'
-import type { GithubAuthStatus, PrFile, PrMergeMethod, PrReview, PrView } from '@shared/ipc'
-import { DOCK_TOOLBAR_ICON_BTN, DockSplitButton, EmptyPanel } from './PanelChrome'
+import { CHAT_RIGHT_PANEL_BODY, SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { formatElapsed } from '@shared/utils/timeFormat'
+import type { GithubAuthStatus, PrCheck, PrFile, PrMergeMethod, PrReview, PrView } from '@shared/ipc'
+import { EmptyPanel } from './PanelChrome'
 import { GithubAuthPanel } from './GithubAuthPanel'
 import { type DiffLayout } from './DiffPreview'
 import {
-  ChangedFilesBrowser,
-  type BrowserFileEntry
-} from './ChangedFilesBrowser'
+  ChangeDiff,
+  ChangesList,
+  type BrowserFileEntry,
+  type ChangesListFile
+} from '@renderer/features/inspector/ChangesList'
 import type { WorkspaceFileOpenOptions } from './FilesPanel'
 
 type PrTab = 'changes' | 'description' | 'commits' | 'checks' | 'reviews' | 'issues'
@@ -225,13 +241,78 @@ export function checksPassedCount(pr: PrView): number {
   }).length
 }
 
-function prStateTone(state: string): string {
-  const s = state.trim().toUpperCase()
-  if (s === 'MERGED') return 'bg-accent/20 text-accent'
-  if (s === 'CLOSED') return 'bg-danger/15 text-danger'
-  if (s === 'DRAFT') return 'bg-surface-2 text-muted'
-  if (s === 'OPEN') return 'bg-success/20 text-success'
-  return 'bg-surface-2 text-muted'
+function prStateTone(pr: PrView): BadgeTone {
+  const s = pr.state.trim().toUpperCase()
+  if (s === 'MERGED') return 'accent'
+  if (s === 'CLOSED') return 'danger'
+  if (pr.isDraft || s === 'DRAFT') return 'neutral'
+  if (s === 'OPEN') return 'success'
+  return 'neutral'
+}
+
+const FAILED_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR'])
+const QUEUED_CHECK_STATES = new Set(['QUEUED', 'WAITING', 'REQUESTED', 'EXPECTED', 'PENDING'])
+
+/** One check in the task vocabulary: shape first, then colour, then its word. */
+export function checkState(check: PrCheck): { glyph: TaskState; word: string } {
+  const conclusion = (check.conclusion ?? '').trim().toUpperCase()
+  const state = check.state.trim().toUpperCase()
+  if (conclusion === 'SUCCESS' || (!conclusion && (state === 'SUCCESS' || state === 'PASSED'))) {
+    return { glyph: 'review', word: 'passed' }
+  }
+  if (FAILED_CONCLUSIONS.has(conclusion) || (!conclusion && (state === 'FAILURE' || state === 'ERROR'))) {
+    return { glyph: 'failed', word: 'failed' }
+  }
+  if (conclusion === 'CANCELLED') return { glyph: 'stopped', word: 'cancelled' }
+  if (conclusion) return { glyph: 'done', word: conclusion.toLowerCase().replace(/_/g, ' ') }
+  if (state === 'IN_PROGRESS') return { glyph: 'running', word: 'running' }
+  if (QUEUED_CHECK_STATES.has(state)) return { glyph: 'queued', word: 'queued' }
+  return { glyph: 'done', word: state.toLowerCase().replace(/_/g, ' ') }
+}
+
+/** How long a check ran, or has been running — only from times GitHub gave. */
+function checkDuration(check: PrCheck, now: number): string {
+  const started = check.startedAt ? Date.parse(check.startedAt) : Number.NaN
+  // GitHub reports year 1 for a check that has not started.
+  if (!Number.isFinite(started) || started <= Date.UTC(2000, 0, 1)) return ''
+  const ended = check.completedAt ? Date.parse(check.completedAt) : Number.NaN
+  const end = Number.isFinite(ended) && ended >= started ? ended : now
+  return formatElapsed(Math.max(0, end - started))
+}
+
+/**
+ * What stands between the pull request and a merge, from GitHub's own state:
+ * the checks it reports and its mergeability.
+ */
+export function mergeSummary(pr: PrView): string {
+  const failing = pr.checks.filter((c) => checkState(c).glyph === 'failed').length
+  const running = checksPendingCount(pr)
+  const parts: string[] = []
+  if (failing > 0) parts.push(`${failing} check${failing === 1 ? '' : 's'} failing`)
+  if (running > 0) parts.push(`${running} still running`)
+  const checks = parts.length ? `${parts.join(' and ')}.` : ''
+  // Older builds of gh report no merge state; the view says less, not wrong.
+  const status = (pr.mergeStateStatus ?? '').trim().toUpperCase()
+  const verdict = pr.isDraft
+    ? 'It is a draft — mark it ready for review to merge.'
+    : status === 'BLOCKED'
+      ? 'Branch protection blocks the merge.'
+      : status === 'DIRTY'
+        ? `The branch conflicts with ${pr.baseRefName}.`
+        : status === 'BEHIND'
+          ? `The branch is behind ${pr.baseRefName}.`
+          : status === 'CLEAN' || status === 'HAS_HOOKS'
+            ? 'Ready to merge.'
+            : status === 'UNSTABLE'
+              ? 'Mergeable, with checks that are not required failing.'
+              : ''
+  return [checks, verdict].filter(Boolean).join(' ')
+}
+
+const MERGE_LABEL: Record<PrMergeMethod, string> = {
+  squash: 'Squash and merge',
+  merge: 'Create a merge commit',
+  rebase: 'Rebase and merge'
 }
 
 function prMergeAllowed(pr: PrView): boolean {
@@ -240,46 +321,31 @@ function prMergeAllowed(pr: PrView): boolean {
   return s !== 'CLOSED' && s !== 'MERGED'
 }
 
-function mergeMethodIcon(method: PrMergeMethod): IconName {
-  switch (method) {
-    case 'squash':
-      return 'gitCommit'
-    case 'merge':
-      return 'gitMerge'
-    case 'rebase':
-      return 'gitRebase'
-    default: {
-      const _exhaustive: never = method
-      return _exhaustive
-    }
-  }
-}
-
 function reviewsLabel(pr: PrView): string {
   const n = pr.latestReviews.length || pr.reviews.length
   return n > 0 ? `Reviews ${n}` : 'Reviews'
 }
 
 function ReviewCard({ review }: { review: PrReview }) {
+  const state = review.state.trim().toUpperCase()
+  const tone: BadgeTone = state === 'APPROVED' ? 'success' : state === 'CHANGES_REQUESTED' ? 'danger' : 'outline'
   return (
-    <li className="rounded-md border border-border px-2.5 py-2 text-caption">
+    <li className="py-2 text-xs">
       <div className="flex items-center gap-2">
         <span className="font-medium text-fg">{review.author}</span>
-        <span className="rounded bg-surface-2 px-1.5 py-0.5 text-2xs text-muted">
-          {review.state}
-        </span>
+        <Badge tone={tone}>{state.toLowerCase().replace(/_/g, ' ')}</Badge>
         {review.submittedAt ? (
-          <span className="ml-auto truncate text-muted">
+          <span className="ml-auto truncate text-caption text-tertiary">
             {new Date(review.submittedAt).toLocaleString()}
           </span>
         ) : null}
       </div>
       {review.body.trim() ? (
-        <div className="mt-1.5 text-fg">
-          <MarkdownContent content={review.body} className="text-caption" />
+        <div className="mt-1.5">
+          <MarkdownContent content={review.body} tone="secondary" className="text-xs" />
         </div>
       ) : (
-        <p className="m-0 mt-1 text-muted">No review comment.</p>
+        <p className="m-0 mt-1 text-tertiary">No review comment.</p>
       )}
     </li>
   )
@@ -295,7 +361,8 @@ export function PrPanel({
   onUnlink,
   active = true,
   gitRevision = 0,
-  onOpenFile
+  onOpenFile,
+  onHandToAgent
 }: {
   workspacePath?: string | null
   className?: string
@@ -306,15 +373,17 @@ export function PrPanel({
   /** Same clock as Changes — reloads PR metadata after git-mutating activity. */
   gitRevision?: number
   onOpenFile?: (path: string, options?: WorkspaceFileOpenOptions) => void
+  /** Give the task an instruction — used for a failing check. */
+  onHandToAgent?: (instruction: string) => void
 }) {
   const [pr, setPr] = useState<PrView | null>(null)
   const [loading, setLoading] = useState(false)
   const loadSeqRef = useRef(0)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<PrTab>('changes')
+  const [tab, setTab] = useState<PrTab>('checks')
   const [menuOpen, setMenuOpen] = useState(false)
-  const [layoutOpen, setLayoutOpen] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
+  const [readyBusy, setReadyBusy] = useState(false)
   const [mergeBusy, setMergeBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [noticeFailed, setNoticeFailed] = useState(false)
@@ -323,11 +392,9 @@ export function PrPanel({
   const [wordWrap, setWordWrap] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [viewed, setViewed] = useState<Set<string>>(() => new Set())
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
-  const [preferredMerge, setPreferredMerge] = useState<PrMergeMethod>('squash')
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [auth, setAuth] = useState<GithubAuthStatus | null>(null)
   const [authBusy, setAuthBusy] = useState(false)
@@ -341,7 +408,6 @@ export function PrPanel({
   const [issueTitle, setIssueTitle] = useState('')
   const [issueBody, setIssueBody] = useState('')
   const [issueCreateBusy, setIssueCreateBusy] = useState(false)
-  const headerMenusRef = useRef<HTMLDivElement>(null)
   const findInputRef = useRef<HTMLInputElement>(null)
   const titleInputRef = useRef<HTMLInputElement>(null)
   const prevGitRevisionRef = useRef(gitRevision)
@@ -352,19 +418,7 @@ export function PrPanel({
   const closeMenus = useCallback(() => {
     setMenuOpen(false)
     setMergeOpen(false)
-    setLayoutOpen(false)
   }, [])
-
-  useEffect(() => {
-    if (!menuOpen && !mergeOpen && !layoutOpen) return undefined
-    const onPointerDown = (e: PointerEvent): void => {
-      if (headerMenusRef.current && !headerMenusRef.current.contains(e.target as Node)) {
-        closeMenus()
-      }
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [menuOpen, mergeOpen, layoutOpen, closeMenus])
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
     const seq = ++loadSeqRef.current
@@ -663,7 +717,7 @@ export function PrPanel({
   }, [load, gitRevision, active])
 
   useEffect(() => {
-    setExpanded(new Set())
+    setSelectedPath(null)
     setFindQuery('')
     setFindOpen(false)
     setEditingTitle(false)
@@ -687,7 +741,6 @@ export function PrPanel({
         `Merge PR #${pr.number} using ${method}? This cannot be undone from the app.`
       )
       if (!confirmed) return
-      setPreferredMerge(method)
       setMergeBusy(true)
       setNotice(null)
       setNoticeFailed(false)
@@ -709,15 +762,6 @@ export function PrPanel({
     [workspacePath, load, closeMenus, pr]
   )
 
-  const togglePath = useCallback((path: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(path)) next.delete(path)
-      else next.add(path)
-      return next
-    })
-  }, [])
-
   const toggleViewed = useCallback(
     (path: string) => {
       if (!workspacePath || !pr) return
@@ -731,18 +775,6 @@ export function PrPanel({
     },
     [workspacePath, pr]
   )
-
-  const expandAll = useCallback(() => {
-    if (!pr) return
-    const EXPAND_ALL_MAX = 12
-    setExpanded(new Set(pr.files.slice(0, EXPAND_ALL_MAX).map((f) => f.path)))
-    closeMenus()
-  }, [pr, closeMenus])
-
-  const collapseAll = useCallback(() => {
-    setExpanded(new Set())
-    closeMenus()
-  }, [closeMenus])
 
   const fetchPrDiff = useCallback(
     async (path: string) => {
@@ -781,7 +813,7 @@ export function PrPanel({
 
   const ghInstallActions = (
     <Button size="sm"
-      variant="subtle"
+      variant="primary"
       disabled={ghInstallBusy}
       onClick={() => void installGhCli()}
     >
@@ -840,6 +872,20 @@ export function PrPanel({
     }
   }, [workspacePath, pr, titleDraft, onPrMeta])
 
+  const markReady = useCallback(async () => {
+    if (!workspacePath || !window.vyotiq?.prReady || !pr) return
+    setReadyBusy(true)
+    setNotice(null)
+    try {
+      const res = await window.vyotiq.prReady(workspacePath, pr.number)
+      setNotice(res.ok ? res.data.detail : res.error)
+      setNoticeFailed(!res.ok)
+      if (res.ok) void load()
+    } finally {
+      setReadyBusy(false)
+    }
+  }, [workspacePath, pr, load])
+
   const startEditTitle = useCallback(() => {
     if (!pr) return
     closeMenus()
@@ -872,20 +918,107 @@ export function PrPanel({
     return () => window.removeEventListener('keydown', onKey)
   }, [pr, load, tab, startEditTitle, active])
 
-  const mergeLabel = useMemo(() => {
-    switch (preferredMerge) {
-      case 'squash':
-        return 'Squash & Merge'
-      case 'merge':
-        return 'Merge'
-      case 'rebase':
-        return 'Rebase Merge'
-      default: {
-        const _exhaustive: never = preferredMerge
-        return _exhaustive
-      }
-    }
-  }, [preferredMerge])
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    setNow(Date.now())
+  }, [pr])
+
+  const prFiles: ChangesListFile[] = filteredBrowserFiles.map((f) => ({
+    path: f.path,
+    status: f.statusLetter,
+    added: f.added,
+    removed: f.removed,
+    ...(viewed.has(f.path) ? { note: 'Viewed' } : {})
+  }))
+  const selectedIndex = selectedPath ? prFiles.findIndex((f) => f.path === selectedPath) : -1
+  const selectedFile = selectedIndex >= 0 ? prFiles[selectedIndex]! : null
+  const stepFile = (offset: number): (() => void) | undefined => {
+    const next = prFiles[selectedIndex + offset]
+    return next ? () => setSelectedPath(next.path) : undefined
+  }
+  const fileActions = (file: ChangesListFile) => {
+    const name = file.path.replace(/\\/g, '/').split('/').pop() ?? file.path
+    const seen = viewed.has(file.path)
+    return (
+      <>
+        <IconButton
+          icon={seen ? 'eye' : 'check'}
+          label={seen ? `Mark ${name} as not viewed` : `Mark ${name} as viewed`}
+          size="xs"
+          tone="muted"
+          onClick={() => toggleViewed(file.path)}
+        />
+        {onOpenFile && file.status !== 'D' ? (
+          <IconButton icon="external" label={`Open ${name}`} size="xs" tone="muted" onClick={() => onOpenFile(file.path)} />
+        ) : null}
+      </>
+    )
+  }
+
+  const moreItems: ActionMenuItem[] = pr
+    ? [
+        { id: 'wrap', label: 'Word wrap', checked: wordWrap, onSelect: () => setWordWrap((v) => !v) },
+        { id: 'whitespace', label: 'Ignore whitespace', checked: ignoreWhitespace, onSelect: () => setIgnoreWhitespace((v) => !v) },
+        {
+          id: 'filter',
+          label: 'Filter files',
+          icon: 'filter',
+          separatorBefore: true,
+          onSelect: () => {
+            setTab('changes')
+            setFindOpen(true)
+          }
+        },
+        { id: 'refresh', label: 'Refresh', icon: 'refresh', onSelect: () => void load() },
+        { id: 'copy', label: 'Copy URL', icon: 'copy', onSelect: () => void copyText(pr.url) },
+        { id: 'title', label: 'Edit title', icon: 'edit', onSelect: startEditTitle },
+        { id: 'issues', label: 'Issues', icon: 'flag', onSelect: () => setTab('issues') },
+        ...(auth?.hasAppToken
+          ? [
+              {
+                id: 'disconnect',
+                label: 'Disconnect GitHub',
+                icon: 'plug' as const,
+                separatorBefore: true,
+                onSelect: () => {
+                  void window.vyotiq.githubAuthLogout?.().then((res) => {
+                    if (res.ok) applyAuthStatus(res.data)
+                    void load()
+                  })
+                }
+              }
+            ]
+          : []),
+        {
+          id: 'close-pr',
+          label: 'Close pull request',
+          icon: 'close',
+          danger: true,
+          separatorBefore: !auth?.hasAppToken,
+          onSelect: () => void closePr()
+        },
+        {
+          id: 'hide',
+          label: 'Hide panel',
+          onSelect: () => {
+            onPrMeta?.(null)
+            onUnlink?.()
+          }
+        }
+      ]
+    : []
+
+  const openState = pr ? pr.state.trim().toUpperCase() : ''
+  const handPrompt = (check: PrCheck): string =>
+    `The “${check.name}” check failed on pull request #${pr?.number ?? ''}${check.description ? ` (${check.description})` : ''}. ` +
+    `Read its log${check.url ? ` at ${check.url}` : ''}, find the cause and fix it.`
+
+  const back = (label: string) => (
+    <div className="-mx-2 mb-2 flex items-center gap-1">
+      <IconButton icon="arrowLeft" label={`Back to ${label}`} size="xs" tone="muted" onClick={() => setTab(pr ? 'checks' : 'changes')} />
+      <span className="text-xs text-muted">{label}</span>
+    </div>
+  )
 
   return (
     <div
@@ -895,242 +1028,42 @@ export function PrPanel({
       aria-label="Pull request panel"
     >
       {pr ? (
-        <div className="flex shrink-0 flex-col gap-1 border-b border-border/60 px-2.5 py-2">
-          <div className="flex h-7 min-w-0 items-center gap-2">
-            <span className={cn('shrink-0 rounded px-1.5 py-0.5 text-2xs font-medium leading-none', prStateTone(pr.state))}>
-              {formatPrState(pr.state)}
+        <div className="shrink-0 border-b border-border px-4 pt-3" data-pr-header>
+          <div className="flex items-center gap-2 text-xs">
+            <Badge tone={prStateTone(pr)}>
+              <Icon name="pullRequest" size={11} />
+              {pr.isDraft && openState === 'OPEN' ? 'Draft' : formatPrState(pr.state)}
+            </Badge>
+            <span className="min-w-0 truncate font-mono text-caption text-muted" title={`${pr.headRefName} → ${pr.baseRefName}`}>
+              {pr.headRefName} <span className="text-tertiary">→</span> {pr.baseRefName}
             </span>
-            <span className="min-w-0 flex-1 truncate text-caption leading-none text-muted" title={`${pr.headRefName} → ${pr.baseRefName}`}>
-              {pr.headRefName} → {pr.baseRefName}
-            </span>
-            <div
-              ref={headerMenusRef}
-              className="flex shrink-0 items-center gap-1"
-            >
-              <div className="relative">
-                <Tooltip content="PR actions">
-                  <button
-                    type="button"
-                    className={DOCK_TOOLBAR_ICON_BTN}
-                    aria-label="PR actions"
-                    onClick={() => {
-                      const next = !menuOpen
-                      closeMenus()
-                      setMenuOpen(next)
-                    }}
-                  >
-                    ···
-                  </button>
-                </Tooltip>
-                {menuOpen ? (
-                  <div className="absolute right-0 top-full z-dropdown mt-0.5 min-w-[14rem] rounded-md border border-border bg-bg py-1 shadow-lg">
-                    <div className="relative">
-                      <button
-                        type="button"
-                        className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-caption hover:bg-surface"
-                        onClick={() => setLayoutOpen((v) => !v)}
-                      >
-                        <span>Layout</span>
-                        <span className="text-muted">
-                          {layout === 'unified' ? 'Unified' : 'Split'} ›
-                        </span>
-                      </button>
-                      {layoutOpen ? (
-                        <div className="absolute left-0 top-0 z-dropdown min-w-[8rem] -translate-x-full rounded-md border border-border bg-bg py-1 shadow-lg">
-                          {(
-                            [
-                              ['unified', 'Unified'],
-                              ['split', 'Split']
-                            ] as const
-                          ).map(([id, label]) => (
-                            <button
-                              key={id}
-                              type="button"
-                              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-caption hover:bg-surface"
-                              onClick={() => {
-                                setLayout(id)
-                                setLayoutOpen(false)
-                              }}
-                            >
-                              <span className="w-3">{layout === id ? '✓' : ''}</span>
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                    <label className="flex cursor-pointer items-center justify-between gap-2 px-2.5 py-1.5 text-caption hover:bg-surface">
-                      <span>Ignore Whitespace</span>
-                      <Switch
-                        checked={ignoreWhitespace}
-                        onCheckedChange={setIgnoreWhitespace}
-                        label="Ignore Whitespace"
-                      />
-                    </label>
-                    <label className="flex cursor-pointer items-center justify-between gap-2 px-2.5 py-1.5 text-caption hover:bg-surface">
-                      <span>Word Wrap</span>
-                      <Switch
-                        checked={wordWrap}
-                        onCheckedChange={setWordWrap}
-                        label="Word Wrap"
-                      />
-                    </label>
-                    <div className="my-1 border-t border-border/60" />
-                    <button
-                      type="button"
-                      className="flex w-full px-2.5 py-1.5 text-left text-caption hover:bg-surface"
-                      onClick={expandAll}
-                    >
-                      Expand All Files
-                    </button>
-                    <button
-                      type="button"
-                      className="flex w-full px-2.5 py-1.5 text-left text-caption hover:bg-surface"
-                      onClick={collapseAll}
-                    >
-                      Collapse All
-                    </button>
-                    <button
-                      type="button"
-                      className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-caption hover:bg-surface"
-                      onClick={() => {
-                        closeMenus()
-                        setFindOpen(true)
-                        setTab('changes')
-                      }}
-                    >
-                      <span>Filter files</span>
-                      <span className="text-muted">{shortcutLabel('find')}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-caption hover:bg-surface"
-                      onClick={() => {
-                        closeMenus()
-                        void load()
-                      }}
-                    >
-                      <span>Refresh Changes</span>
-                      <span className="text-muted">{shortcutLabel('refresh')}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="flex w-full px-2.5 py-1.5 text-left text-caption hover:bg-surface"
-                      onClick={() => {
-                        closeMenus()
-                        void openExternal(pr.url)
-                      }}
-                    >
-                      View on Web
-                    </button>
-                    <button
-                      type="button"
-                      className="flex w-full px-2.5 py-1.5 text-left text-caption hover:bg-surface"
-                      onClick={() => {
-                        closeMenus()
-                        void copyText(pr.url)
-                      }}
-                    >
-                      Copy URL
-                    </button>
-                    <button
-                      type="button"
-                      className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-caption hover:bg-surface"
-                      onClick={startEditTitle}
-                    >
-                      <span>Edit Title</span>
-                      <span className="text-muted">Shift+Alt+T</span>
-                    </button>
-                    <div className="my-1 border-t border-border/60" />
-                    {auth?.hasAppToken ? (
-                      <button
-                        type="button"
-                        className="flex w-full px-2.5 py-1.5 text-left text-caption hover:bg-surface"
-                        onClick={() => {
-                          closeMenus()
-                          void window.vyotiq.githubAuthLogout?.().then((res) => {
-                            if (res.ok) applyAuthStatus(res.data)
-                            void load()
-                          })
-                        }}
-                      >
-                        Disconnect
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="flex w-full px-2.5 py-1.5 text-left text-caption text-danger hover:bg-surface"
-                      onClick={() => void closePr()}
-                    >
-                      Close PR
-                    </button>
-                    <button
-                      type="button"
-                      className="flex w-full px-2.5 py-1.5 text-left text-caption hover:bg-surface"
-                      onClick={() => {
-                        closeMenus()
-                        onPrMeta?.(null)
-                        onUnlink?.()
-                      }}
-                    >
-                      Hide panel
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-              {prMergeAllowed(pr) ? (
-              <DockSplitButton
-                primaryClassName="text-success"
-                primaryLabel={mergeLabel}
-                primaryIcon={
-                  <Icon name={mergeMethodIcon(preferredMerge)} size={12} className="shrink-0" />
-                }
-                primaryDisabled={mergeBusy}
-                onPrimaryClick={() => void merge(preferredMerge)}
-                menuOpen={mergeOpen}
-                onMenuToggle={() => {
-                  const next = !mergeOpen
-                  closeMenus()
-                  setMergeOpen(next)
-                }}
-                menuAriaLabel="Merge method"
-                menu={
-                  mergeOpen ? (
-                    <div className="absolute right-0 top-full z-dropdown mt-0.5 min-w-[11rem] overflow-visible rounded-md border border-border bg-bg py-1 shadow-lg">
-                      <p className="m-0 px-2.5 py-1 text-2xs font-medium uppercase tracking-wide text-muted">
-                        Merge Method
-                      </p>
-                      {(
-                        [
-                          ['squash', 'Squash & Merge'],
-                          ['merge', 'Merge'],
-                          ['rebase', 'Rebase Merge']
-                        ] as const
-                      ).map(([method, label]) => (
-                        <button
-                          key={method}
-                          type="button"
-                          className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-caption hover:bg-surface"
-                          disabled={mergeBusy}
-                          onClick={() => void merge(method)}
-                        >
-                          <Icon name={mergeMethodIcon(method)} size={12} className="shrink-0 text-muted" />
-                          <span className="min-w-0 flex-1 whitespace-nowrap">{label}</span>
-                          <span className="w-3 text-success">
-                            {preferredMerge === method ? '✓' : ''}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null
-                }
-              />
-              ) : null}
-            </div>
+            <span className="flex-1" />
+            <IconButton icon="external" label="Open on GitHub" size="sm" tone="muted" onClick={() => void openExternal(pr.url)} />
+            <ActionMenu
+              open={menuOpen}
+              onOpenChange={setMenuOpen}
+              placement="down"
+              align="end"
+              aria-label="PR actions"
+              items={moreItems}
+              trigger={(t) => (
+                <IconButton
+                  ref={t.ref}
+                  icon="more"
+                  label="PR actions"
+                  size="sm"
+                  tone="muted"
+                  aria-expanded={t['aria-expanded']}
+                  aria-controls={t['aria-controls']}
+                  aria-haspopup={t['aria-haspopup']}
+                  onClick={t.onClick}
+                />
+              )}
+            />
           </div>
           {editingTitle ? (
             <form
-              className="flex min-w-0 items-center gap-1"
+              className="mt-2 flex min-w-0 items-center gap-1.5"
               onSubmit={(e) => {
                 e.preventDefault()
                 void saveTitle()
@@ -1139,7 +1072,7 @@ export function PrPanel({
               <input
                 ref={titleInputRef}
                 type="text"
-                className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-xs text-fg"
+                className="min-w-0 flex-1 rounded-md border border-border bg-bg px-2 py-1 text-sm text-fg focus-visible:vy-focus-ring"
                 value={titleDraft}
                 maxLength={256}
                 aria-label="PR title"
@@ -1153,65 +1086,44 @@ export function PrPanel({
                   }
                 }}
               />
-              <Button size="sm"
-                type="submit"
-                variant="subtle"
-              >
+              <Button size="sm" type="submit">
                 Save
               </Button>
             </form>
           ) : (
-            <p className="m-0 truncate text-xs font-medium text-fg" title={pr.title}>
-              {pr.title} #{pr.number}
-            </p>
+            <h3 className="m-0 mt-2 text-sm font-semibold leading-5 text-fg-strong" title={pr.title}>
+              {pr.title} <span className="font-normal text-tertiary">#{pr.number}</span>
+            </h3>
           )}
-          <div className="flex gap-1 overflow-x-auto">
-            {(
-              [
-                ['changes', `Changes ${pr.files.length}`],
-                ['description', 'Description'],
-                ['commits', `Commits ${pr.commits.length}`],
-                ['checks', checksLabel(pr)],
-                ['reviews', reviewsLabel(pr)],
-                ['issues', 'Issues']
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                className={cn(
-                  'relative shrink-0 rounded px-2 py-1 text-caption',
-                  tab === id ? 'bg-bg text-fg underline decoration-accent' : 'text-muted hover:text-fg'
-                )}
-                aria-pressed={tab === id}
-                onClick={() => setTab(id)}
-              >
-                {label}
-                {id === 'checks' && pr.checks.length > 0 ? (
-                  <span
-                    className="mt-0.5 block h-0.5 w-full overflow-hidden rounded-full bg-surface-2"
-                    aria-hidden
-                  >
-                    <span
-                      className="block h-full bg-success"
-                      style={{
-                        width: `${Math.round(
-                          (checksPassedCount(pr) / Math.max(pr.checks.length, 1)) * 100
-                        )}%`
-                      }}
-                    />
-                  </span>
-                ) : null}
-              </button>
-            ))}
-          </div>
+          <Tabs
+            size="sm"
+            value={tab === 'issues' ? 'checks' : tab}
+            onChange={(id) => setTab(id)}
+            label="Pull request"
+            className="mt-1"
+            items={[
+              {
+                id: 'checks',
+                label: 'Checks',
+                ...(pr.checks.length ? { count: `${checksPassedCount(pr)}/${pr.checks.length}` } : {})
+              },
+              { id: 'changes', label: 'Files', count: pr.files.length },
+              { id: 'commits', label: 'Commits', count: pr.commits.length },
+              {
+                id: 'reviews',
+                label: 'Reviews',
+                ...((pr.latestReviews.length || pr.reviews.length) ? { count: pr.latestReviews.length || pr.reviews.length } : {})
+              },
+              { id: 'description', label: 'About' }
+            ]}
+          />
         </div>
       ) : null}
 
       {notice ? (
         <p
           className={cn(
-            'm-0 shrink-0 border-b border-border/60 px-3 py-1 text-caption',
+            'm-0 shrink-0 border-b border-border px-4 py-1.5 text-xs',
             noticeFailed ? 'text-danger' : 'text-success'
           )}
           role={noticeFailed ? 'alert' : 'status'}
@@ -1221,13 +1133,15 @@ export function PrPanel({
       ) : null}
 
       {findOpen && pr && tab === 'changes' ? (
-        <div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-2 py-1">
+        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs">
+          <Icon name="search" size={13} className="shrink-0 text-muted" />
           <input
             ref={findInputRef}
-            type="search"
-            className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-caption text-fg"
+            type="text"
+            role="searchbox"
+            className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-tertiary"
             value={findQuery}
-            placeholder="Filter files…"
+            placeholder="Filter files"
             aria-label="Filter files"
             onChange={(e) => setFindQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -1239,219 +1153,228 @@ export function PrPanel({
               }
             }}
           />
-          <button
-            type="button"
-            className="rounded px-1.5 py-0.5 text-caption text-muted hover:bg-surface-2"
-            aria-label="Close find"
+          <IconButton
+            icon="close"
+            label="Close find"
+            size="sm"
+            tone="muted"
             onClick={() => {
               setFindOpen(false)
               setFindQuery('')
             }}
-          >
-            ✕
-          </button>
+          />
         </div>
       ) : null}
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-3">
-        {loading ? (
-          <p className="m-0 text-xs text-muted">Loading…</p>
-        ) : tab === 'issues' ? (
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
-            {!pr ? (
-              <Button size="sm"
-                variant="subtle"
-                className="w-fit"
-                onClick={() => setTab('changes')}
-              >
-                Back
-              </Button>
-            ) : null}
-            <form
-              className="flex flex-col gap-2 border-b border-border/60 pb-3"
-              onSubmit={(event) => {
-                event.preventDefault()
-                const title = issueTitle.trim()
-                if (!title || !workspacePath) return
-                setIssueCreateBusy(true)
-                setNotice(null)
-                void window.vyotiq
-                  .githubIssueCreate({
-                    workspacePath,
-                    title,
-                    body: issueBody.trim() || undefined
-                  })
-                  .then((res) => {
-                    if (!res.ok) {
-                      setNotice(res.error)
-                      setNoticeFailed(true)
-                      return
-                    }
-                    setNotice(res.data.detail)
-                    setNoticeFailed(false)
-                    setIssueTitle('')
-                    setIssueBody('')
-                    void loadIssues()
-                    if (res.data.url) void window.vyotiq.shellOpenExternal(res.data.url)
-                  })
-                  .finally(() => setIssueCreateBusy(false))
-              }}
-            >
-              <label className="m-0 text-caption text-muted">
-                New issue
-                <input
-                  className="mt-1 block w-full rounded border border-border bg-bg px-2 py-1 text-fg"
-                  value={issueTitle}
-                  onChange={(e) => setIssueTitle(e.target.value)}
-                  placeholder="Title"
-                  required
-                />
-              </label>
-              <textarea
-                className="min-h-[4.5rem] rounded border border-border bg-bg px-2 py-1 text-caption text-fg"
-                placeholder="Optional description"
-                value={issueBody}
-                onChange={(e) => setIssueBody(e.target.value)}
-              />
-              <Button
-                type="submit"
-                variant="subtle"
-                pending={issueCreateBusy}
-                disabled={issueCreateBusy || !issueTitle.trim()}
-              >
-                {issueCreateBusy ? 'Creating…' : 'Create issue'}
-              </Button>
-            </form>
+      {loading ? (
+        <p className="m-0 px-4 py-3 text-xs text-muted">Loading…</p>
+      ) : tab === 'issues' ? (
+        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {back(pr ? 'checks' : 'the pull request')}
+          <form
+            className="space-y-2"
+            onSubmit={(event) => {
+              event.preventDefault()
+              const title = issueTitle.trim()
+              if (!title || !workspacePath) return
+              setIssueCreateBusy(true)
+              setNotice(null)
+              void window.vyotiq
+                .githubIssueCreate({
+                  workspacePath,
+                  title,
+                  body: issueBody.trim() || undefined
+                })
+                .then((res) => {
+                  if (!res.ok) {
+                    setNotice(res.error)
+                    setNoticeFailed(true)
+                    return
+                  }
+                  setNotice(res.data.detail)
+                  setNoticeFailed(false)
+                  setIssueTitle('')
+                  setIssueBody('')
+                  void loadIssues()
+                  if (res.data.url) void window.vyotiq.shellOpenExternal(res.data.url)
+                })
+                .finally(() => setIssueCreateBusy(false))
+            }}
+          >
+            <h4 className={SECTION_LABEL}>New issue</h4>
+            <input
+              className="block w-full rounded-md border border-border bg-bg px-2 py-1.5 text-xs text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
+              value={issueTitle}
+              onChange={(e) => setIssueTitle(e.target.value)}
+              placeholder="Title"
+              aria-label="Issue title"
+              required
+            />
+            <Textarea
+              className="min-h-[4.5rem] rounded-md border border-border px-2 text-xs"
+              placeholder="Optional description"
+              aria-label="Issue description"
+              value={issueBody}
+              onChange={(e) => setIssueBody(e.target.value)}
+            />
+            <Button size="sm" type="submit" pending={issueCreateBusy} disabled={issueCreateBusy || !issueTitle.trim()}>
+              {issueCreateBusy ? 'Creating…' : 'Create issue'}
+            </Button>
+          </form>
+          <section className="mt-5">
+            <h4 className={cn('mb-1', SECTION_LABEL)}>Open issues</h4>
             {issuesBusy && issues.length === 0 ? (
-              <p className="m-0 text-caption text-muted">Loading issues…</p>
+              <p className="m-0 text-xs text-muted">Loading issues…</p>
             ) : issues.length === 0 ? (
-              <p className="m-0 text-caption text-muted">No open issues.</p>
+              <p className="m-0 text-xs text-muted">No open issues.</p>
             ) : (
-              <ul className="m-0 list-none space-y-1.5 p-0">
+              <ul className="-mx-2 m-0 list-none p-0">
                 {issues.map((issue) => (
-                  <li
-                    key={issue.number}
-                    className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-caption"
-                  >
-                    <span className="shrink-0 text-muted">#{issue.number}</span>
+                  <li key={issue.number} className="flex h-8 items-center gap-2 rounded-md px-2 text-xs hover:bg-surface">
+                    <span className="shrink-0 font-mono text-caption text-tertiary">#{issue.number}</span>
                     <span className="min-w-0 flex-1 truncate text-fg">{issue.title}</span>
-                    <span className="shrink-0 text-muted">{issue.state}</span>
+                    <span className="shrink-0 text-caption text-tertiary">{issue.state.toLowerCase()}</span>
                     {issue.url ? (
-                      <button
-                        type="button"
-                        className="shrink-0 text-accent"
+                      <IconButton
+                        icon="external"
+                        label={`Open issue #${issue.number}`}
+                        size="xs"
+                        tone="muted"
                         onClick={() => void window.vyotiq.shellOpenExternal(issue.url)}
-                      >
-                        Open
-                      </button>
+                      />
                     ) : null}
                   </li>
                 ))}
               </ul>
             )}
-          </div>
-        ) : !pr ? (
-          showGhInstall ? (
+          </section>
+        </div>
+      ) : !pr ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          {showGhInstall ? (
             <EmptyPanel
               icon="pullRequest"
               title={prEmptyTitle(error)}
               body="Install GitHub CLI to view pull requests for this branch. Agent V uses winget or Homebrew when available, otherwise downloads gh into app data."
               actions={ghInstallActions}
+              centered
             />
           ) : showConnect || auth?.pending ? (
-            githubAuthPanel
+            <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-3">{githubAuthPanel}</div>
           ) : (
             <EmptyPanel
               icon="pullRequest"
               title={prEmptyTitle(error)}
               body={prEmptyBody(error)}
+              centered
               actions={
-                <span className="flex flex-wrap items-center gap-1.5">
+                <>
                   {canCreatePr ? (
-                    <Button size="sm"
-                      variant="subtle"
-                      disabled={createBusy}
-                      onClick={() => void createPr()}
-                    >
-                      {createBusy ? 'Creating…' : 'Create draft PR'}
+                    <Button size="sm" variant="primary" disabled={createBusy} onClick={() => void createPr()}>
+                      {createBusy ? 'Creating…' : 'Create a draft PR'}
                     </Button>
                   ) : null}
-                  <Button size="sm"
-                    variant="subtle"
-                    onClick={() => setTab('issues')}
-                  >
+                  <Button size="sm" onClick={() => setTab('issues')}>
                     Issues
                   </Button>
-                </span>
+                </>
               }
             />
-          )
-        ) : tab === 'description' ? (
-          <div className="min-h-0 flex-1 overflow-auto">
-            <MarkdownContent content={pr.body || '_No description_'} className="text-sm" />
-          </div>
-        ) : tab === 'commits' ? (
-          <div className="min-h-0 flex-1 overflow-auto">
-          {showConnect && pr.commits.length === 0 ? (
-            githubAuthPanel
-          ) : pr.commits.length === 0 ? (
-            <p className="m-0 text-caption text-muted">No commits reported for this pull request.</p>
-          ) : (
-            <ul className="m-0 list-none space-y-1.5 p-0">
-              {pr.commits.map((c) => (
-                <li key={c.oid} className="rounded-md border border-border px-2.5 py-1.5 text-caption">
-                  <p className="m-0 text-fg">{c.messageHeadline}</p>
-                  <p className="m-0 mt-0.5 truncate text-muted">
-                    {c.oid.slice(0, 7)}
-                    {c.authors.length ? ` · ${c.authors.join(', ')}` : ''}
-                  </p>
-                </li>
-              ))}
-            </ul>
           )}
+        </div>
+      ) : tab === 'changes' ? (
+        pr.files.length === 0 ? (
+          <p className="m-0 px-4 py-3 text-xs text-muted">No files changed.</p>
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs">
+              <span className="text-muted">
+                {pr.files.length} {pr.files.length === 1 ? 'file' : 'files'}
+              </span>
+              <span className="inline-flex gap-1.5 font-mono text-caption tnum">
+                {pr.additions > 0 ? <span className="text-success">+{pr.additions}</span> : null}
+                {pr.deletions > 0 ? <span className="text-danger">−{pr.deletions}</span> : null}
+              </span>
+              <span className="flex-1" />
+              <Segmented
+                label="Diff layout"
+                value={layout}
+                onChange={setLayout}
+                items={[
+                  { id: 'unified', icon: 'rows', title: 'Unified' },
+                  { id: 'split', icon: 'columns', title: 'Split' }
+                ]}
+              />
+            </div>
+            <ChangesList
+              files={prFiles}
+              selectedPath={selectedFile?.path ?? null}
+              onSelect={setSelectedPath}
+              actions={fileActions}
+              className={cn(
+                'scroll-thin shrink-0 overflow-y-auto',
+                selectedFile ? 'max-h-[210px] border-b border-border' : 'min-h-0 flex-1'
+              )}
+            />
+            {selectedFile ? (
+              <ChangeDiff
+                path={selectedFile.path}
+                fetchDiff={fetchPrDiff}
+                layout={layout}
+                wordWrap={wordWrap}
+                findQuery={findQuery}
+                onOpen={onOpenFile && selectedFile.status !== 'D' ? () => onOpenFile(selectedFile.path) : undefined}
+                onPrev={stepFile(-1)}
+                onNext={stepFile(1)}
+              />
+            ) : null}
           </div>
-        ) : tab === 'checks' ? (
-          <div className="min-h-0 flex-1 overflow-auto">
-          <ul className="m-0 list-none space-y-1 p-0">
-            {pr.checks.length === 0 ? (
-              <li className="text-caption text-muted">
-                No CI checks configured — they&apos;ll appear here once set up.
-              </li>
+        )
+      ) : (
+        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {tab === 'description' ? (
+            pr.body.trim() ? (
+              <MarkdownContent content={pr.body} tone="secondary" />
             ) : (
-              pr.checks.map((c, i) => (
-                <li
-                  key={`${c.name}-${i}`}
-                  className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-caption"
-                >
-                  <span className="min-w-0 flex-1 truncate text-fg">{c.name}</span>
-                  <span className="shrink-0 text-muted">{c.conclusion ?? c.state}</span>
-                </li>
-              ))
-            )}
-          </ul>
-          </div>
-        ) : tab === 'reviews' ? (
-          <div className="min-h-0 flex-1 space-y-3 overflow-auto">
-            {showConnect &&
-            (pr.latestReviews.length ? pr.latestReviews : pr.reviews).length === 0 ? (
+              <p className="m-0 text-xs text-muted">No description.</p>
+            )
+          ) : tab === 'commits' ? (
+            showConnect && pr.commits.length === 0 ? (
+              githubAuthPanel
+            ) : pr.commits.length === 0 ? (
+              <p className="m-0 text-xs text-muted">No commits reported for this pull request.</p>
+            ) : (
+              <ul className="-mx-2 m-0 list-none p-0">
+                {pr.commits.map((c) => (
+                  <li key={c.oid} className="rounded-md px-2 py-1.5">
+                    <p className="m-0 truncate text-xs text-fg" title={c.messageHeadline}>
+                      {c.messageHeadline}
+                    </p>
+                    <p className="m-0 mt-0.5 truncate text-caption text-tertiary">
+                      <span className="font-mono">{c.oid.slice(0, 7)}</span>
+                      {c.authors.length ? ` · ${c.authors.join(', ')}` : ''}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )
+          ) : tab === 'reviews' ? (
+            showConnect && (pr.latestReviews.length ? pr.latestReviews : pr.reviews).length === 0 ? (
               githubAuthPanel
             ) : (
               <>
                 {pr.reviewDecision ? (
-                  <p className="m-0 text-caption text-muted">
-                    Decision:{' '}
-                    <span className="font-medium text-fg">{pr.reviewDecision}</span>
+                  <p className="m-0 text-xs text-muted">
+                    Decision: <span className="font-medium text-fg">{pr.reviewDecision.toLowerCase().replace(/_/g, ' ')}</span>
                   </p>
                 ) : null}
                 {pr.reviewRequests.length > 0 ? (
-                  <p className="m-0 text-caption text-muted">
-                    Requested: {pr.reviewRequests.join(', ')}
-                  </p>
+                  <p className="m-0 mt-1 text-xs text-muted">Requested: {pr.reviewRequests.join(', ')}</p>
                 ) : null}
                 {(pr.latestReviews.length ? pr.latestReviews : pr.reviews).length === 0 ? (
-                  <p className="m-0 text-caption text-muted">No reviews yet for this pull request.</p>
+                  <p className="m-0 mt-1 text-xs text-muted">No reviews yet for this pull request.</p>
                 ) : (
-                  <ul className="m-0 list-none space-y-2 p-0">
+                  <ul className="m-0 mt-1 list-none divide-y divide-border p-0">
                     {(pr.latestReviews.length ? pr.latestReviews : pr.reviews).map((r, i) => (
                       <ReviewCard key={`${r.author}-${r.submittedAt ?? i}`} review={r} />
                     ))}
@@ -1459,7 +1382,7 @@ export function PrPanel({
                 )}
                 {workspacePath && window.vyotiq?.prReview ? (
                   <form
-                    className="flex flex-col gap-2 border-t border-border/60 pt-3"
+                    className="mt-5 space-y-2"
                     onSubmit={(event) => {
                       event.preventDefault()
                       setReviewBusy(true)
@@ -1485,60 +1408,131 @@ export function PrPanel({
                         .finally(() => setReviewBusy(false))
                     }}
                   >
-                    <label className="m-0 text-caption text-muted">
-                      Submit review
-                      <select
-                        className="ml-2 rounded border border-border bg-bg px-1 py-0.5 text-fg"
-                        value={reviewEvent}
-                        onChange={(e) =>
-                          setReviewEvent(e.target.value as 'approve' | 'request-changes' | 'comment')
-                        }
-                      >
-                        <option value="comment">Comment</option>
-                        <option value="approve">Approve</option>
-                        <option value="request-changes">Request changes</option>
-                      </select>
-                    </label>
-                    <textarea
-                      className="min-h-[4.5rem] rounded border border-border bg-bg px-2 py-1 text-caption text-fg"
+                    <h4 className={SECTION_LABEL}>Submit a review</h4>
+                    <Segmented
+                      label="Review"
+                      value={reviewEvent}
+                      onChange={setReviewEvent}
+                      items={[
+                        { id: 'comment', label: 'Comment' },
+                        { id: 'approve', label: 'Approve' },
+                        { id: 'request-changes', label: 'Request changes' }
+                      ]}
+                    />
+                    <Textarea
+                      className="min-h-[4.5rem] rounded-md border border-border px-2 text-xs"
                       placeholder="Review comment"
+                      aria-label="Review comment"
                       value={reviewBody}
                       onChange={(e) => setReviewBody(e.target.value)}
                     />
-                    <Button type="submit" variant="subtle" pending={reviewBusy} disabled={reviewBusy}>
+                    <Button size="sm" type="submit" pending={reviewBusy} disabled={reviewBusy}>
                       {reviewBusy ? 'Submitting…' : 'Submit review'}
                     </Button>
                   </form>
                 ) : null}
               </>
-            )}
-          </div>
-        ) : (
-          <>
-            {pr.files.length === 0 ? (
-              <p className="m-0 text-caption text-muted">No files changed.</p>
-            ) : (
-              <ChangedFilesBrowser
-                className="min-h-0 flex-1"
-                files={filteredBrowserFiles}
-                totals={{ added: pr.additions, removed: pr.deletions }}
-                expanded={expanded}
-                onToggleExpand={togglePath}
-                selectedPath={selectedPath}
-                onSelectPath={setSelectedPath}
-                fetchDiff={fetchPrDiff}
-                layout={layout}
-                wordWrap={wordWrap}
-                findQuery={findQuery}
-                viewedPaths={viewed}
-                onToggleViewed={toggleViewed}
-                workspacePath={workspacePath}
-                onOpenFile={onOpenFile}
-              />
-            )}
-          </>
-        )}
-      </div>
+            )
+          ) : (
+            <>
+              {pr.checks.length === 0 ? (
+                <p className="m-0 text-xs text-muted">No CI checks configured — they’ll appear here once set up.</p>
+              ) : (
+                <ul className="-mx-2 m-0 list-none p-0" aria-label="Checks">
+                  {pr.checks.map((c, i) => {
+                    const { glyph, word } = checkState(c)
+                    const duration = checkDuration(c, now)
+                    return (
+                      <li
+                        key={`${c.name}-${i}`}
+                        className={cn('rounded-md px-2 py-2', glyph === 'failed' ? 'bg-danger-soft' : '')}
+                        data-check-state={glyph}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <StatusGlyph state={glyph} size={14} />
+                          <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg">
+                            {c.name}
+                            <span className="sr-only">, {word}</span>
+                          </span>
+                          {duration ? <span className="font-mono text-caption text-tertiary tnum">{duration}</span> : null}
+                          {c.url ? (
+                            <IconButton
+                              icon="external"
+                              label={`Open the ${c.name} run`}
+                              size="xs"
+                              tone="muted"
+                              onClick={() => void openExternal(c.url!)}
+                            />
+                          ) : null}
+                        </div>
+                        {glyph === 'failed' && (c.description || onHandToAgent) ? (
+                          <div className="mt-1.5 flex items-center gap-2 pl-6 text-xs">
+                            <span className="min-w-0 flex-1 truncate text-danger">{c.description ?? word}</span>
+                            {onHandToAgent ? (
+                              <Button size="xs" icon="robot" onClick={() => onHandToAgent(handPrompt(c))}>
+                                Hand to the agent
+                              </Button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+
+              <section className="mt-5">
+                <h4 className={cn('mb-2', SECTION_LABEL)}>Merge</h4>
+                {openState === 'MERGED' ? (
+                  <p className="m-0 text-xs text-muted">Merged into {pr.baseRefName}.</p>
+                ) : openState === 'CLOSED' ? (
+                  <p className="m-0 text-xs text-muted">Closed without merging.</p>
+                ) : (
+                  <>
+                    {mergeSummary(pr) ? <p className="m-0 text-xs text-muted">{mergeSummary(pr)}</p> : null}
+                    <div className="mt-2.5 flex items-center gap-1.5">
+                      <ActionMenu
+                        open={mergeOpen}
+                        onOpenChange={setMergeOpen}
+                        placement="up"
+                        align="start"
+                        aria-label="Merge method"
+                        items={(['squash', 'merge', 'rebase'] as const).map((method) => ({
+                          id: method,
+                          label: MERGE_LABEL[method],
+                          icon: method === 'squash' ? ('gitCommit' as const) : method === 'merge' ? ('gitMerge' as const) : ('gitRebase' as const),
+                          onSelect: () => void merge(method)
+                        }))}
+                        trigger={(t) => (
+                          <Button
+                            ref={t.ref}
+                            size="sm"
+                            variant="primary"
+                            trailingIcon="chevron"
+                            disabled={!prMergeAllowed(pr) || mergeBusy}
+                            aria-expanded={t['aria-expanded']}
+                            aria-controls={t['aria-controls']}
+                            aria-haspopup={t['aria-haspopup']}
+                            onClick={t.onClick}
+                          >
+                            {mergeBusy ? 'Merging…' : 'Squash and merge'}
+                          </Button>
+                        )}
+                      />
+                      <span className="flex-1" />
+                      {pr.isDraft ? (
+                        <Button size="sm" variant="ghost" pending={readyBusy} onClick={() => void markReady()}>
+                          Mark ready for review
+                        </Button>
+                      ) : null}
+                    </div>
+                  </>
+                )}
+              </section>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

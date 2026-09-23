@@ -1491,6 +1491,18 @@ export const ReadRunArtifactRequestSchema = z.object({
 })
 export type ReadRunArtifactRequest = z.infer<typeof ReadRunArtifactRequestSchema>
 
+/**
+ * Run-dir documents the OS may open in the reader's own editor. They live
+ * under the app's data folder, outside the workspace, so the Files panel
+ * cannot open them.
+ */
+export const OpenRunArtifactRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  runId: RunIdSchema,
+  name: z.enum(['plan.md', 'contract.md'])
+})
+export type OpenRunArtifactRequest = z.infer<typeof OpenRunArtifactRequestSchema>
+
 export const ReadRunArtifactResultSchema = z.object({
   name: RunArtifactNameSchema,
   exists: z.boolean(),

@@ -23,7 +23,7 @@ describe('ChangeSummary compact receipt', () => {
     const onOpenChanges = vi.fn()
     const list = files(COMPACT_PREVIEW_COUNT + 3)
     const { container } = render(
-      <ChangeSummary files={list} compact onOpenChanges={onOpenChanges} />
+      <ChangeSummary files={list} onOpenChanges={onOpenChanges} />
     )
 
     expect(screen.getByText(`${list.length} Files Changed`)).toBeTruthy()
@@ -47,7 +47,7 @@ describe('ChangeSummary compact receipt', () => {
 
   it('clicking a file name opens the Changes panel with that path', () => {
     const onOpenChanges = vi.fn()
-    render(<ChangeSummary files={files(2)} compact onOpenChanges={onOpenChanges} />)
+    render(<ChangeSummary files={files(2)} onOpenChanges={onOpenChanges} />)
     fireEvent.click(screen.getByText('file-00.ts'))
     expect(onOpenChanges).toHaveBeenCalledWith('src/file-00.ts')
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
@@ -55,17 +55,17 @@ describe('ChangeSummary compact receipt', () => {
   })
 
   it('omits Show more when files fit the preview', () => {
-    render(<ChangeSummary files={files(2)} compact onOpenChanges={() => undefined} />)
+    render(<ChangeSummary files={files(2)} onOpenChanges={() => undefined} />)
     expect(screen.queryByRole('button', { name: /Show .+ more/ })).toBeNull()
   })
 
   it('hides Review when onOpenChanges is missing', () => {
-    render(<ChangeSummary files={files(1)} compact />)
+    render(<ChangeSummary files={files(1)} />)
     expect(screen.queryByRole('button', { name: 'Review changes' })).toBeNull()
   })
 
   it('stays text without a workspace', () => {
-    render(<ChangeSummary files={files(1)} compact />)
+    render(<ChangeSummary files={files(1)} />)
     expect(screen.queryByRole('button', { name: 'file-00.ts' })).toBeNull()
     expect(screen.getByText('file-00.ts')).toBeTruthy()
   })
@@ -76,7 +76,7 @@ describe('ChangeSummary compact receipt', () => {
       <RunSessionProvider
         value={{ workspacePath: '/ws/demo', runId: 'run-1', onOpenWorkspaceFile: openFile }}
       >
-        <ChangeSummary files={files(1)} compact />
+        <ChangeSummary files={files(1)} />
       </RunSessionProvider>
     )
     fireEvent.click(screen.getByRole('button', { name: 'file-00.ts' }))
@@ -87,7 +87,6 @@ describe('ChangeSummary compact receipt', () => {
     render(
       <ChangeSummary
         files={[{ path: 'src/new.ts', added: 3, removed: 0, action: 'created' }]}
-        compact
       />
     )
     expect(screen.getByText('1 File Created')).toBeTruthy()
@@ -99,61 +98,10 @@ describe('ChangeSummary compact receipt', () => {
     render(
       <ChangeSummary
         files={[{ path: 'src/gone.ts', added: 0, removed: 1, action: 'deleted' }]}
-        compact
       />
     )
     expect(screen.getByText('1 File Deleted')).toBeTruthy()
     expect(screen.getByText('Deleted')).toBeTruthy()
     expect(screen.queryByText('1 File Changed')).toBeNull()
-  })
-})
-
-describe('ChangeSummary resolve mode', () => {
-  it('keeps Keep/Discard when canResolve', () => {
-    render(
-      <ChangeSummary
-        files={files(1)}
-        canResolve
-        onKeepAll={() => undefined}
-        onDiscardAll={() => undefined}
-        onKeepFile={() => undefined}
-        onDiscardFile={() => undefined}
-      />
-    )
-    expect(screen.getByRole('button', { name: 'Keep all' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Undo all' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Keep' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy()
-  })
-
-  it('uses Changes-panel chrome matching the uncommitted file list', () => {
-    const { container } = render(<ChangeSummary files={files(1)} canResolve />)
-    const root = container.querySelector('[data-change-summary="panel"]')
-    expect(root).toBeTruthy()
-    expect(root?.className).toContain('rounded-md')
-    // Full-strength `border border-border` is the house container outline, and
-    // the Changes panel this is meant to match now uses it too. The old `/50`
-    // pinned one of eight border opacities, not the thing being asserted.
-    expect(root?.className).toContain('border border-border')
-    expect(root?.className).toContain('bg-surface')
-  })
-
-  it('expands file diffs without a nested scroll viewport', () => {
-    const diffs = new Map([
-      [
-        'src/file-00.ts',
-        Array.from({ length: 40 }, (_, i) => ({
-          kind: 'add' as const,
-          text: `line ${i}`,
-          lineNumber: i + 1
-        }))
-      ]
-    ])
-    const { container } = render(
-      <ChangeSummary files={files(1)} fileDiffs={diffs} />
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Show diff' }))
-    expect(container.querySelector('[data-diff-preview="scroll"]')).toBeNull()
-    expect(screen.getByText('line 0')).toBeTruthy()
   })
 })

@@ -194,7 +194,7 @@ export function parseGitDiffData(tool: UiToolRow): GitDiffParsed {
     }
   }
 
-  // Match ChangedFilesBrowser / DiffPreview caps — avoid allocating full 100k-char patches.
+  // Match the Changes tab / DiffPreview caps — avoid allocating full 100k-char patches.
   const lines = parseUnifiedDiff(content, 201)
   const { added, removed } = countDiffLines(content)
   return {

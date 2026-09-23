@@ -265,6 +265,12 @@ export interface VyotiqApi {
     runId: string
     name: RunArtifactName
   }) => Promise<IpcResult<ReadRunArtifactResult>>
+  /** Open plan.md / contract.md in the OS editor (they live outside the workspace). */
+  openRunArtifact: (payload: {
+    workspacePath: string
+    runId: string
+    name: 'plan.md' | 'contract.md'
+  }) => Promise<IpcResult<true>>
   runStats: (payload: {
     workspacePath: string
     runIds: string[]
@@ -441,6 +447,11 @@ export interface VyotiqApi {
     number: number
   }) => Promise<IpcResult<{ content: string }>>
   prClose: (
+    workspacePath: string,
+    number: number
+  ) => Promise<IpcResult<{ detail: string }>>
+  /** A draft pull request becomes ready for review (`gh pr ready`). */
+  prReady: (
     workspacePath: string,
     number: number
   ) => Promise<IpcResult<{ detail: string }>>

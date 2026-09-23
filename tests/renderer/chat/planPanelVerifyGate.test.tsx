@@ -59,7 +59,8 @@ function mockReceipt(verificationGate?: GateFixture): void {
 
 async function openReceipt(): Promise<void> {
   render(<PlanPanel workspacePath="/ws" runId="run-gate" running={false} />)
-  fireEvent.click(screen.getByRole('tab', { name: 'Receipt' }))
+  fireEvent.click(screen.getByRole('button', { name: 'More — contract, receipt' }))
+  fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: /^Receipt/ }))
   await waitFor(() => {
     expect(screen.getByText('Status')).toBeTruthy()
   })

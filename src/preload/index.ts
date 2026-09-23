@@ -102,6 +102,7 @@ const api: VyotiqApi = {
     }),
   resolveWrites: (payload) => ipcRenderer.invoke(IPC.runsResolveWrites, payload),
   readRunArtifact: (payload) => ipcRenderer.invoke(IPC.runsReadArtifact, payload),
+  openRunArtifact: (payload) => ipcRenderer.invoke(IPC.runsOpenArtifact, payload),
   runStats: (payload) => ipcRenderer.invoke(IPC.runStats, payload),
   homeActivity: (payload) => ipcRenderer.invoke(IPC.homeActivity, payload),
   harnessReview: (payload) => ipcRenderer.invoke(IPC.harnessReview, payload),
@@ -266,6 +267,8 @@ const api: VyotiqApi = {
   prDiff: (payload) => ipcRenderer.invoke(IPC.prDiff, payload),
   prClose: (workspacePath, number) =>
     ipcRenderer.invoke(IPC.prClose, { workspacePath, number }),
+  prReady: (workspacePath, number) =>
+    ipcRenderer.invoke(IPC.prReady, { workspacePath, number }),
   prEditTitle: (workspacePath, title, number) =>
     ipcRenderer.invoke(IPC.prEditTitle, { workspacePath, title, number }),
   githubAuthStatus: () => ipcRenderer.invoke(IPC.githubAuthStatus),

@@ -12,6 +12,7 @@ import {
   Inspector,
   type InspectorTabState
 } from '@renderer/features/inspector/Inspector'
+import { useAgentFileMarks } from '@renderer/features/inspector/agentFileMarks'
 import { Composer } from './components/composer'
 import { RunSessionProvider } from './RunSessionContext'
 import { AgentInstancePane } from './components/AgentInstancePane'
@@ -461,8 +462,14 @@ const runGoal = useRunGoal({
   )
   /** Drives the Files panel's follow mode: the file the run is writing now. */
   const agentFileFocus = useAgentFileFocus(running, items, itemsStore)
-  /** Drives the side rail's live markers: what the run has in flight. */
+  /** Drives the inspector tabs' live dots: what the run has in flight. */
   const liveActivity = useAgentLiveActivity(running, items, itemsStore)
+  /** What this task edited and read — the Files tab marks them. */
+  const agentFileMarks = useAgentFileMarks(
+    instancePaneController ? [] : items,
+    instanceItemsStore ?? itemsStore,
+    workspacePath
+  )
   const filesFlushRef = useRef<(() => Promise<boolean>) | null>(null)
   const registerFilesFlush = useCallback(
     (flush: (() => Promise<boolean>) | null): void => {
@@ -538,9 +545,8 @@ const runGoal = useRunGoal({
 
   // Prefer the shared mutating-tool revision (same clock as composer chrome), not
   // a per-done-tool + fileCount formula that over-fetches and races the status cache.
-  const [changesPreferredScope, setChangesPreferredScope] = useState<'agent' | 'uncommitted'>(
-    'uncommitted'
-  )
+  // The Changes tab opens on what this task changed; git's views are a select away.
+  const [changesPreferredScope, setChangesPreferredScope] = useState<'agent' | 'uncommitted'>('agent')
   const [changesScopeToken, setChangesScopeToken] = useState(0)
   const [changesPreferredPath, setChangesPreferredPath] = useState<string | null>(null)
 
@@ -1218,6 +1224,14 @@ const runGoal = useRunGoal({
     </>
     )
 
+  // A failing PR check becomes an instruction to the task, sent like any other.
+  const handToAgent = useCallback(
+    (instruction: string) => {
+      void sendFromDock(instruction)
+    },
+    [sendFromDock]
+  )
+
   const panelBodies = (
     <>
       {mountedPanels.includes('files') ? (
@@ -1245,6 +1259,7 @@ const runGoal = useRunGoal({
               recoveryData={filesRecoveryData}
               onRecoveryDataConsumed={handleFilesRecoveryConsumed}
               findInFilesNonce={findInFilesNonce}
+              agentMarks={agentFileMarks}
             />
           </Suspense>
         </div>
@@ -1265,6 +1280,7 @@ const runGoal = useRunGoal({
             workspacePath={workspacePath}
             activeRunId={activeRunId}
             visible={visiblePanelId === 'browser'}
+            agentAction={liveActivity.browsing}
             onPopOut={hideInspector}
           />
         </div>
@@ -1285,6 +1301,8 @@ const runGoal = useRunGoal({
             <TerminalPanel
               workspacePath={workspacePath}
               visible={visiblePanelId === 'terminal'}
+              agentCommand={liveActivity.command}
+              agentCommandAt={liveActivity.commandAt}
             />
           </Suspense>
         </div>
@@ -1324,6 +1342,8 @@ const runGoal = useRunGoal({
             onKeepAllWrites={instancePaneController ? undefined : keepAllWrites}
             onDiscardAllWrites={instancePaneController ? undefined : discardAllWrites}
             active={visiblePanelId === 'changes'}
+            running={instancePaneController ? false : running}
+            onStopRun={instancePaneController ? undefined : onStop}
             preferredScope={changesPreferredScope}
             preferredScopeToken={changesScopeToken}
             preferredSelectedPath={changesPreferredPath}
@@ -1350,6 +1370,7 @@ const runGoal = useRunGoal({
               onOpenFile={openWorkspaceFile}
               onPrMeta={handlePrMeta}
               onUnlink={hideInspector}
+              onHandToAgent={handToAgent}
               active={visiblePanelId === 'pr'}
             />
           </Suspense>
