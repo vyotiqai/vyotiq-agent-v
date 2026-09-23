@@ -98,7 +98,7 @@ export function WebSearchTimeline({
           </span>
         ) : null}
       </div>
-      <div className="relative ml-1.5 flex flex-col border-l border-border/40 pl-3">
+      <div className="relative ml-1.5 flex flex-col border-l border-border/60 pl-3">
         {items.map((item, index) => (
           <TimelineRow
             key={item.id}
@@ -166,7 +166,7 @@ function TimelineRow({
         className="tool-stagger-enter relative min-w-0 py-1"
         style={{ '--stagger-index': staggerIndex } as CSSProperties}
       >
-        <span aria-hidden className="absolute -left-3 top-1/2 h-px w-2.5 bg-border/40" />
+        <span aria-hidden className="absolute -left-3 top-1/2 h-px w-2.5 bg-border" />
         <div
           className={cn(
             'flex min-w-0 items-center gap-1.5',
@@ -241,7 +241,7 @@ function TimelineRow({
       className="tool-stagger-enter relative min-w-0 py-1"
       style={{ '--stagger-index': staggerIndex } as CSSProperties}
     >
-      <span aria-hidden className="absolute -left-3 top-1/2 h-px w-2.5 bg-border/40" />
+      <span aria-hidden className="absolute -left-3 top-1/2 h-px w-2.5 bg-border" />
       <div
         className={cn('flex min-w-0 items-center gap-1.5', hasBody && 'cursor-pointer')}
         onClick={hasBody ? toggleBody : undefined}

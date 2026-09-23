@@ -626,7 +626,7 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
     headerMeta: (tool) => ({
       verb: toolLabel(tool.name, tool.status),
       target: tool.summary,
-      icon: 'cpu'
+      icon: 'mcp'
     })
   },
   pull_agent_instance: {
@@ -635,7 +635,7 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
     headerMeta: (tool) => ({
       verb: toolLabel(tool.name, tool.status),
       target: tool.summary,
-      icon: 'cpu'
+      icon: 'mcp'
     })
   },
   merge_agent_instance: {

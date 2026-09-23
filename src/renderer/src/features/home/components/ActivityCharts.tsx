@@ -95,7 +95,7 @@ export function SpendPerDay({
   const totalText = segments.length === 0 ? '—' : spendValueText(metric, total)
 
   return (
-    <div className="border-t border-border/40 px-3 py-3">
+    <div className="border-t border-border/60 px-3 py-3">
       <div className="flex items-center justify-between gap-2 text-3xs text-tertiary">
         <span className="uppercase tracking-[var(--vy-tracking-caps)]">{metricLabel(metric)}</span>
         <span className="flex items-center gap-2">
@@ -219,12 +219,12 @@ export function ModelMix({ days }: { days: readonly HomeActivityDay[] }) {
   ]
 
   return (
-    <div className="border-t border-border/40 px-3 py-3">
+    <div className="border-t border-border/60 px-3 py-3">
       <div className="flex items-baseline justify-between gap-2 text-3xs text-tertiary">
         <span className="uppercase tracking-[var(--vy-tracking-caps)]">Model mix</span>
         <span className="tabular-nums">{formatCompactCount(total)} output tokens</span>
       </div>
-      <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-border/40" aria-hidden="true">
+      <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
         {bars.map((bar) => (
           <span key={bar.model} className={bar.fill} style={{ width: `${bar.ratio * 100}%` }} />
         ))}

@@ -11,6 +11,7 @@ import { Icon, type IconName } from '../icons'
 import { prefersReducedMotion } from '../utils/motion'
 import { useDropdownMenu } from '../hooks/useDropdownMenu'
 import { cn } from './cn'
+import { MENU_ROW, MENU_ROW_ACTIVE, MENU_ROW_IDLE, MENU_ROW_TEXT, MENU_SURFACE } from './menuStyles'
 
 export type ActionMenuItem = {
   id: string
@@ -23,11 +24,6 @@ export type ActionMenuItem = {
   checked?: boolean
   onSelect: () => void
 }
-
-const optionClass = cn(
-  'flex w-full cursor-pointer items-center gap-2 rounded-md bg-transparent px-2.5 py-1.5 text-left text-sm text-fg',
-  'hover:bg-surface active:bg-surface-2 vy-transition'
-)
 
 export function ActionMenu({
   trigger,
@@ -116,7 +112,8 @@ export function ActionMenu({
         aria-label={ariaLabel}
         tabIndex={-1}
         className={cn(
-          'app-region-no-drag fixed z-dropdown m-0 list-none overflow-hidden rounded-md border border-border bg-card p-1 shadow-menu animate-menu-in',
+          'app-region-no-drag fixed m-0 list-none p-1',
+          MENU_SURFACE,
           placement === 'up' ? 'origin-bottom' : 'origin-top'
         )}
         style={{
@@ -139,7 +136,7 @@ export function ActionMenu({
               type="button"
               role={item.checked != null ? 'menuitemcheckbox' : 'menuitem'}
               aria-checked={item.checked != null ? item.checked : undefined}
-              className={cn(optionClass, index === activeIndex && 'bg-surface')}
+              className={cn(MENU_ROW, MENU_ROW_TEXT, index === activeIndex ? MENU_ROW_ACTIVE : MENU_ROW_IDLE)}
               onMouseEnter={() => setActiveIndex(index)}
               onClick={() => {
                 item.onSelect()
@@ -148,12 +145,12 @@ export function ActionMenu({
             >
               {item.checked != null ? (
                 item.checked ? (
-                  <Icon name="check" size={16} className="shrink-0" />
+                  <Icon name="check" size={15} className="shrink-0 text-accent" />
                 ) : (
-                  <span className="inline-block w-4 shrink-0" aria-hidden />
+                  <span className="inline-block w-[15px] shrink-0" aria-hidden />
                 )
               ) : item.icon ? (
-                <Icon name={item.icon} size={16} />
+                <Icon name={item.icon} size={15} className="text-muted" />
               ) : null}
               {item.label}
             </button>

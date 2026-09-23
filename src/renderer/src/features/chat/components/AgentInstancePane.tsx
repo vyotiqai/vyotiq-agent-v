@@ -394,7 +394,7 @@ export function AgentInstancePane({
     >
       <header
         className={cn(
-          'flex shrink-0 items-center gap-2 border-b border-border/40 bg-bg/90',
+          'flex shrink-0 items-center gap-2 border-b border-border/60 bg-bg/90',
           inTitleBarBand ? TITLE_BAR_HEIGHT : 'h-7',
           gutter
         )}

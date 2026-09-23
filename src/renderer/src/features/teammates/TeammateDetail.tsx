@@ -99,7 +99,7 @@ export function TeammateDetail({
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       data-teammate-detail={profile.id}
     >
-      <header className="shrink-0 border-b border-border/40 px-5 pt-4">
+      <header className="shrink-0 border-b border-border/60 px-5 pt-4">
         <div className={TEAMMATES_DETAIL_COLUMN}>
           <div className="flex flex-wrap items-start gap-3 pb-3">
             <Avatar
@@ -219,7 +219,7 @@ export function TeammateDetail({
       {blocked ? (
         <p
           role="status"
-          className="m-0 shrink-0 border-b border-border/40 bg-warning/10 px-5 py-2 text-xs text-warning"
+          className="m-0 shrink-0 border-b border-border/60 bg-warning/10 px-5 py-2 text-xs text-warning"
         >
           {blocked}
         </p>
@@ -264,7 +264,7 @@ export function TeammateDetail({
           two dead buttons is what made the old footer read as chrome — and it
           was inside the scroll, so it sat on top of the last row. */}
       {form.dirty ? (
-        <div className="shrink-0 border-t border-border/40 bg-bg px-5 py-2.5 animate-fade-in">
+        <div className="shrink-0 border-t border-border/60 bg-bg px-5 py-2.5 animate-fade-in">
           <div className={cn(TEAMMATES_DETAIL_COLUMN, 'flex items-center gap-2')}>
             <span className="mr-auto inline-flex items-center gap-1.5 text-2xs text-muted">
               <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden />
@@ -273,7 +273,7 @@ export function TeammateDetail({
             <Button variant="ghost" onClick={form.reset}>
               Discard
             </Button>
-            <Button
+            <Button variant="primary"
               onClick={() => void form.save()}
               disabled={!form.canSave}
               pending={form.saving}

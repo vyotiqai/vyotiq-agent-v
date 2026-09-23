@@ -151,7 +151,7 @@ export const SECTION_ICONS: Record<SettingsSection, IconName> = {
   appearance: 'sliders',
   notifications: 'bell',
   shortcuts: 'keyboard',
-  providers: 'cpu',
+  providers: 'mcp',
   agent: 'bot',
   tools: 'plug',
   indexing: 'fileSearch',

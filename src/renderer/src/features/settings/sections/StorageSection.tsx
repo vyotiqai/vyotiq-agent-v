@@ -39,7 +39,7 @@ function CategoryRow({
   // Empty categories recede so the ones actually using space stand out.
   const empty = category.bytes === 0
   return (
-    <tr className={divider ? 'border-t border-border/40' : undefined}>
+    <tr className={divider ? 'border-t border-border/60' : undefined}>
       <td className={empty ? 'py-1.5 pr-2 text-muted' : 'py-1.5 pr-2 text-fg'}>
         {category.label}
         {action ? (
@@ -447,7 +447,7 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
               <caption className="sr-only">App data by workspace</caption>
               <tbody>
                 {report.workspaces.map((ws) => (
-                  <tr key={ws.workspaceId} className="border-t border-border/40 first:border-t-0">
+                  <tr key={ws.workspaceId} className="border-t border-border/60 first:border-t-0">
                     <td
                       className="max-w-[18rem] truncate py-1.5 pr-2 text-fg"
                       title={ws.path ?? ws.workspaceId}

@@ -3587,7 +3587,7 @@ export const FilesPanel = memo(function FilesPanel({
       {promptDialog}
       {confirmDialog}
       {findInFilesOpen ? (
-        <div className="flex shrink-0 flex-col gap-1.5 border-b border-border/40 bg-surface px-2 py-2">
+        <div className="flex shrink-0 flex-col gap-1.5 border-b border-border/60 bg-surface px-2 py-2">
           <form
             className="flex items-center gap-1.5"
             onSubmit={(event) => {
@@ -3724,13 +3724,13 @@ export const FilesPanel = memo(function FilesPanel({
         <div
           style={explorerWidthStyle}
           className={cn(
-            'flex min-h-0 min-w-0 flex-col border-border/40',
+            'flex min-h-0 min-w-0 flex-col border-border/60',
             narrowSurface
               ? 'h-[42%] min-h-[11rem] w-full max-w-none border-b'
               : 'w-[var(--files-explorer-width)] max-w-[45%] border-r'
           )}
         >
-          <div className="flex min-w-0 shrink-0 items-center gap-1 border-b border-border/40 px-2 py-1" role="toolbar" aria-label="Workspace files">
+          <div className="flex min-w-0 shrink-0 items-center gap-1 border-b border-border/60 px-2 py-1" role="toolbar" aria-label="Workspace files">
             <div className="flex min-w-0 flex-1 items-center">
               <span className="min-w-0 truncate text-caption font-medium tracking-normal text-fg" title={workspacePath}>
                 {workspaceName(workspacePath)}
@@ -3741,8 +3741,7 @@ export const FilesPanel = memo(function FilesPanel({
                 icon="search"
                 label="Find in files"
                 size="xs"
-                variant="bare"
-                className="text-muted"
+                tone="muted"
                 disabled={busy}
                 onClick={() => setFindInFilesOpen(true)}
               />
@@ -3750,8 +3749,7 @@ export const FilesPanel = memo(function FilesPanel({
                 icon="plus"
                 label="Create file"
                 size="xs"
-                variant="bare"
-                className="text-muted"
+                tone="muted"
                 disabled={busy}
                 onClick={() => void createEntry('file')}
               />
@@ -3759,8 +3757,7 @@ export const FilesPanel = memo(function FilesPanel({
                 icon="folderPlus"
                 label="Create folder"
                 size="xs"
-                variant="bare"
-                className="text-muted"
+                tone="muted"
                 disabled={busy}
                 onClick={() => void createEntry('directory')}
               />
@@ -3768,8 +3765,7 @@ export const FilesPanel = memo(function FilesPanel({
                 icon="refresh"
                 label="Refresh files"
                 size="xs"
-                variant="bare"
-                className="text-muted"
+                tone="muted"
                 disabled={busy}
                 onClick={refreshTree}
               />
@@ -3786,8 +3782,7 @@ export const FilesPanel = memo(function FilesPanel({
                     icon="menu"
                     label="Workspace actions"
                     size="xs"
-                    variant="bare"
-                    className="text-muted"
+                    tone="muted"
                     disabled={busy}
                     aria-expanded={props['aria-expanded']}
                     aria-controls={props['aria-controls']}
@@ -3833,14 +3828,14 @@ export const FilesPanel = memo(function FilesPanel({
           </div>
           {nestedWorkspaceMessage && !treeFilter.trim() ? (
             <div
-              className={cn(FILES_PANEL_ALERT, 'border-border/40 bg-warning/10 text-warning')}
+              className={cn(FILES_PANEL_ALERT, 'border-border/60 bg-warning/10 text-warning')}
               role="status"
             >
               <Icon name="info" size={14} className="shrink-0" />
               <span className="min-w-0 flex-1">{nestedWorkspaceMessage}</span>
             </div>
           ) : null}
-          <div className="flex min-w-0 shrink-0 items-center gap-1.5 border-b border-border/40 px-2 py-1">
+          <div className="flex min-w-0 shrink-0 items-center gap-1.5 border-b border-border/60 px-2 py-1">
             <SearchInput
               aria-label="Filter workspace files"
               className="h-7 min-h-0 min-w-0 flex-1 gap-1 rounded-md border-border bg-bg px-2"
@@ -4198,7 +4193,7 @@ export const FilesPanel = memo(function FilesPanel({
                 openContextMenu(event, { kind: 'tab', tabId: activeTab.id })
               }
             >
-              <div className="flex min-w-0 shrink-0 items-center gap-1 border-b border-border/40 px-2 py-1 text-caption text-muted">
+              <div className="flex min-w-0 shrink-0 items-center gap-1 border-b border-border/60 px-2 py-1 text-caption text-muted">
                 <EditorBreadcrumb path={activeTab.path} />
                 {activeTextPosition ? (
                   <span className="shrink-0 tabular-nums text-muted">
@@ -4313,7 +4308,7 @@ export const FilesPanel = memo(function FilesPanel({
                 <div className="flex flex-1 items-center justify-center text-caption text-muted">Loading file…</div>
               ) : editorMode === 'diff' ? (
                 <div className="min-h-0 min-w-0 flex-1 overflow-auto" data-editor-integration="diff">
-                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/40 bg-bg/95 px-2 py-1 text-caption">
+                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/60 bg-bg/95 px-2 py-1 text-caption">
                     <strong className="font-medium text-fg">Diff View</strong>
                     <span className="min-w-0 flex-1 truncate text-muted">{activeTab.path}</span>
                     <button
@@ -4337,7 +4332,7 @@ export const FilesPanel = memo(function FilesPanel({
                 </div>
               ) : editorMode === 'blame' ? (
                 <div className="min-h-0 min-w-0 flex-1 overflow-auto" data-editor-integration="blame">
-                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/40 bg-bg/95 px-2 py-1 text-caption">
+                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/60 bg-bg/95 px-2 py-1 text-caption">
                     <strong className="font-medium text-fg">Git Blame</strong>
                     <span className="min-w-0 flex-1 truncate text-muted">{activeTab.path}</span>
                     <button
@@ -4351,7 +4346,7 @@ export const FilesPanel = memo(function FilesPanel({
                   {blameResult?.kind === 'ok' ? (
                     <div className="min-w-max font-mono text-caption leading-5">
                       {blameResult.lines.map((line) => (
-                        <div key={line.line} className="flex min-w-0 border-b border-border/40">
+                        <div key={line.line} className="flex min-w-0 border-b border-border/60">
                           <span className="w-20 shrink-0 truncate px-2 text-muted" title={line.author}>
                             {line.shortSha ?? 'working'}
                           </span>
@@ -4382,7 +4377,7 @@ export const FilesPanel = memo(function FilesPanel({
                 </div>
               ) : editorMode === 'lsp' ? (
                 <div className="min-h-0 min-w-0 flex-1 overflow-auto" data-editor-integration="lsp">
-                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/40 bg-bg/95 px-2 py-1 text-caption">
+                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/60 bg-bg/95 px-2 py-1 text-caption">
                     <strong className="font-medium text-fg">Language Server</strong>
                     <span className="min-w-0 flex-1 truncate text-muted">{activeTab.path}</span>
                     <button
@@ -4418,7 +4413,7 @@ export const FilesPanel = memo(function FilesPanel({
                                     ? 'border-danger/40 text-danger'
                                     : item.severity === 'warning'
                                       ? 'border-warning/40 text-warning'
-                                      : 'border-border/40 text-muted'
+                                      : 'border-border/60 text-muted'
                                 )}
                               >
                                 Ln {item.line + 1}, Col {item.character + 1}: {item.message}
@@ -4537,7 +4532,7 @@ export const FilesPanel = memo(function FilesPanel({
           )}
         </div>
       </div>
-      <div className="flex min-h-8 shrink-0 items-center justify-between gap-3 border-t border-border/40 px-3 py-1 text-caption text-muted">
+      <div className="flex min-h-8 shrink-0 items-center justify-between gap-3 border-t border-border/60 px-3 py-1 text-caption text-muted">
         <div className="flex min-w-0 items-center gap-1.5">
           {dirtyTabCount > 0 ? (
             <span className="text-warning" role="status">

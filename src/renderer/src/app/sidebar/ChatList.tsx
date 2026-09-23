@@ -100,7 +100,7 @@ function FoldableInstanceChildren({
       : `${childRuns.length} instance${childRuns.length === 1 ? '' : 's'}`
 
   return (
-    <div className="ml-2 flex flex-col gap-px border-l border-border/40 pl-1.5">
+    <div className="ml-2 flex flex-col gap-px border-l border-border/60 pl-1.5">
       <button
         type="button"
         className={cn(
@@ -455,9 +455,8 @@ export function ChatList({
       {!workspaceReady ? (
         <div className="flex flex-col items-center gap-2 px-2 py-6 text-center">
           <p className="m-0 text-sm text-muted">Open a workspace to see chats</p>
-          <Button
+          <Button size="sm"
             variant="subtle"
-            className="min-h-8 px-3 text-xs"
             onClick={onAddWorkspace}
           >
             Open workspace
@@ -559,7 +558,7 @@ export function ChatList({
                               <p className={cn(SIDEBAR_SECTION_LABEL, 'shrink-0')}>
                                 {group.label}
                               </p>
-                              <div className="h-px min-w-0 flex-1 bg-border/40" aria-hidden />
+                              <div className="h-px min-w-0 flex-1 bg-border" aria-hidden />
                             </div>
                           )}
                           <div className="flex flex-col gap-px" role="list">

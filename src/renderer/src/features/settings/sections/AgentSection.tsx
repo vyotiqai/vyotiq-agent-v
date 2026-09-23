@@ -114,7 +114,7 @@ export function AgentSection({
             nested
             wide
           >
-            <ul className="m-0 flex list-none flex-col divide-y divide-border/40 p-0">
+            <ul className="m-0 flex list-none flex-col divide-y divide-border/60 p-0">
               {toolApproval.allowlist.map((name) => (
                 <li key={name} className="flex items-center justify-between gap-3 py-1.5">
                   <span className="min-w-0 truncate font-mono text-xs text-secondary">

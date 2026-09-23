@@ -743,7 +743,7 @@ export const PlanPanel = memo(function PlanPanel({
       </div>
       {showContinue ? (
         <div
-          className="flex shrink-0 items-center gap-3 border-t border-border/40 px-3 py-2"
+          className="flex shrink-0 items-center gap-3 border-t border-border/60 px-3 py-2"
           data-plan-continue
         >
           <div className="min-w-0 flex-1">

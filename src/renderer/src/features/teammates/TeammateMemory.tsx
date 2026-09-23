@@ -270,7 +270,7 @@ export function TeammateMemory({
           </Button>
         ) : (
           <>
-            <Button onClick={() => void save()} disabled={!dirty || busy} pending={busy}>
+            <Button variant="primary" onClick={() => void save()} disabled={!dirty || busy} pending={busy}>
               Save {selected}
             </Button>
             <Button variant="ghost" onClick={() => setDraft(null)}>

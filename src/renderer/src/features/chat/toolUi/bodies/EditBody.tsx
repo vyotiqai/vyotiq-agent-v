@@ -75,7 +75,7 @@ export function EditBody({ tool, expanded, loading, loadFailed }: ToolBodyProps)
           className={cn(
             TOOL_BODY_PAD,
             'm-0 text-caption text-danger [overflow-wrap:anywhere]',
-            painted.length > 0 && 'border-b border-border/40 pb-2'
+            painted.length > 0 && 'border-b border-border/60 pb-2'
           )}
         >
           {status}

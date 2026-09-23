@@ -220,7 +220,7 @@ export function MarketplaceRulesPane({
             <Button type="button" variant="subtle" onClick={() => setNewUserOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit">Confirm</Button>
+            <Button variant="primary" type="submit">Confirm</Button>
           </div>
         </form>
       </Dialog>
@@ -525,7 +525,7 @@ function UserRuleEditor({
         {body.length}/{USER_RULE_BODY_MAX}
       </p>
       <div className="flex justify-end">
-        <Button
+        <Button variant="primary"
           disabled={disabled || saving || !name.trim()}
           onClick={() => {
             void (async () => {
@@ -669,7 +669,7 @@ function ProjectRuleEditor({
         onChange={setBody}
       />
       <div className="flex justify-end">
-        <Button
+        <Button variant="primary"
           disabled={disabled || saving}
           onClick={() => {
             void (async () => {

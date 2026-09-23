@@ -87,7 +87,7 @@ export function EnvironmentSection({
   if (providerIssue) {
     rows.push({
       id: 'provider',
-      icon: 'cpu',
+      icon: 'mcp',
       title: `${providerIssue.label} has no API key`,
       detail: 'Runs cannot start until a key is saved for this provider.',
       ...(onOpenProviderSettings
@@ -128,9 +128,8 @@ export function EnvironmentSection({
             </div>
             {row.action ? (
               <div className="flex items-center justify-end pl-7 @md:pl-0">
-                <Button
+                <Button size="xs"
                   variant="subtle"
-                  className="min-h-7 px-2 text-2xs"
                   onClick={row.action.onClick}
                 >
                   {row.action.label}

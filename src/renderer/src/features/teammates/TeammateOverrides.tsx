@@ -392,7 +392,7 @@ export function TeammateOverrides({
             <Button variant="subtle" onClick={() => setEditing(null)}>
               Cancel
             </Button>
-            <Button onClick={() => void save()} pending={saving}>
+            <Button variant="primary" onClick={() => void save()} pending={saving}>
               Save override
             </Button>
           </div>

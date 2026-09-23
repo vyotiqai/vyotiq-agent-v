@@ -37,7 +37,7 @@ export function AttentionLane({
       className="animate-fade-in"
       aria-label={`${presentation.label}, ${entries.length}`}
     >
-      <div className="flex min-w-0 items-start gap-2.5 border-b border-border/40 bg-surface/30 px-3 py-2.5">
+      <div className="flex min-w-0 items-start gap-2.5 border-b border-border/60 bg-surface/30 px-3 py-2.5">
         <span
           className={cn(
             'mt-px inline-flex size-4 shrink-0 items-center justify-center',
@@ -58,7 +58,7 @@ export function AttentionLane({
         </div>
       </div>
 
-      <div role="list" className="divide-y divide-border/40">
+      <div role="list" className="divide-y divide-border/60">
         {shown.map((entry) => renderRow(entry))}
       </div>
 
@@ -66,7 +66,7 @@ export function AttentionLane({
         <button
           type="button"
           aria-expanded={expanded}
-          className="w-full border-t border-border/40 px-3 py-2 text-left text-2xs text-muted vy-transition hover:bg-surface hover:text-fg focus-visible:vy-focus-ring"
+          className="w-full border-t border-border/60 px-3 py-2 text-left text-2xs text-muted vy-transition hover:bg-surface hover:text-fg focus-visible:vy-focus-ring"
           onClick={() => setExpanded((value) => !value)}
         >
           {expanded ? 'Show fewer' : `Show ${hidden} more`}

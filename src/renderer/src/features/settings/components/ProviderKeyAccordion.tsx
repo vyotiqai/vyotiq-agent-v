@@ -56,7 +56,7 @@ export function ProviderKeyAccordion({
   return (
     <div className="flex w-full flex-col gap-1.5">
       <ul
-        className="m-0 flex list-none flex-col divide-y divide-border/40 p-0"
+        className="m-0 flex list-none flex-col divide-y divide-border/60 p-0"
         aria-label="API key status"
       >
         {SECRET_PROVIDERS.map((id) => {

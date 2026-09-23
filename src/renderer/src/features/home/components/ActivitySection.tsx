@@ -168,7 +168,7 @@ export function ActivitySection({
             is what any real display gets and the two-up stack only covers a
             deliberately narrow window. Four 128px cells hold a caps label and a
             short number without touching. */}
-        <div className="grid grid-cols-2 divide-border/40 [&>*:nth-child(-n+2)]:border-b [&>*:nth-child(-n+2)]:border-border/40 @lg:grid-cols-4 @lg:divide-x @lg:[&>*]:border-b-0">
+        <div className="grid grid-cols-2 divide-border/60 [&>*:nth-child(-n+2)]:border-b [&>*:nth-child(-n+2)]:border-border/60 @lg:grid-cols-4 @lg:divide-x @lg:[&>*]:border-b-0">
           <Tile label="Sessions" value={formatCount(totals.runs)} />
           <Tile
             label="Tokens"
@@ -192,7 +192,7 @@ export function ActivitySection({
           />
         </div>
 
-        <div className="border-t border-border/40 px-3 py-3">
+        <div className="border-t border-border/60 px-3 py-3">
           {/* A window can be genuinely lopsided — one busy day and six idle
               ones is a real shape. Naming the peak and keeping a baseline rule
               under every column is what stops that reading as a failed render. */}
@@ -203,7 +203,7 @@ export function ActivitySection({
           <div
             role="img"
             aria-label={`Sessions per day over the last ${span} days, ${formatCount(totals.runs)} total, busiest day ${formatCount(peak)}`}
-            className="mt-2 flex h-14 items-end gap-1 border-b border-border/40"
+            className="mt-2 flex h-14 items-end gap-1 border-b border-border/60"
           >
             {bars.map((bar, index) => (
               <div
@@ -215,7 +215,7 @@ export function ActivitySection({
                   className={cn(
                     'home-bar-enter mx-auto w-full max-w-10 rounded-t-sm vy-transition',
                     bar.runs === 0
-                      ? 'bg-border/40'
+                      ? 'bg-border'
                       : bar.date === todayKey
                         ? 'bg-accent/85'
                         : 'bg-accent/55'
@@ -246,8 +246,8 @@ export function ActivitySection({
         </div>
 
         {outcomes.length > 0 ? (
-          <div className="border-t border-border/40 px-3 py-3">
-            <div className="flex h-1.5 overflow-hidden rounded-full bg-border/40" aria-hidden="true">
+          <div className="border-t border-border/60 px-3 py-3">
+            <div className="flex h-1.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
               {outcomes.map((segment) => (
                 <span
                   key={segment.id}
@@ -279,7 +279,7 @@ export function ActivitySection({
             the window without scrolling — the gui-e2e `fits the window` check
             holds it to that. */}
         {unverifiedRuns > 0 || toolFailures.length > 0 ? (
-          <div className="border-t border-border/40 px-3 py-3">
+          <div className="border-t border-border/60 px-3 py-3">
             {unverifiedRuns > 0 ? (
               <>
                 <p className="m-0 flex items-center gap-1.5 text-3xs uppercase tracking-[var(--vy-tracking-caps)] text-tertiary">

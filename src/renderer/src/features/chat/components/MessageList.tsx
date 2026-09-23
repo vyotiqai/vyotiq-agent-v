@@ -2065,7 +2065,7 @@ export function MessageList({
     <>
       <div className="flex min-h-0 flex-1 flex-col">
         {findOpen ? (
-          <div className="flex shrink-0 items-center gap-1.5 border-b border-border/40 px-3 py-1">
+          <div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-1">
             <Icon name="search" size={12} className="shrink-0 text-muted" />
             <input
               ref={findInputRef}

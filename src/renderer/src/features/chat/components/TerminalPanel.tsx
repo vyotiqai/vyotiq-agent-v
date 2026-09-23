@@ -523,13 +523,13 @@ export function TerminalPanel({
         : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {!useExternalSessionBar ? (
-          <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border/40 bg-bg px-1 py-0.5">
+          <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border/60 bg-bg px-1 py-0.5">
             {sessionBar}
           </div>
         ) : null}
         {error ? (
           <p
-            className="m-0 shrink-0 border-b border-border/40 px-3 py-1 text-caption text-danger"
+            className="m-0 shrink-0 border-b border-border/60 px-3 py-1 text-caption text-danger"
             data-terminal-error
             role="alert"
           >
@@ -537,7 +537,7 @@ export function TerminalPanel({
           </p>
         ) : null}
         {usingPipeFallback ? (
-          <p className="m-0 shrink-0 border-b border-border/40 px-3 py-1 text-caption text-muted">
+          <p className="m-0 shrink-0 border-b border-border/60 px-3 py-1 text-caption text-muted">
             Pipe shell fallback — rebuild node-pty for Electron for a full interactive PTY.
           </p>
         ) : null}
@@ -554,7 +554,7 @@ export function TerminalPanel({
                     isReadOnly={isMirrorSession}
                   />
                 </div>
-                <div className="w-px shrink-0 bg-border/40" />
+                <div className="w-px shrink-0 bg-border" />
                 <div className="min-h-0 min-w-0 flex-1">
                   <PtySessionView
                     sessionId={splitId}

@@ -124,16 +124,16 @@ export function RepositoryLine({
 
       <div className={cn('flex flex-wrap items-center justify-end gap-1.5 pl-7 @lg:pl-0')}>
         {error ? (
-          <Button variant="ghost" className="min-h-7 px-2 text-2xs" onClick={onRetryStatus}>
+          <Button size="xs" variant="ghost"  onClick={onRetryStatus}>
             Retry
           </Button>
         ) : null}
         {onReviewChanges && changed > 0 ? (
-          <Button variant="subtle" className="min-h-7 px-2 text-2xs" onClick={onReviewChanges}>
+          <Button size="xs" variant="subtle"  onClick={onReviewChanges}>
             Review changes
           </Button>
         ) : null}
-        <Button variant="ghost" className="min-h-7 px-2 text-2xs" onClick={onNewChat}>
+        <Button size="xs" variant="ghost"  onClick={onNewChat}>
           <Icon name="plus" size={11} aria-hidden="true" /> New chat
         </Button>
       </div>

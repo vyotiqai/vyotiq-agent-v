@@ -77,12 +77,11 @@ export function NotificationsInbox({
           minWidth: 240
         }}
       >
-        <div className="flex items-center justify-between gap-2 border-b border-border/40 px-2.5 py-2">
+        <div className="flex items-center justify-between gap-2 border-b border-border/60 px-2.5 py-2">
           <p className="m-0 text-sm font-medium text-fg">Notifications</p>
           <div className="flex items-center gap-1">
-            <Button
+            <Button size="sm"
               variant="ghost"
-              className="min-h-7 px-2 text-xs"
               disabled={unreadCount === 0}
               onClick={() => {
                 onMarkRead({ all: true })
@@ -90,9 +89,8 @@ export function NotificationsInbox({
             >
               Mark all read
             </Button>
-            <Button
+            <Button size="sm"
               variant="ghost"
-              className="min-h-7 px-2 text-xs"
               disabled={items.length === 0}
               onClick={() => {
                 onDismiss({ all: true })
@@ -142,7 +140,7 @@ export function NotificationsInbox({
             ))
           )}
         </ul>
-        <div className="border-t border-border/40 p-1">
+        <div className="border-t border-border/60 p-1">
           <button
             type="button"
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-secondary hover:bg-surface hover:text-fg"

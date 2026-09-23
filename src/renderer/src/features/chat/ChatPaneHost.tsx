@@ -208,7 +208,7 @@ export function ChatPaneHost({
               aria-label={paneTitle}
               className={cn(
                 'relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent',
-                index > 0 && 'border-l border-border/40',
+                index > 0 && 'border-l border-border/60',
                 focused && multi && 'ring-1 ring-inset ring-border-strong/60'
               )}
               data-chat-pane
@@ -233,7 +233,7 @@ export function ChatPaneHost({
               {multi ? (
                 <div
                   className={cn(
-                    'absolute inset-x-0 top-0 z-dropdown flex items-center justify-between gap-2 border-b border-border/40 bg-transparent px-2',
+                    'absolute inset-x-0 top-0 z-dropdown flex items-center justify-between gap-2 border-b border-border/60 bg-transparent px-2',
                     inTitleBarBand ? TITLE_BAR_HEIGHT : 'h-7'
                   )}
                   style={

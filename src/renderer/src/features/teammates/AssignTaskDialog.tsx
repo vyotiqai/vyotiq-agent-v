@@ -146,7 +146,7 @@ export function AssignTaskDialog({
           <Button variant="subtle" onClick={onClose}>
             Cancel
           </Button>
-          <Button
+          <Button variant="primary"
             onClick={() => void submit()}
             disabled={!prompt.trim() || overLimit || !workspacePath || saving}
           >

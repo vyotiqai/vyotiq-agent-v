@@ -10,6 +10,16 @@ import {
 import { createPortal } from 'react-dom'
 import { Icon, type IconName } from '../icons'
 import { cn } from './cn'
+import {
+  MENU_ROW,
+  MENU_ROW_ACTIVE,
+  MENU_ROW_DANGER,
+  MENU_ROW_DISABLED,
+  MENU_ROW_IDLE,
+  MENU_ROW_TEXT,
+  MENU_SEPARATOR,
+  MENU_SURFACE
+} from './menuStyles'
 
 export type ContextMenuItem =
   | {
@@ -173,7 +183,10 @@ export function ContextMenu({
       role="menu"
       aria-label={ariaLabel}
       tabIndex={-1}
-      className="app-region-no-drag fixed z-dropdown m-0 min-w-[12rem] max-w-[min(20rem,calc(100vw-1rem))] list-none overflow-auto rounded-md border border-border bg-card p-1 shadow-menu animate-menu-in origin-top"
+      className={cn(
+        'app-region-no-drag fixed m-0 min-w-[12rem] max-w-[min(20rem,calc(100vw-1rem))] list-none overflow-y-auto p-1 origin-top',
+        MENU_SURFACE
+      )}
       style={{
         left: position.x,
         top: position.y,
@@ -182,7 +195,7 @@ export function ContextMenu({
     >
       {items.map((item, index) =>
         item.type === 'separator' ? (
-          <li key={item.id} role="separator" className="my-1 border-t border-border/40" />
+          <li key={item.id} role="separator" className={MENU_SEPARATOR} />
         ) : (
           <li key={item.id} role="none">
             <button
@@ -201,13 +214,9 @@ export function ContextMenu({
               }
               title={item.disabled ? item.disabledReason : undefined}
               className={cn(
-                'flex min-h-8 w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs leading-5 outline-none focus-visible:vy-focus-ring vy-transition',
-                item.disabled
-                  ? 'cursor-not-allowed text-muted/60'
-                  : item.danger
-                    ? 'text-danger hover:bg-danger/10'
-                    : 'text-fg hover:bg-surface',
-                index === activeIndex && !item.disabled && 'bg-surface'
+                MENU_ROW,
+                item.disabled ? MENU_ROW_DISABLED : item.danger ? MENU_ROW_DANGER : MENU_ROW_TEXT,
+                item.disabled ? '' : index === activeIndex ? MENU_ROW_ACTIVE : MENU_ROW_IDLE
               )}
               disabled={item.disabled}
               onMouseEnter={() => {
@@ -219,11 +228,13 @@ export function ContextMenu({
                 close()
               }}
             >
-              {item.icon ? <Icon name={item.icon} size={16} className="shrink-0" /> : null}
+              {item.icon ? (
+                <Icon name={item.icon} size={15} className={item.danger ? 'shrink-0' : 'shrink-0 text-muted'} />
+              ) : null}
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
-              {item.checked ? <Icon name="check" size={16} className="shrink-0" /> : null}
+              {item.checked ? <Icon name="check" size={14} className="shrink-0 text-accent" /> : null}
               {item.shortcut ? (
-                <span className="shrink-0 text-caption text-muted">{item.shortcut}</span>
+                <span className="shrink-0 text-xs text-tertiary">{item.shortcut}</span>
               ) : null}
               {item.disabled && item.disabledReason ? (
                 <span id={`context-menu-reason-${item.id}`} className="sr-only">

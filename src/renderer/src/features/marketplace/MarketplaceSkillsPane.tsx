@@ -573,7 +573,7 @@ function SkillEditor({
         onChange={setBody}
       />
       <div className="flex justify-end">
-        <Button disabled={disabled || saving} onClick={() => void save()}>
+        <Button variant="primary" disabled={disabled || saving} onClick={() => void save()}>
           {saving ? 'Saving…' : 'Save'}
         </Button>
       </div>

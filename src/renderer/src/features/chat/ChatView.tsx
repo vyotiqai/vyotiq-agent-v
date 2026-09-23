@@ -1083,7 +1083,7 @@ const runGoal = useRunGoal({
   const browserWatchBanner = showBrowserWatchBanner ? (
     <div
       className={cn(
-        'flex shrink-0 items-center gap-2 border-b border-border/40 bg-accent/10 px-3 text-caption',
+        'flex shrink-0 items-center gap-2 border-b border-border/60 bg-accent/10 px-3 text-caption',
         browserWatchBannerInBand ? TITLE_BAR_HEIGHT : 'py-1.5'
       )}
       // Inline, not a `pr-*` class: cn() has no tailwind-merge, so an appended

@@ -7,59 +7,120 @@
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
+/*
+  ─── Token contract ──────────────────────────────────────────────────────────
+
+  Planes, back to front:  chrome → bg (work panels) → card → surface → surface-2.
+    chrome   the window plane: title band, navigator
+    sunken   code wells: terminal output, diff bodies, file previews
+  Text ramp, strongest first:  fg-strong → fg → secondary → muted → tertiary.
+  Named tints (accent/success/warning/danger `-soft`, diff add/del) are derived
+  once per theme, so no component ever invents an opacity.
+
+  Layout is flush in every skin: panes meet edge to edge and one hairline
+  separates them. No inset cards, no gaps, no panel shadows.
+
+  Every skin keeps its identity — hue family, accent, radii, font — and
+  renders the same layout. Skins differ in feel, never in
+  structure. `[data-skin]` and `[data-theme]` also match nested elements (the
+  skin previews in Settings), so every block below is written to resolve on
+  the element that carries the attribute, not only on <html>.
+*/
+
+/* ─── Skin structure: fonts, radii ────────────────────────────────────────── */
+
 :root,
-[data-skin="default"] {
+[data-skin] {
   --vy-font-sans: "Plus Jakarta Sans", system-ui, sans-serif;
   --vy-font-mono: "JetBrains Mono", ui-monospace, monospace;
   --vy-radius-sm: 4px;
   --vy-radius-md: 6px;
   --vy-radius-lg: 8px;
   --vy-radius-xl: 10px;
+  /* Jakarta is already set tight; negative body tracking crowds words at 13px. */
+  --vy-tracking-body: 0em;
+  --vy-tracking-tight: -0.01em;
+  --vy-tracking-caps: 0.07em;
+  --vy-tracking: -0.01em;
+  /* Legacy chrome outline — `vy-chrome` until its last caller is ported. */
   --vy-chrome-border-width: 1px;
   --vy-chrome-border-color: var(--vy-border);
   --vy-chrome-surface: var(--vy-bg);
 }
 
+/* Proof — long-reading dusk: tight corners. */
 [data-skin="proof"] {
   --vy-radius-sm: 2px;
   --vy-radius-md: 4px;
   --vy-radius-lg: 6px;
   --vy-radius-xl: 8px;
-  --vy-shadow-chrome: 0 0 0 1px var(--vy-border);
 }
 
+/* Bench — a workbench: the squarest corners. */
 [data-skin="bench"] {
   --vy-radius-sm: 2px;
-  --vy-radius-md: 4px;
-  --vy-radius-lg: 6px;
-  --vy-radius-xl: 8px;
-  --vy-shadow-chrome: none;
-  --vy-shadow-menu: 0 0 0 1px var(--vy-border);
+  --vy-radius-md: 3px;
+  --vy-radius-lg: 4px;
+  --vy-radius-xl: 6px;
   --vy-chrome-surface: var(--vy-surface-2);
 }
 
+/* Native — the platform's own type. The product default. */
 [data-skin="native"] {
-  --vy-font-sans: system-ui, sans-serif;
-  --vy-font-mono: ui-monospace, monospace;
+  --vy-font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --vy-font-mono: "Cascadia Mono", "Cascadia Code", ui-monospace, Consolas, monospace;
 }
 
+/* Gild — mineral and engraved: tight corners, hairline ring. */
 [data-skin="gild"] {
   --vy-radius-sm: 2px;
-  --vy-radius-md: 4px;
-  --vy-radius-lg: 6px;
-  --vy-radius-xl: 8px;
-  --vy-shadow-chrome: 0 0 0 1px var(--vy-border);
+  --vy-radius-md: 3px;
+  --vy-radius-lg: 5px;
+  --vy-radius-xl: 7px;
 }
 
 /*
-  Semantic tokens below are skin-tinted — see the [data-skin][data-theme] blocks.
-  The --vy-gray-* ramps that follow are legacy neutral references, kept for
-  backward compatibility.
+  Theme-wide tokens, and the Default skin's palette. Default is the base the
+  other skins override, so it has no `[data-skin="default"][data-theme]` block
+  of its own (defaultSkinBaseline.test.ts pins that). The base blocks must stay
+  ahead of the skin palettes: skinContrast.test.ts reads the first match.
 */
 :root,
 [data-theme="light"] {
   color-scheme: light;
 
+  --vy-chrome: #f1f4f6;
+  --vy-bg: #ffffff;
+  --vy-card: #f7f9fa;
+  --vy-surface: #eef2f5;
+  --vy-surface-2: #e3e9ee;
+  --vy-sunken: #f5f7f9;
+  --vy-border: #dde4ea;
+  --vy-border-strong: #c2cdd6;
+  --vy-fg-strong: #0b1318;
+  --vy-fg: #1a252d;
+  --vy-secondary: #3e4b55;
+  --vy-muted: #5d6b76;
+  --vy-tertiary: #8793a0;
+  --vy-accent: #00638e;
+  --vy-accent-hover: #00506f;
+  --vy-accent-fg: #ffffff;
+  --vy-focus: #00638e;
+
+  --vy-success: #17804a;
+  --vy-warning: #a35a00;
+  --vy-danger: #c2372d;
+  --vy-soft-mix: 11%;
+  --vy-overlay: rgb(12 14 16 / 0.32);
+  --vy-window-close: #c42b1c;
+  --vy-window-close-fg: #ffffff;
+  --vy-shadow: 0 0 0 1px var(--vy-border);
+  --vy-shadow-menu: 0 0 0 1px var(--vy-border), 0 12px 32px -8px rgb(12 14 16 / 0.18);
+  --vy-shadow-chrome: 0 10px 28px -14px rgb(10 10 10 / 0.12);
+  /* Legacy composer plane — goes with the composer. */
+  --vy-composer: var(--vy-card);
+
+  /* Legacy neutral ramp, kept for backward compatibility. Prefer semantic tokens. */
   --vy-gray-base: #ffffff;
   --vy-gray-50: #fafafa;
   --vy-gray-100: #f5f5f5;
@@ -73,60 +134,29 @@
   --vy-gray-900: #171717;
   --vy-gray-950: #0a0a0a;
 
-  --vy-bg: #FFFFFF;
-  --vy-card: #F7FAFC;
-  --vy-surface: #EEF5F9;
-  --vy-surface-2: #DCEAF2;
-  --vy-border: #C9DCE8;
-  --vy-border-strong: #9DBCCC;
-  --vy-muted: #4A5F6D;
-  --vy-secondary: #3A4E5A;
-  --vy-tertiary: #5E7484;
-  --vy-fg: #17232B;
-  --vy-fg-strong: #0B141A;
-  --vy-accent: #00638E;
-  --vy-accent-fg: #FFFFFF;
-  --vy-focus: #00638E;
-  --vy-accent-hover: #004A6B;
-  --vy-success: #15803d;
-  --vy-danger: #b91c1c;
-  --vy-warning: #a16207;
-  --vy-composer: #E9F2F7;
-  --vy-overlay: rgb(10 10 10 / 0.28);
-  --vy-window-close: #e81123;
-  --vy-window-close-fg: #ffffff;
-  --vy-shadow: 0 0 0 1px var(--vy-border);
-  --vy-shadow-menu: 0 0 0 1px var(--vy-border), 0 8px 24px rgb(10 10 10 / 0.08);
-  --vy-shadow-chrome: 0 10px 28px -14px rgb(10 10 10 / 0.12);
+  /* Code syntax (JetBrains Light hues). */
+  --vy-syntax-keyword: #0033b3;
+  --vy-syntax-string: #067d17;
+  --vy-syntax-number: #1750eb;
+  --vy-syntax-comment: #8c8c8c;
+  --vy-syntax-func: #00627a;
+  --vy-syntax-type: #871094;
+  --vy-syntax-property: #871094;
+  --vy-syntax-punct: #545454;
+  --vy-syntax-variable: #080808;
+  --vy-syntax-constant: #871094;
+  --vy-syntax-escape: #0037a6;
+  --vy-tree-guide: color-mix(in srgb, var(--vy-tertiary) 40%, transparent);
 
   --vy-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --vy-duration: 160ms;
+  --vy-duration: 140ms;
   --vy-disabled-opacity: 0.45;
-  --vy-tracking: -0.01em;
-  --vy-tracking-tight: -0.012em;
-  --vy-tracking-body: -0.006em;
-  --vy-tracking-caps: 0.06em;
   --leading-mono: 1.6;
-
-  /* Code editor syntax palette (VS Code Light+ hues). */
-  --vy-syntax-property: #0451a5;
-  --vy-syntax-string: #a31515;
-  --vy-syntax-number: #098658;
-  --vy-syntax-keyword: #0000ff;
-  --vy-syntax-comment: #008000;
-  --vy-syntax-func: #795e26;
-  --vy-syntax-type: #267f99;
-  --vy-syntax-variable: #001080;
-  --vy-syntax-constant: #0070c1;
-  --vy-syntax-escape: #811f3f;
-  --vy-tree-guide: color-mix(in srgb, var(--vy-tertiary) 40%, transparent);
 
   --z-base: 0;
   --z-sticky: 10;
-  /* Window chrome. Above sticky page content — the pinned turn prompt is also
-     z-sticky and, being later in the DOM, used to paint straight over the
-     caption buttons — and below menus, drawers and toasts, which must still
-     open on top of the bar. */
+  /* Window chrome: above sticky page content, below menus, drawers and toasts,
+     which must still open on top of the bar. */
   --z-titlebar: 15;
   --z-dropdown: 20;
   --z-tooltip: 50;
@@ -143,6 +173,36 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
+  --vy-chrome: #0c0f11;
+  --vy-bg: #13171a;
+  --vy-card: #171c1f;
+  --vy-surface: #1d2327;
+  --vy-surface-2: #252c31;
+  --vy-sunken: #0f1315;
+  --vy-border: #252d33;
+  --vy-border-strong: #36424b;
+  --vy-fg-strong: #f3f6f8;
+  --vy-fg: #dde4e9;
+  --vy-secondary: #b1bdc6;
+  --vy-muted: #8795a1;
+  --vy-tertiary: #5e6c78;
+  --vy-accent: #4fb3e8;
+  --vy-accent-hover: #7ac6ef;
+  --vy-accent-fg: #04121a;
+  --vy-focus: #4fb3e8;
+
+  --vy-success: #3dbb7b;
+  --vy-warning: #e9a23b;
+  --vy-danger: #f26b5e;
+  --vy-soft-mix: 15%;
+  --vy-overlay: rgb(0 0 0 / 0.56);
+  --vy-window-close: #c42b1c;
+  --vy-window-close-fg: #ffffff;
+  --vy-shadow: 0 0 0 1px var(--vy-border);
+  --vy-shadow-menu: 0 0 0 1px var(--vy-border), 0 16px 40px -8px rgb(0 0 0 / 0.6);
+  --vy-shadow-chrome: 0 10px 28px -14px rgb(0 0 0 / 0.45);
+  --vy-composer: var(--vy-card);
+
   --vy-gray-base: #000000;
   --vy-gray-50: #0a0a0a;
   --vy-gray-100: #171717;
@@ -156,60 +216,27 @@
   --vy-gray-900: #f5f5f5;
   --vy-gray-950: #fafafa;
 
-  --vy-bg: #141414;
-  --vy-card: #1A1E20;
-  --vy-surface: #202528;
-  --vy-surface-2: #293034;
-  --vy-border: #303A40;
-  --vy-border-strong: #46545C;
-  --vy-muted: #9FB3BE;
-  --vy-secondary: #BCCDD6;
-  --vy-tertiary: #7E939F;
-  --vy-fg: #E8EDF0;
-  --vy-fg-strong: #F5F8FA;
-  --vy-accent: #4FB3E8;
-  --vy-accent-fg: #0A0A0A;
-  --vy-focus: #8CB9CC;
-  --vy-accent-hover: #8CB9CC;
-  --vy-success: #22c55e;
-  --vy-danger: #f87171;
-  --vy-warning: #fbbf24;
-  --vy-composer: #1B1F22;
-  --vy-overlay: rgb(0 0 0 / 0.55);
-  --vy-window-close: #e81123;
-  --vy-window-close-fg: #ffffff;
-  --vy-shadow: 0 0 0 1px var(--vy-border);
-  --vy-shadow-menu: 0 0 0 1px var(--vy-border), 0 10px 28px rgb(0 0 0 / 0.45);
-  --vy-shadow-chrome: 0 10px 28px -14px rgb(0 0 0 / 0.45);
+  /* Code syntax (JetBrains Dark hues). */
+  --vy-syntax-keyword: #cf8e6d;
+  --vy-syntax-string: #6aab73;
+  --vy-syntax-number: #2aacb8;
+  --vy-syntax-comment: #7a7e85;
+  --vy-syntax-func: #56a8f5;
+  --vy-syntax-type: #c77dbb;
+  --vy-syntax-property: #c77dbb;
+  --vy-syntax-punct: #a9b7c6;
+  --vy-syntax-variable: #bcbec4;
+  --vy-syntax-constant: #c77dbb;
+  --vy-syntax-escape: #cf8e6d;
+  --vy-tree-guide: color-mix(in srgb, var(--vy-tertiary) 32%, transparent);
 
   --vy-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --vy-duration: 160ms;
+  --vy-duration: 140ms;
   --vy-disabled-opacity: 0.45;
-  --vy-tracking: -0.01em;
-  --vy-tracking-tight: -0.012em;
-  --vy-tracking-body: -0.006em;
-  --vy-tracking-caps: 0.06em;
   --leading-mono: 1.6;
-
-  /* Code editor syntax palette (VS Code Dark+ hues). */
-  --vy-syntax-property: #9cdcfe;
-  --vy-syntax-string: #ce9178;
-  --vy-syntax-number: #b5cea8;
-  --vy-syntax-keyword: #569cd6;
-  --vy-syntax-comment: #6a9955;
-  --vy-syntax-func: #dcdcaa;
-  --vy-syntax-type: #4ec9b0;
-  --vy-syntax-variable: #9cdcfe;
-  --vy-syntax-constant: #4fc1ff;
-  --vy-syntax-escape: #d7ba7d;
-  --vy-tree-guide: color-mix(in srgb, var(--vy-tertiary) 32%, transparent);
 
   --z-base: 0;
   --z-sticky: 10;
-  /* Window chrome. Above sticky page content — the pinned turn prompt is also
-     z-sticky and, being later in the DOM, used to paint straight over the
-     caption buttons — and below menus, drawers and toasts, which must still
-     open on top of the bar. */
   --z-titlebar: 15;
   --z-dropdown: 20;
   --z-tooltip: 50;
@@ -239,158 +266,183 @@
   --vy-density-scale: 1.08;
 }
 
+/* ─── Skin palettes: 4 skins × 2 themes (Default is the base above) ─────────── */
+
+/* Proof — lavender slate, muted violet accent. */
 [data-skin="proof"][data-theme="light"] {
-  --vy-bg: #F7F7F7;
-  --vy-card: #EFEFF2;
-  --vy-surface: #E8E9EE;
-  --vy-surface-2: #DDE0E6;
-  --vy-border: #C8CED6;
-  --vy-border-strong: #9EA4B2;
-  --vy-muted: #5B5E72;
-  --vy-secondary: #454860;
-  --vy-tertiary: #75788E;
-  --vy-fg: #272A3B;
-  --vy-fg-strong: #1C1F2C;
-  --vy-composer: #ECECF0;
-  --vy-accent: #736A86;
-  --vy-accent-fg: #FFFFFF;
-  --vy-accent-hover: #615A74;
-  --vy-focus: #736A86;
+  --vy-chrome: #f0f0f4;
+  --vy-bg: #fbfbfc;
+  --vy-card: #f6f6f9;
+  --vy-surface: #ededf2;
+  --vy-surface-2: #e3e3eb;
+  --vy-sunken: #f4f4f7;
+  --vy-border: #dcdce5;
+  --vy-border-strong: #c0c0d0;
+  --vy-fg-strong: #181a26;
+  --vy-fg: #262939;
+  --vy-secondary: #44475e;
+  --vy-muted: #5e6178;
+  --vy-tertiary: #8b8ea4;
+  --vy-accent: #6b5f8a;
+  --vy-accent-hover: #584e74;
+  --vy-accent-fg: #ffffff;
+  --vy-focus: #6b5f8a;
 }
 
 [data-skin="proof"][data-theme="dark"] {
-  --vy-bg: #272A3B;
-  --vy-card: #2E3247;
-  --vy-surface: #353A52;
-  --vy-surface-2: #3E445F;
-  --vy-border: #404763;
-  --vy-border-strong: #5A6180;
-  --vy-muted: #A9ADC4;
-  --vy-secondary: #C6C9DA;
-  --vy-tertiary: #8B8FA6;
-  --vy-fg: #E6E6EE;
-  --vy-fg-strong: #F1F1F7;
-  --vy-composer: #2E3247;
-  --vy-accent: #ACA3C4;
-  --vy-accent-fg: #0A0A0A;
-  --vy-accent-hover: #BEB6D4;
-  --vy-focus: #C8CED6;
+  --vy-chrome: #1c1e2c;
+  --vy-bg: #232637;
+  --vy-card: #282b3d;
+  --vy-surface: #2e3246;
+  --vy-surface-2: #373b52;
+  --vy-sunken: #1e2030;
+  --vy-border: #33374d;
+  --vy-border-strong: #484d69;
+  --vy-fg-strong: #f2f2f8;
+  --vy-fg: #e1e1eb;
+  --vy-secondary: #c0c2d4;
+  --vy-muted: #9a9db5;
+  --vy-tertiary: #6e7291;
+  --vy-accent: #b6acd0;
+  --vy-accent-hover: #c9c1de;
+  --vy-accent-fg: #15131e;
+  --vy-focus: #b6acd0;
 }
 
+/* Bench — workshop blue; electric cyan on deep navy. */
 [data-skin="bench"][data-theme="light"] {
-  --vy-bg: #FFFFFF;
-  --vy-card: #F2F9FE;
-  --vy-surface: #E6F3FC;
-  --vy-surface-2: #D0EAFB;
-  --vy-border: #BEE0F6;
-  --vy-border-strong: #8DC0E6;
-  --vy-muted: #3D566E;
-  --vy-secondary: #29405C;
-  --vy-tertiary: #5C7890;
-  --vy-fg: #0E1B2A;
-  --vy-fg-strong: #04040A;
-  --vy-composer: #ECF6FD;
-  --vy-accent: #0072CE;
-  --vy-accent-fg: #FFFFFF;
-  --vy-accent-hover: #005FAE;
-  --vy-focus: #0072CE;
+  --vy-chrome: #eff5fb;
+  --vy-bg: #ffffff;
+  --vy-card: #f6fafd;
+  --vy-surface: #eaf2fa;
+  --vy-surface-2: #d9e8f5;
+  --vy-sunken: #f3f8fc;
+  --vy-border: #d2e2ef;
+  --vy-border-strong: #a8c6de;
+  --vy-fg-strong: #030712;
+  --vy-fg: #0e1b2a;
+  --vy-secondary: #28405b;
+  --vy-muted: #48627e;
+  --vy-tertiary: #7a91a8;
+  --vy-accent: #0072ce;
+  --vy-accent-hover: #005daa;
+  --vy-accent-fg: #ffffff;
+  --vy-focus: #0072ce;
 }
 
 [data-skin="bench"][data-theme="dark"] {
-  --vy-bg: #04040A;
-  --vy-card: #0B0F22;
-  --vy-surface: #101533;
-  --vy-surface-2: #182046;
-  --vy-border: #1F2956;
-  --vy-border-strong: #33407E;
-  --vy-muted: #94A6C6;
-  --vy-secondary: #B5C3DE;
-  --vy-tertiary: #7083A6;
-  --vy-fg: #DCE6F5;
-  --vy-fg-strong: #F0F5FC;
-  --vy-composer: #0B0F22;
-  --vy-accent: #0DE7FF;
-  --vy-accent-fg: #04040A;
-  --vy-accent-hover: #56EDFF;
-  --vy-focus: #00A6FF;
+  --vy-chrome: #03040a;
+  --vy-bg: #070a16;
+  --vy-card: #0b0f20;
+  --vy-surface: #10152b;
+  --vy-surface-2: #182039;
+  --vy-sunken: #04060e;
+  --vy-border: #181f3e;
+  --vy-border-strong: #28335f;
+  --vy-fg-strong: #f0f5fc;
+  --vy-fg: #dce6f5;
+  --vy-secondary: #aebfdc;
+  --vy-muted: #8294b8;
+  --vy-tertiary: #546488;
+  --vy-accent: #0de7ff;
+  --vy-accent-hover: #62efff;
+  --vy-accent-fg: #021018;
+  --vy-focus: #00a6ff;
 }
 
-/* Native: branding-orange accent on warm grays; light theme gains its own focus hue. */
+/* Native — warm neutral greys, branding orange. The product default. */
 [data-skin="native"][data-theme="light"] {
-  --vy-bg: #F9F9F9;
-  --vy-card: #F3F1EF;
-  --vy-surface: #ECE9E6;
-  --vy-surface-2: #E2DEDA;
-  --vy-border: #D6D1CC;
-  --vy-border-strong: #ADA69F;
-  --vy-muted: #646464;
-  --vy-secondary: #4E4E4E;
-  --vy-tertiary: #6F6F6F;
-  --vy-fg: #2B2B2B;
-  --vy-fg-strong: #1A1A1A;
-  --vy-composer: #F1EEEB;
-  --vy-accent: #C2410C;
-  --vy-accent-fg: #FFFFFF;
-  --vy-accent-hover: #A33A0B;
-  --vy-focus: #E85002;
+  --vy-chrome: #f2f1ef;
+  --vy-bg: #fdfdfc;
+  --vy-card: #f8f7f5;
+  --vy-surface: #f0eeeb;
+  --vy-surface-2: #e6e3df;
+  --vy-sunken: #f6f5f3;
+  --vy-border: #e2ded9;
+  --vy-border-strong: #c8c2bb;
+  --vy-fg-strong: #171717;
+  --vy-fg: #262626;
+  --vy-secondary: #4a4845;
+  --vy-muted: #69655f;
+  --vy-tertiary: #9a958f;
+  --vy-accent: #c2410c;
+  --vy-accent-hover: #a3370a;
+  --vy-accent-fg: #ffffff;
+  --vy-focus: #e85002;
 }
 
 [data-skin="native"][data-theme="dark"] {
-  --vy-bg: #1A1A1A;
-  --vy-card: #212020;
-  --vy-surface: #292827;
-  --vy-surface-2: #32302E;
-  --vy-border: #3A3836;
-  --vy-border-strong: #544F4B;
-  --vy-muted: #B0A9A2;
-  --vy-secondary: #CDC7C0;
-  --vy-tertiary: #8B857E;
-  --vy-fg: #F0EEEB;
-  --vy-fg-strong: #FAF9F7;
-  --vy-composer: #222120;
-  --vy-accent: #FB923C;
-  --vy-accent-fg: #0A0A0A;
-  --vy-accent-hover: #FCA85E;
-  --vy-focus: #FB923C;
+  --vy-chrome: #121212;
+  --vy-bg: #1a1a1a;
+  --vy-card: #1e1e1d;
+  --vy-surface: #252423;
+  --vy-surface-2: #2e2c2b;
+  --vy-sunken: #141414;
+  --vy-border: #2c2a28;
+  --vy-border-strong: #423f3c;
+  --vy-fg-strong: #faf9f7;
+  --vy-fg: #ebe9e6;
+  --vy-secondary: #c8c3bd;
+  --vy-muted: #9e9891;
+  --vy-tertiary: #6d6862;
+  --vy-accent: #fb923c;
+  --vy-accent-hover: #fda965;
+  --vy-accent-fg: #1c0d03;
+  --vy-focus: #fb923c;
 }
 
-/* Gild: mineral / engraved look — Alabaster light, Onyx dark; Blue Slate accent. */
+/* Gild — alabaster and onyx, blue-slate accent. */
 [data-skin="gild"][data-theme="light"] {
-  --vy-bg: #E5E4E2;
-  --vy-card: #EBEAE8;
-  --vy-surface: #F0EFED;
-  --vy-surface-2: #DDD9D5;
-  --vy-border: #C9CAC7;
-  --vy-border-strong: #A8ABAA;
-  --vy-fg: #1A1C1E;
-  --vy-fg-strong: #0A0A0A;
-  --vy-muted: #4A5259;
-  --vy-secondary: #3D4449;
-  --vy-tertiary: #6B747C;
-  --vy-composer: #E3E2E0;
+  --vy-chrome: #e2e1de;
+  --vy-bg: #f3f2f0;
+  --vy-card: #edece9;
+  --vy-surface: #e7e5e2;
+  --vy-surface-2: #dbd8d4;
+  --vy-sunken: #ecebe8;
+  --vy-border: #d1cfcb;
+  --vy-border-strong: #aeaca8;
+  --vy-fg-strong: #0a0a0a;
+  --vy-fg: #1a1c1e;
+  --vy-secondary: #3d4449;
+  --vy-muted: #545c63;
+  --vy-tertiary: #868e95;
   --vy-accent: #536878;
-  --vy-accent-fg: #FFFFFF;
-  --vy-accent-hover: #43525F;
+  --vy-accent-hover: #43525f;
+  --vy-accent-fg: #ffffff;
   --vy-focus: #536878;
 }
 
 [data-skin="gild"][data-theme="dark"] {
-  --vy-bg: #0A0A0A;
-  --vy-card: #141618;
-  --vy-surface: #191C1E;
-  --vy-surface-2: #232629;
-  --vy-border: #2A2F34;
-  --vy-border-strong: #3A4045;
-  --vy-fg: #E5E4E2;
-  --vy-fg-strong: #F2F2F0;
-  --vy-muted: #98A4AD;
-  --vy-secondary: #B7C1C8;
-  --vy-tertiary: #7E8891;
-  --vy-composer: #141618;
-  --vy-accent: #8FA6B8;
-  --vy-accent-fg: #0A0A0A;
-  --vy-accent-hover: #A9BDCB;
-  --vy-focus: #A9BDCB;
+  --vy-chrome: #060606;
+  --vy-bg: #0c0d0e;
+  --vy-card: #111314;
+  --vy-surface: #171a1c;
+  --vy-surface-2: #202326;
+  --vy-sunken: #070808;
+  --vy-border: #212629;
+  --vy-border-strong: #33393e;
+  --vy-fg-strong: #f2f2f0;
+  --vy-fg: #e5e4e2;
+  --vy-secondary: #b7c1c8;
+  --vy-muted: #8d98a1;
+  --vy-tertiary: #5d666e;
+  --vy-accent: #8fa6b8;
+  --vy-accent-hover: #a9bdcb;
+  --vy-accent-fg: #0a0a0a;
+  --vy-focus: #a9bdcb;
+}
+
+/* Named tints — derived per themed element, so components never pick opacities. */
+:root,
+[data-theme] {
+  --vy-accent-soft: color-mix(in srgb, var(--vy-accent) var(--vy-soft-mix), transparent);
+  --vy-success-soft: color-mix(in srgb, var(--vy-success) var(--vy-soft-mix), transparent);
+  --vy-warning-soft: color-mix(in srgb, var(--vy-warning) var(--vy-soft-mix), transparent);
+  --vy-danger-soft: color-mix(in srgb, var(--vy-danger) var(--vy-soft-mix), transparent);
+  --vy-diff-add: color-mix(in srgb, var(--vy-success) 12%, transparent);
+  --vy-diff-del: color-mix(in srgb, var(--vy-danger) 12%, transparent);
+  --vy-diff-add-word: color-mix(in srgb, var(--vy-success) 28%, transparent);
+  --vy-diff-del-word: color-mix(in srgb, var(--vy-danger) 28%, transparent);
 }
 
 /* Opacity-only — transform on ancestors ghosts contenteditable glyphs / spellcheck. */
@@ -426,49 +478,70 @@
   }
 }
 
-@theme {
+@keyframes vy-live {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ─── Tailwind mapping ────────────────────────────────────────────────────────
+
+  `inline` throughout: utilities read the `--vy-*` token on the element they
+  style, so a nested `[data-skin][data-theme]` (a skin preview) repaints with
+  its own palette and scale. A non-inline theme var resolves once at :root.
+*/
+@theme inline {
   --font-sans: var(--vy-font-sans);
   --font-mono: var(--vy-font-mono);
 
-  --text-3xs: calc(9px * var(--vy-font-scale));
-  --text-2xs: calc(10px * var(--vy-font-scale));
-  --text-caption: calc(11px * var(--vy-font-scale));
-  --text-xs: calc(12px * var(--vy-font-scale));
-  --text-sm: calc(13px * var(--vy-font-scale));
-  --text-md: calc(14px * var(--vy-font-scale));
-  --text-lg: calc(15px * var(--vy-font-scale));
-  --text-heading: calc(16px * var(--vy-font-scale));
-  --text-title: calc(17px * var(--vy-font-scale));
-  --leading-mono: 1.6;
+  --color-chrome: var(--vy-chrome);
+  --color-bg: var(--vy-bg);
+  --color-card: var(--vy-card);
+  --color-surface: var(--vy-surface);
+  --color-surface-2: var(--vy-surface-2);
+  --color-sunken: var(--vy-sunken);
+  --color-border: var(--vy-border);
+  --color-border-strong: var(--vy-border-strong);
+  --color-fg-strong: var(--vy-fg-strong);
+  --color-fg: var(--vy-fg);
+  --color-secondary: var(--vy-secondary);
+  --color-muted: var(--vy-muted);
+  --color-tertiary: var(--vy-tertiary);
+  --color-accent: var(--vy-accent);
+  --color-accent-hover: var(--vy-accent-hover);
+  --color-accent-fg: var(--vy-accent-fg);
+  --color-accent-soft: var(--vy-accent-soft);
+  --color-focus: var(--vy-focus);
+  --color-success: var(--vy-success);
+  --color-success-soft: var(--vy-success-soft);
+  --color-warning: var(--vy-warning);
+  --color-warning-soft: var(--vy-warning-soft);
+  --color-danger: var(--vy-danger);
+  --color-danger-soft: var(--vy-danger-soft);
+  --color-overlay: var(--vy-overlay);
+  --color-window-close: var(--vy-window-close);
+  --color-window-close-fg: var(--vy-window-close-fg);
+  --color-composer: var(--vy-composer);
+
+  --color-syntax-keyword: var(--vy-syntax-keyword);
+  --color-syntax-string: var(--vy-syntax-string);
+  --color-syntax-number: var(--vy-syntax-number);
+  --color-syntax-comment: var(--vy-syntax-comment);
+  --color-syntax-func: var(--vy-syntax-func);
+  --color-syntax-type: var(--vy-syntax-type);
+  --color-syntax-property: var(--vy-syntax-property);
+  --color-syntax-punct: var(--vy-syntax-punct);
 
   --radius-sm: var(--vy-radius-sm);
   --radius-md: var(--vy-radius-md);
   --radius-lg: var(--vy-radius-lg);
   --radius-xl: var(--vy-radius-xl);
   --radius-pill: 999px;
-
-  --color-bg: var(--vy-bg);
-  --color-card: var(--vy-card);
-  --color-surface: var(--vy-surface);
-  --color-surface-2: var(--vy-surface-2);
-  --color-border: var(--vy-border);
-  --color-border-strong: var(--vy-border-strong);
-  --color-muted: var(--vy-muted);
-  --color-secondary: var(--vy-secondary);
-  --color-tertiary: var(--vy-tertiary);
-  --color-fg: var(--vy-fg);
-  --color-fg-strong: var(--vy-fg-strong);
-  --color-accent: var(--vy-accent);
-  --color-accent-fg: var(--vy-accent-fg);
-  --color-accent-hover: var(--vy-accent-hover);
-  --color-focus: var(--vy-focus);
-  --color-success: var(--vy-success);
-  --color-danger: var(--vy-danger);
-  --color-warning: var(--vy-warning);
-  --color-composer: var(--vy-composer);
-  --color-overlay: var(--vy-overlay);
-  --color-window-close: var(--vy-window-close);
-  --color-window-close-fg: var(--vy-window-close-fg);
 
   --shadow-card: var(--vy-shadow);
   --shadow-menu: var(--vy-shadow-menu);
@@ -477,23 +550,60 @@
   --default-transition-duration: var(--vy-duration);
   --default-transition-timing-function: var(--vy-ease);
 
-  --animate-fade-in: fade-in var(--vy-duration) var(--vy-ease);
-  --animate-chrome-drop-in: chrome-drop-in var(--vy-duration) var(--vy-ease);
-  --animate-slide-in-left: slide-in-left var(--vy-duration) var(--vy-ease);
-
-  /* Motion system — operate/product surface: anchored emergence, state feedback */
-  --animate-menu-in: vy-pop-in var(--vy-duration) var(--vy-ease) both;
-  --animate-tip-in: vy-tip-in 120ms var(--vy-ease) both;
-  --animate-toast-in: vy-toast-in 220ms var(--vy-ease) both;
-  --animate-toast-out: vy-toast-out 150ms var(--vy-ease) both;
-  --animate-dialog-in: vy-dialog-in 200ms var(--vy-ease) both;
-
   --z-index-sticky: var(--z-sticky);
   --z-index-titlebar: var(--z-titlebar);
   --z-index-dropdown: var(--z-dropdown);
   --z-index-tooltip: var(--z-tooltip);
   --z-index-drawer: var(--z-drawer);
   --z-index-toast: var(--z-toast);
+}
+
+/*
+  Seven sizes. The old scale had nine (9–17px) a pixel apart, which is the same
+  as having none: nobody can tell 15 from 16 on sight.
+    caption 11 · xs 12 · sm 13 (body) · md 14 · heading 15 · title 18 · display 24
+  `2xs` (10) is for keycaps and dense meta only. `3xs` and `lg` are legacy
+  aliases kept until their last caller is ported.
+
+  `inline` matters: the sizes read --vy-font-scale, which lives on the element
+  carrying data-skin. A non-inline theme var resolves at :root, where a nested
+  preview's scale is invisible.
+*/
+@theme inline {
+  --text-3xs: calc(9px * var(--vy-font-scale));
+  --text-3xs--line-height: 12px;
+  --text-2xs: calc(10px * var(--vy-font-scale));
+  --text-2xs--line-height: 14px;
+  --text-caption: calc(11px * var(--vy-font-scale));
+  --text-caption--line-height: 16px;
+  --text-xs: calc(12px * var(--vy-font-scale));
+  --text-xs--line-height: 18px;
+  --text-sm: calc(13px * var(--vy-font-scale));
+  --text-sm--line-height: 20px;
+  --text-md: calc(14px * var(--vy-font-scale));
+  --text-md--line-height: 22px;
+  --text-lg: calc(15px * var(--vy-font-scale));
+  --text-lg--line-height: 22px;
+  --text-heading: calc(15px * var(--vy-font-scale));
+  --text-heading--line-height: 22px;
+  --text-title: calc(18px * var(--vy-font-scale));
+  --text-title--line-height: 26px;
+  --text-display: calc(24px * var(--vy-font-scale));
+  --text-display--line-height: 32px;
+  --leading-mono: 1.6;
+
+  --animate-fade-in: fade-in var(--vy-duration) var(--vy-ease);
+  --animate-chrome-drop-in: chrome-drop-in var(--vy-duration) var(--vy-ease);
+  --animate-slide-in-left: slide-in-left var(--vy-duration) var(--vy-ease);
+  --animate-spin-slow: spin 1.4s linear infinite;
+  --animate-live: vy-live 1.6s var(--vy-ease) infinite;
+
+  /* Motion system — anchored emergence and state feedback. */
+  --animate-menu-in: vy-pop-in var(--vy-duration) var(--vy-ease) both;
+  --animate-tip-in: vy-tip-in 120ms var(--vy-ease) both;
+  --animate-toast-in: vy-toast-in 220ms var(--vy-ease) both;
+  --animate-toast-out: vy-toast-out 150ms var(--vy-ease) both;
+  --animate-dialog-in: vy-dialog-in 200ms var(--vy-ease) both;
 }
 
 @utility app-region-drag {
@@ -566,16 +676,102 @@
 
 /** Diff rows: tint + gutter sign (+/−) mark add/del — never hue alone. */
 @utility diff-row-add {
-  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  background: var(--vy-diff-add);
 }
 
 @utility diff-row-del {
-  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  background: var(--vy-diff-del);
 }
 
 @utility vy-focus-ring {
-  outline: 2px solid var(--color-focus);
+  outline: 2px solid var(--vy-focus);
   outline-offset: 2px;
+}
+
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/** A work pane. Flush in every skin: its only edge is the hairline on its left. */
+@utility vy-panel {
+  background: var(--vy-bg);
+  border-left: 1px solid var(--vy-border);
+}
+
+/** Menus, popovers, palettes. */
+@utility vy-menu {
+  background: var(--vy-bg);
+  border-radius: var(--vy-radius-xl);
+  box-shadow: var(--vy-shadow-menu);
+}
+
+@utility mask-fade-right {
+  mask-image: linear-gradient(to right, black 85%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
+}
+
+/** Diff rows: tint + gutter sign (+/−) mark add/del — never hue alone. */
+@utility diff-add {
+  background: var(--vy-diff-add);
+}
+
+@utility diff-del {
+  background: var(--vy-diff-del);
+}
+
+@utility diff-add-word {
+  background: var(--vy-diff-add-word);
+  border-radius: 2px;
+}
+
+@utility diff-del-word {
+  background: var(--vy-diff-del-word);
+  border-radius: 2px;
+}
+
+@utility scroll-thin {
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--vy-border-strong);
+    border: 2px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@keyframes vy-text-live {
+  from {
+    background-position: 200% 0;
+  }
+
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/** Running label: the text itself carries the motion, no spinner needed. */
+@utility vy-text-live {
+  background-image: linear-gradient(
+    90deg,
+    var(--vy-muted) 0%,
+    var(--vy-muted) 40%,
+    var(--vy-fg-strong) 50%,
+    var(--vy-muted) 60%,
+    var(--vy-muted) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: vy-text-live 2.2s linear infinite;
 }
 
 @layer base {
@@ -592,9 +788,15 @@
 
   body {
     @apply bg-bg font-sans text-sm text-fg antialiased;
-    line-height: 1.4;
+    line-height: 20px;
     letter-spacing: var(--vy-tracking-body);
     text-rendering: optimizeLegibility;
+  }
+
+  /* A nested skin (the previews in Settings) sets its own type, not <html>'s. */
+  [data-skin] {
+    font-family: var(--vy-font-sans);
+    letter-spacing: var(--vy-tracking-body);
   }
 
   /* Contenteditable under transform/tracking paints ghosted glyphs + drifted spellcheck. */
@@ -617,8 +819,9 @@
     color: inherit;
   }
 
+  /* A desktop app: controls keep the arrow; links keep the hand. */
   button {
-    cursor: pointer;
+    cursor: default;
   }
 
   button:disabled,
@@ -633,13 +836,13 @@
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-focus);
+    outline: 2px solid var(--vy-focus);
     outline-offset: 2px;
   }
 
   ::selection {
-    background-color: var(--color-border-strong);
-    color: var(--color-fg-strong);
+    background-color: var(--vy-accent-soft);
+    color: var(--vy-fg-strong);
   }
 
   /*
@@ -649,8 +852,8 @@
     (chunky, with arrow buttons on Windows).
   */
   *::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
   }
 
   *::-webkit-scrollbar-button,
@@ -825,9 +1028,9 @@
     clip: auto;
     white-space: normal;
     border-radius: 0.375rem;
-    background: var(--color-surface);
-    color: var(--color-fg);
-    outline: 2px solid var(--color-focus);
+    background: var(--vy-surface);
+    color: var(--vy-fg);
+    outline: 2px solid var(--vy-focus);
     outline-offset: 2px;
   }
 }
@@ -865,7 +1068,7 @@
     font-weight: 600;
     line-height: 1.25;
     letter-spacing: var(--vy-tracking-tight);
-    color: var(--color-fg-strong);
+    color: var(--vy-fg-strong);
   }
 
   h1 {
@@ -891,7 +1094,7 @@
   hr {
     margin: 1.1em 0;
     border: 0;
-    border-top: 1px solid var(--color-border);
+    border-top: 1px solid var(--vy-border);
   }
 
   img {
@@ -938,7 +1141,7 @@
   }
 
   li::marker {
-    color: var(--color-tertiary);
+    color: var(--vy-tertiary);
   }
 
   li>ul,
@@ -954,17 +1157,17 @@
   blockquote {
     margin: 0.6em 0;
     padding: 0.1em 0 0.1em 0.85rem;
-    border-left: 2px solid color-mix(in srgb, var(--color-tertiary) 60%, transparent);
-    color: var(--color-secondary);
+    border-left: 2px solid color-mix(in srgb, var(--vy-tertiary) 60%, transparent);
+    color: var(--vy-secondary);
   }
 
   a {
-    color: var(--color-muted);
+    color: var(--vy-muted);
     text-decoration: underline;
   }
 
   del {
-    color: var(--color-muted);
+    color: var(--vy-muted);
   }
 
   code {
@@ -990,7 +1193,7 @@
 
   th,
   td {
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--vy-border);
     padding: 0.35em 0.65em;
     text-align: left;
     vertical-align: top;
@@ -1002,13 +1205,13 @@
   }
 
   th {
-    background: var(--color-surface);
-    color: var(--color-fg-strong);
+    background: var(--vy-surface);
+    color: var(--vy-fg-strong);
     font-weight: 600;
   }
 
   tbody tr:nth-child(even) td {
-    background: color-mix(in srgb, var(--color-surface) 55%, transparent);
+    background: color-mix(in srgb, var(--vy-surface) 55%, transparent);
   }
 }
 
@@ -1037,7 +1240,7 @@
   font-size: var(--text-heading);
   line-height: 1.5;
   letter-spacing: var(--vy-tracking-tight);
-  color: var(--color-fg-strong);
+  color: var(--vy-fg-strong);
 }
 
 /* Plan dock: wide tables scroll horizontally (readable cells); task lists status-only. */
@@ -1087,13 +1290,13 @@
   }
 
   td strong {
-    color: var(--color-fg-strong);
+    color: var(--vy-fg-strong);
     font-weight: 600;
   }
 
   input[type='checkbox'] {
     pointer-events: none;
-    accent-color: var(--color-tertiary);
+    accent-color: var(--vy-tertiary);
   }
 }
 
@@ -1119,11 +1322,11 @@
   -webkit-background-clip: text;
   color: transparent;
   background-image: linear-gradient(90deg,
-      var(--color-tertiary) 0%,
-      var(--color-tertiary) 40%,
-      var(--color-muted) 50%,
-      var(--color-tertiary) 60%,
-      var(--color-tertiary) 100%);
+      var(--vy-tertiary) 0%,
+      var(--vy-tertiary) 40%,
+      var(--vy-muted) 50%,
+      var(--vy-tertiary) 60%,
+      var(--vy-tertiary) 100%);
   background-repeat: no-repeat;
 }
 
@@ -1315,7 +1518,7 @@ dialog[open] {
   line-height: 2.4;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--color-fg) 4%, transparent);
+  color: color-mix(in srgb, var(--vy-fg) 4%, transparent);
 }
 
 [data-chat-hero][data-hero-mode='plan'] [data-composer-hero] > * {
@@ -1325,7 +1528,7 @@ dialog[open] {
 
 @media (prefers-contrast: more) {
   [data-chat-hero][data-hero-mode='plan'] [data-composer-hero]::before {
-    color: color-mix(in srgb, var(--color-fg) 12%, transparent);
+    color: color-mix(in srgb, var(--vy-fg) 12%, transparent);
   }
 }
 
@@ -1352,9 +1555,9 @@ dialog[open] {
   align-items: stretch;
   max-width: 100%;
   padding: 2px;
-  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vy-border) 50%, transparent);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--color-surface, var(--vy-surface-2)) 55%, transparent);
+  background: color-mix(in srgb, var(--vy-surface, var(--vy-surface-2)) 55%, transparent);
   box-shadow: var(--vy-shadow-chrome);
 }
 
@@ -1386,7 +1589,7 @@ dialog[open] {
   text-transform: uppercase;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: color-mix(in srgb, var(--color-muted) 75%, transparent);
+  color: color-mix(in srgb, var(--vy-muted) 75%, transparent);
 }
 
 .acc-value {
@@ -1398,7 +1601,7 @@ dialog[open] {
   font-size: 0.75rem;
   font-weight: 500;
   line-height: 1.25;
-  color: var(--color-secondary);
+  color: var(--vy-secondary);
 }
 
 .acc-value > * {
@@ -1410,11 +1613,11 @@ dialog[open] {
 
 .acc-value-empty {
   font-weight: 400;
-  color: var(--color-muted);
+  color: var(--vy-muted);
 }
 
 .acc-value-error {
-  color: var(--color-danger);
+  color: var(--vy-danger);
 }
 
 /* The strip's one action: git init, offered only when there is no repository.
@@ -1422,13 +1625,13 @@ dialog[open] {
 .acc-action {
   flex: none;
   padding: 1px 7px;
-  border: 1px solid color-mix(in srgb, var(--color-border) 75%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vy-border) 75%, transparent);
   border-radius: 5px;
-  background: color-mix(in srgb, var(--color-border) 12%, transparent);
+  background: color-mix(in srgb, var(--vy-border) 12%, transparent);
   font-size: 0.6875rem;
   font-weight: 500;
   line-height: 1.45;
-  color: var(--color-secondary);
+  color: var(--vy-secondary);
   cursor: pointer;
   transition:
     background var(--vy-duration, 160ms) var(--vy-ease, ease),
@@ -1437,9 +1640,9 @@ dialog[open] {
 }
 
 .acc-action:hover:not(:disabled) {
-  border-color: var(--color-border-strong);
-  background: color-mix(in srgb, var(--color-border) 26%, transparent);
-  color: var(--color-fg);
+  border-color: var(--vy-border-strong);
+  background: color-mix(in srgb, var(--vy-border) 26%, transparent);
+  color: var(--vy-fg);
 }
 
 .acc-action:disabled {
@@ -1449,7 +1652,7 @@ dialog[open] {
 
 .acc-dim {
   flex: none;
-  color: var(--color-muted);
+  color: var(--vy-muted);
   opacity: 0.55;
 }
 
@@ -1462,8 +1665,8 @@ dialog[open] {
   background: linear-gradient(
     to bottom,
     transparent,
-    color-mix(in srgb, var(--color-border) 80%, transparent) 22%,
-    color-mix(in srgb, var(--color-border) 80%, transparent) 78%,
+    color-mix(in srgb, var(--vy-border) 80%, transparent) 22%,
+    color-mix(in srgb, var(--vy-border) 80%, transparent) 78%,
     transparent
   );
 }
@@ -1473,27 +1676,27 @@ dialog[open] {
   width: 6px;
   height: 6px;
   border-radius: 9999px;
-  background: var(--color-muted);
+  background: var(--vy-muted);
 }
 
 .acc-dot-ready {
-  background: var(--color-success);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 15%, transparent);
+  background: var(--vy-success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vy-success) 15%, transparent);
 }
 
 .acc-dot-building {
-  background: var(--color-warning);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-warning) 15%, transparent);
+  background: var(--vy-warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vy-warning) 15%, transparent);
   animation: acc-dot-pulse 1.6s var(--vy-ease, ease) infinite;
 }
 
 .acc-dot-degraded {
-  background: var(--color-warning);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-warning) 15%, transparent);
+  background: var(--vy-warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vy-warning) 15%, transparent);
 }
 
 .acc-dot-off {
-  background: var(--color-muted);
+  background: var(--vy-muted);
 }
 
 @keyframes acc-dot-pulse {
@@ -1509,7 +1712,7 @@ dialog[open] {
 [data-agent-context-card-skeleton] .acc-skel {
   display: block;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--color-border) 20%, transparent);
+  background: color-mix(in srgb, var(--vy-border) 20%, transparent);
 }
 
 [data-agent-context-card-skeleton] .acc-skel-label {
@@ -1523,19 +1726,19 @@ dialog[open] {
 
 @media (prefers-contrast: more) {
   .agent-context-card {
-    border-color: var(--color-border-strong);
+    border-color: var(--vy-border-strong);
   }
 
   .acc-sep {
-    background: var(--color-border-strong);
+    background: var(--vy-border-strong);
   }
 
   .acc-label {
-    color: var(--color-muted);
+    color: var(--vy-muted);
   }
 
   .acc-action {
-    border-color: var(--color-border-strong);
+    border-color: var(--vy-border-strong);
   }
 }
 

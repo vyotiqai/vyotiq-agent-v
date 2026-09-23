@@ -6,11 +6,11 @@ import { Tooltip, cn } from '@renderer/lib/ui'
 
 /** Dock panel toolbar row — menus portaled; must not clip dropdowns. */
 export const DOCK_PANEL_TOOLBAR =
-  'relative z-dropdown flex min-h-8 min-w-0 shrink-0 flex-wrap items-center gap-1.5 overflow-visible border-b border-border/40 bg-bg px-2 py-0.5'
+  'relative z-dropdown flex min-h-8 min-w-0 shrink-0 flex-wrap items-center gap-1.5 overflow-visible border-b border-border/60 bg-bg px-2 py-0.5'
 
 /** In-panel secondary tab row — matches {@link DockTabBar} pill tabs. */
 export const PANEL_SUBTAB_BAR =
-  'flex min-w-0 shrink-0 items-center gap-1 border-b border-border/40 px-2 py-0.5'
+  'flex min-w-0 shrink-0 items-center gap-1 border-b border-border/60 px-2 py-0.5'
 
 export function panelSubtabClass(selected: boolean): string {
   return cn(

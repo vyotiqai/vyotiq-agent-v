@@ -315,14 +315,6 @@ export const TITLE_BAR_HEIGHT = 'h-9'
 export const TITLE_BAR_HEIGHT_PX = 36
 
 /**
- * Bottom status bar — the Agent V working indicator and the run it belongs to.
- * Deliberately shorter than {@link TITLE_BAR_HEIGHT}: it is a reading surface,
- * not a hit target, and the chat stage is already tight for vertical room.
- */
-export const STATUS_BAR_HEIGHT = 'h-6'
-export const STATUS_BAR_HEIGHT_PX = 24
-
-/**
  * Windows/Linux caption-button strip width (3 × `sm:w-11` = 132px).
  * Side-dock titlebar tabs shrink by this so their left edge lines up with the
  * dock column while controls stay a TitleBar sibling (no absolute overlay).
@@ -471,8 +463,12 @@ export const SIDEBAR_WORKSPACE_ROW_ACTIONS_RESERVE =
  * cannot learn what a heavier fill means, because it does not mean anything.
  * Pick by role, never by how a particular row happens to look.
  */
-/** A row in a scrollable list. Quiet — it sits behind dense text. */
-export const ROW_HOVER = 'hover:bg-surface/30'
+/**
+ * A row in a scrollable list. Full `bg-surface`: the redesign's panels sit on
+ * `bg-bg`, and `surface` is already only a step off it, so a fractional fill
+ * vanished on four of the ten palettes.
+ */
+export const ROW_HOVER = 'hover:bg-surface'
 /**
  * A discrete control: button, nav item, tab, icon target. Full strength,
  * because that is what `Button`/`IconButton`'s `ghost` variants already use —
@@ -500,8 +496,33 @@ export const HOVER_ON_SURFACE = 'hover:bg-surface-2'
  * One value covers all of them — "quiet grey" is a single idea, and the
  * /40-vs-/50-vs-full spread these had carried no meaning to read.
  */
-export const BORDER_DIVIDER = 'border-border/40'
-export const DIVIDER_FILL = 'bg-border/40'
+export const BORDER_DIVIDER = 'border-border/60'
+export const DIVIDER_FILL = 'bg-border'
+
+/** Outlines a thing: panel, input, card, menu. Named so the pair reads as a pair. */
+export const BORDER = 'border-border'
+
+/** The one fill for "this is the one you're on": a selected row, tab or place. */
+export const SELECTED = 'bg-surface-2 text-fg-strong'
+
+/** Section label: caps, tracked, quiet. One style everywhere — Home, Settings, the record. */
+export const SECTION_LABEL =
+  'text-caption font-semibold uppercase tracking-[var(--vy-tracking-caps)] text-tertiary'
+
+/** Numbers that line up: costs, tokens, durations, counts. */
+export const NUM = 'font-mono tnum text-caption'
+
+/** A page's title. */
+export const PAGE_TITLE = 'text-title font-semibold tracking-[var(--vy-tracking-tight)] text-fg-strong'
+
+/** The navigator column: tasks by status, places, workspace switcher. */
+export const NAVIGATOR_WIDTH_PX = 264
+
+/** The inspector panel's default width beside the record. */
+export const INSPECTOR_WIDTH_PX = 452
+
+/** The record column: one content edge, a readable measure. No label gutter. */
+export const RECORD_MAX = 'max-w-[780px]'
 
 /**
  * Hover surface for sidebar rows — chat rows and workspace headers alike.

@@ -889,9 +889,8 @@ export const ChangesPanel = memo(function ChangesPanel({
   const gitInitAction =
     workspacePath && chrome.result?.kind === 'not_repo' ? (
       <span className="flex flex-col items-center gap-1.5">
-        <Button
+        <Button size="sm"
           variant="subtle"
-          className="h-7 px-2.5 text-caption"
           disabled={gitInit.busy}
           onClick={() => void gitInit.init()}
         >
@@ -1084,7 +1083,7 @@ export const ChangesPanel = memo(function ChangesPanel({
               {branchGroups.instances.length > 0 ? (
                 <div
                   role="presentation"
-                  className="border-t border-border/40 px-2.5 pb-1 pt-1.5 text-2xs uppercase tracking-widest text-tertiary"
+                  className="border-t border-border/60 px-2.5 pb-1 pt-1.5 text-2xs uppercase tracking-widest text-tertiary"
                 >
                   Instance worktrees
                 </div>
@@ -1318,7 +1317,7 @@ export const ChangesPanel = memo(function ChangesPanel({
       </div>
 
       {findOpen ? (
-        <div className="flex shrink-0 items-center gap-1.5 border-b border-border/40 px-2 py-1">
+        <div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-2 py-1">
           <Icon name="search" size={12} className="shrink-0 text-muted" />
           <input
             ref={findInputRef}
@@ -1354,7 +1353,7 @@ export const ChangesPanel = memo(function ChangesPanel({
       {chrome.notice ? (
         <p
           className={cn(
-            'm-0 shrink-0 border-b border-border/40 px-3 py-1 text-caption',
+            'm-0 shrink-0 border-b border-border/60 px-3 py-1 text-caption',
             chrome.noticeFailed ? 'text-danger' : 'text-secondary'
           )}
           role={chrome.noticeFailed ? 'alert' : 'status'}
@@ -1364,7 +1363,7 @@ export const ChangesPanel = memo(function ChangesPanel({
       ) : null}
 
       {status?.truncated && displayScope !== 'agent' && displayScope !== 'commits' ? (
-        <p className="m-0 shrink-0 border-b border-border/40 px-3 py-1 text-caption text-muted">
+        <p className="m-0 shrink-0 border-b border-border/60 px-3 py-1 text-caption text-muted">
           Showing first {status.files.length} of {status.fileCount} changed files
         </p>
       ) : null}
@@ -1424,11 +1423,11 @@ export const ChangesPanel = memo(function ChangesPanel({
             />
           ) : (
           <ul className="m-0 min-h-0 flex-1 list-none overflow-auto rounded-md border border-border bg-surface p-0">
-            <li className="border-b border-border/40 px-3 py-1.5 text-caption text-fg">
+            <li className="border-b border-border/60 px-3 py-1.5 text-caption text-fg">
               {commits.length} {commits.length === 1 ? 'Commit' : 'Commits'}
             </li>
             {commits.map((c) => (
-              <li key={c.sha} className="border-b border-border/40 last:border-b-0">
+              <li key={c.sha} className="border-b border-border/60 last:border-b-0">
                 <button
                   type="button"
                   className="flex w-full min-w-0 flex-col gap-0.5 px-3 py-1.5 text-left text-caption hover:bg-surface/30"

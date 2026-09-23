@@ -783,7 +783,7 @@ export function ConnectMcpWizard({
               Back
             </Button>
           ) : null}
-          <Button
+          <Button variant="primary"
             pending={pending}
             disabled={step === 'finish' ? finishDisabled : pending}
             onClick={() => void goNext()}

@@ -131,11 +131,11 @@ export const ToolApprovalCard = memo(function ToolApprovalCard({
         </pre>
       ) : null}
       {localError ? (
-        <p className="border-t border-border/40 px-3 py-2 text-xs text-danger" role="alert">
+        <p className="border-t border-border/60 px-3 py-2 text-xs text-danger" role="alert">
           {localError}
         </p>
       ) : null}
-      <div className={cn(QUESTION_GATE_FOOTER, 'flex-wrap border-t border-border/40')}>
+      <div className={cn(QUESTION_GATE_FOOTER, 'flex-wrap border-t border-border/60')}>
         {CHOICES.map((choice) => {
           if (!choice.primary) {
             return (

@@ -374,7 +374,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         address bar and toolbar for manual navigation when user control is enabled.
       </p>
       {tabs.length > 0 ? (
-        <div className="flex items-center gap-0.5 overflow-x-auto border-b border-border/40 bg-bg px-1.5 pt-1.5">
+        <div className="flex items-center gap-0.5 overflow-x-auto border-b border-border/60 bg-bg px-1.5 pt-1.5">
           {tabs.map((tab) => (
             <div
               key={tab.id}
@@ -479,7 +479,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
             <div
               className={cn(
                 'flex items-center rounded-md border bg-surface px-2.5 py-1 text-xs transition-colors',
-                urlFocused ? 'border-accent/60' : 'border-border/40'
+                urlFocused ? 'border-accent/60' : 'border-border/60'
               )}
             >
               {!urlFocused && hasPage && isSecureUrl ? (
@@ -619,7 +619,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
               >
                 Take Screenshot
               </MenuButton>
-              <div className="my-1 border-t border-border/40" />
+              <div className="my-1 border-t border-border/60" />
               <MenuButton onClick={() => handleMenuAction('reload')} disabled={!hasPage}>
                 Reload
               </MenuButton>
@@ -632,7 +632,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
               >
                 {state.pip ? 'Return browser to panel' : 'Pop out to floating window'}
               </MenuButton>
-              <div className="my-1 border-t border-border/40" />
+              <div className="my-1 border-t border-border/60" />
               <MenuButton onClick={() => handleMenuAction('recents-bar')}>
                 <span className="flex-1">Show Recents Bar</span>
                 <span
@@ -650,7 +650,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
                   />
                 </span>
               </MenuButton>
-              <div className="my-1 border-t border-border/40" />
+              <div className="my-1 border-t border-border/60" />
               <MenuButton onClick={() => handleMenuAction('clear-history')}>
                 Clear Browsing History
               </MenuButton>
@@ -658,7 +658,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
                 Clear Cookies
               </MenuButton>
               <MenuButton onClick={() => handleMenuAction('clear-cache')}>Clear Cache</MenuButton>
-              <div className="my-1 border-t border-border/40" />
+              <div className="my-1 border-t border-border/60" />
               <MenuButton onClick={() => handleMenuAction('close')}>Close browser</MenuButton>
             </div>
           ) : null}
@@ -667,7 +667,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
 
       {showAgentBanner ? (
         <div
-          className="flex items-center justify-between gap-2 border-b border-border/40 bg-accent/10 px-2.5 py-1.5 text-caption"
+          className="flex items-center justify-between gap-2 border-b border-border/60 bg-accent/10 px-2.5 py-1.5 text-caption"
           role="status"
         >
           <span className="text-fg/90">
@@ -694,7 +694,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
       ) : null}
 
       {recentsBar ? (
-        <div className="flex items-center gap-1 border-b border-border/40 px-2 py-1 text-caption text-muted">
+        <div className="flex items-center gap-1 border-b border-border/60 px-2 py-1 text-caption text-muted">
           <span className="px-1">Recents</span>
           {recents.slice(0, 5).map((item) => (
             <button

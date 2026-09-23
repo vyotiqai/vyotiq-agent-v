@@ -90,7 +90,7 @@ export function TeammateRail({
 
   return (
     <nav
-      className={cn('flex shrink-0 flex-col border-r border-border/40', TEAMMATES_RAIL_WIDTH)}
+      className={cn('flex shrink-0 flex-col border-r border-border/60', TEAMMATES_RAIL_WIDTH)}
       aria-label="Teammates"
       data-teammates-rail
     >

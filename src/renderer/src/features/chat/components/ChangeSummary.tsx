@@ -168,7 +168,7 @@ export const ChangeSummary = memo(function ChangeSummary({
   const panelSurface =
     'w-full overflow-hidden rounded-md border border-border bg-surface'
   const panelHeader =
-    'flex shrink-0 items-center border-b border-border/40 px-3 py-1.5 text-caption text-fg'
+    'flex shrink-0 items-center border-b border-border/60 px-3 py-1.5 text-caption text-fg'
 
   if (compact) {
     const visible = showAll ? visibleFiles : visibleFiles.slice(0, COMPACT_PREVIEW_COUNT)
@@ -192,7 +192,7 @@ export const ChangeSummary = memo(function ChangeSummary({
         </div>
         <ul className="m-0 list-none p-0">
           {visible.map((file) => (
-            <li key={file.path} className="min-w-0 [&+&]:border-t [&+&]:border-border/40">
+            <li key={file.path} className="min-w-0 [&+&]:border-t [&+&]:border-border/60">
               <div className="flex min-w-0 items-center gap-2 px-3 py-1.5 text-xs">
                 <FileBadge path={file.path} />
                 {onOpenChanges ? (
@@ -219,7 +219,7 @@ export const ChangeSummary = memo(function ChangeSummary({
         {canToggleMore ? (
           <button
             type="button"
-            className="flex w-full items-center border-t border-border/40 px-3 py-1.5 text-left text-xs text-tertiary vy-transition hover:bg-surface hover:text-fg"
+            className="flex w-full items-center border-t border-border/60 px-3 py-1.5 text-left text-xs text-tertiary vy-transition hover:bg-surface hover:text-fg"
             onClick={() => setShowAll((prev) => !prev)}
             aria-expanded={showAll}
           >
@@ -258,9 +258,9 @@ export const ChangeSummary = memo(function ChangeSummary({
                 </span>
               ) : null}
               {onKeepAll ? (
-                <Button
+                <Button size="xs"
                   variant="subtle"
-                  className="ml-2 h-6 px-2 text-xs"
+                  className="ml-2"
                   disabled={resolveDisabled}
                   title={resolveBlockedReason ?? 'Keep every listed file as-is'}
                   onClick={() => {
@@ -271,9 +271,8 @@ export const ChangeSummary = memo(function ChangeSummary({
                 </Button>
               ) : null}
               {onDiscardAll ? (
-                <Button
+                <Button size="xs"
                   variant="danger"
-                  className="h-6 px-2 text-xs"
                   disabled={resolveDisabled}
                   title={
                     resolveBlockedReason ??
@@ -301,11 +300,11 @@ export const ChangeSummary = memo(function ChangeSummary({
           const showResolve = canResolve && isResolvablePath(file.path) && !conflicted
 
           return (
-            <li key={file.path} className="min-w-0 [&+&]:border-t [&+&]:border-border/40">
+            <li key={file.path} className="min-w-0 [&+&]:border-t [&+&]:border-border/60">
               <div
                 className={cn(
                   'sticky top-0 z-sticky flex min-w-0 items-center gap-2 bg-surface px-3 py-1.5 text-xs',
-                  expanded && 'border-b border-border/40'
+                  expanded && 'border-b border-border/60'
                 )}
               >
                 {canExpand ? (
@@ -343,9 +342,8 @@ export const ChangeSummary = memo(function ChangeSummary({
                   ) : showResolve ? (
                     <>
                       {onKeepFile ? (
-                        <Button
+                        <Button size="xs"
                           variant="subtle"
-                          className="h-5 px-1.5 text-2xs"
                           disabled={resolveDisabled}
                           title={resolveBlockedReason ?? 'Keep this file as the agent wrote it'}
                           onClick={() => {
@@ -356,9 +354,8 @@ export const ChangeSummary = memo(function ChangeSummary({
                         </Button>
                       ) : null}
                       {onDiscardFile ? (
-                        <Button
-                          variant="subtle"
-                          className="h-5 px-1.5 text-2xs text-danger"
+                        <Button size="xs"
+                          variant="danger"
                           disabled={resolveDisabled}
                           title={
                             resolveBlockedReason ??

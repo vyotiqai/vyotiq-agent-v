@@ -55,7 +55,7 @@ export function WorkspaceOverrideList({
     )
   }
   return (
-    <ul className="m-0 flex list-none flex-col divide-y divide-border/40 p-0" aria-label="Open workspaces">
+    <ul className="m-0 flex list-none flex-col divide-y divide-border/60 p-0" aria-label="Open workspaces">
       {paths.map((path) => (
         <WorkspaceOverrideItem
           key={path}

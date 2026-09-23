@@ -48,7 +48,7 @@ export function FormCard({
     <div
       {...{ [dataAttribute]: true }}
       className={cn(
-        'divide-y divide-border/40 overflow-hidden rounded-xl bg-surface',
+        'divide-y divide-border/60 overflow-hidden rounded-xl bg-surface',
         className
       )}
     >

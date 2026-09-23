@@ -343,7 +343,7 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
           <div
             className={cn(
               QUESTION_GATE_FOOTER,
-              'flex flex-wrap items-center gap-2 border-t border-border/40'
+              'flex flex-wrap items-center gap-2 border-t border-border/60'
             )}
           >
             {showSubmit ? (

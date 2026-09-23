@@ -14,8 +14,6 @@ import { DOCK_PANELS, PANEL_SHORTCUT } from '@renderer/lib/utils/dockPanels'
 import { useRunTodos } from '../hooks/useRunTodos'
 import { TasksRailButton } from './TasksFloatingList'
 
-const RAIL_ICON_ACTIVE =
-  'bg-surface text-fg ring-1 ring-inset ring-border/50 rounded-lg'
 
 /** Counts above this read as "a lot" — the badge has room for two glyphs. */
 const RAIL_COUNT_MAX = 9
@@ -100,12 +98,12 @@ function RailPanelButton({
         icon={icon}
         label={`${label}${suffix}`}
         title={`${title}${suffix}`}
-        variant="ghost"
+        tone="muted"
         size="sm"
         tabIndex={tabIndex}
         aria-pressed={open}
         aria-keyshortcuts={keys}
-        className={cn('text-muted hover:text-fg', open && RAIL_ICON_ACTIVE)}
+        active={open}
         onClick={() => onSelect(panel)}
       />
       {marker}
@@ -174,12 +172,12 @@ function PlanRailRow({
         icon={docIcon}
         label={baseLabel}
         title={title}
-        variant="ghost"
+        tone="muted"
         size="sm"
         tabIndex={tabIndex}
         aria-pressed={open}
         aria-keyshortcuts={keys}
-        className={cn('text-muted hover:text-fg', open && RAIL_ICON_ACTIVE)}
+        active={open}
         onClick={() => onSelectPanel('plan')}
       />
     )
@@ -331,10 +329,10 @@ export function ChatSideRail({
           <IconButton
             icon="maximize"
             label="Expand panel"
-            variant="ghost"
+            tone="muted"
             size="sm"
             tabIndex={DOCK_PANELS.length === tabStop ? 0 : -1}
-            className="mt-0.5 text-muted hover:text-fg"
+            className="mt-0.5"
             onClick={onExpandPanels}
           />
         ) : null}

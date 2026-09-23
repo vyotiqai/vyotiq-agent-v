@@ -82,7 +82,7 @@ export function DockTabBar({
         'flex min-w-0 shrink-0 flex-row items-center gap-0.5 bg-transparent',
         inTitleBar
           ? 'h-full w-full min-w-0 border-0 px-1 py-0'
-          : 'border-b border-border/40 px-1 py-0.5',
+          : 'border-b border-border/60 px-1 py-0.5',
         className
       )}
       data-dock-tab-bar
@@ -166,7 +166,7 @@ export function DockTabBar({
 
       {terminalSessionBarHostRef ? (
         <>
-          <span className="mx-0.5 h-4 w-px shrink-0 bg-border/40" aria-hidden />
+          <span className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />
           <div
             ref={terminalSessionBarHostRef}
             className={cn(
@@ -201,7 +201,7 @@ export function DockTabBar({
         )}
       >
         {showActionsDivider ? (
-          <span className="mx-0.5 h-4 w-px shrink-0 bg-border/40" aria-hidden />
+          <span className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />
         ) : null}
         {quickLaunch}
         {onToggleExpanded ? (

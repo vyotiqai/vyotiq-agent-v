@@ -84,7 +84,7 @@ export function TaskInbox({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-task-inbox>
-      <header className="shrink-0 border-b border-border/40 px-5 pb-3 pt-4">
+      <header className="shrink-0 border-b border-border/60 px-5 pb-3 pt-4">
         <div className={TEAMMATES_DETAIL_COLUMN}>
           <h2 className="m-0 text-heading font-medium tracking-[var(--vy-tracking)] text-fg-strong">
             All tasks
@@ -139,7 +139,7 @@ export function TaskInbox({
                     Active
                     <span className="ml-1.5 tabular-nums text-tertiary">{active.length}</span>
                   </h3>
-                  <div className="flex flex-col divide-y divide-border/40 rounded-xl bg-surface">
+                  <div className="flex flex-col divide-y divide-border/60 rounded-xl bg-surface">
                     {active.map(row)}
                   </div>
                 </section>
@@ -151,7 +151,7 @@ export function TaskInbox({
                     Finished
                     <span className="ml-1.5 tabular-nums text-tertiary">{recent.length}</span>
                   </h3>
-                  <div className="flex flex-col divide-y divide-border/40 rounded-xl bg-surface">
+                  <div className="flex flex-col divide-y divide-border/60 rounded-xl bg-surface">
                     {recent.map(row)}
                   </div>
                 </section>

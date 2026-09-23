@@ -160,7 +160,7 @@ export function DiagnosticsSection({ form }: { form: SettingsFormState }) {
           wide={crashes.length > 0}
         >
           {crashes.length > 0 ? (
-            <ul className="m-0 flex max-h-48 list-none flex-col divide-y divide-border/40 overflow-auto p-0">
+            <ul className="m-0 flex max-h-48 list-none flex-col divide-y divide-border/60 overflow-auto p-0">
               {crashes.map((snippet, i) => (
                 <li key={`${snippet.at}-${snippet.kind}-${i}`} className="flex flex-col py-1.5 text-caption">
                   <span className="text-fg">

@@ -82,7 +82,7 @@ export function TeammateTasks({
             Active
             <span className="ml-1.5 tabular-nums text-tertiary">{active.length}</span>
           </h3>
-          <div className="flex flex-col divide-y divide-border/40 rounded-xl bg-surface">
+          <div className="flex flex-col divide-y divide-border/60 rounded-xl bg-surface">
             {active.map((task) => (
               <TaskRow
                 key={task.id}
@@ -104,7 +104,7 @@ export function TeammateTasks({
             Finished
             <span className="ml-1.5 tabular-nums text-tertiary">{history.length}</span>
           </h3>
-          <div className="flex flex-col divide-y divide-border/40 rounded-xl bg-surface">
+          <div className="flex flex-col divide-y divide-border/60 rounded-xl bg-surface">
             {shown.map((task) => (
               <TaskRow
                 key={task.id}

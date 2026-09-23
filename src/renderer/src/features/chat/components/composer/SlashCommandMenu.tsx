@@ -21,7 +21,7 @@ const SLASH_MAX_PX = 380
 const stickyCategoryHeader = cn(composerDropdownSectionHeader, 'sticky top-0 z-sticky bg-card')
 
 const stickyServerHeader =
-  'sticky top-6 z-sticky m-0 border-b border-border/40 bg-card px-2.5 py-1 text-caption font-medium text-secondary'
+  'sticky top-6 z-sticky m-0 border-b border-border/60 bg-card px-2.5 py-1 text-caption font-medium text-secondary'
 
 export function SlashCommandMenu({
   open,

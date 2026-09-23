@@ -12,7 +12,8 @@ resolve it by restyling.
 | What | Where |
 | --- | --- |
 | Tokens, `@theme` mapping, `@utility` helpers | `src/renderer/src/styles.css` |
-| Shared primitives (Button, IconButton, FormRow, PageHeader, NavItem, EmptyState, Badge, Menu, Tooltip…) | `src/renderer/src/lib/ui/` |
+| Shared primitives (Button, IconButton, Badge, Tabs, Segmented, StatusGlyph, Keys, ProgressBar/Ring, Menu, Tooltip, FormRow…) | `src/renderer/src/lib/ui/` |
+| The redesign's reference screens (not shipped) | `src/redesign/` in the main checkout, `pnpm redesign` |
 | Icon allowlist | `src/renderer/src/lib/icons/index.tsx` |
 | Feature surfaces | `src/renderer/src/features/` |
 
@@ -27,12 +28,15 @@ are mapped to Tailwind names in the `@theme` block, so `bg-surface`, `text-muted
    `lib/utils/layout.ts`; reaching for a ninth is how they got that way.
    Hover: `CONTROL_HOVER` (`hover:bg-surface`) for a button, nav item, tab or
    icon target; `HOVER_ON_SURFACE` (`hover:bg-surface-2`) for the same thing
-   where the base is already `bg-surface`; `ROW_HOVER` (`hover:bg-surface/30`)
-   for a row in a scrollable list. Borders: full `border-border` **outlines a
-   thing**, `BORDER_DIVIDER` (`border-border/40`) **separates two things inside
-   it**, and `DIVIDER_FILL` (`bg-border/40`) is that same grey drawn as a
-   background — a 1px rule, a progress track, a zero-value bar. If a surface
-   seems to need an in-between weight, the problem is its neighbours.
+   where the base is already `bg-surface`; `ROW_HOVER` (`hover:bg-surface`)
+   for a row in a scrollable list. `SELECTED` (`bg-surface-2 text-fg-strong`)
+   is the one fill for "the one you're on". Borders: full `border-border`
+   **outlines a thing**, `BORDER_DIVIDER` (`border-border/60`) **separates two
+   things inside it**, and `DIVIDER_FILL` (`bg-border`) is that same grey drawn
+   as a background — a 1px rule, a progress track, a zero-value bar. Tints are
+   the named `-soft` tokens (`bg-accent-soft`, `bg-danger-soft`…), never
+   `bg-accent/15`. If a surface seems to need an in-between weight, the
+   problem is its neighbours.
 
 2. **Never hardcode a color.** Every surface renders under five skins
    (`default`, `proof`, `bench`, `native`, `gild`) × light/dark. A literal hex
@@ -89,9 +93,12 @@ you want noticed — mute everything around it. Default and unchanged values go 
 eye on its own.
 
 **Dissolve cards into the layout.** Prefer structural rows and columns over
-stacked cards in containers; borders on borders read as clutter. Where chrome is
-genuinely needed, use the `vy-chrome` utility rather than hand-rolling a border
-and radius.
+stacked cards in containers; borders on borders read as clutter. Panes are flush
+in every skin: `vy-panel` is the pane background plus one hairline on its left,
+with no gap, radius or shadow. Menus and popovers use `vy-menu`
+(`MENU_SURFACE`); rows inside them use `MENU_ROW` and its one-of text and fill
+classes. Every pane starts with a 40px row (`h-10 border-b`): text-first rows pad
+`pl-4 pr-2`, control-first rows `px-2`, and buttons in it are `size="xs"`.
 
 ### Never
 
@@ -100,8 +107,13 @@ and radius.
 - Drop the focus ring. Interactive elements use `focus-visible:vy-focus-ring`.
 - Re-open the transcript redesign. Borderless rows, a glyph column, and tighter
   gaps were tried and reverted — they made the timeline harder to read, not
-  easier. "Dissolve cards into the layout" does not apply there; the transcript
-  needs its row boundaries. Treat it as settled unless the user reopens it.
+  easier. The user's Work record redesign (2026-09-23, `src/redesign/`)
+  replaces the chat transcript with a record of steps, but keeps terminal and
+  diff output in bordered cards for the same reason. "Dissolve cards into the
+  layout" does not apply to those.
+- Use a type size off the scale: `2xs` 10 (keycaps only), `caption` 11, `xs`
+  12, `sm` 13 (body), `md` 14, `heading` 15, `title` 18, `display` 24.
+  `3xs` and `lg` are legacy aliases until their last caller is ported.
 - Style the top 36px band casually. Title-bar z-order, the drag region, and the
   caption strip have collided three times; verify changes there with the
   Electron e2e, not by reading classes.

@@ -259,7 +259,7 @@ export function TasksRailButton({
               </li>
             ))}
           </ul>
-          <div className="mt-2 flex items-center justify-end gap-2 border-t border-border/40 pt-2">
+          <div className="mt-2 flex items-center justify-end gap-2 border-t border-border/60 pt-2">
             <button
               type="button"
               className="shrink-0 rounded-md px-1.5 py-0.5 text-2xs font-medium text-fg vy-transition hover:bg-surface"

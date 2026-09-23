@@ -261,7 +261,7 @@ export function HomePage({
             <p className="mx-auto mt-2 max-w-md text-xs text-muted">
               Pick a project folder. Agent V works inside that folder when you ask.
             </p>
-            <Button className="mt-5" onClick={onAddWorkspace}>
+            <Button variant="primary" className="mt-5" onClick={onAddWorkspace}>
               Add workspace
             </Button>
           </section>
@@ -499,7 +499,7 @@ export function HomePage({
                 title="Repositories"
                 count={openWorkspaces.length}
                 trailing={
-                  <Button variant="ghost" className="min-h-7 px-2 text-2xs" onClick={onAddWorkspace}>
+                  <Button size="xs" variant="ghost"  onClick={onAddWorkspace}>
                     <Icon name="plus" size={11} aria-hidden="true" /> Add workspace
                   </Button>
                 }

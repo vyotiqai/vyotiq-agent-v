@@ -780,9 +780,8 @@ export function PrPanel({
   )
 
   const ghInstallActions = (
-    <Button
+    <Button size="sm"
       variant="subtle"
-      className="h-7 px-2.5 text-caption"
       disabled={ghInstallBusy}
       onClick={() => void installGhCli()}
     >
@@ -896,7 +895,7 @@ export function PrPanel({
       aria-label="Pull request panel"
     >
       {pr ? (
-        <div className="flex shrink-0 flex-col gap-1 border-b border-border/40 px-2.5 py-2">
+        <div className="flex shrink-0 flex-col gap-1 border-b border-border/60 px-2.5 py-2">
           <div className="flex h-7 min-w-0 items-center gap-2">
             <span className={cn('shrink-0 rounded px-1.5 py-0.5 text-2xs font-medium leading-none', prStateTone(pr.state))}>
               {formatPrState(pr.state)}
@@ -976,7 +975,7 @@ export function PrPanel({
                         label="Word Wrap"
                       />
                     </label>
-                    <div className="my-1 border-t border-border/40" />
+                    <div className="my-1 border-t border-border/60" />
                     <button
                       type="button"
                       className="flex w-full px-2.5 py-1.5 text-left text-caption hover:bg-surface"
@@ -1042,7 +1041,7 @@ export function PrPanel({
                       <span>Edit Title</span>
                       <span className="text-muted">Shift+Alt+T</span>
                     </button>
-                    <div className="my-1 border-t border-border/40" />
+                    <div className="my-1 border-t border-border/60" />
                     {auth?.hasAppToken ? (
                       <button
                         type="button"
@@ -1154,10 +1153,9 @@ export function PrPanel({
                   }
                 }}
               />
-              <Button
+              <Button size="sm"
                 type="submit"
                 variant="subtle"
-                className="h-7 px-2 text-caption"
               >
                 Save
               </Button>
@@ -1213,7 +1211,7 @@ export function PrPanel({
       {notice ? (
         <p
           className={cn(
-            'm-0 shrink-0 border-b border-border/40 px-3 py-1 text-caption',
+            'm-0 shrink-0 border-b border-border/60 px-3 py-1 text-caption',
             noticeFailed ? 'text-danger' : 'text-success'
           )}
           role={noticeFailed ? 'alert' : 'status'}
@@ -1223,7 +1221,7 @@ export function PrPanel({
       ) : null}
 
       {findOpen && pr && tab === 'changes' ? (
-        <div className="flex shrink-0 items-center gap-1.5 border-b border-border/40 px-2 py-1">
+        <div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-2 py-1">
           <input
             ref={findInputRef}
             type="search"
@@ -1261,16 +1259,16 @@ export function PrPanel({
         ) : tab === 'issues' ? (
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
             {!pr ? (
-              <Button
+              <Button size="sm"
                 variant="subtle"
-                className="h-7 w-fit px-2.5 text-caption"
+                className="w-fit"
                 onClick={() => setTab('changes')}
               >
                 Back
               </Button>
             ) : null}
             <form
-              className="flex flex-col gap-2 border-b border-border/40 pb-3"
+              className="flex flex-col gap-2 border-b border-border/60 pb-3"
               onSubmit={(event) => {
                 event.preventDefault()
                 const title = issueTitle.trim()
@@ -1370,18 +1368,16 @@ export function PrPanel({
               actions={
                 <span className="flex flex-wrap items-center gap-1.5">
                   {canCreatePr ? (
-                    <Button
+                    <Button size="sm"
                       variant="subtle"
-                      className="h-7 px-2.5 text-caption"
                       disabled={createBusy}
                       onClick={() => void createPr()}
                     >
                       {createBusy ? 'Creating…' : 'Create draft PR'}
                     </Button>
                   ) : null}
-                  <Button
+                  <Button size="sm"
                     variant="subtle"
-                    className="h-7 px-2.5 text-caption"
                     onClick={() => setTab('issues')}
                   >
                     Issues
@@ -1463,7 +1459,7 @@ export function PrPanel({
                 )}
                 {workspacePath && window.vyotiq?.prReview ? (
                   <form
-                    className="flex flex-col gap-2 border-t border-border/40 pt-3"
+                    className="flex flex-col gap-2 border-t border-border/60 pt-3"
                     onSubmit={(event) => {
                       event.preventDefault()
                       setReviewBusy(true)

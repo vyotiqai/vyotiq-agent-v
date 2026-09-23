@@ -159,10 +159,9 @@ export function SessionLine({
 
       <div className="flex flex-wrap items-center justify-end gap-1">
         {(actions ?? []).map((action) => (
-          <Button
+          <Button size="xs"
             key={action.label}
             variant={action.variant ?? 'subtle'}
-            className="min-h-7 px-2 text-2xs"
             pending={action.pending}
             // Several rows can carry the same action, so the accessible name
             // has to name the session it acts on.

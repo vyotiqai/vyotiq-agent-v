@@ -280,14 +280,14 @@ function FileRow({
   return (
     <li
       className={cn(
-        'min-w-0 border-b border-border/40 last:border-b-0',
+        'min-w-0 border-b border-border/60 last:border-b-0',
         selected && 'bg-accent/10'
       )}
     >
       <div
         className={cn(
           'sticky top-0 z-sticky flex w-full min-w-0 items-center gap-1.5 border-b border-transparent bg-surface px-3 py-1.5 text-xs',
-          expanded && 'border-border/40',
+          expanded && 'border-border/60',
           selected ? 'bg-accent/10' : 'hover:bg-surface-2'
         )}
       >
@@ -454,7 +454,7 @@ export function ChangedFilesBrowser({
         className
       )}
     >
-      <div className="shrink-0 border-b border-border/40 px-3 py-1.5 text-caption text-fg">
+      <div className="shrink-0 border-b border-border/60 px-3 py-1.5 text-caption text-fg">
         {header ?? (
           <>
             {files.length} {files.length === 1 ? 'File Changed' : 'Files Changed'}

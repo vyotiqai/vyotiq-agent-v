@@ -260,7 +260,7 @@ export function Sidebar({
 
       <div
         className={cn(
-          'app-region-no-drag flex shrink-0 min-w-0 flex-col border-t border-border/40',
+          'app-region-no-drag flex shrink-0 min-w-0 flex-col border-t border-border/60',
           SIDEBAR_PAD_X,
           'gap-0.5 py-2',
           isCollapsed ? 'items-center' : ''

@@ -155,7 +155,7 @@ export function TeammatesView({
     >
       <PageHeader
         bordered={false}
-        className={cn('shrink-0 border-b border-border/40 bg-bg py-3', CHAT_GUTTER)}
+        className={cn('shrink-0 border-b border-border/60 bg-bg py-3', CHAT_GUTTER)}
         title="Teammates"
         description="Persistent agents with their own memory, model and queue."
         trailing={
@@ -277,7 +277,7 @@ export function TeammatesView({
                   : undefined
               }
               action={
-                ready ? <Button onClick={openCreate}>Create your first teammate</Button> : undefined
+                ready ? <Button variant="primary" onClick={openCreate}>Create your first teammate</Button> : undefined
               }
             />
           </div>
@@ -317,7 +317,7 @@ export function TeammatesView({
             <Button variant="subtle" onClick={() => setCreating(false)}>
               Cancel
             </Button>
-            <Button onClick={() => void create()} disabled={!newName.trim() || saving}>
+            <Button variant="primary" onClick={() => void create()} disabled={!newName.trim() || saving}>
               Create teammate
             </Button>
           </div>

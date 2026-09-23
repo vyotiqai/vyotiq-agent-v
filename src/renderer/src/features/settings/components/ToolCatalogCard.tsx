@@ -65,7 +65,7 @@ function ToolGroup({
         </span>
       </summary>
       {note ? <p className="m-0 pb-1 pl-5 text-2xs text-tertiary">{note}</p> : null}
-      <ul className="m-0 list-none divide-y divide-border/40 p-0 pl-5">
+      <ul className="m-0 list-none divide-y divide-border/60 p-0 pl-5">
         {entries.map((entry) => (
           <ToolRow key={entry.name} entry={entry} />
         ))}

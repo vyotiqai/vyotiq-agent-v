@@ -111,7 +111,7 @@ export function MarketplaceMcpPane({
           Servers you add here sync immediately — no restart.
         </p>
         <div className="flex flex-wrap gap-1.5">
-          <Button disabled={formLocked} onClick={() => setAdding(true)}>
+          <Button variant="primary" disabled={formLocked} onClick={() => setAdding(true)}>
             <Icon name="plus" size={14} />
             New
           </Button>

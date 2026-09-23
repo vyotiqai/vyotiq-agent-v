@@ -201,7 +201,7 @@ export function PanelResizeHandle({
           // handle for the whole drag, the gutter never changed colour at all.
           dragging
             ? 'bg-accent'
-            : 'bg-border/40 group-hover:bg-border-strong group-focus-visible:bg-accent'
+            : 'bg-border group-hover:bg-border-strong group-focus-visible:bg-accent'
         )}
       />
     </div>

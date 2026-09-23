@@ -396,8 +396,8 @@ export const ChatRow = memo(function ChatRow({
               icon="more"
               label={`More actions for ${fullLabel}`}
               size="xs"
-              variant="bare"
-              className="pointer-events-auto text-muted hover:text-fg"
+              tone="muted"
+              className="pointer-events-auto"
               aria-haspopup="menu"
               aria-expanded={menuAnchor != null}
               onMouseDown={(e) => {
@@ -418,8 +418,8 @@ export const ChatRow = memo(function ChatRow({
               icon="trash"
               label={`Delete ${fullLabel}`}
               size="xs"
-              variant="bare"
-              className="pointer-events-auto text-muted hover:text-danger"
+              tone="muted"
+              className="pointer-events-auto"
               onMouseDown={(e) => {
                 e.preventDefault()
                 e.stopPropagation()

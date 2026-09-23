@@ -166,7 +166,7 @@ export function AgentProfilePicker({
             <Button variant="subtle" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={() => void submitCreate()} disabled={!name.trim() || saving}>
+            <Button variant="primary" onClick={() => void submitCreate()} disabled={!name.trim() || saving}>
               Create teammate
             </Button>
           </div>
