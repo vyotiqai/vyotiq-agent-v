@@ -1247,7 +1247,7 @@ const runGoal = useRunGoal({
     multiPane && multiPane.panes.length >= 1 ? (
       <>
         <h1 ref={headingRef} tabIndex={-1} className="sr-only">
-          Agent V chat
+          Tasks
         </h1>
         <ChatPaneHost
           panes={multiPane.panes}
@@ -1266,7 +1266,7 @@ const runGoal = useRunGoal({
     ) : (
     <>
       <h1 ref={headingRef} tabIndex={-1} className="sr-only">
-        Agent V chat
+        Tasks
       </h1>
 
       {viewingInstanceRunId && workspacePath ? (

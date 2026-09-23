@@ -56,13 +56,14 @@ test('Files pulses with the file the run is writing, and stops when it lands', a
   const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) await expand.click()
 
-  const composer = window.getByRole('combobox', { name: 'Message' })
+  const composer = window.getByRole('combobox', { name: 'Instruction' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await expect(window.locator('[data-chat-side-rail]')).toBeVisible()
   await expect(window.locator('[data-rail-row="files"][data-rail-active]')).toHaveCount(0)
 
   await composer.fill('Stream a live edit diff')
-  await window.getByRole('button', { name: /^send$/i }).click()
+  // The instruction line sends on Enter — it has no Send button.
+  await window.getByRole('combobox', { name: 'Instruction' }).press('Enter')
 
   // Mid-write: the rail says which file, without the Files panel being open.
   await expect(window.locator('[data-rail-row="files"][data-rail-active]')).toBeVisible({

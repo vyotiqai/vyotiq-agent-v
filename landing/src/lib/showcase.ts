@@ -715,6 +715,10 @@ export const APPROVED_TOOLS: string[] = [
   'create_plan',
   'create_goal',
   'update_goal',
+  // The agent records its own verdict on each done-when check, with the
+  // evidence it saw. The site may say the run is judged against the checks;
+  // it may not imply the app verifies them independently.
+  'check_done_when',
   'ask_question',
   'switch_mode',
   'memory_list',

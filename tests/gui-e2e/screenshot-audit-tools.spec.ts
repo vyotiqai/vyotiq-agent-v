@@ -51,10 +51,11 @@ test('streams T1 tool cards: unknown tool not titled placeholder; ask humanized'
     await expand.click()
   }
 
-  const composer = window.getByRole('combobox', { name: 'Message' })
+  const composer = window.getByRole('combobox', { name: 'Instruction' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('Replay screenshot audit tools')
-  await window.getByRole('button', { name: /^send$/i }).click()
+  // The instruction line sends on Enter — it has no Send button.
+  await window.getByRole('combobox', { name: 'Instruction' }).press('Enter')
 
   await expect(window.getByText('Audit tools fixture done.')).toBeVisible({ timeout: 20_000 })
 

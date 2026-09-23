@@ -1,12 +1,11 @@
 import { SHORTCUT_BINDINGS, type ShortcutId } from './bindings'
 
 /**
- * Main composer contenteditable — same selector as focus / aria.
- * Enabled renders role=combobox (ARIA 1.2 combobox pattern); disabled
- * degrades to role=textbox. Match both so shortcuts survive the enabled state.
+ * The composer's editable field, in every form it takes — the New task brief,
+ * the instruction line, an inline edit. Matched by attribute rather than by
+ * accessible name, which differs between them ("Message", "Instruction").
  */
-export const COMPOSER_MESSAGE_SELECTOR =
-  '[role="textbox"][aria-label="Message"], [role="combobox"][aria-label="Message"]'
+export const COMPOSER_MESSAGE_SELECTOR = '[data-composer-input]'
 
 /** Browser dock URL field. */
 export const BROWSER_URL_SELECTOR = '[data-browser-url]'
@@ -78,11 +77,7 @@ export function isMainComposerTarget(target: EventTarget | null): boolean {
   if (typeof el.closest === 'function') {
     return Boolean(el.closest(COMPOSER_MESSAGE_SELECTOR))
   }
-  const role = el.getAttribute?.('role')
-  return (
-    el.getAttribute?.('aria-label') === 'Message' &&
-    (role === 'textbox' || role === 'combobox')
-  )
+  return Boolean(el.hasAttribute?.('data-composer-input'))
 }
 
 /**

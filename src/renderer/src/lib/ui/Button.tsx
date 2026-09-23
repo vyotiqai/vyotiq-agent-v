@@ -1,4 +1,4 @@
-import { type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { type ButtonHTMLAttributes, type ReactNode, type Ref } from 'react'
 import { Icon, type IconName } from '../icons'
 import { cn } from './cn'
 import { Keys } from './Kbd'
@@ -53,8 +53,11 @@ export function Button({
   type = 'button',
   pending = false,
   disabled,
+  ref,
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
+  /** React 19 passes refs as a plain prop. */
+  ref?: Ref<HTMLButtonElement>
   variant?: ButtonVariant
   size?: ButtonSize
   icon?: IconName
@@ -71,6 +74,7 @@ export function Button({
 
   const button = (
     <button
+      ref={ref}
       className={cn(
         base,
         size ? cn('gap-1.5', buttonSizes[size]) : legacyGeometry,

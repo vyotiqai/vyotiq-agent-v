@@ -194,7 +194,7 @@ describe('AppShell', () => {
   it('opens search and commands with Ctrl/Cmd+K, even from the instruction line', async () => {
     render(
       <AppShell {...baseProps}>
-        <div role="textbox" aria-label="Message" contentEditable tabIndex={0} />
+        <div role="textbox" aria-label="Message" data-composer-input contentEditable tabIndex={0} />
       </AppShell>
     )
     const composer = screen.getByRole('textbox', { name: /^message$/i })
@@ -258,6 +258,7 @@ describe('AppShell', () => {
         <div
           role="textbox"
           aria-label="Message"
+          data-composer-input
           contentEditable
           tabIndex={0}
         />
@@ -272,7 +273,7 @@ describe('AppShell', () => {
     render(
       <AppShell {...baseProps}>
         <div>
-          <div role="textbox" aria-label="Message" contentEditable tabIndex={0} />
+          <div role="textbox" aria-label="Message" data-composer-input contentEditable tabIndex={0} />
           <input data-browser-url placeholder="Search or enter URL" />
         </div>
       </AppShell>
@@ -285,7 +286,7 @@ describe('AppShell', () => {
     render(
       <AppShell {...baseProps}>
         <div>
-          <div role="textbox" aria-label="Message" contentEditable tabIndex={0} />
+          <div role="textbox" aria-label="Message" data-composer-input contentEditable tabIndex={0} />
           <div inert>
             <input data-browser-url placeholder="Search or enter URL" />
           </div>
@@ -303,6 +304,7 @@ describe('AppShell', () => {
         <div
           role="textbox"
           aria-label="Message"
+          data-composer-input
           contentEditable
           tabIndex={0}
         />
@@ -449,7 +451,7 @@ describe('AppShell', () => {
     const onOpenSettings = vi.fn()
     render(
       <AppShell {...baseProps} onNewChat={onNewChat} onOpenSettings={onOpenSettings}>
-        <div role="textbox" aria-label="Message" contentEditable tabIndex={0} />
+        <div role="textbox" aria-label="Message" data-composer-input contentEditable tabIndex={0} />
       </AppShell>
     )
     const composer = screen.getByRole('textbox', { name: /^message$/i })
@@ -464,7 +466,7 @@ describe('AppShell', () => {
     const onCloseChat = vi.fn()
     render(
       <AppShell {...baseProps} onCloseChat={onCloseChat}>
-        <div role="textbox" aria-label="Message" contentEditable tabIndex={0} />
+        <div role="textbox" aria-label="Message" data-composer-input contentEditable tabIndex={0} />
       </AppShell>
     )
     fireEvent.keyDown(window, { key: 'w', ctrlKey: true })

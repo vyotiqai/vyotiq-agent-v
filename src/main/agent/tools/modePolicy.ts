@@ -58,6 +58,7 @@ export const ASK_SAFE_BUILTIN = new Set([
 const PLAN_EXTRA_BUILTIN = new Set([
   'todo_write',
   'create_plan',
+  'check_done_when',
   'create_goal',
   'update_goal',
   'edit',

@@ -30,6 +30,7 @@ import { logger } from '../../shared/logger'
 import { writeRunReceiptBestEffort } from './runReceipt'
 import { writeTrajectoryArtifactsBestEffort } from './runTrajectory'
 import { syncTodosAfterRewind } from './tools/todo'
+import { syncChecksAfterRewind } from './doneWhenChecks'
 
 export type PrepareRewindResult = {
   messages: ChatMessage[]
@@ -298,6 +299,7 @@ async function applyRewindPersistence(input: {
   const { workspacePath, runId, runDir, userMessageIndex, nextMessages, writes } = input
   await syncMessagesAsync(runDir, nextMessages)
   syncTodosAfterRewind(runDir, nextMessages)
+  syncChecksAfterRewind(runDir, nextMessages)
 
   const persistedEvents = await loadEventsAsync(runDir, runId)
   const prior = nextMessages.slice(0, userMessageIndex)

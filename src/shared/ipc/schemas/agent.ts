@@ -1035,6 +1035,7 @@ export const RunArtifactFixedNameSchema = z.enum([
   'contract.md',
   'receipt.json',
   'todos.json',
+  'checks.json',
   'goal.json',
   'loop.json',
   'trajectory.jsonl',

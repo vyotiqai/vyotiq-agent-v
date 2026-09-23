@@ -118,6 +118,8 @@ export type UiItem =
       tool: UiToolRow
       groupTiming?: UiGroupTiming
       at?: string
+      /** When the result arrived (ISO): the call's duration is `endedAt − at`. */
+      endedAt?: string
       toolExpanded?: boolean
       /**
        * Reader's disclosure choice for the activity group this row opens. Kept on
@@ -836,6 +838,7 @@ export function applyEventTimestamps(items: UiItem[], events: PersistedEvent[]):
     items.filter((item): item is Extract<UiItem, { kind: 'tool' }> => item.kind === 'tool').map((item) => item.id)
   )
   const startAtById = new Map<string, string>()
+  const endAtById = new Map<string, string>()
   let runStartAt: string | undefined
   let runDoneAt: string | undefined
   let lastTerminal: 'done' | 'cancelled' | 'error' | null = null
@@ -872,6 +875,11 @@ export function applyEventTimestamps(items: UiItem[], events: PersistedEvent[]):
         visibleAssistantMessageAts.push(row.at)
       }
     }
+    if (row.event.type === 'tool_result') {
+      const resultId = row.event.toolCallId
+      if (resultId && itemIds.has(resultId)) endAtById.set(resultId, row.at)
+      continue
+    }
     if (row.event.type !== 'tool_start') continue
     const id = row.event.toolCallId
     if (!id || !itemIds.has(id) || startAtById.has(id)) continue
@@ -882,8 +890,9 @@ export function applyEventTimestamps(items: UiItem[], events: PersistedEvent[]):
   const withMeta = items.map((item) => {
     if (item.kind !== 'tool') return item
     const startAt = startAtById.get(item.id)
+    const endAt = endAtById.get(item.id)
     const ok = okById.get(item.id)
-    const withAt = startAt ? { ...item, at: startAt } : item
+    const withAt = startAt || endAt ? { ...item, ...(startAt ? { at: startAt } : {}), ...(endAt ? { endedAt: endAt } : {}) } : item
     if (ok === undefined) return withAt
     return {
       ...withAt,

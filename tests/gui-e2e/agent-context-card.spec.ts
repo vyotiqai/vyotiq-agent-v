@@ -67,11 +67,14 @@ test('empty new chat shows the agent context card', async () => {
   await window.getByRole('menuitemcheckbox', { name: /agent-context-ws/i }).click()
   await window.getByRole('button', { name: /new task/i }).first().click()
 
-  await expect(window.getByRole('combobox', { name: 'Message' })).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByRole('combobox', { name: 'Instruction' })).toBeVisible({ timeout: 20_000 })
 
+  // The header names the new task and where it will run.
+  const header = window.locator('[data-task-header]')
+  await expect(header).toContainText('New task')
+  await expect(header).toContainText(/in vyotiq-agent-context-ws/i)
   const emptyState = window.locator('[data-chat-empty-state]')
   await expect(emptyState).toBeVisible({ timeout: 15_000 })
-  await expect(emptyState).toContainText(/New chat in/i)
 
   const card = window.getByRole('group', { name: 'What the agent knows' })
   await expect(card).toBeVisible({ timeout: 15_000 })

@@ -845,6 +845,19 @@
     color: var(--vy-fg-strong);
   }
 
+  /* Find in record (features/task/recordFind.ts): every match, then the one you're on. */
+  ::highlight(record-find) {
+    background-color: var(--vy-warning-soft);
+    color: var(--vy-fg-strong);
+  }
+
+  ::highlight(record-find-current) {
+    background-color: var(--vy-accent-soft);
+    color: var(--vy-fg-strong);
+    text-decoration: underline;
+    text-decoration-color: var(--vy-accent);
+  }
+
   /*
     Custom webkit scrollbars everywhere. Never pair these with standard
     `scrollbar-width` / `scrollbar-color`: since Chromium 121 setting those

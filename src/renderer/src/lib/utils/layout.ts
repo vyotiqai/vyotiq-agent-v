@@ -245,11 +245,14 @@ export const TOOL_CARD_HEADER = 'px-3 py-2 text-xs'
 export const TOOL_CARD_BODY = 'overflow-hidden border-t border-border bg-surface'
 
 /** Ask-question gate — quiet panel, not bordered tool-card chrome. */
-export const QUESTION_GATE_SURFACE =
-  'overflow-hidden rounded-md border-l-2 border-l-accent/60 bg-surface/60'
-export const QUESTION_GATE_HEADER = 'flex items-center gap-2 px-3 pt-2.5 pb-1 text-xs text-fg'
-export const QUESTION_GATE_BODY = 'px-3 py-2'
-export const QUESTION_GATE_FOOTER = 'flex items-center gap-2 px-3 pb-2.5 pt-1'
+/**
+ * The needs-you frame: the one accent block in a record. An accent outline,
+ * a tinted 32px header, then the ask. Shared by questions and approvals.
+ */
+export const QUESTION_GATE_SURFACE = 'overflow-hidden rounded-lg border border-accent bg-bg'
+export const QUESTION_GATE_HEADER = 'flex h-8 items-center gap-2 bg-accent-soft px-3 text-xs'
+export const QUESTION_GATE_BODY = 'px-3 py-3'
+export const QUESTION_GATE_FOOTER = 'flex items-center gap-1.5 px-3 pb-3'
 
 /** Collapsed tool body height before fade mask (virtualizer estimate). */
 export const TOOL_BODY_CLAMP_PX = 168

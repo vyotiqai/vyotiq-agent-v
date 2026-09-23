@@ -1,4 +1,5 @@
 import type { ActiveRun, RunSummary } from '@shared/ipc'
+import type { TurnOutcome } from '@shared/transcript'
 import { isResumableInterruptedRun } from '@shared/runInterrupt'
 import { relativeTime } from '@shared/utils/timeFormat'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
@@ -177,6 +178,61 @@ function finishedState(run: RunSummary): { state: TaskState; label: string } {
   // its final status. It is not running, and it did not report done.
   if (run.status === 'running') return { state: 'stopped', label: 'Stopped' }
   return { state: 'done', label: 'Done' }
+}
+
+/**
+ * The state the task header shows — the navigator's rule, read from the pane's
+ * own stream where that is fresher. While the stream is live the task is
+ * running (or needs you); once the stream has seen the run end, how it ended
+ * wins over a run list that has not refreshed yet.
+ */
+export function taskHeaderState(input: {
+  run: RunSummary | null
+  /** The stream is live: the run is in flight or starting. */
+  streaming: boolean
+  /** A pending approval or question, and since when. */
+  needs: { kind: 'approval' | 'question'; since: number | null } | null
+  /** The plan's progress in the live run. */
+  steps: { current: number; total: number } | null
+  /** How the stream saw the latest run end. */
+  turnStatus: TurnOutcome | null
+  /** The task has at least one run (a draft has none). */
+  started: boolean
+  now?: number
+}): { state: TaskState; label: string } | null {
+  const now = input.now ?? Date.now()
+  if (input.needs) {
+    const what = input.needs.kind === 'approval' ? 'Needs your approval' : 'Has a question for you'
+    const since = input.needs.since != null ? relativeTime(new Date(input.needs.since).toISOString(), now) : ''
+    return { state: 'needs', label: since ? `${what} · ${since}` : what }
+  }
+  if (input.streaming) {
+    const steps = input.steps
+    return { state: 'running', label: steps ? `Running · step ${steps.current} of ${steps.total}` : 'Running' }
+  }
+  if (!input.started && !input.run) return null
+  const run = input.run
+  if (run?.loopArmed && run.loopNextAt) return { state: 'queued', label: `Scheduled · ${untilText(run.loopNextAt, now)}` }
+  const ended: { state: TaskState; label: string } =
+    input.turnStatus === 'error'
+      ? { state: 'failed', label: 'Failed' }
+      : input.turnStatus === 'cancelled'
+        ? { state: 'stopped', label: 'Stopped' }
+        : input.turnStatus === 'interrupted'
+          ? { state: 'stopped', label: 'Interrupted' }
+          : input.turnStatus === 'done'
+            ? run?.goalStatus === 'paused'
+              ? { state: 'paused', label: 'Goal paused' }
+              : { state: 'done', label: 'Done' }
+            : run
+              ? finishedState(run)
+              : { state: 'done', label: 'Done' }
+  if (run?.review) {
+    return ended.state === 'done'
+      ? { state: 'review', label: 'Ready for review' }
+      : { state: ended.state, label: `${ended.label} · edits to review` }
+  }
+  return ended
 }
 
 /** "3m", "2h", "1d" — `now` for a future or unreadable time rather than nothing. */

@@ -15,8 +15,8 @@ export function shouldDeferAppEscapeStop(opts?: {
   // Overlay drawer, lightbox, or other modal dialog
   if (document.querySelector('[role="dialog"][aria-modal="true"]')) return true
 
-  // Tool approval gate — Esc denies instead of stopping the run
-  if (document.querySelector('[data-tool-approval]')) return true
+  // A pending approval does not take Esc: Alt D denies it, and Esc still
+  // stops the run as it does everywhere else.
 
   // Sidebar inline delete / workspace-close confirm (Esc cancels, must not stop run)
   if (document.querySelector('[data-inline-confirm]')) return true
@@ -37,13 +37,15 @@ export function shouldDeferAppEscapeStop(opts?: {
     return true
   }
 
-  // Find-in-panel / PR title edit — Esc closes those UIs first
+  // Find in a panel or the record, a title or PR title edit — Esc closes those UIs first
   const active = document.activeElement as HTMLElement | null
   if (active) {
     const label = active.getAttribute('aria-label')
     if (
       label === 'Find in changes' ||
       label === 'Find in diff' ||
+      label === 'Find in record' ||
+      label === 'Task title' ||
       label === 'PR title'
     ) {
       return true

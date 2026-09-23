@@ -50,24 +50,25 @@ test('send message streams fixture assistant text and can stop', async () => {
     await expand.click()
   }
 
-  const composer = window.getByRole('combobox', { name: 'Message' })
+  const composer = window.getByRole('combobox', { name: 'Instruction' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('Hello from gui e2e')
 
-  const send = window.getByRole('button', { name: /^send$/i })
-  await expect(send).toBeEnabled()
-  await send.click()
+  // The instruction line has no Send button: Enter sends.
+  await expect(window.getByRole('button', { name: /^send$/i })).toHaveCount(0)
+  await composer.press('Enter')
 
   await expect(window.getByText(FIXTURE_ASSISTANT_TEXT)).toBeVisible({ timeout: 15_000 })
 
-  // Merged primary action: while a run streams the button is Stop; once the run
-  // completes with an empty composer, the mic becomes primary (Send unmounts).
-  const stop = window.getByRole('button', { name: /^stop$/i })
+  // While the run streams the task header offers Stop; once it ends, Stop goes
+  // and the header reads the run's outcome.
+  const stop = window.locator('[data-task-header]').getByRole('button', { name: /^stop$/i })
   if (await stop.isVisible().catch(() => false)) {
     await stop.click()
     await expect(stop).toBeHidden({ timeout: 10_000 })
   } else {
-    // Run already finished — the composer returned to idle (Dictate primary).
-    await expect(window.getByRole('button', { name: /^dictate$/i })).toBeVisible({ timeout: 10_000 })
+    await expect(window.locator('[data-task-header] [data-task-state]')).not.toHaveAttribute('data-task-state', 'running', {
+      timeout: 10_000
+    })
   }
 })

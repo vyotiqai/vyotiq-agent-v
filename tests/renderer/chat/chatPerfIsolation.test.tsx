@@ -140,7 +140,9 @@ describe('ChatView / SessionChatColumn isolation', () => {
     expect(chatView).toMatch(/changesDockVisible/)
     expect(column).not.toMatch(/useGitChrome/)
     expect(column).not.toMatch(/useGitRevision/)
-    expect(column).toMatch(/virtualizeLiveEarly/)
+    // The pane renders the task record; streaming stays on its leaf (see perfMatrixCaps).
+    expect(column).toMatch(/<TaskPane/)
+    expect(column).not.toMatch(/useChatLiveItems/)
   })
 })
 

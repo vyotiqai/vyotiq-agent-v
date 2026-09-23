@@ -86,7 +86,7 @@ test('Mic stop inserts fixture transcript into Message', async () => {
     await expand.click()
   }
 
-  const composer = window.getByRole('combobox', { name: 'Message' })
+  const composer = window.getByRole('combobox', { name: 'Instruction' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
 
   // The dictate preflight requires the provider secret. On headless Linux

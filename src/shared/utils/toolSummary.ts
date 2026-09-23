@@ -51,6 +51,7 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   todo_write: { running: 'Updating tasks', done: 'Updated tasks' },
   create_goal: { running: 'Setting goal', done: 'Set goal' },
   update_goal: { running: 'Updating goal', done: 'Updated goal' },
+  check_done_when: { running: 'Checking done-when', done: 'Checked done-when' },
   create_plan: { running: 'Writing plan', done: 'Wrote plan' },
   web_fetch: { running: 'Fetching', done: 'Fetched' },
   web_search: { running: 'Searching web', done: 'Web search' },

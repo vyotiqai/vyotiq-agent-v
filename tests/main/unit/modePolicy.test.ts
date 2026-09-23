@@ -331,6 +331,8 @@ describe('modePolicy', () => {
     const planExtra = [
       'todo_write',
       'create_plan',
+      // Records the agent's verdict on each done-when check — a run artifact, no files.
+      'check_done_when',
       'create_goal',
       'update_goal',
       'edit',

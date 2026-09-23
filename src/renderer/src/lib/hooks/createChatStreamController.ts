@@ -2488,6 +2488,7 @@ export function createChatStreamController(
               ...existing,
               // The call is settled, so any prompt it was waiting on is moot.
               approval: undefined,
+              endedAt: new Date().toISOString(),
               // Drop auto-expand so finished bodies collapse; explicit user toggle wins.
               toolExpanded:
                 existing.toolExpanded === true || existing.toolExpanded === false
@@ -2524,6 +2525,7 @@ export function createChatStreamController(
                 {
                   ...row,
                   approval: undefined,
+                  endedAt: new Date().toISOString(),
                   toolExpanded:
                     row.toolExpanded === true || row.toolExpanded === false
                       ? row.toolExpanded

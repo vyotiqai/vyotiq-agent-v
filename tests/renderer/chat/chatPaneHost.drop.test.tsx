@@ -46,7 +46,9 @@ function dropAt(host: HTMLElement, clientX: number, payload: string): void {
 }
 
 describe('ChatPaneHost drop', () => {
-  it('keeps multi-pane headers visible with titles and min width shells', () => {
+  it('labels each pane and hands it close and split — the pane draws its own header', () => {
+    const onClosePane = vi.fn()
+    const onSplitPane = vi.fn()
     const panes: ChatPane[] = [
       pane,
       { paneId: 'pane-2', workspacePath: '/ws/a', runId: null }
@@ -58,23 +60,28 @@ describe('ChatPaneHost drop', () => {
         sizes={[0.5, 0.5]}
         sideRailPad
         onFocusPane={() => {}}
-        onClosePane={() => {}}
+        onClosePane={onClosePane}
+        onSplitPane={onSplitPane}
         onSizesChange={() => {}}
         onSessionDrop={() => true}
-        getPaneTitle={(p) => (p.runId ? 'Chat A' : 'New chat')}
-        renderPane={(_p, opts) => (
-          <div data-testid="pane-body" data-rail={opts.sideRailPad ? '1' : '0'}>
-            body
+        getPaneTitle={(p) => (p.runId ? 'Chat A' : 'New task')}
+        renderPane={(p, opts) => (
+          <div data-testid="pane-body" data-rail={opts.sideRailPad ? '1' : '0'} data-multi={opts.multi ? '1' : '0'}>
+            <button type="button" onClick={opts.onClose}>
+              Close {p.paneId}
+            </button>
+            <button type="button" onClick={opts.onSplit}>
+              Split {p.paneId}
+            </button>
           </div>
         )}
       />
     )
 
-    const headers = screen.getAllByRole('button', { name: /Close /i })
-    expect(headers).toHaveLength(2)
-    expect(screen.getByText('Chat A')).toBeTruthy()
-    expect(screen.getByText('New chat')).toBeTruthy()
-    expect(document.querySelectorAll('[data-chat-pane-header]')).toHaveLength(2)
+    // No second header above the pane: its region is named, its body is the header.
+    expect(document.querySelectorAll('[data-chat-pane-header]')).toHaveLength(0)
+    expect(screen.getByRole('region', { name: 'Chat A' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'New task' })).toBeTruthy()
 
     const shells = document.querySelectorAll('[data-chat-pane-shell]')
     expect(shells).toHaveLength(2)
@@ -83,45 +90,35 @@ describe('ChatPaneHost drop', () => {
     }
 
     const bodies = screen.getAllByTestId('pane-body')
+    expect(bodies.map((b) => b.getAttribute('data-multi'))).toEqual(['1', '1'])
     expect(bodies[0]!.getAttribute('data-rail')).toBe('0')
     expect(bodies[1]!.getAttribute('data-rail')).toBe('1')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close pane-2' }))
+    expect(onClosePane).toHaveBeenCalledWith('pane-2')
+    fireEvent.click(screen.getByRole('button', { name: 'Split pane-1' }))
+    expect(onSplitPane).toHaveBeenCalledTimes(1)
   })
 
-  it('omits the split button when onSplitPane is absent and calls it on click', () => {
-    const onSplitPane = vi.fn()
-    const { rerender } = render(
+  it('offers no close to a lone pane', () => {
+    let seen: { multi: boolean; onClose?: () => void } | null = null
+    render(
       <ChatPaneHost
-        panes={[pane, { paneId: 'pane-2', workspacePath: '/ws/a', runId: null }]}
+        panes={[pane]}
         focusedPaneId="pane-1"
-        sizes={[0.5, 0.5]}
+        sizes={[1]}
         onFocusPane={() => {}}
         onClosePane={() => {}}
         onSizesChange={() => {}}
         onSessionDrop={() => true}
-        getPaneTitle={(p) => (p.runId ? 'Chat A' : 'New chat')}
-        renderPane={() => <div data-testid="pane-body">body</div>}
+        getPaneTitle={() => 'Chat A'}
+        renderPane={(_p, opts) => {
+          seen = { multi: opts.multi, onClose: opts.onClose }
+          return <div data-testid="pane-body">body</div>
+        }}
       />
     )
-    expect(document.querySelector('[data-chat-pane-split]')).toBeNull()
-
-    rerender(
-      <ChatPaneHost
-        panes={[pane, { paneId: 'pane-2', workspacePath: '/ws/a', runId: null }]}
-        focusedPaneId="pane-1"
-        sizes={[0.5, 0.5]}
-        onFocusPane={() => {}}
-        onClosePane={() => {}}
-        onSplitPane={onSplitPane}
-        onSizesChange={() => {}}
-        onSessionDrop={() => true}
-        getPaneTitle={(p) => (p.runId ? 'Chat A' : 'New chat')}
-        renderPane={() => <div data-testid="pane-body">body</div>}
-      />
-    )
-    const splitButtons = document.querySelectorAll('[data-chat-pane-split]')
-    expect(splitButtons).toHaveLength(2)
-    fireEvent.click(splitButtons[1]!)
-    expect(onSplitPane).toHaveBeenCalledTimes(1)
+    expect(seen).toEqual({ multi: false, onClose: undefined })
   })
 
   it('splits on left-third drop', () => {

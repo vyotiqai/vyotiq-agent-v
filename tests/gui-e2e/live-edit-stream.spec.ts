@@ -51,7 +51,7 @@ test('live edit stream: empty window then early lines before late', async () => 
     await expand.click()
   }
 
-  const composer = window.getByRole('combobox', { name: 'Message' })
+  const composer = window.getByRole('combobox', { name: 'Instruction' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('Stream a live edit diff')
 
@@ -93,7 +93,8 @@ test('live edit stream: empty window then early lines before late', async () => 
     tick()
   })
 
-  await window.getByRole('button', { name: /^send$/i }).click()
+  // The instruction line sends on Enter — it has no Send button.
+  await window.getByRole('combobox', { name: 'Instruction' }).press('Enter')
 
   await expect
     .poll(
@@ -114,7 +115,8 @@ test('live edit stream: empty window then early lines before late', async () => 
   await expect(window.getByText('Live edit stream fixture done.')).toBeVisible({
     timeout: 20_000
   })
-  await expect(window.getByRole('button', { name: /edited: live-stream\.ts/i })).toBeVisible()
+  await expect(window.getByRole('button', { name: /edited: src\/live-stream\.ts/i })).toBeVisible()
   await expect(window.getByText('+5').first()).toBeVisible()
-  await expect(window.getByText('-1').first()).toBeVisible()
+  // The record's diff stat uses a true minus sign.
+  await expect(window.getByText('−1').first()).toBeVisible()
 })

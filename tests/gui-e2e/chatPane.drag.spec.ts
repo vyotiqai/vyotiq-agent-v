@@ -99,7 +99,7 @@ test('drag sidebar session onto right third splits into two panes', async () => 
   await splitBetaBesideAlpha()
 
   await expect(window.locator('[data-chat-pane-focused="1"]')).toHaveCount(1)
-  await expect(window.locator('[data-chat-pane-header]')).toHaveCount(2)
+  await expect(window.locator('[data-task-header]')).toHaveCount(2)
   await expect(window.locator('[data-chat-pane-title="Pane Session Alpha"]')).toBeVisible()
   await expect(window.locator('[data-chat-pane-title="Pane Session Beta"]')).toBeVisible()
 
@@ -107,7 +107,7 @@ test('drag sidebar session onto right third splits into two panes', async () => 
   // its seeded message and the composer leaves the draft placeholder.
   const betaPane = window.locator('[data-chat-pane]').nth(1)
   await expect(betaPane.getByText('Pane Session Beta')).toHaveCount(2, { timeout: 20_000 })
-  await expect(betaPane.getByText(/Send a follow-up/)).toBeVisible({ timeout: 20_000 })
+  await expect(betaPane.getByText(/Follow up — starts run/)).toBeVisible({ timeout: 20_000 })
 
   // Clicking an already-open session focuses its pane; does not add a third.
   await window.getByRole('button', { name: 'Pane Session Alpha', exact: true }).first().click()
@@ -144,7 +144,7 @@ test('multi-pane polish: min widths, sidebar open state, docked empty, rail pad'
   }
 
   // Always-visible headers (not hover-only).
-  await expect(window.locator('[data-chat-pane-header]')).toHaveCount(2)
+  await expect(window.locator('[data-task-header]')).toHaveCount(2)
   await expect(window.getByRole('button', { name: /Close Pane Session Alpha/i })).toBeVisible()
   await expect(window.getByRole('button', { name: /Close Pane Session Beta/i })).toBeVisible()
 
@@ -162,15 +162,15 @@ test('multi-pane polish: min widths, sidebar open state, docked empty, rail pad'
   ).toHaveCount(1)
 
   // Rightmost composer clears the side rail while the rail is mounted.
-  const rightComposer = window.locator('[data-chat-pane]').nth(1).locator('[data-composer-dock]')
+  const rightComposer = window.locator('[data-chat-pane]').nth(1).locator('[data-composer-line]')
   await expect(rightComposer).toHaveAttribute('data-composer-side-rail-pad', '1')
 
   // New chat in multi-pane stays docked (no centered hero).
   await window.getByRole('button', { name: /new task/i }).first().click()
   await expect(window.locator('[data-chat-pane]')).toHaveCount(2)
-  await expect(window.locator('[data-chat-pane-title="New chat"]')).toBeVisible({ timeout: 10_000 })
-  const newPane = window.locator('[data-chat-pane-title="New chat"]')
-  await expect(newPane.locator('[data-composer-dock]')).toBeVisible()
+  await expect(window.locator('[data-chat-pane-title="New task"]')).toBeVisible({ timeout: 10_000 })
+  const newPane = window.locator('[data-chat-pane-title="New task"]')
+  await expect(newPane.locator('[data-composer-line]')).toBeVisible()
   await expect(newPane.locator('[data-composer-hero]')).toHaveCount(0)
 })
 
@@ -204,7 +204,7 @@ test('opening right dock panel keeps multi-pane layout', async () => {
   await expect(window.locator('[data-chat-pane]')).toHaveCount(2)
 
   // With dock open the rail is gone — composer pad drops on the rightmost pane.
-  const rightComposer = window.locator('[data-chat-pane]').nth(1).locator('[data-composer-dock]')
+  const rightComposer = window.locator('[data-chat-pane]').nth(1).locator('[data-composer-line]')
   await expect(rightComposer).toHaveAttribute('data-composer-side-rail-pad', '0')
 })
 
@@ -227,15 +227,16 @@ test('Ctrl/Cmd+\\ splits the focused pane into an empty draft beside it', async 
 
   await window.keyboard.press('ControlOrMeta+Backslash')
   await expect(window.locator('[data-chat-pane]')).toHaveCount(2, { timeout: 15_000 })
-  const draft = window.locator('[data-chat-pane-title="New chat"]')
+  const draft = window.locator('[data-chat-pane-title="New task"]')
   await expect(draft).toBeVisible({ timeout: 10_000 })
   await expect(draft).toHaveAttribute('data-chat-pane-focused', '1')
-  await expect(draft.locator('[data-composer-dock]')).toBeVisible()
+  await expect(draft.locator('[data-composer-line]')).toBeVisible()
 
-  // The header "+" splits the pane it sits on — but the draft pane refuses
-  // (two drafts would share one composer): toast, count unchanged. This is
-  // viewport-independent, unlike a capacity-limited split.
-  await window.locator('[data-chat-pane-split]').nth(1).click()
+  // A draft pane offers no split (its header has no run to split beside), and
+  // the shortcut refuses it (two drafts would share one composer): toast,
+  // count unchanged. This is viewport-independent, unlike a capacity-limited split.
+  await expect(draft.getByRole('button', { name: /More/ })).toHaveCount(0)
+  await window.keyboard.press('ControlOrMeta+Backslash')
   await expect(window.getByText('Send a message in this pane first.')).toBeVisible({
     timeout: 10_000
   })
@@ -271,7 +272,7 @@ test('sessions clicked into empty draft panes hydrate their transcripts', async 
 
   // Pane 2: Cmd+\ draft, then click Beta into the focused draft.
   await window.keyboard.press('ControlOrMeta+Backslash')
-  await expect(window.locator('[data-chat-pane-title="New chat"]')).toBeVisible({
+  await expect(window.locator('[data-chat-pane-title="New task"]')).toBeVisible({
     timeout: 10_000
   })
   await window.getByRole('button', { name: 'Pane Session Beta', exact: true }).first().click()
@@ -279,7 +280,7 @@ test('sessions clicked into empty draft panes hydrate their transcripts', async 
   const betaPane = window.locator('[data-chat-pane-title="Pane Session Beta"]')
   await expect(betaPane).toBeVisible({ timeout: 15_000 })
   await expect(betaPane.getByText('Pane Session Beta')).toHaveCount(2, { timeout: 20_000 })
-  await expect(betaPane.getByText(/Send a follow-up/)).toBeVisible({ timeout: 20_000 })
+  await expect(betaPane.getByText(/Follow up — starts run/)).toBeVisible({ timeout: 20_000 })
 
   // Pane 3: Cmd+\ again (Beta pane focused), then click Gamma into the draft.
   await window.keyboard.press('ControlOrMeta+Backslash')
@@ -300,7 +301,7 @@ test('sessions clicked into empty draft panes hydrate their transcripts', async 
   const gammaPane = window.locator('[data-chat-pane-title="Pane Session Gamma"]')
   await expect(gammaPane).toBeVisible({ timeout: 15_000 })
   await expect(gammaPane.getByText('Pane Session Gamma')).toHaveCount(2, { timeout: 20_000 })
-  await expect(gammaPane.getByText(/Send a follow-up/)).toBeVisible({ timeout: 20_000 })
+  await expect(gammaPane.getByText(/Follow up — starts run/)).toBeVisible({ timeout: 20_000 })
 
   // Pane 1 must still show Alpha's transcript.
   const alphaPane = window.locator('[data-chat-pane-title="Pane Session Alpha"]')

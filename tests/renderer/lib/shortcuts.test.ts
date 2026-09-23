@@ -265,7 +265,7 @@ describe('shouldDeferAppEscapeStop', () => {
   })
 
   it('defers when find / PR title inputs are focused', () => {
-    for (const label of ['Find in changes', 'Find in diff', 'PR title']) {
+    for (const label of ['Find in changes', 'Find in diff', 'Find in record', 'Task title', 'PR title']) {
       const input = document.createElement('input')
       input.setAttribute('aria-label', label)
       document.body.appendChild(input)
@@ -279,11 +279,11 @@ describe('shouldDeferAppEscapeStop', () => {
     expect(shouldDeferAppEscapeStop()).toBe(false)
   })
 
-  it('defers when a tool approval gate is on screen', () => {
+  it('does not defer for a pending tool approval — Esc stops the run, Alt D denies', () => {
     const gate = document.createElement('div')
     gate.setAttribute('data-tool-approval', '')
     document.body.appendChild(gate)
-    expect(shouldDeferAppEscapeStop()).toBe(true)
+    expect(shouldDeferAppEscapeStop()).toBe(false)
     gate.remove()
   })
 })
@@ -293,6 +293,7 @@ describe('shouldBlockPanelShortcut', () => {
     const composer = document.createElement('div')
     composer.setAttribute('role', 'textbox')
     composer.setAttribute('aria-label', 'Message')
+    composer.setAttribute('data-composer-input', '')
     composer.contentEditable = 'true'
     document.body.appendChild(composer)
     expect(shouldBlockPanelShortcut(composer)).toBe(false)
@@ -316,6 +317,7 @@ describe('shouldBlockAppShortcut', () => {
     const composer = document.createElement('div')
     composer.setAttribute('role', 'combobox')
     composer.setAttribute('aria-label', 'Message')
+    composer.setAttribute('data-composer-input', '')
     composer.contentEditable = 'true'
     document.body.appendChild(composer)
     expect(isMainComposerTarget(composer)).toBe(true)
@@ -332,6 +334,7 @@ describe('shouldBlockAppShortcut', () => {
     const composer = document.createElement('div')
     composer.setAttribute('role', 'textbox')
     composer.setAttribute('aria-label', 'Message')
+    composer.setAttribute('data-composer-input', '')
     composer.contentEditable = 'true'
     document.body.appendChild(composer)
     expect(isMainComposerTarget(composer)).toBe(true)
@@ -345,12 +348,14 @@ describe('focusComposerMessage', () => {
     const disabled = document.createElement('div')
     disabled.setAttribute('role', 'textbox')
     disabled.setAttribute('aria-label', 'Message')
+    disabled.setAttribute('data-composer-input', '')
     disabled.setAttribute('contenteditable', 'false')
     document.body.appendChild(disabled)
 
     const composer = document.createElement('div')
     composer.setAttribute('role', 'combobox')
     composer.setAttribute('aria-label', 'Message')
+    composer.setAttribute('data-composer-input', '')
     composer.contentEditable = 'true'
     composer.tabIndex = 0
     document.body.appendChild(composer)
@@ -365,6 +370,7 @@ describe('focusComposerMessage', () => {
     const composer = document.createElement('div')
     composer.setAttribute('role', 'textbox')
     composer.setAttribute('aria-label', 'Message')
+    composer.setAttribute('data-composer-input', '')
     composer.contentEditable = 'true'
     composer.tabIndex = 0
     document.body.appendChild(composer)
@@ -439,6 +445,7 @@ describe('useAppShortcuts escape stop', () => {
     const composer = document.createElement('div')
     composer.setAttribute('role', 'textbox')
     composer.setAttribute('aria-label', 'Message')
+    composer.setAttribute('data-composer-input', '')
     composer.contentEditable = 'true'
     document.body.appendChild(composer)
     composer.focus()

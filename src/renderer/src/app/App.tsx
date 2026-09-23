@@ -719,7 +719,7 @@ function App() {
 
   const getPaneTitle = useCallback(
     (pane: ChatPane): string => {
-      if (!pane.runId) return 'New chat'
+      if (!pane.runId) return 'New task'
       const ctx = findByWorkspacePath(contexts, pane.workspacePath)
       const run =
         ctx?.runs.find((r) => r.runId === pane.runId) ??
@@ -1651,9 +1651,16 @@ function App() {
     }
   }, [chatActions, clearWorkspaceError, setSettingsError, settingsError, workspaceError])
 
+  // The pane header's run actions are plain functions defined further down;
+  // read through a ref so the pane renderer does not rebuild every render.
+  const paneRunActionsRef = useRef<{
+    rename: (path: string, runId: string, title: string) => Promise<void>
+    exportRun: (path: string, runId: string) => Promise<void>
+    deleteRun: (path: string, runId: string) => Promise<void>
+  }>({ rename: async () => {}, exportRun: async () => {}, deleteRun: async () => {} })
   const renderPaneSession = useCallback(
     (pane: ChatPane, options: PaneRenderOptions) => {
-      const { focused, sideRailPad, onOpenChanges, onOpenWorkspaceFile } =
+      const { focused, sideRailPad, onOpenChanges, onOpenWorkspaceFile, multi, onClose, onSplit } =
         options
       const paneContext = findByWorkspacePath(contexts, pane.workspacePath)
       // Standalone instance pane: inspect + stop only (no composer) — the same
@@ -1668,6 +1675,7 @@ function App() {
           settings,
           paneContext?.settingsOverride
         )
+        const parentRun = parentRunId ? (paneContext?.runs.find((r) => r.runId === parentRunId) ?? null) : null
         return (
           <AgentInstancePane
             workspacePath={pane.workspacePath}
@@ -1678,6 +1686,12 @@ function App() {
             showThinking={paneChatSettings.showThinking}
             onOpenWorkspaceFile={onOpenWorkspaceFile}
             approvalAutoFocus={focused}
+            instanceRun={paneContext?.instanceRuns?.find((r) => r.runId === pane.runId) ?? null}
+            parentTitle={parentRun ? runTitle(parentRun) : undefined}
+            siblings={parentCtrl?.agentInstances}
+            onOpenInstance={(siblingRunId) => {
+              void openRunInWorkspace(pane.workspacePath, siblingRunId)
+            }}
             onClose={() => {
               if (!parentRunId) return
               void (async () => {
@@ -1710,11 +1724,8 @@ function App() {
               paneContext.ui.scrollTop > 0
             ? paneContext.ui.scrollTop
             : undefined
-      const paneCollapsed =
-        snap.collapsedTurnIndices.length > 0
-          ? new Set(snap.collapsedTurnIndices)
-          : undefined
       const paneCtrl = getRunController(pane.runId, pane.workspacePath)
+      const paneRun = pane.runId ? (paneContext?.runs.find((r) => r.runId === pane.runId) ?? null) : null
       const paneDraft = paneContext
         ? resolveComposerDraft(paneContext.ui, pane.runId)
         : undefined
@@ -1929,26 +1940,6 @@ function App() {
           onLoadToolContent={
             paneCtrl ? (toolCallId) => paneCtrl.loadToolContent(toolCallId) : undefined
           }
-          onThinkingToggle={
-            paneCtrl
-              ? (messageId, expanded) => paneCtrl.setThinkingExpanded(messageId, expanded)
-              : undefined
-          }
-          onToolToggle={
-            paneCtrl
-              ? (toolCallId, expanded) => paneCtrl.setToolExpanded(toolCallId, expanded)
-              : undefined
-          }
-          onGroupToggle={
-            paneCtrl
-              ? (anchorToolCallId, expanded) =>
-                  paneCtrl.setGroupExpanded(anchorToolCallId, expanded)
-              : undefined
-          }
-          onTurnToggle={
-            paneCtrl ? (turnIndex) => paneCtrl.toggleTurnCollapsed(turnIndex) : undefined
-          }
-          collapsedTurns={paneCollapsed}
           onApprovalDecision={
             paneCtrl
               ? (requestId, decision) => paneCtrl.respondToApproval(requestId, decision)
@@ -1965,13 +1956,41 @@ function App() {
           sideRailPad={sideRailPad}
           onOpenChanges={onOpenChanges}
           onOpenWorkspaceFile={onOpenWorkspaceFile}
+          run={paneRun}
+          instanceRuns={paneContext?.instanceRuns}
+          runActions={{
+            onRename: pane.runId
+              ? (title) => paneRunActionsRef.current.rename(pane.workspacePath, pane.runId!, title)
+              : undefined,
+            onExport: pane.runId
+              ? () => void paneRunActionsRef.current.exportRun(pane.workspacePath, pane.runId!)
+              : undefined,
+            onCopyLink: pane.runId ? () => onCopyRunLinkInWorkspace(pane.workspacePath, pane.runId!) : undefined,
+            onDelete: pane.runId
+              ? () => {
+                  const runId = pane.runId!
+                  void (async () => {
+                    const ok = await confirm(`Delete “${paneRun ? runTitle(paneRun) : 'this task'}”? Its record and checkpoints are removed; files it changed stay as they are.`, {
+                      title: 'Delete task',
+                      confirmLabel: 'Delete',
+                      danger: true
+                    })
+                    if (ok) await paneRunActionsRef.current.deleteRun(pane.workspacePath, runId)
+                  })()
+                }
+              : undefined,
+            onSplit,
+            onClosePane: multi ? onClose : undefined
+          }}
         />
       )
     },
     [
       chatSurfaceEpoch,
+      confirm,
       contexts,
       confirmRevertToUserMessage,
+      onCopyRunLinkInWorkspace,
       createSlashHandlers,
       getInstanceParentRunId,
       getPaneChatSnapshot,
@@ -2051,7 +2070,7 @@ function App() {
       // The sidebar is global chrome, so a refusal ("Cancel run first") has to
       // answer where the click was. The operational banner lives inside the
       // focused chat pane — from a sidebar row that reads as nothing happening.
-      pushToast(`Could not delete chat: ${res.error}`, 'error')
+      pushToast(`Could not delete the task: ${res.error}`, 'error')
       setSettingsError(res.error)
       return
     }
@@ -2105,8 +2124,14 @@ function App() {
       return
     }
     if (res.data.saved && res.data.path) {
-      pushToast(`Chat exported to ${res.data.path}`)
+      pushToast(`Task exported to ${res.data.path}`)
     }
+  }
+
+  paneRunActionsRef.current = {
+    rename: onRenameRunInWorkspace,
+    exportRun: onExportRunInWorkspace,
+    deleteRun: onDeleteRunInWorkspace
   }
 
   const onStopRunInWorkspace = useCallback(

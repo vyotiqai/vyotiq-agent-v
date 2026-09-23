@@ -124,6 +124,7 @@ import {
   setLateFollowUpDropped,
   takePendingMode
 } from './runRegistry'
+import { doneWhenNudgeText, readChecks } from './doneWhenChecks'
 import { saveFollowUps, syncFollowUpsToDisk } from './followUpStore'
 import { clearLoopCheckpoint, loadLoopCheckpoint, saveLoopCheckpoint } from './loopCheckpoint'
 import { LOOP_CHECKPOINT_VERSION, type LoopCheckpoint } from '../../shared/ipc/schemas/agent'
@@ -1984,6 +1985,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     const recentReadPaths = new Map<string, number>()
     /** Plan-mode chat-essay nudges this invoke (cap 2). */
     let planUnreadyNudges = 0
+    /** Reminders to mark unmarked done-when checks before finishing (cap 1). */
+    let doneWhenNudges = 0
     /**
      * Consecutive empty-response retries. The retry re-sends a byte-identical
      * request, so a deterministic empty turn would loop at full generation cost
@@ -3517,6 +3520,26 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         if (hasPendingFollowUps(runId)) {
           yield* applyDrainedFollowUps(runId, runDir, messages, 'next')
           continue
+        }
+
+        // Done-when checks the agent is about to leave unmarked: one reminder,
+        // then the run ends as it is — an unmarked check stays unchecked for
+        // the user to see. Read from checks.json here, at turn end only, so
+        // marking checks never touches the cached prompt prefix.
+        if (!incomplete && agentMode === 'agent' && !isInlineInstance && doneWhenNudges < 1) {
+          const reminder = doneWhenNudgeText(readChecks(runDir))
+          if (reminder) {
+            doneWhenNudges += 1
+            const nudge: ChatMessage = {
+              role: 'user',
+              content: reminder,
+              // Loop-injected protocol turn — must never render as a user bubble.
+              synthetic: true
+            }
+            messages.push(nudge)
+            appendMessage(runDir, nudge)
+            continue
+          }
         }
 
         if (incomplete) {

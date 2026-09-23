@@ -19,6 +19,7 @@ import { streamSignalFor } from './runRegistry'
 import { dismissLifecycleNotification } from '../notifications/bus'
 import { notifyBadgeChange } from '../app/badges'
 import { needsYouDedupeKey } from '../../shared/ipc'
+import { TOOL_APPROVAL_TIMEOUT_MS } from '../../shared/agentTimeouts'
 
 /** Browse/fetch egress — gated, but not workspace-mutating.
  * Legacy `web_fetch` / `web_search` kept for transcript approval replay only
@@ -31,7 +32,7 @@ function isNetworkBrowseTool(name: string): boolean {
 export type ApprovalSender = (request: ToolApprovalRequest) => void
 
 /** Default wait for user approval before auto-denying (15 minutes). */
-export const TOOL_APPROVAL_TIMEOUT_MS = 900_000
+export { TOOL_APPROVAL_TIMEOUT_MS } from '../../shared/agentTimeouts'
 
 /** One sender per run: approval prompts belong to the window that started it. */
 const senders = new Map<string, ApprovalSender>()

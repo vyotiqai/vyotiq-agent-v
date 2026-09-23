@@ -22,11 +22,11 @@ const ALL_EFFORT_OPTIONS: { value: ThinkingEffort; label: string; short: string 
   { value: 'max', label: 'Max', short: 'Max' }
 ]
 
-type ThinkingModeOption =
+export type ThinkingModeOption =
   | { enabled: false; effort: ThinkingEffort | null; label: string; short: string }
   | { enabled: true; effort: ThinkingEffort; label: string; short: string }
 
-function buildModes(
+export function buildModes(
   allowed: readonly ThinkingEffort[] | undefined,
   canDisable: boolean,
   thinkingMode: ThinkingMode | undefined,
@@ -57,7 +57,7 @@ function buildModes(
   return [{ enabled: false, effort: null, label: 'Off', short: 'Off' }, ...effortModes]
 }
 
-function modeIndex(
+export function modeIndex(
   modes: ThinkingModeOption[],
   enabled: boolean,
   effort: ThinkingEffort
@@ -83,7 +83,7 @@ function nextMode(
 }
 
 /** Catalog fields when present; Ollama GPT-OSS / seed heuristic when unset. */
-function resolveThinkingUiMeta(
+export function resolveThinkingUiMeta(
   provider: ProviderId,
   model: string,
   modelMeta?: ModelInfo | null

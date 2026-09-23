@@ -70,10 +70,11 @@ test('follow mode opens the file the run writes', async () => {
   // Nothing is open yet — the run is what puts a file on screen.
   await expect(window.getByRole('tab', { name: /target\.ts/i })).toHaveCount(0)
 
-  const composer = window.getByRole('combobox', { name: 'Message' })
+  const composer = window.getByRole('combobox', { name: 'Instruction' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('Edit the target file')
-  await window.getByRole('button', { name: /^send$/i }).click()
+  // The instruction line sends on Enter — it has no Send button.
+  await window.getByRole('combobox', { name: 'Instruction' }).press('Enter')
 
   await expect(window.getByRole('tab', { name: /target\.ts/i })).toBeVisible({ timeout: 30_000 })
   const editor = window.locator('[data-code-editor] .cm-content')

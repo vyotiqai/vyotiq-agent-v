@@ -362,6 +362,10 @@ export const ComposerMentionInput = forwardRef<
     placeholder?: string
     disabled?: boolean
     className?: string
+    /** Accessible name — "Instruction" on the instruction line. */
+    ariaLabel?: string
+    /** `sm`: one 20px row of body text, for the instruction line. */
+    size?: 'md' | 'sm'
     onPasteFiles?: (files: File[]) => void
     'aria-expanded'?: boolean
     'aria-controls'?: string
@@ -378,6 +382,8 @@ export const ComposerMentionInput = forwardRef<
     placeholder,
     disabled,
     className,
+    ariaLabel = 'Message',
+    size = 'md',
     onPasteFiles,
     onFocus,
     'aria-expanded': ariaExpanded,
@@ -479,7 +485,10 @@ export const ComposerMentionInput = forwardRef<
     <div className="relative min-w-0 w-full">
       {empty && placeholder ? (
         <div
-          className="pointer-events-none absolute inset-0 flex items-center text-md leading-snug tracking-normal text-secondary"
+          className={cn(
+            'pointer-events-none absolute inset-0 flex items-center tracking-normal',
+            size === 'sm' ? 'truncate text-sm text-tertiary' : 'text-md leading-snug text-secondary'
+          )}
           aria-hidden
           style={{ letterSpacing: 0, textRendering: 'auto' }}
         >
@@ -495,7 +504,8 @@ export const ComposerMentionInput = forwardRef<
         aria-controls={disabled ? undefined : ariaControls}
         aria-haspopup={disabled ? undefined : 'listbox'}
         aria-multiline="true"
-        aria-label="Message"
+        aria-label={ariaLabel}
+        data-composer-input
         aria-keyshortcuts="Meta+L Control+L"
         aria-autocomplete={ariaAutocomplete}
         aria-activedescendant={ariaActivedescendant}
@@ -504,9 +514,10 @@ export const ComposerMentionInput = forwardRef<
         contentEditable={disabled ? false : true}
         suppressContentEditableWarning
         className={cn(
-          'min-h-9 min-w-0 w-full overflow-y-auto whitespace-pre-wrap break-words',
+          'min-w-0 w-full overflow-y-auto whitespace-pre-wrap break-words',
+          size === 'sm' ? 'min-h-5 text-sm leading-5 text-fg-strong' : 'min-h-9 text-md leading-snug text-fg',
           COMPOSER_TEXTAREA_MAX_CLASS,
-          'border-0 bg-transparent p-0 text-md leading-snug text-fg outline-none ring-0',
+          'border-0 bg-transparent p-0 outline-none ring-0',
           'focus:ring-0 focus-visible:ring-0',
           disabled && 'opacity-[var(--vy-disabled-opacity)]',
           className

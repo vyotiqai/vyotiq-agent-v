@@ -26,6 +26,7 @@ import { isRuleRelatedRelPath, clearRulesCache } from '../context/rules'
 import { notifySkillsChanged } from '../skills/notify'
 import { toolListDir } from './listDir'
 import { toolStrReplaceAsync } from './strReplace'
+import { executeCheckDoneWhen } from '../doneWhenChecks'
 import { toolDeleteAsync } from './deletePath'
 import {
   assertInlineInstancePathScope,
@@ -533,6 +534,13 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       truncateGoalObjective(goal.objective),
       `${goalToolContent(goal)}\nAwaiting user confirmation — it grants nothing until the user starts it. Continue this turn on your own; do not wait for it and do not try to activate it.`
     )
+  },
+  check_done_when: (_workspace, args, signal, context) => {
+    throwIfAborted(signal)
+    const result = executeCheckDoneWhen(context.runDir, args)
+    return result.ok
+      ? toolOk('check_done_when', result.summary, result.content)
+      : toolFail('check_done_when', result.summary, result.content)
   },
   update_goal: (_workspace, args, signal, context) => {
     throwIfAborted(signal)

@@ -1002,6 +1002,23 @@ const updateGoalArgs = z.object({
     .describe('active resumes a paused goal; complete ends it. Never pause.')
 })
 
+const checkDoneWhenArgs = z.object({
+  checks: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).describe('e.g. c1'),
+        verdict: z.enum(['met', 'not_met']).describe('met only if you saw it hold'),
+        evidence: z
+          .string()
+          .trim()
+          .min(1)
+          .max(600)
+          .describe('Command and result, file and line, or why not met')
+      })
+    )
+    .min(1)
+})
+
 /**
  * Teammate management.
  *
@@ -1224,6 +1241,11 @@ export const TOOL_REGISTRY = {
     description:
       'Mark this chat\'s goal complete (objective done, no required work left). Requires an existing goal. Rejects pause, and cannot start a goal that is awaiting user confirmation — only the user pauses, resumes, or starts a goal.',
     schema: updateGoalArgs
+  },
+  check_done_when: {
+    description:
+      "Mark this run's done-when checks (contract.md, ids c1…) met or not_met with evidence, before you finish. The user sees each verdict; not_met is an honest result.",
+    schema: checkDoneWhenArgs
   },
   browser_search: {
     description:

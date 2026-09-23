@@ -176,7 +176,7 @@ describe('MessageList', () => {
     render(
       <>
         <input aria-label="Other field" />
-        <div role="textbox" aria-label="Message" contentEditable tabIndex={0} />
+        <div role="textbox" aria-label="Message" data-composer-input contentEditable tabIndex={0} />
         <MessageList items={items} />
       </>
     )

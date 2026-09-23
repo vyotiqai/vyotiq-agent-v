@@ -43,6 +43,11 @@ describe('run artifact files', () => {
       '{"updatedAt":"t","todos":[{"id":"1","content":"Ship","status":"pending"}]}\n',
       'utf8'
     )
+    writeFileSync(
+      join(runDir, 'checks.json'),
+      '{"checks":[{"id":"c1","text":"Ship","source":"plan","verdict":null,"createdAt":"t"}]}\n',
+      'utf8'
+    )
     writeFileSync(join(runDir, 'browser', 'snapshot.jpg'), Buffer.from([0xff, 0xd8, 0xff]))
     writeFileSync(join(runDir, 'trajectory.jsonl'), '{"step":0,"kind":"status"}\n', 'utf8')
     writeFileSync(

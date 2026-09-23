@@ -51,13 +51,18 @@ test('context meter: low fill + tipCue without warning chrome (E4/R1)', async ()
     await expand.click()
   }
 
-  const composer = window.getByRole('combobox', { name: 'Message' })
+  const composer = window.getByRole('combobox', { name: 'Instruction' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('Replay screenshot audit meter')
-  await window.getByRole('button', { name: /^send$/i }).click()
+  // The instruction line sends on Enter — it has no Send button.
+  await window.getByRole('combobox', { name: 'Instruction' }).press('Enter')
 
   await expect(window.getByText('Audit meter fixture done.')).toBeVisible({ timeout: 20_000 })
 
+  // The meter opens from the instruction line's options: its ring and share
+  // lead the token, its reading is the footer button of the popover.
+  await expect(window.locator('[data-task-options]')).toContainText('%', { timeout: 15_000 })
+  await window.locator('[data-task-options]').click()
   const meter = window.getByRole('button', { name: /context window/i })
   await expect(meter).toBeVisible({ timeout: 15_000 })
   // The meter renders a ring + sr-free label: numbers live in aria-label/title.

@@ -11,7 +11,15 @@ import { Icon, type IconName } from '../icons'
 import { prefersReducedMotion } from '../utils/motion'
 import { useDropdownMenu } from '../hooks/useDropdownMenu'
 import { cn } from './cn'
-import { MENU_ROW, MENU_ROW_ACTIVE, MENU_ROW_IDLE, MENU_ROW_TEXT, MENU_SEPARATOR, MENU_SURFACE } from './menuStyles'
+import {
+  MENU_ROW,
+  MENU_ROW_ACTIVE,
+  MENU_ROW_DANGER,
+  MENU_ROW_IDLE,
+  MENU_ROW_TEXT,
+  MENU_SEPARATOR,
+  MENU_SURFACE
+} from './menuStyles'
 
 export type ActionMenuItem = {
   id: string
@@ -24,6 +32,8 @@ export type ActionMenuItem = {
   checked?: boolean
   /** Draw a rule above this item — to set apart an action from a list of choices. */
   separatorBefore?: boolean
+  /** Destructive (Delete): drawn in the danger tone. */
+  danger?: boolean
   onSelect: () => void
 }
 
@@ -139,7 +149,11 @@ export function ActionMenu({
               type="button"
               role={item.checked != null ? 'menuitemcheckbox' : 'menuitem'}
               aria-checked={item.checked != null ? item.checked : undefined}
-              className={cn(MENU_ROW, MENU_ROW_TEXT, index === activeIndex ? MENU_ROW_ACTIVE : MENU_ROW_IDLE)}
+              className={cn(
+                MENU_ROW,
+                item.danger ? MENU_ROW_DANGER : MENU_ROW_TEXT,
+                index === activeIndex ? MENU_ROW_ACTIVE : MENU_ROW_IDLE
+              )}
               onMouseEnter={() => setActiveIndex(index)}
               onClick={() => {
                 item.onSelect()
@@ -153,7 +167,7 @@ export function ActionMenu({
                   <span className="inline-block w-[15px] shrink-0" aria-hidden />
                 )
               ) : item.icon ? (
-                <Icon name={item.icon} size={15} className="text-muted" />
+                <Icon name={item.icon} size={15} className={item.danger ? 'text-danger' : 'text-muted'} />
               ) : null}
               {item.label}
             </button>

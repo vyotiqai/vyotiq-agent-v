@@ -22,7 +22,8 @@ export function GoalRunBanner({
   onActivate,
   onDismiss,
   onStopLoop,
-  onStopRun
+  onStopRun,
+  railPad = false
 }: {
   goal: RunGoal | null
   loop: RunLoop | null
@@ -34,6 +35,8 @@ export function GoalRunBanner({
   onDismiss?: () => void | Promise<boolean>
   onStopLoop: () => void | Promise<boolean>
   onStopRun?: () => void
+  /** Clear the panel rail that overlays the rightmost pane's edge. */
+  railPad?: boolean
 }) {
   const [now, setNow] = useState(() => Date.now())
   const armed = loop?.status === 'armed'
@@ -49,6 +52,8 @@ export function GoalRunBanner({
   // A proposal is the agent asking, not a running goal: it shows what would be
   // pursued and offers the grant, with none of the active-goal controls.
   const proposed = goal.status === 'proposed'
+  // A flush row above the instruction line, like a queued instruction: the
+  // flag carries the state, the objective the rest.
   return (
     <div
       data-goal-banner=""
@@ -56,8 +61,8 @@ export function GoalRunBanner({
       role="region"
       aria-label={proposed ? 'Suggested goal' : paused ? 'Goal paused' : 'Active goal'}
       className={cn(
-        'flex items-center gap-2 rounded-md border px-2 py-1',
-        paused || proposed ? 'border-border bg-surface' : 'border-accent/30 bg-accent/5'
+        'flex h-9 shrink-0 items-center gap-2.5 border-t border-border bg-bg pl-4 text-xs',
+        railPad ? 'pr-10' : 'pr-4'
       )}
     >
       <Icon
@@ -66,39 +71,38 @@ export function GoalRunBanner({
         className={cn('shrink-0', paused || proposed ? 'text-muted' : 'text-accent')}
         aria-hidden
       />
-      {proposed ? (
-        <span className="shrink-0 text-[11px] font-medium text-muted">Suggested goal</span>
-      ) : null}
+      <span className="shrink-0 text-tertiary">
+        {proposed ? 'Suggested goal' : paused ? 'Goal paused' : 'Goal'}
+      </span>
       <Tooltip content={goal.objective}>
-        <span className="min-w-0 flex-1 truncate text-xs text-fg [overflow-wrap:anywhere]">
-          {goal.objective}
-        </span>
+        <span className="min-w-0 flex-1 truncate text-secondary [overflow-wrap:anywhere]">{goal.objective}</span>
       </Tooltip>
       {armed && loop ? (
-        <span className="hidden shrink-0 text-[11px] text-muted sm:inline">
+        <span className="hidden shrink-0 font-mono text-caption text-tertiary tnum sm:inline">
           Loop {formatLoopInterval(loop.intervalMs)} · {nextTickLabel(loop, now)}
         </span>
       ) : null}
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="flex shrink-0 items-center gap-0.5">
         {proposed ? (
           <>
             <Tooltip content="Keep working on this objective until it is complete, including across restarts">
-              <Button type="button" variant="subtle" onClick={() => void onActivate?.()}>
+              <Button type="button" size="xs" variant="primary" onClick={() => void onActivate?.()}>
                 Start goal
               </Button>
             </Tooltip>
-            <Button type="button" variant="ghost" onClick={() => void onDismiss?.()}>
+            <Button type="button" size="xs" variant="ghost" onClick={() => void onDismiss?.()}>
               Dismiss
             </Button>
           </>
         ) : paused ? (
-          <Button type="button" variant="subtle" onClick={() => void onResume()}>
+          <Button type="button" size="xs" variant="ghost" onClick={() => void onResume()}>
             Resume
           </Button>
         ) : (
           <Button
             type="button"
-            variant="subtle"
+            size="xs"
+            variant="ghost"
             onClick={() => {
               // Always pause the goal via the dedicated, idempotent IPC path.
               // Stopping the live run is a secondary action so the goal is paused
@@ -111,12 +115,12 @@ export function GoalRunBanner({
           </Button>
         )}
         {proposed ? null : (
-          <Button type="button" variant="subtle" onClick={() => void onComplete()}>
+          <Button type="button" size="xs" variant="ghost" onClick={() => void onComplete()}>
             Mark complete
           </Button>
         )}
         {armed ? (
-          <Button type="button" variant="ghost" onClick={() => void onStopLoop()}>
+          <Button type="button" size="xs" variant="ghost" onClick={() => void onStopLoop()}>
             Stop loop
           </Button>
         ) : null}

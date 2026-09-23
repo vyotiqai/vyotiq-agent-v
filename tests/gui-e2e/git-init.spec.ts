@@ -55,7 +55,7 @@ async function activateWorkspace(window: Page, path: string): Promise<void> {
   await window.evaluate(() => localStorage.removeItem('vyotiq.chatPaneLayout'))
   await window.reload()
   await window.waitForLoadState('domcontentloaded')
-  await expect(window.getByRole('combobox', { name: 'Message' })).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByRole('combobox', { name: 'Instruction' })).toBeVisible({ timeout: 20_000 })
 }
 
 test.beforeAll(async () => {
