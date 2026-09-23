@@ -63,7 +63,7 @@ test.afterAll(async () => {
 test('auto-resumes interrupted run without manual Continue click', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) {
     await expand.click()
   }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RunStat } from '@shared/ipc'
-import type { WorkspaceSidebarRuns } from '@renderer/app/sidebar/types'
+import type { WorkspaceRuns } from '@renderer/app/navigator/types'
 import { pinnedRunKey } from './pinnedRuns'
 
 export type HomePageRunStats = Record<string, RunStat>
@@ -15,7 +15,7 @@ export type HomeRunStatsState = {
 
 export function useRunStats(
   openWorkspaces: readonly string[],
-  runsByWorkspacePath: Record<string, WorkspaceSidebarRuns>,
+  runsByWorkspacePath: Record<string, WorkspaceRuns>,
   refreshVersion = 0
 ): HomeRunStatsState {
   const [data, setData] = useState<HomePageRunStats>({})

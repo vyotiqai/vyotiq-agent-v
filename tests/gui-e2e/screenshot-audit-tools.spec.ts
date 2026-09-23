@@ -46,7 +46,7 @@ test.afterAll(async () => {
 test('streams T1 tool cards: unknown tool not titled placeholder; ask humanized', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) {
     await expand.click()
   }

@@ -57,15 +57,16 @@ test.afterAll(async () => {
   }
 })
 
-test('boot interrupts orphan running run and shows amber sidebar dot', async () => {
+test('boot interrupts an orphan running run and the navigator says so', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) {
     await expand.click()
   }
 
-  await expect(window.getByTitle('Interrupted — click to continue')).toBeVisible({
+  // Stopped glyph, named: "Interrupted", never shown as still running.
+  await expect(window.locator('[data-navigator]').getByTitle('Interrupted', { exact: true })).toBeVisible({
     timeout: 20_000
   })
 })

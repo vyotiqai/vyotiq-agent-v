@@ -53,7 +53,7 @@ test.afterAll(async () => {
 test('an edit tool card opens its file in the Files panel at the changed line', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) await expand.click()
 
   const composer = window.getByRole('combobox', { name: 'Message' })

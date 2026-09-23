@@ -28,8 +28,6 @@ const baseProps = {
       activeRunId: null
     }
   },
-  sessionQuery: '',
-  onSessionQuery: vi.fn(),
   onOpenSettings: vi.fn(),
   onOpenMarketplace: vi.fn(),
   onOpenChat: vi.fn(),
@@ -40,7 +38,6 @@ const baseProps = {
   onSwitchWorkspace: vi.fn(),
   onCloseWorkspace: vi.fn(),
   onAddWorkspace: vi.fn(),
-  workspaceHasBackgroundRun: () => false
 }
 
 beforeEach(() => {
@@ -136,7 +133,7 @@ describe('Home session entry points', () => {
 })
 
 describe("'Go to Home' command dispatch", () => {
-  it("opens Home from the command palette's Go to Home entry", () => {
+  it('opens Home from the Home command in search and commands', () => {
     const onOpenHome = vi.fn()
     render(
       <AppShell {...baseProps} onOpenHome={onOpenHome}>
@@ -144,14 +141,15 @@ describe("'Go to Home' command dispatch", () => {
       </AppShell>
     )
 
-    // Command palette chord: Ctrl/Cmd+Shift+P.
-    fireEvent.keyDown(window, { key: 'p', ctrlKey: true, shiftKey: true })
-    fireEvent.click(screen.getByRole('button', { name: /Go to Home/ }))
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
+    const input = screen.getByRole('textbox', { name: /search tasks, files and commands/i })
+    fireEvent.change(input, { target: { value: '>home' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(onOpenHome).toHaveBeenCalledTimes(1)
   })
 
-  it('opens Home from the top-left sidebar Home button', () => {
+  it('opens Home from the navigator', () => {
     const onOpenHome = vi.fn()
     render(
       <AppShell {...baseProps} onOpenHome={onOpenHome}>

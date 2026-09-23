@@ -2,62 +2,157 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { CommandPalette } from '@renderer/features/commandPalette/CommandPalette'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import type { RunSummary } from '@shared/ipc'
+import { CommandPalette, type PaletteFile } from '@renderer/features/commandPalette/CommandPalette'
+import { labelToKeys, paletteCommands, runPaletteCommand } from '@renderer/features/commandPalette/paletteCommands'
+import { buildNavigatorSections } from '@renderer/app/navigator/navigatorModel'
 
 afterEach(() => cleanup())
 
-const twoWorkspaces = [
-  { name: 'alpha', current: false },
-  { name: 'vyotiq', current: true }
+const WS = 'C:\\work\\vyotiq'
+const OTHER = 'C:\\work\\alpha'
+
+function tasksFor(runs: RunSummary[]) {
+  return buildNavigatorSections({
+    runsByWorkspacePath: { [WS]: { runs } },
+    openPaths: [WS],
+    activePath: WS,
+    activeRuns: [],
+    activeRunsLoaded: true,
+    scopePath: null
+  }).flatMap((s) => s.rows)
+}
+
+const RUNS: RunSummary[] = [
+  { runId: 'r1', status: 'done', updatedAt: new Date().toISOString(), goal: 'Fix the flaky updater test on Windows' },
+  { runId: 'r2', status: 'done', updatedAt: new Date().toISOString(), goal: 'Regroup Settings' }
 ]
 
+function renderPalette(over: Partial<Parameters<typeof CommandPalette>[0]> = {}) {
+  const handlers = {
+    onClose: vi.fn(),
+    onOpenTask: vi.fn(),
+    onOpenFile: vi.fn(),
+    onRunCommand: vi.fn(),
+    onNewTask: vi.fn()
+  }
+  render(
+    <CommandPalette
+      open
+      tasks={tasksFor(RUNS)}
+      commands={paletteCommands({ workspaces: [OTHER, WS], activePath: WS, canSendFeedback: true })}
+      newTaskIn={{ name: 'vyotiq' }}
+      {...handlers}
+      {...over}
+    />
+  )
+  return { handlers, input: screen.getByRole('textbox', { name: 'Search tasks, files and commands' }) }
+}
+
 describe('CommandPalette', () => {
-  it('shows one switch and one new-chat entry per open workspace, with no dead slots', () => {
-    render(
-      <CommandPalette open onClose={() => {}} onSelect={vi.fn()} workspaces={twoWorkspaces} />
-    )
+  it('groups tasks, files and commands and highlights the match', async () => {
+    vi.useFakeTimers()
+    const searchFiles = vi.fn(async (): Promise<PaletteFile[]> => [{ workspacePath: WS, path: 'src/main/updater/swap.ts' }])
+    const { input } = renderPalette({ searchFiles })
+    fireEvent.change(input, { target: { value: 'updater' } })
+    await act(async () => {
+      vi.advanceTimersByTime(120)
+    })
+    vi.useRealTimers()
 
-    expect(screen.getByText('Switch to workspace 1: alpha')).not.toBeNull()
-    expect(screen.getByText('Switch to workspace 2: vyotiq — current')).not.toBeNull()
-    expect(screen.getByText('New chat in alpha')).not.toBeNull()
-    expect(screen.getByText('New chat in vyotiq')).not.toBeNull()
-    expect(screen.queryByText(/^Switch to workspace 3/)).toBeNull()
-    expect(screen.queryByText(/^Switch to workspace 9/)).toBeNull()
+    expect(screen.getByRole('group', { name: 'Tasks' })).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'Files' })).toBeTruthy()
+    expect(searchFiles).toHaveBeenCalledWith('updater', 6)
+    const marks = [...document.querySelectorAll('mark')].map((m) => m.textContent)
+    expect(marks).toContain('updater')
+    expect(screen.queryByText('Regroup Settings')).toBeNull()
   })
 
-  it('emits workspaceN and newchatN ids on click', () => {
-    const onSelect = vi.fn()
-    render(
-      <CommandPalette open onClose={() => {}} onSelect={onSelect} workspaces={twoWorkspaces} />
-    )
-
-    fireEvent.click(screen.getByText('New chat in alpha'))
-    fireEvent.click(screen.getByText('Switch to workspace 2: vyotiq — current'))
-    expect(onSelect).toHaveBeenNthCalledWith(1, 'newchat1')
-    expect(onSelect).toHaveBeenNthCalledWith(2, 'workspace2')
+  it('opens the highlighted task on Enter and beside the current one on Shift Enter', () => {
+    const { handlers, input } = renderPalette()
+    fireEvent.change(input, { target: { value: 'flaky' } })
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+    expect(handlers.onOpenTask).toHaveBeenCalledWith(expect.objectContaining({ runId: 'r1' }), true)
   })
 
-  it('filters by workspace name and runs the highlighted entry on Enter', () => {
-    const onSelect = vi.fn()
-    render(
-      <CommandPalette open onClose={() => {}} onSelect={onSelect} workspaces={twoWorkspaces} />
-    )
-
-    const input = screen.getByPlaceholderText('Search commands…')
-    fireEvent.change(input, { target: { value: 'vyotiq' } })
-    expect(screen.queryByText('Switch to workspace 1: alpha')).toBeNull()
-    expect(screen.getByText('Switch to workspace 2: vyotiq — current')).not.toBeNull()
-
-    fireEvent.keyDown(input, { key: 'Enter' })
-    expect(onSelect).toHaveBeenCalledWith('workspace2')
+  it('narrows to commands with ">"', () => {
+    renderPalette()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks, files and commands' }), {
+      target: { value: '>settings' }
+    })
+    expect(screen.queryByRole('group', { name: 'Tasks' })).toBeNull()
+    expect(within(screen.getByRole('group', { name: 'Commands' })).getByText('Settings')).toBeTruthy()
   })
 
-  it('keeps the generic catalog when no workspaces prop is provided', () => {
-    render(<CommandPalette open onClose={() => {}} onSelect={vi.fn()} />)
+  it('turns the query into a new task with Ctrl Enter', () => {
+    const { handlers, input } = renderPalette()
+    fireEvent.change(input, { target: { value: 'bump electron' } })
+    expect(screen.getByText('New task: “bump electron”')).toBeTruthy()
+    expect(screen.getByText('in vyotiq')).toBeTruthy()
+    fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true })
+    expect(handlers.onNewTask).toHaveBeenCalledWith('bump electron')
+  })
 
-    expect(screen.getByText('Switch to workspace 1')).not.toBeNull()
-    expect(screen.getByText('Switch to workspace 9')).not.toBeNull()
-    expect(screen.queryByText(/^New chat in /)).toBeNull()
+  it('offers no new task when no workspace is open', () => {
+    const { input } = renderPalette({ newTaskIn: null })
+    fireEvent.change(input, { target: { value: 'bump electron' } })
+    expect(screen.queryByText(/New task:/)).toBeNull()
+  })
+
+  it('closes on Escape', () => {
+    const { handlers, input } = renderPalette()
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(handlers.onClose).toHaveBeenCalled()
+  })
+})
+
+describe('paletteCommands', () => {
+  it('lists one switch and one new-task command per open workspace, and never itself', () => {
+    const titles = paletteCommands({ workspaces: [OTHER, WS], activePath: WS, canSendFeedback: false }).map((c) => c.title)
+    expect(titles).toContain('Switch to alpha')
+    expect(titles).toContain('Switch to vyotiq')
+    expect(titles).toContain('New task in alpha')
+    expect(titles).not.toContain('Search and commands')
+    expect(titles.filter((t) => t.startsWith('Switch to '))).toHaveLength(2)
+    expect(titles).not.toContain('Send feedback')
+  })
+
+  it('marks the current workspace', () => {
+    const current = paletteCommands({ workspaces: [OTHER, WS], activePath: WS, canSendFeedback: false }).find(
+      (c) => c.title === 'Switch to vyotiq'
+    )
+    expect(current?.hint).toBe('current')
+  })
+
+  it('splits a chord label into keycaps', () => {
+    expect(labelToKeys('Ctrl+Shift+E')).toEqual(['Ctrl', 'Shift', 'E'])
+    expect(labelToKeys('Ctrl+,')).toEqual(['Ctrl', ','])
+    expect(labelToKeys('End')).toEqual(['End'])
+  })
+
+  it('handles app commands itself and hands the rest to the surface that owns them', () => {
+    const h = {
+      workspaces: [OTHER, WS],
+      onOpenSettings: vi.fn(),
+      onOpenHome: vi.fn(),
+      onNewTask: vi.fn(),
+      onToggleNavigator: vi.fn(),
+      onNextNeedsYou: vi.fn(),
+      onSwitchWorkspaceByIndex: vi.fn(),
+      onNewChatInWorkspace: vi.fn(),
+      onFocusInstructionLine: vi.fn()
+    }
+    runPaletteCommand('workspace2', h)
+    expect(h.onSwitchWorkspaceByIndex).toHaveBeenCalledWith(1)
+    runPaletteCommand('newchat1', h)
+    expect(h.onNewChatInWorkspace).toHaveBeenCalledWith(OTHER)
+
+    const seen: string[] = []
+    const onCommand = (e: Event) => seen.push((e as CustomEvent<{ id: string }>).detail.id)
+    window.addEventListener('vyotiq:command', onCommand)
+    runPaletteCommand('panelChanges', h)
+    window.removeEventListener('vyotiq:command', onCommand)
+    expect(seen).toEqual(['panelChanges'])
   })
 })

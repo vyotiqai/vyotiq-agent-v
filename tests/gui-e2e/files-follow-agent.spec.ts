@@ -55,7 +55,7 @@ test.afterAll(async () => {
 test('follow mode opens the file the run writes', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) await expand.click()
 
   await window.getByRole('button', { name: /Show files panel/i }).click()

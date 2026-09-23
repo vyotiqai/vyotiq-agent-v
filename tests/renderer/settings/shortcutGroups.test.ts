@@ -21,7 +21,7 @@ describe('shortcutGroups', () => {
     const listed = groups.flatMap((group) => group.entries.map((entry) => entry.id))
 
     // A new binding lands in "Other" until someone gives it a real group.
-    expect(groups.map((group) => group.title)).toEqual(['Navigation', 'Chat', 'Panels', 'Text size'])
+    expect(groups.map((group) => group.title)).toEqual(['Go', 'Task', 'Panels', 'Text size'])
     expect(new Set(listed).size).toBe(listed.length)
     expect(listed.filter((id) => id !== 'workspaces').sort()).toEqual([...expected].sort())
   })

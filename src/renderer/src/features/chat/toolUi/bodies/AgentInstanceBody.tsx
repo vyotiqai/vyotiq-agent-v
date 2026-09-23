@@ -3,7 +3,7 @@ import {
   parseAgentInstanceRunId,
   parseAgentInstanceRunIdFromArgs
 } from '@shared/utils/agentInstance'
-import { stripGoalMarkdown } from '@renderer/app/sidebar/runTitle'
+import { stripGoalMarkdown } from '@renderer/app/navigator/runTitle'
 import { useRunSession } from '../../RunSessionContext'
 import type { ToolBodyProps } from '../types'
 import { Button } from '@renderer/lib/ui'

@@ -43,6 +43,8 @@ const pending = new Map<
     cancel: (err: Error) => void
     runId: string
     invokeId?: number
+    /** When the request started waiting — the navigator's "waiting 3m". */
+    requestedAt: string
     request: ToolApprovalRequest
   }
 >()
@@ -74,6 +76,16 @@ export function listPendingToolApprovals(runId: string): ToolApprovalRequest[] {
     if (entry.runId === runId) out.push(entry.request)
   }
   return out
+}
+
+/** When this run's longest-waiting approval started waiting, or undefined when none is. */
+export function oldestPendingToolApprovalAt(runId: string): string | undefined {
+  let oldest: string | undefined
+  for (const entry of pending.values()) {
+    if (entry.runId !== runId) continue
+    if (oldest === undefined || entry.requestedAt < oldest) oldest = entry.requestedAt
+  }
+  return oldest
 }
 
 /** Total approvals waiting across all runs — drives the taskbar badge. */
@@ -295,6 +307,7 @@ function askThroughRenderer(
       cancel,
       runId: request.runId,
       invokeId,
+      requestedAt: new Date().toISOString(),
       request
     })
     notifyBadgeChange()

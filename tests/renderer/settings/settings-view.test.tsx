@@ -1775,8 +1775,10 @@ describe('settings', () => {
       />
     )
     fireEvent.click(screen.getByRole('button', { name: /^Shortcuts$/i }))
-    expect(screen.getByText('Search chats')).toBeTruthy()
+    expect(screen.getByText('Search and commands')).toBeTruthy()
     expect(screen.getByText('Ctrl+K')).toBeTruthy()
+    expect(screen.getByText('Next task that needs you')).toBeTruthy()
+    expect(screen.getByText('Ctrl+J')).toBeTruthy()
     expect(screen.getByText('Jump to latest')).toBeTruthy()
     expect(screen.getByText('End')).toBeTruthy()
   })
@@ -1796,8 +1798,10 @@ describe('settings', () => {
       target: { value: 'keyboard' }
     })
     fireEvent.click(screen.getByRole('option', { name: /Keyboard shortcuts/i }))
-    expect(screen.getByText('Search chats')).toBeTruthy()
+    expect(screen.getByText('Search and commands')).toBeTruthy()
     expect(screen.getByText('Ctrl+K')).toBeTruthy()
+    expect(screen.getByText('Next task that needs you')).toBeTruthy()
+    expect(screen.getByText('Ctrl+J')).toBeTruthy()
   })
 
   it('About section shows lockup, version, runtime, website, and docs', async () => {

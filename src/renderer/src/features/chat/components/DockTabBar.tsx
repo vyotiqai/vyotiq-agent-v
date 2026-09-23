@@ -1,7 +1,7 @@
 import { useMemo, type RefObject } from 'react'
 import { Tooltip, cn } from '@renderer/lib/ui'
 import { Icon, type IconName } from '@renderer/lib/icons'
-import { TITLEBAR_ACTIONS_PAD, type ChatRightPanelId, type DockImmersiveTabId } from '@renderer/lib/utils/layout'
+import type { ChatRightPanelId, DockImmersiveTabId } from '@renderer/lib/utils/layout'
 import { DOCK_PANELS, dockPanelDef } from '@renderer/lib/utils/dockPanels'
 import { handleTabListKeyDown } from '@renderer/lib/utils/tabListKeyboard'
 import { DOCK_CHROME_ICON_HOVER, DOCK_QUICK_LAUNCH_BTN, dockPanelTabButtonClass, dockPanelTabCloseClass, dockPanelTabShellClass, tabMiddleClickHandlers } from './PanelChrome'
@@ -37,7 +37,6 @@ export function DockTabBar({
   onToggleExpanded,
   variant = 'dock',
   terminalSessionBarHostRef,
-  embeddedInTitleBar = false,
   className
 }: {
   active: DockImmersiveTabId
@@ -50,15 +49,12 @@ export function DockTabBar({
   variant?: 'dock' | 'immersive'
   /** Host for {@link TerminalSessionBar} when the terminal panel is active. */
   terminalSessionBarHostRef?: RefObject<HTMLDivElement | null>
-  /** Side-dock tabs portaled into the title bar — fill host height, no second border. */
-  embeddedInTitleBar?: boolean
   className?: string
 }) {
   const immersive = variant === 'immersive'
-  const inTitleBar = immersive || embeddedInTitleBar
   const hasSessionChrome = Boolean(terminalSessionBarHostRef)
-  /** Push quick-launch / expand away from session + (side-dock strip and immersive titlebar). */
-  const separateActions = inTitleBar || hasSessionChrome
+  /** Push quick-launch / expand to the right edge when there is more than tabs. */
+  const separateActions = immersive || hasSessionChrome
 
   const openIds = useMemo(() => new Set(tabs.map((t) => t.id)), [tabs])
   const addable = useMemo(
@@ -79,24 +75,17 @@ export function DockTabBar({
   return (
     <div
       className={cn(
-        'flex min-w-0 shrink-0 flex-row items-center gap-0.5 bg-transparent',
-        inTitleBar
-          ? 'h-full w-full min-w-0 border-0 px-1 py-0'
-          : 'border-b border-border/60 px-1 py-0.5',
+        // Every pane starts with a 40px row; the panels' tabs are that row.
+        'flex h-10 min-w-0 shrink-0 flex-row items-center gap-0.5 border-b border-border bg-bg px-2',
         className
       )}
       data-dock-tab-bar
       data-dock-tab-variant={variant}
-      data-dock-embedded={embeddedInTitleBar ? '1' : undefined}
     >
       <div
         className={cn(
           'flex min-w-0 flex-row items-center gap-1',
-          inTitleBar
-            ? 'app-region-no-drag min-w-0 flex-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:h-0 [&::-webkit-scrollbar]:w-0'
-            : separateActions
-              ? 'min-w-0 max-w-full shrink overflow-x-auto'
-              : 'sidebar-scroll-x min-w-0 flex-1 overflow-x-auto'
+          separateActions ? 'min-w-0 max-w-full shrink overflow-x-auto' : 'sidebar-scroll-x min-w-0 flex-1 overflow-x-auto'
         )}
         role="tablist"
         aria-label={immersive ? 'Agent and panels' : 'Panels'}
@@ -169,36 +158,16 @@ export function DockTabBar({
           <span className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />
           <div
             ref={terminalSessionBarHostRef}
-            className={cn(
-              'inline-flex min-w-0 max-w-[min(100%,11rem)] shrink items-center overflow-hidden',
-              inTitleBar && 'app-region-no-drag'
-            )}
+            className="inline-flex min-w-0 max-w-[min(100%,11rem)] shrink items-center overflow-hidden"
             data-terminal-session-bar-host="1"
           />
         </>
       ) : null}
 
-      {separateActions && !embeddedInTitleBar ? (
-        <div
-          className={cn(
-            'min-w-3 flex-1 self-stretch',
-            inTitleBar && 'app-region-drag'
-          )}
-          aria-hidden
-          data-titlebar-drag-spacer={inTitleBar ? '' : undefined}
-          data-dock-action-spacer={!inTitleBar ? '' : undefined}
-          onDoubleClick={
-            inTitleBar ? () => void window.vyotiq?.windowMaximize() : undefined
-          }
-        />
-      ) : null}
+      {separateActions ? <div className="min-w-3 flex-1 self-stretch" aria-hidden data-dock-action-spacer="" /> : null}
 
       <div
-        className={cn(
-          'relative flex h-7 min-w-0 max-w-[min(100%,12rem)] shrink items-center gap-0.5',
-          inTitleBar && 'app-region-no-drag',
-          inTitleBar && TITLEBAR_ACTIONS_PAD
-        )}
+        className="relative flex h-7 min-w-0 max-w-[min(100%,12rem)] shrink items-center gap-0.5"
       >
         {showActionsDivider ? (
           <span className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />

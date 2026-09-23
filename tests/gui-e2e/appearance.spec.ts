@@ -322,7 +322,7 @@ test('corrupt appearance boot cache does not break startup', async () => {
   await window.reload()
   await window.locator('body').waitFor({ state: 'attached', timeout: 45_000 })
 
-  await expect(window.getByRole('button', { name: /^settings$/i })).toBeVisible({
+  await expect(window.getByRole('button', { name: /^settings/i })).toBeVisible({
     timeout: 15_000
   })
 

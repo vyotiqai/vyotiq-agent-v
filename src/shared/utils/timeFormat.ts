@@ -1,6 +1,6 @@
 /** Compact relative time: "now" | "2m" | "51m" | "3h" | "2d" */
-export function relativeTime(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime()
+export function relativeTime(iso: string, now: number = Date.now()): string {
+  const ms = now - new Date(iso).getTime()
   if (Number.isNaN(ms) || ms < 0) return ''
   const mins = Math.floor(ms / 60_000)
   if (mins < 1) return 'now'

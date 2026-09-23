@@ -8,7 +8,7 @@ import {
   instanceDisplayTitle,
   uniqueInstanceTitles,
   pathScopeLabel
-} from '@renderer/app/sidebar/runTitle'
+} from '@renderer/app/navigator/runTitle'
 import type { RunSummary } from '@shared/ipc'
 
 describe('namedGitBranch', () => {

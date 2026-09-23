@@ -358,11 +358,11 @@ test('Needs you lists the real failure states once each', async () => {
   await expect(region.getByText('Failed')).toBeVisible({ timeout: 20_000 })
   await expect(region.getByText('Interrupted')).toBeVisible()
   await expect(region.getByText('Unverified edits')).toBeVisible()
-  await expect(
-    launched.window.getByText('Fix the production login redirect')
-  ).toHaveCount(1)
-  // Nothing notable happened to this one, so it is on no list.
-  await expect(launched.window.getByText('Draft the release notes')).toHaveCount(0)
+  // Home, not the navigator beside it, which lists every task by design.
+  const home = launched.window.locator('#main-content')
+  await expect(home.getByText('Fix the production login redirect')).toHaveCount(1)
+  // Nothing notable happened to this one, so it is on no Home list.
+  await expect(home.getByText('Draft the release notes')).toHaveCount(0)
 })
 
 test('In flight reads the goal and loop sidecars from disk', async () => {

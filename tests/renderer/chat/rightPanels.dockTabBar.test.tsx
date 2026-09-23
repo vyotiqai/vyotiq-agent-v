@@ -279,7 +279,7 @@ describe('DockTabBar', () => {
     }
   })
 
-  it('immersive layout hugs tabs, exposes drag spacer, and keeps quick launch with collapse', () => {
+  it('immersive layout hugs tabs, pushes quick launch and collapse to the right, and never drags the window', () => {
     const onSelect = vi.fn()
     render(
       <DockTabBar
@@ -298,14 +298,17 @@ describe('DockTabBar', () => {
     )
     const bar = document.querySelector('[data-dock-tab-variant="immersive"]')
     const tablist = bar?.querySelector('[role="tablist"]')
-    expect(tablist?.className).toMatch(/\bflex-1\b/)
-    const spacer = bar?.querySelector('[data-titlebar-drag-spacer]')
+    expect(tablist?.className).not.toMatch(/\bflex-1\b/)
+    const spacer = bar?.querySelector('[data-dock-action-spacer]')
     expect(spacer).toBeTruthy()
+    // The bar is a row inside a pane now, not part of the title band.
+    expect(bar?.querySelector('.app-region-drag')).toBeNull()
+    expect(bar?.className).toContain('h-10')
     const quickLaunch = document.querySelector('[data-dock-quick-launch]')
     expect(quickLaunch).toBeTruthy()
     const browserLaunch = screen.getByRole('button', { name: /Show browser panel/i })
     const collapse = screen.getByRole('button', { name: /^Collapse panel$/i })
-    // Quick launch lives after the drag spacer with collapse — not glued to session +.
+    // Quick launch lives after the spacer with collapse — not glued to session +.
     expect(
       spacer!.compareDocumentPosition(quickLaunch!) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
@@ -314,7 +317,7 @@ describe('DockTabBar', () => {
     )
   })
 
-  it('keeps empty terminal session + before the drag spacer (not beside quick launch)', () => {
+  it('keeps empty terminal session + before the spacer (not beside quick launch)', () => {
     function Bar() {
       const ref = useRef<HTMLDivElement>(null)
       const [host, setHost] = useState<HTMLDivElement | null>(null)
@@ -355,7 +358,7 @@ describe('DockTabBar', () => {
       )
     }
     render(<Bar />)
-    const spacer = document.querySelector('[data-titlebar-drag-spacer]')
+    const spacer = document.querySelector('[data-dock-action-spacer]')
     const quickLaunch = document.querySelector('[data-dock-quick-launch]')
     const newTerminal = screen.getByRole('button', { name: /^New terminal$/i })
     expect(spacer).toBeTruthy()
@@ -371,7 +374,7 @@ describe('DockTabBar', () => {
     expect(document.querySelector('[data-terminal-session-bar] .flex-1')).toBeNull()
   })
 
-  it('side-dock embedded strip separates New terminal from quick launch', () => {
+  it('side-dock strip separates New terminal from quick launch', () => {
     function Bar() {
       const ref = useRef<HTMLDivElement>(null)
       const [host, setHost] = useState<HTMLDivElement | null>(null)
@@ -388,7 +391,6 @@ describe('DockTabBar', () => {
             onOpenPanel={vi.fn()}
             expanded={false}
             onToggleExpanded={vi.fn()}
-            embeddedInTitleBar
             terminalSessionBarHostRef={ref}
           />
           {host
@@ -409,16 +411,17 @@ describe('DockTabBar', () => {
       )
     }
     render(<Bar />)
-    const bar = document.querySelector('[data-dock-embedded="1"]')
-    const spacer = bar?.querySelector('[data-titlebar-drag-spacer]')
-    expect(spacer).toBeNull()
+    const bar = document.querySelector('[data-dock-tab-variant="dock"]')
+    expect(bar?.querySelector('[data-dock-action-spacer]')).toBeTruthy()
+    expect(bar?.querySelector('.app-region-drag')).toBeNull()
     const quickLaunch = document.querySelector('[data-dock-quick-launch]')
     const newTerminal = screen.getByRole('button', { name: /^New terminal$/i })
     expect(quickLaunch).toBeTruthy()
     expect(
       newTerminal.compareDocumentPosition(quickLaunch!) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
-    expect(quickLaunch!.parentElement?.className).toMatch(/\bpr-2\b/)
+    // The row's own px-2 is the right edge; the actions add none of their own.
+    expect(bar?.className).toMatch(/\bpx-2\b/)
     // Session host is outside the panel tablist.
     const tablist = bar?.querySelector('[role="tablist"]')
     expect(tablist?.contains(document.querySelector('[data-terminal-session-bar-host]')!)).toBe(

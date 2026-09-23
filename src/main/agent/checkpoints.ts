@@ -142,6 +142,26 @@ export function getWriteCheckpointMeta(
   return loadMeta(runDir, checkpointId)
 }
 
+/**
+ * Every checkpoint of a run, oldest first, with its meta. Read-only view for
+ * summaries (the navigator's "Ready for review"); unreadable entries are
+ * skipped rather than thrown.
+ */
+export function listCheckpointMetas(runDir: string): WriteCheckpointMeta[] {
+  const out: WriteCheckpointMeta[] = []
+  for (const entry of loadIndex(runDir).checkpoints) {
+    const meta = loadMeta(runDir, entry.id)
+    if (meta) out.push(entry.undone && !meta.undone ? { ...meta, undone: true } : meta)
+  }
+  return out
+}
+
+/** Where a checkpoint keeps the before-image of one workspace-relative path. */
+export function checkpointBeforeImagePath(runDir: string, checkpointId: string, relPath: string): string {
+  assertValidCheckpointId(checkpointId)
+  return blobPathFor(join(runDir, 'checkpoints', checkpointId), relPath)
+}
+
 function saveMeta(runDir: string, meta: WriteCheckpointMeta): void {
   assertValidCheckpointId(meta.id)
   const dir = join(runDir, 'checkpoints', meta.id)

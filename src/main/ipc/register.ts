@@ -430,6 +430,8 @@ import {
   followUpPreview,
   getRunWorkspace
 } from '../agent/runRegistry'
+import { invalidateListRunsCache } from '../agent/runListCache'
+import { listActiveRunsView } from '../agent/activeRunView'
 import {
   loadFollowUpPreviews,
   syncFollowUpsToDisk,
@@ -2147,6 +2149,8 @@ export function registerIpc(): void {
           paths: req.paths
         })
         persistWriteCheckpointEvent(runDir, req.runId, result.checkpointId)
+        // The task may leave "Ready for review" now; don't serve the old list.
+        invalidateListRunsCache(req.workspacePath)
         if (result.discarded.length > 0) {
           invalidateGitStatusCache(req.workspacePath)
           emitGitStatusChanged(req.workspacePath)
@@ -2684,7 +2688,7 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.runsActive, async (event): Promise<IpcResult<ActiveRunsResult>> => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
-      return ok(listActiveRuns())
+      return ok(listActiveRunsView())
     } catch (err) {
       return failFrom(err, IPC.runsActive)
     }

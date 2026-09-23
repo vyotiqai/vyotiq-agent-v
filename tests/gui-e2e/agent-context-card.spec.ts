@@ -58,11 +58,14 @@ test.afterAll(async () => {
 test('empty new chat shows the agent context card', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) await expand.click()
 
-  // Select the seeded workspace so the card reports its files, not another's.
-  await window.getByRole('button', { name: new RegExp(`agent-context-ws`, 'i') }).first().click()
+  // Filter to the seeded workspace so New task starts there and the card
+  // reports its files, not another's.
+  await window.locator('[data-navigator] [aria-haspopup="menu"]').first().click()
+  await window.getByRole('menuitemcheckbox', { name: /agent-context-ws/i }).click()
+  await window.getByRole('button', { name: /new task/i }).first().click()
 
   await expect(window.getByRole('combobox', { name: 'Message' })).toBeVisible({ timeout: 20_000 })
 

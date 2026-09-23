@@ -7,7 +7,6 @@ import { ChatView } from '@renderer/features/chat/ChatView'
 import { emptySecretStatus } from '@shared/ipc'
 import { TitleBar } from '@renderer/app/TitleBar'
 import { BreakpointProvider } from '@renderer/lib/context/BreakpointProvider'
-import { TitleBarAccessoryProvider } from '@renderer/lib/context/TitleBarAccessory'
 import { CHAT_SIDE_RAIL_TOP_INSET, clampDockWidthPx, DOCK_WIDTH_DEFAULT_PX, readSidebarWidthPxForCapacity, TITLE_BAR_HEIGHT_PX } from '@renderer/lib/utils/layout'
 import { resetDockImmersiveStore } from '@renderer/lib/hooks/dockImmersiveStore'
 import { minimalReadyPlanMarkdown } from '@renderer/features/chat/utils/planDraft'
@@ -1030,99 +1029,7 @@ describe('ChatView composer placement', () => {
     ).toMatch(/\bhidden\b/)
   })
 
-  it('portals immersive dock tabs into the titlebar when the shell host is present', () => {
-    render(
-      <BreakpointProvider>
-        <TitleBarAccessoryProvider>
-          <TitleBar drawerOpen={false} onToggleSidebar={() => {}} />
-          <ChatView {...baseProps} items={[]} />
-        </TitleBarAccessoryProvider>
-      </BreakpointProvider>
-    )
-    fireEvent.click(screen.getByRole('button', { name: /Show terminal panel/i }))
-    fireEvent.click(screen.getByRole('button', { name: /^Expand panel$/i }))
-
-    const titlebar = document.querySelector('[data-titlebar]')
-    const accessory = document.querySelector('[data-titlebar-accessory]')
-    const immersiveBar = document.querySelector('[data-dock-tab-variant="immersive"]')
-    expect(titlebar).toBeTruthy()
-    expect(accessory).toBeTruthy()
-    expect(immersiveBar).toBeTruthy()
-    expect(accessory?.contains(immersiveBar)).toBe(true)
-    expect(document.querySelector('[data-dock-immersive] [data-dock-tab-bar]')).toBeNull()
-    expect(screen.getByRole('tab', { name: /^Agent$/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /^Collapse panel$/i })).toBeTruthy()
-
-    // Accessory host stays draggable; only tab/action clusters are no-drag.
-    expect(accessory?.className).not.toMatch(/app-region-no-drag/)
-    const tablist = immersiveBar?.querySelector('[role="tablist"]')
-    expect(tablist?.className).toMatch(/app-region-no-drag/)
-    expect(tablist?.className).toMatch(/\bflex-1\b/)
-    expect(immersiveBar?.querySelector('[data-titlebar-drag-spacer]')).toBeTruthy()
-
-    // Agent tab matches other tabs: icon then label.
-    const agentTab = screen.getByRole('tab', { name: /^Agent$/i })
-    const agentChildren = Array.from(agentTab.childNodes).filter(
-      (n) => n.nodeType === Node.ELEMENT_NODE
-    ) as Element[]
-    expect(agentChildren[0]?.tagName.toLowerCase()).toBe('svg')
-    expect(agentChildren[1]?.textContent).toMatch(/^Agent$/i)
-
-    const quickLaunch = document.querySelector('[data-dock-quick-launch]')
-    expect(quickLaunch).toBeTruthy()
-    expect(quickLaunch?.closest('.app-region-no-drag')).toBeTruthy()
-    const collapse = screen.getByRole('button', { name: /^Collapse panel$/i })
-    expect(collapse.parentElement?.className).toMatch(/\bpr-2\b/)
-    // Quick launch shares the right cluster with collapse (drag spacer sits between tabs and actions).
-    expect(quickLaunch?.parentElement).toBe(collapse.parentElement)
-    const spacer = immersiveBar?.querySelector('[data-titlebar-drag-spacer]')
-    expect(spacer).toBeTruthy()
-    expect(
-      spacer!.compareDocumentPosition(quickLaunch!) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-  })
-
-  it('portals side-dock tabs into the titlebar aligned to the dock column', async () => {
-    render(
-      <BreakpointProvider>
-        <TitleBarAccessoryProvider>
-          <TitleBar drawerOpen={false} onToggleSidebar={() => {}} />
-          <ChatView {...baseProps} items={[]} />
-        </TitleBarAccessoryProvider>
-      </BreakpointProvider>
-    )
-    fireEvent.click(screen.getByRole('button', { name: /Show browser panel/i }))
-    await waitForPanel('[data-agent-browser-panel]')
-
-    const accessory = document.querySelector('[data-titlebar-accessory]')
-    const portal = document.querySelector('[data-dock-titlebar-portal]')
-    const tabsHost = document.querySelector('[data-dock-titlebar-tabs]')
-    const dock = document.querySelector('[data-right-dock]')
-    expect(accessory?.contains(portal)).toBe(true)
-    expect(portal?.querySelector('[data-titlebar-drag-spacer]')).toBeTruthy()
-    expect(tabsHost).toBeTruthy()
-    expect(document.querySelector('[data-dock-embedded="1"]')).toBeTruthy()
-    expect(document.querySelector('[data-dock-column-portal]')).toBeNull()
-    expect(dock?.querySelector('[data-dock-tab-bar]')).toBeNull()
-    expect(screen.getByRole('tab', { name: /^Browser$/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /^Expand panel$/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /^Expand panel$/i }).parentElement?.className).toMatch(
-      /\bpr-2\b/
-    )
-    expect(screen.getByPlaceholderText('Search or enter URL')).toBeTruthy()
-
-    // Tabs strip is dock width minus caption buttons so left edge matches the panel.
-    const dockWidth = Number.parseFloat(
-      (dock as HTMLElement | null)?.style.width?.replace('px', '') ?? ''
-    )
-    const tabsWidth = Number.parseFloat(
-      (tabsHost as HTMLElement | null)?.style.width?.replace('px', '') ?? ''
-    )
-    expect(dockWidth).toBeGreaterThan(0)
-    expect(tabsWidth).toBe(dockWidth - 132)
-  })
-
-  it('keeps side-dock tabs in the aside when the titlebar host is absent', async () => {
+  it('keeps the side-dock tabs in the aside, never in the title band', async () => {
     render(<ChatView {...baseProps} items={[]} />)
     fireEvent.click(screen.getByRole('button', { name: /Show browser panel/i }))
     await waitForPanel('[data-agent-browser-panel]')

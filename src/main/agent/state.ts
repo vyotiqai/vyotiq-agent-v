@@ -52,6 +52,7 @@ import { readLenientReceiptCost } from './runStats'
 import { readJsonDocCached } from './jsonDocCache'
 import { finalizeTodoContentOnRunEnd, type TodoFinalizeOutcome } from '../../shared/utils/todoContent'
 import { DEFAULT_PLAN_STUB, stripPlanStubChrome } from '../../shared/planStub'
+import { pendingReviewSummary } from './reviewSummary'
 import { ensureWorkspaceStorage, resolveRunDir, workspaceSessionsRoot } from '../storage/paths'
 import { TOOL_STUB_RESTART_INTERRUPTED } from '../../shared/toolStubs'
 import { isActive } from './runRegistry'
@@ -1125,7 +1126,11 @@ export async function loadEventsForRunAsync(
 }
 
 
-async function collectRunsFromRoot(root: string): Promise<{
+/**
+ * `workspaceRoot` is where the runs' files live; it is only needed for the
+ * pending-review summary, so callers that do not show it can omit it.
+ */
+async function collectRunsFromRoot(root: string, workspaceRoot?: string): Promise<{
   parents: RunSummary[]
   instances: RunSummary[]
 }> {
@@ -1190,6 +1195,10 @@ async function collectRunsFromRoot(root: string): Promise<{
       }
       const receiptCost = await readLenientReceiptCost(dir)
       if (receiptCost) Object.assign(summary, receiptCost)
+      if (workspaceRoot && !status.inlineInstance) {
+        const review = pendingReviewSummary(dir, workspaceRoot)
+        if (review) summary.review = review
+      }
       if (status.inlineInstance && status.parentRunId) {
         instances.push(summary)
       } else if (!status.inlineInstance) {
@@ -1211,7 +1220,8 @@ export async function listRuns(workspacePath: string): Promise<ListRunsResult> {
     // Reconcile only on cache miss/TTL expiry — avoids disk walk every sidebar poll.
     await reconcileStaleRuns(workspacePath)
     const { parents, instances } = await collectRunsFromRoot(
-      workspaceSessionsRoot(workspacePath)
+      workspaceSessionsRoot(workspacePath),
+      workspacePath
     )
     const sortedParents = parents.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     const parentIds = new Set(sortedParents.slice(0, RUN_LIST_CAP).map((r) => r.runId))
@@ -1236,7 +1246,7 @@ export async function listRunsOlder(
   olderThanIso: string,
   limit: number = RUN_LIST_CAP
 ): Promise<{ runs: RunSummary[]; hasMore: boolean }> {
-  const { parents } = await collectRunsFromRoot(workspaceSessionsRoot(workspacePath))
+  const { parents } = await collectRunsFromRoot(workspaceSessionsRoot(workspacePath), workspacePath)
   const older = parents
     .filter((r) => r.updatedAt < olderThanIso)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))

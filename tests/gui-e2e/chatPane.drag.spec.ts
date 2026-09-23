@@ -9,7 +9,7 @@ let launched: LaunchedApp
 let workspacePath: string
 
 async function ensureSidebarExpanded(): Promise<void> {
-  const expand = launched.window.getByRole('button', { name: /expand sidebar/i })
+  const expand = launched.window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) {
     await expand.click()
   }
@@ -166,7 +166,7 @@ test('multi-pane polish: min widths, sidebar open state, docked empty, rail pad'
   await expect(rightComposer).toHaveAttribute('data-composer-side-rail-pad', '1')
 
   // New chat in multi-pane stays docked (no centered hero).
-  await window.getByRole('button', { name: /new chat in/i }).first().click()
+  await window.getByRole('button', { name: /new task/i }).first().click()
   await expect(window.locator('[data-chat-pane]')).toHaveCount(2)
   await expect(window.locator('[data-chat-pane-title="New chat"]')).toBeVisible({ timeout: 10_000 })
   const newPane = window.locator('[data-chat-pane-title="New chat"]')

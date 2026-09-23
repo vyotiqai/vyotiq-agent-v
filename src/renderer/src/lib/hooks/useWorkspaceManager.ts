@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type {
+  ActiveRun,
   AgentEvent,
   AgentInteractionMode,
   PersistedEvent,
@@ -17,6 +18,7 @@ import { toLogErr } from '@shared/errors'
 import { isResumableInterruptedRun } from '@shared/runInterrupt'
 import { logger } from '@shared/logger'
 import { workspacePathsEqual, findByWorkspacePath } from '@shared/workspacePathMatch'
+import { ACTIVE_RUNS_CHANGED_EVENT, sameActiveRuns } from '@renderer/lib/chat/activeRunsSignal'
 import {
   createChatStreamController,
   EMPTY_RUN_EXPANSIONS,
@@ -600,7 +602,7 @@ export function useWorkspaceManager(options?: {
   maxChatPanesRef.current = options?.maxChatPanes ?? 0
   const [registry, setRegistry] = useState<WorkspacesState | null>(null)
   const [contexts, setContexts] = useState<Record<string, WorkspaceContext>>({})
-  const [activeRuns, setActiveRuns] = useState<{ runId: string; workspacePath: string }[]>([])
+  const [activeRuns, setActiveRuns] = useState<ActiveRun[]>([])
   /**
    * False until main has answered `listActiveRuns` once. Consumers reconcile a
    * run's persisted `running` status against {@link activeRuns}; before the
@@ -644,7 +646,7 @@ export function useWorkspaceManager(options?: {
     (workspacePath: string, runId: string | null) => void
   >(() => {})
   const lastActiveRunsWarnAtRef = useRef(0)
-  const activeRunsRef = useRef<{ runId: string; workspacePath: string }[]>([])
+  const activeRunsRef = useRef<ActiveRun[]>([])
   const orphanSyncTimersRef = useRef(new Map<string, number>())
 
   const bump = useCallback(() => setRevision((r) => r + 1), [])
@@ -1548,13 +1550,9 @@ export function useWorkspaceManager(options?: {
     }
     const prevActive = activeRunsRef.current
     const nextActive = res.data
-    const activeChanged =
-      prevActive.length !== nextActive.length ||
-      prevActive.some(
-        (entry, i) =>
-          entry.runId !== nextActive[i]?.runId ||
-          !workspacePathsEqual(entry.workspacePath, nextActive[i]!.workspacePath)
-      )
+    // Waiting and step counts change while the set of runs does not; the
+    // navigator shows both, so they count as a change too.
+    const activeChanged = !sameActiveRuns(prevActive, nextActive, workspacePathsEqual)
     activeRunsRef.current = nextActive
     setActiveRunsLoaded(true)
     if (activeChanged) {
@@ -1856,6 +1854,7 @@ export function useWorkspaceManager(options?: {
   useEffect(() => {
     if (!window.vyotiq?.onToolApprovalRequest) return
     return window.vyotiq.onToolApprovalRequest((request) => {
+      void pollActiveRuns()
       const ctrl = controllersRef.current.get(request.runId)
       if (!ctrl) {
         bufferOrphanApproval(request.runId, request)
@@ -1863,11 +1862,12 @@ export function useWorkspaceManager(options?: {
       }
       ctrl.handleApprovalRequest(request)
     })
-  }, [bufferOrphanApproval])
+  }, [bufferOrphanApproval, pollActiveRuns])
 
   useEffect(() => {
     if (!window.vyotiq?.onAgentQuestionRequest) return
     return window.vyotiq.onAgentQuestionRequest((request) => {
+      void pollActiveRuns()
       const ctrl = controllersRef.current.get(request.runId)
       if (!ctrl) {
         bufferOrphanQuestion(request.runId, request)
@@ -1875,7 +1875,7 @@ export function useWorkspaceManager(options?: {
       }
       ctrl.handleQuestionRequest(request)
     })
-  }, [bufferOrphanQuestion])
+  }, [bufferOrphanQuestion, pollActiveRuns])
 
   useEffect(() => {
     void pollActiveRuns()
@@ -1887,10 +1887,12 @@ export function useWorkspaceManager(options?: {
       if (document.visibilityState === 'visible') void pollActiveRuns()
     }
     window.addEventListener('focus', onFocus)
+    window.addEventListener(ACTIVE_RUNS_CHANGED_EVENT, onFocus)
     document.addEventListener('visibilitychange', onVisibility)
     return () => {
       window.clearInterval(id)
       window.removeEventListener('focus', onFocus)
+      window.removeEventListener(ACTIVE_RUNS_CHANGED_EVENT, onFocus)
       document.removeEventListener('visibilitychange', onVisibility)
       for (const timer of orphanSyncTimersRef.current.values()) {
         window.clearTimeout(timer)

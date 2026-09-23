@@ -45,7 +45,7 @@ test.afterAll(async () => {
 test('first send opens tool approval onboarding then streams fixture', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) {
     await expand.click()
   }

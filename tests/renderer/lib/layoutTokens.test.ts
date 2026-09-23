@@ -15,12 +15,6 @@ import {
   SETTINGS_COLUMN,
   SETTINGS_COLUMN_MAX,
   SETTINGS_GUTTER,
-  SIDEBAR_ROW_ACTIVE,
-  SIDEBAR_ROW_FOCUSED,
-  SIDEBAR_ROW_OPEN,
-  SIDEBAR_SEARCH_ROW,
-  SIDEBAR_SECTION_LABEL,
-  SIDEBAR_TOOLBAR_ROW,
   TRANSCRIPT_ROW_GAP,
   TRANSCRIPT_TURN_GAP,
   TRANSCRIPT_WORK_ROW_GAP,
@@ -73,7 +67,6 @@ describe('layout typography and spacing tokens', () => {
     expect(MICRO_LABEL).toContain('text-caption')
     expect(MICRO_LABEL_CAPS).toContain('text-2xs')
     expect(MICRO_LABEL_CAPS).toContain('tracking-[var(--vy-tracking-caps)]')
-    expect(SIDEBAR_SECTION_LABEL).toContain(MICRO_LABEL)
   })
 
   it('exports chat stage inset clearing the side rail', () => {
@@ -133,18 +126,5 @@ describe('layout typography and spacing tokens', () => {
     // spacer — otherwise rows bleed through the strip above the pinned prompt.
     expect(CHAT_STAGE_TOP_INSET).toBe('pt-4')
     expect(CHAT_STAGE_TOP_SPACER).toBe('h-4')
-  })
-
-  it('documents sidebar list active accent', () => {
-    expect(SIDEBAR_ROW_ACTIVE).toContain('border-l-fg-strong')
-    expect(SIDEBAR_ROW_OPEN).toContain('bg-surface/20')
-    expect(SIDEBAR_ROW_FOCUSED).toContain('bg-surface/45')
-    expect(SIDEBAR_ROW_FOCUSED).toContain('font-semibold')
-  })
-
-  it('exports sidebar toolbar row aligned with main title bar', () => {
-    expect(SIDEBAR_TOOLBAR_ROW).toContain('h-9')
-    expect(SIDEBAR_TOOLBAR_ROW).toContain('items-center')
-    expect(SIDEBAR_SEARCH_ROW).toContain('pb-2')
   })
 })

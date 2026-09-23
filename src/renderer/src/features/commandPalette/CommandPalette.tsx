@@ -1,146 +1,368 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  shortcutCatalog,
-  shortcutLabel,
-  type ShortcutCatalogEntry,
-  type ShortcutId
-} from '@renderer/lib/shortcuts'
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { Icon, type IconName } from '@renderer/lib/icons'
+import { FileTypeIcon } from '@renderer/lib/fileIcons'
+import { Keys, MENU_LABEL, MENU_SEPARATOR, StatusGlyph, cn } from '@renderer/lib/ui'
+import type { NavRow } from '@renderer/app/navigator/navigatorModel'
 
-/** Slot-ordered open workspaces (index 0 = Ctrl+1) driving per-workspace commands. */
-export type PaletteWorkspace = { name: string; current: boolean }
+export type PaletteCommand = {
+  id: string
+  title: string
+  icon?: IconName
+  /** The chord, as keycaps. */
+  keys?: readonly string[]
+  /** Quiet trailing text ("restarts Agent V"). */
+  hint?: string
+}
 
+export type PaletteFile = { workspacePath: string; path: string }
+
+type Item =
+  | { kind: 'task'; key: string; row: NavRow }
+  | { kind: 'file'; key: string; file: PaletteFile }
+  | { kind: 'command'; key: string; command: PaletteCommand }
+  | { kind: 'newTask'; key: string; text: string; where: string }
+
+const TASK_LIMIT = 6
+const FILE_LIMIT = 6
+const COMMAND_LIMIT = 8
+
+/**
+ * Search & commands (Ctrl K). One list, three groups — tasks, files, commands —
+ * with the matched text highlighted. `>` narrows to commands. Ctrl ↵ turns
+ * the query into a new task in the active workspace.
+ */
 export function CommandPalette({
   open,
   onClose,
-  onSelect,
-  workspaces,
-  extraEntries = []
+  tasks,
+  commands,
+  searchFiles,
+  newTaskIn,
+  onOpenTask,
+  onOpenFile,
+  onRunCommand,
+  onNewTask
 }: {
   open: boolean
   onClose: () => void
-  onSelect: (id: string) => void
-  /** When provided, replaces the generic workspace1..9 rows with real per-slot commands. */
-  workspaces?: PaletteWorkspace[]
-  /** App-level commands outside SHORTCUT_BINDINGS (stable identity; merged after the base catalog). */
-  extraEntries?: ShortcutCatalogEntry[]
+  /** Every task the navigator knows, in its order (needs you first). */
+  tasks: readonly NavRow[]
+  commands: readonly PaletteCommand[]
+  /** Paths in the active workspace matching a query; absent without a workspace. */
+  searchFiles?: (query: string, limit: number) => Promise<PaletteFile[]>
+  /** Where Ctrl ↵ starts a task, or null when no workspace is open. */
+  newTaskIn: { name: string } | null
+  onOpenTask: (row: NavRow, beside: boolean) => void
+  onOpenFile: (file: PaletteFile) => void
+  onRunCommand: (id: string) => void
+  onNewTask: (text: string) => void
 }) {
-  const entries = useMemo(() => {
-    if (!workspaces) return [...shortcutCatalog(), ...extraEntries]
-    const base = shortcutCatalog().filter((entry) => !/^workspace[1-9]$/.test(entry.id))
-    const dynamic: ShortcutCatalogEntry[] = []
-    workspaces.slice(0, 9).forEach((ws, i) => {
-      const slot = i + 1
-      const id = `workspace${slot}` as ShortcutId
-      dynamic.push({
-        id,
-        title: `Switch to workspace ${slot}: ${ws.name}${ws.current ? ' — current' : ''}`,
-        label: shortcutLabel(id)
-      })
-      dynamic.push({
-        id: `newchat${slot}`,
-        title: `New chat in ${ws.name}`,
-        label: ''
-      })
-    })
-    return [...base, ...extraEntries, ...dynamic]
-  }, [workspaces, extraEntries])
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
+  const [files, setFiles] = useState<PaletteFile[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!open) return
     setQuery('')
     setIndex(0)
-    inputRef.current?.focus()
+    setFiles([])
+    // Put focus back where it was, unless what was picked moved it on purpose.
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const t = window.setTimeout(() => inputRef.current?.focus(), 0)
+    return () => {
+      window.clearTimeout(t)
+      window.setTimeout(() => {
+        const current = document.activeElement
+        if (previous?.isConnected && (current === null || current === document.body)) previous.focus()
+      }, 0)
+    }
   }, [open])
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return entries
-    return entries.filter(
-      (entry) =>
-        entry.title.toLowerCase().includes(q) ||
-        entry.label.toLowerCase().includes(q) ||
-        entry.id.toLowerCase().includes(q)
-    )
-  }, [entries, query])
+  const commandsOnly = query.startsWith('>')
+  const needle = (commandsOnly ? query.slice(1) : query).trim()
+
+  // Files come from main; the latest query wins.
+  useEffect(() => {
+    if (!open || commandsOnly || !needle || !searchFiles) {
+      setFiles([])
+      return
+    }
+    let cancelled = false
+    const t = window.setTimeout(() => {
+      void searchFiles(needle, FILE_LIMIT).then((found) => {
+        if (!cancelled) setFiles(found)
+      })
+    }, 90)
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
+  }, [open, commandsOnly, needle, searchFiles])
+
+  const groups = useMemo(() => {
+    const lower = needle.toLowerCase()
+    const matches = (text: string): boolean => !lower || text.toLowerCase().includes(lower)
+    const taskItems: Item[] = commandsOnly
+      ? []
+      : tasks
+          .filter((row) => matches(row.title))
+          .slice(0, TASK_LIMIT)
+          .map((row) => ({ kind: 'task' as const, key: `task:${row.workspacePath}:${row.runId}`, row }))
+    const fileItems: Item[] = commandsOnly
+      ? []
+      : files.map((file) => ({ kind: 'file' as const, key: `file:${file.path}`, file }))
+    const commandItems: Item[] = commands
+      .filter((c) => matches(c.title))
+      .slice(0, commandsOnly ? commands.length : COMMAND_LIMIT)
+      .map((command) => ({ kind: 'command' as const, key: `cmd:${command.id}`, command }))
+    const newTask: Item[] =
+      !commandsOnly && needle && newTaskIn
+        ? [{ kind: 'newTask', key: 'new-task', text: needle, where: newTaskIn.name }]
+        : []
+    return { taskItems, fileItems, commandItems, newTask }
+  }, [needle, commandsOnly, tasks, files, commands, newTaskIn])
+
+  const flat = useMemo(
+    () => [...groups.taskItems, ...groups.fileItems, ...groups.commandItems, ...groups.newTask],
+    [groups]
+  )
+  const positionOf = useMemo(() => new Map(flat.map((item, i) => [item.key, i])), [flat])
 
   useEffect(() => {
-    setIndex((i) => Math.min(i, Math.max(0, filtered.length - 1)))
-  }, [filtered.length])
+    setIndex((i) => Math.min(i, Math.max(0, flat.length - 1)))
+  }, [flat.length])
+
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-palette-index="${index}"]`)
+    el?.scrollIntoView?.({ block: 'nearest' })
+  }, [index])
 
   if (!open) return null
 
-  const run = (entry: ShortcutCatalogEntry): void => {
-    onSelect(entry.id)
+  const activate = (item: Item | undefined, opts: { beside?: boolean } = {}): void => {
+    if (!item) return
     onClose()
+    if (item.kind === 'task') onOpenTask(item.row, opts.beside === true)
+    else if (item.kind === 'file') onOpenFile(item.file)
+    else if (item.kind === 'command') onRunCommand(item.command.id)
+    else onNewTask(item.text)
   }
 
-  return (
+  const render = (item: Item): ReactNode => {
+    const i = positionOf.get(item.key) ?? 0
+    return (
+      <PaletteRow key={item.key} item={item} index={i} active={i === index} needle={needle} onHover={() => setIndex(i)} onClick={() => activate(item)} />
+    )
+  }
+
+  const overlay = (
     <div
-      className="fixed inset-0 z-[80] flex items-start justify-center bg-black/40 pt-[12vh]"
+      className="fixed inset-0 z-dropdown flex items-start justify-center bg-overlay pt-[88px] animate-fade-in"
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose()
       }}
     >
       <div
-        className="flex w-[min(32rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-lg border border-border bg-bg shadow-lg"
         role="dialog"
-        aria-label="Command palette"
+        aria-modal="true"
+        aria-label="Search and commands"
+        className="vy-menu flex max-h-[min(560px,calc(100vh-120px))] w-[min(640px,calc(100vw-2rem))] flex-col overflow-hidden animate-dialog-in"
       >
-        <input
-          ref={inputRef}
-          className="border-b border-border bg-transparent px-3 py-2 text-sm text-fg outline-none"
-          placeholder="Search commands…"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              event.preventDefault()
-              onClose()
-              return
-            }
-            if (event.key === 'ArrowDown') {
-              event.preventDefault()
-              setIndex((i) => Math.min(filtered.length - 1, i + 1))
-              return
-            }
-            if (event.key === 'ArrowUp') {
-              event.preventDefault()
-              setIndex((i) => Math.max(0, i - 1))
-              return
-            }
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              const entry = filtered[index]
-              if (entry) run(entry)
-            }
-          }}
-        />
-        <ul className="m-0 max-h-80 list-none overflow-auto p-1">
-          {filtered.length === 0 ? (
-            <li className="px-2 py-2 text-sm text-muted">No matching commands.</li>
-          ) : (
-            filtered.map((entry, i) => (
-              <li key={entry.id}>
-                <button
-                  type="button"
-                  className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm ${
-                    i === index ? 'bg-accent/15 text-fg' : 'text-fg hover:bg-surface-2'
-                  }`}
-                  onMouseEnter={() => setIndex(i)}
-                  onClick={() => run(entry)}
-                >
-                  <span>{entry.title}</span>
-                  <span className="text-xs text-muted">{entry.label}</span>
-                </button>
-              </li>
-            ))
-          )}
-        </ul>
+        <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
+          <Icon name="search" size={16} className="text-muted" />
+          <input
+            ref={inputRef}
+            aria-label="Search tasks, files and commands"
+            aria-controls="palette-results"
+            aria-activedescendant={flat[index] ? `palette-item-${index}` : undefined}
+            placeholder="Search tasks, files and commands"
+            className="min-w-0 flex-1 bg-transparent text-md text-fg-strong outline-none placeholder:text-tertiary"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value)
+              setIndex(0)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                event.stopPropagation()
+                onClose()
+                return
+              }
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                setIndex((i) => Math.min(flat.length - 1, i + 1))
+                return
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault()
+                setIndex((i) => Math.max(0, i - 1))
+                return
+              }
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                if (event.ctrlKey || event.metaKey) {
+                  if (needle && newTaskIn) {
+                    activate({ kind: 'newTask', key: 'new-task', text: needle, where: newTaskIn.name })
+                  }
+                  return
+                }
+                activate(flat[index], { beside: event.shiftKey })
+              }
+            }}
+          />
+          <Keys keys={['Esc']} />
+        </div>
+        <div ref={listRef} id="palette-results" role="listbox" aria-label="Results" className="scroll-thin min-h-0 flex-1 overflow-y-auto p-1.5">
+          {flat.length === 0 ? (
+            <p className="px-2 py-6 text-center text-sm text-tertiary">
+              {commandsOnly ? 'No matching commands.' : 'Nothing matches.'}
+            </p>
+          ) : null}
+          {groups.taskItems.length > 0 ? (
+            <div role="group" aria-label="Tasks">
+              <div className={MENU_LABEL}>Tasks</div>
+              {groups.taskItems.map(render)}
+            </div>
+          ) : null}
+          {groups.fileItems.length > 0 ? (
+            <div role="group" aria-label="Files">
+              <div className={MENU_LABEL}>Files</div>
+              {groups.fileItems.map(render)}
+            </div>
+          ) : null}
+          {groups.commandItems.length > 0 ? (
+            <div role="group" aria-label="Commands">
+              <div className={MENU_LABEL}>Commands</div>
+              {groups.commandItems.map(render)}
+            </div>
+          ) : null}
+          {groups.newTask.length > 0 ? (
+            <>
+              <div role="separator" className={MENU_SEPARATOR} />
+              {groups.newTask.map(render)}
+            </>
+          ) : null}
+        </div>
+        <div className="flex h-9 shrink-0 items-center gap-4 border-t border-border px-4 text-caption text-tertiary">
+          <span className="flex items-center gap-1.5">
+            <Keys keys={['↑', '↓']} /> move
+          </span>
+          <span className="flex items-center gap-1.5">
+            <Keys keys={['↵']} /> open
+          </span>
+          <span className="flex items-center gap-1.5">
+            <Keys keys={['Shift', '↵']} /> open beside
+          </span>
+          <span className="flex-1" />
+          <span>Type &gt; for commands only</span>
+        </div>
       </div>
     </div>
+  )
+
+  return createPortal(overlay, document.body)
+}
+
+function PaletteRow({
+  item,
+  index,
+  active,
+  needle,
+  onHover,
+  onClick
+}: {
+  item: Item
+  index: number
+  active: boolean
+  needle: string
+  onHover: () => void
+  onClick: () => void
+}) {
+  const base = cn(
+    'flex w-full items-center gap-2 rounded-md px-2 text-left',
+    item.kind === 'task' ? 'py-1.5' : 'h-8',
+    active ? 'bg-surface-2' : 'hover:bg-surface'
+  )
+  const common = {
+    id: `palette-item-${index}`,
+    'data-palette-index': index,
+    role: 'option' as const,
+    'aria-selected': active,
+    className: base,
+    onMouseEnter: onHover,
+    onMouseDown: (e: MouseEvent) => e.preventDefault(),
+    onClick
+  }
+  if (item.kind === 'task') {
+    const row = item.row
+    const detail = [row.workspaceName, taskDetail(row)].filter(Boolean).join(' · ')
+    return (
+      <div {...common}>
+        <span title={row.stateLabel} className="inline-flex shrink-0">
+          <StatusGlyph state={row.state} size={14} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm text-fg">{highlight(row.title, needle)}</span>
+          <span className="block truncate text-xs text-muted">{detail}</span>
+        </span>
+        {active ? <span className="shrink-0 text-xs text-tertiary">↵ open</span> : null}
+      </div>
+    )
+  }
+  if (item.kind === 'file') {
+    return (
+      <div {...common}>
+        <FileTypeIcon path={item.file.path} size={14} />
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg">{highlight(item.file.path, needle)}</span>
+      </div>
+    )
+  }
+  if (item.kind === 'command') {
+    const c = item.command
+    return (
+      <div {...common}>
+        <Icon name={c.icon ?? 'command'} size={15} className="shrink-0 text-muted" />
+        <span className="min-w-0 flex-1 truncate text-sm text-fg">{highlight(c.title, needle)}</span>
+        {c.hint ? <span className="shrink-0 text-xs text-tertiary">{c.hint}</span> : null}
+        {c.keys?.length ? <Keys keys={c.keys} /> : null}
+      </div>
+    )
+  }
+  return (
+    <div {...common}>
+      <Icon name="plus" size={15} className="shrink-0 text-muted" />
+      <span className="flex min-w-0 flex-1 items-baseline gap-2">
+        <span className="truncate text-sm text-fg">New task: “{item.text}”</span>
+        <span className="shrink-0 truncate text-xs text-muted">in {item.where}</span>
+      </span>
+      <Keys keys={['Ctrl', '↵']} />
+    </div>
+  )
+}
+
+function taskDetail(row: NavRow): string {
+  const meta = row.meta
+  if (meta.kind === 'steps') return `step ${meta.current} of ${meta.total}`
+  if (meta.kind === 'diff') return `${meta.files} ${meta.files === 1 ? 'file' : 'files'} to review`
+  if (meta.kind === 'files') return `${meta.files} ${meta.files === 1 ? 'file' : 'files'} to review`
+  return meta.accent ? `${row.stateLabel} · ${meta.text}` : meta.text
+}
+
+/** The first case-insensitive occurrence of `needle`, marked. */
+export function highlight(text: string, needle: string): ReactNode {
+  if (!needle) return text
+  const at = text.toLowerCase().indexOf(needle.toLowerCase())
+  if (at < 0) return text
+  return (
+    <>
+      {text.slice(0, at)}
+      <mark className="rounded-sm bg-accent-soft px-px text-fg-strong">{text.slice(at, at + needle.length)}</mark>
+      {text.slice(at + needle.length)}
+    </>
   )
 }

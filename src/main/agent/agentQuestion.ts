@@ -24,6 +24,8 @@ const pending = new Map<
     cancel: (err: Error) => void
     runId: string
     invokeId?: number
+    /** When the request started waiting — the navigator's "waiting 3m". */
+    requestedAt: string
     request: AgentQuestionRequest
   }
 >()
@@ -55,6 +57,16 @@ export function listPendingAgentQuestions(runId: string): AgentQuestionRequest[]
     if (entry.runId === runId) out.push(entry.request)
   }
   return out
+}
+
+/** When this run's longest-waiting question started waiting, or undefined when none is. */
+export function oldestPendingAgentQuestionAt(runId: string): string | undefined {
+  let oldest: string | undefined
+  for (const entry of pending.values()) {
+    if (entry.runId !== runId) continue
+    if (oldest === undefined || entry.requestedAt < oldest) oldest = entry.requestedAt
+  }
+  return oldest
 }
 
 /** Total questions waiting across all runs — drives the taskbar badge. */
@@ -220,6 +232,7 @@ export function askQuestionThroughRenderer(
       cancel,
       runId: request.runId,
       invokeId,
+      requestedAt: new Date().toISOString(),
       request
     })
     notifyBadgeChange()

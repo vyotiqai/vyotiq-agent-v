@@ -1,23 +1,10 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { TitleBar } from '@renderer/app/TitleBar'
-import { BreakpointProvider } from '@renderer/lib/context/BreakpointProvider'
 import { MACOS_TITLEBAR_INSET_PX } from '@shared/windowChrome'
-
-beforeEach(() => {
-  Object.defineProperty(window, 'matchMedia', {
-    writable: true,
-    value: (query: string) => ({
-      matches: query.includes('1024px'),
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {}
-    })
-  })
-})
 
 afterEach(() => {
   cleanup()
@@ -26,88 +13,82 @@ afterEach(() => {
 
 function renderBar(
   platform: string | undefined,
-  options: {
-    drawerOpen?: boolean
-    desktop?: boolean
-    sidebarExpanded?: boolean
-  } = {}
+  options: { navigatorOpen?: boolean; width?: number; compact?: boolean } = {}
 ) {
+  const onToggleNavigator = vi.fn()
+  const onOpenSearch = vi.fn()
   window.vyotiq = {
     platform,
-    windowIsMaximized: vi.fn(async () => ({ ok: true as const, data: false }))
-  }
-
-  if (options.desktop === false) {
-    Object.defineProperty(window, 'matchMedia', {
-      writable: true,
-      value: () => ({
-        matches: false,
-        media: '',
-        addEventListener: () => {},
-        removeEventListener: () => {}
-      })
-    })
-  }
-
-  return render(
-    <BreakpointProvider>
-      <TitleBar
-        drawerOpen={options.drawerOpen ?? false}
-        onToggleSidebar={vi.fn()}
-        sidebarExpanded={options.sidebarExpanded ?? false}
-      />
-    </BreakpointProvider>
+    windowIsMaximized: vi.fn(async () => ({ ok: true as const, data: false })),
+    windowMinimize: vi.fn(),
+    windowMaximize: vi.fn(),
+    windowClose: vi.fn()
+  } as unknown as typeof window.vyotiq
+  const utils = render(
+    <TitleBar
+      navigatorOpen={options.navigatorOpen ?? true}
+      navigatorWidthPx={options.width ?? 264}
+      onToggleNavigator={onToggleNavigator}
+      onOpenSearch={onOpenSearch}
+      compact={options.compact}
+    />
   )
+  return { ...utils, onToggleNavigator, onOpenSearch }
 }
 
 describe('TitleBar', () => {
-  it('shows window controls on win32', () => {
+  it('draws the three caption buttons on win32, each 46px wide', () => {
     renderBar('win32')
-    expect(screen.getByRole('button', { name: /minimize/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /maximize/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /^Close$/ })).toBeTruthy()
+    for (const name of [/minimize/i, /maximize/i, /^close$/i]) {
+      expect(screen.getByRole('button', { name }).style.width).toBe('46px')
+    }
   })
 
-  it('does not host the desktop sidebar toggle', () => {
+  it('draws no caption buttons on macOS and clears the traffic lights', () => {
+    const { container } = renderBar('darwin')
+    expect(screen.queryByRole('button', { name: /minimize/i })).toBeNull()
+    const brand = container.querySelector('[data-titlebar-brand]') as HTMLElement
+    expect(brand.style.paddingLeft).toBe(`${MACOS_TITLEBAR_INSET_PX}px`)
+  })
+
+  it('lines the mark and toggle up over the navigator column', () => {
+    const { container } = renderBar('win32', { width: 300 })
+    const brand = container.querySelector('[data-titlebar-brand]') as HTMLElement
+    expect(brand.style.width).toBe('300px')
+    expect(brand.textContent).toContain('Agent V')
+  })
+
+  it('names the toggle by what it will do, with its shortcut', () => {
+    const { onToggleNavigator, rerender } = renderBar('win32', { navigatorOpen: true })
+    fireEvent.click(screen.getByRole('button', { name: /hide navigator \(Ctrl\+B\)/i }))
+    expect(onToggleNavigator).toHaveBeenCalled()
+    rerender(
+      <TitleBar navigatorOpen={false} navigatorWidthPx={264} onToggleNavigator={vi.fn()} onOpenSearch={vi.fn()} />
+    )
+    expect(screen.getByRole('button', { name: /show navigator/i })).toBeTruthy()
+  })
+
+  it('opens search from the centred trigger and shows its shortcut as keycaps', () => {
+    const { onOpenSearch } = renderBar('win32')
+    const trigger = screen.getByRole('button', { name: /search tasks, files and commands/i })
+    expect([...trigger.querySelectorAll('kbd')].map((k) => k.textContent)).toEqual(['Ctrl', 'K'])
+    fireEvent.click(trigger)
+    expect(onOpenSearch).toHaveBeenCalled()
+  })
+
+  it('is a drag region whose controls all opt out', () => {
     renderBar('win32')
-    expect(screen.queryByRole('button', { name: /collapse sidebar/i })).toBeNull()
-    expect(screen.queryByRole('button', { name: /expand sidebar/i })).toBeNull()
-    expect(screen.queryByRole('button', { name: /open menu/i })).toBeNull()
-  })
-
-  it('shows the menu toggle on mobile', () => {
-    renderBar('win32', { desktop: false })
-    expect(screen.getByRole('button', { name: /open menu/i })).toBeTruthy()
-  })
-
-  it('does not render a brand mark in the mobile title bar', () => {
-    const { container } = renderBar('win32', { desktop: false })
-    expect(container.querySelector('[data-titlebar-accessory] [data-brand-mark]')).toBeNull()
-  })
-
-  it('does not render a brand mark in the desktop title bar', () => {
-    const { container } = renderBar('win32')
-    expect(container.querySelector('[data-titlebar-accessory] [data-brand-mark]')).toBeNull()
-  })
-
-  it('keeps the title bar brand-free while the sidebar is expanded', () => {
-    const { container } = renderBar('win32', { sidebarExpanded: true })
-    expect(container.querySelector('[data-titlebar-accessory] [data-brand-mark]')).toBeNull()
-  })
-
-  it('uses shared macOS inset on mobile title bar', () => {
-    renderBar('darwin', { desktop: false })
     const header = screen.getByRole('banner')
-    expect(header.style.paddingLeft).toBe(`${MACOS_TITLEBAR_INSET_PX}px`)
+    expect(header.className).toContain('app-region-drag')
+    for (const button of screen.getAllByRole('button')) {
+      expect(button.closest('.app-region-no-drag')).not.toBeNull()
+    }
   })
 
-  it('floats flush to the top edge as an overlay with no seam', () => {
-    const { container } = renderBar('win32')
-    const header = screen.getByRole('banner')
-    expect(header.className).toContain('absolute')
-    expect(header.className).toContain('inset-x-0')
-    expect(header.className).toContain('top-0')
-    expect(header.className).not.toContain('border-b')
-    expect(container.querySelector('[data-titlebar-accessory]')).toBeTruthy()
+  it('gives Close its own hover colour instead of stacking two', () => {
+    renderBar('win32')
+    const close = screen.getByRole('button', { name: /^close$/i })
+    expect(close.className).toContain('hover:bg-window-close')
+    expect(close.className).not.toContain('hover:bg-surface')
   })
 })

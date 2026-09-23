@@ -1,6 +1,5 @@
 import type { Ref } from 'react'
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { MessageList } from './components/MessageList'
 import { AgentBrowserPanel } from './components/AgentBrowserPanel'
 import type { WorkspaceFileOpenRequest } from './components/FilesPanel'
@@ -50,11 +49,6 @@ import { usePersistedBoolean } from '@renderer/lib/hooks/usePersistedBoolean'
 import { usePersistedNumber } from '@renderer/lib/hooks/usePersistedNumber'
 import { setDockImmersive } from '@renderer/lib/hooks/dockImmersiveStore'
 import {
-  TitleBarBandSpent,
-  useTitleBarAccessory,
-  useTitleBarBand
-} from '@renderer/lib/context/TitleBarAccessory'
-import {
   BROWSER_PANEL_OPEN_KEY,
   CHAT_RIGHT_PANEL,
   CHAT_RIGHT_PANEL_IDS,
@@ -65,13 +59,9 @@ import {
   DOCK_WIDTH_MIN_PX,
   IMMERSIVE_TAB_KEY,
   RIGHT_PANEL_KEY,
-  TITLE_BAR_HEIGHT,
-  WINDOW_CONTROLS_WIDTH_PX,
   clampDockWidthPx,
   readSidebarWidthPxForCapacity,
   isChatRightPanelId,
-  showsWindowControls,
-  windowControlsReservePx,
   type ChatRightPanelId,
   type DockImmersiveTabId
 } from '@renderer/lib/utils/layout'
@@ -91,6 +81,8 @@ import {
 } from './hooks/composerShared'
 import type { PaneCapacityContext } from '@renderer/lib/hooks/useWorkspaceManager'
 import type { ChatPane, PaneDropZone } from '@renderer/lib/chat/chatPaneLayout'
+import { consumeWorkspaceFileRequest, useWorkspaceFileRequest } from '@renderer/lib/chat/workspaceFileRequests'
+import { workspacePathsEqual } from '@shared/workspacePathMatch'
 
 
 
@@ -484,33 +476,11 @@ const runGoal = useRunGoal({
   }, [])
   const dockMaxPx = clampDock(DOCK_WIDTH_MAX_PX)
   const dockImmersive = dockExpanded && dockTabs.length > 0
-  const { host: titleBarHost, setOccupied: setTitleBarOccupied } = useTitleBarAccessory()
-  const dockSideTitleBar = activeRightPanel != null && !dockImmersive && titleBarHost != null
 
   useEffect(() => {
     setDockImmersive(dockImmersive)
     return () => setDockImmersive(false)
   }, [dockImmersive])
-
-  const sideDockTitleBarWidthPx = Math.max(
-    DOCK_WIDTH_MIN_PX - WINDOW_CONTROLS_WIDTH_PX,
-    dockWidthPx - (showsWindowControls() ? WINDOW_CONTROLS_WIDTH_PX : 0)
-  )
-
-  /**
-   * Dock tabs live in the title-bar band, so the chat surface starts below it.
-   * With no tabs the band stays empty and the surface runs to the window's top
-   * edge — which is what any chrome pinned there has to reckon with
-   * (`useTitleBarBand`).
-   */
-  const titleBarBandTaken = dockImmersive || dockSideTitleBar
-
-  useLayoutEffect(() => {
-    setTitleBarOccupied(titleBarBandTaken)
-  }, [titleBarBandTaken, setTitleBarOccupied])
-  useEffect(() => {
-    return () => setTitleBarOccupied(false)
-  }, [setTitleBarOccupied])
 
   /** Session-scoped: skip auto-open after the user closes a panel until they open it again. */
   const dismissedPanelsRef = useRef<Set<ChatRightPanelId>>(new Set())
@@ -657,6 +627,15 @@ const runGoal = useRunGoal({
     },
     [setRightPanel, workspacePath]
   )
+  // A file asked for from outside this view (the palette) opens here once
+  // this view is showing that workspace.
+  const fileRequest = useWorkspaceFileRequest()
+  useEffect(() => {
+    if (!fileRequest || !workspacePath) return
+    if (!workspacePathsEqual(fileRequest.workspacePath, workspacePath)) return
+    consumeWorkspaceFileRequest(fileRequest.seq)
+    openWorkspaceFile(fileRequest.path)
+  }, [fileRequest, workspacePath, openWorkspaceFile])
   const transcriptRunSession = useMemo(
     () => ({
       workspacePath: workspacePath ?? null,
@@ -841,6 +820,18 @@ const runGoal = useRunGoal({
     window.addEventListener('vyotiq:command', onCommand)
     return () => window.removeEventListener('vyotiq:command', onCommand)
   }, [toggleRightPanel])
+
+  // Ctrl Shift F / the palette: open Files with its find-in-files box.
+  const [findInFilesNonce, setFindInFilesNonce] = useState(0)
+  useEffect(() => {
+    const onFindInFiles = (): void => {
+      if (!workspacePath) return
+      setRightPanel('files')
+      setFindInFilesNonce((n) => n + 1)
+    }
+    window.addEventListener('vyotiq:find-in-files', onFindInFiles)
+    return () => window.removeEventListener('vyotiq:find-in-files', onFindInFiles)
+  }, [setRightPanel, workspacePath])
 
   const toggleDockExpanded = useCallback(() => {
     if (dockExpanded) {
@@ -1075,24 +1066,9 @@ const runGoal = useRunGoal({
   // The panel itself shows the live view when visible; the banner covers every
   // other case (panel closed, another panel focused, immersive on another tab).
   const showBrowserWatchBanner = browserBusy && visiblePanelId !== 'browser'
-  // With no dock tabs above it the banner is the window's top row, so it owns
-  // the title-bar band: Watch live has to clear the caption buttons, and the
-  // band has to stop being a drag region or the button is dead to the mouse.
-  const bandFreeAboveChat = useTitleBarBand(showBrowserWatchBanner)
-  const browserWatchBannerInBand = showBrowserWatchBanner && bandFreeAboveChat
   const browserWatchBanner = showBrowserWatchBanner ? (
     <div
-      className={cn(
-        'flex shrink-0 items-center gap-2 border-b border-border/60 bg-accent/10 px-3 text-caption',
-        browserWatchBannerInBand ? TITLE_BAR_HEIGHT : 'py-1.5'
-      )}
-      // Inline, not a `pr-*` class: cn() has no tailwind-merge, so an appended
-      // utility would lose to the `px-3` already on the row.
-      style={
-        browserWatchBannerInBand && windowControlsReservePx() > 0
-          ? { paddingRight: windowControlsReservePx() }
-          : undefined
-      }
+      className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-accent-soft px-3 py-1.5 text-caption"
       data-browser-watch-banner
       role="status"
     >
@@ -1100,12 +1076,7 @@ const runGoal = useRunGoal({
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
         <span className="relative inline-flex size-2 rounded-full bg-accent" />
       </span>
-      <span
-        className={cn(
-          'min-w-0 flex-1 truncate text-fg/90',
-          browserWatchBannerInBand && 'app-region-drag'
-        )}
-      >
+      <span className="min-w-0 flex-1 truncate text-fg">
         Agent is browsing
         {browserWatchUrl ? <span className="text-muted"> · {browserWatchUrl}</span> : null}
       </span>
@@ -1396,16 +1367,7 @@ const runGoal = useRunGoal({
     </>
     )
 
-  /**
-   * The banner, when it shows, is the row that spent the band — so the column
-   * under it is an ordinary surface again and its own headers must not reserve
-   * the caption strip a second time.
-   */
-  const agentColumnBelowBanner = browserWatchBannerInBand ? (
-    <TitleBarBandSpent>{agentColumn}</TitleBarBandSpent>
-  ) : (
-    agentColumn
-  )
+  const agentColumnBelowBanner = agentColumn
 
   const panelBodies = (
     <>
@@ -1433,6 +1395,7 @@ const runGoal = useRunGoal({
               onOpenPathHandled={handleWorkspaceFileOpened}
               recoveryData={filesRecoveryData}
               onRecoveryDataConsumed={handleFilesRecoveryConsumed}
+              findInFilesNonce={findInFilesNonce}
             />
           </Suspense>
         </div>
@@ -1575,9 +1538,14 @@ const runGoal = useRunGoal({
   )
 
   return (
-    <div className={cn('flex h-full min-h-0 flex-col', titleBarBandTaken && 'pt-9')}>
-      {dockImmersive && titleBarHost
-        ? createPortal(
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="relative flex min-h-0 min-w-0 flex-1" data-chat-surface>
+        {dockImmersive ? (
+          <div
+            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent"
+            data-dock-immersive
+            data-dock-expanded="1"
+          >
             <DockTabBar
               variant="immersive"
               active={immersiveTab}
@@ -1590,70 +1558,7 @@ const runGoal = useRunGoal({
               terminalSessionBarHostRef={
                 showTerminalSessionChrome ? terminalSessionBarHostRef : undefined
               }
-            />,
-            titleBarHost
-          )
-        : null}
-      {dockSideTitleBar && titleBarHost
-        ? createPortal(
-            <div
-              className="flex h-full w-full min-w-0 items-stretch"
-              data-dock-titlebar-portal
-            >
-              <div
-                className="app-region-drag min-w-3 flex-1 self-stretch"
-                aria-hidden
-                data-titlebar-drag-spacer
-                onDoubleClick={() => void window.vyotiq?.windowMaximize()}
-              />
-              <div
-                className="flex h-full min-w-0 shrink-0"
-                style={{ width: sideDockTitleBarWidthPx }}
-                data-dock-titlebar-tabs
-              >
-                <DockTabBar
-                  active={activeRightPanel!}
-                  tabs={tabItems}
-                  onSelect={(id) => {
-                    if (id !== 'agent') setRightPanel(id)
-                  }}
-                  onCloseTab={closeDockTab}
-                  onOpenPanel={(id) => setRightPanel(id)}
-                  expanded={false}
-                  onToggleExpanded={toggleDockExpanded}
-                  embeddedInTitleBar
-                  terminalSessionBarHostRef={
-                    showTerminalSessionChrome ? terminalSessionBarHostRef : undefined
-                  }
-                />
-              </div>
-            </div>,
-            titleBarHost
-          )
-        : null}
-      <div className="relative flex min-h-0 min-w-0 flex-1" data-chat-surface>
-        {dockImmersive ? (
-          <div
-            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent"
-            data-dock-immersive
-            data-dock-expanded="1"
-          >
-            {/* Fallback when TitleBar host is absent (unit tests / non-shell mounts). */}
-            {!titleBarHost ? (
-              <DockTabBar
-                variant="immersive"
-                active={immersiveTab}
-                tabs={immersiveTabItems}
-                onSelect={selectImmersiveTab}
-                onCloseTab={closeDockTab}
-                onOpenPanel={(id) => setRightPanel(id)}
-                expanded
-                onToggleExpanded={toggleDockExpanded}
-                terminalSessionBarHostRef={
-                  showTerminalSessionChrome ? terminalSessionBarHostRef : undefined
-                }
-              />
-            ) : null}
+            />
             <div
               id="dock-panel-agent"
               role="tabpanel"
@@ -1695,23 +1600,20 @@ const runGoal = useRunGoal({
                   data-right-dock
                   data-dock-expanded="0"
                 >
-                  {/* Fallback when TitleBar host is absent (unit tests / non-shell mounts). */}
-                  {!dockSideTitleBar ? (
-                    <DockTabBar
-                      active={activeRightPanel}
-                      tabs={tabItems}
-                      onSelect={(id) => {
-                        if (id !== 'agent') setRightPanel(id)
-                      }}
-                      onCloseTab={closeDockTab}
-                      onOpenPanel={(id) => setRightPanel(id)}
-                      expanded={false}
-                      onToggleExpanded={toggleDockExpanded}
-                      terminalSessionBarHostRef={
-                        showTerminalSessionChrome ? terminalSessionBarHostRef : undefined
-                      }
-                    />
-                  ) : null}
+                  <DockTabBar
+                    active={activeRightPanel}
+                    tabs={tabItems}
+                    onSelect={(id) => {
+                      if (id !== 'agent') setRightPanel(id)
+                    }}
+                    onCloseTab={closeDockTab}
+                    onOpenPanel={(id) => setRightPanel(id)}
+                    expanded={false}
+                    onToggleExpanded={toggleDockExpanded}
+                    terminalSessionBarHostRef={
+                      showTerminalSessionChrome ? terminalSessionBarHostRef : undefined
+                    }
+                  />
                   {panelBodies}
                 </aside>
               </>

@@ -745,6 +745,18 @@ export const RunSummarySchema = z.object({
   billedCost: z.number().nonnegative().optional(),
   /** Sum of token×price estimates for steps the provider didn't bill. */
   estimatedCost: z.number().nonnegative().optional(),
+  /**
+   * Agent edits still waiting on Keep or Undo — what puts a finished task in
+   * "Ready for review". `add`/`del` are exact line counts against the files as
+   * they are now, or absent when any file could not be counted.
+   */
+  review: z
+    .object({
+      files: z.number().int().min(1),
+      add: z.number().int().min(0).optional(),
+      del: z.number().int().min(0).optional()
+    })
+    .optional(),
   /** Teammate binding snapshot — mirrors RunStatus fields for list surfaces. */
   agentProfileId: AgentProfileIdSchema.optional(),
   agentProfileName: z.string().min(1).max(64).optional(),
@@ -1735,7 +1747,27 @@ export const ActiveRunSchema = z.object({
         preview: z.string()
       })
     )
-    .default([])
+    .default([]),
+  /**
+   * Set while the run is blocked on you: an approval or a question is pending.
+   * `since` is when the longest-waiting one started (ISO).
+   */
+  waiting: z
+    .object({
+      kind: z.enum(['approval', 'question']),
+      since: z.string().min(1)
+    })
+    .optional(),
+  /**
+   * The run's todo list as counts: `completed` of `total` (cancelled items are
+   * not work left, so they are in neither). Absent when the run has no todos.
+   */
+  steps: z
+    .object({
+      completed: z.number().int().min(0),
+      total: z.number().int().min(1)
+    })
+    .optional()
 })
 export type ActiveRun = z.infer<typeof ActiveRunSchema>
 

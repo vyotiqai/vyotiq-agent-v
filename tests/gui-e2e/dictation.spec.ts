@@ -81,7 +81,7 @@ test.afterAll(async () => {
 test('Mic stop inserts fixture transcript into Message', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) {
     await expand.click()
   }

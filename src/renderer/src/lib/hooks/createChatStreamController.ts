@@ -45,6 +45,7 @@ import {
 import { isAgentEvent } from '@shared/eventUtils'
 import { toLogErr, isRetryableTurnFailure } from '@shared/errors'
 import { logger } from '@shared/logger'
+import { signalActiveRunsChanged } from '@renderer/lib/chat/activeRunsSignal'
 import {
   messagesToUiItems,
   applyEventTimestamps,
@@ -4357,6 +4358,8 @@ export function createChatStreamController(
       throw new Error('No active run for approval response.')
     }
     const res = await window.vyotiq?.respondToolApproval?.(requestId, decision, runId)
+    // The task may no longer be waiting on you; let the navigator re-read now.
+    signalActiveRunsChanged()
     if (!res) {
       logger.warn('Tool approval response unavailable', { scope: 'chat' })
       throw new Error('Tool approval response is unavailable.')
@@ -4416,6 +4419,8 @@ export function createChatStreamController(
       throw new Error(message)
     }
     const res = await window.vyotiq?.respondAgentQuestion?.(requestId, answers, runId)
+    // The task may no longer be waiting on you; let the navigator re-read now.
+    signalActiveRunsChanged()
     if (!res) {
       const message = 'Question response is unavailable.'
       logger.warn('Agent question response unavailable', { scope: 'chat' })

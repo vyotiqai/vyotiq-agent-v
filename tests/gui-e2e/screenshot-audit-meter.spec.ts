@@ -46,7 +46,7 @@ test.afterAll(async () => {
 test('context meter: low fill + tipCue without warning chrome (E4/R1)', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) {
     await expand.click()
   }

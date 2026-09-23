@@ -11,10 +11,10 @@ import {
 
 export type AppShortcutHandlers = {
   onToggleSidebar: () => void
-  onFocusSearch: () => void
-  /** Clear + blur when Cmd/Ctrl+K fires while search is focused. */
-  onClearSearchFocus: () => void
-  isSearchFocused: () => boolean
+  /** Ctrl/Cmd+K (and Ctrl/Cmd+Shift+P) — search tasks, files and commands. */
+  onOpenSearch: () => void
+  /** Ctrl/Cmd+J — open the next task that is waiting on you. */
+  onNextNeedsYou?: () => void
   onNewChat: () => void
   /** Ctrl/Cmd+Shift+H — show the Home launch surface. */
   onOpenHome?: () => void
@@ -30,9 +30,6 @@ export type AppShortcutHandlers = {
   running?: boolean
   onStop?: () => void
   drawerOpen?: boolean
-  /** Live check — session query lives in hot UI store, not always in React props. */
-  hasSessionQuery?: () => boolean
-  onOpenCommandPalette?: () => void
   onFindInFiles?: () => void
 }
 
@@ -43,9 +40,8 @@ export type AppShortcutHandlers = {
 export function useAppShortcuts(handlers: AppShortcutHandlers): void {
   const {
     onToggleSidebar,
-    onFocusSearch,
-    onClearSearchFocus,
-    isSearchFocused,
+    onOpenSearch,
+    onNextNeedsYou,
     onNewChat,
     onOpenHome,
     onSwitchWorkspaceByIndex,
@@ -56,8 +52,6 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
     running,
     onStop,
     drawerOpen,
-    hasSessionQuery,
-    onOpenCommandPalette,
     onFindInFiles
   } = handlers
 
@@ -71,15 +65,18 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
         return
       }
 
-      if (matchShortcut(e, 'search')) {
-        if (isSearchFocused()) {
-          e.preventDefault()
-          onClearSearchFocus()
-          return
-        }
+      if (matchShortcut(e, 'search') || matchShortcut(e, 'commandPalette')) {
         if (shouldBlockAppShortcut(e.target)) return
         e.preventDefault()
-        onFocusSearch()
+        onOpenSearch()
+        return
+      }
+
+      if (matchShortcut(e, 'nextNeedsYou')) {
+        if (!onNextNeedsYou) return
+        if (shouldBlockAppShortcut(e.target)) return
+        e.preventDefault()
+        onNextNeedsYou()
         return
       }
 
@@ -150,24 +147,11 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
         if (shouldBlockAppShortcut(e.target)) return
         if (e.defaultPrevented) return
         if (e.isComposing) return
-        if (
-          shouldDeferAppEscapeStop({
-            drawerOpen,
-            hasSessionQuery: hasSessionQuery?.()
-          })
-        ) {
+        if (shouldDeferAppEscapeStop({ drawerOpen })) {
           return
         }
         e.preventDefault()
         onStop()
-        return
-      }
-
-      if (matchShortcut(e, 'commandPalette')) {
-        if (shouldBlockAppShortcut(e.target)) return
-        if (!onOpenCommandPalette) return
-        e.preventDefault()
-        onOpenCommandPalette()
         return
       }
 
@@ -183,9 +167,8 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [
     onToggleSidebar,
-    onFocusSearch,
-    onClearSearchFocus,
-    isSearchFocused,
+    onOpenSearch,
+    onNextNeedsYou,
     onNewChat,
     onOpenHome,
     onSwitchWorkspaceByIndex,
@@ -196,8 +179,6 @@ export function useAppShortcuts(handlers: AppShortcutHandlers): void {
     running,
     onStop,
     drawerOpen,
-    hasSessionQuery,
-    onOpenCommandPalette,
     onFindInFiles
   ])
 }

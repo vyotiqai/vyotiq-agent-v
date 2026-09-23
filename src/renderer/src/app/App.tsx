@@ -1,12 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AppShell } from './AppShell'
+import { requestOpenWorkspaceFile } from '@renderer/lib/chat/workspaceFileRequests'
 import { launchViewFor } from './launchView'
 import { needsDraftChatAfterWorkspaceAdd } from './workspaceAddHandoff'
 import { pinnedRunKey, prunePinnedRun, togglePinnedRun } from '../features/home/pinnedRuns'
 import { ChatView } from '../features/chat/ChatView'
 import { SessionChatColumn } from '../features/chat/SessionChatColumn'
 import { AgentInstancePane } from '../features/chat/components/AgentInstancePane'
-import { runTitle } from './sidebar/runTitle'
+import { runTitle } from './navigator/runTitle'
 import type { ChatPane } from '@renderer/lib/chat/chatPaneLayout'
 import type { PaneRenderOptions } from '../features/chat/ChatPaneHost'
 import type { SettingsSection } from '../features/settings'
@@ -2206,11 +2207,19 @@ function App() {
     [contexts, activeWorkspace, chat.runId, chat.agentInstances]
   )
 
+  const focusedRun =
+    focusedRunId && (focusedWorkspacePath ?? activeWorkspace)
+      ? { workspacePath: (focusedWorkspacePath ?? activeWorkspace)!, runId: focusedRunId }
+      : null
+
   const shellWorkspaceProps = {
     openWorkspaces,
     activeRuns,
     activeRunsLoaded,
     runsByWorkspacePath,
+    focusedRun,
+    isRunOpenInPane: isSessionOpenInPane,
+    onDismissRunsError: clearRunsError,
     onSwitchWorkspace: (path: string) => {
       setOpenInstanceByParent({})
       void switchWorkspace(path)
@@ -2218,21 +2227,28 @@ function App() {
     onCloseWorkspace,
     onAddWorkspace: onPickWorkspace,
     onNewChatInWorkspace,
-    onStartTeammateChat,
-    onOpenTaskRun: (path: string, runId: string) => void onSelectRunInWorkspace(path, runId),
-    workspaceHasBackgroundRun,
-    expandedByPath: workspace.workspaceExpandedByPath,
-    onSetWorkspaceExpanded: workspace.setWorkspaceExpanded,
+    onNewTaskWithText: onNewSessionInWorkspace,
     onSelectRunInWorkspace: (path: string, runId: string) => void onSelectRunInWorkspace(path, runId),
+    onOpenRunBeside: (path: string, runId: string) => {
+      const pane = getFocusedPane()
+      if (!pane || !pane.runId) {
+        void onSelectRunInWorkspace(path, runId)
+        setView('chat')
+        return
+      }
+      handleSessionDrop(pane.paneId, 'right', { workspacePath: path, runId })
+    },
     onRenameRunInWorkspace: (path: string, runId: string, goal: string) =>
       void onRenameRunInWorkspace(path, runId, goal),
     onDeleteRunInWorkspace: (path: string, runId: string) => void onDeleteRunInWorkspace(path, runId),
     onExportRunInWorkspace: (path: string, runId: string) => void onExportRunInWorkspace(path, runId),
     onCopyRunLinkInWorkspace,
     onLoadOlderRuns: (path: string) => void loadOlderWorkspaceRuns(path),
-    isRunOpenInPane: isSessionOpenInPane,
-    isRunFocusedInPane: isSessionFocusedInPane,
-    openInstanceRunId: focusedOpenInstance
+    onOpenWorkspaceFile: (path: string, file: string) => {
+      if (!activeWorkspace || !workspacePathsEqual(path, activeWorkspace)) void switchWorkspace(path)
+      setView('chat')
+      requestOpenWorkspaceFile(path, file)
+    }
   }
 
   if (loading) {
@@ -2240,11 +2256,8 @@ function App() {
       <AppShell
         view="chat"
         workspacePath={null}
-        sessionQuery=""
-        onSessionQuery={() => {}}
         onOpenSettings={() => {}}
         onOpenMarketplace={() => {}}
-        onOpenTeammates={() => {}}
         onOpenChat={() => {}}
         onOpenHome={() => {}}
         onNewChat={() => {}}
@@ -2272,10 +2285,6 @@ function App() {
     <AppShell
       view={view}
       workspacePath={activeWorkspace}
-      navigationMode={settings.navigationMode}
-      onDismissRunsError={clearRunsError}
-      sessionQuery=""
-      onSessionQuery={setSessionQuery}
       onOpenSettings={() => {
         setView('settings')
       }}
@@ -2284,17 +2293,11 @@ function App() {
         setView('settings')
         setFeedbackOpen(true)
       }}
-      onOpenNotificationSettings={() => {
-        setSettingsSection('notifications')
-        setView('settings')
-      }}
       onOpenSettingsSection={(section) => {
         setSettingsSection(section)
         setView('settings')
       }}
-      focusedRunId={focusedRunId}
       onOpenMarketplace={() => setView('marketplace')}
-      onOpenTeammates={() => setView('teammates')}
       onOpenChat={() => setView('chat')}
       onOpenHome={() => setView('home')}
       onNewChat={onNewChat}
@@ -2413,7 +2416,7 @@ function App() {
               activeWorkspace={activeWorkspace}
               runsByWorkspacePath={runsByWorkspacePath}
               activeRuns={shellWorkspaceProps.activeRuns}
-              workspaceHasBackgroundRun={shellWorkspaceProps.workspaceHasBackgroundRun}
+              workspaceHasBackgroundRun={workspaceHasBackgroundRun}
               providerIssue={homeProviderIssue}
               onNewSessionInWorkspace={onNewSessionInWorkspace}
               onSelectRunInWorkspace={shellWorkspaceProps.onSelectRunInWorkspace}
@@ -2432,8 +2435,8 @@ function App() {
               onReviewChangesInWorkspace={(path, runId) => void onReviewChangesInWorkspace(path, runId)}
               onRefreshWorkspaceRuns={(path) => refreshWorkspaceRuns(path)}
               refreshVersion={homeRefreshVersion}
-              isRunOpenInPane={shellWorkspaceProps.isRunOpenInPane}
-              isRunFocusedInPane={shellWorkspaceProps.isRunFocusedInPane}
+              isRunOpenInPane={isSessionOpenInPane}
+              isRunFocusedInPane={isSessionFocusedInPane}
               pinnedRunKeys={settings.pinnedRuns}
               onTogglePinnedRun={onTogglePinnedRun}
             />

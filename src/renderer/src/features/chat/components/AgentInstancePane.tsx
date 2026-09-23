@@ -3,7 +3,7 @@ import type { ChatMessage } from '@shared/ipc'
 import type { UiAgentQuestionAnswer } from '@shared/transcript'
 import type { AgentInstanceUiState } from '@shared/utils/agentInstance'
 import { formatAgentInstanceShortId } from '@shared/utils/agentInstance'
-import { instanceDisplayTitle, stripGoalMarkdown } from '@renderer/app/sidebar/runTitle'
+import { instanceDisplayTitle, stripGoalMarkdown } from '@renderer/app/navigator/runTitle'
 import { MessageList } from '../components/MessageList'
 import { InlineInstanceGateBanner } from './InlineInstanceGateBanner'
 import type { InlineInstanceGate } from '../hooks/useInlineInstanceUi'
@@ -18,11 +18,8 @@ import { cn } from '@renderer/lib/ui'
 import {
   CHAT_COLUMN,
   CHAT_GUTTER,
-  CHAT_STAGE_INSET,
-  TITLE_BAR_HEIGHT,
-  windowControlsReservePx
+  CHAT_STAGE_INSET
 } from '@renderer/lib/utils/layout'
-import { useTitleBarBand } from '@renderer/lib/context/TitleBarAccessory'
 import type { ContextUsageState } from '@shared/utils/contextUsage'
 import { ContextMeter } from './composer/ContextMeter'
 
@@ -381,8 +378,6 @@ export function AgentInstancePane({
   // means it lands inside the title-bar band: match the band's height so its
   // text lines up with the caption glyphs, and hold the caption strip open so
   // the meter and Stop are not painted over by minimize/maximize/close.
-  const inTitleBarBand = useTitleBarBand()
-  const controlsReserve = inTitleBarBand ? windowControlsReservePx() : 0
 
   return (
     <div
@@ -393,16 +388,8 @@ export function AgentInstancePane({
       data-chat-stage
     >
       <header
-        className={cn(
-          'flex shrink-0 items-center gap-2 border-b border-border/60 bg-bg/90',
-          inTitleBarBand ? TITLE_BAR_HEIGHT : 'h-7',
-          gutter
-        )}
-        // Inline, not a `pr-*` class: cn() has no tailwind-merge, so an appended
-        // utility would lose to the gutter's own right padding.
-        style={controlsReserve > 0 ? { paddingRight: controlsReserve } : undefined}
+        className={cn('flex h-7 shrink-0 items-center gap-2 border-b border-border/60 bg-bg/90', gutter)}
         data-instance-header=""
-        data-instance-header-band={inTitleBarBand ? '' : undefined}
       >
         <button
           type="button"
@@ -413,12 +400,7 @@ export function AgentInstancePane({
           Back
         </button>
         <div
-          className={cn(
-            'flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-xs',
-            // Give the window back a drag handle: the title is inert text, and
-            // the TitleBar no longer claims this strip while the band is ours.
-            inTitleBarBand && 'app-region-drag'
-          )}
+          className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-xs"
           title={tooltip}
         >
           {title !== shortId ? (

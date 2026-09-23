@@ -18,10 +18,10 @@ test.beforeEach(async () => {
   await leaveSettingsIfOpen(window)
 })
 
-test('marketplace opens from the sidebar with browse controls', async () => {
+test('marketplace opens from the navigator with browse controls', async () => {
   const { window } = launched
 
-  await window.getByRole('button', { name: 'Marketplace' }).click()
+  await window.getByRole('button', { name: 'Extensions' }).click()
 
   // Section header + tab list render.
   await expect(window.getByRole('tablist', { name: 'Marketplace sections' })).toBeVisible({
@@ -34,7 +34,7 @@ test('marketplace opens from the sidebar with browse controls', async () => {
 test('marketplace browse exposes search and kind filter', async () => {
   const { window } = launched
 
-  await window.getByRole('button', { name: 'Marketplace' }).click()
+  await window.getByRole('button', { name: 'Extensions' }).click()
   const search = window.getByRole('textbox', { name: 'Search marketplace' })
   await expect(search).toBeVisible({ timeout: 15_000 })
 
@@ -48,7 +48,7 @@ test('marketplace browse exposes search and kind filter', async () => {
 test('manage tab reveals registry settings panel', async () => {
   const { window } = launched
 
-  await window.getByRole('button', { name: 'Marketplace' }).click()
+  await window.getByRole('button', { name: 'Extensions' }).click()
   await window.getByRole('tab', { name: 'Manage' }).click()
 
   const registry = window.getByRole('region', { name: 'Package registry' })

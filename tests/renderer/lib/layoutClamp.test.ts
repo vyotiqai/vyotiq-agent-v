@@ -9,7 +9,7 @@ import {
 
 describe('clampSidebarWidthPx', () => {
   it('respects absolute min/max on a wide viewport', () => {
-    expect(clampSidebarWidthPx(100, 1600)).toBe(180)
+    expect(clampSidebarWidthPx(100, 1600)).toBe(220)
     expect(clampSidebarWidthPx(500, 1600)).toBe(420)
     expect(clampSidebarWidthPx(220, 1600)).toBe(220)
   })
@@ -30,16 +30,16 @@ describe('clampDockWidthPx', () => {
   })
 
   it('reserves sidebar floor + chat min so three-pane stays usable', () => {
-    // 1000 − 280 chat − 180 sidebar (dock open, no rail) = 540 → width wins
+    // 1000 − 280 chat − 220 navigator (dock open, no rail) = 500 → width wins
     expect(clampDockWidthPx(480, 1000)).toBe(480)
     expect(clampDockWidthPx(DOCK_WIDTH_DEFAULT_PX, 1000)).toBe(DOCK_WIDTH_DEFAULT_PX)
-    // 700 − 280 − 180 = 240, but floor is DOCK_WIDTH_MIN_PX (280)
+    // 700 − 280 − 220 = 200, but floor is DOCK_WIDTH_MIN_PX (280)
     expect(clampDockWidthPx(400, 700)).toBe(DOCK_WIDTH_MIN_PX)
   })
 
   it('includes side rail when dock is closed', () => {
-    // 1000 − 280 − 180 − 40 rail = 500 → width wins
-    expect(clampDockWidthPx(480, 1000, { dockOpen: false })).toBe(480)
+    // 1000 − 280 − 220 navigator − 40 rail = 460 → the rail costs the dock 40px
+    expect(clampDockWidthPx(480, 1000, { dockOpen: false })).toBe(460)
   })
 
   it('reserves two chat columns when paneCount is 2', () => {

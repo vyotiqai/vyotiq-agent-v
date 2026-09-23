@@ -7,11 +7,8 @@ import {
 } from '@renderer/lib/chat/chatPaneLayout'
 import {
   CHAT_COLUMN_MIN_USABLE_PX,
-  CHAT_SIDE_RAIL_WIDTH_PX,
-  TITLE_BAR_HEIGHT,
-  windowControlsReservePx
+  CHAT_SIDE_RAIL_WIDTH_PX
 } from '@renderer/lib/utils/layout'
-import { TitleBarBandSpent, useTitleBarBand } from '@renderer/lib/context/TitleBarAccessory'
 import { PanelResizeHandle } from '@renderer/lib/ui'
 import { cn } from '@renderer/lib/ui/cn'
 import type { WorkspaceFileOpenOptions } from './components/FilesPanel'
@@ -32,19 +29,11 @@ export type PaneRenderOptions = {
 }
 
 /**
- * Where the rightmost pane header's right edge stops. It is `absolute
- * inset-x-0`, so padding alone would leave a transparent strip lying across the
- * caption buttons and stealing their clicks — the edge itself has to move.
- *
- * The side rail overlays the pane edge below the band; the caption buttons own
- * the corner inside it, so the header clears whichever is wider.
+ * The side rail overlays the rightmost pane's edge, so that pane's header
+ * stops short of it rather than lying under it.
  */
-function paneHeaderRightInsetPx(
-  controlsReserve: number,
-  sideRailPad: boolean
-): { right: number } | undefined {
-  const reserve = Math.max(controlsReserve, sideRailPad ? CHAT_SIDE_RAIL_WIDTH_PX : 0)
-  return reserve > 0 ? { right: reserve } : undefined
+function paneHeaderRightInsetPx(sideRailPad: boolean): { right: number } | undefined {
+  return sideRailPad ? { right: CHAT_SIDE_RAIL_WIDTH_PX } : undefined
 }
 
 function zoneFromEvent(e: React.DragEvent): PaneDropZone {
@@ -167,9 +156,6 @@ export function ChatPaneHost({
   // Pane headers are the top row of the window unless dock tabs already took
   // the band. Claim it only when those headers actually exist — a single pane
   // renders none, and its content decides for itself.
-  const bandFree = useTitleBarBand(multi)
-  const inTitleBarBand = multi && bandFree
-  const controlsReserve = inTitleBarBand ? windowControlsReservePx() : 0
 
   return (
     <div
@@ -232,23 +218,15 @@ export function ChatPaneHost({
               ) : null}
               {multi ? (
                 <div
-                  className={cn(
-                    'absolute inset-x-0 top-0 z-dropdown flex items-center justify-between gap-2 border-b border-border/60 bg-transparent px-2',
-                    inTitleBarBand ? TITLE_BAR_HEIGHT : 'h-7'
-                  )}
+                  className="absolute inset-x-0 top-0 z-dropdown flex h-7 items-center justify-between gap-2 border-b border-border/60 bg-transparent px-2"
                   style={
                     isRightmost
-                      ? paneHeaderRightInsetPx(controlsReserve, sideRailPad)
+                      ? paneHeaderRightInsetPx(sideRailPad)
                       : undefined
                   }
                   data-chat-pane-header
                 >
-                  <span
-                    className={cn(
-                      'min-w-0 truncate text-xs text-fg/80',
-                      inTitleBarBand && 'app-region-drag'
-                    )}
-                  >
+                  <span className="min-w-0 truncate text-xs text-fg/80">
                     {paneTitle}
                   </span>
                   <span className="flex shrink-0 items-center gap-0.5">
@@ -283,10 +261,10 @@ export function ChatPaneHost({
               <div
                 className={cn(
                   'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
-                  multi && (inTitleBarBand ? 'pt-9' : 'pt-7')
+                  multi && 'pt-7'
                 )}
               >
-                {multi ? <TitleBarBandSpent>{paneBody}</TitleBarBandSpent> : paneBody}
+                {paneBody}
               </div>
             </div>
             {index < panes.length - 1 ? (

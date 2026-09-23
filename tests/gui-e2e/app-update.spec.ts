@@ -54,13 +54,13 @@ test.afterAll(async () => {
 test.beforeEach(async () => {
   const { window } = launched
   await window.keyboard.press('Escape')
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) await expand.click()
 })
 
 test('no update affordance while the install is current', async () => {
   const { window } = launched
-  await expect(window.getByRole('button', { name: /^settings$/i })).toBeVisible()
+  await expect(window.getByRole('button', { name: /^settings/i })).toBeVisible()
   await pushUpdaterState(launched, { status: 'not-available' })
 
   await expect(window.getByRole('button', { name: /is available/i })).toHaveCount(0)
@@ -141,7 +141,7 @@ test('Settings mirrors the state and offers no second restart button', async () 
   await pushUpdaterState(launched, { status: 'downloaded', info: makeInfo('9.9.5') })
   await window.keyboard.press('Escape')
 
-  await window.getByRole('button', { name: /^settings$/i }).click()
+  await window.getByRole('button', { name: /^settings/i }).click()
   await window.getByRole('button', { name: /^about$/i }).click()
 
   const row = window.locator('[data-settings-field="about-updater"]')

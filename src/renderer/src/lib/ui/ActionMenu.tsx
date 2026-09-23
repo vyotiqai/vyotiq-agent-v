@@ -11,7 +11,7 @@ import { Icon, type IconName } from '../icons'
 import { prefersReducedMotion } from '../utils/motion'
 import { useDropdownMenu } from '../hooks/useDropdownMenu'
 import { cn } from './cn'
-import { MENU_ROW, MENU_ROW_ACTIVE, MENU_ROW_IDLE, MENU_ROW_TEXT, MENU_SURFACE } from './menuStyles'
+import { MENU_ROW, MENU_ROW_ACTIVE, MENU_ROW_IDLE, MENU_ROW_TEXT, MENU_SEPARATOR, MENU_SURFACE } from './menuStyles'
 
 export type ActionMenuItem = {
   id: string
@@ -22,6 +22,8 @@ export type ActionMenuItem = {
    * glyph when true, and exposes role/aria-checked. Omit for plain actions.
    */
   checked?: boolean
+  /** Draw a rule above this item — to set apart an action from a list of choices. */
+  separatorBefore?: boolean
   onSelect: () => void
 }
 
@@ -132,6 +134,7 @@ export function ActionMenu({
       >
         {items.map((item, index) => (
           <li key={item.id} role="none">
+            {item.separatorBefore ? <div role="separator" className={MENU_SEPARATOR} /> : null}
             <button
               type="button"
               role={item.checked != null ? 'menuitemcheckbox' : 'menuitem'}

@@ -19,11 +19,11 @@ export type ShortcutGroup = {
  */
 const GROUPS: ReadonlyArray<{ title: string; ids: readonly string[] }> = [
   {
-    title: 'Navigation',
-    ids: ['commandPalette', 'search', 'newChat', 'goHome', 'sidebar', 'settings', 'workspaces']
+    title: 'Go',
+    ids: ['search', 'newChat', 'goHome', 'nextNeedsYou', 'workspaces', 'sidebar', 'settings', 'commandPalette']
   },
   {
-    title: 'Chat',
+    title: 'Task',
     ids: [
       'focusComposer',
       'stop',

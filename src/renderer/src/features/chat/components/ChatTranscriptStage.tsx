@@ -6,10 +6,8 @@ import type { RunGoal, RunLoop } from '@shared/ipc'
 import {
   CHAT_COLUMN,
   CHAT_GUTTER,
-  CHAT_STAGE_INSET,
-  CHAT_STAGE_TOP_BAND_INSET
+  CHAT_STAGE_INSET
 } from '@renderer/lib/utils/layout'
-import { useTitleBarBand } from '@renderer/lib/context/TitleBarAccessory'
 import { cn } from '@renderer/lib/ui/cn'
 
 export function ChatTranscriptStage({
@@ -51,7 +49,7 @@ export function ChatTranscriptStage({
   // under the caption buttons nor swallowed by the drag region. Read-only —
   // claiming the band here would take the window's drag strip away from the
   // plain transcript, which is the only handle it has over the chat.
-  const gateBannerTop = useTitleBarBand(false) ? CHAT_STAGE_TOP_BAND_INSET : 'pt-2'
+  const gateBannerTop = 'pt-2'
   return (
     <div className="relative flex min-h-0 flex-1 flex-col" data-chat-stage>
       {pendingGates.length > 0 ? (

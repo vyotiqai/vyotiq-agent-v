@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Icon } from '@renderer/lib/icons'
 import { AlertBlock, Button, PageHeader, cn, pushToast } from '@renderer/lib/ui'
 import { useNotifications } from '@renderer/lib/hooks/useNotifications'
-import type { WorkspaceSidebarRuns } from '@renderer/app/sidebar/types'
+import type { WorkspaceRuns } from '@renderer/app/navigator/types'
 import { pinnedRunKey } from './pinnedRuns'
 import { useRunStats } from './useRunStats'
 import { useWorkspaceGitSummaries } from './useWorkspaceGitSummaries'
@@ -33,7 +33,7 @@ export type HomePageProps = {
   openWorkspaces: string[]
   /** Workspace whose MCP configuration the Environment section reports on. */
   activeWorkspace?: string | null
-  runsByWorkspacePath: Record<string, WorkspaceSidebarRuns>
+  runsByWorkspacePath: Record<string, WorkspaceRuns>
   activeRuns?: { runId: string; workspacePath: string }[]
   workspaceHasBackgroundRun?: (path: string) => boolean
   /** Set by the caller when the provider the next run would use has no key. */
