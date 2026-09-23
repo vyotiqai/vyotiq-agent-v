@@ -1,0 +1,31 @@
+---
+/**
+ * The site-wide download button. It always leads to /download, which has the
+ * right file for each system and the first-launch notes for unsigned builds.
+ * On a desktop it names the visitor's system, when there is a build for it.
+ */
+import { release } from '../lib/site'
+
+interface Props {
+  class?: string
+}
+
+const platforms = [...new Set((release.installers as { platform: string }[]).map((i) => i.platform))]
+---
+
+<a href="/download" class:list={['btn', 'btn-primary', Astro.props.class]} data-platforms={platforms.join(' ')} data-download-cta>
+  <span data-download-label>Download</span>
+</a>
+
+<script>
+  import { detectOs, OS_LABEL } from '../lib/detect'
+
+  const os = detectOs()
+  if (os) {
+    for (const link of document.querySelectorAll<HTMLElement>('[data-download-cta]')) {
+      const available = (link.dataset.platforms ?? '').split(' ')
+      const label = link.querySelector('[data-download-label]')
+      if (label && available.includes(os)) label.textContent = `Download for ${OS_LABEL[os]}`
+    }
+  }
+</script>

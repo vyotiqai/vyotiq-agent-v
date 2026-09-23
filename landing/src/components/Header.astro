@@ -1,0 +1,191 @@
+---
+import { NAV, app } from '../lib/site'
+
+const path = Astro.url.pathname.replace(/\/$/, '') || '/'
+const current = (href: string) => (path === href ? 'page' : undefined)
+---
+
+<header class="header">
+  <div class="wrap row">
+    <a href="/" class="brand" aria-label="Agent V, home">
+      <img src="/brand/vyotiq-mark-black.svg" alt="" width="22" height="22" class="logo-art" />
+      <span>Agent V</span>
+    </a>
+
+    <nav class="nav" aria-label="Main">
+      {NAV.map((item) => <a href={item.href} class="nav-link" aria-current={current(item.href)}>{item.label}</a>)}
+    </nav>
+
+    <div class="end">
+      <a href={app.repo.source} class="nav-link github" rel="noopener noreferrer">GitHub</a>
+      <a href="/download" class="btn btn-primary btn-sm" aria-current={current('/download')}>Download</a>
+      <button
+        type="button"
+        class="menu-button"
+        aria-expanded="false"
+        aria-controls="site-menu"
+        aria-label="Menu"
+        data-menu-button
+      >
+        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+          <path class="bar-top" d="M3.5 7h13" />
+          <path class="bar-bottom" d="M3.5 13h13" />
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="menu" id="site-menu" data-menu hidden>
+    <nav class="wrap menu-links" aria-label="Main">
+      {NAV.map((item) => <a href={item.href} aria-current={current(item.href)}>{item.label}</a>)}
+      <a href={app.repo.source} rel="noopener noreferrer">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<style>
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 2.5rem;
+    height: var(--header);
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.625rem;
+    flex-shrink: 0;
+    font-size: 1.0625rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text);
+  }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .nav-link {
+    padding: 0.4375rem 0.75rem;
+    border-radius: var(--r-sm);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--text-2);
+    transition:
+      color var(--fast) var(--ease),
+      background-color var(--fast) var(--ease);
+  }
+
+  .nav-link:hover {
+    color: var(--text);
+    background: var(--bg-2);
+  }
+
+  .nav-link[aria-current='page'] {
+    color: var(--text);
+  }
+
+  .end {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+  }
+
+  .menu-button {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .menu-button path {
+    transition: transform var(--fast) var(--ease);
+    transform-origin: 10px 10px;
+  }
+
+  .menu-button[aria-expanded='true'] .bar-top {
+    transform: translateY(3px) rotate(45deg);
+  }
+
+  .menu-button[aria-expanded='true'] .bar-bottom {
+    transform: translateY(-3px) rotate(-45deg);
+  }
+
+  .menu {
+    border-top: 1px solid var(--line);
+    background: var(--bg);
+  }
+
+  .menu-links {
+    display: grid;
+    padding-block: 0.5rem 1rem;
+  }
+
+  .menu-links a {
+    padding-block: 0.8125rem;
+    border-bottom: 1px solid var(--line);
+    font-size: 1.0625rem;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .menu-links a:last-child {
+    border-bottom: 0;
+  }
+
+  /* The desktop row needs about 760px. The two queries below are one switch:
+     they must stay adjacent, or both navigations show, or neither. */
+  @media (max-width: 859px) {
+    .nav,
+    .github {
+      display: none;
+    }
+    .menu-button {
+      display: inline-flex;
+    }
+  }
+
+  @media (min-width: 860px) {
+    .menu {
+      display: none !important;
+    }
+  }
+</style>
+
+<script>
+  const button = document.querySelector<HTMLButtonElement>('[data-menu-button]')
+  const menu = document.querySelector<HTMLElement>('[data-menu]')
+
+  const setOpen = (open: boolean) => {
+    if (!button || !menu) return
+    button.setAttribute('aria-expanded', String(open))
+    menu.hidden = !open
+  }
+
+  button?.addEventListener('click', () => setOpen(button.getAttribute('aria-expanded') !== 'true'))
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && button?.getAttribute('aria-expanded') === 'true') {
+      setOpen(false)
+      button.focus()
+    }
+  })
+</script>

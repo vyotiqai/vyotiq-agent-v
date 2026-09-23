@@ -1,7 +1,8 @@
 /**
- * Captures screenshots of the running application for the website. Only
- * surfaces backed by shipped data are captured (marketplace, tool catalog);
- * the chat surface would need invented output.
+ * Captures the Marketplace screenshot for /extensions from the running app.
+ * It is the one surface backed entirely by shipped data, so it can be taken
+ * automatically; everything that shows a real run is captured by hand (see
+ * src/lib/media.ts).
  *
  * The app is booted with the repository as its app path so that
  * bundledMarketplaceRoot() resolves to resources/marketplace; a packaged build
@@ -10,7 +11,7 @@
  *   pnpm build && pnpm site:capture
  *
  * Exits 0 with a warning when capture is not possible; whatever is in
- * public/shots at build time is what ships.
+ * src/media at build time is what ships.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -22,7 +23,7 @@ import { spawn } from 'node:child_process'
 const here = dirname(fileURLToPath(import.meta.url))
 const landing = join(here, '..')
 const repo = join(landing, '..')
-const outDir = join(landing, 'public/shots')
+const outDir = join(landing, 'src/media')
 
 const require = createRequire(join(repo, 'package.json'))
 
@@ -115,15 +116,6 @@ async function leaveOverlay(window) {
   await window.waitForTimeout(600)
 }
 
-async function openSettingsSection(window, section) {
-  await window.getByRole('button', { name: /^settings$/i }).first().click()
-  await window
-    .getByRole('navigation', { name: /settings sections/i })
-    .waitFor({ timeout: 20_000 })
-  await window.getByRole('button', { name: section }).click()
-  await window.waitForTimeout(2000)
-}
-
 /** Each surface is reached the way the GUI e2e specs reach it. */
 const SURFACES = [
   {
@@ -135,10 +127,6 @@ const SURFACES = [
         .waitFor({ timeout: 20_000 })
       await window.waitForTimeout(3000)
     }
-  },
-  {
-    name: 'settings-tools',
-    open: (window) => openSettingsSection(window, /^tools$/i)
   }
 ]
 

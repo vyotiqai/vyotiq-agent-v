@@ -1,20 +1,22 @@
 ---
 import '../styles/global.css'
-import Nav from '../components/Nav.astro'
+import fontUrl from '../fonts/instrument-sans/instrument-sans-latin-wght-normal.woff2?url'
+import Header from '../components/Header.astro'
 import Footer from '../components/Footer.astro'
 import { SITE } from '../lib/site'
 
 interface Props {
+  /** Page name, shown as "<title> · Agent V". Omit on the home page. */
   title?: string
   description?: string
-  /** Error pages: no canonical, and keep them out of the index. */
+  /** Error pages: no canonical, and kept out of the index. */
   noindex?: boolean
 }
 
 const { title, description = SITE.description, noindex = false } = Astro.props
 
-const pageTitle = title ? `${title} — ${SITE.name}` : SITE.title
-// The root keeps its trailing slash (a bare origin cannot be expressed without
+const pageTitle = title ? `${title} · ${SITE.product}` : SITE.title
+// The root keeps its trailing slash (a bare origin cannot be written without
 // one); every other route drops it. The sitemap is normalised the same way.
 const url = new URL(Astro.url.pathname, SITE.url)
 const canonicalUrl = url.pathname === '/' ? url.href : url.href.replace(/\/$/, '')
@@ -33,9 +35,10 @@ const ogImage = new URL('/brand/vyotiq-social-card.png', SITE.url).href
 
     <link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/brand/vyotiq-app-icon.png" />
+    <link rel="preload" href={fontUrl} as="font" type="font/woff2" crossorigin />
 
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content={SITE.name} />
+    <meta property="og:site_name" content={SITE.maker} />
     <meta property="og:title" content={pageTitle} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={noindex ? SITE.url : canonicalUrl} />
@@ -57,29 +60,29 @@ const ogImage = new URL('/brand/vyotiq-social-card.png', SITE.url).href
   </head>
 
   <body>
-    <a href="#main" class="vy-skip">Skip to content</a>
-    <Nav />
+    <a href="#main" class="skip">Skip to content</a>
+    <Header />
     <main id="main">
       <slot />
     </main>
     <Footer />
 
     <style is:global>
-      .vy-skip {
+      .skip {
         position: absolute;
         left: -9999px;
-        top: 0;
+        top: 0.5rem;
         z-index: 100;
-        padding: 0.65rem 1rem;
-        background: var(--vy-accent);
-        color: var(--vy-accent-fg);
-        border-radius: 0 0 var(--vy-radius-md) 0;
+        padding: 0.625rem 1rem;
+        border-radius: var(--r-sm);
+        background: var(--ink);
+        color: var(--ink-text);
         font-size: 0.875rem;
         font-weight: 500;
       }
 
-      .vy-skip:focus {
-        left: 0;
+      .skip:focus {
+        left: 0.5rem;
       }
     </style>
   </body>

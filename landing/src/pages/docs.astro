@@ -3,100 +3,75 @@ import Base from '../layouts/Base.astro'
 import { app } from '../lib/site'
 
 const source = app.repo.source
+// package.json says ">=22.18.0"; the page says "22.18.0 or later".
+const node = app.node.replace(/^>=\s*/, '')
 
+/* Settings is being reorganised between releases, so the steps name the
+   screen to look for rather than a path through the menus. */
 const steps = [
   {
-    h: 'Install',
-    p: 'Download the build for your platform and run it. The Windows installer is per-user and needs no administrator rights. Builds are unsigned, so expect a first-launch warning from your OS.',
-    link: { href: '/download', label: 'Downloads' }
+    title: 'Install it',
+    body: 'Download the build for your system and run it. On Windows it installs for your user only, so you don’t need admin rights. The builds aren’t code-signed, so your system will warn you the first time you open it.',
+    link: { href: '/download#first-run', label: 'What to do about the warning' }
   },
   {
-    h: 'Add a model provider',
-    p: 'Open Settings → Providers and paste an API key for whichever provider you use. Keys are encrypted with your operating system keychain and never leave your machine. Running Ollama locally? Point Agent V at it and skip the key entirely.'
+    title: 'Add a model provider',
+    body: 'Open Settings, find Providers, and paste an API key for the provider you use. The key is stored in your operating system’s keychain. Using Ollama? Point Agent V at it and skip the key.'
   },
   {
-    h: 'Open a repository',
-    p: 'Open the folder you want to work in. Agent V builds a local index of it in the background. You can watch progress in Settings → Indexing.'
+    title: 'Open a repository',
+    body: 'Open the folder you want to work in. Agent V builds a search index of it in the background.'
   },
   {
-    h: 'Pick a mode and start',
-    p: 'Start in Ask to explore the codebase read-only, or switch to Agent to let it make changes. Settings → Agent controls which tools may run without asking you first.'
+    title: 'Give it a task',
+    body: 'Start in Ask mode to explore the code without changing anything, or switch to Agent mode to let it make changes. In Settings you choose which tools may run without asking you first.'
   }
 ]
 
 const reference = [
+  { title: 'README', body: 'What the project is, how it’s laid out, and the development commands.', href: `${source}#readme` },
+  { title: 'Contributing', body: 'How changes are made and the checks every one of them has to pass.', href: '/contributing' },
   {
-    h: 'README',
-    p: 'Project overview, prerequisites, development commands and the full verification suite.',
-    href: `${source}/blob/main/README.md`
+    title: 'How browser traffic is controlled',
+    body: 'The rule every request from the built-in browser goes through, and what a run records about it.',
+    href: `${source}/blob/main/docs/egress.md`
   },
-  {
-    h: 'Contributing',
-    p: 'Development workflow and the gates every change has to pass.',
-    href: '/contributing'
-  },
-  {
-    h: 'Release runbook',
-    p: 'How maintainers cut a release, and what the pipeline verifies before publishing.',
-    href: `${source}/blob/main/RELEASE-RUNBOOK.md`
-  },
-  {
-    h: 'Security policy',
-    p: 'How to report a vulnerability.',
-    href: '/security'
-  },
-  {
-    h: 'Issue tracker',
-    p: 'Bugs, feature requests and questions.',
-    href: app.repo.issues ?? `${source}/issues`
-  }
-]
-
-const jump = [
-  { href: '#start', label: 'Getting started' },
-  { href: '#source', label: 'Build from source' },
-  { href: '#verification', label: 'Verification' },
-  { href: '#reference', label: 'Reference' }
+  { title: 'Security policy', body: 'How to report a vulnerability.', href: '/security' },
+  { title: 'Report an issue', body: 'Bugs, requests and questions.', href: app.repo.issues ?? `${source}/issues` }
 ]
 ---
 
 <Base
   title="Docs"
-  description="Getting started with Agent V — install, connect a model provider, open a repository, and build from source."
+  description="Get started with Agent V: install it, add a model provider, open a repository and give it a task. Or build it from source."
 >
-  <section class="vy-page-head">
-    <div class="vy-shell">
-      <p class="vy-eyebrow">Documentation</p>
-      <h1 class="vy-h1">Getting started</h1>
-      <p class="vy-lede">
-        Agent V is a desktop application. There is no account to create and no service to sign up
-        for. Install it, give it a model provider key, and point it at a repository.
+  <section class="page-head">
+    <div class="wrap">
+      <h1 class="title">Get started</h1>
+      <p class="lede">
+        Agent V is a desktop app, and there’s no account to create. Install it, add a model provider, and open a
+        repository.
       </p>
-      <ul class="vy-jump" aria-label="On this page">
-        {jump.map((j) => <li><a href={j.href}>{j.label}</a></li>)}
-      </ul>
     </div>
   </section>
 
-  <section class="vy-rule vy-section" id="start">
-    <div class="vy-shell vy-section-grid">
-      <header class="vy-sec-head">
-        <p class="vy-eyebrow">Four steps</p>
-        <h2 class="vy-h2">From download to first run</h2>
-      </header>
-
-      <ol class="vy-rows">
+  <section class="band-tight rule" id="start">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 class="h2">From download to your first task</h2>
+      </div>
+      <ol class="steps">
         {
           steps.map((step, i) => (
-            <li class="vy-row-lead vy-item">
-              <span class="vy-step-n vy-mono">{String(i + 1).padStart(2, '0')}</span>
-              <div>
-                <h3 class="vy-h3">{step.h}</h3>
-                <p>{step.p}</p>
+            <li class="step">
+              <span class="step-n mono">{String(i + 1).padStart(2, '0')}</span>
+              <div class="step-text">
+                <h3 class="h3">{step.title}</h3>
+                <p>{step.body}</p>
                 {step.link && (
-                  <p class="vy-more">
-                    <a href={step.link.href} class="vy-link">
-                      {step.link.label} →
+                  <p>
+                    <a href={step.link.href} class="more">
+                      {step.link.label}
                     </a>
                   </p>
                 )}
@@ -108,77 +83,46 @@ const jump = [
     </div>
   </section>
 
-  <section class="vy-rule vy-section" id="source">
-    <div class="vy-shell vy-section-grid">
-      <header class="vy-sec-head">
-        <p class="vy-eyebrow">From source</p>
-        <h2 class="vy-h2">Build it yourself</h2>
-        <p class="vy-prose-muted">
-          Agent V is GPL-3.0-or-later. Everything the release pipeline builds, you can build
-          locally, which is also the answer if you would rather not run an unsigned binary.
+  <section class="band-tight rule" id="source">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 class="h2">Build it yourself</h2>
+        <p class="body">
+          Agent V is GPL-3.0-or-later, and anything the release pipeline builds, you can build too. It’s also the way to go
+          if you’d rather not run an unsigned app.
         </p>
-        <p class="vy-prose-muted">
-          Requires Node <span class="vy-mono">{app.node}</span> and pnpm, enabled once with
-          <span class="vy-mono"> corepack enable</span>.
+        <p class="detail">
+          You need Node <span class="mono">{node}</span> or later, and pnpm. Turn pnpm on once with{' '}
+          <span class="mono">corepack enable</span>.
         </p>
-      </header>
-
-      <div>
-        <pre class="vy-codeblock"><code>git clone {source}.git
-cd vyotiq-agent-v
-pnpm install
-pnpm dev</code></pre>
-        <p class="vy-footnote">
-          <span class="vy-mono">pnpm dev</span> runs the app in development.{' '}
-          <span class="vy-mono">pnpm build</span> produces a production build, and{' '}
-          <span class="vy-mono">pnpm pack:win</span>, <span class="vy-mono">pnpm pack:mac</span>
-          {' '}and <span class="vy-mono">pnpm pack:linux</span> produce installers.
+      </div>
+      <div class="stack">
+        <pre class="code"><code><span class="prompt">$ </span>git clone {source}.git
+<span class="prompt">$ </span>cd vyotiq-agent-v
+<span class="prompt">$ </span>pnpm install
+<span class="prompt">$ </span>pnpm dev</code></pre>
+        <p class="detail">
+          <span class="mono">pnpm dev</span> runs the app in development. <span class="mono">pnpm build</span> makes a
+          production build, and <span class="mono">pnpm pack:win</span>, <span class="mono">pnpm pack:mac</span> and{' '}
+          <span class="mono">pnpm pack:linux</span> make the installers.
         </p>
       </div>
     </div>
   </section>
 
-  <section class="vy-rule vy-section" id="verification">
-    <div class="vy-shell vy-section-grid">
-      <header class="vy-sec-head">
-        <p class="vy-eyebrow">Verification</p>
-        <h2 class="vy-h2">The gates every change passes</h2>
-        <p class="vy-prose-muted">
-          These run in CI on Ubuntu, Windows and macOS for every push and pull request, and again
-          before any release is built.
-        </p>
-      </header>
-      <pre class="vy-codeblock"><code>pnpm typecheck     # tsc over the main and renderer configs
-pnpm lint          # eslint
-pnpm test          # vitest suite
-pnpm test:gui-e2e  # Playwright GUI end-to-end</code></pre>
-    </div>
-  </section>
-
-  <section class="vy-rule vy-section" id="reference">
-    <div class="vy-shell vy-section-grid">
-      <header class="vy-sec-head">
-        <p class="vy-eyebrow">Reference</p>
-        <h2 class="vy-h2">Deeper documentation</h2>
-        <p class="vy-prose-muted">
-          Reference documentation lives in the repository next to the code it describes.
-        </p>
-      </header>
-
-      <ul class="vy-refs">
+  <section class="band-tight rule" id="more">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 class="h2">Go deeper</h2>
+        <p class="body">The detailed documentation lives in the repository, next to the code it describes.</p>
+      </div>
+      <ul class="refs">
         {
-          reference.map((r) => (
+          reference.map((ref) => (
             <li>
-              <a
-                href={r.href}
-                class="vy-ref vy-item"
-                {...(r.href.startsWith('http') ? { rel: 'noopener noreferrer' } : {})}
-              >
-                <div>
-                  <h3 class="vy-h3">{r.h}</h3>
-                  <p>{r.p}</p>
-                </div>
-                <span class="vy-ref-arrow" aria-hidden="true">→</span>
+              <a href={ref.href} class="ref" {...(ref.href.startsWith('http') ? { rel: 'noopener noreferrer' } : {})}>
+                <span class="ref-title">{ref.title}</span>
+                <span class="ref-body">{ref.body}</span>
               </a>
             </li>
           ))
@@ -189,47 +133,61 @@ pnpm test:gui-e2e  # Playwright GUI end-to-end</code></pre>
 </Base>
 
 <style>
-  .vy-step-n {
-    font-size: 0.8125rem;
-    color: var(--vy-tertiary);
-    padding-top: 0.2rem;
+  .steps {
+    border-top: 1px solid var(--line);
   }
 
-  .vy-item .vy-more {
-    margin-top: 0.75rem;
-    font-size: 0.875rem;
-  }
-
-  .vy-ref {
-    display: flex;
-    justify-content: space-between;
-    gap: 1.5rem;
-    padding: 1.125rem 1.25rem;
-    border: 1px solid var(--vy-border);
-    border-radius: var(--vy-radius-2xl);
-    background: var(--vy-elev-1);
-    transition: border-color var(--vy-duration) var(--vy-ease);
-  }
-
-  .vy-ref:hover {
-    border-color: var(--vy-border-strong);
-  }
-
-  .vy-refs {
+  .step {
     display: grid;
-    gap: 0.625rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+    gap: 1rem;
+    padding-block: 1.5rem;
+    border-bottom: 1px solid var(--line);
   }
 
-  .vy-ref-arrow {
-    color: var(--vy-tertiary);
-    transition: color var(--vy-duration) var(--vy-ease);
+  .step-n {
+    padding-top: 0.25rem;
+    font-size: 0.8125rem;
+    color: var(--text-3);
   }
 
-  .vy-ref:hover .vy-h3,
-  .vy-ref:hover .vy-ref-arrow {
-    color: var(--vy-accent);
+  .step-text {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .step-text p {
+    color: var(--text-2);
+  }
+
+  .refs {
+    border-top: 1px solid var(--line);
+  }
+
+  .ref {
+    display: grid;
+    gap: 0.25rem;
+    padding: 1.125rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .ref-title {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .ref-title::after {
+    content: ' →';
+    color: var(--text-3);
+    transition: color var(--fast) var(--ease);
+  }
+
+  .ref:hover .ref-title::after {
+    color: var(--text);
+  }
+
+  .ref-body {
+    font-size: 0.9375rem;
+    color: var(--text-2);
   }
 </style>

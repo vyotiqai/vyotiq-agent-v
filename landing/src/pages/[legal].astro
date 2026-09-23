@@ -5,10 +5,7 @@ import manifest from '../generated/legal/manifest.json'
 /** One route per document in the bake manifest; bake-legal.mjs lifts each
  *  markdown title into the page heading and repoints repo-relative links. */
 
-const md = import.meta.glob('../generated/legal/*.md', { eager: true }) as Record<
-  string,
-  { Content: any }
->
+const md = import.meta.glob('../generated/legal/*.md', { eager: true }) as Record<string, { Content: any }>
 const txt = import.meta.glob('../generated/legal/*.txt', {
   eager: true,
   query: '?raw',
@@ -28,41 +25,40 @@ const Content = doc.format === 'markdown' ? md[key('md')]?.Content : null
 const plain = doc.format === 'plain' ? txt[key('txt')] : null
 
 if (doc.format === 'markdown' && !Content) {
-  throw new Error(`missing baked markdown for ${doc.slug} — run the landing bake step`)
+  throw new Error(`missing baked markdown for ${doc.slug}; run the landing bake step`)
 }
 if (doc.format === 'plain' && !plain) {
-  throw new Error(`missing baked text for ${doc.slug} — run the landing bake step`)
+  throw new Error(`missing baked text for ${doc.slug}; run the landing bake step`)
 }
 
 const DESCRIPTIONS: Record<string, string> = {
   license: 'Agent V is free software under the GNU General Public License v3.0 or later.',
-  notice: 'Third-party components distributed with Agent V and their licences.',
+  notice: 'Third-party components distributed with Agent V and their licenses.',
   security: 'How to report a security vulnerability in Agent V.',
   privacy: 'What data Agent V handles, where it stays, and what leaves your machine.',
-  terms: 'Terms covering the Vyotiq website and the distribution of Agent V installers.',
-  contributing: 'How to contribute to Agent V — workflow, gates and conventions.',
+  terms: 'Terms covering the Vyotiq website and the Agent V installers it links to.',
+  contributing: 'How to contribute to Agent V: the workflow, the checks and the conventions.',
   'code-of-conduct': 'The standards expected in Agent V community spaces.'
 }
 ---
 
 <Base title={doc.title} description={DESCRIPTIONS[doc.slug] ?? doc.title}>
-  <section class="vy-page-head">
-    <div class="vy-shell">
-      <p class="vy-eyebrow">{doc.title}</p>
-      <h1 class="vy-h1">{doc.heading}</h1>
-      <p class="vy-lede vy-doc-source">
-        Source: <a href={doc.sourceUrl} class="vy-link vy-mono" rel="noopener noreferrer">{doc.sourceFile}</a>
+  <section class="page-head">
+    <div class="wrap">
+      <h1 class="title">{doc.heading}</h1>
+      <p class="meta source">
+        From <a href={doc.sourceUrl} class="link mono" rel="noopener noreferrer">{doc.sourceFile}</a> in the repository.
       </p>
     </div>
   </section>
 
-  <section class="vy-rule vy-section">
-    <div class="vy-shell">
+  <section class="rule doc">
+    <div class="wrap">
       {
         doc.format === 'plain' ? (
-          <pre class="vy-doc-plain">{plain}</pre>
+          <pre class="plain">{plain}</pre>
         ) : (
-          <div class="vy-doc">
+          <div class="prose">
             <Content />
           </div>
         )
@@ -72,13 +68,22 @@ const DESCRIPTIONS: Record<string, string> = {
 </Base>
 
 <style>
-  .vy-doc,
-  .vy-doc-plain {
-    padding-top: 0.5rem;
+  .source {
+    margin-top: 1rem;
   }
 
-  .vy-doc-source {
-    font-size: 0.9375rem;
-    color: var(--vy-tertiary);
+  .doc {
+    padding-block: clamp(2.5rem, 5vw, 4rem) 1rem;
+  }
+
+  .plain {
+    max-width: 44rem;
+    font-family: var(--mono);
+    font-variant-ligatures: none;
+    font-size: 0.8125rem;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-2);
   }
 </style>

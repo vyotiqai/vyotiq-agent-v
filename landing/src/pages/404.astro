@@ -1,45 +1,40 @@
 ---
 import Base from '../layouts/Base.astro'
-import { NAV } from '../lib/site'
 
-const links = [{ href: '/', label: 'Home' }, ...NAV, { href: '/download', label: 'Download' }]
+const links = [
+  { href: '/', label: 'Home' },
+  { href: '/features', label: 'Features' },
+  { href: '/download', label: 'Download' },
+  { href: '/docs', label: 'Docs' }
+]
 ---
 
-<Base title="Page not found" description="That page does not exist on vyotiq.com." noindex>
-  <section class="vy-page-head vy-nf">
-    <div class="vy-shell">
-      <img
-        class="vy-nf-wordmark vy-dark-invert"
-        src="/brand/vyotiq-wordmark-black.svg"
-        alt=""
-        width="113"
-        height="20"
-      />
-      <p class="vy-eyebrow">404</p>
-      <h1 class="vy-display">That page does not exist</h1>
-      <p class="vy-lede">The link may be out of date, or the page may have moved.</p>
-      <ul class="vy-jump" aria-label="Site pages">
-        {links.map((l) => <li><a href={l.href}>{l.label}</a></li>)}
+<Base title="Page not found" description="There is no page at this address on vyotiq.com." noindex>
+  <section class="page-head missing">
+    <div class="wrap">
+      <p class="meta mono code-404">404</p>
+      <h1 class="title">There’s no page here</h1>
+      <p class="lede">The link may be old, or the page has moved. One of these should help.</p>
+      <ul class="links">
+        {links.map((l) => <li><a href={l.href} class="more">{l.label}</a></li>)}
       </ul>
     </div>
   </section>
 </Base>
 
 <style>
-  .vy-nf {
-    padding-block: clamp(4rem, 9vw, 7rem);
+  .missing {
+    padding-block: clamp(4rem, 10vw, 8rem);
   }
 
-  .vy-nf-wordmark {
-    margin-bottom: 2rem;
-    opacity: 0.7;
+  .code-404 {
+    margin-bottom: 1rem;
   }
 
-  .vy-nf .vy-display {
-    max-width: 16ch;
-  }
-
-  .vy-nf .vy-lede {
-    margin-top: 1rem;
+  .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 2rem;
+    margin-top: 2rem;
   }
 </style>

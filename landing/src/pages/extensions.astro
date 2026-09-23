@@ -1,7 +1,15 @@
 ---
 import Base from '../layouts/Base.astro'
+import Media from '../components/Media.astro'
+import DownloadButton from '../components/DownloadButton.astro'
 import { app } from '../lib/site'
-import Shot from '../components/Shot.astro'
+
+/**
+ * The bundled marketplace, as the app ships it. Names, descriptions and
+ * publishers are the catalog's own; showcase.ts gates which ones may appear.
+ * The filter is added by the script at the bottom, so without JavaScript the
+ * page is simply the full list.
+ */
 
 const ext = app.extensions
 
@@ -11,20 +19,19 @@ const GROUPS = [
     id: 'mcp-servers',
     title: 'MCP servers',
     blurb:
-      'Model Context Protocol servers. Connect one and its tools, resources and prompts become available to the agent. Several use OAuth, so you sign in to the vendor rather than pasting a token.'
+      'Connect one and its tools, resources and prompts become available to the agent. Several use OAuth, so you sign in with the vendor instead of pasting a token.'
   },
   {
     kind: 'skill',
     id: 'skills',
     title: 'Skills',
-    blurb:
-      'Reusable instruction sets the agent loads into a run, invoked as slash commands. These ship with the app; you can also write your own.'
+    blurb: 'Reusable instructions the agent loads into a run, called with a slash command. These ship with the app, and you can write your own.'
   },
   {
     kind: 'plugin',
-    id: 'plugin-rule-sets',
-    title: 'Plugin rule sets',
-    blurb: 'Bundles of standing rules that apply to every run in a workspace.'
+    id: 'plugins',
+    title: 'Plugins',
+    blurb: 'A few skills bundled with the working conventions that go with them, for one kind of project.'
   }
 ] as const
 
@@ -39,184 +46,331 @@ const byKind = (kind: string) =>
       return a.name.localeCompare(b.name)
     })
 
-const AUTH_LABEL: Record<string, string> = {
-  oauth: 'OAuth',
-  'oauth-client': 'OAuth'
-}
+const groups = GROUPS.map((g) => ({ ...g, items: byKind(g.kind) })).filter((g) => g.items.length > 0)
+const signsIn = (auth: string) => auth === 'oauth' || auth === 'oauth-client'
 ---
 
 <Base
   title="Extensions"
-  description={`${ext.total} extensions ship with Agent V — ${ext.counts.mcp} MCP servers, ${ext.counts.skill} skills and ${ext.counts.plugin} plugin rule sets.`}
+  description={`${ext.total} packages ship with Agent V: ${ext.counts.mcp} MCP servers, ${ext.counts.skill} skills and ${ext.counts.plugin} plugins.`}
 >
-  <section class="vy-page-head">
-    <div class="vy-shell">
-      <p class="vy-eyebrow">Extensions</p>
-      <h1 class="vy-h1">{ext.total} packages, bundled with the app</h1>
-      <p class="vy-lede">
-        The marketplace ships inside Agent V. Browsing it makes no network request, and installing
-        is per workspace. There is no registry account and nothing to sign up for.
+  <section class="page-head">
+    <div class="wrap">
+      <h1 class="title">Extensions</h1>
+      <p class="lede">
+        {ext.total} packages come with Agent V: {ext.counts.mcp} MCP servers, {ext.counts.skill} skills and {ext.counts.plugin} plugins. They’re
+        bundled with the app, so browsing them needs no account and no network, and you install them one workspace at a time.
       </p>
-      <ul class="vy-jump" aria-label="On this page">
-        <li><a href="#mcp-servers">{ext.counts.mcp} MCP servers</a></li>
-        <li><a href="#skills">{ext.counts.skill} skills</a></li>
-        <li><a href="#plugin-rule-sets">{ext.counts.plugin} plugin rule sets</a></li>
-      </ul>
-
-      <div class="vy-canvas vy-ext-canvas">
-        <Shot
-          name="marketplace"
-          alt="The Agent V marketplace listing bundled MCP servers with their publishers."
-          caption="Browsing the bundle, offline, inside the application."
-          eager
-        />
-      </div>
     </div>
   </section>
 
-  {
-    GROUPS.map((group) => {
-      const items = byKind(group.kind)
-      return (
-        <section class="vy-rule vy-section" id={group.id}>
-          <div class="vy-shell vy-section-grid">
-            <header class="vy-sec-head">
-              <p class="vy-eyebrow">{items.length} packages</p>
-              <h2 class="vy-h2">{group.title}</h2>
-              <p class="vy-prose-muted">{group.blurb}</p>
-            </header>
+  <div class="wrap shot">
+    <Media id="marketplace" sizes="(min-width: 1224px) 1160px, 100vw" />
+  </div>
 
-            <div class="vy-panel">
-              <ul class="vy-rows">
-                {items.map((pkg) => (
-                  <li class="vy-pkg">
-                    {pkg.icon ? (
-                      <img
-                        class:list={['vy-pkg-icon', pkg.iconMono && 'vy-dark-invert']}
-                        src={`/brand/extensions/${pkg.icon}`}
-                        alt=""
-                        width="20"
-                        height="20"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <span class="vy-pkg-icon vy-pkg-icon-fallback" aria-hidden="true">
-                        {pkg.name.slice(0, 1)}
-                      </span>
-                    )}
-                    <div class="vy-pkg-body">
-                      <h3 class="vy-pkg-name">{pkg.name}</h3>
-                      <p class="vy-pkg-desc">{pkg.description}</p>
-                    </div>
-                    <div class="vy-pkg-side">
-                      {pkg.publisher && <span class="vy-pkg-pub vy-mono">{pkg.publisher}</span>}
-                      {AUTH_LABEL[pkg.auth] && <span class="vy-tag">{AUTH_LABEL[pkg.auth]}</span>}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
+  <div class="wrap catalog">
+    <div class="filters" data-filters hidden>
+      <div class="kinds" role="group" aria-label="Show">
+        <button type="button" data-kind-button="all" aria-pressed="true">All <span class="count">{ext.total}</span></button>
+        {
+          groups.map((g) => (
+            <button type="button" data-kind-button={g.kind} aria-pressed="false">
+              {g.title} <span class="count">{g.items.length}</span>
+            </button>
+          ))
+        }
+      </div>
+      <div class="search">
+        <label for="package-filter">Filter by name</label>
+        <input id="package-filter" type="search" autocomplete="off" spellcheck="false" data-filter-input />
+      </div>
+    </div>
+
+    <p class="none" data-no-match role="status" aria-live="polite"></p>
+
+    {
+      groups.map((group) => (
+        <section class="group" id={group.id} data-group={group.kind}>
+          <div class="group-head">
+            <h2 class="h2">{group.title}</h2>
+            <p class="body">{group.blurb}</p>
           </div>
+          <ul class="packages">
+            {group.items.map((pkg) => (
+              <li
+                class="package"
+                data-kind={pkg.kind}
+                data-search={`${pkg.name} ${pkg.description} ${pkg.publisher ?? ''}`.toLowerCase()}
+              >
+                {pkg.icon ? (
+                  <img
+                    class:list={['icon', pkg.iconMono && 'logo-art']}
+                    src={`/brand/extensions/${pkg.icon}`}
+                    alt=""
+                    width="20"
+                    height="20"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                ) : (
+                  <span class="icon icon-letter" aria-hidden="true">
+                    {pkg.name.slice(0, 1)}
+                  </span>
+                )}
+                <div class="package-text">
+                  <h3 class="name">{pkg.name}</h3>
+                  <p class="description">{pkg.description}</p>
+                  <p class="meta package-meta">
+                    {pkg.publisher && <span>{pkg.publisher}</span>}
+                    {signsIn(pkg.auth) && <span class="tag">OAuth</span>}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
         </section>
-      )
-    })
-  }
+      ))
+    }
+  </div>
 
-  <section class="vy-rule vy-section">
-    <div class="vy-shell vy-section-grid">
-      <header class="vy-sec-head">
-        <p class="vy-eyebrow">Your own servers</p>
-        <h2 class="vy-h2">Not limited to the bundle</h2>
-      </header>
-      <div>
-        <p class="vy-prose-muted">
-          Any MCP server works, not just the bundled ones. Point Agent V at a command or a URL, or
-          import servers you have already configured for another client.
-        </p>
-        <p class="vy-footnote">
-          Trade marks and icons on this page belong to their respective owners and are shown to
-          identify the integration.
-        </p>
+  <section class="band rule">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 class="h2">Bring your own server</h2>
       </div>
-    </div>
-  </section>
-
-  <section class="vy-rule vy-section">
-    <div class="vy-shell vy-cta">
-      <h2 class="vy-h2">Install it and open the marketplace.</h2>
-      <div class="vy-cta-actions">
-        <a class="vy-btn vy-btn-primary" href="/download">Download</a>
-        <a class="vy-btn vy-btn-secondary" href="/docs">Documentation</a>
+      <div class="stack">
+        <p class="body">
+          Any MCP server works, not only these. Point Agent V at a command or a URL, or import servers you’ve already set
+          up for another client.
+        </p>
+        <p class="detail">Trade marks and icons on this page belong to their owners and are shown to identify each integration.</p>
+        <div class="actions own-actions">
+          <DownloadButton />
+          <a class="btn btn-secondary" href="/docs">Read the docs</a>
+        </div>
       </div>
     </div>
   </section>
 </Base>
 
 <style>
-  .vy-ext-canvas {
-    margin-top: clamp(2rem, 4vw, 3rem);
+  .shot {
+    margin-bottom: clamp(3rem, 6vw, 5rem);
   }
 
-  .vy-rows > .vy-pkg {
-    display: grid;
-    grid-template-columns: 20px minmax(0, 1fr) auto;
-    gap: 0.875rem;
-    align-items: start;
-    padding-block: 1rem;
-  }
-
-  .vy-pkg-icon {
-    width: 20px;
-    height: 20px;
-    margin-top: 0.1rem;
-    object-fit: contain;
-  }
-
-  .vy-pkg-icon-fallback {
-    display: inline-flex;
+  .filters {
+    position: sticky;
+    top: var(--header);
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: center;
-    border: 1px solid var(--vy-border);
-    border-radius: var(--vy-radius-sm);
-    background: var(--vy-surface);
-    font-size: 0.6875rem;
-    font-weight: 600;
-    color: var(--vy-muted);
-    text-transform: uppercase;
+    justify-content: space-between;
+    gap: 0.75rem 1.5rem;
+    padding-block: 0.875rem;
+    margin-bottom: 1rem;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
   }
 
-  .vy-pkg-name {
-    font-size: 0.9375rem;
-    letter-spacing: -0.014em;
+  .kinds {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
   }
 
-  .vy-pkg-desc {
-    margin-top: 0.25rem;
+  .kinds button {
+    height: 2.125rem;
+    padding: 0 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: transparent;
     font-size: 0.875rem;
-    line-height: 1.55;
-    color: var(--vy-muted);
+    font-weight: 500;
+    color: var(--text-2);
+    cursor: pointer;
+    transition:
+      color var(--fast) var(--ease),
+      border-color var(--fast) var(--ease),
+      background-color var(--fast) var(--ease);
   }
 
-  .vy-pkg-side {
+  .kinds button:hover {
+    color: var(--text);
+    border-color: var(--line-2);
+  }
+
+  .kinds button[aria-pressed='true'] {
+    border-color: var(--ink);
+    background: var(--ink);
+    color: var(--ink-text);
+  }
+
+  .count {
+    margin-left: 0.25rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    opacity: 0.7;
+  }
+
+  .search {
     display: flex;
     align-items: center;
     gap: 0.625rem;
-    padding-top: 0.15rem;
   }
 
-  .vy-pkg-pub {
-    font-size: 0.6875rem;
-    color: var(--vy-tertiary);
+  .search label {
+    font-size: 0.875rem;
+    color: var(--text-3);
     white-space: nowrap;
   }
 
-  @media (max-width: 560px) {
-    .vy-pkg {
-      grid-template-columns: 20px minmax(0, 1fr);
+  .search input {
+    width: 15rem;
+    max-width: 100%;
+    height: 2.125rem;
+    padding: 0 0.75rem;
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-sm);
+    background: var(--bg);
+    font: inherit;
+    font-size: 0.9375rem;
+    color: var(--text);
+  }
+
+  .search input:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 1px;
+  }
+
+  .none:empty {
+    display: none;
+  }
+
+  .none {
+    padding-block: 2rem;
+    color: var(--text-3);
+  }
+
+  .group {
+    padding-block: clamp(2rem, 4vw, 3rem);
+  }
+
+  .group-head {
+    display: grid;
+    gap: 0.75rem;
+    margin-bottom: 1.75rem;
+  }
+
+  .packages {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: clamp(2rem, 5vw, 4rem);
+  }
+
+  .package {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 0.875rem;
+    padding-block: 1.125rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .icon {
+    width: 20px;
+    height: 20px;
+    margin-top: 0.125rem;
+    object-fit: contain;
+    border-radius: 3px;
+  }
+
+  .icon-letter {
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--line-2);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--text-2);
+  }
+
+  .name {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+  }
+
+  .description {
+    margin-top: 0.25rem;
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
+
+  .package-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    font-size: 0.8125rem;
+  }
+
+  .own-actions {
+    margin-top: 1rem;
+  }
+
+  @media (max-width: 759px) {
+    .packages {
+      grid-template-columns: minmax(0, 1fr);
     }
-    .vy-pkg-side {
-      grid-column: 2;
-      padding-top: 0;
+    .filters {
+      position: static;
+    }
+    .search {
+      width: 100%;
+    }
+    .search input {
+      flex: 1;
+      width: auto;
     }
   }
 </style>
+
+<script>
+  const filters = document.querySelector<HTMLElement>('[data-filters]')
+  const input = document.querySelector<HTMLInputElement>('[data-filter-input]')
+  const kindButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-kind-button]')]
+  const groups = [...document.querySelectorAll<HTMLElement>('[data-group]')]
+  const none = document.querySelector<HTMLElement>('[data-no-match]')
+
+  let kind = 'all'
+
+  const apply = () => {
+    const query = (input?.value ?? '').trim().toLowerCase()
+    let shown = 0
+    for (const group of groups) {
+      const kindMatches = kind === 'all' || group.dataset.group === kind
+      let visibleInGroup = 0
+      for (const item of group.querySelectorAll<HTMLElement>('[data-search]')) {
+        const match = kindMatches && (!query || (item.dataset.search ?? '').includes(query))
+        item.hidden = !match
+        if (match) visibleInGroup++
+      }
+      group.hidden = visibleInGroup === 0
+      shown += visibleInGroup
+    }
+    if (none) none.textContent = shown === 0 ? `Nothing matches “${input?.value.trim()}”.` : ''
+  }
+
+  if (filters && input) {
+    filters.hidden = false
+    input.addEventListener('input', apply)
+    for (const button of kindButtons) {
+      button.addEventListener('click', () => {
+        kind = button.dataset.kindButton ?? 'all'
+        for (const other of kindButtons) other.setAttribute('aria-pressed', String(other === button))
+        apply()
+      })
+    }
+  }
+</script>

@@ -3,6 +3,10 @@
  *
  *   node scripts/verify-site.mjs            static checks only
  *   node scripts/verify-site.mjs --network  also HEAD every external URL
+ *   node scripts/verify-site.mjs --draft    report empty media slots as a
+ *                                           warning instead of a failure, for
+ *                                           checking a preview before the
+ *                                           screenshots and video arrive
  */
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs'
 import { join, dirname, relative, resolve } from 'node:path'
@@ -13,6 +17,7 @@ const landing = join(here, '..')
 const dist = join(landing, 'dist')
 
 const NETWORK = process.argv.includes('--network')
+const DRAFT = process.argv.includes('--draft')
 const SITE_ORIGIN = 'https://vyotiq.com'
 
 const failures = []
@@ -49,7 +54,6 @@ console.log(`[verify-site] ${htmlFiles.length} pages, ${files.length} files in d
 const EXPECTED_ROUTES = [
   '/',
   '/features',
-  '/use-cases',
   '/extensions',
   '/download',
   '/docs',
@@ -374,29 +378,110 @@ if (claimProblems === 0) {
   ok(`stated counts match the baked data (${toolNames.length} tools, all named on /features)`)
 }
 
-/* ----------------------------------------------------------- screenshots --- */
+/* ----------------------------------------------------------------- media --- */
 
-// Screenshots are optional, but a page that references one must not 404.
-let shotProblems = 0
-let shotRefs = 0
+// A slot whose screenshot or video has not been supplied renders a dashed frame
+// (src/components/Media.astro). Publishing one would put an empty box on the
+// live site, so it fails here; --draft reports it without failing.
+console.log('\nMedia')
+const missingMedia = new Map()
+let mediaRefs = 0
+let mediaBroken = 0
 for (const file of htmlFiles) {
   const html = readFileSync(file, 'utf8')
   const route = '/' + relative(dist, file).replaceAll('\\', '/')
-  for (const m of html.matchAll(/src="(\/shots\/[^"]+)"/g)) {
-    shotRefs++
-    if (!distPaths.has(m[1])) {
-      fail('screenshot', `${m[1]} referenced on ${route} but not emitted`)
-      shotProblems++
+  for (const m of html.matchAll(/data-missing-media="([^"]+)"/g)) {
+    missingMedia.set(m[1], [...(missingMedia.get(m[1]) ?? []), route])
+  }
+  // Video files and posters are not <img>, so the link check above misses them.
+  for (const m of html.matchAll(/<(?:source|video)\b[^>]*\b(?:src|poster)="([^"]+)"/g)) {
+    mediaRefs++
+    const ref = m[1].split('?')[0]
+    if (/^https?:\/\//.test(ref)) continue
+    if (!distPaths.has(ref)) {
+      fail('media', `${ref} referenced on ${route} but not emitted`)
+      mediaBroken++
     }
   }
 }
-if (shotProblems === 0) {
-  ok(
-    shotRefs === 0
-      ? 'no screenshots referenced'
-      : `all ${shotRefs} screenshot references resolve to emitted files`
-  )
+for (const [id, routes] of missingMedia) {
+  const message = `"${id}" has no file yet (${routes.join(', ')}); see src/lib/media.ts`
+  if (DRAFT) console.log(`  ! ${message}`)
+  else fail('media', message)
 }
+if (missingMedia.size === 0) ok('every screenshot and video slot has its file')
+else if (DRAFT) console.log(`  ! ${missingMedia.size} empty slot(s), allowed by --draft`)
+if (mediaBroken === 0) ok(`all ${mediaRefs} video and poster references resolve`)
+
+/* ------------------------------------------------------------------ voice --- */
+
+// The site is written to sound like a person, not a brochure. These are the
+// phrases that give copy away as filler, checked on the pages whose words are
+// ours (legal pages and release notes are baked from the repository as they
+// are). Say the specific thing instead. See the notes at the top of
+// src/lib/showcase.ts.
+console.log('\nVoice')
+const FILLER = [
+  'seamless',
+  'leverage',
+  'unlock',
+  'supercharge',
+  'effortless',
+  'cutting-edge',
+  'game-changer',
+  'game changer',
+  'revolutioni',
+  'empower',
+  'delve',
+  'elevate',
+  'next level',
+  'next-level',
+  'world-class',
+  'best-in-class',
+  'robust',
+  'streamline',
+  'powerful',
+  'blazing',
+  'lightning-fast',
+  'magic',
+  'unleash',
+  'look no further',
+  'whether you’re',
+  "whether you're",
+  'in today’s',
+  "in today's",
+  'not just',
+  'journey'
+]
+const VOICE_ROUTES = ['/', '/features', '/extensions', '/docs', '/download', '/404.html']
+let voiceProblems = 0
+for (const route of VOICE_ROUTES) {
+  const file = route === '/404.html' ? join(dist, '404.html') : join(dist, route === '/' ? 'index.html' : `${route.slice(1)}/index.html`)
+  if (!existsSync(file)) continue
+  const main = readFileSync(file, 'utf8').match(/<main\b[\s\S]*<\/main>/)?.[0] ?? ''
+  const text = main
+    .replace(/<(script|style)\b[\s\S]*?<\/\1>/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&[a-z#0-9]+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+  const lower = text.toLowerCase()
+  for (const phrase of FILLER) {
+    if (lower.includes(phrase)) {
+      fail('voice', `"${phrase}" on ${route}`)
+      voiceProblems++
+    }
+  }
+  if (text.includes('—')) {
+    fail('voice', `an em dash on ${route}; use a full stop, a comma or a colon`)
+    voiceProblems++
+  }
+  const ratherThan = lower.split('rather than').length - 1
+  if (ratherThan > 1) {
+    fail('voice', `"rather than" ${ratherThan} times on ${route}; say what it does, once`)
+    voiceProblems++
+  }
+}
+if (voiceProblems === 0) ok(`no filler phrases, em dashes or stacked contrasts on ${VOICE_ROUTES.length} pages`)
 
 /* ------------------------------------------------------------ downloads --- */
 
@@ -414,7 +499,9 @@ if (release.source !== 'github') {
   }
 } else {
   const dl = readFileSync(join(dist, 'download/index.html'), 'utf8')
-  const hrefs = [...dl.matchAll(/class="vy-asset-link" href="([^"]+)"/g)].map((m) => m[1])
+  const hrefs = [...dl.matchAll(/<a\b[^>]*\bdata-asset\b[^>]*>/g)]
+    .map((m) => m[0].match(/href="([^"]+)"/)?.[1])
+    .filter(Boolean)
 
   if (hrefs.length !== release.installers.length) {
     fail(
