@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { FormCard, FormGroup, FormGroupLabel, FormRow, FormStack } from '@renderer/lib/ui'
+import { FormCard, FormGroup, FormRow, FormStack } from '@renderer/lib/ui'
 
 /**
  * Settings-named view of the shared form grammar in `lib/ui/FormRow`.
@@ -24,10 +24,6 @@ export function SettingsStack({
   return <FormStack className={className}>{children}</FormStack>
 }
 
-export function SettingsGroupLabel({ children }: { children: ReactNode }) {
-  return <FormGroupLabel>{children}</FormGroupLabel>
-}
-
 export function SettingsCard({
   children,
   className
@@ -43,12 +39,32 @@ export function SettingsCard({
 }
 
 /** Group label + card. Pass `title` for the muted heading above the card. */
-export function SettingsGroup({ title, children }: { title?: string; children: ReactNode }) {
+export function SettingsGroup({
+  title,
+  description,
+  children
+}: {
+  title?: string
+  /** One sentence under the heading, for what the rows share. */
+  description?: string
+  children: ReactNode
+}) {
   return (
-    <FormGroup title={title} cardDataAttribute={CARD_ATTRIBUTE}>
+    <FormGroup title={title} description={description} cardDataAttribute={CARD_ATTRIBUTE}>
       {children}
     </FormGroup>
   )
+}
+
+export type SettingsFieldLayout = {
+  /** Short one-liner shown under the title. */
+  hint?: string
+  /** Longer technical copy shown in a ? tooltip. */
+  help?: string
+  /** Marker after the title — see `workspaceBadge`. */
+  badge?: ReactNode
+  /** Indented under the row above it: a limit that belongs to that switch. */
+  nested?: boolean
 }
 
 export function SettingsField({
@@ -56,20 +72,18 @@ export function SettingsField({
   title,
   hint,
   help,
+  badge,
+  nested = false,
   wide = false,
   children,
   className
-}: {
+}: SettingsFieldLayout & {
   /** Stable field id for search scroll/highlight (`data-settings-field`). */
   id: string
   title: string
-  /** Short one-liner shown under the title. */
-  hint?: string
-  /** Longer technical copy shown in a ? tooltip. */
-  help?: string
   /**
    * Full-width control under the title (accordions, textareas, lists).
-   * Default is Cursor-style: copy left, control right.
+   * Default is copy left, control right.
    */
   wide?: boolean
   children: ReactNode
@@ -81,6 +95,8 @@ export function SettingsField({
       title={title}
       hint={hint}
       help={help}
+      badge={badge}
+      indent={nested}
       wide={wide}
       className={className}
       dataAttribute={FIELD_ATTRIBUTE}

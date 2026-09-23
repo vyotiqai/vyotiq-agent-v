@@ -1143,7 +1143,7 @@ async function listOpenAiCompatModels(
         throw new Error(
           cloud
             ? `Cannot reach Ollama Cloud at ${host} (${formatError(openAiErr)}). Check the base URL and API key.`
-            : `Cannot reach Ollama at ${host} (${formatError(openAiErr)}). Start the Ollama app, or save an Ollama API key in Settings to use Ollama Cloud automatically.`
+            : `Cannot reach Ollama at ${host} (${formatError(openAiErr)}). Start the Ollama app, or save an Ollama API key in Settings → Providers to use Ollama Cloud automatically.`
         )
       }
       throw new Error(

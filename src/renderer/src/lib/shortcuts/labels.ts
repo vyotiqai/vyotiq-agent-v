@@ -50,7 +50,7 @@ export const SHORTCUT_TITLES: Record<ShortcutId, string> = {
   find: 'Find in transcript, changes, or PR',
   refresh: 'Refresh changes or PR',
   dictation: 'Dictation',
-  cycleMode: 'Cycle Ask / Plan / Agent',
+  cycleMode: 'Switch Ask / Agent mode',
   panelTerminal: 'Terminal panel',
   panelChanges: 'Changes panel',
   panelBrowser: 'Browser panel',
@@ -83,6 +83,22 @@ export function extraShortcutCatalog(): ShortcutCatalogEntry[] {
   return [
     { id: 'jump-latest', title: 'Jump to latest', label: 'End' },
     { id: 'jump-top', title: 'Jump to top', label: 'Home' }
+  ]
+}
+
+/**
+ * Chords handled where they apply — the composer, the app's text-size
+ * listener — with no command behind them. Settings → Shortcuts lists them so
+ * they can be found at all; the command palette must not, because picking one
+ * there would dispatch an id nothing listens for.
+ */
+export function referenceShortcutCatalog(): ShortcutCatalogEntry[] {
+  const mod = modPrefix()
+  return [
+    { id: 'edit-last', title: 'Edit last prompt (empty composer)', label: '↑' },
+    { id: 'font-smaller', title: 'Smaller text', label: `${mod}-` },
+    { id: 'font-larger', title: 'Larger text', label: `${mod}=` },
+    { id: 'font-reset', title: 'Reset text size', label: `${mod}0` }
   ]
 }
 

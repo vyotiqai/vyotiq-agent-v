@@ -39,6 +39,7 @@ export function Sidebar({
   onSessionQuery,
   onOpenSettings,
   onOpenNotificationSettings,
+  onOpenSettingsSection,
   focusedRunId = null,
   onOpenMarketplace,
   onOpenTeammates,
@@ -286,7 +287,13 @@ export function Sidebar({
                 afterNav()
                 return
               case 'open_settings':
-                openNotificationSettings()
+                // The item names the section it is about (a crash alert opens
+                // Diagnostics); the inbox's own gear is what opens
+                // notification preferences.
+                clearSearch()
+                if (onOpenSettingsSection) onOpenSettingsSection(action.section)
+                else onOpenSettings()
+                afterNav()
                 return
               default: {
                 const _exhaustive: never = action

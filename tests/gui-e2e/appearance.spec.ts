@@ -35,7 +35,7 @@ test('settings nav opens appearance section with all controls', async () => {
   const { window } = launched
   await openAppearanceSection(window)
 
-  await expect(window.getByRole('button', { name: /^theme$/i })).toBeVisible()
+  await expect(window.getByRole('button', { name: /^color mode$/i })).toBeVisible()
   await expect(window.getByText('Interface skin')).toBeVisible()
   await expect(window.getByRole('button', { name: /^text size$/i })).toBeVisible()
   await expect(window.getByRole('button', { name: /^ui density$/i })).toBeVisible()
@@ -57,7 +57,7 @@ test('settings search navigates to interface skin field', async () => {
 test('theme menu updates DOM, boot cache, and persisted settings', async () => {
   const { window, userDataDir } = launched
   await openAppearanceSection(window)
-  await selectSettingsMenu(window, /^theme$/i, /^dark$/i)
+  await selectSettingsMenu(window, /^color mode$/i, /^dark$/i)
 
   await expect
     .poll(async () => readRootAppearance(window))
@@ -225,7 +225,7 @@ test('appearance boot cache survives reload before React hydrates', async () => 
   const { window } = launched
   await openAppearanceSection(window)
   await window.getByRole('button', { name: /^bench$/i }).click()
-  await selectSettingsMenu(window, /^theme$/i, /^light$/i)
+  await selectSettingsMenu(window, /^color mode$/i, /^light$/i)
   await selectSettingsMenu(window, /^text size$/i, /^small$/i)
   await selectSettingsMenu(window, /^ui density$/i, /^comfortable$/i)
 

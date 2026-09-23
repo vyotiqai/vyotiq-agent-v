@@ -18,7 +18,16 @@ export const NotificationActionSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('open_settings'),
-    section: z.literal('general')
+    /**
+     * Only crash alerts open Settings, and the crash list lives in
+     * Diagnostics. Items written before that section existed say 'general'
+     * and sit in the persisted inbox, so the old value is folded forward
+     * instead of failing the parse and dropping the item.
+     */
+    section: z.preprocess(
+      (value) => (value === 'general' ? 'diagnostics' : value),
+      z.literal('diagnostics')
+    )
   })
 ])
 export type NotificationAction = z.infer<typeof NotificationActionSchema>

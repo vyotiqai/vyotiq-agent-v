@@ -229,7 +229,7 @@ export async function planCompact(input: {
     const message = !status.encryptionAvailable
       ? 'OS secure storage is unavailable. API keys cannot be decrypted on this system.'
       : storedBlob
-        ? `API key for ${providerId} is stored but cannot be decrypted. Re-enter it in Settings or restore OS keychain access.`
+        ? `API key for ${providerId} is stored but cannot be decrypted. Re-enter it in Settings → Providers or restore OS keychain access.`
         : `API key for ${providerId} is not set.`
     throw new CompactionUnavailableError(message)
   }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ToolCatalogEntry, ToolCatalogResult } from '@shared/ipc'
+import { Icon } from '@renderer/lib/icons'
 
 const REASON_LABELS: Record<NonNullable<ToolCatalogEntry['reason']>, string> = {
   'server-disabled': 'server disabled',
@@ -9,17 +10,14 @@ const REASON_LABELS: Record<NonNullable<ToolCatalogEntry['reason']>, string> = {
   'code-index-off': 'code index disabled'
 }
 
+/** Active is the norm; only the exceptions carry a label, so they stand out. */
 function ToolRow({ entry }: { entry: ToolCatalogEntry }) {
   return (
-    <li className="flex flex-col gap-0.5 px-4 py-2.5">
+    <li className="flex flex-col gap-0.5 py-2">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="min-w-0 truncate font-mono text-xs text-fg-strong">{entry.name}</span>
-        {entry.active ? (
-          <span className="shrink-0 text-2xs font-medium text-fg-strong">active</span>
-        ) : entry.reason ? (
-          <span className="shrink-0 text-2xs font-medium text-tertiary">
-            {REASON_LABELS[entry.reason]}
-          </span>
+        <span className="min-w-0 truncate font-mono text-xs text-fg">{entry.name}</span>
+        {!entry.active && entry.reason ? (
+          <span className="shrink-0 text-2xs text-tertiary">{REASON_LABELS[entry.reason]}</span>
         ) : null}
       </div>
       {entry.description ? (
@@ -29,6 +27,50 @@ function ToolRow({ entry }: { entry: ToolCatalogEntry }) {
       ) : null}
       <p className="m-0 text-2xs text-tertiary">{entry.modes.join(' · ')}</p>
     </li>
+  )
+}
+
+/**
+ * One source of tools, collapsed to a single line until opened. Expanded
+ * lists run to dozens of rows each; closed, the card answers "what is
+ * connected and how much of it is live" in a line per source.
+ */
+function ToolGroup({
+  title,
+  meta,
+  note,
+  defaultOpen,
+  entries
+}: {
+  title: string
+  meta?: string
+  /** First line inside the open group — how its tools are gated. */
+  note?: string
+  defaultOpen?: boolean
+  entries: ToolCatalogEntry[]
+}) {
+  const active = entries.filter((entry) => entry.active).length
+  return (
+    <details className="group/tools" open={defaultOpen}>
+      <summary className="-mx-1.5 flex cursor-pointer list-none items-center gap-2 rounded-md px-1.5 py-1.5 text-xs vy-transition hover:bg-surface-2 focus-visible:vy-focus-ring [&::-webkit-details-marker]:hidden">
+        <Icon
+          name="chevron"
+          size={12}
+          className="shrink-0 -rotate-90 text-muted vy-transition group-open/tools:rotate-0"
+        />
+        <span className="min-w-0 truncate text-fg">{title}</span>
+        {meta ? <span className="min-w-0 truncate text-2xs text-muted">{meta}</span> : null}
+        <span className="ml-auto shrink-0 text-2xs tabular-nums text-muted">
+          {active}/{entries.length} active
+        </span>
+      </summary>
+      {note ? <p className="m-0 pb-1 pl-5 text-2xs text-tertiary">{note}</p> : null}
+      <ul className="m-0 list-none divide-y divide-border/40 p-0 pl-5">
+        {entries.map((entry) => (
+          <ToolRow key={entry.name} entry={entry} />
+        ))}
+      </ul>
+    </details>
   )
 }
 
@@ -60,6 +102,7 @@ export function ToolCatalogCard() {
   if (!catalog) return null
 
   const builtins = catalog.entries.filter((entry) => entry.source === 'builtin')
+  const agentBuilt = catalog.entries.filter((entry) => entry.source === 'agent')
   const mcpByServer = new Map<string, ToolCatalogEntry[]>()
   for (const entry of catalog.entries) {
     if (entry.source !== 'mcp' || !entry.serverId) continue
@@ -67,76 +110,43 @@ export function ToolCatalogCard() {
     if (list) list.push(entry)
     else mcpByServer.set(entry.serverId, [entry])
   }
-  const agentBuilt = catalog.entries.filter((entry) => entry.source === 'agent')
   const activeCount = catalog.entries.filter((entry) => entry.active).length
   const serverMetaById = new Map(catalog.servers.map((s) => [s.id, s]))
 
   return (
-    <div className="flex min-w-0 flex-col gap-3">
-      <p className="m-0 text-xs text-secondary">
-        {activeCount} of {catalog.entries.length} tools active · code index{' '}
-        {catalog.codeIndexEnabled ? 'on' : 'off'} · automatic mode switching{' '}
-        {catalog.autoModeSwitch ? 'on' : 'off'}
+    <div className="flex min-w-0 flex-col gap-1">
+      <p className="m-0 pb-1 text-xs text-secondary">
+        {activeCount} of {catalog.entries.length} tools active
       </p>
-
-      <div>
-        <p className="m-0 mb-1 text-xs font-medium text-fg-strong">
-          Built-in tools ({builtins.length})
-        </p>
-        <ul className="m-0 list-none divide-y divide-border/40 rounded-lg border border-border p-0">
-          {builtins.map((entry) => (
-            <ToolRow key={entry.name} entry={entry} />
-          ))}
-        </ul>
-      </div>
-
+      <ToolGroup title={`Built-in tools (${builtins.length})`} entries={builtins} />
+      {/* Open from the start, unlike the long lists around it: there are
+          rarely more than a few, and each is code a run wrote, so what it is
+          and how it is gated should not sit behind a click. */}
       {agentBuilt.length > 0 ? (
-        <div>
-          <p className="m-0 mb-1 text-xs font-medium text-fg-strong">
-            Agent-built tools ({agentBuilt.length}){' '}
-            <span className="font-normal text-tertiary">
-              (written by a run — each call asks you, and asks again whenever the code
-              changes)
-            </span>
-          </p>
-          <ul className="m-0 list-none divide-y divide-border/40 rounded-lg border border-border p-0">
-            {agentBuilt.map((entry) => (
-              <ToolRow key={entry.name} entry={entry} />
-            ))}
-          </ul>
-        </div>
+        <ToolGroup
+          title={`Agent-built tools (${agentBuilt.length})`}
+          note="Written by a run — each call asks you, and asks again whenever the code changes."
+          defaultOpen
+          entries={agentBuilt}
+        />
       ) : null}
-
       {[...mcpByServer.entries()].map(([serverId, entries]) => {
         const server = serverMetaById.get(serverId)
+        const state = server?.connected
+          ? 'connected'
+          : server?.enabled === false
+            ? 'disabled'
+            : 'not connected'
+        const loading = server?.loading === 'every-step' ? 'loaded every step' : 'loaded on demand'
         return (
-          <div key={serverId}>
-            <p className="m-0 mb-1 text-xs font-medium text-fg-strong">
-              {server?.name ?? serverId}{' '}
-              <span className="font-normal text-tertiary">
-                ({server?.connected ? 'connected' : server?.enabled === false ? 'disabled' : 'not connected'}
-                {server?.loading === 'every-step'
-                  ? ' · loaded every step'
-                  : ' · loaded on demand'}
-                )
-              </span>
-            </p>
-            <ul className="m-0 list-none divide-y divide-border/40 rounded-lg border border-border p-0">
-              {entries.map((entry) => (
-                <ToolRow key={entry.name} entry={entry} />
-              ))}
-            </ul>
-          </div>
+          <ToolGroup
+            key={serverId}
+            title={server?.name ?? serverId}
+            meta={`${state} · ${loading}`}
+            entries={entries}
+          />
         )
       })}
-
-      <p className="m-0 text-xs text-tertiary">
-        Built-in tools ship with the app and cannot be removed. Add or remove MCP tools from the
-        server cards — enable/disable a server, or edit its allowed/denied tool lists. A server
-        loaded on demand is fully available to the agent; its schemas reach a run only once that
-        run asks for them, which keeps the context window free. This list updates live; no restart
-        needed.
-      </p>
     </div>
   )
 }

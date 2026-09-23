@@ -18,6 +18,7 @@ import {
   setUpdaterStateForTests
 } from '@renderer/features/updates/updaterStore'
 import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
+import type { NotificationItem } from '@shared/ipc'
 
 const searchRef = createRef<HTMLInputElement>()
 
@@ -278,5 +279,58 @@ describe('Sidebar chrome', () => {
     ).toBe('true')
     expect(screen.queryByRole('button', { name: /Drawer run/ })).toBeNull()
     expect(screen.getByRole('button', { name: 'Home' })).toBeTruthy()
+  })
+})
+
+describe('Sidebar inbox actions', () => {
+  const crash: NotificationItem = {
+    id: 'n-crash',
+    createdAt: '2026-09-23T00:00:00.000Z',
+    read: false,
+    source: 'system',
+    kind: 'crash',
+    title: 'UI recovered after a crash',
+    body: 'The renderer crashed and was reloaded.',
+    dedupeKey: 'crash',
+    action: { type: 'open_settings', section: 'diagnostics' }
+  }
+
+  function renderWithInbox(items: NotificationItem[]) {
+    // @ts-expect-error test bridge
+    window.vyotiq = {
+      platform: 'win32',
+      listNotifications: vi.fn(async () => ({ ok: true as const, data: { items } })),
+      onNotificationsChanged: vi.fn(() => () => {}),
+      markNotificationsRead: vi.fn(async () => ({
+        ok: true as const,
+        data: { items: items.map((item) => ({ ...item, read: true })) }
+      }))
+    }
+    const handlers = {
+      onOpenSettings: vi.fn(),
+      onOpenNotificationSettings: vi.fn(),
+      onOpenSettingsSection: vi.fn()
+    }
+    render(<Sidebar {...baseProps} {...handlers} />)
+    return handlers
+  }
+
+  it('opens the section a crash alert names, not notification preferences', async () => {
+    const handlers = renderWithInbox([crash])
+    fireEvent.click(await screen.findByRole('button', { name: /notifications, 1 unread/i }))
+    fireEvent.click(await screen.findByText('UI recovered after a crash'))
+
+    expect(handlers.onOpenSettingsSection).toHaveBeenCalledWith('diagnostics')
+    expect(handlers.onOpenNotificationSettings).not.toHaveBeenCalled()
+    expect(handlers.onOpenSettings).not.toHaveBeenCalled()
+  })
+
+  it('keeps the inbox gear on notification preferences', async () => {
+    const handlers = renderWithInbox([crash])
+    fireEvent.click(await screen.findByRole('button', { name: /notifications, 1 unread/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Notification settings' }))
+
+    expect(handlers.onOpenNotificationSettings).toHaveBeenCalledTimes(1)
+    expect(handlers.onOpenSettingsSection).not.toHaveBeenCalled()
   })
 })

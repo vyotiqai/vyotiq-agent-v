@@ -1,25 +1,29 @@
 import { useMemo } from 'react'
-import { SECRET_PROVIDERS, type ProviderId, type Settings } from '@shared/ipc'
+import { SECRET_PROVIDERS, type ProviderId } from '@shared/ipc'
 import { providerLabel, providerOptionsForConfigured } from '@shared/providers'
-import { Menu, Button } from '@renderer/lib/ui'
+import { Button } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { SettingsViewProps } from '../types'
+import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
+import { SettingsNotice } from '../components/SettingsNotice'
 import { ProviderKeyAccordion } from '../components/ProviderKeyAccordion'
+import { workspaceBadge } from '../components/WorkspaceBadge'
 
 export function ProvidersSection({
-  settings,
   secrets,
   secretsLoadError = false,
   form,
-  onClearSecret
+  onClearSecret,
+  onOpenComposerModel
 }: {
-  settings: Settings
   secrets: SettingsViewProps['secrets']
   secretsLoadError?: boolean
   form: SettingsFormState
   onClearSecret: SettingsViewProps['onClearSecret']
+  onOpenComposerModel?: () => void
 }) {
+  const settings = form.settings
   const activeProviderOptions = useMemo(
     () =>
       providerOptionsForConfigured(secrets, {
@@ -29,63 +33,114 @@ export function ProvidersSection({
       }),
     [secrets, settings.ollamaBaseUrl, settings.customOpenAiBaseUrl, settings.provider]
   )
+  // A workspace override can pin a different provider; name it only then, so
+  // the common case reads as just the model under the provider row above.
+  const modelLabel =
+    form.workspaceOverrideActive && form.displayProvider !== settings.provider
+      ? `${form.displayProviderMeta?.label ?? form.displayProvider} · ${form.displayModel}`
+      : form.displayModel
 
   return (
     <SettingsStack>
       {secretsLoadError ? (
-        <p
-          className="m-0 rounded-xl bg-surface px-4 py-3 text-xs leading-snug text-warning [overflow-wrap:anywhere]"
-          role="status"
-        >
-          Could not read saved API keys. They may still be on disk. Re-enter keys or check
-          secrets.json.
-        </p>
+        <SettingsNotice tone="warning">
+          Saved API keys could not be read. They may still be on disk — re-enter a key, or
+          check secrets.json.
+        </SettingsNotice>
       ) : null}
-      <SettingsGroup title="Provider">
-        <SettingsField
+      {!form.encryptionAvailable ? (
+        <SettingsNotice tone="warning">
+          OS secure storage is unavailable on this system, so API keys cannot be saved.
+        </SettingsNotice>
+      ) : null}
+
+      <SettingsGroup title="Model">
+        <SelectField
           id="active-provider"
           title="Active provider"
-          hint="Used for chat and Refresh models."
-          help="Selecting a provider here makes it active. Expanding an API key row only edits that key. Model is chosen in the composer."
-        >
-          <Menu
-            aria-label="Active provider"
-            value={settings.provider}
-            options={activeProviderOptions}
-            searchable={false}
-            placement="down"
-            disabled={form.formLocked || activeProviderOptions.length === 0}
-            onChange={(v) => {
-              void form.setActiveProvider(v as ProviderId)
-            }}
-          />
-          {activeProviderOptions.length === 0 ? (
-            <p className="m-0 mt-2 text-xs leading-snug text-secondary" role="status">
-              No providers configured yet. Add an API key below or use local Ollama.
-            </p>
-          ) : null}
-        </SettingsField>
-
-        {form.activeNeedsKey && form.savedKeyProviders.length > 0 ? (
-          <p
-            className="m-0 px-4 py-3 text-xs leading-snug text-secondary [overflow-wrap:anywhere]"
+          hint="Used for chat and the model list."
+          help="Opening a key below only edits that key; it never switches the active provider."
+          value={settings.provider}
+          options={activeProviderOptions}
+          disabled={form.formLocked}
+          onChange={(provider) => {
+            void form.setActiveProvider(provider as ProviderId)
+          }}
+        />
+        {/* The menu always holds the active provider (and local Ollama needs
+            no key), so it is never empty; the gap worth naming is an active
+            provider that cannot run. With no other key saved, the way out is
+            adding one. */}
+        {form.activeNeedsKey ? (
+          <div
+            className="flex flex-wrap items-center gap-2 px-4 py-3 text-xs leading-snug text-secondary"
             role="status"
           >
-            Active provider is {providerLabel(settings.provider)} but its API key is
-            missing. Switch to a provider with a saved key:{' '}
+            <span className="min-w-0">
+              {providerLabel(settings.provider)} has no API key.{' '}
+              {form.savedKeyProviders.length > 0
+                ? 'Switch to one that does:'
+                : 'Add one under API keys below.'}
+            </span>
             {form.savedKeyProviders.map((id) => (
-              <button
+              <Button
                 key={id}
-                type="button"
-                className="mr-1.5 inline-flex rounded-sm border border-border bg-bg px-1.5 py-0.5 text-xs text-fg-strong vy-transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]"
+                variant="subtle"
                 disabled={form.formLocked}
                 onClick={() => {
                   void form.setActiveProvider(id as ProviderId)
                 }}
               >
                 Use {providerLabel(id)}
-              </button>
+              </Button>
             ))}
+          </div>
+        ) : null}
+        <SettingsField
+          id="active-model"
+          title="Active model"
+          hint="Pick a different model in the composer."
+          badge={workspaceBadge(form.workspaceOverrideActive)}
+        >
+          <div className="flex min-w-0 max-w-full items-center gap-2">
+            <span className="min-w-0 truncate text-sm text-fg" title={modelLabel}>
+              {modelLabel}
+            </span>
+            {onOpenComposerModel ? (
+              <Button
+                variant="subtle"
+                className="shrink-0"
+                disabled={form.formLocked}
+                onClick={onOpenComposerModel}
+              >
+                Change
+              </Button>
+            ) : null}
+          </div>
+        </SettingsField>
+        <SettingsField
+          id="refresh-models"
+          title="Refresh models"
+          hint={`Reload the model list for ${form.providerMeta?.label ?? settings.provider}. Saving a key does this too.`}
+          help="Fetches the list the composer's model picker shows. It never changes the active model."
+        >
+          <Button
+            variant="subtle"
+            pending={form.refreshingModels}
+            disabled={form.busy && !form.refreshingModels}
+            onClick={() => {
+              void form.refreshModels()
+            }}
+          >
+            {form.refreshingModels ? 'Refreshing…' : 'Refresh models'}
+          </Button>
+        </SettingsField>
+        {form.modelsInfo ? (
+          <p
+            className="m-0 px-4 py-3 text-xs leading-snug text-secondary [overflow-wrap:anywhere]"
+            role="status"
+          >
+            {form.modelsInfo}
           </p>
         ) : null}
       </SettingsGroup>
@@ -96,10 +151,10 @@ export function ProvidersSection({
           title="API keys"
           hint={
             form.encryptionAvailable
-              ? `OS secure storage · ${form.savedKeyCount}/${SECRET_PROVIDERS.length} saved.`
-              : 'OS secure storage is unavailable on this system.'
+              ? `OS secure storage · ${form.savedKeyCount}/${SECRET_PROVIDERS.length} saved`
+              : 'Unavailable without OS secure storage.'
           }
-          help="Expand a provider to edit its key. Saving a key does not change the active provider. Keys never leave encrypted local storage."
+          help="Open a provider to edit its key and, for Ollama and custom endpoints, its base URL. Saving a key does not change the active provider. Keys never leave encrypted local storage."
           wide
         >
           <ProviderKeyAccordion
@@ -132,9 +187,7 @@ export function ProvidersSection({
               error: form.fieldError.customUrl
             }}
             onKeyDraftChange={form.setKeyDraft}
-            onSelectProvider={(id) => {
-              form.selectKeyProvider(id)
-            }}
+            onSelectProvider={form.selectKeyProvider}
             onSetActive={(id) => {
               void form.setActiveProvider(id as ProviderId)
             }}
@@ -146,34 +199,6 @@ export function ProvidersSection({
             }}
           />
         </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup title="Catalog">
-        <SettingsField
-          id="refresh-models"
-          title="Refresh models"
-          hint={`Reload the live catalog for the active provider (${form.providerMeta?.label ?? settings.provider}). Saving a key refreshes that provider's catalog automatically.`}
-          help="Fetches the provider model list used by the composer picker. Does not change the active model."
-        >
-          <Button
-            variant="subtle"
-            pending={form.refreshingModels}
-            disabled={form.busy && !form.refreshingModels}
-            onClick={() => {
-              void form.refreshModels()
-            }}
-          >
-            {form.refreshingModels ? 'Refreshing…' : 'Refresh models'}
-          </Button>
-        </SettingsField>
-        {form.modelsInfo ? (
-          <p
-            className="m-0 px-4 py-3 text-xs text-secondary [overflow-wrap:anywhere]"
-            role="status"
-          >
-            {form.modelsInfo}
-          </p>
-        ) : null}
       </SettingsGroup>
     </SettingsStack>
   )

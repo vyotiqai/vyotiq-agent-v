@@ -252,7 +252,7 @@ function askThroughRenderer(
     })
     return Promise.reject(
       new Error(
-        'Tool approval required but no app window is listening. Reopen Vyotiq and retry, or turn off tool approval in Settings → Tools.'
+        'Tool approval required but no app window is listening. Reopen Vyotiq and retry, or turn off tool approval in Settings → Agent.'
       )
     )
   }

@@ -938,6 +938,34 @@ describe('ipc schemas', () => {
     expect(NotificationMutateRequestSchema.parse({ all: true })).toEqual({ all: true })
   })
 
+  it('points crash alerts at Diagnostics, folding inbox items saved as General', () => {
+    const crash = {
+      id: 'n2',
+      createdAt: '2026-08-16T00:00:00.000Z',
+      read: false,
+      source: 'system',
+      kind: 'crash',
+      title: 'UI recovered after a crash',
+      body: 'crashed',
+      dedupeKey: 'crash'
+    }
+    // A persisted item from before the Diagnostics section still parses, and
+    // now opens the section that actually lists crashes.
+    expect(
+      NotificationItemSchema.parse({ ...crash, action: { type: 'open_settings', section: 'general' } })
+        .action
+    ).toEqual({ type: 'open_settings', section: 'diagnostics' })
+    expect(
+      NotificationItemSchema.parse({
+        ...crash,
+        action: { type: 'open_settings', section: 'diagnostics' }
+      }).action
+    ).toEqual({ type: 'open_settings', section: 'diagnostics' })
+    expect(() =>
+      NotificationItemSchema.parse({ ...crash, action: { type: 'open_settings', section: 'voice' } })
+    ).toThrow()
+  })
+
   it('parses model picker preference fields on settings', () => {
     const parsed = SettingsSchema.parse({
       ...DEFAULT_SETTINGS,

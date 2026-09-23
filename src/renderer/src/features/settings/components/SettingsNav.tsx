@@ -1,30 +1,9 @@
 import type { Ref } from 'react'
-import { Icon, type IconName } from '@renderer/lib/icons'
+import { Icon } from '@renderer/lib/icons'
 import { NavItem, cn } from '@renderer/lib/ui'
 import { SETTINGS_NAV_WIDTH } from '@renderer/lib/utils/layout'
-import { SECTION_LABELS } from '../constants'
+import { SECTION_GROUPS, SECTION_ICONS, SECTION_LABELS } from '../constants'
 import type { SettingsSection } from '../types'
-
-const SECTION_ICONS = {
-  general: 'gear',
-  appearance: 'sliders',
-  providers: 'cpu',
-  agent: 'bot',
-  indexing: 'fileSearch',
-  voice: 'mic',
-  storage: 'stack',
-  tools: 'plug',
-  shortcuts: 'keyboard',
-  about: 'info'
-} as const satisfies Record<SettingsSection, IconName>
-
-const SECTIONS: { id: SettingsSection; label: string; icon: IconName }[] = (
-  Object.keys(SECTION_LABELS) as SettingsSection[]
-).map((id) => ({
-  id,
-  label: SECTION_LABELS[id].title,
-  icon: SECTION_ICONS[id]
-}))
 
 export function SettingsBackButton({
   backRef,
@@ -37,7 +16,7 @@ export function SettingsBackButton({
     <button
       ref={backRef}
       type="button"
-      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-muted vy-transition hover:bg-surface hover:text-fg"
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-muted vy-transition hover:bg-surface hover:text-fg focus-visible:vy-focus-ring"
       onClick={onClose}
     >
       <Icon name="chevron" size={14} className="rotate-90" />
@@ -46,6 +25,12 @@ export function SettingsBackButton({
   )
 }
 
+/**
+ * Sections in three labelled groups. Below `sm` the nav collapses to the
+ * horizontal scroll strip it has always been — the headings would cost more
+ * width than they buy there — so they are the one thing that appears only on
+ * the wide layout.
+ */
 export function SettingsNav({
   section,
   onSectionChange
@@ -58,20 +43,30 @@ export function SettingsNav({
       data-settings-nav
       className={cn(
         'flex shrink-0 flex-row items-center gap-0.5 overflow-x-auto px-2 pb-2',
-        'sm:flex-col sm:items-stretch sm:overflow-visible sm:px-3 sm:pb-3 sm:pt-0',
+        'sm:flex-col sm:items-stretch sm:gap-0 sm:overflow-visible sm:px-3 sm:pb-3 sm:pt-0',
         SETTINGS_NAV_WIDTH
       )}
       aria-label="Settings sections"
     >
-      {SECTIONS.map(({ id, label, icon }) => (
-        <NavItem
-          key={id}
-          variant="settings"
-          label={label}
-          icon={icon}
-          active={section === id}
-          onClick={() => onSectionChange(id)}
-        />
+      {SECTION_GROUPS.map((group) => (
+        <div
+          key={group.label}
+          className="contents sm:mt-4 sm:flex sm:flex-col sm:gap-0.5 sm:first:mt-0"
+        >
+          <h2 className="m-0 hidden px-2.5 pb-1 text-2xs font-medium uppercase tracking-[var(--vy-tracking-caps)] text-tertiary sm:block">
+            {group.label}
+          </h2>
+          {group.sections.map((id) => (
+            <NavItem
+              key={id}
+              variant="settings"
+              label={SECTION_LABELS[id]}
+              icon={SECTION_ICONS[id]}
+              active={section === id}
+              onClick={() => onSectionChange(id)}
+            />
+          ))}
+        </div>
       ))}
     </nav>
   )

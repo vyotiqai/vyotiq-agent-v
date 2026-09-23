@@ -1,23 +1,24 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
-import type { CodeIndexRuntimeStatus, ProcessMetricsSnapshot } from '@shared/ipc'
-import { Button, Switch } from '@renderer/lib/ui'
+import type { CodeIndexRuntimeStatus } from '@shared/ipc'
+import { Button } from '@renderer/lib/ui'
+import { ProgressBar } from '../components/ProgressBar'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
+import { SwitchField } from '../components/SwitchField'
 
 function phaseLabel(status: CodeIndexRuntimeStatus | null): string {
-  if (!status) return 'Unknown'
+  if (!status) return 'Checking…'
   switch (status.phase) {
     case 'ready':
-      return 'Ready'
+      return status.message ?? 'Ready'
     case 'syncing': {
       const ip = status.indexProgress
-      if (ip) return `Code index · ${ip.stage}`
-      const pct =
-        status.progress != null ? ` · ${Math.round(status.progress * 100)}%` : ''
+      if (ip) return `Indexing · ${ip.stage}`
+      const pct = status.progress != null ? ` · ${Math.round(status.progress * 100)}%` : ''
       return status.message ?? `Syncing${pct}`
     }
     case 'error':
-      return `Error${status.error ? `: ${status.error}` : ''}`
+      return 'Error'
     case 'idle':
       return status.message ?? 'Idle'
     default: {
@@ -27,67 +28,33 @@ function phaseLabel(status: CodeIndexRuntimeStatus | null): string {
   }
 }
 
-function IndexProgressPanel({ status }: { status: CodeIndexRuntimeStatus | null }) {
-  if (!status) return null
-  const showBar = status.phase === 'syncing'
-  const pct =
-    status.progress != null && Number.isFinite(status.progress)
-      ? Math.max(0, Math.min(100, Math.round(status.progress * 100)))
-      : null
+function IndexProgress({ status }: { status: CodeIndexRuntimeStatus }) {
+  if (status.phase !== 'syncing') return null
   const ip = status.indexProgress
-  const showDetail = ip != null && status.phase === 'syncing'
-
   return (
     <div className="flex w-full flex-col gap-1.5">
-      <p className="m-0 text-xs text-secondary">{phaseLabel(status)}</p>
-      {showBar && pct != null ? (
-        <div
-          className="h-1.5 w-full overflow-hidden rounded-sm bg-border/40"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={pct}
-          aria-label="Index progress"
-        >
-          <div
-            className="h-full bg-accent transition-[width] duration-100 ease-linear"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      ) : null}
-      {showDetail ? (
-        <div className="m-0 grid grid-cols-2 gap-x-3 gap-y-0.5 text-caption text-secondary">
-          <span>
+      <ProgressBar
+        percent={status.progress != null ? status.progress * 100 : null}
+        label="Index progress"
+      />
+      {ip ? (
+        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-caption text-secondary">
+          <span className="tabular-nums">
             {ip.filesDone}/{ip.filesTotal} scanned
           </span>
-          <span className="text-right">
+          <span className="text-right tabular-nums">
             {ip.indexed} updated · {ip.skipped} unchanged
             {ip.removed > 0 ? ` · ${ip.removed} removed` : ''}
           </span>
-          <span className="text-right text-muted">
-            {ip.indexed + ip.skipped > 0
-              ? `${ip.indexed + ip.skipped} text files`
-              : '\u00a0'}
-          </span>
           {ip.currentPath ? (
-            <span className="col-span-2 truncate font-mono text-2xs" title={ip.currentPath}>
+            <span className="col-span-2 truncate font-mono text-2xs text-muted" title={ip.currentPath}>
               {ip.currentPath}
             </span>
           ) : null}
         </div>
-      ) : status.phase === 'syncing' && status.message ? (
-        <p className="m-0 text-caption text-secondary">{status.message}</p>
       ) : null}
     </div>
   )
-}
-
-function mbForType(snap: ProcessMetricsSnapshot, type: string): number {
-  return snap.byType.find((row) => row.type === type)?.workingSetMb ?? 0
-}
-
-function processMetricsLabel(snap: ProcessMetricsSnapshot): string {
-  return `Main ${mbForType(snap, 'Browser')} MB · GPU ${mbForType(snap, 'GPU')} MB · Tabs ${mbForType(snap, 'Tab')} MB · ${snap.totalWorkingSetMb} MB total`
 }
 
 export function IndexingSection({ form }: { form: SettingsFormState }) {
@@ -95,7 +62,6 @@ export function IndexingSection({ form }: { form: SettingsFormState }) {
   const [runtime, setRuntime] = useState<CodeIndexRuntimeStatus | null>(null)
   const [reindexBusy, setReindexBusy] = useState(false)
   const [statusError, setStatusError] = useState<string | null>(null)
-  const [processMetrics, setProcessMetrics] = useState<ProcessMetricsSnapshot | null>(null)
 
   const refreshStatus = useCallback(() => {
     void window.vyotiq.codeIndexStatus().then((res) => {
@@ -126,7 +92,7 @@ export function IndexingSection({ form }: { form: SettingsFormState }) {
     const onVisibility = (): void => {
       if (document.visibilityState !== 'hidden') refreshStatus()
     }
-    // Fallback poll only when push subscription is unavailable.
+    // Fast fallback poll only when push subscription is unavailable.
     const id = unsub == null ? window.setInterval(poll, 1000) : window.setInterval(poll, 8000)
     document.addEventListener('visibilitychange', onVisibility)
     return () => {
@@ -136,114 +102,67 @@ export function IndexingSection({ form }: { form: SettingsFormState }) {
     }
   }, [refreshStatus, codeIndex.enabled])
 
-  useEffect(() => {
-    let cancelled = false
-    const pull = (): void => {
-      if (typeof window.vyotiq.processMetrics !== 'function') return
-      void window.vyotiq.processMetrics().then((res) => {
-        if (cancelled || !res.ok) return
-        setProcessMetrics(res.data)
+  const reindex = (): void => {
+    setReindexBusy(true)
+    setStatusError(null)
+    void window.vyotiq
+      .codeIndexReindex()
+      .then((res) => {
+        if (!res.ok) {
+          setStatusError(res.error ?? 'Reindex failed')
+          return
+        }
+        refreshStatus()
       })
-    }
-    const poll = (): void => {
-      if (document.visibilityState === 'hidden') return
-      pull()
-    }
-    const onVisibility = (): void => {
-      if (document.visibilityState !== 'hidden') pull()
-    }
-    pull()
-    const id = window.setInterval(poll, 8000)
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
-  }, [])
-
-  const patchCodeIndex = (partial: Partial<typeof codeIndex>) => {
-    void form.runUpdate({
-      codeIndex: { ...codeIndex, ...partial }
-    })
+      .finally(() => setReindexBusy(false))
   }
+
+  const error = statusError ?? runtime?.error ?? null
+  const syncing = codeIndex.enabled && runtime?.phase === 'syncing'
 
   return (
     <SettingsStack>
-      <SettingsGroup title="Codebase indexing">
-        <SettingsField
+      <SettingsGroup title="Code index">
+        <SwitchField
           id="codeindex-enabled"
           title="Enable codebase index"
-          hint="Powers codebase_search (ranked keyword retrieval over a local SQLite trigram index)."
-          help="Index lives under app userData (not the project tree). Everything runs locally — no models, no downloads, no network."
-        >
-          <Switch
-            size="md"
-            checked={codeIndex.enabled}
-            disabled={form.formLocked}
-            label="Enable codebase index"
-            onCheckedChange={(checked) => patchCodeIndex({ enabled: checked })}
-          />
-        </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup title="Index status">
+          hint="Lets the agent search the workspace by keyword and by meaning."
+          help="Powers codebase_search (a keyword index) and concept_search (a small embedding model, downloaded once and shared by every workspace). Both run locally; the index lives in app data, not in your project."
+          checked={codeIndex.enabled}
+          disabled={form.formLocked}
+          onChange={(enabled) => {
+            void form.runUpdate({ codeIndex: { ...codeIndex, enabled } })
+          }}
+        />
+        {/* Same shape as Storage's App data row: the status is the hint, so it
+            reads where every other row's answer does, and Reindex holds the
+            right edge. Progress and errors go underneath, so a sync starting
+            never moves the button. */}
         <SettingsField
           id="codeindex-status"
           title="Index status"
-          hint="Live walk / sync progress for the local code index."
-          help="Scanned counts every walked path. Updated / unchanged apply only to text files that are content-hashed. Non-text and oversized files are skipped without those counters."
-          wide
+          hint={codeIndex.enabled ? phaseLabel(runtime) : 'Off'}
+          help="Scanned counts every walked path. Updated and unchanged count only text files, which are content-hashed; binary and oversized files are skipped."
         >
-          <div className="flex flex-col items-start gap-2">
-            <IndexProgressPanel status={runtime} />
-            {runtime?.error ? (
-              <p className="m-0 w-full text-xs text-danger" role="alert">
-                {runtime.error}
+          <Button
+            variant="subtle"
+            pending={reindexBusy}
+            disabled={form.formLocked || !codeIndex.enabled}
+            onClick={reindex}
+          >
+            {reindexBusy ? 'Reindexing…' : 'Reindex workspace'}
+          </Button>
+        </SettingsField>
+        {syncing || error ? (
+          <div className="flex flex-col gap-1.5 px-4 py-3">
+            {syncing && runtime ? <IndexProgress status={runtime} /> : null}
+            {error ? (
+              <p className="m-0 text-xs text-danger" role="alert">
+                {error}
               </p>
             ) : null}
-            {statusError ? (
-              <p className="m-0 w-full text-xs text-danger" role="alert">
-                {statusError}
-              </p>
-            ) : null}
-            <Button
-              type="button"
-              variant="subtle"
-              disabled={form.formLocked || reindexBusy || !codeIndex.enabled}
-              onClick={() => {
-                setReindexBusy(true)
-                setStatusError(null)
-                void window.vyotiq
-                  .codeIndexReindex()
-                  .then((res) => {
-                    if (!res.ok) {
-                      setStatusError(res.error ?? 'Reindex failed')
-                      return
-                    }
-                    refreshStatus()
-                  })
-                  .finally(() => setReindexBusy(false))
-              }}
-            >
-              {reindexBusy ? 'Reindexing…' : 'Reindex workspace'}
-            </Button>
           </div>
-        </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup title="Process memory">
-        <SettingsField
-          id="process-metrics"
-          title="Live processes"
-          hint="Chromium working set across the app's processes. Matches Task Manager's combined Electron RSS."
-          help="Main is the Browser process. Tabs include the app renderer and any DevTools or agent-browser views."
-          wide
-        >
-          <p className="m-0 text-xs text-secondary">
-            {processMetrics ? processMetricsLabel(processMetrics) : 'Sampling…'}
-          </p>
-        </SettingsField>
+        ) : null}
       </SettingsGroup>
     </SettingsStack>
   )

@@ -99,7 +99,9 @@ export function FormRow({
   title,
   hint,
   help,
+  badge,
   wide = false,
+  indent = false,
   children,
   className,
   dataAttribute = 'data-form-row'
@@ -111,11 +113,19 @@ export function FormRow({
   hint?: string
   /** Longer technical copy shown in a ? tooltip. */
   help?: string
+  /** Small marker after the title — scope ("Workspace"), state. */
+  badge?: ReactNode
   /**
    * Full-width control under the title (accordions, textareas, lists).
    * Default is copy left, control right.
    */
   wide?: boolean
+  /**
+   * A row that only means something under the one above it — the count and
+   * age limits of a cleanup switch. The deeper left edge carries the
+   * relationship, so the rows need no "(requires …)" copy to explain it.
+   */
+  indent?: boolean
   children: ReactNode
   className?: string
   dataAttribute?: string
@@ -123,7 +133,7 @@ export function FormRow({
   return (
     <div
       {...{ [dataAttribute]: id }}
-      className={cn('px-4 py-3.5', className)}
+      className={cn(indent ? 'py-3.5 pl-10 pr-4' : 'px-4 py-3.5', className)}
     >
       <div
         className={cn(
@@ -134,6 +144,7 @@ export function FormRow({
         <div className={cn(wide ? 'min-w-0 w-full' : 'min-w-0 flex-1')}>
           <div className="flex items-center gap-1.5">
             <p className="m-0 text-sm tracking-[var(--vy-tracking)] text-fg-strong">{title}</p>
+            {badge}
             {help ? (
               <Tooltip content={help} side="top" delayMs={200}>
                 <button

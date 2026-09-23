@@ -1,6 +1,7 @@
 import type { RefObject } from 'react'
 import type { RunSummary } from '@shared/ipc'
 import type { RunRecencyGroup } from '@renderer/lib/utils/groupRunsByRecency'
+import type { SettingsSection } from '@renderer/features/settings'
 
 export type SidebarView = 'chat' | 'settings' | 'marketplace' | 'teammates' | 'home'
 
@@ -27,6 +28,8 @@ export type SidebarProps = {
   onSessionQuery: (q: string) => void
   onOpenSettings: () => void
   onOpenNotificationSettings?: () => void
+  /** Open Settings on one section — a notification's `open_settings` action. */
+  onOpenSettingsSection?: (section: SettingsSection) => void
   focusedRunId?: string | null
   onOpenMarketplace: () => void
   onOpenTeammates: () => void

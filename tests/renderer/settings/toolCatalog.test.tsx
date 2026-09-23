@@ -83,7 +83,46 @@ describe('ToolCatalogCard', () => {
     expect(screen.getByText('mcp__ctx__expand_chunk')).toBeTruthy()
     expect(screen.getByText('code index disabled')).toBeTruthy()
     expect(screen.getByText('server disabled')).toBeTruthy()
-    expect(screen.getAllByText('active').length).toBe(2)
+    // Active is the norm and carries no label; each source line counts it.
+    expect(screen.queryByText('active')).toBeNull()
+    expect(screen.getByText('1/2 active')).toBeTruthy()
+    expect(screen.getByText('0/1 active')).toBeTruthy()
+  })
+
+  it('collapses each source to one line until opened', async () => {
+    const { container } = render(<ToolCatalogCard />)
+    await waitFor(() => expect(screen.getByText(/Built-in tools \(2\)/)).toBeTruthy())
+    const groups = container.querySelectorAll('details')
+    expect(groups.length).toBe(3)
+    groups.forEach((group) => expect(group.open).toBe(false))
+  })
+
+  it('opens agent-built tools and says how their calls are gated', async () => {
+    window.vyotiq.toolsCatalogGet = vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        ...payload,
+        entries: [
+          ...payload.entries,
+          {
+            name: 'count_todos',
+            description: 'Count TODO comments',
+            source: 'agent' as const,
+            modes: ['agent' as const],
+            active: true
+          }
+        ]
+      }
+    }))
+    render(<ToolCatalogCard />)
+    const summary = await screen.findByText('Agent-built tools (1)')
+    expect(summary.closest('details')?.open).toBe(true)
+    // tests/gui-e2e/agent-built-tools.spec.ts pins this sentence.
+    expect(
+      screen.getByText(/each call asks you, and asks again whenever the code changes/)
+    ).toBeTruthy()
+    expect(screen.getByText('Count TODO comments')).toBeTruthy()
+    expect(screen.getByText(/Built-in tools \(2\)/).closest('details')?.open).toBe(false)
   })
 
   it('updates live from push events without a refetch', async () => {

@@ -30,33 +30,37 @@ function renderAgentSettings(settings: Settings, onUpdate: Update) {
 
 describe('Agent section — Persona & style fields', () => {
   it('seeds drafts from persisted settings', () => {
-    const onUpdate = vi.fn<Parameters<Update>, ReturnType<Update>>(
+    const onUpdate = vi.fn<Update>(
       async () => ({ ok: true })
     )
     renderAgentSettings(
       { ...DEFAULT_SETTINGS, agentPersona: 'Nova', agentTone: 'blunt', responseLanguage: 'Spanish' },
       onUpdate
     )
-    expect((screen.getByLabelText('Persona') as HTMLTextAreaElement).value).toBe('Nova')
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Nova')
     expect((screen.getByLabelText('Tone') as HTMLTextAreaElement).value).toBe('blunt')
     expect((screen.getByLabelText('Response language') as HTMLInputElement).value).toBe('Spanish')
     expect(onUpdate).not.toHaveBeenCalled()
   })
 
   it('persists trimmed persona/tone/language on blur and skips no-change blurs', async () => {
-    const onUpdate = vi.fn<Parameters<Update>, ReturnType<Update>>(
+    const onUpdate = vi.fn<Update>(
       async () => ({ ok: true })
     )
     renderAgentSettings(DEFAULT_SETTINGS, onUpdate)
 
-    const persona = screen.getByLabelText('Persona') as HTMLTextAreaElement
+    const persona = screen.getByLabelText('Name') as HTMLInputElement
+    // The live region is there before the status is: one that mounts with
+    // its text is never announced.
+    const live = persona.parentElement!.querySelector('[aria-live="polite"]')
+    expect(live?.textContent).toBe('')
     fireEvent.change(persona, { target: { value: '  Nova Prime  ' } })
-    expect(screen.getByText('Unsaved — saved when you leave the field')).toBeTruthy()
+    expect(live?.textContent).toBe('Unsaved — saved when you leave the field')
     fireEvent.blur(persona)
     await waitFor(() =>
       expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ agentPersona: 'Nova Prime' }))
     )
-    await waitFor(() => expect((screen.getByLabelText('Persona') as HTMLTextAreaElement).value).toBe('Nova Prime'))
+    await waitFor(() => expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Nova Prime'))
 
     const tone = screen.getByLabelText('Tone') as HTMLTextAreaElement
     fireEvent.change(tone, { target: { value: 'Blunt, warm ' } })
@@ -74,18 +78,18 @@ describe('Agent section — Persona & style fields', () => {
       )
     )
 
-    fireEvent.blur(screen.getByLabelText('Persona'))
+    fireEvent.blur(screen.getByLabelText('Name'))
     fireEvent.blur(tone)
     fireEvent.blur(language)
     expect(onUpdate).toHaveBeenCalledTimes(3)
   })
 
   it('flushes an uncommitted draft when Settings unmounts (no silent text loss)', async () => {
-    const onUpdate = vi.fn<Parameters<Update>, ReturnType<Update>>(
+    const onUpdate = vi.fn<Update>(
       async () => ({ ok: true })
     )
     const { unmount } = renderAgentSettings(DEFAULT_SETTINGS, onUpdate)
-    fireEvent.change(screen.getByLabelText('Persona'), {
+    fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: '  Never blurred  ' }
     })
     unmount()
@@ -96,15 +100,31 @@ describe('Agent section — Persona & style fields', () => {
     )
   })
 
+  it('flushes every unsaved draft in one write when Settings unmounts', async () => {
+    // Separate writes raced: an override save resends the whole override as
+    // it was at render, so the second put back what the first had changed.
+    const onUpdate = vi.fn<Update>(
+      async () => ({ ok: true })
+    )
+    const { unmount } = renderAgentSettings(DEFAULT_SETTINGS, onUpdate)
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Nova' } })
+    fireEvent.change(screen.getByLabelText('Tone'), { target: { value: 'Blunt' } })
+    unmount()
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1))
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ agentPersona: 'Nova', agentTone: 'Blunt' })
+    )
+  })
+
   it('leaves persona/tone empty with an example placeholder, not a built-in default', () => {
     // The placeholder is an example of what the user could type. It must not
     // name or describe an assistant the app ships with — there is none.
-    const onUpdate = vi.fn<Parameters<Update>, ReturnType<Update>>(
+    const onUpdate = vi.fn<Update>(
       async () => ({ ok: true })
     )
     renderAgentSettings(DEFAULT_SETTINGS, onUpdate)
 
-    const persona = screen.getByLabelText('Persona') as HTMLTextAreaElement
+    const persona = screen.getByLabelText('Name') as HTMLInputElement
     expect(persona.value).toBe('')
     expect(persona.placeholder).toMatch(/^e\.g\. /)
     expect(persona.placeholder).not.toContain('Agent V')
@@ -116,7 +136,7 @@ describe('Agent section — Persona & style fields', () => {
   })
 
   it('shows the saved persona/tone instead of the placeholder when set', () => {
-    const onUpdate = vi.fn<Parameters<Update>, ReturnType<Update>>(
+    const onUpdate = vi.fn<Update>(
       async () => ({ ok: true })
     )
     renderAgentSettings(
@@ -124,7 +144,7 @@ describe('Agent section — Persona & style fields', () => {
       onUpdate
     )
 
-    const persona = screen.getByLabelText('Persona') as HTMLTextAreaElement
+    const persona = screen.getByLabelText('Name') as HTMLInputElement
     expect(persona.value).toBe('Nova')
 
     const tone = screen.getByLabelText('Tone') as HTMLTextAreaElement
@@ -132,7 +152,7 @@ describe('Agent section — Persona & style fields', () => {
   })
 
   it('leaves identity empty with an example placeholder, and shows the saved identity when set', () => {
-    const onUpdate = vi.fn<Parameters<Update>, ReturnType<Update>>(
+    const onUpdate = vi.fn<Update>(
       async () => ({ ok: true })
     )
     renderAgentSettings(DEFAULT_SETTINGS, onUpdate)
@@ -153,7 +173,7 @@ describe('Agent section — Persona & style fields', () => {
   })
 
   it('persists trimmed identity on blur and skips no-change blurs', async () => {
-    const onUpdate = vi.fn<Parameters<Update>, ReturnType<Update>>(
+    const onUpdate = vi.fn<Update>(
       async () => ({ ok: true })
     )
     renderAgentSettings(DEFAULT_SETTINGS, onUpdate)
@@ -177,7 +197,7 @@ describe('Agent section — Persona & style fields', () => {
   })
 
   it('flushes an unblurred identity draft when Settings unmounts', async () => {
-    const onUpdate = vi.fn<Parameters<Update>, ReturnType<Update>>(
+    const onUpdate = vi.fn<Update>(
       async () => ({ ok: true })
     )
     const { unmount } = renderAgentSettings(DEFAULT_SETTINGS, onUpdate)
@@ -192,12 +212,15 @@ describe('Agent section — Persona & style fields', () => {
     )
   })
 
-  it('shows the live character counter for persona', () => {
-    const onUpdate = vi.fn<Parameters<Update>, ReturnType<Update>>(
+  it('shows the character counter only once a field nears its limit', () => {
+    const onUpdate = vi.fn<Update>(
       async () => ({ ok: true })
     )
     renderAgentSettings(DEFAULT_SETTINGS, onUpdate)
-    fireEvent.change(screen.getByLabelText('Persona'), { target: { value: 'Nova Prime' } })
-    expect(screen.getByText('10/1000')).toBeTruthy()
+    const name = screen.getByLabelText('Name')
+    fireEvent.change(name, { target: { value: 'Nova Prime' } })
+    expect(screen.queryByText('10/1000')).toBeNull()
+    fireEvent.change(name, { target: { value: 'x'.repeat(850) } })
+    expect(screen.getByText('850/1000')).toBeTruthy()
   })
 })

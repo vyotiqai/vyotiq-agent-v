@@ -34,6 +34,8 @@ export function MarketplaceManage({
   focusServerId,
   focusSkillPath,
   focusRulePath,
+  focusTab,
+  onFocusTabConsumed,
   openMcpAdd,
   onOpenMcpAddConsumed,
   onFocusSkillConsumed,
@@ -53,6 +55,9 @@ export function MarketplaceManage({
   focusServerId?: string | null
   focusSkillPath?: string | null
   focusRulePath?: string | null
+  /** Land on this tab with nothing selected in it. */
+  focusTab?: ManageKind | null
+  onFocusTabConsumed?: () => void
   openMcpAdd?: boolean
   onOpenMcpAddConsumed?: () => void
   onFocusSkillConsumed?: () => void
@@ -61,7 +66,7 @@ export function MarketplaceManage({
   const [kind, setKind] = useState<ManageKind>(() => {
     if (focusSkillPath) return 'skills'
     if (focusRulePath) return 'rules'
-    return 'mcps'
+    return focusTab ?? 'mcps'
   })
   const { formLocked, feedback, setFeedback, workspaceEnabledForId } = controller
 
@@ -76,6 +81,12 @@ export function MarketplaceManage({
   useEffect(() => {
     if (focusRulePath) setKind('rules')
   }, [focusRulePath])
+
+  useEffect(() => {
+    if (!focusTab) return
+    setKind(focusTab)
+    onFocusTabConsumed?.()
+  }, [focusTab, onFocusTabConsumed])
 
   const workspaceOverride =
     activeWorkspacePath && settingsOverridesByPath

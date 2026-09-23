@@ -2,7 +2,7 @@ import { type ReactNode } from 'react'
 import { SECRET_PROVIDERS, type SecretProvider } from '@shared/ipc'
 import { CUSTOM_OPENAI_DEFAULT, normalizeCustomOpenAiBaseUrl, providerLabel } from '@shared/providers'
 import { Icon } from '@renderer/lib/icons'
-import { Input, Button, cn } from '@renderer/lib/ui'
+import { Badge, Input, Button, cn } from '@renderer/lib/ui'
 import type { SettingsErrorField } from '../types'
 
 export type ProviderBaseUrlFieldState = {
@@ -55,25 +55,15 @@ export function ProviderKeyAccordion({
 }) {
   return (
     <div className="flex w-full flex-col gap-1.5">
-      {!encryptionAvailable ? (
-        <p className="m-0 mb-1 w-full text-xs leading-snug text-secondary" role="status">
-          Secure storage unavailable — provider keys will show as missing until the OS
-          keychain/credential store is available.
-        </p>
-      ) : null}
-      <ul className="m-0 flex list-none flex-col gap-1 p-0" aria-label="API key status">
+      <ul
+        className="m-0 flex list-none flex-col divide-y divide-border/40 p-0"
+        aria-label="API key status"
+      >
         {SECRET_PROVIDERS.map((id) => {
           const saved = secrets[id]
           const expanded = id === keyProvider
           const isActive = id === settingsProvider
           const hasBaseUrl = id === 'custom' || id === 'ollama'
-          const statusLabel = isActive
-            ? 'active'
-            : saved
-              ? 'saved'
-              : encryptionAvailable
-                ? 'missing'
-                : 'unavailable'
           const settingsFieldId =
             id === 'custom' ? 'custom-url' : id === 'ollama' ? 'ollama-url' : undefined
           const rowUrl = id === 'custom' ? customUrl.value : id === 'ollama' ? ollamaUrl.value : ''
@@ -84,17 +74,15 @@ export function ProviderKeyAccordion({
             saved &&
             normalizeCustomOpenAiBaseUrl(customUrl.value) === CUSTOM_OPENAI_DEFAULT
           return (
-            <li
-              key={id}
-              data-settings-field={settingsFieldId}
-              className={cn(
-                'rounded-md border bg-surface',
-                expanded || isActive ? 'border-fg/25' : 'border-border'
-              )}
-            >
+            <li key={id} data-settings-field={settingsFieldId}>
+              {/* Bleeds 6px past the row edge on both sides so the hover fill
+                  frames the text while the chevron stays on the column edge. */}
               <button
                 type="button"
-                className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-xs tracking-[var(--vy-tracking)]"
+                className={cn(
+                  '-mx-1.5 flex w-[calc(100%+0.75rem)] items-center gap-2 rounded-md px-1.5 py-2 text-left text-xs tracking-[var(--vy-tracking)]',
+                  'vy-transition hover:bg-surface-2 focus-visible:vy-focus-ring disabled:vy-disabled-state'
+                )}
                 aria-expanded={expanded}
                 disabled={formLocked || (!encryptionAvailable && !saved && !hasBaseUrl)}
                 onClick={() => onSelectProvider(id)}
@@ -105,28 +93,25 @@ export function ProviderKeyAccordion({
                   className={cn('shrink-0 text-muted vy-transition', expanded ? '' : '-rotate-90')}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-fg-strong">{providerLabel(id)}</span>
+                  <span className="block truncate text-fg">{providerLabel(id)}</span>
                   {collapsedHost ? (
                     <span className="mt-0.5 block truncate text-2xs text-muted" title={rowUrl}>
                       {collapsedHost}
                     </span>
                   ) : null}
                 </span>
-                <span
-                  className={cn(
-                    'shrink-0 rounded-sm px-1.5 py-0.5 text-2xs uppercase tracking-wide',
-                    isActive
-                      ? 'bg-surface-2 text-fg'
-                      : saved
-                        ? 'bg-surface-2 text-secondary'
-                        : 'text-muted'
-                  )}
-                >
-                  {statusLabel}
-                </span>
+                {isActive ? (
+                  <Badge tone="accent">Active</Badge>
+                ) : saved ? (
+                  <Badge>Saved</Badge>
+                ) : (
+                  <span className="shrink-0 text-2xs text-muted">
+                    {encryptionAvailable ? 'No key' : 'Unavailable'}
+                  </span>
+                )}
               </button>
               {expanded ? (
-                <div className="flex flex-col gap-2 border-t border-border px-2.5 py-2.5">
+                <div className="flex flex-col gap-2 pb-3 pl-5 pt-1">
                   {id === 'custom' ? (
                     <ProviderBaseUrlField
                       inputId="custom-openai-url"
@@ -167,19 +152,19 @@ export function ProviderKeyAccordion({
                   {id === 'opencode' ? (
                     <div className="flex flex-col gap-1">
                       <p className="m-0 text-xs leading-snug text-secondary">
-                        OpenCode Go is a $10/month subscription. Subscribe, then paste the API key shown in the console.
+                        Subscribe to OpenCode Go, then paste the API key from its console.
                       </p>
                       <div className="flex flex-wrap items-center gap-3">
                         <button
                           type="button"
-                          className="text-xs text-secondary underline hover:text-fg-strong"
+                          className="rounded-sm text-xs text-secondary underline underline-offset-2 vy-transition hover:text-fg-strong focus-visible:vy-focus-ring"
                           onClick={() => window.vyotiq.shellOpenExternal('https://opencode.ai/go')}
                         >
                           Subscribe — $10/mo
                         </button>
                         <button
                           type="button"
-                          className="text-xs text-secondary underline hover:text-fg-strong"
+                          className="rounded-sm text-xs text-secondary underline underline-offset-2 vy-transition hover:text-fg-strong focus-visible:vy-focus-ring"
                           onClick={() => window.vyotiq.shellOpenExternal('https://opencode.ai/auth')}
                         >
                           Get API key

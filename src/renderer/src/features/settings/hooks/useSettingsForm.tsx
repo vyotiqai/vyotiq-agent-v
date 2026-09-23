@@ -24,6 +24,7 @@ import { findByWorkspacePath } from '@shared/workspacePathMatch'
 import { useEscapeToClose } from '@renderer/lib/hooks/useEscapeToClose'
 import { useModelCatalog } from '@renderer/lib/hooks/useModelCatalog'
 import type { SettingsErrorField, SettingsSection, SettingsViewProps } from '../types'
+import { SETTINGS_ERROR_IDS } from '../constants'
 import { defaultKeyProvider } from '../utils/settingsHelpers'
 
 export type AgentSettingsPatch = Partial<
@@ -97,13 +98,6 @@ export function useSettingsForm({
   const [savingKey, setSavingKey] = useState(false)
   const [clearingKey, setClearingKey] = useState(false)
   const [savingField, setSavingField] = useState(false)
-  const [pickingWorkspace, setPickingWorkspace] = useState(false)
-  const [openingLogs, setOpeningLogs] = useState(false)
-  const [dsnConfigured, setDsnConfigured] = useState(false)
-  const [logsPath, setLogsPath] = useState<string | null>(null)
-  const [crashSnippets, setCrashSnippets] = useState<
-    import('@shared/ipc').CrashSnippet[]
-  >([])
 
   const clearErrors = (): void => {
     setError(null)
@@ -121,14 +115,7 @@ export function useSettingsForm({
   type SettingsErrorKey = Exclude<SettingsErrorField, null>
   const fieldError = useMemo<Partial<Record<SettingsErrorKey, ReactNode>>>(() => {
     if (!errorField || !displayError) return {}
-    const idByField: Record<SettingsErrorKey, string> = {
-      ollama: 'ollama-error',
-      customUrl: 'custom-url-error',
-      apikey: 'apikey-error',
-      keepTurns: 'keep-turns-error',
-      autoCompactThreshold: 'auto-compact-threshold-error'
-    }
-    const id = idByField[errorField]
+    const id = SETTINGS_ERROR_IDS[errorField]
     if (!id) return {}
     return {
       [errorField]: (
@@ -255,36 +242,6 @@ export function useSettingsForm({
     return ok
   }
 
-  /** Commit a bounded numeric setting, reverting and explaining when the value is out of range. */
-  const commitNumberField = (
-    field: SettingsErrorField,
-    input: HTMLInputElement,
-    opts: {
-      label: string
-      min: number
-      max: number
-      integer?: boolean
-      current: number
-      apply: (value: number) => Partial<Settings>
-      /** Defaults to global `runUpdate`; Agent section passes `runAgentUpdate`. */
-      persist?: (partial: Partial<Settings>) => void
-    }
-  ): void => {
-    const raw = input.value.trim()
-    const parsed = Number(raw)
-    if (!raw || !Number.isFinite(parsed) || parsed < opts.min || parsed > opts.max) {
-      input.value = String(opts.current)
-      setFieldError(field, `${opts.label} must be from ${opts.min} to ${opts.max}.`)
-      return
-    }
-    clearErrors()
-    const value = opts.integer ? Math.round(parsed) : parsed
-    if (value === opts.current) return
-    const partial = opts.apply(value)
-    if (opts.persist) opts.persist(partial)
-    else void runUpdate(partial)
-  }
-
   const providerMeta = PROVIDER_DEFAULTS.find((p) => p.id === settings.provider)
   const displayProvider = effectiveChatSettings?.provider ?? settings.provider
   const displayModel = effectiveChatSettings?.model ?? settings.model
@@ -361,34 +318,6 @@ export function useSettingsForm({
     setLanguagePersisted(derivedLanguage)
     setLanguageDraft(derivedLanguage)
   }, [derivedLanguage])
-
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      if (!window.vyotiq?.telemetryStatus) {
-        if (!cancelled) {
-          setDsnConfigured(Boolean(import.meta.env.VITE_SENTRY_DSN?.trim()))
-        }
-      } else {
-        const res = await window.vyotiq.telemetryStatus()
-        if (!cancelled) {
-          if (res.ok) setDsnConfigured(res.data.dsnConfigured)
-          else setDsnConfigured(Boolean(import.meta.env.VITE_SENTRY_DSN?.trim()))
-        }
-      }
-
-      if (!window.vyotiq?.getLogsPath) return
-      const pathRes = await window.vyotiq.getLogsPath()
-      if (!cancelled && pathRes.ok) setLogsPath(pathRes.data)
-
-      if (!window.vyotiq?.getCrashDiagnostics) return
-      const crashRes = await window.vyotiq.getCrashDiagnostics()
-      if (!cancelled && crashRes.ok) setCrashSnippets(crashRes.data.snippets)
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   useEffect(() => {
     setKeyProvider(settings.provider)
@@ -642,16 +571,21 @@ export function useSettingsForm({
   // Closing Settings must not silently drop uncommitted persona/tone/language
   // text: flush the changed (trimmed) value on unmount. Trim-on-save keeps
   // edge whitespace out of the prompt even when the user never blurs.
+  // One write for every changed draft: an override save resends the whole
+  // override as it was at render, so a second concurrent save would put back
+  // the field the first one had just changed.
   const flushPersonaToneRef = useRef<() => void>(() => {})
   flushPersonaToneRef.current = () => {
+    const patch: AgentSettingsPatch = {}
     const persona = personaDraft.trim()
-    if (persona !== personaPersisted) void runAgentUpdate({ agentPersona: persona })
+    if (persona !== personaPersisted) patch.agentPersona = persona
     const tone = toneDraft.trim()
-    if (tone !== tonePersisted) void runAgentUpdate({ agentTone: tone })
+    if (tone !== tonePersisted) patch.agentTone = tone
     const identity = identityDraft.trim()
-    if (identity !== identityPersisted) void runAgentUpdate({ agentIdentity: identity })
+    if (identity !== identityPersisted) patch.agentIdentity = identity
     const language = languageDraft.trim()
-    if (language !== languagePersisted) void runAgentUpdate({ responseLanguage: language })
+    if (language !== languagePersisted) patch.responseLanguage = language
+    if (Object.keys(patch).length > 0) void runAgentUpdate(patch)
   }
   useEffect(() => {
     return () => flushPersonaToneRef.current()
@@ -696,22 +630,16 @@ export function useSettingsForm({
     savingKey,
     clearingKey,
     savingField,
-    pickingWorkspace,
-    setPickingWorkspace,
-    openingLogs,
-    setOpeningLogs,
-    dsnConfigured,
-    logsPath,
-    crashSnippets,
     clearErrors,
+    setFieldError,
     displayError,
     fieldError,
-    commitNumberField,
     providerMeta,
     displayProvider,
     displayModel,
     displayProviderMeta,
     workspaceOverrideActive,
+    activeWorkspacePath,
     effectiveChatSettings,
     keyHasSaved,
     keyProviderLabel,

@@ -14,7 +14,7 @@ import { useOverlayPanel } from '@renderer/lib/hooks/useOverlayPanel'
 import { usePersistedBoolean } from '@renderer/lib/hooks/usePersistedBoolean'
 import { usePersistedNumber } from '@renderer/lib/hooks/usePersistedNumber'
 import { getWorkspaceHotUi } from '@renderer/lib/hooks/workspaceHotUiStore'
-import type { WorkspaceSidebarRuns } from './sidebar/types'
+import type { SidebarProps, WorkspaceSidebarRuns } from './sidebar/types'
 import {
   SIDEBAR_COLLAPSED_KEY,
   SIDEBAR_WIDTH_KEY,
@@ -49,6 +49,7 @@ function AppShellInner({
   onSessionQuery,
   onOpenSettings,
   onOpenNotificationSettings,
+  onOpenSettingsSection,
   onOpenFeedback,
   focusedRunId = null,
   onOpenMarketplace,
@@ -93,6 +94,8 @@ function AppShellInner({
   onSessionQuery: (q: string) => void
   onOpenSettings: () => void
   onOpenNotificationSettings?: () => void
+  /** Open Settings on one section — a notification's `open_settings` action. */
+  onOpenSettingsSection?: SidebarProps['onOpenSettingsSection']
   /** Open the feedback surface from anywhere (command palette). */
   onOpenFeedback?: () => void
   focusedRunId?: string | null
@@ -366,6 +369,7 @@ function AppShellInner({
     onSessionQuery,
     onOpenSettings,
     onOpenNotificationSettings,
+    onOpenSettingsSection,
     focusedRunId,
     onOpenMarketplace,
     onOpenTeammates,

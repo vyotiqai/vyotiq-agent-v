@@ -34,7 +34,7 @@ export function preflightChatProviderAuth(opts: {
   if (hasStoredBlob) {
     return {
       code: 'PROVIDER_KEY_DECRYPT',
-      message: `API key for ${providerId} is stored but cannot be decrypted. Re-enter it in Settings or restore OS keychain access.`
+      message: `API key for ${providerId} is stored but cannot be decrypted. Re-enter it in Settings → Providers or restore OS keychain access.`
     }
   }
   if (providerId === 'ollama' && isOllamaCloudHost(baseUrl ?? '')) {

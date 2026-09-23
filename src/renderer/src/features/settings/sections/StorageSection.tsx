@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type {
   Settings,
   StorageCleanupPreviewResult,
   StorageCleanupRunResult,
+  StorageReportCategory,
   StorageReportResult
 } from '@shared/ipc'
 import { DEFAULT_STORAGE_SETTINGS } from '@shared/ipc'
-import { Button, Switch } from '@renderer/lib/ui'
+import { Button } from '@renderer/lib/ui'
+import type { SettingsFormState } from '../hooks/useSettingsForm'
+import { NumberField } from '../components/NumberField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
+import { SwitchField } from '../components/SwitchField'
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
@@ -17,7 +20,48 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`
+}
+
 type CleanupStage = 'idle' | 'previewing' | 'confirming' | 'running' | 'done'
+
+function CategoryRow({
+  category,
+  divider,
+  action
+}: {
+  category: StorageReportCategory
+  /** Rule above the row — off for the first row under a heading. */
+  divider: boolean
+  action?: { label: string; name: string; onClick: () => void }
+}) {
+  // Empty categories recede so the ones actually using space stand out.
+  const empty = category.bytes === 0
+  return (
+    <tr className={divider ? 'border-t border-border/40' : undefined}>
+      <td className={empty ? 'py-1.5 pr-2 text-muted' : 'py-1.5 pr-2 text-fg'}>
+        {category.label}
+        {action ? (
+          <button
+            type="button"
+            aria-label={action.name}
+            className="ml-2 rounded-sm text-secondary underline underline-offset-2 vy-transition hover:text-fg focus-visible:vy-focus-ring"
+            onClick={action.onClick}
+          >
+            {action.label}
+          </button>
+        ) : null}
+      </td>
+      <td className="py-1.5 pr-2 text-right tabular-nums text-secondary">
+        {formatBytes(category.bytes)}
+      </td>
+      <td className="py-1.5 text-right tabular-nums text-muted">
+        {plural(category.files, 'file')}
+      </td>
+    </tr>
+  )
+}
 
 export function StorageSection({ form }: { form: SettingsFormState }) {
   const settings = form.settings
@@ -43,23 +87,33 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
           setReportError(res.error)
         }
       })
+      .catch((err: unknown) => {
+        setReportError(err instanceof Error ? err.message : String(err))
+      })
       .finally(() => setReportBusy(false))
   }, [])
 
-  // Live scan on open (wired surface — no fake numbers).
+  // Live scan on open — the numbers are measured, never cached or estimated.
   useEffect(() => {
     refreshReport()
   }, [refreshReport])
 
-  // §8.1 first-run ack: opening the section arms the full retention policy.
+  // §8.1 first-run ack: opening this section arms the full retention policy.
+  // That is only honest because the policy is on this page — the ack means
+  // "the user has seen what will be deleted".
   useEffect(() => {
     if (settings.storageSurfaceAcked) return
     if (typeof window.vyotiq?.storageAckSurface !== 'function') return
     void window.vyotiq.storageAckSurface(true)
   }, [settings.storageSurfaceAcked])
 
-  const patchStorage = (partial: Partial<Settings['storage']>) => {
+  const patchStorage = (partial: Partial<Settings['storage']>): void => {
     void form.runUpdate({ storage: { ...storage, ...partial } })
+  }
+
+  const failCleanup = (message: string): void => {
+    setCleanupError(message)
+    setCleanupStage('idle')
   }
 
   const startCleanup = (): void => {
@@ -70,35 +124,26 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
     void window.vyotiq
       .storageCleanupPreview()
       .then((res) => {
-        if (res.ok) {
-          setPreview(res.data)
-          setCleanupStage('confirming')
-        } else {
-          setCleanupError(res.error)
-          setCleanupStage('idle')
-        }
+        if (!res.ok) return failCleanup(res.error)
+        setPreview(res.data)
+        setCleanupStage('confirming')
       })
-      .catch(() => setCleanupStage('idle'))
+      .catch((err: unknown) => failCleanup(err instanceof Error ? err.message : String(err)))
   }
 
   const confirmCleanup = (): void => {
-    if (!preview) return
-    if (typeof window.vyotiq?.storageCleanupRun !== 'function') return
+    if (!preview || typeof window.vyotiq?.storageCleanupRun !== 'function') return
     setCleanupStage('running')
     void window.vyotiq
       .storageCleanupRun({ confirmToken: preview.confirm.token })
       .then((res) => {
-        if (res.ok) {
-          setRunResult(res.data)
-          setCleanupStage('done')
-          setPreview(null)
-          refreshReport()
-        } else {
-          setCleanupError(res.error)
-          setCleanupStage('idle')
-        }
+        if (!res.ok) return failCleanup(res.error)
+        setRunResult(res.data)
+        setCleanupStage('done')
+        setPreview(null)
+        refreshReport()
       })
-      .catch(() => setCleanupStage('idle'))
+      .catch((err: unknown) => failCleanup(err instanceof Error ? err.message : String(err)))
   }
 
   const cancelCleanup = (): void => {
@@ -106,405 +151,322 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
     setCleanupStage('idle')
   }
 
+  const managedCategories = report?.categories.filter((c) => c.managed) ?? []
+  const keptCategories = report?.categories.filter((c) => !c.managed) ?? []
+  const reclaimable = preview?.categories.filter((c) => c.reclaimBytes > 0 || c.items > 0) ?? []
+
   return (
     <SettingsStack>
-      <SettingsGroup title="Storage usage">
+      <SettingsGroup title="Usage">
         <SettingsField
           id="storage-usage"
-          title="Usage report"
+          title="App data"
           hint={
             report
-              ? `${formatBytes(report.totalBytes)} across app data · managed set ${formatBytes(
-                  report.managedBytes
-                )} · cap ${formatBytes(report.sizeCapBytes)}${report.overCap ? ' (over cap)' : ''}`
-              : 'Live scan of app storage on open.'
+              ? `${formatBytes(report.totalBytes)} total · ${formatBytes(report.managedBytes)} of the ${formatBytes(report.sizeCapBytes)} cap managed${report.overCap ? ' — over the cap' : ''}`
+              : 'Measuring…'
           }
-          help="Measured live from app userData: checkpoints, transcripts, per-workspace indexes, instance worktrees, traces, logs, dictation models, embedder model, browser partitions, and cache. Numbers refresh on open and after a cleanup."
+          help="Measured live from app data each time this page opens and after a cleanup. The cap and the retention policy apply to the managed categories only."
         >
-          <div className="flex items-center gap-2">
-            <Button
-              variant="subtle"
-              disabled={reportBusy}
-              onClick={refreshReport}
-            >
-              {reportBusy ? 'Scanning…' : 'Rescan'}
-            </Button>
-          </div>
+          <Button variant="subtle" pending={reportBusy} onClick={refreshReport}>
+            {reportBusy ? 'Scanning…' : 'Rescan'}
+          </Button>
         </SettingsField>
-
-        {report ? (
-          <div className="px-4 pb-3" data-settings-field="storage-usage-report">
+        {reportError ? (
+          <p className="m-0 px-4 py-3 text-xs text-danger" role="alert">
+            {reportError}
+          </p>
+        ) : null}
+        {report && report.categories.length > 0 ? (
+          <div className="px-4 py-2">
             <table className="w-full border-collapse text-xs">
+              <caption className="sr-only">App data by category</caption>
               <tbody>
-                {report.categories.map((cat) => (
-                  <tr key={cat.id} className="border-t border-border/40">
-                    <td className="py-1 pr-2 text-fg-strong">{cat.label}</td>
-                    <td className="py-1 pr-2 text-right text-secondary">
-                      {formatBytes(cat.bytes)}
-                    </td>
-                    <td className="py-1 text-right text-muted">
-                      {cat.files === 1 ? '1 file' : `${cat.files} files`}
-                    </td>
+                {managedCategories.map((category, i) => (
+                  <CategoryRow key={category.id} category={category} divider={i > 0} />
+                ))}
+                {keptCategories.length > 0 ? (
+                  <tr>
+                    <th
+                      colSpan={3}
+                      scope="colgroup"
+                      className="pb-1 pt-3 text-left text-2xs font-normal text-muted"
+                    >
+                      Not cleaned automatically
+                    </th>
                   </tr>
+                ) : null}
+                {keptCategories.map((category, i) => (
+                  <CategoryRow
+                    key={category.id}
+                    category={category}
+                    divider={i > 0}
+                    action={
+                      category.id === 'dictation-models'
+                        ? {
+                            label: 'Manage',
+                            name: 'Manage dictation models in Voice',
+                            onClick: () => form.navigateSection('voice')
+                          }
+                        : undefined
+                    }
+                  />
                 ))}
               </tbody>
             </table>
-            {reportError ? (
-              <p className="m-0 mt-2 text-xs text-danger" role="alert">
-                {reportError}
-              </p>
-            ) : null}
           </div>
-        ) : null}
-
-        {report && report.categories.length > 0 ? (
-          <SettingsField
-            id="storage-models-link"
-            title="Local models"
-            hint="Dictation and embedder models are reported above but managed in their own sections."
-            help="Deleting the local dictation model requires a multi-GB re-download — manage it in Settings → Voice. The embedder model is shared by all workspaces (Settings → Indexing)."
-          >
-            <Button
-              variant="subtle"
-              onClick={() => form.navigateSection('voice')}
-            >
-              Open Voice settings
-            </Button>
-          </SettingsField>
         ) : null}
       </SettingsGroup>
 
-      <SettingsGroup title="Free up space">
+      <SettingsGroup title="Cleanup">
         <SettingsField
           id="storage-free-up"
           title="Free up space"
-          hint="Deletes discarded checkpoints, old untracked workspace storage, and old sessions per the policy below. Nothing written in the last 24 hours is ever touched. Requires confirmation."
-          help="Preview computes exactly what would be reclaimed per category; nothing is deleted until you confirm. Orphan workspace storage means per-workspace runtime dirs the app no longer tracks (old indexes, sessions, worktrees) — the single biggest measured term."
+          hint="Deletes what the retention policy below allows. Nothing from the last 24 hours."
+          help="You see what each category would reclaim before anything is deleted. Untracked storage — indexes and sessions of workspaces the app no longer tracks — is usually the largest share."
         >
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {cleanupStage === 'idle' || cleanupStage === 'done' ? (
-              <Button variant="subtle" onClick={startCleanup}>
-                {cleanupStage === 'done' ? 'Clean again' : 'Free up space'}
-              </Button>
-            ) : null}
-            {cleanupStage === 'previewing' ? (
-              <span className="text-xs text-secondary">Previewing…</span>
-            ) : null}
-            {cleanupStage === 'running' ? (
-              <span className="text-xs text-secondary">Cleaning…</span>
-            ) : null}
-          </div>
+          {cleanupStage === 'previewing' || cleanupStage === 'running' ? (
+            <span className="text-xs text-muted" role="status">
+              {cleanupStage === 'previewing' ? 'Checking…' : 'Cleaning…'}
+            </span>
+          ) : cleanupStage === 'confirming' ? null : (
+            <Button variant="subtle" onClick={startCleanup}>
+              Free up space
+            </Button>
+          )}
         </SettingsField>
 
         {cleanupStage === 'confirming' && preview ? (
-          <div className="px-4 pb-3" data-settings-field="storage-cleanup-preview">
-            <p className="m-0 text-xs text-fg-strong">
-              Reclaimable: {formatBytes(preview.totalReclaimBytes)}
-            </p>
-            <ul className="m-0 mt-1 list-none p-0 text-xs text-secondary">
-              {preview.categories
-                .filter((c) => c.reclaimBytes > 0 || c.items > 0)
-                .map((c) => (
-                  <li key={c.id} className="flex justify-between gap-3 py-0.5">
-                    <span>{c.label}</span>
-                    <span>
-                      {formatBytes(c.reclaimBytes)}
-                      {c.items > 0 ? ` · ${c.items} item${c.items === 1 ? '' : 's'}` : ''}
-                    </span>
-                  </li>
-                ))}
-            </ul>
-            <div className="mt-2 flex justify-end gap-2">
-              <Button variant="subtle" onClick={cancelCleanup}>
-                Cancel
-              </Button>
-              <Button variant="danger" onClick={confirmCleanup}>
-                Delete {formatBytes(preview.totalReclaimBytes)}
-              </Button>
-            </div>
+          <div className="flex flex-col gap-2 px-4 py-3">
+            {preview.totalReclaimBytes > 0 || reclaimable.length > 0 ? (
+              <>
+                <p className="m-0 text-xs text-fg">
+                  Reclaimable: {formatBytes(preview.totalReclaimBytes)}
+                </p>
+                <ul className="m-0 list-none p-0 text-xs text-secondary">
+                  {reclaimable.map((c) => (
+                    <li key={c.id} className="flex justify-between gap-3 py-0.5">
+                      <span>{c.label}</span>
+                      <span className="tabular-nums">
+                        {formatBytes(c.reclaimBytes)}
+                        {c.items > 0 ? ` · ${plural(c.items, 'item')}` : ''}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {/* The run enforces the size cap after these categories and the
+                    preview cannot size that pass, so say it may go further. */}
+                {report?.overCap ? (
+                  <p className="m-0 text-xs text-secondary">
+                    Managed data is over the {formatBytes(report.sizeCapBytes)} cap, so the oldest
+                    checkpoints may also be evicted until it fits.
+                  </p>
+                ) : null}
+                <div className="flex justify-end gap-2">
+                  <Button variant="subtle" onClick={cancelCleanup}>
+                    Cancel
+                  </Button>
+                  <Button variant="danger" onClick={confirmCleanup}>
+                    Delete {formatBytes(preview.totalReclaimBytes)}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center justify-between gap-3">
+                <p className="m-0 text-xs text-secondary">Nothing to clean up right now.</p>
+                <Button variant="subtle" onClick={cancelCleanup}>
+                  Close
+                </Button>
+              </div>
+            )}
           </div>
         ) : null}
 
         {cleanupStage === 'done' && runResult ? (
-          <div className="px-4 pb-3" data-settings-field="storage-cleanup-result">
-            <p className="m-0 text-xs text-fg-strong">
-              Freed {formatBytes(runResult.totalReclaimedBytes)}
-              {runResult.removedDirs > 0
-                ? ` across ${runResult.removedDirs} item${runResult.removedDirs === 1 ? '' : 's'}`
-                : ''}
-              {runResult.skipped > 0 ? ` · ${runResult.skipped} skipped (in use or locked)` : ''}
-            </p>
-          </div>
+          <p className="m-0 px-4 py-3 text-xs text-fg" role="status">
+            Freed {formatBytes(runResult.totalReclaimedBytes)}
+            {runResult.removedDirs > 0 ? ` across ${plural(runResult.removedDirs, 'item')}` : ''}
+            {runResult.skipped > 0 ? ` · ${runResult.skipped} skipped (in use or locked)` : ''}
+          </p>
         ) : null}
 
         {cleanupError ? (
-          <div className="px-4 pb-3">
-            <p className="m-0 text-xs text-danger" role="alert">
-              {cleanupError}
-            </p>
-          </div>
+          <p className="m-0 px-4 py-3 text-xs text-danger" role="alert">
+            {cleanupError}
+          </p>
         ) : null}
       </SettingsGroup>
 
       <SettingsGroup title="Retention policy">
-        <SettingsField
+        <SwitchField
           id="storage-checkpoint-gc"
           title="Checkpoint cleanup"
           hint={
             storage.checkpointGcEnabled
-              ? `Keeps the newest ${storage.checkpointKeepSessions} sessions with checkpoint data; older undo history is deleted after ${storage.checkpointMaxAgeDays} days.`
-              : 'Off = keep everything forever, as today.'
+              ? 'Prunes old undo history for agent edits.'
+              : 'Off: every undo point is kept forever.'
           }
-          help="Checkpoints snapshot prior file content so you can undo agent edits. Discarded (resolved/undone) checkpoints are always cleaned first — that is data you already threw away. Turn off to keep every undo point indefinitely."
-        >
-          <Switch
-            size="md"
-            checked={storage.checkpointGcEnabled}
-            disabled={form.formLocked}
-            label="Checkpoint cleanup"
-            onCheckedChange={(checked) => patchStorage({ checkpointGcEnabled: checked })}
-          />
-        </SettingsField>
-
-        <SettingsField
+          help="Checkpoints snapshot files before the agent edits them, so an edit can be undone. Undo points you already resolved or undid are always cleaned first."
+          checked={storage.checkpointGcEnabled}
+          disabled={form.formLocked}
+          onChange={(checkpointGcEnabled) => patchStorage({ checkpointGcEnabled })}
+        />
+        <NumberField
           id="storage-checkpoint-keep"
+          field="checkpointKeep"
+          form={form}
           title="Keep checkpoint sessions"
-          hint={`Newest ${storage.checkpointKeepSessions} sessions per workspace keep their undo data (5–100).`}
-          help="Measured sessions average well under 1 MB of checkpoints each; 20 keeps a typical week of undo depth cheaply."
-        >
-          <input
-            type="number"
-            className="w-24 rounded-md border border-border bg-surface px-2 py-1 text-sm text-fg"
-            aria-label="Keep checkpoint sessions"
-            min={5}
-            max={100}
-            defaultValue={storage.checkpointKeepSessions}
-            key={`ckpt-keep-${storage.checkpointKeepSessions}`}
-            disabled={form.formLocked || !storage.checkpointGcEnabled}
-            onBlur={(e) => {
-              const v = Math.round(Number(e.target.value))
-              if (!Number.isFinite(v) || v < 5 || v > 100) {
-                e.target.value = String(storage.checkpointKeepSessions)
-                form.setErrorMessage('Keep checkpoint sessions must be from 5 to 100.')
-                return
-              }
-              if (v !== storage.checkpointKeepSessions) patchStorage({ checkpointKeepSessions: v })
-            }}
-          />
-        </SettingsField>
-
-        <SettingsField
+          hint="Newest sessions per workspace that keep undo data."
+          help="Sessions average well under 1 MB of checkpoints; 20 keeps about a week of undo cheaply."
+          nested
+          unit="sessions"
+          min={5}
+          max={100}
+          value={storage.checkpointKeepSessions}
+          disabled={form.formLocked || !storage.checkpointGcEnabled}
+          onCommit={(checkpointKeepSessions) => patchStorage({ checkpointKeepSessions })}
+        />
+        <NumberField
           id="storage-checkpoint-age"
-          title="Checkpoint age backstop"
-          hint={`Sessions older than ${storage.checkpointMaxAgeDays} days lose undo data even under the count cap (7–365).`}
-          help="A hard age ceiling so a workspace used rarely still cannot accumulate years of undo history."
-        >
-          <input
-            type="number"
-            className="w-24 rounded-md border border-border bg-surface px-2 py-1 text-sm text-fg"
-            aria-label="Checkpoint age backstop days"
-            min={7}
-            max={365}
-            defaultValue={storage.checkpointMaxAgeDays}
-            key={`ckpt-age-${storage.checkpointMaxAgeDays}`}
-            disabled={form.formLocked || !storage.checkpointGcEnabled}
-            onBlur={(e) => {
-              const v = Math.round(Number(e.target.value))
-              if (!Number.isFinite(v) || v < 7 || v > 365) {
-                e.target.value = String(storage.checkpointMaxAgeDays)
-                form.setErrorMessage('Checkpoint age backstop must be from 7 to 365 days.')
-                return
-              }
-              if (v !== storage.checkpointMaxAgeDays) patchStorage({ checkpointMaxAgeDays: v })
-            }}
-          />
-        </SettingsField>
+          field="checkpointAge"
+          form={form}
+          title="Checkpoint max age"
+          hint="Older undo data goes even inside the session count."
+          help="A ceiling so a rarely used workspace cannot pile up years of undo history."
+          nested
+          unit="days"
+          min={7}
+          max={365}
+          value={storage.checkpointMaxAgeDays}
+          disabled={form.formLocked || !storage.checkpointGcEnabled}
+          onCommit={(checkpointMaxAgeDays) => patchStorage({ checkpointMaxAgeDays })}
+        />
 
-        <SettingsField
-          id="storage-orphan-reaper"
-          title="Untracked workspace storage cleanup"
-          hint={
-            storage.orphanReaperEnabled
-              ? `Reports storage dirs the app no longer tracks as cleanable after ${storage.orphanGraceDays} idle days. Deletion always needs your confirmation.`
-              : 'Off = keep everything forever, as today.'
-          }
-          help="Each workspace ever opened mints ~100 MB of local indexes under app data. When a workspace is no longer tracked anywhere (not open, recent, or referenced), its dir is flagged untracked; after the grace window it is listed as safe to clean. Nothing is ever deleted without an explicit confirm in the Free up space flow."
-        >
-          <Switch
-            size="md"
-            checked={storage.orphanReaperEnabled}
-            disabled={form.formLocked}
-            label="Untracked workspace storage cleanup"
-            onCheckedChange={(checked) => patchStorage({ orphanReaperEnabled: checked })}
-          />
-        </SettingsField>
-
-        <SettingsField
-          id="storage-orphan-grace"
-          title="Untracked grace window"
-          hint={`Untracked dirs must be idle ${storage.orphanGraceDays} days before they are listed as cleanable (1–365). Derived index dirs left by deleted instance worktrees are cleanable immediately.`}
-          help="Protects a dir minted seconds before a crash from being treated as dead — worst case we hold ~100 MB for a month."
-        >
-          <input
-            type="number"
-            className="w-24 rounded-md border border-border bg-surface px-2 py-1 text-sm text-fg"
-            aria-label="Untracked grace window days"
-            min={1}
-            max={365}
-            defaultValue={storage.orphanGraceDays}
-            key={`orphan-grace-${storage.orphanGraceDays}`}
-            disabled={form.formLocked || !storage.orphanReaperEnabled}
-            onBlur={(e) => {
-              const v = Math.round(Number(e.target.value))
-              if (!Number.isFinite(v) || v < 1 || v > 365) {
-                e.target.value = String(storage.orphanGraceDays)
-                form.setErrorMessage('Untracked grace window must be from 1 to 365 days.')
-                return
-              }
-              if (v !== storage.orphanGraceDays) patchStorage({ orphanGraceDays: v })
-            }}
-          />
-        </SettingsField>
-
-        <SettingsField
-          id="storage-prune-on-removal"
-          title="Delete storage when removing a workspace"
-          hint="When on, closing a workspace offers to also delete its app-data storage (size shown before you confirm)."
-          help="Session transcripts are the archival copy of your chats — deleting a workspace's storage deletes that history, so the confirm dialog always shows the measured size first."
-        >
-          <Switch
-            size="md"
-            checked={storage.pruneOnWorkspaceRemoval}
-            disabled={form.formLocked}
-            label="Delete storage on workspace removal"
-            onCheckedChange={(checked) => patchStorage({ pruneOnWorkspaceRemoval: checked })}
-          />
-        </SettingsField>
-
-        <SettingsField
+        <SwitchField
           id="storage-session-retention"
           title="Automatic session retention"
           hint={
             storage.sessionRetentionEnabled
-              ? `Deletes sessions beyond the newest ${storage.sessionKeepCount} once they are older than ${storage.sessionMaxAgeDays} days.`
-              : 'Off = keep every session forever, as today. "Free up space" can still apply it on demand.'
+              ? 'Deletes old chat sessions on a schedule.'
+              : 'Off: nothing is deleted on a schedule. Free up space still applies the limits below.'
           }
-          help="Sessions are cheap in practice (transcripts average well under 1 MB) but unbounded. The active session and anything from the last 24 hours are never touched."
-        >
-          <Switch
-            size="md"
-            checked={storage.sessionRetentionEnabled}
-            disabled={form.formLocked}
-            label="Automatic session retention"
-            onCheckedChange={(checked) => patchStorage({ sessionRetentionEnabled: checked })}
-          />
-        </SettingsField>
-
-        <SettingsField
+          help="A session is deleted only when it is both beyond the kept count and older than the age limit. The open session and anything from the last 24 hours are never touched."
+          checked={storage.sessionRetentionEnabled}
+          disabled={form.formLocked}
+          onChange={(sessionRetentionEnabled) => patchStorage({ sessionRetentionEnabled })}
+        />
+        <NumberField
           id="storage-session-keep"
-          title="Keep sessions count"
-          hint={`Per workspace, the newest ${storage.sessionKeepCount} sessions always stay (1–200).`}
-          help="Applies when session retention runs (automatic or via Free up space)."
-        >
-          <input
-            type="number"
-            className="w-24 rounded-md border border-border bg-surface px-2 py-1 text-sm text-fg"
-            aria-label="Keep sessions count"
-            min={1}
-            max={200}
-            defaultValue={storage.sessionKeepCount}
-            key={`sess-keep-${storage.sessionKeepCount}`}
-            disabled={form.formLocked || !storage.sessionRetentionEnabled}
-            onBlur={(e) => {
-              const v = Math.round(Number(e.target.value))
-              if (!Number.isFinite(v) || v < 1 || v > 200) {
-                e.target.value = String(storage.sessionKeepCount)
-                form.setErrorMessage('Keep sessions count must be from 1 to 200.')
-                return
-              }
-              if (v !== storage.sessionKeepCount) patchStorage({ sessionKeepCount: v })
-            }}
-          />
-        </SettingsField>
-
-        <SettingsField
+          field="sessionKeep"
+          form={form}
+          title="Keep sessions"
+          hint="Newest sessions per workspace that always stay."
+          nested
+          unit="sessions"
+          min={1}
+          max={200}
+          value={storage.sessionKeepCount}
+          // Editable with the switch off too: Free up space applies these
+          // limits either way, so they are never inert.
+          disabled={form.formLocked}
+          onCommit={(sessionKeepCount) => patchStorage({ sessionKeepCount })}
+        />
+        <NumberField
           id="storage-session-age"
-          title="Session age window"
-          hint={`Sessions older than ${storage.sessionMaxAgeDays} days are eligible for deletion beyond the keep count (7–365).`}
-          help="Both bounds apply: a session is deleted only when it is beyond the keep count AND older than this window."
-        >
-          <input
-            type="number"
-            className="w-24 rounded-md border border-border bg-surface px-2 py-1 text-sm text-fg"
-            aria-label="Session age window days"
-            min={7}
-            max={365}
-            defaultValue={storage.sessionMaxAgeDays}
-            key={`sess-age-${storage.sessionMaxAgeDays}`}
-            disabled={form.formLocked || !storage.sessionRetentionEnabled}
-            onBlur={(e) => {
-              const v = Math.round(Number(e.target.value))
-              if (!Number.isFinite(v) || v < 7 || v > 365) {
-                e.target.value = String(storage.sessionMaxAgeDays)
-                form.setErrorMessage('Session age window must be from 7 to 365 days.')
-                return
-              }
-              if (v !== storage.sessionMaxAgeDays) patchStorage({ sessionMaxAgeDays: v })
-            }}
-          />
-        </SettingsField>
+          field="sessionAge"
+          form={form}
+          title="Session max age"
+          hint="Sessions past the count go once they are older than this."
+          nested
+          unit="days"
+          min={7}
+          max={365}
+          value={storage.sessionMaxAgeDays}
+          disabled={form.formLocked}
+          onCommit={(sessionMaxAgeDays) => patchStorage({ sessionMaxAgeDays })}
+        />
 
-        <SettingsField
+        <SwitchField
+          id="storage-orphan-reaper"
+          title="Untracked storage cleanup"
+          hint={
+            storage.orphanReaperEnabled
+              ? 'Marks storage of workspaces the app no longer tracks as cleanable.'
+              : 'Off: untracked storage is kept forever.'
+          }
+          help="Every workspace ever opened leaves about 100 MB of indexes in app data. Once a workspace is no longer open, recent, or referenced, its storage is untracked; after the grace period, Free up space offers to delete it. Nothing is deleted without your confirmation."
+          checked={storage.orphanReaperEnabled}
+          disabled={form.formLocked}
+          onChange={(orphanReaperEnabled) => patchStorage({ orphanReaperEnabled })}
+        />
+        <NumberField
+          id="storage-orphan-grace"
+          field="orphanGrace"
+          form={form}
+          title="Untracked grace period"
+          hint="Idle time before untracked storage counts as cleanable."
+          help="Protects storage created moments before a crash. Index-only leftovers of deleted instance worktrees skip the wait."
+          nested
+          unit="days"
+          min={1}
+          max={365}
+          value={storage.orphanGraceDays}
+          disabled={form.formLocked || !storage.orphanReaperEnabled}
+          onCommit={(orphanGraceDays) => patchStorage({ orphanGraceDays })}
+        />
+
+        <SwitchField
+          id="storage-prune-on-removal"
+          title="Delete storage when removing a workspace"
+          hint="Closing a workspace offers to delete its app data too."
+          help="That storage holds the workspace's chat history, so the confirmation always shows its measured size first."
+          checked={storage.pruneOnWorkspaceRemoval}
+          disabled={form.formLocked}
+          onChange={(pruneOnWorkspaceRemoval) => patchStorage({ pruneOnWorkspaceRemoval })}
+        />
+        <NumberField
           id="storage-size-cap"
+          field="sizeCap"
+          form={form}
           title="Managed size cap"
-          hint={`Backstop over checkpoints, transcripts, indexes, worktrees, traces, and logs: ${storage.sizeCapGb} GB. Local models are reported but never auto-deleted.`}
-          help="When the managed set exceeds the cap, the oldest checkpoint data is evicted until it fits. Dictation models, embedder model, browser partitions, and cache are excluded from eviction — they are shown in the report only."
-        >
-          <input
-            type="number"
-            className="w-24 rounded-md border border-border bg-surface px-2 py-1 text-sm text-fg"
-            aria-label="Managed size cap GB"
-            min={1}
-            max={50}
-            defaultValue={storage.sizeCapGb}
-            key={`size-cap-${storage.sizeCapGb}`}
-            disabled={form.formLocked}
-            onBlur={(e) => {
-              const v = Math.round(Number(e.target.value))
-              if (!Number.isFinite(v) || v < 1 || v > 50) {
-                e.target.value = String(storage.sizeCapGb)
-                form.setErrorMessage('Managed size cap must be from 1 to 50 GB.')
-                return
-              }
-              if (v !== storage.sizeCapGb) patchStorage({ sizeCapGb: v })
-            }}
-          />
-        </SettingsField>
+          hint="Past this, the oldest checkpoints are evicted until it fits."
+          help="Covers checkpoints, transcripts, indexes, worktrees, traces, and logs. Models, browser data, and cache are reported but never evicted."
+          unit="GB"
+          min={1}
+          max={50}
+          value={storage.sizeCapGb}
+          disabled={form.formLocked}
+          onCommit={(sizeCapGb) => patchStorage({ sizeCapGb })}
+        />
       </SettingsGroup>
 
       {report && report.workspaces.length > 0 ? (
-        <SettingsGroup title="Workspace storage detail">
-          <div className="px-4 py-3.5" data-settings-field="storage-workspaces">
+        <SettingsGroup title="Workspaces">
+          <div className="px-4 py-2">
             <table className="w-full border-collapse text-xs">
+              <caption className="sr-only">App data by workspace</caption>
               <tbody>
                 {report.workspaces.map((ws) => (
-                  <tr key={ws.workspaceId} className="border-t border-border/40">
-                    <td className="max-w-[18rem] truncate py-1 pr-2 text-fg-strong" title={ws.path ?? ws.workspaceId}>
+                  <tr key={ws.workspaceId} className="border-t border-border/40 first:border-t-0">
+                    <td
+                      className="max-w-[18rem] truncate py-1.5 pr-2 text-fg"
+                      title={ws.path ?? ws.workspaceId}
+                    >
                       {ws.displayName ?? ws.workspaceId}
                     </td>
-                    <td className="py-1 pr-2 text-right text-secondary">
+                    <td className="py-1.5 pr-2 text-right tabular-nums text-secondary">
                       {formatBytes(ws.bytes)}
                     </td>
-                    <td className="py-1 pr-2 text-right text-muted">
-                      {ws.sessionCount === 1 ? '1 session' : `${ws.sessionCount} sessions`}
+                    <td className="py-1.5 pr-2 text-right tabular-nums text-muted">
+                      {plural(ws.sessionCount, 'session')}
                     </td>
+                    {/* Tracked is the norm and stays quiet; a cleanable dir is
+                        the one worth noticing, and says so in words. */}
                     <td
                       className={
-                        ws.tracked
-                          ? 'py-1 text-right text-muted'
-                          : ws.reapable
-                            ? 'py-1 text-right text-warning'
-                            : 'py-1 text-right text-muted'
+                        !ws.tracked && ws.reapable
+                          ? 'py-1.5 text-right text-warning'
+                          : 'py-1.5 text-right text-muted'
                       }
                     >
                       {ws.tracked

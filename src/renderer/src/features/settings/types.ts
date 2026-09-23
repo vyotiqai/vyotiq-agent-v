@@ -7,24 +7,54 @@ import type {
   WorkspaceSettingsOverride
 } from '@shared/ipc'
 
+/**
+ * Renderer-side nav contract. Two ids cross the shared boundary: the
+ * notification `open_settings` action (shared/ipc/schemas/notifications.ts,
+ * crash alerts → 'diagnostics') and the composer's dictation error banner
+ * ('voice' | 'providers'). Renaming one means updating those call sites plus
+ * the in-app `Settings.section` state.
+ */
 export type SettingsSection =
+  // App
   | 'general'
   | 'appearance'
+  | 'notifications'
+  | 'shortcuts'
+  // Agent
   | 'providers'
   | 'agent'
+  | 'tools'
   | 'indexing'
   | 'voice'
+  // System
   | 'storage'
-  | 'tools'
-  | 'shortcuts'
+  | 'diagnostics'
   | 'about'
 
+/** One entry of a settings select. `T` keeps the menu's value typed end to end. */
+export type SettingsOption<T extends string = string> = {
+  value: T
+  label: string
+  disabled?: boolean
+}
+
+/**
+ * Which field owns the current error, so the message renders next to the
+ * control instead of as a page-level alert. A field listed here must have an
+ * entry in `SETTINGS_ERROR_IDS` and pass that id to `aria-describedby`.
+ */
 export type SettingsErrorField =
   | 'ollama'
   | 'customUrl'
   | 'apikey'
   | 'keepTurns'
   | 'autoCompactThreshold'
+  | 'checkpointKeep'
+  | 'checkpointAge'
+  | 'orphanGrace'
+  | 'sessionKeep'
+  | 'sessionAge'
+  | 'sizeCap'
   | null
 
 export type SettingsViewProps = {
@@ -38,8 +68,6 @@ export type SettingsViewProps = {
   backRef?: Ref<HTMLButtonElement>
   onClose: () => void
   onUpdate: (partial: Partial<Settings>) => Promise<{ ok: true } | { ok: false; error: string }>
-  /** Reload settings from main after main-only writes (e.g. marketplace ack). */
-  onReloadSettings?: () => Promise<void>
   onSaveSecret: (
     provider: SecretProvider,
     key: string
@@ -68,4 +96,9 @@ export type SettingsViewProps = {
   onFeedbackOpenChange?: (open: boolean) => void
   /** Close Settings and focus the composer model picker. */
   onOpenComposerModel?: () => void
+  /**
+   * Close Settings on a Marketplace → Manage tab. Rules and MCP servers are
+   * edited there; Settings only links to them.
+   */
+  onOpenMarketplace?: (tab: 'mcps' | 'rules') => void
 }

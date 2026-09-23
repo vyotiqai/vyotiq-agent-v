@@ -394,7 +394,7 @@ export function useMarketplaceController({
       const signOutGithub =
         id === GITHUB_MCP_ID &&
         window.confirm(
-          'Also sign out of GitHub in Settings?\n\nCancel keeps GitHub signed in.'
+          'Also sign out of GitHub? Pull requests in Agent V use the same sign-in.\n\nCancel keeps GitHub signed in.'
         )
       beginBusy(id)
       const epoch = ++feedbackSeqRef.current

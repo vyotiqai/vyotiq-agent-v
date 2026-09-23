@@ -293,7 +293,7 @@ export function markRendererRecoveryPending(pending: CrashRecoveryPending): void
     title: 'UI recovered after a crash',
     body: code ? `${pending.reason} · ${code}` : pending.reason,
     dedupeKey: CRASH_DEDUPE_KEY,
-    action: { type: 'open_settings', section: 'general' }
+    action: { type: 'open_settings', section: 'diagnostics' }
   })
 }
 
@@ -307,7 +307,7 @@ export function consumeRendererRecoveryPending(): CrashRecoveryPending | null {
   return pending
 }
 
-/** Recent crash snippets for Settings → General (does not clear). */
+/** Recent crash snippets for Settings → Diagnostics (does not clear). */
 export function listCrashSnippets(): CrashSnippet[] {
   return readHistory().snippets
 }

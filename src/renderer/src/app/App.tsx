@@ -276,6 +276,7 @@ function App() {
   const [marketplaceFocusServerId, setMarketplaceFocusServerId] = useState<string | null>(null)
   const [marketplaceFocusSkillPath, setMarketplaceFocusSkillPath] = useState<string | null>(null)
   const [marketplaceFocusRulePath, setMarketplaceFocusRulePath] = useState<string | null>(null)
+  const [marketplaceFocusTab, setMarketplaceFocusTab] = useState<'mcps' | 'rules' | null>(null)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
   // Lifted so the command palette can open the feedback dialog from any view.
   const [feedbackOpen, setFeedbackOpen] = useState(false)
@@ -1601,7 +1602,7 @@ function App() {
       const reason = res.data.reason
       const code = res.data.exitCodeHex ?? (res.data.exitCode != null ? String(res.data.exitCode) : '')
       setSettingsError(
-        `UI recovered after a renderer crash (${reason}${code ? ` · ${code}` : ''}). Recent crash details are in Settings → General.`
+        `UI recovered after a renderer crash (${reason}${code ? ` · ${code}` : ''}). Recent crash details are in Settings → Diagnostics.`
       )
     })()
     return () => {
@@ -2279,12 +2280,16 @@ function App() {
         setView('settings')
       }}
       onOpenFeedback={() => {
-        setSettingsSection('general')
+        setSettingsSection('about')
         setView('settings')
         setFeedbackOpen(true)
       }}
       onOpenNotificationSettings={() => {
-        setSettingsSection('general')
+        setSettingsSection('notifications')
+        setView('settings')
+      }}
+      onOpenSettingsSection={(section) => {
+        setSettingsSection(section)
         setView('settings')
       }}
       focusedRunId={focusedRunId}
@@ -2319,7 +2324,6 @@ function App() {
             onFeedbackOpenChange={setFeedbackOpen}
             onClose={() => setView('chat')}
             onUpdate={update}
-            onReloadSettings={refresh}
             onSaveSecret={saveSecret}
             onClearSecret={removeSecret}
             onAppearanceChange={(partial) => {
@@ -2344,6 +2348,10 @@ function App() {
             effectiveChatSettings={effectiveChatSettings}
             onSetSettingsOverride={setSettingsOverride}
             onModelsRefreshed={() => setModelsRefreshNonce((n) => n + 1)}
+            onOpenMarketplace={(tab) => {
+              setMarketplaceFocusTab(tab)
+              setView('marketplace')
+            }}
             onOpenComposerModel={() => {
               setView('chat')
               window.setTimeout(() => {
@@ -2373,6 +2381,8 @@ function App() {
             focusServerId={marketplaceFocusServerId}
             focusSkillPath={marketplaceFocusSkillPath}
             focusRulePath={marketplaceFocusRulePath}
+            focusManageTab={marketplaceFocusTab}
+            onFocusManageTabConsumed={() => setMarketplaceFocusTab(null)}
             onFocusServerConsumed={() => setMarketplaceFocusServerId(null)}
             onFocusSkillConsumed={() => setMarketplaceFocusSkillPath(null)}
             onFocusRuleConsumed={() => setMarketplaceFocusRulePath(null)}

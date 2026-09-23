@@ -9,6 +9,7 @@ import {
   focusComposerMessage,
   isMainComposerTarget,
   matchShortcut,
+  referenceShortcutCatalog,
   shouldBlockAppShortcut,
   shouldBlockPanelShortcut,
   shouldDeferAppEscapeStop,
@@ -166,6 +167,22 @@ describe('shortcutLabel', () => {
     expect(shortcutLabel('focusComposer')).toBe('⌘L')
     expect(shortcutLabel('settings')).toBe('⌘,')
     expect(shortcutLabel('panelBrowser')).toBe('⌘⇧B')
+    expect(referenceShortcutCatalog().find((row) => row.id === 'font-larger')?.label).toBe('⌘=')
+  })
+
+  it('lists text-size and edit-last chords for reference, never as palette commands', () => {
+    const reference = referenceShortcutCatalog()
+    expect(reference.map((row) => row.id)).toEqual([
+      'edit-last',
+      'font-smaller',
+      'font-larger',
+      'font-reset'
+    ])
+    expect(reference.find((row) => row.id === 'font-reset')?.label).toBe('Ctrl+0')
+    // The command palette lists shortcutCatalog(); nothing handles these ids
+    // as commands, so they must stay out of it.
+    const paletteIds = new Set(shortcutCatalog().map((row) => row.id))
+    expect(reference.filter((row) => paletteIds.has(row.id))).toEqual([])
   })
 })
 

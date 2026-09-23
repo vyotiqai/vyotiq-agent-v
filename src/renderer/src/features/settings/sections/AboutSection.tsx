@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AppInfo, UpdaterStatePayload } from '@shared/ipc'
 import { VyotiqLockup } from '@renderer/lib/brand'
-import { Button, Switch } from '@renderer/lib/ui'
+import { Button } from '@renderer/lib/ui'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { checkForUpdates, useUpdaterState } from '@renderer/features/updates/updaterStore'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
+import { SwitchField } from '../components/SwitchField'
 
 /**
- * The three external links, as data. Each row was previously ~27 lines of
- * identical open/pending/error handling; the ids are load-bearing for settings
+ * The three external links, as data. The ids are load-bearing for settings
  * search, so they stay exactly as they were.
  */
 const LINKS: readonly {
@@ -105,15 +105,20 @@ function updaterHint(payload: UpdaterStatePayload): string {
   }
 }
 
-export function AboutSection({ form }: { form: SettingsFormState }) {
+export function AboutSection({
+  form,
+  onOpenFeedback
+}: {
+  form: SettingsFormState
+  onOpenFeedback: () => void
+}) {
   const [info, setInfo] = useState<AppInfo | null>(null)
   const [copied, setCopied] = useState(false)
   const [openingId, setOpeningId] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
   const updater = useUpdaterState()
-  const setErrorMessage = form.setErrorMessage
-  const setErrorRef = useRef(setErrorMessage)
-  setErrorRef.current = setErrorMessage
+  const setErrorRef = useRef(form.setErrorMessage)
+  setErrorRef.current = form.setErrorMessage
   const copyTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -161,47 +166,53 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
       .finally(() => setOpeningId(null))
   }
 
+  const copyBuildInfo = (): void => {
+    if (!info) return
+    void copyText(buildInfoText(info)).then((ok) => {
+      if (!ok) {
+        form.setErrorMessage('Could not copy build info.')
+        return
+      }
+      setCopied(true)
+      if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = window.setTimeout(() => setCopied(false), 1200)
+    })
+  }
+
   return (
     <SettingsStack>
-      <div
-        data-settings-field="about"
-        className="rounded-xl border border-border bg-surface p-5"
-      >
-        <div className="flex flex-col gap-2">
-          <VyotiqLockup markSize={36} />
-          <p className="m-0 text-xs leading-snug tracking-[var(--vy-tracking)] text-secondary">
-            Agent V. A product of Vyotiq.com.
-          </p>
-          <p className="m-0 text-xs leading-snug tracking-[var(--vy-tracking)] text-muted">
-            © {CURRENT_YEAR} Vyotiq. Agent V is free software licensed under GPL-3.0-or-later.
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-            {LINKS.map((link) => (
-              <button
-                key={link.id}
-                type="button"
-                data-settings-field={link.id}
-                disabled={!info}
-                title={link.hint(info)}
-                className="m-0 rounded-sm text-xs tracking-[var(--vy-tracking)] text-secondary underline-offset-2 hover:text-fg hover:underline focus-visible:outline focus-visible:outline-accent disabled:opacity-60"
-                onClick={() => {
-                  if (!info) return
-                  openLink(link.id, link.href(info))
-                }}
-              >
-                {openingId === link.id ? 'Opening…' : link.title}
-              </button>
-            ))}
-          </div>
+      {/* The brand sits on the page, not in a card: it is the section's
+          heading, and a bordered box around it was the one card on the page
+          that looked like no other. */}
+      <div data-settings-field="about" className="flex flex-col gap-2 px-0.5">
+        <VyotiqLockup markSize={36} />
+        <p className="m-0 text-xs leading-snug tracking-[var(--vy-tracking)] text-secondary">
+          Agent V. A product of Vyotiq.com.
+        </p>
+        <p className="m-0 text-xs leading-snug tracking-[var(--vy-tracking)] text-muted">
+          © {CURRENT_YEAR} Vyotiq. Agent V is free software licensed under GPL-3.0-or-later.
+        </p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
+          {LINKS.map((link) => (
+            <button
+              key={link.id}
+              type="button"
+              data-settings-field={link.id}
+              disabled={!info}
+              title={link.hint(info)}
+              className="m-0 rounded-sm text-xs tracking-[var(--vy-tracking)] text-secondary underline-offset-2 vy-transition hover:text-fg hover:underline focus-visible:vy-focus-ring disabled:vy-disabled-state"
+              onClick={() => {
+                if (info) openLink(link.id, link.href(info))
+              }}
+            >
+              {openingId === link.id ? 'Opening…' : link.title}
+            </button>
+          ))}
         </div>
       </div>
 
       <SettingsGroup title="Build">
-        <SettingsField
-          id="about-version"
-          title="Version"
-          hint="Product version for this install."
-        >
+        <SettingsField id="about-version" title="Version" hint="Product version of this install.">
           <p className="m-0 text-sm tabular-nums tracking-[var(--vy-tracking)] text-fg">
             {info?.version ?? dash}
           </p>
@@ -209,10 +220,10 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
         <SettingsField
           id="about-runtime"
           title="Runtime"
-          hint="Electron host, Chromium, and Node.js shipped in this app."
+          hint="Electron, Chromium, and Node.js shipped with this app."
           wide
         >
-          <dl className="m-0 grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm tracking-[var(--vy-tracking)]">
+          <dl className="m-0 grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm tracking-[var(--vy-tracking)]">
             <dt className="text-secondary">Electron</dt>
             <dd className="m-0 min-w-0 tabular-nums text-fg">{info?.electron ?? dash}</dd>
             <dt className="text-secondary">Chromium</dt>
@@ -221,57 +232,30 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
             <dd className="m-0 min-w-0 tabular-nums text-fg">{info?.node ?? dash}</dd>
           </dl>
         </SettingsField>
-        <SettingsField
-          id="about-platform"
-          title="Platform"
-          hint="Operating system and architecture reported by the host."
-        >
+        <SettingsField id="about-platform" title="Platform" hint="Operating system and architecture.">
           <p className="m-0 max-w-full text-right text-sm tracking-[var(--vy-tracking)] text-fg [overflow-wrap:anywhere]">
             {info ? platformLabel(info.platform, info.arch, info.osVersion) : dash}
           </p>
         </SettingsField>
-        <SettingsField
-          id="about-copy"
-          title="Build info"
-          hint="Copy version and runtime lines for a bug report."
-        >
-          <Button
-            variant="subtle"
-            disabled={!info}
-            onClick={() => {
-              if (!info) return
-              void copyText(buildInfoText(info)).then((ok) => {
-                if (!ok) {
-                  form.setErrorMessage('Could not copy build info.')
-                  return
-                }
-                setCopied(true)
-                if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current)
-                copyTimerRef.current = window.setTimeout(() => setCopied(false), 1200)
-              })
-            }}
-          >
+        <SettingsField id="about-copy" title="Build info" hint="Version and runtime lines, for a bug report.">
+          <Button variant="subtle" disabled={!info} onClick={copyBuildInfo}>
             {copied ? 'Copied' : 'Copy'}
           </Button>
         </SettingsField>
       </SettingsGroup>
 
       <SettingsGroup title="Updates">
-        <SettingsField
+        <SwitchField
           id="about-auto-check"
           title="Automatic checks"
-          hint="Look for new releases at startup and every 6 hours. Nothing is ever downloaded on its own."
-        >
-          <Switch
-            size="md"
-            checked={form.settings.autoCheckUpdates}
-            disabled={form.formLocked}
-            label="Check for updates automatically"
-            onCheckedChange={(checked) => {
-              void form.runUpdate({ autoCheckUpdates: checked })
-            }}
-          />
-        </SettingsField>
+          label="Check for updates automatically"
+          hint="Look for new releases at startup and every 6 hours. Nothing downloads on its own."
+          checked={form.settings.autoCheckUpdates}
+          disabled={form.formLocked}
+          onChange={(autoCheckUpdates) => {
+            void form.runUpdate({ autoCheckUpdates })
+          }}
+        />
         <SettingsField id="about-updater" title="App updates" hint={updaterHint(updater)}>
           {updateVersionShown ? (
             <p className="m-0 text-xs tabular-nums tracking-[var(--vy-tracking)] text-muted">
@@ -300,6 +284,18 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
         </SettingsField>
       </SettingsGroup>
 
+      <SettingsGroup title="Feedback">
+        <SettingsField
+          id="send-feedback"
+          title="Send feedback"
+          hint="Report a bug, ask for a feature, or say what works."
+          help="Opens a pre-filled email to support@vyotiq.com. Optional diagnostics add the app version, OS, and locale — never chat contents."
+        >
+          <Button variant="subtle" onClick={onOpenFeedback}>
+            Send feedback
+          </Button>
+        </SettingsField>
+      </SettingsGroup>
     </SettingsStack>
   )
 }

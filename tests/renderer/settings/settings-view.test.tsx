@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import { SettingsView } from '@renderer/features/settings'
 import { SETTINGS_SEARCH_INDEX } from '@renderer/features/settings/settingsSearchIndex'
+import { SECTION_GROUPS, SECTION_LABELS } from '@renderer/features/settings/constants'
 import { emptySecretStatus, type Settings } from '@shared/ipc'
 import { DEFAULT_SETTINGS } from '@shared/ipc'
 
@@ -182,6 +183,23 @@ describe('settings', () => {
     expect(screen.queryByText(/default provider/i)).toBeNull()
   })
 
+  it('says how to fix an active provider with no key when no other key is saved', () => {
+    render(
+      <SettingsView
+        settings={{ ...DEFAULT_SETTINGS, provider: 'deepseek', model: 'deepseek-v4-flash' }}
+        secrets={emptySecrets}
+        section="providers"
+        onClose={vi.fn()}
+        onUpdate={vi.fn(async () => ({ ok: true as const }))}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      />
+    )
+
+    expect(screen.getByText(/DeepSeek has no API key\. Add one under API keys below\./)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Use / })).toBeNull()
+  })
+
   it('keeps the selected section when the settings view rerenders', () => {
     const renderSettings = () => (
       <SettingsView
@@ -240,7 +258,15 @@ describe('settings', () => {
     expect(screen.getByRole('button', { name: /^Indexing$/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Voice$/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Tools$/i })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /^Advanced$/i })).toBeNull()
+    // Notifications and Diagnostics are real sections: clicking each nav entry
+    // renders its own fields instead of falling through to General.
+    fireEvent.click(screen.getByRole('button', { name: /^Notifications$/i }))
+    expect(document.querySelectorAll('[data-settings-field]').length).toBeGreaterThan(0)
+    expect(document.querySelector('[data-settings-field="notifications-enabled"]')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^Diagnostics$/i }))
+    expect(document.querySelectorAll('[data-settings-field]').length).toBeGreaterThan(0)
+    expect(document.querySelector('[data-settings-field="telemetry"]')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^General$/i }))
     expect(screen.queryByRole('button', { name: /^Integrations$/i })).toBeNull()
     expect(screen.getByRole('button', { name: /^Shortcuts$/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^About$/i })).toBeTruthy()
@@ -283,6 +309,7 @@ describe('settings', () => {
       <SettingsView
         settings={{ ...baseSettings, provider: 'ollama', model: 'my-custom-model' }}
         secrets={emptySecrets}
+        section="providers"
         onClose={vi.fn()}
         onUpdate={vi.fn(async () => ({ ok: true as const }))}
         onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
@@ -293,12 +320,13 @@ describe('settings', () => {
     expect(screen.queryByPlaceholderText(/Custom model id/i)).toBeNull()
   })
 
-  it('active model badge uses row width not a fixed 200px cap', () => {
+  it('active model truncates a long id in place and keeps the whole id as its title', () => {
     const longModel = 'deepseek/deepseek-v4-flash-0731-extra-long-suffix'
     render(
       <SettingsView
         settings={{ ...baseSettings, provider: 'custom', model: longModel }}
         secrets={emptySecrets}
+        section="providers"
         onClose={vi.fn()}
         onUpdate={vi.fn(async () => ({ ok: true as const }))}
         onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
@@ -306,13 +334,12 @@ describe('settings', () => {
       />
     )
 
-    const badge = screen.getByRole('button', { name: `Custom OpenAI-compatible · ${longModel}` })
-    expect(badge.className).not.toContain('max-w-[200px]')
-    expect(badge.className).toContain('max-w-full')
-    const field = document.querySelector('[data-settings-field="active-model"]')
-    expect(field?.querySelector('.flex-nowrap')).toBeTruthy()
-    expect(field?.querySelector('.min-w-0.flex-1')).toBeTruthy()
-    expect(screen.getByText(/Opens the composer model picker, or jump to Providers/i)).toBeTruthy()
+    const field = document.querySelector('[data-settings-field="active-model"]') as HTMLElement
+    const label = within(field).getByText(longModel)
+    expect(label.classList.contains('truncate')).toBe(true)
+    expect(label.getAttribute('title')).toBe(longModel)
+    // The row stays copy-left/control-right rather than wrapping under.
+    expect(field.querySelector('.flex-nowrap')).toBeTruthy()
   })
 
   it('surfaces save key errors as alert', async () => {
@@ -418,7 +445,7 @@ describe('settings', () => {
 
     render(<Harness />)
     fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
-    expect(screen.getByText(/Active provider is DeepSeek/i)).toBeTruthy()
+    expect(screen.getByText(/DeepSeek has no API key/i)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /Use OpenRouter/i }))
     await waitFor(() =>
       expect(screen.getByLabelText('Active provider').textContent).toMatch(/OpenRouter/i)
@@ -581,12 +608,13 @@ describe('settings', () => {
     expect(screen.queryByText(/still the local default/i)).toBeNull()
   })
 
-  it('active model opens composer callback and Open Providers navigates', () => {
+  it('Active model Change opens the composer model picker', () => {
     const onOpenComposerModel = vi.fn()
-    render(
+    const { rerender } = render(
       <SettingsView
         settings={baseSettings}
         secrets={emptySecrets}
+        section="providers"
         onClose={vi.fn()}
         onUpdate={vi.fn(async () => ({ ok: true as const }))}
         onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
@@ -594,10 +622,24 @@ describe('settings', () => {
         onOpenComposerModel={onOpenComposerModel}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: `OpenAI · ${baseSettings.model}` }))
-    expect(onOpenComposerModel).toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: /^Open Providers$/i }))
-    expect(screen.getByLabelText('Active provider')).toBeTruthy()
+    const field = document.querySelector('[data-settings-field="active-model"]') as HTMLElement
+    expect(within(field).getByText(baseSettings.model)).toBeTruthy()
+    fireEvent.click(within(field).getByRole('button', { name: /^Change$/ }))
+    expect(onOpenComposerModel).toHaveBeenCalledTimes(1)
+
+    // Without a composer to open, the row only reports the model.
+    rerender(
+      <SettingsView
+        settings={baseSettings}
+        secrets={emptySecrets}
+        section="providers"
+        onClose={vi.fn()}
+        onUpdate={vi.fn(async () => ({ ok: true as const }))}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      />
+    )
+    expect(screen.queryByRole('button', { name: /^Change$/ })).toBeNull()
   })
 
   it('settings search for custom base URL expands the Custom OpenAI-compatible row', async () => {
@@ -617,7 +659,7 @@ describe('settings', () => {
     expect(await screen.findByLabelText('Custom OpenAI base URL')).toBeTruthy()
   })
 
-  it('settings search navigates to General telemetry field', async () => {
+  it('settings search navigates to the Diagnostics telemetry field', async () => {
     render(
       <SettingsView
         settings={baseSettings}
@@ -778,7 +820,7 @@ describe('settings', () => {
       />
     )
 
-    const trigger = screen.getByRole('button', { name: /^Theme$/i })
+    const trigger = screen.getByRole('button', { name: /^Color mode$/i })
     expect(trigger.className).toContain('max-w-full')
     expect(trigger.className).not.toContain('max-w-[200px]')
     fireEvent.click(trigger)
@@ -966,7 +1008,7 @@ describe('settings', () => {
     expect(screen.getByLabelText(/Acknowledge marketplace install risk/i)).toBeTruthy()
   })
 
-  it('General section shows privacy and diagnostics fields', () => {
+  it('Notifications and Diagnostics nav entries render real sections', () => {
     render(
       <SettingsView
         settings={baseSettings}
@@ -977,16 +1019,21 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    expect(screen.queryByRole('button', { name: /^Advanced$/i })).toBeNull()
-    expect(screen.getByLabelText(/Share crash and error reports/i)).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Open logs folder/i })).toBeTruthy()
-    expect(screen.getByText(/No crashes recorded this install/i)).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="diagnostics-command"]')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^Notifications$/i }))
+    expect(document.querySelectorAll('[data-settings-field]').length).toBeGreaterThan(0)
+    expect(document.querySelector('[data-settings-field="notifications-enabled"]')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^Diagnostics$/i }))
+    expect(document.querySelectorAll('[data-settings-field]').length).toBeGreaterThan(0)
+    expect(document.querySelector('[data-settings-field="telemetry"]')).toBeTruthy()
+    expect(document.querySelector('[data-settings-field="recent-crashes"]')).toBeTruthy()
+    expect(document.querySelector('[data-settings-field="process-metrics"]')).toBeTruthy()
+    // The typecheck/lint command configures an agent tool, so it is in Tools.
+    expect(document.querySelector('[data-settings-field="diagnostics-command"]')).toBeNull()
     expect(document.querySelector('[data-settings-field="about"]')).toBeNull()
     expect(document.querySelector('[data-settings-field="github-client-id"]')).toBeNull()
   })
 
-  it('Agent section keeps chat prefs and Reference group', () => {
+  it('Agent section owns permissions, runs, conversation, and rules', () => {
     render(
       <SettingsView
         settings={baseSettings}
@@ -998,13 +1045,80 @@ describe('settings', () => {
       />
     )
     fireEvent.click(screen.getByRole('button', { name: /^Agent$/i }))
-    expect(document.querySelector('[data-settings-field="show-thinking"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="keep-recent-turns"]')).toBeTruthy()
-    expect(screen.getByText(/^Reference$/i)).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="workspace-rules"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="memory-files"]')).toBeTruthy()
+    for (const id of [
+      'tool-approval',
+      'mcp-tools-protection',
+      'agent-autonomous-mode',
+      'agent-autonomous-questions',
+      'auto-mode-switch',
+      'auto-resume-interrupted',
+      'show-thinking',
+      'keep-recent-turns',
+      'auto-compact-threshold',
+      'workspace-rules'
+    ]) {
+      expect(document.querySelector(`[data-settings-field="${id}"]`)).toBeTruthy()
+    }
+    expect(screen.getByRole('switch', { name: 'MCP tools protection' }).getAttribute('aria-checked')).toBe(
+      'true'
+    )
+    // The offline wait budget had no effect (runs wait out a lost connection
+    // indefinitely) and the memory-files row was a paragraph, not a setting.
+    expect(document.querySelector('[data-settings-field="agent-offline-wait"]')).toBeNull()
+    expect(document.querySelector('[data-settings-field="memory-files"]')).toBeNull()
     expect(document.querySelector('[data-settings-field="codeindex-enabled"]')).toBeNull()
-    expect(document.querySelector('[data-settings-field="tool-approval"]')).toBeNull()
+    // Questions only apply to autonomous runs, so they wait on that switch.
+    expect(
+      (screen.getByRole('button', { name: 'Questions in autonomous mode' }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true)
+  })
+
+  it('Manage rules opens Marketplace on the Rules tab', () => {
+    const onOpenMarketplace = vi.fn()
+    render(
+      <SettingsView
+        settings={baseSettings}
+        secrets={emptySecrets}
+        section="agent"
+        onClose={vi.fn()}
+        onUpdate={vi.fn(async () => ({ ok: true as const }))}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+        onOpenMarketplace={onOpenMarketplace}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /^Manage rules$/ }))
+    expect(onOpenMarketplace).toHaveBeenCalledWith('rules')
+  })
+
+  it('lists always-allowed tools under Tool approval and removes one', async () => {
+    const onUpdate = vi.fn(async () => ({ ok: true as const }))
+    render(
+      <SettingsView
+        settings={{
+          ...baseSettings,
+          toolApproval: { mode: 'mutating', allowlist: ['edit', 'terminal'], mcpProtection: true }
+        }}
+        secrets={emptySecrets}
+        section="agent"
+        onClose={vi.fn()}
+        onUpdate={onUpdate}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      />
+    )
+    const row = document.querySelector('[data-settings-field="tool-approval-allowlist"]') as HTMLElement
+    expect(row).toBeTruthy()
+    expect(within(row).getByText('2 tools skip approval.')).toBeTruthy()
+    fireEvent.click(within(row).getByRole('button', { name: 'Remove edit' }))
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          toolApproval: expect.objectContaining({ allowlist: ['terminal'] })
+        })
+      )
+    )
   })
 
   it('Agent section renders the persona & style group', () => {
@@ -1023,7 +1137,7 @@ describe('settings', () => {
     expect(document.querySelector('[data-settings-field="agent-tone"]')).toBeTruthy()
     expect(document.querySelector('[data-settings-field="response-language"]')).toBeTruthy()
     expect(document.querySelector('[data-settings-field="response-verbosity"]')).toBeTruthy()
-    expect((screen.getByLabelText('Persona') as HTMLInputElement).value).toBe('Nova')
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Nova')
     expect((screen.getByLabelText('Tone') as HTMLInputElement).value).toBe('friendly, blunt')
     expect((screen.getByLabelText('Response language') as HTMLInputElement).value).toBe('')
   })
@@ -1042,8 +1156,8 @@ describe('settings', () => {
       />
     )
 
-    fireEvent.change(screen.getByLabelText('Persona'), { target: { value: 'Nova' } })
-    fireEvent.blur(screen.getByLabelText('Persona'))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Nova' } })
+    fireEvent.blur(screen.getByLabelText('Name'))
     fireEvent.change(screen.getByLabelText('Tone'), { target: { value: 'friendly, blunt' } })
     fireEvent.blur(screen.getByLabelText('Tone'))
     fireEvent.change(screen.getByLabelText('Response language'), { target: { value: 'Spanish' } })
@@ -1117,9 +1231,15 @@ describe('settings', () => {
       />
     )
 
-    expect((screen.getByLabelText('Persona') as HTMLInputElement).value).toBe('OverrideBot')
-    fireEvent.change(screen.getByLabelText('Persona'), { target: { value: 'Changed' } })
-    fireEvent.blur(screen.getByLabelText('Persona'))
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('OverrideBot')
+    // The override is named once at the top and marked on each row it scopes.
+    expect(screen.getByText(/Override is on for/)).toBeTruthy()
+    const nameRow = document.querySelector('[data-settings-field="agent-persona"]') as HTMLElement
+    expect(within(nameRow).getByText('Workspace')).toBeTruthy()
+    const runsRow = document.querySelector('[data-settings-field="auto-mode-switch"]') as HTMLElement
+    expect(within(runsRow).queryByText('Workspace')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Changed' } })
+    fireEvent.blur(screen.getByLabelText('Name'))
 
     await waitFor(() => {
       expect(onSetSettingsOverride).toHaveBeenCalledWith(
@@ -1467,7 +1587,7 @@ describe('settings', () => {
     ).toBeTruthy()
   })
 
-  it('Tools section owns approval, shell, search, browser allowlist, auto-resume, and auto mode', () => {
+  it('Tools section owns terminal, browser, MCP, and the tool catalog', () => {
     render(
       <SettingsView
         settings={baseSettings}
@@ -1479,16 +1599,43 @@ describe('settings', () => {
       />
     )
     fireEvent.click(screen.getByRole('button', { name: /^Tools$/i }))
-    expect(document.querySelector('[data-settings-field="tool-approval"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="mcp-tools-protection"]')).toBeTruthy()
-    expect(screen.getByRole('switch', { name: 'MCP tools protection' }).getAttribute('aria-checked')).toBe(
-      'true'
+    for (const id of [
+      'terminal-shell',
+      'diagnostics-command',
+      'terminal-screen-reader',
+      'search-engine',
+      'browser-domain-allowlist',
+      'mcp-tool-loading',
+      'mcp-servers',
+      'tools-catalog'
+    ]) {
+      expect(document.querySelector(`[data-settings-field="${id}"]`)).toBeTruthy()
+    }
+    // Approval and run behavior moved to Agent; pane count is layout (General).
+    for (const id of ['tool-approval', 'auto-resume-interrupted', 'auto-mode-switch', 'max-chat-panes']) {
+      expect(document.querySelector(`[data-settings-field="${id}"]`)).toBeNull()
+    }
+  })
+
+  it('saves the diagnostics command trimmed on blur', async () => {
+    const onUpdate = vi.fn(async () => ({ ok: true as const }))
+    render(
+      <SettingsView
+        settings={baseSettings}
+        secrets={emptySecrets}
+        section="tools"
+        onClose={vi.fn()}
+        onUpdate={onUpdate}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      />
     )
-    expect(document.querySelector('[data-settings-field="terminal-shell"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="browser-domain-allowlist"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="search-engine"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="auto-resume-interrupted"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="auto-mode-switch"]')).toBeTruthy()
+    const input = screen.getByLabelText('Diagnostics command')
+    fireEvent.change(input, { target: { value: '  pnpm typecheck  ' } })
+    fireEvent.blur(input)
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith({ diagnosticsCommand: 'pnpm typecheck' })
+    )
   })
 
   it('saves browser domain allowlist on blur', async () => {
@@ -1530,7 +1677,7 @@ describe('settings', () => {
     )
     const search = screen.getByLabelText(/Search settings/i)
     fireEvent.change(search, { target: { value: 'browser domain' } })
-    fireEvent.click(screen.getByRole('option', { name: /Browser domain allowlist/i }))
+    fireEvent.click(screen.getByRole('option', { name: /Domain allowlist/i }))
     expect(
       await waitFor(() => {
         const el = document.querySelector('[data-settings-field="browser-domain-allowlist"]')
@@ -1540,10 +1687,14 @@ describe('settings', () => {
     ).toBeTruthy()
   })
 
-  it('search index covers every rendered settings field', () => {
+  it('search index and rendered rows match in both directions, section by section', () => {
     render(
       <SettingsView
-        settings={baseSettings}
+        settings={{
+          ...baseSettings,
+          // The allowlist row only exists once a tool has been allowed.
+          toolApproval: { ...baseSettings.toolApproval, allowlist: ['read_file'] }
+        }}
         secrets={emptySecrets}
         onClose={vi.fn()}
         onUpdate={vi.fn(async () => ({ ok: true as const }))}
@@ -1554,28 +1705,42 @@ describe('settings', () => {
     )
     const indexed = new Set(SETTINGS_SEARCH_INDEX.map((entry) => entry.id))
     expect(indexed.size).toBe(SETTINGS_SEARCH_INDEX.length)
-    const rendered = new Set<string>()
-    for (const name of [
-      'General',
-      'Appearance',
-      'Providers',
-      'Agent',
-      'Indexing',
-      'Voice',
-      'Tools',
-      'Shortcuts',
-      'About'
-    ]) {
+    const renderedBySection = new Map<string, Set<string>>()
+    const mistitled: string[] = []
+    // Results that name a part of their row rather than its visible title: a
+    // provider's base URL field lives inside that provider's accordion row,
+    // and the Shortcuts entry lands on the whole list.
+    const namedForContent = new Set(['shortcuts', 'ollama-url', 'custom-url'])
+    for (const section of SECTION_GROUPS.flatMap((group) => group.sections)) {
+      const name = SECTION_LABELS[section]
       fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${name}$`, 'i') }))
+      const ids = new Set<string>()
       document.querySelectorAll('[data-settings-field]').forEach((el) => {
         const id = el.getAttribute('data-settings-field')
-        if (id) rendered.add(id)
+        if (id) ids.add(id)
       })
+      renderedBySection.set(section, ids)
+      for (const entry of SETTINGS_SEARCH_INDEX.filter((e) => e.section === section)) {
+        const row = document.querySelector(`[data-settings-field="${entry.id}"]`)
+        if (!row || namedForContent.has(entry.id)) continue
+        if (!row.textContent?.includes(entry.title)) mistitled.push(`${entry.id}: ${entry.title}`)
+      }
     }
+    const rendered = new Set([...renderedBySection.values()].flatMap((ids) => [...ids]))
+    // Every row can be found…
     expect([...rendered].filter((id) => !indexed.has(id))).toEqual([])
+    // …and every result lands on a row that exists, in the section it names.
+    expect(
+      SETTINGS_SEARCH_INDEX.filter(
+        (entry) => !renderedBySection.get(entry.section)?.has(entry.id)
+      ).map((entry) => `${entry.section}:${entry.id}`)
+    ).toEqual([])
+    // …under the name it was listed with: a result called "Copy build info"
+    // that highlights a row called "Build info" reads as the wrong result.
+    expect(mistitled).toEqual([])
   })
 
-  it('settings search navigates to Tools auto-resume field', async () => {
+  it('settings search navigates to the Agent auto-resume field', async () => {
     render(
       <SettingsView
         settings={baseSettings}
@@ -1698,6 +1863,7 @@ describe('settings', () => {
       <SettingsView
         settings={baseSettings}
         secrets={emptySecrets}
+        section="notifications"
         onClose={vi.fn()}
         onUpdate={onUpdate}
         onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
@@ -1748,8 +1914,9 @@ describe('settings', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Agent$/i }))
     expect(document.querySelector('[data-settings-field="agent-persona"]')).toBeTruthy()
     expect(document.querySelector('[data-settings-field="agent-tone"]')).toBeTruthy()
-    expect(screen.getByText(/15\/1000/)).toBeTruthy()
-    expect(screen.getByText(/18\/2000/)).toBeTruthy()
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Code Specialist')
+    // Short text shows no counter; it appears only near the limit.
+    expect(screen.queryByText(/15\/1000/)).toBeNull()
     expect(screen.getByText('turns')).toBeTruthy()
 
     // Compaction input commits on blur (Enter blurs in the browser)

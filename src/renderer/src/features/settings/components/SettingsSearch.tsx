@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useState, type KeyboardEvent } from 'react'
 import { useRovingTabIndex } from '@renderer/lib/a11y'
-import { SearchInput } from '@renderer/lib/ui'
+import { SearchInput, cn } from '@renderer/lib/ui'
 import type { SettingsSection } from '../types'
 import { SECTION_LABELS } from '../constants'
 import {
@@ -113,12 +113,18 @@ export function SettingsSearch({
                 aria-selected={index === activeIndex}
                 ref={setOptionRef(index)}
                 tabIndex={tabIndexFor(index)}
-                className="flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-xs text-fg hover:bg-surface-2"
+                // Focus stays in the search box while arrows move the active
+                // option, so the option has to show it itself — the way Menu
+                // marks its active row.
+                className={cn(
+                  'flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-xs text-fg',
+                  index === activeIndex ? 'bg-surface' : 'hover:bg-surface'
+                )}
                 onClick={() => goTo(entry)}
                 onMouseEnter={() => setActiveIndex(index)}
               >
                 <span className="min-w-0 truncate">{entry.title}</span>
-                <span className="shrink-0 text-muted">{SECTION_LABELS[entry.section].title}</span>
+                <span className="shrink-0 text-muted">{SECTION_LABELS[entry.section]}</span>
               </button>
             </li>
           ))}

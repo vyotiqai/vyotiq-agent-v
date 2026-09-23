@@ -429,6 +429,7 @@ export async function collectStorageReport(): Promise<StorageReportResult> {
     traces,
     logs,
     dictationModels,
+    embedModels,
     partitions,
     cache
   ] = await Promise.all([
@@ -437,6 +438,9 @@ export async function collectStorageReport(): Promise<StorageReportResult> {
     measureDir(join(root, 'traces')).catch(() => EMPTY_MEASURE),
     measureDir(join(root, 'logs')).catch(() => EMPTY_MEASURE),
     measureDir(join(root, 'dictation', 'models')).catch(() => EMPTY_MEASURE),
+    // The concept_search embedding model (embed/models, see embedModels.ts):
+    // downloaded once, shared by every workspace, report-only like dictation.
+    measureDir(join(root, 'embed', 'models')).catch(() => EMPTY_MEASURE),
     measureBrowserPartitions(),
     measureDir(join(root, 'Cache')).catch(() => EMPTY_MEASURE)
   ])
@@ -493,6 +497,7 @@ export async function collectStorageReport(): Promise<StorageReportResult> {
     categoryEntry('traces', 'Traces', traces, true),
     categoryEntry('logs', 'Logs', logs, true),
     categoryEntry('dictation-models', 'Dictation models', dictationModels, false),
+    categoryEntry('embed-models', 'Code search model', embedModels, false),
     categoryEntry('browser-partitions', 'Browser partitions', partitions, false),
     categoryEntry('cache', 'Cache', cache, false)
   ]
@@ -835,7 +840,12 @@ async function sweepSessions(
   return out
 }
 
-/** Preview-only variant of the session retention sweep. */
+/**
+ * Preview-only variant of the session retention sweep. Not gated on
+ * `sessionRetentionEnabled`: that switch is the automatic sweep's, and
+ * runStorageCleanup applies the limits on demand either way. Gating only the
+ * preview hid sessions from the confirmation that the run then deleted.
+ */
 async function previewSessionSweep(
   sessionsRoot: string,
   settings: Settings,
@@ -843,7 +853,6 @@ async function previewSessionSweep(
   protectedRuns: Set<string>
 ): Promise<SessionSweepResult> {
   const out: SessionSweepResult = { bytes: 0, dirs: 0, skipped: 0 }
-  if (!settings.storage.sessionRetentionEnabled) return out
   const sessions = await scanSessions(sessionsRoot)
   const keep = Math.max(1, settings.storage.sessionKeepCount)
   const ageCutoff = nowMs - settings.storage.sessionMaxAgeDays * DAY_MS

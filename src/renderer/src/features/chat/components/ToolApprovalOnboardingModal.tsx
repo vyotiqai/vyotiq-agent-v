@@ -45,7 +45,7 @@ export function ToolApprovalOnboardingModal({
       open={open}
       onClose={onDismiss}
       title="Tool approval"
-      description="Choose when Agent V should ask before running tools on this workspace. You can change this anytime in Settings → Tools."
+      description="Choose when Agent V should ask before running tools on this workspace. You can change this anytime in Settings → Agent."
       initialFocusRef={initialFocusRef}
       useNativeDialog
     >

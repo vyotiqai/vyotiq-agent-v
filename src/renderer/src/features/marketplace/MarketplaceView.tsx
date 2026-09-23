@@ -8,7 +8,7 @@ import { Icon } from '@renderer/lib/icons'
 import { useMarketplaceController } from './useMarketplaceController'
 import { MarketplaceHome } from './MarketplaceHome'
 import { MarketplaceDetail } from './MarketplaceDetail'
-import { MarketplaceManage } from './MarketplaceManage'
+import { MarketplaceManage, type ManageKind } from './MarketplaceManage'
 import { ConnectMcpWizard } from './ConnectMcpWizard'
 
 const SECTION_TABS = ['browse', 'manage'] as const
@@ -38,9 +38,11 @@ export function MarketplaceView({
   focusServerId,
   focusSkillPath,
   focusRulePath,
+  focusManageTab,
   onFocusServerConsumed,
   onFocusSkillConsumed,
-  onFocusRuleConsumed
+  onFocusRuleConsumed,
+  onFocusManageTabConsumed
 }: {
   settings: Settings
   onUpdate: (partial: Partial<Settings>) => Promise<{ ok: true } | { ok: false; error: string }>
@@ -55,12 +57,20 @@ export function MarketplaceView({
   focusServerId?: string | null
   focusSkillPath?: string | null
   focusRulePath?: string | null
+  /** Open straight on a Manage tab with nothing in it selected (Settings links here). */
+  focusManageTab?: ManageKind | null
   onFocusServerConsumed?: () => void
   onFocusSkillConsumed?: () => void
   onFocusRuleConsumed?: () => void
+  onFocusManageTabConsumed?: () => void
 }) {
   const [pane, setPane] = useState<Pane>(() =>
-    focusServerId || focusSkillPath || focusRulePath ? { kind: 'manage' } : { kind: 'home' }
+    focusServerId || focusSkillPath || focusRulePath || focusManageTab
+      ? { kind: 'manage' }
+      : { kind: 'home' }
+  )
+  const [manageFocusTab, setManageFocusTab] = useState<ManageKind | null>(
+    focusManageTab ?? null
   )
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
   const [manageFocusServerId, setManageFocusServerId] = useState<string | null>(
@@ -110,6 +120,13 @@ export function MarketplaceView({
     onFocusRuleConsumed?.()
   }, [focusRulePath, onFocusRuleConsumed])
 
+  useEffect(() => {
+    if (!focusManageTab) return
+    setPane({ kind: 'manage' })
+    setManageFocusTab(focusManageTab)
+    onFocusManageTabConsumed?.()
+  }, [focusManageTab, onFocusManageTabConsumed])
+
   const detailEntry =
     pane.kind === 'detail'
       ? (controller.catalog.find((e) => e.id === pane.entryId) ?? pane.fallback)
@@ -124,6 +141,7 @@ export function MarketplaceView({
     setManageFocusServerId(null)
     setManageFocusSkillPath(null)
     setManageFocusRulePath(null)
+    setManageFocusTab(null)
     setManageOpenMcpAdd(false)
     setPane({ kind: 'home' })
   }
@@ -287,6 +305,8 @@ export function MarketplaceView({
                 focusServerId={manageFocusServerId}
                 focusSkillPath={manageFocusSkillPath}
                 focusRulePath={manageFocusRulePath}
+                focusTab={manageFocusTab}
+                onFocusTabConsumed={() => setManageFocusTab(null)}
                 openMcpAdd={manageOpenMcpAdd}
                 onOpenMcpAddConsumed={() => setManageOpenMcpAdd(false)}
                 onFocusSkillConsumed={() => setManageFocusSkillPath(null)}

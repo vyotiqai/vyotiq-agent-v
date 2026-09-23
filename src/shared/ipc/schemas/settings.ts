@@ -572,8 +572,8 @@ export const SettingsSchema = z.object({
   /** Composer dictation engine + which local Whisper weights to use. */
   dictation: DictationSettingsSchema.default(DEFAULT_DICTATION_SETTINGS),
   /**
-   * Unattended runs: auto-approve gated tools (high-risk still gated) and relax
-   * offline wait_forever. Off by default.
+   * Unattended runs: auto-approve gated tools (high-risk still gated). Off by
+   * default.
    */
   autonomousMode: z.boolean().default(false),
   /**
@@ -589,7 +589,11 @@ export const SettingsSchema = z.object({
    * automatically — everything else waits for this ack.
    */
   storageSurfaceAcked: z.boolean().default(false),
-  /** Offline connectivity wait budget (autonomousMode gates wait_forever). */
+  /**
+   * Retired: offline waits are unlimited now (resolveOfflineWaitMs ignores
+   * this), so Settings no longer shows it. Kept so settings.json files that
+   * carry it still parse.
+   */
   offlineWaitMode: OfflineWaitModeSchema.default('default'),
   /**
    * User-global rules injected as `<user_rules>` on every agent step.
