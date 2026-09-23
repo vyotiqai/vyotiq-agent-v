@@ -887,7 +887,9 @@ describe('ChatView composer placement', () => {
     expect(document.querySelector('[data-chat-hero]')).toBeNull()
     const dock = document.querySelector('[data-composer-dock]')
     expect(dock?.className).toMatch(/absolute/)
-    expect(dock?.className).toMatch(/bottom-2/)
+    // Flush with the stage bottom: the gap under the shell is the cover's pb-2,
+    // so nothing scrolls through it.
+    expect(dock?.className).toMatch(/bottom-0/)
     // Same gutters as the transcript so the column edges line up.
     expect(dock?.className).toMatch(/pl-4/)
     expect(dock?.className).toMatch(/pr-10/)
@@ -895,6 +897,8 @@ describe('ChatView composer placement', () => {
     const column = document.querySelector('[data-composer-column]')
     expect(column?.className).toMatch(/mx-auto/)
     expect(column?.className).toMatch(/max-w-\[840px\]/)
+    // The column carries the cover that rows fade out across above the shell.
+    expect(column?.classList.contains('vy-composer-dock-cover')).toBe(true)
     expect(document.querySelector('[data-hero-brand]')).toBeNull()
     expect(document.querySelector('[data-brand-lockup]')).toBeNull()
   })
@@ -1184,7 +1188,7 @@ describe('ChatView composer placement', () => {
     const composerRoot = document.querySelector('[data-composer-dock]')
     expect(composerRoot?.className).toMatch(/absolute/)
     expect(composerRoot?.className).toMatch(/inset-x-0/)
-    expect(composerRoot?.className).toMatch(/bottom-2/)
+    expect(composerRoot?.className).toMatch(/bottom-0/)
     expect(composerRoot?.className).toMatch(/z-20/)
     expect(composerRoot?.className).not.toMatch(/shrink-0/)
   })

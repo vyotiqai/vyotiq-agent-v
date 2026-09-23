@@ -132,8 +132,14 @@ const modelPillTrigger = cn(
   'vy-transition disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]'
 )
 
-/** Leading cluster root — attach, mode, and model pills sit before the input. */
-const toolsRow = 'flex h-8 min-w-0 items-center gap-1 overflow-hidden'
+/**
+ * Leading cluster root — attach, mode, and model pills sit before the input.
+ * `-ml-1.5` pulls the row out by the attach button's glyph inset (28px box,
+ * 16px icon), so the `+` starts on the typed text's left edge, the way the
+ * tasks row starts on the pinned prompt's text. It moves the row, not the
+ * button, because `overflow-hidden` would clip a button's own negative margin.
+ */
+const toolsRow = '-ml-1.5 flex h-8 min-w-0 items-center gap-1 overflow-hidden'
 
 /** Trailing action row — Think, context meter, Send/Stop. */
 const toolbarRow = 'flex h-8 min-w-0 shrink-0 items-center gap-2'

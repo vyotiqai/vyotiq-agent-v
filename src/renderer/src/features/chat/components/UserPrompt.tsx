@@ -2,9 +2,12 @@ import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type Re
 import { Icon } from '@renderer/lib/icons'
 import { MarkdownContent, Tooltip, cn } from '@renderer/lib/ui'
 import { slashChipFromContent } from '@shared/slashCommands'
-import { TOOL_BODY_CLAMP_PX, USER_PROMPT_SURFACE } from '@renderer/lib/utils/layout'
+import { USER_PROMPT_CLAMP_LINES, USER_PROMPT_SURFACE } from '@renderer/lib/utils/layout'
 import type { UserItem } from '../utils/transcriptRows'
 import { SlashChip } from './SlashChip'
+
+/** Prompt line height when layout reports none (jsdom): 16px heading × 1.5. */
+const FALLBACK_PROMPT_LINE_PX = 24
 
 /** One hover-revealed prompt action (edit / revert). */
 const PROMPT_ACTION =
@@ -46,18 +49,25 @@ export function UserPrompt({
     return item.content
   }, [item.content, slashChip])
 
+  // A slash chip sits on a line of its own above the request text.
+  const clampLines = USER_PROMPT_CLAMP_LINES + (slashChip ? 1 : 0)
+
   useLayoutEffect(() => {
     const el = bodyRef.current
     if (!el) return
     const measure = (): void => {
-      setOverflows(el.scrollHeight > TOOL_BODY_CLAMP_PX + 8)
+      const linePx =
+        Number.parseFloat(getComputedStyle(el).lineHeight) || FALLBACK_PROMPT_LINE_PX
+      // Half a line of slack, so a prompt that only just spills keeps its last
+      // line instead of folding it behind Show more.
+      setOverflows(el.scrollHeight > linePx * (clampLines + 0.5))
     }
     measure()
     if (typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(measure)
     observer.observe(el)
     return () => observer.disconnect()
-  }, [content, slashChip])
+  }, [content, slashChip, clampLines])
 
   useLayoutEffect(() => {
     if (wasEditingRef.current && !editing) promptRef.current?.focus()
@@ -122,7 +132,7 @@ export function UserPrompt({
         <div
           ref={bodyRef}
           className={cn('relative overflow-hidden', clamped && 'mask-fade-bottom')}
-          style={clamped ? { maxHeight: TOOL_BODY_CLAMP_PX } : undefined}
+          style={clamped ? { maxHeight: `${clampLines}lh` } : undefined}
         >
           {slashChip ? (
             <div className="flex flex-col gap-2">

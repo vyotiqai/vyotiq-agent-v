@@ -33,7 +33,7 @@ describe('resolveComposerPlaceholder', () => {
 
   it('uses mid-run follow-up copy while running', () => {
     expect(resolveComposerPlaceholder({ ...base, running: true })).toBe(
-      'Queue a follow-up… · @ to attach · / for commands'
+      'Queue a follow-up…'
     )
   })
 
@@ -43,7 +43,7 @@ describe('resolveComposerPlaceholder', () => {
     )
     expect(
       resolveComposerPlaceholder({ ...base, agentMode: 'ask', hasTranscript: true })
-    ).toBe('Ask a follow-up · won’t edit files · @ to attach · / for commands')
+    ).toBe('Ask a follow-up · won’t edit files')
   })
 
   it('covers Plan empty and follow-up', () => {
@@ -52,7 +52,7 @@ describe('resolveComposerPlaceholder', () => {
     )
     expect(
       resolveComposerPlaceholder({ ...base, agentMode: 'plan', hasTranscript: true })
-    ).toBe('Refine the plan · @ to attach · / for commands')
+    ).toBe('Refine the plan')
   })
 
   it('covers Agent empty and follow-up', () => {
@@ -60,7 +60,7 @@ describe('resolveComposerPlaceholder', () => {
       'Describe a task · @ to attach · / for commands'
     )
     expect(resolveComposerPlaceholder({ ...base, hasTranscript: true })).toBe(
-      'Send a follow-up · @ to attach · / for commands'
+      'Send a follow-up'
     )
   })
 
@@ -72,7 +72,7 @@ describe('resolveComposerPlaceholder', () => {
         agentMode: 'ask',
         hasTranscript: true
       })
-    ).toBe('Queue a follow-up… · @ to attach · / for commands')
+    ).toBe('Queue a follow-up…')
   })
 
   it('workspace gate beats running', () => {

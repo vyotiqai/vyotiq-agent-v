@@ -537,12 +537,31 @@
 }
 
 /**
- * Cover behind the pinned turn prompt. It uses the page background only to
- * prevent scrolling transcript rows from bleeding into the pinned stack; it
- * deliberately has no gradient, border, or shadow.
+ * Cover behind the pinned turn prompt. Page colour behind the prompt and the
+ * tasks band, fading out across the stack's bottom padding so rows scrolling
+ * underneath dissolve into it instead of being sliced by a straight edge. The
+ * 1rem is TURN_PROMPT_STACK's `pb-4` — change them together. At rest nothing
+ * sits behind the stack, so the fade only shows while it is pinned.
+ *
+ * The side shadows reach 2px past the column: a glyph that starts a line on the
+ * column edge (a `T`) antialiases a sliver outside it, which would otherwise
+ * show as a stray tick beside the cover. Shadows are ink overflow, so they
+ * never add a horizontal scrollbar.
  */
 @utility vy-turn-prompt-cover {
-  background-color: var(--vy-bg);
+  background-image: linear-gradient(to bottom, var(--vy-bg) calc(100% - 1rem), transparent);
+  box-shadow: -2px 0 var(--vy-bg), 2px 0 var(--vy-bg);
+}
+
+/**
+ * The same cover under the floating composer, mirrored: page colour behind the
+ * shell and the gap beneath it, fading out upward across the dock column's
+ * `pt-4` so rows scrolling down to the composer dissolve instead of being cut
+ * by its top edge. The 1rem is COMPOSER_DOCK_COVER's `pt-4`.
+ */
+@utility vy-composer-dock-cover {
+  background-image: linear-gradient(to top, var(--vy-bg) calc(100% - 1rem), transparent);
+  box-shadow: -2px 0 var(--vy-bg), 2px 0 var(--vy-bg);
 }
 
 /** Diff rows: tint + gutter sign (+/−) mark add/del — never hue alone. */

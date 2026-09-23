@@ -27,6 +27,7 @@ import {
   CHAT_COLUMN,
   CHAT_GUTTER,
   CHAT_STAGE_INSET,
+  COMPOSER_DOCK_COVER,
   COMPOSER_DOCK_RESERVE_VAR,
   COMPOSER_FLOAT_BODY,
   COMPOSER_FLOAT_DOCK,
@@ -1261,7 +1262,7 @@ export function Composer({
           centered column lines up exactly with the transcript column. */}
       <div className={cn(isDock && COMPOSER_FLOAT_BODY)}>
         <div
-          className={cn(isDock && CHAT_COLUMN, 'flex flex-col gap-2')}
+          className={cn(isDock && CHAT_COLUMN, isDock && COMPOSER_DOCK_COVER, 'flex flex-col gap-2')}
           data-composer-column={isDock ? true : undefined}
         >
         {(isDock || isInline) && (bannerError || secondaryBannerError) ? (

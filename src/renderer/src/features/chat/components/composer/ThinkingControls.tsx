@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { Icon } from '@renderer/lib/icons'
 import { Tooltip } from '@renderer/lib/ui/Tooltip'
 import { cn } from '@renderer/lib/ui/cn'
+import { CONTROL_HOVER } from '@renderer/lib/utils/layout'
 import type { ModelInfo, ProviderId, ThinkingEffort, ThinkingMode } from '@shared/ipc'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import { catalogThinkingAllowed, modelSupportsThinking, ollamaThinkingHeuristicFields } from '@shared/reasoning'
@@ -276,18 +277,15 @@ export function ThinkingControls({
         </Tooltip>
       )}
       {showSuggestLower ? (
-        <span
-          className="inline-flex h-7 max-w-[11rem] shrink-0 items-center gap-0.5 overflow-hidden rounded-md text-2xs leading-tight text-warning @max-[560px]:hidden"
-          role="status"
-        >
+        // A quiet "↓ Med" right after the effort pill, so the suggestion reads
+        // as part of that one control rather than a second, louder label. It is
+        // an offer, not a warning: muted like any default, no hue of its own.
+        <span className="inline-flex h-7 shrink-0 items-center @max-[560px]:hidden" role="status">
           <Tooltip content={lowerTitle}>
             <button
               type="button"
               disabled={lowerLocked}
-              className={cn(
-                'min-w-0 truncate rounded px-1 font-medium vy-transition hover:bg-warning/20',
-                'disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]'
-              )}
+              className={cn(chromePillButton, 'gap-0.5 text-muted')}
               aria-label={`Lower thinking effort to ${lowerLabel}`}
               onClick={(e) => {
                 e.preventDefault()
@@ -295,12 +293,13 @@ export function ThinkingControls({
                 applyLower()
               }}
             >
-              Lower · {lowerLabel}
+              <Icon name="arrowDown" size={12} />
+              {lowerLabel}
             </button>
           </Tooltip>
           <button
             type="button"
-            className="inline-grid size-4 place-items-center rounded text-warning/80 vy-transition hover:bg-warning/20 hover:text-warning"
+            className={cn('inline-grid size-5 place-items-center rounded text-tertiary vy-transition hover:text-fg', CONTROL_HOVER)}
             aria-label="Dismiss lower-thinking suggestion"
             onClick={(e) => {
               e.preventDefault()

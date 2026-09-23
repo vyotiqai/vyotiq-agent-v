@@ -487,6 +487,11 @@ describe('ThinkingControls', () => {
       />
     )
     const lower = screen.getByRole('button', { name: /Lower thinking effort to Med/i })
+    // A muted "↓ Med" offer beside the effort pill, never a warning-coloured label.
+    expect(lower.textContent).toBe('Med')
+    expect(lower.querySelector('svg')).toBeTruthy()
+    expect(lower.classList.contains('text-muted')).toBe(true)
+    expect(lower.className).not.toContain('warning')
     fireEvent.click(lower)
     expect(onChatSettingsChange).toHaveBeenCalledWith({
       thinkingEnabled: true,

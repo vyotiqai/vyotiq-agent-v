@@ -97,15 +97,21 @@ export const CHAT_COLUMN_MAX = 'max-w-[840px]'
 export const CHAT_COLUMN = `mx-auto w-full ${CHAT_COLUMN_MAX}`
 
 /**
- * Floating edge-to-edge composer dock — overlays the chat stage bottom with a
- * small gap so the shell's rounded border never reads as clipped by the window
- * edge. Anchors to the nearest positioned ancestor (`[data-chat-stage]`); the
- * shell keeps `pointer-events-auto` so the wrapper never blocks the transcript.
+ * Floating edge-to-edge composer dock — overlays the chat stage bottom.
+ * Anchors to the nearest positioned ancestor (`[data-chat-stage]`); the shell
+ * keeps `pointer-events-auto` so the wrapper never blocks the transcript, not
+ * even under {@link COMPOSER_DOCK_COVER}'s fade.
  */
-export const COMPOSER_FLOAT_DOCK = 'pointer-events-none absolute inset-x-0 bottom-2 z-20'
+export const COMPOSER_FLOAT_DOCK = 'pointer-events-none absolute inset-x-0 bottom-0 z-20'
 
-/** Gap between the floating composer shell and the pane bottom (`bottom-2`). */
-export const COMPOSER_FLOAT_BOTTOM_INSET_PX = 8
+/**
+ * Cover on the dock's centered column. `pb-2` is the gap under the shell, so
+ * its rounded border never reads as clipped by the window edge; `pt-4` is the
+ * strip rows fade out across on their way under the shell (the `1rem` in
+ * `vy-composer-dock-cover`). Both sit inside the measured dock height, so the
+ * transcript's reserve covers them and the last row rests above the fade.
+ */
+export const COMPOSER_DOCK_COVER = 'vy-composer-dock-cover pt-4 pb-2'
 
 /**
  * Scroll-clipped dock body — reserves the same scrollbar gutter as the
@@ -118,19 +124,14 @@ export const COMPOSER_FLOAT_BODY =
 /**
  * CSS variable the floating composer publishes its measured height to (on the
  * chat stage root); MessageList reserves that height so the last transcript
- * row can scroll fully clear of the bar.
+ * row can scroll fully clear of the bar. The height includes the dock cover's
+ * fade, which doubles as the clearance above the shell.
  */
 export const COMPOSER_DOCK_RESERVE_VAR = '--vy-composer-dock-height'
 
 /**
- * Extra clearance so the last transcript row sits fully above the reserved
- * dock when scrolled to the bottom (not just flush with its edge).
- */
-export const COMPOSER_DOCK_CLEARANCE_PX = 12
-
-/**
  * Extra bottom reserve while a run is live so streaming rows stay clear of a
- * reserved dock; idle chats keep only {@link COMPOSER_DOCK_CLEARANCE_PX}.
+ * reserved dock; idle chats keep only the dock cover's fade.
  */
 export const COMPOSER_DOCK_LIVE_CLEARANCE_PX = 16
 
@@ -204,17 +205,31 @@ export const USER_PROMPT_TEXT =
 export const USER_PROMPT_SURFACE = `w-full rounded-[var(--vy-radius-xl)] border border-border px-3 py-2 ${USER_PROMPT_TEXT}`
 
 /**
- * Compact vertical rhythm of the pinned turn-prompt stack (prompt + tasks band).
- * The page-colored cover prevents transcript rows from bleeding into the stack
- * without a gradient or shadow-like edge.
+ * Horizontal inset of a row set under the prompt bubble (the tasks band): the
+ * bubble's own border width and padding, with the border left transparent, so
+ * the row starts on the prompt text's left edge and ends on its right one.
  */
-export const TURN_PROMPT_STACK = 'py-2.5'
+export const USER_PROMPT_INSET = 'border-x border-transparent px-3'
+
+/**
+ * Lines of a user prompt shown before it folds behind Show more. Every turn
+ * prompt pins while its turn is on screen, so this is also how much of the
+ * work beneath the pinned stack covers.
+ */
+export const USER_PROMPT_CLAMP_LINES = 2
+
+/**
+ * Vertical rhythm of the turn-prompt stack (prompt + tasks band). The bottom
+ * padding doubles as the pinned cover's fade (`vy-turn-prompt-cover` in
+ * styles.css), so the two change together.
+ */
+export const TURN_PROMPT_STACK = 'pt-2.5 pb-4'
 
 /**
  * Pinned state of {@link TURN_PROMPT_STACK}: flush with the scrollport's top
- * edge (see {@link CHAT_STAGE_TOP_SPACER}) over an opaque page-colored cover,
- * so transcript rows cannot bleed into the pinned content. No gradient or
- * shadow is applied.
+ * edge (see {@link CHAT_STAGE_TOP_SPACER}) over a page-colored cover. Rows
+ * scrolling beneath dissolve across its bottom padding instead of meeting a
+ * hard edge; nothing shows through behind the prompt or the tasks band.
  */
 export const TURN_PROMPT_STACK_PINNED = 'sticky top-0 z-sticky vy-turn-prompt-cover'
 

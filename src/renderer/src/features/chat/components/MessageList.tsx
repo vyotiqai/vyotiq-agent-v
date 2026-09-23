@@ -22,9 +22,8 @@ import {
   CHAT_GUTTER,
   CHAT_STAGE_INSET,
   CHAT_STAGE_TOP_SPACER,
-  COMPOSER_DOCK_CLEARANCE_PX,
   COMPOSER_DOCK_RESERVE_VAR,
-  COMPOSER_FLOAT_BOTTOM_INSET_PX,
+  HOVER_ON_SURFACE,
   TRANSCRIPT_CONTAINER,
   TURN_PROMPT_STACK,
   TURN_PROMPT_STACK_PINNED,
@@ -35,6 +34,8 @@ import {
   TRANSCRIPT_TURN_GAP,
   TRANSCRIPT_WORK_PAIR_GAP,
   TRANSCRIPT_WORK_ROW_GAP,
+  USER_PROMPT_CLAMP_LINES,
+  USER_PROMPT_INSET,
   DISCLOSURE_ROW
 } from '@renderer/lib/utils/layout'
 import {
@@ -100,6 +101,8 @@ const CHARS_PER_LINE = 65
 const EMPTY_CITATION_CATALOG: CitationCatalogEntry[] = []
 /** Line height for text-sm + leading-relaxed (1.625 × 13px). */
 const LINE_PX = 21
+/** Line height of a user prompt: text-heading + leading-normal (1.5 × 16px). */
+const PROMPT_LINE_PX = 24
 
 /**
  * Cached appearance scale.
@@ -149,7 +152,6 @@ export function estimateTranscriptRowSize(row: TranscriptRow | undefined): numbe
   if (!row) return 48
   const scale = appearanceMeasureScale()
   const linePx = LINE_PX * scale
-  const bodyClampPx = TOOL_BODY_CLAMP_PX * scale
   switch (row.kind) {
     case 'turn':
       return 40
@@ -159,10 +161,17 @@ export function estimateTranscriptRowSize(row: TranscriptRow | undefined): numbe
       const len = row.item.content?.length ?? 0
       const media =
         (row.item.images?.length ?? 0) + (row.item.attachments?.length ?? 0)
-      // UserPrompt clamps body at TOOL_BODY_CLAMP_PX when overflowing.
-      const bodyLines = Math.max(1, Math.ceil(len / CHARS_PER_LINE))
-      const body = Math.min(bodyClampPx, 28 * scale + bodyLines * linePx)
-      const chrome = 40 + (media > 0 ? 36 : 0) + (len > 400 ? 22 : 0)
+      // UserPrompt folds its body to USER_PROMPT_CLAMP_LINES and puts a Show
+      // more line under it. Newlines count too: a short multi-line prompt folds.
+      const bodyLines = Math.max(
+        1,
+        countNewlines(row.item.content ?? ''),
+        Math.ceil(len / CHARS_PER_LINE)
+      )
+      const folds = bodyLines > USER_PROMPT_CLAMP_LINES
+      const body =
+        28 * scale + Math.min(bodyLines, USER_PROMPT_CLAMP_LINES) * PROMPT_LINE_PX * scale
+      const chrome = 40 + (media > 0 ? 36 : 0) + (folds ? 22 : 0)
       return chrome + body
     }
     case 'text': {
@@ -475,7 +484,11 @@ function TranscriptUserPrompt({
         }
       />
       {showTasksBand ? (
-        <TasksCeilingBand key={item.id} running={running} className="mt-1" />
+        <TasksCeilingBand
+          key={item.id}
+          running={running}
+          className={cn('mt-1', USER_PROMPT_INSET)}
+        />
       ) : null}
     </>
   )
@@ -1987,9 +2000,9 @@ export function MessageList({
    * Turn-grouped flow rendering: rows are wrapped per turn so the turn's user
    * prompt bubble pins natively (position: sticky) while its content scrolls and
    * releases when the next turn pushes it out. The pinned stack (prompt + tasks
-   * band) is held behind a flat, page-colored cover pinned flush with the
-   * scrollport top (TURN_PROMPT_STACK_PINNED), so rows cannot scroll through
-   * it above or below without introducing a gradient or shadow.
+   * band) is held behind a page-colored cover pinned flush with the scrollport
+   * top (TURN_PROMPT_STACK_PINNED); rows scrolling beneath dissolve across its
+   * bottom padding rather than being cut by a hard edge.
    */
   const renderTurnGroups = (
     entries: readonly { row: TranscriptRow; index: number }[],
@@ -2037,7 +2050,7 @@ export function MessageList({
             >
               {renderRow(row, isUser)}
               {hasTasksBand ? (
-                <div key={`${row.id}-tasks-band`} className="mt-1">
+                <div key={`${row.id}-tasks-band`} className={cn('mt-1', USER_PROMPT_INSET)}>
                   <TasksCeilingBand key={row.item.id} running={running} />
                 </div>
               ) : null}
@@ -2099,11 +2112,11 @@ export function MessageList({
           style={{
             // Floating composer overlays this scrollport — reserve its measured
             // height (published on the stage via COMPOSER_DOCK_RESERVE_VAR) so the
-            // last row can scroll fully clear; jump-to-bottom adds its own clearance.
+            // last row can scroll fully clear. That height includes the dock
+            // cover's fade, so the last row rests just above it; jump-to-bottom
+            // adds its own clearance.
             paddingBottom: `calc(var(${COMPOSER_DOCK_RESERVE_VAR}, 0px) + ${
-              COMPOSER_DOCK_CLEARANCE_PX +
-              COMPOSER_FLOAT_BOTTOM_INSET_PX +
-              (isUnpinned ? JUMP_TO_BOTTOM_CLEARANCE_PX : 0)
+              isUnpinned ? JUMP_TO_BOTTOM_CLEARANCE_PX : 0
             }px)`
           }}
           className={cn(
@@ -2329,7 +2342,11 @@ export function MessageList({
                       ? `Jump to latest messages, ${unpinnedNewCount} new`
                       : 'Jump to latest messages'
                   }
-                  className="pointer-events-auto inline-flex -translate-y-full items-center gap-1.5 rounded-full border border-border bg-surface py-1.5 px-2.5 text-caption font-medium text-secondary shadow-md vy-transition hover:border-border hover:bg-surface hover:text-fg focus-visible:vy-focus-ring"
+                  className={cn(
+                    'pointer-events-auto inline-flex -translate-y-full items-center gap-1.5 rounded-full border border-border bg-surface py-1.5 px-2.5 text-caption font-medium text-secondary shadow-md vy-transition hover:text-fg focus-visible:vy-focus-ring',
+                    // Already on bg-surface, so its hover steps up a weight.
+                    HOVER_ON_SURFACE
+                  )}
                 >
                   <Icon name="chevron" size={12} />
                   <span className="tracking-[var(--vy-tracking-tight)]">Latest</span>

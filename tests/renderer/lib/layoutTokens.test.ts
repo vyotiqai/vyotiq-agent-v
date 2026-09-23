@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   CHAT_COLUMN,
@@ -6,6 +8,8 @@ import {
   CHAT_STAGE_INSET,
   CHAT_STAGE_TOP_INSET,
   CHAT_STAGE_TOP_SPACER,
+  COMPOSER_DOCK_COVER,
+  COMPOSER_FLOAT_DOCK,
   MICRO_LABEL,
   MICRO_LABEL_CAPS,
   SETTINGS_COLUMN,
@@ -22,6 +26,8 @@ import {
   TRANSCRIPT_WORK_ROW_GAP,
   TURN_PROMPT_STACK,
   TURN_PROMPT_STACK_PINNED,
+  USER_PROMPT_CLAMP_LINES,
+  USER_PROMPT_INSET,
   USER_PROMPT_SURFACE
 } from '@renderer/lib/utils/layout'
 
@@ -75,16 +81,50 @@ describe('layout typography and spacing tokens', () => {
     expect(CHAT_STAGE_INSET).toContain('pl-4')
   })
 
-  it('keeps the pinned prompt cover compact and flat', () => {
-    expect(TURN_PROMPT_STACK).toContain('py-2.5')
+  it('keeps the pinned prompt cover compact, fading only across its bottom padding', () => {
+    // The cover fades over its last 1rem, which must stay the stack's pb-4:
+    // any longer and rows would show through behind the tasks band.
+    const css = readFileSync(join(__dirname, '../../../src/renderer/src/styles.css'), 'utf8')
+    const cover = /@utility vy-turn-prompt-cover \{([^}]*)\}/.exec(css)?.[1] ?? ''
+    expect(cover).toContain('var(--vy-bg) calc(100% - 1rem), transparent')
+    expect(TURN_PROMPT_STACK).toBe('pt-2.5 pb-4')
     expect(TURN_PROMPT_STACK_PINNED).toContain('vy-turn-prompt-cover')
     expect(TURN_PROMPT_STACK_PINNED).toContain('top-0')
-    // The cover carries no chrome or gradient tokens.
+    // The cover owns its background; no chrome rides on the stack classes.
     for (const token of [TURN_PROMPT_STACK, TURN_PROMPT_STACK_PINNED]) {
       expect(token).not.toContain('border')
       expect(token).not.toContain('shadow')
-      expect(token).not.toContain('bg-bg')
+      expect(token).not.toContain('bg-')
     }
+  })
+
+  it('mirrors the prompt cover under the composer, fading upward across its pt-4', () => {
+    const css = readFileSync(join(__dirname, '../../../src/renderer/src/styles.css'), 'utf8')
+    const cover = /@utility vy-composer-dock-cover \{([^}]*)\}/.exec(css)?.[1] ?? ''
+    expect(cover).toContain('linear-gradient(to top, var(--vy-bg) calc(100% - 1rem), transparent)')
+    expect(COMPOSER_DOCK_COVER).toBe('vy-composer-dock-cover pt-4 pb-2')
+    // Flush with the stage bottom: the gap under the shell is covered padding.
+    expect(COMPOSER_FLOAT_DOCK).toContain('bottom-0')
+  })
+
+  it('spills both covers 2px past the column so edge glyphs never peek out', () => {
+    const css = readFileSync(join(__dirname, '../../../src/renderer/src/styles.css'), 'utf8')
+    for (const name of ['vy-turn-prompt-cover', 'vy-composer-dock-cover']) {
+      const cover = new RegExp(`@utility ${name} \\{([^}]*)\\}`).exec(css)?.[1] ?? ''
+      expect(cover).toContain('box-shadow: -2px 0 var(--vy-bg), 2px 0 var(--vy-bg)')
+    }
+  })
+
+  it('insets the row under the prompt by the bubble border and padding', () => {
+    // The tasks band starts on the prompt text's edge only while both share
+    // one box model: a 1px border (transparent here) plus px-3.
+    expect(USER_PROMPT_SURFACE).toMatch(/(^| )border( |$)/)
+    expect(USER_PROMPT_SURFACE).toContain('px-3')
+    expect(USER_PROMPT_INSET).toBe('border-x border-transparent px-3')
+  })
+
+  it('folds the user prompt to two lines', () => {
+    expect(USER_PROMPT_CLAMP_LINES).toBe(2)
   })
 
   it('pairs the stage top inset with a scrolled spacer of the same height', () => {

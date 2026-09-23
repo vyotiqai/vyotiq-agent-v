@@ -16,6 +16,9 @@ function attachAndSlash(): string {
 /**
  * Mode- and state-aware composer placeholder.
  * Copy stays factual: workspace gate, Ask/Plan/Agent policy, follow-ups, @ attach, slash.
+ * The @ and / hints teach the first message only; once a chat has a transcript
+ * the placeholder is just the action, so it never runs out of room and gets
+ * cut off in a narrow pane.
  */
 export function resolveComposerPlaceholder(opts: {
   hasWorkspace: boolean
@@ -27,25 +30,17 @@ export function resolveComposerPlaceholder(opts: {
   const override = opts.override?.trim()
   if (override) return override
   if (!opts.hasWorkspace) return 'Open a workspace to start chatting'
-  if (opts.running) return line('Queue a follow-up…', attachAndSlash())
+  if (opts.running) return 'Queue a follow-up…'
 
   switch (opts.agentMode) {
     case 'ask':
-      return line(
-        opts.hasTranscript ? 'Ask a follow-up' : 'Ask a question',
-        'won’t edit files',
-        attachAndSlash()
-      )
+      return opts.hasTranscript
+        ? line('Ask a follow-up', 'won’t edit files')
+        : line('Ask a question', 'won’t edit files', attachAndSlash())
     case 'plan':
-      return line(
-        opts.hasTranscript ? 'Refine the plan' : 'Describe a plan',
-        attachAndSlash()
-      )
+      return opts.hasTranscript ? 'Refine the plan' : line('Describe a plan', attachAndSlash())
     case 'agent':
     default:
-      return line(
-        opts.hasTranscript ? 'Send a follow-up' : 'Describe a task',
-        attachAndSlash()
-      )
+      return opts.hasTranscript ? 'Send a follow-up' : line('Describe a task', attachAndSlash())
   }
 }

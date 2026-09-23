@@ -178,7 +178,8 @@ describe('MessageList', () => {
     const wrapper = document.querySelector('[data-sticky-turn-prompt]')!
     expect(wrapper.className).not.toContain('sticky')
     expect(wrapper.className).not.toContain('vy-turn-prompt-cover')
-    expect(wrapper.className).toContain('py-2.5')
+    expect(wrapper.className).toContain('pt-2.5')
+    expect(wrapper.className).toContain('pb-4')
     expect(screen.getByTestId('inline-composer')).toBeTruthy()
   })
 })

@@ -2,6 +2,7 @@ import type { Icon as PhosphorIcon, IconProps as PhosphorIconProps } from '@phos
 import {
   ArrowClockwiseIcon,
   ArrowCounterClockwiseIcon,
+  ArrowDownIcon,
   ArrowElbowLeftIcon,
   ArrowUpIcon,
   ArrowsClockwiseIcon,
@@ -84,6 +85,7 @@ const ICONS = {
   gitRebase: ArrowElbowLeftIcon,
   revert: ArrowElbowLeftIcon,
   refresh: ArrowsClockwiseIcon,
+  arrowDown: ArrowDownIcon,
   arrowUp: ArrowUpIcon,
   stop: StopIcon,
   folder: FolderIcon,

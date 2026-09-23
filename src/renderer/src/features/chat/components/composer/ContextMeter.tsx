@@ -116,7 +116,10 @@ function UsageRing({
           fill="none"
           stroke="currentColor"
           strokeWidth={stroke}
-          className="text-surface-2"
+          // The full circle must read as a track: on surface-2 it vanished
+          // into the composer and the lone round-capped arc looked like a
+          // loading spinner next to Stop.
+          className="text-border"
         />
         <circle
           cx={size / 2}
