@@ -186,9 +186,11 @@ export type AgentLiveActivity = {
   writingPath: string | null
   /** Command a terminal call is running right now, as the transcript labels it. */
   command: string | null
+  /** A `create_plan` call is writing the plan right now. */
+  planning: boolean
 }
 
-const NO_ACTIVITY: AgentLiveActivity = { writingPath: null, command: null }
+const NO_ACTIVITY: AgentLiveActivity = { writingPath: null, command: null, planning: false }
 
 export function useAgentLiveActivity(
   running: boolean,
@@ -212,12 +214,15 @@ export function useAgentLiveActivity(
       const stop = Math.max(0, list.length - FOLLOW_SCAN_WINDOW)
       let writingPath: string | null = null
       let command: string | null = null
+      let planning = false
       for (let i = list.length - 1; i >= stop; i -= 1) {
         const item = list[i]
         if (!item || item.kind !== 'tool') continue
         const tool = item.tool
         if (tool.status !== 'running') continue
-        if (command === null && tool.name === 'terminal') {
+        if (tool.name === 'create_plan') {
+          planning = true
+        } else if (command === null && tool.name === 'terminal') {
           command = tool.summary?.trim() ?? ''
         } else if (writingPath === null && FOLLOW_WRITE_TOOLS.has(tool.name)) {
           // Partial-JSON aware for the same reason follow mode is: a streaming
@@ -226,14 +231,14 @@ export function useAgentLiveActivity(
           const fromArgs = typeof args?.path === 'string' ? args.path.trim() : ''
           writingPath = fromArgs || (tool.summary?.trim() ?? '')
         }
-        if (writingPath !== null && command !== null) break
+        if (writingPath !== null && command !== null && planning) break
       }
       setActivity((prev) =>
-        prev.writingPath === writingPath && prev.command === command
+        prev.writingPath === writingPath && prev.command === command && prev.planning === planning
           ? prev
-          : writingPath === null && command === null
+          : writingPath === null && command === null && !planning
             ? NO_ACTIVITY
-            : { writingPath, command }
+            : { writingPath, command, planning }
       )
     }
     scan()

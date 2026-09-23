@@ -47,7 +47,8 @@ export function Tabs<T extends string>({
   onChange,
   className,
   size = 'md',
-  label
+  label,
+  panelIdPrefix
 }: {
   items: readonly TabItem<T>[]
   value: T
@@ -56,6 +57,8 @@ export function Tabs<T extends string>({
   size?: 'sm' | 'md'
   /** Accessible name for the tab list. */
   label?: string
+  /** Each tab controls the element `${panelIdPrefix}${id}`. */
+  panelIdPrefix?: string
 }) {
   const ids = items.map((t) => t.id)
   return (
@@ -69,6 +72,7 @@ export function Tabs<T extends string>({
             role="tab"
             data-roving
             aria-selected={on}
+            aria-controls={panelIdPrefix ? `${panelIdPrefix}${t.id}` : undefined}
             tabIndex={on ? 0 : -1}
             title={t.title}
             onClick={() => onChange?.(t.id)}
@@ -82,7 +86,12 @@ export function Tabs<T extends string>({
             {t.icon ? <Icon name={t.icon} size={15} /> : null}
             {t.label}
             {t.count !== undefined ? <Count n={t.count} /> : null}
-            {t.live ? <span className="size-1.5 animate-live rounded-full bg-accent" aria-label="live" /> : null}
+            {t.live ? (
+              <>
+                <span aria-hidden="true" className="size-1.5 animate-live rounded-full bg-accent" />
+                <span className="sr-only">, working now</span>
+              </>
+            ) : null}
             {t.trailing}
             <span
               aria-hidden="true"

@@ -27,7 +27,6 @@ import { isSessionDragEvent } from '@renderer/lib/chat/chatPaneLayout'
 import {
   CHAT_COLUMN,
   CHAT_GUTTER,
-  CHAT_STAGE_INSET,
   COMPOSER_DOCK_COVER,
   COMPOSER_DOCK_RESERVE_VAR,
   COMPOSER_FLOAT_BODY,
@@ -198,7 +197,6 @@ export function Composer({
   onDismissError,
   trailing,
   variant = 'dock',
-  sideRailPad = false,
   className,
   slashHandlers,
   seedImages,
@@ -264,8 +262,6 @@ export function Composer({
   /** Optional docked chrome below the shell. */
   trailing?: React.ReactNode
   variant?: ComposerVariant
-  /** When false, use symmetric gutter (immersive Agent — no floating side rail). */
-  sideRailPad?: boolean
   className?: string
   slashHandlers?: SlashClientHandlers
   /** One-shot attachment seed when mounting an inline edit composer. */
@@ -991,16 +987,10 @@ export function Composer({
       Boolean(imageError || fileError || audioError) ||
       extracting
     const showReadiness = Boolean(readinessIssue && readinessIssue.kind !== 'manual_catalog' && hasWorkspace)
-    // The panel rail overlays the rightmost pane's edge: clear it like the header does.
-    const linePadRight = sideRailPad ? 'pr-10' : 'pr-4'
     return (
-      <div
-        className={cn('shrink-0 border-t border-border bg-bg', className)}
-        data-composer-line
-        data-composer-side-rail-pad={sideRailPad ? '1' : '0'}
-      >
+      <div className={cn('shrink-0 border-t border-border bg-bg', className)} data-composer-line>
         {bannerError || secondaryBannerError ? (
-          <div className={cn('flex flex-col gap-2 border-b border-border py-2 pl-4', linePadRight)}>
+          <div className="flex flex-col gap-2 border-b border-border px-4 py-2">
             {secondaryBannerError ? <Alert>{secondaryBannerError}</Alert> : null}
             {bannerError ? (
               <Alert onDismiss={onDismissError}>
@@ -1021,7 +1011,7 @@ export function Composer({
           <ul className="m-0 list-none p-0" data-follow-up-queue aria-label="Queued instructions">
             {pendingFollowUps.map((entry) =>
               editingFollowUpId === entry.id ? (
-                <li key={entry.id} className={cn('flex items-start gap-2 border-b border-border py-2 pl-4', linePadRight)}>
+                <li key={entry.id} className="flex items-start gap-2 border-b border-border px-4 py-2">
                   <textarea
                     ref={followUpEditRef}
                     className="min-h-14 min-w-0 flex-1 resize-y rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg-strong outline-none focus-visible:vy-focus-ring"
@@ -1055,7 +1045,7 @@ export function Composer({
                   </Button>
                 </li>
               ) : (
-                <li key={entry.id} className={cn('flex h-8 items-center gap-2.5 border-b border-border pl-4 text-xs', linePadRight)}>
+                <li key={entry.id} className="flex h-8 items-center gap-2.5 border-b border-border px-4 text-xs">
                   <Icon name="enter" size={13} className="shrink-0 text-tertiary" />
                   <span className="shrink-0 text-tertiary">Queued</span>
                   <span className="min-w-0 flex-1 truncate text-secondary" title={entry.text}>
@@ -1120,7 +1110,7 @@ export function Composer({
             }}
           />
           {hasAttachmentRow || showReadiness || dictationStripState?.kind === 'error' ? (
-            <div className={cn('flex flex-col gap-2 pl-4 pt-2', linePadRight)}>
+            <div className="flex flex-col gap-2 px-4 pt-2">
               <ComposerAttachments
                 images={images}
                 imageError={imageError}
@@ -1158,7 +1148,7 @@ export function Composer({
               ) : null}
             </div>
           ) : null}
-          <div className={cn('flex min-h-11 items-start gap-2.5 py-2 pl-4', linePadRight)} data-composer-row>
+          <div className="flex min-h-11 items-start gap-2.5 px-4 py-2" data-composer-row>
             <span aria-hidden="true" className="flex h-7 shrink-0 items-center font-mono text-md font-semibold text-accent">
               ›
             </span>
@@ -1632,11 +1622,10 @@ export function Composer({
         isDock ? COMPOSER_FLOAT_DOCK : 'shrink-0 w-full pb-0 pt-0',
         // Same gutters as the transcript so the floating column's edges line up
         // exactly with the transcript column (edge to edge with the content).
-        isDock ? (sideRailPad ? CHAT_STAGE_INSET : CHAT_GUTTER) : '',
+        isDock ? CHAT_GUTTER : '',
         className
       )}
       data-composer-dock={isDock ? true : undefined}
-      data-composer-side-rail-pad={isDock && sideRailPad ? '1' : '0'}
       data-composer-hero={variant === 'hero' ? true : undefined}
       data-composer-inline={isInline ? true : undefined}
     >

@@ -262,7 +262,6 @@ export type BuildComposerSendPropsInput = {
     focus?: string
   ) => Promise<{ ok: true; message: string } | { ok: false; message: string }>
   slashHandlers?: SlashClientHandlers
-  sideRailPad?: boolean
   onFocus?: () => void
   onEditLastUserMessage?: () => boolean
   agentProfileId?: string | null
@@ -314,7 +313,6 @@ export function buildComposerSendProps(input: BuildComposerSendPropsInput) {
     metaStore: input.metaStore,
     onCompactContext: input.onCompactContext,
     slashHandlers: input.slashHandlers,
-    sideRailPad: input.sideRailPad,
     ...(input.onFocus ? { onFocus: input.onFocus } : {}),
     ...(input.onEditLastUserMessage
       ? { onEditLastUserMessage: input.onEditLastUserMessage }

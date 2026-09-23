@@ -11,9 +11,9 @@ let workspacePath: string
 async function openFilesPanel(window: Page): Promise<void> {
   const panel = window.getByRole('tabpanel', { name: 'Files' })
   if (await panel.isVisible()) return
-  const filesButton = window.getByRole('button', { name: /Show files panel/i })
-  await expect(filesButton).toBeVisible({ timeout: 20_000 })
-  await filesButton.click()
+  const filesTab = window.getByRole('tablist', { name: 'Inspector' }).getByRole('tab', { name: /^Files/ })
+  await expect(filesTab).toBeVisible({ timeout: 20_000 })
+  await filesTab.click()
   await expect(panel).toBeVisible()
 }
 

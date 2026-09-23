@@ -23,8 +23,11 @@ export type PaneRenderOptions = {
   onClose?: () => void
   /** Open an empty pane beside this one. */
   onSplit?: () => void
-  /** Clear shared ChatSideRail on the rightmost column when the rail is visible. */
-  sideRailPad: boolean
+  /**
+   * The inspector is hidden: the pane nearest where it opens offers it back.
+   * Set on the rightmost pane only.
+   */
+  onShowInspector?: () => void
   /** Open Changes dock (agent scope) — injected by ChatView when multi-pane. */
   onOpenChanges?: (path?: string) => void
   /** Open a workspace path in the Files dock — injected by ChatView. */
@@ -49,7 +52,7 @@ export function ChatPaneHost({
   panes,
   focusedPaneId,
   sizes,
-  sideRailPad = false,
+  onShowInspector,
   onFocusPane,
   onClosePane,
   onSplitPane,
@@ -61,8 +64,8 @@ export function ChatPaneHost({
   panes: ChatPane[]
   focusedPaneId: string
   sizes: number[]
-  /** When true, rightmost pane clears the shared side rail. */
-  sideRailPad?: boolean
+  /** Set while the inspector is hidden — handed to the rightmost pane. */
+  onShowInspector?: () => void
   onFocusPane: (paneId: string) => void
   onClosePane: (paneId: string) => void
   /** Insert an empty draft pane beside this pane (pointerdown already focused it). */
@@ -174,7 +177,7 @@ export function ChatPaneHost({
           multi,
           onClose: multi ? () => onClosePane(pane.paneId) : undefined,
           onSplit: onSplitPane,
-          sideRailPad: Boolean(sideRailPad && isRightmost)
+          onShowInspector: isRightmost ? onShowInspector : undefined
         })
         return (
           <div

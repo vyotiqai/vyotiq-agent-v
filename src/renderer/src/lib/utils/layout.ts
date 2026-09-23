@@ -5,14 +5,6 @@ export const CHAT_GUTTER = 'px-4 sm:px-5'
 export const SETTINGS_GUTTER = CHAT_GUTTER
 
 /**
- * Horizontal inset for the docked chat stage (transcript only — the composer
- * is floating edge-to-edge). Left matches {@link CHAT_GUTTER}; right clears the
- * floating side rail (`w-10`) so content never sits under the icon strip while
- * the scrollbar stays edge-flush.
- */
-export const CHAT_STAGE_INSET = 'pl-4 pr-10 sm:pl-5'
-
-/**
  * Top inset for chat stage surfaces that carry no sticky child.
  *
  * The transcript scrollport must NOT use this: Chromium insets a sticky child's
@@ -29,55 +21,27 @@ export const CHAT_STAGE_TOP_INSET = 'pt-4'
  */
 export const CHAT_STAGE_TOP_SPACER = 'h-4'
 
-/**
- * Top edge of the floating chat side rail.
- *
- * The rail is pinned to the top-right corner — the corner the Windows/Linux
- * caption buttons own — so it must clear the whole title bar
- * ({@link TITLE_BAR_HEIGHT_PX}), not just the stage's 16px
- * ({@link CHAT_STAGE_TOP_INSET}). At `pt-4` the Files button started 18px down
- * while Close owned the top 36px, so Close covered two thirds of it: the strip
- * read as colliding with the window controls and most of Files was unclickable.
- * `top-10` leaves the 36px bar plus a 4px gap.
- */
-export const CHAT_SIDE_RAIL_TOP_INSET = 'top-10'
-
-/** Width of the floating chat side rail (icon strip) in pixels (`w-10`). */
-export const CHAT_SIDE_RAIL_WIDTH_PX = 40
-
-/** Width of the floating chat side rail (icon strip). */
-export const CHAT_SIDE_RAIL_WIDTH = 'w-10'
-
-/**
- * Shared shell for docked right chat panels (width applied via inline style).
- * No `pr-10`: the floating side rail is hidden while the dock is open.
- * `min-w-0` lets the flex child shrink instead of overflowing the chat row.
- */
-export const CHAT_RIGHT_PANEL =
-  'flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden border-l border-border/40 bg-bg'
-
 /** Minimum chat column width reserved when clamping the side dock. */
 export const CHAT_COLUMN_MIN_USABLE_PX = 280
 
 /** Absolute ceiling on simultaneously visible chat panes, even on ultrawide viewports. */
 export const MAX_CHAT_PANES_HARD_CAP = 6
 
-/** Default / clamp bounds for the right dock (px). */
-/** 400 leaves a usable chat column beside the default sidebar (~220). */
-export const DOCK_WIDTH_DEFAULT_PX = 400
+/**
+ * Default / clamp bounds for the inspector (px). 452 is the redesign's width:
+ * beside the 264px navigator it leaves a 724px record in a 1440px window.
+ */
+export const DOCK_WIDTH_DEFAULT_PX = 452
 export const DOCK_WIDTH_MIN_PX = 280
 export const DOCK_WIDTH_MAX_PX = 960
 
-/**
- * localStorage key for immersive dock mode (unified Agent + panel tabs).
- * Legacy values meant “wide side dock”; readers treat `'1'` as immersive.
- */
-export const DOCK_EXPANDED_KEY = 'vyotiq.dockExpanded'
+/** localStorage key for whether the inspector is shown (it is, by default). */
+export const INSPECTOR_OPEN_KEY = 'vyotiq.inspectorOpen'
 
-/** localStorage key for which immersive tab is focused (`agent` or a panel id). */
-export const IMMERSIVE_TAB_KEY = 'vyotiq.immersiveTab'
+/** localStorage key for the inspector taking the whole work area. */
+export const INSPECTOR_EXPANDED_KEY = 'vyotiq.inspectorExpanded'
 
-/** localStorage key for right-dock width in px. */
+/** localStorage key for the inspector's width in px. */
 export const DOCK_WIDTH_KEY = 'vyotiq.dockWidth'
 
 /** Shared max width for chat column content (messages + composer). */
@@ -411,10 +375,7 @@ export const SIDEBAR_COLLAPSED_KEY = 'vyotiq.sidebarCollapsed'
  */
 export const SIDEBAR_WIDTH_KEY = 'vyotiq.navigatorWidth'
 
-/** localStorage key for chat agent-browser panel open preference. */
-export const BROWSER_PANEL_OPEN_KEY = 'vyotiq.browserPanelOpen'
-
-/** localStorage key for which chat right panel is open. */
+/** localStorage key for the inspector's last tab. */
 export const RIGHT_PANEL_KEY = 'vyotiq.rightPanel'
 
 export const CHAT_RIGHT_PANEL_IDS = [
@@ -433,9 +394,6 @@ export function isChatRightPanelId(value: string | null | undefined): value is C
     value != null && (CHAT_RIGHT_PANEL_IDS as readonly string[]).includes(value)
   )
 }
-
-/** Immersive unified-tab id for the Agent (timeline + composer) view. */
-export type DockImmersiveTabId = 'agent' | ChatRightPanelId
 
 /** Shared content shell inside the right dock (parent owns CHAT_RIGHT_PANEL + tab bar). */
 export const CHAT_RIGHT_PANEL_BODY =
@@ -467,25 +425,21 @@ export function paneCapacityReservedPx(options?: {
   const sidebar = options?.sidebarWidthPx ?? readSidebarWidthPxForCapacity()
   const dockOpen = options?.dockOpen && (options.dockWidthPx ?? 0) > 0
   const dock = dockOpen ? options!.dockWidthPx! : 0
-  // Side rail overlays the pane edge only while the dock is closed.
-  const rail = dockOpen ? 0 : CHAT_SIDE_RAIL_WIDTH_PX
-  return sidebar + rail + dock
+  return sidebar + dock
 }
 
 /**
- * Clamp dock width so usable chat column(s) remain beside the sidebar.
- * With multiple panes, reserves {@link CHAT_COLUMN_MIN_USABLE_PX} per pane plus side rail.
+ * Clamp the inspector's width so usable task column(s) remain beside the
+ * navigator. With multiple panes, reserves {@link CHAT_COLUMN_MIN_USABLE_PX} per pane.
  */
 export function clampDockWidthPx(
   width: number,
   viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1280,
-  options?: { paneCount?: number; sidebarWidthPx?: number; dockOpen?: boolean }
+  options?: { paneCount?: number; sidebarWidthPx?: number }
 ): number {
   const paneCount = Math.max(1, options?.paneCount ?? 1)
   const sidebar = options?.sidebarWidthPx ?? readSidebarWidthPxForCapacity()
-  const dockOpen = options?.dockOpen ?? true
-  const rail = dockOpen ? 0 : CHAT_SIDE_RAIL_WIDTH_PX
-  const reservedChrome = paneCount * CHAT_COLUMN_MIN_USABLE_PX + sidebar + rail
+  const reservedChrome = paneCount * CHAT_COLUMN_MIN_USABLE_PX + sidebar
   const maxByViewport = Math.max(
     DOCK_WIDTH_MIN_PX,
     Math.min(DOCK_WIDTH_MAX_PX, viewportWidth - reservedChrome)

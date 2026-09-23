@@ -120,7 +120,7 @@ test('drag sidebar session onto right third splits into two panes', async () => 
   await expect(window.locator('[data-chat-pane]')).toHaveCount(1, { timeout: 10_000 })
 })
 
-test('multi-pane polish: min widths, sidebar open state, docked empty, rail pad', async () => {
+test('multi-pane polish: min widths, sidebar open state, docked empty, inspector beside', async () => {
   const { window } = launched
   await ensureSidebarExpanded()
 
@@ -161,9 +161,10 @@ test('multi-pane polish: min widths, sidebar open state, docked empty, rail pad'
     window.locator('[data-chat-pane-host] [data-panel-resize-handle]')
   ).toHaveCount(1)
 
-  // Rightmost composer clears the side rail while the rail is mounted.
-  const rightComposer = window.locator('[data-chat-pane]').nth(1).locator('[data-composer-line]')
-  await expect(rightComposer).toHaveAttribute('data-composer-side-rail-pad', '1')
+  // The inspector sits beside the panes; nothing floats over the rightmost one.
+  await expect(window.locator('[data-inspector]')).toBeVisible()
+  await expect(window.locator('[data-chat-side-rail]')).toHaveCount(0)
+  await expect(window.getByRole('button', { name: /^Show inspector/ })).toHaveCount(0)
 
   // New chat in multi-pane stays docked (no centered hero).
   await window.getByRole('button', { name: /new task/i }).first().click()
@@ -174,7 +175,7 @@ test('multi-pane polish: min widths, sidebar open state, docked empty, rail pad'
   await expect(newPane.locator('[data-composer-hero]')).toHaveCount(0)
 })
 
-test('opening right dock panel keeps multi-pane layout', async () => {
+test('hiding and showing the inspector keeps multi-pane layout', async () => {
   const { window } = launched
   await ensureSidebarExpanded()
 
@@ -199,13 +200,23 @@ test('opening right dock panel keeps multi-pane layout', async () => {
     })
     .toBe(2)
 
-  await window.getByRole('button', { name: /show terminal panel/i }).click()
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
+  await expect(window.locator('[data-right-dock]')).toBeVisible({ timeout: 10_000 })
+  await window.keyboard.press(`${mod}+I`)
+  await expect(window.locator('[data-right-dock]')).toHaveCount(0)
+  await expect(window.locator('[data-chat-pane]')).toHaveCount(2)
+
+  // Only the pane beside where the inspector opens offers it back.
+  const offers = window.getByRole('button', { name: /^Show inspector/ })
+  await expect(offers).toHaveCount(1)
+  await expect(window.locator('[data-chat-pane]').nth(1).getByRole('button', { name: /^Show inspector/ })).toBeVisible()
+  await offers.click()
   await expect(window.locator('[data-right-dock]')).toBeVisible({ timeout: 10_000 })
   await expect(window.locator('[data-chat-pane]')).toHaveCount(2)
 
-  // With dock open the rail is gone — composer pad drops on the rightmost pane.
-  const rightComposer = window.locator('[data-chat-pane]').nth(1).locator('[data-composer-line]')
-  await expect(rightComposer).toHaveAttribute('data-composer-side-rail-pad', '0')
+  await window.keyboard.press('Alt+3')
+  await expect(window.locator('#dock-panel-terminal')).toBeVisible({ timeout: 10_000 })
+  await expect(window.locator('[data-chat-pane]')).toHaveCount(2)
 })
 
 test('Ctrl/Cmd+\\ splits the focused pane into an empty draft beside it', async () => {

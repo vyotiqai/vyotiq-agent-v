@@ -72,11 +72,22 @@ function toolItem(
   }
 }
 
-const activeRow = (panel: string): Element | null =>
-  document.querySelector(`[data-rail-row="${panel}"][data-rail-active]`)
+const tab = (label: string): HTMLElement =>
+  screen.getByRole('tab', { name: new RegExp(`^${label}`) })
+const live = (label: string): boolean => tab(label).textContent?.includes('working now') ?? false
 
-describe('ChatSideRail live state from the run', () => {
-  it('pulses Files with the file the run is writing, relative to the workspace', () => {
+describe('Inspector tabs: live state from the run', () => {
+  it('lists all six tabs in strip order, on Changes by default', () => {
+    render(<ChatView {...baseProps} />)
+    const strip = screen.getByRole('tablist', { name: 'Inspector' })
+    const labels = Array.from(strip.querySelectorAll('[role="tab"]')).map((t) => t.firstChild?.textContent)
+    expect(labels).toEqual(['Changes', 'Files', 'Terminal', 'Browser', 'PR', 'Plan'])
+    expect(tab('Changes').getAttribute('aria-selected')).toBe('true')
+    // Each tab says its chord.
+    expect(tab('Plan').getAttribute('title')).toBe('Alt+6')
+  })
+
+  it('marks Files live with the file the run is writing, relative to the workspace', () => {
     render(
       <ChatView
         {...baseProps}
@@ -84,13 +95,11 @@ describe('ChatSideRail live state from the run', () => {
         items={[toolItem('edit', 'running', { argsPreview: '{"path":"/ws/src/app.ts"}' })]}
       />
     )
-    expect(activeRow('files')).toBeTruthy()
-    expect(
-      screen.getByRole('button', { name: /Show files panel · Editing src\/app\.ts/i })
-    ).toBeTruthy()
+    expect(live('Files')).toBe(true)
+    expect(tab('Files').getAttribute('title')).toBe('Editing src/app.ts · Alt+2')
   })
 
-  it('pulses Terminal with the command the run is executing', () => {
+  it('marks Terminal live with the command the run is executing', () => {
     render(
       <ChatView
         {...baseProps}
@@ -98,13 +107,11 @@ describe('ChatSideRail live state from the run', () => {
         items={[toolItem('terminal', 'running', { summary: 'pnpm test' })]}
       />
     )
-    expect(activeRow('terminal')).toBeTruthy()
-    expect(
-      screen.getByRole('button', { name: /Show terminal panel · Running pnpm test/i })
-    ).toBeTruthy()
+    expect(live('Terminal')).toBe(true)
+    expect(tab('Terminal').getAttribute('title')).toBe('Running pnpm test · Alt+3')
   })
 
-  it('marks both panels when the run has an edit and a command in flight', () => {
+  it('marks both tabs when the run has an edit and a command in flight', () => {
     render(
       <ChatView
         {...baseProps}
@@ -115,19 +122,23 @@ describe('ChatSideRail live state from the run', () => {
         ]}
       />
     )
-    expect(activeRow('files')).toBeTruthy()
-    expect(activeRow('terminal')).toBeTruthy()
+    expect(live('Files')).toBe(true)
+    expect(live('Terminal')).toBe(true)
   })
 
   it('marks a call that has not named its target yet', () => {
     render(<ChatView {...baseProps} running items={[toolItem('edit', 'running')]} />)
-    expect(activeRow('files')).toBeTruthy()
-    expect(
-      screen.getByRole('button', { name: /Show files panel · Editing a file/i })
-    ).toBeTruthy()
+    expect(live('Files')).toBe(true)
+    expect(tab('Files').getAttribute('title')).toBe('Editing a file · Alt+2')
   })
 
-  it('drops the marker once the call settles — only in-flight work pulses', () => {
+  it('marks Plan live while create_plan writes the plan', () => {
+    render(<ChatView {...baseProps} running items={[toolItem('create_plan', 'running')]} />)
+    expect(live('Plan')).toBe(true)
+    expect(tab('Plan').getAttribute('title')).toBe('Writing the plan · Alt+6')
+  })
+
+  it('drops the dot once the call settles — only in-flight work is live', () => {
     render(
       <ChatView
         {...baseProps}
@@ -135,17 +146,18 @@ describe('ChatSideRail live state from the run', () => {
         items={[toolItem('edit', 'done', { argsPreview: '{"path":"src/app.ts"}' })]}
       />
     )
-    expect(activeRow('files')).toBeNull()
+    expect(live('Files')).toBe(false)
+    expect(tab('Files').getAttribute('title')).toBe('Alt+2')
   })
 
-  it('shows no marker for a finished run', () => {
+  it('shows no dot for a finished run', () => {
     render(
       <ChatView
         {...baseProps}
         items={[toolItem('edit', 'running', { argsPreview: '{"path":"src/app.ts"}' })]}
       />
     )
-    expect(activeRow('files')).toBeNull()
+    expect(live('Files')).toBe(false)
   })
 
   it('counts unresolved agent writes on Changes', () => {
@@ -158,16 +170,13 @@ describe('ChatSideRail live state from the run', () => {
         ]}
       />
     )
-    expect(
-      document.querySelector('[data-rail-row="changes"] [data-rail-count]')?.textContent
-    ).toBe('2')
-    expect(
-      screen.getByRole('button', { name: /Show changes panel · 2 files to review/i })
-    ).toBeTruthy()
+    expect(tab('Changes').textContent).toBe('Changes2')
+    expect(tab('Changes').getAttribute('title')).toBe('2 files to review · Alt+1')
   })
 
-  it('leaves Changes unmarked when nothing is pending', () => {
+  it('leaves Changes without a count when nothing is pending', () => {
     render(<ChatView {...baseProps} />)
-    expect(document.querySelector('[data-rail-row="changes"] [data-rail-count]')).toBeNull()
+    expect(tab('Changes').textContent).toBe('Changes')
+    expect(tab('Changes').getAttribute('title')).toBe('Alt+1')
   })
 })

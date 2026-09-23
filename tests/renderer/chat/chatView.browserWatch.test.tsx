@@ -71,15 +71,33 @@ function busyBrowserState(): AgentBrowserState {
 }
 
 const q = (selector: string): Element | null => document.querySelector(selector)
+const browserTab = (): HTMLElement => screen.getByRole('tab', { name: /^Browser/ })
+/** The inspector is up by default; these cases start with it hidden. */
+const hideInspector = (): void => localStorage.setItem('vyotiq.inspectorOpen', '0')
 
 describe('ChatView browser watch affordance', () => {
-  it('shows no banner while the agent is not browsing', () => {
+  it('shows no banner and no live dot while the agent is not browsing', () => {
     render(<ChatView {...baseProps} />)
     expect(q('[data-browser-watch-banner]')).toBeNull()
-    expect(q('[data-rail-row="browser"][data-rail-active]')).toBeNull()
+    expect(browserTab().textContent).not.toContain('working now')
   })
 
-  it('shows the watch banner and pulses the rail while the agent browses with the panel closed', async () => {
+  it('marks the Browser tab live while the agent browses — the strip says it, no banner', async () => {
+    vi.mocked(window.vyotiq.browserGetState!).mockResolvedValue({
+      ok: true,
+      data: busyBrowserState()
+    })
+    render(<ChatView {...baseProps} />)
+
+    await vi.waitFor(() => {
+      expect(browserTab().textContent).toContain('working now')
+    })
+    expect(browserTab().getAttribute('title')).toBe('Browsing github.com · Alt+4')
+    expect(q('[data-browser-watch-banner]')).toBeNull()
+  })
+
+  it('shows the watch banner while the agent browses with the inspector hidden', async () => {
+    hideInspector()
     vi.mocked(window.vyotiq.browserGetState!).mockResolvedValue({
       ok: true,
       data: busyBrowserState()
@@ -93,15 +111,11 @@ describe('ChatView browser watch affordance', () => {
     expect(banner.textContent).toContain('Agent is browsing')
     expect(banner.textContent).toContain('github.com')
     expect(screen.getByRole('button', { name: /watch live/i })).toBeTruthy()
-    // Dock is closed → the floating rail renders with the busy marker.
-    expect(q('[data-rail-row="browser"][data-rail-active]')).toBeTruthy()
-    expect(
-      screen.getByRole('button', { name: /show browser panel.*Browsing github\.com/i })
-    ).toBeTruthy()
+    expect(q('[data-inspector]')).toBeNull()
   })
 
-  it('hides the banner when the browser panel is already the visible dock', async () => {
-    // ChatView restores the last panel from localStorage on init.
+  it('hides the banner when the browser panel is already on screen', async () => {
+    // ChatView restores the last tab from localStorage on init.
     localStorage.setItem('vyotiq.rightPanel', 'browser')
     vi.mocked(window.vyotiq.browserGetState!).mockResolvedValue({
       ok: true,
@@ -114,7 +128,8 @@ describe('ChatView browser watch affordance', () => {
     expect(q('[data-browser-watch-banner]')).toBeNull()
   })
 
-  it('opens the live browser panel when Watch live is clicked', async () => {
+  it('shows the inspector on the live browser when Watch live is clicked', async () => {
+    hideInspector()
     vi.mocked(window.vyotiq.browserGetState!).mockResolvedValue({
       ok: true,
       data: busyBrowserState()
@@ -128,11 +143,13 @@ describe('ChatView browser watch affordance', () => {
     await vi.waitFor(() => {
       expect(q('[data-agent-browser-panel]')).toBeTruthy()
     })
-    // Panel visible → banner no longer needed.
+    expect(browserTab().getAttribute('aria-selected')).toBe('true')
+    // Inspector up → the banner is no longer needed.
     expect(q('[data-browser-watch-banner]')).toBeNull()
   })
 
   it('reacts to browser state pushes, not just the initial getState', async () => {
+    hideInspector()
     let pushHandler: ((next: AgentBrowserState) => void) | undefined
     vi.mocked(window.vyotiq.onBrowserState!).mockImplementation((handler) => {
       pushHandler = handler

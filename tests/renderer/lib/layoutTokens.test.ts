@@ -5,7 +5,6 @@ import {
   CHAT_COLUMN,
   CHAT_COLUMN_MAX,
   CHAT_GUTTER,
-  CHAT_STAGE_INSET,
   CHAT_STAGE_TOP_INSET,
   CHAT_STAGE_TOP_SPACER,
   COMPOSER_DOCK_COVER,
@@ -67,11 +66,6 @@ describe('layout typography and spacing tokens', () => {
     expect(MICRO_LABEL).toContain('text-caption')
     expect(MICRO_LABEL_CAPS).toContain('text-2xs')
     expect(MICRO_LABEL_CAPS).toContain('tracking-[var(--vy-tracking-caps)]')
-  })
-
-  it('exports chat stage inset clearing the side rail', () => {
-    expect(CHAT_STAGE_INSET).toContain('pr-10')
-    expect(CHAT_STAGE_INSET).toContain('pl-4')
   })
 
   it('keeps the pinned prompt cover compact, fading only across its bottom padding', () => {

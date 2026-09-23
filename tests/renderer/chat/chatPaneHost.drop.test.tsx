@@ -49,6 +49,7 @@ describe('ChatPaneHost drop', () => {
   it('labels each pane and hands it close and split — the pane draws its own header', () => {
     const onClosePane = vi.fn()
     const onSplitPane = vi.fn()
+    const onShowInspector = vi.fn()
     const panes: ChatPane[] = [
       pane,
       { paneId: 'pane-2', workspacePath: '/ws/a', runId: null }
@@ -58,7 +59,7 @@ describe('ChatPaneHost drop', () => {
         panes={panes}
         focusedPaneId="pane-1"
         sizes={[0.5, 0.5]}
-        sideRailPad
+        onShowInspector={onShowInspector}
         onFocusPane={() => {}}
         onClosePane={onClosePane}
         onSplitPane={onSplitPane}
@@ -66,7 +67,7 @@ describe('ChatPaneHost drop', () => {
         onSessionDrop={() => true}
         getPaneTitle={(p) => (p.runId ? 'Chat A' : 'New task')}
         renderPane={(p, opts) => (
-          <div data-testid="pane-body" data-rail={opts.sideRailPad ? '1' : '0'} data-multi={opts.multi ? '1' : '0'}>
+          <div data-testid="pane-body" data-inspector-offer={opts.onShowInspector ? '1' : '0'} data-multi={opts.multi ? '1' : '0'}>
             <button type="button" onClick={opts.onClose}>
               Close {p.paneId}
             </button>
@@ -91,8 +92,9 @@ describe('ChatPaneHost drop', () => {
 
     const bodies = screen.getAllByTestId('pane-body')
     expect(bodies.map((b) => b.getAttribute('data-multi'))).toEqual(['1', '1'])
-    expect(bodies[0]!.getAttribute('data-rail')).toBe('0')
-    expect(bodies[1]!.getAttribute('data-rail')).toBe('1')
+    // Only the pane beside where the inspector opens offers it back.
+    expect(bodies[0]!.getAttribute('data-inspector-offer')).toBe('0')
+    expect(bodies[1]!.getAttribute('data-inspector-offer')).toBe('1')
 
     fireEvent.click(screen.getByRole('button', { name: 'Close pane-2' }))
     expect(onClosePane).toHaveBeenCalledWith('pane-2')

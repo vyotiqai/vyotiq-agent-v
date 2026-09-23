@@ -6,18 +6,16 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { ChatView } from '@renderer/features/chat/ChatView'
 import { emptySecretStatus } from '@shared/ipc'
 import { clampDockWidthPx, DOCK_WIDTH_DEFAULT_PX, readSidebarWidthPxForCapacity } from '@renderer/lib/utils/layout'
-import { resetDockImmersiveStore } from '@renderer/lib/hooks/dockImmersiveStore'
 import { minimalReadyPlanMarkdown } from '@renderer/features/chat/utils/planDraft'
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
-  resetDockImmersiveStore()
   try {
     localStorage.removeItem('vyotiq.browserPanelOpen')
     localStorage.removeItem('vyotiq.rightPanel')
     localStorage.removeItem('vyotiq.browserRecents')
-    localStorage.removeItem('vyotiq.dockExpanded')
-    localStorage.removeItem('vyotiq.immersiveTab')
+    localStorage.removeItem('vyotiq.inspectorOpen')
+    localStorage.removeItem('vyotiq.inspectorExpanded')
     localStorage.removeItem('vyotiq.dockWidth')
     localStorage.removeItem('vyotiq.sidebarWidth')
   } catch {
@@ -167,11 +165,12 @@ describe('ChatView review-changes request', () => {
     await waitFor(() => expect(onHandled).toHaveBeenCalledTimes(2))
 
     // After the owner reset, a remount must not replay the consumed request and
-    // force the Changes dock back open.
+    // force the inspector back onto Changes.
     unmount()
-    localStorage.removeItem('vyotiq.rightPanel')
+    localStorage.setItem('vyotiq.rightPanel', 'terminal')
     render(view(0))
-    await waitFor(() => expect(document.querySelector('[data-changes-panel]')).toBeNull())
+    await waitForPanel('[data-terminal-panel]')
+    expect(document.querySelector('[data-changes-panel]')).toBeNull()
     expect(onHandled).toHaveBeenCalledTimes(2)
   })
 })

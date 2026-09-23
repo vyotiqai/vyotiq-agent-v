@@ -13,7 +13,8 @@ export const BROWSER_URL_SELECTOR = '[data-browser-url]'
 export type ShortcutKeyEvent = Pick<
   KeyboardEvent,
   'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'
->
+> &
+  Partial<Pick<KeyboardEvent, 'code'>>
 
 /**
  * Shifted punctuation glyph → base key. With Shift held, `.` produces `>`
@@ -31,6 +32,11 @@ const SHIFTED_PUNCTUATION: Record<string, string> = {
  */
 export function matchShortcut(e: ShortcutKeyEvent, id: ShortcutId): boolean {
   const binding = SHORTCUT_BINDINGS[id]
+  if (binding.alt) {
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false
+    // Option+digit types a symbol on macOS; the physical key still says which.
+    return e.key.toLowerCase() === binding.key || e.code === `Digit${binding.key}`
+  }
   // Shifted punctuation (e.g. Shift+'.' produces '>' on US layouts) maps to
   // its base key so `shift: 'allow'` chords like Cmd/Ctrl+Shift+. match.
   const eventKey = SHIFTED_PUNCTUATION[e.key] ?? e.key.toLowerCase()

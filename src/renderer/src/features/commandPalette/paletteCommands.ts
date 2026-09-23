@@ -35,6 +35,8 @@ const ICON: Record<string, IconName> = {
   closeChat: 'close',
   splitPane: 'columns',
   findInFiles: 'fileSearch',
+  inspector: 'inspector',
+  inspectorExpand: 'expand',
   'jump-latest': 'arrowDown',
   'jump-top': 'arrowUp',
   sendFeedback: 'note'
@@ -57,7 +59,8 @@ export function paletteCommands({
   canSendFeedback: boolean
 }): PaletteCommand[] {
   const base: PaletteCommand[] = shortcutCatalog()
-    .filter((entry) => !EXCLUDED.has(entry.id) && !/^workspace[1-9]$/.test(entry.id))
+    // One tab per Alt chord would repeat the panel commands; the chords are listed in Settings.
+    .filter((entry) => !EXCLUDED.has(entry.id) && !/^(workspace[1-9]|inspectorTab[1-6])$/.test(entry.id))
     .map((entry) => ({
       id: entry.id,
       title: entry.title,

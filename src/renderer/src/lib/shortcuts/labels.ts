@@ -18,6 +18,7 @@ function modPrefix(): string {
 export function shortcutLabel(id: ShortcutId): string {
   const binding = SHORTCUT_BINDINGS[id]
   const glyph = keyGlyph(binding.key)
+  if (binding.alt) return isDarwin() ? `⌥${glyph}` : `Alt+${glyph}`
   if (!binding.mod) return glyph
   const shift = binding.shift === 'require'
   if (isDarwin()) return shift ? `⌘⇧${glyph}` : `⌘${glyph}`
@@ -33,6 +34,7 @@ export function shortcutLabel(id: ShortcutId): string {
 export function shortcutAriaKeys(id: ShortcutId): string {
   const binding = SHORTCUT_BINDINGS[id]
   const parts: string[] = []
+  if (binding.alt) parts.push('Alt')
   if (binding.mod) parts.push(isDarwin() ? 'Meta' : 'Control')
   if (binding.shift === 'require') parts.push('Shift')
   parts.push(binding.key === 'escape' ? 'Escape' : binding.key.toUpperCase())
@@ -70,7 +72,15 @@ export const SHORTCUT_TITLES: Record<ShortcutId, string> = {
   workspace6: 'Switch to workspace 6',
   workspace7: 'Switch to workspace 7',
   workspace8: 'Switch to workspace 8',
-  workspace9: 'Switch to workspace 9'
+  workspace9: 'Switch to workspace 9',
+  inspector: 'Show / hide the inspector',
+  inspectorExpand: 'Expand the inspector to full width',
+  inspectorTab1: 'Inspector: Changes',
+  inspectorTab2: 'Inspector: Files',
+  inspectorTab3: 'Inspector: Terminal',
+  inspectorTab4: 'Inspector: Browser',
+  inspectorTab5: 'Inspector: PR',
+  inspectorTab6: 'Inspector: Plan'
 }
 
 export type ShortcutCatalogEntry = {

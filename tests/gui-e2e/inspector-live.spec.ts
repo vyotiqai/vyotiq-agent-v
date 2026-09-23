@@ -6,15 +6,15 @@ import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
 import { requireActivePath } from './helpers/seedWorkspace'
 
 /**
- * The rail's live markers against a real run: the replay fixture streams an
- * `edit` call in six paced deltas, so the Files button is genuinely mid-write
+ * The inspector's live dots against a real run: the replay fixture streams an
+ * `edit` call in six paced deltas, so the Files tab is genuinely mid-write
  * while this asserts on it.
  */
 let launched: LaunchedApp
 let workspacePath: string
 
 test.beforeAll(async () => {
-  workspacePath = mkdtempSync(join(tmpdir(), 'vyotiq-rail-live-ws-'))
+  workspacePath = mkdtempSync(join(tmpdir(), 'vyotiq-inspector-live-ws-'))
   mkdirSync(workspacePath, { recursive: true })
   launched = await launchApp({
     e2eFixture: true,
@@ -32,9 +32,9 @@ test.beforeAll(async () => {
   await launched.window.evaluate(async () => {
     await window.vyotiq.setSettings({ toolApprovalOnboardingDone: true })
     localStorage.removeItem('vyotiq.chatPaneLayout')
-    // The rail only shows while no dock panel is open.
+    // Start on the default tab so the Files tab is not the one on screen.
     localStorage.removeItem('vyotiq.rightPanel')
-    localStorage.removeItem('vyotiq.browserPanelOpen')
+    localStorage.removeItem('vyotiq.inspectorOpen')
   })
   await launched.window.reload()
   await launched.window.waitForLoadState('domcontentloaded')
@@ -50,7 +50,7 @@ test.afterAll(async () => {
   }
 })
 
-test('Files pulses with the file the run is writing, and stops when it lands', async () => {
+test('Files goes live with the file the run is writing, and stops when it lands', async () => {
   const { window } = launched
 
   const expand = window.getByRole('button', { name: /show navigator/i })
@@ -58,25 +58,22 @@ test('Files pulses with the file the run is writing, and stops when it lands', a
 
   const composer = window.getByRole('combobox', { name: 'Instruction' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
-  await expect(window.locator('[data-chat-side-rail]')).toBeVisible()
-  await expect(window.locator('[data-rail-row="files"][data-rail-active]')).toHaveCount(0)
+  const files = window.getByRole('tablist', { name: 'Inspector' }).getByRole('tab', { name: /^Files/ })
+  await expect(files).toBeVisible()
+  await expect(files).not.toContainText('working now')
 
   await composer.fill('Stream a live edit diff')
   // The instruction line sends on Enter — it has no Send button.
   await window.getByRole('combobox', { name: 'Instruction' }).press('Enter')
 
-  // Mid-write: the rail says which file, without the Files panel being open.
-  await expect(window.locator('[data-rail-row="files"][data-rail-active]')).toBeVisible({
-    timeout: 20_000
-  })
-  await expect(
-    window.getByRole('button', { name: /Show files panel · Editing src\/live-stream\.ts/ })
-  ).toBeVisible()
+  // Mid-write: the tab says which file, without the Files panel being opened.
+  await expect(files).toContainText('working now', { timeout: 20_000 })
+  await expect(files).toHaveAttribute('title', /^Editing src\/live-stream\.ts · /)
   await expect(window.locator('#dock-panel-files')).toHaveCount(0)
 
-  // The call lands, the run ends, and the marker goes with it.
+  // The call lands, the run ends, and the dot goes with it.
   await expect(window.getByText('Live edit stream fixture done.')).toBeVisible({
     timeout: 30_000
   })
-  await expect(window.locator('[data-rail-row="files"][data-rail-active]')).toHaveCount(0)
+  await expect(files).not.toContainText('working now')
 })

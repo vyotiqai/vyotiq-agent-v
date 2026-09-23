@@ -1660,7 +1660,7 @@ function App() {
   }>({ rename: async () => {}, exportRun: async () => {}, deleteRun: async () => {} })
   const renderPaneSession = useCallback(
     (pane: ChatPane, options: PaneRenderOptions) => {
-      const { focused, sideRailPad, onOpenChanges, onOpenWorkspaceFile, multi, onClose, onSplit } =
+      const { focused, onShowInspector, onOpenChanges, onOpenWorkspaceFile, multi, onClose, onSplit } =
         options
       const paneContext = findByWorkspacePath(contexts, pane.workspacePath)
       // Standalone instance pane: inspect + stop only (no composer) — the same
@@ -1682,7 +1682,7 @@ function App() {
             instanceRunId={pane.runId}
             instanceMeta={parentCtrl?.agentInstances?.[pane.runId]}
             getController={getRunController}
-            sideRailPad={sideRailPad}
+            onShowInspector={onShowInspector}
             showThinking={paneChatSettings.showThinking}
             onOpenWorkspaceFile={onOpenWorkspaceFile}
             approvalAutoFocus={focused}
@@ -1953,7 +1953,7 @@ function App() {
           mcpServerNames={mcpServerNames}
           slashHandlers={paneSlashHandlers}
           approvalAutoFocus={focused}
-          sideRailPad={sideRailPad}
+          onShowInspector={onShowInspector}
           onOpenChanges={onOpenChanges}
           onOpenWorkspaceFile={onOpenWorkspaceFile}
           run={paneRun}

@@ -1,3 +1,4 @@
+import { forwardRef } from 'react'
 import type { Icon as PhosphorIcon, IconProps as PhosphorIconProps } from '@phosphor-icons/react'
 import {
   ArrowBendDownRightIcon,
@@ -131,6 +132,12 @@ import {
 
 export type IconProps = PhosphorIconProps & { size?: number }
 
+/** The navigator toggle's glyph, mirrored: the inspector opens on the right. */
+const InspectorIcon: PhosphorIcon = forwardRef<SVGSVGElement, PhosphorIconProps>((props, ref) => (
+  <SidebarSimpleIcon ref={ref} mirrored {...props} />
+))
+InspectorIcon.displayName = 'InspectorIcon'
+
 const ICONS = {
   send: PaperPlaneRightIcon,
   undo: ArrowCounterClockwiseIcon,
@@ -171,6 +178,7 @@ const ICONS = {
   folderMinus: FolderMinusIcon,
   doc: FileTextIcon,
   sidebar: SidebarSimpleIcon,
+  inspector: InspectorIcon,
   minimize: MinusIcon,
   maximize: CornersOutIcon,
   // Diagonal arrows — distinct from the corner-bracket window maximize glyph.

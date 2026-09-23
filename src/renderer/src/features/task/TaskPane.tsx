@@ -16,7 +16,7 @@ import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand'
 import { ActionMenu, Button, IconButton, ImageLightbox, cn } from '@renderer/lib/ui'
-import { isEditableShortcutTarget, isMainComposerTarget, matchShortcut } from '@renderer/lib/shortcuts'
+import { isEditableShortcutTarget, isMainComposerTarget, matchShortcut, shortcutLabel } from '@renderer/lib/shortcuts'
 import { isChangesOrPrDockClaimingFind } from '@renderer/lib/chat/transcriptFind'
 import { useChatLiveItems, useResolvedTurnUsage } from '@renderer/features/chat/components/ChatStreamLeaves'
 import { AgentContextCard } from '@renderer/features/chat/components/AgentContextCard'
@@ -99,8 +99,8 @@ export type TaskPaneProps = {
   onStopLoop?: () => void | Promise<boolean>
   /** The instruction line. */
   composer: ReactNode
-  /** This is the rightmost pane and the panel rail overlays its edge. */
-  sideRailPad?: boolean
+  /** Set on the rightmost pane while the inspector is hidden: offer it back. */
+  onShowInspector?: () => void
 }
 
 const NO_FOLDS: ReadonlySet<string> = new Set()
@@ -366,7 +366,6 @@ export function TaskPane(props: TaskPaneProps) {
   return (
     <div className="relative flex min-h-0 flex-1 flex-col bg-bg" data-chat-stage data-task-pane>
       <TaskHeader
-        railPad={props.sideRailPad}
         state={header?.state ?? null}
         stateLabel={header?.label}
         title={title}
@@ -412,6 +411,15 @@ export function TaskPane(props: TaskPaneProps) {
                 )}
               />
             ) : null}
+            {props.onShowInspector ? (
+              <IconButton
+                icon="inspector"
+                label={`Show inspector (${shortcutLabel('inspector')})`}
+                size="sm"
+                tone="muted"
+                onClick={props.onShowInspector}
+              />
+            ) : null}
             {props.actions.onClosePane ? (
               // Named for the task so split panes each say which one closes.
               <IconButton icon="close" label={`Close ${title}`} size="sm" tone="muted" onClick={props.actions.onClosePane} />
@@ -421,10 +429,7 @@ export function TaskPane(props: TaskPaneProps) {
       />
       {findOpen ? (
         <div
-          className={cn(
-            'flex h-9 shrink-0 items-center gap-2 border-b border-border pl-4 text-xs',
-            props.sideRailPad ? 'pr-10' : 'pr-4'
-          )}
+          className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs"
           data-record-find
         >
           <Icon name="search" size={13} className="shrink-0 text-muted" />
@@ -484,7 +489,6 @@ export function TaskPane(props: TaskPaneProps) {
             contentRef={scroll.contentRef}
             onScroll={scroll.onScroll}
             onActivate={props.onActivate}
-            railPad={props.sideRailPad}
           >
             {props.transcriptHasEarlier && !empty ? (
               <div className="flex justify-center pb-1" data-load-earlier>
@@ -550,7 +554,6 @@ export function TaskPane(props: TaskPaneProps) {
           onDismiss={props.onGoalDismiss}
           onStopLoop={props.onStopLoop ?? (async () => false)}
           onStopRun={props.onStop}
-          railPad={props.sideRailPad}
         />
       ) : null}
       {props.composer}

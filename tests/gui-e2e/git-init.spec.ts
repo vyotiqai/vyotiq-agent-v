@@ -11,9 +11,6 @@ import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
  * real `.git` on disk, not a stubbed bridge.
  */
 
-/** Ctrl on Win/Linux, Cmd on macOS — the chord that opens the Changes panel. */
-const MOD = process.platform === 'darwin' ? 'Meta' : 'Control'
-
 let launched: LaunchedApp
 let stripWorkspace: string
 let panelWorkspace: string
@@ -117,7 +114,9 @@ test('the Changes panel initializes a repository on click', async () => {
   const { window } = launched
   await activateWorkspace(window, panelWorkspace)
 
-  await window.keyboard.press(`${MOD}+E`)
+  // Alt 1 always lands on Changes; its Ctrl E chord would hide the inspector
+  // when Changes is already the tab on screen, as it is by default.
+  await window.keyboard.press('Alt+1')
   const panel = window.locator('#dock-panel-changes')
   await expect(panel).toBeVisible({ timeout: 20_000 })
   await expect(panel).toContainText('Not a git repository', { timeout: 15_000 })

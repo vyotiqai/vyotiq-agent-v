@@ -20,7 +20,6 @@ import { isRetryableTurnFailure } from '@shared/errors'
 import {
   CHAT_COLUMN,
   CHAT_GUTTER,
-  CHAT_STAGE_INSET,
   CHAT_STAGE_TOP_SPACER,
   COMPOSER_DOCK_RESERVE_VAR,
   HOVER_ON_SURFACE,
@@ -904,7 +903,6 @@ export function MessageList({
   onLoadEarlierMessages,
   virtualizeLiveEarly = false,
   onOpenChanges,
-  sideRailPad = false,
   editingUserMessageIndex = null,
   editComposer,
   onBeginEditUserMessage,
@@ -962,8 +960,6 @@ export function MessageList({
   /** Hybrid-virtualize live transcripts without waiting for 160 rows. */
   virtualizeLiveEarly?: boolean
   onOpenChanges?: (path?: string) => void
-  /** When false, use symmetric gutter (immersive Agent — no floating side rail). */
-  sideRailPad?: boolean
   editingUserMessageIndex?: number | null
   editComposer?: ReactNode
   onBeginEditUserMessage?: (messageIndex: number) => void
@@ -2126,7 +2122,7 @@ export function MessageList({
             // the pinned turn prompt for rows to scroll through. The inset rides
             // as a leading spacer child instead (CHAT_STAGE_TOP_SPACER).
             'relative min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]',
-            sideRailPad ? CHAT_STAGE_INSET : CHAT_GUTTER
+            CHAT_GUTTER
           )}
           onScroll={(e) => handleScroll(e.currentTarget.scrollTop)}
           onPointerDownCapture={() => onActivate?.()}

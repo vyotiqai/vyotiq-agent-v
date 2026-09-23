@@ -1,4 +1,4 @@
-import { SHORTCUT_BINDINGS, WORKSPACE_SWITCH_IDS } from '@renderer/lib/shortcuts/bindings'
+import { INSPECTOR_TAB_SHORTCUTS, SHORTCUT_BINDINGS, WORKSPACE_SWITCH_IDS } from '@renderer/lib/shortcuts/bindings'
 import {
   referenceShortcutCatalog,
   shortcutCatalog,
@@ -38,6 +38,10 @@ const GROUPS: ReadonlyArray<{ title: string; ids: readonly string[] }> = [
     ]
   },
   {
+    title: 'Inspector',
+    ids: ['inspector', 'inspector-tabs-1', 'inspector-tabs-2', 'inspectorExpand']
+  },
+  {
     title: 'Panels',
     ids: [
       'panelTerminal',
@@ -64,11 +68,23 @@ function workspaceRange(): ShortcutCatalogEntry {
   }
 }
 
+/** Alt 1–3 and Alt 4–6 as the two rows the tab strip reads in. */
+function inspectorTabRanges(): ShortcutCatalogEntry[] {
+  const [a, , c, d, , f] = INSPECTOR_TAB_SHORTCUTS
+  type TabId = (typeof INSPECTOR_TAB_SHORTCUTS)[number]
+  const range = (from: TabId, to: TabId): string => `${shortcutLabel(from)}–${SHORTCUT_BINDINGS[to].key}`
+  return [
+    { id: 'inspector-tabs-1', title: 'Changes · Files · Terminal', label: range(a, c) },
+    { id: 'inspector-tabs-2', title: 'Browser · PR · Plan', label: range(d, f) }
+  ]
+}
+
 export function shortcutGroups(): ShortcutGroup[] {
-  const workspaceIds = new Set<string>(WORKSPACE_SWITCH_IDS)
+  const rangedIds = new Set<string>([...WORKSPACE_SWITCH_IDS, ...INSPECTOR_TAB_SHORTCUTS])
   const entries = [
-    ...shortcutCatalog().filter((entry) => !workspaceIds.has(entry.id)),
+    ...shortcutCatalog().filter((entry) => !rangedIds.has(entry.id)),
     workspaceRange(),
+    ...inspectorTabRanges(),
     ...referenceShortcutCatalog()
   ]
   const byId = new Map(entries.map((entry) => [entry.id, entry]))

@@ -99,7 +99,7 @@ export function SessionChatColumn({
   chatSurfaceEpoch = 0,
   mcpServerNames,
   slashHandlers,
-  sideRailPad = false,
+  onShowInspector,
   showPageHeading = true,
   onActivate,
   approvalAutoFocus = true,
@@ -196,7 +196,8 @@ export function SessionChatColumn({
   chatSurfaceEpoch?: number
   mcpServerNames?: ReadonlyMap<string, string>
   slashHandlers?: import('./components/composer/slashCommandExecute').SlashClientHandlers
-  sideRailPad?: boolean
+  /** Set on the rightmost pane while the inspector is hidden. */
+  onShowInspector?: () => void
   showPageHeading?: boolean
   onActivate?: () => void
   approvalAutoFocus?: boolean
@@ -362,7 +363,6 @@ export function SessionChatColumn({
     metaStore,
     onCompactContext,
     slashHandlers,
-    sideRailPad,
     onFocus: onActivate,
     onEditLastUserMessage
   })
@@ -399,7 +399,7 @@ export function SessionChatColumn({
           instanceRunId={openInstanceRunId}
           instanceMeta={agentInstances?.[openInstanceRunId]}
           getController={getInstanceController}
-          sideRailPad={sideRailPad}
+          onShowInspector={onShowInspector}
           pendingGates={pendingGates}
           onOpenInstance={openInstancePane}
           onClose={closeInstancePane}
@@ -461,7 +461,7 @@ export function SessionChatColumn({
             onGoalActivate={runGoal.activate}
             onGoalDismiss={runGoal.dismiss}
             onStopLoop={runGoal.stopLoop}
-            sideRailPad={sideRailPad}
+            onShowInspector={onShowInspector}
             composer={
               <div
                 className={editing ? 'hidden' : undefined}

@@ -15,11 +15,8 @@ export function TaskHeader({
   editor,
   facts,
   actions,
-  headingRef,
-  railPad = false
+  headingRef
 }: {
-  /** Clear the panel rail that overlays the rightmost pane's edge. */
-  railPad?: boolean
   /** None for a task that has not started. */
   state?: TaskState | null
   stateLabel?: string
@@ -32,7 +29,7 @@ export function TaskHeader({
 }) {
   return (
     <header
-      className={cn('flex h-10 shrink-0 items-center gap-2.5 border-b border-border pl-4', railPad ? 'pr-10' : 'pr-2')}
+      className="flex h-10 shrink-0 items-center gap-2.5 border-b border-border pl-4 pr-2"
       data-task-header
     >
       {state ? (
@@ -101,13 +98,10 @@ export function RecordBody({
   scrollRef,
   contentRef,
   onScroll,
-  onActivate,
-  railPad = false
+  onActivate
 }: {
   children: ReactNode
   className?: string
-  /** Clear the panel rail that overlays the rightmost pane's edge. */
-  railPad?: boolean
   scrollRef?: Ref<HTMLDivElement>
   /** The column itself — what grows while a run streams. */
   contentRef?: Ref<HTMLDivElement>
@@ -121,10 +115,7 @@ export function RecordBody({
       onScroll={onScroll}
       onPointerDownCapture={onActivate}
       onFocus={onActivate}
-      className={cn(
-        '@container/record scroll-thin min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]',
-        railPad ? 'pr-10' : ''
-      )}
+      className="@container/record scroll-thin min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]"
       data-record-scroll
       data-transcript-scroll
     >

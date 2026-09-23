@@ -15,7 +15,7 @@ import { useEscapeToClose } from '@renderer/lib/hooks/useEscapeToClose'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand'
 import { Button, IconButton, MarkdownContent, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
-import { focusComposerMessage } from '@renderer/lib/shortcuts'
+import { focusComposerMessage, shortcutLabel } from '@renderer/lib/shortcuts'
 import type { ContextUsageState } from '@shared/utils/contextUsage'
 import { ContextMeter } from './composer/ContextMeter'
 import { useResolvedTurnUsage } from './ChatStreamLeaves'
@@ -177,8 +177,8 @@ type AgentInstancePaneProps = {
   instanceMeta?: AgentInstanceUiState
   /** Prefer workspace-manager controller so IPC is not dual-subscribed. */
   getController?: (runId: string, workspacePath: string) => ChatStreamController | null
-  /** Match parent chat stage inset when the floating side rail is visible. */
-  sideRailPad?: boolean
+  /** Set on the rightmost pane while the inspector is hidden: offer it back. */
+  onShowInspector?: () => void
   /** Parent-tracked approval/question gates (visible while nested in this pane). */
   pendingGates?: InlineInstanceGate[]
   onOpenInstance?: (runId: string) => void
@@ -220,7 +220,7 @@ export function AgentInstancePane({
   instanceRunId,
   instanceMeta,
   getController,
-  sideRailPad = false,
+  onShowInspector,
   pendingGates = [],
   onOpenInstance,
   onClose,
@@ -523,6 +523,15 @@ export function AgentInstancePane({
           <Button size="xs" variant="ghost" icon="stop" aria-label="Stop instance" onClick={onStopInstance}>
             Stop
           </Button>
+        ) : null}
+        {onShowInspector ? (
+          <IconButton
+            icon="inspector"
+            label={`Show inspector (${shortcutLabel('inspector')})`}
+            size="sm"
+            tone="muted"
+            onClick={onShowInspector}
+          />
         ) : null}
       </header>
       {loadError ? (

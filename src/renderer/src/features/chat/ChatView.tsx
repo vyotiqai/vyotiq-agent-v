@@ -7,12 +7,11 @@ import { ChangesPanel } from './components/ChangesPanel'
 import { ConfirmFileList } from './components/ConfirmFileList'
 import { PlanPanel } from './components/PlanPanel'
 import {
-  ChatSideRail,
-  RAIL_DETAIL_MAX,
-  type RailPanelState
-} from './components/ChatSideRail'
-import { DockTabBar, AGENT_DOCK_TAB, defaultDockTab } from './components/DockTabBar'
-import { isPlanDraftReady } from './utils/planDraft'
+  INSPECTOR_DETAIL_MAX,
+  INSPECTOR_TABS,
+  Inspector,
+  type InspectorTabState
+} from '@renderer/features/inspector/Inspector'
 import { Composer } from './components/composer'
 import { RunSessionProvider } from './RunSessionContext'
 import { AgentInstancePane } from './components/AgentInstancePane'
@@ -37,40 +36,36 @@ import type {
   AgentInteractionMode,
   ChatMessage,
   ProviderId,
-  PtySessionInfo,
   ToolApprovalDecision,
   WorkspaceEditorRecoveryLoadResult
 } from '@shared/ipc'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import { useChatErrorSurfaces } from './hooks/composerShared'
-import { Alert, PanelResizeHandle, pushToast } from '@renderer/lib/ui'
+import { Alert, Button, PanelResizeHandle, pushToast } from '@renderer/lib/ui'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { usePersistedBoolean } from '@renderer/lib/hooks/usePersistedBoolean'
 import { usePersistedNumber } from '@renderer/lib/hooks/usePersistedNumber'
-import { setDockImmersive } from '@renderer/lib/hooks/dockImmersiveStore'
 import {
-  BROWSER_PANEL_OPEN_KEY,
-  CHAT_RIGHT_PANEL,
   CHAT_RIGHT_PANEL_IDS,
-  DOCK_EXPANDED_KEY,
   DOCK_WIDTH_DEFAULT_PX,
   DOCK_WIDTH_KEY,
   DOCK_WIDTH_MAX_PX,
   DOCK_WIDTH_MIN_PX,
-  IMMERSIVE_TAB_KEY,
+  INSPECTOR_EXPANDED_KEY,
+  INSPECTOR_OPEN_KEY,
   RIGHT_PANEL_KEY,
   clampDockWidthPx,
   readSidebarWidthPxForCapacity,
   isChatRightPanelId,
-  type ChatRightPanelId,
-  type DockImmersiveTabId
+  type ChatRightPanelId
 } from '@renderer/lib/utils/layout'
 import { PANEL_SHORTCUT } from '@renderer/lib/utils/dockPanels'
 import { formatPathLabel, truncateMiddle } from '@shared/utils/displayPath'
 import { toWorkspaceRelPath } from '@shared/utils/workspacePath'
 import { cn } from '@renderer/lib/ui/cn'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
-import { matchShortcut, shouldBlockPanelShortcut } from '@renderer/lib/shortcuts'
+import { focusComposerMessage, matchShortcut, shouldBlockPanelShortcut } from '@renderer/lib/shortcuts'
+import { INSPECTOR_TAB_SHORTCUTS } from '@renderer/lib/shortcuts/bindings'
 import type { ChatItemsStore, ChatMetaStore } from './chatStores'
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import { ChatPaneHost, type PaneRenderOptions } from './ChatPaneHost'
@@ -384,20 +379,30 @@ const runGoal = useRunGoal({
         : undefined,
     [openInstancePane, workspacePath]
   )
-  const [activeRightPanel, setActiveRightPanel] = useState<ChatRightPanelId | null>(() => {
+  /**
+   * The inspector's tab. It outlives a hide, so Ctrl I brings back the tab you
+   * left; whether the inspector is on screen is its own switch.
+   */
+  const [inspectorTab, setInspectorTab] = useState<ChatRightPanelId>(() => {
     try {
       const raw = localStorage.getItem(RIGHT_PANEL_KEY)
-      // Restore the last panel, but never auto-open the Files panel (file
-      // explorer + editor) on startup — it only opens when the user opens it.
+      // Restore the last tab, but never land on Files (explorer + editor) at
+      // startup — it opens only when asked for.
       if (isChatRightPanelId(raw) && raw !== 'files') return raw
-      // Migrate legacy browser-open preference.
-      const legacy = localStorage.getItem(BROWSER_PANEL_OPEN_KEY)
-      if (legacy === '1' || legacy === 'true') return 'browser'
     } catch {
       /* ignore */
     }
-    return null
+    return 'changes'
   })
+  const [inspectorOpen, setInspectorOpen] = usePersistedBoolean(INSPECTOR_OPEN_KEY, true)
+  const [inspectorExpandedPref, setInspectorExpanded] = usePersistedBoolean(
+    INSPECTOR_EXPANDED_KEY,
+    false
+  )
+  /** Expanded, the inspector is the whole work area and the record steps aside. */
+  const inspectorExpanded = inspectorOpen && inspectorExpandedPref
+  /** The panel on screen, if any. */
+  const activeRightPanel: ChatRightPanelId | null = inspectorOpen ? inspectorTab : null
   const [requestedFilePath, setRequestedFilePath] =
     useState<WorkspaceFileOpenRequest | null>(null)
   const [pendingFilesRecovery, setPendingFilesRecovery] = useState<{
@@ -418,9 +423,7 @@ const runGoal = useRunGoal({
     (width: number) =>
       clampDockWidthPx(width, undefined, {
         paneCount,
-        sidebarWidthPx: readSidebarWidthPxForCapacity(),
-        // Dock width is only shown while open; rail is hidden then.
-        dockOpen: true
+        sidebarWidthPx: readSidebarWidthPxForCapacity()
       }),
     [paneCount]
   )
@@ -439,11 +442,7 @@ const runGoal = useRunGoal({
   const operationalBannerError = operationalError ?? null
   const surfaceKey = `${workspacePath ?? 'none'}:${chatSurfaceEpoch}`
   const [prNumber, setPrNumber] = useState<number | null>(null)
-  /** Accumulated dock title tabs (multi-panel strip). */
-  const [dockTabs, setDockTabs] = useState<ChatRightPanelId[]>(() =>
-    activeRightPanel ? [activeRightPanel] : []
-  )
-  /** Keep panels mounted (hidden) when switching so PTY/browser state survives. */
+  /** Visited panels stay mounted (hidden) when switching so PTY/browser state survives. */
   const [mountedPanels, setMountedPanels] = useState<ChatRightPanelId[]>(() =>
     activeRightPanel ? [activeRightPanel] : []
   )
@@ -452,38 +451,8 @@ const runGoal = useRunGoal({
     DOCK_WIDTH_DEFAULT_PX,
     clampDock
   )
-  /** Immersive unified tabs (Expand panel) — not a wider side dock. */
-  const [dockExpanded, setDockExpanded] = usePersistedBoolean(DOCK_EXPANDED_KEY, false)
-  const [immersiveTab, setImmersiveTabState] = useState<DockImmersiveTabId>(() => {
-    try {
-      const raw = localStorage.getItem(IMMERSIVE_TAB_KEY)
-      if (raw === 'agent' || isChatRightPanelId(raw)) return raw
-    } catch {
-      /* ignore */
-    }
-    return activeRightPanel ?? 'agent'
-  })
-  const setImmersiveTab = useCallback((next: DockImmersiveTabId | ((prev: DockImmersiveTabId) => DockImmersiveTabId)) => {
-    setImmersiveTabState((prev) => {
-      const resolved = typeof next === 'function' ? next(prev) : next
-      try {
-        localStorage.setItem(IMMERSIVE_TAB_KEY, resolved)
-      } catch {
-        /* ignore */
-      }
-      return resolved
-    })
-  }, [])
   const dockMaxPx = clampDock(DOCK_WIDTH_MAX_PX)
-  const dockImmersive = dockExpanded && dockTabs.length > 0
-
-  useEffect(() => {
-    setDockImmersive(dockImmersive)
-    return () => setDockImmersive(false)
-  }, [dockImmersive])
-
-  /** Session-scoped: skip auto-open after the user closes a panel until they open it again. */
-  const dismissedPanelsRef = useRef<Set<ChatRightPanelId>>(new Set())
+  const inspectorRef = useRef<HTMLElement | null>(null)
   const [gitRevision, bumpGitRevision] = useGitRevision(
     workspacePath,
     running,
@@ -514,11 +483,8 @@ const runGoal = useRunGoal({
         .catch(() => respond(requestId, false))
     })
   }, [flushDirtyFiles])
-  // Fetch git chrome only while a Changes surface is actually visible
-  // (side-dock panel or the immersive Changes tab) — never on mount.
-  const changesDockVisible = dockImmersive
-    ? immersiveTab === 'changes'
-    : activeRightPanel === 'changes'
+  // Fetch git chrome only while the Changes tab is on screen — never on mount.
+  const changesDockVisible = activeRightPanel === 'changes'
   const gitChrome = useGitChrome(
     workspacePath,
     gitRevision,
@@ -578,42 +544,35 @@ const runGoal = useRunGoal({
   const [changesScopeToken, setChangesScopeToken] = useState(0)
   const [changesPreferredPath, setChangesPreferredPath] = useState<string | null>(null)
 
-  const persistRightPanel = useCallback((next: ChatRightPanelId | null) => {
-    try {
-      if (next) localStorage.setItem(RIGHT_PANEL_KEY, next)
-      else localStorage.removeItem(RIGHT_PANEL_KEY)
-      localStorage.setItem(BROWSER_PANEL_OPEN_KEY, next === 'browser' ? '1' : '0')
-    } catch {
-      /* ignore */
-    }
-  }, [])
-
-  const closeDock = useCallback(() => {
-    setActiveRightPanel((current) => {
-      if (current) dismissedPanelsRef.current.add(current)
-      return null
-    })
-    setDockExpanded(false)
-    setImmersiveTab('agent')
-    // Keep mountedPanels/dockTabs so PTY/browser/plan state survives hide; clear
-    // only when the last tab is closed via closeDockTab.
-    persistRightPanel(null)
-  }, [persistRightPanel, setDockExpanded, setImmersiveTab])
+  /** Set when a hide takes focus with it; the instruction line gets it back. */
+  const refocusAfterHideRef = useRef(false)
+  const hideInspector = useCallback(() => {
+    refocusAfterHideRef.current = inspectorRef.current?.contains(document.activeElement) ?? false
+    setInspectorOpen(false)
+    setInspectorExpanded(false)
+  }, [setInspectorExpanded, setInspectorOpen])
+  useEffect(() => {
+    if (inspectorOpen || !refocusAfterHideRef.current) return
+    refocusAfterHideRef.current = false
+    focusComposerMessage()
+  }, [inspectorOpen])
 
   const setRightPanel = useCallback(
     (next: ChatRightPanelId | null) => {
       if (next === null) {
-        closeDock()
+        hideInspector()
         return
       }
-      dismissedPanelsRef.current.delete(next)
-      setActiveRightPanel(next)
-      setDockTabs((prev) => (prev.includes(next) ? prev : [...prev, next]))
+      setInspectorTab(next)
+      setInspectorOpen(true)
       setMountedPanels((prev) => (prev.includes(next) ? prev : [...prev, next]))
-      setImmersiveTab(next)
-      persistRightPanel(next)
+      try {
+        localStorage.setItem(RIGHT_PANEL_KEY, next)
+      } catch {
+        /* ignore */
+      }
     },
-    [closeDock, persistRightPanel, setImmersiveTab]
+    [hideInspector, setInspectorOpen]
   )
 
   const openWorkspaceFile = useCallback(
@@ -731,75 +690,70 @@ const runGoal = useRunGoal({
     onOpenChangesRequestHandled?.()
   }, [onOpenChangesRequestHandled, openChangesPanel, openChangesRequest])
 
-  const activeRightPanelRef = useRef(activeRightPanel)
-  activeRightPanelRef.current = activeRightPanel
-
-  const tryAutoOpenPanel = useCallback(
-    (panel: ChatRightPanelId) => {
-      if (dismissedPanelsRef.current.has(panel)) return
-      setDockTabs((prev) => (prev.includes(panel) ? prev : [...prev, panel]))
-      setMountedPanels((prev) => (prev.includes(panel) ? prev : [...prev, panel]))
-      const current = activeRightPanelRef.current
-      if (current === panel || isChatRightPanelId(current)) {
-        // Already open or another panel focused — add the tab but do not steal focus.
-        return
-      }
-      setActiveRightPanel(panel)
-      setImmersiveTab(panel)
-      persistRightPanel(panel)
-    },
-    [persistRightPanel, setImmersiveTab]
-  )
-
-  const closeDockTab = useCallback(
-    (id: ChatRightPanelId) => {
-      if (id === 'browser') {
-        void window.vyotiq.browserClose?.()
-      }
-      dismissedPanelsRef.current.add(id)
-      setDockTabs((prev) => {
-        const next = prev.filter((t) => t !== id)
-        setMountedPanels((mounted) => mounted.filter((t) => t !== id))
-        if (next.length === 0) {
-          setActiveRightPanel(null)
-          setDockExpanded(false)
-          setImmersiveTab('agent')
-          persistRightPanel(null)
-          return []
-        }
-        setActiveRightPanel((active) => {
-          if (active !== id) return active
-          const fallback = next[next.length - 1] ?? null
-          persistRightPanel(fallback)
-          return fallback
-        })
-        setImmersiveTab((tab) => {
-          if (tab !== id) return tab
-          return next[next.length - 1] ?? 'agent'
-        })
-        return next
-      })
-    },
-    [persistRightPanel, setDockExpanded, setImmersiveTab]
-  )
-
   const toggleRightPanel = useCallback(
     (panel: ChatRightPanelId) => {
+      // The chord for the tab on screen hides the inspector; any other shows
+      // the inspector on that tab.
       if (activeRightPanel === panel) {
-        closeDockTab(panel)
+        hideInspector()
         return
       }
       setRightPanel(panel)
     },
-    [activeRightPanel, closeDockTab, setRightPanel]
+    [activeRightPanel, hideInspector, setRightPanel]
   )
 
-  // Both panel entry points read the same table as the rail's tooltips, the
-  // Shortcuts settings page and the command palette, so a panel can never
-  // advertise a chord nothing answers (Files / Plan / Pull request did).
+  const toggleInspector = useCallback(() => {
+    if (inspectorOpen) hideInspector()
+    else setRightPanel(inspectorTab)
+  }, [hideInspector, inspectorOpen, inspectorTab, setRightPanel])
+
+  const toggleInspectorExpanded = useCallback(() => {
+    if (inspectorExpanded) {
+      setInspectorExpanded(false)
+      return
+    }
+    setRightPanel(inspectorTab)
+    setInspectorExpanded(true)
+  }, [inspectorExpanded, inspectorTab, setInspectorExpanded, setRightPanel])
+
+  // Expanding hides the record; focus that was in it moves to the tab strip
+  // rather than falling to <body>.
+  const wasExpandedRef = useRef(inspectorExpanded)
+  useEffect(() => {
+    const was = wasExpandedRef.current
+    wasExpandedRef.current = inspectorExpanded
+    if (!inspectorExpanded || was) return
+    const root = inspectorRef.current
+    if (!root || root.contains(document.activeElement)) return
+    root.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus()
+  }, [inspectorExpanded])
+
+  // Every entry point reads the same tables as the tab strip's titles, the
+  // Shortcuts settings page and the command palette, so nothing advertises a
+  // chord that nothing answers.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (shouldBlockPanelShortcut(e.target)) return
+      // Ctrl Shift I reaches the page re-dispatched on window by the main
+      // process; judge it by what has focus, like any other chord.
+      if (shouldBlockPanelShortcut(e.target === window ? document.activeElement : e.target)) return
+      if (matchShortcut(e, 'inspector')) {
+        e.preventDefault()
+        toggleInspector()
+        return
+      }
+      if (matchShortcut(e, 'inspectorExpand')) {
+        e.preventDefault()
+        toggleInspectorExpanded()
+        return
+      }
+      const tab = INSPECTOR_TAB_SHORTCUTS.findIndex((id) => matchShortcut(e, id))
+      const tabId = tab >= 0 ? INSPECTOR_TABS[tab] : undefined
+      if (tabId) {
+        e.preventDefault()
+        setRightPanel(tabId)
+        return
+      }
       for (const panel of CHAT_RIGHT_PANEL_IDS) {
         if (!matchShortcut(e, PANEL_SHORTCUT[panel])) continue
         e.preventDefault()
@@ -809,17 +763,25 @@ const runGoal = useRunGoal({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [toggleRightPanel])
+  }, [setRightPanel, toggleInspector, toggleInspectorExpanded, toggleRightPanel])
 
   useEffect(() => {
     const onCommand = (event: Event): void => {
       const id = (event as CustomEvent<{ id?: string }>).detail?.id
+      if (id === 'inspector') {
+        toggleInspector()
+        return
+      }
+      if (id === 'inspectorExpand') {
+        toggleInspectorExpanded()
+        return
+      }
       const panel = CHAT_RIGHT_PANEL_IDS.find((p) => PANEL_SHORTCUT[p] === id)
       if (panel) toggleRightPanel(panel)
     }
     window.addEventListener('vyotiq:command', onCommand)
     return () => window.removeEventListener('vyotiq:command', onCommand)
-  }, [toggleRightPanel])
+  }, [toggleInspector, toggleInspectorExpanded, toggleRightPanel])
 
   // Ctrl Shift F / the palette: open Files with its find-in-files box.
   const [findInFilesNonce, setFindInFilesNonce] = useState(0)
@@ -832,46 +794,6 @@ const runGoal = useRunGoal({
     window.addEventListener('vyotiq:find-in-files', onFindInFiles)
     return () => window.removeEventListener('vyotiq:find-in-files', onFindInFiles)
   }, [setRightPanel, workspacePath])
-
-  const toggleDockExpanded = useCallback(() => {
-    if (dockExpanded) {
-      // Collapse: if Agent is focused, return to full chat (no side dock); else side dock.
-      if (immersiveTab === 'agent') {
-        setActiveRightPanel(null)
-        persistRightPanel(null)
-      }
-      setDockExpanded(false)
-      return
-    }
-    if (activeRightPanel) {
-      setImmersiveTab(activeRightPanel)
-      setDockExpanded(true)
-      return
-    }
-    // Re-expand after collapsing from Agent while dock tabs remain mounted in state.
-    if (dockTabs.length > 0) {
-      setImmersiveTab((tab) => (tab === 'agent' ? 'agent' : tab))
-      setDockExpanded(true)
-    }
-  }, [
-    activeRightPanel,
-    dockExpanded,
-    dockTabs.length,
-    immersiveTab,
-    persistRightPanel,
-    setDockExpanded,
-    setImmersiveTab
-  ])
-
-  const selectImmersiveTab = useCallback(
-    (id: DockImmersiveTabId) => {
-      setImmersiveTab(id)
-      if (id !== 'agent') {
-        setRightPanel(id)
-      }
-    },
-    [setImmersiveTab, setRightPanel]
-  )
 
   useEffect(() => {
     onPaneCapacityChange?.({
@@ -892,59 +814,13 @@ const runGoal = useRunGoal({
     return () => window.removeEventListener('resize', onResize)
   }, [clampDock, setDockWidthPx])
 
-  // Drop immersive only when the dock has no panels left (not merely Agent-focused).
-  useEffect(() => {
-    if (!activeRightPanel && dockTabs.length === 0) setDockExpanded(false)
-  }, [activeRightPanel, dockTabs.length, setDockExpanded])
-
   useEffect(() => {
     setPrNumber(null)
-    dismissedPanelsRef.current.clear()
   }, [workspacePath])
 
   const handlePrMeta = useCallback((meta: { number: number; title: string } | null) => {
     setPrNumber(meta?.number ?? null)
   }, [])
-
-  // Auto-open plan panel when plan.md is ready in plan mode — including mid-run
-  // writes (poll) and when `running` flips. Terminal / Browser / Changes open
-  // only via side rail, dock tabs, ChangeSummary, or GitChrome — never on agent
-  // activity (agent terminal output stays in the transcript).
-  // While the plan dock is already mounted, PlanPanel owns the plan.md polling;
-  // this effect then stops so the artifact is never fetched twice per tick.
-  // A dismissed panel must also stop the poll — tryAutoOpenPanel would no-op,
-  // so the interval would fire forever without any possible effect. A terminal
-  // run can no longer produce a fresh plan.md — stop polling once it stops.
-  useEffect(() => {
-    if (
-      !workspacePath ||
-      !activeRunId ||
-      !running ||
-      agentMode !== 'plan' ||
-      mountedPanels.includes('plan') ||
-      dismissedPanelsRef.current.has('plan')
-    ) {
-      return
-    }
-    let cancelled = false
-    const check = (): void => {
-      void window.vyotiq.readRunArtifact?.({ workspacePath, runId: activeRunId, name: 'plan.md' }).then(
-        (res) => {
-          if (cancelled) return
-          const ready = Boolean(res.ok && isPlanDraftReady(res.data?.content))
-          if (ready) {
-            tryAutoOpenPanel('plan')
-          }
-        }
-      )
-    }
-    check()
-    const id = window.setInterval(check, 2000)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-  }, [workspacePath, activeRunId, agentMode, running, mountedPanels, tryAutoOpenPanel])
 
   // Prefetch recovery once so FilesPanel can hydrate from the same result when
   // it auto-opens, without issuing a second recovery load.
@@ -967,9 +843,9 @@ const runGoal = useRunGoal({
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [mountedPanels, workspacePath, tryAutoOpenPanel])
+  }, [mountedPanels, workspacePath])
 
-  // Live browser state for the watch affordances (banner + rail dot). The push
+  // Live browser state for the watch affordances (banner + tab dot). The push
   // channel updates regardless of whether the browser dock is mounted.
   const [browserLive, setBrowserLive] = useState<AgentBrowserState | null>(null)
   useEffect(() => {
@@ -1005,11 +881,7 @@ const runGoal = useRunGoal({
       ? pendingFilesRecovery.data
       : undefined
 
-  const visiblePanelId: ChatRightPanelId | null = dockImmersive
-    ? immersiveTab === 'agent'
-      ? null
-      : immersiveTab
-    : activeRightPanel
+  const visiblePanelId = activeRightPanel
 
   const browserBusy = Boolean(browserLive?.open && browserLive?.agentBusy)
   const browserWatchUrl = useMemo(() => {
@@ -1025,87 +897,69 @@ const runGoal = useRunGoal({
     (instancePaneController ? instanceWriteCheckpointFiles : writeCheckpointFiles)?.length ?? 0
 
   /**
-   * Live markers for the side rail. A pulse means the run is working in that
-   * panel right now; a count means something there is waiting for the reader.
-   * Every value is state this surface already holds, so a rail that is closed
-   * costs nothing extra — no panel is mounted and no IPC is issued for it.
+   * What each inspector tab says without being opened. A live dot means the
+   * run is working there right now; a count means something there waits for
+   * the reader. Every value is state this surface already holds, so an
+   * unopened tab costs nothing — no panel mounts and no IPC is issued for it.
    */
-  const railPanelState = useMemo<Partial<Record<ChatRightPanelId, RailPanelState>>>(() => {
-    const state: Partial<Record<ChatRightPanelId, RailPanelState>> = {}
-    const writing = liveActivity.writingPath
-    if (writing !== null) {
-      // A call whose arguments are still streaming is doing work it cannot
-      // name yet; the marker leads, the label catches up.
-      const target = writing
-        ? formatPathLabel(toWorkspaceRelPath(workspacePath, writing) ?? writing, RAIL_DETAIL_MAX)
-        : 'a file'
-      state.files = { active: true, detail: `Editing ${target}` }
-    }
-    const command = liveActivity.command
-    if (command !== null) {
-      state.terminal = {
-        active: true,
-        detail: `Running ${command ? truncateMiddle(command, RAIL_DETAIL_MAX) : 'a command'}`
-      }
-    }
-    if (browserBusy) {
-      state.browser = {
-        active: true,
-        detail: browserWatchUrl ? `Browsing ${browserWatchUrl}` : 'Agent is browsing'
-      }
-    }
+  const inspectorState = useMemo<Partial<Record<ChatRightPanelId, InspectorTabState>>>(() => {
+    const state: Partial<Record<ChatRightPanelId, InspectorTabState>> = {}
     if (pendingChangeCount > 0) {
       state.changes = {
         count: pendingChangeCount,
         detail: `${pendingChangeCount} ${pendingChangeCount === 1 ? 'file' : 'files'} to review`
       }
     }
-    return state
-  }, [browserBusy, browserWatchUrl, liveActivity, pendingChangeCount, workspacePath])
-
-  // The panel itself shows the live view when visible; the banner covers every
-  // other case (panel closed, another panel focused, immersive on another tab).
-  const showBrowserWatchBanner = browserBusy && visiblePanelId !== 'browser'
-  const browserWatchBanner = showBrowserWatchBanner ? (
-    <div
-      className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-accent-soft px-3 py-1.5 text-caption"
-      data-browser-watch-banner
-      role="status"
-    >
-      <span className="relative flex size-2 shrink-0" aria-hidden>
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
-        <span className="relative inline-flex size-2 rounded-full bg-accent" />
-      </span>
-      <span className="min-w-0 flex-1 truncate text-fg">
-        Agent is browsing
-        {browserWatchUrl ? <span className="text-muted"> · {browserWatchUrl}</span> : null}
-      </span>
-      <button
-        type="button"
-        className="app-region-no-drag shrink-0 rounded-md border border-border bg-surface px-2 py-0.5 text-2xs font-medium text-fg hover:bg-surface-2"
-        onClick={() => setRightPanel('browser')}
-      >
-        Watch live
-      </button>
-    </div>
-  ) : null
-
-  const terminalSessionBarHostRef = useRef<HTMLDivElement>(null)
-  const [terminalSessions, setTerminalSessions] = useState<PtySessionInfo[]>([])
-  const showTerminalSessionChrome =
-    mountedPanels.includes('terminal') && visiblePanelId === 'terminal'
-
-  const tabItems = useMemo(() => {
-    const items = dockTabs.map((id) => defaultDockTab(id, id === 'pr' ? prNumber : null))
-    if (visiblePanelId === 'terminal' && terminalSessions.length > 0) {
-      return items.filter((tab) => tab.id !== 'terminal')
+    const writing = liveActivity.writingPath
+    if (writing !== null) {
+      // A call whose arguments are still streaming is doing work it cannot
+      // name yet; the dot leads, the label catches up.
+      const target = writing
+        ? formatPathLabel(toWorkspaceRelPath(workspacePath, writing) ?? writing, INSPECTOR_DETAIL_MAX)
+        : 'a file'
+      state.files = { live: true, detail: `Editing ${target}` }
     }
-    return items
-  }, [dockTabs, prNumber, visiblePanelId, terminalSessions.length])
-  const immersiveTabItems = useMemo(() => [AGENT_DOCK_TAB, ...tabItems], [tabItems])
-  // Pad only while the floating side rail is mounted (hidden when a side dock
-  // is open or in immersive unified-tabs mode).
-  const agentSideRailPad = !dockImmersive && activeRightPanel == null
+    const command = liveActivity.command
+    if (command !== null) {
+      state.terminal = {
+        live: true,
+        detail: `Running ${command ? truncateMiddle(command, INSPECTOR_DETAIL_MAX) : 'a command'}`
+      }
+    }
+    if (browserBusy) {
+      state.browser = {
+        live: true,
+        detail: browserWatchUrl ? `Browsing ${browserWatchUrl}` : 'Agent is browsing'
+      }
+    }
+    if (prNumber !== null) state.pr = { detail: `Pull request #${prNumber}` }
+    if (liveActivity.planning) state.plan = { live: true, detail: 'Writing the plan' }
+    return state
+  }, [browserBusy, browserWatchUrl, liveActivity, pendingChangeCount, prNumber, workspacePath])
+
+  // The Browser tab's dot says it while the inspector is up; with it hidden,
+  // this row is the only sign the agent is driving a page.
+  const browserWatchBanner =
+    browserBusy && !inspectorOpen ? (
+      <div
+        className="flex h-8 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs"
+        data-browser-watch-banner
+        role="status"
+      >
+        <span aria-hidden="true" className="size-1.5 shrink-0 animate-live rounded-full bg-accent" />
+        <span className="min-w-0 flex-1 truncate text-muted">
+          <span className="text-fg">Agent is browsing</span>
+          {browserWatchUrl ? ` · ${browserWatchUrl}` : null}
+        </span>
+        <Button size="xs" variant="ghost" onClick={() => setRightPanel('browser')}>
+          Watch live
+        </Button>
+      </div>
+    ) : null
+
+  /** With the inspector hidden, the rightmost pane's header offers it back. */
+  const showInspector = useCallback(() => setRightPanel(inspectorTab), [inspectorTab, setRightPanel])
+  const onShowInspector = inspectorOpen ? undefined : showInspector
 
   const {
     editingUserMessageIndex,
@@ -1229,7 +1083,6 @@ const runGoal = useRunGoal({
     metaStore,
     onCompactContext,
     slashHandlers: mergedSlashHandlers,
-    sideRailPad: agentSideRailPad,
     onEditLastUserMessage
   })
 
@@ -1253,7 +1106,7 @@ const runGoal = useRunGoal({
           panes={multiPane.panes}
           focusedPaneId={multiPane.focusedPaneId}
           sizes={multiPane.sizes}
-          sideRailPad={agentSideRailPad}
+          onShowInspector={onShowInspector}
           onFocusPane={multiPane.onFocusPane}
           onClosePane={multiPane.onClosePane}
           onSizesChange={multiPane.onSizesChange}
@@ -1277,7 +1130,7 @@ const runGoal = useRunGoal({
           instanceMeta={agentInstances?.[viewingInstanceRunId]}
           getController={getInstanceController}
           onControllerChange={setInstancePaneController}
-          sideRailPad={agentSideRailPad}
+          onShowInspector={onShowInspector}
           pendingGates={pendingGates}
           onOpenInstance={openInstancePane}
           onClose={closeInstancePane}
@@ -1286,7 +1139,6 @@ const runGoal = useRunGoal({
         />
       ) : (
         <ChatTranscriptStage
-          sideRailPad={agentSideRailPad}
           pendingGates={pendingGates}
           onOpenInstance={openInstancePane}
           goal={runGoal.goal}
@@ -1335,7 +1187,6 @@ const runGoal = useRunGoal({
                 showThinking={showThinking}
                 mcpServerNames={mcpServerNames}
                 onOpenChanges={onOpenAgentChanges}
-                sideRailPad={agentSideRailPad}
                 editingUserMessageIndex={editingUserMessageIndex}
                 editComposer={editComposer}
                 onBeginEditUserMessage={onEditAndResend ? beginPromptEdit : undefined}
@@ -1366,8 +1217,6 @@ const runGoal = useRunGoal({
       )}
     </>
     )
-
-  const agentColumnBelowBanner = agentColumn
 
   const panelBodies = (
     <>
@@ -1416,8 +1265,7 @@ const runGoal = useRunGoal({
             workspacePath={workspacePath}
             activeRunId={activeRunId}
             visible={visiblePanelId === 'browser'}
-            onClose={() => closeDockTab('browser')}
-            onPopOut={() => setRightPanel(null)}
+            onPopOut={hideInspector}
           />
         </div>
       ) : null}
@@ -1437,8 +1285,6 @@ const runGoal = useRunGoal({
             <TerminalPanel
               workspacePath={workspacePath}
               visible={visiblePanelId === 'terminal'}
-              sessionBarHostRef={terminalSessionBarHostRef}
-              onSessionsChange={setTerminalSessions}
             />
           </Suspense>
         </div>
@@ -1503,7 +1349,7 @@ const runGoal = useRunGoal({
               gitRevision={gitRevision}
               onOpenFile={openWorkspaceFile}
               onPrMeta={handlePrMeta}
-              onUnlink={() => closeDockTab('pr')}
+              onUnlink={hideInspector}
               active={visiblePanelId === 'pr'}
             />
           </Suspense>
@@ -1533,107 +1379,54 @@ const runGoal = useRunGoal({
           />
         </div>
       ) : null}
-      {confirmDialog}
     </>
   )
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="relative flex min-h-0 min-w-0 flex-1" data-chat-surface>
-        {dockImmersive ? (
-          <div
-            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent"
-            data-dock-immersive
-            data-dock-expanded="1"
-          >
-            <DockTabBar
-              variant="immersive"
-              active={immersiveTab}
-              tabs={immersiveTabItems}
-              onSelect={selectImmersiveTab}
-              onCloseTab={closeDockTab}
-              onOpenPanel={(id) => setRightPanel(id)}
-              expanded
-              onToggleExpanded={toggleDockExpanded}
-              terminalSessionBarHostRef={
-                showTerminalSessionChrome ? terminalSessionBarHostRef : undefined
-              }
-            />
-            <div
-              id="dock-panel-agent"
-              role="tabpanel"
-              aria-label="Agent"
-              className={cn(
-                'min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
-                immersiveTab === 'agent' ? 'flex' : 'hidden'
-              )}
-              aria-hidden={immersiveTab !== 'agent'}
-              inert={immersiveTab !== 'agent' ? true : undefined}
-              data-immersive-agent
-            >
-              {browserWatchBanner}
-              {agentColumnBelowBanner}
-            </div>
-            {panelBodies}
-          </div>
-        ) : (
+        <div
+          className={inspectorExpanded ? 'hidden' : 'flex min-h-0 min-w-0 flex-1 flex-col'}
+          aria-hidden={inspectorExpanded || undefined}
+          inert={inspectorExpanded ? true : undefined}
+          data-agent-column
+        >
+          {browserWatchBanner}
+          {agentColumn}
+        </div>
+        {inspectorOpen ? (
           <>
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              {browserWatchBanner}
-              {agentColumnBelowBanner}
-            </div>
-            {activeRightPanel ? (
-              <>
-                <PanelResizeHandle
-                  label="Resize panel"
-                  value={dockWidthPx}
-                  min={DOCK_WIDTH_MIN_PX}
-                  max={dockMaxPx}
-                  edge="start"
-                  onChange={(next) => {
-                    setDockWidthPx(next)
-                  }}
-                />
-                <aside
-                  className={CHAT_RIGHT_PANEL}
-                  style={{ width: dockWidthPx }}
-                  data-right-dock
-                  data-dock-expanded="0"
-                >
-                  <DockTabBar
-                    active={activeRightPanel}
-                    tabs={tabItems}
-                    onSelect={(id) => {
-                      if (id !== 'agent') setRightPanel(id)
-                    }}
-                    onCloseTab={closeDockTab}
-                    onOpenPanel={(id) => setRightPanel(id)}
-                    expanded={false}
-                    onToggleExpanded={toggleDockExpanded}
-                    terminalSessionBarHostRef={
-                      showTerminalSessionChrome ? terminalSessionBarHostRef : undefined
-                    }
-                  />
-                  {panelBodies}
-                </aside>
-              </>
-            ) : null}
-            {activeRightPanel === null ? (
-              <ChatSideRail
-                activePanel={null}
-                onSelectPanel={toggleRightPanel}
-                onExpandPanels={
-                  dockTabs.length > 0 ? () => toggleDockExpanded() : undefined
-                }
-                workspacePath={workspacePath}
-                runId={activeRunId}
-                running={running}
-                panelState={railPanelState}
+            {inspectorExpanded ? null : (
+              <PanelResizeHandle
+                label="Resize inspector"
+                value={dockWidthPx}
+                min={DOCK_WIDTH_MIN_PX}
+                max={dockMaxPx}
+                edge="start"
+                onChange={(next) => {
+                  setDockWidthPx(next)
+                }}
+                // One pixel in the row: the handle is the hairline between the
+                // record and the inspector, so both panes' rules meet it.
+                className="-mx-[2.5px]"
               />
-            ) : null}
+            )}
+            <Inspector
+              sectionRef={inspectorRef}
+              tab={inspectorTab}
+              onSelect={setRightPanel}
+              state={inspectorState}
+              expanded={inspectorExpanded}
+              onToggleExpanded={toggleInspectorExpanded}
+              onHide={hideInspector}
+              width={dockWidthPx}
+            >
+              {panelBodies}
+            </Inspector>
           </>
-        )}
+        ) : null}
       </div>
+      {confirmDialog}
     </div>
   )
 }

@@ -58,7 +58,7 @@ test('follow mode opens the file the run writes', async () => {
   const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) await expand.click()
 
-  await window.getByRole('button', { name: /Show files panel/i }).click()
+  await window.getByRole('tablist', { name: 'Inspector' }).getByRole('tab', { name: /^Files/ }).click()
   await expect(window.getByRole('tabpanel', { name: 'Files' })).toBeVisible({ timeout: 20_000 })
 
   const follow = window.getByRole('button', { name: 'Follow agent edits' })

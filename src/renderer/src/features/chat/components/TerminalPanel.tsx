@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { cn } from '@renderer/lib/ui'
+import { matchShortcut } from '@renderer/lib/shortcuts'
+import { INSPECTOR_TAB_SHORTCUTS } from '@renderer/lib/shortcuts/bindings'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { CHAT_RIGHT_PANEL_BODY } from '@renderer/lib/utils/layout'
 import type { PtySessionInfo } from '@shared/ipc'
@@ -109,6 +110,16 @@ function PtySessionView({
     // instead of sending ^C, and Ctrl/Cmd+V pastes the clipboard, like VS Code /
     // Windows Terminal.
     term.attachCustomKeyEventHandler((event) => {
+      // Ctrl I would send a Tab and Alt 1–6 an escape sequence to the shell
+      // while the window handler also hid the inspector or switched its tab.
+      if (
+        event.type === 'keydown' &&
+        (matchShortcut(event, 'inspector') ||
+          matchShortcut(event, 'inspectorExpand') ||
+          INSPECTOR_TAB_SHORTCUTS.some((id) => matchShortcut(event, id)))
+      ) {
+        return false
+      }
       if (
         event.type === 'keydown' &&
         (event.ctrlKey || event.metaKey) &&
@@ -272,16 +283,13 @@ export function TerminalPanel({
   className,
   workspacePath,
   visible = true,
-  sessionBarHostRef,
   onSessionsChange,
   onActiveSessionChange
 }: {
   className?: string
   workspacePath?: string | null
-  /** False while the terminal dock tab is CSS-hidden. */
+  /** False while the terminal tab is CSS-hidden. */
   visible?: boolean
-  /** When set, session tabs render in the dock tab bar instead of inside the panel. */
-  sessionBarHostRef?: React.RefObject<HTMLElement | null>
   onSessionsChange?: (sessions: PtySessionInfo[]) => void
   onActiveSessionChange?: (session: PtySessionInfo | null) => void
 }) {
@@ -461,31 +469,6 @@ export function TerminalPanel({
     }
   }, [refreshList])
 
-  const [sessionBarHost, setSessionBarHost] = useState<HTMLElement | null>(null)
-  useLayoutEffect(() => {
-    if (!sessionBarHostRef || !visible) {
-      setSessionBarHost(null)
-      return
-    }
-    let cancelled = false
-    const attach = (): void => {
-      if (cancelled) return
-      const host = sessionBarHostRef.current
-      if (host) {
-        setSessionBarHost(host)
-        return
-      }
-      requestAnimationFrame(attach)
-    }
-    attach()
-    return () => {
-      cancelled = true
-    }
-  }, [sessionBarHostRef, visible, sessions.length])
-
-  const useExternalSessionBar = Boolean(sessionBarHostRef)
-  const showExternalSessionBar = useExternalSessionBar && visible && sessionBarHost != null
-
   const sessionBar = (
     <TerminalSessionBar
       sessions={sessions}
@@ -518,15 +501,10 @@ export function TerminalPanel({
         Interactive terminal. Screen reader users can press Control plus backtick to review terminal
         output in a text buffer.
       </p>
-      {showExternalSessionBar
-        ? createPortal(sessionBar, sessionBarHost)
-        : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {!useExternalSessionBar ? (
-          <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border/60 bg-bg px-1 py-0.5">
-            {sessionBar}
-          </div>
-        ) : null}
+        <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border/60 bg-bg px-1 py-0.5">
+          {sessionBar}
+        </div>
         {error ? (
           <p
             className="m-0 shrink-0 border-b border-border/60 px-3 py-1 text-caption text-danger"

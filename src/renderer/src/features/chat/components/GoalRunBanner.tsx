@@ -22,8 +22,7 @@ export function GoalRunBanner({
   onActivate,
   onDismiss,
   onStopLoop,
-  onStopRun,
-  railPad = false
+  onStopRun
 }: {
   goal: RunGoal | null
   loop: RunLoop | null
@@ -35,8 +34,6 @@ export function GoalRunBanner({
   onDismiss?: () => void | Promise<boolean>
   onStopLoop: () => void | Promise<boolean>
   onStopRun?: () => void
-  /** Clear the panel rail that overlays the rightmost pane's edge. */
-  railPad?: boolean
 }) {
   const [now, setNow] = useState(() => Date.now())
   const armed = loop?.status === 'armed'
@@ -60,10 +57,7 @@ export function GoalRunBanner({
       data-goal-status={goal.status}
       role="region"
       aria-label={proposed ? 'Suggested goal' : paused ? 'Goal paused' : 'Active goal'}
-      className={cn(
-        'flex h-9 shrink-0 items-center gap-2.5 border-t border-border bg-bg pl-4 text-xs',
-        railPad ? 'pr-10' : 'pr-4'
-      )}
+      className="flex h-9 shrink-0 items-center gap-2.5 border-t border-border bg-bg px-4 text-xs"
     >
       <Icon
         name="flag"

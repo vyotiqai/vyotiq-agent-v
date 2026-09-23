@@ -7,19 +7,17 @@ import { ChatView } from '@renderer/features/chat/ChatView'
 import { emptySecretStatus } from '@shared/ipc'
 import { TitleBar } from '@renderer/app/TitleBar'
 import { BreakpointProvider } from '@renderer/lib/context/BreakpointProvider'
-import { CHAT_SIDE_RAIL_TOP_INSET, clampDockWidthPx, DOCK_WIDTH_DEFAULT_PX, readSidebarWidthPxForCapacity, TITLE_BAR_HEIGHT_PX } from '@renderer/lib/utils/layout'
-import { resetDockImmersiveStore } from '@renderer/lib/hooks/dockImmersiveStore'
+import { clampDockWidthPx, DOCK_WIDTH_DEFAULT_PX, readSidebarWidthPxForCapacity } from '@renderer/lib/utils/layout'
 import { minimalReadyPlanMarkdown } from '@renderer/features/chat/utils/planDraft'
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
-  resetDockImmersiveStore()
   try {
     localStorage.removeItem('vyotiq.browserPanelOpen')
     localStorage.removeItem('vyotiq.rightPanel')
     localStorage.removeItem('vyotiq.browserRecents')
-    localStorage.removeItem('vyotiq.dockExpanded')
-    localStorage.removeItem('vyotiq.immersiveTab')
+    localStorage.removeItem('vyotiq.inspectorOpen')
+    localStorage.removeItem('vyotiq.inspectorExpanded')
     localStorage.removeItem('vyotiq.dockWidth')
     localStorage.removeItem('vyotiq.sidebarWidth')
   } catch {
@@ -145,38 +143,47 @@ async function waitForPanel(selector: string): Promise<void> {
   await waitFor(() => expect(document.querySelector(selector)).toBeTruthy())
 }
 
+/** A tab in the inspector's strip — scoped, since panels have tabs of their own. */
+function inspectorTab(name: RegExp): HTMLElement {
+  return within(screen.getByRole('tablist', { name: 'Inspector' })).getByRole('tab', { name })
+}
+
+/** The inspector is up by default; some cases start with it hidden. */
+function startHidden(): void {
+  localStorage.setItem('vyotiq.inspectorOpen', '0')
+}
+
+const agentColumn = (): HTMLElement => document.querySelector('[data-agent-column]') as HTMLElement
+
 describe('ChatView composer placement', () => {
-  it('shows a side rail that opens the browser panel', async () => {
+  it('opens the browser panel from the inspector tab strip', async () => {
     render(<ChatView {...baseProps} items={[]} />)
 
-    expect(document.querySelector('[data-chat-side-rail]')).toBeTruthy()
+    // Up by default, on Changes; nothing else mounts until it is asked for.
+    expect(document.querySelector('[data-inspector]')).toBeTruthy()
+    expect(inspectorTab(/^Changes/).getAttribute('aria-selected')).toBe('true')
     expect(document.querySelector('[data-agent-browser-panel]')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: /Show browser panel/i }))
+    fireEvent.click(inspectorTab(/^Browser/))
     await waitForPanel('[data-agent-browser-panel]')
     expect(document.querySelector('[data-agent-browser-viewport]')).toBeTruthy()
-    // Dock open ? side rail hidden; dock tabs own navigation.
-    expect(document.querySelector('[data-chat-side-rail]')).toBeNull()
     expect(screen.getByText('No page loaded')).toBeTruthy()
     expect(
       screen.getByText(/Enter a URL above, or ask the agent to open a page/i)
     ).toBeTruthy()
-    const browserPanel = document.querySelector('[data-agent-browser-panel]')
-    expect(
-      browserPanel?.querySelector('[aria-label="Hide browser panel"]')
-    ).toBeNull()
-    expect(screen.getByRole('button', { name: /Close Browser/i })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Close panel/i })).toBeNull()
+    // No floating rail and no per-tab close: the strip is fixed.
+    expect(document.querySelector('[data-chat-side-rail]')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Close Browser/i })).toBeNull()
     expect(screen.getByPlaceholderText('Search or enter URL')).toBeTruthy()
   })
 
-  it('shows the real Files panel from the Chat side rail', async () => {
+  it('shows the real Files panel from its tab', async () => {
     render(<ChatView {...baseProps} items={[]} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /Show files panel/i }))
+    fireEvent.click(inspectorTab(/^Files/))
     expect(screen.getByRole('tabpanel', { name: 'Files' })).toBeTruthy()
     expect(await screen.findByTitle('/ws', {}, { timeout: 5000 })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Show files panel/i })).toBeNull()
+    expect(inspectorTab(/^Files/).getAttribute('aria-selected')).toBe('true')
   })
 
   it('hands prefetched recovery to FilesPanel without loading recovery twice', async () => {
@@ -275,7 +282,7 @@ describe('ChatView composer placement', () => {
 
     expect(workspaceEditorRecoveryLoad).toHaveBeenCalledTimes(1)
     vi.useRealTimers()
-    fireEvent.click(screen.getByRole('button', { name: /Show files panel/i }))
+    fireEvent.click(inspectorTab(/^Files/))
     expect(await screen.findByRole('tab', { name: /README\.md/i })).toBeTruthy()
     expect(workspaceFileList).toHaveBeenCalledTimes(1)
     expect(workspaceEditorRecoveryLoad).toHaveBeenCalledTimes(1)
@@ -291,7 +298,8 @@ describe('ChatView composer placement', () => {
 
   // Files / Plan / Pull request shipped bindings that the Shortcuts settings
   // page and the command palette both advertised while nothing listened for
-  // them. Every panel the dock can open answers its own chord.
+  // them. Every panel answers its own chord: it shows the inspector on that
+  // tab, and the same chord again hides the inspector.
   it.each([
     ['files', { key: 'e', ctrlKey: true, shiftKey: true }],
     ['plan', { key: 'd', ctrlKey: true, shiftKey: true }],
@@ -299,16 +307,53 @@ describe('ChatView composer placement', () => {
     ['changes', { key: 'e', ctrlKey: true }],
     ['browser', { key: 'b', ctrlKey: true, shiftKey: true }]
   ] as const)('toggles the %s panel with its advertised chord', async (panel, chord) => {
+    startHidden()
     render(<ChatView {...baseProps} items={[]} />)
+    expect(document.querySelector('[data-inspector]')).toBeNull()
     fireEvent.keyDown(window, chord)
     await waitFor(() => {
       expect(document.getElementById(`dock-panel-${panel}`)).toBeTruthy()
     })
-    // Same chord again closes it — the rail's tooltip calls it a toggle.
     fireEvent.keyDown(window, chord)
     await waitFor(() => {
-      expect(document.getElementById(`dock-panel-${panel}`)).toBeNull()
+      expect(document.querySelector('[data-inspector]')).toBeNull()
     })
+  })
+
+  it('switches tabs with Alt 1–6, by the physical key too (Option+digit types a symbol on macOS)', async () => {
+    render(<ChatView {...baseProps} items={[]} />)
+    fireEvent.keyDown(window, { key: '3', code: 'Digit3', altKey: true })
+    expect(inspectorTab(/^Terminal/).getAttribute('aria-selected')).toBe('true')
+    await waitForPanel('[data-terminal-panel]')
+    fireEvent.keyDown(window, { key: '¢', code: 'Digit4', altKey: true })
+    expect(inspectorTab(/^Browser/).getAttribute('aria-selected')).toBe('true')
+    fireEvent.keyDown(window, { key: '6', code: 'Digit6', altKey: true })
+    expect(inspectorTab(/^Plan/).getAttribute('aria-selected')).toBe('true')
+    // Ctrl or Shift with the digit is someone else's chord.
+    fireEvent.keyDown(window, { key: '1', code: 'Digit1', altKey: true, ctrlKey: true })
+    expect(inspectorTab(/^Plan/).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('hides and shows the inspector with Ctrl I, on the tab it had', async () => {
+    render(<ChatView {...baseProps} items={[]} />)
+    fireEvent.click(inspectorTab(/^Terminal/))
+    await waitForPanel('[data-terminal-panel]')
+
+    fireEvent.keyDown(window, { key: 'i', ctrlKey: true })
+    expect(document.querySelector('[data-inspector]')).toBeNull()
+    expect(localStorage.getItem('vyotiq.inspectorOpen')).toBe('0')
+
+    fireEvent.keyDown(window, { key: 'i', ctrlKey: true })
+    expect(inspectorTab(/^Terminal/).getAttribute('aria-selected')).toBe('true')
+    await waitForPanel('[data-terminal-panel]')
+  })
+
+  it('answers the palette for hide / show and expand', () => {
+    render(<ChatView {...baseProps} items={[]} />)
+    fireEvent(window, new CustomEvent('vyotiq:command', { detail: { id: 'inspectorExpand' } }))
+    expect(document.querySelector('[data-right-dock]')?.getAttribute('data-dock-expanded')).toBe('1')
+    fireEvent(window, new CustomEvent('vyotiq:command', { detail: { id: 'inspector' } }))
+    expect(document.querySelector('[data-inspector]')).toBeNull()
   })
 
   it('opens a panel from a command palette entry', async () => {
@@ -322,43 +367,40 @@ describe('ChatView composer placement', () => {
     })
   })
 
-  it('closes one dock tab without clearing the remaining tabs', async () => {
+  it('hides from its own button and comes back on the same tab', async () => {
     render(<ChatView {...baseProps} items={[]} />)
-    fireEvent.click(screen.getByRole('button', { name: /Show terminal panel/i }))
-    fireEvent.click(screen.getByRole('button', { name: /Show changes panel/i }))
+    fireEvent.click(inspectorTab(/^Terminal/))
     await waitFor(() => {
       expect(document.querySelector('[data-terminal-panel]')).toBeTruthy()
     })
-    await waitForPanel('[data-changes-panel]')
-    expect(screen.getByRole('tab', { name: /^Terminal$/i })).toBeTruthy()
-    expect(screen.getByRole('tab', { name: /^Changes$/i })).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: /Close Changes/i }))
-    expect(document.querySelector('[data-right-dock]')).toBeTruthy()
-    expect(document.querySelector('[data-changes-panel]')).toBeNull()
-    expect(document.querySelector('[data-terminal-panel]')).toBeTruthy()
-    expect(screen.getByRole('tab', { name: /^Terminal$/i })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Hide inspector (Ctrl+I)' }))
+    expect(document.querySelector('[data-inspector]')).toBeNull()
+    // The record keeps the whole width; nothing is left floating over it.
+    expect(agentColumn().className).toMatch(/\bflex-1\b/)
+    expect(document.querySelector('[data-chat-side-rail]')).toBeNull()
+
+    fireEvent.keyDown(window, { key: 'i', ctrlKey: true })
+    expect(inspectorTab(/^Terminal/).getAttribute('aria-selected')).toBe('true')
   })
 
-  it('switches docked panels from the side rail', async () => {
+  it('switches tabs while keeping visited panels mounted', async () => {
     render(<ChatView {...baseProps} items={[]} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /Show terminal panel/i }))
+    fireEvent.click(inspectorTab(/^Terminal/))
     await waitFor(() => {
       expect(document.querySelector('[data-terminal-panel]')).toBeTruthy()
     })
-    expect(document.querySelector('[data-chat-side-rail]')).toBeNull()
     expect(await screen.findByText('No terminal')).toBeTruthy()
-    // Session strip: New terminal only until a session exists; expand lives on DockTabBar.
+    // Session strip: New terminal only until a session exists.
     expect(screen.getByRole('button', { name: /New terminal/i })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /terminal list/i })).toBeNull()
     expect(screen.queryByRole('button', { name: /Maximize terminal/i })).toBeNull()
     expect(screen.queryByText(/Agent commands/i)).toBeNull()
     expect(screen.queryByRole('button', { name: /Split terminal/i })).toBeNull()
-    expect(screen.getByRole('button', { name: /Expand panel/i })).toBeTruthy()
-    expect(document.querySelector('[data-dock-quick-launch]')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Expand to full width (Ctrl+Shift+I)' })).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: /Show changes panel/i }))
+    fireEvent.click(inspectorTab(/^Changes/))
     await waitForPanel('[data-changes-panel]')
     // Keep-alive: prior panels stay mounted but hidden.
     expect(
@@ -368,13 +410,14 @@ describe('ChatView composer placement', () => {
       document.querySelector('[data-changes-panel]')?.parentElement?.className
     ).toMatch(/\bflex\b/)
     expect(await screen.findByText('Not a git repository', {}, { timeout: 5000 })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Show files panel/i })).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: /Close Changes/i }))
-    // Closing Changes via the tab leaves Terminal mounted.
-    expect(document.querySelector('[data-changes-panel]')).toBeNull()
-    expect(document.querySelector('[data-terminal-panel]')).toBeTruthy()
-    expect(document.querySelector('[data-right-dock]')).toBeTruthy()
+    fireEvent.click(inspectorTab(/^Terminal/))
+    expect(
+      document.querySelector('[data-terminal-panel]')?.parentElement?.className
+    ).toMatch(/\bflex\b/)
+    expect(
+      document.querySelector('[data-changes-panel]')?.parentElement?.className
+    ).toMatch(/\bhidden\b/)
   })
 
   it('does not auto-open Browser on IPC rising edge', async () => {
@@ -400,12 +443,11 @@ describe('ChatView composer placement', () => {
 
     render(<ChatView {...baseProps} items={[]} />)
     expect(document.querySelector('[data-agent-browser-panel]')).toBeNull()
-    expect(document.querySelector('[data-chat-side-rail]')).toBeTruthy()
 
     browserHandler?.({ open: true, url: 'https://example.com', title: 'Example' })
     await Promise.resolve()
     expect(document.querySelector('[data-agent-browser-panel]')).toBeNull()
-    expect(document.querySelector('[data-chat-side-rail]')).toBeTruthy()
+    expect(inspectorTab(/^Changes/).getAttribute('aria-selected')).toBe('true')
   })
 
   it('does not auto-open Browser when Terminal is already open', async () => {
@@ -441,16 +483,27 @@ describe('ChatView composer placement', () => {
     expect(document.querySelector('[data-terminal-panel]')).toBeTruthy()
     expect(document.querySelector('[data-agent-browser-panel]')).toBeNull()
   })
-  it('restores the Plan panel from localStorage on mount', async () => {
+  it('restores the Plan tab from localStorage on mount', async () => {
     localStorage.setItem('vyotiq.rightPanel', 'plan')
     render(<ChatView {...baseProps} items={[]} />)
 
     await waitForPanel('[data-plan-panel]')
-    expect(document.querySelector('[data-chat-side-rail]')).toBeNull()
-    // Scope to the dock tablist: the PlanPanel subtab is also role=tab "Plan".
-    const dockTablist = document.querySelector('[data-dock-panel-tablist]') as HTMLElement
-    expect(within(dockTablist).getByRole('tab', { name: /^Plan$/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Close Plan/i })).toBeTruthy()
+    expect(inspectorTab(/^Plan/).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('never lands on Files at startup — it opens only when asked for', () => {
+    localStorage.setItem('vyotiq.rightPanel', 'files')
+    render(<ChatView {...baseProps} items={[]} />)
+    expect(inspectorTab(/^Changes/).getAttribute('aria-selected')).toBe('true')
+    expect(document.getElementById('dock-panel-files')).toBeNull()
+  })
+
+  it('remembers a hidden inspector across a remount', () => {
+    const first = render(<ChatView {...baseProps} items={[]} />)
+    fireEvent.keyDown(window, { key: 'i', ctrlKey: true })
+    first.unmount()
+    render(<ChatView {...baseProps} items={[]} />)
+    expect(document.querySelector('[data-inspector]')).toBeNull()
   })
 
   it('does not auto-open Browser over a restored Plan panel', async () => {
@@ -506,10 +559,12 @@ describe('ChatView composer placement', () => {
       />
     )
     expect(document.querySelector('[data-terminal-panel]')).toBeNull()
-    expect(document.querySelector('[data-chat-side-rail]')).toBeTruthy()
+    // The Terminal tab says the command is running; the reader chooses to look.
+    expect(inspectorTab(/^Terminal/).textContent).toContain('working now')
+    expect(inspectorTab(/^Changes/).getAttribute('aria-selected')).toBe('true')
   })
 
-  it('does not auto-open Changes for unresolved writes or dirty git', async () => {
+  it('does not switch to Changes for unresolved writes or dirty git', async () => {
     Object.defineProperty(window, 'vyotiq', {
       configurable: true,
       writable: true,
@@ -548,24 +603,27 @@ describe('ChatView composer placement', () => {
       }
     })
 
+    localStorage.setItem('vyotiq.rightPanel', 'terminal')
     render(
       <ChatView
         {...baseProps}
         canUndoWrites
         writeResolvablePaths={new Set(['a.ts'])}
+        writeCheckpointFiles={[{ path: 'a.ts', action: 'modified' }]}
       />
     )
     await Promise.resolve()
     await Promise.resolve()
     expect(document.querySelector('[data-changes-panel]')).toBeNull()
-    expect(document.querySelector('[data-chat-side-rail]')).toBeTruthy()
+    expect(inspectorTab(/^Terminal/).getAttribute('aria-selected')).toBe('true')
+    // The count says something waits there.
+    expect(inspectorTab(/^Changes/).textContent).toBe('Changes1')
 
-    fireEvent.click(screen.getByRole('button', { name: /Show terminal panel/i }))
-    fireEvent.click(screen.getByRole('button', { name: /Show changes panel/i }))
+    fireEvent.click(inspectorTab(/^Changes/))
     await waitForPanel('[data-changes-panel]')
   })
 
-  it('does not fetch git chrome until the Changes dock is visible', async () => {
+  it('does not fetch git chrome until the Changes tab is on screen', async () => {
     const gitStatus = vi.fn().mockResolvedValue({ ok: true, data: { kind: 'not_repo' } })
     Object.defineProperty(window, 'vyotiq', {
       configurable: true,
@@ -575,32 +633,34 @@ describe('ChatView composer placement', () => {
         gitStatus
       }
     })
+    localStorage.setItem('vyotiq.rightPanel', 'terminal')
     render(<ChatView {...baseProps} items={[]} />)
     await act(async () => {
       await Promise.resolve()
     })
     expect(gitStatus).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: /Show changes panel/i }))
+    fireEvent.click(inspectorTab(/^Changes/))
     await waitForPanel('[data-changes-panel]')
     await waitFor(() => {
       expect(gitStatus).toHaveBeenCalled()
     })
   })
 
-  it('auto-opens Plan when plan.md is ready in plan mode', async () => {
+  it('never switches tabs on its own when a plan is ready — and never polls plan.md for it', async () => {
+    const readRunArtifact = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        exists: true,
+        content: minimalReadyPlanMarkdown(),
+        path: '/ws/.vyotiq/runs/run-1/plan.md'
+      }
+    })
     Object.defineProperty(window, 'vyotiq', {
       configurable: true,
       writable: true,
       value: {
         ...(window.vyotiq as object),
-        readRunArtifact: vi.fn().mockResolvedValue({
-          ok: true,
-          data: {
-            exists: true,
-            content: minimalReadyPlanMarkdown(),
-            path: '/ws/.vyotiq/runs/run-1/plan.md'
-          }
-        })
+        readRunArtifact
       }
     })
 
@@ -613,69 +673,15 @@ describe('ChatView composer placement', () => {
         items={[]}
       />
     )
-
-    await waitForPanel('[data-plan-panel]')
-    // Scope to the dock tablist: the PlanPanel subtab is also role=tab "Plan".
-    const autoOpenTablist = document.querySelector('[data-dock-panel-tablist]') as HTMLElement
-    expect(within(autoOpenTablist).getByRole('tab', { name: /^Plan$/i })).toBeTruthy()
-  })
-
-  it('stops polling plan.md after the Plan panel is dismissed', async () => {
-    vi.useFakeTimers()
-    try {
-      const readRunArtifact = vi.fn().mockResolvedValue({
-        ok: true,
-        data: {
-          exists: true,
-          content: minimalReadyPlanMarkdown(),
-          path: '/ws/.vyotiq/runs/run-1/plan.md'
-        }
-      })
-      Object.defineProperty(window, 'vyotiq', {
-        configurable: true,
-        writable: true,
-        value: {
-          ...(window.vyotiq as object),
-          readRunArtifact
-        }
-      })
-
-      render(
-        <ChatView {...baseProps} agentMode="plan" activeRunId="run-1" running items={[]} />
-      )
-      await act(async () => {
-        await Promise.resolve()
-        await Promise.resolve()
-      })
-      // Scope to the dock tablist: the PlanPanel subtab is also role=tab "Plan".
-      const dockTablist = document.querySelector('[data-dock-panel-tablist]') as HTMLElement
-      expect(within(dockTablist).getByRole('tab', { name: /^Plan$/i })).toBeTruthy()
-
-      // While mounted, plan.md polls continue (PlanPanel owns the cadence).
-      const planCalls = () =>
-        readRunArtifact.mock.calls.filter(
-          (c) => (c[0] as { name?: string } | undefined)?.name === 'plan.md'
-        ).length
-      await act(async () => {
-        vi.advanceTimersByTime(2500)
-        await Promise.resolve()
-      })
-      expect(planCalls()).toBeGreaterThan(0)
-
-      fireEvent.click(screen.getByRole('button', { name: /Close Plan/i }))
-
-      // After dismissal the auto-open poll must stop entirely — no interval
-      // may fire without any possible effect.
-      readRunArtifact.mockClear()
-      await act(async () => {
-        vi.advanceTimersByTime(4500)
-        await Promise.resolve()
-      })
-      expect(planCalls()).toBe(0)
-      expect(screen.queryByRole('tab', { name: /^Plan$/i })).toBeNull()
-    } finally {
-      vi.useRealTimers()
-    }
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(inspectorTab(/^Changes/).getAttribute('aria-selected')).toBe('true')
+    expect(document.querySelector('[data-plan-panel]')).toBeNull()
+    expect(
+      readRunArtifact.mock.calls.filter((c) => (c[0] as { name?: string } | undefined)?.name === 'plan.md')
+    ).toHaveLength(0)
   })
 
     it('shows tasks under the owning user prompt in transcript order', async () => {
@@ -809,7 +815,7 @@ describe('ChatView composer placement', () => {
       ])
     )
     render(<ChatView {...baseProps} items={[]} />)
-    fireEvent.click(screen.getByRole('button', { name: /Show browser panel/i }))
+    fireEvent.click(inspectorTab(/^Browser/))
     expect(screen.getByText('Recents')).toBeTruthy()
     expect(screen.getByText('Example Domain')).toBeTruthy()
   })
@@ -826,7 +832,7 @@ describe('ChatView composer placement', () => {
     expect(screen.queryByText(/Type \/ for commands/i)).toBeNull()
   })
 
-  it('renders a floating edge rail over the chat stage', () => {
+  it('keeps the transcript and composer on the plain gutter — nothing overlays the stage edge', () => {
     render(
       <ChatView
         {...baseProps}
@@ -842,42 +848,28 @@ describe('ChatView composer placement', () => {
       />
     )
 
-    const rail = document.querySelector('[data-chat-side-rail]')
-    expect(rail?.className).toMatch(/absolute/)
-    expect(rail?.className).toMatch(/right-0/)
+    expect(document.querySelector('[data-chat-side-rail]')).toBeNull()
     // Floating composer column aligns edge to edge with the transcript column.
     const dock = document.querySelector('[data-composer-dock]')
     expect(dock?.className).toMatch(/inset-x-0/)
-    expect(dock?.className).toMatch(/pr-10/)
-    expect(document.querySelector('[data-transcript-scroll]')?.className).toMatch(/pr-10/)
+    expect(dock?.className).toMatch(/px-4/)
+    expect(dock?.className).not.toMatch(/pr-10/)
+    expect(document.querySelector('[data-transcript-scroll]')?.className).not.toMatch(/pr-10/)
   })
 
-  it('keeps open right panels without reserving side-rail padding', async () => {
-    render(
-      <ChatView
-        {...baseProps}
-        items={[
-          {
-            kind: 'message',
-            id: 'm1',
-            role: 'user',
-            content: 'hello',
-            at: '2024-01-01T00:00:00.000Z'
-          }
-        ]}
-      />
-    )
-    fireEvent.click(screen.getByRole('button', { name: /Show plan panel/i }))
+  it('sizes the inspector beside the record', async () => {
+    render(<ChatView {...baseProps} items={[]} />)
+    fireEvent.click(inspectorTab(/^Plan/))
     await waitForPanel('[data-plan-panel]')
-    const dock = document.querySelector('[data-right-dock]')
-    expect(dock?.className).not.toMatch(/pr-10/)
-    expect(dock?.className).toMatch(/min-w-0/)
-    expect(document.querySelector('[data-chat-side-rail]')).toBeNull()
-    expect(document.querySelector('[data-dock-tab-bar]')).toBeTruthy()
-    expect(document.querySelector('[data-plan-panel]')).toBeTruthy()
-    // Agent column must drop rail inset once the floating rail is hidden.
-    expect(document.querySelector('[data-composer-dock]')?.className).not.toMatch(/pr-10/)
-    expect(document.querySelector('[data-transcript-scroll]')?.className).not.toMatch(/pr-10/)
+    const dock = document.querySelector('[data-right-dock]') as HTMLElement
+    expect(dock.className).toMatch(/min-w-0/)
+    expect(dock.className).toMatch(/shrink-0/)
+    expect(Number.parseInt(dock.style.width, 10)).toBe(
+      clampDockWidthPx(DOCK_WIDTH_DEFAULT_PX, window.innerWidth, {
+        paneCount: 1,
+        sidebarWidthPx: readSidebarWidthPxForCapacity()
+      })
+    )
   })
 
   it('floats the empty-chat composer over the transcript column', () => {
@@ -890,8 +882,7 @@ describe('ChatView composer placement', () => {
     // so nothing scrolls through it.
     expect(dock?.className).toMatch(/bottom-0/)
     // Same gutters as the transcript so the column edges line up.
-    expect(dock?.className).toMatch(/pl-4/)
-    expect(dock?.className).toMatch(/pr-10/)
+    expect(dock?.className).toMatch(/px-4/)
 
     const column = document.querySelector('[data-composer-column]')
     expect(column?.className).toMatch(/mx-auto/)
@@ -902,165 +893,67 @@ describe('ChatView composer placement', () => {
     expect(document.querySelector('[data-brand-lockup]')).toBeNull()
   })
 
-  it('top-aligns the side rail on empty chat', () => {
+  it('expands the inspector to the whole work area and back', () => {
     render(<ChatView {...baseProps} items={[]} />)
-    const rail = document.querySelector('[data-chat-side-rail]')
-    expect(rail?.className).toMatch(/justify-start/)
-    expect(rail?.className).toMatch(/top-10/)
-    expect(rail?.className).not.toMatch(/justify-center/)
+    const dock = document.querySelector('[data-right-dock]') as HTMLElement
+    expect(dock.getAttribute('data-dock-expanded')).toBe('0')
+    expect(screen.getByRole('separator', { name: 'Resize inspector' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand to full width (Ctrl+Shift+I)' }))
+    const expanded = document.querySelector('[data-right-dock]') as HTMLElement
+    expect(expanded.getAttribute('data-dock-expanded')).toBe('1')
+    expect(expanded.style.width).toBe('')
+    // The record steps aside — still mounted, out of reach.
+    expect(agentColumn().classList.contains('hidden')).toBe(true)
+    expect(agentColumn().hasAttribute('inert')).toBe(true)
+    expect(screen.queryByRole('separator', { name: 'Resize inspector' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the record (Ctrl+Shift+I)' }))
+    expect(document.querySelector('[data-right-dock]')?.getAttribute('data-dock-expanded')).toBe('0')
+    expect(agentColumn().classList.contains('hidden')).toBe(false)
+    expect(agentColumn().hasAttribute('inert')).toBe(false)
   })
 
-  it('starts the side rail below the title bar, clear of the window controls', () => {
+  it('expands and collapses with Ctrl Shift I, showing a hidden inspector first', () => {
+    startHidden()
     render(<ChatView {...baseProps} items={[]} />)
-    const rail = document.querySelector('[data-chat-side-rail]')
-    // The rail and the caption buttons share the top-right column, so the rail
-    // must begin past the 36px title bar — `inset-y-0`/`pt-4` put the Files
-    // button (and the rail's gradient) under the Close button.
-    expect(rail?.className).toContain(CHAT_SIDE_RAIL_TOP_INSET)
-    expect(rail?.className).toMatch(/bottom-0/)
-    expect(rail?.className).not.toMatch(/inset-y-0/)
-    expect(rail?.className).not.toMatch(/\bh-full\b/)
-    expect(Number(CHAT_SIDE_RAIL_TOP_INSET.replace('top-', '')) * 4).toBeGreaterThanOrEqual(
-      TITLE_BAR_HEIGHT_PX
-    )
+    fireEvent.keyDown(window, { key: 'I', ctrlKey: true, shiftKey: true })
+    expect(document.querySelector('[data-right-dock]')?.getAttribute('data-dock-expanded')).toBe('1')
+    // Focus left the record for the strip, not for <body>.
+    expect(document.activeElement?.getAttribute('role')).toBe('tab')
+    fireEvent.keyDown(window, { key: 'I', ctrlKey: true, shiftKey: true })
+    expect(document.querySelector('[data-right-dock]')?.getAttribute('data-dock-expanded')).toBe('0')
   })
 
-  it('top-aligns the side rail when transcript is visible', () => {
-    render(
-      <ChatView
-        {...baseProps}
-        items={[
-          {
-            kind: 'message',
-            id: 'm1',
-            role: 'user',
-            content: 'hello',
-            at: '2024-01-01T00:00:00.000Z'
-          }
-        ]}
-      />
-    )
-    const rail = document.querySelector('[data-chat-side-rail]')
-    expect(rail?.className).toMatch(/justify-start/)
-    expect(rail?.className).toMatch(/top-10/)
+  it('hiding an expanded inspector brings the record back, and it returns docked', () => {
+    render(<ChatView {...baseProps} items={[]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand to full width (Ctrl+Shift+I)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Hide inspector (Ctrl+I)' }))
+    expect(document.querySelector('[data-inspector]')).toBeNull()
+    expect(agentColumn().classList.contains('hidden')).toBe(false)
+    fireEvent.keyDown(window, { key: 'i', ctrlKey: true })
+    expect(document.querySelector('[data-right-dock]')?.getAttribute('data-dock-expanded')).toBe('0')
   })
 
-  it('aligns the floating composer with the transcript column under the rail', () => {
+  it('aligns the floating composer with the transcript column', () => {
     render(<ChatView {...baseProps} items={[]} />)
     const dock = document.querySelector('[data-composer-dock]')
     expect(dock?.className).toMatch(/inset-x-0/)
-    expect(dock?.className).toMatch(/pr-10/)
-    expect(document.querySelector('[data-chat-side-rail]')).toBeTruthy()
+    expect(dock?.className).toMatch(/px-4/)
+    expect(dock?.className).not.toMatch(/pr-10/)
   })
 
-  it('switches panels via dock tabs while keeping prior panels mounted', async () => {
+  it('keeps the inspector tabs in the inspector, never in the title band', async () => {
     render(<ChatView {...baseProps} items={[]} />)
-    fireEvent.click(screen.getByRole('button', { name: /Show terminal panel/i }))
-    fireEvent.click(screen.getByRole('button', { name: /Show changes panel/i }))
-    await waitFor(() => {
-      expect(document.querySelector('[data-terminal-panel]')).toBeTruthy()
-    })
-    await waitForPanel('[data-changes-panel]')
-    expect(document.querySelector('[data-dock-tab-bar]')).toBeTruthy()
-    // Multi-tab strip keeps both Terminal and Changes.
-    expect(screen.getByRole('tab', { name: /^Terminal$/i })).toBeTruthy()
-    expect(screen.getByRole('tab', { name: /^Changes$/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('tab', { name: /^Terminal$/i }))
-    expect(document.querySelector('[data-terminal-panel]')).toBeTruthy()
-    expect(
-      document.querySelector('[data-terminal-panel]')?.parentElement?.className
-    ).toMatch(/\bflex\b/)
-    expect(
-      document.querySelector('[data-changes-panel]')?.parentElement?.className
-    ).toMatch(/\bhidden\b/)
-  })
-
-  it('opens a missing panel from the dock quick launch icons', async () => {
-    render(<ChatView {...baseProps} items={[]} />)
-    fireEvent.click(screen.getByRole('button', { name: /Show terminal panel/i }))
-    fireEvent.click(screen.getByRole('button', { name: /Show browser panel/i }))
-    await waitForPanel('[data-agent-browser-panel]')
-    expect(screen.getByRole('tab', { name: /^Terminal$/i })).toBeTruthy()
-    expect(screen.getByRole('tab', { name: /^Browser$/i })).toBeTruthy()
-  })
-
-  it('enters immersive unified tabs from Expand panel (not a wider side dock)', async () => {
-    render(<ChatView {...baseProps} items={[]} />)
-    fireEvent.click(screen.getByRole('button', { name: /Show terminal panel/i }))
-    await waitFor(() => {
-      expect(document.querySelector('[data-terminal-panel]')).toBeTruthy()
-    })
-    const dock = document.querySelector('[data-right-dock]') as HTMLElement | null
-    expect(dock?.getAttribute('data-dock-expanded')).toBe('0')
-    const dockWidthPx = Number.parseInt(dock?.style.width ?? '0', 10)
-    expect(dockWidthPx).toBe(
-      clampDockWidthPx(DOCK_WIDTH_DEFAULT_PX, window.innerWidth, {
-        paneCount: 1,
-        sidebarWidthPx: readSidebarWidthPxForCapacity(),
-        dockOpen: true
-      })
-    )
-    expect(document.querySelector('[data-dock-immersive]')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /^Expand panel$/i }))
-    expect(document.querySelector('[data-right-dock]')).toBeNull()
-    const immersive = document.querySelector('[data-dock-immersive]')
-    expect(immersive).toBeTruthy()
-    expect(immersive?.getAttribute('data-dock-expanded')).toBe('1')
-    expect(screen.getByRole('tab', { name: /^Agent$/i })).toBeTruthy()
-    expect(screen.getByRole('tab', { name: /^Terminal$/i })).toBeTruthy()
-    expect(document.querySelector('[data-dock-tab-variant="immersive"]')).toBeTruthy()
-    expect(document.querySelector('[data-terminal-panel]')).toBeTruthy()
-    // Collapse control must not reuse the window-minimize (minus) icon.
-    expect(screen.getByRole('button', { name: /^Collapse panel$/i })).toBeTruthy()
-    const tablist = document.querySelector('[data-dock-tab-bar] [role="tablist"]')
-    expect(tablist?.className).toMatch(/\bflex-row\b/)
-    fireEvent.click(screen.getByRole('button', { name: /^Collapse panel$/i }))
-    expect(document.querySelector('[data-dock-immersive]')).toBeNull()
-    const restored = document.querySelector('[data-right-dock]') as HTMLElement | null
-    expect(restored).toBeTruthy()
-    expect(restored?.getAttribute('data-dock-expanded')).toBe('0')
-    expect(document.querySelector('[data-terminal-panel]')).toBeTruthy()
-    // Re-expand and switch to Agent
-    fireEvent.click(screen.getByRole('button', { name: /^Expand panel$/i }))
-    fireEvent.click(screen.getByRole('tab', { name: /^Agent$/i }))
-    expect(document.querySelector('[data-immersive-agent]')?.className).toMatch(/\bflex\b/)
-    expect(
-      document.querySelector('[data-terminal-panel]')?.parentElement?.className
-    ).toMatch(/\bhidden\b/)
-  })
-
-  it('keeps the side-dock tabs in the aside, never in the title band', async () => {
-    render(<ChatView {...baseProps} items={[]} />)
-    fireEvent.click(screen.getByRole('button', { name: /Show browser panel/i }))
+    fireEvent.click(inspectorTab(/^Browser/))
     await waitForPanel('[data-agent-browser-panel]')
 
     expect(document.querySelector('[data-dock-titlebar-portal]')).toBeNull()
-    expect(document.querySelector('[data-right-dock] [data-dock-tab-bar]')).toBeTruthy()
-    expect(screen.getByRole('tab', { name: /^Browser$/i })).toBeTruthy()
+    expect(document.querySelector('[data-right-dock] [data-inspector-tabs] [role="tablist"]')).toBeTruthy()
+    expect(inspectorTab(/^Browser/).getAttribute('aria-selected')).toBe('true')
   })
 
-  it('collapsing immersive from Agent restores full chat without a side dock', () => {
-    render(<ChatView {...baseProps} items={[]} />)
-    fireEvent.click(screen.getByRole('button', { name: /Show terminal panel/i }))
-    fireEvent.click(screen.getByRole('button', { name: /^Expand panel$/i }))
-    fireEvent.click(screen.getByRole('tab', { name: /^Agent$/i }))
-    fireEvent.click(screen.getByRole('button', { name: /^Collapse panel$/i }))
-    expect(document.querySelector('[data-dock-immersive]')).toBeNull()
-    expect(document.querySelector('[data-right-dock]')).toBeNull()
-    expect(document.querySelector('[data-chat-side-rail]')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /^Expand panel$/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Expand panel$/i }))
-    expect(document.querySelector('[data-dock-immersive]')).toBeTruthy()
-    expect(document.querySelector('[data-immersive-agent]')?.className).toMatch(/\bflex\b/)
-  })
-
-  it('exposes a drag handle to resize the dock', () => {
-    render(<ChatView {...baseProps} items={[]} />)
-    fireEvent.click(screen.getByRole('button', { name: /Show terminal panel/i }))
-    expect(screen.getByRole('separator', { name: /Resize panel/i })).toBeTruthy()
-  })
-
-  it('opens the pull request panel from the side rail', async () => {
+  it('opens the pull request panel from its tab', async () => {
     Object.defineProperty(window, 'vyotiq', {
       configurable: true,
       writable: true,
@@ -1070,7 +963,7 @@ describe('ChatView composer placement', () => {
       }
     })
     render(<ChatView {...baseProps} items={[]} />)
-    fireEvent.click(screen.getByRole('button', { name: /Show pull request panel/i }))
+    fireEvent.click(inspectorTab(/^PR/))
     await waitFor(() => {
       expect(document.querySelector('[data-pr-panel]')).toBeTruthy()
     })
@@ -1177,8 +1070,8 @@ describe('ChatView composer placement', () => {
     const composerRoot = document.querySelector('[data-composer-dock]')
     expect(composerRoot?.className).toMatch(/absolute/)
     expect(composerRoot?.className).toMatch(/inset-x-0/)
-    expect(composerRoot?.className).toMatch(/pl-4/)
-    expect(composerRoot?.className).toMatch(/pr-10/)
+    expect(composerRoot?.className).toMatch(/px-4/)
+    expect(composerRoot?.className).not.toMatch(/pr-10/)
     expect(composerRoot?.className).not.toMatch(/\bbg-bg\b/)
   })
 
