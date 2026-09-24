@@ -83,7 +83,10 @@ export function paletteCommands({
     perWorkspace.push({ id: `newchat${slot}`, title: `New task in ${formatWorkspaceName(path)}`, icon: 'plus' })
   })
 
-  const extras: PaletteCommand[] = canSendFeedback ? [{ id: 'sendFeedback', title: 'Send feedback', icon: ICON.sendFeedback }] : []
+  const extras: PaletteCommand[] = [
+    { id: 'goUsage', title: 'Usage', icon: 'chart' },
+    ...(canSendFeedback ? [{ id: 'sendFeedback', title: 'Send feedback', icon: ICON.sendFeedback }] : [])
+  ]
   return [...base, ...perWorkspace, ...extras]
 }
 
@@ -91,6 +94,7 @@ export type PaletteHandlers = {
   workspaces: readonly string[]
   onOpenSettings: () => void
   onOpenHome: () => void
+  onOpenUsage: () => void
   onNewTask: () => void
   onToggleNavigator: () => void
   onNextNeedsYou: () => void
@@ -106,6 +110,7 @@ export type PaletteHandlers = {
 export function runPaletteCommand(id: string, h: PaletteHandlers): void {
   if (id === 'settings') return h.onOpenSettings()
   if (id === 'goHome') return h.onOpenHome()
+  if (id === 'goUsage') return h.onOpenUsage()
   if (id === 'newChat') return h.onNewTask()
   if (id === 'sidebar') return h.onToggleNavigator()
   if (id === 'nextNeedsYou') return h.onNextNeedsYou()

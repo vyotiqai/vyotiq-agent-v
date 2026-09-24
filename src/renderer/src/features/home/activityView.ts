@@ -54,9 +54,29 @@ export function activityDayBars(
         : date,
       runs,
       ratio: peak > 0 ? runs / peak : 0,
-      title: `${valid ? parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : date} — ${runs} ${runs === 1 ? 'session' : 'sessions'}`
+      title: `${valid ? parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : date} — ${runs} ${runs === 1 ? 'task' : 'tasks'}`
     }
   })
+}
+
+/** "Mo", "Tu" … — the axis label under a seven-day chart. */
+export function weekdayShort(date: string): string {
+  const parsed = new Date(`${date}T00:00:00`)
+  if (Number.isNaN(parsed.getTime())) return date
+  return parsed.toLocaleDateString('en-US', { weekday: 'short' }).slice(0, 2)
+}
+
+/**
+ * The share of tasks that ended and finished — done against done, failed
+ * and stopped. A running task has not ended, so it is in neither; with
+ * nothing ended there is no share to give.
+ */
+export function finishedShare(
+  outcomes: HomeActivityResult['outcomes']
+): { percent: number; done: number; ended: number } | null {
+  const ended = outcomes.done + outcomes.error + outcomes.cancelled
+  if (ended <= 0) return null
+  return { percent: Math.round((outcomes.done / ended) * 100), done: outcomes.done, ended }
 }
 
 export type ActivityOutcomeSegment = {

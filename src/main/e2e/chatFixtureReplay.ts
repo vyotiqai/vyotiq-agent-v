@@ -4,6 +4,7 @@ import type { AgentEvent, AgentInteractionMode } from '../../shared/ipc'
 import { isAbortError } from '../../shared/errors'
 import { logger } from '../../shared/logger'
 import { clearRunAbort, streamSignalFor } from '../agent/runRegistry'
+import { createApprovalGate } from '../agent/toolApproval'
 import { createRun, runExists, updateStatus } from '../agent/state'
 import { resolveRunDir } from '../storage/paths'
 
@@ -36,6 +37,7 @@ function loadFixtureTemplates(): Omit<AgentEvent, 'runId' | 'invokeId'>[] {
     throw new Error(`Fixture ${fixturePath} must contain a non-empty events array`)
   }
   return raw.events.map((event, index) => {
+    if (isFixtureApproval(event)) return event as unknown as Omit<AgentEvent, 'runId' | 'invokeId'>
     if (!event || typeof event !== 'object' || Array.isArray(event)) {
       throw new Error(`Fixture event ${index} must be an object`)
     }
@@ -45,6 +47,50 @@ function loadFixtureTemplates(): Omit<AgentEvent, 'runId' | 'invokeId'>[] {
     }
     return event as Omit<AgentEvent, 'runId' | 'invokeId'>
   })
+}
+
+/**
+ * A fixture step that asks for a real approval through the run's real gate:
+ * main holds it as pending — the navigator, Home and the record read it from
+ * there — the window gets the request, and the run waits for the answer as it
+ * would before any gated tool. Allowed, the step's scripted result follows;
+ * denied or timed out, the gate's refusal does.
+ */
+type FixtureApproval = {
+  type: '__approval'
+  toolCallId: string
+  name: string
+  /** The tool call's raw JSON arguments. */
+  arguments: string
+  summary: string
+  /** What the tool returns when allowed — the fixture never runs it. */
+  result: string
+}
+
+function isFixtureApproval(template: unknown): template is FixtureApproval {
+  return (template as { type?: unknown }).type === '__approval'
+}
+
+async function* askFixtureApproval(
+  step: FixtureApproval,
+  input: { runId: string; invokeId: number },
+  signal: AbortSignal
+): AsyncGenerator<AgentEvent> {
+  const gate = createApprovalGate({
+    runId: input.runId,
+    invokeId: input.invokeId,
+    mode: 'all',
+    workspaceAllowlist: [],
+    signal
+  })
+  const verdict = await gate.authorize({ id: step.toolCallId, name: step.name, arguments: step.arguments })
+  const base = { runId: input.runId, invokeId: input.invokeId, toolCallId: step.toolCallId, name: step.name, summary: step.summary }
+  if (verdict.allowed) {
+    yield { type: 'tool_start', ...base }
+    yield { type: 'tool_result', ...base, ok: true, content: step.result }
+    return
+  }
+  yield { type: 'tool_result', ...base, ok: false, content: verdict.reason }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -107,6 +153,10 @@ export async function* replayChatFixture(input: {
         const err = new Error('Aborted')
         err.name = 'AbortError'
         throw err
+      }
+      if (isFixtureApproval(template)) {
+        yield* askFixtureApproval(template, input, signal)
+        continue
       }
       const event = {
         ...template,

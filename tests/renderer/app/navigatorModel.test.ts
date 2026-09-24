@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ActiveRun, RunSummary } from '@shared/ipc'
 import { RUN_INTERRUPTED_ERROR } from '@shared/runInterrupt'
 import { buildNavigatorSections, type NavigatorInput } from '@renderer/app/navigator/navigatorModel'
+import { pinnedRunKey } from '@renderer/features/home/pinnedRuns'
 
 const NOW = Date.parse('2026-09-23T12:00:00.000Z')
 const minsAgo = (m: number): string => new Date(NOW - m * 60_000).toISOString()
@@ -211,6 +212,23 @@ describe('buildNavigatorSections', () => {
     )
     expect(sections[0]!.rows.map((r) => r.runId)).toEqual(['w-old', 'w-new'])
     expect(sections[1]!.rows.map((r) => r.runId)).toEqual(['d-new', 'd-old'])
+  })
+
+  it('keeps a pinned task that would be done in Pinned, above Done — and nowhere else', () => {
+    const sections = buildNavigatorSections(
+      input({
+        runsByWorkspacePath: {
+          [A]: { runs: [run('pinned-done'), run('pinned-live', { status: 'running' }), run('plain')] }
+        },
+        activeRuns: [live('pinned-live')],
+        pinnedKeys: new Set([pinnedRunKey(A, 'pinned-done'), pinnedRunKey(A, 'pinned-live')])
+      })
+    )
+    expect(sections.map((s) => s.key)).toEqual(['running', 'pinned', 'done'])
+    expect(sectionOf(sections, 'pinned-done')).toMatchObject({ section: 'pinned', row: { pinned: true } })
+    // Still working: it stays where its state puts it, marked pinned.
+    expect(sectionOf(sections, 'pinned-live')).toMatchObject({ section: 'running', row: { pinned: true } })
+    expect(sectionOf(sections, 'plain')).toMatchObject({ section: 'done', row: { pinned: false } })
   })
 
   it('marks a task unread when its finish notification is unread', () => {

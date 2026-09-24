@@ -5,20 +5,22 @@ import { relativeTime } from '@shared/utils/timeFormat'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import type { TaskState } from '@renderer/lib/ui'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
+import { pinnedRunKey } from '@renderer/features/home/pinnedRuns'
 import { runTitle, runTooltip } from './runTitle'
 
 /**
  * The navigator: tasks grouped by what they want from you.
  *
- *   Needs you → Running → Ready for review → Done
+ *   Needs you → Running → Ready for review → Pinned → Done
  *
  * Every state is read from real data:
  * - needs     a live run with an approval or question pending (`ActiveRun.waiting`)
  * - running   a live run; a run whose loop is armed waits here as `queued`
  * - review    a finished run whose edits still wait on Keep or Undo (`RunSummary.review`)
+ * - pinned    a task you pinned that would otherwise be done — it never folds away
  * - done      everything else: done, failed, stopped, interrupted, goal paused
  */
-export type NavSectionKey = 'needs' | 'running' | 'review' | 'done'
+export type NavSectionKey = 'needs' | 'running' | 'review' | 'pinned' | 'done'
 
 export type NavMeta =
   /** "4/5": the step in progress of the todo list. */
@@ -43,6 +45,8 @@ export type NavRow = {
   foreign: boolean
   /** Finished since you last looked (an unread run notification). */
   unread: boolean
+  /** You pinned it. A pinned task still shows where its state puts it until it is done. */
+  pinned: boolean
   run: RunSummary
 }
 
@@ -52,10 +56,11 @@ export const NAV_SECTION_LABEL: Record<NavSectionKey, string> = {
   needs: 'Needs you',
   running: 'Running',
   review: 'Ready for review',
+  pinned: 'Pinned',
   done: 'Done'
 }
 
-const ORDER: NavSectionKey[] = ['needs', 'running', 'review', 'done']
+const ORDER: NavSectionKey[] = ['needs', 'running', 'review', 'pinned', 'done']
 
 export type NavigatorInput = {
   runsByWorkspacePath: Readonly<Record<string, { runs: readonly RunSummary[] }>>
@@ -68,12 +73,14 @@ export type NavigatorInput = {
   /** `null` = all workspaces. */
   scopePath: string | null
   unreadRunIds?: ReadonlySet<string>
+  /** `pinnedRunKey` of every pinned task. */
+  pinnedKeys?: ReadonlySet<string>
   now?: number
 }
 
 export function buildNavigatorSections(input: NavigatorInput): NavSection[] {
   const now = input.now ?? Date.now()
-  const buckets: Record<NavSectionKey, NavRow[]> = { needs: [], running: [], review: [], done: [] }
+  const buckets: Record<NavSectionKey, NavRow[]> = { needs: [], running: [], review: [], pinned: [], done: [] }
   const waitingSince = new Map<string, number>()
 
   for (const path of input.openPaths) {
@@ -87,7 +94,8 @@ export function buildNavigatorSections(input: NavigatorInput): NavSection[] {
       )
       const placed = place(run, live, input.activeRunsLoaded, now)
       if (live?.waiting) waitingSince.set(run.runId, Date.parse(live.waiting.since))
-      buckets[placed.section].push({
+      const pinned = input.pinnedKeys?.has(pinnedRunKey(path, run.runId)) ?? false
+      buckets[pinned && placed.section === 'done' ? 'pinned' : placed.section].push({
         runId: run.runId,
         workspacePath: path,
         workspaceName: formatWorkspaceName(path),
@@ -98,6 +106,7 @@ export function buildNavigatorSections(input: NavigatorInput): NavSection[] {
         meta: placed.meta,
         foreign,
         unread: input.unreadRunIds?.has(run.runId) ?? false,
+        pinned,
         run
       })
     }
@@ -110,6 +119,7 @@ export function buildNavigatorSections(input: NavigatorInput): NavSection[] {
   )
   buckets.running.sort((a, b) => Number(a.state === 'queued') - Number(b.state === 'queued') || byRecency(a, b))
   buckets.review.sort(byRecency)
+  buckets.pinned.sort(byRecency)
   buckets.done.sort(byRecency)
 
   return ORDER.filter((key) => buckets[key].length > 0).map((key) => ({

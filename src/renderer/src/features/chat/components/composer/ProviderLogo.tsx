@@ -14,7 +14,7 @@ import { resolveProviderBrandColor } from './providerBrandColor'
 
 export type ProviderLogoId = ProviderId | string
 
-const SIZE = { sm: 16, md: 20, lg: 24 } as const
+const SIZE = { xs: 12, sm: 16, md: 20, lg: 24 } as const
 
 function BrandMark({
   slug,

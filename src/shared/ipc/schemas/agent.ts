@@ -1318,6 +1318,31 @@ export const HomeActivityResultSchema = z.object({
             failed: z.number().int().min(0)
           })
         )
+        .optional(),
+      /** Tool calls across the window's receipts; stubs and gate refusals are not calls. */
+      toolCalls: z.number().int().min(0).optional(),
+      /** Tools that failed in the window, most failures first, with their commonest error. */
+      failingTools: z
+        .array(
+          z.object({
+            name: z.string().min(1),
+            ok: z.number().int().min(0),
+            failed: z.number().int().min(1),
+            reason: z.string().min(1).optional()
+          })
+        )
+        .optional(),
+      /** Runs that changed files with no passing check after, newest first. */
+      uncheckedRuns: z
+        .array(
+          z.object({
+            runId: z.string().min(1),
+            workspacePath: z.string().min(1),
+            goal: z.string().optional(),
+            /** Distinct files the run wrote. */
+            files: z.number().int().min(0)
+          })
+        )
         .optional()
     })
     .optional(),
@@ -1342,7 +1367,9 @@ export const HomeActivityResultSchema = z.object({
     /** Raw model context window (latest reported in the window). */
     contextWindow: z.number().int().min(0).optional(),
     /** Token total (input+output) of the prior equal-length window, when > 0. */
-    previousTokens: z.number().int().min(0).optional()
+    previousTokens: z.number().int().min(0).optional(),
+    /** Distinct runs with activity in the prior equal-length window, when > 0. */
+    previousRuns: z.number().int().min(0).optional()
   }),
   generatedAt: z.string().min(1)
 })

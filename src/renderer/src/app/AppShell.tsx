@@ -27,7 +27,7 @@ import { Navigator, type NavigatorPlace } from './navigator/Navigator'
 import { buildNavigatorSections, type NavRow } from './navigator/navigatorModel'
 import { useNavigatorScope } from './navigator/useNavigatorScope'
 
-export type ShellView = 'chat' | 'settings' | 'marketplace' | 'teammates' | 'home'
+export type ShellView = 'chat' | 'settings' | 'marketplace' | 'teammates' | 'home' | 'usage'
 
 export type AppShellProps = {
   view: ShellView
@@ -49,6 +49,7 @@ export type AppShellProps = {
   onOpenMarketplace: () => void
   onOpenChat: () => void
   onOpenHome: () => void
+  onOpenUsage: () => void
   onNewChat: () => void
   onNewChatInWorkspace?: (path: string) => void
   /** A new task whose brief starts as `text` (palette Ctrl ↵). */
@@ -60,6 +61,13 @@ export type AppShellProps = {
   onDeleteRunInWorkspace?: (path: string, runId: string) => void
   onExportRunInWorkspace?: (path: string, runId: string) => void
   onCopyRunLinkInWorkspace?: (path: string, runId: string) => void
+  onStopRunInWorkspace?: (path: string, runId: string) => void
+  onResumeRunInWorkspace?: (path: string, runId: string) => void
+  onPauseGoalInWorkspace?: (path: string, runId: string, live: boolean) => void
+  onStopLoopInWorkspace?: (path: string, runId: string) => void
+  /** `pinnedRunKey` of every pinned task. */
+  pinnedRunKeys?: readonly string[]
+  onTogglePinnedRun?: (path: string, runId: string) => void
   onLoadOlderRuns?: (path: string) => void
   onSwitchWorkspace?: (path: string) => void
   onCloseWorkspace?: (path: string) => void
@@ -79,6 +87,7 @@ export type AppShellProps = {
 
 function placeOf(view: ShellView): NavigatorPlace {
   if (view === 'home') return 'home'
+  if (view === 'usage') return 'usage'
   if (view === 'marketplace') return 'extensions'
   if (view === 'settings') return 'settings'
   if (view === 'chat') return 'task'
@@ -121,6 +130,7 @@ function AppShellInner(props: AppShellProps) {
     clampSidebarWidthPx
   )
   const [scopePath, setScopePath] = useNavigatorScope(openWorkspaces)
+  const pinnedKeys = useMemo(() => new Set(props.pinnedRunKeys ?? []), [props.pinnedRunKeys])
   const drawerRef = useRef<HTMLDivElement>(null)
   const drawerTriggerRef = useRef<HTMLElement | null>(null)
   const mainRef = useRef<HTMLElement>(null)
@@ -291,6 +301,10 @@ function AppShellInner(props: AppShellProps) {
         props.onOpenMarketplace()
         if (!isDesktop) setDrawerOpen(false)
       }}
+      onOpenUsage={() => {
+        props.onOpenUsage()
+        if (!isDesktop) setDrawerOpen(false)
+      }}
       onOpenSettings={props.onOpenSettings}
       onOpenShortcuts={() => {
         if (props.onOpenSettingsSection) props.onOpenSettingsSection('shortcuts')
@@ -308,8 +322,14 @@ function AppShellInner(props: AppShellProps) {
         onRename: (path, runId, goal) => props.onRenameRunInWorkspace?.(path, runId, goal),
         onDelete: (path, runId) => props.onDeleteRunInWorkspace?.(path, runId),
         onExport: props.onExportRunInWorkspace,
-        onCopyLink: props.onCopyRunLinkInWorkspace
+        onCopyLink: props.onCopyRunLinkInWorkspace,
+        onStop: props.onStopRunInWorkspace,
+        onResume: props.onResumeRunInWorkspace,
+        onPauseGoal: props.onPauseGoalInWorkspace,
+        onStopLoop: props.onStopLoopInWorkspace,
+        onTogglePin: props.onTogglePinnedRun
       }}
+      pinnedKeys={pinnedKeys}
       notifications={{
         items: notifications.items,
         unreadCount: notifications.unreadCount,
@@ -412,6 +432,7 @@ function AppShellInner(props: AppShellProps) {
             workspaces: openWorkspaces,
             onOpenSettings: props.onOpenSettings,
             onOpenHome: props.onOpenHome,
+            onOpenUsage: props.onOpenUsage,
             onNewTask,
             onToggleNavigator,
             onNextNeedsYou,

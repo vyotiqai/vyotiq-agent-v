@@ -3,7 +3,7 @@ import type { ActiveRun, NotificationItem, NotificationMutateRequest, RunSummary
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { Icon, type IconName } from '@renderer/lib/icons'
 import { ActionMenu, IconButton, cn } from '@renderer/lib/ui'
-import { SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { SECTION_LABEL, SECTION_LABEL_ACCENT } from '@renderer/lib/utils/layout'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { shortcutLabel } from '@renderer/lib/shortcuts'
 import { buildNavigatorSections, type NavSection } from './navigatorModel'
@@ -11,7 +11,7 @@ import { NavigatorTaskRow, type NavigatorRowActions } from './NavigatorTaskRow'
 import { NotificationsButton } from './NotificationsButton'
 import { UpdateChip } from './UpdateChip'
 
-export type NavigatorPlace = 'home' | 'extensions' | 'settings' | 'task' | 'other'
+export type NavigatorPlace = 'home' | 'extensions' | 'usage' | 'settings' | 'task' | 'other'
 
 /** How many finished tasks show before "N more". */
 const DONE_LIMIT = 5
@@ -35,6 +35,7 @@ export type NavigatorProps = {
   onNewTask: () => void
   onOpenHome: () => void
   onOpenExtensions: () => void
+  onOpenUsage: () => void
   onOpenSettings: () => void
   onOpenShortcuts: () => void
   onAddWorkspace: () => void
@@ -42,6 +43,8 @@ export type NavigatorProps = {
   onLoadOlderRuns: (path: string) => void
   onDismissRunsError: (path: string) => void
   rowActions: NavigatorRowActions
+  /** `pinnedRunKey` of every pinned task. */
+  pinnedKeys?: ReadonlySet<string>
   notifications: {
     items: NotificationItem[]
     unreadCount: number
@@ -81,9 +84,19 @@ export function Navigator(props: NavigatorProps) {
         activeRuns: props.activeRuns,
         activeRunsLoaded: props.activeRunsLoaded,
         scopePath,
-        unreadRunIds
+        unreadRunIds,
+        pinnedKeys: props.pinnedKeys
       }),
-    [runsByWorkspacePath, openPaths, activePath, props.activeRuns, props.activeRunsLoaded, scopePath, unreadRunIds]
+    [
+      runsByWorkspacePath,
+      openPaths,
+      activePath,
+      props.activeRuns,
+      props.activeRunsLoaded,
+      scopePath,
+      unreadRunIds,
+      props.pinnedKeys
+    ]
   )
 
   const cappedPaths = useMemo(
@@ -138,6 +151,7 @@ export function Navigator(props: NavigatorProps) {
       <div className="space-y-px px-2">
         <PlaceRow icon="home" label="Home" active={place === 'home'} onClick={props.onOpenHome} />
         <PlaceRow icon="extensions" label="Extensions" active={place === 'extensions'} onClick={props.onOpenExtensions} />
+        <PlaceRow icon="chart" label="Usage" active={place === 'usage'} onClick={props.onOpenUsage} />
       </div>
 
       <div className="scroll-thin mt-2 min-h-0 flex-1 overflow-y-auto px-2 pb-2" data-navigator-tasks>
@@ -231,7 +245,7 @@ function TaskSection({
     <section className="mt-3 first:mt-1" aria-labelledby={headingId} data-nav-section={section.key}>
       <h3
         id={headingId}
-        className={cn('flex h-6 items-center gap-1.5 px-2', SECTION_LABEL, section.key === 'needs' && 'text-accent')}
+        className={cn('flex h-6 items-center gap-1.5 px-2', section.key === 'needs' ? SECTION_LABEL_ACCENT : SECTION_LABEL)}
       >
         {section.label}
         <span className="font-mono font-normal tnum">{section.rows.length}</span>

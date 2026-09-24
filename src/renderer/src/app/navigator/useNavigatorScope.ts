@@ -2,6 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 
 const SCOPE_KEY = 'vyotiq.navigatorScope'
+const SCOPE_EVENT = 'vyotiq:navigator-scope'
+
+/** Filter the navigator to one workspace from anywhere — Home's workspace rows. */
+export function requestNavigatorScope(path: string | null): void {
+  window.dispatchEvent(new CustomEvent(SCOPE_EVENT, { detail: { path } }))
+}
 
 function readScope(): string | null {
   try {
@@ -33,6 +39,15 @@ export function useNavigatorScope(openPaths: readonly string[]): [string | null,
     setScopeState(path)
     writeScope(path)
   }, [])
+
+  useEffect(() => {
+    const onRequest = (event: Event): void => {
+      const path = (event as CustomEvent<{ path?: string | null }>).detail?.path
+      setScope(typeof path === 'string' && path ? path : null)
+    }
+    window.addEventListener(SCOPE_EVENT, onRequest)
+    return () => window.removeEventListener(SCOPE_EVENT, onRequest)
+  }, [setScope])
 
   useEffect(() => {
     if (scope === null || openPaths.length === 0) return

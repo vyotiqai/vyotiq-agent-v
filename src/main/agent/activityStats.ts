@@ -150,6 +150,8 @@ export async function collectHomeActivity(
   /** Previous equal-length window totals — the trend signal (tokens). */
   const previousKeys = new Set(lastDayKeys(localDayKeyOf(new Date(now.getTime() - windowDays * 86_400_000).toISOString()), windowDays))
   let previousTokens = 0
+  /** Distinct runs with activity in the previous window — the trend signal (tasks). */
+  const previousRunIds = new Set<string>()
   /**
    * Prune cutoff: the earliest local-day start the aggregation can still see
    * (the previous window feeds the token trend). Run-dir files last written
@@ -172,6 +174,12 @@ export async function collectHomeActivity(
   /** Attention signals: unverified runs (receipt-scoped) + window tool usage. */
   let unverifiedRuns = 0
   const toolTotals = new Map<string, { ok: number; failed: number }>()
+  /** Tool calls in window receipts (stubs and gate refusals are not calls). */
+  let toolCalls = 0
+  /** Per tool, how often each failure message came back — the commonest is its reason. */
+  const failureReasons = new Map<string, Map<string, number>>()
+  /** Runs whose edits had no passing check after them. */
+  const uncheckedRuns: Array<{ runId: string; workspacePath: string; goal?: string; files: number; writtenAt: string }> = []
   /** Sessions that ended in error — the newest few become the digest (real goals only). */
   const errorRuns: Array<{ runId: string; workspacePath: string; goal?: string; writtenAt: string }> = []
 
@@ -340,6 +348,7 @@ export async function collectHomeActivity(
         for (const [date, entry] of Object.entries(ledger.days)) {
           if (previousKeys.has(date)) {
             previousTokens += entry.inputTokens + entry.outputTokens
+            previousRunIds.add(runId)
             continue
           }
           const day = bucketFor(date)
@@ -381,6 +390,13 @@ export async function collectHomeActivity(
           : receipt.verification?.verifiedAfterLastMutation === false
         if (unverified) {
           unverifiedRuns += 1
+          uncheckedRuns.push({
+            runId: receipt.runId,
+            workspacePath,
+            ...(receipt.goal ? { goal: receipt.goal } : {}),
+            files: new Set(receipt.wroteFiles).size,
+            writtenAt: receipt.writtenAt
+          })
         }
         if (receipt.status === 'error') {
           errorRuns.push({
@@ -391,6 +407,7 @@ export async function collectHomeActivity(
           })
         }
         if (receipt.toolStats.totalCalls > 0) {
+          toolCalls += receipt.toolStats.totalCalls
           for (const [name, toolStat] of Object.entries(receipt.toolStats.byName)) {
             const entry = toolTotals.get(name) ?? { ok: 0, failed: 0 }
             entry.ok += toolStat.ok
@@ -398,9 +415,21 @@ export async function collectHomeActivity(
             toolTotals.set(name, entry)
           }
         }
+        // Clusters are keyed "tool: message" (runReceipt's failure scan).
+        for (const cluster of receipt.failureClusters) {
+          const split = cluster.key.indexOf(': ')
+          if (split <= 0) continue
+          const tool = cluster.key.slice(0, split)
+          const message = cluster.key.slice(split + 2).trim()
+          if (!message || message === '(no message)') continue
+          const byMessage = failureReasons.get(tool) ?? new Map<string, number>()
+          byMessage.set(message, (byMessage.get(message) ?? 0) + cluster.count)
+          failureReasons.set(tool, byMessage)
+        }
       }
 
       if (ledger) continue // fully attributed by the ledger
+      if (previousKeys.has(receiptDate)) previousRunIds.add(runId)
       // Legacy run without a ledger: fall back to the receipt's cumulative
       // totals, attributed to the day the receipt was written. Cost falls back
       // to the receipt field, then the interrupted-run checkpoint.
@@ -444,6 +473,22 @@ export async function collectHomeActivity(
     .map(([name, totals]) => ({ name, ...totals }))
     .sort((a, b) => b.ok + b.failed - (a.ok + a.failed))
     .slice(0, 5)
+  // Failing tools — most failures first, each with the error it gave most.
+  const failingTools = [...toolTotals.entries()]
+    .filter(([, totals]) => totals.failed > 0)
+    .sort(([nameA, a], [nameB, b]) => b.failed - a.failed || b.failed / (b.ok + b.failed) - a.failed / (a.ok + a.failed) || nameA.localeCompare(nameB))
+    .slice(0, 5)
+    .map(([name, totals]) => {
+      const reasons = [...(failureReasons.get(name)?.entries() ?? [])].sort(
+        ([messageA, countA], [messageB, countB]) => countB - countA || messageA.localeCompare(messageB)
+      )
+      const reason = reasons[0]?.[0]
+      return { name, ok: totals.ok, failed: totals.failed, ...(reason ? { reason } : {}) }
+    })
+  const uncheckedDigest = uncheckedRuns
+    .sort((a, b) => (a.writtenAt < b.writtenAt ? 1 : a.writtenAt > b.writtenAt ? -1 : 0))
+    .slice(0, 5)
+    .map(({ writtenAt: _writtenAt, ...run }) => run)
   // Error digest — newest first, capped at 3; rendered only when present.
   const errorDigest = errorRuns
     .sort((a, b) => (a.writtenAt < b.writtenAt ? 1 : a.writtenAt > b.writtenAt ? -1 : 0))
@@ -460,7 +505,10 @@ export async function collectHomeActivity(
           attention: {
             unverifiedRuns,
             ...(errorDigest.length > 0 ? { errorRuns: errorDigest } : {}),
-            ...(topTools.length > 0 ? { topTools } : {})
+            ...(topTools.length > 0 ? { topTools } : {}),
+            ...(toolCalls > 0 ? { toolCalls } : {}),
+            ...(failingTools.length > 0 ? { failingTools } : {}),
+            ...(uncheckedDigest.length > 0 ? { uncheckedRuns: uncheckedDigest } : {})
           }
         }
       : {}),
@@ -475,7 +523,8 @@ export async function collectHomeActivity(
       ...(withReasoning ? { reasoningTokens: reasoningTokensTotal } : {}),
       ...(withPeak ? { peakInputTokens: peakInputTokensTotal } : {}),
       ...(withContextWindow ? { contextWindow: peakContextWindow } : {}),
-      ...(previousTokens > 0 ? { previousTokens } : {})
+      ...(previousTokens > 0 ? { previousTokens } : {}),
+      ...(previousRunIds.size > 0 ? { previousRuns: previousRunIds.size } : {})
     },
     generatedAt: now.toISOString()
   })

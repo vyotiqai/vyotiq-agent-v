@@ -345,9 +345,13 @@ export const BORDER = 'border-border'
 /** The one fill for "this is the one you're on": a selected row, tab or place. */
 export const SELECTED = 'bg-surface-2 text-fg-strong'
 
+const SECTION_LABEL_TYPE = 'text-caption font-semibold uppercase tracking-[var(--vy-tracking-caps)]'
+
 /** Section label: caps, tracked, quiet. One style everywhere — Home, Settings, the record. */
-export const SECTION_LABEL =
-  'text-caption font-semibold uppercase tracking-[var(--vy-tracking-caps)] text-tertiary'
+export const SECTION_LABEL = `${SECTION_LABEL_TYPE} text-tertiary`
+
+/** The same label in the accent, for Needs you — the one group asking for you. */
+export const SECTION_LABEL_ACCENT = `${SECTION_LABEL_TYPE} text-accent`
 
 /** Numbers that line up: costs, tokens, durations, counts. */
 export const NUM = 'font-mono tnum text-caption'

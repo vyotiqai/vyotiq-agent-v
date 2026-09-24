@@ -14,13 +14,23 @@ export type NavigatorRowActions = {
   onDelete: (workspacePath: string, runId: string) => void
   onExport?: (workspacePath: string, runId: string) => void
   onCopyLink?: (workspacePath: string, runId: string) => void
+  /** Stop a live run. */
+  onStop?: (workspacePath: string, runId: string) => void
+  /** Continue a run the app left interrupted. */
+  onResume?: (workspacePath: string, runId: string) => void
+  /** Pause the standing goal — and stop the run it launched, if one is live. */
+  onPauseGoal?: (workspacePath: string, runId: string, live: boolean) => void
+  /** Disarm a scheduled loop. */
+  onStopLoop?: (workspacePath: string, runId: string) => void
+  onTogglePin?: (workspacePath: string, runId: string) => void
 }
 
 /**
  * One task: status glyph, title, one meta cell. Everything else a row can do
- * (rename, export, copy link, delete) is in its menu — right-click, Shift F10,
- * or the ⋯ that takes the meta cell's place on hover — so the resting row
- * carries nothing it does not need to say.
+ * (stop, resume, pause its goal, stop its loop, pin, rename, export, copy
+ * link, delete) is in its menu — right-click, Shift F10, or the ⋯ that takes
+ * the meta cell's place on hover — so the resting row carries nothing it does
+ * not need to say.
  */
 export const NavigatorTaskRow = memo(function NavigatorTaskRow({
   row,
@@ -47,10 +57,35 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
   busyRef.current = renaming || confirmingDelete
 
   const { workspacePath, runId } = row
+  const live = row.state === 'running' || row.state === 'needs'
+  const interrupted = !live && row.stateLabel.startsWith('Interrupted')
+  const goalActive = row.run.goalStatus === 'active'
+  const loopArmed = row.run.loopArmed === true
   const menuItems = useMemo<ContextMenuItem[]>(() => {
-    const items: ContextMenuItem[] = [
-      { id: 'rename', label: 'Rename', icon: 'edit', onSelect: () => setRenaming(true) }
-    ]
+    const items: ContextMenuItem[] = []
+    const { onStop, onResume, onPauseGoal, onStopLoop, onTogglePin } = actions
+    if (live && onStop) {
+      items.push({ id: 'stop', label: 'Stop', icon: 'stop', onSelect: () => onStop(workspacePath, runId) })
+    }
+    if (interrupted && onResume) {
+      items.push({ id: 'resume', label: 'Resume', icon: 'play', onSelect: () => onResume(workspacePath, runId) })
+    }
+    if (goalActive && onPauseGoal) {
+      items.push({ id: 'pause-goal', label: 'Pause goal', icon: 'pause', onSelect: () => onPauseGoal(workspacePath, runId, live) })
+    }
+    if (loopArmed && onStopLoop) {
+      items.push({ id: 'stop-loop', label: 'Stop loop', icon: 'repeat', onSelect: () => onStopLoop(workspacePath, runId) })
+    }
+    if (items.length > 0) items.push({ type: 'separator', id: 'sep-run' })
+    if (onTogglePin) {
+      items.push({
+        id: 'pin',
+        label: row.pinned ? 'Unpin' : 'Pin',
+        icon: 'pin',
+        onSelect: () => onTogglePin(workspacePath, runId)
+      })
+    }
+    items.push({ id: 'rename', label: 'Rename', icon: 'edit', onSelect: () => setRenaming(true) })
     if (actions.onExport) {
       const onExport = actions.onExport
       items.push({
@@ -74,7 +109,7 @@ export const NavigatorTaskRow = memo(function NavigatorTaskRow({
       onSelect: () => setConfirmingDelete(true)
     })
     return items
-  }, [actions.onCopyLink, actions.onExport, runId, workspacePath])
+  }, [actions, goalActive, interrupted, live, loopArmed, row.pinned, runId, workspacePath])
 
   const dimmed = row.state === 'done' || row.state === 'stopped'
   // The name is the title alone, so the row is found by what it says; the

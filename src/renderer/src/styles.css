@@ -1480,27 +1480,6 @@
   }
 }
 
-/* Day bars grow out of the axis once, left to right, when Activity first
-   paints. Reuses the tool timeline's --stagger-index so the app keeps a single
-   cadence, at a shorter step because a 30-day window has 30 columns. */
-@keyframes home-bar-rise {
-  from {
-    transform: scaleY(0);
-  }
-
-  to {
-    transform: scaleY(1);
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .home-bar-enter {
-    transform-origin: bottom;
-    animation: home-bar-rise var(--vy-duration) var(--vy-ease) both;
-    animation-delay: calc(min(var(--stagger-index, 0), 29) * 18ms);
-  }
-}
-
 /* Native <dialog> (useNativeDialog) has no entrance by default — showModal
    just appears. Animate the open transition so it matches the non-native
    panel. Exit stays instant (close() removes [open] immediately). */

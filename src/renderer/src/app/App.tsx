@@ -4,6 +4,7 @@ import { requestOpenWorkspaceFile } from '@renderer/lib/chat/workspaceFileReques
 import { launchViewFor } from './launchView'
 import { needsDraftChatAfterWorkspaceAdd } from './workspaceAddHandoff'
 import { pinnedRunKey, prunePinnedRun, togglePinnedRun } from '../features/home/pinnedRuns'
+import { requestNavigatorScope } from './navigator/useNavigatorScope'
 import { ChatView } from '../features/chat/ChatView'
 import { SessionChatColumn } from '../features/chat/SessionChatColumn'
 import { AgentInstancePane } from '../features/chat/components/AgentInstancePane'
@@ -31,7 +32,8 @@ import type {
   AttachedFile,
   ToolApprovalMode,
   AgentInteractionMode,
-  ChatRewindPreviewResult
+  ChatRewindPreviewResult,
+  ToolApprovalDecision
 } from '@shared/ipc'
 import { defaultModelFor, isProviderConfigured, providerLabel } from '@shared/providers'
 import {
@@ -80,6 +82,9 @@ const TeammatesView = lazy(() =>
 )
 const HomePage = lazy(() =>
   import('../features/home/HomePage').then((m) => ({ default: m.HomePage }))
+)
+const UsagePage = lazy(() =>
+  import('../features/usage/UsagePage').then((m) => ({ default: m.UsagePage }))
 )
 
 function ViewSuspenseFallback() {
@@ -273,7 +278,7 @@ function App() {
   const focusedOpenInstance =
     focusedParentRunId != null ? (openInstanceByParent[focusedParentRunId] ?? null) : null
 
-  const [view, setView] = useState<'chat' | 'settings' | 'marketplace' | 'teammates' | 'home'>('chat')
+  const [view, setView] = useState<'chat' | 'settings' | 'marketplace' | 'teammates' | 'home' | 'usage'>('chat')
   const previousViewRef = useRef(view)
   const [marketplaceFocusServerId, setMarketplaceFocusServerId] = useState<string | null>(null)
   const [marketplaceFocusSkillPath, setMarketplaceFocusSkillPath] = useState<string | null>(null)
@@ -462,11 +467,12 @@ function App() {
     void update({ favoriteModels: [...set] })
   }, [settings.favoriteModels, update])
 
-  // Pin/unpin a session above the Home recency list — same data-array settings
-  // pattern as favoriteModels. The cap keeps the newest pins (pinnedRuns.ts).
+  // Pin/unpin a task: a pinned task that would be done keeps a navigator group
+  // of its own instead of folding away. Same data-array settings pattern as
+  // favoriteModels; the cap keeps the newest pins (pinnedRuns.ts).
   const onTogglePinnedRun = useCallback(
-    (key: string): void => {
-      void update({ pinnedRuns: togglePinnedRun(settings.pinnedRuns, key) })
+    (path: string, runId: string): void => {
+      void update({ pinnedRuns: togglePinnedRun(settings.pinnedRuns, pinnedRunKey(path, runId)) })
     },
     [settings.pinnedRuns, update]
   )
@@ -999,6 +1005,42 @@ function App() {
       )
     },
     [activeWorkspace, gateSendWithOnboarding, sendWithOfflineQueue]
+  )
+
+  /**
+   * Home's Start: a new task in that workspace, sent at once through the same
+   * onboarding gate, offline queue and controller the brief's Start task uses.
+   * With no key for the provider nothing could run, so the brief opens with the
+   * text in it instead, where the missing key is spelled out.
+   */
+  const onStartTaskFromHome = useCallback(
+    (path: string, brief: string): void => {
+      if (homeProviderIssue) {
+        onNewSessionInWorkspace(path, brief)
+        return
+      }
+      setOpenInstanceByParent({})
+      setView('chat')
+      void newChatInWorkspace(path).then(() =>
+        gateSendWithOnboarding(
+          (text, images, files, extras) =>
+            sendWithOfflineQueue(
+              text,
+              images,
+              files,
+              extras,
+              (t, i, f, e) => getRunControllerRef.current(null, path)?.send(t, i, f, e) ?? false,
+              { runId: null, workspacePath: path }
+            ),
+          brief,
+          undefined,
+          undefined,
+          undefined,
+          { workspacePath: path, runId: null }
+        )
+      )
+    },
+    [gateSendWithOnboarding, homeProviderIssue, newChatInWorkspace, onNewSessionInWorkspace, sendWithOfflineQueue]
   )
 
   const onChatEditAndResend = useCallback(
@@ -2201,6 +2243,48 @@ function App() {
     [getRunController, onSelectRunInWorkspace, refreshActiveRuns, refreshWorkspaceRuns]
   )
 
+  /**
+   * Pause a task's standing goal, then stop the run it launched — the goal
+   * banner's order. Pausing alone would leave the agent working on a goal the
+   * navigator now calls paused.
+   */
+  const onPauseGoalInWorkspace = useCallback(
+    async (path: string, runId: string, live: boolean): Promise<void> => {
+      const res = await window.vyotiq?.setGoalStatus({ workspacePath: path, runId, action: 'pause' })
+      if (!res) return
+      if (!res.ok) {
+        pushToast(res.error, 'error')
+        return
+      }
+      if (live) await onStopRunInWorkspace(path, runId)
+      else await refreshWorkspaceRuns(path)
+    },
+    [onStopRunInWorkspace, refreshWorkspaceRuns]
+  )
+
+  const onStopLoopInWorkspace = useCallback(
+    async (path: string, runId: string): Promise<void> => {
+      const res = await window.vyotiq?.setLoop({ workspacePath: path, runId, action: 'stop' })
+      if (!res) return
+      if (!res.ok) {
+        pushToast(res.error, 'error')
+        return
+      }
+      await refreshWorkspaceRuns(path)
+    },
+    [refreshWorkspaceRuns]
+  )
+
+  /** Home's Deny / Allow once, through the run's own controller so its record clears at once. */
+  const onRespondApprovalFromHome = useCallback(
+    async (path: string, runId: string, requestId: string, decision: ToolApprovalDecision): Promise<void> => {
+      const controller = getRunController(runId, path)
+      if (!controller) throw new Error('That task could not be reached.')
+      await controller.respondToApproval(requestId, decision)
+    },
+    [getRunController]
+  )
+
   const onReviewChangesInWorkspace = useCallback(
     async (path: string, runId?: string): Promise<void> => {
       if (runId) {
@@ -2308,6 +2392,7 @@ function App() {
         onOpenMarketplace={() => {}}
         onOpenChat={() => {}}
         onOpenHome={() => {}}
+        onOpenUsage={() => {}}
         onNewChat={() => {}}
         {...shellWorkspaceProps}
         loading
@@ -2348,7 +2433,14 @@ function App() {
       onOpenMarketplace={() => setView('marketplace')}
       onOpenChat={() => setView('chat')}
       onOpenHome={() => setView('home')}
+      onOpenUsage={() => setView('usage')}
       onNewChat={onNewChat}
+      pinnedRunKeys={settings.pinnedRuns}
+      onTogglePinnedRun={onTogglePinnedRun}
+      onStopRunInWorkspace={(path, runId) => void onStopRunInWorkspace(path, runId)}
+      onResumeRunInWorkspace={(path, runId) => void onResumeRunInWorkspace(path, runId)}
+      onPauseGoalInWorkspace={(path, runId, live) => void onPauseGoalInWorkspace(path, runId, live)}
+      onStopLoopInWorkspace={(path, runId) => void onStopLoopInWorkspace(path, runId)}
       running={chat.running || chat.pendingRun}
       onChatStop={onChatStop}
       onCloseChat={() => {
@@ -2464,12 +2556,16 @@ function App() {
               activeWorkspace={activeWorkspace}
               runsByWorkspacePath={runsByWorkspacePath}
               activeRuns={shellWorkspaceProps.activeRuns}
-              workspaceHasBackgroundRun={workspaceHasBackgroundRun}
               providerIssue={homeProviderIssue}
-              onNewSessionInWorkspace={onNewSessionInWorkspace}
-              onSelectRunInWorkspace={shellWorkspaceProps.onSelectRunInWorkspace}
-              onSwitchWorkspace={shellWorkspaceProps.onSwitchWorkspace}
+              onStartTask={onStartTaskFromHome}
+              onNewTaskInWorkspace={(path) => onNewSessionInWorkspace(path, '')}
+              onOpenTask={shellWorkspaceProps.onSelectRunInWorkspace}
+              onOpenWorkspace={(path) => {
+                shellWorkspaceProps.onSwitchWorkspace(path)
+                requestNavigatorScope(path)
+              }}
               onAddWorkspace={shellWorkspaceProps.onAddWorkspace}
+              onRespondApproval={onRespondApprovalFromHome}
               onOpenProviderSettings={() => {
                 setSettingsSection('providers')
                 setView('settings')
@@ -2478,15 +2574,19 @@ function App() {
                 setMarketplaceFocusServerId(serverId)
                 setView('marketplace')
               }}
-              onStopRunInWorkspace={onStopRunInWorkspace}
-              onResumeRunInWorkspace={onResumeRunInWorkspace}
-              onReviewChangesInWorkspace={(path, runId) => void onReviewChangesInWorkspace(path, runId)}
-              onRefreshWorkspaceRuns={(path) => refreshWorkspaceRuns(path)}
+              onReviewChangesInWorkspace={(path) => void onReviewChangesInWorkspace(path)}
+              onOpenUsage={() => setView('usage')}
               refreshVersion={homeRefreshVersion}
-              isRunOpenInPane={isSessionOpenInPane}
-              isRunFocusedInPane={isSessionFocusedInPane}
-              pinnedRunKeys={settings.pinnedRuns}
-              onTogglePinnedRun={onTogglePinnedRun}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      ) : view === 'usage' ? (
+        <ErrorBoundary title="Usage couldn't render" resetKey="usage">
+          <Suspense fallback={<ViewSuspenseFallback />}>
+            <UsagePage
+              openWorkspaces={openWorkspaces}
+              onOpenTask={shellWorkspaceProps.onSelectRunInWorkspace}
+              refreshVersion={homeRefreshVersion}
             />
           </Suspense>
         </ErrorBoundary>

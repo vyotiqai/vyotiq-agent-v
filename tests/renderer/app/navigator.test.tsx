@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import type { NotificationItem, RunSummary } from '@shared/ipc'
+import { RUN_INTERRUPTED_ERROR } from '@shared/runInterrupt'
 import { SESSION_DRAG_MIME } from '@renderer/lib/chat/chatPaneLayout'
 
 const updater = vi.hoisted(() => ({
@@ -40,6 +41,7 @@ function props(over: Partial<NavigatorProps> = {}): NavigatorProps {
     onNewTask: vi.fn(),
     onOpenHome: vi.fn(),
     onOpenExtensions: vi.fn(),
+    onOpenUsage: vi.fn(),
     onOpenSettings: vi.fn(),
     onOpenShortcuts: vi.fn(),
     onAddWorkspace: vi.fn(),
@@ -130,6 +132,82 @@ describe('Navigator', () => {
     fireEvent.change(input, { target: { value: 'Fix the updater' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(p.rowActions.onRename).toHaveBeenCalledWith(WS, 'r1', 'Fix the updater')
+  })
+
+  it('offers what a run can be told from its menu, only when it applies', () => {
+    const actions = {
+      onSelect: vi.fn(),
+      onRename: vi.fn(),
+      onDelete: vi.fn(),
+      onStop: vi.fn(),
+      onResume: vi.fn(),
+      onPauseGoal: vi.fn(),
+      onStopLoop: vi.fn(),
+      onTogglePin: vi.fn()
+    }
+    render(
+      <Navigator
+        {...props({
+          runsByWorkspacePath: {
+            [WS]: {
+              runs: [
+                run('live', { status: 'running', goal: 'Task live', goalStatus: 'active' }),
+                run('cut', { status: 'cancelled', resumable: true, error: RUN_INTERRUPTED_ERROR }),
+                run('loop', { loopArmed: true, loopNextAt: new Date(Date.now() + 3_600_000).toISOString() })
+              ]
+            }
+          },
+          activeRuns: [{ runId: 'live', workspacePath: WS, invokeId: 1, pendingFollowUps: [] }],
+          rowActions: actions
+        })}
+      />
+    )
+    const menuFor = (name: string): string[] => {
+      fireEvent.contextMenu(row(name))
+      const items = screen.getAllByRole('menuitem').map((item) => item.textContent ?? '')
+      fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+      return items
+    }
+
+    const liveItems = menuFor('Task live')
+    expect(liveItems.slice(0, 3)).toEqual(['Stop', 'Pause goal', 'Pin'])
+    expect(liveItems).not.toContain('Resume')
+    fireEvent.contextMenu(row('Task live'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Pause goal' }))
+    expect(actions.onPauseGoal).toHaveBeenCalledWith(WS, 'live', true)
+
+    expect(menuFor('Task cut').slice(0, 2)).toEqual(['Resume', 'Pin'])
+    fireEvent.contextMenu(row('Task cut'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Resume' }))
+    expect(actions.onResume).toHaveBeenCalledWith(WS, 'cut')
+
+    expect(menuFor('Task loop').slice(0, 2)).toEqual(['Stop loop', 'Pin'])
+    fireEvent.contextMenu(row('Task loop'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Pin' }))
+    expect(actions.onTogglePin).toHaveBeenCalledWith(WS, 'loop')
+  })
+
+  it('lists pinned tasks in their own group, and offers to unpin them', () => {
+    const p = props({
+      runsByWorkspacePath: { [WS]: { runs: [run('keep'), run('other')] } },
+      rowActions: { onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), onTogglePin: vi.fn() },
+      pinnedKeys: new Set([`${WS}\u0000keep`])
+    })
+    render(<Navigator {...p} />)
+    const pinned = document.querySelector('[data-nav-section="pinned"]') as HTMLElement
+    expect(within(pinned).getByRole('heading').textContent).toBe('Pinned1')
+    fireEvent.contextMenu(within(pinned).getByRole('button', { name: /^Task keep/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Unpin' }))
+    expect(p.rowActions.onTogglePin).toHaveBeenCalledWith(WS, 'keep')
+  })
+
+  it('lists Usage among the places', () => {
+    const p = props({ place: 'usage' })
+    render(<Navigator {...p} />)
+    const usage = screen.getByRole('button', { name: 'Usage' })
+    expect(usage.getAttribute('aria-current')).toBe('page')
+    fireEvent.click(usage)
+    expect(p.onOpenUsage).toHaveBeenCalledTimes(1)
   })
 
   it('shows five finished tasks, then "N more"', () => {
