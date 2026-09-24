@@ -361,7 +361,6 @@ import {
 } from '../agent/agentQuestion'
 import { listProviderModels } from '../agent/providers'
 import { clearModelCache } from '../agent/providers/modelCache'
-import { collectWorkspaceFiles } from '../agent/tools/walk'
 import {
   disposeWorkspaceIndexes,
   pauseWorkspaceIndexes,
@@ -560,6 +559,10 @@ import {
   statWorkspaceFile,
   WorkspaceFileError
 } from '@main/workspace/fileService'
+import {
+  invalidateWorkspaceFileListCache,
+  readWorkspaceFileListCached
+} from '@main/workspace/fileListCache'
 import {
   formatWorkspaceFile,
   workspaceFormatterStatus
@@ -1091,6 +1094,7 @@ export function registerIpc(): void {
         // IPC otherwise races remove and can rewrite openPaths from a stale read.
         disposeWorkspaceIndexes(path)
         stopAgentContextWatch(path)
+        invalidateWorkspaceFileListCache(path)
         const next = await enqueueWorkspaceMutation(() => removeWorkspace(path))
         // Storage retention (audit H5): renderer-confirmed storage-dir delete
         // on workspace removal. Skip silently when the dir is gone already.
@@ -4055,9 +4059,8 @@ export function registerIpc(): void {
       }
       const maxResults = req.maxResults ?? 24
       const query = (req.query ?? '').trim().toLowerCase().replace(/\\/g, '/')
-      const files = await collectWorkspaceFiles(req.workspacePath, 8_000)
+      const files = await readWorkspaceFileListCached(req.workspacePath)
       const matched = files
-        .map((f) => f.rel.replace(/\\/g, '/'))
         .filter((rel) => {
           if (!isSafeWorkspaceRelPath(rel)) return false
           return query ? rel.toLowerCase().includes(query) : true
@@ -4164,6 +4167,8 @@ export function registerIpc(): void {
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const result = await saveWorkspaceFile(req)
       scheduleWorkspaceIndexSync(req.workspacePath)
+      // Only a save with no version to check against can have created the file.
+      if (!req.expectedVersion) invalidateWorkspaceFileListCache(req.workspacePath)
       if (isSkillRelatedRelPath(req.path) || isRuleRelatedRelPath(req.path)) {
         if (isRuleRelatedRelPath(req.path)) clearRulesCache(req.workspacePath)
         notifySkillsChanged(req.workspacePath)
@@ -4181,6 +4186,7 @@ export function registerIpc(): void {
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const result = await createWorkspaceFile(req)
       scheduleWorkspaceIndexSync(req.workspacePath)
+      invalidateWorkspaceFileListCache(req.workspacePath)
       const createdRel = [req.parentPath, req.name].filter(Boolean).join('/')
       if (isSkillRelatedRelPath(createdRel) || isRuleRelatedRelPath(createdRel)) {
         if (isRuleRelatedRelPath(createdRel)) clearRulesCache(req.workspacePath)
@@ -4199,6 +4205,7 @@ export function registerIpc(): void {
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const result = await moveWorkspaceFile(req)
       scheduleWorkspaceIndexSync(req.workspacePath)
+      invalidateWorkspaceFileListCache(req.workspacePath)
       if (
         isSkillRelatedRelPath(req.fromPath) ||
         isSkillRelatedRelPath(req.toPath) ||
@@ -4223,6 +4230,7 @@ export function registerIpc(): void {
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const result = await deleteWorkspaceFile(req)
       scheduleWorkspaceIndexSync(req.workspacePath)
+      invalidateWorkspaceFileListCache(req.workspacePath)
       if (isSkillRelatedRelPath(req.path) || isRuleRelatedRelPath(req.path)) {
         if (isRuleRelatedRelPath(req.path)) clearRulesCache(req.workspacePath)
         notifySkillsChanged(req.workspacePath)
@@ -4335,9 +4343,8 @@ export function registerIpc(): void {
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const maxResults = req.maxResults ?? 40
       const query = (req.query ?? '').trim().toLowerCase().replace(/\\/g, '/')
-      const files = await collectWorkspaceFiles(req.workspacePath, 8_000)
+      const files = await readWorkspaceFileListCached(req.workspacePath)
       const matched = files
-        .map((f) => f.rel.replace(/\\/g, '/'))
         .filter((rel) => isSafeWorkspaceRelPath(rel) && isCuratedDocPath(rel))
         .filter((rel) => (query ? rel.toLowerCase().includes(query) : true))
         .sort((a, b) => a.localeCompare(b))

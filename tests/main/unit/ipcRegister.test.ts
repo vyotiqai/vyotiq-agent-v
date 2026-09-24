@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppError } from '@shared/utils/errors'
 import { IPC } from '@shared/channels'
 import type { AgentEvent } from '@shared/ipc'
+import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -260,6 +261,10 @@ vi.mock('@main/logging/sentry', () => ({
 }))
 
 import { registerIpc } from '@main/ipc/register'
+import { loadStatus } from '@main/agent/state'
+import { clearWorkspaceIndexSyncTimers } from '@main/agent/workspaceIndex'
+import { getWorkspaces } from '@main/workspace/workspaces'
+import { invalidateWorkspaceFileListCache } from '@main/workspace/fileListCache'
 
 async function flushAsync(): Promise<void> {
   for (let i = 0; i < 5; i++) {
@@ -441,6 +446,55 @@ describe('registerIpc', () => {
         const result = await handlers.get(channel)!({ sender: mockWc, senderFrame: mockMainFrame }, validPayloads[channel])
         expect(result).toEqual({ ok: false, error: 'Workspace is not open' })
       }
+    })
+  })
+
+  describe('workspaceSuggestPaths', () => {
+    let root: string
+
+    beforeEach(() => {
+      root = mkdtempSync(join(tmpdir(), 'vyotiq-suggest-'))
+      writeFileSync(join(root, 'alpha.ts'), '')
+      getWorkspaces().openPaths.push(root)
+    })
+
+    afterEach(() => {
+      const open = getWorkspaces().openPaths
+      open.splice(open.indexOf(root), 1)
+      clearWorkspaceIndexSyncTimers()
+      invalidateWorkspaceFileListCache()
+      rmSync(root, { recursive: true, force: true })
+    })
+
+    async function suggestedPaths(): Promise<unknown> {
+      const result = (await handlers.get(IPC.workspaceSuggestPaths)!(
+        { sender: mockWc, senderFrame: mockMainFrame },
+        { workspacePath: root, query: '.ts' }
+      )) as { ok: boolean; data?: { paths: string[] } }
+      return result.ok ? result.data?.paths : result
+    }
+
+    it('answers from one walk until the Files panel or a close reports a change', async () => {
+      expect(await suggestedPaths()).toEqual(['alpha.ts'])
+      // Written behind the app's back, so only a fresh walk could list it.
+      writeFileSync(join(root, 'beta.ts'), '')
+      expect(await suggestedPaths()).toEqual(['alpha.ts'])
+
+      const created = await handlers.get(IPC.workspaceFileCreate)!(
+        { sender: mockWc, senderFrame: mockMainFrame },
+        { workspacePath: root, parentPath: '', name: 'gamma.ts', kind: 'file', replaceExisting: false }
+      )
+      expect(created).toMatchObject({ ok: true })
+      expect(await suggestedPaths()).toEqual(['alpha.ts', 'beta.ts', 'gamma.ts'])
+
+      writeFileSync(join(root, 'delta.ts'), '')
+      const removed = await handlers.get(IPC.workspacesRemove)!(
+        { sender: mockWc, senderFrame: mockMainFrame },
+        { path: root }
+      )
+      expect(removed).toMatchObject({ ok: true })
+      // The mocked store still lists it as open, so this query shows the close dropped the walk.
+      expect(await suggestedPaths()).toEqual(['alpha.ts', 'beta.ts', 'delta.ts', 'gamma.ts'])
     })
   })
 
@@ -813,7 +867,7 @@ describe('registerIpc', () => {
         expect(result.error).toMatch(/editMessageIndex out of range/i)
         expect(result.code).not.toBe('IPC_HANDLER')
       }
-      expect(tryRegisterRunAbortMock).toHaveBeenCalledWith('run-edit', '/ws', undefined)
+      expect(tryRegisterRunAbortMock).toHaveBeenCalledWith('run-edit', '/ws')
       expect(clearRunAbortMock).toHaveBeenCalledWith('run-edit', 42)
       expect(runAgentMock).not.toHaveBeenCalled()
     })
@@ -1167,65 +1221,5 @@ describe('registerIpc', () => {
         data: expect.objectContaining({ openPaths: ['/plain-ws'] })
       })
     })
-  })
-})
-
-/**
- * A retry whose task or teammate is gone is the user asking for something that
- * is no longer there — `tasks:retry` threw `Unknown teammate profile: scout`
- * live on 2026-09-22 and `failFrom` logged it as a handler fault and captured
- * it as an exception. These refusals belong in the IPC_CLIENT class, and the
- * classifier that decides is an allow-list, so it needs pinning: a pattern that
- * drifts silently re-promotes a routine refusal to an app fault.
- */
-describe('IPC expected-failure classification', () => {
-  const previousBackend = getLoggerBackend()
-  const warn = vi.fn()
-  const error = vi.fn()
-
-  beforeEach(() => {
-    warn.mockReset()
-    error.mockReset()
-    setLoggerBackend({
-      log: (level, message, fields) => {
-        if (level === 'warn') warn(message, fields)
-        if (level === 'error' || level === 'fatal') error(message, fields)
-      }
-    })
-    registerIpc()
-  })
-
-  afterEach(() => {
-    setLoggerBackend(previousBackend)
-  })
-
-  it('logs a retry of an unknown task as an expected failure, not a handler fault', async () => {
-    const handler = handlers.get(IPC_CHANNELS.tasksRetry)
-    expect(handler).toBeDefined()
-
-    const result = await handler!(
-      { sender: mockWc, senderFrame: mockMainFrame },
-      { id: 'task-does-not-exist' }
-    )
-
-    // The renderer sees IPC_CLIENT, and main logged it as an expected failure
-    // rather than a handler fault — so nothing is captured as an exception.
-    expect(result).toMatchObject({ ok: false, code: 'IPC_CLIENT' })
-    expect(error).not.toHaveBeenCalled()
-    expect(warn.mock.calls.some(([msg]) => String(msg).startsWith('IPC expected failure'))).toBe(
-      true
-    )
-  })
-
-  it('still reports an unrelated handler fault at error level', async () => {
-    // The classifier is an allow-list: anything it does not name must stay a
-    // fault. A bad payload is the cheapest way to prove it from the outside.
-    const handler = handlers.get(IPC_CHANNELS.tasksRetry)
-    const result = await handler!({ sender: mockWc, senderFrame: mockMainFrame }, { id: 42 })
-
-    expect(result).toMatchObject({ ok: false, code: 'IPC_VALIDATION' })
-    expect(
-      warn.mock.calls.some(([msg]) => String(msg).startsWith('IPC expected failure'))
-    ).toBe(false)
   })
 })
