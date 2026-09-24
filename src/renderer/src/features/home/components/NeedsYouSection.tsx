@@ -6,7 +6,7 @@ import { Button, IconButton, StatusGlyph } from '@renderer/lib/ui'
 import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
 import type { McpHealthIssue } from '../useMcpHealth'
 import type { PendingAsk } from '../usePendingAsks'
-import { approvalAsk, questionAsk } from '../needsYouText'
+import { approvalAsk, questionAsk } from '@shared/needsYouText'
 import { HomeRow, HomeSection } from './HomeBlocks'
 
 export type ProviderIssue = {

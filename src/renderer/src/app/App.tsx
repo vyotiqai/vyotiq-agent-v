@@ -307,6 +307,8 @@ function App() {
   const [modelsRefreshNonce, setModelsRefreshNonce] = useState(0)
   const [homeRefreshVersion, setHomeRefreshVersion] = useState(0)
   const [openChangesRequest, setOpenChangesRequest] = useState(0)
+  /** Which changes the request opens: the workspace's, or the task's own. */
+  const [openChangesScope, setOpenChangesScope] = useState<'agent' | 'uncommitted'>('uncommitted')
   const consumeOpenChangesRequest = useCallback(() => setOpenChangesRequest(0), [])
   const chatHeadingRef = useRef<HTMLHeadingElement>(null)
   const settingsBackRef = useRef<HTMLButtonElement>(null)
@@ -693,7 +695,8 @@ function App() {
 
   const onCopyRunLinkInWorkspace = useCallback((path: string, runId: string): void => {
     void copyText(buildRunDeepLink(path, runId)).then((copied) => {
-      pushToast(copied ? 'Link copied.' : 'Could not copy link.', copied ? 'success' : 'error')
+      if (copied) pushToast('Link copied', { icon: 'link' })
+      else pushToast('Could not copy link.', 'error')
     })
   }, [])
 
@@ -2310,9 +2313,20 @@ function App() {
         await switchWorkspace(path)
         setView('chat')
       }
+      setOpenChangesScope('uncommitted')
       setOpenChangesRequest((request) => request + 1)
     },
     [onSelectRunInWorkspace, switchWorkspace]
+  )
+
+  /** A finished task's Review: the task, with Changes on what this task changed. */
+  const onReviewTask = useCallback(
+    async (path: string, runId: string): Promise<void> => {
+      await onSelectRunInWorkspace(path, runId)
+      setOpenChangesScope('agent')
+      setOpenChangesRequest((request) => request + 1)
+    },
+    [onSelectRunInWorkspace]
   )
 
   const chatError = chat.error
@@ -2458,6 +2472,7 @@ function App() {
       onResumeRunInWorkspace={(path, runId) => void onResumeRunInWorkspace(path, runId)}
       onPauseGoalInWorkspace={(path, runId, live) => void onPauseGoalInWorkspace(path, runId, live)}
       onStopLoopInWorkspace={(path, runId) => void onStopLoopInWorkspace(path, runId)}
+      onReviewTask={(path, runId) => void onReviewTask(path, runId)}
       running={chat.running || chat.pendingRun}
       onChatStop={onChatStop}
       onCloseChat={() => {
@@ -2735,6 +2750,7 @@ function App() {
             }
             getInstanceController={getRunController}
             openChangesRequest={openChangesRequest}
+            openChangesScope={openChangesScope}
             onOpenChangesRequestHandled={consumeOpenChangesRequest}
           />
         </ErrorBoundary>

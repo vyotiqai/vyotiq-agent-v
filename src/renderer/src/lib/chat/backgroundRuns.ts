@@ -20,18 +20,3 @@ export function finishedBackgroundRuns(
       )
   )
 }
-
-export function backgroundRunFinishedMessage(title: string | null | undefined): string {
-  const t = title?.trim()
-  return t ? `Finished: ${t}` : 'Agent finished'
-}
-
-export function shouldShowBackgroundRunToast(opts: {
-  windowFocused: boolean
-  focusedRunId: string | null | undefined
-  finishedRunId: string
-}): boolean {
-  if (!opts.windowFocused) return false
-  if (opts.focusedRunId && opts.focusedRunId === opts.finishedRunId) return false
-  return true
-}

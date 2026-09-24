@@ -99,6 +99,18 @@ export function Navigator(props: NavigatorProps) {
     ]
   )
 
+  // A restart interrupts every live task, whatever the switcher shows.
+  const runningCount = useMemo(() => {
+    let count = 0
+    for (const path of openPaths) {
+      for (const run of runsByWorkspacePath[path]?.runs ?? []) {
+        if (run.inlineInstance) continue
+        if (props.activeRuns.some((a) => a.runId === run.runId && workspacePathsEqual(a.workspacePath, path))) count++
+      }
+    }
+    return count
+  }, [openPaths, runsByWorkspacePath, props.activeRuns])
+
   const cappedPaths = useMemo(
     () =>
       openPaths.filter(
@@ -212,7 +224,7 @@ export function Navigator(props: NavigatorProps) {
         />
         <IconButton icon="question" label="Help & shortcuts" size="md" tone="muted" onClick={props.onOpenShortcuts} />
         <span className="flex-1" />
-        <UpdateChip />
+        <UpdateChip runningCount={runningCount} />
       </div>
     </nav>
   )

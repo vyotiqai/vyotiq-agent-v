@@ -189,6 +189,7 @@ export function ChatView({
   onOpenInstanceRunIdChange,
   getInstanceController,
   openChangesRequest = 0,
+  openChangesScope = 'uncommitted',
   onOpenChangesRequestHandled
 }: {
   items: UiItem[]
@@ -331,6 +332,8 @@ export function ChatView({
     workspacePath: string
   ) => import('@renderer/lib/hooks/createChatStreamController').ChatStreamController | null
   openChangesRequest?: number
+  /** Which changes that request opens: the workspace's (default) or this task's. */
+  openChangesScope?: 'agent' | 'uncommitted'
   /** One-shot consumption ack — the owner resets the request so a remount cannot replay it. */
   onOpenChangesRequestHandled?: () => void
 }) {
@@ -706,11 +709,11 @@ const runGoal = useRunGoal({
     }
     if (openChangesRequest === handledOpenChangesRequestRef.current) return
     handledOpenChangesRequestRef.current = openChangesRequest
-    openChangesPanel('uncommitted')
+    openChangesPanel(openChangesScope)
     // Reset the owner's counter: the ref resets on unmount, so without this a
     // later ChatView remount re-consumes the same request and force-opens Changes.
     onOpenChangesRequestHandled?.()
-  }, [onOpenChangesRequestHandled, openChangesPanel, openChangesRequest])
+  }, [onOpenChangesRequestHandled, openChangesPanel, openChangesRequest, openChangesScope])
 
   const toggleRightPanel = useCallback(
     (panel: ChatRightPanelId) => {

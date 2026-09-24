@@ -123,7 +123,9 @@ export function useDropdownMenu({
       if (e.key === 'Escape') {
         e.preventDefault()
         e.stopPropagation()
-        close(true)
+        // Back to the trigger only from inside the panel: a panel that opened
+        // on its own must not pull focus out of whatever you were typing in.
+        close(panelRef?.current?.contains(document.activeElement) ?? true)
       }
     }
     document.addEventListener('mousedown', onDoc)

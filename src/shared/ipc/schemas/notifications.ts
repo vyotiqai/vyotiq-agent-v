@@ -41,7 +41,9 @@ export const NotificationItemSchema = z.object({
   title: z.string().min(1).max(NOTIFICATION_TITLE_MAX),
   body: z.string().max(NOTIFICATION_BODY_MAX),
   dedupeKey: z.string().min(1),
-  action: NotificationActionSchema.optional()
+  action: NotificationActionSchema.optional(),
+  /** A finished run's files still waiting on Keep or Undo when it finished — its Ready for review. */
+  reviewFiles: z.number().int().min(1).optional()
 })
 export type NotificationItem = z.infer<typeof NotificationItemSchema>
 
@@ -62,7 +64,8 @@ export const NotificationPublishInputSchema = z.object({
   title: z.string().min(1),
   body: z.string(),
   dedupeKey: z.string().min(1),
-  action: NotificationActionSchema.optional()
+  action: NotificationActionSchema.optional(),
+  reviewFiles: z.number().int().min(1).optional()
 })
 export type NotificationPublishInput = z.infer<typeof NotificationPublishInputSchema>
 

@@ -207,6 +207,17 @@ describe('notification service', () => {
     expect(items[0]!.body).toBe('edit a.ts')
   })
 
+  it('keeps the files a finished run left for review, on disk too', () => {
+    publishNotification(basePublish({ title: 'Tidy a.txt', body: 'Ready for review · 2 files', reviewFiles: 2 }))
+    expect(listNotifications().items[0]).toMatchObject({ body: 'Ready for review · 2 files', reviewFiles: 2 })
+    // A fresh read of the inbox file keeps it — the store parses what it wrote.
+    setNotificationsPathForTests(join(dir, 'notifications.json'))
+    expect(listNotifications().items[0]!.reviewFiles).toBe(2)
+    // Finishing again with nothing left to review drops it rather than keeping the old count.
+    publishNotification(basePublish({ title: 'Tidy a.txt', body: 'Finished' }))
+    expect(listNotifications().items[0]).not.toHaveProperty('reviewFiles')
+  })
+
   it('caps the inbox at 50, dropping oldest read first', () => {
     settingsState.current!.notifications.desktop = 'off'
     for (let i = 0; i < 50; i++) {

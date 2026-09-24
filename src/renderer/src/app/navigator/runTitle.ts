@@ -1,28 +1,13 @@
 import type { RunSummary } from '@shared/ipc'
 import { formatAgentInstanceShortId } from '@shared/utils/agentInstance'
+import { SPAWN_PREFIX, stripGoalMarkdown, taskTitleFromGoal } from '@shared/utils/taskTitle'
+
+export { stripGoalMarkdown }
 
 const SCOPE_LINE_PREFIX =
   /^(?:AUDIT(?:\s*\/\s*RESPAWN)?\s+SCOPE|PATH\s+SCOPE|SCOPE)\s*:\s*/i
-const SPAWN_PREFIX =
-  /^(?:Spawn(?:ed)?(?:\s+multiple)?(?:\s+parallel)?\s+instances?\s+for\s*:\s*)/i
 const PATH_SCOPE_FOOTER = /^Path scope \(writes must stay within/i
 const MAX_INSTANCE_TITLE = 48
-
-/** First-line plain text from a run goal (strip common markdown chrome). */
-export function stripGoalMarkdown(goal: string): string {
-  let s = goal.trim().split(/\r?\n/, 1)[0] ?? ''
-  s = s.replace(/^#{1,6}\s+/, '')
-  s = s.replace(/\*\*(.+?)\*\*/g, '$1')
-  s = s.replace(/__(.+?)__/g, '$1')
-  s = s.replace(/\*(.+?)\*/g, '$1')
-  s = s.replace(/_(.+?)_/g, '$1')
-  s = s.replace(/`([^`]+)`/g, '$1')
-  s = s.replace(/^>\s+/, '')
-  s = s.replace(/^[-*+]\s*\[[ xX]\]\s+/, '')
-  s = s.replace(/^[-*+]\s+/, '')
-  s = s.replace(/^\d+\.\s+/, '')
-  return s.replace(/\s+/g, ' ').trim()
-}
 
 function clipTitle(text: string, max = MAX_INSTANCE_TITLE): string {
   const t = text.replace(/\s+/g, ' ').trim()
@@ -146,12 +131,6 @@ export function uniqueInstanceTitles(runs: RunSummary[]): Map<string, string> {
   return out
 }
 
-function parentDisplayTitle(goal: string): string {
-  let plain = stripGoalMarkdown(goal)
-  plain = plain.replace(SPAWN_PREFIX, '').trim()
-  return plain || goal.trim()
-}
-
 /** Teammate-bound runs lead with the teammate name: `Scout · Fix the cart badge`. */
 function teammatePrefixTitle(run: RunSummary, goalBody: string): string {
   if (!run.agentProfileName) return goalBody
@@ -165,7 +144,7 @@ export function runTitle(run: RunSummary): string {
   }
   if (!goal) return run.agentProfileName ?? run.runId.slice(0, 8)
   // Full plain title — row CSS `truncate` + tooltip handle overflow (no dual cut).
-  return teammatePrefixTitle(run, parentDisplayTitle(goal))
+  return teammatePrefixTitle(run, taskTitleFromGoal(goal))
 }
 
 export function runTooltip(run: RunSummary): string {
@@ -178,7 +157,7 @@ export function runTooltip(run: RunSummary): string {
     return scope ? `Instance · ${plain} · ${scope}` : `Instance · ${plain}`
   }
   if (!goal) return run.agentProfileName ?? run.runId
-  return teammatePrefixTitle(run, parentDisplayTitle(goal))
+  return teammatePrefixTitle(run, taskTitleFromGoal(goal))
 }
 
 /** Lowercase plain text for sidebar search — matches displayed title, not raw goal. */
@@ -189,5 +168,5 @@ export function runSearchText(run: RunSummary): string {
   if (run.inlineInstance) {
     return `${instanceDisplayTitle(goal, run.runId, run.pathScope).toLowerCase()} ${plain} ${run.runId.toLowerCase()}`
   }
-  return teammatePrefixTitle(run, parentDisplayTitle(goal)).toLowerCase()
+  return teammatePrefixTitle(run, taskTitleFromGoal(goal)).toLowerCase()
 }

@@ -35,6 +35,7 @@ import {
   registerQuestionSender
 } from './agentQuestion'
 import { publishLifecycleNotification } from '../notifications/bus'
+import { approvalNoticeFor, finishedNoticeFor, questionNoticeFor } from '../notifications/runNotices'
 import {
   clearRunAbort,
   followUpPreview,
@@ -49,35 +50,6 @@ import { readGoal } from './runGoal'
 import { launchRunFollowUpOrStart } from './launchRunInvoke'
 import { emitGoalUpdate } from './goalEvents'
 import { planGoalRelaunch } from './goalRelaunchPlan'
-
-/**
- * Title and body for a run's terminal notification.
- *
- * Says who finished, not just that something did. A delegated run sets no
- * goal, so the only identifying field the old title could use was always
- * empty for exactly the runs the user had walked away from — "assign and walk
- * away" notified with a bare "Finished", naming neither teammate nor task.
- *
- * Exported for its own test: composed inline, the only way to exercise it was
- * to drive a whole run to completion, which is why it went untested.
- */
-export function runFinishedNotificationText(input: {
-  failed: boolean
-  goal?: string | undefined
-  teammateName?: string | undefined
-  delegated: boolean
-}): { title: string; body: string } {
-  const goal = input.goal?.trim() ?? ''
-  const teammate = input.teammateName?.trim() ?? ''
-  const verb = input.failed ? 'failed' : 'finished'
-  const suffix = goal ? `: ${goal}` : ''
-  return {
-    title: teammate
-      ? `${teammate} ${verb}${suffix}`
-      : `${input.failed ? 'Failed' : 'Finished'}${suffix}`,
-    body: input.delegated ? `Delegated task ${verb}` : `Agent run ${verb}`
-  }
-}
 
 /**
  * Per-run relaunch budget + pending delayed-relaunch timers (module scope so
@@ -186,11 +158,12 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
     const releaseApprovalSender = registerApprovalSender(runId, (request) => {
       batcher.flush()
       sendToWebContents(IPC.toolApprovalRequest, request, wc)
+      const notice = approvalNoticeFor(workspacePath, runId, request)
       publishLifecycleNotification({
         source: 'agent',
         kind: 'needs_you',
-        title: 'Needs your input',
-        body: request.summary.trim() || request.name,
+        title: notice.title,
+        body: notice.body,
         dedupeKey: needsYouDedupeKey(runId),
         action: { type: 'open_run', workspacePath, runId }
       })
@@ -198,12 +171,12 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
     const releaseQuestionSender = registerQuestionSender(runId, (request) => {
       batcher.flush()
       sendToWebContents(IPC.agentQuestionRequest, request, wc)
-      const firstPrompt = request.questions[0]?.prompt ?? ''
+      const notice = questionNoticeFor(workspacePath, runId, request)
       publishLifecycleNotification({
         source: 'agent',
         kind: 'needs_you',
-        title: 'Needs your input',
-        body: (request.title ?? firstPrompt).trim() || 'Waiting for your answer',
+        title: notice.title,
+        body: notice.body,
         dedupeKey: needsYouDedupeKey(runId),
         action: { type: 'open_run', workspacePath, runId }
       })
@@ -386,19 +359,15 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
         !relaunchedActiveGoal
       ) {
         const failed = terminalStatus === 'error'
-        const text = runFinishedNotificationText({
-          failed,
-          goal: persisted?.goal,
-          teammateName: persisted?.agentProfileName,
-          delegated: Boolean(persisted?.delegatedTaskId)
-        })
+        const notice = finishedNoticeFor({ workspacePath, runId, runDir, failed, status: persisted })
         publishLifecycleNotification({
           source: 'agent',
           kind: failed ? 'run_error' : 'run_done',
-          title: text.title,
-          body: text.body,
+          title: notice.title,
+          body: notice.body,
           dedupeKey: failed ? runErrorDedupeKey(runId) : runDoneDedupeKey(runId),
-          action: { type: 'open_run', workspacePath, runId }
+          action: { type: 'open_run', workspacePath, runId },
+          ...(notice.reviewFiles ? { reviewFiles: notice.reviewFiles } : {})
         })
       }
       if (persisted?.inlineInstance && persisted.parentRunId) {

@@ -7,6 +7,7 @@ import { useOverlayPanel } from '@renderer/lib/hooks/useOverlayPanel'
 import { usePersistedBoolean } from '@renderer/lib/hooks/usePersistedBoolean'
 import { usePersistedNumber } from '@renderer/lib/hooks/usePersistedNumber'
 import { useNotifications } from '@renderer/lib/hooks/useNotifications'
+import { useRunToasts } from '@renderer/lib/hooks/useRunToasts'
 import {
   SIDEBAR_COLLAPSED_KEY,
   SIDEBAR_WIDTH_KEY,
@@ -63,6 +64,8 @@ export type AppShellProps = {
   /** A new task whose brief starts as `text` (palette Ctrl ↵). */
   onNewTaskWithText?: (path: string, text: string) => void
   onSelectRunInWorkspace?: (path: string, runId: string) => void
+  /** A finished task, with Changes on what it changed (a Ready for review toast's Review). */
+  onReviewTask?: (path: string, runId: string) => void
   /** Open a task in a second pane beside the focused one (palette Shift ↵). */
   onOpenRunBeside?: (path: string, runId: string) => void
   onRenameRunInWorkspace?: (path: string, runId: string, goal: string) => void
@@ -147,7 +150,9 @@ function AppShellInner(props: AppShellProps) {
   const mainRef = useRef<HTMLElement>(null)
   const navigatorOpen = isDesktop ? !navigatorHidden : drawerOpen
 
-  const notifications = useNotifications({ focusedRunId: focusedRun?.runId ?? null })
+  // The task in front of you: the focused pane's, while the task view is showing.
+  const visibleRunId = view === 'chat' ? (focusedRun?.runId ?? null) : null
+  const notifications = useNotifications({ focusedRunId: visibleRunId })
 
   const closeDrawer = useCallback((): void => setDrawerOpen(false), [])
   const onToggleNavigator = useCallback((): void => {
@@ -200,6 +205,19 @@ function AppShellInner(props: AppShellProps) {
     },
     [onSelectRunInWorkspace, onOpenChat, isDesktop]
   )
+
+  useRunToasts({
+    items: notifications.items,
+    isOnScreen: (path, runId) =>
+      view === 'chat' && (runId === visibleRunId || (props.isRunOpenInPane?.(path, runId) ?? false)),
+    onOpenTask: openTask,
+    onReviewTask: (path, runId) => {
+      if (props.onReviewTask) {
+        props.onReviewTask(path, runId)
+        if (!isDesktop) setDrawerOpen(false)
+      } else openTask(path, runId)
+    }
+  })
 
   const onNextNeedsYou = useCallback((): void => {
     const waiting = allTasks.filter((row) => row.state === 'needs')

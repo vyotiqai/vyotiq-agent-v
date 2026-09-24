@@ -1,6 +1,6 @@
-import type { AgentQuestionRequest, ToolApprovalRequest } from '@shared/ipc'
-import { parseArgsRecord, parseMcpToolDisplay } from '@shared/toolSummary'
-import { toolLabel } from '@renderer/features/chat/toolUi'
+import type { AgentQuestionRequest, ToolApprovalRequest } from './ipc'
+import { TOOL_LABELS, isUnresolvedToolName, parseArgsRecord, parseMcpToolDisplay } from './utils/toolSummary'
+import { humanizeSnakeCase, mcpDoneLabel } from './utils/mcpToolMeta'
 
 const FILE_TOOLS = new Set(['edit', 'str_replace', 'delete', 'edit_notebook', 'memory_write'])
 
@@ -8,9 +8,21 @@ function oneLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
 }
 
+/** A tool's finished-row verb ("Fetched"), the one the task's record shows for it. */
+function toolDoneLabel(name: string): string {
+  // A malformed wire payload can pack the whole invocation into the name field.
+  const cut = name.search(/[<(]/)
+  const bare = cut > 0 ? name.slice(0, cut).trim() : name
+  if (isUnresolvedToolName(name)) return 'Tool'
+  const mcp = parseMcpToolDisplay(bare)
+  if (mcp) return mcpDoneLabel(mcp.toolName)
+  return TOOL_LABELS[bare]?.done ?? humanizeSnakeCase(bare)
+}
+
 /**
  * "Wants to run pnpm vitest run …" — what the approval would let the agent do,
- * with its target, in the words the task's own approval card uses.
+ * with its target, in the words the task's own approval card uses. Home's
+ * Needs you rows and the notification that asks for you both say it this way.
  */
 export function approvalAsk(
   request: Pick<ToolApprovalRequest, 'name' | 'summary' | 'argsPreview'>,
@@ -31,7 +43,7 @@ export function approvalAsk(
   if (name.startsWith('browser_')) return summary ? `Wants to use the browser · ${summary}` : 'Wants to use the browser'
   const mcp = parseMcpToolDisplay(name)
   if (mcp) return `Wants to use ${serverNames?.get(mcp.serverId) ?? mcp.serverId} · ${mcp.toolName}`
-  const label = toolLabel(name, 'done').toLowerCase()
+  const label = toolDoneLabel(name).toLowerCase()
   return summary ? `Wants to use ${label} · ${summary}` : `Wants to use ${label}`
 }
 

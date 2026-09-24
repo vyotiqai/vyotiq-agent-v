@@ -244,7 +244,8 @@ export function publishNotification(input: NotificationPublishInput): Notificati
     title,
     body,
     dedupeKey: parsed.data.dedupeKey,
-    ...(parsed.data.action ? { action: parsed.data.action } : {})
+    ...(parsed.data.action ? { action: parsed.data.action } : {}),
+    ...(parsed.data.reviewFiles ? { reviewFiles: parsed.data.reviewFiles } : {})
   })
 
   const stored = upsertNotificationItem(item)

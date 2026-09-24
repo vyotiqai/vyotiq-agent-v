@@ -1,29 +1,54 @@
-import type { ReactElement } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import type { UpdateInfo, UpdateProgress, UpdaterStatePayload } from '@shared/ipc'
+import { releaseNoteHeadline } from '@shared/utils/releaseNotes'
+import { Button, ProgressBar } from '@renderer/lib/ui'
+import { SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { downloadUpdate, installUpdate } from './updaterStore'
 
 const BYTES_PER_MB = 1024 * 1024
 
-/** Pure formatters — module-level so render derives nothing per-call. */
+/** How many of the release's items the panel names; the rest are a click away. */
+const HEADLINES = 3
+
 function formatMb(bytes: number): string {
   return (bytes / BYTES_PER_MB).toFixed(1)
 }
 
 function clampPercent(progress: UpdateProgress | null | undefined): number {
   if (!progress) return 0
-  return Math.max(0, Math.min(100, Math.round(progress.percent)))
+  return Math.max(0, Math.min(100, progress.percent))
 }
 
-/** e.g. "Sep 11, 2026". Empty string for missing/invalid dates. */
-function formatReleaseDate(releaseDate: string | undefined): string {
+/** "22 Sep" in the reader's locale, with the year only when it is not this one. '' when unknown. */
+export function formatReleaseDay(releaseDate: string | undefined, now: Date = new Date()): string {
   if (!releaseDate) return ''
   const date = new Date(releaseDate)
   if (Number.isNaN(date.getTime())) return ''
   return date.toLocaleDateString(undefined, {
-    year: 'numeric',
+    day: 'numeric',
     month: 'short',
-    day: 'numeric'
+    ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' })
   })
+}
+
+/** The first items of the release, each by its lead sentence, in the order the notes give them. */
+export function updateHeadlines(info: Pick<UpdateInfo, 'notesSections'>, count = HEADLINES): string[] {
+  return (info.notesSections ?? [])
+    .flatMap((section) => section.items)
+    .map(releaseNoteHeadline)
+    .filter(Boolean)
+    .slice(0, count)
+}
+
+/**
+ * What a restart does to work in flight. Only the task you open picks its run
+ * back up (Settings → Agent → Resume interrupted runs); with that off, a task
+ * offers Continue. A goal relaunches on its own either way — both lines stay
+ * true for it.
+ */
+export function restartLine(runningCount: number, resumeOnOpen: boolean | null): string | null {
+  if (runningCount <= 0 || resumeOnOpen == null) return null
+  return resumeOnOpen ? 'Running tasks resume when you open them' : 'Running tasks can be continued after restart'
 }
 
 function openReleaseNotes(url: string | undefined): void {
@@ -31,135 +56,114 @@ function openReleaseNotes(url: string | undefined): void {
   void window.vyotiq?.shellOpenExternal(url).catch(() => {})
 }
 
+/** The Resume interrupted runs setting, read when a restart is on offer. Null until known. */
+function useResumeOnOpen(active: boolean): boolean | null {
+  const [value, setValue] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (!active) return
+    let cancelled = false
+    void window.vyotiq
+      ?.getSettings?.()
+      .then((res) => {
+        if (!cancelled && res.ok) setValue(res.data.autoResumeInterruptedRuns)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [active])
+  return value
+}
+
+const STATUS_LABEL: Partial<Record<UpdaterStatePayload['status'], string>> = {
+  available: 'Update available',
+  downloading: 'Downloading',
+  downloaded: 'Update ready'
+}
+
 /**
- * Body of the sidebar update popover. The release notes stay visible through
- * every state — available, downloading and downloaded — so what is changing is
- * always in view while deciding.
+ * The navigator chip's popover: which version, when it shipped, the first of
+ * what changed, and the one action the update is waiting on — download it, or
+ * restart to install it.
  *
  * Nothing here runs on its own: the download starts when the user presses
- * Download, and the install when they press Install & restart.
+ * Download, and the install when they press Restart and install.
  */
 export function UpdatePanel({
   info,
   status,
-  progress
+  progress,
+  runningCount = 0
 }: {
   info: UpdateInfo
   status: UpdaterStatePayload['status']
   progress: UpdateProgress | null
+  /** Tasks running now — a restart interrupts them. */
+  runningCount?: number
 }): ReactElement {
   const percent = clampPercent(progress)
-  const dateLabel = formatReleaseDate(info.releaseDate)
-  const hasSections = (info.notesSections?.length ?? 0) > 0
-  const hasNotes = hasSections || info.notesText.trim().length > 0
+  const day = formatReleaseDay(info.releaseDate)
+  const headlines = updateHeadlines(info)
+  const prose = headlines.length === 0 ? info.notesText.trim() : ''
+  const restarting = status === 'downloaded'
+  const resumeOnOpen = useResumeOnOpen(restarting && runningCount > 0)
+  const restart = restarting ? restartLine(runningCount, resumeOnOpen) : null
 
   return (
-    <div className="p-3" data-update-panel>
-      <div className="min-w-0">
-        <p className="text-2xs font-semibold uppercase tracking-[var(--vy-tracking)] text-muted">
-          Update available
-        </p>
-        <h2 className="truncate text-sm font-semibold text-fg">{info.releaseName}</h2>
-        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
-          <span className="rounded bg-surface px-1.5 py-0.5 font-mono text-2xs text-fg">
-            v{info.version}
-          </span>
-          {dateLabel ? <span>{dateLabel}</span> : null}
-        </p>
-      </div>
-
-      {hasNotes ? (
-        <div className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-border bg-surface p-3">
-          <p className="text-2xs font-semibold uppercase tracking-[var(--vy-tracking)] text-muted">
-            What&rsquo;s new
-          </p>
-          {hasSections ? (
-            info.notesSections.map((section, sectionIndex) => (
-              <div
-                key={section.heading || `notes-${sectionIndex}`}
-                className={sectionIndex === 0 ? 'mt-1.5' : 'mt-3'}
-              >
-                {section.heading ? (
-                  <h4 className="inline-flex items-center rounded bg-bg px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-fg">
-                    {section.heading}
-                  </h4>
-                ) : null}
-                <ul className="mt-1.5 space-y-1 text-xs leading-relaxed text-muted">
-                  {section.items.map((item) => (
-                    <li key={item} className="flex gap-1.5">
-                      <span
-                        aria-hidden="true"
-                        className="mt-[7px] size-1 shrink-0 rounded-full bg-accent"
-                      />
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))
-          ) : (
-            <p className="mt-1.5 whitespace-pre-line text-xs leading-relaxed text-muted">
-              {info.notesText}
-            </p>
-          )}
+    <div data-update-panel>
+      <div className="px-4 pb-3 pt-4">
+        <div className={SECTION_LABEL}>{STATUS_LABEL[status] ?? 'Update'}</div>
+        <div className="mt-1 flex items-baseline gap-2">
+          <h2 className="text-heading font-semibold text-fg-strong">Agent V {info.version}</h2>
+          {day ? <span className="font-mono text-caption text-tertiary">{day}</span> : null}
         </div>
-      ) : null}
-
-      <div className="mt-3">
-        {status === 'available' ? (
-          <button
-            type="button"
-            className="w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover focus-visible:outline focus-visible:outline-accent"
-            onClick={downloadUpdate}
-          >
-            Download update
-          </button>
+        {headlines.length > 0 ? (
+          <ul className="mt-2 space-y-1 text-xs leading-[18px] text-secondary">
+            {headlines.map((line) => (
+              <li key={line} className="flex gap-1.5">
+                <span aria-hidden="true">•</span>
+                <span className="min-w-0">{line}</span>
+              </li>
+            ))}
+          </ul>
+        ) : prose ? (
+          <p className="mt-2 line-clamp-3 text-xs leading-[18px] text-secondary">{prose}</p>
         ) : null}
-
+      </div>
+      <div className="border-t border-border px-4 py-3">
+        {status === 'available' ? (
+          <Button variant="primary" size="sm" icon="download" className="w-full" onClick={downloadUpdate}>
+            Download update
+          </Button>
+        ) : null}
         {status === 'downloading' ? (
           <div>
-            <div
-              role="progressbar"
-              aria-label={`Downloading update, ${percent}% complete`}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={percent}
-              className="h-1.5 w-full overflow-hidden rounded-full bg-surface"
-            >
-              <div
-                className="h-full rounded-full bg-accent transition-[width]"
-                style={{ width: `${percent}%` }}
-              />
-            </div>
-            <p className="mt-1.5 text-xs text-muted" aria-live="polite">
-              {percent}% · {formatMb(progress?.transferred ?? 0)} MB of{' '}
-              {formatMb(progress?.total ?? 0)} MB
+            <ProgressBar value={percent} max={100} tone="accent" label={`Downloading update, ${Math.round(percent)}% complete`} />
+            <p className="mt-1.5 text-caption text-tertiary tnum" aria-live="polite">
+              {Math.round(percent)}% · {formatMb(progress?.transferred ?? 0)} MB of {formatMb(progress?.total ?? 0)} MB
             </p>
           </div>
         ) : null}
-
-        {status === 'downloaded' ? (
-          <button
-            type="button"
-            className="w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover focus-visible:outline focus-visible:outline-accent"
-            onClick={installUpdate}
-          >
-            Install &amp; restart
-          </button>
+        {restarting ? (
+          <Button variant="primary" size="sm" icon="retry" className="w-full" onClick={installUpdate}>
+            Restart and install
+          </Button>
+        ) : null}
+        {restart || info.releaseUrl ? (
+          <div className="mt-2 flex items-center gap-2 text-caption text-tertiary">
+            {restart ? <span className="min-w-0 flex-1">{restart}</span> : <span className="flex-1" />}
+            {info.releaseUrl ? (
+              <button
+                type="button"
+                className="shrink-0 rounded-sm text-muted vy-transition hover:text-fg focus-visible:vy-focus-ring"
+                onClick={() => openReleaseNotes(info.releaseUrl)}
+              >
+                Release notes
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
-
-      {info.releaseUrl ? (
-        <div className="mt-2.5 border-t border-border pt-2.5">
-          <button
-            type="button"
-            className="text-xs text-muted underline-offset-2 hover:text-fg hover:underline focus-visible:outline focus-visible:outline-accent"
-            onClick={() => openReleaseNotes(info.releaseUrl)}
-          >
-            Full release notes
-          </button>
-        </div>
-      ) : null}
     </div>
   )
 }

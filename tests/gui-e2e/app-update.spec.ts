@@ -75,7 +75,9 @@ test('an available update announces itself without being asked', async () => {
   await expect(entry).toBeVisible()
   const panel = window.getByRole('dialog', { name: /Version 9\.9\.1 is available/ })
   await expect(panel).toBeVisible()
-  await expect(panel.getByText('Autumn release 9.9.1')).toBeVisible()
+  // Named the way the app names itself; the release's own title is not repeated.
+  await expect(panel.getByRole('heading', { name: 'Agent V 9.9.1' })).toBeVisible()
+  await expect(panel.getByText('Update available')).toBeVisible()
   await expect(panel.getByText('Faster chat streaming')).toBeVisible()
 
   // Nothing downloads on its own: the only route is this button.
@@ -133,7 +135,8 @@ test('download progress and the install handoff render from real state', async (
   await expect(window.getByText(/4\.2 MB of 10\.0 MB/)).toBeVisible()
 
   await pushUpdaterState(launched, { status: 'downloaded', info })
-  await expect(window.getByRole('button', { name: /Install & restart/ })).toBeVisible()
+  await expect(window.getByRole('button', { name: 'Restart and install' })).toBeVisible()
+  await expect(window.getByText('Update ready')).toBeVisible()
 })
 
 test('Settings mirrors the state from the same store', async () => {

@@ -15,7 +15,7 @@ vi.mock('@renderer/features/updates/updaterStore', () => ({
   markAnnounced: vi.fn()
 }))
 vi.mock('@renderer/features/updates/UpdatePanel', () => ({
-  UpdatePanel: () => <div data-testid="update-panel" />
+  UpdatePanel: (p: { runningCount?: number }) => <div data-testid="update-panel" data-running={p.runningCount} />
 }))
 
 import { Navigator, type NavigatorProps } from '@renderer/app/navigator/Navigator'
@@ -283,6 +283,53 @@ describe('Navigator', () => {
     updater.state = { info: { version: '1.1.0' }, status: 'downloaded', progress: null, autoOpen: false }
     rerender(<Navigator {...props()} />)
     expect(screen.getByRole('button', { name: 'Version 1.1.0 is ready to install' }).textContent).toBe('1.1.0 ready')
+  })
+
+  it('tells the update panel how many tasks a restart would interrupt, in every workspace', () => {
+    updater.state = { info: { version: '1.1.0' }, status: 'downloaded', progress: null, autoOpen: true }
+    const p = props({
+      openPaths: [WS, OTHER],
+      scopePath: WS,
+      runsByWorkspacePath: {
+        [WS]: { runs: [run('r1', { status: 'running' }), run('r2'), run('i1', { inlineInstance: true, parentRunId: 'r1' })] },
+        [OTHER]: { runs: [run('r3', { status: 'running' })] }
+      },
+      activeRuns: [
+        { runId: 'r1', workspacePath: WS, invokeId: 1, pendingFollowUps: [] },
+        { runId: 'i1', workspacePath: WS, invokeId: 1, pendingFollowUps: [] },
+        { runId: 'r3', workspacePath: OTHER, invokeId: 1, pendingFollowUps: [] }
+      ]
+    })
+    render(<Navigator {...p} />)
+    // r1 and r3 are live tasks; the instance belongs to r1 and the switcher's scope hides nothing here.
+    expect(screen.getByTestId('update-panel').getAttribute('data-running')).toBe('2')
+  })
+
+  it('opens itself for a new version without taking focus from what you were typing in', async () => {
+    updater.state = { info: { version: '1.1.0' }, status: 'available', progress: null, autoOpen: true }
+    const field = document.createElement('textarea')
+    document.body.appendChild(field)
+    field.focus()
+    render(<Navigator {...props()} />)
+    const panel = await screen.findByRole('dialog', { name: 'Version 1.1.0 is available' })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(document.activeElement).toBe(field)
+    // Escape closes it and leaves focus where it was.
+    fireEvent.keyDown(field, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'Version 1.1.0 is available' })).toBeNull()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(document.activeElement).toBe(field)
+    field.remove()
+    expect(panel).toBeTruthy()
+  })
+
+  it('takes focus into the panel when you open it yourself', async () => {
+    updater.state = { info: { version: '1.1.0' }, status: 'available', progress: null, autoOpen: false }
+    render(<Navigator {...props()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Version 1.1.0 is available' }))
+    const panel = await screen.findByRole('dialog', { name: 'Version 1.1.0 is available' })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(panel.contains(document.activeElement)).toBe(true)
   })
 
   it('shows no update chip while the install is current', () => {

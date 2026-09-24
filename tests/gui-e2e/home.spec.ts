@@ -261,6 +261,15 @@ test.describe('Home and Usage', () => {
     await expect(row).toContainText('Run the updater suite and report')
     // The navigator agrees: the task is under Needs you there too.
     await expect(window.locator('[data-nav-section="needs"]')).toContainText('Run the updater suite and report')
+    // And the bell: main's notification names the task and says what it wants,
+    // in the same words as the row above.
+    await window.getByRole('button', { name: /^Notifications/ }).click()
+    const inbox = window.getByRole('dialog', { name: 'Notifications' })
+    const ask = inbox.locator('[data-notification-kind="needs_you"]')
+    await expect(ask).toContainText('Run the updater suite and report', { timeout: 20_000 })
+    await expect(ask).toContainText('Wants to run pnpm vitest run tests/main/unit/updaterSwap.test.ts')
+    await window.keyboard.press('Escape')
+    await expect(inbox).toBeHidden()
 
     await row.getByRole('button', { name: 'Allow once' }).click()
     await expect(needs).toContainText('Nothing is waiting on you', { timeout: 20_000 })
@@ -270,6 +279,15 @@ test.describe('Home and Usage', () => {
     await window.locator('[data-navigator]').getByRole('button', { name: /^Run the updater suite and report/ }).click()
     await expect(window.getByText('The updater suite passes.').first()).toBeVisible({ timeout: 20_000 })
     await expect(card).toHaveCount(0)
+
+    // Answered, the ask left the inbox; the finish took its place. The run
+    // edited nothing, so it is Finished, not Ready for review.
+    await window.getByRole('button', { name: /^Notifications/ }).click()
+    await expect(inbox.locator('[data-notification-kind="needs_you"]')).toHaveCount(0)
+    const finished = inbox.locator('[data-notification-kind="run_done"]').filter({ hasText: 'Run the updater suite and report' })
+    await expect(finished).toContainText('Finished', { timeout: 20_000 })
+    await expect(finished.locator('[data-state="done"]')).toHaveCount(1)
+    await window.keyboard.press('Escape')
   })
 
   test('a workspace row opens a new task there', async () => {

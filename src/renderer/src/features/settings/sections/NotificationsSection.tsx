@@ -26,7 +26,7 @@ export function NotificationsSection({ form }: { form: SettingsFormState }) {
         <SwitchField
           id="notifications-enabled"
           title="Notifications"
-          hint="The inbox and desktop alerts."
+          hint="The inbox, toasts in the window, and desktop alerts."
           checked={notifications.enabled}
           disabled={form.formLocked}
           onChange={(enabled) => patch({ enabled })}

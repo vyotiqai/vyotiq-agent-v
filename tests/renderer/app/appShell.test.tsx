@@ -2,8 +2,9 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AppShell } from '@renderer/app/AppShell'
+import { getToasts, resetToastStoreForTests } from '@renderer/lib/ui/toastStore'
 
 const baseProps = {
   view: 'chat' as const,
@@ -552,5 +553,72 @@ describe('AppShell', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^other workspace chat/i }))
     expect(onSelectRunInWorkspace).toHaveBeenCalledWith('/ws/other', 'run-xyz')
+  })
+})
+
+
+describe('AppShell run toasts', () => {
+  function withInbox() {
+    let push: ((list: { items: unknown[] }) => void) | null = null
+    // @ts-expect-error test bridge
+    window.vyotiq = {
+      platform: 'win32',
+      windowIsMaximized: vi.fn(async () => ({ ok: true as const, data: false })),
+      listNotifications: vi.fn(async () => ({ ok: true as const, data: { items: [] } })),
+      markNotificationsRead: vi.fn(async () => ({ ok: true as const, data: { items: [] } })),
+      onNotificationsChanged: (handler: (list: { items: unknown[] }) => void) => {
+        push = handler
+        return () => {}
+      }
+    }
+    return (items: unknown[]) => act(() => push?.({ items }))
+  }
+
+  const finished = (runId: string) => ({
+    id: `n-${runId}`,
+    createdAt: new Date(Date.now() + 1000).toISOString(),
+    read: false,
+    source: 'agent',
+    kind: 'run_done',
+    title: 'Fix tests',
+    body: 'Ready for review · 2 files',
+    dedupeKey: `run:${runId}:done`,
+    action: { type: 'open_run', workspacePath: '/ws/demo', runId },
+    reviewFiles: 2
+  })
+
+  beforeEach(() => {
+    resetToastStoreForTests()
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+  })
+
+  it('toasts a task that finishes while Home is in front, with Review opening its changes', async () => {
+    const publish = withInbox()
+    const onReviewTask = vi.fn()
+    render(
+      <AppShell {...baseProps} view="home" focusedRun={{ workspacePath: '/ws/demo', runId: 'run-abc' }} onReviewTask={onReviewTask}>
+        <p>Home</p>
+      </AppShell>
+    )
+    await waitFor(() => expect(window.vyotiq.listNotifications).toHaveBeenCalled())
+    publish([finished('run-abc')])
+    expect(getToasts().map((t) => [t.message, t.detail])).toEqual([['Ready for review', 'Fix tests · 2 files']])
+    getToasts()[0]!.action!.onClick()
+    expect(onReviewTask).toHaveBeenCalledWith('/ws/demo', 'run-abc')
+  })
+
+  it('says nothing about the task on screen', async () => {
+    const publish = withInbox()
+    render(
+      <AppShell {...baseProps} view="chat" focusedRun={{ workspacePath: '/ws/demo', runId: 'run-abc' }}>
+        <p>Task</p>
+      </AppShell>
+    )
+    await waitFor(() => expect(window.vyotiq.listNotifications).toHaveBeenCalled())
+    publish([finished('run-abc')])
+    expect(getToasts()).toHaveLength(0)
+    // A task open in no pane still speaks up.
+    publish([finished('run-abc'), finished('run-other')])
+    expect(getToasts().map((t) => t.message)).toEqual(['Ready for review'])
   })
 })

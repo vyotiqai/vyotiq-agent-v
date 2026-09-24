@@ -74,3 +74,51 @@ describe('ToastHost', () => {
     expect(getToasts()).toHaveLength(0)
   })
 })
+
+
+describe('ToastHost cards', () => {
+  it('draws a toast with a detail and an action as a card that counts down', () => {
+    const onClick = vi.fn()
+    pushToast('Ready for review', {
+      state: 'review',
+      detail: 'Fade rows under the pinned prompt · 3 files',
+      action: { label: 'Review', onClick }
+    })
+    render(<ToastHost />)
+    const card = screen.getByRole('status')
+    expect(card.getAttribute('data-toast')).toBe('card')
+    expect(card.querySelector('[data-state="review"]')).toBeTruthy()
+    expect(screen.getByText('Fade rows under the pinned prompt · 3 files')).toBeTruthy()
+    const timer = card.querySelector('.bg-muted') as HTMLElement
+    expect(timer.style.animation).toContain('vy-toast-progress 6000ms')
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    expect(onClick).toHaveBeenCalledTimes(1)
+    fireEvent.animationEnd(card, { animationName: 'vy-toast-out' })
+    expect(getToasts()).toHaveLength(0)
+  })
+
+  it('stops the countdown bar while hovered, where it stops the timer', () => {
+    vi.setSystemTime(0)
+    pushToast('Finished', { state: 'done', detail: 'Bump electron', durationMs: 1000, action: { label: 'Open', onClick: vi.fn() } })
+    render(<ToastHost />)
+    const card = screen.getByRole('status')
+    act(() => {
+      vi.advanceTimersByTime(400)
+    })
+    fireEvent.pointerEnter(card)
+    const timer = card.querySelector('.bg-muted') as HTMLElement
+    // The snapshot changed, so the bar redraws paused at what is left.
+    expect(timer.style.animation).toBe('')
+    expect(timer.style.transform).toBe('scaleX(0.6)')
+    fireEvent.pointerLeave(card)
+    expect(timer.style.animation).toContain('vy-toast-progress 600ms')
+  })
+
+  it('keeps a plain notice to one line with no countdown bar', () => {
+    pushToast('Link copied', 'success')
+    render(<ToastHost />)
+    const line = screen.getByRole('status')
+    expect(line.getAttribute('data-toast')).toBe('line')
+    expect(line.querySelector('.bg-muted')).toBeNull()
+  })
+})

@@ -46,11 +46,7 @@ import {
 import { pushToast } from '@renderer/lib/ui'
 import { focusComposerMessage } from '@renderer/lib/shortcuts'
 
-import {
-  backgroundRunFinishedMessage,
-  finishedBackgroundRuns,
-  shouldShowBackgroundRunToast
-} from '@renderer/lib/chat/backgroundRunToast'
+import { finishedBackgroundRuns } from '@renderer/lib/chat/backgroundRuns'
 import type { ChatPane, ChatPaneLayout, PaneDropZone, SessionDragPayload } from '@renderer/lib/chat/chatPaneLayout'
 import {
   applyPaneDrop,
@@ -642,9 +638,6 @@ export function useWorkspaceManager(options?: {
   const controllerLruRef = useRef<string[]>([])
   const backgroundRunIdsRef = useRef(new Set<string>())
   const refreshRunsRef = useRef<(path: string) => Promise<void>>(async () => {})
-  const openRunTabInWorkspaceRef = useRef<
-    (workspacePath: string, runId: string | null) => void
-  >(() => {})
   const lastActiveRunsWarnAtRef = useRef(0)
   const activeRunsRef = useRef<ActiveRun[]>([])
   const orphanSyncTimersRef = useRef(new Map<string, number>())
@@ -1572,36 +1565,9 @@ export function useWorkspaceManager(options?: {
       // keeps a spinner for a run that already finished.
       scheduleSettleRefresh(entry.workspacePath)
     }
-    for (const entry of finishedBackgroundRuns(
-      prevActive,
-      nextActive,
-      backgroundRunIdsRef.current
-    )) {
-      const ctx = findByWorkspacePath(contextsRef.current, entry.workspacePath)
-      const run =
-        ctx?.runs.find((r) => r.runId === entry.runId) ??
-        ctx?.instanceRuns.find((r) => r.runId === entry.runId)
-      const layout = paneLayoutRef.current
-      const focusedPane = layout
-        ? (layout.panes.find((p) => p.paneId === layout.focusedPaneId) ?? layout.panes[0] ?? null)
-        : null
-      const focusedId =
-        focusedPane?.runId ??
-        (registryRef.current?.activePath
-          ? contextsRef.current[registryRef.current.activePath]?.activeRunId
-          : null) ??
-        null
-      if (
-        shouldShowBackgroundRunToast({
-          windowFocused: typeof document !== 'undefined' && document.hasFocus(),
-          focusedRunId: focusedId,
-          finishedRunId: entry.runId
-        })
-      ) {
-        pushToast(backgroundRunFinishedMessage(run?.goal), 'info', 6000, () => {
-          openRunTabInWorkspaceRef.current(entry.workspacePath, entry.runId)
-        })
-      }
+    // A background run that finished is told by its notification (the bell,
+    // and a toast while you look elsewhere); here it only stops being one.
+    for (const entry of finishedBackgroundRuns(prevActive, nextActive, backgroundRunIdsRef.current)) {
       backgroundRunIdsRef.current.delete(entry.runId)
     }
     const activeIds = new Set(nextActive.map((entry) => entry.runId))
@@ -2339,8 +2305,6 @@ export function useWorkspaceManager(options?: {
       suspendAllExceptVisible
     ]
   )
-
-  openRunTabInWorkspaceRef.current = openRunTabInWorkspace
 
   const openRunTab = useCallback(
     (runId: string | null): void => {

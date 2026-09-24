@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { announceLive } from '@renderer/lib/a11y/useLiveAnnouncer'
 import { Icon } from '@renderer/lib/icons'
 import { useDropdownMenu } from '@renderer/lib/hooks/useDropdownMenu'
 import { MENU_SURFACE, cn } from '@renderer/lib/ui'
@@ -15,9 +16,12 @@ import { markAnnounced, useUpdateAnnouncement } from '@renderer/features/updates
  *
  * Renders nothing while the install is current.
  */
-export function UpdateChip(): ReactNode {
+export function UpdateChip({ runningCount = 0 }: { runningCount?: number }): ReactNode {
   const { info, status, progress, autoOpen } = useUpdateAnnouncement()
   const [open, setOpen] = useState(false)
+  // Opened by the announcement rather than a click: it shows itself but leaves
+  // focus where you were typing, so a stray Enter cannot download or restart.
+  const [selfOpened, setSelfOpened] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const panelId = useId()
@@ -27,16 +31,19 @@ export function UpdateChip(): ReactNode {
     triggerRef,
     panelRef,
     placement: 'up',
-    align: 'end',
-    trapFocus: true,
-    autoFocusFirst: true
+    align: 'start',
+    trapFocus: !selfOpened,
+    autoFocusFirst: !selfOpened
   })
   const version = info?.version ?? ''
 
   useEffect(() => {
     if (!autoOpen || !version) return
+    setSelfOpened(true)
     setOpen(true)
     markAnnounced(version)
+    // Focus stays put, so say it: the chip's name is what a reader would hear.
+    announceLive(`Agent V ${version} is available. The update is in the navigator.`)
   }, [autoOpen, version])
 
   useEffect(() => {
@@ -64,16 +71,16 @@ export function UpdateChip(): ReactNode {
         aria-label={label}
         tabIndex={-1}
         className={cn(
-          'app-region-no-drag fixed flex max-h-[min(30rem,72vh)] w-[min(22rem,calc(100vw-1.5rem))] flex-col overflow-y-auto origin-bottom',
+          'app-region-no-drag fixed flex max-h-[min(30rem,72vh)] w-[min(21.25rem,calc(100vw-1.5rem))] flex-col overflow-y-auto origin-bottom',
           MENU_SURFACE
         )}
         style={{
           top: position.placement === 'up' ? undefined : position.top,
           bottom: position.placement === 'up' ? window.innerHeight - position.top : undefined,
-          right: window.innerWidth - position.left
+          left: position.left
         }}
       >
-        <UpdatePanel info={info} status={status} progress={progress} />
+        <UpdatePanel info={info} status={status} progress={progress} runningCount={runningCount} />
       </div>
     ) : null
 
@@ -89,7 +96,10 @@ export function UpdateChip(): ReactNode {
         aria-controls={open ? panelId : undefined}
         data-update-chip
         className="inline-flex h-6 items-center gap-1.5 rounded-md bg-accent-soft px-2 text-caption font-medium text-accent tnum vy-transition hover:text-accent-hover focus-visible:vy-focus-ring"
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={() => {
+          setSelfOpened(false)
+          setOpen((prev) => !prev)
+        }}
       >
         <Icon name="download" size={12} weight="bold" />
         {text}
