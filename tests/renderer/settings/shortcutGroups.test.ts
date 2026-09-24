@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { INSPECTOR_TAB_SHORTCUTS, WORKSPACE_SWITCH_IDS } from '@renderer/lib/shortcuts/bindings'
 import { referenceShortcutCatalog, shortcutCatalog } from '@renderer/lib/shortcuts/labels'
-import { shortcutGroups } from '@renderer/features/settings/utils/shortcutGroups'
+import { chordKeys, shortcutGroups } from '@renderer/features/settings/utils/shortcutGroups'
 
 afterEach(() => {
   // @ts-expect-error test cleanup
@@ -66,5 +66,30 @@ describe('shortcutGroups', () => {
       .flatMap((group) => group.entries)
       .find((entry) => entry.id === 'workspaces')
     expect(row?.label).toBe('⌘1–9')
+  })
+})
+
+describe('chordKeys', () => {
+  it('splits a joined chord into one keycap per key', () => {
+    expect(chordKeys('Ctrl+K')).toEqual(['Ctrl', 'K'])
+    expect(chordKeys('Ctrl+Shift+H')).toEqual(['Ctrl', 'Shift', 'H'])
+    expect(chordKeys('Alt+1–3')).toEqual(['Alt', '1–3'])
+    expect(chordKeys('Ctrl+-')).toEqual(['Ctrl', '-'])
+  })
+
+  it("splits macOS's run-together modifiers", () => {
+    expect(chordKeys('⌘K')).toEqual(['⌘', 'K'])
+    expect(chordKeys('⌘⇧H')).toEqual(['⌘', '⇧', 'H'])
+    expect(chordKeys('⌥1–3')).toEqual(['⌥', '1–3'])
+    expect(chordKeys('⌘=')).toEqual(['⌘', '='])
+  })
+
+  it('keeps a plus key and a lone key whole', () => {
+    expect(chordKeys('Ctrl++')).toEqual(['Ctrl', '+'])
+    expect(chordKeys('⌘+')).toEqual(['⌘', '+'])
+    expect(chordKeys('+')).toEqual(['+'])
+    expect(chordKeys('End')).toEqual(['End'])
+    expect(chordKeys('↑')).toEqual(['↑'])
+    expect(chordKeys('Esc')).toEqual(['Esc'])
   })
 })

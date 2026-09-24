@@ -8,9 +8,10 @@ import type {
 } from '@shared/ipc'
 import { DEFAULT_DICTATION_SETTINGS } from '@shared/ipc'
 import { DICTATION_LOCAL_CATALOG } from '@shared/dictation'
-import { AlertBlock, Button } from '@renderer/lib/ui'
+import { ActionMenu, Button, IconButton, type ActionMenuItem } from '@renderer/lib/ui'
 import { DICTATION_ENGINE_OPTIONS, DICTATION_WAVEFORM_STYLE_OPTIONS } from '../constants'
 import { ProgressBar } from '../components/ProgressBar'
+import { SegmentedField } from '../components/SegmentedField'
 import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
 
@@ -19,7 +20,7 @@ const WHISPER_MODELS = DICTATION_LOCAL_CATALOG.filter((m) => m.backend === 'whis
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+  return `${Math.round(n / (1024 * 1024))} MB`
 }
 
 function engineHint(engine: DictationEngine, secrets: Record<SecretProvider, boolean>): string {
@@ -33,7 +34,7 @@ function engineHint(engine: DictationEngine, secrets: Record<SecretProvider, boo
         ? 'Transcribes with your OpenRouter key.'
         : 'No OpenRouter key yet — add one in Providers.'
     case 'local':
-      return 'Whisper on this machine. Offline, English only.'
+      return 'Runs on this PC; nothing leaves it. English only.'
     default: {
       const _exhaustive: never = engine
       return _exhaustive
@@ -41,25 +42,62 @@ function engineHint(engine: DictationEngine, secrets: Record<SecretProvider, boo
   }
 }
 
-function modelStatusLabel(
-  modelId: DictationLocalModelId,
+/** The row's line under its name: what it weighs, and what this PC should pick. */
+function modelHint(
+  model: (typeof WHISPER_MODELS)[number],
   status: DictationRuntimeStatus | null
 ): string {
-  if (!status) return 'Checking…'
-  if (status.phase === 'downloading' && status.activeModelId === modelId) {
-    const pct = status.progress != null ? ` ${Math.round(status.progress * 100)}%` : ''
-    return `Downloading${pct}`
+  const phase = status?.activeModelId === model.id ? status.phase : null
+  if (phase === 'downloading') {
+    return `Downloading${status?.progress != null ? ` · ${Math.round(status.progress * 100)}%` : ''}`
   }
-  if (status.phase === 'loading' && status.activeModelId === modelId) {
-    return status.message ?? 'Loading'
-  }
-  if (status.phase === 'error' && status.activeModelId === modelId) {
-    return `Error${status.error ? `: ${status.error}` : ''}`
-  }
-  const inst = status.installed.find((m) => m.id === modelId)
-  if (inst?.loaded) return 'Ready · loaded'
-  if (inst) return 'Ready · on disk'
-  return 'Not installed'
+  if (phase === 'loading') return status?.message ?? 'Loading'
+  const installed = status?.installed.find((m) => m.id === model.id)
+  const size =
+    installed && installed.bytesOnDisk > 0
+      ? `${formatBytes(installed.bytesOnDisk)} on disk`
+      : installed
+        ? 'On disk'
+        : `${model.approxDownloadLabel} download`
+  // The catalog's own "recommended" role is left out: this line names the one
+  // recommended for this machine, and on a low-RAM PC that is the other one.
+  return status?.recommendedModelId === model.id ? `${size} · recommended for this PC` : size
+}
+
+function ModelMenu({
+  label,
+  items,
+  disabled
+}: {
+  label: string
+  items: ActionMenuItem[]
+  disabled: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <ActionMenu
+      open={open}
+      onOpenChange={setOpen}
+      placement="down"
+      align="end"
+      aria-label={`${label} actions`}
+      items={items}
+      trigger={(t) => (
+        <IconButton
+          ref={t.ref}
+          icon="more"
+          label={`More for ${label}`}
+          size="sm"
+          tone="muted"
+          disabled={disabled}
+          aria-expanded={t['aria-expanded']}
+          aria-controls={t['aria-controls']}
+          aria-haspopup={t['aria-haspopup']}
+          onClick={t.onClick}
+        />
+      )}
+    />
+  )
 }
 
 export function VoiceSection({
@@ -157,83 +195,98 @@ export function VoiceSection({
       .finally(() => setBusy(false))
   }
 
+  const error = actionError ?? loadError
+
   return (
     <SettingsStack>
       <SettingsGroup title="Dictation">
-        <SelectField
+        <SegmentedField
           id="dictation-engine"
-          title="Dictation engine"
+          title="Engine"
+          label="Dictation engine"
           hint={engineHint(dictation.engine, secrets)}
           help="OpenAI and OpenRouter use gpt-transcribe; Local runs Whisper (ONNX) on this machine and is available once a model below is installed. Read on each mic stop — no restart."
           value={dictation.engine}
           options={engineOptions}
           disabled={locked}
+          {...form.nestedDefaultMark('dictation', 'engine')}
+          below={
+            dictation.engine === 'local' && runtime && !localInstalled ? (
+              <p className="m-0 text-xs text-danger" role="alert">
+                Local is selected but no Whisper model is installed. Install one below, or switch engine.
+              </p>
+            ) : error ? (
+              <p className="m-0 text-xs text-danger" role="alert">
+                {error}
+              </p>
+            ) : null
+          }
           onChange={patchEngine}
         />
-        {dictation.engine === 'local' && runtime && !localInstalled ? (
-          <p className="m-0 px-4 py-3 text-xs text-danger" role="alert">
-            Local is selected but no Whisper model is installed. Install one below, or switch
-            engine.
-          </p>
-        ) : null}
-        <SelectField
-          id="dictation-waveform"
-          title="Waveform"
-          hint="The listening visualizer in the composer."
-          value={dictation.waveformStyle ?? 'bars'}
-          options={DICTATION_WAVEFORM_STYLE_OPTIONS}
-          disabled={form.formLocked}
-          onChange={(waveformStyle) => {
-            void form.runUpdate({ dictation: { ...dictation, waveformStyle } })
-          }}
-        />
-      </SettingsGroup>
-
-      <SettingsGroup title="Local Whisper models">
         {WHISPER_MODELS.map((model) => {
           const inst = runtime?.installed.find((m) => m.id === model.id)
           const installed = inst != null
           const loaded = inst?.loaded === true
           const inUse = installed && dictation.localModelId === model.id
-          const recommended = runtime?.recommendedModelId === model.id
           const phaseForModel = runtime?.activeModelId === model.id ? runtime.phase : null
           const failed = phaseForModel === 'error'
+          const working = phaseForModel === 'downloading' || phaseForModel === 'loading'
           const fieldId =
             model.id === 'whisper-tiny.en' ? 'dictation-whisper-tiny' : 'dictation-whisper-small'
+          const menuItems: ActionMenuItem[] = [
+            ...(loaded
+              ? [
+                  {
+                    id: 'unload',
+                    label: 'Unload from memory',
+                    onSelect: () => runModelAction(() => window.vyotiq.dictationUnload())
+                  }
+                ]
+              : []),
+            {
+              id: 'delete',
+              label: 'Delete download',
+              danger: true,
+              separatorBefore: loaded,
+              onSelect: () =>
+                runModelAction(() => window.vyotiq.dictationDeleteCache({ modelId: model.id }))
+            }
+          ]
           return (
             <SettingsField
               key={model.id}
               id={fieldId}
               title={model.label}
-              // Size and when to pick it. The catalog's static "Recommended"
-              // role is left out: the status line names the model recommended
-              // for this machine, and on a low-RAM PC that is the other one.
-              hint={`${model.approxDownloadLabel} · ${model.ramHint}`}
-              help={`${model.language} only. Quantized q8 ONNX, cached in app data. Unload frees memory; Delete removes the files.`}
-              wide
+              hint={modelHint(model, runtime)}
+              help={`${model.language} only. ${model.ramHint}. Quantized q8 ONNX, cached in app data.`}
+              below={
+                working ? (
+                  <ProgressBar
+                    percent={runtime?.progress != null ? runtime.progress * 100 : null}
+                    label={`${model.id} ${phaseForModel === 'loading' ? 'load' : 'download'} progress`}
+                  />
+                ) : failed ? (
+                  <p className="m-0 text-xs text-danger" role="alert">
+                    {runtime?.error ?? 'The model failed to load.'}
+                  </p>
+                ) : null
+              }
             >
-              <p
-                className={failed ? 'm-0 text-xs text-danger' : 'm-0 text-xs text-secondary'}
-                role={failed ? 'alert' : undefined}
-              >
-                {modelStatusLabel(model.id, runtime)}
-                {installed && inst.bytesOnDisk > 0 ? ` · ${formatBytes(inst.bytesOnDisk)} on disk` : ''}
-                {inUse ? ' · In use' : ''}
-                {recommended ? ' · Recommended for this PC' : ''}
-              </p>
-              {phaseForModel === 'downloading' || phaseForModel === 'loading' ? (
-                <ProgressBar
-                  percent={runtime?.progress != null ? runtime.progress * 100 : null}
-                  label={`${model.id} ${phaseForModel === 'loading' ? 'load' : 'download'} progress`}
-                />
-              ) : null}
-              {/* Short visible labels; the accessible name keeps the model, since
-                  both cards carry the same four verbs. */}
-              <div className="flex flex-wrap gap-2">
+              <div className="flex items-center gap-3">
+                {inUse ? <span className="text-caption font-medium text-accent">In use</span> : null}
+                {failed ? (
+                  <span className="text-xs text-danger">Error</span>
+                ) : working || !installed ? null : loaded ? (
+                  <span className="text-xs text-success">Ready · loaded</span>
+                ) : (
+                  <span className="text-xs text-muted">Ready · on disk</span>
+                )}
                 {!installed ? (
                   <Button
-                    variant="subtle"
+                    size="sm"
+                    variant="secondary"
                     aria-label={`Install ${model.label}`}
+                    pending={phaseForModel === 'downloading'}
                     disabled={locked}
                     onClick={() =>
                       runModelAction(() => window.vyotiq.dictationInstall({ modelId: model.id }))
@@ -244,7 +297,8 @@ export function VoiceSection({
                 ) : null}
                 {installed && !inUse ? (
                   <Button
-                    variant="subtle"
+                    size="sm"
+                    variant="secondary"
                     aria-label={`Use ${model.label}`}
                     disabled={locked}
                     onClick={() => selectModel(model.id)}
@@ -252,38 +306,27 @@ export function VoiceSection({
                     Use
                   </Button>
                 ) : null}
-                {loaded ? (
-                  <Button
-                    variant="subtle"
-                    aria-label={`Unload ${model.label}`}
-                    disabled={locked}
-                    onClick={() => runModelAction(() => window.vyotiq.dictationUnload())}
-                  >
-                    Unload
-                  </Button>
-                ) : null}
-                {installed ? (
-                  <Button
-                    variant="danger"
-                    aria-label={`Delete ${model.label} cache`}
-                    disabled={locked}
-                    onClick={() =>
-                      runModelAction(() => window.vyotiq.dictationDeleteCache({ modelId: model.id }))
-                    }
-                  >
-                    Delete
-                  </Button>
-                ) : null}
+                {installed ? <ModelMenu label={model.label} items={menuItems} disabled={locked} /> : null}
               </div>
             </SettingsField>
           )
         })}
-        {actionError || loadError ? (
-          <div className="flex flex-col gap-1.5 px-4 py-3">
-            {actionError ? <AlertBlock>{actionError}</AlertBlock> : null}
-            {loadError ? <AlertBlock>{loadError}</AlertBlock> : null}
-          </div>
-        ) : null}
+      </SettingsGroup>
+
+      <SettingsGroup title="Composer">
+        <SelectField
+          id="dictation-waveform"
+          title="Waveform"
+          hint="The listening visualizer in the composer."
+          value={dictation.waveformStyle ?? 'bars'}
+          options={DICTATION_WAVEFORM_STYLE_OPTIONS}
+          width={140}
+          disabled={form.formLocked}
+          {...form.nestedDefaultMark('dictation', 'waveformStyle')}
+          onChange={(waveformStyle) => {
+            void form.runUpdate({ dictation: { ...dictation, waveformStyle } })
+          }}
+        />
       </SettingsGroup>
     </SettingsStack>
   )

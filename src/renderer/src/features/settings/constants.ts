@@ -4,14 +4,16 @@ import type {
   DesktopNotificationMode,
   DictationEngine,
   DictationWaveformStyle,
+  NavigationMode,
+  ProviderId,
   ResponseVerbosity,
+  SecretProvider,
   SearchEngineId,
   TerminalShell,
   ThemeId,
   ToolApprovalMode
 } from '@shared/ipc'
 import type { IconName } from '@renderer/lib/icons'
-import type { ChoiceCardOption } from './components/ChoiceCards'
 import type { SettingsErrorField, SettingsOption, SettingsSection } from './types'
 
 export const THEME_OPTIONS: SettingsOption<ThemeId>[] = [
@@ -32,22 +34,19 @@ export const DENSITY_OPTIONS: SettingsOption<UiDensity>[] = [
   { value: 'comfortable', label: 'Comfortable' }
 ]
 
-export const NAVIGATION_MODE_OPTIONS: ChoiceCardOption[] = [
-  {
-    value: 'home',
-    label: 'Home page',
-    description: 'Sessions and workspaces on Home, slim sidebar'
-  },
-  {
-    value: 'sidebar',
-    label: 'Sidebar',
-    description: 'Sessions and workspaces listed in the sidebar'
-  }
+/**
+ * Where the window lands at start. `navigationMode` is the setting's old name
+ * from when it also chose the sidebar's layout; today it only picks the view
+ * the app opens on — Home, or the task view with the last open task.
+ */
+export const LAUNCH_VIEW_OPTIONS: SettingsOption<NavigationMode>[] = [
+  { value: 'home', label: 'Home' },
+  { value: 'sidebar', label: 'Last task' }
 ]
 
 /** `maxChatPanes` is numeric in settings; the menu speaks strings. 0 = Auto. */
 export const MAX_CHAT_PANE_OPTIONS: SettingsOption[] = [
-  { value: '0', label: 'Auto (fits window)' },
+  { value: '0', label: 'Auto — fits the window' },
   ...['1', '2', '3', '4', '5', '6'].map((value) => ({ value, label: value }))
 ]
 
@@ -57,10 +56,11 @@ export const DESKTOP_NOTIFICATION_OPTIONS: SettingsOption<DesktopNotificationMod
   { value: 'always', label: 'Always' }
 ]
 
+/** Read as "Ask before …". */
 export const TOOL_APPROVAL_OPTIONS: SettingsOption<ToolApprovalMode>[] = [
-  { value: 'off', label: 'Off' },
-  { value: 'mutating', label: 'Ask for edits and commands' },
-  { value: 'all', label: 'Ask for every tool' }
+  { value: 'off', label: 'Nothing' },
+  { value: 'mutating', label: 'Edits and commands' },
+  { value: 'all', label: 'Every tool' }
 ]
 
 export const AUTONOMOUS_QUESTIONS_OPTIONS: SettingsOption<AutonomousSkipQuestions>[] = [
@@ -148,17 +148,36 @@ export const SECTION_LABELS: Record<SettingsSection, string> = {
 
 export const SECTION_ICONS: Record<SettingsSection, IconName> = {
   general: 'gear',
-  appearance: 'sliders',
+  appearance: 'circleHalf',
   notifications: 'bell',
   shortcuts: 'keyboard',
-  providers: 'mcp',
-  agent: 'bot',
-  tools: 'plug',
-  indexing: 'fileSearch',
+  providers: 'cpu',
+  agent: 'robot',
+  tools: 'tool',
+  indexing: 'database',
   voice: 'mic',
   storage: 'stack',
   diagnostics: 'pulse',
   about: 'info'
+}
+
+/**
+ * One line beside the section's name in its header: what the section is for,
+ * so the rows under it need no preamble. Shortcuts names the search chord at
+ * render time, since it differs by platform.
+ */
+export const SECTION_DESCRIPTIONS: Record<Exclude<SettingsSection, 'shortcuts'>, string> = {
+  general: 'Where Agent V opens, and the workspaces it knows.',
+  appearance: 'Skin, colour mode, type size and density. Changes apply as you pick.',
+  notifications: 'What reaches the inbox, and what reaches the desktop.',
+  providers: 'Model providers and their keys. Keys are encrypted on this device and sent only to their provider.',
+  agent: 'What the agent may do without asking, and how its record reads.',
+  tools: 'Terminal, browser and MCP behaviour, and the live tool catalog.',
+  indexing: 'The codebase index behind search and concept lookups.',
+  voice: 'Dictation for instructions and briefs.',
+  storage: 'What Agent V keeps on disk, and when it lets go of it.',
+  diagnostics: 'Logs, traces and crash reports — local unless you share them.',
+  about: 'Version, updates and feedback.'
 }
 
 /**
@@ -193,4 +212,40 @@ export const SETTINGS_ERROR_IDS: Record<Exclude<SettingsErrorField, null>, strin
   sessionKeep: 'session-keep-error',
   sessionAge: 'session-age-error',
   sizeCap: 'size-cap-error'
+}
+
+/**
+ * Providers in the order the API keys list shows them: the subscription
+ * first, then the labs, the local daemon, the gateways, and custom last.
+ */
+export const PROVIDER_KEY_ORDER: readonly ProviderId[] = [
+  'opencode',
+  'anthropic',
+  'openai',
+  'gemini',
+  'ollama',
+  'deepseek',
+  'openrouter',
+  'xai',
+  'mistral',
+  'groq',
+  'custom'
+]
+
+/**
+ * Where each provider hands out API keys. Every link here was checked against
+ * the provider (a live response, or its own docs linking it) on 2026-09-24;
+ * one that cannot be checked stays out rather than guessed.
+ */
+export const PROVIDER_KEY_URLS: Partial<Record<SecretProvider, string>> = {
+  opencode: 'https://opencode.ai/auth',
+  anthropic: 'https://platform.claude.com/settings/keys',
+  openai: 'https://platform.openai.com/api-keys',
+  gemini: 'https://aistudio.google.com/apikey',
+  ollama: 'https://ollama.com/settings/keys',
+  deepseek: 'https://platform.deepseek.com/api_keys',
+  openrouter: 'https://openrouter.ai/settings/keys',
+  xai: 'https://console.x.ai',
+  mistral: 'https://console.mistral.ai',
+  groq: 'https://console.groq.com/keys'
 }

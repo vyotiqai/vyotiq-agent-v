@@ -1,4 +1,4 @@
-import { Badge } from '@renderer/lib/ui'
+import { WorkspaceScopeBadge } from '@renderer/lib/ui'
 
 /**
  * Marks a row that reads from, and saves to, the active workspace's override.
@@ -9,7 +9,5 @@ import { Badge } from '@renderer/lib/ui'
  * the rows it described.
  */
 export function workspaceBadge(overrideActive: boolean) {
-  return overrideActive ? (
-    <Badge title="Saved to this workspace's override">Workspace</Badge>
-  ) : undefined
+  return overrideActive ? <WorkspaceScopeBadge /> : undefined
 }

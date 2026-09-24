@@ -136,18 +136,24 @@ test('download progress and the install handoff render from real state', async (
   await expect(window.getByRole('button', { name: /Install & restart/ })).toBeVisible()
 })
 
-test('Settings mirrors the state and offers no second restart button', async () => {
+test('Settings mirrors the state from the same store', async () => {
   const { window } = launched
   await pushUpdaterState(launched, { status: 'downloaded', info: makeInfo('9.9.5') })
   await window.keyboard.press('Escape')
 
   await window.getByRole('button', { name: /^settings/i }).click()
-  await window.getByRole('button', { name: /^about$/i }).click()
+  await window
+    .getByRole('navigation', { name: 'Settings', exact: true })
+    .getByRole('button', { name: /^about$/i })
+    .click()
 
-  const row = window.locator('[data-settings-field="about-updater"]')
-  await expect(row).toBeVisible()
-  await expect(row.getByText(/Restart to install the downloaded update/)).toBeVisible()
-  // One place starts an irreversible restart: the rail panel.
-  await expect(row.getByRole('button', { name: /Restart to install/ })).toHaveCount(0)
-  await expect(row.getByRole('button', { name: /^Check$/ })).toBeVisible()
+  const group = window.locator('[data-settings-field="about-updater"]')
+  await expect(group).toBeVisible()
+  const row = group.locator('[data-settings-item="update-status"]')
+  await expect(row.getByText('Version 9.9.5 is ready')).toBeVisible()
+  await expect(row.getByText('Downloaded · restart to install')).toBeVisible()
+  // The install is the rail panel's own action (installUpdate in the store),
+  // so neither place skips what the other does. Nothing is left to check.
+  await expect(row.getByRole('button', { name: 'Restart and install' })).toBeVisible()
+  await expect(row.getByRole('button', { name: 'Check now' })).toHaveCount(0)
 })

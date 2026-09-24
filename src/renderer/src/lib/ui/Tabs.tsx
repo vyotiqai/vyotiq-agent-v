@@ -33,7 +33,8 @@ function moveFocus<T extends string>(
   e.preventDefault()
   onChange?.(ids[next])
   const group = e.currentTarget.parentElement
-  const target = group?.querySelectorAll<HTMLButtonElement>('[data-roving]')[next]
+  // `ids` holds the enabled buttons only, in order, so index the same set.
+  const target = group?.querySelectorAll<HTMLButtonElement>('[data-roving]:not(:disabled)')[next]
   target?.focus()
 }
 
@@ -113,7 +114,7 @@ export function Segmented<T extends string>({
   label,
   disabled = false
 }: {
-  items: ReadonlyArray<{ id: T; label?: string; icon?: IconName; title?: string }>
+  items: ReadonlyArray<{ id: T; label?: string; icon?: IconName; title?: string; disabled?: boolean }>
   value: T
   onChange?: (id: T) => void
   className?: string
@@ -121,7 +122,7 @@ export function Segmented<T extends string>({
   label?: string
   disabled?: boolean
 }) {
-  const ids = items.map((t) => t.id)
+  const ids = items.filter((t) => !t.disabled).map((t) => t.id)
   return (
     <div
       role="radiogroup"
@@ -139,14 +140,18 @@ export function Segmented<T extends string>({
             data-roving
             aria-checked={on}
             tabIndex={on ? 0 : -1}
-            disabled={disabled}
+            disabled={disabled || it.disabled}
             title={it.title}
             aria-label={it.label ? undefined : it.title}
             onClick={() => onChange?.(it.id)}
             onKeyDown={(e) => moveFocus(e, ids, value, onChange)}
             className={cn(
               'inline-flex h-6 items-center gap-1 rounded-[calc(var(--vy-radius-md)-2px)] px-2 text-xs font-medium vy-transition focus-visible:vy-focus-ring',
-              on ? 'bg-bg text-fg-strong shadow-[0_0_0_1px_var(--vy-border)]' : 'text-muted hover:text-fg'
+              on
+                ? 'bg-bg text-fg-strong shadow-[0_0_0_1px_var(--vy-border)]'
+                : it.disabled
+                  ? 'text-muted vy-disabled-state'
+                  : 'text-muted hover:text-fg'
             )}
           >
             {it.icon ? <Icon name={it.icon} size={14} /> : null}

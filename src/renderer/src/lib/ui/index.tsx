@@ -31,7 +31,17 @@ export { PageHeader } from './PageHeader'
 export { Avatar } from './Avatar'
 export { Badge, type BadgeTone } from './Badge'
 export { EmptyState } from './EmptyState'
-export { FormCard, FormGroup, FormGroupLabel, FormRow, FormStack } from './FormRow'
+export {
+  FormCard,
+  FormChangesContext,
+  FormGroup,
+  FormGroupLabel,
+  FormRow,
+  FormStack,
+  WorkspaceScopeBadge,
+  useFormChange,
+  type FormChange
+} from './FormRow'
 export { Textarea } from './Textarea'
 export { ImageChip } from './ImageChip'
 export { ImageLightbox } from './ImageLightbox'

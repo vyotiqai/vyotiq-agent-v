@@ -92,13 +92,17 @@ test('a tool written by an earlier session is in the catalog on a fresh launch',
 
 test('Settings names what a run wrote, and says calls are re-approved when it changes', async () => {
   const page = launched.window
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('button', { name: 'Tools', exact: true }).click()
+  await page.getByRole('button', { name: /^settings/i }).click()
+  await page
+    .getByRole('navigation', { name: 'Settings', exact: true })
+    .getByRole('button', { name: 'Tools', exact: true })
+    .click()
 
-  const heading = page.getByText('Agent-built tools (1)')
-  await expect(heading).toBeVisible({ timeout: 20_000 })
+  // The catalog lists what the run wrote in its own group, open from the start.
+  const group = page.locator('[data-tool-group="Agent-built tools"]')
+  await expect(group).toBeVisible({ timeout: 20_000 })
   // Reading the module means opening the file, so the one thing the list can
   // do is say how it is gated.
-  await expect(page.getByText(/each call asks you, and asks again whenever the code changes/)).toBeVisible()
-  await expect(page.getByText(TOOL_DESCRIPTION)).toBeVisible()
+  await expect(group.getByText(/each call asks you, and asks again whenever the code changes/)).toBeVisible()
+  await expect(group.getByText(TOOL_DESCRIPTION)).toBeVisible()
 })

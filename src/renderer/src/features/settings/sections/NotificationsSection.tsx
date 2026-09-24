@@ -5,6 +5,14 @@ import { SelectField } from '../components/SelectField'
 import { SettingsGroup, SettingsStack } from '../components/SettingsField'
 import { SwitchField } from '../components/SwitchField'
 
+/** Whose notifications a desktop alert is. */
+function desktopName(): string {
+  const platform = window.vyotiq?.platform
+  if (platform === 'win32') return 'Windows'
+  if (platform === 'darwin') return 'macOS'
+  return 'Desktop'
+}
+
 export function NotificationsSection({ form }: { form: SettingsFormState }) {
   const notifications = form.settings.notifications ?? DEFAULT_NOTIFICATION_SETTINGS
   const eventsLocked = form.formLocked || !notifications.enabled
@@ -17,57 +25,58 @@ export function NotificationsSection({ form }: { form: SettingsFormState }) {
       <SettingsGroup title="Delivery">
         <SwitchField
           id="notifications-enabled"
-          title="Enable notifications"
-          hint="The sidebar inbox and desktop alerts."
-          help="When off, nothing is added to the inbox and no desktop notifications are shown."
+          title="Notifications"
+          hint="The inbox and desktop alerts."
           checked={notifications.enabled}
           disabled={form.formLocked}
           onChange={(enabled) => patch({ enabled })}
+          {...form.nestedDefaultMark('notifications', 'enabled')}
         />
         <SelectField
           id="notifications-desktop"
-          title="Desktop notifications"
-          hint="When to also show a system notification."
-          help="The inbox records every enabled event either way. When in background shows one only while the window is unfocused or minimized."
+          title="Desktop alerts"
+          hint={`${desktopName()} notifications, on top of the inbox.`}
           value={notifications.desktop}
           options={DESKTOP_NOTIFICATION_OPTIONS}
           disabled={eventsLocked}
           onChange={(desktop) => patch({ desktop })}
+          {...form.nestedDefaultMark('notifications', 'desktop')}
         />
       </SettingsGroup>
 
       <SettingsGroup title="Events">
         <SwitchField
-          id="notifications-run-finished"
-          title="Agent run finished"
-          hint="A run completes."
-          checked={notifications.agentRunFinished}
-          disabled={eventsLocked}
-          onChange={(agentRunFinished) => patch({ agentRunFinished })}
-        />
-        <SwitchField
-          id="notifications-run-failed"
-          title="Agent run failed"
-          hint="A run stops on an error."
-          checked={notifications.agentRunFailed}
-          disabled={eventsLocked}
-          onChange={(agentRunFailed) => patch({ agentRunFailed })}
-        />
-        <SwitchField
           id="notifications-needs-you"
-          title="Agent needs you"
-          hint="An approval or a question is waiting on you."
+          title="A task needs you"
           checked={notifications.agentNeedsYou}
           disabled={eventsLocked}
           onChange={(agentNeedsYou) => patch({ agentNeedsYou })}
+          {...form.nestedDefaultMark('notifications', 'agentNeedsYou')}
+        />
+        <SwitchField
+          id="notifications-run-finished"
+          title="A task finished"
+          checked={notifications.agentRunFinished}
+          disabled={eventsLocked}
+          onChange={(agentRunFinished) => patch({ agentRunFinished })}
+          {...form.nestedDefaultMark('notifications', 'agentRunFinished')}
+        />
+        <SwitchField
+          id="notifications-run-failed"
+          title="A task failed"
+          checked={notifications.agentRunFailed}
+          disabled={eventsLocked}
+          onChange={(agentRunFailed) => patch({ agentRunFailed })}
+          {...form.nestedDefaultMark('notifications', 'agentRunFailed')}
         />
         <SwitchField
           id="notifications-system"
           title="System alerts"
-          hint="Crash recovery and other app events."
+          hint="When the window recovers from a crash."
           checked={notifications.system}
           disabled={eventsLocked}
           onChange={(system) => patch({ system })}
+          {...form.nestedDefaultMark('notifications', 'system')}
         />
       </SettingsGroup>
     </SettingsStack>

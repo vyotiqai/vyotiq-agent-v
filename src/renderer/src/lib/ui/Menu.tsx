@@ -48,7 +48,8 @@ export function Menu({
   bare = false,
   quiet = false,
   mono = false,
-  icon
+  icon,
+  title
 }: {
   value: string
   options: MenuOption[]
@@ -66,6 +67,8 @@ export function Menu({
   quiet?: boolean
   mono?: boolean
   icon?: IconName
+  /** Hover text for the trigger, when its value can truncate (a long model id). */
+  title?: string
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -337,6 +340,7 @@ export function Menu({
         type="button"
         className={triggerClassName ?? selectTriggerClass({ bare, quiet, mono })}
         aria-label={ariaLabel}
+        title={title}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}

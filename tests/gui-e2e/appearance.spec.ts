@@ -5,13 +5,13 @@ import { APPEARANCE_LOCAL_STORAGE_KEY, DEFAULT_SKIN_ID } from '../../src/shared/
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
 import { seedAppSettings } from './helpers/seedWorkspace'
 import {
+  chooseSettingsRadio,
   leaveSettingsIfOpen,
   openAppearanceSection,
   openSettings,
   readAppearanceBootCache,
   readRootAppearance,
-  resetAppearanceSettings,
-  selectSettingsMenu
+  resetAppearanceSettings
 } from './helpers/settings'
 
 let launched: LaunchedApp
@@ -35,14 +35,17 @@ test('settings nav opens appearance section with all controls', async () => {
   const { window } = launched
   await openAppearanceSection(window)
 
-  await expect(window.getByRole('button', { name: /^color mode$/i })).toBeVisible()
-  await expect(window.getByText('Interface skin')).toBeVisible()
-  await expect(window.getByRole('button', { name: /^text size$/i })).toBeVisible()
-  await expect(window.getByRole('button', { name: /^ui density$/i })).toBeVisible()
+  await expect(window.locator('[data-settings-field="appearance-skin"]')).toBeVisible()
+  for (const skin of ['Native', 'Default', 'Proof', 'Bench', 'Gild']) {
+    await expect(window.getByRole('button', { name: skin, exact: true })).toBeVisible()
+  }
+  await expect(window.getByRole('radiogroup', { name: 'Colour mode', exact: true })).toBeVisible()
+  await expect(window.getByRole('radiogroup', { name: 'Text size', exact: true })).toBeVisible()
+  await expect(window.getByRole('radiogroup', { name: 'Density', exact: true })).toBeVisible()
   await expect(window.getByText('User CSS overlay')).toBeVisible()
 })
 
-test('settings search navigates to interface skin field', async () => {
+test('settings search navigates to the skin picker', async () => {
   const { window } = launched
   await openSettings(window)
 
@@ -50,14 +53,14 @@ test('settings search navigates to interface skin field', async () => {
   await search.fill('template')
   await search.press('Enter')
 
-  await expect(window.getByText('Interface skin')).toBeVisible({ timeout: 10_000 })
+  await expect(window.locator('[data-settings-field="appearance-skin"]')).toBeVisible({ timeout: 10_000 })
   await expect(window.getByRole('button', { name: /^bench$/i })).toBeVisible()
 })
 
-test('theme menu updates DOM, boot cache, and persisted settings', async () => {
+test('colour mode updates DOM, boot cache, and persisted settings', async () => {
   const { window, userDataDir } = launched
   await openAppearanceSection(window)
-  await selectSettingsMenu(window, /^color mode$/i, /^dark$/i)
+  await chooseSettingsRadio(window, 'Colour mode', 'Dark')
 
   await expect
     .poll(async () => readRootAppearance(window))
@@ -80,12 +83,12 @@ test('theme menu updates DOM, boot cache, and persisted settings', async () => {
   expect(onDisk.theme).toBe('dark')
 })
 
-test('font scale and density menus update document attributes and CSS tokens', async () => {
+test('text size and density update document attributes and CSS tokens', async () => {
   const { window } = launched
   await openAppearanceSection(window)
 
-  await selectSettingsMenu(window, /^text size$/i, /^large$/i)
-  await selectSettingsMenu(window, /^ui density$/i, /^compact$/i)
+  await chooseSettingsRadio(window, 'Text size', 'Large')
+  await chooseSettingsRadio(window, 'Density', 'Compact')
 
   await expect
     .poll(async () => readRootAppearance(window))
@@ -225,9 +228,9 @@ test('appearance boot cache survives reload before React hydrates', async () => 
   const { window } = launched
   await openAppearanceSection(window)
   await window.getByRole('button', { name: /^bench$/i }).click()
-  await selectSettingsMenu(window, /^color mode$/i, /^light$/i)
-  await selectSettingsMenu(window, /^text size$/i, /^small$/i)
-  await selectSettingsMenu(window, /^ui density$/i, /^comfortable$/i)
+  await chooseSettingsRadio(window, 'Colour mode', 'Light')
+  await chooseSettingsRadio(window, 'Text size', 'Small')
+  await chooseSettingsRadio(window, 'Density', 'Comfortable')
 
   await expect
     .poll(async () => readAppearanceBootCache(window))

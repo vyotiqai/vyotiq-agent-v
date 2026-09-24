@@ -61,10 +61,12 @@ export function NumberField({
         {/* Width comes from this wrapper: Input is `w-full`, and cn() has no
             tailwind-merge, so a `w-24` passed to it lost to that `w-full` and
             every number box shrank to whatever its row's hint left over. */}
-        <div className="w-24 shrink-0">
+        <div className="w-16 shrink-0">
           <Input
             type="number"
-            className="tabular-nums"
+            size="sm"
+            mono
+            className="text-right tabular-nums"
             aria-label={name}
             min={min}
             max={max}
@@ -95,9 +97,7 @@ export function NumberField({
             }}
           />
         </div>
-        {/* Fixed width so the inputs share one right edge whatever the unit —
-            "sessions" and "%" otherwise pushed them to different columns. */}
-        {unit ? <span className="w-14 shrink-0 text-xs text-muted">{unit}</span> : null}
+        {unit ? <span className="shrink-0 text-xs text-tertiary">{unit}</span> : null}
       </div>
       {form.fieldError[field]}
     </SettingsField>

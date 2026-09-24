@@ -99,3 +99,25 @@ export function shortcutGroups(): ShortcutGroup[] {
   if (unplaced.length > 0) groups.push({ title: 'Other', entries: unplaced })
   return groups.filter((group) => group.entries.length > 0)
 }
+
+const MAC_MODIFIERS = new Set(['⌘', '⇧', '⌥', '⌃'])
+
+/** A `+` joining two keys; a trailing one is the plus key itself. */
+const KEY_JOIN = /\+(?=.)/
+
+/**
+ * A chord's label as keycaps: `Ctrl+Shift+H` → Ctrl · Shift · H, and macOS's
+ * run-together `⌘⇧H` → ⌘ · ⇧ · H. A `+` splits only when a key follows it,
+ * so `Ctrl++` and `⌘+` keep their plus key.
+ */
+export function chordKeys(label: string): string[] {
+  if (KEY_JOIN.test(label)) return label.split(KEY_JOIN)
+  const keys: string[] = []
+  let rest = label
+  while (rest.length > 1 && MAC_MODIFIERS.has(rest[0]!)) {
+    keys.push(rest[0]!)
+    rest = rest.slice(1)
+  }
+  keys.push(rest)
+  return keys
+}

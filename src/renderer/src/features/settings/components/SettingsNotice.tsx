@@ -3,10 +3,9 @@ import { Icon } from '@renderer/lib/icons'
 import { cn } from '@renderer/lib/ui'
 
 /**
- * A sentence above a section's groups: the workspace-override banner, a
- * degraded-capability warning. Three sections had hand-rolled copies of the
- * same `rounded-xl bg-surface px-4 py-3 text-xs` paragraph that had already
- * drifted apart in tone colour, so it lives here once.
+ * A sentence above a section's groups: a degraded-capability warning. It
+ * sits in the page's own rhythm (the `mt-6` every group has) rather than in a
+ * card, so it reads as part of the section it qualifies.
  *
  * A warning carries an icon as well as its colour, so the tone never rests on
  * hue alone. Not an error: `Alert` owns those, and a failed write should not
@@ -22,12 +21,12 @@ export function SettingsNotice({
   return (
     <p
       className={cn(
-        'm-0 flex items-start gap-2 rounded-xl bg-surface px-4 py-3 text-xs leading-snug [overflow-wrap:anywhere]',
+        'm-0 mt-6 flex items-start gap-2 text-xs leading-[18px] [overflow-wrap:anywhere]',
         tone === 'warning' ? 'text-warning' : 'text-secondary'
       )}
       role="status"
     >
-      {tone === 'warning' ? <Icon name="warning" size={14} className="mt-px" /> : null}
+      {tone === 'warning' ? <Icon name="warning" size={14} className="mt-0.5 shrink-0" /> : null}
       <span className="min-w-0">{children}</span>
     </p>
   )

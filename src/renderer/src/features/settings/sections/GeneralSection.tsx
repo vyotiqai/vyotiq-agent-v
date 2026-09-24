@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import type { NavigationMode, SecretProvider } from '@shared/ipc'
+import type { SecretProvider } from '@shared/ipc'
 import { Button } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { SettingsViewProps } from '../types'
-import { MAX_CHAT_PANE_OPTIONS, NAVIGATION_MODE_OPTIONS } from '../constants'
-import { ChoiceCards } from '../components/ChoiceCards'
+import { LAUNCH_VIEW_OPTIONS, MAX_CHAT_PANE_OPTIONS } from '../constants'
+import { SegmentedField } from '../components/SegmentedField'
 import { SelectField } from '../components/SelectField'
-import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
+import { SettingsGroup, SettingsStack } from '../components/SettingsField'
 import { WorkspaceOverrideList } from '../components/WorkspaceOverrideList'
 
 export function GeneralSection({
@@ -42,70 +42,65 @@ export function GeneralSection({
 
   return (
     <SettingsStack>
-      <SettingsGroup title="Layout">
-        <SettingsField
+      <SettingsGroup title="Start">
+        <SegmentedField
           id="navigation"
-          title="Navigation"
-          hint="Where sessions and workspaces live."
-          help="The sidebar changes right away; the startup view follows the next time the app starts."
-          wide
-        >
-          <ChoiceCards
-            label="Navigation"
-            value={settings.navigationMode}
-            options={NAVIGATION_MODE_OPTIONS}
-            disabled={form.formLocked}
-            onChange={(value) => {
-              void form.runUpdate({ navigationMode: value as NavigationMode })
-            }}
-          />
-        </SettingsField>
+          title="Open on launch"
+          hint="Where the window lands when Agent V starts."
+          value={settings.navigationMode}
+          options={LAUNCH_VIEW_OPTIONS}
+          disabled={form.formLocked}
+          onChange={(navigationMode) => {
+            void form.runUpdate({ navigationMode })
+          }}
+          {...form.defaultMark('navigationMode')}
+        />
         <SelectField
           id="max-chat-panes"
-          title="Max chat panes"
-          hint="Sessions shown side by side."
-          help="Auto fits as many 280px columns as the window allows, up to 6. A fixed number can exceed what fits; the pane row then scrolls."
+          title="Tasks side by side"
+          hint="How many tasks fit next to each other. Auto fits the window, up to 6."
+          help="Auto fits as many 280px columns as the window allows. A fixed number can be more than fits; the row of tasks then scrolls."
           value={String(settings.maxChatPanes ?? 0)}
           options={MAX_CHAT_PANE_OPTIONS}
+          width={150}
           disabled={form.formLocked}
           onChange={(value) => {
             void form.runUpdate({ maxChatPanes: Number(value) })
           }}
+          {...form.defaultMark('maxChatPanes')}
         />
       </SettingsGroup>
 
-      <SettingsGroup title="Workspaces">
-        <SettingsField
-          id="workspaces"
-          title="Open workspaces"
-          hint="Override gives a workspace its own model and agent settings."
-          help="Turning Override on starts the workspace from your current settings. While it is on for the active workspace, rows marked Workspace in Providers and Agent save to that workspace only. Turn it off to go back to app-wide settings."
-          wide
-        >
-          <WorkspaceOverrideList
-            paths={openWorkspaces}
-            activePath={activeWorkspacePath}
-            globalSettings={settings}
-            secrets={secrets}
-            overridesByPath={settingsOverridesByPath ?? {}}
-            disabled={form.formLocked || !onSetSettingsOverride}
-            onSetOverride={onSetSettingsOverride ?? (async () => ({ ok: true as const }))}
-            onError={form.setErrorMessage}
-            action={
-              onPickWorkspace ? (
-                <Button
-                  variant="subtle"
-                  pending={pickingWorkspace}
-                  disabled={form.formLocked}
-                  onClick={addWorkspace}
-                >
-                  {pickingWorkspace ? 'Opening…' : 'Add workspace'}
-                </Button>
-              ) : undefined
-            }
-          />
-        </SettingsField>
+      <SettingsGroup
+        title="Workspaces"
+        description="Override gives a workspace its own model and agent settings."
+        fieldId="workspaces"
+      >
+        <WorkspaceOverrideList
+          paths={openWorkspaces}
+          activePath={activeWorkspacePath}
+          globalSettings={settings}
+          secrets={secrets}
+          overridesByPath={settingsOverridesByPath ?? {}}
+          disabled={form.formLocked || !onSetSettingsOverride}
+          onSetOverride={onSetSettingsOverride ?? (async () => ({ ok: true as const }))}
+          onError={form.setErrorMessage}
+        />
       </SettingsGroup>
+      {onPickWorkspace ? (
+        <div className="pt-2">
+          <Button
+            size="xs"
+            variant="ghost"
+            icon="plus"
+            pending={pickingWorkspace}
+            disabled={form.formLocked}
+            onClick={addWorkspace}
+          >
+            {pickingWorkspace ? 'Opening…' : 'Add workspace'}
+          </Button>
+        </div>
+      ) : null}
     </SettingsStack>
   )
 }

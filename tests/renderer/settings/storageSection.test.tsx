@@ -1,14 +1,14 @@
 /** @vitest-environment jsdom */
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { SettingsView, type SettingsSection } from '@renderer/features/settings'
 import { emptySecretStatus, type Settings } from '@shared/ipc'
 import { DEFAULT_SETTINGS } from '@shared/ipc'
 
 /**
- * Settings → Storage surface (audit H4/H5). Every control is wired: the
- * report table renders live IPC numbers, "Free up space" runs the
+ * Settings → Storage surface (audit H4/H5). Every control is wired: the usage
+ * rows render live IPC numbers, "Free up space now" runs the
  * preview → confirm → run flow over the storage cleanup IPC, retention
  * switches/inputs patch settings live, and the first-open ack fires once.
  */
@@ -28,8 +28,8 @@ const baseSettings: Settings = {
 
 const reportData = {
   categories: [
-    { id: 'checkpoints', label: 'Checkpoints', bytes: 4096, files: 2, managed: true },
-    { id: 'transcripts', label: 'Session transcripts', bytes: 1_048_576, files: 3, managed: true },
+    { id: 'checkpoints', label: 'Checkpoints (undo points)', bytes: 4096, files: 2, managed: true },
+    { id: 'transcripts', label: 'Task records', bytes: 1_048_576, files: 3, managed: true },
     { id: 'dictation-models', label: 'Dictation models', bytes: 478_150_656, files: 1, managed: false }
   ],
   workspaces: [
@@ -64,7 +64,7 @@ const reportData = {
 
 const previewData = {
   categories: [
-    { id: 'checkpoints', label: 'Checkpoints', reclaimBytes: 4096, items: 2 },
+    { id: 'checkpoints', label: 'Undo points', reclaimBytes: 4096, items: 2 },
     {
       id: 'orphans',
       label: 'Untracked workspace storage',
@@ -91,7 +91,7 @@ const previewData = {
 
 const runResultData = {
   categories: [
-    { id: 'checkpoints', label: 'Checkpoints', reclaimBytes: 4096, items: 2 },
+    { id: 'checkpoints', label: 'Undo points', reclaimBytes: 4096, items: 2 },
     {
       id: 'orphans',
       label: 'Untracked workspace storage',
@@ -168,15 +168,24 @@ describe('Settings → Storage', () => {
     renderStorage(bridge)
 
     await waitFor(() => expect(bridge.storageReport).toHaveBeenCalled())
-    await waitFor(() =>
-      expect(screen.getByText('Session transcripts').closest('table')).toBeTruthy()
-    )
+    const row = (id: string) => document.querySelector(`[data-storage-category="${id}"]`) as HTMLElement
+    await waitFor(() => expect(row('transcripts')).toBeTruthy())
     expect(bridge.storageReport).toHaveBeenCalledTimes(1)
-    // Category rows with real numbers from the mocked report.
-    expect(screen.getByText('4 KB')).toBeTruthy()
-    expect(screen.getByText('1.0 MB')).toBeTruthy()
-    expect(screen.getByText('1 file')).toBeTruthy()
-    expect(screen.getByText('3 files')).toBeTruthy()
+    // Managed data first, largest first; report-only categories after.
+    expect(
+      [...document.querySelectorAll('[data-storage-category]')].map((el) =>
+        el.getAttribute('data-storage-category')
+      )
+    ).toEqual(['transcripts', 'checkpoints', 'dictation-models'])
+    // Real numbers from the mocked report, with the file count on the size.
+    expect(within(row('checkpoints')).getByText('4 KB').getAttribute('title')).toBe('2 files')
+    expect(within(row('transcripts')).getByText('1.0 MB').getAttribute('title')).toBe('3 files')
+    expect(within(row('dictation-models')).getByText('456 MB').getAttribute('title')).toBe('1 file')
+    // Models are measured but the cap never evicts them, so they draw no share.
+    expect(within(row('dictation-models')).getByText('not managed')).toBeTruthy()
+    // The headline is managed data against its cap, beside everything measured.
+    expect(screen.getByText('of a 5.0 GB managed cap')).toBeTruthy()
+    expect(screen.getByText('457 MB in all')).toBeTruthy()
   })
 
   it('acks the surface once on first open (§8.1 first-run arm)', async () => {
@@ -212,13 +221,13 @@ describe('Settings → Storage', () => {
     expect(bridge.storageAckSurface.mock.calls.length).toBe(calls)
   })
 
-  it('flags untracked workspace storage as safe to clean in the detail table', async () => {
+  it('flags untracked workspace storage as safe to clean', async () => {
     const bridge = makeBridge()
     renderStorage(bridge)
 
-    await waitFor(() => expect(screen.getByText('Untracked (safe to clean)')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Untracked · safe to clean')).toBeTruthy())
     expect(screen.getByText('Tracked')).toBeTruthy()
-    expect(screen.getByText('1 session')).toBeTruthy()
+    expect(screen.getByText('1 task')).toBeTruthy()
   })
 
   it('runs the Free up space flow: preview → confirm → run → result', async () => {
@@ -226,22 +235,22 @@ describe('Settings → Storage', () => {
     renderStorage(bridge)
 
     await waitFor(() => expect(bridge.storageReport).toHaveBeenCalled())
-    // The field's ?-help button also says "About Free up space" — target the
-    // action button by its exact label.
-    fireEvent.click(screen.getByRole('button', { name: 'Free up space' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check…' }))
 
     await waitFor(() => expect(bridge.storageCleanupPreview).toHaveBeenCalled())
-    // Preview shows reclaimable per category, deletes nothing yet.
-    expect(screen.getByText(/Reclaimable:/)).toBeTruthy()
-    expect(screen.getByText('100.0 MB')).toBeTruthy()
+    // The preview lists what would go, per category; nothing is deleted yet.
+    const freeUp = document.querySelector('[data-settings-field="storage-free-up"]') as HTMLElement
+    await waitFor(() => expect(within(freeUp).getByText('Untracked workspace storage')).toBeTruthy())
+    expect(within(freeUp).getByText('100 MB')).toBeTruthy()
+    expect(within(freeUp).getByText('2 items')).toBeTruthy()
     // Under the cap, so the size-cap pass has nothing to add.
     expect(screen.queryByText(/may also be evicted/)).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: /delete 100\.0 mb/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete 100 MB' }))
     await waitFor(() =>
       expect(bridge.storageCleanupRun).toHaveBeenCalledWith({ confirmToken: 'tok-1' })
     )
-    await waitFor(() => expect(screen.getByText(/freed 100\.0 mb/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/Freed 100 MB/)).toBeTruthy())
     expect(screen.getByText(/across 3 items/i)).toBeTruthy()
   })
 
@@ -250,12 +259,13 @@ describe('Settings → Storage', () => {
     renderStorage(bridge)
 
     await waitFor(() => expect(bridge.storageReport).toHaveBeenCalled())
-    fireEvent.click(screen.getByRole('button', { name: 'Free up space' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check…' }))
     await waitFor(() => expect(bridge.storageCleanupPreview).toHaveBeenCalled())
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
     expect(bridge.storageCleanupRun).not.toHaveBeenCalled()
-    expect(screen.queryByText(/reclaimable:/i)).toBeNull()
+    expect(screen.queryByText('Untracked workspace storage')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Check…' })).toBeTruthy()
   })
 
   it('retention switch toggles checkpoint cleanup live', async () => {
@@ -264,7 +274,7 @@ describe('Settings → Storage', () => {
     renderStorage(bridge, onUpdate)
 
     await waitFor(() => expect(bridge.storageReport).toHaveBeenCalled())
-    const toggle = screen.getByRole('switch', { name: /checkpoint cleanup/i })
+    const toggle = screen.getByRole('switch', { name: 'Clean up undo points' })
     fireEvent.click(toggle)
     await waitFor(() => expect(onUpdate).toHaveBeenCalled())
     const patch = onUpdate.mock.calls[0][0] as { storage: Settings['storage'] }
@@ -277,14 +287,14 @@ describe('Settings → Storage', () => {
     renderStorage(bridge, onUpdate)
 
     await waitFor(() => expect(bridge.storageReport).toHaveBeenCalled())
-    const keepInput = screen.getByLabelText('Keep checkpoint sessions')
+    const keepInput = screen.getByLabelText('Keep undo points of the newest')
     fireEvent.change(keepInput, { target: { value: '3' } })
     fireEvent.blur(keepInput)
     // Out of bounds (min 5) → rejected, no settings write, and the reason is
     // under the field rather than at the bottom of the page.
     expect(onUpdate).not.toHaveBeenCalled()
     const row = document.querySelector('[data-settings-field="storage-checkpoint-keep"]')
-    expect(row?.textContent).toMatch(/Keep checkpoint sessions must be from 5 to 100 sessions\./)
+    expect(row?.textContent).toMatch(/Keep undo points of the newest must be from 5 to 100 tasks\./)
     expect(keepInput.getAttribute('aria-invalid')).toBe('true')
 
     fireEvent.change(keepInput, { target: { value: '25' } })
@@ -309,8 +319,10 @@ describe('Settings → Storage', () => {
     // session limits then, so the hint must not promise "kept forever" — and
     // the limits stay editable.
     expect(screen.getByText(/nothing is deleted on a schedule/i)).toBeTruthy()
-    expect(screen.queryByText(/every session is kept forever/i)).toBeNull()
-    expect((screen.getByRole('spinbutton', { name: 'Keep sessions' }) as HTMLInputElement).disabled).toBe(false)
+    expect(screen.queryByText(/every task is kept forever/i)).toBeNull()
+    expect(
+      (screen.getByRole('spinbutton', { name: 'Always keep the newest' }) as HTMLInputElement).disabled
+    ).toBe(false)
   })
 
   it('every retention control is present and labeled', async () => {
@@ -318,20 +330,25 @@ describe('Settings → Storage', () => {
     renderStorage(bridge)
 
     await waitFor(() => expect(bridge.storageReport).toHaveBeenCalled())
-    for (const label of [
-      'Checkpoint cleanup',
-      'Keep checkpoint sessions',
-      'Checkpoint max age',
-      'Untracked storage cleanup',
+    for (const name of [
+      'Clean up undo points',
+      'Delete old tasks',
+      'Clean up untracked storage',
+      'Delete storage when closing a workspace'
+    ]) {
+      expect(screen.getByRole('switch', { name })).toBeTruthy()
+    }
+    for (const name of [
+      'Keep undo points for',
+      'Keep undo points of the newest',
+      'Keep tasks for',
+      'Always keep the newest',
       'Untracked grace period',
-      'Delete storage when removing a workspace',
-      'Automatic session retention',
-      'Keep sessions',
-      'Session max age',
       'Managed size cap'
     ]) {
-      expect(screen.getByText(label, { exact: false })).toBeTruthy()
+      expect(screen.getByRole('spinbutton', { name })).toBeTruthy()
     }
+    expect(screen.getByRole('button', { name: 'Check…' })).toBeTruthy()
   })
 
   it('report failure surfaces the error inline instead of fake numbers', async () => {
@@ -342,7 +359,7 @@ describe('Settings → Storage', () => {
     await waitFor(() => expect(bridge.storageReport).toHaveBeenCalled())
     // No category table rendered (report never resolved ok) — and the
     // failure is said, not swallowed.
-    expect(screen.queryByText('Session transcripts')).toBeNull()
+    expect(screen.queryByText('Task records')).toBeNull()
     expect((await screen.findByRole('alert')).textContent).toMatch(/scan failed/)
   })
 
@@ -367,13 +384,13 @@ describe('Settings → Storage', () => {
     })
     renderStorage(bridge)
     await waitFor(() => expect(bridge.storageReport).toHaveBeenCalled())
-    fireEvent.click(screen.getByRole('button', { name: 'Free up space' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check…' }))
     expect(
       await screen.findByText(
-        /Managed data is over the 5\.00 GB cap, so the oldest checkpoints may also be evicted/
+        /Managed data is over the 5\.0 GB cap, so the oldest checkpoints may also be evicted/
       )
     ).toBeTruthy()
-    expect(screen.getByRole('button', { name: /delete 100\.0 mb/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Delete 100 MB' })).toBeTruthy()
   })
 
   it('a cleanup with nothing to reclaim says so instead of offering to delete 0 B', async () => {
@@ -385,7 +402,7 @@ describe('Settings → Storage', () => {
     })
     renderStorage(bridge)
     await waitFor(() => expect(bridge.storageReport).toHaveBeenCalled())
-    fireEvent.click(screen.getByRole('button', { name: 'Free up space' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check…' }))
     expect(await screen.findByText('Nothing to clean up right now.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Delete /i })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))

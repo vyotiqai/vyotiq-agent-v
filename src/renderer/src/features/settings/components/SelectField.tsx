@@ -1,4 +1,5 @@
-import { Menu } from '@renderer/lib/ui'
+import { Menu, cn, selectTriggerClass } from '@renderer/lib/ui'
+import type { IconName } from '@renderer/lib/icons'
 import type { SettingsOption } from '../types'
 import { SettingsField, type SettingsFieldLayout } from './SettingsField'
 
@@ -27,20 +28,31 @@ export function SelectField<T extends string>({
   options: readonly SettingsOption<T>[]
   disabled?: boolean
   onChange: (value: T) => void
+  /** Model ids and commands read as code. */
+  mono?: boolean
+  icon?: IconName
+  /** Smallest width of the menu, so a column of them shares one left edge. */
+  width?: number
 }) {
+  const { mono = false, icon, width = 180, ...rest } = layout
   return (
-    <SettingsField id={id} title={title} {...layout}>
-      <Menu
-        aria-label={label ?? title}
-        value={value}
-        options={[...options]}
-        searchable={false}
-        placement="down"
-        disabled={disabled}
-        onChange={(next) => {
-          if (next !== value) onChange(next as T)
-        }}
-      />
+    <SettingsField id={id} title={title} {...rest}>
+      <div style={{ minWidth: width }}>
+        <Menu
+          aria-label={label ?? title}
+          value={value}
+          options={[...options]}
+          searchable={false}
+          placement="down"
+          disabled={disabled}
+          icon={icon}
+          // At its default the value is readable but not asking to be read.
+          triggerClassName={cn(selectTriggerClass({ quiet: !rest.changed, mono }), 'w-full')}
+          onChange={(next) => {
+            if (next !== value) onChange(next as T)
+          }}
+        />
+      </div>
     </SettingsField>
   )
 }

@@ -11,9 +11,6 @@ import {
   COMPOSER_FLOAT_DOCK,
   MICRO_LABEL,
   MICRO_LABEL_CAPS,
-  SETTINGS_COLUMN,
-  SETTINGS_COLUMN_MAX,
-  SETTINGS_GUTTER,
   TRANSCRIPT_ROW_GAP,
   TRANSCRIPT_TURN_GAP,
   TRANSCRIPT_WORK_ROW_GAP,
@@ -25,17 +22,13 @@ import {
 } from '@renderer/lib/utils/layout'
 
 describe('layout typography and spacing tokens', () => {
-  it('aligns settings gutter with chat gutter', () => {
-    expect(SETTINGS_GUTTER).toBe(CHAT_GUTTER)
+  it('exports the chat gutter', () => {
     expect(CHAT_GUTTER).toBe('px-4 sm:px-5')
   })
 
   it('exports column max-width tokens', () => {
     expect(CHAT_COLUMN).toContain(CHAT_COLUMN_MAX)
     expect(CHAT_COLUMN_MAX).toBe('max-w-[840px]')
-    expect(SETTINGS_COLUMN).toContain(SETTINGS_COLUMN_MAX)
-    expect(SETTINGS_COLUMN).not.toContain('mx-auto')
-    expect(SETTINGS_COLUMN_MAX).toBe('max-w-[680px]')
   })
 
   it('exports transcript rhythm gaps', () => {

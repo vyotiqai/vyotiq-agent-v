@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import type { AppearanceSettings } from '@shared/appearance'
 import {
   SECRET_PROVIDERS,
   type ProviderId,
@@ -6,6 +7,7 @@ import {
   type Settings,
   type ToolApprovalSettings,
   type WorkspaceSettingsOverride,
+  DEFAULT_SETTINGS,
   DEFAULT_TOOL_APPROVAL
 } from '@shared/ipc'
 import {
@@ -20,6 +22,7 @@ import {
   OLLAMA_CLOUD_BASE_URL,
   OLLAMA_LOCAL_DEFAULT
 } from '@shared/providers'
+import { modelSelectionKey, pushRecentModel } from '@shared/domain/modelSelection'
 import { findByWorkspacePath } from '@shared/workspacePathMatch'
 import { useEscapeToClose } from '@renderer/lib/hooks/useEscapeToClose'
 import { useModelCatalog } from '@renderer/lib/hooks/useModelCatalog'
@@ -57,6 +60,7 @@ export function useSettingsForm({
   onSaveSecret,
   onClearSecret,
   onModelsRefreshed,
+  onAppearanceChange,
   activeWorkspacePath = null,
   settingsOverridesByPath = {},
   effectiveChatSettings,
@@ -71,6 +75,9 @@ export function useSettingsForm({
     defaultKeyProvider(settings.provider, secrets)
   )
   const [keyDraft, setKeyDraft] = useState('')
+  // Whether the key row is open. Until someone opens or closes one, the row
+  // that needs attention is: the active provider's, when it has no key.
+  const [keyRowOpen, setKeyRowOpen] = useState<boolean | null>(null)
   const [ollamaUrl, setOllamaUrl] = useState(settings.ollamaBaseUrl)
   const [customUrl, setCustomUrl] = useState(settings.customOpenAiBaseUrl)
   // Persona & style drafts (Settings → Agent). Same draft-then-commit pattern
@@ -349,6 +356,34 @@ export function useSettingsForm({
   const selectKeyProvider = (provider: SecretProvider): void => {
     setKeyProvider(provider)
     setKeyDraft('')
+    setKeyRowOpen(true)
+  }
+
+  const openKeyProvider: SecretProvider | null = (keyRowOpen ?? activeNeedsKey) ? keyProvider : null
+
+  /** Manage / Add key: opens that provider's row, or closes it when it is the open one. */
+  const toggleKeyProvider = (provider: SecretProvider): void => {
+    if (openKeyProvider === provider) {
+      setKeyRowOpen(false)
+      setKeyDraft('')
+      return
+    }
+    selectKeyProvider(provider)
+  }
+
+  /**
+   * The app-wide model, for new tasks on the app-wide provider. Same contract
+   * as picking one in the composer: it joins the recent models and takes the
+   * service tier last used with it.
+   */
+  const setGlobalModel = async (model: string): Promise<boolean> => {
+    if (model === settings.model) return true
+    const key = modelSelectionKey(settings.provider, model)
+    return runUpdate({
+      model,
+      recentModels: pushRecentModel(settings.recentModels, key),
+      serviceTier: settings.serviceTierByModel[key] ?? 'default'
+    })
   }
 
   const setActiveProvider = async (provider: ProviderId): Promise<boolean> => {
@@ -595,6 +630,83 @@ export function useSettingsForm({
     setError(message)
   }
 
+  /** The value a workspace-overridable row shows: the override's while it is on. */
+  const agentValue = <K extends AgentSettingKey>(key: K): Settings[K] =>
+    ((workspaceOverrideActive ? effectiveChatSettings?.[key] : undefined) ?? settings[key]) as Settings[K]
+
+  /**
+   * Put rows back to their defaults as one save per scope. Each row's own
+   * Reset writes its whole setting; two fields of one object reset that way
+   * race, and the second write restores the field the first had just reset.
+   */
+  const resetToDefaults = (resets: readonly SettingReset[]): void => {
+    const global: Record<string, unknown> = {}
+    const agent: Record<string, unknown> = {}
+    const appearance: Record<string, unknown> = {}
+    for (const reset of resets) {
+      if (reset.scope === 'appearance') {
+        appearance[reset.key] = DEFAULT_SETTINGS[reset.key]
+        continue
+      }
+      const into = reset.scope === 'agent' ? agent : global
+      const key = reset.key
+      if (reset.field === undefined) {
+        into[key] = DEFAULT_SETTINGS[key]
+        continue
+      }
+      const current = (into[key] ??
+        (reset.scope === 'agent' ? agentValue(reset.key) : settings[key]) ??
+        DEFAULT_SETTINGS[key]) as Record<string, unknown>
+      const defaults = DEFAULT_SETTINGS[key] as unknown as Record<string, unknown>
+      into[key] = { ...current, [reset.field]: defaults[reset.field] }
+    }
+    if (Object.keys(appearance).length > 0) {
+      onAppearanceChange?.(appearance as Partial<AppearanceSettings>)
+    }
+    const agentKeys = Object.keys(agent).length > 0
+    // With no override, the agent rows are global settings too: one write.
+    if (agentKeys && !workspaceOverrideActive) Object.assign(global, agent)
+    if (Object.keys(global).length > 0) void runUpdate(global as Partial<Settings>)
+    if (agentKeys && workspaceOverrideActive) void runAgentUpdate(agent as AgentSettingsPatch)
+  }
+
+  const mark = (changed: boolean, resetTo: SettingReset): SettingMark => ({
+    changed,
+    onReset: () => resetToDefaults([resetTo]),
+    resetTo
+  })
+
+  /**
+   * Whether a setting is away from its default, and how to put it back — a
+   * row's mark and its Reset. Compared by value, so an object setting is
+   * changed only when something in it differs.
+   */
+  const defaultMark = <K extends keyof Settings>(key: K, value: Settings[K] = settings[key]): SettingMark =>
+    mark(!sameSetting(value, DEFAULT_SETTINGS[key]), { scope: 'global', key })
+
+  /** The same for one field of an object setting (`notifications.enabled`). */
+  const nestedDefaultMark = <K extends NestedSettingKey>(key: K, field: keyof Settings[K] & string): SettingMark => {
+    // Settings written before the object existed load without it.
+    const value = (settings[key] as Settings[K] | undefined)?.[field] ?? DEFAULT_SETTINGS[key][field]
+    return mark(!sameSetting(value, DEFAULT_SETTINGS[key][field]), { scope: 'global', key, field })
+  }
+
+  /**
+   * For a setting a workspace override can own: judged on the value the row
+   * shows, and reset in the scope the row edits.
+   */
+  const agentDefaultMark = <K extends AgentSettingKey>(key: K, field?: string): SettingMark => {
+    const value = agentValue(key) as unknown
+    const shown = field === undefined ? value : (value as Record<string, unknown> | undefined)?.[field]
+    const fallback = DEFAULT_SETTINGS[key] as unknown
+    const base = field === undefined ? fallback : (fallback as Record<string, unknown>)[field]
+    return mark(!sameSetting(shown, base), { scope: 'agent', key, ...(field === undefined ? {} : { field }) })
+  }
+
+  /** Skin, mode, type and density apply live through the appearance path. */
+  const appearanceMark = (key: AppearanceKey): SettingMark =>
+    mark(!sameSetting(settings[key], DEFAULT_SETTINGS[key]), { scope: 'appearance', key })
+
   return {
     section,
     navigateSection,
@@ -655,12 +767,46 @@ export function useSettingsForm({
     runUpdate,
     runAgentUpdate,
     selectKeyProvider,
+    openKeyProvider,
+    toggleKeyProvider,
     setActiveProvider,
+    setGlobalModel,
     commitOllamaUrl,
     commitCustomUrl,
     refreshModels,
     saveKey,
     clearKey,
-    setErrorMessage
+    setErrorMessage,
+    defaultMark,
+    nestedDefaultMark,
+    agentDefaultMark,
+    appearanceMark,
+    resetToDefaults
   }
+}
+
+/** Settings that are objects of their own, whose fields are rows. */
+type NestedSettingKey = 'notifications' | 'storage' | 'codeIndex' | 'dictation'
+
+/** Settings a workspace override can own (see `runAgentUpdate`). */
+type AgentSettingKey = keyof AgentSettingsPatch & keyof Settings
+
+/** Settings the appearance path applies live, ahead of the save. */
+type AppearanceKey = 'theme' | 'skinId' | 'fontScale' | 'uiDensity' | 'customCssPath'
+
+/**
+ * What a row's Reset writes: a whole setting, or one field of an object
+ * setting, in the scope the row edits. Reset section merges these.
+ */
+export type SettingReset =
+  | { scope: 'global'; key: keyof Settings; field?: string }
+  | { scope: 'agent'; key: AgentSettingKey; field?: string }
+  | { scope: 'appearance'; key: AppearanceKey }
+
+/** Spread onto a settings row: its mark, its Reset, and what that Reset writes. */
+export type SettingMark = { changed: boolean; onReset: () => void; resetTo: SettingReset }
+
+/** Settings are plain JSON, so two values are the same setting when they serialize the same. */
+function sameSetting(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
 }

@@ -1,9 +1,6 @@
 /** Shared horizontal gutter for chat column surfaces. */
 export const CHAT_GUTTER = 'px-4 sm:px-5'
 
-/** Settings/marketplace body gutter — matches {@link CHAT_GUTTER}. */
-export const SETTINGS_GUTTER = CHAT_GUTTER
-
 /**
  * Top inset for chat stage surfaces that carry no sticky child.
  *
@@ -97,15 +94,6 @@ export const COMPOSER_TEXTAREA_MAX_PX = 280
 
 /** Tailwind max-height matching `COMPOSER_TEXTAREA_MAX_PX`. */
 export const COMPOSER_TEXTAREA_MAX_CLASS = 'max-h-[280px]'
-
-/** Settings sidebar width (sm+). */
-export const SETTINGS_NAV_WIDTH = 'sm:w-[220px]'
-
-/** Shared max width for settings content column. */
-export const SETTINGS_COLUMN_MAX = 'max-w-[680px]'
-
-/** Settings content column — left-aligned beside the section nav. */
-export const SETTINGS_COLUMN = `w-full ${SETTINGS_COLUMN_MAX}`
 
 /** Shared max width for marketplace content column. */
 export const MARKETPLACE_COLUMN_MAX = 'max-w-[1040px]'

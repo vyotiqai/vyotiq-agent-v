@@ -1,16 +1,16 @@
 import type { KeyboardEvent } from 'react'
 import type { ToolApprovalSettings } from '@shared/ipc'
+import { Icon } from '@renderer/lib/icons'
 import { Button, Input } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { SettingsViewProps } from '../types'
 import { AutoTextarea } from '../components/AutoTextarea'
 import { NumberField } from '../components/NumberField'
+import { SegmentedField } from '../components/SegmentedField'
 import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
-import { SettingsNotice } from '../components/SettingsNotice'
 import { SwitchField } from '../components/SwitchField'
 import { workspaceBadge } from '../components/WorkspaceBadge'
-import { workspaceShort } from '../utils/settingsHelpers'
 import {
   AUTONOMOUS_QUESTIONS_OPTIONS,
   IDENTITY_MAX_LENGTH,
@@ -47,7 +47,7 @@ function DraftMeta({ value, max, dirty }: { value: string; max: number; dirty: b
         {status}
       </span>
       {status || nearLimit ? (
-        <div className="flex items-center justify-between gap-2 text-2xs text-muted">
+        <div className="flex w-full items-center justify-between gap-2 text-caption text-tertiary">
           <span aria-hidden="true">{status}</span>
           {nearLimit ? (
             <span className="tabular-nums">
@@ -67,6 +67,48 @@ function blurOnEnter(e: KeyboardEvent<HTMLInputElement>): void {
   }
 }
 
+/** The tools that no longer ask, as chips that each take themselves off the list. */
+function AllowedTools({
+  names,
+  disabled,
+  onRemove,
+  onRemoveAll
+}: {
+  names: string[]
+  disabled: boolean
+  onRemove: (name: string) => void
+  onRemoveAll: () => void
+}) {
+  return (
+    <ul className="m-0 flex list-none flex-wrap items-center gap-1.5 p-0" aria-label="Always allowed tools">
+      {names.map((name) => (
+        <li
+          key={name}
+          className="inline-flex h-6 items-center gap-1.5 rounded-md bg-surface pl-2 pr-1 font-mono text-caption text-secondary"
+        >
+          {name}
+          <button
+            type="button"
+            aria-label={`Remove ${name}`}
+            disabled={disabled}
+            className="grid size-4 place-items-center rounded-sm text-tertiary vy-transition hover:bg-surface-2 hover:text-fg focus-visible:vy-focus-ring disabled:vy-disabled-state"
+            onClick={() => onRemove(name)}
+          >
+            <Icon name="close" size={10} />
+          </button>
+        </li>
+      ))}
+      {names.length > 1 ? (
+        <li>
+          <Button size="xs" variant="ghost" disabled={disabled} onClick={onRemoveAll}>
+            Remove all
+          </Button>
+        </li>
+      ) : null}
+    </ul>
+  )
+}
+
 export function AgentSection({
   form,
   onOpenMarketplace
@@ -80,100 +122,77 @@ export function AgentSection({
     void form.runAgentUpdate({ toolApproval: { ...toolApproval, ...patch } })
   }
   const showThinking = form.effectiveChatSettings?.showThinking ?? form.settings.showThinking
+  const verbosity =
+    form.effectiveChatSettings?.responseVerbosity ?? form.settings.responseVerbosity ?? 'concise'
   // Draft fields remount when the override flips, so they re-seed from the
   // other scope's value instead of carrying the previous scope's text.
   const scopeKey = String(form.workspaceOverrideActive)
+  const allowed = toolApproval.allowlist
 
   return (
     <SettingsStack>
-      {form.workspaceOverrideActive ? (
-        <SettingsNotice>
-          Override is on for {workspaceShort(form.activeWorkspacePath)}. Rows marked Workspace
-          save to that workspace only.
-        </SettingsNotice>
-      ) : null}
-
-      <SettingsGroup title="Permissions">
+      <SettingsGroup title="Approvals">
         <SelectField
           id="tool-approval"
-          title="Tool approval"
-          hint="When the agent asks before it runs a tool."
-          help="Edits and commands gates tools that change files or run commands; every tool also gates reads. A tool you always allow from an approval prompt skips it from then on."
+          title="Ask before"
+          hint="The agent pauses for you before these run."
+          help="Edits and commands covers tools that change files or run commands; every tool adds reads. A tool you always allow from an approval prompt stops asking."
           badge={scoped}
+          icon="shield"
           value={toolApproval.mode}
           options={TOOL_APPROVAL_OPTIONS}
           disabled={form.formLocked}
           onChange={(mode) => patchApproval({ mode })}
+          {...form.agentDefaultMark('toolApproval', 'mode')}
         />
-        {toolApproval.allowlist.length > 0 ? (
-          <SettingsField
-            id="tool-approval-allowlist"
-            title="Always allowed"
-            hint={`${toolApproval.allowlist.length} ${toolApproval.allowlist.length === 1 ? 'tool skips' : 'tools skip'} approval.`}
-            badge={scoped}
-            nested
-            wide
-          >
-            <ul className="m-0 flex list-none flex-col divide-y divide-border/60 p-0">
-              {toolApproval.allowlist.map((name) => (
-                <li key={name} className="flex items-center justify-between gap-3 py-1.5">
-                  <span className="min-w-0 truncate font-mono text-xs text-secondary">
-                    {name}
-                  </span>
-                  <Button
-                    variant="subtle"
-                    aria-label={`Remove ${name}`}
-                    disabled={form.formLocked}
-                    onClick={() =>
-                      patchApproval({
-                        allowlist: toolApproval.allowlist.filter((entry) => entry !== name)
-                      })
-                    }
-                  >
-                    Remove
-                  </Button>
-                </li>
-              ))}
-            </ul>
-            {toolApproval.allowlist.length > 1 ? (
-              // Same edge and weight as the per-tool Remove buttons above it.
-              <div className="flex justify-end">
-                <Button
-                  variant="subtle"
-                  disabled={form.formLocked}
-                  onClick={() => patchApproval({ allowlist: [] })}
-                >
-                  Remove all
-                </Button>
-              </div>
-            ) : null}
-          </SettingsField>
-        ) : null}
+        {/* The list grows from approval prompts; it is a record, not a
+            preference, so it carries no changed mark and Reset leaves it. */}
+        <SettingsField
+          id="tool-approval-allowlist"
+          title="Always allowed"
+          hint={
+            allowed.length > 0
+              ? 'Tools you allowed for good. Remove one to be asked again.'
+              : 'None yet. Always allow on an approval adds the tool here.'
+          }
+          badge={scoped}
+          below={
+            allowed.length > 0 ? (
+              <AllowedTools
+                names={allowed}
+                disabled={form.formLocked}
+                onRemove={(name) => patchApproval({ allowlist: allowed.filter((entry) => entry !== name) })}
+                onRemoveAll={() => patchApproval({ allowlist: [] })}
+              />
+            ) : null
+          }
+        />
         <SwitchField
           id="mcp-tools-protection"
-          title="MCP tools protection"
-          hint="Always ask before an MCP server tool runs, even with approval off."
-          help="Applies to mcp__* server tools. The built-in MCP catalog tools (list, pin, release) follow Tool approval. When off, MCP tools follow Tool approval only."
+          title="MCP tools always ask"
+          hint="Even when approvals are off."
+          help="Applies to tools from MCP servers. The built-in MCP catalog tools (list, pin, release) follow Ask before."
           badge={scoped}
           checked={toolApproval.mcpProtection !== false}
           disabled={form.formLocked}
           onChange={(mcpProtection) => patchApproval({ mcpProtection })}
+          {...form.agentDefaultMark('toolApproval', 'mcpProtection')}
         />
         <SwitchField
           id="agent-autonomous-mode"
-          title="Autonomous mode"
-          hint="For unattended runs: approve gated tools automatically."
-          help="High-risk tools still ask. Applies to every workspace."
+          title="Unattended mode"
+          hint="Approve gated tools automatically, except high-risk ones. For runs nobody is watching."
+          help="Applies to every workspace."
           checked={form.settings.autonomousMode}
           disabled={form.formLocked}
           onChange={(autonomousMode) => {
             void form.runUpdate({ autonomousMode })
           }}
+          {...form.defaultMark('autonomousMode')}
         />
         <SelectField
           id="agent-autonomous-questions"
-          title="Questions in autonomous mode"
-          hint="When the agent would stop to ask you something."
+          title="Questions while unattended"
           help="Skip moves on without an answer. Wait holds the run until the 15-minute question timeout."
           nested
           value={form.settings.autonomousSkipQuestions}
@@ -182,52 +201,55 @@ export function AgentSection({
           onChange={(autonomousSkipQuestions) => {
             void form.runUpdate({ autonomousSkipQuestions })
           }}
+          {...form.defaultMark('autonomousSkipQuestions')}
         />
       </SettingsGroup>
 
       <SettingsGroup title="Runs">
         <SwitchField
           id="auto-mode-switch"
-          title="Automatic mode switching"
-          hint="Let the agent move between Ask and Agent as the task changes."
-          help="Takes effect from the next step of a live run. When off, only you change the mode — from the composer picker or a slash command."
+          title="Switch between Ask and Agent on its own"
+          help="Takes effect from the next step of a live run. When off, only you change the mode — from the composer or a slash command."
           checked={form.settings.autoModeSwitch}
           disabled={form.formLocked}
           onChange={(autoModeSwitch) => {
             void form.runUpdate({ autoModeSwitch })
           }}
+          {...form.defaultMark('autoModeSwitch')}
         />
         <SwitchField
           id="auto-resume-interrupted"
-          title="Auto-resume interrupted runs"
-          hint="Opening an interrupted chat picks its run back up."
-          help="Only the chat you open resumes, not every interrupted run in the workspace. When off, the chat offers Continue instead."
+          title="Resume interrupted runs"
+          hint="Opening an interrupted task picks its run back up."
+          help="Only the task you open resumes, not every interrupted run in the workspace. When off, the task offers Continue instead."
           checked={form.settings.autoResumeInterruptedRuns}
           disabled={form.formLocked}
           onChange={(autoResumeInterruptedRuns) => {
             void form.runUpdate({ autoResumeInterruptedRuns })
           }}
+          {...form.defaultMark('autoResumeInterruptedRuns')}
         />
       </SettingsGroup>
 
-      <SettingsGroup title="Conversation">
+      <SettingsGroup title="Record">
         <SwitchField
           id="show-thinking"
-          title="Show thinking"
-          hint="Collapsed reasoning above replies, when the model returns it."
+          title="Show reasoning"
+          hint="Folded notes under each step, when the model returns them."
           badge={scoped}
           checked={showThinking}
           disabled={form.formLocked}
           onChange={(checked) => {
             void form.runAgentUpdate({ showThinking: checked })
           }}
+          {...form.agentDefaultMark('showThinking')}
         />
         <NumberField
           id="keep-recent-turns"
           field="keepTurns"
           form={form}
           title="Keep recent turns"
-          hint="Turns kept word for word when the context is compacted."
+          hint="Kept word for word when the context is compacted."
           badge={scoped}
           unit="turns"
           min={4}
@@ -237,17 +259,17 @@ export function AgentSection({
           onCommit={(keepRecentTurns) => {
             void form.runAgentUpdate({ keepRecentTurns })
           }}
+          {...form.agentDefaultMark('keepRecentTurns')}
         />
         <NumberField
           id="auto-compact-threshold"
           field="autoCompactThreshold"
           form={form}
-          title="Auto-compact threshold"
-          label="Auto-compact threshold percent"
-          hint="How full the context window gets before it is compacted."
+          title="Compact at"
+          label="Compact at, percent of context"
           help="At this share of the model's context window the run summarizes older turns — the same as Compact in the context meter."
           badge={scoped}
-          unit="%"
+          unit="% of context"
           min={5}
           max={95}
           value={form.agentAutoCompactThresholdPct}
@@ -255,94 +277,34 @@ export function AgentSection({
           onCommit={(pct) => {
             void form.runAgentUpdate({ autoCompactThresholdRatio: pct / 100 })
           }}
+          {...form.agentDefaultMark('autoCompactThresholdRatio')}
         />
       </SettingsGroup>
 
-      <SettingsGroup title="Persona & style">
-        <SettingsField
-          id="agent-persona"
-          title="Name"
-          hint="What the agent calls itself."
-          help="Leave blank to keep the default assistant name."
+      <SettingsGroup title="Voice">
+        <SegmentedField
+          id="response-verbosity"
+          title="Answer length"
+          help="Default length of conversational replies. Code and task output are unaffected."
           badge={scoped}
-        >
-          <div className="flex w-full flex-col gap-1 sm:w-72">
-            <Input
-              className="w-full"
-              placeholder="e.g. Nova"
-              aria-label="Name"
-              maxLength={PERSONA_MAX_LENGTH}
-              disabled={form.formLocked}
-              value={form.personaDraft}
-              key={`agent-persona-${scopeKey}`}
-              onChange={(e) => form.setPersonaDraft(e.target.value)}
-              onBlur={() => {
-                void form.persistPersona()
-              }}
-              onKeyDown={blurOnEnter}
-            />
-            <DraftMeta value={form.personaDraft} max={PERSONA_MAX_LENGTH} dirty={form.personaDirty} />
-          </div>
-        </SettingsField>
-
-        <SettingsField
-          id="agent-identity"
-          title="Identity"
-          hint="Who the agent is: its role and how it works."
-          help="Added to the agent's instructions as written. Leave blank for none."
-          badge={scoped}
-          wide
-        >
-          <AutoTextarea
-            placeholder="e.g. Reads the code before acting; reports what it verified separately from what it assumes."
-            aria-label="Identity"
-            maxLength={IDENTITY_MAX_LENGTH}
-            maxRows={6}
-            disabled={form.formLocked}
-            value={form.identityDraft}
-            key={`agent-identity-${scopeKey}`}
-            onChange={(e) => form.setIdentityDraft(e.target.value)}
-            onBlur={() => {
-              void form.persistIdentity()
-            }}
-          />
-          <DraftMeta value={form.identityDraft} max={IDENTITY_MAX_LENGTH} dirty={form.identityDirty} />
-        </SettingsField>
-
-        <SettingsField
-          id="agent-tone"
-          title="Tone"
-          hint="How replies sound."
-          help="Examples: friendly, blunt, playful, formal. Leave blank for no tone directive."
-          badge={scoped}
-          wide
-        >
-          <AutoTextarea
-            placeholder="e.g. Blunt and concise; lead with the outcome."
-            aria-label="Tone"
-            maxLength={TONE_MAX_LENGTH}
-            maxRows={6}
-            disabled={form.formLocked}
-            value={form.toneDraft}
-            key={`agent-tone-${scopeKey}`}
-            onChange={(e) => form.setToneDraft(e.target.value)}
-            onBlur={() => {
-              void form.persistTone()
-            }}
-          />
-          <DraftMeta value={form.toneDraft} max={TONE_MAX_LENGTH} dirty={form.toneDirty} />
-        </SettingsField>
-
+          value={verbosity}
+          options={RESPONSE_VERBOSITY_OPTIONS}
+          disabled={form.formLocked}
+          onChange={(responseVerbosity) => {
+            void form.runAgentUpdate({ responseVerbosity })
+          }}
+          {...form.agentDefaultMark('responseVerbosity')}
+        />
         <SettingsField
           id="response-language"
           title="Response language"
-          hint="Language for replies."
           help="Leave blank to reply in the language you write in."
           badge={scoped}
+          {...form.agentDefaultMark('responseLanguage')}
         >
-          <div className="flex w-full flex-col gap-1 sm:w-72">
+          <div className="flex w-[180px] flex-col items-end gap-1">
             <Input
-              className="w-full"
+              size="sm"
               placeholder="Same as yours"
               aria-label="Response language"
               maxLength={LANGUAGE_MAX_LENGTH}
@@ -361,31 +323,86 @@ export function AgentSection({
                 <option value={language} key={language} />
               ))}
             </datalist>
-            <DraftMeta
-              value={form.languageDraft}
-              max={LANGUAGE_MAX_LENGTH}
-              dirty={form.languageDirty}
-            />
+            <DraftMeta value={form.languageDraft} max={LANGUAGE_MAX_LENGTH} dirty={form.languageDirty} />
           </div>
         </SettingsField>
-
-        <SelectField
-          id="response-verbosity"
-          title="Answer length"
-          hint="Default length of conversational replies."
-          help="Code and task output are unaffected."
+        <SettingsField
+          id="agent-tone"
+          title="Tone"
+          hint="How replies sound."
+          help="Friendly, blunt, playful, formal. Leave blank for no tone directive."
           badge={scoped}
-          value={
-            form.effectiveChatSettings?.responseVerbosity ??
-            form.settings.responseVerbosity ??
-            'concise'
-          }
-          options={RESPONSE_VERBOSITY_OPTIONS}
-          disabled={form.formLocked}
-          onChange={(responseVerbosity) => {
-            void form.runAgentUpdate({ responseVerbosity })
-          }}
-        />
+          wide
+          {...form.agentDefaultMark('agentTone')}
+        >
+          <AutoTextarea
+            placeholder="e.g. Blunt and concise; lead with the outcome."
+            aria-label="Tone"
+            maxLength={TONE_MAX_LENGTH}
+            maxRows={6}
+            disabled={form.formLocked}
+            value={form.toneDraft}
+            key={`agent-tone-${scopeKey}`}
+            onChange={(e) => form.setToneDraft(e.target.value)}
+            onBlur={() => {
+              void form.persistTone()
+            }}
+          />
+          <DraftMeta value={form.toneDraft} max={TONE_MAX_LENGTH} dirty={form.toneDirty} />
+        </SettingsField>
+      </SettingsGroup>
+
+      <SettingsGroup title="Persona">
+        <SettingsField
+          id="agent-persona"
+          title="Name"
+          hint="What the agent calls itself."
+          help="Leave blank to keep the default assistant name."
+          badge={scoped}
+          {...form.agentDefaultMark('agentPersona')}
+        >
+          <div className="flex w-[180px] flex-col items-end gap-1">
+            <Input
+              size="sm"
+              placeholder="e.g. Nova"
+              aria-label="Name"
+              maxLength={PERSONA_MAX_LENGTH}
+              disabled={form.formLocked}
+              value={form.personaDraft}
+              key={`agent-persona-${scopeKey}`}
+              onChange={(e) => form.setPersonaDraft(e.target.value)}
+              onBlur={() => {
+                void form.persistPersona()
+              }}
+              onKeyDown={blurOnEnter}
+            />
+            <DraftMeta value={form.personaDraft} max={PERSONA_MAX_LENGTH} dirty={form.personaDirty} />
+          </div>
+        </SettingsField>
+        <SettingsField
+          id="agent-identity"
+          title="Identity"
+          hint="Who the agent is: its role and how it works."
+          help="Added to the agent's instructions as written. Leave blank for none."
+          badge={scoped}
+          wide
+          {...form.agentDefaultMark('agentIdentity')}
+        >
+          <AutoTextarea
+            placeholder="e.g. Reads the code before acting; reports what it verified separately from what it assumes."
+            aria-label="Identity"
+            maxLength={IDENTITY_MAX_LENGTH}
+            maxRows={6}
+            disabled={form.formLocked}
+            value={form.identityDraft}
+            key={`agent-identity-${scopeKey}`}
+            onChange={(e) => form.setIdentityDraft(e.target.value)}
+            onBlur={() => {
+              void form.persistIdentity()
+            }}
+          />
+          <DraftMeta value={form.identityDraft} max={IDENTITY_MAX_LENGTH} dirty={form.identityDirty} />
+        </SettingsField>
       </SettingsGroup>
 
       <SettingsGroup title="Rules">
@@ -393,10 +410,12 @@ export function AgentSection({
           id="workspace-rules"
           title="Rules"
           hint="AGENTS.md, CLAUDE.md, .cursorrules, .vyotiq/rules/, and your own."
-          help="Rules set to alwaysApply: false are not added to every step; the agent can request them, and you can run them as slash commands. Create one from chat with /create-rule."
+          help="Rules set to alwaysApply: false are not added to every step; the agent can request them, and you can run them as slash commands. Create one from a task with /create-rule."
         >
           <Button
-            variant="subtle"
+            size="sm"
+            variant="secondary"
+            trailingIcon="arrowRight"
             disabled={!onOpenMarketplace}
             onClick={() => onOpenMarketplace?.('rules')}
           >

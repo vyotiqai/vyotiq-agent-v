@@ -102,6 +102,15 @@ function ViewSuspenseFallback() {
 /** Sent as a visible user turn when resuming a run that was cut short. */
 const CONTINUE_PROMPT = 'Continue from where you stopped.'
 
+/** Settings' Back names the view it returns to. */
+const SETTINGS_BACK_LABELS = {
+  chat: 'Back to the task',
+  home: 'Back to Home',
+  usage: 'Back to Usage',
+  marketplace: 'Back to Extensions',
+  teammates: 'Back to Teammates'
+} as const
+
 function modelsRefreshKeyFor(
   chatSettings: {
     provider: string
@@ -280,6 +289,14 @@ function App() {
 
   const [view, setView] = useState<'chat' | 'settings' | 'marketplace' | 'teammates' | 'home' | 'usage'>('chat')
   const previousViewRef = useRef(view)
+  // Where Settings' Back goes: the view it was opened from, recorded as the
+  // view changes (during render, so the first frame already names it).
+  const [settingsReturn, setSettingsReturn] = useState<Exclude<typeof view, 'settings'>>('chat')
+  const [viewSeen, setViewSeen] = useState(view)
+  if (view !== viewSeen) {
+    setViewSeen(view)
+    if (view === 'settings' && viewSeen !== 'settings') setSettingsReturn(viewSeen)
+  }
   const [marketplaceFocusServerId, setMarketplaceFocusServerId] = useState<string | null>(null)
   const [marketplaceFocusSkillPath, setMarketplaceFocusSkillPath] = useState<string | null>(null)
   const [marketplaceFocusRulePath, setMarketplaceFocusRulePath] = useState<string | null>(null)
@@ -2465,7 +2482,8 @@ function App() {
             onSectionChange={setSettingsSection}
             feedbackOpen={feedbackOpen}
             onFeedbackOpenChange={setFeedbackOpen}
-            onClose={() => setView('chat')}
+            backLabel={SETTINGS_BACK_LABELS[settingsReturn]}
+            onClose={() => setView(settingsReturn)}
             onUpdate={update}
             onSaveSecret={saveSecret}
             onClearSecret={removeSecret}
@@ -2495,16 +2513,6 @@ function App() {
               setMarketplaceFocusTab(tab)
               setView('marketplace')
             }}
-            onOpenComposerModel={() => {
-              setView('chat')
-              window.setTimeout(() => {
-                const trigger = document.querySelector<HTMLButtonElement>(
-                  'button[aria-label="Select model"]'
-                )
-                trigger?.focus()
-                trigger?.click()
-              }, 80)
-              }}
             />
           </Suspense>
         </ErrorBoundary>

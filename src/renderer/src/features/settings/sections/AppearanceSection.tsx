@@ -1,21 +1,27 @@
-import type { FontScale, UiDensity } from '@shared/appearance'
-import type { SkinId } from '@shared/skins'
-import { SKIN_CATALOG } from '@shared/skins'
-import type { ThemeId } from '@shared/ipc'
+import type { AppearanceSettings } from '@shared/appearance'
 import { Button } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { SettingsViewProps } from '../types'
 import { DENSITY_OPTIONS, FONT_SCALE_OPTIONS, THEME_OPTIONS } from '../constants'
-import { ChoiceCards } from '../components/ChoiceCards'
-import { SelectField } from '../components/SelectField'
+import { SegmentedField } from '../components/SegmentedField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
+import { SkinPicker } from '../components/SkinPicker'
 
-const SKIN_OPTIONS = SKIN_CATALOG.map((skin) => ({
-  value: skin.id,
-  label: skin.label,
-  description: skin.description,
-  swatchStyle: skin.previewStyle
-}))
+const CUSTOM_CSS_RULES = 'Overrides --vy-* tokens. Remote @import is stripped; 256 KB max.'
+
+/** The OS whose light or dark "System" follows. */
+function systemName(): string {
+  const platform = window.vyotiq?.platform
+  if (platform === 'win32') return 'Windows'
+  if (platform === 'darwin') return 'macOS'
+  return 'your desktop'
+}
+
+/** The text-size chords App handles anywhere in the window (Ctrl = / − / 0). */
+function textSizeHint(): string {
+  const mod = window.vyotiq?.platform === 'darwin' ? '⌘' : 'Ctrl'
+  return `${mod} + and ${mod} − work anywhere.`
+}
 
 export function AppearanceSection({
   form,
@@ -29,15 +35,7 @@ export function AppearanceSection({
   const settings = form.settings
   const locked = form.formLocked || !onAppearanceChange
 
-  const apply = (
-    partial: Partial<{
-      theme: ThemeId
-      fontScale: FontScale
-      uiDensity: UiDensity
-      skinId: SkinId
-      customCssPath: string
-    }>
-  ): void => {
+  const apply = (partial: Partial<AppearanceSettings>): void => {
     form.clearErrors()
     onAppearanceChange?.(partial)
   }
@@ -50,52 +48,49 @@ export function AppearanceSection({
 
   return (
     <SettingsStack>
-      <SettingsGroup title="Theme">
-        <SettingsField
-          id="appearance-skin"
-          title="Interface skin"
-          hint="Contrast, elevation, and type for the whole app."
-          help="Default is the Azure instrument look. Proof is dusk, Bench neon blue, Gild blue-slate on alabaster and onyx, and Native uses system fonts with an orange accent."
-          wide
-        >
-          <ChoiceCards
-            label="Interface skin"
-            value={settings.skinId}
-            options={SKIN_OPTIONS}
-            columns="grid"
-            disabled={locked}
-            onChange={(value) => apply({ skinId: value as SkinId })}
-          />
-        </SettingsField>
-        <SelectField
+      <SettingsGroup title="Skin" fieldId="appearance-skin" plain>
+        <SkinPicker
+          value={settings.skinId}
+          disabled={locked}
+          mark={form.appearanceMark('skinId')}
+          onChange={(skinId) => apply({ skinId })}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup title="Colour mode">
+        <SegmentedField
           id="appearance-theme"
-          title="Color mode"
-          hint="Light, dark, or follow the system."
+          title="Mode"
+          label="Colour mode"
+          hint={`System follows ${systemName()}.`}
           value={settings.theme}
           options={THEME_OPTIONS}
           disabled={locked}
           onChange={(theme) => apply({ theme })}
+          {...form.appearanceMark('theme')}
         />
       </SettingsGroup>
 
-      <SettingsGroup title="Text & spacing">
-        <SelectField
+      <SettingsGroup title="Text and spacing">
+        <SegmentedField
           id="appearance-font-scale"
           title="Text size"
-          hint="Scales body copy and UI labels."
+          hint={textSizeHint()}
           value={settings.fontScale}
           options={FONT_SCALE_OPTIONS}
           disabled={locked}
           onChange={(fontScale) => apply({ fontScale })}
+          {...form.appearanceMark('fontScale')}
         />
-        <SelectField
+        <SegmentedField
           id="appearance-density"
-          title="UI density"
-          hint="Padding and target size of controls."
+          title="Density"
+          hint="Row and control height."
           value={settings.uiDensity}
           options={DENSITY_OPTIONS}
           disabled={locked}
           onChange={(uiDensity) => apply({ uiDensity })}
+          {...form.appearanceMark('uiDensity')}
         />
       </SettingsGroup>
 
@@ -103,24 +98,37 @@ export function AppearanceSection({
         <SettingsField
           id="appearance-custom-css"
           title="User CSS overlay"
-          hint={settings.customCssPath || 'A local stylesheet applied over the skin.'}
-          help="Overrides --vy-* tokens after the skin applies. Remote @import URLs are stripped. Max 256 KB."
+          // Once a file is chosen, which file is the question; the rules go
+          // to the tooltip.
+          hint={
+            settings.customCssPath ? (
+              <span className="font-mono" title={settings.customCssPath}>
+                {settings.customCssPath}
+              </span>
+            ) : (
+              CUSTOM_CSS_RULES
+            )
+          }
+          help={settings.customCssPath ? CUSTOM_CSS_RULES : undefined}
+          below={
+            customCssError ? (
+              <p className="m-0 text-xs text-danger" role="alert">
+                {customCssError}
+              </p>
+            ) : null
+          }
+          {...form.appearanceMark('customCssPath')}
         >
-          <div className="flex items-center gap-2">
-            <Button variant="subtle" disabled={locked} onClick={() => void pickCustomCss()}>
-              {settings.customCssPath ? 'Change…' : 'Choose…'}
-            </Button>
+          <div className="flex items-center gap-1.5">
             {settings.customCssPath ? (
-              <Button variant="ghost" disabled={locked} onClick={() => apply({ customCssPath: '' })}>
+              <Button size="sm" variant="ghost" disabled={locked} onClick={() => apply({ customCssPath: '' })}>
                 Clear
               </Button>
             ) : null}
+            <Button size="sm" variant="secondary" disabled={locked} onClick={() => void pickCustomCss()}>
+              {settings.customCssPath ? 'Change…' : 'Choose file…'}
+            </Button>
           </div>
-          {customCssError ? (
-            <p className="m-0 text-xs text-danger" role="alert">
-              {customCssError}
-            </p>
-          ) : null}
         </SettingsField>
       </SettingsGroup>
     </SettingsStack>

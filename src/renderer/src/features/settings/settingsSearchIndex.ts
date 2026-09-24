@@ -21,19 +21,19 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   // General
   {
     id: 'navigation',
-    title: 'Navigation',
+    title: 'Open on launch',
     keywords: ['home', 'sidebar', 'layout', 'sessions', 'startup', 'launch', 'default view'],
     section: 'general'
   },
   {
     id: 'max-chat-panes',
-    title: 'Max chat panes',
+    title: 'Tasks side by side',
     keywords: ['split', 'panes', 'sessions', 'columns', 'layout', 'side by side'],
     section: 'general'
   },
   {
     id: 'workspaces',
-    title: 'Open workspaces',
+    title: 'Workspaces',
     keywords: ['workspace', 'override', 'per-workspace', 'folder', 'project', 'add workspace'],
     section: 'general'
   },
@@ -41,7 +41,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   // Appearance
   {
     id: 'appearance-skin',
-    title: 'Interface skin',
+    title: 'Skin',
     keywords: [
       'appearance',
       'skin',
@@ -59,8 +59,8 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'appearance-theme',
-    title: 'Color mode',
-    keywords: ['appearance', 'theme', 'dark', 'light', 'system', 'dark mode'],
+    title: 'Mode',
+    keywords: ['appearance', 'theme', 'dark', 'light', 'system', 'dark mode', 'colour mode', 'color mode'],
     section: 'appearance'
   },
   {
@@ -71,7 +71,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'appearance-density',
-    title: 'UI density',
+    title: 'Density',
     keywords: ['appearance', 'density', 'compact', 'comfortable', 'spacing', 'padding'],
     section: 'appearance'
   },
@@ -85,31 +85,31 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   // Notifications
   {
     id: 'notifications-enabled',
-    title: 'Enable notifications',
+    title: 'Notifications',
     keywords: ['notifications', 'inbox', 'bell', 'alerts'],
     section: 'notifications'
   },
   {
     id: 'notifications-desktop',
-    title: 'Desktop notifications',
+    title: 'Desktop alerts',
     keywords: ['notifications', 'desktop', 'os', 'toast', 'background', 'unfocused'],
     section: 'notifications'
   },
   {
     id: 'notifications-run-finished',
-    title: 'Agent run finished',
-    keywords: ['notifications', 'run', 'finished', 'done', 'complete'],
+    title: 'A task finished',
+    keywords: ['notifications', 'run', 'finished', 'done', 'complete', 'ready for review', 'task'],
     section: 'notifications'
   },
   {
     id: 'notifications-run-failed',
-    title: 'Agent run failed',
+    title: 'A task failed',
     keywords: ['notifications', 'run', 'failed', 'error'],
     section: 'notifications'
   },
   {
     id: 'notifications-needs-you',
-    title: 'Agent needs you',
+    title: 'A task needs you',
     keywords: ['notifications', 'approval', 'question', 'needs you', 'waiting'],
     section: 'notifications'
   },
@@ -139,20 +139,14 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   // Providers
   {
     id: 'active-provider',
-    title: 'Active provider',
+    title: 'Provider for new tasks',
     keywords: ['provider', 'openai', 'anthropic', 'gemini', 'ollama', 'openrouter', 'custom'],
     section: 'providers'
   },
   {
     id: 'active-model',
-    title: 'Active model',
-    keywords: ['model', 'composer', 'provider', 'llm'],
-    section: 'providers'
-  },
-  {
-    id: 'refresh-models',
-    title: 'Refresh models',
-    keywords: ['catalog', 'models', 'reload', 'model list'],
+    title: 'Model',
+    keywords: ['model', 'composer', 'provider', 'llm', 'refresh', 'reload', 'model list', 'catalog'],
     section: 'providers'
   },
   {
@@ -177,8 +171,8 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   // Agent
   {
     id: 'tool-approval',
-    title: 'Tool approval',
-    keywords: ['approval', 'permissions', 'ask', 'confirm', 'mutating', 'tools'],
+    title: 'Ask before',
+    keywords: ['approval', 'permissions', 'ask', 'confirm', 'mutating', 'tools', 'tool approval'],
     section: 'agent'
   },
   {
@@ -189,38 +183,38 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'mcp-tools-protection',
-    title: 'MCP tools protection',
+    title: 'MCP tools always ask',
     keywords: ['mcp', 'approval', 'protection', 'servers', 'permissions'],
     section: 'agent'
   },
   {
     id: 'agent-autonomous-mode',
-    title: 'Autonomous mode',
-    keywords: ['autonomous', 'unattended', 'auto-approve', 'yolo', 'background', 'permissions'],
+    title: 'Unattended mode',
+    keywords: ['autonomous', 'unattended', 'auto-approve', 'yolo', 'background', 'permissions', 'autonomous mode'],
     section: 'agent'
   },
   {
     id: 'agent-autonomous-questions',
-    title: 'Questions in autonomous mode',
+    title: 'Questions while unattended',
     keywords: ['autonomous', 'questions', 'ask', 'skip', 'wait'],
     section: 'agent'
   },
   {
     id: 'auto-mode-switch',
-    title: 'Automatic mode switching',
+    title: 'Switch between Ask and Agent on its own',
     keywords: ['mode', 'ask', 'agent', 'switch', 'switch_mode'],
     section: 'agent'
   },
   {
     id: 'auto-resume-interrupted',
-    title: 'Auto-resume interrupted runs',
+    title: 'Resume interrupted runs',
     keywords: ['resume', 'interrupted', 'continue', 'runs'],
     section: 'agent'
   },
   {
     id: 'show-thinking',
-    title: 'Show thinking',
-    keywords: ['thinking', 'reasoning', 'display'],
+    title: 'Show reasoning',
+    keywords: ['thinking', 'reasoning', 'display', 'show thinking'],
     section: 'agent'
   },
   {
@@ -231,8 +225,8 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'auto-compact-threshold',
-    title: 'Auto-compact threshold',
-    keywords: ['compaction', 'context', 'threshold', 'auto-compact', 'window'],
+    title: 'Compact at',
+    keywords: ['compaction', 'context', 'threshold', 'auto-compact', 'window', 'auto-compact threshold', 'percent'],
     section: 'agent'
   },
   {
@@ -275,8 +269,8 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   // Tools
   {
     id: 'terminal-shell',
-    title: 'Terminal shell',
-    keywords: ['shell', 'powershell', 'bash', 'cmd', 'terminal'],
+    title: 'Shell',
+    keywords: ['shell', 'powershell', 'bash', 'cmd', 'terminal', 'terminal shell'],
     section: 'tools'
   },
   {
@@ -299,8 +293,8 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'browser-domain-allowlist',
-    title: 'Domain allowlist',
-    keywords: ['browser domain allowlist', 'browser', 'domain', 'allowlist', 'hostname', 'navigation', 'restrict'],
+    title: 'Allowed sites',
+    keywords: ['browser domain allowlist', 'browser', 'domain', 'allowlist', 'hostname', 'navigation', 'restrict', 'allowed sites', 'sites'],
     section: 'tools'
   },
   {
@@ -311,13 +305,13 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'mcp-servers',
-    title: 'MCP servers',
+    title: 'Servers',
     keywords: ['mcp', 'servers', 'connect', 'marketplace', 'integrations'],
     section: 'tools'
   },
   {
     id: 'tools-catalog',
-    title: 'Live tool catalog',
+    title: 'Catalog',
     keywords: ['tools', 'catalog', 'mcp', 'active', 'available', 'built-in'],
     section: 'tools'
   },
@@ -325,22 +319,16 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   // Indexing
   {
     id: 'codeindex-enabled',
-    title: 'Enable codebase index',
-    keywords: ['codebase', 'index', 'codeindex', 'search', 'embedding', 'semantic', 'concept'],
-    section: 'indexing'
-  },
-  {
-    id: 'codeindex-status',
-    title: 'Index status',
-    keywords: ['reindex', 'status', 'syncing', 'codebase', 'progress'],
+    title: 'Codebase index',
+    keywords: ['codebase', 'index', 'codeindex', 'search', 'embedding', 'semantic', 'concept', 'reindex', 'status', 'syncing', 'progress', 'workspaces'],
     section: 'indexing'
   },
 
   // Voice
   {
     id: 'dictation-engine',
-    title: 'Dictation engine',
-    keywords: ['dictation', 'voice', 'whisper', 'transcribe', 'microphone', 'speech'],
+    title: 'Engine',
+    keywords: ['dictation', 'voice', 'whisper', 'transcribe', 'microphone', 'speech', 'dictation engine', 'local', 'openai', 'openrouter'],
     section: 'voice'
   },
   {
@@ -365,67 +353,67 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   // Storage
   {
     id: 'storage-usage',
-    title: 'App data',
-    keywords: ['storage', 'disk', 'usage', 'report', 'size', 'space'],
+    title: 'Usage',
+    keywords: ['storage', 'disk', 'usage', 'report', 'size', 'space', 'app data', 'cap', 'managed'],
     section: 'storage'
   },
   {
     id: 'storage-free-up',
-    title: 'Free up space',
+    title: 'Free up space now',
     keywords: ['storage', 'cleanup', 'reclaim', 'delete', 'orphan', 'untracked', 'disk'],
     section: 'storage'
   },
   {
     id: 'storage-checkpoint-gc',
-    title: 'Checkpoint cleanup',
-    keywords: ['checkpoints', 'undo', 'retention', 'evict', 'storage'],
+    title: 'Clean up undo points',
+    keywords: ['checkpoints', 'undo', 'retention', 'evict', 'storage', 'checkpoint cleanup', 'undo points'],
     section: 'storage'
   },
   {
     id: 'storage-checkpoint-keep',
-    title: 'Keep checkpoint sessions',
-    keywords: ['checkpoints', 'undo', 'retention', 'count'],
+    title: 'Keep undo points of the newest',
+    keywords: ['checkpoints', 'undo', 'retention', 'count', 'undo points', 'tasks'],
     section: 'storage'
   },
   {
     id: 'storage-checkpoint-age',
-    title: 'Checkpoint max age',
-    keywords: ['checkpoints', 'undo', 'retention', 'days', 'age'],
+    title: 'Keep undo points for',
+    keywords: ['checkpoints', 'undo', 'retention', 'days', 'age', 'undo points', 'checkpoint max age'],
     section: 'storage'
   },
   {
     id: 'storage-session-retention',
-    title: 'Automatic session retention',
-    keywords: ['sessions', 'history', 'transcripts', 'retention', 'delete'],
+    title: 'Delete old tasks',
+    keywords: ['sessions', 'history', 'transcripts', 'retention', 'delete', 'tasks', 'automatic session retention'],
     section: 'storage'
   },
   {
     id: 'storage-session-keep',
-    title: 'Keep sessions',
-    keywords: ['sessions', 'history', 'retention', 'count'],
+    title: 'Always keep the newest',
+    keywords: ['sessions', 'history', 'retention', 'count', 'tasks', 'keep sessions'],
     section: 'storage'
   },
   {
     id: 'storage-session-age',
-    title: 'Session max age',
-    keywords: ['sessions', 'history', 'retention', 'days', 'age'],
+    title: 'Keep tasks for',
+    keywords: ['sessions', 'history', 'retention', 'days', 'age', 'tasks', 'session max age'],
     section: 'storage'
   },
   {
     id: 'storage-orphan-reaper',
-    title: 'Untracked storage cleanup',
+    title: 'Clean up untracked storage',
     keywords: ['orphan', 'untracked', 'workspace', 'storage', 'reap'],
     section: 'storage'
   },
   {
     id: 'storage-orphan-grace',
-    title: 'Untracked grace period',
-    keywords: ['orphan', 'untracked', 'grace', 'days'],
+    title: 'Grace period',
+    keywords: ['orphan', 'untracked', 'grace', 'days', 'untracked grace period', 'idle'],
     section: 'storage'
   },
   {
     id: 'storage-prune-on-removal',
-    title: 'Delete storage when removing a workspace',
+    title: 'Delete storage when closing a workspace',
     keywords: ['remove', 'workspace', 'delete', 'storage', 'prune', 'close'],
     section: 'storage'
   },
@@ -439,7 +427,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   // Diagnostics
   {
     id: 'telemetry',
-    title: 'Share crash & error reports',
+    title: 'Share crash and error reports',
     keywords: ['sentry', 'telemetry', 'crash', 'error', 'privacy', 'reports'],
     section: 'diagnostics'
   },
@@ -471,8 +459,8 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   // About
   {
     id: 'about',
-    title: 'Vyotiq',
-    keywords: ['about', 'brand', 'license', 'agent v', 'vyotiq'],
+    title: 'Agent V',
+    keywords: ['about', 'brand', 'license', 'agent v', 'vyotiq', 'version', 'build', 'release', 'electron', 'chromium', 'chrome', 'node', 'os', 'platform', 'windows', 'macos', 'linux', 'arch'],
     section: 'about'
   },
   {
@@ -494,39 +482,21 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'about'
   },
   {
-    id: 'about-version',
-    title: 'Version',
-    keywords: ['version', 'build', 'release', 'about'],
-    section: 'about'
-  },
-  {
-    id: 'about-runtime',
-    title: 'Runtime',
-    keywords: ['electron', 'chromium', 'chrome', 'node', 'about'],
-    section: 'about'
-  },
-  {
-    id: 'about-platform',
-    title: 'Platform',
-    keywords: ['os', 'windows', 'macos', 'linux', 'arch', 'about'],
-    section: 'about'
-  },
-  {
     id: 'about-copy',
-    title: 'Build info',
+    title: 'Copy build info',
     keywords: ['copy build info', 'copy', 'clipboard', 'build', 'bug report', 'about'],
     section: 'about'
   },
   {
     id: 'about-auto-check',
-    title: 'Automatic checks',
+    title: 'Check automatically',
     keywords: ['check for updates automatically', 'updates', 'auto check', 'periodic', 'upgrade'],
     section: 'about'
   },
   {
     id: 'about-updater',
-    title: 'App updates',
-    keywords: ['updates', 'updater', 'upgrade', 'release', 'version'],
+    title: 'Updates',
+    keywords: ['updates', 'updater', 'upgrade', 'release', 'version', 'check now', 'download', 'restart', 'install'],
     section: 'about'
   },
   {
@@ -558,9 +528,9 @@ function cssEscape(value: string): string {
 }
 
 /**
- * Rows that only render in some states scroll to the row that owns them: the
- * provider URLs live inside the API key accordion, and the approval allowlist
- * only exists once a tool has been allowed.
+ * Where a result lands when its own row is not mounted: the provider URL rows
+ * are rows of the API key list, and the allowlist belongs to the approval
+ * mode above it.
  */
 const FIELD_SCROLL_FALLBACK: Record<string, string> = {
   'ollama-url': 'api-keys',

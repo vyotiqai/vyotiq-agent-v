@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import type { ProviderId, SecretProvider, Settings, WorkspaceSettingsOverride } from '@shared/ipc'
 import {
   CUSTOM_OPENAI_DEFAULT,
@@ -7,8 +7,9 @@ import {
   providerOptionsForConfigured
 } from '@shared/providers'
 import { findByWorkspacePath, workspacePathsEqual } from '@shared/workspacePathMatch'
-import { Badge, Input, Menu, Switch } from '@renderer/lib/ui'
+import { Button, Input, Menu, Switch } from '@renderer/lib/ui'
 import { workspaceShort } from '../utils/settingsHelpers'
+import { SettingsItem } from './SettingsField'
 
 type SetOverride = (
   path: string,
@@ -16,10 +17,11 @@ type SetOverride = (
 ) => Promise<{ ok: true } | { ok: false; error: string }>
 
 /**
- * Open workspaces as one divided list, each with its override switch on the
- * right edge. This replaced a bordered card per workspace inside the settings
- * card — borders on borders — plus a footnote under every card pointing at
- * three other sections.
+ * Open workspaces, one row each: its name, its path, and the switch that gives
+ * it its own model and agent settings. An override starts from the app-wide
+ * values; the rows marked "this workspace" elsewhere in Settings edit it while
+ * that workspace is open. Its model can be changed here too, for a workspace
+ * that is not.
  */
 export function WorkspaceOverrideList({
   paths,
@@ -29,8 +31,7 @@ export function WorkspaceOverrideList({
   overridesByPath,
   disabled,
   onSetOverride,
-  onError,
-  action
+  onError
 }: {
   paths: string[]
   activePath: string | null
@@ -40,24 +41,14 @@ export function WorkspaceOverrideList({
   disabled?: boolean
   onSetOverride: SetOverride
   onError: (message: string) => void
-  /**
-   * Closes the list as one more divided item (Add workspace), so it reads as
-   * belonging to the list rather than to the last workspace's fields.
-   */
-  action?: ReactNode
 }) {
   if (paths.length === 0) {
-    return (
-      <>
-        <p className="m-0 text-xs text-muted">No workspaces open.</p>
-        {action ? <div>{action}</div> : null}
-      </>
-    )
+    return <p className="m-0 py-3 text-xs text-muted">No workspaces open.</p>
   }
   return (
-    <ul className="m-0 flex list-none flex-col divide-y divide-border/60 p-0" aria-label="Open workspaces">
+    <>
       {paths.map((path) => (
-        <WorkspaceOverrideItem
+        <WorkspaceOverrideRow
           key={path}
           path={path}
           isActive={activePath !== null && workspacePathsEqual(path, activePath)}
@@ -69,12 +60,11 @@ export function WorkspaceOverrideList({
           onError={onError}
         />
       ))}
-      {action ? <li className="pt-2.5">{action}</li> : null}
-    </ul>
+    </>
   )
 }
 
-function WorkspaceOverrideItem({
+function WorkspaceOverrideRow({
   path,
   isActive,
   globalSettings,
@@ -95,6 +85,8 @@ function WorkspaceOverrideItem({
 }) {
   const name = workspaceShort(path)
   const useOverride = Boolean(override?.useOverride)
+  const [editing, setEditing] = useState(false)
+  const editorId = useId()
   const [provider, setProvider] = useState(override?.provider ?? globalSettings.provider)
   const [model, setModel] = useState(override?.model ?? globalSettings.model)
   const [customUrl, setCustomUrl] = useState(
@@ -142,6 +134,7 @@ function WorkspaceOverrideItem({
   }
 
   const setUseOverride = (on: boolean): void => {
+    if (!on) setEditing(false)
     // Turning an override on seeds it from the app-wide values, so the
     // workspace starts where it already was instead of on schema defaults.
     const next: WorkspaceSettingsOverride = on
@@ -166,102 +159,121 @@ function WorkspaceOverrideItem({
     void onSetOverride(path, next).then(report)
   }
 
-  return (
-    <li className="flex flex-col gap-2 py-2.5 first:pt-0">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="m-0 flex min-w-0 items-center gap-1.5 text-sm tracking-[var(--vy-tracking)] text-fg">
-            <span className="truncate">{name}</span>
-            {isActive ? <Badge>Active</Badge> : null}
-          </p>
-          <p className="m-0 mt-0.5 truncate text-xs text-muted" title={path}>
-            {path}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="text-xs text-muted" aria-hidden>
-            Override
-          </span>
-          <Switch
-            size="md"
-            checked={useOverride}
-            disabled={disabled}
-            label={`Override settings for ${name}`}
-            onCheckedChange={setUseOverride}
-          />
-        </div>
+  const editors = (
+    <div id={editorId} className="flex flex-wrap items-center gap-2">
+      <div className="w-44 shrink-0">
+        <Menu
+          aria-label={`Provider for ${name}`}
+          value={provider}
+          options={providerOptions}
+          searchable={false}
+          placement="down"
+          disabled={disabled}
+          icon="cpu"
+          triggerClassName="w-full"
+          onChange={(value) => {
+            if (value === provider) return
+            const nextProvider = value as ProviderId
+            const nextModel = defaultModelFor(nextProvider)
+            setProvider(nextProvider)
+            setModel(nextModel)
+            void persist({ provider: nextProvider, model: nextModel })
+          }}
+        />
       </div>
-      {useOverride ? (
-        <div className="flex flex-col gap-2">
-          <Menu
-            aria-label={`Provider for ${name}`}
-            value={provider}
-            options={providerOptions}
-            searchable={false}
-            placement="down"
-            disabled={disabled}
-            onChange={(value) => {
-              if (value === provider) return
-              const nextProvider = value as ProviderId
-              const nextModel = defaultModelFor(nextProvider)
-              setProvider(nextProvider)
-              setModel(nextModel)
-              void persist({ provider: nextProvider, model: nextModel })
-            }}
-          />
+      <div className="min-w-48 flex-1">
+        <Input
+          size="sm"
+          mono
+          aria-label={`Model for ${name}`}
+          disabled={disabled}
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
+          onBlur={() => {
+            const trimmed = model.trim()
+            const current = override?.model ?? globalSettings.model
+            if (!trimmed) {
+              setModel(current)
+              return
+            }
+            if (trimmed !== current) void persist({ model: trimmed })
+          }}
+        />
+      </div>
+      {provider === 'custom' ? (
+        <div className="w-full">
           <Input
-            className="w-full"
-            aria-label={`Model for ${name}`}
+            size="sm"
+            mono
+            aria-label={`Custom OpenAI base URL for ${name}`}
             disabled={disabled}
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
+            value={customUrl}
+            placeholder={CUSTOM_OPENAI_DEFAULT}
+            onChange={(e) => setCustomUrl(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') e.currentTarget.blur()
             }}
             onBlur={() => {
-              const trimmed = model.trim()
-              const current = override?.model ?? globalSettings.model
-              if (!trimmed) {
-                setModel(current)
+              const current = override?.customOpenAiBaseUrl ?? globalSettings.customOpenAiBaseUrl
+              if (!customUrl.trim()) {
+                // Empty falls back to the local default rather than erroring.
+                setCustomUrl(CUSTOM_OPENAI_DEFAULT)
+                if (CUSTOM_OPENAI_DEFAULT !== current) {
+                  void persist({ customOpenAiBaseUrl: CUSTOM_OPENAI_DEFAULT })
+                }
                 return
               }
-              if (trimmed !== current) void persist({ model: trimmed })
+              const parsed = validateCustomOpenAiBaseUrl(customUrl)
+              if (!parsed.ok) {
+                onError(parsed.error)
+                return
+              }
+              setCustomUrl(parsed.url)
+              if (parsed.url !== current) void persist({ customOpenAiBaseUrl: parsed.url })
             }}
           />
-          {provider === 'custom' ? (
-            <Input
-              className="w-full"
-              aria-label={`Custom OpenAI base URL for ${name}`}
-              disabled={disabled}
-              value={customUrl}
-              placeholder={CUSTOM_OPENAI_DEFAULT}
-              onChange={(e) => setCustomUrl(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') e.currentTarget.blur()
-              }}
-              onBlur={() => {
-                const current =
-                  override?.customOpenAiBaseUrl ?? globalSettings.customOpenAiBaseUrl
-                if (!customUrl.trim()) {
-                  // Empty falls back to the local default rather than erroring.
-                  setCustomUrl(CUSTOM_OPENAI_DEFAULT)
-                  if (CUSTOM_OPENAI_DEFAULT !== current) {
-                    void persist({ customOpenAiBaseUrl: CUSTOM_OPENAI_DEFAULT })
-                  }
-                  return
-                }
-                const parsed = validateCustomOpenAiBaseUrl(customUrl)
-                if (!parsed.ok) {
-                  onError(parsed.error)
-                  return
-                }
-                setCustomUrl(parsed.url)
-                if (parsed.url !== current) void persist({ customOpenAiBaseUrl: parsed.url })
-              }}
-            />
-          ) : null}
         </div>
       ) : null}
-    </li>
+    </div>
+  )
+
+  return (
+    <SettingsItem
+      id={`workspace:${path}`}
+      title={name}
+      hint={path}
+      badge={isActive ? <span className="text-caption text-tertiary">active</span> : null}
+      changed={useOverride}
+      onReset={() => setUseOverride(false)}
+      below={useOverride && editing ? editors : null}
+    >
+      <div className="flex items-center gap-2">
+        {/* The model the override runs, and the way to change it without
+            opening the workspace. */}
+        {useOverride ? (
+          <Button
+            size="xs"
+            variant="ghost"
+            trailingIcon={editing ? 'chevronUp' : 'chevron'}
+            aria-expanded={editing}
+            aria-controls={editing ? editorId : undefined}
+            aria-label={`Model for ${name}: ${override?.model ?? model}`}
+            onClick={() => setEditing((open) => !open)}
+          >
+            <span className="max-w-56 truncate font-mono font-normal">{override?.model ?? model}</span>
+          </Button>
+        ) : null}
+        <Switch
+          size="md"
+          checked={useOverride}
+          disabled={disabled}
+          label={`Override settings for ${name}`}
+          onCheckedChange={setUseOverride}
+        />
+      </div>
+    </SettingsItem>
   )
 }

@@ -20,8 +20,8 @@ test.beforeEach(async () => {
     const ae = document.activeElement as HTMLElement | null
     ae?.blur?.()
   })
-  // Leave settings / marketplace if open
-  const back = window.getByRole('button', { name: /^back$/i })
+  // Leave settings if open. Its Back names the view it returns to.
+  const back = window.locator('[data-settings-back]')
   if (await back.isVisible().catch(() => false)) {
     await back.click()
   }

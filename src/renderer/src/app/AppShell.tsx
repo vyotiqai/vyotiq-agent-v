@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, t
 import type { ActiveRun, NotificationItem, RunSummary } from '@shared/ipc'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { BreakpointProvider, useIsDesktop } from '@renderer/lib/context/BreakpointProvider'
+import { NavigatorSlotContext } from '@renderer/lib/context/NavigatorSlot'
 import { useOverlayPanel } from '@renderer/lib/hooks/useOverlayPanel'
 import { usePersistedBoolean } from '@renderer/lib/hooks/usePersistedBoolean'
 import { usePersistedNumber } from '@renderer/lib/hooks/usePersistedNumber'
@@ -130,6 +131,9 @@ function AppShellInner(props: AppShellProps) {
     clampSidebarWidthPx
   )
   const [scopePath, setScopePath] = useNavigatorScope(openWorkspaces)
+  // Settings brings its own index to the navigator's column (see NavigatorSlot).
+  const lendsNavigatorColumn = view === 'settings'
+  const [navigatorSlot, setNavigatorSlot] = useState<HTMLElement | null>(null)
   const pinnedKeys = useMemo(() => new Set(props.pinnedRunKeys ?? []), [props.pinnedRunKeys])
   const drawerRef = useRef<HTMLDivElement>(null)
   const drawerTriggerRef = useRef<HTMLElement | null>(null)
@@ -280,7 +284,14 @@ function AppShellInner(props: AppShellProps) {
     [openTask, onOpenSettingsSection, onOpenSettings]
   )
 
-  const navigator = (
+  const navigator = lendsNavigatorColumn ? (
+    <div
+      ref={setNavigatorSlot}
+      data-navigator-slot
+      className="app-region-no-drag flex h-full shrink-0 flex-col bg-chrome"
+      style={{ width: isDesktop ? navigatorWidthPx : SIDEBAR_WIDTH_PX }}
+    />
+  ) : (
     <Navigator
       place={placeOf(view)}
       selected={focusedRun}
@@ -389,7 +400,9 @@ function AppShellInner(props: AppShellProps) {
           tabIndex={-1}
           aria-busy={loading ? true : undefined}
         >
-          {children}
+          <NavigatorSlotContext.Provider value={lendsNavigatorColumn ? navigatorSlot : null}>
+            {children}
+          </NavigatorSlotContext.Provider>
         </main>
 
         {drawerOpen && !isDesktop ? (

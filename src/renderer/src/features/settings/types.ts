@@ -66,6 +66,9 @@ export type SettingsViewProps = {
   appError?: string | null
   onDismissAppError?: () => void
   backRef?: Ref<HTMLButtonElement>
+  /** The index's Back, named for where it returns — "Back to the task", "Back to Home". */
+  backLabel?: string
+  /** Leave Settings for the view it was opened from. */
   onClose: () => void
   onUpdate: (partial: Partial<Settings>) => Promise<{ ok: true } | { ok: false; error: string }>
   onSaveSecret: (
@@ -94,8 +97,6 @@ export type SettingsViewProps = {
   /** Open the feedback dialog from outside Settings (command palette). */
   feedbackOpen?: boolean
   onFeedbackOpenChange?: (open: boolean) => void
-  /** Close Settings and focus the composer model picker. */
-  onOpenComposerModel?: () => void
   /**
    * Close Settings on a Marketplace → Manage tab. Rules and MCP servers are
    * edited there; Settings only links to them.
