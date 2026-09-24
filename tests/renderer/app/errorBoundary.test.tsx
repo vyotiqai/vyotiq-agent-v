@@ -1,6 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
+import type { JSX } from 'react'
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
 import { cleanup, render, screen, fireEvent } from '@testing-library/react'
 import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
@@ -47,6 +48,59 @@ describe('ErrorBoundary', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Open logs/i }))
     expect(window.vyotiq.openLogsDir).toHaveBeenCalled()
+  })
+
+  it('a panel that fails says so in its own space, without the error text', () => {
+    // @ts-expect-error test bridge
+    window.vyotiq = {
+      openLogsDir: vi.fn(async () => ({ ok: true as const, data: true as const }))
+    }
+
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    render(
+      <div>
+        <ErrorBoundary panel="Changes">
+          <Boom />
+        </ErrorBoundary>
+        <ErrorBoundary panel="Files">
+          <span>files still here</span>
+        </ErrorBoundary>
+      </div>
+    )
+    spy.mockRestore()
+
+    const alert = screen.getByRole('alert')
+    expect(alert.getAttribute('data-panel-error')).toBe('Changes')
+    expect(screen.getByRole('heading', { name: 'The Changes panel couldn’t render' })).toBeTruthy()
+    expect(alert.textContent).toContain(
+      'The rest of the window is fine. The error is in the log, with the component it came from.'
+    )
+    expect(screen.queryByText(/boundary-test-crash/i)).toBeNull()
+    expect(screen.getByText('files still here')).toBeTruthy()
+    // The window is fine, so there is nothing to reload.
+    expect(screen.queryByRole('button', { name: /Reload/i })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Open logs/i }))
+    expect(window.vyotiq.openLogsDir).toHaveBeenCalled()
+  })
+
+  it('Try again renders the panel afresh', () => {
+    let fail = true
+    function Flaky(): JSX.Element {
+      if (fail) throw new Error('boundary-test-crash')
+      return <span>rendered</span>
+    }
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    render(
+      <ErrorBoundary panel="Plan">
+        <Flaky />
+      </ErrorBoundary>
+    )
+    spy.mockRestore()
+    expect(screen.getByRole('alert')).toBeTruthy()
+    fail = false
+    fireEvent.click(screen.getByRole('button', { name: /Try again/i }))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByText('rendered')).toBeTruthy()
   })
 
   it('clears a caught error when resetKey changes', () => {

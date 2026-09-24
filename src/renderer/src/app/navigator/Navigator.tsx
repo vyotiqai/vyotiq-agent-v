@@ -187,10 +187,10 @@ export function Navigator(props: NavigatorProps) {
               />
             </p>
           ))}
-        {!hasWorkspace ? (
-          <p className="px-2 pt-2 text-xs text-tertiary">Open a folder to start a task.</p>
-        ) : sections.length === 0 ? (
-          <p className="px-2 pt-2 text-xs text-tertiary">No tasks yet.</p>
+        {!hasWorkspace || sections.length === 0 ? (
+          <p className="px-2 pt-2 text-xs leading-[18px] text-tertiary">
+            Tasks you start show up here, grouped by what they need from you.
+          </p>
         ) : (
           sections.map((section) => (
             <TaskSection

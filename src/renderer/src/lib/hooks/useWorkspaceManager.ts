@@ -2128,7 +2128,9 @@ export function useWorkspaceManager(options?: {
 
   const addWorkspace = useCallback(
     async (
-      path?: string
+      path?: string,
+      /** Main's reason when the folder can't be opened (missing, not a folder…). */
+      opts?: { onError?: (message: string) => void }
     ): Promise<{ activePath: string; activeRunId: string | null } | null> => {
       if (!window.vyotiq?.addWorkspace) return null
       const res = await window.vyotiq.addWorkspace(path)
@@ -2165,7 +2167,10 @@ export function useWorkspaceManager(options?: {
         }
         return null
       } else {
-        setWorkspaceError(res.error)
+        // A caller that says the error itself (Set up, beside its folder
+        // picker) doesn't want the window's banner saying it again.
+        if (opts?.onError) opts.onError(res.error)
+        else setWorkspaceError(res.error)
         return null
       }
     },

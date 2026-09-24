@@ -472,6 +472,7 @@ import { launchRunFollowUpOrStart } from '../agent/launchRunInvoke'
 import { formatGoalContinueMessage } from '../../shared/goalRuntime'
 import {
   getWorkspaces,
+  getHomeWorkspacePath,
   addWorkspace,
   removeWorkspace,
   setActiveWorkspace,
@@ -894,6 +895,15 @@ export function registerIpc(): void {
       return ok(getWorkspaces())
     } catch (err) {
       return failFrom(err, IPC.workspacesGet)
+    }
+  })
+
+  ipcMain.handle(IPC.workspacesHome, async (event): Promise<IpcResult<string>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok(getHomeWorkspacePath())
+    } catch (err) {
+      return failFrom(err, IPC.workspacesHome)
     }
   })
 

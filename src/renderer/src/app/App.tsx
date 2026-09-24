@@ -69,6 +69,7 @@ import type {
   RevertWritesOutcome
 } from '@renderer/lib/hooks/createChatStreamController'
 import { rewoundToastText, useRewindDialog } from '@renderer/features/task/RewindDialog'
+import { needsSetup, setupRecents, setupWorkspace } from '@renderer/features/setup/setupModel'
 
 /** Full-screen secondary views are code-split; they parse on first open, not at boot. */
 const SettingsView = lazy(() =>
@@ -82,6 +83,9 @@ const TeammatesView = lazy(() =>
 )
 const HomePage = lazy(() =>
   import('../features/home/HomePage').then((m) => ({ default: m.HomePage }))
+)
+const SetupPage = lazy(() =>
+  import('../features/setup/SetupPage').then((m) => ({ default: m.SetupPage }))
 )
 const UsagePage = lazy(() =>
   import('../features/usage/UsagePage').then((m) => ({ default: m.UsagePage }))
@@ -335,15 +339,54 @@ function App() {
     }
   }, [view])
 
+  // Set up is the first run: no approval choice recorded, and no task in any open
+  // workspace. Until the open workspaces' task lists have loaded that can't be
+  // told, so a returning user never sees Set up flash by on the way to Home.
+  // Once told it stays told — a folder opened from Set up loads its tasks too.
+  const taskCount = Object.values(contexts).reduce((sum, ctx) => sum + ctx.runs.length, 0)
+  // Main opens its own scratch folder whenever no project is; Set up must know
+  // it to tell a folder someone chose from one nobody did.
+  const [scratchPath, setScratchPath] = useState<{ path: string | null } | null>(null)
+  useEffect(() => {
+    const get = window.vyotiq?.getHomeWorkspacePath
+    if (!get) {
+      setScratchPath({ path: null })
+      return
+    }
+    let cancelled = false
+    void get().then(
+      (res) => {
+        if (!cancelled) setScratchPath({ path: res.ok ? res.data : null })
+      },
+      () => {
+        if (!cancelled) setScratchPath({ path: null })
+      }
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  const setupDecidedRef = useRef(false)
+  if (
+    scratchPath != null &&
+    (registry != null || workspaceError != null) &&
+    Object.values(contexts).every((ctx) => ctx.runsLoaded)
+  ) {
+    setupDecidedRef.current = true
+  }
+  const setupUndecided = !settings.toolApprovalOnboardingDone && !setupDecidedRef.current
+  const showSetup = !setupUndecided && needsSetup(settings.toolApprovalOnboardingDone, taskCount)
+
   // Navigation-mode preference applies once settings have loaded. During load the
   // shell keeps the established chat skeleton; the launch view lands before the
-  // first post-load paint (useLayoutEffect) so no wrong surface flashes.
+  // first post-load paint (useLayoutEffect) so no wrong surface flashes. A first
+  // run lands on Home, where Set up lives.
   const launchViewAppliedRef = useRef(false)
   useLayoutEffect(() => {
-    if (loading || launchViewAppliedRef.current) return
+    if (loading || setupUndecided || launchViewAppliedRef.current) return
     launchViewAppliedRef.current = true
-    setView(launchViewFor(settings.navigationMode))
-  }, [loading, settings.navigationMode])
+    setView(showSetup ? 'home' : launchViewFor(settings.navigationMode))
+  }, [loading, setupUndecided, showSetup, settings.navigationMode])
 
   useLayoutEffect(() => {
     hydrate(
@@ -2312,6 +2355,38 @@ function App() {
     [onSelectRunInWorkspace]
   )
 
+  /** Set up's folder picker: opens it here, and stays on Set up for step 3. */
+  const setupChooseFolder = useCallback(async (): Promise<string | null> => {
+    const res = await pickWorkspace()
+    // A picker that failed is already the window's banner (useSettings).
+    if (!res.ok || !res.data) return null
+    let error: string | null = null
+    await addWorkspace(res.data, { onError: (message) => (error = message) })
+    return error
+  }, [addWorkspace, pickWorkspace])
+
+  const setupOpenPath = useCallback(
+    async (path: string): Promise<string | null> => {
+      let error: string | null = null
+      await addWorkspace(path, { onError: (message) => (error = message) })
+      return error
+    },
+    [addWorkspace]
+  )
+
+  /** Start your first task: the approval choice is saved the way the first-send question saves it. */
+  const setupStart = useCallback(
+    async (path: string, mode: ToolApprovalMode): Promise<void> => {
+      const res = await update({
+        toolApproval: { ...settings.toolApproval, mode },
+        toolApprovalOnboardingDone: true
+      })
+      if (!res.ok) return
+      onNewSessionInWorkspace(path, '')
+    },
+    [onNewSessionInWorkspace, settings.toolApproval, update]
+  )
+
   const chatError = chat.error
 
   const runsByWorkspacePath = useMemo(
@@ -2397,7 +2472,7 @@ function App() {
     }
   }
 
-  if (loading) {
+  if (loading || setupUndecided) {
     return (
       <AppShell
         view="chat"
@@ -2551,6 +2626,28 @@ function App() {
               onClose={() => setView('chat')}
               onStartTeammateChat={onStartTeammateChat}
               onOpenTaskRun={(path, runId) => void onSelectRunInWorkspace(path, runId)}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      ) : view === 'home' && showSetup ? (
+        <ErrorBoundary title="Set up couldn't render" resetKey="setup">
+          <Suspense fallback={<ViewSuspenseFallback />}>
+            <SetupPage
+              settings={settings}
+              secrets={secrets}
+              workspace={setupWorkspace(activeWorkspace, openWorkspaces, scratchPath?.path ?? null)}
+              recents={setupRecents(registry?.recentPaths ?? [], openWorkspaces, scratchPath?.path ?? null)}
+              // Until someone chooses, the saved mode is only the shipped default (off);
+              // Set up starts on the recommended one, as the first-send question does.
+              approvalMode="mutating"
+              mcpProtection={settings.toolApproval.mcpProtection !== false}
+              onChangeProvider={() => {
+                setSettingsSection('providers')
+                setView('settings')
+              }}
+              onChooseFolder={setupChooseFolder}
+              onOpenPath={setupOpenPath}
+              onStart={setupStart}
             />
           </Suspense>
         </ErrorBoundary>
@@ -2745,6 +2842,7 @@ function App() {
       <ToolApprovalOnboardingModal
         open={approvalOnboardingOpen}
         error={settingsError}
+        mcpProtection={settings.toolApproval.mcpProtection !== false}
         onChoose={(mode) => {
           void completeApprovalOnboarding(mode)
         }}

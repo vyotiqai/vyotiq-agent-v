@@ -672,6 +672,9 @@ export function Composer({
     if (!hadComposerFocus) return
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        // A dialog the send opened (the first-send approval question) took
+        // focus on purpose; taking it back would strand the keyboard behind it.
+        if (document.activeElement?.closest('[aria-modal="true"]')) return
         // Own editor first — document order can point at another pane's composer.
         const own = taRef.current?.el
         if (own && own.isConnected) {

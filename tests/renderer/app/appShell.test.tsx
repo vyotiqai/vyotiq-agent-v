@@ -176,7 +176,7 @@ describe('AppShell', () => {
 
     expect((screen.getByRole('button', { name: /new task/i }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: /^settings/i }) as HTMLButtonElement).disabled).toBe(false)
-    expect(screen.getByText('Open a folder to start a task.')).toBeTruthy()
+    expect(screen.getByText('Tasks you start show up here, grouped by what they need from you.')).toBeTruthy()
   })
 
   it('toggles the desktop sidebar with Ctrl/Cmd+B', () => {

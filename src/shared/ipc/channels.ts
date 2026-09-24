@@ -2,6 +2,8 @@
 export const IPC = {
   pickWorkspace: 'workspace:pick',
   workspacesGet: 'workspaces:get',
+  /** The app's own scratch folder, open whenever no project is. */
+  workspacesHome: 'workspaces:home',
   workspacesAdd: 'workspaces:add',
   workspacesRemove: 'workspaces:remove',
   workspacesSetActive: 'workspaces:set-active',

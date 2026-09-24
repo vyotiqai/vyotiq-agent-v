@@ -10,6 +10,7 @@ const VYOTIQ_INVOKE_MAP: Record<
   Exclude<
     keyof VyotiqApi,
     | 'platform'
+    | 'pathForFile'
     | 'onChatEvent'
     | 'onToolApprovalRequest'
     | 'onAgentQuestionRequest'
@@ -40,6 +41,7 @@ const VYOTIQ_INVOKE_MAP: Record<
 > = {
   pickWorkspace: IPC.pickWorkspace,
   getWorkspaces: IPC.workspacesGet,
+  getHomeWorkspacePath: IPC.workspacesHome,
   addWorkspace: IPC.workspacesAdd,
   removeWorkspace: IPC.workspacesRemove,
   setActiveWorkspace: IPC.workspacesSetActive,

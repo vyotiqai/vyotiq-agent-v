@@ -185,8 +185,15 @@ export interface VyotiqFeedbackApi {
  */
 export interface VyotiqApi {
   platform: HostPlatform
+  /** A dropped file's (or folder's) path on disk; '' for one that has none. */
+  pathForFile: (file: File) => string
   pickWorkspace: () => Promise<IpcResult<string | null>>
   getWorkspaces: () => Promise<IpcResult<WorkspacesState>>
+  /**
+   * The app's own scratch folder under its data directory. Main opens it
+   * whenever no project folder is open, so a task always has somewhere to run.
+   */
+  getHomeWorkspacePath: () => Promise<IpcResult<string>>
   addWorkspace: (path?: string) => Promise<IpcResult<WorkspacesState>>
   removeWorkspace: (
     path: string,

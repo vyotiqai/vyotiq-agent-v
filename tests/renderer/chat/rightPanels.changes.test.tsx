@@ -612,7 +612,8 @@ describe('ChangesPanel', () => {
     })
     renderGit()
     expect(await screen.findByText('Not a git repository')).toBeTruthy()
-    expect(screen.getByText(/Changes, PRs and undo points need git/)).toBeTruthy()
+    // Undo points are the app's own copies, not git — only git's views need it.
+    expect(screen.getByText('Uncommitted changes, commits and PRs need git. Initialize one here — nothing else changes.')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Initialize repository' })).toBeTruthy()
   })
 

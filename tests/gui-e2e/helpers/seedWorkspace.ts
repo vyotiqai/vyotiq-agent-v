@@ -181,6 +181,30 @@ export function seedWorkspacesRegistry(
   )
 }
 
+/** Write workspaces.json with folders opened before and none open now — a recent list. */
+export function seedRecentWorkspaces(userDataDir: string, workspacePaths: string[]): string[] {
+  const canonical = workspacePaths.map(appCanonicalWorkspacePath)
+  mkdirSync(userDataDir, { recursive: true })
+  writeFileSync(
+    join(userDataDir, 'workspaces.json'),
+    JSON.stringify(
+      {
+        version: 2,
+        legacySessionsMigrated: true,
+        openPaths: [],
+        activePath: null,
+        recentPaths: canonical,
+        uiStateByPath: {},
+        settingsOverridesByPath: {}
+      },
+      null,
+      2
+    ),
+    'utf8'
+  )
+  return canonical
+}
+
 /** Seed settings.json (merged over defaults). */
 export function seedAppSettings(
   userDataDir: string,

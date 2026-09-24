@@ -134,6 +134,52 @@ describe('Composer', () => {
     })
   })
 
+  it('leaves focus in a dialog the send opened', async () => {
+    // The first send without an approval choice opens a question and reports
+    // the send as not done: the composer must not take focus back from it.
+    let dialogButton: HTMLButtonElement | null = null
+    const onSend = vi.fn(async () => {
+      const dialog = document.createElement('div')
+      dialog.setAttribute('role', 'dialog')
+      dialog.setAttribute('aria-modal', 'true')
+      dialogButton = document.createElement('button')
+      dialogButton.textContent = 'Edits and commands'
+      dialog.appendChild(dialogButton)
+      document.body.appendChild(dialog)
+      dialogButton.focus()
+      return false
+    })
+    render(
+      <Composer
+        provider="ollama"
+        model="qwen2.5"
+        running={false}
+        secrets={testSecrets}
+        chatSettings={chatSettings}
+        onChatSettingsChange={vi.fn()}
+        onProviderModel={vi.fn()}
+        onSend={onSend}
+        onStop={vi.fn()}
+      />
+    )
+
+    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    ta.focus()
+    ta.textContent = 'first task'
+    fireEvent.input(ta)
+    fireEvent.keyDown(ta, { key: 'Enter' })
+
+    await waitFor(() => expect(onSend).toHaveBeenCalled())
+    await waitFor(() => expect(ta.textContent).toBe('first task'))
+    // Past the composer's two-frame refocus.
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(document.activeElement).toBe(dialogButton)
+    ;(dialogButton as HTMLButtonElement | null)?.closest('[role="dialog"]')?.remove()
+  })
+
   it('normalizes whitespace-only drafts so the composer stays one line', async () => {
     render(
       <Composer

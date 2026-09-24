@@ -55,7 +55,7 @@ function prEmptyTitle(error: string | null): string {
 }
 
 function prEmptyBody(error: string | null): string {
-  if (!error) return 'Create a draft pull request from the current topic branch.'
+  if (!error) return 'Commit and push, then open one — or let the agent do both.'
   if (/not a git repository/i.test(error)) {
     return 'Open a workspace that contains a Git repository to use pull requests.'
   }

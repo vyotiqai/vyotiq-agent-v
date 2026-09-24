@@ -9,6 +9,7 @@ import { PlanPanel } from './components/PlanPanel'
 import {
   INSPECTOR_DETAIL_MAX,
   INSPECTOR_TABS,
+  INSPECTOR_TAB_LABEL,
   Inspector,
   type InspectorTabState
 } from '@renderer/features/inspector/Inspector'
@@ -42,6 +43,7 @@ import type {
 } from '@shared/ipc'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import { useChatErrorSurfaces } from './hooks/composerShared'
+import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
 import { Alert, Button, PanelResizeHandle, pushToast } from '@renderer/lib/ui'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { usePersistedBoolean } from '@renderer/lib/hooks/usePersistedBoolean'
@@ -1259,6 +1261,10 @@ const runGoal = useRunGoal({
     [sendFromDock]
   )
 
+  // A panel that fails to render says so in its own space; opening another
+  // task or workspace gives it a fresh start.
+  const panelResetKey = `${workspacePath ?? ''}|${activeRunId ?? ''}`
+
   const panelBodies = (
     <>
       {shownPanels.includes('files') ? (
@@ -1273,22 +1279,24 @@ const runGoal = useRunGoal({
           aria-hidden={visiblePanelId !== 'files'}
           inert={visiblePanelId !== 'files' ? true : undefined}
         >
-          <Suspense fallback={<DockPanelSuspenseFallback />}>
-            <FilesPanel
-              workspacePath={workspacePath}
-              active={visiblePanelId === 'files'}
-              gitRevision={gitRevision}
-              onGitMutated={notifyGitMutated}
-              onFlushReady={registerFilesFlush}
-              openPath={requestedFilePath}
-              agentFocus={agentFileFocus}
-              onOpenPathHandled={handleWorkspaceFileOpened}
-              recoveryData={filesRecoveryData}
-              onRecoveryDataConsumed={handleFilesRecoveryConsumed}
-              findInFilesNonce={findInFilesNonce}
-              agentMarks={agentFileMarks}
-            />
-          </Suspense>
+          <ErrorBoundary panel={INSPECTOR_TAB_LABEL.files} resetKey={panelResetKey}>
+            <Suspense fallback={<DockPanelSuspenseFallback />}>
+              <FilesPanel
+                workspacePath={workspacePath}
+                active={visiblePanelId === 'files'}
+                gitRevision={gitRevision}
+                onGitMutated={notifyGitMutated}
+                onFlushReady={registerFilesFlush}
+                openPath={requestedFilePath}
+                agentFocus={agentFileFocus}
+                onOpenPathHandled={handleWorkspaceFileOpened}
+                recoveryData={filesRecoveryData}
+                onRecoveryDataConsumed={handleFilesRecoveryConsumed}
+                findInFilesNonce={findInFilesNonce}
+                agentMarks={agentFileMarks}
+              />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       ) : null}
       {shownPanels.includes('browser') ? (
@@ -1303,13 +1311,15 @@ const runGoal = useRunGoal({
           aria-hidden={visiblePanelId !== 'browser'}
           inert={visiblePanelId !== 'browser' ? true : undefined}
         >
-          <AgentBrowserPanel
-            workspacePath={workspacePath}
-            activeRunId={activeRunId}
-            visible={visiblePanelId === 'browser'}
-            agentAction={liveActivity.browsing}
-            onPopOut={hideInspector}
-          />
+          <ErrorBoundary panel={INSPECTOR_TAB_LABEL.browser} resetKey={panelResetKey}>
+            <AgentBrowserPanel
+              workspacePath={workspacePath}
+              activeRunId={activeRunId}
+              visible={visiblePanelId === 'browser'}
+              agentAction={liveActivity.browsing}
+              onPopOut={hideInspector}
+            />
+          </ErrorBoundary>
         </div>
       ) : null}
       {shownPanels.includes('terminal') ? (
@@ -1324,14 +1334,16 @@ const runGoal = useRunGoal({
           aria-hidden={visiblePanelId !== 'terminal'}
           inert={visiblePanelId !== 'terminal' ? true : undefined}
         >
-          <Suspense fallback={<DockPanelSuspenseFallback />}>
-            <TerminalPanel
-              workspacePath={workspacePath}
-              visible={visiblePanelId === 'terminal'}
-              agentCommand={liveActivity.command}
-              agentCommandAt={liveActivity.commandAt}
-            />
-          </Suspense>
+          <ErrorBoundary panel={INSPECTOR_TAB_LABEL.terminal} resetKey={panelResetKey}>
+            <Suspense fallback={<DockPanelSuspenseFallback />}>
+              <TerminalPanel
+                workspacePath={workspacePath}
+                visible={visiblePanelId === 'terminal'}
+                agentCommand={liveActivity.command}
+                agentCommandAt={liveActivity.commandAt}
+              />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       ) : null}
       {shownPanels.includes('changes') ? (
@@ -1347,41 +1359,43 @@ const runGoal = useRunGoal({
           aria-hidden={visiblePanelId !== 'changes'}
           inert={visiblePanelId !== 'changes' ? true : undefined}
         >
-          <ChangesPanel
-            items={instancePaneController ? [] : items}
-            itemsStore={instanceItemsStore ?? itemsStore}
-            workspacePath={workspacePath}
-            gitRevision={gitRevision}
-            chrome={gitChrome}
-            onGitMutated={notifyGitMutated}
-            onOpenFile={openWorkspaceFile}
-            onViewPr={() => setRightPanel('pr')}
-            writeFileResolutions={instancePaneController ? undefined : writeFileResolutions}
-            resolvablePaths={instancePaneController ? undefined : writeResolvablePaths}
-            conflictedPaths={instancePaneController ? undefined : writeConflictedPaths}
-            writeCheckpointFiles={
-              instancePaneController ? instanceWriteCheckpointFiles : writeCheckpointFiles
-            }
-            canResolve={instancePaneController ? false : canUndoWrites}
-            resolveBusy={instancePaneController ? false : undoBusy}
-            resolveBlockedReason={instancePaneController ? null : resolveBlockedReason}
-            onKeepWriteFile={instancePaneController ? undefined : keepWriteFile}
-            onDiscardWriteFile={instancePaneController ? undefined : discardWriteFile}
-            onKeepAllWrites={instancePaneController ? undefined : keepAllWrites}
-            onDiscardAllWrites={instancePaneController ? undefined : discardAllWrites}
-            active={visiblePanelId === 'changes'}
-            running={instancePaneController ? false : running}
-            onStopRun={instancePaneController ? undefined : onStop}
-            preferredScope={changesPreferredScope}
-            preferredScopeToken={changesScopeToken}
-            preferredSelectedPath={changesPreferredPath}
-            preferredSelectedPathToken={changesScopeToken}
-            runId={instancePaneController ? null : activeRunId}
-            variant={reviewing ? 'review' : 'panel'}
-            reviewTitle={taskTitle ?? 'Review'}
-            onReviewBack={toggleInspectorExpanded}
-            onAskAboutLine={instancePaneController ? undefined : handToAgent}
-          />
+          <ErrorBoundary panel={INSPECTOR_TAB_LABEL.changes} resetKey={panelResetKey}>
+            <ChangesPanel
+              items={instancePaneController ? [] : items}
+              itemsStore={instanceItemsStore ?? itemsStore}
+              workspacePath={workspacePath}
+              gitRevision={gitRevision}
+              chrome={gitChrome}
+              onGitMutated={notifyGitMutated}
+              onOpenFile={openWorkspaceFile}
+              onViewPr={() => setRightPanel('pr')}
+              writeFileResolutions={instancePaneController ? undefined : writeFileResolutions}
+              resolvablePaths={instancePaneController ? undefined : writeResolvablePaths}
+              conflictedPaths={instancePaneController ? undefined : writeConflictedPaths}
+              writeCheckpointFiles={
+                instancePaneController ? instanceWriteCheckpointFiles : writeCheckpointFiles
+              }
+              canResolve={instancePaneController ? false : canUndoWrites}
+              resolveBusy={instancePaneController ? false : undoBusy}
+              resolveBlockedReason={instancePaneController ? null : resolveBlockedReason}
+              onKeepWriteFile={instancePaneController ? undefined : keepWriteFile}
+              onDiscardWriteFile={instancePaneController ? undefined : discardWriteFile}
+              onKeepAllWrites={instancePaneController ? undefined : keepAllWrites}
+              onDiscardAllWrites={instancePaneController ? undefined : discardAllWrites}
+              active={visiblePanelId === 'changes'}
+              running={instancePaneController ? false : running}
+              onStopRun={instancePaneController ? undefined : onStop}
+              preferredScope={changesPreferredScope}
+              preferredScopeToken={changesScopeToken}
+              preferredSelectedPath={changesPreferredPath}
+              preferredSelectedPathToken={changesScopeToken}
+              runId={instancePaneController ? null : activeRunId}
+              variant={reviewing ? 'review' : 'panel'}
+              reviewTitle={taskTitle ?? 'Review'}
+              onReviewBack={toggleInspectorExpanded}
+              onAskAboutLine={instancePaneController ? undefined : handToAgent}
+            />
+          </ErrorBoundary>
         </div>
       ) : null}
       {shownPanels.includes('pr') ? (
@@ -1396,17 +1410,19 @@ const runGoal = useRunGoal({
           aria-hidden={visiblePanelId !== 'pr'}
           inert={visiblePanelId !== 'pr' ? true : undefined}
         >
-          <Suspense fallback={<DockPanelSuspenseFallback />}>
-            <PrPanel
-              workspacePath={workspacePath}
-              gitRevision={gitRevision}
-              onOpenFile={openWorkspaceFile}
-              onPrMeta={handlePrMeta}
-              onUnlink={hideInspector}
-              onHandToAgent={handToAgent}
-              active={visiblePanelId === 'pr'}
-            />
-          </Suspense>
+          <ErrorBoundary panel={INSPECTOR_TAB_LABEL.pr} resetKey={panelResetKey}>
+            <Suspense fallback={<DockPanelSuspenseFallback />}>
+              <PrPanel
+                workspacePath={workspacePath}
+                gitRevision={gitRevision}
+                onOpenFile={openWorkspaceFile}
+                onPrMeta={handlePrMeta}
+                onUnlink={hideInspector}
+                onHandToAgent={handToAgent}
+                active={visiblePanelId === 'pr'}
+              />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       ) : null}
       {shownPanels.includes('plan') ? (
@@ -1421,16 +1437,18 @@ const runGoal = useRunGoal({
           aria-hidden={visiblePanelId !== 'plan'}
           inert={visiblePanelId !== 'plan' ? true : undefined}
         >
-          <PlanPanel
-            workspacePath={workspacePath}
-            runId={activeRunId}
-            running={running}
-            invokeId={invokeId}
-            active={visiblePanelId === 'plan'}
-            agentMode={agentMode}
-            onContinueInAgent={onContinueInAgent}
-            onOpenFile={openWorkspaceFile}
-          />
+          <ErrorBoundary panel={INSPECTOR_TAB_LABEL.plan} resetKey={panelResetKey}>
+            <PlanPanel
+              workspacePath={workspacePath}
+              runId={activeRunId}
+              running={running}
+              invokeId={invokeId}
+              active={visiblePanelId === 'plan'}
+              agentMode={agentMode}
+              onContinueInAgent={onContinueInAgent}
+              onOpenFile={openWorkspaceFile}
+            />
+          </ErrorBoundary>
         </div>
       ) : null}
     </>

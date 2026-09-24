@@ -50,6 +50,10 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
     ? (JSON.parse(readFileSync(settingsPath, 'utf8')) as Record<string, unknown>)
     : {}
   if (seeded.navigationMode === undefined) seeded.navigationMode = 'sidebar'
+  // Likewise a returning user: a fresh profile with no approval choice on record
+  // opens on the first-run Set up page. setup.spec.ts drives that page and
+  // seeds the choice as not made.
+  if (seeded.toolApprovalOnboardingDone === undefined) seeded.toolApprovalOnboardingDone = true
   writeFileSync(settingsPath, JSON.stringify(seeded), 'utf8')
   mkdirSync(videoDir, { recursive: true })
 

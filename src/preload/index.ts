@@ -1,4 +1,4 @@
-import { clipboard, contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { clipboard, contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import { IPC } from '../shared/channels'
 import {
   parseRendererChatEvent,
@@ -30,8 +30,10 @@ export type { HostPlatform, VyotiqApi } from '../shared/vyotiqApi'
 
 const api: VyotiqApi = {
   platform: process.platform,
+  pathForFile: (file) => webUtils.getPathForFile(file),
   pickWorkspace: () => ipcRenderer.invoke(IPC.pickWorkspace),
   getWorkspaces: () => ipcRenderer.invoke(IPC.workspacesGet),
+  getHomeWorkspacePath: () => ipcRenderer.invoke(IPC.workspacesHome),
   addWorkspace: (path) => ipcRenderer.invoke(IPC.workspacesAdd, path ? { path } : {}),
   removeWorkspace: (path, stopActiveRuns, deleteStorage) =>
     ipcRenderer.invoke(IPC.workspacesRemove, {

@@ -7,7 +7,8 @@ import type { ChatRightPanelId } from '@renderer/lib/utils/layout'
 /** The strip's order — Alt 1–6 follow it. */
 export const INSPECTOR_TABS: readonly ChatRightPanelId[] = ['changes', 'files', 'terminal', 'browser', 'pr', 'plan']
 
-const LABEL: Record<ChatRightPanelId, string> = {
+/** Each panel's name on the strip — and wherever else the panel is named. */
+export const INSPECTOR_TAB_LABEL: Record<ChatRightPanelId, string> = {
   changes: 'Changes',
   files: 'Files',
   terminal: 'Terminal',
@@ -68,7 +69,7 @@ export function Inspector({
     const chord = shortcutLabel(INSPECTOR_TAB_SHORTCUTS[i] ?? 'inspector')
     return {
       id,
-      label: LABEL[id],
+      label: INSPECTOR_TAB_LABEL[id],
       ...(s?.count ? { count: s.count } : {}),
       ...(s?.live ? { live: true } : {}),
       title: s?.detail ? `${s.detail} · ${chord}` : chord
