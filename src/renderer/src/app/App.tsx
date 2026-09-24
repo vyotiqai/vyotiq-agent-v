@@ -1235,6 +1235,17 @@ function App() {
     return files.map((f) => ({ path: f.path, action: f.action }))
   }, [chat.writeCheckpoint])
 
+  // The task in the chat column, named as the navigator names it.
+  const chatWorkspacePath = focusedWorkspacePath ?? activeWorkspace
+  const chatTaskTitle = useMemo(() => {
+    if (!chatWorkspacePath || !focusedParentRunId) return null
+    const ctx = findByWorkspacePath(contexts, chatWorkspacePath)
+    const run =
+      ctx?.runs.find((r) => r.runId === focusedParentRunId) ??
+      ctx?.instanceRuns?.find((r) => r.runId === focusedParentRunId)
+    return run ? runTitle(run) || null : null
+  }, [contexts, chatWorkspacePath, focusedParentRunId])
+
   const createSlashHandlers = useCallback(
     (scope: {
       workspacePath: string | null
@@ -2507,6 +2518,7 @@ function App() {
               void chatActionsRef.current?.loadEarlierMessages()
             }}
             headingRef={chatHeadingRef}
+            taskTitle={chatTaskTitle}
             onProviderModel={(provider, model) => {
               onSessionProviderModel(
                 focusedParentRunId,

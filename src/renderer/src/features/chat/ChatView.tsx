@@ -130,6 +130,7 @@ export function ChatView({
   transcriptLoadingEarlier,
   onLoadEarlierMessages,
   headingRef,
+  taskTitle = null,
   onProviderModel,
   favoriteModels = [],
   recentModels = [],
@@ -231,6 +232,8 @@ export function ChatView({
   transcriptLoadingEarlier?: boolean
   onLoadEarlierMessages?: () => void | Promise<void>
   headingRef?: Ref<HTMLHeadingElement>
+  /** The task on screen, named as the navigator names it — the review's heading. */
+  taskTitle?: string | null
   onProviderModel: (provider: ProviderId, model: string) => void
   favoriteModels?: string[]
   recentModels?: string[]
@@ -404,6 +407,8 @@ const runGoal = useRunGoal({
   const inspectorExpanded = inspectorOpen && inspectorExpandedPref
   /** The panel on screen, if any. */
   const activeRightPanel: ChatRightPanelId | null = inspectorOpen ? inspectorTab : null
+  /** Changes taken to the whole work area is the review, with a header of its own. */
+  const reviewing = inspectorExpanded && inspectorTab === 'changes'
   const [requestedFilePath, setRequestedFilePath] =
     useState<WorkspaceFileOpenRequest | null>(null)
   const [pendingFilesRecovery, setPendingFilesRecovery] = useState<{
@@ -732,7 +737,7 @@ const runGoal = useRunGoal({
     if (!inspectorExpanded || was) return
     const root = inspectorRef.current
     if (!root || root.contains(document.activeElement)) return
-    root.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus()
+    root.querySelector<HTMLElement>('[role="tab"][aria-selected="true"], [data-review-back]')?.focus()
   }, [inspectorExpanded])
 
   // Every entry point reads the same tables as the tab strip's titles, the
@@ -1310,8 +1315,9 @@ const runGoal = useRunGoal({
       {mountedPanels.includes('changes') ? (
         <div
           id="dock-panel-changes"
-          role="tabpanel"
-          aria-label="Changes"
+          // Reviewing, the panel is its own region; there is no tab to label it.
+          role={reviewing ? undefined : 'tabpanel'}
+          aria-label={reviewing ? undefined : 'Changes'}
           className={cn(
             'min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
             visiblePanelId === 'changes' ? 'flex' : 'hidden'
@@ -1348,6 +1354,11 @@ const runGoal = useRunGoal({
             preferredScopeToken={changesScopeToken}
             preferredSelectedPath={changesPreferredPath}
             preferredSelectedPathToken={changesScopeToken}
+            runId={instancePaneController ? null : activeRunId}
+            variant={reviewing ? 'review' : 'panel'}
+            reviewTitle={taskTitle ?? 'Review'}
+            onReviewBack={toggleInspectorExpanded}
+            onAskAboutLine={instancePaneController ? undefined : handToAgent}
           />
         </div>
       ) : null}
@@ -1441,6 +1452,7 @@ const runGoal = useRunGoal({
               onToggleExpanded={toggleInspectorExpanded}
               onHide={hideInspector}
               width={dockWidthPx}
+              bare={reviewing}
             >
               {panelBodies}
             </Inspector>

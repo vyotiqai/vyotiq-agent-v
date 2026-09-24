@@ -197,23 +197,3 @@ export function collectSessionChangedFiles(items: UiItem[]): ChangedFile[] {
   }
   return [...totals.values()].sort((a, b) => a.path.localeCompare(b.path))
 }
-
-/** Items belonging to the latest user turn (from last user message through end). */
-export function sliceLastUserTurn(items: UiItem[]): UiItem[] {
-  let lastUserIdx = -1
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i]!
-    if (item.kind === 'message' && item.role === 'user') lastUserIdx = i
-  }
-  return lastUserIdx >= 0 ? items.slice(lastUserIdx) : items
-}
-
-/** Changed files for the last agent turn only (“Last Agent Turn” scope). */
-export function collectLastTurnChangedFiles(items: UiItem[]): ChangedFile[] {
-  return collectSessionChangedFiles(sliceLastUserTurn(items))
-}
-
-/** File diffs for the last agent turn only. */
-export function collectLastTurnFileDiffs(items: UiItem[]): Map<string, DiffLine[]> {
-  return collectSessionFileDiffs(sliceLastUserTurn(items))
-}

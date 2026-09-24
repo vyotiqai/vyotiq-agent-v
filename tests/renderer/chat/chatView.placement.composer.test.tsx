@@ -909,10 +909,23 @@ describe('ChatView composer placement', () => {
     expect(agentColumn().hasAttribute('inert')).toBe(true)
     expect(screen.queryByRole('separator', { name: 'Resize inspector' })).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back to the record (Ctrl+Shift+I)' }))
+    // Changes taken to the whole area is the review: its own header, no tab strip.
+    expect(screen.getByRole('region', { name: 'Review' })).toBeTruthy()
+    expect(screen.queryByRole('tablist', { name: 'Inspector' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the record' }))
     expect(document.querySelector('[data-right-dock]')?.getAttribute('data-dock-expanded')).toBe('0')
     expect(agentColumn().classList.contains('hidden')).toBe(false)
     expect(agentColumn().hasAttribute('inert')).toBe(false)
+  })
+
+  it('keeps the tab strip when another tab is expanded', () => {
+    render(<ChatView {...baseProps} items={[]} />)
+    fireEvent.click(within(screen.getByRole('tablist', { name: 'Inspector' })).getByRole('tab', { name: /^Plan/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Expand to full width (Ctrl+Shift+I)' }))
+    expect(document.querySelector('[data-right-dock]')?.getAttribute('data-dock-expanded')).toBe('1')
+    expect(screen.getByRole('tablist', { name: 'Inspector' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the record (Ctrl+Shift+I)' }))
+    expect(document.querySelector('[data-right-dock]')?.getAttribute('data-dock-expanded')).toBe('0')
   })
 
   it('expands and collapses with Ctrl Shift I, showing a hidden inspector first', () => {
@@ -920,8 +933,8 @@ describe('ChatView composer placement', () => {
     render(<ChatView {...baseProps} items={[]} />)
     fireEvent.keyDown(window, { key: 'I', ctrlKey: true, shiftKey: true })
     expect(document.querySelector('[data-right-dock]')?.getAttribute('data-dock-expanded')).toBe('1')
-    // Focus left the record for the strip, not for <body>.
-    expect(document.activeElement?.getAttribute('role')).toBe('tab')
+    // Focus left the record for the review's way back, not for <body>.
+    expect(document.activeElement?.hasAttribute('data-review-back')).toBe(true)
     fireEvent.keyDown(window, { key: 'I', ctrlKey: true, shiftKey: true })
     expect(document.querySelector('[data-right-dock]')?.getAttribute('data-dock-expanded')).toBe('0')
   })
@@ -929,7 +942,8 @@ describe('ChatView composer placement', () => {
   it('hiding an expanded inspector brings the record back, and it returns docked', () => {
     render(<ChatView {...baseProps} items={[]} />)
     fireEvent.click(screen.getByRole('button', { name: 'Expand to full width (Ctrl+Shift+I)' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Hide inspector (Ctrl+I)' }))
+    // The review has no close button of its own; Ctrl I still hides it.
+    fireEvent.keyDown(window, { key: 'i', ctrlKey: true })
     expect(document.querySelector('[data-inspector]')).toBeNull()
     expect(agentColumn().classList.contains('hidden')).toBe(false)
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true })

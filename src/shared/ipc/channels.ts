@@ -64,6 +64,8 @@ export const IPC = {
   runsResolveWrites: 'runs:resolveWrites',
   runsReadArtifact: 'runs:readArtifact',
   runsOpenArtifact: 'runs:openArtifact',
+  runsTaskFileStats: 'runs:taskFileStats',
+  runsTaskFileDiff: 'runs:taskFileDiff',
   runStats: 'runs:stats',
   homeActivity: 'runs:activity',
   runsSetGoalStatus: 'runs:setGoalStatus',

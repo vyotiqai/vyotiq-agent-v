@@ -47,6 +47,7 @@ export function Inspector({
   onHide,
   width,
   sectionRef,
+  bare = false,
   children
 }: {
   tab: ChatRightPanelId
@@ -57,6 +58,8 @@ export function Inspector({
   onHide: () => void
   width: number
   sectionRef?: Ref<HTMLElement>
+  /** The panel draws its own header (the review): no tab strip. */
+  bare?: boolean
   children: ReactNode
 }) {
   const items: TabItem<ChatRightPanelId>[] = INSPECTOR_TABS.map((id, i) => {
@@ -81,37 +84,39 @@ export function Inspector({
       data-right-dock
       data-dock-expanded={expanded ? '1' : '0'}
     >
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2" data-inspector-tabs>
-        <Tabs
-          items={items}
-          value={tab}
-          onChange={onSelect}
-          size="sm"
-          label="Inspector"
-          panelIdPrefix="dock-panel-"
-          // A narrow inspector scrolls its strip sideways; the padding keeps
-          // the current tab's underline inside the scroller.
-          className="min-w-0 flex-1 overflow-x-auto pb-px [scrollbar-width:none]"
-        />
-        <IconButton
-          icon={expanded ? 'collapse' : 'expand'}
-          label={
-            expanded
-              ? `Back to the record (${shortcutLabel('inspectorExpand')})`
-              : `Expand to full width (${shortcutLabel('inspectorExpand')})`
-          }
-          size="sm"
-          tone="muted"
-          onClick={onToggleExpanded}
-        />
-        <IconButton
-          icon="close"
-          label={`Hide inspector (${shortcutLabel('inspector')})`}
-          size="sm"
-          tone="muted"
-          onClick={onHide}
-        />
-      </div>
+      {bare ? null : (
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2" data-inspector-tabs>
+          <Tabs
+            items={items}
+            value={tab}
+            onChange={onSelect}
+            size="sm"
+            label="Inspector"
+            panelIdPrefix="dock-panel-"
+            // A narrow inspector scrolls its strip sideways; the padding keeps
+            // the current tab's underline inside the scroller.
+            className="min-w-0 flex-1 overflow-x-auto pb-px [scrollbar-width:none]"
+          />
+          <IconButton
+            icon={expanded ? 'collapse' : 'expand'}
+            label={
+              expanded
+                ? `Back to the record (${shortcutLabel('inspectorExpand')})`
+                : `Expand to full width (${shortcutLabel('inspectorExpand')})`
+            }
+            size="sm"
+            tone="muted"
+            onClick={onToggleExpanded}
+          />
+          <IconButton
+            icon="close"
+            label={`Hide inspector (${shortcutLabel('inspector')})`}
+            size="sm"
+            tone="muted"
+            onClick={onHide}
+          />
+        </div>
+      )}
       {children}
     </section>
   )

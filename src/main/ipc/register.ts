@@ -38,6 +38,10 @@ import {
   ResolveWritesRequestSchema,
   ReadRunArtifactRequestSchema,
   OpenRunArtifactRequestSchema,
+  TaskFileStatsRequestSchema,
+  TaskFileDiffRequestSchema,
+  type TaskFileStatsResult,
+  type TaskFileDiffResult,
   RunStatsRequestSchema,
   HomeActivityRequestSchema,
   HarnessReviewRequestSchema,
@@ -331,6 +335,7 @@ import {
   CompactionVerifyFailedError
 } from '../agent/compactRun'
 import { resolveWrites, getWriteCheckpointMeta } from '../agent/checkpoints'
+import { taskFileDiff, taskFileStats } from '../agent/taskFileDiff'
 import {
   prepareRewindAndReplaceUserMessage,
   prepareRewindToUserMessage,
@@ -2222,6 +2227,37 @@ export function registerIpc(): void {
       return failFrom(err, IPC.runsOpenArtifact)
     }
   })
+
+  // Against the workspace Keep and Undo act on, so the numbers describe what they would do.
+  ipcMain.handle(
+    IPC.runsTaskFileStats,
+    async (event, raw): Promise<IpcResult<TaskFileStatsResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = TaskFileStatsRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
+        return ok({ files: taskFileStats(resolveRunDir(req.workspacePath, req.runId), req.workspacePath) })
+      } catch (err) {
+        return failFrom(err, IPC.runsTaskFileStats)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.runsTaskFileDiff,
+    async (event, raw): Promise<IpcResult<TaskFileDiffResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = TaskFileDiffRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
+        return ok(taskFileDiff(resolveRunDir(req.workspacePath, req.runId), req.workspacePath, req.path))
+      } catch (err) {
+        return failFrom(err, IPC.runsTaskFileDiff)
+      }
+    }
+  )
 
   ipcMain.handle(
     IPC.runStats,

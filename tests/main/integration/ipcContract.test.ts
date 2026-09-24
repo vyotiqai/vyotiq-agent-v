@@ -75,6 +75,8 @@ const VYOTIQ_INVOKE_MAP: Record<
   resolveWrites: IPC.runsResolveWrites,
   readRunArtifact: IPC.runsReadArtifact,
   openRunArtifact: IPC.runsOpenArtifact,
+  taskFileStats: IPC.runsTaskFileStats,
+  taskFileDiff: IPC.runsTaskFileDiff,
   runStats: IPC.runStats,
   homeActivity: IPC.homeActivity,
   setGoalStatus: IPC.runsSetGoalStatus,

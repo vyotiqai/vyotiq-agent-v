@@ -239,6 +239,39 @@ const agentEdit = (path: string) => [
   }
 ]
 
+/** One settled replacement: one line added above an unchanged one. */
+const agentReplace = (path: string) => [
+  { kind: 'message' as const, id: 'u1', role: 'user' as const, content: 'fix', at: 1 },
+  {
+    kind: 'tool' as const,
+    id: 'r1',
+    at: 2,
+    tool: {
+      toolCallId: 'r1',
+      name: 'str_replace',
+      status: 'done' as const,
+      summary: path,
+      argsPreview: JSON.stringify({
+        path,
+        old_string: '  await rename(staged, target)',
+        new_string: '  await closeStagingWatcher()\n  await rename(staged, target)'
+      })
+    }
+  }
+]
+
+const SWAP_DIFF = [
+  '--- a/src/swap.ts',
+  '+++ b/src/swap.ts',
+  '@@ -1,4 +1,5 @@',
+  ' export async function swapStaged() {',
+  '   await prepare()',
+  '+  await closeStagingWatcher()',
+  '   await rename(staged, target)',
+  ' }',
+  ''
+].join('\n')
+
 describe('ChangesPanel', () => {
   it('opens on this task, and says so when it has changed nothing yet', async () => {
     render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} />)
@@ -747,5 +780,146 @@ describe('ChangesPanel', () => {
     fireEvent.change(find, { target: { value: 'gone' } })
     expect(screen.getByText('gone.ts')).toBeTruthy()
     expect(screen.queryByText('a.ts')).toBeNull()
+  })
+})
+
+describe('This task — counts and diffs from the task’s checkpoints', () => {
+  it('counts a replacement by what it changed, not its old and new text wholesale', async () => {
+    render(<ChangesPanel items={agentReplace('src/swap.ts')} workspacePath="/ws" gitRevision={1} />)
+    await waitFor(() => expect(row('src/swap.ts')).toBeTruthy())
+    // One line added. The arguments hold one old line and two new ones.
+    expect(row('src/swap.ts').textContent).toContain('+1')
+    expect(row('src/swap.ts').textContent).not.toContain('−1')
+    expect(row('src/swap.ts').textContent).not.toContain('+2')
+  })
+
+  it('asks the checkpoints first, and shows no numbers it cannot stand behind', async () => {
+    window.vyotiq.taskFileStats = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { files: [{ path: 'src/swap.ts', action: 'modified' }] }
+    })
+    render(<ChangesPanel items={agentReplace('src/swap.ts')} workspacePath="/ws" gitRevision={1} runId="run-1" />)
+    await waitFor(() => expect(window.vyotiq.taskFileStats).toHaveBeenCalledWith({ workspacePath: '/ws', runId: 'run-1' }))
+    await waitFor(() => expect(row('src/swap.ts').textContent).not.toContain('+1'))
+    const toolbar = document.querySelector('[data-changes-toolbar]') as HTMLElement
+    expect(toolbar.textContent).toContain('1 file')
+    expect(toolbar.textContent).not.toMatch(/[+−]\d/)
+  })
+
+  it('shows the task’s diff with real line numbers under its hunk header', async () => {
+    window.vyotiq.taskFileStats = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { files: [{ path: 'src/swap.ts', action: 'modified', add: 1, del: 0 }] }
+    })
+    window.vyotiq.taskFileDiff = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { path: 'src/swap.ts', action: 'modified', diff: SWAP_DIFF, add: 1, del: 0 }
+    })
+    render(<ChangesPanel items={agentReplace('src/swap.ts')} workspacePath="/ws" gitRevision={1} runId="run-1" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'src/swap.ts, modified' }))
+    const table = await waitFor(() => {
+      const el = document.querySelector('[data-review-diff]')
+      expect(el).toBeTruthy()
+      return el as HTMLElement
+    })
+    expect(window.vyotiq.taskFileDiff).toHaveBeenCalledWith({ workspacePath: '/ws', runId: 'run-1', path: 'src/swap.ts' })
+    expect(table.textContent).toContain('@@ -1,4 +1,5 @@')
+    const added = table.querySelector('[data-diff-line="add"]') as HTMLElement
+    expect(added.textContent).toContain('3')
+    expect(added.textContent).toContain('+')
+    expect(added.textContent).toContain('await closeStagingWatcher()')
+  })
+
+  it('falls back to git against HEAD for a file the task’s writes did not record', async () => {
+    window.vyotiq.taskFileDiff = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { path: 'src/swap.ts', action: null, diff: null, reason: 'not_in_task' }
+    })
+    render(<ChangesPanel items={agentReplace('src/swap.ts')} workspacePath="/ws" gitRevision={1} runId="run-1" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'src/swap.ts, modified' }))
+    await waitFor(() =>
+      expect(window.vyotiq.gitDiff).toHaveBeenCalledWith({ workspacePath: '/ws', path: 'src/swap.ts', vsHead: true })
+    )
+  })
+})
+
+describe('ChangesPanel review', () => {
+  afterEach(() => localStorage.clear())
+
+  it('opens on the first file, side by side, under the task’s name', async () => {
+    const onReviewBack = vi.fn()
+    renderGit({ variant: 'review', reviewTitle: 'Regroup Settings', onReviewBack })
+    expect(screen.getByRole('region', { name: 'Review' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Regroup Settings' })).toBeTruthy()
+    const header = await waitFor(() => {
+      const el = document.querySelector('[data-review-file]')
+      expect(el?.textContent).toContain('a.ts')
+      return el as HTMLElement
+    })
+    expect(header.textContent).toContain('src/')
+    await waitFor(() => expect(document.querySelector('[data-review-diff="split"]')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the record' }))
+    expect(onReviewBack).toHaveBeenCalledTimes(1)
+  })
+
+  it('counts what you have marked viewed, and keeps it', async () => {
+    const first = renderGit({ variant: 'review' })
+    const progress = (): string => (document.querySelector('[data-review-progress]') as HTMLElement).textContent ?? ''
+    await waitFor(() => expect(progress()).toContain('0 of 3 viewed'))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Viewed gone.ts' }))
+    expect(progress()).toContain('1 of 3 viewed')
+    // The open file's own box says the same thing.
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Viewed' }))
+    expect(progress()).toContain('2 of 3 viewed')
+    first.unmount()
+
+    renderGit({ variant: 'review' })
+    await waitFor(() => expect(progress()).toContain('2 of 3 viewed'))
+    expect(screen.getByRole('checkbox', { name: 'Viewed gone.ts' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('asks the agent about a line, naming the file and the line', async () => {
+    const onAskAboutLine = vi.fn()
+    renderGit({ variant: 'review', onAskAboutLine })
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask about line 1' }))
+    const input = await screen.findByRole('textbox', { name: 'Ask the agent about line 1' })
+    fireEvent.change(input, { target: { value: 'Why was this renamed?' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onAskAboutLine).toHaveBeenCalledWith(
+      ['In `src/a.ts`, line 1:', '```', 'new', '```', '', 'Why was this renamed?'].join('\n')
+    )
+    expect(await screen.findByRole('status')).toBeTruthy()
+  })
+
+  it('says a removed line is the old version when asking about it', async () => {
+    const onAskAboutLine = vi.fn()
+    renderGit({ variant: 'review', onAskAboutLine })
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask about line 1 before the change' }))
+    const input = await screen.findByRole('textbox', { name: 'Ask the agent about line 1 before the change' })
+    fireEvent.change(input, { target: { value: 'Keep this?' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onAskAboutLine.mock.calls[0]![0]).toContain('line 1 as it was before the change (removed)')
+  })
+
+  it('undoes the open file when the task can still take it back', async () => {
+    const onDiscardWriteFile = vi.fn()
+    window.vyotiq.taskFileDiff = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { path: 'src/swap.ts', action: 'modified', diff: SWAP_DIFF, add: 1, del: 0 }
+    })
+    render(
+      <ChangesPanel
+        items={agentReplace('src/swap.ts')}
+        workspacePath="/ws"
+        gitRevision={1}
+        runId="run-1"
+        variant="review"
+        canResolve
+        resolvablePaths={new Set(['src/swap.ts'])}
+        onDiscardWriteFile={onDiscardWriteFile}
+      />
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo this file' }))
+    expect(onDiscardWriteFile).toHaveBeenCalledWith('src/swap.ts')
   })
 })

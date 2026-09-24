@@ -24,6 +24,8 @@ import type {
   DeepLinkPayload,
   ResolveWritesResult,
   ReadRunArtifactResult,
+  TaskFileStatsResult,
+  TaskFileDiffResult,
   RunArtifactName,
   RunStatsResult,
   HomeActivityResult,
@@ -271,6 +273,14 @@ export interface VyotiqApi {
     runId: string
     name: 'plan.md' | 'contract.md'
   }) => Promise<IpcResult<true>>
+  /** Each file the task wrote, its first before-image against the file now; counts exact or absent. */
+  taskFileStats: (payload: { workspacePath: string; runId: string }) => Promise<IpcResult<TaskFileStatsResult>>
+  /** One file the task wrote, as `git diff` would print it. */
+  taskFileDiff: (payload: {
+    workspacePath: string
+    runId: string
+    path: string
+  }) => Promise<IpcResult<TaskFileDiffResult>>
   runStats: (payload: {
     workspacePath: string
     runIds: string[]

@@ -2,10 +2,8 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { DiffStat, IconButton, cn } from '@renderer/lib/ui'
 import { FileBadge } from '@renderer/features/chat/components/FileBadge'
 import { DiffPreview, type DiffLayout } from '@renderer/features/chat/components/DiffPreview'
-import { basename, parseUnifiedDiff, type DiffLine } from '@renderer/features/chat/toolUi'
-
-/** Match DiffPreview's expanded cap so we don't parse more than we render. */
-const DIFF_MAX_LINES = 1000
+import { basename, type DiffLine } from '@renderer/features/chat/toolUi'
+import { ReviewDiffTable, type AskTarget } from './ReviewDiffTable'
 
 export type ChangeStatus = 'A' | 'M' | 'D' | 'R' | 'C' | '?'
 
@@ -45,8 +43,9 @@ export type BrowserFileEntry = {
 export type ChangesListFile = {
   path: string
   status: ChangeStatus
-  added: number
-  removed: number
+  /** Exact or absent: a file whose change cannot be counted shows no numbers. */
+  added?: number
+  removed?: number
   /** Said where the counts go once there is nothing left to decide ("Kept"). */
   note?: string
   noteTone?: 'quiet' | 'warning'
@@ -124,9 +123,9 @@ export function ChangesList({
               <span className={cn(trailing, 'text-caption', file.noteTone === 'warning' ? 'text-warning' : 'text-tertiary')}>
                 {file.note}
               </span>
-            ) : (
+            ) : file.added != null && file.removed != null ? (
               <DiffStat add={file.added} del={file.removed} className={trailing} />
-            )}
+            ) : null}
             {rowActions ? (
               <span className="hidden shrink-0 items-center gap-0.5 pr-2 group-focus-within:flex group-hover:flex">
                 {rowActions}
@@ -136,6 +135,87 @@ export function ChangesList({
         )
       })}
     </ul>
+  )
+}
+
+/** What a diff source answers: diff text, a reason there is none, or an error. */
+export type FileDiffSource = (path: string) => Promise<{ content: string; note?: string } | { error: string }>
+
+export type FileDiffState =
+  | { state: 'loading' }
+  | { state: 'text'; content: string }
+  | { state: 'lines'; lines: DiffLine[] }
+  | { state: 'none'; message: string }
+
+/**
+ * One file's diff: `lines` when the caller already holds them (an edit's own
+ * arguments), else whatever `fetchDiff` answers for the path.
+ */
+export function useFileDiff(
+  path: string,
+  lines: DiffLine[] | null | undefined,
+  fetchDiff: FileDiffSource | undefined,
+  binary = false
+): FileDiffState {
+  const [fetched, setFetched] = useState<{ path: string; result: Awaited<ReturnType<FileDiffSource>> } | null>(null)
+  const needsFetch = !(lines && lines.length > 0) && Boolean(fetchDiff)
+
+  useEffect(() => {
+    if (!needsFetch || !fetchDiff) return undefined
+    let cancelled = false
+    setFetched(null)
+    void fetchDiff(path).then((result) => {
+      if (!cancelled) setFetched({ path, result })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [fetchDiff, needsFetch, path])
+
+  if (lines && lines.length > 0) return { state: 'lines', lines }
+  if (!needsFetch) return { state: 'none', message: binary ? 'Binary file' : 'No textual diff' }
+  if (fetched?.path !== path) return { state: 'loading' }
+  const { result } = fetched
+  if ('error' in result) return { state: 'none', message: result.error }
+  if (!result.content.trim() || isEmptyDiffSentinel(result.content)) {
+    return { state: 'none', message: result.note ?? (binary ? 'Binary file' : 'No textual diff') }
+  }
+  return { state: 'text', content: result.content }
+}
+
+/** The body for a {@link FileDiffState}: the table for diff text, the older preview for edit lines. */
+export function FileDiffBody({
+  path,
+  diff,
+  layout,
+  wordWrap,
+  findQuery,
+  numbers = 'new',
+  onAsk
+}: {
+  path: string
+  diff: FileDiffState
+  layout: DiffLayout
+  wordWrap: boolean
+  findQuery: string
+  numbers?: 'new' | 'both'
+  onAsk?: (target: AskTarget, question: string) => void
+}) {
+  if (diff.state === 'loading') return <p className="m-0 px-3 py-2 font-sans text-xs text-muted">Loading diff…</p>
+  if (diff.state === 'none') return <p className="m-0 px-3 py-2 font-sans text-xs text-muted">{diff.message}</p>
+  if (diff.state === 'lines') {
+    return <DiffPreview lines={diff.lines} path={path} expanded layout={layout} findQuery={findQuery} wordWrap={wordWrap} />
+  }
+  return (
+    <ReviewDiffTable
+      path={path}
+      diff={diff.content}
+      layout={layout}
+      wordWrap={wordWrap}
+      findQuery={findQuery}
+      numbers={numbers}
+      onAsk={onAsk}
+    />
   )
 }
 
@@ -159,7 +239,7 @@ export function ChangeDiff({
 }: {
   path: string
   lines?: DiffLine[] | null
-  fetchDiff?: (path: string) => Promise<{ content: string } | { error: string }>
+  fetchDiff?: FileDiffSource
   binary?: boolean
   layout: DiffLayout
   wordWrap: boolean
@@ -170,33 +250,7 @@ export function ChangeDiff({
   /** Anything that belongs between the header and the diff (a conflict). */
   children?: ReactNode
 }) {
-  const [fetched, setFetched] = useState<{ path: string; lines: DiffLine[]; error: string | null } | null>(null)
-  const needsFetch = !(lines && lines.length > 0) && Boolean(fetchDiff)
-
-  useEffect(() => {
-    if (!needsFetch || !fetchDiff) return undefined
-    let cancelled = false
-    setFetched(null)
-    void fetchDiff(path).then((res) => {
-      if (cancelled) return
-      if ('error' in res) {
-        setFetched({ path, lines: [], error: res.error })
-        return
-      }
-      setFetched({
-        path,
-        lines: isEmptyDiffSentinel(res.content) ? [] : parseUnifiedDiff(res.content, DIFF_MAX_LINES + 1),
-        error: null
-      })
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [fetchDiff, needsFetch, path])
-
-  const ready = lines && lines.length > 0 ? lines : fetched?.path === path ? fetched.lines : null
-  const loading = needsFetch && fetched?.path !== path
-  const error = fetched?.path === path ? fetched.error : null
+  const diff = useFileDiff(path, lines, fetchDiff, binary)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-change-diff>
@@ -210,14 +264,11 @@ export function ChangeDiff({
         <IconButton icon="chevron" label="Next file" size="xs" tone="muted" disabled={!onNext} onClick={onNext} />
       </div>
       {children}
-      <div className="scroll-thin min-h-0 flex-1 overflow-auto bg-sunken py-1" data-diff-scroll-root>
-        {loading ? (
-          <p className="m-0 px-3 py-2 text-xs text-muted">Loading diff…</p>
-        ) : ready && ready.length > 0 ? (
-          <DiffPreview lines={ready} path={path} expanded layout={layout} findQuery={findQuery} wordWrap={wordWrap} />
-        ) : (
-          <p className="m-0 px-3 py-2 text-xs text-muted">{error ?? (binary ? 'Binary file' : 'No textual diff')}</p>
-        )}
+      <div
+        className="scroll-thin min-h-0 flex-1 overflow-auto bg-sunken py-1 font-mono text-xs leading-[18px]"
+        data-diff-scroll-root
+      >
+        <FileDiffBody path={path} diff={diff} layout={layout} wordWrap={wordWrap} findQuery={findQuery} />
       </div>
     </div>
   )

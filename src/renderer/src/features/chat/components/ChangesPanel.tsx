@@ -2,9 +2,11 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActionMenu,
   Button,
+  Checkbox,
   DiffStat,
   IconButton,
   Menu,
+  ProgressBar,
   Segmented,
   StatusGlyph,
   cn,
@@ -14,7 +16,7 @@ import {
 import { isEditableShortcutTarget, matchShortcut } from '@renderer/lib/shortcuts'
 import { Icon } from '@renderer/lib/icons'
 import { CHAT_RIGHT_PANEL_BODY } from '@renderer/lib/utils/layout'
-import type { GitBranchEntry, GitChangedFile, GitLogEntry, GitStatus } from '@shared/ipc'
+import type { GitBranchEntry, GitChangedFile, GitLogEntry, GitStatus, TaskFileStat } from '@shared/ipc'
 import { namedGitBranch } from '@shared/utils/gitBranch'
 import type { UiItem } from '@shared/transcript'
 import type { ChatItemsStore } from '../chatStores'
@@ -27,12 +29,18 @@ import { defaultCommitMessage } from './CommitComposer'
 import {
   ChangeDiff,
   ChangesList,
+  FileDiffBody,
+  useFileDiff,
   type BrowserFileEntry,
-  type ChangesListFile
+  type ChangesListFile,
+  type FileDiffSource
 } from '@renderer/features/inspector/ChangesList'
+import type { AskTarget } from '@renderer/features/inspector/ReviewDiffTable'
+import { lineLabel } from '@renderer/features/inspector/reviewDiff'
+import { reviewSignature, useReviewViewed } from '@renderer/features/inspector/reviewViewed'
+import { sessionEditTotals, settledWriteCount } from '@renderer/features/inspector/taskCounts'
+import { FileBadge } from './FileBadge'
 import {
-  collectLastTurnChangedFiles,
-  collectLastTurnFileDiffs,
   collectSessionChangedFiles,
   collectSessionFileDiffs,
   mergeCheckpointChangedFiles,
@@ -138,16 +146,16 @@ function changeSourceSignature(items: readonly UiItem[]): string {
 }
 
 type ChangeData = {
-  toolAgentFiles: ReturnType<typeof collectLastTurnChangedFiles>
-  agentDiffs: ReturnType<typeof collectLastTurnFileDiffs>
   sessionToolAgentFiles: ReturnType<typeof collectSessionChangedFiles>
   sessionAgentDiffs: ReturnType<typeof collectSessionFileDiffs>
+  /** The record's own per-file counts, for when the checkpoints cannot be asked. */
+  sessionEditTotals: ReturnType<typeof sessionEditTotals>
 }
 
 type ChangeDataCache = { current: { signature: string; data: ChangeData } | null }
 
 /**
- * Signature-keyed cache for the four session-wide change collectors.
+ * Signature-keyed cache for the session-wide change collectors.
  *
  * Each one walks every tool item and JSON-parses its arguments to split diffs.
  * `useMemo` cannot express "recompute when this signature changes" without the
@@ -161,10 +169,9 @@ function readChangeData(
   const cached = cache.current
   if (cached && cached.signature === signature) return cached.data
   const data: ChangeData = {
-    toolAgentFiles: collectLastTurnChangedFiles(items),
-    agentDiffs: collectLastTurnFileDiffs(items),
     sessionToolAgentFiles: collectSessionChangedFiles(items),
-    sessionAgentDiffs: collectSessionFileDiffs(items)
+    sessionAgentDiffs: collectSessionFileDiffs(items),
+    sessionEditTotals: sessionEditTotals(items)
   }
   cache.current = { signature, data }
   return data
@@ -202,7 +209,12 @@ export const ChangesPanel = memo(function ChangesPanel({
   preferredScope = 'agent',
   preferredScopeToken = 0,
   preferredSelectedPath = null,
-  preferredSelectedPathToken = 0
+  preferredSelectedPathToken = 0,
+  runId = null,
+  variant = 'panel',
+  reviewTitle = 'Review',
+  onReviewBack,
+  onAskAboutLine
 }: {
   items: UiItem[]
   itemsStore?: ChatItemsStore
@@ -240,6 +252,15 @@ export const ChangesPanel = memo(function ChangesPanel({
   preferredSelectedPath?: string | null
   /** Bump alongside preferredSelectedPath to re-apply the selection. */
   preferredSelectedPathToken?: number
+  /** The task whose writes This task lists; its checkpoints give the counts and diffs. */
+  runId?: string | null
+  /** `review`: the inspector taken to the whole work area. */
+  variant?: 'panel' | 'review'
+  /** The review's heading: the task's name. */
+  reviewTitle?: string
+  onReviewBack?: () => void
+  /** Asking about a line sends this instruction to the agent as a follow-up. */
+  onAskAboutLine?: (instruction: string) => void
 }) {
   // Prefer parent-shared chrome; fall back for tests that mount the panel alone.
   const localChrome = useGitChrome(
@@ -268,23 +289,42 @@ export const ChangesPanel = memo(function ChangesPanel({
   const sourceItemsRef = useRef(sourceItems)
   sourceItemsRef.current = sourceItems
   const changeData = readChangeData(changeCacheRef, sourceSignature, sourceItemsRef.current)
-  const { toolAgentFiles, agentDiffs, sessionToolAgentFiles, sessionAgentDiffs } = changeData
-  const agentFiles = useMemo(
-    () => mergeCheckpointChangedFiles(toolAgentFiles, writeCheckpointFiles),
-    [toolAgentFiles, writeCheckpointFiles]
-  )
+  const { sessionToolAgentFiles, sessionAgentDiffs, sessionEditTotals: editTotals } = changeData
   const sessionAgentFiles = useMemo(
     () => mergeCheckpointChangedFiles(sessionToolAgentFiles, writeCheckpointFiles),
     [sessionToolAgentFiles, writeCheckpointFiles]
   )
+
+  // This task's counts: each file's first before-image against the file now,
+  // exact or absent — the numbers the navigator shows and Keep/Undo act on.
+  // Asked again when a write settles, git moves, or a file is kept or undone.
+  const settledWrites = useMemo(() => settledWriteCount(sourceItems), [sourceItems])
+  const statsKey = workspacePath && runId ? `${workspacePath}\u0000${runId}` : null
+  const [taskStats, setTaskStats] = useState<{ key: string; files: Map<string, TaskFileStat> } | null>(null)
+  useEffect(() => {
+    if (!active || !statsKey || !workspacePath || !runId || !window.vyotiq?.taskFileStats) return undefined
+    let cancelled = false
+    void window.vyotiq.taskFileStats({ workspacePath, runId }).then((res) => {
+      if (cancelled || !res.ok) return
+      setTaskStats({ key: statsKey, files: new Map(res.data.files.map((f) => [normalizeRelPath(f.path), f])) })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [active, statsKey, workspacePath, runId, gitRevision, settledWrites, writeFileResolutions])
+  const liveStats = taskStats && taskStats.key === statsKey ? taskStats.files : null
   const [scope, setScope] = useState<ChangeScope>(preferredScope)
   const [menuOpen, setMenuOpen] = useState(false)
   const [commitMenuOpen, setCommitMenuOpen] = useState(false)
   /** What the commit being composed will do once its message is right. */
   const [commitIntent, setCommitIntent] = useState<'commit' | 'push' | 'pr'>('commit')
   const [layout, setLayout] = useState<DiffLayout>('unified')
+  /** The review reads side by side by default; the narrow tab reads top to bottom. */
+  const [reviewLayout, setReviewLayout] = useState<DiffLayout>('split')
+  const [reviewMenuOpen, setReviewMenuOpen] = useState(false)
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false)
-  const [wordWrap, setWordWrap] = useState(true)
+  // Long lines run on and scroll, as in the mockup; Word wrap is in the menu.
+  const [wordWrap, setWordWrap] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
@@ -317,6 +357,7 @@ export const ChangesPanel = memo(function ChangesPanel({
   const closeMenus = useCallback(() => {
     setMenuOpen(false)
     setCommitMenuOpen(false)
+    setReviewMenuOpen(false)
   }, [])
 
   // A new workspace starts over on the scope the parent asks for.
@@ -506,36 +547,6 @@ export const ChangesPanel = memo(function ChangesPanel({
     }
   }, [workspacePath, selectedPath, gitFiles, chrome])
 
-  const scopeTotals = useMemo(() => {
-    const sumSide = (files: GitChangedFile[], side: 'all' | 'staged' | 'unstaged') => {
-      let added = 0
-      let removed = 0
-      for (const f of files) {
-        if (side === 'staged') {
-          added += f.addedStaged
-          removed += f.removedStaged
-        } else if (side === 'unstaged') {
-          added += f.addedUnstaged
-          removed += f.removedUnstaged
-        } else {
-          added += f.added
-          removed += f.removed
-        }
-      }
-      return { added, removed }
-    }
-    return {
-      agent: {
-        added: agentFiles.reduce((s, f) => s + (f.added ?? 0), 0),
-        removed: agentFiles.reduce((s, f) => s + (f.removed ?? 0), 0)
-      },
-      uncommitted: sumSide(gitFiles, 'all'),
-      staged: sumSide(gitFiles.filter((f) => f.staged), 'staged'),
-      unstaged: sumSide(gitFiles.filter((f) => f.unstaged), 'unstaged'),
-      commits: { added: 0, removed: 0 }
-    }
-  }, [agentFiles, gitFiles])
-
   const visibleGitFiles = useMemo(() => {
     switch (displayScope) {
       case 'agent':
@@ -571,14 +582,9 @@ export const ChangesPanel = memo(function ChangesPanel({
     return q ? sessionAgentFiles.filter((f) => f.path.toLowerCase().includes(q)) : sessionAgentFiles
   }, [sessionAgentFiles, findQuery])
 
-  const totals = useMemo(() => {
-    if (displayScope === 'agent') {
-      return {
-        files: taskFiles.length,
-        added: taskFiles.reduce((s, f) => s + (f.added ?? 0), 0),
-        removed: taskFiles.reduce((s, f) => s + (f.removed ?? 0), 0)
-      }
-    }
+  // git's numbers for its scopes; This task's are summed from its rows, which
+  // come from the task's checkpoints.
+  const gitTotals = useMemo(() => {
     if (displayScope === 'staged' || displayScope === 'unstaged' || displayScope === 'uncommitted') {
       let added = 0
       let removed = 0
@@ -594,7 +600,7 @@ export const ChangesPanel = memo(function ChangesPanel({
       added: filteredFiles.reduce((s, f) => s + f.added, 0),
       removed: filteredFiles.reduce((s, f) => s + f.removed, 0)
     }
-  }, [displayScope, taskFiles, filteredFiles])
+  }, [displayScope, filteredFiles])
 
   const commitMode: 'all' | 'staged' = scope === 'staged' ? 'staged' : 'all'
 
@@ -805,7 +811,6 @@ export const ChangesPanel = memo(function ChangesPanel({
       chrome.result?.kind === 'not_repo' ||
       chrome.result?.kind === 'ok')
 
-  const commitPrimaryPushes = Boolean(status?.hasRemote)
   const commitSha = displayScope === 'commits' ? selectedCommit?.sha ?? null : null
 
   const stageActions =
@@ -876,11 +881,20 @@ export const ChangesPanel = memo(function ChangesPanel({
               : resolution === 'discarded'
                 ? { note: 'Undone' }
                 : {}
+          const key = normalizeRelPath(f.path)
+          const stat = liveStats?.get(key)
+          const action = stat?.action ?? f.action
+          const exact = liveStats
+            ? stat?.add != null && stat.del != null
+              ? { added: stat.add, removed: stat.del }
+              : {}
+            : editTotals.get(key)
+              ? { added: editTotals.get(key)!.add, removed: editTotals.get(key)!.del }
+              : {}
           return {
             path: f.path,
-            status: f.action === 'created' ? 'A' : f.action === 'deleted' ? 'D' : 'M',
-            added: f.added ?? 0,
-            removed: f.removed ?? 0,
+            status: action === 'created' ? 'A' : action === 'deleted' ? 'D' : 'M',
+            ...exact,
             ...note
           }
         })
@@ -893,18 +907,32 @@ export const ChangesPanel = memo(function ChangesPanel({
     return next ? () => setSelectedPath(next.path) : undefined
   }
 
-  const taskDiffLines = selected && displayScope === 'agent'
+  // Without a run to ask, the edit's own arguments are all there is to show.
+  const taskDiffLines = selected && displayScope === 'agent' && !runId
     ? (sessionAgentDiffs.get(normalizeRelPath(selected.path)) ?? sessionAgentDiffs.get(selected.path) ?? null)
     : null
-  // A file the run changed with a command has no edit to show; git's view of
-  // it against HEAD is the change.
-  const fetchTaskFallback = useCallback(
-    async (path: string) => {
+  // The task's own record of the file: its first before-image against the file
+  // now. A file the run changed some other way (a command) is not in it; git's
+  // view against HEAD is the next best answer.
+  const fetchTaskDiff = useCallback<FileDiffSource>(
+    async (path) => {
       if (!workspacePath) return { error: 'No workspace' }
+      void gitRevision
+      if (runId && window.vyotiq?.taskFileDiff) {
+        const res = await window.vyotiq.taskFileDiff({ workspacePath, runId, path })
+        if (res.ok) {
+          const d = res.data
+          if (d.diff) return { content: d.diff }
+          if (d.reason === 'binary_or_large') return { error: 'Binary or too large to diff' }
+          if (d.reason === 'unrestorable') return { error: 'A folder delete — no copy was kept to compare with' }
+          if (d.reason !== 'not_in_task') return { content: '', note: 'Nothing left to review — it is back as it was' }
+        }
+      }
+      if (chrome.result?.kind !== 'ok') return { error: 'No diff to show' }
       const res = await window.vyotiq.gitDiff({ workspacePath, path, vsHead: true })
       return res.ok ? { content: res.data.content } : { error: res.error }
     },
-    [workspacePath]
+    [workspacePath, runId, gitRevision, chrome.result?.kind]
   )
 
   const rowActions = (file: ChangesListFile) => {
@@ -1059,7 +1087,7 @@ export const ChangesPanel = memo(function ChangesPanel({
         <ChangeDiff
           path={selected.path}
           lines={taskDiffLines}
-          fetchDiff={displayScope === 'agent' ? (repoOk ? fetchTaskFallback : undefined) : fetchGitDiff}
+          fetchDiff={displayScope === 'agent' ? fetchTaskDiff : fetchGitDiff}
           binary={browserFiles.find((f) => f.path === selected.path)?.binary}
           layout={layout}
           wordWrap={wordWrap}
@@ -1120,6 +1148,451 @@ export const ChangesPanel = memo(function ChangesPanel({
     commitIntent === 'push' ? 'Commit & Push' : commitIntent === 'pr' ? 'Commit & Create PR' : 'Commit'
   const commitBusy = chrome.busy || Boolean(resolveBusy) || messageGenerating
   const showCounts = Boolean(workspacePath) && listFiles.length > 0 && !(displayScope === 'commits' && !selectedCommit)
+  // One file without numbers leaves the total without numbers too.
+  const shownTotals =
+    displayScope === 'agent'
+      ? listFiles.every((f) => f.added != null && f.removed != null)
+        ? {
+            added: listFiles.reduce((sum, f) => sum + (f.added ?? 0), 0),
+            removed: listFiles.reduce((sum, f) => sum + (f.removed ?? 0), 0)
+          }
+        : null
+      : { added: gitTotals.added, removed: gitTotals.removed }
+
+  // ── Review: the inspector taken to the whole work area ──────────────────
+  const reviewing = variant === 'review'
+  const viewedKey = workspacePath
+    ? `${workspacePath}::${runId ?? ''}::${displayScope}${commitSha ? `:${commitSha}` : ''}`
+    : null
+  const viewed = useReviewViewed(viewedKey)
+  const isViewed = (file: ChangesListFile): boolean => viewed.isViewed(file.path, reviewSignature(file))
+  const viewedCount = listFiles.filter(isViewed).length
+  const firstUnviewed = listFiles.find((f) => !isViewed(f))?.path ?? listFiles[0]?.path ?? null
+  useEffect(() => {
+    // The review opens on something to read: the first file not yet viewed.
+    if (!reviewing || selectedPath || !firstUnviewed) return
+    setSelectedPath(firstUnviewed)
+  }, [reviewing, selectedPath, firstUnviewed])
+  const reviewSource = !reviewing || !selected ? undefined : displayScope === 'agent' ? fetchTaskDiff : fetchGitDiff
+  const reviewDiff = useFileDiff(
+    selected?.path ?? '',
+    reviewing ? taskDiffLines : null,
+    reviewSource,
+    browserFiles.find((f) => f.path === selected?.path)?.binary
+  )
+  const askAboutLine =
+    onAskAboutLine && displayScope !== 'commits'
+      ? (target: AskTarget, question: string) => {
+          const n = lineLabel(target.line)
+          const where =
+            target.line.kind === 'del' ? `line ${n} as it was before the change (removed)` : `line ${n}`
+          onAskAboutLine(
+            [`In \`${target.path}\`, ${where}:`, '```', target.line.text, '```', '', question].join('\n')
+          )
+        }
+      : undefined
+
+  if (reviewing) {
+    const name = selected ? (selected.path.split('/').pop() ?? selected.path) : ''
+    const dir = selected && selected.path.includes('/') ? selected.path.slice(0, selected.path.lastIndexOf('/') + 1) : ''
+    const decidableSelected =
+      selected &&
+      displayScope === 'agent' &&
+      canResolve &&
+      resolvableOf(selected.path) &&
+      !resolutionOf(selected.path) &&
+      !conflictedOf(selected.path)
+    const reviewMoreItems: ActionMenuItem[] = [
+      ...(Object.keys(SCOPE_LABEL) as ChangeScope[]).map((key) => ({
+        id: `scope-${key}`,
+        label: SCOPE_LABEL[key],
+        checked: displayScope === key,
+        onSelect: () => {
+          setScope(key)
+          if (key !== 'commits') setSelectedCommit(null)
+          setSelectedPath(null)
+        }
+      })),
+      { id: 'wrap', label: 'Word wrap', checked: wordWrap, separatorBefore: true, onSelect: () => setWordWrap((v) => !v) },
+      ...(displayScope !== 'agent'
+        ? [{ id: 'whitespace', label: 'Ignore whitespace', checked: ignoreWhitespace, onSelect: () => setIgnoreWhitespace((v) => !v) }]
+        : []),
+      { id: 'find', label: 'Find in changes', icon: 'search', separatorBefore: true, onSelect: () => setFindOpen(true) },
+      {
+        id: 'refresh',
+        label: 'Refresh',
+        icon: 'refresh',
+        onSelect: () => {
+          chrome.refresh()
+          void refreshCommits()
+        }
+      },
+      ...(selected && onOpenFile && selected.status !== 'D'
+        ? [{ id: 'open', label: `Open ${name}`, icon: 'external' as const, onSelect: () => onOpenFile(selected.path) }]
+        : []),
+      ...(pendingTask && !resolveLocked && !running && onKeepAllWrites
+        ? [{ id: 'keep-all', label: 'Keep all', icon: 'check' as const, separatorBefore: true, onSelect: () => void onKeepAllWrites() }]
+        : []),
+      ...(pendingTask && !resolveLocked && !running && onDiscardAllWrites
+        ? [{ id: 'undo-all', label: 'Undo all', icon: 'undo' as const, onSelect: () => void onDiscardAllWrites() }]
+        : []),
+      ...(displayScope === 'unstaged' && status && visibleGitFiles.length > 0
+        ? [{ id: 'stage-all', label: 'Stage all', icon: 'plus' as const, separatorBefore: true, onSelect: sendStageAll }]
+        : []),
+      ...(onViewPr ? [{ id: 'pr', label: 'View pull request', icon: 'pullRequest' as const, separatorBefore: true, onSelect: onViewPr }] : [])
+    ]
+
+    return (
+      <div
+        className={cn('flex min-h-0 min-w-0 flex-1 flex-col bg-bg', className)}
+        data-changes-panel
+        data-review
+        role="region"
+        aria-label="Review"
+      >
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2" data-review-header>
+          <IconButton
+            icon="arrowLeft"
+            label="Back to the record"
+            size="md"
+            onClick={onReviewBack}
+            data-review-back
+          />
+          <h2 className="min-w-0 truncate text-sm font-semibold text-fg-strong">{reviewTitle}</h2>
+          <span className="flex-1" />
+          <Segmented
+            label="Diff layout"
+            value={reviewLayout}
+            onChange={setReviewLayout}
+            items={[
+              { id: 'unified', icon: 'rows', title: 'Unified' },
+              { id: 'split', icon: 'columns', title: 'Split' }
+            ]}
+          />
+          <ActionMenu
+            open={reviewMenuOpen}
+            onOpenChange={setReviewMenuOpen}
+            placement="down"
+            align="end"
+            aria-label="Scope, wrap, whitespace, undo all"
+            items={reviewMoreItems}
+            trigger={(t) => (
+              <IconButton
+                ref={t.ref}
+                icon="more"
+                label="Scope, wrap, whitespace, undo all"
+                size="md"
+                tone="muted"
+                aria-expanded={t['aria-expanded']}
+                aria-controls={t['aria-controls']}
+                aria-haspopup={t['aria-haspopup']}
+                onClick={t.onClick}
+              />
+            )}
+          />
+          {canCommit && !composing ? (
+            <ActionMenu
+              open={commitMenuOpen}
+              onOpenChange={setCommitMenuOpen}
+              placement="down"
+              align="end"
+              aria-label="Commit"
+              items={[
+                { id: 'commit', label: 'Commit…', icon: 'gitCommit', onSelect: () => openCompose('commit') },
+                ...(status?.hasRemote
+                  ? [
+                      { id: 'push', label: 'Commit & Push…', icon: 'arrowUp' as const, onSelect: () => openCompose('push') },
+                      { id: 'pr', label: 'Commit & Create PR…', icon: 'pullRequest' as const, onSelect: () => openCompose('pr') }
+                    ]
+                  : [])
+              ]}
+              trigger={(t) => (
+                <Button
+                  ref={t.ref}
+                  size="xs"
+                  variant="primary"
+                  trailingIcon="chevron"
+                  disabled={running || chrome.busy || Boolean(resolveBusy)}
+                  title={running ? 'Commit unlocks when the run stops' : undefined}
+                  aria-expanded={t['aria-expanded']}
+                  aria-controls={t['aria-controls']}
+                  aria-haspopup={t['aria-haspopup']}
+                  onClick={t.onClick}
+                >
+                  Commit
+                </Button>
+              )}
+            />
+          ) : null}
+        </div>
+
+        {composing ? (
+          <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2" data-review-compose>
+            <input
+              ref={commitInputRef}
+              type="text"
+              value={message}
+              className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-tertiary"
+              placeholder={messageGenerating ? 'The agent is writing a commit message…' : 'Commit message'}
+              aria-label="Commit message"
+              title="Commit message, written by the agent — edit it here"
+              onChange={(e) => onMessageChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && message.trim() && !commitBusy) {
+                  e.preventDefault()
+                  if (commitIntent === 'pr') sendCreatePr()
+                  else sendCommit(commitIntent === 'push')
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  cancelCompose()
+                }
+              }}
+            />
+            {generationNotice ? (
+              <span className="max-w-[40%] truncate text-caption text-muted" title={generationNotice} aria-live="polite">
+                No agent message: {generationNotice}
+              </span>
+            ) : null}
+            <Button size="xs" variant="ghost" onClick={cancelCompose}>
+              Cancel
+            </Button>
+            <Button
+              size="xs"
+              variant="primary"
+              disabled={commitBusy || !message.trim()}
+              onClick={() => {
+                if (commitIntent === 'pr') sendCreatePr()
+                else sendCommit(commitIntent === 'push')
+              }}
+            >
+              {commitLabel}
+            </Button>
+          </div>
+        ) : null}
+
+        {running && (pendingTask || canCommit) ? (
+          <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs text-muted">
+            <StatusGlyph state="paused" size={13} />
+            <span className="min-w-0 flex-1">Commit and Keep/Undo unlock when the run stops.</span>
+            {onStopRun ? (
+              <Button size="xs" variant="ghost" onClick={onStopRun}>
+                Stop run
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {findOpen ? (
+          <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs">
+            <Icon name="search" size={13} className="shrink-0 text-muted" />
+            <input
+              ref={findInputRef}
+              type="text"
+              role="searchbox"
+              value={findQuery}
+              onChange={(e) => setFindQuery(e.target.value)}
+              placeholder="Find in changes"
+              aria-label="Find in changes"
+              className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-tertiary"
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setFindOpen(false)
+                  setFindQuery('')
+                }
+              }}
+            />
+            <IconButton
+              icon="close"
+              label="Close find"
+              size="sm"
+              tone="muted"
+              onClick={() => {
+                setFindOpen(false)
+                setFindQuery('')
+              }}
+            />
+          </div>
+        ) : null}
+
+        {chrome.notice ? (
+          <p
+            className={cn(
+              'm-0 shrink-0 border-b border-border px-4 py-1.5 text-xs',
+              chrome.noticeFailed ? 'text-danger' : 'text-secondary'
+            )}
+            role={chrome.noticeFailed ? 'alert' : 'status'}
+          >
+            {chrome.notice}
+          </p>
+        ) : null}
+
+        <div className="flex min-h-0 flex-1">
+          <aside className="flex w-[300px] shrink-0 flex-col border-r border-border" aria-label="Files to review">
+            {displayScope === 'commits' && !selectedCommit ? (
+              commits.length === 0 ? (
+                <p className="m-0 px-3 py-2 text-xs text-muted">{commitsBusy ? 'Loading commits…' : commitsEmptyTitle}</p>
+              ) : (
+                <ul className="scroll-thin m-0 min-h-0 flex-1 list-none overflow-y-auto py-1" aria-label="Commits">
+                  {commits.map((c) => (
+                    <li key={c.sha}>
+                      <button
+                        type="button"
+                        className="flex w-full min-w-0 flex-col gap-0.5 px-3 py-1.5 text-left hover:bg-surface focus-visible:vy-focus-ring"
+                        onClick={() => {
+                          setSelectedCommit(c)
+                          setSelectedPath(null)
+                        }}
+                      >
+                        <span className="flex min-w-0 items-center gap-2 text-xs">
+                          <span className="shrink-0 font-mono text-caption text-tertiary">{c.shortSha}</span>
+                          <span className="min-w-0 truncate text-fg">{c.subject}</span>
+                        </span>
+                        <span className="text-caption text-tertiary">
+                          {c.author} · {c.relativeDate}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )
+            ) : (
+              <>
+                {displayScope === 'commits' && selectedCommit ? (
+                  <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-1 pr-3 text-xs">
+                    <IconButton
+                      icon="arrowLeft"
+                      label="Back to commits"
+                      size="xs"
+                      tone="muted"
+                      onClick={() => {
+                        setSelectedCommit(null)
+                        setSelectedPath(null)
+                      }}
+                    />
+                    <span className="shrink-0 font-mono text-caption text-tertiary">{selectedCommit.shortSha}</span>
+                    <span className="min-w-0 flex-1 truncate text-fg">{selectedCommit.subject}</span>
+                  </div>
+                ) : null}
+                <div className="flex h-9 shrink-0 items-center gap-2 px-3 text-xs" data-review-progress>
+                  <span className="text-muted">
+                    <span className="font-medium text-fg">{viewedCount}</span> of {listFiles.length} viewed
+                  </span>
+                  <span className="flex-1" />
+                  {shownTotals && listFiles.length > 0 ? (
+                    <DiffStat add={shownTotals.added} del={shownTotals.removed} />
+                  ) : null}
+                </div>
+                <ProgressBar value={viewedCount} max={Math.max(1, listFiles.length)} flush label="Files viewed" />
+                <ul className="scroll-thin m-0 min-h-0 flex-1 list-none overflow-y-auto pb-2" aria-label="Changed files">
+                  {listFiles.map((file) => {
+                    const fileName = file.path.split('/').pop() ?? file.path
+                    const on = file.path === selected?.path
+                    const seen = isViewed(file)
+                    return (
+                      <li
+                        key={file.path}
+                        className={cn('flex h-8 items-center gap-2 px-3', on ? 'bg-surface-2' : 'hover:bg-surface')}
+                        title={file.path}
+                        data-review-row={file.path}
+                      >
+                        <Checkbox
+                          checked={seen}
+                          aria-label={`Viewed ${fileName}`}
+                          onCheckedChange={(next) => viewed.setViewed(file.path, reviewSignature(file), next)}
+                        />
+                        <button
+                          type="button"
+                          aria-current={on || undefined}
+                          className="flex h-full min-w-0 flex-1 items-center gap-2 text-left focus-visible:vy-focus-ring"
+                          onClick={() => setSelectedPath(file.path)}
+                        >
+                          <FileBadge path={file.path} size={14} />
+                          <span
+                            className={cn(
+                              'min-w-0 flex-1 truncate text-xs',
+                              file.status === 'D' ? 'text-muted line-through' : seen ? 'text-muted' : 'text-fg'
+                            )}
+                          >
+                            {fileName}
+                          </span>
+                        </button>
+                        {file.note ? (
+                          <span className={cn('shrink-0 text-caption', file.noteTone === 'warning' ? 'text-warning' : 'text-tertiary')}>
+                            {file.note}
+                          </span>
+                        ) : file.added != null && file.removed != null ? (
+                          <DiffStat add={file.added} del={file.removed} />
+                        ) : null}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </>
+            )}
+          </aside>
+
+          <div className="flex min-w-0 flex-1 flex-col">
+            {selected ? (
+              <>
+                <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4 text-xs" data-review-file>
+                  <FileBadge path={selected.path} size={14} />
+                  <span className="min-w-0 flex-1 truncate font-mono text-caption text-muted" title={selected.path}>
+                    {dir}
+                    <span className="text-fg">{name}</span>
+                  </span>
+                  {selected.added != null && selected.removed != null ? (
+                    <DiffStat add={selected.added} del={selected.removed} />
+                  ) : null}
+                  {decidableSelected && onDiscardWriteFile ? (
+                    <IconButton
+                      icon="undo"
+                      label="Undo this file"
+                      title={resolveBlockedReason ?? 'Put this file back as it was before the agent wrote it'}
+                      size="sm"
+                      tone="muted"
+                      disabled={resolveLocked}
+                      onClick={() => void onDiscardWriteFile(selected.path)}
+                    />
+                  ) : null}
+                  <Checkbox
+                    checked={isViewed(selected)}
+                    label="Viewed"
+                    onCheckedChange={(next) => viewed.setViewed(selected.path, reviewSignature(selected), next)}
+                  />
+                </div>
+                {conflictBlock}
+                <div
+                  className="scroll-thin min-h-0 flex-1 overflow-auto bg-sunken py-1 font-mono text-xs leading-[20px]"
+                  data-diff-scroll-root
+                >
+                  <FileDiffBody
+                    path={selected.path}
+                    diff={reviewDiff}
+                    layout={reviewLayout}
+                    wordWrap={wordWrap}
+                    findQuery={findQuery}
+                    numbers="both"
+                    onAsk={askAboutLine}
+                  />
+                </div>
+              </>
+            ) : (
+              <EmptyPanel
+                icon="diff"
+                title={listFiles.length === 0 ? emptyTitle : 'Pick a file'}
+                body={listFiles.length === 0 ? emptyBody : 'Its diff opens here.'}
+                centered
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -1167,7 +1640,7 @@ export const ChangesPanel = memo(function ChangesPanel({
             <span className="shrink-0 text-xs text-muted">
               {listFiles.length} {listFiles.length === 1 ? 'file' : 'files'}
             </span>
-            <DiffStat add={totals.added} del={totals.removed} className="shrink-0" />
+            {shownTotals ? <DiffStat add={shownTotals.added} del={shownTotals.removed} className="shrink-0" /> : null}
           </>
         ) : null}
         <span className="flex-1" />

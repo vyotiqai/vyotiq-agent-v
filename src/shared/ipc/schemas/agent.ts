@@ -1503,6 +1503,49 @@ export const OpenRunArtifactRequestSchema = z.object({
 })
 export type OpenRunArtifactRequest = z.infer<typeof OpenRunArtifactRequestSchema>
 
+/**
+ * What a task did to the files it wrote: its first write's before-image
+ * against each file as it is now. Counts are exact or absent.
+ */
+export const TaskFileStatsRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  runId: RunIdSchema
+})
+export type TaskFileStatsRequest = z.infer<typeof TaskFileStatsRequestSchema>
+
+const TaskFileActionSchema = z.enum(['created', 'modified', 'deleted'])
+
+export const TaskFileStatSchema = z.object({
+  path: z.string(),
+  action: TaskFileActionSchema,
+  add: z.number().int().nonnegative().optional(),
+  del: z.number().int().nonnegative().optional()
+})
+export type TaskFileStat = z.infer<typeof TaskFileStatSchema>
+
+export const TaskFileStatsResultSchema = z.object({ files: z.array(TaskFileStatSchema) })
+export type TaskFileStatsResult = z.infer<typeof TaskFileStatsResultSchema>
+
+export const TaskFileDiffRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  runId: RunIdSchema,
+  path: z.string().min(1).max(4096)
+})
+export type TaskFileDiffRequest = z.infer<typeof TaskFileDiffRequestSchema>
+
+export const TaskFileDiffResultSchema = z.object({
+  path: z.string(),
+  action: TaskFileActionSchema.nullable(),
+  /** `git diff`-shaped text for the file, or null when there is none to show. */
+  diff: z.string().nullable(),
+  add: z.number().int().nonnegative().optional(),
+  del: z.number().int().nonnegative().optional(),
+  /** Too far apart to diff line by line: shown as one full replacement. */
+  full: z.boolean().optional(),
+  reason: z.enum(['binary_or_large', 'not_in_task', 'unrestorable']).optional()
+})
+export type TaskFileDiffResult = z.infer<typeof TaskFileDiffResultSchema>
+
 export const ReadRunArtifactResultSchema = z.object({
   name: RunArtifactNameSchema,
   exists: z.boolean(),
