@@ -376,6 +376,21 @@ export type WorkspaceRuleListItem = {
   description?: string
   /** False when frontmatter sets alwaysApply: false (requestable). */
   alwaysApply: boolean
+  /**
+   * When the rule reaches the prompt, decided the way `shouldAutoInjectRule`
+   * decides it. `alwaysApply` alone cannot say: a glob rule without the key
+   * reads as true there, yet applies only while a matching file is focused.
+   */
+  applies: WorkspaceRuleApplies
+}
+
+export type WorkspaceRuleApplies = 'always' | 'matching' | 'request'
+
+/** Mirrors `shouldAutoInjectRule` without a focused file to test against. */
+export function workspaceRuleApplies(meta: RuleFrontmatter): WorkspaceRuleApplies {
+  if (meta.alwaysApply === true) return 'always'
+  if (meta.globs && meta.globs.length > 0) return 'matching'
+  return meta.alwaysApply === false ? 'request' : 'always'
 }
 
 /**
@@ -390,7 +405,7 @@ export async function listWorkspaceRulesForMention(
   const out: WorkspaceRuleListItem[] = []
   const seen = new Set<string>()
 
-  const push = (rel: string, raw: string): void => {
+  const push = (rel: string, raw: string, root = false): void => {
     const path = rel.split(sep).join('/')
     if (seen.has(path) || out.length >= MAX_RULE_FILES) return
     seen.add(path)
@@ -398,7 +413,9 @@ export async function listWorkspaceRulesForMention(
     out.push({
       path,
       description: meta.description,
-      alwaysApply: meta.alwaysApply !== false
+      alwaysApply: meta.alwaysApply !== false,
+      // Root files are injected as-is, frontmatter or not.
+      applies: root ? 'always' : workspaceRuleApplies(meta)
     })
   }
 
@@ -406,7 +423,7 @@ export async function listWorkspaceRulesForMention(
     const raw = await readCapped(join(workspacePath, name))
     if (!raw) continue
     // Root instruction files have no alwaysApply:false contract — treat as always.
-    push(name, raw)
+    push(name, raw, true)
   }
 
   for (const { dir, extensions } of RULE_DIRS) {

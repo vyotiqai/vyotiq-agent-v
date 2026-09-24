@@ -2026,7 +2026,12 @@ export const WorkspaceListRulesResultSchema = z.object({
     z.object({
       path: z.string(),
       description: z.string().optional(),
-      alwaysApply: z.boolean()
+      alwaysApply: z.boolean(),
+      /**
+       * When it reaches the prompt: every step, only while a file its globs
+       * match is focused, or only when mentioned. Optional for older mains.
+       */
+      applies: z.enum(['always', 'matching', 'request']).optional()
     })
   )
 })

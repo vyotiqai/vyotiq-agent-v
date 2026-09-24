@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Icon } from '@renderer/lib/icons'
 import { cn } from '@renderer/lib/ui'
-import { SECTION_LABEL, SECTION_LABEL_ACCENT } from '@renderer/lib/utils/layout'
+import { SECTION_LABEL } from '@renderer/lib/utils/layout'
 
 /**
  * A Home section: a caps label with an optional link on its right edge, over
@@ -11,22 +11,19 @@ import { SECTION_LABEL, SECTION_LABEL_ACCENT } from '@renderer/lib/utils/layout'
 export function HomeSection({
   id,
   label,
-  accent = false,
   trailing,
   className,
   children
 }: {
   id: string
   label: string
-  /** Needs you: the one label on the page in the accent. */
-  accent?: boolean
   trailing?: ReactNode
   className?: string
   children: ReactNode
 }) {
   return (
     <section aria-labelledby={id} className={cn('min-w-0', className)}>
-      <h2 className={cn('flex h-6 items-center gap-2', accent ? SECTION_LABEL_ACCENT : SECTION_LABEL)}>
+      <h2 className={cn('flex h-6 items-center gap-2', SECTION_LABEL)}>
         <span id={id}>{label}</span>
         <span className="flex-1" />
         {trailing}

@@ -98,8 +98,8 @@ export type SettingsViewProps = {
   feedbackOpen?: boolean
   onFeedbackOpenChange?: (open: boolean) => void
   /**
-   * Close Settings on a Marketplace → Manage tab. Rules and MCP servers are
-   * edited there; Settings only links to them.
+   * Close Settings on an Extensions tab. Rules and MCP servers are edited
+   * there; Settings only links to them.
    */
   onOpenMarketplace?: (tab: 'mcps' | 'rules') => void
 }

@@ -807,7 +807,7 @@ export async function installMarketplacePackage(
   const ackRequiredSources = new Set(['registry', 'git', 'npm', 'zip', 'remote', 'path'])
   if (ackRequiredSources.has(req.source) && !settings.marketplace?.remoteInstallAcked) {
     throw new Error(
-      'Acknowledge marketplace install risk in Marketplace → Manage (Package Registry) before installing from registry, git, npm, zip, path, or remote MCP URLs.'
+      'Acknowledge marketplace install risk in Extensions → Registry and trust before installing from registry, git, npm, zip, path, or remote MCP URLs.'
     )
   }
   const { root, cleanup, source } = await materializeToTemp(req)
@@ -835,7 +835,7 @@ export async function installMarketplacePackage(
       )
       if (collision) {
         throw new Error(
-          `MCP id "${detected.id}" already exists as a configured server. Remove it in Marketplace → Manage first.`
+          `MCP id "${detected.id}" already exists as a configured server. Remove it in Extensions first.`
         )
       }
       // Reject remote URL installs that would overwrite a different remote package id collision.

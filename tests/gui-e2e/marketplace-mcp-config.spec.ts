@@ -18,42 +18,47 @@ test.beforeEach(async () => {
   await leaveSettingsIfOpen(window)
 })
 
-test('marketplace opens from the navigator with browse controls', async () => {
+// Nothing here depends on what the catalog holds: an e2e build may not ship it.
+
+test('extensions open from the navigator with a tab per kind', async () => {
   const { window } = launched
 
-  await window.getByRole('button', { name: 'Extensions' }).click()
+  await window.getByRole('button', { name: 'Extensions', exact: true }).click()
 
-  // Section header + tab list render.
-  await expect(window.getByRole('tablist', { name: 'Marketplace sections' })).toBeVisible({
-    timeout: 15_000
-  })
-  await expect(window.getByRole('tab', { name: 'Browse' })).toBeVisible()
-  await expect(window.getByRole('tab', { name: 'Manage' })).toBeVisible()
+  const kinds = window.getByRole('tablist', { name: 'Extension kinds' })
+  await expect(kinds).toBeVisible({ timeout: 15_000 })
+  // Each tab carries its count, so match the name from its start.
+  for (const name of [/^All/, /^MCP servers/, /^Skills/, /^Rules/, /^Packages/]) {
+    await expect(kinds.getByRole('tab', { name })).toBeVisible()
+  }
+  await expect(kinds.getByRole('tab', { name: /^All/ })).toHaveAttribute('aria-selected', 'true')
 })
 
-test('marketplace browse exposes search and kind filter', async () => {
+test('search narrows the list and says when nothing matches', async () => {
   const { window } = launched
 
-  await window.getByRole('button', { name: 'Extensions' }).click()
-  const search = window.getByRole('textbox', { name: 'Search marketplace' })
+  await window.getByRole('button', { name: 'Extensions', exact: true }).click()
+  const search = window.getByRole('textbox', { name: 'Search extensions' })
   await expect(search).toBeVisible({ timeout: 15_000 })
 
-  await search.fill('whisper')
-  await expect(search).toHaveValue('whisper')
+  await search.fill('zzzz-no-such-extension')
+  await expect(window.getByText('Nothing matches “zzzz-no-such-extension”.')).toBeVisible()
   await search.fill('')
-
-  await expect(window.getByRole('combobox', { name: /filter by kind/i })).toBeVisible()
+  await expect(window.getByText(/^Nothing matches/)).toHaveCount(0)
 })
 
-test('manage tab reveals registry settings panel', async () => {
+test('the gear opens registry and trust settings', async () => {
   const { window } = launched
 
-  await window.getByRole('button', { name: 'Extensions' }).click()
-  await window.getByRole('tab', { name: 'Manage' }).click()
+  await window.getByRole('button', { name: 'Extensions', exact: true }).click()
+  await window.getByRole('button', { name: 'Registry and trust' }).click()
 
-  const registry = window.getByRole('region', { name: 'Package registry' })
-  await expect(registry).toBeVisible({ timeout: 10_000 })
+  const dialog = window.getByRole('dialog', { name: 'Registry and trust' })
+  await expect(dialog).toBeVisible({ timeout: 10_000 })
+  const registry = dialog.getByRole('region', { name: 'Package registry' })
   await expect(registry.getByText('Registry URL')).toBeVisible()
   await expect(registry.getByPlaceholder(/registry\.example\.com/i)).toBeVisible()
-  await expect(window.getByRole('tablist', { name: 'Manage marketplace' })).toBeVisible()
+
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(dialog).toHaveCount(0)
 })

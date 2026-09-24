@@ -16,6 +16,17 @@ afterEach(() => {
 
 const emptySecrets = emptySecretStatus()
 
+/** An Extensions row by its item key, once the list has loaded. */
+async function findExtensionRow(key: string): Promise<HTMLElement> {
+  return waitFor(() => {
+    const row = Array.from(document.querySelectorAll<HTMLElement>('[data-extension-key]')).find(
+      (li) => li.dataset.extensionKey === key
+    )
+    if (!row) throw new Error(`no row ${key}`)
+    return row
+  })
+}
+
 /**
  * Opens a section from Settings' own index. An entry that needs attention
  * reads its reason after its name ("Providers, OpenAI has no API key"), so
@@ -878,7 +889,7 @@ describe('settings', () => {
     expect(empty.className).toContain('z-dropdown')
   })
 
-  it('edits MCP server fields in Marketplace manage view', async () => {
+  it('edits a manual MCP server from its Extensions detail', async () => {
     const serverId = 'mcp-test-id'
     const onUpdate = vi.fn(async () => ({ ok: true as const }))
     const { MarketplaceView } = await import('@renderer/features/marketplace')
@@ -890,6 +901,7 @@ describe('settings', () => {
             {
               id: serverId,
               name: 'Echo server',
+              transport: 'stdio',
               command: 'node',
               args: ['echo-server.mjs'],
               enabled: true,
@@ -901,10 +913,11 @@ describe('settings', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('tab', { name: /^Manage$/i }))
-    expect(await screen.findByRole('tab', { name: /^MCPs$/i })).toBeTruthy()
-    // Manage view polls connection status on open (mcpStatus). Refresh MCP is explicit.
+    // Extensions reads connection status on open (mcpStatus). Refresh is explicit.
     await waitFor(() => expect(window.vyotiq.mcpStatus).toHaveBeenCalled())
+    fireEvent.click(within(await findExtensionRow(`server:${serverId}`)).getByRole('button'))
+    // The fields sit under Configuration, closed while nothing is wrong.
+    fireEvent.click(await screen.findByRole('button', { name: 'Configuration' }))
 
     const nameInput = screen.getByLabelText(`MCP server name for ${serverId}`)
     fireEvent.change(nameInput, { target: { value: 'Filesystem' } })
@@ -963,7 +976,7 @@ describe('settings', () => {
     )
   })
 
-  it('shows MCP connection status in Marketplace manage view', async () => {
+  it('shows the tool count of a connected MCP server in its row and detail', async () => {
     const statusPayload = {
       ok: true as const,
       data: {
@@ -979,7 +992,7 @@ describe('settings', () => {
       }
     }
     window.vyotiq.mcpStatus = vi.fn(async () => statusPayload)
-    // Manage view loads status via mcpStatus on open. Refresh MCP is explicit.
+    // Extensions loads status via mcpStatus on open. Refresh is explicit.
     window.vyotiq.mcpRefresh = vi.fn(async () => statusPayload)
 
     const { MarketplaceView } = await import('@renderer/features/marketplace')
@@ -1003,12 +1016,13 @@ describe('settings', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('tab', { name: /^Manage$/i }))
-    expect(await screen.findByRole('tab', { name: /^MCPs$/i })).toBeTruthy()
-    expect(await screen.findByText(/Connected · 2 tools/i)).toBeTruthy()
+    const row = await findExtensionRow('server:srv-1')
+    expect(await within(row).findByText('2 tools')).toBeTruthy()
+    fireEvent.click(within(row).getByRole('button'))
+    expect(await screen.findByText('Connected — 2 tools.')).toBeTruthy()
   })
 
-  it('has no Marketplace section; registry lives in Marketplace Manage', async () => {
+  it('has no Marketplace section; the registry sits behind the Extensions gear', async () => {
     render(
       <SettingsView
         settings={baseSettings}
@@ -1031,10 +1045,11 @@ describe('settings', () => {
         onUpdate={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('tab', { name: /^Manage$/i }))
-    expect(await screen.findByLabelText(/Package registry/i)).toBeTruthy()
-    expect(screen.getByLabelText(/Registry URL/i)).toBeTruthy()
-    expect(screen.getByLabelText(/Acknowledge marketplace install risk/i)).toBeTruthy()
+    fireEvent.click(await screen.findByRole('button', { name: 'Registry and trust' }))
+    const dialog = screen.getByRole('dialog', { name: 'Registry and trust' })
+    expect(within(dialog).getByRole('region', { name: 'Package registry' })).toBeTruthy()
+    expect(within(dialog).getByLabelText(/Registry URL/i)).toBeTruthy()
+    expect(within(dialog).getByLabelText(/Acknowledge marketplace install risk/i)).toBeTruthy()
   })
 
   it('Notifications and Diagnostics nav entries render real sections', () => {

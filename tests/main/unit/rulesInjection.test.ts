@@ -141,8 +141,37 @@ describe('workspace rules', () => {
     const req = mentioned.find((r) => r.path === '.cursor/rules/requestable.mdc')
     expect(req).toBeDefined()
     expect(req!.alwaysApply).toBe(false)
+    expect(req!.applies).toBe('request')
     expect(req!.description).toBe('only on request')
     expect(mentioned.some((r) => r.path === 'AGENTS.md' && r.alwaysApply)).toBe(true)
+  })
+
+  it('says a glob rule applies to matching files, not always', async () => {
+    mkdirSync(join(workspace, '.cursor', 'rules'), { recursive: true })
+    const rule = (front: string[]): string => ['---', ...front, '---', '', 'body'].join('\n')
+    writeFileSync(join(workspace, '.cursor', 'rules', 'globbed.mdc'), rule(['globs: src/**/*.ts']))
+    writeFileSync(
+      join(workspace, '.cursor', 'rules', 'globbed-off.mdc'),
+      rule(['alwaysApply: false', 'globs: src/**/*.ts'])
+    )
+    writeFileSync(
+      join(workspace, '.cursor', 'rules', 'forced.mdc'),
+      rule(['alwaysApply: true', 'globs: src/**/*.ts'])
+    )
+    writeFileSync(join(workspace, '.cursor', 'rules', 'plain.mdc'), 'no frontmatter')
+    writeFileSync(join(workspace, 'AGENTS.md'), rule(['alwaysApply: false']))
+
+    const applies = Object.fromEntries(
+      (await listWorkspaceRulesForMention(workspace)).map((r) => [r.path, r.applies])
+    )
+    // The list used to call the first one alwaysApply: true, though it only
+    // reaches the prompt while a matching file is focused.
+    expect(applies['.cursor/rules/globbed.mdc']).toBe('matching')
+    expect(applies['.cursor/rules/globbed-off.mdc']).toBe('matching')
+    expect(applies['.cursor/rules/forced.mdc']).toBe('always')
+    expect(applies['.cursor/rules/plain.mdc']).toBe('always')
+    // Root files are injected as-is, whatever their frontmatter says.
+    expect(applies['AGENTS.md']).toBe('always')
   })
 
   it('ignores files with unrelated extensions', async () => {

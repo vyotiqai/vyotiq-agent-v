@@ -61,7 +61,7 @@ export function NeedsYouSection({
   for (const server of mcpIssues) issues.push(mcpIssue(server, onOpenMcpServer, onRetryMcp))
 
   return (
-    <HomeSection id="home-needs-you" label="Needs you" accent className="mt-12">
+    <HomeSection id="home-needs-you" label="Needs you" className="mt-12">
       {tasks.map((task) => (
         <WaitingRow
           key={task.run.runId}

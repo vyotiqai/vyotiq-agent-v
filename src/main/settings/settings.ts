@@ -657,12 +657,12 @@ function assertMcpServersAcked(
     const prior = prevById.get(server.id)
     if (!prior) {
       throw new Error(
-        'Acknowledge marketplace / MCP installs in Marketplace → Manage (Package Registry) before adding MCP servers.'
+        'Acknowledge marketplace and MCP installs in Extensions → Registry and trust before adding MCP servers.'
       )
     }
     if (mcpServerIdentity(prior) !== mcpServerIdentity(server)) {
       throw new Error(
-        'Acknowledge marketplace / MCP installs in Marketplace → Manage (Package Registry) before changing MCP server endpoints.'
+        'Acknowledge marketplace and MCP installs in Extensions → Registry and trust before changing MCP server endpoints.'
       )
     }
   }

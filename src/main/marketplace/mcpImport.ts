@@ -23,7 +23,6 @@ import {
   VyotiqPluginManifestSchema,
   type DetectedMcpServer,
   type McpApplyDetectedResult,
-  type McpDetectKind,
   type McpDetectResult,
   type McpImportExternalResult,
   type McpServer
@@ -35,26 +34,12 @@ import { getInstalledItem, readMarketplaceIndex } from './indexStore'
 import { assertSafeGitCloneUrl } from './gitCloneUrl'
 import { resolveInstalledPackageRoot } from './paths'
 import { sanitizeMcpManifestEnv } from './sanitizeMcpEnv'
+import { findCatalogMcpMatch, runnerPackage } from './mcpCatalogMatch'
+import { STDIO_LAUNCHERS, classifyMcpInput, tokenizeCommand } from '../../shared/utils/mcpClassify'
+
+export { classifyMcpInput }
 
 const execFileAsync = promisify(execFile)
-
-const STDIO_LAUNCHERS = new Set([
-  'npx',
-  'uvx',
-  'uv',
-  'node',
-  'nodejs',
-  'python',
-  'python3',
-  'pipx',
-  'bun',
-  'deno',
-  'docker',
-  'cmd',
-  'cmd.exe',
-  'powershell',
-  'pwsh'
-])
 
 function slugify(raw: string, max = 40): string {
   return (
@@ -138,8 +123,9 @@ function existingDuplicate(server: DetectedMcpServer): boolean {
   })
 }
 
+/** Finish a detect result: is it already configured, and does the catalog ship the same server? */
 function withDuplicateFlag(
-  result: Omit<McpDetectResult, 'duplicate'> & {
+  result: Omit<McpDetectResult, 'duplicate' | 'catalogMatch'> & {
     server?: DetectedMcpServer
     install?: { target: string }
   }
@@ -152,64 +138,8 @@ function withDuplicateFlag(
         listDedupeCandidates().some((s) => s.packageId === target || s.id === target)
     )
   }
-  return McpDetectResultSchema.parse({ ...result, duplicate })
-}
-
-export function classifyMcpInput(raw: string): McpDetectKind {
-  const input = raw.trim()
-  if (!input) return 'unknown'
-
-  if (input.startsWith('{') || input.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(input) as unknown
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        const obj = parsed as Record<string, unknown>
-        if (obj.mcpServers && typeof obj.mcpServers === 'object') return 'json'
-        if (obj.command || obj.url) return 'json'
-      }
-    } catch {
-      // fall through
-    }
-  }
-
-  if (/^git@|^ssh:\/\/|^git:\/\//i.test(input) || /\.git$/i.test(input)) return 'git'
-
-  if (/^https?:\/\//i.test(input)) {
-    try {
-      const u = new URL(input)
-      const host = u.hostname.toLowerCase()
-      if (
-        host === 'github.com' ||
-        host === 'www.github.com' ||
-        host === 'gitlab.com' ||
-        host === 'bitbucket.org' ||
-        host.endsWith('.github.com')
-      ) {
-        return 'git'
-      }
-      return 'remote'
-    } catch {
-      return 'unknown'
-    }
-  }
-
-  const tokens = tokenizeCommand(input)
-  if (tokens.length > 0 && STDIO_LAUNCHERS.has(tokens[0]!.toLowerCase())) return 'stdio'
-
-  // npm package: @scope/name or simple-name (no spaces, has letter)
-  if (/^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i.test(input)) return 'npm'
-
-  return 'unknown'
-}
-
-function tokenizeCommand(line: string): string[] {
-  const out: string[] = []
-  const re = /"([^"]*)"|'([^']*)'|(\S+)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(line))) {
-    out.push(m[1] ?? m[2] ?? m[3] ?? '')
-  }
-  return out.filter(Boolean)
+  const catalogMatch = result.server ? findCatalogMcpMatch(result.server) : undefined
+  return McpDetectResultSchema.parse({ ...result, duplicate, ...(catalogMatch ? { catalogMatch } : {}) })
 }
 
 function serverFromStdioTokens(
@@ -218,8 +148,10 @@ function serverFromStdioTokens(
 ): DetectedMcpServer {
   const command = tokens[0] ?? ''
   const args = tokens.slice(1)
+  // A flag is never the name: `npx -y pkg` used to be called "-y".
   const pkgHint =
-    args.find((a) => a.startsWith('@') || /^[a-z0-9-]+$/i.test(a)) ??
+    runnerPackage(command, args) ??
+    args.find((a) => !a.startsWith('-') && (a.startsWith('@') || /^[a-z0-9-]+$/i.test(a))) ??
     nameHint ??
     command
   const id = `mcp-${slugify(pkgHint)}-${shortHash(tokens.join(' '))}`
@@ -606,13 +538,16 @@ function requiresRemoteAck(servers: DetectedMcpServer[]): boolean {
 }
 
 const REMOTE_ACK_WARNING =
-  'Acknowledge marketplace / MCP installs in Marketplace → Manage (Package Registry) before adding MCP servers.'
+  'Acknowledge marketplace and MCP installs in Extensions → Registry and trust before adding MCP servers.'
 
 export async function detectMcpInput(rawInput: unknown): Promise<McpDetectResult> {
   const { input } = McpDetectRequestSchema.parse(rawInput)
   const kind = classifyMcpInput(input)
   const settings = getSettings()
-  const needsAck = kind === 'git' || kind === 'npm' || kind === 'remote'
+  // Only a git URL reaches out while detecting — it clones. Every other kind
+  // is parsed in place and runs nothing, so it can be detected as it is
+  // pasted; adding what it finds asks for the acknowledgement then.
+  const needsAck = kind === 'git'
   if (needsAck && !settings.marketplace?.remoteInstallAcked) {
     return withDuplicateFlag({
       kind,
@@ -632,16 +567,9 @@ export async function detectMcpInput(rawInput: unknown): Promise<McpDetectResult
           warnings: ['JSON parsed but no MCP servers found.']
         })
       }
-      if (requiresRemoteAck(servers) && !settings.marketplace?.remoteInstallAcked) {
-        return withDuplicateFlag({
-          kind: 'json',
-          confidence: 'low',
-          warnings: [REMOTE_ACK_WARNING]
-        })
-      }
       const warnings =
         servers.length > 1
-          ? [`Found ${servers.length} servers; preview shows the first. Use Import for all.`]
+          ? [`Found ${servers.length} servers in this config; the fields show the first.`]
           : []
       return withDuplicateFlag({
         kind: 'json',
@@ -687,7 +615,7 @@ export async function detectMcpInput(rawInput: unknown): Promise<McpDetectResult
       confidence: 'medium',
       server,
       warnings: [
-        'Suggested stdio launch via npx. Use Marketplace → Install npm for Vyotiq-packaged npm packages.'
+        'Suggested stdio launch via npx. For a Vyotiq package published to npm, install it from Registry and trust.'
       ]
     })
   }
@@ -751,7 +679,9 @@ export async function detectMcpInput(rawInput: unknown): Promise<McpDetectResult
       enabled: true,
       source: 'manual'
     }),
-    warnings: ['Could not classify input. Enter a command manually or use Advanced.']
+    warnings: [
+      'Could not tell how to run this. Enter the command below, or install it from source in Extensions → Registry and trust.'
+    ]
   })
 }
 
@@ -783,9 +713,7 @@ export function applyDetectedManualMcp(raw: unknown): McpApplyDetectedResult {
 
   const settings = getSettings()
   if (!settings.marketplace?.remoteInstallAcked) {
-    throw new Error(
-      'Acknowledge marketplace / MCP installs in Marketplace → Manage (Package Registry) before adding MCP servers.'
-    )
+    throw new Error(REMOTE_ACK_WARNING)
   }
   const list = [...(settings.mcpServers ?? [])]
   const idx = list.findIndex((s) => s.id === server.id)
@@ -892,11 +820,24 @@ function filterExternalMcpPaths(paths: string[], warnings: string[]): string[] {
 export function scanExternalMcpConfigs(raw?: unknown): McpImportExternalResult {
   const req = McpScanExternalRequestSchema.parse(raw ?? {})
   const warnings: string[] = []
+  const pasted = req.json?.trim()
   const scannedPaths = filterExternalMcpPaths(
-    req.paths?.length ? req.paths : defaultExternalConfigPaths(),
+    req.paths?.length ? req.paths : pasted ? [] : defaultExternalConfigPaths(),
     warnings
   )
   const byId = new Map<string, DetectedMcpServer>()
+
+  // A pasted config is read like a file, so every server in it can be picked
+  // — detect previews only the first.
+  if (pasted) {
+    try {
+      for (const s of parseExternalMcpConfig(pasted)) {
+        if (!byId.has(s.id)) byId.set(s.id, s)
+      }
+    } catch (err) {
+      warnings.push(err instanceof Error ? err.message : String(err))
+    }
+  }
 
   for (const path of scannedPaths) {
     if (!existsSync(path)) continue

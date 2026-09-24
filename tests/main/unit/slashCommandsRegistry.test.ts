@@ -63,7 +63,7 @@ describe('builtin slash commands', () => {
     )
     const marketplace = BUILTIN_COMMANDS.find((c) => c.trigger === 'marketplace')
     expect(marketplace?.description).toBe(
-      'Browse and manage skills, MCP servers, and packages'
+      'Browse and manage MCP servers, skills, rules and packages'
     )
     expect(marketplace?.description).not.toMatch(/plugin/i)
   })

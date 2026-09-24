@@ -18,6 +18,13 @@ const ToolCatalogEntrySchema = z.object({
   /** Present for `source: 'mcp'` (the `mcp__<serverId>__<tool>` server id). */
   serverId: z.string().min(1).optional(),
   serverName: z.string().min(1).optional(),
+  /**
+   * MCP only: true when the server declared the tool read-only in its
+   * `readOnlyHint` annotation, false when it declared otherwise or said
+   * nothing. A claim, not a check — the agent's policy never trusts it — so
+   * a UI must say "declares" rather than "is".
+   */
+  readOnlyHint: z.boolean().optional(),
   /** Modes whose mode policy admits this tool (computed with current settings). */
   modes: z.array(z.enum(['ask', 'plan', 'agent'])),
   /** True when the tool would appear in the next Agent-mode step catalog. */

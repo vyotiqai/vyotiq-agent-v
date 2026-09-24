@@ -266,7 +266,7 @@ import { pickWorkspace } from '@main/workspace/workspace'
 import { consumePendingDeepLink } from '@main/app/deepLinks'
 import { resolveInsideWorkspace } from '@main/workspace/safePath'
 import { getSettings, setSettings, setMarketplaceRemoteInstallAcked, redactSettingsForIpc, enqueueSettingsMutation } from '@main/settings/settings'
-import { syncMcpServers, getMcpServerStatus, mcpStatusExtras, refreshMcpServers, startMcpOAuth, setMcpStdioWorkspace } from '@main/agent/mcp'
+import { syncMcpServers, getMcpServerStatus, mcpStatusExtras, refreshMcpServers, retryFailedMcpServers, startMcpOAuth, setMcpStdioWorkspace } from '@main/agent/mcp'
 import { isExecutableMcpBinary } from '@main/agent/mcp/binaries'
 import { headersWithoutAuthorization } from '../../shared/utils/mcpAuth'
 import {
@@ -3512,7 +3512,8 @@ export function registerIpc(): void {
       const overrides = workspacePath
         ? findWorkspaceSettingsOverride(workspaces, workspacePath)?.marketplaceOverrides ?? null
         : null
-      await refreshMcpServers(resolveMcpServersForSessionMap())
+      if (req.failedOnly) await retryFailedMcpServers(resolveMcpServersForSessionMap())
+      else await refreshMcpServers(resolveMcpServersForSessionMap())
       notifyToolCatalogChanged()
       return ok({
         servers: getMcpServerStatus(resolveEffectiveMcpServers(overrides), workspacePath),

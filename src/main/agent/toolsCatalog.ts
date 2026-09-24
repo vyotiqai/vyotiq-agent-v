@@ -6,7 +6,7 @@ import { mcpAuthAllowedForWorkspace } from '../../shared/mcpApps'
 import { isMcpToolPermitted } from '../../shared/utils/mcpToolPolicy'
 import { getSettings } from '../settings/settings'
 import { findWorkspaceSettingsOverride, getWorkspaces } from '../workspace/workspaces'
-import { listMcpToolDefinitions, parseMcpToolName } from './mcp'
+import { getMcpReadOnlyHint, listMcpToolDefinitions, parseMcpToolName } from './mcp'
 import type { McpToolLoading } from './context/mcpToolLoading'
 import { BUILTIN_TOOL_NAMES, TOOL_REGISTRY } from './schemas/tools'
 import { agentBuiltToolDefinitions } from './agentTools/loader'
@@ -20,7 +20,10 @@ type CatalogToolDef = { name: string; description?: string }
 
 function fingerprintOf(entries: readonly ToolCatalogEntry[], codeIndexEnabled: boolean, autoModeSwitch: boolean): string {
   const basis = `${codeIndexEnabled ? 1 : 0}|${autoModeSwitch ? 1 : 0}|${entries
-    .map((e) => `${e.name}=${e.active ? 1 : 0}${e.reason ? `!${e.reason}` : ''}`)
+    .map(
+      (e) =>
+        `${e.name}=${e.active ? 1 : 0}${e.reason ? `!${e.reason}` : ''}${e.readOnlyHint === undefined ? '' : e.readOnlyHint ? '~r' : '~w'}`
+    )
     .join(',')}`
   let hash = 5381
   for (let i = 0; i < basis.length; i++) {
@@ -44,6 +47,8 @@ export function buildToolCatalog(inputs: {
   agentToolDefs?: readonly CatalogToolDef[]
   /** Settings default; a server's own `autoLoad` overrides it. */
   mcpToolLoading?: McpToolLoading
+  /** What each connected server declared as `readOnlyHint`, by full tool name. */
+  mcpReadOnlyHint?: (name: string) => boolean | undefined
 }): ToolCatalogResult {
   const { autoModeSwitch, codeIndexEnabled, mcpToolDefs, servers, authAllowedServerIds } = inputs
   const eagerMcp = inputs.mcpToolLoading === 'eager'
@@ -94,12 +99,14 @@ export function buildToolCatalog(inputs: {
       deniedTools: server.deniedTools
     })
     const active = server.enabled && authOk && permitted
+    const readOnlyHint = inputs.mcpReadOnlyHint?.(def.name)
     entries.push({
       name: def.name,
       description: def.description ?? '',
       source: 'mcp',
       serverId: server.id,
       serverName: server.name,
+      ...(readOnlyHint === undefined ? {} : { readOnlyHint }),
       modes: ['agent'],
       active,
       reason: active
@@ -152,6 +159,7 @@ export async function computeToolCatalog(
     servers,
     authAllowedServerIds,
     mcpToolLoading: settings.mcpToolLoading ?? 'on-demand',
+    mcpReadOnlyHint: getMcpReadOnlyHint,
     agentToolDefs: await agentBuiltToolDefinitions()
   })
 }

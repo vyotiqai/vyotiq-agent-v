@@ -15,6 +15,7 @@ import {
   MENU_ROW,
   MENU_ROW_ACTIVE,
   MENU_ROW_DANGER,
+  MENU_ROW_DISABLED,
   MENU_ROW_IDLE,
   MENU_ROW_TEXT,
   MENU_SEPARATOR,
@@ -34,6 +35,10 @@ export type ActionMenuItem = {
   separatorBefore?: boolean
   /** Destructive (Delete): drawn in the danger tone. */
   danger?: boolean
+  /** Shown but not choosable; the keyboard steps over it. */
+  disabled?: boolean
+  /** Why it is disabled — the tooltip, and what a screen reader hears. */
+  disabledReason?: string
   onSelect: () => void
 }
 
@@ -64,6 +69,8 @@ export function ActionMenu({
   const triggerRef = useRef<HTMLButtonElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
   const [activeIndex, setActiveIndex] = useState(-1)
+  const selectable = items.flatMap((item, index) => (item.disabled ? [] : [index]))
+  const firstSelectable = selectable[0] ?? -1
 
   const { position, close } = useDropdownMenu({
     open,
@@ -77,10 +84,10 @@ export function ActionMenu({
 
   useEffect(() => {
     if (!open) return
-    setActiveIndex(items.length ? 0 : -1)
+    setActiveIndex(firstSelectable)
     const t = window.setTimeout(() => listRef.current?.focus(), 0)
     return () => window.clearTimeout(t)
-  }, [open, items.length])
+  }, [open, firstSelectable])
 
   useEffect(() => {
     if (!open || activeIndex < 0) return
@@ -92,23 +99,25 @@ export function ActionMenu({
   }, [activeIndex, open])
 
   const onListKeyDown = (e: ReactKeyboardEvent): void => {
-    if (items.length === 0) return
+    if (selectable.length === 0) return
+    // Arrows walk the choosable rows only; a disabled one is never landed on.
+    const at = selectable.indexOf(activeIndex)
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setActiveIndex((i) => (i + 1) % items.length)
+      setActiveIndex(selectable[(at + 1) % selectable.length]!)
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
-      setActiveIndex((i) => (i - 1 + items.length) % items.length)
+      setActiveIndex(selectable[(Math.max(at, 0) - 1 + selectable.length) % selectable.length]!)
     } else if (e.key === 'Home') {
       e.preventDefault()
-      setActiveIndex(0)
+      setActiveIndex(selectable[0]!)
     } else if (e.key === 'End') {
       e.preventDefault()
-      setActiveIndex(items.length - 1)
+      setActiveIndex(selectable[selectable.length - 1]!)
     } else if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       const item = items[activeIndex]
-      if (item) {
+      if (item && !item.disabled) {
         item.onSelect()
         close(true)
       }
@@ -149,13 +158,22 @@ export function ActionMenu({
               type="button"
               role={item.checked != null ? 'menuitemcheckbox' : 'menuitem'}
               aria-checked={item.checked != null ? item.checked : undefined}
+              aria-disabled={item.disabled || undefined}
+              aria-describedby={
+                item.disabled && item.disabledReason ? `${menuId}-reason-${item.id}` : undefined
+              }
+              title={item.disabled ? item.disabledReason : undefined}
+              disabled={item.disabled}
               className={cn(
                 MENU_ROW,
-                item.danger ? MENU_ROW_DANGER : MENU_ROW_TEXT,
-                index === activeIndex ? MENU_ROW_ACTIVE : MENU_ROW_IDLE
+                item.disabled ? MENU_ROW_DISABLED : item.danger ? MENU_ROW_DANGER : MENU_ROW_TEXT,
+                item.disabled ? '' : index === activeIndex ? MENU_ROW_ACTIVE : MENU_ROW_IDLE
               )}
-              onMouseEnter={() => setActiveIndex(index)}
+              onMouseEnter={() => {
+                if (!item.disabled) setActiveIndex(index)
+              }}
               onClick={() => {
+                if (item.disabled) return
                 item.onSelect()
                 close(true)
               }}
@@ -171,6 +189,12 @@ export function ActionMenu({
               ) : null}
               {item.label}
             </button>
+            {/* Outside the button, so it is the row's description and not also part of its name. */}
+            {item.disabled && item.disabledReason ? (
+              <span id={`${menuId}-reason-${item.id}`} hidden>
+                Unavailable: {item.disabledReason}
+              </span>
+            ) : null}
           </li>
         ))}
       </ul>

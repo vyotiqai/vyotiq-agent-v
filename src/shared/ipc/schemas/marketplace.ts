@@ -259,7 +259,8 @@ export const PackageContentsSchema = z.object({
       path: z.string(),
       transport: McpTransportSchema.optional(),
       url: z.string().optional(),
-      command: z.string().optional()
+      command: z.string().optional(),
+      args: z.array(z.string()).optional()
     })
   ),
   skills: z.array(
@@ -495,7 +496,12 @@ export const McpDetectResultSchema = z.object({
   install: MarketplaceInstallRequestSchema.optional(),
   warnings: z.array(z.string()).default([]),
   /** True when an existing server/package with the same id is already configured. */
-  duplicate: z.boolean().default(false)
+  duplicate: z.boolean().default(false),
+  /**
+   * A catalog package that launches the same server — the same URL, or the
+   * same launcher running the same package — so the UI can offer it instead.
+   */
+  catalogMatch: z.object({ id: z.string().min(1), name: z.string().min(1) }).optional()
 })
 export type McpDetectResult = z.infer<typeof McpDetectResultSchema>
 
@@ -540,6 +546,8 @@ export const McpImportExternalResultSchema = z.object({
 export type McpImportExternalResult = z.infer<typeof McpImportExternalResultSchema>
 
 export const McpScanExternalRequestSchema = z.object({
-  paths: z.array(z.string()).optional()
+  paths: z.array(z.string()).optional(),
+  /** A pasted `mcpServers` config, listed in place of the default paths. */
+  json: z.string().optional()
 })
 export type McpScanExternalRequest = z.infer<typeof McpScanExternalRequestSchema>

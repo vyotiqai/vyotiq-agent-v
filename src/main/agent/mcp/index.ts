@@ -957,6 +957,18 @@ export async function refreshMcpServers(servers: McpServer[]): Promise<McpServer
 }
 
 /**
+ * Try again for the servers whose last connect failed, and leave every live
+ * session alone. Refresh tears all of them down, which drops a tool call in
+ * flight on a healthy server to retry one that is not. Binaries are looked up
+ * again because installing the missing one is the usual fix.
+ */
+export async function retryFailedMcpServers(servers: McpServer[]): Promise<McpServerStatus[]> {
+  clearMcpBinaryCache()
+  await syncMcpServers(servers, { forceRetryFailures: true })
+  return getMcpServerStatus(servers)
+}
+
+/**
  * Client that declares the MCP `roots` capability and answers `roots/list` with
  * the active workspace root. Servers that scope themselves via roots (e.g.
  * filesystem) otherwise fall back to spawn cwd or fail — this makes the

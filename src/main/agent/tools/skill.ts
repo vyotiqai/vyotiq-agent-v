@@ -34,9 +34,9 @@ export function missingSkillMessage(
   const reason = describeMissingSkill(skillName, overrides, workspaceRoot)
   switch (reason.kind) {
     case 'disabled':
-      return `Skill "${skillName}" is installed but disabled. Enable "${reason.label}" in Marketplace → Installed (or clear the workspace override) and try again.`
+      return `Skill "${skillName}" is installed but disabled. Enable "${reason.label}" in Extensions (or clear the workspace override) and try again.`
     case 'not_installed':
-      return `Skill "${skillName}" is not installed. Install "${reason.label}" from Marketplace — it is in the catalog, so nothing needs downloading — then try again.`
+      return `Skill "${skillName}" is not installed. Install "${reason.label}" from Extensions — it is in the catalog, so nothing needs downloading — then try again.`
     case 'unknown': {
       const hint =
         reason.suggestions.length > 0

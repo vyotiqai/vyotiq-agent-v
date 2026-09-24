@@ -181,11 +181,118 @@ describe('detectMcpInput git preview clone guardrails', () => {
     expect(result.warnings.join('\n')).toMatch(/scheme not allowed/i)
   })
 
-  it('points npm package detection at Marketplace Install npm', async () => {
+  it('points npm package detection at installing from Registry and trust', async () => {
     const result = await detectMcpInput({ input: '@modelcontextprotocol/server-memory' })
     expect(result.kind).toBe('npm')
-    expect(result.warnings.join('\n')).toMatch(/Marketplace → Install npm/)
+    expect(result.warnings.join('\n')).toMatch(/Registry and trust/)
     expect(result.warnings.join('\n')).not.toMatch(/Advanced/)
+  })
+})
+
+describe('detectMcpInput before the install acknowledgement', () => {
+  beforeEach(() => {
+    setSettings({
+      marketplace: { registryUrl: '', remoteInstallAcked: false },
+      mcpServers: []
+    })
+  })
+
+  it('parses a URL, a package name and a JSON config as they are pasted', async () => {
+    const remote = await detectMcpInput({ input: 'https://mcp.example.com/mcp' })
+    expect(remote).toMatchObject({ kind: 'remote', confidence: 'high' })
+    expect(remote.server?.url).toBe('https://mcp.example.com/mcp')
+
+    const npm = await detectMcpInput({ input: '@modelcontextprotocol/server-memory' })
+    expect(npm.server).toMatchObject({ command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] })
+
+    const json = await detectMcpInput({
+      input: JSON.stringify({ mcpServers: { fs: { command: 'npx', args: ['-y', 'x'] } } })
+    })
+    expect(json).toMatchObject({ kind: 'json', confidence: 'high' })
+  })
+
+  it('still will not clone a git URL', async () => {
+    const result = await detectMcpInput({ input: 'https://github.com/org/repo' })
+    expect(result).toMatchObject({ kind: 'git', confidence: 'low' })
+    expect(result.server).toBeUndefined()
+    expect(result.warnings.join('\n')).toMatch(/Registry and trust/)
+  })
+
+  it('still refuses to add what it parsed', () => {
+    expect(() =>
+      applyDetectedManualMcp({
+        server: {
+          id: 'mcp-remote',
+          name: 'Remote',
+          transport: 'http',
+          url: 'https://mcp.example.com/mcp',
+          enabled: true,
+          source: 'manual'
+        }
+      })
+    ).toThrow(/Acknowledge/i)
+  })
+})
+
+describe('detectMcpInput catalog match', () => {
+  beforeEach(() => {
+    setSettings({
+      marketplace: { registryUrl: '', remoteInstallAcked: true },
+      mcpServers: []
+    })
+  })
+
+  it('names the bundled package that serves the same endpoint', async () => {
+    // The bundled GitHub manifest ends its URL with a slash; a pasted one need not.
+    const result = await detectMcpInput({ input: 'https://api.githubcopilot.com/mcp' })
+    expect(result.catalogMatch).toEqual({ id: 'github', name: 'GitHub' })
+  })
+
+  it('matches a launcher line by the package it runs, whatever the version pin', async () => {
+    const result = await detectMcpInput({ input: 'npx -y @playwright/mcp@1.2.3' })
+    expect(result.catalogMatch?.id).toBe('playwright')
+    const uvx = await detectMcpInput({ input: 'uvx --with "mcp<2" mcp-server-fetch' })
+    expect(uvx.catalogMatch?.id).toBe('fetch')
+  })
+
+  it('does not match a different server on the same host or launcher', async () => {
+    expect((await detectMcpInput({ input: 'https://api.githubcopilot.com/other' })).catalogMatch).toBeUndefined()
+    expect((await detectMcpInput({ input: 'npx -y @scope/unrelated-mcp' })).catalogMatch).toBeUndefined()
+    // Sentry's bundled server is the hosted one; its npm package is a different launch.
+    expect((await detectMcpInput({ input: 'npx -y @sentry/mcp-server@latest' })).catalogMatch).toBeUndefined()
+  })
+})
+
+describe('detectMcpInput names a pasted launcher line', () => {
+  beforeEach(() => {
+    setSettings({
+      marketplace: { registryUrl: '', remoteInstallAcked: true },
+      mcpServers: []
+    })
+  })
+
+  it('by the package it runs, past the runner flags and the version pin', async () => {
+    const result = await detectMcpInput({ input: 'npx -y @sentry/mcp-server@latest' })
+    expect(result.server).toMatchObject({
+      name: '@sentry/mcp-server',
+      command: 'npx',
+      args: ['-y', '@sentry/mcp-server@latest']
+    })
+    expect(result.server?.id).toMatch(/^mcp-sentry-mcp-server-/)
+
+    const uvx = await detectMcpInput({ input: 'uvx --with "mcp<2" mcp-server-fetch' })
+    expect(uvx.server?.name).toBe('mcp-server-fetch')
+  })
+
+  it('never by a flag, whatever the command', async () => {
+    const result = await detectMcpInput({ input: 'node --inspect server-main' })
+    expect(result.server?.name).toBe('server-main')
+  })
+
+  it('keeps the package name for an npm paste, and ids it by the package', async () => {
+    const result = await detectMcpInput({ input: '@modelcontextprotocol/server-memory' })
+    expect(result.server?.name).toBe('@modelcontextprotocol/server-memory')
+    expect(result.server?.id).toMatch(/^mcp-modelcontextprotocol-server-memory-/)
   })
 })
 
@@ -232,6 +339,29 @@ describe('applyDetectedManualMcp', () => {
     ).not.toBe(
       mcpServerDedupeKey({ id: '2', transport: 'http', url: 'https://b.example/mcp' })
     )
+  })
+})
+
+describe('scanExternalMcpConfigs with a pasted config', () => {
+  it('lists every server in it without reading the default paths', async () => {
+    const { scanExternalMcpConfigs } = await import('@main/marketplace/mcpImport')
+    const result = scanExternalMcpConfigs({
+      json: JSON.stringify({
+        mcpServers: {
+          fs: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem'] },
+          docs: { url: 'https://mcp.example.com/mcp' }
+        }
+      })
+    })
+    expect(result.preview.map((s) => s.id).sort()).toEqual(['docs', 'fs'])
+    expect(result.scannedPaths).toEqual([])
+  })
+
+  it('says why a pasted config could not be read', async () => {
+    const { scanExternalMcpConfigs } = await import('@main/marketplace/mcpImport')
+    const result = scanExternalMcpConfigs({ json: '{ not json' })
+    expect(result.preview).toEqual([])
+    expect(result.warnings.length).toBeGreaterThan(0)
   })
 })
 

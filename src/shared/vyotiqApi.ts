@@ -612,7 +612,11 @@ export interface VyotiqApi {
     body?: string
   }) => Promise<IpcResult<GithubIssueCreateResult>>
   mcpStatus: (payload?: { workspacePath?: string | null }) => Promise<IpcResult<McpStatusResult>>
-  mcpRefresh: (payload?: { workspacePath?: string | null }) => Promise<IpcResult<McpStatusResult>>
+  /** `failedOnly` retries the servers that failed to connect and leaves live ones up. */
+  mcpRefresh: (payload?: {
+    workspacePath?: string | null
+    failedOnly?: boolean
+  }) => Promise<IpcResult<McpStatusResult>>
   toolsCatalogGet: (payload?: ToolCatalogRequest) => Promise<IpcResult<ToolCatalogResult>>
   mcpSetAuthToken: (serverId: string, token: string) => Promise<IpcResult<true>>
   mcpClearAuthToken: (serverId: string) => Promise<IpcResult<true>>

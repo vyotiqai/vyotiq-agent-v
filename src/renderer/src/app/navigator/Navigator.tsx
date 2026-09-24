@@ -3,7 +3,7 @@ import type { ActiveRun, NotificationItem, NotificationMutateRequest, RunSummary
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { Icon, type IconName } from '@renderer/lib/icons'
 import { ActionMenu, IconButton, cn } from '@renderer/lib/ui'
-import { SECTION_LABEL, SECTION_LABEL_ACCENT } from '@renderer/lib/utils/layout'
+import { SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { shortcutLabel } from '@renderer/lib/shortcuts'
 import { buildNavigatorSections, type NavSection } from './navigatorModel'
@@ -245,7 +245,7 @@ function TaskSection({
     <section className="mt-3 first:mt-1" aria-labelledby={headingId} data-nav-section={section.key}>
       <h3
         id={headingId}
-        className={cn('flex h-6 items-center gap-1.5 px-2', section.key === 'needs' ? SECTION_LABEL_ACCENT : SECTION_LABEL)}
+        className={cn('flex h-6 items-center gap-1.5 px-2', SECTION_LABEL)}
       >
         {section.label}
         <span className="font-mono font-normal tnum">{section.rows.length}</span>

@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MarketplaceView } from '@renderer/features/marketplace'
 import { DEFAULT_SETTINGS, type Settings } from '@shared/ipc'
 
@@ -13,6 +13,8 @@ beforeEach(() => {
   HTMLDialogElement.prototype.close = vi.fn(function close(this: HTMLDialogElement) {
     this.open = false
   })
+  // jsdom has no layout; selecting a row scrolls it into view.
+  Element.prototype.scrollIntoView = vi.fn()
 })
 
 afterEach(() => {
@@ -52,7 +54,8 @@ const gmailCatalog = {
   featuredRank: 2,
   publisher: 'Google',
   installable: true,
-  bundledPath: 'gmail'
+  bundledPath: 'gmail',
+  auth: 'oauth' as const
 }
 
 /** Shared by the JSX prop and the expectation so the two cannot disagree. */
@@ -78,6 +81,18 @@ const NO_GITHUB_AUTH = {
   userCode: null,
   verificationUri: null,
   error: null
+}
+
+/** Selects an installed row the way a click would, once the list has loaded. */
+async function selectRow(key: string): Promise<void> {
+  const row = await waitFor(() => {
+    const found = Array.from(document.querySelectorAll<HTMLElement>('[data-extension-key]')).find(
+      (li) => li.dataset.extensionKey === key
+    )
+    if (!found) throw new Error(`no row ${key}`)
+    return found
+  })
+  fireEvent.click(within(row).getByRole('button'))
 }
 
 /** Pushed to whatever the wizard subscribed with, to finish a device flow. */
@@ -173,7 +188,7 @@ describe('Connect MCP wizard', () => {
     render(
       <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
     )
-    expect(await screen.findByRole('heading', { name: /^Discover$/i })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: /^Discover/ })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /^Add$/i }))
     expect(await screen.findByRole('dialog', { name: /Connect GitHub/i })).toBeTruthy()
 
@@ -306,7 +321,8 @@ describe('Connect MCP wizard', () => {
           installedAt: new Date().toISOString(),
           packagePath: 'gmail/1.0.0'
         }
-      ]
+      ],
+      mcpServersStatus: [{ id: 'gmail', name: 'Gmail', enabled: true, connected: false, toolCount: 0 }]
     })
     const settings: Settings = {
       ...baseSettings,
@@ -319,7 +335,8 @@ describe('Connect MCP wizard', () => {
           url: 'https://gmailmcp.googleapis.com/mcp/v1',
           enabled: true,
           source: 'marketplace',
-          packageId: 'gmail'
+          packageId: 'gmail',
+          auth: 'oauth'
         }
       ]
     }
@@ -329,8 +346,8 @@ describe('Connect MCP wizard', () => {
         onUpdate={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click((await screen.findAllByRole('tab', { name: /^Manage$/i }))[0]!)
-    fireEvent.click(await screen.findByRole('button', { name: /^Connect$/i }))
+    await selectRow('mcp:gmail')
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }))
     expect(await screen.findByRole('dialog', { name: /Connect Gmail/i })).toBeTruthy()
     expect(screen.getByLabelText('OAuth redirect URI')).toHaveProperty(
       'value',
@@ -384,7 +401,8 @@ describe('Connect MCP wizard', () => {
           url: 'https://gmailmcp.googleapis.com/mcp/v1',
           enabled: true,
           source: 'marketplace',
-          packageId: 'gmail'
+          packageId: 'gmail',
+          auth: 'oauth'
         }
       ]
     }
@@ -394,11 +412,8 @@ describe('Connect MCP wizard', () => {
         onUpdate={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click((await screen.findAllByRole('tab', { name: /^Manage$/i }))[0]!)
-    await waitFor(() => {
-      expect(window.vyotiq.mcpStatus).toHaveBeenCalled()
-    })
-    fireEvent.click(await screen.findByRole('button', { name: /^Connect$/i }))
+    await selectRow('mcp:gmail')
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }))
     expect(await screen.findByRole('dialog', { name: /Connect Gmail/i })).toBeTruthy()
     expect(screen.queryByLabelText(/Google Cloud client ID/i)).toBeNull()
     expect(screen.getByRole('button', { name: /^Sign in$/i })).toBeTruthy()
@@ -601,7 +616,7 @@ describe('GitHub MCP without registering an OAuth app', () => {
     // A token exists and the server still wants one: only the borrowed
     // sign-in can produce that pairing. Offering it again would loop the user
     // through "already signed in" → Connect → the same 401. Reached the way
-    // the user would: the installed card, not a fresh install.
+    // the user would: the installed row's detail, not a fresh install.
     mockVyotiq({
       serversAfterInstall: [oauthClientServer],
       githubAuth: { ...NO_GITHUB_AUTH, ghAuthenticated: true, hasAppToken: true },
@@ -638,12 +653,13 @@ describe('GitHub MCP without registering an OAuth app', () => {
       />
     )
 
-    // The installed card offers the way back in — it used to be a dead chip.
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign in$/i }))
-    expect(await screen.findByRole('dialog', { name: /Connect GitHub/i })).toBeTruthy()
+    // The detail offers the way back in — it used to be a dead chip.
+    await selectRow('mcp:github')
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with GitHub' }))
+    const dialog = await screen.findByRole('dialog', { name: /Connect GitHub/i })
 
-    expect(screen.queryByRole('button', { name: /Sign in with GitHub/i })).toBeNull()
-    expect(await screen.findByRole('button', { name: /^Continue$/i })).toBeTruthy()
+    expect(within(dialog).queryByRole('button', { name: /Sign in with GitHub/i })).toBeNull()
+    expect(await within(dialog).findByRole('button', { name: /^Continue$/i })).toBeTruthy()
   })
 
   it('still offers registering your own OAuth app', async () => {

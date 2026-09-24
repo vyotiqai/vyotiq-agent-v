@@ -2518,7 +2518,7 @@ function App() {
         </ErrorBoundary>
       ) : view === 'marketplace' ? (
         <ErrorBoundary
-          title="Marketplace couldn't render"
+          title="Extensions couldn't render"
           resetKey={`${marketplaceFocusServerId ?? ''}:${marketplaceFocusSkillPath ?? ''}:${marketplaceFocusRulePath ?? ''}:marketplace`}
         >
           <Suspense fallback={<ViewSuspenseFallback />}>

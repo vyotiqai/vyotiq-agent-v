@@ -148,8 +148,8 @@ function notifyMcpUnavailable(
   const notice = command.description?.includes(' — ')
     ? command.description.split(' — ').slice(1).join(' — ')
     : command.availability === 'needs_auth'
-      ? 'MCP server needs authentication — open Marketplace to connect.'
-      : 'MCP server not connected — open Marketplace to reconnect.'
+      ? 'MCP server needs authentication — open Extensions to connect.'
+      : 'MCP server not connected — open Extensions to reconnect.'
   handlers?.onNotice?.(notice)
   handlers?.onOpenMarketplace?.(command.mcpServerId)
 }

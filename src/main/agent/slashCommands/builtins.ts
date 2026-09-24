@@ -24,8 +24,8 @@ export const BUILTIN_COMMANDS: SlashCommandDescriptor[] = [
   {
     id: 'builtin:marketplace',
     trigger: 'marketplace',
-    label: 'Open Marketplace',
-    description: 'Browse and manage skills, MCP servers, and packages',
+    label: 'Open Extensions',
+    description: 'Browse and manage MCP servers, skills, rules and packages',
     kind: 'builtin',
     group: 'App',
     availability: 'ready'

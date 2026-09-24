@@ -144,4 +144,24 @@ describe('buildToolCatalog', () => {
     const eager = buildToolCatalog({ ...inputs, mcpToolLoading: 'eager' })
     expect(eager.servers.every((s) => s.loading === 'every-step')).toBe(true)
   })
+
+  it('carries what each MCP server declared as read-only, and tracks it in the fingerprint', () => {
+    const hints: Record<string, boolean> = {
+      mcp__gh__get_file_contents: true,
+      mcp__gh__list_commits: false
+    }
+    const result = buildToolCatalog({ ...inputs, mcpReadOnlyHint: (name) => hints[name] })
+    const byName = new Map(result.entries.map((e) => [e.name, e]))
+    expect(byName.get('mcp__gh__get_file_contents')?.readOnlyHint).toBe(true)
+    expect(byName.get('mcp__gh__list_commits')?.readOnlyHint).toBe(false)
+    // A tool whose session never reported a hint carries no claim at all.
+    expect(byName.get('mcp__ctx__expand_chunk')).not.toHaveProperty('readOnlyHint')
+    expect(result.entries.filter((e) => e.source === 'builtin').some((e) => 'readOnlyHint' in e)).toBe(false)
+
+    const flipped = buildToolCatalog({
+      ...inputs,
+      mcpReadOnlyHint: (name) => (name === 'mcp__gh__list_commits' ? true : hints[name])
+    })
+    expect(flipped.fingerprint).not.toBe(result.fingerprint)
+  })
 })
