@@ -35,8 +35,9 @@ export type InspectorTabState = {
  * the side rail, the dock's tab bar and its quick-launch icons, and the
  * immersive mode.
  *
- * It draws no hairline of its own: docked, the resize handle beside it is the
- * line (one line, which a drag lights up); expanded, the work area's edge is.
+ * Docked, it draws the hairline on its left, which the resize handle over it
+ * lights up on hover and drag; expanded, the work area's edge is the only
+ * line.
  */
 export function Inspector({
   tab,
@@ -78,7 +79,10 @@ export function Inspector({
     <section
       ref={sectionRef}
       aria-label="Inspector"
-      className={cn('flex min-h-0 min-w-0 flex-col overflow-hidden bg-bg', expanded ? 'flex-1' : 'shrink-0')}
+      className={cn(
+        'flex min-h-0 min-w-0 flex-col overflow-hidden bg-bg',
+        expanded ? 'flex-1' : 'shrink-0 border-l border-border'
+      )}
       style={style}
       data-inspector
       data-right-dock

@@ -386,6 +386,8 @@ function AppShellInner(props: AppShellProps) {
               max={SIDEBAR_WIDTH_MAX_PX}
               edge="end"
               onChange={setNavigatorWidthPx}
+              // Main's border is the line; the handle lights it up.
+              hairline
             />
           </>
         ) : null}

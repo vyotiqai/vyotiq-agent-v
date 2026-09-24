@@ -1449,9 +1449,8 @@ const runGoal = useRunGoal({
                 onChange={(next) => {
                   setDockWidthPx(next)
                 }}
-                // One pixel in the row: the handle is the hairline between the
-                // record and the inspector, so both panes' rules meet it.
-                className="-mx-[2.5px]"
+                // The inspector's border is the line; the handle lights it up.
+                hairline
               />
             )}
             <Inspector
