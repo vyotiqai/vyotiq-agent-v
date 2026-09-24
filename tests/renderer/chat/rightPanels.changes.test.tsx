@@ -435,6 +435,35 @@ describe('ChangesPanel', () => {
     })
   })
 
+  it('drafts the commit message while Changes is on screen, and opens it without asking again', async () => {
+    renderGit()
+    await screen.findByText('a.ts')
+    const line = await screen.findByRole('button', { name: 'feat: improve generated commit messages' }, { timeout: 3000 })
+    expect(line.hasAttribute('data-drafted-commit-message')).toBe(true)
+    expect(line.className).toContain('focus-visible:vy-focus-ring')
+    expect(window.vyotiq.gitGenerateCommitMessage).toHaveBeenCalledTimes(1)
+    expect(window.vyotiq.gitGenerateCommitMessage).toHaveBeenCalledWith({ workspacePath: '/ws', mode: 'all' })
+
+    fireEvent.click(line)
+    const input = (await screen.findByRole('textbox', { name: /Commit message/i })) as HTMLInputElement
+    expect(input.value).toBe('feat: improve generated commit messages')
+    expect(window.vyotiq.gitGenerateCommitMessage).toHaveBeenCalledTimes(1)
+
+    vi.mocked(window.vyotiq.gitGenerateCommitMessage).mockResolvedValueOnce({
+      ok: true,
+      data: { message: 'feat(git): draft the message once per change set', source: 'agent' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Rewrite' }))
+    await waitFor(() => expect(input.value).toBe('feat(git): draft the message once per change set'))
+    expect(window.vyotiq.gitGenerateCommitMessage).toHaveBeenLastCalledWith({ workspacePath: '/ws', mode: 'all', force: true })
+  })
+
+  it('asks for no message while Changes is not on screen', async () => {
+    renderGit({ active: false })
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    expect(window.vyotiq.gitGenerateCommitMessage).not.toHaveBeenCalled()
+  })
+
   it('says why the agent wrote no message, and puts a plain one in its place', async () => {
     vi.mocked(window.vyotiq.gitGenerateCommitMessage).mockResolvedValueOnce({
       ok: true,

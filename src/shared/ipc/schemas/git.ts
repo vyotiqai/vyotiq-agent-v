@@ -73,13 +73,17 @@ export type GitStatusResult = z.infer<typeof GitStatusResultSchema>
 
 export const GitGenerateCommitMessageRequestSchema = z.object({
   workspacePath: z.string().min(1),
-  mode: z.enum(['all', 'staged']).optional().default('all')
+  mode: z.enum(['all', 'staged']).optional().default('all'),
+  /** Write a new message even when this exact diff already has one. */
+  force: z.boolean().optional()
 })
 
 export const GitGenerateCommitMessageResultSchema = z.object({
   message: z.string().min(1).nullable(),
   source: z.enum(['agent', 'fallback']),
-  reason: z.string().nullish()
+  reason: z.string().nullish(),
+  /** The message already written for this exact diff — no model call made. */
+  reused: z.boolean().optional()
 })
 export type GitGenerateCommitMessageResult = z.infer<
   typeof GitGenerateCommitMessageResultSchema

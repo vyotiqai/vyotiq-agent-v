@@ -521,6 +521,9 @@ export const ChangesPanel = memo(function ChangesPanel({
   }, [active, chrome, displayScope, refreshCommits])
 
   const status: GitStatus | null = chrome.status
+  /** The message drafted for a change set, by that set's fingerprint. */
+  const [drafted, setDrafted] = useState<{ fingerprint: string; message: string } | null>(null)
+  const draftedMessageRef = useRef<string | null>(null)
   const gitFiles = useMemo(() => status?.files ?? [], [status?.files])
 
   useEffect(() => {
@@ -670,15 +673,58 @@ export const ChangesPanel = memo(function ChangesPanel({
     setComposing(false)
   }, [])
 
+  /**
+   * Ask for a message: the one already written for these exact changes comes
+   * back from main without a model call; `force` (Rewrite) writes a new one.
+   */
+  const writeMessage = useCallback(
+    (force: boolean) => {
+      const fallback = defaultCommitMessage(visibleGitFiles, visibleGitFiles.length)
+      if (!workspacePath) return
+      const sequence = ++messageGenerationSeqRef.current
+      messageEditedRef.current = false
+      setGenerationNotice(null)
+      setMessageGenerating(true)
+      void window.vyotiq
+        .gitGenerateCommitMessage({ workspacePath, mode: commitMode, ...(force ? { force: true } : {}) })
+        .then((result) => {
+          if (sequence !== messageGenerationSeqRef.current || messageEditedRef.current) return
+          if (result.ok && result.data.source === 'agent' && result.data.message) {
+            setMessage(result.data.message)
+            setGenerationNotice(null)
+            if (force) setDrafted((prev) => (prev ? { ...prev, message: result.data.message! } : prev))
+          } else {
+            setMessage((current) => current || fallback)
+            setGenerationNotice(result.ok ? (result.data.reason ?? 'Generation failed') : 'Generation failed')
+          }
+        })
+        .catch(() => {
+          if (sequence !== messageGenerationSeqRef.current || messageEditedRef.current) return
+          setMessage((current) => current || fallback)
+          setGenerationNotice('Generation failed')
+        })
+        .finally(() => {
+          if (sequence !== messageGenerationSeqRef.current) return
+          setMessageGenerating(false)
+        })
+    },
+    [commitMode, visibleGitFiles, workspacePath]
+  )
+
   const openCompose = useCallback((intent: 'commit' | 'push' | 'pr' = 'commit') => {
     const fallback = defaultCommitMessage(visibleGitFiles, visibleGitFiles.length)
     const sequence = ++messageGenerationSeqRef.current
     messageEditedRef.current = false
     setCommitIntent(intent)
-    setMessage(workspacePath ? '' : fallback)
     setComposing(true)
     setMessageGenerating(false)
     setGenerationNotice(null)
+    // Already drafted for these changes: that is the message, no second ask.
+    if (draftedMessageRef.current) {
+      setMessage(draftedMessageRef.current)
+      return
+    }
+    setMessage(workspacePath ? '' : fallback)
 
     if (!workspacePath) return
     setMessageGenerating(true)
@@ -1144,6 +1190,40 @@ export const ChangesPanel = memo(function ChangesPanel({
     (commitMode === 'staged' ? gitFiles.some((f) => f.staged) : gitFiles.length > 0)
   const pendingTask = unresolvedTask.length > 0 && Boolean(onKeepAllWrites || onDiscardAllWrites)
   const showFooter = Boolean(workspacePath) && (pendingTask || canCommit || composing)
+
+  // The mockup's commit line: a message the agent wrote for these changes,
+  // drafted once while Changes is on screen over uncommitted work (a
+  // stopped run). Main keeps it by the exact diff, so looking again — here,
+  // on Commit…, after a restart — costs nothing until the changes differ.
+  const draftFingerprint = canCommit
+    ? `${commitMode}|${gitFiles
+        .map((f) => `${f.path}:${f.status}:${f.staged ? 1 : 0}${f.unstaged ? 1 : 0}:${f.added}/${f.removed}`)
+        .join(',')}`
+    : ''
+  const [drafting, setDrafting] = useState<string | null>(null)
+  const draftAskedRef = useRef('')
+  useEffect(() => {
+    if (!active || running || composing || !workspacePath || !draftFingerprint) return
+    if (draftAskedRef.current === draftFingerprint) return
+    const fingerprint = draftFingerprint
+    // Let a burst of status updates settle into one change set first.
+    const timer = window.setTimeout(() => {
+      draftAskedRef.current = fingerprint
+      setDrafting(fingerprint)
+      void window.vyotiq
+        ?.gitGenerateCommitMessage({ workspacePath, mode: commitMode })
+        .then((res) => {
+          if (res.ok && res.data.source === 'agent' && res.data.message) {
+            setDrafted({ fingerprint, message: res.data.message })
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => setDrafting((current) => (current === fingerprint ? null : current)))
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [active, running, composing, workspacePath, draftFingerprint, commitMode])
+  const draftedMessage = drafted && drafted.fingerprint === draftFingerprint ? drafted.message : null
+  draftedMessageRef.current = draftedMessage
   const commitLabel =
     commitIntent === 'push' ? 'Commit & Push' : commitIntent === 'pr' ? 'Commit & Create PR' : 'Commit'
   const commitBusy = chrome.busy || Boolean(resolveBusy) || messageGenerating
@@ -1872,6 +1952,18 @@ export const ChangesPanel = memo(function ChangesPanel({
                 <Button size="sm" variant="ghost" onClick={cancelCompose}>
                   Cancel
                 </Button>
+                {workspacePath ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon="retry"
+                    disabled={messageGenerating}
+                    title="Ask the agent for a new message for these changes"
+                    onClick={() => writeMessage(true)}
+                  >
+                    Rewrite
+                  </Button>
+                ) : null}
                 <span className="flex-1" />
                 <Button
                   size="sm"
@@ -1887,6 +1979,24 @@ export const ChangesPanel = memo(function ChangesPanel({
               </div>
             </div>
           ) : (
+            <div className="space-y-2.5">
+              {canCommit && (draftedMessage || drafting === draftFingerprint) ? (
+                draftedMessage ? (
+                  <button
+                    type="button"
+                    className="block w-full truncate rounded-sm text-left font-mono text-xs text-fg vy-transition hover:text-fg-strong focus-visible:vy-focus-ring"
+                    title={`${draftedMessage} — written by the agent; click to edit`}
+                    data-drafted-commit-message
+                    onClick={() => openCompose('commit')}
+                  >
+                    {draftedMessage}
+                  </button>
+                ) : (
+                  <p className="m-0 truncate text-xs text-tertiary" aria-live="polite">
+                    Writing a commit message…
+                  </p>
+                )
+              ) : null}
             <div className="flex items-center gap-1.5">
               {pendingTask && onDiscardAllWrites ? (
                 <Button
@@ -1944,6 +2054,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                   )}
                 />
               ) : null}
+            </div>
             </div>
           )}
         </div>

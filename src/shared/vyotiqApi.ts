@@ -413,6 +413,8 @@ export interface VyotiqApi {
   gitGenerateCommitMessage: (payload: {
     workspacePath: string
     mode?: 'all' | 'staged'
+    /** Write a new message even when this exact diff already has one. */
+    force?: boolean
   }) => Promise<IpcResult<GitGenerateCommitMessageResult>>
   gitCommit: (
     workspacePath: string,

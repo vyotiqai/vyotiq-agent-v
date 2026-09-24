@@ -2825,7 +2825,7 @@ export function registerIpc(): void {
     try {
       const req = GitGenerateCommitMessageRequestSchema.parse(raw)
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
-      return ok(await generateCommitMessage(req.workspacePath, req.mode))
+      return ok(await generateCommitMessage(req.workspacePath, req.mode, req.force === true))
     } catch (err) {
       return failFrom(err, IPC.gitGenerateCommitMessage)
     }
