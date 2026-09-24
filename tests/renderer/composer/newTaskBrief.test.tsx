@@ -7,10 +7,12 @@ import { Composer } from '@renderer/features/chat/components/composer'
 import { DEFAULT_SETTINGS, DEFAULT_TOOL_APPROVAL, emptySecretStatus } from '@shared/ipc'
 import type { EffectiveChatSettings } from '@shared/effectiveSettings'
 import { resetWorkspaceHotUiStoreForTests } from '@renderer/lib/hooks/workspaceHotUiStore'
+import { briefStateFor, resetTaskDraftStoreForTests, setBriefState } from '@renderer/lib/drafts/taskDraftStore'
 
 afterEach(() => {
   cleanup()
   resetWorkspaceHotUiStoreForTests()
+  resetTaskDraftStoreForTests()
 })
 
 const chatSettings = {
@@ -173,6 +175,90 @@ describe('New task brief', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start task' }))
     await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
     expect(vi.mocked(props.onSend).mock.calls[0]![3]).toBeUndefined()
+  })
+
+  it('saves the brief as a draft — text, checks and all — and starts over empty', async () => {
+    const saveTaskDraft = vi.fn(async (payload: { brief: string; doneWhen: string[] }) => ({
+      ok: true as const,
+      data: {
+        id: 'd0000000-0000-4000-8000-000000000001',
+        brief: payload.brief,
+        doneWhen: payload.doneWhen,
+        createdAt: '2026-09-24T10:00:00Z',
+        updatedAt: '2026-09-24T10:00:00Z'
+      }
+    }))
+    window.vyotiq.saveTaskDraft = saveTaskDraft as unknown as typeof window.vyotiq.saveTaskDraft
+    renderBrief()
+    const save = screen.getByRole('button', { name: 'Save as draft' }) as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    typeBrief('Fix the updater swap')
+    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
+    const check = screen.getByRole('textbox', { name: 'New check' })
+    fireEvent.change(check, { target: { value: 'Suite passes' } })
+    fireEvent.keyDown(check, { key: 'Enter' })
+    fireEvent.change(screen.getByRole('textbox', { name: 'New check' }), { target: { value: 'Half typed' } })
+    // A disabled button carries its reason in a wrapper, so the enabled one is a new element.
+    const enabled = screen.getByRole('button', { name: 'Save as draft' }) as HTMLButtonElement
+    expect(enabled.disabled).toBe(false)
+
+    fireEvent.click(enabled)
+    await waitFor(() => expect(saveTaskDraft).toHaveBeenCalledTimes(1))
+    expect(saveTaskDraft).toHaveBeenCalledWith({
+      workspacePath: '/ws/app',
+      brief: 'Fix the updater swap',
+      doneWhen: ['Suite passes', 'Half typed'],
+      attachments: { images: [], files: [], nativeFiles: [], audio: [] }
+    })
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Brief' }).textContent).toBe(''))
+    expect(screen.queryByRole('list', { name: 'Done when' })).toBeNull()
+    expect(screen.queryByRole('textbox', { name: 'New check' })).toBeNull()
+    expect(briefStateFor('/ws/app')).toEqual({ draftId: null, checks: [] })
+  })
+
+  it('keeps an emptied check row in place until a press on a button is over', async () => {
+    renderBrief()
+    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
+    const check = screen.getByRole('textbox', { name: 'New check' })
+    fireEvent.change(check, { target: { value: 'Lint passes' } })
+    fireEvent.keyDown(check, { key: 'Enter' })
+    // A press on Start task: pointer down, the empty row loses focus…
+    fireEvent.pointerDown(document.body)
+    fireEvent.blur(screen.getByRole('textbox', { name: 'New check' }))
+    // …and stays put until the press is over, so the button does not move under it.
+    expect(screen.getByRole('textbox', { name: 'New check' })).toBeTruthy()
+    fireEvent.pointerUp(document.body)
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'New check' })).toBeNull())
+    // Without a press (Tab away), it folds at once.
+    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
+    fireEvent.blur(screen.getByRole('textbox', { name: 'New check' }))
+    expect(screen.queryByRole('textbox', { name: 'New check' })).toBeNull()
+  })
+
+  it('keeps its checks when the page is left and opened again', () => {
+    const first = renderBrief()
+    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
+    const check = screen.getByRole('textbox', { name: 'New check' })
+    fireEvent.change(check, { target: { value: 'Lint passes' } })
+    fireEvent.keyDown(check, { key: 'Enter' })
+    first.unmount()
+    renderBrief()
+    expect(within(screen.getByRole('list', { name: 'Done when' })).getByText('Lint passes')).toBeTruthy()
+  })
+
+  it('continues a draft: Update draft saves over it, and starting spends it', async () => {
+    setBriefState('/ws/app', { draftId: 'd0000000-0000-4000-8000-000000000002', checks: ['From the draft'] })
+    const { props } = renderBrief()
+    expect(screen.getByRole('button', { name: 'Update draft' })).toBeTruthy()
+    expect(within(screen.getByRole('list', { name: 'Done when' })).getByText('From the draft')).toBeTruthy()
+    typeBrief('Pick up where I left off')
+    fireEvent.click(screen.getByRole('button', { name: 'Start task' }))
+    await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(props.onSend).mock.calls[0]![3]).toEqual({
+      doneWhen: ['From the draft'],
+      draftId: 'd0000000-0000-4000-8000-000000000002'
+    })
+    await waitFor(() => expect(briefStateFor('/ws/app')).toEqual({ draftId: null, checks: [] }))
   })
 
   it('moves the task to another workspace, brief and all', async () => {

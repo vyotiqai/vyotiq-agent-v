@@ -833,9 +833,18 @@ export const ChatStartRequestSchema = z
      * against them: they are its first checks (source `brief`) and its
      * contract's Done when.
      */
-    doneWhen: z.array(z.string().trim().min(1).max(500)).max(20).optional()
+    doneWhen: z.array(z.string().trim().min(1).max(500)).max(20).optional(),
+    /** The draft this new task was started from — removed once the task exists. */
+    draftId: z.string().regex(/^[a-zA-Z0-9-]{8,64}$/).optional()
   })
   .superRefine((val, ctx) => {
+    if (val.draftId && val.runId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'draftId belongs to a new task',
+        path: ['draftId']
+      })
+    }
     if (val.doneWhen?.length && val.runId) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -2200,6 +2209,8 @@ export type ComposerSendExtras = {
   nativeFiles?: AttachedNativeFile[]
   /** A new task's done-when checks, from its brief. Ignored once the task has started. */
   doneWhen?: string[]
+  /** The draft the brief continues: main removes it once the task exists. */
+  draftId?: string
 }
 
 export function buildUserContent(

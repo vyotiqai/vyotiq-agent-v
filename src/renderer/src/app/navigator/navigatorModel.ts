@@ -246,7 +246,12 @@ export function taskHeaderState(input: {
 }
 
 /** "3m", "2h", "1d" — `now` for a future or unreadable time rather than nothing. */
-function ageText(iso: string, now: number): string {
+/** How long ago, as a row's meta says it — for rows built outside the sections (drafts). */
+export function ageFromNow(iso: string): string {
+  return ageText(iso, Date.now())
+}
+
+export function ageText(iso: string, now: number): string {
   return relativeTime(iso, now) || 'now'
 }
 

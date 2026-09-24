@@ -115,6 +115,9 @@ import type {
   WorkspacesState,
   WorkspaceUiState,
   ComposerAttachmentsClearRequest,
+  TaskDraft,
+  TaskDraftSaveRequest,
+  TaskDraftsListResult,
   ComposerAttachmentsGetResult,
   ComposerAttachmentsSetRequest,
   WorkspaceFileListRequest,
@@ -194,6 +197,12 @@ export interface VyotiqApi {
    * whenever no project folder is open, so a task always has somewhere to run.
    */
   getHomeWorkspacePath: () => Promise<IpcResult<string>>
+  /** New task briefs put aside with Save as draft, newest first. */
+  listTaskDrafts: (workspacePath: string) => Promise<IpcResult<TaskDraftsListResult>>
+  /** Save a draft, or update the one named by `id`. */
+  saveTaskDraft: (payload: TaskDraftSaveRequest) => Promise<IpcResult<TaskDraft>>
+  /** True when there was a draft to remove. */
+  deleteTaskDraft: (workspacePath: string, id: string) => Promise<IpcResult<boolean>>
   addWorkspace: (path?: string) => Promise<IpcResult<WorkspacesState>>
   removeWorkspace: (
     path: string,

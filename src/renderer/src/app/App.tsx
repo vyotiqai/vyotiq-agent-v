@@ -60,8 +60,11 @@ import {
 } from '@renderer/lib/hooks/offlineQueueStore'
 import {
   clearComposerAttachments,
-  composerAttachmentKey
+  composerAttachmentKey,
+  getComposerAttachments,
+  setComposerAttachments
 } from '@renderer/lib/hooks/composerAttachmentStore'
+import { getWorkspaceHotUi, resolveHotComposerDraft } from '@renderer/lib/hooks/workspaceHotUiStore'
 import { mergeLiveInstanceRuns } from './mergeLiveInstanceRuns'
 import type { SlashClientHandlers } from '../features/chat/components/composer/slashCommandExecute'
 import { formatLoopStatusLine, loopUsageMessage, parseLoopCommand } from '@shared/goalRuntime'
@@ -71,6 +74,16 @@ import type {
 } from '@renderer/lib/hooks/createChatStreamController'
 import { rewoundToastText, useRewindDialog } from '@renderer/features/task/RewindDialog'
 import { needsSetup, setupRecents, setupStartingMode, setupWorkspace } from '@renderer/features/setup/setupModel'
+import {
+  briefStateFor,
+  deleteTaskDraftFor,
+  draftTitle,
+  saveTaskDraftFor,
+  setBriefState,
+  useBriefState,
+  useTaskDrafts
+} from '@renderer/lib/drafts/taskDraftStore'
+import type { TaskDraft } from '@shared/ipc'
 
 /** Full-screen secondary views are code-split; they parse on first open, not at boot. */
 const SettingsView = lazy(() =>
@@ -986,6 +999,8 @@ function App() {
       setComposerDraftForPane(workspacePath, runId, '')
       const attKey = composerAttachmentKey(workspacePath, runId)
       if (attKey) clearComposerAttachments(attKey)
+      // A new task started from the brief: its checks and draft are spent.
+      if (!runId) setBriefState(workspacePath, null)
     }
     return ok
   }, [setComposerDraftForPane])
@@ -2392,6 +2407,86 @@ function App() {
     [onNewSessionInWorkspace, settings.toolApproval, update]
   )
 
+  // Drafts of the open workspaces. A new task (the count moving) reads them
+  // again: main removes the draft a task was started from.
+  const taskDrafts = useTaskDrafts(openWorkspaces, taskCount)
+  // The draft New task is continuing, while New task is what is on screen.
+  const newTaskWorkspace = focusedWorkspacePath ?? activeWorkspace
+  const continuedDraftId = useBriefState(newTaskWorkspace).draftId
+  const openDraft =
+    view === 'chat' && !focusedRunId && newTaskWorkspace && continuedDraftId
+      ? { workspacePath: newTaskWorkspace, draftId: continuedDraftId }
+      : null
+
+  /** Continue a draft on New task — after asking, when that page holds unsaved work. */
+  const openTaskDraft = useCallback(
+    async (path: string, draft: TaskDraft): Promise<void> => {
+      const current = briefStateFor(path)
+      if (current.draftId !== draft.id) {
+        const text = resolveHotComposerDraft(getWorkspaceHotUi(path), null)
+        const key = composerAttachmentKey(path, null)
+        const attached = key ? getComposerAttachments(key) : null
+        const unsaved =
+          text.trim().length > 0 ||
+          current.checks.length > 0 ||
+          (attached != null &&
+            attached.images.length + attached.files.length + attached.nativeFiles.length + attached.audio.length > 0)
+        if (unsaved) {
+          const replace = await confirm(
+            'What is on New task now isn’t saved. Opening the draft replaces it.',
+            { title: `Open “${draftTitle(draft)}”?`, confirmLabel: 'Open draft' }
+          )
+          if (!replace) return
+        }
+      }
+      setBriefState(path, { draftId: draft.id, checks: draft.doneWhen })
+      setComposerDraftForPane(path, null, draft.brief)
+      const key = composerAttachmentKey(path, null)
+      if (key) {
+        setComposerAttachments(key, {
+          images: draft.attachments?.images ?? [],
+          files: draft.attachments?.files ?? [],
+          nativeFiles: draft.attachments?.nativeFiles ?? [],
+          audio: draft.attachments?.audio ?? []
+        })
+      }
+      // The text lands again once the workspace switch settles (as Home's does).
+      onNewSessionInWorkspace(path, draft.brief)
+    },
+    [confirm, onNewSessionInWorkspace, setComposerDraftForPane]
+  )
+
+  const deleteTaskDraft = useCallback(async (path: string, draft: TaskDraft): Promise<void> => {
+    const res = await deleteTaskDraftFor(path, draft.id)
+    if (!res.ok) {
+      pushToast(`Couldn’t delete the draft: ${res.error}`, 'error')
+      return
+    }
+    pushToast('Draft deleted', {
+      detail: draftTitle(draft),
+      icon: 'trash',
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          void saveTaskDraftFor({
+            workspacePath: path,
+            brief: draft.brief,
+            doneWhen: draft.doneWhen,
+            ...(draft.attachments ? { attachments: draft.attachments } : {})
+          })
+        }
+      }
+    })
+  }, [])
+
+  const draftActions = useMemo(
+    () => ({
+      onOpen: (path: string, draft: TaskDraft) => void openTaskDraft(path, draft),
+      onDelete: (path: string, draft: TaskDraft) => void deleteTaskDraft(path, draft)
+    }),
+    [openTaskDraft, deleteTaskDraft]
+  )
+
   const chatError = chat.error
 
   const runsByWorkspacePath = useMemo(
@@ -2513,6 +2608,7 @@ function App() {
       view={view}
       workspacePath={activeWorkspace}
       firstRun={view === 'home' && showSetup ? { workspace: setupChosenWorkspace } : null}
+      drafts={{ items: taskDrafts, actions: draftActions, open: openDraft }}
       onOpenSettings={() => {
         setView('settings')
       }}

@@ -32,7 +32,7 @@ import { SETTINGS_SEARCH_INDEX, revealSettingsFieldWhenMounted } from '@renderer
 import { useUpdaterState } from '@renderer/features/updates/updaterStore'
 import { WhatsNewModal } from '@renderer/features/whats-new/WhatsNewModal'
 import { TitleBar } from './TitleBar'
-import { FirstRunNavigator, Navigator, type NavigatorPlace } from './navigator/Navigator'
+import { FirstRunNavigator, Navigator, type NavigatorPlace, type NavigatorProps } from './navigator/Navigator'
 import { requestUpdatePanel } from './navigator/UpdateChip'
 import { buildNavigatorSections, type NavRow } from './navigator/navigatorModel'
 import { useNavigatorScope } from './navigator/useNavigatorScope'
@@ -101,6 +101,8 @@ export type AppShellProps = {
    * chosen in Set up, if one is.
    */
   firstRun?: { workspace: string | null } | null
+  /** New task briefs put aside, for the navigator's Drafts group. */
+  drafts?: NavigatorProps['drafts']
 }
 
 function placeOf(view: ShellView): NavigatorPlace {
@@ -395,6 +397,7 @@ function AppShellInner(props: AppShellProps) {
         onTogglePin: props.onTogglePinnedRun
       }}
       pinnedKeys={pinnedKeys}
+      drafts={props.drafts}
       notifications={{
         items: notifications.items,
         unreadCount: notifications.unreadCount,

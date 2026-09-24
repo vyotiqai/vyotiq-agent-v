@@ -1,4 +1,6 @@
 import { useCallback, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
+import type { TaskDraft } from '@shared/ipc'
+import { NavigatorDraftRow, type NavigatorDraftActions } from './NavigatorDraftRow'
 import type { ActiveRun, NotificationItem, NotificationMutateRequest, RunSummary } from '@shared/ipc'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { Icon, type IconName } from '@renderer/lib/icons'
@@ -54,6 +56,13 @@ export type NavigatorProps = {
     onOpenSettings: () => void
   }
   widthPx: number
+  /** New task briefs put aside, and what their rows can do. */
+  drafts?: {
+    items: ReadonlyArray<{ workspacePath: string; draft: TaskDraft }>
+    actions: NavigatorDraftActions
+    /** The draft New task is continuing, while it is on screen. */
+    open?: { workspacePath: string; draftId: string } | null
+  }
 }
 
 /**
@@ -97,6 +106,16 @@ export function Navigator(props: NavigatorProps) {
     return ids
   }, [props.notifications.items])
 
+  // Drafts, scoped like tasks: the workspace the navigator is filtered to, or all.
+  const drafts = useMemo(
+    () =>
+      (props.drafts?.items ?? []).filter(
+        ({ workspacePath }) =>
+          openPaths.some((path) => workspacePathsEqual(path, workspacePath)) &&
+          (!scopePath || workspacePathsEqual(scopePath, workspacePath))
+      ),
+    [props.drafts?.items, openPaths, scopePath]
+  )
   const sections = useMemo(
     () =>
       buildNavigatorSections({
@@ -209,15 +228,44 @@ export function Navigator(props: NavigatorProps) {
               />
             </p>
           ))}
-        {!hasWorkspace || sections.length === 0 ? (
+        {!hasWorkspace || (sections.length === 0 && drafts.length === 0) ? (
           <p className="px-2 pt-2 text-xs leading-[18px] text-tertiary">
             Tasks you start show up here, grouped by what they need from you.
           </p>
         ) : (
-          sections.map((section) => (
+          // Drafts sit just above Done: not started, so after everything live.
+          [
+            ...sections.filter((section) => section.key !== 'done').map((section) => ({ kind: 'tasks' as const, section })),
+            ...(drafts.length > 0 ? [{ kind: 'drafts' as const }] : []),
+            ...sections.filter((section) => section.key === 'done').map((section) => ({ kind: 'tasks' as const, section }))
+          ].map((block) =>
+            block.kind === 'drafts' ? (
+              <section key="drafts" className="mt-3 first:mt-1" aria-labelledby="nav-section-drafts" data-nav-section="drafts">
+                <h3 id="nav-section-drafts" className={cn('flex h-6 items-center gap-1.5 px-2', SECTION_LABEL)}>
+                  Drafts
+                  <span className="font-mono font-normal tnum">{drafts.length}</span>
+                </h3>
+                <ul className="space-y-px">
+                  {drafts.map(({ workspacePath, draft }) => (
+                    <NavigatorDraftRow
+                      key={`${workspacePath}::${draft.id}`}
+                      workspacePath={workspacePath}
+                      draft={draft}
+                      foreign={openPaths.length > 1 && !scopePath && !(activePath && workspacePathsEqual(activePath, workspacePath))}
+                      selected={
+                        props.drafts?.open?.draftId === draft.id &&
+                        workspacePathsEqual(props.drafts.open.workspacePath, workspacePath)
+                      }
+                      actions={props.drafts!.actions}
+                      onNavKeyDown={onNavKeyDown}
+                    />
+                  ))}
+                </ul>
+              </section>
+            ) : (
             <TaskSection
-              key={section.key}
-              section={section}
+              key={block.section.key}
+              section={block.section}
               selected={place === 'task' ? selected : null}
               isRunOpen={place === 'task' ? props.isRunOpen : undefined}
               actions={props.rowActions}
@@ -225,12 +273,15 @@ export function Navigator(props: NavigatorProps) {
               expanded={doneExpanded}
               onExpand={() => setDoneExpanded(true)}
               trailing={
-                section.key === 'done' && (doneExpanded || section.rows.length <= DONE_LIMIT) && cappedPaths.length > 0 ? (
+                block.section.key === 'done' &&
+                (doneExpanded || block.section.rows.length <= DONE_LIMIT) &&
+                cappedPaths.length > 0 ? (
                   <MoreButton label="Show older tasks" onClick={() => cappedPaths.forEach((path) => props.onLoadOlderRuns(path))} />
                 ) : null
               }
             />
-          ))
+            )
+          )
         )}
       </div>
 

@@ -373,6 +373,71 @@ describe('Navigator', () => {
     expect(nav.textContent?.startsWith('site')).toBe(true)
   })
 
+  it('lists drafts just above Done, and opens or deletes one', () => {
+    const draft = (id: string, brief: string, doneWhen: string[] = []) => ({
+      id,
+      brief,
+      doneWhen,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date(Date.now() - 5 * 60_000).toISOString()
+    })
+    const onOpen = vi.fn()
+    const onDelete = vi.fn()
+    const items = [
+      { workspacePath: WS, draft: draft('d0000000-0000-4000-8000-00000000000a', 'Fix the **updater** swap') },
+      { workspacePath: WS, draft: draft('d0000000-0000-4000-8000-00000000000b', '', ['Suite passes']) },
+      { workspacePath: 'C:\elsewhere', draft: draft('d0000000-0000-4000-8000-00000000000c', 'Not open here') }
+    ]
+    render(<Navigator {...props({ drafts: { items, actions: { onOpen, onDelete } } })} />)
+    const order = Array.from(document.querySelectorAll('[data-nav-section]')).map((el) => el.getAttribute('data-nav-section'))
+    expect(order).toEqual(['drafts', 'done'])
+    const group = screen.getByRole('region', { name: /^Drafts/ })
+    const rows = within(group).getAllByRole('button', { name: /^(?!Actions)/ })
+    expect(rows.map((r) => r.getAttribute('aria-label'))).toEqual(['Fix the updater swap', 'Suite passes'])
+    expect(group.textContent).toContain('5m')
+    fireEvent.click(rows[0]!)
+    expect(onOpen).toHaveBeenCalledWith(WS, items[0]!.draft)
+    fireEvent.keyDown(rows[1]!, { key: 'Delete' })
+    expect(onDelete).toHaveBeenCalledWith(WS, items[1]!.draft)
+    expect(rows.every((r) => !r.hasAttribute('aria-current'))).toBe(true)
+  })
+
+  it('marks the draft New task is continuing', () => {
+    const item = {
+      workspacePath: WS,
+      draft: { id: 'd0000000-0000-4000-8000-00000000000e', brief: 'Being continued', doneWhen: [], createdAt: '2026-09-24T10:00:00Z', updatedAt: '2026-09-24T10:00:00Z' }
+    }
+    render(
+      <Navigator
+        {...props({
+          drafts: {
+            items: [item],
+            actions: { onOpen: vi.fn(), onDelete: vi.fn() },
+            open: { workspacePath: WS, draftId: item.draft.id }
+          }
+        })}
+      />
+    )
+    const rowEl = screen.getByRole('button', { name: 'Being continued' })
+    expect(rowEl.getAttribute('aria-current')).toBe('page')
+    expect(rowEl.classList.contains('bg-surface-2')).toBe(true)
+    expect(rowEl.classList.contains('hover:bg-surface')).toBe(false)
+  })
+
+  it('shows drafts, not the empty line, in a workspace with no tasks yet', () => {
+    const item = {
+      workspacePath: WS,
+      draft: { id: 'd0000000-0000-4000-8000-00000000000d', brief: 'Only a draft', doneWhen: [], createdAt: '2026-09-24T10:00:00Z', updatedAt: '2026-09-24T10:00:00Z' }
+    }
+    render(
+      <Navigator
+        {...props({ runsByWorkspacePath: { [WS]: { runs: [] } }, drafts: { items: [item], actions: { onOpen: vi.fn(), onDelete: vi.fn() } } })}
+      />
+    )
+    expect(screen.queryByText('Tasks you start show up here, grouped by what they need from you.')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Only a draft' })).toBeTruthy()
+  })
+
   it('shows no update chip while the install is current', () => {
     render(<Navigator {...props()} />)
     expect(document.querySelector('[data-update-chip]')).toBeNull()

@@ -4,6 +4,10 @@ export const IPC = {
   workspacesGet: 'workspaces:get',
   /** The app's own scratch folder, open whenever no project is. */
   workspacesHome: 'workspaces:home',
+  /** New task briefs put aside with Save as draft, per workspace. */
+  taskDraftsList: 'drafts:list',
+  taskDraftsSave: 'drafts:save',
+  taskDraftsDelete: 'drafts:delete',
   workspacesAdd: 'workspaces:add',
   workspacesRemove: 'workspaces:remove',
   workspacesSetActive: 'workspaces:set-active',

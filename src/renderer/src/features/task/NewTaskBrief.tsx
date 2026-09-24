@@ -74,7 +74,11 @@ export function NewTaskBrief({
   onStart,
   onOpenSettings,
   headerActions,
-  mic
+  mic,
+  checks,
+  onChecksEdit,
+  clearToken,
+  draft
 }: {
   workspacePath: string | null
   targets?: NewTaskTargets
@@ -100,8 +104,14 @@ export function NewTaskBrief({
   headerActions?: ReactNode
   /** Dictation, as on the instruction line. */
   mic?: ReactNode
+  /** The checks added so far — kept per workspace, so leaving New task keeps them. */
+  checks: string[]
+  onChecksEdit: (next: string[]) => void
+  /** Changes when the page was emptied (a draft saved): drops a half-typed check. */
+  clearToken?: number
+  /** Save as draft: put this brief aside. `continuing` when it came from one. */
+  draft?: { onSave: () => void; canSave: boolean; saving: boolean; continuing: boolean }
 }) {
-  const [checks, setChecks] = useState<string[]>([])
   const [adding, setAdding] = useState(false)
   const [draftCheck, setDraftCheck] = useState('')
   const addRef = useRef<HTMLInputElement>(null)
@@ -109,6 +119,48 @@ export function NewTaskBrief({
   useEffect(() => {
     if (adding) addRef.current?.focus()
   }, [adding])
+
+  // An empty "add a check" row folds away when focus leaves it. When a press
+  // took focus (Start task, Save as draft), fold it only once that press is
+  // over: folding at blur moves those buttons up under the pointer between
+  // its down and its up, and the click is lost.
+  const pointerDownRef = useRef(false)
+  useEffect(() => {
+    const down = (): void => {
+      pointerDownRef.current = true
+    }
+    const up = (): void => {
+      pointerDownRef.current = false
+    }
+    document.addEventListener('pointerdown', down, true)
+    document.addEventListener('pointerup', up, true)
+    document.addEventListener('pointercancel', up, true)
+    return () => {
+      document.removeEventListener('pointerdown', down, true)
+      document.removeEventListener('pointerup', up, true)
+      document.removeEventListener('pointercancel', up, true)
+    }
+  }, [])
+  const collapseEmptyCheck = (): void => {
+    if (!pointerDownRef.current) {
+      setAdding(false)
+      return
+    }
+    const afterPress = (): void => {
+      window.removeEventListener('pointerup', afterPress, true)
+      window.removeEventListener('pointercancel', afterPress, true)
+      // The click comes after pointerup in the same gesture; fold after it.
+      window.setTimeout(() => setAdding(false), 0)
+    }
+    window.addEventListener('pointerup', afterPress, true)
+    window.addEventListener('pointercancel', afterPress, true)
+  }
+
+  useEffect(() => {
+    if (!clearToken) return
+    setAdding(false)
+    setDraftCheck('')
+  }, [clearToken])
 
   // Ctrl/Cmd+Enter in the brief starts the task too, so the composer holds
   // the checks as they are now rather than being handed them on a click.
@@ -122,7 +174,7 @@ export function NewTaskBrief({
   const addCheck = (): void => {
     const text = draftCheck.trim().slice(0, CHECK_MAX_CHARS)
     if (!text || checks.length >= MAX_CHECKS) return
-    setChecks((prev) => [...prev, text])
+    onChecksEdit([...checks, text])
     setDraftCheck('')
   }
 
@@ -210,7 +262,7 @@ export function NewTaskBrief({
                         size="xs"
                         tone="muted"
                         className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-                        onClick={() => setChecks((prev) => prev.filter((_, i) => i !== index))}
+                        onClick={() => onChecksEdit(checks.filter((_, i) => i !== index))}
                       />
                     </li>
                   ))}
@@ -224,7 +276,7 @@ export function NewTaskBrief({
                         onChange={(e) => setDraftCheck(e.target.value)}
                         onKeyDown={onCheckKeyDown}
                         onBlur={() => {
-                          if (!draftCheck.trim()) setAdding(false)
+                          if (!draftCheck.trim()) collapseEmptyCheck()
                         }}
                         placeholder="A result you can check — a command that passes, a file that exists"
                         aria-label="New check"
@@ -261,6 +313,18 @@ export function NewTaskBrief({
               >
                 Start task
               </Button>
+              {draft ? (
+                <Button
+                  variant="ghost"
+                  size="md"
+                  disabled={!draft.canSave || draft.saving}
+                  pending={draft.saving}
+                  title={draft.canSave ? undefined : 'Write a brief or a check first'}
+                  onClick={draft.onSave}
+                >
+                  {draft.continuing ? 'Update draft' : 'Save as draft'}
+                </Button>
+              ) : null}
             </div>
           </div>
 

@@ -21,7 +21,14 @@ import { modelSelectionKey } from '@shared/domain/modelSelection'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import { resolveSlashCommandForSubmit } from '@shared/slashCommands'
 import { isRetryableTurnFailure } from '@shared/errors'
-import { Alert, Button, IconButton, cn } from '@renderer/lib/ui'
+import { Alert, Button, IconButton, cn, pushToast } from '@renderer/lib/ui'
+import {
+  draftTitle,
+  saveTaskDraftFor,
+  setBriefChecks,
+  setBriefState,
+  useBriefState
+} from '@renderer/lib/drafts/taskDraftStore'
 import { Icon } from '@renderer/lib/icons'
 import { isSessionDragEvent } from '@renderer/lib/chat/chatPaneLayout'
 import {
@@ -60,7 +67,7 @@ import {
   setWorkspaceHotComposerDraft,
   useWorkspaceHotComposerDraft
 } from '@renderer/lib/hooks/workspaceHotUiStore'
-import { composerAttachmentKey } from '@renderer/lib/hooks/composerAttachmentStore'
+import { clearComposerAttachments, composerAttachmentKey } from '@renderer/lib/hooks/composerAttachmentStore'
 import { SlashCommandMenu } from './SlashCommandMenu'
 import { NewTaskBrief, type NewTaskTargets } from '@renderer/features/task/NewTaskBrief'
 import { useSlashCommands } from './useSlashCommands'
@@ -382,6 +389,16 @@ export function Composer({
 
   const { audio, setAudio, audioError, addAudio, removeAudio } = useComposerAudio(attachmentKey)
 
+  // New task: its checks and the draft it continues live per workspace, so
+  // leaving the page keeps them and a start made elsewhere can empty them.
+  const briefWorkspace = variant === 'brief' ? (workspacePath ?? null) : null
+  const briefState = useBriefState(briefWorkspace)
+  const briefDraftIdRef = useRef(briefState.draftId)
+  briefDraftIdRef.current = briefState.draftId
+  const [savingDraft, setSavingDraft] = useState(false)
+  /** Bumped after a save empties the page, so a half-typed check goes too. */
+  const [briefClearToken, setBriefClearToken] = useState(0)
+
   const seededRef = useRef(false)
   useEffect(() => {
     if (seededRef.current) return
@@ -443,6 +460,10 @@ export function Composer({
         if (briefChecksRef.current.length > 0) {
           extras = { ...(extras ?? {}), doneWhen: briefChecksRef.current }
         }
+        // Starting from a draft spends it: main removes it once the task exists.
+        if (variant === 'brief' && briefDraftIdRef.current) {
+          extras = { ...(extras ?? {}), draftId: briefDraftIdRef.current }
+        }
         const boundWorkspace = workspacePath
         const resolved = await resolveComposerMentions({
           workspacePath: boundWorkspace,
@@ -468,18 +489,21 @@ export function Composer({
         ) {
           return false
         }
-        return await onSend(
+        const sent = await onSend(
           resolved.text,
           resolved.images.length ? resolved.images : undefined,
           resolved.files.length ? resolved.files : undefined,
           extras
         )
+        // The task exists: the page starts over empty next time.
+        if (sent !== false && variant === 'brief' && boundWorkspace) setBriefState(boundWorkspace, null)
+        return sent
       } catch (err) {
         setFileError(err instanceof Error ? err.message : 'Send failed')
         return false
       }
     },
-    [workspacePath, activeRunId, onSend, setFileError]
+    [workspacePath, activeRunId, onSend, setFileError, variant]
   )
 
   const resolveSlashSubmitCommand = useCallback(
@@ -730,6 +754,31 @@ export function Composer({
     catalogLoading
   })
   const readinessBlocksSend = modelReadinessBlocksSend(readinessIssue)
+
+  /** Save as draft: the brief, its checks and attachments go aside; the page empties. */
+  const saveBriefDraft = async (): Promise<void> => {
+    const workspace = briefWorkspace
+    if (!workspace || savingDraft) return
+    const continuing = briefDraftIdRef.current
+    setSavingDraft(true)
+    const res = await saveTaskDraftFor({
+      workspacePath: workspace,
+      id: continuing,
+      brief: text,
+      doneWhen: briefChecksRef.current,
+      attachments: { images, files, nativeFiles, audio }
+    })
+    setSavingDraft(false)
+    if (!res.ok) {
+      pushToast(`Couldn’t save the draft: ${res.error}`, 'error')
+      return
+    }
+    setText('')
+    if (attachmentKey) clearComposerAttachments(attachmentKey)
+    setBriefState(workspace, null)
+    setBriefClearToken((n) => n + 1)
+    pushToast(continuing ? 'Draft updated' : 'Saved as a draft', { detail: draftTitle(res.data), icon: 'check' })
+  }
 
   const { text, setText, canSend, submit, onKeyDown } = useComposerDraft({
     submitOnModEnter: variant === 'brief',
@@ -1245,6 +1294,24 @@ export function Composer({
         onChecksChange={(doneWhen) => {
           briefChecksRef.current = doneWhen
         }}
+        checks={briefState.checks}
+        onChecksEdit={(next) => {
+          if (briefWorkspace) setBriefChecks(briefWorkspace, next)
+        }}
+        clearToken={briefClearToken}
+        draft={
+          briefWorkspace
+            ? {
+                onSave: () => void saveBriefDraft(),
+                canSave:
+                  text.trim().length > 0 ||
+                  briefState.checks.length > 0 ||
+                  images.length + files.length + nativeFiles.length + audio.length > 0,
+                saving: savingDraft,
+                continuing: briefState.draftId != null
+              }
+            : undefined
+        }
         onStart={() => submit()}
         onOpenSettings={slashHandlers?.onOpenSettings ? (section) => slashHandlers.onOpenSettings?.(section) : undefined}
         headerActions={briefHeaderActions}

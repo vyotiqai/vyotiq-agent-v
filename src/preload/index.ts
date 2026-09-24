@@ -34,6 +34,9 @@ const api: VyotiqApi = {
   pickWorkspace: () => ipcRenderer.invoke(IPC.pickWorkspace),
   getWorkspaces: () => ipcRenderer.invoke(IPC.workspacesGet),
   getHomeWorkspacePath: () => ipcRenderer.invoke(IPC.workspacesHome),
+  listTaskDrafts: (workspacePath) => ipcRenderer.invoke(IPC.taskDraftsList, { workspacePath }),
+  saveTaskDraft: (payload) => ipcRenderer.invoke(IPC.taskDraftsSave, payload),
+  deleteTaskDraft: (workspacePath, id) => ipcRenderer.invoke(IPC.taskDraftsDelete, { workspacePath, id }),
   addWorkspace: (path) => ipcRenderer.invoke(IPC.workspacesAdd, path ? { path } : {}),
   removeWorkspace: (path, stopActiveRuns, deleteStorage) =>
     ipcRenderer.invoke(IPC.workspacesRemove, {

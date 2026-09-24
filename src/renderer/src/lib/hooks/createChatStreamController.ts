@@ -3123,7 +3123,8 @@ export function createChatStreamController(
           model: turnProviderModel?.model,
           modelExplicit: turnProviderModel?.explicit,
           agentProfileId,
-          ...(extras?.doneWhen?.length ? { doneWhen: extras.doneWhen } : {})
+          ...(extras?.doneWhen?.length ? { doneWhen: extras.doneWhen } : {}),
+          ...(extras?.draftId ? { draftId: extras.draftId } : {})
         }
     let res = await window.vyotiq.chatStart(startPayload)
     for (

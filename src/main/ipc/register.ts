@@ -470,6 +470,14 @@ import { emitGoalUpdate } from '../agent/goalEvents'
 import { armLoop, disarmLoop, readLoop } from '../agent/runLoopScheduler'
 import { launchRunFollowUpOrStart } from '../agent/launchRunInvoke'
 import { formatGoalContinueMessage } from '../../shared/goalRuntime'
+import { deleteTaskDraft, listTaskDrafts, saveTaskDraft } from '../drafts/taskDrafts'
+import {
+  TaskDraftDeleteRequestSchema,
+  TaskDraftSaveRequestSchema,
+  TaskDraftsListRequestSchema,
+  type TaskDraft,
+  type TaskDraftsListResult
+} from '../../shared/ipc'
 import {
   getWorkspaces,
   getHomeWorkspacePath,
@@ -898,6 +906,39 @@ export function registerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.taskDraftsList, async (event, raw): Promise<IpcResult<TaskDraftsListResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskDraftsListRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok({ drafts: await listTaskDrafts(req.workspacePath) })
+    } catch (err) {
+      return failFrom(err, IPC.taskDraftsList)
+    }
+  })
+
+  ipcMain.handle(IPC.taskDraftsSave, async (event, raw): Promise<IpcResult<TaskDraft>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskDraftSaveRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await saveTaskDraft(req))
+    } catch (err) {
+      return failFrom(err, IPC.taskDraftsSave)
+    }
+  })
+
+  ipcMain.handle(IPC.taskDraftsDelete, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskDraftDeleteRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await deleteTaskDraft(req.workspacePath, req.id))
+    } catch (err) {
+      return failFrom(err, IPC.taskDraftsDelete)
+    }
+  })
+
   ipcMain.handle(IPC.workspacesHome, async (event): Promise<IpcResult<string>> => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
@@ -1247,7 +1288,7 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.chatStart, async (event, raw): Promise<IpcResult<ChatStartResult>> => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
-      const req = ChatStartRequestSchema.parse(raw)
+      const { draftId, ...req } = ChatStartRequestSchema.parse(raw)
       // Everything from workspace validation to background start lives in the
       // shared launcher, so a chat send and a delegated task get an identical
       // sequence of checks. This handler owns only trust: schema and sender.
@@ -1267,6 +1308,14 @@ export function registerIpc(): void {
       })
       if (!outcome.ok) {
         return failExpected(outcome.error, IPC.chatStart, req.runId, outcome.code)
+      }
+      // A task started from a draft: the draft is spent. Only after the run
+      // exists, so a refused start keeps it.
+      // Awaited, so the task list the renderer reads next no longer has it.
+      if (draftId) {
+        await deleteTaskDraft(req.workspacePath, draftId).catch((err: unknown) => {
+          logger.warn('Could not remove the draft a task started from', { scope: 'drafts', err })
+        })
       }
       return ok({ runId: outcome.runId, invokeId: outcome.invokeId })
     } catch (err) {
