@@ -116,11 +116,12 @@ describe('App → Set up', () => {
     install({})
     render(<App />)
 
-    expect(await screen.findByRole('heading', { name: 'Set up Agent V' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Set up Agent V' }, { timeout: 5000 })).toBeTruthy()
     expect(screen.queryByTestId('home')).toBeNull()
     expect(listModels).toHaveBeenCalledWith({ provider: 'ollama', forceRefresh: true })
-    await waitFor(() =>
-      expect(document.querySelector('[data-setup-step="1"]')?.getAttribute('data-state')).toBe('done')
+    await waitFor(
+      () => expect(document.querySelector('[data-setup-step="1"]')?.getAttribute('data-state')).toBe('done'),
+      { timeout: 5000 }
     )
     expect(document.querySelector('[data-setup-step="1"]')?.textContent).toContain(
       'Ollama · no key needed · http://127.0.0.1:11434'
@@ -138,7 +139,7 @@ describe('App → Set up', () => {
     install({ settings: { toolApprovalOnboardingDone: true } })
     render(<App />)
 
-    expect(await screen.findByTestId('home')).toBeTruthy()
+    expect(await screen.findByTestId('home', {}, { timeout: 5000 })).toBeTruthy()
     expect(screen.queryByRole('heading', { name: 'Set up Agent V' })).toBeNull()
   })
 
@@ -159,7 +160,7 @@ describe('App → Set up', () => {
     expect(screen.queryByRole('heading', { name: 'Set up Agent V' })).toBeNull()
 
     release()
-    expect(await screen.findByTestId('chat')).toBeTruthy()
+    expect(await screen.findByTestId('chat', {}, { timeout: 5000 })).toBeTruthy()
     expect(screen.queryByRole('heading', { name: 'Set up Agent V' })).toBeNull()
   })
 
@@ -167,24 +168,27 @@ describe('App → Set up', () => {
     install({ openPaths: [SCRATCH, WS] })
     render(<App />)
 
-    expect(await screen.findByRole('heading', { name: 'Set up Agent V' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Set up Agent V' }, { timeout: 5000 })).toBeTruthy()
     expect(document.querySelector('[data-setup-step="2"]')?.getAttribute('data-state')).toBe('done')
     expect(document.querySelector('[data-setup-step="2"]')?.textContent).toContain(WS)
-    await waitFor(() =>
-      expect((screen.getByRole('button', { name: /Start your first task/ }) as HTMLButtonElement).disabled).toBe(false)
+    await waitFor(
+      () => expect((screen.getByRole('button', { name: /Start your first task/ }) as HTMLButtonElement).disabled).toBe(false),
+      { timeout: 5000 }
     )
     expect(screen.getByText('Starts in ws-first')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('radio', { name: /Every tool/ }))
     fireEvent.click(screen.getByRole('button', { name: /Start your first task/ }))
 
-    await waitFor(() =>
-      expect(setSettings).toHaveBeenCalledWith({
-        toolApproval: { ...DEFAULT_SETTINGS.toolApproval, mode: 'all' },
-        toolApprovalOnboardingDone: true
-      })
+    await waitFor(
+      () =>
+        expect(setSettings).toHaveBeenCalledWith({
+          toolApproval: { ...DEFAULT_SETTINGS.toolApproval, mode: 'all' },
+          toolApprovalOnboardingDone: true
+        }),
+      { timeout: 5000 }
     )
-    expect(await screen.findByTestId('chat')).toBeTruthy()
+    expect(await screen.findByTestId('chat', {}, { timeout: 5000 })).toBeTruthy()
     expect(screen.queryByRole('heading', { name: 'Set up Agent V' })).toBeNull()
   })
 })

@@ -45,6 +45,8 @@ const VYOTIQ_INVOKE_MAP: Record<
   listTaskDrafts: IPC.taskDraftsList,
   saveTaskDraft: IPC.taskDraftsSave,
   deleteTaskDraft: IPC.taskDraftsDelete,
+  rewindRedoStatus: IPC.runRewindRedoStatus,
+  redoRewind: IPC.runRewindRedo,
   addWorkspace: IPC.workspacesAdd,
   removeWorkspace: IPC.workspacesRemove,
   setActiveWorkspace: IPC.workspacesSetActive,

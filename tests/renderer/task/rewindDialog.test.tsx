@@ -27,10 +27,10 @@ describe('RewindDialog', () => {
     render(<RewindDialog ask={{ runN: 2, files: FILES }} onCancel={() => {}} onConfirm={() => {}} />)
     const dialog = screen.getByRole('dialog', { name: 'Rewind to before run 2?' })
     expect(dialog.textContent).toContain(
-      'Everything after run 2’s instruction leaves the record, and these files go back to how they were before it. This can’t be undone.'
+      'Everything after run 2’s instruction leaves the record, and these files go back to how they were before it. It’s kept, so you can redo it until you send a new instruction or change those files.'
     )
-    // Never the mockup's promise of a redo: a rewind removes the later record.
-    expect(dialog.textContent).not.toMatch(/redo/i)
+    // Redo is real now (main keeps the rewound record and files), and says when it ends.
+    expect(dialog.textContent).toContain('until you send a new instruction or change those files')
     expect(dialog.textContent).toContain('Your own edits since then are left alone.')
   })
 
@@ -70,13 +70,13 @@ describe('RewindDialog', () => {
     expect(screen.queryByRole('list', { name: 'Files' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Rewind' })).toBeTruthy()
     expect(rewindSummary({ runN: 3, files: [] })).toBe(
-      'Everything after run 3’s instruction leaves the record, and no files change. This can’t be undone.'
+      'Everything after run 3’s instruction leaves the record, and no files change. It’s kept, so you can redo it until you send a new instruction or change those files.'
     )
   })
 
   it('claims no list when the preview could not be read', () => {
     expect(rewindSummary({ runN: null, files: null })).toBe(
-      'Everything after this instruction leaves the record, and the files the task changed after it go back to how they were. This can’t be undone.'
+      'Everything after this instruction leaves the record, and the files the task changed after it go back to how they were. It’s kept, so you can redo it until you send a new instruction or change those files.'
     )
     render(<RewindDialog ask={{ runN: null, files: null }} onCancel={() => {}} onConfirm={() => {}} />)
     expect(screen.getByRole('dialog', { name: 'Rewind to before this instruction?' })).toBeTruthy()

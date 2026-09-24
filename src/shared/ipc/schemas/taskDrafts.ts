@@ -46,3 +46,25 @@ export const TaskDraftDeleteRequestSchema = z.object({
   id: TaskDraftSchema.shape.id
 })
 export type TaskDraftDeleteRequest = z.infer<typeof TaskDraftDeleteRequestSchema>
+
+/** A task's last rewind, and whether Redo can still bring it back. */
+export const RewindRedoRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  runId: z.string().min(1).max(128)
+})
+export type RewindRedoRequest = z.infer<typeof RewindRedoRequestSchema>
+
+export const RewindRedoStatusSchema = z.discriminatedUnion('available', [
+  z.object({
+    available: z.literal(true),
+    /** Workspace files Redo puts back as they were. */
+    files: z.number().int().min(0),
+    /** The instruction the task was rewound to (message index). */
+    userMessageIndex: z.number().int().min(0)
+  }),
+  z.object({
+    available: z.literal(false),
+    reason: z.enum(['none', 'running', 'record-changed', 'files-changed'])
+  })
+])
+export type RewindRedoStatus = z.infer<typeof RewindRedoStatusSchema>

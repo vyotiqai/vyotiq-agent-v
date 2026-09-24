@@ -471,7 +471,10 @@ import { armLoop, disarmLoop, readLoop } from '../agent/runLoopScheduler'
 import { launchRunFollowUpOrStart } from '../agent/launchRunInvoke'
 import { formatGoalContinueMessage } from '../../shared/goalRuntime'
 import { deleteTaskDraft, listTaskDrafts, saveTaskDraft } from '../drafts/taskDrafts'
+import { discardRewindRedo, redoRewind, rewindRedoStatus } from '../agent/rewindRedo'
 import {
+  RewindRedoRequestSchema,
+  type RewindRedoStatus,
   TaskDraftDeleteRequestSchema,
   TaskDraftSaveRequestSchema,
   TaskDraftsListRequestSchema,
@@ -939,6 +942,31 @@ export function registerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.runRewindRedoStatus, async (event, raw): Promise<IpcResult<RewindRedoStatus>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = RewindRedoRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await rewindRedoStatus(req.workspacePath, req.runId))
+    } catch (err) {
+      return failFrom(err, IPC.runRewindRedoStatus)
+    }
+  })
+
+  ipcMain.handle(IPC.runRewindRedo, async (event, raw): Promise<IpcResult<{ messages: ChatMessage[] }>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = RewindRedoRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      const result = await redoRewind(req.workspacePath, req.runId)
+      invalidateGitStatusCache(req.workspacePath)
+      emitGitStatusChanged(req.workspacePath)
+      return ok(result)
+    } catch (err) {
+      return failFrom(err, IPC.runRewindRedo)
+    }
+  })
+
   ipcMain.handle(IPC.workspacesHome, async (event): Promise<IpcResult<string>> => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
@@ -1309,6 +1337,8 @@ export function registerIpc(): void {
       if (!outcome.ok) {
         return failExpected(outcome.error, IPC.chatStart, req.runId, outcome.code)
       }
+      // A new instruction on a task ends what its last rewind kept for Redo.
+      if (req.runId) discardRewindRedo(req.workspacePath, req.runId)
       // A task started from a draft: the draft is spent. Only after the run
       // exists, so a refused start keeps it.
       // Awaited, so the task list the renderer reads next no longer has it.

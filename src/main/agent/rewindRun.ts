@@ -31,6 +31,7 @@ import { writeRunReceiptBestEffort } from './runReceipt'
 import { writeTrajectoryArtifactsBestEffort } from './runTrajectory'
 import { syncTodosAfterRewind } from './tools/todo'
 import { syncChecksAfterRewind } from './doneWhenChecks'
+import { captureRewindRedo, discardRewindRedo, sealRewindRedo } from './rewindRedo'
 
 export type PrepareRewindResult = {
   messages: ChatMessage[]
@@ -243,6 +244,7 @@ export async function prepareRewindAndReplaceUserMessage(input: {
   if (!existsSync(runDir)) {
     throw new Error('Run not found')
   }
+  discardRewindRedo(workspacePath, runId)
 
   clearFollowUps(runId)
   // The queue is persisted at enqueue time; without the disk clear the
@@ -389,8 +391,25 @@ export async function prepareRewindToUserMessage(input: {
     fromUserMessageIndex: userMessageIndex,
     quiesce: true
   })
+  // What Redo needs, copied aside before anything changes. Best-effort: a
+  // rewind that could not keep its redo still rewinds, it just can't be redone.
+  let redoKept = false
+  try {
+    await captureRewindRedo({
+      workspacePath,
+      runId,
+      userMessageIndex,
+      scopes,
+      plan: planRewindWritesAcrossRuns(scopes, userMessageIndex, workspacePath)
+    })
+    redoKept = true
+  } catch (err) {
+    discardRewindRedo(workspacePath, runId)
+    logger.warn('Could not keep a redo for this rewind', { scope: 'agent', correlationId: runId, err })
+  }
   const writes = rewindWritesFromScopes(workspacePath, scopes, userMessageIndex)
   if (writes.undoableRestoreFailed) {
+    discardRewindRedo(workspacePath, runId)
     throw new Error('Could not restore checkpoint files; history was not truncated')
   }
   const nextMessages = diskMessages.slice(0, userMessageIndex + 1)
@@ -403,6 +422,12 @@ export async function prepareRewindToUserMessage(input: {
     nextMessages,
     writes
   })
+  if (redoKept) {
+    await sealRewindRedo(workspacePath, runId).catch((err: unknown) => {
+      discardRewindRedo(workspacePath, runId)
+      logger.warn('Could not seal the redo for this rewind', { scope: 'agent', correlationId: runId, err })
+    })
+  }
 
   return { messages: nextMessages, writes }
 }

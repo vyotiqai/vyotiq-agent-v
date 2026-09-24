@@ -39,15 +39,18 @@ export function rewindRestoreCount(files: readonly RewindFile[]): number {
  * everything after it — this run's work and every later run — and it cannot
  * be taken back.
  */
+/** What stays of a rewind: main keeps it until something would be overwritten by bringing it back. */
+const REDO_NOTE = 'It’s kept, so you can redo it until you send a new instruction or change those files.'
+
 export function rewindSummary(ask: RewindAsk): string {
   const from = ask.runN != null ? `run ${ask.runN}’s instruction` : 'this instruction'
   const record = `Everything after ${from} leaves the record`
   if (ask.files == null) {
-    return `${record}, and the files the task changed after it go back to how they were. This can’t be undone.`
+    return `${record}, and the files the task changed after it go back to how they were. ${REDO_NOTE}`
   }
   const files = rewindRestoreCount(ask.files)
-  if (files === 0) return `${record}, and no files change. This can’t be undone.`
-  return `${record}, and ${files === 1 ? 'this file goes' : 'these files go'} back to how ${files === 1 ? 'it was' : 'they were'} before it. This can’t be undone.`
+  if (files === 0) return `${record}, and no files change. ${REDO_NOTE}`
+  return `${record}, and ${files === 1 ? 'this file goes' : 'these files go'} back to how ${files === 1 ? 'it was' : 'they were'} before it. ${REDO_NOTE}`
 }
 
 /**

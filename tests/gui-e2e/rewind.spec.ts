@@ -53,7 +53,7 @@ test('rewinds to before run 2, leaving the file you changed since', async () => 
   await window.getByRole('button', { name: REWIND }).click()
   const dialog = window.getByRole('dialog', { name: 'Rewind to before run 2?' })
   await expect(dialog).toContainText(
-    'Everything after run 2’s instruction leaves the record, and these files go back to how they were before it. This can’t be undone.'
+    'Everything after run 2’s instruction leaves the record, and these files go back to how they were before it. It’s kept, so you can redo it until you send a new instruction or change those files.'
   )
   const rows = dialog.getByRole('list', { name: 'Files' }).getByRole('listitem')
   await expect(rows).toHaveCount(3)
@@ -79,6 +79,19 @@ test('rewinds to before run 2, leaving the file you changed since', async () => 
   // Nothing is left waiting on Keep or Undo, so the navigator stops calling it Ready for review.
   await expect(window.locator('[data-nav-section="review"]')).toHaveCount(0, { timeout: 15_000 })
   await expect(window.locator('[data-nav-section="done"]')).toContainText('Regroup Settings into App, Agent and System')
+
+  // Kept for Redo: the record says so, and Redo brings the run and its files back.
+  const redo = window.locator('[data-rewind-redo]')
+  await expect(redo).toContainText('Rewound to here. Redo brings back the runs after this instruction and 2 files as the task left them.')
+  await redo.getByRole('button', { name: 'Redo' }).click()
+  await expect(window.getByText('Shortcuts sit under App, and the section labels share one style.')).toBeVisible({ timeout: 20_000 })
+  expect(read(REWIND_FILES.changed.path)).toBe(REWIND_FILES.changed.after)
+  expect(read(REWIND_FILES.created.path)).toBe(REWIND_FILES.created.after)
+  // Yours was never touched by the rewind, so Redo leaves it too.
+  expect(read(REWIND_FILES.yours.path)).toBe(REWIND_FILES.yours.mine)
+  await expect(redo).toHaveCount(0)
+  // Its edits wait on Keep or Undo again.
+  await expect(window.locator('[data-nav-section="review"]')).toContainText('Regroup Settings into App, Agent and System', { timeout: 15_000 })
 })
 
 test.describe('Keep all', () => {

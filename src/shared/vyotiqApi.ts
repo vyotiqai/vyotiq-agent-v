@@ -116,6 +116,7 @@ import type {
   WorkspaceUiState,
   ComposerAttachmentsClearRequest,
   TaskDraft,
+  RewindRedoStatus,
   TaskDraftSaveRequest,
   TaskDraftsListResult,
   ComposerAttachmentsGetResult,
@@ -203,6 +204,10 @@ export interface VyotiqApi {
   saveTaskDraft: (payload: TaskDraftSaveRequest) => Promise<IpcResult<TaskDraft>>
   /** True when there was a draft to remove. */
   deleteTaskDraft: (workspacePath: string, id: string) => Promise<IpcResult<boolean>>
+  /** Whether the task's last rewind can still be redone. */
+  rewindRedoStatus: (workspacePath: string, runId: string) => Promise<IpcResult<RewindRedoStatus>>
+  /** Bring back what the last rewind took — the record and the files — while nothing has changed since. */
+  redoRewind: (workspacePath: string, runId: string) => Promise<IpcResult<{ messages: ChatMessage[] }>>
   addWorkspace: (path?: string) => Promise<IpcResult<WorkspacesState>>
   removeWorkspace: (
     path: string,

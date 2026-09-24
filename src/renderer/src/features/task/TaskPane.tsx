@@ -31,6 +31,7 @@ import { runTitle } from '@renderer/app/navigator/runTitle'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { buildRecordModel, type BuildOptions } from './recordModel'
 import { RecordBody, TaskHeader } from './record/RecordLayout'
+import { useRewindRedo } from './rewindRedo'
 import { RecordActionsContext } from './record/WorkItems'
 import { TaskRecord } from './TaskRecord'
 import { clearMatches, findRanges, foldsToOpen, paintMatches, RecordOpenContext } from './recordFind'
@@ -160,6 +161,8 @@ export function TaskPane(props: TaskPaneProps) {
   const items = useDeferredValue(liveItems)
   const turnUsage = useResolvedTurnUsage(props.metaStore, props.turnUsage)
   const todos = useRunTodos({ workspacePath, runId, running: live, active: true })
+  // The last rewind, while it can still be redone.
+  const { redo, busy: redoing, onRedo } = useRewindRedo(workspacePath, runId, items.length, live)
   const liveTodos = live ? (todos.data?.items ?? null) : null
 
   const options: BuildOptions = useMemo(
@@ -567,6 +570,18 @@ export function TaskPane(props: TaskPaneProps) {
                 <AgentVSpinner size={11} />
                 Loading the record…
               </p>
+            ) : null}
+            {redo && !live ? (
+              <div className="mt-3 flex items-center gap-2 text-xs text-muted" data-rewind-redo>
+                <Icon name="undo" size={13} className="shrink-0 text-tertiary" />
+                <span className="min-w-0 flex-1">
+                  Rewound to here. Redo brings back the runs after this instruction
+                  {redo.files > 0 ? ` and ${redo.files} ${redo.files === 1 ? 'file' : 'files'} as the task left them` : ''}.
+                </span>
+                <Button size="xs" variant="ghost" icon="redo" disabled={redoing} pending={redoing} onClick={onRedo}>
+                  Redo
+                </Button>
+              </div>
             ) : null}
           </RecordBody>
         </RecordOpenContext.Provider>

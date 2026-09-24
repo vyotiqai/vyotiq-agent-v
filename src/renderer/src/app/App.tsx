@@ -73,6 +73,7 @@ import type {
   RevertWritesOutcome
 } from '@renderer/lib/hooks/createChatStreamController'
 import { rewoundToastText, useRewindDialog } from '@renderer/features/task/RewindDialog'
+import { RELOAD_RUN_EVENT, announceRewound, redoRewindAndReload, type ReloadRunDetail } from '@renderer/features/task/rewindRedo'
 import { needsSetup, setupRecents, setupStartingMode, setupWorkspace } from '@renderer/features/setup/setupModel'
 import {
   briefStateFor,
@@ -1144,6 +1145,19 @@ function App() {
 
   const { confirm, dialog: confirmDialog } = useConfirm()
   const { askRewind, dialog: rewindDialog } = useRewindDialog()
+  const chatRunIdRef = useRef<string | null>(null)
+  chatRunIdRef.current = chat.runId
+
+  useEffect(() => {
+    const onReload = (event: Event): void => {
+      const detail = (event as CustomEvent<ReloadRunDetail>).detail
+      if (!detail?.workspacePath || !detail.runId) return
+      void loadRunTranscriptIntoTab(detail.workspacePath, detail.runId)
+      refreshWorkspaceRuns(detail.workspacePath)
+    }
+    window.addEventListener(RELOAD_RUN_EVENT, onReload)
+    return () => window.removeEventListener(RELOAD_RUN_EVENT, onReload)
+  }, [loadRunTranscriptIntoTab, refreshWorkspaceRuns])
 
   /**
    * Rewind to before an instruction: the Rewind dialog lists what the task
@@ -1157,6 +1171,8 @@ function App() {
       runN: number | undefined,
       io: {
         workspacePath: string | null
+        /** The task rewound — its Redo is offered from the toast. */
+        runId: string | null
         preview: (index: number) => Promise<ChatRewindPreviewResult | null>
         revert: (index: number) => Promise<RevertWritesOutcome | false>
       }
@@ -1166,7 +1182,15 @@ function App() {
       if (!ok) return false
       const done = await io.revert(userMessageIndex)
       if (done) {
-        pushToast(rewoundToastText(runN ?? null, done), 'success')
+        const { workspacePath, runId } = io
+        if (workspacePath && runId) announceRewound(workspacePath, runId)
+        pushToast(rewoundToastText(runN ?? null, done), {
+          kind: 'success',
+          icon: 'undo',
+          ...(workspacePath && runId
+            ? { action: { label: 'Redo', onClick: () => void redoRewindAndReload(workspacePath, runId) } }
+            : {})
+        })
         // The rewound edits no longer wait on Keep or Undo.
         if (io.workspacePath) refreshWorkspaceRuns(io.workspacePath)
       }
@@ -1183,12 +1207,13 @@ function App() {
         runN,
         {
           workspacePath: focusedWorkspacePath ?? activeWorkspace,
+          runId: focusedRunId ?? chatRunIdRef.current,
           preview: (i) => actions?.previewRewindToUserMessage?.(i) ?? Promise.resolve(null),
           revert: (i) => actions?.revertToUserMessage?.(i) ?? Promise.resolve(false)
         }
       )
     },
-    [activeWorkspace, confirmRevertToUserMessage, focusedWorkspacePath]
+    [activeWorkspace, confirmRevertToUserMessage, focusedRunId, focusedWorkspacePath]
   )
 
   const onChatStop = useCallback(() => {
@@ -2036,6 +2061,7 @@ function App() {
               runN,
               {
                 workspacePath: pane.workspacePath,
+                runId: pane.runId,
                 preview: (i) => paneCtrl?.previewRewindToUserMessage(i) ?? Promise.resolve(null),
                 revert: (i) => paneCtrl?.revertToUserMessage(i) ?? Promise.resolve(false)
               }

@@ -8,6 +8,9 @@ export const IPC = {
   taskDraftsList: 'drafts:list',
   taskDraftsSave: 'drafts:save',
   taskDraftsDelete: 'drafts:delete',
+  /** Whether a task's last rewind can still be redone, and redoing it. */
+  runRewindRedoStatus: 'runs:rewindRedoStatus',
+  runRewindRedo: 'runs:rewindRedo',
   workspacesAdd: 'workspaces:add',
   workspacesRemove: 'workspaces:remove',
   workspacesSetActive: 'workspaces:set-active',
