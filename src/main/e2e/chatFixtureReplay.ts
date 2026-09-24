@@ -64,6 +64,8 @@ export async function* replayChatFixture(input: {
   mode?: AgentInteractionMode
   agentProfileId?: string
   delegatedTaskId?: string
+  /** A new task's checks — the run is created as runAgent would create it. */
+  doneWhen?: string[]
 }): AsyncGenerator<AgentEvent> {
   const signal = streamSignalFor(input.runId, input.runSignal)
   // The fixture replaces the whole event stream, so `runAgent` — and with it
@@ -74,7 +76,10 @@ export async function* replayChatFixture(input: {
   // failed sixty seconds after it streamed perfectly.
   const runDir = resolveRunDir(input.workspacePath, input.runId)
   if (!runExists(input.workspacePath, input.runId)) {
-    createRun(input.workspacePath, input.runId, input.goal ?? 'chat', input.mode ?? 'agent')
+    createRun(input.workspacePath, input.runId, input.goal ?? 'chat', {
+      mode: input.mode ?? 'agent',
+      ...(input.doneWhen?.length ? { doneWhen: input.doneWhen } : {})
+    })
   }
   const persistStatus = async (status: 'done' | 'error' | 'cancelled'): Promise<void> => {
     try {

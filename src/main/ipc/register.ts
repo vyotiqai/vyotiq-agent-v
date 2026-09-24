@@ -4467,9 +4467,11 @@ export function registerIpc(): void {
     try {
       const req = WorkspaceAgentContextRequestSchema.parse(raw ?? {})
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      const indexStatus = getCodeIndexRuntimeStatus()
       const context = await buildWorkspaceAgentContext(req.workspacePath, {
         enabled: getSettings().codeIndex?.enabled !== false,
-        phase: getCodeIndexRuntimeStatus().phase
+        phase: indexStatus.phase,
+        statusWorkspace: indexStatus.workspacePath
       })
       // Reading the summary is what says someone is looking at it: keep this
       // workspace live from here until it is removed.

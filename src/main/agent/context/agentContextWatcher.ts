@@ -4,6 +4,7 @@ import { BrowserWindow } from 'electron'
 import { IPC } from '../../../shared/channels'
 import type { WorkspaceAgentContextChanged, WorkspaceAgentContextResult } from '../../../shared/ipc'
 import { canonicalizeWorkspacePath } from '../../../shared/workspacePath'
+import { workspacePathsEqual } from '../../../shared/workspacePathMatch'
 import { getCodeIndexRuntimeStatus, onCodeIndexRuntimeStatus } from '../codeindex'
 import { invalidateGitStatusCache } from '../../git/gitStatusCache'
 import { getSettings } from '../../settings/settings'
@@ -81,7 +82,10 @@ function sameContext(a: WorkspaceAgentContextResult, b: WorkspaceAgentContextRes
     a.rules.cursorrules === b.rules.cursorrules &&
     a.rules.ruleFileCount === b.rules.ruleFileCount &&
     a.memoryNotes === b.memoryNotes &&
-    a.codeIndex.state === b.codeIndex.state
+    (a.memoryNoteNames ?? []).join('\0') === (b.memoryNoteNames ?? []).join('\0') &&
+    a.codeIndex.state === b.codeIndex.state &&
+    a.codeIndex.files === b.codeIndex.files &&
+    a.codeIndex.indexedAt === b.codeIndex.indexedAt
   )
 }
 
@@ -155,9 +159,11 @@ async function rebuild(w: Watch): Promise<void> {
         invalidateGitStatusCache(w.workspacePath)
       }
       armTargets(w)
+      const indexStatus = getCodeIndexRuntimeStatus()
       const next = await buildWorkspaceAgentContext(w.workspacePath, {
         enabled: getSettings().codeIndex?.enabled !== false,
-        phase: getCodeIndexRuntimeStatus().phase
+        phase: indexStatus.phase,
+        statusWorkspace: indexStatus.workspacePath
       })
       // Stopped while we were reading disk — drop the result.
       if (watches.get(canonicalizeWorkspacePath(w.workspacePath)) !== w) return
@@ -174,13 +180,16 @@ async function rebuild(w: Watch): Promise<void> {
 
 function hookCodeIndexStatus(): void {
   if (codeIndexUnsubscribe) return
-  // Index phase is process-wide, so one listener feeds every watched workspace.
-  // Sync emits progress continuously; only a change to the mapped card state
-  // is worth a rebuild, so progress ticks cost one comparison each.
+  // One listener feeds every watched workspace, but the phase speaks only for
+  // the workspace the status names. Sync emits progress continuously; only a
+  // change to that workspace's card state is worth a rebuild, and any other
+  // workspace rebuilds once, when a live phase it showed has moved on.
   codeIndexUnsubscribe = onCodeIndexRuntimeStatus((status) => {
-    const state = mapCodeIndexState(status.phase, getSettings().codeIndex?.enabled !== false)
+    const enabled = getSettings().codeIndex?.enabled !== false
     for (const w of watches.values()) {
-      if (w.last.codeIndex.state === state) continue
+      const owns = status.workspacePath != null && workspacePathsEqual(status.workspacePath, w.workspacePath)
+      const shown = w.last.codeIndex.state
+      if (owns ? shown === mapCodeIndexState(status.phase, enabled) : shown !== 'building' && shown !== 'degraded') continue
       schedule(w, false)
     }
   })

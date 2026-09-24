@@ -56,15 +56,17 @@ test('Files goes live with the file the run is writing, and stops when it lands'
   const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) await expand.click()
 
-  const composer = window.getByRole('combobox', { name: 'Instruction' })
+  const composer = window.getByRole('combobox', { name: 'Brief' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
+  // A new task keeps the inspector out of the way until asked for.
+  await window.locator('[data-task-header]').getByRole('button', { name: /^Show inspector/ }).click()
   const files = window.getByRole('tablist', { name: 'Inspector' }).getByRole('tab', { name: /^Files/ })
   await expect(files).toBeVisible()
   await expect(files).not.toContainText('working now')
 
   await composer.fill('Stream a live edit diff')
-  // The instruction line sends on Enter — it has no Send button.
-  await window.getByRole('combobox', { name: 'Instruction' }).press('Enter')
+  // A new task starts from its brief on Ctrl+Enter — Enter is a new line there.
+  await window.getByRole('combobox', { name: 'Brief' }).press('Control+Enter')
 
   // Mid-write: the tab says which file, without the Files panel being opened.
   await expect(files).toContainText('working now', { timeout: 20_000 })

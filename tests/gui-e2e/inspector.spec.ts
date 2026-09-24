@@ -44,7 +44,8 @@ test.beforeAll(async () => {
       seedWorkspacesRegistry(userDataDir, workspacePath, null)
     }
   })
-  // Up by default, on Changes.
+  // On a task the inspector is up by default, on Changes.
+  await launched.window.getByRole('button', { name: 'Edit two files', exact: true }).click({ timeout: 20_000 })
   await expect(inspector(launched.window)).toBeVisible({ timeout: 20_000 })
 })
 
@@ -65,8 +66,9 @@ async function docked(window: Page): Promise<void> {
 
 test('shows all six tabs in one strip, on Changes', async () => {
   const { window } = launched
+  // Changes carries the seeded task's two writes still waiting to be reviewed.
   await expect(strip(window).getByRole('tab')).toHaveText([
-    'Changes',
+    /^Changes/,
     'Files',
     'Terminal',
     'Browser',
@@ -163,6 +165,25 @@ test('the strip is one tab stop that the arrow keys walk', async () => {
   await expect(tab(window, /^Plan/)).toBeFocused()
   await window.keyboard.press('Home')
   await expect(tab(window, /^Changes/)).toBeFocused()
+})
+
+test('a new task leaves the work area to its brief until the inspector is asked for', async () => {
+  const { window } = launched
+  await docked(window)
+
+  await window.keyboard.press(`${MOD}+N`)
+  await expect(window.locator('[data-new-task]')).toBeVisible({ timeout: 20_000 })
+  await expect(inspector(window)).toHaveCount(0)
+  const offer = window.locator('[data-task-header]').getByRole('button', { name: /^Show inspector/ })
+  await expect(offer).toBeVisible()
+
+  await window.keyboard.press(`${MOD}+I`)
+  await expect(inspector(window)).toBeVisible()
+  await expect(offer).toHaveCount(0)
+
+  // The saved choice was never touched: a task opens with it up.
+  await window.getByRole('button', { name: 'Edit two files', exact: true }).click()
+  await expect(inspector(window)).toBeVisible()
 })
 
 test('Changes counts the agent writes still waiting to be reviewed', async () => {

@@ -11,10 +11,10 @@ let workspacePath: string
 async function openFilesPanel(window: Page): Promise<void> {
   const panel = window.getByRole('tabpanel', { name: 'Files' })
   if (await panel.isVisible()) return
-  const filesTab = window.getByRole('tablist', { name: 'Inspector' }).getByRole('tab', { name: /^Files/ })
-  await expect(filesTab).toBeVisible({ timeout: 20_000 })
-  await filesTab.click()
-  await expect(panel).toBeVisible()
+  // A new task keeps the inspector out of the way until asked; Alt 2 asks for Files.
+  await expect(window.locator('[data-new-task]')).toBeVisible({ timeout: 20_000 })
+  await window.keyboard.press('Alt+2')
+  await expect(panel).toBeVisible({ timeout: 20_000 })
 }
 
 test.beforeAll(async () => {

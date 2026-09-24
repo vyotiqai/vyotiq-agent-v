@@ -52,7 +52,7 @@ async function activateWorkspace(window: Page, path: string): Promise<void> {
   await window.evaluate(() => localStorage.removeItem('vyotiq.chatPaneLayout'))
   await window.reload()
   await window.waitForLoadState('domcontentloaded')
-  await expect(window.getByRole('combobox', { name: 'Instruction' })).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByRole('combobox', { name: 'Brief' })).toBeVisible({ timeout: 20_000 })
 }
 
 test.beforeAll(async () => {
@@ -89,13 +89,13 @@ test.afterAll(async () => {
   }
 })
 
-test('the context strip initializes a repository on click', async () => {
+test('a new task’s aside initializes a repository on click', async () => {
   const { window } = launched
   await activateWorkspace(window, stripWorkspace)
 
-  const card = window.getByRole('group', { name: 'What the agent knows' })
+  const card = window.getByRole('complementary', { name: 'What the agent will see' })
   await expect(card).toBeVisible({ timeout: 15_000 })
-  await expect(card).toContainText('Not a repo')
+  await expect(card).toContainText('Not a repository')
   expect(existsSync(join(stripWorkspace, '.git'))).toBe(false)
 
   await card.getByRole('button', { name: 'Initialize' }).click()
@@ -106,7 +106,7 @@ test('the context strip initializes a repository on click', async () => {
     .not.toBeNull()
   const branch = branchOnDisk(stripWorkspace)!
   await expect(card).toContainText(branch, { timeout: 15_000 })
-  await expect(card).not.toContainText('Not a repo')
+  await expect(card).not.toContainText('Not a repository')
   await expect(card.getByRole('button', { name: 'Initialize' })).toHaveCount(0)
 })
 

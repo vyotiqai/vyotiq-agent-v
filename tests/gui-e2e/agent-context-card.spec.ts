@@ -67,41 +67,30 @@ test('empty new chat shows the agent context card', async () => {
   await window.getByRole('menuitemcheckbox', { name: /agent-context-ws/i }).click()
   await window.getByRole('button', { name: /new task/i }).first().click()
 
-  await expect(window.getByRole('combobox', { name: 'Instruction' })).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByRole('combobox', { name: 'Brief' })).toBeVisible({ timeout: 20_000 })
 
   // The header names the new task and where it will run.
   const header = window.locator('[data-task-header]')
   await expect(header).toContainText('New task')
   await expect(header).toContainText(/in vyotiq-agent-context-ws/i)
-  const emptyState = window.locator('[data-chat-empty-state]')
-  await expect(emptyState).toBeVisible({ timeout: 15_000 })
-
-  const card = window.getByRole('group', { name: 'What the agent knows' })
+  // The brief's aside says what the agent will see.
+  const card = window.getByRole('complementary', { name: 'What the agent will see' })
   await expect(card).toBeVisible({ timeout: 15_000 })
-  // Seeded rules must surface — proves the card reads live workspace state.
+  // Seeded rules must surface — proves the aside reads live workspace state.
   await expect(card).toContainText('AGENTS.md')
-  await expect(card).toContainText(/1 rules/)
+  await expect(card).toContainText('+ 1 rule file')
 
   // Every reading is labelled, and the workspace name is NOT repeated here —
-  // the heading above already carries it.
-  for (const label of ['Branch', 'Rules', 'Memory', 'Index']) {
+  // the header above already carries it.
+  for (const label of ['Branch', 'Rules', 'Memory', 'Index', 'Tools']) {
     await expect(card.getByText(label, { exact: true })).toBeVisible()
   }
-
-  // Layout contract: one row that shrinks, never a wrap and never an
-  // overflow. Wrapping is what made this strip look ragged before.
-  const box = await card.evaluate((el) => ({
-    scrollWidth: el.scrollWidth,
-    clientWidth: el.clientWidth,
-    height: (el as HTMLElement).offsetHeight
-  }))
-  expect(box.scrollWidth).toBeLessThanOrEqual(box.clientWidth)
-  expect(box.height).toBeLessThan(70)
+  await expect(card).not.toContainText(/vyotiq-agent-context-ws/i)
 })
 
-test('the strip follows the workspace live, pushed not polled', async () => {
+test('the aside follows the workspace live, pushed not polled', async () => {
   const { window } = launched
-  const card = window.getByRole('group', { name: 'What the agent knows' })
+  const card = window.getByRole('complementary', { name: 'What the agent will see' })
   await expect(card).toBeVisible({ timeout: 15_000 })
 
   // Count pushes from a second subscriber: proves main emits per real change
@@ -135,10 +124,12 @@ test('the strip follows the workspace live, pushed not polled', async () => {
   // push that never arrives fails, and step 4 still catches a polling loop.
 
   // 1. First memory note — the directory does not exist yet, so this also
-  //    proves the watcher arms paths that appear after it started.
-  mkdirSync(join(workspacePath, '.vyotiq', 'memory'), { recursive: true })
-  writeFileSync(join(workspacePath, '.vyotiq', 'memory', 'note.md'), '- remembered\n', 'utf8')
+  //    proves the watcher arms paths that appear after it started. Notes live
+  //    in `notes/`, where memory_write puts them.
+  mkdirSync(join(workspacePath, '.vyotiq', 'memory', 'notes'), { recursive: true })
+  writeFileSync(join(workspacePath, '.vyotiq', 'memory', 'notes', 'remembered.md'), '- remembered\n', 'utf8')
   await expect(card).toContainText('1 note', { timeout: PUSH_WAIT })
+  await expect(card).toContainText('remembered')
   expect(await pushes()).toBe(1)
 
   // 2. A rule file appearing at the workspace root.
@@ -149,7 +140,7 @@ test('the strip follows the workspace live, pushed not polled', async () => {
   // 3. `git init` in a workspace that was not a repo: the branch reading has
   //    to stop saying "Not a repo" even though `.git` did not exist when the
   //    watcher started, and even though branch reads are cached.
-  await expect(card).toContainText('Not a repo')
+  await expect(card).toContainText('Not a repository')
   const git = (...args: string[]): void => {
     execFileSync('git', args, { cwd: workspacePath, stdio: 'ignore' })
   }

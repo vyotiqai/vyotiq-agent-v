@@ -148,6 +148,8 @@ export type StartAgentRunAgentInput = {
   delegatedTaskId?: string
   /** Execution substrate (Phase 4 runtime seam) — local unless cloud is wired. */
   runtime?: 'local' | 'cloud'
+  /** A new task's done-when checks, from its brief. */
+  doneWhen?: string[]
 }
 
 export type StartAgentRunInput = {
@@ -222,7 +224,8 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
           goal: firstUserMessageText(agentInput),
           mode: agentInput.mode,
           ...(agentInput.agentProfileId ? { agentProfileId: agentInput.agentProfileId } : {}),
-          ...(agentInput.delegatedTaskId ? { delegatedTaskId: agentInput.delegatedTaskId } : {})
+          ...(agentInput.delegatedTaskId ? { delegatedTaskId: agentInput.delegatedTaskId } : {}),
+          ...(agentInput.doneWhen?.length ? { doneWhen: agentInput.doneWhen } : {})
         })
       } else {
         // Confirm the substrate can take the work before anything observes this

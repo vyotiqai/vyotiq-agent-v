@@ -1,7 +1,7 @@
-import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 import type { WorkspaceAgentContextResult } from '@shared/ipc/schemas/agent'
-import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { useGitInit } from './useGitInit'
+import { useAgentContext } from './useAgentContext'
 
 type CodeIndexState = WorkspaceAgentContextResult['codeIndex']['state']
 
@@ -46,49 +46,7 @@ type Reading = {
  * "New chat in <workspace>", and this strip sits under it.
  */
 export function AgentContextCard({ workspacePath }: { workspacePath: string }) {
-  const [context, setContext] = useState<WorkspaceAgentContextResult | null>(null)
-  const [failed, setFailed] = useState(false)
-  // Bumped to re-run the read below. Re-running it rather than firing a second
-  // fetch keeps one code path, with its cancelled/pushed guards, as the only
-  // thing that writes `context`.
-  const [reloadToken, setReloadToken] = useState(0)
-
-  useEffect(() => {
-    let cancelled = false
-    let pushed = false
-
-    // Subscribe before requesting, so a change landing while the first read is
-    // in flight is not lost. Panes can show different workspaces, so filter.
-    const off = window.vyotiq.onAgentContextChanged?.((payload) => {
-      if (cancelled || !workspacePathsEqual(payload.workspacePath, workspacePath)) return
-      pushed = true
-      setFailed(false)
-      setContext(payload.context)
-    })
-    const stop = (): void => {
-      cancelled = true
-      off?.()
-    }
-
-    // Bridge surface is versioned — an older/partial preload without the
-    // method must render nothing (never throw inside the effect).
-    const request = window.vyotiq.agentContext?.({ workspacePath })
-    if (!request) {
-      setFailed(true)
-      return stop
-    }
-    request
-      .then((res) => {
-        // A push that got here first is newer than this reply — never regress.
-        if (cancelled || pushed) return
-        if (res.ok) setContext(res.data)
-        else setFailed(true)
-      })
-      .catch(() => {
-        if (!cancelled && !pushed) setFailed(true)
-      })
-    return stop
-  }, [workspacePath, reloadToken])
+  const { context, failed, reload } = useAgentContext(workspacePath)
 
   // Re-read after an init instead of waiting for the watcher to notice `.git`.
   // The watcher is the only refresh on every other path, but it does not carry
@@ -97,10 +55,7 @@ export function AgentContextCard({ workspacePath }: { workspacePath: string }) {
   // one surface that caused the change refreshes what it changed. The
   // ChangesPanel already did this; only this strip assumed the push. A push
   // that arrives afterwards still applies.
-  const gitInit = useGitInit(
-    workspacePath,
-    useCallback(() => setReloadToken((token) => token + 1), [])
-  )
+  const gitInit = useGitInit(workspacePath, reload)
 
   if (failed) return null
 

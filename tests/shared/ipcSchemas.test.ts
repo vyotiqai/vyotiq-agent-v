@@ -131,6 +131,28 @@ describe('ipc schemas', () => {
     ).toBe(false)
   })
 
+  it('takes done-when checks for a new task only', () => {
+    const user = { role: 'user' as const, content: 'fix it' }
+    const parsed = ChatStartRequestSchema.parse({
+      messages: [user],
+      workspacePath: '/ws',
+      doneWhen: ['  The suite passes  ']
+    })
+    expect(parsed.doneWhen).toEqual(['The suite passes'])
+    expect(
+      ChatStartRequestSchema.safeParse({
+        incremental: true,
+        newMessages: [user],
+        workspacePath: '/ws',
+        runId: 'run-1',
+        doneWhen: ['The suite passes']
+      }).success
+    ).toBe(false)
+    expect(
+      ChatStartRequestSchema.safeParse({ messages: [user], workspacePath: '/ws', doneWhen: ['   '] }).success
+    ).toBe(false)
+  })
+
   it('rejects full messages on chatStart resume unless incremental', () => {
     const user = { role: 'user' as const, content: 'hi' }
     expect(

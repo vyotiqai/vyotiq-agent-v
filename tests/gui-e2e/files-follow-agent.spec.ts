@@ -58,7 +58,8 @@ test('follow mode opens the file the run writes', async () => {
   const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) await expand.click()
 
-  await window.getByRole('tablist', { name: 'Inspector' }).getByRole('tab', { name: /^Files/ }).click()
+  // A new task keeps the inspector out of the way until asked; Alt 2 asks for Files.
+  await window.keyboard.press('Alt+2')
   await expect(window.getByRole('tabpanel', { name: 'Files' })).toBeVisible({ timeout: 20_000 })
 
   const follow = window.getByRole('switch', { name: 'Follow agent edits' })
@@ -70,11 +71,11 @@ test('follow mode opens the file the run writes', async () => {
   // Nothing is open yet — the run is what puts a file on screen.
   await expect(window.getByRole('tab', { name: /target\.ts/i })).toHaveCount(0)
 
-  const composer = window.getByRole('combobox', { name: 'Instruction' })
+  const composer = window.getByRole('combobox', { name: 'Brief' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('Edit the target file')
-  // The instruction line sends on Enter — it has no Send button.
-  await window.getByRole('combobox', { name: 'Instruction' }).press('Enter')
+  // A new task starts from its brief on Ctrl+Enter — Enter is a new line there.
+  await window.getByRole('combobox', { name: 'Brief' }).press('Control+Enter')
 
   await expect(window.getByRole('tab', { name: /target\.ts/i })).toBeVisible({ timeout: 30_000 })
   const editor = window.locator('[data-code-editor] .cm-content')

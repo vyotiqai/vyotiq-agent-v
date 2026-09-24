@@ -62,6 +62,7 @@ import {
 } from '@renderer/lib/hooks/workspaceHotUiStore'
 import { composerAttachmentKey } from '@renderer/lib/hooks/composerAttachmentStore'
 import { SlashCommandMenu } from './SlashCommandMenu'
+import { NewTaskBrief, type NewTaskTargets } from '@renderer/features/task/NewTaskBrief'
 import { useSlashCommands } from './useSlashCommands'
 import { MentionMenu } from './MentionMenu'
 import { useComposerMentions } from './useComposerMentions'
@@ -83,6 +84,7 @@ function composerLayoutKind(variant: ComposerVariant): ComposerVariant {
     case 'dock':
     case 'inline':
     case 'line':
+    case 'brief':
       return variant
     default: {
       const _exhaustive: never = variant
@@ -206,7 +208,9 @@ export function Composer({
   onCancelEdit,
   onFocus,
   onEditLastUserMessage,
-  runCount = 0
+  runCount = 0,
+  newTaskTargets,
+  briefHeaderActions
 }: {
   provider: ProviderId
   model: string
@@ -276,9 +280,19 @@ export function Composer({
   onEditLastUserMessage?: () => boolean
   /** Line only: runs the task has had — the placeholder names the next one. */
   runCount?: number
+  /** Brief only: the workspaces a new task can move to. */
+  newTaskTargets?: NewTaskTargets
+  /** Brief only: the pane's controls, at the end of its header. */
+  briefHeaderActions?: React.ReactNode
 }) {
   const taRef = useRef<ComposerMentionInputHandle>(null)
   const focusInput = useCallback(() => taRef.current?.focus(), [])
+  /** The New task brief's done-when checks, kept current while the brief is up. */
+  const briefChecksRef = useRef<string[]>([])
+  // Once the task has started the checks are its own; later sends carry none.
+  useEffect(() => {
+    if (variant !== 'brief') briefChecksRef.current = []
+  }, [variant])
   const mentionAnchorRef = useRef<HTMLDivElement | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const workspacePathRef = useRef(workspacePath)
@@ -421,6 +435,10 @@ export function Composer({
       extras?: ComposerSendExtras
     ): Promise<boolean | void> => {
       try {
+        // The brief's checks ride with the first send only.
+        if (briefChecksRef.current.length > 0) {
+          extras = { ...(extras ?? {}), doneWhen: briefChecksRef.current }
+        }
         const boundWorkspace = workspacePath
         const resolved = await resolveComposerMentions({
           workspacePath: boundWorkspace,
@@ -707,6 +725,7 @@ export function Composer({
   const readinessBlocksSend = modelReadinessBlocksSend(readinessIssue)
 
   const { text, setText, canSend, submit, onKeyDown } = useComposerDraft({
+    submitOnModEnter: variant === 'brief',
     draft: resolvedDraft,
     onDraftChange,
     images,
@@ -871,6 +890,7 @@ export function Composer({
   const isDock = layout === 'dock'
   const isInline = layout === 'inline'
   const isLine = layout === 'line'
+  const isBrief = layout === 'brief'
 
   useLayoutEffect(() => {
     if (isInline) taRef.current?.focus()
@@ -970,6 +990,258 @@ export function Composer({
   const showRetry =
     Boolean(onRetryNetwork) &&
     isRetryableTurnFailure({ errorCode, incompleteReason: incomplete?.reason })
+
+  if (isBrief) {
+    const attachFullAll = imagesFull && filesFull && audioFull
+    const attachLabel = attachFullAll
+      ? 'Attachment limits reached'
+      : attachHint
+        ? `Attach files — ${attachHint}`
+        : 'Attach files'
+    const showReadiness = Boolean(readinessIssue && readinessIssue.kind !== 'manual_catalog' && hasWorkspace)
+    const dictationBusy = dictation.phase === 'checking' || dictation.phase === 'transcribing'
+    const hasAttachmentRow =
+      images.length > 0 ||
+      files.length > 0 ||
+      nativeFiles.length > 0 ||
+      audio.length > 0 ||
+      Boolean(imageError || fileError || audioError) ||
+      extracting
+    return (
+      <NewTaskBrief
+        workspacePath={workspacePath ?? null}
+        targets={
+          newTaskTargets
+            ? {
+                workspaces: newTaskTargets.workspaces,
+                // The brief goes with the task; nothing is left behind here.
+                onMove: (path, brief) => {
+                  setText('')
+                  newTaskTargets.onMove(path, brief)
+                }
+              }
+            : undefined
+        }
+        brief={text}
+        banners={
+          bannerError || secondaryBannerError || showReadiness || dictationStripState?.kind === 'error' ? (
+            <div className="mb-4 flex flex-col gap-2">
+              {secondaryBannerError ? <Alert>{secondaryBannerError}</Alert> : null}
+              {bannerError ? <Alert onDismiss={onDismissError}>{bannerError}</Alert> : null}
+              {dictationStripState?.kind === 'error' ? (
+                <DictationErrorBanner
+                  message={dictationStripState.message}
+                  settingsSection={dictationStripState.settingsSection}
+                  onDismiss={() => dictation.setError(null)}
+                  onOpenSettings={slashHandlers?.onOpenSettings}
+                />
+              ) : null}
+              {showReadiness && readinessIssue ? (
+                <ModelReadinessBanner
+                  issue={readinessIssue}
+                  busy={catalogLoading}
+                  onRecheck={() => {
+                    void refreshCatalog({ forceRefresh: true, provider })
+                  }}
+                  onAddKey={() => {
+                    slashHandlers?.onOpenSettings?.('providers')
+                  }}
+                />
+              ) : null}
+            </div>
+          ) : null
+        }
+        fileInput={
+          <input
+            ref={fileRef}
+            type="file"
+            accept={ATTACHMENT_ACCEPT}
+            multiple
+            className="hidden"
+            aria-hidden
+            tabIndex={-1}
+            onChange={(e) => {
+              void onPickAttachments(e.target.files)
+              e.target.value = ''
+            }}
+          />
+        }
+        input={
+          dictationActive ? (
+            <div
+              className="flex min-h-[132px] items-start gap-2"
+              role="status"
+              aria-live="polite"
+              aria-label={dictation.phase === 'recording' ? 'Listening' : lineMic(dictation.phase, null).label}
+              data-dictation-session={dictationStripState?.kind}
+            >
+              <Waveform samples={dictation.waveform} style={dictation.waveformStyle} />
+              <span className="shrink-0 font-mono text-xs text-muted tnum" aria-hidden="true">
+                {formatElapsed(dictation.elapsedMs)}
+              </span>
+            </div>
+          ) : (
+          <div
+            ref={mentionAnchorRef}
+            data-composer-input-wrap
+            onDragOver={onAttachmentDragOver}
+            onDrop={onAttachmentDrop}
+          >
+            <ComposerMentionInput
+              ref={taRef}
+              size="brief"
+              newlineOnEnter
+              ariaLabel="Brief"
+              value={text}
+              onChange={(next) => {
+                setText(next)
+                requestAnimationFrame(syncCursor)
+              }}
+              onKeyDown={(e) => {
+                onKeyDown(e)
+                requestAnimationFrame(syncCursor)
+              }}
+              onCaretChange={(offset) => setCursor(offset)}
+              onPasteFiles={(pasted) => {
+                void onPickAttachments(pasted)
+              }}
+              placeholder={
+                composerPlaceholder?.trim() ||
+                (hasWorkspace
+                  ? 'Describe the task — the agent plans it, does it, and shows you the result'
+                  : 'Open a workspace to start a task')
+              }
+              disabled={inputLocked}
+              onFocus={onFocus}
+              aria-expanded={slash.open || mentions.open}
+              aria-controls={slash.open ? slashListId : mentions.open ? mentionListId : undefined}
+              aria-autocomplete={slash.open || mentions.open ? 'list' : undefined}
+              aria-activedescendant={
+                slash.open && slash.activeCommand
+                  ? `${slashListId}-opt-${slash.activeCommand.id}`
+                  : mentions.open && mentions.activeItem
+                    ? `${mentionListId}-opt-${mentions.activeItem.id}`
+                    : undefined
+              }
+            />
+          </div>
+          )
+        }
+        mic={
+          <IconButton
+            icon={dictationActive ? (dictationBusy ? 'loader' : 'stop') : 'mic'}
+            label={lineMic(dictation.phase, dictation.engineHint).label}
+            title={lineMic(dictation.phase, dictation.engineHint).tip}
+            size="md"
+            tone="muted"
+            active={dictation.phase === 'recording'}
+            disabled={Boolean(disabled) || dictationBusy}
+            aria-busy={dictationBusy || undefined}
+            className={dictationBusy ? '[&_svg]:motion-safe:animate-spin' : undefined}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={dictation.toggle}
+          />
+        }
+        attachments={
+          hasAttachmentRow ? (
+            <ComposerAttachments
+              images={images}
+              imageError={imageError}
+              files={files}
+              nativeFiles={nativeFiles}
+              audio={audio}
+              fileError={fileError}
+              audioError={audioError}
+              extracting={extracting}
+              attachLocked={inputLocked}
+              onRemove={removeImage}
+              onRemoveFile={removeFile}
+              onRemoveNativeFile={removeNativeFile}
+              onRemoveAudio={removeAudio}
+            />
+          ) : null
+        }
+        menus={
+          <>
+            <SlashCommandMenu
+              open={slash.open}
+              commands={slash.filtered}
+              activeIndex={slash.activeIndex}
+              onActiveIndexChange={slash.setActiveIndex}
+              onPick={onSlashAccept}
+              onDismiss={slash.dismiss}
+              anchorRef={mentionAnchorRef}
+              listId={slashListId}
+              loading={slash.loading}
+              listError={slash.listError}
+            />
+            <MentionMenu
+              open={mentions.open}
+              view={mentions.view}
+              items={mentions.items}
+              activeIndex={mentions.activeIndex}
+              onActiveIndexChange={mentions.setActiveIndex}
+              onPick={onMentionAccept}
+              onDismiss={mentions.dismiss}
+              onBack={mentions.goBack}
+              anchorRef={mentionAnchorRef}
+              listId={mentionListId}
+              loading={mentions.loading}
+            />
+          </>
+        }
+        attachLabel={attachLabel}
+        attachDisabled={inputLocked || attachFullAll}
+        onAttach={() => fileRef.current?.click()}
+        onMention={() => {
+          // Typing @ is what opens the context menu; do the same at the caret.
+          taRef.current?.insertText('@')
+        }}
+        options={{
+          provider,
+          model,
+          providers,
+          optionsByProvider,
+          seedsByProvider,
+          modelMetaByValue,
+          warningsByProvider,
+          favoriteModels,
+          recentModels,
+          serviceTier,
+          secrets,
+          ollamaBaseUrl,
+          customOpenAiBaseUrl,
+          onModelChange: onProviderModel,
+          onToggleFavorite,
+          onServiceTierChange,
+          onRefreshCatalog: () => {
+            setRefreshingCatalog(true)
+            void refreshCatalog({ forceRefresh: true, provider: browsedProvider }).finally(() =>
+              setRefreshingCatalog(false)
+            )
+          },
+          onBrowseProvider: setBrowsedProvider,
+          catalogLoading,
+          agentMode,
+          onAgentModeChange,
+          chatSettings,
+          onChatSettingsChange,
+          onAddProvider: slashHandlers?.onOpenSettings ? () => slashHandlers.onOpenSettings?.('providers') : undefined,
+          running,
+          disabled: settingsLocked,
+          focusInput
+        }}
+        canStart={canSend}
+        startBlockedReason={sendDisabledReason}
+        onChecksChange={(doneWhen) => {
+          briefChecksRef.current = doneWhen
+        }}
+        onStart={() => submit()}
+        onOpenSettings={slashHandlers?.onOpenSettings ? (section) => slashHandlers.onOpenSettings?.(section) : undefined}
+        headerActions={briefHeaderActions}
+      />
+    )
+  }
 
   if (isLine) {
     const attachFullAll = imagesFull && filesFull && audioFull

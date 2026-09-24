@@ -236,7 +236,7 @@ export function ComposerToolbarTools({
  * `line` is the task's instruction line: one row flush with the pane's bottom
  * edge — no Send or Stop button (Enter sends, Esc stops), options in one token.
  */
-export type ComposerVariant = 'hero' | 'dock' | 'inline' | 'line'
+export type ComposerVariant = 'hero' | 'dock' | 'inline' | 'line' | 'brief'
 
 function dictationMicLabel(phase: DictationPhase): string {
   switch (phase) {
@@ -336,6 +336,7 @@ function composerToolbarKind(variant: ComposerVariant): 'inline' | 'standard' {
     case 'hero':
     case 'dock':
     case 'line':
+    case 'brief':
       return 'standard'
     default: {
       const _exhaustive: never = variant

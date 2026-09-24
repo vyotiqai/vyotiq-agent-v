@@ -260,7 +260,12 @@ export const CodeIndexRuntimeStatusSchema = z.object({
   message: z.string().nullable(),
   error: z.string().nullable(),
   /** Live file counters while phase === 'syncing'. */
-  indexProgress: CodeIndexSyncProgressSchema.nullable().default(null)
+  indexProgress: CodeIndexSyncProgressSchema.nullable().default(null),
+  /**
+   * The workspace this phase belongs to. One status serves every workspace,
+   * so without it a sync in one reads as building in all of them.
+   */
+  workspacePath: z.string().min(1).optional()
 })
 export type CodeIndexRuntimeStatus = z.infer<typeof CodeIndexRuntimeStatusSchema>
 

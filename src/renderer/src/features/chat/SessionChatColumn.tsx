@@ -13,7 +13,8 @@ import type {
 } from '@shared/ipc'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import type { ChatStreamController } from '@renderer/lib/hooks/createChatStreamController'
-import { TaskPane, type TaskPaneRunActions } from '@renderer/features/task/TaskPane'
+import { PaneHeaderActions, TaskPane, type TaskPaneRunActions } from '@renderer/features/task/TaskPane'
+import type { NewTaskTargets } from '@renderer/features/task/NewTaskBrief'
 import { runTitle } from '@renderer/app/navigator/runTitle'
 import { Composer } from './components/composer'
 import { useHasChatItems } from './components/ChatStreamLeaves'
@@ -111,7 +112,8 @@ export function SessionChatColumn({
   getInstanceController,
   run = null,
   runActions = {},
-  instanceRuns
+  instanceRuns,
+  newTaskTargets
 }: {
   items: UiItem[]
   itemsStore?: ChatItemsStore
@@ -213,6 +215,8 @@ export function SessionChatColumn({
   runActions?: TaskPaneRunActions
   /** This workspace's instance runs, for an open instance's worktree branch. */
   instanceRuns?: readonly RunSummary[]
+  /** The workspaces a new task can move to from its brief. */
+  newTaskTargets?: NewTaskTargets
 }) {
   const instanceOpenControlled =
     onOpenInstanceRunIdChange != null
@@ -229,6 +233,8 @@ export function SessionChatColumn({
   } = useInlineInstanceUi(agentInstances, activeRunId, instanceOpenControlled)
 
   const hasItems = useHasChatItems(itemsStore, items)
+  // Nothing sent and no run behind it: the pane is a new task's brief.
+  const newTask = !activeRunId && !hasItems && !pendingRun && !running
   const { chatBannerError, turnFailed } = useChatErrorSurfaces({
     itemsStore,
     items,
@@ -462,18 +468,29 @@ export function SessionChatColumn({
             onGoalDismiss={runGoal.dismiss}
             onStopLoop={runGoal.stopLoop}
             onShowInspector={onShowInspector}
+            newTask={newTask}
             composer={
               <div
-                className={editing ? 'hidden' : undefined}
+                className={editing ? 'hidden' : newTask ? 'flex min-h-0 flex-1 flex-col' : undefined}
                 inert={editing ? true : undefined}
                 aria-hidden={editing || undefined}
               >
                 <MemoComposer
                   key={`composer:${surfaceKey}`}
                   {...composerProps}
-                  variant="line"
+                  variant={newTask ? 'brief' : 'line'}
                   runCount={runCount}
                   onDismissError={onDismissError}
+                  newTaskTargets={newTaskTargets}
+                  briefHeaderActions={
+                    newTask ? (
+                      <PaneHeaderActions
+                        title="New task"
+                        onShowInspector={onShowInspector}
+                        onClosePane={runActions.onClosePane}
+                      />
+                    ) : undefined
+                  }
                 />
               </div>
             }

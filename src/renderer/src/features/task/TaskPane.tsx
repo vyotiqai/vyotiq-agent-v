@@ -101,6 +101,8 @@ export type TaskPaneProps = {
   composer: ReactNode
   /** Set on the rightmost pane while the inspector is hidden: offer it back. */
   onShowInspector?: () => void
+  /** Not started yet: the composer (its brief variant) is the whole pane. */
+  newTask?: boolean
 }
 
 const NO_FOLDS: ReadonlySet<string> = new Set()
@@ -121,6 +123,36 @@ function useRunEndRevision(live: boolean): number {
  * pane. Everything shown is read from the run's own stream, its files on disk
  * and the run list; nothing is kept here that those do not say.
  */
+/**
+ * The pane's own controls at the end of its header: the inspector, when it is
+ * hidden, and closing this pane of a split — named for the task, so each pane
+ * says which one closes.
+ */
+export function PaneHeaderActions({
+  title,
+  onShowInspector,
+  onClosePane
+}: {
+  title: string
+  onShowInspector?: () => void
+  onClosePane?: () => void
+}) {
+  return (
+    <>
+      {onShowInspector ? (
+        <IconButton
+          icon="inspector"
+          label={`Show inspector (${shortcutLabel('inspector')})`}
+          size="sm"
+          tone="muted"
+          onClick={onShowInspector}
+        />
+      ) : null}
+      {onClosePane ? <IconButton icon="close" label={`Close ${title}`} size="sm" tone="muted" onClick={onClosePane} /> : null}
+    </>
+  )
+}
+
 export function TaskPane(props: TaskPaneProps) {
   const { workspacePath, runId, running, pendingRun, showThinking } = props
   const live = running || pendingRun
@@ -363,6 +395,15 @@ export function TaskPane(props: TaskPaneProps) {
   const empty = items.length === 0
   const loading = Boolean(props.transcriptLoading) && empty
 
+  // A task not started yet is its brief; the composer draws the whole page.
+  if (props.newTask) {
+    return (
+      <div className="relative flex min-h-0 flex-1 flex-col bg-bg" data-chat-stage data-task-pane>
+        {props.composer}
+      </div>
+    )
+  }
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col bg-bg" data-chat-stage data-task-pane>
       <TaskHeader
@@ -411,19 +452,7 @@ export function TaskPane(props: TaskPaneProps) {
                 )}
               />
             ) : null}
-            {props.onShowInspector ? (
-              <IconButton
-                icon="inspector"
-                label={`Show inspector (${shortcutLabel('inspector')})`}
-                size="sm"
-                tone="muted"
-                onClick={props.onShowInspector}
-              />
-            ) : null}
-            {props.actions.onClosePane ? (
-              // Named for the task so split panes each say which one closes.
-              <IconButton icon="close" label={`Close ${title}`} size="sm" tone="muted" onClick={props.actions.onClosePane} />
-            ) : null}
+            <PaneHeaderActions title={title} onShowInspector={props.onShowInspector} onClosePane={props.actions.onClosePane} />
           </>
         }
       />

@@ -122,7 +122,8 @@ const baseProps = {
   workspacePath: '/ws',
   provider: 'ollama' as const,
   model: 'qwen2.5',
-  activeRunId: null,
+  // A task is on screen: a new task keeps the inspector out of the way until asked.
+  activeRunId: 'run-1',
   chatSettings: {
     provider: 'ollama' as const,
     model: 'qwen2.5',
@@ -346,6 +347,26 @@ describe('ChatView composer placement', () => {
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true })
     expect(inspectorTab(/^Terminal/).getAttribute('aria-selected')).toBe('true')
     await waitForPanel('[data-terminal-panel]')
+  })
+
+  it('leaves a new task the work area until the inspector is asked for', () => {
+    const { rerender } = render(<ChatView {...baseProps} items={[]} activeRunId={null} />)
+    // No run and no record yet: the brief has the work area to itself.
+    expect(document.querySelector('[data-inspector]')).toBeNull()
+
+    fireEvent.keyDown(window, { key: 'i', ctrlKey: true })
+    expect(inspectorTab(/^Changes/).getAttribute('aria-selected')).toBe('true')
+    expect(localStorage.getItem('vyotiq.inspectorOpen')).not.toBe('0')
+
+    // The task starts: the inspector stays up.
+    rerender(<ChatView {...baseProps} items={[]} activeRunId="run-1" />)
+    expect(document.querySelector('[data-inspector]')).toBeTruthy()
+
+    // The next new task starts unasked; a tab chord asks for its tab.
+    rerender(<ChatView {...baseProps} items={[]} activeRunId={null} />)
+    expect(document.querySelector('[data-inspector]')).toBeNull()
+    fireEvent.keyDown(window, { key: '2', altKey: true })
+    expect(inspectorTab(/^Files/).getAttribute('aria-selected')).toBe('true')
   })
 
   it('answers the palette for hide / show and expand', () => {

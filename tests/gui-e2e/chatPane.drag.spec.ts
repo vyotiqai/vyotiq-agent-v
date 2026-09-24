@@ -166,12 +166,12 @@ test('multi-pane polish: min widths, sidebar open state, docked empty, inspector
   await expect(window.locator('[data-chat-side-rail]')).toHaveCount(0)
   await expect(window.getByRole('button', { name: /^Show inspector/ })).toHaveCount(0)
 
-  // New chat in multi-pane stays docked (no centered hero).
+  // A new task in multi-pane gets its brief inside the pane (no centered hero).
   await window.getByRole('button', { name: /new task/i }).first().click()
   await expect(window.locator('[data-chat-pane]')).toHaveCount(2)
   await expect(window.locator('[data-chat-pane-title="New task"]')).toBeVisible({ timeout: 10_000 })
   const newPane = window.locator('[data-chat-pane-title="New task"]')
-  await expect(newPane.locator('[data-composer-line]')).toBeVisible()
+  await expect(newPane.locator('[data-new-task]')).toBeVisible()
   await expect(newPane.locator('[data-composer-hero]')).toHaveCount(0)
 })
 
@@ -241,7 +241,7 @@ test('Ctrl/Cmd+\\ splits the focused pane into an empty draft beside it', async 
   const draft = window.locator('[data-chat-pane-title="New task"]')
   await expect(draft).toBeVisible({ timeout: 10_000 })
   await expect(draft).toHaveAttribute('data-chat-pane-focused', '1')
-  await expect(draft.locator('[data-composer-line]')).toBeVisible()
+  await expect(draft.locator('[data-new-task]')).toBeVisible()
 
   // A draft pane offers no split (its header has no run to split beside), and
   // the shortcut refuses it (two drafts would share one composer): toast,

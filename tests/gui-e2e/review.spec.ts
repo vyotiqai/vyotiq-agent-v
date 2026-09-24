@@ -49,6 +49,9 @@ test.afterAll(async () => {
 test('reviews the working tree side by side, ticking files off as viewed', async () => {
   const { window } = launched
   const inspector = window.locator('[data-inspector]')
+  // A new task keeps the inspector out of the way until asked; Alt 1 asks for Changes.
+  await expect(window.locator('[data-new-task]')).toBeVisible({ timeout: 20_000 })
+  await window.keyboard.press('Alt+1')
   await expect(inspector).toBeVisible({ timeout: 20_000 })
 
   // Nothing from a task yet: git's view of the working tree instead.

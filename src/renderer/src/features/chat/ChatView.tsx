@@ -403,10 +403,20 @@ const runGoal = useRunGoal({
     INSPECTOR_EXPANDED_KEY,
     false
   )
+  // A new task has no artifacts yet, so its brief has the work area to itself;
+  // asking for the inspector (a tab, Ctrl I, Show inspector) brings it anyway,
+  // and the saved open/closed choice is left as it was.
+  const newTaskOnScreen = !activeRunId && items.length === 0 && !pendingRun && !running
+  const [newTaskInspectorAsked, setNewTaskInspectorAsked] = useState(false)
+  // Each new task starts unasked — tabs opened on the task before do not count.
+  useEffect(() => {
+    setNewTaskInspectorAsked(false)
+  }, [newTaskOnScreen, workspacePath])
+  const inspectorVisible = inspectorOpen && (!newTaskOnScreen || newTaskInspectorAsked)
   /** Expanded, the inspector is the whole work area and the record steps aside. */
-  const inspectorExpanded = inspectorOpen && inspectorExpandedPref
+  const inspectorExpanded = inspectorVisible && inspectorExpandedPref
   /** The panel on screen, if any. */
-  const activeRightPanel: ChatRightPanelId | null = inspectorOpen ? inspectorTab : null
+  const activeRightPanel: ChatRightPanelId | null = inspectorVisible ? inspectorTab : null
   /** Changes taken to the whole work area is the review, with a header of its own. */
   const reviewing = inspectorExpanded && inspectorTab === 'changes'
   const [requestedFilePath, setRequestedFilePath] =
@@ -576,6 +586,7 @@ const runGoal = useRunGoal({
       }
       setInspectorTab(next)
       setInspectorOpen(true)
+      setNewTaskInspectorAsked(true)
       setMountedPanels((prev) => (prev.includes(next) ? prev : [...prev, next]))
       try {
         localStorage.setItem(RIGHT_PANEL_KEY, next)
@@ -715,9 +726,9 @@ const runGoal = useRunGoal({
   )
 
   const toggleInspector = useCallback(() => {
-    if (inspectorOpen) hideInspector()
+    if (inspectorVisible) hideInspector()
     else setRightPanel(inspectorTab)
-  }, [hideInspector, inspectorOpen, inspectorTab, setRightPanel])
+  }, [hideInspector, inspectorVisible, inspectorTab, setRightPanel])
 
   const toggleInspectorExpanded = useCallback(() => {
     if (inspectorExpanded) {
@@ -951,7 +962,7 @@ const runGoal = useRunGoal({
   // The Browser tab's dot says it while the inspector is up; with it hidden,
   // this row is the only sign the agent is driving a page.
   const browserWatchBanner =
-    browserBusy && !inspectorOpen ? (
+    browserBusy && !inspectorVisible ? (
       <div
         className="flex h-8 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs"
         data-browser-watch-banner
@@ -970,7 +981,7 @@ const runGoal = useRunGoal({
 
   /** With the inspector hidden, the rightmost pane's header offers it back. */
   const showInspector = useCallback(() => setRightPanel(inspectorTab), [inspectorTab, setRightPanel])
-  const onShowInspector = inspectorOpen ? undefined : showInspector
+  const onShowInspector = inspectorVisible ? undefined : showInspector
 
   const {
     editingUserMessageIndex,
@@ -1426,7 +1437,7 @@ const runGoal = useRunGoal({
           {browserWatchBanner}
           {agentColumn}
         </div>
-        {inspectorOpen ? (
+        {inspectorVisible ? (
           <>
             {inspectorExpanded ? null : (
               <PanelResizeHandle

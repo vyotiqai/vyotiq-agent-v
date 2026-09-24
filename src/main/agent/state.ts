@@ -2,6 +2,12 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, rmSync, wri
 import { readFile, readdir, open, stat } from 'fs/promises'
 import { join, basename } from 'path'
 import { atomicWriteFile, atomicWriteFileAsync, atomicWriteJson } from '../storage/atomicWrite'
+import {
+  DONE_WHEN_CHECKS_FILE,
+  contractDoneWhenBlock,
+  normalizeCheckText,
+  type DoneWhenCheck
+} from '../../shared/doneWhenChecks'
 import { enqueueEventAppend, flushEventAppends, listEventArchives, listEventArchivesSync, removeEventArchives } from './eventAppendQueue'
 import {
   enqueueMessageAppend,
@@ -259,8 +265,24 @@ export function appendMessage(dir: string, message: ChatMessage): Promise<void> 
   return enqueueMessageAppend(dir, line)
 }
 
+/** The brief's checks, numbered c1… in the order typed; a repeat is one check. */
+function briefDoneWhenChecks(texts: readonly string[], createdAt: string): DoneWhenCheck[] {
+  const seen = new Set<string>()
+  const checks: DoneWhenCheck[] = []
+  for (const raw of texts) {
+    const text = raw.trim()
+    const key = normalizeCheckText(text)
+    if (!text || seen.has(key)) continue
+    seen.add(key)
+    checks.push({ id: `c${checks.length + 1}`, text, source: 'brief', verdict: null, createdAt })
+  }
+  return checks
+}
+
 export type CreateRunOptions = {
   mode?: AgentInteractionMode
+  /** The brief's done-when checks: the run's first checks and its contract's Done when. */
+  doneWhen?: string[]
   parentRunId?: string
   inlineInstance?: true
   pathScope?: string[]
@@ -281,6 +303,8 @@ export function createRun(
   ensureWorkspaceStorage(workspacePath)
   mkdirSync(dir, { recursive: true })
   const goalText = goal.trim() || 'chat'
+  const briefChecks = briefDoneWhenChecks(options.doneWhen ?? [], new Date().toISOString())
+  if (briefChecks.length > 0) atomicWriteJson(join(dir, DONE_WHEN_CHECKS_FILE), { checks: briefChecks })
   atomicWriteFile(
     join(dir, 'contract.md'),
     [
@@ -288,12 +312,16 @@ export function createRun(
       '',
       goalText,
       '',
-      '## Done when',
-      '',
-      '- The goal above is satisfied (check outcomes: read results, command output, or user-visible success).',
-      '- Or blockers are explained clearly and no further narrow retry will help.',
-      '- Update this file if scope or done-when changes.',
-      ''
+      ...(briefChecks.length > 0
+        ? [contractDoneWhenBlock(briefChecks), '']
+        : [
+            '## Done when',
+            '',
+            '- The goal above is satisfied (check outcomes: read results, command output, or user-visible success).',
+            '- Or blockers are explained clearly and no further narrow retry will help.',
+            '- Update this file if scope or done-when changes.',
+            ''
+          ])
     ].join('\n')
   )
   const status: RunStatus = {

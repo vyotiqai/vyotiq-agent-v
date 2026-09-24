@@ -169,7 +169,8 @@ export function warmWorkspaceIndexes(
           message: sync ? `Index ready · ${sync.indexed} updated · ${sync.skipped} skipped` : 'Index ready',
           error: null,
           progress: 1,
-          indexProgress: null
+          indexProgress: null,
+          workspacePath: workspaceRoot
         })
       } catch (err) {
         if (signal.aborted || isAbortError(err)) return
@@ -189,7 +190,8 @@ export function warmWorkspaceIndexes(
       message: null,
       error: 'Workspace index sync failed. Click Reindex workspace to retry.',
       progress: null,
-      indexProgress: null
+      indexProgress: null,
+      workspacePath: workspaceRoot
     })
   })
 }

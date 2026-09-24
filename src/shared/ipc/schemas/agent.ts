@@ -827,9 +827,22 @@ export const ChatStartRequestSchema = z
     modelExplicit: z.boolean().optional(),
     /** Teammate profile binding: identity, per-profile memory namespace, model pin. */
     agentProfileId: AgentProfileIdSchema.optional(),
-    runtime: AgentProfileRuntimeSchema.optional()
+    runtime: AgentProfileRuntimeSchema.optional(),
+    /**
+     * A new task's done-when checks, typed in its brief. The run is judged
+     * against them: they are its first checks (source `brief`) and its
+     * contract's Done when.
+     */
+    doneWhen: z.array(z.string().trim().min(1).max(500)).max(20).optional()
   })
   .superRefine((val, ctx) => {
+    if (val.doneWhen?.length && val.runId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'doneWhen belongs to a new task; a running task adds checks through its plan',
+        path: ['doneWhen']
+      })
+    }
     if (val.incremental) {
       if (!val.runId) {
         ctx.addIssue({
@@ -2007,9 +2020,16 @@ export const WorkspaceAgentContextResultSchema = z.object({
     /** Files from `.cursor/rules` and `.vyotiq/rules` that reach the prompt. */
     ruleFileCount: z.number().int().nonnegative()
   }),
+  /** Notes in `.vyotiq/memory/notes` — the memory's index and state are not notes. */
   memoryNotes: z.number().int().nonnegative(),
+  /** The most recently changed notes, newest first. */
+  memoryNoteNames: z.array(z.string().min(1)).max(3).optional(),
   codeIndex: z.object({
-    state: z.enum(['ready', 'building', 'degraded', 'off'])
+    state: z.enum(['ready', 'building', 'degraded', 'off']),
+    /** Files in this workspace's own index, when it has one. */
+    files: z.number().int().nonnegative().optional(),
+    /** When that index last finished a pass (ISO). */
+    indexedAt: z.string().min(1).optional()
   })
 })
 export type WorkspaceAgentContextResult = z.infer<typeof WorkspaceAgentContextResultSchema>
@@ -2134,6 +2154,8 @@ export function contentHasImage(content: MessageContent): boolean {
 export type ComposerSendExtras = {
   audio?: AttachedAudio[]
   nativeFiles?: AttachedNativeFile[]
+  /** A new task's done-when checks, from its brief. Ignored once the task has started. */
+  doneWhen?: string[]
 }
 
 export function buildUserContent(

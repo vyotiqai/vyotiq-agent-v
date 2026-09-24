@@ -1019,6 +1019,8 @@ export type RunAgentInput = {
   delegatedTaskId?: string
   /** Execution substrate (Phase 4 runtime seam) — local unless cloud is wired. */
   runtime?: 'local' | 'cloud'
+  /** A new task's done-when checks, from its brief — written when the run is created. */
+  doneWhen?: string[]
 }
 
 export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent> {
@@ -1296,7 +1298,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         const persisted = loadStatus(runDir)
         agentMode = input.mode ?? persisted?.mode ?? agentMode
       } else {
-        runDir = createRun(workspace, runId, goal, agentMode)
+        runDir = createRun(workspace, runId, goal, {
+          mode: agentMode,
+          ...(input.doneWhen?.length ? { doneWhen: input.doneWhen } : {})
+        })
         // Persist the substrate + identity snapshot before any async failure
         // window — a fresh run that crashes during message flush must still
         // resume with its teammate binding intact.

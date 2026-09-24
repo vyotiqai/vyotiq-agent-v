@@ -29,6 +29,8 @@ export type ComposerMentionInputHandle = {
   focus: () => void
   getSelectionStart: () => number
   setSelectionStart: (offset: number) => void
+  /** Type `text` at the caret, as if the user had — menus open on `@` and `/` as they would. */
+  insertText: (text: string) => void
   el: HTMLDivElement | null
 }
 
@@ -364,8 +366,10 @@ export const ComposerMentionInput = forwardRef<
     className?: string
     /** Accessible name — "Instruction" on the instruction line. */
     ariaLabel?: string
-    /** `sm`: one 20px row of body text, for the instruction line. */
-    size?: 'md' | 'sm'
+    /** `sm`: one 20px row of body text, for the instruction line. `brief`: the New task brief, six rows tall. */
+    size?: 'md' | 'sm' | 'brief'
+    /** Enter makes a new line (Shift+Enter's break); the caller submits on Ctrl/Cmd+Enter. */
+    newlineOnEnter?: boolean
     onPasteFiles?: (files: File[]) => void
     'aria-expanded'?: boolean
     'aria-controls'?: string
@@ -384,6 +388,7 @@ export const ComposerMentionInput = forwardRef<
     className,
     ariaLabel = 'Message',
     size = 'md',
+    newlineOnEnter = false,
     onPasteFiles,
     onFocus,
     'aria-expanded': ariaExpanded,
@@ -403,6 +408,10 @@ export const ComposerMentionInput = forwardRef<
     getSelectionStart: () => (elRef.current ? caretSerializedOffset(elRef.current) : 0),
     setSelectionStart: (offset: number) => {
       if (elRef.current) setCaretSerializedOffset(elRef.current, offset)
+    },
+    insertText: (text: string) => {
+      elRef.current?.focus()
+      if (insertPlainText(elRef.current, text)) emitFromDom()
     },
     get el() {
       return elRef.current
@@ -486,8 +495,12 @@ export const ComposerMentionInput = forwardRef<
       {empty && placeholder ? (
         <div
           className={cn(
-            'pointer-events-none absolute inset-0 flex items-center tracking-normal',
-            size === 'sm' ? 'truncate text-sm text-tertiary' : 'text-md leading-snug text-secondary'
+            'pointer-events-none absolute inset-0 flex tracking-normal',
+            size === 'sm'
+              ? 'items-center truncate text-sm text-tertiary'
+              : size === 'brief'
+                ? 'items-start text-md leading-[22px] text-tertiary'
+                : 'items-center text-md leading-snug text-secondary'
           )}
           aria-hidden
           style={{ letterSpacing: 0, textRendering: 'auto' }}
@@ -515,8 +528,12 @@ export const ComposerMentionInput = forwardRef<
         suppressContentEditableWarning
         className={cn(
           'min-w-0 w-full overflow-y-auto whitespace-pre-wrap break-words',
-          size === 'sm' ? 'min-h-5 text-sm leading-5 text-fg-strong' : 'min-h-9 text-md leading-snug text-fg',
-          COMPOSER_TEXTAREA_MAX_CLASS,
+          size === 'sm'
+            ? 'min-h-5 text-sm leading-5 text-fg-strong'
+            : size === 'brief'
+              ? 'min-h-[132px] text-md leading-[22px] text-fg-strong'
+              : 'min-h-9 text-md leading-snug text-fg',
+          size === 'brief' ? 'max-h-[50vh]' : COMPOSER_TEXTAREA_MAX_CLASS,
           'border-0 bg-transparent p-0 outline-none ring-0',
           'focus:ring-0 focus-visible:ring-0',
           disabled && 'opacity-[var(--vy-disabled-opacity)]',
@@ -525,6 +542,19 @@ export const ComposerMentionInput = forwardRef<
         onInput={onInput}
         onKeyDown={(e) => {
           onKeyDown(e)
+          // A brief takes Enter as a new line, the same break Shift+Enter makes.
+          if (
+            newlineOnEnter &&
+            e.key === 'Enter' &&
+            !e.defaultPrevented &&
+            !e.shiftKey &&
+            !e.ctrlKey &&
+            !e.metaKey &&
+            !composingRef.current
+          ) {
+            e.preventDefault()
+            if (insertPlainText(elRef.current, '\n')) emitFromDom()
+          }
           requestAnimationFrame(syncCaret)
         }}
         onKeyUp={syncCaret}

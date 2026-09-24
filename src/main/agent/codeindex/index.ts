@@ -158,7 +158,8 @@ async function ensureCodeIndexSyncedUnlocked(
     phase: 'syncing',
     message: opts.force ? 'Syncing codebase index' : 'Incremental sync',
     error: null,
-    indexProgress: null
+    indexProgress: null,
+    workspacePath: workspaceRoot
   })
   const store = getOrOpenCodeIndexStore(workspaceRoot)
   const sync = await syncCodeIndex(workspaceRoot, store, {
@@ -180,7 +181,8 @@ async function ensureCodeIndexSyncedUnlocked(
       message: `Code index synced · ${sync.indexed} updated · ${sync.skipped} skipped`,
       error: null,
       progress: 0.7,
-      indexProgress: doneProgress
+      indexProgress: doneProgress,
+      workspacePath: workspaceRoot
     })
   } else {
     clearIndexSyncProgress()
@@ -189,7 +191,8 @@ async function ensureCodeIndexSyncedUnlocked(
       message: `Index ready · ${sync.indexed} updated · ${sync.skipped} skipped`,
       error: null,
       progress: 1,
-      indexProgress: doneProgress
+      indexProgress: doneProgress,
+      workspacePath: workspaceRoot
     })
   }
   scheduleDenseWarm(workspaceRoot)
@@ -367,7 +370,8 @@ function scheduleDenseWarm(workspaceRoot: string): void {
               message: `Embedding vectors · ${done}/${total}`,
               error: null,
               progress: total > 0 ? done / total : 1,
-              indexProgress: null
+              indexProgress: null,
+              workspacePath: workspaceRoot
             })
           }
         }
@@ -377,6 +381,7 @@ function scheduleDenseWarm(workspaceRoot: string): void {
         setCodeIndexRuntimeStatus({
           phase: 'ready',
           message: `Index ready · ${after.vectorized}/${after.total} vectors embedded`,
+          workspacePath: workspaceRoot,
           error: null,
           progress: 1,
           indexProgress: null

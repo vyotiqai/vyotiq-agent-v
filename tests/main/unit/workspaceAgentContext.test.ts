@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mkdir, mkdtemp, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, utimes, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { basename, dirname, join } from 'path'
 import {
@@ -8,6 +8,7 @@ import {
 } from '@shared/ipc'
 import {
   buildWorkspaceAgentContext,
+  codeIndexStateFor,
   mapCodeIndexState
 } from '@main/agent/context/agentContext'
 
@@ -87,14 +88,42 @@ describe('workspace:agentContext', () => {
     expect(ctx.codeIndex.state).toBe('off')
   })
 
-  it('counts .md memory files under .vyotiq/memory', async () => {
+  it('counts and names the notes, newest first — not the memory index or state', async () => {
     const dir = await makeWorkspace({
       '.vyotiq/memory/index.md': '# Memory index\n',
       '.vyotiq/memory/state.md': 'state\n',
-      '.vyotiq/memory/notes/one.md': 'one\n'
+      '.vyotiq/memory/notes/one.md': 'one\n',
+      '.vyotiq/memory/notes/two.md': 'two\n'
     })
+    const old = new Date('2026-01-01T00:00:00Z')
+    await utimes(join(dir, '.vyotiq/memory/notes/one.md'), old, old)
     const ctx = await buildWorkspaceAgentContext(dir, { enabled: true, phase: 'ready' })
-    expect(ctx.memoryNotes).toBe(3)
+    expect(ctx.memoryNotes).toBe(2)
+    expect(ctx.memoryNoteNames).toEqual(['two', 'one'])
+    await expect(WorkspaceAgentContextResultSchema.parseAsync(ctx)).resolves.toEqual(ctx)
+  })
+
+  it('reads the index phase only for the workspace the status names', async () => {
+    const dir = await makeWorkspace({})
+    const own = await buildWorkspaceAgentContext(dir, { enabled: true, phase: 'syncing', statusWorkspace: dir })
+    expect(own.codeIndex.state).toBe('building')
+    // Another workspace's sync says nothing about this one, which was never indexed.
+    const other = await buildWorkspaceAgentContext(dir, {
+      enabled: true,
+      phase: 'syncing',
+      statusWorkspace: join(dir, 'elsewhere')
+    })
+    expect(other.codeIndex.state).toBe('off')
+    expect(other.codeIndex.files).toBeUndefined()
+  })
+
+  it('answers from the workspace\'s own index when the status names another', () => {
+    const idle = { enabled: true, phase: 'syncing' as const, statusWorkspace: 'C:/other' }
+    expect(codeIndexStateFor('C:/repo', idle, { files: 120, indexedAt: '2026-09-24T09:00:00.000Z' })).toBe('ready')
+    expect(codeIndexStateFor('C:/repo', idle, { files: 0, indexedAt: null })).toBe('off')
+    expect(codeIndexStateFor('C:/repo', idle, null)).toBe('off')
+    expect(codeIndexStateFor('C:/repo', { ...idle, statusWorkspace: 'C:/repo' }, null)).toBe('building')
+    expect(codeIndexStateFor('C:/repo', { ...idle, enabled: false, statusWorkspace: 'C:/repo' }, null)).toBe('off')
   })
 
   it('returns branch null and the basename outside a git repo', async () => {

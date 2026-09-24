@@ -50,12 +50,12 @@ test('first send opens tool approval onboarding then streams fixture', async () 
     await expand.click()
   }
 
-  const composer = window.getByRole('combobox', { name: 'Instruction' })
+  const composer = window.getByRole('combobox', { name: 'Brief' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('First send with onboarding')
 
-  // The instruction line sends on Enter — it has no Send button.
-  await composer.press('Enter')
+  // A new task starts from its brief on Ctrl+Enter — Enter is a new line there.
+  await composer.press('Control+Enter')
 
   await expect(window.getByRole('heading', { name: 'Tool approval' })).toBeVisible({
     timeout: 10_000

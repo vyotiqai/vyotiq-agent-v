@@ -48,6 +48,8 @@ export type LaunchRunRequest = {
   runtime?: 'local' | 'cloud'
   /** Delegated task that owns this run (scheduler launches only). */
   delegatedTaskId?: string
+  /** A new task's done-when checks, from its brief. */
+  doneWhen?: string[]
   /**
    * Which binding fields the caller stated explicitly. An absent field inherits
    * the run's persisted binding; a field set to a DIFFERENT value is a rebind
@@ -184,7 +186,11 @@ export function launchRunSync(request: LaunchRunRequest): LaunchRunOutcome {
           newMessages: request.newMessages,
           persistedMessageCount: request.persistedMessageCount
         }
-      : { ...shared, messages: request.messages ?? [] }
+      : {
+          ...shared,
+          messages: request.messages ?? [],
+          ...(request.doneWhen?.length ? { doneWhen: request.doneWhen } : {})
+        }
 
   startAgentRunInBackground({ runId, workspacePath, invokeId, controller, wc, agentInput })
   return { ok: true, runId, invokeId, resume }

@@ -8,6 +8,7 @@ import { ChatView } from '../features/chat/ChatView'
 import { SessionChatColumn } from '../features/chat/SessionChatColumn'
 import { AgentInstancePane } from '../features/chat/components/AgentInstancePane'
 import { runTitle } from './navigator/runTitle'
+import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import type { ChatPane } from '@renderer/lib/chat/chatPaneLayout'
 import type { PaneRenderOptions } from '../features/chat/ChatPaneHost'
 import type { SettingsSection } from '../features/settings'
@@ -810,6 +811,15 @@ function App() {
     [newChatInWorkspace, setComposerDraftForPane]
   )
 
+  // Where a new task's brief can move: the open workspaces, named as the navigator names them.
+  const newTaskTargets = useMemo(
+    () => ({
+      workspaces: openWorkspaces.map((path) => ({ path, name: formatWorkspaceName(path) })),
+      onMove: onNewSessionInWorkspace
+    }),
+    [openWorkspaces, onNewSessionInWorkspace]
+  )
+
   const focusComposerSoon = useCallback((): void => {
     let attempts = 0
     const tryFocus = (): void => {
@@ -1295,7 +1305,7 @@ function App() {
         setMarketplaceFocusServerId(mcpServerId ?? null)
         setView('marketplace')
       },
-      onOpenSettings: (section?: 'voice' | 'providers') => {
+      onOpenSettings: (section?: 'voice' | 'providers' | 'agent') => {
         if (section) setSettingsSection(section)
         setView('settings')
       },
@@ -1969,6 +1979,7 @@ function App() {
           onOpenWorkspaceFile={onOpenWorkspaceFile}
           run={paneRun}
           instanceRuns={paneContext?.instanceRuns}
+          newTaskTargets={newTaskTargets}
           runActions={{
             onRename: pane.runId
               ? (title) => paneRunActionsRef.current.rename(pane.workspacePath, pane.runId!, title)
@@ -2031,7 +2042,8 @@ function App() {
       update,
       onChatSettingsChangeForWorkspace,
       onProviderModelForWorkspace,
-      onToggleFavorite
+      onToggleFavorite,
+      newTaskTargets
     ]
   )
 

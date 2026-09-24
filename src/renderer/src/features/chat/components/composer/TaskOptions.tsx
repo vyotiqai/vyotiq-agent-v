@@ -65,11 +65,17 @@ export type TaskOptionsProps = {
   running: boolean
   disabled?: boolean
   focusInput?: () => void
+  /**
+   * `token`: mode · model · effort on the instruction line (the default).
+   * `model`: the model's name as a select, for the New task brief, opening
+   * below it.
+   */
+  trigger?: 'token' | 'model'
 }
 
 type Row = { provider: ProviderId; opt: ModelPickerOption; manual?: boolean }
 
-function capabilities(meta?: ModelInfo): Array<{ icon: IconName; label: string }> {
+export function capabilities(meta?: ModelInfo): Array<{ icon: IconName; label: string }> {
   if (!meta) return []
   const out: Array<{ icon: IconName; label: string }> = []
   if (meta.supportsThinking) out.push({ icon: 'memory', label: 'Thinks' })
@@ -144,8 +150,8 @@ export function TaskOptions(props: TaskOptionsProps) {
     onOpenChange,
     triggerRef,
     panelRef,
-    placement: 'up',
-    align: 'end',
+    placement: props.trigger === 'model' ? 'down' : 'up',
+    align: props.trigger === 'model' ? 'start' : 'end',
     disabled: locked,
     trapFocus: true,
     autoFocusFirst: true
@@ -312,7 +318,11 @@ export function TaskOptions(props: TaskOptionsProps) {
   const layout =
     open && position
       ? clampComposerDropdownPanel({
-          position: { left: position.left - PANEL_MAX_PX, top: position.top, placement: position.placement },
+          position: {
+            left: props.trigger === 'model' ? position.left : position.left - PANEL_MAX_PX,
+            top: position.top,
+            placement: position.placement
+          },
           maxWidthPx: PANEL_MAX_PX,
           minHeightPx: 240
         })
@@ -538,6 +548,29 @@ export function TaskOptions(props: TaskOptionsProps) {
         ) : null}
       </div>
     ) : null
+
+  if (props.trigger === 'model') {
+    return (
+      <div ref={rootRef} className="flex min-w-0 shrink items-center">
+        <button
+          ref={triggerRef}
+          type="button"
+          disabled={locked}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-controls={open ? panelId : undefined}
+          aria-label={`Model: ${modelName}`}
+          data-task-options
+          onClick={() => setOpen((v) => !v)}
+          className="inline-flex h-8 w-60 min-w-0 items-center gap-2 rounded-md border border-border bg-bg px-2.5 font-mono text-xs text-fg vy-transition hover:border-border-strong focus-visible:vy-focus-ring disabled:vy-disabled-state"
+        >
+          <span className="min-w-0 flex-1 truncate text-left">{modelName}</span>
+          <Icon name="chevron" size={10} className="shrink-0 text-tertiary" />
+        </button>
+        {panel ? createPortal(panel, document.body) : null}
+      </div>
+    )
+  }
 
   return (
     <div ref={rootRef} className="flex min-w-0 shrink items-center">

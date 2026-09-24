@@ -50,13 +50,13 @@ test('send message streams fixture assistant text and can stop', async () => {
     await expand.click()
   }
 
-  const composer = window.getByRole('combobox', { name: 'Instruction' })
+  const composer = window.getByRole('combobox', { name: 'Brief' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('Hello from gui e2e')
 
-  // The instruction line has no Send button: Enter sends.
+  // The brief has no Send button: Start task, or Ctrl+Enter.
   await expect(window.getByRole('button', { name: /^send$/i })).toHaveCount(0)
-  await composer.press('Enter')
+  await composer.press('Control+Enter')
 
   await expect(window.getByText(FIXTURE_ASSISTANT_TEXT)).toBeVisible({ timeout: 15_000 })
 

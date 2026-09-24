@@ -3119,7 +3119,8 @@ export function createChatStreamController(
           provider: turnProviderModel?.provider,
           model: turnProviderModel?.model,
           modelExplicit: turnProviderModel?.explicit,
-          agentProfileId
+          agentProfileId,
+          ...(extras?.doneWhen?.length ? { doneWhen: extras.doneWhen } : {})
         }
     let res = await window.vyotiq.chatStart(startPayload)
     for (

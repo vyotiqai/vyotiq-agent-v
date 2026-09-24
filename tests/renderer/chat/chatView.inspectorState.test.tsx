@@ -20,7 +20,8 @@ beforeEach(() => {
         data: { open: false, url: '', title: '' }
       }),
       onBrowserState: vi.fn().mockReturnValue(() => undefined),
-      readRunArtifact: vi.fn().mockResolvedValue({ ok: false, error: 'none' })
+      readRunArtifact: vi.fn().mockResolvedValue({ ok: false, error: 'none' }),
+      runFeedbackGet: vi.fn().mockResolvedValue({ ok: true, data: { entry: null } })
     }
   })
 })
@@ -38,7 +39,8 @@ const baseProps = {
   workspacePath: '/ws',
   provider: 'ollama' as const,
   model: 'qwen2.5',
-  activeRunId: null,
+  // A task is on screen: a new task keeps the inspector out of the way until asked.
+  activeRunId: 'run-1',
   chatSettings: {
     provider: 'ollama' as const,
     model: 'qwen2.5',

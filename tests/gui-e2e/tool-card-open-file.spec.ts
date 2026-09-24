@@ -56,11 +56,11 @@ test('an edit tool card opens its file in the Files panel at the changed line', 
   const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) await expand.click()
 
-  const composer = window.getByRole('combobox', { name: 'Instruction' })
+  const composer = window.getByRole('combobox', { name: 'Brief' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('Edit the target file')
-  // The instruction line sends on Enter — it has no Send button.
-  await window.getByRole('combobox', { name: 'Instruction' }).press('Enter')
+  // A new task starts from its brief on Ctrl+Enter — Enter is a new line there.
+  await window.getByRole('combobox', { name: 'Brief' }).press('Control+Enter')
 
   // The record lists the edit closed, as one line; opening it shows the diff.
   const editToggle = window.getByRole('button', { name: /^Edited: src\/target\.ts$/ })

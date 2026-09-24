@@ -51,7 +51,7 @@ test('live edit stream: empty window then early lines before late', async () => 
     await expand.click()
   }
 
-  const composer = window.getByRole('combobox', { name: 'Instruction' })
+  const composer = window.getByRole('combobox', { name: 'Brief' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('Stream a live edit diff')
 
@@ -93,8 +93,8 @@ test('live edit stream: empty window then early lines before late', async () => 
     tick()
   })
 
-  // The instruction line sends on Enter — it has no Send button.
-  await window.getByRole('combobox', { name: 'Instruction' }).press('Enter')
+  // A new task starts from its brief on Ctrl+Enter — Enter is a new line there.
+  await window.getByRole('combobox', { name: 'Brief' }).press('Control+Enter')
 
   await expect
     .poll(
