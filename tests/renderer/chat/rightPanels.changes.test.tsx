@@ -881,8 +881,9 @@ describe('ChangesPanel review', () => {
   it('asks the agent about a line, naming the file and the line', async () => {
     const onAskAboutLine = vi.fn()
     renderGit({ variant: 'review', onAskAboutLine })
-    fireEvent.click(await screen.findByRole('button', { name: 'Ask about line 1' }))
-    const input = await screen.findByRole('textbox', { name: 'Ask the agent about line 1' })
+    // Role queries over the whole diff table are slow under a full-suite load.
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask about line 1' }, { timeout: 5000 }))
+    const input = await screen.findByRole('textbox', { name: 'Ask the agent about line 1' }, { timeout: 5000 })
     fireEvent.change(input, { target: { value: 'Why was this renamed?' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(onAskAboutLine).toHaveBeenCalledWith(
@@ -894,8 +895,8 @@ describe('ChangesPanel review', () => {
   it('says a removed line is the old version when asking about it', async () => {
     const onAskAboutLine = vi.fn()
     renderGit({ variant: 'review', onAskAboutLine })
-    fireEvent.click(await screen.findByRole('button', { name: 'Ask about line 1 before the change' }))
-    const input = await screen.findByRole('textbox', { name: 'Ask the agent about line 1 before the change' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask about line 1 before the change' }, { timeout: 5000 }))
+    const input = await screen.findByRole('textbox', { name: 'Ask the agent about line 1 before the change' }, { timeout: 5000 })
     fireEvent.change(input, { target: { value: 'Keep this?' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(onAskAboutLine.mock.calls[0]![0]).toContain('line 1 as it was before the change (removed)')

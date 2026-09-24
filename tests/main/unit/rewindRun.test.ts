@@ -421,8 +421,9 @@ describe('prepareRewindToUserMessage', () => {
     const cp = beginWriteCheckpoint(runDir, workspace, 2)
     await cp.recordPrior('a.txt', 'write')
     writeFileSync(join(workspace, 'a.txt'), 'after-second\n', 'utf8')
-    finalizeWriteCheckpoint(runDir)
-    writeFileSync(join(workspace, 'a.txt'), 'user-edit\n', 'utf8')
+    const meta = finalizeWriteCheckpoint(runDir)
+    // The copy to restore from is gone; a file you changed since would be left alone.
+    rmSync(join(runDir, 'checkpoints', meta!.id, 'files', 'a.txt'))
 
     await expect(
       prepareRewindToUserMessage({
@@ -433,7 +434,7 @@ describe('prepareRewindToUserMessage', () => {
     ).rejects.toThrow(/history was not truncated/)
 
     expect(loadMessages(workspace, runId)).toEqual(messages)
-    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('user-edit\n')
+    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('after-second\n')
   })
 
   it('drops todos.json when the kept todo_write snapshot is unparseable', async () => {

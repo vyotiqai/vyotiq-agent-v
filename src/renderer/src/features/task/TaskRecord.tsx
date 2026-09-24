@@ -52,7 +52,8 @@ export type TaskRecordProps = {
   editingUserMessageIndex?: number | null
   editComposer?: ReactNode
   onBeginEdit?: (messageIndex: number) => void
-  onRevert?: (messageIndex: number) => void
+  /** Rewind to before the brief at `messageIndex`, the record's run `runN`. */
+  onRevert?: (messageIndex: number, runN?: number) => void
   messageCount: number
   onImageClick?: (src: string) => void
 }
@@ -231,7 +232,7 @@ function RunBody({
               ? () => props.onBeginEdit!(index)
               : undefined
           }
-          onRewind={props.onRevert && canRevert ? () => props.onRevert!(index!) : undefined}
+          onRewind={props.onRevert && canRevert ? () => props.onRevert!(index!, run.n) : undefined}
           onImageClick={props.onImageClick}
         />
       ) : null}

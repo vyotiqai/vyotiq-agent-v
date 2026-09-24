@@ -844,7 +844,10 @@ export type WriteCheckpointState = {
 /** Files a revert actually restored (main's post-execution result). */
 export type RevertWritesOutcome = {
   restored: string[]
+  /** Kept without a copy to restore from. */
   skipped: string[]
+  /** Changed after the agent's write; left as they are. */
+  edited: string[]
 }
 
 function incompleteFromPersisted(events: PersistedEvent[]): IncompleteTurnState | null {
@@ -3633,7 +3636,7 @@ export function createChatStreamController(
       writeCheckpoint: null,
       turnUsage: turnUsageSlots
     })
-    return { restored: res.data.restored, skipped: res.data.skipped }
+    return { restored: res.data.restored, skipped: res.data.skipped, edited: res.data.edited ?? [] }
   }
 
   const canQueueFollowUp = (): boolean =>

@@ -180,7 +180,7 @@ export function SessionChatColumn({
     files?: AttachedFile[],
     extras?: import('@shared/ipc').ComposerSendExtras
   ) => boolean | void | Promise<boolean | void>
-  onRevertToUserMessage?: (userMessageIndex: number) => boolean | Promise<boolean>
+  onRevertToUserMessage?: (userMessageIndex: number, runN?: number) => boolean | Promise<boolean>
   messages?: ChatMessage[]
   pendingFollowUps?: import('@renderer/lib/hooks/createChatStreamController').PendingFollowUpState[]
   onRemoveFollowUp?: (id: string) => void

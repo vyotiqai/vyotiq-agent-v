@@ -4,7 +4,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { ChatView } from '@renderer/features/chat/ChatView'
-import { emptySecretStatus } from '@shared/ipc'
+import { DEFAULT_SETTINGS, emptySecretStatus } from '@shared/ipc'
+import { resolveEffectiveSettings } from '@shared/effectiveSettings'
 import type { UiItem } from '@shared/transcript'
 
 beforeEach(() => {
@@ -180,5 +181,21 @@ describe('Inspector tabs: live state from the run', () => {
     render(<ChatView {...baseProps} />)
     expect(tab('Changes').textContent).toBe('Changes')
     expect(tab('Changes').getAttribute('title')).toBe('Alt+1')
+  })
+})
+
+
+describe('Inspector body when a task loads after the first render', () => {
+  it('mounts the tab the inspector opens on, without a click', () => {
+    const props = { ...baseProps, chatSettings: resolveEffectiveSettings(DEFAULT_SETTINGS, null) }
+    // Launch: the window draws before the task's record has loaded, so the
+    // first render is a new task and the inspector stays out of the way.
+    const { rerender } = render(<ChatView {...props} activeRunId={null} items={[]} />)
+    expect(screen.queryByRole('tablist', { name: 'Inspector' })).toBeNull()
+
+    // The record arrives; the inspector comes up on Changes — and its body with it.
+    rerender(<ChatView {...props} items={[toolItem('edit', 'done', { argsPreview: '{"path":"src/app.ts"}' })]} />)
+    expect(tab('Changes').getAttribute('aria-selected')).toBe('true')
+    expect(document.getElementById('dock-panel-changes')).not.toBeNull()
   })
 })

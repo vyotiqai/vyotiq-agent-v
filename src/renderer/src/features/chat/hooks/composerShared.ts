@@ -103,7 +103,7 @@ export function useComposerEditState(args: {
     files?: AttachedFile[],
     extras?: ComposerSendExtras
   ) => boolean | void | Promise<boolean | void>
-  onRevertToUserMessage?: (userMessageIndex: number) => boolean | Promise<boolean>
+  onRevertToUserMessage?: (userMessageIndex: number, runN?: number) => boolean | Promise<boolean>
   onAfterRevert?: () => void
 }) {
   const {
@@ -168,11 +168,11 @@ export function useComposerEditState(args: {
   )
 
   const beginPromptRevert = useCallback(
-    async (messageIndex: number) => {
+    async (messageIndex: number, runN?: number) => {
       if (!onRevertToUserMessage) return
       // Confirmation (with the affected-file list) is owned by the handler —
       // do not add a second native confirm here.
-      const ok = await onRevertToUserMessage(messageIndex)
+      const ok = await onRevertToUserMessage(messageIndex, runN)
       if (ok !== false) onAfterRevert?.()
     },
     [onRevertToUserMessage, onAfterRevert]

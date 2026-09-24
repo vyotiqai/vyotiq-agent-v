@@ -224,7 +224,7 @@ export async function planRewindToUserMessage(input: {
     fromUserMessageIndex: userMessageIndex,
     quiesce: false
   })
-  return planRewindWritesAcrossRuns(scopes, userMessageIndex)
+  return planRewindWritesAcrossRuns(scopes, userMessageIndex, input.workspacePath)
 }
 
 /**

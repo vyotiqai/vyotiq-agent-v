@@ -910,7 +910,10 @@ export type ChatRewindRequest = z.infer<typeof ChatRewindRequestSchema>
 export const ChatRewindResultSchema = z.object({
   messages: z.array(ChatMessageSchema),
   restored: z.array(z.string()),
-  skipped: z.array(z.string())
+  /** Kept without a copy to restore from. */
+  skipped: z.array(z.string()),
+  /** Changed after the agent's write; left as they are. */
+  edited: z.array(z.string()).default([])
 })
 export type ChatRewindResult = z.infer<typeof ChatRewindResultSchema>
 
@@ -920,7 +923,9 @@ export const ChatRewindPreviewResultSchema = z.object({
     z.object({
       path: z.string().min(1),
       action: z.enum(['created', 'modified', 'deleted']),
-      undoable: z.boolean()
+      undoable: z.boolean(),
+      /** Changed after the agent's write: the rewind leaves it as it is. */
+      edited: z.boolean().optional()
     })
   )
 })

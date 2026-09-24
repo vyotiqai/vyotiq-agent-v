@@ -84,7 +84,7 @@ export type TaskPaneProps = {
   editingUserMessageIndex?: number | null
   editComposer?: ReactNode
   onBeginEdit?: (messageIndex: number) => void
-  onRevert?: (messageIndex: number) => void
+  onRevert?: (messageIndex: number, runN?: number) => void
   messageCount: number
   onOpenChanges?: (path?: string) => void
   onLoadToolContent?: (toolCallId: string) => Promise<string | null>

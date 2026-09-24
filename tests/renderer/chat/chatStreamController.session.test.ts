@@ -232,7 +232,8 @@ describe('createChatStreamController', () => {
           { role: 'assistant', content: 'reply-1' }
         ],
         restored: ['a.ts'],
-        skipped: []
+        skipped: [],
+        edited: ['b.ts']
       }
     })
     // @ts-expect-error test bridge
@@ -247,7 +248,8 @@ describe('createChatStreamController', () => {
     ])
 
     const ok = await controller.revertToUserMessage(0)
-    expect(ok).toEqual({ restored: ['a.ts'], skipped: [] })
+    // The file changed since the agent wrote it comes back as left alone.
+    expect(ok).toEqual({ restored: ['a.ts'], skipped: [], edited: ['b.ts'] })
     expect(chatRewind).toHaveBeenCalledWith({
       workspacePath: '/ws',
       runId: 'r1',

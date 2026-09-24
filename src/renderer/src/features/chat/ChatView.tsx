@@ -261,7 +261,7 @@ export function ChatView({
     files?: import('@shared/ipc').AttachedFile[],
     extras?: import('@shared/ipc').ComposerSendExtras
   ) => boolean | void | Promise<boolean | void>
-  onRevertToUserMessage?: (userMessageIndex: number) => boolean | Promise<boolean>
+  onRevertToUserMessage?: (userMessageIndex: number, runN?: number) => boolean | Promise<boolean>
   /** Full chat messages for seeding inline edit attachments. */
   messages?: ChatMessage[]
   onStop: () => void
@@ -465,6 +465,14 @@ const runGoal = useRunGoal({
   const [mountedPanels, setMountedPanels] = useState<ChatRightPanelId[]>(() =>
     activeRightPanel ? [activeRightPanel] : []
   )
+  // The tab on screen is always mounted, even one that appeared without a
+  // click: a task that loads after the first render turns the inspector on.
+  const shownPanels =
+    activeRightPanel && !mountedPanels.includes(activeRightPanel) ? [...mountedPanels, activeRightPanel] : mountedPanels
+  useEffect(() => {
+    if (!activeRightPanel) return
+    setMountedPanels((prev) => (prev.includes(activeRightPanel) ? prev : [...prev, activeRightPanel]))
+  }, [activeRightPanel])
   const [dockWidthPx, setDockWidthPx] = usePersistedNumber(
     DOCK_WIDTH_KEY,
     DOCK_WIDTH_DEFAULT_PX,
@@ -1253,7 +1261,7 @@ const runGoal = useRunGoal({
 
   const panelBodies = (
     <>
-      {mountedPanels.includes('files') ? (
+      {shownPanels.includes('files') ? (
         <div
           id="dock-panel-files"
           role="tabpanel"
@@ -1283,7 +1291,7 @@ const runGoal = useRunGoal({
           </Suspense>
         </div>
       ) : null}
-      {mountedPanels.includes('browser') ? (
+      {shownPanels.includes('browser') ? (
         <div
           id="dock-panel-browser"
           role="tabpanel"
@@ -1304,7 +1312,7 @@ const runGoal = useRunGoal({
           />
         </div>
       ) : null}
-      {mountedPanels.includes('terminal') ? (
+      {shownPanels.includes('terminal') ? (
         <div
           id="dock-panel-terminal"
           role="tabpanel"
@@ -1326,7 +1334,7 @@ const runGoal = useRunGoal({
           </Suspense>
         </div>
       ) : null}
-      {mountedPanels.includes('changes') ? (
+      {shownPanels.includes('changes') ? (
         <div
           id="dock-panel-changes"
           // Reviewing, the panel is its own region; there is no tab to label it.
@@ -1376,7 +1384,7 @@ const runGoal = useRunGoal({
           />
         </div>
       ) : null}
-      {mountedPanels.includes('pr') ? (
+      {shownPanels.includes('pr') ? (
         <div
           id="dock-panel-pr"
           role="tabpanel"
@@ -1401,7 +1409,7 @@ const runGoal = useRunGoal({
           </Suspense>
         </div>
       ) : null}
-      {mountedPanels.includes('plan') ? (
+      {shownPanels.includes('plan') ? (
         <div
           id="dock-panel-plan"
           role="tabpanel"

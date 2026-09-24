@@ -68,7 +68,7 @@ import type {
   ChatStreamController,
   RevertWritesOutcome
 } from '@renderer/lib/hooks/createChatStreamController'
-import { ConfirmFileList } from '../features/chat/components/ConfirmFileList'
+import { rewoundToastText, useRewindDialog } from '@renderer/features/task/RewindDialog'
 
 /** Full-screen secondary views are code-split; they parse on first open, not at boot. */
 const SettingsView = lazy(() =>
@@ -1080,74 +1080,52 @@ function App() {
   )
 
   const { confirm, dialog: confirmDialog } = useConfirm()
+  const { askRewind, dialog: rewindDialog } = useRewindDialog()
 
+  /**
+   * Rewind to before an instruction: the Rewind dialog lists what the task
+   * changed from main's preview, then main restores and truncates. Null files
+   * means the preview could not be read — the dialog says so rather than
+   * claiming nothing changes.
+   */
   const confirmRevertToUserMessage = useCallback(
     async (
       userMessageIndex: number,
-      turnCount: number,
+      runN: number | undefined,
       io: {
+        workspacePath: string | null
         preview: (index: number) => Promise<ChatRewindPreviewResult | null>
         revert: (index: number) => Promise<RevertWritesOutcome | false>
       }
     ): Promise<boolean> => {
       const preview = await io.preview(userMessageIndex)
-      const files = preview?.files ?? []
-      const notUndoable = files.filter((f) => !f.undoable).length
-      const turnText = turnCount === 1 ? '1 turn' : `${turnCount} turns`
-      const baseMessage =
-        files.length > 0
-          ? `Revert to before this prompt? ${turnText} will be removed and ${
-              files.length === 1 ? '1 file' : `${files.length} files`
-            } restored to their state before the agent ran.`
-          : turnCount === 1
-            ? 'Revert to before this prompt? The reply and any workspace edits made after it are undone and the turn is removed from the chat.'
-            : `Revert to before this prompt? ${turnCount} turns and any workspace edits made after it are undone and removed from the chat.`
-      const message =
-        files.length > 0 && notUndoable > 0
-          ? `${baseMessage} ${
-              notUndoable === 1 ? '1 file' : `${notUndoable} files`
-            } can't be auto-restored and will be skipped.`
-          : baseMessage
-      const ok = await confirm(message, {
-        title: 'Revert to earlier prompt',
-        confirmLabel: 'Revert',
-        danger: true,
-        ...(files.length > 0 ? { details: <ConfirmFileList files={files} /> } : {})
-      })
+      const ok = await askRewind({ runN: runN ?? null, files: preview?.files ?? null })
       if (!ok) return false
       const done = await io.revert(userMessageIndex)
       if (done) {
-        const restored = done.restored.length
-        const skipped = done.skipped.length
-        let toastText = 'Reverted to the earlier prompt. Later turns were removed.'
-        if (restored > 0 || skipped > 0) {
-          toastText = `Reverted to the earlier prompt. ${
-            restored === 1 ? '1 file' : `${restored} files`
-          } restored.`
-          if (skipped > 0) {
-            toastText += ` ${skipped === 1 ? '1 file' : `${skipped} files`} could not be restored.`
-          }
-        }
-        pushToast(toastText, 'success')
+        pushToast(rewoundToastText(runN ?? null, done), 'success')
+        // The rewound edits no longer wait on Keep or Undo.
+        if (io.workspacePath) refreshWorkspaceRuns(io.workspacePath)
       }
       return done !== false
     },
-    [confirm]
+    [askRewind, refreshWorkspaceRuns]
   )
 
   const onChatRevertToUserMessage = useCallback(
-    (userMessageIndex: number) => {
+    (userMessageIndex: number, runN?: number) => {
       const actions = chatActionsRef.current
       return confirmRevertToUserMessage(
         userMessageIndex,
-        Math.max(0, chat.messages.length - userMessageIndex - 1),
+        runN,
         {
+          workspacePath: focusedWorkspacePath ?? activeWorkspace,
           preview: (i) => actions?.previewRewindToUserMessage?.(i) ?? Promise.resolve(null),
           revert: (i) => actions?.revertToUserMessage?.(i) ?? Promise.resolve(false)
         }
       )
     },
-    [confirmRevertToUserMessage, chat.messages]
+    [activeWorkspace, confirmRevertToUserMessage, focusedWorkspacePath]
   )
 
   const onChatStop = useCallback(() => {
@@ -1242,6 +1220,9 @@ function App() {
           chatActionsRef.current?.applyWriteCheckpointResolution
         apply?.(res.data)
         setSettingsError(null)
+        // Resolved edits can take the task out of Ready for review; main has
+        // already dropped its cached list, so ask for it again.
+        refreshWorkspaceRuns(workspacePath)
         return true
       } finally {
         setUndoBusy(false)
@@ -1253,6 +1234,7 @@ function App() {
       chat.running,
       chat.writeCheckpoint,
       focusedWorkspacePath,
+      refreshWorkspaceRuns,
       setSettingsError
     ]
   )
@@ -1985,11 +1967,12 @@ function App() {
           onEditAndResend={(editMessageIndex, text, images, files, extras) =>
             paneCtrl?.editAndResend(editMessageIndex, text, images, files, extras) ?? false
           }
-          onRevertToUserMessage={(userMessageIndex) =>
+          onRevertToUserMessage={(userMessageIndex, runN) =>
             confirmRevertToUserMessage(
               userMessageIndex,
-              Math.max(0, snap.messages.length - userMessageIndex - 1),
+              runN,
               {
+                workspacePath: pane.workspacePath,
                 preview: (i) => paneCtrl?.previewRewindToUserMessage(i) ?? Promise.resolve(null),
                 revert: (i) => paneCtrl?.revertToUserMessage(i) ?? Promise.resolve(false)
               }
@@ -2758,6 +2741,7 @@ function App() {
       <LiveRegion />
       <ToastHost />
       {confirmDialog}
+      {rewindDialog}
       <ToolApprovalOnboardingModal
         open={approvalOnboardingOpen}
         error={settingsError}

@@ -1670,7 +1670,8 @@ export function registerIpc(): void {
       return ok({
         messages: prepared.messages,
         restored: prepared.writes.restored,
-        skipped: prepared.writes.skipped
+        skipped: prepared.writes.skipped,
+        edited: prepared.writes.edited
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)

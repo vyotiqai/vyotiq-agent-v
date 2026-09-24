@@ -415,11 +415,13 @@ describe('write checkpoints', async () => {
     writeFileSync(join(workspace, 'a.txt'), 'agent\n', 'utf8')
     const meta = finalizeWriteCheckpoint(runDir)
 
-    writeFileSync(join(workspace, 'a.txt'), 'user-edit\n', 'utf8')
+    // The copy to restore from is gone. (A file you changed since is left
+    // alone instead — see rewindLeavesEdits.test.ts.)
+    rmSync(join(runDir, 'checkpoints', meta!.id, 'files', 'a.txt'))
     const result = rewindWritesFrom(runDir, workspace, 0)
     expect(result.undoableRestoreFailed).toBe(true)
-    expect(result.skipped).toContain('a.txt')
-    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('user-edit\n')
+    expect(result.restored).toEqual([])
+    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('agent\n')
 
     const persisted = getWriteCheckpointMeta(runDir, meta!.id)
     expect(persisted?.resolved).not.toBe(true)

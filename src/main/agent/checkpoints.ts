@@ -635,6 +635,38 @@ function resolveCheckpointId(runDir: string, checkpointId?: string): string | nu
   return id
 }
 
+/**
+ * Where a file stands against the agent's write: `edited` when someone changed
+ * it after the agent did (restoring would destroy that change), `restored`
+ * when it already holds what restoring would put there, else `writable`.
+ * Restore and the rewind preview both read it, so the dialog lists exactly
+ * the files the rewind will leave alone.
+ */
+function writeState(resolved: string, blob: string | null, file: CheckpointFileEntry): 'edited' | 'restored' | 'writable' {
+  const current = hashExistingFile(resolved)
+  if (file.action === 'created') {
+    return file.hash && current && current !== file.hash ? 'edited' : 'writable'
+  }
+  if (!current || !blob) return 'writable'
+  if (file.action === 'modified') {
+    if (!file.hash || current === file.hash) return 'writable'
+    return current === hashExistingFile(blob) ? 'restored' : 'edited'
+  }
+  // Deleted by the agent and back on disk: already the old file, or someone else's.
+  return current === hashExistingFile(blob) ? 'restored' : 'edited'
+}
+
+/** True when restoring `file` would overwrite a change made after the agent's write. */
+export function changedSinceAgentWrite(workspaceRoot: string, checkpointDir: string, file: CheckpointFileEntry): boolean {
+  if (!file.undoable) return false
+  try {
+    const blob = file.action === 'created' ? null : blobPathFor(checkpointDir, file.path)
+    return writeState(resolveInsideWorkspace(workspaceRoot, file.path), blob, file) === 'edited'
+  } catch {
+    return false
+  }
+}
+
 function restoreOneFile(
   workspaceRoot: string,
   checkpointDir: string,
@@ -644,16 +676,13 @@ function restoreOneFile(
   const resolved = resolveInsideWorkspace(workspaceRoot, file.path)
   try {
     if (file.action === 'created') {
-      if (file.hash) {
-        const current = hashExistingFile(resolved)
-        if (current && current !== file.hash) {
-          // User edited the file the agent created — refuse to delete their work.
-          logger.warn('Skipping checkpoint restore; file changed after the agent write', {
-            scope: 'agent',
-            path: file.path
-          })
-          return 'conflict'
-        }
+      if (writeState(resolved, null, file) === 'edited') {
+        // User edited the file the agent created — refuse to delete their work.
+        logger.warn('Skipping checkpoint restore; file changed after the agent write', {
+          scope: 'agent',
+          path: file.path
+        })
+        return 'conflict'
       }
       if (existsSync(resolved)) {
         rmSync(resolved, { force: true })
@@ -663,40 +692,18 @@ function restoreOneFile(
     const blob = blobPathFor(checkpointDir, file.path)
     if (!existsSync(blob)) return 'failed'
 
-    if (file.action === 'modified' && file.hash) {
-      const current = hashExistingFile(resolved)
-      if (current) {
-        if (current !== file.hash) {
-          const priorHash = hashExistingFile(blob)
-          if (current === priorHash) return 'restored'
-          // User edited the file after the agent modified it — refuse to clobber.
-          logger.warn('Skipping checkpoint restore; file changed after the agent write', {
-            scope: 'agent',
-            path: file.path
-          })
-          return 'conflict'
-        }
-        // current === file.hash: user has not changed the file; fall through to
-        // restore the prior blob at the bottom of this function.
-      }
-      // current is undefined: the agent-modified file was deleted after the write.
-      // Fall through so the prior blob is restored, recreating the original file
-      // instead of silently leaving the deletion in place.
-    }
-
-    if (file.action === 'deleted') {
-      const current = hashExistingFile(resolved)
-      if (current) {
-        const priorHash = hashExistingFile(blob)
-        if (current !== priorHash) {
-          logger.warn('Skipping checkpoint restore; file changed after the agent write', {
-            scope: 'agent',
-            path: file.path
-          })
-          return 'skipped'
-        }
-        return 'restored'
-      }
+    // A missing file falls through: the prior blob is restored, recreating what
+    // the agent changed or deleted rather than leaving the deletion in place.
+    const state = writeState(resolved, blob, file)
+    if (state === 'restored') return 'restored'
+    if (state === 'edited') {
+      // Changed after the agent's write (or, for a delete, put back with other
+      // content) — refuse to clobber it.
+      logger.warn('Skipping checkpoint restore; file changed after the agent write', {
+        scope: 'agent',
+        path: file.path
+      })
+      return 'conflict'
     }
 
     mkdirSync(dirname(resolved), { recursive: true })
@@ -902,8 +909,11 @@ function resolveWritesInCheckpoint(
 export type RewindWritesResult = {
   checkpointIds: string[]
   restored: string[]
+  /** Kept without a copy to restore from (not undoable). */
   skipped: string[]
-  /** True when an undoable file could not be restored (I/O or hash conflict). */
+  /** Changed after the agent's write; left as they are. */
+  edited: string[]
+  /** True when an undoable file could not be restored — a missing copy or an I/O error. */
   undoableRestoreFailed: boolean
 }
 
@@ -911,6 +921,8 @@ export type RewindWritesPlanFile = {
   path: string
   action: CheckpointFileAction
   undoable: boolean
+  /** Changed after the agent's write: the rewind will leave it as it is. */
+  edited?: boolean
 }
 
 export type RewindWritesPlan = {
@@ -987,19 +999,24 @@ function collectRewindEntries(
 /** Read-only preview of what rewindWritesFromScopes would restore; mutates nothing. */
 export function planRewindWritesAcrossRuns(
   scopes: RewindRunScope[],
-  fromUserMessageIndex: number
+  fromUserMessageIndex: number,
+  /** When given, each file says whether it changed since the agent's write. */
+  workspaceRoot?: string
 ): RewindWritesPlan {
   const checkpointIds: string[] = []
   const byPath = new Map<string, RewindWritesPlanFile>()
   for (const entry of collectRewindEntries(scopes, fromUserMessageIndex)) {
     checkpointIds.push(entry.meta.id)
+    const checkpointDir = join(entry.runDir, 'checkpoints', entry.meta.id)
     for (const file of entry.meta.files) {
       // Newest checkpoint wins per path; older checkpoints never overwrite it.
       if (!byPath.has(file.path)) {
+        const edited = workspaceRoot ? changedSinceAgentWrite(workspaceRoot, checkpointDir, file) : false
         byPath.set(file.path, {
           path: file.path,
           action: file.action,
-          undoable: file.undoable
+          undoable: file.undoable,
+          ...(edited ? { edited: true } : {})
         })
       }
     }
@@ -1029,9 +1046,27 @@ export function rewindWritesFromScopes(
   const checkpointIds: string[] = []
   const restored: string[] = []
   const skipped: string[] = []
+  const edited: string[] = []
   let undoableRestoreFailed = false
 
-  for (const entry of collectRewindEntries(scopes, fromUserMessageIndex)) {
+  const entries = collectRewindEntries(scopes, fromUserMessageIndex)
+  // A copy that is gone would fail its restore halfway through, after newer
+  // files were already put back. Check them all first and touch nothing.
+  for (const entry of entries) {
+    const checkpointDir = join(entry.runDir, 'checkpoints', entry.meta.id)
+    for (const file of entry.meta.files) {
+      if (!file.undoable || file.action === 'created') continue
+      if (!existsSync(blobPathFor(checkpointDir, file.path))) {
+        logger.warn('Rewind stopped before restoring: a checkpoint copy is missing', {
+          scope: 'agent',
+          path: file.path
+        })
+        return { checkpointIds: [], restored: [], skipped: [], edited: [], undoableRestoreFailed: true }
+      }
+    }
+  }
+
+  for (const entry of entries) {
     const checkpointDir = join(entry.runDir, 'checkpoints', entry.meta.id)
     let hadIoFailure = false
     for (const file of [...entry.meta.files].reverse()) {
@@ -1039,6 +1074,10 @@ export function rewindWritesFromScopes(
       if (outcome === 'restored') {
         file.resolved = 'discarded'
         restored.push(file.path)
+      } else if (outcome === 'conflict') {
+        // Changed after the agent wrote it: left as it is, the rewind goes on.
+        file.resolved = 'kept'
+        if (!edited.includes(file.path)) edited.push(file.path)
       } else if (file.undoable) {
         hadIoFailure = true
         skipped.push(file.path)
@@ -1055,7 +1094,7 @@ export function rewindWritesFromScopes(
     checkpointIds.push(entry.meta.id)
   }
 
-  return { checkpointIds, restored, skipped, undoableRestoreFailed }
+  return { checkpointIds, restored, skipped, edited, undoableRestoreFailed }
 }
 
 /** Single-run rewind (parent scope) — see rewindWritesFromScopes. */
