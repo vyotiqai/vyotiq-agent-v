@@ -1,7 +1,47 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync, existsSync } from 'fs'
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+  existsSync
+} from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import type { ChatMessage } from '@shared/ipc'
+
+// The copy of one file fails. The fs builtin namespace is frozen in ESM, so a
+// hoisted module mock with a test-controlled route is the repo pattern
+// (editTools.test.ts). Unrouted copies go straight through.
+const { fsRoute } = vi.hoisted(() => ({
+  fsRoute: {
+    /** Fail the copy whose source ends with this — a restore from a checkpoint copy. */
+    failCopyFrom: null as string | null,
+    /** The name of each workspace file a copy wrote, in order. */
+    copied: [] as string[],
+    /** Only copies into this folder count — Redo's snapshot of the run is not a restore. */
+    workspace: ''
+  }
+}))
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>()
+  return {
+    ...actual,
+    copyFileSync: (src: import('fs').PathLike, dest: import('fs').PathLike, mode?: number): void => {
+      if (fsRoute.workspace && String(dest).startsWith(fsRoute.workspace)) {
+        fsRoute.copied.push(String(dest).split(/[\\/]/).pop() ?? '')
+      }
+      if (fsRoute.failCopyFrom != null && String(src).replace(/\\/g, '/').endsWith(fsRoute.failCopyFrom)) {
+        throw Object.assign(new Error('EBUSY: resource busy or locked, copyfile'), { code: 'EBUSY' })
+      }
+      actual.copyFileSync(src, dest, mode)
+    }
+  }
+})
 
 const userData = mkdtempSync(join(tmpdir(), 'vyotiq-rw-ud-'))
 
@@ -30,7 +70,14 @@ import {
 } from '@main/agent/checkpoints'
 import { toolTodoWrite } from '@main/agent/tools/todo'
 import { prepareRewindToUserMessage } from '@main/agent/rewindRun'
-import { createRun, loadMessages, syncMessagesAsync } from '@main/agent/state'
+import {
+  appendEvent,
+  createRun,
+  flushEventAppends,
+  loadEventsAsync,
+  loadMessages,
+  syncMessagesAsync
+} from '@main/agent/state'
 
 let workspace: string
 let runDir: string
@@ -38,6 +85,7 @@ let runDir: string
 beforeEach(() => {
   resetWriteCheckpointsForTests()
   workspace = mkdtempSync(join(tmpdir(), 'vyotiq-rw-ws-'))
+  fsRoute.workspace = workspace
   runDir = mkdtempSync(join(tmpdir(), 'vyotiq-rw-run-'))
   writeFileSync(join(workspace, 'a.txt'), 'a0\n', 'utf8')
   writeFileSync(join(workspace, 'b.txt'), 'b0\n', 'utf8')
@@ -45,6 +93,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  fsRoute.failCopyFrom = null
   resetWriteCheckpointsForTests()
   rmSync(workspace, { recursive: true, force: true })
   rmSync(runDir, { recursive: true, force: true })
@@ -205,5 +254,66 @@ describe('prepareRewindToUserMessage with a file you changed since', () => {
     expect(loadMessages(workspace, runId).map((m) => m.content)).toEqual(['first', 'ok', 'second'])
     expect(read('a.txt')).toBe('a0\n')
     expect(read('b.txt')).toBe('mine\n')
+  })
+})
+
+describe('prepareRewindToUserMessage when a file cannot be written', () => {
+  const messages: ChatMessage[] = [
+    { role: 'user', content: 'first' },
+    { role: 'assistant', content: 'ok' },
+    { role: 'user', content: 'second' },
+    { role: 'assistant', content: 'edited a, b and c' }
+  ]
+
+  /** Run 2 changes a, b and c; the rewind restores c, then b, then a. */
+  async function runThatChangedThreeFiles(): Promise<{ runId: string; dir: string }> {
+    const runId = `run-${Date.now()}`
+    const dir = createRun(workspace, runId, 'test')
+    await syncMessagesAsync(dir, messages)
+    writeFileSync(join(workspace, 'c.txt'), 'c0\n', 'utf8')
+    const cp = beginWriteCheckpoint(dir, workspace, 2)
+    for (const n of ['a', 'b', 'c']) await cp.recordPrior(`${n}.txt`, 'write')
+    for (const n of ['a', 'b', 'c']) writeFileSync(join(workspace, `${n}.txt`), `${n}2\n`, 'utf8')
+    const meta = finalizeWriteCheckpoint(dir)!
+    appendEvent(dir, { type: 'writes_checkpoint', runId, checkpointId: meta.id, files: meta.files })
+    await flushEventAppends(dir)
+    return { runId, dir }
+  }
+
+  it('puts the first of three files back and leaves the record as it was', async () => {
+    const { runId, dir } = await runThatChangedThreeFiles()
+    const events = await loadEventsAsync(dir, runId)
+    fsRoute.copied = []
+    fsRoute.failCopyFrom = 'files/b.txt'
+
+    await expect(prepareRewindToUserMessage({ workspacePath: workspace, runId, userMessageIndex: 2 })).rejects.toThrow(
+      'Could not rewind: b.txt could not be restored (EBUSY). The files and the record are as they were.'
+    )
+
+    // c.txt was restored before b.txt failed, then put back.
+    expect(fsRoute.copied).toEqual(['c.txt', 'b.txt'])
+    expect(read('c.txt')).toBe('c2\n')
+    expect(read('b.txt')).toBe('b2\n')
+    expect(read('a.txt')).toBe('a2\n')
+    expect(loadMessages(workspace, runId)).toEqual(messages)
+    expect(await loadEventsAsync(dir, runId)).toEqual(events)
+  })
+
+  // A read-only file is a real refusal: EPERM on Windows, EACCES on POSIX. Root ignores the bit.
+  it.skipIf(process.getuid?.() === 0)('leaves everything as it was when the system refuses the write', async () => {
+    const { runId } = await runThatChangedThreeFiles()
+    chmodSync(join(workspace, 'b.txt'), 0o444)
+    try {
+      await expect(prepareRewindToUserMessage({ workspacePath: workspace, runId, userMessageIndex: 2 })).rejects.toThrow(
+        /^Could not rewind: b\.txt could not be restored \((EPERM|EACCES)\)\. The files and the record are as they were\.$/
+      )
+    } finally {
+      chmodSync(join(workspace, 'b.txt'), 0o644)
+    }
+
+    expect(read('c.txt')).toBe('c2\n')
+    expect(read('b.txt')).toBe('b2\n')
+    expect(read('a.txt')).toBe('a2\n')
+    expect(loadMessages(workspace, runId)).toEqual(messages)
   })
 })

@@ -245,6 +245,23 @@ function rewindAnchorMissingMessage(hadTimestampAnchor: boolean): string {
     : 'editMessageIndex out of range'
 }
 
+/**
+ * Why a rewind stopped, for the user: the file it could not restore. The
+ * restore undoes itself, so everything is as it was, unless putting a file
+ * back failed too — then it names those files.
+ */
+function rewindFailedMessage(writes: RewindWritesResult): string {
+  const failed = writes.failure
+    ? `${writes.failure.path} could not be restored (${writes.failure.reason})`
+    : 'a file could not be restored'
+  const notPutBack = writes.notPutBack ?? []
+  if (notPutBack.length === 0) {
+    return `Could not rewind: ${failed}. The files and the record are as they were.`
+  }
+  const was = notPutBack.length === 1 ? 'it was' : 'they were'
+  return `Could not rewind: ${failed}, and ${notPutBack.join(', ')} could not be put back as ${was}. The record is as it was.`
+}
+
 /** Read-only preview of which files chatRewind to userMessageIndex would restore. */
 export async function planRewindToUserMessage(input: {
   workspacePath: string
@@ -315,7 +332,7 @@ export async function prepareRewindAndReplaceUserMessage(input: {
   })
   const writes = rewindWritesFromScopes(workspacePath, scopes, editMessageIndex)
   if (writes.undoableRestoreFailed) {
-    throw new Error('Could not restore checkpoint files; history was not truncated')
+    throw new Error(rewindFailedMessage(writes))
   }
   const prior = diskMessages.slice(0, editMessageIndex)
   const nextMessages: ChatMessage[] = [...prior, { ...editedUserMessage, role: 'user' }]
@@ -457,7 +474,7 @@ export async function prepareRewindToUserMessage(input: {
   const writes = rewindWritesFromScopes(workspacePath, scopes, userMessageIndex)
   if (writes.undoableRestoreFailed) {
     discardRewindRedo(workspacePath, runId)
-    throw new Error('Could not restore checkpoint files; history was not truncated')
+    throw new Error(rewindFailedMessage(writes))
   }
   const nextMessages = diskMessages.slice(0, userMessageIndex + 1)
 

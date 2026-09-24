@@ -579,7 +579,9 @@ describe('prepareRewindToUserMessage', () => {
         runId,
         userMessageIndex: 2
       })
-    ).rejects.toThrow(/history was not truncated/)
+    ).rejects.toThrow(
+      'Could not rewind: a.txt could not be restored (its saved copy is missing). The files and the record are as they were.'
+    )
 
     expect(loadMessages(workspace, runId)).toEqual(messages)
     expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('after-second\n')
