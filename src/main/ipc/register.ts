@@ -1473,7 +1473,9 @@ export function registerIpc(): void {
           clearRunAbort(runId, invokeId)
           throw err
         }
-        if (prepared.writes.restored.length > 0) {
+        // Not restored.length: a file the rewind took back only partway is
+        // listed as edited or skipped, and it was still written.
+        if (prepared.writes.checkpointIds.length > 0) {
           invalidateAfterWorkspaceMutation(req.workspacePath)
         }
 
@@ -1545,7 +1547,8 @@ export function registerIpc(): void {
         userMessageIndex: req.userMessageIndex,
         targetUserAt: req.targetUserAt
       })
-      if (prepared.writes.restored.length > 0) {
+      // Not restored.length — see chatRewindAndStart.
+      if (prepared.writes.checkpointIds.length > 0) {
         invalidateAfterWorkspaceMutation(req.workspacePath)
       }
 

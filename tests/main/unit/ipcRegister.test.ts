@@ -62,6 +62,7 @@ const prepareRewindToUserMessageMock = vi.hoisted(() =>
     writes: { restored: ['a.txt'], checkpointIds: ['cp-1'], skipped: [] as string[] }
   }))
 )
+const invalidateAfterWorkspaceMutationSpy = vi.hoisted(() => vi.fn())
 const fromWebContents = vi.hoisted(() => vi.fn(() => mockWin))
 
 vi.mock('electron', () => ({
@@ -146,6 +147,18 @@ vi.mock('@main/agent/checkpoints', () => ({
   resolveWrites: (...args: unknown[]) => resolveWritesMock(...args),
   getWriteCheckpointMeta: vi.fn(() => null)
 }))
+
+// Still the real refresh, recorded so a rewind can be checked for it.
+vi.mock('@main/agent/tools', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/agent/tools')>()
+  return {
+    ...actual,
+    invalidateAfterWorkspaceMutation: (...args: Parameters<typeof actual.invalidateAfterWorkspaceMutation>) => {
+      invalidateAfterWorkspaceMutationSpy(...args)
+      actual.invalidateAfterWorkspaceMutation(...args)
+    }
+  }
+})
 
 vi.mock('@main/agent/harnessApply', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@main/agent/harnessApply')>()
@@ -917,6 +930,42 @@ describe('registerIpc', () => {
       expect(result.ok).toBe(true)
       expect(chatCancelResult).toHaveBeenCalledWith('run-revert')
       expect(waitUntilRunInactiveMock).toHaveBeenCalled()
+    })
+
+    it('refreshes the workspace after a file it took back only partway', async () => {
+      runExistsMock.mockReturnValue(true)
+      isActiveMock.mockReturnValue(false)
+      // a.txt lost the later run's write and kept your change: written, yet
+      // listed as edited, with nothing restored.
+      const writes = { restored: [], skipped: [], edited: ['a.txt'], checkpointIds: ['cp-1', 'cp-2'] }
+      prepareRewindToUserMessageMock.mockResolvedValueOnce({
+        messages: [{ role: 'user' as const, content: 'kept' }],
+        writes
+      })
+      invalidateAfterWorkspaceMutationSpy.mockClear()
+
+      const handler = handlers.get(IPC.chatRewind)
+      await expect(handler!({ sender: mockWc, senderFrame: mockMainFrame }, rewindPayload)).resolves.toMatchObject({
+        ok: true
+      })
+
+      expect(invalidateAfterWorkspaceMutationSpy).toHaveBeenCalledWith('/ws')
+    })
+
+    it('leaves the workspace caches alone when no checkpoint was rewound', async () => {
+      runExistsMock.mockReturnValue(true)
+      isActiveMock.mockReturnValue(false)
+      const writes = { restored: [], skipped: [], edited: [], checkpointIds: [] }
+      prepareRewindToUserMessageMock.mockResolvedValueOnce({
+        messages: [{ role: 'user' as const, content: 'kept' }],
+        writes
+      })
+      invalidateAfterWorkspaceMutationSpy.mockClear()
+
+      const handler = handlers.get(IPC.chatRewind)
+      await handler!({ sender: mockWc, senderFrame: mockMainFrame }, rewindPayload)
+
+      expect(invalidateAfterWorkspaceMutationSpy).not.toHaveBeenCalled()
     })
 
     it('maps userMessageIndex errors to user-facing fail', async () => {

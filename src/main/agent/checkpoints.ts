@@ -1104,12 +1104,17 @@ function resolveWritesInCheckpoint(
   }
 }
 
+/**
+ * A file is in at most one of restored, skipped and edited, however many
+ * rewound runs changed it: the one that says where the rewind left it.
+ */
 export type RewindWritesResult = {
   checkpointIds: string[]
+  /** Back to how they were before the rewound runs. */
   restored: string[]
   /** Kept without a copy to restore from (not undoable). */
   skipped: string[]
-  /** Changed after the agent's write; left as they are. */
+  /** Changed after an agent's write: the rewind stops at that change and leaves it. */
   edited: string[]
   /**
    * True when an undoable file could not be restored — a missing copy or an
@@ -1285,9 +1290,11 @@ export function rewindWritesFromScopes(
   fromUserMessageIndex: number
 ): RewindWritesResult {
   for (const scope of scopes) discardWriteCheckpoint(scope.runDir)
-  const restored: string[] = []
-  const skipped: string[] = []
-  const edited: string[] = []
+  // Where the rewind leaves each file, newest first: one entry per file, as
+  // in the preview, however many rewound runs changed it. Each restore takes
+  // the file back a run; the first thing to stop it after that (a change made
+  // since, or a write with no copy) says why it is not all the way back.
+  const leftAs = new Map<string, RestoreOutcome>()
 
   const entries = collectRewindEntries(scopes, fromUserMessageIndex)
   // A copy that is gone would fail its restore halfway through, after newer
@@ -1327,13 +1334,13 @@ export function rewindWritesFromScopes(
         }
         if (outcome === 'restored') {
           file.resolved = 'discarded'
-          restored.push(file.path)
         } else if (outcome === 'conflict') {
           // Changed after the agent wrote it: left as it is, the rewind goes on.
           file.resolved = 'kept'
-          if (!edited.includes(file.path)) edited.push(file.path)
-        } else {
-          skipped.push(file.path)
+        }
+        const was = leftAs.get(file.path)
+        if (outcome === 'restored' || was === undefined || was === 'restored') {
+          leftAs.set(file.path, outcome)
         }
       }
     }
@@ -1342,15 +1349,13 @@ export function rewindWritesFromScopes(
   }
 
   for (const entry of entries) markCheckpointFullyResolved(entry.runDir, entry.meta)
-  // A path is undone once per turn that wrote it; say each once, by where it
-  // ended: left as you changed it wins over put back (an older undo refused it).
-  const editedSet = new Set(edited)
-  const once = (paths: string[]): string[] => [...new Set(paths)]
+  const leftAsOf = (outcome: RestoreOutcome): string[] =>
+    [...leftAs].filter(([, left]) => left === outcome).map(([path]) => path)
   return {
     checkpointIds: entries.map((entry) => entry.meta.id),
-    restored: once(restored).filter((path) => !editedSet.has(path)),
-    skipped: once(skipped).filter((path) => !editedSet.has(path)),
-    edited,
+    restored: leftAsOf('restored'),
+    skipped: leftAsOf('skipped'),
+    edited: leftAsOf('conflict'),
     undoableRestoreFailed: false
   }
 }
