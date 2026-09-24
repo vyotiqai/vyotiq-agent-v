@@ -791,7 +791,11 @@ class RewindUndo {
   }
 }
 
-/** The outermost directory missing on the way to `dir`: what mkdir will create. */
+/**
+ * The outermost directory missing on the way to `dir`: what mkdir will create.
+ * Not mkdirSync's own return value, which on Windows is the `\\?\` form and
+ * never equals a path walked up with dirname().
+ */
 function outermostMissingDir(dir: string): string | undefined {
   let missing: string | undefined
   for (let d = dir; !existsSync(d); d = dirname(d)) {
