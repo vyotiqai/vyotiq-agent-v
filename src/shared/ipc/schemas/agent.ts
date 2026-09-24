@@ -904,15 +904,18 @@ export const ChatRewindResultSchema = z.object({
 })
 export type ChatRewindResult = z.infer<typeof ChatRewindResultSchema>
 
-/** Read-only preview of which files chatRewind to userMessageIndex would restore. */
+/** Read-only preview of where chatRewind to userMessageIndex would leave each file. */
 export const ChatRewindPreviewResultSchema = z.object({
   files: z.array(
     z.object({
       path: z.string().min(1),
       action: z.enum(['created', 'modified', 'deleted']),
+      /** False when the rewind stops at a write that kept no copy. */
       undoable: z.boolean(),
-      /** Changed after the agent's write: the rewind leaves it as it is. */
-      edited: z.boolean().optional()
+      /** Changed after the agent's write: the rewind stops at that change. */
+      edited: z.boolean().optional(),
+      /** Stops (edited, or no copy) after taking off later runs' writes, so the file still changes. */
+      partway: z.boolean().optional()
     })
   )
 })

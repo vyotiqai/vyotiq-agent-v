@@ -139,7 +139,8 @@ describe('a rewind across several turns that wrote the same file', () => {
     await turn(4, { 'a.txt': 'a4\n' })
     const plan = planRewindWritesAcrossRuns([{ runDir, selection: 'anchored' }], 2, workspace)
     // The preview no longer promises a restore the rewind will refuse.
-    expect(plan.files).toEqual([{ path: 'a.txt', action: 'modified', undoable: true, edited: true }])
+    // Turn 4's write comes off, then your edit stops it: back partway.
+    expect(plan.files).toEqual([{ path: 'a.txt', action: 'modified', undoable: true, edited: true, partway: true }])
     const result = rewindWritesFrom(runDir, workspace, 2)
     expect(result.restored).toEqual([])
     expect(result.edited).toEqual(['a.txt'])

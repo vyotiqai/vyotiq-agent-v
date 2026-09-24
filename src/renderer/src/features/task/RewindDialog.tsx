@@ -22,10 +22,15 @@ const MARK: Record<RewindFile['action'], { letter: string; title: string }> = {
   deleted: { letter: 'D', title: 'The task deleted it; rewinding brings it back' }
 }
 
-/** A file the rewind leaves as it is, and why; null when it goes back. */
+/**
+ * Why the rewind stops short of taking a file all the way back, and how far it
+ * goes: left as is, or back partway when later runs' writes come off before
+ * the stop. Null when it goes all the way back.
+ */
 function keptBecause(file: RewindFile): string | null {
-  if (file.edited) return 'changed since · left as is'
-  if (!file.undoable) return 'no copy kept · left as is'
+  const left = file.partway ? 'back partway' : 'left as is'
+  if (file.edited) return `changed since · ${left}`
+  if (!file.undoable) return `no copy kept · ${left}`
   return null
 }
 
@@ -49,15 +54,18 @@ export function rewindSummary(ask: RewindAsk): string {
     return `${record}, and the files the task changed after it go back to how they were. ${REDO_NOTE}`
   }
   const files = rewindRestoreCount(ask.files)
-  if (files === 0) return `${record}, and no files change. ${REDO_NOTE}`
+  if (files === 0) {
+    const change = ask.files.some((f) => f.partway) ? 'no file goes all the way back' : 'no files change'
+    return `${record}, and ${change}. ${REDO_NOTE}`
+  }
   return `${record}, and ${files === 1 ? 'this file goes' : 'these files go'} back to how ${files === 1 ? 'it was' : 'they were'} before it. ${REDO_NOTE}`
 }
 
 /**
  * The rewind confirmation: which run, what leaves the record, and each file the
  * task touched with what rewinding does to it. Files changed since the task
- * wrote them, or kept without a copy to restore from, are listed but left as
- * they are.
+ * wrote them, or kept without a copy to restore from, are listed with where
+ * the rewind stops: left as they are, or back partway.
  */
 export function RewindDialog({
   ask,

@@ -65,6 +65,26 @@ describe('RewindDialog', () => {
     expect(cancelled).toBe(1)
   })
 
+  it('says which files go back only partway, and counts only the ones that go all the way', () => {
+    const files: RewindFile[] = [
+      { path: 'a.txt', action: 'modified', undoable: true, edited: true, partway: true },
+      { path: 'b.txt', action: 'modified', undoable: false, partway: true },
+      { path: 'c.txt', action: 'created', undoable: true }
+    ]
+    render(<RewindDialog ask={{ runN: 1, files }} onCancel={() => {}} onConfirm={() => {}} />)
+    const rows = within(screen.getByRole('list', { name: 'Files' })).getAllByRole('listitem')
+    expect(rows.map((row) => row.textContent)).toEqual([
+      'Ma.txtchanged since · back partway',
+      'Mb.txtno copy kept · back partway',
+      'Ac.txt'
+    ])
+    expect(screen.getByRole('button', { name: 'Rewind 1 file' })).toBeTruthy()
+    // A file that goes back partway still changes, so never "no files change".
+    expect(rewindSummary({ runN: 1, files: files.slice(0, 2) })).toBe(
+      'Everything after run 1’s instruction leaves the record, and no file goes all the way back. It’s kept, so you can redo it until you send a new instruction or change those files.'
+    )
+  })
+
   it('says no files change when the run changed none', () => {
     render(<RewindDialog ask={{ runN: 3, files: [] }} onCancel={() => {}} onConfirm={() => {}} />)
     expect(screen.queryByRole('list', { name: 'Files' })).toBeNull()

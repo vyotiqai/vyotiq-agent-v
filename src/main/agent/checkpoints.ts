@@ -645,42 +645,42 @@ function resolveCheckpointId(runDir: string, checkpointId?: string): string | nu
  * Where a file stands against the agent's write: `edited` when someone changed
  * it after the agent did (restoring would destroy that change), `restored`
  * when it already holds what restoring would put there, else `writable`.
- * Restore and the rewind preview both read it, so the dialog lists exactly
- * the files the rewind will leave alone.
+ * `current` is the file's content hash, undefined when there is no file.
+ * Restore passes what is on disk; the rewind preview passes what the newer
+ * restores in its walk would leave, so the dialog says what the rewind will do.
  */
-function writeState(resolved: string, blob: string | null, file: CheckpointFileEntry): 'edited' | 'restored' | 'writable' {
-  return writeStateOf(hashExistingFile(resolved) ?? null, blob ? (hashExistingFile(blob) ?? null) : null, blob != null, file)
-}
-
-/**
- * writeState on hashes: `current` is the file's content hash (null when it is
- * absent), `blobHash` the hash of the copy restoring would write. The rewind
- * preview runs it on the file as each newer undo would leave it.
- */
-function writeStateOf(
-  current: string | null,
-  blobHash: string | null,
-  hasBlob: boolean,
-  file: CheckpointFileEntry
-): 'edited' | 'restored' | 'writable' {
+function writeState(current: string | undefined, blob: string | null, file: CheckpointFileEntry): 'edited' | 'restored' | 'writable' {
   if (file.action === 'created') {
     return file.hash && current && current !== file.hash ? 'edited' : 'writable'
   }
-  if (!current || !hasBlob) return 'writable'
+  if (!current || !blob) return 'writable'
   if (file.action === 'modified') {
     if (!file.hash || current === file.hash) return 'writable'
-    return current === blobHash ? 'restored' : 'edited'
+    return current === hashExistingFile(blob) ? 'restored' : 'edited'
   }
   // Deleted by the agent and back on disk: already the old file, or someone else's.
-  return current === blobHash ? 'restored' : 'edited'
+  return current === hashExistingFile(blob) ? 'restored' : 'edited'
 }
 
-/** True when restoring `file` would overwrite a change made after the agent's write. */
-export function changedSinceAgentWrite(workspaceRoot: string, checkpointDir: string, file: CheckpointFileEntry): boolean {
-  if (!file.undoable) return false
+/**
+ * Past a write that kept no copy, whether a rewind can take back the next,
+ * older write: only where that destroys nothing but the older write's own
+ * work. The file is gone, or holds just what that write left (its hash) or
+ * found (its copy); anything else may be the uncopied write's work, or yours.
+ * A further write with no copy passes too, since nothing is done to it.
+ */
+function goesPastNoCopy(current: string | undefined, blob: string | null, file: CheckpointFileEntry): boolean {
+  if (!file.undoable || !current) return true
+  if (file.hash && current === file.hash) return true
+  return writeState(current, blob, file) === 'restored'
+}
+
+/** goesPastNoCopy for the file on disk. One it cannot read stops the walk. */
+function goesPastNoCopyOnDisk(workspaceRoot: string, checkpointDir: string, file: CheckpointFileEntry): boolean {
+  if (!file.undoable) return true
   try {
     const blob = file.action === 'created' ? null : blobPathFor(checkpointDir, file.path)
-    return writeState(resolveInsideWorkspace(workspaceRoot, file.path), blob, file) === 'edited'
+    return goesPastNoCopy(hashExistingFile(resolveInsideWorkspace(workspaceRoot, file.path)), blob, file)
   } catch {
     return false
   }
@@ -862,7 +862,7 @@ function restoreFile(
   if (!file.undoable) return 'skipped'
   const resolved = resolveInsideWorkspace(workspaceRoot, file.path)
   if (file.action === 'created') {
-    if (writeState(resolved, null, file) === 'edited') {
+    if (writeState(hashExistingFile(resolved), null, file) === 'edited') {
       // User edited the file the agent created — refuse to delete their work.
       logger.warn('Skipping checkpoint restore; file changed after the agent write', {
         scope: 'agent',
@@ -881,7 +881,7 @@ function restoreFile(
 
   // A missing file falls through: the prior blob is restored, recreating what
   // the agent changed or deleted rather than leaving the deletion in place.
-  const state = writeState(resolved, blob, file)
+  const state = writeState(hashExistingFile(resolved), blob, file)
   if (state === 'restored') return 'restored'
   if (state === 'edited') {
     // Changed after the agent's write (or, for a delete, put back with other
@@ -1112,7 +1112,7 @@ export type RewindWritesResult = {
   checkpointIds: string[]
   /** Back to how they were before the rewound runs. */
   restored: string[]
-  /** Kept without a copy to restore from (not undoable). */
+  /** Changed by a write that kept no copy (not undoable), which the rewind could not get past. */
   skipped: string[]
   /** Changed after an agent's write: the rewind stops at that change and leaves it. */
   edited: string[]
@@ -1128,12 +1128,23 @@ export type RewindWritesResult = {
   notPutBack?: string[]
 }
 
+/** Where the rewind will leave one file, in the terms of RewindWritesResult. */
 export type RewindWritesPlanFile = {
   path: string
+  /**
+   * What the rewind undoes, as git would letter it: created (it removes the
+   * file), modified (puts it back), deleted (brings it back).
+   */
   action: CheckpointFileAction
+  /** False when the rewind stops at a write that kept no copy (skipped). */
   undoable: boolean
-  /** Changed after the agent's write: the rewind will leave it as it is. */
+  /** Changed after an agent's write: the rewind stops at that change (edited). */
   edited?: boolean
+  /**
+   * Stops (edited, or no copy) only after taking off later runs' writes: the
+   * file changes, but not all the way back.
+   */
+  partway?: boolean
 }
 
 export type RewindWritesPlan = {
@@ -1207,72 +1218,102 @@ function collectRewindEntries(
   return entries
 }
 
-/** Read-only preview of what rewindWritesFromScopes would restore; mutates nothing. */
+/** One rewound write of a file, and the checkpoint that holds its copy. */
+type RewoundWrite = { file: CheckpointFileEntry; checkpointDir: string }
+
+/**
+ * Read-only preview of where rewindWritesFromScopes will leave each file;
+ * mutates nothing. With the workspace it walks each file's rewound writes as
+ * the rewind does. Without it there is nothing to walk on, so a file's newest
+ * rewound write stands for it and nothing is marked edited.
+ */
 export function planRewindWritesAcrossRuns(
   scopes: RewindRunScope[],
   fromUserMessageIndex: number,
-  /** When given, each file says whether it changed since the agent's write. */
   workspaceRoot?: string
 ): RewindWritesPlan {
-  const checkpointIds: string[] = []
-  // Per path, every undo the rewind will run on it (newest first), and the
-  // file as those undos leave it: the rewind restores a path once per turn
-  // that wrote it, and a later turn's undo can hand an earlier one a file it
-  // refuses (your edit between the two turns).
-  const byPath = new Map<
-    string,
-    { plan: RewindWritesPlanFile; current: string | null; refused: boolean; oldestAction: CheckpointFileAction }
-  >()
-  for (const entry of collectRewindEntries(scopes, fromUserMessageIndex)) {
-    checkpointIds.push(entry.meta.id)
+  const entries = collectRewindEntries(scopes, fromUserMessageIndex)
+  // Each file's rewound writes in the order the rewind takes them: newest first.
+  const writesByPath = new Map<string, RewoundWrite[]>()
+  for (const entry of entries) {
     const checkpointDir = join(entry.runDir, 'checkpoints', entry.meta.id)
-    for (const file of entry.meta.files) {
-      let state = byPath.get(file.path)
-      if (!state) {
-        let current: string | null = null
-        if (workspaceRoot) {
-          try {
-            current = hashExistingFile(resolveInsideWorkspace(workspaceRoot, file.path)) ?? null
-          } catch {
-            current = null
-          }
-        }
-        state = {
-          plan: { path: file.path, action: file.action, undoable: file.undoable },
-          current,
-          refused: false,
-          oldestAction: file.action
-        }
-        byPath.set(file.path, state)
-      }
-      // The oldest write decides what the rewind does overall (adds back, removes, restores).
-      state.oldestAction = file.action
-      state.plan.undoable = state.plan.undoable && file.undoable
-      if (!workspaceRoot || !file.undoable || state.refused) continue
-      const blob = file.action === 'created' ? null : blobPathFor(checkpointDir, file.path)
-      const blobHash = blob ? (hashExistingFile(blob) ?? null) : null
-      const outcome = writeStateOf(state.current, blobHash, blob != null, file)
-      if (outcome === 'edited') {
-        state.refused = true
-        continue
-      }
-      state.current = file.action === 'created' ? null : blobHash
+    for (const file of [...entry.meta.files].reverse()) {
+      const writes = writesByPath.get(file.path)
+      if (writes) writes.push({ file, checkpointDir })
+      else writesByPath.set(file.path, [{ file, checkpointDir }])
     }
   }
+  const files = [...writesByPath.values()].map((writes) => {
+    const newest = writes[0]!.file
+    const asNewest = { path: newest.path, action: newest.action, undoable: newest.undoable }
+    return workspaceRoot ? (planFileRewind(workspaceRoot, writes) ?? asNewest) : asNewest
+  })
   return {
-    checkpointIds,
-    files: [...byPath.values()]
-      .map(({ plan, refused, oldestAction }) => ({
-        ...plan,
-        action: oldestAction,
-        ...(refused ? { edited: true } : {})
-      }))
-      .sort((a, b) => a.path.localeCompare(b.path))
+    checkpointIds: entries.map((entry) => entry.meta.id),
+    files: files.sort((a, b) => a.path.localeCompare(b.path))
   }
 }
 
 /**
- * Force-restore every selected write checkpoint (newest first). Selection is
+ * Walk one file's rewound writes, newest first, on content hashes: the walk
+ * rewindWritesFromScopes makes on disk. Each restore takes the file back a
+ * run. A change made since stops it; a write with no copy stops it unless
+ * the next write can be taken back past it (goesPastNoCopy).
+ * Null when the file cannot be read to walk on.
+ */
+function planFileRewind(workspaceRoot: string, writes: RewoundWrite[]): RewindWritesPlanFile | null {
+  const newest = writes[0]!.file
+  try {
+    const now = hashExistingFile(resolveInsideWorkspace(workspaceRoot, newest.path))
+    let content = now
+    const taken: CheckpointFileEntry[] = []
+    // Writes with no copy the walk has reached but not yet got past.
+    let noCopy: CheckpointFileEntry[] = []
+    let edited = false
+    for (const { file, checkpointDir } of writes) {
+      if (!file.undoable) {
+        noCopy.push(file)
+        continue
+      }
+      const blob = file.action === 'created' ? null : blobPathFor(checkpointDir, file.path)
+      if (noCopy.length > 0 && !goesPastNoCopy(content, blob, file)) break
+      const state = writeState(content, blob, file)
+      if (state === 'edited') {
+        edited = true
+        break
+      }
+      // 'restored' leaves the file as it is: it already holds this write's copy.
+      if (state === 'writable') content = blob ? hashExistingFile(blob) : undefined
+      taken.push(...noCopy, file)
+      noCopy = []
+    }
+    const stopped = edited || noCopy.length > 0
+    return {
+      path: newest.path,
+      action: taken.length > 0 ? undoneAction(taken) : newest.action,
+      undoable: noCopy.length === 0,
+      ...(edited ? { edited: true } : {}),
+      ...(stopped && content !== now ? { partway: true } : {})
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The letter for what taking back `taken` (newest first) undoes: a file the
+ * oldest of them created goes, one the newest deleted comes back, and any
+ * other is put back as it was.
+ */
+function undoneAction(taken: CheckpointFileEntry[]): CheckpointFileAction {
+  if (taken[taken.length - 1]!.action === 'created') return 'created'
+  return taken[0]!.action === 'deleted' ? 'deleted' : 'modified'
+}
+
+/**
+ * Force-restore every selected write checkpoint (newest first), each file
+ * until a change made since stops it, or a write with no copy it cannot get
+ * past without destroying more than older runs' own work. Selection is
  * per scope: parent runs filter by the rewind anchor, inline instance runs are
  * included whole. Ignores UI Keep/Discard and prior undone flags so
  * edit-and-resend can rewind multi-turn history.
@@ -1295,6 +1336,11 @@ export function rewindWritesFromScopes(
   // the file back a run; the first thing to stop it after that (a change made
   // since, or a write with no copy) says why it is not all the way back.
   const leftAs = new Map<string, RestoreOutcome>()
+  // Files whose walk has stopped: older runs leave them as they are. Their
+  // copies would go back over a change made since, unguarded when a run never
+  // finalized (a crash leaves no hash). Past a write with no copy the walk
+  // goes on only where that destroys nothing (goesPastNoCopy).
+  const stopped = new Set<string>()
 
   const entries = collectRewindEntries(scopes, fromUserMessageIndex)
   // A copy that is gone would fail its restore halfway through, after newer
@@ -1321,6 +1367,18 @@ export function rewindWritesFromScopes(
     for (const entry of entries) {
       const checkpointDir = join(entry.runDir, 'checkpoints', entry.meta.id)
       for (const file of [...entry.meta.files].reverse()) {
+        if (
+          !stopped.has(file.path) &&
+          leftAs.get(file.path) === 'skipped' &&
+          !goesPastNoCopyOnDisk(workspaceRoot, checkpointDir, file)
+        ) {
+          stopped.add(file.path)
+        }
+        if (stopped.has(file.path)) {
+          // A newer run stopped the walk: this run's write stays under it.
+          file.resolved = 'kept'
+          continue
+        }
         let outcome: RestoreOutcome
         try {
           outcome = restoreFile(workspaceRoot, checkpointDir, file, undo)
@@ -1335,13 +1393,12 @@ export function rewindWritesFromScopes(
         if (outcome === 'restored') {
           file.resolved = 'discarded'
         } else if (outcome === 'conflict') {
-          // Changed after the agent wrote it: left as it is, the rewind goes on.
+          // Changed after the agent wrote it: left as it is, by older runs
+          // too. The rewind goes on with the other files.
           file.resolved = 'kept'
+          stopped.add(file.path)
         }
-        const was = leftAs.get(file.path)
-        if (outcome === 'restored' || was === undefined || was === 'restored') {
-          leftAs.set(file.path, outcome)
-        }
+        leftAs.set(file.path, outcome)
       }
     }
   } finally {
