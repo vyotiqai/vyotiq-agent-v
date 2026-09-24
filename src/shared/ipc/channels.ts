@@ -11,6 +11,11 @@ export const IPC = {
   /** Whether a task's last rewind can still be redone, and redoing it. */
   runRewindRedoStatus: 'runs:rewindRedoStatus',
   runRewindRedo: 'runs:rewindRedo',
+  /** A whole task in its own git worktree: make one, read it, merge it back, delete it. */
+  taskWorktreeCreate: 'worktrees:create',
+  taskWorktreeInfo: 'worktrees:info',
+  taskWorktreeMerge: 'worktrees:merge',
+  taskWorktreeDiscard: 'worktrees:discard',
   workspacesAdd: 'workspaces:add',
   workspacesRemove: 'workspaces:remove',
   workspacesSetActive: 'workspaces:set-active',

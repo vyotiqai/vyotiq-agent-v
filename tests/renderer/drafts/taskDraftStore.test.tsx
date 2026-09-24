@@ -9,7 +9,9 @@ import {
   deleteTaskDraftFor,
   resetTaskDraftStoreForTests,
   saveTaskDraftFor,
+  setBriefChecks,
   setBriefState,
+  setBriefWorktree,
   useTaskDrafts
 } from '@renderer/lib/drafts/taskDraftStore'
 
@@ -61,15 +63,25 @@ describe('task draft store', () => {
     })
     expect(result.current.map((d) => d.draft.id)).toEqual([A])
     // Not continuing a draft that is gone — but what is on the page stays.
-    expect(briefStateFor('/ws')).toEqual({ draftId: null, checks: ['Typed on the page'] })
+    expect(briefStateFor('/ws')).toEqual({ draftId: null, checks: ['Typed on the page'], worktree: false })
   })
 
   it('an empty page state is no state at all', () => {
     setBriefState('/ws', { draftId: null, checks: [] })
-    expect(briefStateFor('/ws')).toEqual({ draftId: null, checks: [] })
+    expect(briefStateFor('/ws')).toEqual({ draftId: null, checks: [], worktree: false })
     setBriefState('/ws', { draftId: A, checks: [] })
     expect(briefStateFor('/ws').draftId).toBe(A)
     setBriefState('/ws', null)
     expect(briefStateFor('/ws').draftId).toBeNull()
+  })
+
+  it('keeps New worktree picked on its own, and through its checks changing', () => {
+    setBriefWorktree('/ws', true)
+    expect(briefStateFor('/ws')).toEqual({ draftId: null, checks: [], worktree: true })
+    setBriefChecks('/ws', ['A check'])
+    expect(briefStateFor('/ws').worktree).toBe(true)
+    setBriefWorktree('/ws', false)
+    setBriefChecks('/ws', [])
+    expect(briefStateFor('/ws')).toEqual({ draftId: null, checks: [], worktree: false })
   })
 })

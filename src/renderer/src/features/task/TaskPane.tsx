@@ -32,6 +32,7 @@ import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { buildRecordModel, type BuildOptions } from './recordModel'
 import { RecordBody, TaskHeader } from './record/RecordLayout'
 import { useRewindRedo } from './rewindRedo'
+import { TaskWorktreeStrip, useTaskWorktree } from './taskWorktree'
 import { RecordActionsContext } from './record/WorkItems'
 import { TaskRecord } from './TaskRecord'
 import { clearMatches, findRanges, foldsToOpen, paintMatches, RecordOpenContext } from './recordFind'
@@ -217,12 +218,14 @@ export function TaskPane(props: TaskPaneProps) {
   const gitRevision = useRunEndRevision(live)
   const git = useGitStatus(workspacePath, gitRevision, Boolean(workspacePath) && !draft && !props.run?.worktreeBranch)
   const branch = props.run?.worktreeBranch ?? git.status?.branch ?? null
+  // A task started in a new worktree: its workspace is that worktree.
+  const worktree = useTaskWorktree(draft ? null : workspacePath, gitRevision)
   const facts = draft
     ? workspacePath
       ? [{ text: `in ${formatWorkspaceName(workspacePath)}`, title: workspacePath }]
       : []
     : branch
-      ? [{ text: branch, mono: true, title: props.run?.worktreeBranch ? 'Worktree branch' : 'Branch' }]
+      ? [{ text: branch, mono: true, title: props.run?.worktreeBranch || worktree.info ? 'Worktree branch' : 'Branch' }]
       : []
 
   const [renaming, setRenaming] = useState(false)
@@ -582,6 +585,9 @@ export function TaskPane(props: TaskPaneProps) {
                   Redo
                 </Button>
               </div>
+            ) : null}
+            {worktree.info && runId && !live ? (
+              <TaskWorktreeStrip info={worktree.info} title={title} onChanged={worktree.refresh} />
             ) : null}
           </RecordBody>
         </RecordOpenContext.Provider>

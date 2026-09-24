@@ -231,6 +231,14 @@ async function gitDiffStdout(args: string[], cwd: string, timeout: number): Prom
   }
 }
 
+/**
+ * Run git with the app's non-interactive environment. Throws with git's own
+ * stderr on a non-zero exit — callers that need a quiet read use their own.
+ */
+export function runGit(args: string[], cwd: string, timeout = WRITE_TIMEOUT_MS): Promise<string> {
+  return git(args, cwd, timeout)
+}
+
 async function gitQuiet(args: string[], cwd: string, timeout: number): Promise<string | null> {
   try {
     return await git(args, cwd, timeout)
@@ -924,7 +932,7 @@ export type CommitOutcome = { committed: boolean; pushed: boolean; detail: strin
 export type CommitMode = 'all' | 'staged'
 
 /** Dirty paths from porcelain, excluding chrome noise trees (node_modules, etc.). */
-async function listNonNoiseDirtyPaths(cwd: string): Promise<string[]> {
+export async function listNonNoiseDirtyPaths(cwd: string): Promise<string[]> {
   const porcelain = await gitQuiet(
     ['status', '--porcelain=v1', '-z', '-uall', '--no-renames'],
     cwd,

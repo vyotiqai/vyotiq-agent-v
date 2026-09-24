@@ -2211,6 +2211,11 @@ export type ComposerSendExtras = {
   doneWhen?: string[]
   /** The draft the brief continues: main removes it once the task exists. */
   draftId?: string
+  /**
+   * Start the new task in a new worktree of this workspace. The renderer makes
+   * the worktree and starts the task there; this never reaches main.
+   */
+  worktree?: boolean
 }
 
 export function buildUserContent(

@@ -472,7 +472,14 @@ import { launchRunFollowUpOrStart } from '../agent/launchRunInvoke'
 import { formatGoalContinueMessage } from '../../shared/goalRuntime'
 import { deleteTaskDraft, listTaskDrafts, saveTaskDraft } from '../drafts/taskDrafts'
 import { discardRewindRedo, redoRewind, rewindRedoStatus } from '../agent/rewindRedo'
+import { createTaskWorktree, discardTaskWorktree, mergeTaskWorktree, taskWorktreeInfo } from '../git/taskWorktrees'
 import {
+  TaskWorktreeCreateRequestSchema,
+  TaskWorktreeMergeRequestSchema,
+  TaskWorktreePathRequestSchema,
+  type TaskWorktree,
+  type TaskWorktreeInfo,
+  type TaskWorktreeMergeResult,
   RewindRedoRequestSchema,
   type RewindRedoStatus,
   TaskDraftDeleteRequestSchema,
@@ -964,6 +971,60 @@ export function registerIpc(): void {
       return ok(result)
     } catch (err) {
       return failFrom(err, IPC.runRewindRedo)
+    }
+  })
+
+  ipcMain.handle(IPC.taskWorktreeCreate, async (event, raw): Promise<IpcResult<TaskWorktree>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskWorktreeCreateRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await createTaskWorktree(req.workspacePath, req.brief))
+    } catch (err) {
+      return failFrom(err, IPC.taskWorktreeCreate)
+    }
+  })
+
+  ipcMain.handle(IPC.taskWorktreeInfo, async (event, raw): Promise<IpcResult<TaskWorktreeInfo | null>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskWorktreePathRequestSchema.parse(raw)
+      return ok(await taskWorktreeInfo(req.workspacePath))
+    } catch (err) {
+      return failFrom(err, IPC.taskWorktreeInfo)
+    }
+  })
+
+  ipcMain.handle(IPC.taskWorktreeMerge, async (event, raw): Promise<IpcResult<TaskWorktreeMergeResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskWorktreeMergeRequestSchema.parse(raw)
+      const result = await mergeTaskWorktree(req.workspacePath, req.message)
+      const info = await taskWorktreeInfo(req.workspacePath)
+      for (const path of [req.workspacePath, info?.parentPath]) {
+        if (!path) continue
+        invalidateGitStatusCache(path)
+        emitGitStatusChanged(path)
+      }
+      return ok(result)
+    } catch (err) {
+      return failFrom(err, IPC.taskWorktreeMerge)
+    }
+  })
+
+  ipcMain.handle(IPC.taskWorktreeDiscard, async (event, raw): Promise<IpcResult<true>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskWorktreePathRequestSchema.parse(raw)
+      const info = await taskWorktreeInfo(req.workspacePath)
+      await discardTaskWorktree(req.workspacePath)
+      if (info?.parentPath) {
+        invalidateGitStatusCache(info.parentPath)
+        emitGitStatusChanged(info.parentPath)
+      }
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.taskWorktreeDiscard)
     }
   })
 

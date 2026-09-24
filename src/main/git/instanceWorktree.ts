@@ -370,7 +370,8 @@ export function executablePathIsUnder(root: string, executablePath: string): boo
   return workspacePathIsInside(root, executablePath)
 }
 
-async function releaseInstanceWorktreeResources(worktreePath: string): Promise<void> {
+/** Let go of the index, LSP, PTY and terminal handles under a worktree, so it can be deleted. */
+export async function releaseInstanceWorktreeResources(worktreePath: string): Promise<void> {
   try {
     disposeWorkspaceIndexes(worktreePath, { permanent: true })
   } catch {
@@ -635,7 +636,7 @@ function gitWorktreeMutexKey(workspacePath: string): string {
  * `git worktree add` cannot race on index.lock (`GIT_OPTIONAL_LOCKS=0`).
  * Nested ops use *Unlocked helpers — this chain is not re-entrant.
  */
-function withGitWorktreeMutex<T>(
+export function withGitWorktreeMutex<T>(
   workspacePath: string,
   operation: () => T | Promise<T>
 ): Promise<T> {

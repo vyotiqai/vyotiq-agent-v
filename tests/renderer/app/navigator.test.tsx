@@ -386,7 +386,7 @@ describe('Navigator', () => {
     const items = [
       { workspacePath: WS, draft: draft('d0000000-0000-4000-8000-00000000000a', 'Fix the **updater** swap') },
       { workspacePath: WS, draft: draft('d0000000-0000-4000-8000-00000000000b', '', ['Suite passes']) },
-      { workspacePath: 'C:\elsewhere', draft: draft('d0000000-0000-4000-8000-00000000000c', 'Not open here') }
+      { workspacePath: '/elsewhere', draft: draft('d0000000-0000-4000-8000-00000000000c', 'Not open here') }
     ]
     render(<Navigator {...props({ drafts: { items, actions: { onOpen, onDelete } } })} />)
     const order = Array.from(document.querySelectorAll('[data-nav-section]')).map((el) => el.getAttribute('data-nav-section'))

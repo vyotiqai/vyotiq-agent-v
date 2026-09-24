@@ -39,6 +39,10 @@ const api: VyotiqApi = {
   deleteTaskDraft: (workspacePath, id) => ipcRenderer.invoke(IPC.taskDraftsDelete, { workspacePath, id }),
   rewindRedoStatus: (workspacePath, runId) => ipcRenderer.invoke(IPC.runRewindRedoStatus, { workspacePath, runId }),
   redoRewind: (workspacePath, runId) => ipcRenderer.invoke(IPC.runRewindRedo, { workspacePath, runId }),
+  createTaskWorktree: (workspacePath, brief) => ipcRenderer.invoke(IPC.taskWorktreeCreate, { workspacePath, brief }),
+  taskWorktreeInfo: (workspacePath) => ipcRenderer.invoke(IPC.taskWorktreeInfo, { workspacePath }),
+  mergeTaskWorktree: (workspacePath, message) => ipcRenderer.invoke(IPC.taskWorktreeMerge, { workspacePath, message }),
+  discardTaskWorktree: (workspacePath) => ipcRenderer.invoke(IPC.taskWorktreeDiscard, { workspacePath }),
   addWorkspace: (path) => ipcRenderer.invoke(IPC.workspacesAdd, path ? { path } : {}),
   removeWorkspace: (path, stopActiveRuns, deleteStorage) =>
     ipcRenderer.invoke(IPC.workspacesRemove, {

@@ -117,6 +117,9 @@ import type {
   ComposerAttachmentsClearRequest,
   TaskDraft,
   RewindRedoStatus,
+  TaskWorktree,
+  TaskWorktreeInfo,
+  TaskWorktreeMergeResult,
   TaskDraftSaveRequest,
   TaskDraftsListResult,
   ComposerAttachmentsGetResult,
@@ -208,6 +211,14 @@ export interface VyotiqApi {
   rewindRedoStatus: (workspacePath: string, runId: string) => Promise<IpcResult<RewindRedoStatus>>
   /** Bring back what the last rewind took — the record and the files — while nothing has changed since. */
   redoRewind: (workspacePath: string, runId: string) => Promise<IpcResult<{ messages: ChatMessage[] }>>
+  /** Branch the workspace's current branch into a new worktree, named from the brief. */
+  createTaskWorktree: (workspacePath: string, brief: string) => Promise<IpcResult<TaskWorktree>>
+  /** The task worktree this workspace is, as it stands now; null when it is not one. */
+  taskWorktreeInfo: (workspacePath: string) => Promise<IpcResult<TaskWorktreeInfo | null>>
+  /** Commit what is left (under `message`), then merge the branch into the one it came from. */
+  mergeTaskWorktree: (workspacePath: string, message: string) => Promise<IpcResult<TaskWorktreeMergeResult>>
+  /** Delete the worktree's folder and branch. Close its workspace first. */
+  discardTaskWorktree: (workspacePath: string) => Promise<IpcResult<true>>
   addWorkspace: (path?: string) => Promise<IpcResult<WorkspacesState>>
   removeWorkspace: (
     path: string,

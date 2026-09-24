@@ -74,9 +74,11 @@ import type {
 } from '@renderer/lib/hooks/createChatStreamController'
 import { rewoundToastText, useRewindDialog } from '@renderer/features/task/RewindDialog'
 import { RELOAD_RUN_EVENT, announceRewound, redoRewindAndReload, type ReloadRunDetail } from '@renderer/features/task/rewindRedo'
+import { DISCARD_TASK_WORKTREE_EVENT, type DiscardTaskWorktreeDetail } from '@renderer/features/task/taskWorktree'
 import { needsSetup, setupRecents, setupStartingMode, setupWorkspace } from '@renderer/features/setup/setupModel'
 import {
   briefStateFor,
+  setBriefChecks,
   deleteTaskDraftFor,
   draftTitle,
   saveTaskDraftFor,
@@ -989,6 +991,15 @@ function App() {
   )
 
   const { sendWithOfflineQueue } = useOfflineSendQueue(offlineWorkspacePath, flushOfflineEntry)
+  const startInNewWorktreeRef = useRef<
+    (
+      parentPath: string,
+      text: string,
+      images: string[] | undefined,
+      files: AttachedFile[] | undefined,
+      extras: import('@shared/ipc').ComposerSendExtras
+    ) => Promise<boolean>
+  >(async () => false)
 
   const flushPendingSend = useCallback(async () => {
     const pending = pendingSendRef.current
@@ -1039,7 +1050,10 @@ function App() {
       files: AttachedFile[] | undefined,
       extras: import('@shared/ipc').ComposerSendExtras | undefined,
       binding: { workspacePath: string; runId: string | null }
-    ) => {
+    ): Promise<boolean> => {
+      if (extras?.worktree && !binding.runId) {
+        return startInNewWorktreeRef.current(binding.workspacePath, text, images, files, extras)
+      }
       if (!settings.toolApprovalOnboardingDone) {
         pendingSendRef.current = {
           text,
@@ -1126,6 +1140,90 @@ function App() {
     },
     [gateSendWithOnboarding, homeProviderIssue, newChatInWorkspace, onNewSessionInWorkspace, sendWithOfflineQueue]
   )
+
+  /**
+   * Start task in a new worktree: make the worktree (a new branch of this
+   * workspace's current branch), open it as a workspace, and start the task
+   * there through the same gate, queue and controller as any new task. The
+   * draft it continued is spent in the workspace it was saved in.
+   */
+  startInNewWorktreeRef.current = async (parentPath, text, images, files, extras) => {
+    const { worktree: _worktree, draftId, ...rest } = extras
+    const made = await window.vyotiq.createTaskWorktree(parentPath, text)
+    if (!made.ok) {
+      pushToast(made.error, 'error')
+      return false
+    }
+    const path = made.data.workspacePath
+    let openError: string | null = null
+    const added = await addWorkspace(path, { onError: (message) => (openError = message) })
+    if (!added) {
+      pushToast(`Made the worktree ${made.data.branch}, but couldn’t open it: ${openError ?? 'unknown error'}`, 'error')
+      return false
+    }
+    setOpenInstanceByParent({})
+    setView('chat')
+    await newChatInWorkspace(path)
+    const sendExtras = Object.keys(rest).length > 0 ? rest : undefined
+    const sent = await gateSendWithOnboarding(
+      (t, i, f, e) =>
+        sendWithOfflineQueue(
+          t,
+          i,
+          f,
+          e,
+          (t2, i2, f2, e2) => getRunControllerRef.current(null, path)?.send(t2, i2, f2, e2) ?? false,
+          { runId: null, workspacePath: path }
+        ),
+      text,
+      images,
+      files,
+      sendExtras,
+      { workspacePath: path, runId: null }
+    )
+    // Not sent yet (the approval choice comes first): it waits on the worktree's New task page.
+    if (!sent) {
+      setComposerDraftForPane(path, null, text)
+      if (rest.doneWhen?.length) setBriefChecks(path, rest.doneWhen)
+    }
+    if (draftId) void deleteTaskDraftFor(parentPath, draftId)
+    // Either way the brief now lives in the worktree, so the page it came from empties.
+    return true
+  }
+
+  // Discard / Remove on a task worktree: close its workspace (so nothing of the
+  // app holds its files), then delete the folder and the branch.
+  const activeRunsRef = useRef(activeRuns)
+  activeRunsRef.current = activeRuns
+  const openWorkspacesRef = useRef(openWorkspaces)
+  openWorkspacesRef.current = openWorkspaces
+  useEffect(() => {
+    const onDiscard = (event: Event): void => {
+      const detail = (event as CustomEvent<DiscardTaskWorktreeDetail>).detail
+      if (!detail?.workspacePath) return
+      void (async () => {
+        if (activeRunsRef.current.some((run) => workspacePathsEqual(run.workspacePath, detail.workspacePath))) {
+          pushToast('A task is still running in this worktree — stop it first', 'error')
+          return
+        }
+        await removeWorkspace(detail.workspacePath, false)
+        const res = await window.vyotiq.discardTaskWorktree(detail.workspacePath)
+        if (!res.ok) {
+          pushToast(`Couldn’t delete the worktree: ${res.error}`, 'error')
+          return
+        }
+        if (openWorkspacesRef.current.some((open) => workspacePathsEqual(open, detail.parentPath))) {
+          void switchWorkspace(detail.parentPath)
+        }
+        pushToast(detail.merged ? `Removed the worktree ${detail.branch}` : `Discarded the worktree ${detail.branch}`, {
+          kind: 'success',
+          icon: 'trash'
+        })
+      })()
+    }
+    window.addEventListener(DISCARD_TASK_WORKTREE_EVENT, onDiscard)
+    return () => window.removeEventListener(DISCARD_TASK_WORKTREE_EVENT, onDiscard)
+  }, [removeWorkspace, switchWorkspace])
 
   const onChatEditAndResend = useCallback(
     async (
@@ -2465,7 +2563,7 @@ function App() {
           if (!replace) return
         }
       }
-      setBriefState(path, { draftId: draft.id, checks: draft.doneWhen })
+      setBriefState(path, { ...briefStateFor(path), draftId: draft.id, checks: draft.doneWhen })
       setComposerDraftForPane(path, null, draft.brief)
       const key = composerAttachmentKey(path, null)
       if (key) {

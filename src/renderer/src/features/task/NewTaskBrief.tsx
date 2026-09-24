@@ -36,6 +36,8 @@ const MODE_NOTE: Record<AgentInteractionMode, string> = {
   ask: 'Reads and answers — changes nothing'
 }
 
+const MODE_NOTE_WORKTREE = 'Plans, edits files and runs commands in the new worktree'
+
 const APPROVAL_NOTE: Record<ToolApprovalMode, string> = {
   off: 'Runs its tools without asking',
   mutating: 'Asks before edits and commands',
@@ -78,7 +80,9 @@ export function NewTaskBrief({
   checks,
   onChecksEdit,
   clearToken,
-  draft
+  draft,
+  worktree = false,
+  onWorktreeChange
 }: {
   workspacePath: string | null
   targets?: NewTaskTargets
@@ -111,6 +115,9 @@ export function NewTaskBrief({
   clearToken?: number
   /** Save as draft: put this brief aside. `continuing` when it came from one. */
   draft?: { onSave: () => void; canSave: boolean; saving: boolean; continuing: boolean }
+  /** Start it in a new worktree of this workspace instead of in this folder. */
+  worktree?: boolean
+  onWorktreeChange?: (worktree: boolean) => void
 }) {
   const [adding, setAdding] = useState(false)
   const [draftCheck, setDraftCheck] = useState('')
@@ -205,7 +212,7 @@ export function NewTaskBrief({
           <>
             {'in '}
             <WorkspaceSelect workspacePath={workspacePath} targets={targets} brief={brief} />
-            <BranchSelect workspacePath={workspacePath} />
+            <BranchSelect workspacePath={workspacePath} worktree={worktree} onWorktreeChange={onWorktreeChange} />
           </>
         ) : null}
         <span className="flex-1" />
@@ -299,7 +306,7 @@ export function NewTaskBrief({
             </Block>
 
             <Block label="How it runs">
-              <HowItRuns options={options} onOpenSettings={onOpenSettings} />
+              <HowItRuns options={options} onOpenSettings={onOpenSettings} worktree={worktree} />
             </Block>
 
             <div className="mt-8 flex items-center gap-2">
@@ -328,7 +335,7 @@ export function NewTaskBrief({
             </div>
           </div>
 
-          {workspacePath ? <WhatTheAgentSees workspacePath={workspacePath} /> : null}
+          {workspacePath ? <WhatTheAgentSees workspacePath={workspacePath} worktree={worktree} /> : null}
         </div>
       </div>
     </div>
@@ -379,8 +386,25 @@ function WorkspaceSelect({
   )
 }
 
-/** The branch the task starts on; picking another checks it out. */
-function BranchSelect({ workspacePath }: { workspacePath: string }) {
+const WHERE_OPTIONS: MenuOption[] = [
+  { value: 'here', label: 'This folder' },
+  { value: 'worktree', label: 'New worktree' }
+]
+
+/**
+ * The branch the task starts on (picking another checks it out), and where it
+ * works: in this folder, or in a new worktree branched from it — only offered
+ * when there is a branch with a commit to branch from.
+ */
+function BranchSelect({
+  workspacePath,
+  worktree,
+  onWorktreeChange
+}: {
+  workspacePath: string
+  worktree: boolean
+  onWorktreeChange?: (worktree: boolean) => void
+}) {
   const [revision, setRevision] = useState(0)
   const git = useGitStatus(workspacePath, revision, true, 0)
   const [branches, setBranches] = useState<string[]>([])
@@ -431,6 +455,22 @@ function BranchSelect({ workspacePath }: { workspacePath: string }) {
         bare
         mono
       />
+      {onWorktreeChange && git.status?.hasCommits ? (
+        <>
+          <span aria-hidden="true" className="px-1 text-tertiary">
+            ·
+          </span>
+          <Menu
+            value={worktree ? 'worktree' : 'here'}
+            options={WHERE_OPTIONS}
+            onChange={(where) => onWorktreeChange(where === 'worktree')}
+            aria-label="Where it works"
+            placement="down"
+            bare
+            quiet
+          />
+        </>
+      ) : null}
       {error ? (
         <span className="ml-2 min-w-0 truncate text-danger" role="alert" title={error}>
           {error}
@@ -440,7 +480,15 @@ function BranchSelect({ workspacePath }: { workspacePath: string }) {
   )
 }
 
-function HowItRuns({ options, onOpenSettings }: { options: TaskOptionsProps; onOpenSettings?: (section: 'agent') => void }) {
+function HowItRuns({
+  options,
+  onOpenSettings,
+  worktree
+}: {
+  options: TaskOptionsProps
+  onOpenSettings?: (section: 'agent') => void
+  worktree: boolean
+}) {
   const { provider, model, modelMetaByValue, agentMode, onAgentModeChange, chatSettings, onChatSettingsChange } = options
   const locked = Boolean(options.disabled)
   const meta = modelMetaByValue[modelSelectionKey(provider, model)] ?? modelMetaByValue[model]
@@ -474,7 +522,9 @@ function HowItRuns({ options, onOpenSettings }: { options: TaskOptionsProps; onO
           onChange={onAgentModeChange}
           disabled={locked}
         />
-        <span className="min-w-0 truncate text-xs text-tertiary">{MODE_NOTE[agentMode]}</span>
+        <span className="min-w-0 truncate text-xs text-tertiary">
+          {worktree && agentMode === 'agent' ? MODE_NOTE_WORKTREE : MODE_NOTE[agentMode]}
+        </span>
       </dd>
       <dt className="text-muted">Model</dt>
       <dd className="m-0 flex min-w-0 items-center gap-3">
@@ -558,7 +608,7 @@ function useToolsSummary(workspacePath: string): {
   return { builtin, servers, problem }
 }
 
-function WhatTheAgentSees({ workspacePath }: { workspacePath: string }) {
+function WhatTheAgentSees({ workspacePath, worktree }: { workspacePath: string; worktree: boolean }) {
   const { context, failed, reload } = useAgentContext(workspacePath)
   // Read again after an init: a watcher may not carry a `.git` just created.
   const gitInit = useGitInit(workspacePath, reload)
@@ -566,14 +616,25 @@ function WhatTheAgentSees({ workspacePath }: { workspacePath: string }) {
   const tools = useToolsSummary(workspacePath)
 
   const status = git.status
+  // A new worktree starts from the branch's last commit; what is uncommitted here stays here.
+  const inWorktree = worktree && Boolean(context?.branch)
   const branchDetail = status
-    ? [
-        status.fileCount > 0 ? `${status.fileCount.toLocaleString()} changed` : 'clean',
-        status.ahead ? `${status.ahead} ahead` : null,
-        status.behind ? `${status.behind} behind` : null
-      ]
-        .filter(Boolean)
-        .join(' · ')
+    ? inWorktree
+      ? [
+          `from ${status.branch ?? context?.branch}`,
+          status.fileCount > 0
+            ? `${status.fileCount.toLocaleString()} uncommitted ${status.fileCount === 1 ? 'file stays' : 'files stay'} here`
+            : null
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      : [
+          status.fileCount > 0 ? `${status.fileCount.toLocaleString()} changed` : 'clean',
+          status.ahead ? `${status.ahead} ahead` : null,
+          status.behind ? `${status.behind} behind` : null
+        ]
+          .filter(Boolean)
+          .join(' · ')
     : null
 
   const rules = context?.rules
@@ -595,7 +656,11 @@ function WhatTheAgentSees({ workspacePath }: { workspacePath: string }) {
             v={
               context ? (
                 context.branch ? (
-                  <span className="font-mono">{context.branch}</span>
+                  inWorktree ? (
+                    'New worktree'
+                  ) : (
+                    <span className="font-mono">{context.branch}</span>
+                  )
                 ) : (
                   <span className="flex items-center gap-2">
                     {gitInit.error ? 'Init failed' : 'Not a repository'}

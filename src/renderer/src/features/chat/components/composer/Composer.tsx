@@ -27,6 +27,7 @@ import {
   saveTaskDraftFor,
   setBriefChecks,
   setBriefState,
+  setBriefWorktree,
   useBriefState
 } from '@renderer/lib/drafts/taskDraftStore'
 import { Icon } from '@renderer/lib/icons'
@@ -395,6 +396,8 @@ export function Composer({
   const briefState = useBriefState(briefWorkspace)
   const briefDraftIdRef = useRef(briefState.draftId)
   briefDraftIdRef.current = briefState.draftId
+  const briefWorktreeRef = useRef(Boolean(briefState.worktree))
+  briefWorktreeRef.current = Boolean(briefState.worktree)
   const [savingDraft, setSavingDraft] = useState(false)
   /** Bumped after a save empties the page, so a half-typed check goes too. */
   const [briefClearToken, setBriefClearToken] = useState(0)
@@ -463,6 +466,10 @@ export function Composer({
         // Starting from a draft spends it: main removes it once the task exists.
         if (variant === 'brief' && briefDraftIdRef.current) {
           extras = { ...(extras ?? {}), draftId: briefDraftIdRef.current }
+        }
+        // New worktree: App makes it and starts the task there.
+        if (variant === 'brief' && briefWorktreeRef.current) {
+          extras = { ...(extras ?? {}), worktree: true }
         }
         const boundWorkspace = workspacePath
         const resolved = await resolveComposerMentions({
@@ -1299,6 +1306,10 @@ export function Composer({
           if (briefWorkspace) setBriefChecks(briefWorkspace, next)
         }}
         clearToken={briefClearToken}
+        worktree={Boolean(briefState.worktree)}
+        onWorktreeChange={(on) => {
+          if (briefWorkspace) setBriefWorktree(briefWorkspace, on)
+        }}
         draft={
           briefWorkspace
             ? {

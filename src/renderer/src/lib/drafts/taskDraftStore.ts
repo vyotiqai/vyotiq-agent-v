@@ -131,9 +131,11 @@ export type BriefState = {
   /** The draft being continued — Update draft saves over it; starting spends it. */
   draftId: string | null
   checks: string[]
+  /** Start it in a new worktree rather than in this folder. */
+  worktree?: boolean
 }
 
-const EMPTY_BRIEF: BriefState = Object.freeze({ draftId: null, checks: [] }) as BriefState
+const EMPTY_BRIEF: BriefState = Object.freeze({ draftId: null, checks: [], worktree: false }) as BriefState
 const briefs = new Map<string, BriefState>()
 
 function briefKeyOf(workspacePath: string): string {
@@ -147,9 +149,13 @@ export function briefStateFor(workspacePath: string | null | undefined): BriefSt
 
 export function setBriefState(workspacePath: string, next: BriefState | null): void {
   const key = briefKeyOf(workspacePath)
-  if (next == null || (next.draftId == null && next.checks.length === 0)) briefs.delete(key)
-  else briefs.set(key, { draftId: next.draftId, checks: [...next.checks] })
+  if (next == null || (next.draftId == null && next.checks.length === 0 && !next.worktree)) briefs.delete(key)
+  else briefs.set(key, { draftId: next.draftId, checks: [...next.checks], worktree: Boolean(next.worktree) })
   emit()
+}
+
+export function setBriefWorktree(workspacePath: string, worktree: boolean): void {
+  setBriefState(workspacePath, { ...briefStateFor(workspacePath), worktree })
 }
 
 export function setBriefChecks(workspacePath: string, checks: string[]): void {

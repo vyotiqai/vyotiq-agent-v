@@ -213,7 +213,7 @@ describe('New task brief', () => {
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Brief' }).textContent).toBe(''))
     expect(screen.queryByRole('list', { name: 'Done when' })).toBeNull()
     expect(screen.queryByRole('textbox', { name: 'New check' })).toBeNull()
-    expect(briefStateFor('/ws/app')).toEqual({ draftId: null, checks: [] })
+    expect(briefStateFor('/ws/app')).toEqual({ draftId: null, checks: [], worktree: false })
   })
 
   it('keeps an emptied check row in place until a press on a button is over', async () => {
@@ -258,7 +258,7 @@ describe('New task brief', () => {
       doneWhen: ['From the draft'],
       draftId: 'd0000000-0000-4000-8000-000000000002'
     })
-    await waitFor(() => expect(briefStateFor('/ws/app')).toEqual({ draftId: null, checks: [] }))
+    await waitFor(() => expect(briefStateFor('/ws/app')).toEqual({ draftId: null, checks: [], worktree: false }))
   })
 
   it('moves the task to another workspace, brief and all', async () => {
@@ -289,6 +289,39 @@ describe('New task brief', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Branch' }))
     fireEvent.click(await screen.findByRole('option', { name: 'next' }))
     await waitFor(() => expect(window.vyotiq.gitCheckout).toHaveBeenCalledWith('/ws/app', 'next'))
+  })
+
+  it('offers a new worktree: says where it will run, and starts with it asked for', async () => {
+    const { props } = renderBrief()
+    fireEvent.click(await screen.findByRole('button', { name: 'Where it works' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'New worktree' }))
+    const page = document.querySelector('[data-new-task]') as HTMLElement
+    expect(page.textContent).toContain('Plans, edits files and runs commands in the new worktree')
+    const sees = screen.getByRole('complementary', { name: 'What the agent will see' })
+    // Two uncommitted files in this folder: the worktree starts without them.
+    await waitFor(() => expect(sees.textContent).toContain('New worktree'))
+    expect(sees.textContent).toContain('from main · 2 uncommitted files stay here')
+    expect(briefStateFor('/ws/app').worktree).toBe(true)
+
+    typeBrief('Add backpressure to the chat stream')
+    fireEvent.click(screen.getByRole('button', { name: 'Start task' }))
+    await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(props.onSend).mock.calls[0]![3]).toEqual({ worktree: true })
+    // Started: the page's choice goes with the task.
+    expect(briefStateFor('/ws/app').worktree).toBe(false)
+  })
+
+  it('offers no worktree when there is no commit to branch from', async () => {
+    window.vyotiq.gitStatus = vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        kind: 'ok',
+        status: { branch: 'main', files: [], truncated: false, fileCount: 0, added: 0, removed: 0, hasRemote: false, hasCommits: false }
+      }
+    })) as unknown as typeof window.vyotiq.gitStatus
+    renderBrief()
+    await screen.findByRole('button', { name: 'Branch' })
+    expect(screen.queryByRole('button', { name: 'Where it works' })).toBeNull()
   })
 
   it('opens the context menu from the @ button, as typing @ would', () => {
