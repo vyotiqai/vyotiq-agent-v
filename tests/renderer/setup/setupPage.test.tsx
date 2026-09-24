@@ -39,7 +39,7 @@ function renderSetup(overrides: Partial<Props> = {}) {
     onChangeProvider: vi.fn(),
     onChooseFolder: vi.fn(async () => null),
     onOpenPath: vi.fn(async () => null),
-    onStart: vi.fn(async () => {}),
+    onStart: vi.fn(async () => null),
     ...overrides
   }
   render(<SetupPage {...props} />)
@@ -155,7 +155,7 @@ describe('SetupPage', () => {
   })
 
   it('starts once a provider answered and a workspace is open, with the mode chosen', async () => {
-    const onStart = vi.fn(async () => {})
+    const onStart = vi.fn(async () => null)
     renderSetup({ workspace: 'C:\\work\\site', onStart })
 
     expect(step(2).dataset.state).toBe('done')
@@ -172,6 +172,15 @@ describe('SetupPage', () => {
 
     fireEvent.click(start)
     expect(onStart).toHaveBeenCalledWith('C:\\work\\site', 'off')
+  })
+
+  it('says so on Set up when the approval choice could not be saved', async () => {
+    const onStart = vi.fn(async () => 'settings.json is read-only')
+    renderSetup({ workspace: 'C:\\work\\site', onStart })
+    const start = screen.getByRole('button', { name: /Start your first task/ }) as HTMLButtonElement
+    await waitFor(() => expect(start.disabled).toBe(false))
+    fireEvent.click(start)
+    expect((await screen.findByRole('alert')).textContent).toBe('Couldn’t save your approval choice: settings.json is read-only')
   })
 
   it('numbers its steps on the type scale — caption, not the keycap size', () => {

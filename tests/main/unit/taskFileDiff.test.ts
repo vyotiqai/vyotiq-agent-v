@@ -135,6 +135,41 @@ describe('taskFileDiff', () => {
     expect(diff.diff).toBe('--- /dev/null\n+++ b/src/new.ts\n@@ -0,0 +1 @@\n+export const a = 1\n')
   })
 
+  it('a command’s change with no copy kept says what happened to the file, not a folder delete', async () => {
+    const cp = beginWriteCheckpoint(runDir, workspace)
+    writeFileSync(join(workspace, 'swap.ts'), 'changed by a command\n', 'utf8')
+    await cp.recordObservedMutation('swap.ts', 'modified')
+    finalizeWriteCheckpoint(runDir)
+    expect(taskFileDiff(runDir, workspace, 'swap.ts')).toEqual({
+      path: 'swap.ts',
+      action: 'modified',
+      diff: null,
+      reason: 'unrestorable'
+    })
+    expect(taskFileStats(runDir, workspace)).toEqual([{ path: 'swap.ts', action: 'modified' }])
+  })
+
+  it('a file the task created and then deleted is nothing to review — for the navigator too', async () => {
+    await turn(() => run('edit', { path: 'tmp.ts', contents: 'scratch\n' }))
+    await turn(() => run('delete_file', { path: 'tmp.ts' }))
+    expect(taskFileStats(runDir, workspace)).toEqual([])
+    expect(pendingReviewSummary(runDir, workspace)).toBeUndefined()
+  })
+
+  it('re-counts only the file that changed', async () => {
+    await turn(() => run('edit', { path: 'one.ts', contents: 'a\n' }))
+    await turn(() => run('edit', { path: 'two.ts', contents: 'b\n' }))
+    expect(taskFileStats(runDir, workspace).map((s) => [s.path, s.add])).toEqual([
+      ['one.ts', 1],
+      ['two.ts', 1]
+    ])
+    writeFileSync(join(workspace, 'two.ts'), 'b\nc\nd\n', 'utf8')
+    expect(taskFileStats(runDir, workspace).map((s) => [s.path, s.add])).toEqual([
+      ['one.ts', 1],
+      ['two.ts', 3]
+    ])
+  })
+
   it('says when a path is not one the task wrote', () => {
     expect(taskFileDiff(runDir, workspace, 'swap.ts')).toEqual({
       path: 'swap.ts',

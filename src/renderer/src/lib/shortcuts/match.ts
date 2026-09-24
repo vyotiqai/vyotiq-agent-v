@@ -106,9 +106,12 @@ export function shouldBlockPanelShortcut(target: EventTarget | null): boolean {
   return isEditableShortcutTarget(el)
 }
 
-/** Focus the Message composer. Returns whether focus landed on it. */
-export function focusComposerMessage(): boolean {
-  const candidates = document.querySelectorAll<HTMLElement>(COMPOSER_MESSAGE_SELECTOR)
+/**
+ * Focus the Message composer — the first on the page, or the one inside
+ * `within` (a pane, when there are several). Returns whether focus landed on it.
+ */
+export function focusComposerMessage(within?: ParentNode | null): boolean {
+  const candidates = (within ?? document).querySelectorAll<HTMLElement>(COMPOSER_MESSAGE_SELECTOR)
   for (const el of candidates) {
     if (el.getAttribute('contenteditable') === 'false') continue
     el.focus()

@@ -138,7 +138,8 @@ describe('task worktrees', () => {
     git(parent, 'commit', '-q', '-am', 'ours')
     const head = git(parent, 'rev-parse', 'HEAD').trim()
 
-    expect(await mergeTaskWorktree(wt.workspacePath, 'theirs')).toEqual({ merged: false, conflicts: ['a.txt'] })
+    // Its own uncommitted change was committed on the branch first — the message says so.
+    expect(await mergeTaskWorktree(wt.workspacePath, 'theirs')).toEqual({ merged: false, conflicts: ['a.txt'], committedFirst: true })
     expect(git(parent, 'rev-parse', 'HEAD').trim()).toBe(head)
     expect(readFileSync(join(parent, 'a.txt'), 'utf8')).toBe('ours\n')
     expect(git(parent, 'status', '--porcelain').trim()).toBe('')
@@ -151,6 +152,28 @@ describe('task worktrees', () => {
     git(parent, 'checkout', '-q', '-b', 'other')
     await expect(mergeTaskWorktree(wt.workspacePath, 'm')).rejects.toThrow('is on other now — check out main there')
     expect(readFileSync(join(parent, 'a.txt'), 'utf8')).toBe('a0\n')
+  })
+
+  it('with its base branch renamed, still counts what deleting the branch would lose, and will not merge', async () => {
+    const wt = await createTaskWorktree(parent, 'edit a')
+    writeFileSync(join(wt.workspacePath, 'a.txt'), 'a1\n', 'utf8')
+    git(wt.workspacePath, 'commit', '-q', '-am', 'one')
+    writeFileSync(join(wt.workspacePath, 'a.txt'), 'a2\n', 'utf8')
+    git(wt.workspacePath, 'commit', '-q', '-am', 'two')
+    git(parent, 'branch', '-m', 'main', 'trunk')
+    // Never a silent 0: Discard's warning reads this.
+    expect(await taskWorktreeInfo(wt.workspacePath)).toMatchObject({ ahead: 2, baseMissing: true })
+    await expect(mergeTaskWorktree(wt.workspacePath, 'm')).rejects.toThrow('Its base branch main is gone')
+  })
+
+  it('refuses to delete a folder the registry names outside its own', async () => {
+    const wt = await createTaskWorktree(parent, 'x')
+    const registry = join(userData, 'task-worktrees.json')
+    const raw = JSON.parse(readFileSync(registry, 'utf8')) as { worktrees: Array<{ workspacePath: string; worktreeRoot: string }> }
+    for (const w of raw.worktrees) if (w.workspacePath === wt.workspacePath) w.worktreeRoot = parent
+    writeFileSync(registry, JSON.stringify(raw), 'utf8')
+    await expect(discardTaskWorktree(wt.workspacePath)).rejects.toThrow('not one the app made')
+    expect(existsSync(join(parent, 'a.txt'))).toBe(true)
   })
 
   it('discard deletes the folder and the branch, and forgets it', async () => {

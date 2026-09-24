@@ -83,6 +83,11 @@ export function FirstRunNavigator({ workspaceName, widthPx }: { workspaceName: s
       <p className="px-4 pt-2 text-xs leading-[18px] text-tertiary">
         Tasks you start show up here, grouped by what they need from you.
       </p>
+      {/* The app's one update surface lives in this footer; it must exist here too,
+          or an "is ready" notice clicked during Set up opens nothing. Renders nothing while current. */}
+      <div className="mt-auto flex h-10 shrink-0 items-center px-2">
+        <UpdateChip />
+      </div>
     </nav>
   )
 }

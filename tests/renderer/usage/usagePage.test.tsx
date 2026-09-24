@@ -72,6 +72,18 @@ describe('Usage', () => {
     expect(page.textContent).toContain('Finished75%2 failed · 1 running')
   })
 
+  it('marks spend as an estimate when some tasks had no cost, and averages over the ones that did', async () => {
+    homeActivity = vi.fn(async () => ({
+      ok: true as const,
+      data: result({ totals: { runs: 9, billedInputTokens: 900_000, outputTokens: 340_000, billedCost: 4.21, pricedRuns: 6 } })
+    }))
+    renderUsage()
+    await screen.findByText('Tasks per day')
+    const page = document.querySelector('[data-usage]') as HTMLElement
+    expect(page.textContent).toContain('Spend$4.21 est.$0.702 a task with a cost')
+    expect(page.querySelector('[title^="Estimated total — 3 of 9 tasks have no measurable cost"]')).toBeTruthy()
+  })
+
   it('says how much of the prompt came from cache when the window can tell', async () => {
     homeActivity = vi.fn(async (payload: { windowDays: number }) => ({
       ok: true as const,

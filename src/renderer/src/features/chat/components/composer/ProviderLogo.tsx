@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { PlugsConnectedIcon } from '@phosphor-icons/react'
+import { Icon } from '@renderer/lib/icons'
 import { cn } from '@renderer/lib/ui/cn'
 import { useDocumentTheme } from '@renderer/lib/ui/useDocumentTheme'
 import type { ProviderId } from '@shared/ipc'
@@ -82,20 +82,18 @@ function GenericIcon({
   letter: string
 }) {
   const initial = letter.slice(0, 1).toUpperCase()
-  const hue = [...initial].reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360
-  const tint =
-    tone === 'brand' ? { backgroundColor: `hsl(${hue} 70% 50% / 0.15)`, color: `hsl(${hue} 70% 55%)` } : {}
   return (
     <span
       className={cn(
         'inline-grid shrink-0 place-items-center rounded-sm font-semibold',
+        // A provider with no mark of its own: its initial on the surface, in every skin.
+        tone === 'brand' ? 'bg-surface-2 text-secondary' : '',
         className
       )}
       style={{
         width: size,
         height: size,
-        fontSize: Math.max(10, size - 6),
-        ...tint
+        fontSize: Math.max(10, size - 6)
       }}
       aria-hidden
     >
@@ -129,11 +127,7 @@ export function ProviderLogo({
 
   if (!subProvider && id === 'custom') {
     return (
-      <PlugsConnectedIcon
-        size={px}
-        className={cn('shrink-0', tone === 'brand' ? 'text-secondary' : '', className)}
-        aria-hidden="true"
-      />
+      <Icon name="mcp" size={px} className={cn('shrink-0', tone === 'brand' ? 'text-secondary' : '', className)} />
     )
   }
 

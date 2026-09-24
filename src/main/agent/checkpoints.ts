@@ -643,17 +643,30 @@ function resolveCheckpointId(runDir: string, checkpointId?: string): string | nu
  * the files the rewind will leave alone.
  */
 function writeState(resolved: string, blob: string | null, file: CheckpointFileEntry): 'edited' | 'restored' | 'writable' {
-  const current = hashExistingFile(resolved)
+  return writeStateOf(hashExistingFile(resolved) ?? null, blob ? (hashExistingFile(blob) ?? null) : null, blob != null, file)
+}
+
+/**
+ * writeState on hashes: `current` is the file's content hash (null when it is
+ * absent), `blobHash` the hash of the copy restoring would write. The rewind
+ * preview runs it on the file as each newer undo would leave it.
+ */
+function writeStateOf(
+  current: string | null,
+  blobHash: string | null,
+  hasBlob: boolean,
+  file: CheckpointFileEntry
+): 'edited' | 'restored' | 'writable' {
   if (file.action === 'created') {
     return file.hash && current && current !== file.hash ? 'edited' : 'writable'
   }
-  if (!current || !blob) return 'writable'
+  if (!current || !hasBlob) return 'writable'
   if (file.action === 'modified') {
     if (!file.hash || current === file.hash) return 'writable'
-    return current === hashExistingFile(blob) ? 'restored' : 'edited'
+    return current === blobHash ? 'restored' : 'edited'
   }
   // Deleted by the agent and back on disk: already the old file, or someone else's.
-  return current === hashExistingFile(blob) ? 'restored' : 'edited'
+  return current === blobHash ? 'restored' : 'edited'
 }
 
 /** True when restoring `file` would overwrite a change made after the agent's write. */
@@ -1004,26 +1017,59 @@ export function planRewindWritesAcrossRuns(
   workspaceRoot?: string
 ): RewindWritesPlan {
   const checkpointIds: string[] = []
-  const byPath = new Map<string, RewindWritesPlanFile>()
+  // Per path, every undo the rewind will run on it (newest first), and the
+  // file as those undos leave it: the rewind restores a path once per turn
+  // that wrote it, and a later turn's undo can hand an earlier one a file it
+  // refuses (your edit between the two turns).
+  const byPath = new Map<
+    string,
+    { plan: RewindWritesPlanFile; current: string | null; refused: boolean; oldestAction: CheckpointFileAction }
+  >()
   for (const entry of collectRewindEntries(scopes, fromUserMessageIndex)) {
     checkpointIds.push(entry.meta.id)
     const checkpointDir = join(entry.runDir, 'checkpoints', entry.meta.id)
     for (const file of entry.meta.files) {
-      // Newest checkpoint wins per path; older checkpoints never overwrite it.
-      if (!byPath.has(file.path)) {
-        const edited = workspaceRoot ? changedSinceAgentWrite(workspaceRoot, checkpointDir, file) : false
-        byPath.set(file.path, {
-          path: file.path,
-          action: file.action,
-          undoable: file.undoable,
-          ...(edited ? { edited: true } : {})
-        })
+      let state = byPath.get(file.path)
+      if (!state) {
+        let current: string | null = null
+        if (workspaceRoot) {
+          try {
+            current = hashExistingFile(resolveInsideWorkspace(workspaceRoot, file.path)) ?? null
+          } catch {
+            current = null
+          }
+        }
+        state = {
+          plan: { path: file.path, action: file.action, undoable: file.undoable },
+          current,
+          refused: false,
+          oldestAction: file.action
+        }
+        byPath.set(file.path, state)
       }
+      // The oldest write decides what the rewind does overall (adds back, removes, restores).
+      state.oldestAction = file.action
+      state.plan.undoable = state.plan.undoable && file.undoable
+      if (!workspaceRoot || !file.undoable || state.refused) continue
+      const blob = file.action === 'created' ? null : blobPathFor(checkpointDir, file.path)
+      const blobHash = blob ? (hashExistingFile(blob) ?? null) : null
+      const outcome = writeStateOf(state.current, blobHash, blob != null, file)
+      if (outcome === 'edited') {
+        state.refused = true
+        continue
+      }
+      state.current = file.action === 'created' ? null : blobHash
     }
   }
   return {
     checkpointIds,
-    files: [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path))
+    files: [...byPath.values()]
+      .map(({ plan, refused, oldestAction }) => ({
+        ...plan,
+        action: oldestAction,
+        ...(refused ? { edited: true } : {})
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path))
   }
 }
 
@@ -1094,7 +1140,17 @@ export function rewindWritesFromScopes(
     checkpointIds.push(entry.meta.id)
   }
 
-  return { checkpointIds, restored, skipped, edited, undoableRestoreFailed }
+  // A path is undone once per turn that wrote it; say each once, by where it
+  // ended: left as you changed it wins over put back (an older undo refused it).
+  const editedSet = new Set(edited)
+  const once = (paths: string[]): string[] => [...new Set(paths)]
+  return {
+    checkpointIds,
+    restored: once(restored).filter((path) => !editedSet.has(path)),
+    skipped: once(skipped).filter((path) => !editedSet.has(path)),
+    edited,
+    undoableRestoreFailed
+  }
 }
 
 /** Single-run rewind (parent scope) — see rewindWritesFromScopes. */

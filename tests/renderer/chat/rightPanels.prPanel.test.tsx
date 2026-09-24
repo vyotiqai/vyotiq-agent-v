@@ -7,6 +7,7 @@ import {
   checkState,
   checksPassedCount,
   mergeSummary,
+  prMergeBlockedReason,
   PrPanel
 } from '@renderer/features/chat/components/PrPanel'
 import type { PrView } from '@shared/ipc'
@@ -800,6 +801,15 @@ describe('checkState and mergeSummary', () => {
     expect(checkState({ name: 'f', state: 'COMPLETED', conclusion: 'SKIPPED' })).toEqual({ glyph: 'done', word: 'skipped' })
     expect(checkState({ name: 'g', state: 'IN_PROGRESS', conclusion: null }).glyph).toBe('running')
     expect(checkState({ name: 'h', state: 'PENDING', conclusion: null }).glyph).toBe('queued')
+  })
+
+  it('holds Merge back only when GitHub would refuse it, and says why', () => {
+    expect(prMergeBlockedReason({ ...base, mergeStateStatus: 'CLEAN' })).toBeNull()
+    expect(prMergeBlockedReason({ ...base, mergeStateStatus: 'BEHIND' })).toBeNull()
+    expect(prMergeBlockedReason({ ...base, mergeStateStatus: 'BLOCKED' })).toBe('Branch protection blocks the merge.')
+    expect(prMergeBlockedReason({ ...base, mergeStateStatus: 'DIRTY' })).toBe('The branch conflicts with main.')
+    expect(prMergeBlockedReason({ ...base, isDraft: true })).toBe('It is a draft — mark it ready for review to merge.')
+    expect(prMergeBlockedReason({ ...base, state: 'MERGED' })).toBe('Already merged.')
   })
 
   it('claims only what GitHub reports', () => {

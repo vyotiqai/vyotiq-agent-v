@@ -1,14 +1,19 @@
 import { existsSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
-import { atomicWriteJson } from '@main/storage/atomicWrite'
+import { atomicWriteFile, atomicWriteJson } from '@main/storage/atomicWrite'
 import type { ChatMessage } from '../../shared/ipc'
 import {
   DONE_WHEN_CHECKS_FILE,
+  DoneWhenChecksFileSchema,
   applyCheckVerdicts,
   checksTally,
+  contractDoneWhenBlock,
+  defaultDoneWhenBlock,
   doneWhenBullets,
+  maxCheckNumber,
   mergePlanChecks,
   parseDoneWhenChecks,
+  upsertDoneWhenSection,
   type CheckVerdictUpdate,
   type DoneWhenCheck
 } from '../../shared/doneWhenChecks'
@@ -35,12 +40,32 @@ export function readChecks(runDir: string | undefined): DoneWhenCheck[] {
   }
 }
 
-export function writeChecks(runDir: string, checks: readonly DoneWhenCheck[]): void {
-  if (checks.length === 0) {
+/** The highest `cN` this run ever gave out — kept even after its check is dropped. */
+export function readChecksLastId(runDir: string | undefined): number {
+  if (!runDir) return 0
+  const p = checksPath(runDir)
+  if (!existsSync(p)) return 0
+  try {
+    const parsed = DoneWhenChecksFileSchema.safeParse(JSON.parse(readFileSync(p, 'utf8')))
+    return parsed.success ? Math.max(parsed.data.lastId ?? 0, maxCheckNumber(parsed.data.checks)) : 0
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Write the checks. The file also keeps the highest id given out, so a plan
+ * that drops c3 and later adds a check gives it c4 — c3 keeps meaning what the
+ * agent was told it meant. `lastId` sets it outright (a rewind replay), else it
+ * only ever rises.
+ */
+export function writeChecks(runDir: string, checks: readonly DoneWhenCheck[], lastId?: number): void {
+  const high = lastId ?? Math.max(readChecksLastId(runDir), maxCheckNumber(checks))
+  if (checks.length === 0 && high === 0) {
     rmSync(checksPath(runDir), { force: true })
     return
   }
-  atomicWriteJson(checksPath(runDir), { checks })
+  atomicWriteJson(checksPath(runDir), { checks, lastId: Math.max(high, maxCheckNumber(checks)) })
 }
 
 /** The Done when bullets of a plan, when the plan is a real one. */
@@ -130,12 +155,17 @@ export function doneWhenNudgeText(checks: readonly DoneWhenCheck[]): string | nu
 /**
  * After a rewind the checks are whatever the kept history made them: the
  * brief's checks, unmarked, then every kept `create_plan` and `check_done_when`
- * replayed in order. A plan or a verdict the rewind removed is gone with it.
+ * replayed in order — with the same ids they were given, since the replay
+ * tracks the highest id as the run did. A plan or a verdict the rewind removed
+ * is gone with it, and so is its place in the contract: the contract's Done
+ * when is rewritten from the checks that are left, so the next run is told
+ * the same ids `check_done_when` accepts.
  */
 export function syncChecksAfterRewind(runDir: string, messages: readonly ChatMessage[]): void {
   let checks: DoneWhenCheck[] = readChecks(runDir)
     .filter((c) => c.source === 'brief')
     .map((c) => ({ id: c.id, text: c.text, source: c.source, verdict: null, createdAt: c.createdAt }))
+  let floor = maxCheckNumber(checks)
   const failed = new Set(
     messages.filter((m) => m.role === 'tool' && m.ok === false && m.toolCallId).map((m) => m.toolCallId!)
   )
@@ -157,12 +187,20 @@ export function syncChecksAfterRewind(runDir: string, messages: readonly ChatMes
       const at = runAt ?? new Date().toISOString()
       if (call.name === 'create_plan') {
         const plan = planMarkdownFromArgs(args)
-        if (plan) checks = mergePlanChecks(checks, planCheckBullets(plan.markdown), at)
+        if (plan) {
+          checks = mergePlanChecks(checks, planCheckBullets(plan.markdown), at, floor)
+          floor = Math.max(floor, maxCheckNumber(checks))
+        }
       } else {
         const updates = parseUpdates(args)
         if (typeof updates !== 'string') checks = applyCheckVerdicts(checks, updates, at).checks
       }
     }
   }
-  writeChecks(runDir, checks)
+  writeChecks(runDir, checks, floor)
+  const contractPath = join(runDir, 'contract.md')
+  if (existsSync(contractPath)) {
+    const block = checks.length > 0 ? contractDoneWhenBlock(checks) : defaultDoneWhenBlock()
+    atomicWriteFile(contractPath, upsertDoneWhenSection(readFileSync(contractPath, 'utf8'), block))
+  }
 }

@@ -5,6 +5,7 @@ import { atomicWriteFile, atomicWriteFileAsync, atomicWriteJson } from '../stora
 import {
   DONE_WHEN_CHECKS_FILE,
   contractDoneWhenBlock,
+  defaultDoneWhenBlock,
   normalizeCheckText,
   type DoneWhenCheck
 } from '../../shared/doneWhenChecks'
@@ -312,16 +313,7 @@ export function createRun(
       '',
       goalText,
       '',
-      ...(briefChecks.length > 0
-        ? [contractDoneWhenBlock(briefChecks), '']
-        : [
-            '## Done when',
-            '',
-            '- The goal above is satisfied (check outcomes: read results, command output, or user-visible success).',
-            '- Or blockers are explained clearly and no further narrow retry will help.',
-            '- Update this file if scope or done-when changes.',
-            ''
-          ])
+      ...(briefChecks.length > 0 ? [contractDoneWhenBlock(briefChecks), ''] : [defaultDoneWhenBlock(), ''])
     ].join('\n')
   )
   const status: RunStatus = {

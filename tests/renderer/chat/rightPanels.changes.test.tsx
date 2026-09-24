@@ -435,7 +435,7 @@ describe('ChangesPanel', () => {
     })
   })
 
-  it('drafts the commit message while Changes is on screen, and opens it without asking again', async () => {
+  it('drafts the commit message while Changes is on screen, and checks it with main on Commit…', async () => {
     renderGit()
     await screen.findByText('a.ts')
     const line = await screen.findByRole('button', { name: 'feat: improve generated commit messages' }, { timeout: 3000 })
@@ -444,10 +444,17 @@ describe('ChangesPanel', () => {
     expect(window.vyotiq.gitGenerateCommitMessage).toHaveBeenCalledTimes(1)
     expect(window.vyotiq.gitGenerateCommitMessage).toHaveBeenCalledWith({ workspacePath: '/ws', mode: 'all' })
 
+    // The line is keyed on paths and counts; a same-size edit keeps it. Commit… asks main,
+    // which keys on the exact diff — here the diff changed, so its message wins.
+    vi.mocked(window.vyotiq.gitGenerateCommitMessage).mockResolvedValueOnce({
+      ok: true,
+      data: { message: 'fix: the message for the changes as they are now', source: 'agent' }
+    })
     fireEvent.click(line)
     const input = (await screen.findByRole('textbox', { name: /Commit message/i })) as HTMLInputElement
-    expect(input.value).toBe('feat: improve generated commit messages')
-    expect(window.vyotiq.gitGenerateCommitMessage).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(input.value).toBe('fix: the message for the changes as they are now'))
+    expect(window.vyotiq.gitGenerateCommitMessage).toHaveBeenCalledTimes(2)
+    expect(window.vyotiq.gitGenerateCommitMessage).toHaveBeenLastCalledWith({ workspacePath: '/ws', mode: 'all' })
 
     vi.mocked(window.vyotiq.gitGenerateCommitMessage).mockResolvedValueOnce({
       ok: true,

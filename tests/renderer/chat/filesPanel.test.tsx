@@ -1158,4 +1158,24 @@ describe('TextCodeEditor', () => {
     )
     await waitFor(() => expect(onChange).not.toHaveBeenCalled())
   })
+
+  it('tints the lines the agent read, and moves the tint when the range changes', async () => {
+    const text = ['one', 'two', 'three', 'four', 'five'].join('\n')
+    const props = {
+      path: 'note.ts',
+      value: text,
+      cursor: 0,
+      selections: [{ from: 0, to: 0 }],
+      onChange: vi.fn(),
+      onMetaChange: vi.fn()
+    }
+    const view = render(<TextCodeEditor {...props} markedLines={{ from: 2, to: 3 }} />)
+    const tinted = (): string[] => Array.from(document.querySelectorAll('.cm-line.cm-agentRead')).map((el) => el.textContent ?? '')
+    await waitFor(() => expect(tinted()).toEqual(['two', 'three']))
+    // Open-ended (a read to the end of the file): clamped to the last line.
+    view.rerender(<TextCodeEditor {...props} markedLines={{ from: 4, to: Number.MAX_SAFE_INTEGER }} />)
+    await waitFor(() => expect(tinted()).toEqual(['four', 'five']))
+    view.rerender(<TextCodeEditor {...props} markedLines={null} />)
+    await waitFor(() => expect(tinted()).toEqual([]))
+  })
 })

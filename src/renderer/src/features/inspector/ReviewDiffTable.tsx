@@ -293,7 +293,7 @@ function AskLine({
         onBlur={() => {
           if (!value.trim()) onClose()
         }}
-        className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-tertiary"
+        className="min-w-0 flex-1 rounded-sm bg-transparent text-sm text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
         placeholder="Ask about or change this line — goes to the agent as a follow-up"
         aria-label={`Ask the agent about line ${n}${before ? ' before the change' : ''}`}
       />

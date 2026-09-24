@@ -5,6 +5,7 @@ import { TERMINAL_DEFAULT_TIMEOUT_MS, TOOL_APPROVAL_TIMEOUT_MS } from '@shared/a
 import { parseArgsRecord, parseMcpToolDisplay } from '@shared/toolSummary'
 import { Button, StatusGlyph } from '@renderer/lib/ui'
 import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
+import { altChordLabel } from '@renderer/lib/shortcuts/labels'
 import { toolLabel } from '@renderer/features/chat/toolUi'
 import { RecordActionsContext } from './WorkItems'
 
@@ -96,7 +97,8 @@ export const ApprovalCard = memo(function ApprovalCard({
     if (!canDecide || !captureFocus) return undefined
     const onKey = (e: KeyboardEvent): void => {
       if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.defaultPrevented) return
-      const key = e.key.toLowerCase()
+      // The physical key: on macOS Option+A types "å", so `e.key` is never "a".
+      const key = e.code === 'KeyA' ? 'a' : e.code === 'KeyD' ? 'd' : e.key.toLowerCase()
       if (key !== 'a' && key !== 'd') return
       e.preventDefault()
       decide(key === 'a' ? 'once' : 'deny')
@@ -183,7 +185,7 @@ export const ApprovalCard = memo(function ApprovalCard({
             variant="primary"
             size="sm"
             icon="check"
-            title="Allow once (Alt A)"
+            title={`Allow once (${altChordLabel('a')})`}
             aria-keyshortcuts="Alt+A"
             disabled={!canDecide}
             onClick={() => decide('once')}
@@ -210,7 +212,7 @@ export const ApprovalCard = memo(function ApprovalCard({
           <Button
             size="sm"
             variant="danger"
-            title="Deny (Alt D)"
+            title={`Deny (${altChordLabel('d')})`}
             aria-keyshortcuts="Alt+D"
             disabled={!canDecide}
             onClick={() => decide('deny')}

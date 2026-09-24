@@ -1375,6 +1375,8 @@ export const HomeActivityResultSchema = z.object({
     billedCost: z.number().finite().optional(),
     /** Estimated cost (tokens × published prices) across window runs, when any. */
     estimatedCost: z.number().finite().optional(),
+    /** Runs whose usage carried a bill or an estimate — the rest have no measurable cost. */
+    pricedRuns: z.number().int().min(0).optional(),
     cachedInputTokens: z.number().int().min(0).optional(),
     /**
      * Share of prompt tokens read from the provider's cache, 0–1. Present only

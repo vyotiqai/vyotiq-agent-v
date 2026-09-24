@@ -118,6 +118,8 @@ export async function collectHomeActivity(
   const days = new Map<string, HomeActivityDay>()
   /** Distinct parent runs with in-window activity — the honest session count. */
   const activeRunIds = new Set<string>()
+  /** Runs any of whose usage carried a bill or an estimate. */
+  const pricedRunIds = new Set<string>()
   const outcomes = { done: 0, error: 0, cancelled: 0, running: 0 }
   let billedInputTokens = 0
   let outputTokens = 0
@@ -246,6 +248,7 @@ export async function collectHomeActivity(
     day.outputTokens += usage.outputTokens
     billedInputTokens += usage.inputTokens
     outputTokens += usage.outputTokens
+    if ((usage.billedCost ?? 0) > 0 || (usage.estimatedCost ?? 0) > 0) pricedRunIds.add(runId)
     if (usage.billedCost != null && usage.billedCost > 0) {
       day.billedCost = (day.billedCost ?? 0) + usage.billedCost
       billedCostTotal += usage.billedCost
@@ -526,6 +529,7 @@ export async function collectHomeActivity(
       outputTokens,
       ...(withCost ? { billedCost: billedCostTotal } : {}),
       ...(withEstimate ? { estimatedCost: estimatedCostTotal } : {}),
+      ...(withCost || withEstimate ? { pricedRuns: pricedRunIds.size } : {}),
       ...(withCache ? { cachedInputTokens } : {}),
       // Only when the provider reported cache reads: one that reports none
       // would read as a measured 0%, which it is not.

@@ -4221,8 +4221,11 @@ export const FilesPanel = memo(function FilesPanel({
                 {(() => {
                   const mark = agentMarks?.get(activeTab.path)
                   if (!mark) return null
+                  // A read with no end line ran to the end of the file.
                   const range = mark.read?.startLine
-                    ? ` L${mark.read.startLine}–${mark.read.endLine ?? ''}`
+                    ? mark.read.endLine
+                      ? ` L${mark.read.startLine}–${mark.read.endLine}`
+                      : ` from L${mark.read.startLine}`
                     : ''
                   return (
                     <Badge tone="accent" title={mark.change ? 'This task changed this file' : 'This task read this file'}>
@@ -4412,6 +4415,13 @@ export const FilesPanel = memo(function FilesPanel({
                   wordWrap={wordWrap}
                   scrollTop={activeTab.scrollTop}
                   scrollToLine={scrollToLine}
+                  markedLines={(() => {
+                    // What the badge above names, tinted in the file: the lines the agent read.
+                    const read = agentMarks?.get(activeTab.path)?.read
+                    return read?.startLine
+                      ? { from: read.startLine, to: read.endLine ?? Number.MAX_SAFE_INTEGER }
+                      : null
+                  })()}
                   lspDiagnostics={
                     inlineLspEnabled && inlineLsp.status?.kind === 'available'
                       ? inlineLsp.diagnostics

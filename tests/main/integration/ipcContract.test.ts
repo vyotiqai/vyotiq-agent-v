@@ -151,6 +151,7 @@ const VYOTIQ_INVOKE_MAP: Record<
   gitInit: IPC.gitInit,
   gitGenerateCommitMessage: IPC.gitGenerateCommitMessage,
   gitDiff: IPC.gitDiff,
+  gitBranchDiff: IPC.gitBranchDiff,
   gitBlame: IPC.gitBlame,
   gitCommit: IPC.gitCommit,
   gitStageAll: IPC.gitStageAll,

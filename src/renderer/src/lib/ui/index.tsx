@@ -17,6 +17,7 @@ export {
   MENU_ROW_TEXT,
   MENU_SEPARATOR,
   MENU_SURFACE,
+  MENU_SURFACE_SCROLL,
   selectTriggerClass
 } from './menuStyles'
 export { Tooltip } from './Tooltip'

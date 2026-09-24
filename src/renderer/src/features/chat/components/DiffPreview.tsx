@@ -104,7 +104,7 @@ function DiffLines({
           return (
             <div
               key={line.rowKey ?? `gap-${hiddenBeforeCount + index}`}
-              className="h-3 border-y border-border/60 bg-surface-2/40"
+              className="h-3 border-y border-border/60 bg-surface"
               aria-hidden
             />
           )

@@ -182,6 +182,8 @@ function readChangeData(
  * and git's view of the working tree, with Commit. One file list; the
  * selected file's diff below it.
  */
+const STALE_DRAFT_NOTE = 'Written for an earlier version of these changes — check it before committing'
+
 export const ChangesPanel = memo(function ChangesPanel({
   items,
   itemsStore,
@@ -340,6 +342,8 @@ export const ChangesPanel = memo(function ChangesPanel({
   const [message, setMessage] = useState('')
   const [messageGenerating, setMessageGenerating] = useState(false)
   const [generationNotice, setGenerationNotice] = useState<string | null>(null)
+  /** Commit… filled in the line's message but main could not confirm it for the changes as they are now. */
+  const [draftMayBeStale, setDraftMayBeStale] = useState(false)
   const [branches, setBranches] = useState<GitBranchEntry[]>([])
   const [commits, setCommits] = useState<GitLogEntry[]>([])
   const [selectedCommit, setSelectedCommit] = useState<GitLogEntry | null>(null)
@@ -719,12 +723,13 @@ export const ChangesPanel = memo(function ChangesPanel({
     setComposing(true)
     setMessageGenerating(false)
     setGenerationNotice(null)
-    // Already drafted for these changes: that is the message, no second ask.
-    if (draftedMessageRef.current) {
-      setMessage(draftedMessageRef.current)
-      return
-    }
-    setMessage(workspacePath ? '' : fallback)
+    setDraftMayBeStale(false)
+    // The line above the buttons is keyed on paths and line counts, which a
+    // same-size edit leaves alone — so it only fills the field while main is
+    // asked. Main keys its copy on the exact diff: the same changes come back
+    // at once with no model call, different ones get their own message.
+    const drafted = draftedMessageRef.current
+    setMessage(drafted ?? (workspacePath ? '' : fallback))
 
     if (!workspacePath) return
     setMessageGenerating(true)
@@ -735,6 +740,10 @@ export const ChangesPanel = memo(function ChangesPanel({
         if (result.ok && result.data.source === 'agent' && result.data.message) {
           setMessage(result.data.message)
           setGenerationNotice(null)
+        } else if (drafted) {
+          // Main could not answer for the changes as they are now: keep the
+          // earlier message to edit, and say it may not match.
+          setDraftMayBeStale(true)
         } else {
           setMessage(fallback)
           setGenerationNotice(
@@ -970,7 +979,14 @@ export const ChangesPanel = memo(function ChangesPanel({
           const d = res.data
           if (d.diff) return { content: d.diff }
           if (d.reason === 'binary_or_large') return { error: 'Binary or too large to diff' }
-          if (d.reason === 'unrestorable') return { error: 'A folder delete — no copy was kept to compare with' }
+          if (d.reason === 'unrestorable') {
+            return {
+              error:
+                d.action === 'deleted'
+                  ? 'Deleted with its folder — no copy was kept to compare with'
+                  : 'Changed by a command — no copy was kept to compare with'
+            }
+          }
           if (d.reason !== 'not_in_task') return { content: '', note: 'Nothing left to review — it is back as it was' }
         }
       }
@@ -1096,7 +1112,7 @@ export const ChangesPanel = memo(function ChangesPanel({
             {(['ours', 'theirs', 'base'] as const).map((side) => (
               <pre
                 key={side}
-                className="m-0 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-bg p-1.5 font-mono text-2xs text-fg"
+                className="m-0 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-bg p-1.5 font-mono text-xs text-fg"
               >
                 <span className="block font-sans text-caption font-medium text-muted">
                   {side === 'ours' ? 'Ours' : side === 'theirs' ? 'Theirs' : 'Base'}
@@ -1109,7 +1125,7 @@ export const ChangesPanel = memo(function ChangesPanel({
         <label className="m-0 block text-muted">
           Working copy
           <textarea
-            className="mt-1 max-h-36 min-h-[4.5rem] w-full rounded-md border border-border bg-bg px-1.5 py-1 font-mono text-2xs text-fg focus-visible:vy-focus-ring"
+            className="mt-1 max-h-36 min-h-[4.5rem] w-full rounded-md border border-border bg-bg px-1.5 py-1 font-mono text-xs text-fg focus-visible:vy-focus-ring"
             value={workingDraft}
             onChange={(e) => setWorkingDraft(e.target.value)}
           />
@@ -1412,7 +1428,7 @@ export const ChangesPanel = memo(function ChangesPanel({
               ref={commitInputRef}
               type="text"
               value={message}
-              className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-tertiary"
+              className="min-w-0 flex-1 rounded-sm bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-tertiary focus-visible:vy-focus-ring"
               placeholder={messageGenerating ? 'The agent is writing a commit message…' : 'Commit message'}
               aria-label="Commit message"
               title="Commit message, written by the agent — edit it here"
@@ -1433,6 +1449,10 @@ export const ChangesPanel = memo(function ChangesPanel({
             {generationNotice ? (
               <span className="max-w-[40%] truncate text-caption text-muted" title={generationNotice} aria-live="polite">
                 No agent message: {generationNotice}
+              </span>
+            ) : draftMayBeStale ? (
+              <span className="max-w-[40%] truncate text-caption text-muted" title={STALE_DRAFT_NOTE} aria-live="polite">
+                {STALE_DRAFT_NOTE}
               </span>
             ) : null}
             <Button size="xs" variant="ghost" onClick={cancelCompose}>
@@ -1475,7 +1495,7 @@ export const ChangesPanel = memo(function ChangesPanel({
               onChange={(e) => setFindQuery(e.target.value)}
               placeholder="Find in changes"
               aria-label="Find in changes"
-              className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-tertiary"
+              className="min-w-0 flex-1 rounded-sm bg-transparent text-xs text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
                   e.preventDefault()
@@ -1768,7 +1788,7 @@ export const ChangesPanel = memo(function ChangesPanel({
             onChange={(e) => setFindQuery(e.target.value)}
             placeholder="Find in changes"
             aria-label="Find in changes"
-            className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-tertiary"
+            className="min-w-0 flex-1 rounded-sm bg-transparent text-xs text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
                 e.preventDefault()
@@ -1946,6 +1966,10 @@ export const ChangesPanel = memo(function ChangesPanel({
               {generationNotice ? (
                 <p className="m-0 truncate text-caption text-muted" title={generationNotice} aria-live="polite">
                   No agent message: {generationNotice} — a plain one is in its place
+                </p>
+              ) : draftMayBeStale ? (
+                <p className="m-0 truncate text-caption text-muted" title={STALE_DRAFT_NOTE} aria-live="polite">
+                  {STALE_DRAFT_NOTE}
                 </p>
               ) : null}
               <div className="flex items-center gap-1.5">

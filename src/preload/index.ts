@@ -270,6 +270,7 @@ const api: VyotiqApi = {
   gitLog: (payload) => ipcRenderer.invoke(IPC.gitLog, payload),
   gitCommitFiles: (payload) => ipcRenderer.invoke(IPC.gitCommitFiles, payload),
   gitDiff: (payload) => ipcRenderer.invoke(IPC.gitDiff, payload),
+  gitBranchDiff: (workspacePath) => ipcRenderer.invoke(IPC.gitBranchDiff, { workspacePath }),
   gitBlame: (workspacePath, path) =>
     ipcRenderer.invoke(IPC.gitBlame, { workspacePath, path }),
   prView: (workspacePath) => ipcRenderer.invoke(IPC.prView, { workspacePath }),

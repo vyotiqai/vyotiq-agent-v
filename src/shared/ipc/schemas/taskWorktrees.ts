@@ -41,8 +41,10 @@ export type TaskWorktree = z.infer<typeof TaskWorktreeSchema>
 
 /** A task worktree as it stands now. */
 export const TaskWorktreeInfoSchema = TaskWorktreeSchema.extend({
-  /** Commits on the branch that its base does not have. */
+  /** Commits on the branch that its base does not have — or, with the base gone, that no other branch has. */
   ahead: z.number().int().min(0),
+  /** The branch it came from no longer exists (deleted or renamed): nothing to merge into. */
+  baseMissing: z.boolean(),
   /** Uncommitted files in the worktree. */
   uncommitted: z.number().int().min(0),
   /** Whether the folder it came from is still there. */
@@ -52,4 +54,4 @@ export type TaskWorktreeInfo = z.infer<typeof TaskWorktreeInfoSchema>
 
 export type TaskWorktreeMergeResult =
   | { merged: true; commits: number; committedFirst: boolean }
-  | { merged: false; conflicts: string[] }
+  | { merged: false; conflicts: string[]; committedFirst: boolean }

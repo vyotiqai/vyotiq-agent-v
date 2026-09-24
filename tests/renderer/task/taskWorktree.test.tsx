@@ -21,6 +21,7 @@ const INFO: TaskWorktreeInfo = {
   baseBranch: 'main',
   createdAt: '2026-09-24T10:00:00Z',
   ahead: 2,
+  baseMissing: false,
   uncommitted: 3,
   parentExists: true
 }
@@ -72,7 +73,7 @@ describe('TaskWorktreeStrip', () => {
   it('names the files when the merge would conflict, and says nothing changed', async () => {
     window.vyotiq.mergeTaskWorktree = vi.fn(async () => ({
       ok: true as const,
-      data: { merged: false as const, conflicts: ['src/a.ts', 'src/b.ts'] }
+      data: { merged: false as const, conflicts: ['src/a.ts', 'src/b.ts'], committedFirst: false }
     })) as unknown as typeof window.vyotiq.mergeTaskWorktree
     render(<TaskWorktreeStrip info={{ ...INFO, uncommitted: 0 }} title="T" onChanged={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: 'Merge into main' }))
@@ -80,7 +81,7 @@ describe('TaskWorktreeStrip', () => {
     expect(dialog.textContent).toContain('Merges vyotiq/add-backpressure into main in app.')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Merge' }))
     await waitFor(() =>
-      expect(getToasts().some((t) => t.message === 'Merging would conflict in 2 files — nothing was changed' && t.detail === 'src/a.ts, src/b.ts')).toBe(
+      expect(getToasts().some((t) => t.message === 'Merging would conflict in 2 files — nothing was merged' && t.detail === 'src/a.ts, src/b.ts')).toBe(
         true
       )
     )
@@ -107,6 +108,17 @@ describe('TaskWorktreeStrip', () => {
     await waitFor(() => expect(seen).toHaveLength(1))
     expect(seen[0]).toEqual({ workspacePath: INFO.workspacePath, parentPath: '/ws/app', branch: INFO.branch, merged: false })
     window.removeEventListener(DISCARD_TASK_WORKTREE_EVENT, on)
+  })
+
+  it('with its base branch gone: no merge, and Discard warns about what no other branch has', async () => {
+    render(<TaskWorktreeStrip info={{ ...INFO, baseMissing: true, uncommitted: 0, mergedAt: '2026-09-24T11:00:00Z' }} title="T" onChanged={() => {}} />)
+    const strip = document.querySelector('[data-task-worktree]') as HTMLElement
+    // Merged once, but the base is gone: never shown as merged.
+    expect(strip.textContent).toContain('Works in its own worktree; its base branch main is gone · 2 commits')
+    expect((within(strip).getByRole('button', { name: 'Merge into main' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(within(strip).getByRole('button', { name: 'Discard' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Discard this worktree?' })
+    expect(dialog.textContent).toContain('with 2 commits that no other branch has')
   })
 
   it('merged, it only offers to remove the worktree', async () => {

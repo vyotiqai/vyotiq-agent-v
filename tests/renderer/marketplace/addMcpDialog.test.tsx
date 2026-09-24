@@ -192,6 +192,26 @@ describe('Add an MCP server', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add an MCP server' })).toBeNull())
   })
 
+  it('keeps the field typeable while a pasted config is being read', async () => {
+    let finishScan: () => void = () => {}
+    installBridge({
+      marketplaceDetectMcp: vi.fn(async () => detected({ kind: 'json' })),
+      marketplaceScanExternalMcp: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finishScan = () => resolve(ok({ preview: [], applied: 0, skipped: 0, warnings: [], scannedPaths: [] }))
+          })
+      )
+    })
+    const dialog = await openDialog()
+    const field = within(dialog).getByLabelText('Paste a URL, npm package, npx command or JSON') as HTMLTextAreaElement
+    paste(dialog, '{"mcpServers":{"fetch":{"command":"uvx"}}}')
+    await waitFor(() => expect(bridge.marketplaceScanExternalMcp).toHaveBeenCalled())
+    // The scan is out, and the marketplace is busy — the field is not.
+    expect(field.disabled).toBe(false)
+    finishScan()
+  })
+
   it('waits for Detect before cloning a git URL', async () => {
     installBridge({
       marketplaceDetectMcp: vi.fn(async () =>

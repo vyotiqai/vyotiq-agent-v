@@ -2,8 +2,8 @@ import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { atomicWriteFile } from '../../storage/atomicWrite'
 import { extractDoneWhenBody, isPlanDraftReady, scorePlanQuality } from '../../../shared/planQuality'
-import { contractDoneWhenBlock, mergePlanChecks } from '../../../shared/doneWhenChecks'
-import { planCheckBullets, readChecks, writeChecks } from '../doneWhenChecks'
+import { contractDoneWhenBlock, mergePlanChecks, upsertDoneWhenSection } from '../../../shared/doneWhenChecks'
+import { planCheckBullets, readChecks, readChecksLastId, writeChecks } from '../doneWhenChecks'
 import { planMarkdownFromArgs } from './planMarkdown'
 import { toolTodoWrite, type TodoItem } from './todo'
 
@@ -12,20 +12,6 @@ export type CreatePlanContext = {
 }
 
 export type CreatePlanResult = { ok: boolean; summary: string; content: string }
-
-function upsertDoneWhen(contract: string, block: string): string {
-  const lines = contract.split(/\r?\n/)
-  const start = lines.findIndex((line) => /^## Done when\b/i.test(line))
-  if (start < 0) return `${contract.trimEnd()}\n\n${block}\n`
-  let end = lines.length
-  for (let i = start + 1; i < lines.length; i++) {
-    if (/^##\s/.test(lines[i]!)) {
-      end = i
-      break
-    }
-  }
-  return [...lines.slice(0, start), block, ...lines.slice(end)].join('\n').trimEnd() + '\n'
-}
 
 export function executeCreatePlan(
   _workspace: string,
@@ -63,14 +49,14 @@ export function executeCreatePlan(
 
   // The plan's Done when list becomes its checks (the brief's stay), and the
   // contract lists every check by id so the agent can mark them.
-  const checks = mergePlanChecks(readChecks(runDir), planCheckBullets(markdown), new Date().toISOString())
+  const checks = mergePlanChecks(readChecks(runDir), planCheckBullets(markdown), new Date().toISOString(), readChecksLastId(runDir))
   writeChecks(runDir, checks)
   const doneWhen = extractDoneWhenBody(markdown)
   if (checks.length > 0 || doneWhen) {
     const contractPath = join(runDir, 'contract.md')
     const prior = existsSync(contractPath) ? readFileSync(contractPath, 'utf8') : '## Goal\n\n'
     const block = checks.length > 0 ? contractDoneWhenBlock(checks) : `## Done when\n\n${doneWhen.trim()}`
-    atomicWriteFile(contractPath, upsertDoneWhen(prior, block))
+    atomicWriteFile(contractPath, upsertDoneWhenSection(prior, block))
   }
   const checksNote =
     checks.length > 0

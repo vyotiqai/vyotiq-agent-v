@@ -25,7 +25,9 @@ type Pending = { path: string; action: CheckpointFileAction; beforePath: string 
 const cache = new Map<string, { signature: string; review: PendingReview | undefined }>()
 
 export function pendingReviewSummary(runDir: string, workspaceRoot: string): PendingReview | undefined {
-  const pending = collectPending(runDir)
+  // A file the task created and later deleted left nothing to review — the
+  // Changes list skips it too, so the count here must.
+  const pending = collectPending(runDir).filter((p) => p.action !== 'created' || fileExists(workspaceRoot, p.path))
   if (pending.length === 0) {
     cache.delete(runDir)
     return undefined
@@ -86,6 +88,14 @@ function safeBeforePath(runDir: string, checkpointId: string, relPath: string): 
     return checkpointBeforeImagePath(runDir, checkpointId, relPath)
   } catch {
     return null
+  }
+}
+
+function fileExists(workspaceRoot: string, relPath: string): boolean {
+  try {
+    return existsSync(resolveInsideWorkspace(workspaceRoot, relPath))
+  } catch {
+    return false
   }
 }
 

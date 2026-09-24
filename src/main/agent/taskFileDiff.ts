@@ -112,39 +112,45 @@ function statSignature(path: string | null): string {
   }
 }
 
-const statsCache = new Map<string, { signature: string; stats: TaskFileStat[] }>()
+/**
+ * Per file: its entry, and the before-image and file-now signatures it was
+ * counted from. Keyed per file, so a write to one file re-reads and re-diffs
+ * that file alone — the panel asks again after every write of a live run,
+ * and a task can have written thousands of files.
+ */
+const statsCache = new Map<string, { signature: string; stat: TaskFileStat | null }>()
+const STATS_CACHE_MAX = 50_000
 
 /** One entry per file the task wrote, with exact counts where they can be had. */
 export function taskFileStats(runDir: string, workspaceRoot: string): TaskFileStat[] {
-  const written = [...collectWritten(runDir).values()]
-  const signature = written
-    .map((w) => `${w.path}:${w.firstAction}:${statSignature(w.beforePath)}:${statSignature(workspaceFile(workspaceRoot, w.path))}`)
-    .join('|')
-  const key = `${runDir}\0${workspaceRoot}`
-  const hit = statsCache.get(key)
-  if (hit && hit.signature === signature) return hit.stats
-  const stats = computeStats(written, workspaceRoot)
-  statsCache.set(key, { signature, stats })
-  return stats
-}
-
-function computeStats(all: Written[], workspaceRoot: string): TaskFileStat[] {
   const out: TaskFileStat[] = []
-  for (const written of all) {
-    const { before, after, existsNow } = sides(written, workspaceRoot)
-    // Created, then deleted again: the task left nothing behind here.
-    if (written.firstAction === 'created' && !existsNow) continue
-    const entry: TaskFileStat = { path: written.path, action: netAction(written, existsNow) }
-    if (before !== null && after !== null) {
-      const stat = lineDiffStat(before, after)
-      if (stat) {
-        entry.add = stat.add
-        entry.del = stat.del
-      }
+  for (const written of collectWritten(runDir).values()) {
+    const signature = `${written.firstAction}:${written.undoable ? 1 : 0}:${statSignature(written.beforePath)}:${statSignature(workspaceFile(workspaceRoot, written.path))}`
+    const key = `${runDir}\0${workspaceRoot}\0${written.path}`
+    let hit = statsCache.get(key)
+    if (!hit || hit.signature !== signature) {
+      hit = { signature, stat: statFor(written, workspaceRoot) }
+      if (statsCache.size >= STATS_CACHE_MAX) statsCache.clear()
+      statsCache.set(key, hit)
     }
-    out.push(entry)
+    if (hit.stat) out.push(hit.stat)
   }
   return out.sort((a, b) => a.path.localeCompare(b.path))
+}
+
+function statFor(written: Written, workspaceRoot: string): TaskFileStat | null {
+  const { before, after, existsNow } = sides(written, workspaceRoot)
+  // Created, then deleted again: the task left nothing behind here.
+  if (written.firstAction === 'created' && !existsNow) return null
+  const entry: TaskFileStat = { path: written.path, action: netAction(written, existsNow) }
+  if (before !== null && after !== null) {
+    const stat = lineDiffStat(before, after)
+    if (stat) {
+      entry.add = stat.add
+      entry.del = stat.del
+    }
+  }
+  return entry
 }
 
 export function resetTaskFileStatsCacheForTests(): void {
@@ -156,9 +162,12 @@ export function taskFileDiff(runDir: string, workspaceRoot: string, relPath: str
   const path = relPath.replace(/\\/g, '/').replace(/^\.\//, '')
   const written = collectWritten(runDir).get(path)
   if (!written) return { path, action: null, diff: null, reason: 'not_in_task' }
-  // A recursive directory delete keeps no before-image to compare with.
+  // No before-image was kept — a recursive folder delete, or a terminal
+  // command's change once the snapshot budget was spent. Say what happened to
+  // the file now, not what a folder delete would have done.
   if (!written.undoable && written.firstAction !== 'created') {
-    return { path, action: 'deleted', diff: null, reason: 'unrestorable' }
+    const abs = workspaceFile(workspaceRoot, path)
+    return { path, action: netAction(written, abs !== null && existsSync(abs)), diff: null, reason: 'unrestorable' }
   }
   const { before, after, existsNow } = sides(written, workspaceRoot)
   const action = netAction(written, existsNow)

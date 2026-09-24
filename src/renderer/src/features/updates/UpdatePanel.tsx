@@ -78,7 +78,8 @@ function useResumeOnOpen(active: boolean): boolean | null {
 const STATUS_LABEL: Partial<Record<UpdaterStatePayload['status'], string>> = {
   available: 'Update available',
   downloading: 'Downloading',
-  downloaded: 'Update ready'
+  downloaded: 'Update ready',
+  error: 'Update failed'
 }
 
 /**
@@ -93,11 +94,14 @@ export function UpdatePanel({
   info,
   status,
   progress,
+  error = null,
   runningCount = 0
 }: {
   info: UpdateInfo
   status: UpdaterStatePayload['status']
   progress: UpdateProgress | null
+  /** Why the last step failed — the panel then offers to try the download again. */
+  error?: string | null
   /** Tasks running now — a restart interrupts them. */
   runningCount?: number
 }): ReactElement {
@@ -135,6 +139,16 @@ export function UpdatePanel({
           <Button variant="primary" size="sm" icon="download" className="w-full" onClick={downloadUpdate}>
             Download update
           </Button>
+        ) : null}
+        {status === 'error' ? (
+          <div>
+            <p className="mb-2 text-xs text-danger" role="alert">
+              {error ?? 'The update failed'}
+            </p>
+            <Button variant="primary" size="sm" icon="retry" className="w-full" onClick={downloadUpdate}>
+              Try the download again
+            </Button>
+          </div>
         ) : null}
         {status === 'downloading' ? (
           <div>

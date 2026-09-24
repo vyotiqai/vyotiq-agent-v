@@ -6,6 +6,7 @@ import {
   MENU_ROW_IDLE,
   MENU_ROW_TEXT,
   MENU_SURFACE,
+  MENU_SURFACE_SCROLL,
   SearchInput,
   cn
 } from '@renderer/lib/ui'
@@ -117,7 +118,7 @@ export function SettingsSearch({
       {query.trim() && visibleMatches.length > 0 ? (
         <ul
           id={listId}
-          className={cn(MENU_SURFACE, 'absolute inset-x-0 m-0 mt-1 max-h-72 origin-top list-none overflow-auto p-1')}
+          className={cn(MENU_SURFACE_SCROLL, 'absolute inset-x-0 m-0 mt-1 max-h-72 origin-top list-none p-1')}
           role="listbox"
           aria-label="Settings search results"
           onKeyDown={onContainerKeyDown}

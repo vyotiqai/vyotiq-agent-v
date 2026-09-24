@@ -27,7 +27,7 @@ export function requestUpdatePanel(): void {
  * Renders nothing while the install is current.
  */
 export function UpdateChip({ runningCount = 0 }: { runningCount?: number }): ReactNode {
-  const { info, status, progress, autoOpen } = useUpdateAnnouncement()
+  const { info, status, progress, autoOpen, error } = useUpdateAnnouncement()
   const [open, setOpen] = useState(false)
   // Opened by the announcement rather than a click: it shows itself but leaves
   // focus where you were typing, so a stray Enter cannot download or restart.
@@ -75,9 +75,17 @@ export function UpdateChip({ runningCount = 0 }: { runningCount?: number }): Rea
 
   const percent = progress ? Math.max(0, Math.min(100, Math.round(progress.percent))) : 0
   const text =
-    status === 'downloaded' ? `${version} ready` : status === 'downloading' ? `${version} · ${percent}%` : `${version} available`
+    status === 'error'
+      ? `${version} failed`
+      : status === 'downloaded'
+        ? `${version} ready`
+        : status === 'downloading'
+          ? `${version} · ${percent}%`
+          : `${version} available`
   const label =
-    status === 'downloaded'
+    status === 'error'
+      ? `Updating to version ${version} failed`
+      : status === 'downloaded'
       ? `Version ${version} is ready to install`
       : status === 'downloading'
         ? `Downloading version ${version}, ${percent}%`
@@ -101,7 +109,7 @@ export function UpdateChip({ runningCount = 0 }: { runningCount?: number }): Rea
           left: position.left
         }}
       >
-        <UpdatePanel info={info} status={status} progress={progress} runningCount={runningCount} />
+        <UpdatePanel info={info} status={status} progress={progress} error={error} runningCount={runningCount} />
       </div>
     ) : null
 
@@ -116,13 +124,16 @@ export function UpdateChip({ runningCount = 0 }: { runningCount?: number }): Rea
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         data-update-chip
-        className="inline-flex h-6 items-center gap-1.5 rounded-md bg-accent-soft px-2 text-caption font-medium text-accent tnum vy-transition hover:text-accent-hover focus-visible:vy-focus-ring"
+        className={cn(
+          'inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-caption font-medium tnum vy-transition focus-visible:vy-focus-ring',
+          status === 'error' ? 'bg-danger-soft text-danger' : 'bg-accent-soft text-accent hover:text-accent-hover'
+        )}
         onClick={() => {
           setSelfOpened(false)
           setOpen((prev) => !prev)
         }}
       >
-        <Icon name="download" size={12} weight="bold" />
+        <Icon name={status === 'error' ? 'warningCircle' : 'download'} size={12} weight="bold" />
         {text}
       </button>
       {panel ? createPortal(panel, document.body) : null}

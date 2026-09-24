@@ -334,6 +334,15 @@ describe('Navigator', () => {
     expect(panel.contains(document.activeElement)).toBe(true)
   })
 
+  it('keeps the update entry when its download failed, and says so', async () => {
+    updater.state = { info: { version: '1.1.0' }, status: 'error', progress: null, autoOpen: false, error: 'disk full' } as typeof updater.state
+    render(<Navigator {...props()} />)
+    const chip = screen.getByRole('button', { name: 'Updating to version 1.1.0 failed' })
+    expect(chip.textContent).toBe('1.1.0 failed')
+    expect(chip.classList.contains('text-danger')).toBe(true)
+    expect(chip.classList.contains('text-accent')).toBe(false)
+  })
+
   it('opens the update panel when the inbox row asks, and takes focus there', async () => {
     updater.state = { info: { version: '1.1.0' }, status: 'downloaded', progress: null, autoOpen: false }
     render(<Navigator {...props()} />)
@@ -371,6 +380,13 @@ describe('Navigator', () => {
     expect(within(nav).queryAllByRole('button')).toHaveLength(0)
     rerender(<FirstRunNavigator workspaceName="site" widthPx={264} />)
     expect(nav.textContent?.startsWith('site')).toBe(true)
+  })
+
+  it('carries the update chip during Set up, so an "is ready" notice opens its panel', async () => {
+    updater.state = { info: { version: '1.1.0' }, status: 'downloaded', progress: null, autoOpen: false }
+    render(<FirstRunNavigator workspaceName={null} widthPx={264} />)
+    act(() => requestUpdatePanel())
+    expect(await screen.findByRole('dialog', { name: 'Version 1.1.0 is ready to install' })).toBeTruthy()
   })
 
   it('lists drafts just above Done, and opens or deletes one', () => {

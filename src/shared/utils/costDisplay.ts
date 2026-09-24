@@ -63,6 +63,34 @@ export function runCostDisplay(
 }
 
 /**
+ * A window's spend over many tasks (Usage): the bills and estimates summed
+ * by main, and how many of the tasks carried any cost at all. `est.` when
+ * any part is an estimate or any task had no measurable cost — then the true
+ * total is higher than shown. The per-task figure divides by the priced tasks
+ * only; dividing by all would read low.
+ */
+export function windowCostDisplay(totals: {
+  billedCost?: number
+  estimatedCost?: number
+  runs: number
+  pricedRuns?: number
+}): (RunCostDisplay & { perTask: number | null }) | null {
+  const billed = totals.billedCost ?? 0
+  const estimated = totals.estimatedCost ?? 0
+  if (!(billed > 0) && !(estimated > 0)) return null
+  const priced = Math.min(totals.pricedRuns ?? totals.runs, totals.runs)
+  const unpriced = Math.max(0, totals.runs - priced)
+  const anyEstimated = estimated > 0 || unpriced > 0
+  const title =
+    unpriced > 0
+      ? `Estimated total — ${unpriced} of ${totals.runs} ${totals.runs === 1 ? 'task has' : 'tasks have'} no measurable cost`
+      : estimated > 0
+        ? 'Estimated from published model rates — not a provider bill'
+        : 'Provider-reported cost across tasks'
+  return { ...presentCost(billed + estimated, anyEstimated, title), perTask: priced > 0 ? (billed + estimated) / priced : null }
+}
+
+/**
  * Workspace/session total over run costs. Runs without measurable cost
  * contribute nothing and are counted as unpriced — their true spend is
  * unknown, so the aggregate stays `est.`-labeled whenever any portion is

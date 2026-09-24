@@ -37,6 +37,10 @@ describe('resolveComposerMentions', () => {
         ok: true as const,
         data: { content: 'diff --git a/x' }
       })),
+      gitBranchDiff: vi.fn(async () => ({
+        ok: true as const,
+        data: { content: 'diff --git a/x', branch: 'feat/x', base: 'main', commits: 3 }
+      })),
       loadRun: vi.fn(async () => ({
         ok: true as const,
         data: {
@@ -105,8 +109,9 @@ describe('resolveComposerMentions', () => {
     })
     expect(result.text).toContain('Referenced branch diff')
     expect(result.text).toContain('diff --git')
-    // Staged and unstaged: everything uncommitted, as the status lines count it.
-    expect(window.vyotiq.gitDiff).toHaveBeenCalledWith({ workspacePath: '/ws', vsHead: true })
+    // The branch against where it left its base, and says which base.
+    expect(window.vyotiq.gitBranchDiff).toHaveBeenCalledWith('/ws')
+    expect(result.text).toContain('### Diff: feat/x against main — 3 commits since it left main, and uncommitted changes')
     expect(result.text).toContain('Prefer browser_* tools')
     expect(result.text).toContain('https://example.com/app')
     expect(result.text).toContain('Referenced browser')

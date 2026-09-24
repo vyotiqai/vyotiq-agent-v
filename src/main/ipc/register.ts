@@ -84,6 +84,8 @@ import {
   GitBranchesRequestSchema,
   GitCheckoutRequestSchema,
   GitDiffRequestSchema,
+  GitBranchDiffRequestSchema,
+  type GitBranchDiffResult,
   GitBlameRequestSchema,
   GitLogRequestSchema,
   GitCommitFilesRequestSchema,
@@ -509,6 +511,7 @@ import {
   readGitCommitFiles,
   readGitBlame,
   readGitDiff,
+  readBranchDiff,
   readGitLog,
   stageAll,
   stagePaths,
@@ -3056,6 +3059,18 @@ export function registerIpc(): void {
       return ok({ files: await readGitCommitFiles(req.workspacePath, req.sha) })
     } catch (err) {
       return failFrom(err, IPC.gitCommitFiles)
+    }
+  })
+
+  ipcMain.handle(IPC.gitBranchDiff, async (event, raw): Promise<IpcResult<GitBranchDiffResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GitBranchDiffRequestSchema.parse(raw ?? {})
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      const result = await readBranchDiff(req.workspacePath)
+      return result.ok ? ok(result.data) : fail(result.error)
+    } catch (err) {
+      return failFrom(err, IPC.gitBranchDiff)
     }
   })
 

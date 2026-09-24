@@ -170,15 +170,19 @@ describe('shortcutLabel', () => {
     expect(referenceShortcutCatalog().find((row) => row.id === 'font-larger')?.label).toBe('⌘=')
   })
 
-  it('lists text-size and edit-last chords for reference, never as palette commands', () => {
+  it('lists text-size, edit-last and approval chords for reference, never as palette commands', () => {
     const reference = referenceShortcutCatalog()
     expect(reference.map((row) => row.id)).toEqual([
       'edit-last',
+      'approval-allow',
+      'approval-deny',
       'font-smaller',
       'font-larger',
       'font-reset'
     ])
     expect(reference.find((row) => row.id === 'font-reset')?.label).toBe('Ctrl+0')
+    expect(reference.find((row) => row.id === 'approval-allow')?.label).toBe('Alt+A')
+    expect(reference.find((row) => row.id === 'approval-deny')?.label).toBe('Alt+D')
     // The command palette lists shortcutCatalog(); nothing handles these ids
     // as commands, so they must stay out of it.
     const paletteIds = new Set(shortcutCatalog().map((row) => row.id))

@@ -66,8 +66,10 @@ export function worktreeUnmerged(info: Pick<TaskWorktreeInfo, 'ahead' | 'uncommi
 }
 
 /** Merged, and nothing new since: all that is left to do is remove it. */
-export function worktreeIsMerged(info: Pick<TaskWorktreeInfo, 'ahead' | 'uncommitted' | 'mergedAt'>): boolean {
-  return Boolean(info.mergedAt) && info.ahead === 0 && info.uncommitted === 0
+export function worktreeIsMerged(
+  info: Pick<TaskWorktreeInfo, 'ahead' | 'uncommitted' | 'mergedAt'> & { baseMissing?: boolean }
+): boolean {
+  return Boolean(info.mergedAt) && !info.baseMissing && info.ahead === 0 && info.uncommitted === 0
 }
 
 /**
@@ -100,9 +102,11 @@ export function TaskWorktreeStrip({ info, title, onChanged }: { info: TaskWorktr
     }
     if (!res.data.merged) {
       const files = res.data.conflicts
-      pushToast(`Merging would conflict in ${count(files.length, 'file', 'files')} — nothing was changed`, {
+      const listed = files.slice(0, 5).join(', ') + (files.length > 5 ? ', …' : '')
+      pushToast(`Merging would conflict in ${count(files.length, 'file', 'files')} — nothing was merged`, {
         kind: 'error',
-        detail: files.slice(0, 5).join(', ') + (files.length > 5 ? ', …' : '')
+        // The worktree's own commit did happen: say so, it is on the branch now.
+        detail: res.data.committedFirst ? `${listed}. Its uncommitted files were committed on ${info.branch} first.` : listed
       })
       return
     }
@@ -113,7 +117,9 @@ export function TaskWorktreeStrip({ info, title, onChanged }: { info: TaskWorktr
     const loses = merged ? null : unmerged
     const ok = await confirm(
       loses
-        ? `Deletes the worktree’s folder and its branch ${info.branch}, with ${loses} that ${info.baseBranch} doesn’t have. This workspace closes.`
+        ? info.baseMissing
+          ? `Deletes the worktree’s folder and its branch ${info.branch}, with ${loses} that no other branch has. This workspace closes.`
+          : `Deletes the worktree’s folder and its branch ${info.branch}, with ${loses} that ${info.baseBranch} doesn’t have. This workspace closes.`
         : `Deletes the worktree’s folder and its branch ${info.branch} — ${info.baseBranch} already has everything on it. This workspace closes.`,
       {
         title: merged ? 'Remove this worktree?' : 'Discard this worktree?',
@@ -135,6 +141,11 @@ export function TaskWorktreeStrip({ info, title, onChanged }: { info: TaskWorktr
       <span className="min-w-0 flex-1 truncate" title={info.branch}>
         {merged ? (
           <>Merged into {info.baseBranch}. The worktree has nothing {info.baseBranch} doesn’t.</>
+        ) : info.baseMissing ? (
+          <>
+            Works in its own worktree; its base branch <span className="font-mono">{info.baseBranch}</span> is gone
+            {unmerged ? ` · ${unmerged}` : ''}
+          </>
         ) : (
           <>
             Works in its own worktree, from <span className="font-mono">{info.baseBranch}</span>
@@ -147,9 +158,17 @@ export function TaskWorktreeStrip({ info, title, onChanged }: { info: TaskWorktr
           size="xs"
           variant="ghost"
           icon="merge"
-          disabled={!unmerged || !info.parentExists || merging}
+          disabled={!unmerged || !info.parentExists || info.baseMissing || merging}
           pending={merging}
-          title={!info.parentExists ? 'The folder it came from is gone' : unmerged ? undefined : 'Nothing to merge yet'}
+          title={
+            !info.parentExists
+              ? 'The folder it came from is gone'
+              : info.baseMissing
+                ? `Its base branch ${info.baseBranch} is gone — there is nothing to merge into`
+                : unmerged
+                  ? undefined
+                  : 'Nothing to merge yet'
+          }
           onClick={() => void onMerge()}
         >
           Merge into {info.baseBranch}

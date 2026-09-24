@@ -158,7 +158,9 @@ describe('collectHomeActivity', () => {
       runs: 1,
       billedInputTokens: 400,
       outputTokens: 40,
-      billedCost: 0.5
+      billedCost: 0.5,
+      // One run with a cost, counted once though its usage spans two days.
+      pricedRuns: 1
     })
     expect(res.outcomes).toEqual({ done: 1, error: 0, cancelled: 0, running: 0 })
   })

@@ -7,11 +7,13 @@ import type { TaskDraft } from '@shared/ipc'
 import {
   briefStateFor,
   deleteTaskDraftFor,
+  refreshTaskDrafts,
   resetTaskDraftStoreForTests,
   saveTaskDraftFor,
   setBriefChecks,
   setBriefState,
   setBriefWorktree,
+  taskDraftsFor,
   useTaskDrafts
 } from '@renderer/lib/drafts/taskDraftStore'
 
@@ -64,6 +66,33 @@ describe('task draft store', () => {
     expect(result.current.map((d) => d.draft.id)).toEqual([A])
     // Not continuing a draft that is gone — but what is on the page stays.
     expect(briefStateFor('/ws')).toEqual({ draftId: null, checks: ['Typed on the page'], worktree: false })
+  })
+
+  it('a read asked for while one is out runs after it, and a read older than a save does not undo it', async () => {
+    let answer: (drafts: TaskDraft[]) => void = () => {}
+    const listTaskDrafts = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          answer = (drafts) => resolve({ ok: true as const, data: { drafts } })
+        })
+    )
+    window.vyotiq = {
+      listTaskDrafts,
+      saveTaskDraft: vi.fn(async () => ({ ok: true as const, data: draft(B, 'Saved while the read was out') }))
+    } as unknown as typeof window.vyotiq
+    const first = refreshTaskDrafts('/ws')
+    // A task started from A meanwhile: main removed it, so the list is read again.
+    void refreshTaskDrafts('/ws')
+    expect(listTaskDrafts).toHaveBeenCalledTimes(1)
+    // A save lands before the first read answers.
+    await saveTaskDraftFor({ workspacePath: '/ws', brief: 'Saved while the read was out', doneWhen: [] })
+    answer([draft(A, 'Read before the save')])
+    // The stale read is dropped; the second read goes out.
+    await waitFor(() => expect(listTaskDrafts).toHaveBeenCalledTimes(2))
+    expect(taskDraftsFor('/ws').map((d) => d.id)).toEqual([B])
+    answer([draft(B, 'Saved while the read was out')])
+    await first
+    expect(taskDraftsFor('/ws').map((d) => d.id)).toEqual([B])
   })
 
   it('an empty page state is no state at all', () => {

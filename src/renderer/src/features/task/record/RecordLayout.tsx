@@ -68,20 +68,18 @@ export function RecordRow({
   meta,
   children,
   className,
-  tone,
   id
 }: {
   label?: string
   meta?: ReactNode
   children: ReactNode
   className?: string
-  tone?: 'accent'
   id?: string
 }) {
   return (
     <section id={id} aria-label={label} className={cn('py-3', className)}>
       {label ? (
-        <h2 className={cn('mb-2 flex items-baseline gap-2', SECTION_LABEL, tone === 'accent' && 'text-accent')}>
+        <h2 className={cn('mb-2 flex items-baseline gap-2', SECTION_LABEL)}>
           {label}
           {meta ? <span className="font-mono font-normal normal-case tracking-normal text-tertiary tnum">{meta}</span> : null}
         </h2>

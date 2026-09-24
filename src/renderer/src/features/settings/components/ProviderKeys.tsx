@@ -7,7 +7,7 @@ import {
   providerNeedsKey
 } from '@shared/providers'
 import { Icon } from '@renderer/lib/icons'
-import { Button, Input } from '@renderer/lib/ui'
+import { Button, Input, pushToast } from '@renderer/lib/ui'
 import { ProviderLogo } from '@renderer/features/chat/components/composer/ProviderLogo'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import { PROVIDER_KEY_ORDER, PROVIDER_KEY_URLS } from '../constants'
@@ -238,7 +238,13 @@ function ExternalLink({ href, children }: { href: string; children: ReactNode })
       type="button"
       className="inline-flex shrink-0 items-center gap-1 rounded-sm text-xs text-muted vy-transition hover:text-fg focus-visible:vy-focus-ring"
       onClick={() => {
-        void window.vyotiq?.shellOpenExternal(href)
+        // A link that could not open says so, rather than doing nothing.
+        void window.vyotiq
+          ?.shellOpenExternal(href)
+          .then((res) => {
+            if (!res.ok) pushToast(`Couldn’t open ${href}: ${res.error}`, 'error')
+          })
+          .catch((err: unknown) => pushToast(`Couldn’t open ${href}: ${err instanceof Error ? err.message : String(err)}`, 'error'))
       }}
     >
       {children}

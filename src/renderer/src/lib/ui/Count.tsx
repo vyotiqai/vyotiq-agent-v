@@ -5,10 +5,10 @@ export function Count({ n, tone = 'quiet' }: { n: number | string; tone?: 'quiet
   return (
     <span
       className={cn(
-        'font-mono text-caption tnum',
+        'font-mono tnum',
         tone === 'accent'
           ? 'inline-grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-2xs font-semibold text-accent-fg'
-          : 'text-tertiary'
+          : 'text-caption text-tertiary'
       )}
     >
       {n}

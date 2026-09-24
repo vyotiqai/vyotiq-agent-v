@@ -518,8 +518,9 @@ export function buildRootMentionItems(opts: {
       id: 'branch',
       kind: 'branch',
       label: 'Branch diff',
-      // `git diff HEAD`: staged and unstaged, not the branch against its base.
-      subtitle: branch && branch !== 'HEAD' ? `uncommitted changes on ${branch}` : 'uncommitted changes'
+      // Against where the branch left its base (main's gitBranchDiff), uncommitted included;
+      // on the base itself that is the uncommitted changes — true either way.
+      subtitle: branch && branch !== 'HEAD' ? `what ${branch} changed, uncommitted included` : 'uncommitted changes'
     })
   }
   if (lintsOk) {

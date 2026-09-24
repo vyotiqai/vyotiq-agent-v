@@ -1181,12 +1181,24 @@ function App() {
       sendExtras,
       { workspacePath: path, runId: null }
     )
-    // Not sent yet (the approval choice comes first): it waits on the worktree's New task page.
+    // Not sent yet (the approval choice comes first, or the send failed): the
+    // whole brief — text, checks and attachments — waits on the worktree's New
+    // task page, and the draft it came from is kept until a task spends it.
     if (!sent) {
       setComposerDraftForPane(path, null, text)
       if (rest.doneWhen?.length) setBriefChecks(path, rest.doneWhen)
+      const key = composerAttachmentKey(path, null)
+      if (key) {
+        setComposerAttachments(key, {
+          images: images ?? [],
+          files: files ?? [],
+          nativeFiles: rest.nativeFiles ?? [],
+          audio: rest.audio ?? []
+        })
+      }
+    } else if (draftId) {
+      void deleteTaskDraftFor(parentPath, draftId)
     }
-    if (draftId) void deleteTaskDraftFor(parentPath, draftId)
     // Either way the brief now lives in the worktree, so the page it came from empties.
     return true
   }
@@ -1207,8 +1219,17 @@ function App() {
           return
         }
         await removeWorkspace(detail.workspacePath, false)
+        // removeWorkspace reports a failure only through the window's banner:
+        // ask main whether it is really closed before deleting its folder.
+        const after = await window.vyotiq.getWorkspaces()
+        if (!after.ok || after.data.openPaths.some((open) => workspacePathsEqual(open, detail.workspacePath))) {
+          pushToast('Couldn’t close the worktree’s workspace, so nothing was deleted', 'error')
+          return
+        }
         const res = await window.vyotiq.discardTaskWorktree(detail.workspacePath)
         if (!res.ok) {
+          // Open it again: its strip is the only place to retry from.
+          await addWorkspace(detail.workspacePath, { onError: () => {} })
           pushToast(`Couldn’t delete the worktree: ${res.error}`, 'error')
           return
         }
@@ -1223,7 +1244,7 @@ function App() {
     }
     window.addEventListener(DISCARD_TASK_WORKTREE_EVENT, onDiscard)
     return () => window.removeEventListener(DISCARD_TASK_WORKTREE_EVENT, onDiscard)
-  }, [removeWorkspace, switchWorkspace])
+  }, [addWorkspace, removeWorkspace, switchWorkspace])
 
   const onChatEditAndResend = useCallback(
     async (
@@ -1282,10 +1303,13 @@ function App() {
       if (done) {
         const { workspacePath, runId } = io
         if (workspacePath && runId) announceRewound(workspacePath, runId)
+        // Offer Redo only when main kept it — keeping it is best-effort.
+        const redo = workspacePath && runId ? await window.vyotiq.rewindRedoStatus?.(workspacePath, runId) : undefined
+        const canRedo = Boolean(redo?.ok && redo.data.available)
         pushToast(rewoundToastText(runN ?? null, done), {
           kind: 'success',
           icon: 'undo',
-          ...(workspacePath && runId
+          ...(canRedo && workspacePath && runId
             ? { action: { label: 'Redo', onClick: () => void redoRewindAndReload(workspacePath, runId) } }
             : {})
         })
@@ -1908,7 +1932,17 @@ function App() {
     rename: (path: string, runId: string, title: string) => Promise<void>
     exportRun: (path: string, runId: string) => Promise<void>
     deleteRun: (path: string, runId: string) => Promise<void>
-  }>({ rename: async () => {}, exportRun: async () => {}, deleteRun: async () => {} })
+    fork: (path: string, runId: string) => Promise<void>
+    togglePin: (path: string, runId: string) => void
+    isPinned: (path: string, runId: string) => boolean
+  }>({
+    rename: async () => {},
+    exportRun: async () => {},
+    deleteRun: async () => {},
+    fork: async () => {},
+    togglePin: () => {},
+    isPinned: () => false
+  })
   const renderPaneSession = useCallback(
     (pane: ChatPane, options: PaneRenderOptions) => {
       const { focused, onShowInspector, onOpenChanges, onOpenWorkspaceFile, multi, onClose, onSplit } =
@@ -1943,6 +1977,7 @@ function App() {
             onOpenInstance={(siblingRunId) => {
               void openRunInWorkspace(pane.workspacePath, siblingRunId)
             }}
+            onClosePane={multi ? onClose : undefined}
             onClose={() => {
               if (!parentRunId) return
               void (async () => {
@@ -2220,6 +2255,9 @@ function App() {
               ? () => void paneRunActionsRef.current.exportRun(pane.workspacePath, pane.runId!)
               : undefined,
             onCopyLink: pane.runId ? () => onCopyRunLinkInWorkspace(pane.workspacePath, pane.runId!) : undefined,
+            onFork: pane.runId ? () => void paneRunActionsRef.current.fork(pane.workspacePath, pane.runId!) : undefined,
+            onTogglePin: pane.runId ? () => paneRunActionsRef.current.togglePin(pane.workspacePath, pane.runId!) : undefined,
+            isPinned: pane.runId ? () => paneRunActionsRef.current.isPinned(pane.workspacePath, pane.runId!) : undefined,
             onDelete: pane.runId
               ? () => {
                   const runId = pane.runId!
@@ -2383,10 +2421,25 @@ function App() {
     }
   }
 
+  /** Fork: the task's conversation as a new, finished task, opened where you are. */
+  const onForkRunInWorkspace = async (path: string, runId: string): Promise<void> => {
+    const res = await window.vyotiq.forkRun(path, runId)
+    if (!res.ok) {
+      pushToast(`Couldn’t fork the task: ${res.error}`, 'error')
+      return
+    }
+    refreshWorkspaceRuns(path)
+    await onSelectRunInWorkspace(path, res.data)
+    pushToast('Forked — a copy of the task to take another way', { kind: 'success', icon: 'fork' })
+  }
+
   paneRunActionsRef.current = {
     rename: onRenameRunInWorkspace,
     exportRun: onExportRunInWorkspace,
-    deleteRun: onDeleteRunInWorkspace
+    deleteRun: onDeleteRunInWorkspace,
+    fork: onForkRunInWorkspace,
+    togglePin: onTogglePinnedRun,
+    isPinned: (path, runId) => settings.pinnedRuns.includes(pinnedRunKey(path, runId))
   }
 
   const onStopRunInWorkspace = useCallback(
@@ -2520,13 +2573,15 @@ function App() {
 
   /** Start your first task: the approval choice is saved the way the first-send question saves it. */
   const setupStart = useCallback(
-    async (path: string, mode: ToolApprovalMode): Promise<void> => {
+    async (path: string, mode: ToolApprovalMode): Promise<string | null> => {
       const res = await update({
         toolApproval: { ...settings.toolApproval, mode },
         toolApprovalOnboardingDone: true
       })
-      if (!res.ok) return
+      // Said on Set up itself: the window's settings banner is not on screen there.
+      if (!res.ok) return res.error
       onNewSessionInWorkspace(path, '')
+      return null
     },
     [onNewSessionInWorkspace, settings.toolApproval, update]
   )

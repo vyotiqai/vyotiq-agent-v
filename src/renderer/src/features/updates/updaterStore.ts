@@ -119,6 +119,8 @@ export interface UpdateAnnouncement {
   status: UpdaterStatePayload['status']
   /** Non-null only while downloading. */
   progress: UpdateProgress | null
+  /** Why the last step failed, while the update it was about is still known. */
+  error: string | null
   /** True until this version's panel has opened itself once. */
   autoOpen: boolean
 }
@@ -134,12 +136,15 @@ export function useUpdateAnnouncement(): UpdateAnnouncement {
   const pending =
     current.status === 'available' ||
     current.status === 'downloading' ||
-    current.status === 'downloaded'
+    current.status === 'downloaded' ||
+    // A failed download of a known update keeps the entry: it is where you retry.
+    (current.status === 'error' && current.info != null)
   const info = pending ? (current.info ?? null) : null
   return {
     info,
     status: current.status,
     progress: current.status === 'downloading' ? (current.progress ?? null) : null,
+    error: current.status === 'error' && info ? (current.error ?? 'The update failed') : null,
     autoOpen: info != null && info.version !== announcedVersion
   }
 }

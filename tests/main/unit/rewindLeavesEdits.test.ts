@@ -62,6 +62,52 @@ async function run2Writes(): Promise<string> {
   return finalizeWriteCheckpoint(runDir)!.id
 }
 
+describe('a rewind across several turns that wrote the same file', () => {
+  /** A turn answering the user message at `index` writes `content` into each file. */
+  async function turn(index: number, files: Record<string, string>): Promise<void> {
+    const cp = beginWriteCheckpoint(runDir, workspace, index)
+    for (const name of Object.keys(files)) await cp.recordPrior(name, 'write')
+    for (const [name, content] of Object.entries(files)) writeFileSync(join(workspace, name), content, 'utf8')
+    finalizeWriteCheckpoint(runDir)
+    // Distinct checkpoint times, so newest-first is unambiguous.
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+
+  it('counts a file two turns wrote once, and puts it back as it was before both', async () => {
+    await turn(2, { 'a.txt': 'a2\n' })
+    await turn(4, { 'a.txt': 'a4\n' })
+    const plan = planRewindWritesAcrossRuns([{ runDir, selection: 'anchored' }], 2, workspace)
+    expect(plan.files).toEqual([{ path: 'a.txt', action: 'modified', undoable: true }])
+    const result = rewindWritesFrom(runDir, workspace, 2)
+    expect(result.restored).toEqual(['a.txt'])
+    expect(result.edited).toEqual([])
+    expect(read('a.txt')).toBe('a0\n')
+  })
+
+  it('says ahead of time that your edit between the two turns is where the file stops', async () => {
+    await turn(2, { 'a.txt': 'a2\n' })
+    writeFileSync(join(workspace, 'a.txt'), 'mine between\n', 'utf8')
+    await turn(4, { 'a.txt': 'a4\n' })
+    const plan = planRewindWritesAcrossRuns([{ runDir, selection: 'anchored' }], 2, workspace)
+    // The preview no longer promises a restore the rewind will refuse.
+    expect(plan.files).toEqual([{ path: 'a.txt', action: 'modified', undoable: true, edited: true }])
+    const result = rewindWritesFrom(runDir, workspace, 2)
+    expect(result.restored).toEqual([])
+    expect(result.edited).toEqual(['a.txt'])
+    expect(read('a.txt')).toBe('mine between\n')
+  })
+
+  it('marks a file a turn created and a later one changed as added — the rewind removes it', async () => {
+    await turn(2, { 'new.txt': 'n2\n' })
+    await turn(4, { 'new.txt': 'n4\n' })
+    const plan = planRewindWritesAcrossRuns([{ runDir, selection: 'anchored' }], 2, workspace)
+    expect(plan.files).toEqual([{ path: 'new.txt', action: 'created', undoable: true }])
+    const result = rewindWritesFrom(runDir, workspace, 2)
+    expect(result.restored).toEqual(['new.txt'])
+    expect(existsSync(join(workspace, 'new.txt'))).toBe(false)
+  })
+})
+
 describe('rewind and files changed since the agent wrote them', () => {
   it('leaves a file you changed after the agent, and still rewinds the rest', async () => {
     await run2Writes()

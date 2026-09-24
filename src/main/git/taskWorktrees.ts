@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, realpathSync } from 'fs'
 import { readFile } from 'fs/promises'
-import { isAbsolute, join, relative } from 'path'
+import { isAbsolute, join, relative, resolve, sep } from 'path'
 import {
   TaskWorktreeSchema,
   type TaskWorktree,
@@ -42,6 +42,16 @@ let chain: Promise<unknown> = Promise.resolve()
 
 function registryPath(): string {
   return join(userDataRoot(), REGISTRY_FILE)
+}
+
+/** Under `<userData>/task-worktrees/`, and not that folder itself. */
+function isInsideTaskWorktrees(path: string): boolean {
+  const root = resolve(userDataRoot(), 'task-worktrees')
+  const target = resolve(path)
+  const prefix = root.endsWith(sep) ? root : `${root}${sep}`
+  return process.platform === 'win32'
+    ? target.toLowerCase().startsWith(prefix.toLowerCase())
+    : target.startsWith(prefix)
 }
 
 function worktreesRoot(parentPath: string): string {
@@ -186,14 +196,29 @@ export async function createTaskWorktree(parentPath: string, brief: string): Pro
   })
 }
 
-async function commitsAhead(cwd: string, base: string, branch: string): Promise<number> {
-  try {
-    const out = await runGit(['rev-list', '--count', `refs/heads/${base}..refs/heads/${branch}`], cwd, 5_000)
-    const n = Number(out.trim())
-    return Number.isFinite(n) && n >= 0 ? n : 0
-  } catch {
-    // The base branch was deleted or renamed: count what the branch has on its own.
-    return 0
+async function countRevs(cwd: string, args: string[]): Promise<number> {
+  const n = Number((await runGit(['rev-list', '--count', ...args], cwd, 5_000)).trim())
+  if (!Number.isFinite(n) || n < 0) throw new Error('git rev-list gave no count')
+  return n
+}
+
+/**
+ * Commits on the branch its base doesn't have. With the base gone (deleted or
+ * renamed) there is nothing to compare with, so it counts the commits no other
+ * local branch has — what deleting the branch would lose. Never a silent 0:
+ * Discard's warning reads this.
+ */
+async function commitsAhead(
+  cwd: string,
+  base: string,
+  branch: string
+): Promise<{ count: number; baseMissing: boolean }> {
+  if (await branchExists(cwd, base)) {
+    return { count: await countRevs(cwd, [`refs/heads/${base}..refs/heads/${branch}`]), baseMissing: false }
+  }
+  return {
+    count: await countRevs(cwd, [`refs/heads/${branch}`, '--not', `--exclude=${branch}`, '--branches']),
+    baseMissing: true
   }
 }
 
@@ -201,9 +226,11 @@ export async function taskWorktreeInfo(workspacePath: string): Promise<TaskWorkt
   const record = await findTaskWorktree(workspacePath)
   if (!record) return null
   const here = existsSync(record.worktreeRoot) && isGitRepo(record.worktreeRoot)
+  const ahead = here ? await commitsAhead(record.worktreeRoot, record.baseBranch, record.branch) : null
   return {
     ...record,
-    ahead: here ? await commitsAhead(record.worktreeRoot, record.baseBranch, record.branch) : 0,
+    ahead: ahead?.count ?? 0,
+    baseMissing: ahead?.baseMissing ?? false,
     uncommitted: here ? (await listNonNoiseDirtyPaths(record.worktreeRoot)).length : 0,
     parentExists: existsSync(record.parentPath) && isGitRepo(record.parentPath)
   }
@@ -219,6 +246,9 @@ export async function mergeTaskWorktree(workspacePath: string, message: string):
   if (!record) throw new Error('This workspace is not a task worktree')
   const parent = record.parentPath
   if (!existsSync(parent) || !isGitRepo(parent)) throw new Error('The folder it came from is gone')
+  if (!(await branchExists(parent, record.baseBranch))) {
+    throw new Error(`Its base branch ${record.baseBranch} is gone — there is nothing to merge into`)
+  }
   const onBranch = await currentGitBranch(parent)
   if (onBranch !== record.baseBranch) {
     throw new Error(
@@ -234,7 +264,7 @@ export async function mergeTaskWorktree(workspacePath: string, message: string):
       throw new Error(`Couldn’t commit the worktree’s changes: ${gitReason(err)}`)
     }
   }
-  const commits = await commitsAhead(record.worktreeRoot, record.baseBranch, record.branch)
+  const { count: commits } = await commitsAhead(record.worktreeRoot, record.baseBranch, record.branch)
   if (commits === 0) throw new Error(`Nothing to merge — ${record.baseBranch} already has everything on ${record.branch}`)
 
   return withGitWorktreeMutex(parent, async (): Promise<TaskWorktreeMergeResult> => {
@@ -252,7 +282,7 @@ export async function mergeTaskWorktree(workspacePath: string, message: string):
       }
       if (conflicts.length > 0) {
         await runGit(['merge', '--abort'], parent, 30_000)
-        return { merged: false, conflicts }
+        return { merged: false, conflicts, committedFirst }
       }
       throw new Error(`Couldn’t merge: ${gitReason(err)}`)
     }
@@ -273,6 +303,9 @@ export async function mergeTaskWorktree(workspacePath: string, message: string):
 export async function discardTaskWorktree(workspacePath: string): Promise<void> {
   const record = await findTaskWorktree(workspacePath)
   if (!record) throw new Error('This workspace is not a task worktree')
+  if (!isInsideTaskWorktrees(record.worktreeRoot) || !record.branch.startsWith(BRANCH_PREFIX)) {
+    throw new Error('This worktree is not one the app made, so it will not delete it')
+  }
   await releaseInstanceWorktreeResources(record.workspacePath)
   if (!workspacePathsEqual(record.workspacePath, record.worktreeRoot)) {
     await releaseInstanceWorktreeResources(record.worktreeRoot)

@@ -40,6 +40,7 @@ import type {
   GitGenerateCommitMessageResult,
   GitStatusChangedPayload,
   GitStatusResult,
+  GitBranchDiffResult,
   GitInitRequest,
   GitInitResult,
   IpcResult,
@@ -462,6 +463,8 @@ export interface VyotiqApi {
     workspacePath: string
     sha: string
   }) => Promise<IpcResult<{ files: import('./ipc').GitChangedFile[] }>>
+  /** What the branch changed since it left its base, uncommitted work included. */
+  gitBranchDiff: (workspacePath: string) => Promise<IpcResult<GitBranchDiffResult>>
   gitDiff: (payload: {
     workspacePath: string
     path?: string

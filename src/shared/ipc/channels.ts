@@ -234,6 +234,8 @@ export const IPC = {
   agentContextChanged: 'workspace:agent-context-changed',
   workspaceDiagnostics: 'workspace:diagnostics',
   gitDiff: 'git:diff',
+  /** The branch against its base (merge base with the default branch), uncommitted work included. */
+  gitBranchDiff: 'git:branch-diff',
   prView: 'pr:view',
   prCreate: 'pr:create',
   prMerge: 'pr:merge',

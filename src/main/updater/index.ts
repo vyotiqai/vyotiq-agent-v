@@ -56,6 +56,15 @@ function toUpdateInfo(info: ElectronUpdateInfo): UpdateInfo {
   }
 }
 
+/**
+ * The error state, carrying the update it was about when one is known — so
+ * the navigator's chip stays and says the download failed, with Try again,
+ * instead of disappearing with the only way to retry.
+ */
+function failed(err: unknown): UpdaterStatePayload {
+  return { status: 'error', error: errorMessage(err), ...(lastInfo ? { info: lastInfo } : {}) }
+}
+
 function broadcast(next: UpdaterStatePayload): void {
   current = next
   for (const win of BrowserWindow.getAllWindows()) {
@@ -106,6 +115,8 @@ export function initAutoUpdater(): void {
     broadcast({ status: 'available', info: lastInfo })
   })
   autoUpdater.on('update-not-available', () => {
+    // Nothing newer: an update known from an earlier check is not one any more.
+    lastInfo = null
     broadcast({ status: 'not-available' })
   })
   autoUpdater.on('download-progress', (progress: ProgressInfo) => {
@@ -125,7 +136,7 @@ export function initAutoUpdater(): void {
     publishLifecycleNotification(updateReadyNotice(lastInfo.version))
   })
   autoUpdater.on('error', (err) => {
-    broadcast({ status: 'error', error: errorMessage(err) })
+    broadcast(failed(err))
   })
 }
 
@@ -229,7 +240,9 @@ export async function checkForAppUpdates(
 export async function downloadAppUpdate(): Promise<void> {
   // Already downloading: report progress, never start a second transfer.
   if (current.status === 'downloading') return
-  if (!app.isPackaged || current.status !== 'available') {
+  // A failed download can be tried again: the update it was for is still known.
+  const retrying = current.status === 'error' && lastInfo != null
+  if (!app.isPackaged || (current.status !== 'available' && !retrying)) {
     broadcast({
       status: 'error',
       error: 'No update is available to download. Check for updates first.'
@@ -239,7 +252,7 @@ export async function downloadAppUpdate(): Promise<void> {
   try {
     await autoUpdater.downloadUpdate()
   } catch (err) {
-    broadcast({ status: 'error', error: errorMessage(err) })
+    broadcast(failed(err))
   }
 }
 

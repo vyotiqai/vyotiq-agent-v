@@ -21,10 +21,11 @@ import {
  * record, events, todos, checks, receipt, checkpoint marks — every top-level
  * file, and each checkpoint's index and meta, never the immutable copies) and
  * the workspace files it is about to put back are copied aside. Redo copies
- * them back — only while nothing has moved since: the record is exactly what
- * the rewind left and every one of those files still is too. A new
- * instruction on the task drops it (`discardRewindRedo`), as does anything
- * that changes what Redo would overwrite.
+ * them back — only while nothing has moved since: every file Redo would
+ * overwrite or delete (the run's files, the checkpoint marks, the workspace
+ * files) is byte for byte what the rewind left. A rename, a loop, a Keep or
+ * Undo, a new instruction — anything written after the rewind ends it, so
+ * Redo never takes back something done since.
  */
 const REDO_DIR = 'rewind-redo'
 const MANIFEST = 'manifest.json'
@@ -33,6 +34,8 @@ type WorkspaceFileEntry = {
   path: string
   /** How the file was before the rewind: its content is under files/<n>, or it did not exist. */
   before: 'file' | 'absent'
+  /** sha256 of that content, null when absent — to tell a file the rewind changed from one it left. */
+  beforeHash?: string | null
   /** How the rewind left it: sha256 of its content, or null when it removed it. */
   afterHash?: string | null
 }
@@ -48,6 +51,10 @@ type Manifest = {
   workspaceFiles: WorkspaceFileEntry[]
   /** sha256 of the record as the rewind left it; set once the rewind is done. */
   messagesHash?: string
+  /** Every top-level run file as the rewind left it (name → sha256). */
+  sealedRunFiles?: Record<string, string>
+  /** Each scope's checkpoint marks as the rewind left them (rel → sha256), by scope index. */
+  sealedScopeFiles?: Array<Record<string, string>>
 }
 
 export type { RewindRedoStatus }
@@ -102,6 +109,19 @@ function topLevelRunFiles(runDir: string): string[] {
     .map((entry) => entry.name)
 }
 
+/** name → sha256 of each file, as they are now. */
+function hashesOf(root: string, names: readonly string[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const name of names) out[name] = fileHash(join(root, name)) ?? ''
+  return out
+}
+
+function sameHashes(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length) return false
+  return keys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && a[key] === b[key])
+}
+
 function copyInto(from: string, to: string): void {
   mkdirSync(dirname(to), { recursive: true })
   copyFileSync(from, to)
@@ -150,15 +170,17 @@ export async function captureRewindRedo(input: {
 
   const workspaceFiles: WorkspaceFileEntry[] = []
   const seen = new Set<string>()
+  // Every file the rewind may write — one it ends up leaving as you changed
+  // it can still have been written by a newer turn's undo on the way.
   for (const file of input.plan.files) {
-    if (!file.undoable || file.edited || seen.has(file.path)) continue
+    if (!file.undoable || seen.has(file.path)) continue
     seen.add(file.path)
     const target = resolveInsideWorkspace(input.workspacePath, file.path)
     if (existsSync(target) && statSync(target).isFile()) {
       copyInto(target, join(dir, 'files', String(workspaceFiles.length)))
-      workspaceFiles.push({ path: file.path, before: 'file' })
+      workspaceFiles.push({ path: file.path, before: 'file', beforeHash: fileHash(target) })
     } else {
-      workspaceFiles.push({ path: file.path, before: 'absent' })
+      workspaceFiles.push({ path: file.path, before: 'absent', beforeHash: null })
     }
   }
 
@@ -177,9 +199,14 @@ export async function sealRewindRedo(workspacePath: string, runId: string): Prom
   const runDir = resolveRunDir(workspacePath, runId)
   const manifest = readManifest(runDir)
   if (!manifest) return
+  await flushMessageAppends(runDir)
+  await flushEventAppends(runDir)
+  await flushStatusWrites(runDir)
   writeManifest(runDir, {
     ...manifest,
     messagesHash: await recordHash(workspacePath, runId),
+    sealedRunFiles: hashesOf(runDir, topLevelRunFiles(runDir)),
+    sealedScopeFiles: manifest.scopes.map((scope) => hashesOf(scope.runDir, checkpointMarkFiles(scope.runDir))),
     workspaceFiles: manifest.workspaceFiles.map((entry) => ({
       ...entry,
       afterHash: fileHash(resolveInsideWorkspace(workspacePath, entry.path))
@@ -204,12 +231,26 @@ export async function rewindRedoStatus(workspacePath: string, runId: string): Pr
   if ((await recordHash(workspacePath, runId)) !== manifest.messagesHash) {
     return { available: false, reason: 'record-changed' }
   }
+  // Anything else Redo would overwrite: the run's own files and the checkpoint marks.
+  await flushEventAppends(runDir)
+  await flushStatusWrites(runDir)
+  if (!manifest.sealedRunFiles || !sameHashes(hashesOf(runDir, topLevelRunFiles(runDir)), manifest.sealedRunFiles)) {
+    return { available: false, reason: 'record-changed' }
+  }
+  for (const [index, scope] of manifest.scopes.entries()) {
+    const sealed = manifest.sealedScopeFiles?.[index]
+    if (!sealed || !sameHashes(hashesOf(scope.runDir, checkpointMarkFiles(scope.runDir)), sealed)) {
+      return { available: false, reason: 'record-changed' }
+    }
+  }
   for (const entry of manifest.workspaceFiles) {
     if (fileHash(resolveInsideWorkspace(workspacePath, entry.path)) !== (entry.afterHash ?? null)) {
       return { available: false, reason: 'files-changed' }
     }
   }
-  return { available: true, files: manifest.workspaceFiles.length, userMessageIndex: manifest.userMessageIndex }
+  // The files Redo changes back: the ones the rewind actually changed.
+  const changed = manifest.workspaceFiles.filter((entry) => (entry.beforeHash ?? null) !== (entry.afterHash ?? null)).length
+  return { available: true, files: changed, userMessageIndex: manifest.userMessageIndex }
 }
 
 /**

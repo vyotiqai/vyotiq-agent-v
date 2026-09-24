@@ -14,6 +14,11 @@ function modPrefix(): string {
   return isDarwin() ? '⌘' : 'Ctrl+'
 }
 
+/** `Alt+A` — `⌥A` on macOS. */
+export function altChordLabel(key: string): string {
+  return isDarwin() ? `⌥${key.toUpperCase()}` : `Alt+${key.toUpperCase()}`
+}
+
 /** Platform-correct label for a shortcut (Darwin `⌘K` vs `Ctrl+K`). */
 export function shortcutLabel(id: ShortcutId): string {
   const binding = SHORTCUT_BINDINGS[id]
@@ -107,6 +112,8 @@ export function referenceShortcutCatalog(): ShortcutCatalogEntry[] {
   const mod = modPrefix()
   return [
     { id: 'edit-last', title: 'Edit last prompt (empty composer)', label: '↑' },
+    { id: 'approval-allow', title: 'Allow the pending approval once', label: altChordLabel('a') },
+    { id: 'approval-deny', title: 'Deny the pending approval', label: altChordLabel('d') },
     { id: 'font-smaller', title: 'Smaller text', label: `${mod}-` },
     { id: 'font-larger', title: 'Larger text', label: `${mod}=` },
     { id: 'font-reset', title: 'Reset text size', label: `${mod}0` }

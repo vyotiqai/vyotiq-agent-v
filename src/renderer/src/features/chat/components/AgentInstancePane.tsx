@@ -184,6 +184,8 @@ type AgentInstancePaneProps = {
   onOpenInstance?: (runId: string) => void
   /** Leave the sub-session and return to the parent chat. */
   onClose: () => void
+  /** Close this pane — only when it is one of several side by side. */
+  onClosePane?: () => void
   showThinking?: boolean
   onOpenWorkspaceFile?: (path: string, options?: WorkspaceFileOpenOptions) => void
   approvalAutoFocus?: boolean
@@ -224,6 +226,7 @@ export function AgentInstancePane({
   pendingGates = [],
   onOpenInstance,
   onClose,
+  onClosePane,
   showThinking = true,
   onOpenWorkspaceFile,
   approvalAutoFocus = true,
@@ -519,7 +522,7 @@ export function AgentInstancePane({
             })
           : null}
         <ContextMeter usage={contextUsage} />
-        {running ? (
+        {running || pendingRun ? (
           <Button size="xs" variant="ghost" icon="stop" aria-label="Stop instance" onClick={onStopInstance}>
             Stop
           </Button>
@@ -533,6 +536,7 @@ export function AgentInstancePane({
             onClick={onShowInspector}
           />
         ) : null}
+        {onClosePane ? <IconButton icon="close" label={`Close ${title}`} size="sm" tone="muted" onClick={onClosePane} /> : null}
       </header>
       {loadError ? (
         <div className="shrink-0 border-b border-border px-4 py-2 text-xs text-danger" role="alert">
@@ -563,9 +567,16 @@ export function AgentInstancePane({
         <span className="min-w-0 truncate">Instances take instructions from their parent task.</span>
         <button
           type="button"
-          onClick={() => {
+          onClick={(event) => {
+            // This pane goes back to the parent task: focus its instruction
+            // line, not the first one on the page (the leftmost of a split).
+            const pane = event.currentTarget.closest('[data-chat-pane]')
             onClose()
-            requestAnimationFrame(() => requestAnimationFrame(() => focusComposerMessage()))
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => {
+                if (!(pane?.isConnected && focusComposerMessage(pane))) focusComposerMessage()
+              })
+            )
           }}
           className="shrink-0 rounded-sm font-medium text-accent hover:underline focus-visible:vy-focus-ring"
         >

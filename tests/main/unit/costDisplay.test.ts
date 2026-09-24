@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { aggregateRunCost, formatUsdCost, runCostDisplay } from '@shared/utils/costDisplay'
+import { aggregateRunCost, formatUsdCost, runCostDisplay, windowCostDisplay } from '@shared/utils/costDisplay'
 
 describe('formatUsdCost', () => {
   it('formats zero as $0', () => {
@@ -105,5 +105,32 @@ describe('aggregateRunCost', () => {
   it('mentions one unpriced session in the singular', () => {
     const total = aggregateRunCost([{ billedCost: 0.012 }, undefined])
     expect(total?.title).toBe('Estimated total — 1 session has no measurable cost')
+  })
+})
+
+describe('windowCostDisplay', () => {
+  it('is a bill across tasks only when every task had one', () => {
+    expect(windowCostDisplay({ billedCost: 3, runs: 3, pricedRuns: 3 })).toMatchObject({
+      text: '$3.00',
+      estimated: false,
+      title: 'Provider-reported cost across tasks',
+      perTask: 1
+    })
+  })
+
+  it('is an estimate when some tasks had no cost, and averages over the priced ones', () => {
+    expect(windowCostDisplay({ billedCost: 3, runs: 5, pricedRuns: 3 })).toMatchObject({
+      text: '$3.00 est.',
+      estimated: true,
+      title: 'Estimated total — 2 of 5 tasks have no measurable cost',
+      perTask: 1
+    })
+  })
+
+  it('is an estimate when any part was priced from published rates, and nothing without a cost', () => {
+    expect(windowCostDisplay({ estimatedCost: 0.5, runs: 1, pricedRuns: 1 })?.title).toBe(
+      'Estimated from published model rates — not a provider bill'
+    )
+    expect(windowCostDisplay({ runs: 4, pricedRuns: 0 })).toBeNull()
   })
 })

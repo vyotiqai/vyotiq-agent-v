@@ -117,6 +117,33 @@ describe('redo a rewind', () => {
     expect(await rewindRedoStatus(workspace, runId)).toEqual({ available: false, reason: 'none' })
   })
 
+  it('goes away when anything else it would overwrite was written since: a rename, a new run file, a checkpoint mark', async () => {
+    // A rename rewrites status.json; Redo would put the old one back.
+    await taskWithSecondRun()
+    await prepareRewindToUserMessage({ workspacePath: workspace, runId, userMessageIndex: 2 })
+    expect((await rewindRedoStatus(workspace, runId)).available).toBe(true)
+    const status = join(dir, 'status.json')
+    writeFileSync(status, readFileSync(status, 'utf8').replace(/}\s*$/, ', "title": "Renamed"}'), 'utf8')
+    expect(await rewindRedoStatus(workspace, runId)).toEqual({ available: false, reason: 'record-changed' })
+    await expect(redoRewind(workspace, runId)).rejects.toThrow('Something changed since the rewind')
+    expect(readFileSync(status, 'utf8')).toContain('"title": "Renamed"')
+
+    // A file the task gained since (a loop's loop.json): Redo would delete it.
+    await taskWithSecondRun()
+    await prepareRewindToUserMessage({ workspacePath: workspace, runId, userMessageIndex: 2 })
+    writeFileSync(join(dir, 'loop.json'), '{}', 'utf8')
+    expect(await rewindRedoStatus(workspace, runId)).toEqual({ available: false, reason: 'record-changed' })
+    expect(existsSync(join(dir, 'loop.json'))).toBe(true)
+
+    // A checkpoint mark changed since (Keep or Undo on a turn): Redo would put the old mark back.
+    await taskWithSecondRun()
+    await prepareRewindToUserMessage({ workspacePath: workspace, runId, userMessageIndex: 2 })
+    const index = join(dir, 'checkpoints', 'index.json')
+    expect(existsSync(index)).toBe(true)
+    writeFileSync(index, `${readFileSync(index, 'utf8')}\n`, 'utf8')
+    expect(await rewindRedoStatus(workspace, runId)).toEqual({ available: false, reason: 'record-changed' })
+  })
+
   it('edit and resend is a new instruction: nothing to redo after it', async () => {
     await taskWithSecondRun()
     await prepareRewindToUserMessage({ workspacePath: workspace, runId, userMessageIndex: 2 })

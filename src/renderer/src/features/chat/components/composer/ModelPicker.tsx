@@ -137,10 +137,10 @@ function ModelRow({
         <button
           type="button"
           className={cn(
-            'absolute top-1/2 right-7 z-sticky inline-grid size-5 -translate-y-1/2 place-items-center rounded text-muted vy-transition',
+            'absolute top-1/2 right-7 z-sticky inline-grid size-5 -translate-y-1/2 place-items-center rounded vy-transition',
             favorite
               ? 'opacity-100 text-fg'
-              : 'opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
+              : 'text-muted opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
           )}
           aria-label={favorite ? 'Remove from favourites' : 'Add to favourites'}
           onMouseDown={(e) => e.preventDefault()}

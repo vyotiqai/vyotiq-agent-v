@@ -726,6 +726,62 @@ export async function readGitDiff(
   }
 }
 
+export type BranchDiff = {
+  content: string
+  branch: string | null
+  /** The branch it is compared with — null when there is none apart from it (then: uncommitted changes only). */
+  base: string | null
+  /** Commits on the branch since it left its base. */
+  commits: number
+}
+
+/** The repository's default branch: origin's HEAD, else a local or remote main/master. */
+async function defaultBaseRef(cwd: string): Promise<string | null> {
+  const originHead = (await gitQuiet(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], cwd, READ_TIMEOUT_MS))?.trim()
+  if (originHead) return originHead
+  for (const ref of ['main', 'master', 'origin/main', 'origin/master']) {
+    if ((await gitQuiet(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], cwd, READ_TIMEOUT_MS)) != null) return ref
+  }
+  return null
+}
+
+/**
+ * What the branch changed: the working tree against where the branch left its
+ * base (the merge base with the default branch) — its commits and anything
+ * uncommitted, not the base's own later work. On the base branch itself, or
+ * with no base to find, it is the uncommitted changes, and says so.
+ */
+export async function readBranchDiff(cwd: string): Promise<{ ok: true; data: BranchDiff } | { ok: false; error: string }> {
+  if (!isGitRepo(cwd)) return { ok: false, error: 'Not a git repository' }
+  const branch = await currentGitBranch(cwd)
+  const uncommittedOnly = async (): Promise<{ ok: true; data: BranchDiff } | { ok: false; error: string }> => {
+    const res = await readGitDiff(cwd, { vsHead: true })
+    return res.ok ? { ok: true, data: { content: res.content, branch, base: null, commits: 0 } } : res
+  }
+  if (!branch || !(await hasGitCommits(cwd))) return uncommittedOnly()
+  const base = await defaultBaseRef(cwd)
+  // On the base itself (main, or the remote it tracks), there is nothing to compare with.
+  if (!base || base === branch || base.replace(/^origin\//, '') === branch) return uncommittedOnly()
+  const mergeBase = (await gitQuiet(['merge-base', 'HEAD', base], cwd, READ_TIMEOUT_MS))?.trim()
+  if (!mergeBase) return uncommittedOnly()
+  try {
+    const stdout = await git(['diff', '--no-color', '--no-ext-diff', mergeBase], cwd, READ_TIMEOUT_MS)
+    const count = Number((await gitQuiet(['rev-list', '--count', `${mergeBase}..HEAD`], cwd, READ_TIMEOUT_MS))?.trim())
+    const text = stdout.trimEnd()
+    return {
+      ok: true,
+      data: {
+        content: text ? capDiff(text) : `(no changes against ${base})`,
+        branch,
+        base,
+        commits: Number.isFinite(count) && count > 0 ? count : 0
+      }
+    }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
 const GIT_BLAME_MAX_LINES = 20_000
 
 type BlameCursor = {

@@ -219,7 +219,7 @@ export function TeammateDetail({
       {blocked ? (
         <p
           role="status"
-          className="m-0 shrink-0 border-b border-border/60 bg-warning/10 px-5 py-2 text-xs text-warning"
+          className="m-0 shrink-0 border-b border-border/60 bg-warning-soft px-5 py-2 text-xs text-warning"
         >
           {blocked}
         </p>

@@ -11,6 +11,11 @@ import { cn } from './cn'
  *   `MENU_ROW_TEXT` / `MENU_ROW_DANGER` / `MENU_ROW_SELECTED`.
  */
 export const MENU_SURFACE = 'vy-menu z-dropdown overflow-hidden animate-menu-in'
+/**
+ * MENU_SURFACE for a list that scrolls. Not MENU_SURFACE + 'overflow-auto':
+ * cn() has no tailwind-merge, and overflow-hidden is emitted later, so it wins.
+ */
+export const MENU_SURFACE_SCROLL = 'vy-menu z-dropdown overflow-auto animate-menu-in'
 
 export const MENU_ROW = cn(
   'flex h-7 w-full cursor-default items-center gap-2 rounded-md px-2 text-left text-sm vy-transition',

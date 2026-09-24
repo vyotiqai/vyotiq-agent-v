@@ -87,6 +87,16 @@ describe('UpdatePanel', () => {
     expect(vyotiq.getSettings).not.toHaveBeenCalled()
   })
 
+  it('says why the download failed, and offers to try it again', () => {
+    const vyotiq = bridge(true)
+    render(<UpdatePanel info={INFO} status="error" progress={null} error="disk full" />)
+    expect(screen.getByText('Update failed')).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toBe('disk full')
+    fireEvent.click(screen.getByRole('button', { name: 'Try the download again' }))
+    expect(vyotiq.updater.download).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: 'Restart and install' })).toBeNull()
+  })
+
   it('shows the download as it goes', () => {
     bridge(true)
     render(

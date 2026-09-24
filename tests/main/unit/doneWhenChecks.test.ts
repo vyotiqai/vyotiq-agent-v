@@ -154,4 +154,56 @@ describe('done-when checks', () => {
     ])
     expect(readChecks(runDir)[1]!.verdict).toBe('met')
   })
+
+  const planWith = (checks: string[]): string =>
+    PLAN.replace(
+      '- [ ] The updater suite passes\n- [ ] No retry or sleep added around the swap',
+      checks.map((c) => `- [ ] ${c}`).join('\n')
+    )
+
+  it('never gives a dropped check’s id to a new one', () => {
+    setup()
+    executeCreatePlan(workspace, { plan: planWith(['A passes', 'B passes']) }, { runDir })
+    expect(readChecks(runDir).map((c) => `${c.id} ${c.text}`)).toEqual(['c1 A passes', 'c2 B passes'])
+    // B dropped: c2 goes with it…
+    executeCreatePlan(workspace, { plan: planWith(['A passes']) }, { runDir })
+    expect(readChecks(runDir).map((c) => c.id)).toEqual(['c1'])
+    // …and a new check is c3, never c2 — the agent was told c2 meant B.
+    executeCreatePlan(workspace, { plan: planWith(['A passes', 'C passes']) }, { runDir })
+    expect(readChecks(runDir).map((c) => `${c.id} ${c.text}`)).toEqual(['c1 A passes', 'c3 C passes'])
+    expect(readFileSync(join(runDir, 'contract.md'), 'utf8')).toContain('- (c3) C passes')
+  })
+
+  it('a rewind past a plan rewrites the contract, so the next run is told the ids that exist', () => {
+    setup()
+    const call = (id: string, checks: string[]) => ({ id, name: 'create_plan', arguments: JSON.stringify({ plan: planWith(checks) }) })
+    const first = call('p1', ['A passes', 'B passes'])
+    const second = call('p2', ['A passes'])
+    const third = call('p3', ['A passes', 'C passes'])
+    for (const c of [first, second, third]) executeCreatePlan(workspace, JSON.parse(c.arguments), { runDir })
+    const turn = (c: { id: string; name: string; arguments: string }): ChatMessage[] => [
+      { role: 'assistant', content: '', toolCalls: [c] },
+      { role: 'tool', content: 'ok', toolCallId: c.id, toolName: 'create_plan', ok: true }
+    ]
+    const user: ChatMessage = { role: 'user', content: 'Fix it', at: '2026-09-24T09:00:00.000Z' }
+
+    // Replaying all three gives the same ids the run gave out: c3 stays C.
+    syncChecksAfterRewind(runDir, [user, ...turn(first), ...turn(second), ...turn(third)])
+    expect(readChecks(runDir).map((c) => `${c.id} ${c.text}`)).toEqual(['c1 A passes', 'c3 C passes'])
+
+    // Rewound to before the third plan: C is gone from the checks and from the contract.
+    syncChecksAfterRewind(runDir, [user, ...turn(first), ...turn(second)])
+    expect(readChecks(runDir).map((c) => `${c.id} ${c.text}`)).toEqual(['c1 A passes'])
+    let contract = readFileSync(join(runDir, 'contract.md'), 'utf8')
+    expect(contract).toContain('- (c1) A passes')
+    expect(contract).not.toContain('C passes')
+    expect(contract).toContain('## Goal')
+
+    // Rewound past every plan: no checks, and the contract's Done when is the default again.
+    syncChecksAfterRewind(runDir, [user])
+    expect(readChecks(runDir)).toEqual([])
+    contract = readFileSync(join(runDir, 'contract.md'), 'utf8')
+    expect(contract).not.toContain('(c1)')
+    expect(contract).toContain('The goal above is satisfied')
+  })
 })

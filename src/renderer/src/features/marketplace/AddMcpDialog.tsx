@@ -330,7 +330,10 @@ export function AddMcpDialog({
               id="mcp-src"
               rows={2}
               value={input}
-              disabled={locked}
+              // Only this dialog's own submit locks what you type. The JSON
+              // preview scan sets the marketplace's busy lock, which disabled
+              // the field mid-typing and dropped its focus.
+              disabled={submitting}
               placeholder="npx -y @modelcontextprotocol/server-memory"
               className={`mt-1.5 ${FIELD_TEXTAREA}`}
               onChange={(e) => setInput(e.target.value)}

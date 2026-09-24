@@ -36,8 +36,8 @@ export function rewindRestoreCount(files: readonly RewindFile[]): number {
 
 /**
  * The sentence under the title. A rewind keeps the instruction and removes
- * everything after it — this run's work and every later run — and it cannot
- * be taken back.
+ * everything after it — this run's work and every later run. It is kept, so
+ * Redo can bring it back until a new instruction or a changed file ends that.
  */
 /** What stays of a rewind: main keeps it until something would be overwritten by bringing it back. */
 const REDO_NOTE = 'It’s kept, so you can redo it until you send a new instruction or change those files.'

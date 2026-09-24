@@ -280,8 +280,9 @@ function PtySessionView({
 
 /**
  * Interactive user PTY terminal panel (VS Code–style).
- * Agent `terminal` tool output stays in the chat transcript — this dock is not
- * wired to agent tools and must not auto-open on agent activity.
+ * The agent's `terminal` commands show here only as a read-only mirror session
+ * (main's ptySessions agent mirror); their output stays in the record too. The
+ * dock must not auto-open on agent activity.
  */
 export function TerminalPanel({
   className,

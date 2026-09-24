@@ -346,12 +346,6 @@ export const NUM = 'font-mono tnum text-caption'
 /** A page's title. */
 export const PAGE_TITLE = 'text-title font-semibold tracking-[var(--vy-tracking-tight)] text-fg-strong'
 
-/** The navigator column: tasks by status, places, workspace switcher. */
-export const NAVIGATOR_WIDTH_PX = 264
-
-/** The inspector panel's default width beside the record. */
-export const INSPECTOR_WIDTH_PX = 452
-
 /** The record column: one content edge, a readable measure. No label gutter. */
 export const RECORD_MAX = 'max-w-[780px]'
 

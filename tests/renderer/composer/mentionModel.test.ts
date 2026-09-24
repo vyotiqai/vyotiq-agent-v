@@ -205,7 +205,7 @@ describe('mentionModel', () => {
       branchName: 'feat/stream-backpressure'
     })
     expect(items.filter((i) => i.kind !== 'nav').map((i) => [i.label, 'subtitle' in i ? i.subtitle : null])).toEqual([
-      ['Branch diff', 'uncommitted changes on feat/stream-backpressure'],
+      ['Branch diff', 'what feat/stream-backpressure changed, uncommitted included'],
       ['Typecheck errors', 'checked when you send'],
       ['Lint problems', 'checked when you send'],
       ['Browser page', 'prefer browser tools this instruction']

@@ -1,6 +1,6 @@
 import { useId, useMemo, useState, type ReactNode } from 'react'
 import type { HomeActivityResult } from '@shared/ipc'
-import { formatUsdCost, runCostDisplay } from '@shared/utils/costDisplay'
+import { formatUsdCost, windowCostDisplay } from '@shared/utils/costDisplay'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { Icon } from '@renderer/lib/icons'
 import { Button, Menu, ProgressBar, Segmented, cn, type MenuOption } from '@renderer/lib/ui'
@@ -114,7 +114,7 @@ function UsageBody({
   const span = data.windowDays ?? windowDays
   const totals = data.totals
   const tokens = totals.billedInputTokens + totals.outputTokens
-  const cost = runCostDisplay(totals)
+  const cost = windowCostDisplay(totals)
   const finished = finishedShare(data.outcomes)
   const bars = useMemo(() => activityDayBars(data.days, span), [data.days, span])
   const peak = bars.reduce((max, bar) => Math.max(max, bar.runs), 0)
@@ -155,7 +155,11 @@ function UsageBody({
         <BigStat
           value={cost ? cost.text : '—'}
           label="Spend"
-          detail={cost ? `${formatUsdCost(cost.cost / totals.runs)} a task` : 'No cost reported'}
+          detail={
+            cost?.perTask != null
+              ? `${formatUsdCost(cost.perTask)} a task${(totals.pricedRuns ?? totals.runs) < totals.runs ? ' with a cost' : ''}`
+              : 'No cost reported'
+          }
           title={cost ? cost.title : 'No provider reported a cost, and none could be estimated'}
         />
         <BigStat

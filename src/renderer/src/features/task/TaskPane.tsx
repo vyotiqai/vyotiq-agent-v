@@ -44,6 +44,11 @@ export type TaskPaneRunActions = {
   onExport?: () => void
   onCopyLink?: () => void
   onDelete?: () => void
+  /** A copy of the task's conversation as a new task, to take another way. */
+  onFork?: () => void
+  /** Pin or unpin: a pinned task keeps its own navigator group. Read when the menu draws. */
+  onTogglePin?: () => void
+  isPinned?: () => boolean
   /** Open another task beside this one. */
   onSplit?: () => void
   /** Close this pane (only when there is more than one). */
@@ -232,8 +237,15 @@ export function TaskPane(props: TaskPaneProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuItems = [
     ...(props.actions.onRename && runId ? [{ id: 'rename', label: 'Rename', icon: 'edit' as const, onSelect: () => setRenaming(true) }] : []),
+    ...(props.actions.onTogglePin && runId
+      ? [{ id: 'pin', label: props.actions.isPinned?.() ? 'Unpin' : 'Pin', icon: 'pin' as const, onSelect: props.actions.onTogglePin }]
+      : []),
     ...(props.actions.onExport && runId
       ? [{ id: 'export', label: 'Export as Markdown', icon: 'download' as const, onSelect: props.actions.onExport }]
+      : []),
+    // Main forks only a stopped task ("Cancel run first").
+    ...(props.actions.onFork && runId && !live
+      ? [{ id: 'fork', label: 'Fork', icon: 'fork' as const, onSelect: props.actions.onFork }]
       : []),
     ...(props.actions.onCopyLink && runId
       ? [{ id: 'link', label: 'Copy link', icon: 'link' as const, onSelect: props.actions.onCopyLink }]
@@ -448,7 +460,7 @@ export function TaskPane(props: TaskPaneProps) {
                   <IconButton
                     ref={t.ref}
                     icon="more"
-                    label="More — rename, export, copy link, delete"
+                    label={`More — ${menuItems.map((item) => item.label.toLowerCase()).join(', ')}`}
                     size="sm"
                     aria-expanded={t['aria-expanded']}
                     aria-controls={t['aria-controls']}
@@ -489,7 +501,7 @@ export function TaskPane(props: TaskPaneProps) {
             }}
             placeholder="Find in record"
             aria-label="Find in record"
-            className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-tertiary"
+            className="min-w-0 flex-1 rounded-sm bg-transparent text-sm text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
           />
           {findQuery.trim() ? (
             <span className="shrink-0 font-mono text-caption text-muted tnum" role="status">

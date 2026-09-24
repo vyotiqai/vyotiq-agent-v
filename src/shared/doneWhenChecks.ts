@@ -20,7 +20,11 @@ export const DoneWhenCheckSchema = z.object({
 })
 export type DoneWhenCheck = z.infer<typeof DoneWhenCheckSchema>
 
-export const DoneWhenChecksFileSchema = z.object({ checks: z.array(DoneWhenCheckSchema) })
+export const DoneWhenChecksFileSchema = z.object({
+  checks: z.array(DoneWhenCheckSchema),
+  /** The highest `cN` ever given out on this run, so a dropped check's id is never reused. */
+  lastId: z.number().int().min(0).optional()
+})
 
 export const DONE_WHEN_CHECKS_FILE = 'checks.json'
 
@@ -61,13 +65,19 @@ export function normalizeCheckText(text: string): string {
   return text.toLowerCase().replace(/\s+/g, ' ').replace(/[.;:,\s]+$/, '').trim()
 }
 
-export function nextCheckId(checks: readonly DoneWhenCheck[]): string {
+/** The N of the highest `cN` among these checks (0 when none). */
+export function maxCheckNumber(checks: readonly DoneWhenCheck[]): number {
   let max = 0
   for (const c of checks) {
     const m = /^c(\d+)$/.exec(c.id)
     if (m) max = Math.max(max, Number(m[1]))
   }
-  return `c${max + 1}`
+  return max
+}
+
+/** The next id after these checks and after `floor` — the highest id the run ever gave out. */
+export function nextCheckId(checks: readonly DoneWhenCheck[], floor = 0): string {
+  return `c${Math.max(maxCheckNumber(checks), floor) + 1}`
 }
 
 /**
@@ -78,7 +88,9 @@ export function nextCheckId(checks: readonly DoneWhenCheck[]): string {
 export function mergePlanChecks(
   existing: readonly DoneWhenCheck[],
   bullets: readonly string[],
-  now: string
+  now: string,
+  /** The highest id the run ever gave out: checks dropped since still hold theirs. */
+  floor = 0
 ): DoneWhenCheck[] {
   const brief = existing.filter((c) => c.source === 'brief')
   const prior = new Map(
@@ -94,7 +106,7 @@ export function mergePlanChecks(
     seen.add(key)
     const kept = prior.get(key)
     // Ids are never reused: a dropped check's id must not come to mean another.
-    out.push(kept ? { ...kept, text } : { id: nextCheckId([...existing, ...out]), text, source: 'plan', verdict: null, createdAt: now })
+    out.push(kept ? { ...kept, text } : { id: nextCheckId([...existing, ...out], floor), text, source: 'plan', verdict: null, createdAt: now })
   }
   return out
 }
@@ -136,6 +148,32 @@ export function checksTally(checks: readonly DoneWhenCheck[]): { met: number; no
 }
 
 /** The Done when block of contract.md, the checks listed by id. */
+/** The contract's Done when when a task has no checks of its own. */
+export function defaultDoneWhenBlock(): string {
+  return [
+    '## Done when',
+    '',
+    '- The goal above is satisfied (check outcomes: read results, command output, or user-visible success).',
+    '- Or blockers are explained clearly and no further narrow retry will help.',
+    '- Update this file if scope or done-when changes.'
+  ].join('\n')
+}
+
+/** Replace the contract's `## Done when` section with `block`, or add it at the end. */
+export function upsertDoneWhenSection(contract: string, block: string): string {
+  const lines = contract.split(/\r?\n/)
+  const start = lines.findIndex((line) => /^## Done when\b/i.test(line))
+  if (start < 0) return `${contract.trimEnd()}\n\n${block}\n`
+  let end = lines.length
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^##\s/.test(lines[i]!)) {
+      end = i
+      break
+    }
+  }
+  return [...lines.slice(0, start), block, ...lines.slice(end)].join('\n').trimEnd() + '\n'
+}
+
 export function contractDoneWhenBlock(checks: readonly DoneWhenCheck[]): string {
   return [
     '## Done when',

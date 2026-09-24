@@ -1,4 +1,4 @@
-import { createContext, memo, useContext, useState, type ReactNode } from 'react'
+import { createContext, memo, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { UiItem } from '@shared/transcript'
 import { inferFileWriteAction, parseArgsRecord } from '@shared/toolSummary'
 import { parseTerminalOutput } from '@shared/utils/terminalFormat'
@@ -234,7 +234,10 @@ function ExploreItem({ tools }: { tools: ToolItem[] }) {
             return (
               <li key={nested.id}>
                 <div className="flex h-6 items-center gap-2 text-xs">
-                  {nested.filePath ? (
+                  {fail ? (
+                    // Which one failed is said by its shape, not only its colour.
+                    <Icon name="warningCircle" size={13} className="shrink-0 text-danger" aria-label="Failed" />
+                  ) : nested.filePath ? (
                     <FileTypeIcon path={nested.filePath} size={13} />
                   ) : (
                     <Icon name={nested.category === 'browse' ? 'folder' : nested.category === 'browser' ? 'globe' : 'search'} size={13} className="text-tertiary" />
@@ -244,15 +247,15 @@ function ExploreItem({ tools }: { tools: ToolItem[] }) {
                       type="button"
                       onClick={() => onOpenWorkspaceFile(nested.filePath!, nested.fileLine ? { line: nested.fileLine } : undefined)}
                       className={cn(
-                        'min-w-0 truncate text-left font-mono text-caption text-secondary hover:text-fg-strong hover:underline focus-visible:vy-focus-ring',
-                        fail && 'line-through decoration-danger'
+                        'min-w-0 truncate text-left font-mono text-caption hover:text-fg-strong hover:underline focus-visible:vy-focus-ring',
+                        fail ? 'text-danger' : 'text-secondary'
                       )}
                       title={nested.filePath}
                     >
                       {label}
                     </button>
                   ) : (
-                    <span className={cn('min-w-0 truncate font-mono text-caption text-secondary', fail && 'text-danger')}>{label}</span>
+                    <span className={cn('min-w-0 truncate font-mono text-caption', fail ? 'text-danger' : 'text-secondary')}>{label}</span>
                   )}
                   <span className="flex-1" />
                   <Duration ms={toolDurationMs(t)} />
@@ -548,6 +551,24 @@ export function NowLine({ text, since }: { text: string; since?: string }) {
       <span className="min-w-0 flex-1 truncate vy-text-live" title={since}>
         {line}
       </span>
+      <ElapsedSince since={since} />
     </div>
   )
+}
+
+/** How long it has been at it, counting up each second while it shows. */
+function ElapsedSince({ since }: { since?: string }) {
+  const [elapsed, setElapsed] = useState<number | null>(null)
+  useEffect(() => {
+    const start = since ? Date.parse(since) : NaN
+    if (!Number.isFinite(start)) {
+      setElapsed(null)
+      return undefined
+    }
+    const tick = (): void => setElapsed(Math.max(0, Date.now() - start))
+    tick()
+    const timer = window.setInterval(tick, 1000)
+    return () => window.clearInterval(timer)
+  }, [since])
+  return <Duration ms={elapsed} />
 }

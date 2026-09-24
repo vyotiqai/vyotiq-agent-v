@@ -315,10 +315,20 @@ const MERGE_LABEL: Record<PrMergeMethod, string> = {
   rebase: 'Rebase and merge'
 }
 
-function prMergeAllowed(pr: PrView): boolean {
-  if (pr.isDraft) return false
-  const s = pr.state.trim().toUpperCase()
-  return s !== 'CLOSED' && s !== 'MERGED'
+/**
+ * Why Merge can't go through now, in the words the summary uses — null when it
+ * can. GitHub refuses a merge that branch protection blocks or that conflicts,
+ * so the button says so instead of failing after you pick a method.
+ */
+export function prMergeBlockedReason(pr: PrView): string | null {
+  if (pr.isDraft) return 'It is a draft — mark it ready for review to merge.'
+  const state = pr.state.trim().toUpperCase()
+  if (state === 'MERGED') return 'Already merged.'
+  if (state === 'CLOSED') return 'The pull request is closed.'
+  const status = (pr.mergeStateStatus ?? '').trim().toUpperCase()
+  if (status === 'BLOCKED') return 'Branch protection blocks the merge.'
+  if (status === 'DIRTY') return `The branch conflicts with ${pr.baseRefName}.`
+  return null
 }
 
 function reviewsLabel(pr: PrView): string {
@@ -1509,7 +1519,8 @@ export function PrPanel({
                             size="sm"
                             variant="primary"
                             trailingIcon="chevron"
-                            disabled={!prMergeAllowed(pr) || mergeBusy}
+                            disabled={prMergeBlockedReason(pr) != null || mergeBusy}
+                            title={prMergeBlockedReason(pr) ?? undefined}
                             aria-expanded={t['aria-expanded']}
                             aria-controls={t['aria-controls']}
                             aria-haspopup={t['aria-haspopup']}

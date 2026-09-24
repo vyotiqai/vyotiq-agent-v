@@ -59,8 +59,8 @@ const levelFill: Record<UsageLevel, string> = {
 
 const levelSoft: Record<UsageLevel, string> = {
   normal: 'bg-fg/10',
-  warning: 'bg-warning/12',
-  danger: 'bg-danger/12'
+  warning: 'bg-warning-soft',
+  danger: 'bg-danger-soft'
 }
 
 function formatPct(n: number, total: number): string {
@@ -729,10 +729,12 @@ export function ContextMeter({
         type="button"
         className={cn(
           'inline-grid size-7 shrink-0 place-items-center rounded-md vy-transition',
+          // One state's classes at a time: appended, the open state's text-fg lost to text-muted.
           overBudget
-            ? cn(levelSoft.danger, levelRing.danger, 'hover:bg-danger/15')
-            : 'text-muted hover:bg-surface hover:text-fg',
-          open && (overBudget ? 'bg-danger/15' : 'bg-surface text-fg')
+            ? cn(levelSoft.danger, levelRing.danger)
+            : open
+              ? 'bg-surface text-fg'
+              : 'text-muted hover:bg-surface hover:text-fg'
         )}
         aria-expanded={open}
         aria-haspopup="dialog"

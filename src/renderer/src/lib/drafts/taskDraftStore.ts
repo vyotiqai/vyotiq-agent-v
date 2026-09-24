@@ -21,6 +21,10 @@ type Listener = () => void
 
 const draftsByWorkspace = new Map<string, TaskDraft[]>()
 const loading = new Set<string>()
+/** A read asked for while one was out: read once more when it returns. */
+const readAgain = new Set<string>()
+/** Bumped by every change made here, so a list read before it can't undo it. */
+const localChanges = new Map<string, number>()
 const listeners = new Set<Listener>()
 let version = 0
 
@@ -40,6 +44,8 @@ function keyOf(workspacePath: string): string {
 }
 
 function setDrafts(workspacePath: string, drafts: TaskDraft[]): void {
+  const key = keyOf(workspacePath)
+  localChanges.set(key, (localChanges.get(key) ?? 0) + 1)
   draftsByWorkspace.set(keyOf(workspacePath), [...drafts].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)))
   // A draft that is gone — started, or deleted — is no longer being continued;
   // the page keeps what is typed on it.
@@ -55,11 +61,21 @@ export async function refreshTaskDrafts(workspacePath: string): Promise<void> {
   const list = window.vyotiq?.listTaskDrafts
   if (!list) return
   const key = keyOf(workspacePath)
-  if (loading.has(key)) return
+  // One read at a time per workspace; one asked for meanwhile runs after it,
+  // since main may have changed the list since the first was sent.
+  if (loading.has(key)) {
+    readAgain.add(key)
+    return
+  }
   loading.add(key)
   try {
-    const res = await list(workspacePath)
-    if (res.ok) setDrafts(workspacePath, res.data.drafts)
+    do {
+      readAgain.delete(key)
+      const changesBefore = localChanges.get(key) ?? 0
+      const res = await list(workspacePath)
+      // A save or delete here while it was out is newer than what it read.
+      if (res.ok && (localChanges.get(key) ?? 0) === changesBefore) setDrafts(workspacePath, res.data.drafts)
+    } while (readAgain.has(key))
   } finally {
     loading.delete(key)
   }
@@ -170,6 +186,8 @@ export function useBriefState(workspacePath: string | null | undefined): BriefSt
 export function resetTaskDraftStoreForTests(): void {
   draftsByWorkspace.clear()
   loading.clear()
+  readAgain.clear()
+  localChanges.clear()
   briefs.clear()
   emit()
 }

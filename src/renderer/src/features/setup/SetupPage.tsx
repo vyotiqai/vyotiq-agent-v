@@ -104,12 +104,14 @@ export function SetupPage({
   onChooseFolder: () => Promise<string | null>
   /** Open a folder by path — a recent one or a dropped one. Resolves to an error message, or null. */
   onOpenPath: (path: string) => Promise<string | null>
-  onStart: (workspacePath: string, mode: ToolApprovalMode) => Promise<void>
+  /** Resolves to why the choice could not be saved, or null once the brief opens. */
+  onStart: (workspacePath: string, mode: ToolApprovalMode) => Promise<string | null>
 }): ReactNode {
   const [mode, setMode] = useState<ToolApprovalMode>(approvalMode)
   const [folderError, setFolderError] = useState<string | null>(null)
   const [dropping, setDropping] = useState(false)
   const [starting, setStarting] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
   const { check, recheck } = useProviderCheck(
     settings.provider,
     providerConfigured(settings, secrets),
@@ -268,13 +270,21 @@ export function SetupPage({
             onClick={() => {
               if (!workspace) return
               setStarting(true)
-              void onStart(workspace, mode).finally(() => setStarting(false))
+              setStartError(null)
+              void onStart(workspace, mode)
+                .then((error) => setStartError(error))
+                .finally(() => setStarting(false))
             }}
           >
             Start your first task
           </Button>
           <span className="text-xs text-tertiary">{hint}</span>
         </div>
+        {startError ? (
+          <p role="alert" className="mt-2 text-xs text-danger">
+            Couldn’t save your approval choice: {startError}
+          </p>
+        ) : null}
       </div>
     </div>
   )
