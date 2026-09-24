@@ -2,7 +2,18 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode }
 import { createPortal } from 'react-dom'
 import { Icon, type IconName } from '@renderer/lib/icons'
 import { FileTypeIcon } from '@renderer/lib/fileIcons'
-import { Keys, MENU_LABEL, MENU_SEPARATOR, StatusGlyph, cn } from '@renderer/lib/ui'
+import {
+  Keys,
+  MENU_LABEL,
+  MENU_ROW,
+  MENU_ROW_ACTIVE,
+  MENU_ROW_IDLE,
+  MENU_ROW_TEXT,
+  MENU_SEPARATOR,
+  MenuItemBody,
+  StatusGlyph,
+  cn
+} from '@renderer/lib/ui'
 import type { NavRow } from '@renderer/app/navigator/navigatorModel'
 
 export type PaletteCommand = {
@@ -13,6 +24,8 @@ export type PaletteCommand = {
   keys?: readonly string[]
   /** Quiet trailing text ("restarts Agent V"). */
   hint?: string
+  /** Muted text beside the title ("About" for a settings row). */
+  detail?: string
 }
 
 export type PaletteFile = { workspacePath: string; path: string }
@@ -37,6 +50,7 @@ export function CommandPalette({
   onClose,
   tasks,
   commands,
+  settingsCommands,
   searchFiles,
   newTaskIn,
   onOpenTask,
@@ -49,6 +63,8 @@ export function CommandPalette({
   /** Every task the navigator knows, in its order (needs you first). */
   tasks: readonly NavRow[]
   commands: readonly PaletteCommand[]
+  /** Settings rows matching the query, as commands; listed after the others. */
+  settingsCommands?: (needle: string) => PaletteCommand[]
   /** Paths in the active workspace matching a query; absent without a workspace. */
   searchFiles?: (query: string, limit: number) => Promise<PaletteFile[]>
   /** Where Ctrl ↵ starts a task, or null when no workspace is open. */
@@ -114,16 +130,16 @@ export function CommandPalette({
     const fileItems: Item[] = commandsOnly
       ? []
       : files.map((file) => ({ kind: 'file' as const, key: `file:${file.path}`, file }))
-    const commandItems: Item[] = commands
-      .filter((c) => matches(c.title))
-      .slice(0, commandsOnly ? commands.length : COMMAND_LIMIT)
+    const matched = [...commands.filter((c) => matches(c.title)), ...(needle ? (settingsCommands?.(needle) ?? []) : [])]
+    const commandItems: Item[] = matched
+      .slice(0, commandsOnly ? matched.length : COMMAND_LIMIT)
       .map((command) => ({ kind: 'command' as const, key: `cmd:${command.id}`, command }))
     const newTask: Item[] =
       !commandsOnly && needle && newTaskIn
         ? [{ kind: 'newTask', key: 'new-task', text: needle, where: newTaskIn.name }]
         : []
     return { taskItems, fileItems, commandItems, newTask }
-  }, [needle, commandsOnly, tasks, files, commands, newTaskIn])
+  }, [needle, commandsOnly, tasks, files, commands, settingsCommands, newTaskIn])
 
   const flat = useMemo(
     () => [...groups.taskItems, ...groups.fileItems, ...groups.commandItems, ...groups.newTask],
@@ -217,7 +233,13 @@ export function CommandPalette({
           />
           <Keys keys={['Esc']} />
         </div>
-        <div ref={listRef} id="palette-results" role="listbox" aria-label="Results" className="scroll-thin min-h-0 flex-1 overflow-y-auto p-1.5">
+        <div
+          ref={listRef}
+          id="palette-results"
+          role="listbox"
+          aria-label="Results"
+          className="scroll-thin max-h-[440px] min-h-0 flex-1 overflow-y-auto p-1.5"
+        >
           {flat.length === 0 ? (
             <p className="px-2 py-6 text-center text-sm text-tertiary">
               {commandsOnly ? 'No matching commands.' : 'Nothing matches.'}
@@ -283,42 +305,37 @@ function PaletteRow({
   onHover: () => void
   onClick: () => void
 }) {
-  const base = cn(
-    'flex w-full items-center gap-2 rounded-md px-2 text-left',
-    item.kind === 'task' ? 'py-1.5' : 'h-8',
-    active ? 'bg-surface-2' : 'hover:bg-surface'
-  )
   const common = {
     id: `palette-item-${index}`,
     'data-palette-index': index,
     role: 'option' as const,
     'aria-selected': active,
-    className: base,
+    className: cn(MENU_ROW, active ? MENU_ROW_ACTIVE : MENU_ROW_IDLE, MENU_ROW_TEXT),
     onMouseEnter: onHover,
     onMouseDown: (e: MouseEvent) => e.preventDefault(),
     onClick
   }
   if (item.kind === 'task') {
     const row = item.row
-    const detail = [row.workspaceName, taskDetail(row)].filter(Boolean).join(' · ')
     return (
       <div {...common}>
-        <span title={row.stateLabel} className="inline-flex shrink-0">
-          <StatusGlyph state={row.state} size={14} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm text-fg">{highlight(row.title, needle)}</span>
-          <span className="block truncate text-xs text-muted">{detail}</span>
-        </span>
-        {active ? <span className="shrink-0 text-xs text-tertiary">↵ open</span> : null}
+        <MenuItemBody
+          lead={
+            <span title={row.stateLabel} className="inline-flex shrink-0">
+              <StatusGlyph state={row.state} size={14} />
+            </span>
+          }
+          label={highlight(row.title, needle)}
+          detail={[row.workspaceName, taskDetail(row)].filter(Boolean).join(' · ')}
+          hint={active ? '↵ open' : undefined}
+        />
       </div>
     )
   }
   if (item.kind === 'file') {
     return (
       <div {...common}>
-        <FileTypeIcon path={item.file.path} size={14} />
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg">{highlight(item.file.path, needle)}</span>
+        <MenuItemBody lead={<FileTypeIcon path={item.file.path} size={14} />} label={highlight(item.file.path, needle)} />
       </div>
     )
   }
@@ -326,21 +343,13 @@ function PaletteRow({
     const c = item.command
     return (
       <div {...common}>
-        <Icon name={c.icon ?? 'command'} size={15} className="shrink-0 text-muted" />
-        <span className="min-w-0 flex-1 truncate text-sm text-fg">{highlight(c.title, needle)}</span>
-        {c.hint ? <span className="shrink-0 text-xs text-tertiary">{c.hint}</span> : null}
-        {c.keys?.length ? <Keys keys={c.keys} /> : null}
+        <MenuItemBody icon={c.icon ?? 'command'} label={highlight(c.title, needle)} detail={c.detail} hint={c.hint} keys={c.keys} />
       </div>
     )
   }
   return (
     <div {...common}>
-      <Icon name="plus" size={15} className="shrink-0 text-muted" />
-      <span className="flex min-w-0 flex-1 items-baseline gap-2">
-        <span className="truncate text-sm text-fg">New task: “{item.text}”</span>
-        <span className="shrink-0 truncate text-xs text-muted">in {item.where}</span>
-      </span>
-      <Keys keys={['Ctrl', '↵']} />
+      <MenuItemBody icon="plus" label={`New task: “${item.text}”`} detail={`in ${item.where}`} keys={['Ctrl', '↵']} />
     </div>
   )
 }

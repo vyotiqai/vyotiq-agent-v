@@ -478,11 +478,17 @@ export function findActiveMentionToken(
   }
 }
 
+/**
+ * The @ menu before a subview: what can be attached (Context), files (the
+ * recent ones, or matches once something is typed), and the lists to browse.
+ */
 export function buildRootMentionItems(opts: {
   query: string
-  recentFiles: string[]
-  matchingFiles: string[]
-  /** When false, omit codebase file rows and Files & Folders (no selected workspace). */
+  /** Files you mentioned, then files this task read or edited — most recent first. */
+  recentFiles: readonly string[]
+  /** Workspace search results for the query. */
+  matchingFiles: readonly string[]
+  /** When false, omit codebase file rows and Files and folders (no selected workspace). */
   includeCodebase?: boolean
   branchName?: string | null
 }): MentionMenuItem[] {
@@ -490,8 +496,8 @@ export function buildRootMentionItems(opts: {
   const items: MentionMenuItem[] = []
   const includeCodebase = opts.includeCodebase !== false
 
-  const branchOk = !q || 'branch'.includes(q) || 'diff'.includes(q)
-  const browserOk = !q || 'browser'.includes(q) || 'web'.includes(q)
+  const branchOk = !q || 'branch'.includes(q) || 'diff'.includes(q) || 'changes'.includes(q)
+  const browserOk = !q || 'browser'.includes(q) || 'web'.includes(q) || 'page'.includes(q)
   const lintsOk =
     includeCodebase &&
     (!q || 'lint'.includes(q) || 'lints'.includes(q) || 'typecheck'.includes(q) || 'diag'.includes(q))
@@ -502,7 +508,8 @@ export function buildRootMentionItems(opts: {
     includeCodebase && (!q || 'docs'.includes(q) || 'doc'.includes(q) || 'readme'.includes(q))
   const rulesNavOk =
     includeCodebase && (!q || 'rules'.includes(q) || 'rule'.includes(q) || 'agents'.includes(q))
-  const chatsNavOk = !q || 'past'.includes(q) || 'chats'.includes(q) || 'chat'.includes(q)
+  const chatsNavOk =
+    !q || 'past'.includes(q) || 'tasks'.includes(q) || 'chats'.includes(q) || 'chat'.includes(q)
 
   // Context → Files → Browse (see buildMentionRootSections).
   if (branchOk) {
@@ -510,37 +517,41 @@ export function buildRootMentionItems(opts: {
     items.push({
       id: 'branch',
       kind: 'branch',
-      label: 'Branch',
-      subtitle: branch ? `Diff for ${branch}` : 'Current branch diff'
+      label: 'Branch diff',
+      // `git diff HEAD`: staged and unstaged, not the branch against its base.
+      subtitle: branch && branch !== 'HEAD' ? `uncommitted changes on ${branch}` : 'uncommitted changes'
+    })
+  }
+  if (lintsOk) {
+    // Run over the whole project when the instruction is sent — there is no live count.
+    items.push({
+      id: 'lints-typecheck',
+      kind: 'lints',
+      diagnosticsKind: 'typecheck',
+      label: 'Typecheck errors',
+      subtitle: 'checked when you send'
+    })
+    items.push({
+      id: 'lints-lint',
+      kind: 'lints',
+      diagnosticsKind: 'lint',
+      label: 'Lint problems',
+      subtitle: 'checked when you send'
     })
   }
   if (browserOk) {
     items.push({
       id: 'browser',
       kind: 'browser',
-      label: 'Browser',
-      subtitle: 'Prefer browser tools this turn'
-    })
-  }
-  if (lintsOk) {
-    items.push({
-      id: 'lints-typecheck',
-      kind: 'lints',
-      diagnosticsKind: 'typecheck',
-      label: 'Typecheck',
-      subtitle: 'Attach typecheck errors'
-    })
-    items.push({
-      id: 'lints-lint',
-      kind: 'lints',
-      diagnosticsKind: 'lint',
-      label: 'Lint',
-      subtitle: 'Attach lint errors'
+      label: 'Browser page',
+      subtitle: 'prefer browser tools this instruction'
     })
   }
 
   if (includeCodebase) {
-    const filePool = [...opts.recentFiles, ...opts.matchingFiles]
+    // With nothing typed only recent files are worth a row; a search result
+    // for an empty query is just the first files alphabetically.
+    const filePool = q ? [...opts.recentFiles, ...opts.matchingFiles] : opts.recentFiles
     const seen = new Set<string>()
     for (const path of filePool) {
       const norm = path.replace(/\\/g, '/')
@@ -563,40 +574,16 @@ export function buildRootMentionItems(opts: {
   }
 
   if (filesNavOk) {
-    items.push({
-      id: 'files',
-      kind: 'nav',
-      view: 'files',
-      label: 'Files & Folders',
-      subtitle: 'Browse the workspace'
-    })
+    items.push({ id: 'files', kind: 'nav', view: 'files', label: 'Files and folders' })
   }
   if (docsNavOk) {
-    items.push({
-      id: 'docs',
-      kind: 'nav',
-      view: 'docs',
-      label: 'Docs',
-      subtitle: 'README and project docs'
-    })
+    items.push({ id: 'docs', kind: 'nav', view: 'docs', label: 'Docs' })
   }
   if (rulesNavOk) {
-    items.push({
-      id: 'rules',
-      kind: 'nav',
-      view: 'rules',
-      label: 'Rules',
-      subtitle: 'Agent rules'
-    })
+    items.push({ id: 'rules', kind: 'nav', view: 'rules', label: 'Rules' })
   }
   if (chatsNavOk) {
-    items.push({
-      id: 'chats',
-      kind: 'nav',
-      view: 'chats',
-      label: 'Past Chats',
-      subtitle: 'Earlier conversations'
-    })
+    items.push({ id: 'chats', kind: 'nav', view: 'chats', label: 'Past tasks' })
   }
 
   return items

@@ -146,6 +146,7 @@ import type {
   WorkspaceEditorRecoveryClearRequest,
   SlashCommandDescriptor,
   SlashCommandResolveResult,
+  SlashMcpServer,
   SlashCommandsCreateRuleResult,
   SlashCommandsCreateSkillResult,
   LocalSkillItem,
@@ -669,7 +670,7 @@ export interface VyotiqApi {
   marketplaceAckRemoteInstall: (acked: boolean) => Promise<IpcResult<Settings>>
   slashCommandsList: (payload?: {
     workspacePath?: string | null
-  }) => Promise<IpcResult<{ commands: SlashCommandDescriptor[] }>>
+  }) => Promise<IpcResult<{ commands: SlashCommandDescriptor[]; mcpServers?: SlashMcpServer[] }>>
   slashCommandsResolve: (payload: {
     id: string
     workspacePath?: string | null

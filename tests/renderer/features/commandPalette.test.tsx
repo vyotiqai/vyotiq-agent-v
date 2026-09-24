@@ -5,7 +5,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import type { RunSummary } from '@shared/ipc'
 import { CommandPalette, type PaletteFile } from '@renderer/features/commandPalette/CommandPalette'
-import { labelToKeys, paletteCommands, runPaletteCommand } from '@renderer/features/commandPalette/paletteCommands'
+import {
+  labelToKeys,
+  paletteCommands,
+  paletteSettingsCommands,
+  paletteUpdateCommands,
+  runPaletteCommand
+} from '@renderer/features/commandPalette/paletteCommands'
+import { resetUpdaterStoreForTests } from '@renderer/features/updates/updaterStore'
 import { buildNavigatorSections } from '@renderer/app/navigator/navigatorModel'
 
 afterEach(() => cleanup())
@@ -136,12 +143,14 @@ describe('paletteCommands', () => {
       workspaces: [OTHER, WS],
       onOpenSettings: vi.fn(),
       onOpenHome: vi.fn(),
+      onOpenUsage: vi.fn(),
       onNewTask: vi.fn(),
       onToggleNavigator: vi.fn(),
       onNextNeedsYou: vi.fn(),
       onSwitchWorkspaceByIndex: vi.fn(),
       onNewChatInWorkspace: vi.fn(),
-      onFocusInstructionLine: vi.fn()
+      onFocusInstructionLine: vi.fn(),
+      onOpenSettingsField: vi.fn()
     }
     runPaletteCommand('workspace2', h)
     expect(h.onSwitchWorkspaceByIndex).toHaveBeenCalledWith(1)
@@ -154,5 +163,71 @@ describe('paletteCommands', () => {
     runPaletteCommand('panelChanges', h)
     window.removeEventListener('vyotiq:command', onCommand)
     expect(seen).toEqual(['panelChanges'])
+  })
+})
+
+describe('palette update and settings commands', () => {
+  const info = {
+    version: '1.1.0',
+    releaseDate: '2026-09-22T00:00:00Z',
+    releaseName: 'v1.1.0',
+    notesText: '',
+    notesSections: []
+  }
+
+  afterEach(() => {
+    resetUpdaterStoreForTests()
+    Reflect.deleteProperty(window, 'vyotiq')
+  })
+
+  it('offers the update only while there is one to download or install', () => {
+    expect(paletteUpdateCommands({ status: 'available', info }).map((c) => c.title)).toEqual(['Download update 1.1.0'])
+    const [install] = paletteUpdateCommands({ status: 'downloaded', info })
+    expect(install).toMatchObject({ id: 'installUpdate', title: 'Install update 1.1.0', hint: 'restarts Agent V' })
+    expect(paletteUpdateCommands({ status: 'downloading', info })).toEqual([])
+    expect(paletteUpdateCommands({ status: 'idle' })).toEqual([])
+  })
+
+  it('downloads and installs through the update store, never on its own', () => {
+    const updater = {
+      download: vi.fn(async () => ({ ok: true as const, data: true })),
+      install: vi.fn(async () => ({ ok: true as const, data: true }))
+    }
+    Object.defineProperty(window, 'vyotiq', { value: { updater }, configurable: true, writable: true })
+    const h = {
+      workspaces: [],
+      onOpenSettings: vi.fn(),
+      onOpenHome: vi.fn(),
+      onOpenUsage: vi.fn(),
+      onNewTask: vi.fn(),
+      onToggleNavigator: vi.fn(),
+      onNextNeedsYou: vi.fn(),
+      onSwitchWorkspaceByIndex: vi.fn(),
+      onFocusInstructionLine: vi.fn(),
+      onOpenSettingsField: vi.fn()
+    }
+    runPaletteCommand('downloadUpdate', h)
+    expect(updater.download).toHaveBeenCalledTimes(1)
+    expect(updater.install).not.toHaveBeenCalled()
+    runPaletteCommand('installUpdate', h)
+    expect(updater.install).toHaveBeenCalledTimes(1)
+    runPaletteCommand('settings:about-auto-check', h)
+    expect(h.onOpenSettingsField).toHaveBeenCalledWith('about-auto-check')
+  })
+
+  it('finds a setting by what it does and names its section', () => {
+    const { handlers, input } = renderPalette({ settingsCommands: paletteSettingsCommands })
+    fireEvent.change(input, { target: { value: 'check for updates' } })
+    const commands = screen.getByRole('group', { name: 'Commands' })
+    const option = within(commands).getByRole('option', { name: /Settings: Check automatically/ })
+    expect(option.textContent).toContain('About')
+    fireEvent.click(option)
+    expect(handlers.onRunCommand).toHaveBeenCalledWith('settings:about-auto-check')
+  })
+
+  it('lists no settings until something is typed', () => {
+    expect(paletteSettingsCommands('')).toEqual([])
+    renderPalette({ settingsCommands: paletteSettingsCommands })
+    expect(screen.queryByText(/^Settings: /)).toBeNull()
   })
 })

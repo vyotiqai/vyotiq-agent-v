@@ -16,6 +16,7 @@ import type { ChatStreamController } from '@renderer/lib/hooks/createChatStreamC
 import { PaneHeaderActions, TaskPane, type TaskPaneRunActions } from '@renderer/features/task/TaskPane'
 import type { NewTaskTargets } from '@renderer/features/task/NewTaskBrief'
 import { runTitle } from '@renderer/app/navigator/runTitle'
+import { useTaskRecentFiles } from '@renderer/features/inspector/agentFileMarks'
 import { Composer } from './components/composer'
 import { useHasChatItems } from './components/ChatStreamLeaves'
 import { RunSessionProvider } from './RunSessionContext'
@@ -233,6 +234,8 @@ export function SessionChatColumn({
   } = useInlineInstanceUi(agentInstances, activeRunId, instanceOpenControlled)
 
   const hasItems = useHasChatItems(itemsStore, items)
+  /** The @ menu's recent files: what this task read or edited last. */
+  const taskFiles = useTaskRecentFiles(items, itemsStore, workspacePath ?? null)
   // Nothing sent and no run behind it: the pane is a new task's brief.
   const newTask = !activeRunId && !hasItems && !pendingRun && !running
   const { chatBannerError, turnFailed } = useChatErrorSurfaces({
@@ -323,6 +326,7 @@ export function SessionChatColumn({
         seedNativeFiles={editSeeds.nativeFiles}
         onCancelEdit={cancelPromptEdit}
         composerPlaceholder="Edit message…"
+        taskFiles={taskFiles}
       />
     ) : null
 
@@ -482,6 +486,7 @@ export function SessionChatColumn({
                   runCount={runCount}
                   onDismissError={onDismissError}
                   newTaskTargets={newTaskTargets}
+                  taskFiles={taskFiles}
                   briefHeaderActions={
                     newTask ? (
                       <PaneHeaderActions

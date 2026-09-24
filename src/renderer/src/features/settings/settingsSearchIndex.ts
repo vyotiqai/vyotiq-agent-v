@@ -546,6 +546,23 @@ function querySettingsField(fieldId: string): HTMLElement | null {
 /** The flash a search result leaves on its row, so the eye lands on it. */
 const HIGHLIGHT = ['ring-1', 'ring-border-strong', 'rounded-md']
 
+/**
+ * Scroll to a row that may not exist yet. From outside Settings (the palette)
+ * the view loads lazily and its rows wait for settings, so this waits for the
+ * row — or its fallback — to mount, and gives up after `timeoutMs`.
+ */
+export function revealSettingsFieldWhenMounted(fieldId: string, timeoutMs = 3000): void {
+  const started = Date.now()
+  const tick = (): void => {
+    if (querySettingsField(fieldId) ?? querySettingsField(FIELD_SCROLL_FALLBACK[fieldId] ?? '')) {
+      scrollToSettingsField(fieldId)
+      return
+    }
+    if (Date.now() - started < timeoutMs) window.requestAnimationFrame(tick)
+  }
+  window.requestAnimationFrame(tick)
+}
+
 export function scrollToSettingsField(fieldId: string): void {
   const el = querySettingsField(fieldId) ?? querySettingsField(FIELD_SCROLL_FALLBACK[fieldId] ?? '')
   if (!el) return

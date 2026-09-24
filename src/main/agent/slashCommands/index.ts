@@ -18,6 +18,7 @@ import { listSkillCommands, resolveSkillCommand } from './skills'
 import { listWorkspaceCommands, resolveWorkspaceCommand } from './workspaceCommands'
 import { listRuleCommands, resolveRuleCommand } from './ruleCommands'
 import { listMcpCommands, resolveMcpCommand } from './mcp'
+import { listSlashMcpServers } from './mcpServers'
 import { runHarnessReviewWithSettings } from '../harnessReviewRun'
 import { createLocalSkill } from '../skills/local'
 import { clearRulesCache } from '../context/rules'
@@ -29,7 +30,8 @@ import {
   getSlashListInflight,
   listCacheKey,
   setSlashListCacheEntry,
-  setSlashListInflight
+  setSlashListInflight,
+  type SlashList
 } from './listCache'
 
 export { invalidateSlashCommandsCache } from './listCache'
@@ -115,10 +117,15 @@ function mergeByTrigger(groups: SlashCommandDescriptor[][]): SlashCommandDescrip
 export async function listSlashCommands(
   workspacePath?: string | null
 ): Promise<SlashCommandDescriptor[]> {
+  return (await listSlashMenu(workspacePath)).commands
+}
+
+/** The commands, and the MCP servers their tools belong to. */
+export async function listSlashMenu(workspacePath?: string | null): Promise<SlashList> {
   const key = listCacheKey(workspacePath)
   const hit = getSlashListCacheEntry(key)
   if (hit && Date.now() <= hit.expiresAt) {
-    return hit.commands
+    return { commands: hit.commands, mcpServers: hit.mcpServers }
   }
 
   const pending = getSlashListInflight(key)
@@ -133,8 +140,9 @@ export async function listSlashCommands(
     ])
     const mcp = listMcpCommands(overrides, workspacePath ?? null)
     const commands = mergeByTrigger([BUILTIN_COMMANDS, workspace, skills, rules, mcp])
-    setSlashListCacheEntry(key, { commands, expiresAt: Date.now() + LIST_TTL_MS })
-    return commands
+    const mcpServers = listSlashMcpServers(commands, overrides)
+    setSlashListCacheEntry(key, { commands, mcpServers, expiresAt: Date.now() + LIST_TTL_MS })
+    return { commands, mcpServers }
   })()
 
   setSlashListInflight(key, run)

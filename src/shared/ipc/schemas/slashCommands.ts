@@ -82,8 +82,21 @@ export const SlashCommandsListRequestSchema = z.object({
 })
 export type SlashCommandsListRequest = z.infer<typeof SlashCommandsListRequestSchema>
 
+/**
+ * An MCP server the slash menu groups tools under: the name Extensions shows
+ * for it and, when it came from a catalog package, that package's mark.
+ */
+export const SlashMcpServerSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  iconUrl: z.string().optional(),
+  iconMono: z.boolean().optional()
+})
+export type SlashMcpServer = z.infer<typeof SlashMcpServerSchema>
+
 export const SlashCommandsListResultSchema = z.object({
-  commands: z.array(SlashCommandDescriptorSchema)
+  commands: z.array(SlashCommandDescriptorSchema),
+  mcpServers: z.array(SlashMcpServerSchema).default([])
 })
 export type SlashCommandsListResult = z.infer<typeof SlashCommandsListResultSchema>
 

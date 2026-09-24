@@ -19,6 +19,7 @@ describe('mentionPresentation', () => {
     })
     const sections = buildMentionRootSections(items)
     expect(sections.map((s) => s.id)).toEqual(['context', 'files', 'browse'])
+    expect(sections.map((s) => s.label)).toEqual(['Context', 'Recent files', 'Browse'])
     expect(sections[0]!.entries.every((e) => mentionItemSection(e.item) === 'context')).toBe(
       true
     )
@@ -27,6 +28,16 @@ describe('mentionPresentation', () => {
 
     const flat = sections.flatMap((s) => s.entries.map((e) => e.flatIndex))
     expect(flat).toEqual([...Array(items.length).keys()])
+  })
+
+  it('names file rows Files once something is typed', () => {
+    const items = buildRootMentionItems({
+      query: 'a',
+      recentFiles: [],
+      matchingFiles: ['src/a.ts'],
+      includeCodebase: true
+    })
+    expect(buildMentionRootSections(items, 'a').find((s) => s.id === 'files')?.label).toBe('Files')
   })
 
   it('omits empty sections when filtered', () => {

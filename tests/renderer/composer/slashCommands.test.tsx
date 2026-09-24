@@ -150,7 +150,9 @@ describe('Composer slash commands', () => {
     await waitFor(() => {
       expect(screen.getByRole('listbox', { name: /Slash commands/i })).toBeTruthy()
     })
-    expect(screen.getByText('/compact')).toBeTruthy()
+    // One line: the command as typed, then its description.
+    const option = screen.getByRole('option', { name: 'Compact context · /compact' })
+    expect(option.textContent).toBe('/compactSummarize older messages')
   })
 
   it('does not accept a slash menu item when Enter is committing IME composition', async () => {

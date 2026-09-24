@@ -1,6 +1,10 @@
+import type { UpdaterStatePayload } from '@shared/ipc'
 import type { IconName } from '@renderer/lib/icons'
 import { shortcutCatalog, shortcutLabel, type ShortcutId } from '@renderer/lib/shortcuts'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
+import { SECTION_LABELS } from '@renderer/features/settings/constants'
+import { filterSettingsSearch } from '@renderer/features/settings/settingsSearchIndex'
+import { downloadUpdate, installUpdate } from '@renderer/features/updates/updaterStore'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import type { PaletteCommand } from './CommandPalette'
 
@@ -90,6 +94,39 @@ export function paletteCommands({
   return [...base, ...perWorkspace, ...extras]
 }
 
+/**
+ * The update, when there is one to act on: the same store and the same two
+ * actions as the navigator's update chip, never a check of its own.
+ */
+export function paletteUpdateCommands(update: UpdaterStatePayload): PaletteCommand[] {
+  const version = update.info?.version
+  if (!version) return []
+  if (update.status === 'available') {
+    return [{ id: 'downloadUpdate', title: `Download update ${version}`, icon: 'download' }]
+  }
+  if (update.status === 'downloaded') {
+    return [{ id: 'installUpdate', title: `Install update ${version}`, icon: 'download', hint: 'restarts Agent V' }]
+  }
+  return []
+}
+
+const SETTINGS_PREFIX = 'settings:'
+
+/**
+ * Settings rows that match, as commands ("Settings: Check automatically"),
+ * found the way Settings' own search finds them. Only for a typed query —
+ * the palette never lists every setting.
+ */
+export function paletteSettingsCommands(needle: string): PaletteCommand[] {
+  if (!needle.trim()) return []
+  return filterSettingsSearch(needle).map((entry) => ({
+    id: `${SETTINGS_PREFIX}${entry.id}`,
+    title: `Settings: ${entry.title}`,
+    icon: 'gear',
+    detail: SECTION_LABELS[entry.section]
+  }))
+}
+
 export type PaletteHandlers = {
   workspaces: readonly string[]
   onOpenSettings: () => void
@@ -105,6 +142,8 @@ export type PaletteHandlers = {
   onSwitchWorkspaceByIndex: (index: number) => void
   onNewChatInWorkspace?: (path: string) => void
   onFocusInstructionLine: () => void
+  /** A settings row by its `data-settings-field` id. */
+  onOpenSettingsField: (fieldId: string) => void
 }
 
 export function runPaletteCommand(id: string, h: PaletteHandlers): void {
@@ -119,6 +158,9 @@ export function runPaletteCommand(id: string, h: PaletteHandlers): void {
   if (id === 'stop') return h.onStop?.()
   if (id === 'closeChat') return h.onCloseChat?.()
   if (id === 'splitPane') return h.onSplitPane?.()
+  if (id === 'downloadUpdate') return downloadUpdate()
+  if (id === 'installUpdate') return installUpdate()
+  if (id.startsWith(SETTINGS_PREFIX)) return h.onOpenSettingsField(id.slice(SETTINGS_PREFIX.length))
   if (id === 'findInFiles') {
     window.dispatchEvent(new Event('vyotiq:find-in-files'))
     return

@@ -287,7 +287,7 @@ import {
   invalidateMcpResolveCache
 } from '@main/marketplace'
 import {
-  listSlashCommands,
+  listSlashMenu,
   resolveSlashCommand,
   createWorkspaceRule,
   createWorkspaceSkill,
@@ -3982,8 +3982,7 @@ export function registerIpc(): void {
       if (workspacePath && !isOpenWorkspace(workspacePath)) {
         return fail('Workspace is not open')
       }
-      const commands = await listSlashCommands(workspacePath)
-      return ok({ commands })
+      return ok(await listSlashMenu(workspacePath))
     } catch (err) {
       return failFrom(err, IPC.slashCommandsList)
     }

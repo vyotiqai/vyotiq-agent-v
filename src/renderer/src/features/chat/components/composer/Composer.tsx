@@ -210,7 +210,8 @@ export function Composer({
   onEditLastUserMessage,
   runCount = 0,
   newTaskTargets,
-  briefHeaderActions
+  briefHeaderActions,
+  taskFiles
 }: {
   provider: ProviderId
   model: string
@@ -284,6 +285,8 @@ export function Composer({
   newTaskTargets?: NewTaskTargets
   /** Brief only: the pane's controls, at the end of its header. */
   briefHeaderActions?: React.ReactNode
+  /** Files this task read or edited, most recent first — the @ menu's recent files. */
+  taskFiles?: readonly string[]
 }) {
   const taRef = useRef<ComposerMentionInputHandle>(null)
   const focusInput = useCallback(() => taRef.current?.focus(), [])
@@ -401,7 +404,8 @@ export function Composer({
     workspacePath,
     text: resolvedDraft,
     cursor,
-    enabled: !inputLocked && Boolean(hasWorkspace) && !slash.open
+    enabled: !inputLocked && Boolean(hasWorkspace) && !slash.open,
+    taskFiles
   })
 
   const onMentionAccept = useCallback(
@@ -1166,6 +1170,7 @@ export function Composer({
             <SlashCommandMenu
               open={slash.open}
               commands={slash.filtered}
+              mcpServers={slash.mcpServers}
               activeIndex={slash.activeIndex}
               onActiveIndexChange={slash.setActiveIndex}
               onPick={onSlashAccept}
@@ -1179,6 +1184,7 @@ export function Composer({
               open={mentions.open}
               view={mentions.view}
               items={mentions.items}
+              query={mentions.token?.query ?? ''}
               activeIndex={mentions.activeIndex}
               onActiveIndexChange={mentions.setActiveIndex}
               onPick={onMentionAccept}
@@ -1559,6 +1565,7 @@ export function Composer({
             <SlashCommandMenu
               open={slash.open}
               commands={slash.filtered}
+              mcpServers={slash.mcpServers}
               activeIndex={slash.activeIndex}
               onActiveIndexChange={slash.setActiveIndex}
               onPick={onSlashAccept}
@@ -1572,6 +1579,7 @@ export function Composer({
               open={mentions.open}
               view={mentions.view}
               items={mentions.items}
+              query={mentions.token?.query ?? ''}
               activeIndex={mentions.activeIndex}
               onActiveIndexChange={mentions.setActiveIndex}
               onPick={onMentionAccept}
@@ -1873,6 +1881,7 @@ export function Composer({
                 open={mentions.open}
                 view={mentions.view}
                 items={mentions.items}
+                query={mentions.token?.query ?? ''}
                 activeIndex={mentions.activeIndex}
                 onActiveIndexChange={mentions.setActiveIndex}
                 onPick={onMentionAccept}

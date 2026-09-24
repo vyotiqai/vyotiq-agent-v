@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { SlashCommandDescriptor } from '@shared/ipc'
+import type { SlashCommandDescriptor, SlashMcpServer } from '@shared/ipc'
 import { fuzzyMatchCommands, findActiveSlashToken } from '@shared/slashCommands'
 import { findSlashChipSubmit } from './mentionModel'
 import {
@@ -55,6 +55,7 @@ export function useSlashCommands({
   onListError?: (message: string) => void
 }) {
   const [commands, setCommands] = useState<SlashCommandDescriptor[]>([])
+  const [mcpServers, setMcpServers] = useState<SlashMcpServer[]>([])
   const [loading, setLoading] = useState(false)
   const [listError, setListError] = useState<string | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
@@ -68,6 +69,7 @@ export function useSlashCommands({
   const reload = useCallback(async (): Promise<SlashCommandDescriptor[]> => {
     if (!window.vyotiq?.slashCommandsList) {
       setCommands([])
+      setMcpServers([])
       return []
     }
     const reqId = ++reqIdRef.current
@@ -81,10 +83,12 @@ export function useSlashCommands({
         hasLoadedRef.current = true
         commandsStaleRef.current = false
         setCommands(res.data.commands)
+        setMcpServers(res.data.mcpServers ?? [])
         setListError(null)
         return res.data.commands
       }
       setCommands([])
+      setMcpServers([])
       setListError(res.error)
       onListErrorRef.current?.(res.error)
       return []
@@ -103,6 +107,7 @@ export function useSlashCommands({
 
   useEffect(() => {
     setCommands([])
+    setMcpServers([])
     if (hasLoadedRef.current) void reload()
   }, [workspacePath, reload])
 
@@ -175,6 +180,7 @@ export function useSlashCommands({
 
   return {
     commands,
+    mcpServers,
     filtered,
     open,
     activeIndex,

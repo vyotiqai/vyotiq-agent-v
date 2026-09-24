@@ -16,16 +16,16 @@ function cmd(
 }
 
 describe('buildSlashDisplayList', () => {
-  it('keeps GROUP_ORDER so activeIndex matches highlighted row', () => {
+  it('lists skills, then commands, then MCP tools, so activeIndex matches the highlighted row', () => {
     const items = [
       cmd({ id: 'skill:a', trigger: 'alpha-skill', group: 'Skills', kind: 'skill' }),
       cmd({ id: 'builtin:compact', trigger: 'compact', group: 'App', kind: 'builtin' }),
       cmd({ id: 'mcp:x', trigger: 'mcp-tool', group: 'MCP', kind: 'mcp' })
     ]
     const display = buildSlashDisplayList('', items)
-    expect(display.map((c) => c.group)).toEqual(['App', 'Skills', 'MCP'])
-    expect(display[0]?.id).toBe('builtin:compact')
-    expect(display[1]?.id).toBe('skill:a')
+    expect(display.map((c) => c.group)).toEqual(['Skills', 'App', 'MCP'])
+    expect(display[0]?.id).toBe('skill:a')
+    expect(display[1]?.id).toBe('builtin:compact')
     expect(display[2]?.id).toBe('mcp:x')
   })
 

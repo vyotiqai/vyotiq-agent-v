@@ -11,7 +11,9 @@ const SECTION_LABEL: Record<MentionSectionId, string> = {
   browse: 'Browse'
 }
 
-export function mentionSectionLabel(id: MentionSectionId): string {
+/** File rows are the recent ones until something is typed, then matches. */
+export function mentionSectionLabel(id: MentionSectionId, query = ''): string {
+  if (id === 'files' && !query.trim()) return 'Recent files'
   return SECTION_LABEL[id]
 }
 
@@ -48,7 +50,7 @@ export type MentionMenuSection = {
  * Group a flat root mention list into Context / Files / Browse sections.
  * Preserves flat indices for keyboard selection.
  */
-export function buildMentionRootSections(items: MentionMenuItem[]): MentionMenuSection[] {
+export function buildMentionRootSections(items: MentionMenuItem[], query = ''): MentionMenuSection[] {
   const buckets = new Map<MentionSectionId, MentionMenuSection['entries']>()
   for (const id of MENTION_SECTION_ORDER) buckets.set(id, [])
 
@@ -62,7 +64,7 @@ export function buildMentionRootSections(items: MentionMenuItem[]): MentionMenuS
   for (const id of MENTION_SECTION_ORDER) {
     const entries = buckets.get(id)!
     if (!entries.length) continue
-    out.push({ id, label: mentionSectionLabel(id), entries })
+    out.push({ id, label: mentionSectionLabel(id, query), entries })
   }
   return out
 }

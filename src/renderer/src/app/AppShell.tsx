@@ -21,7 +21,14 @@ import { focusComposerMessage, useAppShortcuts } from '@renderer/lib/shortcuts'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import type { SettingsSection } from '@renderer/features/settings'
 import { CommandPalette, type PaletteFile } from '@renderer/features/commandPalette/CommandPalette'
-import { paletteCommands, runPaletteCommand } from '@renderer/features/commandPalette/paletteCommands'
+import {
+  paletteCommands,
+  paletteSettingsCommands,
+  paletteUpdateCommands,
+  runPaletteCommand
+} from '@renderer/features/commandPalette/paletteCommands'
+import { SETTINGS_SEARCH_INDEX, revealSettingsFieldWhenMounted } from '@renderer/features/settings/settingsSearchIndex'
+import { useUpdaterState } from '@renderer/features/updates/updaterStore'
 import { WhatsNewModal } from '@renderer/features/whats-new/WhatsNewModal'
 import { TitleBar } from './TitleBar'
 import { Navigator, type NavigatorPlace } from './navigator/Navigator'
@@ -241,9 +248,23 @@ function AppShellInner(props: AppShellProps) {
     }
   }, [workspacePath])
 
+  const update = useUpdaterState()
   const commands = useMemo(
-    () => paletteCommands({ workspaces: openWorkspaces, activePath: workspacePath, canSendFeedback: Boolean(props.onOpenFeedback) }),
-    [openWorkspaces, workspacePath, props.onOpenFeedback]
+    () => [
+      ...paletteUpdateCommands(update),
+      ...paletteCommands({ workspaces: openWorkspaces, activePath: workspacePath, canSendFeedback: Boolean(props.onOpenFeedback) })
+    ],
+    [update, openWorkspaces, workspacePath, props.onOpenFeedback]
+  )
+
+  const openSettingsField = useCallback(
+    (fieldId: string): void => {
+      const entry = SETTINGS_SEARCH_INDEX.find((e) => e.id === fieldId)
+      if (entry && onOpenSettingsSection) onOpenSettingsSection(entry.section)
+      else onOpenSettings()
+      revealSettingsFieldWhenMounted(fieldId)
+    },
+    [onOpenSettingsSection, onOpenSettings]
   )
 
   useAppShortcuts({
@@ -432,6 +453,7 @@ function AppShellInner(props: AppShellProps) {
         onClose={() => setPaletteOpen(false)}
         tasks={allTasks}
         commands={commands}
+        settingsCommands={paletteSettingsCommands}
         searchFiles={searchFiles}
         newTaskIn={newTaskPath ? { name: formatWorkspaceName(newTaskPath) } : null}
         onOpenTask={(row, beside) => {
@@ -459,7 +481,8 @@ function AppShellInner(props: AppShellProps) {
             onNewChatInWorkspace: props.onNewChatInWorkspace,
             onFocusInstructionLine: () => {
               focusComposerMessage()
-            }
+            },
+            onOpenSettingsField: openSettingsField
           })
         }
       />

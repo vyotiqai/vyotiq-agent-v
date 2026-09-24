@@ -1,47 +1,165 @@
-import type { SlashCommandDescriptor } from '@shared/ipc'
+import type { SlashCommandDescriptor, SlashMcpServer } from '@shared/ipc'
 import { humanizeSlashToken } from '@shared/slashCommands'
+import type { IconName } from '@renderer/lib/icons'
 
-/** Canonical group order for the slash menu (display list + headers). */
-export const SLASH_GROUP_ORDER = ['App', 'Commands', 'Skills', 'Rules', 'MCP'] as const
+/** Canonical group order for the slash menu (display list + labels). */
+export const SLASH_GROUP_ORDER = ['Skills', 'App', 'Commands', 'Rules', 'MCP'] as const
 
-/** Human-readable category titles — keep data `group` ids stable. */
+/** Labels by data `group` id — the ids stay stable. MCP tools are labelled by server instead. */
 const GROUP_DISPLAY: Record<string, string> = {
-  App: 'Built-in',
-  Commands: 'Workspace',
   Skills: 'Skills',
+  App: 'Commands',
+  Commands: 'Workspace commands',
   Rules: 'Rules',
   MCP: 'MCP'
 }
-
-/** Hide row secondary when the typed trigger is long (MCP server-tool keys). */
-const SECONDARY_TRIGGER_MAX = 28
 
 export function slashGroupDisplayName(group: string): string {
   return GROUP_DISPLAY[group] ?? group
 }
 
 /**
- * Primary = what to read; secondary = how to type it.
- * Always prefer a human label when the catalog has one so `/create-rule`
- * and `Create rule` do not look like different kinds of row.
- * Omits long MCP triggers from the secondary line (still in `title`).
+ * How a row names its command: a command as it is typed (`/goal`), a skill or
+ * rule by its name, an MCP tool by the tool's own name.
  */
-export function slashCommandRowCopy(cmd: SlashCommandDescriptor): {
-  primary: string
-  secondary: string | null
-  title: string
-} {
+export function slashRowLabel(cmd: SlashCommandDescriptor): string {
+  switch (cmd.kind) {
+    case 'builtin':
+    case 'workspace':
+      return `/${cmd.trigger}`
+    case 'skill':
+    case 'rule':
+      return cmd.trigger
+    case 'mcp':
+      return cmd.mcpToolName ?? cmd.label
+    default: {
+      const _exhaustive: never = cmd.kind
+      return _exhaustive
+    }
+  }
+}
+
+/** The option's accessible name: what it is, then how to type it. */
+export function slashOptionName(cmd: SlashCommandDescriptor): string {
   const trigger = `/${cmd.trigger}`
   const label = cmd.label.trim()
-  if (!label) {
-    return { primary: trigger, secondary: null, title: trigger }
+  return label ? `${label} · ${trigger}` : trigger
+}
+
+const BUILTIN_ICON: Record<string, IconName> = {
+  goal: 'target',
+  loop: 'repeat',
+  compact: 'stack',
+  clear: 'plus',
+  marketplace: 'extensions',
+  settings: 'gear',
+  'create-rule': 'rules',
+  'create-skill': 'skill',
+  help: 'question',
+  undo: 'undo',
+  ask: 'chat',
+  plan: 'plan',
+  agent: 'robot',
+  'harness-review': 'checklist',
+  'harness-apply': 'check'
+}
+
+/** The glyph in a row's icon slot. An MCP row shows its package's mark over this when it has one. */
+export function slashRowIcon(cmd: SlashCommandDescriptor): IconName {
+  switch (cmd.kind) {
+    case 'builtin':
+      return BUILTIN_ICON[cmd.trigger] ?? 'command'
+    case 'workspace':
+      return 'command'
+    case 'skill':
+      return 'skill'
+    case 'rule':
+      return 'rules'
+    case 'mcp':
+      return 'mcp'
+    default: {
+      const _exhaustive: never = cmd.kind
+      return _exhaustive
+    }
   }
-  const showSecondary = trigger.length <= SECONDARY_TRIGGER_MAX
-  return {
-    primary: label,
-    secondary: showSecondary ? trigger : null,
-    title: `${label} · ${trigger}`
+}
+
+/** The name of the server an MCP command belongs to: as main names it, else its id made readable. */
+export function slashMcpServerName(
+  serverId: string,
+  servers: ReadonlyMap<string, SlashMcpServer>
+): string {
+  return servers.get(serverId)?.name ?? humanizeSlashToken(serverId)
+}
+
+/** The first sentence of a description, for the muted text beside a row's label. */
+function firstSentence(raw: string): string {
+  const flat = raw.replace(/\s+/g, ' ').trim()
+  return (flat.match(/^(.+?)[.!?](?:\s|$)/)?.[1] ?? flat).trim()
+}
+
+/**
+ * The muted text beside a row's label. An MCP tool names its server; a server
+ * with no tools listed yet is the row itself.
+ */
+export function slashRowDetail(
+  cmd: SlashCommandDescriptor,
+  servers: ReadonlyMap<string, SlashMcpServer>
+): string {
+  if (cmd.kind === 'mcp') {
+    if (!cmd.mcpToolName || !cmd.mcpServerId) return 'MCP server'
+    return `${slashMcpServerName(cmd.mcpServerId, servers)} MCP`
   }
+  return firstSentence(cmd.description)
+}
+
+/**
+ * What accepting the row does, for the footer. Accepting always inserts a
+ * chip; the command itself resolves when the instruction is sent — except
+ * rows that are not usable yet, which install, enable or open Extensions.
+ */
+export function slashAcceptHint(cmd: SlashCommandDescriptor): string {
+  switch (cmd.availability) {
+    case 'not_installed':
+      if (cmd.packageId) return 'Tab to install'
+      break
+    case 'disabled':
+      if (cmd.packageId) return 'Tab to enable'
+      break
+    case 'needs_auth':
+    case 'disconnected':
+      return 'Tab to open it in Extensions'
+    case 'ready':
+      break
+    default: {
+      const _exhaustive: never = cmd.availability
+      return _exhaustive
+    }
+  }
+  if (cmd.kind === 'builtin') return 'Tab to insert · runs when you send'
+  if (cmd.kind === 'rule') return 'Tab to insert · opens the rule when you send'
+  return 'Tab to insert · runs with this instruction'
+}
+
+/** A description for the footer: whole, flattened, ending on a stop, capped at a word. */
+export function slashFooterDescription(raw: string, maxLen = 180): string {
+  const flat = raw.replace(/\s+/g, ' ').trim()
+  if (!flat) return ''
+  if (flat.length > maxLen) {
+    const cut = flat.slice(0, maxLen - 1)
+    const atWord = cut.slice(0, Math.max(cut.lastIndexOf(' '), maxLen / 2)).trimEnd()
+    return `${atWord.replace(/[,;:—-]+$/, '')}…`
+  }
+  return /[\p{L}\p{N})]$/u.test(flat) ? `${flat}.` : flat
+}
+
+/** About two lines of footer at the menu's width, its label and accept hint included. */
+const SLASH_FOOTER_CHARS = 128
+
+/** The footer's description of a row, cut so it and the accept hint fit on two lines. */
+export function slashFooterText(cmd: SlashCommandDescriptor): string {
+  const room = SLASH_FOOTER_CHARS - slashRowLabel(cmd).length - slashAcceptHint(cmd).length - 4
+  return slashFooterDescription(cmd.description, Math.max(40, room))
 }
 
 const COMPOSER_MODE_TRIGGERS = new Set(['ask', 'plan', 'agent'])
@@ -49,21 +167,6 @@ const COMPOSER_MODE_TRIGGERS = new Set(['ask', 'plan', 'agent'])
 /** Toolbar Mode picker owns mode switching. Keep `/ask` `/plan` `/agent` typable. */
 export function isComposerModeSlashCommand(cmd: SlashCommandDescriptor): boolean {
   return cmd.kind === 'builtin' && COMPOSER_MODE_TRIGGERS.has(cmd.trigger)
-}
-
-/** First sentence / clause, capped for the menu footer. */
-export function truncateSlashDescription(raw: string, maxLen = 140): string {
-  const flat = raw.replace(/\s+/g, ' ').trim()
-  if (!flat) return ''
-  const sentence = flat.match(/^(.+?[.!?])(?:\s|$)/)
-  const base = sentence?.[1] ?? flat
-  if (base.length <= maxLen) return base
-  return `${base.slice(0, Math.max(0, maxLen - 1)).trimEnd()}…`
-}
-
-export function mcpServerDisplayName(cmd: SlashCommandDescriptor): string | null {
-  if (cmd.kind !== 'mcp' || !cmd.mcpServerId) return null
-  return humanizeSlashToken(cmd.mcpServerId)
 }
 
 /** Ready commands first; preserves relative order within each band (fuzzy rank). */
@@ -99,54 +202,36 @@ export function clusterMcpByServer(
 }
 
 export type SlashMenuBlock = {
-  serverLabel: string | null
+  key: string
+  /** The group's label, or for MCP tools their server's name. */
+  label: string
   items: SlashCommandDescriptor[]
   startIndex: number
 }
 
-export type SlashMenuSection = {
-  group: string
-  startIndex: number
-  blocks: SlashMenuBlock[]
-}
-
-/** Split a flat display list into category sections and MCP server blocks. */
-export function buildSlashMenuSections(
-  commands: SlashCommandDescriptor[]
-): SlashMenuSection[] {
-  const sections: SlashMenuSection[] = []
-  let i = 0
-  while (i < commands.length) {
-    const group = commands[i]!.group
-    const startIndex = i
-    const groupItems: SlashCommandDescriptor[] = []
-    while (i < commands.length && commands[i]!.group === group) {
-      groupItems.push(commands[i]!)
-      i += 1
+/**
+ * Split the flat display list into labelled runs: one per group, and one per
+ * server for MCP tools — there is no MCP heading above the servers.
+ */
+export function buildSlashMenuBlocks(
+  commands: SlashCommandDescriptor[],
+  servers: ReadonlyMap<string, SlashMcpServer> = new Map()
+): SlashMenuBlock[] {
+  const blocks: SlashMenuBlock[] = []
+  commands.forEach((cmd, index) => {
+    const serverId = cmd.group === 'MCP' ? (cmd.mcpServerId ?? cmd.id) : null
+    const key = serverId ? `MCP:${serverId}` : cmd.group
+    const last = blocks[blocks.length - 1]
+    if (last?.key === key) {
+      last.items.push(cmd)
+      return
     }
-
-    const blocks: SlashMenuBlock[] = []
-    if (group === 'MCP') {
-      let j = 0
-      while (j < groupItems.length) {
-        const serverId = groupItems[j]!.mcpServerId ?? groupItems[j]!.id
-        const serverLabel = mcpServerDisplayName(groupItems[j]!) ?? humanizeSlashToken(serverId)
-        const blockItems: SlashCommandDescriptor[] = []
-        const blockStart = startIndex + j
-        while (
-          j < groupItems.length &&
-          (groupItems[j]!.mcpServerId ?? groupItems[j]!.id) === serverId
-        ) {
-          blockItems.push(groupItems[j]!)
-          j += 1
-        }
-        blocks.push({ serverLabel, items: blockItems, startIndex: blockStart })
-      }
-    } else {
-      blocks.push({ serverLabel: null, items: groupItems, startIndex })
-    }
-
-    sections.push({ group, startIndex, blocks })
-  }
-  return sections
+    blocks.push({
+      key,
+      label: serverId ? slashMcpServerName(serverId, servers) : slashGroupDisplayName(cmd.group),
+      items: [cmd],
+      startIndex: index
+    })
+  })
+  return blocks
 }

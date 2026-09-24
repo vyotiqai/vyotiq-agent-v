@@ -3,6 +3,7 @@ import type { UiItem } from '@shared/transcript'
 import { extractPartialEditArgs } from '@shared/utils/partialJson'
 import { toWorkspaceRelPath } from '@shared/utils/workspacePath'
 import type { ChatItemsStore } from '@renderer/features/chat/chatStores'
+import { collectWritingChanges, parseDeleteData } from '@renderer/features/chat/toolUi'
 import { collectSessionChangedFiles, normalizeRelPath } from '@renderer/features/chat/utils/turnFileDiffs'
 
 /** What this task did to one file, from its own tool calls. */
@@ -53,6 +54,47 @@ export function collectAgentFileMarks(items: readonly UiItem[], workspacePath: s
   return marks
 }
 
+/** A read call's path, when it settled and named one. */
+function readPath(item: UiItem): string | null {
+  if (item.kind !== 'tool' || item.tool.name !== 'read' || item.tool.status !== 'done') return null
+  const args = extractPartialEditArgs(item.tool.argsPreview) as Record<string, unknown> | null
+  const path = typeof args?.path === 'string' ? args.path.trim() : ''
+  return path || null
+}
+
+/**
+ * The files this task read or edited, the last one it touched first. A file
+ * it deleted is left out — there is nothing left to attach.
+ */
+export function collectTaskRecentFiles(
+  items: readonly UiItem[],
+  workspacePath: string | null,
+  limit = 3
+): string[] {
+  const touched = new Map<string, number>()
+  const touch = (path: string, at: number): void => {
+    const key = markKey(workspacePath, path)
+    touched.delete(key)
+    touched.set(key, at)
+  }
+  items.forEach((item, at) => {
+    const read = readPath(item)
+    if (read) return touch(read, at)
+    if (item.kind !== 'tool' || item.tool.status !== 'done') return
+    if (item.tool.name === 'delete') {
+      const { path } = parseDeleteData(item.tool)
+      if (path) touched.delete(markKey(workspacePath, path))
+      return
+    }
+    if (item.tool.name !== 'edit' && item.tool.name !== 'str_replace') return
+    for (const change of collectWritingChanges(item.tool)) {
+      if (change.action === 'deleted') touched.delete(markKey(workspacePath, change.path))
+      else touch(change.path, at)
+    }
+  })
+  return [...touched.keys()].reverse().slice(0, limit)
+}
+
 function sameMarks(a: AgentFileMarks, b: AgentFileMarks): boolean {
   if (a.size !== b.size) return false
   for (const [key, mark] of a) {
@@ -71,16 +113,19 @@ function sameMarks(a: AgentFileMarks, b: AgentFileMarks): boolean {
 }
 
 /**
- * This task's footprint on the workspace's files, for the Files tab: what it
- * edited and what it read. Recomputed only when a tool call appears, settles
- * or grows its arguments — never per streamed token.
+ * A value read from this task's tool calls, recomputed only when a call
+ * appears, settles or grows its arguments — never per streamed token.
+ * `compute` and `same` must be module-level, so they never change.
  */
-export function useAgentFileMarks(
+function useToolDerived<T>(
   items: UiItem[],
   itemsStore: ChatItemsStore | undefined,
-  workspacePath: string | null
-): AgentFileMarks {
-  const [marks, setMarks] = useState<AgentFileMarks>(NO_MARKS)
+  workspacePath: string | null,
+  initial: T,
+  compute: (items: readonly UiItem[], workspacePath: string | null) => T,
+  same: (a: T, b: T) => boolean
+): T {
+  const [value, setValue] = useState<T>(initial)
   const itemsRef = useRef(items)
   itemsRef.current = items
   const fallbackItems = itemsStore ? null : items
@@ -92,15 +137,43 @@ export function useAgentFileMarks(
       const next = toolSignature(list)
       if (next === signature) return
       signature = next
-      const computed = collectAgentFileMarks(list, workspacePath)
-      setMarks((prev) => (sameMarks(prev, computed) ? prev : computed))
+      const computed = compute(list, workspacePath)
+      setValue((prev) => (same(prev, computed) ? prev : computed))
     }
     scan()
     const unsubscribe = itemsStore?.subscribeItems(scan)
     return () => {
       unsubscribe?.()
     }
-  }, [itemsStore, fallbackItems, workspacePath])
+  }, [itemsStore, fallbackItems, workspacePath, compute, same])
 
-  return marks
+  return value
+}
+
+/** This task's footprint on the workspace's files, for the Files tab: what it edited and what it read. */
+export function useAgentFileMarks(
+  items: UiItem[],
+  itemsStore: ChatItemsStore | undefined,
+  workspacePath: string | null
+): AgentFileMarks {
+  return useToolDerived(items, itemsStore, workspacePath, NO_MARKS, collectAgentFileMarks, sameMarks)
+}
+
+const NO_FILES: readonly string[] = []
+
+function sameFiles(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((path, i) => path === b[i])
+}
+
+function recentFiles(items: readonly UiItem[], workspacePath: string | null): readonly string[] {
+  return collectTaskRecentFiles(items, workspacePath)
+}
+
+/** The files this task touched last, for the @ menu's Recent files. */
+export function useTaskRecentFiles(
+  items: UiItem[],
+  itemsStore: ChatItemsStore | undefined,
+  workspacePath: string | null
+): readonly string[] {
+  return useToolDerived(items, itemsStore, workspacePath, NO_FILES, recentFiles, sameFiles)
 }

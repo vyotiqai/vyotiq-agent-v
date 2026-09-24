@@ -85,7 +85,8 @@ async function resolveBranchBlock(workspacePath: string): Promise<string> {
 
   if (window.vyotiq.gitDiff) {
     try {
-      const diffRes = await window.vyotiq.gitDiff({ workspacePath })
+      // Staged and unstaged alike — the status above counts both.
+      const diffRes = await window.vyotiq.gitDiff({ workspacePath, vsHead: true })
       if (diffRes.ok) {
         parts.push('', '### Diff', diffRes.data.content)
       } else {

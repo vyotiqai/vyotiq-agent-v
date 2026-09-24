@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { UiItem } from '@shared/transcript'
-import { collectAgentFileMarks, markKey } from '@renderer/features/inspector/agentFileMarks'
+import { collectAgentFileMarks, collectTaskRecentFiles, markKey } from '@renderer/features/inspector/agentFileMarks'
 import { encodingLabel, eolLabel, languageName } from '@renderer/features/inspector/fileFacts'
 
 const tool = (id: string, name: string, args: Record<string, unknown>, status: 'done' | 'running' = 'done'): UiItem => ({
@@ -43,6 +43,38 @@ describe('collectAgentFileMarks', () => {
   it('keys by the tree’s own path form', () => {
     expect(markKey('C:/ws', 'C:\\ws\\src\\a.ts')).toBe('src/a.ts')
     expect(markKey('C:/ws', './src/a.ts')).toBe('src/a.ts')
+  })
+})
+
+describe('collectTaskRecentFiles', () => {
+  it('lists what the task read or edited, the last one it touched first', () => {
+    const files = collectTaskRecentFiles(
+      [
+        tool('r1', 'read', { path: 'C:/ws/src/main/net/sseReader.ts' }),
+        tool('e1', 'edit', { path: 'src/lib/hooks/createChatStreamController.ts', old_string: 'a', new_string: 'b' }),
+        tool('r2', 'read', { path: 'README.md' }),
+        // Touching it again moves it to the front.
+        tool('r3', 'read', { path: 'src/main/net/sseReader.ts', startLine: 1, endLine: 9 }),
+        tool('r4', 'read', { path: 'docs/in-flight.md' }, 'running')
+      ],
+      'C:/ws'
+    )
+    expect(files).toEqual(['src/main/net/sseReader.ts', 'README.md', 'src/lib/hooks/createChatStreamController.ts'])
+  })
+
+  it('leaves out a file the task deleted, and keeps to the limit', () => {
+    const files = collectTaskRecentFiles(
+      [
+        tool('r1', 'read', { path: 'a.ts' }),
+        tool('r2', 'read', { path: 'b.ts' }),
+        tool('r3', 'read', { path: 'c.ts' }),
+        tool('d1', 'delete', { path: 'b.ts' })
+      ],
+      'C:/ws',
+      1
+    )
+    expect(files).toEqual(['c.ts'])
+    expect(collectTaskRecentFiles([tool('r1', 'read', { path: 'a.ts' }), tool('d1', 'delete', { path: 'a.ts' })], 'C:/ws')).toEqual([])
   })
 })
 

@@ -105,6 +105,8 @@ describe('resolveComposerMentions', () => {
     })
     expect(result.text).toContain('Referenced branch diff')
     expect(result.text).toContain('diff --git')
+    // Staged and unstaged: everything uncommitted, as the status lines count it.
+    expect(window.vyotiq.gitDiff).toHaveBeenCalledWith({ workspacePath: '/ws', vsHead: true })
     expect(result.text).toContain('Prefer browser_* tools')
     expect(result.text).toContain('https://example.com/app')
     expect(result.text).toContain('Referenced browser')
