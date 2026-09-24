@@ -10,6 +10,7 @@ import {
   NOTIFICATION_TITLE_MAX,
   NotificationItemSchema,
   NotificationPublishInputSchema,
+  UPDATE_READY_DEDUPE_KEY,
   type DesktopNotificationMode,
   type NotificationItem,
   type NotificationKind,
@@ -56,6 +57,7 @@ function categoryEnabled(settings: NotificationSettings, kind: NotificationKind)
     case 'needs_you':
       return settings.agentNeedsYou
     case 'crash':
+    case 'update_ready':
       return settings.system
     default: {
       const _exhaustive: never = kind
@@ -295,6 +297,9 @@ export function dismissNotificationsByDedupeKey(dedupeKey: string): Notification
 
 export function initNotifications(): void {
   loadNotificationItems()
+  // A downloaded update is ready only until the app restarts: after it, the
+  // new version is running or the download has to be found again.
+  dismissNotificationItemsByDedupeKey(UPDATE_READY_DEDUPE_KEY)
   installHandleActivation()
   setNotificationBus({
     publish: (input) => {

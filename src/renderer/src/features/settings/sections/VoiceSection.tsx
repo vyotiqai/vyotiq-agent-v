@@ -258,7 +258,7 @@ export function VoiceSection({
               id={fieldId}
               title={model.label}
               hint={modelHint(model, runtime)}
-              help={`${model.language} only. ${model.ramHint}. Quantized q8 ONNX, cached in app data.`}
+              help={`${model.language} only. ${model.ramHint}. Quantised q8 ONNX, cached in app data.`}
               below={
                 working ? (
                   <ProgressBar
@@ -317,7 +317,7 @@ export function VoiceSection({
         <SelectField
           id="dictation-waveform"
           title="Waveform"
-          hint="The listening visualizer in the composer."
+          hint="The listening visualiser in the composer."
           value={dictation.waveformStyle ?? 'bars'}
           options={DICTATION_WAVEFORM_STYLE_OPTIONS}
           width={140}

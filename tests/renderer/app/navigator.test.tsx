@@ -18,7 +18,9 @@ vi.mock('@renderer/features/updates/UpdatePanel', () => ({
   UpdatePanel: (p: { runningCount?: number }) => <div data-testid="update-panel" data-running={p.runningCount} />
 }))
 
-import { Navigator, type NavigatorProps } from '@renderer/app/navigator/Navigator'
+import { FirstRunNavigator, Navigator, type NavigatorProps } from '@renderer/app/navigator/Navigator'
+import { requestUpdatePanel } from '@renderer/app/navigator/UpdateChip'
+import { act } from '@testing-library/react'
 
 const WS = 'C:\\work\\alpha'
 const OTHER = 'C:\\work\\beta'
@@ -330,6 +332,45 @@ describe('Navigator', () => {
     const panel = await screen.findByRole('dialog', { name: 'Version 1.1.0 is available' })
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(panel.contains(document.activeElement)).toBe(true)
+  })
+
+  it('opens the update panel when the inbox row asks, and takes focus there', async () => {
+    updater.state = { info: { version: '1.1.0' }, status: 'downloaded', progress: null, autoOpen: false }
+    render(<Navigator {...props()} />)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    act(() => requestUpdatePanel())
+    const panel = await screen.findByRole('dialog', { name: 'Version 1.1.0 is ready to install' })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(panel.contains(document.activeElement)).toBe(true)
+  })
+
+  it('draws an update-ready row with the download mark, not a task state', () => {
+    const item: NotificationItem = {
+      id: 'u1',
+      createdAt: new Date().toISOString(),
+      read: false,
+      source: 'system',
+      kind: 'update_ready',
+      title: 'Agent V 1.1.0 is ready',
+      body: 'Restart to install',
+      dedupeKey: 'update_ready',
+      action: { type: 'open_update' }
+    }
+    render(<Navigator {...props({ notifications: { ...props().notifications, items: [item], unreadCount: 1 } })} />)
+    fireEvent.click(screen.getByRole('button', { name: /^Notifications/ }))
+    const rowEl = document.querySelector('[data-notification-kind="update_ready"]') as HTMLElement
+    expect(rowEl.textContent).toContain('Agent V 1.1.0 is ready')
+    expect(rowEl.textContent).toContain('Restart to install')
+    expect(rowEl.querySelector('svg')).toBeTruthy()
+  })
+
+  it('is the mockup\'s first-run column while Set up is on screen', () => {
+    const { rerender } = render(<FirstRunNavigator workspaceName={null} widthPx={264} />)
+    const nav = screen.getByRole('navigation', { name: 'Tasks' })
+    expect(nav.textContent).toBe('No workspace yetTasks you start show up here, grouped by what they need from you.')
+    expect(within(nav).queryAllByRole('button')).toHaveLength(0)
+    rerender(<FirstRunNavigator workspaceName="site" widthPx={264} />)
+    expect(nav.textContent?.startsWith('site')).toBe(true)
   })
 
   it('shows no update chip while the install is current', () => {

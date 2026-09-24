@@ -228,6 +228,32 @@ describe('updater service', () => {
     expect(updater.updaterState()).toEqual({ status: 'error', error: 'network down' })
   })
 
+  it('adds the update-ready row to the inbox when the download finishes, and only then', async () => {
+    const { setNotificationBus } = await import('@main/notifications/bus')
+    const publish = vi.fn()
+    setNotificationBus({ publish, dismissByDedupeKey: vi.fn() })
+    const updater = await loadUpdater()
+    updater.initAutoUpdater()
+    getAllWindows.mockReturnValue([])
+    autoUpdater.emit('update-available', { version: '1.3.0' })
+    autoUpdater.emit('download-progress', { percent: 50, transferred: 1, total: 2 })
+    expect(publish).not.toHaveBeenCalled()
+    autoUpdater.emit('update-downloaded', { version: '1.3.0' })
+    expect(publish).toHaveBeenCalledTimes(1)
+    expect(publish).toHaveBeenCalledWith({
+      source: 'system',
+      kind: 'update_ready',
+      title: 'Agent V 1.3.0 is ready',
+      body: 'Restart to install',
+      dedupeKey: 'update_ready',
+      action: { type: 'open_update' }
+    })
+    // Still never downloads or installs by itself.
+    expect(autoUpdater.downloadUpdate).not.toHaveBeenCalled()
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+    setNotificationBus(null)
+  })
+
   it('emits not-available when up to date', async () => {
     const updater = await loadUpdater()
     updater.initAutoUpdater()

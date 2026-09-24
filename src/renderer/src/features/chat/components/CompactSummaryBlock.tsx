@@ -46,7 +46,7 @@ function headingForStatus(status: CompactionVerifyStatus | undefined): string {
     case 'failed':
       return 'Summary not applied'
     default:
-      return 'Context summarized'
+      return 'Context summarised'
   }
 }
 

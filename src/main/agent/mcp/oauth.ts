@@ -181,14 +181,14 @@ export async function beginMcpOAuthCallback(
       const desc = url.searchParams.get('error_description')
       if (err) {
         res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
-        res.end(htmlPage('Authorization failed', desc || err))
+        res.end(htmlPage('Authorisation failed', desc || err))
         cancelMcpOAuthCallback(serverId, new Error(desc || err))
         return
       }
       const code = url.searchParams.get('code')
       if (!code) {
         res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
-        res.end(htmlPage('Authorization failed', 'Missing authorization code.'))
+        res.end(htmlPage('Authorisation failed', 'Missing authorisation code.'))
         cancelMcpOAuthCallback(serverId, new Error('Missing authorization code'))
         return
       }
@@ -200,7 +200,7 @@ export async function beginMcpOAuthCallback(
         res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
         res.end(
           htmlPage(
-            'Authorization failed',
+            'Authorisation failed',
             'This response did not match the sign-in Vyotiq started. Try Sign in again.'
           )
         )

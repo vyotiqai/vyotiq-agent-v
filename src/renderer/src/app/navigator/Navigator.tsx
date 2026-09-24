@@ -57,6 +57,28 @@ export type NavigatorProps = {
 }
 
 /**
+ * The navigator while Set up is on screen: nothing to navigate yet, so it says
+ * what will show here. Named for the folder chosen in Set up once there is one
+ * — the app's own scratch folder is not one anybody chose.
+ */
+export function FirstRunNavigator({ workspaceName, widthPx }: { workspaceName: string | null; widthPx: number }) {
+  return (
+    <nav
+      aria-label="Tasks"
+      data-navigator
+      data-first-run
+      className="app-region-no-drag flex h-full shrink-0 flex-col bg-chrome"
+      style={{ width: widthPx }}
+    >
+      <div className="truncate px-4 pt-3 text-sm font-medium text-muted">{workspaceName ?? 'No workspace yet'}</div>
+      <p className="px-4 pt-2 text-xs leading-[18px] text-tertiary">
+        Tasks you start show up here, grouped by what they need from you.
+      </p>
+    </nav>
+  )
+}
+
+/**
  * The navigator: what needs you first, then what is running, what is waiting
  * for your review, and what is done. The workspace switcher filters it; a row
  * from a workspace other than the active one names that workspace in its meta.

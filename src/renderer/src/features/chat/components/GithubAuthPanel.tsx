@@ -146,7 +146,7 @@ export function GithubAuthPanel({
 
         <div className="mt-4 flex items-center gap-2 text-caption text-muted">
           <AgentVSpinner size={14} />
-          <span>Waiting for authorization…</span>
+          <span>Waiting for authorisation…</span>
         </div>
       </div>
     )

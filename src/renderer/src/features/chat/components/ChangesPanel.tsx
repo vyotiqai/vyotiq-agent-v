@@ -772,7 +772,7 @@ export const ChangesPanel = memo(function ChangesPanel({
         : displayScope === 'agent'
           ? 'Edits the agent makes land here as it makes them.'
           : chrome.result?.kind === 'not_repo'
-            ? 'Uncommitted changes, commits and PRs need git. Initialize one here — nothing else changes.'
+            ? 'Uncommitted changes, commits and PRs need git. Initialise one here — nothing else changes.'
             : 'Working tree changes will appear here when files differ from HEAD.'
 
   const commitsEmptyTitle =
@@ -792,7 +792,7 @@ export const ChangesPanel = memo(function ChangesPanel({
           disabled={gitInit.busy}
           onClick={() => void gitInit.init()}
         >
-          {gitInit.busy ? 'Initializing…' : 'Initialize repository'}
+          {gitInit.busy ? 'Initialising…' : 'Initialise repository'}
         </Button>
         {gitInit.error ? (
           <span className="max-w-[16rem] text-xs text-danger" role="alert">
@@ -1756,7 +1756,7 @@ export const ChangesPanel = memo(function ChangesPanel({
               <EmptyPanel
                 icon="branch"
                 title="Not a git repository"
-                body="Uncommitted changes, commits and PRs need git. Initialize one here — nothing else changes."
+                body="Uncommitted changes, commits and PRs need git. Initialise one here — nothing else changes."
                 actions={gitInitAction}
                 centered
               />

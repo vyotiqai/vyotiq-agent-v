@@ -5,6 +5,7 @@ import {
   providerCheckFrom,
   setupProvider,
   setupRecents,
+  setupStartingMode,
   setupWorkspace,
   type SetupProviderSettings
 } from '@renderer/features/setup/setupModel'
@@ -143,5 +144,13 @@ describe('needsSetup', () => {
     expect(needsSetup(false, 0)).toBe(true)
     expect(needsSetup(false, 3)).toBe(false)
     expect(needsSetup(true, 0)).toBe(false)
+  })
+})
+
+describe('setupStartingMode', () => {
+  it('starts on the recommended mode over the shipped default, and keeps one set in Settings', () => {
+    expect(setupStartingMode('off')).toBe('mutating')
+    expect(setupStartingMode('all')).toBe('all')
+    expect(setupStartingMode('mutating')).toBe('mutating')
   })
 })

@@ -43,7 +43,11 @@ test('Set up: a provider that answered, a folder, the approval choice, then the 
   const page = launched.window
 
   await expect(page.getByRole('heading', { name: 'Set up Agent V' })).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByText('Tasks you start show up here, grouped by what they need from you.')).toBeVisible()
+  // The mockup's first-run column: what will show here, nothing to navigate yet.
+  const firstRunNav = page.locator('nav[data-first-run]')
+  await expect(firstRunNav).toContainText('No workspace yet')
+  await expect(firstRunNav).toContainText('Tasks you start show up here, grouped by what they need from you.')
+  await expect(firstRunNav.getByRole('button')).toHaveCount(0)
 
   const provider = page.locator('[data-setup-step="1"]')
   await expect(provider).toHaveAttribute('data-state', 'done', { timeout: 15_000 })
@@ -85,6 +89,7 @@ test('Set up: a provider that answered, a folder, the approval choice, then the 
   await expect(folder).toContainText(workspacePath)
   await expect(folderAlert).toHaveCount(0)
   await expect(start).toBeEnabled()
+  await expect(firstRunNav).toContainText(basename(workspacePath))
   await expect(page.getByText(`Starts in ${basename(workspacePath)}`)).toBeVisible()
 
   await page.getByRole('radio', { name: /Every tool/ }).click()

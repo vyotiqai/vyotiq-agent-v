@@ -15,6 +15,12 @@ export type StepUsageTotals = {
   cachedInputTokens: number
   /** Sum of per-step cached input tokens (for run-level hit rate). */
   billedCachedInputTokens: number
+  /**
+   * Sum of per-step whole-prompt tokens (`promptTokensFromUsage`) — the
+   * denominator a cache share needs, whatever each provider counts as input.
+   * Absent on totals rebuilt from before it was tracked.
+   */
+  billedPromptTokens?: number
   /** Tokens written into the prompt cache this run (Anthropic); accumulates across steps. */
   cacheCreationInputTokens: number
   /** Billed thinking tokens, a subset of the output tokens above. */
@@ -85,6 +91,7 @@ export function emptyStepUsageTotals(): StepUsageTotals {
     outputTokens: 0,
     cachedInputTokens: 0,
     billedCachedInputTokens: 0,
+    billedPromptTokens: 0,
     cacheCreationInputTokens: 0,
     reasoningTokens: 0,
     steps: 0,
@@ -117,6 +124,7 @@ export function mergeStepUsageTotals(a: StepUsageTotals, b: StepUsageTotals): St
     outputTokens: a.outputTokens + b.outputTokens,
     cachedInputTokens: b.inputTokens > 0 ? b.cachedInputTokens : a.cachedInputTokens,
     billedCachedInputTokens: a.billedCachedInputTokens + stepCached,
+    billedPromptTokens: (a.billedPromptTokens ?? 0) + (b.inputTokens > 0 ? (b.billedPromptTokens ?? 0) : 0),
     cacheCreationInputTokens: a.cacheCreationInputTokens + b.cacheCreationInputTokens,
     reasoningTokens: a.reasoningTokens + b.reasoningTokens,
     steps: a.steps + b.steps,
@@ -158,6 +166,7 @@ export function stepUsageFromEvent(event: AgentEvent): StepUsageTotals | null {
     outputTokens: event.outputTokens ?? 0,
     cachedInputTokens,
     billedCachedInputTokens: cachedInputTokens,
+    billedPromptTokens: promptTokensFromUsage(event),
     cacheCreationInputTokens,
     reasoningTokens: event.reasoningTokens ?? 0,
     steps: 1,

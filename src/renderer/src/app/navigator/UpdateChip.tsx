@@ -7,6 +7,16 @@ import { MENU_SURFACE, cn } from '@renderer/lib/ui'
 import { UpdatePanel } from '@renderer/features/updates/UpdatePanel'
 import { markAnnounced, useUpdateAnnouncement } from '@renderer/features/updates/updaterStore'
 
+const openRequests = new Set<() => void>()
+
+/**
+ * Open the update panel as if its chip were clicked — the inbox's "is ready"
+ * row lands here. Nothing happens while no update is known.
+ */
+export function requestUpdatePanel(): void {
+  for (const open of openRequests) open()
+}
+
 /**
  * The app's one update surface (see updaterStore): a chip in the navigator's
  * footer that appears the moment main reports a newer version, opens its panel
@@ -49,6 +59,17 @@ export function UpdateChip({ runningCount = 0 }: { runningCount?: number }): Rea
   useEffect(() => {
     if (info == null && open) close(false)
   }, [info, open, close])
+
+  useEffect(() => {
+    const openFromRequest = (): void => {
+      setSelfOpened(false)
+      setOpen(true)
+    }
+    openRequests.add(openFromRequest)
+    return () => {
+      openRequests.delete(openFromRequest)
+    }
+  }, [])
 
   if (info == null) return null
 

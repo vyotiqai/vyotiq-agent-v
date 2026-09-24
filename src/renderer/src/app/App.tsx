@@ -5,6 +5,7 @@ import { launchViewFor } from './launchView'
 import { needsDraftChatAfterWorkspaceAdd } from './workspaceAddHandoff'
 import { pinnedRunKey, prunePinnedRun, togglePinnedRun } from '../features/home/pinnedRuns'
 import { requestNavigatorScope } from './navigator/useNavigatorScope'
+import { requestUpdatePanel } from './navigator/UpdateChip'
 import { ChatView } from '../features/chat/ChatView'
 import { SessionChatColumn } from '../features/chat/SessionChatColumn'
 import { AgentInstancePane } from '../features/chat/components/AgentInstancePane'
@@ -69,7 +70,7 @@ import type {
   RevertWritesOutcome
 } from '@renderer/lib/hooks/createChatStreamController'
 import { rewoundToastText, useRewindDialog } from '@renderer/features/task/RewindDialog'
-import { needsSetup, setupRecents, setupWorkspace } from '@renderer/features/setup/setupModel'
+import { needsSetup, setupRecents, setupStartingMode, setupWorkspace } from '@renderer/features/setup/setupModel'
 
 /** Full-screen secondary views are code-split; they parse on first open, not at boot. */
 const SettingsView = lazy(() =>
@@ -376,6 +377,7 @@ function App() {
   }
   const setupUndecided = !settings.toolApprovalOnboardingDone && !setupDecidedRef.current
   const showSetup = !setupUndecided && needsSetup(settings.toolApprovalOnboardingDone, taskCount)
+  const setupChosenWorkspace = setupWorkspace(activeWorkspace, openWorkspaces, scratchPath?.path ?? null)
 
   // Navigation-mode preference applies once settings have loaded. During load the
   // shell keeps the established chat skeleton; the launch view lands before the
@@ -672,6 +674,9 @@ function App() {
           setSettingsSection(action.section)
           setView('settings')
           return
+        case 'open_update':
+          requestUpdatePanel()
+          return
         default: {
           const _exhaustive: never = action
           return _exhaustive
@@ -688,7 +693,7 @@ function App() {
     async (payload: import('@shared/ipc').DeepLinkPayload): Promise<void> => {
       const { target } = payload
       if (!target) {
-        pushToast('Unrecognized Vyotiq link.', 'error')
+        pushToast('Unrecognised Vyotiq link.', 'error')
         return
       }
       if (target.type !== 'open_run') return
@@ -1209,7 +1214,7 @@ function App() {
         chatActionsRef.current?.applyManualCompaction?.(res.data)
         return {
           ok: true as const,
-          message: `Summarized ${res.data.messagesBefore - res.data.keptMessages} messages; ${res.data.keptMessages} kept verbatim.`
+          message: `Summarised ${res.data.messagesBefore - res.data.keptMessages} messages; ${res.data.keptMessages} kept verbatim.`
         }
       } finally {
         chatActionsRef.current?.setCompacting?.(false)
@@ -1853,7 +1858,7 @@ function App() {
                 paneCtrl?.applyManualCompaction?.(res.data)
                 return {
                   ok: true as const,
-                  message: `Summarized ${res.data.messagesBefore - res.data.keptMessages} messages; ${res.data.keptMessages} kept verbatim.`
+                  message: `Summarised ${res.data.messagesBefore - res.data.keptMessages} messages; ${res.data.keptMessages} kept verbatim.`
                 }
               } finally {
                 paneCtrl?.setCompacting?.(false)
@@ -2507,6 +2512,7 @@ function App() {
     <AppShell
       view={view}
       workspacePath={activeWorkspace}
+      firstRun={view === 'home' && showSetup ? { workspace: setupChosenWorkspace } : null}
       onOpenSettings={() => {
         setView('settings')
       }}
@@ -2635,11 +2641,11 @@ function App() {
             <SetupPage
               settings={settings}
               secrets={secrets}
-              workspace={setupWorkspace(activeWorkspace, openWorkspaces, scratchPath?.path ?? null)}
+              workspace={setupChosenWorkspace}
               recents={setupRecents(registry?.recentPaths ?? [], openWorkspaces, scratchPath?.path ?? null)}
-              // Until someone chooses, the saved mode is only the shipped default (off);
-              // Set up starts on the recommended one, as the first-send question does.
-              approvalMode="mutating"
+              // The shipped default (off) is nobody's choice: Set up starts on the
+              // recommended mode unless one was set in Settings before this.
+              approvalMode={setupStartingMode(settings.toolApproval.mode)}
               mcpProtection={settings.toolApproval.mcpProtection !== false}
               onChangeProvider={() => {
                 setSettingsSection('providers')

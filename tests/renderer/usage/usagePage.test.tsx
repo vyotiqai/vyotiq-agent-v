@@ -72,6 +72,20 @@ describe('Usage', () => {
     expect(page.textContent).toContain('Finished75%2 failed · 1 running')
   })
 
+  it('says how much of the prompt came from cache when the window can tell', async () => {
+    homeActivity = vi.fn(async (payload: { windowDays: number }) => ({
+      ok: true as const,
+      data: result({
+        windowDays: payload.windowDays,
+        totals: { runs: 9, billedInputTokens: 900_000, outputTokens: 340_000, cachedInputTokens: 640_000, cacheShare: 0.712, billedCost: 4.21 }
+      })
+    }))
+    renderUsage()
+    await screen.findByText('Tasks per day')
+    const page = document.querySelector('[data-usage]') as HTMLElement
+    expect(page.textContent).toContain('Tokens1.2M71% from cache')
+  })
+
   it('draws a bar per day with today in the accent, and spend as a line', async () => {
     renderUsage()
     const perDay = within(await screen.findByRole('region', { name: 'Tasks per day' })).getByRole('img')

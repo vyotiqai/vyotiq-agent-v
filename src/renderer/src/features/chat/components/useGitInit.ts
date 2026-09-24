@@ -36,7 +36,7 @@ export function useGitInit(
       // must say so rather than look like a silently ignored click.
       const request = window.vyotiq.gitInit?.({ workspacePath })
       if (!request) {
-        setError('This build cannot initialize repositories')
+        setError('This build cannot initialise repositories')
         return false
       }
       const res = await request
@@ -47,7 +47,7 @@ export function useGitInit(
       onDone?.()
       return true
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not initialize the repository')
+      setError(err instanceof Error ? err.message : 'Could not initialise the repository')
       return false
     } finally {
       inFlight.current = false

@@ -15,7 +15,7 @@ export const BUILTIN_COMMANDS: SlashCommandDescriptor[] = [
     id: 'builtin:compact',
     trigger: 'compact',
     label: 'Compact context',
-    description: 'Summarize older steps to free context. Text after /compact says what to keep',
+    description: 'Summarise older steps to free context. Text after /compact says what to keep',
     kind: 'builtin',
     group: 'App',
     availability: 'ready'

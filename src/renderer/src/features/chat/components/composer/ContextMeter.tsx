@@ -613,7 +613,7 @@ export function ContextMeterPanel({
                 ? 'Unavailable while the agent is running'
                 : compacting
                   ? 'Compacting…'
-                  : 'Summarize older history'
+                  : 'Summarise older history'
             }
             className={cn(
               'flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium vy-transition',

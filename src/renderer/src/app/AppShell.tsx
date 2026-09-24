@@ -32,7 +32,8 @@ import { SETTINGS_SEARCH_INDEX, revealSettingsFieldWhenMounted } from '@renderer
 import { useUpdaterState } from '@renderer/features/updates/updaterStore'
 import { WhatsNewModal } from '@renderer/features/whats-new/WhatsNewModal'
 import { TitleBar } from './TitleBar'
-import { Navigator, type NavigatorPlace } from './navigator/Navigator'
+import { FirstRunNavigator, Navigator, type NavigatorPlace } from './navigator/Navigator'
+import { requestUpdatePanel } from './navigator/UpdateChip'
 import { buildNavigatorSections, type NavRow } from './navigator/navigatorModel'
 import { useNavigatorScope } from './navigator/useNavigatorScope'
 
@@ -94,6 +95,12 @@ export type AppShellProps = {
   onSplitPane?: () => void
   children: ReactNode
   loading?: boolean
+  /**
+   * Set up is on screen: the navigator is the mockup's first-run column — no
+   * places, no footer, just what will show here. `workspace` is the folder
+   * chosen in Set up, if one is.
+   */
+  firstRun?: { workspace: string | null } | null
 }
 
 function placeOf(view: ShellView): NavigatorPlace {
@@ -314,6 +321,9 @@ function AppShellInner(props: AppShellProps) {
           if (onOpenSettingsSection) onOpenSettingsSection(action.section)
           else onOpenSettings()
           return
+        case 'open_update':
+          requestUpdatePanel()
+          return
         default: {
           const exhaustive: never = action
           return exhaustive
@@ -329,6 +339,11 @@ function AppShellInner(props: AppShellProps) {
       data-navigator-slot
       className="app-region-no-drag flex h-full shrink-0 flex-col bg-chrome"
       style={{ width: isDesktop ? navigatorWidthPx : SIDEBAR_WIDTH_PX }}
+    />
+  ) : props.firstRun ? (
+    <FirstRunNavigator
+      workspaceName={props.firstRun.workspace ? formatWorkspaceName(props.firstRun.workspace) : null}
+      widthPx={isDesktop ? navigatorWidthPx : SIDEBAR_WIDTH_PX}
     />
   ) : (
     <Navigator

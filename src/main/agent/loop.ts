@@ -1284,7 +1284,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           inputTokens: checkpointTotals.lastStepInputTokens,
           // Checkpoints written before estimate tracking lack these — never NaN.
           estimatedCost: checkpointTotals.estimatedCost ?? 0,
-          stepsWithEstimate: checkpointTotals.stepsWithEstimate ?? 0
+          stepsWithEstimate: checkpointTotals.stepsWithEstimate ?? 0,
+          billedPromptTokens: checkpointTotals.billedPromptTokens
         }
       } else {
         costTotals = archivedTotals
@@ -1572,6 +1573,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         peakInputTokens: costTotals.peakInputTokens,
         outputTokens: costTotals.outputTokens,
         billedCachedInputTokens: costTotals.billedCachedInputTokens,
+        ...(costTotals.billedPromptTokens !== undefined ? { billedPromptTokens: costTotals.billedPromptTokens } : {}),
         cacheCreationInputTokens: costTotals.cacheCreationInputTokens,
         reasoningTokens: costTotals.reasoningTokens,
         steps: costTotals.steps,

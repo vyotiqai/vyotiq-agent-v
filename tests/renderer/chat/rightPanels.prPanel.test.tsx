@@ -364,7 +364,7 @@ describe('PrPanel', () => {
     render(<PrPanel workspacePath="/ws" />)
     expect(await screen.findByText('WXYZ-9876')).toBeTruthy()
     expect(screen.getByRole('button', { name: /Open GitHub/i })).toBeTruthy()
-    expect(screen.getByText(/Waiting for authorization/i)).toBeTruthy()
+    expect(screen.getByText(/Waiting for authorisation/i)).toBeTruthy()
     expect(screen.queryByText(/^Complete authorization in your browser\.$/)).toBeNull()
   })
 
@@ -399,7 +399,7 @@ describe('PrPanel', () => {
     })
     render(<PrPanel workspacePath="/ws" />)
     fireEvent.click(await screen.findByRole('button', { name: /Connect GitHub/i }))
-    expect(await screen.findByText(/Waiting for authorization/i)).toBeTruthy()
+    expect(await screen.findByText(/Waiting for authorisation/i)).toBeTruthy()
     await waitFor(() => {
       expect(window.vyotiq.githubAuthStart).toHaveBeenCalled()
     })

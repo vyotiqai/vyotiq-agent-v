@@ -39,6 +39,8 @@ describe('runTelemetry', () => {
       outputTokens: 30,
       cachedInputTokens: 200,
       billedCachedInputTokens: 600,
+      // No provider flag: input is the whole prompt (promptTokensFromUsage).
+      billedPromptTokens: 800,
       cacheCreationInputTokens: 0,
       reasoningTokens: 16,
       steps: 2,
@@ -147,6 +149,7 @@ describe('runTelemetry', () => {
       outputTokens: 0,
       cachedInputTokens: 0,
       billedCachedInputTokens: 0,
+      billedPromptTokens: 0,
       cacheCreationInputTokens: 0,
       reasoningTokens: 0,
       steps: 0,
@@ -257,5 +260,23 @@ describe('runTelemetry', () => {
       generationMs: 1500
     })
     expect(mergeStepUsageTotals(first!, second!).generationMs).toBe(4000)
+  })
+})
+
+describe('billedPromptTokens', () => {
+  it('is the whole prompt per step: Anthropic adds its cache slices, OpenAI-style input already has them', () => {
+    const anthropic = stepUsageFromEvent({
+      type: 'step_usage', runId: 'r', step: 1,
+      inputTokens: 6, inputTokensIncludesCache: false, cachedInputTokens: 9000, cacheCreationInputTokens: 994, outputTokens: 5
+    })!
+    const openai = stepUsageFromEvent({
+      type: 'step_usage', runId: 'r', step: 2,
+      inputTokens: 10000, cachedInputTokens: 8000, outputTokens: 5
+    })!
+    expect(anthropic.billedPromptTokens).toBe(10000)
+    expect(openai.billedPromptTokens).toBe(10000)
+    const merged = mergeStepUsageTotals(mergeStepUsageTotals(emptyStepUsageTotals(), anthropic), openai)
+    expect(merged.billedPromptTokens).toBe(20000)
+    expect(merged.billedCachedInputTokens).toBe(17000)
   })
 })

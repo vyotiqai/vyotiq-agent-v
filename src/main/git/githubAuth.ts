@@ -430,7 +430,7 @@ async function pollOnce(): Promise<void> {
     failPending(
       typeof json.error_description === 'string' && json.error_description
         ? json.error_description
-        : `GitHub authorization failed (${err})`
+        : `GitHub authorisation failed (${err})`
     )
   } catch (err) {
     if (!pending) return

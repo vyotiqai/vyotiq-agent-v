@@ -72,7 +72,7 @@ export function NotificationsSection({ form }: { form: SettingsFormState }) {
         <SwitchField
           id="notifications-system"
           title="System alerts"
-          hint="When the window recovers from a crash."
+          hint="When the window recovers from a crash, and when an update is ready to install."
           checked={notifications.system}
           disabled={eventsLocked}
           onChange={(system) => patch({ system })}

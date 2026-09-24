@@ -130,4 +130,22 @@ describe('recordUsageDeltas', () => {
     writeFileSync(join(root, USAGE_LEDGER_FILENAME), JSON.stringify(raw))
     expect(readUsageLedger(root)).toBeNull()
   })
+
+  it('records whole-prompt tokens on a day begun with them, as deltas', () => {
+    recordUsageDeltas(root, totals({ steps: 1, billedInputTokens: 10, billedCachedInputTokens: 900, billedPromptTokens: 1000 }), NOW)
+    recordUsageDeltas(root, totals({ steps: 2, billedInputTokens: 30, billedCachedInputTokens: 1800, billedPromptTokens: 2100 }), NOW)
+    const ledger = readUsageLedger(root)!
+    expect(ledger.days['2026-09-09']).toMatchObject({ cachedInputTokens: 1800, promptInputTokens: 2100 })
+    expect(ledger.lastTotals.promptInputTokens).toBe(2100)
+  })
+
+  it('never half-counts a day begun before prompt sizes were tracked', () => {
+    recordUsageDeltas(root, totals({ steps: 1, billedInputTokens: 100, billedCachedInputTokens: 50 }), NOW)
+    recordUsageDeltas(root, totals({ steps: 2, billedInputTokens: 200, billedCachedInputTokens: 90, billedPromptTokens: 150 }), NOW)
+    recordUsageDeltas(root, totals({ steps: 3, billedInputTokens: 300, billedCachedInputTokens: 120, billedPromptTokens: 260 }), NEXT_DAY)
+    const ledger = readUsageLedger(root)!
+    expect('promptInputTokens' in ledger.days['2026-09-09']!).toBe(false)
+    // The next day starts tracked, from the delta since the last record.
+    expect(ledger.days['2026-09-10']).toMatchObject({ cachedInputTokens: 30, promptInputTokens: 110 })
+  })
 })

@@ -681,7 +681,7 @@ function ModelRow({
       {row.manual ? null : (
         <button
           type="button"
-          aria-label={favorite ? `Remove ${modelId} from favorites` : `Add ${modelId} to favorites`}
+          aria-label={favorite ? `Remove ${modelId} from favourites` : `Add ${modelId} to favourites`}
           aria-pressed={favorite}
           onMouseDown={(e) => e.preventDefault()}
           onClick={(e) => {

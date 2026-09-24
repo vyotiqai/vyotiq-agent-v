@@ -4357,7 +4357,7 @@ export const FilesPanel = memo(function FilesPanel({
                       <p className="m-0 text-muted">
                         {lspStatus.server.capabilities.length > 0
                           ? `Capabilities: ${lspStatus.server.capabilities.join(', ')}`
-                          : 'The detected server will report capabilities when it initializes.'}
+                          : 'The detected server will report capabilities when it initialises.'}
                       </p>
                       {lspResponse?.kind === 'diagnostics' ? (
                         lspResponse.items.length > 0 ? (

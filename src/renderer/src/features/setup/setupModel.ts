@@ -1,4 +1,4 @@
-import type { IpcResult, ListModelsResult, Settings } from '@shared/ipc'
+import { DEFAULT_TOOL_APPROVAL, type IpcResult, type ListModelsResult, type Settings, type ToolApprovalMode } from '@shared/ipc'
 import { isProviderConfigured, providerLabel } from '@shared/providers'
 import { workspacePathsEqual } from '@shared/workspacePathMatch'
 import { isModelListUnsupportedWarning } from '@renderer/features/chat/components/composer/composerModelUtils'
@@ -91,6 +91,14 @@ export function setupWorkspace(
   const chosen = (path: string): boolean => scratchPath == null || !workspacePathsEqual(path, scratchPath)
   if (activePath && chosen(activePath)) return activePath
   return openPaths.find(chosen) ?? null
+}
+
+/**
+ * The mode Set up's step 3 starts on. Settings ship with approvals off, which
+ * nobody chose; any other saved mode was set in Settings, so it stays.
+ */
+export function setupStartingMode(saved: ToolApprovalMode): ToolApprovalMode {
+  return saved === DEFAULT_TOOL_APPROVAL.mode ? 'mutating' : saved
 }
 
 /** Folders opened before, most recent first, without the open ones or the scratch folder. */

@@ -795,4 +795,30 @@ describe('window pruning (mtime-keyed)', () => {
     expect(res.totals.previousTokens).toBe(770)
     expect(res.days).toHaveLength(0)
   })
+
+  it('reports a cache share only when every day in the window has prompt sizes and cache reads', async () => {
+    makeRun('run-tracked', {
+      'usage.json': ledgerFile({
+        '2026-09-09': { inputTokens: 300, outputTokens: 20, cachedInputTokens: 710, promptInputTokens: 1000 }
+      })
+    })
+    const tracked = await collectHomeActivity([WS], NOW)
+    expect(tracked.totals.cacheShare).toBeCloseTo(0.71)
+
+    // A day recorded before prompt sizes were tracked makes the share unknowable.
+    makeRun('run-older', {
+      'usage.json': ledgerFile({ '2026-09-08': { inputTokens: 500, outputTokens: 20, cachedInputTokens: 100 } })
+    })
+    resetJsonDocCacheForTests()
+    const mixed = await collectHomeActivity([WS], NOW)
+    expect('cacheShare' in mixed.totals).toBe(false)
+  })
+
+  it('shows no share for a provider that reports no cache reads', async () => {
+    makeRun('run-nocache', {
+      'usage.json': ledgerFile({ '2026-09-09': { inputTokens: 300, outputTokens: 20, promptInputTokens: 300 } }, { cachedInputTokens: 0 })
+    })
+    const res = await collectHomeActivity([WS], NOW)
+    expect('cacheShare' in res.totals).toBe(false)
+  })
 })

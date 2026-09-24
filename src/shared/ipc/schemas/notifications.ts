@@ -7,7 +7,7 @@ export const NOTIFICATION_INBOX_CAP = 50
 export const NotificationSourceSchema = z.enum(['agent', 'system'])
 export type NotificationSource = z.infer<typeof NotificationSourceSchema>
 
-export const NotificationKindSchema = z.enum(['run_done', 'run_error', 'needs_you', 'crash'])
+export const NotificationKindSchema = z.enum(['run_done', 'run_error', 'needs_you', 'crash', 'update_ready'])
 export type NotificationKind = z.infer<typeof NotificationKindSchema>
 
 export const NotificationActionSchema = z.discriminatedUnion('type', [
@@ -28,7 +28,9 @@ export const NotificationActionSchema = z.discriminatedUnion('type', [
       (value) => (value === 'general' ? 'diagnostics' : value),
       z.literal('diagnostics')
     )
-  })
+  }),
+  /** Open the navigator's update panel — the one update surface. */
+  z.object({ type: z.literal('open_update') })
 ])
 export type NotificationAction = z.infer<typeof NotificationActionSchema>
 
@@ -86,3 +88,9 @@ export function runErrorDedupeKey(runId: string): string {
 }
 
 export const CRASH_DEDUPE_KEY = 'crash'
+
+/**
+ * One "update ready" item at most: a newer download replaces it, and it goes at
+ * the next launch — a restart ends that download's ready state either way.
+ */
+export const UPDATE_READY_DEDUPE_KEY = 'update_ready'

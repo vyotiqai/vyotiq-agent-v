@@ -145,8 +145,12 @@ function UsageBody({
         <BigStat
           value={formatCompactCount(tokens)}
           label="Tokens"
-          detail={`${formatCompactCount(totals.billedInputTokens)} in · ${formatCompactCount(totals.outputTokens)} out`}
-          title={`${formatCount(tokens)} input and output tokens`}
+          detail={
+            totals.cacheShare != null
+              ? `${Math.round(totals.cacheShare * 100)}% from cache`
+              : `${formatCompactCount(totals.billedInputTokens)} in · ${formatCompactCount(totals.outputTokens)} out`
+          }
+          title={`${formatCount(tokens)} input and output tokens · ${formatCompactCount(totals.billedInputTokens)} in · ${formatCompactCount(totals.outputTokens)} out`}
         />
         <BigStat
           value={cost ? cost.text : '—'}

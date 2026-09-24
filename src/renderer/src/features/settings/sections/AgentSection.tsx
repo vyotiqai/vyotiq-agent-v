@@ -267,7 +267,7 @@ export function AgentSection({
           form={form}
           title="Compact at"
           label="Compact at, percent of context"
-          help="At this share of the model's context window the run summarizes older turns — the same as Compact in the context meter."
+          help="At this share of the model's context window the run summarises older turns — the same as Compact in the context meter."
           badge={scoped}
           unit="% of context"
           min={5}

@@ -127,6 +127,9 @@ export async function collectHomeActivity(
   let withEstimate = false
   let cachedInputTokens = 0
   let withCache = false
+  /** Whole-prompt tokens in the window, and whether any tokens lacked one. */
+  let promptInputTokens = 0
+  let promptUntracked = false
   let reasoningTokensTotal = 0
   let withReasoning = false
   let peakInputTokensTotal = 0
@@ -220,6 +223,7 @@ export async function collectHomeActivity(
       billedCost?: number
       estimatedCost?: number
       cachedInputTokens?: number
+      promptInputTokens?: number
       model?: string
       reasoningTokens?: number
       peakInputTokens?: number
@@ -264,6 +268,8 @@ export async function collectHomeActivity(
       cachedInputTokens += usage.cachedInputTokens
       withCache = true
     }
+    if (usage.promptInputTokens != null) promptInputTokens += usage.promptInputTokens
+    else if (usage.inputTokens > 0) promptUntracked = true
     if (usage.reasoningTokens != null && usage.reasoningTokens > 0) {
       day.reasoningTokens = (day.reasoningTokens ?? 0) + usage.reasoningTokens
       reasoningTokensTotal += usage.reasoningTokens
@@ -362,6 +368,7 @@ export async function collectHomeActivity(
               billedCost: entry.billedCost,
               estimatedCost: entry.estimatedCost,
               cachedInputTokens: entry.cachedInputTokens,
+              promptInputTokens: entry.promptInputTokens,
               model: receipt?.model,
               reasoningTokens: entry.reasoningTokens,
               peakInputTokens: entry.peakInputTokens,
@@ -520,6 +527,11 @@ export async function collectHomeActivity(
       ...(withCost ? { billedCost: billedCostTotal } : {}),
       ...(withEstimate ? { estimatedCost: estimatedCostTotal } : {}),
       ...(withCache ? { cachedInputTokens } : {}),
+      // Only when the provider reported cache reads: one that reports none
+      // would read as a measured 0%, which it is not.
+      ...(withCache && !promptUntracked && promptInputTokens > 0
+        ? { cacheShare: Math.min(1, cachedInputTokens / promptInputTokens) }
+        : {}),
       ...(withReasoning ? { reasoningTokens: reasoningTokensTotal } : {}),
       ...(withPeak ? { peakInputTokens: peakInputTokensTotal } : {}),
       ...(withContextWindow ? { contextWindow: peakContextWindow } : {}),

@@ -605,7 +605,7 @@ describe('ChangesPanel', () => {
     })
   })
 
-  it('shows the not-a-repo state with Initialize repository', async () => {
+  it('shows the not-a-repo state with Initialise repository', async () => {
     ;(window.vyotiq.gitStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       data: { kind: 'not_repo' }
@@ -613,8 +613,8 @@ describe('ChangesPanel', () => {
     renderGit()
     expect(await screen.findByText('Not a git repository')).toBeTruthy()
     // Undo points are the app's own copies, not git — only git's views need it.
-    expect(screen.getByText('Uncommitted changes, commits and PRs need git. Initialize one here — nothing else changes.')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Initialize repository' })).toBeTruthy()
+    expect(screen.getByText('Uncommitted changes, commits and PRs need git. Initialise one here — nothing else changes.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Initialise repository' })).toBeTruthy()
   })
 
   it('shows this task’s edits when there is no git repository to list', async () => {
@@ -635,7 +635,7 @@ describe('ChangesPanel', () => {
     })
     render(<ChangesPanel items={[]} workspacePath="/ws" gitRevision={1} />)
     expect(await screen.findByText('Not a git repository')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Initialize repository' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Initialise repository' })).toBeTruthy()
   })
 
   it('shows git-not-found empty state when git is unavailable', async () => {

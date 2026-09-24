@@ -133,7 +133,7 @@ function ModelRow({
         {opt.label}
       </span>
       <CapabilityBadges meta={opt.meta} />
-      <Tooltip content={favorite ? 'Remove from favorites' : 'Add to favorites'}>
+      <Tooltip content={favorite ? 'Remove from favourites' : 'Add to favourites'}>
         <button
           type="button"
           className={cn(
@@ -142,7 +142,7 @@ function ModelRow({
               ? 'opacity-100 text-fg'
               : 'opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
           )}
-          aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'}
+          aria-label={favorite ? 'Remove from favourites' : 'Add to favourites'}
           onMouseDown={(e) => e.preventDefault()}
           onClick={(e) => {
             e.stopPropagation()
@@ -337,7 +337,7 @@ export function ModelPicker({
     const rest = base.filter((o) => !pinned.has(o.value))
 
     const sections: { header: string; items: ModelPickerOption[] }[] = []
-    if (favorites.length) sections.push({ header: 'Favorites', items: favorites })
+    if (favorites.length) sections.push({ header: 'Favourites', items: favorites })
     if (recent.length) sections.push({ header: 'Recent', items: recent })
     if (seeds.length) sections.push({ header: 'Recommended', items: seeds })
     if (rest.length) sections.push({ header: 'All models', items: rest })

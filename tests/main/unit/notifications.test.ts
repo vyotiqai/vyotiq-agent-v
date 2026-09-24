@@ -320,6 +320,27 @@ describe('notification service', () => {
     expect(dismissNotifications({ all: true }).items).toHaveLength(0)
   })
 
+  it('keeps one update-ready row, under System alerts, and clears it at the next launch', () => {
+    const notice = (version: string): NotificationPublishInput => ({
+      source: 'system',
+      kind: 'update_ready',
+      title: `Agent V ${version} is ready`,
+      body: 'Restart to install',
+      dedupeKey: 'update_ready',
+      action: { type: 'open_update' }
+    })
+    publishNotification(notice('1.1.0'))
+    publishNotification(notice('1.2.0'))
+    expect(listNotifications().items.map((item) => item.title)).toEqual(['Agent V 1.2.0 is ready'])
+
+    settingsState.current!.notifications.system = false
+    expect(publishNotification(notice('1.3.0'))).toBeNull()
+
+    resetNotificationsForTests()
+    initNotifications()
+    expect(listNotifications().items).toHaveLength(0)
+  })
+
   it('dismiss by dedupe key is a no-op when missing', () => {
     expect(dismissNotificationsByDedupeKey('missing').items).toHaveLength(0)
   })

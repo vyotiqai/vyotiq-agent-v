@@ -122,12 +122,12 @@ test('the Changes panel initializes a repository on click', async () => {
   await expect(panel).toContainText('Not a git repository', { timeout: 15_000 })
   expect(existsSync(join(panelWorkspace, '.git'))).toBe(false)
 
-  await panel.getByRole('button', { name: 'Initialize repository' }).click()
+  await panel.getByRole('button', { name: 'Initialise repository' }).click()
 
   await expect
     .poll(() => existsSync(join(panelWorkspace, '.git')), { timeout: 15_000 })
     .toBe(true)
   // The panel re-reads git status itself, so the not-a-repo state has to go.
   await expect(panel).not.toContainText('Not a git repository', { timeout: 15_000 })
-  await expect(panel.getByRole('button', { name: 'Initialize repository' })).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: 'Initialise repository' })).toHaveCount(0)
 })

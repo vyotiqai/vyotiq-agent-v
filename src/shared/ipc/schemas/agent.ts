@@ -1144,6 +1144,8 @@ export const LoopCheckpointSchema = z.object({
       peakInputTokens: z.number().int().min(0),
       outputTokens: z.number().int().min(0),
       billedCachedInputTokens: z.number().int().min(0),
+      /** Cumulative whole-prompt tokens (cache share denominator), additive. */
+      billedPromptTokens: z.number().int().min(0).optional(),
       cacheCreationInputTokens: z.number().int().min(0),
       reasoningTokens: z.number().int().min(0),
       steps: z.number().int().min(0),
@@ -1365,6 +1367,11 @@ export const HomeActivityResultSchema = z.object({
     /** Estimated cost (tokens × published prices) across window runs, when any. */
     estimatedCost: z.number().finite().optional(),
     cachedInputTokens: z.number().int().min(0).optional(),
+    /**
+     * Share of prompt tokens read from the provider's cache, 0–1. Present only
+     * when every token in the window was recorded with its whole-prompt size.
+     */
+    cacheShare: z.number().min(0).max(1).optional(),
     /** Billed thinking tokens in the window (subset of output). */
     reasoningTokens: z.number().int().min(0).optional(),
     /** Peak per-step context input in the window (max across runs). */

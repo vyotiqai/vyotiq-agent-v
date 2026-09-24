@@ -51,9 +51,9 @@ test('a task started around Set up asks the approval question on first send', as
   }
 
   // No choice on record and no task yet: the window opens on Set up. New task
-  // in the navigator goes around it, so the first send still has to ask.
+  // (Ctrl+N) goes around it, so the first send still has to ask.
   await expect(window.getByRole('heading', { name: 'Set up Agent V' })).toBeVisible({ timeout: 20_000 })
-  await window.getByRole('button', { name: /^New task/ }).click()
+  await window.keyboard.press('Control+n')
 
   const composer = window.getByRole('combobox', { name: 'Brief' })
   await expect(composer).toBeVisible({ timeout: 20_000 })

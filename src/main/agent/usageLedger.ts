@@ -42,6 +42,12 @@ export type UsageLedgerDay = {
   /** Estimated cost deltas (tokens × published prices), kept separate. */
   estimatedCost?: number
   cachedInputTokens?: number
+  /**
+   * Whole-prompt tokens recorded this day (cached reads included, whatever the
+   * provider counts as input). Present only on days whose every step was
+   * recorded with it, so `cachedInputTokens / promptInputTokens` is exact.
+   */
+  promptInputTokens?: number
   /** Billed thinking-token deltas recorded this day (subset of output). */
   reasoningTokens?: number
   /** Peak per-step context input seen this day (max across steps). */
@@ -73,6 +79,8 @@ export type UsageLedger = {
     estimatedCost: number
     cachedInputTokens: number
     reasoningTokens: number
+    /** Absent on ledgers written before prompt sizes were tracked. */
+    promptInputTokens?: number
   }
   /** Local-day buckets keyed YYYY-MM-DD — only days with recorded deltas. */
   days: Record<string, UsageLedgerDay>
@@ -154,6 +162,8 @@ export function recordUsageDeltas(
     const dEstimate = delta(totals.estimatedCost, last.estimatedCost)
     const dCached = delta(totals.billedCachedInputTokens, last.cachedInputTokens)
     const dReasoning = delta(totals.reasoningTokens, last.reasoningTokens)
+    const promptTracked = totals.billedPromptTokens !== undefined
+    const dPrompt = promptTracked ? delta(totals.billedPromptTokens!, last.promptInputTokens ?? 0) : 0
     // Nothing new to record — skip the write entirely (the snapshot only
     // matters when a later cumulative jump bills its actual delta).
     if (totals.steps === last.steps && dCost === 0) return
@@ -161,7 +171,15 @@ export function recordUsageDeltas(
     const dateKey = localDayKeyOf(now.toISOString())
     if (!dateKey) return
     const days: Record<string, UsageLedgerDay> = { ...(prev?.days ?? {}) }
-    const day: UsageLedgerDay = { ...(days[dateKey] ?? { inputTokens: 0, outputTokens: 0 }) }
+    // A day starts tracking prompt sizes only when its first step does: a day
+    // begun before, or by totals without them, stays without, never half-counted.
+    const day: UsageLedgerDay = {
+      ...(days[dateKey] ?? { inputTokens: 0, outputTokens: 0, ...(promptTracked ? { promptInputTokens: 0 } : {}) })
+    }
+    if (day.promptInputTokens !== undefined) {
+      if (promptTracked) day.promptInputTokens += dPrompt
+      else delete day.promptInputTokens
+    }
     day.inputTokens += dInput
     day.outputTokens += dOutput
     if (dCost > 0) day.billedCost = (day.billedCost ?? 0) + dCost
@@ -187,7 +205,10 @@ export function recordUsageDeltas(
         billedCost: Math.max(totals.billedCost, last.billedCost),
         estimatedCost: Math.max(totals.estimatedCost, last.estimatedCost),
         cachedInputTokens: Math.max(totals.billedCachedInputTokens, last.cachedInputTokens),
-        reasoningTokens: Math.max(totals.reasoningTokens, last.reasoningTokens)
+        reasoningTokens: Math.max(totals.reasoningTokens, last.reasoningTokens),
+        ...(promptTracked
+          ? { promptInputTokens: Math.max(totals.billedPromptTokens!, last.promptInputTokens ?? 0) }
+          : {})
       },
       days
     }
