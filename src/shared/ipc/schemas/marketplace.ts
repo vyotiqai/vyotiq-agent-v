@@ -201,13 +201,13 @@ export const SkillFrontmatterSchema = z.object({
    */
   'disable-model-invocation': z
     .union([z.boolean(), z.string()])
-    .optional()
     .transform((v) => {
-      if (v == null) return undefined
       if (typeof v === 'boolean') return v
       const t = v.trim().toLowerCase()
       return t === 'true' || t === 'yes' ? true : undefined
     })
+    // Outermost, so a missing key stays optional in the inferred type.
+    .optional()
 })
 export type SkillFrontmatter = z.infer<typeof SkillFrontmatterSchema>
 

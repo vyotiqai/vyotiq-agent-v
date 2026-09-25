@@ -1560,8 +1560,15 @@ export function validateParsedToolArgs(
 
   const result = entry.schema.safeParse(parsed)
   if (!result.success) {
-    const detail = result.error.errors
-      .map((e) => (e.path.length ? `${e.path.join('.')}: ${e.message}` : e.message))
+    const detail = result.error.issues
+      .map((e) => {
+        // zod 4 words a missing argument as a type error ("expected string,
+        // received undefined"); the hints in formatToolArgsError, and the
+        // model, read the shorter "Required" that zod 3 sent.
+        const message =
+          e.code === 'invalid_type' && / received undefined$/.test(e.message) ? 'Required' : e.message
+        return e.path.length ? `${e.path.join('.')}: ${message}` : message
+      })
       .join('; ')
     return { ok: false, error: formatToolArgsError(canonical, detail) }
   }

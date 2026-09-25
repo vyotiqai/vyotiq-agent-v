@@ -404,7 +404,7 @@ export const WorkspaceEditorRecoverySnapshotSchema = z.object({
         code: z.ZodIssueCode.too_big,
         path: ['tabs', index, 'content'],
         maximum: WORKSPACE_EDITOR_RECOVERY_MAX_CONTENT_BYTES,
-        type: 'string',
+        origin: 'string',
         inclusive: true,
         message: 'Editor recovery content is too large'
       })
