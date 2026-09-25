@@ -17,9 +17,9 @@ peerDependencyRules:
     react: '19'
 
 overrides:
-  # All @sentry packages must share one release line: @sentry/electron 7.18.0
-  # declares @sentry/core 10.73.0 exactly, so the override moves with it.
-  '@sentry/core': 10.73.0
+  # All @sentry packages must share one release line: @sentry/electron 7.19.0
+  # declares @sentry/core 10.74.0 exactly, so the override moves with it.
+  '@sentry/core': 10.74.0
   # GHSA-vwc7-r8mq-g2x9 (CVE-2026-76845, symlink-following extraction): the
   # resolved version stays INSIDE the vulnerable 0.5.9–0.6.0 range because
   # no patched release exists upstream — this override tracks compatibility
