@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
+import { openSettings } from './helpers/settings'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
 import { requireActivePath } from './helpers/seedWorkspace'
 
@@ -65,7 +66,7 @@ test('pause stops the index and keeps it stopped; resume finishes it', async () 
   expect(status).toMatchObject({ phase: 'idle', message: 'Indexing paused' })
 
   // Settings shows it paused, and Resume carries on to a finished index.
-  await page.keyboard.press('Control+,')
+  await openSettings(page)
   await page.getByRole('navigation', { name: 'Settings' }).first().getByRole('button', { name: 'Indexing' }).click({ timeout: 20_000 })
   const row = page.locator('[data-settings-item^="index:"]').filter({ hasText: 'vyotiq-index-pause' })
   await expect(row.getByText('Paused', { exact: true })).toBeVisible({ timeout: 20_000 })

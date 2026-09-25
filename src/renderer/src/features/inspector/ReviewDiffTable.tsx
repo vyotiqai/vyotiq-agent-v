@@ -66,10 +66,15 @@ export function ReviewDiffTable({
   const [asking, setAsking] = useState<{ rowKey: string; target: AskTarget } | null>(null)
   const [sent, setSent] = useState<string | null>(null)
 
-  useEffect(() => {
+  // A different file or a changed diff closes the question. Compared during
+  // render rather than in an effect: an effect also ran just after mount, and a
+  // click that landed before it flushed (a slow machine) was undone by it.
+  const [shown, setShown] = useState({ diff, path })
+  if (shown.diff !== diff || shown.path !== path) {
+    setShown({ diff, path })
     setAsking(null)
     setSent(null)
-  }, [diff, path])
+  }
 
   const q = findQuery.trim().toLowerCase()
   const split = layout === 'split'

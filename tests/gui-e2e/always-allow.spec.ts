@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
+import { openSettings } from './helpers/settings'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
 import { requireActivePath } from './helpers/seedWorkspace'
 
@@ -60,7 +61,7 @@ test('Always allow remembers the command, and a chained command still asks', asy
   expect(allowlist).toEqual(['terminal:pnpm vitest'])
 
   // Settings lists it as the command.
-  await page.keyboard.press('Control+,')
+  await openSettings(page)
   const nav = page.getByRole('navigation', { name: 'Settings' }).first()
   await nav.getByRole('button', { name: 'Agent' }).click({ timeout: 20_000 })
   const row = page.locator('[data-settings-field="tool-approval-allowlist"]')
