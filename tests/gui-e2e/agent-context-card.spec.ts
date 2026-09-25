@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { FSWatcher } from 'node:fs'
 import { expect, test } from '@playwright/test'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
 import { requireActivePath } from './helpers/seedWorkspace'
@@ -52,17 +53,27 @@ test.beforeAll(async () => {
 test.afterEach(async () => {
   const testInfo = test.info()
   if (testInfo.status === testInfo.expectedStatus || !launched) return
+  const report: string[] = [`workspacePath=${workspacePath}`, `osEvents=${JSON.stringify(osEvents)}`]
   const dir = join(launched.userDataDir, 'logs')
-  if (!existsSync(dir)) return
-  for (const name of readdirSync(dir)) {
-    const lines = readFileSync(join(dir, name), 'utf8')
-      .split(/\r?\n/)
-      .filter((line) => /agent context|agentContext|watch/i.test(line))
-    if (lines.length > 0) console.log(`[gui-e2e] ${name}:\n${lines.slice(-40).join('\n')}`)
+  report.push(`logDir=${dir} exists=${existsSync(dir)}`)
+  if (existsSync(dir)) {
+    for (const name of readdirSync(dir)) {
+      const lines = readFileSync(join(dir, name), 'utf8').split(/\r?\n/)
+      const hits = lines.filter((line) => /agent context/i.test(line))
+      report.push(`--- ${name}: ${lines.length} lines, ${hits.length} about the watcher`)
+      report.push(...(hits.length > 0 ? hits.slice(-60) : lines.slice(-30)))
+    }
   }
+  await testInfo.attach('watcher-diagnostics', { body: report.join('\n'), contentType: 'text/plain' })
+  console.log(`[gui-e2e] watcher diagnostics\n${report.join('\n')}`)
 })
 
+/** What the OS itself delivered to this test process for the workspace, as a control. */
+const osEvents: string[] = []
+let control: FSWatcher | null = null
+
 test.afterAll(async () => {
+  control?.close()
   if (launched) await closeApp(launched)
   try {
     rmSync(workspacePath, { recursive: true, force: true })
@@ -138,6 +149,11 @@ test('the aside follows the workspace live, pushed not polled', async () => {
   // green 3/3 against the real app on Windows, and green on ubuntu and macOS.
   // The assertions stay exact -- push counts are checked after every step, so a
   // push that never arrives fails, and step 4 still catches a polling loop.
+
+  // A control, outside the app: does the OS deliver events for this folder?
+  control = watch(workspacePath, { recursive: true }, (event, name) => {
+    if (osEvents.length < 40) osEvents.push(`${event}:${String(name)}`)
+  })
 
   // 1. First memory note — the directory does not exist yet, so this also
   //    proves the watcher arms paths that appear after it started. Notes live

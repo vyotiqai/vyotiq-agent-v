@@ -27,6 +27,16 @@ import { buildWorkspaceAgentContext, mapCodeIndexState } from './agentContext'
 /** One checkout writes several files; coalesce the burst into one rebuild. */
 const DEBOUNCE_MS = 250
 
+/**
+ * Under the GUI e2e fixture, trace what the watcher saw and did. The live-strip
+ * spec fails only on the windows-latest runner, which cannot be reproduced
+ * elsewhere, so the runner's own log is the only evidence of which link broke.
+ */
+const TRACE = process.env.VYOTIQ_E2E_FIXTURE === '1'
+function trace(message: string): void {
+  if (TRACE) logger.info(`Agent context watch: ${message}`, { scope: 'agent' })
+}
+
 type TargetKey = 'root' | 'vyotiq' | 'rules' | 'cursor' | 'cursorRules' | 'memory' | 'git'
 
 type Target = {
@@ -120,16 +130,18 @@ function armTargets(w: Watch): void {
     if (w.handles.has(target.key)) continue
     const dir = join(w.workspacePath, ...target.rel)
     try {
-      const handle = watch(dir, { recursive: target.recursive }, (_event, filename) => {
+      const handle = watch(dir, { recursive: target.recursive }, (event, filename) => {
         // `filename` is null on platforms that cannot report it — react rather
         // than filter, since a missed change is worse than a wasted rebuild.
         const name = filename == null ? null : String(filename)
+        trace(`event ${target.key} ${event} ${name == null ? '(no name)' : (name.split(/[\\/]/).pop() ?? '')}`)
         if (target.names && name != null && !target.names.includes(name)) return
         const gitChanged =
           target.gitNames != null && (name == null || target.gitNames.includes(name))
         schedule(w, gitChanged)
       })
-      handle.on('error', () => {
+      handle.on('error', (err) => {
+        logger.warn('Agent context watch stopped on an error', { scope: 'agent', target: target.key, err })
         try {
           handle.close()
         } catch {
@@ -140,6 +152,7 @@ function armTargets(w: Watch): void {
       // Never hold the event loop open at quit.
       handle.unref()
       w.handles.set(target.key, handle)
+      trace(`armed ${target.key}`)
     } catch (err) {
       // A directory that does not exist yet is expected: its parent is watched,
       // so it is armed on a later rebuild. Anything else is a watch that will
@@ -165,6 +178,8 @@ async function rebuild(w: Watch): Promise<void> {
         invalidateGitStatusCache(w.workspacePath)
       }
       armTargets(w)
+      const startedAt = Date.now()
+      trace('rebuild started')
       const indexStatus = getCodeIndexRuntimeStatus()
       const next = await buildWorkspaceAgentContext(w.workspacePath, {
         enabled: getSettings().codeIndex?.enabled !== false,
@@ -172,8 +187,12 @@ async function rebuild(w: Watch): Promise<void> {
         statusWorkspace: indexStatus.workspacePath,
         paused: isCodeIndexPaused(w.workspacePath)
       })
+      trace(`rebuild finished in ${Date.now() - startedAt}ms, ${next.memoryNotes} notes, ${sameContext(w.last, next) ? 'unchanged' : 'changed'}`)
       // Stopped while we were reading disk — drop the result.
-      if (watches.get(canonicalizeWorkspacePath(w.workspacePath)) !== w) return
+      if (watches.get(canonicalizeWorkspacePath(w.workspacePath)) !== w) {
+        trace('rebuild dropped: the watch was replaced')
+        return
+      }
       if (sameContext(w.last, next)) continue
       w.last = next
       push({ workspacePath: w.workspacePath, context: next })
@@ -230,6 +249,7 @@ export function armAgentContextWatch(
     again: false
   }
   watches.set(key, w)
+  trace(`started (${watches.size} watched)`)
   armTargets(w)
   hookCodeIndexStatus()
 }
