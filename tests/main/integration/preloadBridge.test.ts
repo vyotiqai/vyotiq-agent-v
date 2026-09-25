@@ -23,11 +23,13 @@ vi.mock('electron', () => ({
 
 // Side-effect import: the module calls contextBridge.exposeInMainWorld at load.
 import '../../../src/preload/index'
+// Vitest 5 clears mock calls before each test; keep the ones the import made.
+const exposeCalls = [...h.expose.mock.calls]
 
 describe('preload bridge', () => {
   it('exposes the vyotiq API on the main world', () => {
-    expect(h.expose).toHaveBeenCalledTimes(1)
-    expect(h.expose.mock.calls[0][0]).toBe('vyotiq')
+    expect(exposeCalls).toHaveLength(1)
+    expect(exposeCalls[0][0]).toBe('vyotiq')
     const api = h.captured.api
     expect(api).toBeDefined()
     expect(typeof api!.getSettings).toBe('function')
