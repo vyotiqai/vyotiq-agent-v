@@ -49,6 +49,12 @@ overrides:
   # above) and colord's export map is unchanged from 2.9.3. Patched in 2.9.4
   # (2026-08-19); every 2.9.4+ release is ~1 month old, past minimumReleaseAge.
   colord: '>=2.9.4'
+  # GHSA-r5fr-rjxr-66jc (high): code injection through `_.template` import key
+  # names in lodash-es <=4.17.23. mermaid 12 pins chevrotain ~11.1, which pins
+  # lodash-es 4.17.23 exactly; nothing here calls `_.template` with untrusted
+  # keys, but the audit gate is high. 4.18.1 (2026-04-01) is a minor within
+  # 4.x, so the same API.
+  lodash-es: '>=4.18.1'
 
 # Workspace packages: root Electron app + Astro website.
 packages:
