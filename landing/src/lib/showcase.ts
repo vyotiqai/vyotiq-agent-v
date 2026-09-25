@@ -263,7 +263,7 @@ export const CLAIMS: Claim[] = [
   /* Grounded in docs/agent-tools.md and the approval bounds noted above
      build_tool in APPROVED_TOOLS. It claims no sandbox: the module runs with
      full Node privileges in a utility process, and approval is the control.
-     1.0.0 does not ship build_tool, so this stays off the site until it does. */
+     Shown only while the app ships build_tool, which 1.0.0 does. */
   {
     id: 'X4',
     approved: true,
@@ -614,18 +614,10 @@ export const APPROVED_TOOLS: string[] = [
   'memory_list',
   'memory_read',
   'memory_write',
-  // teammates: approved on feat/agent-teammates, carried here so that branch
-  // merges without tripping the gate. The agent creates and directs durable
-  // identities; the high-risk gate (edits, deletes, terminal, commits,
-  // patches, connected servers) holds for every teammate whatever its
-  // autonomy is set to. The site may say the agent runs the team; it may not
-  // imply the team runs unsupervised.
-  'teammate_list',
-  'teammate_create',
-  'teammate_update',
-  'teammate_delete',
-  'teammate_assign_task',
-  'teammate_task',
+  // done-when checks: the agent marks each of a task's checks met or not met,
+  // with the evidence. The site may say a task is held to its checks; it may
+  // not imply a check was verified by anything but the agent's own evidence.
+  'check_done_when',
   // agent-written tools: a run writes a module that later executes as Node in
   // a utility process. Approved because the claim is bounded by an approval
   // card on every call whose file changed, and by Node builtins only. The site
@@ -704,7 +696,6 @@ export const APPROVED_PACKAGES: Record<string, string> = {
   docs: 'Docs',
   refactor: 'Refactor',
   'analyze-api': 'Analyze API',
-  'create-teammate': 'Create teammate',
   // skills vendored from github.com/mattpocock/skills (MIT), published under
   // their author's name rather than ours; the catalog entry carries the
   // attribution the site renders.
