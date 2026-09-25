@@ -163,7 +163,10 @@ export function useFileDiff(
   useEffect(() => {
     if (!needsFetch || !fetchDiff) return undefined
     let cancelled = false
-    setFetched(null)
+    // No reset to "loading" here: a refetch of the same file (the workspace
+    // changed, the source was rebuilt) keeps the diff on screen until the new
+    // one lands, so a question half-typed on a line survives it. A different
+    // path still reads as loading, since `fetched.path` no longer matches.
     void fetchDiff(path).then((result) => {
       if (!cancelled) setFetched({ path, result })
     })

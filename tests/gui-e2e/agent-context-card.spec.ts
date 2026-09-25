@@ -54,6 +54,12 @@ test.afterEach(async () => {
   const testInfo = test.info()
   if (testInfo.status === testInfo.expectedStatus || !launched) return
   const report: string[] = [`workspacePath=${workspacePath}`, `osEvents=${JSON.stringify(osEvents)}`]
+  // Is main still answering at all? A watcher call that blocks would freeze it.
+  const mainAnswers = await Promise.race([
+    launched.app.evaluate(() => 'yes').catch((err: unknown) => `threw: ${String(err)}`),
+    new Promise<string>((resolve) => setTimeout(() => resolve('no answer in 5s'), 5_000))
+  ])
+  report.push(`main process answers: ${mainAnswers}`)
   const dir = join(launched.userDataDir, 'logs')
   report.push(`logDir=${dir} exists=${existsSync(dir)}`)
   if (existsSync(dir)) {

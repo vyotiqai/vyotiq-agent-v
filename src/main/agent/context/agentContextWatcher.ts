@@ -116,6 +116,7 @@ function schedule(w: Watch, gitChanged: boolean): void {
   if (w.timer) clearTimeout(w.timer)
   w.timer = setTimeout(() => {
     w.timer = null
+    trace(`debounce fired${w.building ? ' while a rebuild runs' : ''}`)
     void rebuild(w)
   }, DEBOUNCE_MS)
 }
@@ -130,6 +131,7 @@ function armTargets(w: Watch): void {
     if (w.handles.has(target.key)) continue
     const dir = join(w.workspacePath, ...target.rel)
     try {
+      trace(`arming ${target.key}`)
       const handle = watch(dir, { recursive: target.recursive }, (event, filename) => {
         // `filename` is null on platforms that cannot report it — react rather
         // than filter, since a missed change is worse than a wasted rebuild.
