@@ -207,8 +207,8 @@ importers:
         specifier: ^6.8.9
         version: 6.8.9(supports-color@7.2.0)
       gpt-tokenizer:
-        specifier: ^3.4.0
-        version: 3.4.0
+        specifier: ^4.0.0
+        version: 4.0.0
       onnxruntime-node:
         specifier: 1.30.0
         version: 1.30.0
@@ -4898,8 +4898,8 @@ packages:
     resolution: {integrity: sha512-6tfZ91bOr7bOXnK7PRDCGBLa1H4U080YHNaAQ2KsMGlLEzRbk44nsZF2E1IeRc3vtJHPVbKCYgdFbaGO2ljd8g==}
     engines: {node: '>=10.19.0'}
 
-  gpt-tokenizer@3.4.0:
-    resolution: {integrity: sha512-wxFLnhIXTDjYebd9A9pGl3e31ZpSypbpIJSOswbgop5jLte/AsZVDvjlbEuVFlsqZixVKqbcoNmRlFDf6pz/UQ==}
+  gpt-tokenizer@4.0.0:
+    resolution: {integrity: sha512-YAWIyzvuVUHEfW7tFfFAxH8qQb+Q3RU9nYOTy7skMNX5qzU6Q8jxTHZLyO56ug1vYvCR7wndzpd3jwD86/mhjQ==}
 
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
@@ -12660,7 +12660,7 @@ snapshots:
       p-cancelable: 2.1.1
       responselike: 2.0.1
 
-  gpt-tokenizer@3.4.0: {}
+  gpt-tokenizer@4.0.0: {}
 
   graceful-fs@4.2.11: {}
 
