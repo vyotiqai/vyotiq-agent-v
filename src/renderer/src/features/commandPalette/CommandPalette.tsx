@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useEscapeToClose } from '@renderer/lib/hooks/useEscapeToClose'
 import { Icon, type IconName } from '@renderer/lib/icons'
 import { FileTypeIcon } from '@renderer/lib/fileIcons'
 import {
@@ -96,6 +97,11 @@ export function CommandPalette({
       }, 0)
     }
   }, [open])
+
+  // Escape closes it wherever focus is. The input answers Escape itself; this
+  // covers focus left outside it (a mouse-opened palette in an unfocused macOS
+  // window never took focus, and Escape did nothing).
+  useEscapeToClose(onClose, open)
 
   const commandsOnly = query.startsWith('>')
   const needle = (commandsOnly ? query.slice(1) : query).trim()

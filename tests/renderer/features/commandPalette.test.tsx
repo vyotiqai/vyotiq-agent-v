@@ -115,6 +115,19 @@ describe('CommandPalette', () => {
 })
 
 describe('paletteCommands', () => {
+  it('closes on Escape when focus is outside it, closing once', () => {
+    const { handlers, input } = renderPalette()
+    // A mouse-opened palette in an unfocused window can leave focus on the page.
+    input.blur()
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(handlers.onClose).toHaveBeenCalledTimes(1)
+
+    // From the input, its own handler answers and the window listener stands aside.
+    handlers.onClose.mockClear()
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(handlers.onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('lists one switch and one new-task command per open workspace, and never itself', () => {
     const titles = paletteCommands({ workspaces: [OTHER, WS], activePath: WS, canSendFeedback: false }).map((c) => c.title)
     expect(titles).toContain('Switch to alpha')

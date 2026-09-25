@@ -32,6 +32,8 @@ test.beforeAll(async () => {
   await launched.window.evaluate(() => localStorage.removeItem('vyotiq.chatPaneLayout'))
   await launched.window.reload()
   await launched.window.waitForLoadState('domcontentloaded')
+  // The app is ready once the task view has mounted; shortcuts answer from then on.
+  await expect(launched.window.locator('[data-composer-input]').first()).toBeVisible({ timeout: 30_000 })
 })
 
 test.afterAll(async () => {
