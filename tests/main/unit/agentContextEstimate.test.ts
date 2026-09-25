@@ -6,7 +6,9 @@ import {
 } from '../../../src/main/agent/context/estimate'
 import type { ChatMessage } from '../../../src/shared/ipc'
 
-const replayText = 'r'.repeat(48_000)
+// Words, as reasoning is: one letter repeated is BPE's worst case, ~30x slower
+// under coverage, and it put this file at the 30s test timeout on CI runners.
+const replayText = 'Weigh the cache drift against the token budget first. '.repeat(900)
 
 /**
  * RC1 fixture: an assistant turn whose reasoning is stored for the UI
@@ -85,7 +87,7 @@ describe('agent context estimate (history rewritten in place)', () => {
       role: 'tool',
       toolName: 'read',
       toolCallId: 'old',
-      content: 'x'.repeat(20_000)
+      content: 'A long tool result body, since cleared from the wire. '.repeat(370)
     } as unknown as ChatMessage
 
     const before = [{ role: 'user', content: 'go' }, fat, tail] as unknown as ChatMessage[]
