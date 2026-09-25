@@ -260,11 +260,12 @@ describe('TerminalPanel', () => {
 
     render(<TerminalPanel workspacePath="/ws" visible />)
 
+    // The key handler is attached once xterm is constructed, which can land
+    // after the host element under load (windows-latest).
     await waitFor(() => {
-      expect(document.querySelector('[data-pty-host]')).toBeTruthy()
+      expect(termMocks[termMocks.length - 1]?.handler).toBeTypeOf('function')
     })
     const term = termMocks[termMocks.length - 1] as CapturedTerm & { selection: boolean }
-    expect(term.handler).toBeTypeOf('function')
 
     const ctrlC = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, cancelable: true })
     // Without a selection, Ctrl+C flows through to the shell.
