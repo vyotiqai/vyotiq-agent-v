@@ -55,8 +55,9 @@ describe('armed prompt loop during quota exhaustion', () => {
     vi.useRealTimers()
     workspaceState.path = ''
     // A write the loop's tick started can still land while the tree is removed
-    // (ENOTEMPTY on the CI runners); rm retries that case itself.
-    const gone = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }
+    // (ENOTEMPTY on the CI runners); rm retries that case itself, backing off
+    // linearly: 12 tries is ~4s, where 5 (~0.75s) was outlasted on ubuntu.
+    const gone = { recursive: true, force: true, maxRetries: 12, retryDelay: 50 }
     if (existsSync(userData)) rmSync(userData, gone)
     if (existsSync(workspace)) rmSync(workspace, gone)
   })
