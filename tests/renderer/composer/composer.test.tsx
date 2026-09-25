@@ -521,7 +521,8 @@ describe('Composer', () => {
     await waitFor(() => {
       expect(screen.getByRole('listbox', { name: 'Select model' })).toBeTruthy()
     })
-    fireEvent.click(screen.getByRole('option', { name: /llama3.2 Tools/i }))
+    // The model rows load after the list opens; a busy suite catches the gap.
+    fireEvent.click(await screen.findByRole('option', { name: /llama3.2 Tools/i }))
     expect(onProviderModel).toHaveBeenCalledWith('ollama', 'llama3.2')
   })
 

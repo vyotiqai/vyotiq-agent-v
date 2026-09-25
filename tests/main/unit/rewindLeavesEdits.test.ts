@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   unlinkSync,
   writeFileSync,
@@ -32,9 +33,15 @@ vi.mock('fs', async (importOriginal) => {
   return {
     ...actual,
     copyFileSync: (src: import('fs').PathLike, dest: import('fs').PathLike, mode?: number): void => {
-      if (fsRoute.workspace && String(dest).startsWith(fsRoute.workspace)) {
-        fsRoute.copied.push(String(dest).split(/[\\/]/).pop() ?? '')
+      // Resolved on both sides: macOS hands out /var temp paths that are /private/var.
+      let intoWorkspace = false
+      try {
+        const destDir = actual.realpathSync(String(dest).replace(/[\\/][^\\/]*$/, ''))
+        intoWorkspace = Boolean(fsRoute.workspace) && destDir.startsWith(fsRoute.workspace)
+      } catch {
+        intoWorkspace = false
       }
+      if (intoWorkspace) fsRoute.copied.push(String(dest).split(/[\\/]/).pop() ?? '')
       if (fsRoute.failCopyFrom != null && String(src).replace(/\\/g, '/').endsWith(fsRoute.failCopyFrom)) {
         throw Object.assign(new Error('EBUSY: resource busy or locked, copyfile'), { code: 'EBUSY' })
       }
@@ -85,7 +92,7 @@ let runDir: string
 beforeEach(() => {
   resetWriteCheckpointsForTests()
   workspace = mkdtempSync(join(tmpdir(), 'vyotiq-rw-ws-'))
-  fsRoute.workspace = workspace
+  fsRoute.workspace = realpathSync(workspace)
   runDir = mkdtempSync(join(tmpdir(), 'vyotiq-rw-run-'))
   writeFileSync(join(workspace, 'a.txt'), 'a0\n', 'utf8')
   writeFileSync(join(workspace, 'b.txt'), 'b0\n', 'utf8')
