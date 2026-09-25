@@ -16,7 +16,6 @@ import { disposeAllPtySessions, replayPtySessionsToWindow } from '@main/app/ptyS
 import { disposeAllTerminalSessions } from '@main/agent/tools/terminalSessions'
 import { registerIpc } from './ipc/register'
 import { resumeActiveGoalsAndLoops } from './agent/resumeActiveGoals'
-import { resumeTasksForWorkspaces } from './agent/taskScheduler'
 import { initAutoUpdater, applyUpdateCheckSchedule } from '@main/updater'
 import { initNotifications, unreadNotificationCount } from './notifications/service'
 import { shutdownMcpServers, syncMcpServers } from '@main/agent/mcp'
@@ -209,8 +208,6 @@ if (!gotLock) {
         // Same rationale as boot resume: let first paint and hydration win.
         setTimeout(() => {
           if (!fresh.isDestroyed()) resumeActiveGoalsAndLoops(fresh.webContents)
-          // Queued tasks held for a missing window can start again now.
-          void resumeTasksForWorkspaces(getWorkspaces().openPaths)
         }, RESUME_AFTER_FIRST_PAINT_MS)
       })
       win.destroy()
@@ -373,9 +370,6 @@ if (!gotLock) {
         // first paint and renderer hydration win first.
         setTimeout(() => {
           if (!win.isDestroyed()) resumeActiveGoalsAndLoops(win.webContents)
-          // Delegated tasks re-arm after goals: queued tasks need a free window
-          // to stream into, and scheduling must not stampede boot.
-          void resumeTasksForWorkspaces(getWorkspaces().openPaths)
         }, RESUME_AFTER_FIRST_PAINT_MS)
       }
     })
@@ -401,9 +395,6 @@ if (!gotLock) {
           // first paint and renderer hydration win first.
           setTimeout(() => {
             if (!win.isDestroyed()) resumeActiveGoalsAndLoops(win.webContents)
-            // Window recreation must re-pump queued tasks held while no
-            // window existed — same contract as the boot path above.
-            void resumeTasksForWorkspaces(getWorkspaces().openPaths)
           }, RESUME_AFTER_FIRST_PAINT_MS)
         })
       }

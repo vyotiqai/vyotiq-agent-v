@@ -588,7 +588,41 @@ describe('ChatView composer placement', () => {
     })
   })
 
-  it('auto-opens Plan when plan.md is ready in plan mode', async () => {
+  // The auto-open trigger moved from `agentMode === 'plan'` to "this run called
+  // create_plan", since Plan mode is merged into Agent and every run now seeds a
+  // plan.md stub — mode and file existence both stopped meaning "has a plan".
+  const CREATE_PLAN_ITEM = {
+    kind: 'tool' as const,
+    id: 'cp1',
+    tool: { id: 'cp1', name: 'create_plan', summary: 'Ship it', status: 'done' as const }
+  }
+
+  it('does not auto-open Plan for a run that never called create_plan', async () => {
+    Object.defineProperty(window, 'vyotiq', {
+      configurable: true,
+      writable: true,
+      value: {
+        ...(window.vyotiq as object),
+        readRunArtifact: vi.fn().mockResolvedValue({
+          ok: true,
+          data: {
+            exists: true,
+            content: minimalReadyPlanMarkdown(),
+            path: '/ws/.vyotiq/runs/run-1/plan.md'
+          }
+        })
+      }
+    })
+
+    render(<ChatView {...baseProps} activeRunId="run-1" running items={[]} />)
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(document.querySelector('[data-plan-panel]')).toBeNull()
+  })
+
+  it('auto-opens Plan when the run published a plan with create_plan', async () => {
     Object.defineProperty(window, 'vyotiq', {
       configurable: true,
       writable: true,
@@ -608,10 +642,9 @@ describe('ChatView composer placement', () => {
     render(
       <ChatView
         {...baseProps}
-        agentMode="plan"
         activeRunId="run-1"
         running
-        items={[]}
+        items={[CREATE_PLAN_ITEM]}
       />
     )
 
@@ -642,7 +675,12 @@ describe('ChatView composer placement', () => {
       })
 
       render(
-        <ChatView {...baseProps} agentMode="plan" activeRunId="run-1" running items={[]} />
+        <ChatView
+          {...baseProps}
+          activeRunId="run-1"
+          running
+          items={[CREATE_PLAN_ITEM]}
+        />
       )
       await act(async () => {
         await Promise.resolve()

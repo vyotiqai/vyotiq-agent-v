@@ -338,8 +338,6 @@ export type WorkspaceUiSlice = {
   composerDraft: string
   composerDraftByRunId: Record<string, string>
   agentMode: AgentInteractionMode
-  /** Teammate profile bound per chat bucket (runId or draft key). */
-  agentProfileIdByRunId: Record<string, string>
   /** Whether this workspace's group is expanded in the sidebar (undefined = default). */
   expanded?: boolean
   /** Persisted per-run card expansion state (tool/group/thinking, collapsed turns). */
@@ -484,7 +482,6 @@ function defaultUiState(): WorkspaceUiState {
     composerDraft: '',
     composerDraftByRunId: {},
     agentMode: 'agent',
-    agentProfileIdByRunId: {},
     expansionsByRunId: {}
   }
 }
@@ -507,7 +504,6 @@ function uiStateFromContext(ctx: WorkspaceContext): WorkspaceUiState {
     composerDraft: ctx.ui.composerDraft,
     composerDraftByRunId: { ...ctx.ui.composerDraftByRunId },
     agentMode: ctx.ui.agentMode,
-    agentProfileIdByRunId: { ...ctx.ui.agentProfileIdByRunId },
     expanded: ctx.ui.expanded,
     expansionsByRunId: pruneExpansionsByRunId(ctx.ui.expansionsByRunId, {
       openRunIds: ctx.openRunIds,
@@ -516,15 +512,29 @@ function uiStateFromContext(ctx: WorkspaceContext): WorkspaceUiState {
   }
 }
 
-/** Keep persisted expansion state bounded to open (or recently open) runs. */
-function pruneExpansionsByRunId(
+/** Closed runs whose dismissed error boxes are remembered (the rest drop out oldest first). */
+const DISMISSED_ERRORS_RUNS_MAX = 200
+
+/**
+ * Keep persisted expansion state bounded to open (or recently open) runs.
+ * Dismissed error boxes are the exception: a closed run keeps those, bounded
+ * by run count, so a box the reader dismissed stays gone when it reopens.
+ */
+export function pruneExpansionsByRunId(
   expansions: Record<string, RunExpansions>,
   opts: { openRunIds: string[]; activeRunId: string | null }
 ): Record<string, RunExpansions> {
   const keep = new Set([...opts.openRunIds, ...(opts.activeRunId ? [opts.activeRunId] : [])])
   const out: Record<string, RunExpansions> = {}
+  const closedWithDismissals: [string, string[]][] = []
   for (const [runId, value] of Object.entries(expansions)) {
     if (keep.has(runId)) out[runId] = value
+    else if (value.dismissedErrorIds?.length) {
+      closedWithDismissals.push([runId, value.dismissedErrorIds])
+    }
+  }
+  for (const [runId, dismissedErrorIds] of closedWithDismissals.slice(-DISMISSED_ERRORS_RUNS_MAX)) {
+    out[runId] = { ...EMPTY_RUN_EXPANSIONS, dismissedErrorIds }
   }
   return out
 }
@@ -559,7 +569,6 @@ function contextFromRegistry(path: string, registry: WorkspacesState): Workspace
       composerDraft: ui.composerDraft,
       composerDraftByRunId: { ...(ui.composerDraftByRunId ?? {}) },
       agentMode: ui.agentMode ?? 'agent',
-      agentProfileIdByRunId: { ...(ui.agentProfileIdByRunId ?? {}) },
       expanded: ui.expanded,
       expansionsByRunId: { ...(ui.expansionsByRunId ?? {}) }
     },
@@ -582,9 +591,6 @@ export function useWorkspaceManager(options?: {
   getDefaultProviderModelForWorkspace?: (
     workspacePath: string
   ) => { provider: ProviderId; model: string } | null
-  /** Teammate model pin lookup — seeds a session's provider/model from its bound profile. */
-  getAgentProfileModelPin?: (profileId: string) => { provider: ProviderId; model: string } | null
-  getValidAgentProfileIds?: () => ReadonlySet<string> | null
   /** Settings `maxChatPanes`: 0 = auto (viewport-derived), 1–6 = fixed limit. */
   maxChatPanes?: number
 }) {
@@ -592,10 +598,6 @@ export function useWorkspaceManager(options?: {
   openInstanceRunIdsRef.current = options?.openInstanceRunIds ?? []
   const getDefaultProviderModelRef = useRef(options?.getDefaultProviderModelForWorkspace)
   getDefaultProviderModelRef.current = options?.getDefaultProviderModelForWorkspace
-  const getAgentProfileModelPinRef = useRef(options?.getAgentProfileModelPin)
-  getAgentProfileModelPinRef.current = options?.getAgentProfileModelPin
-  const getValidAgentProfileIdsRef = useRef(options?.getValidAgentProfileIds)
-  getValidAgentProfileIdsRef.current = options?.getValidAgentProfileIds
   const maxChatPanesRef = useRef(options?.maxChatPanes ?? 0)
   maxChatPanesRef.current = options?.maxChatPanes ?? 0
   const [registry, setRegistry] = useState<WorkspacesState | null>(null)
@@ -1104,80 +1106,15 @@ export function useWorkspaceManager(options?: {
       // draft key until a run id is assigned.
       let expansionRunId: string | null = runId
       const expansionBucketKey = (): string => expansionRunId ?? DRAFT_SCROLL_KEY
-      // Profile binding migrates with the same draft → run bucket transition.
-      let profileBindingRunId: string | null = runId
-      const profileBucketKey = (): string => profileBindingRunId ?? DRAFT_SCROLL_KEY
 
       const controller = createChatStreamController({
         workspacePath,
         runId,
         onRunIdAssigned: (assignedRunId) => {
-          // Migrate the draft's profile binding into the assigned run bucket —
-          // the closure bucket below changes with profileBindingRunId, but the
-          // persisted map only had the value under the draft key, so the
-          // composer picker reset and follow-up sends dropped the teammate.
-          const ctx0 = contextsRef.current[workspacePath]
-          const draftBinding = ctx0?.ui.agentProfileIdByRunId?.[DRAFT_SCROLL_KEY]
-          if (
-            ctx0 &&
-            draftBinding != null &&
-            ctx0.ui.agentProfileIdByRunId?.[assignedRunId] == null
-          ) {
-            const { [DRAFT_SCROLL_KEY]: _drop, ...restBindings } = ctx0.ui.agentProfileIdByRunId
-            const nextCtx0: WorkspaceContext = {
-              ...ctx0,
-              ui: {
-                ...ctx0.ui,
-                agentProfileIdByRunId: {
-                  ...restBindings,
-                  [assignedRunId]: draftBinding
-                }
-              }
-            }
-            contextsRef.current = { ...contextsRef.current, [workspacePath]: nextCtx0 }
-            setContexts((prev) => ({ ...prev, [workspacePath]: nextCtx0 }))
-            schedulePersistUiState(workspacePath, nextCtx0)
-          }
-          profileBindingRunId = assignedRunId
           onRunIdAssigned(assignedRunId)
         },
         onTerminal,
         getAgentMode: () => contextsRef.current[workspacePath]?.ui.agentMode ?? 'agent',
-        getAgentProfileId: () =>
-          // Match the setter and the composer's reader: a context stored under
-          // a different spelling of the same path must still be found, or the
-          // send silently drops the teammate the picker is visibly showing.
-          (contextsRef.current[workspacePath] ??
-            findByWorkspacePath(contextsRef.current, workspacePath))?.ui.agentProfileIdByRunId?.[
-            profileBucketKey()
-          ] ?? null,
-        onAgentProfileRefused: () => {
-          // Main refused this teammate: the run is durably bound to another.
-          // Cleared directly rather than through setAgentProfileIdForRun,
-          // whose own guard ("a durable binding differs") would block the
-          // clear and leave the refusal repeating on every later send.
-          const ctx =
-            contextsRef.current[workspacePath] ??
-            findByWorkspacePath(contextsRef.current, workspacePath)
-          if (!ctx) return
-          const storedPath =
-            contextsRef.current[workspacePath] != null
-              ? workspacePath
-              : (Object.keys(contextsRef.current).find((key) =>
-                  workspacePathsEqual(key, workspacePath)
-                ) ?? workspacePath)
-          const bucket = profileBucketKey()
-          const nextMap = { ...(ctx.ui.agentProfileIdByRunId ?? {}) }
-          if (nextMap[bucket] == null) return
-          delete nextMap[bucket]
-          const nextCtx: WorkspaceContext = {
-            ...ctx,
-            ui: { ...ctx.ui, agentProfileIdByRunId: nextMap }
-          }
-          contextsRef.current = { ...contextsRef.current, [storedPath]: nextCtx }
-          setContexts((prev) => ({ ...prev, [storedPath]: nextCtx }))
-          schedulePersistUiState(storedPath, nextCtx)
-        },
         getDefaultProviderModel: () =>
           getDefaultProviderModelRef.current?.(workspacePath) ?? null,
         onAgentModeChange: (mode) => {
@@ -1212,17 +1149,6 @@ export function useWorkspaceManager(options?: {
         }
       })
       controllersRef.current.set(key, controller)
-      // Seed the session's provider/model from the teammate pin at creation —
-      // session-scoped only: a later manual pick overrides it and nothing is
-      // written to the workspace/global default. Creation happens once per
-      // session, so remounts (dictation, panes) never re-fire it.
-      const boundProfileId =
-        (contextsRef.current[workspacePath] ??
-          findByWorkspacePath(contextsRef.current, workspacePath))?.ui.agentProfileIdByRunId?.[
-          runId ?? DRAFT_SCROLL_KEY
-        ] ?? null
-      const pin = boundProfileId ? getAgentProfileModelPinRef.current?.(boundProfileId) : null
-      if (pin) controller.setProviderModel(pin.provider, pin.model)
       if (runId) {
         registerRunId(runId, workspacePath)
         void restorePendingQuestions(controller, runId)
@@ -1249,21 +1175,6 @@ export function useWorkspaceManager(options?: {
             runIds,
             ctx.runs.map((r) => r.runId)
           )
-          const validProfileIds = getValidAgentProfileIdsRef.current?.() ?? null
-          const hydratedBindings = { ...ctx.ui.agentProfileIdByRunId }
-          let bindingsChanged = false
-          if (validProfileIds) {
-            for (const run of [...res.data.runs, ...(res.data.instanceRuns ?? [])]) {
-              if (
-                run.agentProfileId &&
-                validProfileIds.has(run.agentProfileId) &&
-                hydratedBindings[run.runId] == null
-              ) {
-                hydratedBindings[run.runId] = run.agentProfileId
-                bindingsChanged = true
-              }
-            }
-          }
           const nextCtx: WorkspaceContext = {
             ...ctx,
             runs: res.data.runs,
@@ -1271,16 +1182,12 @@ export function useWorkspaceManager(options?: {
             runsCapped: res.data.capped,
             runsError: null,
             runsLoaded: true,
-            ...(bindingsChanged
-              ? { ui: { ...ctx.ui, agentProfileIdByRunId: hydratedBindings } }
-              : {}),
             ...(reconciled.changed
               ? {
                   openRunIds: reconciled.openRunIds,
                   activeRunId: reconciled.activeRunId,
                   ui: {
                     ...ctx.ui,
-                    agentProfileIdByRunId: hydratedBindings,
                     scrollTopByRunId: pruneScrollTopByRunId(ctx.ui.scrollTopByRunId, {
                       openRunIds: reconciled.openRunIds,
                       activeRunId: reconciled.activeRunId
@@ -1290,7 +1197,7 @@ export function useWorkspaceManager(options?: {
               : {})
           }
           contextsRef.current = { ...contextsRef.current, [workspacePath]: nextCtx }
-          if (reconciled.changed || bindingsChanged) {
+          if (reconciled.changed) {
             schedulePersistUiState(workspacePath, nextCtx)
           }
           return {
@@ -1688,11 +1595,6 @@ export function useWorkspaceManager(options?: {
             composerDraft,
             composerDraftByRunId,
             agentMode: existing.ui.agentMode ?? refUi?.agentMode ?? ui.agentMode ?? 'agent',
-            agentProfileIdByRunId: {
-              ...(ui.agentProfileIdByRunId ?? {}),
-              ...existing.ui.agentProfileIdByRunId,
-              ...(refUi?.agentProfileIdByRunId ?? {})
-            },
             expanded: existing.ui.expanded ?? refUi?.expanded ?? ui.expanded,
             expansionsByRunId: {
               ...(ui.expansionsByRunId ?? {}),
@@ -2423,14 +2325,19 @@ export function useWorkspaceManager(options?: {
   /** New chat (runId null) in a specific workspace; switches there first when needed. */
   const newChatInWorkspace = useCallback(
     async (path: string): Promise<void> => {
-      if (!activeWorkspace || !workspacePathsEqual(activeWorkspace, path)) {
+      // The live registry, not this render's activeWorkspace: the add-workspace
+      // handoff calls in right after addWorkspace resolves, when the closure
+      // still holds the previous workspace, and switching would re-activate the
+      // one main just made active. openRunTabInWorkspace syncs the pane either way.
+      const active = registryRef.current?.activePath ?? null
+      if (!active || !workspacePathsEqual(active, path)) {
         await switchWorkspace(path)
       }
       // Same session-replacement semantics as the top-bar + button (openRunTab(null)):
       // single pane syncs to (path, null); multi-pane replaces the focused pane.
       openRunTabInWorkspace(path, null)
     },
-    [activeWorkspace, openRunTabInWorkspace, switchWorkspace]
+    [openRunTabInWorkspace, switchWorkspace]
   )
 
   const openSessionInFocusedPane = useCallback(
@@ -2721,96 +2628,6 @@ export function useWorkspaceManager(options?: {
     [activeWorkspace, getFocusedPane, schedulePersistUiState]
   )
 
-  const setAgentProfileIdForRun = useCallback(
-    (workspacePath: string | null, runId: string | null, profileId: string | null) => {
-      if (!workspacePath) return
-      const ctx =
-        contextsRef.current[workspacePath] ??
-        findByWorkspacePath(contextsRef.current, workspacePath)
-      if (!ctx) return
-      const storedPath =
-        contextsRef.current[workspacePath] != null
-          ? workspacePath
-          : (Object.keys(contextsRef.current).find((key) =>
-              workspacePathsEqual(key, workspacePath)
-            ) ?? workspacePath)
-      const bucket = runId ?? DRAFT_SCROLL_KEY
-      if (runId) {
-        const durable = [...ctx.runs, ...ctx.olderRuns, ...ctx.instanceRuns].find(
-          (run) => run.runId === runId
-        )?.agentProfileId
-        if (durable && durable !== profileId) return
-      }
-      const nextMap = { ...(ctx.ui.agentProfileIdByRunId ?? {}) }
-      if ((nextMap[bucket] ?? null) === profileId) return
-      if (profileId) nextMap[bucket] = profileId
-      else delete nextMap[bucket]
-      const nextCtx: WorkspaceContext = {
-        ...ctx,
-        ui: { ...ctx.ui, agentProfileIdByRunId: nextMap }
-      }
-      contextsRef.current = { ...contextsRef.current, [storedPath]: nextCtx }
-      setContexts((prev) => ({ ...prev, [storedPath]: nextCtx }))
-      schedulePersistUiState(storedPath, nextCtx)
-      // Bind-time adoption: a teammate with a model pin seeds the session's
-      // provider/model immediately (creation-time seeding already covers chats
-      // that mount pre-bound). Session-scoped only — never the global default.
-      if (profileId) {
-        const pin = getAgentProfileModelPinRef.current?.(profileId)
-        if (pin) ensureController(storedPath, runId).setProviderModel(pin.provider, pin.model)
-      }
-    },
-    [ensureController, schedulePersistUiState]
-  )
-
-  const getAgentProfileIdForRun = useCallback(
-    (workspacePath: string | null, runId: string | null): string | null => {
-      if (!workspacePath) return null
-      // Match the setter (and the rest of the codebase): a context stored
-      // under a different spelling of the same path must still be found, or
-      // the send silently drops the teammate binding.
-      const ctx =
-        contextsRef.current[workspacePath] ??
-        findByWorkspacePath(contextsRef.current, workspacePath)
-      return ctx?.ui.agentProfileIdByRunId?.[runId ?? DRAFT_SCROLL_KEY] ?? null
-    },
-    []
-  )
-
-  /**
-   * Drop every chat binding whose profile id is no longer in the roster — a
-   * deleted teammate must never ride a stale id into chatStart (main rejects
-   * the whole send with 'Unknown agent profile'). Call when the roster loads
-   * or changes. Unknown-bucket bindings for not-yet-loaded rosters are safe:
-   * only pass the roster's own ids.
-   */
-  const pruneAgentProfileBindings = useCallback(
-    (validIds: ReadonlySet<string>): void => {
-      let changedAny = false
-      const nextContexts: Record<string, WorkspaceContext> = { ...contextsRef.current }
-      for (const [path, ctx] of Object.entries(nextContexts)) {
-        const map = ctx.ui.agentProfileIdByRunId
-        if (!map) continue
-        const stale = Object.keys(map).filter((bucket) => !validIds.has(map[bucket]!))
-        if (stale.length === 0) continue
-        const nextMap = { ...map }
-        for (const bucket of stale) delete nextMap[bucket]
-        const nextCtx: WorkspaceContext = {
-          ...ctx,
-          ui: { ...ctx.ui, agentProfileIdByRunId: nextMap }
-        }
-        nextContexts[path] = nextCtx
-        schedulePersistUiState(path, nextCtx)
-        changedAny = true
-      }
-      if (changedAny) {
-        contextsRef.current = nextContexts
-        setContexts(nextContexts)
-      }
-    },
-    [schedulePersistUiState]
-  )
-
   const onMessageListScrollForPane = useCallback(
     (workspacePath: string, runId: string | null, scrollTop: number): void => {
       const ctx = contextsRef.current[workspacePath]
@@ -2908,6 +2725,10 @@ export function useWorkspaceManager(options?: {
 
   const onTurnToggle = useCallback((turnIndex: number) => {
     activeControllerRef.current?.toggleTurnCollapsed(turnIndex)
+  }, [])
+
+  const onDismissRunError = useCallback((itemId: string) => {
+    activeControllerRef.current?.dismissRunError(itemId)
   }, [])
 
   const onApprovalDecision = useCallback(
@@ -3061,31 +2882,12 @@ export function useWorkspaceManager(options?: {
       const seen = new Set(current.runs.map((r) => r.runId))
       for (const r of current.olderRuns) seen.add(r.runId)
       const deduped = res.data.runs.filter((r) => !seen.has(r.runId))
-      const validProfileIds = getValidAgentProfileIdsRef.current?.() ?? null
-      const hydratedBindings = { ...current.ui.agentProfileIdByRunId }
-      let bindingsChanged = false
-      if (validProfileIds) {
-        for (const run of deduped) {
-          if (
-            run.agentProfileId &&
-            validProfileIds.has(run.agentProfileId) &&
-            hydratedBindings[run.runId] == null
-          ) {
-            hydratedBindings[run.runId] = run.agentProfileId
-            bindingsChanged = true
-          }
-        }
-      }
       const nextCtx: WorkspaceContext = {
         ...current,
         olderRuns: [...current.olderRuns, ...deduped],
-        runsCapped: res.data.hasMore,
-        ...(bindingsChanged
-          ? { ui: { ...current.ui, agentProfileIdByRunId: hydratedBindings } }
-          : {})
+        runsCapped: res.data.hasMore
       }
       contextsRef.current = { ...contextsRef.current, [workspacePath]: nextCtx }
-      if (bindingsChanged) schedulePersistUiState(workspacePath, nextCtx)
       return { ...prev, [workspacePath]: nextCtx }
     })
   }, [schedulePersistUiState])
@@ -3229,9 +3031,6 @@ export function useWorkspaceManager(options?: {
     switchWorkspace,
     addWorkspace,
     removeWorkspace,
-    setAgentProfileIdForRun,
-    getAgentProfileIdForRun,
-    pruneAgentProfileBindings,
     workspaceExpandedByPath,
     setWorkspaceExpanded,
     getRunController,
@@ -3263,6 +3062,7 @@ export function useWorkspaceManager(options?: {
     onToolToggle,
     onGroupToggle,
     onTurnToggle,
+    onDismissRunError,
     onApprovalDecision,
     onQuestionSubmit,
     collapsedTurns,

@@ -68,6 +68,47 @@ describe('agent context estimate (reasoning replay)', () => {
   })
 })
 
+describe('agent context estimate (history rewritten in place)', () => {
+  /**
+   * Mirrors `trimToolResults`: same length, tail returned by identity, an older
+   * body replaced. The cache used to key on (length, tail identity) and would
+   * serve the pre-rewrite total for exactly this shape.
+   */
+  it('re-counts a same-length array whose middle changed and whose tail is the same object', async () => {
+    const tail: ChatMessage = {
+      role: 'tool',
+      toolName: 'read',
+      toolCallId: 'keep',
+      content: 'kept body'
+    } as unknown as ChatMessage
+    const fat: ChatMessage = {
+      role: 'tool',
+      toolName: 'read',
+      toolCallId: 'old',
+      content: 'x'.repeat(20_000)
+    } as unknown as ChatMessage
+
+    const before = [{ role: 'user', content: 'go' }, fat, tail] as unknown as ChatMessage[]
+    const full = await estimateMessagesTokensAsync(before)
+
+    const after = before.map((m) => (m === fat ? { ...m, content: '[cleared]' } : m))
+    expect(after).toHaveLength(before.length)
+    expect(after[after.length - 1]).toBe(tail)
+
+    const cleared = await estimateMessagesTokensAsync(after)
+    expect(cleared).toBeLessThan(full / 2)
+  })
+
+  it('still serves the memo for the identical array', async () => {
+    const messages = [
+      { role: 'user', content: 'go' },
+      { role: 'assistant', content: 'done' }
+    ] as unknown as ChatMessage[]
+    const first = await estimateMessagesTokensAsync(messages)
+    expect(await estimateMessagesTokensAsync(messages)).toBe(first)
+  })
+})
+
 describe('agent context estimate (resume anchor)', () => {
   it('anchors the compaction decision on the provider figure across resume', () => {
     // Resumed run before the first usage report arrives: the replay-inflated
@@ -92,10 +133,10 @@ describe('agent context estimate (resume anchor)', () => {
 })
 
 /**
- * Every part kind a message can carry, in one object. The two estimators —
- * the synchronous incremental path and the batched worker path — used to walk
- * this shape in two separately-maintained copies of the same branch set; they
- * now share `messageParts`, and these tests are what keeps them honest.
+ * Every part kind a message can carry, in one object. Counting used to be walked by
+ * two separately-maintained branch sets — a synchronous incremental path and the
+ * batched worker path — which is how they drifted. There is one walk now
+ * (`messageParts`), and these tests are what keeps every branch of it counted.
  */
 function richMessages(): ChatMessage[] {
   return [
@@ -121,8 +162,8 @@ function richMessages(): ChatMessage[] {
   ] as unknown as ChatMessage[]
 }
 
-describe('agent context estimate (one walk, two paths)', () => {
-  it('agrees between the batched cold path and the incremental sync path', async () => {
+describe('agent context estimate (one walk)', () => {
+  it('reaches the same total whether history arrives whole or one message at a time', async () => {
     // Fresh objects each time: the per-message cache is a WeakMap keyed by
     // identity, so distinct objects force a real re-count down each path.
     const cold = await estimateMessagesTokensAsync(richMessages())
@@ -135,7 +176,7 @@ describe('agent context estimate (one walk, two paths)', () => {
     expect(incremental).toBe(cold)
   })
 
-  it('agrees on both paths with reasoning replay switched off', async () => {
+  it('reaches the same total either way with reasoning replay switched off', async () => {
     const opts = { countReasoningReplay: false }
     const cold = await estimateMessagesTokensAsync(richMessages(), undefined, opts)
 

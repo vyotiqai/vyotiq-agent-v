@@ -54,7 +54,7 @@ export function MemoryReadBody({ tool, inGroup }: ToolBodyProps) {
   return (
     <div>
       {!inGroup ? (
-        <div className="border-b border-border px-3 py-1 font-mono text-2xs text-tertiary">
+        <div className="border-b border-border/40 px-3 py-1 font-mono text-2xs text-tertiary">
           {data.path}
         </div>
       ) : null}
@@ -83,7 +83,7 @@ export function MemoryWriteBody({ tool, inGroup }: ToolBodyProps) {
   return (
     <div>
       {!inGroup ? (
-        <div className="flex items-baseline justify-between gap-2 border-b border-border px-3 py-1">
+        <div className="flex items-baseline justify-between gap-2 border-b border-border/40 px-3 py-1">
           <span className="truncate font-mono text-2xs text-tertiary">{data.path}</span>
           <span className="shrink-0 text-2xs tabular-nums text-tertiary">
             {data.charCount} chars

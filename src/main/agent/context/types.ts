@@ -111,13 +111,6 @@ export type AssembleInput = {
   pluginRulesSection?: string
   /** User-global rules from settings; assembled before workspace rules. */
   userRules?: UserRule[]
-  /**
-   * Display name of the teammate profile this run is bound to.
-   *
-   * Fixed for the life of a run, which is what makes it safe to put in the
-   * cached stable prefix. Absent for an unbound chat.
-   */
-  teammateName?: string
   /** User-set assistant name (settings.agentPersona). Empty/omitted = unnamed. */
   persona?: string
   /** User-set identity blurb (settings.agentIdentity). Empty/omitted = no identity. */
@@ -131,8 +124,10 @@ export type AssembleInput = {
   modeSection?: string
   plan?: string
   /**
-   * Plan mode: keep the `<plan>` inner text equal to on-disk plan.md (no
-   * heading strip, no token cap) so str_replace/edit args can quote it.
+   * Keep the `<plan>` inner text equal to on-disk plan.md (no heading strip,
+   * no token cap) so str_replace/edit args can quote it. Set whenever the run
+   * has a real plan — the mode that used to gate this was merged into Agent,
+   * which both publishes the plan and edits it.
    */
   planVerbatim?: boolean
   sessionEnv?: string

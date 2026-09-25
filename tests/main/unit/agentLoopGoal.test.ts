@@ -153,33 +153,34 @@ describe('runAgent goal auto-continue', () => {
     expect(String(goalWait?.message)).toContain('Goal is still active')
   })
 
-  it('auto-continues an active goal in Plan mode too, then waits visibly', async () => {
+  it('does not auto-continue an active goal in Ask mode', async () => {
+    // Replaces "auto-continues an active goal in Plan mode too": with Plan
+    // merged into Agent that case became a duplicate of the test above. Ask is
+    // the only mode that still differs, and it is the untested half —
+    // shouldAutoContinueActiveGoal returns 'none' for it (read-only Q&A must
+    // not loop), so the run stops after one call with the goal left active.
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
-      yield { type: 'text', text: 'plan only' }
+      yield { type: 'text', text: 'answer only' }
       yield { type: 'done', stopReason: 'stop' }
     })
 
-    const runId = 'goal-plan'
-    const events: Array<{ type: string; reason?: string }> = []
-    for await (const ev of runAgent({
+    const runId = 'goal-ask'
+    for await (const _ of runAgent({
       runId,
       messages: [{ role: 'user', content: formatGoalInvocation('make CI green') }],
       workspacePath: workspace,
-      mode: 'plan'
+      mode: 'ask'
     })) {
-      events.push(ev as { type: string; reason?: string })
+      // drain
     }
-    // 2 plan nudges (no create_plan call) + 1 goal continue + final stop_wait.
-    expect(streamChat.mock.calls.length).toBe(4)
-    expect(loadMessages(workspace, runId).some((m) => String(m.content).startsWith(GOAL_CONTINUE_PREFIX))).toBe(
-      true
-    )
-    expect(readGoal(resolveRunDir(workspace, runId))?.status).toBe('active')
-    const goalWait = events.find((e) => e.type === 'incomplete' && e.reason === 'goal_wait')
-    expect(goalWait).toBeTruthy()
+
+    expect(streamChat.mock.calls.length).toBe(1)
     expect(
-      readFileSync(join(resolveRunDir(workspace, runId), 'events.jsonl'), 'utf8')
-    ).toContain('"reason":"goal_wait"')
+      loadMessages(workspace, runId).some((m) =>
+        String(m.content).startsWith(GOAL_CONTINUE_PREFIX)
+      )
+    ).toBe(false)
+    expect(readGoal(resolveRunDir(workspace, runId))?.status).toBe('active')
   })
 
   it('leaves the goal active when the run is aborted (quit must still resume)', async () => {

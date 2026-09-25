@@ -177,7 +177,7 @@ export const ChangeSummary = memo(function ChangeSummary({
 
     return (
       <div className={cn(TOOL_CARD_SURFACE, 'w-full')} data-change-summary="receipt">
-        <div className={cn(TOOL_CARD_HEADER, 'flex items-center gap-2 border-b border-border text-fg')}>
+        <div className={cn(TOOL_CARD_HEADER, 'flex items-center gap-2 border-b border-border/40 text-fg')}>
           <span className="min-w-0 truncate font-medium">{title}</span>
           {onOpenChanges ? (
             <button

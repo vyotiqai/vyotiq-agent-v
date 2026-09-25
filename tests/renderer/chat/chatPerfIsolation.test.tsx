@@ -7,7 +7,8 @@ import { join } from 'node:path'
 import { renderHook, act } from '@testing-library/react'
 import {
   useHasChatItems,
-  useHasTranscriptRunError
+  transcriptShowsError,
+  useTranscriptShowsError
 } from '@renderer/features/chat/components/ChatStreamLeaves'
 import type { ChatItemsStore } from '@renderer/features/chat/chatStores'
 import type { UiItem } from '@shared/transcript'
@@ -103,10 +104,10 @@ describe('useHasChatItems', () => {
   })
 })
 
-describe('useHasTranscriptRunError', () => {
+describe('useTranscriptShowsError', () => {
   it('stays Object.is-stable across stream growth without a run_error', () => {
     const store = makeStore([])
-    const { result, rerender } = renderHook(() => useHasTranscriptRunError(store, []))
+    const { result, rerender } = renderHook(() => useTranscriptShowsError(store, [], 'boom'))
     expect(result.current).toBe(false)
     act(() => {
       store.setItems([
@@ -127,8 +128,26 @@ describe('useHasTranscriptRunError', () => {
     const store = makeStore([
       { kind: 'run_error', id: 'e1', message: 'boom' } as UiItem
     ])
-    const { result } = renderHook(() => useHasTranscriptRunError(store, []))
+    const { result } = renderHook(() => useTranscriptShowsError(store, [], 'boom'))
     expect(result.current).toBe(true)
+  })
+})
+
+describe('transcriptShowsError', () => {
+  const prompt = (id: string): UiItem => ({ kind: 'message', id, role: 'user', content: id })
+  const box = (id: string, message: string): UiItem => ({ kind: 'run_error', id, message })
+
+  it('matches only the current error in the latest turn', () => {
+    const items = [prompt('u1'), box('e1', 'boom')]
+    expect(transcriptShowsError(items, 'boom')).toBe(true)
+    // A different, current error still needs the banner.
+    expect(transcriptShowsError(items, 'Wait for the run to finish before reverting.')).toBe(false)
+    expect(transcriptShowsError(items, null)).toBe(false)
+  })
+
+  it('ignores a box left in an earlier turn', () => {
+    const items = [prompt('u1'), box('e1', 'boom'), prompt('u2')]
+    expect(transcriptShowsError(items, 'boom')).toBe(false)
   })
 })
 

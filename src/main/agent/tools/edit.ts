@@ -271,6 +271,11 @@ export function toolEdit(
   assertResolvedInsideWorkspace(workspaceRoot, resolved)
 
   const existed = existsSync(resolved)
+  if (existed && statSync(resolved).isDirectory()) {
+    throw new Error(
+      `Path is a directory: ${path}. edit needs a file path — use read to list the directory or edit a file inside it.`
+    )
+  }
 
   if (typeof contents === 'string') {
     if (existed && contents.length === 0 && statSync(resolved).size > 0) {

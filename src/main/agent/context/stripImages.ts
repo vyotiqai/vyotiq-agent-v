@@ -84,6 +84,14 @@ export function stripUnsupportedModalitiesFromMessages(
     )
     if (!hasRich) return m
     const parts = providerContentParts(m.content, caps)
+    // Nothing was actually replaced — every rich part is supported on this model, so
+    // hand back the same message. `providerContentParts` always allocates a fresh
+    // array while passing supported parts through by identity, so a vision run used
+    // to mint a new object for its screenshot message on every step, missing the
+    // per-message token cache and re-decoding the image header each time.
+    if (parts.length === m.content.length && parts.every((p, i) => p === m.content[i])) {
+      return m
+    }
     return withCollapsedTextParts(m, parts)
   })
 }

@@ -43,11 +43,9 @@ export function launchRunFollowUpOrStart(input: {
     return { ok: false, error: 'Run not found' }
   }
 
-  // Recover the teammate binding so the registry entry carries the profile —
-  // the task scheduler's one-run-per-teammate gate reads it from here.
+  // Recover the run dir for follow-up hydration below.
   const runDir = resolveRunDir(input.workspacePath, input.runId)
-  const boundProfileId = loadStatus(runDir)?.agentProfileId
-  const registered = tryRegisterRunAbort(input.runId, input.workspacePath, boundProfileId)
+  const registered = tryRegisterRunAbort(input.runId, input.workspacePath)
   if (!registered.ok) return { ok: false, error: registered.error }
 
   hydrateFollowUpsFromDisk(runDir, input.runId)

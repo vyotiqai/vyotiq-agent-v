@@ -510,51 +510,6 @@ export interface VyotiqApi {
   }) => Promise<IpcResult<{ cleared: 'history' | 'cookies' | 'cache' | 'all' }>>
   /** Toggle the floating always-on-top PiP window hosting the live browser view. */
   browserPipToggle: () => Promise<IpcResult<{ pip: boolean }>>
-  agentProfilesList: () => Promise<IpcResult<import('./ipc').AgentProfile[]>>
-  agentProfilesCreate: (
-    profile: import('./ipc').AgentProfileCreateRequest
-  ) => Promise<IpcResult<import('./ipc').AgentProfile>>
-  agentProfilesUpdate: (
-    payload: import('./ipc').AgentProfileUpdateRequest
-  ) => Promise<IpcResult<import('./ipc').AgentProfile>>
-  agentProfilesDelete: (
-    payload: import('./ipc').AgentProfileDeleteRequest
-  ) => Promise<IpcResult<import('./ipc').AgentProfileDeleteResult>>
-  onAgentProfilesChanged: (
-    handler: (event: import('./ipc').AgentProfilesChangedEvent) => void
-  ) => () => void
-  agentProfileOverridesList: (
-    payload: import('./ipc').AgentProfileOverridesListRequest
-  ) => Promise<IpcResult<import('./ipc').AgentProfileOverridesResult>>
-  agentProfileOverrideSet: (
-    payload: import('./ipc').AgentProfileOverrideSetRequest
-  ) => Promise<IpcResult<import('./ipc').AgentProfileOverride | null>>
-  /** Grant this workspace's override file its privileged fields, as written. */
-  agentProfileOverrideAccept: (
-    payload: import('./ipc').AgentProfileOverrideAcceptRequest
-  ) => Promise<IpcResult<import('./ipc').AgentProfileOverridesResult>>
-  onAgentProfileOverridesChanged: (
-    handler: (event: import('./ipc').AgentProfileOverridesChangedEvent) => void
-  ) => () => void
-  agentMemoryList: (
-    payload: import('./ipc').AgentMemoryListRequest
-  ) => Promise<IpcResult<import('./ipc').AgentMemoryListResult>>
-  agentMemoryRead: (
-    payload: import('./ipc').AgentMemoryReadRequest
-  ) => Promise<IpcResult<import('./ipc').AgentMemoryReadResult>>
-  /** Resolves to the refreshed namespace, so a write needs no follow-up list. */
-  agentMemoryWrite: (
-    payload: import('./ipc').AgentMemoryWriteRequest
-  ) => Promise<IpcResult<import('./ipc').AgentMemoryListResult>>
-  tasksList: () => Promise<IpcResult<import('./ipc').DelegatedTask[]>>
-  tasksEnqueue: (
-    payload: import('./ipc').TaskEnqueueRequest
-  ) => Promise<IpcResult<import('./ipc').DelegatedTask>>
-  tasksCancel: (payload: import('./ipc').TaskCancelRequest) => Promise<IpcResult<boolean>>
-  tasksRetry: (
-    payload: import('./ipc').TaskRetryRequest
-  ) => Promise<IpcResult<import('./ipc').DelegatedTask>>
-  onTasksChanged: (handler: (event: import('./ipc').TasksChangedEvent) => void) => () => void
   openLogsDir: () => Promise<IpcResult<true>>
   getLogsPath: () => Promise<IpcResult<string>>
   getCrashDiagnostics: () => Promise<IpcResult<CrashDiagnosticsSnapshot>>

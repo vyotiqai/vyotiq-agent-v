@@ -518,13 +518,15 @@ describe('ipc schemas', () => {
         verifyCoverage: 1
       }).verified
     ).toBe(true)
-    expect(
-      AgentEventSchema.parse({
-        type: 'mode_changed',
-        runId: 'r1',
-        mode: 'plan'
-      }).mode
-    ).toBe('plan')
+    const modeOf = (raw: unknown): string | null => {
+      const ev = AgentEventSchema.parse(raw)
+      return ev.type === 'mode_changed' ? ev.mode : null
+    }
+    expect(modeOf({ type: 'mode_changed', runId: 'r1', mode: 'agent' })).toBe('agent')
+    // events.jsonl written before Plan merged into Agent still holds 'plan'.
+    // Transcript replay re-parses those rows, so the value must FOLD rather
+    // than throw — a rejected row would break replay of every pre-merge run.
+    expect(modeOf({ type: 'mode_changed', runId: 'r1', mode: 'plan' })).toBe('agent')
     expect(
       AgentEventSchema.parse({
         type: 'goal_update',

@@ -60,7 +60,7 @@ function PathTree({ path }: { path: string }) {
   const parts = pathSegments(path)
   if (!parts.length) return null
   return (
-    <div className="sidebar-scroll flex min-h-0 min-w-[140px] max-w-[180px] shrink-0 flex-col gap-0.5 overflow-y-auto border-l border-border px-2 py-1.5">
+    <div className="sidebar-scroll flex min-h-0 min-w-[140px] max-w-[180px] shrink-0 flex-col gap-0.5 overflow-y-auto border-l border-border/40 px-2 py-1.5">
       {parts.map((part, i) => {
         const isLast = i === parts.length - 1
         return (
@@ -261,7 +261,7 @@ export function MentionMenu({
     >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {title ? (
-          <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
+          <div className="flex shrink-0 items-center gap-1 border-b border-border/40 px-2 py-1.5">
             {onBack ? (
               <button
                 type="button"
@@ -279,7 +279,7 @@ export function MentionMenu({
             ) : null}
           </div>
         ) : loading && items.length > 0 ? (
-          <div className="shrink-0 border-b border-border px-2.5 py-1 text-2xs text-secondary">
+          <div className="shrink-0 border-b border-border/40 px-2.5 py-1 text-2xs text-secondary">
             Searching…
           </div>
         ) : null}

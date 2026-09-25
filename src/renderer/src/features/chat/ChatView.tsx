@@ -29,7 +29,8 @@ import {
   useAgentFileFocus,
   useAgentLiveActivity,
   useGitRevision,
-  useHasChatItems
+  useHasChatItems,
+  useHasCreatePlanCall
 } from './components/ChatStreamLeaves'
 import { useGitChrome } from './components/GitChrome'
 import type { UiAgentQuestionAnswer, UiItem } from '@shared/transcript'
@@ -152,9 +153,6 @@ export function ChatView({
   onChatSettingsChange,
   agentMode = 'agent',
   onAgentModeChange = () => {},
-  agentProfileId = null,
-  onAgentProfileChange = () => {},
-  onContinueInAgent,
   onSend,
   onStop,
   onEditAndResend,
@@ -175,6 +173,7 @@ export function ChatView({
   onToolToggle,
   onGroupToggle,
   onTurnToggle,
+  onDismissRunError,
   onApprovalDecision,
   onQuestionSubmit,
   collapsedTurns,
@@ -253,9 +252,6 @@ export function ChatView({
   onChatSettingsChange: (patch: ChatSettingsPatch) => void
   agentMode?: AgentInteractionMode
   onAgentModeChange?: (mode: AgentInteractionMode) => void
-  agentProfileId?: string | null
-  onAgentProfileChange?: (profileId: string | null) => void
-  onContinueInAgent?: () => void
   onSend: (
     text: string,
     images?: string[],
@@ -288,6 +284,8 @@ export function ChatView({
   onToolToggle?: (toolCallId: string, expanded: boolean) => void
   onGroupToggle?: (anchorToolCallId: string, expanded: boolean) => void
   onTurnToggle?: (turnIndex: number) => void
+  /** Dismiss (and remember) one run_error row in the transcript. */
+  onDismissRunError?: (itemId: string) => void
   onApprovalDecision?: (requestId: string, decision: ToolApprovalDecision) => void | Promise<void>
   onQuestionSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
   collapsedTurns?: ReadonlySet<number>
@@ -524,6 +522,8 @@ const runGoal = useRunGoal({
   const agentFileFocus = useAgentFileFocus(running, items, itemsStore)
   /** Drives the side rail's live markers: what the run has in flight. */
   const liveActivity = useAgentLiveActivity(running, items, itemsStore)
+  /** Gates the plan panel's auto-open — replaced the old `agentMode === 'plan'` check. */
+  const hasCreatePlanCall = useHasCreatePlanCall(itemsStore, items)
   const filesFlushRef = useRef<(() => Promise<boolean>) | null>(null)
   const registerFilesFlush = useCallback(
     (flush: (() => Promise<boolean>) | null): void => {
@@ -915,8 +915,13 @@ const runGoal = useRunGoal({
     setPrNumber(meta?.number ?? null)
   }, [])
 
-  // Auto-open plan panel when plan.md is ready in plan mode — including mid-run
-  // writes (poll) and when `running` flips. Terminal / Browser / Changes open
+  // Auto-open the plan panel when this run has actually published a plan.
+  // With Plan mode merged into Agent there is no mode left to key this off, and
+  // every run now seeds a plan.md stub — so the trigger is the run calling
+  // `create_plan`, which is the moment a plan exists to show. Polling still
+  // confirms readiness on disk, because the tool row appears before the write
+  // lands and a failed call must not open the panel.
+  // Terminal / Browser / Changes open
   // only via side rail, dock tabs, ChangeSummary, or GitChrome — never on agent
   // activity (agent terminal output stays in the transcript).
   // While the plan dock is already mounted, PlanPanel owns the plan.md polling;
@@ -929,7 +934,7 @@ const runGoal = useRunGoal({
       !workspacePath ||
       !activeRunId ||
       !running ||
-      agentMode !== 'plan' ||
+      !hasCreatePlanCall ||
       mountedPanels.includes('plan') ||
       dismissedPanelsRef.current.has('plan')
     ) {
@@ -953,7 +958,7 @@ const runGoal = useRunGoal({
       cancelled = true
       window.clearInterval(id)
     }
-  }, [workspacePath, activeRunId, agentMode, running, mountedPanels, tryAutoOpenPanel])
+  }, [workspacePath, activeRunId, hasCreatePlanCall, running, mountedPanels, tryAutoOpenPanel])
 
   // Prefetch recovery once so FilesPanel can hydrate from the same result when
   // it auto-opens, without issuing a second recovery load.
@@ -1191,8 +1196,6 @@ const runGoal = useRunGoal({
         onChatSettingsChange={onChatSettingsChange}
         agentMode={agentMode}
         onAgentModeChange={onAgentModeChange}
-        agentProfileId={agentProfileId}
-        onAgentProfileChange={onAgentProfileChange}
         onSend={submitPromptEdit}
         onStop={onStop}
         activeRunId={activeRunId}
@@ -1239,8 +1242,6 @@ const runGoal = useRunGoal({
     onChatSettingsChange,
     agentMode,
     onAgentModeChange,
-    agentProfileId,
-    onAgentProfileChange,
     onSend: sendFromDock,
     onStop,
     pendingFollowUps,
@@ -1357,6 +1358,7 @@ const runGoal = useRunGoal({
                 onToolToggle={onToolToggle}
                 onGroupToggle={onGroupToggle}
                 onTurnToggle={onTurnToggle}
+                onDismissRunError={onDismissRunError}
                 onApprovalDecision={onApprovalDecision}
                 onQuestionSubmit={onQuestionSubmit}
                 onRetryNetwork={onContinue}
@@ -1564,8 +1566,6 @@ const runGoal = useRunGoal({
             running={running}
             invokeId={invokeId}
             active={visiblePanelId === 'plan'}
-            agentMode={agentMode}
-            onContinueInAgent={onContinueInAgent}
             onOpenFile={openWorkspaceFile}
           />
         </div>

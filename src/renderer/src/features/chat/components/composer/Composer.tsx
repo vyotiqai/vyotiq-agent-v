@@ -149,8 +149,7 @@ export function Composer({
   onChatSettingsChange,
   agentMode = 'agent',
   onAgentModeChange = () => {},
-  agentProfileId = null,
-  onAgentProfileChange = () => {},
+
   onSend,
   onStop,
   pendingFollowUps = [],
@@ -205,8 +204,7 @@ export function Composer({
   onChatSettingsChange: (patch: ChatSettingsPatch) => void
   agentMode?: AgentInteractionMode
   onAgentModeChange?: (mode: AgentInteractionMode) => void
-  agentProfileId?: string | null
-  onAgentProfileChange?: (profileId: string | null) => void
+
   onSend: (
     text: string,
     images?: string[],
@@ -1146,7 +1144,6 @@ export function Composer({
         {!dictationActive && (
           <ComposerToolbarTools
             locked={settingsLocked}
-            workspacePath={workspacePath ?? null}
             attachDisabled={inputLocked}
             attachFull={imagesFull && filesFull && audioFull}
             attachHint={attachHint}
@@ -1174,8 +1171,6 @@ export function Composer({
             catalogLoading={catalogLoading}
             agentMode={agentMode}
             onAgentModeChange={onAgentModeChange}
-            agentProfileId={agentProfileId}
-            onAgentProfileChange={onAgentProfileChange}
             running={running}
             focusInput={focusInput}
           />
@@ -1277,7 +1272,7 @@ export function Composer({
                   {showRetry ? (
                     <button
                       type="button"
-                      className="shrink-0 rounded-xl border border-border px-2 py-0.5 text-caption font-medium text-fg transition-colors hover:bg-surface"
+                      className="shrink-0 rounded-xl border border-border px-2 py-0.5 text-caption font-medium text-fg transition-colors hover:bg-surface focus-visible:vy-focus-ring"
                       onClick={onRetryNetwork}
                     >
                       Retry

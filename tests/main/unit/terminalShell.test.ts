@@ -12,6 +12,7 @@ import {
   isDirMissingPath,
   isDirMissingPathContent,
   lastPipelineCommandToken,
+  normalizeChildExitCode,
   primaryCommandToken,
   POWERSHELL_EXIT_EPILOGUE,
   resolveTerminalShell,
@@ -34,6 +35,20 @@ import { getLoggerBackend, setLoggerBackend } from '@shared/logger'
 import { mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+
+describe('normalizeChildExitCode', () => {
+  it('maps unsigned 32-bit Windows exit codes to signed', () => {
+    expect(normalizeChildExitCode(4294967295)).toBe(-1)
+    expect(normalizeChildExitCode(3221225477)).toBe(-1073741819)
+  })
+
+  it('leaves small codes and null unchanged', () => {
+    expect(normalizeChildExitCode(0)).toBe(0)
+    expect(normalizeChildExitCode(1)).toBe(1)
+    expect(normalizeChildExitCode(124)).toBe(124)
+    expect(normalizeChildExitCode(null)).toBe(null)
+  })
+})
 
 describe('unixShellInvocation', () => {
   const prev = process.env.SHELL

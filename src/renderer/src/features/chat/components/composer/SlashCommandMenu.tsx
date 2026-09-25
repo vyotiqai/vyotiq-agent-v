@@ -128,7 +128,7 @@ export function SlashCommandMenu({
           return (
             <div
               key={`${group}:${startIndex}`}
-              className={cn(sectionIndex > 0 && 'mt-0.5 border-t border-border pt-0.5')}
+              className={cn(sectionIndex > 0 && 'mt-0.5 border-t border-border/40 pt-0.5')}
               role="group"
               aria-label={heading}
             >
@@ -206,7 +206,7 @@ export function SlashCommandMenu({
       </div>
       {footerDescription ? (
         <div
-          className="shrink-0 border-t border-border px-2.5 py-1.5 text-xs leading-snug text-secondary"
+          className="shrink-0 border-t border-border/40 px-2.5 py-1.5 text-xs leading-snug text-secondary"
           title={tooltipCmd?.description}
         >
           {footerDescription}

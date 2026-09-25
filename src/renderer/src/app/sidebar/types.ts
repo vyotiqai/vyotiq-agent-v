@@ -3,7 +3,7 @@ import type { RunSummary } from '@shared/ipc'
 import type { RunRecencyGroup } from '@renderer/lib/utils/groupRunsByRecency'
 import type { SettingsSection } from '@renderer/features/settings'
 
-export type SidebarView = 'chat' | 'settings' | 'marketplace' | 'teammates' | 'home'
+export type SidebarView = 'chat' | 'settings' | 'marketplace' | 'home'
 
 export type SidebarProps = {
   view: SidebarView
@@ -32,16 +32,12 @@ export type SidebarProps = {
   onOpenSettingsSection?: (section: SettingsSection) => void
   focusedRunId?: string | null
   onOpenMarketplace: () => void
-  onOpenTeammates: () => void
   /** Show the Home launch surface (Sidebar footer rail + Ctrl/Cmd+Shift+H). */
   onOpenHome?: () => void
   onOpenChat: () => void
   /** Open a fresh chat in a specific workspace (switches there when needed). */
   onNewChatInWorkspace?: (path: string) => void
-  /** Start a new chat in the active workspace bound to a teammate profile. */
-  onStartTeammateChat?: (profileId: string) => void
-  /** Open a delegated task's session transcript. */
-  onOpenTaskRun?: (path: string, runId: string) => void
+
   onSelectRunInWorkspace?: (path: string, runId: string) => void
   onRenameRunInWorkspace?: (path: string, runId: string, goal: string) => void
   onDeleteRunInWorkspace?: (path: string, runId: string) => void

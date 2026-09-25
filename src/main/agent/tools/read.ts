@@ -1,6 +1,7 @@
 import { resolveInsideWorkspace } from '../../workspace/safePath'
 import { existsSync, readdirSync, statSync, promises as fsp } from 'fs'
 import { basename, dirname, join } from 'path'
+import { memoryRoot } from '../context/memory'
 import {
   extractDocxText,
   isDocxPath,
@@ -125,7 +126,30 @@ function decodeTextBuffer(buf: Buffer, pathArg: string, encoding: 'utf8' | 'utf1
   return stripNuls(buf.toString('utf8'))
 }
 
+/**
+ * A missing workspace path that names a file the agent's memory really holds.
+ *
+ * `memory_read index.md` is how memory is addressed, so the model reaches for
+ * `str_replace index.md` to change it — but memory lives under
+ * `.vyotiq/memory/`, and the workspace root has no such file. The answer was a
+ * bare "File not found" naming no remedy, and the model spent the step; seen in
+ * two runs against two different repos. (Its real path needs no hint: an
+ * existing memory file reads and edits fine by `.vyotiq/memory/...`.)
+ *
+ * Gated on the memory file existing, so a workspace that simply has no
+ * `index.md` still gets an ordinary missing-file answer.
+ */
+export function memoryFileHint(workspaceRoot: string, relPath: string): string | null {
+  const rel = relPath.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '')
+  const known = rel === 'index.md' || rel === 'state.md' || /^notes\/[^/]+$/.test(rel)
+  if (!known) return null
+  if (!existsSync(join(memoryRoot(workspaceRoot), ...rel.split('/')))) return null
+  return `${rel} is agent memory, not a workspace file — read it with memory_read and change it with memory_write.`
+}
+
 function formatMissingFileHint(workspaceRoot: string, relPath: string): string {
+  const memory = memoryFileHint(workspaceRoot, relPath)
+  if (memory) return `File not found: ${relPath}. ${memory}`
   const suggestions = suggestSimilarPaths(workspaceRoot, relPath)
   if (!suggestions.length) {
     return `File not found: ${relPath}. Verify the path exists in this workspace.`
@@ -160,6 +184,13 @@ export function missingDirectoryHint(
     if (suggestions.length > 0) {
       lines.push('Similar names in parent directory:', ...suggestions.map((s) => `- ${s}`))
     }
+  }
+  if (leaf === 'node_modules') {
+    // Instance worktrees junction node_modules from the parent checkout, so a
+    // missing one usually means the junction was never created — not a typo.
+    lines.push(
+      'node_modules in an instance worktree is often a junction into the parent checkout — check list_dir . for it before searching.'
+    )
   }
   if (leaf && leaf !== '.' && !/[*?]/.test(leaf)) {
     lines.push(`If it is nested, glob **/${leaf} or list_dir from '.' first.`)
@@ -237,7 +268,9 @@ function applyTextReadWindows(text: string, pathArg: string, options: ReadOption
   if (limit !== undefined || offset > 0) {
     const buf = Buffer.from(text, 'utf8')
     if (offset > buf.length) {
-      throw new Error(`offset ${offset} is past the end of ${pathArg} (${buf.length} bytes).`)
+      throw new Error(
+        `offset ${offset} is past the end of ${pathArg} (${buf.length} bytes). Use offset <= ${buf.length}.`
+      )
     }
     const remaining = Math.max(0, buf.length - offset)
     const want = limit === undefined ? remaining : Math.min(Math.max(0, limit), remaining)
@@ -258,7 +291,9 @@ function sliceTextLineRange(text: string, pathArg: string, options: ReadOptions)
   const start = Number.isFinite(endRaw) && endRaw < startRaw ? Math.max(1, endRaw) : startRaw
   const endLimit = Number.isFinite(endRaw) && endRaw < startRaw ? startRaw : endRaw
   if (start > total) {
-    throw new Error(`startLine ${start} is past the end of ${pathArg} (${total} lines).`)
+    throw new Error(
+      `startLine ${start} is past the end of ${pathArg} (${total} lines). Use startLine <= ${total}.`
+    )
   }
   const actualEnd = Math.min(endLimit, total)
   const collected = lines.slice(start - 1, actualEnd)
@@ -276,7 +311,9 @@ async function readByteRange(
   limit: number | undefined
 ): Promise<string> {
   if (offset > size) {
-    throw new Error(`offset ${offset} is past the end of ${pathArg} (${size} bytes).`)
+    throw new Error(
+      `offset ${offset} is past the end of ${pathArg} (${size} bytes). Use offset <= ${size}.`
+    )
   }
   const remaining = Math.max(0, size - offset)
   const want = limit === undefined ? remaining : Math.min(Math.max(0, limit), remaining)
@@ -512,7 +549,9 @@ async function readLineRange(
   // counts it when leftover text/bytes are non-empty — matching split('\n')+pop.
 
   if (start > total) {
-    throw new Error(`startLine ${start} is past the end of ${pathArg} (${total} lines).`)
+    throw new Error(
+      `startLine ${start} is past the end of ${pathArg} (${total} lines). Use startLine <= ${total}.`
+    )
   }
 
   const actualEnd = Math.min(endLimit, total)

@@ -7,20 +7,6 @@ import { toolMessageForIpc } from '../../shared/utils/toolResultIpc'
 import { computeToolCatalog, notifyToolCatalogChanged } from '../agent/toolsCatalog'
 import {
   ChatStartRequestSchema,
-  AgentProfileCreateRequestSchema,
-  AgentProfileUpdateRequestSchema,
-  AgentProfileDeleteRequestSchema,
-  AgentProfileOverridesListRequestSchema,
-  AgentProfileOverrideSetRequestSchema,
-  AgentProfileOverrideAcceptRequestSchema,
-  AgentMemoryListRequestSchema,
-  AgentMemoryReadRequestSchema,
-  AgentMemoryWriteRequestSchema,
-  type AgentMemoryListResult,
-  type AgentProfileDeleteResult,
-  TaskEnqueueRequestSchema,
-  TaskCancelRequestSchema,
-  TaskRetryRequestSchema,
   ChatUiSubscribeRequestSchema,
   ChatUiSubscribeAddRequestSchema,
   ComposerAttachmentsClearRequestSchema,
@@ -320,7 +306,7 @@ import {
 } from '@main/settings/secrets'
 import { getChatEventDispatcher, setChatEventUiSubscriptions, addChatEventUiSubscription } from './streamBatch'
 import { installIpcTiming, timeSyncIpc } from '../perf/ipcTiming'
-import { createRunId, validateExistingRunStart } from '../agent/loop'
+import { createRunId } from '../agent/loop'
 import { hydrateRunFollowUps, startAgentRunInBackground } from '../agent/startAgentRun'
 import { launchRun } from '../agent/launchRun'
 import {
@@ -344,32 +330,6 @@ import {
 } from '@main/storage/retention'
 import { collectRunStats } from '../agent/runStats'
 import { collectHomeActivity } from '../agent/activityStats'
-import {
-  listAgentProfiles,
-  createAgentProfile,
-  updateAgentProfile,
-  deleteAgentProfile,
-  getAgentProfile,
-  emitAgentProfilesChanged,
-  mutateAgentProfiles,
-  removeProfileArtifactsForWorkspaces,
-  listWorkspaceProfileOverrides,
-  listUnacceptedOverrideFields,
-  acceptWorkspaceProfileOverride,
-  writeWorkspaceProfileOverride,
-  emitAgentProfileOverridesChanged
-} from '../settings/agentProfiles'
-import {
-  clearMemoryNamespace,
-  ensureMemoryLayout,
-  listMemoryNotes,
-  memoryNamespaceExists,
-  readMemoryFile,
-  writeMemoryFile
-} from '../agent/context/memory'
-import { normalizeMemoryRelPath } from '../agent/tools/memory'
-import { deleteTeammateCascade } from '../agent/teammateAdmin'
-import { listTasks, enqueueTask, cancelTask, retryTask, resumeTasksForWorkspaces, cancelTasksForProfile } from '../agent/taskScheduler'
   import { focusAgentBrowser, closeAgentBrowser, getAgentBrowserState, selectBrowserTab, browserGoBack, browserGoForward, setAgentBrowserBounds, navigateUrl, clearAgentBrowserData, takeBrowserScreenshot, disposeAgentBrowserForWorkspace, takeBrowserControl, releaseBrowserControl, manageTabs, toggleAgentBrowserPip } from '@main/app/agentBrowser'
 import { extractAttachment } from '../attachments/extract'
 import {
@@ -698,7 +658,12 @@ function isExpectedIpcFailure(err: unknown): boolean {
     return true
   }
   const msg = formatError(err)
-  return /no undoable write checkpoint|nothing to undo|no editable harness|already undone|already resolved|checkpoint not found|invalid checkpoint|no harness proposal found|missing a ## Proposed harness body|requires confirm|no git remote|no git remotes|no default remote|not a git repository|unable to determine base repository|could not determine base repository|no initial commit/i.test(
+  // `enqueueTask` refuses a deleted teammate and a closed workspace. Both are
+  // states the user creates, and both stay reachable after the UI stops
+  // offering the control — a window rendered before the teammate was deleted
+  // still has the button. A refusal the user can cause is IPC_CLIENT, not a
+  // handler fault to capture as an exception.
+  return /no undoable write checkpoint|nothing to undo|no editable harness|already undone|already resolved|checkpoint not found|invalid checkpoint|no harness proposal found|missing a ## Proposed harness body|requires confirm|no git remote|no git remotes|no default remote|not a git repository|unable to determine base repository|could not determine base repository|no initial commit|unknown teammate profile: |unknown agent profile: |^workspace is not open$|only a finished task can be retried|unknown task: /i.test(
     msg
   )
 }
@@ -895,9 +860,6 @@ export function registerIpc(): void {
         const req = WorkspacesAddRequestSchema.parse(raw ?? {})
         const win = BrowserWindow.fromWebContents(event.sender)
         const next = await addWorkspace(win, req.path)
-        // Load and arm the new workspace's persisted tasks (boot re-arm only
-        // covers workspaces open at startup).
-        if (req.path) await resumeTasksForWorkspaces([req.path])
         invalidateMcpResolveCache()
         await syncMcpServers(resolveMcpServersForSessionMap())
         notifyToolCatalogChanged()
@@ -963,13 +925,23 @@ export function registerIpc(): void {
       if (!senderOk(event)) return fail('Invalid sender')
       try {
         const { path } = WorkspacesSetActiveRequestSchema.parse(raw)
-        const state = await enqueueWorkspaceMutation(() => setActiveWorkspace(path))
+        let alreadyActive = false
+        const state = await enqueueWorkspaceMutation(() => {
+          const prev = getWorkspaces().activePath
+          alreadyActive = prev != null && workspacePathsEqual(prev, path)
+          return setActiveWorkspace(path)
+        })
         setMcpStdioWorkspace(path)
-        warmWorkspaceIndexes(path)
-        pruneStaleInstanceWorktreesBestEffort(
-          path,
-          new Set(listActiveRuns().map((run) => run.runId))
-        )
+        // Re-activating the workspace that is already active (the renderer's
+        // add-workspace handoff did, 2 s after add had warmed it) must not
+        // warm its index and prune its worktrees a second time.
+        if (!alreadyActive) {
+          warmWorkspaceIndexes(path)
+          pruneStaleInstanceWorktreesBestEffort(
+            path,
+            new Set(listActiveRuns().map((run) => run.runId))
+          )
+        }
         return ok(state)
       } catch (err) {
         return failFrom(err, IPC.workspacesSetActive)
@@ -1233,15 +1205,6 @@ export function registerIpc(): void {
       // sequence of checks. This handler owns only trust: schema and sender.
       const outcome = await launchRun({
         ...req,
-        // Read the parsed value, not key presence on `raw`: Electron's
-        // structured clone keeps own properties whose value is `undefined`,
-        // and the composer spells both keys out on every send — so presence
-        // marked every send as stating a binding, and the "absent field
-        // inherits the run's binding" contract never applied to chat at all.
-        explicit: {
-          agentProfileId: req.agentProfileId !== undefined,
-          runtime: req.runtime !== undefined
-        },
         wc: event.sender,
         source: IPC.chatStart
       })
@@ -1256,266 +1219,6 @@ export function registerIpc(): void {
       // failure — which never reaches `req` — is correlated too.
       const rawRunId = (raw as { runId?: unknown } | null)?.runId
       return failFrom(err, IPC.chatStart, typeof rawRunId === 'string' ? rawRunId : undefined)
-    }
-  })
-
-  ipcMain.handle(IPC.agentProfilesList, async (event): Promise<IpcResult<ReturnType<typeof listAgentProfiles>>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    return ok(listAgentProfiles())
-  })
-
-  ipcMain.handle(IPC.agentProfilesCreate, async (event, raw): Promise<IpcResult<unknown>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = AgentProfileCreateRequestSchema.parse(raw)
-      const profile = await mutateAgentProfiles(() => createAgentProfile(req))
-      emitAgentProfilesChanged()
-      return ok(profile)
-    } catch (err) {
-      return failFrom(err, IPC.agentProfilesCreate)
-    }
-  })
-
-  ipcMain.handle(IPC.agentProfilesUpdate, async (event, raw): Promise<IpcResult<unknown>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = AgentProfileUpdateRequestSchema.parse(raw)
-      const profile = await mutateAgentProfiles(() => updateAgentProfile(req))
-      emitAgentProfilesChanged()
-      return ok(profile)
-    } catch (err) {
-      return failFrom(err, IPC.agentProfilesUpdate)
-    }
-  })
-
-  ipcMain.handle(
-    IPC.agentProfilesDelete,
-    async (event, raw): Promise<IpcResult<AgentProfileDeleteResult>> => {
-      if (!senderOk(event)) return fail('Invalid sender')
-      try {
-        const req = AgentProfileDeleteRequestSchema.parse(raw)
-        if (!getAgentProfile(req.id)) {
-          return failExpected(`Unknown agent profile: ${req.id}`, IPC.agentProfilesDelete)
-        }
-        // Shared with the agent's `teammate_delete` tool: the cancel-then-remove
-        // ordering is what keeps live work from failing as "profile no longer
-        // exists", and two copies of it would drift.
-        return ok(await deleteTeammateCascade(req.id))
-      } catch (err) {
-        return failFrom(err, IPC.agentProfilesDelete)
-      }
-    }
-  )
-
-  ipcMain.handle(
-    IPC.agentProfileOverridesList,
-    async (event, raw): Promise<IpcResult<unknown>> => {
-      if (!senderOk(event)) return fail('Invalid sender')
-      try {
-        const req = AgentProfileOverridesListRequestSchema.parse(raw)
-        if (!isOpenWorkspace(req.workspacePath)) {
-          return failExpected('Workspace is not open', IPC.agentProfileOverridesList)
-        }
-        return ok({
-          workspacePath: req.workspacePath,
-          // The listing is deliberately unfiltered: the UI has to show what
-          // the user is being asked to accept. `unaccepted` names what the
-          // run path is withholding meanwhile.
-          overrides: listWorkspaceProfileOverrides(req.workspacePath),
-          unaccepted: listUnacceptedOverrideFields(req.workspacePath)
-        })
-      } catch (err) {
-        return failFrom(err, IPC.agentProfileOverridesList)
-      }
-    }
-  )
-
-  ipcMain.handle(
-    IPC.agentProfileOverrideSet,
-    async (event, raw): Promise<IpcResult<unknown>> => {
-      if (!senderOk(event)) return fail('Invalid sender')
-      try {
-        const req = AgentProfileOverrideSetRequestSchema.parse(raw)
-        if (!isOpenWorkspace(req.workspacePath)) {
-          return failExpected('Workspace is not open', IPC.agentProfileOverrideSet)
-        }
-        // getAgentProfile, not resolveAgentProfile: an override whose current
-        // contents make the profile resolve oddly must still be editable, and
-        // the override file belongs to the global profile either way.
-        if (!getAgentProfile(req.profileId)) {
-          return failExpected(
-            `Unknown agent profile: ${req.profileId}`,
-            IPC.agentProfileOverrideSet
-          )
-        }
-        // Serialized with roster mutations so a write cannot interleave with a
-        // delete that is removing this same profile's artifacts.
-        const next = await mutateAgentProfiles(() =>
-          writeWorkspaceProfileOverride(req.workspacePath, req.profileId, req.override)
-        )
-        emitAgentProfileOverridesChanged(req.workspacePath)
-        return ok(next)
-      } catch (err) {
-        return failFrom(err, IPC.agentProfileOverrideSet)
-      }
-    }
-  )
-
-  ipcMain.handle(
-    IPC.agentProfileOverrideAccept,
-    async (event, raw): Promise<IpcResult<unknown>> => {
-      if (!senderOk(event)) return fail('Invalid sender')
-      try {
-        const req = AgentProfileOverrideAcceptRequestSchema.parse(raw)
-        if (!isOpenWorkspace(req.workspacePath)) {
-          return failExpected('Workspace is not open', IPC.agentProfileOverrideAccept)
-        }
-        if (!getAgentProfile(req.profileId)) {
-          return failExpected(
-            `Unknown agent profile: ${req.profileId}`,
-            IPC.agentProfileOverrideAccept
-          )
-        }
-        // Serialized with roster mutations, like the override write: consent
-        // must not interleave with a delete clearing this profile's entries.
-        await mutateAgentProfiles(() =>
-          acceptWorkspaceProfileOverride(req.workspacePath, req.profileId)
-        )
-        emitAgentProfileOverridesChanged(req.workspacePath)
-        return ok({
-          workspacePath: req.workspacePath,
-          overrides: listWorkspaceProfileOverrides(req.workspacePath),
-          unaccepted: listUnacceptedOverrideFields(req.workspacePath)
-        })
-      } catch (err) {
-        return failFrom(err, IPC.agentProfileOverrideAccept)
-      }
-    }
-  )
-
-  /**
-   * One teammate's memory namespace, as the panel needs it. Returned by both
-   * the list and the write handlers so a write refreshes the panel without a
-   * second round trip.
-   */
-  const memorySnapshot = (workspacePath: string, profileId: string): AgentMemoryListResult => {
-    if (!memoryNamespaceExists(workspacePath, profileId)) {
-      // Never written to. Reporting an empty layout instead of `exists: false`
-      // would have the panel offer to edit files that do not exist.
-      return {
-        workspacePath,
-        profileId,
-        notes: [],
-        indexedNotes: [],
-        hasState: false,
-        exists: false
-      }
-    }
-    const { notes, indexedNotes, hasState } = listMemoryNotes(workspacePath, profileId)
-    return { workspacePath, profileId, notes, indexedNotes, hasState, exists: true }
-  }
-
-  /** Shared gate: an open workspace and a teammate that still exists. */
-  const memoryGate = (
-    channel: string,
-    req: { workspacePath: string; profileId: string }
-  ): IpcResult<never> | null => {
-    if (!isOpenWorkspace(req.workspacePath)) {
-      return failExpected('Workspace is not open', channel)
-    }
-    // `getAgentProfile`, not `resolveAgentProfile`: a workspace-scoped teammate
-    // viewed from elsewhere still owns memory here, and the namespace is keyed
-    // by id regardless of where the profile resolves.
-    if (!getAgentProfile(req.profileId)) {
-      return failExpected(`Unknown agent profile: ${req.profileId}`, channel)
-    }
-    return null
-  }
-
-  ipcMain.handle(IPC.agentMemoryList, async (event, raw): Promise<IpcResult<unknown>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = AgentMemoryListRequestSchema.parse(raw)
-      const refused = memoryGate(IPC.agentMemoryList, req)
-      if (refused) return refused
-      return ok(memorySnapshot(req.workspacePath, req.profileId))
-    } catch (err) {
-      return failFrom(err, IPC.agentMemoryList)
-    }
-  })
-
-  ipcMain.handle(IPC.agentMemoryRead, async (event, raw): Promise<IpcResult<unknown>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = AgentMemoryReadRequestSchema.parse(raw)
-      const refused = memoryGate(IPC.agentMemoryRead, req)
-      if (refused) return refused
-      // The same validator the agent's memory tools use, so the panel can open
-      // exactly the files the teammate can write and no others.
-      const path = normalizeMemoryRelPath(req.path)
-      return ok({ path, contents: readMemoryFile(req.workspacePath, path, req.profileId) })
-    } catch (err) {
-      return failFrom(err, IPC.agentMemoryRead)
-    }
-  })
-
-  ipcMain.handle(IPC.agentMemoryWrite, async (event, raw): Promise<IpcResult<unknown>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = AgentMemoryWriteRequestSchema.parse(raw)
-      const refused = memoryGate(IPC.agentMemoryWrite, req)
-      if (refused) return refused
-      if (req.path === null) {
-        // The only path in the app that deletes a teammate's memory. Deleting
-        // the teammate itself still does not — the id is retired instead.
-        clearMemoryNamespace(req.workspacePath, req.profileId)
-        return ok(memorySnapshot(req.workspacePath, req.profileId))
-      }
-      const path = normalizeMemoryRelPath(req.path)
-      // A teammate that has never run has no layout yet; writing its first note
-      // from the panel must create index.md and notes/ the same way a run does.
-      ensureMemoryLayout(req.workspacePath, req.profileId)
-      writeMemoryFile(req.workspacePath, path, req.contents ?? '', req.profileId)
-      return ok(memorySnapshot(req.workspacePath, req.profileId))
-    } catch (err) {
-      return failFrom(err, IPC.agentMemoryWrite)
-    }
-  })
-
-  ipcMain.handle(IPC.tasksList, async (event): Promise<IpcResult<ReturnType<typeof listTasks>>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    return ok(listTasks())
-  })
-
-  ipcMain.handle(IPC.tasksEnqueue, async (event, raw): Promise<IpcResult<unknown>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = TaskEnqueueRequestSchema.parse(raw)
-      return ok(enqueueTask(req))
-    } catch (err) {
-      return failFrom(err, IPC.tasksEnqueue)
-    }
-  })
-
-  ipcMain.handle(IPC.tasksCancel, async (event, raw): Promise<IpcResult<boolean>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = TaskCancelRequestSchema.parse(raw)
-      return ok(cancelTask(req.id))
-    } catch (err) {
-      return failFrom(err, IPC.tasksCancel)
-    }
-  })
-
-  ipcMain.handle(IPC.tasksRetry, async (event, raw): Promise<IpcResult<unknown>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = TaskRetryRequestSchema.parse(raw)
-      // Explicit, user-initiated re-run only. Auto-retrying a delegated task
-      // would replay whatever side effects the previous attempt already had.
-      return ok(retryTask(req.id))
-    } catch (err) {
-      return failFrom(err, IPC.tasksRetry)
     }
   })
 
@@ -1549,11 +1252,7 @@ export function registerIpc(): void {
         // Register before mutating disk so a failed register cannot leave a
         // rewound transcript without a new invoke (matches chatStart ordering).
         const runId = req.runId
-        // Rewind requests carry no profile field; recover the run's durable
-        // teammate binding so the registry entry serves the one-run-per-teammate
-        // gate exactly like a normal resume.
-        const rewindProfileId = loadStatus(resolveRunDir(req.workspacePath, runId))?.agentProfileId
-        const registered = tryRegisterRunAbort(runId, req.workspacePath, rewindProfileId)
+        const registered = tryRegisterRunAbort(runId, req.workspacePath)
         if (!registered.ok) {
           return failExpected(registered.error, IPC.chatRewindAndStart, runId, registered.code)
         }
@@ -1597,8 +1296,7 @@ export function registerIpc(): void {
             resume: true,
             mode: req.mode,
             provider: req.provider,
-            model: req.model,
-            modelExplicit: req.modelExplicit
+            model: req.model
           }
         })
 

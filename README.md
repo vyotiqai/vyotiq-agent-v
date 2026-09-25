@@ -14,13 +14,11 @@ Vyotiq ("Agent V") is an Electron desktop app: a coding workspace for real repos
 - **Skills and marketplace** — skills ship with the app as marketplace resources and can be loaded into a run; plugin rules are supported alongside skill files.
 - **MCP client** — connect Model Context Protocol servers, list their tools/resources/prompts, and pin their tools into the agent's catalog. Connection attempts widen Node's 250ms per-address window, so a reachable host that publishes several A/AAAA records is not reported as unreachable.
 - **Long-term workspace memory** — the agent keeps notes under `.vyotiq/memory/` in the workspace and re-reads them on later runs.
-- **Teammates** — persistent agent identities with per-workspace private memory, pinned models, and delegated tasks that run on a schedule or queue — surviving app restarts, with auto-resume for interrupted runs. A dedicated Teammates view carries the roster, each teammate's task inbox, and per-workspace behaviour overrides; a finished task can be retried as a new record so the attempt that failed stays in history. See [docs/teammates.md](docs/teammates.md).
 - **Verification gate** — the run loop tracks whether a check actually ran, and reported clean, after the last file the agent changed, so a turn that edited code without verifying it is caught while it can still act rather than at teardown.
 - **Run feedback** — each workspace remembers how its runs went under `runFeedback.json`, and messages can be rated in place. Receipts are per-run and pruned with their session, so this is what makes recurring trouble visible across runs.
 
 ## Documentation
 
-- [Teammates — architecture, scheduler semantics, and user guide](docs/teammates.md)
 - [Outbound network egress — what the gate covers, and what it deliberately does not](docs/egress.md)
 - [Agent-built tools — what `build_tool` permits, and the four things that bound it](docs/agent-tools.md)
 
@@ -58,7 +56,8 @@ Copy `.env.example` to `.env`. Both variables are optional and only enable Sentr
 
 ```bash
 pnpm dev     # launch the Electron app in dev mode
-pnpm start   # preview the production build
+pnpm build   # typecheck, sync assets, and build the production bundle
+pnpm start   # launch that build (it does not rebuild — run pnpm build first)
 ```
 
 ## Verification

@@ -151,6 +151,20 @@ export function probeInstanceWorktreePathLocked(
 
 const NODE_MODULES_DIR = 'node_modules'
 
+/**
+ * Exclude shape for checkpoint `git add` that can never trip git's
+ * ignored-path check: any pathspec item whose pattern starts with the literal
+ * `node_modules` (`:(exclude)node_modules`, `:(exclude,glob)node_modules`,
+ * `:(exclude,glob)node_modules/**`) makes `git add` exit 1 whenever
+ * node_modules is ignored. Wildcard-leading glob excludes are exempt and
+ * `**` + `/` also covers nested node_modules (scratch/repro-add.mjs matrix on git
+ * 2.55.0.windows.3: these two items, 0/120 die cells).
+ */
+const NODE_MODULES_ADD_EXCLUDES = [
+  ':(exclude,glob)**/node_modules',
+  ':(exclude,glob)**/node_modules/**'
+]
+
 /** Win32 long-path prefix so deep pnpm trees are not reported as EPERM. */
 function toLongPath(p: string): string {
   if (process.platform !== 'win32') return p
@@ -771,21 +785,96 @@ async function applySparseConeCheckout(
   await git(['checkout', branch], worktreePath, WRITE_TIMEOUT_MS)
 }
 
+/** Probe entries whose absence breaks child tsc/vitest runs (observed live
+ * 2026-09-22 as `Directory not found: node_modules/typescript/bin` /
+ * `node_modules/vitest`). A worktree node_modules is usable when every probe
+ * that resolves in the parent resolves through it too. */
+const NODE_MODULES_PROBE_PATHS = ['typescript/bin', 'vitest']
+
+function nodeModulesProbeResolves(root: string, probe: string): boolean {
+  return existsSync(join(root, ...probe.split('/')))
+}
+
+function nodeModulesProbesUsable(source: string, target: string): boolean {
+  return NODE_MODULES_PROBE_PATHS.every(
+    (probe) =>
+      !nodeModulesProbeResolves(source, probe) || nodeModulesProbeResolves(target, probe)
+  )
+}
+
+function normalizedLinkPath(p: string): string {
+  const abs = resolve(p).replace(/^\\\\\?\\/, '')
+  return process.platform === 'win32' ? abs.toLowerCase() : abs
+}
+
+/** True when target is a junction/symlink already pointing at source. */
+async function isLinkTo(target: string, source: string): Promise<boolean> {
+  try {
+    const st = await lstat(target)
+    if (!st.isSymbolicLink()) return false
+    return normalizedLinkPath(await readlink(target)) === normalizedLinkPath(source)
+  } catch {
+    return false
+  }
+}
+
 /**
  * Best-effort junction of the parent's node_modules into the worktree so
  * child test/build runs work without paying a full install (worktrees never
  * materialize ignored dirs). Removal unlinks the junction without recursing
  * into the parent's node_modules (shouldUnlinkWithoutRecurse).
+ *
+ * Guarantees usable node_modules: repair-or-link instead of the old
+ * `existsSync(source) && !existsSync(target)` early return, which left gap
+ * states behind — a pre-existing empty/partial real dir, a dangling junction
+ * (existsSync follows links, so a dangling junction skipped linking and
+ * `symlink` would then fail EEXIST), or a junction to the wrong target all
+ * left `node_modules/typescript/bin` and `node_modules/vitest` unresolvable.
+ * Exported for tests.
  */
-async function linkNodeModulesBestEffort(
+export async function linkNodeModulesBestEffort(
   workspacePath: string,
   worktreePath: string
 ): Promise<void> {
   try {
     const source = join(workspacePath, NODE_MODULES_DIR)
     const target = join(worktreePath, NODE_MODULES_DIR)
-    if (!existsSync(source) || existsSync(target)) return
-    await symlink(source, target, process.platform === 'win32' ? 'junction' : 'dir')
+    if (!existsSync(source)) {
+      logger.warn('instance worktree node_modules link skipped: parent node_modules missing', {
+        scope: 'git',
+        worktreePath
+      })
+      return
+    }
+    let targetEntry = await lstat(target).catch(() => null)
+    if (targetEntry && !(await isLinkTo(target, source))) {
+      // A target whose probes already resolve is a deliberate in-worktree
+      // install — leave it alone. Anything else is a gap state: clear it
+      // (rmSync unlinks a junction without recursing into its target) and
+      // fall through to a fresh link.
+      if (nodeModulesProbesUsable(source, target)) return
+      try {
+        rmSync(target, { recursive: true, force: true })
+      } catch (err) {
+        logger.warn('instance worktree node_modules repair could not clear broken target', {
+          scope: 'git',
+          worktreePath,
+          err
+        })
+        return
+      }
+      targetEntry = await lstat(target).catch(() => null)
+      if (targetEntry) return
+    }
+    if (!targetEntry) {
+      await symlink(source, target, process.platform === 'win32' ? 'junction' : 'dir')
+    }
+    if (!nodeModulesProbesUsable(source, target)) {
+      logger.warn('instance worktree node_modules link is missing entries present in the parent', {
+        scope: 'git',
+        worktreePath
+      })
+    }
   } catch (err) {
     logger.warn('instance worktree node_modules link failed', {
       scope: 'git',
@@ -1009,16 +1098,47 @@ export async function commitDirtyInstanceWorktree(worktreePath: string): Promise
   }
   if (!dirty) return
 
+  // Exclude node_modules content unconditionally — provisioning junctions the
+  // parent's node_modules into the worktree, so a bare `add -A` would stage that
+  // junction's contents (a plain directory to git on Windows) into the instance
+  // branch. The exclude shape is constrained by git's ignored-path check: any
+  // pathspec item whose pattern *starts with the literal `node_modules`* —
+  // `:(exclude)node_modules`, `:(exclude,glob)node_modules`,
+  // `:(exclude,glob)node_modules/**` — makes `git add` exit 1 ("The following
+  // paths are ignored by one of your .gitignore files") whenever node_modules is
+  // ignored, throwing away the commit below (the only durable copy of an
+  // instance's edits). Wildcard-leading glob excludes are exempt from that
+  // check, and a leading `**` wildcard also covers nested node_modules (verified matrix:
+  // scratch/repro-add.mjs, git 2.55.0.windows.3). A dirty-status sniff cannot
+  // decide this safely: `status` and `add` are separate git invocations whose
+  // ignore verdicts can disagree (a concurrently edited/locked .gitignore), and
+  // `status.showUntrackedFiles=all` hides the `?? node_modules/` shape the old
+  // sniff matched, staging junction contents instead.
+  const pathspec = ['.', ...NODE_MODULES_ADD_EXCLUDES]
+
   try {
-    // Exclude node_modules: provisioning junctions the parent's node_modules
-    // into the worktree, and in repos whose HEAD lacks ignore coverage a bare
-    // `add -A` would stage that junction (gitlink/symlink — or traverse the
-    // parent's real deps on Windows) into the instance branch.
-    await git(
-      ['add', '-A', '--', '.', ':(exclude)node_modules'],
+    await git(['add', '-A', '--', ...pathspec], worktreePath, WRITE_TIMEOUT_MS)
+  } catch (addErr) {
+    // Never lose the checkpoint over `add`: commit whatever landed.
+    logger.warn('instance worktree checkpoint add failed; committing staged state', {
+      scope: 'git',
       worktreePath,
-      WRITE_TIMEOUT_MS
-    )
+      err: addErr
+    })
+  }
+  try {
+    // Tracked node_modules updates (mods/deletes) are excluded above — `-u`
+    // records them without ever naming an ignorable path (`.` only).
+    await git(['add', '-u', '--', '.'], worktreePath, WRITE_TIMEOUT_MS)
+  } catch (updateErr) {
+    logger.warn('instance worktree checkpoint tracked-update pass failed', {
+      scope: 'git',
+      worktreePath,
+      err: updateErr
+    })
+  }
+
+  try {
     // Nothing staged (e.g. only ignored files) — skip empty commit.
     try {
       await git(['diff', '--cached', '--quiet'], worktreePath, READ_TIMEOUT_MS)

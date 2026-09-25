@@ -39,7 +39,7 @@ function rewriteLinks(body) {
     if (/^(https?:|#|mailto:)/.test(target)) return whole
     const key = target.replace(/^\.\//, '')
     if (ROUTES[key]) return `](${ROUTES[key]})`
-    // Still a repo path (e.g. docs/teammates.md) — point at GitHub.
+    // Still a repo path (e.g. docs/egress.md) — point at GitHub.
     if (/\.(md|txt|ya?ml|json|ts|tsx|mjs)$/.test(key) || key === 'LICENSE' || key === 'NOTICE') {
       return `](${BLOB}${key})`
     }

@@ -45,10 +45,6 @@ function writeStatus(
     goal?: string
     error?: string
     workspacePath?: string
-    agentProfileId?: string
-    agentProfileName?: string
-    agentProfileSnapshot?: Record<string, unknown>
-    runtime?: 'local' | 'cloud'
   }
 ): void {
   mkdirSync(dir, { recursive: true })
@@ -617,6 +613,26 @@ describe('listRuns / interruptOrphanRuns', () => {
     expect(result.runs.find((r) => r.runId === 'live-run')?.status).toBe('running')
 
     clearRunAbort('live-run')
+  })
+
+  it('lists a workspace with no sessions root as empty without warning', async () => {
+    // Nothing has created this workspace's storage, so its sessions root is
+    // missing; reconciliation used to warn ENOENT on every uncached listing.
+    const warn = vi.fn()
+    const { setLoggerBackend, getLoggerBackend } = await import('@shared/logger')
+    const prev = getLoggerBackend()
+    setLoggerBackend({
+      log: (level, message, fields) => {
+        if (level === 'warn') warn(message, fields)
+      }
+    })
+    try {
+      const result = await listRuns(workspace)
+      expect(result.runs).toEqual([])
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      setLoggerBackend(prev)
+    }
   })
 
   it('syncMessages rewrites messages.jsonl from client history', () => {

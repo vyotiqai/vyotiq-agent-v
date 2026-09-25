@@ -474,7 +474,7 @@ function ContextMeterPanel({
         </div>
       </header>
 
-      <div className="sidebar-scroll min-h-0 flex-1 overflow-y-auto border-t border-border px-3.5 py-3">
+      <div className="sidebar-scroll min-h-0 flex-1 overflow-y-auto border-t border-border/40 px-3.5 py-3">
         {overBudget ? (
           <p className="m-0 mb-3 rounded-lg bg-danger/10 px-2.5 py-2 text-3xs leading-snug text-danger" role="alert">
             {usage.overflow
@@ -581,7 +581,7 @@ function ContextMeterPanel({
       </div>
 
       {onCompact ? (
-        <footer className="shrink-0 border-t border-border p-3">
+        <footer className="shrink-0 border-t border-border/40 p-3">
           <button
             type="button"
             onClick={onCompact}

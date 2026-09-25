@@ -259,7 +259,7 @@ describe('Composer slash commands', () => {
     const { rerender } = render(
       <Composer
         {...baseProps}
-        agentMode="plan"
+        agentMode="ask"
         draft="/goal make CI green"
         onDraftChange={onDraftChange}
         onSend={onSend}
@@ -270,7 +270,7 @@ describe('Composer slash commands', () => {
     rerender(
       <Composer
         {...baseProps}
-        agentMode="plan"
+        agentMode="ask"
         draft="/goal make CI green"
         onDraftChange={onDraftChange}
         onSend={onSend}

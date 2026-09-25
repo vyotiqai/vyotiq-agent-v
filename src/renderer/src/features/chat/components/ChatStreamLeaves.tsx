@@ -268,12 +268,31 @@ function useLiveItems(
 }
 
 /**
- * Boolean-only run_error presence — Object.is-stable across stream deltas so
- * ChatView / Composer skip re-renders while the transcript grows.
+ * True when the latest turn already shows `error` as an inline run_error box.
+ * The scan stops at the latest prompt: a box left in an earlier turn is
+ * history and must not hide a different, current error from the banner.
  */
-export function useHasTranscriptRunError(
+export function transcriptShowsError(
+  items: readonly UiItem[],
+  error: string | null | undefined
+): boolean {
+  if (!error) return false
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]!
+    if (item.kind === 'message' && item.role === 'user') return false
+    if (item.kind === 'run_error' && item.message === error) return true
+  }
+  return false
+}
+
+/**
+ * Boolean-only {@link transcriptShowsError} — Object.is-stable across stream
+ * deltas so ChatView / Composer skip re-renders while the transcript grows.
+ */
+export function useTranscriptShowsError(
   itemsStore: ChatItemsStore | undefined,
-  items: UiItem[]
+  items: UiItem[],
+  error: string | null | undefined
 ): boolean {
   const itemsRef = useRef(items)
   itemsRef.current = items
@@ -285,10 +304,10 @@ export function useHasTranscriptRunError(
   )
   const getSnapshot = useCallback((): boolean => {
     const list = getItems ? getItems() : itemsRef.current
-    return list.some((item) => item.kind === 'run_error')
-  }, [getItems])
+    return transcriptShowsError(list, error)
+  }, [getItems, error])
   const fromStore = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
-  return getItems ? fromStore : items.some((item) => item.kind === 'run_error')
+  return getItems ? fromStore : transcriptShowsError(items, error)
 }
 
 /**
@@ -313,6 +332,36 @@ export function useHasChatItems(
   }, [getItems])
   const fromStore = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
   return getItems ? fromStore : items.length > 0
+}
+
+/**
+ * True once this run has called `create_plan`.
+ *
+ * Drives the plan panel's auto-open, which used to key off Plan mode. It must
+ * read the STORE, not the `items` prop: while a run streams, the prop is frozen
+ * and the store is the live list — the same split `useHasChatItems` handles.
+ * Returns a plain boolean so a subscriber only re-renders when it flips.
+ */
+export function useHasCreatePlanCall(
+  itemsStore: ChatItemsStore | undefined,
+  items: UiItem[]
+): boolean {
+  const itemsRef = useRef(items)
+  itemsRef.current = items
+  const subscribeItems = itemsStore?.subscribeItems
+  const getItems = itemsStore?.getItems
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => subscribeItems?.(onStoreChange) ?? (() => {}),
+    [subscribeItems]
+  )
+  const getSnapshot = useCallback((): boolean => {
+    const list = getItems ? getItems() : itemsRef.current
+    return list.some((item) => item.kind === 'tool' && item.tool.name === 'create_plan')
+  }, [getItems])
+  const fromStore = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  return getItems
+    ? fromStore
+    : items.some((item) => item.kind === 'tool' && item.tool.name === 'create_plan')
 }
 
 export function useChatLiveItems(

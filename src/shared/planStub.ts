@@ -1,4 +1,4 @@
-/** Shared Plan-mode `plan.md` stub and chrome detection. */
+/** Shared `plan.md` run-start stub and chrome detection. */
 
 export const PLAN_STUB_HINT =
   'Write the plan with create_plan. Stay on plan.md — do not edit product source.'

@@ -209,7 +209,16 @@ function tabBelongsToWorkspace(tab: BrowserTab, workspacePath?: string): boolean
 function getExistingTab(tabId: string, workspacePath?: string): BrowserTab {
   const existing = tabs.get(tabId)
   if (!existing || isTabDestroyed(existing) || !tabBelongsToWorkspace(existing, workspacePath)) {
-    throw new Error(`Unknown browser tab_id: ${tabId}`)
+    // An unknown id is model mis-aim; the ids this workspace can actually
+    // address are the whole remedy, so enumerate them in the message.
+    const liveIds = [...tabs.values()]
+      .filter((tab) => !isTabDestroyed(tab) && tabBelongsToWorkspace(tab, workspacePath))
+      .map((tab) => tab.id)
+    throw new Error(
+      liveIds.length > 0
+        ? `Unknown browser tab_id: ${tabId}. Live tab ids: ${liveIds.join(', ')}`
+        : `Unknown browser tab_id: ${tabId}. No live browser tabs open.`
+    )
   }
   return existing
 }

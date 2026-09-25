@@ -104,7 +104,7 @@ export async function readContractAsync(runDir: string): Promise<string> {
 
 export { DEFAULT_PLAN_STUB }
 
-/** Approved/draft plan artifact; empty when missing or still the Plan-mode stub. */
+/** Approved/draft plan artifact; empty when missing or still the run-start stub. */
 export async function readPlanAsync(runDir: string): Promise<string> {
   const text = await readPlanRawAsync(runDir)
   if (!text) return ''
@@ -114,8 +114,9 @@ export async function readPlanAsync(runDir: string): Promise<string> {
 }
 
 /**
- * Full plan.md contents, stub included and never truncated — the Plan-mode
- * prompt mirrors this verbatim so the model edits against the real file.
+ * Full plan.md contents, stub included and never truncated. Prefer
+ * `readPlanAsync` for the prompt: it returns the same verbatim bytes once the
+ * plan has a real body, and '' while it is still the stub every run seeds.
  */
 export async function readPlanRawAsync(runDir: string): Promise<string> {
   const p = join(runDir, 'plan.md')
@@ -320,17 +321,15 @@ export function appendEvent(dir: string, event: unknown): void {
   enqueueEventAppend(dir, event)
 }
 
-/** Await pending event appends, then rewrite events.jsonl (authoritative). */
-export async function syncEventsAsync(dir: string, events: unknown[]): Promise<void> {
+/**
+ * Await pending event appends, then rewrite events.jsonl (authoritative).
+ * Rows keep their own `at`: stamping the rewrite time onto every kept row
+ * collapsed earlier turns onto one instant, which broke their durations and
+ * anything that orders transcript rows by event time.
+ */
+export async function syncEventsAsync(dir: string, rows: PersistedEvent[]): Promise<void> {
   await flushEventAppends(dir)
-  const body = events
-    .map((event) =>
-      JSON.stringify({
-        at: new Date().toISOString(),
-        event
-      })
-    )
-    .join('\n')
+  const body = rows.map((row) => JSON.stringify({ at: row.at, event: row.event })).join('\n')
   atomicWriteFile(join(dir, 'events.jsonl'), body ? `${body}\n` : '')
   // The rewritten live file is authoritative and callers pass the stitched
   // (archive + live) history; stale archive heads would resurrect truncated
@@ -1180,13 +1179,7 @@ async function collectRunsFromRoot(root: string): Promise<{
         ...(status.inlineInstance ? { inlineInstance: true as const } : {}),
         ...(status.pathScope?.length ? { pathScope: status.pathScope } : {}),
         ...(status.worktreePath ? { worktreePath: status.worktreePath } : {}),
-        ...(status.worktreeBranch ? { worktreeBranch: status.worktreeBranch } : {}),
-        ...(status.agentProfileId ? { agentProfileId: status.agentProfileId } : {}),
-        ...(status.agentProfileName ? { agentProfileName: status.agentProfileName } : {}),
-        ...(status.agentProfileSnapshot
-          ? { agentProfileSnapshot: status.agentProfileSnapshot }
-          : {}),
-        ...(status.runtime ? { runtime: status.runtime } : {})
+        ...(status.worktreeBranch ? { worktreeBranch: status.worktreeBranch } : {})
       }
       const receiptCost = await readLenientReceiptCost(dir)
       if (receiptCost) Object.assign(summary, receiptCost)
@@ -1605,9 +1598,13 @@ export async function reconcileStaleRuns(
   try {
     entries = await readdir(runs, { withFileTypes: true })
   } catch (err) {
+    // No sessions root means no run was ever recorded here (or its storage is
+    // gone), so nothing can be stale — collectRunsFromRoot lists it as empty.
+    // Warning on it fired on every uncached listing, i.e. every switch to it.
+    if ((err as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return 0
     logger.warn('Run reconcile skipped workspace sessions root', {
       scope: 'runs',
-      workspacePath,
+      workspaceId: workspaceIdFromPath(workspacePath),
       err
     })
     return 0

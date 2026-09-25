@@ -431,122 +431,12 @@ describe('PlanPanel', () => {
     })
   })
 
-  it('shows Continue in Agent when plan mode, idle, and draft ready', async () => {
-    window.vyotiq.readRunArtifact = vi.fn().mockResolvedValue({
-      ok: true,
-      data: {
-        name: 'plan.md',
-        exists: true,
-        content: minimalReadyPlanMarkdown()
-      }
-    })
-    const onContinueInAgent = vi.fn()
-
-    render(
-      <PlanPanel
-        workspacePath="/ws"
-        runId="run-continue"
-        running={false}
-        agentMode="plan"
-        onContinueInAgent={onContinueInAgent}
-      />
-    )
-
-    const btn = await screen.findByRole('button', { name: 'Continue in Agent' })
-    fireEvent.click(btn)
-    expect(onContinueInAgent).toHaveBeenCalledTimes(1)
-  })
-
-  it('hides Continue in Agent when agent mode or running', async () => {
-    window.vyotiq.readRunArtifact = vi.fn().mockResolvedValue({
-      ok: true,
-      data: {
-        name: 'plan.md',
-        exists: true,
-        content: minimalReadyPlanMarkdown()
-      }
-    })
-    const onContinueInAgent = vi.fn()
-
-    const { rerender } = render(
-      <PlanPanel
-        workspacePath="/ws"
-        runId="run-hide"
-        running={false}
-        agentMode="agent"
-        onContinueInAgent={onContinueInAgent}
-      />
-    )
-
-    await waitFor(() => {
-      expect(window.vyotiq.readRunArtifact).toHaveBeenCalled()
-    })
-    expect(screen.queryByRole('button', { name: 'Continue in Agent' })).toBeNull()
-
-    rerender(
-      <PlanPanel
-        workspacePath="/ws"
-        runId="run-hide"
-        running
-        agentMode="plan"
-        onContinueInAgent={onContinueInAgent}
-      />
-    )
-    await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Continue in Agent' })).toBeNull()
-    })
-  })
-
-  it('shows Continue tool-fail hint from receipt while on plan tab', async () => {
-    const receipt = {
-      version: 5,
-      writtenAt: '2026-07-30T00:00:00.000Z',
-      runId: 'run-fail',
-      status: 'done',
-      step: 2,
-      compactionCount: 0,
-      toolStats: { totalCalls: 3, ok: 1, failed: 2, byName: {} },
-      failureClusters: [{ key: 'terminal:exit', count: 2 }],
-      unreadEditPaths: [],
-      wroteFiles: [],
-      diagnostics: { calls: 0, ok: 0, clean: 0 },
-      contractExcerpt: ''
-    }
-    window.vyotiq.readRunArtifact = vi.fn().mockImplementation(({ name }) => {
-      if (name === 'plan.md') {
-        return Promise.resolve({
-          ok: true,
-          data: {
-            name: 'plan.md',
-            exists: true,
-            content: minimalReadyPlanMarkdown()
-          }
-        })
-      }
-      if (name === 'receipt.json') {
-        return Promise.resolve({
-          ok: true,
-          data: { name: 'receipt.json', exists: true, content: JSON.stringify(receipt) }
-        })
-      }
-      return Promise.resolve({ ok: true, data: { name, exists: false, content: null } })
-    })
-
-    render(
-      <PlanPanel
-        workspacePath="/ws"
-        runId="run-fail"
-        running={false}
-        agentMode="plan"
-        onContinueInAgent={() => undefined}
-      />
-    )
-
-    await screen.findByRole('button', { name: 'Continue in Agent' })
-    await waitFor(() => {
-      expect(screen.getByText(/2 tool failures · terminal:exit/)).toBeTruthy()
-    })
-  })
+  // Removed with Plan mode: "shows Continue in Agent when plan mode, idle and
+  // draft ready", "hides Continue in Agent when agent mode or running" and
+  // "shows Continue tool-fail hint from receipt while on plan tab". The footer
+  // existed to carry an approved plan from Plan mode into Agent; one mode now
+  // publishes and implements it, so there is nothing to continue into. Dropping
+  // it also removed the receipt.json fetch the plan tab made on every load.
 
   it('clears Loading when a quiet poll supersedes a non-quiet load', async () => {
     let resolveSlow: ((v: unknown) => void) | undefined
@@ -602,16 +492,14 @@ describe('PlanPanel', () => {
     })
   })
 
-  it('uses plan-mode empty copy when agentMode is plan', async () => {
+  it('uses one empty copy that points at create_plan, not at a mode', async () => {
     window.vyotiq.readRunArtifact = vi.fn().mockResolvedValue({
       ok: true,
       data: { name: 'plan.md', exists: false, content: null }
     })
-    render(
-      <PlanPanel workspacePath="/ws" runId="run-empty" running={false} agentMode="plan" />
-    )
+    render(<PlanPanel workspacePath="/ws" runId="run-empty" running={false} />)
     await waitFor(() => {
-      expect(screen.getByText(/Draft plan.md for this run/)).toBeTruthy()
+      expect(screen.getByText(/Publish plan.md with create_plan/)).toBeTruthy()
     })
     expect(screen.queryByText(/Switch to Plan mode/)).toBeNull()
   })
@@ -689,7 +577,12 @@ describe('PlanPanel', () => {
     expect(screen.queryByText('No plan drafted yet')).toBeNull()
   })
 
-  it('renders in-progress plan stub instead of empty state', async () => {
+  it('reads a seeded stub as empty, not as a plan', async () => {
+    // Behaviour change with the Plan merge: EVERY run seeds plan.md at start
+    // now, so "the file has text" no longer means "the run has a plan". The
+    // panel keys off draft readiness, or it would show this scaffold on every
+    // run that never planned. Previously the stub rendered verbatim, which was
+    // right only while Plan mode existed to draft into it.
     window.vyotiq.readRunArtifact = vi.fn().mockImplementation(async (req: { name?: string }) => {
       if (req.name === 'plan.md') {
         return {
@@ -711,8 +604,8 @@ describe('PlanPanel', () => {
     render(<PlanPanel workspacePath="/ws" runId="run-stub" running={false} />)
 
     await waitFor(() => {
-      expect(screen.getByText(/Draft the plan here/i)).toBeTruthy()
+      expect(screen.getByText('No plan drafted yet')).toBeTruthy()
     })
-    expect(screen.queryByText('No plan drafted yet')).toBeNull()
+    expect(screen.queryByText(/Draft the plan here/i)).toBeNull()
   })
 })

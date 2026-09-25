@@ -207,7 +207,7 @@ export function DockSplitButton({
           <button
             type="button"
             className={cn(
-              'inline-flex h-full w-6 shrink-0 items-center justify-center border-l border-border text-muted hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]',
+              'inline-flex h-full w-6 shrink-0 items-center justify-center border-l border-border/40 text-muted hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]',
               menuClassName
             )}
             disabled={primaryDisabled}

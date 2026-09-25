@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -304,12 +304,72 @@ describe('wireToolCallArguments', () => {
     })
   })
 
+  it('closes unterminated containers after a complete value for non-write tools (live 4a5dffa5)', () => {
+    // The walk ends after the complete "goal" value; only the outer `}` is
+    // missing, so appending closers adds zero fabricated bytes.
+    const wired = wireToolCallArguments(
+      'spawn_agent_instance',
+      '{"goal": "Research model pricing and limits"'
+    )
+    expect(JSON.parse(wired)).toEqual({ goal: 'Research model pricing and limits' })
+  })
+
+  it('refuses to close unterminated containers for write-family tools (live de3b38d6)', () => {
+    // Same shape as the spawn salvage, but a closed-but-truncated write body
+    // could still satisfy the schema and overwrite the file — stay refused.
+    expect(
+      wireToolCallArguments('str_replace', '{"path":"a.ts","new_string":"<!--APPEND-->"')
+    ).toBe('{}')
+  })
+
   it('does not salvage a truncated payload with no complete value', () => {
     expect(wireToolCallArguments('ask_question', '{"questions": [{"id"')).toBe('{}')
+  })
+
+  it('still refuses mid-string cuts after the closer salvage (locked behavior)', () => {
+    // The walk ends inside a string, so closeUnterminatedJson returns null —
+    // truncation stays a malformed-args error even for non-write tools.
+    expect(wireToolCallArguments('read', '{"path":"a.ts","pattern":"half of a fi')).toBe('{}')
   })
 
   it('keeps stray braces inside string values intact', () => {
     const wired = wireToolCallArguments('grep', '{"pattern":"interface\\\\{\\\\}"}')
     expect(JSON.parse(wired)).toEqual({ pattern: 'interface\\{\\}' })
+  })
+})
+
+describe('dangling member-stub salvage end to end (observed w1 shapes)', () => {
+  it('executeTool runs the read after a dangling `"offset":` stub is dropped', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'w1-stub-read-'))
+    try {
+      writeFileSync(join(dir, 'pkg.json'), '{"ok":true}')
+      const result = await executeTool(
+        'read',
+        '{"path":"pkg.json", "offset":',
+        dir,
+        new AbortController().signal
+      )
+      expect(result.ok).toBe(true)
+      expect(result.content).not.toMatch(/malformed, truncated, or non-object/i)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('executeTool keeps write-family dangling stubs refused and writes nothing', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'w1-stub-edit-'))
+    try {
+      const result = await executeTool(
+        'edit',
+        '{"path":"a.ts","contents":"full body", "old_string":',
+        dir,
+        new AbortController().signal
+      )
+      expect(result.ok).toBe(false)
+      expect(result.content).toMatch(/malformed, truncated, or non-object/i)
+      expect(existsSync(join(dir, 'a.ts'))).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

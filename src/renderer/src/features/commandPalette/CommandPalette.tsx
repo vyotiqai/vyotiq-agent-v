@@ -92,7 +92,7 @@ export function CommandPalette({
       >
         <input
           ref={inputRef}
-          className="border-b border-border bg-transparent px-3 py-2 text-sm text-fg outline-none"
+          className="border-b border-border/40 bg-transparent px-3 py-2 text-sm text-fg outline-none"
           placeholder="Search commands…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}

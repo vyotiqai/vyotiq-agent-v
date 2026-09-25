@@ -132,8 +132,8 @@ export function shouldAutoContinueActiveGoal(input: {
 }): GoalAutoContinueDecision {
   if (input.goalStatus !== 'active') return 'none'
   // Ask mode is read-only Q&A — auto-looping a goal there would churn Q&A
-  // turns without progress. Agent and Plan both work with tools, so both
-  // continue an active goal (bounded by the two-finish stop_wait cap).
+  // turns without progress. Agent works with tools, so it continues an active
+  // goal (bounded by the two-finish stop_wait cap).
   if (input.agentMode === 'ask') return 'none'
   if (input.incomplete) return 'none'
   if ((input.continueCount ?? 0) >= GOAL_CONTINUE_BUDGET) return 'stop_budget'

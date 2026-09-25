@@ -4,12 +4,10 @@ import {
   writeMemoryFile
 } from '../context/memory'
 
-type MemoryNamespace = string | undefined
-
-export function toolMemoryList(workspace: string, namespace?: MemoryNamespace): string {
+export function toolMemoryList(workspace: string): string {
   // index.md is auto-injected into the system prompt every step — do not
   // duplicate it here. memory_read fetches the full file on demand.
-  const { notes, indexedNotes, hasState } = listMemoryNotes(workspace, namespace)
+  const { notes, indexedNotes, hasState } = listMemoryNotes(workspace)
   // Drift signal: notes on disk vs notes the injected index points at.
   // Unindexed notes are invisible to retrieval (the index is the map);
   // broken pointers would make memory_read fail. Zero injection cost —
@@ -37,10 +35,8 @@ export function toolMemoryList(workspace: string, namespace?: MemoryNamespace): 
 /**
  * Validate a memory-relative path and return its canonical form.
  *
- * One implementation for every caller. The agent's tools and the Teammates
- * pane's memory panel write into the same namespace, so a path one accepts and
- * the other rejects means a note the agent can never read back — or a panel
- * that cannot open a file the agent just wrote.
+ * One implementation for every caller, so a path one caller accepts and
+ * another rejects cannot strand a note the agent can never read back.
  */
 export function normalizeMemoryRelPath(pathArg: string): string {
   const cleaned = pathArg.trim().replace(/^[/\\]+/, '')
@@ -61,10 +57,9 @@ export function normalizeMemoryRelPath(pathArg: string): string {
 
 export function toolMemoryRead(
   workspace: string,
-  pathArg: string,
-  namespace?: MemoryNamespace
+  pathArg: string
 ): string {
-  return readMemoryFile(workspace, normalizeMemoryRelPath(pathArg), namespace)
+  return readMemoryFile(workspace, normalizeMemoryRelPath(pathArg))
 }
 
 /** @deprecated Kept for callers that still import the former write cap. */
@@ -73,9 +68,8 @@ export const MEMORY_WRITE_CAP = Number.POSITIVE_INFINITY
 export function toolMemoryWrite(
   workspace: string,
   pathArg: string,
-  contents: string,
-  namespace?: MemoryNamespace
+  contents: string
 ): string {
-  const written = writeMemoryFile(workspace, normalizeMemoryRelPath(pathArg), contents, namespace)
+  const written = writeMemoryFile(workspace, normalizeMemoryRelPath(pathArg), contents)
   return `Wrote memory/${written}`
 }

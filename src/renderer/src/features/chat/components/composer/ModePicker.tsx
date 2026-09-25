@@ -12,13 +12,15 @@ import { chromePillButton } from './composerChrome'
 
 const MODES: { value: AgentInteractionMode; label: string; short: string }[] = [
   { value: 'ask', label: 'Ask', short: 'Ask' },
-  { value: 'plan', label: 'Plan', short: 'Plan' },
   { value: 'agent', label: 'Agent', short: 'Agent' }
 ]
 
+/** Index of `agent` in MODES — the fallback for an unrecognized mode. */
+const DEFAULT_MODE_INDEX = MODES.findIndex((m) => m.value === 'agent')
+
 function nextMode(current: AgentInteractionMode, reverse: boolean): AgentInteractionMode {
   const i = MODES.findIndex((m) => m.value === current)
-  const idx = i >= 0 ? i : 2
+  const idx = i >= 0 ? i : DEFAULT_MODE_INDEX
   const len = MODES.length
   const next = reverse ? (idx - 1 + len) % len : (idx + 1) % len
   return MODES[next]!.value
@@ -82,7 +84,7 @@ export function ModePicker({
     return () => window.removeEventListener('vyotiq:command', onCommand)
   }, [locked, advance])
 
-  const current = MODES.find((m) => m.value === mode) ?? MODES[2]!
+  const current = MODES.find((m) => m.value === mode) ?? MODES[DEFAULT_MODE_INDEX]!
   const upcoming = MODES.find((m) => m.value === nextMode(mode, false))!
   const chord = shortcutLabel('cycleMode')
 

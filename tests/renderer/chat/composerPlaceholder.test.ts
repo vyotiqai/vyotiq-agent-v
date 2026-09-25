@@ -46,13 +46,11 @@ describe('resolveComposerPlaceholder', () => {
     ).toBe('Ask a follow-up · won’t edit files')
   })
 
-  it('covers Plan empty and follow-up', () => {
-    expect(resolveComposerPlaceholder({ ...base, agentMode: 'plan' })).toBe(
-      'Describe a plan · @ to attach · / for commands'
-    )
+  it('falls back to the Agent placeholder for a legacy plan mode', () => {
     expect(
-      resolveComposerPlaceholder({ ...base, agentMode: 'plan', hasTranscript: true })
-    ).toBe('Refine the plan')
+      // @ts-expect-error legacy persisted value: Plan was merged into Agent.
+      resolveComposerPlaceholder({ ...base, agentMode: 'plan' })
+    ).toBe('Describe a task · @ to attach · / for commands')
   })
 
   it('covers Agent empty and follow-up', () => {

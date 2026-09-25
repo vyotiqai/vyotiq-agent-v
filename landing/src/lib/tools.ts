@@ -62,6 +62,10 @@ const EXPLICIT: { title: string; match: (n: string) => boolean }[] = [
     match: (n) => n.endsWith('_agent_instance')
   },
   {
+    title: 'Agent-written tools',
+    match: (n) => n === 'build_tool'
+  },
+  {
     title: 'Planning & memory',
     match: (n) =>
       n.startsWith('memory_') ||

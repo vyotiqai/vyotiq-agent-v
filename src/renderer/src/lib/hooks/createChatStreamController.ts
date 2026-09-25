@@ -35,6 +35,7 @@ import {
   buildUserContent,
   contentDisplayText,
   contentImages,
+  RUN_DISMISSED_ERRORS_MAX,
   type MessageContent
 } from '@shared/ipc'
 import {
@@ -780,19 +781,39 @@ function findToolResultRowIndex(
   return -1
 }
 
-function errorMessageFromPersisted(events: PersistedEvent[]): string | null {
-  let message: string | null = null
+/**
+ * Transcript id of a run-error box. Keyed by the failure's own `errorId`, or by
+ * its row's time for rows written before errors carried one — never by row
+ * position, which shifts as the loaded tail of events.jsonl moves.
+ */
+function runErrorItemId(key: string): string {
+  return `run-error:${key}`
+}
+
+function runErrorKey(
+  row: PersistedEvent,
+  event: Extract<AgentEvent, { type: 'error' }>
+): string {
+  return event.errorId ?? row.at
+}
+
+function lastPersistedError(
+  events: PersistedEvent[]
+): { message: string; itemId: string } | null {
+  let last: { message: string; itemId: string } | null = null
   for (const row of events) {
     const event = row.event
     if (!isAgentEvent(event)) continue
     // A later turn start clears a prior failure (matches live status:running).
     if (event.type === 'status' && event.status === 'running') {
-      message = null
+      last = null
       continue
     }
-    if (event.type === 'error') message = event.message
+    if (event.type === 'error') {
+      last = { message: event.message, itemId: runErrorItemId(runErrorKey(row, event)) }
+    }
   }
-  return message
+  return last
 }
 
 function errorCodeFromPersisted(events: PersistedEvent[]): string | null {
@@ -811,12 +832,15 @@ function errorCodeFromPersisted(events: PersistedEvent[]): string | null {
 
 function errorFromPersisted(
   events: PersistedEvent[],
-  dismissedErrorMessage: string | null = null
+  dismissedErrorMessage: string | null = null,
+  dismissedRunErrorIds: ReadonlySet<string> = new Set()
 ): string | null {
-  const message = errorMessageFromPersisted(events)
-  if (!message) return null
-  if (dismissedErrorMessage && dismissedErrorMessage === message) return null
-  return message
+  const last = lastPersistedError(events)
+  if (!last) return null
+  if (dismissedErrorMessage && dismissedErrorMessage === last.message) return null
+  // Its box was dismissed; the banner must not bring the same failure back.
+  if (dismissedRunErrorIds.has(last.itemId)) return null
+  return last.message
 }
 
 /** A turn that ended before the work was finished, offering a Continue affordance. */
@@ -953,7 +977,12 @@ function hydrateFromDisk(
   kept: ChatMessage[],
   events: PersistedEvent[],
   dismissedErrorMessage: string | null = null,
-  opts?: { idle?: boolean; priorAgentInstances?: Record<string, AgentInstanceUiState> }
+  opts?: {
+    idle?: boolean
+    priorAgentInstances?: Record<string, AgentInstanceUiState>
+    /** Run-error boxes the reader dismissed (persisted per run). */
+    dismissedRunErrorIds?: ReadonlySet<string>
+  }
 ) {
   const items = applyEventTimestamps(
     applyPersistedLiveTools(messagesToUiItems(kept), events),
@@ -973,7 +1002,7 @@ function hydrateFromDisk(
   const incomplete = incompleteFromPersisted(events)
   return {
     messages: kept,
-    error: errorFromPersisted(events, dismissedErrorMessage),
+    error: errorFromPersisted(events, dismissedErrorMessage, opts?.dismissedRunErrorIds),
     errorCode: errorCodeFromPersisted(events),
     incomplete,
     turnStatus: turnOutcomeFromPersisted(events, opts?.idle === true, incomplete),
@@ -982,14 +1011,15 @@ function hydrateFromDisk(
     compacting: compactingFromEvents(events, opts?.idle === true),
     costHint: costHintFromEvents(events),
     items: applyCompactionItems(
-      appendRunErrorItems(
+      weaveRunErrorItems(
         finalizeHydratedTranscript(
           items,
           events,
           opts?.idle ? { treatRunningAs: 'cancelled' } : undefined
         ),
         events,
-        dismissedErrorMessage
+        dismissedErrorMessage,
+        opts?.dismissedRunErrorIds
       ),
       events
     ),
@@ -1043,53 +1073,140 @@ function costHintFromEvents(events: PersistedEvent[]): string | null {
   return hint
 }
 
-function appendRunErrorItems(
+/**
+ * Rebuild the transcript's error boxes from disk. Mirrors the live terminal
+ * handler: one box per failed invoke, from the last error before its
+ * `status: 'error'`.
+ *
+ * A box only stands while nothing has re-run its turn. A later
+ * `status: 'running'` with no new prompt in between (a resume, a goal
+ * relaunch, or what an edited-and-resent prompt left behind) supersedes it, so
+ * it is dropped rather than shown over the work that followed. A box that
+ * stands goes where its turn ended, just before the next prompt. Appending
+ * every box to the end pinned old failures under the newest turn after each
+ * reload.
+ */
+function weaveRunErrorItems(
   items: UiItem[],
   events: PersistedEvent[],
-  dismissedErrorMessage: string | null = null
+  dismissedErrorMessage: string | null = null,
+  dismissedRunErrorIds: ReadonlySet<string> = new Set()
 ): UiItem[] {
-  const out = [...items]
-  // Mirror the live terminal handler: one error box per failed run — the last
-  // error event before each status:'error', scoped by the next status:'running'.
-  let lastError: { row: PersistedEvent; index: number; message: string; code?: string } | null =
-    null
-  const pushBox = (): void => {
-    if (!lastError || lastError.message === dismissedErrorMessage) return
-    const id = `run-error:${lastError.row.at}:${lastError.index}`
-    if (out.some((item) => item.kind === 'run_error' && item.id === id)) return
-    out.push({
-      kind: 'run_error',
-      id,
-      message: lastError.message,
-      ...(lastError.code ? { code: lastError.code } : {}),
-      at: lastError.row.at
-    })
+  type Failure = { id: string; message: string; code?: string; at: string; rerunAt?: string }
+  const failures: Failure[] = []
+  let lastError: Failure | null = null
+  // Rows a pre-fix rewind re-stamped can share one `at`; ids must stay unique.
+  const usedIds = new Set<string>()
+  // Whether an invoke was open when `lastError` was logged. One logged after
+  // its invoke ended is a post-run warning unless a `status: 'error'` follows
+  // to close a new invoke that failed before reporting `running`.
+  let invokeOpen = true
+  let lastErrorInInvoke = false
+  const closeInvoke = (): void => {
+    if (!lastError) return
+    // A failure is also evidence of a new invoke, even one that died before
+    // its `status: 'running'` row, so it re-runs the failures before it.
+    const failedAt = lastError.at
+    for (const failure of failures) failure.rerunAt ??= failedAt
+    const dismissed =
+      lastError.message === dismissedErrorMessage || dismissedRunErrorIds.has(lastError.id)
+    if (!dismissed) failures.push(lastError)
+    lastError = null
   }
   for (let i = 0; i < events.length; i++) {
     const row = events[i]
     const event = row?.event
-    if (!isAgentEvent(event)) continue
+    if (!row || !isAgentEvent(event)) continue
     if (event.type === 'status') {
       if (event.status === 'running') {
+        for (const failure of failures) failure.rerunAt ??= row.at
         lastError = null
-      } else if (event.status === 'error') {
-        pushBox()
+        invokeOpen = true
+      } else {
+        if (event.status === 'error') closeInvoke()
         lastError = null
+        invokeOpen = false
       }
       continue
     }
     if (event.type === 'error') {
+      const baseId = runErrorItemId(runErrorKey(row, event))
+      const id = usedIds.has(baseId) ? `${baseId}:${i}` : baseId
+      usedIds.add(id)
       lastError = {
-        row,
-        index: i,
+        id,
         message: event.message,
-        ...(event.code ? { code: event.code } : {})
+        ...(event.code ? { code: event.code } : {}),
+        at: row.at
       }
+      lastErrorInInvoke = invokeOpen
     }
   }
-  // Trailing error with no terminal status (truncated/legacy logs) — keep the box.
-  pushBox()
+  // Trailing error with no terminal status (truncated/legacy logs) keeps its
+  // box; a warning logged after the invoke ended never gets one.
+  if (lastErrorInInvoke) closeInvoke()
+  if (failures.length === 0) return items
+
+  const out = [...items]
+  for (const failure of failures) {
+    const failedMs = Date.parse(failure.at)
+    let nextPrompt = -1
+    let nextPromptMs = Number.NaN
+    if (!Number.isNaN(failedMs)) {
+      for (let i = 0; i < out.length; i++) {
+        const item = out[i]!
+        if (item.kind !== 'message' || item.role !== 'user' || !item.at) continue
+        const ms = Date.parse(item.at)
+        if (!Number.isNaN(ms) && ms > failedMs) {
+          nextPrompt = i
+          nextPromptMs = ms
+          break
+        }
+      }
+    }
+    if (failure.rerunAt != null) {
+      const rerunMs = Date.parse(failure.rerunAt)
+      const newPromptFirst =
+        nextPrompt >= 0 && !Number.isNaN(rerunMs) && nextPromptMs <= rerunMs
+      if (!newPromptFirst) continue
+    }
+    // Every loaded row is newer than the failure: its turn is outside the window.
+    if (nextPrompt === 0) continue
+    const box: UiItem = {
+      kind: 'run_error',
+      id: failure.id,
+      message: failure.message,
+      ...(failure.code ? { code: failure.code } : {}),
+      at: failure.at
+    }
+    if (nextPrompt < 0) out.push(box)
+    else out.splice(nextPrompt, 0, box)
+  }
   return out
+}
+
+/** Index of the latest prompt; rows after it belong to the latest turn. */
+function latestPromptIndex(items: readonly UiItem[]): number {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]!
+    if (item.kind === 'message' && item.role === 'user') return i
+  }
+  return -1
+}
+
+/**
+ * A new invoke re-running the latest turn supersedes the error boxes in it, the
+ * same rule `weaveRunErrorItems` applies on hydrate. Earlier turns keep theirs.
+ */
+function dropLatestTurnRunErrors(items: UiItem[]): UiItem[] {
+  const lastPrompt = latestPromptIndex(items)
+  let dropped = false
+  const next = items.filter((item, i) => {
+    if (i <= lastPrompt || item.kind !== 'run_error') return true
+    dropped = true
+    return false
+  })
+  return dropped ? next : items
 }
 
 export type PendingFollowUpState = {
@@ -1188,13 +1305,6 @@ export type ChatStreamState = {
   agentInstances: Record<string, AgentInstanceUiState>
   /** Session-pinned provider/model — set on first send; other sessions' model changes cannot bleed in. */
   providerModel: { provider: ProviderId; model: string } | null
-  /**
-   * True once the user picks a model by hand. `providerModel` is also filled
-   * from the ambient default on first send, so without this flag main cannot
-   * tell a deliberate choice from a default — and a teammate's pinned model
-   * would lose to a default the user never chose.
-   */
-  providerModelExplicit: boolean
 }
 
 export type ChatStreamController = ChatStreamState & {
@@ -1244,6 +1354,8 @@ export type ChatStreamController = ChatStreamState & {
   loadEarlierMessages: () => Promise<boolean>
   reattachActiveRun: (runId: string) => Promise<void>
   clearError: () => void
+  /** Hide one run-error box for good (persisted with this run's reader state). */
+  dismissRunError: (itemId: string) => void
   /** Lazy-load full tool output from disk when IPC preview was truncated. */
   loadToolContent: (toolCallId: string) => Promise<string | null>
   /** Persist thinking block expand/collapse across transcript remounts. */
@@ -1335,13 +1447,16 @@ export type RunExpansions = {
   groupIds: string[]
   thinkingIds: string[]
   collapsedTurns: number[]
+  /** Run-error boxes the reader dismissed; kept after the run's tab closes. */
+  dismissedErrorIds: string[]
 }
 
 export const EMPTY_RUN_EXPANSIONS: RunExpansions = {
   toolIds: [],
   groupIds: [],
   thinkingIds: [],
-  collapsedTurns: []
+  collapsedTurns: [],
+  dismissedErrorIds: []
 }
 
 export type CreateChatStreamControllerOptions = {
@@ -1351,15 +1466,6 @@ export type CreateChatStreamControllerOptions = {
   onTerminal?: () => void
   /** Current Ask / Plan / Agent mode for chatStart. */
   getAgentMode?: () => AgentInteractionMode
-  /** Teammate profile bound to this chat (identity, memory namespace, model pin). */
-  getAgentProfileId?: () => string | null | undefined
-  /**
-   * Main refused this chat's teammate because the run is durably bound to a
-   * different one. The local binding is persisted, so without dropping it here
-   * every later send repeats the same refusal — the chat stays unusable across
-   * restarts with no hint that the teammate picker is the cause.
-   */
-  onAgentProfileRefused?: () => void
   /** Live default provider/model (effective settings) until this session pins its own. */
   getDefaultProviderModel?: () => { provider: ProviderId; model: string } | null
   /** Sync composer mode when the agent calls switch_mode. */
@@ -1374,8 +1480,7 @@ export function createChatStreamController(
   options: CreateChatStreamControllerOptions
 ): ChatStreamController {
   const { workspacePath, onRunIdAssigned, onTerminal, getAgentMode, onAgentModeChange, getDefaultProviderModel } = options
-  const { initialExpansions, onExpansionsChange, getAgentProfileId } = options
-  const { onAgentProfileRefused } = options
+  const { initialExpansions, onExpansionsChange } = options
   let lastNotifiedAgentMode: AgentInteractionMode | null = null
   const notifyAgentMode = (mode: AgentInteractionMode | null | undefined): void => {
     if (!mode) return
@@ -1421,6 +1526,8 @@ export function createChatStreamController(
   let runningTurnSeq = 0
   let lastRunErrorMessage: string | null = null
   let lastRunErrorCode: string | null = null
+  /** `errorId` of the failure lastRunErrorMessage came from — its box's id on disk too. */
+  let lastRunErrorId: string | null = null
   /** Persisted error message dismissed by the reader; hydrate skips restoring it. */
   let dismissedErrorMessage: string | null = null
   let usageTotals: StepUsageTotals = emptyStepUsageTotals()
@@ -1502,12 +1609,15 @@ export function createChatStreamController(
   const expandedToolIds = new Set(initialExpansions?.toolIds ?? [])
   const expandedGroupIds = new Set(initialExpansions?.groupIds ?? [])
   const expandedThinkingIds = new Set(initialExpansions?.thinkingIds ?? [])
+  /** Insertion-ordered, so the oldest dismissal is the one that drops past the cap. */
+  const dismissedRunErrorIds = new Set(initialExpansions?.dismissedErrorIds ?? [])
 
   const expansionsSnapshot = (): RunExpansions => ({
     toolIds: [...expandedToolIds],
     groupIds: [...expandedGroupIds],
     thinkingIds: [...expandedThinkingIds],
-    collapsedTurns: [...state.collapsedTurnIndices]
+    collapsedTurns: [...state.collapsedTurnIndices],
+    dismissedErrorIds: [...dismissedRunErrorIds]
   })
 
   const notifyExpansions = (): void => {
@@ -1887,8 +1997,7 @@ export function createChatStreamController(
     writeCheckpoint: null,
     pendingFollowUps: [],
     agentInstances: {},
-    providerModel: null,
-    providerModelExplicit: false
+    providerModel: null
   }
 
   const notify = (): void => {
@@ -1963,6 +2072,7 @@ export function createChatStreamController(
     dismissedErrorMessage = null
     lastRunErrorMessage = null
     lastRunErrorCode = null
+    lastRunErrorId = null
     if (activeInvokeId != null) supersededInvokeIds.add(activeInvokeId)
     activeInvokeId = null
     usageTotals = emptyStepUsageTotals()
@@ -1991,8 +2101,7 @@ export function createChatStreamController(
       writeCheckpoint: null,
       pendingFollowUps: [],
       agentInstances: {},
-      providerModel: null,
-      providerModelExplicit: false
+      providerModel: null
     })
   }
 
@@ -2001,18 +2110,16 @@ export function createChatStreamController(
    * the first send so a model change in a different session (which only updates
    * the shared global settings) cannot bleed into this one.
    */
-  const resolveTurnProviderModel = ():
-    | { provider: ProviderId; model: string; explicit: boolean }
-    | null => {
+  const resolveTurnProviderModel = (): { provider: ProviderId; model: string } | null => {
     if (state.providerModel) {
-      return { ...state.providerModel, explicit: state.providerModelExplicit }
+      return state.providerModel
     }
     const fallback = getDefaultProviderModel?.() ?? null
     if (!fallback) return null
     // Pinning the ambient default still keeps another session's model change
-    // from bleeding in, but it stays non-explicit so a teammate's pin wins.
+    // from bleeding in.
     patch({ providerModel: fallback })
-    return { ...fallback, explicit: false }
+    return fallback
   }
 
   const assignRunId = (id: string): void => {
@@ -2142,7 +2249,8 @@ export function createChatStreamController(
     if (mode) notifyAgentMode(mode)
     const hydrated = hydrateFromDisk(kept, events, dismissedErrorMessage, {
       ...(opts.idle === undefined ? {} : { idle: opts.idle }),
-      priorAgentInstances: state.agentInstances
+      priorAgentInstances: state.agentInstances,
+      dismissedRunErrorIds
     })
     return { ok: true, data: res.data, events, eventsLoadError, kept, hydrated }
   }
@@ -2572,7 +2680,7 @@ export function createChatStreamController(
       // was dropped (suspend race / orphan buffer).
       if (event.ok && event.name === 'switch_mode') {
         const mode = event.summary?.trim()
-        if (mode === 'ask' || mode === 'plan' || mode === 'agent') {
+        if (mode === 'ask' || mode === 'agent') {
           notifyAgentMode(mode)
         }
       }
@@ -2617,6 +2725,7 @@ export function createChatStreamController(
     } else if (event.type === 'error') {
       lastRunErrorMessage = event.message
       lastRunErrorCode = event.code ?? null
+      lastRunErrorId = event.errorId ?? null
       dismissedErrorMessage = null
       // Put detail in the log line — AppError sanitize strips message from `err`.
       logger.warn(`Agent run error: ${event.message}`, {
@@ -2897,10 +3006,12 @@ export function createChatStreamController(
           incomplete: null,
           networkWait: null,
           runStartedAt: state.runStartedAt ?? Date.now(),
-          items: state.items.map((item) =>
-            item.kind === 'message' && item.reconnecting
-              ? { ...item, reconnecting: false }
-              : item
+          items: dropLatestTurnRunErrors(
+            state.items.map((item) =>
+              item.kind === 'message' && item.reconnecting
+                ? { ...item, reconnecting: false }
+                : item
+            )
           )
         })
       }
@@ -2965,10 +3076,17 @@ export function createChatStreamController(
         const withRunError =
           event.status === 'error' && errorMessage
             ? [
-                ...finalizedItems,
+                // One box per turn: this failure replaces one an earlier attempt
+                // at the same turn left behind.
+                ...dropLatestTurnRunErrors(finalizedItems),
                 {
                   kind: 'run_error' as const,
-                  id: `run-error:live:${state.runTerminalTick + 1}`,
+                  // The failure's own id matches the box a reload rebuilds, so a
+                  // dismissal made now still applies after it.
+                  id:
+                    lastRunErrorId && errorMessage === lastRunErrorMessage
+                      ? runErrorItemId(lastRunErrorId)
+                      : `run-error:live:${Date.now()}`,
                   message: errorMessage,
                   ...(lastRunErrorCode ? { code: lastRunErrorCode } : {})
                 }
@@ -3028,6 +3146,7 @@ export function createChatStreamController(
     })
     lastRunErrorMessage = null
     lastRunErrorCode = null
+    lastRunErrorId = null
     usageTotals = emptyStepUsageTotals()
     // Keep last contextUsage so the meter does not flicker away between turns;
     // stepUsage resets via usageTotals and is overwritten on the next event.
@@ -3091,7 +3210,6 @@ export function createChatStreamController(
     const mode = getAgentMode?.() ?? 'agent'
     const focusedFile = getFocusedFile() ?? undefined
     const turnProviderModel = resolveTurnProviderModel()
-    const agentProfileId = getAgentProfileId?.() || undefined
     const startPayload = continuingRunId
       ? {
           incremental: true as const,
@@ -3104,9 +3222,7 @@ export function createChatStreamController(
           mode,
           focusedFile,
           provider: turnProviderModel?.provider,
-          model: turnProviderModel?.model,
-          modelExplicit: turnProviderModel?.explicit,
-          agentProfileId
+          model: turnProviderModel?.model
         }
       : {
           messages: nextMessages,
@@ -3114,9 +3230,7 @@ export function createChatStreamController(
           mode,
           focusedFile,
           provider: turnProviderModel?.provider,
-          model: turnProviderModel?.model,
-          modelExplicit: turnProviderModel?.explicit,
-          agentProfileId
+          model: turnProviderModel?.model
         }
     let res = await window.vyotiq.chatStart(startPayload)
     for (
@@ -3134,9 +3248,6 @@ export function createChatStreamController(
       const message = res.error
       // Detail in the log line — string `err` keeps scrubbed text; AppError would not.
       logger.error(`chatStart failed: ${message}`, { scope: 'chat', err: res.error, code: res.code })
-      // Drop the local teammate binding main just refused, so the next send
-      // uses the run's own binding instead of repeating this refusal forever.
-      if (res.code === 'run_binding_immutable') onAgentProfileRefused?.()
       turnUsageSlots = priorTurnUsage
       patch({
         error: message,
@@ -3217,6 +3328,7 @@ export function createChatStreamController(
     })
     lastRunErrorMessage = null
     lastRunErrorCode = null
+    lastRunErrorId = null
     usageTotals = emptyStepUsageTotals()
     pendingCancel = false
     ignoreStreamEvents = false
@@ -3244,8 +3356,7 @@ export function createChatStreamController(
       mode,
       focusedFile: getFocusedFile() ?? undefined,
       provider: resumeProviderModel?.provider,
-      model: resumeProviderModel?.model,
-      modelExplicit: resumeProviderModel?.explicit
+      model: resumeProviderModel?.model
     }
     let res = await window.vyotiq.chatStart(startPayload)
     for (
@@ -3262,14 +3373,12 @@ export function createChatStreamController(
       awaitingRun = false
       const message = res.error
       logger.error(`chatStart failed: ${message}`, { scope: 'chat', err: res.error, code: res.code })
-      // Drop the local teammate binding main just refused, so the next send
-      // uses the run's own binding instead of repeating this refusal forever.
-      if (res.code === 'run_binding_immutable') onAgentProfileRefused?.()
       // Append the box here too — without it the banner is not suppressed and
       // the turn summary would repeat the message (the duplicate-error path).
       const runErrorItem: UiItem = {
         kind: 'run_error',
-        id: `run-error:resume:${state.runTerminalTick + 1}`,
+        // Never written to disk; unique so a remembered dismissal cannot match it.
+        id: `run-error:resume:${Date.now()}`,
         message,
         ...(res.code ? { code: res.code } : {})
       }
@@ -3282,7 +3391,9 @@ export function createChatStreamController(
         pendingRun: false,
         runId: continuingRunId,
         runTerminalTick: state.runTerminalTick + 1,
-        items: [...state.items, runErrorItem]
+        // This attempt re-ran the latest turn, so its box replaces that turn's
+        // earlier one instead of stacking under it.
+        items: [...dropLatestTurnRunErrors(state.items), runErrorItem]
       })
       return false
     }
@@ -3382,6 +3493,7 @@ export function createChatStreamController(
     )
     patch({
       error: null,
+      errorCode: null,
       runNotice: null,
       compacting: false,
       incomplete: null,
@@ -3395,6 +3507,9 @@ export function createChatStreamController(
     })
 
     lastRunErrorMessage = null
+    // A stale code would decide whether the resent turn's own failure offers Retry.
+    lastRunErrorCode = null
+    lastRunErrorId = null
     usageTotals = emptyStepUsageTotals()
     pendingCancel = false
     ignoreStreamEvents = false
@@ -3426,8 +3541,7 @@ export function createChatStreamController(
       editedUserMessage: user,
       mode,
       provider: turnProviderModel?.provider,
-      model: turnProviderModel?.model,
-      modelExplicit: turnProviderModel?.explicit
+      model: turnProviderModel?.model
     })
 
     if (!res.ok) {
@@ -4000,7 +4114,8 @@ export function createChatStreamController(
     if (mode) notifyAgentMode(mode)
     const hydrated = hydrateFromDisk(kept, rows, dismissedErrorMessage, {
       idle: true,
-      priorAgentInstances: state.agentInstances
+      priorAgentInstances: state.agentInstances,
+      dismissedRunErrorIds
     })
     adoptHydratedUsage(hydrated)
     patch({
@@ -4455,6 +4570,29 @@ export function createChatStreamController(
     })
   }
 
+  const dismissRunError = (itemId: string): void => {
+    const index = state.items.findIndex((item) => item.kind === 'run_error' && item.id === itemId)
+    const box = index >= 0 ? state.items[index] : undefined
+    if (!box || box.kind !== 'run_error') return
+    dismissedRunErrorIds.delete(itemId)
+    dismissedRunErrorIds.add(itemId)
+    for (const oldest of dismissedRunErrorIds) {
+      if (dismissedRunErrorIds.size <= RUN_DISMISSED_ERRORS_MAX) break
+      dismissedRunErrorIds.delete(oldest)
+    }
+    // The latest turn's box is the current error, which the composer banner
+    // only stays quiet about while the box shows it. Dismissing the box
+    // dismisses that error too, or the banner would repeat it. A rebuild from
+    // disk keeps it quiet by this id (errorFromPersisted) — not by message,
+    // which would also hide an older turn's box that failed the same way.
+    const current = index > latestPromptIndex(state.items) && state.error === box.message
+    patch({
+      items: state.items.filter((_, i) => i !== index),
+      ...(current ? { error: null, errorCode: null } : {})
+    })
+    notifyExpansions()
+  }
+
   const setThinkingExpanded = (messageId: string, expanded: boolean): void => {
     if (expanded) expandedThinkingIds.add(messageId)
     else expandedThinkingIds.delete(messageId)
@@ -4667,7 +4805,7 @@ export function createChatStreamController(
     if (disposed) return
     const trimmed = model.trim()
     if (!trimmed) return
-    patch({ providerModel: { provider, model: trimmed }, providerModelExplicit: true })
+    patch({ providerModel: { provider, model: trimmed } })
   }
 
   const applyWriteCheckpointResolution = (result: {
@@ -4785,9 +4923,6 @@ export function createChatStreamController(
     get providerModel() {
       return state.providerModel
     },
-    get providerModelExplicit() {
-      return state.providerModelExplicit
-    },
     get disposed() {
       return disposed
     },
@@ -4811,6 +4946,7 @@ export function createChatStreamController(
     loadEarlierMessages,
     reattachActiveRun,
     clearError,
+    dismissRunError,
     loadToolContent,
     setThinkingExpanded,
     setToolExpanded,

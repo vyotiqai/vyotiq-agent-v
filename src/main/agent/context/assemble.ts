@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import type { ChatMessage, ModelInfo, ProviderId } from '../../../shared/ipc'
 import { flattenFileParts } from '../../../shared/ipc'
 import { allocateBudget, contentWindow } from './budget'
@@ -62,17 +64,12 @@ export type AssembleContextRequest = AssembleInput & {
    * sparse instance checkout has no .vyotiq; snapshot and rules stay worktree-local.
    */
   memoryWorkspacePath?: string | null
-  /**
-   * Agent-profile memory namespace — reads from `.vyotiq/agents/<namespace>/memory/`
-   * instead of the shared `.vyotiq/memory/` so teammate profiles never share a brain.
-   */
-  memoryNamespace?: string | null
 }
 
 /**
  * Share of the system budget a verbatim plan may not consume.
  *
- * A Plan-mode plan is injected uncapped by contract (str_replace has to be able
+ * A run's plan is injected uncapped by contract (str_replace has to be able
  * to quote plan.md byte-for-byte). It used to subtract its full size from the
  * running allowance with no floor, so a large plan drove `systemTokensLeft`
  * negative and every later section — skills, mcp, plugin rules, user rules,
@@ -82,13 +79,53 @@ export type AssembleContextRequest = AssembleInput & {
  */
 const PLAN_VERBATIM_TAIL_RESERVE = 0.3
 
-/** In-process cache for the stable instruction prefix only (not the volatile tail). */
-type SystemCacheEntry = { fingerprint: string; stable: string; sections: SystemSection[] }
-let systemPromptCache: SystemCacheEntry | null = null
+/**
+ * In-process cache for the stable instruction prefix only (not the volatile tail).
+ *
+ * Keyed, not a single slot. Several runs share this process — `runRegistry` holds
+ * an active map of them, and a run can spawn inline instances whose whole purpose
+ * is parallelism — so with one slot two interleaved runs with different harness /
+ * workspace / contract / model fingerprints evicted each other on every assemble,
+ * and the hit rate collapsed to zero exactly when parallelism was in use.
+ */
+type SystemCacheEntry = { stable: string; sections: SystemSection[] }
+
+/**
+ * Bounded by entry count. An entry retains a whole stable prompt plus the sections
+ * it was joined from, so this stays small — but nothing caps how many inline
+ * instances a run spawns, and each one has its own fingerprint (`modeSection`
+ * alone differs), so too low a bound just moves the thrash.
+ */
+const SYSTEM_PROMPT_CACHE_MAX = 8
+const systemPromptCache = new Map<string, SystemCacheEntry>()
+let systemPromptCacheHits = 0
+let systemPromptCacheMisses = 0
 
 /** @internal — clear stable system-prefix cache (tests). */
 export function clearSystemPromptCache(): void {
-  systemPromptCache = null
+  systemPromptCache.clear()
+  systemPromptCacheHits = 0
+  systemPromptCacheMisses = 0
+}
+
+/** @internal — stable system-prefix cache counters (tests). */
+export function systemPromptCacheStats(): { hits: number; misses: number; size: number } {
+  return {
+    hits: systemPromptCacheHits,
+    misses: systemPromptCacheMisses,
+    size: systemPromptCache.size
+  }
+}
+
+/**
+ * Map key for a fingerprint.
+ *
+ * The fingerprint is a join of every raw section body, so using it as the key would
+ * pin a full copy of the harness, rules, memory and an uncapped verbatim plan per
+ * entry. Hash it, exactly as `tokenizer.ts` does for the same reason.
+ */
+function fingerprintKey(fingerprint: string): string {
+  return createHash('sha256').update(fingerprint).digest('base64url').slice(0, 24)
 }
 
 /**
@@ -344,23 +381,48 @@ function buildStableSystem(parts: {
     model: parts.model.id,
     planVerbatim: parts.planVerbatim
   })
-  if (systemPromptCache?.fingerprint === fingerprint) {
-    return { stable: systemPromptCache.stable, sections: systemPromptCache.sections }
+  const cacheKey = fingerprintKey(fingerprint)
+  const hit = systemPromptCache.get(cacheKey)
+  if (hit) {
+    systemPromptCacheHits += 1
+    return { stable: hit.stable, sections: hit.sections }
   }
+  systemPromptCacheMisses += 1
 
   const sections: SystemSection[] = []
   let systemTokensLeft = parts.budgets.system
+  /**
+   * What budget pressure cost this prompt, reported once below rather than per
+   * section: once the floor trips every remaining section is dropped, so warning at
+   * each call site would report one cause a dozen times. `priorSession` has its own
+   * reserved budget and does not pass through `capWithinSystem`, so it is not
+   * covered here.
+   *
+   * `truncated` is measured in characters, which is what makes it cheap — read a
+   * near-equal `chars`/`keptChars` pair as the cap round-tripping CRLF to LF rather
+   * than as real loss.
+   */
+  const dropped: SystemSectionLabel[] = []
+  const truncated: { section: SystemSectionLabel; chars: number; keptChars: number }[] = []
   /**
    * `preTrim` is a section-aware first pass (only `capHarness` needs one).
    * `capToTokenBudget` already applies the plain character cap itself, so the
    * default used to run `capText` twice over the same text for every section.
    */
   function capWithinSystem(
+    label: SystemSectionLabel,
     text: string,
     requested: number,
     preTrim?: (text: string, maxTokens: number) => string
   ): string | null {
-    if (systemTokensLeft < 50) return null
+    // Recorded for every label, where only rules and memory used to say anything: a
+    // prompt that had quietly lost its skills list or its MCP directory looked
+    // identical to one that never had them, so the only symptom was a model
+    // ignoring capabilities nothing had told it about.
+    if (systemTokensLeft < 50) {
+      dropped.push(label)
+      return null
+    }
     const allowed = Math.min(requested, systemTokensLeft)
     const capped = capToTokenBudget(
       preTrim ? preTrim(text, allowed) : text,
@@ -369,10 +431,14 @@ function buildStableSystem(parts: {
     )
     const used = estimateTextTokens(capped, parts.model)
     systemTokensLeft -= used
+    if (capped.length < text.length) {
+      truncated.push({ section: label, chars: text.length, keptChars: capped.length })
+    }
     return capped
   }
 
   const harness = capWithinSystem(
+    'harness',
     parts.harness,
     Math.floor(parts.budgets.system * 0.75),
     capHarness
@@ -381,6 +447,7 @@ function buildStableSystem(parts: {
 
   if (parts.modeSection?.trim()) {
     const mode = capWithinSystem(
+      'mode',
       parts.modeSection.trim(),
       Math.max(400, Math.floor(parts.budgets.system * 0.35))
     )
@@ -390,6 +457,7 @@ function buildStableSystem(parts: {
   if (parts.contract?.trim()) {
     const contractBody = parts.contract.trim().replace(/^#+\s*Run contract\s*(?:\r?\n)*/i, '')
     const contract = capWithinSystem(
+      'contract',
       wrapPromptSection('run_contract', contractBody),
       Math.floor(parts.budgets.system * 0.4)
     )
@@ -401,7 +469,7 @@ function buildStableSystem(parts: {
       : parts.plan.trim().replace(/^#+\s*Plan\s*(?:\r?\n)*/i, '')
     const wrapped = wrapPromptSection('plan', planBody)
     if (parts.planVerbatim) {
-      // Skip token cap so Plan-mode str_replace can quote on-disk text.
+      // Skip token cap so `str_replace`/`edit` can quote on-disk text exactly.
       sections.push({ label: 'plan', text: wrapped })
       const planTokens = estimateTextTokens(wrapped, parts.model)
       const reserve = Math.min(
@@ -419,30 +487,47 @@ function buildStableSystem(parts: {
       }
       systemTokensLeft = Math.max(reserve, remaining)
     } else {
-      const plan = capWithinSystem(wrapped, parts.budgets.system)
+      const plan = capWithinSystem('plan', wrapped, parts.budgets.system)
       if (plan) sections.push({ label: 'plan', text: plan })
     }
   }
 
   if (parts.skillsSection?.trim()) {
-    const skills = capWithinSystem(parts.skillsSection.trim(), Math.floor(parts.budgets.system * 0.35))
+    const skills = capWithinSystem(
+      'skills',
+      parts.skillsSection.trim(),
+      Math.floor(parts.budgets.system * 0.35)
+    )
     if (skills) sections.push({ label: 'skills', text: skills })
   }
   if (parts.mcpSection?.trim()) {
-    const mcp = capWithinSystem(parts.mcpSection.trim(), Math.floor(parts.budgets.system * 0.2))
+    const mcp = capWithinSystem(
+      'mcpServers',
+      parts.mcpSection.trim(),
+      Math.floor(parts.budgets.system * 0.2)
+    )
     if (mcp) sections.push({ label: 'mcpServers', text: mcp })
   }
   if (parts.pluginRulesSection?.trim()) {
-    const plugins = capWithinSystem(parts.pluginRulesSection.trim(), Math.floor(parts.budgets.system * 0.25))
+    const plugins = capWithinSystem(
+      'pluginRules',
+      parts.pluginRulesSection.trim(),
+      Math.floor(parts.budgets.system * 0.25)
+    )
     if (plugins) sections.push({ label: 'pluginRules', text: plugins })
   }
   if (parts.userRules.trim()) {
     const userRulesRaw = parts.userRules.trim()
-    const userRules = capWithinSystem(userRulesRaw, Math.floor(parts.budgets.system * 0.35))
+    const userRules = capWithinSystem(
+      'userRules',
+      userRulesRaw,
+      Math.floor(parts.budgets.system * 0.35)
+    )
     if (userRules) sections.push({ label: 'userRules', text: userRules })
   }
   if (parts.responseStyleSection?.trim()) {
     const style = capWithinSystem(
+      'responseStyle',
       parts.responseStyleSection.trim(),
       Math.max(120, Math.floor(parts.budgets.system * 0.05))
     )
@@ -450,49 +535,18 @@ function buildStableSystem(parts: {
   }
   if (parts.rules.trim()) {
     const rulesRaw = parts.rules.trim()
-    const rules = capWithinSystem(rulesRaw, Math.floor(parts.budgets.system * 0.5))
-    if (rules) {
-      sections.push({ label: 'rules', text: rules })
-      if (rules.length < rulesRaw.length) {
-        logger.warn('Workspace rules truncated from system prompt under budget pressure', {
-          scope: 'assemble',
-          rulesChars: rulesRaw.length,
-          keptChars: rules.length,
-          systemBudget: parts.budgets.system
-        })
-      }
-    } else {
-      logger.warn('Workspace rules dropped from system prompt under budget pressure', {
-        scope: 'assemble',
-        rulesChars: rulesRaw.length,
-        systemBudget: parts.budgets.system
-      })
-    }
+    const rules = capWithinSystem('rules', rulesRaw, Math.floor(parts.budgets.system * 0.5))
+    if (rules) sections.push({ label: 'rules', text: rules })
   }
 
   if (parts.memorySection?.trim()) {
     const memoryRaw = parts.memorySection.trim()
     const memory = capWithinSystem(
+      'memory',
       memoryRaw,
       Math.floor(parts.budgets.memoryWorkspace / 2)
     )
-    if (memory) {
-      sections.push({ label: 'memory', text: memory })
-      if (memory.length < memoryRaw.length) {
-        logger.warn('Memory section truncated from system prompt under budget pressure', {
-          scope: 'assemble',
-          memoryChars: memoryRaw.length,
-          keptChars: memory.length,
-          systemBudget: parts.budgets.system
-        })
-      }
-    } else {
-      logger.warn('Memory section dropped from system prompt under budget pressure', {
-        scope: 'assemble',
-        memoryChars: memoryRaw.length,
-        systemBudget: parts.budgets.system
-      })
-    }
+    if (memory) sections.push({ label: 'memory', text: memory })
   }
 
   if (parts.compaction?.summary) {
@@ -531,8 +585,21 @@ function buildStableSystem(parts: {
     })
   }
 
+  if (dropped.length > 0 || truncated.length > 0) {
+    logger.warn('System prompt sections cut to fit the system budget', {
+      scope: 'assemble',
+      dropped,
+      truncated,
+      systemBudget: parts.budgets.system
+    })
+  }
+
   const stable = sections.map((s) => s.text).join('\n\n')
-  systemPromptCache = { fingerprint, stable, sections }
+  if (systemPromptCache.size >= SYSTEM_PROMPT_CACHE_MAX) {
+    const oldest = systemPromptCache.keys().next().value
+    if (oldest !== undefined) systemPromptCache.delete(oldest)
+  }
+  systemPromptCache.set(cacheKey, { stable, sections })
   return { stable, sections }
 }
 
@@ -647,13 +714,12 @@ function buildSystemZones(parts: {
  * tool call on every run. Both files are char-capped by the memory readers.
  */
 async function buildMemorySection(
-  workspacePath: string | null | undefined,
-  memoryNamespace?: string | null
+  workspacePath: string | null | undefined
 ): Promise<string> {
   if (!workspacePath) return ''
   const [state, index] = await Promise.all([
-    readMemoryStateAsync(workspacePath, undefined, memoryNamespace ?? undefined),
-    readMemoryIndexAsync(workspacePath, undefined, memoryNamespace ?? undefined)
+    readMemoryStateAsync(workspacePath),
+    readMemoryIndexAsync(workspacePath)
   ])
   const stateBody = state.trim()
   const indexBody = index.trim()
@@ -747,7 +813,7 @@ export async function assembleContext(
   const [workspace, rules, memorySection] = await Promise.all([
     buildWorkspaceSnapshotAsync(input.workspacePath, input.goal),
     buildWorkspaceRulesSection(input.workspacePath, input.focusedFile),
-    buildMemorySection(memoryWorkspacePath, input.memoryNamespace)
+    buildMemorySection(memoryWorkspacePath)
   ])
 
   // Keep the original object whenever flattening changes nothing. Token
@@ -770,7 +836,6 @@ export async function assembleContext(
   const estimateStarted = perfNow()
   const userRules = formatUserRules(input.userRules ?? [])
   const responseStyleSection = formatResponseStyle({
-    teammateName: input.teammateName,
     identity: input.identity,
     persona: input.persona,
     tone: input.tone,

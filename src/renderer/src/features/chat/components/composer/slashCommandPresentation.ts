@@ -44,9 +44,9 @@ export function slashCommandRowCopy(cmd: SlashCommandDescriptor): {
   }
 }
 
-const COMPOSER_MODE_TRIGGERS = new Set(['ask', 'plan', 'agent'])
+const COMPOSER_MODE_TRIGGERS = new Set(['ask', 'agent'])
 
-/** Toolbar Mode picker owns mode switching. Keep `/ask` `/plan` `/agent` typable. */
+/** Toolbar Mode picker owns mode switching. Keep `/ask` and `/agent` typable. */
 export function isComposerModeSlashCommand(cmd: SlashCommandDescriptor): boolean {
   return cmd.kind === 'builtin' && COMPOSER_MODE_TRIGGERS.has(cmd.trigger)
 }

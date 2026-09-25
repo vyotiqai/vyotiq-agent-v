@@ -37,8 +37,6 @@ export function resolveComposerPlaceholder(opts: {
       return opts.hasTranscript
         ? line('Ask a follow-up', 'won’t edit files')
         : line('Ask a question', 'won’t edit files', attachAndSlash())
-    case 'plan':
-      return opts.hasTranscript ? 'Refine the plan' : line('Describe a plan', attachAndSlash())
     case 'agent':
     default:
       return opts.hasTranscript ? 'Send a follow-up' : line('Describe a task', attachAndSlash())

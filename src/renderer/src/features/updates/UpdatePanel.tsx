@@ -150,7 +150,7 @@ export function UpdatePanel({
       </div>
 
       {info.releaseUrl ? (
-        <div className="mt-2.5 border-t border-border pt-2.5">
+        <div className="mt-2.5 border-t border-border/40 pt-2.5">
           <button
             type="button"
             className="text-xs text-muted underline-offset-2 hover:text-fg hover:underline focus-visible:outline focus-visible:outline-accent"

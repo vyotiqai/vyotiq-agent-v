@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import type { WebContents } from 'electron'
 import { IPC } from '../../shared/channels'
 import {
@@ -40,7 +41,6 @@ import {
   followUpPreview,
   isActive,
   markRunTurnComplete,
-  notifyProfileRunFinished,
   seedFollowUps,
   takeLateFollowUpDropped,
   takeLateWriteCheckpoint
@@ -53,10 +53,7 @@ import { planGoalRelaunch } from './goalRelaunchPlan'
 /**
  * Title and body for a run's terminal notification.
  *
- * Says who finished, not just that something did. A delegated run sets no
- * goal, so the only identifying field the old title could use was always
- * empty for exactly the runs the user had walked away from — "assign and walk
- * away" notified with a bare "Finished", naming neither teammate nor task.
+ * Names the goal it finished, so a bare "Finished" is never the whole story.
  *
  * Exported for its own test: composed inline, the only way to exercise it was
  * to drive a whole run to completion, which is why it went untested.
@@ -64,18 +61,13 @@ import { planGoalRelaunch } from './goalRelaunchPlan'
 export function runFinishedNotificationText(input: {
   failed: boolean
   goal?: string | undefined
-  teammateName?: string | undefined
-  delegated: boolean
 }): { title: string; body: string } {
   const goal = input.goal?.trim() ?? ''
-  const teammate = input.teammateName?.trim() ?? ''
   const verb = input.failed ? 'failed' : 'finished'
   const suffix = goal ? `: ${goal}` : ''
   return {
-    title: teammate
-      ? `${teammate} ${verb}${suffix}`
-      : `${input.failed ? 'Failed' : 'Finished'}${suffix}`,
-    body: input.delegated ? `Delegated task ${verb}` : `Agent run ${verb}`
+    title: `${input.failed ? 'Failed' : 'Finished'}${suffix}`,
+    body: `Agent run ${verb}`
   }
 }
 
@@ -140,12 +132,6 @@ export type StartAgentRunAgentInput = {
   provider?: ProviderId
   /** Session-pinned model — authoritative for this invoke. */
   model?: string
-  /** True only when the user picked `model` by hand (see ChatStartRequestSchema). */
-  modelExplicit?: boolean
-  /** Teammate profile binding — identity, memory namespace, model pin. */
-  agentProfileId?: string
-  /** Delegated task that owns this run (scheduler-launched runs only). */
-  delegatedTaskId?: string
   /** Execution substrate (Phase 4 runtime seam) — local unless cloud is wired. */
   runtime?: 'local' | 'cloud'
 }
@@ -220,9 +206,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
           workspacePath,
           runSignal,
           goal: firstUserMessageText(agentInput),
-          mode: agentInput.mode,
-          ...(agentInput.agentProfileId ? { agentProfileId: agentInput.agentProfileId } : {}),
-          ...(agentInput.delegatedTaskId ? { delegatedTaskId: agentInput.delegatedTaskId } : {})
+          mode: agentInput.mode
         })
       } else {
         // Confirm the substrate can take the work before anything observes this
@@ -268,7 +252,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
       })
       if (!terminalSent) {
         const crashEvents = [
-          { type: 'error', runId, message, code: 'AGENT_LOOP' },
+          { type: 'error', runId, message, code: 'AGENT_LOOP', errorId: randomUUID() },
           { type: 'status', runId, status: 'error' }
         ] as const
         // Persist the crash so a reload shows the failure instead of a
@@ -385,9 +369,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
         const failed = terminalStatus === 'error'
         const text = runFinishedNotificationText({
           failed,
-          goal: persisted?.goal,
-          teammateName: persisted?.agentProfileName,
-          delegated: Boolean(persisted?.delegatedTaskId)
+          goal: persisted?.goal
         })
         publishLifecycleNotification({
           source: 'agent',
@@ -428,19 +410,11 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
       // Storage retention run-end sweep (audit H4/H5): free pass + armed
       // policy per §8.1 ack. Fire-and-forget — never blocks the terminal path.
       void sweepRetentionAuto()
-      // Safety net: a generator that throws BEFORE the loop's try (e.g.
-      // 'Unknown agent profile' during binding resolution) never runs its own
-      // finally, leaking the registry slot — which would permanently blind the
-      // scheduler's one-run-per-teammate gate. Normal paths are already clear
-      // by the time this finally runs, so this is a no-op for them; the
+      // Safety net: a generator that throws BEFORE the loop's try never runs
+      // its own finally, leaking the registry slot. Normal paths are already
+      // clear by the time this finally runs, so this is a no-op for them; the
       // invokeId guard never clears a fresh re-registration of the same runId.
       clearRunAbort(runId, invokeId)
-      // A teammate-bound run ending frees the identity for the task scheduler's
-      // queue (delegated tasks wait behind user chats and resumed runs) — but a
-      // delayed goal relaunch keeps the identity busy until it re-registers.
-      if (persisted?.agentProfileId && !relaunchedActiveGoal) {
-        notifyProfileRunFinished(persisted.agentProfileId, runId)
-      }
     }
   })().catch((err) => {
     logger.error('Background agent run failed after terminal cleanup', {

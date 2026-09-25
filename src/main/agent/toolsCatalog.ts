@@ -11,8 +11,9 @@ import type { McpToolLoading } from './context/mcpToolLoading'
 import { BUILTIN_TOOL_NAMES, TOOL_REGISTRY } from './schemas/tools'
 import { agentBuiltToolDefinitions } from './agentTools/loader'
 import { filterToolDefsForCodeIndex, isBuiltinAllowedInMode } from './tools/modePolicy'
+import { AGENT_INTERACTION_MODES } from '../../shared/ipc'
 
-const ALL_MODES = ['ask', 'plan', 'agent'] as const
+const ALL_MODES = AGENT_INTERACTION_MODES
 type CatalogMode = (typeof ALL_MODES)[number]
 
 /** Minimal shape we need from the registry + MCP defs (structural; keeps this module light). */

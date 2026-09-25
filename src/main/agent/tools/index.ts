@@ -29,7 +29,7 @@ import { toolStrReplaceAsync } from './strReplace'
 import { toolDeleteAsync } from './deletePath'
 import {
   assertInlineInstancePathScope,
-  assertMemoryNamespaceAccess,
+  assertNotRetiredAgentDataPath,
   assertInlineInstancePushDenied,
   assertInlineInstanceTerminalAllowed,
   assertInlineInstanceUnscopedToolAllowed
@@ -39,7 +39,6 @@ import { proposeGoal, updateGoalStatus, goalToolContent } from '../runGoal'
 import { emitGoalUpdate } from '../goalEvents'
 import { truncateGoalObjective } from '../../../shared/goalRuntime'
 import { executeCreatePlan } from './createPlan'
-import { ensurePlanStub } from '../planArtifacts'
 import {
   isFindstrNoMatchContent,
   isDirMissingPathContent,
@@ -68,7 +67,6 @@ import { mcpHandlers } from './mcpTools'
 import { terminalHandlers } from './terminalHandlers'
 import { gitGithubHandlers } from './gitGithubTools'
 import { instanceHandlers } from './instanceTools'
-import { teammateHandlers } from './teammateTools'
 import { handler as buildToolHandler } from './buildTool'
 import { resolveAgentToolsDir } from '../agentTools/paths'
 import { loadAgentToolsSnapshot } from '../agentTools/loader'
@@ -86,7 +84,6 @@ import { toolCallArgumentsUnusable, wireToolCallArguments } from '../toolArgWire
 import { parseJsonish } from '../../../shared/utils/jsonish'
 import {
   assertToolAllowedInMode,
-  isPlanArtifactPath,
   isRunContractPath,
   isRunPlanPath
 } from './modePolicy'
@@ -142,7 +139,7 @@ export type ToolExecutionContext = {
    * Hard run-cancel signal only (not soft stream / follow-up interrupt).
    */
   runSignal?: AbortSignal
-  /** Ask / Plan / Agent mode for this invoke (prefer getAgentMode when mutable). */
+  /** Ask / Agent mode for this invoke (prefer getAgentMode when mutable). */
   agentMode?: AgentInteractionMode
   getAgentMode?: () => AgentInteractionMode
   setAgentMode?: (mode: AgentInteractionMode) => void | Promise<void>
@@ -207,12 +204,6 @@ export type ToolExecutionContext = {
    * Used to fail-fast after repeated retries of the same omitted tool.
    */
   mcpNotInCatalogCounts?: Map<string, number>
-  /**
-   * Agent-profile memory namespace — routes memory_* tools (and the injected
-   * <memory> prompt section) to `.vyotiq/agents/<namespace>/memory/` so
-   * teammate profiles never share one brain. Absent = shared workspace memory.
-   */
-  memoryNamespace?: string
   /** Paths the agent changed this run — scopes git_commit staging when present. */
   mutationPaths?: Set<string>
   /**
@@ -264,7 +255,9 @@ function logToolFailure(name: string, err: unknown): void {
   // in messages.jsonl — so drop the message and the `err` field entirely rather
   // than trusting the scrubber with file content. Unexpected failures are real
   // app faults and keep their summary and captured exception.
-  if (isExpectedToolError(formatError(err))) {
+  // `past_end` is model mis-aim like the rest, but the EXPECTED_* regexes in
+  // shared/utils/errors.ts are frozen this tranche — admit it by kind here.
+  if (isExpectedToolError(formatError(err)) || kind === 'past_end') {
     logger.warn(`Tool failed as expected (${kind ?? 'unclassified'})`, {
       scope: 'tools',
       code: 'TOOL_EXEC',
@@ -296,6 +289,8 @@ function toolFailureKind(err: unknown): string | undefined {
   if (/Binary file detected/i.test(message)) return 'binary'
   if (/File too large/i.test(message)) return 'too_large'
   if (/Path escapes workspace/i.test(message)) return 'path_escape'
+  // A read window aimed past EOF (read.ts throws `startLine|offset N is past the end of …`).
+  if (/^(?:startLine|offset) \d+ is past the end of /.test(message)) return 'past_end'
   if (/Failed to parse tool arguments/i.test(message)) return 'bad_args'
   // Edit-family aim misses. Classified so the expected-failure line still says
   // which way the edit missed once its message is dropped.
@@ -575,13 +570,11 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     if (!result.ok) {
       return toolFail('create_plan', result.summary, result.content)
     }
-    // `create_plan` publishes a FINISHED plan, so a run already in Agent mode
-    // stays there and implements it. Demoting to Plan mode here cost a whole
-    // model step to undo: measured across every plan in the telemetry, 4 of 4
-    // switched straight back, and 3 of those spent a dedicated step doing
-    // nothing else (10,744 / 9,972 / 2,065 ms). `plan.md` keeps remapping to
-    // the run directory in Agent mode once the artifact exists, so nothing
-    // else depended on the switch.
+    // No mode change here any more. This used to promote a Plan-mode run to
+    // Agent so it could act on what it had just published; with Plan merged
+    // into Agent the run is already in the mode that implements the plan, so
+    // publishing is a plain tool result and the prior promotion — plus the
+    // `switch_mode` step it existed to save — is simply gone.
     return toolOk('create_plan', result.summary, result.content)
   },
   ...browserHandlers,
@@ -638,12 +631,15 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       return toolFail(
         'switch_mode',
         'mode',
-        'Automatic mode switching is off. Only the user can change Ask / Plan / Agent (composer or slash).'
+        'Automatic mode switching is off. Only the user can change Ask / Agent (composer or slash).'
       )
     }
-    const mode = args.mode
-    if (mode !== 'ask' && mode !== 'plan' && mode !== 'agent') {
-      return toolFail('switch_mode', 'mode', 'mode must be ask, plan, or agent')
+    // `'plan'` is accepted and folded to `'agent'`: a model that learned the
+    // old three-mode vocabulary asks for the mode that no longer exists, and
+    // agent is exactly what plan became. Failing would cost it a wasted step.
+    const mode = args.mode === 'plan' ? 'agent' : args.mode
+    if (mode !== 'ask' && mode !== 'agent') {
+      return toolFail('switch_mode', 'mode', 'mode must be ask or agent')
     }
     const previous = resolveAgentMode(context)
     if (!context.setAgentMode) {
@@ -654,9 +650,6 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
       )
     }
     await context.setAgentMode(mode)
-    if (mode === 'plan' && context.runDir) {
-      ensurePlanStub(context.runDir)
-    }
     if (context.runId) {
       context.emitAgentEvent?.({
         type: 'mode_changed',
@@ -672,27 +665,23 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     return toolOk('switch_mode', mode, content)
   },
   ...terminalHandlers,
-  memory_list: (workspace, _args, signal, context) => {
+  memory_list: (workspace, _args, signal) => {
     throwIfAborted(signal)
-    return toolOk('memory_list', 'memory', toolMemoryList(workspace, context.memoryNamespace))
+    return toolOk('memory_list', 'memory', toolMemoryList(workspace))
   },
-  memory_read: (workspace, args, signal, context) => {
+  memory_read: (workspace, args, signal) => {
     throwIfAborted(signal)
     const path = requirePathArg('memory_read', args)
-    const content = toolMemoryRead(workspace, path, context.memoryNamespace)
+    const content = toolMemoryRead(workspace, path)
     return toolOk('memory_read', path, content)
   },
   memory_write: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const path = requirePathArg('memory_write', args)
     const contents = readString(args, 'contents') ?? readString(args, 'content') ?? ''
-    const namespace = context.memoryNamespace
-    const memoryPrefix = namespace
-      ? `.vyotiq/agents/${namespace}/memory/`
-      : '.vyotiq/memory/'
-    const relUnderWorkspace = `${memoryPrefix}${path.trim().replace(/^[/\\]+/, '').replace(/\\/g, '/')}`
+    const relUnderWorkspace = `.vyotiq/memory/${path.trim().replace(/^[/\\]+/, '').replace(/\\/g, '/')}`
     const content = await withWorkspaceMutation(workspace, relUnderWorkspace, () =>
-      toolMemoryWrite(workspace, path, contents, namespace)
+      toolMemoryWrite(workspace, path, contents)
     )
     clearWorkspaceSnapshotCache(workspace)
     return toolOk('memory_write', path, content)
@@ -771,7 +760,6 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     return toolOk('lsp', result.summary, result.content)
   },
   ...instanceHandlers,
-  ...teammateHandlers,
   build_tool: async (_workspace, args, signal) => {
     throwIfAborted(signal)
     const written = await buildToolHandler(args)
@@ -1108,37 +1096,28 @@ export async function executeTool(
   }
   const handler = BUILTIN_HANDLERS[name as AgentToolName]
 
-  // Remap run artifacts to the run directory (not the workspace root):
-  // Plan: plan.md + contract.md; Agent: contract.md + existing plan.md.
-  // Ask: read-only remap of the same artifacts so `read plan.md` resolves to
-  // the run artifact instead of a workspace-root lookalike (Ask cannot run
-  // edit/delete, so read is the only reachable consumer).
+  // Remap run artifacts to the run directory (not the workspace root).
+  // One rule for both surviving modes now that Plan is gone: `contract.md`
+  // always, `plan.md` once the run artifact exists. The run seeds the plan stub
+  // at start (see seedPlanStubIfMissing in loop.ts), so in practice it exists
+  // from step 0 and an `edit plan.md` cannot escape to the workspace root —
+  // that seeding is what replaced Plan mode's unconditional remap.
+  //
+  // Keeping the existence check rather than remapping `plan.md` outright is
+  // deliberate: a workspace with its own root `plan.md` and no active run
+  // artifact must still resolve to its own file.
   let effectiveWorkspace = workspace
   let effectiveArgs = validatedArgs
   let effectiveContext = context
 
   const shouldRemapPath = (pathArg: string): boolean => {
     if (!pathArg) return false
-    if (agentMode === 'plan' && isPlanArtifactPath(pathArg)) return true
-    if (agentMode === 'agent' && isRunContractPath(pathArg)) return true
-    if (
-      agentMode === 'agent' &&
+    if (isRunContractPath(pathArg)) return true
+    return (
       isRunPlanPath(pathArg) &&
-      context.runDir &&
-      existsSync(join(context.runDir, 'plan.md'))
-    ) {
-      return true
-    }
-    if (
-      agentMode === 'ask' &&
-      (isRunContractPath(pathArg) ||
-        (isRunPlanPath(pathArg) &&
-          context.runDir &&
-          existsSync(join(context.runDir, 'plan.md'))))
-    ) {
-      return true
-    }
-    return false
+      Boolean(context.runDir) &&
+      existsSync(join(context.runDir!, 'plan.md'))
+    )
   }
 
   const remapPathArg = (pathArg: string): string => {
@@ -1171,10 +1150,10 @@ export async function executeTool(
     }
   }
 
-  // Teammates do not read each other's memory. `read` is included where the
-  // path_scope block below cannot reach it: `.vyotiq` is skipped by the
-  // walkers, so glob/grep/search/list_dir never surface these files, but a
-  // direct path read had nothing stopping it.
+  // The retired `.vyotiq/agents/` data root is legacy user data. `read` is
+  // included where the path_scope block below cannot reach it: `.vyotiq` is
+  // skipped by the walkers, so glob/grep/search/list_dir never surface these
+  // files, but a direct path read had nothing stopping it.
   if (
     effectiveWorkspace === workspace &&
     (name === 'read' ||
@@ -1185,7 +1164,7 @@ export async function executeTool(
   ) {
     const p = readPathArg(effectiveArgs)
     try {
-      assertMemoryNamespaceAccess(effectiveContext.memoryNamespace, p ? [p] : [])
+      assertNotRetiredAgentDataPath(p ? [p] : [])
     } catch (err) {
       return toolFail(name, summary, formatToolResultError(err))
     }

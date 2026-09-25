@@ -13,12 +13,20 @@ import {
   ToolApprovalSettingsSchema
 } from './settings'
 
+/** Dismissed run-error boxes remembered per run; the oldest drops out first. */
+export const RUN_DISMISSED_ERRORS_MAX = 100
+
 /** Per-run expansion state for chat cards (tool / group / thinking / turns). */
 export const RunExpansionsSchema = z.object({
   toolIds: z.array(z.string()).max(200).default([]),
   groupIds: z.array(z.string()).max(200).default([]),
   thinkingIds: z.array(z.string()).max(200).default([]),
-  collapsedTurns: z.array(z.number().int()).max(200).default([])
+  collapsedTurns: z.array(z.number().int()).max(200).default([]),
+  /**
+   * Run-error boxes the reader dismissed. Unlike the disclosure flags above,
+   * these are kept after the run's tab closes.
+   */
+  dismissedErrorIds: z.array(z.string()).max(RUN_DISMISSED_ERRORS_MAX).default([])
 })
 export type RunExpansions = z.infer<typeof RunExpansionsSchema>
 
@@ -29,10 +37,8 @@ export const WorkspaceUiStateSchema = z.object({
   scrollTopByRunId: z.record(z.string(), z.number()).default({}),
   composerDraft: z.string(),
   composerDraftByRunId: z.record(z.string(), z.string()).default({}),
-  /** Per-workspace composer Ask / Plan / Agent mode. */
+  /** Per-workspace composer Ask / Agent mode. */
   agentMode: AgentInteractionModeSchema.default('agent'),
-  /** Teammate profile bound per chat bucket (runId or draft key). */
-  agentProfileIdByRunId: z.record(z.string(), z.string()).default({}),
   /** Whether this workspace's group is expanded in the sidebar (persisted). */
   expanded: z.boolean().optional(),
   /**

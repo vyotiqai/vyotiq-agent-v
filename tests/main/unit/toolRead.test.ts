@@ -3,7 +3,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, promises as fsp } from '
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { deflateRawSync } from 'zlib'
-import { toolRead } from '@main/agent/tools/read'
+import { toolRead, missingDirectoryHint } from '@main/agent/tools/read'
+import { toolStrReplace } from '@main/agent/tools/strReplace'
 import { extractDocxText } from '@main/agent/tools/docxText'
 import { READ_DEFAULT_MAX_LINES } from '@main/agent/tools/read'
 
@@ -204,6 +205,42 @@ describe('toolRead', () => {
     await expect(toolRead(root, 'lines.txt', { startLine: 12 })).rejects.toThrow(/past the end/)
   })
 
+  it('past-end windows name a concrete remedy (W5)', async () => {
+    try {
+      await toolRead(root, 'lines.txt', { startLine: 230 })
+      expect.fail('expected throw')
+    } catch (err) {
+      expect(String(err)).toMatch(
+        /startLine 230 is past the end of lines\.txt \(5 lines\)\. Use startLine <= 5\./
+      )
+    }
+    try {
+      await toolRead(root, 'hello.txt', { offset: 100 })
+      expect.fail('expected throw')
+    } catch (err) {
+      expect(String(err)).toMatch(
+        /offset 100 is past the end of hello\.txt \(11 bytes\)\. Use offset <= 11\./
+      )
+    }
+  })
+
+  it('past-end windows on .docx extracted text name the remedy too (W5)', async () => {
+    const xml = wordDocumentXml(['one', 'two'])
+    writeFileSync(join(root, 'pastend.docx'), buildZip([{ name: 'word/document.xml', data: xml }]))
+    try {
+      await toolRead(root, 'pastend.docx', { startLine: 50 })
+      expect.fail('expected throw')
+    } catch (err) {
+      expect(String(err)).toMatch(/startLine 50 is past the end of .* Use startLine <= \d+\./)
+    }
+    try {
+      await toolRead(root, 'pastend.docx', { offset: 5000 })
+      expect.fail('expected throw')
+    } catch (err) {
+      expect(String(err)).toMatch(/offset 5000 is past the end of .* Use offset <= \d+\./)
+    }
+  })
+
   it('does not count a trailing newline as an extra line', async () => {
     expect(await toolRead(root, 'lines.txt', { startLine: 1 })).toContain('of 5 ---')
   })
@@ -339,5 +376,72 @@ describe('toolRead', () => {
       `--- lines ${start}-${start + 499} of ${READ_DEFAULT_MAX_LINES + 500} ---\n` +
         Array.from({ length: 500 }, (_, i) => `L${start + i}`).join('\n')
     )
+  })
+})
+
+/**
+ * Memory lives under `.vyotiq/memory/`, which the walkers skip, so the two
+ * spellings the model reaches for both miss: `str_replace index.md` (the name
+ * `memory_read` answers to) and `read .vyotiq/memory/index.md` (where it
+ * really sits). Both returned a bare "File not found" naming no remedy —
+ * observed in three runs across two repos, twice as `str_replace index.md`.
+ */
+describe('missing paths that name agent memory', () => {
+  let ws: string
+
+  beforeAll(() => {
+    ws = mkdtempSync(join(tmpdir(), 'vyotiq-memhint-'))
+    mkdirSync(join(ws, '.vyotiq', 'memory', 'notes'), { recursive: true })
+    writeFileSync(join(ws, '.vyotiq', 'memory', 'index.md'), '# index\n', 'utf8')
+    writeFileSync(join(ws, '.vyotiq', 'memory', 'notes', 'a.md'), 'note\n', 'utf8')
+  })
+
+  afterAll(() => {
+    rmSync(ws, { recursive: true, force: true })
+  })
+
+  it('points str_replace at the memory tools instead of a bare miss', () => {
+    expect(() => toolStrReplace(ws, 'index.md', 'a', 'b')).toThrow(/memory_write/)
+  })
+
+  it('still reads an existing memory file by its real path', async () => {
+    // No hint is owed here: the path resolves, so the read simply works.
+    await expect(toolRead(ws, '.vyotiq/memory/notes/a.md')).resolves.toContain('note')
+  })
+
+  it('stays silent for a memory name the store does not hold', async () => {
+    // state.md is a valid memory name but this workspace has none, so the
+    // honest answer is an ordinary miss — a hint here would be a guess.
+    await expect(toolRead(ws, 'state.md')).rejects.toThrow(/File not found/)
+    await expect(toolRead(ws, 'state.md')).rejects.not.toThrow(/memory_read/)
+  })
+
+  it('stays silent for an ordinary workspace file', async () => {
+    await expect(toolRead(ws, 'docs/index.md')).rejects.not.toThrow(/memory_read/)
+  })
+})
+
+describe('missing directory hints (W5)', () => {
+  let ws: string
+
+  beforeAll(() => {
+    ws = mkdtempSync(join(tmpdir(), 'vyotiq-dirdirhint-'))
+  })
+
+  afterAll(() => {
+    rmSync(ws, { recursive: true, force: true })
+  })
+
+  it('mentions the worktree node_modules junction when that dir is missing', () => {
+    const hint = missingDirectoryHint(ws, 'node_modules', 'node_modules')
+    expect(hint).toContain('Directory not found: node_modules')
+    expect(hint).toContain('junction')
+    expect(hint).toContain('list_dir .')
+  })
+
+  it('leaves other missing directories with the generic hint', () => {
+    const hint = missingDirectoryHint(ws, 'docs', 'docs')
+    expect(hint).toContain('Directory not found: docs')
+    expect(hint).not.toContain('junction')
   })
 })

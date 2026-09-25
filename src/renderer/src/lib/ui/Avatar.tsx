@@ -2,11 +2,11 @@ import { Icon, isIconName, type IconName } from '../icons'
 import { cn } from './cn'
 
 /**
- * Identity chip for a named thing — a teammate, an agent, an author.
+ * Identity chip for a named thing — an agent, an author.
  *
  * Renders the named icon when the key resolves, otherwise the first character
- * of the name. The fallback is not defensive padding: `AgentProfile.avatar` is
- * a free `z.string().max(32)`, so an unknown key is a normal state, not a bug.
+ * of the name. The fallback is not defensive padding: `avatar` is free
+ * `z.string().max(32)` text, so an unknown key is a normal state, not a bug.
  *
  * Colour stays on the accent token deliberately. The app is themed across five
  * skins and two themes from `--vy-*` tokens alone, so a per-name hue would be

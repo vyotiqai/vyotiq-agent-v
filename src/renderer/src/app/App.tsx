@@ -15,7 +15,6 @@ import { useCustomSkinCss } from '@renderer/lib/hooks/useCustomSkinCss'
 import { pickAppearanceSettings, stepFontScale, DEFAULT_FONT_SCALE } from '@shared/appearance'
 import { useSettings } from '@renderer/lib/hooks/useSettings'
 import { useWorkspaceManager, resolveComposerDraft } from '@renderer/lib/hooks/useWorkspaceManager'
-import { useAgentProfiles } from '@renderer/lib/hooks/useAgentProfiles'
 import type { WorkspaceContext } from '@renderer/lib/hooks/useWorkspaceManager'
 import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
 import { ToastHost, pushToast } from '@renderer/lib/ui'
@@ -72,9 +71,6 @@ const SettingsView = lazy(() =>
 )
 const MarketplaceView = lazy(() =>
   import('../features/marketplace').then((m) => ({ default: m.MarketplaceView }))
-)
-const TeammatesView = lazy(() =>
-  import('../features/teammates').then((m) => ({ default: m.TeammatesView }))
 )
 const HomePage = lazy(() =>
   import('../features/home/HomePage').then((m) => ({ default: m.HomePage }))
@@ -181,14 +177,9 @@ function App() {
     },
     [settings]
   )
-  const { profiles: rosterProfiles, ready: rosterReady } = useAgentProfiles()
   const workspace = useWorkspaceManager({
     openInstanceRunIds,
     getDefaultProviderModelForWorkspace,
-    getAgentProfileModelPin: (profileId) =>
-      rosterProfiles.find((p) => p.id === profileId)?.model ?? null,
-    getValidAgentProfileIds: () =>
-      rosterReady ? new Set(rosterProfiles.map((profile) => profile.id)) : null,
     maxChatPanes: settings.maxChatPanes ?? 0
   })
   const {
@@ -206,6 +197,7 @@ function App() {
     onToolToggle,
     onGroupToggle,
     onTurnToggle,
+    onDismissRunError,
     onApprovalDecision,
     onQuestionSubmit,
     collapsedTurns,
@@ -228,9 +220,6 @@ function App() {
     setComposerDraft,
     setComposerDraftForPane,
     setAgentMode,
-    setAgentProfileIdForRun,
-    getAgentProfileIdForRun,
-    pruneAgentProfileBindings,
     onMessageListScroll,
     onMessageListScrollForPane,
     setPaneCapacityContext,
@@ -258,20 +247,12 @@ function App() {
     focusedRunId
   } = workspace
 
-  // A deleted teammate must never ride a stale binding into chatStart — main
-  // rejects the whole send ('Unknown agent profile'). Prune every chat's
-  // binding that no longer resolves in the roster whenever the roster changes.
-  useEffect(() => {
-    if (!rosterReady) return
-    pruneAgentProfileBindings(new Set(rosterProfiles.map((p) => p.id)))
-  }, [rosterReady, rosterProfiles, pruneAgentProfileBindings])
-
   const focusedParentRunId = chat.runId ?? activeContext?.activeRunId ?? null
   contextsForModelRef.current = contexts
   const focusedOpenInstance =
     focusedParentRunId != null ? (openInstanceByParent[focusedParentRunId] ?? null) : null
 
-  const [view, setView] = useState<'chat' | 'settings' | 'marketplace' | 'teammates' | 'home'>('chat')
+  const [view, setView] = useState<'chat' | 'settings' | 'marketplace' | 'home'>('chat')
   const previousViewRef = useRef(view)
   const [marketplaceFocusServerId, setMarketplaceFocusServerId] = useState<string | null>(null)
   const [marketplaceFocusSkillPath, setMarketplaceFocusSkillPath] = useState<string | null>(null)
@@ -301,8 +282,7 @@ function App() {
     } else if (view === 'chat') {
       // Returning from settings/marketplace must not steal the first Tab stop
       // (skip link). New chat focuses the composer explicitly in onNewChat.
-      if (previous === 'settings' || previous === 'marketplace' || previous === 'teammates')
-        return
+      if (previous === 'settings' || previous === 'marketplace') return
       requestAnimationFrame(() => requestAnimationFrame(() => {
         focusComposerMessage()
       }))
@@ -773,18 +753,6 @@ function App() {
       window.setTimeout(tryFocus, 0)
     },
     [newChatInWorkspace]
-  )
-
-  // Teammate rows: fresh chat in the active workspace, bound to the profile so
-  // the first send already carries identity + the profile's memory namespace.
-  const onStartTeammateChat = useCallback(
-    (profileId: string): void => {
-      const path = workspace.focusedWorkspacePath ?? workspace.activeWorkspace
-      if (!path) return
-      setAgentProfileIdForRun(path, null, profileId)
-      onNewChatInWorkspace(path)
-    },
-    [workspace.focusedWorkspacePath, workspace.activeWorkspace, setAgentProfileIdForRun, onNewChatInWorkspace]
   )
 
   // Home start bar / workspace cards route here: same switch + focus flow as
@@ -1851,10 +1819,6 @@ function App() {
           onAgentModeChange={(mode) => {
             setAgentMode(mode, { workspacePath: pane.workspacePath, runId: pane.runId })
           }}
-          agentProfileId={getAgentProfileIdForRun(pane.workspacePath, pane.runId)}
-          onAgentProfileChange={(profileId) =>
-            setAgentProfileIdForRun(pane.workspacePath, pane.runId, profileId)
-          }
           onSend={(text, images, files, extras) =>
             gateSendWithOnboarding(
               (sendText, sendImages, sendFiles, sendExtras) => {
@@ -1947,6 +1911,9 @@ function App() {
           onTurnToggle={
             paneCtrl ? (turnIndex) => paneCtrl.toggleTurnCollapsed(turnIndex) : undefined
           }
+          onDismissRunError={
+            paneCtrl ? (itemId) => paneCtrl.dismissRunError(itemId) : undefined
+          }
           collapsedTurns={paneCollapsed}
           onApprovalDecision={
             paneCtrl
@@ -1994,8 +1961,6 @@ function App() {
       operationalError,
       scrollRestoreToken,
       setAgentMode,
-      setAgentProfileIdForRun,
-      getAgentProfileIdForRun,
       settings,
       update,
       onChatSettingsChangeForWorkspace,
@@ -2218,8 +2183,6 @@ function App() {
     onCloseWorkspace,
     onAddWorkspace: onPickWorkspace,
     onNewChatInWorkspace,
-    onStartTeammateChat,
-    onOpenTaskRun: (path: string, runId: string) => void onSelectRunInWorkspace(path, runId),
     workspaceHasBackgroundRun,
     expandedByPath: workspace.workspaceExpandedByPath,
     onSetWorkspaceExpanded: workspace.setWorkspaceExpanded,
@@ -2244,7 +2207,6 @@ function App() {
         onSessionQuery={() => {}}
         onOpenSettings={() => {}}
         onOpenMarketplace={() => {}}
-        onOpenTeammates={() => {}}
         onOpenChat={() => {}}
         onOpenHome={() => {}}
         onNewChat={() => {}}
@@ -2294,7 +2256,6 @@ function App() {
       }}
       focusedRunId={focusedRunId}
       onOpenMarketplace={() => setView('marketplace')}
-      onOpenTeammates={() => setView('teammates')}
       onOpenChat={() => setView('chat')}
       onOpenHome={() => setView('home')}
       onNewChat={onNewChat}
@@ -2388,21 +2349,6 @@ function App() {
             onFocusRuleConsumed={() => setMarketplaceFocusRulePath(null)}
             onClose={() => setView('chat')}
           />
-          </Suspense>
-        </ErrorBoundary>
-      ) : view === 'teammates' ? (
-        <ErrorBoundary title="Teammates couldn't render" resetKey="teammates">
-          <Suspense fallback={<ViewSuspenseFallback />}>
-            <TeammatesView
-              secrets={secrets}
-              ollamaBaseUrl={settings.ollamaBaseUrl}
-              customOpenAiBaseUrl={settings.customOpenAiBaseUrl}
-              openWorkspaces={openWorkspaces}
-              activeWorkspacePath={focusedWorkspacePath ?? activeWorkspace}
-              onClose={() => setView('chat')}
-              onStartTeammateChat={onStartTeammateChat}
-              onOpenTaskRun={(path, runId) => void onSelectRunInWorkspace(path, runId)}
-            />
           </Suspense>
         </ErrorBoundary>
       ) : view === 'home' ? (
@@ -2506,26 +2452,6 @@ function App() {
                 runId: focusedRunId
               })
             }
-            agentProfileId={getAgentProfileIdForRun(
-              focusedWorkspacePath ?? activeWorkspace,
-              focusedRunId
-            )}
-            onAgentProfileChange={(profileId) =>
-              setAgentProfileIdForRun(
-                focusedWorkspacePath ?? activeWorkspace,
-                focusedRunId,
-                profileId
-              )
-            }
-            onContinueInAgent={() => {
-              setAgentMode('agent', {
-                workspacePath: focusedWorkspacePath ?? undefined,
-                runId: focusedRunId
-              })
-              setComposerDraft(
-                'Implement the approved plan from plan.md (run artifact — read plan.md to load it).'
-              )
-            }}
             onSend={onChatSend}
             onEditAndResend={onChatEditAndResend}
             onRevertToUserMessage={onChatRevertToUserMessage}
@@ -2547,6 +2473,7 @@ function App() {
             onToolToggle={onToolToggle}
             onGroupToggle={onGroupToggle}
             onTurnToggle={onTurnToggle}
+            onDismissRunError={onDismissRunError}
             collapsedTurns={collapsedTurns}
             onApprovalDecision={onApprovalDecision}
             onQuestionSubmit={onQuestionSubmit}

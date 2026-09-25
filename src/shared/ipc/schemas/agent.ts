@@ -1,11 +1,6 @@
 import { z } from 'zod'
 import { AgentInteractionModeSchema } from './settings'
 import { ProviderIdSchema } from './providers'
-import {
-  AgentProfileIdSchema,
-  AgentProfileRuntimeSchema,
-  AgentProfileSnapshotSchema
-} from './agentProfile'
 
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 export const MAX_IMAGE_DATA_URL_CHARS = Math.ceil(MAX_IMAGE_BYTES * (4 / 3)) + 128
@@ -114,7 +109,7 @@ export const RunStatusSchema = z.object({
   workspacePath: z.string().optional(),
   /** Latest chatStart invocation represented by outcome fields. */
   invokeId: z.number().int().min(1).optional(),
-  /** Last Ask / Plan / Agent mode for this run (survives resume). */
+  /** Last Ask / Agent mode for this run (survives resume). */
   mode: AgentInteractionModeSchema.optional(),
   /** ISO timestamp when an orphan interrupt marked this run resumable. */
   interruptedAt: z.string().optional(),
@@ -129,20 +124,7 @@ export const RunStatusSchema = z.object({
   /** Git worktree checkout for write-capable inline instances. */
   worktreePath: z.string().min(1).optional(),
   /** Branch checked out in the instance worktree; used for sequential merge-back. */
-  worktreeBranch: z.string().min(1).optional(),
-  /** Teammate profile this run is bound to (identity + memory namespace). */
-  agentProfileId: AgentProfileIdSchema.optional(),
-  /** Snapshot of the profile name at run time (survives profile rename/delete). */
-  agentProfileName: z.string().min(1).max(64).optional(),
-  agentProfileSnapshot: AgentProfileSnapshotSchema.optional(),
-  /**
-   * Delegated task that owns this run. Lets boot tell a task's run apart from
-   * an ordinary teammate chat, so generic profile auto-resume cannot relaunch
-   * work the scheduler is responsible for reconciling.
-   */
-  delegatedTaskId: z.string().min(1).max(80).optional(),
-  /** Execution substrate for this run (Phase 4 runtime seam). */
-  runtime: AgentProfileRuntimeSchema.optional()
+  worktreeBranch: z.string().min(1).optional()
 })
 export type RunStatus = z.infer<typeof RunStatusSchema>
 
@@ -356,7 +338,12 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     type: z.literal('error'),
     ...eventBase,
     message: z.string(),
-    code: z.string().optional()
+    code: z.string().optional(),
+    /**
+     * Identity of this failure, shared by the live event and its events.jsonl
+     * row, so a reader's dismissal of its transcript box survives a reload.
+     */
+    errorId: z.string().min(1).optional()
   }),
   z.object({
     type: z.literal('assistant_message'),
@@ -471,6 +458,14 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
      */
     provider: z.string().max(64).optional(),
     model: z.string().max(200).optional(),
+    /**
+     * Fingerprint of the tool catalog + stable system zone this step sent, i.e.
+     * everything ahead of the conversation (`promptPrefixFingerprint`). Two
+     * consecutive steps with the same value sent the same cacheable prefix, so
+     * a cache miss between them was the provider's. Optional: older events
+     * predate it.
+     */
+    prefixHash: z.string().max(64).optional(),
     /** Latest step context window size (not cumulative bill). */
     inputTokens: z.number().int().min(0).optional(),
     outputTokens: z.number().int().min(0).optional(),
@@ -744,12 +739,7 @@ export const RunSummarySchema = z.object({
   /** Provider-reported cost for the run when the provider bills it. */
   billedCost: z.number().nonnegative().optional(),
   /** Sum of token×price estimates for steps the provider didn't bill. */
-  estimatedCost: z.number().nonnegative().optional(),
-  /** Teammate binding snapshot — mirrors RunStatus fields for list surfaces. */
-  agentProfileId: AgentProfileIdSchema.optional(),
-  agentProfileName: z.string().min(1).max(64).optional(),
-  agentProfileSnapshot: AgentProfileSnapshotSchema.optional(),
-  runtime: AgentProfileRuntimeSchema.optional()
+  estimatedCost: z.number().nonnegative().optional()
 })
 export type RunSummary = z.infer<typeof RunSummarySchema>
 
@@ -805,17 +795,7 @@ export const ChatStartRequestSchema = z
     /** Session's pinned provider — authoritative for this invoke. */
     provider: ProviderIdSchema.optional(),
     /** Session's pinned model — authoritative for this invoke. */
-    model: z.string().min(1).optional(),
-    /**
-     * True only when the user picked this model by hand. The renderer also
-     * sends its ambient default in `model`, which must NOT outrank a teammate's
-     * pinned model on that teammate's first turn — without this flag the two
-     * are indistinguishable and the pin never takes effect.
-     */
-    modelExplicit: z.boolean().optional(),
-    /** Teammate profile binding: identity, per-profile memory namespace, model pin. */
-    agentProfileId: AgentProfileIdSchema.optional(),
-    runtime: AgentProfileRuntimeSchema.optional()
+    model: z.string().min(1).optional()
   })
   .superRefine((val, ctx) => {
     if (val.incremental) {
@@ -865,9 +845,7 @@ export const ChatRewindAndStartRequestSchema = z.object({
   }),
   mode: AgentInteractionModeSchema.optional(),
   provider: ProviderIdSchema.optional(),
-  model: z.string().min(1).optional(),
-  /** True only when the user picked `model` by hand (see ChatStartRequestSchema). */
-  modelExplicit: z.boolean().optional()
+  model: z.string().min(1).optional()
 })
 export type ChatRewindAndStartRequest = z.infer<typeof ChatRewindAndStartRequestSchema>
 

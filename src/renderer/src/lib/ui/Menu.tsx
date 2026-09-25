@@ -222,7 +222,7 @@ export function Menu({
         onKeyDown={onListKeyDown}
       >
           {showSearch ? (
-            <div className="border-b border-border px-2 py-1.5">
+            <div className="border-b border-border/40 px-2 py-1.5">
               <SearchInput
                 ref={searchRef}
                 inputClassName="min-h-7 text-xs"

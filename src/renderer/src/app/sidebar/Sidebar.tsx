@@ -13,7 +13,6 @@ import {
   SIDEBAR_WIDTH_PX
 } from '@renderer/lib/utils/layout'
 import { ChatList } from './ChatList'
-import { TeammatesSection } from './TeammatesSection'
 import { SidebarCollapsedHeader, SidebarTopBar } from './SidebarTopBar'
 import type { SidebarProps } from './types'
 import { useSidebarChats } from './useSidebarChats'
@@ -42,12 +41,9 @@ export function Sidebar({
   onOpenSettingsSection,
   focusedRunId = null,
   onOpenMarketplace,
-  onOpenTeammates,
   onOpenHome,
   onOpenChat,
   onNewChatInWorkspace,
-  onStartTeammateChat,
-  onOpenTaskRun,
   onSelectRunInWorkspace,
   onRenameRunInWorkspace,
   onDeleteRunInWorkspace,
@@ -127,12 +123,6 @@ export function Sidebar({
   const { items: notificationItems, unreadCount, markRead, dismiss } = useNotifications({
     focusedRunId
   })
-
-  const openTeammates = (): void => {
-    clearSearch()
-    onOpenTeammates()
-    afterNav()
-  }
 
   const openMarketplace = (): void => {
     clearSearch()
@@ -240,21 +230,6 @@ export function Sidebar({
             openInstanceRunId={openInstanceRunId}
             hideSessionRuns={dockImmersive && !sessionQuery.trim()}
           />
-          {/* A sibling of the chat list, not its last child: inside ChatList
-              the roster sat below every workspace and every chat, and it was
-              hidden entirely whenever no workspace was open. */}
-          <TeammatesSection
-            onStartTeammateChat={onStartTeammateChat}
-            onOpenTeammates={onOpenTeammates}
-            onOpenTaskRun={(path, runId) => {
-              setExpanded(path, true)
-              onOpenTaskRun?.(path, runId)
-              onOpenChat()
-              afterNav()
-            }}
-            activeWorkspacePath={activePath ?? null}
-            current={view === 'teammates'}
-          />
         </div>
       )}
 
@@ -303,19 +278,6 @@ export function Sidebar({
           }}
           onOpenSettings={openNotificationSettings}
         />
-        {/* Teammates is not listed here. The roster section above is already
-            the way in — it names the same destination, and carrying both meant
-            the sidebar offered the word twice, three rows apart, for one pane.
-            Collapsed, the roster is hidden, so the rail keeps its entry. */}
-        {isCollapsed ? (
-          <NavItem
-            label="Teammates"
-            icon="bot"
-            variant="icon"
-            current={view === 'teammates'}
-            onClick={openTeammates}
-          />
-        ) : null}
         <NavItem
           label="Settings"
           icon="gear"

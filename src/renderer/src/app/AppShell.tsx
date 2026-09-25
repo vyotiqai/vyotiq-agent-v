@@ -53,13 +53,10 @@ function AppShellInner({
   onOpenFeedback,
   focusedRunId = null,
   onOpenMarketplace,
-  onOpenTeammates,
   onOpenChat,
   onOpenHome,
   onNewChat,
   onNewChatInWorkspace,
-  onStartTeammateChat,
-  onOpenTaskRun,
   onSelectRunInWorkspace,
   onRenameRunInWorkspace,
   onDeleteRunInWorkspace,
@@ -83,7 +80,7 @@ function AppShellInner({
   loading,
   navigationMode = 'sidebar'
 }: {
-  view: 'chat' | 'settings' | 'marketplace' | 'teammates' | 'home'
+  view: 'chat' | 'settings' | 'marketplace' | 'home'
   workspacePath: string | null
   openWorkspaces?: string[]
   runsByWorkspacePath?: Record<string, WorkspaceSidebarRuns>
@@ -100,13 +97,10 @@ function AppShellInner({
   onOpenFeedback?: () => void
   focusedRunId?: string | null
   onOpenMarketplace: () => void
-  onOpenTeammates: () => void
   onOpenChat: () => void
   onOpenHome: () => void
   onNewChat: () => void
   onNewChatInWorkspace?: (path: string) => void
-  onStartTeammateChat?: (profileId: string) => void
-  onOpenTaskRun?: (path: string, runId: string) => void
   onSelectRunInWorkspace?: (path: string, runId: string) => void
   onRenameRunInWorkspace?: (path: string, runId: string, goal: string) => void
   onDeleteRunInWorkspace?: (path: string, runId: string) => void
@@ -372,12 +366,9 @@ function AppShellInner({
     onOpenSettingsSection,
     focusedRunId,
     onOpenMarketplace,
-    onOpenTeammates,
     onOpenChat,
     onOpenHome,
     onNewChatInWorkspace,
-    onStartTeammateChat,
-    onOpenTaskRun,
     onSelectRunInWorkspace,
     onRenameRunInWorkspace,
     onDeleteRunInWorkspace,

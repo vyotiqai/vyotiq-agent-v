@@ -29,15 +29,14 @@ describe('buildSlashDisplayList', () => {
     expect(display[2]?.id).toBe('mcp:x')
   })
 
-  it('hides Ask/Plan/Agent from the idle list and keeps them searchable', () => {
+  it('hides Ask/Agent from the idle list and keeps them searchable', () => {
     const items = [
       cmd({ id: 'builtin:ask', trigger: 'ask', group: 'App', kind: 'builtin', label: 'Ask mode' }),
-      cmd({ id: 'builtin:plan', trigger: 'plan', group: 'App', kind: 'builtin', label: 'Plan mode' }),
       cmd({ id: 'builtin:agent', trigger: 'agent', group: 'App', kind: 'builtin', label: 'Agent mode' }),
       cmd({ id: 'builtin:compact', trigger: 'compact', group: 'App', kind: 'builtin', label: 'Compact context' })
     ]
     expect(buildSlashDisplayList('', items).map((c) => c.trigger)).toEqual(['compact'])
-    expect(buildSlashDisplayList('plan', items).map((c) => c.trigger)).toEqual(['plan'])
+    expect(buildSlashDisplayList('agent', items).map((c) => c.trigger)).toEqual(['agent'])
   })
 
   it('preserves fuzzy ranking within a group', () => {

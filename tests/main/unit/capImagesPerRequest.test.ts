@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   capImagesPerRequest,
   IMAGE_CAP_OMISSION_MARKER,
-  MAX_IMAGES_PER_REQUEST
+  MAX_IMAGES_PER_REQUEST,
+  stripUnsupportedModalitiesFromMessages
 } from '@main/agent/context/stripImages'
 import type { ChatMessage, ContentPart } from '@shared/ipc'
 
@@ -70,6 +71,23 @@ describe('capImagesPerRequest', () => {
       user([image(4), image(5), image(6)])
     ]
     expect(capImagesPerRequest(messages, caps)).toEqual(messages)
+  })
+
+  it('leaves a supported image message untouched, object identity included', () => {
+    // Assembly runs this on every step, and the token estimate caches per message
+    // object, so minting a new message for an unchanged screenshot re-decoded its
+    // header and re-counted its text every step of a vision run.
+    const messages = [user([text('look'), image(1)]), { role: 'user', content: 'plain' }]
+    const out = stripUnsupportedModalitiesFromMessages(messages as ChatMessage[], caps)
+    expect(out[0]).toBe(messages[0])
+    expect(out[1]).toBe(messages[1])
+  })
+
+  it('still replaces an image the model cannot take', () => {
+    const messages = [user([text('look'), image(1)])]
+    const out = stripUnsupportedModalitiesFromMessages(messages, { image: false })
+    expect(out[0]).not.toBe(messages[0])
+    expect(String(out[0]!.content)).toContain('image omitted')
   })
 
   it('does not cap when the model does not support images (they are stripped already)', () => {

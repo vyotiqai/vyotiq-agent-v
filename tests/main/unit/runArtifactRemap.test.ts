@@ -37,19 +37,19 @@ describe('run artifact path remap', () => {
     }
   })
 
-  it('denies delete of run plan.md in Plan mode and keeps the artifact', async () => {
+  it('denies delete of run plan.md in Ask mode and keeps the artifact', async () => {
     setup()
     const res = await executeTool(
       'delete',
       JSON.stringify({ path: 'plan.md' }),
       workspace,
       new AbortController().signal,
-      { runDir, agentMode: 'plan' }
+      { runDir, agentMode: 'ask' }
     )
-    // Plan mode's tool gate denies delete outright; the artifact-delete block
-    // covers modes where delete IS allowed (Agent).
+    // Ask's tool gate denies delete outright; the artifact-delete block covers
+    // Agent, the only mode where delete IS allowed.
     expect(res.ok).toBe(false)
-    expect(res.content).toMatch(/Plan mode does not allow tool "delete"/)
+    expect(res.content).toMatch(/Ask mode does not allow tool "delete"/)
     expect(existsSync(join(runDir, 'plan.md'))).toBe(true)
   })
 

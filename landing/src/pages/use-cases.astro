@@ -1,9 +1,8 @@
 ---
 import Base from '../layouts/Base.astro'
 import Shot from '../components/Shot.astro'
-import TeammateScenarios from '../components/TeammateScenarios.astro'
 import UseCaseCard from '../components/UseCaseCard.astro'
-import { LIVE_TEAMMATE_SCENARIOS, LIVE_USE_CASES } from '../lib/showcase'
+import { LIVE_USE_CASES } from '../lib/showcase'
 
 /**
  * What people use Agent V for, as opposed to what it is built out of — which
@@ -18,7 +17,7 @@ import { LIVE_TEAMMATE_SCENARIOS, LIVE_USE_CASES } from '../lib/showcase'
 
 <Base
   title="Use cases"
-  description="What people use Agent V for: reviewing pull requests, upgrading dependencies one at a time, taking an incident from alert to fix, and the routine work in between."
+  description="What people use Agent V for: reviewing pull requests, upgrading dependencies one at a time, and taking an incident from alert to fix."
 >
   <section class="vy-page-head">
     <div class="vy-shell">
@@ -41,33 +40,6 @@ import { LIVE_TEAMMATE_SCENARIOS, LIVE_USE_CASES } from '../lib/showcase'
       </ul>
     </div>
   </section>
-
-  {/* Dropped entirely when nothing is approved, the same way a claim-less
-      section disappears — a heading with no list under it is worse than no
-      section at all. */}
-  {
-    LIVE_TEAMMATE_SCENARIOS.length > 0 && (
-      <section class="vy-rule vy-section" id="teammates">
-        <div class="vy-shell vy-section-grid">
-          <header class="vy-sec-head">
-            <p class="vy-eyebrow">Teammates</p>
-            <h2 class="vy-h2">When a teammate earns its keep</h2>
-            <p class="vy-prose-muted">
-              A teammate is a named agent that outlives the conversation: its own memory, its own
-              queue, its own model. These are the situations it is for — and the one it is not.
-            </p>
-            <p class="vy-more">
-              <a href="/features#teammates" class="vy-link">
-                How teammates work →
-              </a>
-            </p>
-          </header>
-
-          <TeammateScenarios />
-        </div>
-      </section>
-    )
-  }
 
   <section class="vy-rule vy-section">
     <div class="vy-shell vy-section-grid">

@@ -75,8 +75,6 @@ export function SessionChatColumn({
   onChatSettingsChange,
   agentMode = 'agent',
   onAgentModeChange = () => {},
-  agentProfileId = null,
-  onAgentProfileChange = () => {},
   onSend,
   onStop,
   onEditAndResend,
@@ -97,6 +95,7 @@ export function SessionChatColumn({
   onToolToggle,
   onGroupToggle,
   onTurnToggle,
+  onDismissRunError,
   onApprovalDecision,
   onQuestionSubmit,
   collapsedTurns,
@@ -163,8 +162,6 @@ export function SessionChatColumn({
   onChatSettingsChange: (patch: ChatSettingsPatch) => void
   agentMode?: AgentInteractionMode
   onAgentModeChange?: (mode: AgentInteractionMode) => void
-  agentProfileId?: string | null
-  onAgentProfileChange?: (profileId: string | null) => void
   onSend: (
     text: string,
     images?: string[],
@@ -196,6 +193,8 @@ export function SessionChatColumn({
   onToolToggle?: (toolCallId: string, expanded: boolean) => void
   onGroupToggle?: (anchorToolCallId: string, expanded: boolean) => void
   onTurnToggle?: (turnIndex: number) => void
+  /** Dismiss (and remember) one run_error row in the transcript. */
+  onDismissRunError?: (itemId: string) => void
   onApprovalDecision?: (requestId: string, decision: ToolApprovalDecision) => void | Promise<void>
   onQuestionSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
   collapsedTurns?: ReadonlySet<number>
@@ -295,8 +294,6 @@ export function SessionChatColumn({
         onChatSettingsChange={onChatSettingsChange}
         agentMode={agentMode}
         onAgentModeChange={onAgentModeChange}
-        agentProfileId={agentProfileId}
-        onAgentProfileChange={onAgentProfileChange}
         onSend={submitPromptEdit}
         onStop={onStop}
         activeRunId={activeRunId}
@@ -352,8 +349,6 @@ export function SessionChatColumn({
     onChatSettingsChange,
     agentMode,
     onAgentModeChange,
-    agentProfileId,
-    onAgentProfileChange,
     onSend: sendFromDock,
     onStop,
     pendingFollowUps,
@@ -463,6 +458,7 @@ export function SessionChatColumn({
                   onToolToggle={onToolToggle}
                   onGroupToggle={onGroupToggle}
                   onTurnToggle={onTurnToggle}
+                  onDismissRunError={onDismissRunError}
                   onApprovalDecision={onApprovalDecision}
                   onQuestionSubmit={onQuestionSubmit}
                   onRetryNetwork={onContinue}
