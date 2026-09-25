@@ -57,28 +57,70 @@ function eventToolCallId(event: AgentEvent): string | undefined {
 }
 
 /**
+ * The row that opens the rewound turn: the invoke that answered the rewound
+ * prompt, or the follow-up drain that applied it mid-run. A `status: running`
+ * row does not name its prompt, so an invoke is matched by starting at or after
+ * the moment the prompt was sent.
+ */
+function opensRewoundTurn(row: PersistedEvent, event: AgentEvent, rewoundUserAt: string): boolean {
+  if (event.type === 'follow_up_applied') {
+    return event.messages.some((m) => m.role === 'user' && m.at === rewoundUserAt)
+  }
+  if (event.type !== 'status' || event.status !== 'running') return false
+  const startedMs = Date.parse(row.at)
+  const sentMs = Date.parse(rewoundUserAt)
+  return !Number.isNaN(startedMs) && !Number.isNaN(sentMs) && startedMs >= sentMs
+}
+
+/**
  * Truncate events to those that still belong to kept message history.
  * Cuts at the first event that references a dropped tool call or a rewound
- * write checkpoint.
+ * write checkpoint, or — when the rewound prompt's send time is known — at the
+ * row that opened its turn. The tool cut alone missed a turn that failed before
+ * calling any tool: its `error` and `status: error` survived the rewind and
+ * reappeared in the timeline under the resent prompt.
+ *
+ * Rows keep their original `at`.
  */
 function truncateEvents(
   persisted: PersistedEvent[],
   keptIds: Set<string>,
-  rewoundCheckpointIds: Set<string>
-): AgentEvent[] {
-  const kept: AgentEvent[] = []
-  for (const row of persisted) {
+  rewoundCheckpointIds: Set<string>,
+  rewoundUserAt?: string
+): PersistedEvent[] {
+  // A row naming a kept tool call is kept history, so the turn cut never lands
+  // before the last one. Rewinds used to re-stamp every row they kept, which can
+  // make older turns look newer than the prompt being rewound.
+  let lastKeptToolRow = -1
+  if (rewoundUserAt) {
+    persisted.forEach((row, index) => {
+      const ev = row.event
+      if (!ev || typeof ev !== 'object' || !('type' in ev)) return
+      const toolId = eventToolCallId(ev as AgentEvent)
+      if (toolId && keptIds.has(toolId)) lastKeptToolRow = index
+    })
+  }
+  const kept: PersistedEvent[] = []
+  for (let index = 0; index < persisted.length; index++) {
+    const row = persisted[index]!
     const ev = row.event
     if (!ev || typeof ev !== 'object' || !('type' in ev)) continue
     const agentEvent = ev as AgentEvent
+    if (
+      rewoundUserAt &&
+      index > lastKeptToolRow &&
+      opensRewoundTurn(row, agentEvent, rewoundUserAt)
+    ) {
+      break
+    }
     if (agentEvent.type === 'writes_checkpoint') {
       if (rewoundCheckpointIds.has(agentEvent.checkpointId)) break
-      kept.push(agentEvent)
+      kept.push(row)
       continue
     }
     const toolId = eventToolCallId(agentEvent)
     if (toolId && !keptIds.has(toolId)) break
-    kept.push(agentEvent)
+    kept.push(row)
   }
   return kept
 }
@@ -283,6 +325,8 @@ export async function prepareRewindAndReplaceUserMessage(input: {
     runId,
     runDir,
     userMessageIndex: editMessageIndex,
+    // The prompt as it was on disk — the edited copy carries a fresh `at`.
+    rewoundUserAt: diskMessages[editMessageIndex]?.at,
     nextMessages,
     writes
   })
@@ -295,10 +339,13 @@ async function applyRewindPersistence(input: {
   runId: string
   runDir: string
   userMessageIndex: number
+  /** Send time of the rewound prompt; its turn's events are cut from there. */
+  rewoundUserAt?: string
   nextMessages: ChatMessage[]
   writes: RewindWritesResult
 }): Promise<void> {
-  const { workspacePath, runId, runDir, userMessageIndex, nextMessages, writes } = input
+  const { workspacePath, runId, runDir, userMessageIndex, rewoundUserAt, nextMessages, writes } =
+    input
   await syncMessagesAsync(runDir, nextMessages)
   syncTodosAfterRewind(runDir, nextMessages)
   syncChecksAfterRewind(runDir, nextMessages)
@@ -307,7 +354,7 @@ async function applyRewindPersistence(input: {
   const prior = nextMessages.slice(0, userMessageIndex)
   const keptIds = keptToolCallIds(prior)
   const rewoundIds = new Set(writes.checkpointIds)
-  const truncatedEvents = truncateEvents(persistedEvents, keptIds, rewoundIds)
+  const truncatedEvents = truncateEvents(persistedEvents, keptIds, rewoundIds, rewoundUserAt)
   await syncEventsAsync(runDir, truncatedEvents)
 
   const compaction = loadCompaction(runDir)
@@ -419,6 +466,7 @@ export async function prepareRewindToUserMessage(input: {
     runId,
     runDir,
     userMessageIndex,
+    rewoundUserAt: diskMessages[userMessageIndex]?.at,
     nextMessages,
     writes
   })

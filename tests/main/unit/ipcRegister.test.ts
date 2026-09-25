@@ -260,7 +260,6 @@ vi.mock('@main/logging/sentry', () => ({
 }))
 
 import { registerIpc } from '@main/ipc/register'
-import { loadStatus } from '@main/agent/state'
 
 async function flushAsync(): Promise<void> {
   for (let i = 0; i < 5; i++) {
@@ -752,95 +751,6 @@ describe('registerIpc', () => {
       expect(runAgentMock).not.toHaveBeenCalled()
     })
 
-    describe('teammate binding on an existing run', () => {
-      beforeEach(() => {
-        vi.mocked(loadStatus).mockReturnValue(null)
-        validateExistingRunStartMock.mockReset()
-        validateExistingRunStartMock.mockReturnValue({ runtime: 'local' as const })
-      })
-
-      // Sends go through the payload shape the composer actually produces —
-      // `agentProfileId` always spelled out, sometimes with no value.
-      const sendWithBinding = async (
-        agentProfileId: string | undefined
-      ): Promise<{ ok: boolean; error?: string; code?: string }> => {
-        runExistsMock.mockReturnValue(true)
-        isActiveMock.mockReturnValue(false)
-        runAgentMock.mockImplementation(async function* () {
-          yield { type: 'status', runId: 'existing-run', status: 'done' } satisfies AgentEvent
-        })
-        const handler = handlers.get(IPC.chatStart)
-        return (await handler!(
-          { sender: mockWc, senderFrame: mockMainFrame },
-          {
-            incremental: true,
-            newMessages: [{ role: 'user' as const, content: 'follow up' }],
-            workspacePath: '/ws',
-            runId: 'existing-run',
-            agentProfileId
-          }
-        )) as { ok: boolean; error?: string; code?: string }
-      }
-
-      const persistedRun = {
-        status: 'done',
-        step: 3,
-        updatedAt: 'now',
-        runtime: 'local'
-      } as ReturnType<typeof loadStatus>
-
-      it('reads a stated binding from the value, not from key presence', async () => {
-        // The composer spells `agentProfileId` out on every send and structured
-        // clone keeps the key when the value is `undefined`. Reading presence
-        // made every send claim to state a binding, so "absent inherits the
-        // run's binding" never applied and ordinary sends were refused.
-        vi.mocked(loadStatus).mockReturnValueOnce(persistedRun)
-        await sendWithBinding(undefined)
-        expect(validateExistingRunStartMock).toHaveBeenLastCalledWith(
-          persistedRun,
-          expect.anything(),
-          { agentProfileId: false, runtime: false }
-        )
-
-        vi.mocked(loadStatus).mockReturnValueOnce(persistedRun)
-        await sendWithBinding('auditer')
-        expect(validateExistingRunStartMock).toHaveBeenLastCalledWith(
-          persistedRun,
-          expect.objectContaining({ agentProfileId: 'auditer' }),
-          { agentProfileId: true, runtime: false }
-        )
-      })
-
-      it('refuses a binding conflict as a client failure, without starting the run', async () => {
-        vi.mocked(loadStatus).mockReturnValueOnce(persistedRun)
-        validateExistingRunStartMock.mockImplementationOnce(() => {
-          throw new AppError('Existing run teammate binding cannot be changed', {
-            code: 'IPC_CLIENT',
-            retriable: false
-          })
-        })
-
-        expect(await sendWithBinding('auditer')).toEqual({
-          ok: false,
-          error: 'Existing run teammate binding cannot be changed',
-          code: 'run_binding_immutable'
-        })
-        expect(runAgentMock).not.toHaveBeenCalled()
-      })
-
-      it('lets a real fault keep its own reporting', async () => {
-        vi.mocked(loadStatus).mockReturnValueOnce(persistedRun)
-        validateExistingRunStartMock.mockImplementationOnce(() => {
-          throw new TypeError('bug in the check')
-        })
-
-        const result = await sendWithBinding('auditer')
-        expect(result.ok).toBe(false)
-        expect(result.code).not.toBe('run_binding_immutable')
-        expect(runAgentMock).not.toHaveBeenCalled()
-      })
-    })
-
     it('marks turn complete on terminal status; clearRunAbort guarded by invokeId', async () => {
       runAgentMock.mockImplementation(async function* () {
         yield { type: 'status', runId: 'run-test', status: 'done' } satisfies AgentEvent
@@ -1257,5 +1167,65 @@ describe('registerIpc', () => {
         data: expect.objectContaining({ openPaths: ['/plain-ws'] })
       })
     })
+  })
+})
+
+/**
+ * A retry whose task or teammate is gone is the user asking for something that
+ * is no longer there — `tasks:retry` threw `Unknown teammate profile: scout`
+ * live on 2026-09-22 and `failFrom` logged it as a handler fault and captured
+ * it as an exception. These refusals belong in the IPC_CLIENT class, and the
+ * classifier that decides is an allow-list, so it needs pinning: a pattern that
+ * drifts silently re-promotes a routine refusal to an app fault.
+ */
+describe('IPC expected-failure classification', () => {
+  const previousBackend = getLoggerBackend()
+  const warn = vi.fn()
+  const error = vi.fn()
+
+  beforeEach(() => {
+    warn.mockReset()
+    error.mockReset()
+    setLoggerBackend({
+      log: (level, message, fields) => {
+        if (level === 'warn') warn(message, fields)
+        if (level === 'error' || level === 'fatal') error(message, fields)
+      }
+    })
+    registerIpc()
+  })
+
+  afterEach(() => {
+    setLoggerBackend(previousBackend)
+  })
+
+  it('logs a retry of an unknown task as an expected failure, not a handler fault', async () => {
+    const handler = handlers.get(IPC_CHANNELS.tasksRetry)
+    expect(handler).toBeDefined()
+
+    const result = await handler!(
+      { sender: mockWc, senderFrame: mockMainFrame },
+      { id: 'task-does-not-exist' }
+    )
+
+    // The renderer sees IPC_CLIENT, and main logged it as an expected failure
+    // rather than a handler fault — so nothing is captured as an exception.
+    expect(result).toMatchObject({ ok: false, code: 'IPC_CLIENT' })
+    expect(error).not.toHaveBeenCalled()
+    expect(warn.mock.calls.some(([msg]) => String(msg).startsWith('IPC expected failure'))).toBe(
+      true
+    )
+  })
+
+  it('still reports an unrelated handler fault at error level', async () => {
+    // The classifier is an allow-list: anything it does not name must stay a
+    // fault. A bad payload is the cheapest way to prove it from the outside.
+    const handler = handlers.get(IPC_CHANNELS.tasksRetry)
+    const result = await handler!({ sender: mockWc, senderFrame: mockMainFrame }, { id: 42 })
+
+    expect(result).toMatchObject({ ok: false, code: 'IPC_VALIDATION' })
+    expect(
+      warn.mock.calls.some(([msg]) => String(msg).startsWith('IPC expected failure'))
+    ).toBe(false)
   })
 })

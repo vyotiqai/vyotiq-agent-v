@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AGENT_INTERACTION_MODES } from './settings'
 
 /** Why a tool is not active in the next Agent-mode catalog. */
 export const TOOL_CATALOG_REASONS = [
@@ -26,7 +27,7 @@ const ToolCatalogEntrySchema = z.object({
    */
   readOnlyHint: z.boolean().optional(),
   /** Modes whose mode policy admits this tool (computed with current settings). */
-  modes: z.array(z.enum(['ask', 'plan', 'agent'])),
+  modes: z.array(z.enum(AGENT_INTERACTION_MODES)),
   /** True when the tool would appear in the next Agent-mode step catalog. */
   active: z.boolean(),
   reason: z.enum(TOOL_CATALOG_REASONS).optional()

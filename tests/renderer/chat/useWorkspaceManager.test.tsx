@@ -223,6 +223,34 @@ describe('useWorkspaceManager', () => {
     expect(result.current.activeContext?.openRunIds).toContain('run-b-123')
   })
 
+  it('opens a draft in a just-added workspace without re-activating it', async () => {
+    // Main makes an added workspace active itself. App's picker handoff then
+    // opens a draft through the newChatInWorkspace of the render before the
+    // add, whose activeWorkspace is still /ws-a; switching from there sent a
+    // second setActive that re-warmed the index and re-pruned worktrees.
+    const added = defaultRegistry({ openPaths: ['/ws-a', '/ws-b', '/ws-c'], activePath: '/ws-c' })
+    added.uiStateByPath['/ws-c'] = { ...added.uiStateByPath['/ws-a']! }
+    const addWorkspace = vi.fn(async () => ({ ok: true, data: added }))
+    ;(window.vyotiq as Record<string, unknown>).addWorkspace = addWorkspace
+    const { result } = renderHook(() => useWorkspaceManager())
+
+    await waitFor(() => {
+      expect(result.current.activeWorkspace).toBe('/ws-a')
+    })
+    const newChatFromBeforeAdd = result.current.newChatInWorkspace
+
+    await act(async () => {
+      await result.current.addWorkspace('/ws-c')
+    })
+    await act(async () => {
+      await newChatFromBeforeAdd('/ws-c')
+    })
+
+    expect(addWorkspace).toHaveBeenCalledWith('/ws-c')
+    expect(setActiveWorkspace).not.toHaveBeenCalled()
+    expect(result.current.activeWorkspace).toBe('/ws-c')
+  })
+
   it('multi-pane click focuses existing session without duplicating', async () => {
     const { result } = renderHook(() => useWorkspaceManager())
 
@@ -324,10 +352,10 @@ describe('useWorkspaceManager', () => {
     expect(result.current.chat.running).toBe(true)
 
     await act(async () => {
-      result.current.setAgentMode('plan', { workspacePath: '/ws-a', runId: 'run-live' })
+      result.current.setAgentMode('ask', { workspacePath: '/ws-a', runId: 'run-live' })
     })
-    expect(chatQueueMode).toHaveBeenCalledWith({ runId: 'run-live', mode: 'plan' })
-    expect(result.current.contexts['/ws-a']?.ui.agentMode).toBe('plan')
+    expect(chatQueueMode).toHaveBeenCalledWith({ runId: 'run-live', mode: 'ask' })
+    expect(result.current.contexts['/ws-a']?.ui.agentMode).toBe('ask')
 
     chatQueueMode.mockClear()
     await act(async () => {

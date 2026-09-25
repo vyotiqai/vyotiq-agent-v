@@ -55,56 +55,30 @@ export function isRelPathInPathScope(relPath: string, pathScope: string[]): bool
   })
 }
 
-/** Every teammate memory namespace lives directly under this prefix. */
-const AGENT_NAMESPACE_PREFIX = '.vyotiq/agents/'
-
 /**
- * The namespace a workspace-relative path belongs to, or null when the path is
- * not inside any teammate's directory.
+ * Retired per-profile data root — `.vyotiq/agents/<id>/` holds legacy user
+ * data left on disk after the profiles feature was removed.
  */
-function namespaceOfPath(relPath: string): string | null {
-  const norm = normalizeScopePath(relPath.trim())
-  if (!norm) return null
-  const key = process.platform === 'win32' ? norm.toLowerCase() : norm
-  if (!key.startsWith(AGENT_NAMESPACE_PREFIX)) return null
-  // `.vyotiq/agents/<id>` — the id is one segment, and `<id>.profile.json` is a
-  // sibling FILE rather than a namespace directory, so it is not claimed here.
-  const rest = norm.slice(AGENT_NAMESPACE_PREFIX.length)
-  const segment = rest.split('/')[0] ?? ''
-  if (!segment || segment.endsWith('.profile.json')) return null
-  return segment
-}
+const RETIRED_AGENT_DATA_PREFIX = '.vyotiq/agents/'
 
 /**
- * Deny a run reaching into a teammate memory namespace that is not its own.
+ * Deny a run reaching into the retired `.vyotiq/agents/` data root.
  *
  * `.vyotiq` is in `IGNORED_DIRS`, so glob/grep/search and `list_dir` skip these
  * files — but `read` resolves its path with `resolveInsideWorkspace` alone and
- * had no deny list, so a direct path reached another teammate's notes. Ids are
- * slugified display names, which makes them guessable.
- *
- * A run with no namespace (an ordinary chat on the shared brain) is denied
- * every namespace: the shared brain has no business in `.vyotiq/agents/`
- * either. The user is not restricted — the Teammates pane's Memory tab is the
- * supported way to read this.
+ * has no deny list, so a direct path reaches this legacy data. The feature is
+ * gone: nothing in a run has business under `.vyotiq/agents/`, reading or
+ * writing. The user is not restricted — this guard is about run access only.
  */
-export function assertMemoryNamespaceAccess(
-  namespace: string | undefined,
-  relPaths: readonly string[]
-): void {
+export function assertNotRetiredAgentDataPath(relPaths: readonly string[]): void {
   for (const rel of relPaths) {
-    const target = namespaceOfPath(rel)
-    if (!target) continue
-    const own =
-      namespace !== undefined &&
-      (process.platform === 'win32'
-        ? target.toLowerCase() === namespace.toLowerCase()
-        : target === namespace)
-    if (own) continue
+    const norm = normalizeScopePath(rel.trim())
+    if (!norm) continue
+    const key = process.platform === 'win32' ? norm.toLowerCase() : norm
+    if (!key.startsWith(RETIRED_AGENT_DATA_PREFIX)) continue
     throw new Error(
-      `Path "${rel.trim()}" is another teammate's private memory (${target}). ` +
-        'Teammates do not read each other\'s notes. This denial will not change on retry — ' +
-        'use your own memory tools, which are already scoped to your namespace.'
+      `Path "${rel.trim()}" is retired per-profile data (.vyotiq/agents/). ` +
+        'This denial will not change on retry — that directory is legacy user data outside run access.'
     )
   }
 }

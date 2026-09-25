@@ -19,7 +19,6 @@ vi.mock('electron', () => ({
 import { toolEdit } from '@main/agent/tools/edit'
 import {
   assertInlineInstancePathScope,
-  assertMemoryNamespaceAccess,
   assertInlineInstancePushDenied,
   assertInlineInstanceTerminalAllowed,
   assertInlineInstanceUnscopedToolAllowed,

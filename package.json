@@ -33,7 +33,7 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "usage:report": "node scripts/usage-report.mjs",
-    "start": "electron-vite preview",
+    "start": "electron-vite preview --skipBuild",
     "site:dev": "pnpm --filter @vyotiq/landing dev",
     "site:build": "pnpm --filter @vyotiq/landing build",
     "site:capture": "pnpm --filter @vyotiq/landing capture",

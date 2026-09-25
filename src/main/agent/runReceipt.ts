@@ -86,6 +86,8 @@ function failureClusterBody(toolName: string, content: string): string {
   ) {
     return 'old_string not found'
   }
+  // Historical: Plan mode is merged into Agent, but receipts are recomputed
+  // from pre-merge history, which still holds this refusal. Keep the cluster.
   if (/Plan mode may only edit plan\.md or contract\.md/i.test(text)) {
     return 'Plan mode may only edit plan.md or contract.md'
   }

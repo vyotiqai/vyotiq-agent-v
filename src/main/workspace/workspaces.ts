@@ -181,7 +181,6 @@ function defaultUiState(): WorkspaceUiState {
     composerDraft: '',
     composerDraftByRunId: {},
     agentMode: 'agent',
-    agentProfileIdByRunId: {},
     expansionsByRunId: {}
   }
 }

@@ -1,4 +1,5 @@
 import type {
+  AgentInteractionMode,
   BuiltinClientAction,
   SlashCommandDescriptor,
   SlashCommandResolveResult
@@ -9,7 +10,7 @@ export type SlashClientHandlers = {
   onClear?: () => void | boolean | Promise<void | boolean>
   onCompact?: (focus?: string) => void | boolean | Promise<void | boolean>
   onUndoWrites?: () => void | boolean | Promise<void | boolean>
-  onSetAgentMode?: (mode: 'ask' | 'plan' | 'agent') => void | boolean | Promise<void | boolean>
+  onSetAgentMode?: (mode: AgentInteractionMode) => void | boolean | Promise<void | boolean>
   onOpenMarketplace?: (mcpServerId?: string) => void
   onOpenSettings?: (section?: 'voice' | 'providers' | 'agent') => void
   onCreateRule?: (title?: string) => void | boolean | Promise<void | boolean>
@@ -79,10 +80,6 @@ async function runClientAction(
     }
     case 'set_mode_ask': {
       const r = await handlers.onSetAgentMode?.('ask')
-      return r !== false
-    }
-    case 'set_mode_plan': {
-      const r = await handlers.onSetAgentMode?.('plan')
       return r !== false
     }
     case 'set_mode_agent': {

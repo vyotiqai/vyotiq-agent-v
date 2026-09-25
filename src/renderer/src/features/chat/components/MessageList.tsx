@@ -2,7 +2,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMem
 import { useAppVirtualizer } from '@renderer/lib/hooks/useAppVirtualizer'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand'
-import { Tooltip, cn, ImageLightbox, MarkdownContent } from '@renderer/lib/ui'
+import { IconButton, Tooltip, cn, ImageLightbox, MarkdownContent } from '@renderer/lib/ui'
 import {
   focusComposerMessage,
   isEditableShortcutTarget,
@@ -646,6 +646,7 @@ const TranscriptRowBlock = memo(function TranscriptRowBlock({
   onApprovalDecision,
   onQuestionSubmit,
   onRetryNetwork,
+  onDismissRunError,
   autoFocusApproval = true,
   turnCollapsed = false,
   showThinking = true,
@@ -682,6 +683,8 @@ const TranscriptRowBlock = memo(function TranscriptRowBlock({
   onQuestionSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
   /** Retry affordance for retryable run_error rows. */
   onRetryNetwork?: () => void
+  /** Hides a run_error row for good; the id is the row's own. */
+  onDismissRunError?: (itemId: string) => void
   autoFocusApproval?: boolean
   turnCollapsed?: boolean
   showThinking?: boolean
@@ -787,14 +790,30 @@ const TranscriptRowBlock = memo(function TranscriptRowBlock({
       >
         <div className="flex items-start justify-between gap-2">
           <span className="min-w-0">{row.message}</span>
-          {canRetry ? (
-            <button
-              type="button"
-              className="shrink-0 rounded-xl border border-border px-2 py-0.5 text-caption font-medium text-fg transition-colors hover:bg-surface"
-              onClick={onRetryNetwork}
-            >
-              Retry
-            </button>
+          {canRetry || onDismissRunError ? (
+            // -my-1 centres the controls on the first text line without making
+            // the box taller than a one-line message needs.
+            <div className="-my-1 flex shrink-0 items-center gap-1">
+              {canRetry ? (
+                <button
+                  type="button"
+                  className="shrink-0 rounded-xl border border-border px-2 py-0.5 text-caption font-medium text-fg transition-colors hover:bg-surface focus-visible:vy-focus-ring"
+                  onClick={onRetryNetwork}
+                >
+                  Retry
+                </button>
+              ) : null}
+              {onDismissRunError ? (
+                <IconButton
+                  icon="close"
+                  label="Dismiss error"
+                  size="xs"
+                  variant="bare"
+                  className="text-muted"
+                  onClick={() => onDismissRunError(row.id)}
+                />
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>
@@ -886,6 +905,7 @@ export function MessageList({
   onApprovalDecision,
   onQuestionSubmit,
   onRetryNetwork,
+  onDismissRunError,
   approvalAutoFocus = true,
   collapsedTurns,
   showThinking = true,
@@ -931,6 +951,8 @@ export function MessageList({
   onQuestionSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
   /** Retry affordance for retryable run_error rows (banner is suppressed at terminal). */
   onRetryNetwork?: () => void
+  /** Dismiss (and remember) one run_error row by its id. */
+  onDismissRunError?: (itemId: string) => void
   /** Autofocus Allow once only when this transcript is the focused visible pane. */
   approvalAutoFocus?: boolean
   /** Persisted turn-summary collapse state from the chat stream controller. */
@@ -1932,7 +1954,15 @@ export function MessageList({
       onTurnToggle={handleTurnToggle}
       onApprovalDecision={onApprovalDecision}
       onQuestionSubmit={onQuestionSubmit}
-      onRetryNetwork={onRetryNetwork}
+      onRetryNetwork={
+        // Retry continues the run from its latest turn, so only that turn's box
+        // offers it, and only once the run has stopped. Older boxes are history.
+        row.kind === 'run_error' &&
+        (row.turnIndex !== latestTurnIndex || running || pendingRun)
+          ? undefined
+          : onRetryNetwork
+      }
+      onDismissRunError={row.kind === 'run_error' ? onDismissRunError : undefined}
       autoFocusApproval={approvalAutoFocus}
       turnCollapsed={collapsedTurnSet.has(row.turnIndex)}
       showThinking={showThinking}

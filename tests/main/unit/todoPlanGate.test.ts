@@ -16,6 +16,7 @@ import { executeStepToolCalls } from '@main/agent/executeStepTools'
 import { executeTool } from '@main/agent/tools'
 import { hasInProgressTodo, toolTodoWrite } from '@main/agent/tools/todo'
 import { resetTerminalSessionsForTests } from '@main/agent/tools/terminalSessions'
+import { ensurePlanStub } from '@main/agent/planArtifacts'
 
 describe('Agent todo_write planning (no mutation gate)', () => {
   let workspace: string
@@ -131,8 +132,11 @@ describe('Agent todo_write planning (no mutation gate)', () => {
     expect(existsSync(join(runDir, 'plan.md'))).toBe(false)
   })
 
-  it('does not block Plan edit of plan.md and contract.md without in_progress', async () => {
+  it('does not block run-artifact edits without in_progress', async () => {
     setup()
+    // The run loop seeds this at start; plan.md only remaps into the run
+    // directory once the artifact exists.
+    ensurePlanStub(runDir)
     expect(hasInProgressTodo(runDir)).toBe(false)
     const signal = new AbortController().signal
     const plan = await executeTool(
@@ -140,7 +144,7 @@ describe('Agent todo_write planning (no mutation gate)', () => {
       JSON.stringify({ path: 'plan.md', contents: '# Runtime planning gate\n' }),
       workspace,
       signal,
-      { runDir, agentMode: 'plan' }
+      { runDir, agentMode: 'agent' }
     )
     expect(plan.ok).toBe(true)
     expect(plan.content).not.toMatch(/Agent mode requires todo_write/)
@@ -154,7 +158,7 @@ describe('Agent todo_write planning (no mutation gate)', () => {
       }),
       workspace,
       signal,
-      { runDir, agentMode: 'plan' }
+      { runDir, agentMode: 'agent' }
     )
     expect(contract.ok).toBe(true)
     expect(readFileSync(join(runDir, 'contract.md'), 'utf8')).toContain('Land the planning gate')

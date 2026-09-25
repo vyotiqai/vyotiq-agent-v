@@ -552,6 +552,41 @@ describe('assembleContext integration', () => {
     ).toBeGreaterThan(0)
   })
 
+  it('reports the tokens the wire trim reclaimed, not the pre-trim total', async () => {
+    // The trim rewrites history mid-array and pays for it with the provider's
+    // cached prefix, so its saving has to reach the numbers the loop decides on:
+    // `overflow` is estimate-only and forces a fold on its own. The history-total
+    // cache used to key on (length, tail identity), and `trimToolResults` returns a
+    // same-length array whose tail is the same object, so the post-trim re-count
+    // served the pre-trim total and the saving was invisible.
+    const body = 'lorem ipsum dolor sit amet '.repeat(230)
+    const toolResults = Array.from({ length: KEEP_LAST_TOOL_RESULTS + 2 }, (_, i) => ({
+      role: 'tool' as const,
+      toolName: 'read_file',
+      toolCallId: `t${i}`,
+      content: `RESULT-${i}:${body}`
+    }))
+    const base = {
+      harness: 'harness',
+      messages: [{ role: 'user' as const, content: 'go' }, ...toolResults],
+      workspacePath: null,
+      goal: 'go',
+      model: { ...model, contextWindow: 8_000 },
+      toolsJsonEstimate: 50,
+      providerId: 'ollama' as const
+    }
+    const untrimmed = await assembleContext({ ...base, proactiveThreshold: 1_000_000 })
+    const trimmed = await assembleContext({ ...base, proactiveThreshold: 1 })
+
+    expect(trimmed.estimatedTokens).toBeLessThan(untrimmed.estimatedTokens)
+    expect(trimmed.layers.history).toBeLessThan(untrimmed.layers.history)
+    expect(trimmed.detail?.messages).toBe(trimmed.layers.history)
+    // Layers still sum to the reported total after the second measurement.
+    expect(
+      trimmed.layers.system + trimmed.layers.history + trimmed.layers.tools
+    ).toBe(trimmed.estimatedTokens)
+  })
+
   it('reuses stable prefix cache when only volatile session env changes', async () => {
     const { clearSystemPromptCache } = await import('@main/agent/context/assemble')
     clearSystemPromptCache()
@@ -604,6 +639,84 @@ describe('assembleContext integration', () => {
     expect(folded.systemStable).toContain('Folded billing work')
     expect(folded.systemStable).not.toContain('Folded auth work')
     expect(folded.systemStable).not.toBe(second.systemStable)
+  })
+
+  it('keeps a prefix per run, so two interleaved runs both keep hitting', async () => {
+    // Instances exist for parallelism, so assembles from different runs interleave.
+    // With a single cache slot each one evicted the other and the hit rate went to
+    // zero exactly when parallelism was in use.
+    const { clearSystemPromptCache, systemPromptCacheStats } = await import(
+      '@main/agent/context/assemble'
+    )
+    clearSystemPromptCache()
+    const base = {
+      messages: [{ role: 'user' as const, content: 'hi' }],
+      workspacePath: null as string | null,
+      goal: 'hi',
+      model,
+      toolsJsonEstimate: 50,
+      providerId: 'ollama' as const
+    }
+    const runA = { ...base, harness: '## Role\nParent run' }
+    const runB = { ...base, harness: '## Role\nInstance child' }
+
+    const a1 = await assembleContext(runA)
+    await assembleContext(runB)
+    const a2 = await assembleContext(runA)
+
+    expect(a2.systemStable).toBe(a1.systemStable)
+    // Two distinct prefixes were built, and run A's third assemble was served.
+    expect(systemPromptCacheStats()).toMatchObject({ misses: 2, hits: 1, size: 2 })
+
+    // Bounded: an entry holds a whole stable prompt, so the map must not grow with
+    // every fingerprint it has ever seen.
+    for (let i = 0; i < 20; i++) {
+      await assembleContext({ ...base, harness: `## Role
+Run ${i}` })
+    }
+    expect(systemPromptCacheStats().size).toBeLessThanOrEqual(8)
+  })
+
+  it('names the system sections it cut, instead of dropping them silently', async () => {
+    // A prompt that quietly lost its skills list looked identical to one that never
+    // had them, so the only symptom was a model ignoring tools nothing told it about.
+    // A 1k window gives a 120-token system share: the harness takes its 75% and the
+    // contract is capped to what is left, so the sections after them arrive under the
+    // 50-token floor and are dropped.
+    // Note a verbatim plan cannot produce this — PLAN_VERBATIM_TAIL_RESERVE floors
+    // the tail at 30% of the share precisely so these sections survive one.
+    const { clearSystemPromptCache } = await import('@main/agent/context/assemble')
+    const { logger } = await import('@shared/logger')
+    clearSystemPromptCache()
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    try {
+      const result = await assembleContext({
+        harness: `## Role\n${'agent role detail '.repeat(4000)}`,
+        contract: `## Goal\n${'contract detail '.repeat(4000)}`,
+        skillsSection: '<available_skills>\nSKILL_CANARY\n</available_skills>',
+        mcpSection: '<mcp_servers>\nMCP_CANARY\n</mcp_servers>',
+        messages: [{ role: 'user' as const, content: 'hi' }],
+        workspacePath: null,
+        goal: 'hi',
+        model: { ...model, contextWindow: 1_000 },
+        toolsJsonEstimate: 10,
+        providerId: 'ollama'
+      })
+      expect(result.system).not.toContain('SKILL_CANARY')
+      expect(result.system).not.toContain('MCP_CANARY')
+
+      const cut = warn.mock.calls.filter(([message]) =>
+        String(message).includes('System prompt sections cut')
+      )
+      // One line for the whole prompt: once the floor trips every remaining section
+      // is dropped, so a warn per call site would report one cause nine times.
+      expect(cut).toHaveLength(1)
+      const fields = cut[0]?.[1] as { scope?: string; dropped?: string[] }
+      expect(fields?.scope).toBe('assemble')
+      expect(fields?.dropped).toEqual(expect.arrayContaining(['skills', 'mcpServers']))
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('keeps the compaction age line byte-stable across clock advances (provider prefix cache)', async () => {

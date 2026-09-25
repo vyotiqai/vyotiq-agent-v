@@ -85,8 +85,22 @@ export const ALLOWED_LOG_FIELD_KEYS = new Set([
   'bytes',
   'systemBudget',
   'planTokens',
-  'reserve'
+  'reserve',
+  /** MCP transport kind (`stdio` / `http` / `sse`), never a URL or command. */
+  'transport'
 ])
+
+/**
+ * Numbers and booleans cannot carry a path, tool argument, chat text or file
+ * name, so they pass under any code-shaped key without being allowlisted.
+ * Requiring each counter by name silently stripped the numbers from lines that
+ * exist to report them: `Code index warm sync` kept `removed` and lost
+ * scanned/indexed/skipped, `MCP server connected` lost every count, and the
+ * run usage summary lost its tokens and cost. The key must still look like an
+ * identifier, so a key spread in from user data (`{ 'src/payroll.ts': 3 }`) is
+ * dropped with its value.
+ */
+const COUNTER_KEY = /^[a-z][A-Za-z0-9]*$/
 
 const PATH_IN_TEXT =
   /(?:[A-Za-z]:\\|\\\\|\/(?:Users|home|root|tmp|var)\/)[^\s"',})\]]+/g
@@ -195,7 +209,12 @@ export function sanitizeLogFields(fields?: PolicyLogFields): PolicyLogFields | u
   if (!fields) return undefined
   const out: PolicyLogFields = {}
   for (const [key, value] of Object.entries(fields)) {
-    if (!ALLOWED_LOG_FIELD_KEYS.has(key)) continue
+    if (!ALLOWED_LOG_FIELD_KEYS.has(key)) {
+      if ((typeof value === 'number' || typeof value === 'boolean') && COUNTER_KEY.test(key)) {
+        out[key] = value
+      }
+      continue
+    }
     if (key === 'err') {
       const sanitized = sanitizeErrorForLog(value)
       if (sanitized) out.err = sanitized

@@ -956,7 +956,10 @@ describe('executeStepToolCalls', () => {
     expect(order).toEqual(['todo_write', 'edit', 'read'])
   })
 
-  it('does not hoist todo_write in Plan mode', async () => {
+  // Hoisting is Agent-only (`agentMode === 'agent' ? hoistTodoWriteCalls(...)`).
+  // Plan used to be the non-Agent mode that still ran these tools; Ask is the
+  // one that remains, and executeTool is mocked here so no gate is exercised.
+  it('does not hoist todo_write outside Agent mode', async () => {
     const order: string[] = []
     executeTool.mockImplementation(async (name: string) => {
       order.push(name)
@@ -964,7 +967,7 @@ describe('executeStepToolCalls', () => {
     })
 
     const { ctx } = makeCtx(new AbortController().signal)
-    ctx.agentMode = 'plan'
+    ctx.agentMode = 'ask'
     await executeStepToolCalls(
       [
         { id: 'e1', name: 'edit', arguments: '{"path":"plan.md","contents":"# Plan\\n"}' },

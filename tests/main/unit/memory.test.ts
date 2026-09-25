@@ -30,9 +30,7 @@ import {
   readMemoryState,
   truncateMemoryExcerpt,
   writeMemoryFile,
-  memoryRoot,
-  memoryNamespaceExists,
-  clearMemoryNamespace
+  memoryRoot
 } from '@main/agent/context/memory'
 import {
   normalizeMemoryRelPath,
@@ -189,63 +187,6 @@ describe('memory store', () => {
     expect(out).toContain('index.md coverage: 1/1 notes — full')
     expect(out).not.toContain('not in index.md:')
     expect(out).not.toContain('indexed but missing on disk:')
-  })
-})
-
-describe('memory namespace surface for the Teammates pane', () => {
-  let dir: string
-
-  afterEach(() => {
-    if (dir) rmSync(dir, { recursive: true, force: true })
-  })
-
-  it('reports whether a namespace has been written to', () => {
-    dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-ns-'))
-    // The panel needs to tell "never ran" apart from "ran and remembers
-    // nothing" — otherwise it offers to edit files that do not exist.
-    expect(memoryNamespaceExists(dir, 'scout')).toBe(false)
-    ensureMemoryLayout(dir, 'scout')
-    expect(memoryNamespaceExists(dir, 'scout')).toBe(true)
-    // Namespaces are independent: one teammate running says nothing about another.
-    expect(memoryNamespaceExists(dir, 'ops')).toBe(false)
-  })
-
-  it('clears one namespace without touching another teammate or the shared brain', () => {
-    dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-ns-'))
-    writeMemoryFile(dir, 'notes/a.md', '# scout\n', 'scout')
-    writeMemoryFile(dir, 'notes/b.md', '# ops\n', 'ops')
-    writeMemoryFile(dir, 'notes/c.md', '# shared\n')
-
-    expect(clearMemoryNamespace(dir, 'scout')).toBe(true)
-
-    expect(memoryNamespaceExists(dir, 'scout')).toBe(false)
-    expect(readMemoryFile(dir, 'notes/b.md', 'ops')).toContain('ops')
-    expect(readMemoryFile(dir, 'notes/c.md')).toContain('shared')
-  })
-
-  it('keeps the workspace override file, which is a sibling not a child', () => {
-    // `removeProfileArtifactsForWorkspaces({ purgeMemory: true })` removes both;
-    // clearing what a teammate remembers must not discard how a project
-    // retuned it.
-    dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-ns-'))
-    writeMemoryFile(dir, 'notes/a.md', '# scout\n', 'scout')
-    const override = join(dir, '.vyotiq', 'agents', 'scout.profile.json')
-    writeFileSync(override, '{"tone":"terse"}', 'utf8')
-
-    clearMemoryNamespace(dir, 'scout')
-
-    expect(existsSync(override)).toBe(true)
-  })
-
-  it('answers false when there was nothing to clear', () => {
-    dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-ns-'))
-    expect(clearMemoryNamespace(dir, 'scout')).toBe(false)
-  })
-
-  it('refuses an unsafe namespace before it becomes a path segment', () => {
-    dir = mkdtempSync(join(tmpdir(), 'vyotiq-mem-ns-'))
-    expect(() => clearMemoryNamespace(dir, '../..')).toThrow(/Invalid memory namespace/)
-    expect(() => memoryNamespaceExists(dir, '../..')).toThrow(/Invalid memory namespace/)
   })
 })
 

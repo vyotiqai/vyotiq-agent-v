@@ -1,1 +1,0 @@
-export { TeammatesView } from './TeammatesView'

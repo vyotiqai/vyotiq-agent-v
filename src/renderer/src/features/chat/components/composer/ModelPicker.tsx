@@ -447,7 +447,7 @@ export function ModelPicker({
             }}
             onKeyDown={onListKeyDown}
           >
-            <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
+            <div className="flex shrink-0 items-center gap-1 border-b border-border/40 px-2 py-1.5">
               <div className="min-w-0 flex-1">
                 <SearchInput
                   ref={searchRef}
@@ -478,12 +478,12 @@ export function ModelPicker({
             </div>
 
             {browsedWarning ? (
-              <p className="m-0 shrink-0 border-b border-border bg-surface px-3 py-1.5 text-2xs leading-snug text-muted">
+              <p className="m-0 shrink-0 border-b border-border/40 bg-surface px-3 py-1.5 text-2xs leading-snug text-muted">
                 {browsedWarning}
               </p>
             ) : null}
 
-            <div className="sidebar-scroll-x flex shrink-0 gap-1 border-b border-border px-2 py-1.5">
+            <div className="sidebar-scroll-x flex shrink-0 gap-1 border-b border-border/40 px-2 py-1.5">
               {providers.length === 0 ? (
                 <p className="m-0 px-1 py-1 text-xs text-muted">
                   No providers configured — open Settings → Providers
@@ -589,7 +589,7 @@ export function ModelPicker({
             </ul>
 
             {supportedTiers.length > 0 ? (
-              <div className="shrink-0 border-t border-border px-3 py-2">
+              <div className="shrink-0 border-t border-border/40 px-3 py-2">
                 <p className="mb-1.5 text-2xs font-medium uppercase tracking-wide text-secondary">
                   Speed
                 </p>

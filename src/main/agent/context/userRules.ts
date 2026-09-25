@@ -20,11 +20,6 @@ export function formatUserRules(rules: readonly UserRule[]): string {
 }
 
 export type ResponseStyleInput = {
-  /**
-   * Display name of the bound teammate profile. Present only for a run bound
-   * to a teammate, and fixed for that run's lifetime.
-   */
-  teammateName?: string
   /** User-set assistant name. Empty = the assistant is left unnamed. */
   persona?: string
   /** User-set identity blurb. Empty = no identity is asserted. */
@@ -44,32 +39,16 @@ export type ResponseStyleInput = {
  * user's own, and an unconfigured assistant emits no section at all.
  */
 export function formatResponseStyle(input: ResponseStyleInput): string {
-  const teammateName = input.teammateName?.trim() ?? ''
   const persona = input.persona?.trim() ?? ''
   const identity = input.identity?.trim() ?? ''
   const tone = input.tone?.trim() ?? ''
   const language = input.responseLanguage?.trim() ?? ''
   const verbosity = input.responseVerbosity ?? 'concise'
   const lines: string[] = []
-  // The name anchors everything below it, so it leads.
-  if (teammateName) {
-    lines.push(
-      `Name: you are "${teammateName}", a teammate in this workspace with your own persistent memory. ` +
-        'Use this name when you refer to yourself; it overrides the default assistant name.'
-    )
-  }
   if (identity) lines.push(`Identity: ${identity}`)
   if (persona) {
-    // A bound teammate has a real name of its own, so the name slot is already
-    // spoken for and `persona` can mean what its own editor says it means —
-    // "What it is: the role it plays". Without this split a teammate was told
-    // its *name* was a sentence describing its job, because loop.ts routes the
-    // profile's persona through `settings.agentPersona`, which for an unbound
-    // chat is the name the user typed in Settings → Agent → Persona.
     lines.push(
-      teammateName
-        ? `Role: ${persona}`
-        : `Identity: this assistant is "${persona}"; that name overrides the default assistant name.`
+      `Identity: this assistant is "${persona}"; that name overrides the default assistant name.`
     )
   }
   if (tone) lines.push(`Tone: apply this tone in replies: "${tone}".`)

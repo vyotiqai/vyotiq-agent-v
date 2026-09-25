@@ -89,9 +89,12 @@ describe('create_plan', () => {
       }),
       workspace,
       new AbortController().signal,
-      { runDir, agentMode: 'plan' }
+      { runDir, agentMode: 'agent' }
     )
     expect(result.ok).toBe(true)
+    // The prompt keeps the plan it read when the invoke started, so the result
+    // names the one line the file adds to what the model sent.
+    expect(result.content).toContain('Wrote plan.md under `# Ship the planner`.')
     const plan = readFileSync(join(runDir, 'plan.md'), 'utf8')
     expect(plan).toMatch(/^# Ship the planner/m)
     expect(plan).toContain('## Steps')
@@ -108,7 +111,7 @@ describe('create_plan', () => {
       JSON.stringify({ title: 'Ship the planner', plan: DEFAULT_PLAN_STUB }),
       workspace,
       new AbortController().signal,
-      { runDir, agentMode: 'plan' }
+      { runDir, agentMode: 'agent' }
     )
     expect(result.ok).toBe(false)
     expect(result.content).toMatch(/real plan|empty stub/i)
@@ -121,7 +124,7 @@ describe('create_plan', () => {
       JSON.stringify({ title: 'Ship the planner', plan: COMPLETE_PLAN }),
       workspace,
       new AbortController().signal,
-      { runDir, agentMode: 'plan' }
+      { runDir, agentMode: 'agent' }
     )
     expect(result.ok).toBe(true)
     expect(result.content).not.toMatch(/Quality feedback/)
@@ -134,7 +137,7 @@ describe('create_plan', () => {
       JSON.stringify({ title: 'Quick fix', plan: SIMPLE_PLAN }),
       workspace,
       new AbortController().signal,
-      { runDir, agentMode: 'plan' }
+      { runDir, agentMode: 'agent' }
     )
     expect(result.ok).toBe(true)
     expect(result.content).toMatch(/Quality feedback \(advisory/)
@@ -151,7 +154,7 @@ describe('create_plan', () => {
       }),
       workspace,
       new AbortController().signal,
-      { runDir, agentMode: 'plan' }
+      { runDir, agentMode: 'agent' }
     )
     expect(result.ok).toBe(true)
     expect(existsSync(join(runDir, 'plan.md'))).toBe(true)
@@ -164,7 +167,7 @@ describe('create_plan', () => {
       JSON.stringify({ plan: `# My Title\n\n${SIMPLE_PLAN}` }),
       workspace,
       new AbortController().signal,
-      { runDir, agentMode: 'plan' }
+      { runDir, agentMode: 'agent' }
     )
     expect(result.ok).toBe(true)
     expect(result.summary).toBe('My Title')
@@ -180,7 +183,7 @@ describe('create_plan', () => {
       JSON.stringify({ plan: SIMPLE_PLAN }),
       workspace,
       new AbortController().signal,
-      { runDir, agentMode: 'plan' }
+      { runDir, agentMode: 'agent' }
     )
     expect(result.ok).toBe(false)
     expect(result.content).toContain('requires title')

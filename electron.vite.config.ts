@@ -168,6 +168,15 @@ export default defineConfig(({ mode }) => {
         // pruneSupersededRendererAssets collects them once they are old enough,
         // and `pack:*` clears the tree outright so no installer ships them.
         emptyOutDir: false,
+        // A budget in place of Vite's 500 kB default, which is a download-size
+        // heuristic for websites: this renderer loads from local disk, so it
+        // warned on every build and was ignored. The entry chunk is the first
+        // screen (chat surface, react-dom, the icon set, zod) at ~1.52 MB, and
+        // every other chunk over 500 kB is one vendor library that already
+        // loads on demand (mermaid's parser and core, CodeMirror, cytoscape).
+        // 1.7 MB leaves the entry room to grow and still warns if any lazy
+        // library — even katex, the smallest at ~0.26 MB — is pulled into it.
+        chunkSizeWarningLimit: 1700,
         rollupOptions: {
           output: {
             manualChunks(id) {

@@ -16,7 +16,7 @@ Collect merged commits and pull requests in that window, authored by the user un
 
 Collect the user's assigned issues from the connected tracker with their current state, and note anything that moved.
 
-Write three short sections: shipped, in flight, blocked. One line each, in plain language a teammate outside the codebase can follow. Name the user-visible effect, not the refactor.
+Write three short sections: shipped, in flight, blocked. One line each, in plain language a colleague outside the codebase can follow. Name the user-visible effect, not the refactor.
 
 Flag anything that looks stalled — an open pull request with no review, an in-progress issue with no commits in the window — as a candidate blocker, and say why you think so.
 

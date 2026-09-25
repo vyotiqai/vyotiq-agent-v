@@ -41,7 +41,6 @@ export type SectionId =
   | 'parallelism'
   | 'environment'
   | 'persistence'
-  | 'teammates'
   | 'extensibility'
 
 export type Claim = {
@@ -113,18 +112,11 @@ export const CLAIMS: Claim[] = [
     body: 'Read-only. The agent can search and read the repository and answer questions, but cannot edit files, run the terminal or touch git. Use it to understand code you did not write.'
   },
   {
-    id: 'M2',
-    approved: true,
-    section: 'modes',
-    title: 'Plan',
-    body: 'Investigates, then writes a plan you approve before anything changes. The plan is a real artefact in the run, not a throwaway message.'
-  },
-  {
     id: 'M3',
     approved: true,
     section: 'modes',
     title: 'Agent',
-    body: 'Full catalog. Edits files, runs commands, commits, opens pull requests. Per-tool approval decides what it may do without asking first.'
+    body: 'Full catalog. Investigates, writes a plan as a real artefact in the run, then edits files, runs commands, commits and opens pull requests. Per-tool approval decides what it may do without asking first.'
   },
 
   /* -- /features · runs ---------------------------------------------------- */
@@ -242,51 +234,6 @@ export const CLAIMS: Claim[] = [
     title: 'Workspace memory',
     body: 'Notes kept under .vyotiq/memory/ in the repository and re-read on later runs, so context you established once does not have to be re-explained.'
   },
-  /* Superseded by the teammates section, which says all of this in parts. */
-  {
-    id: 'S2',
-    approved: false,
-    section: 'persistence',
-    title: 'Teammates',
-    body: 'Persistent agent identities with their own private memory, a pinned model and their own delegated tasks. They survive restarts and pick interrupted work back up.'
-  },
-
-  /* -- teammates ----------------------------------------------------------
-     Every claim below is grounded in docs/teammates.md, which states it
-     reflects implemented behaviour rather than intent. Note what is NOT
-     claimed: nothing here says a teammate works while the application is
-     closed. Per that document's own limitations, a locally scheduled task
-     cannot start with the app fully shut, and away-mode cloud execution is
-     not shipped. */
-  {
-    id: 'T1',
-    approved: true,
-    section: 'teammates',
-    title: 'An identity, not a session',
-    body: 'A teammate has its own persona, tone and an optional pinned model, and it outlives any one conversation. Runs record which teammate they belonged to, so a restart picks the identity back up rather than starting over as a stranger.'
-  },
-  {
-    id: 'T2',
-    approved: true,
-    section: 'teammates',
-    title: 'Memory of its own',
-    body: 'Each teammate keeps a private memory tree per workspace, under .vyotiq/agents/. Two teammates in the same repository never read each other’s notes, and neither one writes into the shared workspace brain.'
-  },
-  {
-    id: 'S3',
-    approved: true,
-    section: 'teammates',
-    title: 'Work you hand over',
-    body: 'Assign a teammate a task now or schedule it for later. The queue is written to disk before it is acknowledged, so it survives a restart, and every task keeps the link back to its own transcript.'
-  },
-  {
-    id: 'T3',
-    approved: true,
-    section: 'teammates',
-    title: 'One run at a time, and honest about it',
-    body: 'A teammate is single-threaded by design, so a delegated task and a chat can never interleave writes to one memory. A task cut short by a restart is reported as failed and waits for you to retry it, rather than quietly running a second time.'
-  },
-
   /* -- /features · extensibility ------------------------------------------- */
   {
     id: 'X1',
@@ -308,6 +255,18 @@ export const CLAIMS: Claim[] = [
     section: 'extensibility',
     title: 'Rules',
     body: 'Per-workspace standing instructions under .vyotiq/rules/ that apply to every run in that repository.'
+  },
+  /* Grounded in docs/agent-tools.md plus the approval bounds recorded above
+     `build_tool` in APPROVED_TOOLS. Says the agent can write itself a tool and
+     that nothing it writes runs unseen; claims no sandbox — the module runs
+     with full Node privileges in the utility process and approval is the
+     control. */
+  {
+    id: 'X4',
+    approved: true,
+    section: 'extensibility',
+    title: 'Tools it writes for itself',
+    body: 'The agent can write a new tool for itself and use it from the next step like any built-in. What it writes is a Node module that executes in an isolated utility process and stays available to later runs. Nothing runs unseen: the code is on the approval card when the tool is written, and every call whose file changed shows an approval card again.'
   },
   {
     id: 'H2',
@@ -354,7 +313,7 @@ const SECTION_META: {
   {
     id: 'modes',
     eyebrow: 'Modes',
-    title: 'Three levels of autonomy',
+    title: 'Two levels of autonomy',
     body: 'Each mode exposes a different slice of the tool catalog. Switch between them mid-run without losing the conversation.',
     lead: true,
     pages: ['features']
@@ -380,14 +339,6 @@ const SECTION_META: {
     eyebrow: 'Your environment',
     title: 'Your tools, and an index of your code',
     pages: ['features']
-  },
-  {
-    id: 'teammates',
-    eyebrow: 'Teammates',
-    title: 'Agents with a name, a memory and a queue',
-    body: 'Instances are the hands. A teammate is the who — it persists across sessions, keeps its own memory, and takes work you hand it.',
-    pages: ['home', 'features'],
-    display: { home: 'cards' }
   },
   {
     id: 'persistence',
@@ -480,24 +431,6 @@ export const USE_CASES: UseCase[] = [
     visual: 'incident'
   },
   {
-    id: 'U4',
-    approved: true,
-    featured: true,
-    /* Titled "routine" rather than "recurring", and the fourth bullet says each
-       task runs once. A delegated task carries a single optional scheduledAt
-       instant — there is no cron and no recurrence — so a title promising
-       recurring work would be read as a weekly standup that fires itself. */
-    title: 'Hand the routine work to a teammate',
-    bullets: [
-      'What shipped, what is in flight and what is blocked, assembled from git and your tracker.',
-      'Release notes written for the people who use the product, not scraped from commit subjects.',
-      'Set a goal and it works toward it across turns, pausing for you rather than running forever.',
-      'Queue a task for a named teammate now, or set it to start at a time you choose. Each one runs once.',
-      'Scheduled work runs while Agent V is open. There is no hosted service running it for you.'
-    ],
-    packages: ['standup-digest', 'release-notes', 'goal']
-  },
-  {
     id: 'U5',
     approved: true,
     featured: false,
@@ -538,95 +471,6 @@ export const USE_CASES: UseCase[] = [
   }
 ]
 
-/* --------------------------------------------------- teammate scenarios - */
-
-/**
- * When a teammate is worth the ceremony, written as the situation you are in
- * rather than the feature that answers it.
- *
- * Source is docs/teammates.md §16, whose header states it describes implemented
- * behaviour. The doc's own vocabulary is not always safe to lift: it titles one
- * of these "Recurring ops teammate", but a delegated task carries a single
- * optional scheduledAt instant and there is no cron, so W3 says outright that
- * each task runs once.
- *
- * `limit` is a field rather than a footnote on the section. Every constraint
- * here comes from §15 or §10 and belongs to one specific scenario — the closed
- * app to the scheduled one, the hand-authored file to the per-repository one.
- * Attaching it to the claim means the qualifier cannot drift away from the
- * thing it qualifies, or be dropped by a later edit that keeps the promise.
- */
-export type TeammateScenario = {
-  /** Stable handle. Quoted in review and in build errors; never rendered. */
-  id: string
-  /** false hides it from the site without discarding the copy. */
-  approved: boolean
-  /** The situation, in the reader's terms. */
-  when: string
-  /** What a teammate does about it. */
-  then: string
-  /** The constraint that keeps `then` honest. Rendered, never decorative. */
-  limit?: string
-}
-
-export const TEAMMATE_SCENARIOS: TeammateScenario[] = [
-  {
-    id: 'W1',
-    approved: true,
-    when: 'You keep re-explaining the same conventions',
-    then: 'Give the project its own teammate. It keeps a private memory tree per workspace, so what you established once is still there in the next session.',
-    limit: 'Two teammates in one repository never read each other’s notes, and neither writes into the shared workspace brain.'
-  },
-  {
-    id: 'W2',
-    approved: true,
-    when: 'You want work happening while you are away from the desk',
-    then: 'Assign a task now, or set it to start at a time you choose. When it needs a decision it notifies you rather than hanging silently.',
-    limit: 'Agent V has to still be running. A scheduled task cannot start with the application fully closed — that would need a hosted service, and there is not one.'
-  },
-  {
-    id: 'W3',
-    approved: true,
-    when: 'Friday’s release steps are the same every week',
-    then: 'Queue them up front. One teammate runs one task at a time, in order, and the queue is written to disk before it is acknowledged, so it survives a restart.',
-    limit: 'Each task runs once. There is no repeating schedule — you queue the next set yourself.'
-  },
-  {
-    id: 'W4',
-    approved: true,
-    when: 'A long run died when something restarted',
-    then: 'Switch on auto-resume and a teammate-bound run picks itself back up at launch, with its identity, checkpoints and memory intact.',
-    limit: 'A delegated task cut short by a restart is reported as failed instead, and waits for you to retry it, so a half-finished job never quietly runs twice.'
-  },
-  {
-    id: 'W5',
-    approved: true,
-    when: 'You want to leave a chat running and come back to it',
-    then: 'A chat message behaves like a task: you get a notification when it needs you, you can watch the browser it drives, and Stop always works.'
-  },
-  {
-    id: 'W6',
-    approved: true,
-    when: 'One client repository needs a different tone',
-    then: 'Commit a profile override into that repository, and everyone working in it gets the same house tone.',
-    limit: 'That file is hand-authored today. The edit dialog writes the global profile only.'
-  },
-  {
-    id: 'W7',
-    approved: true,
-    when: 'Not every job deserves your most expensive model',
-    then: 'Pin a strong model to one teammate and a cheap one to another. Their chats and tasks use it automatically, and a manual pick still wins.'
-  }
-]
-
-/**
- * The counterpart to the list above, from the same section's "Honest verdict".
- * It is deliberately not a scenario: the point of showing it is that it is the
- * case where the answer is no.
- */
-export const TEAMMATE_NOT_WORTH_IT =
-  'Not worth the ceremony when the work is a one-off you can explain fully in a single chat. A teammate earns its keep when you are repeating yourself, running workstreams that should not share a brain, or want work moving while you are away.'
-
 /** Blurbs for the tool-catalog groups. The grouping logic lives in tools.ts. */
 export const TOOL_GROUP_BLURBS: Record<string, string> = {
   'Files & code': 'Read, search and edit the working tree directly.',
@@ -639,6 +483,8 @@ export const TOOL_GROUP_BLURBS: Record<string, string> = {
   MCP: 'Discover and pin tools, resources and prompts from connected MCP servers.',
   Skills: 'Load an enabled marketplace skill or plugin rule set into the run.',
   'Agent instances': 'Fan work out to child runs on their own git worktree, then merge back.',
+  'Agent-written tools':
+    'build_tool writes a Node module that later executes in an isolated utility process.',
   'Planning & memory': 'Track work, set goals, switch modes and keep notes across runs.'
 }
 
@@ -724,19 +570,6 @@ export const APPROVED_TOOLS: string[] = [
   'memory_list',
   'memory_read',
   'memory_write',
-  // teammates — the agent creates and directs durable identities of its own.
-  // Approved knowing what it claims: a run can create a teammate that never
-  // asks before running tools, and hand it work. That is the documented
-  // decision, not an oversight, and the high-risk gate (edits, deletes,
-  // terminal, commits, patches, connected servers) holds for every teammate
-  // whatever its autonomy is set to. The site may say the agent runs the team;
-  // it may not imply the team runs unsupervised.
-  'teammate_list',
-  'teammate_create',
-  'teammate_update',
-  'teammate_delete',
-  'teammate_assign_task',
-  'teammate_task',
   // agent-written tools — a run writes a module that later executes as Node in
   // a utility process. Approved because the claim is bounded by an approval
   // card on every call whose file changed, and by Node builtins only. The site
@@ -800,7 +633,6 @@ export const APPROVED_PACKAGES: Record<string, string> = {
   'write-tests': 'Write tests',
   'explain-code': 'Explain code',
   'create-skill': 'Create skill',
-  'create-teammate': 'Create teammate',
   goal: 'Goal',
   'frontend-design': 'Frontend design',
   accessibility: 'Accessibility',
@@ -910,14 +742,6 @@ function assertConsistent(): void {
     problems.push('no use case is approved, which would leave /use-cases empty — remove the route instead')
   }
 
-  const scenarioIds = new Set<string>()
-  for (const scenario of TEAMMATE_SCENARIOS) {
-    if (scenarioIds.has(scenario.id)) {
-      problems.push(`two teammate scenarios share the id ${scenario.id}`)
-    }
-    scenarioIds.add(scenario.id)
-  }
-
   if (problems.length > 0) {
     throw new Error(
       `\n\n  landing/src/lib/showcase.ts does not hold together:\n\n` +
@@ -1000,11 +824,6 @@ function sectionsFor(page: Page): ShowcaseSection[] {
     }))
     .filter((section) => section.claims.length > 0)
 }
-
-/** Approved teammate scenarios. An empty list drops the section entirely. */
-export const LIVE_TEAMMATE_SCENARIOS: TeammateScenario[] = TEAMMATE_SCENARIOS.filter(
-  (s) => s.approved
-)
 
 /** Approved use cases, in declaration order. */
 export const LIVE_USE_CASES: UseCase[] = USE_CASES.filter((u) => u.approved)

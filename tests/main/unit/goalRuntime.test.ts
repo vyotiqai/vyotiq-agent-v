@@ -61,22 +61,16 @@ describe('goalRuntime', () => {
         consecutiveNoToolFinishes: 2
       })
     ).toBe('stop_wait')
+    // Was asserted for Plan, which behaved exactly like Agent here and is now
+    // merged into it. Ask is the only mode that diverges — covered below.
     expect(
       shouldAutoContinueActiveGoal({
         goalStatus: 'active',
-        agentMode: 'plan',
+        agentMode: 'agent',
         incomplete: false,
         consecutiveNoToolFinishes: 1
       })
     ).toBe('continue')
-    expect(
-      shouldAutoContinueActiveGoal({
-        goalStatus: 'active',
-        agentMode: 'plan',
-        incomplete: false,
-        consecutiveNoToolFinishes: 2
-      })
-    ).toBe('stop_wait')
     expect(
       shouldAutoContinueActiveGoal({
         goalStatus: 'active',

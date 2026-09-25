@@ -37,7 +37,7 @@ import { requestUpdatePanel } from './navigator/UpdateChip'
 import { buildNavigatorSections, type NavRow } from './navigator/navigatorModel'
 import { useNavigatorScope } from './navigator/useNavigatorScope'
 
-export type ShellView = 'chat' | 'settings' | 'marketplace' | 'teammates' | 'home' | 'usage'
+export type ShellView = 'chat' | 'settings' | 'marketplace' | 'home' | 'usage'
 
 export type AppShellProps = {
   view: ShellView

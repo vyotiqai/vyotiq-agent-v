@@ -254,6 +254,33 @@ describe('log policy (no user workspace data)', () => {
     expect(out.correlationId).toBe('abc123')
   })
 
+  it('keeps counters and flags under unlisted keys, but not their strings or path-shaped keys', () => {
+    // Verbatim fields of the `Code index warm sync` line, which reached disk
+    // as `{ removed: 0 }` because only `removed` was allowlisted.
+    const out = sanitizeLogFields({
+      scope: 'workspaceIndex',
+      workspace: 'C:\\Users\\me\\secret-project',
+      scanned: 1200,
+      indexed: 3,
+      skipped: 0,
+      removed: 0,
+      complete: true,
+      cursor: 'src/payroll.ts',
+      'src/payroll.ts': 3,
+      'secret-project': 1,
+      Payroll: 2,
+      nested: { count: 1 }
+    })
+    expect(out).toEqual({
+      scope: 'workspaceIndex',
+      scanned: 1200,
+      indexed: 3,
+      skipped: 0,
+      removed: 0,
+      complete: true
+    })
+  })
+
   it('keeps scrubbed providerMessage for HTTP diagnostics', () => {
     const out = sanitizeLogFields({
       scope: 'provider',

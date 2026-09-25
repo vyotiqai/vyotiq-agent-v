@@ -689,10 +689,9 @@ describe('ChatView composer placement', () => {
     render(
       <ChatView
         {...baseProps}
-        agentMode="plan"
         activeRunId="run-1"
         running
-        items={[]}
+        items={[CREATE_PLAN_ITEM]}
       />
     )
     await act(async () => {

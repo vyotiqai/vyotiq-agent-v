@@ -32,7 +32,6 @@ const CHECK_MAX_CHARS = 500
 
 const MODE_NOTE: Record<AgentInteractionMode, string> = {
   agent: 'Plans, edits files and runs commands in the workspace',
-  plan: 'Writes the plan and its checks, and edits nothing else',
   ask: 'Reads and answers — changes nothing'
 }
 

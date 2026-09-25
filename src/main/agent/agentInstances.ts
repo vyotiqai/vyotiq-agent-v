@@ -8,6 +8,7 @@ import { IPC } from '../../shared/channels'
 import { formatAgentInstanceLabel } from '../../shared/utils/agentInstance'
 import { logger } from '../../shared/logger'
 import { abortError } from '../../shared/errors'
+import { AWAIT_AGENT_INSTANCE_MAX_MS } from './schemas/tools'
 import { getMainWindow } from '../app/window'
 import {
   addInstanceWorktree,
@@ -229,16 +230,13 @@ function capChildText(text: string, max: number): string {
 }
 
 /**
- * `noun` exists because delegated teammate tasks read back through this same
- * function. The body — the run's last assistant message plus what it wrote — is
- * identical for both; only the bare fallback, reached when a run produced
- * neither, would otherwise call a teammate's task an "Instance".
+ * `noun` labels the bare fallback — reached when a run produced neither a final
+ * message nor a write record.
  */
 function formatChildSummary(
   workspacePath: string,
   childRunId: string,
-  messages: ChatMessage[],
-  noun = 'Instance'
+  messages: ChatMessage[]
 ): string {
   const runDir = resolveRunDir(workspacePath, childRunId)
   const status = loadStatus(runDir)
@@ -255,21 +253,19 @@ function formatChildSummary(
   const wroteBlock = formatWroteFilesBlock(wroteFilesFromReceipt(runDir))
   if (wroteBlock) parts.push(wroteBlock)
   if (parts.length > 0) return parts.join('\n\n')
-  if (status?.status === 'cancelled') return `${noun} cancelled.`
-  if (status?.status === 'error') return status.error ?? `${noun} failed.`
-  return `${noun} finished.`
+  if (status?.status === 'cancelled') return 'Instance cancelled.'
+  if (status?.status === 'error') return status.error ?? 'Instance failed.'
+  return 'Instance finished.'
 }
 
 export async function summarizeChildRunAsync(
   workspacePath: string,
-  childRunId: string,
-  noun?: string
+  childRunId: string
 ): Promise<string> {
   const summary = formatChildSummary(
     workspacePath,
     childRunId,
-    await loadMessagesAsync(workspacePath, childRunId),
-    noun
+    await loadMessagesAsync(workspacePath, childRunId)
   )
   return capChildText(summary, CHILD_SUMMARY_MAX_CHARS)
 }
@@ -397,7 +393,9 @@ export function waitForChildTerminal(
       cleanup()
       reject(
         new Error(
-          `Timed out waiting for ${formatAgentInstanceLabel(childRunId)}. Child is still running — use cancel_agent_instance to stop it, await again with a longer timeout_ms, or pull_agent_instance.`
+          `Timed out waiting for ${formatAgentInstanceLabel(childRunId)} after ${timeoutMs} ms. ` +
+            `Child is still running. Each await_agent_instance call waits at most ${AWAIT_AGENT_INSTANCE_MAX_MS} ms — timeout_ms is capped there, so a longer timeout_ms cannot extend a single wait. ` +
+            'Await again to start another wait, use cancel_agent_instance to stop the child, or pull_agent_instance for its current state.'
         )
       )
     }, timeoutMs)

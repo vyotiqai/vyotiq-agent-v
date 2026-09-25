@@ -889,10 +889,6 @@ svg {
   margin: 0;
 }
 
-.vy-cards-after-visual {
-  margin-top: clamp(1.5rem, 3vw, 2.5rem);
-}
-
 /* Use-case cards carry a bullet list rather than a sentence, so they want a
    wider track than the claim cards: three up in the shell rather than four. */
 .vy-uses {

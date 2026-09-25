@@ -156,7 +156,7 @@ export type ToolStepContext = {
   approval?: ToolApprovalGate
   /** ChatStart invoke that owns this step; scopes interactive cancel. */
   invokeId?: number
-  /** Ask / Plan / Agent for this invoke (mutable via switch_mode). */
+  /** Ask / Agent for this invoke (mutable via switch_mode). */
   agentMode?: AgentInteractionMode
   getAgentMode?: () => AgentInteractionMode
   setAgentMode?: (mode: AgentInteractionMode) => void | Promise<void>

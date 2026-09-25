@@ -73,14 +73,14 @@ describe('statusWriteQueue', () => {
   })
 
   it('flushes mode patches immediately', async () => {
-    enqueueStatusPatch(dir, { mode: 'plan' })
+    enqueueStatusPatch(dir, { mode: 'ask' })
     // Mode must not sit behind the 250ms coalesce timer (resume reads status.mode).
     await flushStatusWrites(dir)
 
     const after = JSON.parse(readFileSync(join(dir, 'status.json'), 'utf8')) as {
       mode?: string
     }
-    expect(after.mode).toBe('plan')
+    expect(after.mode).toBe('ask')
   })
 
   it('flushes terminal status immediately', async () => {

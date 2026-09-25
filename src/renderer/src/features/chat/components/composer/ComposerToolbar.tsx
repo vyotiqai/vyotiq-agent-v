@@ -9,7 +9,6 @@ import { ContextMeter, type ContextUsageState } from './ContextMeter'
 import { ComposerPlusButton } from './ComposerPlusButton'
 import { ModelPicker } from './ModelPicker'
 import { ModePicker } from './ModePicker'
-import { AgentProfilePicker } from './AgentProfilePicker'
 import { ThinkingControls } from './ThinkingControls'
 import { useResolvedContextUsage, useResolvedCostHint } from './useContextUsage'
 import { chromeIconButton, chromeLabelText } from './composerChrome'
@@ -146,9 +145,6 @@ export function ComposerToolbarTools({
   onModelPickerOpenChange,
   agentMode,
   onAgentModeChange,
-  agentProfileId,
-  workspacePath = null,
-  onAgentProfileChange,
   running,
   focusInput
 }: {
@@ -176,10 +172,6 @@ export function ComposerToolbarTools({
   onModelPickerOpenChange?: (open: boolean) => void
   agentMode: AgentInteractionMode
   onAgentModeChange: (mode: AgentInteractionMode) => void
-  agentProfileId?: string | null
-  /** Scope-gates the teammate picker: a workspace teammate cannot run elsewhere. */
-  workspacePath?: string | null
-  onAgentProfileChange?: (profileId: string | null) => void
   running: boolean
   focusInput?: () => void
 }) {
@@ -196,13 +188,6 @@ export function ComposerToolbarTools({
         onModeChange={onAgentModeChange}
         disabled={locked}
         running={running}
-        className="shrink-0"
-      />
-      <AgentProfilePicker
-        profileId={agentProfileId ?? null}
-        workspacePath={workspacePath}
-        onProfileChange={onAgentProfileChange ?? (() => {})}
-        disabled={locked}
         className="shrink-0"
       />
       <ModelPicker

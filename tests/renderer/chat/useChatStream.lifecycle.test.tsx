@@ -470,8 +470,8 @@ describe('useChatStream', () => {
       runId: 'run-1',
       onAgentModeChange
     })
-    controller.handleEvent({ type: 'mode_changed', runId: 'run-1', mode: 'plan' })
-    expect(onAgentModeChange).toHaveBeenCalledWith('plan')
+    controller.handleEvent({ type: 'mode_changed', runId: 'run-1', mode: 'ask' })
+    expect(onAgentModeChange).toHaveBeenCalledWith('ask')
     controller.dispose()
   })
 

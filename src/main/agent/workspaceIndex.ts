@@ -16,6 +16,7 @@ import { legacyCodeindexRoot, legacySparsegrepRoot } from './indexStoragePaths'
 import { isAbortError } from '../../shared/errors'
 import { logger } from '../../shared/logger'
 import { logErrorSummary } from '../../shared/utils/logPolicy'
+import { workspaceIdFromPath } from '../../shared/utils/workspaceId'
 import {
   activeIndexJobPreemptSignal,
   dropPendingByCoalesceKey,
@@ -132,7 +133,7 @@ export function warmWorkspaceIndexes(
   if (isHeapPressureHigh()) {
     logger.debug('Workspace index warm skipped under heap pressure', {
       scope: 'workspaceIndex',
-      workspace: workspaceRoot
+      workspaceId: workspaceIdFromPath(workspaceRoot)
     })
     return
   }
@@ -148,7 +149,11 @@ export function warmWorkspaceIndexes(
       const signal = combineSignals(disposeSignal, activeIndexJobPreemptSignal())
       try {
         throwIfAborted(signal)
-        logger.debug('Workspace index warm started', { scope: 'workspaceIndex', warmCodeIndex })
+        logger.debug('Workspace index warm started', {
+          scope: 'workspaceIndex',
+          workspaceId: workspaceIdFromPath(workspaceRoot),
+          warmCodeIndex
+        })
         throwIfAborted(signal)
         if (!warmCodeIndex) {
           clearIndexSyncProgress()
@@ -163,7 +168,7 @@ export function warmWorkspaceIndexes(
           const changed = sync.indexed > 0 || sync.removed > 0
           ;(changed ? logger.info.bind(logger) : logger.debug.bind(logger))('Code index warm sync', {
             scope: 'workspaceIndex',
-            workspace: workspaceRoot,
+            workspaceId: workspaceIdFromPath(workspaceRoot),
             scanned: sync.scanned,
             indexed: sync.indexed,
             skipped: sync.skipped,

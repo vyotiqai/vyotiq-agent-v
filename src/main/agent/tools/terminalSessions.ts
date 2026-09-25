@@ -6,6 +6,7 @@ import {
   formatTerminalSessionOutput,
   killProcessTree,
   killProcessTreeAndWait,
+  normalizeChildExitCode,
   resolveTerminalShell,
   sanitizedTerminalEnv,
   stripPowerShellPatternNoise,
@@ -470,7 +471,7 @@ export async function startBackgroundTerminal(
   child.on('close', (code) => {
     session.running = false
     session.finishedAt = Date.now()
-    session.exitCode = code
+    session.exitCode = normalizeChildExitCode(code)
     if (session.status === 'running' || session.status === 'pattern_matched') {
       session.status = matchesPattern(session) ? 'pattern_matched' : 'done'
     }

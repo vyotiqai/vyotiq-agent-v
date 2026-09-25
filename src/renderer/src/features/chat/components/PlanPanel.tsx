@@ -319,15 +319,6 @@ function ReceiptSummary({
   )
 }
 
-function receiptToolFailHint(receipt: RunReceipt): string | null {
-  const { toolStats, failureClusters } = receipt
-  if (toolStats.failed <= 0) return null
-  const top = failureClusters[0]?.key
-  return top
-    ? `${toolStats.failed} tool failure${toolStats.failed === 1 ? '' : 's'} · ${top}`
-    : `${toolStats.failed} tool failure${toolStats.failed === 1 ? '' : 's'} — check receipt.json`
-}
-
 /**
  * The inspector's Plan tab: the plan document only. Its steps, the done-when
  * checks and the receipt already live in the record with live state; the
@@ -340,8 +331,6 @@ export const PlanPanel = memo(function PlanPanel({
   running = false,
   invokeId = null,
   active = true,
-  agentMode = 'agent',
-  onContinueInAgent,
   onOpenFile,
   className
 }: {
@@ -352,8 +341,6 @@ export const PlanPanel = memo(function PlanPanel({
   invokeId?: number | null
   /** False while the plan dock tab is CSS-hidden — skip mid-run polling. */
   active?: boolean
-  agentMode?: 'ask' | 'plan' | 'agent'
-  onContinueInAgent?: () => void
   onOpenFile?: (path: string, options?: WorkspaceFileOpenOptions) => void
   className?: string
 }) {
@@ -362,8 +349,6 @@ export const PlanPanel = memo(function PlanPanel({
   const [openError, setOpenError] = useState<string | null>(null)
   const [content, setContent] = useState<string | null>(null)
   const [receipt, setReceipt] = useState<RunReceipt | null>(null)
-  /** Receipt snapshot for Continue footer while viewing plan.md (not the receipt tab). */
-  const [continueReceipt, setContinueReceipt] = useState<RunReceipt | null>(null)
   /** True when a live run hid a prior/mismatched receipt (not a true absence). */
   const [receiptDeferred, setReceiptDeferred] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -415,7 +400,6 @@ export const PlanPanel = memo(function PlanPanel({
         if (seq !== loadSeqRef.current) return
         setContent(null)
         setReceipt(null)
-        setContinueReceipt(null)
         setReceiptDeferred(false)
         setError(null)
         setLoading(false)
@@ -437,7 +421,6 @@ export const PlanPanel = memo(function PlanPanel({
         if (!res.ok) {
           setContent(null)
           setReceipt(null)
-          if (requestedTab === 'receipt') setContinueReceipt(null)
           setReceiptDeferred(false)
           setError(res.error)
           return
@@ -445,7 +428,6 @@ export const PlanPanel = memo(function PlanPanel({
         if (!res.data.exists) {
           setContent(null)
           setReceipt(null)
-          if (requestedTab === 'receipt') setContinueReceipt(null)
           setReceiptDeferred(false)
           setError(null)
           return
@@ -453,7 +435,6 @@ export const PlanPanel = memo(function PlanPanel({
         if (requestedTab === 'receipt') {
           const parsed = parseReceiptText(res.data.content ?? '')
           setReceipt(parsed.receipt)
-          setContinueReceipt(parsed.receipt)
           setReceiptDeferred(parsed.deferred)
           setContent(null)
           setError(parsed.error)
@@ -462,27 +443,11 @@ export const PlanPanel = memo(function PlanPanel({
           setReceipt(null)
           setReceiptDeferred(false)
           setError(null)
-          // Keep Continue footer tool-fail hint accurate while on plan/contract.
-          if (requestedTab === 'plan') {
-            const receiptRes = await window.vyotiq.readRunArtifact({
-              workspacePath,
-              runId,
-              name: 'receipt.json'
-            })
-            if (seq !== loadSeqRef.current) return
-            if (receiptRes.ok && receiptRes.data.exists) {
-              const parsed = parseReceiptText(receiptRes.data.content ?? '')
-              setContinueReceipt(parsed.receipt)
-            } else {
-              setContinueReceipt(null)
-            }
-          }
         }
       } catch (err) {
         if (seq !== loadSeqRef.current) return
         setContent(null)
         setReceipt(null)
-        setContinueReceipt(null)
         setReceiptDeferred(false)
         setError(err instanceof Error ? err.message : 'Failed to load artifact')
       } finally {
@@ -512,17 +477,9 @@ export const PlanPanel = memo(function PlanPanel({
     if (!running || !receipt) return
     if (isReceiptStaleForLiveRun(receipt, { running, invokeId })) {
       setReceipt(null)
-      setContinueReceipt(null)
       setReceiptDeferred(true)
     }
   }, [running, invokeId, receipt])
-
-  useEffect(() => {
-    if (!running || !continueReceipt) return
-    if (isReceiptStaleForLiveRun(continueReceipt, { running, invokeId })) {
-      setContinueReceipt(null)
-    }
-  }, [running, invokeId, continueReceipt])
 
   // Poll while the panel is visible — mid-run edits and idle post-write refresh.
   useEffect(() => {
@@ -543,16 +500,23 @@ export const PlanPanel = memo(function PlanPanel({
           : 'No receipt yet'
   const emptyBody =
     tab === 'plan'
-      ? agentMode === 'plan'
-        ? 'Draft plan.md for this run — Goal, Steps, and Done when. create_plan copies Done when into the contract.'
-        : 'Switch to Plan mode and draft plan.md, or continue from an existing plan.'
+      ? 'Publish plan.md with create_plan — Goal, Steps, and Done when. Done when is copied into the contract.'
       : tab === 'contract'
         ? 'The run contract is created when a chat starts.'
         : receiptDeferred
           ? 'Prior receipt is hidden while this run is live. A new receipt appears when the turn writes it.'
           : 'receipt.json appears when the run writes it.'
 
-  const showEmpty = !loading && !error && (tab === 'receipt' ? !receipt : !content?.trim())
+  const showEmpty =
+    !loading &&
+    !error &&
+    (tab === 'receipt'
+      ? !receipt
+      : tab === 'contract'
+        ? !content
+        // Every run seeds a plan.md stub now that Plan mode is merged in, so
+        // `content` is non-empty from step 0 — readiness, not length, decides.
+        : !hasTodos && !isPlanDraftReady(content))
 
   const doc = useMemo(() => (tab === 'plan' && content?.trim() ? planDocument(content) : null), [tab, content])
   const live = { steps: hasTodos, checks: checks.length > 0 }
@@ -568,13 +532,6 @@ export const PlanPanel = memo(function PlanPanel({
     if (res && !res.ok) setOpenError(res.error)
   }, [runId, tab, workspacePath])
 
-  const showContinue =
-    Boolean(onContinueInAgent) &&
-    agentMode === 'plan' &&
-    !running &&
-    tab === 'plan' &&
-    isPlanDraftReady(content)
-  const toolFailHint = continueReceipt ? receiptToolFailHint(continueReceipt) : null
 
   const select = (next: ArtifactView): void => {
     setOpenError(null)
@@ -673,16 +630,6 @@ export const PlanPanel = memo(function PlanPanel({
           </div>
         )}
       </div>
-      {showContinue ? (
-        <div className="flex h-11 shrink-0 items-center gap-3 border-t border-border pl-5 pr-2" data-plan-continue>
-          <p className="m-0 min-w-0 flex-1 truncate text-xs text-warning" title={toolFailHint ?? undefined}>
-            {toolFailHint}
-          </p>
-          <Button size="sm" variant="primary" onClick={onContinueInAgent}>
-            Continue in Agent
-          </Button>
-        </div>
-      ) : null}
     </div>
   )
 })

@@ -170,6 +170,12 @@ export function scorePlanQuality(markdown: string): PlanQualityReport {
   return { score: Math.max(0, Math.min(100, score)), issues }
 }
 
+/**
+ * Verbatim stub text written by older builds. Compared for EQUALITY against
+ * plan.md already on disk, so its wording (including the Plan-mode sentence)
+ * is frozen data, not live copy — editing it would make old stubs read as
+ * real plans.
+ */
 const LEGACY_PLAN_STUB = [
   '# Plan',
   '',

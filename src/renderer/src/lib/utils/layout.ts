@@ -102,16 +102,6 @@ export const MARKETPLACE_COLUMN_MAX = 'max-w-[1040px]'
 export const MARKETPLACE_COLUMN = `mx-auto w-full ${MARKETPLACE_COLUMN_MAX}`
 
 /**
- * Teammates rail — the task inbox entry plus the roster, beside the detail
- * pane. Fixed rather than fluid: it holds an avatar, a name and one badge, and
- * a fluid track would stretch that to half the window on a wide display.
- */
-export const TEAMMATES_RAIL_WIDTH = 'w-[264px]'
-
-/** Content column inside the teammates detail pane. */
-export const TEAMMATES_DETAIL_COLUMN = 'w-full max-w-[720px]'
-
-/**
  * Vertical rhythm. Applied as padding on each row rather than flex gap so
  * spacing stays consistent across the transcript.
  */
@@ -194,7 +184,7 @@ export const TOOL_CARD_SURFACE =
   'overflow-hidden rounded-lg border border-border'
 export const TOOL_CARD_HEADER = 'px-3 py-2 text-xs'
 /** Body content owns its own padding so a diff can run edge to edge. */
-export const TOOL_CARD_BODY = 'overflow-hidden border-t border-border bg-surface'
+export const TOOL_CARD_BODY = 'overflow-hidden border-t border-border/40 bg-surface'
 
 /** Ask-question gate — quiet panel, not bordered tool-card chrome. */
 /**

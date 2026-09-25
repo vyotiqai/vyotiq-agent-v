@@ -38,8 +38,8 @@ describe('toolsSchema', () => {
   it('covers every executable built-in with a short description', () => {
     const names = AGENT_TOOLS.map((t) => t.name).sort()
     expect(names).toEqual([...BUILTIN_TOOL_NAMES].sort())
-    // 61 + the six teammate_* tools (docs/teammates.md §17) + build_tool + check_done_when.
-    expect(names.length).toBe(69)
+    // 61 + build_tool + check_done_when.
+    expect(names.length).toBe(63)
     expect(names).toEqual(
       expect.arrayContaining([
         'github_pr_create',

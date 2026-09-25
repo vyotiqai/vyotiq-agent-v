@@ -162,9 +162,9 @@ export function slashFooterText(cmd: SlashCommandDescriptor): string {
   return slashFooterDescription(cmd.description, Math.max(40, room))
 }
 
-const COMPOSER_MODE_TRIGGERS = new Set(['ask', 'plan', 'agent'])
+const COMPOSER_MODE_TRIGGERS = new Set(['ask', 'agent'])
 
-/** Toolbar Mode picker owns mode switching. Keep `/ask` `/plan` `/agent` typable. */
+/** Toolbar Mode picker owns mode switching. Keep `/ask` and `/agent` typable. */
 export function isComposerModeSlashCommand(cmd: SlashCommandDescriptor): boolean {
   return cmd.kind === 'builtin' && COMPOSER_MODE_TRIGGERS.has(cmd.trigger)
 }

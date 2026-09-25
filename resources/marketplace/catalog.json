@@ -313,19 +313,6 @@
       "installable": true
     },
     {
-      "id": "create-teammate",
-      "name": "Create teammate",
-      "version": "1.0.0",
-      "description": "Create and direct persistent teammates: when one is worth the ceremony, how to write a persona and identity worth keeping, seeding its memory, and reading delegated work back.",
-      "kind": "skill",
-      "bundledPath": "create-teammate",
-      "source": "bundled",
-      "publisher": "Agent V",
-      "category": "skills",
-      "iconPath": "icons/create-teammate.svg",
-      "installable": true
-    },
-    {
       "id": "goal",
       "name": "Goal",
       "version": "1.0.0",

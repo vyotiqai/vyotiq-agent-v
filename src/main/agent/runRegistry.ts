@@ -26,8 +26,6 @@ type RunEntry = {
    * so Stop still cancels the whole turn while follow-ups only interrupt the stream.
    */
   streamInterrupt: AbortController | null
-  /** Teammate profile this run is bound to, when started with a binding. */
-  agentProfileId?: string
 }
 
 export type RunAbortHandle = {
@@ -152,19 +150,11 @@ export function takeLateFollowUpDropped(runId: string): AgentEvent | undefined {
 }
 
 /** Register abort controller before the async loop starts so cancel works immediately. */
-export function registerRunAbort(
-  runId: string,
-  workspacePath: string,
-  agentProfileId?: string
-): RunAbortHandle {
+export function registerRunAbort(runId: string, workspacePath: string): RunAbortHandle {
   const existing = active.get(runId)
   // Reuse the live invoke. Never replace a turnComplete entry still unwinding —
   // overlapping runAgent finally blocks corrupt the same runDir.
   if (existing) {
-    // Backfill the profile when the pre-registration lacked it (the loop
-    // resolves overrides later) — the scheduler's one-run-per-teammate gate
-    // reads this field, so a dropped binding blinds it for the run's lifetime.
-    if (agentProfileId && !existing.agentProfileId) existing.agentProfileId = agentProfileId
     return { controller: existing.controller, invokeId: existing.invokeId }
   }
 
@@ -177,8 +167,7 @@ export function registerRunAbort(
     turnComplete: false,
     forceFinishTimer: null,
     followUps: [],
-    streamInterrupt: null,
-    ...(agentProfileId ? { agentProfileId } : {})
+    streamInterrupt: null
   })
   // Fresh registration — stale late buffers from a prior finish of this id are
   // meaningless now, and a pending prune timer must not eat the new run's ones.
@@ -186,57 +175,22 @@ export function registerRunAbort(
   return { controller, invokeId }
 }
 
-export type TryRegisterRunOptions = {
-  /**
-   * Refuse the registration when another live run already holds this teammate.
-   * A teammate is one identity with one memory namespace: two concurrent runs
-   * would interleave writes to it. The check and the insert happen together
-   * here — a scheduler-side precheck followed by a separate register leaves a
-   * window where two callers both see the slot free.
-   */
-  requireProfileSlot?: boolean
-}
-
 export type TryRegisterRunResult =
   | { ok: true; controller: AbortController; invokeId: number }
   | { ok: false; error: string; code?: string }
-
-/** The run currently holding a teammate's identity slot, if any. */
-export function findActiveRunForProfile(agentProfileId: string): string | undefined {
-  for (const [runId, entry] of active) {
-    if (entry.agentProfileId === agentProfileId) return runId
-  }
-  return undefined
-}
 
 /**
  * Atomic register for IPC chatStart — rejects if a run slot already exists.
  * Single-threaded: check+set with no await in between.
  */
-export function tryRegisterRunAbort(
-  runId: string,
-  workspacePath: string,
-  agentProfileId?: string,
-  options: TryRegisterRunOptions = {}
-): TryRegisterRunResult {
+export function tryRegisterRunAbort(runId: string, workspacePath: string): TryRegisterRunResult {
   if (active.has(runId)) {
     rejectedRunStarts++
     // Coded so the caller can tell this transient race apart from a settled
     // refusal and retry it; an uncoded failure is treated as final.
     return { ok: false, error: 'Run is already active', code: 'run_active' }
   }
-  if (options.requireProfileSlot && agentProfileId) {
-    const holder = findActiveRunForProfile(agentProfileId)
-    if (holder) {
-      rejectedRunStarts++
-      return {
-        ok: false,
-        error: `Teammate is already working on run ${holder}`,
-        code: 'profile_busy'
-      }
-    }
-  }
-  const handle = registerRunAbort(runId, workspacePath, agentProfileId)
+  const handle = registerRunAbort(runId, workspacePath)
   return { ok: true, controller: handle.controller, invokeId: handle.invokeId }
 }
 
@@ -470,7 +424,6 @@ export type ActiveRunInfo = {
   runId: string
   workspacePath: string
   invokeId: number
-  agentProfileId?: string
   pendingFollowUps: { id: string; preview: string }[]
 }
 
@@ -490,7 +443,6 @@ export function listActiveRuns(): ActiveRunInfo[] {
     runId,
     workspacePath: entry.workspacePath,
     invokeId: entry.invokeId,
-    ...(entry.agentProfileId ? { agentProfileId: entry.agentProfileId } : {}),
     pendingFollowUps: entry.followUps.map((item) => ({
       id: item.id,
       preview: followUpPreview(item.message)
@@ -500,32 +452,6 @@ export function listActiveRuns(): ActiveRunInfo[] {
 
 export function getRunInvokeId(runId: string): number | undefined {
   return active.get(runId)?.invokeId
-}
-
-type ProfileRunFinishListener = (profileId: string, runId: string) => void
-const profileRunFinishListeners: ProfileRunFinishListener[] = []
-
-/**
- * Observe when any run bound to a teammate profile ends, regardless of which
- * subsystem started it (chat, delegated task, boot resume). Lets the task
- * scheduler re-pump its queue without importing run-starting modules.
- */
-export function registerProfileRunFinishListener(fn: ProfileRunFinishListener): () => void {
-  profileRunFinishListeners.push(fn)
-  return () => {
-    const index = profileRunFinishListeners.indexOf(fn)
-    if (index !== -1) profileRunFinishListeners.splice(index, 1)
-  }
-}
-
-export function notifyProfileRunFinished(profileId: string, runId: string): void {
-  for (const fn of profileRunFinishListeners) {
-    try {
-      fn(profileId, runId)
-    } catch (err) {
-      logger.warn('Profile run-finish listener failed', { scope: 'runRegistry', profileId, err })
-    }
-  }
 }
 
 export function clearRunAbort(runId: string, invokeId?: number): void {

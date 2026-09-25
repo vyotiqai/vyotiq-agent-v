@@ -562,66 +562,6 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
       icon: 'bot'
     })
   },
-  // Teammate management. The four mutating ones say everything in their
-  // summary line, so they stay header-only like create_goal/update_goal;
-  // teammate_list carries a roster worth expanding.
-  teammate_list: {
-    Body: StatusMessageBody,
-    hasBody: resultHasBody,
-    headerMeta: (tool) => ({
-      verb: toolLabel(tool.name, tool.status),
-      target: tool.summary,
-      icon: 'bot'
-    })
-  },
-  teammate_create: {
-    Body: StatusMessageBody,
-    hasBody: resultHasBody,
-    headerMeta: (tool) => ({
-      verb: toolLabel(tool.name, tool.status),
-      target: tool.summary,
-      icon: 'bot'
-    })
-  },
-  teammate_update: {
-    Body: StatusMessageBody,
-    hasBody: resultHasBody,
-    headerMeta: (tool) => ({
-      verb: toolLabel(tool.name, tool.status),
-      target: tool.summary,
-      icon: 'bot'
-    })
-  },
-  teammate_delete: {
-    Body: StatusMessageBody,
-    hasBody: resultHasBody,
-    headerMeta: (tool) => ({
-      verb: toolLabel(tool.name, tool.status),
-      target: tool.summary,
-      icon: 'trash'
-    })
-  },
-  teammate_assign_task: {
-    Body: StatusMessageBody,
-    hasBody: resultHasBody,
-    headerMeta: (tool) => ({
-      verb: toolLabel(tool.name, tool.status),
-      target: tool.summary,
-      icon: 'listTodo'
-    })
-  },
-  // The one teammate tool whose body is the point: `result` returns what the
-  // teammate actually produced, which belongs in an expandable card rather
-  // than a header line.
-  teammate_task: {
-    Body: StatusMessageBody,
-    hasBody: resultHasBody,
-    headerMeta: (tool) => ({
-      verb: toolLabel(tool.name, tool.status),
-      target: tool.summary,
-      icon: 'listTodo'
-    })
-  },
   build_tool: {
     Body: StatusMessageBody,
     hasBody: resultHasBody,

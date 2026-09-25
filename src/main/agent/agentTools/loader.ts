@@ -137,9 +137,8 @@ export async function loadAgentToolsSnapshot(dir: string): Promise<AgentToolDef[
  *
  * `<name>@<hash>` rather than the bare name, because `build_tool` can rewrite
  * the module behind a stable name: an "always allow" keyed on the name alone
- * would silently carry over to code the user never saw. This is the same shape
- * as `acceptedOverrides` in settings/agentProfiles, which hashes an override
- * file's bytes so editing it withdraws consent.
+ * would silently carry over to code the user never saw: editing the module
+ * withdraws consent.
  */
 export async function agentBuiltToolAllowKey(dir: string, name: string): Promise<string | null> {
   const defs = await loadAgentToolsSnapshot(dir)

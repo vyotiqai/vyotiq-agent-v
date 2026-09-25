@@ -74,11 +74,16 @@ export function executeCreatePlan(
       ? ` Quality feedback (advisory, score ${quality.score}/100): ${quality.issues.slice(0, 3).join(' ')}`
       : ''
 
+  // The system prompt keeps the plan it read when this invoke started (a write
+  // there would void the provider's prompt cache for the whole history), so the
+  // plan the model just sent stays its working copy until then. Name the one
+  // line the file changed, so a later str_replace can still quote plan.md exactly.
+  const wrote = `Wrote plan.md under \`# ${title}\`.`
   return {
     ok: true,
     summary: title,
     content: doneWhen
-      ? `Wrote plan.md. Copied Done when into contract.md ## Done when.${checksNote}${feedback}`
-      : `Wrote plan.md.${checksNote}${feedback}`
+      ? `${wrote} Copied Done when into contract.md ## Done when.${checksNote}${feedback}`
+      : `${wrote}${checksNote}${feedback}`
   }
 }

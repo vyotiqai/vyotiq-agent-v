@@ -30,7 +30,6 @@ const VYOTIQ_INVOKE_MAP: Record<
     | 'onNotificationActivate'
     | 'onDeepLinkOpened'
     | 'onAppearanceCustomCssChanged'
-    | 'onAgentProfileOverridesChanged'
     | 'updater'
     | 'feedback'
     | 'onAccessibilitySupportChanged'
@@ -133,20 +132,6 @@ const VYOTIQ_INVOKE_MAP: Record<
   browserTakeScreenshot: IPC.browserTakeScreenshot,
   browserClearBrowsingData: IPC.browserClearBrowsingData,
   browserPipToggle: IPC.browserPipToggle,
-  agentProfilesList: IPC.agentProfilesList,
-  agentProfilesCreate: IPC.agentProfilesCreate,
-  agentProfilesUpdate: IPC.agentProfilesUpdate,
-  agentProfilesDelete: IPC.agentProfilesDelete,
-  agentProfileOverridesList: IPC.agentProfileOverridesList,
-  agentProfileOverrideSet: IPC.agentProfileOverrideSet,
-  agentProfileOverrideAccept: IPC.agentProfileOverrideAccept,
-  agentMemoryList: IPC.agentMemoryList,
-  agentMemoryRead: IPC.agentMemoryRead,
-  agentMemoryWrite: IPC.agentMemoryWrite,
-  tasksList: IPC.tasksList,
-  tasksEnqueue: IPC.tasksEnqueue,
-  tasksCancel: IPC.tasksCancel,
-  tasksRetry: IPC.tasksRetry,
   gitStatus: IPC.gitStatus,
   gitInit: IPC.gitInit,
   gitGenerateCommitMessage: IPC.gitGenerateCommitMessage,
@@ -322,9 +307,6 @@ const VYOTIQ_PUSH_MAP: Record<
   onDictationStatus: IPC.dictationStatusEvent,
   onGithubAuthStatus: IPC.githubAuthStatusEvent,
   onSkillsChanged: IPC.skillsChanged,
-  onAgentProfilesChanged: IPC.agentProfilesChanged,
-  onAgentProfileOverridesChanged: IPC.agentProfileOverridesChanged,
-  onTasksChanged: IPC.tasksChanged,
   onNotificationsChanged: IPC.notificationsChanged,
   onNotificationActivate: IPC.notificationsActivate,
   onDeepLinkOpened: IPC.deepLinkOpened,

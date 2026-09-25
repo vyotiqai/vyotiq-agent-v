@@ -207,6 +207,74 @@ function cost(bucket) {
   return bucket.billedCost + bucket.estimatedCost
 }
 
+/** Under this share of the prompt served from cache, a step counts as cold. */
+const COLD_HIT = 0.5
+/** Providers cache nothing shorter than this (Anthropic and OpenAI both use 1024). */
+const MIN_CACHEABLE_PROMPT = 1024
+/** A gap this long can outlive a provider cache, so a miss after it is expiry. */
+const IDLE_MS = 10 * 60 * 1000
+
+/** The whole prompt of a step, however the provider split its usage. */
+function promptTokens(ev) {
+  const input = ev.inputTokens ?? 0
+  if (ev.inputTokensIncludesCache !== false) return input
+  return (
+    input +
+    Math.max(0, ev.cachedInputTokens ?? 0) +
+    Math.max(0, ev.cacheCreationInputTokens ?? 0)
+  )
+}
+
+/**
+ * What the provider could cache ahead of the conversation: the tool catalog and
+ * the stable system zone. Uses the recorded `prefixHash` when there is one.
+ * Older events fall back to the estimated sizes of those two layers, which catch
+ * every change except a same-length one.
+ */
+function prefixIdentity(ev) {
+  if (typeof ev.prefixHash === 'string' && ev.prefixHash) {
+    return { kind: 'hash', value: ev.prefixHash }
+  }
+  const system = ev.layers?.system
+  const volatile = ev.detail?.system?.volatile
+  const tools = ev.layers?.tools
+  if (typeof system !== 'number' || typeof volatile !== 'number' || typeof tools !== 'number') {
+    return null
+  }
+  return { kind: 'size', value: `${system - volatile}/${tools}` }
+}
+
+/**
+ * Why a step missed the cache, judged against the step before it in the same run.
+ * Returns null for a step that was not cold, or whose provider reports no cache.
+ */
+function classifyColdStep(ev, at, prev) {
+  const reportsCache = ev.cacheReported ?? ev.cachedInputTokens != null
+  if (!reportsCache) return null
+  const whole = promptTokens(ev)
+  if (whole < MIN_CACHEABLE_PROMPT) return null
+  if (Math.max(0, ev.cachedInputTokens ?? 0) / whole >= COLD_HIT) return null
+  if (!prev) return 'first'
+  if (ev.invokeId != null && prev.event.invokeId != null && ev.invokeId !== prev.event.invokeId) {
+    return 'first'
+  }
+  const mine = prefixIdentity(ev)
+  const before = prefixIdentity(prev.event)
+  const comparable = mine && before && mine.kind === before.kind
+  if (comparable && mine.value !== before.value) return 'prefix'
+  const startedAt = Date.parse(at) - (ev.generationMs ?? 0)
+  if (startedAt - Date.parse(prev.at) > IDLE_MS) return 'idle'
+  return comparable ? 'provider' : 'unknown'
+}
+
+const COLD_CAUSES = [
+  ['first', 'first of an invoke'],
+  ['prefix', 'prefix changed'],
+  ['idle', 'idle > 10 min'],
+  ['provider', 'provider'],
+  ['unknown', 'unknown']
+]
+
 function into(map, key, ev) {
   add(map.get(key) ?? map.set(key, emptyBucket()).get(key), ev)
 }
@@ -234,11 +302,33 @@ let stepsWithoutModel = 0
 let pricedCalls = 0
 let unpriceableCalls = 0
 let splitDrift = 0
+const coldSteps = Object.fromEntries(COLD_CAUSES.map(([key]) => [key, { steps: 0, uncached: 0 }]))
+let cacheReportingSteps = 0
+let uncachedInput = 0
+let coldStepsBySize = 0
 
 for (const runDir of runDirs) {
   if (eventFiles(runDir).length > 1) rotated += 1
+  let prevStep = null
   for (const { at, event } of readEvents(runDir)) {
     if (event.type !== 'step_usage' && event.type !== 'aux_usage') continue
+    if (event.type === 'step_usage') {
+      // Judged before the --since cut so the first step inside the window still
+      // has the step before it to compare with.
+      const cause = classifyColdStep(event, at, prevStep)
+      prevStep = { at, event }
+      const inWindow = !(since && at && at < since)
+      if (inWindow && (event.cacheReported ?? event.cachedInputTokens != null)) {
+        const missed = Math.max(0, promptTokens(event) - Math.max(0, event.cachedInputTokens ?? 0))
+        cacheReportingSteps += 1
+        uncachedInput += missed
+        if (cause) {
+          coldSteps[cause].steps += 1
+          coldSteps[cause].uncached += missed
+          if (!event.prefixHash && (cause === 'prefix' || cause === 'provider')) coldStepsBySize += 1
+        }
+      }
+    }
     if (since && at && at < since) continue
     const site = event.type === 'step_usage' ? 'turn' : (event.site ?? 'aux')
     const model = event.model ? `${event.provider ?? '?'}/${event.model}` : '(unrecorded)'
@@ -285,7 +375,8 @@ if (asJson) {
         runs: runDirs.length,
         overall,
         bySite: Object.fromEntries(bySite),
-        byModel: Object.fromEntries(byModel)
+        byModel: Object.fromEntries(byModel),
+        cacheMisses: { steps: cacheReportingSteps, uncachedInput, byCause: coldSteps }
       },
       null,
       2
@@ -364,6 +455,34 @@ if (pricedCalls > 0) {
     `\nOutput is ${pct(split.output, splitTotal)} of spend while being ` +
       `${pct(overall.outputTokens, allTokens)} of tokens.`
   )
+}
+
+const coldTotal = COLD_CAUSES.reduce((n, [key]) => n + coldSteps[key].steps, 0)
+if (cacheReportingSteps > 0) {
+  console.log(
+    `\n=== Cache misses (${num(coldTotal)} of ${num(cacheReportingSteps)} steps cached under ` +
+      `${COLD_HIT * 100}% of their prompt) ===`
+  )
+  console.log('cause                 steps     uncached   of all uncached input')
+  for (const [key, label] of COLD_CAUSES) {
+    const b = coldSteps[key]
+    if (b.steps === 0 && key === 'unknown') continue
+    console.log(
+      `${label.padEnd(20)} ${String(b.steps).padStart(6)} ${num(b.uncached).padStart(12)} ` +
+        `${pct(b.uncached, uncachedInput).padStart(10)}`
+    )
+  }
+  console.log(
+    'Each cold step is compared with the step before it in its run. "prefix changed" means ' +
+      'the tool catalog or stable system zone differed, which the app caused. "provider" means ' +
+      'the same prefix was sent within 10 minutes and still missed.'
+  )
+  if (coldStepsBySize > 0) {
+    console.log(
+      `Note: ${num(coldStepsBySize)} of those step(s) predate prefixHash and were compared by ` +
+        'token size, which cannot see a same-length change.'
+    )
+  }
 }
 if (stepsWithoutModel > 0) {
   console.log(

@@ -12,9 +12,6 @@ import {
   DictationRuntimeStatusSchema,
   GithubAuthStatusSchema,
   SkillsChangedPayloadSchema,
-  AgentProfilesChangedEventSchema,
-  AgentProfileOverridesChangedEventSchema,
-  TasksChangedEventSchema,
   ToolCatalogResultSchema,
   GitStatusChangedPayloadSchema,
   NotificationListSchema,
@@ -565,56 +562,6 @@ const api: VyotiqApi = {
     ipcRenderer.on(IPC.toolsCatalogChanged, listener)
     return () => {
       ipcRenderer.removeListener(IPC.toolsCatalogChanged, listener)
-    }
-  },
-  agentProfilesList: () => ipcRenderer.invoke(IPC.agentProfilesList),
-  agentProfilesCreate: (profile) => ipcRenderer.invoke(IPC.agentProfilesCreate, profile),
-  agentProfilesUpdate: (payload) => ipcRenderer.invoke(IPC.agentProfilesUpdate, payload),
-  agentProfilesDelete: (payload) => ipcRenderer.invoke(IPC.agentProfilesDelete, payload),
-  onAgentProfilesChanged: (handler) => {
-    const listener = (_: IpcRendererEvent, raw: unknown): void => {
-      const parsed = AgentProfilesChangedEventSchema.safeParse(raw)
-      if (!parsed.success) return
-      handler(parsed.data)
-    }
-    ipcRenderer.on(IPC.agentProfilesChanged, listener)
-    return () => {
-      ipcRenderer.removeListener(IPC.agentProfilesChanged, listener)
-    }
-  },
-  agentProfileOverridesList: (payload) =>
-    ipcRenderer.invoke(IPC.agentProfileOverridesList, payload),
-  agentProfileOverrideSet: (payload) =>
-    ipcRenderer.invoke(IPC.agentProfileOverrideSet, payload),
-  agentProfileOverrideAccept: (payload) =>
-    ipcRenderer.invoke(IPC.agentProfileOverrideAccept, payload),
-  onAgentProfileOverridesChanged: (handler) => {
-    const listener = (_: IpcRendererEvent, raw: unknown): void => {
-      const parsed = AgentProfileOverridesChangedEventSchema.safeParse(raw)
-      if (!parsed.success) return
-      handler(parsed.data)
-    }
-    ipcRenderer.on(IPC.agentProfileOverridesChanged, listener)
-    return () => {
-      ipcRenderer.removeListener(IPC.agentProfileOverridesChanged, listener)
-    }
-  },
-  agentMemoryList: (payload) => ipcRenderer.invoke(IPC.agentMemoryList, payload),
-  agentMemoryRead: (payload) => ipcRenderer.invoke(IPC.agentMemoryRead, payload),
-  agentMemoryWrite: (payload) => ipcRenderer.invoke(IPC.agentMemoryWrite, payload),
-  tasksList: () => ipcRenderer.invoke(IPC.tasksList),
-  tasksEnqueue: (payload) => ipcRenderer.invoke(IPC.tasksEnqueue, payload),
-  tasksCancel: (payload) => ipcRenderer.invoke(IPC.tasksCancel, payload),
-  tasksRetry: (payload) => ipcRenderer.invoke(IPC.tasksRetry, payload),
-  onTasksChanged: (handler) => {
-    const listener = (_: IpcRendererEvent, raw: unknown): void => {
-      const parsed = TasksChangedEventSchema.safeParse(raw)
-      if (!parsed.success) return
-      handler(parsed.data)
-    }
-    ipcRenderer.on(IPC.tasksChanged, listener)
-    return () => {
-      ipcRenderer.removeListener(IPC.tasksChanged, listener)
     }
   },
   listNotifications: () => ipcRenderer.invoke(IPC.notificationsList),

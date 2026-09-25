@@ -127,8 +127,6 @@ export async function* replayChatFixture(input: {
   runSignal: AbortSignal
   goal?: string
   mode?: AgentInteractionMode
-  agentProfileId?: string
-  delegatedTaskId?: string
   /** A new task's checks — the run is created as runAgent would create it. */
   doneWhen?: string[]
 }): AsyncGenerator<AgentEvent> {
@@ -136,9 +134,7 @@ export async function* replayChatFixture(input: {
   // The fixture replaces the whole event stream, so `runAgent` — and with it
   // `createRun` and every `writeStatus` — never executes. Without this a
   // fixture run leaves no run directory and no status.json at all, and anything
-  // that reads a run's durable outcome sees nothing: a delegated task falls
-  // through to the scheduler's MISSING_STATUS_SWEEP_LIMIT and is reported as
-  // failed sixty seconds after it streamed perfectly.
+  // that reads a run's durable outcome sees nothing.
   const runDir = resolveRunDir(input.workspacePath, input.runId)
   if (!runExists(input.workspacePath, input.runId)) {
     createRun(input.workspacePath, input.runId, input.goal ?? 'chat', {
@@ -151,9 +147,7 @@ export async function* replayChatFixture(input: {
       await updateStatus(
         runDir,
         {
-          status,
-          ...(input.agentProfileId ? { agentProfileId: input.agentProfileId } : {}),
-          ...(input.delegatedTaskId ? { delegatedTaskId: input.delegatedTaskId } : {})
+          status
         },
         { sync: true }
       )

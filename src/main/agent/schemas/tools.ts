@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { TEAMMATE_AVATAR_KEYS } from '../../../shared/ipc'
 import { TERMINAL_DEFAULT_TIMEOUT_MS, TERMINAL_MAX_TIMEOUT_MS } from '../tools/terminal'
 import { DEFAULT_SEARCH_LIMIT } from '../codeindex/types'
 import {
@@ -18,7 +17,11 @@ import { toolCallArgumentsUnusable, wireToolCallArguments } from '../toolArgWire
 import { duplicateTopLevelJsonKeyError } from '../../../shared/utils/jsonish'
 import { zodToJsonSchema } from './zodToJsonSchema'
 
-/** Default wait for await_agent_instance when timeout_ms is omitted (15 minutes). */
+/**
+ * Default AND maximum wait for await_agent_instance (15 minutes): used when
+ * timeout_ms is omitted, and larger timeout_ms values are capped to it at the
+ * handler — the timeout error reports the cap so re-awaiting is chosen knowingly.
+ */
 export const AWAIT_AGENT_INSTANCE_MAX_MS = 900_000
 
 type ReadArgs = {
@@ -764,9 +767,14 @@ const askQuestionArgs = z.object({
 
 const switchModeArgs = z
   .object({
+    // `'plan'` stays in the enum so a model that learned the old vocabulary is
+    // not hard-failed for naming a mode that was merged away; the handler folds
+    // it to `'agent'`, which is what Plan became.
     mode: z
-      .enum(['ask', 'plan', 'agent'])
-      .describe('Target interaction mode for the rest of this run')
+      .enum(['ask', 'agent', 'plan'])
+      .describe(
+        'Target interaction mode for the rest of this run: "ask" (read-only) or "agent" (full). "plan" is a deprecated alias for "agent".'
+      )
   })
 
 const memoryListArgs = z.object({})
@@ -911,7 +919,9 @@ const awaitAgentInstanceArgs = z.object({
     .number()
     .int()
     .min(1_000)
-    .describe(`Wait ms. Omitted defaults to ${AWAIT_AGENT_INSTANCE_MAX_MS}.`)
+    .describe(
+      `Wait ms. Omitted defaults to ${AWAIT_AGENT_INSTANCE_MAX_MS}; values above ${AWAIT_AGENT_INSTANCE_MAX_MS} are capped to it, so one call never waits longer.`
+    )
     .optional()
 })
 
@@ -1020,128 +1030,6 @@ const checkDoneWhenArgs = z.object({
 })
 
 /**
- * Teammate management.
- *
- * Fields mirror `AgentProfileBaseSchema` (shared/ipc/schemas/agentProfile.ts).
- * The behaviour fields — `autonomous_mode` and `auto_resume_on_launch` — are
- * writable here by deliberate product decision: the agent has full control over
- * the identities it creates, including whether they ask before running tools.
- * High-risk tools (edit, str_replace, delete, terminal, git_commit, git_apply,
- * GitHub, MCP) stay approval-gated for every teammate regardless, unless the
- * workspace itself allowlists one.
- *
- * `runtime` is deliberately NOT here. The profile schema still carries it, but
- * no cloud runtime is registered, so a teammate pinned to one refuses every run
- * it is ever given — an option whose only reachable effect is to brick the
- * identity the agent just made.
- */
-const teammateIdentityFields = {
-  persona: z
-    .string()
-    .max(1000)
-    .describe('What it is — the role it plays and the lines it does not cross.')
-    .optional(),
-  identity: z
-    .string()
-    .max(1000)
-    .describe('What it knows — long-term context it carries into every run.')
-    .optional(),
-  tone: z.string().max(2000).describe('How it writes back.').optional(),
-  avatar: z
-    .string()
-    .max(32)
-    .describe(`Icon key for the roster chip. One of: ${TEAMMATE_AVATAR_KEYS.join(', ')}.`)
-    .optional(),
-  model_provider: z
-    .string()
-    .min(1)
-    .describe('Pin every run to this provider. Requires model_id. Must be a configured provider.')
-    .optional(),
-  model_id: z.string().min(1).max(200).describe('Pinned model id. Requires model_provider.').optional(),
-  autonomous_mode: z
-    .enum(['inherit', 'on', 'off'])
-    .describe(
-      'Tool approvals: inherit the app setting, on = never ask (high-risk tools stay gated), off = always ask.'
-    )
-    .optional(),
-  auto_resume_on_launch: z
-    .boolean()
-    .describe('Relaunch this teammate’s interrupted runs when the app starts.')
-    .optional()
-} as const
-
-const teammateListArgs = z.object({
-  include_tasks: z
-    .boolean()
-    .describe('Also list each teammate’s queued, scheduled and running work. Default true.')
-    .optional()
-})
-
-/**
- * Starting `index.md` for a new teammate's memory in the open project.
- *
- * Capped well below the 1 MB the memory IPC accepts because this file is
- * injected into every step of every run the teammate does — it is an index, not
- * a document. The cap is what keeps "give it a brain" from quietly becoming a
- * permanent per-step tax.
- */
-const MAX_SEEDED_MEMORY_CHARS = 4_000
-
-const teammateCreateArgs = z.object({
-  name: z.string().trim().min(1).max(64).describe('Display name. The id is slugified from it.'),
-  scope: z
-    .enum(['global', 'workspace'])
-    .describe('global = every project; workspace = this one only. Default global.')
-    .optional(),
-  memory: z
-    .string()
-    .max(MAX_SEEDED_MEMORY_CHARS)
-    .describe(
-      'What it should already know, written into its private index.md for THIS project. Injected into every step of its runs, so keep it to durable facts and pointers — conventions, where things live, decisions already made.'
-    )
-    .optional(),
-  ...teammateIdentityFields
-})
-
-const teammateUpdateArgs = z.object({
-  id: z.string().min(1).max(48).describe('Teammate id from teammate_list.'),
-  name: z.string().trim().min(1).max(64).describe('New display name. The id never changes.').optional(),
-  scope: z.enum(['global', 'workspace']).describe('Narrowing to workspace strands work elsewhere.').optional(),
-  ...teammateIdentityFields
-})
-
-const teammateDeleteArgs = z.object({
-  id: z.string().min(1).max(48).describe('Teammate id from teammate_list.')
-})
-
-const teammateAssignTaskArgs = z.object({
-  id: z.string().min(1).max(48).describe('Teammate id from teammate_list.'),
-  prompt: z
-    .string()
-    .trim()
-    .min(1)
-    .describe('The brief. Becomes one user message on the normal run path — write it as you would to a person.'),
-  scheduled_at: z
-    .string()
-    .min(1)
-    .describe('ISO-8601 datetime to start at. Omit to run as soon as the teammate is free.')
-    .optional()
-})
-
-const teammateTaskArgs = z.object({
-  action: z
-    .enum(['result', 'cancel', 'retry'])
-    .describe(
-      'result = read what the teammate produced and how it ended; cancel = stop it; retry = run it again as a new task.'
-    ),
-  task_id: z
-    .string()
-    .min(1)
-    .max(80)
-    .describe('Task id, from teammate_list or from teammate_assign_task.')
-})
-
-/**
  * A tool the agent writes for itself.
  *
  * The module is dynamically imported in a utility process with full Node
@@ -1229,7 +1117,7 @@ export const TOOL_REGISTRY = {
   },
   create_plan: {
     description:
-      'Publish this run plan.md (Plan mode; in root Agent runs the plan Steps are the fan-out manifest — every step maps to one child instance). When automatic mode switching is on, calling it in Agent mode switches the run to Plan mode. title is the H1. plan markdown should cover Goal, Scope, Steps (each with affected paths + verification), a Done when checklist, and Risks; the result includes advisory quality feedback when sections are missing. Optional todos merge into todo_write. Copies Done when into contract.md. Do not put the plan only in chat.',
+      'Publish this run plan.md. Publishing changes no mode — the run carries straight on and implements it; in root runs the plan Steps are the fan-out manifest, every step mapping to one child instance. Inspect the workspace first: the plan may only name paths and symbols verified in this run. title is the H1. Canonical structure for plan: `## Goal` (outcome in 1–2 sentences), `## Scope` (in / out), `## Architecture` (a ```mermaid diagram of the affected components and data flow, nodes named after real files or symbols), `## Steps` (ordered; each names the paths or symbols it touches and the runnable check that proves it done — a test, command, or output), `## Done when` (a `- [ ]` checklist of concrete, observable criteria), `## Risks` (trade-offs, unknowns). The result includes advisory quality feedback when sections are missing. Optional todos merge into todo_write. Copies Done when into contract.md. Do not put the plan only in chat.',
     schema: createPlanArgs
   },
   create_goal: {
@@ -1366,7 +1254,7 @@ export const TOOL_REGISTRY = {
   },
   switch_mode: {
     description:
-      'Switch this run between Ask (read-only Q&A), Plan (plan.md/contract.md only), and Agent (edits, terminal, MCP). Only present when automatic mode switching is on.',
+      'Switch this run between Ask (read-only Q&A) and Agent (edits, terminal, MCP). Planning needs no switch — Agent publishes and implements the plan. Only present when automatic mode switching is on.',
     schema: switchModeArgs
   },
   terminal: {
@@ -1453,7 +1341,7 @@ export const TOOL_REGISTRY = {
   },
   await_agent_instance: {
     description:
-      'Wait for a spawned child instance to finish; returns phase plus the child’s summary and wroteFiles. Await multiple run_ids together in one step. On timeout the child keeps running — await again with a longer timeout_ms, pull_agent_instance, or cancel_agent_instance. The returned summary is capped (~6,000 chars, ends with a [...truncated N chars] marker when cut); use pull_agent_instance views for more detail.',
+      'Wait for a spawned child instance to finish; returns phase plus the child’s summary and wroteFiles. Await multiple run_ids together in one step. Each call waits at most the timeout_ms cap (see timeout_ms); on timeout the child keeps running — await again for another bounded wait, pull_agent_instance, or cancel_agent_instance. The returned summary is capped (~6,000 chars, ends with a [...truncated N chars] marker when cut); use pull_agent_instance views for more detail.',
     schema: awaitAgentInstanceArgs
   },
   pull_agent_instance: {
@@ -1471,40 +1359,10 @@ export const TOOL_REGISTRY = {
       'Cancel a still-running spawned instance (by run_id). Use when a child is stuck, looping on denials, or no longer needed; pull its output afterwards.',
     schema: cancelAgentInstanceArgs
   },
-  teammate_list: {
-    description:
-      'List persistent teammates — their id, name, persona, scope, pinned model, autonomy, and current work. Teammates are NOT instances: an instance is an ephemeral worker inside this run, a teammate outlives every conversation, keeps its own private memory per project, and takes scheduled work unattended. Call this before any other teammate_* tool; every one of them takes an id from here.',
-    schema: teammateListArgs
-  },
-  teammate_create: {
-    description:
-      'Create a persistent teammate. Use when work is recurring, needs its own accumulated memory, or should run unattended later — not for one-off parallelism, which is spawn_agent_instance. Give it a persona and identity worth keeping; a teammate with an empty persona is just a slower chat. The id is slugified from the name and can never be reused after deletion, so name it deliberately. Returns the created id.',
-    schema: teammateCreateArgs
-  },
-  teammate_update: {
-    description:
-      'Change a teammate. Only the fields you pass are touched; everything else is left alone. The id and its memory namespace never change, so renaming is safe. Narrowing scope from global to workspace strands that teammate’s chats and queued tasks in every other project.',
-    schema: teammateUpdateArgs
-  },
-  teammate_delete: {
-    description:
-      'Delete a teammate. Stops its queued and running work first, then removes it and its per-workspace overrides. Its run history and private memory are KEPT and its id is retired forever, so a later teammate can never inherit them. Reports how many tasks and runs it stopped.',
-    schema: teammateDeleteArgs
-  },
-  teammate_assign_task: {
-    description:
-      'Hand a teammate a brief to run on its own, now or at a scheduled time. It runs through the normal agent path in its own session with its own memory — you do not wait for it, and nothing streams back to this conversation. Read the outcome later with teammate_task. A teammate runs one task at a time; anything else you assign queues behind it. The app must stay open for a scheduled task to fire. Returns the task id and its status.',
-    schema: teammateAssignTaskArgs
-  },
   build_tool: {
     description:
       'Write a reusable tool for yourself, as `<name>.mjs` under the agent tools dir. Use it when a run keeps repeating the same mechanical shape that no built-in covers — not for one-off work, which the existing tools already do. Your code must export `async function handler(args, ctx)` and may use Node builtins only. It joins the catalog on the next step and stays available to later runs; calling it asks the user, every time the file changes. Pass overwrite: true to replace one you wrote earlier.',
     schema: buildToolArgs
-  },
-  teammate_task: {
-    description:
-      'Follow up on one task you handed a teammate. `result` reads what it produced — its final message and the files it wrote — and is the only way delegated work comes back to you; a task still running says so instead. `cancel` stops queued, scheduled or running work. `retry` re-runs a finished task as a NEW one, leaving the original in history. Ids come from teammate_list or teammate_assign_task.',
-    schema: teammateTaskArgs
   }
 } as const
 

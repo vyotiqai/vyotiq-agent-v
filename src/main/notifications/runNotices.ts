@@ -18,15 +18,10 @@ import { findWorkspaceSettingsOverride, getWorkspaces } from '../workspace/works
  */
 export type RunNotice = { title: string; body: string; reviewFiles?: number }
 
-/** The navigator's name for a task: its goal's first line, a teammate's name before it. */
-export function noticeTaskTitle(
-  status: Pick<RunStatus, 'goal' | 'agentProfileName'> | null | undefined,
-  runId: string
-): string {
+/** The navigator's name for a task: its goal's first line. */
+export function noticeTaskTitle(status: Pick<RunStatus, 'goal'> | null | undefined, runId: string): string {
   const goal = status?.goal?.trim()
   const title = goal ? taskTitleFromGoal(goal) : ''
-  const teammate = status?.agentProfileName?.trim()
-  if (teammate) return title ? `${teammate} · ${title}` : teammate
   return title || runId.slice(0, 8)
 }
 

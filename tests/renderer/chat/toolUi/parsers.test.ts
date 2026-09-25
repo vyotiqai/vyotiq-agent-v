@@ -759,8 +759,23 @@ describe('status message parser', () => {
     const data = parseStatusMessageData(
       tool({
         name: 'switch_mode',
+        argsPreview: JSON.stringify({ mode: 'ask' }),
+        content: 'Mode switched from agent to ask. Tool gating applies immediately; the visible tool catalog refreshes for subsequent steps.'
+      })
+    )
+    expect(data.chip).toBe('ask')
+    expect(data.message).toContain('Mode switched')
+  })
+
+  it('still renders a pre-merge switch_mode row naming Plan', () => {
+    // Transcripts recorded before Plan merged into Agent replay through this
+    // parser unchanged — it reads the row's own text, so it must not assume
+    // the chip is one of today's two modes.
+    const data = parseStatusMessageData(
+      tool({
+        name: 'switch_mode',
         argsPreview: JSON.stringify({ mode: 'plan' }),
-        content: 'Mode switched from agent to plan. Tool gating applies immediately; the visible tool catalog refreshes for subsequent steps.'
+        content: 'Mode switched from agent to plan.'
       })
     )
     expect(data.chip).toBe('plan')

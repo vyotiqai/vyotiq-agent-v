@@ -31,10 +31,10 @@ function estimateBinaryPartTokens(bytesApprox: number): number {
 /**
  * One message, split into what needs BPE and what does not.
  *
- * Both estimators read this: the incremental fast path counts `texts` on the
- * main thread, the cold path pushes them into a single worker batch. Keeping
- * one description of a message means the two can no longer drift — they used to
- * be two hand-maintained copies of the same branch set.
+ * The single description of a countable message: `texts` go into one batched
+ * worker encode, `nonTextTokens` are heuristic and need no BPE at all. This was
+ * once duplicated across a synchronous and a batched estimator, which is how the
+ * two drifted; there is only one walk now.
  */
 function messageParts(
   message: ChatMessage,
@@ -102,39 +102,21 @@ export async function estimateMessagesTokensAsync(
   const encoding = encodingForModel(model)
   const countReasoningReplay = options?.countReasoningReplay !== false
 
-  // Prefix total cache: when the previously counted array's last message object is
-  // still the last message and the array only grew, the prefix total is still valid
-  // — only newly appended messages need counting. This turns the per-step O(N) full
-  // re-walk into O(new messages), and collapses the redundant 3x assembleContext
-  // calls during a compaction step (same array -> instant hit). Assumes messages are
-  // immutable per www: the existing WeakMap cache already relies on this.
-  if (messages.length === 0) {
-    messagesTotalCache = { tail: null, length: 0, total: 0, encoding, replay: countReasoningReplay }
-    return 0
-  }
+  const wholeArray = messagesTotalCache.get(messages)
   if (
-    messagesTotalCache &&
-    messagesTotalCache.encoding === encoding &&
-    messagesTotalCache.replay === countReasoningReplay &&
-    messages.length >= messagesTotalCache.length &&
-    // Immutable messages: when the previously-counted tail is still at index
-    // cache.length-1, the whole prefix [0, cache.length) is unchanged (it moved
-    // because new messages were appended), so only the appended tail is re-counted.
-    messages[messagesTotalCache.length - 1] === messagesTotalCache.tail
+    wholeArray &&
+    wholeArray.encoding === encoding &&
+    wholeArray.replay === countReasoningReplay
   ) {
-    let total = messagesTotalCache.total
-    for (let i = messagesTotalCache.length; i < messages.length; i++) {
-      total += estimateOneMessageTokens(messages[i]!, encoding, countReasoningReplay)
-    }
-    messagesTotalCache = {
-      tail: messages[messages.length - 1],
-      length: messages.length,
-      total,
-      encoding,
-      replay: countReasoningReplay
-    }
+    return wholeArray.total
+  }
+
+  const memoize = (total: number): number => {
+    messagesTotalCache.set(messages, { total, encoding, replay: countReasoningReplay })
     return total
   }
+
+  if (messages.length === 0) return memoize(0)
 
   // Single worker round-trip for all uncached messages (not one await per message).
   const texts: Array<{ text: string; encoding: EncodingName }> = []
@@ -158,16 +140,7 @@ export async function estimateMessagesTokensAsync(
     spans.push({ message, nonTextTokens, start, end: texts.length })
   }
 
-  if (spans.length === 0) {
-    messagesTotalCache = {
-      tail: messages[messages.length - 1],
-      length: messages.length,
-      total,
-      encoding,
-      replay: countReasoningReplay
-    }
-    return total
-  }
+  if (spans.length === 0) return memoize(total)
 
   const counts = await countTextsTokensAsync(texts)
   for (const span of spans) {
@@ -176,14 +149,7 @@ export async function estimateMessagesTokensAsync(
     messageTokenCache.set(span.message, { encoding, replay: countReasoningReplay, tokens: n })
     total += n
   }
-  messagesTotalCache = {
-    tail: messages[messages.length - 1]!,
-    length: messages.length,
-    total,
-    encoding,
-    replay: countReasoningReplay
-  }
-  return total
+  return memoize(total)
 }
 
 const messageTokenCache = new WeakMap<
@@ -192,33 +158,33 @@ const messageTokenCache = new WeakMap<
 >()
 
 /**
- * Tracks the last fully-counted messages array so a growing array only re-counts
- * its appended tail. Keyed by the last message object reference (assumed immutable).
+ * Whole-array totals, keyed on the array object.
+ *
+ * It can only ever answer for the *identical* array, which is the whole point. The
+ * heuristic this replaced keyed on (length, identity of the message at
+ * `length - 1`) and accepted any array at least as long whose tail message
+ * matched — exactly the shape every history rewrite in this pipeline produces.
+ * `trimToolResults` and `stubPastSkillInvocationsInMessages` both return a
+ * *same-length* array whose tail passes through by identity and whose middle
+ * bodies are replaced, so the post-trim re-count in `assembleContext` hit the
+ * cache and served the pre-trim total: the tokens the wire trim had just
+ * reclaimed never reached `estimatedTokens`, `layers.history` or `overflow`, and a
+ * run could be sent to the summarizer on room it had already freed.
+ *
+ * Weak, not a single field: a field would pin the whole last-assembled wire
+ * history — every kept tool body and every `reasoningState` — for the life of the
+ * process, and would only ever describe one array while parallel runs assemble
+ * against several.
+ *
+ * Dropping the incremental path costs nothing measurable. The per-message WeakMap
+ * above still skips every unchanged message, so a grown array is N map lookups
+ * plus BPE for the appended tail only — and that BPE now goes through the worker
+ * batch instead of the synchronous main-thread encode the incremental path used.
  */
-let messagesTotalCache: {
-  tail: object | null
-  length: number
-  total: number
-  encoding: EncodingName
-  replay: boolean
-} | null = null
-
-function estimateOneMessageTokens(
-  message: ChatMessage,
-  encoding: EncodingName,
-  countReasoningReplay: boolean
-): number {
-  const cached = messageTokenCache.get(message)
-  if (cached && cached.encoding === encoding && cached.replay === countReasoningReplay) {
-    return cached.tokens
-  }
-
-  const { texts, nonTextTokens } = messageParts(message, countReasoningReplay)
-  let n = nonTextTokens
-  for (const text of texts) n += countTextTokens(text, encoding)
-  messageTokenCache.set(message, { encoding, replay: countReasoningReplay, tokens: n })
-  return n
-}
+const messagesTotalCache = new WeakMap<
+  readonly ChatMessage[],
+  { total: number; encoding: EncodingName; replay: boolean }
+>()
 
 /**
  * Auto-compact trigger decision against a hard window threshold.

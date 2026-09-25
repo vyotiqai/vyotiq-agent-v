@@ -159,9 +159,27 @@ export type ToolApprovalMode = z.infer<typeof ToolApprovalModeSchema>
 export const TerminalShellSchema = z.enum(['auto', 'cmd', 'powershell', 'bash'])
 export type TerminalShell = z.infer<typeof TerminalShellSchema>
 
-/** Composer interaction mode: Ask (read-only), Plan (plan artifacts), Agent (full). */
-export const AgentInteractionModeSchema = z.enum(['ask', 'plan', 'agent'])
-export type AgentInteractionMode = z.infer<typeof AgentInteractionModeSchema>
+/** Composer interaction mode: Ask (read-only) or Agent (full). */
+export const AGENT_INTERACTION_MODES = ['ask', 'agent'] as const
+
+/**
+ * Plan was merged into Agent — every capability Plan gated (plan artifacts,
+ * `create_plan`, todos, diagnostics) is now reachable from Agent, so the mode
+ * that only restricted them has nothing left to do.
+ *
+ * `'plan'` is still ACCEPTED here and folded to `'agent'`, because the value is
+ * durable: it sits in `workspaces.json` (`uiStateByPath.*.agentMode`), in every
+ * `status.json` a Plan run wrote, and in `mode_changed` rows of `events.jsonl`.
+ * A bare `z.enum(['ask','agent'])` would reject those: `readStatus` treats a
+ * schema failure as a CORRUPT file and returns null, so a finished Plan run
+ * would lose its status entirely. Folding migrates them on next read/write
+ * instead. Do not narrow this to a plain enum while old stores can exist.
+ */
+export const AgentInteractionModeSchema = z.preprocess(
+  (value) => (value === 'plan' ? 'agent' : value),
+  z.enum(AGENT_INTERACTION_MODES)
+)
+export type AgentInteractionMode = (typeof AGENT_INTERACTION_MODES)[number]
 
 /** Default answer length for conversational replies. */
 export const ResponseVerbositySchema = z.enum(['concise', 'balanced', 'detailed'])

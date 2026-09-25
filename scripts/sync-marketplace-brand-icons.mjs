@@ -99,7 +99,6 @@ export const VENDORED = {
 export const GLYPHS = {
   'implement-feature': 'hammer',
   'create-skill': 'magic-wand',
-  'create-teammate': 'users-three',
   goal: 'target',
   'persona-builder': 'user-circle-gear',
   'incident-triage': 'siren',

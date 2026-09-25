@@ -14,7 +14,6 @@
  * this component, because showcase.ts drops it.
  */
 import type { ShowcaseSection } from '../lib/showcase'
-import TeammateCompare from './TeammateCompare.astro'
 import WorktreeDiagram from './WorktreeDiagram.astro'
 
 interface Props {
@@ -35,9 +34,7 @@ const cards = section.display === 'cards'
           {section.body && <p class="vy-lede vy-card-lede">{section.body}</p>}
         </header>
 
-        {section.id === 'teammates' && <TeammateCompare />}
-
-        <ul class:list={['vy-cards', section.id === 'teammates' && 'vy-cards-after-visual']}>
+        <ul class="vy-cards">
           {section.id === 'parallelism' && (
             <li class="vy-card vy-card-visual">
               <WorktreeDiagram />

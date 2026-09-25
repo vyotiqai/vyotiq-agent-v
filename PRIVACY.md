@@ -41,7 +41,6 @@ All of the following stays on your machine. None of it is transmitted to Vyotiq.
 | Workspace and code | Repository paths, file contents the agent reads or edits | The folders you open |
 | Chats and agent runs | Messages, tool calls, run history, checkpoints | Electron `userData` |
 | Workspace memory | Notes the agent keeps between runs | `.vyotiq/memory/` in the workspace |
-| Teammate memory | Per-identity private notes | `.vyotiq/agents/<id>/memory/` |
 | Provider credentials | API keys for the providers you configure | OS keychain (see §4) |
 | Settings | Preferences, including `telemetryEnabled` | `settings.json` in Electron `userData` |
 | Code index | Keyword index and local embeddings of your repository | Per-workspace SQLite in `userData` |

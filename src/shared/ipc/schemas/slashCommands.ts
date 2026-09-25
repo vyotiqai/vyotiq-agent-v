@@ -41,7 +41,6 @@ export const BuiltinClientActionSchema = z.enum([
   'create_skill',
   'undo_writes',
   'set_mode_ask',
-  'set_mode_plan',
   'set_mode_agent',
   'harness_apply',
   'goal_pause',

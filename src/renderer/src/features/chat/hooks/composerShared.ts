@@ -24,7 +24,7 @@ import type { ChatMetaStore } from '../chatStores'
 import type { IncompleteTurnState, PendingFollowUpState } from '@renderer/lib/hooks/createChatStreamController'
 import type { ContextUsageState } from '../components/composer/ContextMeter'
 import type { SlashClientHandlers } from '../components/composer/slashCommandExecute'
-import { useHasTranscriptRunError } from '../components/ChatStreamLeaves'
+import { useTranscriptShowsError } from '../components/ChatStreamLeaves'
 import type { ChatItemsStore } from '../chatStores'
 import { isRetryableTurnFailure } from '@shared/errors'
 import type { TurnOutcome } from '@shared/transcript'
@@ -46,8 +46,8 @@ export type ChatErrorSurfacesArgs = {
 /**
  * Single derivation of the banner / turn-failure presentation shared by
  * ChatView and SessionChatColumn — the suppression rule (composer banner off
- * when the transcript already shows a run_error row) and the failure-label
- * vocabulary live here so the surfaces cannot drift.
+ * when the latest turn already shows the same error as a run_error row) and the
+ * failure-label vocabulary live here so the surfaces cannot drift.
  */
 export function deriveChatErrorSurfaces(
   hasTranscriptRunError: boolean,
@@ -73,7 +73,7 @@ export function deriveChatErrorSurfaces(
 export function useChatErrorSurfaces(
   args: ChatErrorSurfacesArgs & { itemsStore?: ChatItemsStore; items: UiItem[] }
 ): ChatErrorSurfaces {
-  const hasTranscriptRunError = useHasTranscriptRunError(args.itemsStore, args.items)
+  const hasTranscriptRunError = useTranscriptShowsError(args.itemsStore, args.items, args.error)
   return deriveChatErrorSurfaces(hasTranscriptRunError, args)
 }
 
@@ -264,8 +264,6 @@ export type BuildComposerSendPropsInput = {
   slashHandlers?: SlashClientHandlers
   onFocus?: () => void
   onEditLastUserMessage?: () => boolean
-  agentProfileId?: string | null
-  onAgentProfileChange?: (profileId: string | null) => void
 }
 
 /** Shared dock/hero composer prop bag for ChatView and SessionChatColumn. */
@@ -294,8 +292,6 @@ export function buildComposerSendProps(input: BuildComposerSendPropsInput) {
     onChatSettingsChange: input.onChatSettingsChange,
     agentMode: input.agentMode,
     onAgentModeChange: input.onAgentModeChange,
-    agentProfileId: input.agentProfileId,
-    onAgentProfileChange: input.onAgentProfileChange,
     onSend: input.onSend,
     onStop: input.onStop,
     pendingFollowUps: input.pendingFollowUps,
