@@ -22,7 +22,11 @@ function loadMermaid(theme: 'dark' | 'neutral'): Promise<MermaidApi> {
         // Suppress mermaid's own error-diagram SVG ("Syntax error in text");
         // on failure mermaid removes its temp `d${id}` element before rejecting.
         suppressErrorRendering: true,
-        theme
+        theme,
+        // Mermaid 12 defaults to a new look (glow shadows, orthogonal edges)
+        // and re-lays out flowcharts; these keep diagrams as they were drawn.
+        look: 'classic',
+        layout: 'dagre'
       })
       return mod.default
     })
