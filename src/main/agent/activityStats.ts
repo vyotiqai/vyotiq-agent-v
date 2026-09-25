@@ -118,6 +118,8 @@ export async function collectHomeActivity(
   const days = new Map<string, HomeActivityDay>()
   /** Distinct parent runs with in-window activity — the honest session count. */
   const activeRunIds = new Set<string>()
+  /** Runs any of whose usage carried a bill or an estimate. */
+  const pricedRunIds = new Set<string>()
   const outcomes = { done: 0, error: 0, cancelled: 0, running: 0 }
   let billedInputTokens = 0
   let outputTokens = 0
@@ -127,6 +129,9 @@ export async function collectHomeActivity(
   let withEstimate = false
   let cachedInputTokens = 0
   let withCache = false
+  /** Whole-prompt tokens in the window, and whether any tokens lacked one. */
+  let promptInputTokens = 0
+  let promptUntracked = false
   let reasoningTokensTotal = 0
   let withReasoning = false
   let peakInputTokensTotal = 0
@@ -150,6 +155,8 @@ export async function collectHomeActivity(
   /** Previous equal-length window totals — the trend signal (tokens). */
   const previousKeys = new Set(lastDayKeys(localDayKeyOf(new Date(now.getTime() - windowDays * 86_400_000).toISOString()), windowDays))
   let previousTokens = 0
+  /** Distinct runs with activity in the previous window — the trend signal (tasks). */
+  const previousRunIds = new Set<string>()
   /**
    * Prune cutoff: the earliest local-day start the aggregation can still see
    * (the previous window feeds the token trend). Run-dir files last written
@@ -172,6 +179,12 @@ export async function collectHomeActivity(
   /** Attention signals: unverified runs (receipt-scoped) + window tool usage. */
   let unverifiedRuns = 0
   const toolTotals = new Map<string, { ok: number; failed: number }>()
+  /** Tool calls in window receipts (stubs and gate refusals are not calls). */
+  let toolCalls = 0
+  /** Per tool, how often each failure message came back — the commonest is its reason. */
+  const failureReasons = new Map<string, Map<string, number>>()
+  /** Runs whose edits had no passing check after them. */
+  const uncheckedRuns: Array<{ runId: string; workspacePath: string; goal?: string; files: number; writtenAt: string }> = []
   /** Sessions that ended in error — the newest few become the digest (real goals only). */
   const errorRuns: Array<{ runId: string; workspacePath: string; goal?: string; writtenAt: string }> = []
 
@@ -212,6 +225,7 @@ export async function collectHomeActivity(
       billedCost?: number
       estimatedCost?: number
       cachedInputTokens?: number
+      promptInputTokens?: number
       model?: string
       reasoningTokens?: number
       peakInputTokens?: number
@@ -234,6 +248,7 @@ export async function collectHomeActivity(
     day.outputTokens += usage.outputTokens
     billedInputTokens += usage.inputTokens
     outputTokens += usage.outputTokens
+    if ((usage.billedCost ?? 0) > 0 || (usage.estimatedCost ?? 0) > 0) pricedRunIds.add(runId)
     if (usage.billedCost != null && usage.billedCost > 0) {
       day.billedCost = (day.billedCost ?? 0) + usage.billedCost
       billedCostTotal += usage.billedCost
@@ -256,6 +271,8 @@ export async function collectHomeActivity(
       cachedInputTokens += usage.cachedInputTokens
       withCache = true
     }
+    if (usage.promptInputTokens != null) promptInputTokens += usage.promptInputTokens
+    else if (usage.inputTokens > 0) promptUntracked = true
     if (usage.reasoningTokens != null && usage.reasoningTokens > 0) {
       day.reasoningTokens = (day.reasoningTokens ?? 0) + usage.reasoningTokens
       reasoningTokensTotal += usage.reasoningTokens
@@ -340,6 +357,7 @@ export async function collectHomeActivity(
         for (const [date, entry] of Object.entries(ledger.days)) {
           if (previousKeys.has(date)) {
             previousTokens += entry.inputTokens + entry.outputTokens
+            previousRunIds.add(runId)
             continue
           }
           const day = bucketFor(date)
@@ -353,6 +371,7 @@ export async function collectHomeActivity(
               billedCost: entry.billedCost,
               estimatedCost: entry.estimatedCost,
               cachedInputTokens: entry.cachedInputTokens,
+              promptInputTokens: entry.promptInputTokens,
               model: receipt?.model,
               reasoningTokens: entry.reasoningTokens,
               peakInputTokens: entry.peakInputTokens,
@@ -381,6 +400,13 @@ export async function collectHomeActivity(
           : receipt.verification?.verifiedAfterLastMutation === false
         if (unverified) {
           unverifiedRuns += 1
+          uncheckedRuns.push({
+            runId: receipt.runId,
+            workspacePath,
+            ...(receipt.goal ? { goal: receipt.goal } : {}),
+            files: new Set(receipt.wroteFiles).size,
+            writtenAt: receipt.writtenAt
+          })
         }
         if (receipt.status === 'error') {
           errorRuns.push({
@@ -391,6 +417,7 @@ export async function collectHomeActivity(
           })
         }
         if (receipt.toolStats.totalCalls > 0) {
+          toolCalls += receipt.toolStats.totalCalls
           for (const [name, toolStat] of Object.entries(receipt.toolStats.byName)) {
             const entry = toolTotals.get(name) ?? { ok: 0, failed: 0 }
             entry.ok += toolStat.ok
@@ -398,9 +425,21 @@ export async function collectHomeActivity(
             toolTotals.set(name, entry)
           }
         }
+        // Clusters are keyed "tool: message" (runReceipt's failure scan).
+        for (const cluster of receipt.failureClusters) {
+          const split = cluster.key.indexOf(': ')
+          if (split <= 0) continue
+          const tool = cluster.key.slice(0, split)
+          const message = cluster.key.slice(split + 2).trim()
+          if (!message || message === '(no message)') continue
+          const byMessage = failureReasons.get(tool) ?? new Map<string, number>()
+          byMessage.set(message, (byMessage.get(message) ?? 0) + cluster.count)
+          failureReasons.set(tool, byMessage)
+        }
       }
 
       if (ledger) continue // fully attributed by the ledger
+      if (previousKeys.has(receiptDate)) previousRunIds.add(runId)
       // Legacy run without a ledger: fall back to the receipt's cumulative
       // totals, attributed to the day the receipt was written. Cost falls back
       // to the receipt field, then the interrupted-run checkpoint.
@@ -444,6 +483,22 @@ export async function collectHomeActivity(
     .map(([name, totals]) => ({ name, ...totals }))
     .sort((a, b) => b.ok + b.failed - (a.ok + a.failed))
     .slice(0, 5)
+  // Failing tools — most failures first, each with the error it gave most.
+  const failingTools = [...toolTotals.entries()]
+    .filter(([, totals]) => totals.failed > 0)
+    .sort(([nameA, a], [nameB, b]) => b.failed - a.failed || b.failed / (b.ok + b.failed) - a.failed / (a.ok + a.failed) || nameA.localeCompare(nameB))
+    .slice(0, 5)
+    .map(([name, totals]) => {
+      const reasons = [...(failureReasons.get(name)?.entries() ?? [])].sort(
+        ([messageA, countA], [messageB, countB]) => countB - countA || messageA.localeCompare(messageB)
+      )
+      const reason = reasons[0]?.[0]
+      return { name, ok: totals.ok, failed: totals.failed, ...(reason ? { reason } : {}) }
+    })
+  const uncheckedDigest = uncheckedRuns
+    .sort((a, b) => (a.writtenAt < b.writtenAt ? 1 : a.writtenAt > b.writtenAt ? -1 : 0))
+    .slice(0, 5)
+    .map(({ writtenAt: _writtenAt, ...run }) => run)
   // Error digest — newest first, capped at 3; rendered only when present.
   const errorDigest = errorRuns
     .sort((a, b) => (a.writtenAt < b.writtenAt ? 1 : a.writtenAt > b.writtenAt ? -1 : 0))
@@ -460,7 +515,10 @@ export async function collectHomeActivity(
           attention: {
             unverifiedRuns,
             ...(errorDigest.length > 0 ? { errorRuns: errorDigest } : {}),
-            ...(topTools.length > 0 ? { topTools } : {})
+            ...(topTools.length > 0 ? { topTools } : {}),
+            ...(toolCalls > 0 ? { toolCalls } : {}),
+            ...(failingTools.length > 0 ? { failingTools } : {}),
+            ...(uncheckedDigest.length > 0 ? { uncheckedRuns: uncheckedDigest } : {})
           }
         }
       : {}),
@@ -471,11 +529,18 @@ export async function collectHomeActivity(
       outputTokens,
       ...(withCost ? { billedCost: billedCostTotal } : {}),
       ...(withEstimate ? { estimatedCost: estimatedCostTotal } : {}),
+      ...(withCost || withEstimate ? { pricedRuns: pricedRunIds.size } : {}),
       ...(withCache ? { cachedInputTokens } : {}),
+      // Only when the provider reported cache reads: one that reports none
+      // would read as a measured 0%, which it is not.
+      ...(withCache && !promptUntracked && promptInputTokens > 0
+        ? { cacheShare: Math.min(1, cachedInputTokens / promptInputTokens) }
+        : {}),
       ...(withReasoning ? { reasoningTokens: reasoningTokensTotal } : {}),
       ...(withPeak ? { peakInputTokens: peakInputTokensTotal } : {}),
       ...(withContextWindow ? { contextWindow: peakContextWindow } : {}),
-      ...(previousTokens > 0 ? { previousTokens } : {})
+      ...(previousTokens > 0 ? { previousTokens } : {}),
+      ...(previousRunIds.size > 0 ? { previousRuns: previousRunIds.size } : {})
     },
     generatedAt: now.toISOString()
   })

@@ -3,11 +3,10 @@ import { InlineInstanceGateBanner } from './InlineInstanceGateBanner'
 import { GoalRunBanner } from './GoalRunBanner'
 import type { InlineInstanceGate } from '../hooks/useInlineInstanceUi'
 import type { RunGoal, RunLoop } from '@shared/ipc'
-import { CHAT_COLUMN, CHAT_GUTTER, CHAT_STAGE_INSET } from '@renderer/lib/utils/layout'
+import { CHAT_COLUMN, CHAT_GUTTER } from '@renderer/lib/utils/layout'
 import { cn } from '@renderer/lib/ui/cn'
 
 export function ChatTranscriptStage({
-  sideRailPad = false,
   pendingGates,
   onOpenInstance,
   goal,
@@ -23,7 +22,6 @@ export function ChatTranscriptStage({
   transcript,
   composer
 }: {
-  sideRailPad?: boolean
   pendingGates: InlineInstanceGate[]
   onOpenInstance: (instanceRunId: string) => void
   goal?: RunGoal | null
@@ -40,10 +38,16 @@ export function ChatTranscriptStage({
   composer?: ReactNode
 }) {
   const showGoal = Boolean(goal && goal.status !== 'complete' && onGoalPause && onGoalResume && onGoalComplete)
+  // The gate banner is content, not window chrome: rather than claim the
+  // title-bar band it drops below it, so its Open buttons are neither painted
+  // under the caption buttons nor swallowed by the drag region. Read-only —
+  // claiming the band here would take the window's drag strip away from the
+  // plain transcript, which is the only handle it has over the chat.
+  const gateBannerTop = 'pt-2'
   return (
     <div className="relative flex min-h-0 flex-1 flex-col" data-chat-stage>
       {pendingGates.length > 0 ? (
-        <div className={cn('shrink-0 pt-2', sideRailPad ? CHAT_STAGE_INSET : CHAT_GUTTER)}>
+        <div className={cn('shrink-0', gateBannerTop, CHAT_GUTTER)}>
           <div className={CHAT_COLUMN}>
             <InlineInstanceGateBanner gates={pendingGates} onOpenInstance={onOpenInstance} />
           </div>
@@ -59,7 +63,7 @@ export function ChatTranscriptStage({
             // Mirror the dock's own gutter bookkeeping so the centered column of
             // the banner matches the composer's even with classic scrollbars.
             'shrink-0 overflow-x-hidden overflow-y-hidden pb-1.5 [scrollbar-gutter:stable]',
-            sideRailPad ? CHAT_STAGE_INSET : CHAT_GUTTER
+            CHAT_GUTTER
           )}
         >
           <div className={CHAT_COLUMN}>

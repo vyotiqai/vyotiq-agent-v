@@ -11,7 +11,7 @@ const OPTION_BASE = cn(
   OPTION_FOCUS
 )
 /** Hover stays lighter than selected fill so hover ≠ answered. */
-const OPTION_IDLE = 'text-secondary hover:bg-surface/50 hover:text-fg'
+const OPTION_IDLE = 'text-secondary hover:bg-surface hover:text-fg'
 const OPTION_ACTIVE = 'bg-surface-2 text-fg ring-1 ring-inset ring-border/70'
 
 export type QuestionFieldProps = {
@@ -292,7 +292,7 @@ export function BooleanField({
               OPTION_FOCUS,
               active
                 ? 'border-border-strong bg-surface-2 text-fg'
-                : 'border-border text-secondary hover:bg-surface/50'
+                : 'border-border text-secondary hover:bg-surface'
             )}
             onClick={() => onChange([option], '')}
           >

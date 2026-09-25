@@ -52,7 +52,7 @@ describe('MessageList', () => {
 
     expect(screen.getByText('Compacting…')).toBeTruthy()
     expect(document.querySelector('[data-compact-status]')).toBeNull()
-    expect(screen.queryByText(/Context summarized/)).toBeNull()
+    expect(screen.queryByText(/Context summarised/)).toBeNull()
   })
 
   it('keeps Compacting… on the live TurnSummary when tool chrome is visible', () => {
@@ -98,7 +98,7 @@ describe('MessageList', () => {
     render(<MessageList items={items} />)
 
     expect(document.querySelector('[data-compact-status]')).toBeNull()
-    expect(screen.getByText('Context summarized')).toBeTruthy()
+    expect(screen.getByText('Context summarised')).toBeTruthy()
     expect(screen.getByText('Verified 100%')).toBeTruthy()
     expect(screen.getByText('~1.2k')).toBeTruthy()
     expect(screen.getByText('Earlier turns set up auth and the session store.')).toBeTruthy()

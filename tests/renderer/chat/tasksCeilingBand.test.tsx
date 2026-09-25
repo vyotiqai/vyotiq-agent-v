@@ -80,6 +80,48 @@ describe('TasksCeilingBand', () => {
     expect(screen.getByRole('progressbar')).toBeTruthy()
   })
 
+  it('lists the current task once when expanded', async () => {
+    readRunArtifact.mockResolvedValue({
+      ok: true,
+      data: {
+        name: 'todos.json',
+        exists: true,
+        content: JSON.stringify({
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          todos: [
+            { id: '1', content: 'Map project', status: 'completed' },
+            { id: '2', content: 'Run tests', status: 'in_progress' },
+            { id: '3', content: 'Ship it', status: 'pending' }
+          ]
+        })
+      }
+    })
+
+    renderBand(<TasksCeilingBand running />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Run tests')).toBeTruthy()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /Expand tasks/i }))
+
+    // The header drops to a section label so the checklist owns every task
+    // row: naming the current task in both printed it twice, stacked.
+    expect(screen.getByText('Tasks')).toBeTruthy()
+    expect(screen.getAllByText('Run tests')).toHaveLength(1)
+    // And the list keeps plan order, with nothing hoisted out of it.
+    expect(
+      Array.from(document.querySelectorAll('[data-tasks-ceiling] li')).map(
+        (li) => li.textContent
+      )
+    ).toEqual(['Map project', 'Run tests', 'Ship it'])
+
+    fireEvent.click(screen.getByRole('button', { name: /Collapse tasks/i }))
+
+    expect(screen.queryByText('Tasks')).toBeNull()
+    expect(screen.getByText('Run tests')).toBeTruthy()
+  })
+
   it('shows a skipped count when cancelled tasks exist', async () => {
     readRunArtifact.mockResolvedValue({
       ok: true,

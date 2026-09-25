@@ -2,9 +2,9 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AppShell } from '@renderer/app/AppShell'
-import { setWorkspaceHotUi, clearWorkspaceHotUi } from '@renderer/lib/hooks/workspaceHotUiStore'
+import { getToasts, resetToastStoreForTests } from '@renderer/lib/ui/toastStore'
 
 const baseProps = {
   view: 'chat' as const,
@@ -26,8 +26,6 @@ const baseProps = {
       activeRunId: null
     }
   },
-  sessionQuery: '',
-  onSessionQuery: vi.fn(),
   onOpenSettings: vi.fn(),
   onOpenMarketplace: vi.fn(),
   onOpenChat: vi.fn(),
@@ -38,8 +36,7 @@ const baseProps = {
   onDeleteRunInWorkspace: vi.fn(),
   onSwitchWorkspace: vi.fn(),
   onCloseWorkspace: vi.fn(),
-  onAddWorkspace: vi.fn(),
-  workspaceHasBackgroundRun: () => false
+  onAddWorkspace: vi.fn()
 }
 
 beforeEach(() => {
@@ -80,7 +77,6 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
-  clearWorkspaceHotUi('/ws/demo')
   vi.restoreAllMocks()
 })
 
@@ -102,11 +98,11 @@ describe('AppShell', () => {
       </AppShell>
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /open menu/i }))
-    expect(screen.getByRole('dialog', { name: /navigation/i })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /show navigator/i }))
+    expect(screen.getByRole('dialog', { name: /^navigator$/i })).toBeTruthy()
 
     fireEvent.keyDown(document, { key: 'Escape' })
-    expect(screen.queryByRole('dialog', { name: /navigation/i })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: /^navigator$/i })).toBeNull()
   })
 
   it('selects a chat from the sidebar', () => {
@@ -127,19 +123,22 @@ describe('AppShell', () => {
     expect(onOpenChat).toHaveBeenCalled()
   })
 
-  it('shows agent-first sidebar with chats and workspace controls', () => {
+  it('frames the window: the band, the navigator and the main pane', () => {
     render(
       <AppShell {...baseProps}>
         <p>Main content</p>
       </AppShell>
     )
-    expect(screen.getByRole('region', { name: /workspace sessions/i })).toBeTruthy()
-    expect(screen.getByText(/workspaces/i)).toBeTruthy()
-    expect(screen.getByRole('button', { name: /new chat/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /settings/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /^marketplace$/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /collapse sidebar/i })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /open menu/i })).toBeNull()
+    const nav = screen.getByRole('navigation', { name: 'Tasks' })
+    expect(within(nav).getByRole('button', { name: /new task/i })).toBeTruthy()
+    expect(within(nav).getByRole('button', { name: /^home$/i })).toBeTruthy()
+    expect(within(nav).getByRole('button', { name: /^extensions$/i })).toBeTruthy()
+    expect(within(nav).getByRole('button', { name: /^settings/i })).toBeTruthy()
+    expect(within(nav).getByRole('button', { name: /help & shortcuts/i })).toBeTruthy()
+    expect(within(nav).getByRole('button', { name: /^fix tests/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /hide navigator/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /search tasks, files and commands/i })).toBeTruthy()
+    expect(screen.getByRole('main').textContent).toContain('Main content')
   })
 
   it('shows a sidebar resize handle on desktop when expanded', () => {
@@ -148,49 +147,36 @@ describe('AppShell', () => {
         <p>Main content</p>
       </AppShell>
     )
-    expect(screen.getByRole('separator', { name: /Resize sidebar/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /collapse sidebar/i }))
-    expect(screen.queryByRole('separator', { name: /Resize sidebar/i })).toBeNull()
+    expect(screen.getByRole('separator', { name: /Resize navigator/i })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /hide navigator/i }))
+    expect(screen.queryByRole('separator', { name: /Resize navigator/i })).toBeNull()
   })
 
-  it('collapses the desktop sidebar to a top corner icon', () => {
+  it('hides the navigator entirely and remembers it', () => {
     render(
       <AppShell {...baseProps}>
         <p>Main content</p>
       </AppShell>
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /collapse sidebar/i }))
-    expect(screen.getByRole('button', { name: /expand sidebar/i })).toBeTruthy()
-    expect(screen.queryByRole('textbox', { name: /search chats/i })).toBeNull()
-    expect(screen.queryByRole('button', { name: /new chat in/i })).toBeNull()
-    expect(screen.queryByRole('button', { name: /^search chats$/i })).toBeNull()
-    expect(screen.getByRole('button', { name: /^settings$/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /^marketplace$/i })).toBeTruthy()
-    expect(screen.queryByRole('tablist', { name: /workspaces/i })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /hide navigator/i }))
+    expect(screen.queryByRole('navigation', { name: 'Tasks' })).toBeNull()
     expect(localStorage.getItem('vyotiq.sidebarCollapsed')).toBe('1')
 
-    // Expanding restores the full sidebar chrome.
-    fireEvent.click(screen.getByRole('button', { name: /expand sidebar/i }))
-    expect(screen.getByRole('textbox', { name: /search chats/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /new chat in/i })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /show navigator/i }))
+    expect(screen.getByRole('navigation', { name: 'Tasks' })).toBeTruthy()
   })
 
-  it('disables workspace-dependent sidebar actions when no workspace is open', () => {
+  it('offers no new task until a workspace is open', () => {
     render(
-      <AppShell {...baseProps} workspacePath={null} openWorkspaces={[]} runs={[]}>
+      <AppShell {...baseProps} workspacePath={null} openWorkspaces={[]} runsByWorkspacePath={{}}>
         <p>Main content</p>
       </AppShell>
     )
 
-    expect(screen.queryByRole('button', { name: /new chat in/i })).toBeNull()
-    expect((screen.getByRole('textbox', { name: /search chats/i }) as HTMLInputElement).disabled).toBe(
-      true
-    )
-    expect((screen.getByRole('button', { name: /settings/i }) as HTMLButtonElement).disabled).toBe(
-      false
-    )
-    expect(screen.getByText('Open a workspace to see chats')).toBeTruthy()
+    expect((screen.getByRole('button', { name: /new task/i }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: /^settings/i }) as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByText('Tasks you start show up here, grouped by what they need from you.')).toBeTruthy()
   })
 
   it('toggles the desktop sidebar with Ctrl/Cmd+B', () => {
@@ -201,26 +187,48 @@ describe('AppShell', () => {
     )
 
     fireEvent.keyDown(window, { key: 'b', ctrlKey: true })
-    expect(screen.getByRole('button', { name: /expand sidebar/i })).toBeTruthy()
+    expect(screen.queryByRole('navigation', { name: 'Tasks' })).toBeNull()
     fireEvent.keyDown(window, { key: 'b', ctrlKey: true })
-    expect(screen.getByRole('button', { name: /collapse sidebar/i })).toBeTruthy()
+    expect(screen.getByRole('navigation', { name: 'Tasks' })).toBeTruthy()
   })
 
-  it('focuses chat search with Ctrl/Cmd+K after expanding', async () => {
+  it('opens search and commands with Ctrl/Cmd+K, even from the instruction line', async () => {
     render(
       <AppShell {...baseProps}>
+        <div role="textbox" aria-label="Message" data-composer-input contentEditable tabIndex={0} />
+      </AppShell>
+    )
+    const composer = screen.getByRole('textbox', { name: /^message$/i })
+    composer.focus()
+    fireEvent.keyDown(composer, { key: 'k', ctrlKey: true })
+    const search = await screen.findByRole('textbox', { name: /search tasks, files and commands/i })
+    await waitFor(() => expect(document.activeElement).toBe(search))
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: /search and commands/i })).toBeNull()
+  })
+
+  it('opens the task that waits on you with Ctrl/Cmd+J', () => {
+    const onSelectRunInWorkspace = vi.fn()
+    render(
+      <AppShell
+        {...baseProps}
+        activeRuns={[
+          {
+            runId: 'run-abc',
+            workspacePath: '/ws/demo',
+            invokeId: 1,
+            pendingFollowUps: [],
+            waiting: { kind: 'approval', since: new Date().toISOString() }
+          }
+        ]}
+        activeRunsLoaded
+        onSelectRunInWorkspace={onSelectRunInWorkspace}
+      >
         <p>Main content</p>
       </AppShell>
     )
-
-    fireEvent.click(screen.getByRole('button', { name: /collapse sidebar/i }))
-    expect(screen.queryByRole('textbox', { name: /search chats/i })).toBeNull()
-
-    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
-    const search = await screen.findByRole('textbox', { name: /search chats/i })
-    await waitFor(() => {
-      expect(document.activeElement).toBe(search)
-    })
+    fireEvent.keyDown(window, { key: 'j', ctrlKey: true })
+    expect(onSelectRunInWorkspace).toHaveBeenCalledWith('/ws/demo', 'run-abc')
   })
 
   it('creates a new chat with Ctrl/Cmd+N', () => {
@@ -251,6 +259,7 @@ describe('AppShell', () => {
         <div
           role="textbox"
           aria-label="Message"
+          data-composer-input
           contentEditable
           tabIndex={0}
         />
@@ -265,7 +274,7 @@ describe('AppShell', () => {
     render(
       <AppShell {...baseProps}>
         <div>
-          <div role="textbox" aria-label="Message" contentEditable tabIndex={0} />
+          <div role="textbox" aria-label="Message" data-composer-input contentEditable tabIndex={0} />
           <input data-browser-url placeholder="Search or enter URL" />
         </div>
       </AppShell>
@@ -278,7 +287,7 @@ describe('AppShell', () => {
     render(
       <AppShell {...baseProps}>
         <div>
-          <div role="textbox" aria-label="Message" contentEditable tabIndex={0} />
+          <div role="textbox" aria-label="Message" data-composer-input contentEditable tabIndex={0} />
           <div inert>
             <input data-browser-url placeholder="Search or enter URL" />
           </div>
@@ -296,6 +305,7 @@ describe('AppShell', () => {
         <div
           role="textbox"
           aria-label="Message"
+          data-composer-input
           contentEditable
           tabIndex={0}
         />
@@ -406,20 +416,20 @@ describe('AppShell', () => {
         <p>Main content</p>
       </AppShell>
     )
-    fireEvent.click(screen.getByRole('button', { name: /open menu/i }))
-    expect(screen.getByRole('dialog', { name: /navigation/i })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /show navigator/i }))
+    expect(screen.getByRole('dialog', { name: /^navigator$/i })).toBeTruthy()
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(onChatStop).not.toHaveBeenCalled()
   })
 
-  it('does not stop on Escape with session query while running', () => {
+  it('does not stop on Escape while search and commands is open', () => {
     const onChatStop = vi.fn()
-    setWorkspaceHotUi('/ws/demo', { sessionQuery: 'hello' })
     render(
-      <AppShell {...baseProps} running onChatStop={onChatStop} sessionQuery="hello">
+      <AppShell {...baseProps} running onChatStop={onChatStop}>
         <p>Main content</p>
       </AppShell>
     )
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(onChatStop).not.toHaveBeenCalled()
   })
@@ -442,7 +452,7 @@ describe('AppShell', () => {
     const onOpenSettings = vi.fn()
     render(
       <AppShell {...baseProps} onNewChat={onNewChat} onOpenSettings={onOpenSettings}>
-        <div role="textbox" aria-label="Message" contentEditable tabIndex={0} />
+        <div role="textbox" aria-label="Message" data-composer-input contentEditable tabIndex={0} />
       </AppShell>
     )
     const composer = screen.getByRole('textbox', { name: /^message$/i })
@@ -457,7 +467,7 @@ describe('AppShell', () => {
     const onCloseChat = vi.fn()
     render(
       <AppShell {...baseProps} onCloseChat={onCloseChat}>
-        <div role="textbox" aria-label="Message" contentEditable tabIndex={0} />
+        <div role="textbox" aria-label="Message" data-composer-input contentEditable tabIndex={0} />
       </AppShell>
     )
     fireEvent.keyDown(window, { key: 'w', ctrlKey: true })
@@ -482,7 +492,7 @@ describe('AppShell', () => {
     expect(onCloseChat).not.toHaveBeenCalled()
   })
 
-  it('keeps the chat list visible when runsError is set', () => {
+  it('keeps the task list visible when runsError is set', () => {
     render(
       <AppShell
         {...baseProps}
@@ -498,10 +508,10 @@ describe('AppShell', () => {
     )
 
     expect(screen.getByRole('alert').textContent).toContain('Failed to load chats')
-    expect(screen.getAllByRole('button', { name: /fix tests/i }).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: /^fix tests/i })).toBeTruthy()
   })
 
-  it('opens settings from the sidebar footer', () => {
+  it('opens settings from the navigator footer', () => {
     const onOpenSettings = vi.fn()
     render(
       <AppShell {...baseProps} onOpenSettings={onOpenSettings}>
@@ -509,11 +519,11 @@ describe('AppShell', () => {
       </AppShell>
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /^settings$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^settings/i }))
     expect(onOpenSettings).toHaveBeenCalledTimes(1)
   })
 
-  it('switches workspace when selecting a run from another workspace', () => {
+  it('opens a task from another workspace in that workspace', () => {
     const onSelectRunInWorkspace = vi.fn()
     render(
       <AppShell
@@ -541,8 +551,74 @@ describe('AppShell', () => {
       </AppShell>
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /expand .*other/i }))
-    fireEvent.click(screen.getAllByRole('button', { name: /other workspace chat/i })[0])
+    fireEvent.click(screen.getByRole('button', { name: /^other workspace chat/i }))
     expect(onSelectRunInWorkspace).toHaveBeenCalledWith('/ws/other', 'run-xyz')
+  })
+})
+
+
+describe('AppShell run toasts', () => {
+  function withInbox() {
+    let push: ((list: { items: unknown[] }) => void) | null = null
+    // @ts-expect-error test bridge
+    window.vyotiq = {
+      platform: 'win32',
+      windowIsMaximized: vi.fn(async () => ({ ok: true as const, data: false })),
+      listNotifications: vi.fn(async () => ({ ok: true as const, data: { items: [] } })),
+      markNotificationsRead: vi.fn(async () => ({ ok: true as const, data: { items: [] } })),
+      onNotificationsChanged: (handler: (list: { items: unknown[] }) => void) => {
+        push = handler
+        return () => {}
+      }
+    }
+    return (items: unknown[]) => act(() => push?.({ items }))
+  }
+
+  const finished = (runId: string) => ({
+    id: `n-${runId}`,
+    createdAt: new Date(Date.now() + 1000).toISOString(),
+    read: false,
+    source: 'agent',
+    kind: 'run_done',
+    title: 'Fix tests',
+    body: 'Ready for review · 2 files',
+    dedupeKey: `run:${runId}:done`,
+    action: { type: 'open_run', workspacePath: '/ws/demo', runId },
+    reviewFiles: 2
+  })
+
+  beforeEach(() => {
+    resetToastStoreForTests()
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+  })
+
+  it('toasts a task that finishes while Home is in front, with Review opening its changes', async () => {
+    const publish = withInbox()
+    const onReviewTask = vi.fn()
+    render(
+      <AppShell {...baseProps} view="home" focusedRun={{ workspacePath: '/ws/demo', runId: 'run-abc' }} onReviewTask={onReviewTask}>
+        <p>Home</p>
+      </AppShell>
+    )
+    await waitFor(() => expect(window.vyotiq.listNotifications).toHaveBeenCalled())
+    publish([finished('run-abc')])
+    expect(getToasts().map((t) => [t.message, t.detail])).toEqual([['Ready for review', 'Fix tests · 2 files']])
+    getToasts()[0]!.action!.onClick()
+    expect(onReviewTask).toHaveBeenCalledWith('/ws/demo', 'run-abc')
+  })
+
+  it('says nothing about the task on screen', async () => {
+    const publish = withInbox()
+    render(
+      <AppShell {...baseProps} view="chat" focusedRun={{ workspacePath: '/ws/demo', runId: 'run-abc' }}>
+        <p>Task</p>
+      </AppShell>
+    )
+    await waitFor(() => expect(window.vyotiq.listNotifications).toHaveBeenCalled())
+    publish([finished('run-abc')])
+    expect(getToasts()).toHaveLength(0)
+    // A task open in no pane still speaks up.
+    publish([finished('run-abc'), finished('run-other')])
+    expect(getToasts().map((t) => t.message)).toEqual(['Ready for review'])
   })
 })

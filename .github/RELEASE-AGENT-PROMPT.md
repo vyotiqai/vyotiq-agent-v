@@ -314,9 +314,9 @@ example — read it before writing:
 gh release view v1.0.0 --repo vyotiqai/vyotiq-agent-v-releases --json body --jq .body
 ```
 
-The retired `0.x` bodies are kept in `release-notes/archive-0.x/` for style
-reference only. They describe versions that no longer exist; never cite them in
-a release, and never link a reader to them.
+`release-notes/v1.0.0.md` is the house-style reference: the rebuilt app's
+first release. The `0.x` previews and the teammates release before it were
+withdrawn; never cite them in a release, and never link a reader to them.
 
 **Known cosmetic limitation, accepted deliberately:** `**bold**` renders as bold
 on GitHub, but the update panel and the website's `<pre>` block show the asterisks

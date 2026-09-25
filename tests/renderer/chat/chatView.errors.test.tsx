@@ -116,13 +116,39 @@ describe('ChatView operational errors', () => {
         {...baseProps}
         items={[]}
         itemsStore={itemsStore}
-        error="Stale chat error banner"
+        error="Run failed in transcript"
         activeRunId="run-1"
         onDismissError={vi.fn()}
       />
     )
 
-    expect(screen.queryByText('Stale chat error banner')).toBeNull()
+    // One copy: the transcript row. A second (the banner) makes getByText throw.
     expect(screen.getByText('Run failed in transcript')).toBeTruthy()
+  })
+
+  it('keeps the banner for a different error while an older box stays in the transcript', () => {
+    const snapshot: UiItem[] = [
+      { kind: 'message', id: 'user-0', role: 'user', content: 'first' },
+      { kind: 'run_error', id: 'err-1', message: 'Model not available' },
+      { kind: 'message', id: 'user-2', role: 'user', content: 'second' }
+    ]
+    const itemsStore: ChatItemsStore = {
+      subscribeItems: () => () => {},
+      getItemsRevision: () => 1,
+      getItems: () => snapshot
+    }
+
+    render(
+      <ChatView
+        {...baseProps}
+        items={[]}
+        itemsStore={itemsStore}
+        error="Wait for the run to finish before reverting."
+        activeRunId="run-1"
+        onDismissError={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('Wait for the run to finish before reverting.')).toBeTruthy()
   })
 })

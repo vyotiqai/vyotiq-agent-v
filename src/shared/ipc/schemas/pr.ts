@@ -31,8 +31,15 @@ export const PrCommitSchema = z.object({
 export const PrCheckSchema = z.object({
   name: z.string(),
   state: z.string(),
-  conclusion: z.string().nullable()
+  conclusion: z.string().nullable(),
+  /** The run's page on GitHub — where its log is. */
+  url: z.string().nullable().optional(),
+  startedAt: z.string().nullable().optional(),
+  completedAt: z.string().nullable().optional(),
+  /** A status context's own one-line summary ("2 failing tests"). */
+  description: z.string().nullable().optional()
 })
+export type PrCheck = z.infer<typeof PrCheckSchema>
 
 export const PrReviewSchema = z.object({
   author: z.string(),
@@ -61,7 +68,9 @@ export const PrViewSchema = z.object({
   latestReviews: z.array(PrReviewSchema),
   reviewDecision: z.string(),
   reviewRequests: z.array(z.string()),
-  isDraft: z.boolean().default(false)
+  isDraft: z.boolean().default(false),
+  /** GitHub's mergeability: CLEAN, BLOCKED, DIRTY, BEHIND, UNSTABLE, DRAFT… ('' when gh is too old). */
+  mergeStateStatus: z.string().default('')
 })
 export type PrView = z.infer<typeof PrViewSchema>
 
@@ -110,6 +119,11 @@ export const PrDiffResultSchema = z.object({
 })
 
 export const PrCloseRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  number: z.number().int().positive()
+})
+
+export const PrReadyRequestSchema = z.object({
   workspacePath: z.string().min(1),
   number: z.number().int().positive()
 })

@@ -17,7 +17,11 @@ import { toolCallArgumentsUnusable, wireToolCallArguments } from '../toolArgWire
 import { duplicateTopLevelJsonKeyError } from '../../../shared/utils/jsonish'
 import { zodToJsonSchema } from './zodToJsonSchema'
 
-/** Default wait for await_agent_instance when timeout_ms is omitted (15 minutes). */
+/**
+ * Default AND maximum wait for await_agent_instance (15 minutes): used when
+ * timeout_ms is omitted, and larger timeout_ms values are capped to it at the
+ * handler — the timeout error reports the cap so re-awaiting is chosen knowingly.
+ */
 export const AWAIT_AGENT_INSTANCE_MAX_MS = 900_000
 
 type ReadArgs = {
@@ -763,9 +767,14 @@ const askQuestionArgs = z.object({
 
 const switchModeArgs = z
   .object({
+    // `'plan'` stays in the enum so a model that learned the old vocabulary is
+    // not hard-failed for naming a mode that was merged away; the handler folds
+    // it to `'agent'`, which is what Plan became.
     mode: z
-      .enum(['ask', 'plan', 'agent'])
-      .describe('Target interaction mode for the rest of this run')
+      .enum(['ask', 'agent', 'plan'])
+      .describe(
+        'Target interaction mode for the rest of this run: "ask" (read-only) or "agent" (full). "plan" is a deprecated alias for "agent".'
+      )
   })
 
 const memoryListArgs = z.object({})
@@ -870,7 +879,7 @@ const spawnAgentInstanceArgs = z.object({
     .trim()
     .min(1)
     .describe(
-      'Child-only user prompt: complete workstream (outcome, dependent sub-tasks, done-when). No parent transcript.'
+      'Child-only user prompt: the background this workstream needs, since the child sees no parent transcript. The brief fields — outcome, sub-tasks, done-when — are separate arguments composed ahead of this text, so send each of them rather than folding them in here.'
     ),
   outcome: z
     .string()
@@ -910,7 +919,9 @@ const awaitAgentInstanceArgs = z.object({
     .number()
     .int()
     .min(1_000)
-    .describe(`Wait ms. Omitted defaults to ${AWAIT_AGENT_INSTANCE_MAX_MS}.`)
+    .describe(
+      `Wait ms. Omitted defaults to ${AWAIT_AGENT_INSTANCE_MAX_MS}; values above ${AWAIT_AGENT_INSTANCE_MAX_MS} are capped to it, so one call never waits longer.`
+    )
     .optional()
 })
 
@@ -1001,6 +1012,53 @@ const updateGoalArgs = z.object({
     .describe('active resumes a paused goal; complete ends it. Never pause.')
 })
 
+const checkDoneWhenArgs = z.object({
+  checks: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).describe('e.g. c1'),
+        verdict: z.enum(['met', 'not_met']).describe('met only if you saw it hold'),
+        evidence: z
+          .string()
+          .trim()
+          .min(1)
+          .max(600)
+          .describe('Command and result, file and line, or why not met')
+      })
+    )
+    .min(1)
+})
+
+/**
+ * A tool the agent writes for itself.
+ *
+ * The module is dynamically imported in a utility process with full Node
+ * privileges, so `build_tool` is approval-gated and high-risk: the `code`
+ * argument is what the user reads on the approval card, and it is the only
+ * point at which anyone sees it. Calls to the resulting tool are gated on their
+ * own, against the module's content hash rather than its name.
+ */
+const buildToolArgs = z.object({
+  name: z
+    .string()
+    .min(1)
+    .max(32)
+    .describe('Lowercase [a-z0-9_-]. Cannot shadow a built-in or start with mcp__.'),
+  description: z.string().min(1).max(500).describe('What it does, as the model will read it.'),
+  schema: z
+    .record(z.string(), z.unknown().describe('Any JSON value.'))
+    .describe(
+      'JSON Schema object describing the handler args, e.g. {"type":"object","properties":{...},"required":[...]}. Becomes the tool’s inputSchema.'
+    ),
+  code: z
+    .string()
+    .min(1)
+    .describe(
+      'Module body. Must export `async function handler(args, ctx)` returning JSON-serializable data. Node builtins only — it runs in a utility process, not this run.'
+    ),
+  overwrite: z.boolean().describe('Replace an existing tool of this name. Default false.').optional()
+})
+
 export const TOOL_REGISTRY = {
   read: {
     description:
@@ -1059,7 +1117,7 @@ export const TOOL_REGISTRY = {
   },
   create_plan: {
     description:
-      'Publish this run plan.md (Plan mode; in root Agent runs the plan Steps are the fan-out manifest — every step maps to one child instance). When automatic mode switching is on, calling it in Agent mode switches the run to Plan mode. title is the H1. plan markdown should cover Goal, Scope, Steps (each with affected paths + verification), a Done when checklist, and Risks; the result includes advisory quality feedback when sections are missing. Optional todos merge into todo_write. Copies Done when into contract.md. Do not put the plan only in chat.',
+      'Publish this run plan.md. Publishing changes no mode — the run carries straight on and implements it; in root runs the plan Steps are the fan-out manifest, every step mapping to one child instance. Inspect the workspace first: the plan may only name paths and symbols verified in this run. title is the H1. Canonical structure for plan: `## Goal` (outcome in 1–2 sentences), `## Scope` (in / out), `## Architecture` (a ```mermaid diagram of the affected components and data flow, nodes named after real files or symbols), `## Steps` (ordered; each names the paths or symbols it touches and the runnable check that proves it done — a test, command, or output), `## Done when` (a `- [ ]` checklist of concrete, observable criteria), `## Risks` (trade-offs, unknowns). The result includes advisory quality feedback when sections are missing. Optional todos merge into todo_write. Copies Done when into contract.md. Do not put the plan only in chat.',
     schema: createPlanArgs
   },
   create_goal: {
@@ -1071,6 +1129,11 @@ export const TOOL_REGISTRY = {
     description:
       'Mark this chat\'s goal complete (objective done, no required work left). Requires an existing goal. Rejects pause, and cannot start a goal that is awaiting user confirmation — only the user pauses, resumes, or starts a goal.',
     schema: updateGoalArgs
+  },
+  check_done_when: {
+    description:
+      "Mark this run's done-when checks (contract.md, ids c1…) met or not_met with evidence, before you finish. The user sees each verdict; not_met is an honest result.",
+    schema: checkDoneWhenArgs
   },
   browser_search: {
     description:
@@ -1191,7 +1254,7 @@ export const TOOL_REGISTRY = {
   },
   switch_mode: {
     description:
-      'Switch this run between Ask (read-only Q&A), Plan (plan.md/contract.md only), and Agent (edits, terminal, MCP). Only present when automatic mode switching is on.',
+      'Switch this run between Ask (read-only Q&A) and Agent (edits, terminal, MCP). Planning needs no switch — Agent publishes and implements the plan. Only present when automatic mode switching is on.',
     schema: switchModeArgs
   },
   terminal: {
@@ -1278,7 +1341,7 @@ export const TOOL_REGISTRY = {
   },
   await_agent_instance: {
     description:
-      'Wait for a spawned child instance to finish; returns phase plus the child’s summary and wroteFiles. Await multiple run_ids together in one step. On timeout the child keeps running — await again with a longer timeout_ms, pull_agent_instance, or cancel_agent_instance. The returned summary is capped (~6,000 chars, ends with a [...truncated N chars] marker when cut); use pull_agent_instance views for more detail.',
+      'Wait for a spawned child instance to finish; returns phase plus the child’s summary and wroteFiles. Await multiple run_ids together in one step. Each call waits at most the timeout_ms cap (see timeout_ms); on timeout the child keeps running — await again for another bounded wait, pull_agent_instance, or cancel_agent_instance. The returned summary is capped (~6,000 chars, ends with a [...truncated N chars] marker when cut); use pull_agent_instance views for more detail.',
     schema: awaitAgentInstanceArgs
   },
   pull_agent_instance: {
@@ -1295,6 +1358,11 @@ export const TOOL_REGISTRY = {
     description:
       'Cancel a still-running spawned instance (by run_id). Use when a child is stuck, looping on denials, or no longer needed; pull its output afterwards.',
     schema: cancelAgentInstanceArgs
+  },
+  build_tool: {
+    description:
+      'Write a reusable tool for yourself, as `<name>.mjs` under the agent tools dir. Use it when a run keeps repeating the same mechanical shape that no built-in covers — not for one-off work, which the existing tools already do. Your code must export `async function handler(args, ctx)` and may use Node builtins only. It joins the catalog on the next step and stays available to later runs; calling it asks the user, every time the file changes. Pass overwrite: true to replace one you wrote earlier.',
+    schema: buildToolArgs
   }
 } as const
 
@@ -1413,6 +1481,12 @@ function formatToolArgsError(name: string, detail: string): string {
   }
   if (name === 'spawn_agent_instance' && /path_scope/i.test(detail)) {
     return `${detail}. path_scope only accepts workspace-relative prefixes inside this workspace — omit it entirely when git worktree isolation is available.`
+  }
+  if (
+    name === 'spawn_agent_instance' &&
+    /(outcome|done_when|sub_tasks)\s*:\s*(Required|Invalid input: expected)/i.test(detail)
+  ) {
+    return `${detail}. spawn_agent_instance takes the brief as four separate arguments: goal (background context), outcome (the one deliverable, a string), sub_tasks (ordered array of strings), done_when (how completion is checked, a string). Resending the same payload fails the same way.`
   }
   return detail || 'Invalid tool arguments'
 }

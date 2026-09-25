@@ -6,8 +6,6 @@ import { cleanup, render } from '@testing-library/react'
 import type { UiItem } from '@shared/transcript'
 
 const spies = vi.hoisted(() => ({
-  collectLastTurnChangedFiles: vi.fn(() => [] as unknown[]),
-  collectLastTurnFileDiffs: vi.fn(() => new Map()),
   collectSessionChangedFiles: vi.fn(() => [] as unknown[]),
   collectSessionFileDiffs: vi.fn(() => new Map()),
   mergeCheckpointChangedFiles: vi.fn((files: unknown) => files),
@@ -57,6 +55,5 @@ describe('ChangesPanel hidden dock gating', () => {
     )
     expect(spies.collectSessionFileDiffs.mock.calls.length).toBe(atMount)
     expect(spies.collectSessionChangedFiles.mock.calls.length).toBe(atMount)
-    expect(spies.collectLastTurnFileDiffs.mock.calls.length).toBe(atMount)
   })
 })

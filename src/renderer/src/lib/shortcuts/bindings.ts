@@ -2,6 +2,7 @@
 export type ShortcutId =
   | 'sidebar'
   | 'search'
+  | 'nextNeedsYou'
   | 'newChat'
   | 'goHome'
   | 'settings'
@@ -30,6 +31,14 @@ export type ShortcutId =
   | 'workspace7'
   | 'workspace8'
   | 'workspace9'
+  | 'inspector'
+  | 'inspectorExpand'
+  | 'inspectorTab1'
+  | 'inspectorTab2'
+  | 'inspectorTab3'
+  | 'inspectorTab4'
+  | 'inspectorTab5'
+  | 'inspectorTab6'
 
 export type ShortcutShift = 'forbid' | 'allow' | 'require'
 
@@ -41,11 +50,17 @@ export type ShortcutBinding = {
   mod: boolean
   /** Mod chords default to forbidding Shift. */
   shift?: ShortcutShift
+  /**
+   * An Alt (Option) chord with no Cmd/Ctrl. Matched by the physical key too,
+   * because Option+1 types "¡" on macOS.
+   */
+  alt?: boolean
 }
 
 export const SHORTCUT_BINDINGS: Record<ShortcutId, ShortcutBinding> = {
   sidebar: { id: 'sidebar', key: 'b', mod: true },
   search: { id: 'search', key: 'k', mod: true },
+  nextNeedsYou: { id: 'nextNeedsYou', key: 'j', mod: true },
   newChat: { id: 'newChat', key: 'n', mod: true },
   // Shift required: ⌘H alone hides the app on macOS.
   goHome: { id: 'goHome', key: 'h', mod: true, shift: 'require' },
@@ -74,8 +89,26 @@ export const SHORTCUT_BINDINGS: Record<ShortcutId, ShortcutBinding> = {
   workspace6: { id: 'workspace6', key: '6', mod: true },
   workspace7: { id: 'workspace7', key: '7', mod: true },
   workspace8: { id: 'workspace8', key: '8', mod: true },
-  workspace9: { id: 'workspace9', key: '9', mod: true }
+  workspace9: { id: 'workspace9', key: '9', mod: true },
+  inspector: { id: 'inspector', key: 'i', mod: true },
+  inspectorExpand: { id: 'inspectorExpand', key: 'i', mod: true, shift: 'require' },
+  inspectorTab1: { id: 'inspectorTab1', key: '1', mod: false, alt: true },
+  inspectorTab2: { id: 'inspectorTab2', key: '2', mod: false, alt: true },
+  inspectorTab3: { id: 'inspectorTab3', key: '3', mod: false, alt: true },
+  inspectorTab4: { id: 'inspectorTab4', key: '4', mod: false, alt: true },
+  inspectorTab5: { id: 'inspectorTab5', key: '5', mod: false, alt: true },
+  inspectorTab6: { id: 'inspectorTab6', key: '6', mod: false, alt: true }
 }
+
+/** Alt 1–6: the inspector's tabs in their strip order (Changes … Plan). */
+export const INSPECTOR_TAB_SHORTCUTS = [
+  'inspectorTab1',
+  'inspectorTab2',
+  'inspectorTab3',
+  'inspectorTab4',
+  'inspectorTab5',
+  'inspectorTab6'
+] as const
 
 /** Ctrl/Cmd+1..9 — index into the sidebar's open-workspace order. */
 export const WORKSPACE_SWITCH_IDS = [

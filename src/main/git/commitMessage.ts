@@ -11,6 +11,49 @@ import { getSecret } from '../settings/secrets'
 import { getSettings } from '../settings/settings'
 import { readGitDiff, readGitLog, readGitStatus } from './git'
 import { getProvider } from '../agent/providers'
+import { createHash } from 'crypto'
+import { readFile } from 'fs/promises'
+import { join } from 'path'
+import { canonicalizeWorkspacePath } from '../../shared/workspacePath'
+import { atomicWriteJsonAsync } from '../storage/atomicWrite'
+import { workspaceId, workspaceMetaDir } from '../storage/paths'
+
+/**
+ * The last message the model wrote per workspace, keyed by the exact diff it
+ * read. Changes drafts one when it opens on uncommitted work; asking again for
+ * the same diff — Commit…, a reopened panel, a restart — reuses it instead of
+ * paying for another call. Any change to the diff is a new key.
+ */
+const DRAFT_FILENAME = 'commit-message.json'
+type DraftedMessage = { key: string; message: string; writtenAt: string }
+
+function draftPath(workspacePath: string): string {
+  return join(workspaceMetaDir(workspaceId(canonicalizeWorkspacePath(workspacePath))), DRAFT_FILENAME)
+}
+
+function diffKey(mode: 'all' | 'staged', diff: string): string {
+  return createHash('sha256').update(mode).update('\0').update(diff).digest('hex')
+}
+
+/** Best-effort: a message that could not be kept is still the answer. */
+async function keepDrafted(workspacePath: string, drafted: DraftedMessage): Promise<void> {
+  try {
+    await atomicWriteJsonAsync(draftPath(workspacePath), drafted)
+  } catch (err) {
+    logger.warn('Could not keep the drafted commit message', { scope: 'git', err })
+  }
+}
+
+async function readDrafted(workspacePath: string): Promise<DraftedMessage | null> {
+  try {
+    const raw = JSON.parse(await readFile(draftPath(workspacePath), 'utf8')) as Partial<DraftedMessage>
+    return typeof raw.key === 'string' && typeof raw.message === 'string' && raw.message.trim()
+      ? { key: raw.key, message: raw.message, writtenAt: String(raw.writtenAt ?? '') }
+      : null
+  } catch {
+    return null
+  }
+}
 
 const MAX_DIFF_CHARS = 60_000
 const MAX_HISTORY_CHARS = 2_000
@@ -180,11 +223,18 @@ async function selectedDiff(
 
 export async function generateCommitMessage(
   workspacePath: string,
-  mode: 'all' | 'staged' = 'all'
+  mode: 'all' | 'staged' = 'all',
+  /** Write a new one even when this diff already has one (Rewrite). */
+  force = false
 ): Promise<GitGenerateCommitMessageResult> {
   const diff = await selectedDiff(workspacePath, mode)
   if (!diff) {
     return fallbackResult('No diff content found for the selected changes')
+  }
+  const key = diffKey(mode, diff)
+  if (!force) {
+    const drafted = await readDrafted(workspacePath)
+    if (drafted?.key === key) return { message: drafted.message, source: 'agent', reused: true }
   }
 
   let settings: Settings
@@ -218,6 +268,7 @@ export async function generateCommitMessage(
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), GENERATION_TIMEOUT_MS)
+  const startedAt = Date.now()
   let raw = ''
   try {
     const provider = getProvider(settings.provider)
@@ -240,6 +291,24 @@ export async function generateCommitMessage(
       if (controller.signal.aborted) {
         return fallbackResult('Generation timed out')
       }
+      if (chunk.type === 'done' && chunk.usage) {
+        // Commit-message generation is a billed LLM call with no run behind it,
+        // so there is no run-scoped `usage.json` to record into. Its output is
+        // capped at 256 tokens, making it a rounding error next to compaction —
+        // log it structurally so the spend is at least attributable, and give it
+        // real storage only if these numbers turn out to matter.
+        logger.info('Token cost aux call', {
+          scope: 'agent',
+          code: 'AUX_USAGE',
+          site: 'commit_message',
+          provider: settings.provider,
+          model: settings.model,
+          inputTokens: chunk.usage.inputTokens,
+          outputTokens: chunk.usage.outputTokens,
+          cachedInputTokens: chunk.usage.cachedInputTokens,
+          generationMs: Math.max(0, Date.now() - startedAt)
+        })
+      }
       if (chunk.type === 'text' && chunk.text) raw += chunk.text
       if (chunk.type === 'error') return fallbackResult('The model returned an error')
     }
@@ -252,7 +321,10 @@ export async function generateCommitMessage(
   }
 
   const message = parseGeneratedCommitMessage(raw)
-  if (message) return { message, source: 'agent' }
+  if (message) {
+    await keepDrafted(workspacePath, { key, message, writtenAt: new Date().toISOString() })
+    return { message, source: 'agent' }
+  }
   return fallbackResult(
     raw.trim() ? 'The model reply was not a usable commit message' : 'The model returned no text'
   )

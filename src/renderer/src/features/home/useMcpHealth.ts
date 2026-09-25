@@ -20,8 +20,15 @@ export function useMcpHealth(
   workspacePath: string | null,
   enabled: boolean,
   refreshVersion = 0
-): { issues: McpHealthIssue[]; refresh: () => void; retry: () => Promise<void> } {
+): {
+  issues: McpHealthIssue[]
+  /** Every configured server's name by id — how an MCP tool's server is named. */
+  names: ReadonlyMap<string, string>
+  refresh: () => void
+  retry: () => Promise<void>
+} {
   const [issues, setIssues] = useState<McpHealthIssue[]>([])
+  const [names, setNames] = useState<ReadonlyMap<string, string>>(() => new Map())
   const [refreshNonce, setRefreshNonce] = useState(0)
   const generationRef = useRef(0)
 
@@ -55,6 +62,7 @@ export function useMcpHealth(
     const api = window.vyotiq?.mcpStatus
     if (!api || !enabled) {
       setIssues([])
+      setNames(new Map())
       return
     }
     const generation = ++generationRef.current
@@ -65,6 +73,7 @@ export function useMcpHealth(
         setIssues([])
         return
       }
+      setNames(new Map(result.data.servers.map((server) => [server.id, server.name])))
       setIssues(
         result.data.servers
           // A connect still in flight is not a fault. Without this the first
@@ -83,5 +92,5 @@ export function useMcpHealth(
     }
   }, [workspacePath, enabled, refreshNonce, refreshVersion])
 
-  return { issues, refresh, retry }
+  return { issues, names, refresh, retry }
 }

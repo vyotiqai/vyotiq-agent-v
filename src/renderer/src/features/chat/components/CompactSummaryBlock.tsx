@@ -46,7 +46,7 @@ function headingForStatus(status: CompactionVerifyStatus | undefined): string {
     case 'failed':
       return 'Summary not applied'
     default:
-      return 'Context summarized'
+      return 'Context summarised'
   }
 }
 
@@ -111,7 +111,7 @@ export function CompactSummaryBlock({
         />
       </button>
       <ExpandPanel open={isExpanded}>
-        <div className={cn('mt-0.5 border-l border-border pl-3', SUMMARY_BODY_MAX)}>
+        <div className={cn('mt-0.5 border-l border-border/40 pl-3', SUMMARY_BODY_MAX)}>
           {verifyFailures && verifyFailures.length > 0 ? (
             <ul className="mb-2 list-disc space-y-0.5 pl-4 text-caption text-danger">
               {verifyFailures.map((line, i) => (

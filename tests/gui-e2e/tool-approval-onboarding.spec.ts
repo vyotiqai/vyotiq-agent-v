@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
+import { requireActivePath } from './helpers/seedWorkspace'
 
 const FIXTURE_ASSISTANT_TEXT = 'E2E fixture response.'
 
@@ -20,7 +21,7 @@ test.beforeAll(async () => {
   expect(addRes.ok).toBe(true)
   if (!addRes.ok) throw new Error(addRes.error)
 
-  workspacePath = addRes.data.activePath
+  workspacePath = requireActivePath(addRes.data.activePath)
   await launched.window.evaluate(async () => {
     await window.vyotiq.setSettings({ toolApprovalOnboardingDone: false })
     localStorage.removeItem('vyotiq.chatPaneLayout')
@@ -41,25 +42,33 @@ test.afterAll(async () => {
   }
 })
 
-test('first send opens tool approval onboarding then streams fixture', async () => {
+test('a task started around Set up asks the approval question on first send', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) {
     await expand.click()
   }
 
-  const composer = window.getByRole('combobox', { name: 'Message' })
+  // No choice on record and no task yet: the window opens on Set up. New task
+  // (Ctrl+N) goes around it, so the first send still has to ask.
+  await expect(window.getByRole('heading', { name: 'Set up Agent V' })).toBeVisible({ timeout: 20_000 })
+  await window.keyboard.press('Control+n')
+
+  const composer = window.getByRole('combobox', { name: 'Brief' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('First send with onboarding')
 
-  const send = window.getByRole('button', { name: /^send$/i })
-  await send.click()
+  // A new task starts from its brief on Ctrl+Enter — Enter is a new line there.
+  await composer.press('Control+Enter')
 
-  await expect(window.getByRole('heading', { name: 'Tool approval' })).toBeVisible({
-    timeout: 10_000
-  })
-  await window.getByRole('button', { name: /mutating tools/i }).click()
+  const question = window.getByRole('dialog', { name: 'What needs your OK?' })
+  await expect(question).toBeVisible({ timeout: 10_000 })
+  await expect(question.getByRole('button', { name: /Unattended/ })).toContainText(
+    'MCP tools and tools the agent writes still ask.'
+  )
+  await expect(question.getByRole('button', { name: /Edits and commands/ })).toBeFocused()
+  await question.getByRole('button', { name: /Edits and commands/ }).click()
 
   await expect(window.getByText(FIXTURE_ASSISTANT_TEXT)).toBeVisible({ timeout: 15_000 })
 

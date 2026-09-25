@@ -2,7 +2,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMem
 import { useAppVirtualizer } from '@renderer/lib/hooks/useAppVirtualizer'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand'
-import { Tooltip, cn, ImageLightbox, MarkdownContent } from '@renderer/lib/ui'
+import { IconButton, Tooltip, cn, ImageLightbox, MarkdownContent } from '@renderer/lib/ui'
 import {
   focusComposerMessage,
   isEditableShortcutTarget,
@@ -20,11 +20,9 @@ import { isRetryableTurnFailure } from '@shared/errors'
 import {
   CHAT_COLUMN,
   CHAT_GUTTER,
-  CHAT_STAGE_INSET,
   CHAT_STAGE_TOP_SPACER,
-  COMPOSER_DOCK_CLEARANCE_PX,
   COMPOSER_DOCK_RESERVE_VAR,
-  COMPOSER_FLOAT_BOTTOM_INSET_PX,
+  HOVER_ON_SURFACE,
   TRANSCRIPT_CONTAINER,
   TURN_PROMPT_STACK,
   TURN_PROMPT_STACK_PINNED,
@@ -35,6 +33,8 @@ import {
   TRANSCRIPT_TURN_GAP,
   TRANSCRIPT_WORK_PAIR_GAP,
   TRANSCRIPT_WORK_ROW_GAP,
+  USER_PROMPT_CLAMP_LINES,
+  USER_PROMPT_INSET,
   DISCLOSURE_ROW
 } from '@renderer/lib/utils/layout'
 import {
@@ -100,6 +100,8 @@ const CHARS_PER_LINE = 65
 const EMPTY_CITATION_CATALOG: CitationCatalogEntry[] = []
 /** Line height for text-sm + leading-relaxed (1.625 × 13px). */
 const LINE_PX = 21
+/** Line height of a user prompt: text-heading + leading-normal (1.5 × 16px). */
+const PROMPT_LINE_PX = 24
 
 /**
  * Cached appearance scale.
@@ -149,7 +151,6 @@ export function estimateTranscriptRowSize(row: TranscriptRow | undefined): numbe
   if (!row) return 48
   const scale = appearanceMeasureScale()
   const linePx = LINE_PX * scale
-  const bodyClampPx = TOOL_BODY_CLAMP_PX * scale
   switch (row.kind) {
     case 'turn':
       return 40
@@ -159,10 +160,17 @@ export function estimateTranscriptRowSize(row: TranscriptRow | undefined): numbe
       const len = row.item.content?.length ?? 0
       const media =
         (row.item.images?.length ?? 0) + (row.item.attachments?.length ?? 0)
-      // UserPrompt clamps body at TOOL_BODY_CLAMP_PX when overflowing.
-      const bodyLines = Math.max(1, Math.ceil(len / CHARS_PER_LINE))
-      const body = Math.min(bodyClampPx, 28 * scale + bodyLines * linePx)
-      const chrome = 40 + (media > 0 ? 36 : 0) + (len > 400 ? 22 : 0)
+      // UserPrompt folds its body to USER_PROMPT_CLAMP_LINES and puts a Show
+      // more line under it. Newlines count too: a short multi-line prompt folds.
+      const bodyLines = Math.max(
+        1,
+        countNewlines(row.item.content ?? ''),
+        Math.ceil(len / CHARS_PER_LINE)
+      )
+      const folds = bodyLines > USER_PROMPT_CLAMP_LINES
+      const body =
+        28 * scale + Math.min(bodyLines, USER_PROMPT_CLAMP_LINES) * PROMPT_LINE_PX * scale
+      const chrome = 40 + (media > 0 ? 36 : 0) + (folds ? 22 : 0)
       return chrome + body
     }
     case 'text': {
@@ -475,7 +483,11 @@ function TranscriptUserPrompt({
         }
       />
       {showTasksBand ? (
-        <TasksCeilingBand key={item.id} running={running} className="mt-1" />
+        <TasksCeilingBand
+          key={item.id}
+          running={running}
+          className={cn('mt-1', USER_PROMPT_INSET)}
+        />
       ) : null}
     </>
   )
@@ -634,6 +646,7 @@ const TranscriptRowBlock = memo(function TranscriptRowBlock({
   onApprovalDecision,
   onQuestionSubmit,
   onRetryNetwork,
+  onDismissRunError,
   autoFocusApproval = true,
   turnCollapsed = false,
   showThinking = true,
@@ -670,6 +683,8 @@ const TranscriptRowBlock = memo(function TranscriptRowBlock({
   onQuestionSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
   /** Retry affordance for retryable run_error rows. */
   onRetryNetwork?: () => void
+  /** Hides a run_error row for good; the id is the row's own. */
+  onDismissRunError?: (itemId: string) => void
   autoFocusApproval?: boolean
   turnCollapsed?: boolean
   showThinking?: boolean
@@ -775,14 +790,30 @@ const TranscriptRowBlock = memo(function TranscriptRowBlock({
       >
         <div className="flex items-start justify-between gap-2">
           <span className="min-w-0">{row.message}</span>
-          {canRetry ? (
-            <button
-              type="button"
-              className="shrink-0 rounded-xl border border-border px-2 py-0.5 text-caption font-medium text-fg transition-colors hover:bg-surface"
-              onClick={onRetryNetwork}
-            >
-              Retry
-            </button>
+          {canRetry || onDismissRunError ? (
+            // -my-1 centres the controls on the first text line without making
+            // the box taller than a one-line message needs.
+            <div className="-my-1 flex shrink-0 items-center gap-1">
+              {canRetry ? (
+                <button
+                  type="button"
+                  className="shrink-0 rounded-xl border border-border px-2 py-0.5 text-caption font-medium text-fg transition-colors hover:bg-surface focus-visible:vy-focus-ring"
+                  onClick={onRetryNetwork}
+                >
+                  Retry
+                </button>
+              ) : null}
+              {onDismissRunError ? (
+                <IconButton
+                  icon="close"
+                  label="Dismiss error"
+                  size="xs"
+                  variant="bare"
+                  className="text-muted"
+                  onClick={() => onDismissRunError(row.id)}
+                />
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>
@@ -804,7 +835,7 @@ const TranscriptRowBlock = memo(function TranscriptRowBlock({
 
   if (row.kind === 'changes') {
     // Receipt only — Keep/Discard lives in the Changes panel (Review).
-    return <ChangeSummary files={row.files} compact onOpenChanges={onOpenChanges} />
+    return <ChangeSummary files={row.files} onOpenChanges={onOpenChanges} />
   }
 
   if (row.kind === 'approval') {
@@ -874,6 +905,7 @@ export function MessageList({
   onApprovalDecision,
   onQuestionSubmit,
   onRetryNetwork,
+  onDismissRunError,
   approvalAutoFocus = true,
   collapsedTurns,
   showThinking = true,
@@ -891,7 +923,6 @@ export function MessageList({
   onLoadEarlierMessages,
   virtualizeLiveEarly = false,
   onOpenChanges,
-  sideRailPad = false,
   editingUserMessageIndex = null,
   editComposer,
   onBeginEditUserMessage,
@@ -920,6 +951,8 @@ export function MessageList({
   onQuestionSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
   /** Retry affordance for retryable run_error rows (banner is suppressed at terminal). */
   onRetryNetwork?: () => void
+  /** Dismiss (and remember) one run_error row by its id. */
+  onDismissRunError?: (itemId: string) => void
   /** Autofocus Allow once only when this transcript is the focused visible pane. */
   approvalAutoFocus?: boolean
   /** Persisted turn-summary collapse state from the chat stream controller. */
@@ -949,8 +982,6 @@ export function MessageList({
   /** Hybrid-virtualize live transcripts without waiting for 160 rows. */
   virtualizeLiveEarly?: boolean
   onOpenChanges?: (path?: string) => void
-  /** When false, use symmetric gutter (immersive Agent — no floating side rail). */
-  sideRailPad?: boolean
   editingUserMessageIndex?: number | null
   editComposer?: ReactNode
   onBeginEditUserMessage?: (messageIndex: number) => void
@@ -1923,7 +1954,15 @@ export function MessageList({
       onTurnToggle={handleTurnToggle}
       onApprovalDecision={onApprovalDecision}
       onQuestionSubmit={onQuestionSubmit}
-      onRetryNetwork={onRetryNetwork}
+      onRetryNetwork={
+        // Retry continues the run from its latest turn, so only that turn's box
+        // offers it, and only once the run has stopped. Older boxes are history.
+        row.kind === 'run_error' &&
+        (row.turnIndex !== latestTurnIndex || running || pendingRun)
+          ? undefined
+          : onRetryNetwork
+      }
+      onDismissRunError={row.kind === 'run_error' ? onDismissRunError : undefined}
       autoFocusApproval={approvalAutoFocus}
       turnCollapsed={collapsedTurnSet.has(row.turnIndex)}
       showThinking={showThinking}
@@ -1987,9 +2026,9 @@ export function MessageList({
    * Turn-grouped flow rendering: rows are wrapped per turn so the turn's user
    * prompt bubble pins natively (position: sticky) while its content scrolls and
    * releases when the next turn pushes it out. The pinned stack (prompt + tasks
-   * band) is held behind a flat, page-colored cover pinned flush with the
-   * scrollport top (TURN_PROMPT_STACK_PINNED), so rows cannot scroll through
-   * it above or below without introducing a gradient or shadow.
+   * band) is held behind a page-colored cover pinned flush with the scrollport
+   * top (TURN_PROMPT_STACK_PINNED); rows scrolling beneath dissolve across its
+   * bottom padding rather than being cut by a hard edge.
    */
   const renderTurnGroups = (
     entries: readonly { row: TranscriptRow; index: number }[],
@@ -2037,7 +2076,7 @@ export function MessageList({
             >
               {renderRow(row, isUser)}
               {hasTasksBand ? (
-                <div key={`${row.id}-tasks-band`} className="mt-1">
+                <div key={`${row.id}-tasks-band`} className={cn('mt-1', USER_PROMPT_INSET)}>
                   <TasksCeilingBand key={row.item.id} running={running} />
                 </div>
               ) : null}
@@ -2052,7 +2091,7 @@ export function MessageList({
     <>
       <div className="flex min-h-0 flex-1 flex-col">
         {findOpen ? (
-          <div className="flex shrink-0 items-center gap-1.5 border-b border-border/40 px-3 py-1">
+          <div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-1">
             <Icon name="search" size={12} className="shrink-0 text-muted" />
             <input
               ref={findInputRef}
@@ -2099,11 +2138,11 @@ export function MessageList({
           style={{
             // Floating composer overlays this scrollport — reserve its measured
             // height (published on the stage via COMPOSER_DOCK_RESERVE_VAR) so the
-            // last row can scroll fully clear; jump-to-bottom adds its own clearance.
+            // last row can scroll fully clear. That height includes the dock
+            // cover's fade, so the last row rests just above it; jump-to-bottom
+            // adds its own clearance.
             paddingBottom: `calc(var(${COMPOSER_DOCK_RESERVE_VAR}, 0px) + ${
-              COMPOSER_DOCK_CLEARANCE_PX +
-              COMPOSER_FLOAT_BOTTOM_INSET_PX +
-              (isUnpinned ? JUMP_TO_BOTTOM_CLEARANCE_PX : 0)
+              isUnpinned ? JUMP_TO_BOTTOM_CLEARANCE_PX : 0
             }px)`
           }}
           className={cn(
@@ -2113,7 +2152,7 @@ export function MessageList({
             // the pinned turn prompt for rows to scroll through. The inset rides
             // as a leading spacer child instead (CHAT_STAGE_TOP_SPACER).
             'relative min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]',
-            sideRailPad ? CHAT_STAGE_INSET : CHAT_GUTTER
+            CHAT_GUTTER
           )}
           onScroll={(e) => handleScroll(e.currentTarget.scrollTop)}
           onPointerDownCapture={() => onActivate?.()}
@@ -2329,7 +2368,11 @@ export function MessageList({
                       ? `Jump to latest messages, ${unpinnedNewCount} new`
                       : 'Jump to latest messages'
                   }
-                  className="pointer-events-auto inline-flex -translate-y-full items-center gap-1.5 rounded-full border border-border/80 bg-surface py-1.5 px-2.5 text-caption font-medium text-secondary shadow-md vy-transition hover:border-border hover:bg-surface hover:text-fg focus-visible:vy-focus-ring"
+                  className={cn(
+                    'pointer-events-auto inline-flex -translate-y-full items-center gap-1.5 rounded-full border border-border bg-surface py-1.5 px-2.5 text-caption font-medium text-secondary shadow-md vy-transition hover:text-fg focus-visible:vy-focus-ring',
+                    // Already on bg-surface, so its hover steps up a weight.
+                    HOVER_ON_SURFACE
+                  )}
                 >
                   <Icon name="chevron" size={12} />
                   <span className="tracking-[var(--vy-tracking-tight)]">Latest</span>

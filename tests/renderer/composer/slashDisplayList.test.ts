@@ -16,28 +16,27 @@ function cmd(
 }
 
 describe('buildSlashDisplayList', () => {
-  it('keeps GROUP_ORDER so activeIndex matches highlighted row', () => {
+  it('lists skills, then commands, then MCP tools, so activeIndex matches the highlighted row', () => {
     const items = [
       cmd({ id: 'skill:a', trigger: 'alpha-skill', group: 'Skills', kind: 'skill' }),
       cmd({ id: 'builtin:compact', trigger: 'compact', group: 'App', kind: 'builtin' }),
       cmd({ id: 'mcp:x', trigger: 'mcp-tool', group: 'MCP', kind: 'mcp' })
     ]
     const display = buildSlashDisplayList('', items)
-    expect(display.map((c) => c.group)).toEqual(['App', 'Skills', 'MCP'])
-    expect(display[0]?.id).toBe('builtin:compact')
-    expect(display[1]?.id).toBe('skill:a')
+    expect(display.map((c) => c.group)).toEqual(['Skills', 'App', 'MCP'])
+    expect(display[0]?.id).toBe('skill:a')
+    expect(display[1]?.id).toBe('builtin:compact')
     expect(display[2]?.id).toBe('mcp:x')
   })
 
-  it('hides Ask/Plan/Agent from the idle list and keeps them searchable', () => {
+  it('hides Ask/Agent from the idle list and keeps them searchable', () => {
     const items = [
       cmd({ id: 'builtin:ask', trigger: 'ask', group: 'App', kind: 'builtin', label: 'Ask mode' }),
-      cmd({ id: 'builtin:plan', trigger: 'plan', group: 'App', kind: 'builtin', label: 'Plan mode' }),
       cmd({ id: 'builtin:agent', trigger: 'agent', group: 'App', kind: 'builtin', label: 'Agent mode' }),
       cmd({ id: 'builtin:compact', trigger: 'compact', group: 'App', kind: 'builtin', label: 'Compact context' })
     ]
     expect(buildSlashDisplayList('', items).map((c) => c.trigger)).toEqual(['compact'])
-    expect(buildSlashDisplayList('plan', items).map((c) => c.trigger)).toEqual(['plan'])
+    expect(buildSlashDisplayList('agent', items).map((c) => c.trigger)).toEqual(['agent'])
   })
 
   it('preserves fuzzy ranking within a group', () => {

@@ -124,6 +124,22 @@ export function isPermanentInBandStreamMessage(message: string): boolean {
 }
 
 /**
+ * A 400 that means the server lost the conversation, not that we sent junk.
+ *
+ * The Responses endpoint keeps prior turns server-side and the client chains
+ * them with `previous_response_id`, sending only the continuation suffix. When
+ * that response expires or is evicted, the request fails with
+ * `[invalid_request_error] referenced response not found or expired` (observed
+ * 2026-09-21, run 859925aa, step 3). It reads as a permanent bad request and
+ * ended the run — but the full history is still in the loop's own message
+ * list, so resending stateless recovers it. OpenAI's own wording for the same
+ * condition is `Previous response with id '...' not found`, so match both.
+ */
+export function isStalePriorResponseError(message: string): boolean {
+  return /(referenced|previous)\s+response[^.]*(not found|expired)/i.test(message)
+}
+
+/**
  * Status-aware mid-stream retry. A `PROVIDER_HTTP` failure retries only for
  * transient statuses (429/408/5xx) — auth, billing, and bad-request errors are
  * permanent and must surface to the user immediately.

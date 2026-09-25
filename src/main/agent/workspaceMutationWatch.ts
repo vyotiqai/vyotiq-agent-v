@@ -22,6 +22,10 @@ export type WorkspaceSnapshot = {
   root: string
   files: Map<string, WorkspaceFileFingerprint>
   blobDir: string
+  /** Wall clock before the pre-walk — anything newer was written during the watch. */
+  startedAtMs: number
+  /** The pre-walk hit the file cap, so `files` covers only a prefix of the tree. */
+  truncated: boolean
 }
 
 export type WorkspaceDiff = {
@@ -40,6 +44,23 @@ const SNAPSHOT_HASH_MAX_BYTES = 32 * 1024 * 1024
 const SNAPSHOT_HASH_TOTAL_MAX_BYTES = 64 * 1024 * 1024
 const SNAPSHOT_FILE_CAP = 5_000
 const YIELD_EVERY_DIRS = 64
+
+/** Effective walk cap — overridable by tests so truncation is reachable cheaply. */
+let snapshotFileCap = SNAPSHOT_FILE_CAP
+
+/**
+ * Roots already reported as over the cap. Truncation is a property of the tree,
+ * not of the step, and both walks of every mutating tool call re-derive it — 25
+ * of one session's 49 warnings were this one line repeating. Say it once per
+ * root so it stays findable.
+ */
+const truncationWarnedRoots = new Set<string>()
+
+/** @internal Test hook. */
+export function setSnapshotFileCapForTests(cap: number | null): void {
+  snapshotFileCap = cap ?? SNAPSHOT_FILE_CAP
+  truncationWarnedRoots.clear()
+}
 
 /**
  * Dependency/cache directories that dominate snapshot cost (the venv-heavy
@@ -79,14 +100,18 @@ function hashFile(path: string): Promise<string | undefined> {
   })
 }
 
-async function walkWorkspace(
-  root: string,
-  cap: number
-): Promise<WorkspaceFileFingerprint[]> {
+type WalkResult = {
+  files: WorkspaceFileFingerprint[]
+  /** The cap stopped the walk — the result covers only a prefix of the tree. */
+  truncated: boolean
+}
+
+async function walkWorkspace(root: string, cap: number): Promise<WalkResult> {
   const realRoot = canonicalizeWorkspacePath(root)
   const out: WorkspaceFileFingerprint[] = []
   const queue: Array<{ dir: string; relDir: string }> = [{ dir: realRoot, relDir: '' }]
   let dirsVisited = 0
+  let truncated = false
 
   while (queue.length > 0 && out.length < cap) {
     const next = queue.shift()!
@@ -98,8 +123,15 @@ async function walkWorkspace(
     } catch {
       continue
     }
+    // Sort so the cap frontier is a function of the tree, not of readdir order.
+    // Two walks of the same tree then truncate at the same place, which is what
+    // makes a truncated diff comparable at all.
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     for (const entry of entries) {
-      if (out.length >= cap) break
+      if (out.length >= cap) {
+        truncated = true
+        break
+      }
       if (IGNORED_DIRS.has(entry.name)) continue
       if (SNAPSHOT_SKIP_DIRS.has(entry.name)) continue
       if (entry.isSymbolicLink()) continue
@@ -123,14 +155,18 @@ async function walkWorkspace(
       }
     }
   }
-  if (out.length >= cap) {
+  // Directories still queued are directories never walked. Testing `out.length`
+  // instead flagged a tree of exactly `cap` files, which the walk covered in
+  // full, as partial — and a partial diff suppresses genuine creates.
+  if (queue.length > 0) truncated = true
+  if (truncated && !truncationWarnedRoots.has(realRoot)) {
+    truncationWarnedRoots.add(realRoot)
     logger.warn('Workspace snapshot file cap reached; checkpoint diff may be incomplete', {
       scope: 'workspaceMutationWatch',
-      cap,
-      root: realRoot
+      cap
     })
   }
-  return out
+  return { files: out, truncated }
 }
 
 /** Take a pre-mutation workspace fingerprint (with prior blobs for small files). */
@@ -138,7 +174,10 @@ export async function startWatch(workspaceRoot: string): Promise<WorkspaceSnapsh
   const blobDir = join(tmpdir(), `vyotiq-ws-snap-${process.pid}-${randomUUID()}`)
   await mkdir(blobDir, { recursive: true })
   const files = new Map<string, WorkspaceFileFingerprint>()
-  const walked = await walkWorkspace(workspaceRoot, SNAPSHOT_FILE_CAP)
+  // Read the clock before the walk: a file written while the walk is still
+  // running must count as created, not be dated before the watch began.
+  const startedAtMs = Date.now()
+  const { files: walked, truncated } = await walkWorkspace(workspaceRoot, snapshotFileCap)
   let totalBlobBytes = 0
   let totalHashBytes = 0
   for (const fp of walked) {
@@ -170,20 +209,39 @@ export async function startWatch(workspaceRoot: string): Promise<WorkspaceSnapsh
     }
     files.set(fp.rel, { ...fp, blobPath, contentHash })
   }
-  return { root: workspaceRoot, files, blobDir }
+  return { root: workspaceRoot, files, blobDir, startedAtMs, truncated }
 }
 
 export async function diffSince(snapshot: WorkspaceSnapshot): Promise<WorkspaceDiff> {
-  const walked = await walkWorkspace(snapshot.root, SNAPSHOT_FILE_CAP)
+  const { files: walked, truncated: nowTruncated } = await walkWorkspace(
+    snapshot.root,
+    snapshotFileCap
+  )
   const current = new Map(walked.map((f) => [f.rel, f] as const))
   const created: string[] = []
   const modified: string[] = []
   const deleted: string[] = []
 
+  /**
+   * Either walk stopping at the cap means the two cover different prefixes of
+   * the tree, so set membership alone no longer implies the file appeared or
+   * vanished during the step — it may only have crossed the frontier. Undo
+   * *deletes* files recorded as created, so a file wrongly classified that way
+   * destroys work the agent never touched. Fall back to evidence that does not
+   * depend on coverage: an mtime inside the watch window, and, for deletions,
+   * the file actually being gone.
+   *
+   * This can miss a genuine create whose mtime predates the watch (`unzip`,
+   * `tar -x` and `cp -p` restore recorded timestamps). Under truncation the
+   * diff is already incomplete by construction — the warning says so — and a
+   * missed undo entry only leaves a file in place, which is the safe direction.
+   */
+  const partial = snapshot.truncated || nowTruncated
+
   for (const [rel, now] of current) {
     const before = snapshot.files.get(rel)
     if (!before) {
-      created.push(rel)
+      if (!partial || now.mtimeMs >= snapshot.startedAtMs) created.push(rel)
       continue
     }
     if (before.mtimeMs !== now.mtimeMs || before.size !== now.size) {
@@ -198,10 +256,23 @@ export async function diffSince(snapshot: WorkspaceSnapshot): Promise<WorkspaceD
       if (contentHash && contentHash !== before.contentHash) modified.push(rel)
     }
   }
-  for (const rel of snapshot.files.keys()) {
-    if (!current.has(rel)) deleted.push(rel)
+  for (const [rel, before] of snapshot.files) {
+    if (current.has(rel)) continue
+    // `before.full` is the path the walk resolved, so this re-checks exactly
+    // the file that was fingerprinted — no second root canonicalization.
+    if (partial && (await stillExists(before.full))) continue
+    deleted.push(rel)
   }
   return { created, modified, deleted }
+}
+
+/** Does this path still have a file on disk? Used to confirm a truncated-walk deletion. */
+async function stillExists(full: string): Promise<boolean> {
+  try {
+    return (await stat(full)).isFile()
+  } catch {
+    return false
+  }
 }
 
 export async function disposeWatch(snapshot: WorkspaceSnapshot): Promise<void> {

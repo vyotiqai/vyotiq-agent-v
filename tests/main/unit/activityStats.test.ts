@@ -158,7 +158,9 @@ describe('collectHomeActivity', () => {
       runs: 1,
       billedInputTokens: 400,
       outputTokens: 40,
-      billedCost: 0.5
+      billedCost: 0.5,
+      // One run with a cost, counted once though its usage spans two days.
+      pricedRuns: 1
     })
     expect(res.outcomes).toEqual({ done: 1, error: 0, cancelled: 0, running: 0 })
   })
@@ -441,6 +443,32 @@ describe('collectHomeActivity', () => {
     expect(res.days[0]!.date).toBe('2026-09-09')
     expect(res.activeDays).toBe(1)
     expect(res.totals.previousTokens).toBe(132)
+    expect(res.totals.previousRuns).toBe(1)
+  })
+
+  it('counts the runs of the previous window, from ledgers and legacy receipts alike', async () => {
+    makeRun('ledger-run', {
+      'usage.json': ledgerFile({ '2026-09-05': { inputTokens: 10, outputTokens: 1 } })
+    })
+    makeRun('legacy-run', {
+      'receipt.json': receipt({
+        runId: 'legacy-run',
+        writtenAt: '2026-08-30T10:00:00.000Z',
+        tokenUsage: { billedInputTokens: 50, outputTokens: 5 }
+      })
+    })
+    makeRun('both-windows', {
+      'usage.json': ledgerFile({
+        '2026-08-31': { inputTokens: 20, outputTokens: 2 },
+        '2026-09-09': { inputTokens: 30, outputTokens: 3 }
+      })
+    })
+
+    const res = await collectHomeActivity([WS], NOW)
+
+    // ledger-run and both-windows are this week; legacy-run and both-windows the week before.
+    expect(res.totals.runs).toBe(2)
+    expect(res.totals.previousRuns).toBe(2)
   })
 
   it('emits per-workspace slices only for multi-workspace requests', async () => {
@@ -510,8 +538,86 @@ describe('collectHomeActivity', () => {
       topTools: [
         { name: 'edit', ok: 8, failed: 2 },
         { name: 'read', ok: 4, failed: 0 }
-      ]
+      ],
+      toolCalls: 14,
+      failingTools: [{ name: 'edit', ok: 8, failed: 2 }],
+      uncheckedRuns: [{ runId: 'run-a', workspacePath: WS, files: 0 }]
     })
+  })
+
+  it('names each failing tool with the error it gave most, worst first', async () => {
+    makeRun('run-a', {
+      'receipt.json': receipt({
+        runId: 'run-a',
+        toolStats: {
+          totalCalls: 40,
+          ok: 33,
+          failed: 7,
+          byName: {
+            terminal: { ok: 20, failed: 4 },
+            list_dir: { ok: 10, failed: 1 },
+            read: { ok: 3, failed: 2 }
+          }
+        },
+        failureClusters: [
+          { key: 'terminal: Timed out after 5 min', count: 3 },
+          { key: 'terminal: exit code 1', count: 1 },
+          { key: 'list_dir: Path did not exist', count: 1 },
+          { key: 'read: (no message)', count: 2 }
+        ]
+      })
+    })
+    makeRun('run-b', {
+      'receipt.json': receipt({
+        runId: 'run-b',
+        toolStats: { totalCalls: 3, ok: 3, failed: 0, byName: { edit: { ok: 3, failed: 0 } } }
+      })
+    })
+
+    const res = await collectHomeActivity([WS], NOW)
+
+    expect(res.attention?.toolCalls).toBe(43)
+    expect(res.attention?.failingTools).toEqual([
+      { name: 'terminal', ok: 20, failed: 4, reason: 'Timed out after 5 min' },
+      // A failure that said nothing gives no reason rather than "(no message)".
+      { name: 'read', ok: 3, failed: 2 },
+      { name: 'list_dir', ok: 10, failed: 1, reason: 'Path did not exist' }
+    ])
+  })
+
+  it('lists unchecked runs newest first with the files they wrote, capped at 5', async () => {
+    for (const [id, at, files] of [
+      ['u-1', '2026-09-09T01:00:00.000Z', ['a.ts', 'b.ts', 'a.ts']],
+      ['u-2', '2026-09-09T02:00:00.000Z', ['c.ts']],
+      ['u-3', '2026-09-09T03:00:00.000Z', []],
+      ['u-4', '2026-09-09T04:00:00.000Z', ['d.ts']],
+      ['u-5', '2026-09-09T05:00:00.000Z', ['e.ts']],
+      ['u-6', '2026-09-09T06:00:00.000Z', ['f.ts', 'g.ts']]
+    ] as const) {
+      makeRun(id, {
+        'receipt.json': receipt({
+          runId: id,
+          writtenAt: at,
+          goal: `goal ${id}`,
+          wroteFiles: files,
+          verificationGate: { wouldFire: true, reason: 'never_checked' }
+        })
+      })
+    }
+    makeRun('checked', {
+      'receipt.json': receipt({ runId: 'checked', wroteFiles: ['x.ts'], verificationGate: { wouldFire: false } })
+    })
+
+    const res = await collectHomeActivity([WS], NOW)
+
+    expect(res.attention?.unverifiedRuns).toBe(6)
+    expect(res.attention?.uncheckedRuns).toEqual([
+      { runId: 'u-6', workspacePath: WS, goal: 'goal u-6', files: 2 },
+      { runId: 'u-5', workspacePath: WS, goal: 'goal u-5', files: 1 },
+      { runId: 'u-4', workspacePath: WS, goal: 'goal u-4', files: 1 },
+      { runId: 'u-3', workspacePath: WS, goal: 'goal u-3', files: 0 },
+      { runId: 'u-2', workspacePath: WS, goal: 'goal u-2', files: 1 }
+    ])
   })
 
   it('counts the gate verdict over the raw receipt field when both are present', async () => {
@@ -690,5 +796,31 @@ describe('window pruning (mtime-keyed)', () => {
 
     expect(res.totals.previousTokens).toBe(770)
     expect(res.days).toHaveLength(0)
+  })
+
+  it('reports a cache share only when every day in the window has prompt sizes and cache reads', async () => {
+    makeRun('run-tracked', {
+      'usage.json': ledgerFile({
+        '2026-09-09': { inputTokens: 300, outputTokens: 20, cachedInputTokens: 710, promptInputTokens: 1000 }
+      })
+    })
+    const tracked = await collectHomeActivity([WS], NOW)
+    expect(tracked.totals.cacheShare).toBeCloseTo(0.71)
+
+    // A day recorded before prompt sizes were tracked makes the share unknowable.
+    makeRun('run-older', {
+      'usage.json': ledgerFile({ '2026-09-08': { inputTokens: 500, outputTokens: 20, cachedInputTokens: 100 } })
+    })
+    resetJsonDocCacheForTests()
+    const mixed = await collectHomeActivity([WS], NOW)
+    expect('cacheShare' in mixed.totals).toBe(false)
+  })
+
+  it('shows no share for a provider that reports no cache reads', async () => {
+    makeRun('run-nocache', {
+      'usage.json': ledgerFile({ '2026-09-09': { inputTokens: 300, outputTokens: 20, promptInputTokens: 300 } }, { cachedInputTokens: 0 })
+    })
+    const res = await collectHomeActivity([WS], NOW)
+    expect('cacheShare' in res.totals).toBe(false)
   })
 })

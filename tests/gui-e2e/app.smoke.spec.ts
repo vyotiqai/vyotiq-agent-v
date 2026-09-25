@@ -20,13 +20,13 @@ test.beforeEach(async () => {
     const ae = document.activeElement as HTMLElement | null
     ae?.blur?.()
   })
-  // Leave settings / marketplace if open
-  const back = window.getByRole('button', { name: /^back$/i })
+  // Leave settings if open. Its Back names the view it returns to.
+  const back = window.locator('[data-settings-back]')
   if (await back.isVisible().catch(() => false)) {
     await back.click()
   }
   // Ensure desktop sidebar is expanded
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) {
     await expand.click()
   }
@@ -35,19 +35,19 @@ test.beforeEach(async () => {
 test('app opens a main window', async () => {
   const { window } = launched
   await expect(window.locator('body')).toBeVisible()
-  await expect(window.getByRole('button', { name: /^settings$/i })).toBeVisible()
+  await expect(window.getByRole('button', { name: /^settings/i })).toBeVisible()
 })
 
-test('Ctrl/Cmd+B toggles the sidebar', async () => {
+test('Ctrl/Cmd+B toggles the navigator', async () => {
   const { window } = launched
   const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
 
-  const collapse = window.getByRole('button', { name: /collapse sidebar/i })
+  const collapse = window.getByRole('button', { name: /hide navigator/i })
   await expect(collapse).toBeVisible({ timeout: 10_000 })
   await window.keyboard.press(`${mod}+B`)
-  await expect(window.getByRole('button', { name: /expand sidebar/i })).toBeVisible()
+  await expect(window.getByRole('button', { name: /show navigator/i })).toBeVisible()
   await window.keyboard.press(`${mod}+B`)
-  await expect(window.getByRole('button', { name: /collapse sidebar/i })).toBeVisible()
+  await expect(window.getByRole('button', { name: /hide navigator/i })).toBeVisible()
 })
 
 test('Ctrl/Cmd+, opens settings', async () => {
@@ -77,17 +77,17 @@ test('skip link targets main content landmark', async () => {
   await expect(window.locator('#main-content')).toHaveAttribute('tabindex', '-1')
 })
 
-test('hover shows new chat tooltip', async () => {
+test('hover shows the new task tooltip', async () => {
   const { window } = launched
-  // Settings uses native title=; IconButton (New chat) mounts role=tooltip.
-  const newChat = window.getByRole('button', { name: /new chat in/i }).first()
+  // IconButton (New task) mounts role=tooltip.
+  const newChat = window.getByRole('button', { name: /new task/i }).first()
   await expect(newChat).toBeVisible()
   const box = await newChat.boundingBox()
   expect(box).toBeTruthy()
   await window.mouse.move((box?.x ?? 0) + (box?.width ?? 0) / 2, (box?.y ?? 0) + (box?.height ?? 0) / 2)
   const tip = window.locator('[role="tooltip"]')
   await expect(tip).toBeVisible({ timeout: 5_000 })
-  await expect(tip).toContainText(/new chat/i)
+  await expect(tip).toContainText(/new task/i)
   await window.keyboard.press('Escape')
   await expect(tip).toHaveCount(0)
 })

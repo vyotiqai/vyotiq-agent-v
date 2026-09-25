@@ -49,6 +49,7 @@ function zoomShortcutKey(input: Input): string | null {
  * Ctrl/Cmd +/- / 0 are blocked from Chromium page-zoom and re-dispatched so the
  * renderer can map them to Settings text size. Ctrl/Cmd+W is intercepted so the
  * default menu cannot close the window; the renderer closes the chat tab.
+ * Ctrl/Cmd+Shift+I is re-dispatched too: it expands the inspector.
  */
 export function watchWindowShortcuts(window: BrowserWindow): void {
   if (!window) return
@@ -64,10 +65,7 @@ export function watchWindowShortcuts(window: BrowserWindow): void {
         return
       }
       // Ignore DevTools open chords in production
-      if (
-        input.code === 'KeyI' &&
-        ((input.alt && input.meta) || (input.control && input.shift))
-      ) {
+      if (input.code === 'KeyI' && input.alt && input.meta) {
         event.preventDefault()
       }
     } else if (input.code === 'F12') {
@@ -79,6 +77,14 @@ export function watchWindowShortcuts(window: BrowserWindow): void {
     }
 
     if (input.control || input.meta) {
+      // Ctrl/Cmd+Shift+I expands the inspector. Chromium would open DevTools
+      // on it (and packaged builds used to swallow it); the app gets it
+      // instead — F12 still opens DevTools in development.
+      if (input.shift && !input.alt && input.code === 'KeyI') {
+        event.preventDefault()
+        redispatchRendererKey(webContents, input, 'I', 'KeyI')
+        return
+      }
       if (!input.alt && !input.shift && input.code === 'KeyW') {
         event.preventDefault()
         redispatchRendererKey(webContents, input, 'w', 'KeyW')

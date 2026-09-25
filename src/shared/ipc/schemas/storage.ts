@@ -16,7 +16,11 @@ export const StorageReportCategorySchema = z.object({
   bytes: z.number().int().nonnegative(),
   /** File count measured for the category. */
   files: z.number().int().nonnegative(),
-  /** True when this category is report-only (§6.3: models, caches, memory). */
+  /**
+   * True when retention and the size cap apply to this category. False for
+   * report-only ones (§6.3: models, browser partitions, cache), which are
+   * measured but never evicted.
+   */
   managed: z.boolean()
 })
 export type StorageReportCategory = z.infer<typeof StorageReportCategorySchema>
@@ -49,7 +53,7 @@ export const StorageReportRequestSchema = z.object({})
 export type StorageReportRequest = z.infer<typeof StorageReportRequestSchema>
 
 export const StorageReportResultSchema = z.object({
-  /** All categories: checkpoints, transcripts, per-workspace indexes, worktrees, traces, logs, models, partitions, cache. */
+  /** All categories: checkpoints, transcripts, per-workspace indexes, worktrees, traces, logs, dictation and code search models, partitions, cache. */
   categories: z.array(StorageReportCategorySchema),
   /** Per-storage-dir rollup — untracked dirs are the orphan-reaper surface. */
   workspaces: z.array(StorageReportWorkspaceSchema),

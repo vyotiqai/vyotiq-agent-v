@@ -116,7 +116,7 @@ export function ThinkingBlock({
       <ExpandPanel open={isExpanded}>
         <div
           ref={bodyRef}
-          className={cn('mt-0.5 border-l border-border pl-3', THINKING_BODY_MAX)}
+          className={cn('mt-0.5 border-l border-border/40 pl-3', THINKING_BODY_MAX)}
           data-testid="thinking-body"
           onScroll={onBodyScroll}
         >

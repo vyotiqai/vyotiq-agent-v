@@ -223,6 +223,34 @@ describe('useWorkspaceManager', () => {
     expect(result.current.activeContext?.openRunIds).toContain('run-b-123')
   })
 
+  it('opens a draft in a just-added workspace without re-activating it', async () => {
+    // Main makes an added workspace active itself. App's picker handoff then
+    // opens a draft through the newChatInWorkspace of the render before the
+    // add, whose activeWorkspace is still /ws-a; switching from there sent a
+    // second setActive that re-warmed the index and re-pruned worktrees.
+    const added = defaultRegistry({ openPaths: ['/ws-a', '/ws-b', '/ws-c'], activePath: '/ws-c' })
+    added.uiStateByPath['/ws-c'] = { ...added.uiStateByPath['/ws-a']! }
+    const addWorkspace = vi.fn(async () => ({ ok: true, data: added }))
+    ;(window.vyotiq as Record<string, unknown>).addWorkspace = addWorkspace
+    const { result } = renderHook(() => useWorkspaceManager())
+
+    await waitFor(() => {
+      expect(result.current.activeWorkspace).toBe('/ws-a')
+    })
+    const newChatFromBeforeAdd = result.current.newChatInWorkspace
+
+    await act(async () => {
+      await result.current.addWorkspace('/ws-c')
+    })
+    await act(async () => {
+      await newChatFromBeforeAdd('/ws-c')
+    })
+
+    expect(addWorkspace).toHaveBeenCalledWith('/ws-c')
+    expect(setActiveWorkspace).not.toHaveBeenCalled()
+    expect(result.current.activeWorkspace).toBe('/ws-c')
+  })
+
   it('multi-pane click focuses existing session without duplicating', async () => {
     const { result } = renderHook(() => useWorkspaceManager())
 
@@ -306,7 +334,6 @@ describe('useWorkspaceManager', () => {
 
   it('queues mode on a live run unless syncOnly (switch_mode echo)', async () => {
     const chatQueueMode = vi.fn().mockResolvedValue({ ok: true, data: true })
-    // @ts-expect-error test bridge
     window.vyotiq.chatQueueMode = chatQueueMode
 
     const { result } = renderHook(() => useWorkspaceManager())
@@ -325,10 +352,10 @@ describe('useWorkspaceManager', () => {
     expect(result.current.chat.running).toBe(true)
 
     await act(async () => {
-      result.current.setAgentMode('plan', { workspacePath: '/ws-a', runId: 'run-live' })
+      result.current.setAgentMode('ask', { workspacePath: '/ws-a', runId: 'run-live' })
     })
-    expect(chatQueueMode).toHaveBeenCalledWith({ runId: 'run-live', mode: 'plan' })
-    expect(result.current.contexts['/ws-a']?.ui.agentMode).toBe('plan')
+    expect(chatQueueMode).toHaveBeenCalledWith({ runId: 'run-live', mode: 'ask' })
+    expect(result.current.contexts['/ws-a']?.ui.agentMode).toBe('ask')
 
     chatQueueMode.mockClear()
     await act(async () => {
@@ -1599,159 +1626,6 @@ describe('useWorkspaceManager', () => {
         result.current.openRunTab('parent-1')
       })
       expect(result.current.activeContext?.openRunIds).toContain('parent-1')
-  })
-
-  describe('teammate model pin + binding prune', () => {
-    function registryWithBindings(bindingsA: Record<string, string>): WorkspacesState {
-      return defaultRegistry({
-        uiStateByPath: {
-          '/ws-a': {
-            activeRunId: null,
-            openRunIds: [],
-            scrollTop: 0,
-            scrollTopByRunId: {},
-            composerDraft: '',
-            agentProfileIdByRunId: bindingsA
-          },
-          '/ws-b': {
-            activeRunId: null,
-            openRunIds: [],
-            scrollTop: 0,
-            scrollTopByRunId: {},
-            composerDraft: '',
-            agentProfileIdByRunId: {}
-          }
-        } as WorkspacesState['uiStateByPath']
-      })
-    }
-
-    it('seeds a pre-bound chat with the teammate model pin at controller creation', async () => {
-      getWorkspaces.mockResolvedValue({
-        ok: true,
-        data: registryWithBindings({ __draft__: 'scout' })
-      })
-      const { result } = renderHook(() =>
-        useWorkspaceManager({
-          getAgentProfileModelPin: (id) =>
-            id === 'scout' ? { provider: 'openai', model: 'gpt-pin' } : null
-        })
-      )
-      await waitFor(() => expect(result.current.activeWorkspace).toBe('/ws-a'))
-
-      chatStart.mockResolvedValueOnce({ ok: true, data: { runId: 'run-pin' } })
-      await act(async () => {
-        await result.current.chatActions?.send('pinned hello')
-      })
-      expect(chatStart).toHaveBeenCalledWith(
-        expect.objectContaining({ provider: 'openai', model: 'gpt-pin', agentProfileId: 'scout' })
-      )
-    })
-
-    it('adopts the pin immediately when the user binds a teammate mid-session', async () => {
-      getWorkspaces.mockResolvedValue({ ok: true, data: registryWithBindings({}) })
-      const { result } = renderHook(() =>
-        useWorkspaceManager({
-          getAgentProfileModelPin: (id) =>
-            id === 'scout' ? { provider: 'openai', model: 'gpt-pin' } : null
-        })
-      )
-      await waitFor(() => expect(result.current.activeWorkspace).toBe('/ws-a'))
-
-      act(() => {
-        result.current.setAgentProfileIdForRun('/ws-a', null, 'scout')
-      })
-      expect(result.current.getAgentProfileIdForRun('/ws-a', null)).toBe('scout')
-
-      chatStart.mockResolvedValueOnce({ ok: true, data: { runId: 'run-bound' } })
-      await act(async () => {
-        await result.current.chatActions?.send('after bind')
-      })
-      expect(chatStart).toHaveBeenLastCalledWith(
-        expect.objectContaining({ provider: 'openai', model: 'gpt-pin', agentProfileId: 'scout' })
-      )
-    })
-
-    it('hydrates valid durable bindings from initial and older run summaries', async () => {
-      listRuns.mockResolvedValue({
-        ok: true,
-        data: {
-          runs: [
-            { runId: 'run-current', status: 'done', updatedAt: '2026-02-02T00:00:00.000Z', agentProfileId: 'scout' },
-            { runId: 'run-deleted', status: 'done', updatedAt: '2026-02-01T00:00:00.000Z', agentProfileId: 'ghost' }
-          ],
-          capped: true
-        }
-      })
-      listOlderRuns.mockResolvedValue({
-        ok: true,
-        data: {
-          runs: [{ runId: 'run-older', status: 'done', updatedAt: '2026-01-01T00:00:00.000Z', agentProfileId: 'scout' }],
-          hasMore: false
-        }
-      })
-      const { result } = renderHook(() =>
-        useWorkspaceManager({ getValidAgentProfileIds: () => new Set(['scout']) })
-      )
-      await waitFor(() => expect(result.current.activeContext?.runsLoaded).toBe(true))
-      expect(result.current.getAgentProfileIdForRun('/ws-a', 'run-current')).toBe('scout')
-      expect(result.current.getAgentProfileIdForRun('/ws-a', 'run-deleted')).toBeNull()
-
-      await act(async () => {
-        await result.current.loadOlderRuns('/ws-a')
-      })
-      expect(result.current.getAgentProfileIdForRun('/ws-a', 'run-older')).toBe('scout')
-      // Hydrating a durable binding persists through the debounced writer, so
-      // the write lands after this tick — same as the prune test below.
-      await waitFor(() => expect(updateWorkspaceUiState).toHaveBeenCalled())
-    })
-
-    it('keeps durable existing-run bindings immutable in the renderer', async () => {
-      listRuns.mockResolvedValue({
-        ok: true,
-        data: {
-          runs: [{ runId: 'run-bound', status: 'done', updatedAt: '2026-01-01T00:00:00.000Z', agentProfileId: 'scout' }],
-          capped: false
-        }
-      })
-      const { result } = renderHook(() =>
-        useWorkspaceManager({ getValidAgentProfileIds: () => new Set(['scout', 'other']) })
-      )
-      await waitFor(() => expect(result.current.getAgentProfileIdForRun('/ws-a', 'run-bound')).toBe('scout'))
-      act(() => result.current.setAgentProfileIdForRun('/ws-a', 'run-bound', 'other'))
-      act(() => result.current.setAgentProfileIdForRun('/ws-a', 'run-bound', null))
-      expect(result.current.getAgentProfileIdForRun('/ws-a', 'run-bound')).toBe('scout')
-    })
-
-    it('reads a binding through a differently spelled workspace path', async () => {
-      getWorkspaces.mockResolvedValue({
-        ok: true,
-        data: registryWithBindings({ __draft__: 'scout' })
-      })
-      const { result } = renderHook(() => useWorkspaceManager())
-      await waitFor(() => expect(result.current.activeWorkspace).toBe('/ws-a'))
-
-      // The setter already tolerates an equal-but-differently-spelled path;
-      // a direct key lookup in the getter would drop the teammate from the
-      // send instead.
-      expect(result.current.getAgentProfileIdForRun('/ws-a/', null)).toBe('scout')
-    })
-
-    it('prunes chat bindings whose teammate no longer exists in the roster', async () => {
-      getWorkspaces.mockResolvedValue({
-        ok: true,
-        data: registryWithBindings({ __draft__: 'ghost', 'run-old': 'scout' })
-      })
-      const { result } = renderHook(() => useWorkspaceManager())
-      await waitFor(() => expect(result.current.activeWorkspace).toBe('/ws-a'))
-      expect(result.current.getAgentProfileIdForRun('/ws-a', null)).toBe('ghost')
-
-      act(() => {
-        result.current.pruneAgentProfileBindings(new Set(['scout']))
-      })
-      expect(result.current.getAgentProfileIdForRun('/ws-a', null)).toBeNull()
-      expect(result.current.getAgentProfileIdForRun('/ws-a', 'run-old')).toBe('scout')
-      await waitFor(() => expect(updateWorkspaceUiState).toHaveBeenCalled())
-    })
   })
 
   it('does not auto-resume inline instance runs on load', async () => {

@@ -2,22 +2,16 @@ import { randomUUID } from 'crypto'
 import type {
   AgentEvent,
   AgentInteractionMode,
-  AgentProfile,
-  AgentProfileSnapshot,
   ChatMessage,
   IncompleteReason,
   ModelInfo,
-  ProviderId,
-  RunStatus
+  ProviderId
 } from '../../shared/ipc'
 import { DEFAULT_SETTINGS } from '../../shared/ipc'
 import { contentDisplayText, contentToText } from '../../shared/ipc'
-import { AgentProfileIdSchema } from '../../shared/ipc'
-import { DEFAULT_AGENT_IDENTITY, DEFAULT_AGENT_PERSONA, DEFAULT_AGENT_TONE } from '../../shared/agentPersona'
 import { runGoalFromUserText, findAbsolutePathsInText, outsideWorkspacePathGuidance, stubPastSkillInvocationsInMessages } from '../../shared/slashCommands'
 import { resolveProviderChatBaseUrl, seedModelsFor } from '../../shared/providers'
 import { formatError, isAbortError } from '../../shared/errors'
-import { AppError } from '../../shared/utils/errors'
 import { logger, logErrorSummary } from '../../shared/logger'
 import { workspaceIdFromPath } from '../../shared/workspaceId'
 import { isNetworkFailureCode, iterateNetworkWait, resolveOfflineWaitMs } from './networkMonitor'
@@ -27,6 +21,7 @@ import { circuitKeyProvider } from './circuitBreaker'
 import { waitForHeapPressureRelief } from '../perf/heapPressure'
 import {
   isRetriableStreamFailure,
+  isStalePriorResponseError,
   isTransientHttpFailure,
   runWithStreamRetryGen,
   shouldRetryStreamErrorChunk,
@@ -45,7 +40,6 @@ import { persistAlwaysAllow } from './toolApprovalStore'
 import { createLiveEventQueue, pushLiveEvent, shiftLiveEvent } from './liveEventQueue'
 import { getSecret, hasStoredSecretBlob, secretStatus } from '@main/settings/secrets'
 import { getSettings } from '@main/settings/settings'
-import { resolveAgentProfile } from '@main/settings/agentProfiles'
 import { findWorkspaceSettingsOverride, readWorkspacesState } from '@main/workspace/workspaces'
 import { preflightChatProviderAuth } from './providers/preflight'
 import {
@@ -62,6 +56,7 @@ import {
 import type { ContextToolsDetail } from '../../shared/utils/contextUsage'
 import { trimToolResults } from './context/toolTrim'
 import { KEEP_LAST_TOOL_RESULTS, TOOL_RESULT_TRIM_SLACK } from './context/types'
+import { promptPrefixFingerprint } from './context/promptPrefix'
 import { autoCompactLlmEvents } from './compactRun'
 import {
   DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO,
@@ -124,6 +119,7 @@ import {
   setLateFollowUpDropped,
   takePendingMode
 } from './runRegistry'
+import { doneWhenNudgeText, readChecks } from './doneWhenChecks'
 import { saveFollowUps, syncFollowUpsToDisk } from './followUpStore'
 import { clearLoopCheckpoint, loadLoopCheckpoint, saveLoopCheckpoint } from './loopCheckpoint'
 import { LOOP_CHECKPOINT_VERSION, type LoopCheckpoint } from '../../shared/ipc/schemas/agent'
@@ -165,6 +161,7 @@ import { writeTrajectoryArtifactsBestEffort } from './runTrajectory'
 import {
   emptyStepUsageTotals,
   mergeStepUsageTotals,
+  promptTokensFromUsage,
   stepUsageFromEvent,
   type StepUsageTotals
 } from '../../shared/utils/runTelemetry'
@@ -198,6 +195,7 @@ import {
 import { toolResultEventForIpc, toolResultEventForPersistence } from '../../shared/utils/toolResultIpc'
 import { AGENT_TOOLS } from './types'
 import { canonicalizeAgentToolName } from './schemas/tools'
+import { agentBuiltToolDefinitions } from './agentTools/loader'
 import {
   getMcpServerStatus,
   isGitMcpNotARepoError,
@@ -535,9 +533,62 @@ function* applyDrainedFollowUps(
   return true
 }
 
-/** Seed plan.md with the Goal / Steps / Done when stub — at run start and on mid-run switch to Plan. */
+/**
+ * Seed plan.md with the Goal / Steps / Done when stub at run start.
+ *
+ * Unconditional since Plan mode merged into Agent. It is not cosmetic: the
+ * `plan.md` run-artifact remap is gated on the file existing (see
+ * `shouldRemapPath` in tools/index.ts), and `toolEdit` CREATES a missing path
+ * rather than failing. Without the stub, an `edit plan.md` before the first
+ * `create_plan` would not remap and would drop a stray plan.md in the user's
+ * workspace root. The stub costs nothing in the prompt — `readPlanAsync`
+ * returns '' until the plan has a real body.
+ */
 function seedPlanStubIfMissing(runDir: string): void {
   ensurePlanStub(runDir)
+}
+
+/**
+ * contract.md and plan.md as the prompt renders them, and the compaction fold
+ * they were read under.
+ *
+ * Both render in the cached stable system zone, so they are read once per
+ * invoke and again only when a fold rewrites history, not on every step.
+ * Reading them every step meant any write in the middle of an invoke changed the
+ * prefix, and the next request re-sent the whole prompt, history included,
+ * uncached. That covers `create_plan` (every run publishes one, and it also
+ * rewrites the contract's Done when), an edit to either file, and a run rename.
+ * Measured 2026-09-23: all 4 `create_plan` calls were followed by a 3–12% hit
+ * on 20k–58k-token prompts. A write in between reaches the model through the
+ * tool call that made it. A fold misses the cache anyway, so catching up there
+ * is free.
+ */
+type PromptArtifacts = { foldKey: string; contract: string; plan: string }
+
+/** Changes exactly when a compaction fold replaces the working history. */
+function compactionFoldKey(compaction: CompactionRecord | null): string {
+  return compaction ? `${compaction.createdAt}#${compaction.foldedMessages ?? 0}` : ''
+}
+
+async function readPromptArtifacts(
+  runDir: string,
+  compaction: CompactionRecord | null
+): Promise<PromptArtifacts> {
+  const [contract, plan] = await Promise.all([readContractAsync(runDir), readPlanAsync(runDir)])
+  return { foldKey: compactionFoldKey(compaction), contract, plan }
+}
+
+/** Assemble fields for the frozen artifacts; see readPlanAsync for the verbatim rule. */
+function promptArtifactFields(artifacts: PromptArtifacts): {
+  contract: string
+  plan: string | undefined
+  planVerbatim: boolean
+} {
+  return {
+    contract: artifacts.contract,
+    plan: artifacts.plan || undefined,
+    planVerbatim: Boolean(artifacts.plan)
+  }
 }
 
 /**
@@ -554,7 +605,6 @@ function* applyPendingModeChange(
   const pending = takePendingMode(runId)
   if (pending == null || pending === currentMode) return currentMode
   writeStatus({ mode: pending })
-  if (pending === 'plan') seedPlanStubIfMissing(runDir)
   const ev: AgentEvent = {
     type: 'mode_changed',
     runId,
@@ -615,7 +665,14 @@ function* emitMessageAppendFailureNotice(
     correlationId: runId,
     err
   })
-  const ev: AgentEvent = { type: 'error', runId, invokeId, message, code: 'PERSIST' }
+  const ev: AgentEvent = {
+    type: 'error',
+    runId,
+    invokeId,
+    message,
+    code: 'PERSIST',
+    errorId: randomUUID()
+  }
   appendEvent(runDir, ev)
   yield ev
   yield* dropPendingFollowUps(runId, runDir, 'PERSIST')
@@ -640,7 +697,14 @@ function* emitEventAppendFailureNotice(
     correlationId: runId,
     err
   })
-  const ev: AgentEvent = { type: 'error', runId, invokeId, message, code: 'PERSIST' }
+  const ev: AgentEvent = {
+    type: 'error',
+    runId,
+    invokeId,
+    message,
+    code: 'PERSIST',
+    errorId: randomUUID()
+  }
   appendEvent(runDir, ev)
   yield ev
   yield* dropPendingFollowUps(runId, runDir, 'PERSIST')
@@ -677,13 +741,18 @@ function* emitTerminalRunError(opts: {
 }): Generator<AgentEvent, void, unknown> {
   const { runId, invokeId, runDir, message, code, flushWriteCheckpoint, writeStatus } = opts
   const emitError = opts.emitErrorEvent !== false && code != null
+  // One event for the live yield and the persisted row, so both carry the
+  // same errorId.
+  const errorEvent: AgentEvent | null = emitError
+    ? { type: 'error', runId, invokeId, message, code, errorId: randomUUID() }
+    : null
   if (opts.dropFollowUpsReason) {
     yield* dropPendingFollowUps(runId, runDir, opts.dropFollowUpsReason)
   } else if (opts.preserveFollowUps) {
     yield* dropPendingFollowUps(runId, runDir, 'run_ended', { preserveOnDisk: true })
   }
-  if (emitError) {
-    yield { type: 'error', runId, invokeId, message, code }
+  if (errorEvent) {
+    yield errorEvent
   }
   if (!opts.skipCheckpoint) {
     yield* flushWriteCheckpoint()
@@ -691,8 +760,8 @@ function* emitTerminalRunError(opts: {
   yield { type: 'status', runId, invokeId, status: 'error' }
   writeStatus({ status: 'error', error: message, ...(opts.resumable ? { resumable: true } : {}) })
   if (runDir) {
-    if (emitError) {
-      appendEvent(runDir, { type: 'error', runId, invokeId, message, code })
+    if (errorEvent) {
+      appendEvent(runDir, errorEvent)
     }
     appendEvent(runDir, { type: 'status', runId, invokeId, status: 'error' })
   }
@@ -891,105 +960,29 @@ async function reconstructStreamSnapshotAssistant(
   appendEvent(runDir, { type: 'assistant_message', runId, content: snapshot })
 }
 
-export function createAgentProfileSnapshot(
-  profile: AgentProfile,
-  runtime: 'local' | 'cloud'
-): AgentProfileSnapshot {
-  const { createdAt: _createdAt, updatedAt: _updatedAt, ...behavior } = profile
-  return { version: 1, ...behavior, runtime }
-}
-
-/**
- * A launch that contradicts what the run is already bound to. Typed, so the
- * launcher can recognise this refusal for what it is — a settled fact about
- * the run, worth a client-level log and no retry — instead of catching every
- * throw from the check and labelling it a binding conflict.
- */
-export function runBindingRefusal(message: string): AppError {
-  return new AppError(message, { code: 'IPC_CLIENT', retriable: false })
-}
-
-/**
- * What an existing run will bind this turn, refusing only a real contradiction.
- *
- * The invariant is that a binding cannot be CHANGED — not that it cannot be
- * set, and not that it must be restated. Two cases are therefore not
- * violations, and treating them as such bricked whole chats, because every
- * later send repeated the same refusal:
- *
- *  - Adoption. A run that never bound a teammate has no snapshot and no memory
- *    namespace to contradict, so picking one mid-chat is exactly as safe as
- *    picking it on the run's first turn. The composer offers that on any idle
- *    chat, and the renderer's own setter already allows it (it refuses only
- *    when a DURABLE binding differs) — main was the one surface disagreeing.
- *  - Omission. An unstated teammate means "leave the run's own binding alone",
- *    never "unbind". A resumed run whose teammate was since deleted comes
- *    through here with nothing stated, by design: the renderer prunes bindings
- *    that no longer resolve, and runAgent keeps such a run alive on its
- *    persisted snapshot and namespace.
- */
-export function validateExistingRunStart(
-  persisted: RunStatus,
-  requested: { agentProfileId?: string; runtime?: 'local' | 'cloud' },
-  explicit: { agentProfileId: boolean; runtime: boolean }
-): { agentProfileId?: string; runtime: 'local' | 'cloud' } {
-  const bound = persisted.agentProfileId
-  const stated = explicit.agentProfileId ? requested.agentProfileId : undefined
-  if (bound && stated && stated !== bound) {
-    throw runBindingRefusal('Existing run teammate binding cannot be changed')
-  }
-  const runtime = persisted.runtime ?? persisted.agentProfileSnapshot?.runtime ?? 'local'
-  // Runtime has no unbound state (it resolves to 'local'), so only a stated
-  // value can contradict it.
-  if (explicit.runtime && requested.runtime != null && requested.runtime !== runtime) {
-    throw runBindingRefusal('Existing run runtime cannot be changed')
-  }
-  const agentProfileId = bound ?? stated
-  return {
-    ...(agentProfileId ? { agentProfileId } : {}),
-    runtime
-  }
-}
-
 export type ProviderModelPair = { provider: ProviderId; model: string }
 
 /**
  * Which provider/model a turn runs on.
  *
- * Precedence: a model the user picked by hand, then the selection this run
- * already persisted, then the teammate's pin, then whatever the renderer
- * resolved from the workspace/global chain.
+ * Precedence: the selection the renderer sent for this turn, then the one this
+ * run remembered, then the workspace/global chain.
  *
- * `requested` carries BOTH a hand-picked model and the renderer's ambient
- * default, which are otherwise indistinguishable — so it may only outrank a
- * teammate's pin when `explicit` says the user chose it. Without that
- * distinction a teammate's pinned model never takes effect, because the
- * renderer always sends something.
+ * The renderer pins each session's selection on its first send, so `requested`
+ * is that session's own choice and a model switched mid-chat takes effect.
+ * `recalled` only fills in for main-originated invokes (follow-up promote, goal
+ * relaunch) that carry no selection of their own.
  */
 export function resolveTurnModel(input: {
   requested?: Partial<ProviderModelPair>
-  explicit?: boolean
   /** This run's remembered selection (set on its first turn). */
   recalled?: Partial<ProviderModelPair> | null
-  /** The bound teammate's pinned provider/model, when it has one. */
-  profilePin?: Partial<ProviderModelPair> | null
   /** Workspace override merged over global settings. */
   fallback: ProviderModelPair
 }): ProviderModelPair {
-  const explicit = input.explicit ? input.requested : undefined
   return {
-    provider:
-      explicit?.provider ??
-      input.recalled?.provider ??
-      input.profilePin?.provider ??
-      input.requested?.provider ??
-      input.fallback.provider,
-    model:
-      explicit?.model ??
-      input.recalled?.model ??
-      input.profilePin?.model ??
-      input.requested?.model ??
-      input.fallback.model
+    provider: input.requested?.provider ?? input.recalled?.provider ?? input.fallback.provider,
+    model: input.requested?.model ?? input.recalled?.model ?? input.fallback.model
   }
 }
 
@@ -1008,14 +1001,8 @@ export type RunAgentInput = {
   provider?: ProviderId
   /** Session-pinned model — authoritative for this invoke. */
   model?: string
-  /** True only when the user picked `model` by hand (see ChatStartRequestSchema). */
-  modelExplicit?: boolean
-  /** Teammate profile binding — identity, memory namespace, model pin. */
-  agentProfileId?: string
-  /** Delegated task that owns this run (scheduler-launched runs only). */
-  delegatedTaskId?: string
-  /** Execution substrate (Phase 4 runtime seam) — local unless cloud is wired. */
-  runtime?: 'local' | 'cloud'
+  /** A new task's done-when checks, from its brief — written when the run is created. */
+  doneWhen?: string[]
 }
 
 export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent> {
@@ -1023,51 +1010,12 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
   const workspaces = readWorkspacesState()
   const override = findWorkspaceSettingsOverride(workspaces, input.workspacePath)
   const effective = resolveEffectiveSettings(globalSettings, override)
-  const existingStatus = runExists(input.workspacePath, input.runId)
-    ? loadStatus(resolveRunDir(input.workspacePath, input.runId))
-    : null
-  const existingInvariant = existingStatus
-    ? validateExistingRunStart(
-        existingStatus,
-        input,
-        {
-          // A stated field is one that carries a value. Key presence cannot
-          // stand in for it: structured clone preserves own properties whose
-          // value is `undefined`, so an IPC payload that always spells the key
-          // out would read as stated on every send.
-          agentProfileId: input.agentProfileId !== undefined,
-          runtime: input.runtime !== undefined
-        }
-      )
-    : null
-  const boundProfileId = existingInvariant?.agentProfileId ?? input.agentProfileId
-  const profile = boundProfileId
-    ? resolveAgentProfile(input.workspacePath, boundProfileId)
-    : null
-  if (boundProfileId && !profile && !existingStatus?.agentProfileSnapshot) {
-    throw new Error(`Unknown agent profile: ${boundProfileId}`)
-  }
-  let effectiveProfile = profile
-  let effectiveProfileBehavior: AgentProfile | AgentProfileSnapshot | null =
-    profile ?? existingStatus?.agentProfileSnapshot ?? null
-  let persistedNamespaceId: string | undefined
-  if (!effectiveProfile && boundProfileId && AgentProfileIdSchema.safeParse(boundProfileId).success) {
-    persistedNamespaceId = boundProfileId
-    logger.warn('Resumed run binds a deleted teammate profile — snapshot and memory namespace retained', {
-      scope: 'agent',
-      correlationId: input.runId,
-      profileId: boundProfileId
-    })
-  }
-  const runRuntime = existingInvariant?.runtime ?? input.runtime ?? effectiveProfileBehavior?.runtime ?? 'local'
   // Per-session model pinning: renderer turns pass their session's selection;
   // main-originated invokes (follow-up promote, goal relaunch) recall the run's
   // last selection so a model change in another session cannot bleed in here.
   const turnModel = resolveTurnModel({
     requested: { provider: input.provider, model: input.model },
-    explicit: input.modelExplicit === true,
     recalled: recallRunModelSelection(input.runId),
-    profilePin: effectiveProfileBehavior?.model ?? null,
     fallback: { provider: effective.provider, model: effective.model }
   })
   const settings = {
@@ -1077,19 +1025,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     provider: turnModel.provider,
     model: turnModel.model
   }
-  if (effectiveProfileBehavior) {
-    // Profile identity overrides the workspace/global persona chain per-field.
-    if (effectiveProfileBehavior.persona) settings.agentPersona = effectiveProfileBehavior.persona
-    if (effectiveProfileBehavior.tone) settings.agentTone = effectiveProfileBehavior.tone
-    if (effectiveProfileBehavior.identity) settings.agentIdentity = effectiveProfileBehavior.identity
-    if (effectiveProfileBehavior.autonomousMode === 'on') settings.autonomousMode = true
-    if (effectiveProfileBehavior.autonomousMode === 'off') settings.autonomousMode = false
-  }
   rememberRunModelSelection(input.runId, settings.provider, settings.model)
   let agentMode: AgentInteractionMode = input.mode ?? 'agent'
   const workspace = input.workspacePath
   const runId = input.runId
-  const { controller, invokeId } = registerRunAbort(runId, workspace, boundProfileId)
+  const { controller, invokeId } = registerRunAbort(runId, workspace)
 
   // Entire body in try/finally so early returns (missing key, etc.) always clear the abort map.
   // Storage / session paths stay on `workspace`. File tools may use an instance worktree.
@@ -1279,7 +1219,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           inputTokens: checkpointTotals.lastStepInputTokens,
           // Checkpoints written before estimate tracking lack these — never NaN.
           estimatedCost: checkpointTotals.estimatedCost ?? 0,
-          stepsWithEstimate: checkpointTotals.stepsWithEstimate ?? 0
+          stepsWithEstimate: checkpointTotals.stepsWithEstimate ?? 0,
+          billedPromptTokens: checkpointTotals.billedPromptTokens
         }
       } else {
         costTotals = archivedTotals
@@ -1293,23 +1234,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         const persisted = loadStatus(runDir)
         agentMode = input.mode ?? persisted?.mode ?? agentMode
       } else {
-        runDir = createRun(workspace, runId, goal, agentMode)
-        // Persist the substrate + identity snapshot before any async failure
-        // window — a fresh run that crashes during message flush must still
-        // resume with its teammate binding intact.
-        writeStatus({
-          runtime: runRuntime,
-          // Task ownership is durable: boot uses it to tell a scheduler-owned
-          // run from an ordinary teammate chat, so generic profile auto-resume
-          // cannot relaunch work the scheduler must reconcile instead.
-          ...(input.delegatedTaskId ? { delegatedTaskId: input.delegatedTaskId } : {}),
-          ...(effectiveProfile
-            ? {
-                agentProfileId: effectiveProfile.id,
-                agentProfileName: effectiveProfile.name,
-                agentProfileSnapshot: createAgentProfileSnapshot(effectiveProfile, runRuntime)
-              }
-            : {})
+        runDir = createRun(workspace, runId, goal, {
+          mode: agentMode,
+          ...(input.doneWhen?.length ? { doneWhen: input.doneWhen } : {})
         })
       }
       for (const m of messages) appendMessage(runDir, m)
@@ -1331,22 +1258,6 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       }
       onRunStorageLost(runDir, abortOnStorageLost)
     }
-    // Durable substrate + identity snapshot. The runtime is taken from input on
-    // first start and preserved from the persisted status on resume — an invoke
-    // never rewrites the substrate a run was started with.
-    writeStatus({
-      runtime: persistedForTools?.runtime ?? runRuntime,
-      ...(effectiveProfile
-        ? {
-            agentProfileId: effectiveProfile.id,
-            agentProfileName: effectiveProfile.name,
-            agentProfileSnapshot: createAgentProfileSnapshot(
-              effectiveProfile,
-              persistedForTools?.runtime ?? runRuntime
-            )
-          }
-        : {})
-    })
     const isInlineInstance = persistedForTools?.inlineInstance === true
     runIsInlineInstance = isInlineInstance
     if (isInlineInstance && persistedForTools?.worktreePath) {
@@ -1360,7 +1271,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           invokeId,
           error: missing
         })
-        yield { type: 'error', runId, message: missing }
+        yield { type: 'error', runId, message: missing, errorId: randomUUID() }
         yield { type: 'status', runId, status: 'error', invokeId }
         return
       }
@@ -1430,9 +1341,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     // not run yet, so the plain working index is already a full-transcript index.
     beginWriteCheckpoint(runDir, toolWorkspace, lastUserMessageIndex(messages))
 
-    if (agentMode === 'plan') {
-      seedPlanStubIfMissing(runDir)
-    }
+    seedPlanStubIfMissing(runDir)
 
     let compaction: CompactionRecord | null = loadCompaction(runDir)
     // Everything before the watermark is already represented by the summary, so it
@@ -1564,6 +1473,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         peakInputTokens: costTotals.peakInputTokens,
         outputTokens: costTotals.outputTokens,
         billedCachedInputTokens: costTotals.billedCachedInputTokens,
+        ...(costTotals.billedPromptTokens !== undefined ? { billedPromptTokens: costTotals.billedPromptTokens } : {}),
         cacheCreationInputTokens: costTotals.cacheCreationInputTokens,
         reasoningTokens: costTotals.reasoningTokens,
         steps: costTotals.steps,
@@ -1698,10 +1608,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         tokenEstimate: record.tokenEstimate,
         kind: 'summary',
         ...(record.verified != null ? { verified: record.verified } : {}),
-        ...(record.verifyCoverage != null ? { verifyCoverage: record.verifyCoverage } : {}),
-        ...(record.verifyFailures && record.verifyFailures.length > 0
-          ? { verifyFailures: record.verifyFailures }
-          : {})
+        ...(record.verifyCoverage != null ? { verifyCoverage: record.verifyCoverage } : {})
       }
       appendEvent(runDir, ev)
       return { saved: true, event: ev }
@@ -1889,8 +1796,12 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         attachedServerIds: runAttachedMcpServerIds,
         pinnedToolNames: runPinnedMcpToolNames
       })
-      const fullToolDefs = [...AGENT_TOOLS, ...mcpCandidateDefs]
-      const wireToolDefs = [...AGENT_TOOLS, ...mcpSelection.active]
+      // Tools this user's own runs wrote (build_tool). Never deferred: the set
+      // is small, and a tool written this step has to be callable on the next
+      // one for build_tool to be worth having.
+      const agentBuiltDefs = await agentBuiltToolDefinitions()
+      const fullToolDefs = [...AGENT_TOOLS, ...agentBuiltDefs, ...mcpCandidateDefs]
+      const wireToolDefs = [...AGENT_TOOLS, ...agentBuiltDefs, ...mcpSelection.active]
       const allToolDefs =
         modelInfo.supportsTools !== false
           ? filterToolDefsForCodeIndex(
@@ -1937,7 +1848,22 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     }
 
     await refreshMcpToolsForStep()
-    let compactionLoopHint: string | undefined
+    /**
+     * Post-compaction `<run_notice>`, delivered once and then dropped.
+     *
+     * These are transition notices ("a fold just happened", "the fold had
+     * nothing to take"), not standing instructions. Held across steps they rode
+     * every remaining request of the run, and the retained-decisions variant
+     * duplicated the `Decision:` lines that `<prior_session>` already pins
+     * permanently — so the model was told to "execute these next, do not stop at
+     * inspecting files" dozens of steps after it had.
+     */
+    let pendingCompactionHint: string | undefined
+    const takeCompactionHint = (): string | undefined => {
+      const hint = pendingCompactionHint
+      pendingCompactionHint = undefined
+      return hint
+    }
     /** Estimated tokens left by the last auto-compaction (re-compaction throttle). */
     let postCompactEstimateFloor: number | null = null
     /**
@@ -1964,8 +1890,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
      * cheap steering note appended to its result (executeStepTools).
      */
     const recentReadPaths = new Map<string, number>()
-    /** Plan-mode chat-essay nudges this invoke (cap 2). */
-    let planUnreadyNudges = 0
+    /** Shallow-published-plan nudges this invoke (cap 2). */
+    let planQualityNudges = 0
+    /** Reminders to mark unmarked done-when checks before finishing (cap 1). */
+    let doneWhenNudges = 0
     /**
      * Consecutive empty-response retries. The retry re-sends a byte-identical
      * request, so a deterministic empty turn would loop at full generation cost
@@ -1979,9 +1907,13 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
      * step resets it. See adaptiveThinkingEffort in loopPolicy.
      */
     let mechanicalStepStreak = 0
+    /** Frozen for the invoke; re-read after a fold (see PromptArtifacts). */
+    let promptArtifacts: PromptArtifacts | null = null
     const costWarnOnce = new Set<string>()
     /** Rolling cache-hit samples from large steps (low_cache_hit_rate). */
     const recentLargeCacheHits: number[] = []
+    // high, xhigh and max all accumulate reasoning tokens the same way, which
+    // is why the notice says "high effort or above" rather than naming one.
     const thinkingEffortHigh =
       settings.thinkingEffort === 'high' ||
       settings.thinkingEffort === 'xhigh' ||
@@ -2138,16 +2070,23 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       }
 
       const priorSummary = compaction?.summary
-      const contract = await readContractAsync(runDir)
-      // Plan mode mirrors plan.md verbatim (stub included, never truncated) so
-      // str_replace/edit args match the on-disk file exactly; Agent mode only
-      // injects a filled (non-stub) plan.
-      const plan =
-        agentMode === 'plan' ? await readPlanRawAsync(runDir) : await readPlanAsync(runDir)
+      // `readPlanAsync` returns the file VERBATIM once it has a real body, and
+      // '' while it is still the seeded stub — so a run that never plans pays
+      // nothing, and a run that has a plan sees the exact on-disk bytes its
+      // own `str_replace`/`edit` must match. That exactness is why the section
+      // below is injected uncapped (`planVerbatim`), which is what Plan mode
+      // did; the merged mode both authors and edits the plan, so it needs it.
+      // Read once per invoke and again per fold, never per step: see
+      // PromptArtifacts for what a per-step read cost.
+      const artifacts: PromptArtifacts =
+        promptArtifacts?.foldKey === compactionFoldKey(compaction)
+          ? promptArtifacts
+          : await readPromptArtifacts(runDir, compaction)
+      promptArtifacts = artifacts
       const assembleLoopHint = combineLoopHints(
         mcpNotInCatalogFailFastHint(),
         outsidePathHint,
-        compactionLoopHint
+        takeCompactionHint()
       )
       const effectiveContentWindow = contentWindow(modelInfo, providerId)
       const compactThresholdRatio =
@@ -2163,28 +2102,24 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         // Worktree children read memory from the session (parent) workspace —
         // their sparse worktree has no .vyotiq; snapshot and rules stay worktree-local.
         memoryWorkspacePath: isInlineInstance && toolWorkspace !== workspace ? workspace : undefined,
-        // Profile-bound runs read their own memory namespace (.vyotiq/agents/<id>/memory).
-        memoryNamespace: effectiveProfile?.id ?? persistedNamespaceId,
         goal,
-        contract,
-        plan: plan || undefined,
+        ...promptArtifactFields(artifacts),
         sessionEnv: buildSessionEnvSection(settings.terminalShell),
         model: modelInfo,
+        proactiveThreshold,
         toolsJsonEstimate,
         toolsSplit: toolsSplitDetail,
-        compactionTrigger: proactiveThreshold,
-        lastUsage,
         priorCompaction: compaction,
-        keepRecentTurns: settings.keepRecentTurns,
         skillsSection,
         mcpSection: mcpServersSection,
         pluginRulesSection,
         userRules: getSettings().userRules ?? [],
-        persona: settings.agentPersona || DEFAULT_AGENT_PERSONA,
-        identity:
-          settings.agentIdentity ||
-          (settings.agentPersona ? undefined : DEFAULT_AGENT_IDENTITY),
-        tone: settings.agentTone || DEFAULT_AGENT_TONE,
+        // No built-in fallback: persona, identity and tone are the user's to
+        // set. Left empty they emit nothing, so the model arrives with no
+        // imposed name, character or voice.
+        persona: settings.agentPersona || undefined,
+        identity: settings.agentIdentity || undefined,
+        tone: settings.agentTone || undefined,
         responseLanguage: settings.responseLanguage || undefined,
         responseVerbosity: settings.responseVerbosity,
         focusedFile: input.focusedFile,
@@ -2193,16 +2128,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             autoModeSwitch: settings.autoModeSwitch,
             inlineInstance: isInlineInstance
           }) ?? undefined,
-        planVerbatim: agentMode === 'plan',
         loopHint: assembleLoopHint,
         taskList: formatTodosContextSection(readTodos(runDir)),
         activeGoal: isInlineInstance ? undefined : formatActiveGoalSection(readGoal(runDir)),
         providerId,
-        countReasoningReplay,
-        provider,
-        apiKey,
-        baseUrl,
-        signal: controller.signal
+        countReasoningReplay
       }
 
       let assembled = await assembleContext(assembleBase)
@@ -2259,8 +2189,6 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           settings,
           signal: controller.signal,
           triggerReason: assembled.overflow ? 'overflow' : 'proactive',
-          systemStable: assembled.systemStable,
-          toolDefs,
           ...(invokeId != null ? { invokeId } : {})
         })
         if (!autoOutcome.ok && autoOutcome.reason === 'aborted') break
@@ -2293,7 +2221,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               reason: autoOutcome.message
             }
           )
-          compactionLoopHint = verifyFailed
+          // This step's request is already assembled, so the notice lands on the
+          // next one — and is dropped after that. A fold that is still blocked
+          // re-arms it here.
+          pendingCompactionHint = verifyFailed
             ? loopHintForCompactionVerifyFailed()
             : loopHintForCompactionFailure()
           // Same-size history would otherwise re-pay a summarizer call every step.
@@ -2317,7 +2248,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           // would make its dedupe guard compare the record against itself and drop
           // the event, so auto-compaction would never reach the UI or the receipt.
           const { saved: autoSaved, event: autoCompactionEv } = emitCompaction(nextCompaction)
-          compactionLoopHint = loopHintAfterCompaction(nextCompaction.retainedDecisions)
+          // Delivered by this step's re-assemble below and not held past it —
+          // the decisions themselves stay permanently in `<prior_session>`.
+          const postFoldHint = loopHintAfterCompaction(nextCompaction.retainedDecisions)
           compactionCountThisRun++
           if (autoCompactionEv) yield autoCompactionEv
           if (!autoSaved) {
@@ -2333,17 +2266,22 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             return
           }
           reloadCompactionWatermark()
+          // The fold replaced the working history, so this request misses the
+          // cache whatever it carries. That makes it the free point for the
+          // prompt to catch up with contract/plan writes.
+          promptArtifacts = await readPromptArtifacts(runDir, compaction)
           lastCompactVerifyFailed = false
           const postCompactEstimate = autoOutcome.result.estimatedTokens
           postCompactEstimateFloor = postCompactEstimate ?? null
           assembled = await assembleContext({
             ...assembleBase,
+            ...promptArtifactFields(promptArtifacts),
             messages,
             priorCompaction: compaction,
             loopHint: combineLoopHints(
               mcpNotInCatalogFailFastHint(),
               outsidePathHint,
-              compactionLoopHint,
+              postFoldHint,
               loopHintWhenContextStillLarge(postCompactEstimate ?? 0, proactiveThreshold)
             )
           })
@@ -2379,8 +2317,6 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             settings,
             signal: controller.signal,
             triggerReason: 'overflow',
-            systemStable: assembled.systemStable,
-            toolDefs,
             ...(invokeId != null ? { invokeId } : {})
           })
           if (!retryOutcome.ok && retryOutcome.reason === 'aborted') break
@@ -2416,7 +2352,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               return
             }
             const { saved: retrySaved, event: retryEv } = emitCompaction(retryCompaction)
-            compactionLoopHint = loopHintAfterCompaction(retryCompaction.retainedDecisions)
+            const retryFoldHint = loopHintAfterCompaction(retryCompaction.retainedDecisions)
             compactionCountThisRun++
             if (retryEv) yield retryEv
             if (!retrySaved) {
@@ -2432,17 +2368,19 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               return
             }
             reloadCompactionWatermark()
+            promptArtifacts = await readPromptArtifacts(runDir, compaction)
             lastCompactVerifyFailed = false
             const retryPostCompactEstimate = retryOutcome.result.estimatedTokens
             postCompactEstimateFloor = retryPostCompactEstimate ?? null
             assembled = await assembleContext({
               ...assembleBase,
+              ...promptArtifactFields(promptArtifacts),
               messages,
               priorCompaction: compaction,
               loopHint: combineLoopHints(
                 mcpNotInCatalogFailFastHint(),
                 outsidePathHint,
-                compactionLoopHint,
+                retryFoldHint,
                 loopHintWhenContextStillLarge(retryPostCompactEstimate ?? 0, proactiveThreshold)
               )
             })
@@ -2490,8 +2428,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       const contextWindow = contextWindowFor(modelInfo, providerId)
       costLogContextWindow = contextWindow
       const compactionTrigger = proactiveThreshold
-      const priorProviderInput =
-        lastUsage?.inputTokens && lastUsage.inputTokens > 0 ? lastUsage.inputTokens : undefined
+      // Whole-prompt tokens, not the provider's uncached slice (see promptTokensFromUsage).
+      const priorPromptTokens = lastUsage ? promptTokensFromUsage(lastUsage) : 0
+      const priorProviderInput = priorPromptTokens > 0 ? priorPromptTokens : undefined
       const usingProviderMeter =
         priorProviderInput != null && compaction?.summary === priorSummary
       const contextUsageEv: AgentEvent = {
@@ -2527,6 +2466,13 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       let lastSnapshotText = ''
       let lastStreamFailureMessage = ''
       let lastStreamFailureCode = 'PROVIDER_STREAM'
+      /**
+       * The server lost the response this step chains from, so this step's
+       * remaining attempts send the whole history instead. Per step on purpose:
+       * a stateless attempt that succeeds writes a fresh response id, which the
+       * next step picks up as usual.
+       */
+      let droppedPriorResponseState = false
       let lastStreamFailureHttpStatus: number | undefined = undefined
       // Const capture so nested generators keep `string` (outer `runDir` is `string | null`).
       const streamRunDir = runDir
@@ -2543,6 +2489,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         })
         return
       }
+
+      // Recorded on step_usage: equal to the previous step's value means this
+      // request sent the same prefix, so a cold step was the provider's miss.
+      const promptPrefixHash = promptPrefixFingerprint(toolDefs, assembled.systemStable)
 
       const streamRetryResult = yield* runWithStreamRetryGen({
         circuitKey: circuitKeyProvider(providerId, baseUrl),
@@ -2610,12 +2560,11 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           apiKey,
           baseUrl,
           maxOutputTokens: requestMaxOutputTokens(providerId, modelInfo),
-          anthropicNative: assembled.anthropicNative,
           toolChoice: toolDefs.length > 0 ? 'auto' : undefined,
           parallelToolCalls: toolDefs.length > 0 ? true : undefined,
           promptCacheKey: runId,
           modelInfo,
-          reasoningState: lastReasoningState(messages),
+          reasoningState: droppedPriorResponseState ? undefined : lastReasoningState(messages),
           thinking: thinkingEnabled
             ? {
                 enabled: true,
@@ -2777,8 +2726,10 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             if (chunk.stopReason) stepStopReason = chunk.stopReason
             if (chunk.usage) {
               lastUsage = chunk.usage
-              if (chunk.usage.inputTokens && chunk.usage.inputTokens > 0) {
-                providerInputTokens = chunk.usage.inputTokens
+              // Context sizing uses the whole prompt; billing below keeps the raw slices.
+              const promptTokens = promptTokensFromUsage(chunk.usage)
+              if (promptTokens > 0) {
+                providerInputTokens = promptTokens
               }
               const generationMs = Math.max(0, Date.now() - streamStartedAt)
               // Estimated cost only when the provider did NOT report a cost
@@ -2833,7 +2784,17 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               const usageEv: AgentEvent = {
                 type: 'step_usage',
                 runId,
+                // A new invoke may start cold because time passed, not
+                // because anything went wrong; the spend report tells the two
+                // apart with this.
+                ...(invokeId != null ? { invokeId } : {}),
                 step,
+                // Attribution for offline analysis: events.jsonl is the only
+                // per-step record, and the run-level receipt carries whichever
+                // model the LAST invoke of this run used.
+                provider: providerId,
+                model: settings.model,
+                prefixHash: promptPrefixHash,
                 inputTokens: chunk.usage.inputTokens,
                 ...(chunk.usage.inputTokensIncludesCache !== undefined
                   ? { inputTokensIncludesCache: chunk.usage.inputTokensIncludesCache }
@@ -2933,7 +2894,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 runId,
                 step,
                 estimatedTokens: assembled.estimatedTokens,
-                inputTokens: chunk.usage.inputTokens ?? assembled.estimatedTokens,
+                inputTokens: promptTokensFromUsage(chunk.usage) || assembled.estimatedTokens,
                 contextWindow,
                 contentWindow: effectiveContentWindow,
                 compactionTrigger,
@@ -2980,6 +2941,23 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               lastStreamFailureMessage = message
               lastStreamFailureCode = errorCode
             }
+            // Recoverable without user action, and only once: the retry carries
+            // no previous_response_id, so the same cause cannot repeat. Without
+            // the guard a server that keeps returning it would retry forever.
+            if (!droppedPriorResponseState && isStalePriorResponseError(message)) {
+              droppedPriorResponseState = true
+              lastStreamFailureMessage = message
+              lastStreamFailureCode = errorCode
+              logger.warn('Prior response gone upstream — retrying with full history', {
+                scope: 'agent',
+                code: errorCode,
+                correlationId: runId,
+                provider: providerId,
+                step,
+                attempt
+              })
+              return 'retry'
+            }
             if (shouldRetryStreamErrorChunk(errorCode, message, attempt, chunk.httpStatus)) {
               lastStreamFailureMessage = message
               lastStreamFailureCode = errorCode
@@ -2999,7 +2977,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               correlationId: runId,
               provider: providerId,
               step,
-              message: message.slice(0, 280)
+              providerMessage: message.slice(0, 280)
             })
             // A retriable status that exhausted its attempts (429/408/5xx) is a
             // transient provider-side wait — interrupted + Continue, not a hard error.
@@ -3421,19 +3399,24 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
 
         if (controller.signal.aborted) break
 
-        if (agentMode === 'plan' && planUnreadyNudges < 2) {
+        // Plan-QUALITY nudge. Plan mode also nudged for a MISSING plan, and
+        // that half did not survive the merge into Agent: Plan mode was entered
+        // deliberately to produce a plan, so "where is it" was always a fair
+        // question there. Agent answers questions too, and firing on every
+        // turn that ends without a plan cost two extra model round trips on
+        // ordinary runs — measured as 4 provider calls where 2 were expected
+        // across the agentLoop / loopStopReason suites. What is worth keeping
+        // is the half that judges a plan the run chose to publish.
+        // Asking for a plan at all stays with the mode section and
+        // `create_plan`'s own advisory quality feedback.
+        if (!isInlineInstance && agentMode === 'agent' && planQualityNudges < 2) {
           const planRaw = await readPlanRawAsync(runDir)
-          // Draft-ready but structurally shallow plans get the same capped
-          // nudge budget as missing plans, with the top quality issues named.
           const quality = isPlanDraftReady(planRaw) ? scorePlanQuality(planRaw) : null
-          if (quality === null || quality.issues.length > 0) {
-            planUnreadyNudges += 1
+          if (quality && quality.issues.length > 0) {
+            planQualityNudges += 1
             const nudge: ChatMessage = {
               role: 'user',
-              content:
-                quality === null
-                  ? 'Call `create_plan` with title, Goal, Scope, Steps, and Done when. The title may be an H1 first line in `plan` (`# Title`). Do not put the plan only in chat.'
-                  : `Plan published but shallow — refine it with \`create_plan\`. Top issues: ${quality.issues.slice(0, 2).join(' ')}`,
+              content: `Plan published but shallow — refine it with \`create_plan\`. Top issues: ${quality.issues.slice(0, 2).join(' ')}`,
               // Loop-injected protocol turn — must never render as a user bubble.
               synthetic: true
             }
@@ -3467,6 +3450,26 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         if (hasPendingFollowUps(runId)) {
           yield* applyDrainedFollowUps(runId, runDir, messages, 'next')
           continue
+        }
+
+        // Done-when checks the agent is about to leave unmarked: one reminder,
+        // then the run ends as it is — an unmarked check stays unchecked for
+        // the user to see. Read from checks.json here, at turn end only, so
+        // marking checks never touches the cached prompt prefix.
+        if (!incomplete && agentMode === 'agent' && !isInlineInstance && doneWhenNudges < 1) {
+          const reminder = doneWhenNudgeText(readChecks(runDir))
+          if (reminder) {
+            doneWhenNudges += 1
+            const nudge: ChatMessage = {
+              role: 'user',
+              content: reminder,
+              // Loop-injected protocol turn — must never render as a user bubble.
+              synthetic: true
+            }
+            messages.push(nudge)
+            appendMessage(runDir, nudge)
+            continue
+          }
         }
 
         if (incomplete) {
@@ -3746,15 +3749,12 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         getAgentMode: () => agentMode,
         setAgentMode: (mode: AgentInteractionMode) => {
           agentMode = mode
-          const dir = runDir
-          if (mode === 'plan' && dir) seedPlanStubIfMissing(dir)
           return writeStatus({ mode })
         },
         autoModeSwitch: settings.autoModeSwitch,
         terminalShell: settings.terminalShell,
         diagnosticsCommand: settings.diagnosticsCommand,
         invokeSettings: settings,
-        memoryNamespace: effectiveProfile?.id ?? persistedNamespaceId,
         runEnabledMcpIds,
         mcpToolPolicies,
         stepMcpToolNames,
@@ -3903,7 +3903,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       // agent's working memory at the last few tool results however empty the
       // window was: on run 356eefd5, 507 of 523 tool results were `[cleared]`
       // at a peak of 57,758 tokens against a ~880k content window, and the
-      // model re-read docs/teammates.md 108 times because its own history kept
+      // model re-read the same doc 108 times because its own history kept
       // vanishing underneath it. Trimmed with slack so the boundary does not
       // move every step — a mid-history rewrite invalidates the cached prefix.
       // messages.jsonl keeps the full bodies.

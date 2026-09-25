@@ -81,3 +81,25 @@ describe('useSettings sequencing', () => {
     expect(result.current.error).toBe('IPC failed')
   })
 })
+
+describe('useSettings and main’s own writes', () => {
+  it('takes settings main wrote on its own — an Always allow saved mid-run — without a reload', async () => {
+    let push: (next: typeof DEFAULT_SETTINGS) => void = () => {}
+    // @ts-expect-error test bridge
+    window.vyotiq = {
+      getSettings: vi.fn(async () => ({ ok: true as const, data: { ...DEFAULT_SETTINGS } })),
+      secretStatus: vi.fn(async () => ({ ok: true as const, data: { keys: emptySecretStatus(), encryptionAvailable: true } })),
+      setSettings: vi.fn(),
+      onSettingsChanged: vi.fn((handler: (next: typeof DEFAULT_SETTINGS) => void) => {
+        push = handler
+        return () => {}
+      })
+    }
+    const { result } = renderHook(() => useSettings())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    act(() =>
+      push({ ...DEFAULT_SETTINGS, toolApproval: { ...DEFAULT_SETTINGS.toolApproval, allowlist: ['terminal:pnpm vitest'] } })
+    )
+    expect(result.current.settings.toolApproval.allowlist).toEqual(['terminal:pnpm vitest'])
+  })
+})

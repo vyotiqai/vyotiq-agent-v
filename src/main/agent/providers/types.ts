@@ -108,18 +108,6 @@ export interface ProviderChatRequest {
   temperature?: number
   /** Stop sequences (provider-capped). */
   stop?: string[]
-  /** Anthropic-native context management / caching. */
-  anthropicNative?: {
-    enableContextManagement: boolean
-    clearToolUsesKeep?: number
-    compactTriggerTokens?: number
-    /** Server clear_tool_uses input_tokens trigger (Anthropic context editing). */
-    clearToolUsesTriggerTokens?: number
-    /** Min tokens cleared per activation — avoids cache-busting micro-clears. */
-    clearToolUsesAtLeastTokens?: number
-    /** Tool names whose uses/results are never server-cleared. */
-    clearToolUsesExcludeTools?: string[]
-  }
   responseFormat?: ResponseFormat
   toolChoice?: 'auto' | 'none' | 'required'
   parallelToolCalls?: boolean

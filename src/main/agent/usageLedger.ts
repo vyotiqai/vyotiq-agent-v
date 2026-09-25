@@ -9,9 +9,32 @@ export const USAGE_LEDGER_FILENAME = 'usage.json'
 
 const USAGE_LEDGER_VERSION = 1 as const
 
+/** Non-turn LLM call sites — the "endpoints" spend is attributed to. */
+export type UsageLedgerAuxSite =
+  | 'compaction_fork'
+  | 'compaction_structured'
+  | 'compaction_freeform'
+  | 'commit_message'
+
+/** One call site's spend within a day bucket. */
+export type UsageLedgerAux = {
+  /** Billed provider streams, retries included. */
+  calls: number
+  inputTokens: number
+  outputTokens: number
+  cachedInputTokens?: number
+  reasoningTokens?: number
+  billedCost?: number
+  estimatedCost?: number
+}
+
 /** One local-day bucket of recorded usage deltas for a run. */
 export type UsageLedgerDay = {
-  /** Sum of per-step billed input tokens recorded on this day. */
+  /**
+   * Billed input tokens recorded on this day — per-step turn input plus any
+   * auxiliary (non-turn) input folded in, so day totals reflect everything
+   * actually paid for rather than turns alone.
+   */
   inputTokens: number
   outputTokens: number
   /** Provider-reported cost deltas (may stay absent when never reported). */
@@ -19,12 +42,30 @@ export type UsageLedgerDay = {
   /** Estimated cost deltas (tokens × published prices), kept separate. */
   estimatedCost?: number
   cachedInputTokens?: number
+  /**
+   * Whole-prompt tokens recorded this day (cached reads included, whatever the
+   * provider counts as input). Present only on days whose every step was
+   * recorded with it, so `cachedInputTokens / promptInputTokens` is exact.
+   */
+  promptInputTokens?: number
   /** Billed thinking-token deltas recorded this day (subset of output). */
   reasoningTokens?: number
   /** Peak per-step context input seen this day (max across steps). */
   peakInputTokens?: number
   /** Raw model context window in effect at the last recorded step this day. */
   contextWindow?: number
+  /**
+   * Per-call-site breakdown of auxiliary spend. Additive and optional, so this
+   * stays a version-1 ledger: every reader reads named keys, and bumping the
+   * version would make `readUsageLedger` reject every existing ledger — which
+   * silently falls Home activity back to the receipt path and re-attributes each
+   * multi-day run's whole total to its receipt day.
+   *
+   * These amounts are ALSO folded into the day totals above. They are never
+   * routed through `lastTotals`, so they cannot double-count: `recordUsageDeltas`
+   * only ever deltas turn accounting.
+   */
+  aux?: Partial<Record<UsageLedgerAuxSite, UsageLedgerAux>>
 }
 
 export type UsageLedger = {
@@ -38,6 +79,8 @@ export type UsageLedger = {
     estimatedCost: number
     cachedInputTokens: number
     reasoningTokens: number
+    /** Absent on ledgers written before prompt sizes were tracked. */
+    promptInputTokens?: number
   }
   /** Local-day buckets keyed YYYY-MM-DD — only days with recorded deltas. */
   days: Record<string, UsageLedgerDay>
@@ -119,6 +162,8 @@ export function recordUsageDeltas(
     const dEstimate = delta(totals.estimatedCost, last.estimatedCost)
     const dCached = delta(totals.billedCachedInputTokens, last.cachedInputTokens)
     const dReasoning = delta(totals.reasoningTokens, last.reasoningTokens)
+    const promptTracked = totals.billedPromptTokens !== undefined
+    const dPrompt = promptTracked ? delta(totals.billedPromptTokens!, last.promptInputTokens ?? 0) : 0
     // Nothing new to record — skip the write entirely (the snapshot only
     // matters when a later cumulative jump bills its actual delta).
     if (totals.steps === last.steps && dCost === 0) return
@@ -126,7 +171,15 @@ export function recordUsageDeltas(
     const dateKey = localDayKeyOf(now.toISOString())
     if (!dateKey) return
     const days: Record<string, UsageLedgerDay> = { ...(prev?.days ?? {}) }
-    const day: UsageLedgerDay = { ...(days[dateKey] ?? { inputTokens: 0, outputTokens: 0 }) }
+    // A day starts tracking prompt sizes only when its first step does: a day
+    // begun before, or by totals without them, stays without, never half-counted.
+    const day: UsageLedgerDay = {
+      ...(days[dateKey] ?? { inputTokens: 0, outputTokens: 0, ...(promptTracked ? { promptInputTokens: 0 } : {}) })
+    }
+    if (day.promptInputTokens !== undefined) {
+      if (promptTracked) day.promptInputTokens += dPrompt
+      else delete day.promptInputTokens
+    }
     day.inputTokens += dInput
     day.outputTokens += dOutput
     if (dCost > 0) day.billedCost = (day.billedCost ?? 0) + dCost
@@ -152,12 +205,111 @@ export function recordUsageDeltas(
         billedCost: Math.max(totals.billedCost, last.billedCost),
         estimatedCost: Math.max(totals.estimatedCost, last.estimatedCost),
         cachedInputTokens: Math.max(totals.billedCachedInputTokens, last.cachedInputTokens),
-        reasoningTokens: Math.max(totals.reasoningTokens, last.reasoningTokens)
+        reasoningTokens: Math.max(totals.reasoningTokens, last.reasoningTokens),
+        ...(promptTracked
+          ? { promptInputTokens: Math.max(totals.billedPromptTokens!, last.promptInputTokens ?? 0) }
+          : {})
       },
       days
     }
     atomicWriteJson(join(runDir, USAGE_LEDGER_FILENAME), ledger)
   } catch {
     // Ledger is observational — a failed write must never break the run loop.
+  }
+}
+
+/**
+ * Record one billed non-turn LLM call (compaction, commit-message generation)
+ * into its run's per-day ledger.
+ *
+ * Unlike `recordUsageDeltas` this takes ABSOLUTE amounts for a single call, not
+ * a cumulative snapshot, so it deliberately never reads or writes `lastTotals`.
+ * That separation is what makes double-counting structurally impossible: turn
+ * spend flows through `lastTotals` deltas and auxiliary spend never touches it.
+ *
+ * Synchronous, matching `recordUsageDeltas` — both read-modify-write the same
+ * file from the main process, and interleaving them would lose a bucket.
+ *
+ * Best-effort: never throws to callers.
+ */
+export function recordAuxUsage(
+  runDir: string,
+  entry: {
+    site: UsageLedgerAuxSite
+    inputTokens?: number
+    outputTokens?: number
+    cachedInputTokens?: number
+    reasoningTokens?: number
+    billedCost?: number
+    estimatedCost?: number
+  },
+  now = new Date()
+): void {
+  try {
+    const add = (n: number | undefined): number => (typeof n === 'number' && n > 0 ? n : 0)
+    const dInput = add(entry.inputTokens)
+    const dOutput = add(entry.outputTokens)
+    const dCached = add(entry.cachedInputTokens)
+    const dReasoning = add(entry.reasoningTokens)
+    const dCost = add(entry.billedCost)
+    const dEstimate = add(entry.estimatedCost)
+    if (
+      dInput === 0 &&
+      dOutput === 0 &&
+      dCached === 0 &&
+      dReasoning === 0 &&
+      dCost === 0 &&
+      dEstimate === 0
+    ) {
+      return
+    }
+
+    const dateKey = localDayKeyOf(now.toISOString())
+    if (!dateKey) return
+
+    const prev = readUsageLedger(runDir)
+    const days: Record<string, UsageLedgerDay> = { ...(prev?.days ?? {}) }
+    const day: UsageLedgerDay = { ...(days[dateKey] ?? { inputTokens: 0, outputTokens: 0 }) }
+
+    // Fold into the day totals so Home activity picks auxiliary spend up with no
+    // changes to its aggregation.
+    day.inputTokens += dInput
+    day.outputTokens += dOutput
+    if (dCached > 0) day.cachedInputTokens = (day.cachedInputTokens ?? 0) + dCached
+    if (dReasoning > 0) day.reasoningTokens = (day.reasoningTokens ?? 0) + dReasoning
+    if (dCost > 0) day.billedCost = (day.billedCost ?? 0) + dCost
+    if (dEstimate > 0) day.estimatedCost = (day.estimatedCost ?? 0) + dEstimate
+
+    const aux: Partial<Record<UsageLedgerAuxSite, UsageLedgerAux>> = { ...(day.aux ?? {}) }
+    const site: UsageLedgerAux = {
+      ...(aux[entry.site] ?? { calls: 0, inputTokens: 0, outputTokens: 0 })
+    }
+    site.calls += 1
+    site.inputTokens += dInput
+    site.outputTokens += dOutput
+    if (dCached > 0) site.cachedInputTokens = (site.cachedInputTokens ?? 0) + dCached
+    if (dReasoning > 0) site.reasoningTokens = (site.reasoningTokens ?? 0) + dReasoning
+    if (dCost > 0) site.billedCost = (site.billedCost ?? 0) + dCost
+    if (dEstimate > 0) site.estimatedCost = (site.estimatedCost ?? 0) + dEstimate
+    aux[entry.site] = site
+    day.aux = aux
+    days[dateKey] = day
+
+    const ledger: UsageLedger = {
+      version: USAGE_LEDGER_VERSION,
+      lastTotals: prev?.lastTotals ?? {
+        steps: 0,
+        billedInputTokens: 0,
+        outputTokens: 0,
+        billedCost: 0,
+        estimatedCost: 0,
+        cachedInputTokens: 0,
+        reasoningTokens: 0
+      },
+      days
+    }
+    atomicWriteJson(join(runDir, USAGE_LEDGER_FILENAME), ledger)
+  } catch {
+    // Ledger is observational — a failed write must never break compaction.
   }
 }

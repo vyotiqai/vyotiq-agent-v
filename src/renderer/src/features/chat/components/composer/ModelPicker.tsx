@@ -133,16 +133,16 @@ function ModelRow({
         {opt.label}
       </span>
       <CapabilityBadges meta={opt.meta} />
-      <Tooltip content={favorite ? 'Remove from favorites' : 'Add to favorites'}>
+      <Tooltip content={favorite ? 'Remove from favourites' : 'Add to favourites'}>
         <button
           type="button"
           className={cn(
-            'absolute top-1/2 right-7 z-sticky inline-grid size-5 -translate-y-1/2 place-items-center rounded text-muted vy-transition',
+            'absolute top-1/2 right-7 z-sticky inline-grid size-5 -translate-y-1/2 place-items-center rounded vy-transition',
             favorite
               ? 'opacity-100 text-fg'
-              : 'opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
+              : 'text-muted opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
           )}
-          aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'}
+          aria-label={favorite ? 'Remove from favourites' : 'Add to favourites'}
           onMouseDown={(e) => e.preventDefault()}
           onClick={(e) => {
             e.stopPropagation()
@@ -337,7 +337,7 @@ export function ModelPicker({
     const rest = base.filter((o) => !pinned.has(o.value))
 
     const sections: { header: string; items: ModelPickerOption[] }[] = []
-    if (favorites.length) sections.push({ header: 'Favorites', items: favorites })
+    if (favorites.length) sections.push({ header: 'Favourites', items: favorites })
     if (recent.length) sections.push({ header: 'Recent', items: recent })
     if (seeds.length) sections.push({ header: 'Recommended', items: seeds })
     if (rest.length) sections.push({ header: 'All models', items: rest })
@@ -447,7 +447,7 @@ export function ModelPicker({
             }}
             onKeyDown={onListKeyDown}
           >
-            <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
+            <div className="flex shrink-0 items-center gap-1 border-b border-border/40 px-2 py-1.5">
               <div className="min-w-0 flex-1">
                 <SearchInput
                   ref={searchRef}
@@ -478,12 +478,12 @@ export function ModelPicker({
             </div>
 
             {browsedWarning ? (
-              <p className="m-0 shrink-0 border-b border-border bg-surface px-3 py-1.5 text-2xs leading-snug text-muted">
+              <p className="m-0 shrink-0 border-b border-border/40 bg-surface px-3 py-1.5 text-2xs leading-snug text-muted">
                 {browsedWarning}
               </p>
             ) : null}
 
-            <div className="sidebar-scroll-x flex shrink-0 gap-1 border-b border-border px-2 py-1.5">
+            <div className="sidebar-scroll-x flex shrink-0 gap-1 border-b border-border/40 px-2 py-1.5">
               {providers.length === 0 ? (
                 <p className="m-0 px-1 py-1 text-xs text-muted">
                   No providers configured — open Settings → Providers
@@ -589,7 +589,7 @@ export function ModelPicker({
             </ul>
 
             {supportedTiers.length > 0 ? (
-              <div className="shrink-0 border-t border-border px-3 py-2">
+              <div className="shrink-0 border-t border-border/40 px-3 py-2">
                 <p className="mb-1.5 text-2xs font-medium uppercase tracking-wide text-secondary">
                   Speed
                 </p>

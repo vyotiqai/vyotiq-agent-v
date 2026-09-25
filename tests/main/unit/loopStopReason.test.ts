@@ -56,7 +56,6 @@ const { streamChat, executeTool, assembleContext } = vi.hoisted(() => ({
     estimatedTokens: 100,
     layers: { system: 10, history: 50, tools: 20, buffer: 20 },
     overflow: false,
-    anthropicNative: undefined,
     compaction: null
   }))
 }))
@@ -113,6 +112,7 @@ type CapturedEvent = {
   content?: string
   code?: string
   message?: string
+  errorId?: string
   toolCallId?: string
   name?: string
   argumentsDelta?: string
@@ -161,7 +161,6 @@ describe('runAgent stop-reason classification', () => {
       estimatedTokens: 100,
       layers: { system: 10, history: 50, tools: 20, buffer: 20 },
       overflow: false,
-      anthropicNative: undefined,
       compaction: null
     }))
   })
@@ -523,7 +522,6 @@ describe('runAgent stop-reason classification', () => {
       estimatedTokens: 200_000,
       layers: { system: 10, history: 50, tools: 20, buffer: 20 },
       overflow: true,
-      anthropicNative: undefined,
       compaction: null
     }))
 
@@ -571,7 +569,6 @@ describe('runAgent stop-reason classification', () => {
       estimatedTokens: 200_000,
       layers: { system: 10, history: 50, tools: 20, buffer: 20 },
       overflow: true,
-      anthropicNative: undefined,
       compaction: null
     }))
     streamChat.mockImplementation(async function* (req: StreamChatReq): AsyncGenerator<StreamChunk> {
@@ -620,7 +617,6 @@ describe('runAgent stop-reason classification', () => {
         estimatedTokens: 200_000,
         layers: { system: 10, history: 50, tools: 20, buffer: 20 },
         overflow: true,
-        anthropicNative: undefined,
         compaction: null
       }
     })
@@ -675,7 +671,6 @@ describe('runAgent partial persistence', () => {
       estimatedTokens: 100,
       layers: { system: 10, history: 50, tools: 20, buffer: 20 },
       overflow: false,
-      anthropicNative: undefined,
       compaction: null
     }))
   })
@@ -698,6 +693,27 @@ describe('runAgent partial persistence', () => {
 
     const messages = readFileSync(join(resolveRunDir(workspace, runId), 'messages.jsonl'), 'utf8')
     expect(messages).toContain('streamed before the failure')
+  })
+
+  it('gives a run failure one errorId, live and on disk', async () => {
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'error', error: 'HTTP 400: bad request' }
+    })
+
+    const runId = 'error-id-live-and-disk'
+    const events = await collect(runId, workspace)
+
+    // The renderer keys a dismissed error box by this id, so the box a reload
+    // rebuilds must carry the id the live box had.
+    const live = events.filter((e) => e.type === 'error')
+    expect(live).toHaveLength(1)
+    expect(live[0]?.errorId).toMatch(/\S/)
+    const persisted = readFileSync(join(resolveRunDir(workspace, runId), 'events.jsonl'), 'utf8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => (JSON.parse(line) as { event: CapturedEvent }).event)
+      .filter((event) => event.type === 'error')
+    expect(persisted.map((event) => event.errorId)).toEqual([live[0]?.errorId])
   })
 
   it('recovers from a retriable thrown stream error (no exhaustion stop)', async () => {

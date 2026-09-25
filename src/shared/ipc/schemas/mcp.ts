@@ -56,8 +56,11 @@ export const McpStatusRequestSchema = z.object({
 })
 export type McpStatusRequest = z.infer<typeof McpStatusRequestSchema>
 
-export const McpRefreshRequestSchema = McpStatusRequestSchema
-export type McpRefreshRequest = McpStatusRequest
+export const McpRefreshRequestSchema = McpStatusRequestSchema.extend({
+  /** Retry only the servers that failed to connect; live sessions stay up. */
+  failedOnly: z.boolean().optional()
+})
+export type McpRefreshRequest = z.infer<typeof McpRefreshRequestSchema>
 
 export const McpSetAuthTokenRequestSchema = z.object({
   serverId: z.string().min(1),

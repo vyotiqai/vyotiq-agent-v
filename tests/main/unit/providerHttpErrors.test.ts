@@ -3,6 +3,7 @@ import {
   formatProviderHttpError,
   isOpenRouterNoEndpointsError,
   parseOpenRouterAffordableOutputTokens,
+  isStaleContinuationError,
   parseRejectedBodyField,
   shouldRetryOmitIncludeUsage,
   shouldRetryOpenRouterCompatBody,
@@ -323,5 +324,40 @@ describe('shouldRetrySanitizeToolSchema', () => {
   it('does not match unrelated errors or statuses', () => {
     expect(shouldRetrySanitizeToolSchema(400, '{"error":{"message":"invalid model"}}')).toBe(false)
     expect(shouldRetrySanitizeToolSchema(500, 'unsupported_keyword')).toBe(false)
+  })
+})
+
+describe('isStaleContinuationError', () => {
+  it('matches a host that disowns the chained response id', () => {
+    expect(
+      isStaleContinuationError(
+        400,
+        JSON.stringify({
+          error: {
+            message:
+              'Upstream request failed: [invalid_request_error] referenced response not found or expired',
+            type: 'invalid_request_error'
+          }
+        })
+      )
+    ).toBe(true)
+    expect(
+      isStaleContinuationError(
+        404,
+        JSON.stringify({ error: { message: "Previous response with id 'resp_abc123' not found." } })
+      )
+    ).toBe(true)
+    expect(
+      isStaleContinuationError(400, JSON.stringify({ message: 'previous_interaction_id expired' }))
+    ).toBe(true)
+  })
+
+  it('does not match unrelated failures, expiries or statuses', () => {
+    expect(isStaleContinuationError(400, '{"error":{"message":"invalid model"}}')).toBe(false)
+    // Auth expiry is not a continuation problem — resending statelessly cannot help.
+    expect(isStaleContinuationError(401, '{"error":{"message":"API key expired"}}')).toBe(false)
+    expect(
+      isStaleContinuationError(500, 'referenced response not found or expired')
+    ).toBe(false)
   })
 })

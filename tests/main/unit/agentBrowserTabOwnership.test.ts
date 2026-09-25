@@ -167,6 +167,42 @@ describe('browser tab workspace ownership', () => {
     expect(result.path).toContain(join('browser', 'snapshot-'))
   })
 
+  it('enumerates live workspace-visible tab ids in the unknown-tab error', async () => {
+    const { tabA, tabB } = await openOwnedTabs()
+    let message = ''
+    try {
+      await navigateUrl('https://example.com', {
+        tabId: 't999',
+        workspacePath: WS_A,
+        agentControl: false
+      })
+      expect.fail('expected throw')
+    } catch (err) {
+      message = String(err)
+    }
+    expect(message).toContain('Unknown browser tab_id: t999')
+    // Only this workspace's tabs are addressable, so only its ids are listed.
+    const live = /Live tab ids: (.+)/.exec(message)?.[1]?.split(', ') ?? []
+    expect(live).toEqual([tabA])
+    expect(tabB).toMatch(/^t\d+$/)
+  })
+
+  it('says no live browser tabs when none are open', async () => {
+    let message = ''
+    try {
+      await navigateUrl('https://example.com', {
+        tabId: 't1',
+        workspacePath: WS_A,
+        agentControl: false
+      })
+      expect.fail('expected throw')
+    } catch (err) {
+      message = String(err)
+    }
+    expect(message).toContain('Unknown browser tab_id: t1')
+    expect(message).toContain('No live browser tabs open.')
+  })
+
   it('installs a will-download handler that prevents unowned downloads', async () => {
     await openOwnedTabs()
     expect(sessionOn).toHaveBeenCalledWith('will-download', expect.any(Function))

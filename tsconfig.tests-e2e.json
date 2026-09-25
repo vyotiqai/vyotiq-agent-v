@@ -1,0 +1,13 @@
+{
+  // Playwright specs run in Node, but their page.evaluate callbacks are
+  // authored against the browser. Checking them under tsconfig.tests-node.json
+  // (lib: esnext) left `document`, `window` and `HTMLElement` unresolved — 61
+  // errors that were a config gap, not test debt. They get their own project
+  // rather than DOM being added to the node one, which would let src/main
+  // reference `document` without a word from the compiler.
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
+  },
+  "include": ["tests/gui-e2e/**/*", "src/shared/**/*", "src/preload/index.d.ts"]
+}

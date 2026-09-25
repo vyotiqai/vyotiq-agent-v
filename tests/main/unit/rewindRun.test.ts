@@ -46,6 +46,10 @@ let workspace: string
 let runId: string
 let runDir: string
 
+function eventTypes(rows: { event?: unknown }[]): string[] {
+  return rows.map((row) => (row.event as { type: string }).type)
+}
+
 beforeEach(() => {
   resetWriteCheckpointsForTests()
   workspace = join(tmpdir(), `vyotiq-rewind-ws-${process.pid}-${Date.now()}-${Math.random()}`)
@@ -216,6 +220,150 @@ describe('prepareRewindAndReplaceUserMessage', () => {
     ).rejects.toThrow(/compacted away/)
 
     expect(loadMessages(workspace, runId)).toEqual(messages)
+  })
+
+  it('drops the error of a turn that failed before calling any tool', async () => {
+    const firstAt = '2026-01-01T00:00:00.000Z'
+    const secondAt = '2026-01-01T00:05:00.000Z'
+    await syncMessagesAsync(runDir, [
+      { role: 'user', content: 'first', at: firstAt },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'second', at: secondAt }
+    ])
+    writeFileSync(
+      join(runDir, 'events.jsonl'),
+      [
+        { at: '2026-01-01T00:00:00.100Z', event: { type: 'status', runId, invokeId: 1, status: 'running' } },
+        { at: '2026-01-01T00:00:02.000Z', event: { type: 'assistant_message', runId, invokeId: 1, content: 'ok' } },
+        { at: '2026-01-01T00:00:02.100Z', event: { type: 'status', runId, invokeId: 1, status: 'done' } },
+        { at: '2026-01-01T00:05:00.100Z', event: { type: 'status', runId, invokeId: 2, status: 'running' } },
+        {
+          at: '2026-01-01T00:05:01.000Z',
+          event: { type: 'error', runId, invokeId: 2, message: 'Model not available', code: 'PROVIDER_REQUEST' }
+        },
+        { at: '2026-01-01T00:05:01.000Z', event: { type: 'status', runId, invokeId: 2, status: 'error' } }
+      ]
+        .map((row) => JSON.stringify(row))
+        .join('\n') + '\n',
+      'utf8'
+    )
+
+    await prepareRewindAndReplaceUserMessage({
+      workspacePath: workspace,
+      runId,
+      editMessageIndex: 2,
+      targetUserAt: secondAt,
+      editedUserMessage: { role: 'user', content: 'second-edited', at: '2026-01-01T00:09:00.000Z' }
+    })
+
+    const events = await loadEventsAsync(runDir, runId)
+    expect(eventTypes(events)).toEqual(['status', 'assistant_message', 'status'])
+    expect(eventTypes(events)).not.toContain('error')
+    // Kept rows keep the time they happened, not the time of the rewind.
+    expect(events.map((row) => row.at)).toEqual([
+      '2026-01-01T00:00:00.100Z',
+      '2026-01-01T00:00:02.000Z',
+      '2026-01-01T00:00:02.100Z'
+    ])
+  })
+
+  it('cuts at the follow-up drain that applied the rewound prompt mid-run', async () => {
+    const firstAt = '2026-01-01T00:00:00.000Z'
+    const followUpAt = '2026-01-01T00:00:03.000Z'
+    await syncMessagesAsync(runDir, [
+      { role: 'user', content: 'first', at: firstAt },
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 't1', name: 'read', arguments: '{}' }]
+      },
+      { role: 'tool', toolCallId: 't1', toolName: 'read', content: 'x', ok: true },
+      { role: 'user', content: 'also this', at: followUpAt },
+      { role: 'assistant', content: 'noted' }
+    ])
+    writeFileSync(
+      join(runDir, 'events.jsonl'),
+      [
+        { at: '2026-01-01T00:00:00.100Z', event: { type: 'status', runId, invokeId: 1, status: 'running' } },
+        { at: '2026-01-01T00:00:01.000Z', event: { type: 'tool_start', runId, toolCallId: 't1', name: 'read' } },
+        {
+          at: '2026-01-01T00:00:01.500Z',
+          event: { type: 'tool_result', runId, toolCallId: 't1', name: 'read', ok: true }
+        },
+        {
+          at: '2026-01-01T00:00:04.000Z',
+          event: {
+            type: 'follow_up_applied',
+            runId,
+            ids: ['f1'],
+            messages: [{ role: 'user', content: 'also this', at: followUpAt }]
+          }
+        },
+        { at: '2026-01-01T00:00:05.000Z', event: { type: 'assistant_message', runId, content: 'noted' } },
+        { at: '2026-01-01T00:00:05.100Z', event: { type: 'status', runId, invokeId: 1, status: 'done' } }
+      ]
+        .map((row) => JSON.stringify(row))
+        .join('\n') + '\n',
+      'utf8'
+    )
+
+    await prepareRewindAndReplaceUserMessage({
+      workspacePath: workspace,
+      runId,
+      editMessageIndex: 3,
+      targetUserAt: followUpAt,
+      editedUserMessage: { role: 'user', content: 'also that', at: '2026-01-01T00:09:00.000Z' }
+    })
+
+    const events = await loadEventsAsync(runDir, runId)
+    expect(eventTypes(events)).toEqual(['status', 'tool_start', 'tool_result'])
+  })
+
+  it('never cuts before a kept tool call when older rows were re-stamped', async () => {
+    // A rewind before the fix wrote every kept row with the rewind time, so all
+    // of them look newer than the prompt that rewind replaced.
+    const restamped = '2026-01-01T01:00:00.000Z'
+    const secondAt = '2026-01-01T00:59:59.900Z'
+    await syncMessagesAsync(runDir, [
+      { role: 'user', content: 'first', at: '2026-01-01T00:00:00.000Z' },
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 't1', name: 'read', arguments: '{}' }]
+      },
+      { role: 'tool', toolCallId: 't1', toolName: 'read', content: 'x', ok: true },
+      { role: 'user', content: 'second', at: secondAt }
+    ])
+    writeFileSync(
+      join(runDir, 'events.jsonl'),
+      [
+        { at: restamped, event: { type: 'status', runId, invokeId: 1, status: 'running' } },
+        { at: restamped, event: { type: 'tool_start', runId, toolCallId: 't1', name: 'read' } },
+        { at: restamped, event: { type: 'tool_result', runId, toolCallId: 't1', name: 'read', ok: true } },
+        { at: restamped, event: { type: 'status', runId, invokeId: 1, status: 'done' } },
+        { at: restamped, event: { type: 'status', runId, invokeId: 2, status: 'running' } },
+        { at: restamped, event: { type: 'error', runId, invokeId: 2, message: 'boom', code: 'PROVIDER_HTTP' } },
+        { at: restamped, event: { type: 'status', runId, invokeId: 2, status: 'error' } }
+      ]
+        .map((row) => JSON.stringify(row))
+        .join('\n') + '\n',
+      'utf8'
+    )
+
+    await prepareRewindToUserMessage({
+      workspacePath: workspace,
+      runId,
+      userMessageIndex: 3,
+      targetUserAt: secondAt
+    })
+
+    const events = await loadEventsAsync(runDir, runId)
+    expect(eventTypes(events)).toEqual([
+      'status',
+      'tool_start',
+      'tool_result',
+      'status'
+    ])
   })
 
   it('keeps the generic out-of-range error when no timestamp anchor was sent', async () => {
@@ -421,8 +569,9 @@ describe('prepareRewindToUserMessage', () => {
     const cp = beginWriteCheckpoint(runDir, workspace, 2)
     await cp.recordPrior('a.txt', 'write')
     writeFileSync(join(workspace, 'a.txt'), 'after-second\n', 'utf8')
-    finalizeWriteCheckpoint(runDir)
-    writeFileSync(join(workspace, 'a.txt'), 'user-edit\n', 'utf8')
+    const meta = finalizeWriteCheckpoint(runDir)
+    // The copy to restore from is gone; a file you changed since would be left alone.
+    rmSync(join(runDir, 'checkpoints', meta!.id, 'files', 'a.txt'))
 
     await expect(
       prepareRewindToUserMessage({
@@ -430,10 +579,12 @@ describe('prepareRewindToUserMessage', () => {
         runId,
         userMessageIndex: 2
       })
-    ).rejects.toThrow(/history was not truncated/)
+    ).rejects.toThrow(
+      'Could not rewind: a.txt could not be restored (its saved copy is missing). The files and the record are as they were.'
+    )
 
     expect(loadMessages(workspace, runId)).toEqual(messages)
-    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('user-edit\n')
+    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('after-second\n')
   })
 
   it('drops todos.json when the kept todo_write snapshot is unparseable', async () => {

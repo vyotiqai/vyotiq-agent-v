@@ -429,6 +429,7 @@ export async function collectStorageReport(): Promise<StorageReportResult> {
     traces,
     logs,
     dictationModels,
+    embedModels,
     partitions,
     cache
   ] = await Promise.all([
@@ -437,6 +438,9 @@ export async function collectStorageReport(): Promise<StorageReportResult> {
     measureDir(join(root, 'traces')).catch(() => EMPTY_MEASURE),
     measureDir(join(root, 'logs')).catch(() => EMPTY_MEASURE),
     measureDir(join(root, 'dictation', 'models')).catch(() => EMPTY_MEASURE),
+    // The concept_search embedding model (embed/models, see embedModels.ts):
+    // downloaded once, shared by every workspace, report-only like dictation.
+    measureDir(join(root, 'embed', 'models')).catch(() => EMPTY_MEASURE),
     measureBrowserPartitions(),
     measureDir(join(root, 'Cache')).catch(() => EMPTY_MEASURE)
   ])
@@ -486,14 +490,15 @@ export async function collectStorageReport(): Promise<StorageReportResult> {
   }
 
   const categories: StorageReportCategory[] = [
-    categoryEntry('checkpoints', 'Checkpoints', checkpoints, true),
-    categoryEntry('transcripts', 'Session transcripts', transcripts, true),
+    categoryEntry('checkpoints', 'Checkpoints (undo points)', checkpoints, true),
+    categoryEntry('transcripts', 'Task records', transcripts, true),
     categoryEntry('worktrees', 'Instance worktrees', { bytes: worktreeBytes, files: worktreeFiles, lastWriteMs: 0 }, true),
-    categoryEntry('indexes', 'Workspace indexes', { bytes: indexBytes, files: indexFiles, lastWriteMs: 0 }, true),
+    categoryEntry('indexes', 'Codebase index', { bytes: indexBytes, files: indexFiles, lastWriteMs: 0 }, true),
     categoryEntry('traces', 'Traces', traces, true),
     categoryEntry('logs', 'Logs', logs, true),
     categoryEntry('dictation-models', 'Dictation models', dictationModels, false),
-    categoryEntry('browser-partitions', 'Browser partitions', partitions, false),
+    categoryEntry('embed-models', 'Code search model', embedModels, false),
+    categoryEntry('browser-partitions', 'Browser profile', partitions, false),
     categoryEntry('cache', 'Cache', cache, false)
   ]
 
@@ -835,7 +840,12 @@ async function sweepSessions(
   return out
 }
 
-/** Preview-only variant of the session retention sweep. */
+/**
+ * Preview-only variant of the session retention sweep. Not gated on
+ * `sessionRetentionEnabled`: that switch is the automatic sweep's, and
+ * runStorageCleanup applies the limits on demand either way. Gating only the
+ * preview hid sessions from the confirmation that the run then deleted.
+ */
 async function previewSessionSweep(
   sessionsRoot: string,
   settings: Settings,
@@ -843,7 +853,6 @@ async function previewSessionSweep(
   protectedRuns: Set<string>
 ): Promise<SessionSweepResult> {
   const out: SessionSweepResult = { bytes: 0, dirs: 0, skipped: 0 }
-  if (!settings.storage.sessionRetentionEnabled) return out
   const sessions = await scanSessions(sessionsRoot)
   const keep = Math.max(1, settings.storage.sessionKeepCount)
   const ageCutoff = nowMs - settings.storage.sessionMaxAgeDays * DAY_MS
@@ -906,7 +915,7 @@ export async function previewStorageCleanup(): Promise<StorageCleanupPreviewResu
       checkpointDirs += r.dirs
     }
   }
-  pushCategory('checkpoints', 'Checkpoints', { bytes: checkpointBytes, dirs: checkpointDirs })
+  pushCategory('checkpoints', 'Undo points', { bytes: checkpointBytes, dirs: checkpointDirs })
 
   // Session retention (manual flow always applies policy, acked or not — it
   // is user-confirmed here, satisfying the §8.1 first-run suspension).
@@ -920,7 +929,7 @@ export async function previewStorageCleanup(): Promise<StorageCleanupPreviewResu
       existing.items += r.dirs
       totalReclaimBytes += r.bytes
     } else {
-      pushCategory('sessions', 'Old sessions', r)
+      pushCategory('sessions', 'Old tasks', r)
     }
   }
 
@@ -1003,18 +1012,18 @@ export async function runStorageCleanup(confirmToken: string): Promise<StorageCl
     for (const runId of await listRunIds(sessionsRoot)) {
       const runDir = join(sessionsRoot, runId)
       if (protectedRuns.has(runDir)) continue
-      pushCategory('checkpoints', 'Checkpoints', await sweepResolvedUndone(runDir, nowMs))
+      pushCategory('checkpoints', 'Undo points', await sweepResolvedUndone(runDir, nowMs))
     }
     // A1 count-cap (needs ack + enabled).
     if (acked && settings.storage.checkpointGcEnabled) {
       pushCategory(
         'checkpoints',
-        'Checkpoints',
+        'Undo points',
         await sweepCheckpointCountCap(sessionsRoot, settings, nowMs, protectedRuns)
       )
     }
     // Session retention (manual run = user confirmed).
-    pushCategory('sessions', 'Old sessions', await sweepSessions(sessionsRoot, settings, nowMs, protectedRuns))
+    pushCategory('sessions', 'Old tasks', await sweepSessions(sessionsRoot, settings, nowMs, protectedRuns))
   }
 
   // Orphans (confirm token = the explicit user action §6.2 B3 requires).

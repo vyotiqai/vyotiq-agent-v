@@ -1,72 +1,42 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AppInfo, UpdaterStatePayload } from '@shared/ipc'
-import { VyotiqLockup } from '@renderer/lib/brand'
-import { Button, Switch } from '@renderer/lib/ui'
+import { VyotiqMark } from '@renderer/lib/brand'
+import { Button, ProgressBar } from '@renderer/lib/ui'
 import { copyText } from '@renderer/lib/markdown/copyText'
-import { checkForUpdates, useUpdaterState } from '@renderer/features/updates/updaterStore'
+import {
+  checkForUpdates,
+  downloadUpdate,
+  installUpdate,
+  useUpdaterState
+} from '@renderer/features/updates/updaterStore'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
-import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
+import { SettingsField, SettingsGroup, SettingsItem, SettingsStack } from '../components/SettingsField'
+import { SwitchField } from '../components/SwitchField'
 
-/**
- * The three external links, as data. Each row was previously ~27 lines of
- * identical open/pending/error handling; the ids are load-bearing for settings
- * search, so they stay exactly as they were.
- */
-const LINKS: readonly {
-  id: string
-  title: string
-  hint: (info: AppInfo | null) => string
-  href: (info: AppInfo) => string
-}[] = [
-  {
-    id: 'about-website',
-    title: 'Website',
-    hint: (info) => (info ? websiteHost(info.homepage) : 'vyotiq.com'),
-    href: (info) => info.homepage
-  },
-  {
-    id: 'about-docs',
-    title: 'Docs',
-    hint: (info) => (info ? `${websiteHost(info.homepage)}/docs` : 'vyotiq.com/docs'),
-    href: (info) => new URL('/docs', info.homepage).href
-  },
-  {
-    id: 'about-source',
-    title: 'Source',
-    hint: () => 'github.com/vyotiqai/vyotiq-agent-v',
-    href: () => 'https://github.com/vyotiqai/vyotiq-agent-v'
-  }
-]
+const SOURCE_URL = 'https://github.com/vyotiqai/vyotiq-agent-v'
 
-// Module-level so render stays pure under React Compiler annotation mode
-// (audit L3); Date access in a render body is an impurity.
-const CURRENT_YEAR = new Date().getFullYear()
-
-function platformLabel(platform: string, arch: string, osVersion: string): string {
-  let os: string
+function osLabel(platform: string): string {
   switch (platform) {
     case 'win32':
-      os = 'Windows'
-      break
+      return 'Windows'
     case 'darwin':
-      os = 'macOS'
-      break
+      return 'macOS'
     case 'linux':
-      os = 'Linux'
-      break
+      return 'Linux'
     default:
-      os = platform
-      break
+      return platform
   }
-  return `${os} ${arch} · ${osVersion}`
 }
 
-function websiteHost(url: string): string {
-  try {
-    return new URL(url).host
-  } catch {
-    return url
-  }
+/** "1.0.0 · Electron 43.2.0 · Chromium 150.0.… · Node 24.18.0 · Windows x64". */
+function buildLine(info: AppInfo): string {
+  return [
+    info.version,
+    `Electron ${info.electron}`,
+    `Chromium ${info.chrome}`,
+    `Node ${info.node}`,
+    `${osLabel(info.platform)} ${info.arch}`
+  ].join(' · ')
 }
 
 function buildInfoText(info: AppInfo): string {
@@ -80,40 +50,55 @@ function buildInfoText(info: AppInfo): string {
   ].join('\n')
 }
 
-function updaterHint(payload: UpdaterStatePayload): string {
+/**
+ * The update row names the state it is in — "Version 1.1.0 is ready" — and
+ * offers the one step that moves it on. The actions are the update store's,
+ * the same ones the sidebar entry runs; nothing here subscribes on its own.
+ */
+function updateRow(payload: UpdaterStatePayload, current: string | null): { title: string; hint: string } {
+  const next = payload.info?.version
   switch (payload.status) {
     case 'checking':
-      return 'Checking for updates…'
+      return { title: 'Checking for updates…', hint: current ? `This is ${current}.` : '' }
     case 'available':
-      return payload.info?.version
-        ? `Version ${payload.info.version} is available.`
-        : 'An update is available.'
+      return {
+        title: next ? `Version ${next} is available` : 'An update is available',
+        hint: 'Nothing downloads until you ask.'
+      }
     case 'downloading':
-      return payload.progress != null
-        ? `Downloading ${Math.round(payload.progress.percent)}%`
-        : 'Downloading update…'
+      return {
+        title: next ? `Downloading version ${next}` : 'Downloading the update',
+        hint: payload.progress != null ? `${Math.round(payload.progress.percent)}%` : 'Starting…'
+      }
     case 'downloaded':
-      return 'Restart to install the downloaded update.'
+      return {
+        title: next ? `Version ${next} is ready` : 'The update is ready',
+        hint: 'Downloaded · restart to install'
+      }
     case 'not-available':
-      return 'This install is current.'
+      return { title: 'Up to date', hint: current ? `${current} is the newest release.` : 'This is the newest release.' }
     case 'error':
-      return payload.error ?? 'Update check failed. Try again.'
+      return { title: 'The update check failed', hint: payload.error ?? 'Try again.' }
     default:
-      // Idle: nothing checked yet this session (before the startup check,
-      // or in dev). Say what the button does, not where the bits live.
-      return 'Check for a newer version.'
+      // Idle: nothing checked yet this session (before the startup check, or
+      // in dev). Say so rather than implying an answer.
+      return { title: 'Not checked yet', hint: current ? `This is ${current}.` : '' }
   }
 }
 
-export function AboutSection({ form }: { form: SettingsFormState }) {
+export function AboutSection({
+  form,
+  onOpenFeedback
+}: {
+  form: SettingsFormState
+  onOpenFeedback: () => void
+}) {
   const [info, setInfo] = useState<AppInfo | null>(null)
   const [copied, setCopied] = useState(false)
-  const [openingId, setOpeningId] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
   const updater = useUpdaterState()
-  const setErrorMessage = form.setErrorMessage
-  const setErrorRef = useRef(setErrorMessage)
-  setErrorRef.current = setErrorMessage
+  const setErrorRef = useRef(form.setErrorMessage)
+  setErrorRef.current = form.setErrorMessage
   const copyTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -138,18 +123,13 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
     }
   }, [])
 
-  const dash = '—'
   const status = updater.status
-  const canCheck = status !== 'checking' && status !== 'downloading'
-  const updateVersionShown =
-    info?.version != null &&
-    updater.info?.version != null &&
-    (status === 'available' || status === 'downloading' || status === 'downloaded')
+  const bridge = Boolean(window.vyotiq?.updater)
+  const row = updateRow(updater, info?.version ?? null)
 
-  const openLink = (id: string, url: string): void => {
+  const openLink = (url: string): void => {
     if (!window.vyotiq?.shellOpenExternal) return
     form.clearErrors()
-    setOpeningId(id)
     void window.vyotiq
       .shellOpenExternal(url)
       .then((res) => {
@@ -158,148 +138,153 @@ export function AboutSection({ form }: { form: SettingsFormState }) {
       .catch((err: unknown) => {
         form.setErrorMessage(err instanceof Error ? err.message : String(err))
       })
-      .finally(() => setOpeningId(null))
+  }
+
+  const copyBuildInfo = (): void => {
+    if (!info) return
+    void copyText(buildInfoText(info)).then((ok) => {
+      if (!ok) {
+        form.setErrorMessage('Could not copy build info.')
+        return
+      }
+      setCopied(true)
+      if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = window.setTimeout(() => setCopied(false), 1200)
+    })
+  }
+
+  const check = (): void => {
+    form.clearErrors()
+    setChecking(true)
+    void checkForUpdates()
+      .catch((err: unknown) => {
+        form.setErrorMessage(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => setChecking(false))
   }
 
   return (
     <SettingsStack>
-      <div
-        data-settings-field="about"
-        className="rounded-xl border border-border/70 bg-surface p-5"
-      >
-        <div className="flex flex-col gap-2">
-          <VyotiqLockup markSize={36} />
-          <p className="m-0 text-xs leading-snug tracking-[var(--vy-tracking)] text-secondary">
-            Agent V. A product of Vyotiq.com.
-          </p>
-          <p className="m-0 text-xs leading-snug tracking-[var(--vy-tracking)] text-muted">
-            © {CURRENT_YEAR} Vyotiq. Agent V is free software licensed under GPL-3.0-or-later.
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-            {LINKS.map((link) => (
-              <button
-                key={link.id}
-                type="button"
-                data-settings-field={link.id}
+      <SettingsGroup title="Agent V" fieldId="about" plain>
+        <div className="mt-2 flex items-start gap-4">
+          <span className="grid size-14 shrink-0 place-items-center rounded-xl bg-surface text-fg-strong">
+            <VyotiqMark size={28} decorative />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-heading font-semibold text-fg-strong">Agent V</div>
+            <div
+              className="font-mono text-xs text-muted tnum [overflow-wrap:anywhere]"
+              title={info ? `${osLabel(info.platform)} ${info.osVersion}` : undefined}
+            >
+              {info ? buildLine(info) : '—'}
+            </div>
+            <div className="mt-2 text-xs text-muted">A product of Vyotiq.com · free software under GPL-3.0-or-later</div>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              <Button
+                size="xs"
+                variant="ghost"
+                icon={copied ? 'check' : 'copy'}
+                data-settings-field="about-copy"
                 disabled={!info}
-                title={link.hint(info)}
-                className="m-0 rounded-sm text-xs tracking-[var(--vy-tracking)] text-secondary underline-offset-2 hover:text-fg hover:underline focus-visible:outline focus-visible:outline-accent disabled:opacity-60"
+                onClick={copyBuildInfo}
+              >
+                {copied ? 'Copied' : 'Copy build info'}
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost"
+                icon="external"
+                data-settings-field="about-docs"
+                disabled={!info}
                 onClick={() => {
-                  if (!info) return
-                  openLink(link.id, link.href(info))
+                  if (info) openLink(new URL('/docs', info.homepage).href)
                 }}
               >
-                {openingId === link.id ? 'Opening…' : link.title}
-              </button>
-            ))}
+                Docs
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost"
+                icon="external"
+                data-settings-field="about-source"
+                onClick={() => openLink(SOURCE_URL)}
+              >
+                Source
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost"
+                icon="external"
+                data-settings-field="about-website"
+                disabled={!info}
+                onClick={() => {
+                  if (info) openLink(info.homepage)
+                }}
+              >
+                Website
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
-
-      <SettingsGroup title="Build">
-        <SettingsField
-          id="about-version"
-          title="Version"
-          hint="Product version for this install."
-        >
-          <p className="m-0 text-sm tabular-nums tracking-[var(--vy-tracking)] text-fg">
-            {info?.version ?? dash}
-          </p>
-        </SettingsField>
-        <SettingsField
-          id="about-runtime"
-          title="Runtime"
-          hint="Electron host, Chromium, and Node.js shipped in this app."
-          wide
-        >
-          <dl className="m-0 grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm tracking-[var(--vy-tracking)]">
-            <dt className="text-secondary">Electron</dt>
-            <dd className="m-0 min-w-0 tabular-nums text-fg">{info?.electron ?? dash}</dd>
-            <dt className="text-secondary">Chromium</dt>
-            <dd className="m-0 min-w-0 break-all tabular-nums text-fg">{info?.chrome ?? dash}</dd>
-            <dt className="text-secondary">Node.js</dt>
-            <dd className="m-0 min-w-0 tabular-nums text-fg">{info?.node ?? dash}</dd>
-          </dl>
-        </SettingsField>
-        <SettingsField
-          id="about-platform"
-          title="Platform"
-          hint="Operating system and architecture reported by the host."
-        >
-          <p className="m-0 max-w-full text-right text-sm tracking-[var(--vy-tracking)] text-fg [overflow-wrap:anywhere]">
-            {info ? platformLabel(info.platform, info.arch, info.osVersion) : dash}
-          </p>
-        </SettingsField>
-        <SettingsField
-          id="about-copy"
-          title="Build info"
-          hint="Copy version and runtime lines for a bug report."
-        >
-          <Button
-            variant="subtle"
-            disabled={!info}
-            onClick={() => {
-              if (!info) return
-              void copyText(buildInfoText(info)).then((ok) => {
-                if (!ok) {
-                  form.setErrorMessage('Could not copy build info.')
-                  return
-                }
-                setCopied(true)
-                if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current)
-                copyTimerRef.current = window.setTimeout(() => setCopied(false), 1200)
-              })
-            }}
-          >
-            {copied ? 'Copied' : 'Copy'}
-          </Button>
-        </SettingsField>
       </SettingsGroup>
 
-      <SettingsGroup title="Updates">
-        <SettingsField
+      <SettingsGroup title="Updates" fieldId="about-updater">
+        <SwitchField
           id="about-auto-check"
-          title="Automatic checks"
-          hint="Look for new releases at startup and every 6 hours. Nothing is ever downloaded on its own."
+          title="Check automatically"
+          label="Check for updates automatically"
+          hint="At start and every 6 hours. Nothing downloads on its own."
+          checked={form.settings.autoCheckUpdates}
+          disabled={form.formLocked}
+          {...form.defaultMark('autoCheckUpdates')}
+          onChange={(autoCheckUpdates) => {
+            void form.runUpdate({ autoCheckUpdates })
+          }}
+        />
+        <SettingsItem
+          id="update-status"
+          title={row.title}
+          hint={row.hint || undefined}
+          below={
+            status === 'downloading' && updater.progress != null ? (
+              <ProgressBar value={updater.progress.percent} max={100} tone="accent" label="Update download" />
+            ) : null
+          }
         >
-          <Switch
-            size="md"
-            checked={form.settings.autoCheckUpdates}
-            disabled={form.formLocked}
-            label="Check for updates automatically"
-            onCheckedChange={(checked) => {
-              void form.runUpdate({ autoCheckUpdates: checked })
-            }}
-          />
-        </SettingsField>
-        <SettingsField id="about-updater" title="App updates" hint={updaterHint(updater)}>
-          {updateVersionShown ? (
-            <p className="m-0 text-xs tabular-nums tracking-[var(--vy-tracking)] text-muted">
-              {info?.version} <span aria-hidden="true">→</span> {updater.info?.version}
-            </p>
-          ) : null}
-          {/* Download and install live in the sidebar update panel, which is
-              showing exactly when those actions are available. One place to
-              start an irreversible restart is enough. */}
-          <Button
-            variant="subtle"
-            pending={checking || status === 'checking'}
-            disabled={!canCheck || checking || !window.vyotiq?.updater}
-            onClick={() => {
-              form.clearErrors()
-              setChecking(true)
-              void checkForUpdates()
-                .catch((err: unknown) => {
-                  form.setErrorMessage(err instanceof Error ? err.message : String(err))
-                })
-                .finally(() => setChecking(false))
-            }}
-          >
-            {status === 'checking' ? 'Checking…' : 'Check'}
+          {status === 'downloaded' ? (
+            <Button size="sm" variant="primary" disabled={!bridge} onClick={installUpdate}>
+              Restart and install
+            </Button>
+          ) : status === 'available' ? (
+            <Button size="sm" variant="secondary" disabled={!bridge} onClick={downloadUpdate}>
+              Download
+            </Button>
+          ) : status === 'downloading' ? null : (
+            <Button
+              size="sm"
+              variant="secondary"
+              pending={checking || status === 'checking'}
+              disabled={!bridge || checking || status === 'checking'}
+              onClick={check}
+            >
+              {status === 'checking' ? 'Checking…' : status === 'error' ? 'Try again' : 'Check now'}
+            </Button>
+          )}
+        </SettingsItem>
+      </SettingsGroup>
+
+      <SettingsGroup title="Feedback">
+        <SettingsField
+          id="send-feedback"
+          title="Send feedback"
+          hint="Opens a pre-filled email to support@vyotiq.com."
+          help="Report a bug, ask for a feature, or say what works. Optional diagnostics add the app version, OS, and locale — never chat contents."
+        >
+          <Button size="sm" variant="secondary" onClick={onOpenFeedback}>
+            Write…
           </Button>
         </SettingsField>
       </SettingsGroup>
-
     </SettingsStack>
   )
 }

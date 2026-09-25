@@ -71,12 +71,12 @@ describe('AskQuestionPanel', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Skip — let the agent choose' }))
 
     expect(onSubmit).toHaveBeenCalledTimes(1)
     expect(onSubmit).toHaveBeenCalledWith('q1', [])
     expect(await screen.findByText('Skipped — agent continues with a reasonable default.')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Skip — let the agent choose' })).toBeNull()
   })
 
   it('moves focus and selection with arrow keys in non-quick forms', async () => {
@@ -180,9 +180,9 @@ describe('AskQuestionPanel', () => {
       />
     )
 
-    expect(screen.getByText('Setup')).toBeTruthy()
+    expect(screen.getByText('Needs you — Setup')).toBeTruthy()
     expect(screen.getByText('2 questions')).toBeTruthy()
-    expect(screen.getByText('Waiting for your answer — agent continues if skipped.')).toBeTruthy()
+    // Progress takes the footer while questions are open.
     expect(screen.getByText('0 of 2 answered')).toBeTruthy()
     expect(screen.getAllByText('Unanswered')).toHaveLength(2)
     // The why-not reason renders as a styled tooltip — native titles never
@@ -226,7 +226,7 @@ describe('AskQuestionPanel', () => {
         })}
       />
     )
-    expect(screen.getByText('2 questions')).toBeTruthy()
+    expect(screen.getByText('Needs you — 2 questions')).toBeTruthy()
     expect(screen.queryByText('Questions')).toBeNull()
   })
 
@@ -322,18 +322,21 @@ describe('AskQuestionPanel', () => {
     expect(screen.queryByPlaceholderText('Other…')).toBeNull()
   })
 
-  it('uses quiet question-gate chrome instead of a tool card', () => {
+  it('uses the needs-you frame — an accent outline and tinted header — not a tool card', () => {
     const { container } = render(
       <AskQuestionPanel
         question={baseQuestion({
           questions: [{ id: 'q1', prompt: 'Pick', type: 'single', options: ['A'] }]
         })}
+        stepLabel="Step 2 · Pick the storage format"
       />
     )
     const form = container.querySelector('form')
-    expect(form?.className).toMatch(/border-l-2/)
-    expect(form?.className).toMatch(/bg-surface\/60/)
-    expect(form?.className).not.toMatch(/border-border(?!\/)/)
+    expect(form?.hasAttribute('data-needs-you')).toBe(true)
+    expect(form?.classList.contains('border-accent')).toBe(true)
+    expect(form?.classList.contains('border-l-2')).toBe(false)
+    expect(screen.getByText('Needs you — one question')).toBeTruthy()
+    expect(screen.getByText('Step 2 · Pick the storage format')).toBeTruthy()
   })
 
   it('resets field selections when the question shape changes for the same requestId', () => {
@@ -372,12 +375,13 @@ describe('AskQuestionPanel', () => {
         onSubmit={onSubmit}
       />
     )
-    expect(screen.getByText('Waiting for your answer — agent continues if skipped.')).toBeTruthy()
+    // The loop waits for an answer indefinitely (agentQuestion.ts) — no timeout is claimed.
+    expect(screen.getByText('The run waits for your answer')).toBeTruthy()
     fireEvent.click(screen.getByRole('radio', { name: 'Yes' }))
     expect(await screen.findByText('Answered')).toBeTruthy()
     expect(screen.getByText('Yes')).toBeTruthy()
-    expect(screen.queryByText('Waiting for your answer — agent continues if skipped.')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
+    expect(screen.queryByText('The run waits for your answer')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Skip — let the agent choose' })).toBeNull()
   })
 
   it('dims unanswered prompts and shows labeled settled summary for multi-question forms', async () => {

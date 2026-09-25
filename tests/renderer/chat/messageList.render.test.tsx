@@ -87,6 +87,51 @@ describe('MessageList', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
   })
 
+  it('dismisses a run_error row by its own id', () => {
+    const onDismissRunError = vi.fn()
+    const items: UiItem[] = [
+      { kind: 'message', id: 'user-0', role: 'user', content: 'first' },
+      { kind: 'run_error', id: 'run-error:e-1', message: 'Connection lost', code: 'PROVIDER_NETWORK' }
+    ]
+    render(<MessageList items={items} onDismissRunError={onDismissRunError} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }))
+
+    expect(onDismissRunError).toHaveBeenCalledWith('run-error:e-1')
+  })
+
+  it('offers Retry only on the latest turn’s box, and not while a run is live', () => {
+    const onRetryNetwork = vi.fn()
+    const box = (id: string): UiItem => ({
+      kind: 'run_error',
+      id,
+      message: `Connection dropped (${id})`,
+      code: 'PROVIDER_NETWORK'
+    })
+    const earlierTurnFailed: UiItem[] = [
+      { kind: 'message', id: 'user-0', role: 'user', content: 'first' },
+      box('re-old'),
+      { kind: 'message', id: 'user-1', role: 'user', content: 'second' },
+      { kind: 'message', id: 'assistant-2', role: 'assistant', content: 'done' }
+    ]
+    const { rerender } = render(
+      <MessageList items={earlierTurnFailed} onRetryNetwork={onRetryNetwork} />
+    )
+    // The earlier failure is history: a Retry there would continue the latest turn.
+    expect(screen.getByText('Connection dropped (re-old)')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+
+    const latestTurnFailed: UiItem[] = [
+      { kind: 'message', id: 'user-0', role: 'user', content: 'first' },
+      box('re-new')
+    ]
+    rerender(<MessageList items={latestTurnFailed} onRetryNetwork={onRetryNetwork} />)
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
+
+    rerender(<MessageList items={latestTurnFailed} onRetryNetwork={onRetryNetwork} running />)
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+  })
+
   it('keeps the narration between tool batches on the page', () => {
     const items: UiItem[] = [
       { kind: 'message', id: 'a1', role: 'assistant', content: 'First look.' },

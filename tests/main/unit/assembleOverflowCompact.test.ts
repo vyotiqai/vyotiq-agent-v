@@ -1,13 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import type { LlmProvider } from '@main/agent/providers/types'
-
-const mockProvider: LlmProvider = {
-  id: 'ollama',
-  listModels: async () => [],
-  streamChat: async function* () {
-    yield { type: 'done' }
-  }
-}
 
 describe('assembleContext overflow trim', () => {
   it('flags hard overflow without LLM compaction', async () => {
@@ -47,10 +38,7 @@ describe('assembleContext overflow trim', () => {
         contextWindow: 8_000
       },
       toolsJsonEstimate: 20_000,
-      providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal,
-      keepRecentTurns: 4
+      providerId: 'ollama'
     })
 
     expect(result.compaction).toBeNull()

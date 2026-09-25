@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import { SettingsView } from '@renderer/features/settings'
 import { SETTINGS_SEARCH_INDEX } from '@renderer/features/settings/settingsSearchIndex'
+import { SECTION_GROUPS, SECTION_LABELS } from '@renderer/features/settings/constants'
 import { emptySecretStatus, type Settings } from '@shared/ipc'
 import { DEFAULT_SETTINGS } from '@shared/ipc'
 
@@ -15,6 +16,33 @@ afterEach(() => {
 
 const emptySecrets = emptySecretStatus()
 
+/** An Extensions row by its item key, once the list has loaded. */
+async function findExtensionRow(key: string): Promise<HTMLElement> {
+  return waitFor(() => {
+    const row = Array.from(document.querySelectorAll<HTMLElement>('[data-extension-key]')).find(
+      (li) => li.dataset.extensionKey === key
+    )
+    if (!row) throw new Error(`no row ${key}`)
+    return row
+  })
+}
+
+/**
+ * Opens a section from Settings' own index. An entry that needs attention
+ * reads its reason after its name ("Providers, OpenAI has no API key"), so
+ * the match is on the start of the name.
+ */
+function openSection(label: string): void {
+  const nav = screen.getByRole('navigation', { name: 'Settings' })
+  fireEvent.click(within(nav).getByRole('button', { name: new RegExp(`^${label}\\b`, 'i') }))
+}
+
+/** A shortcut row's keycaps, left to right. */
+function keycaps(id: string): string[] {
+  const row = document.querySelector(`[data-settings-field="shortcut-${id}"]`)
+  return [...(row?.querySelectorAll('kbd') ?? [])].map((key) => key.textContent ?? '')
+}
+
 const baseSettings: Settings = {
   ...DEFAULT_SETTINGS,
   provider: 'openai',
@@ -23,7 +51,6 @@ const baseSettings: Settings = {
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
-  // @ts-expect-error test bridge
   window.vyotiq = {
     listModels: vi.fn(async () => ({
       ok: true as const,
@@ -178,9 +205,26 @@ describe('settings', () => {
       />
     )
 
-    expect(screen.getByLabelText('Active provider').textContent).toMatch(/Ollama/i)
+    expect(screen.getByLabelText('Provider for new tasks').textContent).toMatch(/Ollama/i)
     expect(screen.queryByText(/No providers configured yet/i)).toBeNull()
     expect(screen.queryByText(/default provider/i)).toBeNull()
+  })
+
+  it('says how to fix an active provider with no key when no other key is saved', () => {
+    render(
+      <SettingsView
+        settings={{ ...DEFAULT_SETTINGS, provider: 'deepseek', model: 'deepseek-v4-flash' }}
+        secrets={emptySecrets}
+        section="providers"
+        onClose={vi.fn()}
+        onUpdate={vi.fn(async () => ({ ok: true as const }))}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      />
+    )
+
+    expect(screen.getByText(/DeepSeek has no API key\. Add one under API keys below\./)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Use / })).toBeNull()
   })
 
   it('keeps the selected section when the settings view rerenders', () => {
@@ -196,11 +240,11 @@ describe('settings', () => {
     )
 
     const { rerender } = render(renderSettings())
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
-    expect(screen.getByLabelText('Active provider')).toBeTruthy()
+    openSection('Providers')
+    expect(screen.getByLabelText('Provider for new tasks')).toBeTruthy()
 
     rerender(renderSettings())
-    expect(screen.getByLabelText('Active provider')).toBeTruthy()
+    expect(screen.getByLabelText('Provider for new tasks')).toBeTruthy()
   })
 
   it('surfaces secure-storage unavailable messaging', () => {
@@ -216,7 +260,7 @@ describe('settings', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
+    openSection('Providers')
     expect(screen.getByText(/secure storage is unavailable/i)).toBeTruthy()
     expect(screen.getByPlaceholderText(/Secure storage unavailable/i)).toBeTruthy()
   })
@@ -241,7 +285,15 @@ describe('settings', () => {
     expect(screen.getByRole('button', { name: /^Indexing$/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Voice$/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Tools$/i })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /^Advanced$/i })).toBeNull()
+    // Notifications and Diagnostics are real sections: clicking each nav entry
+    // renders its own fields instead of falling through to General.
+    openSection('Notifications')
+    expect(document.querySelectorAll('[data-settings-field]').length).toBeGreaterThan(0)
+    expect(document.querySelector('[data-settings-field="notifications-enabled"]')).toBeTruthy()
+    openSection('Diagnostics')
+    expect(document.querySelectorAll('[data-settings-field]').length).toBeGreaterThan(0)
+    expect(document.querySelector('[data-settings-field="telemetry"]')).toBeTruthy()
+    openSection('General')
     expect(screen.queryByRole('button', { name: /^Integrations$/i })).toBeNull()
     expect(screen.getByRole('button', { name: /^Shortcuts$/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^About$/i })).toBeTruthy()
@@ -251,14 +303,14 @@ describe('settings', () => {
     expect(screen.getAllByText(/^Workspaces$/i).length).toBeGreaterThan(0)
     expect(screen.getByLabelText(/Search settings/i)).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
-    expect(screen.getByLabelText('Active provider')).toBeTruthy()
+    openSection('Providers')
+    expect(screen.getByLabelText('Provider for new tasks')).toBeTruthy()
     expect(screen.queryByLabelText('Image provider')).toBeNull()
     expect(screen.queryByLabelText('Image model')).toBeNull()
     expect(screen.queryByLabelText(/Allow Custom for image generation/i)).toBeNull()
     expect(screen.queryByLabelText('Ollama base URL')).toBeNull()
     expect(screen.queryByLabelText('Custom OpenAI base URL')).toBeNull()
-    expect(screen.getByLabelText(/API key status/i)).toBeTruthy()
+    expect(document.querySelector('[data-settings-field="api-keys"]')).toBeTruthy()
     expect(screen.queryByText(/change provider in the composer/i)).toBeNull()
   })
 
@@ -275,7 +327,7 @@ describe('settings', () => {
       />
     )
     expect(
-      (screen.getByLabelText('Auto-compact threshold percent') as HTMLInputElement).value
+      (screen.getByLabelText('Compact at, percent of context') as HTMLInputElement).value
     ).toBe('55')
   })
 
@@ -284,6 +336,7 @@ describe('settings', () => {
       <SettingsView
         settings={{ ...baseSettings, provider: 'ollama', model: 'my-custom-model' }}
         secrets={emptySecrets}
+        section="providers"
         onClose={vi.fn()}
         onUpdate={vi.fn(async () => ({ ok: true as const }))}
         onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
@@ -294,12 +347,13 @@ describe('settings', () => {
     expect(screen.queryByPlaceholderText(/Custom model id/i)).toBeNull()
   })
 
-  it('active model badge uses row width not a fixed 200px cap', () => {
+  it('active model truncates a long id in place and keeps the whole id as its title', () => {
     const longModel = 'deepseek/deepseek-v4-flash-0731-extra-long-suffix'
     render(
       <SettingsView
         settings={{ ...baseSettings, provider: 'custom', model: longModel }}
         secrets={emptySecrets}
+        section="providers"
         onClose={vi.fn()}
         onUpdate={vi.fn(async () => ({ ok: true as const }))}
         onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
@@ -307,13 +361,10 @@ describe('settings', () => {
       />
     )
 
-    const badge = screen.getByRole('button', { name: `Custom OpenAI-compatible · ${longModel}` })
-    expect(badge.className).not.toContain('max-w-[200px]')
-    expect(badge.className).toContain('max-w-full')
-    const field = document.querySelector('[data-settings-field="active-model"]')
-    expect(field?.querySelector('.flex-nowrap')).toBeTruthy()
-    expect(field?.querySelector('.min-w-0.flex-1')).toBeTruthy()
-    expect(screen.getByText(/Opens the composer model picker, or jump to Providers/i)).toBeTruthy()
+    const field = document.querySelector('[data-settings-field="active-model"]') as HTMLElement
+    const trigger = within(field).getByRole('button', { name: 'Model' })
+    expect(within(trigger).getByText(longModel).classList.contains('truncate')).toBe(true)
+    expect(trigger.getAttribute('title')).toBe(longModel)
   })
 
   it('surfaces save key errors as alert', async () => {
@@ -331,7 +382,7 @@ describe('settings', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
+    openSection('Providers')
     fireEvent.change(screen.getByLabelText(/API key \(OpenAI\)/i), {
       target: { value: 'sk-test' }
     })
@@ -354,8 +405,8 @@ describe('settings', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
-    fireEvent.click(screen.getByRole('button', { name: /Anthropic/i }))
+    openSection('Providers')
+    fireEvent.click(screen.getByRole('button', { name: 'Add key for Anthropic' }))
     expect(onUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ provider: 'anthropic' }))
     fireEvent.change(screen.getByLabelText(/API key \(Anthropic\)/i), {
       target: { value: 'sk-ant' }
@@ -368,7 +419,7 @@ describe('settings', () => {
       )
     )
     expect(onUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ provider: 'anthropic' }))
-    expect(screen.getByLabelText('Active provider').textContent).toMatch(/OpenAI/i)
+    expect(screen.getByLabelText('Provider for new tasks').textContent).toMatch(/OpenAI/i)
   })
 
   it('Active provider menu switches provider without expanding a key row', async () => {
@@ -385,8 +436,8 @@ describe('settings', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
-    fireEvent.click(screen.getByLabelText('Active provider'))
+    openSection('Providers')
+    fireEvent.click(screen.getByLabelText('Provider for new tasks'))
     fireEvent.click(screen.getByRole('option', { name: /Anthropic/i }))
     await waitFor(() =>
       expect(onUpdate).toHaveBeenCalledWith(
@@ -418,13 +469,13 @@ describe('settings', () => {
     }
 
     render(<Harness />)
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
-    expect(screen.getByText(/Active provider is DeepSeek/i)).toBeTruthy()
+    openSection('Providers')
+    expect(screen.getByText(/DeepSeek has no API key/i)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /Use OpenRouter/i }))
     await waitFor(() =>
-      expect(screen.getByLabelText('Active provider').textContent).toMatch(/OpenRouter/i)
+      expect(screen.getByLabelText('Provider for new tasks').textContent).toMatch(/OpenRouter/i)
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh models' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Refresh the .+ model list$/ }))
     await waitFor(() =>
       expect(window.vyotiq.listModels).toHaveBeenCalledWith(
         expect.objectContaining({ provider: 'openrouter', forceRefresh: true })
@@ -445,7 +496,7 @@ describe('settings', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
+    openSection('Providers')
     fireEvent.change(screen.getByLabelText(/API key \(OpenAI\)/i), {
       target: { value: 'sk-live' }
     })
@@ -471,7 +522,9 @@ describe('settings', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
+    openSection('Providers')
+    // Local Ollama needs no key, so its row stays closed until asked.
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Ollama' }))
     const ollama = screen.getByLabelText('Ollama base URL')
     fireEvent.change(ollama, { target: { value: 'not-a-url' } })
     fireEvent.blur(ollama)
@@ -490,26 +543,27 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
+    openSection('Providers')
     expect(screen.queryByLabelText('Ollama base URL')).toBeNull()
     expect(screen.queryByLabelText('Custom OpenAI base URL')).toBeNull()
-    expect(
-      screen.getByRole('button', { name: /Custom OpenAI-compatible.*127\.0\.0\.1:8080/i })
-    ).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Ollama.*127\.0\.0\.1:11434/i })).toBeTruthy()
+    // Each row names its host while closed.
+    const customRow = document.querySelector('[data-settings-field="custom-url"]') as HTMLElement
+    const ollamaRow = document.querySelector('[data-settings-field="ollama-url"]') as HTMLElement
+    expect(customRow.textContent).toMatch(/127\.0\.0\.1:8080/)
+    expect(ollamaRow.textContent).toMatch(/127\.0\.0\.1:11434/)
 
-    fireEvent.click(screen.getByRole('button', { name: /Custom OpenAI-compatible/i }))
+    fireEvent.click(within(customRow).getByRole('button', { name: 'Manage Custom OpenAI-compatible' }))
     expect(screen.getByLabelText('Custom OpenAI base URL')).toBeTruthy()
     expect(screen.getByText(/api\.deepinfra\.com\/v1\/openai/)).toBeTruthy()
-    expect(screen.getByText(/loopback and private LAN can stay empty/i)).toBeTruthy()
+    expect(screen.getByText(/loopback and a private LAN can go without/i)).toBeTruthy()
     expect(screen.queryByLabelText('Ollama base URL')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: /^Ollama/i }))
+    fireEvent.click(within(ollamaRow).getByRole('button', { name: 'Manage Ollama' }))
     expect(screen.getByLabelText('Ollama base URL')).toBeTruthy()
     expect(screen.queryByLabelText('Custom OpenAI base URL')).toBeNull()
   })
 
-  it('shows the custom base URL when Custom is already the active provider', () => {
+  it('shows the custom host on its row when Custom is already the active provider', () => {
     render(
       <SettingsView
         settings={{ ...baseSettings, provider: 'custom', model: 'local' }}
@@ -520,10 +574,14 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
+    openSection('Providers')
+    const customRow = document.querySelector('[data-settings-field="custom-url"]') as HTMLElement
+    expect(customRow.textContent).toMatch(/127\.0\.0\.1:8080/)
+    expect(within(customRow).getByText('In use')).toBeTruthy()
+    fireEvent.click(within(customRow).getByRole('button', { name: 'Manage Custom OpenAI-compatible' }))
     expect(screen.getByLabelText('Custom OpenAI base URL')).toBeTruthy()
     expect(screen.queryByLabelText('Ollama base URL')).toBeNull()
-    expect(screen.queryByRole('button', { name: /^Set as active$/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Use for new tasks' })).toBeNull()
     expect(screen.queryByText(/still the local default/i)).toBeNull()
   })
 
@@ -539,15 +597,15 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
-    fireEvent.click(screen.getByRole('button', { name: /Anthropic/i }))
-    fireEvent.click(screen.getByRole('button', { name: /^Set as active$/i }))
+    openSection('Providers')
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Anthropic' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use for new tasks' }))
     await waitFor(() =>
       expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ provider: 'anthropic' }))
     )
   })
 
-  it('warns when Custom is active with the local default URL and a saved key', () => {
+  it('warns on the closed row when Custom is active with the local default URL and a saved key', () => {
     render(
       <SettingsView
         settings={{ ...baseSettings, provider: 'custom', model: 'local' }}
@@ -558,7 +616,7 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
+    openSection('Providers')
     expect(screen.getByText(/still the local default/i)).toBeTruthy()
   })
 
@@ -578,27 +636,50 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
+    openSection('Providers')
     expect(screen.queryByText(/still the local default/i)).toBeNull()
   })
 
-  it('active model opens composer callback and Open Providers navigates', () => {
-    const onOpenComposerModel = vi.fn()
+  it('the Model row picks the app-wide model from the provider list', async () => {
+    const model = (id: string) => ({
+      id,
+      inputModalities: ['text'],
+      outputModalities: ['text'],
+      supportsTools: true,
+      supportsVision: false
+    })
+    // @ts-expect-error test bridge
+    window.vyotiq.listModels = vi.fn(async () => ({
+      ok: true as const,
+      data: { models: [model('gpt-5.6'), model('gpt-5.6-mini')] }
+    }))
+    const onUpdate = vi.fn(async () => ({ ok: true as const }))
     render(
       <SettingsView
         settings={baseSettings}
-        secrets={emptySecrets}
+        secrets={{ ...emptySecrets, openai: true }}
+        section="providers"
         onClose={vi.fn()}
-        onUpdate={vi.fn(async () => ({ ok: true as const }))}
+        onUpdate={onUpdate}
         onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
-        onOpenComposerModel={onOpenComposerModel}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: `OpenAI · ${baseSettings.model}` }))
-    expect(onOpenComposerModel).toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: /^Open Providers$/i }))
-    expect(screen.getByLabelText('Active provider')).toBeTruthy()
+    const field = document.querySelector('[data-settings-field="active-model"]') as HTMLElement
+    const trigger = within(field).getByRole('button', { name: 'Model' })
+    expect(trigger.textContent).toContain(baseSettings.model)
+    await waitFor(() =>
+      expect(window.vyotiq.listModels).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'openai', forceRefresh: false })
+      )
+    )
+    fireEvent.click(trigger)
+    fireEvent.click(await screen.findByRole('option', { name: 'gpt-5.6-mini' }))
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-5.6-mini' }))
+    )
+    // The provider stays; only the model changes.
+    expect(onUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ provider: expect.anything() }))
   })
 
   it('settings search for custom base URL expands the Custom OpenAI-compatible row', async () => {
@@ -618,7 +699,7 @@ describe('settings', () => {
     expect(await screen.findByLabelText('Custom OpenAI base URL')).toBeTruthy()
   })
 
-  it('settings search navigates to General telemetry field', async () => {
+  it('settings search navigates to the Diagnostics telemetry field', async () => {
     render(
       <SettingsView
         settings={baseSettings}
@@ -632,12 +713,11 @@ describe('settings', () => {
     const search = screen.getByLabelText(/Search settings/i)
     fireEvent.change(search, { target: { value: 'telemetry' } })
     fireEvent.click(screen.getByRole('option', { name: /Share crash/i }))
-    expect(await screen.findByLabelText(/Share crash and error reports/i)).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Open logs folder/i })).toBeTruthy()
+    expect(await screen.findByRole('switch', { name: 'Share crash and error reports' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open folder' })).toBeTruthy()
   })
 
   it('surfaces refresh model errors', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.listModels = vi.fn(async () => ({
       ok: false as const,
       error: 'catalog unavailable'
@@ -652,8 +732,8 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh models' }))
+    openSection('Providers')
+    fireEvent.click(screen.getByRole('button', { name: /^Refresh the .+ model list$/ }))
     expect((await screen.findByRole('alert')).textContent).toMatch(/catalog unavailable/)
   })
 
@@ -684,10 +764,10 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
+    openSection('Providers')
     // modal left SECRET_PROVIDERS (12 → 11) when the Modal provider was removed.
-    expect(screen.getByText(/1\/11 saved/i)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh models' }))
+    expect(screen.getByText(/1 of 11 saved/i)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^Refresh the .+ model list$/ }))
     expect(
       await screen.findByText(/seed models for Ollama.*Cannot reach Ollama/i)
     ).toBeTruthy()
@@ -706,10 +786,14 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh models' }))
+    openSection('Providers')
+    fireEvent.click(screen.getByRole('button', { name: /^Refresh the .+ model list$/ }))
     expect((await screen.findByRole('alert')).textContent).toMatch(/DeepSeek API key not set/i)
-    expect(window.vyotiq.listModels).not.toHaveBeenCalled()
+    // The Model row's own read may go out (main answers it from seeds when
+    // there is no key); a forced refresh must not.
+    expect(window.vyotiq.listModels).not.toHaveBeenCalledWith(
+      expect.objectContaining({ forceRefresh: true })
+    )
   })
 
   it('Refresh models uses workspace override custom URL when active', async () => {
@@ -752,8 +836,8 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Providers$/i }))
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh models' }))
+    openSection('Providers')
+    fireEvent.click(screen.getByRole('button', { name: /^Refresh the .+ model list$/ }))
     await waitFor(() =>
       expect(window.vyotiq.listModels).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -765,7 +849,7 @@ describe('settings', () => {
     )
   })
 
-  it('theme menu calls onAppearanceChange', () => {
+  it('colour mode calls onAppearanceChange', () => {
     const onAppearanceChange = vi.fn()
     render(
       <SettingsView
@@ -780,12 +864,8 @@ describe('settings', () => {
       />
     )
 
-    const trigger = screen.getByRole('button', { name: /^Theme$/i })
-    expect(trigger.className).toContain('max-w-full')
-    expect(trigger.className).not.toContain('max-w-[200px]')
-    fireEvent.click(trigger)
-    const listbox = screen.getByRole('listbox')
-    fireEvent.click(within(listbox).getByText('Dark'))
+    const mode = screen.getByRole('radiogroup', { name: 'Colour mode' })
+    fireEvent.click(within(mode).getByRole('radio', { name: 'Dark' }))
     expect(onAppearanceChange).toHaveBeenCalledWith({ theme: 'dark' })
   })
 
@@ -809,7 +889,7 @@ describe('settings', () => {
     expect(empty.className).toContain('z-dropdown')
   })
 
-  it('edits MCP server fields in Marketplace manage view', async () => {
+  it('edits a manual MCP server from its Extensions detail', async () => {
     const serverId = 'mcp-test-id'
     const onUpdate = vi.fn(async () => ({ ok: true as const }))
     const { MarketplaceView } = await import('@renderer/features/marketplace')
@@ -821,6 +901,7 @@ describe('settings', () => {
             {
               id: serverId,
               name: 'Echo server',
+              transport: 'stdio',
               command: 'node',
               args: ['echo-server.mjs'],
               enabled: true,
@@ -832,10 +913,11 @@ describe('settings', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('tab', { name: /^Manage$/i }))
-    expect(await screen.findByRole('tab', { name: /^MCPs$/i })).toBeTruthy()
-    // Manage view polls connection status on open (mcpStatus). Refresh MCP is explicit.
+    // Extensions reads connection status on open (mcpStatus). Refresh is explicit.
     await waitFor(() => expect(window.vyotiq.mcpStatus).toHaveBeenCalled())
+    fireEvent.click(within(await findExtensionRow(`server:${serverId}`)).getByRole('button'))
+    // The fields sit under Configuration, closed while nothing is wrong.
+    fireEvent.click(await screen.findByRole('button', { name: 'Configuration' }))
 
     const nameInput = screen.getByLabelText(`MCP server name for ${serverId}`)
     fireEvent.change(nameInput, { target: { value: 'Filesystem' } })
@@ -894,7 +976,7 @@ describe('settings', () => {
     )
   })
 
-  it('shows MCP connection status in Marketplace manage view', async () => {
+  it('shows the tool count of a connected MCP server in its row and detail', async () => {
     const statusPayload = {
       ok: true as const,
       data: {
@@ -909,10 +991,8 @@ describe('settings', () => {
         ]
       }
     }
-    // @ts-expect-error test bridge
     window.vyotiq.mcpStatus = vi.fn(async () => statusPayload)
-    // Manage view loads status via mcpStatus on open. Refresh MCP is explicit.
-    // @ts-expect-error test bridge
+    // Extensions loads status via mcpStatus on open. Refresh is explicit.
     window.vyotiq.mcpRefresh = vi.fn(async () => statusPayload)
 
     const { MarketplaceView } = await import('@renderer/features/marketplace')
@@ -936,12 +1016,13 @@ describe('settings', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('tab', { name: /^Manage$/i }))
-    expect(await screen.findByRole('tab', { name: /^MCPs$/i })).toBeTruthy()
-    expect(await screen.findByText(/Connected · 2 tools/i)).toBeTruthy()
+    const row = await findExtensionRow('server:srv-1')
+    expect(await within(row).findByText('2 tools')).toBeTruthy()
+    fireEvent.click(within(row).getByRole('button'))
+    expect(await screen.findByText('Connected — 2 tools.')).toBeTruthy()
   })
 
-  it('has no Marketplace section; registry lives in Marketplace Manage', async () => {
+  it('has no Marketplace section; the registry sits behind the Extensions gear', async () => {
     render(
       <SettingsView
         settings={baseSettings}
@@ -964,13 +1045,14 @@ describe('settings', () => {
         onUpdate={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('tab', { name: /^Manage$/i }))
-    expect(await screen.findByLabelText(/Package registry/i)).toBeTruthy()
-    expect(screen.getByLabelText(/Registry URL/i)).toBeTruthy()
-    expect(screen.getByLabelText(/Acknowledge marketplace install risk/i)).toBeTruthy()
+    fireEvent.click(await screen.findByRole('button', { name: 'Registry and trust' }))
+    const dialog = screen.getByRole('dialog', { name: 'Registry and trust' })
+    expect(within(dialog).getByRole('region', { name: 'Package registry' })).toBeTruthy()
+    expect(within(dialog).getByLabelText(/Registry URL/i)).toBeTruthy()
+    expect(within(dialog).getByLabelText(/Acknowledge marketplace install risk/i)).toBeTruthy()
   })
 
-  it('General section shows privacy and diagnostics fields', () => {
+  it('Notifications and Diagnostics nav entries render real sections', () => {
     render(
       <SettingsView
         settings={baseSettings}
@@ -981,16 +1063,21 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    expect(screen.queryByRole('button', { name: /^Advanced$/i })).toBeNull()
-    expect(screen.getByLabelText(/Share crash and error reports/i)).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Open logs folder/i })).toBeTruthy()
-    expect(screen.getByText(/No crashes recorded this install/i)).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="diagnostics-command"]')).toBeTruthy()
+    openSection('Notifications')
+    expect(document.querySelectorAll('[data-settings-field]').length).toBeGreaterThan(0)
+    expect(document.querySelector('[data-settings-field="notifications-enabled"]')).toBeTruthy()
+    openSection('Diagnostics')
+    expect(document.querySelectorAll('[data-settings-field]').length).toBeGreaterThan(0)
+    expect(document.querySelector('[data-settings-field="telemetry"]')).toBeTruthy()
+    expect(document.querySelector('[data-settings-field="recent-crashes"]')).toBeTruthy()
+    expect(document.querySelector('[data-settings-field="process-metrics"]')).toBeTruthy()
+    // The typecheck/lint command configures an agent tool, so it is in Tools.
+    expect(document.querySelector('[data-settings-field="diagnostics-command"]')).toBeNull()
     expect(document.querySelector('[data-settings-field="about"]')).toBeNull()
     expect(document.querySelector('[data-settings-field="github-client-id"]')).toBeNull()
   })
 
-  it('Agent section keeps chat prefs and Reference group', () => {
+  it('Agent section owns permissions, runs, conversation, and rules', () => {
     render(
       <SettingsView
         settings={baseSettings}
@@ -1001,14 +1088,86 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Agent$/i }))
-    expect(document.querySelector('[data-settings-field="show-thinking"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="keep-recent-turns"]')).toBeTruthy()
-    expect(screen.getByText(/^Reference$/i)).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="workspace-rules"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="memory-files"]')).toBeTruthy()
+    openSection('Agent')
+    for (const id of [
+      'tool-approval',
+      'mcp-tools-protection',
+      'agent-autonomous-mode',
+      'agent-autonomous-questions',
+      'auto-mode-switch',
+      'auto-resume-interrupted',
+      'show-thinking',
+      'keep-recent-turns',
+      'auto-compact-threshold',
+      'workspace-rules'
+    ]) {
+      expect(document.querySelector(`[data-settings-field="${id}"]`)).toBeTruthy()
+    }
+    expect(screen.getByRole('switch', { name: 'MCP tools always ask' }).getAttribute('aria-checked')).toBe(
+      'true'
+    )
+    // The offline wait budget had no effect (runs wait out a lost connection
+    // indefinitely) and the memory-files row was a paragraph, not a setting.
+    expect(document.querySelector('[data-settings-field="agent-offline-wait"]')).toBeNull()
+    expect(document.querySelector('[data-settings-field="memory-files"]')).toBeNull()
     expect(document.querySelector('[data-settings-field="codeindex-enabled"]')).toBeNull()
-    expect(document.querySelector('[data-settings-field="tool-approval"]')).toBeNull()
+    // Questions only apply to autonomous runs, so they wait on that switch.
+    expect(
+      (screen.getByRole('button', { name: 'Questions while unattended' }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true)
+  })
+
+  it('Manage rules opens Marketplace on the Rules tab', () => {
+    const onOpenMarketplace = vi.fn()
+    render(
+      <SettingsView
+        settings={baseSettings}
+        secrets={emptySecrets}
+        section="agent"
+        onClose={vi.fn()}
+        onUpdate={vi.fn(async () => ({ ok: true as const }))}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+        onOpenMarketplace={onOpenMarketplace}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /^Manage rules$/ }))
+    expect(onOpenMarketplace).toHaveBeenCalledWith('rules')
+  })
+
+  it('lists always-allowed tools under Tool approval and removes one', async () => {
+    const onUpdate = vi.fn(async () => ({ ok: true as const }))
+    render(
+      <SettingsView
+        settings={{
+          ...baseSettings,
+          toolApproval: { mode: 'mutating', allowlist: ['edit', 'terminal', 'terminal:pnpm vitest'], mcpProtection: true }
+        }}
+        secrets={emptySecrets}
+        section="agent"
+        onClose={vi.fn()}
+        onUpdate={onUpdate}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      />
+    )
+    const row = document.querySelector('[data-settings-field="tool-approval-allowlist"]') as HTMLElement
+    expect(row).toBeTruthy()
+    const chips = within(row).getByRole('list', { name: 'Always allowed' })
+    expect(within(chips).getByText('edit')).toBeTruthy()
+    expect(within(chips).getByText('terminal')).toBeTruthy()
+    // A command allow reads as the command, marked as one.
+    expect(within(chips).getByText('pnpm vitest')).toBeTruthy()
+    expect(within(chips).getByLabelText('Command')).toBeTruthy()
+    fireEvent.click(within(row).getByRole('button', { name: 'Remove edit' }))
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          toolApproval: expect.objectContaining({ allowlist: ['terminal', 'terminal:pnpm vitest'] })
+        })
+      )
+    )
   })
 
   it('Agent section renders the persona & style group', () => {
@@ -1027,7 +1186,7 @@ describe('settings', () => {
     expect(document.querySelector('[data-settings-field="agent-tone"]')).toBeTruthy()
     expect(document.querySelector('[data-settings-field="response-language"]')).toBeTruthy()
     expect(document.querySelector('[data-settings-field="response-verbosity"]')).toBeTruthy()
-    expect((screen.getByLabelText('Persona') as HTMLInputElement).value).toBe('Nova')
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Nova')
     expect((screen.getByLabelText('Tone') as HTMLInputElement).value).toBe('friendly, blunt')
     expect((screen.getByLabelText('Response language') as HTMLInputElement).value).toBe('')
   })
@@ -1046,8 +1205,8 @@ describe('settings', () => {
       />
     )
 
-    fireEvent.change(screen.getByLabelText('Persona'), { target: { value: 'Nova' } })
-    fireEvent.blur(screen.getByLabelText('Persona'))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Nova' } })
+    fireEvent.blur(screen.getByLabelText('Name'))
     fireEvent.change(screen.getByLabelText('Tone'), { target: { value: 'friendly, blunt' } })
     fireEvent.blur(screen.getByLabelText('Tone'))
     fireEvent.change(screen.getByLabelText('Response language'), { target: { value: 'Spanish' } })
@@ -1060,7 +1219,7 @@ describe('settings', () => {
     expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ responseLanguage: 'Spanish' }))
   })
 
-  it('answer length menu persists the selected verbosity', () => {
+  it('answer length persists the selected verbosity', () => {
     const onUpdate = vi.fn(async () => ({ ok: true as const }))
     render(
       <SettingsView
@@ -1074,9 +1233,8 @@ describe('settings', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /^Answer length$/i }))
-    const listbox = screen.getByRole('listbox')
-    fireEvent.click(within(listbox).getByText('Detailed'))
+    const length = screen.getByRole('radiogroup', { name: 'Answer length' })
+    fireEvent.click(within(length).getByRole('radio', { name: 'Detailed' }))
     expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ responseVerbosity: 'detailed' }))
   })
 
@@ -1121,9 +1279,14 @@ describe('settings', () => {
       />
     )
 
-    expect((screen.getByLabelText('Persona') as HTMLInputElement).value).toBe('OverrideBot')
-    fireEvent.change(screen.getByLabelText('Persona'), { target: { value: 'Changed' } })
-    fireEvent.blur(screen.getByLabelText('Persona'))
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('OverrideBot')
+    // Each row the override scopes says so on the row itself.
+    const nameRow = document.querySelector('[data-settings-field="agent-persona"]') as HTMLElement
+    expect(within(nameRow).getByText('this workspace')).toBeTruthy()
+    const runsRow = document.querySelector('[data-settings-field="auto-mode-switch"]') as HTMLElement
+    expect(within(runsRow).queryByText('this workspace')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Changed' } })
+    fireEvent.blur(screen.getByLabelText('Name'))
 
     await waitFor(() => {
       expect(onSetSettingsOverride).toHaveBeenCalledWith(
@@ -1134,25 +1297,117 @@ describe('settings', () => {
     expect(onUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ agentPersona: 'Changed' }))
   })
 
-  it('Indexing section owns codebase index controls', () => {
+  it('Indexing lists each open workspace with its own index and a reindex', async () => {
+    const workspacePath = 'C:/ws/proj'
+    window.vyotiq.agentContext = vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        workspaceName: 'proj',
+        branch: null,
+        rules: { agentsMd: false, claudeMd: false, cursorrules: false, ruleFileCount: 0 },
+        memoryNotes: 0,
+        codeIndex: { state: 'ready' as const, files: 12, indexedAt: new Date().toISOString() }
+      }
+    }))
+    window.vyotiq.onAgentContextChanged = vi.fn(() => () => {})
     render(
       <SettingsView
         settings={baseSettings}
         secrets={emptySecrets}
+        openWorkspaces={[workspacePath]}
         onClose={vi.fn()}
         onUpdate={vi.fn(async () => ({ ok: true as const }))}
         onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Indexing$/i }))
+    openSection('Indexing')
     expect(document.querySelector('[data-settings-field="codeindex-enabled"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="codeindex-status"]')).toBeTruthy()
     expect(document.querySelector('[data-settings-field="show-thinking"]')).toBeNull()
-    expect(screen.getByRole('button', { name: /Reindex workspace/i })).toBeTruthy()
+    const row = document.querySelector(`[data-settings-item="index:${workspacePath}"]`) as HTMLElement
+    expect(row).toBeTruthy()
+    await waitFor(() => expect(row.textContent).toMatch(/12 files · updated/))
+    expect(within(row).getByText('Ready')).toBeTruthy()
+    fireEvent.click(within(row).getByRole('button', { name: 'Reindex proj' }))
+    await waitFor(() => expect(window.vyotiq.codeIndexReindex).toHaveBeenCalledWith({ workspacePath }))
   })
 
-  it('Voice section wires Install, Unload, and Delete cache', async () => {
+  it('Indexing pauses a workspace while it builds, and resumes a paused one', async () => {
+    const workspacePath = 'C:/ws/proj'
+    const facts = (state: 'building' | 'paused') => ({
+      ok: true as const,
+      data: {
+        workspaceName: 'proj',
+        branch: null,
+        rules: { agentsMd: false, claudeMd: false, cursorrules: false, ruleFileCount: 0 },
+        memoryNotes: 0,
+        codeIndex: { state, files: 340, indexedAt: new Date().toISOString() }
+      }
+    })
+    window.vyotiq.agentContext = vi.fn(async () => facts('building'))
+    window.vyotiq.onAgentContextChanged = vi.fn(() => () => {})
+    window.vyotiq.codeIndexPause = vi.fn(async () => ({ ok: true as const, data: true as const }))
+    window.vyotiq.codeIndexResume = vi.fn(async () => ({ ok: true as const, data: true as const }))
+    const props = {
+      secrets: emptySecrets,
+      openWorkspaces: [workspacePath],
+      section: 'indexing' as const,
+      onClose: vi.fn(),
+      onUpdate: vi.fn(async () => ({ ok: true as const })),
+      onSaveSecret: vi.fn(async () => ({ ok: true as const })),
+      onClearSecret: vi.fn(async () => ({ ok: true as const }))
+    }
+    const { rerender } = render(<SettingsView settings={baseSettings} {...props} />)
+    const row = () => document.querySelector(`[data-settings-item="index:${workspacePath}"]`) as HTMLElement
+    const pause = await within(row()).findByRole('button', { name: 'Pause indexing proj' })
+    fireEvent.click(pause)
+    await waitFor(() => expect(window.vyotiq.codeIndexPause).toHaveBeenCalledWith(workspacePath))
+
+    // Main keeps the flag; the settings it pushes back carry it.
+    window.vyotiq.agentContext = vi.fn(async () => facts('paused'))
+    rerender(
+      <SettingsView
+        settings={{ ...baseSettings, codeIndex: { ...baseSettings.codeIndex, pausedPaths: [workspacePath] } }}
+        {...props}
+      />
+    )
+    expect(within(row()).getByText('Paused')).toBeTruthy()
+    expect(row().textContent).toContain('Paused · 340 files indexed so far — resume carries on from there')
+    expect(within(row()).queryByRole('button', { name: /^Reindex/ })).toBeNull()
+    fireEvent.click(within(row()).getByRole('button', { name: 'Resume indexing proj' }))
+    await waitFor(() => expect(window.vyotiq.codeIndexResume).toHaveBeenCalledWith(workspacePath))
+  })
+
+  it('Indexing says so when no workspace is open, and hides the rows when off', () => {
+    const { rerender } = render(
+      <SettingsView
+        settings={baseSettings}
+        secrets={emptySecrets}
+        section="indexing"
+        onClose={vi.fn()}
+        onUpdate={vi.fn(async () => ({ ok: true as const }))}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      />
+    )
+    expect(screen.getByText('No workspaces open.')).toBeTruthy()
+    rerender(
+      <SettingsView
+        settings={{ ...baseSettings, codeIndex: { ...baseSettings.codeIndex, enabled: false } }}
+        secrets={emptySecrets}
+        section="indexing"
+        openWorkspaces={['C:/ws/proj']}
+        onClose={vi.fn()}
+        onUpdate={vi.fn(async () => ({ ok: true as const }))}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      />
+    )
+    expect(screen.queryByText('No workspaces open.')).toBeNull()
+    expect(document.querySelector('[data-settings-item^="index:"]')).toBeNull()
+  })
+
+  it('Voice section wires Install, and Unload and Delete from the row menu', async () => {
     const idle = {
       phase: 'idle' as const,
       progress: null,
@@ -1186,11 +1441,8 @@ describe('settings', () => {
       }
     }))
     const deleteCache = vi.fn(async () => ({ ok: true as const, data: idle }))
-    // @ts-expect-error test bridge
     window.vyotiq.dictationInstall = install
-    // @ts-expect-error test bridge
     window.vyotiq.dictationUnload = unload
-    // @ts-expect-error test bridge
     window.vyotiq.dictationDeleteCache = deleteCache
 
     render(
@@ -1203,23 +1455,23 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Voice$/i }))
+    openSection('Voice')
     expect(document.querySelector('[data-settings-field="dictation-engine"]')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Install Whisper Tiny/i })).toBeTruthy()
-
-    fireEvent.click(screen.getByRole('button', { name: /Install Whisper Tiny/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Install Whisper Tiny' }))
     await waitFor(() =>
       expect(install).toHaveBeenCalledWith({ modelId: 'whisper-tiny.en' })
     )
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /Unload Whisper Tiny/i })).toBeTruthy()
-    )
-    fireEvent.click(screen.getByRole('button', { name: /Unload Whisper Tiny/i }))
+    // Loaded, the row's menu offers Unload; once it is only on disk, Delete.
+    const more = (): HTMLButtonElement =>
+      screen.getByRole('button', { name: 'More for Whisper Tiny' }) as HTMLButtonElement
+    await waitFor(() => expect(more().disabled).toBe(false))
+    fireEvent.click(more())
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Unload from memory' }))
     await waitFor(() => expect(unload).toHaveBeenCalled())
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /Delete Whisper Tiny cache/i })).toBeTruthy()
-    )
-    fireEvent.click(screen.getByRole('button', { name: /Delete Whisper Tiny cache/i }))
+    await waitFor(() => expect(more().disabled).toBe(false))
+    fireEvent.click(more())
+    expect(screen.queryByRole('menuitem', { name: 'Unload from memory' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete download' }))
     await waitFor(() =>
       expect(deleteCache).toHaveBeenCalledWith({ modelId: 'whisper-tiny.en' })
     )
@@ -1236,10 +1488,10 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Voice$/i }))
-    fireEvent.click(screen.getByLabelText('Dictation engine'))
-    const local = await waitFor(() => screen.getByRole('option', { name: /^Local$/i }))
-    expect(local.getAttribute('aria-disabled')).toBe('true')
+    openSection('Voice')
+    await waitFor(() => expect(window.vyotiq.dictationStatus).toHaveBeenCalled())
+    const engine = screen.getByRole('radiogroup', { name: 'Dictation engine' })
+    expect((within(engine).getByRole('radio', { name: 'Local' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('Waveform menu patches dictation.waveformStyle', async () => {
@@ -1254,7 +1506,7 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Voice$/i }))
+    openSection('Voice')
     expect(document.querySelector('[data-settings-field="dictation-waveform"]')).toBeTruthy()
     fireEvent.click(screen.getByLabelText('Waveform'))
     fireEvent.click(await waitFor(() => screen.getByRole('option', { name: /^Dots$/i })))
@@ -1265,7 +1517,6 @@ describe('settings', () => {
   })
 
   it('switching to Local does not send empty localModelId from stale form state', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.dictationStatus = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -1294,11 +1545,12 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Voice$/i }))
-    await waitFor(() => expect(window.vyotiq.dictationStatus).toHaveBeenCalled())
-    fireEvent.click(screen.getByLabelText('Dictation engine'))
-    const local = await waitFor(() => screen.getByRole('option', { name: /^Local$/i }))
-    expect(local.getAttribute('aria-disabled')).not.toBe('true')
+    openSection('Voice')
+    const local = await waitFor(() => {
+      const radio = screen.getByRole('radio', { name: 'Local' }) as HTMLButtonElement
+      expect(radio.disabled).toBe(false)
+      return radio
+    })
     fireEvent.click(local)
     await waitFor(() => expect(onUpdate).toHaveBeenCalled())
     expect(onUpdate).toHaveBeenCalledWith({
@@ -1311,7 +1563,6 @@ describe('settings', () => {
   })
 
   it('Voice cards prefer Error over Ready when load failed with files on disk', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.dictationStatus = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -1343,17 +1594,17 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Voice$/i }))
+    openSection('Voice')
     await waitFor(() => expect(window.vyotiq.dictationStatus).toHaveBeenCalled())
     const tiny = document.querySelector('[data-settings-field="dictation-whisper-tiny"]')
     expect(tiny).toBeTruthy()
-    expect(tiny!.textContent).toMatch(/Error: ONNX load failed/)
+    expect(tiny!.textContent).toMatch(/Error/)
+    expect(tiny!.textContent).toMatch(/ONNX load failed/)
     expect(tiny!.textContent).not.toMatch(/Ready · on disk/)
     expect(tiny!.textContent).toMatch(/In use/)
   })
 
   it('shows an indeterminate load bar without a stuck 0%', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.dictationStatus = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -1385,7 +1636,7 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Voice$/i }))
+    openSection('Voice')
     const bar = await waitFor(() =>
       screen.getByRole('progressbar', { name: /whisper-tiny\.en load progress/i })
     )
@@ -1398,11 +1649,8 @@ describe('settings', () => {
   it('Use on an installed card sets localModelId without changing engine or loading', async () => {
     const install = vi.fn(async () => ({ ok: false as const, error: 'not used' }))
     const unload = vi.fn(async () => ({ ok: false as const, error: 'not used' }))
-    // @ts-expect-error test bridge
     window.vyotiq.dictationInstall = install
-    // @ts-expect-error test bridge
     window.vyotiq.dictationUnload = unload
-    // @ts-expect-error test bridge
     window.vyotiq.dictationStatus = vi.fn(async () => ({
       ok: true as const,
       data: {
@@ -1438,7 +1686,7 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Voice$/i }))
+    openSection('Voice')
     await waitFor(() => expect(window.vyotiq.dictationStatus).toHaveBeenCalled())
     const small = document.querySelector('[data-settings-field="dictation-whisper-small"]')
     expect(small?.textContent).toMatch(/In use/)
@@ -1470,7 +1718,7 @@ describe('settings', () => {
     )
     const search = screen.getByLabelText(/Search settings/i)
     fireEvent.change(search, { target: { value: 'whisper' } })
-    fireEvent.click(screen.getByRole('option', { name: /Dictation engine/i }))
+    fireEvent.click(screen.getByRole('option', { name: /^Engine/ }))
     expect(
       await waitFor(() => {
         const el = document.querySelector('[data-settings-field="dictation-engine"]')
@@ -1480,7 +1728,7 @@ describe('settings', () => {
     ).toBeTruthy()
   })
 
-  it('Tools section owns approval, shell, search, browser allowlist, auto-resume, and auto mode', () => {
+  it('Tools section owns terminal, browser, MCP, and the tool catalog', () => {
     render(
       <SettingsView
         settings={baseSettings}
@@ -1491,17 +1739,44 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Tools$/i }))
-    expect(document.querySelector('[data-settings-field="tool-approval"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="mcp-tools-protection"]')).toBeTruthy()
-    expect(screen.getByRole('switch', { name: 'MCP tools protection' }).getAttribute('aria-checked')).toBe(
-      'true'
+    openSection('Tools')
+    for (const id of [
+      'terminal-shell',
+      'diagnostics-command',
+      'terminal-screen-reader',
+      'search-engine',
+      'browser-domain-allowlist',
+      'mcp-tool-loading',
+      'mcp-servers',
+      'tools-catalog'
+    ]) {
+      expect(document.querySelector(`[data-settings-field="${id}"]`)).toBeTruthy()
+    }
+    // Approval and run behavior moved to Agent; pane count is layout (General).
+    for (const id of ['tool-approval', 'auto-resume-interrupted', 'auto-mode-switch', 'max-chat-panes']) {
+      expect(document.querySelector(`[data-settings-field="${id}"]`)).toBeNull()
+    }
+  })
+
+  it('saves the diagnostics command trimmed on blur', async () => {
+    const onUpdate = vi.fn(async () => ({ ok: true as const }))
+    render(
+      <SettingsView
+        settings={baseSettings}
+        secrets={emptySecrets}
+        section="tools"
+        onClose={vi.fn()}
+        onUpdate={onUpdate}
+        onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+        onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+      />
     )
-    expect(document.querySelector('[data-settings-field="terminal-shell"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="browser-domain-allowlist"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="search-engine"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="auto-resume-interrupted"]')).toBeTruthy()
-    expect(document.querySelector('[data-settings-field="auto-mode-switch"]')).toBeTruthy()
+    const input = screen.getByLabelText('Diagnostics command')
+    fireEvent.change(input, { target: { value: '  pnpm typecheck  ' } })
+    fireEvent.blur(input)
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith({ diagnosticsCommand: 'pnpm typecheck' })
+    )
   })
 
   it('saves browser domain allowlist on blur', async () => {
@@ -1516,8 +1791,9 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Tools$/i }))
-    const field = screen.getByLabelText('Browser domain allowlist')
+    openSection('Tools')
+    fireEvent.click(screen.getByRole('button', { name: 'Edit list' }))
+    const field = screen.getByLabelText('Allowed sites')
     fireEvent.change(field, {
       target: { value: 'example.com\nhttps://api.allowed.dev/path\n*.corp.internal' }
     })
@@ -1543,7 +1819,7 @@ describe('settings', () => {
     )
     const search = screen.getByLabelText(/Search settings/i)
     fireEvent.change(search, { target: { value: 'browser domain' } })
-    fireEvent.click(screen.getByRole('option', { name: /Browser domain allowlist/i }))
+    fireEvent.click(screen.getByRole('option', { name: /^Allowed sites/ }))
     expect(
       await waitFor(() => {
         const el = document.querySelector('[data-settings-field="browser-domain-allowlist"]')
@@ -1553,10 +1829,14 @@ describe('settings', () => {
     ).toBeTruthy()
   })
 
-  it('search index covers every rendered settings field', () => {
+  it('search index and rendered rows match in both directions, section by section', () => {
     render(
       <SettingsView
-        settings={baseSettings}
+        settings={{
+          ...baseSettings,
+          // The allowlist row only exists once a tool has been allowed.
+          toolApproval: { ...baseSettings.toolApproval, allowlist: ['read_file'] }
+        }}
         secrets={emptySecrets}
         onClose={vi.fn()}
         onUpdate={vi.fn(async () => ({ ok: true as const }))}
@@ -1567,28 +1847,42 @@ describe('settings', () => {
     )
     const indexed = new Set(SETTINGS_SEARCH_INDEX.map((entry) => entry.id))
     expect(indexed.size).toBe(SETTINGS_SEARCH_INDEX.length)
-    const rendered = new Set<string>()
-    for (const name of [
-      'General',
-      'Appearance',
-      'Providers',
-      'Agent',
-      'Indexing',
-      'Voice',
-      'Tools',
-      'Shortcuts',
-      'About'
-    ]) {
-      fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${name}$`, 'i') }))
+    const renderedBySection = new Map<string, Set<string>>()
+    const mistitled: string[] = []
+    // Results that name a part of their row rather than its visible title: a
+    // provider's base URL field lives inside that provider's accordion row,
+    // and the Shortcuts entry lands on the whole list.
+    const namedForContent = new Set(['shortcuts', 'ollama-url', 'custom-url'])
+    for (const section of SECTION_GROUPS.flatMap((group) => group.sections)) {
+      const name = SECTION_LABELS[section]
+      openSection(name)
+      const ids = new Set<string>()
       document.querySelectorAll('[data-settings-field]').forEach((el) => {
         const id = el.getAttribute('data-settings-field')
-        if (id) rendered.add(id)
+        if (id) ids.add(id)
       })
+      renderedBySection.set(section, ids)
+      for (const entry of SETTINGS_SEARCH_INDEX.filter((e) => e.section === section)) {
+        const row = document.querySelector(`[data-settings-field="${entry.id}"]`)
+        if (!row || namedForContent.has(entry.id)) continue
+        if (!row.textContent?.includes(entry.title)) mistitled.push(`${entry.id}: ${entry.title}`)
+      }
     }
+    const rendered = new Set([...renderedBySection.values()].flatMap((ids) => [...ids]))
+    // Every row can be found…
     expect([...rendered].filter((id) => !indexed.has(id))).toEqual([])
+    // …and every result lands on a row that exists, in the section it names.
+    expect(
+      SETTINGS_SEARCH_INDEX.filter(
+        (entry) => !renderedBySection.get(entry.section)?.has(entry.id)
+      ).map((entry) => `${entry.section}:${entry.id}`)
+    ).toEqual([])
+    // …under the name it was listed with: a result called "Copy build info"
+    // that highlights a row called "Build info" reads as the wrong result.
+    expect(mistitled).toEqual([])
   })
 
-  it('settings search navigates to Tools auto-resume field', async () => {
+  it('settings search navigates to the Agent auto-resume field', async () => {
     render(
       <SettingsView
         settings={baseSettings}
@@ -1601,7 +1895,7 @@ describe('settings', () => {
     )
     const search = screen.getByLabelText(/Search settings/i)
     fireEvent.change(search, { target: { value: 'resume' } })
-    fireEvent.click(screen.getByRole('option', { name: /Auto-resume interrupted runs/i }))
+    fireEvent.click(screen.getByRole('option', { name: /^Resume interrupted runs/ }))
     expect(
       await waitFor(() => {
         const el = document.querySelector('[data-settings-field="auto-resume-interrupted"]')
@@ -1622,11 +1916,13 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Shortcuts$/i }))
-    expect(screen.getByText('Search chats')).toBeTruthy()
-    expect(screen.getByText('Ctrl+K')).toBeTruthy()
+    openSection('Shortcuts')
+    expect(screen.getByText('Search and commands')).toBeTruthy()
+    expect(keycaps('search')).toEqual(['Ctrl', 'K'])
+    expect(screen.getByText('Next task that needs you')).toBeTruthy()
+    expect(keycaps('nextNeedsYou')).toEqual(['Ctrl', 'J'])
     expect(screen.getByText('Jump to latest')).toBeTruthy()
-    expect(screen.getByText('End')).toBeTruthy()
+    expect(keycaps('jump-latest')).toEqual(['End'])
   })
 
   it('settings search for keyboard jumps to Shortcuts', () => {
@@ -1644,11 +1940,13 @@ describe('settings', () => {
       target: { value: 'keyboard' }
     })
     fireEvent.click(screen.getByRole('option', { name: /Keyboard shortcuts/i }))
-    expect(screen.getByText('Search chats')).toBeTruthy()
-    expect(screen.getByText('Ctrl+K')).toBeTruthy()
+    expect(screen.getByText('Search and commands')).toBeTruthy()
+    expect(keycaps('search')).toEqual(['Ctrl', 'K'])
+    expect(screen.getByText('Next task that needs you')).toBeTruthy()
+    expect(keycaps('nextNeedsYou')).toEqual(['Ctrl', 'J'])
   })
 
-  it('About section shows lockup, version, runtime, website, and docs', async () => {
+  it('About section shows the mark, the build line, and its links', async () => {
     render(
       <SettingsView
         settings={baseSettings}
@@ -1659,18 +1957,18 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^About$/i }))
-    const aboutLockup = document.querySelector('[data-settings-field="about"] [data-brand-lockup]')
-    expect(aboutLockup).toBeTruthy()
-    expect(aboutLockup?.getAttribute('aria-label')).toBe('Vyotiq')
-    expect(await screen.findByText('1.0.0')).toBeTruthy()
-    expect(screen.getByText('43.2.0')).toBeTruthy()
-    expect(screen.getByText('132.0.6834.196')).toBeTruthy()
-    expect(screen.getByText('22.17.0')).toBeTruthy()
-    expect(screen.getByText(/Windows x64 · 10\.0\.26200/)).toBeTruthy()
-    expect(screen.getByText('Agent V. A product of Vyotiq.com.')).toBeTruthy()
-    // The links live inline in the brand card now, not in their own group of
-    // full-width rows; the field ids stay so settings search still finds them.
+    openSection('About')
+    const about = document.querySelector('[data-settings-field="about"]') as HTMLElement
+    // The group's label and the product's name, as the mockup has it.
+    expect(within(about).getAllByText('Agent V')).toHaveLength(2)
+    // One line for the build; the OS version rides on its title.
+    const build = await within(about).findByText(
+      '1.0.0 · Electron 43.2.0 · Chromium 132.0.6834.196 · Node 22.17.0 · Windows x64'
+    )
+    expect(build.getAttribute('title')).toBe('Windows 10.0.26200')
+    expect(within(about).getByText(/A product of Vyotiq\.com/)).toBeTruthy()
+    // The links sit under the build line, not in a group of their own; the
+    // field ids stay so settings search still finds them.
     expect(screen.queryByText('Links')).toBeNull()
     const websiteLink = document.querySelector('[data-settings-field="about-website"]')
     expect(websiteLink).toBeTruthy()
@@ -1711,6 +2009,7 @@ describe('settings', () => {
       <SettingsView
         settings={baseSettings}
         secrets={emptySecrets}
+        section="notifications"
         onClose={vi.fn()}
         onUpdate={onUpdate}
         onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
@@ -1718,7 +2017,7 @@ describe('settings', () => {
       />
     )
     expect(document.querySelector('[data-settings-field="notifications-enabled"]')).toBeTruthy()
-    fireEvent.click(screen.getByRole('switch', { name: 'Enable notifications' }))
+    fireEvent.click(screen.getByRole('switch', { name: 'Notifications' }))
     await waitFor(() => {
       expect(onUpdate).toHaveBeenCalled()
     })
@@ -1749,20 +2048,21 @@ describe('settings', () => {
     )
 
     // About Section
-    fireEvent.click(screen.getByRole('button', { name: /^About$/i }))
+    openSection('About')
     expect(document.querySelector('[data-settings-field="about"]')).toBeTruthy()
-    expect(screen.getByText('Build')).toBeTruthy()
     expect(screen.getByText('Updates')).toBeTruthy()
-    // Links are inline in the brand card, not a group of their own.
+    expect(screen.getByText('Feedback')).toBeTruthy()
+    // Links sit under the build line, not in a group of their own.
     expect(screen.queryByText('Links')).toBeNull()
     expect(document.querySelector('[data-settings-field="about-source"]')).toBeTruthy()
 
     // Agent Section
-    fireEvent.click(screen.getByRole('button', { name: /^Agent$/i }))
+    openSection('Agent')
     expect(document.querySelector('[data-settings-field="agent-persona"]')).toBeTruthy()
     expect(document.querySelector('[data-settings-field="agent-tone"]')).toBeTruthy()
-    expect(screen.getByText(/15\/1000/)).toBeTruthy()
-    expect(screen.getByText(/18\/2000/)).toBeTruthy()
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Code Specialist')
+    // Short text shows no counter; it appears only near the limit.
+    expect(screen.queryByText(/15\/1000/)).toBeNull()
     expect(screen.getByText('turns')).toBeTruthy()
 
     // Compaction input commits on blur (Enter blurs in the browser)
@@ -1776,12 +2076,12 @@ describe('settings', () => {
     })
 
     // Voice Section
-    fireEvent.click(screen.getByRole('button', { name: /^Voice$/i }))
+    openSection('Voice')
     await waitFor(() => expect(window.vyotiq.dictationStatus).toHaveBeenCalled())
-    expect(screen.getByText('Local Whisper models')).toBeTruthy()
+    expect(screen.getByText('Dictation')).toBeTruthy()
     await waitFor(() => {
       const smallField = document.querySelector('[data-settings-field="dictation-whisper-small"]')
-      expect(smallField?.textContent).toMatch(/Recommended for this PC/)
+      expect(smallField?.textContent).toMatch(/recommended for this PC/)
     })
   })
 
@@ -1798,14 +2098,12 @@ describe('settings', () => {
       loadedModelId: null
     }
     let pushStatus: ((s: Record<string, unknown>) => void) | undefined
-    // @ts-expect-error test bridge
     window.vyotiq.dictationStatus = vi.fn(async () => ({ ok: true as const, data: status }))
     // @ts-expect-error test bridge
     window.vyotiq.onDictationStatus = vi.fn((cb: (s: Record<string, unknown>) => void) => {
       pushStatus = cb
       return () => {}
     })
-    // @ts-expect-error test bridge
     window.vyotiq.dictationDeleteCache = vi.fn(async () => ({
       ok: false as const,
       error: 'cache delete boom'
@@ -1820,11 +2118,10 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Voice$/i }))
-    const deleteButton = await waitFor(() =>
-      screen.getByRole('button', { name: /Delete Whisper Tiny cache/i })
-    )
-    fireEvent.click(deleteButton)
+    openSection('Voice')
+    const more = await waitFor(() => screen.getByRole('button', { name: 'More for Whisper Tiny' }))
+    fireEvent.click(more)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete download' }))
     await waitFor(() => expect(screen.getByText('cache delete boom')).toBeTruthy())
     pushStatus?.({ ...status, phase: 'ready' })
     await waitFor(() => expect(screen.getByText(/Ready · on disk/i)).toBeTruthy())
@@ -1844,7 +2141,6 @@ describe('settings', () => {
       loadedModelId: null
     }
     let pushStatus: ((s: Record<string, unknown>) => void) | undefined
-    // @ts-expect-error test bridge
     window.vyotiq.dictationStatus = vi.fn(async () => ({
       ok: false as const,
       error: 'status endpoint down'
@@ -1864,13 +2160,13 @@ describe('settings', () => {
         onClearSecret={vi.fn(async () => ({ ok: true as const }))}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /^Voice$/i }))
+    openSection('Voice')
     await waitFor(() => expect(screen.getByText('status endpoint down')).toBeTruthy())
     pushStatus?.(status)
     await waitFor(() => expect(screen.queryByText('status endpoint down')).toBeNull())
   })
 
-  it('General section shows the Navigation choice with Home page selected by default', () => {
+  it('General section opens on Home by default', () => {
     render(
       <SettingsView
         settings={baseSettings}
@@ -1882,13 +2178,12 @@ describe('settings', () => {
       />
     )
     expect(document.querySelector('[data-settings-field="navigation"]')).toBeTruthy()
-    const home = screen.getByRole('button', { name: 'Home page' }) as HTMLButtonElement
-    const chat = screen.getByRole('button', { name: 'Sidebar' }) as HTMLButtonElement
-    expect(home.getAttribute('aria-pressed')).toBe('true')
-    expect(chat.getAttribute('aria-pressed')).toBe('false')
+    const launch = screen.getByRole('radiogroup', { name: 'Open on launch' })
+    expect(within(launch).getByRole('radio', { name: 'Home' }).getAttribute('aria-checked')).toBe('true')
+    expect(within(launch).getByRole('radio', { name: 'Last task' }).getAttribute('aria-checked')).toBe('false')
   })
 
-  it('Navigation choice persists through onUpdate', async () => {
+  it('Open on launch persists through onUpdate', async () => {
     const onUpdate = vi.fn(async () => ({ ok: true as const }))
     function Harness() {
       const [settings, setSettings] = useState<Settings>(baseSettings)
@@ -1907,13 +2202,13 @@ describe('settings', () => {
       )
     }
     render(<Harness />)
-    const chat = screen.getByRole('button', { name: 'Sidebar' }) as HTMLButtonElement
-    expect((screen.getByRole('button', { name: 'Home page' }) as HTMLButtonElement).getAttribute('aria-pressed')).toBe('true')
-    fireEvent.click(chat)
+    const radio = (name: string) => screen.getByRole('radio', { name })
+    expect(radio('Home').getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(radio('Last task'))
     await waitFor(() =>
       expect(onUpdate).toHaveBeenCalledWith({ navigationMode: 'sidebar' })
     )
-    await waitFor(() => expect(chat.getAttribute('aria-pressed')).toBe('true'))
-    expect((screen.getByRole('button', { name: 'Home page' }) as HTMLButtonElement).getAttribute('aria-pressed')).toBe('false')
+    await waitFor(() => expect(radio('Last task').getAttribute('aria-checked')).toBe('true'))
+    expect(radio('Home').getAttribute('aria-checked')).toBe('false')
   })
 })

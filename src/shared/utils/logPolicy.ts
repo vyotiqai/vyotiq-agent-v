@@ -76,11 +76,44 @@ export const ALLOWED_LOG_FIELD_KEYS = new Set([
   'retryAfterMs',
   /** Live/batch queue backpressure counters (event counts, never content). */
   'dropped',
-  'queued'
+  'queued',
+  /**
+   * Byte and token counters. Omitting them left the lines that exist only to
+   * report a size — retention evictions, the system-prompt budget squeeze —
+   * logging a sentence and no number.
+   */
+  'bytes',
+  'systemBudget',
+  'planTokens',
+  'reserve',
+  /** MCP transport kind (`stdio` / `http` / `sse`), never a URL or command. */
+  'transport'
 ])
+
+/**
+ * Numbers and booleans cannot carry a path, tool argument, chat text or file
+ * name, so they pass under any code-shaped key without being allowlisted.
+ * Requiring each counter by name silently stripped the numbers from lines that
+ * exist to report them: `Code index warm sync` kept `removed` and lost
+ * scanned/indexed/skipped, `MCP server connected` lost every count, and the
+ * run usage summary lost its tokens and cost. The key must still look like an
+ * identifier, so a key spread in from user data (`{ 'src/payroll.ts': 3 }`) is
+ * dropped with its value.
+ */
+const COUNTER_KEY = /^[a-z][A-Za-z0-9]*$/
 
 const PATH_IN_TEXT =
   /(?:[A-Za-z]:\\|\\\\|\/(?:Users|home|root|tmp|var)\/)[^\s"',})\]]+/g
+
+/**
+ * Workspace-relative paths, which absolute-only scrubbing let straight through:
+ * run 874dad8f wrote `aether/agentsd/src/config.rs` to disk verbatim. Requires
+ * at least one `/` plus a file extension so directory-shaped identifiers
+ * (`agent/events`) survive, and the lookbehind keeps URLs intact — a match can
+ * never begin right after `/`, `:` or `.`, so no span inside
+ * `https://host/a/b.js` qualifies.
+ */
+const RELATIVE_PATH_IN_TEXT = /(?<![\w:/.-])(?:[\w.@-]+\/)+[\w.@-]+\.[A-Za-z]\w{0,7}\b/g
 
 const USER_DATA_PREFIX =
   /^(?:File not found|Not a file|Path is a directory|Path escapes workspace|Binary file detected|Invalid memory path|Unsupported Unix command)[:\s].+/i
@@ -115,6 +148,10 @@ export function logErrorSummary(err: unknown, code?: string): string {
 export function sanitizeLogMessage(message: string): string {
   let out = scrubString(message)
   out = out.replace(PATH_IN_TEXT, '[path]')
+  out = out.replace(RELATIVE_PATH_IN_TEXT, '[path]')
+  // One entry per line: a multi-line message (a diff hunk's expected-context
+  // preview) would otherwise write file content as untagged log lines.
+  out = out.replace(/\s*[\r\n]+\s*/g, ' ').trim()
   if (USER_DATA_PREFIX.test(out)) {
     const label = out.split(':')[0]?.trim() ?? 'Error'
     out = `${label}: [redacted]`
@@ -172,7 +209,12 @@ export function sanitizeLogFields(fields?: PolicyLogFields): PolicyLogFields | u
   if (!fields) return undefined
   const out: PolicyLogFields = {}
   for (const [key, value] of Object.entries(fields)) {
-    if (!ALLOWED_LOG_FIELD_KEYS.has(key)) continue
+    if (!ALLOWED_LOG_FIELD_KEYS.has(key)) {
+      if ((typeof value === 'number' || typeof value === 'boolean') && COUNTER_KEY.test(key)) {
+        out[key] = value
+      }
+      continue
+    }
     if (key === 'err') {
       const sanitized = sanitizeErrorForLog(value)
       if (sanitized) out.err = sanitized

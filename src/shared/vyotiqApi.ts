@@ -24,6 +24,8 @@ import type {
   DeepLinkPayload,
   ResolveWritesResult,
   ReadRunArtifactResult,
+  TaskFileStatsResult,
+  TaskFileDiffResult,
   RunArtifactName,
   RunStatsResult,
   HomeActivityResult,
@@ -38,6 +40,9 @@ import type {
   GitGenerateCommitMessageResult,
   GitStatusChangedPayload,
   GitStatusResult,
+  GitBranchDiffResult,
+  GitInitRequest,
+  GitInitResult,
   IpcResult,
   ListModelsResult,
   ListRunsResult,
@@ -71,6 +76,7 @@ import type {
   FeedbackComposeResult,
   WorkspaceAgentContextRequest,
   WorkspaceAgentContextResult,
+  WorkspaceAgentContextChanged,
   WorkspaceGrepRequest,
   WorkspaceGrepResult,
   GitConflictFileResult,
@@ -110,6 +116,13 @@ import type {
   WorkspacesState,
   WorkspaceUiState,
   ComposerAttachmentsClearRequest,
+  TaskDraft,
+  RewindRedoStatus,
+  TaskWorktree,
+  TaskWorktreeInfo,
+  TaskWorktreeMergeResult,
+  TaskDraftSaveRequest,
+  TaskDraftsListResult,
   ComposerAttachmentsGetResult,
   ComposerAttachmentsSetRequest,
   WorkspaceFileListRequest,
@@ -141,6 +154,7 @@ import type {
   WorkspaceEditorRecoveryClearRequest,
   SlashCommandDescriptor,
   SlashCommandResolveResult,
+  SlashMcpServer,
   SlashCommandsCreateRuleResult,
   SlashCommandsCreateSkillResult,
   LocalSkillItem,
@@ -179,8 +193,35 @@ export interface VyotiqFeedbackApi {
  */
 export interface VyotiqApi {
   platform: HostPlatform
+  /** A dropped file's (or folder's) path on disk; '' for one that has none. */
+  pathForFile: (file: File) => string
   pickWorkspace: () => Promise<IpcResult<string | null>>
   getWorkspaces: () => Promise<IpcResult<WorkspacesState>>
+  /**
+   * The app's own scratch folder under its data directory. Main opens it
+   * whenever no project folder is open, so a task always has somewhere to run.
+   */
+  getHomeWorkspacePath: () => Promise<IpcResult<string>>
+  /** New task briefs put aside with Save as draft, newest first. */
+  listTaskDrafts: (workspacePath: string) => Promise<IpcResult<TaskDraftsListResult>>
+  /** Save a draft, or update the one named by `id`. */
+  saveTaskDraft: (payload: TaskDraftSaveRequest) => Promise<IpcResult<TaskDraft>>
+  /** True when there was a draft to remove. */
+  deleteTaskDraft: (workspacePath: string, id: string) => Promise<IpcResult<boolean>>
+  /** Whether the task's last rewind can still be redone. */
+  rewindRedoStatus: (workspacePath: string, runId: string) => Promise<IpcResult<RewindRedoStatus>>
+  /** Bring back what the last rewind took — the record and the files — while nothing has changed since. */
+  redoRewind: (workspacePath: string, runId: string) => Promise<IpcResult<{ messages: ChatMessage[] }>>
+  /** Branch the workspace's current branch into a new worktree, named from the brief. */
+  createTaskWorktree: (workspacePath: string, brief: string) => Promise<IpcResult<TaskWorktree>>
+  /** The task worktree this workspace is, as it stands now; null when it is not one. */
+  taskWorktreeInfo: (workspacePath: string) => Promise<IpcResult<TaskWorktreeInfo | null>>
+  /** Commit what is left (under `message`), then merge the branch into the one it came from. */
+  mergeTaskWorktree: (workspacePath: string, message: string) => Promise<IpcResult<TaskWorktreeMergeResult>>
+  /** Delete the worktree's folder and branch. Close its workspace first. */
+  discardTaskWorktree: (workspacePath: string) => Promise<IpcResult<true>>
+  /** Settings as just written, by the renderer or by main itself. */
+  onSettingsChanged: (handler: (settings: Settings) => void) => () => void
   addWorkspace: (path?: string) => Promise<IpcResult<WorkspacesState>>
   removeWorkspace: (
     path: string,
@@ -262,6 +303,20 @@ export interface VyotiqApi {
     runId: string
     name: RunArtifactName
   }) => Promise<IpcResult<ReadRunArtifactResult>>
+  /** Open plan.md / contract.md in the OS editor (they live outside the workspace). */
+  openRunArtifact: (payload: {
+    workspacePath: string
+    runId: string
+    name: 'plan.md' | 'contract.md'
+  }) => Promise<IpcResult<true>>
+  /** Each file the task wrote, its first before-image against the file now; counts exact or absent. */
+  taskFileStats: (payload: { workspacePath: string; runId: string }) => Promise<IpcResult<TaskFileStatsResult>>
+  /** One file the task wrote, as `git diff` would print it. */
+  taskFileDiff: (payload: {
+    workspacePath: string
+    runId: string
+    path: string
+  }) => Promise<IpcResult<TaskFileDiffResult>>
   runStats: (payload: {
     workspacePath: string
     runIds: string[]
@@ -369,9 +424,16 @@ export interface VyotiqApi {
   listActiveRuns: () => Promise<IpcResult<ActiveRunsResult>>
   /** Discriminated: ok | not_repo | unavailable (git missing from PATH). */
   gitStatus: (workspacePath: string) => Promise<IpcResult<GitStatusResult>>
+  /**
+   * `git init` in an open workspace. Manual only — the UI calls this from an
+   * explicit button, never on open and never for the agent.
+   */
+  gitInit: (payload: GitInitRequest) => Promise<IpcResult<GitInitResult>>
   gitGenerateCommitMessage: (payload: {
     workspacePath: string
     mode?: 'all' | 'staged'
+    /** Write a new message even when this exact diff already has one. */
+    force?: boolean
   }) => Promise<IpcResult<GitGenerateCommitMessageResult>>
   gitCommit: (
     workspacePath: string,
@@ -403,6 +465,8 @@ export interface VyotiqApi {
     workspacePath: string
     sha: string
   }) => Promise<IpcResult<{ files: import('./ipc').GitChangedFile[] }>>
+  /** What the branch changed since it left its base, uncommitted work included. */
+  gitBranchDiff: (workspacePath: string) => Promise<IpcResult<GitBranchDiffResult>>
   gitDiff: (payload: {
     workspacePath: string
     path?: string
@@ -433,6 +497,11 @@ export interface VyotiqApi {
     number: number
   }) => Promise<IpcResult<{ content: string }>>
   prClose: (
+    workspacePath: string,
+    number: number
+  ) => Promise<IpcResult<{ detail: string }>>
+  /** A draft pull request becomes ready for review (`gh pr ready`). */
+  prReady: (
     workspacePath: string,
     number: number
   ) => Promise<IpcResult<{ detail: string }>>
@@ -502,37 +571,6 @@ export interface VyotiqApi {
   }) => Promise<IpcResult<{ cleared: 'history' | 'cookies' | 'cache' | 'all' }>>
   /** Toggle the floating always-on-top PiP window hosting the live browser view. */
   browserPipToggle: () => Promise<IpcResult<{ pip: boolean }>>
-  agentProfilesList: () => Promise<IpcResult<import('./ipc').AgentProfile[]>>
-  agentProfilesCreate: (
-    profile: import('./ipc').AgentProfileCreateRequest
-  ) => Promise<IpcResult<import('./ipc').AgentProfile>>
-  agentProfilesUpdate: (
-    payload: import('./ipc').AgentProfileUpdateRequest
-  ) => Promise<IpcResult<import('./ipc').AgentProfile>>
-  agentProfilesDelete: (
-    payload: import('./ipc').AgentProfileDeleteRequest
-  ) => Promise<IpcResult<import('./ipc').AgentProfileDeleteResult>>
-  onAgentProfilesChanged: (
-    handler: (event: import('./ipc').AgentProfilesChangedEvent) => void
-  ) => () => void
-  agentProfileOverridesList: (
-    payload: import('./ipc').AgentProfileOverridesListRequest
-  ) => Promise<IpcResult<import('./ipc').AgentProfileOverridesResult>>
-  agentProfileOverrideSet: (
-    payload: import('./ipc').AgentProfileOverrideSetRequest
-  ) => Promise<IpcResult<import('./ipc').AgentProfileOverride | null>>
-  onAgentProfileOverridesChanged: (
-    handler: (event: import('./ipc').AgentProfileOverridesChangedEvent) => void
-  ) => () => void
-  tasksList: () => Promise<IpcResult<import('./ipc').DelegatedTask[]>>
-  tasksEnqueue: (
-    payload: import('./ipc').TaskEnqueueRequest
-  ) => Promise<IpcResult<import('./ipc').DelegatedTask>>
-  tasksCancel: (payload: import('./ipc').TaskCancelRequest) => Promise<IpcResult<boolean>>
-  tasksRetry: (
-    payload: import('./ipc').TaskRetryRequest
-  ) => Promise<IpcResult<import('./ipc').DelegatedTask>>
-  onTasksChanged: (handler: (event: import('./ipc').TasksChangedEvent) => void) => () => void
   openLogsDir: () => Promise<IpcResult<true>>
   getLogsPath: () => Promise<IpcResult<string>>
   getCrashDiagnostics: () => Promise<IpcResult<CrashDiagnosticsSnapshot>>
@@ -569,7 +607,11 @@ export interface VyotiqApi {
     body?: string
   }) => Promise<IpcResult<GithubIssueCreateResult>>
   mcpStatus: (payload?: { workspacePath?: string | null }) => Promise<IpcResult<McpStatusResult>>
-  mcpRefresh: (payload?: { workspacePath?: string | null }) => Promise<IpcResult<McpStatusResult>>
+  /** `failedOnly` retries the servers that failed to connect and leaves live ones up. */
+  mcpRefresh: (payload?: {
+    workspacePath?: string | null
+    failedOnly?: boolean
+  }) => Promise<IpcResult<McpStatusResult>>
   toolsCatalogGet: (payload?: ToolCatalogRequest) => Promise<IpcResult<ToolCatalogResult>>
   mcpSetAuthToken: (serverId: string, token: string) => Promise<IpcResult<true>>
   mcpClearAuthToken: (serverId: string) => Promise<IpcResult<true>>
@@ -622,7 +664,7 @@ export interface VyotiqApi {
   marketplaceAckRemoteInstall: (acked: boolean) => Promise<IpcResult<Settings>>
   slashCommandsList: (payload?: {
     workspacePath?: string | null
-  }) => Promise<IpcResult<{ commands: SlashCommandDescriptor[] }>>
+  }) => Promise<IpcResult<{ commands: SlashCommandDescriptor[]; mcpServers?: SlashMcpServer[] }>>
   slashCommandsResolve: (payload: {
     id: string
     workspacePath?: string | null
@@ -745,11 +787,23 @@ export interface VyotiqApi {
   agentContext: (payload: WorkspaceAgentContextRequest) => Promise<
     IpcResult<WorkspaceAgentContextResult>
   >
+  /**
+   * Live push: a watched workspace's agent-context summary changed on disk
+   * (branch, rules, memory notes) or the code index changed phase. Only fires
+   * on a real difference, and only for workspaces `agentContext` was read for.
+   */
+  onAgentContextChanged: (
+    handler: (payload: WorkspaceAgentContextChanged) => void
+  ) => () => void
   /** Local codebase index embedder / download status. */
   codeIndexStatus: () => Promise<
     IpcResult<CodeIndexRuntimeStatus & { settings: CodeIndexSettings }>
   >
   /** Force re-sync of the active workspace code index. */
+  /** Stop this workspace's indexing now and keep it stopped until resumed. */
+  codeIndexPause: (workspacePath: string) => Promise<IpcResult<true>>
+  /** Clear the pause and carry on indexing from what is already there. */
+  codeIndexResume: (workspacePath: string) => Promise<IpcResult<true>>
   codeIndexReindex: (payload?: { workspacePath?: string }) => Promise<
     IpcResult<{ scanned: number; indexed: number; skipped: number; removed: number } | null>
   >

@@ -1,17 +1,6 @@
 /** Shared horizontal gutter for chat column surfaces. */
 export const CHAT_GUTTER = 'px-4 sm:px-5'
 
-/** Settings/marketplace body gutter — matches {@link CHAT_GUTTER}. */
-export const SETTINGS_GUTTER = CHAT_GUTTER
-
-/**
- * Horizontal inset for the docked chat stage (transcript only — the composer
- * is floating edge-to-edge). Left matches {@link CHAT_GUTTER}; right clears the
- * floating side rail (`w-10`) so content never sits under the icon strip while
- * the scrollbar stays edge-flush.
- */
-export const CHAT_STAGE_INSET = 'pl-4 pr-10 sm:pl-5'
-
 /**
  * Top inset for chat stage surfaces that carry no sticky child.
  *
@@ -29,55 +18,27 @@ export const CHAT_STAGE_TOP_INSET = 'pt-4'
  */
 export const CHAT_STAGE_TOP_SPACER = 'h-4'
 
-/**
- * Top edge of the floating chat side rail.
- *
- * The rail is pinned to the top-right corner — the corner the Windows/Linux
- * caption buttons own — so it must clear the whole title bar
- * ({@link TITLE_BAR_HEIGHT_PX}), not just the stage's 16px
- * ({@link CHAT_STAGE_TOP_INSET}). At `pt-4` the Files button started 18px down
- * while Close owned the top 36px, so Close covered two thirds of it: the strip
- * read as colliding with the window controls and most of Files was unclickable.
- * `top-10` leaves the 36px bar plus a 4px gap.
- */
-export const CHAT_SIDE_RAIL_TOP_INSET = 'top-10'
-
-/** Width of the floating chat side rail (icon strip) in pixels (`w-10`). */
-export const CHAT_SIDE_RAIL_WIDTH_PX = 40
-
-/** Width of the floating chat side rail (icon strip). */
-export const CHAT_SIDE_RAIL_WIDTH = 'w-10'
-
-/**
- * Shared shell for docked right chat panels (width applied via inline style).
- * No `pr-10`: the floating side rail is hidden while the dock is open.
- * `min-w-0` lets the flex child shrink instead of overflowing the chat row.
- */
-export const CHAT_RIGHT_PANEL =
-  'flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden border-l border-border/50 bg-bg'
-
 /** Minimum chat column width reserved when clamping the side dock. */
 export const CHAT_COLUMN_MIN_USABLE_PX = 280
 
 /** Absolute ceiling on simultaneously visible chat panes, even on ultrawide viewports. */
 export const MAX_CHAT_PANES_HARD_CAP = 6
 
-/** Default / clamp bounds for the right dock (px). */
-/** 400 leaves a usable chat column beside the default sidebar (~220). */
-export const DOCK_WIDTH_DEFAULT_PX = 400
+/**
+ * Default / clamp bounds for the inspector (px). 452 is the redesign's width:
+ * beside the 264px navigator it leaves a 724px record in a 1440px window.
+ */
+export const DOCK_WIDTH_DEFAULT_PX = 452
 export const DOCK_WIDTH_MIN_PX = 280
 export const DOCK_WIDTH_MAX_PX = 960
 
-/**
- * localStorage key for immersive dock mode (unified Agent + panel tabs).
- * Legacy values meant “wide side dock”; readers treat `'1'` as immersive.
- */
-export const DOCK_EXPANDED_KEY = 'vyotiq.dockExpanded'
+/** localStorage key for whether the inspector is shown (it is, by default). */
+export const INSPECTOR_OPEN_KEY = 'vyotiq.inspectorOpen'
 
-/** localStorage key for which immersive tab is focused (`agent` or a panel id). */
-export const IMMERSIVE_TAB_KEY = 'vyotiq.immersiveTab'
+/** localStorage key for the inspector taking the whole work area. */
+export const INSPECTOR_EXPANDED_KEY = 'vyotiq.inspectorExpanded'
 
-/** localStorage key for right-dock width in px. */
+/** localStorage key for the inspector's width in px. */
 export const DOCK_WIDTH_KEY = 'vyotiq.dockWidth'
 
 /** Shared max width for chat column content (messages + composer). */
@@ -87,15 +48,21 @@ export const CHAT_COLUMN_MAX = 'max-w-[840px]'
 export const CHAT_COLUMN = `mx-auto w-full ${CHAT_COLUMN_MAX}`
 
 /**
- * Floating edge-to-edge composer dock — overlays the chat stage bottom with a
- * small gap so the shell's rounded border never reads as clipped by the window
- * edge. Anchors to the nearest positioned ancestor (`[data-chat-stage]`); the
- * shell keeps `pointer-events-auto` so the wrapper never blocks the transcript.
+ * Floating edge-to-edge composer dock — overlays the chat stage bottom.
+ * Anchors to the nearest positioned ancestor (`[data-chat-stage]`); the shell
+ * keeps `pointer-events-auto` so the wrapper never blocks the transcript, not
+ * even under {@link COMPOSER_DOCK_COVER}'s fade.
  */
-export const COMPOSER_FLOAT_DOCK = 'pointer-events-none absolute inset-x-0 bottom-2 z-20'
+export const COMPOSER_FLOAT_DOCK = 'pointer-events-none absolute inset-x-0 bottom-0 z-20'
 
-/** Gap between the floating composer shell and the pane bottom (`bottom-2`). */
-export const COMPOSER_FLOAT_BOTTOM_INSET_PX = 8
+/**
+ * Cover on the dock's centered column. `pb-2` is the gap under the shell, so
+ * its rounded border never reads as clipped by the window edge; `pt-4` is the
+ * strip rows fade out across on their way under the shell (the `1rem` in
+ * `vy-composer-dock-cover`). Both sit inside the measured dock height, so the
+ * transcript's reserve covers them and the last row rests above the fade.
+ */
+export const COMPOSER_DOCK_COVER = 'vy-composer-dock-cover pt-4 pb-2'
 
 /**
  * Scroll-clipped dock body — reserves the same scrollbar gutter as the
@@ -108,19 +75,14 @@ export const COMPOSER_FLOAT_BODY =
 /**
  * CSS variable the floating composer publishes its measured height to (on the
  * chat stage root); MessageList reserves that height so the last transcript
- * row can scroll fully clear of the bar.
+ * row can scroll fully clear of the bar. The height includes the dock cover's
+ * fade, which doubles as the clearance above the shell.
  */
 export const COMPOSER_DOCK_RESERVE_VAR = '--vy-composer-dock-height'
 
 /**
- * Extra clearance so the last transcript row sits fully above the reserved
- * dock when scrolled to the bottom (not just flush with its edge).
- */
-export const COMPOSER_DOCK_CLEARANCE_PX = 12
-
-/**
  * Extra bottom reserve while a run is live so streaming rows stay clear of a
- * reserved dock; idle chats keep only {@link COMPOSER_DOCK_CLEARANCE_PX}.
+ * reserved dock; idle chats keep only the dock cover's fade.
  */
 export const COMPOSER_DOCK_LIVE_CLEARANCE_PX = 16
 
@@ -132,15 +94,6 @@ export const COMPOSER_TEXTAREA_MAX_PX = 280
 
 /** Tailwind max-height matching `COMPOSER_TEXTAREA_MAX_PX`. */
 export const COMPOSER_TEXTAREA_MAX_CLASS = 'max-h-[280px]'
-
-/** Settings sidebar width (sm+). */
-export const SETTINGS_NAV_WIDTH = 'sm:w-[220px]'
-
-/** Shared max width for settings content column. */
-export const SETTINGS_COLUMN_MAX = 'max-w-[680px]'
-
-/** Settings content column — left-aligned beside the section nav. */
-export const SETTINGS_COLUMN = `w-full ${SETTINGS_COLUMN_MAX}`
 
 /** Shared max width for marketplace content column. */
 export const MARKETPLACE_COLUMN_MAX = 'max-w-[1040px]'
@@ -184,17 +137,31 @@ export const USER_PROMPT_TEXT =
 export const USER_PROMPT_SURFACE = `w-full rounded-[var(--vy-radius-xl)] border border-border px-3 py-2 ${USER_PROMPT_TEXT}`
 
 /**
- * Compact vertical rhythm of the pinned turn-prompt stack (prompt + tasks band).
- * The page-colored cover prevents transcript rows from bleeding into the stack
- * without a gradient or shadow-like edge.
+ * Horizontal inset of a row set under the prompt bubble (the tasks band): the
+ * bubble's own border width and padding, with the border left transparent, so
+ * the row starts on the prompt text's left edge and ends on its right one.
  */
-export const TURN_PROMPT_STACK = 'py-2.5'
+export const USER_PROMPT_INSET = 'border-x border-transparent px-3'
+
+/**
+ * Lines of a user prompt shown before it folds behind Show more. Every turn
+ * prompt pins while its turn is on screen, so this is also how much of the
+ * work beneath the pinned stack covers.
+ */
+export const USER_PROMPT_CLAMP_LINES = 2
+
+/**
+ * Vertical rhythm of the turn-prompt stack (prompt + tasks band). The bottom
+ * padding doubles as the pinned cover's fade (`vy-turn-prompt-cover` in
+ * styles.css), so the two change together.
+ */
+export const TURN_PROMPT_STACK = 'pt-2.5 pb-4'
 
 /**
  * Pinned state of {@link TURN_PROMPT_STACK}: flush with the scrollport's top
- * edge (see {@link CHAT_STAGE_TOP_SPACER}) over an opaque page-colored cover,
- * so transcript rows cannot bleed into the pinned content. No gradient or
- * shadow is applied.
+ * edge (see {@link CHAT_STAGE_TOP_SPACER}) over a page-colored cover. Rows
+ * scrolling beneath dissolve across its bottom padding instead of meeting a
+ * hard edge; nothing shows through behind the prompt or the tasks band.
  */
 export const TURN_PROMPT_STACK_PINNED = 'sticky top-0 z-sticky vy-turn-prompt-cover'
 
@@ -217,14 +184,17 @@ export const TOOL_CARD_SURFACE =
   'overflow-hidden rounded-lg border border-border'
 export const TOOL_CARD_HEADER = 'px-3 py-2 text-xs'
 /** Body content owns its own padding so a diff can run edge to edge. */
-export const TOOL_CARD_BODY = 'overflow-hidden border-t border-border bg-surface'
+export const TOOL_CARD_BODY = 'overflow-hidden border-t border-border/40 bg-surface'
 
 /** Ask-question gate — quiet panel, not bordered tool-card chrome. */
-export const QUESTION_GATE_SURFACE =
-  'overflow-hidden rounded-md border-l-2 border-l-accent/60 bg-surface/60'
-export const QUESTION_GATE_HEADER = 'flex items-center gap-2 px-3 pt-2.5 pb-1 text-xs text-fg'
-export const QUESTION_GATE_BODY = 'px-3 py-2'
-export const QUESTION_GATE_FOOTER = 'flex items-center gap-2 px-3 pb-2.5 pt-1'
+/**
+ * The needs-you frame: the one accent block in a record. An accent outline,
+ * a tinted 32px header, then the ask. Shared by questions and approvals.
+ */
+export const QUESTION_GATE_SURFACE = 'overflow-hidden rounded-lg border border-accent bg-bg'
+export const QUESTION_GATE_HEADER = 'flex h-8 items-center gap-2 bg-accent-soft px-3 text-xs'
+export const QUESTION_GATE_BODY = 'px-3 py-3'
+export const QUESTION_GATE_FOOTER = 'flex items-center gap-1.5 px-3 pb-3'
 
 /** Collapsed tool body height before fade mask (virtualizer estimate). */
 export const TOOL_BODY_CLAMP_PX = 168
@@ -269,33 +239,15 @@ export const TOOL_FAMILY_DELETE = 'border-l-2 border-danger/50 pl-2'
 /** Subtle surface shared by the in-flow docked composer. */
 export const FLOATING_CHROME = 'vy-chrome bg-[var(--vy-chrome-surface)] motion-reduce:animate-none'
 
-/** App chrome dimensions — sidebar header row aligns with title bar height. */
-export const SIDEBAR_WIDTH_PX = 248
-export const SIDEBAR_WIDTH_MIN_PX = 180
+/**
+ * The navigator column (it replaced the sidebar; the names stay so the pane
+ * capacity maths keeps one vocabulary). 264 is the redesign's width.
+ */
+export const SIDEBAR_WIDTH_PX = 264
+export const SIDEBAR_WIDTH_MIN_PX = 220
 export const SIDEBAR_WIDTH_MAX_PX = 420
-export const SIDEBAR_COLLAPSED_WIDTH_PX = 44
-/** Wider collapsed rail on macOS so the toggle clears traffic lights. */
-export const SIDEBAR_COLLAPSED_WIDTH_DARWIN_PX = 72
 export const TITLE_BAR_HEIGHT = 'h-9'
 export const TITLE_BAR_HEIGHT_PX = 36
-
-/**
- * Bottom status bar — the Agent V working indicator and the run it belongs to.
- * Deliberately shorter than {@link TITLE_BAR_HEIGHT}: it is a reading surface,
- * not a hit target, and the chat stage is already tight for vertical room.
- */
-export const STATUS_BAR_HEIGHT = 'h-6'
-export const STATUS_BAR_HEIGHT_PX = 24
-
-/**
- * Windows/Linux caption-button strip width (3 × `sm:w-11` = 132px).
- * Side-dock titlebar tabs shrink by this so their left edge lines up with the
- * dock column while controls stay a TitleBar sibling (no absolute overlay).
- */
-export const WINDOW_CONTROLS_WIDTH_PX = 132
-
-/** Right padding for titlebar-embedded dock actions (Add panel / expand). */
-export const TITLEBAR_ACTIONS_PAD = 'pr-2'
 
 /** True when the shell draws custom min/max/close (Win/Linux; also jsdom fallback). */
 export function showsWindowControls(
@@ -306,23 +258,8 @@ export function showsWindowControls(
   return platform === 'win32' || platform === 'linux' || !platform
 }
 
-/**
- * Width class names must be complete static strings so Tailwind can emit them.
- * Template-interpolated `w-[${n}px]` is invisible to the scanner and never ships.
- * Expanded desktop width is applied via inline style so it can be drag-resized.
- */
-export const SIDEBAR_WIDTH = 'w-[min(248px,92vw)]'
-export const SIDEBAR_WIDTH_COLLAPSED = 'w-[44px]'
-export const SIDEBAR_WIDTH_COLLAPSED_DARWIN = 'w-[72px]'
-
-/** Named container — children use `@sidebar/…` for width-aware density. */
-export const SIDEBAR_CONTAINER = '@container/sidebar'
-
 /** Transcript scrollport — floating tasks use `@transcript/…` to sit beside the Plan rail. */
 export const TRANSCRIPT_CONTAINER = '@container/transcript'
-
-/** Sidebar shell — same surface as main column, no elevated chrome. */
-export const SIDEBAR_SURFACE = 'bg-transparent'
 
 /** Quiet micro copy — dense panels, git chrome, dock toolbars. */
 export const MICRO_LABEL =
@@ -332,105 +269,88 @@ export const MICRO_LABEL =
 export const MICRO_LABEL_CAPS =
   'text-2xs font-medium uppercase tracking-[var(--vy-tracking-caps)] text-secondary'
 
-/** Sidebar section label — quiet category headers. */
-export const SIDEBAR_SECTION_LABEL = `m-0 px-1 ${MICRO_LABEL}`
-
-/** Horizontal padding for sidebar list body. */
-export const SIDEBAR_PAD_X = 'px-2'
-
-/**
- * Sidebar toolbar row — collapse + new chat; same {@link TITLE_BAR_HEIGHT} as main title bar.
- */
-export const SIDEBAR_TOOLBAR_ROW = `app-region-drag flex items-center gap-0.5 px-2 ${TITLE_BAR_HEIGHT}`
-
-/** Search field row below the sidebar toolbar. */
-export const SIDEBAR_SEARCH_ROW = 'app-region-no-drag min-w-0 px-2 pb-2'
-
-/** Workspace group inside the chat list — flat, no nested card chrome. */
-export const SIDEBAR_WORKSPACE_GROUP = 'flex flex-col gap-0.5'
-
-/** Indent for chat rows nested under a workspace header. */
-export const SIDEBAR_INDENT = 'pl-1'
-
-/**
- * Active-state rules (pick one per surface; do not mix within a list):
- * - {@link SIDEBAR_ROW_ACTIVE} — scrollable lists (chat rows): left accent bar, no fill.
- * - {@link SIDEBAR_NAV_ACTIVE} — sparse footer/toolbar nav: filled surface + inset ring.
- * - {@link SIDEBAR_WORKSPACE_ROW_ACTIVE} — group headers: text emphasis only.
- */
-
 /** Filled ring active state — sidebar footer nav, dock tabs, marketplace tabs. */
 export const SIDEBAR_NAV_ACTIVE =
   'bg-surface text-fg-strong ring-1 ring-inset ring-border/50'
 
-/** Shared row chrome for chat rows — left accent on active. */
-export const SIDEBAR_ROW =
-  'rounded-lg px-2 py-1.5 text-sm leading-normal border-l-2 border-l-transparent'
-
-/** Workspace header row inside a card — no left accent bar. */
-export const SIDEBAR_WORKSPACE_ROW = 'rounded-lg px-1.5 py-1.5 text-sm leading-normal'
-
-/** Active workspace header row — text emphasis only, no fill chrome. */
-export const SIDEBAR_WORKSPACE_ROW_ACTIVE = 'text-fg-strong font-medium'
-
-/** Active sidebar row — left accent bar, no fill chrome. */
-export const SIDEBAR_ROW_ACTIVE = 'border-l-fg-strong text-fg-strong font-medium'
-
 /**
- * Session open in a pane but not focused — accent + light fill so multi-open
- * is glanceable beside the focused row.
- */
-export const SIDEBAR_ROW_OPEN =
-  'border-l-fg/55 text-fg bg-surface/20 font-medium'
-
-/** Session in the focused pane — stronger fill + accent. */
-export const SIDEBAR_ROW_FOCUSED =
-  'border-l-fg-strong text-fg-strong bg-surface/45 font-semibold'
-
-/**
- * Right-hand clearance a sidebar row must hold open while its hover actions are
- * showing, so the truncated label ends *before* the icon strip instead of being
- * painted over by it.
+ * Hover fills — three weights, chosen by what sits under the pointer.
  *
- * Sized against the widest cluster any row shows: the delete confirm's two
- * `size-7` buttons plus their `gap-0.5` (58px). The steady-state strips are
- * narrower (two `size-6` buttons + `gap-px` = 49px), so 64px leaves a visible
- * gutter between the ellipsis and the first icon in both states.
- *
- * Applied only while the strip is visible — at rest the row keeps its own
- * padding so the label (and the cost badge that shares that edge) get the full
- * width. `vy-transition` does not animate padding, so the reserve snaps in as
- * the icons fade and the two never overlap mid-transition.
+ * These had grown into eight ad-hoc opacities (25/30/40/50/55/60/70 plus a bare
+ * `bg-surface`) for one affordance, which is the same as having none: a reader
+ * cannot learn what a heavier fill means, because it does not mean anything.
+ * Pick by role, never by how a particular row happens to look.
  */
-export const SIDEBAR_ROW_ACTIONS_RESERVE =
-  'group-hover:pr-16 group-focus-within:pr-16 [@media(hover:none)]:pr-16'
+/**
+ * A row in a scrollable list. Full `bg-surface`: the redesign's panels sit on
+ * `bg-bg`, and `surface` is already only a step off it, so a fractional fill
+ * vanished on four of the ten palettes.
+ */
+export const ROW_HOVER = 'hover:bg-surface'
+/**
+ * A discrete control: button, nav item, tab, icon target. Full strength,
+ * because that is what `Button`/`IconButton`'s `ghost` variants already use —
+ * a control that dims itself below them only looks broken next to one.
+ */
+export const CONTROL_HOVER = 'hover:bg-surface'
+/**
+ * Either of the above where the element already sits on `bg-surface` — there a
+ * `bg-surface` fill is invisible, so the step has to come off `surface-2`, the
+ * way the `subtle` button variants do. One weight covers both roles: the
+ * contrast is already doing the work.
+ */
+export const HOVER_ON_SURFACE = 'hover:bg-surface-2'
 
 /**
- * Same idea as {@link SIDEBAR_ROW_ACTIONS_RESERVE} for a workspace header.
- * Its strip is two `size-6` buttons with `gap-1` (52px), so 56px keeps a
- * gutter after the truncated folder name.
+ * Borders — two weights, and the opacity is the whole distinction.
+ *
+ * Full-strength `border-border` **outlines a thing** (panel, card, menu, input)
+ * and is the house default at ~240 call sites. {@link BORDER_DIVIDER}
+ * **separates two things inside it** (a row from the next, a header from a
+ * body). Anything else invents a weight that has to be re-learned on sight.
+ *
+ * {@link DIVIDER_FILL} is the same grey as a background rather than a border:
+ * a rule drawn as a 1px element, a progress track, a zero-value chart bar.
+ * One value covers all of them — "quiet grey" is a single idea, and the
+ * /40-vs-/50-vs-full spread these had carried no meaning to read.
  */
-export const SIDEBAR_WORKSPACE_ROW_ACTIONS_RESERVE =
-  'group-hover:pr-14 group-focus-within:pr-14 [@media(hover:none)]:pr-14'
+export const BORDER_DIVIDER = 'border-border/60'
+export const DIVIDER_FILL = 'bg-border'
 
-/** Hover surface for sidebar rows. */
-export const SIDEBAR_ROW_HOVER = 'hover:bg-surface/30 hover:text-fg'
+/** Outlines a thing: panel, input, card, menu. Named so the pair reads as a pair. */
+export const BORDER = 'border-border'
 
-/** Hover surface for workspace headers. */
-export const SIDEBAR_WORKSPACE_ROW_HOVER = 'hover:bg-surface/25 hover:text-fg'
+/** The one fill for "this is the one you're on": a selected row, tab or place. */
+export const SELECTED = 'bg-surface-2 text-fg-strong'
+
+/**
+ * Section label: caps, tracked, quiet. One style everywhere — Home, Settings,
+ * the record. Needs you included: its rows carry the accent, so its label stays
+ * as quiet as the rest, which is how the approved mockup renders it.
+ */
+export const SECTION_LABEL = 'text-caption font-semibold uppercase tracking-[var(--vy-tracking-caps)] text-tertiary'
+
+/** Numbers that line up: costs, tokens, durations, counts. */
+export const NUM = 'font-mono tnum text-caption'
+
+/** A page's title. */
+export const PAGE_TITLE = 'text-title font-semibold tracking-[var(--vy-tracking-tight)] text-fg-strong'
+
+/** The record column: one content edge, a readable measure. No label gutter. */
+export const RECORD_MAX = 'max-w-[780px]'
 
 export { RUN_LIST_CAP } from '@shared/domain/runs'
 
-/** localStorage key for desktop sidebar collapse preference. */
+/** localStorage key for the navigator being hidden (Ctrl B). */
 export const SIDEBAR_COLLAPSED_KEY = 'vyotiq.sidebarCollapsed'
 
-/** localStorage key for desktop sidebar width in px. */
-export const SIDEBAR_WIDTH_KEY = 'vyotiq.sidebarWidth'
+/**
+ * localStorage key for the navigator's width in px. A new key: widths saved
+ * for the old 248px sidebar would otherwise pin the navigator below its size.
+ */
+export const SIDEBAR_WIDTH_KEY = 'vyotiq.navigatorWidth'
 
-/** localStorage key for chat agent-browser panel open preference. */
-export const BROWSER_PANEL_OPEN_KEY = 'vyotiq.browserPanelOpen'
-
-/** localStorage key for which chat right panel is open. */
+/** localStorage key for the inspector's last tab. */
 export const RIGHT_PANEL_KEY = 'vyotiq.rightPanel'
 
 export const CHAT_RIGHT_PANEL_IDS = [
@@ -450,9 +370,6 @@ export function isChatRightPanelId(value: string | null | undefined): value is C
   )
 }
 
-/** Immersive unified-tab id for the Agent (timeline + composer) view. */
-export type DockImmersiveTabId = 'agent' | ChatRightPanelId
-
 /** Shared content shell inside the right dock (parent owns CHAT_RIGHT_PANEL + tab bar). */
 export const CHAT_RIGHT_PANEL_BODY =
   'flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden'
@@ -461,9 +378,10 @@ export const CHAT_RIGHT_PANEL_BODY =
 export function readSidebarWidthPxForCapacity(): number {
   if (typeof window === 'undefined') return SIDEBAR_WIDTH_MIN_PX
   try {
-    if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true') {
-      return SIDEBAR_COLLAPSED_WIDTH_PX
-    }
+    // usePersistedBoolean writes '1'/'0'; 'true' is the older spelling. A
+    // hidden navigator takes no width at all — there is no rail behind it.
+    const collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
+    if (collapsed === '1' || collapsed === 'true') return 0
     const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY)
     const n = raw ? Number(raw) : SIDEBAR_WIDTH_PX
     const w = Number.isFinite(n) ? n : SIDEBAR_WIDTH_PX
@@ -482,25 +400,21 @@ export function paneCapacityReservedPx(options?: {
   const sidebar = options?.sidebarWidthPx ?? readSidebarWidthPxForCapacity()
   const dockOpen = options?.dockOpen && (options.dockWidthPx ?? 0) > 0
   const dock = dockOpen ? options!.dockWidthPx! : 0
-  // Side rail overlays the pane edge only while the dock is closed.
-  const rail = dockOpen ? 0 : CHAT_SIDE_RAIL_WIDTH_PX
-  return sidebar + rail + dock
+  return sidebar + dock
 }
 
 /**
- * Clamp dock width so usable chat column(s) remain beside the sidebar.
- * With multiple panes, reserves {@link CHAT_COLUMN_MIN_USABLE_PX} per pane plus side rail.
+ * Clamp the inspector's width so usable task column(s) remain beside the
+ * navigator. With multiple panes, reserves {@link CHAT_COLUMN_MIN_USABLE_PX} per pane.
  */
 export function clampDockWidthPx(
   width: number,
   viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1280,
-  options?: { paneCount?: number; sidebarWidthPx?: number; dockOpen?: boolean }
+  options?: { paneCount?: number; sidebarWidthPx?: number }
 ): number {
   const paneCount = Math.max(1, options?.paneCount ?? 1)
   const sidebar = options?.sidebarWidthPx ?? readSidebarWidthPxForCapacity()
-  const dockOpen = options?.dockOpen ?? true
-  const rail = dockOpen ? 0 : CHAT_SIDE_RAIL_WIDTH_PX
-  const reservedChrome = paneCount * CHAT_COLUMN_MIN_USABLE_PX + sidebar + rail
+  const reservedChrome = paneCount * CHAT_COLUMN_MIN_USABLE_PX + sidebar
   const maxByViewport = Math.max(
     DOCK_WIDTH_MIN_PX,
     Math.min(DOCK_WIDTH_MAX_PX, viewportWidth - reservedChrome)

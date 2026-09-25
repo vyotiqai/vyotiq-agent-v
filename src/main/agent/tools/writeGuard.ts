@@ -55,6 +55,34 @@ export function isRelPathInPathScope(relPath: string, pathScope: string[]): bool
   })
 }
 
+/**
+ * Retired per-profile data root — `.vyotiq/agents/<id>/` holds legacy user
+ * data left on disk after the profiles feature was removed.
+ */
+const RETIRED_AGENT_DATA_PREFIX = '.vyotiq/agents/'
+
+/**
+ * Deny a run reaching into the retired `.vyotiq/agents/` data root.
+ *
+ * `.vyotiq` is in `IGNORED_DIRS`, so glob/grep/search and `list_dir` skip these
+ * files — but `read` resolves its path with `resolveInsideWorkspace` alone and
+ * has no deny list, so a direct path reaches this legacy data. The feature is
+ * gone: nothing in a run has business under `.vyotiq/agents/`, reading or
+ * writing. The user is not restricted — this guard is about run access only.
+ */
+export function assertNotRetiredAgentDataPath(relPaths: readonly string[]): void {
+  for (const rel of relPaths) {
+    const norm = normalizeScopePath(rel.trim())
+    if (!norm) continue
+    const key = process.platform === 'win32' ? norm.toLowerCase() : norm
+    if (!key.startsWith(RETIRED_AGENT_DATA_PREFIX)) continue
+    throw new Error(
+      `Path "${rel.trim()}" is retired per-profile data (.vyotiq/agents/). ` +
+        'This denial will not change on retry — that directory is legacy user data outside run access.'
+    )
+  }
+}
+
 type InlineInstanceGuardOpts = {
   /** When false, skip disk — caller already knows this is not an inline instance. */
   inlineInstance?: boolean

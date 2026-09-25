@@ -1,12 +1,16 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AppShell } from './AppShell'
+import { requestOpenWorkspaceFile } from '@renderer/lib/chat/workspaceFileRequests'
 import { launchViewFor } from './launchView'
 import { needsDraftChatAfterWorkspaceAdd } from './workspaceAddHandoff'
 import { pinnedRunKey, prunePinnedRun, togglePinnedRun } from '../features/home/pinnedRuns'
+import { requestNavigatorScope } from './navigator/useNavigatorScope'
+import { requestUpdatePanel } from './navigator/UpdateChip'
 import { ChatView } from '../features/chat/ChatView'
 import { SessionChatColumn } from '../features/chat/SessionChatColumn'
 import { AgentInstancePane } from '../features/chat/components/AgentInstancePane'
-import { runTitle } from './sidebar/runTitle'
+import { runTitle } from './navigator/runTitle'
+import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import type { ChatPane } from '@renderer/lib/chat/chatPaneLayout'
 import type { PaneRenderOptions } from '../features/chat/ChatPaneHost'
 import type { SettingsSection } from '../features/settings'
@@ -15,7 +19,6 @@ import { useCustomSkinCss } from '@renderer/lib/hooks/useCustomSkinCss'
 import { pickAppearanceSettings, stepFontScale, DEFAULT_FONT_SCALE } from '@shared/appearance'
 import { useSettings } from '@renderer/lib/hooks/useSettings'
 import { useWorkspaceManager, resolveComposerDraft } from '@renderer/lib/hooks/useWorkspaceManager'
-import { useAgentProfiles } from '@renderer/lib/hooks/useAgentProfiles'
 import type { WorkspaceContext } from '@renderer/lib/hooks/useWorkspaceManager'
 import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
 import { ToastHost, pushToast } from '@renderer/lib/ui'
@@ -29,7 +32,8 @@ import type {
   AttachedFile,
   ToolApprovalMode,
   AgentInteractionMode,
-  ChatRewindPreviewResult
+  ChatRewindPreviewResult,
+  ToolApprovalDecision
 } from '@shared/ipc'
 import { defaultModelFor, isProviderConfigured, providerLabel } from '@shared/providers'
 import {
@@ -55,8 +59,11 @@ import {
 } from '@renderer/lib/hooks/offlineQueueStore'
 import {
   clearComposerAttachments,
-  composerAttachmentKey
+  composerAttachmentKey,
+  getComposerAttachments,
+  setComposerAttachments
 } from '@renderer/lib/hooks/composerAttachmentStore'
+import { getWorkspaceHotUi, resolveHotComposerDraft } from '@renderer/lib/hooks/workspaceHotUiStore'
 import { mergeLiveInstanceRuns } from './mergeLiveInstanceRuns'
 import type { SlashClientHandlers } from '../features/chat/components/composer/slashCommandExecute'
 import { formatLoopStatusLine, loopUsageMessage, parseLoopCommand } from '@shared/goalRuntime'
@@ -64,7 +71,21 @@ import type {
   ChatStreamController,
   RevertWritesOutcome
 } from '@renderer/lib/hooks/createChatStreamController'
-import { ConfirmFileList } from '../features/chat/components/ConfirmFileList'
+import { rewoundToastText, useRewindDialog } from '@renderer/features/task/RewindDialog'
+import { RELOAD_RUN_EVENT, announceRewound, redoRewindAndReload, type ReloadRunDetail } from '@renderer/features/task/rewindRedo'
+import { DISCARD_TASK_WORKTREE_EVENT, type DiscardTaskWorktreeDetail } from '@renderer/features/task/taskWorktree'
+import { needsSetup, setupRecents, setupStartingMode, setupWorkspace } from '@renderer/features/setup/setupModel'
+import {
+  briefStateFor,
+  setBriefChecks,
+  deleteTaskDraftFor,
+  draftTitle,
+  saveTaskDraftFor,
+  setBriefState,
+  useBriefState,
+  useTaskDrafts
+} from '@renderer/lib/drafts/taskDraftStore'
+import type { TaskDraft } from '@shared/ipc'
 
 /** Full-screen secondary views are code-split; they parse on first open, not at boot. */
 const SettingsView = lazy(() =>
@@ -73,11 +94,14 @@ const SettingsView = lazy(() =>
 const MarketplaceView = lazy(() =>
   import('../features/marketplace').then((m) => ({ default: m.MarketplaceView }))
 )
-const TeammatesView = lazy(() =>
-  import('../features/teammates').then((m) => ({ default: m.TeammatesView }))
-)
 const HomePage = lazy(() =>
   import('../features/home/HomePage').then((m) => ({ default: m.HomePage }))
+)
+const SetupPage = lazy(() =>
+  import('../features/setup/SetupPage').then((m) => ({ default: m.SetupPage }))
+)
+const UsagePage = lazy(() =>
+  import('../features/usage/UsagePage').then((m) => ({ default: m.UsagePage }))
 )
 
 function ViewSuspenseFallback() {
@@ -94,6 +118,14 @@ function ViewSuspenseFallback() {
 
 /** Sent as a visible user turn when resuming a run that was cut short. */
 const CONTINUE_PROMPT = 'Continue from where you stopped.'
+
+/** Settings' Back names the view it returns to. */
+const SETTINGS_BACK_LABELS = {
+  chat: 'Back to the task',
+  home: 'Back to Home',
+  usage: 'Back to Usage',
+  marketplace: 'Back to Extensions'
+} as const
 
 function modelsRefreshKeyFor(
   chatSettings: {
@@ -181,14 +213,9 @@ function App() {
     },
     [settings]
   )
-  const { profiles: rosterProfiles, ready: rosterReady } = useAgentProfiles()
   const workspace = useWorkspaceManager({
     openInstanceRunIds,
     getDefaultProviderModelForWorkspace,
-    getAgentProfileModelPin: (profileId) =>
-      rosterProfiles.find((p) => p.id === profileId)?.model ?? null,
-    getValidAgentProfileIds: () =>
-      rosterReady ? new Set(rosterProfiles.map((profile) => profile.id)) : null,
     maxChatPanes: settings.maxChatPanes ?? 0
   })
   const {
@@ -206,6 +233,7 @@ function App() {
     onToolToggle,
     onGroupToggle,
     onTurnToggle,
+    onDismissRunError,
     onApprovalDecision,
     onQuestionSubmit,
     collapsedTurns,
@@ -228,9 +256,6 @@ function App() {
     setComposerDraft,
     setComposerDraftForPane,
     setAgentMode,
-    setAgentProfileIdForRun,
-    getAgentProfileIdForRun,
-    pruneAgentProfileBindings,
     onMessageListScroll,
     onMessageListScrollForPane,
     setPaneCapacityContext,
@@ -258,30 +283,33 @@ function App() {
     focusedRunId
   } = workspace
 
-  // A deleted teammate must never ride a stale binding into chatStart — main
-  // rejects the whole send ('Unknown agent profile'). Prune every chat's
-  // binding that no longer resolves in the roster whenever the roster changes.
-  useEffect(() => {
-    if (!rosterReady) return
-    pruneAgentProfileBindings(new Set(rosterProfiles.map((p) => p.id)))
-  }, [rosterReady, rosterProfiles, pruneAgentProfileBindings])
-
   const focusedParentRunId = chat.runId ?? activeContext?.activeRunId ?? null
   contextsForModelRef.current = contexts
   const focusedOpenInstance =
     focusedParentRunId != null ? (openInstanceByParent[focusedParentRunId] ?? null) : null
 
-  const [view, setView] = useState<'chat' | 'settings' | 'marketplace' | 'teammates' | 'home'>('chat')
+  const [view, setView] = useState<'chat' | 'settings' | 'marketplace' | 'home' | 'usage'>('chat')
   const previousViewRef = useRef(view)
+  // Where Settings' Back goes: the view it was opened from, recorded as the
+  // view changes (during render, so the first frame already names it).
+  const [settingsReturn, setSettingsReturn] = useState<Exclude<typeof view, 'settings'>>('chat')
+  const [viewSeen, setViewSeen] = useState(view)
+  if (view !== viewSeen) {
+    setViewSeen(view)
+    if (view === 'settings' && viewSeen !== 'settings') setSettingsReturn(viewSeen)
+  }
   const [marketplaceFocusServerId, setMarketplaceFocusServerId] = useState<string | null>(null)
   const [marketplaceFocusSkillPath, setMarketplaceFocusSkillPath] = useState<string | null>(null)
   const [marketplaceFocusRulePath, setMarketplaceFocusRulePath] = useState<string | null>(null)
+  const [marketplaceFocusTab, setMarketplaceFocusTab] = useState<'mcps' | 'rules' | null>(null)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
   // Lifted so the command palette can open the feedback dialog from any view.
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [modelsRefreshNonce, setModelsRefreshNonce] = useState(0)
   const [homeRefreshVersion, setHomeRefreshVersion] = useState(0)
   const [openChangesRequest, setOpenChangesRequest] = useState(0)
+  /** Which changes the request opens: the workspace's, or the task's own. */
+  const [openChangesScope, setOpenChangesScope] = useState<'agent' | 'uncommitted'>('uncommitted')
   const consumeOpenChangesRequest = useCallback(() => setOpenChangesRequest(0), [])
   const chatHeadingRef = useRef<HTMLHeadingElement>(null)
   const settingsBackRef = useRef<HTMLButtonElement>(null)
@@ -300,23 +328,62 @@ function App() {
     } else if (view === 'chat') {
       // Returning from settings/marketplace must not steal the first Tab stop
       // (skip link). New chat focuses the composer explicitly in onNewChat.
-      if (previous === 'settings' || previous === 'marketplace' || previous === 'teammates')
-        return
+      if (previous === 'settings' || previous === 'marketplace') return
       requestAnimationFrame(() => requestAnimationFrame(() => {
         focusComposerMessage()
       }))
     }
   }, [view])
 
+  // Set up is the first run: no approval choice recorded, and no task in any open
+  // workspace. Until the open workspaces' task lists have loaded that can't be
+  // told, so a returning user never sees Set up flash by on the way to Home.
+  // Once told it stays told — a folder opened from Set up loads its tasks too.
+  const taskCount = Object.values(contexts).reduce((sum, ctx) => sum + ctx.runs.length, 0)
+  // Main opens its own scratch folder whenever no project is; Set up must know
+  // it to tell a folder someone chose from one nobody did.
+  const [scratchPath, setScratchPath] = useState<{ path: string | null } | null>(null)
+  useEffect(() => {
+    const get = window.vyotiq?.getHomeWorkspacePath
+    if (!get) {
+      setScratchPath({ path: null })
+      return
+    }
+    let cancelled = false
+    void get().then(
+      (res) => {
+        if (!cancelled) setScratchPath({ path: res.ok ? res.data : null })
+      },
+      () => {
+        if (!cancelled) setScratchPath({ path: null })
+      }
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  const setupDecidedRef = useRef(false)
+  if (
+    scratchPath != null &&
+    (registry != null || workspaceError != null) &&
+    Object.values(contexts).every((ctx) => ctx.runsLoaded)
+  ) {
+    setupDecidedRef.current = true
+  }
+  const setupUndecided = !settings.toolApprovalOnboardingDone && !setupDecidedRef.current
+  const showSetup = !setupUndecided && needsSetup(settings.toolApprovalOnboardingDone, taskCount)
+  const setupChosenWorkspace = setupWorkspace(activeWorkspace, openWorkspaces, scratchPath?.path ?? null)
+
   // Navigation-mode preference applies once settings have loaded. During load the
   // shell keeps the established chat skeleton; the launch view lands before the
-  // first post-load paint (useLayoutEffect) so no wrong surface flashes.
+  // first post-load paint (useLayoutEffect) so no wrong surface flashes. A first
+  // run lands on Home, where Set up lives.
   const launchViewAppliedRef = useRef(false)
   useLayoutEffect(() => {
-    if (loading || launchViewAppliedRef.current) return
+    if (loading || setupUndecided || launchViewAppliedRef.current) return
     launchViewAppliedRef.current = true
-    setView(launchViewFor(settings.navigationMode))
-  }, [loading, settings.navigationMode])
+    setView(showSetup ? 'home' : launchViewFor(settings.navigationMode))
+  }, [loading, setupUndecided, showSetup, settings.navigationMode])
 
   useLayoutEffect(() => {
     hydrate(
@@ -459,11 +526,12 @@ function App() {
     void update({ favoriteModels: [...set] })
   }, [settings.favoriteModels, update])
 
-  // Pin/unpin a session above the Home recency list — same data-array settings
-  // pattern as favoriteModels. The cap keeps the newest pins (pinnedRuns.ts).
+  // Pin/unpin a task: a pinned task that would be done keeps a navigator group
+  // of its own instead of folding away. Same data-array settings pattern as
+  // favoriteModels; the cap keeps the newest pins (pinnedRuns.ts).
   const onTogglePinnedRun = useCallback(
-    (key: string): void => {
-      void update({ pinnedRuns: togglePinnedRun(settings.pinnedRuns, key) })
+    (path: string, runId: string): void => {
+      void update({ pinnedRuns: togglePinnedRun(settings.pinnedRuns, pinnedRunKey(path, runId)) })
     },
     [settings.pinnedRuns, update]
   )
@@ -601,6 +669,9 @@ function App() {
           setSettingsSection(action.section)
           setView('settings')
           return
+        case 'open_update':
+          requestUpdatePanel()
+          return
         default: {
           const _exhaustive: never = action
           return _exhaustive
@@ -617,7 +688,7 @@ function App() {
     async (payload: import('@shared/ipc').DeepLinkPayload): Promise<void> => {
       const { target } = payload
       if (!target) {
-        pushToast('Unrecognized Vyotiq link.', 'error')
+        pushToast('Unrecognised Vyotiq link.', 'error')
         return
       }
       if (target.type !== 'open_run') return
@@ -667,7 +738,8 @@ function App() {
 
   const onCopyRunLinkInWorkspace = useCallback((path: string, runId: string): void => {
     void copyText(buildRunDeepLink(path, runId)).then((copied) => {
-      pushToast(copied ? 'Link copied.' : 'Could not copy link.', copied ? 'success' : 'error')
+      if (copied) pushToast('Link copied', { icon: 'link' })
+      else pushToast('Could not copy link.', 'error')
     })
   }, [])
 
@@ -717,7 +789,7 @@ function App() {
 
   const getPaneTitle = useCallback(
     (pane: ChatPane): string => {
-      if (!pane.runId) return 'New chat'
+      if (!pane.runId) return 'New task'
       const ctx = findByWorkspacePath(contexts, pane.workspacePath)
       const run =
         ctx?.runs.find((r) => r.runId === pane.runId) ??
@@ -774,18 +846,6 @@ function App() {
     [newChatInWorkspace]
   )
 
-  // Teammate rows: fresh chat in the active workspace, bound to the profile so
-  // the first send already carries identity + the profile's memory namespace.
-  const onStartTeammateChat = useCallback(
-    (profileId: string): void => {
-      const path = workspace.focusedWorkspacePath ?? workspace.activeWorkspace
-      if (!path) return
-      setAgentProfileIdForRun(path, null, profileId)
-      onNewChatInWorkspace(path)
-    },
-    [workspace.focusedWorkspacePath, workspace.activeWorkspace, setAgentProfileIdForRun, onNewChatInWorkspace]
-  )
-
   // Home start bar / workspace cards route here: same switch + focus flow as
   // onNewChatInWorkspace, then the typed goal lands in the new session's
   // composer draft in that workspace. The new session is a draft (runId null),
@@ -806,6 +866,15 @@ function App() {
       window.setTimeout(tryFocus, 0)
     },
     [newChatInWorkspace, setComposerDraftForPane]
+  )
+
+  // Where a new task's brief can move: the open workspaces, named as the navigator names them.
+  const newTaskTargets = useMemo(
+    () => ({
+      workspaces: openWorkspaces.map((path) => ({ path, name: formatWorkspaceName(path) })),
+      onMove: onNewSessionInWorkspace
+    }),
+    [openWorkspaces, onNewSessionInWorkspace]
   )
 
   const focusComposerSoon = useCallback((): void => {
@@ -889,6 +958,15 @@ function App() {
   )
 
   const { sendWithOfflineQueue } = useOfflineSendQueue(offlineWorkspacePath, flushOfflineEntry)
+  const startInNewWorktreeRef = useRef<
+    (
+      parentPath: string,
+      text: string,
+      images: string[] | undefined,
+      files: AttachedFile[] | undefined,
+      extras: import('@shared/ipc').ComposerSendExtras
+    ) => Promise<boolean>
+  >(async () => false)
 
   const flushPendingSend = useCallback(async () => {
     const pending = pendingSendRef.current
@@ -900,6 +978,8 @@ function App() {
       setComposerDraftForPane(workspacePath, runId, '')
       const attKey = composerAttachmentKey(workspacePath, runId)
       if (attKey) clearComposerAttachments(attKey)
+      // A new task started from the brief: its checks and draft are spent.
+      if (!runId) setBriefState(workspacePath, null)
     }
     return ok
   }, [setComposerDraftForPane])
@@ -937,7 +1017,10 @@ function App() {
       files: AttachedFile[] | undefined,
       extras: import('@shared/ipc').ComposerSendExtras | undefined,
       binding: { workspacePath: string; runId: string | null }
-    ) => {
+    ): Promise<boolean> => {
+      if (extras?.worktree && !binding.runId) {
+        return startInNewWorktreeRef.current(binding.workspacePath, text, images, files, extras)
+      }
       if (!settings.toolApprovalOnboardingDone) {
         pendingSendRef.current = {
           text,
@@ -989,6 +1072,147 @@ function App() {
     [activeWorkspace, gateSendWithOnboarding, sendWithOfflineQueue]
   )
 
+  /**
+   * Home's Start: a new task in that workspace, sent at once through the same
+   * onboarding gate, offline queue and controller the brief's Start task uses.
+   * With no key for the provider nothing could run, so the brief opens with the
+   * text in it instead, where the missing key is spelled out.
+   */
+  const onStartTaskFromHome = useCallback(
+    (path: string, brief: string): void => {
+      if (homeProviderIssue) {
+        onNewSessionInWorkspace(path, brief)
+        return
+      }
+      setOpenInstanceByParent({})
+      setView('chat')
+      void newChatInWorkspace(path).then(() =>
+        gateSendWithOnboarding(
+          (text, images, files, extras) =>
+            sendWithOfflineQueue(
+              text,
+              images,
+              files,
+              extras,
+              (t, i, f, e) => getRunControllerRef.current(null, path)?.send(t, i, f, e) ?? false,
+              { runId: null, workspacePath: path }
+            ),
+          brief,
+          undefined,
+          undefined,
+          undefined,
+          { workspacePath: path, runId: null }
+        )
+      )
+    },
+    [gateSendWithOnboarding, homeProviderIssue, newChatInWorkspace, onNewSessionInWorkspace, sendWithOfflineQueue]
+  )
+
+  /**
+   * Start task in a new worktree: make the worktree (a new branch of this
+   * workspace's current branch), open it as a workspace, and start the task
+   * there through the same gate, queue and controller as any new task. The
+   * draft it continued is spent in the workspace it was saved in.
+   */
+  startInNewWorktreeRef.current = async (parentPath, text, images, files, extras) => {
+    const { worktree: _worktree, draftId, ...rest } = extras
+    const made = await window.vyotiq.createTaskWorktree(parentPath, text)
+    if (!made.ok) {
+      pushToast(made.error, 'error')
+      return false
+    }
+    const path = made.data.workspacePath
+    let openError: string | null = null
+    const added = await addWorkspace(path, { onError: (message) => (openError = message) })
+    if (!added) {
+      pushToast(`Made the worktree ${made.data.branch}, but couldn’t open it: ${openError ?? 'unknown error'}`, 'error')
+      return false
+    }
+    setOpenInstanceByParent({})
+    setView('chat')
+    await newChatInWorkspace(path)
+    const sendExtras = Object.keys(rest).length > 0 ? rest : undefined
+    const sent = await gateSendWithOnboarding(
+      (t, i, f, e) =>
+        sendWithOfflineQueue(
+          t,
+          i,
+          f,
+          e,
+          (t2, i2, f2, e2) => getRunControllerRef.current(null, path)?.send(t2, i2, f2, e2) ?? false,
+          { runId: null, workspacePath: path }
+        ),
+      text,
+      images,
+      files,
+      sendExtras,
+      { workspacePath: path, runId: null }
+    )
+    // Not sent yet (the approval choice comes first, or the send failed): the
+    // whole brief — text, checks and attachments — waits on the worktree's New
+    // task page, and the draft it came from is kept until a task spends it.
+    if (!sent) {
+      setComposerDraftForPane(path, null, text)
+      if (rest.doneWhen?.length) setBriefChecks(path, rest.doneWhen)
+      const key = composerAttachmentKey(path, null)
+      if (key) {
+        setComposerAttachments(key, {
+          images: images ?? [],
+          files: files ?? [],
+          nativeFiles: rest.nativeFiles ?? [],
+          audio: rest.audio ?? []
+        })
+      }
+    } else if (draftId) {
+      void deleteTaskDraftFor(parentPath, draftId)
+    }
+    // Either way the brief now lives in the worktree, so the page it came from empties.
+    return true
+  }
+
+  // Discard / Remove on a task worktree: close its workspace (so nothing of the
+  // app holds its files), then delete the folder and the branch.
+  const activeRunsRef = useRef(activeRuns)
+  activeRunsRef.current = activeRuns
+  const openWorkspacesRef = useRef(openWorkspaces)
+  openWorkspacesRef.current = openWorkspaces
+  useEffect(() => {
+    const onDiscard = (event: Event): void => {
+      const detail = (event as CustomEvent<DiscardTaskWorktreeDetail>).detail
+      if (!detail?.workspacePath) return
+      void (async () => {
+        if (activeRunsRef.current.some((run) => workspacePathsEqual(run.workspacePath, detail.workspacePath))) {
+          pushToast('A task is still running in this worktree — stop it first', 'error')
+          return
+        }
+        await removeWorkspace(detail.workspacePath, false)
+        // removeWorkspace reports a failure only through the window's banner:
+        // ask main whether it is really closed before deleting its folder.
+        const after = await window.vyotiq.getWorkspaces()
+        if (!after.ok || after.data.openPaths.some((open) => workspacePathsEqual(open, detail.workspacePath))) {
+          pushToast('Couldn’t close the worktree’s workspace, so nothing was deleted', 'error')
+          return
+        }
+        const res = await window.vyotiq.discardTaskWorktree(detail.workspacePath)
+        if (!res.ok) {
+          // Open it again: its strip is the only place to retry from.
+          await addWorkspace(detail.workspacePath, { onError: () => {} })
+          pushToast(`Couldn’t delete the worktree: ${res.error}`, 'error')
+          return
+        }
+        if (openWorkspacesRef.current.some((open) => workspacePathsEqual(open, detail.parentPath))) {
+          void switchWorkspace(detail.parentPath)
+        }
+        pushToast(detail.merged ? `Removed the worktree ${detail.branch}` : `Discarded the worktree ${detail.branch}`, {
+          kind: 'success',
+          icon: 'trash'
+        })
+      })()
+    }
+    window.addEventListener(DISCARD_TASK_WORKTREE_EVENT, onDiscard)
+    return () => window.removeEventListener(DISCARD_TASK_WORKTREE_EVENT, onDiscard)
+  }, [addWorkspace, removeWorkspace, switchWorkspace])
+
   const onChatEditAndResend = useCallback(
     async (
       editMessageIndex: number,
@@ -1006,74 +1230,79 @@ function App() {
   )
 
   const { confirm, dialog: confirmDialog } = useConfirm()
+  const { askRewind, dialog: rewindDialog } = useRewindDialog()
+  const chatRunIdRef = useRef<string | null>(null)
+  chatRunIdRef.current = chat.runId
 
+  useEffect(() => {
+    const onReload = (event: Event): void => {
+      const detail = (event as CustomEvent<ReloadRunDetail>).detail
+      if (!detail?.workspacePath || !detail.runId) return
+      void loadRunTranscriptIntoTab(detail.workspacePath, detail.runId)
+      refreshWorkspaceRuns(detail.workspacePath)
+    }
+    window.addEventListener(RELOAD_RUN_EVENT, onReload)
+    return () => window.removeEventListener(RELOAD_RUN_EVENT, onReload)
+  }, [loadRunTranscriptIntoTab, refreshWorkspaceRuns])
+
+  /**
+   * Rewind to before an instruction: the Rewind dialog lists what the task
+   * changed from main's preview, then main restores and truncates. Null files
+   * means the preview could not be read — the dialog says so rather than
+   * claiming nothing changes.
+   */
   const confirmRevertToUserMessage = useCallback(
     async (
       userMessageIndex: number,
-      turnCount: number,
+      runN: number | undefined,
       io: {
+        workspacePath: string | null
+        /** The task rewound — its Redo is offered from the toast. */
+        runId: string | null
         preview: (index: number) => Promise<ChatRewindPreviewResult | null>
         revert: (index: number) => Promise<RevertWritesOutcome | false>
       }
     ): Promise<boolean> => {
       const preview = await io.preview(userMessageIndex)
-      const files = preview?.files ?? []
-      const notUndoable = files.filter((f) => !f.undoable).length
-      const turnText = turnCount === 1 ? '1 turn' : `${turnCount} turns`
-      const baseMessage =
-        files.length > 0
-          ? `Revert to before this prompt? ${turnText} will be removed and ${
-              files.length === 1 ? '1 file' : `${files.length} files`
-            } restored to their state before the agent ran.`
-          : turnCount === 1
-            ? 'Revert to before this prompt? The reply and any workspace edits made after it are undone and the turn is removed from the chat.'
-            : `Revert to before this prompt? ${turnCount} turns and any workspace edits made after it are undone and removed from the chat.`
-      const message =
-        files.length > 0 && notUndoable > 0
-          ? `${baseMessage} ${
-              notUndoable === 1 ? '1 file' : `${notUndoable} files`
-            } can't be auto-restored and will be skipped.`
-          : baseMessage
-      const ok = await confirm(message, {
-        title: 'Revert to earlier prompt',
-        confirmLabel: 'Revert',
-        danger: true,
-        ...(files.length > 0 ? { details: <ConfirmFileList files={files} /> } : {})
-      })
+      const ok = await askRewind({ runN: runN ?? null, files: preview?.files ?? null })
       if (!ok) return false
       const done = await io.revert(userMessageIndex)
       if (done) {
-        const restored = done.restored.length
-        const skipped = done.skipped.length
-        let toastText = 'Reverted to the earlier prompt. Later turns were removed.'
-        if (restored > 0 || skipped > 0) {
-          toastText = `Reverted to the earlier prompt. ${
-            restored === 1 ? '1 file' : `${restored} files`
-          } restored.`
-          if (skipped > 0) {
-            toastText += ` ${skipped === 1 ? '1 file' : `${skipped} files`} could not be restored.`
-          }
-        }
-        pushToast(toastText, 'success')
+        const { workspacePath, runId } = io
+        if (workspacePath && runId) announceRewound(workspacePath, runId)
+        // Offer Redo only when main kept it — keeping it is best-effort.
+        const redo = workspacePath && runId ? await window.vyotiq.rewindRedoStatus?.(workspacePath, runId) : undefined
+        const canRedo = Boolean(redo?.ok && redo.data.available)
+        pushToast(rewoundToastText(runN ?? null, done), {
+          kind: 'success',
+          icon: 'undo',
+          ...(canRedo && workspacePath && runId
+            ? { action: { label: 'Redo', onClick: () => void redoRewindAndReload(workspacePath, runId) } }
+            : {})
+        })
+        // The rewound edits no longer wait on Keep or Undo.
+        if (io.workspacePath) refreshWorkspaceRuns(io.workspacePath)
       }
       return done !== false
     },
-    [confirm]
+    [askRewind, refreshWorkspaceRuns]
   )
 
   const onChatRevertToUserMessage = useCallback(
-    (userMessageIndex: number) => {
+    (userMessageIndex: number, runN?: number) => {
       const actions = chatActionsRef.current
       return confirmRevertToUserMessage(
         userMessageIndex,
-        Math.max(0, chat.messages.length - userMessageIndex - 1),
+        runN,
         {
+          workspacePath: focusedWorkspacePath ?? activeWorkspace,
+          runId: focusedRunId ?? chatRunIdRef.current,
           preview: (i) => actions?.previewRewindToUserMessage?.(i) ?? Promise.resolve(null),
           revert: (i) => actions?.revertToUserMessage?.(i) ?? Promise.resolve(false)
         }
       )
     },
-    [confirmRevertToUserMessage, chat.messages]
+    [activeWorkspace, confirmRevertToUserMessage, focusedRunId, focusedWorkspacePath]
   )
 
   const onChatStop = useCallback(() => {
@@ -1114,7 +1343,7 @@ function App() {
         chatActionsRef.current?.applyManualCompaction?.(res.data)
         return {
           ok: true as const,
-          message: `Summarized ${res.data.messagesBefore - res.data.keptMessages} messages; ${res.data.keptMessages} kept verbatim.`
+          message: `Summarised ${res.data.messagesBefore - res.data.keptMessages} messages; ${res.data.keptMessages} kept verbatim.`
         }
       } finally {
         chatActionsRef.current?.setCompacting?.(false)
@@ -1168,6 +1397,9 @@ function App() {
           chatActionsRef.current?.applyWriteCheckpointResolution
         apply?.(res.data)
         setSettingsError(null)
+        // Resolved edits can take the task out of Ready for review; main has
+        // already dropped its cached list, so ask for it again.
+        refreshWorkspaceRuns(workspacePath)
         return true
       } finally {
         setUndoBusy(false)
@@ -1179,6 +1411,7 @@ function App() {
       chat.running,
       chat.writeCheckpoint,
       focusedWorkspacePath,
+      refreshWorkspaceRuns,
       setSettingsError
     ]
   )
@@ -1233,6 +1466,17 @@ function App() {
     return files.map((f) => ({ path: f.path, action: f.action }))
   }, [chat.writeCheckpoint])
 
+  // The task in the chat column, named as the navigator names it.
+  const chatWorkspacePath = focusedWorkspacePath ?? activeWorkspace
+  const chatTaskTitle = useMemo(() => {
+    if (!chatWorkspacePath || !focusedParentRunId) return null
+    const ctx = findByWorkspacePath(contexts, chatWorkspacePath)
+    const run =
+      ctx?.runs.find((r) => r.runId === focusedParentRunId) ??
+      ctx?.instanceRuns?.find((r) => r.runId === focusedParentRunId)
+    return run ? runTitle(run) || null : null
+  }, [contexts, chatWorkspacePath, focusedParentRunId])
+
   const createSlashHandlers = useCallback(
     (scope: {
       workspacePath: string | null
@@ -1282,7 +1526,7 @@ function App() {
         setMarketplaceFocusServerId(mcpServerId ?? null)
         setView('marketplace')
       },
-      onOpenSettings: (section?: 'voice' | 'providers') => {
+      onOpenSettings: (section?: 'voice' | 'providers' | 'agent') => {
         if (section) setSettingsSection(section)
         setView('settings')
       },
@@ -1601,7 +1845,7 @@ function App() {
       const reason = res.data.reason
       const code = res.data.exitCodeHex ?? (res.data.exitCode != null ? String(res.data.exitCode) : '')
       setSettingsError(
-        `UI recovered after a renderer crash (${reason}${code ? ` · ${code}` : ''}). Recent crash details are in Settings → General.`
+        `UI recovered after a renderer crash (${reason}${code ? ` · ${code}` : ''}). Recent crash details are in Settings → Diagnostics.`
       )
     })()
     return () => {
@@ -1649,9 +1893,26 @@ function App() {
     }
   }, [chatActions, clearWorkspaceError, setSettingsError, settingsError, workspaceError])
 
+  // The pane header's run actions are plain functions defined further down;
+  // read through a ref so the pane renderer does not rebuild every render.
+  const paneRunActionsRef = useRef<{
+    rename: (path: string, runId: string, title: string) => Promise<void>
+    exportRun: (path: string, runId: string) => Promise<void>
+    deleteRun: (path: string, runId: string) => Promise<void>
+    fork: (path: string, runId: string) => Promise<void>
+    togglePin: (path: string, runId: string) => void
+    isPinned: (path: string, runId: string) => boolean
+  }>({
+    rename: async () => {},
+    exportRun: async () => {},
+    deleteRun: async () => {},
+    fork: async () => {},
+    togglePin: () => {},
+    isPinned: () => false
+  })
   const renderPaneSession = useCallback(
     (pane: ChatPane, options: PaneRenderOptions) => {
-      const { focused, sideRailPad, onOpenChanges, onOpenWorkspaceFile } =
+      const { focused, onShowInspector, onOpenChanges, onOpenWorkspaceFile, multi, onClose, onSplit } =
         options
       const paneContext = findByWorkspacePath(contexts, pane.workspacePath)
       // Standalone instance pane: inspect + stop only (no composer) — the same
@@ -1666,16 +1927,24 @@ function App() {
           settings,
           paneContext?.settingsOverride
         )
+        const parentRun = parentRunId ? (paneContext?.runs.find((r) => r.runId === parentRunId) ?? null) : null
         return (
           <AgentInstancePane
             workspacePath={pane.workspacePath}
             instanceRunId={pane.runId}
             instanceMeta={parentCtrl?.agentInstances?.[pane.runId]}
             getController={getRunController}
-            sideRailPad={sideRailPad}
+            onShowInspector={onShowInspector}
             showThinking={paneChatSettings.showThinking}
             onOpenWorkspaceFile={onOpenWorkspaceFile}
             approvalAutoFocus={focused}
+            instanceRun={paneContext?.instanceRuns?.find((r) => r.runId === pane.runId) ?? null}
+            parentTitle={parentRun ? runTitle(parentRun) : undefined}
+            siblings={parentCtrl?.agentInstances}
+            onOpenInstance={(siblingRunId) => {
+              void openRunInWorkspace(pane.workspacePath, siblingRunId)
+            }}
+            onClosePane={multi ? onClose : undefined}
             onClose={() => {
               if (!parentRunId) return
               void (async () => {
@@ -1708,11 +1977,8 @@ function App() {
               paneContext.ui.scrollTop > 0
             ? paneContext.ui.scrollTop
             : undefined
-      const paneCollapsed =
-        snap.collapsedTurnIndices.length > 0
-          ? new Set(snap.collapsedTurnIndices)
-          : undefined
       const paneCtrl = getRunController(pane.runId, pane.workspacePath)
+      const paneRun = pane.runId ? (paneContext?.runs.find((r) => r.runId === pane.runId) ?? null) : null
       const paneDraft = paneContext
         ? resolveComposerDraft(paneContext.ui, pane.runId)
         : undefined
@@ -1732,7 +1998,7 @@ function App() {
                 paneCtrl?.applyManualCompaction?.(res.data)
                 return {
                   ok: true as const,
-                  message: `Summarized ${res.data.messagesBefore - res.data.keptMessages} messages; ${res.data.keptMessages} kept verbatim.`
+                  message: `Summarised ${res.data.messagesBefore - res.data.keptMessages} messages; ${res.data.keptMessages} kept verbatim.`
                 }
               } finally {
                 paneCtrl?.setCompacting?.(false)
@@ -1850,10 +2116,6 @@ function App() {
           onAgentModeChange={(mode) => {
             setAgentMode(mode, { workspacePath: pane.workspacePath, runId: pane.runId })
           }}
-          agentProfileId={getAgentProfileIdForRun(pane.workspacePath, pane.runId)}
-          onAgentProfileChange={(profileId) =>
-            setAgentProfileIdForRun(pane.workspacePath, pane.runId, profileId)
-          }
           onSend={(text, images, files, extras) =>
             gateSendWithOnboarding(
               (sendText, sendImages, sendFiles, sendExtras) => {
@@ -1889,11 +2151,13 @@ function App() {
           onEditAndResend={(editMessageIndex, text, images, files, extras) =>
             paneCtrl?.editAndResend(editMessageIndex, text, images, files, extras) ?? false
           }
-          onRevertToUserMessage={(userMessageIndex) =>
+          onRevertToUserMessage={(userMessageIndex, runN) =>
             confirmRevertToUserMessage(
               userMessageIndex,
-              Math.max(0, snap.messages.length - userMessageIndex - 1),
+              runN,
               {
+                workspacePath: pane.workspacePath,
+                runId: pane.runId,
                 preview: (i) => paneCtrl?.previewRewindToUserMessage(i) ?? Promise.resolve(null),
                 revert: (i) => paneCtrl?.revertToUserMessage(i) ?? Promise.resolve(false)
               }
@@ -1927,26 +2191,7 @@ function App() {
           onLoadToolContent={
             paneCtrl ? (toolCallId) => paneCtrl.loadToolContent(toolCallId) : undefined
           }
-          onThinkingToggle={
-            paneCtrl
-              ? (messageId, expanded) => paneCtrl.setThinkingExpanded(messageId, expanded)
-              : undefined
-          }
-          onToolToggle={
-            paneCtrl
-              ? (toolCallId, expanded) => paneCtrl.setToolExpanded(toolCallId, expanded)
-              : undefined
-          }
-          onGroupToggle={
-            paneCtrl
-              ? (anchorToolCallId, expanded) =>
-                  paneCtrl.setGroupExpanded(anchorToolCallId, expanded)
-              : undefined
-          }
-          onTurnToggle={
-            paneCtrl ? (turnIndex) => paneCtrl.toggleTurnCollapsed(turnIndex) : undefined
-          }
-          collapsedTurns={paneCollapsed}
+          onDismissRunError={paneCtrl ? (itemId) => paneCtrl.dismissRunError(itemId) : undefined}
           onApprovalDecision={
             paneCtrl
               ? (requestId, decision) => paneCtrl.respondToApproval(requestId, decision)
@@ -1960,16 +2205,48 @@ function App() {
           mcpServerNames={mcpServerNames}
           slashHandlers={paneSlashHandlers}
           approvalAutoFocus={focused}
-          sideRailPad={sideRailPad}
+          onShowInspector={onShowInspector}
           onOpenChanges={onOpenChanges}
           onOpenWorkspaceFile={onOpenWorkspaceFile}
+          run={paneRun}
+          instanceRuns={paneContext?.instanceRuns}
+          newTaskTargets={newTaskTargets}
+          runActions={{
+            onRename: pane.runId
+              ? (title) => paneRunActionsRef.current.rename(pane.workspacePath, pane.runId!, title)
+              : undefined,
+            onExport: pane.runId
+              ? () => void paneRunActionsRef.current.exportRun(pane.workspacePath, pane.runId!)
+              : undefined,
+            onCopyLink: pane.runId ? () => onCopyRunLinkInWorkspace(pane.workspacePath, pane.runId!) : undefined,
+            onFork: pane.runId ? () => void paneRunActionsRef.current.fork(pane.workspacePath, pane.runId!) : undefined,
+            onTogglePin: pane.runId ? () => paneRunActionsRef.current.togglePin(pane.workspacePath, pane.runId!) : undefined,
+            isPinned: pane.runId ? () => paneRunActionsRef.current.isPinned(pane.workspacePath, pane.runId!) : undefined,
+            onDelete: pane.runId
+              ? () => {
+                  const runId = pane.runId!
+                  void (async () => {
+                    const ok = await confirm(`Delete “${paneRun ? runTitle(paneRun) : 'this task'}”? Its record and checkpoints are removed; files it changed stay as they are.`, {
+                      title: 'Delete task',
+                      confirmLabel: 'Delete',
+                      danger: true
+                    })
+                    if (ok) await paneRunActionsRef.current.deleteRun(pane.workspacePath, runId)
+                  })()
+                }
+              : undefined,
+            onSplit,
+            onClosePane: multi ? onClose : undefined
+          }}
         />
       )
     },
     [
       chatSurfaceEpoch,
+      confirm,
       contexts,
       confirmRevertToUserMessage,
+      onCopyRunLinkInWorkspace,
       createSlashHandlers,
       getInstanceParentRunId,
       getPaneChatSnapshot,
@@ -1993,13 +2270,12 @@ function App() {
       operationalError,
       scrollRestoreToken,
       setAgentMode,
-      setAgentProfileIdForRun,
-      getAgentProfileIdForRun,
       settings,
       update,
       onChatSettingsChangeForWorkspace,
       onProviderModelForWorkspace,
-      onToggleFavorite
+      onToggleFavorite,
+      newTaskTargets
     ]
   )
 
@@ -2049,7 +2325,7 @@ function App() {
       // The sidebar is global chrome, so a refusal ("Cancel run first") has to
       // answer where the click was. The operational banner lives inside the
       // focused chat pane — from a sidebar row that reads as nothing happening.
-      pushToast(`Could not delete chat: ${res.error}`, 'error')
+      pushToast(`Could not delete the task: ${res.error}`, 'error')
       setSettingsError(res.error)
       return
     }
@@ -2103,8 +2379,29 @@ function App() {
       return
     }
     if (res.data.saved && res.data.path) {
-      pushToast(`Chat exported to ${res.data.path}`)
+      pushToast(`Task exported to ${res.data.path}`)
     }
+  }
+
+  /** Fork: the task's conversation as a new, finished task, opened where you are. */
+  const onForkRunInWorkspace = async (path: string, runId: string): Promise<void> => {
+    const res = await window.vyotiq.forkRun(path, runId)
+    if (!res.ok) {
+      pushToast(`Couldn’t fork the task: ${res.error}`, 'error')
+      return
+    }
+    refreshWorkspaceRuns(path)
+    await onSelectRunInWorkspace(path, res.data)
+    pushToast('Forked — a copy of the task to take another way', { kind: 'success', icon: 'fork' })
+  }
+
+  paneRunActionsRef.current = {
+    rename: onRenameRunInWorkspace,
+    exportRun: onExportRunInWorkspace,
+    deleteRun: onDeleteRunInWorkspace,
+    fork: onForkRunInWorkspace,
+    togglePin: onTogglePinnedRun,
+    isPinned: (path, runId) => settings.pinnedRuns.includes(pinnedRunKey(path, runId))
   }
 
   const onStopRunInWorkspace = useCallback(
@@ -2151,6 +2448,48 @@ function App() {
     [getRunController, onSelectRunInWorkspace, refreshActiveRuns, refreshWorkspaceRuns]
   )
 
+  /**
+   * Pause a task's standing goal, then stop the run it launched — the goal
+   * banner's order. Pausing alone would leave the agent working on a goal the
+   * navigator now calls paused.
+   */
+  const onPauseGoalInWorkspace = useCallback(
+    async (path: string, runId: string, live: boolean): Promise<void> => {
+      const res = await window.vyotiq?.setGoalStatus({ workspacePath: path, runId, action: 'pause' })
+      if (!res) return
+      if (!res.ok) {
+        pushToast(res.error, 'error')
+        return
+      }
+      if (live) await onStopRunInWorkspace(path, runId)
+      else await refreshWorkspaceRuns(path)
+    },
+    [onStopRunInWorkspace, refreshWorkspaceRuns]
+  )
+
+  const onStopLoopInWorkspace = useCallback(
+    async (path: string, runId: string): Promise<void> => {
+      const res = await window.vyotiq?.setLoop({ workspacePath: path, runId, action: 'stop' })
+      if (!res) return
+      if (!res.ok) {
+        pushToast(res.error, 'error')
+        return
+      }
+      await refreshWorkspaceRuns(path)
+    },
+    [refreshWorkspaceRuns]
+  )
+
+  /** Home's Deny / Allow once, through the run's own controller so its record clears at once. */
+  const onRespondApprovalFromHome = useCallback(
+    async (path: string, runId: string, requestId: string, decision: ToolApprovalDecision): Promise<void> => {
+      const controller = getRunController(runId, path)
+      if (!controller) throw new Error('That task could not be reached.')
+      await controller.respondToApproval(requestId, decision)
+    },
+    [getRunController]
+  )
+
   const onReviewChangesInWorkspace = useCallback(
     async (path: string, runId?: string): Promise<void> => {
       if (runId) {
@@ -2159,9 +2498,134 @@ function App() {
         await switchWorkspace(path)
         setView('chat')
       }
+      setOpenChangesScope('uncommitted')
       setOpenChangesRequest((request) => request + 1)
     },
     [onSelectRunInWorkspace, switchWorkspace]
+  )
+
+  /** A finished task's Review: the task, with Changes on what this task changed. */
+  const onReviewTask = useCallback(
+    async (path: string, runId: string): Promise<void> => {
+      await onSelectRunInWorkspace(path, runId)
+      setOpenChangesScope('agent')
+      setOpenChangesRequest((request) => request + 1)
+    },
+    [onSelectRunInWorkspace]
+  )
+
+  /** Set up's folder picker: opens it here, and stays on Set up for step 3. */
+  const setupChooseFolder = useCallback(async (): Promise<string | null> => {
+    const res = await pickWorkspace()
+    // A picker that failed is already the window's banner (useSettings).
+    if (!res.ok || !res.data) return null
+    let error: string | null = null
+    await addWorkspace(res.data, { onError: (message) => (error = message) })
+    return error
+  }, [addWorkspace, pickWorkspace])
+
+  const setupOpenPath = useCallback(
+    async (path: string): Promise<string | null> => {
+      let error: string | null = null
+      await addWorkspace(path, { onError: (message) => (error = message) })
+      return error
+    },
+    [addWorkspace]
+  )
+
+  /** Start your first task: the approval choice is saved the way the first-send question saves it. */
+  const setupStart = useCallback(
+    async (path: string, mode: ToolApprovalMode): Promise<string | null> => {
+      const res = await update({
+        toolApproval: { ...settings.toolApproval, mode },
+        toolApprovalOnboardingDone: true
+      })
+      // Said on Set up itself: the window's settings banner is not on screen there.
+      if (!res.ok) return res.error
+      onNewSessionInWorkspace(path, '')
+      return null
+    },
+    [onNewSessionInWorkspace, settings.toolApproval, update]
+  )
+
+  // Drafts of the open workspaces. A new task (the count moving) reads them
+  // again: main removes the draft a task was started from.
+  const taskDrafts = useTaskDrafts(openWorkspaces, taskCount)
+  // The draft New task is continuing, while New task is what is on screen.
+  const newTaskWorkspace = focusedWorkspacePath ?? activeWorkspace
+  const continuedDraftId = useBriefState(newTaskWorkspace).draftId
+  const openDraft =
+    view === 'chat' && !focusedRunId && newTaskWorkspace && continuedDraftId
+      ? { workspacePath: newTaskWorkspace, draftId: continuedDraftId }
+      : null
+
+  /** Continue a draft on New task — after asking, when that page holds unsaved work. */
+  const openTaskDraft = useCallback(
+    async (path: string, draft: TaskDraft): Promise<void> => {
+      const current = briefStateFor(path)
+      if (current.draftId !== draft.id) {
+        const text = resolveHotComposerDraft(getWorkspaceHotUi(path), null)
+        const key = composerAttachmentKey(path, null)
+        const attached = key ? getComposerAttachments(key) : null
+        const unsaved =
+          text.trim().length > 0 ||
+          current.checks.length > 0 ||
+          (attached != null &&
+            attached.images.length + attached.files.length + attached.nativeFiles.length + attached.audio.length > 0)
+        if (unsaved) {
+          const replace = await confirm(
+            'What is on New task now isn’t saved. Opening the draft replaces it.',
+            { title: `Open “${draftTitle(draft)}”?`, confirmLabel: 'Open draft' }
+          )
+          if (!replace) return
+        }
+      }
+      setBriefState(path, { ...briefStateFor(path), draftId: draft.id, checks: draft.doneWhen })
+      setComposerDraftForPane(path, null, draft.brief)
+      const key = composerAttachmentKey(path, null)
+      if (key) {
+        setComposerAttachments(key, {
+          images: draft.attachments?.images ?? [],
+          files: draft.attachments?.files ?? [],
+          nativeFiles: draft.attachments?.nativeFiles ?? [],
+          audio: draft.attachments?.audio ?? []
+        })
+      }
+      // The text lands again once the workspace switch settles (as Home's does).
+      onNewSessionInWorkspace(path, draft.brief)
+    },
+    [confirm, onNewSessionInWorkspace, setComposerDraftForPane]
+  )
+
+  const deleteTaskDraft = useCallback(async (path: string, draft: TaskDraft): Promise<void> => {
+    const res = await deleteTaskDraftFor(path, draft.id)
+    if (!res.ok) {
+      pushToast(`Couldn’t delete the draft: ${res.error}`, 'error')
+      return
+    }
+    pushToast('Draft deleted', {
+      detail: draftTitle(draft),
+      icon: 'trash',
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          void saveTaskDraftFor({
+            workspacePath: path,
+            brief: draft.brief,
+            doneWhen: draft.doneWhen,
+            ...(draft.attachments ? { attachments: draft.attachments } : {})
+          })
+        }
+      }
+    })
+  }, [])
+
+  const draftActions = useMemo(
+    () => ({
+      onOpen: (path: string, draft: TaskDraft) => void openTaskDraft(path, draft),
+      onDelete: (path: string, draft: TaskDraft) => void deleteTaskDraft(path, draft)
+    }),
+    [openTaskDraft, deleteTaskDraft]
   )
 
   const chatError = chat.error
@@ -2205,11 +2669,19 @@ function App() {
     [contexts, activeWorkspace, chat.runId, chat.agentInstances]
   )
 
+  const focusedRun =
+    focusedRunId && (focusedWorkspacePath ?? activeWorkspace)
+      ? { workspacePath: (focusedWorkspacePath ?? activeWorkspace)!, runId: focusedRunId }
+      : null
+
   const shellWorkspaceProps = {
     openWorkspaces,
     activeRuns,
     activeRunsLoaded,
     runsByWorkspacePath,
+    focusedRun,
+    isRunOpenInPane: isSessionOpenInPane,
+    onDismissRunsError: clearRunsError,
     onSwitchWorkspace: (path: string) => {
       setOpenInstanceByParent({})
       void switchWorkspace(path)
@@ -2217,35 +2689,40 @@ function App() {
     onCloseWorkspace,
     onAddWorkspace: onPickWorkspace,
     onNewChatInWorkspace,
-    onStartTeammateChat,
-    onOpenTaskRun: (path: string, runId: string) => void onSelectRunInWorkspace(path, runId),
-    workspaceHasBackgroundRun,
-    expandedByPath: workspace.workspaceExpandedByPath,
-    onSetWorkspaceExpanded: workspace.setWorkspaceExpanded,
+    onNewTaskWithText: onNewSessionInWorkspace,
     onSelectRunInWorkspace: (path: string, runId: string) => void onSelectRunInWorkspace(path, runId),
+    onOpenRunBeside: (path: string, runId: string) => {
+      const pane = getFocusedPane()
+      if (!pane || !pane.runId) {
+        void onSelectRunInWorkspace(path, runId)
+        setView('chat')
+        return
+      }
+      handleSessionDrop(pane.paneId, 'right', { workspacePath: path, runId })
+    },
     onRenameRunInWorkspace: (path: string, runId: string, goal: string) =>
       void onRenameRunInWorkspace(path, runId, goal),
     onDeleteRunInWorkspace: (path: string, runId: string) => void onDeleteRunInWorkspace(path, runId),
     onExportRunInWorkspace: (path: string, runId: string) => void onExportRunInWorkspace(path, runId),
     onCopyRunLinkInWorkspace,
     onLoadOlderRuns: (path: string) => void loadOlderWorkspaceRuns(path),
-    isRunOpenInPane: isSessionOpenInPane,
-    isRunFocusedInPane: isSessionFocusedInPane,
-    openInstanceRunId: focusedOpenInstance
+    onOpenWorkspaceFile: (path: string, file: string) => {
+      if (!activeWorkspace || !workspacePathsEqual(path, activeWorkspace)) void switchWorkspace(path)
+      setView('chat')
+      requestOpenWorkspaceFile(path, file)
+    }
   }
 
-  if (loading) {
+  if (loading || setupUndecided) {
     return (
       <AppShell
         view="chat"
         workspacePath={null}
-        sessionQuery=""
-        onSessionQuery={() => {}}
         onOpenSettings={() => {}}
         onOpenMarketplace={() => {}}
-        onOpenTeammates={() => {}}
         onOpenChat={() => {}}
         onOpenHome={() => {}}
+        onOpenUsage={() => {}}
         onNewChat={() => {}}
         {...shellWorkspaceProps}
         loading
@@ -2271,28 +2748,32 @@ function App() {
     <AppShell
       view={view}
       workspacePath={activeWorkspace}
-      navigationMode={settings.navigationMode}
-      onDismissRunsError={clearRunsError}
-      sessionQuery=""
-      onSessionQuery={setSessionQuery}
+      firstRun={view === 'home' && showSetup ? { workspace: setupChosenWorkspace } : null}
+      drafts={{ items: taskDrafts, actions: draftActions, open: openDraft }}
       onOpenSettings={() => {
         setView('settings')
       }}
       onOpenFeedback={() => {
-        setSettingsSection('general')
+        setSettingsSection('about')
         setView('settings')
         setFeedbackOpen(true)
       }}
-      onOpenNotificationSettings={() => {
-        setSettingsSection('general')
+      onOpenSettingsSection={(section) => {
+        setSettingsSection(section)
         setView('settings')
       }}
-      focusedRunId={focusedRunId}
       onOpenMarketplace={() => setView('marketplace')}
-      onOpenTeammates={() => setView('teammates')}
       onOpenChat={() => setView('chat')}
       onOpenHome={() => setView('home')}
+      onOpenUsage={() => setView('usage')}
       onNewChat={onNewChat}
+      pinnedRunKeys={settings.pinnedRuns}
+      onTogglePinnedRun={onTogglePinnedRun}
+      onStopRunInWorkspace={(path, runId) => void onStopRunInWorkspace(path, runId)}
+      onResumeRunInWorkspace={(path, runId) => void onResumeRunInWorkspace(path, runId)}
+      onPauseGoalInWorkspace={(path, runId, live) => void onPauseGoalInWorkspace(path, runId, live)}
+      onStopLoopInWorkspace={(path, runId) => void onStopLoopInWorkspace(path, runId)}
+      onReviewTask={(path, runId) => void onReviewTask(path, runId)}
       running={chat.running || chat.pendingRun}
       onChatStop={onChatStop}
       onCloseChat={() => {
@@ -2317,9 +2798,9 @@ function App() {
             onSectionChange={setSettingsSection}
             feedbackOpen={feedbackOpen}
             onFeedbackOpenChange={setFeedbackOpen}
-            onClose={() => setView('chat')}
+            backLabel={SETTINGS_BACK_LABELS[settingsReturn]}
+            onClose={() => setView(settingsReturn)}
             onUpdate={update}
-            onReloadSettings={refresh}
             onSaveSecret={saveSecret}
             onClearSecret={removeSecret}
             onAppearanceChange={(partial) => {
@@ -2344,22 +2825,16 @@ function App() {
             effectiveChatSettings={effectiveChatSettings}
             onSetSettingsOverride={setSettingsOverride}
             onModelsRefreshed={() => setModelsRefreshNonce((n) => n + 1)}
-            onOpenComposerModel={() => {
-              setView('chat')
-              window.setTimeout(() => {
-                const trigger = document.querySelector<HTMLButtonElement>(
-                  'button[aria-label="Select model"]'
-                )
-                trigger?.focus()
-                trigger?.click()
-              }, 80)
-              }}
+            onOpenMarketplace={(tab) => {
+              setMarketplaceFocusTab(tab)
+              setView('marketplace')
+            }}
             />
           </Suspense>
         </ErrorBoundary>
       ) : view === 'marketplace' ? (
         <ErrorBoundary
-          title="Marketplace couldn't render"
+          title="Extensions couldn't render"
           resetKey={`${marketplaceFocusServerId ?? ''}:${marketplaceFocusSkillPath ?? ''}:${marketplaceFocusRulePath ?? ''}:marketplace`}
         >
           <Suspense fallback={<ViewSuspenseFallback />}>
@@ -2373,6 +2848,8 @@ function App() {
             focusServerId={marketplaceFocusServerId}
             focusSkillPath={marketplaceFocusSkillPath}
             focusRulePath={marketplaceFocusRulePath}
+            focusManageTab={marketplaceFocusTab}
+            onFocusManageTabConsumed={() => setMarketplaceFocusTab(null)}
             onFocusServerConsumed={() => setMarketplaceFocusServerId(null)}
             onFocusSkillConsumed={() => setMarketplaceFocusSkillPath(null)}
             onFocusRuleConsumed={() => setMarketplaceFocusRulePath(null)}
@@ -2380,18 +2857,25 @@ function App() {
           />
           </Suspense>
         </ErrorBoundary>
-      ) : view === 'teammates' ? (
-        <ErrorBoundary title="Teammates couldn't render" resetKey="teammates">
+      ) : view === 'home' && showSetup ? (
+        <ErrorBoundary title="Set up couldn't render" resetKey="setup">
           <Suspense fallback={<ViewSuspenseFallback />}>
-            <TeammatesView
+            <SetupPage
+              settings={settings}
               secrets={secrets}
-              ollamaBaseUrl={settings.ollamaBaseUrl}
-              customOpenAiBaseUrl={settings.customOpenAiBaseUrl}
-              openWorkspaces={openWorkspaces}
-              activeWorkspacePath={focusedWorkspacePath ?? activeWorkspace}
-              onClose={() => setView('chat')}
-              onStartTeammateChat={onStartTeammateChat}
-              onOpenTaskRun={(path, runId) => void onSelectRunInWorkspace(path, runId)}
+              workspace={setupChosenWorkspace}
+              recents={setupRecents(registry?.recentPaths ?? [], openWorkspaces, scratchPath?.path ?? null)}
+              // The shipped default (off) is nobody's choice: Set up starts on the
+              // recommended mode unless one was set in Settings before this.
+              approvalMode={setupStartingMode(settings.toolApproval.mode)}
+              mcpProtection={settings.toolApproval.mcpProtection !== false}
+              onChangeProvider={() => {
+                setSettingsSection('providers')
+                setView('settings')
+              }}
+              onChooseFolder={setupChooseFolder}
+              onOpenPath={setupOpenPath}
+              onStart={setupStart}
             />
           </Suspense>
         </ErrorBoundary>
@@ -2403,12 +2887,16 @@ function App() {
               activeWorkspace={activeWorkspace}
               runsByWorkspacePath={runsByWorkspacePath}
               activeRuns={shellWorkspaceProps.activeRuns}
-              workspaceHasBackgroundRun={shellWorkspaceProps.workspaceHasBackgroundRun}
               providerIssue={homeProviderIssue}
-              onNewSessionInWorkspace={onNewSessionInWorkspace}
-              onSelectRunInWorkspace={shellWorkspaceProps.onSelectRunInWorkspace}
-              onSwitchWorkspace={shellWorkspaceProps.onSwitchWorkspace}
+              onStartTask={onStartTaskFromHome}
+              onNewTaskInWorkspace={(path) => onNewSessionInWorkspace(path, '')}
+              onOpenTask={shellWorkspaceProps.onSelectRunInWorkspace}
+              onOpenWorkspace={(path) => {
+                shellWorkspaceProps.onSwitchWorkspace(path)
+                requestNavigatorScope(path)
+              }}
               onAddWorkspace={shellWorkspaceProps.onAddWorkspace}
+              onRespondApproval={onRespondApprovalFromHome}
               onOpenProviderSettings={() => {
                 setSettingsSection('providers')
                 setView('settings')
@@ -2417,15 +2905,19 @@ function App() {
                 setMarketplaceFocusServerId(serverId)
                 setView('marketplace')
               }}
-              onStopRunInWorkspace={onStopRunInWorkspace}
-              onResumeRunInWorkspace={onResumeRunInWorkspace}
-              onReviewChangesInWorkspace={(path, runId) => void onReviewChangesInWorkspace(path, runId)}
-              onRefreshWorkspaceRuns={(path) => refreshWorkspaceRuns(path)}
+              onReviewChangesInWorkspace={(path) => void onReviewChangesInWorkspace(path)}
+              onOpenUsage={() => setView('usage')}
               refreshVersion={homeRefreshVersion}
-              isRunOpenInPane={shellWorkspaceProps.isRunOpenInPane}
-              isRunFocusedInPane={shellWorkspaceProps.isRunFocusedInPane}
-              pinnedRunKeys={settings.pinnedRuns}
-              onTogglePinnedRun={onTogglePinnedRun}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      ) : view === 'usage' ? (
+        <ErrorBoundary title="Usage couldn't render" resetKey="usage">
+          <Suspense fallback={<ViewSuspenseFallback />}>
+            <UsagePage
+              openWorkspaces={openWorkspaces}
+              onOpenTask={shellWorkspaceProps.onSelectRunInWorkspace}
+              refreshVersion={homeRefreshVersion}
             />
           </Suspense>
         </ErrorBoundary>
@@ -2469,6 +2961,7 @@ function App() {
               void chatActionsRef.current?.loadEarlierMessages()
             }}
             headingRef={chatHeadingRef}
+            taskTitle={chatTaskTitle}
             onProviderModel={(provider, model) => {
               onSessionProviderModel(
                 focusedParentRunId,
@@ -2496,26 +2989,6 @@ function App() {
                 runId: focusedRunId
               })
             }
-            agentProfileId={getAgentProfileIdForRun(
-              focusedWorkspacePath ?? activeWorkspace,
-              focusedRunId
-            )}
-            onAgentProfileChange={(profileId) =>
-              setAgentProfileIdForRun(
-                focusedWorkspacePath ?? activeWorkspace,
-                focusedRunId,
-                profileId
-              )
-            }
-            onContinueInAgent={() => {
-              setAgentMode('agent', {
-                workspacePath: focusedWorkspacePath ?? undefined,
-                runId: focusedRunId
-              })
-              setComposerDraft(
-                'Implement the approved plan from plan.md (run artifact — read plan.md to load it).'
-              )
-            }}
             onSend={onChatSend}
             onEditAndResend={onChatEditAndResend}
             onRevertToUserMessage={onChatRevertToUserMessage}
@@ -2537,6 +3010,7 @@ function App() {
             onToolToggle={onToolToggle}
             onGroupToggle={onGroupToggle}
             onTurnToggle={onTurnToggle}
+            onDismissRunError={onDismissRunError}
             collapsedTurns={collapsedTurns}
             onApprovalDecision={onApprovalDecision}
             onQuestionSubmit={onQuestionSubmit}
@@ -2565,6 +3039,7 @@ function App() {
             }
             getInstanceController={getRunController}
             openChangesRequest={openChangesRequest}
+            openChangesScope={openChangesScope}
             onOpenChangesRequestHandled={consumeOpenChangesRequest}
           />
         </ErrorBoundary>
@@ -2572,9 +3047,11 @@ function App() {
       <LiveRegion />
       <ToastHost />
       {confirmDialog}
+      {rewindDialog}
       <ToolApprovalOnboardingModal
         open={approvalOnboardingOpen}
         error={settingsError}
+        mcpProtection={settings.toolApproval.mcpProtection !== false}
         onChoose={(mode) => {
           void completeApprovalOnboarding(mode)
         }}

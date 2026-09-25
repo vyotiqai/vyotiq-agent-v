@@ -136,7 +136,7 @@ export function BrowserSnapshotBody({ tool, loading, loadFailed }: ToolBodyProps
           <img
             src={screenshotSrc}
             alt="Browser snapshot"
-            className="max-h-48 w-full rounded border border-border/60 object-contain object-top"
+            className="max-h-48 w-full rounded border border-border object-contain object-top"
             onError={() => {
               setScreenshotFailed(true)
               setScreenshotSrc(null)

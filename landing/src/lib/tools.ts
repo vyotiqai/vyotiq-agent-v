@@ -62,10 +62,16 @@ const EXPLICIT: { title: string; match: (n: string) => boolean }[] = [
     match: (n) => n.endsWith('_agent_instance')
   },
   {
+    title: 'Agent-written tools',
+    match: (n) => n === 'build_tool'
+  },
+  {
     title: 'Planning & memory',
     match: (n) =>
       n.startsWith('memory_') ||
-      ['todo_write', 'create_plan', 'create_goal', 'update_goal', 'ask_question', 'switch_mode'].includes(n)
+      ['todo_write', 'create_plan', 'check_done_when', 'create_goal', 'update_goal', 'ask_question', 'switch_mode'].includes(
+        n
+      )
   }
 ]
 

@@ -45,10 +45,6 @@ function writeStatus(
     goal?: string
     error?: string
     workspacePath?: string
-    agentProfileId?: string
-    agentProfileName?: string
-    agentProfileSnapshot?: Record<string, unknown>
-    runtime?: 'local' | 'cloud'
   }
 ): void {
   mkdirSync(dir, { recursive: true })
@@ -85,34 +81,6 @@ describe('listRuns / interruptOrphanRuns', () => {
     const result = await listRuns(workspace)
     expect(result.runs.map((r) => r.runId)).toEqual(['ws-run'])
     expect(result.capped).toBe(false)
-  })
-
-  it('includes profile snapshot and runtime in run summaries', async () => {
-    const snapshot = {
-      version: 1,
-      id: 'scout',
-      name: 'Scout',
-      persona: 'Investigate carefully.',
-      scope: 'global',
-      runtime: 'cloud'
-    }
-    writeStatus(resolveRunDir(workspace, 'profile-run'), {
-      status: 'done',
-      updatedAt: '2026-01-03T00:00:00.000Z',
-      workspacePath: workspace,
-      agentProfileId: 'scout',
-      agentProfileName: 'Scout',
-      agentProfileSnapshot: snapshot,
-      runtime: 'cloud'
-    })
-
-    const result = await listRuns(workspace)
-    expect(result.runs[0]).toMatchObject({
-      runId: 'profile-run',
-      agentProfileId: 'scout',
-      agentProfileSnapshot: snapshot,
-      runtime: 'cloud'
-    })
   })
 
   it('reports capped when more than 30 runs exist', async () => {
@@ -617,6 +585,26 @@ describe('listRuns / interruptOrphanRuns', () => {
     expect(result.runs.find((r) => r.runId === 'live-run')?.status).toBe('running')
 
     clearRunAbort('live-run')
+  })
+
+  it('lists a workspace with no sessions root as empty without warning', async () => {
+    // Nothing has created this workspace's storage, so its sessions root is
+    // missing; reconciliation used to warn ENOENT on every uncached listing.
+    const warn = vi.fn()
+    const { setLoggerBackend, getLoggerBackend } = await import('@shared/logger')
+    const prev = getLoggerBackend()
+    setLoggerBackend({
+      log: (level, message, fields) => {
+        if (level === 'warn') warn(message, fields)
+      }
+    })
+    try {
+      const result = await listRuns(workspace)
+      expect(result.runs).toEqual([])
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      setLoggerBackend(prev)
+    }
   })
 
   it('syncMessages rewrites messages.jsonl from client history', () => {

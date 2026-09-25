@@ -60,8 +60,8 @@ async function resolveBranchBlock(workspacePath: string): Promise<string> {
       const s = statusRes.data.status
       parts.push(
         `Branch: ${s.branch && s.branch !== 'HEAD' ? s.branch : '(detached)'}`,
-        `Changed files: ${s.fileCount}${s.truncated ? ' (truncated)' : ''}`,
-        `+/-: +${s.added} / -${s.removed}`
+        `Uncommitted files: ${s.fileCount}${s.truncated ? ' (truncated)' : ''}`,
+        `Uncommitted +/-: +${s.added} / -${s.removed}`
       )
       if (s.files.length) {
         parts.push(
@@ -83,11 +83,17 @@ async function resolveBranchBlock(workspacePath: string): Promise<string> {
     // continue to diff
   }
 
-  if (window.vyotiq.gitDiff) {
+  if (window.vyotiq.gitBranchDiff) {
     try {
-      const diffRes = await window.vyotiq.gitDiff({ workspacePath })
+      // The branch against where it left its base — its commits and what is
+      // uncommitted. With no base apart from it: the uncommitted changes, said so.
+      const diffRes = await window.vyotiq.gitBranchDiff(workspacePath)
       if (diffRes.ok) {
-        parts.push('', '### Diff', diffRes.data.content)
+        const d = diffRes.data
+        const heading = d.base
+          ? `### Diff: ${d.branch} against ${d.base} — ${d.commits} ${d.commits === 1 ? 'commit' : 'commits'} since it left ${d.base}, and uncommitted changes`
+          : `### Diff: uncommitted changes${d.branch ? ` on ${d.branch}` : ''} — it has no base branch apart from itself`
+        parts.push('', heading, d.content)
       } else {
         parts.push('', `Diff unavailable: ${diffRes.error}`)
       }

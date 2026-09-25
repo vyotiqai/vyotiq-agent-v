@@ -17,7 +17,7 @@ export function PageHeader({
   return (
     <header
       className={cn(
-        bordered && 'mb-1 border-b border-border/30 pb-4 pt-1',
+        bordered && 'mb-1 border-b border-border/40 pb-4 pt-1',
         trailing ? 'flex flex-wrap items-start justify-between gap-3' : undefined,
         className
       )}

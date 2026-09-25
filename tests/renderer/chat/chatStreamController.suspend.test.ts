@@ -39,7 +39,6 @@ describe('createChatStreamController', () => {
       return diskPayload
     })
 
-    // @ts-expect-error test bridge
     window.vyotiq = {
       loadRun,
       loadRunEvents,

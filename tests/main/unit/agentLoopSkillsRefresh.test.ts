@@ -72,7 +72,6 @@ vi.mock('@main/agent/context', async (importOriginal) => {
         estimatedTokens: 100,
         layers: { system: 10, history: 50, tools: 20, buffer: 20 },
         overflow: false,
-        anthropicNative: undefined,
         compaction: null
       }
     },

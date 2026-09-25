@@ -7,7 +7,6 @@ import {
   OPTIONAL_BUILTIN_NAMES,
   toolCatalogFingerprint
 } from '@main/agent/context/toolsBudget'
-import { toolsBudgetFromRaw } from '@shared/domain/contextBudget'
 
 function tool(name: string, description: string): ToolDefinition {
   return {

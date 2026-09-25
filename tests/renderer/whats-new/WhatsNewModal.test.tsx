@@ -82,33 +82,32 @@ describe('WhatsNewModal gate', () => {
     expect(window.localStorage.getItem(LAST_SEEN_UPDATE_VERSION_KEY)).toBe('1.2.0')
   })
 
-  it('shows the modal with categorized sections when the app was updated', async () => {
+  it('names the version, the one it replaced, and each item by its lead', async () => {
     setLastSeen('1.1.0')
     seedPendingNotes({
       version: '1.2.0',
-      notesText: '## Features\n- Faster streaming',
+      notesText: '## Added\n- **Faster streaming.** Tokens arrive as they are made.',
       notesSections: [
-        { heading: 'Features', items: ['Faster streaming'] },
-        { heading: 'Fixes', items: ['Scroll fix'] },
+        { heading: 'Added', items: ['**Faster streaming.** Tokens arrive as they are made.'] },
+        { heading: 'Fixed', items: ['Scroll fix.'] },
         { heading: 'Random heading', items: ['Something else'] }
       ]
     })
     const { shellOpenExternal } = installBridge('1.2.0')
     render(<WhatsNewModal />)
 
-    const dialog = await screen.findByRole('dialog')
-    expect(dialog).toBeTruthy()
-    expect(screen.getByText('Welcome to Vyotiq v1.2.0')).toBeTruthy()
-    expect(screen.getByText(/since your last version \(v1\.1\.0\)/)).toBeTruthy()
-    // Known categories map onto the canonical emoji headings…
-    expect(screen.getByRole('heading', { name: '🚀 Features' })).toBeTruthy()
+    const dialog = await screen.findByRole('dialog', { name: 'Agent V 1.2.0' })
+    expect(dialog.textContent).toContain('What’s new')
+    expect(screen.getByText('from 1.1.0')).toBeTruthy()
+    // The release's own headings, Added read as New…
+    expect(screen.getByRole('heading', { name: 'New' })).toBeTruthy()
     expect(screen.getByText('Faster streaming')).toBeTruthy()
-    expect(screen.getByRole('heading', { name: '🛠️ Fixes & Stability' })).toBeTruthy()
+    expect(screen.queryByText(/Tokens arrive/)).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Fixed' })).toBeTruthy()
     expect(screen.getByText('Scroll fix')).toBeTruthy()
-    // …unknown headings pass through unchanged.
+    // …and one it does not know keeps its own words.
     expect(screen.getByRole('heading', { name: 'Random heading' })).toBeTruthy()
     expect(screen.getByText('Something else')).toBeTruthy()
-    expect(screen.queryByRole('heading', { name: '⚡ Performance Improvements' })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Full release notes' }))
     await waitFor(() => expect(shellOpenExternal).toHaveBeenCalledWith(GITHUB_URL))
@@ -139,8 +138,8 @@ describe('WhatsNewModal gate', () => {
     installBridge('1.2.0')
     render(<WhatsNewModal />)
 
-    const dialog = await screen.findByRole('dialog')
-    await waitFor(() => expect(document.activeElement).toBe(dialog))
+    await screen.findByRole('dialog')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Got it' })))
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
     await waitFor(() =>
@@ -199,7 +198,7 @@ describe('WhatsNewModal pending notes', () => {
     render(<WhatsNewModal />)
 
     await screen.findByRole('dialog')
-    expect(screen.getByText(/Vyotiq was updated to v1\.2\.0/)).toBeTruthy()
+    expect(screen.getByText(/Agent V was updated to 1\.2\.0/)).toBeTruthy()
     expect(
       screen.getByRole('button', { name: 'Full release notes' })
     ).toBeTruthy()
@@ -217,7 +216,7 @@ describe('WhatsNewModal pending notes', () => {
 
     await screen.findByRole('dialog')
     expect(screen.queryByText('stale item')).toBeNull()
-    expect(screen.getByText(/Vyotiq was updated to v1\.2\.0/)).toBeTruthy()
+    expect(screen.getByText(/Agent V was updated to 1\.2\.0/)).toBeTruthy()
   })
 
   it('consumes Stage A notes and clears the pending key after showing', async () => {

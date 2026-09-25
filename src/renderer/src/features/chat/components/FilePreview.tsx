@@ -35,7 +35,7 @@ export function FilePreview({
   if (kind === 'html') {
     return (
       <div className="flex min-h-0 flex-1 flex-col" data-file-preview="html">
-        <div className="flex shrink-0 items-center gap-1 border-b border-border/40 bg-bg px-2 py-1 text-caption text-muted">
+        <div className="flex shrink-0 items-center gap-1 border-b border-border/60 bg-bg px-2 py-1 text-caption text-muted">
           <button
             type="button"
             onClick={() => setAllowScripts((value) => !value)}

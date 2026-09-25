@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
+import { requireActivePath } from './helpers/seedWorkspace'
 
 let launched: LaunchedApp
 let workspacePath: string
@@ -27,7 +28,7 @@ test.beforeAll(async () => {
   )
   expect(addRes.ok).toBe(true)
   if (!addRes.ok) throw new Error(addRes.error)
-  workspacePath = addRes.data.activePath
+  workspacePath = requireActivePath(addRes.data.activePath)
 
   await launched.window.evaluate(async () => {
     await window.vyotiq.setSettings({ toolApprovalOnboardingDone: true })
@@ -52,14 +53,19 @@ test.afterAll(async () => {
 test('an edit tool card opens its file in the Files panel at the changed line', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) await expand.click()
 
-  const composer = window.getByRole('combobox', { name: 'Message' })
+  const composer = window.getByRole('combobox', { name: 'Brief' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('Edit the target file')
-  await window.getByRole('button', { name: /^send$/i }).click()
+  // A new task starts from its brief on Ctrl+Enter — Enter is a new line there.
+  await window.getByRole('combobox', { name: 'Brief' }).press('Control+Enter')
 
+  // The record lists the edit closed, as one line; opening it shows the diff.
+  const editToggle = window.getByRole('button', { name: /^Edited: src\/target\.ts$/ })
+  await expect(editToggle).toBeVisible({ timeout: 30_000 })
+  await editToggle.click()
   await expect(window.getByText('export const THREE_MARK = 3').first()).toBeVisible({
     timeout: 30_000
   })

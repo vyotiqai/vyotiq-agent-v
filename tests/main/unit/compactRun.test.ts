@@ -139,13 +139,16 @@ describe('ensureSubstantialFold (81cf5721 6-turn / 243-message shape)', () => {
   })
 })
 
-describe('runCompact API surface', () => {
-  it('exports auto + manual wrappers over shared runCompact', async () => {
+describe('compactRun API surface', () => {
+  it('exposes the streaming auto + manual entry points and nothing else', async () => {
     const mod = await import('@main/agent/compactRun')
-    expect(typeof mod.runCompact).toBe('function')
-    expect(typeof mod.autoCompactLlm).toBe('function')
     expect(typeof mod.autoCompactLlmEvents).toBe('function')
     expect(typeof mod.compactRunNow).toBe('function')
-    expect('runSelfCompact' in mod).toBe(false)
+    // Collected-result wrappers over the generators. Every one of these was
+    // unreachable from src/ and kept alive only by this test; a re-added wrapper
+    // is a second compaction path that will drift from the one the loop uses.
+    for (const gone of ['runCompact', 'executeCompact', 'autoCompactLlm', 'runSelfCompact']) {
+      expect(gone in mod).toBe(false)
+    }
   })
 })

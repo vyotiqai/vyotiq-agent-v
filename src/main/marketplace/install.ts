@@ -21,6 +21,7 @@ import {
   type MarketplaceInstallRequest,
   type MarketplaceInstallResult,
   type MarketplaceInstallSource,
+  type MarketplaceCatalogEntry,
   type MarketplaceInstalledItem,
   type MarketplaceKind,
   VyotiqMcpManifestSchema,
@@ -36,7 +37,7 @@ import { resolveSkillMdPath, SKILL_MD, LEGACY_SKILL_MD } from '../agent/skills/p
 import { getSettings, setSettings, enqueueSettingsMutation } from '../settings/settings'
 import { formatError } from '../../shared/errors'
 import { logger } from '../../shared/logger'
-import { browseCatalog, refreshRemoteCatalog } from './catalog'
+import { browseCatalog, loadBundledCatalog, refreshRemoteCatalog } from './catalog'
 import { getInstalledItem, readMarketplaceIndex, upsertInstalledItem } from './indexStore'
 import {
   bundledPackagePath,
@@ -509,6 +510,118 @@ async function registerInstalled(
   return item
 }
 
+/**
+ * Bundled ids `rootId` needs before it can work, deepest-first, minus whatever
+ * is already installed.
+ *
+ * A skill that opens with "call the Skill tool with X" is inert on its own: the
+ * agent loads it, follows the instruction, and the Skill tool throws because X
+ * was never installed. Vendoring an interlinked suite as one card per skill is
+ * what made that reachable, so the catalog records the edges and install walks
+ * them.
+ *
+ * Only bundled entries are followed — resolving a dependency must never reach
+ * the network or widen the ack gate that guards untrusted sources.
+ */
+function bundledDependencyPlan(
+  rootId: string,
+  byId: Map<string, MarketplaceCatalogEntry>
+): string[] {
+  const plan: string[] = []
+  const done = new Set<string>()
+  const onStack = new Set<string>()
+
+  const visit = (id: string): void => {
+    if (done.has(id)) return
+    // A cycle in hand-edited catalog data must not hang the installer; the
+    // integrity test is what keeps it from getting this far.
+    if (onStack.has(id)) {
+      logger.warn('Marketplace dependency cycle ignored', { scope: 'marketplace', id, rootId })
+      return
+    }
+    const entry = byId.get(id)
+    if (!entry) return
+    onStack.add(id)
+    for (const dep of entry.dependsOn ?? []) visit(dep)
+    onStack.delete(id)
+    done.add(id)
+    if (id === rootId) return
+    if (entry.source !== 'bundled' || !entry.bundledPath) return
+    // Leave an existing install exactly as the user has it — same version,
+    // same enabled flag. A dependency is on the package, not on its state.
+    if (getInstalledItem(id)) return
+    plan.push(id)
+  }
+
+  visit(rootId)
+  return plan
+}
+
+/** The bundled catalog keyed by id — read once per install, not once per edge. */
+function bundledCatalogById(): Map<string, MarketplaceCatalogEntry> {
+  return new Map(loadBundledCatalog().packages.map((e) => [e.id, e]))
+}
+
+/** Install the missing half of `bundledDependencyPlan`, returning what was added. */
+async function installBundledDependencies(
+  rootId: string,
+  byId = bundledCatalogById()
+): Promise<string[]> {
+  const plan = bundledDependencyPlan(rootId, byId)
+  if (plan.length === 0) return []
+  const installed: string[] = []
+  for (const depId of plan) {
+    const entry = byId.get(depId)
+    if (!entry?.bundledPath) continue
+    const root = bundledPackagePath(entry.bundledPath)
+    if (!existsSync(root)) {
+      throw new Error(`${rootId} requires "${depId}", which is missing from the bundled packages.`)
+    }
+    const detected = detectPackageAt(root)
+    copyPackageIntoStore(detected.root, detected.id, detected.version)
+    const rel = join(detected.id, detected.version).replace(/\\/g, '/')
+    await registerInstalled(detected, 'bundled', rel)
+    installed.push(detected.id)
+  }
+  logger.info('Marketplace dependencies installed', {
+    scope: 'marketplace',
+    id: rootId,
+    dependencies: installed
+  })
+  return installed
+}
+
+/**
+ * Install declared dependencies that installed packages are missing.
+ *
+ * Packages installed before the catalog recorded its edges are simply broken —
+ * `grill-me` sitting there alone does nothing but instruct the agent to load a
+ * skill that was never copied in. Startup heals that the same way
+ * `repairBundledSkillPackagesFromResources` heals drifted markdown: bundled
+ * content is restored to a state that works, from resources, without asking.
+ *
+ * Removing a dependency on its own is therefore not a supported way to trim the
+ * set — uninstall the package that needs it instead.
+ */
+export async function repairMissingPackageDependencies(): Promise<string[]> {
+  const installedIds = readMarketplaceIndex().items.map((i) => i.id)
+  const byId = bundledCatalogById()
+  const repaired: string[] = []
+  for (const id of installedIds) {
+    try {
+      const added = await installBundledDependencies(id, byId)
+      repaired.push(...added)
+    } catch (err) {
+      logger.warn('Could not restore marketplace dependencies', {
+        scope: 'marketplace',
+        id,
+        err: formatError(err)
+      })
+    }
+  }
+  return repaired
+}
+
 async function materializeToTemp(req: MarketplaceInstallRequest): Promise<{
   root: string
   cleanup: () => void
@@ -694,7 +807,7 @@ export async function installMarketplacePackage(
   const ackRequiredSources = new Set(['registry', 'git', 'npm', 'zip', 'remote', 'path'])
   if (ackRequiredSources.has(req.source) && !settings.marketplace?.remoteInstallAcked) {
     throw new Error(
-      'Acknowledge marketplace install risk in Marketplace → Manage (Package Registry) before installing from registry, git, npm, zip, path, or remote MCP URLs.'
+      'Acknowledge marketplace install risk in Extensions → Registry and trust before installing from registry, git, npm, zip, path, or remote MCP URLs.'
     )
   }
   const { root, cleanup, source } = await materializeToTemp(req)
@@ -722,7 +835,7 @@ export async function installMarketplacePackage(
       )
       if (collision) {
         throw new Error(
-          `MCP id "${detected.id}" already exists as a configured server. Remove it in Marketplace → Manage first.`
+          `MCP id "${detected.id}" already exists as a configured server. Remove it in Extensions first.`
         )
       }
       // Reject remote URL installs that would overwrite a different remote package id collision.
@@ -747,6 +860,9 @@ export async function installMarketplacePackage(
         }
       }
     }
+    // Dependencies first: if one cannot be installed, fail before the store is
+    // touched rather than leaving behind a package whose instructions dead-end.
+    const dependencies = source === 'bundled' ? await installBundledDependencies(detected.id) : []
     const dest = copyPackageIntoStore(detected.root, detected.id, detected.version)
     const rel = join(detected.id, detected.version).replace(/\\/g, '/')
     const item = await registerInstalled(detected, source, rel)
@@ -771,7 +887,10 @@ export async function installMarketplacePackage(
       source
     })
     void dest
-    return authTokenStored === undefined ? { item } : { item, authTokenStored }
+    const result: MarketplaceInstallResult = { item }
+    if (authTokenStored !== undefined) result.authTokenStored = authTokenStored
+    if (dependencies.length > 0) result.dependencies = dependencies
+    return result
   } finally {
     cleanup()
   }

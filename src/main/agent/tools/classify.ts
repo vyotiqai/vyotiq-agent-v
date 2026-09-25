@@ -49,6 +49,8 @@ const SERIAL_APPROVAL_EXEMPT_BUILTIN = new Set([
   'create_plan',
   'create_goal',
   'update_goal',
+  // Writes only the run's checks.json — the agent's own verdicts, no files.
+  'check_done_when',
   'await_agent_instance',
   'spawn_agent_instance',
   'cancel_agent_instance'

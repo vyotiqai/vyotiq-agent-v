@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppError } from '@shared/utils/errors'
 import { IPC } from '@shared/channels'
 import type { AgentEvent } from '@shared/ipc'
+import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -61,6 +62,7 @@ const prepareRewindToUserMessageMock = vi.hoisted(() =>
     writes: { restored: ['a.txt'], checkpointIds: ['cp-1'], skipped: [] as string[] }
   }))
 )
+const invalidateAfterWorkspaceMutationSpy = vi.hoisted(() => vi.fn())
 const fromWebContents = vi.hoisted(() => vi.fn(() => mockWin))
 
 vi.mock('electron', () => ({
@@ -112,7 +114,8 @@ vi.mock('@main/settings/settings', () => ({
     theme: 'system',
     telemetryEnabled: false
   }),
-  setSettings: vi.fn()
+  setSettings: vi.fn(),
+  onSettingsWritten: vi.fn(() => () => {})
 }))
 
 vi.mock('@main/settings/secrets', () => ({
@@ -145,6 +148,18 @@ vi.mock('@main/agent/checkpoints', () => ({
   getWriteCheckpointMeta: vi.fn(() => null)
 }))
 
+// Still the real refresh, recorded so a rewind can be checked for it.
+vi.mock('@main/agent/tools', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/agent/tools')>()
+  return {
+    ...actual,
+    invalidateAfterWorkspaceMutation: (...args: Parameters<typeof actual.invalidateAfterWorkspaceMutation>) => {
+      invalidateAfterWorkspaceMutationSpy(...args)
+      actual.invalidateAfterWorkspaceMutation(...args)
+    }
+  }
+})
+
 vi.mock('@main/agent/harnessApply', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@main/agent/harnessApply')>()
   return {
@@ -164,6 +179,7 @@ vi.mock('@main/agent/providers/modelCache', () => ({
 }))
 
 vi.mock('@main/agent/runRegistry', () => ({
+  registerRunCancelHooks: vi.fn(),
   activeRunCount: vi.fn(() => 0),
   chatCancelResult: vi.fn(),
   cancelRun: vi.fn(),
@@ -259,6 +275,9 @@ vi.mock('@main/logging/sentry', () => ({
 
 import { registerIpc } from '@main/ipc/register'
 import { loadStatus } from '@main/agent/state'
+import { clearWorkspaceIndexSyncTimers } from '@main/agent/workspaceIndex'
+import { getWorkspaces } from '@main/workspace/workspaces'
+import { invalidateWorkspaceFileListCache } from '@main/workspace/fileListCache'
 
 async function flushAsync(): Promise<void> {
   for (let i = 0; i < 5; i++) {
@@ -440,6 +459,55 @@ describe('registerIpc', () => {
         const result = await handlers.get(channel)!({ sender: mockWc, senderFrame: mockMainFrame }, validPayloads[channel])
         expect(result).toEqual({ ok: false, error: 'Workspace is not open' })
       }
+    })
+  })
+
+  describe('workspaceSuggestPaths', () => {
+    let root: string
+
+    beforeEach(() => {
+      root = mkdtempSync(join(tmpdir(), 'vyotiq-suggest-'))
+      writeFileSync(join(root, 'alpha.ts'), '')
+      getWorkspaces().openPaths.push(root)
+    })
+
+    afterEach(() => {
+      const open = getWorkspaces().openPaths
+      open.splice(open.indexOf(root), 1)
+      clearWorkspaceIndexSyncTimers()
+      invalidateWorkspaceFileListCache()
+      rmSync(root, { recursive: true, force: true })
+    })
+
+    async function suggestedPaths(): Promise<unknown> {
+      const result = (await handlers.get(IPC.workspaceSuggestPaths)!(
+        { sender: mockWc, senderFrame: mockMainFrame },
+        { workspacePath: root, query: '.ts' }
+      )) as { ok: boolean; data?: { paths: string[] } }
+      return result.ok ? result.data?.paths : result
+    }
+
+    it('answers from one walk until the Files panel or a close reports a change', async () => {
+      expect(await suggestedPaths()).toEqual(['alpha.ts'])
+      // Written behind the app's back, so only a fresh walk could list it.
+      writeFileSync(join(root, 'beta.ts'), '')
+      expect(await suggestedPaths()).toEqual(['alpha.ts'])
+
+      const created = await handlers.get(IPC.workspaceFileCreate)!(
+        { sender: mockWc, senderFrame: mockMainFrame },
+        { workspacePath: root, parentPath: '', name: 'gamma.ts', kind: 'file', replaceExisting: false }
+      )
+      expect(created).toMatchObject({ ok: true })
+      expect(await suggestedPaths()).toEqual(['alpha.ts', 'beta.ts', 'gamma.ts'])
+
+      writeFileSync(join(root, 'delta.ts'), '')
+      const removed = await handlers.get(IPC.workspacesRemove)!(
+        { sender: mockWc, senderFrame: mockMainFrame },
+        { path: root }
+      )
+      expect(removed).toMatchObject({ ok: true })
+      // The mocked store still lists it as open, so this query shows the close dropped the walk.
+      expect(await suggestedPaths()).toEqual(['alpha.ts', 'beta.ts', 'delta.ts', 'gamma.ts'])
     })
   })
 
@@ -750,95 +818,6 @@ describe('registerIpc', () => {
       expect(runAgentMock).not.toHaveBeenCalled()
     })
 
-    describe('teammate binding on an existing run', () => {
-      beforeEach(() => {
-        vi.mocked(loadStatus).mockReturnValue(null)
-        validateExistingRunStartMock.mockReset()
-        validateExistingRunStartMock.mockReturnValue({ runtime: 'local' as const })
-      })
-
-      // Sends go through the payload shape the composer actually produces —
-      // `agentProfileId` always spelled out, sometimes with no value.
-      const sendWithBinding = async (
-        agentProfileId: string | undefined
-      ): Promise<{ ok: boolean; error?: string; code?: string }> => {
-        runExistsMock.mockReturnValue(true)
-        isActiveMock.mockReturnValue(false)
-        runAgentMock.mockImplementation(async function* () {
-          yield { type: 'status', runId: 'existing-run', status: 'done' } satisfies AgentEvent
-        })
-        const handler = handlers.get(IPC.chatStart)
-        return (await handler!(
-          { sender: mockWc, senderFrame: mockMainFrame },
-          {
-            incremental: true,
-            newMessages: [{ role: 'user' as const, content: 'follow up' }],
-            workspacePath: '/ws',
-            runId: 'existing-run',
-            agentProfileId
-          }
-        )) as { ok: boolean; error?: string; code?: string }
-      }
-
-      const persistedRun = {
-        status: 'done',
-        step: 3,
-        updatedAt: 'now',
-        runtime: 'local'
-      } as ReturnType<typeof loadStatus>
-
-      it('reads a stated binding from the value, not from key presence', async () => {
-        // The composer spells `agentProfileId` out on every send and structured
-        // clone keeps the key when the value is `undefined`. Reading presence
-        // made every send claim to state a binding, so "absent inherits the
-        // run's binding" never applied and ordinary sends were refused.
-        vi.mocked(loadStatus).mockReturnValueOnce(persistedRun)
-        await sendWithBinding(undefined)
-        expect(validateExistingRunStartMock).toHaveBeenLastCalledWith(
-          persistedRun,
-          expect.anything(),
-          { agentProfileId: false, runtime: false }
-        )
-
-        vi.mocked(loadStatus).mockReturnValueOnce(persistedRun)
-        await sendWithBinding('auditer')
-        expect(validateExistingRunStartMock).toHaveBeenLastCalledWith(
-          persistedRun,
-          expect.objectContaining({ agentProfileId: 'auditer' }),
-          { agentProfileId: true, runtime: false }
-        )
-      })
-
-      it('refuses a binding conflict as a client failure, without starting the run', async () => {
-        vi.mocked(loadStatus).mockReturnValueOnce(persistedRun)
-        validateExistingRunStartMock.mockImplementationOnce(() => {
-          throw new AppError('Existing run teammate binding cannot be changed', {
-            code: 'IPC_CLIENT',
-            retriable: false
-          })
-        })
-
-        expect(await sendWithBinding('auditer')).toEqual({
-          ok: false,
-          error: 'Existing run teammate binding cannot be changed',
-          code: 'run_binding_immutable'
-        })
-        expect(runAgentMock).not.toHaveBeenCalled()
-      })
-
-      it('lets a real fault keep its own reporting', async () => {
-        vi.mocked(loadStatus).mockReturnValueOnce(persistedRun)
-        validateExistingRunStartMock.mockImplementationOnce(() => {
-          throw new TypeError('bug in the check')
-        })
-
-        const result = await sendWithBinding('auditer')
-        expect(result.ok).toBe(false)
-        expect(result.code).not.toBe('run_binding_immutable')
-        expect(runAgentMock).not.toHaveBeenCalled()
-      })
-    })
-
     it('marks turn complete on terminal status; clearRunAbort guarded by invokeId', async () => {
       runAgentMock.mockImplementation(async function* () {
         yield { type: 'status', runId: 'run-test', status: 'done' } satisfies AgentEvent
@@ -901,7 +880,7 @@ describe('registerIpc', () => {
         expect(result.error).toMatch(/editMessageIndex out of range/i)
         expect(result.code).not.toBe('IPC_HANDLER')
       }
-      expect(tryRegisterRunAbortMock).toHaveBeenCalledWith('run-edit', '/ws', undefined)
+      expect(tryRegisterRunAbortMock).toHaveBeenCalledWith('run-edit', '/ws')
       expect(clearRunAbortMock).toHaveBeenCalledWith('run-edit', 42)
       expect(runAgentMock).not.toHaveBeenCalled()
     })
@@ -951,6 +930,42 @@ describe('registerIpc', () => {
       expect(result.ok).toBe(true)
       expect(chatCancelResult).toHaveBeenCalledWith('run-revert')
       expect(waitUntilRunInactiveMock).toHaveBeenCalled()
+    })
+
+    it('refreshes the workspace after a file it took back only partway', async () => {
+      runExistsMock.mockReturnValue(true)
+      isActiveMock.mockReturnValue(false)
+      // a.txt lost the later run's write and kept your change: written, yet
+      // listed as edited, with nothing restored.
+      const writes = { restored: [], skipped: [], edited: ['a.txt'], checkpointIds: ['cp-1', 'cp-2'] }
+      prepareRewindToUserMessageMock.mockResolvedValueOnce({
+        messages: [{ role: 'user' as const, content: 'kept' }],
+        writes
+      })
+      invalidateAfterWorkspaceMutationSpy.mockClear()
+
+      const handler = handlers.get(IPC.chatRewind)
+      await expect(handler!({ sender: mockWc, senderFrame: mockMainFrame }, rewindPayload)).resolves.toMatchObject({
+        ok: true
+      })
+
+      expect(invalidateAfterWorkspaceMutationSpy).toHaveBeenCalledWith('/ws')
+    })
+
+    it('leaves the workspace caches alone when no checkpoint was rewound', async () => {
+      runExistsMock.mockReturnValue(true)
+      isActiveMock.mockReturnValue(false)
+      const writes = { restored: [], skipped: [], edited: [], checkpointIds: [] }
+      prepareRewindToUserMessageMock.mockResolvedValueOnce({
+        messages: [{ role: 'user' as const, content: 'kept' }],
+        writes
+      })
+      invalidateAfterWorkspaceMutationSpy.mockClear()
+
+      const handler = handlers.get(IPC.chatRewind)
+      await handler!({ sender: mockWc, senderFrame: mockMainFrame }, rewindPayload)
+
+      expect(invalidateAfterWorkspaceMutationSpy).not.toHaveBeenCalled()
     })
 
     it('maps userMessageIndex errors to user-facing fail', async () => {

@@ -189,7 +189,25 @@ export const SkillFrontmatterSchema = z.object({
   license: z.string().min(1).optional(),
   compatibility: z.string().min(1).max(500).optional(),
   metadata: z.record(z.string(), z.string()).optional(),
-  'allowed-tools': z.string().min(1).optional()
+  'allowed-tools': z.string().min(1).optional(),
+  /**
+   * `true` keeps the skill out of the model's available-skills list: it is an
+   * entry point for a person to reach for, not one the agent should pick from a
+   * description. Slash invocation and the Skill tool still resolve it, so a skill
+   * the user asks for by name always loads.
+   *
+   * Frontmatter is read by a line parser rather than a YAML library, so the value
+   * arrives as text and only the two spellings YAML would call true are honoured.
+   */
+  'disable-model-invocation': z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .transform((v) => {
+      if (v == null) return undefined
+      if (typeof v === 'boolean') return v
+      const t = v.trim().toLowerCase()
+      return t === 'true' || t === 'yes' ? true : undefined
+    })
 })
 export type SkillFrontmatter = z.infer<typeof SkillFrontmatterSchema>
 
@@ -241,7 +259,8 @@ export const PackageContentsSchema = z.object({
       path: z.string(),
       transport: McpTransportSchema.optional(),
       url: z.string().optional(),
-      command: z.string().optional()
+      command: z.string().optional(),
+      args: z.array(z.string()).optional()
     })
   ),
   skills: z.array(
@@ -295,7 +314,17 @@ export const MarketplaceCatalogEntrySchema = z.object({
    */
   auth: McpAuthKindSchema.optional(),
   /** Browse-time mirror of the manifest's `requires`. */
-  requires: z.array(McpRuntimeRequirementSchema).optional()
+  requires: z.array(McpRuntimeRequirementSchema).optional(),
+  /**
+   * Other catalog ids this package hands control to — a skill whose body calls
+   * the Skill tool with another skill's name cannot do its job alone. Installing
+   * pulls these in first (bundled only, never a download), so a one-card install
+   * of an interlinked suite is not a dead end. Not a dependency on a *version*:
+   * an already-installed id is left exactly as the user has it, disabled ones
+   * included. Ids must resolve to installable catalog entries and the graph must
+   * be acyclic — both asserted by the bundled-catalog integrity test.
+   */
+  dependsOn: z.array(MarketplaceSegmentSchema).optional()
 })
 export type MarketplaceCatalogEntry = z.infer<typeof MarketplaceCatalogEntrySchema>
 
@@ -336,7 +365,13 @@ export type MarketplaceInstalledItem = z.infer<typeof MarketplaceInstalledItemSc
 export const MarketplaceInstallResultSchema = z.object({
   item: MarketplaceInstalledItemSchema,
   /** Present when a Bearer token was requested; false if secure storage failed. */
-  authTokenStored: z.boolean().optional()
+  authTokenStored: z.boolean().optional(),
+  /**
+   * Ids pulled in from the entry's `dependsOn` because they were missing. Empty
+   * when nothing extra was needed. The UI names them, so an install that quietly
+   * grew from one package to several is still something the user can see.
+   */
+  dependencies: z.array(z.string().min(1)).optional()
 })
 export type MarketplaceInstallResult = z.infer<typeof MarketplaceInstallResultSchema>
 
@@ -461,7 +496,12 @@ export const McpDetectResultSchema = z.object({
   install: MarketplaceInstallRequestSchema.optional(),
   warnings: z.array(z.string()).default([]),
   /** True when an existing server/package with the same id is already configured. */
-  duplicate: z.boolean().default(false)
+  duplicate: z.boolean().default(false),
+  /**
+   * A catalog package that launches the same server — the same URL, or the
+   * same launcher running the same package — so the UI can offer it instead.
+   */
+  catalogMatch: z.object({ id: z.string().min(1), name: z.string().min(1) }).optional()
 })
 export type McpDetectResult = z.infer<typeof McpDetectResultSchema>
 
@@ -506,6 +546,8 @@ export const McpImportExternalResultSchema = z.object({
 export type McpImportExternalResult = z.infer<typeof McpImportExternalResultSchema>
 
 export const McpScanExternalRequestSchema = z.object({
-  paths: z.array(z.string()).optional()
+  paths: z.array(z.string()).optional(),
+  /** A pasted `mcpServers` config, listed in place of the default paths. */
+  json: z.string().optional()
 })
 export type McpScanExternalRequest = z.infer<typeof McpScanExternalRequestSchema>

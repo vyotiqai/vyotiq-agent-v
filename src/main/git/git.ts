@@ -11,7 +11,6 @@ import type {
   GitStatus,
   GitStatusResult
 } from '../../shared/ipc'
-import { namedGitBranch } from '../../shared/utils/gitBranch'
 import { isSafeWorkspaceRelPath } from '../../shared/utils/workspacePath'
 import { resolveInsideWorkspace } from '../workspace/safePath'
 import { sanitizedTerminalEnv } from '../agent/tools/terminal'
@@ -145,6 +144,34 @@ export async function hasGitCommits(cwd: string): Promise<boolean> {
 }
 
 /**
+ * Create a repository in `cwd`. User-initiated only: nothing in the app calls
+ * this on open, on mount, or on an agent's behalf, and there is no agent tool
+ * for it — the app never creates a repository the user did not ask for.
+ *
+ * Refuses when `cwd` is already inside one (isGitRepo walks ancestors), so a
+ * workspace opened at a subdirectory of an existing repo can never be shadowed
+ * by a nested one. No `-b`: the default branch name is the user's
+ * `init.defaultBranch`, not ours to decide.
+ */
+export async function initGitRepo(
+  cwd: string
+): Promise<{ ok: true; branch: string | null } | { ok: false; error: string }> {
+  if (!(await gitAvailable())) {
+    return { ok: false, error: 'Git is not installed or not on PATH' }
+  }
+  if (isGitRepo(cwd)) {
+    return { ok: false, error: 'This workspace is already inside a git repository' }
+  }
+  try {
+    await git(['init'], cwd, WRITE_TIMEOUT_MS)
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+  // Unborn HEAD still names its branch, so this is the real one, not a guess.
+  return { ok: true, branch: await currentGitBranch(cwd) }
+}
+
+/**
  * Best-effort ahead/behind counts vs the current branch's upstream
  * (`rev-list --left-right --count @{upstream}...HEAD`): left = upstream
  * (behind), right = HEAD (ahead). Null when no upstream exists (never pushed
@@ -204,11 +231,51 @@ async function gitDiffStdout(args: string[], cwd: string, timeout: number): Prom
   }
 }
 
+/**
+ * Run git with the app's non-interactive environment. Throws with git's own
+ * stderr on a non-zero exit — callers that need a quiet read use their own.
+ */
+export function runGit(args: string[], cwd: string, timeout = WRITE_TIMEOUT_MS): Promise<string> {
+  return git(args, cwd, timeout)
+}
+
 async function gitQuiet(args: string[], cwd: string, timeout: number): Promise<string | null> {
   try {
     return await git(args, cwd, timeout)
   } catch {
     return null
+  }
+}
+
+/**
+ * `-uall` so real project files under new dirs stay visible (e.g. `sub/new.txt`).
+ * `--no-renames`: porcelain -z rename/copy records are two NUL fields
+ * (`R new\0old\0`); without this, the old path is parsed as `XY + path`
+ * and invents ghosts like `.txt` from `old.txt`.
+ */
+const STATUS_PORCELAIN_ARGS = ['status', '--porcelain=v1', '-z', '-uall', '--no-renames']
+
+type PorcelainRead =
+  | { kind: 'ok'; stdout: string }
+  | { kind: 'too-large' }
+  | { kind: 'failed' }
+
+/**
+ * Status porcelain read that tells "too big to read" apart from "failed".
+ *
+ * A workspace holding a large untracked tree — a vendored toolchain, an MSYS2
+ * install, a VM image — pushes `-uall` output past MAX_BUFFER. Routed through
+ * gitQuiet that surfaced as null, which readGitStatus could not distinguish
+ * from a clean tree, so the Changes panel went silently empty on exactly the
+ * repositories with the most to report. Surface the overflow so status can
+ * mark itself truncated instead of claiming there is nothing to show.
+ */
+async function gitStatusPorcelain(cwd: string): Promise<PorcelainRead> {
+  try {
+    return { kind: 'ok', stdout: await git(STATUS_PORCELAIN_ARGS, cwd, READ_TIMEOUT_MS) }
+  } catch (err) {
+    const code = (err as { code?: unknown } | null)?.code
+    return code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? { kind: 'too-large' } : { kind: 'failed' }
   }
 }
 
@@ -378,17 +445,35 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
   }
   if (!isGitRepo(cwd)) return { kind: 'not_repo' }
 
-  const branchRaw = await gitQuiet(['rev-parse', '--abbrev-ref', 'HEAD'], cwd, READ_TIMEOUT_MS)
-  const branch = namedGitBranch(branchRaw)
-  const hasCommits = await hasGitCommits(cwd)
+  // Process creation dominates this function: every spawn costs a fixed
+  // ~250ms on Windows with real-time scanning, whatever the command does.
+  // What matters is therefore how many rounds we wait for, not how much work
+  // each command performs — so run everything independent in one round.
+  //
+  // `rev-parse --abbrev-ref HEAD` fails outright on an unborn HEAD, which
+  // reported a freshly initialized repository as having no branch at all.
+  // symbolic-ref answers before the first commit and stays null when detached.
+  const unstagedArgs = ['diff', '--numstat', '--no-renames', '-z']
+  const [branch, hasCommits, porcelain, remote, unstagedMap] = await Promise.all([
+    currentGitBranch(cwd),
+    hasGitCommits(cwd),
+    gitStatusPorcelain(cwd),
+    gitQuiet(['remote'], cwd, READ_TIMEOUT_MS),
+    numstatMap(cwd, unstagedArgs)
+  ])
 
+  const hasRemote = Boolean(remote?.trim())
+
+  // Round two — both of these need an answer from round one: the staged diff
+  // needs to know whether HEAD exists, and ahead/behind needs a remote plus
+  // history (`@{upstream}` fails on never-pushed branches, and a best-effort
+  // null keeps chrome honest).
   const stagedArgs = hasCommits
     ? ['diff', '--numstat', '--no-renames', '-z', '--cached', 'HEAD']
     : ['diff', '--numstat', '--no-renames', '-z', '--cached']
-  const unstagedArgs = ['diff', '--numstat', '--no-renames', '-z']
-  const [stagedMap, unstagedMap] = await Promise.all([
+  const [stagedMap, aheadBehind] = await Promise.all([
     numstatMap(cwd, stagedArgs),
-    numstatMap(cwd, unstagedArgs)
+    hasRemote && hasCommits ? readGitAheadBehind(cwd) : Promise.resolve(null)
   ])
 
   const tracked = new Map<string, GitChangedFile>()
@@ -414,19 +499,12 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
     file.binary = file.binary || delta.binary
   }
 
-  // Prefer `-uall` so real project files under new dirs stay visible (e.g. `sub/new.txt`).
-  // Skip dependency trees — home workspace had 637× `node_modules/**` untracked with no
-  // .gitignore; sync line-counting them made git:status multi-second under startup load.
-  // `--no-renames`: porcelain -z rename/copy records are two NUL fields
-  // (`R new\0old\0`); without this, the old path is parsed as `XY + path`
-  // and invents ghosts like `.txt` from `old.txt`.
-  const porcelain = await gitQuiet(
-    ['status', '--porcelain=v1', '-z', '-uall', '--no-renames'],
-    cwd,
-    READ_TIMEOUT_MS
-  )
-  if (porcelain != null) {
-    for (const record of splitNul(porcelain)) {
+  // Untracked paths are recorded here but not yet measured: counting a file's
+  // lines means reading it, and that read is deferred until we know which
+  // files actually ship (see below).
+  const untrackedPaths = new Set<string>()
+  if (porcelain.kind === 'ok') {
+    for (const record of splitNul(porcelain.stdout)) {
       const code = record.slice(0, 2)
       const path = record.slice(3)
       if (!path) continue
@@ -434,12 +512,9 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
       const flags = flagsFromPorcelain(code)
 
       if (code === '??') {
-        const canCount = shouldCountUntrackedLines(path)
-        const added = canCount ? countFileLines(cwd, path) : 0
+        untrackedPaths.add(path)
         tracked.set(path, {
           ...emptyFile(path, 'untracked'),
-          added,
-          addedUnstaged: added,
           binary: false,
           ...flags
         })
@@ -470,6 +545,21 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
   // panel announces the cut instead of pretending the list is everything.
   const files = all.slice(0, GIT_STATUS_FILE_LIMIT)
 
+  // Measure untracked files only once we know which ones ship. Every count is
+  // a synchronous statSync + readFileSync on the main thread, so doing this
+  // inside the parse loop meant a workspace carrying a large untracked tree
+  // (a vendored toolchain, an MSYS2 install, a VM image) read tens of
+  // thousands of files — blocking the process outright — to then discard all
+  // but GIT_STATUS_FILE_LIMIT of them. Untracked files past the cap report 0
+  // added lines; the cap itself is already announced through `truncated`.
+  for (const file of files) {
+    if (!untrackedPaths.has(file.path)) continue
+    if (!shouldCountUntrackedLines(file.path)) continue
+    const lines = countFileLines(cwd, file.path)
+    file.added = lines
+    file.addedUnstaged = lines
+  }
+
   let added = 0
   let removed = 0
   for (const file of all) {
@@ -477,18 +567,13 @@ export async function readGitStatus(cwd: string): Promise<GitStatusResult> {
     removed += file.removed
   }
 
-  const remote = await gitQuiet(['remote'], cwd, READ_TIMEOUT_MS)
-  const hasRemote = Boolean(remote?.trim())
-
-  // Ahead/behind only when a remote exists AND history does — `@{upstream}`
-  // fails on never-pushed branches and best-effort null keeps chrome honest.
-  const aheadBehind =
-    hasRemote && hasCommits ? await readGitAheadBehind(cwd) : null
-
   const status: GitStatus = {
     branch,
     files,
-    truncated: all.length > files.length,
+    // A porcelain read that overflowed MAX_BUFFER is missing the untracked
+    // list entirely. That is a truncation the UI has to announce, not render
+    // as a clean tree.
+    truncated: all.length > files.length || porcelain.kind === 'too-large',
     fileCount: all.length,
     added,
     removed,
@@ -638,6 +723,62 @@ export async function readGitDiff(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return { ok: false, error: message }
+  }
+}
+
+export type BranchDiff = {
+  content: string
+  branch: string | null
+  /** The branch it is compared with — null when there is none apart from it (then: uncommitted changes only). */
+  base: string | null
+  /** Commits on the branch since it left its base. */
+  commits: number
+}
+
+/** The repository's default branch: origin's HEAD, else a local or remote main/master. */
+async function defaultBaseRef(cwd: string): Promise<string | null> {
+  const originHead = (await gitQuiet(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], cwd, READ_TIMEOUT_MS))?.trim()
+  if (originHead) return originHead
+  for (const ref of ['main', 'master', 'origin/main', 'origin/master']) {
+    if ((await gitQuiet(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], cwd, READ_TIMEOUT_MS)) != null) return ref
+  }
+  return null
+}
+
+/**
+ * What the branch changed: the working tree against where the branch left its
+ * base (the merge base with the default branch) — its commits and anything
+ * uncommitted, not the base's own later work. On the base branch itself, or
+ * with no base to find, it is the uncommitted changes, and says so.
+ */
+export async function readBranchDiff(cwd: string): Promise<{ ok: true; data: BranchDiff } | { ok: false; error: string }> {
+  if (!isGitRepo(cwd)) return { ok: false, error: 'Not a git repository' }
+  const branch = await currentGitBranch(cwd)
+  const uncommittedOnly = async (): Promise<{ ok: true; data: BranchDiff } | { ok: false; error: string }> => {
+    const res = await readGitDiff(cwd, { vsHead: true })
+    return res.ok ? { ok: true, data: { content: res.content, branch, base: null, commits: 0 } } : res
+  }
+  if (!branch || !(await hasGitCommits(cwd))) return uncommittedOnly()
+  const base = await defaultBaseRef(cwd)
+  // On the base itself (main, or the remote it tracks), there is nothing to compare with.
+  if (!base || base === branch || base.replace(/^origin\//, '') === branch) return uncommittedOnly()
+  const mergeBase = (await gitQuiet(['merge-base', 'HEAD', base], cwd, READ_TIMEOUT_MS))?.trim()
+  if (!mergeBase) return uncommittedOnly()
+  try {
+    const stdout = await git(['diff', '--no-color', '--no-ext-diff', mergeBase], cwd, READ_TIMEOUT_MS)
+    const count = Number((await gitQuiet(['rev-list', '--count', `${mergeBase}..HEAD`], cwd, READ_TIMEOUT_MS))?.trim())
+    const text = stdout.trimEnd()
+    return {
+      ok: true,
+      data: {
+        content: text ? capDiff(text) : `(no changes against ${base})`,
+        branch,
+        base,
+        commits: Number.isFinite(count) && count > 0 ? count : 0
+      }
+    }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 }
 
@@ -847,7 +988,7 @@ export type CommitOutcome = { committed: boolean; pushed: boolean; detail: strin
 export type CommitMode = 'all' | 'staged'
 
 /** Dirty paths from porcelain, excluding chrome noise trees (node_modules, etc.). */
-async function listNonNoiseDirtyPaths(cwd: string): Promise<string[]> {
+export async function listNonNoiseDirtyPaths(cwd: string): Promise<string[]> {
   const porcelain = await gitQuiet(
     ['status', '--porcelain=v1', '-z', '-uall', '--no-renames'],
     cwd,

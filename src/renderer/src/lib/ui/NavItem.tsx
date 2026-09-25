@@ -52,7 +52,7 @@ export function NavItem({
         className={cn(
           'app-region-no-drag relative inline-grid size-8 place-items-center rounded-lg vy-transition focus-visible:vy-focus-ring',
           'disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]',
-          isActive ? SIDEBAR_NAV_ACTIVE : 'text-secondary hover:bg-surface/60 hover:text-fg active:bg-surface',
+          isActive ? SIDEBAR_NAV_ACTIVE : 'text-secondary hover:bg-surface hover:text-fg active:bg-surface',
           className
         )}
         aria-label={ariaLabel ?? label}
@@ -94,7 +94,7 @@ export function NavItem({
           : variant === 'settings'
             ? 'inline-flex shrink-0 items-center gap-2 sm:flex sm:w-full'
             : 'shrink-0 sm:w-full',
-        isActive ? SIDEBAR_NAV_ACTIVE : 'text-secondary hover:bg-surface/50 hover:text-fg active:bg-surface',
+        isActive ? SIDEBAR_NAV_ACTIVE : 'text-secondary hover:bg-surface hover:text-fg active:bg-surface',
         className
       )}
       aria-label={ariaLabel}

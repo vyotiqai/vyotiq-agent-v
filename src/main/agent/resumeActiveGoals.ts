@@ -11,7 +11,6 @@ import { launchRunFollowUpOrStart } from './launchRunInvoke'
 import { formatGoalContinueMessage, GOAL_AUTO_RESUME_LIMIT } from '../../shared/goalRuntime'
 import { isQuotaExhaustedMessage } from './quotaGate'
 import { isActive } from './runRegistry'
-import { resolveAgentProfile } from '@main/settings/agentProfiles'
 import { logger } from '../../shared/logger'
 
 let resumedOnce = false
@@ -49,12 +48,6 @@ export function resumeActiveGoalsAndLoops(wc: WebContents): void {
         logger.info('Re-armed chat loop', { scope: 'loop', correlationId: runId })
       }
 
-      // A delegated task owns its run's lifecycle. The scheduler's boot pass
-      // either rebuilds the watcher for a still-live run or finalizes it from
-      // durable status; relaunching the same run here would put two owners on
-      // one teammate and re-run delegated work the task already accounted for.
-      if (status.delegatedTaskId) continue
-
       // Quota exhaustion is a billing gate, not an outage (quotaGate contract):
       // relaunching cannot succeed until the plan resets, so an app-start
       // relaunch would re-stop instantly on the same terminal error at every
@@ -68,55 +61,7 @@ export function resumeActiveGoalsAndLoops(wc: WebContents): void {
       }
 
       const goal = readGoal(runDir)
-      if (goal?.status !== 'active') {
-        // Teammate auto-resume: a profile with autoResumeOnLaunch restarts its
-        // own resumable (interrupted) runs at boot — crash recovery the user
-        // opted into per teammate. Covers both interrupted-cancelled and
-        // resumable-error (network/provider outage) stops; runs with active
-        // goals resume above unconditionally.
-        if (
-          (status.status === 'cancelled' || status.status === 'error') &&
-          status.resumable &&
-          status.agentProfileId &&
-          !isActive(runId)
-        ) {
-          const profile = resolveAgentProfile(workspacePath, status.agentProfileId)
-          if (!profile) {
-            logger.warn('Teammate run left resumable but its profile no longer exists', {
-              scope: 'agent',
-              correlationId: runId,
-              profileId: status.agentProfileId
-            })
-          }
-          if (profile?.autoResumeOnLaunch) {
-            const launched = launchRunFollowUpOrStart({
-              workspacePath,
-              runId,
-              wc,
-              mode: status.mode ?? 'agent',
-              message: {
-                role: 'user',
-                content: 'Continue where you left off.',
-                synthetic: true
-              }
-            })
-            if (launched.ok) {
-              logger.info('Auto-resumed teammate run at startup', {
-                scope: 'agent',
-                correlationId: runId,
-                profileId: profile.id
-              })
-            } else {
-              logger.warn('Failed to auto-resume teammate run', {
-                scope: 'agent',
-                correlationId: runId,
-                err: launched.error
-              })
-            }
-          }
-        }
-        continue
-      }
+      if (goal?.status !== 'active') continue
       if (isActive(runId)) continue
 
       // Ceiling on unattended restarts: a goal that has already been relaunched

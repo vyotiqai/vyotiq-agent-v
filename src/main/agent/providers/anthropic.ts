@@ -281,12 +281,6 @@ async function postAnthropicMessages(
 
   push(body, betaStr || undefined)
 
-  if (body.context_management) {
-    const next = { ...body }
-    delete next.context_management
-    push(next, stripAnthropicBetas(betaStr, 'context-management', 'compact'))
-  }
-
   if (body.output_config) {
     const next = { ...body }
     delete next.output_config
@@ -297,7 +291,6 @@ async function postAnthropicMessages(
   }
 
   const plain = { ...body }
-  delete plain.context_management
   delete plain.output_config
   push(plain)
 
@@ -458,48 +451,12 @@ export const anthropicProvider: LlmProvider = {
 
     const body = buildAnthropicBody(req)
 
-    const native = req.anthropicNative
+    // No server-side context edits: `clear_tool_uses` / `compact` are not sent.
+    // LLM summarization (context/compact.ts) is the only shrink path, and the
+    // client's own tool-result trim (context/toolTrim.ts) is the only elision.
     const betas = ['prompt-caching-2024-07-31']
     if (req.responseFormat) {
       betas.push('structured-outputs-2025-11-13')
-    }
-    if (native?.enableContextManagement) {
-      betas.push('context-management-2025-06-27', 'compact-2026-01-12')
-    }
-
-    if (native && native.enableContextManagement) {
-      const clearEdit: Record<string, unknown> = {
-        type: 'clear_tool_uses_20250919',
-        keep: { type: 'tool_uses', value: native.clearToolUsesKeep ?? 0 }
-      }
-      if (
-        typeof native.clearToolUsesTriggerTokens === 'number' &&
-        native.clearToolUsesTriggerTokens > 0
-      ) {
-        clearEdit.trigger = {
-          type: 'input_tokens',
-          value: native.clearToolUsesTriggerTokens
-        }
-      }
-      if (
-        typeof native.clearToolUsesAtLeastTokens === 'number' &&
-        native.clearToolUsesAtLeastTokens > 0
-      ) {
-        clearEdit.clear_at_least = {
-          type: 'input_tokens',
-          value: native.clearToolUsesAtLeastTokens
-        }
-      }
-      if (native.clearToolUsesExcludeTools && native.clearToolUsesExcludeTools.length > 0) {
-        clearEdit.exclude_tools = [...native.clearToolUsesExcludeTools]
-      }
-      const edits: Array<Record<string, unknown>> = [clearEdit]
-      const compactTrigger = native.compactTriggerTokens ?? 8_000
-      edits.push({
-        type: 'compact_20260112',
-        trigger: { type: 'input_tokens', value: compactTrigger }
-      })
-      body.context_management = { edits }
     }
 
     const baseHeaders: Record<string, string> = {

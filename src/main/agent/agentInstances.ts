@@ -2,11 +2,13 @@ import { existsSync, readFileSync } from 'fs'
 import { join, resolve } from 'path'
 import type { WebContents } from 'electron'
 import type { AgentEvent, AgentInteractionMode, ChatMessage } from '../../shared/ipc'
-import { contentDisplayText, RunReceiptSchema } from '../../shared/ipc'
+import { contentDisplayText, DEFAULT_MAX_PARALLEL_INSTANCES, RunReceiptSchema } from '../../shared/ipc'
+import { getSettings } from '@main/settings/settings'
 import { IPC } from '../../shared/channels'
 import { formatAgentInstanceLabel } from '../../shared/utils/agentInstance'
 import { logger } from '../../shared/logger'
 import { abortError } from '../../shared/errors'
+import { AWAIT_AGENT_INSTANCE_MAX_MS } from './schemas/tools'
 import { getMainWindow } from '../app/window'
 import {
   addInstanceWorktree,
@@ -60,6 +62,23 @@ export function getRunIpcSender(runId: string): WebContents | undefined {
     return undefined
   }
   return wc
+}
+
+/** Instances of this task still running. */
+export function runningInstanceCount(parentRunId: string): number {
+  let n = 0
+  for (const [child, parent] of childToParent) {
+    if (parent === parentRunId && isActive(child)) n += 1
+  }
+  return n
+}
+
+function instanceCap(): number {
+  try {
+    return getSettings().maxParallelInstances ?? DEFAULT_MAX_PARALLEL_INSTANCES
+  } catch {
+    return DEFAULT_MAX_PARALLEL_INSTANCES
+  }
 }
 
 function resolveSpawnWebContents(parentRunId: string): WebContents | undefined {
@@ -210,6 +229,10 @@ function capChildText(text: string, max: number): string {
   return `${text.slice(0, max)}\n[...truncated ${text.length - max} chars]`
 }
 
+/**
+ * `noun` labels the bare fallback — reached when a run produced neither a final
+ * message nor a write record.
+ */
 function formatChildSummary(
   workspacePath: string,
   childRunId: string,
@@ -235,7 +258,10 @@ function formatChildSummary(
   return 'Instance finished.'
 }
 
-export async function summarizeChildRunAsync(workspacePath: string, childRunId: string): Promise<string> {
+export async function summarizeChildRunAsync(
+  workspacePath: string,
+  childRunId: string
+): Promise<string> {
   const summary = formatChildSummary(
     workspacePath,
     childRunId,
@@ -367,7 +393,9 @@ export function waitForChildTerminal(
       cleanup()
       reject(
         new Error(
-          `Timed out waiting for ${formatAgentInstanceLabel(childRunId)}. Child is still running — use cancel_agent_instance to stop it, await again with a longer timeout_ms, or pull_agent_instance.`
+          `Timed out waiting for ${formatAgentInstanceLabel(childRunId)} after ${timeoutMs} ms. ` +
+            `Child is still running. Each await_agent_instance call waits at most ${AWAIT_AGENT_INSTANCE_MAX_MS} ms — timeout_ms is capped there, so a longer timeout_ms cannot extend a single wait. ` +
+            'Await again to start another wait, use cancel_agent_instance to stop the child, or pull_agent_instance for its current state.'
         )
       )
     }, timeoutMs)
@@ -561,8 +589,27 @@ export async function spawnAgentInstance(
   if (pathScope?.length) {
     briefLines.push(`Paths: ${pathScope.join(', ')}`)
   }
-  briefLines.push(goalText)
+  // The goal is appended verbatim as the child's background. When the caller's
+  // goal *was* the brief — the Task/subagent alias sends a single prompt and the
+  // arg normalizer backfills the missing brief fields from it — appending it
+  // again would compose the same text into the child prompt up to four times.
+  if (goalText !== outcome && goalText !== doneWhen && !subTasks.includes(goalText)) {
+    briefLines.push(goalText)
+  }
   const composedGoal = briefLines.join('\n')
+  // Settings → Agent → Instances at once. Counted and registered with no await
+  // between, so spawns in one step cannot both pass the check.
+  const cap = instanceCap()
+  const running = runningInstanceCount(input.parentRunId)
+  if (running >= cap) {
+    clearRunAbort(childRunId, registered.invokeId)
+    return {
+      ok: false,
+      error:
+        `This task already has ${running} ${running === 1 ? 'instance' : 'instances'} running — the most Settings → Agent → Instances at once allows (${cap}). ` +
+        'Wait for one with await_agent_instance, then spawn the next.'
+    }
+  }
   registerChildInstance(input.parentRunId, childRunId, input.workspacePath)
   const releaseChildIpc = registerRunIpcSender(childRunId, wc)
 

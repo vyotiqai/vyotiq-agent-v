@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { PlugsConnectedIcon } from '@phosphor-icons/react'
+import { Icon } from '@renderer/lib/icons'
 import { cn } from '@renderer/lib/ui/cn'
 import { useDocumentTheme } from '@renderer/lib/ui/useDocumentTheme'
 import type { ProviderId } from '@shared/ipc'
@@ -14,15 +14,19 @@ import { resolveProviderBrandColor } from './providerBrandColor'
 
 export type ProviderLogoId = ProviderId | string
 
-const SIZE = { sm: 16, md: 20, lg: 24 } as const
+const SIZE = { xs: 12, sm: 16, md: 20, lg: 24 } as const
+
+type LogoTone = 'brand' | 'current'
 
 function BrandMark({
   slug,
   size,
+  tone,
   className
 }: {
   slug: ProviderBrandSlug
   size: number
+  tone: LogoTone
   className?: string
 }) {
   const theme = useDocumentTheme()
@@ -52,14 +56,14 @@ function BrandMark({
 
   if (!brand) {
     // Letter tile while loading or on failure — never a blank gap.
-    return <GenericIcon size={size} className={className} letter={slug.slice(0, 1)} />
+    return <GenericIcon size={size} tone={tone} className={className} letter={slug.slice(0, 1)} />
   }
 
   const color = resolveProviderBrandColor(brand.colorPrimary, theme)
   return (
     <brand.Component
       size={size}
-      style={{ color }}
+      style={tone === 'brand' ? { color } : undefined}
       className={cn('shrink-0', className)}
       aria-hidden="true"
     />
@@ -68,27 +72,28 @@ function BrandMark({
 
 function GenericIcon({
   size,
+  tone,
   className,
   letter
 }: {
   size: number
+  tone: LogoTone
   className?: string
   letter: string
 }) {
   const initial = letter.slice(0, 1).toUpperCase()
-  const hue = [...initial].reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360
   return (
     <span
       className={cn(
         'inline-grid shrink-0 place-items-center rounded-sm font-semibold',
+        // A provider with no mark of its own: its initial on the surface, in every skin.
+        tone === 'brand' ? 'bg-surface-2 text-secondary' : '',
         className
       )}
       style={{
         width: size,
         height: size,
-        fontSize: Math.max(10, size - 6),
-        backgroundColor: `hsl(${hue} 70% 50% / 0.15)`,
-        color: `hsl(${hue} 70% 55%)`
+        fontSize: Math.max(10, size - 6)
       }}
       aria-hidden
     >
@@ -101,32 +106,35 @@ export function ProviderLogo({
   id,
   subProvider,
   size = 'md',
+  tone = 'brand',
   className
 }: {
   id: ProviderLogoId
   subProvider?: string
-  size?: keyof typeof SIZE
+  /** A named size, or pixels for a mark set in a tile of its own. */
+  size?: keyof typeof SIZE | number
+  /**
+   * `brand` draws the mark in the vendor's colour; `current` takes the text
+   * colour around it, for a list of marks that should read as one set.
+   */
+  tone?: LogoTone
   className?: string
 }) {
-  const px = SIZE[size]
+  const px = typeof size === 'number' ? size : SIZE[size]
   const subSlug = subProvider ? resolveProviderBrandSlug(subProvider) : undefined
   const providerSlug = resolveProviderBrandSlug(String(id))
   const slug = subSlug ?? providerSlug
 
   if (!subProvider && id === 'custom') {
     return (
-      <PlugsConnectedIcon
-        size={px}
-        className={cn('shrink-0 text-secondary', className)}
-        aria-hidden="true"
-      />
+      <Icon name="mcp" size={px} className={cn('shrink-0', tone === 'brand' ? 'text-secondary' : '', className)} />
     )
   }
 
   if (slug) {
-    return <BrandMark slug={slug} size={px} className={className} />
+    return <BrandMark slug={slug} size={px} tone={tone} className={className} />
   }
 
   const fallbackKey = (subProvider ?? String(id)).toLowerCase()
-  return <GenericIcon size={px} className={className} letter={fallbackKey.slice(0, 1)} />
+  return <GenericIcon size={px} tone={tone} className={className} letter={fallbackKey.slice(0, 1)} />
 }

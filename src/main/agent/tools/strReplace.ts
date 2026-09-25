@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, readFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, statSync } from 'fs'
 import { dirname } from 'path'
 import { resolveInsideWorkspace, assertResolvedInsideWorkspace } from '../../workspace/safePath'
 import { atomicWriteFile } from '@main/storage/atomicWrite'
 import { withWorkspaceMutation } from '@main/workspace/mutationQueue'
 import { assertWritablePath } from './writeGuard'
+import { memoryFileHint } from './read'
 
 /** Count non-overlapping occurrences of `needle` in `haystack`. */
 export function countOccurrences(haystack: string, needle: string): number {
@@ -78,7 +79,14 @@ export function toolStrReplace(
 
   const resolved = resolveInsideWorkspace(workspaceRoot, path)
   if (!existsSync(resolved)) {
-    throw new Error(`File not found: ${path}`)
+    const memory = memoryFileHint(workspaceRoot, path)
+    throw new Error(memory ? `File not found: ${path}. ${memory}` : `File not found: ${path}`)
+  }
+
+  if (statSync(resolved).isDirectory()) {
+    throw new Error(
+      `Path is a directory: ${path}. str_replace needs a file path — use read to list the directory or edit a file inside it.`
+    )
   }
 
   const original = readFileSync(resolved, 'utf8')

@@ -10,6 +10,7 @@ const VYOTIQ_INVOKE_MAP: Record<
   Exclude<
     keyof VyotiqApi,
     | 'platform'
+    | 'pathForFile'
     | 'onChatEvent'
     | 'onToolApprovalRequest'
     | 'onAgentQuestionRequest'
@@ -29,7 +30,6 @@ const VYOTIQ_INVOKE_MAP: Record<
     | 'onNotificationActivate'
     | 'onDeepLinkOpened'
     | 'onAppearanceCustomCssChanged'
-    | 'onAgentProfileOverridesChanged'
     | 'updater'
     | 'feedback'
     | 'onAccessibilitySupportChanged'
@@ -40,6 +40,16 @@ const VYOTIQ_INVOKE_MAP: Record<
 > = {
   pickWorkspace: IPC.pickWorkspace,
   getWorkspaces: IPC.workspacesGet,
+  getHomeWorkspacePath: IPC.workspacesHome,
+  listTaskDrafts: IPC.taskDraftsList,
+  saveTaskDraft: IPC.taskDraftsSave,
+  deleteTaskDraft: IPC.taskDraftsDelete,
+  rewindRedoStatus: IPC.runRewindRedoStatus,
+  redoRewind: IPC.runRewindRedo,
+  createTaskWorktree: IPC.taskWorktreeCreate,
+  taskWorktreeInfo: IPC.taskWorktreeInfo,
+  mergeTaskWorktree: IPC.taskWorktreeMerge,
+  discardTaskWorktree: IPC.taskWorktreeDiscard,
   addWorkspace: IPC.workspacesAdd,
   removeWorkspace: IPC.workspacesRemove,
   setActiveWorkspace: IPC.workspacesSetActive,
@@ -74,6 +84,9 @@ const VYOTIQ_INVOKE_MAP: Record<
   chatRewindPreview: IPC.chatRewindPreview,
   resolveWrites: IPC.runsResolveWrites,
   readRunArtifact: IPC.runsReadArtifact,
+  openRunArtifact: IPC.runsOpenArtifact,
+  taskFileStats: IPC.runsTaskFileStats,
+  taskFileDiff: IPC.runsTaskFileDiff,
   runStats: IPC.runStats,
   homeActivity: IPC.homeActivity,
   setGoalStatus: IPC.runsSetGoalStatus,
@@ -119,19 +132,11 @@ const VYOTIQ_INVOKE_MAP: Record<
   browserTakeScreenshot: IPC.browserTakeScreenshot,
   browserClearBrowsingData: IPC.browserClearBrowsingData,
   browserPipToggle: IPC.browserPipToggle,
-  agentProfilesList: IPC.agentProfilesList,
-  agentProfilesCreate: IPC.agentProfilesCreate,
-  agentProfilesUpdate: IPC.agentProfilesUpdate,
-  agentProfilesDelete: IPC.agentProfilesDelete,
-  agentProfileOverridesList: IPC.agentProfileOverridesList,
-  agentProfileOverrideSet: IPC.agentProfileOverrideSet,
-  tasksList: IPC.tasksList,
-  tasksEnqueue: IPC.tasksEnqueue,
-  tasksCancel: IPC.tasksCancel,
-  tasksRetry: IPC.tasksRetry,
   gitStatus: IPC.gitStatus,
+  gitInit: IPC.gitInit,
   gitGenerateCommitMessage: IPC.gitGenerateCommitMessage,
   gitDiff: IPC.gitDiff,
+  gitBranchDiff: IPC.gitBranchDiff,
   gitBlame: IPC.gitBlame,
   gitCommit: IPC.gitCommit,
   gitStageAll: IPC.gitStageAll,
@@ -142,6 +147,7 @@ const VYOTIQ_INVOKE_MAP: Record<
   prMerge: IPC.prMerge,
   prDiff: IPC.prDiff,
   prClose: IPC.prClose,
+  prReady: IPC.prReady,
   prEditTitle: IPC.prEditTitle,
   ptyCreate: IPC.ptyCreate,
   ptyList: IPC.ptyList,
@@ -238,6 +244,8 @@ const VYOTIQ_INVOKE_MAP: Record<
   probeNetwork: IPC.networkProbe,
   codeIndexStatus: IPC.codeIndexStatus,
   codeIndexReindex: IPC.codeIndexReindex,
+  codeIndexPause: IPC.codeIndexPause,
+  codeIndexResume: IPC.codeIndexResume,
   processMetrics: IPC.processMetrics,
   listNotifications: IPC.notificationsList,
   markNotificationsRead: IPC.notificationsMarkRead,
@@ -286,6 +294,7 @@ const VYOTIQ_PUSH_MAP: Record<
 > = {
   onChatEvent: IPC.chatEvent,
   onToolApprovalRequest: IPC.toolApprovalRequest,
+  onSettingsChanged: IPC.settingsChanged,
   onAgentQuestionRequest: IPC.agentQuestionRequest,
   onWindowMaximizedChanged: IPC.windowMaximizedChanged,
   onWindowFocusChanged: IPC.windowFocusChanged,
@@ -298,15 +307,13 @@ const VYOTIQ_PUSH_MAP: Record<
   onDictationStatus: IPC.dictationStatusEvent,
   onGithubAuthStatus: IPC.githubAuthStatusEvent,
   onSkillsChanged: IPC.skillsChanged,
-  onAgentProfilesChanged: IPC.agentProfilesChanged,
-  onAgentProfileOverridesChanged: IPC.agentProfileOverridesChanged,
-  onTasksChanged: IPC.tasksChanged,
   onNotificationsChanged: IPC.notificationsChanged,
   onNotificationActivate: IPC.notificationsActivate,
   onDeepLinkOpened: IPC.deepLinkOpened,
   onAppearanceCustomCssChanged: IPC.appearanceCustomCssChanged,
   onAccessibilitySupportChanged: IPC.accessibilitySupportChanged,
-  onGitStatusChanged: IPC.gitStatusChanged
+  onGitStatusChanged: IPC.gitStatusChanged,
+  onAgentContextChanged: IPC.agentContextChanged
 }
 
 /** Namespaced VyotiqApi surfaces (window.vyotiq.updater / .feedback). */

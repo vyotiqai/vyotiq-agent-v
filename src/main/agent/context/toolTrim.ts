@@ -6,11 +6,6 @@ import {
   isDurableToolResultName
 } from './durableToolResults'
 
-/** Stub text for cleared ephemeral tool bodies. */
-function clearedToolStub(_text: string): string {
-  return CLEARED_TOOL_RESULT_STUB
-}
-
 /**
  * Collapse old ephemeral tool bodies; never stub durable tools (ask_question,
  * todo_write, memory_*). File `read` is clearable. Kept and durable bodies pass
@@ -54,9 +49,13 @@ export function trimToolResults(
       return m
     }
     const text = contentToText(m.content)
-    const stub = clearedToolStub(text)
-    if (!keep.has(i) && text && text !== stub && !text.endsWith(CLEARED_TOOL_RESULT_STUB)) {
-      return { ...m, content: stub }
+    if (
+      !keep.has(i) &&
+      text &&
+      text !== CLEARED_TOOL_RESULT_STUB &&
+      !text.endsWith(CLEARED_TOOL_RESULT_STUB)
+    ) {
+      return { ...m, content: CLEARED_TOOL_RESULT_STUB }
     }
     return m
   })

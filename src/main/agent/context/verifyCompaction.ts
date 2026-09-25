@@ -1,6 +1,7 @@
 import {
   isPlausibleWorkspaceFilePath,
   normalizeWorkspaceRelPath,
+  pathCandidatesIn,
   type FoldFacts
 } from './foldFacts'
 
@@ -44,6 +45,31 @@ function coverageNeeded(fileCount: number): number {
   )
 }
 
+/**
+ * Failures that make the whole summary untrustworthy, as opposed to merely
+ * incomplete.
+ *
+ * A refusal is not a summary, and an invented path is a claim about work that
+ * never happened — neither can be repaired from the extracted facts, so both
+ * are worth a second summarizer call and, failing that, discarding the fold.
+ * Every other kind is an *omission*: `pinFoldFacts` splices the missing fact
+ * back verbatim from the same extraction the verifier scored against, which is
+ * both lossless and free.
+ */
+const UNTRUSTWORTHY_KINDS = new Set<CompactionVerifyFailureKind>([
+  'refusal',
+  'invented_path'
+])
+
+export function isUntrustworthy(failure: CompactionVerifyFailure): boolean {
+  return UNTRUSTWORTHY_KINDS.has(failure.kind)
+}
+
+/** Failures that must not be repaired by pinning — retry, then discard the fold. */
+export function untrustworthy(result: CompactionVerifyResult): CompactionVerifyFailure[] {
+  return result.failures.filter(isUntrustworthy)
+}
+
 /** IPC / CompactionRecord cap — preload drops events that exceed this. */
 export const MAX_VERIFY_FAILURES = 16
 
@@ -52,9 +78,6 @@ export function clipVerifyFailures(lines: readonly string[]): string[] {
   return lines.slice(0, MAX_VERIFY_FAILURES)
 }
 
-const PATH_TOKEN_RE =
-  /(?:^|[\s`"'([<])((?:[\w.-]+\/)+[\w.-]+\.[A-Za-z][\w.-]*|[\w.-]+\.[A-Za-z][\w.-]{1,12})/g
-const BACKTICK_RE = /`([^`]+)`/g
 /** `src/core/llm/{provider,openai,fakellm}.ts` from the d7dcdfbf Files Touched card. */
 const BRACE_PATH_RE = /(?:[\w.-]+\/)*[\w.-]*\{[^{}]+\}[\w./\\-]*\.[A-Za-z][\w.-]*/g
 
@@ -152,13 +175,8 @@ function pushUniquePath(into: string[], raw: string): void {
 /** Path tokens inside one Files Touched bullet — never the whole annotated line. */
 function extractPathsFromFilesTouchedBullet(bullet: string, into: string[]): void {
   const before = into.length
-  for (const match of bullet.matchAll(BACKTICK_RE)) {
-    pushUniquePath(into, match[1] ?? '')
-  }
-  PATH_TOKEN_RE.lastIndex = 0
-  let token: RegExpExecArray | null
-  while ((token = PATH_TOKEN_RE.exec(bullet))) {
-    pushUniquePath(into, token[1] ?? '')
+  for (const candidate of pathCandidatesIn(bullet)) {
+    pushUniquePath(into, candidate)
   }
   if (into.length === before) {
     const stripped = bullet.replace(/^[*_`]+|[*_`]+$/g, '').trim()

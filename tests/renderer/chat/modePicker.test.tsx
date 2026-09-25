@@ -51,8 +51,20 @@ describe('ModePicker', () => {
     fireEvent.keyDown(window, { key: '.', ctrlKey: true })
     expect(onModeChange).toHaveBeenCalledWith('ask')
     onModeChange.mockClear()
+    // Two modes: forward and reverse are the same hop. Plan used to sit
+    // between them, which is what made the two directions differ.
     fireEvent.keyDown(window, { key: '.', ctrlKey: true, shiftKey: true })
-    expect(onModeChange).toHaveBeenCalledWith('plan')
+    expect(onModeChange).toHaveBeenCalledWith('ask')
+  })
+
+  it('falls back to Agent when handed a mode that no longer exists', () => {
+    const onModeChange = vi.fn()
+    // @ts-expect-error legacy persisted value: Plan was merged into Agent.
+    render(<ModePicker mode="plan" onModeChange={onModeChange} />)
+    // Renders as Agent rather than blank, and cycles from Agent to Ask.
+    expect(screen.getByRole('button', { name: /Agent mode/ })).toBeTruthy()
+    fireEvent.keyDown(window, { key: '.', ctrlKey: true })
+    expect(onModeChange).toHaveBeenCalledWith('ask')
   })
 
   it('does not cycle from a generic input', () => {

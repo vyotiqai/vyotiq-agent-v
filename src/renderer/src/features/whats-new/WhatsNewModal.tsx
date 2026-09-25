@@ -1,156 +1,132 @@
-import { useEffect, useRef, type ReactElement } from 'react'
-import { VyotiqMark } from '@renderer/lib/brand'
+import { useId, useRef, type ReactElement } from 'react'
 import type { ReleaseNotesSection } from '@shared/ipc/schemas/updater'
+import { releaseNoteHeadline } from '@shared/utils/releaseNotes'
+import { Dialog } from '@renderer/lib/a11y/Dialog'
+import { VyotiqMark } from '@renderer/lib/brand'
+import { Icon, type IconName } from '@renderer/lib/icons'
+import { Button } from '@renderer/lib/ui'
+import { SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { useWhatsNew } from './useWhatsNew'
 
 /** Repo hosting the per-version release pages linked from the modal. */
 const RELEASES_URL = 'https://github.com/vyotiqai/vyotiq-agent-v-releases'
 
 /**
- * Categorize a parsed `## Heading` onto the canonical display heading when it
- * matches a known category; unknown headings pass through unchanged.
+ * How a release-notes heading reads here. The notes are written under Added,
+ * Improved, Fixed, Security, Removed and Known issues; "Added" reads as New,
+ * and a heading this does not know keeps its own words.
  */
-function displayHeading(heading: string): string {
-  const normalized = heading.toLowerCase()
-  if (normalized.includes('feature')) return '🚀 Features'
-  if (/fix|stability|bug/.test(normalized)) return '🛠️ Fixes & Stability'
-  if (normalized.includes('performance')) return '⚡ Performance Improvements'
-  return heading
+const SECTION_LOOK: Record<string, { label: string; icon: IconName }> = {
+  added: { label: 'New', icon: 'skill' },
+  new: { label: 'New', icon: 'skill' },
+  improved: { label: 'Improved', icon: 'effort' },
+  fixed: { label: 'Fixed', icon: 'check' },
+  security: { label: 'Security', icon: 'shield' },
+  removed: { label: 'Removed', icon: 'minus' },
+  'known issues': { label: 'Known issues', icon: 'warning' }
 }
 
-function SectionList({ sections }: { sections: ReleaseNotesSection[] }): ReactElement {
+export function sectionLook(heading: string): { label: string; icon: IconName } | null {
+  const trimmed = heading.trim()
+  if (!trimmed) return null
+  return SECTION_LOOK[trimmed.toLowerCase()] ?? { label: trimmed, icon: 'note' }
+}
+
+function Sections({ sections }: { sections: ReleaseNotesSection[] }): ReactElement {
   return (
     <>
-      {sections.map((section, index) => (
-        <div key={section.heading || `section-${index}`} className={index === 0 ? '' : 'mt-3'}>
-          {section.heading ? (
-            <h4 className="inline-flex items-center rounded bg-bg px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg">
-              {displayHeading(section.heading)}
-            </h4>
-          ) : null}
-          <ul className="mt-1.5 space-y-1 text-xs leading-relaxed text-muted">
-            {section.items.map((item) => (
-              <li key={item} className="flex gap-1.5">
-                <span
-                  aria-hidden="true"
-                  className="mt-[7px] size-1 shrink-0 rounded-full bg-accent"
-                />
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+      {sections.map((section, index) => {
+        const look = sectionLook(section.heading)
+        return (
+          <section key={`${section.heading}-${index}`}>
+            {look ? (
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-fg">
+                <Icon name={look.icon} size={13} className="text-muted" />
+                {look.label}
+              </h3>
+            ) : null}
+            <ul className={look ? 'mt-1.5 space-y-1 pl-5 text-sm text-secondary' : 'space-y-1 pl-5 text-sm text-secondary'}>
+              {section.items.map((item, itemIndex) => (
+                <li key={`${itemIndex}-${item}`} className="list-disc marker:text-tertiary">
+                  {releaseNoteHeadline(item)}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )
+      })}
     </>
   )
 }
 
 /**
- * Centered post-restart "What's New" modal (Stage B of the dual-stage update
- * flow). Gated by useWhatsNew: shows only when the running version is newer
- * than the version recorded at the end of the previous run. Renders nothing
- * on first install and on an unchanged version.
+ * What's new, after an update restarts the app: the version now running, the
+ * one it replaced, and the release's items under their headings, each by its
+ * lead sentence. Gated by useWhatsNew — nothing on a first install or an
+ * unchanged version.
  */
 export function WhatsNewModal(): ReactElement | null {
   const { open, currentVersion, lastRunVersion, pendingNotes, dismiss } = useWhatsNew()
-  const dialogRef = useRef<HTMLDivElement>(null)
-
-  // Focus management: focus moves into the modal while it is open (mirrors
-  // UpdateCard's focus behavior).
-  useEffect(() => {
-    if (open) dialogRef.current?.focus()
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
-      e.preventDefault()
-      e.stopPropagation()
-      dismiss()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, dismiss])
+  const titleId = useId()
+  const gotItRef = useRef<HTMLButtonElement>(null)
 
   if (!open || currentVersion == null) return null
 
   const releaseUrl = `${RELEASES_URL}/releases/tag/v${currentVersion}`
-  const hasNotes =
-    pendingNotes != null &&
-    (pendingNotes.notesSections.length > 0 || pendingNotes.notesText.trim().length > 0)
+  const sections = pendingNotes?.notesSections.filter((s) => s.items.length > 0) ?? []
+  const prose = sections.length === 0 ? (pendingNotes?.notesText.trim() ?? '') : ''
 
   return (
-    <div className="fixed inset-0 z-dropdown flex animate-fade-in items-center justify-center bg-overlay p-4">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="whats-new-title"
-        tabIndex={-1}
-        data-whats-new-modal
-        className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-bg text-fg shadow-menu outline-none"
-      >
-        <div aria-hidden="true" className="h-0.5 bg-accent opacity-80" />
-
-        <div className="p-4">
-          <div className="flex items-start gap-3">
-            <div
-              aria-hidden="true"
-              className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface text-accent"
-            >
-              <VyotiqMark size={18} decorative />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-semibold uppercase tracking-[var(--vy-tracking)] text-muted">
-                What’s new
-              </p>
-              <h2 id="whats-new-title" className="text-sm font-semibold">
-                Welcome to Vyotiq v{currentVersion}
-              </h2>
-              {lastRunVersion != null ? (
-                <p className="mt-1 text-xs text-muted">
-                  Here is what changed since your last version (v{lastRunVersion}):
-                </p>
-              ) : null}
-            </div>
+    <Dialog
+      open
+      onClose={dismiss}
+      labelledBy={titleId}
+      useNativeDialog={false}
+      padded={false}
+      initialFocusRef={gotItRef}
+      className="vy-menu flex w-[500px] flex-col overflow-hidden"
+    >
+      <div data-whats-new-modal className="flex min-h-0 flex-col">
+        <div className="flex shrink-0 items-center gap-3 border-b border-border px-5 py-4">
+          <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-lg bg-surface text-fg-strong">
+            <VyotiqMark size={20} decorative />
+          </span>
+          <div className="min-w-0">
+            <div className={SECTION_LABEL}>What’s new</div>
+            <h2 id={titleId} className="text-heading font-semibold text-fg-strong">
+              Agent V {currentVersion}
+            </h2>
           </div>
-
-          <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-border bg-surface p-3">
-            {hasNotes && pendingNotes != null ? (
-              pendingNotes.notesSections.length > 0 ? (
-                <SectionList sections={pendingNotes.notesSections} />
-              ) : (
-                <p className="whitespace-pre-line text-xs leading-relaxed text-muted">
-                  {pendingNotes.notesText}
-                </p>
-              )
-            ) : (
-              <p className="text-xs leading-relaxed text-muted">
-                Vyotiq was updated to v{currentVersion}. See the full release notes for
-                everything that changed.
-              </p>
-            )}
-          </div>
-
-          <div className="mt-3 flex items-center justify-between gap-2">
-            <button
-              type="button"
-              className="text-xs text-muted underline-offset-2 hover:text-fg hover:underline focus-visible:outline focus-visible:outline-accent"
-              onClick={() => void window.vyotiq?.shellOpenExternal(releaseUrl).catch(() => {})}
-            >
-              Full release notes
-            </button>
-            <button
-              type="button"
-              className="rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover focus-visible:outline focus-visible:outline-accent"
-              onClick={dismiss}
-            >
-              Got it
-            </button>
-          </div>
+          <span className="flex-1" />
+          {lastRunVersion != null ? (
+            <span className="shrink-0 font-mono text-caption text-tertiary">from {lastRunVersion}</span>
+          ) : null}
+        </div>
+        <div className="max-h-[min(60vh,32rem)] min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          {sections.length > 0 ? (
+            <Sections sections={sections} />
+          ) : prose ? (
+            <p className="whitespace-pre-line text-sm leading-relaxed text-secondary">{prose}</p>
+          ) : (
+            <p className="text-sm text-secondary">
+              Agent V was updated to {currentVersion}. The release notes list everything that changed.
+            </p>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center border-t border-border px-5 py-3">
+          <button
+            type="button"
+            className="rounded-sm text-xs text-muted vy-transition hover:text-fg focus-visible:vy-focus-ring"
+            onClick={() => void window.vyotiq?.shellOpenExternal(releaseUrl).catch(() => {})}
+          >
+            Full release notes
+          </button>
+          <span className="flex-1" />
+          <Button ref={gotItRef} size="sm" variant="primary" onClick={dismiss}>
+            Got it
+          </Button>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

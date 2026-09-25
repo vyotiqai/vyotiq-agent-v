@@ -14,6 +14,14 @@ export type AgentToolDef = AgentToolHeader & {
   modulePath: string
   /** Stable per-file identity (name + mtimeMs) used for change detection. */
   fingerprint: string
+  /**
+   * SHA-256 of the module's bytes.
+   *
+   * What an approval is granted against. mtime answers "has this file changed
+   * since we last scanned"; only the content answers "is this the code the user
+   * said yes to", which is what an "always allow" has to survive a rewrite.
+   */
+  contentHash: string
 }
 
 /** Outcome of running a tool module in a utility child. */

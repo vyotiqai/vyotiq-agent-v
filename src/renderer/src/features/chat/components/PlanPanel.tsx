@@ -1,45 +1,29 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { cn } from '@renderer/lib/ui'
-import { MarkdownContent } from '@renderer/lib/ui'
-import { allocateHeadingId } from '@renderer/lib/markdown/headingIds'
-import { CHAT_RIGHT_PANEL_BODY } from '@renderer/lib/utils/layout'
-import { handleTabListKeyDown } from '@renderer/lib/utils/tabListKeyboard'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ActionMenu, Button, IconButton, MarkdownContent, cn } from '@renderer/lib/ui'
+import { CHAT_RIGHT_PANEL_BODY, SECTION_LABEL } from '@renderer/lib/utils/layout'
 import type { RunReceipt } from '@shared/ipc'
 import { RunReceiptSchema } from '@shared/ipc'
-import { EmptyPanel, PANEL_SUBTAB_BAR, panelSubtabClass } from './PanelChrome'
-import { TodoChecklist } from './TodoChecklist'
-import { TodoProgressBar } from './TasksCeilingBand'
+import { useRunChecks } from '@renderer/features/task/useRunChecks'
+import { EmptyPanel } from './PanelChrome'
 import { isPlanDraftReady } from '../utils/planDraft'
 import { useRunTodos } from '../hooks/useRunTodos'
 import type { WorkspaceFileOpenOptions } from './FilesPanel'
 
-type ArtifactTab = 'plan' | 'contract' | 'receipt'
+type ArtifactView = 'plan' | 'contract' | 'receipt'
 
 const POLL_MS = 2000
 
-const TAB_IDS: Record<ArtifactTab, string> = {
-  plan: 'plan-tab-plan',
-  contract: 'plan-tab-contract',
-  receipt: 'plan-tab-receipt'
-}
-
-const PANEL_IDS: Record<ArtifactTab, string> = {
-  plan: 'plan-panel-plan',
-  contract: 'plan-panel-contract',
-  receipt: 'plan-panel-receipt'
-}
-
-const TAB_TITLE: Record<ArtifactTab, string> = {
+const VIEW_TITLE: Record<ArtifactView, string> = {
   plan: 'Plan',
   contract: 'Contract',
   receipt: 'Receipt'
 }
 
-const ARTIFACT_TABS: ReadonlyArray<{ id: ArtifactTab; label: string; file: string }> = [
-  { id: 'plan', label: 'Plan', file: 'plan.md' },
-  { id: 'contract', label: 'Contract', file: 'contract.md' },
-  { id: 'receipt', label: 'Receipt', file: 'receipt.json' }
-]
+const VIEW_FILE: Record<ArtifactView, 'plan.md' | 'contract.md' | 'receipt.json'> = {
+  plan: 'plan.md',
+  contract: 'contract.md',
+  receipt: 'receipt.json'
+}
 
 /** Prior-invoke receipt while a new turn is live — hide until interim/final aligns. */
 export function isReceiptStaleForLiveRun(
@@ -58,61 +42,69 @@ export function isReceiptStaleForLiveRun(
   return false
 }
 
-type OutlineHeading = { text: string; id: string; level: 1 | 2 | 3 }
+export type PlanDocument = {
+  /** The `# Title` create_plan writes, when there is one. */
+  title: string | null
+  /** Anything between the title and the first section. */
+  lead: string
+  sections: Array<{ heading: string; body: string }>
+}
 
-/** Max outline rows before “+N more” (h1 omitted from nav when deeper headings exist). */
-export const PLAN_OUTLINE_MAX = 12
-
-export function parsePlanOutline(markdown: string): {
-  headings: OutlineHeading[]
-  checked: number
-  unchecked: number
-} {
-  const all: OutlineHeading[] = []
-  const used = new Map<string, number>()
-  let checked = 0
-  let unchecked = 0
+/**
+ * plan.md as the Plan tab lays it out: its title, then one section per `## `
+ * heading. A heading inside fenced code stays code.
+ */
+export function planDocument(markdown: string): PlanDocument {
+  let title: string | null = null
+  const lead: string[] = []
+  const sections: Array<{ heading: string; lines: string[] }> = []
+  let fence: string | null = null
   for (const line of markdown.split(/\r?\n/)) {
-    const h = line.match(/^(#{1,3})\s+(.+)$/)
-    if (h?.[1] && h[2]) {
-      const level = h[1].length as 1 | 2 | 3
-      const text = h[2].trim()
-      // Always allocate so ids stay aligned with MarkdownContent headingIds.
-      const id = allocateHeadingId(text, used)
-      all.push({ text, id, level })
+    const mark = /^\s{0,3}(`{3,}|~{3,})/.exec(line)?.[1]
+    if (mark) {
+      if (fence === null) fence = mark[0]!
+      else if (mark[0] === fence) fence = null
+    } else if (fence === null) {
+      const h1 = /^#\s+(.+?)\s*#*\s*$/.exec(line)
+      if (h1 && title === null && sections.length === 0 && !lead.some((l) => l.trim())) {
+        title = h1[1]!
+        continue
+      }
+      const h2 = /^##\s+(.+?)\s*#*\s*$/.exec(line)
+      if (h2) {
+        sections.push({ heading: h2[1]!, lines: [] })
+        continue
+      }
     }
-    if (/^\s*[-*]\s+\[[xX]\]\s+/.test(line)) checked += 1
-    else if (/^\s*[-*]\s+\[\s\]\s+/.test(line)) unchecked += 1
+    ;(sections[sections.length - 1]?.lines ?? lead).push(line)
   }
-  // Skip H1 in the nav when any H2/H3 exists — title already shows in the body.
-  const hasDeeper = all.some((h) => h.level > 1)
-  const headings = hasDeeper ? all.filter((h) => h.level > 1) : all
-  return { headings, checked, unchecked }
+  return {
+    title,
+    lead: lead.join('\n').trim(),
+    sections: sections.map((section) => ({ heading: section.heading, body: section.lines.join('\n').trim() }))
+  }
 }
 
-/** Indent outline rows relative to the shallowest level shown. */
-export function outlineIndentRem(level: 1 | 2 | 3, shallowest: 1 | 2 | 3): number {
-  return Math.max(0, level - shallowest) * 0.65
-}
-
-function scrollToHeading(id: string, root: HTMLElement | null): void {
-  // Prefer getElementById — CSS.escape is missing in some jsdom versions.
-  const el =
-    (root?.ownerDocument ?? document).getElementById(id) ??
-    root?.querySelector(`[id="${id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`)
-  el?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+/**
+ * The record already shows these live — the run's steps from todos.json and
+ * its done-when checks from checks.json — so the document leaves them out
+ * when the run has them, and keeps them when it does not.
+ */
+function recordShows(heading: string, live: { steps: boolean; checks: boolean }): boolean {
+  const h = heading.trim().toLowerCase()
+  return (live.steps && h === 'steps') || (live.checks && h === 'done when')
 }
 
 function receiptStatusTone(status: RunReceipt['status']): string {
   switch (status) {
     case 'done':
-      return 'bg-success/15 text-success'
+      return 'bg-success-soft text-success'
     case 'error':
-      return 'bg-danger/15 text-danger'
+      return 'bg-danger-soft text-danger'
     case 'cancelled':
-      return 'bg-warning/15 text-warning'
+      return 'bg-warning-soft text-warning'
     case 'running':
-      return 'bg-surface text-muted'
+      return 'bg-surface-2 text-muted'
     default: {
       const _exhaustive: never = status
       return _exhaustive
@@ -134,14 +126,14 @@ function PathList({
   const more = paths.length - shown.length
   return (
     <section>
-      <h3 className="m-0 text-xs font-medium uppercase tracking-wide text-muted">{label}</h3>
-      <ul className="mt-1.5 list-none space-y-1 p-0">
+      <h3 className={SECTION_LABEL}>{label}</h3>
+      <ul className="mt-2 list-none space-y-1 p-0">
         {shown.map((p) => (
           <li key={p} className="min-w-0">
             {onOpenFile ? (
               <button
                 type="button"
-                className="block max-w-full truncate font-mono text-xs text-fg/80 underline-offset-2 hover:underline"
+                className="block max-w-full truncate font-mono text-xs text-secondary underline-offset-2 hover:text-fg hover:underline"
                 title={p}
                 onClick={() => onOpenFile(p)}
               >
@@ -172,7 +164,7 @@ function ReceiptSummary({
   const failTop = receipt.failureClusters.slice(0, 5)
   const incomplete = Boolean(receipt.incomplete)
   const statusTone = incomplete
-    ? 'bg-warning/15 text-warning'
+    ? 'bg-warning-soft text-warning'
     : receiptStatusTone(receipt.status)
   const statusLabel = incomplete ? 'incomplete' : receipt.status
 
@@ -210,13 +202,13 @@ function ReceiptSummary({
   }
 
   return (
-    <div className="space-y-4 text-sm" data-receipt-summary>
+    <div className="mt-4 space-y-5 text-sm" data-receipt-summary>
       <section className="min-w-0">
-        <h3 className="m-0 text-xs font-medium uppercase tracking-wide text-muted">Status</h3>
-        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2">
+        <h3 className={SECTION_LABEL}>Status</h3>
+        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
           <span
             className={cn(
-              'inline-flex shrink-0 rounded-md px-1.5 py-0.5 text-2xs font-medium uppercase tracking-wide',
+              'inline-flex h-[18px] shrink-0 items-center rounded-sm px-1.5 text-caption font-medium leading-none',
               statusTone
             )}
             data-receipt-status={statusLabel}
@@ -239,10 +231,8 @@ function ReceiptSummary({
           </p>
         ) : null}
         {receipt.contractExcerpt.trim() ? (
-          <div className="mt-2 rounded-md border border-border/40 bg-surface/60 px-2.5 py-2">
-            <p className="m-0 text-2xs font-medium uppercase tracking-wide text-muted">
-              Contract
-            </p>
+          <div className="mt-3">
+            <p className={SECTION_LABEL}>Contract</p>
             <p className="m-0 mt-1 whitespace-pre-wrap text-xs text-secondary [overflow-wrap:anywhere]">
               {receipt.contractExcerpt.trim()}
             </p>
@@ -251,8 +241,8 @@ function ReceiptSummary({
       </section>
 
       <section className="min-w-0">
-        <h3 className="m-0 text-xs font-medium uppercase tracking-wide text-muted">Tools</h3>
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
+        <h3 className={SECTION_LABEL}>Tools</h3>
+        <div className="mt-2 flex flex-wrap gap-1.5">
           <span className="rounded-md bg-surface px-1.5 py-0.5 text-caption tabular-nums text-fg">
             {receipt.toolStats.totalCalls} calls
           </span>
@@ -273,9 +263,9 @@ function ReceiptSummary({
             {failTop.map((f) => (
               <li
                 key={f.key}
-                className="min-w-0 rounded-md border border-border/30 bg-surface/40 px-2 py-1.5 font-mono text-caption text-muted [overflow-wrap:anywhere]"
+                className="min-w-0 rounded-md bg-danger-soft px-2 py-1.5 font-mono text-caption text-secondary [overflow-wrap:anywhere]"
               >
-                <span className="text-fg/80">{f.count}×</span> {f.key}
+                <span className="text-fg">{f.count}×</span> {f.key}
               </li>
             ))}
           </ul>
@@ -283,8 +273,8 @@ function ReceiptSummary({
       </section>
 
       <section>
-        <h3 className="m-0 text-xs font-medium uppercase tracking-wide text-muted">Diagnostics</h3>
-        <p className="m-0 mt-1.5 text-xs tabular-nums text-fg">
+        <h3 className={SECTION_LABEL}>Diagnostics</h3>
+        <p className="m-0 mt-2 text-xs tabular-nums text-fg">
           {receipt.diagnostics.clean}/{receipt.diagnostics.calls} clean
         </p>
         {receipt.verification ? (
@@ -311,8 +301,8 @@ function ReceiptSummary({
 
       {contextChips.length > 0 ? (
         <section className="min-w-0">
-          <h3 className="m-0 text-xs font-medium uppercase tracking-wide text-muted">Context</h3>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
+          <h3 className={SECTION_LABEL}>Context</h3>
+          <div className="mt-2 flex flex-wrap gap-1.5">
             {contextChips.map((c) => (
               <span
                 key={`${c.label}:${c.value}`}
@@ -329,17 +319,10 @@ function ReceiptSummary({
   )
 }
 
-function receiptToolFailHint(receipt: RunReceipt): string | null {
-  const { toolStats, failureClusters } = receipt
-  if (toolStats.failed <= 0) return null
-  const top = failureClusters[0]?.key
-  return top
-    ? `${toolStats.failed} tool failure${toolStats.failed === 1 ? '' : 's'} · ${top}`
-    : `${toolStats.failed} tool failure${toolStats.failed === 1 ? '' : 's'} — check receipt.json`
-}
-
 /**
- * Docked panel for run plan.md / contract.md / receipt.json artifacts.
+ * The inspector's Plan tab: the plan document only. Its steps, the done-when
+ * checks and the receipt already live in the record with live state; the
+ * contract and the full receipt stay one menu away.
  * Identity must be passed as props — this panel sits outside RunSessionProvider.
  */
 export const PlanPanel = memo(function PlanPanel({
@@ -348,8 +331,6 @@ export const PlanPanel = memo(function PlanPanel({
   running = false,
   invokeId = null,
   active = true,
-  agentMode = 'agent',
-  onContinueInAgent,
   onOpenFile,
   className
 }: {
@@ -360,16 +341,14 @@ export const PlanPanel = memo(function PlanPanel({
   invokeId?: number | null
   /** False while the plan dock tab is CSS-hidden — skip mid-run polling. */
   active?: boolean
-  agentMode?: 'ask' | 'plan' | 'agent'
-  onContinueInAgent?: () => void
   onOpenFile?: (path: string, options?: WorkspaceFileOpenOptions) => void
   className?: string
 }) {
-  const [tab, setTab] = useState<ArtifactTab>('plan')
+  const [tab, setTab] = useState<ArtifactView>('plan')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [openError, setOpenError] = useState<string | null>(null)
   const [content, setContent] = useState<string | null>(null)
   const [receipt, setReceipt] = useState<RunReceipt | null>(null)
-  /** Receipt snapshot for Continue footer while viewing plan.md (not the receipt tab). */
-  const [continueReceipt, setContinueReceipt] = useState<RunReceipt | null>(null)
   /** True when a live run hid a prior/mismatched receipt (not a true absence). */
   const [receiptDeferred, setReceiptDeferred] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -377,20 +356,20 @@ export const PlanPanel = memo(function PlanPanel({
   const wasRunningRef = useRef(running)
   const loadSeqRef = useRef(0)
   const scrollRootRef = useRef<HTMLDivElement | null>(null)
-  const {
-    data: todosData,
-    error: todosError
-  } = useRunTodos({
+  const { data: todosData } = useRunTodos({
     workspacePath,
     runId,
     running,
     active: active && tab === 'plan'
   })
-  const todoItems = todosData?.items ?? []
-  const hasTodos = todoItems.length > 0
+  const hasTodos = (todosData?.items.length ?? 0) > 0
+  // create_plan writes checks.json with plan.md, so the plan's text is the
+  // moment to look again.
+  const checks = useRunChecks(workspacePath, runId, tab === 'plan' ? (content ?? '') : '')
 
   useEffect(() => {
     setTab('plan')
+    setOpenError(null)
   }, [runId])
 
   const parseReceiptText = useCallback(
@@ -421,7 +400,6 @@ export const PlanPanel = memo(function PlanPanel({
         if (seq !== loadSeqRef.current) return
         setContent(null)
         setReceipt(null)
-        setContinueReceipt(null)
         setReceiptDeferred(false)
         setError(null)
         setLoading(false)
@@ -443,7 +421,6 @@ export const PlanPanel = memo(function PlanPanel({
         if (!res.ok) {
           setContent(null)
           setReceipt(null)
-          if (requestedTab === 'receipt') setContinueReceipt(null)
           setReceiptDeferred(false)
           setError(res.error)
           return
@@ -451,7 +428,6 @@ export const PlanPanel = memo(function PlanPanel({
         if (!res.data.exists) {
           setContent(null)
           setReceipt(null)
-          if (requestedTab === 'receipt') setContinueReceipt(null)
           setReceiptDeferred(false)
           setError(null)
           return
@@ -459,7 +435,6 @@ export const PlanPanel = memo(function PlanPanel({
         if (requestedTab === 'receipt') {
           const parsed = parseReceiptText(res.data.content ?? '')
           setReceipt(parsed.receipt)
-          setContinueReceipt(parsed.receipt)
           setReceiptDeferred(parsed.deferred)
           setContent(null)
           setError(parsed.error)
@@ -468,27 +443,11 @@ export const PlanPanel = memo(function PlanPanel({
           setReceipt(null)
           setReceiptDeferred(false)
           setError(null)
-          // Keep Continue footer tool-fail hint accurate while on plan/contract.
-          if (requestedTab === 'plan') {
-            const receiptRes = await window.vyotiq.readRunArtifact({
-              workspacePath,
-              runId,
-              name: 'receipt.json'
-            })
-            if (seq !== loadSeqRef.current) return
-            if (receiptRes.ok && receiptRes.data.exists) {
-              const parsed = parseReceiptText(receiptRes.data.content ?? '')
-              setContinueReceipt(parsed.receipt)
-            } else {
-              setContinueReceipt(null)
-            }
-          }
         }
       } catch (err) {
         if (seq !== loadSeqRef.current) return
         setContent(null)
         setReceipt(null)
-        setContinueReceipt(null)
         setReceiptDeferred(false)
         setError(err instanceof Error ? err.message : 'Failed to load artifact')
       } finally {
@@ -518,17 +477,9 @@ export const PlanPanel = memo(function PlanPanel({
     if (!running || !receipt) return
     if (isReceiptStaleForLiveRun(receipt, { running, invokeId })) {
       setReceipt(null)
-      setContinueReceipt(null)
       setReceiptDeferred(true)
     }
   }, [running, invokeId, receipt])
-
-  useEffect(() => {
-    if (!running || !continueReceipt) return
-    if (isReceiptStaleForLiveRun(continueReceipt, { running, invokeId })) {
-      setContinueReceipt(null)
-    }
-  }, [running, invokeId, continueReceipt])
 
   // Poll while the panel is visible — mid-run edits and idle post-write refresh.
   useEffect(() => {
@@ -539,10 +490,9 @@ export const PlanPanel = memo(function PlanPanel({
     return () => window.clearInterval(id)
   }, [active, workspacePath, runId, load])
 
-  const panelTitle = TAB_TITLE[tab]
   const emptyTitle =
     tab === 'plan'
-      ? 'No plan drafted yet'
+      ? 'No plan yet'
       : tab === 'contract'
         ? 'No contract yet'
         : receiptDeferred
@@ -550,9 +500,7 @@ export const PlanPanel = memo(function PlanPanel({
           : 'No receipt yet'
   const emptyBody =
     tab === 'plan'
-      ? agentMode === 'plan'
-        ? 'Draft plan.md for this run — Goal, Steps, and Done when. create_plan copies Done when into the contract.'
-        : 'Switch to Plan mode and draft plan.md, or continue from an existing plan.'
+      ? 'Publish plan.md with create_plan — Goal, Steps, and Done when. Done when is copied into the contract.'
       : tab === 'contract'
         ? 'The run contract is created when a chat starts.'
         : receiptDeferred
@@ -566,202 +514,123 @@ export const PlanPanel = memo(function PlanPanel({
       ? !receipt
       : tab === 'contract'
         ? !content
-        : !hasTodos && !content?.trim())
+        // Every run seeds a plan.md stub now that Plan mode is merged in, so
+        // `content` is non-empty from step 0 — readiness, not length, decides.
+        // Steps alone are not a plan: the record shows them.
+        : !isPlanDraftReady(content))
 
-  const planOutline =
-    tab === 'plan' && content && isPlanDraftReady(content) ? parsePlanOutline(content) : null
+  const doc = useMemo(() => (tab === 'plan' && content?.trim() ? planDocument(content) : null), [tab, content])
+  const live = { steps: hasTodos, checks: checks.length > 0 }
+  const sections = doc ? doc.sections.filter((section) => !recordShows(section.heading, live)) : []
+  const heading = tab === 'plan' ? (doc?.title ?? 'Plan') : VIEW_TITLE[tab]
+  const openName = tab === 'receipt' ? null : VIEW_FILE[tab]
+  const canOpen = Boolean(openName && content?.trim() && workspacePath && runId && window.vyotiq?.openRunArtifact)
 
-  const showContinue =
-    Boolean(onContinueInAgent) &&
-    agentMode === 'plan' &&
-    !running &&
-    tab === 'plan' &&
-    isPlanDraftReady(content)
-  const toolFailHint = continueReceipt ? receiptToolFailHint(continueReceipt) : null
+  const openArtifact = useCallback(async () => {
+    if (!workspacePath || !runId || tab === 'receipt') return
+    setOpenError(null)
+    const res = await window.vyotiq.openRunArtifact?.({ workspacePath, runId, name: VIEW_FILE[tab] as 'plan.md' | 'contract.md' })
+    if (res && !res.ok) setOpenError(res.error)
+  }, [runId, tab, workspacePath])
 
-  const tasksBlock =
-    tab === 'plan' && hasTodos ? (
-      <div className="mb-3 min-w-0" data-plan-tasks>
-        <div className="mb-2 flex min-w-0 items-baseline justify-between gap-1.5">
-          <p className="m-0 text-2xs font-medium uppercase tracking-[var(--vy-tracking-caps)] text-muted">
-            Tasks
-          </p>
-          <span className="shrink-0 tabular-nums text-caption text-muted">
-            {todosData!.done}/{todosData!.total}
-          </span>
-        </div>
-        {todosError ? (
-          <p className="m-0 text-caption text-danger">{todosError}</p>
-        ) : (
-          <>
-            <TodoProgressBar done={todosData!.done} total={todosData!.total} />
-            <TodoChecklist items={todoItems} className="mt-2" />
-          </>
-        )}
-      </div>
-    ) : null
+
+  const select = (next: ArtifactView): void => {
+    setOpenError(null)
+    setTab(next)
+  }
 
   return (
     <div
       className={cn(CHAT_RIGHT_PANEL_BODY, className)}
       data-plan-panel
       role="region"
-      aria-label={`${panelTitle} panel`}
+      aria-label={`${VIEW_TITLE[tab]} panel`}
     >
       <div
-        className={PANEL_SUBTAB_BAR}
-        role="tablist"
-        aria-label="Plan artifacts"
-        tabIndex={-1}
-        onKeyDown={(event) =>
-          handleTabListKeyDown(event, {
-            tabs: ARTIFACT_TABS.map((item) => item.id),
-            activeId: tab,
-            onSelect: (id) => setTab(id as ArtifactTab)
-          })
-        }
-      >
-        {ARTIFACT_TABS.map((item) => (
-          <button
-            key={item.id}
-            id={TAB_IDS[item.id]}
-            type="button"
-            role="tab"
-            className={panelSubtabClass(tab === item.id)}
-            aria-selected={tab === item.id}
-            aria-controls={PANEL_IDS[item.id]}
-            title={item.file}
-            onClick={() => setTab(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-      <div
-        id={PANEL_IDS[tab]}
-        role="tabpanel"
-        aria-labelledby={TAB_IDS[tab]}
         ref={scrollRootRef}
-        className={cn(
-          'min-h-0 min-w-0 flex-1 overflow-auto p-3',
-          showEmpty && 'flex flex-col'
-        )}
+        className="scroll-thin flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-5 py-4"
+        data-plan-doc={tab === 'plan' ? '' : undefined}
       >
+        <div className="flex items-start gap-2">
+          {tab !== 'plan' ? (
+            <IconButton icon="arrowLeft" label="Back to the plan" size="sm" tone="muted" onClick={() => select('plan')} />
+          ) : null}
+          <h2 className="min-w-0 flex-1 text-heading font-semibold tracking-[var(--vy-tracking-tight)] text-fg-strong">
+            {heading}
+          </h2>
+          {canOpen && openName ? (
+            <IconButton
+              icon="external"
+              label={`Open ${openName}`}
+              size="sm"
+              tone="muted"
+              onClick={() => void openArtifact()}
+            />
+          ) : null}
+          <ActionMenu
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            placement="down"
+            align="end"
+            aria-label="Run documents"
+            items={(['plan', 'contract', 'receipt'] as const).map((id) => ({
+              id,
+              label: `${VIEW_TITLE[id]} · ${VIEW_FILE[id]}`,
+              checked: tab === id,
+              onSelect: () => select(id)
+            }))}
+            trigger={(t) => (
+              <IconButton
+                ref={t.ref}
+                icon="more"
+                label="More — contract, receipt"
+                size="sm"
+                tone="muted"
+                aria-expanded={t['aria-expanded']}
+                aria-controls={t['aria-controls']}
+                aria-haspopup={t['aria-haspopup']}
+                onClick={t.onClick}
+              />
+            )}
+          />
+        </div>
+        {openError ? (
+          <p role="alert" className="m-0 mt-2 text-xs text-danger">
+            {openError}
+          </p>
+        ) : null}
         {loading ? (
-          <p className="m-0 text-xs text-muted">Loading…</p>
+          <p className="m-0 mt-4 text-xs text-muted">Loading…</p>
         ) : error ? (
-          <p className="m-0 text-xs text-danger">{error}</p>
+          <p className="m-0 mt-4 text-xs text-danger">{error}</p>
         ) : showEmpty ? (
-          <EmptyPanel icon="file" title={emptyTitle} body={emptyBody} centered />
+          <EmptyPanel icon={tab === 'receipt' ? 'receipt' : 'plan'} title={emptyTitle} body={emptyBody} centered />
         ) : tab === 'receipt' && receipt ? (
           <ReceiptSummary receipt={receipt} onOpenFile={onOpenFile} />
-        ) : tab === 'plan' ? (
-          <div data-plan-doc className="min-w-0">
-            {tasksBlock}
-            {planOutline ? (
-              <>
-                {planOutline.headings.length > 0 ||
-                (!hasTodos && planOutline.checked + planOutline.unchecked > 0) ? (
-                  <nav
-                    className="mb-3 rounded-md border border-border/40 bg-surface px-2.5 py-2"
-                    aria-label="Plan outline"
-                  >
-                    <p className="m-0 text-2xs font-medium uppercase tracking-[var(--vy-tracking-caps)] text-muted">
-                      Outline
-                    </p>
-                    {/*
-                      Markdown checkboxes are the draft's static record; the
-                      Tasks section above is the live source of truth. Show
-                      this count only when no todos.json exists for the run.
-                    */}
-                    {!hasTodos && planOutline.checked + planOutline.unchecked > 0 ? (
-                      <p className="m-0 mt-1 text-caption text-muted">
-                        Checklist {planOutline.checked}/
-                        {planOutline.checked + planOutline.unchecked}
-                      </p>
-                    ) : null}
-                    {planOutline.headings.length > 0 ? (
-                      (() => {
-                        const shallowest = planOutline.headings.reduce(
-                          (min, row) => (row.level < min ? row.level : min),
-                          planOutline.headings[0]!.level
-                        )
-                        const visible = planOutline.headings.slice(0, PLAN_OUTLINE_MAX)
-                        const hidden = planOutline.headings.length - visible.length
-                        return (
-                          <ul className="m-0 mt-1.5 list-none space-y-0.5 p-0">
-                            {visible.map((h) => (
-                              <li
-                                key={h.id}
-                                className="min-w-0"
-                                style={{
-                                  paddingLeft: `${outlineIndentRem(h.level, shallowest)}rem`
-                                }}
-                              >
-                                <button
-                                  type="button"
-                                  className={cn(
-                                    'block w-full whitespace-normal break-words text-left text-caption leading-snug underline-offset-2 hover:underline',
-                                    h.level === 1 && 'font-medium text-fg',
-                                    h.level === 2 && 'text-fg/90',
-                                    h.level === 3 && 'text-fg/75'
-                                  )}
-                                  title={h.text}
-                                  onClick={() => scrollToHeading(h.id, scrollRootRef.current)}
-                                >
-                                  {h.text}
-                                </button>
-                              </li>
-                            ))}
-                            {hidden > 0 ? (
-                              <li className="pt-0.5 text-caption text-muted">+{hidden} more</li>
-                            ) : null}
-                          </ul>
-                        )
-                      })()
-                    ) : null}
-                  </nav>
-                ) : null}
-                <MarkdownContent
-                  content={content!}
-                  headingIds
-                  readOnlyTasks
-                  className="text-sm"
-                />
-              </>
-            ) : content && !isPlanDraftReady(content) ? (
-              <MarkdownContent content={content} readOnlyTasks className="text-sm" />
+        ) : doc ? (
+          <>
+            {doc.lead ? (
+              <div className="mt-3">
+                <MarkdownContent content={doc.lead} readOnlyTasks wrapTables tone="secondary" />
+              </div>
             ) : null}
-          </div>
+            {sections.map((section, index) => (
+              <section key={`${index}:${section.heading}`} className="mt-5">
+                <h3 className={SECTION_LABEL}>{section.heading}</h3>
+                {section.body ? (
+                  <div className="mt-2">
+                    <MarkdownContent content={section.body} readOnlyTasks wrapTables tone="secondary" />
+                  </div>
+                ) : null}
+              </section>
+            ))}
+          </>
         ) : (
-          <MarkdownContent
-            content={content ?? ''}
-            readOnlyTasks
-            className="text-sm"
-          />
+          <div className="mt-3">
+            <MarkdownContent content={content ?? ''} readOnlyTasks wrapTables tone="secondary" />
+          </div>
         )}
       </div>
-      {showContinue ? (
-        <div
-          className="flex shrink-0 items-center gap-3 border-t border-border/40 px-3 py-2"
-          data-plan-continue
-        >
-          <div className="min-w-0 flex-1">
-            {toolFailHint ? (
-              <p className="m-0 truncate text-caption text-warning" title={toolFailHint}>
-                {toolFailHint}
-              </p>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            onClick={onContinueInAgent}
-            className="shrink-0 rounded-xl border border-border px-2.5 py-1.5 text-caption font-medium text-fg transition-colors hover:bg-surface"
-          >
-            Continue in Agent
-          </button>
-        </div>
-      ) : null}
     </div>
   )
 })

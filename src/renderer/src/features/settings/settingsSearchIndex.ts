@@ -1,6 +1,5 @@
 import type { SettingsSection } from './types'
-import { SHORTCUT_BINDINGS, type ShortcutId } from '@renderer/lib/shortcuts/bindings'
-import { SHORTCUT_TITLES } from '@renderer/lib/shortcuts/labels'
+import { shortcutGroups } from './utils/shortcutGroups'
 
 export type SettingsSearchEntry = {
   id: string
@@ -9,29 +8,40 @@ export type SettingsSearchEntry = {
   section: SettingsSection
 }
 
-/** Client-side index of settings fields for search navigation. */
+/**
+ * Client-side index of settings rows for search navigation, in nav order.
+ *
+ * Every `id` is a `data-settings-field` a section renders, and `title` is that
+ * row's title. `settings-view.test.tsx` checks both directions — each rendered
+ * row is indexed, and each entry here is rendered — because the index is
+ * edited by hand and drifted twice: two results pointed at ids no row carried,
+ * so picking them changed section and then scrolled nowhere.
+ */
 export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
+  // General
   {
-    id: 'active-model',
-    title: 'Active model',
-    keywords: ['model', 'composer', 'provider'],
+    id: 'navigation',
+    title: 'Open on launch',
+    keywords: ['home', 'sidebar', 'layout', 'sessions', 'startup', 'launch', 'default view'],
     section: 'general'
   },
   {
-    id: 'navigation',
-    title: 'Navigation',
-    keywords: ['navigation', 'home', 'sidebar', 'layout', 'sessions', 'startup', 'launch', 'default view'],
+    id: 'max-chat-panes',
+    title: 'Tasks side by side',
+    keywords: ['split', 'panes', 'sessions', 'columns', 'layout', 'side by side'],
     section: 'general'
   },
   {
     id: 'workspaces',
     title: 'Workspaces',
-    keywords: ['override', 'workspace', 'folder', 'tabs'],
+    keywords: ['workspace', 'override', 'per-workspace', 'folder', 'project', 'add workspace'],
     section: 'general'
   },
+
+  // Appearance
   {
     id: 'appearance-skin',
-    title: 'Interface skin',
+    title: 'Skin',
     keywords: [
       'appearance',
       'skin',
@@ -40,122 +50,207 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
       'bench',
       'native',
       'gild',
-      'default',
       'contrast',
-      'workshop',
       'elevation',
-      'legibility',
       'instrument',
-      'chrome'
+      'look'
     ],
     section: 'appearance'
   },
   {
-    id: 'appearance-custom-css',
-    title: 'User CSS overlay',
-    keywords: ['appearance', 'css', 'stylesheet', 'custom', 'overlay', 'tokens', 'skin'],
-    section: 'appearance'
-  },
-  {
     id: 'appearance-theme',
-    title: 'Color mode',
-    keywords: ['appearance', 'theme', 'dark', 'light', 'system', 'color mode'],
+    title: 'Mode',
+    keywords: ['appearance', 'theme', 'dark', 'light', 'system', 'dark mode', 'colour mode', 'color mode'],
     section: 'appearance'
   },
   {
     id: 'appearance-font-scale',
     title: 'Text size',
-    keywords: ['appearance', 'font', 'text', 'size', 'scale'],
+    keywords: ['appearance', 'font', 'text', 'size', 'scale', 'zoom'],
     section: 'appearance'
   },
   {
     id: 'appearance-density',
-    title: 'UI density',
-    keywords: ['appearance', 'density', 'compact', 'comfortable', 'spacing'],
+    title: 'Density',
+    keywords: ['appearance', 'density', 'compact', 'comfortable', 'spacing', 'padding'],
     section: 'appearance'
   },
   {
+    id: 'appearance-custom-css',
+    title: 'User CSS overlay',
+    keywords: ['appearance', 'css', 'stylesheet', 'custom', 'overlay', 'tokens'],
+    section: 'appearance'
+  },
+
+  // Notifications
+  {
+    id: 'notifications-enabled',
+    title: 'Notifications',
+    keywords: ['notifications', 'inbox', 'bell', 'alerts'],
+    section: 'notifications'
+  },
+  {
+    id: 'notifications-desktop',
+    title: 'Desktop alerts',
+    keywords: ['notifications', 'desktop', 'os', 'toast', 'background', 'unfocused'],
+    section: 'notifications'
+  },
+  {
+    id: 'notifications-run-finished',
+    title: 'A task finished',
+    keywords: ['notifications', 'run', 'finished', 'done', 'complete', 'ready for review', 'task'],
+    section: 'notifications'
+  },
+  {
+    id: 'notifications-run-failed',
+    title: 'A task failed',
+    keywords: ['notifications', 'run', 'failed', 'error'],
+    section: 'notifications'
+  },
+  {
+    id: 'notifications-needs-you',
+    title: 'A task needs you',
+    keywords: ['notifications', 'approval', 'question', 'needs you', 'waiting'],
+    section: 'notifications'
+  },
+  {
+    id: 'notifications-system',
+    title: 'System alerts',
+    keywords: ['notifications', 'crash', 'recovery', 'system'],
+    section: 'notifications'
+  },
+
+  // Shortcuts
+  {
+    id: 'shortcuts',
+    title: 'Keyboard shortcuts',
+    keywords: ['shortcut', 'keyboard', 'hotkey', 'keybinding', 'chords'],
+    section: 'shortcuts'
+  },
+  ...shortcutGroups().flatMap((group) =>
+    group.entries.map((entry) => ({
+      id: `shortcut-${entry.id}`,
+      title: entry.title,
+      keywords: ['shortcut', 'keyboard', 'hotkey', group.title.toLowerCase(), entry.label.toLowerCase()],
+      section: 'shortcuts' as const
+    }))
+  ),
+
+  // Providers
+  {
     id: 'active-provider',
-    title: 'Active provider',
-    keywords: ['openai', 'anthropic', 'ollama', 'custom', 'provider'],
+    title: 'Provider for new tasks',
+    keywords: ['provider', 'openai', 'anthropic', 'gemini', 'ollama', 'openrouter', 'custom'],
     section: 'providers'
   },
   {
-    id: 'ollama-url',
-    title: 'Ollama base URL',
-    keywords: ['ollama', 'url', 'local', 'cloud'],
-    section: 'providers'
-  },
-  {
-    id: 'custom-url',
-    title: 'Custom OpenAI base URL',
-    keywords: ['custom', 'openai', 'url', 'deepinfra', 'compatible'],
+    id: 'active-model',
+    title: 'Model',
+    keywords: ['model', 'composer', 'provider', 'llm', 'refresh', 'reload', 'model list', 'catalog'],
     section: 'providers'
   },
   {
     id: 'api-keys',
     title: 'API keys',
-    keywords: ['secret', 'key', 'token', 'credentials'],
+    keywords: ['secret', 'key', 'token', 'credentials', 'secure storage'],
     section: 'providers'
   },
   {
-    id: 'refresh-models',
-    title: 'Refresh models',
-    keywords: ['catalog', 'models', 'reload'],
+    id: 'ollama-url',
+    title: 'Ollama base URL',
+    keywords: ['ollama', 'url', 'local', 'cloud', 'host'],
     section: 'providers'
+  },
+  {
+    id: 'custom-url',
+    title: 'Custom OpenAI base URL',
+    keywords: ['custom', 'openai', 'url', 'deepinfra', 'compatible', 'endpoint'],
+    section: 'providers'
+  },
+
+  // Agent
+  {
+    id: 'tool-approval',
+    title: 'Ask before',
+    keywords: ['approval', 'permissions', 'ask', 'confirm', 'mutating', 'tools', 'tool approval'],
+    section: 'agent'
+  },
+  {
+    id: 'tool-approval-allowlist',
+    title: 'Always allowed',
+    keywords: ['approval', 'allowlist', 'always allow', 'allowed tools', 'permissions'],
+    section: 'agent'
+  },
+  {
+    id: 'mcp-tools-protection',
+    title: 'MCP tools always ask',
+    keywords: ['mcp', 'approval', 'protection', 'servers', 'permissions'],
+    section: 'agent'
+  },
+  {
+    id: 'agent-autonomous-mode',
+    title: 'Unattended mode',
+    keywords: ['autonomous', 'unattended', 'auto-approve', 'yolo', 'background', 'permissions', 'autonomous mode'],
+    section: 'agent'
+  },
+  {
+    id: 'agent-autonomous-questions',
+    title: 'Questions while unattended',
+    keywords: ['autonomous', 'questions', 'ask', 'skip', 'wait'],
+    section: 'agent'
+  },
+  {
+    id: 'auto-mode-switch',
+    title: 'Switch between Ask and Agent on its own',
+    keywords: ['mode', 'ask', 'agent', 'switch', 'switch_mode'],
+    section: 'agent'
+  },
+  {
+    id: 'auto-resume-interrupted',
+    title: 'Resume interrupted runs',
+    keywords: ['resume', 'interrupted', 'continue', 'runs'],
+    section: 'agent'
+  },
+  {
+    id: 'parallel-instances',
+    title: 'Instances at once',
+    keywords: ['instances', 'sub-agents', 'subagents', 'parallel', 'spawn', 'limit'],
+    section: 'agent'
   },
   {
     id: 'show-thinking',
-    title: 'Show thinking in chat',
-    keywords: ['thinking', 'reasoning', 'display'],
+    title: 'Show reasoning',
+    keywords: ['thinking', 'reasoning', 'display', 'show thinking'],
     section: 'agent'
   },
   {
     id: 'keep-recent-turns',
     title: 'Keep recent turns',
-    keywords: ['compaction', 'context', 'turns'],
+    keywords: ['compaction', 'context', 'turns', 'history'],
     section: 'agent'
   },
   {
     id: 'auto-compact-threshold',
-    title: 'Auto-compact threshold',
-    keywords: ['compaction', 'context', 'threshold', 'auto-compact'],
-    section: 'agent'
-  },
-  {
-    id: 'agent-autonomous-mode',
-    title: 'Autonomous mode',
-    keywords: ['autonomous', 'unattended', 'auto-approve', 'background'],
-    section: 'agent'
-  },
-  {
-    id: 'agent-autonomous-questions',
-    title: 'Questions in autonomous mode',
-    keywords: ['autonomous', 'questions', 'ask', 'skip'],
-    section: 'agent'
-  },
-  {
-    id: 'agent-offline-wait',
-    title: 'Offline wait budget',
-    keywords: ['offline', 'wait', 'network', 'autonomous', 'budget'],
+    title: 'Compact at',
+    keywords: ['compaction', 'context', 'threshold', 'auto-compact', 'window', 'auto-compact threshold', 'percent'],
     section: 'agent'
   },
   {
     id: 'agent-persona',
-    title: 'Persona',
-    keywords: ['persona', 'identity', 'name', 'assistant'],
+    title: 'Name',
+    keywords: ['persona', 'name', 'assistant', 'identity'],
     section: 'agent'
   },
   {
     id: 'agent-identity',
     title: 'Identity',
-    keywords: ['identity', 'blurb', 'persona', 'about'],
+    keywords: ['identity', 'role', 'persona', 'about', 'instructions'],
     section: 'agent'
   },
   {
     id: 'agent-tone',
     title: 'Tone',
-    keywords: ['tone', 'voice', 'style', 'friendly', 'attitude'],
+    keywords: ['tone', 'style', 'friendly', 'blunt', 'formal', 'attitude'],
     section: 'agent'
   },
   {
@@ -172,162 +267,27 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'workspace-rules',
-    title: 'Workspace rules',
-    keywords: ['agents.md', 'cursorrules', 'rules', 'reference', 'marketplace'],
+    title: 'Rules',
+    keywords: ['rules', 'agents.md', 'claude.md', 'cursorrules', 'instructions', 'marketplace'],
     section: 'agent'
   },
-  {
-    id: 'memory-files',
-    title: 'Memory files',
-    keywords: ['memory', 'vyotiq', 'durable', 'reference'],
-    section: 'agent'
-  },
-  {
-    id: 'codeindex-enabled',
-    title: 'Enable codebase index',
-    keywords: ['codebase', 'index', 'codeindex', 'keyword search', 'trigram'],
-    section: 'indexing'
-  },
-  {
-    id: 'codeindex-status',
-    title: 'Index status',
-    keywords: ['reindex', 'status', 'syncing', 'codebase'],
-    section: 'indexing'
-  },
-  {
-    id: 'process-metrics',
-    title: 'Live processes',
-    keywords: [
-      'rss',
-      'memory',
-      'cpu',
-      'electron',
-      'diagnostics',
-      'task manager'
-    ],
-    section: 'indexing'
-  },
-  {
-    id: 'dictation-engine',
-    title: 'Dictation engine',
-    keywords: [
-      'dictation',
-      'voice',
-      'whisper',
-      'transcribe',
-      'microphone',
-      'OpenRouter',
-      'local model'
-    ],
-    section: 'voice'
-  },
-  {
-    id: 'dictation-waveform',
-    title: 'Waveform',
-    keywords: [
-      'dictation',
-      'voice',
-      'waveform',
-      'bars',
-      'dots',
-      'line',
-      'mirror',
-      'microphone'
-    ],
-    section: 'voice'
-  },
-  {
-    id: 'dictation-whisper-tiny',
-    title: 'Whisper Tiny',
-    keywords: ['dictation', 'voice', 'whisper', 'tiny', 'transcribe', 'local model', 'microphone'],
-    section: 'voice'
-  },
-  {
-    id: 'dictation-whisper-small',
-    title: 'Whisper Small',
-    keywords: [
-      'dictation',
-      'voice',
-      'whisper',
-      'small',
-      'transcribe',
-      'local model',
-      'OpenRouter'
-    ],
-    section: 'voice'
-  },
-  {
-    id: 'storage-usage',
-    title: 'Storage usage',
-    keywords: ['storage', 'disk', 'usage', 'report', 'size', 'free up space'],
-    section: 'storage'
-  },
-  {
-    id: 'storage-free-up-space',
-    title: 'Free up space',
-    keywords: ['storage', 'cleanup', 'reclaim', 'delete', 'orphan', 'untracked'],
-    section: 'storage'
-  },
-  {
-    id: 'storage-checkpoint-cleanup',
-    title: 'Checkpoint cleanup',
-    keywords: [
-      'checkpoints',
-      'undo',
-      'retain',
-      'evict',
-      'storage',
-      'discarded',
-      'resolved',
-      'undone'
-    ],
-    section: 'storage'
-  },
-  {
-    id: 'storage-orphan-reaper',
-    title: 'Untracked workspace storage cleanup',
-    keywords: ['orphan', 'untracked', 'workspace', 'storage', 'grace', 'reap'],
-    section: 'storage'
-  },
-  {
-    id: 'storage-prune-on-removal',
-    title: 'Delete storage when removing a workspace',
-    keywords: ['remove', 'workspace', 'delete', 'storage', 'prune', 'close'],
-    section: 'storage'
-  },
-  {
-    id: 'storage-session-retention',
-    title: 'Automatic session retention',
-    keywords: ['sessions', 'history', 'transcripts', 'retain', 'delete', 'storage'],
-    section: 'storage'
-  },
-  {
-    id: 'storage-size-cap',
-    title: 'Managed size cap',
-    keywords: ['cap', 'limit', 'size', 'gb', 'storage', 'backstop', 'lru'],
-    section: 'storage'
-  },
-  {
-    id: 'tool-approval',
-    title: 'Tool approval',
-    keywords: ['approval', 'allowlist', 'tools', 'mutating'],
-    section: 'tools'
-  },
-  {
-    id: 'mcp-tools-protection',
-    title: 'MCP tools protection',
-    keywords: ['mcp', 'approval', 'tools', 'protection', 'servers'],
-    section: 'tools'
-  },
+
+  // Tools
   {
     id: 'terminal-shell',
-    title: 'Terminal shell',
-    keywords: ['shell', 'powershell', 'bash', 'cmd', 'terminal'],
+    title: 'Shell',
+    keywords: ['shell', 'powershell', 'bash', 'cmd', 'terminal', 'terminal shell'],
+    section: 'tools'
+  },
+  {
+    id: 'diagnostics-command',
+    title: 'Diagnostics command',
+    keywords: ['typecheck', 'lint', 'diagnostics', 'tsc', 'eslint', 'check'],
     section: 'tools'
   },
   {
     id: 'terminal-screen-reader',
-    title: 'Terminal screen reader',
+    title: 'Screen reader mode',
     keywords: ['screen reader', 'accessibility', 'a11y', 'terminal', 'assistive'],
     section: 'tools'
   },
@@ -339,140 +299,174 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'browser-domain-allowlist',
-    title: 'Browser domain allowlist',
-    keywords: ['browser', 'domain', 'allowlist', 'hostname', 'navigation', 'restrict'],
-    section: 'tools'
-  },
-  {
-    id: 'auto-resume-interrupted',
-    title: 'Auto-resume interrupted runs',
-    keywords: ['resume', 'interrupted', 'continue', 'runs'],
-    section: 'tools'
-  },
-  {
-    id: 'max-chat-panes',
-    title: 'Max chat panes',
-    keywords: ['split', 'panes', 'sessions', 'columns', 'layout', 'view'],
-    section: 'tools'
-  },
-  {
-    id: 'auto-mode-switch',
-    title: 'Automatic mode switching',
-    keywords: ['mode', 'ask', 'plan', 'agent', 'switch'],
+    title: 'Allowed sites',
+    keywords: ['browser domain allowlist', 'browser', 'domain', 'allowlist', 'hostname', 'navigation', 'restrict', 'allowed sites', 'sites'],
     section: 'tools'
   },
   {
     id: 'mcp-tool-loading',
     title: 'Preload every MCP tool',
-    keywords: ['mcp', 'tools', 'context', 'window', 'tokens', 'schemas', 'on demand', 'load'],
+    keywords: ['mcp', 'tools', 'context', 'tokens', 'schemas', 'on demand', 'eager', 'load'],
+    section: 'tools'
+  },
+  {
+    id: 'mcp-servers',
+    title: 'Servers',
+    keywords: ['mcp', 'servers', 'connect', 'marketplace', 'integrations'],
     section: 'tools'
   },
   {
     id: 'tools-catalog',
-    title: 'Live tool catalog',
-    keywords: ['tools', 'catalog', 'mcp', 'active', 'available', 'servers'],
+    title: 'Catalog',
+    keywords: ['tools', 'catalog', 'mcp', 'active', 'available', 'built-in'],
     section: 'tools'
   },
+
+  // Indexing
   {
-    id: 'send-feedback',
-    title: 'Send feedback',
-    keywords: ['feedback', 'bug', 'feature request', 'praise', 'email', 'contact'],
-    section: 'general'
+    id: 'codeindex-enabled',
+    title: 'Codebase index',
+    keywords: ['codebase', 'index', 'codeindex', 'search', 'embedding', 'semantic', 'concept', 'reindex', 'status', 'syncing', 'progress', 'workspaces'],
+    section: 'indexing'
   },
+
+  // Voice
+  {
+    id: 'dictation-engine',
+    title: 'Engine',
+    keywords: ['dictation', 'voice', 'whisper', 'transcribe', 'microphone', 'speech', 'dictation engine', 'local', 'openai', 'openrouter'],
+    section: 'voice'
+  },
+  {
+    id: 'dictation-waveform',
+    title: 'Waveform',
+    keywords: ['dictation', 'voice', 'waveform', 'bars', 'dots', 'line', 'mirror'],
+    section: 'voice'
+  },
+  {
+    id: 'dictation-whisper-tiny',
+    title: 'Whisper Tiny',
+    keywords: ['dictation', 'voice', 'whisper', 'tiny', 'local model', 'offline'],
+    section: 'voice'
+  },
+  {
+    id: 'dictation-whisper-small',
+    title: 'Whisper Small',
+    keywords: ['dictation', 'voice', 'whisper', 'small', 'local model', 'offline'],
+    section: 'voice'
+  },
+
+  // Storage
+  {
+    id: 'storage-usage',
+    title: 'Usage',
+    keywords: ['storage', 'disk', 'usage', 'report', 'size', 'space', 'app data', 'cap', 'managed'],
+    section: 'storage'
+  },
+  {
+    id: 'storage-free-up',
+    title: 'Free up space now',
+    keywords: ['storage', 'cleanup', 'reclaim', 'delete', 'orphan', 'untracked', 'disk'],
+    section: 'storage'
+  },
+  {
+    id: 'storage-checkpoint-gc',
+    title: 'Clean up undo points',
+    keywords: ['checkpoints', 'undo', 'retention', 'evict', 'storage', 'checkpoint cleanup', 'undo points'],
+    section: 'storage'
+  },
+  {
+    id: 'storage-checkpoint-keep',
+    title: 'Keep undo points of the newest',
+    keywords: ['checkpoints', 'undo', 'retention', 'count', 'undo points', 'tasks'],
+    section: 'storage'
+  },
+  {
+    id: 'storage-checkpoint-age',
+    title: 'Keep undo points for',
+    keywords: ['checkpoints', 'undo', 'retention', 'days', 'age', 'undo points', 'checkpoint max age'],
+    section: 'storage'
+  },
+  {
+    id: 'storage-session-retention',
+    title: 'Delete old tasks',
+    keywords: ['sessions', 'history', 'transcripts', 'retention', 'delete', 'tasks', 'automatic session retention'],
+    section: 'storage'
+  },
+  {
+    id: 'storage-session-keep',
+    title: 'Always keep the newest',
+    keywords: ['sessions', 'history', 'retention', 'count', 'tasks', 'keep sessions'],
+    section: 'storage'
+  },
+  {
+    id: 'storage-session-age',
+    title: 'Keep tasks for',
+    keywords: ['sessions', 'history', 'retention', 'days', 'age', 'tasks', 'session max age'],
+    section: 'storage'
+  },
+  {
+    id: 'storage-orphan-reaper',
+    title: 'Clean up untracked storage',
+    keywords: ['orphan', 'untracked', 'workspace', 'storage', 'reap'],
+    section: 'storage'
+  },
+  {
+    id: 'storage-orphan-grace',
+    title: 'Grace period',
+    keywords: ['orphan', 'untracked', 'grace', 'days', 'untracked grace period', 'idle'],
+    section: 'storage'
+  },
+  {
+    id: 'storage-prune-on-removal',
+    title: 'Delete storage when closing a workspace',
+    keywords: ['remove', 'workspace', 'delete', 'storage', 'prune', 'close'],
+    section: 'storage'
+  },
+  {
+    id: 'storage-size-cap',
+    title: 'Managed size cap',
+    keywords: ['cap', 'limit', 'size', 'gb', 'storage', 'quota'],
+    section: 'storage'
+  },
+
+  // Diagnostics
   {
     id: 'telemetry',
-    title: 'Share crash & error reports',
-    keywords: ['sentry', 'telemetry', 'crash', 'error', 'privacy', 'advanced'],
-    section: 'general'
-  },
-  {
-    id: 'notifications-enabled',
-    title: 'Enable notifications',
-    keywords: ['notifications', 'inbox', 'bell', 'alerts'],
-    section: 'general'
-  },
-  {
-    id: 'notifications-desktop',
-    title: 'Desktop notifications',
-    keywords: ['notifications', 'desktop', 'os', 'toast', 'unfocused'],
-    section: 'general'
-  },
-  {
-    id: 'notifications-run-finished',
-    title: 'Agent run finished',
-    keywords: ['notifications', 'run', 'finished', 'done', 'agent'],
-    section: 'general'
-  },
-  {
-    id: 'notifications-run-failed',
-    title: 'Agent run failed',
-    keywords: ['notifications', 'run', 'failed', 'error', 'agent'],
-    section: 'general'
-  },
-  {
-    id: 'notifications-needs-you',
-    title: 'Agent needs you',
-    keywords: ['notifications', 'approval', 'question', 'needs you', 'agent'],
-    section: 'general'
-  },
-  {
-    id: 'notifications-system',
-    title: 'System alerts',
-    keywords: ['notifications', 'crash', 'recovery', 'system'],
-    section: 'general'
+    title: 'Share crash and error reports',
+    keywords: ['sentry', 'telemetry', 'crash', 'error', 'privacy', 'reports'],
+    section: 'diagnostics'
   },
   {
     id: 'logs',
     title: 'Logs',
-    keywords: ['logs', 'folder', 'rotating', 'diagnostics', 'advanced'],
-    section: 'general'
-  },
-  {
-    id: 'recent-crashes',
-    title: 'Recent crashes',
-    keywords: ['crash', 'diagnostics', 'renderer', 'gpu', 'advanced'],
-    section: 'general'
+    keywords: ['logs', 'folder', 'troubleshooting', 'diagnostics'],
+    section: 'diagnostics'
   },
   {
     id: 'trace-capture',
     title: 'Trace capture',
-    keywords: ['trace', 'tracing', 'chrome://tracing', 'profiling', 'performance', 'flight recorder', 'crash', 'hang', 'diagnostics', 'advanced'],
-    section: 'general'
+    keywords: ['trace', 'tracing', 'chrome://tracing', 'profiling', 'performance', 'hang'],
+    section: 'diagnostics'
   },
   {
-    id: 'diagnostics-command',
-    title: 'Diagnostics command',
-    keywords: ['typecheck', 'diagnostics', 'tsc', 'advanced'],
-    section: 'general'
+    id: 'recent-crashes',
+    title: 'Recent crashes',
+    keywords: ['crash', 'renderer', 'gpu', 'exit', 'diagnostics'],
+    section: 'diagnostics'
   },
+  {
+    id: 'process-metrics',
+    title: 'Memory',
+    keywords: ['memory', 'rss', 'ram', 'processes', 'task manager', 'performance'],
+    section: 'diagnostics'
+  },
+
+  // About
   {
     id: 'about',
-    title: 'Vyotiq',
-    keywords: ['about', 'logo', 'brand', 'company', 'agent v', 'vyotiq'],
-    section: 'about'
-  },
-  {
-    id: 'about-version',
-    title: 'Version',
-    keywords: ['version', 'build', 'release', 'about'],
-    section: 'about'
-  },
-  {
-    id: 'about-runtime',
-    title: 'Runtime',
-    keywords: ['electron', 'chromium', 'chrome', 'node', 'about'],
-    section: 'about'
-  },
-  {
-    id: 'about-platform',
-    title: 'Platform',
-    keywords: ['os', 'windows', 'macos', 'linux', 'arch', 'about'],
-    section: 'about'
-  },
-  {
-    id: 'about-copy',
-    title: 'Copy build info',
-    keywords: ['copy', 'clipboard', 'build', 'about'],
+    title: 'Agent V',
+    keywords: ['about', 'brand', 'license', 'agent v', 'vyotiq', 'version', 'build', 'release', 'electron', 'chromium', 'chrome', 'node', 'os', 'platform', 'windows', 'macos', 'linux', 'arch'],
     section: 'about'
   },
   {
@@ -484,7 +478,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   {
     id: 'about-docs',
     title: 'Docs',
-    keywords: ['docs', 'documentation', 'vyotiq.com/docs', 'about'],
+    keywords: ['docs', 'documentation', 'help', 'about'],
     section: 'about'
   },
   {
@@ -494,64 +488,28 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'about'
   },
   {
+    id: 'about-copy',
+    title: 'Copy build info',
+    keywords: ['copy build info', 'copy', 'clipboard', 'build', 'bug report', 'about'],
+    section: 'about'
+  },
+  {
     id: 'about-auto-check',
-    title: 'Check for updates automatically',
-    keywords: ['updates', 'auto check', 'background', 'periodic', 'upgrade', 'about'],
+    title: 'Check automatically',
+    keywords: ['check for updates automatically', 'updates', 'auto check', 'periodic', 'upgrade'],
     section: 'about'
   },
   {
     id: 'about-updater',
-    title: 'App updates',
-    keywords: ['updates', 'updater', 'upgrade', 'release', 'version', 'about'],
+    title: 'Updates',
+    keywords: ['updates', 'updater', 'upgrade', 'release', 'version', 'check now', 'download', 'restart', 'install'],
     section: 'about'
   },
   {
-    id: 'shortcuts',
-    title: 'Keyboard shortcuts',
-    keywords: ['shortcut', 'keyboard', 'hotkey', 'keybinding', 'chords'],
-    section: 'shortcuts'
-  },
-  ...(Object.keys(SHORTCUT_BINDINGS) as ShortcutId[]).map((id) => ({
-    id: `shortcut-${id}`,
-    title: SHORTCUT_TITLES[id],
-    keywords: ['shortcut', 'keyboard', 'hotkey'],
-    section: 'shortcuts' as const
-  })),
-  {
-    id: 'shortcut-jump-latest',
-    title: 'Jump to latest',
-    keywords: ['shortcut', 'keyboard', 'hotkey', 'end'],
-    section: 'shortcuts' as const
-  },
-  {
-    id: 'shortcut-jump-top',
-    title: 'Jump to top',
-    keywords: ['shortcut', 'keyboard', 'hotkey', 'home'],
-    section: 'shortcuts' as const
-  },
-  {
-    id: 'shortcut-edit-last',
-    title: 'Edit last prompt',
-    keywords: ['shortcut', 'keyboard', 'hotkey', 'arrow'],
-    section: 'shortcuts' as const
-  },
-  {
-    id: 'shortcut-font-smaller',
-    title: 'Smaller text',
-    keywords: ['shortcut', 'keyboard', 'hotkey', 'font', 'zoom'],
-    section: 'shortcuts' as const
-  },
-  {
-    id: 'shortcut-font-larger',
-    title: 'Larger text',
-    keywords: ['shortcut', 'keyboard', 'hotkey', 'font', 'zoom'],
-    section: 'shortcuts' as const
-  },
-  {
-    id: 'shortcut-font-reset',
-    title: 'Reset text size',
-    keywords: ['shortcut', 'keyboard', 'hotkey', 'font', 'zoom'],
-    section: 'shortcuts' as const
+    id: 'send-feedback',
+    title: 'Send feedback',
+    keywords: ['feedback', 'bug', 'feature request', 'praise', 'email', 'contact', 'support'],
+    section: 'about'
   }
 ]
 
@@ -575,15 +533,40 @@ function cssEscape(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 
-/** Conditional fields (provider-specific) scroll to the control that reveals them. */
+/**
+ * Where a result lands when its own row is not mounted: the provider URL rows
+ * are rows of the API key list, and the allowlist belongs to the approval
+ * mode above it.
+ */
 const FIELD_SCROLL_FALLBACK: Record<string, string> = {
   'ollama-url': 'api-keys',
-  'custom-url': 'api-keys'
+  'custom-url': 'api-keys',
+  'tool-approval-allowlist': 'tool-approval'
 }
 
 function querySettingsField(fieldId: string): HTMLElement | null {
   if (!fieldId) return null
   return document.querySelector<HTMLElement>(`[data-settings-field="${cssEscape(fieldId)}"]`)
+}
+
+/** The flash a search result leaves on its row, so the eye lands on it. */
+const HIGHLIGHT = ['ring-1', 'ring-border-strong', 'rounded-md']
+
+/**
+ * Scroll to a row that may not exist yet. From outside Settings (the palette)
+ * the view loads lazily and its rows wait for settings, so this waits for the
+ * row — or its fallback — to mount, and gives up after `timeoutMs`.
+ */
+export function revealSettingsFieldWhenMounted(fieldId: string, timeoutMs = 3000): void {
+  const started = Date.now()
+  const tick = (): void => {
+    if (querySettingsField(fieldId) ?? querySettingsField(FIELD_SCROLL_FALLBACK[fieldId] ?? '')) {
+      scrollToSettingsField(fieldId)
+      return
+    }
+    if (Date.now() - started < timeoutMs) window.requestAnimationFrame(tick)
+  }
+  window.requestAnimationFrame(tick)
 }
 
 export function scrollToSettingsField(fieldId: string): void {
@@ -592,8 +575,8 @@ export function scrollToSettingsField(fieldId: string): void {
   if (typeof el.scrollIntoView === 'function') {
     el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }
-  el.classList.add('ring-1', 'ring-fg/25', 'rounded-md')
+  el.classList.add(...HIGHLIGHT)
   window.setTimeout(() => {
-    el.classList.remove('ring-1', 'ring-fg/25', 'rounded-md')
+    el.classList.remove(...HIGHLIGHT)
   }, 1600)
 }

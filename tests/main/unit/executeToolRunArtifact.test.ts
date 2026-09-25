@@ -9,6 +9,7 @@ vi.mock('@main/app/window', () => ({
 
 import { executeTool, usesSessionWorkspaceIndex } from '@main/agent/tools'
 import { toolTodoWrite } from '@main/agent/tools/todo'
+import { ensurePlanStub } from '@main/agent/planArtifacts'
 
 describe('executeTool run-artifact remap', () => {
   let workspace: string
@@ -135,32 +136,25 @@ describe('executeTool run-artifact remap', () => {
     expect(readFileSync(join(runDir, 'plan.md'), 'utf8')).toBe('# Existing plan\n')
   })
 
-  it('Plan mode still remaps plan.md and contract.md', async () => {
+  it('the run-start plan stub is what keeps edit plan.md inside the run directory', async () => {
+    // Plan mode used to remap plan.md unconditionally. Merged into Agent, the
+    // remap is gated on the artifact existing — so the run loop seeds the stub
+    // at start (seedPlanStubIfMissing). Without it `edit` would CREATE a stray
+    // plan.md in the workspace root, as the test above shows. This pins the two
+    // halves together: seeding is load-bearing, not decoration.
     setup()
+    ensurePlanStub(runDir)
     const signal = new AbortController().signal
     const plan = await executeTool(
       'edit',
       JSON.stringify({ path: 'plan.md', contents: '# Plan\n' }),
       workspace,
       signal,
-      { runDir, agentMode: 'plan' }
+      { runDir, agentMode: 'agent' }
     )
     expect(plan.ok).toBe(true)
     expect(readFileSync(join(runDir, 'plan.md'), 'utf8')).toContain('# Plan')
     expect(existsSync(join(workspace, 'plan.md'))).toBe(false)
-
-    const contract = await executeTool(
-      'edit',
-      JSON.stringify({
-        path: 'contract.md',
-        contents: '## Goal\n\nplan mode update\n\n## Done when\n\n- done\n'
-      }),
-      workspace,
-      signal,
-      { runDir, agentMode: 'plan' }
-    )
-    expect(contract.ok).toBe(true)
-    expect(readFileSync(join(runDir, 'contract.md'), 'utf8')).toContain('plan mode update')
   })
 })
 

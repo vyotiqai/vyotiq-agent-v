@@ -1,4 +1,6 @@
 import { useCallback, useSyncExternalStore } from 'react'
+import type { IconName } from '@renderer/lib/icons'
+import type { TaskState } from './StatusGlyph'
 
 /**
  * Global transient notifications. One surface for app-level notices that do
@@ -7,16 +9,36 @@ import { useCallback, useSyncExternalStore } from 'react'
 
 export type ToastKind = 'info' | 'success' | 'error'
 
+/** A button on the toast; pressing it also dismisses the toast. */
+export type ToastAction = { label: string; onClick: () => void }
+
 export type ToastItem = {
   id: number
   kind: ToastKind
+  /** The toast's line, or its title when it has a detail. */
   message: string
+  /** A second, quieter line: what the title is about. */
+  detail?: string
+  /** A task's state, drawn as the navigator draws it, in place of the kind's mark. */
+  state?: TaskState
+  /** A mark for what the toast is about, in place of the kind's. */
+  icon?: IconName
+  action?: ToastAction
   onClick?: () => void
   durationMs: number
   /** Timestamp when the toast will auto-dismiss. Null while paused. */
   expiresAt: number | null
   /** Remaining milliseconds when paused. */
   remainingMs: number
+}
+
+export type ToastOptions = {
+  kind?: ToastKind
+  detail?: string
+  state?: TaskState
+  icon?: IconName
+  action?: ToastAction
+  durationMs?: number
 }
 
 const MAX_TOASTS = 4
@@ -29,6 +51,12 @@ const timers = new Map<number, ReturnType<typeof setTimeout>>()
 
 function emit(): void {
   for (const listener of listeners) listener()
+}
+
+/** Replace one toast, so the snapshot changes and the host redraws it. */
+function update(id: number, patch: Partial<ToastItem>): void {
+  toasts = toasts.map((t) => (t.id === id ? { ...t, ...patch } : t))
+  emit()
 }
 
 export function dismissToast(id: number): void {
@@ -50,30 +78,38 @@ export function pauseToast(id: number): void {
     clearTimeout(timer)
     timers.delete(id)
   }
-  toast.remainingMs = Math.max(0, toast.expiresAt - Date.now())
-  toast.expiresAt = null
-  emit()
+  update(id, { remainingMs: Math.max(0, toast.expiresAt - Date.now()), expiresAt: null })
 }
 
 export function resumeToast(id: number): void {
   const toast = toasts.find((t) => t.id === id)
   if (!toast || toast.durationMs <= 0 || toast.expiresAt != null) return
-  toast.expiresAt = Date.now() + toast.remainingMs
   timers.set(id, setTimeout(() => dismissToast(id), toast.remainingMs))
-  emit()
+  update(id, { expiresAt: Date.now() + toast.remainingMs })
 }
 
+/**
+ * Show a toast. The short form is a line of text; the options form adds a
+ * detail line, a task state or icon, and an action button.
+ */
+export function pushToast(message: string, kind?: ToastKind, durationMs?: number, onClick?: () => void): number
+export function pushToast(message: string, options: ToastOptions): number
 export function pushToast(
   message: string,
-  kind: ToastKind = 'info',
-  durationMs = DEFAULT_DURATION_MS,
+  kindOrOptions: ToastKind | ToastOptions = 'info',
+  durationMsArg = DEFAULT_DURATION_MS,
   onClick?: () => void
 ): number {
+  const options: ToastOptions =
+    typeof kindOrOptions === 'string' ? { kind: kindOrOptions, durationMs: durationMsArg } : kindOrOptions
+  const kind = options.kind ?? 'info'
+  const durationMs = options.durationMs ?? DEFAULT_DURATION_MS
   const text = message.trim()
   if (!text) return -1
+  const detail = options.detail?.trim() || undefined
   const id = nextId++
   // Replace an identical visible toast instead of stacking duplicates.
-  const dupe = toasts.find((t) => t.message === text && t.kind === kind)
+  const dupe = toasts.find((t) => t.message === text && t.kind === kind && t.detail === detail)
   if (dupe) {
     dismissToast(dupe.id)
   }
@@ -85,6 +121,10 @@ export function pushToast(
     durationMs,
     expiresAt: durationMs > 0 ? now + durationMs : null,
     remainingMs: durationMs > 0 ? durationMs : 0,
+    ...(detail ? { detail } : {}),
+    ...(options.state ? { state: options.state } : {}),
+    ...(options.icon ? { icon: options.icon } : {}),
+    ...(options.action ? { action: options.action } : {}),
     ...(onClick ? { onClick } : {})
   }
   toasts = [...toasts, item].slice(-MAX_TOASTS)

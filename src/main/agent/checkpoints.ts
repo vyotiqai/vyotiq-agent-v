@@ -1,13 +1,19 @@
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
+  rmdirSync,
   rmSync,
-  statSync
+  statSync,
+  writeFileSync,
+  type Stats
 } from 'fs'
 import { copyFile, mkdir, readdir, stat } from 'fs/promises'
+import { tmpdir } from 'os'
 import { basename, dirname, join, relative } from 'path'
 import { createHash, randomUUID } from 'crypto'
 import { realpathIfExists, resolveInsideWorkspace } from '../workspace/safePath'
@@ -140,6 +146,26 @@ export function getWriteCheckpointMeta(
   // Soft no-op resolveWrites may pass ''; avoid assert throw → IPC_HANDLER.
   if (!checkpointId.trim() || !CHECKPOINT_ID_RE.test(checkpointId)) return null
   return loadMeta(runDir, checkpointId)
+}
+
+/**
+ * Every checkpoint of a run, oldest first, with its meta. Read-only view for
+ * summaries (the navigator's "Ready for review"); unreadable entries are
+ * skipped rather than thrown.
+ */
+export function listCheckpointMetas(runDir: string): WriteCheckpointMeta[] {
+  const out: WriteCheckpointMeta[] = []
+  for (const entry of loadIndex(runDir).checkpoints) {
+    const meta = loadMeta(runDir, entry.id)
+    if (meta) out.push(entry.undone && !meta.undone ? { ...meta, undone: true } : meta)
+  }
+  return out
+}
+
+/** Where a checkpoint keeps the before-image of one workspace-relative path. */
+export function checkpointBeforeImagePath(runDir: string, checkpointId: string, relPath: string): string {
+  assertValidCheckpointId(checkpointId)
+  return blobPathFor(join(runDir, 'checkpoints', checkpointId), relPath)
 }
 
 function saveMeta(runDir: string, meta: WriteCheckpointMeta): void {
@@ -426,11 +452,86 @@ export class InvokeWriteCheckpoint {
     }
   }
 
+  /**
+   * Drop entries the turn proved changed nothing.
+   *
+   * `recordPrior` runs *before* the write it is protecting, because the prior
+   * content has to be captured while it still exists. When the write then
+   * fails, the speculative entry stays: run 874dad8f's `str_replace index.md`
+   * failed with "File not found" and left `index.md` recorded created and
+   * undoable for a file that never existed. It reached the Changes panel, and
+   * the receipt told the user (and any awaiting parent) the run wrote it. Undo
+   * deletes what a `created` entry names, so had anything else produced that
+   * path later, Undo would have destroyed it.
+   *
+   * Only disk state decides — an entry survives unless the workspace itself
+   * shows no net change, so a real mutation can never be dropped here. Two
+   * kinds are deliberately left alone: non-undoable entries (a directory delete
+   * too large to snapshot) are real changes that simply cannot be reverted, and
+   * `deleted` entries are recorded by callers with their own lifecycles
+   * (`recordObservedMutation` from the post-tool watcher, instance merges)
+   * rather than by a snapshot taken ahead of a write that might fail.
+   */
+  private dropUnchangedEntries(): void {
+    for (const [rel, file] of [...this.files]) {
+      if (!file.undoable) continue
+      if (file.action === 'deleted') continue
+      let resolved: string
+      try {
+        resolved = resolveInsideWorkspace(this.workspaceRoot, file.path)
+      } catch {
+        continue
+      }
+      if (file.action === 'created') {
+        // Nothing at the path it claims to have created.
+        if (!existsSync(resolved)) this.files.delete(rel)
+        continue
+      }
+      // `modified` snapshotted the prior content, so identical bytes on disk
+      // mean the write never landed.
+      let priorHash: string | undefined
+      try {
+        priorHash = hashExistingFile(blobPathFor(this.checkpointDir(), file.path))
+      } catch {
+        continue
+      }
+      if (!priorHash) continue
+      if (hashExistingFile(resolved) === priorHash) this.files.delete(rel)
+    }
+  }
+
+  /** Remove a mid-turn persisted checkpoint that finalize found to be empty. */
+  private discardPersistedCheckpoint(): void {
+    try {
+      const index = loadIndex(this.runDir)
+      const next = index.checkpoints.filter((c) => c.id !== this.id)
+      if (next.length !== index.checkpoints.length) {
+        saveIndex(this.runDir, { ...index, checkpoints: next })
+      }
+      rmSync(this.checkpointDir(), { recursive: true, force: true })
+    } catch (err) {
+      logger.warn('Failed to discard an empty write checkpoint', {
+        scope: 'agent',
+        correlationId: basename(this.runDir),
+        checkpointId: this.id,
+        err
+      })
+    }
+  }
+
   /** Persist if any files were recorded; returns meta or null. */
   finalize(): WriteCheckpointMeta | null {
     if (this.finalized) return null
     this.finalized = true
     if (this.files.size === 0) return null
+    this.dropUnchangedEntries()
+    if (this.files.size === 0) {
+      // persistIncremental may already have written this id to disk mid-turn.
+      // Leaving it there would keep the phantom in the Changes panel under a
+      // checkpoint finalize has disowned.
+      this.discardPersistedCheckpoint()
+      return null
+    }
     this.stampPostWriteHashes()
 
     const meta: WriteCheckpointMeta = {
@@ -540,73 +641,272 @@ function resolveCheckpointId(runDir: string, checkpointId?: string): string | nu
   return id
 }
 
+/**
+ * Where a file stands against the agent's write: `edited` when someone changed
+ * it after the agent did (restoring would destroy that change), `restored`
+ * when it already holds what restoring would put there, else `writable`.
+ * `current` is the file's content hash, undefined when there is no file.
+ * Restore passes what is on disk; the rewind preview passes what the newer
+ * restores in its walk would leave, so the dialog says what the rewind will do.
+ */
+function writeState(current: string | undefined, blob: string | null, file: CheckpointFileEntry): 'edited' | 'restored' | 'writable' {
+  if (file.action === 'created') {
+    return file.hash && current && current !== file.hash ? 'edited' : 'writable'
+  }
+  if (!current || !blob) return 'writable'
+  if (file.action === 'modified') {
+    if (!file.hash || current === file.hash) return 'writable'
+    return current === hashExistingFile(blob) ? 'restored' : 'edited'
+  }
+  // Deleted by the agent and back on disk: already the old file, or someone else's.
+  return current === hashExistingFile(blob) ? 'restored' : 'edited'
+}
+
+/**
+ * Past a write that kept no copy, whether a rewind can take back the next,
+ * older write: only where that destroys nothing but the older write's own
+ * work. The file is gone, or holds just what that write left (its hash) or
+ * found (its copy); anything else may be the uncopied write's work, or yours.
+ * A further write with no copy passes too, since nothing is done to it.
+ */
+function goesPastNoCopy(current: string | undefined, blob: string | null, file: CheckpointFileEntry): boolean {
+  if (!file.undoable || !current) return true
+  if (file.hash && current === file.hash) return true
+  return writeState(current, blob, file) === 'restored'
+}
+
+/** goesPastNoCopy for the file on disk. One it cannot read stops the walk. */
+function goesPastNoCopyOnDisk(workspaceRoot: string, checkpointDir: string, file: CheckpointFileEntry): boolean {
+  if (!file.undoable) return true
+  try {
+    const blob = file.action === 'created' ? null : blobPathFor(checkpointDir, file.path)
+    return goesPastNoCopy(hashExistingFile(resolveInsideWorkspace(workspaceRoot, file.path)), blob, file)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * How much of what a rewind overwrites it holds in memory to put back if a
+ * later restore fails. Past this it copies files to a temp directory instead,
+ * so a rewind over large files cannot run the main process out of memory.
+ */
+const REWIND_UNDO_MEMORY_BYTES = 64 * 1024 * 1024
+let rewindUndoMemoryBytes = REWIND_UNDO_MEMORY_BYTES
+
+/** @internal Test hook: 0 copies every file a rewind overwrites to disk. */
+export function setRewindUndoMemoryBytesForTests(bytes: number | null): void {
+  rewindUndoMemoryBytes = bytes ?? REWIND_UNDO_MEMORY_BYTES
+}
+
+/** A file as a restore found it: its size and time, to tell whether it was touched, and its content. */
+type FileBefore = { size: number; mtimeMs: number; mode: number } & ({ bytes: Buffer } | { copy: string })
+
+type RestoreUndo = {
+  path: string
+  resolved: string
+  /** Null when there was no file at the path. */
+  before: FileBefore | null
+  /** Outermost directory that was missing, which the restore creates. */
+  missingDir?: string
+}
+
+/**
+ * What a rewind changed, so one that fails partway can leave the workspace as
+ * it was. A restore records its path before touching it, the failing one
+ * included: a copy that fails partway can leave its file truncated or gone.
+ */
+class RewindUndo {
+  private readonly undos: RestoreUndo[] = []
+  private heldBytes = 0
+  private copyDir: string | null = null
+  private keepCopies = false
+
+  /** Note what `resolved` holds now. Throws, having touched nothing, when it cannot. */
+  record(path: string, resolved: string): void {
+    this.undos.push({
+      path,
+      resolved,
+      before: this.capture(resolved),
+      missingDir: outermostMissingDir(dirname(resolved))
+    })
+  }
+
+  private capture(resolved: string): FileBefore | null {
+    let st: Stats
+    try {
+      st = statSync(resolved)
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw err
+    }
+    // Only a file can be put back, so restoring over anything else fails here.
+    if (!st.isFile()) throw new Error('not a file')
+    const seen = { size: st.size, mtimeMs: st.mtimeMs, mode: st.mode }
+    if (this.heldBytes + st.size <= rewindUndoMemoryBytes) {
+      const bytes = readFileSync(resolved)
+      this.heldBytes += bytes.length
+      return { ...seen, bytes }
+    }
+    this.copyDir ??= mkdtempSync(join(tmpdir(), 'vyotiq-rewind-undo-'))
+    const copy = join(this.copyDir, String(this.undos.length))
+    copyFileSync(resolved, copy)
+    return { ...seen, copy }
+  }
+
+  /** Put every recorded path back, newest first. Returns the ones it could not. */
+  rollBack(): string[] {
+    const notPutBack: string[] = []
+    for (const undo of [...this.undos].reverse()) {
+      try {
+        putBack(undo)
+      } catch (err) {
+        logger.error('Rewind could not put a file back as it was', {
+          scope: 'agent',
+          path: undo.path,
+          err
+        })
+        notPutBack.push(undo.path)
+      }
+    }
+    // A copy may now be the only one left of a file it could not put back.
+    this.keepCopies = notPutBack.length > 0
+    return notPutBack
+  }
+
+  dispose(): void {
+    if (!this.copyDir) return
+    if (this.keepCopies) {
+      logger.warn('Kept the rewind copies of files it could not put back', {
+        scope: 'agent',
+        path: this.copyDir
+      })
+      return
+    }
+    try {
+      rmSync(this.copyDir, { recursive: true, force: true })
+    } catch (err) {
+      logger.warn('Failed to remove rewind copies', { scope: 'agent', path: this.copyDir, err })
+    }
+  }
+}
+
+/**
+ * The outermost directory missing on the way to `dir`: what mkdir will create.
+ * Not mkdirSync's own return value, which on Windows is the `\\?\` form and
+ * never equals a path walked up with dirname().
+ */
+function outermostMissingDir(dir: string): string | undefined {
+  let missing: string | undefined
+  for (let d = dir; !existsSync(d); d = dirname(d)) {
+    missing = d
+    if (dirname(d) === d) break
+  }
+  return missing
+}
+
+/** True when the path still holds what the restore found there: it never got that far. */
+function stillAsFound(undo: RestoreUndo): boolean {
+  let st: Stats
+  try {
+    st = statSync(undo.resolved)
+  } catch (err) {
+    return undo.before === null && (err as NodeJS.ErrnoException).code === 'ENOENT'
+  }
+  const before = undo.before
+  return before !== null && st.isFile() && st.size === before.size && st.mtimeMs === before.mtimeMs
+}
+
+function putBack(undo: RestoreUndo): void {
+  const { resolved, before } = undo
+  if (!stillAsFound(undo)) {
+    if (!before) {
+      rmSync(resolved, { force: true })
+    } else if ('copy' in before) {
+      copyFileSync(before.copy, resolved)
+    } else {
+      const mode = before.mode & 0o7777
+      writeFileSync(resolved, before.bytes, { mode })
+      // A file that is still there keeps the mode the restore gave it.
+      if ((statSync(resolved).mode & 0o7777) !== mode) chmodSync(resolved, mode)
+    }
+  }
+  if (undo.missingDir) removeEmptyDirs(dirname(resolved), undo.missingDir)
+}
+
+/** Remove `dir` and its parents up to `outermost` while they are empty. */
+function removeEmptyDirs(dir: string, outermost: string): void {
+  for (let d = dir; ; d = dirname(d)) {
+    try {
+      rmdirSync(d)
+    } catch {
+      return
+    }
+    if (d === outermost || dirname(d) === d) return
+  }
+}
+
+type RestoreOutcome = 'restored' | 'skipped' | 'conflict'
+
+/**
+ * Put one file back as it was before the agent's write. Throws when it cannot:
+ * a missing copy or an I/O error. With `undo`, notes what the path held before
+ * changing it.
+ */
+function restoreFile(
+  workspaceRoot: string,
+  checkpointDir: string,
+  file: CheckpointFileEntry,
+  undo?: RewindUndo
+): RestoreOutcome {
+  if (!file.undoable) return 'skipped'
+  const resolved = resolveInsideWorkspace(workspaceRoot, file.path)
+  if (file.action === 'created') {
+    if (writeState(hashExistingFile(resolved), null, file) === 'edited') {
+      // User edited the file the agent created — refuse to delete their work.
+      logger.warn('Skipping checkpoint restore; file changed after the agent write', {
+        scope: 'agent',
+        path: file.path
+      })
+      return 'conflict'
+    }
+    if (existsSync(resolved)) {
+      undo?.record(file.path, resolved)
+      rmSync(resolved, { force: true })
+    }
+    return 'restored'
+  }
+  const blob = blobPathFor(checkpointDir, file.path)
+  if (!existsSync(blob)) throw new Error('its saved copy is missing')
+
+  // A missing file falls through: the prior blob is restored, recreating what
+  // the agent changed or deleted rather than leaving the deletion in place.
+  const state = writeState(hashExistingFile(resolved), blob, file)
+  if (state === 'restored') return 'restored'
+  if (state === 'edited') {
+    // Changed after the agent's write (or, for a delete, put back with other
+    // content) — refuse to clobber it.
+    logger.warn('Skipping checkpoint restore; file changed after the agent write', {
+      scope: 'agent',
+      path: file.path
+    })
+    return 'conflict'
+  }
+
+  undo?.record(file.path, resolved)
+  mkdirSync(dirname(resolved), { recursive: true })
+  copyFileSync(blob, resolved)
+  return 'restored'
+}
+
+/** restoreFile for Undo, where a file that fails stays unresolved and the rest go on. */
 function restoreOneFile(
   workspaceRoot: string,
   checkpointDir: string,
   file: CheckpointFileEntry
-): 'restored' | 'skipped' | 'conflict' | 'failed' {
-  if (!file.undoable) return 'skipped'
-  const resolved = resolveInsideWorkspace(workspaceRoot, file.path)
+): RestoreOutcome | 'failed' {
   try {
-    if (file.action === 'created') {
-      if (file.hash) {
-        const current = hashExistingFile(resolved)
-        if (current && current !== file.hash) {
-          // User edited the file the agent created — refuse to delete their work.
-          logger.warn('Skipping checkpoint restore; file changed after the agent write', {
-            scope: 'agent',
-            path: file.path
-          })
-          return 'conflict'
-        }
-      }
-      if (existsSync(resolved)) {
-        rmSync(resolved, { force: true })
-      }
-      return 'restored'
-    }
-    const blob = blobPathFor(checkpointDir, file.path)
-    if (!existsSync(blob)) return 'failed'
-
-    if (file.action === 'modified' && file.hash) {
-      const current = hashExistingFile(resolved)
-      if (current) {
-        if (current !== file.hash) {
-          const priorHash = hashExistingFile(blob)
-          if (current === priorHash) return 'restored'
-          // User edited the file after the agent modified it — refuse to clobber.
-          logger.warn('Skipping checkpoint restore; file changed after the agent write', {
-            scope: 'agent',
-            path: file.path
-          })
-          return 'conflict'
-        }
-        // current === file.hash: user has not changed the file; fall through to
-        // restore the prior blob at the bottom of this function.
-      }
-      // current is undefined: the agent-modified file was deleted after the write.
-      // Fall through so the prior blob is restored, recreating the original file
-      // instead of silently leaving the deletion in place.
-    }
-
-    if (file.action === 'deleted') {
-      const current = hashExistingFile(resolved)
-      if (current) {
-        const priorHash = hashExistingFile(blob)
-        if (current !== priorHash) {
-          logger.warn('Skipping checkpoint restore; file changed after the agent write', {
-            scope: 'agent',
-            path: file.path
-          })
-          return 'skipped'
-        }
-        return 'restored'
-      }
-    }
-
-    mkdirSync(dirname(resolved), { recursive: true })
-    copyFileSync(blob, resolved)
-    return 'restored'
+    return restoreFile(workspaceRoot, checkpointDir, file)
   } catch (err) {
     logger.warn('Failed to restore checkpoint file', {
       scope: 'agent',
@@ -804,18 +1104,47 @@ function resolveWritesInCheckpoint(
   }
 }
 
+/**
+ * A file is in at most one of restored, skipped and edited, however many
+ * rewound runs changed it: the one that says where the rewind left it.
+ */
 export type RewindWritesResult = {
   checkpointIds: string[]
+  /** Back to how they were before the rewound runs. */
   restored: string[]
+  /** Changed by a write that kept no copy (not undoable), which the rewind could not get past. */
   skipped: string[]
-  /** True when an undoable file could not be restored (I/O or hash conflict). */
+  /** Changed after an agent's write: the rewind stops at that change and leaves it. */
+  edited: string[]
+  /**
+   * True when an undoable file could not be restored — a missing copy or an
+   * I/O error. The rewind then leaves the workspace as it was: files it had
+   * already restored are put back, and no checkpoint is marked.
+   */
   undoableRestoreFailed: boolean
+  /** The file that stopped the rewind, and why: an error code, or what is missing. */
+  failure?: { path: string; reason: string }
+  /** Files the failed rewind changed and then could not put back as they were. */
+  notPutBack?: string[]
 }
 
+/** Where the rewind will leave one file, in the terms of RewindWritesResult. */
 export type RewindWritesPlanFile = {
   path: string
+  /**
+   * What the rewind undoes, as git would letter it: created (it removes the
+   * file), modified (puts it back), deleted (brings it back).
+   */
   action: CheckpointFileAction
+  /** False when the rewind stops at a write that kept no copy (skipped). */
   undoable: boolean
+  /** Changed after an agent's write: the rewind stops at that change (edited). */
+  edited?: boolean
+  /**
+   * Stops (edited, or no copy) only after taking off later runs' writes: the
+   * file changes, but not all the way back.
+   */
+  partway?: boolean
 }
 
 export type RewindWritesPlan = {
@@ -889,34 +1218,102 @@ function collectRewindEntries(
   return entries
 }
 
-/** Read-only preview of what rewindWritesFromScopes would restore; mutates nothing. */
+/** One rewound write of a file, and the checkpoint that holds its copy. */
+type RewoundWrite = { file: CheckpointFileEntry; checkpointDir: string }
+
+/**
+ * Read-only preview of where rewindWritesFromScopes will leave each file;
+ * mutates nothing. With the workspace it walks each file's rewound writes as
+ * the rewind does. Without it there is nothing to walk on, so a file's newest
+ * rewound write stands for it and nothing is marked edited.
+ */
 export function planRewindWritesAcrossRuns(
   scopes: RewindRunScope[],
-  fromUserMessageIndex: number
+  fromUserMessageIndex: number,
+  workspaceRoot?: string
 ): RewindWritesPlan {
-  const checkpointIds: string[] = []
-  const byPath = new Map<string, RewindWritesPlanFile>()
-  for (const entry of collectRewindEntries(scopes, fromUserMessageIndex)) {
-    checkpointIds.push(entry.meta.id)
-    for (const file of entry.meta.files) {
-      // Newest checkpoint wins per path; older checkpoints never overwrite it.
-      if (!byPath.has(file.path)) {
-        byPath.set(file.path, {
-          path: file.path,
-          action: file.action,
-          undoable: file.undoable
-        })
-      }
+  const entries = collectRewindEntries(scopes, fromUserMessageIndex)
+  // Each file's rewound writes in the order the rewind takes them: newest first.
+  const writesByPath = new Map<string, RewoundWrite[]>()
+  for (const entry of entries) {
+    const checkpointDir = join(entry.runDir, 'checkpoints', entry.meta.id)
+    for (const file of [...entry.meta.files].reverse()) {
+      const writes = writesByPath.get(file.path)
+      if (writes) writes.push({ file, checkpointDir })
+      else writesByPath.set(file.path, [{ file, checkpointDir }])
     }
   }
+  const files = [...writesByPath.values()].map((writes) => {
+    const newest = writes[0]!.file
+    const asNewest = { path: newest.path, action: newest.action, undoable: newest.undoable }
+    return workspaceRoot ? (planFileRewind(workspaceRoot, writes) ?? asNewest) : asNewest
+  })
   return {
-    checkpointIds,
-    files: [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path))
+    checkpointIds: entries.map((entry) => entry.meta.id),
+    files: files.sort((a, b) => a.path.localeCompare(b.path))
   }
 }
 
 /**
- * Force-restore every selected write checkpoint (newest first). Selection is
+ * Walk one file's rewound writes, newest first, on content hashes: the walk
+ * rewindWritesFromScopes makes on disk. Each restore takes the file back a
+ * run. A change made since stops it; a write with no copy stops it unless
+ * the next write can be taken back past it (goesPastNoCopy).
+ * Null when the file cannot be read to walk on.
+ */
+function planFileRewind(workspaceRoot: string, writes: RewoundWrite[]): RewindWritesPlanFile | null {
+  const newest = writes[0]!.file
+  try {
+    const now = hashExistingFile(resolveInsideWorkspace(workspaceRoot, newest.path))
+    let content = now
+    const taken: CheckpointFileEntry[] = []
+    // Writes with no copy the walk has reached but not yet got past.
+    let noCopy: CheckpointFileEntry[] = []
+    let edited = false
+    for (const { file, checkpointDir } of writes) {
+      if (!file.undoable) {
+        noCopy.push(file)
+        continue
+      }
+      const blob = file.action === 'created' ? null : blobPathFor(checkpointDir, file.path)
+      if (noCopy.length > 0 && !goesPastNoCopy(content, blob, file)) break
+      const state = writeState(content, blob, file)
+      if (state === 'edited') {
+        edited = true
+        break
+      }
+      // 'restored' leaves the file as it is: it already holds this write's copy.
+      if (state === 'writable') content = blob ? hashExistingFile(blob) : undefined
+      taken.push(...noCopy, file)
+      noCopy = []
+    }
+    const stopped = edited || noCopy.length > 0
+    return {
+      path: newest.path,
+      action: taken.length > 0 ? undoneAction(taken) : newest.action,
+      undoable: noCopy.length === 0,
+      ...(edited ? { edited: true } : {}),
+      ...(stopped && content !== now ? { partway: true } : {})
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The letter for what taking back `taken` (newest first) undoes: a file the
+ * oldest of them created goes, one the newest deleted comes back, and any
+ * other is put back as it was.
+ */
+function undoneAction(taken: CheckpointFileEntry[]): CheckpointFileAction {
+  if (taken[taken.length - 1]!.action === 'created') return 'created'
+  return taken[0]!.action === 'deleted' ? 'deleted' : 'modified'
+}
+
+/**
+ * Force-restore every selected write checkpoint (newest first), each file
+ * until a change made since stops it, or a write with no copy it cannot get
+ * past without destroying more than older runs' own work. Selection is
  * per scope: parent runs filter by the rewind anchor, inline instance runs are
  * included whole. Ignores UI Keep/Discard and prior undone flags so
  * edit-and-resend can rewind multi-turn history.
@@ -924,6 +1321,9 @@ export function planRewindWritesAcrossRuns(
  * Checkpoints without `anchorUserMessageIndex` (legacy runs) are only restored
  * when rewinding to the start of the transcript (`fromUserMessageIndex === 0`).
  * Including them on a mid-history rewind would undo earlier-turn writes.
+ *
+ * All or nothing: when an undoable file cannot be restored, the files already
+ * restored are put back and `undoableRestoreFailed` is set.
  */
 export function rewindWritesFromScopes(
   workspaceRoot: string,
@@ -931,36 +1331,109 @@ export function rewindWritesFromScopes(
   fromUserMessageIndex: number
 ): RewindWritesResult {
   for (const scope of scopes) discardWriteCheckpoint(scope.runDir)
-  const checkpointIds: string[] = []
-  const restored: string[] = []
-  const skipped: string[] = []
-  let undoableRestoreFailed = false
+  // Where the rewind leaves each file, newest first: one entry per file, as
+  // in the preview, however many rewound runs changed it. Each restore takes
+  // the file back a run; the first thing to stop it after that (a change made
+  // since, or a write with no copy) says why it is not all the way back.
+  const leftAs = new Map<string, RestoreOutcome>()
+  // Files whose walk has stopped: older runs leave them as they are. Their
+  // copies would go back over a change made since, unguarded when a run never
+  // finalized (a crash leaves no hash). Past a write with no copy the walk
+  // goes on only where that destroys nothing (goesPastNoCopy).
+  const stopped = new Set<string>()
 
-  for (const entry of collectRewindEntries(scopes, fromUserMessageIndex)) {
+  const entries = collectRewindEntries(scopes, fromUserMessageIndex)
+  // A copy that is gone would fail its restore halfway through, after newer
+  // files were already put back. Check them all first and touch nothing.
+  for (const entry of entries) {
     const checkpointDir = join(entry.runDir, 'checkpoints', entry.meta.id)
-    let hadIoFailure = false
-    for (const file of [...entry.meta.files].reverse()) {
-      const outcome = restoreOneFile(workspaceRoot, checkpointDir, file)
-      if (outcome === 'restored') {
-        file.resolved = 'discarded'
-        restored.push(file.path)
-      } else if (file.undoable) {
-        hadIoFailure = true
-        skipped.push(file.path)
-      } else {
-        skipped.push(file.path)
+    for (const file of entry.meta.files) {
+      if (!file.undoable || file.action === 'created') continue
+      if (!existsSync(blobPathFor(checkpointDir, file.path))) {
+        logger.warn('Rewind stopped before restoring: a checkpoint copy is missing', {
+          scope: 'agent',
+          path: file.path
+        })
+        return rewindFailed({ path: file.path, reason: 'its saved copy is missing' }, [])
       }
     }
-    if (hadIoFailure) {
-      undoableRestoreFailed = true
-      saveMeta(entry.runDir, entry.meta)
-    } else {
-      markCheckpointFullyResolved(entry.runDir, entry.meta)
-    }
-    checkpointIds.push(entry.meta.id)
   }
 
-  return { checkpointIds, restored, skipped, undoableRestoreFailed }
+  // An I/O error (EPERM, EBUSY, a full disk) only shows up while writing, so
+  // each restore notes what it overwrites first, a failure puts all of it back,
+  // and no checkpoint is marked until every file is through.
+  const undo = new RewindUndo()
+  try {
+    for (const entry of entries) {
+      const checkpointDir = join(entry.runDir, 'checkpoints', entry.meta.id)
+      for (const file of [...entry.meta.files].reverse()) {
+        if (
+          !stopped.has(file.path) &&
+          leftAs.get(file.path) === 'skipped' &&
+          !goesPastNoCopyOnDisk(workspaceRoot, checkpointDir, file)
+        ) {
+          stopped.add(file.path)
+        }
+        if (stopped.has(file.path)) {
+          // A newer run stopped the walk: this run's write stays under it.
+          file.resolved = 'kept'
+          continue
+        }
+        let outcome: RestoreOutcome
+        try {
+          outcome = restoreFile(workspaceRoot, checkpointDir, file, undo)
+        } catch (err) {
+          logger.warn('Rewind could not restore a file; putting back what it changed', {
+            scope: 'agent',
+            path: file.path,
+            err
+          })
+          return rewindFailed({ path: file.path, reason: failureReason(err) }, undo.rollBack())
+        }
+        if (outcome === 'restored') {
+          file.resolved = 'discarded'
+        } else if (outcome === 'conflict') {
+          // Changed after the agent wrote it: left as it is, by older runs
+          // too. The rewind goes on with the other files.
+          file.resolved = 'kept'
+          stopped.add(file.path)
+        }
+        leftAs.set(file.path, outcome)
+      }
+    }
+  } finally {
+    undo.dispose()
+  }
+
+  for (const entry of entries) markCheckpointFullyResolved(entry.runDir, entry.meta)
+  const leftAsOf = (outcome: RestoreOutcome): string[] =>
+    [...leftAs].filter(([, left]) => left === outcome).map(([path]) => path)
+  return {
+    checkpointIds: entries.map((entry) => entry.meta.id),
+    restored: leftAsOf('restored'),
+    skipped: leftAsOf('skipped'),
+    edited: leftAsOf('conflict'),
+    undoableRestoreFailed: false
+  }
+}
+
+function rewindFailed(failure: { path: string; reason: string }, notPutBack: string[]): RewindWritesResult {
+  return {
+    checkpointIds: [],
+    restored: [],
+    skipped: [],
+    edited: [],
+    undoableRestoreFailed: true,
+    failure,
+    ...(notPutBack.length > 0 ? { notPutBack } : {})
+  }
+}
+
+/** A short why for the user: the error code when there is one. */
+function failureReason(err: unknown): string {
+  const code = (err as NodeJS.ErrnoException | null)?.code
+  if (typeof code === 'string' && code) return code
+  return err instanceof Error ? err.message : String(err)
 }
 
 /** Single-run rewind (parent scope) — see rewindWritesFromScopes. */

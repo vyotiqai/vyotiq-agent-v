@@ -15,6 +15,12 @@ export type StepUsageTotals = {
   cachedInputTokens: number
   /** Sum of per-step cached input tokens (for run-level hit rate). */
   billedCachedInputTokens: number
+  /**
+   * Sum of per-step whole-prompt tokens (`promptTokensFromUsage`) — the
+   * denominator a cache share needs, whatever each provider counts as input.
+   * Absent on totals rebuilt from before it was tracked.
+   */
+  billedPromptTokens?: number
   /** Tokens written into the prompt cache this run (Anthropic); accumulates across steps. */
   cacheCreationInputTokens: number
   /** Billed thinking tokens, a subset of the output tokens above. */
@@ -40,6 +46,43 @@ export type StepUsageTotals = {
   generationMs: number
 }
 
+/**
+ * Total prompt tokens actually sent on the wire.
+ *
+ * Providers disagree on what `inputTokens` covers. OpenAI-compatible and Gemini
+ * report the whole prompt, cached reads included; Anthropic reports only the
+ * uncached slice and splits the rest into `cachedInputTokens` /
+ * `cacheCreationInputTokens` (providers/anthropic.ts sets
+ * `inputTokensIncludesCache: false`). Context sizing needs one number — the
+ * whole prompt — or a cache-warm step looks nearly empty and the auto-compact
+ * trigger never fires. Observed on a real run: `inputTokens: 6` alongside
+ * `cacheCreationInputTokens: 15900`, against a 13,070-token local estimate.
+ *
+ * Only an explicit `false` adds the cache slices. A provider that omits the flag
+ * is assumed to report the full prompt: adding there would double-count a cached
+ * prefix and compact far too early.
+ *
+ * Billing is the opposite — `estimateStepCost` prices each slice at its own rate
+ * — so `step_usage.inputTokens` must keep the provider's raw figure. This helper
+ * is for context sizing only.
+ */
+export function promptTokensFromUsage(usage: {
+  inputTokens?: number
+  inputTokensIncludesCache?: boolean
+  cachedInputTokens?: number
+  cacheCreationInputTokens?: number
+}): number {
+  const input = positiveTokens(usage.inputTokens)
+  if (usage.inputTokensIncludesCache !== false) return input
+  return (
+    input + positiveTokens(usage.cachedInputTokens) + positiveTokens(usage.cacheCreationInputTokens)
+  )
+}
+
+function positiveTokens(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+}
+
 export function emptyStepUsageTotals(): StepUsageTotals {
   return {
     inputTokens: 0,
@@ -48,6 +91,7 @@ export function emptyStepUsageTotals(): StepUsageTotals {
     outputTokens: 0,
     cachedInputTokens: 0,
     billedCachedInputTokens: 0,
+    billedPromptTokens: 0,
     cacheCreationInputTokens: 0,
     reasoningTokens: 0,
     steps: 0,
@@ -80,6 +124,7 @@ export function mergeStepUsageTotals(a: StepUsageTotals, b: StepUsageTotals): St
     outputTokens: a.outputTokens + b.outputTokens,
     cachedInputTokens: b.inputTokens > 0 ? b.cachedInputTokens : a.cachedInputTokens,
     billedCachedInputTokens: a.billedCachedInputTokens + stepCached,
+    billedPromptTokens: (a.billedPromptTokens ?? 0) + (b.inputTokens > 0 ? (b.billedPromptTokens ?? 0) : 0),
     cacheCreationInputTokens: a.cacheCreationInputTokens + b.cacheCreationInputTokens,
     reasoningTokens: a.reasoningTokens + b.reasoningTokens,
     steps: a.steps + b.steps,
@@ -121,6 +166,7 @@ export function stepUsageFromEvent(event: AgentEvent): StepUsageTotals | null {
     outputTokens: event.outputTokens ?? 0,
     cachedInputTokens,
     billedCachedInputTokens: cachedInputTokens,
+    billedPromptTokens: promptTokensFromUsage(event),
     cacheCreationInputTokens,
     reasoningTokens: event.reasoningTokens ?? 0,
     steps: 1,

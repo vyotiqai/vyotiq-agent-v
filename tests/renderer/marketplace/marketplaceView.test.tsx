@@ -2,14 +2,17 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MarketplaceView } from '@renderer/features/marketplace'
-import type { Settings } from '@shared/ipc'
+import type {
+  MarketplaceCatalogEntry,
+  MarketplaceInstalledItem,
+  McpServerStatus,
+  PackageContents,
+  Settings,
+  ToolCatalogResult
+} from '@shared/ipc'
 import { DEFAULT_SETTINGS } from '@shared/ipc'
-
-afterEach(() => {
-  cleanup()
-})
 
 const baseSettings: Settings = {
   ...DEFAULT_SETTINGS,
@@ -17,445 +20,336 @@ const baseSettings: Settings = {
   mcpServers: []
 }
 
-const catalogPackages = [
-  {
+const entry = (
+  partial: Partial<MarketplaceCatalogEntry> & Pick<MarketplaceCatalogEntry, 'id' | 'name' | 'kind'>
+): MarketplaceCatalogEntry => ({
+  version: '1.0.0',
+  description: '',
+  source: 'bundled',
+  installable: true,
+  bundledPath: partial.id,
+  ...partial
+})
+
+const catalog: MarketplaceCatalogEntry[] = [
+  entry({
     id: 'filesystem',
     name: 'Filesystem',
-    version: '1.0.0',
+    kind: 'mcp',
     description: 'MCP filesystem',
-    kind: 'mcp' as const,
-    source: 'bundled' as const,
-    sections: ['featured'] as const,
-    category: 'infrastructure',
     featuredRank: 1,
     verified: true,
-    publisher: 'Model Context Protocol',
-    installable: true,
-    bundledPath: 'filesystem'
-  },
-  {
+    publisher: 'Model Context Protocol'
+  }),
+  entry({
     id: 'memory',
     name: 'Memory',
-    version: '1.0.0',
+    kind: 'mcp',
     description: 'MCP memory',
-    kind: 'mcp' as const,
-    source: 'bundled' as const,
-    sections: ['featured'] as const,
-    category: 'infrastructure',
     featuredRank: 2,
-    verified: true,
-    publisher: 'Model Context Protocol',
-    installable: true,
-    bundledPath: 'memory'
-  },
-  {
-    id: 'implement-feature',
-    name: 'Implement feature',
-    version: '1.0.0',
-    description: 'Feature implementation skill',
-    kind: 'skill' as const,
-    source: 'bundled' as const,
-    category: 'skills',
-    verified: true,
-    publisher: 'Agent V',
-    installable: true,
-    bundledPath: 'implement-feature'
-  },
-  {
-    id: 'fetch',
-    name: 'Fetch',
-    version: '1.0.0',
-    description: 'Fetch MCP',
-    kind: 'mcp' as const,
-    source: 'bundled' as const,
-    category: 'infrastructure',
-    verified: true,
-    publisher: 'Model Context Protocol',
-    installable: true,
-    bundledPath: 'fetch'
-  },
-  {
-    id: 'create-skill',
-    name: 'Create skill',
-    version: '1.0.0',
-    description: 'Create skill workflow',
-    kind: 'skill' as const,
-    source: 'bundled' as const,
-    category: 'skills',
-    verified: true,
-    publisher: 'Agent V',
-    installable: true,
-    bundledPath: 'create-skill'
-  }
+    publisher: 'Model Context Protocol'
+  }),
+  entry({ id: 'fetch', name: 'Fetch', kind: 'mcp', description: 'Fetch MCP', publisher: 'Model Context Protocol' }),
+  entry({ id: 'implement-feature', name: 'Implement feature', kind: 'skill', publisher: 'Agent V' }),
+  entry({ id: 'create-skill', name: 'Create skill', kind: 'skill', publisher: 'Agent V' }),
+  entry({
+    id: 'grill-me',
+    name: 'Grill me',
+    kind: 'skill',
+    description: 'A relentless interview',
+    publisher: 'Matt Pocock',
+    // Hands off to a skill that ships as its own card, so Add pulls it in too.
+    dependsOn: ['grilling', 'memory']
+  }),
+  entry({ id: 'devtools', name: 'Devtools', kind: 'plugin', publisher: 'Agent V' })
 ]
 
-describe('MarketplaceView', () => {
-  beforeEach(() => {
-    // @ts-expect-error test bridge
-    window.vyotiq = {
-      marketplaceBrowse: vi.fn(async (opts?: { q?: string; kind?: string }) => {
-        const q = opts?.q?.trim().toLowerCase()
-        let packages = catalogPackages
-        if (opts?.kind) packages = packages.filter((p) => p.kind === opts.kind)
-        if (q) {
-          packages = packages.filter(
-            (p) =>
-              p.id.toLowerCase().includes(q) ||
-              p.name.toLowerCase().includes(q) ||
-              p.description.toLowerCase().includes(q)
-          )
-        }
-        return { ok: true as const, data: { packages } }
-      }),
-      marketplaceListInstalled: vi.fn(async () => ({
-        ok: true as const,
-        data: {
-          schemaVersion: 1 as const,
-          items: [
-            {
-              id: 'memory',
-              kind: 'mcp' as const,
-              name: 'Memory',
-              version: '1.0.0',
-              description: '',
-              enabled: true,
-              installSource: 'bundled' as const,
-              installedAt: new Date().toISOString(),
-              packagePath: 'memory/1.0.0'
-            }
-          ]
-        }
-      })),
-      marketplaceGetContents: vi.fn(async () => ({
-        ok: true as const,
-        data: {
-          id: 'filesystem',
-          kind: 'mcp' as const,
-          mcp: [{ id: 'filesystem', name: 'Filesystem', path: 'vyotiq.mcp.json' }],
-          skills: [],
-          rules: []
-        }
-      })),
-      marketplaceInstall: vi.fn(async () => ({
-        ok: true as const,
-        data: {
-          item: {
-            id: 'filesystem',
-            kind: 'mcp' as const,
-            name: 'Filesystem',
-            version: '1.0.0',
-            description: '',
-            enabled: true,
-            installSource: 'bundled' as const,
-            installedAt: new Date().toISOString(),
-            packagePath: 'filesystem/1.0.0'
-          }
-        }
-      })),
-      mcpStatus: vi.fn(async () => ({
-        ok: true as const,
-        data: {
-          servers: [
-            {
-              id: 'memory',
-              name: 'Memory',
-              enabled: true,
-              connected: true,
-              toolCount: 2
-            }
-          ]
-        }
-      })),
-      mcpRefresh: vi.fn(async () => ({
-        ok: true as const,
-        data: {
-          servers: [
-            {
-              id: 'memory',
-              name: 'Memory',
-              enabled: true,
-              connected: true,
-              toolCount: 2
-            }
-          ]
-        }
-      })),
-      marketplaceDetectMcp: vi.fn(async () => ({
-        ok: true as const,
-        data: {
-          kind: 'stdio' as const,
-          confidence: 'high' as const,
-          server: {
-            id: 'mcp-fetch',
-            name: 'fetch',
-            transport: 'stdio' as const,
-            command: 'uvx',
-            args: ['mcp-server-fetch'],
-            enabled: true,
-            source: 'manual' as const
-          },
-          warnings: [],
-          duplicate: false
-        }
-      })),
-      marketplaceApplyDetectedMcp: vi.fn(async () => ({
-        ok: true as const,
-        data: { applied: 'manual' as const, serverId: 'mcp-fetch' }
-      })),
-      marketplaceScanExternalMcp: vi.fn(async () => ({
-        ok: true as const,
-        data: {
-          preview: [],
-          applied: 0,
-          skipped: 0,
-          warnings: [],
-          scannedPaths: []
-        }
-      })),
-      marketplaceImportExternalMcp: vi.fn(async () => ({
-        ok: true as const,
-        data: {
-          preview: [],
-          applied: 0,
-          skipped: 0,
-          warnings: [],
-          scannedPaths: []
-        }
-      })),
-      marketplacePickLocal: vi.fn(async () => ({ ok: true as const, data: null })),
-      skillsListLocal: vi.fn(async () => ({
-        ok: true as const,
-        data: {
-          skills: [
-            {
-              id: 'skill:local:project:ship-notes',
-              name: 'ship-notes',
-              description: 'Project skill for shipping notes from the current workspace.',
-              source: 'project' as const,
-              origin: 'vyotiq' as const,
-              skillPath: 'C:/tmp/.vyotiq/skills/ship-notes/SKILL.md',
-              relativePath: '.vyotiq/skills/ship-notes/SKILL.md'
-            }
-          ]
-        }
-      })),
-      skillsOpenLocal: vi.fn(async () => ({ ok: true as const, data: true as const })),
-      skillsReadLocal: vi.fn(async () => ({
-        ok: true as const,
-        data: {
-          skillPath: 'C:/tmp/.vyotiq/skills/ship-notes/SKILL.md',
-          content: '---\nname: ship-notes\ndescription: Project skill for shipping notes from the current workspace.\n---\n\n# Ship notes\n',
-          name: 'ship-notes',
-          description: 'Project skill for shipping notes from the current workspace.',
-          body: '# Ship notes\n'
-        }
-      })),
-      skillsWriteLocal: vi.fn(async () => ({
-        ok: true as const,
-        data: {
-          skillPath: 'C:/tmp/.vyotiq/skills/ship-notes/SKILL.md',
-          relativePath: '.vyotiq/skills/ship-notes/SKILL.md',
-          name: 'ship-notes'
-        }
-      })),
-      skillsDeleteLocal: vi.fn(async () => ({ ok: true as const, data: true as const })),
-      slashCommandsCreateSkill: vi.fn(async () => ({
-        ok: true as const,
-        data: {
-          path: 'C:/tmp/.vyotiq/skills/release-notes/SKILL.md',
-          relativePath: '.vyotiq/skills/release-notes/SKILL.md',
-          name: 'release-notes',
-          source: 'project' as const
-        }
-      })),
-      slashCommandsCreateRule: vi.fn(async () => ({
-        ok: true as const,
-        data: {
-          path: 'C:/tmp/.vyotiq/rules/release-notes.md',
-          relativePath: '.vyotiq/rules/release-notes.md'
-        }
-      })),
-      workspaceListRules: vi.fn(async () => ({
-        ok: true as const,
-        data: { rules: [] as Array<{ path: string; alwaysApply: boolean }> }
-      })),
-      workspaceFileRead: vi.fn(async () => ({
-        ok: false as const,
-        error: 'not used'
-      })),
-      workspaceFileSave: vi.fn(async () => ({
-        ok: false as const,
-        error: 'not used'
-      })),
-      workspaceFileDelete: vi.fn(async () => ({
-        ok: false as const,
-        error: 'not used'
-      })),
-      workspaceFileReveal: vi.fn(async () => ({ ok: true as const, data: true as const })),
-      shellOpenExternal: vi.fn(async () => ({ ok: true as const, data: true as const })),
-      onSkillsChanged: vi.fn(() => () => {})
+const installedItem = (
+  partial: Partial<MarketplaceInstalledItem> & Pick<MarketplaceInstalledItem, 'id' | 'name'>
+): MarketplaceInstalledItem => ({
+  kind: 'mcp',
+  version: '1.0.0',
+  description: '',
+  enabled: true,
+  installSource: 'bundled',
+  installedAt: '2026-09-24T00:00:00.000Z',
+  packagePath: `${partial.id}/1.0.0`,
+  ...partial
+})
+
+const memoryConnected: McpServerStatus = { id: 'memory', name: 'Memory', enabled: true, connected: true, toolCount: 2 }
+
+const contentsById: Record<string, PackageContents> = {
+  filesystem: {
+    id: 'filesystem',
+    kind: 'mcp',
+    mcp: [
+      {
+        id: 'filesystem',
+        name: 'Filesystem',
+        path: 'vyotiq.mcp.json',
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-filesystem']
+      }
+    ],
+    skills: [],
+    rules: []
+  },
+  devtools: {
+    id: 'devtools',
+    kind: 'plugin',
+    mcp: [{ id: 'browser', name: 'Browser', path: 'mcp/browser.json' }],
+    skills: [{ name: 'triage', description: 'Triage a failing build', path: 'skills/triage/SKILL.md' }],
+    rules: [{ path: 'rules/style.md' }]
+  }
+}
+
+const toolCatalog: ToolCatalogResult = {
+  entries: [
+    {
+      name: 'mcp__memory__read_graph',
+      description: 'Read the whole graph',
+      source: 'mcp',
+      serverId: 'memory',
+      readOnlyHint: true,
+      modes: ['ask', 'agent'],
+      active: true
+    },
+    {
+      name: 'mcp__memory__create_entities',
+      description: 'Add entities',
+      source: 'mcp',
+      serverId: 'memory',
+      readOnlyHint: false,
+      modes: ['agent'],
+      active: true
     }
-  })
+  ],
+  servers: [],
+  codeIndexEnabled: false,
+  autoModeSwitch: false,
+  fingerprint: 'test'
+}
 
-  it('renders Featured without Discover and lists each package once', async () => {
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    expect(await screen.findByRole('heading', { name: /^Installed$/i })).toBeTruthy()
-    expect(await screen.findByRole('heading', { name: /^Featured$/i })).toBeTruthy()
-    expect(screen.queryByRole('heading', { name: /^Discover$/i })).toBeNull()
-    expect(screen.getAllByText('Filesystem').length).toBe(1)
-    expect(screen.getAllByText('Memory').length).toBe(1)
-    expect(screen.getAllByText('Implement feature').length).toBe(1)
-    expect(screen.getByRole('heading', { name: /^Skills$/i })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /^Infrastructure$/i })).toBeTruthy()
-    expect(screen.queryByRole('heading', { name: /^Plugins$/i })).toBeNull()
-    expect(screen.getByText('MCP servers, skills, and packages for the agent.')).toBeTruthy()
-    expect(screen.getByPlaceholderText('Search packages, skills, MCPs…')).toBeTruthy()
-    expect(screen.getByRole('option', { name: 'Packages' })).toBeTruthy()
-    expect(screen.queryByRole('option', { name: 'Plugins' })).toBeNull()
-    expect(screen.getByText('Fetch')).toBeTruthy()
-    expect(screen.getByText('Create skill')).toBeTruthy()
-    // Installed packages sit in Installed, not Featured / categories
-    const installedSection = screen.getByRole('heading', { name: /^Installed$/i }).closest('section')
-    expect(installedSection?.textContent).toContain('Memory')
-    const featured = screen.getByRole('heading', { name: /^Featured$/i }).closest('section')
-    expect(featured?.textContent).toContain('Filesystem')
-    expect(featured?.textContent).not.toContain('Memory')
-    const infra = screen.getByRole('heading', { name: /^Infrastructure$/i }).closest('section')
-    expect(infra?.textContent).toContain('Fetch')
-    expect(infra?.textContent).not.toContain('Filesystem')
-    expect(infra?.textContent).not.toContain('Memory')
-    expect(screen.queryByRole('button', { name: /^Coming soon$/i })).toBeNull()
-  })
+type Bridge = Record<string, (...args: never[]) => unknown>
+let bridge: Bridge
 
-  it('shows Installing… only on the Featured card being installed', async () => {
-    let resolveInstall: ((value: unknown) => void) | undefined
-    // @ts-expect-error test bridge
-    window.vyotiq.marketplaceListInstalled = vi.fn(async () => ({
-      ok: true as const,
-      data: { schemaVersion: 1 as const, items: [] }
-    }))
-    // @ts-expect-error test bridge
-    window.vyotiq.marketplaceInstall = vi.fn(
-      () =>
-        new Promise((resolve) => {
-          resolveInstall = resolve
-        })
-    )
+function ok<T>(data: T) {
+  return { ok: true as const, data }
+}
 
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    await screen.findByRole('heading', { name: /^Featured$/i })
-
-    const featured = screen.getByRole('heading', { name: /^Featured$/i }).closest('section')
-    expect(featured).toBeTruthy()
-    const addButtons = within(featured!).getAllByRole('button', { name: /^Add$/i })
-    expect(addButtons.length).toBeGreaterThanOrEqual(2)
-
-    fireEvent.click(addButtons[0]!)
-
-    await waitFor(() => {
-      expect(within(featured!).getAllByRole('button', { name: /^Installing/i }).length).toBe(1)
-    })
-    expect(within(featured!).getAllByRole('button', { name: /^Add$/i }).length).toBe(
-      addButtons.length - 1
-    )
-
-    resolveInstall?.({
-      ok: true,
-      data: {
-        item: {
-          id: 'filesystem',
-          kind: 'mcp',
-          name: 'Filesystem',
-          version: '1.0.0',
-          description: '',
+function installBridge(overrides: Bridge = {}): void {
+  bridge = {
+    marketplaceBrowse: vi.fn(async () => ok({ packages: catalog })),
+    marketplaceListInstalled: vi.fn(async () =>
+      ok({ schemaVersion: 1 as const, items: [installedItem({ id: 'memory', name: 'Memory' })] })
+    ),
+    marketplaceGetContents: vi.fn(async (id: string) =>
+      contentsById[id] ? ok(contentsById[id]) : { ok: false as const, error: 'no contents' }
+    ),
+    marketplaceInstall: vi.fn(async () =>
+      ok({ item: installedItem({ id: 'filesystem', name: 'Filesystem' }) })
+    ),
+    marketplaceRefreshCatalog: vi.fn(async () => ok({ schemaVersion: 1 as const, packages: catalog })),
+    marketplaceAckRemoteInstall: vi.fn(async () => ok(baseSettings)),
+    mcpStatus: vi.fn(async () => ok({ servers: [memoryConnected] })),
+    mcpRefresh: vi.fn(async () => ok({ servers: [memoryConnected] })),
+    marketplaceDetectMcp: vi.fn(async () =>
+      ok({
+        kind: 'stdio' as const,
+        confidence: 'high' as const,
+        server: {
+          id: 'mcp-fetch',
+          name: 'fetch',
+          transport: 'stdio' as const,
+          command: 'uvx',
+          args: ['mcp-server-fetch'],
           enabled: true,
-          installSource: 'bundled',
-          installedAt: new Date().toISOString(),
-          packagePath: 'filesystem/1.0.0'
-        }
-      }
-    })
-    await waitFor(() => {
-      expect(within(featured!).queryByRole('button', { name: /^Installing/i })).toBeNull()
-    })
+          source: 'manual' as const
+        },
+        warnings: [],
+        duplicate: false
+      })
+    ),
+    marketplaceApplyDetectedMcp: vi.fn(async () => ok({ applied: 'manual' as const, serverId: 'mcp-fetch' })),
+    marketplaceScanExternalMcp: vi.fn(async () =>
+      ok({ preview: [], applied: 0, skipped: 0, warnings: [], scannedPaths: [] })
+    ),
+    marketplaceImportExternalMcp: vi.fn(async () =>
+      ok({ preview: [], applied: 0, skipped: 0, warnings: [], scannedPaths: [] })
+    ),
+    marketplacePickLocal: vi.fn(async () => ok(null)),
+    skillsListLocal: vi.fn(async () =>
+      ok({
+        skills: [
+          {
+            id: 'skill:local:project:ship-notes',
+            name: 'ship-notes',
+            description: 'Project skill for shipping notes from the current workspace.',
+            source: 'project' as const,
+            origin: 'vyotiq' as const,
+            skillPath: 'C:/tmp/.vyotiq/skills/ship-notes/SKILL.md',
+            relativePath: '.vyotiq/skills/ship-notes/SKILL.md'
+          }
+        ]
+      })
+    ),
+    workspaceListRules: vi.fn(async () => ok({ rules: [] })),
+    toolsCatalogGet: vi.fn(async () => ok(toolCatalog)),
+    getSettings: vi.fn(async () => ok(baseSettings)),
+    shellOpenExternal: vi.fn(async () => ok(true as const)),
+    onSkillsChanged: vi.fn(() => () => {}),
+    onToolsCatalogChanged: vi.fn(() => () => {}),
+    ...overrides
+  }
+  window.vyotiq = bridge as unknown as typeof window.vyotiq
+}
+
+const noUpdate = vi.fn(async () => ({ ok: true as const }))
+
+function renderView(props: Partial<Parameters<typeof MarketplaceView>[0]> = {}) {
+  return render(<MarketplaceView settings={baseSettings} onUpdate={noUpdate} {...props} />)
+}
+
+/** The row for one list key — keys carry paths, so compare the attribute. */
+function row(key: string): HTMLElement {
+  const el = Array.from(document.querySelectorAll<HTMLElement>('[data-extension-key]')).find(
+    (li) => li.dataset.extensionKey === key
+  )
+  if (!el) throw new Error(`no row ${key}`)
+  return el
+}
+
+function section(label: RegExp): HTMLElement {
+  const heading = screen.getByRole('heading', { level: 2, name: label })
+  const el = heading.closest('section')
+  if (!el) throw new Error(`no section for ${label}`)
+  return el
+}
+
+const detail = (name: string) => screen.getByRole('complementary', { name: `${name} details` })
+
+let scrollIntoView: ReturnType<typeof vi.fn>
+
+beforeEach(() => {
+  installBridge()
+  // jsdom has no layout, so it has no scrollIntoView either.
+  scrollIntoView = vi.fn()
+  Element.prototype.scrollIntoView = scrollIntoView as unknown as Element['scrollIntoView']
+})
+
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+})
+
+describe('Extensions list', () => {
+  it('lists what is installed above the catalog, each package once', async () => {
+    renderView()
+    await screen.findByRole('heading', { level: 2, name: /^Installed/ })
+    const list = screen.getByRole('tabpanel', { name: 'All' })
+    // Nothing needs attention in this fixture, so there is no such section.
+    expect(within(list).queryByRole('heading', { name: /^Needs you/ })).toBeNull()
+    expect(within(list).getAllByRole('heading', { level: 2 }).map((h) => h.id)).toEqual([
+      'extensions-installed',
+      'extensions-discover'
+    ])
+    for (const name of ['Filesystem', 'Memory', 'Fetch', 'Grill me', 'Devtools', 'ship-notes']) {
+      expect(within(list).getAllByText(name)).toHaveLength(1)
+    }
+    const installed = section(/^Installed/)
+    expect(within(installed).getByText('Memory')).toBeTruthy()
+    expect(within(installed).getByText('ship-notes')).toBeTruthy()
+    const discover = section(/^Discover/)
+    expect(within(discover).queryByText('Memory')).toBeNull()
+    // Featured order first, then by name.
+    const names = Array.from(discover.querySelectorAll('li')).map((li) => li.dataset.extensionKey)
+    expect(names).toEqual([
+      'mcp:filesystem',
+      'skill:create-skill',
+      'plugin:devtools',
+      'mcp:fetch',
+      'skill:grill-me',
+      'skill:implement-feature'
+    ])
   })
 
-  it('shows Installing… only on the detail being installed, not on other details', async () => {
-    let resolveInstall: ((value: unknown) => void) | undefined
-    // @ts-expect-error test bridge
-    window.vyotiq.marketplaceInstall = vi.fn(
-      () =>
-        new Promise((resolve) => {
-          resolveInstall = resolve
+  it('puts a server waiting on a sign-in first, under Needs you', async () => {
+    installBridge({
+      marketplaceBrowse: vi.fn(async () =>
+        ok({ packages: [...catalog, entry({ id: 'linear', name: 'Linear', kind: 'mcp', auth: 'oauth' })] })
+      ),
+      marketplaceListInstalled: vi.fn(async () =>
+        ok({
+          schemaVersion: 1 as const,
+          items: [installedItem({ id: 'memory', name: 'Memory' }), installedItem({ id: 'linear', name: 'Linear' })]
         })
-    )
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    await screen.findByRole('heading', { name: /^Featured$/i })
-    fireEvent.click(screen.getByText('Filesystem'))
-    expect(await screen.findByRole('button', { name: /^Add to Agent V$/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Add to Agent V$/i }))
-    expect(await screen.findByRole('button', { name: /^Installing/i })).toBeTruthy()
+      ),
+      mcpStatus: vi.fn(async () =>
+        ok({
+          servers: [memoryConnected, { id: 'linear', name: 'Linear', enabled: true, connected: false, toolCount: 0 }]
+        })
+      )
+    })
+    renderView()
+    const needs = await screen.findByRole('heading', { level: 2, name: /^Needs you/ })
+    expect(within(needs.closest('section')!).getByText('Needs sign-in')).toBeTruthy()
+    const headings = within(screen.getByRole('tabpanel', { name: 'All' })).getAllByRole('heading', { level: 2 })
+    expect(headings[0]).toBe(needs)
+    // The first row is the one shown beside the list.
+    expect(within(row('mcp:linear')).getByRole('button', { current: true })).toBeTruthy()
+    expect(within(detail('Linear')).getByRole('button', { name: 'Sign in' })).toBeTruthy()
+    expect(within(detail('Linear')).getByText('Installed, not connected — sign in to use its tools.')).toBeTruthy()
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: /^Marketplace$/i }))
-    await screen.findByRole('heading', { name: /^Featured$/i })
+  it('shows a row’s Add as pending only on the row being added', async () => {
+    let finish: ((value: unknown) => void) | undefined
+    installBridge({
+      marketplaceListInstalled: vi.fn(async () => ok({ schemaVersion: 1 as const, items: [] })),
+      marketplaceInstall: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve
+          })
+      )
+    })
+    renderView()
+    const add = await screen.findByRole('button', { name: 'Add Filesystem' })
+    fireEvent.click(add)
+
+    await waitFor(() => expect(add.getAttribute('aria-busy')).toBe('true'))
+    const others = screen.getAllByRole('button', { name: /^Add (?!Filesystem)/ })
+    expect(others.length).toBeGreaterThan(2)
+    for (const other of others) expect(other.getAttribute('aria-busy')).toBeNull()
+    // Adding selects the row, and the detail agrees about what is being added.
+    expect(within(row('mcp:filesystem')).getByRole('button', { current: true })).toBeTruthy()
+    expect(within(detail('Filesystem')).getByRole('button', { name: 'Add' }).getAttribute('aria-busy')).toBe('true')
+
+    finish?.(ok({ item: installedItem({ id: 'filesystem', name: 'Filesystem' }) }))
+    await waitFor(() => expect(document.querySelectorAll('[aria-busy="true"]')).toHaveLength(0))
+    expect(bridge.marketplaceInstall).toHaveBeenCalledWith({ source: 'bundled', target: 'filesystem', kind: 'mcp' })
+  })
+
+  it('shows a detail’s Add as pending only for the item being added', async () => {
+    installBridge({
+      marketplaceInstall: vi.fn(() => new Promise(() => {}))
+    })
+    renderView()
+    fireEvent.click(await screen.findByText('Filesystem'))
+    fireEvent.click(within(detail('Filesystem')).getByRole('button', { name: 'Add' }))
+    await waitFor(() =>
+      expect(within(detail('Filesystem')).getByRole('button', { name: 'Add' }).getAttribute('aria-busy')).toBe('true')
+    )
+
     fireEvent.click(screen.getByText('Fetch'))
-    expect(await screen.findByRole('button', { name: /^Add to Agent V$/i })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /^Installing/i })).toBeNull()
-
-    resolveInstall?.({
-      ok: true,
-      data: {
-        item: {
-          id: 'filesystem',
-          kind: 'mcp',
-          name: 'Filesystem',
-          version: '1.0.0',
-          description: '',
-          enabled: true,
-          installSource: 'bundled',
-          installedAt: new Date().toISOString(),
-          packagePath: 'filesystem/1.0.0'
-        }
-      }
-    })
-    await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /^Installing/i })).toBeNull()
-    })
+    const fetchAdd = within(detail('Fetch')).getByRole('button', { name: 'Add' })
+    expect(fetchAdd.getAttribute('aria-busy')).toBeNull()
+    // Everything waits for the one install, but only that one says so.
+    expect((fetchAdd as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole('button', { name: 'Add Filesystem' }).getAttribute('aria-busy')).toBe('true')
   })
 
-  it('Manage hub lists packages, skills, and MCP add', async () => {
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    fireEvent.click((await screen.findAllByRole('tab', { name: /^Manage$/i }))[0]!)
-    expect(await screen.findByRole('tab', { name: /^MCPs$/i })).toBeTruthy()
-    expect(screen.getByRole('tab', { name: /^Skills$/i })).toBeTruthy()
-    expect(screen.getByRole('tab', { name: /^Rules$/i })).toBeTruthy()
-    expect(screen.getByRole('tab', { name: /^Packages$/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('tab', { name: /^Packages$/i }))
-    expect(await screen.findByText('Memory')).toBeTruthy()
-    fireEvent.click(screen.getByRole('tab', { name: /^Skills$/i }))
-    expect(await screen.findByText('ship-notes')).toBeTruthy()
-    fireEvent.click(screen.getByRole('tab', { name: /^MCPs$/i }))
-    fireEvent.click(await screen.findByRole('button', { name: /^New$/i }))
-    expect(await screen.findByLabelText(/Paste MCP URL, command, or JSON/i)).toBeTruthy()
-  })
-
-  it('shows connected state for installed MCP packages', async () => {
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    expect(await screen.findAllByText(/Connected · 2 tools/i)).toBeTruthy()
-    expect(screen.getAllByRole('button', { name: /^Connected$/i }).length).toBeGreaterThan(0)
-  })
-
-  it('keeps Browse, detail, and Manage on the same connected MCP status', async () => {
+  it('agrees about a live connection in the row and the detail', async () => {
     const settings: Settings = {
       ...baseSettings,
       mcpServers: [
@@ -465,65 +359,42 @@ describe('MarketplaceView', () => {
           transport: 'stdio',
           command: 'npx',
           args: ['-y', '@modelcontextprotocol/server-memory'],
-          enabled: false,
+          enabled: true,
           source: 'marketplace',
           packageId: 'memory'
         }
       ]
     }
-    render(
-      <MarketplaceView settings={settings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    const installed = await screen.findByRole('heading', { name: /^Installed$/i })
-    expect(installed.closest('section')?.textContent).toMatch(/Connected · 2 tools/i)
-    expect(screen.getAllByRole('button', { name: /^Connected$/i }).length).toBeGreaterThan(0)
+    installBridge({
+      toolsCatalogGet: vi.fn(async () =>
+        ok({ ...toolCatalog, entries: toolCatalog.entries.map((e) => ({ ...e, serverId: 'memory-settings' })) })
+      )
+    })
+    renderView({ settings })
+    await screen.findByRole('heading', { level: 2, name: /^Installed/ })
+    expect(within(row('mcp:memory')).getByText('2 tools')).toBeTruthy()
 
-    fireEvent.click(screen.getByText('Memory'))
-    expect(await screen.findByRole('button', { name: /^Connected$/i })).toBeTruthy()
-    expect(screen.getByText(/Connected · 2 tools/i)).toBeTruthy()
-
-    fireEvent.click(screen.getByRole('button', { name: /^Manage$/i }))
-    expect(await screen.findByText(/Connected · 2 tools/i)).toBeTruthy()
-    expect(screen.queryByText(/^Disabled$/i)).toBeNull()
-    expect(screen.queryByRole('checkbox', { name: /Enable MCP server/i })).toBeNull()
+    fireEvent.click(within(row('mcp:memory')).getByRole('button'))
+    const aside = detail('Memory')
+    expect(within(aside).getByText('Connected — 2 tools.')).toBeTruthy()
+    // The tools the server lists, with what each declares about writing.
+    expect(await within(aside).findByText('read_graph')).toBeTruthy()
+    expect(within(aside).getByText('reads')).toBeTruthy()
+    expect(within(aside).getByText('create_entities')).toBeTruthy()
+    expect(within(aside).getByText('may write')).toBeTruthy()
+    // What a local server runs, from its settings entry.
+    expect(within(aside).getByText('npx -y @modelcontextprotocol/server-memory')).toBeTruthy()
+    // A stdio server has nothing to sign in to.
+    expect(within(aside).queryByRole('button', { name: 'Reconnect' })).toBeNull()
   })
 
-  it('does not show connected on Browse when the MCP is disabled', async () => {
-    // @ts-expect-error test bridge
-    window.vyotiq.marketplaceListInstalled = vi.fn(async () => ({
-      ok: true as const,
-      data: {
-        schemaVersion: 1 as const,
-        items: [
-          {
-            id: 'memory',
-            kind: 'mcp' as const,
-            name: 'Memory',
-            version: '1.0.0',
-            description: '',
-            enabled: false,
-            installSource: 'bundled' as const,
-            installedAt: new Date().toISOString(),
-            packagePath: 'memory/1.0.0'
-          }
-        ]
-      }
-    }))
-    // @ts-expect-error test bridge
-    window.vyotiq.mcpStatus = vi.fn(async () => ({
-      ok: true as const,
-      data: {
-        servers: [
-          {
-            id: 'memory',
-            name: 'Memory',
-            enabled: false,
-            connected: true,
-            toolCount: 2
-          }
-        ]
-      }
-    }))
+  it('shows a server switched off as Off, even with a session still open', async () => {
+    installBridge({
+      marketplaceListInstalled: vi.fn(async () =>
+        ok({ schemaVersion: 1 as const, items: [installedItem({ id: 'memory', name: 'Memory', enabled: false })] })
+      ),
+      mcpStatus: vi.fn(async () => ok({ servers: [{ ...memoryConnected, enabled: false }] }))
+    })
     const settings: Settings = {
       ...baseSettings,
       mcpServers: [
@@ -532,317 +403,237 @@ describe('MarketplaceView', () => {
           name: 'Memory',
           transport: 'stdio',
           command: 'npx',
-          args: ['-y', '@modelcontextprotocol/server-memory'],
           enabled: false,
           source: 'marketplace',
           packageId: 'memory'
         }
       ]
     }
-    render(
-      <MarketplaceView settings={settings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    const installed = await screen.findByRole('heading', { name: /^Installed$/i })
-    expect(installed.closest('section')?.textContent).toMatch(/Disabled/i)
-    expect(installed.closest('section')?.textContent).not.toMatch(/Connected/i)
+    renderView({ settings })
+    await screen.findByRole('heading', { level: 2, name: /^Installed/ })
+    expect(within(row('mcp:memory')).getByText('Off')).toBeTruthy()
+    expect(screen.queryByText(/2 tools/)).toBeNull()
 
-    fireEvent.click(screen.getByText('Memory'))
-    expect(await screen.findByRole('button', { name: /^Disabled$/i })).toBeTruthy()
-
-    fireEvent.click(screen.getByRole('button', { name: /^Manage$/i }))
-    expect(await screen.findByText(/^Disabled$/i)).toBeTruthy()
-    expect(screen.queryByText(/Connected · 2 tools/i)).toBeNull()
+    fireEvent.click(within(row('mcp:memory')).getByRole('button'))
+    const aside = detail('Memory')
+    expect(within(aside).getByText('Off in every workspace.')).toBeTruthy()
+    expect(within(aside).queryByText(/Connected/)).toBeNull()
+    const where = within(aside).getByRole('radiogroup', { name: 'Where it can run' })
+    expect(within(where).getByRole('radio', { name: 'Off' }).getAttribute('aria-checked')).toBe('true')
   })
 
-  it('does not show connected on Featured catalog MCPs that are not installed', async () => {
-    // @ts-expect-error test bridge
-    window.vyotiq.mcpStatus = vi.fn(async () => ({
-      ok: true as const,
-      data: {
-        servers: [
-          {
-            id: 'filesystem',
-            name: 'Filesystem',
-            enabled: true,
-            connected: true,
-            toolCount: 6
-          },
-          {
-            id: 'memory',
-            name: 'Memory',
-            enabled: true,
-            connected: true,
-            toolCount: 2
-          }
-        ]
-      }
-    }))
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    await screen.findByRole('heading', { name: /^Featured$/i })
-    const featured = screen.getByRole('heading', { name: /^Featured$/i }).closest('section')
-    expect(featured?.textContent).toContain('Filesystem')
-    expect(featured?.textContent).not.toMatch(/Connected/i)
-    expect(within(featured!).getAllByRole('button', { name: /^Add$/i }).length).toBeGreaterThan(0)
-  })
-
-  it('marks the selected package when returning from detail', async () => {
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    await screen.findByRole('heading', { name: /^Featured$/i })
-    fireEvent.click(screen.getByText('Filesystem'))
-    expect(await screen.findByRole('button', { name: /^Add to Agent V$/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Marketplace$/i }))
-    await screen.findByRole('heading', { name: /^Featured$/i })
-    const selected = screen.getAllByRole('button', { current: 'page' })
-    expect(selected.some((el) => el.textContent?.includes('Filesystem'))).toBe(true)
-  })
-
-  it('opens package detail with contents', async () => {
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    await screen.findByRole('heading', { name: /^Featured$/i })
-    fireEvent.click(screen.getByText('Filesystem'))
-    expect(await screen.findByRole('button', { name: /^Add to Agent V$/i })).toBeTruthy()
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /^MCP$/i })).toBeTruthy()
+  it('never calls a catalog server connected before it is added', async () => {
+    installBridge({
+      mcpStatus: vi.fn(async () =>
+        ok({
+          servers: [{ id: 'filesystem', name: 'Filesystem', enabled: true, connected: true, toolCount: 6 }, memoryConnected]
+        })
+      )
     })
+    renderView()
+    await screen.findByRole('heading', { level: 2, name: /^Discover/ })
+    const discover = section(/^Discover/)
+    expect(discover.textContent).toContain('Filesystem')
+    expect(discover.textContent).not.toMatch(/6 tools|Connected/)
+    expect(within(row('mcp:filesystem')).getByRole('button', { name: 'Add Filesystem' })).toBeTruthy()
+
+    fireEvent.click(screen.getByText('Filesystem'))
+    const aside = detail('Filesystem')
+    expect(within(aside).getByText('Connects on its own once added.')).toBeTruthy()
+    // Before it is added the package manifest says what it would run.
+    expect(await within(aside).findByText('npx -y @modelcontextprotocol/server-filesystem')).toBeTruthy()
+    expect(within(aside).queryByText(/Connected/)).toBeNull()
   })
 
-  it('opens Manage from header Browse/Manage tabs', async () => {
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    const manageTabs = await screen.findAllByRole('tab', { name: /^Manage$/i })
-    fireEvent.click(manageTabs[0]!)
-    expect(await screen.findByRole('tab', { name: /^MCPs$/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('tab', { name: /^Browse$/i }))
-    expect(await screen.findByRole('heading', { name: /^Featured$/i })).toBeTruthy()
+  it('marks the row whose detail is showing', async () => {
+    renderView()
+    await screen.findByRole('heading', { level: 2, name: /^Discover/ })
+    fireEvent.click(screen.getByText('Filesystem'))
+    const current = screen.getAllByRole('button', { current: true })
+    expect(current).toHaveLength(1)
+    expect(row('mcp:filesystem').contains(current[0]!)).toBe(true)
+    expect(within(detail('Filesystem')).getByRole('heading', { name: 'Filesystem' })).toBeTruthy()
+    expect(within(detail('Filesystem')).getByRole('img', { name: 'Verified' })).toBeTruthy()
   })
 
-  it('Manage shows Package registry panel with URL and ack', async () => {
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    fireEvent.click((await screen.findAllByRole('tab', { name: /^Manage$/i }))[0]!)
-    expect(await screen.findByLabelText(/Package registry/i)).toBeTruthy()
-    expect(screen.getByLabelText(/Registry URL/i)).toBeTruthy()
-    expect(screen.getByLabelText(/Acknowledge marketplace install risk/i)).toBeTruthy()
+  it('lists what a package contains', async () => {
+    renderView()
+    await screen.findByRole('heading', { level: 2, name: /^Discover/ })
+    fireEvent.click(screen.getByText('Devtools'))
+    const aside = detail('Devtools')
+    const contains = await within(aside).findByRole('heading', { name: 'Contains' })
+    const list = contains.closest('section')!
+    expect(list.textContent).toContain('3')
+    expect(within(list).getByText('Browser')).toBeTruthy()
+    expect(within(list).getByText('triage')).toBeTruthy()
+    expect(within(list).getByText('rules/style.md')).toBeTruthy()
   })
 
-  it('refreshes the remote catalog after the registry URL changes on blur', async () => {
-    const refreshCatalog = vi.fn(async () => ({
-      ok: true as const,
-      data: { schemaVersion: 1 as const, packages: [] }
-    }))
-    // @ts-expect-error test bridge
-    window.vyotiq.marketplaceRefreshCatalog = refreshCatalog
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    fireEvent.click((await screen.findAllByRole('tab', { name: /^Manage$/i }))[0]!)
-    const input = await screen.findByLabelText(/Registry URL/i)
-    fireEvent.change(input, { target: { value: 'https://registry.example.com' } })
-    fireEvent.blur(input)
-    await waitFor(() => {
-      expect(refreshCatalog).toHaveBeenCalledTimes(1)
-    })
+  /**
+   * Add on an interlinked skill installs more than the card names. Say so
+   * before the click, and only for the part the user does not already have —
+   * `memory` is installed in this fixture, so it must not be listed.
+   */
+  it('names only the missing packages an Add pulls in with it', async () => {
+    renderView()
+    await screen.findByRole('heading', { level: 2, name: /^Discover/ })
+    fireEvent.click(screen.getByText('Grill me'))
+    const note = within(detail('Grill me')).getByText(/^Also adds/)
+    expect(note.textContent).toBe('Also adds grilling — it hands work to them.')
   })
 
-  it('exposes full package names on truncated cards and roving tab a11y', async () => {
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    await screen.findByRole('heading', { name: /^Featured$/i })
+  it('gives every row its full name and every tab its panel', async () => {
+    renderView()
+    await screen.findByRole('heading', { level: 2, name: /^Discover/ })
+    expect(within(row('mcp:filesystem')).getByTitle('Filesystem')).toBeTruthy()
+    expect(within(row('mcp:filesystem')).getByTitle('MCP filesystem')).toBeTruthy()
 
-    const filesystem = screen.getByRole('button', { name: 'Filesystem' })
-    expect(filesystem.getAttribute('title')).toBe('Filesystem')
-    expect(filesystem.querySelector('p[title="Filesystem"]')).toBeTruthy()
-    expect(filesystem.querySelector('p[title="MCP filesystem"]')).toBeTruthy()
+    const tablist = screen.getByRole('tablist', { name: 'Extension kinds' })
+    const tabs = within(tablist).getAllByRole('tab')
+    expect(tabs.map((t) => t.textContent)).toEqual(['All8', 'MCP servers3', 'Skills4', 'Rules0', 'Packages1'])
+    const all = tabs[0]!
+    expect(all.getAttribute('aria-selected')).toBe('true')
+    expect(all.getAttribute('tabindex')).toBe('0')
+    expect(tabs[1]!.getAttribute('tabindex')).toBe('-1')
+    expect(all.getAttribute('aria-controls')).toBe('extensions-panel-all')
+    expect(document.getElementById('extensions-panel-all')?.getAttribute('role')).toBe('tabpanel')
 
-    const browse = screen.getByRole('tab', { name: /^Browse$/i })
-    const manage = screen.getAllByRole('tab', { name: /^Manage$/i })[0]!
-    expect(browse.getAttribute('aria-selected')).toBe('true')
-    expect(browse.getAttribute('tabindex')).toBe('0')
-    expect(manage.getAttribute('tabindex')).toBe('-1')
-    expect(browse.getAttribute('aria-controls')).toBe('marketplace-browse-panel')
-    expect(document.getElementById('marketplace-browse-panel')?.getAttribute('role')).toBe(
-      'tabpanel'
-    )
-
-    fireEvent.keyDown(browse.closest('[role="tablist"]')!, { key: 'ArrowRight' })
-    expect(await screen.findByRole('tab', { name: /^MCPs$/i })).toBeTruthy()
-    const manageHeader = screen.getAllByRole('tab', { name: /^Manage$/i })[0]!
-    expect(manageHeader.getAttribute('aria-selected')).toBe('true')
-    expect(manageHeader.getAttribute('tabindex')).toBe('0')
+    fireEvent.keyDown(all, { key: 'ArrowRight' })
+    const mcp = screen.getByRole('tab', { name: /^MCP servers/ })
+    expect(mcp.getAttribute('aria-selected')).toBe('true')
+    expect(mcp.getAttribute('tabindex')).toBe('0')
+    const panel = screen.getByRole('tabpanel', { name: 'MCP servers' })
+    expect(panel.id).toBe('extensions-panel-mcp')
+    expect(within(panel).queryByText('Grill me')).toBeNull()
+    expect(within(panel).getByText('Filesystem')).toBeTruthy()
   })
 
-  it('empty search points to Manage → Add for external MCPs', async () => {
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    await screen.findByRole('heading', { name: /^Featured$/i })
-    fireEvent.change(screen.getByLabelText(/Search marketplace/i), {
+  it('changes the add button with the tab', async () => {
+    renderView()
+    await screen.findByRole('heading', { level: 2, name: /^Discover/ })
+    expect(screen.getByRole('button', { name: 'Add MCP server' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: /^Skills/ }))
+    expect(screen.getByRole('button', { name: 'New skill' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Add MCP server' })).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: /^Rules/ }))
+    expect(screen.getByRole('button', { name: 'New rule' })).toBeTruthy()
+    expect(screen.getByRole('tabpanel', { name: 'Rules' }).textContent).toContain('No rules yet.')
+  })
+
+  it('offers to clear a search that matches nothing', async () => {
+    renderView()
+    await screen.findByRole('heading', { level: 2, name: /^Discover/ })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search extensions' }), {
       target: { value: 'not-in-catalog-xyz' }
     })
-    expect(
-      await screen.findByText(/No matching packages in the curated catalog/i)
-    ).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Open Manage to add$/i }))
-    expect(await screen.findByLabelText(/Paste MCP URL, command, or JSON/i)).toBeTruthy()
+    const panel = screen.getByRole('tabpanel', { name: 'All' })
+    expect(within(panel).getByText('Nothing matches “not-in-catalog-xyz”.')).toBeTruthy()
+    // Counts follow the search, so no tab promises rows it will not show.
+    expect(screen.getByRole('tab', { name: /^All/ }).textContent).toBe('All0')
+    fireEvent.click(within(panel).getByRole('button', { name: 'Clear search' }))
+    expect(await within(panel).findByText('Filesystem')).toBeTruthy()
   })
 
-  it('links installed detail to Manage', async () => {
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    await screen.findByRole('heading', { name: /^Featured$/i })
-    fireEvent.click(screen.getByText('Memory'))
-    expect(await screen.findByRole('button', { name: /^Connected$/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Manage$/i }))
-    expect(await screen.findByRole('tab', { name: /^MCPs$/i })).toBeTruthy()
+  it('focuses search on mount', async () => {
+    renderView({ onClose: vi.fn() })
+    const search = await screen.findByRole('textbox', { name: 'Search extensions' })
+    await waitFor(() => expect(document.activeElement).toBe(search))
   })
 
-  it('detects pasted stdio MCP on Manage MCPs New panel', async () => {
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
-    )
-    fireEvent.click((await screen.findAllByRole('tab', { name: /^Manage$/i }))[0]!)
-    fireEvent.click(await screen.findByRole('button', { name: /^New$/i }))
-    const paste = await screen.findByLabelText(/Paste MCP URL, command, or JSON/i)
-    fireEvent.change(paste, { target: { value: 'uvx mcp-server-fetch' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Detect$/i }))
-    expect(await screen.findByDisplayValue('uvx')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /Add & connect/i }))
-    await waitFor(() => {
-      expect(window.vyotiq.marketplaceApplyDetectedMcp).toHaveBeenCalled()
-    })
-  })
-
-  it('focuses marketplace search on mount', async () => {
-    render(
-      <MarketplaceView
-        settings={baseSettings}
-        onUpdate={vi.fn(async () => ({ ok: true as const }))}
-        onClose={vi.fn()}
-      />
-    )
-    const search = await screen.findByLabelText(/Search marketplace/i)
-    await waitFor(() => {
-      expect(document.activeElement).toBe(search)
-    })
-  })
-
-  it('closes on Escape from an empty search', async () => {
+  it('clears the search on Escape, then closes', async () => {
     const onClose = vi.fn()
-    render(
-      <MarketplaceView
-        settings={baseSettings}
-        onUpdate={vi.fn(async () => ({ ok: true as const }))}
-        onClose={onClose}
-      />
-    )
-    const search = await screen.findByLabelText(/Search marketplace/i)
+    renderView({ onClose })
+    const search = await screen.findByRole('textbox', { name: 'Search extensions' })
     fireEvent.change(search, { target: { value: 'filesystem' } })
     fireEvent.keyDown(search, { key: 'Escape' })
     expect(onClose).not.toHaveBeenCalled()
+    expect((search as HTMLInputElement).value).toBe('')
     fireEvent.keyDown(search, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+})
 
-  it('renders Discover above Featured and does not duplicate ids', async () => {
-    // @ts-expect-error test bridge
-    window.vyotiq.marketplaceBrowse = vi.fn(async () => ({
-      ok: true as const,
-      data: {
-        packages: [
-          {
-            id: 'github',
-            name: 'GitHub',
-            version: '1.0.0',
-            description: 'Official hosted GitHub MCP.',
-            kind: 'mcp' as const,
-            source: 'bundled' as const,
-            sections: ['discover', 'featured'] as const,
-            category: 'developer',
-            featuredRank: 1,
-            publisher: 'GitHub',
-            installable: true,
-            bundledPath: 'github'
-          },
-          {
-            id: 'gmail',
-            name: 'Gmail',
-            version: '1.0.0',
-            description: 'Official hosted Gmail MCP.',
-            kind: 'mcp' as const,
-            source: 'bundled' as const,
-            sections: ['discover', 'featured'] as const,
-            category: 'productivity',
-            featuredRank: 2,
-            publisher: 'Google',
-            installable: true,
-            bundledPath: 'gmail'
-          },
-          {
-            id: 'filesystem',
-            name: 'Filesystem',
-            version: '1.0.0',
-            description: 'MCP filesystem',
-            kind: 'mcp' as const,
-            source: 'bundled' as const,
-            sections: ['featured'] as const,
-            category: 'infrastructure',
-            featuredRank: 5,
-            publisher: 'Model Context Protocol',
-            installable: true,
-            bundledPath: 'filesystem'
-          },
-          {
-            id: 'fetch',
-            name: 'Fetch',
-            version: '1.0.0',
-            description: 'Fetch MCP',
-            kind: 'mcp' as const,
-            source: 'bundled' as const,
-            category: 'infrastructure',
-            publisher: 'Model Context Protocol',
-            installable: true,
-            bundledPath: 'fetch'
-          }
-        ]
-      }
-    }))
-    // @ts-expect-error test bridge
-    window.vyotiq.marketplaceListInstalled = vi.fn(async () => ({
-      ok: true as const,
-      data: { schemaVersion: 1 as const, items: [] }
-    }))
+describe('Extensions opened from elsewhere', () => {
+  it('selects a server named by another surface once its row exists', async () => {
+    const consumed = vi.fn()
+    renderView({ focusServerId: 'memory', onFocusServerConsumed: consumed })
+    await waitFor(() => expect(within(row('mcp:memory')).getByRole('button', { current: true })).toBeTruthy())
+    expect(consumed).toHaveBeenCalledTimes(1)
+    expect(detail('Memory')).toBeTruthy()
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled())
+  })
 
-    render(
-      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
+  it('opens on the kind Settings asked for', async () => {
+    const consumed = vi.fn()
+    renderView({ focusManageTab: 'skills', onFocusManageTabConsumed: consumed })
+    expect(screen.getByRole('tab', { name: /^Skills/ }).getAttribute('aria-selected')).toBe('true')
+    expect(consumed).toHaveBeenCalledTimes(1)
+    const panel = screen.getByRole('tabpanel', { name: 'Skills' })
+    expect(await within(panel).findByText('Grill me')).toBeTruthy()
+    expect(within(panel).queryByText('Filesystem')).toBeNull()
+  })
+})
+
+describe('Registry and trust', () => {
+  it('holds the registry, the acknowledgement and the MCP documentation link', async () => {
+    renderView()
+    fireEvent.click(await screen.findByRole('button', { name: 'Registry and trust' }))
+    const dialog = screen.getByRole('dialog', { name: 'Registry and trust' })
+    expect(within(dialog).getByRole('region', { name: 'Package registry' })).toBeTruthy()
+    expect(within(dialog).getByLabelText('Registry URL')).toBeTruthy()
+    expect(within(dialog).getByRole('checkbox', { name: 'Acknowledge marketplace install risk' })).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'MCP documentation' }))
+    await waitFor(() => expect(bridge.shellOpenExternal).toHaveBeenCalledWith('https://modelcontextprotocol.io/'))
+  })
+
+  it('saves a new registry URL on blur and lists its packages', async () => {
+    const onUpdate = vi.fn(async () => ({ ok: true as const }))
+    renderView({ onUpdate })
+    fireEvent.click(await screen.findByRole('button', { name: 'Registry and trust' }))
+    const input = screen.getByLabelText('Registry URL')
+    fireEvent.change(input, { target: { value: 'https://registry.example.com' } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(bridge.marketplaceRefreshCatalog).toHaveBeenCalledTimes(1))
+    expect(onUpdate).toHaveBeenCalledWith({
+      marketplace: { registryUrl: 'https://registry.example.com', remoteInstallAcked: true }
+    })
+    // The refresh is announced, and the list asks main for the catalog again.
+    await waitFor(() => expect(bridge.marketplaceBrowse).toHaveBeenCalledTimes(2))
+  })
+
+  it('does not save a URL that is not http(s)', async () => {
+    const onUpdate = vi.fn(async () => ({ ok: true as const }))
+    renderView({ onUpdate })
+    fireEvent.click(await screen.findByRole('button', { name: 'Registry and trust' }))
+    const input = screen.getByLabelText('Registry URL')
+    fireEvent.change(input, { target: { value: 'ftp://registry.example.com' } })
+    fireEvent.blur(input)
+    expect((await screen.findByRole('alert')).textContent).toBe('Enter a valid http(s) URL — not saved.')
+    expect(onUpdate).not.toHaveBeenCalled()
+    expect(bridge.marketplaceRefreshCatalog).not.toHaveBeenCalled()
+  })
+})
+
+describe('Add MCP server', () => {
+  it('detects a pasted command and adds it', async () => {
+    renderView()
+    fireEvent.click(await screen.findByRole('button', { name: 'Add MCP server' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add an MCP server' })
+    fireEvent.change(within(dialog).getByLabelText('Paste a URL, npm package, npx command or JSON'), {
+      target: { value: 'uvx mcp-server-fetch' }
+    })
+    expect(await within(dialog).findByText('Detected a stdio server')).toBeTruthy()
+    expect((within(dialog).getByRole('textbox', { name: 'Server command' }) as HTMLInputElement).value).toBe('uvx')
+    expect((within(dialog).getByRole('textbox', { name: 'Server arguments' }) as HTMLInputElement).value).toBe(
+      'mcp-server-fetch'
     )
-    expect(await screen.findByRole('heading', { name: /^Discover$/i })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /^Featured$/i })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /^Infrastructure$/i })).toBeTruthy()
-    expect(screen.queryByRole('heading', { name: /^Developer$/i })).toBeNull()
-    expect(screen.queryByRole('heading', { name: /^Productivity$/i })).toBeNull()
-    expect(screen.getAllByText('GitHub').length).toBe(1)
-    expect(screen.getAllByText('Gmail').length).toBe(1)
-    const discover = screen.getByRole('heading', { name: /^Discover$/i }).closest('section')
-    expect(discover?.textContent).toContain('GitHub')
-    expect(discover?.textContent).toContain('Gmail')
-    expect(within(discover!).getAllByRole('button', { name: /^Add$/i }).length).toBe(2)
-    const featured = screen.getByRole('heading', { name: /^Featured$/i }).closest('section')
-    expect(featured?.textContent).toContain('Filesystem')
-    expect(featured?.textContent).not.toContain('GitHub')
-    expect(featured?.textContent).not.toContain('Gmail')
-    const infra = screen.getByRole('heading', { name: /^Infrastructure$/i }).closest('section')
-    expect(infra?.textContent).toContain('Fetch')
-    expect(infra?.textContent).not.toContain('Filesystem')
-    expect(within(infra!).getByRole('button', { name: /^Add$/i })).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add and connect' }))
+    await waitFor(() =>
+      expect(bridge.marketplaceApplyDetectedMcp).toHaveBeenCalledWith({
+        server: expect.objectContaining({ id: 'mcp-fetch', command: 'uvx', args: ['mcp-server-fetch'], enabled: true }),
+        overwrite: false
+      })
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add an MCP server' })).toBeNull())
   })
 })

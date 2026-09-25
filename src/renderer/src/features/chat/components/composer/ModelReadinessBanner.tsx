@@ -32,29 +32,27 @@ export function ModelReadinessBanner({
       </div>
       <div className="flex flex-wrap gap-1.5">
         {issue.kind === 'missing_key' ? (
-          <Button type="button" className="min-h-8 px-2 text-xs" onClick={onAddKey}>
+          <Button size="sm" variant="primary" type="button"  onClick={onAddKey}>
             Add API key
           </Button>
         ) : null}
         {issue.kind === 'unreachable' ? (
           <>
-            <Button
+            <Button size="sm" variant="primary"
               type="button"
-              className="min-h-8 px-2 text-xs"
               disabled={busy}
               onClick={onRecheck}
             >
               Recheck
             </Button>
-            <Button type="button" variant="subtle" className="min-h-8 px-2 text-xs" onClick={onAddKey}>
+            <Button size="sm" type="button" variant="subtle"  onClick={onAddKey}>
               Add API key
             </Button>
           </>
         ) : null}
         {issue.kind === 'manual_catalog' ? (
-          <Button
+          <Button size="sm" variant="primary"
             type="button"
-            className="min-h-8 px-2 text-xs"
             disabled={busy}
             onClick={onRecheck}
           >

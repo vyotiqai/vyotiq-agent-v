@@ -88,7 +88,8 @@ export function describePackageAt(
         path: 'vyotiq.mcp.json',
         transport: m.transport,
         ...(m.url ? { url: m.url } : {}),
-        ...(m.command ? { command: m.command } : {})
+        ...(m.command ? { command: m.command } : {}),
+        ...(m.args?.length ? { args: m.args } : {})
       })
     }
     return out
@@ -126,7 +127,8 @@ export function describePackageAt(
         path: rel,
         transport: m.transport,
         ...(m.url ? { url: m.url } : {}),
-        ...(m.command ? { command: m.command } : {})
+        ...(m.command ? { command: m.command } : {}),
+        ...(m.args?.length ? { args: m.args } : {})
       })
     } catch {
       // skip

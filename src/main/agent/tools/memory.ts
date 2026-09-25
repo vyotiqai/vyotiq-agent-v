@@ -4,12 +4,10 @@ import {
   writeMemoryFile
 } from '../context/memory'
 
-type MemoryNamespace = string | undefined
-
-export function toolMemoryList(workspace: string, namespace?: MemoryNamespace): string {
+export function toolMemoryList(workspace: string): string {
   // index.md is auto-injected into the system prompt every step — do not
   // duplicate it here. memory_read fetches the full file on demand.
-  const { notes, indexedNotes, hasState } = listMemoryNotes(workspace, namespace)
+  const { notes, indexedNotes, hasState } = listMemoryNotes(workspace)
   // Drift signal: notes on disk vs notes the injected index points at.
   // Unindexed notes are invisible to retrieval (the index is the map);
   // broken pointers would make memory_read fail. Zero injection cost —
@@ -34,20 +32,18 @@ export function toolMemoryList(workspace: string, namespace?: MemoryNamespace): 
   ].join('\n')
 }
 
-export function toolMemoryRead(
-  workspace: string,
-  pathArg: string,
-  namespace?: MemoryNamespace
-): string {
+/**
+ * Validate a memory-relative path and return its canonical form.
+ *
+ * One implementation for every caller, so a path one caller accepts and
+ * another rejects cannot strand a note the agent can never read back.
+ */
+export function normalizeMemoryRelPath(pathArg: string): string {
   const cleaned = pathArg.trim().replace(/^[/\\]+/, '')
   if (!cleaned) throw new Error('path is required')
   if (cleaned.includes('..')) throw new Error('Invalid memory path')
   // Allow index.md, state.md, notes/foo.md
-  if (
-    cleaned !== 'index.md' &&
-    cleaned !== 'state.md' &&
-    !cleaned.startsWith('notes/')
-  ) {
+  if (cleaned !== 'index.md' && cleaned !== 'state.md' && !cleaned.startsWith('notes/')) {
     throw new Error('path must be index.md, state.md, or notes/<name>.md')
   }
   if (cleaned.startsWith('notes/')) {
@@ -56,7 +52,14 @@ export function toolMemoryRead(
       throw new Error('note files must be notes/<name>.md with safe characters')
     }
   }
-  return readMemoryFile(workspace, cleaned, namespace)
+  return cleaned
+}
+
+export function toolMemoryRead(
+  workspace: string,
+  pathArg: string
+): string {
+  return readMemoryFile(workspace, normalizeMemoryRelPath(pathArg))
 }
 
 /** @deprecated Kept for callers that still import the former write cap. */
@@ -65,25 +68,8 @@ export const MEMORY_WRITE_CAP = Number.POSITIVE_INFINITY
 export function toolMemoryWrite(
   workspace: string,
   pathArg: string,
-  contents: string,
-  namespace?: MemoryNamespace
+  contents: string
 ): string {
-  const cleaned = pathArg.trim().replace(/^[/\\]+/, '')
-  if (!cleaned) throw new Error('path is required')
-  if (cleaned.includes('..')) throw new Error('Invalid memory path')
-  if (
-    cleaned !== 'index.md' &&
-    cleaned !== 'state.md' &&
-    !cleaned.startsWith('notes/')
-  ) {
-    throw new Error('path must be index.md, state.md, or notes/<name>.md')
-  }
-  if (cleaned.startsWith('notes/')) {
-    const noteName = cleaned.slice('notes/'.length)
-    if (!noteName || !/^[a-zA-Z0-9._-]+\.md$/.test(noteName)) {
-      throw new Error('note files must be notes/<name>.md with safe characters')
-    }
-  }
-  const written = writeMemoryFile(workspace, cleaned, contents, namespace)
+  const written = writeMemoryFile(workspace, normalizeMemoryRelPath(pathArg), contents)
   return `Wrote memory/${written}`
 }

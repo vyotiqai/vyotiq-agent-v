@@ -14,6 +14,7 @@ export type IpcChannelName = keyof typeof IPC
 export const PUSH_CHANNEL_NAMES = [
   'chatEvent',
   'toolApprovalRequest',
+  'settingsChanged',
   'agentQuestionRequest',
   'windowMaximizedChanged',
   'windowFocusChanged',
@@ -26,15 +27,13 @@ export const PUSH_CHANNEL_NAMES = [
   'dictationStatusEvent',
   'githubAuthStatusEvent',
   'skillsChanged',
-  'agentProfilesChanged',
-  'agentProfileOverridesChanged',
-  'tasksChanged',
   'notificationsChanged',
   'notificationsActivate',
   'appearanceCustomCssChanged',
   'updaterState',
   'accessibilitySupportChanged',
   'gitStatusChanged',
+  'agentContextChanged',
   'deepLinkOpened'
 ] as const satisfies readonly IpcChannelName[]
 

@@ -1,5 +1,14 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'fs'
+import {
+  mkdtempSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  utimesSync
+} from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
@@ -122,6 +131,10 @@ describe('mcpCheckpoint known paths', () => {
         { source: 'src.txt', destination: 'dst.txt' },
         { runDir }
       )
+      // Priors are snapshotted before the MCP server runs; perform the move the
+      // way the server would, or finalize drops `dst.txt` as an entry for a file
+      // nothing ever created.
+      renameSync(join(workspace, 'src.txt'), join(workspace, 'dst.txt'))
       const meta = finalizeWriteCheckpoint(runDir)
       expect(meta!.files).toEqual(
         expect.arrayContaining([

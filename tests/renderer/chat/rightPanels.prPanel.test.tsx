@@ -2,13 +2,15 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { createPortal } from 'react-dom'
-import { useLayoutEffect, useRef, useState } from 'react'
-import { ChangesPanel } from '@renderer/features/chat/components/ChangesPanel'
-import { DockTabBar, defaultDockTab } from '@renderer/features/chat/components/DockTabBar'
-import { TerminalSessionBar } from '@renderer/features/chat/components/TerminalSessionBar'
-import { checksPassedCount, PrPanel } from '@renderer/features/chat/components/PrPanel'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  checkState,
+  checksPassedCount,
+  mergeSummary,
+  prMergeBlockedReason,
+  PrPanel
+} from '@renderer/features/chat/components/PrPanel'
+import type { PrView } from '@shared/ipc'
 
 beforeEach(() => {
   Object.defineProperty(window, 'vyotiq', {
@@ -153,7 +155,8 @@ beforeEach(() => {
           latestReviews: [],
           reviewDecision: '',
           reviewRequests: [],
-          isDraft: false
+          isDraft: false,
+          mergeStateStatus: 'CLEAN'
         }
       }),
       prCreate: vi.fn().mockResolvedValue({
@@ -210,15 +213,17 @@ describe('PrPanel', () => {
   it('renders PR metadata from gh view', async () => {
     const onPrMeta = vi.fn()
     render(<PrPanel workspacePath="/ws" onPrMeta={onPrMeta} />)
-    expect(await screen.findByText(/feat: panels/)).toBeTruthy()
-    expect(screen.getByText(/feat\/panels → main/)).toBeTruthy()
+    expect(await screen.findByRole('heading', { level: 3, name: 'feat: panels #10' })).toBeTruthy()
+    expect(document.querySelector('[data-pr-header]')?.textContent).toContain('feat/panels → main')
+    // Checks first, like the redesign.
+    expect(screen.getByRole('tab', { name: /^Checks/ }).getAttribute('aria-selected')).toBe('true')
     expect(onPrMeta).toHaveBeenCalledWith({ number: 10, title: 'feat: panels' })
   })
 
   it('creates a draft PR from an already-pushed topic branch', async () => {
     ;(window.vyotiq.prView as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, data: null })
     render(<PrPanel workspacePath="/ws" />)
-    fireEvent.click(await screen.findByRole('button', { name: /Create draft PR/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /Create a draft PR/i }))
     await waitFor(() => {
       expect(window.vyotiq.prCreate).toHaveBeenCalledWith('/ws', { draft: true })
     })
@@ -267,7 +272,7 @@ describe('PrPanel', () => {
     expect(
       screen.getByText(/connect the matching GitHub repository or create a private one/i)
     ).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Create draft PR/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Create a draft PR/i })).toBeTruthy()
   })
 
   it('titles empty state when the repository has no initial commit', async () => {
@@ -289,7 +294,7 @@ describe('PrPanel', () => {
         'The repository has no initial commit yet. Commit changes first, then create a pull request.'
     })
     render(<PrPanel workspacePath="/ws" />)
-    fireEvent.click(await screen.findByRole('button', { name: /Create draft PR/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /Create a draft PR/i }))
     expect(await screen.findByText(/no initial commit/i)).toBeTruthy()
   })
 
@@ -360,7 +365,7 @@ describe('PrPanel', () => {
     render(<PrPanel workspacePath="/ws" />)
     expect(await screen.findByText('WXYZ-9876')).toBeTruthy()
     expect(screen.getByRole('button', { name: /Open GitHub/i })).toBeTruthy()
-    expect(screen.getByText(/Waiting for authorization/i)).toBeTruthy()
+    expect(screen.getByText(/Waiting for authorisation/i)).toBeTruthy()
     expect(screen.queryByText(/^Complete authorization in your browser\.$/)).toBeNull()
   })
 
@@ -395,7 +400,7 @@ describe('PrPanel', () => {
     })
     render(<PrPanel workspacePath="/ws" />)
     fireEvent.click(await screen.findByRole('button', { name: /Connect GitHub/i }))
-    expect(await screen.findByText(/Waiting for authorization/i)).toBeTruthy()
+    expect(await screen.findByText(/Waiting for authorisation/i)).toBeTruthy()
     await waitFor(() => {
       expect(window.vyotiq.githubAuthStart).toHaveBeenCalled()
     })
@@ -483,12 +488,13 @@ describe('PrPanel', () => {
     expect(window.vyotiq.prView).toHaveBeenCalled()
   })
 
-  it('calls prMerge for Squash & Merge after confirmation', async () => {
+  it('merges with the method chosen, after confirmation', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<PrPanel workspacePath="/ws" />)
     await screen.findByText(/feat: panels/)
     expect(screen.getByText('Open')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /Squash & Merge/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Squash and merge/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Squash and merge' }))
     expect(confirm).toHaveBeenCalled()
     expect(window.vyotiq.prMerge).toHaveBeenCalledWith('/ws', 'squash', 10)
   })
@@ -497,15 +503,17 @@ describe('PrPanel', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<PrPanel workspacePath="/ws" />)
     await screen.findByText(/feat: panels/)
-    fireEvent.click(screen.getByRole('button', { name: /Squash & Merge/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Squash and merge/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rebase and merge' }))
     expect(window.vyotiq.prMerge).not.toHaveBeenCalled()
   })
 
-  it('exposes Reviews tab and expandable file diffs with viewed checkbox', async () => {
+  it('lists files with the selected one’s diff below, and marks files viewed', async () => {
     render(<PrPanel workspacePath="/ws" />)
     await screen.findByText(/feat: panels/)
-    expect(screen.getByRole('button', { name: /^Reviews/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Show diff for a.ts' }))
+    expect(screen.getByRole('tab', { name: /^Reviews/ })).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: /^Files/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'a.ts, modified' }))
     await waitFor(() => {
       expect(window.vyotiq.prDiff).toHaveBeenCalledWith({
         workspacePath: '/ws',
@@ -514,25 +522,125 @@ describe('PrPanel', () => {
         number: 10
       })
     })
-    fireEvent.click(screen.getByRole('checkbox', { name: /Mark a\.ts as viewed/i }))
-    expect(
-      (screen.getByRole('checkbox', { name: /Mark a\.ts as viewed/i }) as HTMLInputElement).checked
-    ).toBe(true)
+    const row = document.querySelector('[data-change-row="a.ts"]') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: 'Mark a.ts as viewed' }))
+    expect(row.textContent).toContain('Viewed')
+    expect(within(row).getByRole('button', { name: 'Mark a.ts as not viewed' })).toBeTruthy()
   })
 
-  it('shows Expand All, Filter files, Edit Title, Close PR, Hide panel in ··· menu', async () => {
+  it('keeps filter, title, issues, close and hide in the PR menu', async () => {
     const onUnlink = vi.fn()
     render(<PrPanel workspacePath="/ws" onUnlink={onUnlink} />)
     await screen.findByText(/feat: panels/)
-    fireEvent.click(screen.getByRole('button', { name: /PR actions/i }))
-    expect(screen.getByRole('button', { name: /Expand All Files/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Collapse All/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /View on Web/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Filter files/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Edit Title/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Close PR/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /Hide panel/i }))
+    expect(screen.getByRole('button', { name: 'Open on GitHub' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'PR actions' }))
+    expect(await screen.findByRole('menuitem', { name: 'Filter files' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Edit title' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Issues' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Close pull request' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Hide panel' }))
     expect(onUnlink).toHaveBeenCalled()
+  })
+
+  it('shows each check’s state, time and run link, and hands a failure to the agent', async () => {
+    const onHandToAgent = vi.fn()
+    ;(window.vyotiq.prView as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      data: {
+        number: 10,
+        title: 'feat: panels',
+        url: 'https://github.com/ex/repo/pull/10',
+        state: 'OPEN',
+        baseRefName: 'main',
+        headRefName: 'feat/panels',
+        baseRefOid: 'aaa',
+        headRefOid: 'bbb',
+        body: '',
+        additions: 1,
+        deletions: 0,
+        files: [],
+        commits: [],
+        checks: [
+          {
+            name: 'typecheck',
+            state: 'COMPLETED',
+            conclusion: 'SUCCESS',
+            url: 'https://github.com/ex/repo/actions/runs/1',
+            startedAt: '2026-01-01T00:00:00Z',
+            completedAt: '2026-01-01T00:00:38Z'
+          },
+          {
+            name: 'e2e (windows)',
+            state: 'COMPLETED',
+            conclusion: 'FAILURE',
+            url: 'https://github.com/ex/repo/actions/runs/2',
+            startedAt: '2026-01-01T00:00:00Z',
+            completedAt: '2026-01-01T00:04:12Z',
+            description: '1 test failed'
+          },
+          { name: 'lint', state: 'IN_PROGRESS', conclusion: null }
+        ],
+        reviews: [],
+        latestReviews: [],
+        reviewDecision: '',
+        reviewRequests: [],
+        isDraft: false,
+        mergeStateStatus: 'BLOCKED'
+      }
+    })
+    render(<PrPanel workspacePath="/ws" onHandToAgent={onHandToAgent} />)
+    await screen.findByText(/feat: panels/)
+    expect(screen.getByRole('tab', { name: /^Checks/ }).textContent).toContain('1/3')
+    const checks = screen.getByRole('list', { name: 'Checks' })
+    const rows = Array.from(checks.querySelectorAll('li'))
+    expect(rows.map((r) => r.getAttribute('data-check-state'))).toEqual(['review', 'failed', 'running'])
+    expect(rows[0]!.textContent).toContain('38s')
+    expect(rows[1]!.textContent).toContain('1 test failed')
+    fireEvent.click(within(rows[1]!).getByRole('button', { name: 'Open the e2e (windows) run' }))
+    expect(window.vyotiq.shellOpenExternal).toHaveBeenCalledWith('https://github.com/ex/repo/actions/runs/2')
+    fireEvent.click(within(rows[1]!).getByRole('button', { name: /Hand to the agent/ }))
+    expect(onHandToAgent).toHaveBeenCalledWith(
+      'The “e2e (windows)” check failed on pull request #10 (1 test failed). Read its log at https://github.com/ex/repo/actions/runs/2, find the cause and fix it.'
+    )
+    // The merge section says what GitHub reports, no more.
+    expect(screen.getByText('1 check failing and 1 still running. Branch protection blocks the merge.')).toBeTruthy()
+  })
+
+  it('marks a draft ready for review', async () => {
+    window.vyotiq.prReady = vi.fn().mockResolvedValue({ ok: true, data: { detail: 'Marked ready for review' } })
+    ;(window.vyotiq.prView as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      data: {
+        number: 10,
+        title: 'feat: panels',
+        url: 'https://github.com/ex/repo/pull/10',
+        state: 'OPEN',
+        baseRefName: 'main',
+        headRefName: 'feat/panels',
+        baseRefOid: 'aaa',
+        headRefOid: 'bbb',
+        body: '',
+        additions: 1,
+        deletions: 0,
+        files: [],
+        commits: [],
+        checks: [],
+        reviews: [],
+        latestReviews: [],
+        reviewDecision: '',
+        reviewRequests: [],
+        isDraft: true,
+        mergeStateStatus: 'DRAFT'
+      }
+    })
+    render(<PrPanel workspacePath="/ws" />)
+    await screen.findByText(/feat: panels/)
+    expect(screen.getByText('Draft')).toBeTruthy()
+    expect((screen.getByRole('button', { name: /Squash and merge/ }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Mark ready for review' }))
+    await waitFor(() => {
+      expect(window.vyotiq.prReady).toHaveBeenCalledWith('/ws', 10)
+    })
   })
 
   it('hides merge controls for a closed PR', async () => {
@@ -563,7 +671,8 @@ describe('PrPanel', () => {
     render(<PrPanel workspacePath="/ws" />)
     await screen.findByText(/feat: panels/)
     expect(screen.getByText('Closed')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Squash & Merge/i })).toBeNull()
+    expect(screen.getByText('Closed without merging.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Squash and merge/ })).toBeNull()
   })
 
   it('does not treat bare COMPLETED check state as passed', () => {
@@ -654,7 +763,63 @@ describe('PrPanel', () => {
     })
     render(<PrPanel workspacePath="/ws" />)
     await screen.findByText(/feat: panels/)
-    fireEvent.click(screen.getByRole('button', { name: /PR actions/i }))
-    expect(screen.getByRole('button', { name: /Disconnect/i })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'PR actions' }))
+    expect(await screen.findByRole('menuitem', { name: 'Disconnect GitHub' })).toBeTruthy()
+  })
+})
+
+describe('checkState and mergeSummary', () => {
+  const base = {
+    number: 1,
+    title: 't',
+    url: 'https://github.com/o/r/pull/1',
+    state: 'OPEN',
+    baseRefName: 'main',
+    headRefName: 'feat',
+    baseRefOid: 'a',
+    headRefOid: 'b',
+    body: '',
+    additions: 0,
+    deletions: 0,
+    files: [],
+    commits: [],
+    checks: [],
+    reviews: [],
+    latestReviews: [],
+    reviewDecision: '',
+    reviewRequests: [],
+    isDraft: false,
+    mergeStateStatus: ''
+  } satisfies PrView
+
+  it('reads both node shapes the rollup mixes', () => {
+    expect(checkState({ name: 'a', state: 'COMPLETED', conclusion: 'SUCCESS' }).glyph).toBe('review')
+    expect(checkState({ name: 'b', state: 'SUCCESS', conclusion: null }).glyph).toBe('review')
+    expect(checkState({ name: 'c', state: 'COMPLETED', conclusion: 'TIMED_OUT' }).glyph).toBe('failed')
+    expect(checkState({ name: 'd', state: 'FAILURE', conclusion: null }).glyph).toBe('failed')
+    expect(checkState({ name: 'e', state: 'COMPLETED', conclusion: 'CANCELLED' }).glyph).toBe('stopped')
+    expect(checkState({ name: 'f', state: 'COMPLETED', conclusion: 'SKIPPED' })).toEqual({ glyph: 'done', word: 'skipped' })
+    expect(checkState({ name: 'g', state: 'IN_PROGRESS', conclusion: null }).glyph).toBe('running')
+    expect(checkState({ name: 'h', state: 'PENDING', conclusion: null }).glyph).toBe('queued')
+  })
+
+  it('holds Merge back only when GitHub would refuse it, and says why', () => {
+    expect(prMergeBlockedReason({ ...base, mergeStateStatus: 'CLEAN' })).toBeNull()
+    expect(prMergeBlockedReason({ ...base, mergeStateStatus: 'BEHIND' })).toBeNull()
+    expect(prMergeBlockedReason({ ...base, mergeStateStatus: 'BLOCKED' })).toBe('Branch protection blocks the merge.')
+    expect(prMergeBlockedReason({ ...base, mergeStateStatus: 'DIRTY' })).toBe('The branch conflicts with main.')
+    expect(prMergeBlockedReason({ ...base, isDraft: true })).toBe('It is a draft — mark it ready for review to merge.')
+    expect(prMergeBlockedReason({ ...base, state: 'MERGED' })).toBe('Already merged.')
+  })
+
+  it('claims only what GitHub reports', () => {
+    expect(mergeSummary({ ...base, mergeStateStatus: 'CLEAN' })).toBe('Ready to merge.')
+    expect(mergeSummary({ ...base, mergeStateStatus: 'DIRTY' })).toBe('The branch conflicts with main.')
+    expect(mergeSummary({ ...base, mergeStateStatus: 'BEHIND' })).toBe('The branch is behind main.')
+    expect(mergeSummary({ ...base, isDraft: true, mergeStateStatus: 'DRAFT' })).toBe(
+      'It is a draft — mark it ready for review to merge.'
+    )
+    // An older gh with no merge state: nothing is claimed.
+    expect(mergeSummary(base)).toBe('')
   })
 })

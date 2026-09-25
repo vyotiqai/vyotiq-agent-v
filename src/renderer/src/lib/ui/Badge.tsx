@@ -2,22 +2,26 @@ import type { ReactNode } from 'react'
 import { cn } from './cn'
 
 /**
- * Small status or count pill.
+ * Small status or count tag.
  *
- * Tones are semantic, not decorative: pick the one that matches what the label
- * means, so the colour survives all five skins and both themes. `dot` adds a
- * leading marker for states that read better as presence than as a word.
+ * Tones are semantic, not decorative. The redesign uses three — `outline` (a
+ * quiet tag), `accent` (asks for you) and `success` (passed). `neutral`,
+ * `danger` and `warning` stay for surfaces not yet ported. Tints come from the
+ * named `-soft` tokens, never an invented opacity.
  */
-
 const badgeTones = {
+  outline: 'border border-border text-muted',
   neutral: 'bg-surface-2 text-muted',
-  accent: 'bg-accent/15 text-accent',
-  success: 'bg-success/15 text-success',
-  danger: 'bg-danger/15 text-danger',
-  warning: 'bg-warning/15 text-warning'
+  accent: 'bg-accent-soft text-accent',
+  success: 'bg-success-soft text-success',
+  danger: 'bg-danger-soft text-danger',
+  warning: 'bg-warning-soft text-warning'
 } as const
 
-const badgeDotTones: Record<keyof typeof badgeTones, string> = {
+export type BadgeTone = keyof typeof badgeTones
+
+const badgeDotTones: Record<BadgeTone, string> = {
+  outline: 'bg-muted',
   neutral: 'bg-muted',
   accent: 'bg-accent',
   success: 'bg-success',
@@ -26,8 +30,8 @@ const badgeDotTones: Record<keyof typeof badgeTones, string> = {
 }
 
 const badgeSizes = {
-  sm: 'min-h-4 px-1.5 text-3xs',
-  md: 'min-h-5 px-2 text-2xs'
+  sm: 'h-[18px] px-1.5 text-caption',
+  md: 'h-5 px-2 text-xs'
 } as const
 
 export function Badge({
@@ -35,29 +39,31 @@ export function Badge({
   tone = 'neutral',
   size = 'sm',
   dot = false,
+  mono = false,
   className,
   title
 }: {
   children: ReactNode
-  tone?: keyof typeof badgeTones
+  tone?: BadgeTone
   size?: keyof typeof badgeSizes
   dot?: boolean
+  /** Tabular digits, for versions and counts. */
+  mono?: boolean
   className?: string
   title?: string
 }) {
   return (
     <span
       className={cn(
-        'inline-flex shrink-0 items-center gap-1 rounded-pill font-medium leading-none',
+        'inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-sm font-medium leading-none',
         badgeSizes[size],
         badgeTones[tone],
+        mono && 'font-mono tnum',
         className
       )}
       title={title}
     >
-      {dot ? (
-        <span className={cn('size-1.5 shrink-0 rounded-full', badgeDotTones[tone])} aria-hidden />
-      ) : null}
+      {dot ? <span className={cn('size-1.5 shrink-0 rounded-full', badgeDotTones[tone])} aria-hidden /> : null}
       {children}
     </span>
   )

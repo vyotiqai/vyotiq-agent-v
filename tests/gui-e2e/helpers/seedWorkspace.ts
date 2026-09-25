@@ -5,6 +5,20 @@ import { workspaceIdFromPath } from '../../../src/shared/utils/workspaceId'
 import { canonicalizeWorkspacePath } from '../../../src/shared/utils/workspacePath'
 import { RUN_INTERRUPTED_ERROR } from '../../../src/shared/runInterrupt'
 
+/**
+ * The active workspace path after `addWorkspace`, or a loud failure.
+ *
+ * `activePath` is `string | null` on the wire — null when the registry has no
+ * active workspace. Specs were assigning it straight into a `string` and
+ * carrying a null into `join()` and `evaluate()` arguments, where it surfaces
+ * much later as an unreadable path error. Fail here, where the cause is still
+ * on screen.
+ */
+export function requireActivePath(activePath: string | null): string {
+  if (!activePath) throw new Error('addWorkspace returned no activePath')
+  return activePath
+}
+
 export type SeededRun = {
   runId: string
   goal: string
@@ -165,6 +179,30 @@ export function seedWorkspacesRegistry(
     ),
     'utf8'
   )
+}
+
+/** Write workspaces.json with folders opened before and none open now — a recent list. */
+export function seedRecentWorkspaces(userDataDir: string, workspacePaths: string[]): string[] {
+  const canonical = workspacePaths.map(appCanonicalWorkspacePath)
+  mkdirSync(userDataDir, { recursive: true })
+  writeFileSync(
+    join(userDataDir, 'workspaces.json'),
+    JSON.stringify(
+      {
+        version: 2,
+        legacySessionsMigrated: true,
+        openPaths: [],
+        activePath: null,
+        recentPaths: canonical,
+        uiStateByPath: {},
+        settingsOverridesByPath: {}
+      },
+      null,
+      2
+    ),
+    'utf8'
+  )
+  return canonical
 }
 
 /** Seed settings.json (merged over defaults). */

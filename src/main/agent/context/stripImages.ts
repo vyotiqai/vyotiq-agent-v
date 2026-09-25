@@ -1,4 +1,4 @@
-import type { ChatMessage, ModelInfo } from '../../../shared/ipc'
+import type { ChatMessage, ContentPart, ModelInfo } from '../../../shared/ipc'
 import { providerContentParts, type ProviderWireCaps } from '../../../shared/ipc'
 
 export function wireCapsFromModel(model: ModelInfo): ProviderWireCaps {
@@ -45,17 +45,27 @@ export function capImagesPerRequest(
       }
       return p
     })
-    if (parts.every((p) => p.type === 'text')) {
-      return {
-        ...m,
-        content: parts
-          .map((p) => (p.type === 'text' ? p.text : ''))
-          .filter(Boolean)
-          .join('\n')
-      }
-    }
-    return { ...m, content: parts }
+    return withCollapsedTextParts(m, parts)
   })
+}
+
+/**
+ * Once every part is text the message no longer needs the array shape — a plain
+ * string keeps the wire payload, and the token estimate, closer to what the
+ * model actually receives.
+ */
+function withCollapsedTextParts<P extends ContentPart>(
+  message: ChatMessage,
+  parts: P[]
+): ChatMessage {
+  if (!parts.every((p) => p.type === 'text')) return { ...message, content: parts }
+  return {
+    ...message,
+    content: parts
+      .map((p) => (p.type === 'text' ? p.text : ''))
+      .filter(Boolean)
+      .join('\n')
+  }
 }
 
 /** Replace unsupported multimodal parts with text markers before send/estimate. */
@@ -74,15 +84,14 @@ export function stripUnsupportedModalitiesFromMessages(
     )
     if (!hasRich) return m
     const parts = providerContentParts(m.content, caps)
-    if (parts.every((p) => p.type === 'text')) {
-      return {
-        ...m,
-        content: parts
-          .map((p) => (p.type === 'text' ? p.text : ''))
-          .filter(Boolean)
-          .join('\n')
-      }
+    // Nothing was actually replaced — every rich part is supported on this model, so
+    // hand back the same message. `providerContentParts` always allocates a fresh
+    // array while passing supported parts through by identity, so a vision run used
+    // to mint a new object for its screenshot message on every step, missing the
+    // per-message token cache and re-decoding the image header each time.
+    if (parts.length === m.content.length && parts.every((p, i) => p === m.content[i])) {
+      return m
     }
-    return { ...m, content: parts }
+    return withCollapsedTextParts(m, parts)
   })
 }

@@ -17,8 +17,17 @@ type DropHighlight = {
 
 export type PaneRenderOptions = {
   focused: boolean
-  /** Clear shared ChatSideRail on the rightmost column when the rail is visible. */
-  sideRailPad: boolean
+  /** More than one pane is open: the pane's header offers to close it. */
+  multi: boolean
+  /** Close this pane — offered only when `multi`. */
+  onClose?: () => void
+  /** Open an empty pane beside this one. */
+  onSplit?: () => void
+  /**
+   * The inspector is hidden: the pane nearest where it opens offers it back.
+   * Set on the rightmost pane only.
+   */
+  onShowInspector?: () => void
   /** Open Changes dock (agent scope) — injected by ChatView when multi-pane. */
   onOpenChanges?: (path?: string) => void
   /** Open a workspace path in the Files dock — injected by ChatView. */
@@ -43,7 +52,7 @@ export function ChatPaneHost({
   panes,
   focusedPaneId,
   sizes,
-  sideRailPad = false,
+  onShowInspector,
   onFocusPane,
   onClosePane,
   onSplitPane,
@@ -55,8 +64,8 @@ export function ChatPaneHost({
   panes: ChatPane[]
   focusedPaneId: string
   sizes: number[]
-  /** When true, rightmost pane clears the shared side rail. */
-  sideRailPad?: boolean
+  /** Set while the inspector is hidden — handed to the rightmost pane. */
+  onShowInspector?: () => void
   onFocusPane: (paneId: string) => void
   onClosePane: (paneId: string) => void
   /** Insert an empty draft pane beside this pane (pointerdown already focused it). */
@@ -161,6 +170,15 @@ export function ChatPaneHost({
           index < panes.length - 1
             ? (sizes[index] ?? 0) + (sizes[index + 1] ?? 0)
             : 0
+        // Each pane's own 40px header carries its title, split and close —
+        // the host draws no second header above it.
+        const paneBody = renderPane(pane, {
+          focused,
+          multi,
+          onClose: multi ? () => onClosePane(pane.paneId) : undefined,
+          onSplit: onSplitPane,
+          onShowInspector: isRightmost ? onShowInspector : undefined
+        })
         return (
           <div
             key={pane.paneId}
@@ -176,7 +194,7 @@ export function ChatPaneHost({
               aria-label={paneTitle}
               className={cn(
                 'relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent',
-                index > 0 && 'border-l border-border/50',
+                index > 0 && 'border-l border-border',
                 focused && multi && 'ring-1 ring-inset ring-border-strong/60'
               )}
               data-chat-pane
@@ -198,54 +216,8 @@ export function ChatPaneHost({
                   )}
                 />
               ) : null}
-              {multi ? (
-                <div
-                  className={cn(
-                    'absolute inset-x-0 top-0 z-dropdown flex h-7 items-center justify-between gap-2 border-b border-border/40 bg-transparent px-2',
-                    isRightmost && sideRailPad && 'pr-10'
-                  )}
-                  data-chat-pane-header
-                >
-                  <span className="min-w-0 truncate text-xs text-fg/80">{paneTitle}</span>
-                  <span className="flex shrink-0 items-center gap-0.5">
-                    {onSplitPane ? (
-                      <button
-                        type="button"
-                        className="shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface/70 hover:text-fg"
-                        aria-label={`Split pane beside ${paneTitle}`}
-                        data-chat-pane-split={pane.paneId}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onSplitPane()
-                        }}
-                      >
-                        +
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface/70 hover:text-fg"
-                      aria-label={`Close ${paneTitle}`}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onClosePane(pane.paneId)
-                      }}
-                    >
-                      Close
-                    </button>
-                  </span>
-                </div>
-              ) : null}
-              <div
-                className={cn(
-                  'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
-                  multi && 'pt-7'
-                )}
-              >
-                {renderPane(pane, {
-                  focused,
-                  sideRailPad: Boolean(sideRailPad && isRightmost)
-                })}
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                {paneBody}
               </div>
             </div>
             {index < panes.length - 1 ? (

@@ -6,12 +6,14 @@ import { mcpAuthAllowedForWorkspace } from '../../shared/mcpApps'
 import { isMcpToolPermitted } from '../../shared/utils/mcpToolPolicy'
 import { getSettings } from '../settings/settings'
 import { findWorkspaceSettingsOverride, getWorkspaces } from '../workspace/workspaces'
-import { listMcpToolDefinitions, parseMcpToolName } from './mcp'
+import { getMcpReadOnlyHint, listMcpToolDefinitions, parseMcpToolName } from './mcp'
 import type { McpToolLoading } from './context/mcpToolLoading'
 import { BUILTIN_TOOL_NAMES, TOOL_REGISTRY } from './schemas/tools'
+import { agentBuiltToolDefinitions } from './agentTools/loader'
 import { filterToolDefsForCodeIndex, isBuiltinAllowedInMode } from './tools/modePolicy'
+import { AGENT_INTERACTION_MODES } from '../../shared/ipc'
 
-const ALL_MODES = ['ask', 'plan', 'agent'] as const
+const ALL_MODES = AGENT_INTERACTION_MODES
 type CatalogMode = (typeof ALL_MODES)[number]
 
 /** Minimal shape we need from the registry + MCP defs (structural; keeps this module light). */
@@ -19,7 +21,10 @@ type CatalogToolDef = { name: string; description?: string }
 
 function fingerprintOf(entries: readonly ToolCatalogEntry[], codeIndexEnabled: boolean, autoModeSwitch: boolean): string {
   const basis = `${codeIndexEnabled ? 1 : 0}|${autoModeSwitch ? 1 : 0}|${entries
-    .map((e) => `${e.name}=${e.active ? 1 : 0}${e.reason ? `!${e.reason}` : ''}`)
+    .map(
+      (e) =>
+        `${e.name}=${e.active ? 1 : 0}${e.reason ? `!${e.reason}` : ''}${e.readOnlyHint === undefined ? '' : e.readOnlyHint ? '~r' : '~w'}`
+    )
     .join(',')}`
   let hash = 5381
   for (let i = 0; i < basis.length; i++) {
@@ -39,8 +44,12 @@ export function buildToolCatalog(inputs: {
   mcpToolDefs: readonly CatalogToolDef[]
   servers: readonly McpServer[]
   authAllowedServerIds: ReadonlySet<string>
+  /** Tools written by `build_tool`; omitted in tests that only cover builtins/MCP. */
+  agentToolDefs?: readonly CatalogToolDef[]
   /** Settings default; a server's own `autoLoad` overrides it. */
   mcpToolLoading?: McpToolLoading
+  /** What each connected server declared as `readOnlyHint`, by full tool name. */
+  mcpReadOnlyHint?: (name: string) => boolean | undefined
 }): ToolCatalogResult {
   const { autoModeSwitch, codeIndexEnabled, mcpToolDefs, servers, authAllowedServerIds } = inputs
   const eagerMcp = inputs.mcpToolLoading === 'eager'
@@ -67,6 +76,19 @@ export function buildToolCatalog(inputs: {
     })
   }
 
+  // Tools a run wrote for itself. Always active in Agent mode — nothing defers
+  // them and no server can disable them — but never offered to Ask or Plan,
+  // which is what isBuiltinAllowedInMode already says for an unknown name.
+  for (const def of inputs.agentToolDefs ?? []) {
+    entries.push({
+      name: def.name,
+      description: def.description ?? '',
+      source: 'agent',
+      modes: ['agent'],
+      active: true
+    })
+  }
+
   for (const def of mcpToolDefs) {
     const parsed = parseMcpToolName(def.name)
     if (!parsed) continue
@@ -78,12 +100,14 @@ export function buildToolCatalog(inputs: {
       deniedTools: server.deniedTools
     })
     const active = server.enabled && authOk && permitted
+    const readOnlyHint = inputs.mcpReadOnlyHint?.(def.name)
     entries.push({
       name: def.name,
       description: def.description ?? '',
       source: 'mcp',
       serverId: server.id,
       serverName: server.name,
+      ...(readOnlyHint === undefined ? {} : { readOnlyHint }),
       modes: ['agent'],
       active,
       reason: active
@@ -116,7 +140,9 @@ export function buildToolCatalog(inputs: {
  * same sources the agent loop reads: effective MCP servers, connected sessions,
  * settings (autoModeSwitch, codeIndex) and the builtin registry.
  */
-export function computeToolCatalog(workspacePath?: string | null): ToolCatalogResult {
+export async function computeToolCatalog(
+  workspacePath?: string | null
+): Promise<ToolCatalogResult> {
   const settings = getSettings()
   const workspaces = getWorkspaces()
   const workspace = workspacePath === undefined ? workspaces.activePath : workspacePath
@@ -133,16 +159,25 @@ export function computeToolCatalog(workspacePath?: string | null): ToolCatalogRe
     mcpToolDefs: listMcpToolDefinitions(),
     servers,
     authAllowedServerIds,
-    mcpToolLoading: settings.mcpToolLoading ?? 'on-demand'
+    mcpToolLoading: settings.mcpToolLoading ?? 'on-demand',
+    mcpReadOnlyHint: getMcpReadOnlyHint,
+    agentToolDefs: await agentBuiltToolDefinitions()
   })
 }
 
 /** Push the live catalog to every renderer window (same pattern as skills:changed). */
 export function notifyToolCatalogChanged(): void {
-  const payload = computeToolCatalog()
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) {
-      win.webContents.send(IPC.toolsCatalogChanged, payload)
-    }
-  }
+  // Stays sync at the call site — there are fourteen of them and every one is
+  // fire-and-forget. The scan it now awaits is a cached mtime sweep.
+  void computeToolCatalog()
+    .then((payload) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) {
+          win.webContents.send(IPC.toolsCatalogChanged, payload)
+        }
+      }
+    })
+    .catch(() => {
+      /* a catalog push that cannot be computed is not worth failing a mutation over */
+    })
 }

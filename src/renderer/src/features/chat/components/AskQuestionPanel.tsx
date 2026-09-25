@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Tooltip, cn, MarkdownContent } from '@renderer/lib/ui'
+import { Button, StatusGlyph, Tooltip, cn, MarkdownContent } from '@renderer/lib/ui'
 import {
   QUESTION_GATE_BODY,
   QUESTION_GATE_FOOTER,
@@ -67,10 +67,13 @@ function isQuickSubmitForm(question: UiAgentQuestion): boolean {
 
 export const AskQuestionPanel = memo(function AskQuestionPanel({
   question,
-  onSubmit
+  onSubmit,
+  stepLabel
 }: {
   question: UiAgentQuestion
   onSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
+  /** "Step 2 · Pick the storage format", when the question belongs to a step. */
+  stepLabel?: string
 }) {
   const [phase, setPhase] = useState<'idle' | 'pending' | 'answered' | 'skipped'>('idle')
   const [localError, setLocalError] = useState<string | null>(null)
@@ -161,7 +164,7 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
     ? question.title!.trim()
     : multi
       ? `${question.questions.length} questions`
-      : 'Question'
+      : 'one question'
   const singleHint =
     !multi && question.questions[0] ? questionTypeHint(question.questions[0].type) : null
 
@@ -259,18 +262,19 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
   return (
     <form
       ref={rootRef}
-      className={cn(QUESTION_GATE_SURFACE, 'w-full')}
+      data-needs-you
+      className={cn(QUESTION_GATE_SURFACE, 'w-full scroll-mt-4')}
       aria-labelledby={`ask-q-title-${question.requestId}`}
       aria-busy={phase === 'pending' ? true : undefined}
       onSubmit={onFormSubmit}
     >
       <div className={QUESTION_GATE_HEADER}>
-        <span
-          id={`ask-q-title-${question.requestId}`}
-          className="shrink-0 font-medium text-fg"
-        >
-          {headerTitle}
+        <StatusGlyph state="needs" size={12} />
+        <span id={`ask-q-title-${question.requestId}`} className="min-w-0 truncate font-semibold text-accent">
+          Needs you — {headerTitle}
         </span>
+        <span className="flex-1" />
+        {stepLabel ? <span className="min-w-0 truncate text-muted">{stepLabel}</span> : null}
         {settled ? (
           <span className="min-w-0 truncate text-tertiary">
             {phase === 'answered' ? 'Answered' : 'Skipped'}
@@ -286,7 +290,7 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
 
       {settled ? (
         <div className={cn(QUESTION_GATE_BODY, 'flex flex-col gap-1')}>
-          <p className="m-0 text-sm text-fg/80 [overflow-wrap:anywhere]">
+          <p className="m-0 text-sm text-secondary [overflow-wrap:anywhere]">
             {phase === 'skipped'
               ? 'Skipped — agent continues with a reasonable default.'
               : settledSummary || 'Answered.'}
@@ -295,9 +299,6 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
       ) : (
         <>
           <div className={cn(QUESTION_GATE_BODY, 'flex flex-col gap-3')}>
-            <p className="m-0 text-caption text-tertiary">
-              Waiting for your answer — agent continues if skipped.
-            </p>
             {question.questions.map((item) => {
               const promptId = `ask-q-prompt-${question.requestId}-${item.id}`
               const state = fields[item.id] ?? { values: [], customText: '' }
@@ -340,58 +341,49 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
             ) : null}
           </div>
 
-          <div
-            className={cn(
-              QUESTION_GATE_FOOTER,
-              'flex flex-wrap items-center gap-2 border-t border-border/40'
-            )}
-          >
+          <div className={cn(QUESTION_GATE_FOOTER, 'flex-wrap')}>
             {showSubmit ? (
               // Disabled submit ignores pointer events — wrap so the why-not
               // tip (e.g. "Still need: …") actually shows.
               submitTitle ? (
                 <Tooltip content={submitTitle}>
                   <span className="inline-flex cursor-not-allowed">
-                    <button
+                    <Button
                       type="submit"
+                      variant="primary"
+                      size="sm"
                       disabled
                       aria-describedby={showProgress ? progressId : undefined}
                       aria-busy={phase === 'pending' ? true : undefined}
-                      className="rounded-md border border-border px-2.5 py-1 text-xs text-tertiary disabled:opacity-[var(--vy-disabled-opacity)]"
                     >
                       {submitLabel}
-                    </button>
+                    </Button>
                   </span>
                 </Tooltip>
               ) : (
-                <button
+                <Button
                   type="submit"
+                  variant="primary"
+                  size="sm"
                   aria-describedby={showProgress ? progressId : undefined}
                   aria-busy={phase === 'pending' ? true : undefined}
-                  className="rounded-md border border-accent bg-accent px-2.5 py-1 text-xs text-accent-fg hover:opacity-90"
                 >
                   {submitLabel}
-                </button>
+                </Button>
               )
             ) : null}
-            <Tooltip content="Skip — the agent continues with a reasonable default">
-              <button
-                type="button"
-                disabled={!canSkip}
-                className={cn(
-                  'rounded-md px-2.5 py-1 text-xs text-tertiary vy-transition',
-                  'hover:text-fg disabled:opacity-[var(--vy-disabled-opacity)]'
-                )}
-                onClick={skip}
-              >
-                Skip
-              </button>
-            </Tooltip>
+            <Button type="button" variant="ghost" size="sm" disabled={!canSkip} onClick={skip}>
+              Skip — let the agent choose
+            </Button>
+            <span className="flex-1" />
             {showProgress ? (
               <span id={progressId} className="min-w-0 truncate text-caption text-tertiary">
                 {answeredCount} of {question.questions.length} answered
               </span>
-            ) : null}
+            ) : (
+              // The loop waits indefinitely for an answer (agentQuestion.ts).
+              <span className="text-caption text-tertiary">The run waits for your answer</span>
+            )}
           </div>
         </>
       )}

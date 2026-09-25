@@ -78,9 +78,8 @@ export function GithubAuthPanel({
           {auth?.error}
         </p>
         <div className="mt-4">
-          <Button
+          <Button size="sm"
             variant="subtle"
-            className="h-7 px-2.5 text-caption"
             disabled={authBusy}
             onClick={onConnect}
           >
@@ -119,9 +118,8 @@ export function GithubAuthPanel({
               <span className="font-mono text-lg font-semibold tracking-widest text-fg">
                 {userCode}
               </span>
-              <Button
+              <Button size="sm"
                 variant="subtle"
-                className="h-7 px-2 text-caption"
                 onClick={handleCopyCode}
               >
                 {copied ? 'Copied' : 'Copy'}
@@ -131,16 +129,14 @@ export function GithubAuthPanel({
         ) : null}
 
         <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-          <Button
+          <Button size="sm"
             variant="subtle"
-            className="h-7 px-2.5 text-caption"
             onClick={() => onOpenGithub(verificationUri)}
           >
             Open GitHub
           </Button>
-          <Button
+          <Button size="sm"
             variant="subtle"
-            className="h-7 px-2.5 text-caption"
             disabled={authBusy}
             onClick={onCancel}
           >
@@ -150,7 +146,7 @@ export function GithubAuthPanel({
 
         <div className="mt-4 flex items-center gap-2 text-caption text-muted">
           <AgentVSpinner size={14} />
-          <span>Waiting for authorization…</span>
+          <span>Waiting for authorisation…</span>
         </div>
       </div>
     )
@@ -164,9 +160,8 @@ export function GithubAuthPanel({
         Connect GitHub to view pull requests for this branch.
       </p>
       <div className="mt-3">
-        <Button
+        <Button size="sm"
           variant="subtle"
-          className="h-7 px-2.5 text-caption"
           disabled={authBusy}
           onClick={onConnect}
         >

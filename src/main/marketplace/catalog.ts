@@ -169,6 +169,21 @@ export function mergeCatalogs(
   return [...byId.values()]
 }
 
+/**
+ * Catalog entries by id, with their icons, as browse would show them — from
+ * the bundled catalog and the cached registry copy, never a network refresh.
+ */
+export function catalogEntriesById(ids: Iterable<string>): Map<string, MarketplaceCatalogEntry> {
+  const wanted = new Set(ids)
+  if (wanted.size === 0) return new Map()
+  const registryUrl = (getSettings().marketplace?.registryUrl ?? '').trim()
+  const remote: MarketplaceCatalog = registryUrl
+    ? loadCachedRemoteCatalog()
+    : { schemaVersion: 1, packages: [] }
+  const entries = mergeCatalogs(loadBundledCatalog(), remote).filter((e) => wanted.has(e.id))
+  return new Map(enrichCatalogEntryIcons(entries).map((e) => [e.id, e]))
+}
+
 export async function browseCatalog(opts?: {
   kind?: MarketplaceKind
   q?: string

@@ -74,4 +74,51 @@ describe('collectStructuredResponse', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error).toBe('Request aborted')
   })
+
+  describe('usage sink', () => {
+    it('reports the billed stream on the success path', async () => {
+      const provider = fakeProvider([
+        { type: 'text', text: '{"a":1}' },
+        { type: 'done', usage: { inputTokens: 1200, outputTokens: 90 } }
+      ])
+      const seen: Array<{ inputTokens?: number; attempt: number }> = []
+      await collectStructuredResponse(
+        provider,
+        request(),
+        (raw) => ({ ok: true, data: JSON.parse(raw) as { a: number } }),
+        (usage, attempt) => seen.push({ inputTokens: usage.inputTokens, attempt })
+      )
+      expect(seen).toEqual([{ inputTokens: 1200, attempt: 1 }])
+    })
+
+    it('still reports spend when the payload fails to parse', async () => {
+      // The tokens were charged regardless of whether the JSON was usable —
+      // a parse failure must not make the spend invisible.
+      const provider = fakeProvider([
+        { type: 'text', text: 'not json' },
+        { type: 'done', usage: { inputTokens: 800, outputTokens: 40 } }
+      ])
+      const seen: number[] = []
+      const result = await collectStructuredResponse<{ a: number }>(
+        provider,
+        request(),
+        () => ({ ok: false, error: 'bad payload' }),
+        (usage) => seen.push(usage.inputTokens ?? 0)
+      )
+      expect(result.ok).toBe(false)
+      expect(seen).toEqual([800])
+    })
+
+    it('does not fire when the provider reported no usage', async () => {
+      const provider = fakeProvider([{ type: 'text', text: '{"a":1}' }, { type: 'done' }])
+      const seen: unknown[] = []
+      await collectStructuredResponse(
+        provider,
+        request(),
+        (raw) => ({ ok: true, data: JSON.parse(raw) as { a: number } }),
+        (usage) => seen.push(usage)
+      )
+      expect(seen).toEqual([])
+    })
+  })
 })

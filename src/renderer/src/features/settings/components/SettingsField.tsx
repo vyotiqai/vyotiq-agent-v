@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import { FormCard, FormGroup, FormGroupLabel, FormRow, FormStack } from '@renderer/lib/ui'
+import { FormCard, FormGroup, FormRow, FormStack } from '@renderer/lib/ui'
+import type { SettingReset } from '../hooks/useSettingsForm'
 
 /**
  * Settings-named view of the shared form grammar in `lib/ui/FormRow`.
@@ -24,10 +25,6 @@ export function SettingsStack({
   return <FormStack className={className}>{children}</FormStack>
 }
 
-export function SettingsGroupLabel({ children }: { children: ReactNode }) {
-  return <FormGroupLabel>{children}</FormGroupLabel>
-}
-
 export function SettingsCard({
   children,
   className
@@ -42,13 +39,56 @@ export function SettingsCard({
   )
 }
 
-/** Group label + card. Pass `title` for the muted heading above the card. */
-export function SettingsGroup({ title, children }: { title?: string; children: ReactNode }) {
+/** A caps label over ruled rows; `description` is the note beside the label. */
+export function SettingsGroup({
+  title,
+  description,
+  fieldId,
+  plain,
+  children
+}: {
+  title?: string
+  /** One line beside the label, for what the rows share. */
+  description?: string
+  /**
+   * Makes the group a search target, for groups whose rows are data rather
+   * than settings of their own (one per workspace, one per provider).
+   */
+  fieldId?: string
+  /** One block rather than rows — a picker, a meter — so nothing rules it. */
+  plain?: boolean
+  children: ReactNode
+}) {
   return (
-    <FormGroup title={title} cardDataAttribute={CARD_ATTRIBUTE}>
+    <FormGroup
+      title={title}
+      description={description}
+      cardDataAttribute={CARD_ATTRIBUTE}
+      anchor={fieldId ? { attribute: FIELD_ATTRIBUTE, id: fieldId } : undefined}
+      plain={plain}
+    >
       {children}
     </FormGroup>
   )
+}
+
+export type SettingsFieldLayout = {
+  /** Short one-liner shown under the title. */
+  hint?: ReactNode
+  /** Longer technical copy shown in a ? tooltip. */
+  help?: string
+  /** Marker after the title — see `workspaceBadge`. */
+  badge?: ReactNode
+  /** Indented under the row above it: a limit that belongs to that switch. */
+  nested?: boolean
+  /** Set away from its default — see `form.defaultMark`. */
+  changed?: boolean
+  /** Puts it back to its default. */
+  onReset?: () => void
+  /** What `onReset` writes, so Reset section can merge every row into one save. */
+  resetTo?: SettingReset
+  /** More under the row, full width: chips, a progress bar, a short list. */
+  below?: ReactNode
 }
 
 export function SettingsField({
@@ -56,23 +96,25 @@ export function SettingsField({
   title,
   hint,
   help,
+  badge,
+  nested = false,
+  changed,
+  onReset,
+  resetTo,
+  below,
   wide = false,
   children,
   className
-}: {
+}: SettingsFieldLayout & {
   /** Stable field id for search scroll/highlight (`data-settings-field`). */
   id: string
   title: string
-  /** Short one-liner shown under the title. */
-  hint?: string
-  /** Longer technical copy shown in a ? tooltip. */
-  help?: string
   /**
    * Full-width control under the title (accordions, textareas, lists).
-   * Default is Cursor-style: copy left, control right.
+   * Default is copy left, control right.
    */
   wide?: boolean
-  children: ReactNode
+  children?: ReactNode
   className?: string
 }) {
   return (
@@ -81,9 +123,63 @@ export function SettingsField({
       title={title}
       hint={hint}
       help={help}
+      badge={badge}
+      indent={nested}
       wide={wide}
+      changed={changed}
+      onReset={onReset}
+      resetToken={resetTo}
+      below={below}
       className={className}
       dataAttribute={FIELD_ATTRIBUTE}
+    >
+      {children}
+    </FormRow>
+  )
+}
+
+/**
+ * A row of data rather than a setting of its own — one per workspace, per
+ * provider, per model. Same layout as `SettingsField`, but no search target:
+ * the rows come and go with what is on disk, so search lands on their group
+ * (`SettingsGroup fieldId`) instead.
+ */
+export function SettingsItem({
+  id,
+  title,
+  hint,
+  help,
+  badge,
+  nested = false,
+  changed,
+  onReset,
+  resetTo,
+  below,
+  wide = false,
+  children,
+  className
+}: SettingsFieldLayout & {
+  id: string
+  title: string
+  wide?: boolean
+  children?: ReactNode
+  className?: string
+}) {
+  return (
+    <FormRow
+      id={id}
+      title={title}
+      hint={hint}
+      help={help}
+      badge={badge}
+      indent={nested}
+      wide={wide}
+      changed={changed}
+      onReset={onReset}
+      resetToken={resetTo}
+      below={below}
+      className={className}
+      dataAttribute="data-settings-item"
     >
       {children}
     </FormRow>

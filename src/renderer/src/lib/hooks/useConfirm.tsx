@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type JSX, type ReactNode } from 'react'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
+import { Button } from '@renderer/lib/ui'
 
 type ConfirmState = {
   message: string
@@ -62,30 +63,22 @@ export function useConfirm(): {
       onClose={() => finish(false)}
       title={state?.title ?? 'Confirm action'}
       useNativeDialog={false}
-      className="w-[min(92vw,28rem)] rounded-xl border border-border bg-surface text-fg shadow-menu"
+      className="vy-menu w-[min(92vw,28rem)] text-fg"
     >
       <div className="flex flex-col gap-4">
         <p className="m-0 text-sm text-fg">{state?.message}</p>
         {state?.details ? <div className="min-h-0">{state.details}</div> : null}
         <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            className="rounded-md px-3 py-1.5 text-xs text-muted hover:bg-surface-2"
-            onClick={() => finish(false)}
-          >
+          <Button size="sm" variant="ghost" onClick={() => finish(false)}>
             Cancel
-          </button>
-          <button
-            type="button"
-            className={
-              state?.danger
-                ? 'rounded-md bg-danger px-3 py-1.5 text-xs text-white hover:opacity-90'
-                : 'rounded-md bg-accent px-3 py-1.5 text-xs text-accent-fg hover:bg-accent/90'
-            }
+          </Button>
+          <Button
+            size="sm"
+            variant={state?.danger ? 'danger' : 'primary'}
             onClick={() => finish(true)}
           >
             {state?.confirmLabel ?? 'Confirm'}
-          </button>
+          </Button>
         </div>
       </div>
     </Dialog>

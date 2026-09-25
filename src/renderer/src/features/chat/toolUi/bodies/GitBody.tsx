@@ -73,7 +73,7 @@ export function GitDiffBody({ tool, expanded, loading, loadFailed, inGroup }: To
     <div aria-busy={loading || undefined}>
       {showMeta ? (
         <div
-          className={`${TOOL_BODY_PAD} flex flex-wrap items-center gap-2 border-b border-border pb-2`}
+          className={`${TOOL_BODY_PAD} flex flex-wrap items-center gap-2 border-b border-border/40 pb-2`}
         >
           {data.path ? (
             <span className="inline-flex min-w-0 items-center gap-1.5">

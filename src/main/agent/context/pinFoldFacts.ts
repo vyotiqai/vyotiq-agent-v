@@ -13,7 +13,10 @@ export type PinnedFoldFacts = {
 }
 
 const PINNED_HEADING = 'Pinned Facts'
-const PINNED_APPENDIX_RE = /\n*##\s+Pinned Facts\s*\n[\s\S]*$/i
+const PINNED_HEADING_RE = /^[ \t]*##[ \t]+Pinned Facts[ \t]*$/i
+/** A pinned-facts body line: one `- `/`* ` bullet. */
+const PINNED_BULLET_RE = /^[ \t]*[-*][ \t]/
+const BLANK_LINE_RE = /^[ \t]*$/
 
 const CAPS = {
   files: 64,
@@ -118,8 +121,38 @@ export function mergeFoldFacts(base: FoldFacts | undefined, extra: FoldFacts): F
   }
 }
 
-function stripPinnedAppendix(summary: string): string {
-  return summary.replace(PINNED_APPENDIX_RE, '').trimEnd()
+/**
+ * Drop every pinned-facts appendix, leaving the model's own narrative. Callers
+ * re-pin the *current* fact set, so one block survives and it is never stale.
+ *
+ * Scoped to the heading plus its bullet run. The end-anchored regex this
+ * replaces deleted everything after the first appendix, which on a rolling fold
+ * (`<prior summary>` + `---` + `<new summary>`, prior carrying its own
+ * appendix) threw away the new narrative — after fold #2 a run kept only fold
+ * #1's prose plus a bullet list.
+ */
+export function stripPinnedFactsAppendix(summary: string): string {
+  if (!summary.includes(PINNED_HEADING)) return summary
+  const lines = summary.split(/\r?\n/)
+  const kept: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    if (!PINNED_HEADING_RE.test(lines[i]!)) {
+      kept.push(lines[i]!)
+      continue
+    }
+    // Consume the bullet run (blank lines between bullets included), then rewind
+    // to the last bullet so blank lines *after* the block keep separating it
+    // from whatever follows.
+    let last = i
+    let scan = i + 1
+    while (scan < lines.length) {
+      if (PINNED_BULLET_RE.test(lines[scan]!)) last = scan
+      else if (!BLANK_LINE_RE.test(lines[scan]!)) break
+      scan++
+    }
+    i = last
+  }
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 function missingLines(facts: FoldFacts, summary: string): string[] {
@@ -156,7 +189,7 @@ function missingLines(facts: FoldFacts, summary: string): string[] {
  * left in place so the verifier can still reject hallucinations.
  */
 export function pinFoldFacts(summary: string, facts: FoldFacts): string {
-  const body = stripPinnedAppendix(summary)
+  const body = stripPinnedFactsAppendix(summary)
   const lines = missingLines(facts, body)
   if (lines.length === 0) return body
   return `${body}\n\n## ${PINNED_HEADING}\n${lines.join('\n')}`

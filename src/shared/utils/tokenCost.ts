@@ -244,7 +244,7 @@ export function evaluateTokenCostWarnings(input: {
   ) {
     out.push({
       kind: 'high_thinking_on_long_run',
-      message: `Thinking is enabled at high effort on step ${input.step} — reasoning tokens accumulate every step`
+      message: `Thinking is enabled at high effort or above on step ${input.step} — reasoning tokens accumulate every step`
     })
   }
   const billed = Math.max(0, input.billedInputTokens ?? 0)

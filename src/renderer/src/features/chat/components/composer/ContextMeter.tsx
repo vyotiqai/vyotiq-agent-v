@@ -59,8 +59,8 @@ const levelFill: Record<UsageLevel, string> = {
 
 const levelSoft: Record<UsageLevel, string> = {
   normal: 'bg-fg/10',
-  warning: 'bg-warning/12',
-  danger: 'bg-danger/12'
+  warning: 'bg-warning-soft',
+  danger: 'bg-danger-soft'
 }
 
 function formatPct(n: number, total: number): string {
@@ -71,7 +71,8 @@ function formatPct(n: number, total: number): string {
   return `${pct.toFixed(1)}%`
 }
 
-function usageMetrics(usage: ContextUsageState) {
+/** Ratio, percent and level for a usage snapshot — one source for every ring. */
+export function usageMetrics(usage: ContextUsageState) {
   const budget = Math.max(1, usage.contentWindow > 0 ? usage.contentWindow : usage.window)
   const overBudget = usage.used > budget || usage.overflow === true
   const ratio = Math.min(1, usage.used / budget)
@@ -116,7 +117,10 @@ function UsageRing({
           fill="none"
           stroke="currentColor"
           strokeWidth={stroke}
-          className="text-surface-2"
+          // The full circle must read as a track: on surface-2 it vanished
+          // into the composer and the lone round-capped arc looked like a
+          // loading spinner next to Stop.
+          className="text-border"
         />
         <circle
           cx={size / 2}
@@ -219,7 +223,7 @@ function BreakdownRow({
       type="button"
       onClick={onToggle}
       aria-expanded={expanded}
-      className="flex w-full items-center gap-2 rounded text-left vy-transition hover:bg-surface/60"
+      className="flex w-full items-center gap-2 rounded text-left vy-transition hover:bg-surface"
     >
       {row}
     </button>
@@ -351,6 +355,27 @@ function BreakdownRows({ usage }: { usage: ContextUsageState }) {
 }
 
 /** Latest-step cache hit share of provider input, or null when unknown. */
+/**
+ * The meter's words: how full the context is, of what, how much was cached,
+ * and whether a long-run tip waits inside. Shared by every place the meter
+ * opens from, so screen readers hear the same reading wherever it is.
+ */
+export function contextMeterLabels(
+  usage: ContextUsageState,
+  advisoryHint: string | null
+): { aria: string; title: string } {
+  const { budget, displayPct } = usageMetrics(usage)
+  const estimate = usage.source === 'estimate' ? '~' : ''
+  const used = formatTokens(usage.used)
+  const of = formatTokens(budget)
+  const hit = cacheHitPct(usage.stepUsage)
+  const tip = longRunTipCue(usage, advisoryHint)
+  return {
+    aria: `Context window ${displayPct}% full: ${estimate}${used} of ${of}${hit != null ? `. ${hit}% cached` : ''}.${tip ? ' Long-run tip available.' : ''} Open details.`,
+    title: `${estimate}${used} / ${of} (${displayPct}%)${hit != null ? ` · ${hit}% cached` : ''}`
+  }
+}
+
 export function cacheHitPct(totals: StepUsageTotals): number | null {
   if (totals.cachedInputTokens <= 0 || totals.inputTokens <= 0) return null
   return Math.round((totals.cachedInputTokens / totals.inputTokens) * 100)
@@ -386,7 +411,7 @@ function RunStat({
   )
 }
 
-function ContextMeterPanel({
+export function ContextMeterPanel({
   usage,
   onCompact,
   compacting,
@@ -471,7 +496,7 @@ function ContextMeterPanel({
         </div>
       </header>
 
-      <div className="sidebar-scroll min-h-0 flex-1 overflow-y-auto border-t border-border px-3.5 py-3">
+      <div className="sidebar-scroll min-h-0 flex-1 overflow-y-auto border-t border-border/40 px-3.5 py-3">
         {overBudget ? (
           <p className="m-0 mb-3 rounded-lg bg-danger/10 px-2.5 py-2 text-3xs leading-snug text-danger" role="alert">
             {usage.overflow
@@ -578,7 +603,7 @@ function ContextMeterPanel({
       </div>
 
       {onCompact ? (
-        <footer className="shrink-0 border-t border-border p-3">
+        <footer className="shrink-0 border-t border-border/40 p-3">
           <button
             type="button"
             onClick={onCompact}
@@ -588,7 +613,7 @@ function ContextMeterPanel({
                 ? 'Unavailable while the agent is running'
                 : compacting
                   ? 'Compacting…'
-                  : 'Summarize older history'
+                  : 'Summarise older history'
             }
             className={cn(
               'flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium vy-transition',
@@ -675,12 +700,8 @@ export function ContextMeter({
     return null
   }
 
-  const { budget, overBudget, ratio, displayPct, level } = usageMetrics(alignedUsage)
-  const estimate = alignedUsage.source === 'estimate'
-  const usedLabel = formatTokens(alignedUsage.used)
-  const budgetLabel = formatTokens(budget)
-  const hitPct = cacheHitPct(alignedUsage.stepUsage)
-  const tipCue = longRunTipCue(alignedUsage, advisoryHint)
+  const { overBudget, ratio, level } = usageMetrics(alignedUsage)
+  const labels = contextMeterLabels(alignedUsage, advisoryHint)
 
   const panelLayout =
     open && position
@@ -708,16 +729,18 @@ export function ContextMeter({
         type="button"
         className={cn(
           'inline-grid size-7 shrink-0 place-items-center rounded-md vy-transition',
+          // One state's classes at a time: appended, the open state's text-fg lost to text-muted.
           overBudget
-            ? cn(levelSoft.danger, levelRing.danger, 'hover:bg-danger/15')
-            : 'text-muted hover:bg-surface hover:text-fg',
-          open && (overBudget ? 'bg-danger/15' : 'bg-surface text-fg')
+            ? cn(levelSoft.danger, levelRing.danger)
+            : open
+              ? 'bg-surface text-fg'
+              : 'text-muted hover:bg-surface hover:text-fg'
         )}
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-controls={open ? panelId : undefined}
-        aria-label={`Context window ${displayPct}% full: ${estimate ? '~' : ''}${usedLabel} of ${budgetLabel}${hitPct != null ? `. ${hitPct}% cached` : ''}.${tipCue ? ' Long-run tip available.' : ''} Open details.`}
-        title={`${estimate ? '~' : ''}${usedLabel} / ${budgetLabel} (${displayPct}%)${hitPct != null ? ` · ${hitPct}% cached` : ''}`}
+        aria-label={labels.aria}
+        title={labels.title}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setOpen((v) => !v)}
       >

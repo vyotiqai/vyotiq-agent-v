@@ -1,6 +1,15 @@
-import { useEffect, useId, useMemo, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useMemo, useState, type KeyboardEvent, type Ref } from 'react'
 import { useRovingTabIndex } from '@renderer/lib/a11y'
-import { SearchInput } from '@renderer/lib/ui'
+import {
+  MENU_ROW,
+  MENU_ROW_ACTIVE,
+  MENU_ROW_IDLE,
+  MENU_ROW_TEXT,
+  MENU_SURFACE,
+  MENU_SURFACE_SCROLL,
+  SearchInput,
+  cn
+} from '@renderer/lib/ui'
 import type { SettingsSection } from '../types'
 import { SECTION_LABELS } from '../constants'
 import {
@@ -9,17 +18,24 @@ import {
   type SettingsSearchEntry
 } from '../settingsSearchIndex'
 
+/**
+ * "Search settings" at the top of the index. `/` focuses it (see
+ * SettingsView); the results drop over the section list, and picking one
+ * opens its section and flashes the row.
+ */
 export function SettingsSearch({
   section,
   onSectionChange,
   onRevealField,
-  onClose
+  onClose,
+  inputRef
 }: {
   section: SettingsSection
   onSectionChange: (section: SettingsSection) => void
   /** Expand a nested control (e.g. provider accordion) before scrolling to it. */
   onRevealField?: (fieldId: string) => void
   onClose?: () => void
+  inputRef?: Ref<HTMLInputElement>
 }) {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
@@ -80,8 +96,11 @@ export function SettingsSearch({
   }
 
   return (
-    <div className="relative min-w-0 w-full max-w-xl">
+    <div className="relative w-full min-w-0">
       <SearchInput
+        ref={inputRef}
+        size="sm"
+        keys={['/']}
         aria-label="Search settings"
         placeholder="Search settings"
         value={query}
@@ -99,7 +118,7 @@ export function SettingsSearch({
       {query.trim() && visibleMatches.length > 0 ? (
         <ul
           id={listId}
-          className="absolute z-dropdown m-0 mt-1 max-h-56 w-full list-none overflow-auto rounded-md border border-border bg-card p-1 shadow-menu animate-menu-in origin-top"
+          className={cn(MENU_SURFACE_SCROLL, 'absolute inset-x-0 m-0 mt-1 max-h-72 origin-top list-none p-1')}
           role="listbox"
           aria-label="Settings search results"
           onKeyDown={onContainerKeyDown}
@@ -113,22 +132,22 @@ export function SettingsSearch({
                 aria-selected={index === activeIndex}
                 ref={setOptionRef(index)}
                 tabIndex={tabIndexFor(index)}
-                className="flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-xs text-fg hover:bg-surface-2"
+                // Focus stays in the search box while arrows move the active
+                // option, so the option has to show it itself — the way Menu
+                // marks its active row.
+                className={cn(MENU_ROW, MENU_ROW_TEXT, index === activeIndex ? MENU_ROW_ACTIVE : MENU_ROW_IDLE)}
                 onClick={() => goTo(entry)}
                 onMouseEnter={() => setActiveIndex(index)}
               >
-                <span className="min-w-0 truncate">{entry.title}</span>
-                <span className="shrink-0 text-muted">{SECTION_LABELS[entry.section].title}</span>
+                <span className="min-w-0 flex-1 truncate text-xs">{entry.title}</span>
+                <span className="shrink-0 text-caption text-tertiary">{SECTION_LABELS[entry.section]}</span>
               </button>
             </li>
           ))}
         </ul>
       ) : null}
       {query.trim() && matches.length === 0 ? (
-        <p
-          className="absolute z-dropdown m-0 mt-1 w-full rounded-md border border-border bg-card px-2 py-1.5 text-xs text-muted shadow-menu"
-          role="status"
-        >
+        <p className={cn(MENU_SURFACE, 'absolute inset-x-0 m-0 mt-1 px-2 py-1.5 text-xs text-muted')} role="status">
           No matching settings.
         </p>
       ) : null}

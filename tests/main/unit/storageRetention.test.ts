@@ -399,6 +399,8 @@ describe('collectStorageReport (rollup math + orphan flags)', () => {
     writeWithAge(join(userDataRoot, 'logs', 'main.log'), 250, 0)
     mkdirSync(join(userDataRoot, 'dictation', 'models'), { recursive: true })
     writeWithAge(join(userDataRoot, 'dictation', 'models', 'model.bin'), 500, 0)
+    mkdirSync(join(userDataRoot, 'embed', 'models'), { recursive: true })
+    writeWithAge(join(userDataRoot, 'embed', 'models', 'model_quantized.onnx'), 700, 0)
 
     const report = await collectStorageReport()
 
@@ -410,6 +412,9 @@ describe('collectStorageReport (rollup math + orphan flags)', () => {
     // Report-only categories are measured but excluded from the managed set.
     expect(byId.get('dictation-models')?.managed).toBe(false)
     expect(byId.get('logs')?.managed).toBe(true)
+    // The code-search embedding model is reported too — Settings → Storage
+    // names it — but, like dictation models, is never evicted.
+    expect(byId.get('embed-models')).toMatchObject({ bytes: 700, managed: false })
 
     const orphan = report.workspaces.find((w) => w.workspaceId === 'wid-orphan')
     expect(orphan).toBeDefined()
@@ -556,6 +561,27 @@ describe('confirm-gated cleanup flow', () => {
     // Token is single-use.
     resetPendingCleanupTokenForTests()
     await expect(runStorageCleanup(preview.confirm.token)).rejects.toThrow(/expired/)
+  })
+
+  it('previews the old sessions a run deletes, with automatic retention off', async () => {
+    // The default: the automatic sweep is off, but Free up space still
+    // applies the session limits — so its confirmation has to list them.
+    ackedSettings({ sessionRetentionEnabled: false, sessionKeepCount: 1, sessionMaxAgeDays: 30 })
+    makeStorageId('wid-a')
+    mockWorkspacesState.workspaceIdsByPath = { 'C:\\proj\\a': 'wid-a' }
+    const old = makeSession('wid-a', 'run-old', { ageDays: 90, transcriptBytes: 300 })
+    const kept = makeSession('wid-a', 'run-new', { ageDays: 5 })
+
+    const preview = await previewStorageCleanup()
+    const previewed = preview.categories.find((c) => c.id === 'sessions')
+    expect(previewed).toMatchObject({ items: 1 })
+    expect(previewed!.reclaimBytes).toBeGreaterThanOrEqual(300)
+    expect(existsSync(old)).toBe(true)
+
+    const result = await runStorageCleanup(preview.confirm.token)
+    expect(result.categories.find((c) => c.id === 'sessions')).toEqual(previewed)
+    expect(existsSync(old)).toBe(false)
+    expect(existsSync(kept)).toBe(true)
   })
 
   it('never reaps an orphan that became tracked between preview and run', async () => {

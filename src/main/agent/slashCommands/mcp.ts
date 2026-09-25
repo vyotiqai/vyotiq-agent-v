@@ -93,7 +93,7 @@ export function listMcpCommands(
       label: server.name || server.id,
       description: errHint
         ? `MCP server — ${errHint}`
-        : 'MCP server — connect in Marketplace to use tools',
+        : 'MCP server — connect in Extensions to use tools',
       kind: 'mcp',
       group: 'MCP',
       availability,

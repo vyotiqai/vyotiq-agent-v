@@ -7,15 +7,6 @@ import { toolMessageForIpc } from '../../shared/utils/toolResultIpc'
 import { computeToolCatalog, notifyToolCatalogChanged } from '../agent/toolsCatalog'
 import {
   ChatStartRequestSchema,
-  AgentProfileCreateRequestSchema,
-  AgentProfileUpdateRequestSchema,
-  AgentProfileDeleteRequestSchema,
-  AgentProfileOverridesListRequestSchema,
-  AgentProfileOverrideSetRequestSchema,
-  type AgentProfileDeleteResult,
-  TaskEnqueueRequestSchema,
-  TaskCancelRequestSchema,
-  TaskRetryRequestSchema,
   ChatUiSubscribeRequestSchema,
   ChatUiSubscribeAddRequestSchema,
   ComposerAttachmentsClearRequestSchema,
@@ -32,6 +23,11 @@ import {
   CompactRunRequestSchema,
   ResolveWritesRequestSchema,
   ReadRunArtifactRequestSchema,
+  OpenRunArtifactRequestSchema,
+  TaskFileStatsRequestSchema,
+  TaskFileDiffRequestSchema,
+  type TaskFileStatsResult,
+  type TaskFileDiffResult,
   RunStatsRequestSchema,
   HomeActivityRequestSchema,
   HarnessReviewRequestSchema,
@@ -65,6 +61,7 @@ import {
   WorkspacesUpdateUiStateRequestSchema,
   WorkspacesSetSettingsOverrideRequestSchema,
   GitStatusRequestSchema,
+  GitInitRequestSchema,
   GitGenerateCommitMessageRequestSchema,
   GitCommitRequestSchema,
   GitStageAllRequestSchema,
@@ -73,6 +70,8 @@ import {
   GitBranchesRequestSchema,
   GitCheckoutRequestSchema,
   GitDiffRequestSchema,
+  GitBranchDiffRequestSchema,
+  type GitBranchDiffResult,
   GitBlameRequestSchema,
   GitLogRequestSchema,
   GitCommitFilesRequestSchema,
@@ -81,6 +80,7 @@ import {
   PrMergeRequestSchema,
   PrDiffRequestSchema,
   PrCloseRequestSchema,
+  PrReadyRequestSchema,
   PrEditTitleRequestSchema,
   ShellOpenExternalRequestSchema,
   PtyCreateRequestSchema,
@@ -155,6 +155,8 @@ import {
   SkillsWriteLocalRequestSchema,
   SkillsDeleteLocalRequestSchema,
   CodeIndexReindexRequestSchema,
+  CodeIndexPauseRequestSchema,
+  DEFAULT_SETTINGS,
   StorageCleanupPreviewRequestSchema,
   StorageCleanupRunRequestSchema,
   StorageSurfaceAckRequestSchema,
@@ -225,6 +227,7 @@ import {
   type ActiveRunsResult,
   type GitStatusResult,
   type GitCommitResult,
+  type GitInitResult,
   type AgentBrowserState,
   BrowserNavigateRequestSchema,
   BrowserWorkspaceScopeSchema,
@@ -252,8 +255,8 @@ import { logger, logErrorSummary } from '../../shared/logger'
 import { pickWorkspace } from '@main/workspace/workspace'
 import { consumePendingDeepLink } from '@main/app/deepLinks'
 import { resolveInsideWorkspace } from '@main/workspace/safePath'
-import { getSettings, setSettings, setMarketplaceRemoteInstallAcked, redactSettingsForIpc, enqueueSettingsMutation } from '@main/settings/settings'
-import { syncMcpServers, getMcpServerStatus, mcpStatusExtras, refreshMcpServers, startMcpOAuth, setMcpStdioWorkspace } from '@main/agent/mcp'
+import { getSettings, setSettings, setMarketplaceRemoteInstallAcked, redactSettingsForIpc, enqueueSettingsMutation, onSettingsWritten } from '@main/settings/settings'
+import { syncMcpServers, getMcpServerStatus, mcpStatusExtras, refreshMcpServers, retryFailedMcpServers, startMcpOAuth, setMcpStdioWorkspace } from '@main/agent/mcp'
 import { isExecutableMcpBinary } from '@main/agent/mcp/binaries'
 import { headersWithoutAuthorization } from '../../shared/utils/mcpAuth'
 import {
@@ -274,7 +277,7 @@ import {
   invalidateMcpResolveCache
 } from '@main/marketplace'
 import {
-  listSlashCommands,
+  listSlashMenu,
   resolveSlashCommand,
   createWorkspaceRule,
   createWorkspaceSkill,
@@ -311,9 +314,9 @@ import {
   clearGoogleMcpClientSecret,
   enqueueSecretsMutation
 } from '@main/settings/secrets'
-import { getChatEventDispatcher, setChatEventUiSubscriptions, addChatEventUiSubscription } from './streamBatch'
+import { getChatEventDispatcher, setChatEventUiSubscriptions, addChatEventUiSubscription, setChatEventActivePathResolver } from './streamBatch'
 import { installIpcTiming, timeSyncIpc } from '../perf/ipcTiming'
-import { createRunId, validateExistingRunStart } from '../agent/loop'
+import { createRunId } from '../agent/loop'
 import { hydrateRunFollowUps, startAgentRunInBackground } from '../agent/startAgentRun'
 import { launchRun } from '../agent/launchRun'
 import {
@@ -322,6 +325,7 @@ import {
   CompactionVerifyFailedError
 } from '../agent/compactRun'
 import { resolveWrites, getWriteCheckpointMeta } from '../agent/checkpoints'
+import { taskFileDiff, taskFileStats } from '../agent/taskFileDiff'
 import {
   prepareRewindAndReplaceUserMessage,
   prepareRewindToUserMessage,
@@ -337,20 +341,6 @@ import {
 } from '@main/storage/retention'
 import { collectRunStats } from '../agent/runStats'
 import { collectHomeActivity } from '../agent/activityStats'
-import {
-  listAgentProfiles,
-  createAgentProfile,
-  updateAgentProfile,
-  deleteAgentProfile,
-  getAgentProfile,
-  emitAgentProfilesChanged,
-  mutateAgentProfiles,
-  removeProfileArtifactsForWorkspaces,
-  listWorkspaceProfileOverrides,
-  writeWorkspaceProfileOverride,
-  emitAgentProfileOverridesChanged
-} from '../settings/agentProfiles'
-import { listTasks, enqueueTask, cancelTask, retryTask, resumeTasksForWorkspaces, cancelTasksForProfile } from '../agent/taskScheduler'
   import { focusAgentBrowser, closeAgentBrowser, getAgentBrowserState, selectBrowserTab, browserGoBack, browserGoForward, setAgentBrowserBounds, navigateUrl, clearAgentBrowserData, takeBrowserScreenshot, disposeAgentBrowserForWorkspace, takeBrowserControl, releaseBrowserControl, manageTabs, toggleAgentBrowserPip } from '@main/app/agentBrowser'
 import { extractAttachment } from '../attachments/extract'
 import {
@@ -371,21 +361,27 @@ import {
 } from '../agent/agentQuestion'
 import { listProviderModels } from '../agent/providers'
 import { clearModelCache } from '../agent/providers/modelCache'
-import { collectWorkspaceFiles } from '../agent/tools/walk'
 import {
   disposeWorkspaceIndexes,
+  pauseWorkspaceIndexes,
   scheduleWorkspaceIndexSync,
   warmWorkspaceIndexes,
   workspaceIndexAbortSignal
 } from '../agent/workspaceIndex'
 import {
   onCodeIndexRuntimeStatus,
+  closeCodeIndexStore,
   getCodeIndexRuntimeStatus,
+  isCodeIndexPaused,
   reindexCodeIndex
 } from '@main/agent/codeindex'
 import { pruneStaleInstanceWorktreesBestEffort } from '../git/instanceWorktree'
 import { listWorkspaceRulesForMention, clearRulesCache, isRuleRelatedRelPath } from '../agent/context/rules'
 import { buildWorkspaceAgentContext } from '../agent/context/agentContext'
+import {
+  armAgentContextWatch,
+  stopAgentContextWatch
+} from '../agent/context/agentContextWatcher'
 import { toolDiagnosticsAsync } from '../agent/tools/diagnostics'
 import { disposeTerminalSessionsForWorkspace as disposeAgentTerminalSessionsForWorkspace } from '../agent/tools/terminalSessions'
 import {
@@ -407,6 +403,8 @@ import {
   followUpPreview,
   getRunWorkspace
 } from '../agent/runRegistry'
+import { invalidateListRunsCache } from '../agent/runListCache'
+import { listActiveRunsView } from '../agent/activeRunView'
 import {
   loadFollowUpPreviews,
   syncFollowUpsToDisk,
@@ -438,8 +436,27 @@ import { emitGoalUpdate } from '../agent/goalEvents'
 import { armLoop, disarmLoop, readLoop } from '../agent/runLoopScheduler'
 import { launchRunFollowUpOrStart } from '../agent/launchRunInvoke'
 import { formatGoalContinueMessage } from '../../shared/goalRuntime'
+import { deleteTaskDraft, listTaskDrafts, saveTaskDraft } from '../drafts/taskDrafts'
+import { discardRewindRedo, redoRewind, rewindRedoStatus } from '../agent/rewindRedo'
+import { createTaskWorktree, discardTaskWorktree, mergeTaskWorktree, taskWorktreeInfo } from '../git/taskWorktrees'
+import {
+  TaskWorktreeCreateRequestSchema,
+  TaskWorktreeMergeRequestSchema,
+  TaskWorktreePathRequestSchema,
+  type TaskWorktree,
+  type TaskWorktreeInfo,
+  type TaskWorktreeMergeResult,
+  RewindRedoRequestSchema,
+  type RewindRedoStatus,
+  TaskDraftDeleteRequestSchema,
+  TaskDraftSaveRequestSchema,
+  TaskDraftsListRequestSchema,
+  type TaskDraft,
+  type TaskDraftsListResult
+} from '../../shared/ipc'
 import {
   getWorkspaces,
+  getHomeWorkspacePath,
   addWorkspace,
   removeWorkspace,
   setActiveWorkspace,
@@ -453,10 +470,12 @@ import { relative, isAbsolute, join, resolve } from 'path'
 import {
   checkoutBranch,
   commitAll,
+  initGitRepo,
   listLocalBranches,
   readGitCommitFiles,
   readGitBlame,
   readGitDiff,
+  readBranchDiff,
   readGitLog,
   stageAll,
   stagePaths,
@@ -469,6 +488,7 @@ import { emitGitStatusChanged } from '@main/git/gitStatusEvents'
 import { generateCommitMessage } from '@main/git/commitMessage'
 import {
   prClose,
+  prReady,
   prCreate,
   prCreateFromChanges,
   prDiff,
@@ -539,6 +559,10 @@ import {
   statWorkspaceFile,
   WorkspaceFileError
 } from '@main/workspace/fileService'
+import {
+  invalidateWorkspaceFileListCache,
+  readWorkspaceFileListCached
+} from '@main/workspace/fileListCache'
 import {
   formatWorkspaceFile,
   workspaceFormatterStatus
@@ -674,7 +698,10 @@ function isExpectedIpcFailure(err: unknown): boolean {
     return true
   }
   const msg = formatError(err)
-  return /no undoable write checkpoint|nothing to undo|no editable harness|already undone|already resolved|checkpoint not found|invalid checkpoint|no harness proposal found|missing a ## Proposed harness body|requires confirm|no git remote|no git remotes|no default remote|not a git repository|unable to determine base repository|could not determine base repository|no initial commit/i.test(
+  // A refusal the user can cause (nothing left to undo, no git remote, a
+  // workspace closed under a window that still offers the control) is
+  // IPC_CLIENT, not a handler fault to capture as an exception.
+  return /no undoable write checkpoint|nothing to undo|no editable harness|already undone|already resolved|checkpoint not found|invalid checkpoint|no harness proposal found|missing a ## Proposed harness body|requires confirm|no git remote|no git remotes|no default remote|not a git repository|unable to determine base repository|could not determine base repository|no initial commit|^workspace is not open$/i.test(
     msg
   )
 }
@@ -803,6 +830,38 @@ function getTraceCapture(): ReturnType<typeof getTraceAutoCapture>['capture'] {
 export function registerIpc(): void {
   installIpcTiming()
 
+  // The chat stream batcher's active-workspace lookup (it cannot import
+  // workspaces itself without a cycle).
+  setChatEventActivePathResolver(() => getWorkspaces().activePath)
+
+  // What settings.ts once did with lazy requires the one-file bundle could
+  // never resolve: close the code index when it is switched off, and clear the
+  // MCP resolve cache when servers change.
+  onSettingsWritten((next, prev) => {
+    if ((prev.codeIndex?.enabled ?? true) !== (next.codeIndex?.enabled ?? true)) {
+      try {
+        closeCodeIndexStore()
+      } catch {
+        // no store open yet
+      }
+    }
+    if (JSON.stringify(next.mcpServers ?? []) !== JSON.stringify(prev.mcpServers ?? [])) invalidateMcpResolveCache()
+  })
+
+  // Every settings write reaches every window, main's own included ("Always
+  // allow" saving the allowlist mid-run), so no window shows a stale value.
+  onSettingsWritten((next) => {
+    const payload = redactSettingsForIpc(next)
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue
+      try {
+        win.webContents.send(IPC.settingsChanged, payload)
+      } catch {
+        /* ignore */
+      }
+    }
+  })
+
   // Push live code-index / embed progress to all renderer windows.
   onCodeIndexRuntimeStatus((status) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -863,6 +922,127 @@ export function registerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.taskDraftsList, async (event, raw): Promise<IpcResult<TaskDraftsListResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskDraftsListRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok({ drafts: await listTaskDrafts(req.workspacePath) })
+    } catch (err) {
+      return failFrom(err, IPC.taskDraftsList)
+    }
+  })
+
+  ipcMain.handle(IPC.taskDraftsSave, async (event, raw): Promise<IpcResult<TaskDraft>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskDraftSaveRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await saveTaskDraft(req))
+    } catch (err) {
+      return failFrom(err, IPC.taskDraftsSave)
+    }
+  })
+
+  ipcMain.handle(IPC.taskDraftsDelete, async (event, raw): Promise<IpcResult<boolean>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskDraftDeleteRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await deleteTaskDraft(req.workspacePath, req.id))
+    } catch (err) {
+      return failFrom(err, IPC.taskDraftsDelete)
+    }
+  })
+
+  ipcMain.handle(IPC.runRewindRedoStatus, async (event, raw): Promise<IpcResult<RewindRedoStatus>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = RewindRedoRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await rewindRedoStatus(req.workspacePath, req.runId))
+    } catch (err) {
+      return failFrom(err, IPC.runRewindRedoStatus)
+    }
+  })
+
+  ipcMain.handle(IPC.runRewindRedo, async (event, raw): Promise<IpcResult<{ messages: ChatMessage[] }>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = RewindRedoRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      const result = await redoRewind(req.workspacePath, req.runId)
+      invalidateGitStatusCache(req.workspacePath)
+      emitGitStatusChanged(req.workspacePath)
+      return ok(result)
+    } catch (err) {
+      return failFrom(err, IPC.runRewindRedo)
+    }
+  })
+
+  ipcMain.handle(IPC.taskWorktreeCreate, async (event, raw): Promise<IpcResult<TaskWorktree>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskWorktreeCreateRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await createTaskWorktree(req.workspacePath, req.brief))
+    } catch (err) {
+      return failFrom(err, IPC.taskWorktreeCreate)
+    }
+  })
+
+  ipcMain.handle(IPC.taskWorktreeInfo, async (event, raw): Promise<IpcResult<TaskWorktreeInfo | null>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskWorktreePathRequestSchema.parse(raw)
+      return ok(await taskWorktreeInfo(req.workspacePath))
+    } catch (err) {
+      return failFrom(err, IPC.taskWorktreeInfo)
+    }
+  })
+
+  ipcMain.handle(IPC.taskWorktreeMerge, async (event, raw): Promise<IpcResult<TaskWorktreeMergeResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskWorktreeMergeRequestSchema.parse(raw)
+      const result = await mergeTaskWorktree(req.workspacePath, req.message)
+      const info = await taskWorktreeInfo(req.workspacePath)
+      for (const path of [req.workspacePath, info?.parentPath]) {
+        if (!path) continue
+        invalidateGitStatusCache(path)
+        emitGitStatusChanged(path)
+      }
+      return ok(result)
+    } catch (err) {
+      return failFrom(err, IPC.taskWorktreeMerge)
+    }
+  })
+
+  ipcMain.handle(IPC.taskWorktreeDiscard, async (event, raw): Promise<IpcResult<true>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = TaskWorktreePathRequestSchema.parse(raw)
+      const info = await taskWorktreeInfo(req.workspacePath)
+      await discardTaskWorktree(req.workspacePath)
+      if (info?.parentPath) {
+        invalidateGitStatusCache(info.parentPath)
+        emitGitStatusChanged(info.parentPath)
+      }
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.taskWorktreeDiscard)
+    }
+  })
+
+  ipcMain.handle(IPC.workspacesHome, async (event): Promise<IpcResult<string>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      return ok(getHomeWorkspacePath())
+    } catch (err) {
+      return failFrom(err, IPC.workspacesHome)
+    }
+  })
+
   ipcMain.handle(
     IPC.workspacesAdd,
     async (event, raw): Promise<IpcResult<WorkspacesState>> => {
@@ -871,9 +1051,6 @@ export function registerIpc(): void {
         const req = WorkspacesAddRequestSchema.parse(raw ?? {})
         const win = BrowserWindow.fromWebContents(event.sender)
         const next = await addWorkspace(win, req.path)
-        // Load and arm the new workspace's persisted tasks (boot re-arm only
-        // covers workspaces open at startup).
-        if (req.path) await resumeTasksForWorkspaces([req.path])
         invalidateMcpResolveCache()
         await syncMcpServers(resolveMcpServersForSessionMap())
         notifyToolCatalogChanged()
@@ -916,6 +1093,8 @@ export function registerIpc(): void {
         // Same mutation queue as UI state / setActive — flushPersistUiState sync
         // IPC otherwise races remove and can rewrite openPaths from a stale read.
         disposeWorkspaceIndexes(path)
+        stopAgentContextWatch(path)
+        invalidateWorkspaceFileListCache(path)
         const next = await enqueueWorkspaceMutation(() => removeWorkspace(path))
         // Storage retention (audit H5): renderer-confirmed storage-dir delete
         // on workspace removal. Skip silently when the dir is gone already.
@@ -938,13 +1117,23 @@ export function registerIpc(): void {
       if (!senderOk(event)) return fail('Invalid sender')
       try {
         const { path } = WorkspacesSetActiveRequestSchema.parse(raw)
-        const state = await enqueueWorkspaceMutation(() => setActiveWorkspace(path))
+        let alreadyActive = false
+        const state = await enqueueWorkspaceMutation(() => {
+          const prev = getWorkspaces().activePath
+          alreadyActive = prev != null && workspacePathsEqual(prev, path)
+          return setActiveWorkspace(path)
+        })
         setMcpStdioWorkspace(path)
-        warmWorkspaceIndexes(path)
-        pruneStaleInstanceWorktreesBestEffort(
-          path,
-          new Set(listActiveRuns().map((run) => run.runId))
-        )
+        // Re-activating the workspace that is already active (the renderer's
+        // add-workspace handoff did, 2 s after add had warmed it) must not
+        // warm its index and prune its worktrees a second time.
+        if (!alreadyActive) {
+          warmWorkspaceIndexes(path)
+          pruneStaleInstanceWorktreesBestEffort(
+            path,
+            new Set(listActiveRuns().map((run) => run.runId))
+          )
+        }
         return ok(state)
       } catch (err) {
         return failFrom(err, IPC.workspacesSetActive)
@@ -1202,26 +1391,27 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.chatStart, async (event, raw): Promise<IpcResult<ChatStartResult>> => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
-      const req = ChatStartRequestSchema.parse(raw)
+      const { draftId, ...req } = ChatStartRequestSchema.parse(raw)
       // Everything from workspace validation to background start lives in the
       // shared launcher, so a chat send and a delegated task get an identical
       // sequence of checks. This handler owns only trust: schema and sender.
       const outcome = await launchRun({
         ...req,
-        // Read the parsed value, not key presence on `raw`: Electron's
-        // structured clone keeps own properties whose value is `undefined`,
-        // and the composer spells both keys out on every send — so presence
-        // marked every send as stating a binding, and the "absent field
-        // inherits the run's binding" contract never applied to chat at all.
-        explicit: {
-          agentProfileId: req.agentProfileId !== undefined,
-          runtime: req.runtime !== undefined
-        },
         wc: event.sender,
         source: IPC.chatStart
       })
       if (!outcome.ok) {
         return failExpected(outcome.error, IPC.chatStart, req.runId, outcome.code)
+      }
+      // A new instruction on a task ends what its last rewind kept for Redo.
+      if (req.runId) discardRewindRedo(req.workspacePath, req.runId)
+      // A task started from a draft: the draft is spent. Only after the run
+      // exists, so a refused start keeps it.
+      // Awaited, so the task list the renderer reads next no longer has it.
+      if (draftId) {
+        await deleteTaskDraft(req.workspacePath, draftId).catch((err: unknown) => {
+          logger.warn('Could not remove the draft a task started from', { scope: 'drafts', err })
+        })
       }
       return ok({ runId: outcome.runId, invokeId: outcome.invokeId })
     } catch (err) {
@@ -1231,184 +1421,6 @@ export function registerIpc(): void {
       // failure — which never reaches `req` — is correlated too.
       const rawRunId = (raw as { runId?: unknown } | null)?.runId
       return failFrom(err, IPC.chatStart, typeof rawRunId === 'string' ? rawRunId : undefined)
-    }
-  })
-
-  ipcMain.handle(IPC.agentProfilesList, async (event): Promise<IpcResult<ReturnType<typeof listAgentProfiles>>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    return ok(listAgentProfiles())
-  })
-
-  ipcMain.handle(IPC.agentProfilesCreate, async (event, raw): Promise<IpcResult<unknown>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = AgentProfileCreateRequestSchema.parse(raw)
-      const profile = await mutateAgentProfiles(() => createAgentProfile(req))
-      emitAgentProfilesChanged()
-      return ok(profile)
-    } catch (err) {
-      return failFrom(err, IPC.agentProfilesCreate)
-    }
-  })
-
-  ipcMain.handle(IPC.agentProfilesUpdate, async (event, raw): Promise<IpcResult<unknown>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = AgentProfileUpdateRequestSchema.parse(raw)
-      const profile = await mutateAgentProfiles(() => updateAgentProfile(req))
-      emitAgentProfilesChanged()
-      return ok(profile)
-    } catch (err) {
-      return failFrom(err, IPC.agentProfilesUpdate)
-    }
-  })
-
-  ipcMain.handle(
-    IPC.agentProfilesDelete,
-    async (event, raw): Promise<IpcResult<AgentProfileDeleteResult>> => {
-      if (!senderOk(event)) return fail('Invalid sender')
-      try {
-        const req = AgentProfileDeleteRequestSchema.parse(raw)
-        if (!getAgentProfile(req.id)) {
-          return failExpected(`Unknown agent profile: ${req.id}`, IPC.agentProfilesDelete)
-        }
-        // Cover every path this install knows (open, recent, persisted UI
-        // state), not just open ones — a closed workspace would otherwise keep
-        // running the dead identity's tasks and revive its override.
-        const knownPaths = new Set<string>([
-          ...getWorkspaces().openPaths,
-          ...getWorkspaces().recentPaths
-        ])
-        for (const path of Object.keys(getWorkspaces().uiStateByPath ?? {})) knownPaths.add(path)
-        const paths = [...knownPaths]
-        const warnings: string[] = []
-
-        // Preflight: end the teammate's work BEFORE the roster entry goes away.
-        // Committing first leaves a window where tasks and runs reference a
-        // profile that no longer resolves, and they then fail as "profile no
-        // longer exists" instead of being cancelled with the teammate.
-        let cancelledTasks = 0
-        try {
-          cancelledTasks = cancelTasksForProfile(req.id, paths)
-        } catch (err) {
-          warnings.push(
-            `Some delegated tasks could not be cancelled: ${err instanceof Error ? err.message : String(err)}`
-          )
-        }
-        let cancelledRuns = 0
-        for (const run of listActiveRuns()) {
-          if (run.agentProfileId !== req.id) continue
-          try {
-            if (cancelRun(run.runId)) cancelledRuns += 1
-          } catch (err) {
-            warnings.push(
-              `Run ${run.runId} could not be stopped: ${err instanceof Error ? err.message : String(err)}`
-            )
-          }
-        }
-
-        await mutateAgentProfiles(() => deleteAgentProfile(req))
-
-        // Behavior overrides must not survive to re-skin a future teammate.
-        // Run history and the private memory namespace are preserved — the id
-        // is retired instead of reused, so nothing can inherit them.
-        const artifacts = removeProfileArtifactsForWorkspaces(req.id, paths)
-        for (const failure of artifacts.failures) {
-          warnings.push(`Could not remove ${failure.path}: ${failure.error}`)
-        }
-        emitAgentProfilesChanged()
-        for (const path of getWorkspaces().openPaths) emitAgentProfileOverridesChanged(path)
-        return ok({ deleted: true as const, cancelledTasks, cancelledRuns, warnings })
-      } catch (err) {
-        return failFrom(err, IPC.agentProfilesDelete)
-      }
-    }
-  )
-
-  ipcMain.handle(
-    IPC.agentProfileOverridesList,
-    async (event, raw): Promise<IpcResult<unknown>> => {
-      if (!senderOk(event)) return fail('Invalid sender')
-      try {
-        const req = AgentProfileOverridesListRequestSchema.parse(raw)
-        if (!isOpenWorkspace(req.workspacePath)) {
-          return failExpected('Workspace is not open', IPC.agentProfileOverridesList)
-        }
-        return ok({
-          workspacePath: req.workspacePath,
-          overrides: listWorkspaceProfileOverrides(req.workspacePath)
-        })
-      } catch (err) {
-        return failFrom(err, IPC.agentProfileOverridesList)
-      }
-    }
-  )
-
-  ipcMain.handle(
-    IPC.agentProfileOverrideSet,
-    async (event, raw): Promise<IpcResult<unknown>> => {
-      if (!senderOk(event)) return fail('Invalid sender')
-      try {
-        const req = AgentProfileOverrideSetRequestSchema.parse(raw)
-        if (!isOpenWorkspace(req.workspacePath)) {
-          return failExpected('Workspace is not open', IPC.agentProfileOverrideSet)
-        }
-        // getAgentProfile, not resolveAgentProfile: an override whose current
-        // contents make the profile resolve oddly must still be editable, and
-        // the override file belongs to the global profile either way.
-        if (!getAgentProfile(req.profileId)) {
-          return failExpected(
-            `Unknown agent profile: ${req.profileId}`,
-            IPC.agentProfileOverrideSet
-          )
-        }
-        // Serialized with roster mutations so a write cannot interleave with a
-        // delete that is removing this same profile's artifacts.
-        const next = await mutateAgentProfiles(() =>
-          writeWorkspaceProfileOverride(req.workspacePath, req.profileId, req.override)
-        )
-        emitAgentProfileOverridesChanged(req.workspacePath)
-        return ok(next)
-      } catch (err) {
-        return failFrom(err, IPC.agentProfileOverrideSet)
-      }
-    }
-  )
-
-  ipcMain.handle(IPC.tasksList, async (event): Promise<IpcResult<ReturnType<typeof listTasks>>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    return ok(listTasks())
-  })
-
-  ipcMain.handle(IPC.tasksEnqueue, async (event, raw): Promise<IpcResult<unknown>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = TaskEnqueueRequestSchema.parse(raw)
-      return ok(enqueueTask(req))
-    } catch (err) {
-      return failFrom(err, IPC.tasksEnqueue)
-    }
-  })
-
-  ipcMain.handle(IPC.tasksCancel, async (event, raw): Promise<IpcResult<boolean>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = TaskCancelRequestSchema.parse(raw)
-      return ok(cancelTask(req.id))
-    } catch (err) {
-      return failFrom(err, IPC.tasksCancel)
-    }
-  })
-
-  ipcMain.handle(IPC.tasksRetry, async (event, raw): Promise<IpcResult<unknown>> => {
-    if (!senderOk(event)) return fail('Invalid sender')
-    try {
-      const req = TaskRetryRequestSchema.parse(raw)
-      // Explicit, user-initiated re-run only. Auto-retrying a delegated task
-      // would replay whatever side effects the previous attempt already had.
-      return ok(retryTask(req.id))
-    } catch (err) {
-      return failFrom(err, IPC.tasksRetry)
     }
   })
 
@@ -1442,11 +1454,7 @@ export function registerIpc(): void {
         // Register before mutating disk so a failed register cannot leave a
         // rewound transcript without a new invoke (matches chatStart ordering).
         const runId = req.runId
-        // Rewind requests carry no profile field; recover the run's durable
-        // teammate binding so the registry entry serves the one-run-per-teammate
-        // gate exactly like a normal resume.
-        const rewindProfileId = loadStatus(resolveRunDir(req.workspacePath, runId))?.agentProfileId
-        const registered = tryRegisterRunAbort(runId, req.workspacePath, rewindProfileId)
+        const registered = tryRegisterRunAbort(runId, req.workspacePath)
         if (!registered.ok) {
           return failExpected(registered.error, IPC.chatRewindAndStart, runId, registered.code)
         }
@@ -1465,7 +1473,9 @@ export function registerIpc(): void {
           clearRunAbort(runId, invokeId)
           throw err
         }
-        if (prepared.writes.restored.length > 0) {
+        // Not restored.length: a file the rewind took back only partway is
+        // listed as edited or skipped, and it was still written.
+        if (prepared.writes.checkpointIds.length > 0) {
           invalidateAfterWorkspaceMutation(req.workspacePath)
         }
 
@@ -1490,8 +1500,7 @@ export function registerIpc(): void {
             resume: true,
             mode: req.mode,
             provider: req.provider,
-            model: req.model,
-            modelExplicit: req.modelExplicit
+            model: req.model
           }
         })
 
@@ -1538,7 +1547,8 @@ export function registerIpc(): void {
         userMessageIndex: req.userMessageIndex,
         targetUserAt: req.targetUserAt
       })
-      if (prepared.writes.restored.length > 0) {
+      // Not restored.length — see chatRewindAndStart.
+      if (prepared.writes.checkpointIds.length > 0) {
         invalidateAfterWorkspaceMutation(req.workspacePath)
       }
 
@@ -1553,7 +1563,8 @@ export function registerIpc(): void {
       return ok({
         messages: prepared.messages,
         restored: prepared.writes.restored,
-        skipped: prepared.writes.skipped
+        skipped: prepared.writes.skipped,
+        edited: prepared.writes.edited
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -2040,6 +2051,8 @@ export function registerIpc(): void {
           paths: req.paths
         })
         persistWriteCheckpointEvent(runDir, req.runId, result.checkpointId)
+        // The task may leave "Ready for review" now; don't serve the old list.
+        invalidateListRunsCache(req.workspacePath)
         if (result.discarded.length > 0) {
           invalidateGitStatusCache(req.workspacePath)
           emitGitStatusChanged(req.workspacePath)
@@ -2089,6 +2102,53 @@ export function registerIpc(): void {
         return ok({ name: req.name, exists: true, content })
       } catch (err) {
         return failFrom(err, IPC.runsReadArtifact)
+      }
+    }
+  )
+
+  ipcMain.handle(IPC.runsOpenArtifact, async (event, raw): Promise<IpcResult<true>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = OpenRunArtifactRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
+      const filePath = join(resolveRunDir(req.workspacePath, req.runId), req.name)
+      if (!existsSync(filePath)) return fail(`This task has no ${req.name} yet`)
+      // Opens with whatever the OS uses for .md; the reply is its error text.
+      const error = await shell.openPath(filePath)
+      return error ? fail(error) : ok(true as const)
+    } catch (err) {
+      return failFrom(err, IPC.runsOpenArtifact)
+    }
+  })
+
+  // Against the workspace Keep and Undo act on, so the numbers describe what they would do.
+  ipcMain.handle(
+    IPC.runsTaskFileStats,
+    async (event, raw): Promise<IpcResult<TaskFileStatsResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = TaskFileStatsRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
+        return ok({ files: taskFileStats(resolveRunDir(req.workspacePath, req.runId), req.workspacePath) })
+      } catch (err) {
+        return failFrom(err, IPC.runsTaskFileStats)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.runsTaskFileDiff,
+    async (event, raw): Promise<IpcResult<TaskFileDiffResult>> => {
+      if (!senderOk(event)) return fail('Invalid sender')
+      try {
+        const req = TaskFileDiffRequestSchema.parse(raw)
+        if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+        if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
+        return ok(taskFileDiff(resolveRunDir(req.workspacePath, req.runId), req.workspacePath, req.path))
+      } catch (err) {
+        return failFrom(err, IPC.runsTaskFileDiff)
       }
     }
   )
@@ -2577,7 +2637,7 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.runsActive, async (event): Promise<IpcResult<ActiveRunsResult>> => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
-      return ok(listActiveRuns())
+      return ok(listActiveRunsView())
     } catch (err) {
       return failFrom(err, IPC.runsActive)
     }
@@ -2599,9 +2659,24 @@ export function registerIpc(): void {
     try {
       const req = GitGenerateCommitMessageRequestSchema.parse(raw)
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
-      return ok(await generateCommitMessage(req.workspacePath, req.mode))
+      return ok(await generateCommitMessage(req.workspacePath, req.mode, req.force === true))
     } catch (err) {
       return failFrom(err, IPC.gitGenerateCommitMessage)
+    }
+  })
+
+  ipcMain.handle(IPC.gitInit, async (event, raw): Promise<IpcResult<GitInitResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GitInitRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      const result = await initGitRepo(req.workspacePath)
+      if (!result.ok) return fail(result.error)
+      invalidateGitStatusCache(req.workspacePath)
+      emitGitStatusChanged(req.workspacePath)
+      return ok({ branch: result.branch })
+    } catch (err) {
+      return failFrom(err, IPC.gitInit)
     }
   })
 
@@ -2727,6 +2802,18 @@ export function registerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.gitBranchDiff, async (event, raw): Promise<IpcResult<GitBranchDiffResult>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = GitBranchDiffRequestSchema.parse(raw ?? {})
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      const result = await readBranchDiff(req.workspacePath)
+      return result.ok ? ok(result.data) : fail(result.error)
+    } catch (err) {
+      return failFrom(err, IPC.gitBranchDiff)
+    }
+  })
+
   ipcMain.handle(IPC.gitDiff, async (event, raw) => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
@@ -2825,6 +2912,17 @@ export function registerIpc(): void {
       return ok(await prClose(req.workspacePath, req.number))
     } catch (err) {
       return failFrom(err, IPC.prClose)
+    }
+  })
+
+  ipcMain.handle(IPC.prReady, async (event, raw) => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const req = PrReadyRequestSchema.parse(raw)
+      if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
+      return ok(await prReady(req.workspacePath, req.number))
+    } catch (err) {
+      return failFrom(err, IPC.prReady)
     }
   })
 
@@ -3320,7 +3418,8 @@ export function registerIpc(): void {
       const overrides = workspacePath
         ? findWorkspaceSettingsOverride(workspaces, workspacePath)?.marketplaceOverrides ?? null
         : null
-      await refreshMcpServers(resolveMcpServersForSessionMap())
+      if (req.failedOnly) await retryFailedMcpServers(resolveMcpServersForSessionMap())
+      else await refreshMcpServers(resolveMcpServersForSessionMap())
       notifyToolCatalogChanged()
       return ok({
         servers: getMcpServerStatus(resolveEffectiveMcpServers(overrides), workspacePath),
@@ -3342,7 +3441,7 @@ export function registerIpc(): void {
         return fail('Workspace is not open')
       }
       const workspacePath = requestedPath !== undefined ? requestedPath : workspaces.activePath
-      return ok(computeToolCatalog(workspacePath))
+      return ok(await computeToolCatalog(workspacePath))
     } catch (err) {
       return failFrom(err, IPC.toolsCatalogGet)
     }
@@ -3789,8 +3888,7 @@ export function registerIpc(): void {
       if (workspacePath && !isOpenWorkspace(workspacePath)) {
         return fail('Workspace is not open')
       }
-      const commands = await listSlashCommands(workspacePath)
-      return ok({ commands })
+      return ok(await listSlashMenu(workspacePath))
     } catch (err) {
       return failFrom(err, IPC.slashCommandsList)
     }
@@ -3964,9 +4062,8 @@ export function registerIpc(): void {
       }
       const maxResults = req.maxResults ?? 24
       const query = (req.query ?? '').trim().toLowerCase().replace(/\\/g, '/')
-      const files = await collectWorkspaceFiles(req.workspacePath, 8_000)
+      const files = await readWorkspaceFileListCached(req.workspacePath)
       const matched = files
-        .map((f) => f.rel.replace(/\\/g, '/'))
         .filter((rel) => {
           if (!isSafeWorkspaceRelPath(rel)) return false
           return query ? rel.toLowerCase().includes(query) : true
@@ -4073,6 +4170,8 @@ export function registerIpc(): void {
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const result = await saveWorkspaceFile(req)
       scheduleWorkspaceIndexSync(req.workspacePath)
+      // Only a save with no version to check against can have created the file.
+      if (!req.expectedVersion) invalidateWorkspaceFileListCache(req.workspacePath)
       if (isSkillRelatedRelPath(req.path) || isRuleRelatedRelPath(req.path)) {
         if (isRuleRelatedRelPath(req.path)) clearRulesCache(req.workspacePath)
         notifySkillsChanged(req.workspacePath)
@@ -4090,6 +4189,7 @@ export function registerIpc(): void {
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const result = await createWorkspaceFile(req)
       scheduleWorkspaceIndexSync(req.workspacePath)
+      invalidateWorkspaceFileListCache(req.workspacePath)
       const createdRel = [req.parentPath, req.name].filter(Boolean).join('/')
       if (isSkillRelatedRelPath(createdRel) || isRuleRelatedRelPath(createdRel)) {
         if (isRuleRelatedRelPath(createdRel)) clearRulesCache(req.workspacePath)
@@ -4108,6 +4208,7 @@ export function registerIpc(): void {
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const result = await moveWorkspaceFile(req)
       scheduleWorkspaceIndexSync(req.workspacePath)
+      invalidateWorkspaceFileListCache(req.workspacePath)
       if (
         isSkillRelatedRelPath(req.fromPath) ||
         isSkillRelatedRelPath(req.toPath) ||
@@ -4132,6 +4233,7 @@ export function registerIpc(): void {
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const result = await deleteWorkspaceFile(req)
       scheduleWorkspaceIndexSync(req.workspacePath)
+      invalidateWorkspaceFileListCache(req.workspacePath)
       if (isSkillRelatedRelPath(req.path) || isRuleRelatedRelPath(req.path)) {
         if (isRuleRelatedRelPath(req.path)) clearRulesCache(req.workspacePath)
         notifySkillsChanged(req.workspacePath)
@@ -4244,9 +4346,8 @@ export function registerIpc(): void {
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
       const maxResults = req.maxResults ?? 40
       const query = (req.query ?? '').trim().toLowerCase().replace(/\\/g, '/')
-      const files = await collectWorkspaceFiles(req.workspacePath, 8_000)
+      const files = await readWorkspaceFileListCached(req.workspacePath)
       const matched = files
-        .map((f) => f.rel.replace(/\\/g, '/'))
         .filter((rel) => isSafeWorkspaceRelPath(rel) && isCuratedDocPath(rel))
         .filter((rel) => (query ? rel.toLowerCase().includes(query) : true))
         .sort((a, b) => a.localeCompare(b))
@@ -4275,12 +4376,17 @@ export function registerIpc(): void {
     try {
       const req = WorkspaceAgentContextRequestSchema.parse(raw ?? {})
       if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
-      return ok(
-        await buildWorkspaceAgentContext(req.workspacePath, {
-          enabled: getSettings().codeIndex?.enabled !== false,
-          phase: getCodeIndexRuntimeStatus().phase
-        })
-      )
+      const indexStatus = getCodeIndexRuntimeStatus()
+      const context = await buildWorkspaceAgentContext(req.workspacePath, {
+        enabled: getSettings().codeIndex?.enabled !== false,
+        phase: indexStatus.phase,
+        statusWorkspace: indexStatus.workspacePath,
+        paused: isCodeIndexPaused(req.workspacePath)
+      })
+      // Reading the summary is what says someone is looking at it: keep this
+      // workspace live from here until it is removed.
+      armAgentContextWatch(req.workspacePath, context)
+      return ok(context)
     } catch (err) {
       return failFrom(err, IPC.agentContext)
     }
@@ -4619,6 +4725,7 @@ export function registerIpc(): void {
       if (getSettings().codeIndex?.enabled === false) {
         return fail('Codebase index is disabled')
       }
+      if (isCodeIndexPaused(workspacePath)) return fail('Indexing is paused for this workspace — resume it first')
       const sync = await reindexCodeIndex(workspacePath, {
         signal: workspaceIndexAbortSignal(workspacePath)
       })
@@ -4631,6 +4738,43 @@ export function registerIpc(): void {
       })
     } catch (err) {
       return failFrom(err, IPC.codeIndexReindex)
+    }
+  })
+
+  ipcMain.handle(IPC.codeIndexPause, async (event, raw): Promise<IpcResult<true>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const { workspacePath } = CodeIndexPauseRequestSchema.parse(raw)
+      if (!isOpenWorkspace(workspacePath)) return fail('Workspace is not open')
+      // The flag first: whatever the stop races with then finds it paused.
+      const current = getSettings().codeIndex ?? DEFAULT_SETTINGS.codeIndex
+      if (!isCodeIndexPaused(workspacePath)) {
+        setSettings({ codeIndex: { ...current, pausedPaths: [...(current.pausedPaths ?? []), workspacePath] } })
+      }
+      pauseWorkspaceIndexes(workspacePath)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.codeIndexPause)
+    }
+  })
+
+  ipcMain.handle(IPC.codeIndexResume, async (event, raw): Promise<IpcResult<true>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const { workspacePath } = CodeIndexPauseRequestSchema.parse(raw)
+      if (!isOpenWorkspace(workspacePath)) return fail('Workspace is not open')
+      const current = getSettings().codeIndex ?? DEFAULT_SETTINGS.codeIndex
+      setSettings({
+        codeIndex: {
+          ...current,
+          pausedPaths: (current.pausedPaths ?? []).filter((path) => !workspacePathsEqual(path, workspacePath))
+        }
+      })
+      // An incremental sync: files already indexed and unchanged are skipped.
+      warmWorkspaceIndexes(workspacePath)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.codeIndexResume)
     }
   })
 

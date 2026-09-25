@@ -956,7 +956,10 @@ describe('executeStepToolCalls', () => {
     expect(order).toEqual(['todo_write', 'edit', 'read'])
   })
 
-  it('does not hoist todo_write in Plan mode', async () => {
+  // Hoisting is Agent-only (`agentMode === 'agent' ? hoistTodoWriteCalls(...)`).
+  // Plan used to be the non-Agent mode that still ran these tools; Ask is the
+  // one that remains, and executeTool is mocked here so no gate is exercised.
+  it('does not hoist todo_write outside Agent mode', async () => {
     const order: string[] = []
     executeTool.mockImplementation(async (name: string) => {
       order.push(name)
@@ -964,7 +967,7 @@ describe('executeStepToolCalls', () => {
     })
 
     const { ctx } = makeCtx(new AbortController().signal)
-    ctx.agentMode = 'plan'
+    ctx.agentMode = 'ask'
     await executeStepToolCalls(
       [
         { id: 'e1', name: 'edit', arguments: '{"path":"plan.md","contents":"# Plan\\n"}' },
@@ -1054,6 +1057,40 @@ describe('groupStepToolCalls', () => {
     const fields = failLog?.[1] as { tool: string; reason?: string }
     expect(fields.tool).toBe('todo_write')
     expect(fields.reason).toBe('todos.0.content: Required; todos.1.content: Required')
+    warnSpy.mockRestore()
+  })
+
+  /**
+   * A terminal frame opens with a unique `session_id:` and puts its verdict on
+   * the last line, so first-line logging recorded a bare UUID as the reason for
+   * every terminal failure (run 874dad8f, twice). The command must stay out —
+   * it is a tool argument, which the logging policy keeps off disk.
+   */
+  it('logs exit code and status for a terminal failure, never the session id or command', async () => {
+    const { logger } = await import('@shared/logger')
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    executeTool.mockResolvedValue({
+      ok: false,
+      summary: 'cd aether; cargo build --release',
+      content: `session_id: b757085e-377a-498a-bc77-118b4691cc2b
+status: done
+command: cd aether; cargo build --release
+cwd: /home/me/OS
+shell: powershell
+BUILD_EXIT=101
+
+exit_code: 101`
+    })
+    const { ctx } = makeCtx(new AbortController().signal)
+    await executeStepToolCalls(
+      [{ id: 'x2', name: 'terminal', arguments: '{"command":"cargo build"}' }],
+      ctx
+    )
+    const failLog = warnSpy.mock.calls.find(([msg]) => msg === 'Tool returned failure')
+    const fields = failLog?.[1] as { reason?: string }
+    expect(fields.reason).toBe('exit 101 · status done')
+    expect(fields.reason).not.toMatch(/session_id|b757085e/)
+    expect(fields.reason).not.toMatch(/cargo build/)
     warnSpy.mockRestore()
   })
 

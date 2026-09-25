@@ -5,22 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ChatView } from '@renderer/features/chat/ChatView'
 import { emptySecretStatus } from '@shared/ipc'
-import { TitleBar } from '@renderer/app/TitleBar'
-import { BreakpointProvider } from '@renderer/lib/context/BreakpointProvider'
-import { TitleBarAccessoryProvider } from '@renderer/lib/context/TitleBarAccessory'
 import { clampDockWidthPx, DOCK_WIDTH_DEFAULT_PX, readSidebarWidthPxForCapacity } from '@renderer/lib/utils/layout'
-import { resetDockImmersiveStore } from '@renderer/lib/hooks/dockImmersiveStore'
 import { minimalReadyPlanMarkdown } from '@renderer/features/chat/utils/planDraft'
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
-  resetDockImmersiveStore()
   try {
     localStorage.removeItem('vyotiq.browserPanelOpen')
     localStorage.removeItem('vyotiq.rightPanel')
     localStorage.removeItem('vyotiq.browserRecents')
-    localStorage.removeItem('vyotiq.dockExpanded')
-    localStorage.removeItem('vyotiq.immersiveTab')
+    localStorage.removeItem('vyotiq.inspectorOpen')
+    localStorage.removeItem('vyotiq.inspectorExpanded')
     localStorage.removeItem('vyotiq.dockWidth')
     localStorage.removeItem('vyotiq.sidebarWidth')
   } catch {
@@ -77,6 +72,7 @@ beforeEach(() => {
       onPtyData: vi.fn().mockReturnValue(() => undefined),
       onPtyExit: vi.fn().mockReturnValue(() => undefined),
       readRunArtifact: vi.fn().mockResolvedValue({ ok: false, error: 'none' }),
+      runFeedbackGet: vi.fn().mockResolvedValue({ ok: true, data: { entry: null } }),
       browserGetState: vi.fn().mockResolvedValue({
         ok: true,
         data: { open: false, url: '', title: '' }
@@ -124,7 +120,8 @@ const baseProps = {
   workspacePath: '/ws',
   provider: 'ollama' as const,
   model: 'qwen2.5',
-  activeRunId: null,
+  // A task is on screen: a new task keeps the inspector out of the way until asked.
+  activeRunId: 'run-1',
   chatSettings: {
     provider: 'ollama' as const,
     model: 'qwen2.5',
@@ -170,11 +167,12 @@ describe('ChatView review-changes request', () => {
     await waitFor(() => expect(onHandled).toHaveBeenCalledTimes(2))
 
     // After the owner reset, a remount must not replay the consumed request and
-    // force the Changes dock back open.
+    // force the inspector back onto Changes.
     unmount()
-    localStorage.removeItem('vyotiq.rightPanel')
+    localStorage.setItem('vyotiq.rightPanel', 'terminal')
     render(view(0))
-    await waitFor(() => expect(document.querySelector('[data-changes-panel]')).toBeNull())
+    await waitForPanel('[data-terminal-panel]')
+    expect(document.querySelector('[data-changes-panel]')).toBeNull()
     expect(onHandled).toHaveBeenCalledTimes(2)
   })
 })

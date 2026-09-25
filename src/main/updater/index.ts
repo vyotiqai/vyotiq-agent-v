@@ -8,6 +8,8 @@ import { IPC } from '../../shared/channels'
 import type { UpdateInfo, UpdaterStatePayload } from '../../shared/ipc'
 import { parseReleaseNotes } from '../../shared/utils/releaseNotes'
 import { logger } from '../../shared/logger'
+import { publishLifecycleNotification } from '../notifications/bus'
+import { UPDATE_READY_DEDUPE_KEY, type NotificationPublishInput } from '../../shared/ipc'
 
 /** Idle delay after app ready before the one-shot startup update check. */
 export const STARTUP_CHECK_DELAY_MS = 10_000
@@ -17,6 +19,18 @@ export const PERIODIC_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 let current: UpdaterStatePayload = { status: 'idle' }
 let lastInfo: UpdateInfo | null = null
+
+/** The inbox row for a downloaded update, in the mockup's words. */
+export function updateReadyNotice(version: string): NotificationPublishInput {
+  return {
+    source: 'system',
+    kind: 'update_ready',
+    title: `Agent V ${version} is ready`,
+    body: 'Restart to install',
+    dedupeKey: UPDATE_READY_DEDUPE_KEY,
+    action: { type: 'open_update' }
+  }
+}
 let initialized = false
 let checkInFlight = false
 let startupTimer: NodeJS.Timeout | null = null
@@ -42,6 +56,15 @@ function toUpdateInfo(info: ElectronUpdateInfo): UpdateInfo {
   }
 }
 
+/**
+ * The error state, carrying the update it was about when one is known — so
+ * the navigator's chip stays and says the download failed, with Try again,
+ * instead of disappearing with the only way to retry.
+ */
+function failed(err: unknown): UpdaterStatePayload {
+  return { status: 'error', error: errorMessage(err), ...(lastInfo ? { info: lastInfo } : {}) }
+}
+
 function broadcast(next: UpdaterStatePayload): void {
   current = next
   for (const win of BrowserWindow.getAllWindows()) {
@@ -52,7 +75,8 @@ function broadcast(next: UpdaterStatePayload): void {
       // A destroyed-mid-send window races the isDestroyed() check routinely;
       // record it instead of swallowing silently.
       logger.debug('[updater] broadcast to window failed', {
-        error: errorMessage(err)
+        scope: 'updater',
+        err
       })
     }
   }
@@ -91,6 +115,8 @@ export function initAutoUpdater(): void {
     broadcast({ status: 'available', info: lastInfo })
   })
   autoUpdater.on('update-not-available', () => {
+    // Nothing newer: an update known from an earlier check is not one any more.
+    lastInfo = null
     broadcast({ status: 'not-available' })
   })
   autoUpdater.on('download-progress', (progress: ProgressInfo) => {
@@ -106,9 +132,11 @@ export function initAutoUpdater(): void {
   autoUpdater.on('update-downloaded', (info) => {
     lastInfo = toUpdateInfo(info)
     broadcast({ status: 'downloaded', info: lastInfo })
+    // The inbox row (System alerts) — main's, not a second renderer subscriber.
+    publishLifecycleNotification(updateReadyNotice(lastInfo.version))
   })
   autoUpdater.on('error', (err) => {
-    broadcast({ status: 'error', error: errorMessage(err) })
+    broadcast(failed(err))
   })
 }
 
@@ -141,7 +169,7 @@ export function applyUpdateCheckSchedule(enabled: boolean): void {
 
   const check = (label: string): void => {
     void checkForAppUpdates({ silent: true }).catch((err) => {
-      logger.warn(`[updater] ${label} check failed`, { error: errorMessage(err) })
+      logger.warn(`[updater] ${label} check failed`, { scope: 'updater', err })
     })
   }
 
@@ -198,7 +226,7 @@ export async function checkForAppUpdates(
       : null
   } catch (err) {
     if (options?.silent) {
-      logger.warn('[updater] background check failed', { error: errorMessage(err) })
+      logger.warn('[updater] background check failed', { scope: 'updater', err })
     } else {
       broadcast({ status: 'error', error: errorMessage(err) })
     }
@@ -212,7 +240,9 @@ export async function checkForAppUpdates(
 export async function downloadAppUpdate(): Promise<void> {
   // Already downloading: report progress, never start a second transfer.
   if (current.status === 'downloading') return
-  if (!app.isPackaged || current.status !== 'available') {
+  // A failed download can be tried again: the update it was for is still known.
+  const retrying = current.status === 'error' && lastInfo != null
+  if (!app.isPackaged || (current.status !== 'available' && !retrying)) {
     broadcast({
       status: 'error',
       error: 'No update is available to download. Check for updates first.'
@@ -222,7 +252,7 @@ export async function downloadAppUpdate(): Promise<void> {
   try {
     await autoUpdater.downloadUpdate()
   } catch (err) {
-    broadcast({ status: 'error', error: errorMessage(err) })
+    broadcast(failed(err))
   }
 }
 

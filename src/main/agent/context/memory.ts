@@ -1,32 +1,24 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync
+} from 'fs'
 import { readFile } from 'fs/promises'
 import { dirname, join, relative, resolve, basename } from 'path'
 import { canonicalizeWorkspacePath } from '../../../shared/utils/workspacePath'
 import { isInsideRoot } from '../../workspace/safePath'
 import { MEMORY_INDEX_CAP, MEMORY_STATE_CAP } from './types'
 
-/**
- * Memory namespaces: a run bound to an agent profile keeps its durable memory
- * under `.vyotiq/agents/<profileId>/memory/` instead of the shared
- * `.vyotiq/memory/`, so teammates never cross-contaminate their knowledge.
- * The namespace MUST be a filesystem-safe slug (it becomes a path segment).
- */
-export function assertSafeMemoryNamespace(namespace: string): string {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$/.test(namespace)) {
-    throw new Error('Invalid memory namespace')
-  }
-  return namespace
+function memoryDir(workspacePath: string): string {
+  return join(workspacePath, '.vyotiq', 'memory')
 }
 
-function memoryDir(workspacePath: string, namespace?: string): string {
-  return namespace
-    ? join(workspacePath, '.vyotiq', 'agents', namespace, 'memory')
-    : join(workspacePath, '.vyotiq', 'memory')
-}
-
-export function memoryRoot(workspacePath: string, namespace?: string): string {
-  if (namespace) assertSafeMemoryNamespace(namespace)
-  return memoryDir(workspacePath, namespace)
+export function memoryRoot(workspacePath: string): string {
+  return memoryDir(workspacePath)
 }
 
 function workspaceRealRoot(workspacePath: string): string {
@@ -35,9 +27,9 @@ function workspaceRealRoot(workspacePath: string): string {
 }
 
 /** Memory root must resolve inside the workspace (blocks junction/symlink escape). */
-function assertMemoryRootInsideWorkspace(workspacePath: string, namespace?: string): string {
+function assertMemoryRootInsideWorkspace(workspacePath: string): string {
   const wsReal = workspaceRealRoot(workspacePath)
-  const planned = memoryDir(wsReal, namespace)
+  const planned = memoryDir(wsReal)
   // Walk up to the nearest EXISTING ancestor and resolve from there — the
   // memory dir itself usually doesn't exist yet, and a symlinked `.vyotiq`
   // (or `agents/`) ancestor must still be resolved before first write.
@@ -57,9 +49,9 @@ function assertMemoryRootInsideWorkspace(workspacePath: string, namespace?: stri
   return realRoot
 }
 
-export function ensureMemoryLayout(workspacePath: string, namespace?: string): void {
-  assertMemoryRootInsideWorkspace(workspacePath, namespace)
-  const root = memoryRoot(workspacePath, namespace)
+export function ensureMemoryLayout(workspacePath: string): void {
+  assertMemoryRootInsideWorkspace(workspacePath)
+  const root = memoryRoot(workspacePath)
   const notes = join(root, 'notes')
   if (!existsSync(notes)) mkdirSync(notes, { recursive: true })
   const indexPath = join(root, 'index.md')
@@ -72,12 +64,30 @@ export function ensureMemoryLayout(workspacePath: string, namespace?: string): v
   }
 }
 
+/**
+ * True once shared memory has been written to. Surfaces an empty state rather
+ * than inventing a layout for a workspace that has never run.
+ */
+export function memoryNamespaceExists(workspacePath: string): boolean {
+  return existsSync(memoryRoot(workspacePath))
+}
+
+/**
+ * Delete the shared memory directory. Returns false when there was nothing
+ * to delete.
+ */
+export function clearMemoryNamespace(workspacePath: string): boolean {
+  const root = assertMemoryRootInsideWorkspace(workspacePath)
+  if (!existsSync(root)) return false
+  rmSync(root, { recursive: true, force: true })
+  return true
+}
+
 function assertUnderMemory(
   workspacePath: string,
-  targetPath: string,
-  namespace?: string
+  targetPath: string
 ): string {
-  const realRoot = assertMemoryRootInsideWorkspace(workspacePath, namespace)
+  const realRoot = assertMemoryRootInsideWorkspace(workspacePath)
   const wsReal = workspaceRealRoot(workspacePath)
   const candidate = resolve(realRoot, targetPath)
   const checkContained = (resolved: string): void => {
@@ -100,10 +110,9 @@ function assertUnderMemory(
 function readMemoryFileExcerpt(
   workspacePath: string,
   relPath: string,
-  cap: number,
-  namespace?: string
+  cap: number
 ): string {
-  const p = join(memoryRoot(workspacePath, namespace), relPath)
+  const p = join(memoryRoot(workspacePath), relPath)
   if (!existsSync(p)) return ''
   try {
     const text = readFileSync(p, 'utf8')
@@ -116,10 +125,9 @@ function readMemoryFileExcerpt(
 async function readMemoryFileExcerptAsync(
   workspacePath: string,
   relPath: string,
-  cap: number,
-  namespace?: string
+  cap: number
 ): Promise<string> {
-  const p = join(memoryRoot(workspacePath, namespace), relPath)
+  const p = join(memoryRoot(workspacePath), relPath)
   if (!existsSync(p)) return ''
   try {
     const text = await readFile(p, 'utf8')
@@ -147,39 +155,35 @@ export function truncateMemoryExcerpt(text: string, cap: number): string {
 
 export function readMemoryIndex(
   workspacePath: string,
-  cap = MEMORY_INDEX_CAP,
-  namespace?: string
+  cap = MEMORY_INDEX_CAP
 ): string {
-  return readMemoryFileExcerpt(workspacePath, 'index.md', cap, namespace)
+  return readMemoryFileExcerpt(workspacePath, 'index.md', cap)
 }
 
 export async function readMemoryIndexAsync(
   workspacePath: string,
-  cap = MEMORY_INDEX_CAP,
-  namespace?: string
+  cap = MEMORY_INDEX_CAP
 ): Promise<string> {
-  return readMemoryFileExcerptAsync(workspacePath, 'index.md', cap, namespace)
+  return readMemoryFileExcerptAsync(workspacePath, 'index.md', cap)
 }
 
 export function readMemoryState(
   workspacePath: string,
-  cap = MEMORY_STATE_CAP,
-  namespace?: string
+  cap = MEMORY_STATE_CAP
 ): string {
-  return readMemoryFileExcerpt(workspacePath, 'state.md', cap, namespace)
+  return readMemoryFileExcerpt(workspacePath, 'state.md', cap)
 }
 
 export async function readMemoryStateAsync(
   workspacePath: string,
-  cap = MEMORY_STATE_CAP,
-  namespace?: string
+  cap = MEMORY_STATE_CAP
 ): Promise<string> {
-  return readMemoryFileExcerptAsync(workspacePath, 'state.md', cap, namespace)
+  return readMemoryFileExcerptAsync(workspacePath, 'state.md', cap)
 }
 
 /** Note filenames referenced by index.md links (`notes/<name>.md`). */
-function indexLinkedNotes(workspacePath: string, namespace?: string): string[] {
-  const text = readMemoryIndex(workspacePath, Number.MAX_SAFE_INTEGER, namespace)
+function indexLinkedNotes(workspacePath: string): string[] {
+  const text = readMemoryIndex(workspacePath, Number.MAX_SAFE_INTEGER)
   const names = new Set<string>()
   for (const m of text.matchAll(/notes\/([a-zA-Z0-9._-]+\.md)/g)) {
     names.add(m[1])
@@ -188,14 +192,13 @@ function indexLinkedNotes(workspacePath: string, namespace?: string): string[] {
 }
 
 export function listMemoryNotes(
-  workspacePath: string,
-  namespace?: string
+  workspacePath: string
 ): {
   notes: string[]
   indexedNotes: string[]
   hasState: boolean
 } {
-  const root = memoryRoot(workspacePath, namespace)
+  const root = memoryRoot(workspacePath)
   const notesDir = join(root, 'notes')
   let notes: string[] = []
   try {
@@ -212,19 +215,18 @@ export function listMemoryNotes(
   // is visible without inflating the injected prompt.
   return {
     notes,
-    indexedNotes: indexLinkedNotes(workspacePath, namespace),
+    indexedNotes: indexLinkedNotes(workspacePath),
     hasState: existsSync(join(root, 'state.md'))
   }
 }
 
 export function readMemoryFile(
   workspacePath: string,
-  relPath: string,
-  namespace?: string
+  relPath: string
 ): string {
   const cleaned = relPath.replace(/^[/\\]+/, '')
   if (cleaned.includes('..')) throw new Error('Invalid memory path')
-  const resolved = assertUnderMemory(workspacePath, cleaned, namespace)
+  const resolved = assertUnderMemory(workspacePath, cleaned)
   if (!existsSync(resolved)) {
     if (cleaned === 'state.md') {
       return '(state.md not created yet — use memory_write to create it)'
@@ -237,20 +239,16 @@ export function readMemoryFile(
 export function writeMemoryFile(
   workspacePath: string,
   relPath: string,
-  contents: string,
-  namespace?: string
+  contents: string
 ): string {
-  ensureMemoryLayout(workspacePath, namespace)
+  ensureMemoryLayout(workspacePath)
   const cleaned = relPath.replace(/^[/\\]+/, '')
   if (cleaned.includes('..')) throw new Error('Invalid memory path')
-  const resolved = assertUnderMemory(workspacePath, cleaned, namespace)
+  const resolved = assertUnderMemory(workspacePath, cleaned)
   mkdirSync(dirname(resolved), { recursive: true })
   writeFileSync(resolved, contents, 'utf8')
   // Report relative to the REAL memory root: on macOS tmpdir sits under the
   // /var → /private/var symlink, and relative() between the raw and real root
   // produced "../../../../…/private/var/…" (mac CI failure).
-  return relative(
-    assertMemoryRootInsideWorkspace(workspacePath, namespace),
-    resolved
-  ).replace(/\\/g, '/')
+  return relative(assertMemoryRootInsideWorkspace(workspacePath), resolved).replace(/\\/g, '/')
 }

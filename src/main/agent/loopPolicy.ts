@@ -329,6 +329,10 @@ export function isGateRefusalToolResult(content: string): boolean {
   if (/Tool approval required but no app window is listening\./i.test(content)) return true
   if (/Tool approval failed because no app window is listening\./i.test(content)) return true
   if (/^(?:Ask|Plan) mode does not allow (?:tool|lsp|MCP)/i.test(content)) return true
+  // Plan mode was merged into Agent and emits neither message any more, but a
+  // receipt is recomputed from history: runs recorded before the merge still
+  // carry these strings in messages.jsonl and must not start counting as
+  // failures. Historical patterns — keep them, do not "clean up".
   if (/^Plan mode may only edit plan\.md or contract\.md/i.test(content)) return true
   if (/^Automatic mode switching is off\./i.test(content)) return true
   if (/^Background terminal requires run ownership/i.test(content)) return true
@@ -338,6 +342,7 @@ export function isGateRefusalToolResult(content: string): boolean {
 /**
  * Failures that never mutated the file. Counting them as unread-before-edit
  * poisoned harness review (Plan-mode memory-path edits on run 75135925).
+ * The Plan-mode pattern is historical — see isGateRefusalToolResult.
  */
 export function isNonMutatingWriteFailure(content: string): boolean {
   if (isAbortStubToolResult(content)) return true

@@ -104,7 +104,7 @@ function DiffLines({
           return (
             <div
               key={line.rowKey ?? `gap-${hiddenBeforeCount + index}`}
-              className="h-3 border-y border-border/60 bg-surface-2/40"
+              className="h-3 border-y border-border/60 bg-surface"
               aria-hidden
             />
           )
@@ -183,7 +183,7 @@ export const DiffPreview = memo(function DiffPreview({
 
   if (splitSides) {
     return (
-      <div className="grid min-w-0 grid-cols-2 gap-px overflow-hidden bg-border/40">
+      <div className="grid min-w-0 grid-cols-2 gap-px overflow-hidden bg-border">
         <div className="min-h-0 min-w-0 overflow-auto bg-bg">
           <DiffLines
             lines={splitSides.left}

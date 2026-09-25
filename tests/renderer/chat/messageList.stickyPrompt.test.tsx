@@ -104,19 +104,20 @@ function forceHybridPath(): () => void {
 }
 
 describe('MessageList native turn prompt pinning', () => {
-  it('pins the user prompt bubble inline with an opaque pinned stack (no scroll-through)', () => {
+  it('pins the user prompt bubble inline over a cover that fades rows out beneath it', () => {
     render(<MessageList items={items} />)
     const pinned = [...document.querySelectorAll('[data-sticky-turn-prompt]')]
     expect(pinned.length).toBe(2)
     for (const el of pinned) {
       // The prompt pins inline (position: sticky), flush with the scrollport
       // top so nothing scrolls through the gap above it, and the stack's gaps
-      // ride as padding so nothing scrolls through below either.
+      // ride as padding — the bottom one is where rows beneath fade out.
       expect(el.className).toContain('sticky')
       expect(el.className).toContain('top-0')
-      expect(el.className).toContain('py-2.5')
-      // Flat page-colored cover prevents rows scrolling beneath the pinned
-      // prompt from bleeding through, without a gradient or shadow.
+      expect(el.className).toContain('pt-2.5')
+      expect(el.className).toContain('pb-4')
+      // The page-colored cover hides rows behind the prompt and dissolves them
+      // across that bottom padding; no border or shadow draws the edge.
       expect(el.className).toContain('vy-turn-prompt-cover')
       expect(el.className).not.toContain('border')
       expect(el.className).not.toContain('shadow')
@@ -298,6 +299,12 @@ describe('MessageList native turn prompt pinning', () => {
     expect(pinned.some((wrapper) => wrapper.contains(band))).toBe(true)
     // Exactly one band — no duplicate rendered outside the sticky unit.
     expect(document.querySelectorAll('[data-tasks-ceiling]').length).toBe(1)
+    // Inset by the bubble's own border + padding, so the band's icon starts on
+    // the prompt text's left edge rather than on the outline.
+    const inset = band!.parentElement!.classList
+    expect(inset.contains('border-x')).toBe(true)
+    expect(inset.contains('border-transparent')).toBe(true)
+    expect(inset.contains('px-3')).toBe(true)
   })
 
   it('pins the active turn prompt mid-run while the turn stays within the live mount bound', () => {

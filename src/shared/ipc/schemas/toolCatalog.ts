@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AGENT_INTERACTION_MODES } from './settings'
 
 /** Why a tool is not active in the next Agent-mode catalog. */
 export const TOOL_CATALOG_REASONS = [
@@ -13,12 +14,20 @@ export type ToolCatalogReason = (typeof TOOL_CATALOG_REASONS)[number]
 const ToolCatalogEntrySchema = z.object({
   name: z.string().min(1),
   description: z.string(),
-  source: z.enum(['builtin', 'mcp']),
+  /** `agent` = written by a run with build_tool, living under userData. */
+  source: z.enum(['builtin', 'mcp', 'agent']),
   /** Present for `source: 'mcp'` (the `mcp__<serverId>__<tool>` server id). */
   serverId: z.string().min(1).optional(),
   serverName: z.string().min(1).optional(),
+  /**
+   * MCP only: true when the server declared the tool read-only in its
+   * `readOnlyHint` annotation, false when it declared otherwise or said
+   * nothing. A claim, not a check — the agent's policy never trusts it — so
+   * a UI must say "declares" rather than "is".
+   */
+  readOnlyHint: z.boolean().optional(),
   /** Modes whose mode policy admits this tool (computed with current settings). */
-  modes: z.array(z.enum(['ask', 'plan', 'agent'])),
+  modes: z.array(z.enum(AGENT_INTERACTION_MODES)),
   /** True when the tool would appear in the next Agent-mode step catalog. */
   active: z.boolean(),
   reason: z.enum(TOOL_CATALOG_REASONS).optional()

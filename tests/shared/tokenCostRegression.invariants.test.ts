@@ -4,11 +4,7 @@
  * Do not weaken these without an explicit product decision.
  */
 import { describe, expect, it } from 'vitest'
-import {
-  compactionTriggerFromRaw,
-  contentWindowFromRaw,
-  toolsBudgetFromRaw
-} from '../../src/shared/domain/contextBudget'
+import { BUDGET_SHARES, contentWindowFromRaw } from '../../src/shared/domain/contextBudget'
 import {
   mergeStepUsageTotals,
   stepUsageFromEvent,
@@ -16,14 +12,15 @@ import {
 } from '../../src/shared/utils/runTelemetry'
 
 describe('token-cost freeze invariants', () => {
-  it('keeps 1M-window compaction trigger at the hard content window', () => {
-    const trigger = compactionTriggerFromRaw(1_000_000)
-    expect(trigger).toBe(contentWindowFromRaw(1_000_000))
-    expect(trigger).toBe(850_000)
+  it('keeps the 1M-window content budget at the hard 85% share', () => {
+    expect(contentWindowFromRaw(1_000_000)).toBe(850_000)
   })
 
-  it('keeps tools budget as raw window share on huge windows', () => {
-    expect(toolsBudgetFromRaw(1_000_000)).toBe(180_000)
+  it('keeps the tools share at 18% of the raw window', () => {
+    // Accounting only — nothing enforces a tools ceiling — but the share is a
+    // term in contentWindowFromRaw, so moving it moves every meter and trigger.
+    expect(BUDGET_SHARES.tools).toBe(0.18)
+    expect(Math.floor(1_000_000 * BUDGET_SHARES.tools)).toBe(180_000)
   })
 
   it('treats billed input as Σ step inputs, not latest window', () => {

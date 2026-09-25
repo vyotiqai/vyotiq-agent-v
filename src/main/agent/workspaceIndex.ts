@@ -4,12 +4,19 @@
  * Warm is serialized via the global index job queue.
  */
 import { existsSync, rmSync } from 'fs'
-import { ensureCodeIndexSynced, disposeCodeIndexWorkspace } from './codeindex'
+import {
+  abortDenseWarm,
+  disposeCodeIndexWorkspace,
+  ensureCodeIndexSynced,
+  isCodeIndexPaused,
+  setCodeIndexPausedStatus
+} from './codeindex'
 import { throwIfAborted } from './tools/walk'
 import { legacyCodeindexRoot, legacySparsegrepRoot } from './indexStoragePaths'
 import { isAbortError } from '../../shared/errors'
 import { logger } from '../../shared/logger'
 import { logErrorSummary } from '../../shared/utils/logPolicy'
+import { workspaceIdFromPath } from '../../shared/utils/workspaceId'
 import {
   activeIndexJobPreemptSignal,
   dropPendingByCoalesceKey,
@@ -116,6 +123,9 @@ export function warmWorkspaceIndexes(
   if (!workspaceRoot.trim()) return
   const key = workspaceKey(workspaceRoot)
   if (permanentlyDisposedKeys.has(key)) return
+  // Paused in Settings → Indexing: nothing re-starts it — not a boot, an open,
+  // an edit or a search — until Resume.
+  if (warmCodeIndex && isCodeIndexPaused(workspaceRoot)) return
   // Near the V8 ceiling, background index work must not allocate: the walk,
   // hashing and SQLite writes run on main, and the last-resort GC that follows
   // an allocation failure is a hard process abort. Indexes simply stay
@@ -123,7 +133,7 @@ export function warmWorkspaceIndexes(
   if (isHeapPressureHigh()) {
     logger.debug('Workspace index warm skipped under heap pressure', {
       scope: 'workspaceIndex',
-      workspace: workspaceRoot
+      workspaceId: workspaceIdFromPath(workspaceRoot)
     })
     return
   }
@@ -139,7 +149,11 @@ export function warmWorkspaceIndexes(
       const signal = combineSignals(disposeSignal, activeIndexJobPreemptSignal())
       try {
         throwIfAborted(signal)
-        logger.debug('Workspace index warm started', { scope: 'workspaceIndex', warmCodeIndex })
+        logger.debug('Workspace index warm started', {
+          scope: 'workspaceIndex',
+          workspaceId: workspaceIdFromPath(workspaceRoot),
+          warmCodeIndex
+        })
         throwIfAborted(signal)
         if (!warmCodeIndex) {
           clearIndexSyncProgress()
@@ -154,7 +168,7 @@ export function warmWorkspaceIndexes(
           const changed = sync.indexed > 0 || sync.removed > 0
           ;(changed ? logger.info.bind(logger) : logger.debug.bind(logger))('Code index warm sync', {
             scope: 'workspaceIndex',
-            workspace: workspaceRoot,
+            workspaceId: workspaceIdFromPath(workspaceRoot),
             scanned: sync.scanned,
             indexed: sync.indexed,
             skipped: sync.skipped,
@@ -169,10 +183,18 @@ export function warmWorkspaceIndexes(
           message: sync ? `Index ready · ${sync.indexed} updated · ${sync.skipped} skipped` : 'Index ready',
           error: null,
           progress: 1,
-          indexProgress: null
+          indexProgress: null,
+          workspacePath: workspaceRoot
         })
       } catch (err) {
-        if (signal.aborted || isAbortError(err)) return
+        if (signal.aborted || isAbortError(err)) {
+          // Stopped by Pause: the last progress it published must not stand.
+          if (isCodeIndexPaused(workspaceRoot)) {
+            clearIndexSyncProgress()
+            setCodeIndexPausedStatus(workspaceRoot)
+          }
+          return
+        }
         throw err
       }
     }
@@ -189,7 +211,8 @@ export function warmWorkspaceIndexes(
       message: null,
       error: 'Workspace index sync failed. Click Reindex workspace to retry.',
       progress: null,
-      indexProgress: null
+      indexProgress: null,
+      workspacePath: workspaceRoot
     })
   })
 }
@@ -200,6 +223,7 @@ export function scheduleWorkspaceIndexSync(
   delayMs: number = WORKSPACE_INDEX_DEBOUNCE_MS
 ): void {
   if (!workspaceRoot.trim()) return
+  if (isCodeIndexPaused(workspaceRoot)) return
   // Instance worktrees index on first codebase_search, not on every mutation.
   if (workspaceRoot.replace(/\\/g, '/').split('/').includes('instance-worktrees')) return
   const key = workspaceKey(workspaceRoot)
@@ -212,6 +236,29 @@ export function scheduleWorkspaceIndexSync(
       warmWorkspaceIndexes(workspaceRoot)
     }, delayMs)
   )
+}
+
+/**
+ * Pause: stop what is indexing this workspace now — the running sync, anything
+ * queued, a pending debounce, the embedding pass — and keep the store open with
+ * what it has. Callers set the paused flag first, which keeps it stopped.
+ */
+export function pauseWorkspaceIndexes(workspaceRoot: string): void {
+  const key = workspaceKey(workspaceRoot)
+  const prev = timers.get(key)
+  if (prev) clearTimeout(prev)
+  timers.delete(key)
+  dropPendingByCoalesceKey(`warm:${key}`)
+  dropPendingByCoalesceKey(`reindex:${key}`)
+  dropPendingByCoalesceKey(`dense-warm:${key}`)
+  const ac = abortControllers.get(key)
+  if (ac) {
+    ac.abort()
+    abortControllers.delete(key)
+  }
+  abortDenseWarm(workspaceRoot)
+  clearIndexSyncProgress()
+  setCodeIndexPausedStatus(workspaceRoot)
 }
 
 export type DisposeWorkspaceIndexesOptions = {

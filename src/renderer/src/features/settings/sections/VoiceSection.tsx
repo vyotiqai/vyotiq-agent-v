@@ -4,13 +4,15 @@ import type {
   DictationEngine,
   DictationLocalModelId,
   DictationRuntimeStatus,
-  DictationWaveformStyle,
   SecretProvider
 } from '@shared/ipc'
 import { DEFAULT_DICTATION_SETTINGS } from '@shared/ipc'
 import { DICTATION_LOCAL_CATALOG } from '@shared/dictation'
-import { Button, Menu, type MenuOption } from '@renderer/lib/ui'
+import { ActionMenu, Button, IconButton, type ActionMenuItem } from '@renderer/lib/ui'
 import { DICTATION_ENGINE_OPTIONS, DICTATION_WAVEFORM_STYLE_OPTIONS } from '../constants'
+import { ProgressBar } from '../components/ProgressBar'
+import { SegmentedField } from '../components/SegmentedField'
+import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
 
 const WHISPER_MODELS = DICTATION_LOCAL_CATALOG.filter((m) => m.backend === 'whisper')
@@ -18,24 +20,21 @@ const WHISPER_MODELS = DICTATION_LOCAL_CATALOG.filter((m) => m.backend === 'whis
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+  return `${Math.round(n / (1024 * 1024))} MB`
 }
 
-function engineKeyHint(
-  engine: DictationEngine,
-  secrets: Record<SecretProvider, boolean>
-): string {
+function engineHint(engine: DictationEngine, secrets: Record<SecretProvider, boolean>): string {
   switch (engine) {
     case 'openai':
       return secrets.openai
-        ? 'OpenAI API key is saved.'
-        : 'No OpenAI API key — add one in Settings → Providers.'
+        ? 'Transcribes with your OpenAI key.'
+        : 'No OpenAI key yet — add one in Providers.'
     case 'openrouter':
       return secrets.openrouter
-        ? 'OpenRouter API key is saved.'
-        : 'No OpenRouter API key — add one in Settings → Providers.'
+        ? 'Transcribes with your OpenRouter key.'
+        : 'No OpenRouter key yet — add one in Providers.'
     case 'local':
-      return 'Works offline after a model is installed. English only.'
+      return 'Runs on this PC; nothing leaves it. English only.'
     default: {
       const _exhaustive: never = engine
       return _exhaustive
@@ -43,83 +42,61 @@ function engineKeyHint(
   }
 }
 
-function cardStatusLabel(
-  modelId: DictationLocalModelId,
+/** The row's line under its name: what it weighs, and what this PC should pick. */
+function modelHint(
+  model: (typeof WHISPER_MODELS)[number],
   status: DictationRuntimeStatus | null
 ): string {
-  if (!status) return 'Unknown'
-  if (status.phase === 'downloading' && status.activeModelId === modelId) {
-    const pct =
-      status.progress != null ? ` ${Math.round(status.progress * 100)}%` : ''
-    return `Downloading${pct}`
+  const phase = status?.activeModelId === model.id ? status.phase : null
+  if (phase === 'downloading') {
+    return `Downloading${status?.progress != null ? ` · ${Math.round(status.progress * 100)}%` : ''}`
   }
-  if (status.phase === 'loading' && status.activeModelId === modelId) {
-    return status.message ?? 'Loading'
-  }
-  if (status.phase === 'error' && status.activeModelId === modelId) {
-    return `Error${status.error ? `: ${status.error}` : ''}`
-  }
-  const inst = status.installed.find((m) => m.id === modelId)
-  if (inst?.loaded) return 'Ready · loaded'
-  if (inst) return 'Ready · on disk'
-  return 'Not installed'
+  if (phase === 'loading') return status?.message ?? 'Loading'
+  const installed = status?.installed.find((m) => m.id === model.id)
+  const size =
+    installed && installed.bytesOnDisk > 0
+      ? `${formatBytes(installed.bytesOnDisk)} on disk`
+      : installed
+        ? 'On disk'
+        : `${model.approxDownloadLabel} download`
+  // The catalog's own "recommended" role is left out: this line names the one
+  // recommended for this machine, and on a low-RAM PC that is the other one.
+  return status?.recommendedModelId === model.id ? `${size} · recommended for this PC` : size
 }
 
-function VoiceProgressBar({
-  status,
-  modelId
+function ModelMenu({
+  label,
+  items,
+  disabled
 }: {
-  status: DictationRuntimeStatus | null
-  modelId: DictationLocalModelId
+  label: string
+  items: ActionMenuItem[]
+  disabled: boolean
 }) {
-  if (!status) return null
-  const active =
-    (status.phase === 'downloading' || status.phase === 'loading') &&
-    status.activeModelId === modelId
-  if (!active) return null
-  const pct =
-    status.progress != null && Number.isFinite(status.progress)
-      ? Math.max(0, Math.min(100, Math.round(status.progress * 100)))
-      : null
-  const label =
-    status.phase === 'loading'
-      ? `${modelId} load progress`
-      : `${modelId} download progress`
+  const [open, setOpen] = useState(false)
   return (
-    <div
-      className="h-1.5 w-full overflow-hidden rounded-sm bg-border"
-      role="progressbar"
-      aria-valuemin={pct == null ? undefined : 0}
-      aria-valuemax={pct == null ? undefined : 100}
-      aria-valuenow={pct ?? undefined}
-      aria-label={label}
-    >
-      <div
-        className={
-          pct == null
-            ? 'h-full w-2/5 bg-accent motion-safe:animate-pulse'
-            : 'h-full bg-accent transition-[width] duration-100 ease-linear'
-        }
-        style={pct == null ? undefined : { width: `${pct}%` }}
-      />
-    </div>
-  )
-}
-
-function VoiceModelError({
-  status,
-  modelId
-}: {
-  status: DictationRuntimeStatus | null
-  modelId: DictationLocalModelId
-}) {
-  if (status?.phase !== 'error' || status.activeModelId !== modelId || !status.error) return null
-  return (
-    <div className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2">
-      <p className="m-0 text-xs text-danger" role="alert">
-        {status.error}
-      </p>
-    </div>
+    <ActionMenu
+      open={open}
+      onOpenChange={setOpen}
+      placement="down"
+      align="end"
+      aria-label={`${label} actions`}
+      items={items}
+      trigger={(t) => (
+        <IconButton
+          ref={t.ref}
+          icon="more"
+          label={`More for ${label}`}
+          size="sm"
+          tone="muted"
+          disabled={disabled}
+          aria-expanded={t['aria-expanded']}
+          aria-controls={t['aria-controls']}
+          aria-haspopup={t['aria-haspopup']}
+          onClick={t.onClick}
+        />
+      )}
+    />
   )
 }
 
@@ -178,37 +155,31 @@ export function VoiceSection({
   }, [refreshStatus, dictation.engine, dictation.localModelId])
 
   const localInstalled = (runtime?.installed.length ?? 0) > 0
-  const downloading = runtime?.phase === 'downloading' || runtime?.phase === 'loading'
-  const engineOptions: MenuOption[] = DICTATION_ENGINE_OPTIONS.map((opt) =>
+  const modelBusy = runtime?.phase === 'downloading' || runtime?.phase === 'loading'
+  const locked = form.formLocked || busy || modelBusy
+  const engineOptions = DICTATION_ENGINE_OPTIONS.map((opt) =>
     opt.value === 'local' ? { ...opt, disabled: !localInstalled } : opt
   )
 
-  const patchEngine = (engine: DictationEngine) => {
+  const patchEngine = (engine: DictationEngine): void => {
     if (engine === 'local' && !localInstalled) return
     let localModelId: DictationLocalModelId | '' =
-      dictation.localModelId ||
-      runtime?.loadedModelId ||
-      runtime?.installed[0]?.id ||
-      ''
+      dictation.localModelId || runtime?.loadedModelId || runtime?.installed[0]?.id || ''
     if (engine === 'local' && !WHISPER_MODELS.some((m) => m.id === localModelId)) {
-      localModelId = runtime?.loadedModelId || runtime?.installed[0]?.id || WHISPER_MODELS[0]?.id || ''
+      localModelId =
+        runtime?.loadedModelId || runtime?.installed[0]?.id || WHISPER_MODELS[0]?.id || ''
     }
     void form.runUpdate({ dictation: { ...dictation, engine, localModelId } })
   }
 
-  const patchLocalModelId = (localModelId: DictationLocalModelId) => {
+  const selectModel = (localModelId: DictationLocalModelId): void => {
     if (dictation.localModelId === localModelId) return
     void form.runUpdate({ dictation: { ...dictation, localModelId } })
   }
 
-  const patchWaveformStyle = (waveformStyle: DictationWaveformStyle) => {
-    if ((dictation.waveformStyle ?? 'bars') === waveformStyle) return
-    void form.runUpdate({ dictation: { ...dictation, waveformStyle } })
-  }
-
   const runModelAction = (
     action: () => Promise<{ ok: true; data: DictationRuntimeStatus } | { ok: false; error?: string }>
-  ) => {
+  ): void => {
     setBusy(true)
     setActionError(null)
     void action()
@@ -224,154 +195,139 @@ export function VoiceSection({
       .finally(() => setBusy(false))
   }
 
+  const error = actionError ?? loadError
+
   return (
     <SettingsStack>
       <SettingsGroup title="Dictation">
-        <SettingsField
+        <SegmentedField
           id="dictation-engine"
-          title="Dictation engine"
-          hint="OpenAI and OpenRouter use gpt-transcribe. Local (Whisper) runs ONNX on this machine."
-          help="Engine is read on each mic stop — no restart. Local stays disabled until at least one Whisper model is installed below."
-        >
-          <div className="flex w-full max-w-xs flex-col items-stretch gap-1.5">
-            <Menu
-              aria-label="Dictation engine"
-              value={dictation.engine}
-              options={engineOptions}
-              searchable={false}
-              placement="down"
-              disabled={form.formLocked || busy || downloading}
-              onChange={(v) => patchEngine(v as DictationEngine)}
-            />
-            <p className="m-0 text-xs text-secondary">
-              {engineKeyHint(dictation.engine, secrets)}
-            </p>
-            {!localInstalled ? (
-              <p className="m-0 text-xs text-muted">
-                Install a Whisper model below to enable Local.
-              </p>
-            ) : null}
-            {dictation.engine === 'local' && !localInstalled ? (
+          title="Engine"
+          label="Dictation engine"
+          hint={engineHint(dictation.engine, secrets)}
+          help="OpenAI and OpenRouter use gpt-transcribe; Local runs Whisper (ONNX) on this machine and is available once a model below is installed. Read on each mic stop — no restart."
+          value={dictation.engine}
+          options={engineOptions}
+          disabled={locked}
+          {...form.nestedDefaultMark('dictation', 'engine')}
+          below={
+            dictation.engine === 'local' && runtime && !localInstalled ? (
               <p className="m-0 text-xs text-danger" role="alert">
-                Install a local Whisper model below, or switch engine.
+                Local is selected but no Whisper model is installed. Install one below, or switch engine.
               </p>
-            ) : null}
-          </div>
-        </SettingsField>
-        <SettingsField
-          id="dictation-waveform"
-          title="Waveform"
-          hint="Listening visualizer in the composer."
-          help="Applies the next time you open the composer after leaving Settings. Does not change transcription."
-        >
-          <Menu
-            aria-label="Waveform"
-            value={dictation.waveformStyle ?? 'bars'}
-            options={DICTATION_WAVEFORM_STYLE_OPTIONS}
-            searchable={false}
-            placement="down"
-            disabled={form.formLocked}
-            onChange={(v) => patchWaveformStyle(v as DictationWaveformStyle)}
-          />
-        </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup title="Local Whisper models">
+            ) : error ? (
+              <p className="m-0 text-xs text-danger" role="alert">
+                {error}
+              </p>
+            ) : null
+          }
+          onChange={patchEngine}
+        />
         {WHISPER_MODELS.map((model) => {
           const inst = runtime?.installed.find((m) => m.id === model.id)
           const installed = inst != null
           const loaded = inst?.loaded === true
           const inUse = installed && dictation.localModelId === model.id
-          const isRecommended = runtime?.recommendedModelId === model.id
-          const statusLabel = cardStatusLabel(model.id, runtime)
+          const phaseForModel = runtime?.activeModelId === model.id ? runtime.phase : null
+          const failed = phaseForModel === 'error'
+          const working = phaseForModel === 'downloading' || phaseForModel === 'loading'
           const fieldId =
-            model.id === 'whisper-tiny.en'
-              ? 'dictation-whisper-tiny'
-              : 'dictation-whisper-small'
+            model.id === 'whisper-tiny.en' ? 'dictation-whisper-tiny' : 'dictation-whisper-small'
+          const menuItems: ActionMenuItem[] = [
+            ...(loaded
+              ? [
+                  {
+                    id: 'unload',
+                    label: 'Unload from memory',
+                    onSelect: () => runModelAction(() => window.vyotiq.dictationUnload())
+                  }
+                ]
+              : []),
+            {
+              id: 'delete',
+              label: 'Delete download',
+              danger: true,
+              separatorBefore: loaded,
+              onSelect: () =>
+                runModelAction(() => window.vyotiq.dictationDeleteCache({ modelId: model.id }))
+            }
+          ]
           return (
             <SettingsField
               key={model.id}
               id={fieldId}
               title={model.label}
-              hint={`${model.roleLabel} · ${model.language} · ${model.approxDownloadLabel}`}
-              help={`${model.ramHint}. Quantized q8 ONNX cached under app userData. Unload frees RAM; Delete cache removes the files.`}
-              wide
+              hint={modelHint(model, runtime)}
+              help={`${model.language} only. ${model.ramHint}. Quantised q8 ONNX, cached in app data.`}
+              below={
+                working ? (
+                  <ProgressBar
+                    percent={runtime?.progress != null ? runtime.progress * 100 : null}
+                    label={`${model.id} ${phaseForModel === 'loading' ? 'load' : 'download'} progress`}
+                  />
+                ) : failed ? (
+                  <p className="m-0 text-xs text-danger" role="alert">
+                    {runtime?.error ?? 'The model failed to load.'}
+                  </p>
+                ) : null
+              }
             >
-              <div className="flex w-full flex-col gap-2">
-                <p className="m-0 text-xs text-secondary">
-                  {statusLabel}
-                  {installed && inst.bytesOnDisk > 0
-                    ? ` · ${formatBytes(inst.bytesOnDisk)} on disk`
-                    : ''}
-                  {inUse ? ' · In use' : ''}
-                  {isRecommended ? ' · Recommended for this PC' : ''}
-                </p>
-                <VoiceProgressBar status={runtime} modelId={model.id} />
-                <VoiceModelError status={runtime} modelId={model.id} />
-                <div className="flex flex-wrap gap-2">
-                  {!installed ? (
-                    <Button
-                      type="button"
-                      variant="subtle"
-                      disabled={form.formLocked || busy || downloading}
-                      onClick={() =>
-                        runModelAction(() => window.vyotiq.dictationInstall({ modelId: model.id }))
-                      }
-                    >
-                      Install {model.label}
-                    </Button>
-                  ) : null}
-                   {installed && !inUse ? (
-                     <Button
-                       type="button"
-                       variant="subtle"
-                       disabled={form.formLocked || busy || downloading}
-                       onClick={() => patchLocalModelId(model.id)}
-                     >
-                       Use {model.label}
-                     </Button>
-                   ) : null}
-                  {loaded ? (
-                    <Button
-                      type="button"
-                      variant="subtle"
-                      disabled={form.formLocked || busy || downloading}
-                      onClick={() => runModelAction(() => window.vyotiq.dictationUnload())}
-                    >
-                      Unload {model.label}
-                    </Button>
-                  ) : null}
-                  {installed ? (
-                    <Button
-                      type="button"
-                      variant="danger"
-                      disabled={form.formLocked || busy || downloading}
-                      onClick={() =>
-                        runModelAction(() =>
-                          window.vyotiq.dictationDeleteCache({ modelId: model.id })
-                        )
-                      }
-                    >
-                      Delete {model.label} cache
-                    </Button>
-                  ) : null}
-                </div>
+              <div className="flex items-center gap-3">
+                {inUse ? <span className="text-caption font-medium text-accent">In use</span> : null}
+                {failed ? (
+                  <span className="text-xs text-danger">Error</span>
+                ) : working || !installed ? null : loaded ? (
+                  <span className="text-xs text-success">Ready · loaded</span>
+                ) : (
+                  <span className="text-xs text-muted">Ready · on disk</span>
+                )}
+                {!installed ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    aria-label={`Install ${model.label}`}
+                    pending={phaseForModel === 'downloading'}
+                    disabled={locked}
+                    onClick={() =>
+                      runModelAction(() => window.vyotiq.dictationInstall({ modelId: model.id }))
+                    }
+                  >
+                    Install
+                  </Button>
+                ) : null}
+                {installed && !inUse ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    aria-label={`Use ${model.label}`}
+                    disabled={locked}
+                    onClick={() => selectModel(model.id)}
+                  >
+                    Use
+                  </Button>
+                ) : null}
+                {installed ? <ModelMenu label={model.label} items={menuItems} disabled={locked} /> : null}
               </div>
             </SettingsField>
           )
         })}
       </SettingsGroup>
 
-      {actionError ? (
-        <p className="m-0 text-xs text-danger" role="alert">
-          {actionError}
-        </p>
-      ) : null}
-      {loadError ? (
-        <p className="m-0 text-xs text-danger" role="alert">
-          {loadError}
-        </p>
-      ) : null}
+      <SettingsGroup title="Composer">
+        <SelectField
+          id="dictation-waveform"
+          title="Waveform"
+          hint="The listening visualiser in the composer."
+          value={dictation.waveformStyle ?? 'bars'}
+          options={DICTATION_WAVEFORM_STYLE_OPTIONS}
+          width={140}
+          disabled={form.formLocked}
+          {...form.nestedDefaultMark('dictation', 'waveformStyle')}
+          onChange={(waveformStyle) => {
+            void form.runUpdate({ dictation: { ...dictation, waveformStyle } })
+          }}
+        />
+      </SettingsGroup>
     </SettingsStack>
   )
 }

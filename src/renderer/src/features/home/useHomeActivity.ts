@@ -74,6 +74,12 @@ export function useHomeActivity(
         setError(result.error)
       }
       setLoading(false)
+    }, (err: unknown) => {
+      // A rejected bridge call would otherwise leave "Reading receipts…" up for good.
+      if (generation !== generationRef.current) return
+      setData(null)
+      setError(err instanceof Error ? err.message : String(err))
+      setLoading(false)
     })
 
     return () => {

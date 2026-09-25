@@ -51,7 +51,7 @@ export function ToolFileBadge({
   return (
     <button
       type="button"
-      className="shrink-0 rounded-sm vy-transition hover:bg-surface-2/80 focus-visible:vy-focus-ring"
+      className="shrink-0 rounded-sm vy-transition hover:bg-surface-2 focus-visible:vy-focus-ring"
       aria-label={`Open ${target}`}
       title={`Open ${target}`}
       onClick={() => {
@@ -90,7 +90,7 @@ export function ToolPanelIcon({
   return (
     <button
       type="button"
-      className="shrink-0 rounded-sm vy-transition hover:bg-surface-2/80 focus-visible:vy-focus-ring"
+      className="shrink-0 rounded-sm vy-transition hover:bg-surface-2 focus-visible:vy-focus-ring"
       aria-label={label}
       title={label}
       onClick={() => onOpenPanel(panel)}
@@ -159,7 +159,7 @@ export function ProminentChrome({
       <div
         className={cn(
           'group flex w-full items-center vy-transition',
-          hasBody && 'hover:bg-surface/60'
+          hasBody && 'hover:bg-surface'
         )}
       >
         {leading ? <span className="flex shrink-0 items-center pl-3">{leading}</span> : null}

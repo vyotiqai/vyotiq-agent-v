@@ -5,15 +5,6 @@ import { tmpdir } from 'os'
 import { assembleContext, clearSystemPromptCache } from '@main/agent/context/assemble'
 import { ensureMemoryLayout } from '@main/agent/context/memory'
 import { clearWorkspaceSnapshotCache } from '@main/agent/context/workspaceSnapshot'
-import type { LlmProvider } from '@main/agent/providers/types'
-
-const mockProvider: LlmProvider = {
-  id: 'ollama',
-  listModels: async () => [],
-  streamChat: async function* () {
-    yield { type: 'done' }
-  }
-}
 
 const model = {
   id: 'test',
@@ -50,8 +41,6 @@ describe('assemble memory workspace seam', () => {
       model,
       toolsJsonEstimate: 50,
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
 
   it('reads memory from memoryWorkspacePath while the workspace snapshot stays on workspacePath', async () => {

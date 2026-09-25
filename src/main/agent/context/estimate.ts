@@ -1,7 +1,7 @@
-import type { ChatMessage, MessageContent } from '../../../shared/ipc'
+import type { ChatMessage } from '../../../shared/ipc'
 import { attachedFileToText } from '../../../shared/ipc'
 import type { ModelInfo } from '../../../shared/ipc/schemas/providers'
-import { estimateImageTokens, estimateImageTokensWithExpansion } from './imageTokens'
+import { estimateImageTokensWithExpansion } from './imageTokens'
 import {
   countTextTokens,
   countTextTokensAsync,
@@ -28,18 +28,58 @@ function estimateBinaryPartTokens(bytesApprox: number): number {
   return Math.max(256, Math.ceil(bytesApprox / 750))
 }
 
-function countContentTokens(content: MessageContent, encoding: EncodingName): number {
-  if (typeof content === 'string') return countTextTokens(content, encoding)
-  let n = 0
-  for (const part of content) {
-    if (part.type === 'image_url') n += estimateImageTokensWithExpansion(part.url)
-    else if (part.type === 'file') n += countTextTokens(attachedFileToText(part), encoding)
-    else if (part.type === 'audio') n += estimateBinaryPartTokens(Math.ceil((dataUrlBase64Length(part.url) * 3) / 4))
-    else if (part.type === 'file_native')
-      n += estimateBinaryPartTokens(Math.ceil((part.data.length * 3) / 4))
-    else n += countTextTokens(part.text, encoding)
+/**
+ * One message, split into what needs BPE and what does not.
+ *
+ * The single description of a countable message: `texts` go into one batched
+ * worker encode, `nonTextTokens` are heuristic and need no BPE at all. This was
+ * once duplicated across a synchronous and a batched estimator, which is how the
+ * two drifted; there is only one walk now.
+ */
+function messageParts(
+  message: ChatMessage,
+  countReasoningReplay: boolean
+): { texts: string[]; nonTextTokens: number } {
+  const texts: string[] = []
+  let nonTextTokens = 0
+
+  if (typeof message.content === 'string') {
+    texts.push(message.content)
+  } else {
+    for (const part of message.content) {
+      if (part.type === 'image_url') nonTextTokens += estimateImageTokensWithExpansion(part.url)
+      else if (part.type === 'file') texts.push(attachedFileToText(part))
+      else if (part.type === 'audio')
+        nonTextTokens += estimateBinaryPartTokens(
+          Math.ceil((dataUrlBase64Length(part.url) * 3) / 4)
+        )
+      else if (part.type === 'file_native')
+        nonTextTokens += estimateBinaryPartTokens(Math.ceil((part.data.length * 3) / 4))
+      else texts.push(part.text)
+    }
   }
-  return n
+
+  // Prefer reasoningState (wire replay) over UI thinking when both exist —
+  // counting both double-counts the same reasoning and triggers compaction early.
+  // When the provider does not replay reasoning on the wire (it strips prior-turn
+  // reasoning and regenerates thinking from context), skip replay-only fields
+  // entirely: counting them inflates the wire estimate severalfold above the
+  // real request.
+  if (countReasoningReplay) {
+    if (message.reasoningState) texts.push(JSON.stringify(message.reasoningState))
+    else if (message.thinking) texts.push(message.thinking)
+  }
+
+  if (message.toolCalls) {
+    for (const toolCall of message.toolCalls) {
+      texts.push(toolCall.name, toolCall.arguments)
+    }
+  }
+
+  // toolName is not part of `content`, so it is counted separately.
+  if (message.role === 'tool') texts.push(message.toolName ?? '')
+
+  return { texts, nonTextTokens }
 }
 
 export interface EstimateMessagesOptions {
@@ -62,43 +102,30 @@ export async function estimateMessagesTokensAsync(
   const encoding = encodingForModel(model)
   const countReasoningReplay = options?.countReasoningReplay !== false
 
-  // Prefix total cache: when the previously counted array's last message object is
-  // still the last message and the array only grew, the prefix total is still valid
-  // — only newly appended messages need counting. This turns the per-step O(N) full
-  // re-walk into O(new messages), and collapses the redundant 3x assembleContext
-  // calls during a compaction step (same array -> instant hit). Assumes messages are
-  // immutable per www: the existing WeakMap cache already relies on this.
-  if (messages.length === 0) {
-    messagesTotalCache = { tail: null, length: 0, total: 0, encoding, replay: countReasoningReplay }
-    return 0
-  }
+  const wholeArray = messagesTotalCache.get(messages)
   if (
-    messagesTotalCache &&
-    messagesTotalCache.encoding === encoding &&
-    messagesTotalCache.replay === countReasoningReplay &&
-    messages.length >= messagesTotalCache.length &&
-    // Immutable messages: when the previously-counted tail is still at index
-    // cache.length-1, the whole prefix [0, cache.length) is unchanged (it moved
-    // because new messages were appended), so only the appended tail is re-counted.
-    messages[messagesTotalCache.length - 1] === messagesTotalCache.tail
+    wholeArray &&
+    wholeArray.encoding === encoding &&
+    wholeArray.replay === countReasoningReplay
   ) {
-    let total = messagesTotalCache.total
-    for (let i = messagesTotalCache.length; i < messages.length; i++) {
-      total += estimateOneMessageTokens(messages[i]!, encoding, countReasoningReplay)
-    }
-    messagesTotalCache = {
-      tail: messages[messages.length - 1],
-      length: messages.length,
-      total,
-      encoding,
-      replay: countReasoningReplay
-    }
+    return wholeArray.total
+  }
+
+  const memoize = (total: number): number => {
+    messagesTotalCache.set(messages, { total, encoding, replay: countReasoningReplay })
     return total
   }
 
+  if (messages.length === 0) return memoize(0)
+
   // Single worker round-trip for all uncached messages (not one await per message).
   const texts: Array<{ text: string; encoding: EncodingName }> = []
-  const spans: Array<{ message: ChatMessage; images: number; start: number; end: number }> = []
+  const spans: Array<{
+    message: ChatMessage
+    nonTextTokens: number
+    start: number
+    end: number
+  }> = []
   let total = 0
 
   for (const message of messages) {
@@ -108,70 +135,21 @@ export async function estimateMessagesTokensAsync(
       continue
     }
     const start = texts.length
-    let images = 0
-    if (typeof message.content === 'string') {
-      texts.push({ text: message.content, encoding })
-    } else {
-      for (const part of message.content) {
-        if (part.type === 'image_url') images += estimateImageTokensWithExpansion(part.url)
-        else if (part.type === 'file') texts.push({ text: attachedFileToText(part), encoding })
-        else if (part.type === 'audio')
-          images += estimateBinaryPartTokens(Math.ceil((dataUrlBase64Length(part.url) * 3) / 4))
-        else if (part.type === 'file_native')
-          images += estimateBinaryPartTokens(Math.ceil((part.data.length * 3) / 4))
-        else texts.push({ text: part.text, encoding })
-      }
-    }
-    // Prefer reasoningState (wire replay) over UI thinking when both exist —
-    // counting both double-counts the same reasoning and triggers compaction early.
-    // When the provider does not replay reasoning on the wire (it strips prior-turn
-    // reasoning and regenerates thinking from context), skip replay-only fields
-    // entirely: counting them inflates the wire estimate severalfold above the
-    // real request.
-    if (countReasoningReplay) {
-      if (message.reasoningState) {
-        texts.push({ text: JSON.stringify(message.reasoningState), encoding })
-      } else if (message.thinking) {
-        texts.push({ text: message.thinking, encoding })
-      }
-    }
-    if (message.toolCalls) {
-      for (const toolCall of message.toolCalls) {
-        texts.push({ text: toolCall.name, encoding }, { text: toolCall.arguments, encoding })
-      }
-    }
-    if (message.role === 'tool') {
-      texts.push({ text: message.toolName ?? '', encoding })
-    }
-    spans.push({ message, images, start, end: texts.length })
+    const { texts: messageTexts, nonTextTokens } = messageParts(message, countReasoningReplay)
+    for (const text of messageTexts) texts.push({ text, encoding })
+    spans.push({ message, nonTextTokens, start, end: texts.length })
   }
 
-  if (spans.length === 0) {
-    messagesTotalCache = {
-      tail: messages[messages.length - 1],
-      length: messages.length,
-      total,
-      encoding,
-      replay: countReasoningReplay
-    }
-    return total
-  }
+  if (spans.length === 0) return memoize(total)
 
   const counts = await countTextsTokensAsync(texts)
   for (const span of spans) {
-    let n = span.images
+    let n = span.nonTextTokens
     for (let i = span.start; i < span.end; i++) n += counts[i] ?? 0
     messageTokenCache.set(span.message, { encoding, replay: countReasoningReplay, tokens: n })
     total += n
   }
-  messagesTotalCache = {
-    tail: messages[messages.length - 1]!,
-    length: messages.length,
-    total,
-    encoding,
-    replay: countReasoningReplay
-  }
-  return total
+  return memoize(total)
 }
 
 const messageTokenCache = new WeakMap<
@@ -180,48 +158,33 @@ const messageTokenCache = new WeakMap<
 >()
 
 /**
- * Tracks the last fully-counted messages array so a growing array only re-counts
- * its appended tail. Keyed by the last message object reference (assumed immutable).
+ * Whole-array totals, keyed on the array object.
+ *
+ * It can only ever answer for the *identical* array, which is the whole point. The
+ * heuristic this replaced keyed on (length, identity of the message at
+ * `length - 1`) and accepted any array at least as long whose tail message
+ * matched — exactly the shape every history rewrite in this pipeline produces.
+ * `trimToolResults` and `stubPastSkillInvocationsInMessages` both return a
+ * *same-length* array whose tail passes through by identity and whose middle
+ * bodies are replaced, so the post-trim re-count in `assembleContext` hit the
+ * cache and served the pre-trim total: the tokens the wire trim had just
+ * reclaimed never reached `estimatedTokens`, `layers.history` or `overflow`, and a
+ * run could be sent to the summarizer on room it had already freed.
+ *
+ * Weak, not a single field: a field would pin the whole last-assembled wire
+ * history — every kept tool body and every `reasoningState` — for the life of the
+ * process, and would only ever describe one array while parallel runs assemble
+ * against several.
+ *
+ * Dropping the incremental path costs nothing measurable. The per-message WeakMap
+ * above still skips every unchanged message, so a grown array is N map lookups
+ * plus BPE for the appended tail only — and that BPE now goes through the worker
+ * batch instead of the synchronous main-thread encode the incremental path used.
  */
-let messagesTotalCache: {
-  tail: object | null
-  length: number
-  total: number
-  encoding: EncodingName
-  replay: boolean
-} | null = null
-
-function estimateOneMessageTokens(
-  message: ChatMessage,
-  encoding: EncodingName,
-  countReasoningReplay: boolean
-): number {
-  const cached = messageTokenCache.get(message)
-  if (cached && cached.encoding === encoding && cached.replay === countReasoningReplay) {
-    return cached.tokens
-  }
-
-  let n = countContentTokens(message.content, encoding)
-  if (countReasoningReplay) {
-    if (message.reasoningState) {
-      n += countTextTokens(JSON.stringify(message.reasoningState), encoding)
-    } else if (message.thinking) {
-      n += countTextTokens(message.thinking, encoding)
-    }
-  }
-  if (message.toolCalls) {
-    for (const toolCall of message.toolCalls) {
-      n +=
-        countTextTokens(toolCall.name, encoding) + countTextTokens(toolCall.arguments, encoding)
-    }
-  }
-  if (message.role === 'tool') {
-    // toolName is not in `content`; do not re-count content (already counted above).
-    n += countTextTokens(message.toolName ?? '', encoding)
-  }
-  messageTokenCache.set(message, { encoding, replay: countReasoningReplay, tokens: n })
-  return n
-}
+const messagesTotalCache = new WeakMap<
+  readonly ChatMessage[],
+  { total: number; encoding: EncodingName; replay: boolean }
+>()
 
 /**
  * Auto-compact trigger decision against a hard window threshold.

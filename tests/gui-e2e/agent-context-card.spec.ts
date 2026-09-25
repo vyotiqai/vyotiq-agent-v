@@ -1,0 +1,202 @@
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { FSWatcher } from 'node:fs'
+import { expect, test } from '@playwright/test'
+import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
+import { requireActivePath } from './helpers/seedWorkspace'
+
+/**
+ * The empty-session "what the agent knows" strip, asserted on the surface the
+ * app actually renders. ChatView delegates to a pane column whenever a pane
+ * layout exists — which is always — so a unit test of the card, or of the
+ * single-pane branch, proves nothing about what ships. This regressed once by
+ * the pane column simply not forwarding `emptyLabel`/`workspacePath`, and the
+ * card fails closed (renders nothing), so the omission was silent.
+ */
+
+let launched: LaunchedApp
+let workspacePath: string
+
+/** Budget for one watcher-to-render round trip on the slowest CI runner. */
+const PUSH_WAIT = 45_000
+
+test.beforeAll(async () => {
+  workspacePath = mkdtempSync(join(tmpdir(), 'vyotiq-agent-context-ws-'))
+  mkdirSync(join(workspacePath, '.vyotiq', 'rules'), { recursive: true })
+  // Two signals the card must report from real disk state, not placeholders.
+  writeFileSync(join(workspacePath, 'AGENTS.md'), '# rules\n', 'utf8')
+  writeFileSync(join(workspacePath, '.vyotiq', 'rules', 'style.md'), '- be brief\n', 'utf8')
+
+  launched = await launchApp({})
+  const addRes = await launched.window.evaluate(
+    async (path) => window.vyotiq.addWorkspace(path),
+    workspacePath
+  )
+  expect(addRes.ok).toBe(true)
+  if (!addRes.ok) throw new Error(addRes.error)
+  workspacePath = requireActivePath(addRes.data.activePath)
+
+  await launched.window.evaluate(async () => {
+    await window.vyotiq.setSettings({ toolApprovalOnboardingDone: true })
+    localStorage.removeItem('vyotiq.chatPaneLayout')
+  })
+  await launched.window.reload()
+  await launched.window.waitForLoadState('domcontentloaded')
+  await expect(launched.window.locator('body')).toBeVisible({ timeout: 30_000 })
+})
+
+// When the live test fails (it has only ever failed on the windows-latest
+// runner), print what main logged about the watcher: that runner cannot be
+// reproduced locally, so its own log is the evidence.
+test.afterEach(async () => {
+  const testInfo = test.info()
+  if (testInfo.status === testInfo.expectedStatus || !launched) return
+  const report: string[] = [`workspacePath=${workspacePath}`, `osEvents=${JSON.stringify(osEvents)}`]
+  // Is main still answering at all? A watcher call that blocks would freeze it.
+  const mainAnswers = await Promise.race([
+    launched.app.evaluate(() => 'yes').catch((err: unknown) => `threw: ${String(err)}`),
+    new Promise<string>((resolve) => setTimeout(() => resolve('no answer in 5s'), 5_000))
+  ])
+  report.push(`main process answers: ${mainAnswers}`)
+  const dir = join(launched.userDataDir, 'logs')
+  report.push(`logDir=${dir} exists=${existsSync(dir)}`)
+  if (existsSync(dir)) {
+    for (const name of readdirSync(dir)) {
+      const lines = readFileSync(join(dir, name), 'utf8').split(/\r?\n/)
+      const hits = lines.filter((line) => /agent context/i.test(line))
+      report.push(`--- ${name}: ${lines.length} lines, ${hits.length} about the watcher`)
+      report.push(...(hits.length > 0 ? hits.slice(-60) : lines.slice(-30)))
+    }
+  }
+  await testInfo.attach('watcher-diagnostics', { body: report.join('\n'), contentType: 'text/plain' })
+  console.log(`[gui-e2e] watcher diagnostics\n${report.join('\n')}`)
+})
+
+/** What the OS itself delivered to this test process for the workspace, as a control. */
+const osEvents: string[] = []
+let control: FSWatcher | null = null
+
+test.afterAll(async () => {
+  control?.close()
+  if (launched) await closeApp(launched)
+  try {
+    rmSync(workspacePath, { recursive: true, force: true })
+  } catch {
+    /* ignore */
+  }
+})
+
+test('empty new chat shows the agent context card', async () => {
+  const { window } = launched
+
+  const expand = window.getByRole('button', { name: /show navigator/i })
+  if (await expand.isVisible().catch(() => false)) await expand.click()
+
+  // Filter to the seeded workspace so New task starts there and the card
+  // reports its files, not another's.
+  await window.locator('[data-navigator] [aria-haspopup="menu"]').first().click()
+  await window.getByRole('menuitemcheckbox', { name: /agent-context-ws/i }).click()
+  await window.getByRole('button', { name: /new task/i }).first().click()
+
+  await expect(window.getByRole('combobox', { name: 'Brief' })).toBeVisible({ timeout: 20_000 })
+
+  // The header names the new task and where it will run.
+  const header = window.locator('[data-task-header]')
+  await expect(header).toContainText('New task')
+  await expect(header).toContainText(/in vyotiq-agent-context-ws/i)
+  // The brief's aside says what the agent will see.
+  const card = window.getByRole('complementary', { name: 'What the agent will see' })
+  await expect(card).toBeVisible({ timeout: 15_000 })
+  // Seeded rules must surface — proves the aside reads live workspace state.
+  await expect(card).toContainText('AGENTS.md')
+  await expect(card).toContainText('+ 1 rule file')
+
+  // Every reading is labelled, and the workspace name is NOT repeated here —
+  // the header above already carries it.
+  for (const label of ['Branch', 'Rules', 'Memory', 'Index', 'Tools']) {
+    await expect(card.getByText(label, { exact: true })).toBeVisible()
+  }
+  await expect(card).not.toContainText(/vyotiq-agent-context-ws/i)
+})
+
+test('the aside follows the workspace live, pushed not polled', async () => {
+  const { window } = launched
+  const card = window.getByRole('complementary', { name: 'What the agent will see' })
+  await expect(card).toBeVisible({ timeout: 15_000 })
+
+  // Count pushes from a second subscriber: proves main emits per real change
+  // rather than the card re-reading on a timer.
+  await window.evaluate(() => {
+    const sink = window as unknown as { __accPushes: unknown[] }
+    sink.__accPushes = []
+    window.vyotiq.onAgentContextChanged((payload) => {
+      sink.__accPushes.push(payload.context)
+    })
+  })
+  const pushes = (): Promise<number> =>
+    window.evaluate(() => (window as unknown as { __accPushes: unknown[] }).__accPushes.length)
+
+  // Nothing has been written yet, so nothing should have been pushed.
+  await expect(card).toContainText('None')
+  expect(await pushes()).toBe(0)
+
+  // Each step waits on a whole chain: fs event, debounce, rebuild, IPC push,
+  // render. PUSH_WAIT is generous so a slow runner is never the reason this
+  // fails -- but note that on windows-latest it fails anyway, at 45s, and the
+  // card is still showing its boot-time summary (seeded rules present, memory
+  // "None"). So the rebuild never runs there at all; it is not a budget that
+  // was too tight. Ruled out with direct probes: Windows reports a bare
+  // `.vyotiq` and a `rename`/`change` pair for a directory created under
+  // `.vyotiq` (both pass the name filter), canonicalizeWorkspacePath is
+  // string-only so both sides hold the same form, and the marketplace repair
+  // that boot awaits is a no-op on a profile with nothing installed. It runs
+  // green 3/3 against the real app on Windows, and green on ubuntu and macOS.
+  // The assertions stay exact -- push counts are checked after every step, so a
+  // push that never arrives fails, and step 4 still catches a polling loop.
+
+  // A control, outside the app: does the OS deliver events for this folder?
+  control = watch(workspacePath, { recursive: true }, (event, name) => {
+    if (osEvents.length < 40) osEvents.push(`${event}:${String(name)}`)
+  })
+
+  // 1. First memory note — the directory does not exist yet, so this also
+  //    proves the watcher arms paths that appear after it started. Notes live
+  //    in `notes/`, where memory_write puts them.
+  mkdirSync(join(workspacePath, '.vyotiq', 'memory', 'notes'), { recursive: true })
+  writeFileSync(join(workspacePath, '.vyotiq', 'memory', 'notes', 'remembered.md'), '- remembered\n', 'utf8')
+  await expect(card).toContainText('1 note', { timeout: PUSH_WAIT })
+  await expect(card).toContainText('remembered')
+  expect(await pushes()).toBe(1)
+
+  // 2. A rule file appearing at the workspace root.
+  writeFileSync(join(workspacePath, '.cursorrules'), 'be brief\n', 'utf8')
+  await expect(card).toContainText('.cursorrules', { timeout: PUSH_WAIT })
+  expect(await pushes()).toBe(2)
+
+  // 3. `git init` in a workspace that was not a repo: the branch reading has
+  //    to stop saying "Not a repo" even though `.git` did not exist when the
+  //    watcher started, and even though branch reads are cached.
+  await expect(card).toContainText('Not a repository')
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: workspacePath, stdio: 'ignore' })
+  }
+  git('init', '-q')
+  git('config', 'user.email', 'e2e@example.com')
+  git('config', 'user.name', 'e2e')
+  git('checkout', '-q', '-b', 'live-branch')
+  git('add', '-A')
+  git('commit', '-q', '-m', 'seed')
+  await expect(card).toContainText('live-branch', { timeout: PUSH_WAIT })
+
+  // 4. Quiet workspace stays quiet — no polling loop behind the strip.
+  const settled = await pushes()
+  await window.waitForTimeout(2_000)
+  expect(await pushes()).toBe(settled)
+
+  // Everything above is still on screen together, from one initial read.
+  await expect(card).toContainText('live-branch')
+  await expect(card).toContainText('.cursorrules')
+  await expect(card).toContainText('1 note')
+})

@@ -30,13 +30,28 @@ export function isOptionalBuiltinName(name: string): boolean {
   return OPTIONAL_BUILTIN_NAMES.has(name)
 }
 
+/**
+ * Per-definition estimate cache. A catalog rebuild measures every def twice —
+ * once for the wire catalog, once for the meter's wire/deferred split — and the
+ * expensive half is `JSON.stringify` over a nested JSON-Schema, which the
+ * tokenizer's own text cache cannot skip because it only sees the result.
+ * Keyed on the definition object, so a rebuilt catalog re-measures and a
+ * discarded one is collected.
+ */
+const toolDefTokens = new WeakMap<ToolDefinition, number>()
+
 /** BPE token estimate of one wire tool definition (JSON shape). */
 export function estimateToolDefTokens(tool: ToolDefinition): number {
+  const cached = toolDefTokens.get(tool)
+  if (cached !== undefined) return cached
+  let tokens: number
   try {
-    return estimateTextTokens(JSON.stringify(tool))
+    tokens = estimateTextTokens(JSON.stringify(tool))
   } catch {
-    return 200
+    tokens = 200
   }
+  toolDefTokens.set(tool, tokens)
+  return tokens
 }
 
 /** Stable fingerprint of the step tool catalog (names only, order-sensitive). */

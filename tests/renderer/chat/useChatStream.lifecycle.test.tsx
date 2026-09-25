@@ -470,8 +470,8 @@ describe('useChatStream', () => {
       runId: 'run-1',
       onAgentModeChange
     })
-    controller.handleEvent({ type: 'mode_changed', runId: 'run-1', mode: 'plan' })
-    expect(onAgentModeChange).toHaveBeenCalledWith('plan')
+    controller.handleEvent({ type: 'mode_changed', runId: 'run-1', mode: 'ask' })
+    expect(onAgentModeChange).toHaveBeenCalledWith('ask')
     controller.dispose()
   })
 
@@ -513,11 +513,8 @@ describe('useChatStream', () => {
       }
     })
     const loadRunEvents = vi.fn().mockResolvedValue({ ok: true, data: [] })
-    // @ts-expect-error test bridge
     window.vyotiq.listActiveRuns = listActiveRuns
-    // @ts-expect-error test bridge
     window.vyotiq.loadRun = loadRun
-    // @ts-expect-error test bridge
     window.vyotiq.loadRunEvents = loadRunEvents
 
     const controller = createChatStreamController({

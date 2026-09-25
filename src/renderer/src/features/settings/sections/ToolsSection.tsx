@@ -1,314 +1,229 @@
-import { useEffect, useRef, useState } from 'react'
-import type { TerminalShell, ToolApprovalMode } from '@shared/ipc'
-import { Menu, Button, Switch, Textarea } from '@renderer/lib/ui'
+import { useEffect, useId, useRef, useState } from 'react'
+import { Button, Input } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
-import { TERMINAL_SCREEN_READER_OPTIONS, TERMINAL_SHELL_OPTIONS, TOOL_APPROVAL_OPTIONS } from '../constants'
+import type { SettingsViewProps } from '../types'
+import {
+  SEARCH_ENGINE_OPTIONS,
+  TERMINAL_SCREEN_READER_OPTIONS,
+  TERMINAL_SHELL_OPTIONS
+} from '../constants'
+import { AutoTextarea } from '../components/AutoTextarea'
+import { SegmentedField } from '../components/SegmentedField'
+import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
-import { ToolCatalogCard } from '../components/ToolCatalogCard'
+import { SwitchField } from '../components/SwitchField'
+import { ToolCatalog, toolCatalogSummary, useToolCatalog } from '../components/ToolCatalog'
 import {
   formatBrowserDomainAllowlist,
   parseBrowserDomainAllowlist
 } from '../utils/settingsHelpers'
 
-export function ToolsSection({ form }: { form: SettingsFormState }) {
-  const persistedAllowlist = form.settings.browserDomainAllowlist
-  const allowlistKey = (persistedAllowlist ?? []).join('\n')
+/**
+ * Text settings that save on blur keep a local draft; closing Settings with
+ * the field still focused must not drop what was typed.
+ */
+function useFlushOnUnmount(flush: () => void): void {
+  const ref = useRef(flush)
+  ref.current = flush
+  useEffect(() => () => ref.current(), [])
+}
+
+/** "Only example.com, *.corp.internal and 2 more." */
+function allowlistHint(hosts: readonly string[]): string {
+  if (hosts.length === 0) return 'Empty: the agent’s browser may open any site.'
+  const named = hosts.slice(0, 2)
+  const rest = hosts.length - named.length
+  if (rest === 0) return `Only ${named.join(' and ')}.`
+  return `Only ${named.join(', ')} and ${rest} more.`
+}
+
+export function ToolsSection({
+  form,
+  onOpenMarketplace
+}: {
+  form: SettingsFormState
+  onOpenMarketplace?: SettingsViewProps['onOpenMarketplace']
+}) {
+  const settings = form.settings
+  const catalog = useToolCatalog()
+  const allowlistPanelId = useId()
+
+  const persistedAllowlist = settings.browserDomainAllowlist ?? []
+  const allowlistKey = persistedAllowlist.join('\n')
+  const [allowlistOpen, setAllowlistOpen] = useState(false)
   const [allowlistDraft, setAllowlistDraft] = useState(() =>
     formatBrowserDomainAllowlist(persistedAllowlist)
   )
-
   useEffect(() => {
     setAllowlistDraft(allowlistKey)
   }, [allowlistKey])
-
-  const commitBrowserDomainAllowlist = (): void => {
+  const commitAllowlist = (): void => {
     const next = parseBrowserDomainAllowlist(allowlistDraft)
-    const prev = persistedAllowlist ?? []
-    if (next.join('\n') === prev.join('\n')) return
+    if (next.join('\n') === allowlistKey) return
     void form.runUpdate({ browserDomainAllowlist: next })
   }
-  const commitAllowlistRef = useRef(commitBrowserDomainAllowlist)
-  commitAllowlistRef.current = commitBrowserDomainAllowlist
-  useEffect(() => () => commitAllowlistRef.current(), [])
+  useFlushOnUnmount(commitAllowlist)
+  // Opening the list is asking to edit it: put the caret there.
+  useEffect(() => {
+    if (!allowlistOpen) return
+    document.getElementById(allowlistPanelId)?.querySelector('textarea')?.focus()
+  }, [allowlistOpen, allowlistPanelId])
+
+  const persistedDiagnostics = settings.diagnosticsCommand ?? ''
+  const [diagnosticsDraft, setDiagnosticsDraft] = useState(persistedDiagnostics)
+  useEffect(() => {
+    setDiagnosticsDraft(persistedDiagnostics)
+  }, [persistedDiagnostics])
+  const commitDiagnostics = (): void => {
+    const next = diagnosticsDraft.trim()
+    if (next === persistedDiagnostics) return
+    void form.runUpdate({ diagnosticsCommand: next })
+  }
+  useFlushOnUnmount(commitDiagnostics)
+
   return (
     <SettingsStack>
-      {form.workspaceOverrideActive ? (
-        <p className="m-0 rounded-xl bg-surface px-4 py-3 text-xs text-secondary">
-          Workspace override on — tool approval applies to this workspace only. Shell,
-          search engine, browser domain allowlist, and automatic mode switching stay app-wide.
-        </p>
-      ) : null}
-
-      <SettingsGroup title="Tool catalog">
+      <SettingsGroup title="Terminal">
+        <SelectField
+          id="terminal-shell"
+          title="Shell"
+          label="Terminal shell"
+          help="For the agent's terminal and the terminal panel. Auto uses PowerShell on Windows when it is available."
+          value={settings.terminalShell ?? 'auto'}
+          options={TERMINAL_SHELL_OPTIONS}
+          width={140}
+          disabled={form.formLocked}
+          {...form.defaultMark('terminalShell')}
+          onChange={(terminalShell) => {
+            void form.runUpdate({ terminalShell })
+          }}
+        />
         <SettingsField
-          id="tools-catalog"
-          title="Live tool catalog"
-          hint="What the agent can actually call right now. Updates live as servers connect, settings change, or runs start."
-          help="Built-in tools ship with the app runtime and cannot be removed. MCP tools come from connected servers: add or remove them via the server cards — enable/disable a server, or edit its allowed/denied tool lists. Inactive tools show the exact reason."
-          wide
+          id="diagnostics-command"
+          title="Diagnostics command"
+          hint="What the agent runs to check its work after edits."
+          help="Runs for both typecheck and lint. Leave blank to use the project's typecheck and lint scripts, falling back to tsc and eslint."
+          {...form.defaultMark('diagnosticsCommand')}
         >
-          <ToolCatalogCard />
-        </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup title="Approval">
-        <SettingsField
-          id="tool-approval"
-          title="Tool approval"
-          hint="Ask before the agent runs tools. Off by default."
-          help="Allowlisted tools never ask. Mutating gates edits/commands; All gates every tool including reads."
-          wide
-        >
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Menu
-                aria-label="Tool approval"
-                value={form.toolApproval.mode}
-                options={TOOL_APPROVAL_OPTIONS}
-                searchable={false}
-                placement="down"
-                disabled={form.formLocked}
-                onChange={(v) => {
-                  void form.runAgentUpdate({
-                    toolApproval: { ...form.toolApproval, mode: v as ToolApprovalMode }
-                  })
-                }}
-              />
-              {form.toolApproval.allowlist.length > 0 ? (
-                <Button
-                  variant="subtle"
-                  disabled={form.formLocked}
-                  onClick={() => {
-                    void form.runAgentUpdate({
-                      toolApproval: { ...form.toolApproval, allowlist: [] }
-                    })
-                  }}
-                >
-                  Clear {form.toolApproval.allowlist.length} allowed
-                </Button>
-              ) : null}
-            </div>
-            {form.toolApproval.allowlist.length > 0 ? (
-              <ul className="m-0 list-none space-y-1 pl-0 text-xs text-tertiary">
-                {form.toolApproval.allowlist.map((name) => (
-                  <li key={name} className="flex items-center justify-between gap-2 font-mono">
-                    <span className="min-w-0 truncate">{name}</span>
-                    <Button
-                      variant="subtle"
-                      disabled={form.formLocked}
-                      onClick={() => {
-                        void form.runAgentUpdate({
-                          toolApproval: {
-                            ...form.toolApproval,
-                            allowlist: form.toolApproval.allowlist.filter((entry) => entry !== name)
-                          }
-                        })
-                      }}
-                    >
-                      Remove
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+          {/* Sized by the wrapper; Input's own `w-full` would beat a width
+              passed through className (no tailwind-merge). */}
+          <div className="w-[240px]">
+            <Input
+              size="sm"
+              mono
+              placeholder="Auto-detect"
+              aria-label="Diagnostics command"
+              spellCheck={false}
+              disabled={form.formLocked}
+              value={diagnosticsDraft}
+              onChange={(e) => setDiagnosticsDraft(e.target.value)}
+              onBlur={commitDiagnostics}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  e.currentTarget.blur()
+                }
+              }}
+            />
           </div>
         </SettingsField>
-
-        <SettingsField
-          id="mcp-tools-protection"
-          title="MCP tools protection"
-          hint="Ask before the agent runs tools from connected MCP servers, even when tool approval is off."
-          help="Applies to mcp__* server tools. Built-in MCP catalog tools (list, pin, release) follow tool approval. Off = MCP tools follow the global tool approval mode only."
-        >
-          <Switch
-            size="md"
-            checked={form.toolApproval.mcpProtection !== false}
-            disabled={form.formLocked}
-            label="MCP tools protection"
-            onCheckedChange={(checked) => {
-              void form.runAgentUpdate({
-                toolApproval: { ...form.toolApproval, mcpProtection: checked }
-              })
-            }}
-          />
-        </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup title="Terminal">
-        <SettingsField
-          id="terminal-shell"
-          title="Terminal shell"
-          hint="Shell for the terminal tool."
-          help="Auto prefers PowerShell on Windows when available."
-        >
-          <Menu
-            aria-label="Terminal shell"
-            value={form.settings.terminalShell ?? 'auto'}
-            options={TERMINAL_SHELL_OPTIONS}
-            searchable={false}
-            placement="down"
-            disabled={form.formLocked}
-            onChange={(v) => {
-              void form.runUpdate({ terminalShell: v as TerminalShell })
-            }}
-          />
-        </SettingsField>
-
-        <SettingsField
+        <SelectField
           id="terminal-screen-reader"
-          title="Terminal screen reader"
-          hint="Accessibility mirror for terminal output."
-          help="Auto enables it only when a screen reader or assistive technology is detected. Always on costs extra CPU on fast-scrolling output because xterm maintains a parallel accessibility DOM for every chunk."
-        >
-          <Menu
-            aria-label="Terminal screen reader"
-            value={form.settings.terminalScreenReader ?? 'auto'}
-            options={TERMINAL_SCREEN_READER_OPTIONS}
-            searchable={false}
-            placement="down"
-            disabled={form.formLocked}
-            onChange={(v) => {
-              void form.runUpdate({
-                terminalScreenReader: v as 'auto' | 'on' | 'off'
-              })
-            }}
-          />
-        </SettingsField>
+          title="Screen reader mode"
+          label="Terminal screen reader"
+          hint="Accessible terminal output for assistive technology."
+          help="Auto turns it on only when a screen reader is detected. Always on costs CPU on fast output, because xterm keeps a parallel accessibility DOM for every chunk."
+          value={settings.terminalScreenReader ?? 'auto'}
+          options={TERMINAL_SCREEN_READER_OPTIONS}
+          width={140}
+          disabled={form.formLocked}
+          {...form.defaultMark('terminalScreenReader')}
+          onChange={(terminalScreenReader) => {
+            void form.runUpdate({ terminalScreenReader })
+          }}
+        />
       </SettingsGroup>
 
       <SettingsGroup title="Browser">
-        <SettingsField
-          id="browser-domain-allowlist"
-          title="Browser domain allowlist"
-          hint="When non-empty, the agent browser may only navigate to listed hosts. Empty = allow all."
-          help="One hostname per line (or comma-separated). Exact match (example.com) or wildcard suffix (*.example.com). Trailing dots ignored; case-insensitive. Paste full URLs to extract the hostname. Checked on every navigation and redirect."
-          wide
-        >
-          <Textarea
-            className="min-h-[72px] font-mono text-xs"
-            aria-label="Browser domain allowlist"
-            placeholder={'example.com\n*.corp.internal'}
-            disabled={form.formLocked}
-            rows={4}
-            value={allowlistDraft}
-            onChange={(e) => {
-              setAllowlistDraft(e.target.value)
-            }}
-            onBlur={() => {
-              commitBrowserDomainAllowlist()
-            }}
-          />
-          {allowlistKey ? (
-            <p className="m-0 text-xs text-tertiary">
-              {(persistedAllowlist ?? []).length} domain
-              {(persistedAllowlist ?? []).length === 1 ? '' : 's'} enforced — clear the field to
-              allow all hosts.
-            </p>
-          ) : null}
-        </SettingsField>
-
-        <SettingsField
+        <SegmentedField
           id="search-engine"
           title="Search engine"
-          hint="Used by browser_search in the embedded agent browser."
-          help="DuckDuckGo, Bing, or Google for the browser_search tool."
+          value={settings.searchEngine}
+          options={SEARCH_ENGINE_OPTIONS}
+          disabled={form.formLocked}
+          {...form.defaultMark('searchEngine')}
+          onChange={(searchEngine) => {
+            void form.runUpdate({ searchEngine })
+          }}
+        />
+        <SettingsField
+          id="browser-domain-allowlist"
+          title="Allowed sites"
+          hint={allowlistHint(persistedAllowlist)}
+          help="One hostname per line, or comma-separated. Exact (example.com) or wildcard (*.example.com), case-insensitive; a pasted URL keeps its host. Checked on every navigation and redirect."
+          {...form.defaultMark('browserDomainAllowlist')}
+          below={
+            allowlistOpen ? (
+              <div id={allowlistPanelId}>
+                <AutoTextarea
+                  className="font-mono"
+                  aria-label="Allowed sites"
+                  placeholder={'example.com\n*.corp.internal'}
+                  spellCheck={false}
+                  maxRows={8}
+                  disabled={form.formLocked}
+                  value={allowlistDraft}
+                  onChange={(e) => setAllowlistDraft(e.target.value)}
+                  onBlur={commitAllowlist}
+                />
+              </div>
+            ) : null
+          }
         >
-          <Menu
-            aria-label="Search engine"
-            value={form.settings.searchEngine}
-            options={[
-              { value: 'duckduckgo', label: 'DuckDuckGo' },
-              { value: 'bing', label: 'Bing' },
-              { value: 'google', label: 'Google' }
-            ]}
-            searchable={false}
-            placement="down"
-            disabled={form.formLocked}
-            onChange={(v) => {
-              void form.runUpdate({ searchEngine: v as 'duckduckgo' | 'bing' | 'google' })
-            }}
-          />
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-expanded={allowlistOpen}
+            aria-controls={allowlistOpen ? allowlistPanelId : undefined}
+            onClick={() => setAllowlistOpen((open) => !open)}
+          >
+            {allowlistOpen ? 'Done' : 'Edit list'}
+          </Button>
         </SettingsField>
       </SettingsGroup>
 
-      <SettingsGroup title="Runs">
-        <SettingsField
-          id="auto-resume-interrupted"
-          title="Auto-resume interrupted runs"
-          hint="When on, opening an interrupted chat resumes automatically instead of showing Continue."
-          help="Only applies to the chat you open — does not resume every interrupted run in the workspace."
-        >
-          <Switch
-            size="md"
-            checked={form.settings.autoResumeInterruptedRuns ?? false}
-            disabled={form.formLocked}
-            label="Auto-resume interrupted runs"
-            onCheckedChange={(checked) => {
-              void form.runUpdate({ autoResumeInterruptedRuns: checked })
-            }}
-          />
-        </SettingsField>
-
-        <SettingsField
-          id="max-chat-panes"
-          title="Max chat panes"
-          hint="How many split session panes can show side by side. Auto fits as many 280px columns as the window allows."
-          help="Auto derives the limit from the window width (hard cap 6). A fixed limit may exceed what fits — the pane row scrolls horizontally."
-        >
-          <Menu
-            aria-label="Max chat panes"
-            value={String(form.settings.maxChatPanes ?? 0)}
-            options={[
-              { value: '0', label: 'Auto (fits window)' },
-              { value: '1', label: '1' },
-              { value: '2', label: '2' },
-              { value: '3', label: '3' },
-              { value: '4', label: '4' },
-              { value: '5', label: '5' },
-              { value: '6', label: '6' }
-            ]}
-            searchable={false}
-            placement="down"
-            disabled={form.formLocked}
-            onChange={(v) => {
-              void form.runUpdate({ maxChatPanes: Number(v) })
-            }}
-          />
-        </SettingsField>
-
-        <SettingsField
-          id="auto-mode-switch"
-          title="Automatic mode switching"
-          hint="Agent may call switch_mode mid-run. Applies at next step of a live run. Default on."
-          help="When off, only you change mode (composer picker or slash). When on, the agent may move between ask, plan, and agent as the task phase changes."
-        >
-          <Switch
-            size="md"
-            checked={form.settings.autoModeSwitch ?? false}
-            disabled={form.formLocked}
-            label="Automatic mode switching"
-            onCheckedChange={(checked) => {
-              void form.runUpdate({ autoModeSwitch: checked })
-            }}
-          />
-        </SettingsField>
-
-        <SettingsField
+      <SettingsGroup title="MCP">
+        <SwitchField
           id="mcp-tool-loading"
           title="Preload every MCP tool"
-          hint="Off (default): the agent sees each connected server's tool names and loads the schemas it needs. Applies at the next step of a live run."
-          help="Tool schemas are re-sent on every step. Four connected servers measured 67k tokens — 8% of a 850k window — whether or not the run touched MCP. On demand keeps that out of the window until a run asks; the agent loads a server with request_mcp_tools, and calling a tool directly loads it too. Marketplace has a per-server override for a server you want available with no wait."
+          hint="Send every connected tool's schema on every step."
+          help="Off (the default) sends only tool names; the agent loads a server's schemas when a run needs them. Four connected servers measured 67k tokens a step when preloaded. To keep one server loaded, pin it in Extensions instead. Takes effect from the next step."
+          checked={settings.mcpToolLoading === 'eager'}
+          disabled={form.formLocked}
+          {...form.defaultMark('mcpToolLoading')}
+          onChange={(checked) => {
+            void form.runUpdate({ mcpToolLoading: checked ? 'eager' : 'on-demand' })
+          }}
+        />
+        <SettingsField
+          id="mcp-servers"
+          title="Servers"
+          hint="Connect servers and choose which of their tools the agent gets."
         >
-          <Switch
-            size="md"
-            checked={form.settings.mcpToolLoading === 'eager'}
-            disabled={form.formLocked}
-            label="Preload every MCP tool"
-            onCheckedChange={(checked) => {
-              void form.runUpdate({ mcpToolLoading: checked ? 'eager' : 'on-demand' })
-            }}
-          />
+          <Button
+            size="sm"
+            variant="secondary"
+            trailingIcon="arrowRight"
+            disabled={!onOpenMarketplace}
+            onClick={() => onOpenMarketplace?.('mcps')}
+          >
+            Manage servers
+          </Button>
         </SettingsField>
+      </SettingsGroup>
+
+      <SettingsGroup title="Catalog" fieldId="tools-catalog" description={toolCatalogSummary(catalog)} plain>
+        {catalog ? <ToolCatalog catalog={catalog} /> : null}
       </SettingsGroup>
     </SettingsStack>
   )

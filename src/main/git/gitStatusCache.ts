@@ -4,6 +4,7 @@
  */
 import type { GitStatusResult } from '../../shared/ipc'
 import { canonicalizeWorkspacePath } from '../../shared/workspacePath'
+import { invalidateWorkspaceFileListCache } from '../workspace/fileListCache'
 import { readGitStatus as readGitStatusUncached } from './git'
 
 const TTL_MS = 750
@@ -28,6 +29,9 @@ function currentGeneration(key: string): number {
 }
 
 export function invalidateGitStatusCache(cwd?: string): void {
+  // Whatever can move git status can add or remove files, so the path
+  // pickers' walked list goes stale with it.
+  invalidateWorkspaceFileListCache(cwd)
   if (cwd == null) {
     cache.clear()
     inflight.clear()

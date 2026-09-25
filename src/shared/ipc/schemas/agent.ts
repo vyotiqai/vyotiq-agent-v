@@ -1,11 +1,6 @@
 import { z } from 'zod'
 import { AgentInteractionModeSchema } from './settings'
 import { ProviderIdSchema } from './providers'
-import {
-  AgentProfileIdSchema,
-  AgentProfileRuntimeSchema,
-  AgentProfileSnapshotSchema
-} from './agentProfile'
 
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 export const MAX_IMAGE_DATA_URL_CHARS = Math.ceil(MAX_IMAGE_BYTES * (4 / 3)) + 128
@@ -114,7 +109,7 @@ export const RunStatusSchema = z.object({
   workspacePath: z.string().optional(),
   /** Latest chatStart invocation represented by outcome fields. */
   invokeId: z.number().int().min(1).optional(),
-  /** Last Ask / Plan / Agent mode for this run (survives resume). */
+  /** Last Ask / Agent mode for this run (survives resume). */
   mode: AgentInteractionModeSchema.optional(),
   /** ISO timestamp when an orphan interrupt marked this run resumable. */
   interruptedAt: z.string().optional(),
@@ -129,20 +124,7 @@ export const RunStatusSchema = z.object({
   /** Git worktree checkout for write-capable inline instances. */
   worktreePath: z.string().min(1).optional(),
   /** Branch checked out in the instance worktree; used for sequential merge-back. */
-  worktreeBranch: z.string().min(1).optional(),
-  /** Teammate profile this run is bound to (identity + memory namespace). */
-  agentProfileId: AgentProfileIdSchema.optional(),
-  /** Snapshot of the profile name at run time (survives profile rename/delete). */
-  agentProfileName: z.string().min(1).max(64).optional(),
-  agentProfileSnapshot: AgentProfileSnapshotSchema.optional(),
-  /**
-   * Delegated task that owns this run. Lets boot tell a task's run apart from
-   * an ordinary teammate chat, so generic profile auto-resume cannot relaunch
-   * work the scheduler is responsible for reconciling.
-   */
-  delegatedTaskId: z.string().min(1).max(80).optional(),
-  /** Execution substrate for this run (Phase 4 runtime seam). */
-  runtime: AgentProfileRuntimeSchema.optional()
+  worktreeBranch: z.string().min(1).optional()
 })
 export type RunStatus = z.infer<typeof RunStatusSchema>
 
@@ -356,7 +338,12 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     type: z.literal('error'),
     ...eventBase,
     message: z.string(),
-    code: z.string().optional()
+    code: z.string().optional(),
+    /**
+     * Identity of this failure, shared by the live event and its events.jsonl
+     * row, so a reader's dismissal of its transcript box survives a reload.
+     */
+    errorId: z.string().min(1).optional()
   }),
   z.object({
     type: z.literal('assistant_message'),
@@ -459,6 +446,26 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
     type: z.literal('step_usage'),
     ...eventBase,
     step: z.number().int().min(1),
+    /**
+     * Provider and model that served THIS step. Optional because events written
+     * before these fields existed must still parse.
+     *
+     * Fixed within one invoke (`resolveTurnModel` runs once, before the step
+     * loop), but a later turn of the SAME run can resolve a different model —
+     * and each invoke overwrites the run-level provider/model that reaches
+     * `receipt.json`. So the receipt cannot attribute an individual step, and
+     * `events.jsonl` carried no model at all before this field.
+     */
+    provider: z.string().max(64).optional(),
+    model: z.string().max(200).optional(),
+    /**
+     * Fingerprint of the tool catalog + stable system zone this step sent, i.e.
+     * everything ahead of the conversation (`promptPrefixFingerprint`). Two
+     * consecutive steps with the same value sent the same cacheable prefix, so
+     * a cache miss between them was the provider's. Optional: older events
+     * predate it.
+     */
+    prefixHash: z.string().max(64).optional(),
     /** Latest step context window size (not cumulative bill). */
     inputTokens: z.number().int().min(0).optional(),
     outputTokens: z.number().int().min(0).optional(),
@@ -498,6 +505,55 @@ const AgentEventUnionSchema = z.discriminatedUnion('type', [
       })
       .optional(),
     detail: ContextBreakdownDetailWireSchema.optional()
+  }),
+  z.object({
+    /**
+     * Spend from an LLM call that is NOT an agent turn — compaction, commit-message
+     * generation. These cost real money but were previously invisible: no event, no
+     * ledger entry, nothing.
+     *
+     * Deliberately NOT a `step_usage` variant and deliberately carries no `step`:
+     * `stepUsageFromEvent` gates on `type === 'step_usage'` and stamps `steps: 1`,
+     * so reusing that type would inflate `billedInputTokens` and `steps`, which in
+     * turn makes `messageFooterStats.turnCost` return null (it requires
+     * `stepsWithCostReport === steps`) and silently drop per-turn cost from the UI.
+     * Having no `step` also keeps these rows out of the `(type, step)` coalescing in
+     * `streamBatch` and out of `turnUsage` binning.
+     */
+    type: z.literal('aux_usage'),
+    ...eventBase,
+    /** Which non-turn call site spent this — the "endpoint" for spend attribution. */
+    site: z.enum([
+      'compaction_fork',
+      'compaction_structured',
+      'compaction_freeform',
+      'commit_message'
+    ]),
+    /** Always known at every emit site; an aux row without them cannot be attributed. */
+    provider: z.string().min(1).max(64),
+    model: z.string().min(1).max(200),
+    /**
+     * Loop step this call happened alongside, for correlation only. Named `atStep`
+     * and NOT `step` on purpose: it must stay structurally impossible for a later
+     * edit to feed these rows into `streamBatch`'s `(type, step)` coalescer, which
+     * keeps only the newest per key and would evict the real `step_usage`.
+     */
+    atStep: z.number().int().min(0).optional(),
+    /** 1-based provider attempt; >1 means a retry that was still billed. */
+    attempt: z.number().int().min(1).optional(),
+    inputTokens: z.number().int().min(0).optional(),
+    outputTokens: z.number().int().min(0).optional(),
+    cachedInputTokens: z.number().int().min(0).optional(),
+    cacheCreationInputTokens: z.number().int().min(0).optional(),
+    reasoningTokens: z.number().int().min(0).optional(),
+    inputTokensIncludesCache: z.boolean().optional(),
+    /** Provider-reported account charge in USD when the stream included a cost field. */
+    billedCost: z.number().finite().optional(),
+    billedCostSaved: z.number().finite().optional(),
+    /** Estimated USD (tokens × published price) when the provider reported no cost. */
+    estimatedCost: z.number().finite().optional(),
+    /** Wall-clock ms of the provider stream behind this call. */
+    generationMs: z.number().int().min(0).optional()
   }),
   z.object({
     type: z.literal('context_usage'),
@@ -684,11 +740,18 @@ export const RunSummarySchema = z.object({
   billedCost: z.number().nonnegative().optional(),
   /** Sum of token×price estimates for steps the provider didn't bill. */
   estimatedCost: z.number().nonnegative().optional(),
-  /** Teammate binding snapshot — mirrors RunStatus fields for list surfaces. */
-  agentProfileId: AgentProfileIdSchema.optional(),
-  agentProfileName: z.string().min(1).max(64).optional(),
-  agentProfileSnapshot: AgentProfileSnapshotSchema.optional(),
-  runtime: AgentProfileRuntimeSchema.optional()
+  /**
+   * Agent edits still waiting on Keep or Undo — what puts a finished task in
+   * "Ready for review". `add`/`del` are exact line counts against the files as
+   * they are now, or absent when any file could not be counted.
+   */
+  review: z
+    .object({
+      files: z.number().int().min(1),
+      add: z.number().int().min(0).optional(),
+      del: z.number().int().min(0).optional()
+    })
+    .optional()
 })
 export type RunSummary = z.infer<typeof RunSummarySchema>
 
@@ -746,17 +809,29 @@ export const ChatStartRequestSchema = z
     /** Session's pinned model — authoritative for this invoke. */
     model: z.string().min(1).optional(),
     /**
-     * True only when the user picked this model by hand. The renderer also
-     * sends its ambient default in `model`, which must NOT outrank a teammate's
-     * pinned model on that teammate's first turn — without this flag the two
-     * are indistinguishable and the pin never takes effect.
+     * A new task's done-when checks, typed in its brief. The run is judged
+     * against them: they are its first checks (source `brief`) and its
+     * contract's Done when.
      */
-    modelExplicit: z.boolean().optional(),
-    /** Teammate profile binding: identity, per-profile memory namespace, model pin. */
-    agentProfileId: AgentProfileIdSchema.optional(),
-    runtime: AgentProfileRuntimeSchema.optional()
+    doneWhen: z.array(z.string().trim().min(1).max(500)).max(20).optional(),
+    /** The draft this new task was started from — removed once the task exists. */
+    draftId: z.string().regex(/^[a-zA-Z0-9-]{8,64}$/).optional()
   })
   .superRefine((val, ctx) => {
+    if (val.draftId && val.runId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'draftId belongs to a new task',
+        path: ['draftId']
+      })
+    }
+    if (val.doneWhen?.length && val.runId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'doneWhen belongs to a new task; a running task adds checks through its plan',
+        path: ['doneWhen']
+      })
+    }
     if (val.incremental) {
       if (!val.runId) {
         ctx.addIssue({
@@ -804,9 +879,7 @@ export const ChatRewindAndStartRequestSchema = z.object({
   }),
   mode: AgentInteractionModeSchema.optional(),
   provider: ProviderIdSchema.optional(),
-  model: z.string().min(1).optional(),
-  /** True only when the user picked `model` by hand (see ChatStartRequestSchema). */
-  modelExplicit: z.boolean().optional()
+  model: z.string().min(1).optional()
 })
 export type ChatRewindAndStartRequest = z.infer<typeof ChatRewindAndStartRequestSchema>
 
@@ -824,17 +897,25 @@ export type ChatRewindRequest = z.infer<typeof ChatRewindRequestSchema>
 export const ChatRewindResultSchema = z.object({
   messages: z.array(ChatMessageSchema),
   restored: z.array(z.string()),
-  skipped: z.array(z.string())
+  /** Kept without a copy to restore from. */
+  skipped: z.array(z.string()),
+  /** Changed after the agent's write; left as they are. */
+  edited: z.array(z.string()).default([])
 })
 export type ChatRewindResult = z.infer<typeof ChatRewindResultSchema>
 
-/** Read-only preview of which files chatRewind to userMessageIndex would restore. */
+/** Read-only preview of where chatRewind to userMessageIndex would leave each file. */
 export const ChatRewindPreviewResultSchema = z.object({
   files: z.array(
     z.object({
       path: z.string().min(1),
       action: z.enum(['created', 'modified', 'deleted']),
-      undoable: z.boolean()
+      /** False when the rewind stops at a write that kept no copy. */
+      undoable: z.boolean(),
+      /** Changed after the agent's write: the rewind stops at that change. */
+      edited: z.boolean().optional(),
+      /** Stops (edited, or no copy) after taking off later runs' writes, so the file still changes. */
+      partway: z.boolean().optional()
     })
   )
 })
@@ -962,6 +1043,7 @@ export const RunArtifactFixedNameSchema = z.enum([
   'contract.md',
   'receipt.json',
   'todos.json',
+  'checks.json',
   'goal.json',
   'loop.json',
   'trajectory.jsonl',
@@ -1052,6 +1134,8 @@ export const LoopCheckpointSchema = z.object({
       peakInputTokens: z.number().int().min(0),
       outputTokens: z.number().int().min(0),
       billedCachedInputTokens: z.number().int().min(0),
+      /** Cumulative whole-prompt tokens (cache share denominator), additive. */
+      billedPromptTokens: z.number().int().min(0).optional(),
       cacheCreationInputTokens: z.number().int().min(0),
       reasoningTokens: z.number().int().min(0),
       steps: z.number().int().min(0),
@@ -1089,7 +1173,14 @@ export const RunTokenUsageSchema = z.object({
   reasoningTokens: z.number().int().min(0).optional(),
   cachedInputTokens: z.number().int().min(0).optional(),
   billedCachedInputTokens: z.number().int().min(0).optional(),
-  cacheCreationInputTokens: z.number().int().min(0).optional()
+  cacheCreationInputTokens: z.number().int().min(0).optional(),
+  /**
+   * Summed per-step provider wall-clock for the run's turns. Additive and
+   * optional, so this still parses as a version-5 receipt. Previously this only
+   * existed on `events.jsonl` (which rotates) and as a cumulative field in
+   * `loopCheckpoint.json`, so a finished run kept no durable latency record.
+   */
+  generationMs: z.number().int().min(0).optional()
 })
 export type RunTokenUsage = z.infer<typeof RunTokenUsageSchema>
 
@@ -1224,6 +1315,31 @@ export const HomeActivityResultSchema = z.object({
             failed: z.number().int().min(0)
           })
         )
+        .optional(),
+      /** Tool calls across the window's receipts; stubs and gate refusals are not calls. */
+      toolCalls: z.number().int().min(0).optional(),
+      /** Tools that failed in the window, most failures first, with their commonest error. */
+      failingTools: z
+        .array(
+          z.object({
+            name: z.string().min(1),
+            ok: z.number().int().min(0),
+            failed: z.number().int().min(1),
+            reason: z.string().min(1).optional()
+          })
+        )
+        .optional(),
+      /** Runs that changed files with no passing check after, newest first. */
+      uncheckedRuns: z
+        .array(
+          z.object({
+            runId: z.string().min(1),
+            workspacePath: z.string().min(1),
+            goal: z.string().optional(),
+            /** Distinct files the run wrote. */
+            files: z.number().int().min(0)
+          })
+        )
         .optional()
     })
     .optional(),
@@ -1240,7 +1356,14 @@ export const HomeActivityResultSchema = z.object({
     billedCost: z.number().finite().optional(),
     /** Estimated cost (tokens × published prices) across window runs, when any. */
     estimatedCost: z.number().finite().optional(),
+    /** Runs whose usage carried a bill or an estimate — the rest have no measurable cost. */
+    pricedRuns: z.number().int().min(0).optional(),
     cachedInputTokens: z.number().int().min(0).optional(),
+    /**
+     * Share of prompt tokens read from the provider's cache, 0–1. Present only
+     * when every token in the window was recorded with its whole-prompt size.
+     */
+    cacheShare: z.number().min(0).max(1).optional(),
     /** Billed thinking tokens in the window (subset of output). */
     reasoningTokens: z.number().int().min(0).optional(),
     /** Peak per-step context input in the window (max across runs). */
@@ -1248,7 +1371,9 @@ export const HomeActivityResultSchema = z.object({
     /** Raw model context window (latest reported in the window). */
     contextWindow: z.number().int().min(0).optional(),
     /** Token total (input+output) of the prior equal-length window, when > 0. */
-    previousTokens: z.number().int().min(0).optional()
+    previousTokens: z.number().int().min(0).optional(),
+    /** Distinct runs with activity in the prior equal-length window, when > 0. */
+    previousRuns: z.number().int().min(0).optional()
   }),
   generatedAt: z.string().min(1)
 })
@@ -1410,6 +1535,61 @@ export const ReadRunArtifactRequestSchema = z.object({
 })
 export type ReadRunArtifactRequest = z.infer<typeof ReadRunArtifactRequestSchema>
 
+/**
+ * Run-dir documents the OS may open in the reader's own editor. They live
+ * under the app's data folder, outside the workspace, so the Files panel
+ * cannot open them.
+ */
+export const OpenRunArtifactRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  runId: RunIdSchema,
+  name: z.enum(['plan.md', 'contract.md'])
+})
+export type OpenRunArtifactRequest = z.infer<typeof OpenRunArtifactRequestSchema>
+
+/**
+ * What a task did to the files it wrote: its first write's before-image
+ * against each file as it is now. Counts are exact or absent.
+ */
+export const TaskFileStatsRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  runId: RunIdSchema
+})
+export type TaskFileStatsRequest = z.infer<typeof TaskFileStatsRequestSchema>
+
+const TaskFileActionSchema = z.enum(['created', 'modified', 'deleted'])
+
+export const TaskFileStatSchema = z.object({
+  path: z.string(),
+  action: TaskFileActionSchema,
+  add: z.number().int().nonnegative().optional(),
+  del: z.number().int().nonnegative().optional()
+})
+export type TaskFileStat = z.infer<typeof TaskFileStatSchema>
+
+export const TaskFileStatsResultSchema = z.object({ files: z.array(TaskFileStatSchema) })
+export type TaskFileStatsResult = z.infer<typeof TaskFileStatsResultSchema>
+
+export const TaskFileDiffRequestSchema = z.object({
+  workspacePath: z.string().min(1),
+  runId: RunIdSchema,
+  path: z.string().min(1).max(4096)
+})
+export type TaskFileDiffRequest = z.infer<typeof TaskFileDiffRequestSchema>
+
+export const TaskFileDiffResultSchema = z.object({
+  path: z.string(),
+  action: TaskFileActionSchema.nullable(),
+  /** `git diff`-shaped text for the file, or null when there is none to show. */
+  diff: z.string().nullable(),
+  add: z.number().int().nonnegative().optional(),
+  del: z.number().int().nonnegative().optional(),
+  /** Too far apart to diff line by line: shown as one full replacement. */
+  full: z.boolean().optional(),
+  reason: z.enum(['binary_or_large', 'not_in_task', 'unrestorable']).optional()
+})
+export type TaskFileDiffResult = z.infer<typeof TaskFileDiffResultSchema>
+
 export const ReadRunArtifactResultSchema = z.object({
   name: RunArtifactNameSchema,
   exists: z.boolean(),
@@ -1478,7 +1658,13 @@ export const ToolApprovalRequestSchema = z.object({
   /** Raw arguments so the card can show exactly what would run. */
   argsPreview: z.string(),
   /** False for approval-exempt tools; true for mutating tools, web_fetch, and MCP. */
-  mutating: z.boolean()
+  mutating: z.boolean(),
+  /**
+   * Terminal only: the command "Always allow" would remember (`pnpm vitest`),
+   * or null when this command chains or redirects and cannot be scoped — the
+   * card then offers no "Always allow". Absent for every other tool.
+   */
+  alwaysAllowCommand: z.string().nullable().optional()
 })
 export type ToolApprovalRequest = z.infer<typeof ToolApprovalRequestSchema>
 
@@ -1667,7 +1853,27 @@ export const ActiveRunSchema = z.object({
         preview: z.string()
       })
     )
-    .default([])
+    .default([]),
+  /**
+   * Set while the run is blocked on you: an approval or a question is pending.
+   * `since` is when the longest-waiting one started (ISO).
+   */
+  waiting: z
+    .object({
+      kind: z.enum(['approval', 'question']),
+      since: z.string().min(1)
+    })
+    .optional(),
+  /**
+   * The run's todo list as counts: `completed` of `total` (cancelled items are
+   * not work left, so they are in neither). Absent when the run has no todos.
+   */
+  steps: z
+    .object({
+      completed: z.number().int().min(0),
+      total: z.number().int().min(1)
+    })
+    .optional()
 })
 export type ActiveRun = z.infer<typeof ActiveRunSchema>
 
@@ -1830,7 +2036,12 @@ export const WorkspaceListRulesResultSchema = z.object({
     z.object({
       path: z.string(),
       description: z.string().optional(),
-      alwaysApply: z.boolean()
+      alwaysApply: z.boolean(),
+      /**
+       * When it reaches the prompt: every step, only while a file its globs
+       * match is focused, or only when mentioned. Optional for older mains.
+       */
+      applies: z.enum(['always', 'matching', 'request']).optional()
     })
   )
 })
@@ -1846,15 +2057,32 @@ export const WorkspaceAgentContextResultSchema = z.object({
   branch: z.string().nullable(),
   rules: z.object({
     agentsMd: z.boolean(),
+    claudeMd: z.boolean(),
     cursorrules: z.boolean(),
-    vyotiqRulesCount: z.number().int().nonnegative()
+    /** Files from `.cursor/rules` and `.vyotiq/rules` that reach the prompt. */
+    ruleFileCount: z.number().int().nonnegative()
   }),
+  /** Notes in `.vyotiq/memory/notes` — the memory's index and state are not notes. */
   memoryNotes: z.number().int().nonnegative(),
+  /** The most recently changed notes, newest first. */
+  memoryNoteNames: z.array(z.string().min(1)).max(3).optional(),
   codeIndex: z.object({
-    state: z.enum(['ready', 'building', 'degraded', 'off'])
+    /** `paused`: Settings → Indexing paused it; what is indexed stays searchable. */
+    state: z.enum(['ready', 'building', 'degraded', 'off', 'paused']),
+    /** Files in this workspace's own index, when it has one. */
+    files: z.number().int().nonnegative().optional(),
+    /** When that index last finished a pass (ISO). */
+    indexedAt: z.string().min(1).optional()
   })
 })
 export type WorkspaceAgentContextResult = z.infer<typeof WorkspaceAgentContextResultSchema>
+
+/** Pushed from main when a watched workspace's summary changed on disk. */
+export const WorkspaceAgentContextChangedSchema = z.object({
+  workspacePath: z.string().min(1),
+  context: WorkspaceAgentContextResultSchema
+})
+export type WorkspaceAgentContextChanged = z.infer<typeof WorkspaceAgentContextChangedSchema>
 
 export const WorkspaceDiagnosticsRequestSchema = z.object({
   workspacePath: z.string().min(1),
@@ -1969,6 +2197,20 @@ export function contentHasImage(content: MessageContent): boolean {
 export type ComposerSendExtras = {
   audio?: AttachedAudio[]
   nativeFiles?: AttachedNativeFile[]
+  /** A new task's done-when checks, from its brief. Ignored once the task has started. */
+  doneWhen?: string[]
+  /** The draft the brief continues: main removes it once the task exists. */
+  draftId?: string
+  /**
+   * Start the new task in a new worktree of this workspace. The renderer makes
+   * the worktree and starts the task there; this never reaches main.
+   */
+  worktree?: boolean
+  /**
+   * While a run is live: send it now instead of queueing it for the turn's end
+   * (Shift+Enter) — queued, then promoted as "Send now" does. Renderer only.
+   */
+  steer?: boolean
 }
 
 export function buildUserContent(

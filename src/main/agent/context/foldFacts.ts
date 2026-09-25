@@ -73,7 +73,17 @@ const DOTFILE_RE = /^\.[A-Za-z0-9][\w.-]*$/
 const IDENTIFIER_STEM_RE =
   /^(?:process|import|logger|console|module|globalThis|window|document)\./
 
-/** Same bar as receipt/loop path tracking — skip globs, dirs, and junk tokens. */
+/**
+ * Skip globs, directories and junk tokens.
+ *
+ * NOT the same rule as the identically-named export in `loopPolicy.ts`, which
+ * gates receipt/checkpoint path tracking: that one accepts anything containing
+ * `/` (so `src/components`, `src/foo.ts:42` and `https://example.com/a.ts` all
+ * pass), while this one requires a known source extension or a dotfile. They
+ * disagree on 10 of 16 representative inputs. The two feed disjoint subsystems
+ * — this one the compaction facts, that one receipts — so the split is not
+ * currently observable, but they are not interchangeable.
+ */
 export function isPlausibleWorkspaceFilePath(value: string): boolean {
   const path = normalizeRelPath(value)
   if (!isConcretePath(path)) return false
@@ -134,25 +144,40 @@ function pathsFromCall(name: string, args: Record<string, unknown>): string[] {
   return out
 }
 
-/** Path-like tokens in prose (backticks and `dir/file.ext`). Skips tool dumps. */
-export function collectPathsFromText(text: string): string[] {
+/**
+ * Raw path-like candidates in text — backtick spans first, then bare
+ * `dir/file.ext` tokens. Unfiltered and undeduped: callers apply their own
+ * plausibility rules (the verifier additionally expands `{a,b}` globs).
+ *
+ * Single definition of the scan. Both regexes are `/g`, so `lastIndex` is
+ * shared mutable state; the verbatim second copy that used to live in
+ * `verifyCompaction.ts` had to reset it independently, and any call that forgot
+ * would silently skip the head of the text.
+ */
+export function pathCandidatesIn(text: string): string[] {
   const out: string[] = []
-  const seen = new Set<string>()
-  const push = (raw: string): void => {
-    const path = normalizeRelPath(raw.replace(/^[*_`]+|[*_`]+$/g, ''))
-    if (!isPlausibleWorkspaceFilePath(path)) return
-    const key = path.toLowerCase()
-    if (seen.has(key)) return
-    seen.add(key)
-    out.push(path)
-  }
   for (const match of text.matchAll(BACKTICK_RE)) {
-    push(match[1] ?? '')
+    out.push(match[1] ?? '')
   }
   PATH_TOKEN_RE.lastIndex = 0
   let token: RegExpExecArray | null
   while ((token = PATH_TOKEN_RE.exec(text))) {
-    push(token[1] ?? '')
+    out.push(token[1] ?? '')
+  }
+  return out
+}
+
+/** Path-like tokens in prose (backticks and `dir/file.ext`). Skips tool dumps. */
+export function collectPathsFromText(text: string): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const raw of pathCandidatesIn(text)) {
+    const path = normalizeRelPath(raw.replace(/^[*_`]+|[*_`]+$/g, ''))
+    if (!isPlausibleWorkspaceFilePath(path)) continue
+    const key = path.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(path)
   }
   return out
 }

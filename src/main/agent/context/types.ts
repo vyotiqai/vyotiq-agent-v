@@ -1,8 +1,7 @@
 import type { ChatMessage, ModelInfo, ResponseVerbosity, UserRule } from '../../../shared/ipc'
-import type { TokenUsage } from '../providers/types'
-import { DEFAULT_CONTEXT_WINDOW as SHARED_DEFAULT_CONTEXT_WINDOW } from '../../../shared/domain/contextBudget'
 import type {
   ContextBreakdownDetailWire,
+  ContextLayerBreakdown,
   ContextToolsDetail
 } from '../../../shared/utils/contextUsage'
 
@@ -26,7 +25,6 @@ export const KEEP_LAST_TOOL_RESULTS = 6
 export const TOOL_RESULT_TRIM_SLACK = 6
 export const MEMORY_INDEX_CAP = 3000
 export const MEMORY_STATE_CAP = 3000
-export const DEFAULT_CONTEXT_WINDOW = SHARED_DEFAULT_CONTEXT_WINDOW
 
 import { z } from 'zod'
 
@@ -75,10 +73,15 @@ export const CompactionRecordSchema = z.object({
     .optional(),
   /** Extractive verifier accepted this summary before the watermark advanced. */
   verified: z.boolean().optional(),
-  /** Share of extracted fold files cited in the summary (0–1). */
-  verifyCoverage: z.number().min(0).max(1).optional(),
-  /** Human-readable verify failures (empty when verified). */
-  verifyFailures: z.array(z.string()).max(16).optional()
+  /**
+   * Share of extracted fold files cited in the summary (0–1).
+   *
+   * There is deliberately no `verifyFailures` here: a fold that fails
+   * verification is never written, so the record can only ever describe an
+   * accepted summary. The failure list reaches the UI on the
+   * `compaction_verify_failed` event instead.
+   */
+  verifyCoverage: z.number().min(0).max(1).optional()
 })
 export type CompactionRecord = z.infer<typeof CompactionRecordSchema>
 
@@ -95,13 +98,6 @@ export type AssembleInput = {
    * splitToolCatalogDetail). When absent the tools layer stays one aggregate.
    */
   toolsSplit?: ContextToolsDetail
-  /**
-   * Auto-compact trigger tokens for the content window (loop-side, from
-   * settings.autoCompactThresholdRatio). Enables the derived buffer/free rows.
-   */
-  compactionTrigger?: number
-  lastUsage?: TokenUsage
-  keepRecentTurns?: number
   contract?: string
   priorCompaction?: CompactionRecord | null
   loopHint?: string
@@ -115,11 +111,11 @@ export type AssembleInput = {
   pluginRulesSection?: string
   /** User-global rules from settings; assembled before workspace rules. */
   userRules?: UserRule[]
-  /** Optional assistant identity override (settings.agentPersona). */
+  /** User-set assistant name (settings.agentPersona). Empty/omitted = unnamed. */
   persona?: string
-  /** Built-in identity blurb; overridden by settings.agentIdentity, and assembled only when identity is empty and no user persona is set. */
+  /** User-set identity blurb (settings.agentIdentity). Empty/omitted = no identity. */
   identity?: string
-  /** Optional tone directive (settings.agentTone). Empty/omitted = spine default. */
+  /** User-set tone directive (settings.agentTone). Empty/omitted = no tone directive. */
   tone?: string
   /** Preferred response language (settings.responseLanguage). Empty/omitted = auto. */
   responseLanguage?: string
@@ -128,8 +124,10 @@ export type AssembleInput = {
   modeSection?: string
   plan?: string
   /**
-   * Plan mode: keep the `<plan>` inner text equal to on-disk plan.md (no
-   * heading strip, no token cap) so str_replace/edit args can quote it.
+   * Keep the `<plan>` inner text equal to on-disk plan.md (no heading strip,
+   * no token cap) so str_replace/edit args can quote it. Set whenever the run
+   * has a real plan — the mode that used to gate this was merged into Agent,
+   * which both publishes the plan and edits it.
    */
   planVerbatim?: boolean
   sessionEnv?: string
@@ -137,13 +135,6 @@ export type AssembleInput = {
   taskList?: string
   /** Long-lived goal overlay from goal.json. */
   activeGoal?: string
-}
-
-export type ContextLayerBreakdown = {
-  system: number
-  history: number
-  tools: number
-  buffer: number
 }
 
 export type AssembleResult = {
@@ -157,7 +148,4 @@ export type AssembleResult = {
   /** Measured breakdown for the context meter (window-derived fields added consumer-side). */
   detail?: ContextBreakdownDetailWire
   overflow: boolean
-  anthropicNative: {
-    enableContextManagement: boolean
-  }
 }

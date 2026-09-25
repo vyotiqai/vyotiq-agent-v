@@ -194,12 +194,57 @@ describe('mentionModel', () => {
     expect(kinds[0]).toBe('branch')
     expect(firstFile).toBeGreaterThan(0)
     expect(firstNav).toBeGreaterThan(firstFile)
-    expect(items.find((i) => i.kind === 'browser')?.subtitle).toBe(
-      'Prefer browser tools this turn'
-    )
-    expect(items.find((i) => i.kind === 'nav' && i.view === 'files')?.subtitle).toBe(
-      'Browse the workspace'
-    )
+  })
+
+  it('says what each context row attaches, and when', () => {
+    const items = buildRootMentionItems({
+      query: '',
+      recentFiles: [],
+      matchingFiles: [],
+      includeCodebase: true,
+      branchName: 'feat/stream-backpressure'
+    })
+    expect(items.filter((i) => i.kind !== 'nav').map((i) => [i.label, 'subtitle' in i ? i.subtitle : null])).toEqual([
+      ['Branch diff', 'what feat/stream-backpressure changed, uncommitted included'],
+      ['Typecheck errors', 'checked when you send'],
+      ['Lint problems', 'checked when you send'],
+      ['Browser page', 'prefer browser tools this instruction']
+    ])
+    expect(items.filter((i) => i.kind === 'nav').map((i) => i.label)).toEqual([
+      'Files and folders',
+      'Docs',
+      'Rules',
+      'Past tasks'
+    ])
+    // A detached head has no branch to name.
+    const detached = buildRootMentionItems({ query: '', recentFiles: [], matchingFiles: [], branchName: 'HEAD' })
+    expect(detached.find((i) => i.kind === 'branch')).toMatchObject({ subtitle: 'uncommitted changes' })
+  })
+
+  it('lists only recent files until something is typed, then recent matches before search results', () => {
+    const idle = buildRootMentionItems({
+      query: '',
+      recentFiles: [],
+      matchingFiles: ['.eslintrc.cjs', '.github/ci.yml'],
+      includeCodebase: true
+    })
+    expect(idle.some((i) => i.kind === 'file')).toBe(false)
+
+    const typed = buildRootMentionItems({
+      query: 'sse',
+      recentFiles: ['src/main/net/sseReader.ts', 'src/other.ts'],
+      matchingFiles: ['src/main/net/sseReader.ts', 'tests/main/unit/sseBackpressure.test.ts'],
+      includeCodebase: true
+    })
+    expect(typed.filter((i) => i.kind === 'file').map((i) => i.label)).toEqual([
+      'sseReader.ts',
+      'sseBackpressure.test.ts'
+    ])
+  })
+
+  it('finds Past tasks by "tasks"', () => {
+    const items = buildRootMentionItems({ query: 'tasks', recentFiles: [], matchingFiles: [] })
+    expect(items.map((i) => i.label)).toEqual(['Past tasks'])
   })
 
   it('filters root by query', () => {

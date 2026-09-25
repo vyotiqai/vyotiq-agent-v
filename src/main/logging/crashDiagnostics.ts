@@ -43,6 +43,36 @@ export function planRendererReload(input: {
   return { action: 'reload', waitMs }
 }
 
+/**
+ * Back-off for re-issuing a failed top-frame renderer load.
+ *
+ * A load issued while `out/renderer` is being replaced — a packaged update, or
+ * `pnpm pack:clean` ahead of a build — gets ERR_FILE_NOT_FOUND. Nothing is then
+ * running in the renderer to retry, not even its own stale-chunk recovery, so
+ * the window stays blank until the app is restarted. Main has to own this.
+ */
+export const RENDERER_LOAD_RETRY_DELAYS_MS = [400, 1_000, 2_500, 5_000]
+
+/** ERR_ABORTED — the navigation was superseded, not a failed load. */
+const ERR_ABORTED = -3
+
+export type RendererLoadRetryPlan =
+  | { action: 'ignore' }
+  | { action: 'give-up' }
+  | { action: 'retry'; waitMs: number; attempt: number }
+
+export function planRendererLoadRetry(input: {
+  errorCode: number
+  isMainFrame: boolean
+  attempts: number
+}): RendererLoadRetryPlan {
+  if (!input.isMainFrame) return { action: 'ignore' }
+  if (input.errorCode === ERR_ABORTED) return { action: 'ignore' }
+  const waitMs = RENDERER_LOAD_RETRY_DELAYS_MS[input.attempts]
+  if (waitMs == null) return { action: 'give-up' }
+  return { action: 'retry', waitMs, attempt: input.attempts + 1 }
+}
+
 /** Count Crashpad minidump files currently on disk (best-effort). */
 export function countCrashpadReports(crashDumpsDir: string): number {
   const reportsDir = join(crashDumpsDir, 'reports')
@@ -263,7 +293,7 @@ export function markRendererRecoveryPending(pending: CrashRecoveryPending): void
     title: 'UI recovered after a crash',
     body: code ? `${pending.reason} · ${code}` : pending.reason,
     dedupeKey: CRASH_DEDUPE_KEY,
-    action: { type: 'open_settings', section: 'general' }
+    action: { type: 'open_settings', section: 'diagnostics' }
   })
 }
 
@@ -277,7 +307,7 @@ export function consumeRendererRecoveryPending(): CrashRecoveryPending | null {
   return pending
 }
 
-/** Recent crash snippets for Settings → General (does not clear). */
+/** Recent crash snippets for Settings → Diagnostics (does not clear). */
 export function listCrashSnippets(): CrashSnippet[] {
   return readHistory().snippets
 }

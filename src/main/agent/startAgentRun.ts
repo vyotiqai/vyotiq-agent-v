@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import type { WebContents } from 'electron'
 import { IPC } from '../../shared/channels'
 import {
@@ -35,12 +36,12 @@ import {
   registerQuestionSender
 } from './agentQuestion'
 import { publishLifecycleNotification } from '../notifications/bus'
+import { approvalNoticeFor, finishedNoticeFor, questionNoticeFor } from '../notifications/runNotices'
 import {
   clearRunAbort,
   followUpPreview,
   isActive,
   markRunTurnComplete,
-  notifyProfileRunFinished,
   seedFollowUps,
   takeLateFollowUpDropped,
   takeLateWriteCheckpoint
@@ -111,14 +112,10 @@ export type StartAgentRunAgentInput = {
   provider?: ProviderId
   /** Session-pinned model — authoritative for this invoke. */
   model?: string
-  /** True only when the user picked `model` by hand (see ChatStartRequestSchema). */
-  modelExplicit?: boolean
-  /** Teammate profile binding — identity, memory namespace, model pin. */
-  agentProfileId?: string
-  /** Delegated task that owns this run (scheduler-launched runs only). */
-  delegatedTaskId?: string
   /** Execution substrate (Phase 4 runtime seam) — local unless cloud is wired. */
   runtime?: 'local' | 'cloud'
+  /** A new task's done-when checks, from its brief. */
+  doneWhen?: string[]
 }
 
 export type StartAgentRunInput = {
@@ -128,6 +125,14 @@ export type StartAgentRunInput = {
   controller: AbortController
   wc: WebContents
   agentInput: StartAgentRunAgentInput
+}
+
+/** Goal text for a fixture-created run: the first user message, as runAgent uses. */
+function firstUserMessageText(agentInput: StartAgentRunAgentInput): string {
+  const messages = agentInput.newMessages ?? agentInput.messages ?? []
+  const first = messages.find((m) => m.role === 'user')
+  const content = typeof first?.content === 'string' ? first.content : ''
+  return content.trim().slice(0, 200) || 'chat'
 }
 
 export function startAgentRunInBackground(input: StartAgentRunInput): void {
@@ -147,11 +152,12 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
     const releaseApprovalSender = registerApprovalSender(runId, (request) => {
       batcher.flush()
       sendToWebContents(IPC.toolApprovalRequest, request, wc)
+      const notice = approvalNoticeFor(workspacePath, runId, request)
       publishLifecycleNotification({
         source: 'agent',
         kind: 'needs_you',
-        title: 'Needs your input',
-        body: request.summary.trim() || request.name,
+        title: notice.title,
+        body: notice.body,
         dedupeKey: needsYouDedupeKey(runId),
         action: { type: 'open_run', workspacePath, runId }
       })
@@ -159,12 +165,12 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
     const releaseQuestionSender = registerQuestionSender(runId, (request) => {
       batcher.flush()
       sendToWebContents(IPC.agentQuestionRequest, request, wc)
-      const firstPrompt = request.questions[0]?.prompt ?? ''
+      const notice = questionNoticeFor(workspacePath, runId, request)
       publishLifecycleNotification({
         source: 'agent',
         kind: 'needs_you',
-        title: 'Needs your input',
-        body: (request.title ?? firstPrompt).trim() || 'Waiting for your answer',
+        title: notice.title,
+        body: notice.body,
         dedupeKey: needsYouDedupeKey(runId),
         action: { type: 'open_run', workspacePath, runId }
       })
@@ -177,7 +183,15 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
       const runSignal = controller.signal
       let eventStream: AsyncGenerator<AgentEvent>
       if (isChatFixtureReplayEnabled()) {
-        eventStream = replayChatFixture({ runId, invokeId, workspacePath, runSignal })
+        eventStream = replayChatFixture({
+          runId,
+          invokeId,
+          workspacePath,
+          runSignal,
+          goal: firstUserMessageText(agentInput),
+          mode: agentInput.mode,
+          ...(agentInput.doneWhen?.length ? { doneWhen: agentInput.doneWhen } : {})
+        })
       } else {
         // Confirm the substrate can take the work before anything observes this
         // run as started. There is no fallback to local: a cloud-bound run that
@@ -222,7 +236,7 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
       })
       if (!terminalSent) {
         const crashEvents = [
-          { type: 'error', runId, message, code: 'AGENT_LOOP' },
+          { type: 'error', runId, message, code: 'AGENT_LOOP', errorId: randomUUID() },
           { type: 'status', runId, status: 'error' }
         ] as const
         // Persist the crash so a reload shows the failure instead of a
@@ -336,21 +350,16 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
         (terminalStatus === 'done' || terminalStatus === 'error') &&
         !relaunchedActiveGoal
       ) {
-        const goal = persisted?.goal?.trim() ?? ''
         const failed = terminalStatus === 'error'
+        const notice = finishedNoticeFor({ workspacePath, runId, runDir, failed, status: persisted })
         publishLifecycleNotification({
           source: 'agent',
           kind: failed ? 'run_error' : 'run_done',
-          title: failed
-            ? goal
-              ? `Failed: ${goal}`
-              : 'Failed'
-            : goal
-              ? `Finished: ${goal}`
-              : 'Finished',
-          body: failed ? 'Agent run failed' : 'Agent run finished',
+          title: notice.title,
+          body: notice.body,
           dedupeKey: failed ? runErrorDedupeKey(runId) : runDoneDedupeKey(runId),
-          action: { type: 'open_run', workspacePath, runId }
+          action: { type: 'open_run', workspacePath, runId },
+          ...(notice.reviewFiles ? { reviewFiles: notice.reviewFiles } : {})
         })
       }
       if (persisted?.inlineInstance && persisted.parentRunId) {
@@ -383,25 +392,17 @@ export function startAgentRunInBackground(input: StartAgentRunInput): void {
       // Storage retention run-end sweep (audit H4/H5): free pass + armed
       // policy per §8.1 ack. Fire-and-forget — never blocks the terminal path.
       void sweepRetentionAuto()
-      // Safety net: a generator that throws BEFORE the loop's try (e.g.
-      // 'Unknown agent profile' during binding resolution) never runs its own
-      // finally, leaking the registry slot — which would permanently blind the
-      // scheduler's one-run-per-teammate gate. Normal paths are already clear
-      // by the time this finally runs, so this is a no-op for them; the
+      // Safety net: a generator that throws BEFORE the loop's try never runs
+      // its own finally, leaking the registry slot. Normal paths are already
+      // clear by the time this finally runs, so this is a no-op for them; the
       // invokeId guard never clears a fresh re-registration of the same runId.
       clearRunAbort(runId, invokeId)
-      // A teammate-bound run ending frees the identity for the task scheduler's
-      // queue (delegated tasks wait behind user chats and resumed runs) — but a
-      // delayed goal relaunch keeps the identity busy until it re-registers.
-      if (persisted?.agentProfileId && !relaunchedActiveGoal) {
-        notifyProfileRunFinished(persisted.agentProfileId, runId)
-      }
     }
   })().catch((err) => {
     logger.error('Background agent run failed after terminal cleanup', {
       scope: 'agent',
       correlationId: runId,
-      error: formatError(err)
+      err
     })
   })
 }

@@ -1,4 +1,3 @@
-import { useCallback, useSyncExternalStore } from 'react'
 import { Icon } from '@renderer/lib/icons'
 import { Tooltip, cn } from '@renderer/lib/ui'
 import { shortcutLabel } from '@renderer/lib/shortcuts'
@@ -10,8 +9,8 @@ import { ContextMeter, type ContextUsageState } from './ContextMeter'
 import { ComposerPlusButton } from './ComposerPlusButton'
 import { ModelPicker } from './ModelPicker'
 import { ModePicker } from './ModePicker'
-import { AgentProfilePicker } from './AgentProfilePicker'
 import { ThinkingControls } from './ThinkingControls'
+import { useResolvedContextUsage, useResolvedCostHint } from './useContextUsage'
 import { chromeIconButton, chromeLabelText } from './composerChrome'
 import { Waveform, formatElapsed } from './DictationSessionStrip'
 import type { DictationPhase } from './useComposerDictation'
@@ -58,30 +57,6 @@ function ThinkingControlsWithSteps({
       className={className}
     />
   )
-}
-
-function useResolvedContextUsage(
-  metaStore: ChatMetaStore | undefined,
-  usage: ContextUsageState | null | undefined
-): ContextUsageState | null {
-  const subscribe = useCallback(
-    (onStoreChange: () => void) => metaStore?.subscribeMeta(onStoreChange) ?? (() => {}),
-    [metaStore]
-  )
-  const getRevision = useCallback(() => metaStore?.getMetaRevision() ?? 0, [metaStore])
-  useSyncExternalStore(subscribe, getRevision, getRevision)
-  return metaStore ? metaStore.getContextUsage() : (usage ?? null)
-}
-
-function useResolvedCostHint(
-  metaStore: ChatMetaStore | undefined,
-  costHint: string | null | undefined
-): string | null {
-  const subscribe = metaStore?.subscribeMeta ?? (() => () => {})
-  const getRevision = metaStore?.getMetaRevision ?? (() => 0)
-  useSyncExternalStore(subscribe, getRevision, getRevision)
-  if (metaStore?.getCostHint) return metaStore.getCostHint()
-  return costHint ?? null
 }
 
 function ContextMeterLeaf({
@@ -132,8 +107,14 @@ const modelPillTrigger = cn(
   'vy-transition disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]'
 )
 
-/** Leading cluster root — attach, mode, and model pills sit before the input. */
-const toolsRow = 'flex h-8 min-w-0 items-center gap-1 overflow-hidden'
+/**
+ * Leading cluster root — attach, mode, and model pills sit before the input.
+ * `-ml-1.5` pulls the row out by the attach button's glyph inset (28px box,
+ * 16px icon), so the `+` starts on the typed text's left edge, the way the
+ * tasks row starts on the pinned prompt's text. It moves the row, not the
+ * button, because `overflow-hidden` would clip a button's own negative margin.
+ */
+const toolsRow = '-ml-1.5 flex h-8 min-w-0 items-center gap-1 overflow-hidden'
 
 /** Trailing action row — Think, context meter, Send/Stop. */
 const toolbarRow = 'flex h-8 min-w-0 shrink-0 items-center gap-2'
@@ -164,9 +145,6 @@ export function ComposerToolbarTools({
   onModelPickerOpenChange,
   agentMode,
   onAgentModeChange,
-  agentProfileId,
-  workspacePath = null,
-  onAgentProfileChange,
   running,
   focusInput
 }: {
@@ -194,10 +172,6 @@ export function ComposerToolbarTools({
   onModelPickerOpenChange?: (open: boolean) => void
   agentMode: AgentInteractionMode
   onAgentModeChange: (mode: AgentInteractionMode) => void
-  agentProfileId?: string | null
-  /** Scope-gates the teammate picker: a workspace teammate cannot run elsewhere. */
-  workspacePath?: string | null
-  onAgentProfileChange?: (profileId: string | null) => void
   running: boolean
   focusInput?: () => void
 }) {
@@ -214,13 +188,6 @@ export function ComposerToolbarTools({
         onModeChange={onAgentModeChange}
         disabled={locked}
         running={running}
-        className="shrink-0"
-      />
-      <AgentProfilePicker
-        profileId={agentProfileId ?? null}
-        workspacePath={workspacePath}
-        onProfileChange={onAgentProfileChange ?? (() => {})}
-        disabled={locked}
         className="shrink-0"
       />
       <ModelPicker
@@ -250,7 +217,11 @@ export function ComposerToolbarTools({
   )
 }
 
-export type ComposerVariant = 'hero' | 'dock' | 'inline'
+/**
+ * `line` is the task's instruction line: one row flush with the pane's bottom
+ * edge — no Send or Stop button (Enter sends, Esc stops), options in one token.
+ */
+export type ComposerVariant = 'hero' | 'dock' | 'inline' | 'line' | 'brief'
 
 function dictationMicLabel(phase: DictationPhase): string {
   switch (phase) {
@@ -349,6 +320,8 @@ function composerToolbarKind(variant: ComposerVariant): 'inline' | 'standard' {
       return 'inline'
     case 'hero':
     case 'dock':
+    case 'line':
+    case 'brief':
       return 'standard'
     default: {
       const _exhaustive: never = variant

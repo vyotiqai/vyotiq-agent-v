@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
+import { requireActivePath } from './helpers/seedWorkspace'
 
 let launched: LaunchedApp
 let workspacePath: string
@@ -28,7 +29,7 @@ test.beforeAll(async () => {
   )
   expect(addRes.ok).toBe(true)
   if (!addRes.ok) throw new Error(addRes.error)
-  workspacePath = addRes.data.activePath
+  workspacePath = requireActivePath(addRes.data.activePath)
 
   await launched.window.evaluate(async () => {
     await window.vyotiq.setSettings({ toolApprovalOnboardingDone: true })
@@ -54,25 +55,29 @@ test.afterAll(async () => {
 test('follow mode opens the file the run writes', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) await expand.click()
 
-  await window.getByRole('button', { name: /Show files panel/i }).click()
+  // The chord is answered by the task view: wait for it before pressing.
+  await expect(window.getByRole('combobox', { name: 'Brief' })).toBeVisible({ timeout: 20_000 })
+  // A new task keeps the inspector out of the way until asked; Alt 2 asks for Files.
+  await window.keyboard.press('Alt+2')
   await expect(window.getByRole('tabpanel', { name: 'Files' })).toBeVisible({ timeout: 20_000 })
 
-  const follow = window.getByRole('button', { name: 'Follow agent edits' })
+  const follow = window.getByRole('switch', { name: 'Follow agent edits' })
   await expect(follow).toBeVisible({ timeout: 20_000 })
-  expect(await follow.getAttribute('aria-pressed')).toBe('false')
+  expect(await follow.getAttribute('aria-checked')).toBe('false')
   await follow.click()
-  expect(await follow.getAttribute('aria-pressed')).toBe('true')
+  expect(await follow.getAttribute('aria-checked')).toBe('true')
 
   // Nothing is open yet — the run is what puts a file on screen.
   await expect(window.getByRole('tab', { name: /target\.ts/i })).toHaveCount(0)
 
-  const composer = window.getByRole('combobox', { name: 'Message' })
+  const composer = window.getByRole('combobox', { name: 'Brief' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('Edit the target file')
-  await window.getByRole('button', { name: /^send$/i }).click()
+  // A new task starts from its brief on Ctrl+Enter — Enter is a new line there.
+  await window.getByRole('combobox', { name: 'Brief' }).press('Control+Enter')
 
   await expect(window.getByRole('tab', { name: /target\.ts/i })).toBeVisible({ timeout: 30_000 })
   const editor = window.locator('[data-code-editor] .cm-content')

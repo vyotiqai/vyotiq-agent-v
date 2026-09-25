@@ -89,6 +89,75 @@ export function closeUnterminatedJson(text: string): string | null {
   return closed
 }
 
+/**
+ * Innermost container still open at end-of-text (`{` / `[`), string-aware.
+ * Null when every container closed or the walk ended inside a string.
+ */
+function innermostOpenContainer(text: string): '{' | '[' | null {
+  const stack: Array<'{' | '['> = []
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+    if (ch === '{' || ch === '[') {
+      stack.push(ch)
+      continue
+    }
+    if (ch === '}' || ch === ']') stack.pop()
+  }
+  return stack.length > 0 ? stack[stack.length - 1]! : null
+}
+
+/**
+ * Drop a dangling trailing member stub — `,`, `, "key"`, or `, "key": ` — whose
+ * value never arrived, and return the prefix that ends after a whole value.
+ * The `,` / `:` is the previous value's token terminator, so `12,` cannot be a
+ * cut `123`: dropping the stub reconstructs no value, it only erases the record
+ * of a member whose value never arrived. A started value (`: [`, `: "partial`)
+ * is never a stub, and a complete trailing string inside `[` is an array VALUE
+ * that did arrive — it is never dropped. Each candidate prefix is verified by
+ * closing it up and `JSON.parse`-ing the result before it is returned. Null
+ * when the tail is anything but exactly one member stub.
+ */
+export function trimDanglingJsonTail(text: string): string | null {
+  const open = innermostOpenContainer(text)
+  if (!open) return null
+  // In `{` a trailing complete string can only be a dangling KEY (its value
+  // never arrived). In `[` it would be a complete element value — never drop.
+  const memberStubs: RegExp[] =
+    open === '{'
+      ? [
+          /(,\s*"(?:[^"\\]|\\.)*"\s*:\s*)$/, // `, "key":` — the value never started
+          /(,\s*"(?:[^"\\]|\\.)*"\s*)$/ // `, "key"` — neither colon nor value arrived
+        ]
+      : []
+  for (const shape of [...memberStubs, /(,\s*)$/]) {
+    const match = shape.exec(text)
+    if (!match) continue
+    const prefix = text.slice(0, match.index).replace(/\s+$/, '')
+    if (!prefix) continue
+    const closed = closeUnterminatedJson(prefix)
+    if (!closed) continue
+    try {
+      const parsed: unknown = JSON.parse(closed)
+      if (parsed !== null && typeof parsed === 'object') return prefix
+    } catch {
+      // candidate kept the dangling half of a member — try the next-shorter stub
+    }
+  }
+  return null
+}
+
 function tryParseJson(text: string): unknown | undefined {
   try {
     return JSON.parse(text) as unknown

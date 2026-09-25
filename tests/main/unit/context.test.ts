@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { allocateBudget, contentWindow, contextWindowFor, effectiveWindow } from '@main/agent/context/budget'
+import { allocateBudget, contentWindow, contextWindowFor } from '@main/agent/context/budget'
 import { estimateTextTokens, estimateMessagesTokensAsync } from '@main/agent/context/estimate'
 import { preserveRecentMessagesAsync } from '@main/agent/context/compact'
 import {
   applyFoldedMessagesWatermark,
   stripLeadingOrphanToolMessages
 } from '@main/agent/context/foldWatermark'
-import { anthropicNativeOptions } from '@main/agent/context/anthropicContext'
 import type { ChatMessage } from '@shared/ipc'
 
 describe('context budget', () => {
@@ -33,7 +32,6 @@ describe('context budget', () => {
       supportsVision: false,
       contextWindow: 100_000
     }
-    expect(contentWindow(model)).toBe(effectiveWindow(model))
     expect(contentWindow(model)).toBe(85_000)
   })
 
@@ -54,9 +52,7 @@ describe('context budget', () => {
       messages: [{ role: 'user', content: 'hello' }],
       toolsJsonEstimate: 1000,
       model,
-      providerId: 'ollama',
-      provider: { stream: async function* () {} } as never,
-      signal: new AbortController().signal
+      providerId: 'ollama'
     })
     const used = result.layers.system + result.layers.history + result.layers.tools
     expect(result.layers.buffer).toBe(Math.max(0, 85_000 - used))
@@ -116,10 +112,5 @@ describe('context budget', () => {
     const kept = await preserveRecentMessagesAsync(msgs, 5, 200, model)
     expect(kept.length).toBeGreaterThan(0)
     expect(kept[0].role).not.toBe('tool')
-  })
-
-  it('disables anthropic server-side context management (LLM compact is client-only)', () => {
-    const opts = anthropicNativeOptions()
-    expect(opts.enableContextManagement).toBe(false)
   })
 })

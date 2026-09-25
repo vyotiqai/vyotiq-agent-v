@@ -9,11 +9,22 @@ import {
   type ReactNode
 } from 'react'
 import { createPortal } from 'react-dom'
-import { Icon } from '../icons'
+import { Icon, type IconName } from '../icons'
 import { prefersReducedMotion } from '../utils/motion'
 import { useDropdownMenu } from '../hooks/useDropdownMenu'
 import { SearchInput } from './SearchInput'
 import { cn } from './cn'
+import {
+  MENU_LABEL,
+  MENU_ROW,
+  MENU_ROW_ACTIVE,
+  MENU_ROW_DISABLED,
+  MENU_ROW_IDLE,
+  MENU_ROW_SELECTED,
+  MENU_ROW_TEXT,
+  MENU_SURFACE,
+  selectTriggerClass
+} from './menuStyles'
 
 export type MenuOption = {
   value: string
@@ -22,19 +33,6 @@ export type MenuOption = {
   disabled?: boolean
 }
 
-const interactive = 'vy-transition disabled:vy-disabled-state'
-
-const menuTriggerClass = cn(
-  'inline-flex max-w-full min-h-7 items-center gap-1 rounded-md border border-border bg-surface px-2 text-xs tracking-[var(--vy-tracking)] text-fg',
-  'hover:bg-surface-2 hover:border-border-strong active:bg-surface-2',
-  interactive
-)
-
-const menuOptionClass = cn(
-  'flex w-full cursor-pointer items-center gap-2 rounded-md bg-transparent px-2.5 py-1.5 text-left text-sm text-fg',
-  'hover:bg-surface active:bg-surface-2',
-  'vy-transition'
-)
 
 export function Menu({
   value,
@@ -46,7 +44,12 @@ export function Menu({
   disabled,
   searchable,
   searchPlaceholder = 'Search',
-  placement = 'up'
+  placement = 'up',
+  bare = false,
+  quiet = false,
+  mono = false,
+  icon,
+  title
 }: {
   value: string
   options: MenuOption[]
@@ -58,6 +61,14 @@ export function Menu({
   searchable?: boolean
   searchPlaceholder?: string
   placement?: 'up' | 'down'
+  /** No outline until hover — toolbars and inline sentences. */
+  bare?: boolean
+  /** The value is the default: readable, but not asking to be read. */
+  quiet?: boolean
+  mono?: boolean
+  icon?: IconName
+  /** Hover text for the trigger, when its value can truncate (a long model id). */
+  title?: string
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -204,10 +215,7 @@ export function Menu({
     open && position ? (
       <div
         ref={panelRef}
-        className={cn(
-          'fixed z-dropdown overflow-hidden rounded-md border border-border bg-card shadow-menu animate-menu-in',
-          placement === 'up' ? 'origin-bottom' : 'origin-top'
-        )}
+        className={cn('fixed', MENU_SURFACE, placement === 'up' ? 'origin-bottom' : 'origin-top')}
         style={{
           top: position.placement === 'up' ? undefined : position.top,
           bottom:
@@ -222,7 +230,7 @@ export function Menu({
         onKeyDown={onListKeyDown}
       >
           {showSearch ? (
-            <div className="border-b border-border px-2 py-1.5">
+            <div className="border-b border-border p-1.5">
               <SearchInput
                 ref={searchRef}
                 inputClassName="min-h-7 text-xs"
@@ -259,7 +267,7 @@ export function Menu({
             onKeyDown={onListKeyDown}
           >
             {filtered.length === 0 ? (
-              <li className="px-2.5 py-2 text-xs text-muted" role="presentation">
+              <li className="px-2 py-2 text-xs text-muted" role="presentation">
                 No matches
               </li>
             ) : (
@@ -269,10 +277,7 @@ export function Menu({
                 if (group) {
                   nodes.push(
                     <li key={`${group}-label`} role="presentation">
-                      <div
-                        id={groupId}
-                        className="px-2 pt-1 pb-0.5 text-xs tracking-[var(--vy-tracking)] text-muted"
-                      >
+                      <div id={groupId} className={MENU_LABEL}>
                         {group}
                       </div>
                     </li>
@@ -295,11 +300,10 @@ export function Menu({
                         optionRefs.current[index] = el
                       }}
                       className={cn(
-                        menuOptionClass,
-                        isSelected && 'bg-surface-2 text-fg-strong',
-                        isActive && !isSelected && 'bg-surface',
-                        isActive && 'outline-none ring-0',
-                        opt.disabled && 'cursor-not-allowed opacity-[var(--vy-disabled-opacity)]'
+                        MENU_ROW,
+                        isActive ? MENU_ROW_ACTIVE : MENU_ROW_IDLE,
+                        isSelected ? MENU_ROW_SELECTED : MENU_ROW_TEXT,
+                        opt.disabled && MENU_ROW_DISABLED
                       )}
                       onClick={() => {
                         if (!opt.disabled) pick(opt.value)
@@ -315,9 +319,9 @@ export function Menu({
                     >
                       <span className="min-w-0 flex-1 truncate">{opt.label}</span>
                       {isSelected ? (
-                        <Icon name="check" size={16} className="shrink-0 text-fg" />
+                        <Icon name="check" size={14} className="shrink-0 text-accent" />
                       ) : (
-                        <span className="inline-block size-4 shrink-0" aria-hidden />
+                        <span className="inline-block size-3.5 shrink-0" aria-hidden />
                       )}
                     </li>
                   )
@@ -334,8 +338,9 @@ export function Menu({
       <button
         ref={triggerRef}
         type="button"
-        className={triggerClassName ?? menuTriggerClass}
+        className={triggerClassName ?? selectTriggerClass({ bare, quiet, mono })}
         aria-label={ariaLabel}
+        title={title}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}
@@ -350,12 +355,9 @@ export function Menu({
           }
         }}
       >
-        <span className="truncate">{label}</span>
-        <Icon
-          name="chevron"
-          size={14}
-          className={cn('text-muted vy-transition', open && 'rotate-180')}
-        />
+        {icon ? <Icon name={icon} size={14} className="text-muted" /> : null}
+        <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+        <Icon name="chevron" size={12} className="text-tertiary" />
       </button>
       {dropdown ? createPortal(dropdown, document.body) : null}
     </div>

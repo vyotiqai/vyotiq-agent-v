@@ -11,6 +11,16 @@ import { Icon, type IconName } from '../icons'
 import { prefersReducedMotion } from '../utils/motion'
 import { useDropdownMenu } from '../hooks/useDropdownMenu'
 import { cn } from './cn'
+import {
+  MENU_ROW,
+  MENU_ROW_ACTIVE,
+  MENU_ROW_DANGER,
+  MENU_ROW_DISABLED,
+  MENU_ROW_IDLE,
+  MENU_ROW_TEXT,
+  MENU_SEPARATOR,
+  MENU_SURFACE
+} from './menuStyles'
 
 export type ActionMenuItem = {
   id: string
@@ -21,13 +31,16 @@ export type ActionMenuItem = {
    * glyph when true, and exposes role/aria-checked. Omit for plain actions.
    */
   checked?: boolean
+  /** Draw a rule above this item — to set apart an action from a list of choices. */
+  separatorBefore?: boolean
+  /** Destructive (Delete): drawn in the danger tone. */
+  danger?: boolean
+  /** Shown but not choosable; the keyboard steps over it. */
+  disabled?: boolean
+  /** Why it is disabled — the tooltip, and what a screen reader hears. */
+  disabledReason?: string
   onSelect: () => void
 }
-
-const optionClass = cn(
-  'flex w-full cursor-pointer items-center gap-2 rounded-md bg-transparent px-2.5 py-1.5 text-left text-sm text-fg',
-  'hover:bg-surface active:bg-surface-2 vy-transition'
-)
 
 export function ActionMenu({
   trigger,
@@ -56,6 +69,8 @@ export function ActionMenu({
   const triggerRef = useRef<HTMLButtonElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
   const [activeIndex, setActiveIndex] = useState(-1)
+  const selectable = items.flatMap((item, index) => (item.disabled ? [] : [index]))
+  const firstSelectable = selectable[0] ?? -1
 
   const { position, close } = useDropdownMenu({
     open,
@@ -69,10 +84,10 @@ export function ActionMenu({
 
   useEffect(() => {
     if (!open) return
-    setActiveIndex(items.length ? 0 : -1)
+    setActiveIndex(firstSelectable)
     const t = window.setTimeout(() => listRef.current?.focus(), 0)
     return () => window.clearTimeout(t)
-  }, [open, items.length])
+  }, [open, firstSelectable])
 
   useEffect(() => {
     if (!open || activeIndex < 0) return
@@ -84,23 +99,25 @@ export function ActionMenu({
   }, [activeIndex, open])
 
   const onListKeyDown = (e: ReactKeyboardEvent): void => {
-    if (items.length === 0) return
+    if (selectable.length === 0) return
+    // Arrows walk the choosable rows only; a disabled one is never landed on.
+    const at = selectable.indexOf(activeIndex)
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setActiveIndex((i) => (i + 1) % items.length)
+      setActiveIndex(selectable[(at + 1) % selectable.length]!)
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
-      setActiveIndex((i) => (i - 1 + items.length) % items.length)
+      setActiveIndex(selectable[(Math.max(at, 0) - 1 + selectable.length) % selectable.length]!)
     } else if (e.key === 'Home') {
       e.preventDefault()
-      setActiveIndex(0)
+      setActiveIndex(selectable[0]!)
     } else if (e.key === 'End') {
       e.preventDefault()
-      setActiveIndex(items.length - 1)
+      setActiveIndex(selectable[selectable.length - 1]!)
     } else if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       const item = items[activeIndex]
-      if (item) {
+      if (item && !item.disabled) {
         item.onSelect()
         close(true)
       }
@@ -116,7 +133,8 @@ export function ActionMenu({
         aria-label={ariaLabel}
         tabIndex={-1}
         className={cn(
-          'app-region-no-drag fixed z-dropdown m-0 list-none overflow-hidden rounded-md border border-border bg-card p-1 shadow-menu animate-menu-in',
+          'app-region-no-drag fixed m-0 list-none p-1',
+          MENU_SURFACE,
           placement === 'up' ? 'origin-bottom' : 'origin-top'
         )}
         style={{
@@ -135,28 +153,48 @@ export function ActionMenu({
       >
         {items.map((item, index) => (
           <li key={item.id} role="none">
+            {item.separatorBefore ? <div role="separator" className={MENU_SEPARATOR} /> : null}
             <button
               type="button"
               role={item.checked != null ? 'menuitemcheckbox' : 'menuitem'}
               aria-checked={item.checked != null ? item.checked : undefined}
-              className={cn(optionClass, index === activeIndex && 'bg-surface')}
-              onMouseEnter={() => setActiveIndex(index)}
+              aria-disabled={item.disabled || undefined}
+              aria-describedby={
+                item.disabled && item.disabledReason ? `${menuId}-reason-${item.id}` : undefined
+              }
+              title={item.disabled ? item.disabledReason : undefined}
+              disabled={item.disabled}
+              className={cn(
+                MENU_ROW,
+                item.disabled ? MENU_ROW_DISABLED : item.danger ? MENU_ROW_DANGER : MENU_ROW_TEXT,
+                item.disabled ? '' : index === activeIndex ? MENU_ROW_ACTIVE : MENU_ROW_IDLE
+              )}
+              onMouseEnter={() => {
+                if (!item.disabled) setActiveIndex(index)
+              }}
               onClick={() => {
+                if (item.disabled) return
                 item.onSelect()
                 close(true)
               }}
             >
               {item.checked != null ? (
                 item.checked ? (
-                  <Icon name="check" size={16} className="shrink-0" />
+                  <Icon name="check" size={15} className="shrink-0 text-accent" />
                 ) : (
-                  <span className="inline-block w-4 shrink-0" aria-hidden />
+                  <span className="inline-block w-[15px] shrink-0" aria-hidden />
                 )
               ) : item.icon ? (
-                <Icon name={item.icon} size={16} />
+                <Icon name={item.icon} size={15} className={item.danger ? 'text-danger' : 'text-muted'} />
               ) : null}
               {item.label}
             </button>
+            {/* Outside the button, so it is the row's description and not also part of its name. */}
+            {item.disabled && item.disabledReason ? (
+              <span id={`${menuId}-reason-${item.id}`} hidden>
+                Unavailable: {item.disabledReason}
+              </span>
+            ) : null}
           </li>
         ))}
       </ul>

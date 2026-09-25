@@ -3,25 +3,31 @@
 [![CI](https://github.com/vyotiqai/vyotiq-agent-v/actions/workflows/ci.yml/badge.svg)](https://github.com/vyotiqai/vyotiq-agent-v/actions/workflows/ci.yml)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-Vyotiq ("Agent V") is an Electron desktop app: a coding workspace for real repositories. It pairs a chat interface with multiple model providers with an agent that can act directly on your checked-out code — terminal, files, and repository tools — instead of only working from pasted snippets. Voice dictation is built in and transcribes on-device with Whisper; the model weights are downloaded once on first use rather than shipped in the installer.
+Vyotiq ("Agent V") is an Electron desktop app for handing real work on a real repository to a coding agent. You give it a task; it works in your checkout with terminal, file, git and browser tools, and the app keeps a record of the work — every step, every change, the checks it was held to and whether they held — beside the files, terminal, browser and pull request it worked in. It works with many model providers, and voice dictation transcribes on-device with Whisper.
+
+This is version 1.0.0, the rebuilt app. Release notes: [release-notes/v1.0.0.md](release-notes/v1.0.0.md).
 
 ## Features
 
-- **Multi-provider chat** — talk to OpenAI, Anthropic, Google Gemini, Ollama (local models), DeepSeek, Groq, OpenRouter, xAI, Mistral, or any custom OpenAI-compatible endpoint, plus an OpenCode provider. Model lists are fetched per provider where the API supports it.
-- **An agent that acts on your checkout** — the built-in tool catalog includes a terminal, file tools (read, edit, search, glob, grep, codebase search), git tools (status, diff, commit, apply patch), GitHub tools (pull requests, issues), typecheck/lint/test runners, browser automation, notebook editing, and language-server queries.
-- **Agent runs and instance worktrees** — the agent can fan work out to child instances; each child runs on its own git worktree branch and the result is merged back into the parent branch.
+- **Tasks, sorted by what they need** — the navigator groups every task in your open workspaces as Needs you, Running, Ready for review and Done. A task is a record of the work, not a chat: the instruction, then each step the agent took, with terminal and diff output kept whole.
+- **Done-when checks** — a task can carry the conditions that mean it is finished; the agent marks each met or not met with evidence before it stops, and the record shows every verdict.
+- **The inspector** — Changes, Files, Terminal, Browser, Pull request and Plan beside the task. Changes is a review: keep or undo each file, mark files viewed, ask about a line, and commit with a message drafted once per change set.
+- **Rewind and Redo** — go back to an earlier instruction; the dialog says which files go back and which stop at a change you made, and a rewind can be brought back until you send a new instruction.
+- **Worktrees** — start a task on its own branch in its own folder, then merge it back or discard it.
+- **Multiple model providers** — OpenAI, Anthropic, Google Gemini, Ollama (local models), DeepSeek, Groq, OpenRouter, xAI, Mistral, or any custom OpenAI-compatible endpoint, plus an OpenCode provider. Model lists are fetched per provider where the API supports it.
+- **An agent that acts on your checkout** — two modes, Ask (reads and answers) and Agent (plans, edits and runs commands). The built-in tool catalog includes a terminal, file tools (read, edit, search, glob, grep, codebase search), git tools (status, diff, commit, apply patch), GitHub tools (pull requests, issues), typecheck/lint/test runners, browser automation, notebook editing, and language-server queries.
+- **Helper instances** — a task can fan work out to helper instances, each on its own git worktree branch, merged back into the task's branch. Settings caps how many run at once.
 - **Local Whisper dictation** — voice dictation is transcribed entirely on your machine (Whisper via transformers.js with the onnxruntime-node backend) in the Electron main process / a utility process. No audio leaves the app. The model weights are fetched from Hugging Face into the app's user data directory the first time you use dictation, so the feature needs one download before it works offline.
 - **Skills and marketplace** — skills ship with the app as marketplace resources and can be loaded into a run; plugin rules are supported alongside skill files.
 - **MCP client** — connect Model Context Protocol servers, list their tools/resources/prompts, and pin their tools into the agent's catalog. Connection attempts widen Node's 250ms per-address window, so a reachable host that publishes several A/AAAA records is not reported as unreachable.
 - **Long-term workspace memory** — the agent keeps notes under `.vyotiq/memory/` in the workspace and re-reads them on later runs.
-- **Teammates** — persistent agent identities with per-workspace private memory, pinned models, and delegated tasks that run on a schedule or queue — surviving app restarts, with auto-resume for interrupted runs. A dedicated Teammates view carries the roster, each teammate's task inbox, and per-workspace behaviour overrides; a finished task can be retried as a new record so the attempt that failed stays in history. See [docs/teammates.md](docs/teammates.md).
 - **Verification gate** — the run loop tracks whether a check actually ran, and reported clean, after the last file the agent changed, so a turn that edited code without verifying it is caught while it can still act rather than at teardown.
 - **Run feedback** — each workspace remembers how its runs went under `runFeedback.json`, and messages can be rated in place. Receipts are per-run and pruned with their session, so this is what makes recurring trouble visible across runs.
 
 ## Documentation
 
-- [Teammates — architecture, scheduler semantics, and user guide](docs/teammates.md)
 - [Outbound network egress — what the gate covers, and what it deliberately does not](docs/egress.md)
+- [Agent-built tools — what `build_tool` permits, and the four things that bound it](docs/agent-tools.md)
 
 ## Platforms
 
@@ -57,7 +63,8 @@ Copy `.env.example` to `.env`. Both variables are optional and only enable Sentr
 
 ```bash
 pnpm dev     # launch the Electron app in dev mode
-pnpm start   # preview the production build
+pnpm build   # typecheck, sync assets, and build the production bundle
+pnpm start   # launch that build (it does not rebuild — run pnpm build first)
 ```
 
 ## Verification

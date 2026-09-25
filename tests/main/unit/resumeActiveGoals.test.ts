@@ -90,38 +90,42 @@ describe('resumeActiveGoalsAndLoops', () => {
     expect(launched.message.synthetic).toBe(true)
   })
 
+  const launchCalls = (): Array<[{ runId: string; mode: string }]> =>
+    launchMock.mock.calls as unknown as Array<[{ runId: string; mode: string }]>
+
   it('resumes a goal in its persisted interaction mode', () => {
-    const planId = 'goal-plan-mode'
-    createRun(workspace, planId, 'chat', 'plan')
-    createGoal(resolveRunDir(workspace, planId), 'plan objective')
+    const askId = 'goal-ask-mode'
+    createRun(workspace, askId, 'chat', 'ask')
+    createGoal(resolveRunDir(workspace, askId), 'ask objective')
 
     resumeActiveGoalsAndLoops({ isDestroyed: () => false } as WebContents)
 
     expect(launchMock).toHaveBeenCalledTimes(1)
-    const launched = launchMock.mock.calls[0]?.[0] as { runId: string; mode: string }
-    expect(launched.runId).toBe(planId)
-    expect(launched.mode).toBe('plan')
+    const launched = launchCalls()[0]?.[0]
+    expect(launched?.runId).toBe(askId)
+    expect(launched?.mode).toBe('ask')
   })
 
-  it('leaves a delegated task run to the scheduler instead of relaunching it', () => {
-    // A task's run has two possible owners at boot: this generic pass and the
-    // delegated-task scheduler. Relaunching here would put two owners on one
-    // teammate and re-run work the task already accounted for.
-    const taskRunId = 'goal-delegated'
-    createRun(workspace, taskRunId, 'chat')
-    createGoal(resolveRunDir(workspace, taskRunId), 'delegated objective')
-    const statusPath = join(resolveRunDir(workspace, taskRunId), 'status.json')
-    writeFileSync(
-      statusPath,
-      JSON.stringify({
-        ...JSON.parse(readFileSync(statusPath, 'utf8')),
-        delegatedTaskId: 'task-owns-this-run'
-      })
-    )
+  it('resumes a pre-merge Plan run in Agent mode', () => {
+    // status.json written before Plan merged into Agent still says "plan".
+    // readStatus discards a status.json it cannot parse, so the value has to be
+    // FOLDED, not rejected — otherwise the run loses its status and its goal
+    // never resumes. This is that migration, end to end through resume.
+    const legacyId = 'goal-legacy-plan-mode'
+    const runDir = createRun(workspace, legacyId, 'chat', 'agent')
+    const status = JSON.parse(readFileSync(join(runDir, 'status.json'), 'utf8')) as Record<
+      string,
+      unknown
+    >
+    writeFileSync(join(runDir, 'status.json'), JSON.stringify({ ...status, mode: 'plan' }))
+    createGoal(runDir, 'legacy plan objective')
 
     resumeActiveGoalsAndLoops({ isDestroyed: () => false } as WebContents)
 
-    expect(launchMock).not.toHaveBeenCalled()
+    expect(launchMock).toHaveBeenCalledTimes(1)
+    const launched = launchCalls()[0]?.[0]
+    expect(launched?.runId).toBe(legacyId)
+    expect(launched?.mode).toBe('agent')
   })
 
   it('skips the app-start relaunch when the run stopped on provider quota', () => {

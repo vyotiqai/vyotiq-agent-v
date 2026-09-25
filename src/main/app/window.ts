@@ -15,6 +15,7 @@ import {
   MACOS_TRAFFIC_LIGHT_Y
 } from '../../shared/windowChrome'
 import { attachWebContentsCrashLogging } from '@main/logging/init'
+import { planRendererLoadRetry, sanitizeCrashUrl } from '@main/logging/crashDiagnostics'
 import { logger } from '../../shared/logger'
 
 let mainWindow: BrowserWindow | null = null
@@ -72,6 +73,61 @@ function attachWindowStatePush(win: BrowserWindow): void {
   })
 }
 
+/**
+ * Re-issue a top-frame load that failed, so a window cannot be left blank by a
+ * tree replacing `out/renderer` mid-navigation. See planRendererLoadRetry.
+ */
+function attachRendererLoadRetry(win: BrowserWindow, load: () => Promise<void>): void {
+  let attempts = 0
+  let timer: ReturnType<typeof setTimeout> | null = null
+
+  win.webContents.on('did-finish-load', () => {
+    attempts = 0
+  })
+
+  win.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (win.isDestroyed()) return
+      const plan = planRendererLoadRetry({ errorCode, isMainFrame, attempts })
+      if (plan.action === 'ignore') return
+      const url = sanitizeCrashUrl(validatedURL)
+      if (plan.action === 'give-up') {
+        logger.error('Renderer failed to load', {
+          scope: 'main',
+          code: 'RENDERER_LOAD_FAILED',
+          errorCode,
+          errorDescription,
+          attempts,
+          ...(url ? { url } : {})
+        })
+        return
+      }
+      attempts = plan.attempt
+      logger.warn('Renderer load failed, retrying', {
+        scope: 'main',
+        code: 'RENDERER_LOAD_RETRY',
+        errorCode,
+        errorDescription,
+        attempt: plan.attempt,
+        waitMs: plan.waitMs,
+        ...(url ? { url } : {})
+      })
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = null
+        if (win.isDestroyed()) return
+        void load()
+      }, plan.waitMs)
+    }
+  )
+
+  win.on('closed', () => {
+    if (timer) clearTimeout(timer)
+    timer = null
+  })
+}
+
 export function createWindow(): BrowserWindow {
   const settings = getSettings()
 
@@ -117,10 +173,23 @@ export function createWindow(): BrowserWindow {
     if (mainWindow === created) mainWindow = null
   })
 
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']).catch((err: unknown) => {
-      logger.error('Failed to load renderer URL', { scope: 'main', err })
-    })
+  const rendererUrl = is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined
+  // Failures are reported by the did-fail-load retry, which owns the decision
+  // to try again; the rejection here carries nothing it does not already log.
+  const loadRenderer = (): Promise<void> =>
+    created.isDestroyed()
+      ? Promise.resolve()
+      : (rendererUrl
+          ? created.loadURL(rendererUrl)
+          : created.loadFile(join(__dirname, '../renderer/index.html'))
+        ).catch((err: unknown) => {
+          logger.debug('Renderer load rejected', { scope: 'main', err })
+        })
+
+  attachRendererLoadRetry(created, loadRenderer)
+  void loadRenderer()
+
+  if (rendererUrl) {
     // Open after first paint so DevTools detach does not race renderer boot / logging IPC.
     mainWindow.webContents.once('did-finish-load', () => {
       if (!mainWindow || mainWindow.isDestroyed()) return
@@ -128,10 +197,6 @@ export function createWindow(): BrowserWindow {
         if (!mainWindow || mainWindow.isDestroyed()) return
         mainWindow.webContents.openDevTools({ mode: 'detach' })
       }, 750)
-    })
-  } else {
-    void mainWindow.loadFile(join(__dirname, '../renderer/index.html')).catch((err: unknown) => {
-      logger.error('Failed to load renderer file', { scope: 'main', err })
     })
   }
 

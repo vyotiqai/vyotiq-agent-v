@@ -6,8 +6,7 @@ export const BUILTIN_COMMANDS: SlashCommandDescriptor[] = [
     id: 'builtin:clear',
     trigger: 'clear',
     label: 'Clear / new chat',
-    description:
-      'Start a fresh chat (task boundary). Prefer this over carrying stale history into unrelated work',
+    description: 'Start a new task. Prefer this over carrying stale history into unrelated work',
     kind: 'builtin',
     group: 'App',
     availability: 'ready'
@@ -16,7 +15,7 @@ export const BUILTIN_COMMANDS: SlashCommandDescriptor[] = [
     id: 'builtin:compact',
     trigger: 'compact',
     label: 'Compact context',
-    description: 'Summarize older messages to free context window space',
+    description: 'Summarise older steps to free context. Text after /compact says what to keep',
     kind: 'builtin',
     group: 'App',
     availability: 'ready'
@@ -24,8 +23,8 @@ export const BUILTIN_COMMANDS: SlashCommandDescriptor[] = [
   {
     id: 'builtin:marketplace',
     trigger: 'marketplace',
-    label: 'Open Marketplace',
-    description: 'Browse and manage skills, MCP servers, and packages',
+    label: 'Open Extensions',
+    description: 'Browse and manage MCP servers, skills, rules and packages',
     kind: 'builtin',
     group: 'App',
     availability: 'ready'
@@ -85,19 +84,10 @@ export const BUILTIN_COMMANDS: SlashCommandDescriptor[] = [
     availability: 'ready'
   },
   {
-    id: 'builtin:plan',
-    trigger: 'plan',
-    label: 'Plan mode',
-    description: 'Switch to Plan mode (explore + plan artifacts)',
-    kind: 'builtin',
-    group: 'App',
-    availability: 'ready'
-  },
-  {
     id: 'builtin:agent',
     trigger: 'agent',
     label: 'Agent mode',
-    description: 'Switch to Agent mode (full tools)',
+    description: 'Switch to Agent mode (plan, edit, terminal, MCP)',
     kind: 'builtin',
     group: 'App',
     availability: 'ready'
@@ -124,7 +114,7 @@ export const BUILTIN_COMMANDS: SlashCommandDescriptor[] = [
     id: 'builtin:goal',
     trigger: 'goal',
     label: 'Set goal',
-    description: 'Set a long-lived objective for this chat (/goal pause, resume, complete)',
+    description: 'Keep working toward an objective. /goal pause, resume or complete it',
     kind: 'builtin',
     group: 'App',
     availability: 'ready'
@@ -133,7 +123,7 @@ export const BUILTIN_COMMANDS: SlashCommandDescriptor[] = [
     id: 'builtin:loop',
     trigger: 'loop',
     label: 'Arm loop',
-    description: 'Repeat a prompt on an interval (/loop 30s check CI; /loop stop)',
+    description: 'Repeat an instruction on an interval. /loop 30s check CI; /loop stop disarms it',
     kind: 'builtin',
     group: 'App',
     availability: 'ready'
@@ -176,8 +166,6 @@ export function resolveBuiltin(
       return { action: 'client', clientAction: 'undo_writes' }
     case 'builtin:ask':
       return { action: 'client', clientAction: 'set_mode_ask' }
-    case 'builtin:plan':
-      return { action: 'client', clientAction: 'set_mode_plan' }
     case 'builtin:agent':
       return { action: 'client', clientAction: 'set_mode_agent' }
     case 'builtin:harness-review':

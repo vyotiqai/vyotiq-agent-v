@@ -1,103 +1,29 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { CodeIndexRuntimeStatus, WorkspaceAgentContextResult } from '@shared/ipc'
+import { relativeTimeAgo } from '@shared/utils/timeFormat'
+import { workspacePathsEqual } from '@shared/workspacePathMatch'
+import { Button } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
-import type { CodeIndexRuntimeStatus, ProcessMetricsSnapshot } from '@shared/ipc'
-import { Button, Switch } from '@renderer/lib/ui'
-import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
+import { ProgressBar } from '../components/ProgressBar'
+import { SettingsGroup, SettingsItem, SettingsStack } from '../components/SettingsField'
+import { SwitchField } from '../components/SwitchField'
+import { workspaceShort } from '../utils/settingsHelpers'
 
-function phaseLabel(status: CodeIndexRuntimeStatus | null): string {
-  if (!status) return 'Unknown'
-  switch (status.phase) {
-    case 'ready':
-      return 'Ready'
-    case 'syncing': {
-      const ip = status.indexProgress
-      if (ip) return `Code index · ${ip.stage}`
-      const pct =
-        status.progress != null ? ` · ${Math.round(status.progress * 100)}%` : ''
-      return status.message ?? `Syncing${pct}`
-    }
-    case 'error':
-      return `Error${status.error ? `: ${status.error}` : ''}`
-    case 'idle':
-      return status.message ?? 'Idle'
-    default: {
-      const _exhaustive: never = status.phase
-      return _exhaustive
-    }
-  }
-}
+type IndexFacts = WorkspaceAgentContextResult['codeIndex']
 
-function IndexProgressPanel({ status }: { status: CodeIndexRuntimeStatus | null }) {
-  if (!status) return null
-  const showBar = status.phase === 'syncing'
-  const pct =
-    status.progress != null && Number.isFinite(status.progress)
-      ? Math.max(0, Math.min(100, Math.round(status.progress * 100)))
-      : null
-  const ip = status.indexProgress
-  const showDetail = ip != null && status.phase === 'syncing'
-
-  return (
-    <div className="flex w-full flex-col gap-1.5">
-      <p className="m-0 text-xs text-secondary">{phaseLabel(status)}</p>
-      {showBar && pct != null ? (
-        <div
-          className="h-1.5 w-full overflow-hidden rounded-sm bg-border"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={pct}
-          aria-label="Index progress"
-        >
-          <div
-            className="h-full bg-accent transition-[width] duration-100 ease-linear"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      ) : null}
-      {showDetail ? (
-        <div className="m-0 grid grid-cols-2 gap-x-3 gap-y-0.5 text-caption text-secondary">
-          <span>
-            {ip.filesDone}/{ip.filesTotal} scanned
-          </span>
-          <span className="text-right">
-            {ip.indexed} updated · {ip.skipped} unchanged
-            {ip.removed > 0 ? ` · ${ip.removed} removed` : ''}
-          </span>
-          <span className="text-right text-muted">
-            {ip.indexed + ip.skipped > 0
-              ? `${ip.indexed + ip.skipped} text files`
-              : '\u00a0'}
-          </span>
-          {ip.currentPath ? (
-            <span className="col-span-2 truncate font-mono text-2xs" title={ip.currentPath}>
-              {ip.currentPath}
-            </span>
-          ) : null}
-        </div>
-      ) : status.phase === 'syncing' && status.message ? (
-        <p className="m-0 text-caption text-secondary">{status.message}</p>
-      ) : null}
-    </div>
-  )
-}
-
-function mbForType(snap: ProcessMetricsSnapshot, type: string): number {
-  return snap.byType.find((row) => row.type === type)?.workingSetMb ?? 0
-}
-
-function processMetricsLabel(snap: ProcessMetricsSnapshot): string {
-  return `Main ${mbForType(snap, 'Browser')} MB · GPU ${mbForType(snap, 'GPU')} MB · Tabs ${mbForType(snap, 'Tab')} MB · ${snap.totalWorkingSetMb} MB total`
-}
-
-export function IndexingSection({ form }: { form: SettingsFormState }) {
-  const codeIndex = form.settings.codeIndex ?? { enabled: true }
+/**
+ * The one live index status. It speaks only for the workspace it names; the
+ * rest answer from their own index on disk.
+ */
+function useCodeIndexRuntime(enabled: boolean): {
+  runtime: CodeIndexRuntimeStatus | null
+  statusError: string | null
+  refresh: () => void
+} {
   const [runtime, setRuntime] = useState<CodeIndexRuntimeStatus | null>(null)
-  const [reindexBusy, setReindexBusy] = useState(false)
   const [statusError, setStatusError] = useState<string | null>(null)
-  const [processMetrics, setProcessMetrics] = useState<ProcessMetricsSnapshot | null>(null)
 
-  const refreshStatus = useCallback(() => {
+  const refresh = useCallback(() => {
     void window.vyotiq.codeIndexStatus().then((res) => {
       if (res.ok) {
         const { settings: _s, ...rest } = res.data
@@ -110,7 +36,7 @@ export function IndexingSection({ form }: { form: SettingsFormState }) {
   }, [])
 
   useEffect(() => {
-    refreshStatus()
+    refresh()
     const unsub =
       typeof window.vyotiq.onCodeIndexStatus === 'function'
         ? window.vyotiq.onCodeIndexStatus((status) => {
@@ -121,12 +47,12 @@ export function IndexingSection({ form }: { form: SettingsFormState }) {
     // Poll only while visible; a hidden settings window must not keep IPC awake.
     const poll = (): void => {
       if (document.visibilityState === 'hidden') return
-      refreshStatus()
+      refresh()
     }
     const onVisibility = (): void => {
-      if (document.visibilityState !== 'hidden') refreshStatus()
+      if (document.visibilityState !== 'hidden') refresh()
     }
-    // Fallback poll only when push subscription is unavailable.
+    // Fast fallback poll only when push subscription is unavailable.
     const id = unsub == null ? window.setInterval(poll, 1000) : window.setInterval(poll, 8000)
     document.addEventListener('visibilitychange', onVisibility)
     return () => {
@@ -134,116 +60,251 @@ export function IndexingSection({ form }: { form: SettingsFormState }) {
       window.clearInterval(id)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [refreshStatus, codeIndex.enabled])
+  }, [refresh, enabled])
 
-  useEffect(() => {
-    let cancelled = false
-    const pull = (): void => {
-      if (typeof window.vyotiq.processMetrics !== 'function') return
-      void window.vyotiq.processMetrics().then((res) => {
-        if (cancelled || !res.ok) return
-        setProcessMetrics(res.data)
+  return { runtime, statusError, refresh }
+}
+
+/**
+ * Each open workspace's own index — file count and last pass — read once and
+ * kept current by main's push. Reading it arms that push until the workspace
+ * is removed, which the navigator already does for every open workspace.
+ */
+function useIndexFacts(paths: readonly string[], enabled: boolean): {
+  facts: Record<string, IndexFacts>
+  reload: (path: string) => void
+} {
+  const [facts, setFacts] = useState<Record<string, IndexFacts>>({})
+  const pathsKey = paths.join('\n')
+
+  const reload = useCallback((path: string) => {
+    void window.vyotiq
+      .agentContext?.({ workspacePath: path })
+      .then((res) => {
+        if (res.ok) setFacts((prev) => ({ ...prev, [path]: res.data.codeIndex }))
       })
-    }
-    const poll = (): void => {
-      if (document.visibilityState === 'hidden') return
-      pull()
-    }
-    const onVisibility = (): void => {
-      if (document.visibilityState !== 'hidden') pull()
-    }
-    pull()
-    const id = window.setInterval(poll, 8000)
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
+      .catch(() => {})
   }, [])
 
-  const patchCodeIndex = (partial: Partial<typeof codeIndex>) => {
-    void form.runUpdate({
-      codeIndex: { ...codeIndex, ...partial }
+  useEffect(() => {
+    const list = pathsKey ? pathsKey.split('\n') : []
+    const off = window.vyotiq.onAgentContextChanged?.((payload) => {
+      const path = list.find((candidate) => workspacePathsEqual(candidate, payload.workspacePath))
+      if (path) setFacts((prev) => ({ ...prev, [path]: payload.context.codeIndex }))
     })
+    for (const path of list) reload(path)
+    return () => off?.()
+  }, [pathsKey, enabled, reload])
+
+  return { facts, reload }
+}
+
+/** What the index is doing right now, in the words of the stage it reports. */
+function syncHint(runtime: CodeIndexRuntimeStatus): string {
+  const ip = runtime.indexProgress
+  if (!ip) return runtime.message ?? 'Indexing'
+  switch (ip.stage) {
+    case 'walking':
+      return 'Listing files'
+    case 'scanning': {
+      const counts = `Scanning · ${ip.filesDone.toLocaleString()} of ${ip.filesTotal.toLocaleString()}`
+      return ip.currentPath ? `${counts} · ${ip.currentPath}` : counts
+    }
+    case 'reconciling':
+      return 'Reconciling'
+    case 'done':
+      return 'Finishing'
+  }
+}
+
+function factsHint(facts: IndexFacts | undefined): string | undefined {
+  if (!facts || facts.files == null) return undefined
+  const files = `${facts.files.toLocaleString()} ${facts.files === 1 ? 'file' : 'files'}`
+  const age = facts.indexedAt ? relativeTimeAgo(facts.indexedAt) : ''
+  return age ? `${files} · updated ${age}` : files
+}
+
+export function IndexingSection({
+  form,
+  openWorkspaces = []
+}: {
+  form: SettingsFormState
+  openWorkspaces?: string[]
+}) {
+  const codeIndex = form.settings.codeIndex ?? { enabled: true }
+  const { runtime, statusError, refresh } = useCodeIndexRuntime(codeIndex.enabled)
+  const { facts, reload } = useIndexFacts(openWorkspaces, codeIndex.enabled)
+  const [reindexing, setReindexing] = useState<string | null>(null)
+  const [rowError, setRowError] = useState<{ path: string; message: string } | null>(null)
+
+  const syncingPath =
+    runtime?.phase === 'syncing' && runtime.workspacePath
+      ? (openWorkspaces.find((path) => workspacePathsEqual(path, runtime.workspacePath!)) ?? null)
+      : null
+
+  /** Pause or resume a workspace's indexing; main keeps the flag, and Settings hears it back. */
+  const setPaused = (path: string, pause: boolean): void => {
+    setReindexing(path)
+    setRowError(null)
+    const call = pause ? window.vyotiq.codeIndexPause(path) : window.vyotiq.codeIndexResume(path)
+    void call
+      .then((res) => {
+        if (!res.ok) setRowError({ path, message: res.error ?? (pause ? 'Could not pause' : 'Could not resume') })
+      })
+      .catch((err: unknown) => {
+        setRowError({ path, message: err instanceof Error ? err.message : pause ? 'Could not pause' : 'Could not resume' })
+      })
+      .finally(() => {
+        setReindexing(null)
+        reload(path)
+        refresh()
+      })
+  }
+
+  const reindex = (path: string): void => {
+    setReindexing(path)
+    setRowError(null)
+    void window.vyotiq
+      .codeIndexReindex({ workspacePath: path })
+      .then((res) => {
+        if (!res.ok) setRowError({ path, message: res.error ?? 'Reindex failed' })
+      })
+      .catch((err: unknown) => {
+        setRowError({ path, message: err instanceof Error ? err.message : 'Reindex failed' })
+      })
+      .finally(() => {
+        setReindexing(null)
+        reload(path)
+        refresh()
+      })
   }
 
   return (
     <SettingsStack>
-      <SettingsGroup title="Codebase indexing">
-        <SettingsField
+      <SettingsGroup title="Index">
+        <SwitchField
           id="codeindex-enabled"
-          title="Enable codebase index"
-          hint="Powers codebase_search (ranked keyword retrieval over a local SQLite trigram index)."
-          help="Index lives under app userData (not the project tree). Everything runs locally — no models, no downloads, no network."
-        >
-          <Switch
-            size="md"
-            checked={codeIndex.enabled}
-            disabled={form.formLocked}
-            label="Enable codebase index"
-            onCheckedChange={(checked) => patchCodeIndex({ enabled: checked })}
-          />
-        </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup title="Index status">
-        <SettingsField
-          id="codeindex-status"
-          title="Index status"
-          hint="Live walk / sync progress for the local code index."
-          help="Scanned counts every walked path. Updated / unchanged apply only to text files that are content-hashed. Non-text and oversized files are skipped without those counters."
-          wide
-        >
-          <div className="flex flex-col items-start gap-2">
-            <IndexProgressPanel status={runtime} />
-            {runtime?.error ? (
-              <p className="m-0 w-full text-xs text-danger" role="alert">
-                {runtime.error}
-              </p>
-            ) : null}
-            {statusError ? (
-              <p className="m-0 w-full text-xs text-danger" role="alert">
+          title="Codebase index"
+          help="Powers codebase_search (a keyword index) and concept_search (a small embedding model, downloaded once and shared by every workspace). Both run locally; the index lives in app data, not in your project."
+          checked={codeIndex.enabled}
+          disabled={form.formLocked}
+          {...form.nestedDefaultMark('codeIndex', 'enabled')}
+          below={
+            statusError ? (
+              <p className="m-0 text-xs text-danger" role="alert">
                 {statusError}
               </p>
-            ) : null}
-            <Button
-              type="button"
-              variant="subtle"
-              disabled={form.formLocked || reindexBusy || !codeIndex.enabled}
-              onClick={() => {
-                setReindexBusy(true)
-                setStatusError(null)
-                void window.vyotiq
-                  .codeIndexReindex()
-                  .then((res) => {
-                    if (!res.ok) {
-                      setStatusError(res.error ?? 'Reindex failed')
-                      return
-                    }
-                    refreshStatus()
-                  })
-                  .finally(() => setReindexBusy(false))
-              }}
-            >
-              {reindexBusy ? 'Reindexing…' : 'Reindex workspace'}
-            </Button>
-          </div>
-        </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup title="Process memory">
-        <SettingsField
-          id="process-metrics"
-          title="Live processes"
-          hint="Chromium working set across the app's processes. Matches Task Manager's combined Electron RSS."
-          help="Main is the Browser process. Tabs include the app renderer and any DevTools or agent-browser views."
-          wide
-        >
-          <p className="m-0 text-xs text-secondary">
-            {processMetrics ? processMetricsLabel(processMetrics) : 'Sampling…'}
-          </p>
-        </SettingsField>
+            ) : null
+          }
+          onChange={(enabled) => {
+            void form.runUpdate({ codeIndex: { ...codeIndex, enabled } })
+          }}
+        />
+        {codeIndex.enabled && openWorkspaces.length === 0 ? (
+          <p className="m-0 py-3 text-xs text-muted">No workspaces open.</p>
+        ) : null}
+        {codeIndex.enabled
+          ? openWorkspaces.map((path) => {
+              const own = facts[path]
+              const paused = (codeIndex.pausedPaths ?? []).some((entry) => workspacePathsEqual(entry, path))
+              const syncing = !paused && syncingPath === path
+              const building = !paused && (syncing || own?.state === 'building')
+              // The live status names the workspace its error belongs to.
+              const failed =
+                !building &&
+                (own?.state === 'degraded' ||
+                  (runtime?.phase === 'error' &&
+                    runtime.workspacePath != null &&
+                    workspacePathsEqual(runtime.workspacePath, path)))
+              const runtimeError =
+                failed && runtime?.error && runtime.workspacePath && workspacePathsEqual(runtime.workspacePath, path)
+                  ? runtime.error
+                  : null
+              const error = rowError?.path === path ? rowError.message : runtimeError
+              const ready = !paused && !building && !failed && own?.state === 'ready'
+              const busy = reindexing === path
+              const action = busy ? 'Reindexing…' : own?.files ? 'Reindex' : 'Index now'
+              const name = workspaceShort(path)
+              return (
+                <SettingsItem
+                  key={path}
+                  id={`index:${path}`}
+                  title={workspaceShort(path)}
+                  hint={
+                    paused
+                      ? `Paused${own?.files ? ` · ${own.files.toLocaleString('en-US')} files indexed so far` : ''} — resume carries on from there`
+                      : syncing && runtime
+                        ? syncHint(runtime)
+                        : building
+                          ? 'Indexing'
+                          : factsHint(own)
+                  }
+                  below={
+                    syncing || error ? (
+                      <div className="flex flex-col gap-1.5">
+                        {syncing && runtime ? (
+                          <ProgressBar
+                            percent={runtime.progress != null ? runtime.progress * 100 : null}
+                            label={`Indexing ${workspaceShort(path)}`}
+                          />
+                        ) : null}
+                        {error ? (
+                          <p className="m-0 text-xs text-danger" role="alert">
+                            {error}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null
+                  }
+                >
+                  <div className="flex items-center gap-3">
+                    {ready ? <span className="text-xs text-success">Ready</span> : null}
+                    {failed ? <span className="text-xs text-danger">Error</span> : null}
+                    {paused ? <span className="text-xs text-muted">Paused</span> : null}
+                    {!own || paused ? null : !building && !failed && !ready ? (
+                      <span className="text-xs text-tertiary">Not indexed</span>
+                    ) : null}
+                    {paused ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon="play"
+                        aria-label={`Resume indexing ${name}`}
+                        pending={busy}
+                        disabled={form.formLocked || (reindexing != null && !busy)}
+                        onClick={() => setPaused(path, false)}
+                      >
+                        Resume
+                      </Button>
+                    ) : building ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon="pause"
+                        aria-label={`Pause indexing ${name}`}
+                        pending={busy}
+                        disabled={form.formLocked || (reindexing != null && !busy)}
+                        onClick={() => setPaused(path, true)}
+                      >
+                        Pause
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        aria-label={`${action} ${name}`}
+                        pending={busy}
+                        disabled={form.formLocked || (reindexing != null && !busy)}
+                        onClick={() => reindex(path)}
+                      >
+                        {action}
+                      </Button>
+                    )}
+                  </div>
+                </SettingsItem>
+              )
+            })
+          : null}
       </SettingsGroup>
     </SettingsStack>
   )

@@ -166,7 +166,7 @@ function TimelineRow({
         className="tool-stagger-enter relative min-w-0 py-1"
         style={{ '--stagger-index': staggerIndex } as CSSProperties}
       >
-        <span aria-hidden className="absolute -left-3 top-1/2 h-px w-2.5 bg-border/60" />
+        <span aria-hidden className="absolute -left-3 top-1/2 h-px w-2.5 bg-border" />
         <div
           className={cn(
             'flex min-w-0 items-center gap-1.5',
@@ -241,7 +241,7 @@ function TimelineRow({
       className="tool-stagger-enter relative min-w-0 py-1"
       style={{ '--stagger-index': staggerIndex } as CSSProperties}
     >
-      <span aria-hidden className="absolute -left-3 top-1/2 h-px w-2.5 bg-border/60" />
+      <span aria-hidden className="absolute -left-3 top-1/2 h-px w-2.5 bg-border" />
       <div
         className={cn('flex min-w-0 items-center gap-1.5', hasBody && 'cursor-pointer')}
         onClick={hasBody ? toggleBody : undefined}

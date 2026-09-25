@@ -18,7 +18,18 @@ test.beforeAll(async () => {
 
   launched = await launchApp({
     preLaunchSeed: (userDataDir) => {
-      seedAppSettings(userDataDir, { toolApprovalOnboardingDone: true })
+      // Auto-resume is on by default and would immediately consume the state
+      // this spec exists to observe: boot interrupts the orphan, auto-resume
+      // restarts it, and under the e2e fixture that replay now persists its own
+      // terminal status — so the run reaches `done` and the interrupted dot
+      // never renders. That sequence is correct product behaviour (a run that
+      // finished has nothing left to continue) and it has its own spec in
+      // auto-resume-interrupted.spec.ts. Hold it off here so the assertion is
+      // about the interrupt, not about which of the two wins the race.
+      seedAppSettings(userDataDir, {
+        toolApprovalOnboardingDone: true,
+        autoResumeInterruptedRuns: false
+      })
       seedInterruptedRun(userDataDir, workspacePath, {
         runId: 'orphan-boot-run',
         goal: 'Orphan boot test',
@@ -46,15 +57,16 @@ test.afterAll(async () => {
   }
 })
 
-test('boot interrupts orphan running run and shows amber sidebar dot', async () => {
+test('boot interrupts an orphan running run and the navigator says so', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) {
     await expand.click()
   }
 
-  await expect(window.getByTitle('Interrupted — click to continue')).toBeVisible({
+  // Stopped glyph, named: "Interrupted", never shown as still running.
+  await expect(window.locator('[data-navigator]').getByTitle('Interrupted', { exact: true })).toBeVisible({
     timeout: 20_000
   })
 })

@@ -430,7 +430,7 @@ async function pollOnce(): Promise<void> {
     failPending(
       typeof json.error_description === 'string' && json.error_description
         ? json.error_description
-        : `GitHub authorization failed (${err})`
+        : `GitHub authorisation failed (${err})`
     )
   } catch (err) {
     if (!pending) return
@@ -571,7 +571,7 @@ export async function setupGithubGitAuth(): Promise<void> {
   } catch (err) {
     logger.warn('gh auth setup-git failed', { scope: 'github-auth', err })
     throw new Error(
-      'GitHub authentication could not be configured for Git pushes. Run `gh auth login` in a terminal (or add a token in Settings → GitHub), then retry.'
+      'GitHub authentication could not be configured for Git pushes. Run `gh auth login` in a terminal (or use Connect GitHub in the pull request panel), then retry.'
     )
   }
 }

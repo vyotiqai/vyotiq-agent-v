@@ -431,6 +431,7 @@ export function MarkdownContent({
   readOnlyTasks = false,
   linkWorkspacePaths = false,
   onOpenWorkspaceFile,
+  tone = 'fg',
   className
 }: {
   content: string
@@ -444,6 +445,11 @@ export function MarkdownContent({
   /** Auto-link bare workspace-relative paths in prose (assistant chat). */
   linkWorkspacePaths?: boolean
   onOpenWorkspaceFile?: (path: string, options?: { line?: number }) => void
+  /**
+   * Body text colour. `secondary` is a document's prose under its own
+   * headings (the Plan tab); a class passed in could not override `text-fg`.
+   */
+  tone?: 'fg' | 'secondary'
   className?: string
 }) {
   const markdown = useMemo(
@@ -480,7 +486,8 @@ export function MarkdownContent({
   return (
     <div
       className={cn(
-        'markdown-body text-sm leading-relaxed text-fg [overflow-wrap:anywhere] [&_pre]:[overflow-wrap:normal]',
+        'markdown-body text-sm leading-relaxed [overflow-wrap:anywhere] [&_pre]:[overflow-wrap:normal]',
+        tone === 'secondary' ? 'text-secondary' : 'text-fg',
         // Chat transcript: keep table cells from exploding layout. Plan panel opts into wrap.
         !wrapTables &&
           '[&_table]:[overflow-wrap:normal] [&_th]:[overflow-wrap:normal] [&_td]:[overflow-wrap:normal]',

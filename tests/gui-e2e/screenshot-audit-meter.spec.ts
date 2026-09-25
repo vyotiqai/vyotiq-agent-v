@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
+import { requireActivePath } from './helpers/seedWorkspace'
 
 let launched: LaunchedApp
 let workspacePath: string
@@ -21,7 +22,7 @@ test.beforeAll(async () => {
   expect(addRes.ok).toBe(true)
   if (!addRes.ok) throw new Error(addRes.error)
 
-  workspacePath = addRes.data.activePath
+  workspacePath = requireActivePath(addRes.data.activePath)
   await launched.window.evaluate(async () => {
     await window.vyotiq.setSettings({ toolApprovalOnboardingDone: true })
     localStorage.removeItem('vyotiq.chatPaneLayout')
@@ -45,18 +46,23 @@ test.afterAll(async () => {
 test('context meter: low fill + tipCue without warning chrome (E4/R1)', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) {
     await expand.click()
   }
 
-  const composer = window.getByRole('combobox', { name: 'Message' })
+  const composer = window.getByRole('combobox', { name: 'Brief' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('Replay screenshot audit meter')
-  await window.getByRole('button', { name: /^send$/i }).click()
+  // A new task starts from its brief on Ctrl+Enter — Enter is a new line there.
+  await window.getByRole('combobox', { name: 'Brief' }).press('Control+Enter')
 
   await expect(window.getByText('Audit meter fixture done.')).toBeVisible({ timeout: 20_000 })
 
+  // The meter opens from the instruction line's options: its ring and share
+  // lead the token, its reading is the footer button of the popover.
+  await expect(window.locator('[data-task-options]')).toContainText('%', { timeout: 15_000 })
+  await window.locator('[data-task-options]').click()
   const meter = window.getByRole('button', { name: /context window/i })
   await expect(meter).toBeVisible({ timeout: 15_000 })
   // The meter renders a ring + sr-free label: numbers live in aria-label/title.

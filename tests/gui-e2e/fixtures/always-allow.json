@@ -1,0 +1,50 @@
+{
+  "events": [
+    { "type": "status", "status": "running" },
+    { "type": "assistant_message", "content": "Running the tests." },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "allow-1",
+      "name": "terminal",
+      "argumentsDelta": "{\"command\":\"pnpm vitest run tests/a.test.ts\"}"
+    },
+    {
+      "type": "__approval",
+      "toolCallId": "allow-1",
+      "name": "terminal",
+      "arguments": "{\"command\":\"pnpm vitest run tests/a.test.ts\"}",
+      "summary": "pnpm vitest run tests/a.test.ts",
+      "result": "Tests  3 passed (3)\nexit_code: 0"
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "allow-2",
+      "name": "terminal",
+      "argumentsDelta": "{\"command\":\"pnpm vitest run tests/b.test.ts\"}"
+    },
+    {
+      "type": "__approval",
+      "toolCallId": "allow-2",
+      "name": "terminal",
+      "arguments": "{\"command\":\"pnpm vitest run tests/b.test.ts\"}",
+      "summary": "pnpm vitest run tests/b.test.ts",
+      "result": "Tests  5 passed (5)\nexit_code: 0"
+    },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "allow-3",
+      "name": "terminal",
+      "argumentsDelta": "{\"command\":\"pnpm vitest run && rm -rf dist\"}"
+    },
+    {
+      "type": "__approval",
+      "toolCallId": "allow-3",
+      "name": "terminal",
+      "arguments": "{\"command\":\"pnpm vitest run && rm -rf dist\"}",
+      "summary": "pnpm vitest run && rm -rf dist",
+      "result": "exit_code: 0"
+    },
+    { "type": "assistant_message", "content": "All three ran." },
+    { "type": "status", "status": "done" }
+  ]
+}

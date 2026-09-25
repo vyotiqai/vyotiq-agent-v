@@ -64,6 +64,21 @@ describe('MessageList', () => {
     expect(estimateTranscriptRowSize(activity)).toBeLessThanOrEqual(56)
   })
 
+  it('estimates a user prompt at its two-line fold, plus Show more once it folds', () => {
+    const rows = buildTranscriptRows([
+      { kind: 'message', id: 'u1', role: 'user', content: 'short ask' },
+      { kind: 'message', id: 'u2', role: 'user', content: 'one\ntwo\nthree' },
+      { kind: 'message', id: 'u3', role: 'user', content: 'x'.repeat(2000) }
+    ])
+    const [short, multiLine, long] = rows.filter((r) => r.kind === 'user')
+    // Bubble chrome (40 + 28) around one 24px heading line.
+    expect(estimateTranscriptRowSize(short)).toBe(40 + 28 + 24)
+    // Newlines fold too: two lines kept, plus the 22px Show more line.
+    expect(estimateTranscriptRowSize(multiLine)).toBe(40 + 22 + 28 + 2 * 24)
+    // However long the prompt, the fold caps it at that same height.
+    expect(estimateTranscriptRowSize(long)).toBe(estimateTranscriptRowSize(multiLine))
+  })
+
   it('estimates settled todo_write as compact (checklist lives in Tasks dock)', () => {
     const rows = buildTranscriptRows([
       {

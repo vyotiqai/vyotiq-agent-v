@@ -126,10 +126,25 @@ export function observePromise<T>(promise: Promise<T>): Promise<T> {
   return promise
 }
 
+/** Paths the model asked for that are simply not there, or not readable as asked. */
+const EXPECTED_EXPLORATION_TOOL_ERROR =
+  /File not found|Not a file|Path is a directory|Path escapes workspace|No matches|Unsupported Unix command|Invalid memory path|Binary file detected|MCP server not connected/i
+
+/**
+ * An edit aimed at text that has since moved or never matched. Normal agent
+ * behaviour — run 874dad8f's `old_string` miss self-corrected 13ms later, yet
+ * raised the session's only [error] line and a captured exception. These
+ * messages also quote the file back (a closest-match line, an expected-context
+ * preview), so they are exactly the ones that must not reach disk verbatim.
+ */
+const EXPECTED_EDIT_TOOL_ERROR =
+  /old_string not found|old_string matched \d+ times|str_replace left .+ unchanged|context\/removal mismatch|No unified-diff hunks found|Notebook not found|cell_idx \d+ is (?:out of range|past the end)|is not valid notebook JSON|must be nbformat 4|is missing cells\[\]|is not a Jupyter notebook object/i
+
+/** Tool failures that are the model exploring or mis-aiming, not an app fault. */
 export function isExpectedToolError(message: string): boolean {
   if (/Command timed out after \d+ms/i.test(message)) return false
-  return /File not found|Not a file|Path is a directory|Path escapes workspace|No matches|Unsupported Unix command|Invalid memory path|Binary file detected|MCP server not connected/i.test(
-    message
+  return (
+    EXPECTED_EXPLORATION_TOOL_ERROR.test(message) || EXPECTED_EDIT_TOOL_ERROR.test(message)
   )
 }
 

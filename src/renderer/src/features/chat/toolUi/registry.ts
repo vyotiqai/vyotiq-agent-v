@@ -381,6 +381,17 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
       icon: 'flag'
     })
   },
+  // The verdicts themselves show with the done-when checks; the call is one line.
+  check_done_when: {
+    Body: StatusMessageBody,
+    hasBody: () => false,
+    headerOnly: true,
+    headerMeta: (tool) => ({
+      verb: toolLabel(tool.name, tool.status),
+      target: tool.summary,
+      icon: 'checkCircle'
+    })
+  },
   web_fetch: {
     Body: WebFetchBody,
     hasBody: resultHasBody,
@@ -551,13 +562,22 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
       icon: 'bot'
     })
   },
+  build_tool: {
+    Body: StatusMessageBody,
+    hasBody: resultHasBody,
+    headerMeta: (tool) => ({
+      verb: toolLabel(tool.name, tool.status),
+      target: tool.summary,
+      icon: 'plug'
+    })
+  },
   await_agent_instance: {
     Body: AwaitAgentInstanceBody,
     hasBody: (tool) => tool.status === 'running' || Boolean(tool.content?.trim()),
     headerMeta: (tool) => ({
       verb: toolLabel(tool.name, tool.status),
       target: tool.summary,
-      icon: 'cpu'
+      icon: 'mcp'
     })
   },
   pull_agent_instance: {
@@ -566,7 +586,7 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
     headerMeta: (tool) => ({
       verb: toolLabel(tool.name, tool.status),
       target: tool.summary,
-      icon: 'cpu'
+      icon: 'mcp'
     })
   },
   merge_agent_instance: {

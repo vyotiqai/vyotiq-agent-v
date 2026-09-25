@@ -7,18 +7,20 @@ import type {
   AttachedFile,
   ChatMessage,
   ProviderId,
+  RunSummary,
   SecretProvider,
   ToolApprovalDecision
 } from '@shared/ipc'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import type { ChatStreamController } from '@renderer/lib/hooks/createChatStreamController'
-import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
+import { PaneHeaderActions, TaskPane, type TaskPaneRunActions } from '@renderer/features/task/TaskPane'
+import type { NewTaskTargets } from '@renderer/features/task/NewTaskBrief'
+import { runTitle } from '@renderer/app/navigator/runTitle'
+import { useTaskRecentFiles } from '@renderer/features/inspector/agentFileMarks'
 import { Composer } from './components/composer'
 import { useHasChatItems } from './components/ChatStreamLeaves'
 import { RunSessionProvider } from './RunSessionContext'
-import { MessageList } from './components/MessageList'
 import { AgentInstancePane } from './components/AgentInstancePane'
-import { ChatTranscriptStage } from './components/ChatTranscriptStage'
 import { useRunGoal } from './hooks/useRunGoal'
 import { useRunFeedback } from './hooks/useRunFeedback'
 import { useInlineInstanceUi } from './hooks/useInlineInstanceUi'
@@ -75,8 +77,6 @@ export function SessionChatColumn({
   onChatSettingsChange,
   agentMode = 'agent',
   onAgentModeChange = () => {},
-  agentProfileId = null,
-  onAgentProfileChange = () => {},
   onSend,
   onStop,
   onEditAndResend,
@@ -93,18 +93,14 @@ export function SessionChatColumn({
   scrollRestoreToken,
   onScrollTopChange,
   onLoadToolContent,
-  onThinkingToggle,
-  onToolToggle,
-  onGroupToggle,
-  onTurnToggle,
+  onDismissRunError,
   onApprovalDecision,
   onQuestionSubmit,
-  collapsedTurns,
   showThinking = true,
   chatSurfaceEpoch = 0,
   mcpServerNames,
   slashHandlers,
-  sideRailPad = false,
+  onShowInspector,
   showPageHeading = true,
   onActivate,
   approvalAutoFocus = true,
@@ -113,7 +109,11 @@ export function SessionChatColumn({
   agentInstances,
   openInstanceRunId: openInstanceRunIdProp = null,
   onOpenInstanceRunIdChange,
-  getInstanceController
+  getInstanceController,
+  run = null,
+  runActions = {},
+  instanceRuns,
+  newTaskTargets
 }: {
   items: UiItem[]
   itemsStore?: ChatItemsStore
@@ -163,8 +163,6 @@ export function SessionChatColumn({
   onChatSettingsChange: (patch: ChatSettingsPatch) => void
   agentMode?: AgentInteractionMode
   onAgentModeChange?: (mode: AgentInteractionMode) => void
-  agentProfileId?: string | null
-  onAgentProfileChange?: (profileId: string | null) => void
   onSend: (
     text: string,
     images?: string[],
@@ -179,7 +177,7 @@ export function SessionChatColumn({
     files?: AttachedFile[],
     extras?: import('@shared/ipc').ComposerSendExtras
   ) => boolean | void | Promise<boolean | void>
-  onRevertToUserMessage?: (userMessageIndex: number) => boolean | Promise<boolean>
+  onRevertToUserMessage?: (userMessageIndex: number, runN?: number) => boolean | Promise<boolean>
   messages?: ChatMessage[]
   pendingFollowUps?: import('@renderer/lib/hooks/createChatStreamController').PendingFollowUpState[]
   onRemoveFollowUp?: (id: string) => void
@@ -192,18 +190,16 @@ export function SessionChatColumn({
   scrollRestoreToken?: number
   onScrollTopChange?: (scrollTop: number) => void
   onLoadToolContent?: (toolCallId: string) => Promise<string | null>
-  onThinkingToggle?: (messageId: string, expanded: boolean) => void
-  onToolToggle?: (toolCallId: string, expanded: boolean) => void
-  onGroupToggle?: (anchorToolCallId: string, expanded: boolean) => void
-  onTurnToggle?: (turnIndex: number) => void
+  /** Hide one error row in the record for good. */
+  onDismissRunError?: (itemId: string) => void
   onApprovalDecision?: (requestId: string, decision: ToolApprovalDecision) => void | Promise<void>
   onQuestionSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
-  collapsedTurns?: ReadonlySet<number>
   showThinking?: boolean
   chatSurfaceEpoch?: number
   mcpServerNames?: ReadonlyMap<string, string>
   slashHandlers?: import('./components/composer/slashCommandExecute').SlashClientHandlers
-  sideRailPad?: boolean
+  /** Set on the rightmost pane while the inspector is hidden. */
+  onShowInspector?: () => void
   showPageHeading?: boolean
   onActivate?: () => void
   approvalAutoFocus?: boolean
@@ -213,6 +209,14 @@ export function SessionChatColumn({
   openInstanceRunId?: string | null
   onOpenInstanceRunIdChange?: (runId: string | null) => void
   getInstanceController?: (runId: string, workspacePath: string) => ChatStreamController | null
+  /** The run as the workspace's run list has it, for the task header. */
+  run?: RunSummary | null
+  /** Rename, export, copy link, delete, split, close — the header's menu. */
+  runActions?: TaskPaneRunActions
+  /** This workspace's instance runs, for an open instance's worktree branch. */
+  instanceRuns?: readonly RunSummary[]
+  /** The workspaces a new task can move to from its brief. */
+  newTaskTargets?: NewTaskTargets
 }) {
   const instanceOpenControlled =
     onOpenInstanceRunIdChange != null
@@ -229,7 +233,11 @@ export function SessionChatColumn({
   } = useInlineInstanceUi(agentInstances, activeRunId, instanceOpenControlled)
 
   const hasItems = useHasChatItems(itemsStore, items)
-  const { chatBannerError, turnFailed, turnFailureLabel } = useChatErrorSurfaces({
+  /** The @ menu's recent files: what this task read or edited last. */
+  const taskFiles = useTaskRecentFiles(items, itemsStore, workspacePath ?? null)
+  // Nothing sent and no run behind it: the pane is a new task's brief.
+  const newTask = !activeRunId && !hasItems && !pendingRun && !running
+  const { chatBannerError, turnFailed } = useChatErrorSurfaces({
     itemsStore,
     items,
     error,
@@ -295,8 +303,6 @@ export function SessionChatColumn({
         onChatSettingsChange={onChatSettingsChange}
         agentMode={agentMode}
         onAgentModeChange={onAgentModeChange}
-        agentProfileId={agentProfileId}
-        onAgentProfileChange={onAgentProfileChange}
         onSend={submitPromptEdit}
         onStop={onStop}
         activeRunId={activeRunId}
@@ -317,16 +323,9 @@ export function SessionChatColumn({
         seedNativeFiles={editSeeds.nativeFiles}
         onCancelEdit={cancelPromptEdit}
         composerPlaceholder="Edit message…"
+        taskFiles={taskFiles}
       />
     ) : null
-
-  // Same empty-session surface as the single-pane ChatView path: without
-  // these two props MessageList skips the empty block entirely, so a new
-  // chat in a pane showed neither the label nor the agent-context card.
-  const transcriptEmptyLabel =
-    activeRunId == null && workspacePath
-      ? `New chat in ${formatWorkspaceName(workspacePath)}`
-      : undefined
 
   const runFeedback = useRunFeedback(workspacePath, activeRunId, !running)
   const composerProps = buildComposerSendProps({
@@ -352,8 +351,6 @@ export function SessionChatColumn({
     onChatSettingsChange,
     agentMode,
     onAgentModeChange,
-    agentProfileId,
-    onAgentProfileChange,
     onSend: sendFromDock,
     onStop,
     pendingFollowUps,
@@ -371,7 +368,6 @@ export function SessionChatColumn({
     metaStore,
     onCompactContext,
     slashHandlers,
-    sideRailPad,
     onFocus: onActivate,
     onEditLastUserMessage
   })
@@ -396,13 +392,11 @@ export function SessionChatColumn({
     active: true
   })
 
+  // Runs so far, as the record numbers them: one per instruction you sent.
+  const runCount = useMemo(() => messages.filter((m) => m.role === 'user').length, [messages])
+
   return (
     <>
-      {showPageHeading ? (
-        <h1 ref={headingRef} tabIndex={-1} className="sr-only">
-          Agent V chat
-        </h1>
-      ) : null}
       {openInstanceRunId && workspacePath ? (
         <AgentInstancePane
           key={openInstanceRunId}
@@ -410,92 +404,99 @@ export function SessionChatColumn({
           instanceRunId={openInstanceRunId}
           instanceMeta={agentInstances?.[openInstanceRunId]}
           getController={getInstanceController}
-          sideRailPad={sideRailPad}
+          onShowInspector={onShowInspector}
           pendingGates={pendingGates}
           onOpenInstance={openInstancePane}
           onClose={closeInstancePane}
           showThinking={showThinking}
           onOpenWorkspaceFile={onOpenWorkspaceFile}
           approvalAutoFocus={approvalAutoFocus}
+          instanceRun={instanceRuns?.find((r) => r.runId === openInstanceRunId) ?? null}
+          parentTitle={run ? runTitle(run) : undefined}
+          siblings={agentInstances}
         />
       ) : (
         <RunSessionProvider value={runSession}>
-            <ChatTranscriptStage
-              sideRailPad={sideRailPad}
-              pendingGates={pendingGates}
-              onOpenInstance={openInstancePane}
-              goal={runGoal.goal}
-              loop={runGoal.loop}
-              running={running}
-              onGoalPause={runGoal.pause}
-              onGoalResume={runGoal.resume}
-              onGoalComplete={runGoal.complete}
-              onGoalActivate={runGoal.activate}
-              onGoalDismiss={runGoal.dismiss}
-              onStopLoop={runGoal.stopLoop}
-              onStopRun={onStop}
-              transcript={
-                <MessageList
-                  key={`transcript:${surfaceKey}`}
-                  emptyLabel={transcriptEmptyLabel}
-                  workspacePath={workspacePath ?? undefined}
-                  runFeedback={runFeedback}
-                  items={items}
-                  itemsStore={itemsStore}
-                  virtualizeLiveEarly
-                  pendingRun={pendingRun}
-                  running={running}
-                  networkWait={networkWait}
-                  compacting={compacting}
-                  turnFailed={turnFailed}
-                  turnFailureLabel={turnFailureLabel}
-                  turnStatus={turnStatus}
-                  transcriptLoading={transcriptLoading}
-                  transcriptHasEarlier={transcriptHasEarlier}
-                  transcriptLoadingEarlier={transcriptLoadingEarlier}
-                  onLoadEarlierMessages={onLoadEarlierMessages}
-                  restoreScrollTop={restoreScrollTop}
-                  scrollRestoreToken={scrollRestoreToken}
-                  onScrollTopChange={onScrollTopChange}
-                  onActivate={onActivate}
-                  onLoadToolContent={onLoadToolContent}
-                  onThinkingToggle={onThinkingToggle}
-                  onToolToggle={onToolToggle}
-                  onGroupToggle={onGroupToggle}
-                  onTurnToggle={onTurnToggle}
-                  onApprovalDecision={onApprovalDecision}
-                  onQuestionSubmit={onQuestionSubmit}
-                  onRetryNetwork={onContinue}
-                  approvalAutoFocus={approvalAutoFocus}
-                  collapsedTurns={collapsedTurns}
-                  showThinking={showThinking}
-                  mcpServerNames={mcpServerNames}
-                  onOpenChanges={onOpenChanges}
-                  sideRailPad={sideRailPad}
-                  editingUserMessageIndex={editingUserMessageIndex}
-                  editComposer={editComposer}
-                  onBeginEditUserMessage={onEditAndResend ? beginPromptEdit : undefined}
-                  onRevertUserMessage={onRevertToUserMessage ? beginPromptRevert : undefined}
-                  messageCount={messages.length}
-                  turnUsage={turnUsage}
-                  metaStore={metaStore}
+          <TaskPane
+            key={`record:${surfaceKey}`}
+            workspacePath={workspacePath}
+            runId={activeRunId}
+            items={items}
+            itemsStore={itemsStore}
+            metaStore={metaStore}
+            running={running}
+            pendingRun={pendingRun}
+            turnFailed={turnFailed || turnStatus === 'error'}
+            turnStatus={turnStatus}
+            networkWait={networkWait}
+            compacting={compacting}
+            showThinking={showThinking}
+            run={run}
+            transcriptLoading={transcriptLoading}
+            transcriptHasEarlier={transcriptHasEarlier}
+            transcriptLoadingEarlier={transcriptLoadingEarlier}
+            onLoadEarlier={onLoadEarlierMessages}
+            restoreScrollTop={restoreScrollTop}
+            scrollRestoreToken={scrollRestoreToken}
+            onScrollTopChange={onScrollTopChange}
+            onActivate={onActivate}
+            headingRef={showPageHeading ? headingRef : undefined}
+            onStop={onStop}
+            actions={runActions}
+            turnUsage={turnUsage}
+            runFeedback={runFeedback}
+            onApprovalDecision={onApprovalDecision}
+            onQuestionSubmit={onQuestionSubmit}
+            approvalAutoFocus={approvalAutoFocus}
+            instanceGates={pendingGates}
+            onOpenInstance={openInstancePane}
+            editingUserMessageIndex={editingUserMessageIndex}
+            editComposer={editComposer}
+            onBeginEdit={onEditAndResend ? beginPromptEdit : undefined}
+            onRevert={onRevertToUserMessage ? beginPromptRevert : undefined}
+            messageCount={messages.length}
+            onOpenChanges={onOpenChanges}
+            onLoadToolContent={onLoadToolContent}
+            onRetry={onContinue}
+            onDismissRunError={onDismissRunError}
+            mcpServerNames={mcpServerNames}
+            goal={runGoal.goal}
+            loop={runGoal.loop}
+            onGoalPause={runGoal.pause}
+            onGoalResume={runGoal.resume}
+            onGoalComplete={runGoal.complete}
+            onGoalActivate={runGoal.activate}
+            onGoalDismiss={runGoal.dismiss}
+            onStopLoop={runGoal.stopLoop}
+            onShowInspector={onShowInspector}
+            newTask={newTask}
+            composer={
+              <div
+                className={editing ? 'hidden' : newTask ? 'flex min-h-0 flex-1 flex-col' : undefined}
+                inert={editing ? true : undefined}
+                aria-hidden={editing || undefined}
+              >
+                <MemoComposer
+                  key={`composer:${surfaceKey}`}
+                  {...composerProps}
+                  variant={newTask ? 'brief' : 'line'}
+                  runCount={runCount}
+                  onDismissError={onDismissError}
+                  newTaskTargets={newTaskTargets}
+                  taskFiles={taskFiles}
+                  briefHeaderActions={
+                    newTask ? (
+                      <PaneHeaderActions
+                        title="New task"
+                        onShowInspector={onShowInspector}
+                        onClosePane={runActions.onClosePane}
+                      />
+                    ) : undefined
+                  }
                 />
-              }
-              composer={
-                <div
-                  className={editing ? 'hidden' : undefined}
-                  inert={editing ? true : undefined}
-                  aria-hidden={editing || undefined}
-                >
-                  <MemoComposer
-                    key={`composer:${surfaceKey}`}
-                    {...composerProps}
-                    variant="dock"
-                    onDismissError={onDismissError}
-                  />
-                </div>
-              }
-            />
+              </div>
+            }
+          />
         </RunSessionProvider>
       )}
     </>

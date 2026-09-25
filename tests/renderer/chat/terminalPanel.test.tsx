@@ -3,7 +3,6 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { useRef } from 'react'
 import { TerminalPanel } from '@renderer/features/chat/components/TerminalPanel'
 import type { PtySessionInfo } from '@shared/ipc'
 
@@ -86,7 +85,7 @@ afterEach(() => {
 })
 
 describe('TerminalPanel', () => {
-  it('renders session tabs inline when no dock host is provided', async () => {
+  it('renders its session tabs inside the panel', async () => {
     const ptyList = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, data: [] as PtySessionInfo[] })
@@ -117,19 +116,16 @@ describe('TerminalPanel', () => {
     expect(document.querySelector('[data-terminal-session-bar]')).toBeTruthy()
   })
 
-  it('portals session tabs to a dock host instead of rendering an inline bar', async () => {
-    const ptyList = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, data: [] as PtySessionInfo[] })
-      .mockResolvedValue({ ok: true, data: [session] })
-    const ptyCreate = vi.fn().mockResolvedValue({ ok: true, data: session })
-
+  it('keeps the inspector chords from the shell — the window handler owns them', async () => {
     Object.defineProperty(window, 'vyotiq', {
       configurable: true,
       writable: true,
       value: {
-        ptyList,
-        ptyCreate,
+        ptyList: vi
+          .fn()
+          .mockResolvedValueOnce({ ok: true, data: [] as PtySessionInfo[] })
+          .mockResolvedValue({ ok: true, data: [session] }),
+        ptyCreate: vi.fn().mockResolvedValue({ ok: true, data: session }),
         ptyKill: vi.fn().mockResolvedValue({ ok: true, data: true }),
         ptyWrite: vi.fn().mockResolvedValue({ ok: true, data: true }),
         ptyResize: vi.fn().mockResolvedValue({ ok: true, data: true }),
@@ -138,22 +134,22 @@ describe('TerminalPanel', () => {
       }
     })
 
-    function HostHarness() {
-      const hostRef = useRef<HTMLDivElement>(null)
-      return (
-        <div>
-          <div ref={hostRef} data-terminal-session-bar-host />
-          <TerminalPanel workspacePath="/ws" visible sessionBarHostRef={hostRef} />
-        </div>
-      )
-    }
+    render(<TerminalPanel workspacePath="/ws" visible />)
 
-    render(<HostHarness />)
-
+    // The terminal attaches its key handler once xterm is constructed, which
+    // can land after the host element under load.
     await waitFor(() => {
-      expect(document.querySelector('[data-terminal-session-bar-host] [data-terminal-session-bar]')).toBeTruthy()
+      expect(termMocks[termMocks.length - 1]?.handler).toBeTypeOf('function')
     })
-    expect(document.querySelector('[data-terminal-panel] [data-terminal-session-bar]')).toBeNull()
+    const term = termMocks[termMocks.length - 1]!
+    const key = (init: KeyboardEventInit): boolean => term.handler!(new KeyboardEvent('keydown', init))
+    // Ctrl I would reach the shell as a Tab, Alt 3 as an escape sequence.
+    expect(key({ key: 'i', ctrlKey: true })).toBe(false)
+    expect(key({ key: 'I', ctrlKey: true, shiftKey: true })).toBe(false)
+    expect(key({ key: '3', code: 'Digit3', altKey: true })).toBe(false)
+    // Their neighbours still belong to the shell.
+    expect(key({ key: '7', code: 'Digit7', altKey: true })).toBe(true)
+    expect(key({ key: 'u', ctrlKey: true })).toBe(true)
   })
 
   it('surfaces ptyCreate failure as an error banner', async () => {

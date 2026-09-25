@@ -207,6 +207,17 @@ describe('notification service', () => {
     expect(items[0]!.body).toBe('edit a.ts')
   })
 
+  it('keeps the files a finished run left for review, on disk too', () => {
+    publishNotification(basePublish({ title: 'Tidy a.txt', body: 'Ready for review · 2 files', reviewFiles: 2 }))
+    expect(listNotifications().items[0]).toMatchObject({ body: 'Ready for review · 2 files', reviewFiles: 2 })
+    // A fresh read of the inbox file keeps it — the store parses what it wrote.
+    setNotificationsPathForTests(join(dir, 'notifications.json'))
+    expect(listNotifications().items[0]!.reviewFiles).toBe(2)
+    // Finishing again with nothing left to review drops it rather than keeping the old count.
+    publishNotification(basePublish({ title: 'Tidy a.txt', body: 'Finished' }))
+    expect(listNotifications().items[0]).not.toHaveProperty('reviewFiles')
+  })
+
   it('caps the inbox at 50, dropping oldest read first', () => {
     settingsState.current!.notifications.desktop = 'off'
     for (let i = 0; i < 50; i++) {
@@ -307,6 +318,27 @@ describe('notification service', () => {
     expect(markNotificationsRead({ id }).items.find((item) => item.id === id)?.read).toBe(true)
     expect(dismissNotifications({ id }).items.some((item) => item.id === id)).toBe(false)
     expect(dismissNotifications({ all: true }).items).toHaveLength(0)
+  })
+
+  it('keeps one update-ready row, under System alerts, and clears it at the next launch', () => {
+    const notice = (version: string): NotificationPublishInput => ({
+      source: 'system',
+      kind: 'update_ready',
+      title: `Agent V ${version} is ready`,
+      body: 'Restart to install',
+      dedupeKey: 'update_ready',
+      action: { type: 'open_update' }
+    })
+    publishNotification(notice('1.1.0'))
+    publishNotification(notice('1.2.0'))
+    expect(listNotifications().items.map((item) => item.title)).toEqual(['Agent V 1.2.0 is ready'])
+
+    settingsState.current!.notifications.system = false
+    expect(publishNotification(notice('1.3.0'))).toBeNull()
+
+    resetNotificationsForTests()
+    initNotifications()
+    expect(listNotifications().items).toHaveLength(0)
   })
 
   it('dismiss by dedupe key is a no-op when missing', () => {

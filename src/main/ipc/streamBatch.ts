@@ -167,16 +167,13 @@ type ActivePathResolver = () => string | null
 
 let resolveActivePath: ActivePathResolver = defaultActivePathResolver
 
+/**
+ * Until registerIpc installs the real lookup (setChatEventActivePathResolver),
+ * no workspace is known to be active. A lazy require of workspaces here never
+ * resolved in the bundle — main is one file, the relative path pointed nowhere.
+ */
 function defaultActivePathResolver(): string | null {
-  try {
-    // Lazy require avoids circular import at module load (workspaces ↔ ipc).
-    const { getWorkspaces } = require('../workspace/workspaces') as {
-      getWorkspaces: () => { activePath: string | null }
-    }
-    return getWorkspaces().activePath
-  } catch {
-    return null
-  }
+  return null
 }
 
 /** @internal Override active-path lookup in unit tests. */
@@ -377,6 +374,21 @@ export class ChatEventDispatcher {
         stream: ev.stream,
         invokeId: ev.invokeId
       })
+      this.schedule(slot)
+      return
+    }
+
+    if (ev.type === 'aux_usage') {
+      // Ride the batch timer rather than falling through to the forced flush
+      // below: compaction emits these in bursts (one per history chunk, plus
+      // retries), and each forced flush restarts the coalescing window.
+      //
+      // Deliberately NOT coalesced the way the meters below are. A usage meter
+      // is a replaceable latest-value reading; every aux row is a distinct
+      // billed call, so dropping one loses real spend. It also has no `step` to
+      // key on, by design.
+      slot.pendingSegments.push({ kind: 'event', event: ev })
+      this.enforcePendingCap(slot)
       this.schedule(slot)
       return
     }

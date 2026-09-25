@@ -26,8 +26,10 @@ import {
   ensureSubstantialFold,
   manualKeepRecentTurns,
   preserveRecentMessagesAsync,
-  type CompactForkPrefix
+  type CompactionUsageSample
 } from './context/compact'
+import { estimateStepCost, resolveModelPrice } from '../../shared/pricing/modelPrices'
+import { recordAuxUsage } from './usageLedger'
 import { estimateMessagesTokensAsync, estimateTextTokensAsync } from './context/estimate'
 import { extractFoldFacts } from './context/foldFacts'
 import {
@@ -43,8 +45,10 @@ import {
 import {
   clipVerifyFailures,
   formatCompactionVerifyFailure,
+  isUntrustworthy,
   missingFactsFocus,
   requiredFoldFactsFocus,
+  untrustworthy,
   verifyCompactionSummary
 } from './context/verifyCompaction'
 import {
@@ -55,8 +59,7 @@ import {
 import { resolveModelInfo } from './modelResolve'
 import { getProvider } from './providers'
 import { STREAM_IDLE_TIMEOUT_MS } from './providers/sse'
-import type { LlmProvider, ToolDefinition } from './providers/types'
-import { loadHarness } from './harness'
+import type { LlmProvider } from './providers/types'
 import {
   appendEvent,
   loadCompaction,
@@ -137,8 +140,15 @@ export type CompactPlan = {
   toSummarize: ChatMessage[]
   baseFolded: number
   existing: CompactionRecord | null
-  /** Parent-step or best-effort (harness + sticky catalog) cache prefix. */
-  forkPrefix?: CompactForkPrefix
+  /** Whether the unchunked message-shape fork may be used for this plan. */
+  allowMessageFork: boolean
+  /**
+   * Billed compaction streams collected during this plan's LLM calls, drained
+   * by `drainAuxUsageEvents` once the awaited call returns. An accumulator
+   * rather than a return value because compaction retries and chunks, and the
+   * abort paths return `null` after having already been billed.
+   */
+  auxUsage?: CompactionUsageSample[]
 }
 
 /** Combine caller abort with the compact timeout. */
@@ -183,13 +193,6 @@ function throwCompactionAbort(abort: CompactAbortHandle): void {
   throw err
 }
 
-/** Manual /compact: harness-only fork prefix. Not byte-identical to a live step. */
-function bestEffortForkPrefix(workspacePath: string): CompactForkPrefix | undefined {
-  const systemStable = loadHarness(workspacePath)
-  if (!systemStable) return undefined
-  return { systemStable, toolDefs: [] }
-}
-
 function resolveSettings(workspacePath: string, snapshotted?: Settings): Settings {
   if (snapshotted) {
     return { ...DEFAULT_SETTINGS, ...snapshotted }
@@ -226,7 +229,7 @@ export async function planCompact(input: {
     const message = !status.encryptionAvailable
       ? 'OS secure storage is unavailable. API keys cannot be decrypted on this system.'
       : storedBlob
-        ? `API key for ${providerId} is stored but cannot be decrypted. Re-enter it in Settings or restore OS keychain access.`
+        ? `API key for ${providerId} is stored but cannot be decrypted. Re-enter it in Settings → Providers or restore OS keychain access.`
         : `API key for ${providerId} is not set.`
     throw new CompactionUnavailableError(message)
   }
@@ -278,7 +281,8 @@ export async function planCompact(input: {
     toSummarize,
     baseFolded,
     existing,
-    forkPrefix: bestEffortForkPrefix(input.workspacePath)
+    allowMessageFork: true,
+    auxUsage: []
   }
 }
 
@@ -301,10 +305,72 @@ async function invokeCompactionLlm(
     contextWindow: contentWindow(plan.model, plan.providerId),
     priorSummary: plan.existing?.summary,
     focus,
-    ...(allowFork && plan.forkPrefix ? { forkPrefix: plan.forkPrefix } : {}),
+    allowMessageFork: allowFork && plan.allowMessageFork,
     promptCacheKey: plan.runId,
-    modelInfo: plan.model
+    modelInfo: plan.model,
+    onAuxUsage: (sample) => plan.auxUsage?.push(sample)
   })
+}
+
+/**
+ * Turn collected compaction streams into `aux_usage` events, recording each into
+ * the run's per-day ledger on the way out. Drains the accumulator, so calling it
+ * after every awaited compaction call is safe and never double-reports.
+ *
+ * Cost mirrors the agent loop: provider-reported when the stream carried one,
+ * otherwise a published-price estimate, and neither when the model is
+ * unpriceable — tokens are still reported, a fabricated `$` never is.
+ */
+function drainAuxUsageEvents(plan: CompactPlan, invokeId: number | undefined): AgentEvent[] {
+  const samples = plan.auxUsage
+  if (!samples?.length) return []
+  const drained = samples.splice(0, samples.length)
+  const price = resolveModelPrice(plan.providerId, plan.model.id)
+  const events: AgentEvent[] = []
+  for (const sample of drained) {
+    const { usage } = sample
+    const estimated =
+      usage.billedCost == null && price ? estimateStepCost(usage, price) ?? undefined : undefined
+    const event: AgentEvent = {
+      type: 'aux_usage',
+      runId: plan.runId,
+      site: sample.site,
+      provider: plan.providerId,
+      model: plan.model.id,
+      attempt: sample.attempt,
+      ...(usage.inputTokens != null ? { inputTokens: usage.inputTokens } : {}),
+      ...(usage.outputTokens != null ? { outputTokens: usage.outputTokens } : {}),
+      ...(usage.cachedInputTokens != null
+        ? { cachedInputTokens: usage.cachedInputTokens }
+        : {}),
+      ...(usage.cacheCreationInputTokens != null
+        ? { cacheCreationInputTokens: usage.cacheCreationInputTokens }
+        : {}),
+      ...(usage.reasoningTokens != null ? { reasoningTokens: usage.reasoningTokens } : {}),
+      ...(usage.inputTokensIncludesCache !== undefined
+        ? { inputTokensIncludesCache: usage.inputTokensIncludesCache }
+        : {}),
+      ...(usage.billedCost != null ? { billedCost: usage.billedCost } : {}),
+      ...(usage.billedCostSaved != null ? { billedCostSaved: usage.billedCostSaved } : {}),
+      ...(estimated !== undefined ? { estimatedCost: estimated } : {}),
+      generationMs: sample.generationMs
+    }
+    recordAuxUsage(plan.runDir, {
+      site: sample.site,
+      ...(usage.inputTokens != null ? { inputTokens: usage.inputTokens } : {}),
+      ...(usage.outputTokens != null ? { outputTokens: usage.outputTokens } : {}),
+      ...(usage.cachedInputTokens != null
+        ? { cachedInputTokens: usage.cachedInputTokens }
+        : {}),
+      ...(usage.reasoningTokens != null ? { reasoningTokens: usage.reasoningTokens } : {}),
+      ...(usage.billedCost != null ? { billedCost: usage.billedCost } : {}),
+      ...(estimated !== undefined ? { estimatedCost: estimated } : {})
+    })
+    const stamped = stampCompactEvent(plan, invokeId, event)
+    appendEvent(plan.runDir, stamped)
+    events.push(stamped)
+  }
+  return events
 }
 
 export type CompactMode = 'auto' | 'manual'
@@ -442,15 +508,17 @@ export async function* executeCompactEvents(
     yield started
   }
 
-  let record = await summarizeWithTimeoutRetry(plan, effectiveFocus, structured)
-  const pinnedSummary = pinFoldFacts(record.summary, facts)
-  if (pinnedSummary !== record.summary) {
-    record = {
-      ...record,
-      summary: pinnedSummary,
-      tokenEstimate: await estimateTextTokensAsync(pinnedSummary)
-    }
+  let record: NonNullable<Awaited<ReturnType<typeof compactMessages>>>
+  try {
+    record = await summarizeWithTimeoutRetry(plan, effectiveFocus, structured)
+  } catch (err) {
+    // A compaction that failed was still billed for whatever it streamed before
+    // failing — persist that spend to the ledger and the event log, then rethrow.
+    // This is the spend most worth seeing, so it must not ride on the happy path.
+    drainAuxUsageEvents(plan, opts?.invokeId)
+    throw err
   }
+  for (const ev of drainAuxUsageEvents(plan, opts?.invokeId)) yield ev
 
   const emitVerifying = function* (): Generator<AgentEvent, void> {
     const ev = stampCompactEvent(plan, opts?.invokeId, {
@@ -464,10 +532,18 @@ export async function* executeCompactEvents(
   }
 
   yield* emitVerifying()
+  // Score the model's own narrative, before pinning. Pinning appends every
+  // missing fact verbatim, so scoring the pinned text made `missing_*` and
+  // `low_file_coverage` unreachable and `verifyCoverage` a constant 1 — the
+  // retry could only ever fire on a refusal or an invented path. Verifying
+  // first keeps exactly that reachable set, but now says so, and reports a real
+  // coverage number.
   let scored = verifyCompactionSummary(record.summary, facts, foldedText)
 
-  if (!scored.ok) {
-    const failureLines = clipVerifyFailures(scored.failures.map(formatCompactionVerifyFailure))
+  if (untrustworthy(scored).length > 0) {
+    const failureLines = clipVerifyFailures(
+      untrustworthy(scored).map(formatCompactionVerifyFailure)
+    )
     const retryEv = stampCompactEvent(plan, opts?.invokeId, {
       type: 'compaction_verify_retry',
       runId: plan.runId,
@@ -494,8 +570,11 @@ export async function* executeCompactEvents(
         allowFork: false
       })
     } catch (err) {
+      drainAuxUsageEvents(plan, opts?.invokeId)
       unwrapCompactionFailure(err)
     }
+    // The verification retry is a second full compaction — bill it separately.
+    for (const ev of drainAuxUsageEvents(plan, opts?.invokeId)) yield ev
     if (!retryRecord) {
       if (retryAbort.userAborted() || retryAbort.timedOut() || retryAbort.signal.aborted) {
         throwCompactionAbort(retryAbort)
@@ -503,20 +582,13 @@ export async function* executeCompactEvents(
       throw new CompactionUnavailableError('The model returned no summary.')
     }
     record = retryRecord
-    const retryPinned = pinFoldFacts(record.summary, facts)
-    if (retryPinned !== record.summary) {
-      record = {
-        ...record,
-        summary: retryPinned,
-        tokenEstimate: await estimateTextTokensAsync(retryPinned)
-      }
-    }
     yield* emitVerifying()
     scored = verifyCompactionSummary(record.summary, facts, foldedText)
   }
 
-  if (!scored.ok) {
-    const failureLines = clipVerifyFailures(scored.failures.map(formatCompactionVerifyFailure))
+  const blocking = untrustworthy(scored)
+  if (blocking.length > 0) {
+    const failureLines = clipVerifyFailures(blocking.map(formatCompactionVerifyFailure))
     const failedEv = stampCompactEvent(plan, opts?.invokeId, {
       type: 'compaction_verify_failed',
       runId: plan.runId,
@@ -532,13 +604,34 @@ export async function* executeCompactEvents(
     )
   }
 
+  // The summary is trustworthy; now repair what it merely left out. Pinning
+  // splices the missing extractive facts back in verbatim from `facts`, so an
+  // omission costs an appendix rather than a second summarizer call.
+  const repaired = scored.failures.filter((f) => !isUntrustworthy(f))
+  const pinnedSummary = pinFoldFacts(record.summary, facts)
+  if (pinnedSummary !== record.summary) {
+    record = {
+      ...record,
+      summary: pinnedSummary,
+      tokenEstimate: await estimateTextTokensAsync(pinnedSummary)
+    }
+  }
+  if (repaired.length > 0) {
+    logger.info('Compaction summary omissions repaired from extracted fold facts', {
+      scope: 'agent',
+      code: 'COMPACTION_VERIFY',
+      correlationId: plan.runId,
+      repairedCount: repaired.length,
+      repaired: clipVerifyFailures(repaired.map(formatCompactionVerifyFailure))
+    })
+  }
+
   const foldedMessages = plan.baseFolded + plan.toSummarize.length
   const ctxWindow = contextWindowFor(plan.model, plan.providerId)
   const cWin = contentWindow(plan.model, plan.providerId)
   const remainingEstimate =
     (await estimateMessagesTokensAsync(plan.kept, plan.model)) + (record.tokenEstimate ?? 0)
   const triggerReason = resolveTriggerReason(mode, autoReason)
-  const failureLines = clipVerifyFailures(scored.failures.map(formatCompactionVerifyFailure))
 
   const compactionRecord: CompactionRecord = {
     ...record,
@@ -549,9 +642,10 @@ export async function* executeCompactEvents(
     postCompactEstimatedTokens: remainingEstimate,
     contentWindowAtCompact: cWin,
     verified: true,
+    // Pre-pin coverage: the share of fold files the model cited on its own.
+    // Scored after pinning this was always 1.
     verifyCoverage: scored.coverage,
     pinnedFacts: foldFactsToPinned(facts),
-    ...(failureLines.length > 0 ? { verifyFailures: failureLines } : {}),
     ...(retainedDecisions.length > 0
       ? { retainedDecisions: retainedDecisions.slice(0, 8) }
       : {})
@@ -606,21 +700,6 @@ export async function* executeCompactEvents(
   }
 }
 
-export async function executeCompact(
-  plan: CompactPlan,
-  focus: string | undefined,
-  mode: CompactMode,
-  autoReason?: 'proactive' | 'overflow',
-  opts?: ExecuteCompactOpts
-): Promise<CompactRunResult> {
-  const gen = executeCompactEvents(plan, focus, mode, autoReason, opts)
-  let next = await gen.next()
-  while (!next.done) {
-    next = await gen.next()
-  }
-  return next.value
-}
-
 export type AutoCompactOutcome =
   | { ok: true; result: CompactRunResult }
   /** Nothing to fold yet — the caller should continue the run, not fail it. */
@@ -630,37 +709,6 @@ export type AutoCompactOutcome =
   /** Caller cancelled — the caller should take its cancel path, not its error path. */
   | { ok: false; reason: 'aborted'; message: string }
   | { ok: false; reason: 'failed'; message: string }
-
-export type RunCompactInput = {
-  mode: CompactMode
-  workspacePath: string
-  runId: string
-  settings?: Settings
-  signal?: AbortSignal
-  focus?: string
-  /** Auto only — proactive vs overflow observability. */
-  triggerReason?: 'proactive' | 'overflow'
-}
-
-/** Shared plan → execute path for auto and menu compact. */
-export async function runCompact(input: RunCompactInput): Promise<CompactRunResult> {
-  const plan = await planCompact({
-    workspacePath: input.workspacePath,
-    runId: input.runId,
-    signal: input.signal,
-    settings: input.settings
-  })
-  if (input.signal?.aborted || plan.abort.signal.aborted) {
-    throwCompactionAbort(plan.abort)
-  }
-  const focus = input.focus?.trim() || undefined
-  return executeCompact(
-    plan,
-    focus,
-    input.mode,
-    input.mode === 'auto' ? input.triggerReason : undefined
-  )
-}
 
 function compactOutcomeFromCaught(err: unknown): AutoCompactOutcome {
   if (err instanceof CompactionVerifyFailedError) {
@@ -688,10 +736,6 @@ export type AutoCompactEventsInput = {
   focus?: string
   triggerReason?: 'proactive' | 'overflow'
   invokeId?: number
-  /** Parent step stable system — required with `toolDefs` for a cache-safe fork. */
-  systemStable?: string
-  /** Parent step tool defs in catalog order. */
-  toolDefs?: ToolDefinition[]
 }
 
 /**
@@ -714,10 +758,6 @@ export async function* autoCompactLlmEvents(
     }
   } catch (err) {
     return compactOutcomeFromCaught(err)
-  }
-
-  if (input.systemStable !== undefined && input.toolDefs !== undefined) {
-    plan.forkPrefix = { systemStable: input.systemStable, toolDefs: input.toolDefs }
   }
 
   const started: AgentEvent = {
@@ -743,26 +783,6 @@ export async function* autoCompactLlmEvents(
   } catch (err) {
     return compactOutcomeFromCaught(err)
   }
-}
-
-/** Loop auto path (no live yield — prefer `autoCompactLlmEvents` in the agent loop). */
-export async function autoCompactLlm(input: {
-  workspacePath: string
-  runId: string
-  settings: Settings
-  signal?: AbortSignal
-  focus?: string
-  triggerReason?: 'proactive' | 'overflow'
-}): Promise<AutoCompactOutcome> {
-  const gen = autoCompactLlmEvents({
-    ...input,
-    runDir: resolveRunDir(input.workspacePath, input.runId)
-  })
-  let next = await gen.next()
-  while (!next.done) {
-    next = await gen.next()
-  }
-  return next.value
 }
 
 /** Menu /compact IPC. */

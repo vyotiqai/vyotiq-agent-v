@@ -8,23 +8,15 @@ import { shouldTriggerAutoCompact } from '@main/agent/context/estimate'
 import { clearRulesCache } from '@main/agent/context/rules'
 import { clearWorkspaceSnapshotCache } from '@main/agent/context/workspaceSnapshot'
 import { volatileSessionMessage } from '@main/agent/providers/systemZones'
-import type { LlmProvider } from '@main/agent/providers/types'
 import { contentToText } from '@shared/ipc'
 import { SKILL_BODY_STUB } from '@shared/slashCommands'
+import type { ModelInfo } from '@shared/ipc'
 import type { ContextToolsDetail } from '@shared/utils/contextUsage'
 
-const mockProvider: LlmProvider = {
-  id: 'ollama',
-  listModels: async () => [],
-  streamChat: async function* () {
-    yield { type: 'done' }
-  }
-}
-
-const model = {
+const model: ModelInfo = {
   id: 'test',
-  inputModalities: ['text'] as const,
-  outputModalities: ['text'] as const,
+  inputModalities: ['text'],
+  outputModalities: ['text'],
   supportsTools: true,
   supportsVision: false,
   contextWindow: 100_000
@@ -41,8 +33,6 @@ describe('assembleContext integration', () => {
       model,
       toolsJsonEstimate: 100,
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     expect(result.system).toContain('## Context')
     expect(result.system).toContain('<run_contract>')
@@ -75,10 +65,7 @@ describe('assembleContext integration', () => {
       model,
       toolsJsonEstimate: 100,
       toolsSplit,
-      compactionTrigger: 10_000,
-      providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
+      providerId: 'ollama'
     })
     const detail = result.detail
     expect(detail).toBeTruthy()
@@ -103,8 +90,6 @@ describe('assembleContext integration', () => {
       model,
       toolsJsonEstimate: 77,
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     expect(result.detail?.tools.total).toBe(77)
     expect(result.detail?.tools.builtin).toEqual({ tokens: 77, count: 0 })
@@ -132,8 +117,6 @@ describe('assembleContext integration', () => {
       model: { ...model, contextWindow: 8_000 },
       toolsJsonEstimate: 50,
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     const tools = result.messages.filter((m) => m.role === 'tool')
     expect(tools).toHaveLength(KEEP_LAST_TOOL_RESULTS + 2)
@@ -159,8 +142,6 @@ describe('assembleContext integration', () => {
         tokenEstimate: 10
       },
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     expect(result.system).toContain('Prior work on auth')
     expect(result.system).toContain('<prior_session>')
@@ -189,8 +170,6 @@ describe('assembleContext integration', () => {
       toolsJsonEstimate: 100,
       taskList: '<task_list>\n1/2 complete\n[x] (1) Done\n[~] (2) Next',
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     expect(result.systemVolatile).toContain('<task_list>')
     expect(result.systemVolatile).toContain('[~] (2) Next')
@@ -207,8 +186,6 @@ describe('assembleContext integration', () => {
       toolsJsonEstimate: 50,
       loopHint: 'Last 3 agent steps had only tool failures.',
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     expect(result.system).toContain('<run_notice>')
     expect(result.system).toContain('tool failures')
@@ -228,8 +205,6 @@ describe('assembleContext integration', () => {
       toolsJsonEstimate: 50,
       modeSection: '<mode>\nAsk mode.\nYou are in Ask mode.\n</mode>',
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     expect(result.system).toContain('<mode>')
     expect(result.system).toContain('You are in Ask mode.')
@@ -245,8 +220,6 @@ describe('assembleContext integration', () => {
       model,
       toolsJsonEstimate: 100,
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     expect(result.system).toContain('<run_contract>')
     expect(result.system).toContain('## Goal')
@@ -266,8 +239,6 @@ describe('assembleContext integration', () => {
       model: { ...model, contextWindow: 8_000 },
       toolsJsonEstimate: 100,
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     const start = result.system.indexOf('<run_contract>')
     const end = result.system.lastIndexOf('</run_contract>')
@@ -291,8 +262,6 @@ describe('assembleContext integration', () => {
       model,
       toolsJsonEstimate: 100,
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     expect(result.system).toContain('<plan>')
     expect(result.system).toContain('Do the thing')
@@ -314,8 +283,6 @@ describe('assembleContext integration', () => {
       model,
       toolsJsonEstimate: 100,
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     const inner = result.systemStable.match(/<plan>\n([\s\S]*?)\n<\/plan>/)?.[1]
     expect(inner).toBe(plan)
@@ -334,8 +301,6 @@ describe('assembleContext integration', () => {
       model,
       toolsJsonEstimate: 50,
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     expect(result.system).toContain('<session>')
     expect(result.system).toContain('OS: Windows')
@@ -375,8 +340,6 @@ describe('assembleContext integration', () => {
         model,
         toolsJsonEstimate: 50,
         providerId: 'ollama',
-        provider: mockProvider,
-        signal: new AbortController().signal
       })
       const role = result.system.indexOf('## Role')
       const mode = result.system.indexOf('<mode>')
@@ -446,8 +409,6 @@ describe('assembleContext integration', () => {
       model,
       toolsJsonEstimate: 50,
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     const bodies = result.messages.filter((m) => m.role === 'tool').map((m) => String(m.content))
     expect(bodies).toHaveLength(8)
@@ -482,13 +443,148 @@ describe('assembleContext integration', () => {
       goal: 'hi',
       model: { ...model, contextWindow: 1_000_000 },
       toolsJsonEstimate: 13_000,
-      providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal,
-      keepRecentTurns: 20
+      providerId: 'ollama'
     })
     expect(result.estimatedTokens).toBeGreaterThan(64_000)
     expect(result.compaction).toBeNull()
+  })
+
+  it('keeps the stable prefix byte-identical across steps when the workspace has rules', async () => {
+    // The nonce on the untrusted-content fence used to be random per call, so
+    // this prefix differed every step for any workspace carrying rule files —
+    // the in-process cache never hit and the provider prefix never cached.
+    const { clearSystemPromptCache } = await import('@main/agent/context/assemble')
+    const workspace = join(tmpdir(), `vyotiq-assemble-stable-${process.pid}-${Date.now()}`)
+    mkdirSync(workspace, { recursive: true })
+    writeFileSync(join(workspace, 'AGENTS.md'), 'Prefer small diffs.')
+    clearRulesCache()
+    clearWorkspaceSnapshotCache()
+    clearSystemPromptCache()
+    try {
+      const base = {
+        harness: '## Role\nStable agent',
+        messages: [{ role: 'user' as const, content: 'hi' }],
+        workspacePath: workspace,
+        goal: 'hi',
+        model,
+        toolsJsonEstimate: 50,
+        providerId: 'ollama' as const
+      }
+      const first = await assembleContext({
+        ...base,
+        sessionEnv: '<session>\nDate (UTC): 2026-08-01T12:00:00.000Z'
+      })
+      const second = await assembleContext({
+        ...base,
+        sessionEnv: '<session>\nDate (UTC): 2026-08-01T12:00:01.000Z'
+      })
+      expect(first.systemStable).toContain('Prefer small diffs.')
+      expect(second.systemStable).toBe(first.systemStable)
+      expect(first.systemVolatile).not.toBe(second.systemVolatile)
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+      clearRulesCache()
+      clearWorkspaceSnapshotCache()
+      clearSystemPromptCache()
+    }
+  })
+
+  it('keeps rules and memory in the prompt when a verbatim plan is oversized', async () => {
+    // Plan mode injects plan.md uncapped so str_replace can quote it. It used
+    // to subtract its full size from the running system allowance with no
+    // floor, which silently dropped every section after it.
+    const { clearSystemPromptCache } = await import('@main/agent/context/assemble')
+    const workspace = join(tmpdir(), `vyotiq-assemble-plan-${process.pid}-${Date.now()}`)
+    mkdirSync(join(workspace, '.vyotiq', 'memory'), { recursive: true })
+    writeFileSync(join(workspace, 'AGENTS.md'), 'RULE_CANARY: always run the linter.')
+    writeFileSync(join(workspace, '.vyotiq', 'memory', 'state.md'), 'MEMORY_CANARY: shipping v2.')
+    clearRulesCache()
+    clearWorkspaceSnapshotCache()
+    clearSystemPromptCache()
+    try {
+      const result = await assembleContext({
+        harness: '## Role\nAgent',
+        // Far larger than the 12% system share of this 100k window.
+        plan: `# Plan\n${'step by step detail '.repeat(20_000)}`,
+        planVerbatim: true,
+        messages: [{ role: 'user' as const, content: 'go' }],
+        workspacePath: workspace,
+        goal: 'go',
+        model,
+        toolsJsonEstimate: 50,
+        providerId: 'ollama' as const
+      })
+      expect(result.system).toContain('RULE_CANARY')
+      expect(result.system).toContain('MEMORY_CANARY')
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+      clearRulesCache()
+      clearWorkspaceSnapshotCache()
+      clearSystemPromptCache()
+    }
+  })
+
+  it('trims tool results at the threshold the caller passes, not the built-in default', async () => {
+    const body = 'lorem ipsum dolor sit amet '.repeat(230)
+    const toolResults = Array.from({ length: KEEP_LAST_TOOL_RESULTS + 2 }, (_, i) => ({
+      role: 'tool' as const,
+      toolName: 'read_file',
+      toolCallId: `t${i}`,
+      content: `RESULT-${i}:${body}`
+    }))
+    const base = {
+      harness: 'harness',
+      messages: [{ role: 'user' as const, content: 'go' }, ...toolResults],
+      workspacePath: null,
+      goal: 'go',
+      model: { ...model, contextWindow: 8_000 },
+      toolsJsonEstimate: 50,
+      providerId: 'ollama' as const
+    }
+    // A user who raised autoCompactThresholdRatio moves this trim too; it used
+    // to be pinned to the 0.55 default whatever the setting said.
+    const raised = await assembleContext({ ...base, proactiveThreshold: 1_000_000 })
+    expect(raised.messages.filter((m) => contentToText(m.content) === '[cleared]')).toHaveLength(0)
+
+    const lowered = await assembleContext({ ...base, proactiveThreshold: 1 })
+    expect(
+      lowered.messages.filter((m) => contentToText(m.content) === '[cleared]').length
+    ).toBeGreaterThan(0)
+  })
+
+  it('reports the tokens the wire trim reclaimed, not the pre-trim total', async () => {
+    // The trim rewrites history mid-array and pays for it with the provider's
+    // cached prefix, so its saving has to reach the numbers the loop decides on:
+    // `overflow` is estimate-only and forces a fold on its own. The history-total
+    // cache used to key on (length, tail identity), and `trimToolResults` returns a
+    // same-length array whose tail is the same object, so the post-trim re-count
+    // served the pre-trim total and the saving was invisible.
+    const body = 'lorem ipsum dolor sit amet '.repeat(230)
+    const toolResults = Array.from({ length: KEEP_LAST_TOOL_RESULTS + 2 }, (_, i) => ({
+      role: 'tool' as const,
+      toolName: 'read_file',
+      toolCallId: `t${i}`,
+      content: `RESULT-${i}:${body}`
+    }))
+    const base = {
+      harness: 'harness',
+      messages: [{ role: 'user' as const, content: 'go' }, ...toolResults],
+      workspacePath: null,
+      goal: 'go',
+      model: { ...model, contextWindow: 8_000 },
+      toolsJsonEstimate: 50,
+      providerId: 'ollama' as const
+    }
+    const untrimmed = await assembleContext({ ...base, proactiveThreshold: 1_000_000 })
+    const trimmed = await assembleContext({ ...base, proactiveThreshold: 1 })
+
+    expect(trimmed.estimatedTokens).toBeLessThan(untrimmed.estimatedTokens)
+    expect(trimmed.layers.history).toBeLessThan(untrimmed.layers.history)
+    expect(trimmed.detail?.messages).toBe(trimmed.layers.history)
+    // Layers still sum to the reported total after the second measurement.
+    expect(
+      trimmed.layers.system + trimmed.layers.history + trimmed.layers.tools
+    ).toBe(trimmed.estimatedTokens)
   })
 
   it('reuses stable prefix cache when only volatile session env changes', async () => {
@@ -503,8 +599,6 @@ describe('assembleContext integration', () => {
       model,
       toolsJsonEstimate: 50,
       providerId: 'ollama' as const,
-      provider: mockProvider,
-      signal: new AbortController().signal,
       priorCompaction: {
         summary: 'Folded auth work',
         createdAt: '2026-01-01T00:00:00.000Z',
@@ -547,6 +641,84 @@ describe('assembleContext integration', () => {
     expect(folded.systemStable).not.toBe(second.systemStable)
   })
 
+  it('keeps a prefix per run, so two interleaved runs both keep hitting', async () => {
+    // Instances exist for parallelism, so assembles from different runs interleave.
+    // With a single cache slot each one evicted the other and the hit rate went to
+    // zero exactly when parallelism was in use.
+    const { clearSystemPromptCache, systemPromptCacheStats } = await import(
+      '@main/agent/context/assemble'
+    )
+    clearSystemPromptCache()
+    const base = {
+      messages: [{ role: 'user' as const, content: 'hi' }],
+      workspacePath: null as string | null,
+      goal: 'hi',
+      model,
+      toolsJsonEstimate: 50,
+      providerId: 'ollama' as const
+    }
+    const runA = { ...base, harness: '## Role\nParent run' }
+    const runB = { ...base, harness: '## Role\nInstance child' }
+
+    const a1 = await assembleContext(runA)
+    await assembleContext(runB)
+    const a2 = await assembleContext(runA)
+
+    expect(a2.systemStable).toBe(a1.systemStable)
+    // Two distinct prefixes were built, and run A's third assemble was served.
+    expect(systemPromptCacheStats()).toMatchObject({ misses: 2, hits: 1, size: 2 })
+
+    // Bounded: an entry holds a whole stable prompt, so the map must not grow with
+    // every fingerprint it has ever seen.
+    for (let i = 0; i < 20; i++) {
+      await assembleContext({ ...base, harness: `## Role
+Run ${i}` })
+    }
+    expect(systemPromptCacheStats().size).toBeLessThanOrEqual(8)
+  })
+
+  it('names the system sections it cut, instead of dropping them silently', async () => {
+    // A prompt that quietly lost its skills list looked identical to one that never
+    // had them, so the only symptom was a model ignoring tools nothing told it about.
+    // A 1k window gives a 120-token system share: the harness takes its 75% and the
+    // contract is capped to what is left, so the sections after them arrive under the
+    // 50-token floor and are dropped.
+    // Note a verbatim plan cannot produce this — PLAN_VERBATIM_TAIL_RESERVE floors
+    // the tail at 30% of the share precisely so these sections survive one.
+    const { clearSystemPromptCache } = await import('@main/agent/context/assemble')
+    const { logger } = await import('@shared/logger')
+    clearSystemPromptCache()
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    try {
+      const result = await assembleContext({
+        harness: `## Role\n${'agent role detail '.repeat(4000)}`,
+        contract: `## Goal\n${'contract detail '.repeat(4000)}`,
+        skillsSection: '<available_skills>\nSKILL_CANARY\n</available_skills>',
+        mcpSection: '<mcp_servers>\nMCP_CANARY\n</mcp_servers>',
+        messages: [{ role: 'user' as const, content: 'hi' }],
+        workspacePath: null,
+        goal: 'hi',
+        model: { ...model, contextWindow: 1_000 },
+        toolsJsonEstimate: 10,
+        providerId: 'ollama'
+      })
+      expect(result.system).not.toContain('SKILL_CANARY')
+      expect(result.system).not.toContain('MCP_CANARY')
+
+      const cut = warn.mock.calls.filter(([message]) =>
+        String(message).includes('System prompt sections cut')
+      )
+      // One line for the whole prompt: once the floor trips every remaining section
+      // is dropped, so a warn per call site would report one cause nine times.
+      expect(cut).toHaveLength(1)
+      const fields = cut[0]?.[1] as { scope?: string; dropped?: string[] }
+      expect(fields?.scope).toBe('assemble')
+      expect(fields?.dropped).toEqual(expect.arrayContaining(['skills', 'mcpServers']))
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it('keeps the compaction age line byte-stable across clock advances (provider prefix cache)', async () => {
     // The fold line sits in the STABLE system, so its bytes must not depend on
     // the wall clock — otherwise every app restart (or first rebuild after
@@ -565,8 +737,6 @@ describe('assembleContext integration', () => {
         model,
         toolsJsonEstimate: 50,
         providerId: 'ollama' as const,
-        provider: mockProvider,
-        signal: new AbortController().signal,
         priorCompaction: {
           summary: 'Folded refactor work',
           createdAt: '2026-08-01T09:30:00.000Z',
@@ -610,11 +780,7 @@ describe('assembleContext integration', () => {
       goal: 'hi',
       model: smallModel,
       toolsJsonEstimate: 100,
-      lastUsage: { inputTokens: 11_000 },
-      providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal,
-      keepRecentTurns: 20
+      providerId: 'ollama'
     })
     const cleared = withProvider.messages.filter(
       (m) => m.role === 'tool' && String(m.content).includes('[cleared]')
@@ -655,8 +821,6 @@ describe('assembleContext integration', () => {
       model,
       toolsJsonEstimate: 50,
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     const skillResults = result.messages.filter((m) => m.role === 'tool' && m.toolName === 'Skill')
     expect(skillResults).toHaveLength(2)
@@ -694,5 +858,95 @@ describe('shouldTriggerAutoCompact', () => {
       trigger: false,
       source: 'estimate'
     })
+  })
+
+  it('renders each fold fact once, from the structured sidecar', async () => {
+    // The stored summary ends in a `## Pinned Facts` appendix carrying the same
+    // facts as `pinnedFacts`. Injecting both put every path, decision and todo
+    // in the prompt twice — and the duplicate ate the narrative's own cap.
+    const { clearSystemPromptCache } = await import('@main/agent/context/assemble')
+    clearSystemPromptCache()
+    const result = await assembleContext({
+      harness: '## Role\nAgent',
+      messages: [{ role: 'user', content: 'hi' }],
+      workspacePath: null,
+      goal: 'hi',
+      model,
+      toolsJsonEstimate: 50,
+      providerId: 'ollama',
+      priorCompaction: {
+        summary: [
+          '## Session Intent',
+          'Rewrote auth to JWT.',
+          '',
+          '## Pinned Facts',
+          '- Wrote: `src/auth.ts`',
+          '- Decision: Use JWT'
+        ].join('\n'),
+        createdAt: '2026-01-01T00:00:00.000Z',
+        tokenEstimate: 40,
+        pinnedFacts: {
+          files: ['src/auth.ts'],
+          wroteFiles: ['src/auth.ts'],
+          decisions: ['Use JWT'],
+          todos: [],
+          doneWhen: [],
+          constraints: []
+        }
+      }
+    })
+
+    const prior = result.systemStable
+    expect(prior).toContain('Rewrote auth to JWT.')
+    expect(prior).not.toContain('Pinned Facts')
+    expect(prior.match(/src\/auth\.ts/g)).toHaveLength(1)
+    expect(prior.match(/Use JWT/g)).toHaveLength(1)
+  })
+
+  // Token estimation memoizes per message in a WeakMap and reuses a prefix
+  // total keyed on the tail message's identity. Handing it a fresh object for
+  // an unchanged message re-counts the whole history every step, which is the
+  // per-step full-context work the run loop has to throttle against.
+  it('keeps message identity when there is nothing to flatten', async () => {
+    const messages = [
+      { role: 'user' as const, content: 'plain string' },
+      { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'array, no file' }] }
+    ]
+
+    const result = await assembleContext({
+      harness: '## Context\nAgent',
+      messages,
+      workspacePath: null,
+      goal: 'identity',
+      model,
+      toolsJsonEstimate: 0,
+      providerId: 'ollama'
+    })
+
+    expect(result.messages[0]).toBe(messages[0])
+    expect(result.messages[1]).toBe(messages[1])
+  })
+
+  it('still inlines an attached file part, replacing that message', async () => {
+    const withFile = {
+      role: 'user' as const,
+      content: [
+        { type: 'text' as const, text: 'see attached' },
+        { type: 'file' as const, name: 'notes.txt', mime: 'text/plain', text: 'file body' }
+      ]
+    }
+
+    const result = await assembleContext({
+      harness: '## Context\nAgent',
+      messages: [withFile],
+      workspacePath: null,
+      goal: 'identity',
+      model,
+      toolsJsonEstimate: 0,
+      providerId: 'ollama'
+    })
+
+    expect(result.messages[0]).not.toBe(withFile)
+    expect(contentToText(result.messages[0]!.content)).toContain('file body')
   })
 })

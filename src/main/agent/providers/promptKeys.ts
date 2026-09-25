@@ -18,6 +18,11 @@ export function stablePromptKey(req: {
   return createHash('sha256').update(req.model).update('\0').update(stable).digest('hex')
 }
 
+/** Drop an id the host has disowned so later turns cannot re-offer it. */
+export function forgetContinuationPrompt(id: string): void {
+  continuationPromptKeys.delete(id)
+}
+
 export function rememberContinuationPrompt(id: string, key: string): void {
   continuationPromptKeys.delete(id)
   continuationPromptKeys.set(id, key)

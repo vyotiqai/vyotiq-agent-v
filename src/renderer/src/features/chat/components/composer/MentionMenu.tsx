@@ -3,14 +3,22 @@ import { createPortal } from 'react-dom'
 import { FileTypeIcon } from '@renderer/lib/fileIcons'
 import { Icon, type IconName } from '@renderer/lib/icons'
 import { useDropdownMenu } from '@renderer/lib/hooks/useDropdownMenu'
-import { cn } from '@renderer/lib/ui/cn'
+import {
+  cn,
+  IconButton,
+  MENU_LABEL,
+  MENU_ROW,
+  MENU_ROW_ACTIVE,
+  MENU_ROW_IDLE,
+  MENU_ROW_TEXT,
+  MENU_SURFACE,
+  MenuItemBody
+} from '@renderer/lib/ui'
 import { FileTypeBadge } from './FileTypeBadge'
 import {
   COMPOSER_DROPDOWN_PAD_PX,
   COMPOSER_DROPDOWN_TREE_MIN_PX,
-  clampComposerDropdownPanel,
-  composerDropdownRow,
-  composerDropdownSectionHeader
+  clampComposerDropdownPanel
 } from './composerDropdownLayout'
 import {
   pathSegments,
@@ -19,34 +27,30 @@ import {
 } from './mentionModel'
 import { buildMentionRootSections } from './mentionPresentation'
 
-const MENTION_MAX_PX = 340
-const MENTION_TREE_MAX_PX = 480
-
-const stickySectionHeader = cn(
-  composerDropdownSectionHeader,
-  'sticky top-0 z-sticky bg-card'
-)
+const MENTION_MAX_PX = 420
+/** The list and the path tree beside it. */
+const MENTION_TREE_MAX_PX = 600
 
 function itemIcon(item: MentionMenuItem): IconName {
   switch (item.kind) {
     case 'branch':
       return 'branch'
     case 'browser':
-      return 'globe'
+      return 'browser'
     case 'lints':
-      return 'warning'
+      return item.diagnosticsKind === 'lint' ? 'warning' : 'warningCircle'
     case 'nav':
       if (item.view === 'files') return 'folder'
-      if (item.view === 'docs') return 'doc'
-      if (item.view === 'rules') return 'listTodo'
-      return 'doc'
+      if (item.view === 'docs') return 'book'
+      if (item.view === 'rules') return 'rules'
+      return 'tasks'
     case 'file':
     case 'docs':
       return 'file'
     case 'rule':
-      return 'listTodo'
+      return 'rules'
     case 'chat':
-      return 'doc'
+      return 'tasks'
     case 'show-more':
       return 'chevron'
     default: {
@@ -56,11 +60,18 @@ function itemIcon(item: MentionMenuItem): IconName {
   }
 }
 
+const VIEW_TITLE: Record<Exclude<MentionMenuView, 'root'>, string> = {
+  files: 'Files and folders',
+  chats: 'Past tasks',
+  docs: 'Docs',
+  rules: 'Rules'
+}
+
 function PathTree({ path }: { path: string }) {
   const parts = pathSegments(path)
   if (!parts.length) return null
   return (
-    <div className="sidebar-scroll flex min-h-0 min-w-[140px] max-w-[180px] shrink-0 flex-col gap-0.5 overflow-y-auto border-l border-border px-2 py-1.5">
+    <div className="scroll-thin flex min-h-0 min-w-[140px] max-w-[180px] shrink-0 flex-col gap-0.5 overflow-y-auto border-l border-border px-2 py-1.5">
       {parts.map((part, i) => {
         const isLast = i === parts.length - 1
         return (
@@ -74,10 +85,7 @@ function PathTree({ path }: { path: string }) {
             ) : (
               <FileTypeIcon path={part} kind="folder" size={14} />
             )}
-            <span
-              className={cn('truncate', isLast && 'font-medium text-fg')}
-              title={part}
-            >
+            <span className={cn('truncate', isLast && 'font-medium text-fg')} title={part}>
               {part}
             </span>
           </div>
@@ -92,7 +100,7 @@ function emptyCopy(view: MentionMenuView): string {
     case 'files':
       return 'No files match'
     case 'chats':
-      return 'No past chats match'
+      return 'No past tasks match'
     case 'docs':
       return 'No docs match'
     case 'rules':
@@ -117,6 +125,7 @@ function MentionRow({
   onPick: () => void
   optionRef: (el: HTMLElement | null) => void
 }) {
+  const path = item.kind === 'file' || item.kind === 'docs' ? item.path : null
   return (
     <button
       type="button"
@@ -124,37 +133,36 @@ function MentionRow({
       role="option"
       aria-selected={selected}
       ref={optionRef}
-      className={cn(composerDropdownRow, selected && 'bg-surface-2 text-fg')}
+      title={path ?? undefined}
+      className={cn(MENU_ROW, selected ? MENU_ROW_ACTIVE : MENU_ROW_IDLE, MENU_ROW_TEXT)}
       onMouseDown={(e) => e.preventDefault()}
       onMouseEnter={onActive}
       onClick={onPick}
     >
-      {item.kind === 'file' || item.kind === 'docs' ? (
-        <FileTypeBadge path={item.path} size="md" />
-      ) : (
-        <Icon name={itemIcon(item)} size={16} className="shrink-0 text-muted" />
-      )}
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium leading-snug" title={item.label}>
-          {item.label}
-        </span>
-        {'subtitle' in item && item.subtitle ? (
-          <span className="block truncate text-caption text-secondary" title={item.subtitle}>
-            {item.subtitle}
-          </span>
-        ) : null}
-      </span>
-      {item.kind === 'nav' || item.kind === 'show-more' ? (
-        <Icon name="chevronRight" size={14} className="shrink-0 text-muted" />
-      ) : null}
+      <MenuItemBody
+        {...(path ? { lead: <FileTypeIcon path={path} size={14} /> } : { icon: itemIcon(item) })}
+        label={item.label}
+        detail={'subtitle' in item ? item.subtitle : undefined}
+        trailing={
+          item.kind === 'nav' ? (
+            <Icon name="chevronRight" size={12} className="shrink-0 text-tertiary" />
+          ) : undefined
+        }
+      />
     </button>
   )
 }
 
+/**
+ * The @ menu: what can be attached to the instruction (Context), recent or
+ * matching files, and lists to browse into. A list opens in place with a way
+ * back; files, docs and rules show where the row lives beside the list.
+ */
 export function MentionMenu({
   open,
   view,
   items,
+  query = '',
   activeIndex,
   onActiveIndexChange,
   onPick,
@@ -167,6 +175,8 @@ export function MentionMenu({
   open: boolean
   view: MentionMenuView
   items: MentionMenuItem[]
+  /** What follows the @ — the root names its file rows by it. */
+  query?: string
   activeIndex: number
   onActiveIndexChange: (index: number) => void
   onPick: (item: MentionMenuItem) => void
@@ -196,8 +206,8 @@ export function MentionMenu({
   })
 
   const rootSections = useMemo(
-    () => (view === 'root' ? buildMentionRootSections(items) : null),
-    [view, items]
+    () => (view === 'root' ? buildMentionRootSections(items, query) : null),
+    [view, items, query]
   )
 
   useEffect(() => {
@@ -214,16 +224,7 @@ export function MentionMenu({
       : null
   const treeDesired =
     (view === 'files' || view === 'docs' || view === 'rules') && Boolean(activePath)
-  const title =
-    view === 'files'
-      ? 'Files & Folders'
-      : view === 'chats'
-        ? 'Past Chats'
-        : view === 'docs'
-          ? 'Docs'
-          : view === 'rules'
-            ? 'Rules'
-            : null
+  const title = view === 'root' ? null : VIEW_TITLE[view]
 
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1024
   const { left, width, maxHeight } = clampComposerDropdownPanel({
@@ -240,6 +241,20 @@ export function MentionMenu({
       ? `${listId}-opt-${items[activeIndex]!.id}`
       : undefined
 
+  const row = (item: MentionMenuItem, index: number) => (
+    <MentionRow
+      key={item.id}
+      item={item}
+      selected={index === activeIndex}
+      optionId={`${listId}-opt-${item.id}`}
+      onActive={() => onActiveIndexChange(index)}
+      onPick={() => onPick(item)}
+      optionRef={(el) => {
+        optionRefs.current[index] = el
+      }}
+    />
+  )
+
   return createPortal(
     <div
       ref={panelRef}
@@ -248,7 +263,7 @@ export function MentionMenu({
       aria-label="Mentions"
       aria-activedescendant={activeDescendant}
       tabIndex={0}
-      className="fixed z-dropdown flex overflow-hidden rounded-xl border border-border bg-card shadow-menu animate-menu-in origin-bottom"
+      className={cn(MENU_SURFACE, 'fixed flex origin-bottom text-sm')}
       style={{
         top: position.placement === 'up' ? undefined : position.top,
         bottom:
@@ -261,73 +276,43 @@ export function MentionMenu({
     >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {title ? (
-          <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
+          <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-1.5">
             {onBack ? (
-              <button
-                type="button"
-                className="rounded p-0.5 text-secondary hover:bg-surface hover:text-fg"
-                aria-label="Back"
+              <IconButton
+                icon="chevronLeft"
+                label="Back"
+                size="sm"
+                tone="muted"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onBack()}
-              >
-                <Icon name="chevron" size={14} className="rotate-90" />
-              </button>
+              />
             ) : null}
-            <span className="min-w-0 flex-1 truncate text-xs font-medium text-fg">{title}</span>
+            <span className="min-w-0 flex-1 truncate px-1 text-xs font-medium text-fg">{title}</span>
             {loading && items.length > 0 ? (
-              <span className="shrink-0 text-2xs text-secondary">Searching…</span>
+              <span className="shrink-0 px-1 text-xs text-tertiary">Searching…</span>
             ) : null}
-          </div>
-        ) : loading && items.length > 0 ? (
-          <div className="shrink-0 border-b border-border px-2.5 py-1 text-2xs text-secondary">
-            Searching…
           </div>
         ) : null}
 
-        <div className="sidebar-scroll min-h-0 flex-1 overflow-y-auto p-1">
+        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-1">
           {loading && items.length === 0 ? (
-            <p className="m-0 px-2.5 py-2 text-xs text-secondary">Searching…</p>
+            <p className="m-0 px-2 py-1.5 text-xs text-muted">Searching…</p>
           ) : items.length === 0 ? (
-            <p className="m-0 px-2.5 py-2 text-xs text-secondary">{emptyCopy(view)}</p>
+            <p className="m-0 px-2 py-1.5 text-xs text-muted">{emptyCopy(view)}</p>
           ) : rootSections ? (
             rootSections.map((section) => (
               <div key={section.id} role="group" aria-label={section.label}>
-                <p className={stickySectionHeader}>{section.label}</p>
-                <ul className="m-0 list-none p-0">
-                  {section.entries.map(({ item, flatIndex }) => (
-                    <li key={item.id} className="m-0">
-                      <MentionRow
-                        item={item}
-                        selected={flatIndex === activeIndex}
-                        optionId={`${listId}-opt-${item.id}`}
-                        onActive={() => onActiveIndexChange(flatIndex)}
-                        onPick={() => onPick(item)}
-                        optionRef={(el) => {
-                          optionRefs.current[flatIndex] = el
-                        }}
-                      />
-                    </li>
-                  ))}
-                </ul>
+                <div className={MENU_LABEL} aria-hidden="true">
+                  <span>{section.label}</span>
+                  {section.id === 'files' && loading ? (
+                    <span className="font-normal normal-case tracking-normal">Searching…</span>
+                  ) : null}
+                </div>
+                {section.entries.map(({ item, flatIndex }) => row(item, flatIndex))}
               </div>
             ))
           ) : (
-            <ul className="m-0 list-none p-0">
-              {items.map((item, index) => (
-                <li key={item.id} className="m-0">
-                  <MentionRow
-                    item={item}
-                    selected={index === activeIndex}
-                    optionId={`${listId}-opt-${item.id}`}
-                    onActive={() => onActiveIndexChange(index)}
-                    onPick={() => onPick(item)}
-                    optionRef={(el) => {
-                      optionRefs.current[index] = el
-                    }}
-                  />
-                </li>
-              ))}
-            </ul>
+            items.map((item, index) => row(item, index))
           )}
         </div>
       </div>

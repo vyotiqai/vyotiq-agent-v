@@ -2,6 +2,13 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, rmSync, wri
 import { readFile, readdir, open, stat } from 'fs/promises'
 import { join, basename } from 'path'
 import { atomicWriteFile, atomicWriteFileAsync, atomicWriteJson } from '../storage/atomicWrite'
+import {
+  DONE_WHEN_CHECKS_FILE,
+  contractDoneWhenBlock,
+  defaultDoneWhenBlock,
+  normalizeCheckText,
+  type DoneWhenCheck
+} from '../../shared/doneWhenChecks'
 import { enqueueEventAppend, flushEventAppends, listEventArchives, listEventArchivesSync, removeEventArchives } from './eventAppendQueue'
 import {
   enqueueMessageAppend,
@@ -52,6 +59,7 @@ import { readLenientReceiptCost } from './runStats'
 import { readJsonDocCached } from './jsonDocCache'
 import { finalizeTodoContentOnRunEnd, type TodoFinalizeOutcome } from '../../shared/utils/todoContent'
 import { DEFAULT_PLAN_STUB, stripPlanStubChrome } from '../../shared/planStub'
+import { pendingReviewSummary } from './reviewSummary'
 import { ensureWorkspaceStorage, resolveRunDir, workspaceSessionsRoot } from '../storage/paths'
 import { TOOL_STUB_RESTART_INTERRUPTED } from '../../shared/toolStubs'
 import { isActive } from './runRegistry'
@@ -104,7 +112,7 @@ export async function readContractAsync(runDir: string): Promise<string> {
 
 export { DEFAULT_PLAN_STUB }
 
-/** Approved/draft plan artifact; empty when missing or still the Plan-mode stub. */
+/** Approved/draft plan artifact; empty when missing or still the run-start stub. */
 export async function readPlanAsync(runDir: string): Promise<string> {
   const text = await readPlanRawAsync(runDir)
   if (!text) return ''
@@ -114,8 +122,9 @@ export async function readPlanAsync(runDir: string): Promise<string> {
 }
 
 /**
- * Full plan.md contents, stub included and never truncated — the Plan-mode
- * prompt mirrors this verbatim so the model edits against the real file.
+ * Full plan.md contents, stub included and never truncated. Prefer
+ * `readPlanAsync` for the prompt: it returns the same verbatim bytes once the
+ * plan has a real body, and '' while it is still the stub every run seeds.
  */
 export async function readPlanRawAsync(runDir: string): Promise<string> {
   const p = join(runDir, 'plan.md')
@@ -258,8 +267,24 @@ export function appendMessage(dir: string, message: ChatMessage): Promise<void> 
   return enqueueMessageAppend(dir, line)
 }
 
+/** The brief's checks, numbered c1… in the order typed; a repeat is one check. */
+function briefDoneWhenChecks(texts: readonly string[], createdAt: string): DoneWhenCheck[] {
+  const seen = new Set<string>()
+  const checks: DoneWhenCheck[] = []
+  for (const raw of texts) {
+    const text = raw.trim()
+    const key = normalizeCheckText(text)
+    if (!text || seen.has(key)) continue
+    seen.add(key)
+    checks.push({ id: `c${checks.length + 1}`, text, source: 'brief', verdict: null, createdAt })
+  }
+  return checks
+}
+
 export type CreateRunOptions = {
   mode?: AgentInteractionMode
+  /** The brief's done-when checks: the run's first checks and its contract's Done when. */
+  doneWhen?: string[]
   parentRunId?: string
   inlineInstance?: true
   pathScope?: string[]
@@ -280,6 +305,8 @@ export function createRun(
   ensureWorkspaceStorage(workspacePath)
   mkdirSync(dir, { recursive: true })
   const goalText = goal.trim() || 'chat'
+  const briefChecks = briefDoneWhenChecks(options.doneWhen ?? [], new Date().toISOString())
+  if (briefChecks.length > 0) atomicWriteJson(join(dir, DONE_WHEN_CHECKS_FILE), { checks: briefChecks })
   atomicWriteFile(
     join(dir, 'contract.md'),
     [
@@ -287,12 +314,7 @@ export function createRun(
       '',
       goalText,
       '',
-      '## Done when',
-      '',
-      '- The goal above is satisfied (check outcomes: read results, command output, or user-visible success).',
-      '- Or blockers are explained clearly and no further narrow retry will help.',
-      '- Update this file if scope or done-when changes.',
-      ''
+      ...(briefChecks.length > 0 ? [contractDoneWhenBlock(briefChecks), ''] : [defaultDoneWhenBlock(), ''])
     ].join('\n')
   )
   const status: RunStatus = {
@@ -320,17 +342,15 @@ export function appendEvent(dir: string, event: unknown): void {
   enqueueEventAppend(dir, event)
 }
 
-/** Await pending event appends, then rewrite events.jsonl (authoritative). */
-export async function syncEventsAsync(dir: string, events: unknown[]): Promise<void> {
+/**
+ * Await pending event appends, then rewrite events.jsonl (authoritative).
+ * Rows keep their own `at`: stamping the rewrite time onto every kept row
+ * collapsed earlier turns onto one instant, which broke their durations and
+ * anything that orders transcript rows by event time.
+ */
+export async function syncEventsAsync(dir: string, rows: PersistedEvent[]): Promise<void> {
   await flushEventAppends(dir)
-  const body = events
-    .map((event) =>
-      JSON.stringify({
-        at: new Date().toISOString(),
-        event
-      })
-    )
-    .join('\n')
+  const body = rows.map((row) => JSON.stringify({ at: row.at, event: row.event })).join('\n')
   atomicWriteFile(join(dir, 'events.jsonl'), body ? `${body}\n` : '')
   // The rewritten live file is authoritative and callers pass the stitched
   // (archive + live) history; stale archive heads would resurrect truncated
@@ -1125,7 +1145,11 @@ export async function loadEventsForRunAsync(
 }
 
 
-async function collectRunsFromRoot(root: string): Promise<{
+/**
+ * `workspaceRoot` is where the runs' files live; it is only needed for the
+ * pending-review summary, so callers that do not show it can omit it.
+ */
+async function collectRunsFromRoot(root: string, workspaceRoot?: string): Promise<{
   parents: RunSummary[]
   instances: RunSummary[]
 }> {
@@ -1180,16 +1204,14 @@ async function collectRunsFromRoot(root: string): Promise<{
         ...(status.inlineInstance ? { inlineInstance: true as const } : {}),
         ...(status.pathScope?.length ? { pathScope: status.pathScope } : {}),
         ...(status.worktreePath ? { worktreePath: status.worktreePath } : {}),
-        ...(status.worktreeBranch ? { worktreeBranch: status.worktreeBranch } : {}),
-        ...(status.agentProfileId ? { agentProfileId: status.agentProfileId } : {}),
-        ...(status.agentProfileName ? { agentProfileName: status.agentProfileName } : {}),
-        ...(status.agentProfileSnapshot
-          ? { agentProfileSnapshot: status.agentProfileSnapshot }
-          : {}),
-        ...(status.runtime ? { runtime: status.runtime } : {})
+        ...(status.worktreeBranch ? { worktreeBranch: status.worktreeBranch } : {})
       }
       const receiptCost = await readLenientReceiptCost(dir)
       if (receiptCost) Object.assign(summary, receiptCost)
+      if (workspaceRoot && !status.inlineInstance) {
+        const review = pendingReviewSummary(dir, workspaceRoot)
+        if (review) summary.review = review
+      }
       if (status.inlineInstance && status.parentRunId) {
         instances.push(summary)
       } else if (!status.inlineInstance) {
@@ -1211,7 +1233,8 @@ export async function listRuns(workspacePath: string): Promise<ListRunsResult> {
     // Reconcile only on cache miss/TTL expiry — avoids disk walk every sidebar poll.
     await reconcileStaleRuns(workspacePath)
     const { parents, instances } = await collectRunsFromRoot(
-      workspaceSessionsRoot(workspacePath)
+      workspaceSessionsRoot(workspacePath),
+      workspacePath
     )
     const sortedParents = parents.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     const parentIds = new Set(sortedParents.slice(0, RUN_LIST_CAP).map((r) => r.runId))
@@ -1236,7 +1259,7 @@ export async function listRunsOlder(
   olderThanIso: string,
   limit: number = RUN_LIST_CAP
 ): Promise<{ runs: RunSummary[]; hasMore: boolean }> {
-  const { parents } = await collectRunsFromRoot(workspaceSessionsRoot(workspacePath))
+  const { parents } = await collectRunsFromRoot(workspaceSessionsRoot(workspacePath), workspacePath)
   const older = parents
     .filter((r) => r.updatedAt < olderThanIso)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -1605,9 +1628,13 @@ export async function reconcileStaleRuns(
   try {
     entries = await readdir(runs, { withFileTypes: true })
   } catch (err) {
+    // No sessions root means no run was ever recorded here (or its storage is
+    // gone), so nothing can be stale — collectRunsFromRoot lists it as empty.
+    // Warning on it fired on every uncached listing, i.e. every switch to it.
+    if ((err as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return 0
     logger.warn('Run reconcile skipped workspace sessions root', {
       scope: 'runs',
-      workspacePath,
+      workspaceId: workspaceIdFromPath(workspacePath),
       err
     })
     return 0

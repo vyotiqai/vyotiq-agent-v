@@ -6,6 +6,7 @@ import {
   formatTerminalSessionOutput,
   killProcessTree,
   killProcessTreeAndWait,
+  normalizeChildExitCode,
   resolveTerminalShell,
   sanitizedTerminalEnv,
   stripPowerShellPatternNoise,
@@ -21,6 +22,7 @@ import { workspacePathIsInside, workspacePathsEqual } from '../../../shared/work
 import type { TerminalShell } from '../../../shared/ipc'
 import { lowerProcessPriority } from '../processPriority'
 import { logger } from '../../../shared/logger'
+import { registerRunCancelHooks } from '../runRegistry'
 
 export type TerminalSessionStatus = 'running' | 'done' | 'timeout' | 'pattern_matched' | 'aborted'
 
@@ -469,7 +471,7 @@ export async function startBackgroundTerminal(
   child.on('close', (code) => {
     session.running = false
     session.finishedAt = Date.now()
-    session.exitCode = code
+    session.exitCode = normalizeChildExitCode(code)
     if (session.status === 'running' || session.status === 'pattern_matched') {
       session.status = matchesPattern(session) ? 'pattern_matched' : 'done'
     }
@@ -571,3 +573,6 @@ export async function pollTerminalSession(opts: PollTerminalSessionOpts): Promis
   }
   return formatSession(session)
 }
+
+// A cancel kills this run's background terminal sessions (runRegistry calls it).
+registerRunCancelHooks({ disposeTerminals: (runId, invokeId) => void disposeTerminalSessionsForInvoke(runId, invokeId) })

@@ -25,7 +25,9 @@ const EDIT_TOOLS = new Set([
   'str_replace',
   'memory_write',
   'delete',
-  'edit_notebook'
+  'edit_notebook',
+  // Writes a module to disk; grouped with the other writers.
+  'build_tool'
 ])
 const SEARCH_TOOLS = new Set([
   'search',
@@ -47,6 +49,7 @@ const SEARCH_TOOLS = new Set([
   'todo_write',
   'create_goal',
   'update_goal',
+  'check_done_when',
   'spawn_agent_instance',
   'await_agent_instance',
   'pull_agent_instance',
@@ -240,6 +243,7 @@ const TOOL_ICON_BY_NAME: Record<string, IconName> = {
   todo_write: 'listTodo',
   create_goal: 'flag',
   update_goal: 'flag',
+  check_done_when: 'checkCircle',
   web_fetch: 'globe',
   web_search: 'globe',
   browser_navigate: 'globe',
@@ -277,8 +281,9 @@ const TOOL_ICON_BY_NAME: Record<string, IconName> = {
   git_diff: 'branch',
   git_commit: 'branch',
   spawn_agent_instance: 'bot',
-  await_agent_instance: 'cpu',
-  pull_agent_instance: 'cpu',
+  build_tool: 'plug',
+  await_agent_instance: 'mcp',
+  pull_agent_instance: 'mcp',
   merge_agent_instance: 'branch',
   cancel_agent_instance: 'close',
   diagnostics: 'scanSearch',

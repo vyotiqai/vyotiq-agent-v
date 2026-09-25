@@ -626,6 +626,9 @@ describe('applyEventTimestamps', () => {
       expect(tool.tool.status).toBe('fail')
       expect(tool.groupTiming?.startedAt).toBe(new Date('2026-07-24T12:00:00.000Z').getTime())
       expect(tool.groupTiming?.endedAt).toBe(new Date('2026-07-24T12:00:02.000Z').getTime())
+      // The record times each call from its own start and result stamps.
+      expect(tool.at).toBe('2026-07-24T12:00:00.000Z')
+      expect(tool.endedAt).toBe('2026-07-24T12:00:02.000Z')
     }
   })
 

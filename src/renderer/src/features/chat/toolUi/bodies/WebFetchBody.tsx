@@ -11,7 +11,7 @@ export function WebFetchBody({ tool, loading, loadFailed, inGroup }: ToolBodyPro
   return (
     <div>
       {!inGroup ? (
-        <div className={`${TOOL_BODY_PAD} border-b border-border pb-2`}>
+        <div className={`${TOOL_BODY_PAD} border-b border-border/40 pb-2`}>
           <span className="truncate font-mono text-2xs text-tertiary" title={data.url}>
             {data.url}
           </span>

@@ -7,9 +7,10 @@ import {
   activitySpendSeries,
   activityTokenTrend,
   activityToolFailures,
-  formatCompactCount
+  finishedShare,
+  formatCompactCount,
+  weekdayShort
 } from '@renderer/features/home/activityView'
-import { nextTickLabel } from '@renderer/features/home/homeTime'
 
 const NOW = new Date(2026, 0, 7, 12, 0, 0)
 
@@ -216,21 +217,24 @@ describe('activityModelMix', () => {
   })
 })
 
-describe('nextTickLabel', () => {
-  const now = Date.parse('2026-01-07T12:00:00Z')
-
-  it('counts down to the scheduled tick', () => {
-    expect(nextTickLabel('2026-01-07T12:20:00Z', now)).toBe('in 20m')
-    expect(nextTickLabel('2026-01-07T16:00:00Z', now)).toBe('in 4h')
-    expect(nextTickLabel('2026-01-10T12:00:00Z', now)).toBe('in 3d')
+describe('weekdayShort', () => {
+  it('names the day in two letters, as the seven-day axis reads', () => {
+    expect(weekdayShort('2026-01-07')).toBe('We')
+    expect(weekdayShort('2026-01-08')).toBe('Th')
+    expect(weekdayShort('2026-01-11')).toBe('Su')
   })
 
-  it('reads a past or imminent tick as due rather than negative', () => {
-    expect(nextTickLabel('2026-01-07T11:00:00Z', now)).toBe('due now')
-    expect(nextTickLabel('2026-01-07T12:00:30Z', now)).toBe('due now')
+  it('leaves an unparseable key as it is', () => {
+    expect(weekdayShort('someday')).toBe('someday')
+  })
+})
+
+describe('finishedShare', () => {
+  it('is done against everything that ended — a running task has not', () => {
+    expect(finishedShare({ done: 20, error: 2, cancelled: 1, running: 4 })).toEqual({ percent: 87, done: 20, ended: 23 })
   })
 
-  it('omits the label for an unparseable timestamp', () => {
-    expect(nextTickLabel('not-a-date', now)).toBeNull()
+  it('gives no share when nothing ended', () => {
+    expect(finishedShare({ done: 0, error: 0, cancelled: 0, running: 2 })).toBeNull()
   })
 })

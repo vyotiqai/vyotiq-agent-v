@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { DEFAULT_SETTINGS } from '@shared/ipc'
+import { DEFAULT_SETTINGS, type AgentInteractionMode } from '@shared/ipc'
 import {
   assertToolAllowedInMode,
   filterToolDefsForMode,
@@ -26,24 +26,21 @@ describe('switch_mode', () => {
     getSettings.mockReturnValue({ ...DEFAULT_SETTINGS, autoModeSwitch: true })
   })
 
-  it('is allowed in every interaction mode when autoModeSwitch is on', () => {
+  it('is allowed in both interaction modes when autoModeSwitch is on', () => {
     const opts = { autoModeSwitch: true }
     expect(isBuiltinAllowedInMode('ask', 'switch_mode', opts)).toBe(true)
-    expect(isBuiltinAllowedInMode('plan', 'switch_mode', opts)).toBe(true)
     expect(isBuiltinAllowedInMode('agent', 'switch_mode', opts)).toBe(true)
     expect(assertToolAllowedInMode('ask', 'switch_mode', { mode: 'agent' }, opts).ok).toBe(true)
-    expect(assertToolAllowedInMode('plan', 'switch_mode', { mode: 'agent' }, opts).ok).toBe(true)
-    expect(assertToolAllowedInMode('agent', 'switch_mode', { mode: 'plan' }, opts).ok).toBe(true)
+    expect(assertToolAllowedInMode('agent', 'switch_mode', { mode: 'ask' }, opts).ok).toBe(true)
   })
 
-  it('is denied in every interaction mode when autoModeSwitch is off', () => {
+  it('is denied in both interaction modes when autoModeSwitch is off', () => {
     expect(isBuiltinAllowedInMode('ask', 'switch_mode')).toBe(false)
-    expect(isBuiltinAllowedInMode('plan', 'switch_mode', { autoModeSwitch: false })).toBe(false)
     expect(isBuiltinAllowedInMode('agent', 'switch_mode', { autoModeSwitch: false })).toBe(false)
     const denied = assertToolAllowedInMode(
       'agent',
       'switch_mode',
-      { mode: 'plan' },
+      { mode: 'ask' },
       { autoModeSwitch: false }
     )
     expect(denied.ok).toBe(false)
@@ -61,7 +58,7 @@ describe('switch_mode', () => {
   })
 
   it('updates mutable mode and emits mode_changed when autoModeSwitch is on', async () => {
-    let mode: 'ask' | 'plan' | 'agent' = 'ask'
+    let mode: AgentInteractionMode = 'ask'
     const events: { type: string; mode?: string }[] = []
     const result = await executeTool(
       'switch_mode',
@@ -107,7 +104,7 @@ describe('switch_mode', () => {
 
   it('fails execute when autoModeSwitch is off', async () => {
     getSettings.mockReturnValue({ ...DEFAULT_SETTINGS, autoModeSwitch: false })
-    let mode: 'ask' | 'plan' | 'agent' = 'ask'
+    let mode: AgentInteractionMode = 'ask'
     const result = await executeTool(
       'switch_mode',
       JSON.stringify({ mode: 'agent' }),
@@ -153,37 +150,61 @@ describe('switch_mode', () => {
     expect(agentTools).toContain('edit')
   })
 
-  it('seeds plan.md when switching to plan', async () => {
+  it('folds a legacy "plan" request to agent instead of failing the step', async () => {
+    // A model carrying the old three-mode vocabulary will ask for `plan`.
+    // Agent is what Plan became, so answering with a tool failure would burn a
+    // step to teach it a mode that no longer exists.
     const workspace = mkdtempSync(join(tmpdir(), 'vyotiq-switch-plan-'))
     const runDir = join(workspace, 'run')
     mkdirSync(runDir)
     try {
-      let mode: 'ask' | 'plan' | 'agent' = 'ask'
+      let mode: AgentInteractionMode = 'ask'
+      const events: { type: string; mode?: string }[] = []
       const result = await executeTool(
         'switch_mode',
         JSON.stringify({ mode: 'plan' }),
         workspace,
         new AbortController().signal,
         {
-          runId: 'run-plan-seed',
+          runId: 'run-plan-fold',
           runDir,
           getAgentMode: () => mode,
           setAgentMode: (next) => {
             mode = next
           },
+          emitAgentEvent: (ev) => events.push(ev),
           autoModeSwitch: true
         }
       )
       expect(result.ok).toBe(true)
-      expect(mode).toBe('plan')
-      expect(existsSync(join(runDir, 'plan.md'))).toBe(true)
-      expect(readFileSync(join(runDir, 'plan.md'), 'utf8')).toContain('## Steps')
+      expect(mode).toBe('agent')
+      expect(events).toEqual([
+        { type: 'mode_changed', runId: 'run-plan-fold', mode: 'agent' }
+      ])
+      // Seeding plan.md is the run loop's job now, not this tool's.
+      expect(existsSync(join(runDir, 'plan.md'))).toBe(false)
     } finally {
       rmSync(workspace, { recursive: true, force: true })
     }
   })
 
-  it('create_plan publishes without moving the run out of Agent mode', async () => {
+  it('rejects a mode that was never valid', async () => {
+    const result = await executeTool(
+      'switch_mode',
+      JSON.stringify({ mode: 'turbo' }),
+      '/ws',
+      new AbortController().signal,
+      {
+        runId: 'run-bad-mode',
+        getAgentMode: () => 'agent' as AgentInteractionMode,
+        setAgentMode: () => {},
+        autoModeSwitch: true
+      }
+    )
+    expect(result.ok).toBe(false)
+  })
+
+  it('create_plan publishes without touching the mode, in either autoModeSwitch state', async () => {
     const plan = [
       '## Goal',
       '',
@@ -191,7 +212,7 @@ describe('switch_mode', () => {
       '',
       '## Steps',
       '',
-      '1. Call `create_plan` in Agent mode and verify the run stays in Agent mode.',
+      '1. Call `create_plan`; the run stays in Agent mode and emits no mode_changed.',
       '',
       '## Done when',
       '',
@@ -202,62 +223,35 @@ describe('switch_mode', () => {
     const runDir = join(workspace, 'run')
     mkdirSync(runDir)
     try {
-      let mode: 'ask' | 'plan' | 'agent' = 'agent'
-      const events: { type: string; mode?: string }[] = []
-      const result = await executeTool('create_plan', argsJson, workspace, new AbortController().signal, {
-        runId: 'gate-run-agent',
-        runDir,
-        invokeId: 7,
-        getAgentMode: () => mode,
-        setAgentMode: (next) => {
-          mode = next
-        },
-        emitAgentEvent: (ev) => events.push(ev),
-        autoModeSwitch: true
-      })
-      expect(result.ok).toBe(true)
-      expect(existsSync(join(runDir, 'plan.md'))).toBe(true)
-      // The plan is finished when this tool runs, so demoting the run here only
-      // bought a wasted `switch_mode` step: 4 of 4 plans in the telemetry
-      // switched straight back, 3 of them in a step that did nothing else.
-      expect(mode).toBe('agent')
-      expect(events).toEqual([])
-      expect(result.content).not.toMatch(/Switched to Plan mode/)
-
-      // Already in plan mode: publishes, and still does not move the run.
-      let planMode: 'ask' | 'plan' | 'agent' = 'plan'
-      const planEvents: { type: string }[] = []
-      const again = await executeTool('create_plan', argsJson, workspace, new AbortController().signal, {
-        runId: 'gate-run-plan',
-        runDir,
-        getAgentMode: () => planMode,
-        setAgentMode: (next) => {
-          planMode = next
-        },
-        emitAgentEvent: (ev) => planEvents.push(ev),
-        autoModeSwitch: true
-      })
-      expect(again.ok).toBe(true)
-      expect(planMode).toBe('plan')
-      expect(planEvents).toHaveLength(0)
-
-      // Auto off: unchanged, as before.
-      let autoOffMode: 'ask' | 'plan' | 'agent' = 'agent'
-      const autoOffEvents: { type: string }[] = []
-      const autoOff = await executeTool('create_plan', argsJson, workspace, new AbortController().signal, {
-        runId: 'gate-run-autooff',
-        runDir,
-        getAgentMode: () => autoOffMode,
-        setAgentMode: (next) => {
-          autoOffMode = next
-        },
-        emitAgentEvent: (ev) => autoOffEvents.push(ev),
-        autoModeSwitch: false
-      })
-      expect(autoOff.ok).toBe(true)
-      expect(autoOffMode).toBe('agent')
-      expect(autoOffEvents).toHaveLength(0)
-      expect(autoOff.content).not.toMatch(/Switched to Plan mode/)
+      // Plan mode is merged in, so publishing has no mode to hand off to or
+      // from: the promotion this tool used to perform is gone, along with the
+      // `switch_mode` step it was introduced to save.
+      for (const autoModeSwitch of [true, false]) {
+        let mode: AgentInteractionMode = 'agent'
+        const events: { type: string; mode?: string }[] = []
+        const result = await executeTool(
+          'create_plan',
+          argsJson,
+          workspace,
+          new AbortController().signal,
+          {
+            runId: `gate-run-${autoModeSwitch ? 'auto' : 'manual'}`,
+            runDir,
+            invokeId: 7,
+            getAgentMode: () => mode,
+            setAgentMode: (next) => {
+              mode = next
+            },
+            emitAgentEvent: (ev) => events.push(ev),
+            autoModeSwitch
+          }
+        )
+        expect(result.ok, String(autoModeSwitch)).toBe(true)
+        expect(existsSync(join(runDir, 'plan.md'))).toBe(true)
+        expect(mode, String(autoModeSwitch)).toBe('agent')
+        expect(events, String(autoModeSwitch)).toEqual([])
+        expect(result.content).not.toMatch(/Mode switched/i)
+      }
     } finally {
       rmSync(workspace, { recursive: true, force: true })
     }

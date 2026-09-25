@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'fs'
 import { basename } from 'path'
 import {
+  describeMissingSkill,
   findEnabledSkillByName,
   findPluginRuleById,
   listSkillBundledFiles,
@@ -15,6 +16,39 @@ import type { MarketplaceOverrides } from '../../../shared/ipc'
 function marketplaceOverridesFor(workspacePath: string): MarketplaceOverrides | null {
   const override = findWorkspaceSettingsOverride(getWorkspaces(), workspacePath)
   return override?.marketplaceOverrides ?? null
+}
+
+/**
+ * One sentence the agent can act on, and one the user can act on.
+ *
+ * Skills that hand off to other skills ("call the Skill tool with X") land here
+ * whenever X is a Marketplace package nobody installed. Saying "unknown or
+ * disabled" left the agent to guess between a typo and a toggle; naming the
+ * state lets it tell the user exactly which card to press.
+ */
+export function missingSkillMessage(
+  skillName: string,
+  overrides: MarketplaceOverrides | null,
+  workspaceRoot: string
+): string {
+  const reason = describeMissingSkill(skillName, overrides, workspaceRoot)
+  switch (reason.kind) {
+    case 'disabled':
+      return `Skill "${skillName}" is installed but disabled. Enable "${reason.label}" in Extensions (or clear the workspace override) and try again.`
+    case 'not_installed':
+      return `Skill "${skillName}" is not installed. Install "${reason.label}" from Extensions — it is in the catalog, so nothing needs downloading — then try again.`
+    case 'unknown': {
+      const hint =
+        reason.suggestions.length > 0
+          ? ` Closest enabled skills: ${reason.suggestions.join(', ')}.`
+          : ''
+      return `Unknown skill/plugin-rule: ${skillName}. Check Available skills / Plugin rules for the exact name.${hint}`
+    }
+    default: {
+      const _exhaustive: never = reason
+      return _exhaustive
+    }
+  }
 }
 
 /**
@@ -45,9 +79,7 @@ export function toolSkill(
 
   const skill = findEnabledSkillByName(skillName, overrides, workspaceRoot)
   if (!skill) {
-    throw new Error(
-      `Unknown or disabled skill/plugin-rule: ${skillName}. Enable it in Marketplace, or check Available skills / Plugin rules.`
-    )
+    throw new Error(missingSkillMessage(skillName, overrides, workspaceRoot))
   }
 
   const requested = (relPath ?? '').trim().replace(/\\/g, '/')

@@ -70,7 +70,6 @@ vi.mock('@main/agent/context', async (importOriginal) => {
       estimatedTokens: 100,
       layers: { system: 10, history: 50, tools: 20, buffer: 20 },
       overflow: false,
-      anthropicNative: undefined,
       compaction: null
     }),
     ensureMemoryLayout: () => undefined
@@ -172,7 +171,7 @@ describe('runAgent mode and API key', () => {
     expect(existsSync(join(workspace, '.vyotiq'))).toBe(false)
   })
 
-  it('Plan mode seeds plan.md under the run directory', async () => {
+  it('every run seeds plan.md under the run directory', async () => {
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
       yield { type: 'text', text: 'drafting' }
       yield { type: 'done', stopReason: 'end_turn' }
@@ -183,7 +182,7 @@ describe('runAgent mode and API key', () => {
       runId,
       messages: [{ role: 'user', content: 'plan a feature' }],
       workspacePath: workspace,
-      mode: 'plan'
+      mode: 'agent'
     })) {
       // drain
     }
@@ -198,7 +197,10 @@ describe('runAgent mode and API key', () => {
     expect(existsSync(join(workspace, '.vyotiq'))).toBe(false)
   })
 
-  it('seeds plan.md when the run switches into Plan mode mid-run', async () => {
+  it('applies a mid-run pending mode at the step boundary and emits mode_changed', async () => {
+    // Was "seeds plan.md when the run switches into Plan mode mid-run".
+    // Seeding moved to run start, so what is left to protect here is the
+    // boundary application itself, which lost its seeding side effect.
     let call = 0
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
       call += 1
@@ -213,25 +215,26 @@ describe('runAgent mode and API key', () => {
       yield { type: 'text', text: 'done' }
       yield { type: 'done', stopReason: 'stop' }
     })
-    const runId = 'plan-seed-mid-run'
+    const runId = 'mode-pending-mid-run'
     executeTool.mockImplementation(async () => {
-      setPendingMode(runId, 'plan')
+      setPendingMode(runId, 'ask')
       return { ok: true, summary: 'file', content: 'ok' }
     })
 
-    for await (const _ of runAgent({
+    const modes: string[] = []
+    for await (const ev of runAgent({
       runId,
-      messages: [{ role: 'user', content: 'work then plan' }],
+      messages: [{ role: 'user', content: 'work then ask' }],
       workspacePath: workspace,
       mode: 'agent'
     })) {
-      // drain
+      if (ev.type === 'mode_changed') modes.push(ev.mode)
     }
 
+    expect(modes).toEqual(['ask'])
+    // Run-start seeding is unconditional, so plan.md exists regardless of mode.
     const planPath = join(resolveRunDir(workspace, runId), 'plan.md')
     expect(existsSync(planPath)).toBe(true)
-    expect(readFileSync(planPath, 'utf8')).toContain('# Plan')
-    expect(readFileSync(planPath, 'utf8')).toContain('## Steps')
   })
 
   it('rebuilds the tool catalog when a queued mode lands at the first step boundary', async () => {
@@ -259,42 +262,72 @@ describe('runAgent mode and API key', () => {
     expect(seenTools).toContain('terminal')
   })
 
-  it('nudges a text-only Plan step when plan.md is not ready', async () => {
+  it('does not nudge a text-only step when the run published no plan', async () => {
+    // Plan mode nudged for a MISSING plan. Agent answers questions as well as
+    // implements, so carrying that over cost two extra provider round trips on
+    // every ordinary turn — this pins the turn at a single call.
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
-      yield { type: 'text', text: 'Here is the full plan in chat.' }
-      yield { type: 'done', stopReason: 'end_turn' }
+      yield { type: 'text', text: 'Here is the answer in chat.' }
+      yield { type: 'done', stopReason: 'stop' }
     })
 
-    const runId = 'plan-chat-nudge'
+    const runId = 'plan-chat-no-nudge'
     for await (const _ of runAgent({
       runId,
-      messages: [{ role: 'user', content: 'plan the work' }],
+      messages: [{ role: 'user', content: 'what does this do?' }],
       workspacePath: workspace,
-      mode: 'plan'
+      mode: 'agent'
     })) {
       // drain
     }
 
-    expect(streamChat.mock.calls.length).toBe(3)
-    const second = streamChat.mock.calls[1]![0] as ProviderChatRequest
-    expect(JSON.stringify(second.messages)).toMatch(/create_plan/)
+    expect(streamChat).toHaveBeenCalledTimes(1)
   })
 
-  it('finishes a text-only Plan step when plan.md is already ready', async () => {
+  it('nudges twice when a published plan is shallow, naming its quality issues', async () => {
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'text', text: 'Plan is done.' }
+      yield { type: 'done', stopReason: 'stop' }
+    })
+
+    const runId = 'plan-shallow-nudge'
+    const runDir = createRun(workspace, runId, 'plan the work', 'agent')
+    // Draft-ready (so it counts as published) but missing Scope/Architecture/Risks.
+    writeFileSync(
+      join(runDir, 'plan.md'),
+      ['# Thin plan', '', '## Goal', '', 'Ship it.', '', '## Steps', '', '1. Do it.', '', '## Done when', '', '- [ ] Done.'].join('\n')
+    )
+
+    for await (const _ of runAgent({
+      runId,
+      messages: [{ role: 'user', content: 'plan the work' }],
+      workspacePath: workspace,
+      mode: 'agent'
+    })) {
+      // drain
+    }
+
+    // 1 original + 2 capped nudges.
+    expect(streamChat.mock.calls.length).toBe(3)
+    const second = streamChat.mock.calls[1]![0] as ProviderChatRequest
+    expect(JSON.stringify(second.messages)).toMatch(/Plan published but shallow/)
+  })
+
+  it('finishes a text-only step when plan.md is already ready', async () => {
     streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
       yield { type: 'text', text: 'Plan is ready for review.' }
       yield { type: 'done', stopReason: 'end_turn' }
     })
 
     const runId = 'plan-ready-finish'
-    const runDir = createRun(workspace, runId, 'plan the work', 'plan')
+    const runDir = createRun(workspace, runId, 'plan the work', 'agent')
     writeFileSync(join(runDir, 'plan.md'), minimalReadyPlanMarkdown())
 
     for await (const _ of runAgent({
       runId,
       messages: [{ role: 'user', content: 'plan the work' }],
       workspacePath: workspace,
-      mode: 'plan'
+      mode: 'agent'
     })) {
       // drain
     }

@@ -130,6 +130,7 @@ export async function countTextsTokensAsync(
   const out = new Array<number>(items.length)
   const missIdx: number[] = []
   const missItems: Array<{ text: string; encoding: EncodingName }> = []
+  const missKeys: string[] = []
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i]!
@@ -151,6 +152,11 @@ export async function countTextsTokensAsync(
     }
     missIdx.push(i)
     missItems.push(item)
+    // Carried, not recomputed below: `cacheKey` runs SHA-256 over anything longer
+    // than INLINE_KEY_CHARS, so recomputing it in the write-back loop hashed every
+    // uncached body twice — a cold count of a long history hashed the whole history
+    // twice over.
+    missKeys.push(key)
   }
 
   if (missItems.length === 0) return out
@@ -174,7 +180,7 @@ export async function countTextsTokensAsync(
   for (let j = 0; j < missItems.length; j++) {
     const item = missItems[j]!
     const idx = missIdx[j]!
-    const key = cacheKey(item.encoding, item.text)
+    const key = missKeys[j]!
     const count =
       counts && counts[j] !== undefined ? counts[j]! : countUncachedSync(item.text, item.encoding)
     out[idx] = remember(key, count)

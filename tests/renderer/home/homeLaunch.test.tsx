@@ -28,11 +28,10 @@ const baseProps = {
       activeRunId: null
     }
   },
-  sessionQuery: '',
-  onSessionQuery: vi.fn(),
   onOpenSettings: vi.fn(),
   onOpenMarketplace: vi.fn(),
   onOpenChat: vi.fn(),
+  onOpenUsage: vi.fn(),
   onNewChat: vi.fn(),
   onSelectRunInWorkspace: vi.fn(),
   onRenameRunInWorkspace: vi.fn(),
@@ -40,7 +39,6 @@ const baseProps = {
   onSwitchWorkspace: vi.fn(),
   onCloseWorkspace: vi.fn(),
   onAddWorkspace: vi.fn(),
-  workspaceHasBackgroundRun: () => false
 }
 
 beforeEach(() => {
@@ -90,12 +88,13 @@ function renderDemoHome(overrides: Partial<Parameters<typeof HomePage>[0]> = {})
     <HomePage
       openWorkspaces={[DEMO]}
       runsByWorkspacePath={baseProps.runsByWorkspacePath}
-      onNewSessionInWorkspace={vi.fn()}
-      onSelectRunInWorkspace={vi.fn()}
-      onSwitchWorkspace={vi.fn()}
+      onStartTask={vi.fn()}
+      onNewTaskInWorkspace={vi.fn()}
+      onOpenTask={vi.fn()}
+      onOpenWorkspace={vi.fn()}
       onAddWorkspace={vi.fn()}
-      pinnedRunKeys={[]}
-      onTogglePinnedRun={vi.fn()}
+      onRespondApproval={vi.fn(async () => {})}
+      onOpenUsage={vi.fn()}
       {...overrides}
     />
   )
@@ -116,27 +115,27 @@ describe('launchViewFor (App navigation-mode decision)', () => {
   })
 })
 
-describe('Home session entry points', () => {
-  it('renders no composer on the Home tab', () => {
+describe('Home task entry points', () => {
+  it('starts a task from one line, not from a brief', () => {
     renderDemoHome()
 
-    expect(screen.queryByText(/Describe a task/)).toBeNull()
-    expect(screen.getByText('Home')).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: 'New task' })).toBeTruthy()
+    expect(screen.queryByRole('combobox', { name: 'Brief' })).toBeNull()
   })
 
-  it('keeps the workspace card action routing to the new-session handler', () => {
-    const onNewSessionInWorkspace = vi.fn()
-    renderDemoHome({ onNewSessionInWorkspace })
+  it('opens a new task in a workspace from its row', () => {
+    const onNewTaskInWorkspace = vi.fn()
+    renderDemoHome({ onNewTaskInWorkspace })
 
-    fireEvent.click(screen.getByRole('button', { name: 'New chat' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New task in demo' }))
 
-    expect(onNewSessionInWorkspace).toHaveBeenCalledTimes(1)
-    expect(onNewSessionInWorkspace).toHaveBeenCalledWith(DEMO, '')
+    expect(onNewTaskInWorkspace).toHaveBeenCalledTimes(1)
+    expect(onNewTaskInWorkspace).toHaveBeenCalledWith(DEMO)
   })
 })
 
 describe("'Go to Home' command dispatch", () => {
-  it("opens Home from the command palette's Go to Home entry", () => {
+  it('opens Home from the Home command in search and commands', () => {
     const onOpenHome = vi.fn()
     render(
       <AppShell {...baseProps} onOpenHome={onOpenHome}>
@@ -144,14 +143,15 @@ describe("'Go to Home' command dispatch", () => {
       </AppShell>
     )
 
-    // Command palette chord: Ctrl/Cmd+Shift+P.
-    fireEvent.keyDown(window, { key: 'p', ctrlKey: true, shiftKey: true })
-    fireEvent.click(screen.getByRole('button', { name: /Go to Home/ }))
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
+    const input = screen.getByRole('textbox', { name: /search tasks, files and commands/i })
+    fireEvent.change(input, { target: { value: '>home' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(onOpenHome).toHaveBeenCalledTimes(1)
   })
 
-  it('opens Home from the top-left sidebar Home button', () => {
+  it('opens Home from the navigator', () => {
     const onOpenHome = vi.fn()
     render(
       <AppShell {...baseProps} onOpenHome={onOpenHome}>
@@ -162,5 +162,41 @@ describe("'Go to Home' command dispatch", () => {
     fireEvent.click(screen.getByRole('button', { name: 'Home' }))
 
     expect(onOpenHome).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Usage entry points', () => {
+  it('opens Usage from the navigator, marked as the place you are on', () => {
+    const onOpenUsage = vi.fn()
+    const { rerender } = render(
+      <AppShell {...baseProps} onOpenUsage={onOpenUsage}>
+        <p>Main content</p>
+      </AppShell>
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Usage' }))
+    expect(onOpenUsage).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <AppShell {...baseProps} view="usage" onOpenUsage={onOpenUsage}>
+        <p>Main content</p>
+      </AppShell>
+    )
+    expect(screen.getByRole('button', { name: 'Usage' }).getAttribute('aria-current')).toBe('page')
+  })
+
+  it('opens Usage from search and commands', () => {
+    const onOpenUsage = vi.fn()
+    render(
+      <AppShell {...baseProps} onOpenUsage={onOpenUsage}>
+        <p>Main content</p>
+      </AppShell>
+    )
+
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
+    const input = screen.getByRole('textbox', { name: /search tasks, files and commands/i })
+    fireEvent.change(input, { target: { value: '>usage' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onOpenUsage).toHaveBeenCalledTimes(1)
   })
 })

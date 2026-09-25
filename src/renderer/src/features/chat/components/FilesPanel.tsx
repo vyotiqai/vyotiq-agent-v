@@ -32,9 +32,12 @@ import { AgentVSpinner } from '@renderer/lib/brand'
 import { isIgnoredWorkspaceEntryName } from '@shared/utils/workspaceIgnores'
 import {
   ActionMenu,
+  Badge,
+  Button,
   IconButton,
   PanelResizeHandle,
   SearchInput,
+  Switch,
   cn,
   type ActionMenuItem
 } from '@renderer/lib/ui'
@@ -64,7 +67,9 @@ import {
   type FileSessionPatch,
   type FileTab
 } from './fileSessionStore'
-import { DOCK_TOOLBAR_BTN, PANEL_SUBTAB_BAR, dockPanelTabButtonClass, dockPanelTabCloseClass, dockPanelTabShellClass } from './PanelChrome'
+import { EmptyPanel } from './PanelChrome'
+import type { AgentFileMarks } from '@renderer/features/inspector/agentFileMarks'
+import { encodingLabel, eolLabel, languageName } from '@renderer/features/inspector/fileFacts'
 
 type DirectoryState = {
   entries: WorkspaceFileEntry[]
@@ -181,16 +186,16 @@ const FILES_FOLLOW_AGENT_KEY = 'vyotiq.files.followAgent'
 const FILES_EXPLORER_WIDTH_MIN = 176
 const FILES_EXPLORER_WIDTH_MAX = 360
 const FILES_EXPLORER_WIDTH_DEFAULT = 260
-const TREE_INDENT_REM = 0.75
-const TREE_ROW_HEIGHT_PX = 28
-const TREE_ROW_ACTIVE_FILE =
-  'bg-accent/15 text-fg ring-1 ring-inset ring-accent/35'
-const TREE_ROW_FOCUSED =
-  'bg-surface/60 text-fg ring-1 ring-inset ring-border/70'
+const TREE_INDENT_PX = 14
+const TREE_EDGE_PX = 10
+const TREE_ROW_HEIGHT_PX = 24
+/** The open file: the one selection fill. */
+const TREE_ROW_ACTIVE_FILE = 'bg-surface-2 text-fg-strong'
+/** The keyboard's place when it is not the open file. */
+const TREE_ROW_FOCUSED = 'bg-surface text-fg'
 const FILTER_REVEAL_MAX_DIRS = 120
 const FILES_PANEL_ALERT =
-  'flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 text-caption'
-const DOCK_TOOLBAR_BTN_PRESSED = 'border-accent/60 bg-accent/10 text-fg'
+  'flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-xs'
 const TREE_KIND_ORDER: Record<WorkspaceFileEntry['kind'], number> = {
   directory: 0,
   file: 1,
@@ -324,12 +329,13 @@ function treeLoadMoreElementId(parentPath: string): string {
 }
 
 /** Pixel x-offset of the nesting guide for ancestor level `ancestor` (1-based). */
+/** Each ancestor's guide runs under its chevron. */
 function treeGuideOffsetPx(ancestor: number): number {
-  return Math.round(ancestor * 16 * TREE_INDENT_REM) - 7
+  return TREE_EDGE_PX + (ancestor - 1) * TREE_INDENT_PX + 5
 }
 
 function treeIndentStyle(level: number): CSSProperties {
-  const paddingLeft = `${Math.max(0, level - 1) * TREE_INDENT_REM + 0.25}rem`
+  const paddingLeft = `${TREE_EDGE_PX + Math.max(0, level - 1) * TREE_INDENT_PX}px`
   if (level < 2) return { paddingLeft }
   // One vertical guide per ancestor level, drawn as background layers so the
   // hierarchy stays readable without wrapping the tree in nested containers.
@@ -483,7 +489,8 @@ export const FilesPanel = memo(function FilesPanel({
   agentFocus = null,
   recoveryData,
   onRecoveryDataConsumed,
-  findInFilesNonce = 0
+  findInFilesNonce = 0,
+  agentMarks
 }: {
   workspacePath: string | null
   active: boolean
@@ -497,6 +504,8 @@ export const FilesPanel = memo(function FilesPanel({
   findInFilesNonce?: number
   recoveryData?: WorkspaceEditorRecoveryLoadResult
   onRecoveryDataConsumed?: (workspacePath: string) => void
+  /** What this task edited and read, keyed by workspace-relative path. */
+  agentMarks?: AgentFileMarks
 }) {
   const sessionRef = useRef<FileSession | null>(null)
   const wasActiveRef = useRef(false)
@@ -3587,9 +3596,9 @@ export const FilesPanel = memo(function FilesPanel({
       {promptDialog}
       {confirmDialog}
       {findInFilesOpen ? (
-        <div className="flex shrink-0 flex-col gap-1.5 border-b border-border/40 bg-surface px-2 py-2">
+        <div className="flex shrink-0 flex-col border-b border-border">
           <form
-            className="flex items-center gap-1.5"
+            className="flex h-10 items-center gap-1.5 pl-3 pr-2"
             onSubmit={(event) => {
               event.preventDefault()
               const q = findQuery.trim()
@@ -3609,42 +3618,44 @@ export const FilesPanel = memo(function FilesPanel({
                 .finally(() => setFindBusy(false))
             }}
           >
+            <Icon name="search" size={13} className="shrink-0 text-muted" />
             <input
               ref={findInputRef}
-              className="h-7 min-w-0 flex-1 rounded-md border border-border bg-bg px-2 text-caption text-fg outline-none"
+              className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-tertiary"
               placeholder="Find in files"
+              aria-label="Find in files"
               value={findQuery}
               onChange={(event) => setFindQuery(event.target.value)}
             />
-            <button type="submit" className={DOCK_TOOLBAR_BTN} disabled={findBusy}>
+            <Button size="xs" type="submit" pending={findBusy}>
               {findBusy ? 'Searching…' : 'Search'}
-            </button>
-            <button
-              type="button"
-              className={DOCK_TOOLBAR_BTN}
+            </Button>
+            <IconButton
+              icon="close"
+              label="Close find in files"
+              size="sm"
+              tone="muted"
               onClick={() => {
                 setFindInFilesOpen(false)
                 setFindHits([])
                 setFindError(null)
               }}
-            >
-              Close
-            </button>
+            />
           </form>
-          {findError ? <p className="m-0 text-caption text-danger">{findError}</p> : null}
+          {findError ? <p className="m-0 px-3 pb-2 text-xs text-danger">{findError}</p> : null}
           {findHits.length > 0 ? (
-            <ul className="m-0 max-h-40 list-none overflow-auto p-0">
+            <ul className="scroll-thin m-0 max-h-40 list-none overflow-auto border-t border-border py-1">
               {findHits.map((hit) => (
                 <li key={`${hit.path}:${hit.line}:${hit.text.slice(0, 24)}`}>
                   <button
                     type="button"
-                    className="flex w-full items-baseline gap-2 truncate rounded px-1 py-0.5 text-left text-caption hover:bg-surface-2"
+                    className="flex h-6 w-full items-baseline gap-2 truncate px-3 text-left text-xs hover:bg-surface focus-visible:vy-focus-ring"
                     onClick={() => {
                       void openFile(hit.path).then(() => setScrollToLine(hit.line))
                     }}
                   >
                     <span className="truncate text-fg">{hit.path}</span>
-                    <span className="shrink-0 text-muted">{hit.line}</span>
+                    <span className="shrink-0 font-mono text-caption text-tertiary">{hit.line}</span>
                     <span className="min-w-0 truncate text-muted">{hit.text.trim()}</span>
                   </button>
                 </li>
@@ -3674,7 +3685,7 @@ export const FilesPanel = memo(function FilesPanel({
           role="alert"
           className={cn(
             FILES_PANEL_ALERT,
-            'border-warning/30 bg-warning/10 text-warning'
+            'bg-warning-soft text-warning'
           )}
         >
           <span className="min-w-0 flex-1 truncate">
@@ -3688,15 +3699,15 @@ export const FilesPanel = memo(function FilesPanel({
           aria-live="assertive"
           className={cn(
             FILES_PANEL_ALERT,
-            'border-danger/30 bg-danger/10 text-danger'
+            'bg-danger-soft text-danger'
           )}
         >
           <span className="min-w-0 flex-1 truncate">{error}</span>
           <div className="flex shrink-0 items-center gap-1.5">
             {failedOpenPath && window.vyotiq?.slashCommandsOpenFile ? (
-              <button
-                type="button"
-                className={DOCK_TOOLBAR_BTN}
+              <Button
+                size="xs"
+                variant="ghost"
                 onClick={() => {
                   void window.vyotiq?.slashCommandsOpenFile({
                     workspacePath,
@@ -3705,18 +3716,18 @@ export const FilesPanel = memo(function FilesPanel({
                 }}
               >
                 Open externally
-              </button>
+              </Button>
             ) : null}
-            <button
-              type="button"
-              className={DOCK_TOOLBAR_BTN}
+            <Button
+              size="xs"
+              variant="ghost"
               onClick={() => {
                 setError(null)
                 setFailedOpenPath(null)
               }}
             >
               Dismiss
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}
@@ -3724,173 +3735,137 @@ export const FilesPanel = memo(function FilesPanel({
         <div
           style={explorerWidthStyle}
           className={cn(
-            'flex min-h-0 min-w-0 flex-col border-border/40',
-            narrowSurface
-              ? 'h-[42%] min-h-[11rem] w-full max-w-none border-b'
-              : 'w-[var(--files-explorer-width)] max-w-[45%] border-r'
+            'flex min-h-0 min-w-0 flex-col border-border',
+            narrowSurface ? 'w-full max-w-none shrink-0 border-b' : 'w-[var(--files-explorer-width)] max-w-[45%] border-r'
           )}
         >
-          <div className="flex min-w-0 shrink-0 items-center gap-1 border-b border-border/30 px-2 py-1" role="toolbar" aria-label="Workspace files">
-            <div className="flex min-w-0 flex-1 items-center">
-              <span className="min-w-0 truncate text-caption font-medium tracking-normal text-fg" title={workspacePath}>
-                {workspaceName(workspacePath)}
-              </span>
-            </div>
-            <div className="flex shrink-0 items-center gap-0.5">
-              <IconButton
-                icon="search"
-                label="Find in files"
-                size="xs"
-                variant="bare"
-                className="text-muted"
-                disabled={busy}
-                onClick={() => setFindInFilesOpen(true)}
-              />
-              <IconButton
-                icon="plus"
-                label="Create file"
-                size="xs"
-                variant="bare"
-                className="text-muted"
-                disabled={busy}
-                onClick={() => void createEntry('file')}
-              />
-              <IconButton
-                icon="folderPlus"
-                label="Create folder"
-                size="xs"
-                variant="bare"
-                className="text-muted"
-                disabled={busy}
-                onClick={() => void createEntry('directory')}
-              />
-              <IconButton
-                icon="refresh"
-                label="Refresh files"
-                size="xs"
-                variant="bare"
-                className="text-muted"
-                disabled={busy}
-                onClick={refreshTree}
-              />
-              <ActionMenu
-                open={workspaceActionsOpen}
-                onOpenChange={setWorkspaceActionsOpen}
-                placement="down"
-                align="end"
-                aria-label="Workspace actions"
-                items={workspaceActionItems}
-                trigger={(props) => (
-                  <IconButton
-                    ref={props.ref}
-                    icon="menu"
-                    label="Workspace actions"
-                    size="xs"
-                    variant="bare"
-                    className="text-muted"
-                    disabled={busy}
-                    aria-expanded={props['aria-expanded']}
-                    aria-controls={props['aria-controls']}
-                    aria-haspopup={props['aria-haspopup']}
-                    onClick={props.onClick}
-                  />
-                )}
-              />
-              <button
-                type="button"
-                className={cn(
-                  DOCK_TOOLBAR_BTN,
-                  'ml-0.5 px-1.5',
-                  followAgent && DOCK_TOOLBAR_BTN_PRESSED
-                )}
-                aria-pressed={followAgent}
-                aria-label="Follow agent edits"
-                title={
-                  followAgent
-                    ? 'Following the agent — opens each file it writes'
-                    : 'Follow the agent — open each file it writes'
-                }
-                onClick={() => setFollowAgent((prev) => !prev)}
-              >
-                Follow
-              </button>
-              {dirtyTabCount > 0 ? (
-                <button
-                  type="button"
-                  className={cn(
-                    DOCK_TOOLBAR_BTN,
-                    'ml-0.5 border-accent bg-accent px-1.5 text-accent-fg hover:bg-accent/90'
-                  )}
-                  aria-label={`Save all (${dirtyTabCount} unsaved)`}
-                  title={`Save ${dirtyTabCount} unsaved tab${dirtyTabCount === 1 ? '' : 's'}`}
-                  disabled={busy || !tabs.some((tab) => tab.dirty && !tab.conflict)}
-                  onClick={() => void flushDirtyTabs()}
-                >
-                  Save
-                </button>
-              ) : null}
-            </div>
-          </div>
-          {nestedWorkspaceMessage && !treeFilter.trim() ? (
-            <div
-              className={cn(FILES_PANEL_ALERT, 'border-border/30 bg-warning/10 text-warning')}
-              role="status"
-            >
-              <Icon name="info" size={14} className="shrink-0" />
-              <span className="min-w-0 flex-1">{nestedWorkspaceMessage}</span>
-            </div>
-          ) : null}
-          <div className="flex min-w-0 shrink-0 items-center gap-1.5 border-b border-border/30 px-2 py-1">
+          <div
+            className="flex h-10 min-w-0 shrink-0 items-center gap-1.5 border-b border-border px-2"
+            role="toolbar"
+            aria-label="Workspace files"
+            title={workspacePath}
+          >
             <SearchInput
               aria-label="Filter workspace files"
-              className="h-7 min-h-0 min-w-0 flex-1 gap-1 rounded-md border-border/50 bg-bg px-2"
-              inputClassName="min-h-0 py-0 text-caption"
+              className="h-7 min-h-0 min-w-0 flex-1 gap-1 rounded-md border-border bg-bg px-2"
+              inputClassName="min-h-0 py-0 text-xs"
               placeholder="Filter files"
               tone="quiet"
               value={treeFilter}
               onChange={(event) => setTreeFilter(event.target.value)}
               onClear={() => setTreeFilter('')}
             />
+            <label
+              className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-muted"
+              title={
+                followAgent
+                  ? 'Following the agent — opens each file it writes'
+                  : 'Follow the agent — open each file it writes'
+              }
+            >
+              <Switch checked={followAgent} onCheckedChange={setFollowAgent} label="Follow agent edits" />
+              Follow
+            </label>
+            {dirtyTabCount > 0 ? (
+              <Button
+                size="xs"
+                variant="primary"
+                aria-label={`Save all (${dirtyTabCount} unsaved)`}
+                title={`Save ${dirtyTabCount} unsaved tab${dirtyTabCount === 1 ? '' : 's'}`}
+                disabled={busy || !tabs.some((tab) => tab.dirty && !tab.conflict)}
+                onClick={() => void flushDirtyTabs()}
+              >
+                Save
+              </Button>
+            ) : null}
+            <IconButton
+              icon="fileNew"
+              label="Create file"
+              size="sm"
+              tone="muted"
+              disabled={busy}
+              onClick={() => void createEntry('file')}
+            />
             <ActionMenu
-              open={treeSortOpen}
-              onOpenChange={setTreeSortOpen}
+              open={workspaceActionsOpen}
+              onOpenChange={setWorkspaceActionsOpen}
               placement="down"
               align="end"
-              aria-label="Sort workspace files"
-              items={treeSortItems}
+              aria-label="Workspace actions"
+              items={[
+                {
+                  id: 'find-in-files',
+                  label: 'Find in files',
+                  icon: 'search',
+                  onSelect: () => setFindInFilesOpen(true)
+                },
+                {
+                  id: 'create-folder',
+                  label: 'Create folder',
+                  icon: 'folderPlus',
+                  onSelect: () => void createEntry('directory')
+                },
+                ...workspaceActionItems.map((item, index) =>
+                  index === 0 ? { ...item, separatorBefore: true } : item
+                ),
+                {
+                  id: 'sort-name',
+                  label: 'Sort by name',
+                  checked: treeSort === 'name',
+                  separatorBefore: true,
+                  onSelect: () => updateSession({ treeSort: 'name' })
+                },
+                {
+                  id: 'sort-kind',
+                  label: 'Sort by type',
+                  checked: treeSort === 'kind',
+                  onSelect: () => updateSession({ treeSort: 'kind' })
+                }
+              ]}
               trigger={(props) => (
-                <button
+                <IconButton
                   ref={props.ref}
-                  type="button"
-                  className={cn(DOCK_TOOLBAR_BTN, 'shrink-0 gap-1 px-1.5')}
-                  aria-label="Sort workspace files"
+                  icon="more"
+                  label="Workspace actions"
+                  title="More — find, new folder, sort"
+                  size="sm"
+                  tone="muted"
+                  disabled={busy}
                   aria-expanded={props['aria-expanded']}
                   aria-controls={props['aria-controls']}
                   aria-haspopup={props['aria-haspopup']}
-                  title="Sort workspace files"
                   onClick={props.onClick}
-                >
-                  <span>{treeSort === 'name' ? 'Name' : 'Type'}</span>
-                  <Icon name="chevron" size={10} className="text-muted" />
-                </button>
+                />
               )}
             />
           </div>
+          {nestedWorkspaceMessage && !treeFilter.trim() ? (
+            <div
+              className={cn(FILES_PANEL_ALERT, 'bg-warning-soft text-warning')}
+              role="status"
+            >
+              <Icon name="info" size={14} className="shrink-0" />
+              <span className="min-w-0 flex-1">{nestedWorkspaceMessage}</span>
+            </div>
+          ) : null}
           <div
             ref={treeScrollRef}
-            className="files-panel-scroll min-h-0 flex-1 overflow-auto px-1 pb-1"
+            className={cn(
+              'files-panel-scroll overflow-auto py-1',
+              narrowSurface ? 'h-[272px] shrink-0' : 'min-h-0 flex-1'
+            )}
             role="region"
             aria-label="Workspace file surface"
             aria-busy={rootLoading}
             onContextMenu={(event) => openContextMenu(event, { kind: 'surface' })}
           >
             {rootLoading && visibleEntries.length === 0 ? (
-              <div className="px-2 py-3 text-caption text-muted" role="status">
+              <div className="px-3 py-2 text-xs text-muted" role="status">
                 Loading files…
               </div>
             ) : null}
             {directories['']?.error ? (
-              <div role="alert" className="flex items-center gap-2 px-2 py-3 text-caption text-danger">
+              <div role="alert" className="flex items-center gap-2 px-3 py-2 text-xs text-danger">
                 {directories[''].error}
                 <button
                   type="button"
@@ -3902,14 +3877,14 @@ export const FilesPanel = memo(function FilesPanel({
               </div>
             ) : null}
             {directories['']?.truncated ? (
-              <div className="px-2 py-1 text-2xs text-warning">
+              <div className="px-3 py-1 text-caption text-warning">
                 Workspace root capped at {directories[''].total.toLocaleString()} entries
               </div>
             ) : null}
             {!rootLoading &&
             !directories['']?.error &&
             visibleEntries.length === 0 ? (
-              <div className="px-2 py-5 text-center text-caption text-muted" role="status">
+              <div className="px-3 py-5 text-center text-xs text-muted" role="status">
                 {treeFilter ? 'No matching files.' : 'No files in this workspace.'}
               </div>
             ) : null}
@@ -3936,12 +3911,12 @@ export const FilesPanel = memo(function FilesPanel({
                       data-index={virtualEntry.index}
                       id={treeLoadMoreElementId(visible.parentPath)}
                       role="none"
-                      className="absolute left-0 top-0 m-0 h-7 w-full list-none p-0"
+                      className="absolute left-0 top-0 m-0 h-6 w-full list-none p-0"
                       style={{ transform: `translateY(${virtualEntry.start}px)` }}
                     >
                       <button
                         type="button"
-                        className="flex h-full min-w-0 items-center gap-1 rounded px-1.5 text-left text-xs text-accent outline-none hover:bg-surface/60 focus-visible:vy-focus-ring"
+                        className="flex h-full w-full min-w-0 items-center gap-1.5 pr-3 text-left text-xs text-accent outline-none hover:bg-surface focus-visible:vy-focus-ring"
                         style={treeIndentStyle(visible.level)}
                         onClick={() => void loadDirectory(visible.parentPath, true)}
                       >
@@ -3971,7 +3946,7 @@ export const FilesPanel = memo(function FilesPanel({
                     aria-expanded={isDir ? open : undefined}
                     aria-selected={highlighted || (!activeTab && focused)}
                     tabIndex={focused ? 0 : -1}
-                    className="absolute left-0 top-0 m-0 h-7 w-full list-none p-0"
+                    className="absolute left-0 top-0 m-0 h-6 w-full list-none p-0"
                     style={{ transform: `translateY(${virtualEntry.start}px)` }}
                     onContextMenu={(event) => {
                       selectContextPath(entry.path)
@@ -4001,12 +3976,12 @@ export const FilesPanel = memo(function FilesPanel({
                       tabIndex={-1}
                       aria-haspopup="menu"
                       className={cn(
-                        'flex h-full min-w-0 items-center gap-1 overflow-hidden rounded px-1.5 text-left text-xs outline-none hover:bg-surface/60 focus-visible:vy-focus-ring',
+                        'flex h-full w-full min-w-0 items-center gap-1.5 overflow-hidden pr-3 text-left text-xs outline-none focus-visible:vy-focus-ring',
                         highlighted
                           ? TREE_ROW_ACTIVE_FILE
                           : focused
                             ? TREE_ROW_FOCUSED
-                            : 'text-fg/80'
+                            : 'text-secondary hover:bg-surface'
                       )}
                       style={treeIndentStyle(level)}
                       onClick={() => void selectTreePath(entry.path)}
@@ -4036,9 +4011,9 @@ export const FilesPanel = memo(function FilesPanel({
                       }}
                     >
                       {isDir ? (
-                        <Icon name={open ? 'chevron' : 'chevronRight'} size={10} className="text-muted" />
+                        <Icon name={open ? 'chevron' : 'chevronRight'} size={10} className="text-tertiary" />
                       ) : (
-                        <span className="w-[10px]" aria-hidden />
+                        <span className="w-[10px] shrink-0" aria-hidden />
                       )}
                       <FileTypeIcon
                         path={entry.path}
@@ -4099,8 +4074,39 @@ export const FilesPanel = memo(function FilesPanel({
                         </span>
                       ) : null}
                       {entry.kind === 'symlink' ? (
-                        <span className="text-2xs text-warning">link</span>
+                        <span className="text-caption text-warning">link</span>
                       ) : null}
+                      {(() => {
+                        const mark = isDir ? undefined : agentMarks?.get(entry.path)
+                        if (!mark) return null
+                        if (mark.change) {
+                          return (
+                            <span
+                              className={cn(
+                                'shrink-0 font-mono text-caption font-semibold',
+                                mark.change === 'A' ? 'text-success' : mark.change === 'D' ? 'text-danger' : 'text-muted'
+                              )}
+                              title={
+                                mark.change === 'A'
+                                  ? 'Added by this task'
+                                  : mark.change === 'D'
+                                    ? 'Deleted by this task'
+                                    : 'Modified by this task'
+                              }
+                            >
+                              {mark.change}
+                            </span>
+                          )
+                        }
+                        return (
+                          <Icon
+                            name="eye"
+                            size={12}
+                            className="shrink-0 text-tertiary"
+                            aria-label="Read by the agent"
+                          />
+                        )
+                      })()}
                     </button>
                   </li>
                 )
@@ -4123,7 +4129,7 @@ export const FilesPanel = memo(function FilesPanel({
               role="tablist"
               aria-label="Open files"
               tabIndex={-1}
-              className={cn(PANEL_SUBTAB_BAR, 'sidebar-scroll-x gap-1 overflow-x-auto')}
+              className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 [scrollbar-width:none]"
               onKeyDown={(event) =>
                 handleTabListKeyDown(event, {
                   tabs: tabs.map((tab) => tab.id),
@@ -4135,7 +4141,13 @@ export const FilesPanel = memo(function FilesPanel({
               {tabs.map((tab) => {
                 const selected = tab.id === activeTabId
                 return (
-                  <div key={tab.id} className={dockPanelTabShellClass(selected, true)}>
+                  <div
+                    key={tab.id}
+                    className={cn(
+                      'group inline-flex h-7 max-w-[12rem] shrink-0 items-center rounded-md vy-transition',
+                      selected ? 'bg-surface-2 text-fg-strong' : 'text-muted hover:bg-surface hover:text-fg'
+                    )}
+                  >
                     <button
                       type="button"
                       role="tab"
@@ -4145,7 +4157,7 @@ export const FilesPanel = memo(function FilesPanel({
                       id={tabElementId(tab.id)}
                       aria-label={`${fileName(tab.path)}${tab.dirty ? `, ${saveStateLabel(saveStates[tab.id] ?? 'pending')}` : ', Saved'}`}
                       tabIndex={selected ? 0 : -1}
-                      className={dockPanelTabButtonClass(selected)}
+                      className="inline-flex h-full min-w-0 items-center gap-1.5 rounded-md pl-2 pr-1 text-xs focus-visible:vy-focus-ring"
                       onClick={() => void selectTab(tab.id)}
                       onContextMenu={(event) =>
                         openContextMenu(event, { kind: 'tab', tabId: tab.id })
@@ -4155,15 +4167,18 @@ export const FilesPanel = memo(function FilesPanel({
                       }
                       title={tab.path}
                     >
-                      <FileTypeIcon path={tab.path} size={14} className="shrink-0" />
-                      {tab.dirty ? <span className="text-warning" aria-hidden>●</span> : null}
+                      <FileTypeIcon path={tab.path} size={13} className="shrink-0" />
                       <span className="min-w-0 truncate">{fileName(tab.path)}</span>
+                      {tab.dirty ? <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden /> : null}
                     </button>
                     <button
                       type="button"
                       aria-label={`Close ${fileName(tab.path)}`}
                       tabIndex={selected ? 0 : -1}
-                      className={dockPanelTabCloseClass(selected)}
+                      className={cn(
+                        'mr-1 grid size-4 shrink-0 place-items-center rounded-sm text-tertiary hover:bg-surface-2 hover:text-fg focus-visible:vy-focus-ring',
+                        selected ? '' : 'invisible group-focus-within:visible group-hover:visible'
+                      )}
                       onClick={() => void closeTab(tab.id)}
                       onContextMenu={(event) =>
                         openContextMenu(event, { kind: 'tab', tabId: tab.id })
@@ -4198,82 +4213,42 @@ export const FilesPanel = memo(function FilesPanel({
                 openContextMenu(event, { kind: 'tab', tabId: activeTab.id })
               }
             >
-              <div className="flex min-w-0 shrink-0 items-center gap-1 border-b border-border/30 px-2 py-1 text-caption text-muted">
-                <EditorBreadcrumb path={activeTab.path} />
-                {activeTextPosition ? (
-                  <span className="shrink-0 tabular-nums text-muted">
-                    Ln {activeTextPosition.line}, Col {activeTextPosition.column}
-                  </span>
-                ) : null}
-                {activeTab.kind === 'text' ? (
-                  <button
-                    type="button"
-                    className={cn(
-                      DOCK_TOOLBAR_BTN,
-                      'px-1.5',
-                      wordWrap && DOCK_TOOLBAR_BTN_PRESSED
-                    )}
-                    aria-pressed={wordWrap}
-                    aria-label="Wrap"
-                    title="Toggle word wrap"
-                    onClick={() => updateSession({ wordWrap: !wordWrap })}
-                  >
-                    Wrap
-                  </button>
-                ) : null}
-                {activeTab.kind === 'text' ? (
-                  <button
-                    type="button"
-                    className={cn(
-                      DOCK_TOOLBAR_BTN,
-                      'px-1.5',
-                      showLineNumbers && DOCK_TOOLBAR_BTN_PRESSED
-                    )}
-                    aria-pressed={showLineNumbers}
-                    aria-label="Line numbers"
-                    title="Toggle line numbers"
-                    onClick={() => updateSession({ showLineNumbers: !showLineNumbers })}
-                  >
-                    Lines
-                  </button>
-                ) : null}
+              <div className="flex h-9 min-w-0 shrink-0 items-center gap-2 border-b border-border pl-3 pr-2 text-xs" data-editor-header>
+                <FileTypeIcon path={activeTab.path} size={13} className="shrink-0" />
+                <span className="min-w-0 flex-1 truncate font-mono text-caption text-muted" title={activeTab.path}>
+                  <EditorBreadcrumb path={activeTab.path} />
+                </span>
+                {(() => {
+                  const mark = agentMarks?.get(activeTab.path)
+                  if (!mark) return null
+                  // A read with no end line ran to the end of the file.
+                  const range = mark.read?.startLine
+                    ? mark.read.endLine
+                      ? ` L${mark.read.startLine}–${mark.read.endLine}`
+                      : ` from L${mark.read.startLine}`
+                    : ''
+                  return (
+                    <Badge tone="accent" title={mark.change ? 'This task changed this file' : 'This task read this file'}>
+                      <Icon name={mark.change ? 'edit' : 'eye'} size={10} />
+                      {mark.change ? 'agent edited' : `agent read${range}`}
+                    </Badge>
+                  )
+                })()}
                 {previewKind ? (
-                  <button
-                    type="button"
-                    className={cn(
-                      DOCK_TOOLBAR_BTN,
-                      'px-1.5',
-                      previewOpen && DOCK_TOOLBAR_BTN_PRESSED
-                    )}
+                  <Button
+                    size="xs"
+                    variant={previewOpen ? 'secondary' : 'ghost'}
                     aria-pressed={previewOpen}
                     aria-label={previewOpen ? 'Show source' : 'Show preview'}
                     title={previewOpen ? 'Show source' : 'Show preview'}
                     onClick={() => setPreviewOpen((open) => !open)}
                   >
                     {previewOpen ? 'Source' : 'Preview'}
-                  </button>
+                  </Button>
                 ) : null}
-                <div className="ml-auto flex shrink-0 items-center gap-1">
-                <span
-                  className={cn(
-                    'inline-flex shrink-0 items-center gap-1',
-                    activeTab.conflict || activeSaveState === 'error'
-                      ? 'text-warning'
-                      : activeSaveState === 'saved'
-                        ? 'text-success'
-                        : 'text-muted'
-                  )}
-                  role="status"
-                  aria-live="polite"
-                  title={saveStateLabel(activeSaveState)}
-                >
-                  {activeSaveState === 'saved' ? <Icon name="check" size={12} /> : null}
-                  <span className="hidden sm:inline">{saveStateLabel(activeSaveState)}</span>
-                </span>
                 {activeDirty || activeTab.conflict ? (
-                  <button
-                    type="button"
-                    className={cn(DOCK_TOOLBAR_BTN, 'px-1.5')}
+                  <Button
+                    size="xs"
                     disabled={busy}
                     onClick={() =>
                       activeTab.conflict
@@ -4282,47 +4257,36 @@ export const FilesPanel = memo(function FilesPanel({
                     }
                   >
                     {activeTab.conflict ? 'Reload' : 'Save'}
-                  </button>
+                  </Button>
                 ) : null}
                 {activeTab.conflict ? (
-                  <button
-                    type="button"
-                    className={cn(DOCK_TOOLBAR_BTN, 'px-1.5 text-warning')}
-                    disabled={busy}
-                    onClick={() => void overwriteTab(activeTab.id)}
-                  >
+                  <Button size="xs" variant="danger" disabled={busy} onClick={() => void overwriteTab(activeTab.id)}>
                     Overwrite
-                  </button>
+                  </Button>
                 ) : null}
-                <button
+                <IconButton
                   ref={editorActionsButtonRef}
-                  type="button"
-                  className={cn(DOCK_TOOLBAR_BTN, 'px-1.5')}
+                  icon="more"
+                  label="Editor actions"
+                  title="Editor options — wrap, blame, diff"
+                  size="xs"
+                  tone="muted"
                   aria-haspopup="menu"
                   aria-expanded={editorActionsAnchor != null}
-                  aria-label="Editor actions"
-                  title="Editor actions"
                   disabled={integrationBusy}
                   onClick={openEditorActions}
-                >
-                  <Icon name="menu" size={12} />
-                </button>
-                </div>
+                />
               </div>
               {loadingPath === activeTab.path ? (
                 <div className="flex flex-1 items-center justify-center text-caption text-muted">Loading file…</div>
               ) : editorMode === 'diff' ? (
                 <div className="min-h-0 min-w-0 flex-1 overflow-auto" data-editor-integration="diff">
-                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/30 bg-bg/95 px-2 py-1 text-caption">
-                    <strong className="font-medium text-fg">Diff View</strong>
-                    <span className="min-w-0 flex-1 truncate text-muted">{activeTab.path}</span>
-                    <button
-                      type="button"
-                      className={DOCK_TOOLBAR_BTN}
-                      onClick={() => setEditorMode('editor')}
-                    >
+                  <div className="sticky top-0 z-sticky flex h-8 items-center gap-2 border-b border-border bg-bg pl-3 pr-2 text-xs">
+                    <span className="font-medium text-fg">Diff View</span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-caption text-tertiary">{activeTab.path}</span>
+                    <Button size="xs" variant="ghost" onClick={() => setEditorMode('editor')}>
                       Back to editor
-                    </button>
+                    </Button>
                   </div>
                   {diffLines.length > 0 ? (
                     <DiffPreview
@@ -4332,36 +4296,32 @@ export const FilesPanel = memo(function FilesPanel({
                       wordWrap={wordWrap}
                     />
                   ) : (
-                    <p className="px-3 py-5 text-caption text-muted">No diff content is available.</p>
+                    <p className="px-3 py-5 text-xs text-muted">No diff content is available.</p>
                   )}
                 </div>
               ) : editorMode === 'blame' ? (
                 <div className="min-h-0 min-w-0 flex-1 overflow-auto" data-editor-integration="blame">
-                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/30 bg-bg/95 px-2 py-1 text-caption">
-                    <strong className="font-medium text-fg">Git Blame</strong>
-                    <span className="min-w-0 flex-1 truncate text-muted">{activeTab.path}</span>
-                    <button
-                      type="button"
-                      className={DOCK_TOOLBAR_BTN}
-                      onClick={() => setEditorMode('editor')}
-                    >
+                  <div className="sticky top-0 z-sticky flex h-8 items-center gap-2 border-b border-border bg-bg pl-3 pr-2 text-xs">
+                    <span className="font-medium text-fg">Git Blame</span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-caption text-tertiary">{activeTab.path}</span>
+                    <Button size="xs" variant="ghost" onClick={() => setEditorMode('editor')}>
                       Back to editor
-                    </button>
+                    </Button>
                   </div>
                   {blameResult?.kind === 'ok' ? (
                     <div className="min-w-max font-mono text-caption leading-5">
                       {blameResult.lines.map((line) => (
-                        <div key={line.line} className="flex min-w-0 border-b border-border/15">
-                          <span className="w-20 shrink-0 truncate px-2 text-muted" title={line.author}>
+                        <div key={line.line} className="flex min-w-0">
+                          <span className="w-20 shrink-0 truncate px-2 text-tertiary" title={line.author}>
                             {line.shortSha ?? 'working'}
                           </span>
                           <span className="w-32 shrink-0 truncate px-2 text-muted" title={line.date}>
                             {line.author}
                           </span>
-                          <span className="w-10 shrink-0 px-1 text-right tabular-nums text-muted/70">
+                          <span className="w-10 shrink-0 px-1 text-right tabular-nums text-tertiary">
                             {line.line}
                           </span>
-                          <span className="min-w-0 whitespace-pre px-2 text-fg/85">{line.text}</span>
+                          <span className="min-w-0 whitespace-pre px-2 text-fg">{line.text}</span>
                         </div>
                       ))}
                       {blameResult.truncated ? (
@@ -4382,16 +4342,12 @@ export const FilesPanel = memo(function FilesPanel({
                 </div>
               ) : editorMode === 'lsp' ? (
                 <div className="min-h-0 min-w-0 flex-1 overflow-auto" data-editor-integration="lsp">
-                  <div className="sticky top-0 z-sticky flex items-center gap-2 border-b border-border/30 bg-bg/95 px-2 py-1 text-caption">
-                    <strong className="font-medium text-fg">Language Server</strong>
-                    <span className="min-w-0 flex-1 truncate text-muted">{activeTab.path}</span>
-                    <button
-                      type="button"
-                      className={DOCK_TOOLBAR_BTN}
-                      onClick={() => setEditorMode('editor')}
-                    >
+                  <div className="sticky top-0 z-sticky flex h-8 items-center gap-2 border-b border-border bg-bg pl-3 pr-2 text-xs">
+                    <span className="font-medium text-fg">Language Server</span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-caption text-tertiary">{activeTab.path}</span>
+                    <Button size="xs" variant="ghost" onClick={() => setEditorMode('editor')}>
                       Back to editor
-                    </button>
+                    </Button>
                   </div>
                   {lspStatus?.kind === 'available' ? (
                     <div className="space-y-2 px-3 py-3 text-caption">
@@ -4404,7 +4360,7 @@ export const FilesPanel = memo(function FilesPanel({
                       <p className="m-0 text-muted">
                         {lspStatus.server.capabilities.length > 0
                           ? `Capabilities: ${lspStatus.server.capabilities.join(', ')}`
-                          : 'The detected server will report capabilities when it initializes.'}
+                          : 'The detected server will report capabilities when it initialises.'}
                       </p>
                       {lspResponse?.kind === 'diagnostics' ? (
                         lspResponse.items.length > 0 ? (
@@ -4413,12 +4369,12 @@ export const FilesPanel = memo(function FilesPanel({
                               <li
                                 key={`${item.line}:${item.character}:${index}`}
                                 className={cn(
-                                  'rounded border px-2 py-1',
+                                  'rounded-md px-2 py-1',
                                   item.severity === 'error'
-                                    ? 'border-danger/40 text-danger'
+                                    ? 'bg-danger-soft text-danger'
                                     : item.severity === 'warning'
-                                      ? 'border-warning/40 text-warning'
-                                      : 'border-border/50 text-muted'
+                                      ? 'bg-warning-soft text-warning'
+                                      : 'bg-surface text-muted'
                                 )}
                               >
                                 Ln {item.line + 1}, Col {item.character + 1}: {item.message}
@@ -4459,6 +4415,13 @@ export const FilesPanel = memo(function FilesPanel({
                   wordWrap={wordWrap}
                   scrollTop={activeTab.scrollTop}
                   scrollToLine={scrollToLine}
+                  markedLines={(() => {
+                    // What the badge above names, tinted in the file: the lines the agent read.
+                    const read = agentMarks?.get(activeTab.path)?.read
+                    return read?.startLine
+                      ? { from: read.startLine, to: read.endLine ?? Number.MAX_SAFE_INTEGER }
+                      : null
+                  })()}
                   lspDiagnostics={
                     inlineLspEnabled && inlineLsp.status?.kind === 'available'
                       ? inlineLsp.diagnostics
@@ -4526,47 +4489,67 @@ export const FilesPanel = memo(function FilesPanel({
               )}
             </div>
           ) : (
-            <div className="flex flex-1 flex-col items-center justify-center px-5 text-center text-caption text-muted">
-              <Icon name="fileSearch" size={28} className="mb-3 text-muted/50" />
-              <p>Select a file to open it in the editor.</p>
-              <p className="mt-1 max-w-[18rem] text-caption text-muted/80">
-                Text files open in the code editor. Images, SVG, Markdown, and HTML can preview in
-                the tab. Other binary files open in the hex editor.
-              </p>
-            </div>
+            <EmptyPanel
+              icon="fileSearch"
+              title="Select a file to open it in the editor."
+              body="Text files open in the code editor. Images, SVG, Markdown, and HTML can preview in the tab. Other binary files open in the hex editor."
+              centered
+            />
           )}
         </div>
       </div>
-      <div className="flex min-h-8 shrink-0 items-center justify-between gap-3 border-t border-border/30 px-3 py-1 text-caption text-muted">
-        <div className="flex min-w-0 items-center gap-1.5">
-          {dirtyTabCount > 0 ? (
-            <span className="text-warning" role="status">
-              {dirtyTabCount} unsaved tab{dirtyTabCount === 1 ? '' : 's'}
-            </span>
-          ) : null}
-          {savingTabCount > 0 ? (
-            <span className="text-muted" role="status" aria-live="polite">
-              {savingTabCount === 1 ? 'Autosaving' : `Autosaving ${savingTabCount}`}
-            </span>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <span
-            className={cn(autoSave ? 'text-muted' : 'text-warning')}
-            title={
-              autoSave
-                ? 'Files save automatically after editing. Toggle in Editor actions menu.'
-                : 'Files save only when you choose Save. Toggle in Editor actions menu.'
-            }
-          >
-            {autoSave ? 'Auto Save' : 'Manual Save'}
+      <div
+        className="flex h-7 shrink-0 items-center gap-3 border-t border-border px-3 font-mono text-caption text-tertiary"
+        data-files-status
+      >
+        {activeTextPosition ? (
+          <span className="shrink-0 tabular-nums">
+            Ln {activeTextPosition.line}, Col {activeTextPosition.column}
           </span>
-          {formatOnSave ? (
-            <span className="hidden text-muted sm:inline">
-              Format on Save{formatterStatus?.kind === 'available' ? ` · ${formatterStatus.tool}` : ''}
-            </span>
-          ) : null}
-        </div>
+        ) : null}
+        {dirtyTabCount > 0 ? (
+          <span className="shrink-0 font-sans text-warning" role="status">
+            {dirtyTabCount} unsaved tab{dirtyTabCount === 1 ? '' : 's'}
+          </span>
+        ) : null}
+        {savingTabCount > 0 ? (
+          <span className="shrink-0 font-sans" role="status" aria-live="polite">
+            {savingTabCount === 1 ? 'Autosaving' : `Autosaving ${savingTabCount}`}
+          </span>
+        ) : null}
+        <span className="flex-1" />
+        {activeTab ? <span className="min-w-0 truncate">{languageName(activeTab.path)}</span> : null}
+        {activeTab ? (
+          <span className="shrink-0">
+            {[encodingLabel(activeTab.encoding, activeTab.bom), eolLabel(activeTab.eol)].filter(Boolean).join(' · ')}
+          </span>
+        ) : null}
+        {formatOnSave ? (
+          <span className="hidden shrink-0 font-sans sm:inline">
+            Format on save{formatterStatus?.kind === 'available' ? ` · ${formatterStatus.tool}` : ''}
+          </span>
+        ) : null}
+        {!autoSave ? (
+          <span
+            className="shrink-0 font-sans text-warning"
+            title="Files save only when you choose Save. Toggle in the editor options."
+          >
+            Manual save
+          </span>
+        ) : null}
+        {activeTab ? (
+          <span
+            className={cn(
+              'shrink-0 font-sans',
+              activeTab.conflict || activeSaveState === 'error' ? 'text-warning' : 'text-tertiary'
+            )}
+            role="status"
+            aria-live="polite"
+            title={autoSave ? 'Files save automatically after editing. Toggle in the editor options.' : undefined}
+          >
+            {saveStateLabel(activeSaveState)}
+          </span>
+        ) : null}
       </div>
     </div>
   )

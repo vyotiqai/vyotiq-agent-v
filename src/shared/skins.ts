@@ -17,53 +17,20 @@ export const LEGACY_SKIN_ID: SkinId = 'default'
 export type SkinCatalogEntry = {
   id: SkinId
   label: string
+  /** One line under the skin's miniature in Settings. */
   description: string
-  /** Inline preview for the settings swatch chip. */
-  previewStyle: Record<string, string>
 }
 
+/**
+ * The skins in the order Settings offers them: the shipped one first. Each
+ * line says what the skin's own tokens do, so it stays true only while they do.
+ */
 export const SKIN_CATALOG: readonly SkinCatalogEntry[] = [
-  {
-    id: 'default',
-    label: 'Default',
-    description: 'Azure instrument look.',
-    previewStyle: {
-      background: 'linear-gradient(135deg, #ffffff 40%, #00638e 40%, #00638e 72%, #4fb3e8 72%)'
-    }
-  },
-  {
-    id: 'proof',
-    label: 'Proof',
-    description: 'Dusk contrast for diffs and long reading.',
-    previewStyle: {
-      background: 'linear-gradient(135deg, #f7f7f7 40%, #736a86 40%, #736a86 72%, #aca3c4 72%)'
-    }
-  },
-  {
-    id: 'bench',
-    label: 'Bench',
-    description: 'Neon-blue workshop — borders only, no elevation.',
-    previewStyle: {
-      background: 'linear-gradient(135deg, #ffffff 40%, #0072ce 40%, #0072ce 72%, #0de7ff 72%)'
-    }
-  },
-  {
-    id: 'native',
-    label: 'Native',
-    description: 'System fonts with branding-orange accent.',
-    previewStyle: {
-      background: 'linear-gradient(135deg, #f9f9f9 40%, #c2410c 40%, #c2410c 72%, #fb923c 72%)',
-      fontFamily: 'system-ui, sans-serif'
-    }
-  },
-  {
-    id: 'gild',
-    label: 'Gild',
-    description: 'Blue-slate instrument on alabaster and onyx.',
-    previewStyle: {
-      background: 'linear-gradient(135deg, #e5e4e2 40%, #536878 40%, #536878 72%, #0a0a0a 72%)'
-    }
-  }
+  { id: 'native', label: 'Native', description: 'System type, branding orange' },
+  { id: 'default', label: 'Default', description: 'Neutral grey, azure instrument' },
+  { id: 'proof', label: 'Proof', description: 'Dusk contrast for long reading' },
+  { id: 'bench', label: 'Bench', description: 'Workshop blue, the squarest corners' },
+  { id: 'gild', label: 'Gild', description: 'Alabaster and onyx, blue slate' }
 ]
 
 /** Opaque window canvas. */

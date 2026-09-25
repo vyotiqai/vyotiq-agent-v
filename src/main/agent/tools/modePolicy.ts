@@ -51,22 +51,10 @@ export const ASK_SAFE_BUILTIN = new Set([
   'git_status',
   'git_diff',
   'lsp'
-  // `diagnostics` spawns a shell — Plan-only (see PLAN_EXTRA / agent), not Ask.
+  // `diagnostics` spawns a shell — Agent-only, not Ask.
 ])
 
-/** Plan mode also allows todos + plan-artifact edits + diagnostics. */
-const PLAN_EXTRA_BUILTIN = new Set([
-  'todo_write',
-  'create_plan',
-  'create_goal',
-  'update_goal',
-  'edit',
-  'str_replace',
-  'diagnostics',
-  'run_tests'
-])
-
-/** Filenames Plan mode may write inside the run directory. */
+/** Run-artifact filenames that live in the run directory, not the workspace. */
 export const PLAN_ARTIFACT_NAMES = new Set(['contract.md', 'plan.md'])
 
 export function isPlanArtifactPath(pathArg: string): boolean {
@@ -79,12 +67,12 @@ function exactRunArtifactRelPath(pathArg: string): string {
   return pathArg.replace(/\\/g, '/').replace(/^\.\//, '').trim()
 }
 
-/** Run contract file — remapped to the run directory in Plan and Agent modes. */
+/** Run contract file — always remapped to the run directory. */
 export function isRunContractPath(pathArg: string): boolean {
   return exactRunArtifactRelPath(pathArg) === 'contract.md'
 }
 
-/** Run plan.md — remapped in Plan always; in Agent when a run plan artifact exists. */
+/** Run plan.md — remapped once the run artifact exists (the run seeds it at start). */
 export function isRunPlanPath(pathArg: string): boolean {
   return exactRunArtifactRelPath(pathArg) === 'plan.md'
 }
@@ -102,15 +90,11 @@ function autoModeSwitchBanner(mode: AgentInteractionMode, auto: boolean): string
   switch (mode) {
     case 'agent':
       return [
-        'Automatic mode switching is ON. Use `switch_mode` when the task changes — `ask` for read-only Q&A, or `plan` to work an approach up before implementing. Publishing with `create_plan` does not change the mode, so an `agent` run carries straight on and implements its plan.'
+        'Automatic mode switching is ON. Use `switch_mode` with `ask` for read-only Q&A. Planning needs no switch — `create_plan` publishes the plan and this same mode implements it.'
       ]
     case 'ask':
       return [
-        'Automatic mode switching is ON. Use `switch_mode` before planning (`plan`) or making changes (`agent`).'
-      ]
-    case 'plan':
-      return [
-        'Automatic mode switching is ON. Use `switch_mode` before implementation (`agent`) or read-only Q&A (`ask`).'
+        'Automatic mode switching is ON. Use `switch_mode` with `agent` to plan or make changes.'
       ]
     default: {
       const _exhaustive: never = mode
@@ -131,6 +115,9 @@ export function modeSectionMarkdown(
         [
           'Agent mode. You may use the tools in this turn’s catalog, subject to their schemas and approval requirements.',
           ...autoModeSwitchBanner(mode, auto),
+          // Plan mode's discipline, now unconditional: it was the only thing
+          // that mode enforced that Agent did not already allow.
+          'Plan before you act. Inspect the workspace with reads first so the plan names paths and symbols verified in this run, give every step a runnable check (a test, command, or output) instead of asserting success, then publish with `create_plan` — no mode change is needed to implement it.',
           'Follow the run contract and any approved plan unless the user redirects. Ask before making a product decision that materially changes the result.',
           ...(opts?.inlineInstance
             ? []
@@ -152,20 +139,6 @@ export function modeSectionMarkdown(
             : ['If changes are required, explain that the user must switch to Agent mode.'])
         ].join('\n')
       )
-    case 'plan':
-      return wrapPromptSection(
-        'mode',
-        [
-          'Plan mode. Inspect the workspace with read-only tools before drafting. Plans must name paths and symbols verified in this run.',
-          'Use `ask_question` for blocking choices, then publish the complete plan with `create_plan`. Follow the canonical structure: `## Goal` (outcome in 1–2 sentences), `## Scope` (in / out), `## Architecture` (a ```mermaid diagram of the affected components and data flow, with nodes named after real files or symbols), `## Steps` (ordered; each step names the paths or symbols it touches — verified in this run — and the runnable check that proves it done: a test, command, or output), `## Done when` (a `- [ ]` checklist of concrete, observable criteria), `## Risks` (trade-offs, unknowns).',
-          'Give the run a check it can execute (tests, build, lint) and cite real evidence — test output or command results — rather than asserting success.',
-          'Only plan.md and contract.md may be edited. Do not change product files, delete files, run `terminal`, write memory, or invoke MCP server tools. `diagnostics` and `run_tests` may run checks subject to approval.',
-          ...autoModeSwitchBanner(mode, auto),
-          ...(auto
-            ? []
-            : ['After the plan is ready, the user can approve implementation by switching to Agent mode.'])
-        ].join('\n')
-      )
     default: {
       const _exhaustive: never = mode
       return _exhaustive
@@ -180,14 +153,12 @@ export function isBuiltinAllowedInMode(
 ): boolean {
   if (name === 'switch_mode') return autoModeSwitchEnabled(opts)
   if (mode === 'agent') return true
-  if (ASK_SAFE_BUILTIN.has(name)) return true
-  if (mode === 'plan' && PLAN_EXTRA_BUILTIN.has(name)) return true
-  return false
+  return ASK_SAFE_BUILTIN.has(name)
 }
 
 /**
  * MCP tools are Agent-mode only. Server-reported `readOnlyHint` is untrusted
- * as a security gate (see classify.ts) — never use it to allow Ask/Plan.
+ * as a security gate (see classify.ts) — never use it to allow Ask.
  */
 export function isMcpAllowedInMode(mode: AgentInteractionMode, _fullName: string): boolean {
   return mode === 'agent'
@@ -223,7 +194,8 @@ export function filterToolDefsForCodeIndex<T extends { name: string }>(
 export type ModeDenyResult = { ok: true } | { ok: false; error: string }
 
 /**
- * Hard gate before executing a tool. Plan edit/str_replace must target plan artifacts.
+ * Hard gate before executing a tool. Agent admits everything in its catalog;
+ * Ask admits only ASK_SAFE_BUILTIN, and never MCP.
  */
 export function assertToolAllowedInMode(
   mode: AgentInteractionMode,
@@ -239,7 +211,7 @@ export function assertToolAllowedInMode(
     return {
       ok: false,
       error:
-        'Automatic mode switching is off. Only the user can change Ask / Plan / Agent (composer or slash).'
+        'Automatic mode switching is off. Only the user can change Ask / Agent (composer or slash).'
     }
   }
 
@@ -264,7 +236,7 @@ export function assertToolAllowedInMode(
     if (!isMcpAllowedInMode(mode, name)) {
       return {
         ok: false,
-        error: `${mode === 'ask' ? 'Ask' : 'Plan'} mode does not allow MCP tools. "${name}" requires Agent mode. ${switchToAgentHint}`
+        error: `Ask mode does not allow MCP tools. "${name}" requires Agent mode. ${switchToAgentHint}`
       }
     }
     return { ok: true }
@@ -273,40 +245,21 @@ export function assertToolAllowedInMode(
   if (!isBuiltinAllowedInMode(mode, name, opts)) {
     return {
       ok: false,
-      error: `${mode === 'ask' ? 'Ask' : 'Plan'} mode does not allow tool "${name}". ${switchToAgentHint}`
+      error: `Ask mode does not allow tool "${name}". ${switchToAgentHint}`
     }
   }
 
   if (name === 'lsp' && lspActionFromArgs(args) === 'rename') {
     return {
       ok: false,
-      error: `${mode === 'ask' ? 'Ask' : 'Plan'} mode does not allow lsp rename. ${switchToAgentHint}`
+      error: `Ask mode does not allow lsp rename. ${switchToAgentHint}`
     }
   }
 
   if (name === 'browser_tabs' && args.action === 'close') {
     return {
       ok: false,
-      error: `${mode === 'ask' ? 'Ask' : 'Plan'} mode does not allow browser_tabs close. ${switchToAgentHint}`
-    }
-  }
-
-  if (mode === 'plan' && name === 'update_goal' && args.status === 'complete') {
-    return {
-      ok: false,
-      error: `Plan mode does not allow update_goal "complete". ${switchToAgentHint}`
-    }
-  }
-
-  if (mode === 'plan' && (name === 'edit' || name === 'str_replace')) {
-    const path = typeof args.path === 'string' ? args.path : ''
-    if (!isPlanArtifactPath(path)) {
-      return {
-        ok: false,
-        error: auto
-          ? 'Plan mode may only edit plan.md or contract.md (run plan artifacts). Call `switch_mode` with mode "agent" to edit product code.'
-          : 'Plan mode may only edit plan.md or contract.md (run plan artifacts). Switch to Agent mode to edit product code.'
-      }
+      error: `Ask mode does not allow browser_tabs close. ${switchToAgentHint}`
     }
   }
 

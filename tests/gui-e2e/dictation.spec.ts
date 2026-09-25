@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
+import { requireActivePath } from './helpers/seedWorkspace'
 
 const FIXTURE_TRANSCRIPT = 'E2E dictation transcript.'
 
@@ -54,7 +55,7 @@ test.beforeAll(async () => {
   expect(addRes.ok).toBe(true)
   if (!addRes.ok) throw new Error(addRes.error)
 
-  workspacePath = addRes.data.activePath
+  workspacePath = requireActivePath(addRes.data.activePath)
   secretWrite = await launched.window.evaluate(async () => {
     await window.vyotiq.setSettings({ toolApprovalOnboardingDone: true })
     const res = await window.vyotiq.setSecret('openai', 'sk-e2e-dictation-fixture')
@@ -80,12 +81,12 @@ test.afterAll(async () => {
 test('Mic stop inserts fixture transcript into Message', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) {
     await expand.click()
   }
 
-  const composer = window.getByRole('combobox', { name: 'Message' })
+  const composer = window.getByRole('combobox', { name: 'Brief' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
 
   // The dictate preflight requires the provider secret. On headless Linux

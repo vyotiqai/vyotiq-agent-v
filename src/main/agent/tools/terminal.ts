@@ -6,6 +6,7 @@ import type { TerminalShell } from '../../../shared/ipc'
 import { parseTerminalOutput } from '../../../shared/utils/terminalFormat'
 import { logger } from '../../../shared/logger'
 import { lowerProcessPriority } from '../processPriority'
+import { TERMINAL_DEFAULT_TIMEOUT_MS } from '../../../shared/agentTimeouts'
 
 const KILL_TREE_WAIT_MS = 5_000
 
@@ -64,7 +65,7 @@ export const TERMINAL_MAX_OUTPUT = 64 * 1024
  */
 export const TERMINAL_MAX_TIMEOUT_MS = 1_800_000
 /** Default wait for a new command when timeoutMs / block_until_ms are omitted. */
-export const TERMINAL_DEFAULT_TIMEOUT_MS = 300_000
+export { TERMINAL_DEFAULT_TIMEOUT_MS } from '../../../shared/agentTimeouts'
 const SESSION_POLL_DEFAULT_MS = 30_000
 
 /** New-command wait: timeoutMs wins over block_until_ms unless background-now (0). */
@@ -238,6 +239,16 @@ export const POWERSHELL_EXIT_EPILOGUE =
   `if ($LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE } ` +
   `elseif (@($Error | Where-Object { $_.FullyQualifiedErrorId -notlike 'NativeCommandError*' }).Count -gt 0) { exit 1 } ` +
   `else { exit 0 }`
+
+/**
+ * Windows child_process delivers exit codes as unsigned 32-bit: a process
+ * terminated with status -1 (0xFFFFFFFF) arrives as 4294967295 (observed live
+ * 2026-09-22, `exit 4294967295 — status done`). Normalize to signed before
+ * reporting to the model.
+ */
+export function normalizeChildExitCode(code: number | null): number | null {
+  return code == null ? null : code | 0
+}
 
 function powershellInvocation(command: string): { bin: string; args: string[] } {
   const bin = commandOnPath('pwsh') ? 'pwsh' : 'powershell'
@@ -1225,14 +1236,15 @@ export async function toolTerminal(
     })
 
     child.on('close', (code) => {
+      const exitCode = normalizeChildExitCode(code)
       const findstrNoMatch =
-        resolved === 'cmd' && isFindstrNoMatch(command, code, stdout, stderr)
+        resolved === 'cmd' && isFindstrNoMatch(command, exitCode, stdout, stderr)
       const out = formatTerminalOutput(
         cwd,
         command,
         stdout,
         stderr,
-        code,
+        exitCode,
         [
           findstrNoMatch ? 'findstr: no matches' : '',
           outputCapped

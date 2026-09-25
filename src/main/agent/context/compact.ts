@@ -7,7 +7,12 @@ import {
   isRetriableProviderMessage,
   RetriableStreamError
 } from '../providers/fetchWithRetry'
-import type { LlmProvider, ProviderChatRequest, ToolDefinition } from '../providers/types'
+import type {
+  LlmProvider,
+  ProviderChatRequest,
+  TokenUsage,
+  ToolDefinition
+} from '../providers/types'
 import {
   compactionSystemPrompt,
   parseCompactionJson,
@@ -24,6 +29,7 @@ import {
 } from './estimate'
 import { exceedsHardLimit } from '../../../shared/domain/contextBudget'
 import { stripLeadingOrphanToolMessages } from './foldWatermark'
+import { stripPinnedFactsAppendix } from './pinFoldFacts'
 import { KEEP_RECENT_TURNS, type CompactionRecord } from './types'
 
 /**
@@ -112,12 +118,6 @@ export function ensureSubstantialFold(
 const COMPACTION_NEXT_STEPS_GUIDANCE =
   'In Next Steps and Open Bugs/Blockers, name concrete files, todos, or commands the next turn should reopen — do not assume they remain in the verbatim window.'
 
-/** Legacy parent-step shape retained at the caller boundary; its agent instructions are not inherited. */
-export type CompactForkPrefix = {
-  systemStable: string
-  toolDefs: ToolDefinition[]
-}
-
 const FOCUS_MAX_CHARS = 2000
 const VERIFY_RETRY_FOCUS_PREFIX = 'Previous summary failed verification.'
 
@@ -164,22 +164,56 @@ function buildCompactForkUserMessage(priorSummary?: string): string {
   return body
 }
 
+/** One billed compaction provider stream. */
+export type CompactionUsageSample = {
+  site: 'compaction_fork' | 'compaction_structured' | 'compaction_freeform'
+  usage: TokenUsage
+  /** 1-based; >1 is a retry that re-sent the whole prompt and was billed again. */
+  attempt: number
+  generationMs: number
+}
+
+/**
+ * Receives every billed compaction stream as it completes.
+ *
+ * A sink rather than a return value on purpose: `compactMessages` has several
+ * abort and failure paths that return `null` or `''`, and a compaction that was
+ * billed and then abandoned is exactly the spend worth seeing. A return channel
+ * would discard it.
+ */
+export type CompactionUsageSink = (sample: CompactionUsageSample) => void
+
 async function collectCompactionStreamText(input: {
   provider: LlmProvider
   req: ProviderChatRequest
   logCode: 'COMPACTION_STREAM' | 'COMPACTION_FORK'
+  site: CompactionUsageSample['site']
+  onAuxUsage?: CompactionUsageSink
 }): Promise<string> {
   let summary = ''
+  let attempt = 0
+  let startedAt = Date.now()
   try {
     await runWithStreamRetry({
       signal: input.req.signal,
       circuitKey: circuitKeyProvider(input.provider.id, input.req.baseUrl),
-      onAttemptStart: () => {
+      onAttemptStart: (n) => {
         summary = ''
+        // Each retry re-sends the whole prompt and is billed again.
+        attempt = n
+        startedAt = Date.now()
       },
       runAttempt: async () => {
         for await (const chunk of input.provider.streamChat(input.req)) {
           if (input.req.signal.aborted) return 'terminal'
+          if (chunk.type === 'done' && chunk.usage) {
+            input.onAuxUsage?.({
+              site: input.site,
+              usage: chunk.usage,
+              attempt: Math.max(1, attempt),
+              generationMs: Math.max(0, Date.now() - startedAt)
+            })
+          }
           if (chunk.type === 'text' && chunk.text) summary += chunk.text
           if (chunk.type === 'error') {
             const message = chunk.error ?? 'Provider error'
@@ -223,10 +257,13 @@ async function streamFreeformSummary(input: {
   signal: AbortSignal
   historyText: string
   focus?: string
+  onAuxUsage?: CompactionUsageSink
 }): Promise<string> {
   return collectCompactionStreamText({
     provider: input.provider,
     logCode: 'COMPACTION_STREAM',
+    site: 'compaction_freeform',
+    ...(input.onAuxUsage ? { onAuxUsage: input.onAuxUsage } : {}),
     req: {
       model: input.model,
       apiKey: input.apiKey,
@@ -252,10 +289,13 @@ async function streamMessageSummary(input: {
   priorSummary?: string
   promptCacheKey?: string
   modelInfo?: ModelInfo
+  onAuxUsage?: CompactionUsageSink
 }): Promise<string> {
   return collectCompactionStreamText({
     provider: input.provider,
     logCode: 'COMPACTION_FORK',
+    site: 'compaction_fork',
+    ...(input.onAuxUsage ? { onAuxUsage: input.onAuxUsage } : {}),
     req: {
       model: input.model,
       apiKey: input.apiKey,
@@ -316,6 +356,7 @@ async function summarizeHistoryChunk(input: {
   historyText: string
   supportsStructuredOutput?: boolean
   focus?: string
+  onAuxUsage?: CompactionUsageSink
 }): Promise<string> {
   let summary = ''
   const useStructured = input.supportsStructuredOutput !== false
@@ -346,7 +387,9 @@ async function summarizeHistoryChunk(input: {
           const parsed = parseCompactionJson(raw)
           if (parsed.structured) return { ok: true, data: parsed.structured }
           return { ok: false, error: 'invalid compaction schema' }
-        }
+        },
+        (usage, attempt, generationMs) =>
+          input.onAuxUsage?.({ site: 'compaction_structured', usage, attempt, generationMs })
       )
       // Abort leaves partial rawText — never treat it as a summary.
       if (
@@ -394,7 +437,8 @@ async function summarizeHistoryChunk(input: {
       baseUrl: input.baseUrl,
       signal: input.signal,
       historyText: input.historyText,
-      focus: input.focus
+      focus: input.focus,
+      ...(input.onAuxUsage ? { onAuxUsage: input.onAuxUsage } : {})
     })
   }
   return summary.trim()
@@ -414,12 +458,19 @@ export async function compactMessages(input: {
   /** Optional operator focus directive for what to preserve. */
   focus?: string
   /**
-   * Parent-step message shape signal. Agent harness and tools are deliberately
-   * excluded; compaction always runs under its dedicated summarizer instructions.
+   * Allow the unchunked message-shape fork. Compaction always runs under its own
+   * summarizer instructions, so the parent step's harness and tools are never
+   * inherited — this is the whole signal the fork path ever needed.
    */
-  forkPrefix?: CompactForkPrefix
+  allowMessageFork?: boolean
   promptCacheKey?: string
   modelInfo?: ModelInfo
+  /**
+   * Fires per billed provider stream. Compaction is genuinely multi-call —
+   * one per history chunk, plus a freeform fallback, plus retries inside each —
+   * so this reports every stream rather than one row per fold.
+   */
+  onAuxUsage?: CompactionUsageSink
 }): Promise<CompactionRecord | null> {
   if (input.signal.aborted) return null
 
@@ -429,7 +480,11 @@ export async function compactMessages(input: {
   )
   const charCap = tokenCap * 4
 
-  const prior = capRollingSummary(input.priorSummary?.trim() ?? '', charCap)
+  // Narrative only. The prior record's pinned-facts appendix is re-derived from
+  // the structured `pinnedFacts` sidecar after this fold, so carrying it here
+  // would spend the rolling char budget — which keeps the *tail* — on a fact
+  // list that is about to be regenerated, evicting prose to do it.
+  const prior = capRollingSummary(stripPinnedFactsAppendix(input.priorSummary ?? ''), charCap)
 
   const mergeForkSummary = async (summary: string): Promise<CompactionRecord> => {
     const merged = prior
@@ -442,7 +497,7 @@ export async function compactMessages(input: {
     }
   }
 
-  if (input.forkPrefix && input.messages.length > 0) {
+  if (input.allowMessageFork && input.messages.length > 0) {
     // An over-window fork request 400s at the provider hard limit and kills the
     // run (observed: e7d7d807 — request resolved to 1,068,578 tokens on a
     // 1,048,576-token raw window). Skip the unchunked message-shape fork when the
@@ -463,7 +518,8 @@ export async function compactMessages(input: {
         focus: input.focus,
         priorSummary: prior || undefined,
         promptCacheKey: input.promptCacheKey,
-        modelInfo: input.modelInfo
+        modelInfo: input.modelInfo,
+        ...(input.onAuxUsage ? { onAuxUsage: input.onAuxUsage } : {})
       })
       if (input.signal.aborted) return null
       if (forked) return mergeForkSummary(forked)
@@ -509,7 +565,8 @@ export async function compactMessages(input: {
       signal: input.signal,
       historyText,
       supportsStructuredOutput: input.supportsStructuredOutput,
-      focus: input.focus
+      focus: input.focus,
+      ...(input.onAuxUsage ? { onAuxUsage: input.onAuxUsage } : {})
     })
     if (input.signal.aborted) return null
     if (!summary) continue

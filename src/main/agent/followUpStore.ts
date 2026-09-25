@@ -4,7 +4,8 @@ import { z } from 'zod'
 import { logger } from '../../shared/logger'
 import { atomicWriteJson } from '@main/storage/atomicWrite'
 import { ChatMessageSchema } from '@shared/ipc/schemas/agent'
-import { followUpPreview, peekFollowUps, seedFollowUps, type FollowUpEntry } from './runRegistry'
+import { followUpPreview, peekFollowUps, registerRunCancelHooks, seedFollowUps, type FollowUpEntry } from './runRegistry'
+import { resolveRunDir } from '../storage/paths'
 
 const PersistedFollowUpSchema = z.object({
   id: z.string().min(1),
@@ -130,3 +131,6 @@ export function loadFollowUpPreviews(runDir: string): PersistedFollowUpPreview[]
     ...(entry.ready ? { ready: true } : {})
   }))
 }
+
+// A cancel drops the persisted queue too, or a resume would bring it back (runRegistry calls it).
+registerRunCancelHooks({ clearFollowUpsOnDisk: (workspacePath, runId) => clearFollowUps(resolveRunDir(workspacePath, runId)) })

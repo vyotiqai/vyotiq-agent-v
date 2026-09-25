@@ -6,7 +6,6 @@
     "src/shared/**/*",
     "tests/main/**/*",
     "tests/shared/**/*",
-    "tests/helpers/**/*",
-    "tests/gui-e2e/**/*"
+    "tests/helpers/**/*"
   ]
 }

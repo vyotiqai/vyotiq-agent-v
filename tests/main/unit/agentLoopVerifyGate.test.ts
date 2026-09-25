@@ -56,7 +56,6 @@ const { streamChat, executeTool, assembleContext } = vi.hoisted(() => ({
     estimatedTokens: 100,
     layers: { system: 10, history: 50, tools: 20, buffer: 20 },
     overflow: false,
-    anthropicNative: undefined,
     compaction: null
   }))
 }))
@@ -91,6 +90,7 @@ vi.mock('@main/agent/tools', () => ({
 
 import { getWriteCheckpoint } from '@main/agent/checkpoints'
 import { runAgent } from '@main/agent/loop'
+import { createRun } from '@main/agent/state'
 import { resetActiveRunsForTests } from '@main/agent/runRegistry'
 
 const DIRTY_DIAGNOSTICS =
@@ -289,25 +289,27 @@ describe('runAgent verification gate (observe-only)', () => {
     expect(verdict?.paths ?? []).toEqual([])
   })
 
-  it('does not report a would-fire verdict for a plan-mode run', async () => {
-    // Plan mode can only touch plan.md / contract.md and the armed gate is
-    // guarded off there. Recomputing the verdict at teardown instead of
-    // reusing the guarded one would report a phantom fire and inflate the
-    // rate this phase exists to measure.
+  it('does not report a would-fire verdict for an inline-instance run', async () => {
+    // Was a plan-mode run: Plan is merged into Agent, so the guarded-off cases
+    // left are Ask (which cannot edit at all, making the check vacuous) and an
+    // inline instance, which CAN edit. The invariant is unchanged —
+    // recomputing the verdict at teardown instead of reusing the guarded one
+    // would report a phantom fire and inflate the rate this phase measures.
     mockEditThen()
-    const runId = 'gate-plan-mode'
+    const runId = 'gate-inline-instance'
+    createRun(workspace, runId, 'edit a change', { mode: 'agent', inlineInstance: true })
     for await (const ev of runAgent({
       runId,
-      messages: [{ role: 'user', content: 'plan a change' }],
+      messages: [{ role: 'user', content: 'edit a change' }],
       workspacePath: workspace,
-      mode: 'plan'
+      mode: 'agent'
     })) {
       void ev
     }
 
     const receipt = readReceipt(workspace, runId)
     // Non-vacuous: the edit really landed and was never checked, so an
-    // unguarded verdict WOULD have reported a fire here. Only the mode guard
+    // unguarded verdict WOULD have reported a fire here. Only the guard
     // suppresses it.
     expect(receipt.toolStats.byName.edit).toMatchObject({ ok: 1 })
     expect(receipt.verificationGate).toEqual({ wouldFire: false })

@@ -27,7 +27,6 @@ const chatSettings: EffectiveChatSettings = {
 }
 
 beforeEach(() => {
-  // @ts-expect-error test bridge
   window.vyotiq = {
     listModels: vi.fn(async () => ({
       ok: true as const,
@@ -135,6 +134,52 @@ describe('Composer', () => {
     })
   })
 
+  it('leaves focus in a dialog the send opened', async () => {
+    // The first send without an approval choice opens a question and reports
+    // the send as not done: the composer must not take focus back from it.
+    let dialogButton: HTMLButtonElement | null = null
+    const onSend = vi.fn(async () => {
+      const dialog = document.createElement('div')
+      dialog.setAttribute('role', 'dialog')
+      dialog.setAttribute('aria-modal', 'true')
+      dialogButton = document.createElement('button')
+      dialogButton.textContent = 'Edits and commands'
+      dialog.appendChild(dialogButton)
+      document.body.appendChild(dialog)
+      dialogButton.focus()
+      return false
+    })
+    render(
+      <Composer
+        provider="ollama"
+        model="qwen2.5"
+        running={false}
+        secrets={testSecrets}
+        chatSettings={chatSettings}
+        onChatSettingsChange={vi.fn()}
+        onProviderModel={vi.fn()}
+        onSend={onSend}
+        onStop={vi.fn()}
+      />
+    )
+
+    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    ta.focus()
+    ta.textContent = 'first task'
+    fireEvent.input(ta)
+    fireEvent.keyDown(ta, { key: 'Enter' })
+
+    await waitFor(() => expect(onSend).toHaveBeenCalled())
+    await waitFor(() => expect(ta.textContent).toBe('first task'))
+    // Past the composer's two-frame refocus.
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(document.activeElement).toBe(dialogButton)
+    ;(dialogButton as HTMLButtonElement | null)?.closest('[role="dialog"]')?.remove()
+  })
+
   it('normalizes whitespace-only drafts so the composer stays one line', async () => {
     render(
       <Composer
@@ -198,7 +243,6 @@ describe('Composer', () => {
   })
 
   it('does not send partial text when a referenced mention cannot be resolved', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.workspaceReadText = vi.fn(async () => ({
       ok: false as const,
       error: 'Referenced file no longer exists'
@@ -357,7 +401,6 @@ describe('Composer', () => {
       ok: true as const,
       data: { name: 'spec.md', mime: 'text/markdown', text: 'rules here', truncated: false }
     }))
-    // @ts-expect-error test bridge
     window.vyotiq.extractAttachment = extractAttachment
     const onSend = vi.fn()
     render(
@@ -396,7 +439,6 @@ describe('Composer', () => {
   })
 
   it('surfaces the reason a document could not be read', async () => {
-    // @ts-expect-error test bridge
     window.vyotiq.extractAttachment = vi.fn(async () => ({
       ok: false as const,
       error: 'scan.pdf has no extractable text (it may be a scan)'
@@ -448,9 +490,8 @@ describe('Composer', () => {
     expect(screen.queryByRole('button', { name: /^Send$/i })).toBeNull()
   })
 
-  it('keeps mode, teammate, and model controls enabled while a run is in progress', async () => {
+  it('keeps mode and model controls enabled while a run is in progress', async () => {
     const onAgentModeChange = vi.fn()
-    const onAgentProfileChange = vi.fn()
     const onProviderModel = vi.fn()
     render(
       <Composer
@@ -463,34 +504,25 @@ describe('Composer', () => {
         onChatSettingsChange={vi.fn()}
         onProviderModel={onProviderModel}
         onAgentModeChange={onAgentModeChange}
-        onAgentProfileChange={onAgentProfileChange}
         onSend={vi.fn()}
         onStop={vi.fn()}
       />
     )
 
     const mode = screen.getByRole('button', { name: /Agent mode/i })
-    const teammate = screen.getByRole('button', { name: 'Teammate' })
     const modelPicker = screen.getByRole('button', { name: 'Select model' })
     expect(mode).toHaveProperty('disabled', false)
-    expect(teammate).toHaveProperty('disabled', false)
     expect(modelPicker).toHaveProperty('disabled', false)
 
     fireEvent.click(mode)
     expect(onAgentModeChange).toHaveBeenCalledWith('ask')
 
-    fireEvent.click(teammate)
-    await waitFor(() => {
-      expect(screen.getByRole('listbox', { name: 'Teammate' })).toBeTruthy()
-    })
-    fireEvent.click(screen.getByRole('option', { name: /No teammate \(default agent\)/i }))
-    expect(onAgentProfileChange).toHaveBeenCalledWith(null)
-
     fireEvent.click(modelPicker)
     await waitFor(() => {
       expect(screen.getByRole('listbox', { name: 'Select model' })).toBeTruthy()
     })
-    fireEvent.click(screen.getByRole('option', { name: /llama3.2 Tools/i }))
+    // The model rows load after the list opens; a busy suite catches the gap.
+    fireEvent.click(await screen.findByRole('option', { name: /llama3.2 Tools/i }))
     expect(onProviderModel).toHaveBeenCalledWith('ollama', 'llama3.2')
   })
 

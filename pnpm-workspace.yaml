@@ -41,6 +41,14 @@ overrides:
   # GHSA-w27v-7q3p-w38r (high): SVGO removeScripts bypass; astro pulls
   # svgo ^4.0.2, patched in 4.1.0 (2026-08-24, >24h old).
   svgo: '>=4.1.0'
+  # GHSA-2wm5-q62r-hmrv (moderate, CWE-1333): slow rejection of oversized
+  # malformed color strings in colord <2.9.4. Dev-only and build-time - reached
+  # via the icon toolkit (@lobehub/icons > @lobehub/ui > leva), which parses our
+  # own brand colours, never untrusted input. leva declares ^2.9.2, so the
+  # resolved 2.10.0 stays INSIDE its range (unlike the @xmldom/xmldom case
+  # above) and colord's export map is unchanged from 2.9.3. Patched in 2.9.4
+  # (2026-08-19); every 2.9.4+ release is ~1 month old, past minimumReleaseAge.
+  colord: '>=2.9.4'
 
 # Workspace packages: root Electron app + Astro website.
 packages:

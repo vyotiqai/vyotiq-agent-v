@@ -68,6 +68,8 @@ describe('Composer layout', () => {
     const tools = row?.querySelector('[data-composer-toolbar-tools]')
     const toolbar = row?.querySelector('[data-composer-toolbar]')
     expect(tools).toBeTruthy()
+    // Pulled out by the attach glyph's inset so the `+` sits on the text edge.
+    expect(tools?.classList.contains('-ml-1.5')).toBe(true)
     expect(screen.getByRole('button', { name: /^Attach files$/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Select model$/i })).toBeTruthy()
     // Field precedes the control row in the form.

@@ -50,11 +50,22 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
     ? (JSON.parse(readFileSync(settingsPath, 'utf8')) as Record<string, unknown>)
     : {}
   if (seeded.navigationMode === undefined) seeded.navigationMode = 'sidebar'
+  // Likewise a returning user: a fresh profile with no approval choice on record
+  // opens on the first-run Set up page. setup.spec.ts drives that page and
+  // seeds the choice as not made.
+  if (seeded.toolApprovalOnboardingDone === undefined) seeded.toolApprovalOnboardingDone = true
   writeFileSync(settingsPath, JSON.stringify(seeded), 'utf8')
   mkdirSync(videoDir, { recursive: true })
 
   const electronExecutable = require('electron') as string
-  const env = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
+  // Spreading ProcessEnv does not carry its index signature through, so the
+  // inferred type was the one literal key and every assignment below was an
+  // error. Playwright's `env` takes string values only, so drop the unset ones
+  // rather than widening to `string | undefined` and failing at the call.
+  const env: Record<string, string> = Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] != null)
+  )
+  env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true'
   if (options.e2eFixture ?? process.env.VYOTIQ_E2E_FIXTURE === '1') {
     env.VYOTIQ_E2E_FIXTURE = '1'
     if (options.fixtureFile) {

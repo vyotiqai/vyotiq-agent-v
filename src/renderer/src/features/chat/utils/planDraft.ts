@@ -6,7 +6,7 @@ export {
 } from '@shared/planQuality'
 
 /**
- * Minimal legacy stub shape. Real Plan-mode stubs (`DEFAULT_PLAN_STUB`)
+ * Minimal legacy stub shape. Real seeded stubs (`DEFAULT_PLAN_STUB`)
  * are the Goal / Steps / Done when outline — readiness needs real body text, not the empty stub.
  */
 export const PLAN_STUB = [

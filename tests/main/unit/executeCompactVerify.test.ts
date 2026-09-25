@@ -6,8 +6,7 @@ import type { ChatMessage } from '@shared/ipc'
 import type {
   LlmProvider,
   ProviderChatRequest,
-  StreamChunk,
-  ToolDefinition
+  StreamChunk
 } from '@main/agent/providers/types'
 
 const userData = join(tmpdir(), `vyotiq-compact-verify-${process.pid}-${Date.now()}`)
@@ -27,6 +26,7 @@ import { assembleContext } from '@main/agent/context/assemble'
 import { applyFoldedMessagesWatermark } from '@main/agent/context/foldWatermark'
 import { loopHintAfterCompaction } from '@main/agent/loopPolicy'
 import { createRun, loadCompaction, readContract } from '@main/agent/state'
+import { readUsageLedger } from '@main/agent/usageLedger'
 import {
   CompactionVerifyFailedError,
   executeCompactEvents,
@@ -279,6 +279,55 @@ describe('executeCompactEvents extractive gate', () => {
     expect(String((result as { summary: string }).summary)).toContain('Use JWT')
   })
 
+  it('emits aux_usage and ledgers compaction spend that was previously invisible', async () => {
+    // Compaction is a real LLM call that cost real money and reported nothing:
+    // no event, no ledger entry. This drives the whole chain — provider `done`
+    // chunk -> compact.ts sink -> plan.auxUsage -> drainAuxUsageEvents.
+    const runId = 'run-aux-usage'
+    const dir = createRun(workspace, runId, 'Rewrite auth to JWT')
+    const plan: CompactPlan = {
+      ...makePlan(
+        dir,
+        runId,
+        mockProviderPerCall([
+          () => [
+            { type: 'text', text: AMNESIA },
+            { type: 'done', usage: { inputTokens: 24_000, outputTokens: 700 } }
+          ]
+        ])
+      ),
+      auxUsage: []
+    }
+
+    const { events } = await drain(plan)
+    const aux = events.filter((e) => e.type === 'aux_usage') as Array<
+      Record<string, unknown>
+    >
+    expect(aux).toHaveLength(1)
+    expect(aux[0]).toMatchObject({
+      type: 'aux_usage',
+      site: 'compaction_freeform',
+      provider: 'openai',
+      model: 'gpt-4o',
+      inputTokens: 24_000,
+      outputTokens: 700,
+      attempt: 1
+    })
+    // No `step`, so it can never key the streamBatch (type, step) coalescer.
+    expect('step' in aux[0]!).toBe(false)
+
+    // And it reached the per-day ledger under its own call site.
+    const ledger = readUsageLedger(dir)
+    const day = Object.values(ledger?.days ?? {})[0]
+    expect(day?.aux?.compaction_freeform).toMatchObject({
+      calls: 1,
+      inputTokens: 24_000,
+      outputTokens: 700
+    })
+    // Turn accounting is untouched: aux never flows through lastTotals.
+    expect(ledger?.lastTotals.billedInputTokens).toBe(0)
+  })
+
   it('pins omitted extractive facts so an amnesic summary verifies without retry', async () => {
     const runId = 'run-ok'
     const dir = createRun(workspace, runId, 'Rewrite auth to JWT')
@@ -456,9 +505,7 @@ Rewrite auth to JWT
       toolsJsonEstimate: 50,
       priorCompaction: saved,
       loopHint: hint,
-      providerId: 'openai',
-      provider: plan.provider,
-      signal: new AbortController().signal
+      providerId: 'openai'
     })
     expect(assembled.system).toContain('<prior_session>')
     expect(assembled.system).toContain('Use JWT')
@@ -478,16 +525,12 @@ Rewrite auth to JWT
   it('message-shape summary and verify retry both exclude parent harness and tools', async () => {
     const runId = 'run-fork'
     const dir = createRun(workspace, runId, 'Rewrite auth to JWT')
-    const parentTools: ToolDefinition[] = [
-      { name: 'read', description: 'Read', parameters: { type: 'object', properties: {} } },
-      { name: 'edit', description: 'Edit', parameters: { type: 'object', properties: {} } }
-    ]
     const parentStable = 'PARENT_STABLE_FORK_UNIQUE'
     const { provider, requests } = capturingProvider([
       () => [{ type: 'text', text: AMNESIA }]
     ])
     const plan = makePlan(dir, runId, provider)
-    plan.forkPrefix = { systemStable: parentStable, toolDefs: parentTools }
+    plan.allowMessageFork = true
 
     const { result } = await drain(plan)
     expect(result).toMatchObject({ verified: true })

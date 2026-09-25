@@ -1,4 +1,8 @@
 import { z } from 'zod'
+
+/** Sub-agents a task may run at once: the default, and the most the setting allows. */
+export const DEFAULT_MAX_PARALLEL_INSTANCES = 16
+export const MAX_PARALLEL_INSTANCES_LIMIT = 16
 import {
   DEFAULT_FONT_SCALE,
   DEFAULT_SKIN_ID,
@@ -155,9 +159,27 @@ export type ToolApprovalMode = z.infer<typeof ToolApprovalModeSchema>
 export const TerminalShellSchema = z.enum(['auto', 'cmd', 'powershell', 'bash'])
 export type TerminalShell = z.infer<typeof TerminalShellSchema>
 
-/** Composer interaction mode: Ask (read-only), Plan (plan artifacts), Agent (full). */
-export const AgentInteractionModeSchema = z.enum(['ask', 'plan', 'agent'])
-export type AgentInteractionMode = z.infer<typeof AgentInteractionModeSchema>
+/** Composer interaction mode: Ask (read-only) or Agent (full). */
+export const AGENT_INTERACTION_MODES = ['ask', 'agent'] as const
+
+/**
+ * Plan was merged into Agent — every capability Plan gated (plan artifacts,
+ * `create_plan`, todos, diagnostics) is now reachable from Agent, so the mode
+ * that only restricted them has nothing left to do.
+ *
+ * `'plan'` is still ACCEPTED here and folded to `'agent'`, because the value is
+ * durable: it sits in `workspaces.json` (`uiStateByPath.*.agentMode`), in every
+ * `status.json` a Plan run wrote, and in `mode_changed` rows of `events.jsonl`.
+ * A bare `z.enum(['ask','agent'])` would reject those: `readStatus` treats a
+ * schema failure as a CORRUPT file and returns null, so a finished Plan run
+ * would lose its status entirely. Folding migrates them on next read/write
+ * instead. Do not narrow this to a plain enum while old stores can exist.
+ */
+export const AgentInteractionModeSchema = z.preprocess(
+  (value) => (value === 'plan' ? 'agent' : value),
+  z.enum(AGENT_INTERACTION_MODES)
+)
+export type AgentInteractionMode = (typeof AGENT_INTERACTION_MODES)[number]
 
 /** Default answer length for conversational replies. */
 export const ResponseVerbositySchema = z.enum(['concise', 'balanced', 'detailed'])
@@ -231,12 +253,19 @@ export const DEFAULT_TOOL_APPROVAL: ToolApprovalSettings = {
 }
 
 export const CodeIndexSettingsSchema = z.object({
-  enabled: z.boolean().default(true)
+  enabled: z.boolean().default(true),
+  /**
+   * Workspaces whose indexing is paused (Settings → Indexing → Pause): no sync
+   * or embedding starts for them until resumed. What was indexed stays; a
+   * resume carries on from there, since a sync skips unchanged files.
+   */
+  pausedPaths: z.array(z.string().min(1)).default([])
 })
 export type CodeIndexSettings = z.infer<typeof CodeIndexSettingsSchema>
 
 export const DEFAULT_CODE_INDEX_SETTINGS: CodeIndexSettings = {
-  enabled: true
+  enabled: true,
+  pausedPaths: []
 }
 
 export const CodeIndexModelPhaseSchema = z.enum(['idle', 'ready', 'syncing', 'error'])
@@ -260,7 +289,12 @@ export const CodeIndexRuntimeStatusSchema = z.object({
   message: z.string().nullable(),
   error: z.string().nullable(),
   /** Live file counters while phase === 'syncing'. */
-  indexProgress: CodeIndexSyncProgressSchema.nullable().default(null)
+  indexProgress: CodeIndexSyncProgressSchema.nullable().default(null),
+  /**
+   * The workspace this phase belongs to. One status serves every workspace,
+   * so without it a sync in one reads as building in all of them.
+   */
+  workspacePath: z.string().min(1).optional()
 })
 export type CodeIndexRuntimeStatus = z.infer<typeof CodeIndexRuntimeStatusSchema>
 
@@ -283,6 +317,9 @@ export const CodeIndexReindexRequestSchema = z.object({
   workspacePath: z.string().min(1).optional()
 })
 export type CodeIndexReindexRequest = z.infer<typeof CodeIndexReindexRequestSchema>
+
+export const CodeIndexPauseRequestSchema = z.object({ workspacePath: z.string().min(1) })
+export type CodeIndexPauseRequest = z.infer<typeof CodeIndexPauseRequestSchema>
 
 export const DictationEngineSchema = z.enum(['openai', 'openrouter', 'local'])
 export type DictationEngine = z.infer<typeof DictationEngineSchema>
@@ -554,6 +591,12 @@ export const SettingsSchema = z.object({
    */
   autoResumeInterruptedRuns: z.boolean().default(true),
   /**
+   * Sub-agents (inline instances) one task may run at the same time. A spawn
+   * past it is refused and the agent is told to await one first. The default
+   * is above what a task uses in practice, so it changes nothing until lowered.
+   */
+  maxParallelInstances: z.number().int().min(1).max(MAX_PARALLEL_INSTANCES_LIMIT).default(DEFAULT_MAX_PARALLEL_INSTANCES),
+  /**
    * Maximum simultaneously visible chat panes (split session view). 0 = Auto:
    * derived from the viewport (min 280px per pane, hard cap 6). 1–6 is a fixed
    * limit that may exceed what fits — the pane row scrolls horizontally.
@@ -572,8 +615,8 @@ export const SettingsSchema = z.object({
   /** Composer dictation engine + which local Whisper weights to use. */
   dictation: DictationSettingsSchema.default(DEFAULT_DICTATION_SETTINGS),
   /**
-   * Unattended runs: auto-approve gated tools (high-risk still gated) and relax
-   * offline wait_forever. Off by default.
+   * Unattended runs: auto-approve gated tools (high-risk still gated). Off by
+   * default.
    */
   autonomousMode: z.boolean().default(false),
   /**
@@ -589,18 +632,22 @@ export const SettingsSchema = z.object({
    * automatically — everything else waits for this ack.
    */
   storageSurfaceAcked: z.boolean().default(false),
-  /** Offline connectivity wait budget (autonomousMode gates wait_forever). */
+  /**
+   * Retired: offline waits are unlimited now (resolveOfflineWaitMs ignores
+   * this), so Settings no longer shows it. Kept so settings.json files that
+   * carry it still parse.
+   */
   offlineWaitMode: OfflineWaitModeSchema.default('default'),
   /**
    * User-global rules injected as `<user_rules>` on every agent step.
    * Disabled rules are omitted. Workspace rules override these on conflict.
    */
   userRules: z.array(UserRuleSchema).max(MAX_USER_RULES).default([]),
-  /** Optional assistant identity surfaced in the stable prompt zone. Empty = default. */
+  /** Optional assistant name surfaced in the stable prompt zone. Empty = unnamed. */
   agentPersona: z.string().max(1000).default(''),
-  /** Optional tone directive for replies. Empty = default spine tone. */
+  /** Optional tone directive for replies. Empty = no tone directive. */
   agentTone: z.string().max(2000).default(''),
-  /** Optional identity blurb for replies. Empty = built-in fallback (unless a custom persona suppresses it). */
+  /** Optional identity blurb for replies. Empty = no identity. */
   agentIdentity: z.string().max(1000).default(''),
   /** Preferred response language. Empty = follow the user's language. */
   responseLanguage: z.string().max(64).default(''),
@@ -649,6 +696,7 @@ export const DEFAULT_SETTINGS: Settings = {
   diagnosticsCommand: '',
   autoModeSwitch: true,
   autoResumeInterruptedRuns: true,
+  maxParallelInstances: DEFAULT_MAX_PARALLEL_INSTANCES,
   maxChatPanes: 0,
   autoCheckUpdates: true,
   googleMcpClientId: '',

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
+import { requireActivePath } from './helpers/seedWorkspace'
 
 let launched: LaunchedApp
 let workspacePath: string
@@ -21,7 +22,7 @@ test.beforeAll(async () => {
   expect(addRes.ok).toBe(true)
   if (!addRes.ok) throw new Error(addRes.error)
 
-  workspacePath = addRes.data.activePath
+  workspacePath = requireActivePath(addRes.data.activePath)
   await launched.window.evaluate(async () => {
     await window.vyotiq.setSettings({ toolApprovalOnboardingDone: true })
     localStorage.removeItem('vyotiq.chatPaneLayout')
@@ -45,12 +46,12 @@ test.afterAll(async () => {
 test('live edit stream: empty window then early lines before late', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) {
     await expand.click()
   }
 
-  const composer = window.getByRole('combobox', { name: 'Message' })
+  const composer = window.getByRole('combobox', { name: 'Brief' })
   await expect(composer).toBeVisible({ timeout: 20_000 })
   await composer.fill('Stream a live edit diff')
 
@@ -92,7 +93,8 @@ test('live edit stream: empty window then early lines before late', async () => 
     tick()
   })
 
-  await window.getByRole('button', { name: /^send$/i }).click()
+  // A new task starts from its brief on Ctrl+Enter — Enter is a new line there.
+  await window.getByRole('combobox', { name: 'Brief' }).press('Control+Enter')
 
   await expect
     .poll(
@@ -113,7 +115,8 @@ test('live edit stream: empty window then early lines before late', async () => 
   await expect(window.getByText('Live edit stream fixture done.')).toBeVisible({
     timeout: 20_000
   })
-  await expect(window.getByRole('button', { name: /edited: live-stream\.ts/i })).toBeVisible()
+  await expect(window.getByRole('button', { name: /edited: src\/live-stream\.ts/i })).toBeVisible()
   await expect(window.getByText('+5').first()).toBeVisible()
-  await expect(window.getByText('-1').first()).toBeVisible()
+  // The record's diff stat uses a true minus sign.
+  await expect(window.getByText('−1').first()).toBeVisible()
 })

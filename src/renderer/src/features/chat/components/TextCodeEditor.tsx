@@ -14,10 +14,11 @@ import {
   Compartment,
   EditorSelection,
   EditorState,
+  RangeSetBuilder,
   Transaction,
   type Extension
 } from '@codemirror/state'
-import { EditorView, highlightActiveLine, highlightActiveLineGutter, hoverTooltip, lineNumbers } from '@codemirror/view'
+import { Decoration, EditorView, highlightActiveLine, highlightActiveLineGutter, hoverTooltip, lineNumbers } from '@codemirror/view'
 import type { WorkspaceEditorSelection } from '@shared/ipc'
 import {
   mapLspDiagnosticsToCm,
@@ -161,6 +162,32 @@ function wrapStyleTheme(enabled: boolean): Extension {
   })
 }
 
+const AGENT_READ_LINE = Decoration.line({ class: 'cm-agentRead' })
+
+/** Tint lines `from`–`to` (1-based, clamped to the file): the lines the task's agent read. */
+function markedLinesExtension(range: { from: number; to: number } | null): Extension {
+  if (!range) return []
+  return [
+    EditorView.baseTheme({ '.cm-agentRead': { backgroundColor: 'var(--vy-accent-soft)' } }),
+    EditorView.decorations.of((view) => {
+      const doc = view.state.doc
+      const builder = new RangeSetBuilder<Decoration>()
+      const first = Math.max(1, Math.min(range.from, doc.lines))
+      const last = Math.max(first, Math.min(range.to, doc.lines))
+      // Only what is on screen: a read can span a whole long file.
+      for (const visible of view.visibleRanges) {
+        const a = Math.max(first, doc.lineAt(visible.from).number)
+        const b = Math.min(last, doc.lineAt(visible.to).number)
+        for (let n = a; n <= b; n++) {
+          const at = doc.line(n).from
+          builder.add(at, at, AGENT_READ_LINE)
+        }
+      }
+      return builder.finish()
+    })
+  ]
+}
+
 export function TextCodeEditor({
   path,
   value,
@@ -170,6 +197,7 @@ export function TextCodeEditor({
   wordWrap = false,
   scrollTop = 0,
   scrollToLine = null,
+  markedLines = null,
   lspDiagnostics = null,
   onLspHover,
   onScrollToLineHandled,
@@ -185,6 +213,8 @@ export function TextCodeEditor({
   wordWrap?: boolean
   scrollTop?: number
   scrollToLine?: number | null
+  /** Lines to tint — the range the task's agent read of this file. */
+  markedLines?: { from: number; to: number } | null
   lspDiagnostics?: readonly LspDiagnosticItem[] | null
   onLspHover?: (line: number, character: number) => Promise<string | null>
   onScrollToLineHandled?: () => void
@@ -210,6 +240,8 @@ export function TextCodeEditor({
   const wrapCompartmentRef = useRef(new Compartment())
   const wrapStyleCompartmentRef = useRef(new Compartment())
   const lintCompartmentRef = useRef(new Compartment())
+  const markCompartmentRef = useRef(new Compartment())
+  const initialMarkedLinesRef = useRef(markedLines)
   const hoverCompartmentRef = useRef(new Compartment())
   const completeCompartmentRef = useRef(new Compartment())
   const lspDiagnosticsRef = useRef(lspDiagnostics)
@@ -257,6 +289,7 @@ export function TextCodeEditor({
         wrapCompartmentRef.current.of(wordWrapRef.current ? EditorView.lineWrapping : []),
         wrapStyleCompartmentRef.current.of(wrapStyleTheme(wordWrapRef.current)),
         lintCompartmentRef.current.of([]),
+        markCompartmentRef.current.of(markedLinesExtension(initialMarkedLinesRef.current)),
         hoverCompartmentRef.current.of([]),
         completeCompartmentRef.current.of([]),
         EditorView.theme({
@@ -410,6 +443,18 @@ export function TextCodeEditor({
       ]
     })
   }, [wordWrap])
+
+  const markFrom = markedLines?.from ?? null
+  const markTo = markedLines?.to ?? null
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({
+      effects: markCompartmentRef.current.reconfigure(
+        markFrom != null && markTo != null ? markedLinesExtension({ from: markFrom, to: markTo }) : []
+      )
+    })
+  }, [markFrom, markTo])
 
   useEffect(() => {
     const view = viewRef.current

@@ -24,8 +24,9 @@ export function AutoTextarea({
     const el = ref.current
     if (!el || !FIELD_SIZING_SUPPORTED) return
     const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight)
-    const lh = Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 20
-    el.style.maxHeight = `${Math.round(lh * maxRows + lh / 3)}px`
+    const lh = Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 18
+    // Rows, plus 5px padding and a 1px border on each side.
+    el.style.maxHeight = `${Math.round(lh * maxRows + 12)}px`
   }, [maxRows])
 
   return (
@@ -33,13 +34,13 @@ export function AutoTextarea({
       ref={ref}
       rows={FIELD_SIZING_SUPPORTED ? 1 : (rows ?? 3)}
       className={cn(
-        'w-full rounded-md border border-border bg-surface px-[var(--vy-control-px)] py-1.5',
-        'text-sm leading-[1.45] text-fg placeholder:text-muted',
+        'w-full rounded-md border border-border bg-bg px-2.5 py-[5px]',
+        'text-xs leading-[18px] text-fg placeholder:text-tertiary',
         'hover:border-border-strong',
         'focus-visible:border-border-strong focus-visible:vy-focus-ring',
         'disabled:vy-disabled-state disabled:hover:border-border',
         'vy-transition',
-        FIELD_SIZING_SUPPORTED ? 'field-sizing-content min-h-[2.25rem] resize-none overflow-y-auto' : '',
+        FIELD_SIZING_SUPPORTED ? 'field-sizing-content min-h-7 resize-none overflow-y-auto' : '',
         className
       )}
       {...props}

@@ -84,12 +84,28 @@ export function TasksCeilingBand({
         type="button"
         className="flex w-full min-w-0 items-center gap-2 py-1.5 text-left"
         aria-expanded={expanded}
-        aria-label={expanded ? 'Collapse tasks' : 'Expand tasks'}
+        aria-label={expanded ? 'Collapse tasks' : `Expand tasks: ${current.content}`}
         onClick={() => setExpanded((v) => !v)}
       >
-        <TodoStatusIcon status={current.status} size={14} />
-        <span className="min-w-0 flex-1 truncate text-caption font-medium text-fg">
-          {current.content}
+        {/* Expanded, the checklist below carries every task in plan order, so
+            the header drops to the same uppercase section label the Plan panel
+            uses. Naming the current task here too printed it twice, stacked —
+            and dropping it from the checklist instead would hoist a mid-plan
+            task above the ones it follows. */}
+        {expanded ? (
+          <Icon name="listTodo" size={14} className="shrink-0 text-muted" />
+        ) : (
+          <TodoStatusIcon status={current.status} size={14} />
+        )}
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate',
+            expanded
+              ? 'text-2xs font-medium uppercase tracking-[var(--vy-tracking-caps)] text-muted'
+              : 'text-caption font-medium text-fg'
+          )}
+        >
+          {expanded ? 'Tasks' : current.content}
         </span>
         {cancelled > 0 ? (
           <span

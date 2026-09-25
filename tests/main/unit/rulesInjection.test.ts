@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, rmSync, utimesSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
@@ -141,8 +141,37 @@ describe('workspace rules', () => {
     const req = mentioned.find((r) => r.path === '.cursor/rules/requestable.mdc')
     expect(req).toBeDefined()
     expect(req!.alwaysApply).toBe(false)
+    expect(req!.applies).toBe('request')
     expect(req!.description).toBe('only on request')
     expect(mentioned.some((r) => r.path === 'AGENTS.md' && r.alwaysApply)).toBe(true)
+  })
+
+  it('says a glob rule applies to matching files, not always', async () => {
+    mkdirSync(join(workspace, '.cursor', 'rules'), { recursive: true })
+    const rule = (front: string[]): string => ['---', ...front, '---', '', 'body'].join('\n')
+    writeFileSync(join(workspace, '.cursor', 'rules', 'globbed.mdc'), rule(['globs: src/**/*.ts']))
+    writeFileSync(
+      join(workspace, '.cursor', 'rules', 'globbed-off.mdc'),
+      rule(['alwaysApply: false', 'globs: src/**/*.ts'])
+    )
+    writeFileSync(
+      join(workspace, '.cursor', 'rules', 'forced.mdc'),
+      rule(['alwaysApply: true', 'globs: src/**/*.ts'])
+    )
+    writeFileSync(join(workspace, '.cursor', 'rules', 'plain.mdc'), 'no frontmatter')
+    writeFileSync(join(workspace, 'AGENTS.md'), rule(['alwaysApply: false']))
+
+    const applies = Object.fromEntries(
+      (await listWorkspaceRulesForMention(workspace)).map((r) => [r.path, r.applies])
+    )
+    // The list used to call the first one alwaysApply: true, though it only
+    // reaches the prompt while a matching file is focused.
+    expect(applies['.cursor/rules/globbed.mdc']).toBe('matching')
+    expect(applies['.cursor/rules/globbed-off.mdc']).toBe('matching')
+    expect(applies['.cursor/rules/forced.mdc']).toBe('always')
+    expect(applies['.cursor/rules/plain.mdc']).toBe('always')
+    // Root files are injected as-is, whatever their frontmatter says.
+    expect(applies['AGENTS.md']).toBe('always')
   })
 
   it('ignores files with unrelated extensions', async () => {
@@ -223,5 +252,69 @@ describe('workspace rules', () => {
     expect(
       (await readWorkspaceRules(workspace)).find((f) => f.path === '.vyotiq/rules/ops.md')?.content
     ).toBe('prefer named branches for every deploy')
+  })
+
+  // The fingerprint walk is the only thing that catches an edit made outside the
+  // app — every in-app path (agent writes, file IPC, slash commands) calls
+  // clearRulesCache explicitly. These two pin that behaviour, so the walk cannot
+  // be reorganised into something that silently serves stale rules.
+  it('rereads a nested rule file after an external edit, with no cache clear', async () => {
+    const dir = join(workspace, '.vyotiq', 'rules', 'nested')
+    mkdirSync(dir, { recursive: true })
+    const rulePath = join(dir, 'deep.md')
+    writeFileSync(rulePath, 'first body')
+    const read = async (): Promise<string | undefined> =>
+      (await readWorkspaceRules(workspace)).find(
+        (f) => f.path === '.vyotiq/rules/nested/deep.md'
+      )?.content
+    expect(await read()).toBe('first body')
+
+    // Explicit mtime bump: a same-millisecond rewrite can land in the same
+    // timestamp, which would make this pass for the wrong reason.
+    writeFileSync(rulePath, 'second body')
+    const future = new Date(Date.now() + 10_000)
+    utimesSync(rulePath, future, future)
+
+    expect(await read()).toBe('second body')
+  })
+
+  it('renders byte-identical bytes for identical rules', async () => {
+    // The untrusted-content fence used to carry a fresh random nonce per call,
+    // so this section changed every step even when nothing on disk did. That
+    // made the "stable" system prefix unstable, which defeats both the
+    // in-process prefix cache and the provider's cache_control breakpoint.
+    writeFileSync(join(workspace, 'AGENTS.md'), 'use tabs')
+    const files = await readWorkspaceRules(workspace)
+    expect(formatWorkspaceRules(files)).toBe(formatWorkspaceRules(files))
+
+    clearRulesCache(workspace)
+    const first = await buildWorkspaceRulesSection(workspace)
+    clearRulesCache(workspace)
+    const second = await buildWorkspaceRulesSection(workspace)
+    expect(second).toBe(first)
+    expect(first).toMatch(/nonce="[0-9a-f]{16}"/)
+  })
+
+  it('still fences different rule files apart', async () => {
+    writeFileSync(join(workspace, 'AGENTS.md'), 'use tabs')
+    writeFileSync(join(workspace, 'CLAUDE.md'), 'use spaces')
+    const section = await buildWorkspaceRulesSection(workspace)
+    const nonces = [...section.matchAll(/nonce="([0-9a-f]{16})"/g)].map((m) => m[1])
+    expect(nonces).toHaveLength(2)
+    expect(new Set(nonces).size).toBe(2)
+  })
+
+  it('produces a stable fingerprint across repeated reads', async () => {
+    mkdirSync(join(workspace, '.cursor', 'rules', 'a'), { recursive: true })
+    writeFileSync(join(workspace, 'AGENTS.md'), 'root')
+    writeFileSync(join(workspace, '.cursor', 'rules', 'one.mdc'), 'one')
+    writeFileSync(join(workspace, '.cursor', 'rules', 'a', 'two.mdc'), 'two')
+
+    const first = await readWorkspaceRules(workspace)
+    // A parallel walk must not reorder or drop entries between identical reads.
+    for (let i = 0; i < 5; i++) {
+      clearRulesCache(workspace)
+      expect(await readWorkspaceRules(workspace)).toEqual(first)
+    }
   })
 })

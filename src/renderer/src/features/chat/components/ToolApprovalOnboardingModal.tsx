@@ -1,79 +1,79 @@
-import { useRef } from 'react'
+import { useId, useRef } from 'react'
 import type { ToolApprovalMode } from '@shared/ipc'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
+import { Icon } from '@renderer/lib/icons'
 import { Alert, Button } from '@renderer/lib/ui'
+import { approvalModes } from '@renderer/features/setup/ApprovalModeChoice'
 
-const MODES: {
-  mode: ToolApprovalMode
-  label: string
-  description: string
-  recommended?: boolean
-}[] = [
-  {
-    mode: 'mutating',
-    label: 'Mutating tools',
-    description: 'Ask before file edits, terminal, and other changes. Reads can run without asking.',
-    recommended: true
-  },
-  {
-    mode: 'off',
-    label: 'Off',
-    description: 'Run tools without asking. Faster; riskier on unfamiliar repos.'
-  },
-  {
-    mode: 'all',
-    label: 'All tools',
-    description: 'Ask before every tool, including reads. Maximum control; more interruptions.'
-  }
-]
-
+/**
+ * The first send without an approval choice on record — someone who started a
+ * task without finishing Set up. One click picks a mode and sends; Not now
+ * sends nothing and asks again next time. The choice is the global one, as
+ * Set up's is: it holds wherever a workspace doesn't set its own.
+ */
 export function ToolApprovalOnboardingModal({
   open,
   onChoose,
   onDismiss,
-  error = null
+  error = null,
+  mcpProtection = true
 }: {
   open: boolean
   onChoose: (mode: ToolApprovalMode) => void
   onDismiss: () => void
   error?: string | null
+  mcpProtection?: boolean
 }) {
   const initialFocusRef = useRef<HTMLButtonElement>(null)
+  const titleId = useId()
+  const descId = useId()
 
   return (
     <Dialog
       open={open}
       onClose={onDismiss}
-      title="Tool approval"
-      description="Choose when Agent V should ask before running tools on this workspace. You can change this anytime in Settings → Tools."
+      labelledBy={titleId}
+      describedBy={descId}
+      useNativeDialog={false}
+      padded={false}
       initialFocusRef={initialFocusRef}
-      useNativeDialog
+      className="vy-menu flex w-[440px] flex-col overflow-hidden"
     >
-      <div className="flex flex-col gap-3">
-        {error ? <Alert>{error}</Alert> : null}
-        <div className="flex flex-col gap-2">
-          {MODES.map((item) => (
+      <div data-approval-onboarding className="flex min-h-0 flex-col">
+        <div className="px-5 pb-2 pt-5">
+          <div className="flex items-center gap-2">
+            <Icon name="shield" size={18} className="text-muted" />
+            <h2 id={titleId} className="text-heading font-semibold text-fg-strong">
+              What needs your OK?
+            </h2>
+          </div>
+          <p id={descId} className="mt-2 text-sm leading-[21px] text-secondary">
+            Choose once, before the first task starts. It holds in every workspace that doesn’t set its own, and
+            Settings → Agent changes it later.
+          </p>
+        </div>
+        {error ? (
+          <div className="px-5 pt-2">
+            <Alert>{error}</Alert>
+          </div>
+        ) : null}
+        <div className="space-y-px px-3 pb-4 pt-2">
+          {approvalModes(mcpProtection).map((item) => (
             <button
               key={item.mode}
               ref={item.mode === 'mutating' ? initialFocusRef : undefined}
               type="button"
-              className="rounded-xl border border-border bg-surface-2 px-3 py-2 text-left transition-colors hover:bg-surface"
+              className="flex w-full flex-col rounded-md px-2 py-1.5 text-left vy-transition hover:bg-surface focus-visible:vy-focus-ring"
               onClick={() => onChoose(item.mode)}
             >
-              <div className="flex items-center gap-2">
-                <div className="text-sm font-medium text-fg-strong">{item.label}</div>
-                {item.recommended ? (
-                  <span className="rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
-                    Recommended
-                  </span>
-                ) : null}
-              </div>
-              <div className="text-xs text-secondary">{item.description}</div>
+              <span className="text-sm text-fg">{item.label}</span>
+              <span className="text-xs text-muted">{item.description}</span>
             </button>
           ))}
         </div>
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="subtle" onClick={onDismiss}>
+        <div className="flex shrink-0 items-center border-t border-border px-5 py-3">
+          <span className="min-w-0 flex-1 text-caption text-tertiary">Not now keeps your brief, unsent.</span>
+          <Button size="sm" variant="ghost" onClick={onDismiss}>
             Not now
           </Button>
         </div>

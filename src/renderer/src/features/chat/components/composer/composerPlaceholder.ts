@@ -16,6 +16,9 @@ function attachAndSlash(): string {
 /**
  * Mode- and state-aware composer placeholder.
  * Copy stays factual: workspace gate, Ask/Plan/Agent policy, follow-ups, @ attach, slash.
+ * The @ and / hints teach the first message only; once a chat has a transcript
+ * the placeholder is just the action, so it never runs out of room and gets
+ * cut off in a narrow pane.
  */
 export function resolveComposerPlaceholder(opts: {
   hasWorkspace: boolean
@@ -27,25 +30,35 @@ export function resolveComposerPlaceholder(opts: {
   const override = opts.override?.trim()
   if (override) return override
   if (!opts.hasWorkspace) return 'Open a workspace to start chatting'
-  if (opts.running) return line('Queue a follow-up…', attachAndSlash())
+  if (opts.running) return 'Queue a follow-up…'
 
   switch (opts.agentMode) {
     case 'ask':
-      return line(
-        opts.hasTranscript ? 'Ask a follow-up' : 'Ask a question',
-        'won’t edit files',
-        attachAndSlash()
-      )
-    case 'plan':
-      return line(
-        opts.hasTranscript ? 'Refine the plan' : 'Describe a plan',
-        attachAndSlash()
-      )
+      return opts.hasTranscript
+        ? line('Ask a follow-up', 'won’t edit files')
+        : line('Ask a question', 'won’t edit files', attachAndSlash())
     case 'agent':
     default:
-      return line(
-        opts.hasTranscript ? 'Send a follow-up' : 'Describe a task',
-        attachAndSlash()
-      )
+      return opts.hasTranscript ? 'Send a follow-up' : line('Describe a task', attachAndSlash())
   }
+}
+
+/**
+ * The instruction line's placeholder says what sending does right now. While
+ * a run is live the instruction queues and applies when the run's turn ends
+ * (the loop drains queued follow-ups at turn end); after that it starts the
+ * task's next run. Ask mode keeps its one fact: it won't edit files.
+ */
+export function resolveLinePlaceholder(opts: {
+  hasWorkspace: boolean
+  running: boolean
+  agentMode: AgentInteractionMode
+  /** Runs the task has had so far. */
+  runCount: number
+}): string {
+  if (!opts.hasWorkspace) return 'Open a workspace to start chatting'
+  if (opts.running) return 'Add an instruction — starts when this run ends · Shift+Enter sends it now'
+  const readOnly = opts.agentMode === 'ask' ? ' · won’t edit files' : ''
+  if (opts.runCount > 0) return `Follow up — starts run ${opts.runCount + 1}${readOnly}`
+  return `Add an instruction${readOnly}`
 }

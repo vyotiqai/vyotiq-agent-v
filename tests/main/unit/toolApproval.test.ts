@@ -43,6 +43,40 @@ describe('isToolGated', () => {
     ).toBe(true)
   })
 
+  it('gates an agent-built tool even when approvals are off', () => {
+    // "Approvals off" is a judgement about the tools that shipped with the app.
+    // A module a run wrote minutes ago is not one of them.
+    const key = 'my-tool@0123456789abcdef'
+    expect(isToolGated('my-tool', 'off', none, [], undefined, { agentBuiltAllowKey: key })).toBe(
+      true
+    )
+    expect(isToolGated('my-tool', 'off', none, [])).toBe(false)
+  })
+
+  it('matches an agent-built allow on its content key, never its bare name', () => {
+    const key = 'my-tool@0123456789abcdef'
+    // Allowed under the exact key it was granted against.
+    expect(
+      isToolGated('my-tool', 'all', new Set([key]), [], undefined, { agentBuiltAllowKey: key })
+    ).toBe(false)
+    expect(isToolGated('my-tool', 'all', none, [key], undefined, { agentBuiltAllowKey: key })).toBe(
+      false
+    )
+    // A standing allow on the bare name buys nothing: that is what stops an
+    // "always allow" carrying over to code the user never read.
+    expect(
+      isToolGated('my-tool', 'all', new Set(['my-tool']), ['my-tool'], undefined, {
+        agentBuiltAllowKey: key
+      })
+    ).toBe(true)
+    // And the old key stops matching once the module is rewritten.
+    expect(
+      isToolGated('my-tool', 'all', new Set([key]), [], undefined, {
+        agentBuiltAllowKey: 'my-tool@fedcba9876543210'
+      })
+    ).toBe(true)
+  })
+
   it('does not gate builtin MCP meta tools when mode is off', () => {
     for (const name of ['mcp_list_tools', 'request_mcp_tools', 'release_mcp_tools']) {
       expect(isToolGated(name, 'off', none, [])).toBe(false)
@@ -134,6 +168,71 @@ describe('createApprovalGate', () => {
 
     await gate.authorize(WRITE)
     expect(persisted).toEqual(['edit'])
+  })
+
+  it('"always allow" on a terminal command remembers the command, not the tool', async () => {
+    const persisted: string[] = []
+    const requests: ToolApprovalRequest[] = []
+    const gate = createApprovalGate({
+      runId: 'run-1',
+      mode: 'mutating',
+      workspaceAllowlist: [],
+      signal: new AbortController().signal,
+      persistAlways: (name) => persisted.push(name),
+      ask: async (request) => {
+        requests.push(request)
+        return 'always'
+      }
+    })
+    const terminal = (id: string, command: string) => ({ id, name: 'terminal', arguments: JSON.stringify({ command }) })
+
+    expect(await gate.authorize(terminal('t1', 'pnpm vitest run tests/a.test.ts'))).toEqual({ allowed: true })
+    // Main says on the card what Always would remember.
+    expect(requests[0]!.alwaysAllowCommand).toBe('pnpm vitest')
+    expect(persisted).toEqual(['terminal:pnpm vitest'])
+    // The same command again, other arguments: no second ask.
+    await gate.authorize(terminal('t2', 'pnpm vitest run tests/b.test.ts'))
+    expect(requests).toHaveLength(1)
+    // Another command still asks.
+    await gate.authorize(terminal('t3', 'pnpm install'))
+    expect(requests).toHaveLength(2)
+  })
+
+  it('never offers or grants a standing allow for a command that chains or redirects', async () => {
+    const persisted: string[] = []
+    const requests: ToolApprovalRequest[] = []
+    const gate = createApprovalGate({
+      runId: 'run-1',
+      mode: 'mutating',
+      workspaceAllowlist: ['terminal:pnpm vitest'],
+      signal: new AbortController().signal,
+      persistAlways: (name) => persisted.push(name),
+      ask: async (request) => {
+        requests.push(request)
+        return 'always'
+      }
+    })
+    // An allowed prefix does not carry a chained command through.
+    const chained = { id: 't1', name: 'terminal', arguments: JSON.stringify({ command: 'pnpm vitest && rm -rf dist' }) }
+    expect(await gate.authorize(chained)).toEqual({ allowed: true })
+    expect(requests).toHaveLength(1)
+    expect(requests[0]!.alwaysAllowCommand).toBeNull()
+    // Let through once; remembered for nothing.
+    expect(persisted).toEqual([])
+    await gate.authorize({ ...chained, id: 't2' })
+    expect(requests).toHaveLength(2)
+  })
+
+  it('still honours a whole-tool terminal allow granted before, and never asks to poll a session', () => {
+    const none = new Set<string>()
+    const args = (value: Record<string, unknown>) => JSON.stringify(value)
+    expect(isToolGated('terminal', 'mutating', none, ['terminal'], args({ command: 'anything at all' }))).toBe(false)
+    expect(isToolGated('terminal', 'mutating', none, ['terminal:git status'], args({ command: 'git status --short' }))).toBe(false)
+    expect(isToolGated('terminal', 'mutating', none, ['terminal:git status'], args({ command: 'git push' }))).toBe(true)
+    // Reading a running session's output starts nothing.
+    expect(
+      isToolGated('terminal', 'mutating', none, [], args({ session_id: '9f1c6d3e-0b7a-4a51-9a51-2f6d3c1b2a10' }))
+    ).toBe(false)
   })
 
   it('rides the renderer round trip', async () => {
@@ -343,6 +442,12 @@ describe('createApprovalGate', () => {
     expect(isAutonomousHighRiskTool('bash')).toBe(true)
     expect(isAutonomousHighRiskTool('Write')).toBe(true)
     expect(isAutonomousHighRiskTool('git_commit')).toBe(true)
+    expect(isAutonomousHighRiskTool('str_replace')).toBe(true)
+    // A patch is a file write. Autonomy gates `edit`, so gating this too is
+    // what keeps "autonomy buys browsing, not silent file access" true.
+    expect(isAutonomousHighRiskTool('git_apply')).toBe(true)
+    // Writing a module that later runs as arbitrary Node in a utility process.
+    expect(isAutonomousHighRiskTool('build_tool')).toBe(true)
     expect(isAutonomousHighRiskTool('github_pr_create')).toBe(true)
     expect(isAutonomousHighRiskTool('github_pr_review')).toBe(true)
     expect(isAutonomousHighRiskTool('github_issue')).toBe(true)

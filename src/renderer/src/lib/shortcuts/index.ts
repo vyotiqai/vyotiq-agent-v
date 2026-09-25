@@ -2,6 +2,7 @@ export { SHORTCUT_BINDINGS, type ShortcutBinding, type ShortcutId } from './bind
 export { shouldDeferAppEscapeStop } from './escape'
 export {
   extraShortcutCatalog,
+  referenceShortcutCatalog,
   shortcutAriaKeys,
   shortcutCatalog,
   shortcutLabel,

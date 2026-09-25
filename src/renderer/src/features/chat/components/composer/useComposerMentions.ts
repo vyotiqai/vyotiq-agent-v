@@ -19,18 +19,23 @@ export type ActiveMentionToken = NonNullable<ReturnType<typeof findActiveMention
 
 const FILES_PAGE = 12
 
+const NO_FILES: readonly string[] = []
+
 type RuleRow = { path: string; description?: string; alwaysApply: boolean }
 
 export function useComposerMentions({
   workspacePath,
   text,
   cursor,
-  enabled
+  enabled,
+  taskFiles = NO_FILES
 }: {
   workspacePath?: string | null
   text: string
   cursor: number
   enabled: boolean
+  /** Files this task read or edited, most recent first (workspace-relative). */
+  taskFiles?: readonly string[]
 }) {
   const [view, setView] = useState<MentionMenuView>('root')
   const [paths, setPaths] = useState<string[]>([])
@@ -86,6 +91,14 @@ export function useComposerMentions({
       return
     }
     if (view !== 'root' && view !== 'files') return
+    // The root lists recent files until something is typed: no search to run.
+    if (view === 'root' && !token.query.trim()) {
+      ++reqIdRef.current
+      setPaths([])
+      setPathsTotal(0)
+      setLoading(false)
+      return
+    }
     const reqId = ++reqIdRef.current
     setLoading(true)
     const maxResults = view === 'files' ? filesLimit : 8
@@ -258,7 +271,7 @@ export function useComposerMentions({
     }
     return buildRootMentionItems({
       query: token.query,
-      recentFiles: hasWorkspace ? recentFiles : [],
+      recentFiles: hasWorkspace ? [...recentFiles, ...taskFiles] : [],
       matchingFiles: hasWorkspace ? paths : [],
       includeCodebase: hasWorkspace,
       branchName
@@ -272,6 +285,7 @@ export function useComposerMentions({
     rules,
     runs,
     recentFiles,
+    taskFiles,
     hasWorkspace,
     branchName
   ])

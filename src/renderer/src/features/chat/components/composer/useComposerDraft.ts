@@ -64,10 +64,13 @@ export function useComposerDraft({
   onEditLastUserMessage,
   onCancelEdit,
   getCaretStart,
-  onSubmitted
+  onSubmitted,
+  submitOnModEnter = false
 }: {
   draft?: string
   onDraftChange?: (draft: string) => void
+  /** A brief: Enter is a new line and Ctrl/Cmd+Enter submits. */
+  submitOnModEnter?: boolean
   images: string[]
   setImages: Dispatch<SetStateAction<string[]>>
   setImageError: (error: string | null) => void
@@ -377,10 +380,18 @@ export function useComposerDraft({
         }
       }
     }
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault()
-      submit()
-      return
+    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+      if (submitOnModEnter) {
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault()
+          submit()
+          return
+        }
+      } else if (!e.shiftKey) {
+        e.preventDefault()
+        submit()
+        return
+      }
     }
     if (e.key === 'Escape' && onCancelEdit) {
       e.preventDefault()

@@ -7,7 +7,6 @@ import { mentionMarker } from '@renderer/features/chat/components/composer/menti
 
 describe('resolveComposerMentions', () => {
   beforeEach(() => {
-    // @ts-expect-error test bridge
     window.vyotiq = {
       workspaceReadText: vi.fn(async ({ path }: { path: string }) => ({
         ok: true as const,
@@ -37,6 +36,10 @@ describe('resolveComposerMentions', () => {
       gitDiff: vi.fn(async () => ({
         ok: true as const,
         data: { content: 'diff --git a/x' }
+      })),
+      gitBranchDiff: vi.fn(async () => ({
+        ok: true as const,
+        data: { content: 'diff --git a/x', branch: 'feat/x', base: 'main', commits: 3 }
       })),
       loadRun: vi.fn(async () => ({
         ok: true as const,
@@ -106,6 +109,9 @@ describe('resolveComposerMentions', () => {
     })
     expect(result.text).toContain('Referenced branch diff')
     expect(result.text).toContain('diff --git')
+    // The branch against where it left its base, and says which base.
+    expect(window.vyotiq.gitBranchDiff).toHaveBeenCalledWith('/ws')
+    expect(result.text).toContain('### Diff: feat/x against main — 3 commits since it left main, and uncommitted changes')
     expect(result.text).toContain('Prefer browser_* tools')
     expect(result.text).toContain('https://example.com/app')
     expect(result.text).toContain('Referenced browser')

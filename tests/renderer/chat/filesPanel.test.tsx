@@ -566,7 +566,7 @@ describe('FilesPanel', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'OK' }))
     view.rerender(<FilesPanel workspacePath={secondWorkspacePath} active />)
-    await screen.findByText('second-files-panel')
+    await screen.findByTitle(secondWorkspacePath)
     resolveCreate({
       ok: true,
       data: {
@@ -596,7 +596,7 @@ describe('FilesPanel', () => {
     api.workspaceEditorRecoverySave.mockClear()
 
     view.rerender(<FilesPanel workspacePath={secondWorkspacePath} active />)
-    await screen.findByText('second-files-panel')
+    await screen.findByTitle(secondWorkspacePath)
 
     expect(api.workspaceEditorRecoverySave).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -797,9 +797,10 @@ describe('FilesPanel', () => {
     fireEvent.click(screen.getByText('src'))
     fireEvent.click(await screen.findByText('note.ts'))
     await screen.findByRole('tab', { name: /note\.ts/i })
-    fireEvent.click(screen.getByRole('button', { name: 'Sort workspace files' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Type' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Wrap' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }))
+    fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Sort by type' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Editor actions' }))
+    fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Word wrap' }))
 
     expect(getFileSession(workspacePath).selectedPath).toBe('src/note.ts')
     expect(getFileSession(workspacePath).expandedPaths).toContain('src')
@@ -822,10 +823,15 @@ describe('FilesPanel', () => {
 
     render(<FilesPanel workspacePath={workspacePath} active />)
     expect(await screen.findByRole('tab', { name: /note\.ts/i })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }))
     expect(
-      (await screen.findByRole('button', { name: 'Sort workspace files' })).textContent
-    ).toContain('Type')
-    expect(screen.getByRole('button', { name: 'Wrap' }).getAttribute('aria-pressed')).toBe('true')
+      (await screen.findByRole('menuitemcheckbox', { name: 'Sort by type' })).getAttribute('aria-checked')
+    ).toBe('true')
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    fireEvent.click(screen.getByRole('button', { name: 'Editor actions' }))
+    expect(
+      (await screen.findByRole('menuitemcheckbox', { name: 'Word wrap' })).getAttribute('aria-checked')
+    ).toBe('true')
     await waitFor(() => {
       expect(api.workspaceFileList).toHaveBeenCalledWith(
         expect.objectContaining({ workspacePath, path: 'src' })
@@ -833,13 +839,14 @@ describe('FilesPanel', () => {
     }    )
   })
 
-  it('refreshes expanded directories from the toolbar button', async () => {
+  it('refreshes expanded directories from the workspace menu', async () => {
     render(<FilesPanel workspacePath={workspacePath} active />)
     await screen.findByText('README.md')
     fireEvent.click(screen.getByText('src'))
     await screen.findByText('note.ts')
     api.workspaceFileList.mockClear()
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh files' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Refresh files' }))
     await waitFor(() => {
       expect(api.workspaceFileList).toHaveBeenCalledWith(
         expect.objectContaining({ workspacePath, path: 'src' })
@@ -892,13 +899,44 @@ describe('FilesPanel', () => {
     expect(await screen.findByRole('button', { name: /Load more \(200\/400\)/i })).toBeTruthy()
   })
 
-  it('applies accent selection styling to the active tree row', async () => {
+  it('gives the open file the one selection fill', async () => {
     render(<FilesPanel workspacePath={workspacePath} active />)
     const readme = await screen.findByText('README.md')
     fireEvent.click(readme)
     await waitFor(() => {
-      expect(readme.closest('button')?.className).toContain('ring-accent/35')
+      expect(readme.closest('button')?.className).toContain('bg-surface-2')
     })
+    expect(readme.closest('button')?.className).toContain('text-fg-strong')
+  })
+
+  it('marks what this task edited and read, and says so over the open file', async () => {
+    const marks = new Map([
+      ['README.md', { read: { startLine: 1, endLine: 20 } }],
+      ['src', { change: 'M' as const }]
+    ])
+    render(<FilesPanel workspacePath={workspacePath} active agentMarks={marks} />)
+    const readme = await screen.findByText('README.md')
+    const row = readme.closest('button') as HTMLElement
+    expect(row.querySelector('[aria-label="Read by the agent"]')).toBeTruthy()
+    // Folders carry no mark of their own.
+    expect((await screen.findByText('src')).closest('button')?.textContent).not.toContain('M')
+    fireEvent.click(readme)
+    const header = await waitFor(() => {
+      const el = document.querySelector('[data-editor-header]')
+      expect(el).toBeTruthy()
+      return el as HTMLElement
+    })
+    expect(header.textContent).toContain('agent read L1–20')
+  })
+
+  it('reads the open file out in the status bar', async () => {
+    render(<FilesPanel workspacePath={workspacePath} active />)
+    fireEvent.click(await screen.findByText('README.md'))
+    await screen.findByRole('tab', { name: /README\.md/i })
+    await waitFor(() => {
+      expect(document.querySelector('[data-files-status]')?.textContent).toContain('Markdown')
+    })
+    expect(document.querySelector('[data-files-status]')?.textContent).toContain('UTF-8')
   })
 
   it('exposes editor actions and persists editor settings in the session', async () => {
@@ -1119,5 +1157,25 @@ describe('TextCodeEditor', () => {
       />
     )
     await waitFor(() => expect(onChange).not.toHaveBeenCalled())
+  })
+
+  it('tints the lines the agent read, and moves the tint when the range changes', async () => {
+    const text = ['one', 'two', 'three', 'four', 'five'].join('\n')
+    const props = {
+      path: 'note.ts',
+      value: text,
+      cursor: 0,
+      selections: [{ from: 0, to: 0 }],
+      onChange: vi.fn(),
+      onMetaChange: vi.fn()
+    }
+    const view = render(<TextCodeEditor {...props} markedLines={{ from: 2, to: 3 }} />)
+    const tinted = (): string[] => Array.from(document.querySelectorAll('.cm-line.cm-agentRead')).map((el) => el.textContent ?? '')
+    await waitFor(() => expect(tinted()).toEqual(['two', 'three']))
+    // Open-ended (a read to the end of the file): clamped to the last line.
+    view.rerender(<TextCodeEditor {...props} markedLines={{ from: 4, to: Number.MAX_SAFE_INTEGER }} />)
+    await waitFor(() => expect(tinted()).toEqual(['four', 'five']))
+    view.rerender(<TextCodeEditor {...props} markedLines={null} />)
+    await waitFor(() => expect(tinted()).toEqual([]))
   })
 })

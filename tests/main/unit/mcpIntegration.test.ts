@@ -34,6 +34,7 @@ import {
   gitMcpNotARepoMessage,
   isGitMcpNotARepoError,
   refreshMcpServers,
+  retryFailedMcpServers,
   resetMcpSessionsForTests,
   setMcpStdioWorkspace,
   shutdownMcpServers,
@@ -312,6 +313,39 @@ describe('syncMcpServers', () => {
     expect(second).toBeTruthy()
     // Re-attempted (error string may match) but status still disconnected.
     expect(getMcpServerStatus([bad])[0]?.connected).toBe(false)
+  })
+
+  it('retryFailedMcpServers retries the failed server and keeps a live call running', async () => {
+    const slow = {
+      id: 'slow-live',
+      name: 'Slow Echo',
+      enabled: true,
+      transport: 'stdio' as const,
+      command: process.execPath,
+      args: [slowFixturePath]
+    }
+    const bad = {
+      id: 'bad-retry-only',
+      name: 'Bad',
+      enabled: true,
+      command: 'vyotiq-nonexistent-mcp-command-retry',
+      args: [] as string[]
+    }
+    await syncMcpServers([slow, bad])
+    expect(listConnectedMcpServerIdsForTests()).toEqual(['slow-live'])
+    expect(getMcpServerStatus([bad])[0]?.error).toBeTruthy()
+
+    // Refresh would disconnect this session and fail the call; a retry of
+    // the failures only must leave it running.
+    const call = invokeMcpTool('slow-live', 'slow_echo', { message: 'kept' }, new AbortController().signal)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const statuses = await retryFailedMcpServers([slow, bad])
+
+    const result = await call
+    expect(result.ok).toBe(true)
+    expect(result.content).toContain('kept')
+    expect(statuses.find((s) => s.id === 'slow-live')?.connected).toBe(true)
+    expect(statuses.find((s) => s.id === 'bad-retry-only')?.error).toBeTruthy()
   })
 
   it('skips spawning Git MCP when workspace is not a git repo', async () => {

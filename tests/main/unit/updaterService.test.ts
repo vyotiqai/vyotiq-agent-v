@@ -220,12 +220,40 @@ describe('updater service', () => {
     })
 
     autoUpdater.emit('error', new Error('network down'))
+    // The error carries the update it was about, so the chip stays where you retry.
     expect(send).toHaveBeenNthCalledWith(5, IPC.updaterState, {
       status: 'error',
-      error: 'network down'
+      error: 'network down',
+      info: expect.objectContaining({ version: '1.3.0' })
     })
 
-    expect(updater.updaterState()).toEqual({ status: 'error', error: 'network down' })
+    expect(updater.updaterState()).toMatchObject({ status: 'error', error: 'network down', info: { version: '1.3.0' } })
+  })
+
+  it('adds the update-ready row to the inbox when the download finishes, and only then', async () => {
+    const { setNotificationBus } = await import('@main/notifications/bus')
+    const publish = vi.fn()
+    setNotificationBus({ publish, dismissByDedupeKey: vi.fn() })
+    const updater = await loadUpdater()
+    updater.initAutoUpdater()
+    getAllWindows.mockReturnValue([])
+    autoUpdater.emit('update-available', { version: '1.3.0' })
+    autoUpdater.emit('download-progress', { percent: 50, transferred: 1, total: 2 })
+    expect(publish).not.toHaveBeenCalled()
+    autoUpdater.emit('update-downloaded', { version: '1.3.0' })
+    expect(publish).toHaveBeenCalledTimes(1)
+    expect(publish).toHaveBeenCalledWith({
+      source: 'system',
+      kind: 'update_ready',
+      title: 'Agent V 1.3.0 is ready',
+      body: 'Restart to install',
+      dedupeKey: 'update_ready',
+      action: { type: 'open_update' }
+    })
+    // Still never downloads or installs by itself.
+    expect(autoUpdater.downloadUpdate).not.toHaveBeenCalled()
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+    setNotificationBus(null)
   })
 
   it('emits not-available when up to date', async () => {
@@ -324,7 +352,23 @@ describe('updater service', () => {
 
     autoUpdater.downloadUpdate.mockRejectedValueOnce(new Error('disk full'))
     await updater.downloadAppUpdate()
-    expect(updater.updaterState()).toEqual({ status: 'error', error: 'disk full' })
+    expect(updater.updaterState()).toMatchObject({ status: 'error', error: 'disk full', info: { version: '1.3.0' } })
+
+    // Try again: a failed download of a known update can be retried.
+    await updater.downloadAppUpdate()
+    expect(autoUpdater.downloadUpdate).toHaveBeenCalledTimes(3)
+  })
+
+  it('forgets a known update once a check finds nothing newer', async () => {
+    const updater = await loadUpdater()
+    updater.initAutoUpdater()
+    autoUpdater.emit('update-available', { version: '1.3.0' })
+    autoUpdater.emit('update-not-available')
+    autoUpdater.emit('error', new Error('offline'))
+    // No stale version to hang an error on, and nothing to retry.
+    expect(updater.updaterState()).toEqual({ status: 'error', error: 'offline' })
+    await updater.downloadAppUpdate()
+    expect(autoUpdater.downloadUpdate).not.toHaveBeenCalled()
   })
 
   it('install only quits and installs after a completed download', async () => {

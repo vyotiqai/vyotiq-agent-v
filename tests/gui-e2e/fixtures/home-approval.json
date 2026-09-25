@@ -1,0 +1,24 @@
+{
+  "events": [
+    { "type": "status", "status": "running" },
+    { "type": "text_delta", "text": "Running the updater suite first." },
+    { "type": "assistant_message", "content": "Running the updater suite first." },
+    {
+      "type": "tool_call_delta",
+      "toolCallId": "home-approval-1",
+      "name": "terminal",
+      "argumentsDelta": "{\"command\":\"pnpm vitest run tests/main/unit/updaterSwap.test.ts\"}"
+    },
+    {
+      "type": "__approval",
+      "toolCallId": "home-approval-1",
+      "name": "terminal",
+      "arguments": "{\"command\":\"pnpm vitest run tests/main/unit/updaterSwap.test.ts\"}",
+      "summary": "pnpm vitest run tests/main/unit/updaterSwap.test.ts",
+      "result": "Test Files  1 passed (1)\nTests  6 passed (6)\nexit_code: 0"
+    },
+    { "type": "text_delta", "text": "The updater suite passes." },
+    { "type": "assistant_message", "content": "The updater suite passes." },
+    { "type": "status", "status": "done" }
+  ]
+}

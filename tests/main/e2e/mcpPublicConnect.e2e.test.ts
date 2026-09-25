@@ -73,9 +73,13 @@ describe('public MCP package connects with no credentials', () => {
     const tools = listMcpToolDefinitions([server])
 
     expect(tools.length).toBeGreaterThan(0)
-    // Names are prefixed mcp__<serverId>__<tool>.
-    expect(tools.every((t) => t.name.startsWith('mcp__deepwiki__'))).toBe(true)
-    expect(tools.map((t) => t.name)).toContain('mcp__deepwiki__ask_question')
+    // Names are prefixed mcp__<serverId>__<tool>, and the suffix is the tool the
+    // server advertised. Which tools those are is DeepWiki's to change — it
+    // renamed `ask_question` to `ask_wiki_question`, failing this test on a name
+    // that never tested the gate. What the gate guarantees is that an `auth:
+    // none` package connects and its tools arrive intact, so assert that.
+    expect(tools.every((t) => /^mcp__deepwiki__[a-z0-9_]+$/.test(t.name))).toBe(true)
+    expect(tools.every((t) => typeof t.description === 'string')).toBe(true)
 
     await disconnectMcpServer(server.id)
   }, 60_000)

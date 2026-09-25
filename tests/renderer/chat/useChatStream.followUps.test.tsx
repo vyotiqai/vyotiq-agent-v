@@ -85,6 +85,30 @@ describe('useChatStream', () => {
     })
   })
 
+  it('a steered instruction is queued and then sent now, as the row\'s Send now does', async () => {
+    const chatFollowUpPromote = vi.fn(async () => ({ ok: true as const, data: { promoted: true } }))
+    ;(window.vyotiq as unknown as { chatFollowUpPromote: typeof chatFollowUpPromote }).chatFollowUpPromote = chatFollowUpPromote
+    const { result } = renderHook(() => useChatStream('/ws'))
+    await act(async () => {
+      await result.current.send('start')
+    })
+    await act(async () => {
+      handler?.({ type: 'status', runId: 'run-1', status: 'running', invokeId: 1 })
+    })
+    await act(async () => {
+      await result.current.send('use the other API', undefined, undefined, { steer: true })
+    })
+    expect(chatFollowUp).toHaveBeenCalledTimes(1)
+    expect(chatFollowUpPromote).toHaveBeenCalledWith({ runId: 'run-1', id: 'fu-1' })
+
+    // Without steer it only queues.
+    chatFollowUpPromote.mockClear()
+    await act(async () => {
+      await result.current.send('and then the docs')
+    })
+    expect(chatFollowUpPromote).not.toHaveBeenCalled()
+  })
+
   it('surfaces runNotice when queued follow-ups are dropped', async () => {
     const { result } = renderHook(() => useChatStream('/ws'))
 

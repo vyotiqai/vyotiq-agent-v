@@ -16,12 +16,11 @@ import { disposeAllPtySessions, replayPtySessionsToWindow } from '@main/app/ptyS
 import { disposeAllTerminalSessions } from '@main/agent/tools/terminalSessions'
 import { registerIpc } from './ipc/register'
 import { resumeActiveGoalsAndLoops } from './agent/resumeActiveGoals'
-import { resumeTasksForWorkspaces } from './agent/taskScheduler'
 import { initAutoUpdater, applyUpdateCheckSchedule } from '@main/updater'
 import { initNotifications, unreadNotificationCount } from './notifications/service'
 import { shutdownMcpServers, syncMcpServers } from '@main/agent/mcp'
 import { primeLoginShellPath } from '@main/agent/mcp/binaries'
-import { resolveEffectiveMcpServers, syncMarketplaceMcpIntoSettings, purgeOrphanMarketplacePackageDirs } from '@main/marketplace'
+import { resolveEffectiveMcpServers, repairMissingPackageDependencies, syncMarketplaceMcpIntoSettings, purgeOrphanMarketplacePackageDirs } from '@main/marketplace'
 import { getSettings } from '@main/settings/settings'
 import { migrateLegacySessions } from '@main/storage/migrations/migrateSessions'
 import { migrateWorkspaceRuns } from './storage/migrateWorkspaceRuns'
@@ -209,8 +208,6 @@ if (!gotLock) {
         // Same rationale as boot resume: let first paint and hydration win.
         setTimeout(() => {
           if (!fresh.isDestroyed()) resumeActiveGoalsAndLoops(fresh.webContents)
-          // Queued tasks held for a missing window can start again now.
-          void resumeTasksForWorkspaces(getWorkspaces().openPaths)
         }, RESUME_AFTER_FIRST_PAINT_MS)
       })
       win.destroy()
@@ -335,6 +332,15 @@ if (!gotLock) {
           removed: orphan.removed
         })
       }
+      // Before the MCP sync: a dependency restored here may itself be an MCP
+      // package that then needs a settings entry.
+      const restored = await repairMissingPackageDependencies()
+      if (restored.length > 0) {
+        logger.info('Restored missing marketplace dependencies', {
+          scope: 'main',
+          packages: restored
+        })
+      }
       await syncMarketplaceMcpIntoSettings()
       void syncMcpServers(resolveEffectiveMcpServers()).catch((err) => {
         logger.warn('MCP sync on startup failed', { scope: 'main', err })
@@ -364,9 +370,6 @@ if (!gotLock) {
         // first paint and renderer hydration win first.
         setTimeout(() => {
           if (!win.isDestroyed()) resumeActiveGoalsAndLoops(win.webContents)
-          // Delegated tasks re-arm after goals: queued tasks need a free window
-          // to stream into, and scheduling must not stampede boot.
-          void resumeTasksForWorkspaces(getWorkspaces().openPaths)
         }, RESUME_AFTER_FIRST_PAINT_MS)
       }
     })
@@ -392,9 +395,6 @@ if (!gotLock) {
           // first paint and renderer hydration win first.
           setTimeout(() => {
             if (!win.isDestroyed()) resumeActiveGoalsAndLoops(win.webContents)
-            // Window recreation must re-pump queued tasks held while no
-            // window existed — same contract as the boot path above.
-            void resumeTasksForWorkspaces(getWorkspaces().openPaths)
           }, RESUME_AFTER_FIRST_PAINT_MS)
         })
       }

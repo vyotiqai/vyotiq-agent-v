@@ -24,7 +24,7 @@ import type { ChatMetaStore } from '../chatStores'
 import type { IncompleteTurnState, PendingFollowUpState } from '@renderer/lib/hooks/createChatStreamController'
 import type { ContextUsageState } from '../components/composer/ContextMeter'
 import type { SlashClientHandlers } from '../components/composer/slashCommandExecute'
-import { useHasTranscriptRunError } from '../components/ChatStreamLeaves'
+import { useTranscriptShowsError } from '../components/ChatStreamLeaves'
 import type { ChatItemsStore } from '../chatStores'
 import { isRetryableTurnFailure } from '@shared/errors'
 import type { TurnOutcome } from '@shared/transcript'
@@ -46,8 +46,8 @@ export type ChatErrorSurfacesArgs = {
 /**
  * Single derivation of the banner / turn-failure presentation shared by
  * ChatView and SessionChatColumn — the suppression rule (composer banner off
- * when the transcript already shows a run_error row) and the failure-label
- * vocabulary live here so the surfaces cannot drift.
+ * when the latest turn already shows the same error as a run_error row) and the
+ * failure-label vocabulary live here so the surfaces cannot drift.
  */
 export function deriveChatErrorSurfaces(
   hasTranscriptRunError: boolean,
@@ -73,7 +73,7 @@ export function deriveChatErrorSurfaces(
 export function useChatErrorSurfaces(
   args: ChatErrorSurfacesArgs & { itemsStore?: ChatItemsStore; items: UiItem[] }
 ): ChatErrorSurfaces {
-  const hasTranscriptRunError = useHasTranscriptRunError(args.itemsStore, args.items)
+  const hasTranscriptRunError = useTranscriptShowsError(args.itemsStore, args.items, args.error)
   return deriveChatErrorSurfaces(hasTranscriptRunError, args)
 }
 
@@ -103,7 +103,7 @@ export function useComposerEditState(args: {
     files?: AttachedFile[],
     extras?: ComposerSendExtras
   ) => boolean | void | Promise<boolean | void>
-  onRevertToUserMessage?: (userMessageIndex: number) => boolean | Promise<boolean>
+  onRevertToUserMessage?: (userMessageIndex: number, runN?: number) => boolean | Promise<boolean>
   onAfterRevert?: () => void
 }) {
   const {
@@ -168,11 +168,11 @@ export function useComposerEditState(args: {
   )
 
   const beginPromptRevert = useCallback(
-    async (messageIndex: number) => {
+    async (messageIndex: number, runN?: number) => {
       if (!onRevertToUserMessage) return
       // Confirmation (with the affected-file list) is owned by the handler —
       // do not add a second native confirm here.
-      const ok = await onRevertToUserMessage(messageIndex)
+      const ok = await onRevertToUserMessage(messageIndex, runN)
       if (ok !== false) onAfterRevert?.()
     },
     [onRevertToUserMessage, onAfterRevert]
@@ -262,11 +262,8 @@ export type BuildComposerSendPropsInput = {
     focus?: string
   ) => Promise<{ ok: true; message: string } | { ok: false; message: string }>
   slashHandlers?: SlashClientHandlers
-  sideRailPad?: boolean
   onFocus?: () => void
   onEditLastUserMessage?: () => boolean
-  agentProfileId?: string | null
-  onAgentProfileChange?: (profileId: string | null) => void
 }
 
 /** Shared dock/hero composer prop bag for ChatView and SessionChatColumn. */
@@ -295,8 +292,6 @@ export function buildComposerSendProps(input: BuildComposerSendPropsInput) {
     onChatSettingsChange: input.onChatSettingsChange,
     agentMode: input.agentMode,
     onAgentModeChange: input.onAgentModeChange,
-    agentProfileId: input.agentProfileId,
-    onAgentProfileChange: input.onAgentProfileChange,
     onSend: input.onSend,
     onStop: input.onStop,
     pendingFollowUps: input.pendingFollowUps,
@@ -314,7 +309,6 @@ export function buildComposerSendProps(input: BuildComposerSendPropsInput) {
     metaStore: input.metaStore,
     onCompactContext: input.onCompactContext,
     slashHandlers: input.slashHandlers,
-    sideRailPad: input.sideRailPad,
     ...(input.onFocus ? { onFocus: input.onFocus } : {}),
     ...(input.onEditLastUserMessage
       ? { onEditLastUserMessage: input.onEditLastUserMessage }

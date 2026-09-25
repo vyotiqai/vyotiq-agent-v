@@ -112,7 +112,7 @@ export const mcpHandlers = {
             'Enabled MCP server(s) are configured but not connected:',
             ...lines,
             '',
-            'Fix in Marketplace → Manage (ensure uv/uvx is on PATH), then Refresh MCP connections.'
+            'Fix in Extensions (ensure uv/uvx is on PATH), then Reconnect all MCP servers in Registry and trust.'
           ].join('\n')
         )
       }

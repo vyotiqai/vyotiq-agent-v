@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
-import { cn } from '@renderer/lib/ui'
+import { Button, cn } from '@renderer/lib/ui'
+import { Icon } from '@renderer/lib/icons'
+import { AgentVSpinner } from '@renderer/lib/brand/AgentVSpinner'
+import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
+import { formatElapsed } from '@shared/utils/timeFormat'
+import { matchShortcut } from '@renderer/lib/shortcuts'
+import { INSPECTOR_TAB_SHORTCUTS } from '@renderer/lib/shortcuts/bindings'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { CHAT_RIGHT_PANEL_BODY } from '@renderer/lib/utils/layout'
 import type { PtySessionInfo } from '@shared/ipc'
@@ -23,7 +28,7 @@ function readCssColor(varName: string, fallback: string): string {
 
 function readTerminalTheme(): ITheme {
   return {
-    background: readCssColor('--vy-bg', '#000000'),
+    background: readCssColor('--vy-sunken', '#000000'),
     foreground: readCssColor('--vy-fg', '#f5f5f5'),
     cursor: readCssColor('--vy-fg', '#f5f5f5'),
     selectionBackground: readCssColor('--vy-surface-2', '#262626'),
@@ -109,6 +114,16 @@ function PtySessionView({
     // instead of sending ^C, and Ctrl/Cmd+V pastes the clipboard, like VS Code /
     // Windows Terminal.
     term.attachCustomKeyEventHandler((event) => {
+      // Ctrl I would send a Tab and Alt 1–6 an escape sequence to the shell
+      // while the window handler also hid the inspector or switched its tab.
+      if (
+        event.type === 'keydown' &&
+        (matchShortcut(event, 'inspector') ||
+          matchShortcut(event, 'inspectorExpand') ||
+          INSPECTOR_TAB_SHORTCUTS.some((id) => matchShortcut(event, id)))
+      ) {
+        return false
+      }
       if (
         event.type === 'keydown' &&
         (event.ctrlKey || event.metaKey) &&
@@ -253,7 +268,7 @@ function PtySessionView({
   return (
     <div
       ref={hostRef}
-      className="h-full w-full bg-bg"
+      className="h-full w-full bg-sunken"
       data-pty-host
       role="application"
       aria-label="Terminal session"
@@ -265,23 +280,27 @@ function PtySessionView({
 
 /**
  * Interactive user PTY terminal panel (VS Code–style).
- * Agent `terminal` tool output stays in the chat transcript — this dock is not
- * wired to agent tools and must not auto-open on agent activity.
+ * The agent's `terminal` commands show here only as a read-only mirror session
+ * (main's ptySessions agent mirror); their output stays in the record too. The
+ * dock must not auto-open on agent activity.
  */
 export function TerminalPanel({
   className,
   workspacePath,
   visible = true,
-  sessionBarHostRef,
+  agentCommand = null,
+  agentCommandAt = null,
   onSessionsChange,
   onActiveSessionChange
 }: {
   className?: string
   workspacePath?: string | null
-  /** False while the terminal dock tab is CSS-hidden. */
+  /** False while the terminal tab is CSS-hidden. */
   visible?: boolean
-  /** When set, session tabs render in the dock tab bar instead of inside the panel. */
-  sessionBarHostRef?: React.RefObject<HTMLElement | null>
+  /** The command the run is executing right now, if any. */
+  agentCommand?: string | null
+  /** When that command started (ISO). */
+  agentCommandAt?: string | null
   onSessionsChange?: (sessions: PtySessionInfo[]) => void
   onActiveSessionChange?: (session: PtySessionInfo | null) => void
 }) {
@@ -461,36 +480,26 @@ export function TerminalPanel({
     }
   }, [refreshList])
 
-  const [sessionBarHost, setSessionBarHost] = useState<HTMLElement | null>(null)
-  useLayoutEffect(() => {
-    if (!sessionBarHostRef || !visible) {
-      setSessionBarHost(null)
-      return
-    }
-    let cancelled = false
-    const attach = (): void => {
-      if (cancelled) return
-      const host = sessionBarHostRef.current
-      if (host) {
-        setSessionBarHost(host)
-        return
-      }
-      requestAnimationFrame(attach)
-    }
-    attach()
-    return () => {
-      cancelled = true
-    }
-  }, [sessionBarHostRef, visible, sessions.length])
-
-  const useExternalSessionBar = Boolean(sessionBarHostRef)
-  const showExternalSessionBar = useExternalSessionBar && visible && sessionBarHost != null
+  // The status bar's clock: only while the run has a command in flight.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!visible || agentCommand === null) return undefined
+    setNow(Date.now())
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [agentCommand, visible])
+  const startedMs = agentCommandAt ? Date.parse(agentCommandAt) : Number.NaN
+  const elapsed = agentCommand !== null && Number.isFinite(startedMs) ? formatElapsed(Math.max(0, now - startedMs)) : ''
+  const activeIsAgent = activeSession?.backend === 'agent'
+  const workspaceName = workspacePath ? formatWorkspaceName(workspacePath) : ''
+  const shellName = activeSession && !activeIsAgent ? activeSession.title : null
 
   const sessionBar = (
     <TerminalSessionBar
       sessions={sessions}
       activeId={activeId}
       splitId={splitId}
+      agentCommand={agentCommand}
       onSelect={(id) => {
         // Selecting the secondary split pane: swap roles so split stays open.
         if (splitId && id === splitId && activeId && id !== activeId) {
@@ -518,18 +527,24 @@ export function TerminalPanel({
         Interactive terminal. Screen reader users can press Control plus backtick to review terminal
         output in a text buffer.
       </p>
-      {showExternalSessionBar
-        ? createPortal(sessionBar, sessionBarHost)
-        : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {!useExternalSessionBar ? (
-          <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border/40 bg-bg px-1 py-0.5">
-            {sessionBar}
+        {sessionBar}
+        {activeIsAgent ? (
+          <div className="flex h-8 shrink-0 items-center gap-2 bg-surface px-3 text-xs text-muted" data-terminal-readonly>
+            <Icon name="lock" size={12} className="shrink-0" />
+            <span className="min-w-0 flex-1 truncate">Agent session · read-only</span>
+            <button
+              type="button"
+              className="shrink-0 whitespace-nowrap rounded-sm font-medium text-accent hover:underline focus-visible:vy-focus-ring"
+              onClick={() => void createSession()}
+            >
+              Open a shell here
+            </button>
           </div>
         ) : null}
         {error ? (
           <p
-            className="m-0 shrink-0 border-b border-border/40 px-3 py-1 text-caption text-danger"
+            className="m-0 shrink-0 border-b border-border px-3 py-1.5 text-xs text-danger"
             data-terminal-error
             role="alert"
           >
@@ -537,11 +552,11 @@ export function TerminalPanel({
           </p>
         ) : null}
         {usingPipeFallback ? (
-          <p className="m-0 shrink-0 border-b border-border/40 px-3 py-1 text-caption text-muted">
+          <p className="m-0 shrink-0 border-b border-border px-3 py-1.5 text-xs text-muted">
             Pipe shell fallback — rebuild node-pty for Electron for a full interactive PTY.
           </p>
         ) : null}
-        <div className="relative min-h-0 min-w-0 flex-1 bg-bg p-1">
+        <div className="relative min-h-0 min-w-0 flex-1 bg-sunken p-1">
           {activeId && workspacePath ? (
             splitId && splitId !== activeId ? (
               <div className="flex h-full min-h-0 w-full gap-1">
@@ -554,7 +569,7 @@ export function TerminalPanel({
                     isReadOnly={isMirrorSession}
                   />
                 </div>
-                <div className="w-px shrink-0 bg-border/50" />
+                <div className="w-px shrink-0 bg-border" />
                 <div className="min-h-0 min-w-0 flex-1">
                   <PtySessionView
                     sessionId={splitId}
@@ -580,12 +595,38 @@ export function TerminalPanel({
               title="No terminal"
               body={
                 workspacePath
-                  ? 'Use New terminal above to start an interactive shell.'
+                  ? 'The agent’s commands show up here, read-only. You can open your own shell beside them.'
                   : 'Open a workspace to start an interactive shell.'
+              }
+              actions={
+                workspacePath ? (
+                  <Button size="sm" onClick={() => void createSession()}>
+                    Open a shell
+                  </Button>
+                ) : null
               }
             />
           )}
         </div>
+        {activeSession ? (
+          <div
+            className="flex h-7 shrink-0 items-center gap-3 border-t border-border px-3 font-mono text-caption text-tertiary"
+            data-terminal-status
+          >
+            {activeIsAgent && agentCommand !== null ? (
+              <span className="inline-flex items-center gap-1.5 font-sans">
+                <AgentVSpinner size={10} />
+                {elapsed ? `running · ${elapsed}` : 'running'}
+              </span>
+            ) : !activeIsAgent && !activeSession.running ? (
+              <span className="font-sans">exited</span>
+            ) : null}
+            <span className="flex-1" />
+            <span className="min-w-0 truncate" title={activeSession.cwd}>
+              {[shellName, workspaceName].filter(Boolean).join(' · ')}
+            </span>
+          </div>
+        ) : null}
       </div>
     </div>
   )

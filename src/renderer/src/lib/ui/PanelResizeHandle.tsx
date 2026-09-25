@@ -27,6 +27,15 @@ export type PanelResizeHandleProps = {
   step?: number
   className?: string
   disabled?: boolean
+  /**
+   * The handle sits on the hairline between two flush panes and takes no room
+   * in the row. The pane after it draws the rule as a border, which stays one
+   * device pixel at every display scale like every other rule; a drawn 1px
+   * line came out one or two device pixels depending on where it landed. The
+   * handle lights the rule up on hover, drag and focus, and its hit area
+   * reaches into both panes.
+   */
+  hairline?: boolean
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -46,7 +55,8 @@ export function PanelResizeHandle({
   onChange,
   step = 8,
   className,
-  disabled = false
+  disabled = false,
+  hairline = false
 }: PanelResizeHandleProps) {
   const [dragging, setDragging] = useState(false)
   const valueRef = useRef(value)
@@ -179,7 +189,8 @@ export function PanelResizeHandle({
       data-panel-resize-handle
       data-dragging={dragging ? '1' : undefined}
       className={cn(
-        'group relative z-sticky w-1.5 shrink-0 touch-none select-none',
+        'group relative z-sticky shrink-0 touch-none select-none',
+        hairline ? 'w-0' : 'w-1.5',
         disabled
           ? 'cursor-default'
           : 'cursor-col-resize focus-visible:vy-focus-ring',
@@ -191,12 +202,24 @@ export function PanelResizeHandle({
     >
       <span
         aria-hidden
+        data-resize-line
         className={cn(
-          'pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/50',
-          'group-hover:bg-border-strong group-focus-visible:bg-accent',
-          dragging && 'bg-accent'
+          'pointer-events-none absolute inset-y-0',
+          hairline ? 'left-0 w-px' : 'left-1/2 w-px -translate-x-1/2',
+          // The drag state is a branch, not a base plus an override: `cn` only
+          // joins strings, and Tailwind emits group-hover as
+          // `.group-hover\:bg-border-strong:is(:where(.group):hover *)` — (0,2,0)
+          // against a bare `.bg-accent` (0,1,0). Appended, it lost on specificity
+          // no matter the order, and since pointer capture keeps `:hover` on the
+          // handle for the whole drag, the gutter never changed colour at all.
+          dragging
+            ? 'bg-accent'
+            : hairline
+              ? 'group-hover:bg-border-strong group-focus-visible:bg-accent'
+              : 'bg-border group-hover:bg-border-strong group-focus-visible:bg-accent'
         )}
       />
+      {hairline ? <span aria-hidden className="absolute inset-y-0 -inset-x-[3px]" /> : null}
     </div>
   )
 }

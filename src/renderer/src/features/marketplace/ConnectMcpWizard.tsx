@@ -633,7 +633,7 @@ export function ConnectMcpWizard({
                     ? 'Sign in with Google to connect this MCP.'
                     : github
                       ? 'Sign in with GitHub to connect this MCP.'
-                      : `Opens your browser to authorize ${serverName}.`}
+                      : `Opens your browser to authorise ${serverName}.`}
               </p>
             )}
 
@@ -783,7 +783,7 @@ export function ConnectMcpWizard({
               Back
             </Button>
           ) : null}
-          <Button
+          <Button variant="primary"
             pending={pending}
             disabled={step === 'finish' ? finishDisabled : pending}
             onClick={() => void goNext()}

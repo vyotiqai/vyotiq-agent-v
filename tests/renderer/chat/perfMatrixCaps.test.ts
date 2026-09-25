@@ -50,12 +50,21 @@ describe('perf matrix scenario 3 — long transcript row build', () => {
   })
 })
 
-describe('live-early virtualization on the main transcript', () => {
-  it('passes virtualizeLiveEarly from ChatView and SessionChatColumn', () => {
+describe('live cost of the main surfaces', () => {
+  it('keeps live-early virtualization on the legacy transcript', () => {
     const root = join(__dirname, '../../../src/renderer/src')
     const chatView = readFileSync(join(root, 'features/chat/ChatView.tsx'), 'utf8')
-    const column = readFileSync(join(root, 'features/chat/SessionChatColumn.tsx'), 'utf8')
     expect(chatView).toMatch(/virtualizeLiveEarly/)
-    expect(column).toMatch(/virtualizeLiveEarly/)
+  })
+
+  it('bounds the task record by folding, deferring and memoising instead', () => {
+    const root = join(__dirname, '../../../src/renderer/src')
+    const pane = readFileSync(join(root, 'features/task/TaskPane.tsx'), 'utf8')
+    const work = readFileSync(join(root, 'features/task/record/WorkItems.tsx'), 'utf8')
+    // Live items reach the record through the store leaf, deferred, never per token.
+    expect(pane).toMatch(/useChatLiveItems/)
+    expect(pane).toMatch(/useDeferredValue/)
+    // Unchanged work rows skip rendering while one row streams.
+    expect(work).toMatch(/memo\(WorkItemViewImpl, \(prev, next\) => sameWork/)
   })
 })

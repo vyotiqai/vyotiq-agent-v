@@ -110,7 +110,6 @@ describe('runAgent effective workspace settings', () => {
       system: 'system',
       estimatedTokens: 100,
       layers: { system: 10, history: 50, tools: 20, buffer: 20 },
-      anthropicNative: undefined,
       compaction: null
     }))
     saveWorkspacesState({
@@ -288,4 +287,5 @@ describe('runAgent effective workspace settings', () => {
     expect(input.responseLanguage).toBe('German')
     expect(input.responseVerbosity).toBe('balanced')
   })
+
 })

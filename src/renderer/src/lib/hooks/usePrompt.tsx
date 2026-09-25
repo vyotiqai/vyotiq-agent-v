@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
+import { Button } from '@renderer/lib/ui'
 
 type PromptState = {
   message: string
@@ -48,7 +49,7 @@ export function usePrompt(): {
       label={state?.message ?? 'Input'}
       initialFocusRef={inputRef}
       useNativeDialog={false}
-      className="w-[min(92vw,28rem)] rounded-xl border border-border bg-surface text-fg shadow-menu"
+      className="vy-menu w-[min(92vw,28rem)] text-fg"
     >
       <form
         className="flex flex-col gap-3"
@@ -71,19 +72,12 @@ export function usePrompt(): {
           }
         />
         <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            className="rounded-md px-3 py-1.5 text-xs text-muted hover:bg-surface-2"
-            onClick={() => finish(null)}
-          >
+          <Button size="sm" variant="ghost" onClick={() => finish(null)}>
             Cancel
-          </button>
-          <button
-            type="submit"
-            className="rounded-md bg-accent px-3 py-1.5 text-xs text-accent-fg hover:bg-accent/90"
-          >
+          </Button>
+          <Button type="submit" size="sm" variant="primary">
             OK
-          </button>
+          </Button>
         </div>
       </form>
     </Dialog>

@@ -131,6 +131,28 @@ describe('ipc schemas', () => {
     ).toBe(false)
   })
 
+  it('takes done-when checks for a new task only', () => {
+    const user = { role: 'user' as const, content: 'fix it' }
+    const parsed = ChatStartRequestSchema.parse({
+      messages: [user],
+      workspacePath: '/ws',
+      doneWhen: ['  The suite passes  ']
+    })
+    expect(parsed.doneWhen).toEqual(['The suite passes'])
+    expect(
+      ChatStartRequestSchema.safeParse({
+        incremental: true,
+        newMessages: [user],
+        workspacePath: '/ws',
+        runId: 'run-1',
+        doneWhen: ['The suite passes']
+      }).success
+    ).toBe(false)
+    expect(
+      ChatStartRequestSchema.safeParse({ messages: [user], workspacePath: '/ws', doneWhen: ['   '] }).success
+    ).toBe(false)
+  })
+
   it('rejects full messages on chatStart resume unless incremental', () => {
     const user = { role: 'user' as const, content: 'hi' }
     expect(
@@ -518,13 +540,15 @@ describe('ipc schemas', () => {
         verifyCoverage: 1
       }).verified
     ).toBe(true)
-    expect(
-      AgentEventSchema.parse({
-        type: 'mode_changed',
-        runId: 'r1',
-        mode: 'plan'
-      }).mode
-    ).toBe('plan')
+    const modeOf = (raw: unknown): string | null => {
+      const ev = AgentEventSchema.parse(raw)
+      return ev.type === 'mode_changed' ? ev.mode : null
+    }
+    expect(modeOf({ type: 'mode_changed', runId: 'r1', mode: 'agent' })).toBe('agent')
+    // events.jsonl written before Plan merged into Agent still holds 'plan'.
+    // Transcript replay re-parses those rows, so the value must FOLD rather
+    // than throw — a rejected row would break replay of every pre-merge run.
+    expect(modeOf({ type: 'mode_changed', runId: 'r1', mode: 'plan' })).toBe('agent')
     expect(
       AgentEventSchema.parse({
         type: 'goal_update',
@@ -936,6 +960,34 @@ describe('ipc schemas', () => {
     ).toThrow()
     expect(NotificationMutateRequestSchema.parse({ id: 'n1' })).toEqual({ id: 'n1' })
     expect(NotificationMutateRequestSchema.parse({ all: true })).toEqual({ all: true })
+  })
+
+  it('points crash alerts at Diagnostics, folding inbox items saved as General', () => {
+    const crash = {
+      id: 'n2',
+      createdAt: '2026-08-16T00:00:00.000Z',
+      read: false,
+      source: 'system',
+      kind: 'crash',
+      title: 'UI recovered after a crash',
+      body: 'crashed',
+      dedupeKey: 'crash'
+    }
+    // A persisted item from before the Diagnostics section still parses, and
+    // now opens the section that actually lists crashes.
+    expect(
+      NotificationItemSchema.parse({ ...crash, action: { type: 'open_settings', section: 'general' } })
+        .action
+    ).toEqual({ type: 'open_settings', section: 'diagnostics' })
+    expect(
+      NotificationItemSchema.parse({
+        ...crash,
+        action: { type: 'open_settings', section: 'diagnostics' }
+      }).action
+    ).toEqual({ type: 'open_settings', section: 'diagnostics' })
+    expect(() =>
+      NotificationItemSchema.parse({ ...crash, action: { type: 'open_settings', section: 'voice' } })
+    ).toThrow()
   })
 
   it('parses model picker preference fields on settings', () => {

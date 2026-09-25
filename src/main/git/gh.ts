@@ -119,11 +119,24 @@ type GhPrJson = {
     messageHeadline?: string
     authors?: Array<{ name?: string; login?: string }>
   }>
+  /**
+   * Two node shapes share the rollup: a CheckRun (`name`, `status`,
+   * `conclusion`, `detailsUrl`, `startedAt`, `completedAt`) and a
+   * StatusContext (`context`, `state`, `targetUrl`, `description`).
+   */
   statusCheckRollup?: Array<{
     name?: string
+    context?: string
     state?: string
+    status?: string
     conclusion?: string | null
+    detailsUrl?: string | null
+    targetUrl?: string | null
+    startedAt?: string | null
+    completedAt?: string | null
+    description?: string | null
   }>
+  mergeStateStatus?: string
   reviews?: GhReviewJson[]
   latestReviews?: GhReviewJson[]
   reviewDecision?: string
@@ -184,7 +197,8 @@ const PR_VIEW_JSON_FIELDS = [
   'latestReviews',
   'reviewDecision',
   'reviewRequests',
-  'isDraft'
+  'isDraft',
+  'mergeStateStatus'
 ] as const
 
 /** Older gh / reduced GraphQL surface when optional review fields are unsupported. */
@@ -222,6 +236,12 @@ function isUnknownJsonFieldError(message: string): boolean {
   return /unknown json field|unknown field|is not a valid field/i.test(message)
 }
 
+/** A check's link, when GitHub gave one the app may open. */
+function httpsUrl(raw: string | null | undefined): string | null {
+  const url = raw?.trim()
+  return url && /^https:\/\//i.test(url) ? url : null
+}
+
 function mapPrView(data: GhPrJson): PrView | null {
   if (typeof data.number !== 'number') return null
   return {
@@ -250,10 +270,15 @@ function mapPrView(data: GhPrJson): PrView | null {
         .filter(Boolean)
     })),
     checks: (data.statusCheckRollup ?? []).map((c) => ({
-      name: c.name ?? 'check',
-      state: c.state ?? 'UNKNOWN',
-      conclusion: c.conclusion ?? null
+      name: c.name ?? c.context ?? 'check',
+      state: c.state ?? c.status ?? 'UNKNOWN',
+      conclusion: c.conclusion ?? null,
+      url: httpsUrl(c.detailsUrl ?? c.targetUrl),
+      startedAt: c.startedAt ?? null,
+      completedAt: c.completedAt ?? null,
+      description: c.description?.trim() || null
     })),
+    mergeStateStatus: data.mergeStateStatus ?? '',
     reviews: (data.reviews ?? []).map(mapReview),
     latestReviews: (data.latestReviews ?? []).map(mapReview),
     reviewDecision: data.reviewDecision ?? '',
@@ -680,6 +705,20 @@ export async function prClose(cwd: string, number: number): Promise<{ detail: st
   try {
     const out = await gh(['pr', 'close', prNumberArg(number)], cwd, TIMEOUT_MS)
     return { detail: out.trim() || 'Pull request closed' }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new Error(message)
+  }
+}
+
+/** `gh pr ready`: a draft becomes ready for review. */
+export async function prReady(cwd: string, number: number): Promise<{ detail: string }> {
+  if (!(await ghAvailable())) {
+    throw new Error('GitHub CLI (gh) is not installed or not on PATH')
+  }
+  try {
+    const out = await gh(['pr', 'ready', prNumberArg(number)], cwd, TIMEOUT_MS)
+    return { detail: out.trim() || 'Marked ready for review' }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     throw new Error(message)

@@ -7,7 +7,7 @@ export const NOTIFICATION_INBOX_CAP = 50
 export const NotificationSourceSchema = z.enum(['agent', 'system'])
 export type NotificationSource = z.infer<typeof NotificationSourceSchema>
 
-export const NotificationKindSchema = z.enum(['run_done', 'run_error', 'needs_you', 'crash'])
+export const NotificationKindSchema = z.enum(['run_done', 'run_error', 'needs_you', 'crash', 'update_ready'])
 export type NotificationKind = z.infer<typeof NotificationKindSchema>
 
 export const NotificationActionSchema = z.discriminatedUnion('type', [
@@ -18,8 +18,19 @@ export const NotificationActionSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('open_settings'),
-    section: z.literal('general')
-  })
+    /**
+     * Only crash alerts open Settings, and the crash list lives in
+     * Diagnostics. Items written before that section existed say 'general'
+     * and sit in the persisted inbox, so the old value is folded forward
+     * instead of failing the parse and dropping the item.
+     */
+    section: z.preprocess(
+      (value) => (value === 'general' ? 'diagnostics' : value),
+      z.literal('diagnostics')
+    )
+  }),
+  /** Open the navigator's update panel — the one update surface. */
+  z.object({ type: z.literal('open_update') })
 ])
 export type NotificationAction = z.infer<typeof NotificationActionSchema>
 
@@ -32,7 +43,9 @@ export const NotificationItemSchema = z.object({
   title: z.string().min(1).max(NOTIFICATION_TITLE_MAX),
   body: z.string().max(NOTIFICATION_BODY_MAX),
   dedupeKey: z.string().min(1),
-  action: NotificationActionSchema.optional()
+  action: NotificationActionSchema.optional(),
+  /** A finished run's files still waiting on Keep or Undo when it finished — its Ready for review. */
+  reviewFiles: z.number().int().min(1).optional()
 })
 export type NotificationItem = z.infer<typeof NotificationItemSchema>
 
@@ -53,7 +66,8 @@ export const NotificationPublishInputSchema = z.object({
   title: z.string().min(1),
   body: z.string(),
   dedupeKey: z.string().min(1),
-  action: NotificationActionSchema.optional()
+  action: NotificationActionSchema.optional(),
+  reviewFiles: z.number().int().min(1).optional()
 })
 export type NotificationPublishInput = z.infer<typeof NotificationPublishInputSchema>
 
@@ -74,3 +88,9 @@ export function runErrorDedupeKey(runId: string): string {
 }
 
 export const CRASH_DEDUPE_KEY = 'crash'
+
+/**
+ * One "update ready" item at most: a newer download replaces it, and it goes at
+ * the next launch — a restart ends that download's ready state either way.
+ */
+export const UPDATE_READY_DEDUPE_KEY = 'update_ready'

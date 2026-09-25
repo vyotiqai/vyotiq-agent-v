@@ -89,6 +89,7 @@ import { httpRetryBackoffMs, sleepAbortable } from '../providers/fetchWithRetry'
 import { isGitRepo } from '../../git/git'
 import { readWorkspacesState } from '../../workspace/workspaces'
 import { workspacePathsEqual } from '../../../shared/workspacePath'
+import { workspaceIdFromPath } from '../../../shared/workspaceId'
 import { listActiveRuns } from '../runRegistry'
 import { AppError, formatError, isAbortError, mcpConnectErrorCode } from '../../../shared/errors'
 import { assertPublicUrl } from '@main/net/webFetch'
@@ -622,9 +623,11 @@ function handleMcpSessionClosed(sessionKey: string, client: Client): void {
   sessionConfigKeys.delete(sessionKey)
   connectErrors.set(sessionKey, MCP_TRANSPORT_CLOSED)
   invalidateSyncFingerprint()
+  const stdio = parseMcpStdioSessionKey(sessionKey)
   logger.warn('MCP session closed by transport; will reconnect on next sync', {
     scope: 'mcp',
-    serverId: parseMcpStdioSessionKey(sessionKey)?.serverId ?? sessionKey
+    serverId: stdio?.serverId ?? sessionKey,
+    ...(stdio ? { workspaceId: workspaceIdFromPath(stdio.workspacePath) } : {})
   })
 }
 
@@ -953,6 +956,18 @@ export async function refreshMcpServers(servers: McpServer[]): Promise<McpServer
   // must reconnect even if a future teardown path forgets to.
   invalidateSyncFingerprint()
   await syncMcpServers(servers)
+  return getMcpServerStatus(servers)
+}
+
+/**
+ * Try again for the servers whose last connect failed, and leave every live
+ * session alone. Refresh tears all of them down, which drops a tool call in
+ * flight on a healthy server to retry one that is not. Binaries are looked up
+ * again because installing the missing one is the usual fix.
+ */
+export async function retryFailedMcpServers(servers: McpServer[]): Promise<McpServerStatus[]> {
+  clearMcpBinaryCache()
+  await syncMcpServers(servers, { forceRetryFailures: true })
   return getMcpServerStatus(servers)
 }
 
@@ -1504,11 +1519,16 @@ export async function connectMcpServer(
         err: formatError(err)
       })
     }
+    const stdioWorkspace = isStdioTransport(server.transport)
+      ? resolveStdioWorkspacePath(workspacePath)
+      : null
     logger.info('MCP server connected', {
       scope: 'mcp',
       serverId: server.id,
       transport: server.transport ?? 'stdio',
-      workspacePath: isStdioTransport(server.transport) ? resolveStdioWorkspacePath(workspacePath) : undefined,
+      // A stdio server runs once per open workspace; without the id, the
+      // second workspace's connect reads as the same server reconnecting.
+      ...(stdioWorkspace ? { workspaceId: workspaceIdFromPath(stdioWorkspace) } : {}),
       toolCount: tools.length,
       skippedToolCount: skippedToolNames.length,
       resourceCount: resources.length,

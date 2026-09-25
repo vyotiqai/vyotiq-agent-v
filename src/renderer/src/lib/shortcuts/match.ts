@@ -1,12 +1,11 @@
 import { SHORTCUT_BINDINGS, type ShortcutId } from './bindings'
 
 /**
- * Main composer contenteditable — same selector as focus / aria.
- * Enabled renders role=combobox (ARIA 1.2 combobox pattern); disabled
- * degrades to role=textbox. Match both so shortcuts survive the enabled state.
+ * The composer's editable field, in every form it takes — the New task brief,
+ * the instruction line, an inline edit. Matched by attribute rather than by
+ * accessible name, which differs between them ("Message", "Instruction").
  */
-export const COMPOSER_MESSAGE_SELECTOR =
-  '[role="textbox"][aria-label="Message"], [role="combobox"][aria-label="Message"]'
+export const COMPOSER_MESSAGE_SELECTOR = '[data-composer-input]'
 
 /** Browser dock URL field. */
 export const BROWSER_URL_SELECTOR = '[data-browser-url]'
@@ -14,7 +13,8 @@ export const BROWSER_URL_SELECTOR = '[data-browser-url]'
 export type ShortcutKeyEvent = Pick<
   KeyboardEvent,
   'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'
->
+> &
+  Partial<Pick<KeyboardEvent, 'code'>>
 
 /**
  * Shifted punctuation glyph → base key. With Shift held, `.` produces `>`
@@ -32,6 +32,11 @@ const SHIFTED_PUNCTUATION: Record<string, string> = {
  */
 export function matchShortcut(e: ShortcutKeyEvent, id: ShortcutId): boolean {
   const binding = SHORTCUT_BINDINGS[id]
+  if (binding.alt) {
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false
+    // Option+digit types a symbol on macOS; the physical key still says which.
+    return e.key.toLowerCase() === binding.key || e.code === `Digit${binding.key}`
+  }
   // Shifted punctuation (e.g. Shift+'.' produces '>' on US layouts) maps to
   // its base key so `shift: 'allow'` chords like Cmd/Ctrl+Shift+. match.
   const eventKey = SHIFTED_PUNCTUATION[e.key] ?? e.key.toLowerCase()
@@ -78,11 +83,7 @@ export function isMainComposerTarget(target: EventTarget | null): boolean {
   if (typeof el.closest === 'function') {
     return Boolean(el.closest(COMPOSER_MESSAGE_SELECTOR))
   }
-  const role = el.getAttribute?.('role')
-  return (
-    el.getAttribute?.('aria-label') === 'Message' &&
-    (role === 'textbox' || role === 'combobox')
-  )
+  return Boolean(el.hasAttribute?.('data-composer-input'))
 }
 
 /**
@@ -105,9 +106,12 @@ export function shouldBlockPanelShortcut(target: EventTarget | null): boolean {
   return isEditableShortcutTarget(el)
 }
 
-/** Focus the Message composer. Returns whether focus landed on it. */
-export function focusComposerMessage(): boolean {
-  const candidates = document.querySelectorAll<HTMLElement>(COMPOSER_MESSAGE_SELECTOR)
+/**
+ * Focus the Message composer — the first on the page, or the one inside
+ * `within` (a pane, when there are several). Returns whether focus landed on it.
+ */
+export function focusComposerMessage(within?: ParentNode | null): boolean {
+  const candidates = (within ?? document).querySelectorAll<HTMLElement>(COMPOSER_MESSAGE_SELECTOR)
   for (const el of candidates) {
     if (el.getAttribute('contenteditable') === 'false') continue
     el.focus()

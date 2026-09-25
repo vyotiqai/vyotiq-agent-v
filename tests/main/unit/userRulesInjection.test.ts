@@ -1,17 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { assembleContext, clearSystemPromptCache } from '@main/agent/context/assemble'
 import { formatResponseStyle, formatUserRules } from '@main/agent/context/userRules'
-import { DEFAULT_AGENT_IDENTITY } from '@shared/agentPersona'
 import { DEFAULT_SETTINGS, type UserRule } from '@shared/ipc'
-import type { LlmProvider } from '@main/agent/providers/types'
-
-const mockProvider: LlmProvider = {
-  id: 'ollama',
-  listModels: async () => [],
-  streamChat: async function* () {
-    yield { type: 'done' }
-  }
-}
 
 const model = {
   id: 'test',
@@ -69,8 +59,6 @@ describe('user rules injection', () => {
         }
       ],
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     expect(result.system).toContain('<user_rules>')
     expect(result.system).toContain('Prefer named exports')
@@ -100,8 +88,6 @@ describe('user rules injection', () => {
       toolsJsonEstimate: 100,
       userRules: [huge],
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     expect(result.system.length).toBeLessThan(huge.body.length)
   })
@@ -134,49 +120,49 @@ describe('user rules injection', () => {
     expect(section).not.toContain('Respond in')
   })
 
-  it('emits the built-in identity blurb line first when identity is set', () => {
+  it('emits the identity blurb line first when identity is set', () => {
     const section = formatResponseStyle({
-      identity: DEFAULT_AGENT_IDENTITY,
+      identity: 'Reads the code before acting.',
       persona: 'Nova',
       tone: 'friendly, blunt'
     })
     expect(section).toContain('<response_style>')
-    const blurbIdx = section.indexOf(`Identity: ${DEFAULT_AGENT_IDENTITY}`)
+    const blurbIdx = section.indexOf('Identity: Reads the code before acting.')
     const personaIdx = section.indexOf('Identity: this assistant is "Nova"')
     expect(blurbIdx).toBeGreaterThanOrEqual(0)
     expect(personaIdx).toBeGreaterThan(blurbIdx)
   })
 
-  it('emits no built-in identity blurb when identity is absent', () => {
+  it('emits no identity line at all when identity is absent', () => {
     const section = formatResponseStyle({ persona: 'Nova', tone: 'friendly' })
-    expect(section).not.toContain('Identity: Agent V')
     expect(section).toContain('Identity: this assistant is "Nova"')
+    // No built-in blurb backfills an unset identity: the persona name line is
+    // the only Identity line in the section.
+    expect(section).not.toContain('Agent V')
+    expect(section.match(/^Identity: /gm)).toHaveLength(1)
   })
 
-  it('renders a custom agentIdentity, winning over the built-in blurb', () => {
+  it('renders identity and persona as separate lines', () => {
     const section = formatResponseStyle({
       identity: 'Custom staff-level blurb',
       persona: 'Nova',
       tone: 'friendly'
     })
     expect(section).toContain('Identity: Custom staff-level blurb')
-    expect(section).not.toContain(`Identity: ${DEFAULT_AGENT_IDENTITY}`)
-    // Custom identity does not suppress the custom persona name line.
+    // A set identity does not suppress the persona name line.
     expect(section).toContain('Identity: this assistant is "Nova"')
   })
 
-  it('suppresses the built-in blurb when identity is empty and a custom persona is set', () => {
-    // Mirrors loop.ts wiring: settings.agentIdentity '' + custom persona -> identity undefined.
-    const section = formatResponseStyle({ persona: 'Nova', tone: 'friendly' })
-    expect(section).toContain('Identity: this assistant is "Nova"')
-    expect(section).not.toContain(`Identity: ${DEFAULT_AGENT_IDENTITY}`)
-  })
-
-  it('renders the built-in blurb when identity and persona are both empty', () => {
-    // Mirrors loop.ts wiring: settings.agentIdentity '' + no custom persona -> DEFAULT_AGENT_IDENTITY.
-    const section = formatResponseStyle({ identity: DEFAULT_AGENT_IDENTITY })
-    expect(section).toContain(`Identity: ${DEFAULT_AGENT_IDENTITY}`)
+  it('emits an identity-only section when persona is empty', () => {
+    // Mirrors loop.ts wiring: settings.agentPersona '' -> persona undefined.
+    const section = formatResponseStyle({ identity: 'Reads the code before acting.' })
+    expect(section).toContain('Identity: Reads the code before acting.')
     expect(section).not.toContain('Identity: this assistant is')
+  })
+
+  it('emits nothing when identity, persona and tone are all empty', () => {
+    // Mirrors loop.ts wiring: no user settings -> no fallbacks -> no section.
+    expect(formatResponseStyle({ identity: '', persona: '', tone: '' })).toBe('')
   })
 
   it('injects a custom agentIdentity into the assembled system prompt', async () => {
@@ -191,8 +177,6 @@ describe('user rules injection', () => {
       identity: 'Custom staff-level blurb',
       persona: 'Nova',
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     expect(result.system).toContain('Identity: Custom staff-level blurb')
     expect(result.system).toContain('Identity: this assistant is "Nova"')
@@ -216,8 +200,6 @@ describe('user rules injection', () => {
       persona: 'Nova',
       tone: 'friendly, blunt',
       providerId: 'ollama',
-      provider: mockProvider,
-      signal: new AbortController().signal
     })
     expect(result.systemStable).toContain('<response_style>')
     expect(result.system).toContain('Identity: this assistant is "Nova"')

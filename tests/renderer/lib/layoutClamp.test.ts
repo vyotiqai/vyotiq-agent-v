@@ -9,7 +9,7 @@ import {
 
 describe('clampSidebarWidthPx', () => {
   it('respects absolute min/max on a wide viewport', () => {
-    expect(clampSidebarWidthPx(100, 1600)).toBe(180)
+    expect(clampSidebarWidthPx(100, 1600)).toBe(220)
     expect(clampSidebarWidthPx(500, 1600)).toBe(420)
     expect(clampSidebarWidthPx(220, 1600)).toBe(220)
   })
@@ -30,31 +30,33 @@ describe('clampDockWidthPx', () => {
   })
 
   it('reserves sidebar floor + chat min so three-pane stays usable', () => {
-    // 1000 − 280 chat − 180 sidebar (dock open, no rail) = 540 → width wins
+    // 1000 − 280 chat − 220 navigator = 500 → width wins
     expect(clampDockWidthPx(480, 1000)).toBe(480)
     expect(clampDockWidthPx(DOCK_WIDTH_DEFAULT_PX, 1000)).toBe(DOCK_WIDTH_DEFAULT_PX)
-    // 700 − 280 − 180 = 240, but floor is DOCK_WIDTH_MIN_PX (280)
+    // 700 − 280 − 220 = 200, but floor is DOCK_WIDTH_MIN_PX (280)
     expect(clampDockWidthPx(400, 700)).toBe(DOCK_WIDTH_MIN_PX)
   })
 
-  it('includes side rail when dock is closed', () => {
-    // 1000 − 280 − 180 − 40 rail = 500 → width wins
-    expect(clampDockWidthPx(480, 1000, { dockOpen: false })).toBe(480)
+  it('opens at the redesign width beside the navigator in a 1440px window', () => {
+    // 1440 − 264 navigator − 452 inspector leaves a 724px record.
+    expect(DOCK_WIDTH_DEFAULT_PX).toBe(452)
+    expect(clampDockWidthPx(DOCK_WIDTH_DEFAULT_PX, 1440, { sidebarWidthPx: 264 })).toBe(452)
   })
 
   it('reserves two chat columns when paneCount is 2', () => {
-    // 1600 − 2×280 − 180 sidebar (dock open, no rail) = 860 → width wins
+    // 1600 − 2×280 − 180 sidebar = 860 → width wins
     expect(clampDockWidthPx(800, 1600, { paneCount: 2, sidebarWidthPx: 180 })).toBe(800)
   })
 })
 
 describe('paneCapacityReservedPx', () => {
-  it('sums sidebar, side rail, and open dock width', () => {
+  it('sums the sidebar and the inspector while it is shown', () => {
     expect(
       paneCapacityReservedPx({ sidebarWidthPx: 200, dockOpen: true, dockWidthPx: 400 })
     ).toBe(600)
+    // Hidden, the inspector leaves nothing behind — there is no rail any more.
     expect(paneCapacityReservedPx({ sidebarWidthPx: 200, dockOpen: false, dockWidthPx: 400 })).toBe(
-      240
+      200
     )
   })
 })

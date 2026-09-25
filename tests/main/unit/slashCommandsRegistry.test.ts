@@ -63,7 +63,7 @@ describe('builtin slash commands', () => {
     )
     const marketplace = BUILTIN_COMMANDS.find((c) => c.trigger === 'marketplace')
     expect(marketplace?.description).toBe(
-      'Browse and manage skills, MCP servers, and packages'
+      'Browse and manage MCP servers, skills, rules and packages'
     )
     expect(marketplace?.description).not.toMatch(/plugin/i)
   })
@@ -98,7 +98,9 @@ describe('builtin slash commands', () => {
     expect(BUILTIN_COMMANDS.map((c) => c.trigger)).toEqual(
       expect.arrayContaining(['goal', 'loop'])
     )
-    expect(BUILTIN_COMMANDS).toHaveLength(15)
+    // 15 before /plan was removed with Plan mode.
+    expect(BUILTIN_COMMANDS).toHaveLength(14)
+    expect(BUILTIN_COMMANDS.map((c) => c.trigger)).not.toContain('plan')
     const send = resolveBuiltin('builtin:goal', 'fix flaky tests', '')
     expect(send?.action).toBe('send')
     if (send?.action === 'send') {

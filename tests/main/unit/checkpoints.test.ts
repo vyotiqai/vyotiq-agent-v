@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
   existsSync,
@@ -14,6 +15,41 @@ vi.mock('@main/app/window', () => ({
   getMainWindow: () => null
 }))
 
+// A restore that fails partway. The fs builtin namespace is frozen in ESM, so
+// a hoisted module mock with a test-controlled route is the repo pattern
+// (editTools.test.ts). Unrouted calls go straight through.
+const { fsRoute } = vi.hoisted(() => ({
+  fsRoute: {
+    /** Fail the copy whose source ends with this — a restore from a checkpoint copy. */
+    failCopyFrom: null as string | null,
+    code: 'EBUSY',
+    /** What the failing copy leaves at its destination first, as a full disk does. */
+    partial: null as string | null,
+    /** Each copy and removal, by the name of the file it wrote or removed. */
+    ops: [] as string[]
+  }
+}))
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>()
+  const name = (p: import('fs').PathLike): string => String(p).split(/[\\/]/).pop() ?? ''
+  return {
+    ...actual,
+    copyFileSync: (src: import('fs').PathLike, dest: import('fs').PathLike, mode?: number): void => {
+      fsRoute.ops.push(`copy ${name(dest)}`)
+      if (fsRoute.failCopyFrom != null && String(src).replace(/\\/g, '/').endsWith(fsRoute.failCopyFrom)) {
+        if (fsRoute.partial != null) actual.writeFileSync(dest, fsRoute.partial)
+        throw Object.assign(new Error(`${fsRoute.code}: simulated, copyfile`), { code: fsRoute.code })
+      }
+      actual.copyFileSync(src, dest, mode)
+    },
+    rmSync: (path: import('fs').PathLike, options?: import('fs').RmOptions): void => {
+      fsRoute.ops.push(`rm ${name(path)}`)
+      actual.rmSync(path, options)
+    }
+  }
+})
+
 import {
   beginWriteCheckpoint,
   discardWriteCheckpoint,
@@ -23,7 +59,8 @@ import {
   resetWriteCheckpointsForTests,
   planRewindWrites,
   resolveWrites,
-  rewindWritesFrom
+  rewindWritesFrom,
+  setRewindUndoMemoryBytesForTests
 } from '@main/agent/checkpoints'
 import { executeTool } from '@main/agent/tools'
 import { toolTodoWrite } from '@main/agent/tools/todo'
@@ -415,11 +452,13 @@ describe('write checkpoints', async () => {
     writeFileSync(join(workspace, 'a.txt'), 'agent\n', 'utf8')
     const meta = finalizeWriteCheckpoint(runDir)
 
-    writeFileSync(join(workspace, 'a.txt'), 'user-edit\n', 'utf8')
+    // The copy to restore from is gone. (A file you changed since is left
+    // alone instead — see rewindLeavesEdits.test.ts.)
+    rmSync(join(runDir, 'checkpoints', meta!.id, 'files', 'a.txt'))
     const result = rewindWritesFrom(runDir, workspace, 0)
     expect(result.undoableRestoreFailed).toBe(true)
-    expect(result.skipped).toContain('a.txt')
-    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('user-edit\n')
+    expect(result.restored).toEqual([])
+    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe('agent\n')
 
     const persisted = getWriteCheckpointMeta(runDir, meta!.id)
     expect(persisted?.resolved).not.toBe(true)
@@ -593,5 +632,235 @@ describe('write checkpoints', async () => {
     const full = planRewindWrites(runDir, 0)
     expect(full.checkpointIds).toHaveLength(2)
     expect(full.files.map((f) => f.path).sort()).toEqual(['a.txt', 'b.txt'])
+  })
+})
+
+/**
+ * Run 874dad8f: `str_replace index.md` failed with "File not found", but
+ * `recordPrior` had already run — it has to, since the prior content must be
+ * captured before the write. The speculative entry stayed, so the finalized
+ * checkpoint carried `index.md` as created and undoable for a file that never
+ * existed. The receipt reported it in `wroteFiles`, and Undo deletes what a
+ * `created` entry names.
+ */
+describe('write checkpoint drops entries nothing changed', () => {
+  const signal = new AbortController().signal
+
+  it('does not record a created entry for a failed edit of a missing file', async () => {
+    beginWriteCheckpoint(runDir, workspace)
+    const result = await executeTool(
+      'str_replace',
+      JSON.stringify({ path: 'index.md', old_string: 'a', new_string: 'b' }),
+      workspace,
+      signal,
+      { runDir }
+    )
+    expect(result.ok).toBe(false)
+    expect(result.content).toMatch(/File not found/)
+    expect(finalizeWriteCheckpoint(runDir)).toBeNull()
+    expect(existsSync(join(workspace, 'index.md'))).toBe(false)
+  })
+
+  it('keeps a real write recorded alongside a failed one', async () => {
+    beginWriteCheckpoint(runDir, workspace)
+    await executeTool(
+      'str_replace',
+      JSON.stringify({ path: 'index.md', old_string: 'a', new_string: 'b' }),
+      workspace,
+      signal,
+      { runDir }
+    )
+    const ok = await executeTool(
+      'edit',
+      JSON.stringify({ path: 'real.txt', contents: 'written\n' }),
+      workspace,
+      signal,
+      { runDir }
+    )
+    expect(ok.ok).toBe(true)
+    const meta = finalizeWriteCheckpoint(runDir)
+    expect(meta).not.toBeNull()
+    expect(meta!.files.map((f) => f.path)).toEqual(['real.txt'])
+  })
+
+  it('drops a modified entry when every edit of that file failed', async () => {
+    beginWriteCheckpoint(runDir, workspace)
+    const before = readFileSync(join(workspace, 'a.txt'), 'utf8')
+    const result = await executeTool(
+      'str_replace',
+      JSON.stringify({ path: 'a.txt', old_string: 'nowhere in the file', new_string: 'x' }),
+      workspace,
+      signal,
+      { runDir }
+    )
+    expect(result.ok).toBe(false)
+    expect(finalizeWriteCheckpoint(runDir)).toBeNull()
+    expect(readFileSync(join(workspace, 'a.txt'), 'utf8')).toBe(before)
+  })
+
+  it('leaves no index entry behind when every entry was a phantom', async () => {
+    beginWriteCheckpoint(runDir, workspace)
+    await executeTool(
+      'str_replace',
+      JSON.stringify({ path: 'index.md', old_string: 'a', new_string: 'b' }),
+      workspace,
+      signal,
+      { runDir }
+    )
+    finalizeWriteCheckpoint(runDir)
+    const indexPath = join(runDir, 'checkpoints', 'index.json')
+    if (!existsSync(indexPath)) return
+    const index = JSON.parse(readFileSync(indexPath, 'utf8')) as {
+      checkpoints: { id: string }[]
+    }
+    expect(index.checkpoints).toEqual([])
+  })
+})
+
+/**
+ * A restore throws partway through a rewind (EBUSY, EPERM, a full disk). The
+ * files restored before it used to stay restored while the rewind reported
+ * failure and kept the history: a half-rewound workspace.
+ */
+describe('a rewind that fails partway', () => {
+  const read = (name: string): string => readFileSync(join(workspace, name), 'utf8')
+
+  beforeEach(() => {
+    fsRoute.failCopyFrom = null
+    fsRoute.code = 'EBUSY'
+    fsRoute.partial = null
+  })
+
+  afterEach(() => {
+    fsRoute.failCopyFrom = null
+    fsRoute.partial = null
+  })
+
+  /** The turn at user message 2 changes a, b and c; a rewind restores c, then b, then a. */
+  async function changeThreeFiles(): Promise<string> {
+    const names = ['a', 'b', 'c']
+    for (const n of names) writeFileSync(join(workspace, `${n}.txt`), `${n}0\n`, 'utf8')
+    const cp = beginWriteCheckpoint(runDir, workspace, 2)
+    for (const n of names) await cp.recordPrior(`${n}.txt`, 'write')
+    for (const n of names) writeFileSync(join(workspace, `${n}.txt`), `${n}2\n`, 'utf8')
+    const id = finalizeWriteCheckpoint(runDir)!.id
+    fsRoute.ops = []
+    return id
+  }
+
+  it('puts the first file back when the second cannot be written', async () => {
+    const id = await changeThreeFiles()
+    fsRoute.failCopyFrom = 'files/b.txt'
+
+    const result = rewindWritesFrom(runDir, workspace, 2)
+
+    // c.txt really was restored before b.txt failed.
+    expect(fsRoute.ops).toEqual(['copy c.txt', 'copy b.txt'])
+    expect(read('c.txt')).toBe('c2\n')
+    expect(read('b.txt')).toBe('b2\n')
+    expect(read('a.txt')).toBe('a2\n')
+    expect(result).toEqual({
+      checkpointIds: [],
+      restored: [],
+      skipped: [],
+      edited: [],
+      undoableRestoreFailed: true,
+      failure: { path: 'b.txt', reason: 'EBUSY' }
+    })
+    // Nothing is marked, so Keep and Undo still offer every file.
+    const meta = getWriteCheckpointMeta(runDir, id)
+    expect(meta?.undone).not.toBe(true)
+    expect(meta?.files.map((f) => f.resolved)).toEqual([undefined, undefined, undefined])
+  })
+
+  it('puts back the file whose copy failed partway', async () => {
+    await changeThreeFiles()
+    fsRoute.failCopyFrom = 'files/b.txt'
+    fsRoute.code = 'ENOSPC'
+    fsRoute.partial = 'b'
+
+    const result = rewindWritesFrom(runDir, workspace, 2)
+
+    expect(result.failure).toEqual({ path: 'b.txt', reason: 'ENOSPC' })
+    expect(read('b.txt')).toBe('b2\n')
+    expect(read('c.txt')).toBe('c2\n')
+  })
+
+  it('deletes what it brought back, restores what it deleted, and removes the folders it made', async () => {
+    writeFileSync(join(workspace, 'b.txt'), 'b0\n', 'utf8')
+    mkdirSync(join(workspace, 'gone', 'deep'), { recursive: true })
+    writeFileSync(join(workspace, 'gone', 'deep', 'old.txt'), 'old\n', 'utf8')
+    const cp = beginWriteCheckpoint(runDir, workspace, 2)
+    await cp.recordPrior('b.txt', 'write')
+    await cp.recordPrior('gone', 'delete', { recursiveDir: true })
+    await cp.recordPrior('new.txt', 'write')
+    writeFileSync(join(workspace, 'b.txt'), 'b2\n', 'utf8')
+    rmSync(join(workspace, 'gone'), { recursive: true })
+    writeFileSync(join(workspace, 'new.txt'), 'made by the agent\n', 'utf8')
+    finalizeWriteCheckpoint(runDir)
+    fsRoute.ops = []
+    fsRoute.failCopyFrom = 'files/b.txt'
+
+    const result = rewindWritesFrom(runDir, workspace, 2)
+
+    // new.txt went and gone/deep/old.txt came back before b.txt failed.
+    expect(fsRoute.ops.slice(0, 3)).toEqual(['rm new.txt', 'copy old.txt', 'copy b.txt'])
+    expect(result.failure?.path).toBe('b.txt')
+    expect(read('new.txt')).toBe('made by the agent\n')
+    expect(existsSync(join(workspace, 'gone'))).toBe(false)
+    expect(read('b.txt')).toBe('b2\n')
+  })
+
+  it('leaves a newer turn unmarked when an older one fails, and a retry finishes', async () => {
+    writeFileSync(join(workspace, 'b.txt'), 'b0\n', 'utf8')
+    const older = beginWriteCheckpoint(runDir, workspace, 0)
+    await older.recordPrior('b.txt', 'write')
+    writeFileSync(join(workspace, 'b.txt'), 'b1\n', 'utf8')
+    const olderId = finalizeWriteCheckpoint(runDir)!.id
+    const newer = beginWriteCheckpoint(runDir, workspace, 2)
+    await newer.recordPrior('a.txt', 'write')
+    writeFileSync(join(workspace, 'a.txt'), 'a2\n', 'utf8')
+    const newerId = finalizeWriteCheckpoint(runDir)!.id
+    fsRoute.failCopyFrom = `${olderId}/files/b.txt`
+
+    expect(rewindWritesFrom(runDir, workspace, 0).undoableRestoreFailed).toBe(true)
+    // The newer turn used to be marked undone before the older one failed.
+    expect(read('a.txt')).toBe('a2\n')
+    expect(read('b.txt')).toBe('b1\n')
+    expect(getWriteCheckpointMeta(runDir, newerId)?.undone).not.toBe(true)
+    expect(getWriteCheckpointMeta(runDir, olderId)?.undone).not.toBe(true)
+
+    fsRoute.failCopyFrom = null
+    const retried = rewindWritesFrom(runDir, workspace, 0)
+    expect(retried.undoableRestoreFailed).toBe(false)
+    expect(retried.checkpointIds).toEqual([newerId, olderId])
+    expect(read('a.txt')).toBe('hello\n')
+    expect(read('b.txt')).toBe('b0\n')
+    expect(getWriteCheckpointMeta(runDir, newerId)?.undone).toBe(true)
+    expect(getWriteCheckpointMeta(runDir, olderId)?.undone).toBe(true)
+  })
+
+  it('past its memory budget, puts back from copies on disk and then removes them', async () => {
+    const copyDirs = (): string[] => readdirSync(tmpdir()).filter((n) => n.startsWith('vyotiq-rewind-undo-'))
+    const existing = new Set(copyDirs())
+    setRewindUndoMemoryBytesForTests(0)
+    try {
+      await changeThreeFiles()
+      fsRoute.failCopyFrom = 'files/b.txt'
+
+      expect(rewindWritesFrom(runDir, workspace, 2).failure?.path).toBe('b.txt')
+      // Each file is copied aside before it is restored; c.txt comes back from its copy.
+      expect(fsRoute.ops.slice(0, 5)).toEqual(['copy 0', 'copy c.txt', 'copy 1', 'copy b.txt', 'copy c.txt'])
+      expect(fsRoute.ops.slice(5)).toEqual([expect.stringMatching(/^rm vyotiq-rewind-undo-/)])
+      expect(read('c.txt')).toBe('c2\n')
+      expect(read('b.txt')).toBe('b2\n')
+
+      fsRoute.failCopyFrom = null
+      expect(rewindWritesFrom(runDir, workspace, 2).restored).toEqual(['c.txt', 'b.txt', 'a.txt'])
+      expect(read('c.txt')).toBe('c0\n')
+      expect(copyDirs().filter((n) => !existing.has(n))).toEqual([])
+    } finally {
+      setRewindUndoMemoryBytesForTests(null)
+    }
   })
 })

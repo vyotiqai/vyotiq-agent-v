@@ -33,6 +33,7 @@ import {
   memoryRoot
 } from '@main/agent/context/memory'
 import {
+  normalizeMemoryRelPath,
   toolMemoryList,
   toolMemoryRead,
   toolMemoryWrite
@@ -186,5 +187,25 @@ describe('memory store', () => {
     expect(out).toContain('index.md coverage: 1/1 notes — full')
     expect(out).not.toContain('not in index.md:')
     expect(out).not.toContain('indexed but missing on disk:')
+  })
+})
+
+describe('normalizeMemoryRelPath', () => {
+  it('accepts exactly what the memory tools accept', () => {
+    // The panel and the agent write into one namespace. A path one accepts and
+    // the other rejects is a note the agent can never read back.
+    expect(normalizeMemoryRelPath('index.md')).toBe('index.md')
+    expect(normalizeMemoryRelPath('state.md')).toBe('state.md')
+    expect(normalizeMemoryRelPath('notes/arch.md')).toBe('notes/arch.md')
+    expect(normalizeMemoryRelPath('  /notes/arch.md  ')).toBe('notes/arch.md')
+  })
+
+  it('rejects traversal, foreign files and unsafe note names', () => {
+    expect(() => normalizeMemoryRelPath('')).toThrow(/path is required/)
+    expect(() => normalizeMemoryRelPath('../secrets.txt')).toThrow(/Invalid memory path/)
+    expect(() => normalizeMemoryRelPath('notes/../index.md')).toThrow(/Invalid memory path/)
+    expect(() => normalizeMemoryRelPath('other.md')).toThrow(/index\.md, state\.md/)
+    expect(() => normalizeMemoryRelPath('notes/a.txt')).toThrow(/safe characters/)
+    expect(() => normalizeMemoryRelPath('notes/')).toThrow(/safe characters/)
   })
 })

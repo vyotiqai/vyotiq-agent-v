@@ -98,7 +98,7 @@ test.afterAll(async () => {
 test('rates a finished run from the transcript and persists the verdict', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
+  const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) await expand.click()
 
   await window.getByRole('button', { name: GOAL, exact: true }).first().click()

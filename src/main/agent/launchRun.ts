@@ -2,14 +2,11 @@ import { existsSync } from 'fs'
 import type { WebContents } from 'electron'
 import type { AgentInteractionMode, ChatMessage, ProviderId } from '../../shared/ipc'
 import { logger } from '../../shared/logger'
-import { AppError } from '../../shared/utils/errors'
 import { workspacePathsEqual } from '../../shared/workspacePath'
 import { getWorkspaces } from '../workspace/workspaces'
-import { loadStatus, runExists } from './state'
-import { resolveRunDir } from '../storage/paths'
-import { createRunId, validateExistingRunStart } from './loop'
+import { runExists } from './state'
+import { createRunId } from './loop'
 import {
-  clearRunAbort,
   isActive,
   isRunTurnComplete,
   tryRegisterRunAbort,
@@ -20,12 +17,11 @@ import { hydrateRunFollowUps, startAgentRunInBackground } from './startAgentRun'
 /**
  * The one path that starts an agent run.
  *
- * Chat IPC, the delegated-task scheduler and boot relaunch all used to repeat
- * this sequence — workspace validation, run id allocation, immutable-binding
- * checks, atomic registration, follow-up hydration and background start — with
- * small divergences between copies. Those divergences are how a task-launched
- * run ended up without the checks a user-launched one got. Callers now supply
- * intent; this owns the order.
+ * Chat IPC and boot relaunch all used to repeat this sequence — workspace
+ * validation, run id allocation, atomic registration, follow-up hydration and
+ * background start — with small divergences between copies. Those divergences
+ * are how a background-launched run ended up without the checks a user-launched
+ * one got. Callers now supply intent; this owns the order.
  *
  * Zod parsing and sender authorization stay with the IPC layer: they are about
  * trusting the request, not about starting a run.
@@ -43,32 +39,9 @@ export type LaunchRunRequest = {
   focusedFile?: string | null
   provider?: ProviderId
   model?: string
-  modelExplicit?: boolean
-  agentProfileId?: string
   runtime?: 'local' | 'cloud'
-  /** Delegated task that owns this run (scheduler launches only). */
-  delegatedTaskId?: string
-  /**
-   * Which binding fields the caller stated explicitly. An absent field inherits
-   * the run's persisted binding; a field set to a DIFFERENT value is a rebind
-   * attempt and is refused — so `undefined` and "not provided" cannot mean the
-   * same thing here.
-   */
-  explicit?: { agentProfileId?: boolean; runtime?: boolean }
-  /**
-   * Refuse the launch if another live run already holds this teammate. Taken
-   * atomically with the run registration, so no window exists where two
-   * callers both observe the identity as free.
-   */
-  requireProfileSlot?: boolean
-  /**
-   * Runs after the run slot is claimed and before the run starts. Throwing
-   * aborts the launch and releases the claim. Callers that must have durable
-   * state on disk before any work begins (the task scheduler writing its
-   * `running` record) hook in here, so a failed write means the run never ran
-   * rather than running untracked.
-   */
-  onClaimed?: (claim: { runId: string; invokeId: number }) => void
+  /** A new task's done-when checks, from its brief. */
+  doneWhen?: string[]
   /** Where this run's events stream. */
   wc: WebContents
   /** Log label for the originating surface. */
@@ -85,8 +58,7 @@ function refuse(error: string, code?: string): LaunchRunOutcome {
 
 /**
  * Synchronous launch. Used wherever the caller must observe the started run in
- * the same tick (the scheduler returns the stored record straight after
- * enqueue). Refuses rather than waits when the run is still unwinding —
+ * the same tick. Refuses rather than waits when the run is still unwinding —
  * `launchRun` is the variant that waits.
  */
 export function launchRunSync(request: LaunchRunRequest): LaunchRunOutcome {
@@ -104,26 +76,6 @@ export function launchRunSync(request: LaunchRunRequest): LaunchRunOutcome {
     // refuses rather than waits (launchRun is the variant that waits), so the
     // caller's bounded retry is what covers that race.
     if (isActive(request.runId)) return refuse('Run is already active', 'run_active')
-    // Early reject on an immutable-binding violation so the caller gets a clear
-    // error before a run slot is taken. A run dir with no readable status still
-    // resumes: there is no persisted binding to contradict, and runAgent
-    // re-derives (and re-validates) whatever it can from disk.
-    const persisted = loadStatus(resolveRunDir(workspacePath, request.runId))
-    if (persisted) {
-      try {
-        validateExistingRunStart(persisted, request, {
-          agentProfileId: request.explicit?.agentProfileId === true,
-          runtime: request.explicit?.runtime === true
-        })
-      } catch (err) {
-        // A settled fact about the run, not a fault: refuse with a code so the
-        // IPC layer logs it as an expected client failure and the caller can
-        // tell it apart from a transient one worth retrying. Anything else
-        // thrown here is a real fault and must keep its own reporting.
-        if (!(err instanceof AppError)) throw err
-        return refuse(err.message, 'run_binding_immutable')
-      }
-    }
     runId = request.runId
     resume = true
   } else {
@@ -132,22 +84,9 @@ export function launchRunSync(request: LaunchRunRequest): LaunchRunOutcome {
 
   // Atomic register BEFORE any await so cancel works during startup and two
   // concurrent launches cannot overlap the same runDir.
-  const registered = tryRegisterRunAbort(runId, workspacePath, request.agentProfileId, {
-    requireProfileSlot: request.requireProfileSlot === true
-  })
+  const registered = tryRegisterRunAbort(runId, workspacePath)
   if (!registered.ok) return refuse(registered.error, registered.code)
   const { invokeId, controller } = registered
-
-  if (request.onClaimed) {
-    try {
-      request.onClaimed({ runId, invokeId })
-    } catch (err) {
-      // Release the claim: the run never started, so the teammate must not
-      // stay blocked and the id must stay reusable.
-      clearRunAbort(runId, invokeId)
-      return refuse(err instanceof Error ? err.message : String(err), 'claim_failed')
-    }
-  }
 
   if (resume) {
     // Dedupe against the freshly sent messages: a crash between enqueue and
@@ -158,8 +97,7 @@ export function launchRunSync(request: LaunchRunRequest): LaunchRunOutcome {
     scope: 'agent',
     correlationId: runId,
     source: request.source,
-    resume,
-    ...(request.delegatedTaskId ? { delegatedTaskId: request.delegatedTaskId } : {})
+    resume
   })
 
   const shared = {
@@ -170,12 +108,7 @@ export function launchRunSync(request: LaunchRunRequest): LaunchRunOutcome {
     focusedFile: request.focusedFile,
     provider: request.provider,
     model: request.model,
-    modelExplicit: request.modelExplicit,
-    ...(request.delegatedTaskId ? { delegatedTaskId: request.delegatedTaskId } : {}),
-    // Presence matters, not value: only a stated field participates in the
-    // immutable-binding comparison downstream.
-    ...(request.explicit?.agentProfileId ? { agentProfileId: request.agentProfileId } : {}),
-    ...(request.explicit?.runtime ? { runtime: request.runtime } : {})
+    ...(request.runtime ? { runtime: request.runtime } : {})
   }
   const agentInput =
     request.incremental && request.runId && request.newMessages?.length
@@ -184,7 +117,11 @@ export function launchRunSync(request: LaunchRunRequest): LaunchRunOutcome {
           newMessages: request.newMessages,
           persistedMessageCount: request.persistedMessageCount
         }
-      : { ...shared, messages: request.messages ?? [] }
+      : {
+          ...shared,
+          messages: request.messages ?? [],
+          ...(request.doneWhen?.length ? { doneWhen: request.doneWhen } : {})
+        }
 
   startAgentRunInBackground({ runId, workspacePath, invokeId, controller, wc, agentInput })
   return { ok: true, runId, invokeId, resume }

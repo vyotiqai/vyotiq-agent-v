@@ -27,11 +27,11 @@ export const ConfirmFileList = memo(function ConfirmFileList({
   files: readonly ConfirmFileListEntry[]
 }) {
   return (
-    <ul className="m-0 max-h-48 list-none overflow-y-auto rounded-md border border-border/50 bg-surface p-0 text-xs">
+    <ul className="m-0 max-h-48 list-none overflow-y-auto rounded-md border border-border bg-surface p-0 text-xs">
       {files.map((file) => (
         <li
           key={file.path}
-          className="flex min-w-0 items-center gap-2 border-b border-border/40 px-2 py-1 last:border-b-0"
+          className="flex min-w-0 items-center gap-2 border-b border-border/60 px-2 py-1 last:border-b-0"
         >
           <span className="min-w-0 truncate font-mono text-fg" title={file.path}>
             {file.path}

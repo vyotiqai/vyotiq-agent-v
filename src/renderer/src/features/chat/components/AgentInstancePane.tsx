@@ -1,11 +1,9 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ChatMessage } from '@shared/ipc'
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import type { ChatMessage, RunSummary } from '@shared/ipc'
 import type { UiAgentQuestionAnswer } from '@shared/transcript'
 import type { AgentInstanceUiState } from '@shared/utils/agentInstance'
 import { formatAgentInstanceShortId } from '@shared/utils/agentInstance'
-import { instanceDisplayTitle, stripGoalMarkdown } from '@renderer/app/sidebar/runTitle'
-import { MessageList } from '../components/MessageList'
-import { InlineInstanceGateBanner } from './InlineInstanceGateBanner'
+import { instanceDisplayTitle, stripGoalMarkdown } from '@renderer/app/navigator/runTitle'
 import type { InlineInstanceGate } from '../hooks/useInlineInstanceUi'
 import { RunSessionProvider } from '../RunSessionContext'
 import type { WorkspaceFileOpenOptions } from './FilesPanel'
@@ -14,13 +12,34 @@ import {
   type ChatStreamController
 } from '@renderer/lib/hooks/createChatStreamController'
 import { useEscapeToClose } from '@renderer/lib/hooks/useEscapeToClose'
-import { cn } from '@renderer/lib/ui'
-import { CHAT_COLUMN, CHAT_GUTTER, CHAT_STAGE_INSET } from '@renderer/lib/utils/layout'
+import { Icon } from '@renderer/lib/icons'
+import { AgentVSpinner } from '@renderer/lib/brand'
+import { Button, IconButton, MarkdownContent, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
+import { focusComposerMessage, shortcutLabel } from '@renderer/lib/shortcuts'
 import type { ContextUsageState } from '@shared/utils/contextUsage'
 import { ContextMeter } from './composer/ContextMeter'
+import { useResolvedTurnUsage } from './ChatStreamLeaves'
+import { buildRecordModel, type BuildOptions } from '@renderer/features/task/recordModel'
+import { RecordBody, RecordRow } from '@renderer/features/task/record/RecordLayout'
+import { RecordActionsContext } from '@renderer/features/task/record/WorkItems'
+import { TaskRecord } from '@renderer/features/task/TaskRecord'
+import { useRecordScroll } from '@renderer/features/task/useRecordScroll'
 
-const HEADER_ACTION =
-  'shrink-0 rounded px-1.5 py-0.5 text-xs text-muted vy-transition hover:bg-surface/70 hover:text-fg'
+/** An instance's phase, as the parent's stream reports it, in the glyph vocabulary. */
+export function instancePhaseState(phase: AgentInstanceUiState['phase'] | undefined, waiting: boolean): TaskState {
+  if (waiting) return 'needs'
+  switch (phase) {
+    case 'done':
+      return 'done'
+    case 'error':
+      return 'failed'
+    case 'cancelled':
+      return 'stopped'
+    case 'started':
+    default:
+      return 'running'
+  }
+}
 
 /** Matches spawn note in agentInstances + runTitle.PATH_SCOPE_FOOTER. */
 const PATH_SCOPE_FOOTER_SPLIT = /\n\nPath scope \(writes must stay within/i
@@ -49,7 +68,7 @@ function useControllerContextUsage(controller: ChatStreamController): ContextUsa
   return controller.getContextUsage()
 }
 
-const AgentInstanceTranscript = memo(function AgentInstanceTranscript({
+const InstanceRecord = memo(function InstanceRecord({
   controller,
   running,
   pendingRun,
@@ -57,14 +76,12 @@ const AgentInstanceTranscript = memo(function AgentInstanceTranscript({
   transcriptHasEarlier,
   transcriptLoadingEarlier,
   onLoadEarlierMessages,
-  sideRailPad,
   showThinking,
-  collapsedTurns,
-  onTurnToggle,
   onLoadToolContent,
   onApprovalDecision,
   onQuestionSubmit,
-  approvalAutoFocus
+  approvalAutoFocus,
+  lead
 }: {
   controller: ChatStreamController
   running: boolean
@@ -73,10 +90,7 @@ const AgentInstanceTranscript = memo(function AgentInstanceTranscript({
   transcriptHasEarlier: boolean
   transcriptLoadingEarlier: boolean
   onLoadEarlierMessages: () => void | Promise<void>
-  sideRailPad: boolean
   showThinking: boolean
-  collapsedTurns: ReadonlySet<number>
-  onTurnToggle: (turnIndex: number) => void
   onLoadToolContent: (id: string) => Promise<string | null>
   onApprovalDecision: (
     requestId: string,
@@ -84,6 +98,8 @@ const AgentInstanceTranscript = memo(function AgentInstanceTranscript({
   ) => void
   onQuestionSubmit: (requestId: string, answers: UiAgentQuestionAnswer[]) => void
   approvalAutoFocus: boolean
+  /** Goal and Scope — what the instance was asked and what it may touch. */
+  lead: ReactNode
 }) {
   const [, bump] = useState(0)
   const metaStore = useMemo(
@@ -97,28 +113,61 @@ const AgentInstanceTranscript = memo(function AgentInstanceTranscript({
     [controller]
   )
   useEffect(() => controller.subscribeItems(() => bump((n) => n + 1)), [controller])
+  const items = useDeferredValue(controller.items)
+  const turnUsage = useResolvedTurnUsage(metaStore, controller.turnUsage)
+  const live = running || pendingRun
+  const turnStatus = controller.turnStatus
+  const options: BuildOptions = useMemo(
+    () => ({ running: live, failed: turnStatus === 'error', showThinking }),
+    [live, turnStatus, showThinking]
+  )
+  const model = useMemo(() => buildRecordModel(items, options), [items, options])
+  const scroll = useRecordScroll({ ready: !(transcriptLoading && items.length === 0), live })
+  const recordActions = useMemo(() => ({ onLoadToolContent }), [onLoadToolContent])
+  const lastNeeds = live ? (model.runs[model.runs.length - 1]?.needs.length ?? 0) : 0
   return (
-    <MessageList
-      items={controller.items}
-      running={running}
-       pendingRun={pendingRun}
-       turnStatus={controller.turnStatus}
-       transcriptLoading={transcriptLoading}
-      transcriptHasEarlier={transcriptHasEarlier}
-      transcriptLoadingEarlier={transcriptLoadingEarlier}
-      onLoadEarlierMessages={onLoadEarlierMessages}
-      sideRailPad={sideRailPad}
-      showThinking={showThinking}
-      collapsedTurns={collapsedTurns}
-      onTurnToggle={onTurnToggle}
-      onLoadToolContent={onLoadToolContent}
-      onApprovalDecision={onApprovalDecision}
-      onQuestionSubmit={onQuestionSubmit}
-      approvalAutoFocus={approvalAutoFocus}
-      virtualizeLiveEarly
-      turnUsage={controller.turnUsage}
-      metaStore={metaStore}
-    />
+    <RecordActionsContext.Provider value={recordActions}>
+      <RecordBody scrollRef={scroll.scrollRef} contentRef={scroll.contentRef} onScroll={scroll.onScroll}>
+        {transcriptHasEarlier && items.length > 0 ? (
+          <div className="flex justify-center pb-1" data-load-earlier>
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={transcriptLoadingEarlier}
+              pending={transcriptLoadingEarlier}
+              onClick={() => void onLoadEarlierMessages()}
+            >
+              {transcriptLoadingEarlier ? 'Loading earlier work…' : 'Load earlier work'}
+            </Button>
+          </div>
+        ) : null}
+        {transcriptLoading && items.length === 0 ? (
+          <>
+            {lead}
+            <p className="flex items-center gap-2 py-3 text-sm text-muted" role="status" aria-busy="true">
+              <AgentVSpinner size={13} />
+              Loading the record…
+            </p>
+          </>
+        ) : model.runs.length === 0 ? (
+          lead
+        ) : (
+          <TaskRecord
+            model={model}
+            options={options}
+            activity={live && lastNeeds === 0 ? (pendingRun && !running ? 'Starting' : 'Working') : null}
+            turnUsage={turnUsage}
+            onApprovalDecision={onApprovalDecision}
+            onQuestionSubmit={onQuestionSubmit}
+            approvalAutoFocus={approvalAutoFocus}
+            lead={lead}
+            omitFirstBrief
+            workLabel="Work"
+            messageCount={0}
+          />
+        )}
+      </RecordBody>
+    </RecordActionsContext.Provider>
   )
 })
 
@@ -128,19 +177,27 @@ type AgentInstancePaneProps = {
   instanceMeta?: AgentInstanceUiState
   /** Prefer workspace-manager controller so IPC is not dual-subscribed. */
   getController?: (runId: string, workspacePath: string) => ChatStreamController | null
-  /** Match parent chat stage inset when the floating side rail is visible. */
-  sideRailPad?: boolean
+  /** Set on the rightmost pane while the inspector is hidden: offer it back. */
+  onShowInspector?: () => void
   /** Parent-tracked approval/question gates (visible while nested in this pane). */
   pendingGates?: InlineInstanceGate[]
   onOpenInstance?: (runId: string) => void
   /** Leave the sub-session and return to the parent chat. */
   onClose: () => void
+  /** Close this pane — only when it is one of several side by side. */
+  onClosePane?: () => void
   showThinking?: boolean
   onOpenWorkspaceFile?: (path: string, options?: WorkspaceFileOpenOptions) => void
   approvalAutoFocus?: boolean
   /** Report the controller backing this pane (WM-shared or pane-owned) so parents
    * (e.g. the dock Changes panel) can subscribe to the same run's items. */
   onControllerChange?: (controller: ChatStreamController | null) => void
+  /** The instance as the run list has it — its worktree branch, when isolated. */
+  instanceRun?: RunSummary | null
+  /** The parent task's title, for the way back. */
+  parentTitle?: string
+  /** The parent's instances (this one included), one click apart. */
+  siblings?: Record<string, AgentInstanceUiState>
 }
 
 function goalFromMessages(messages: ChatMessage[]): string | undefined {
@@ -165,14 +222,18 @@ export function AgentInstancePane({
   instanceRunId,
   instanceMeta,
   getController,
-  sideRailPad = false,
+  onShowInspector,
   pendingGates = [],
   onOpenInstance,
   onClose,
+  onClosePane,
   showThinking = true,
   onOpenWorkspaceFile,
   approvalAutoFocus = true,
-  onControllerChange
+  onControllerChange,
+  instanceRun = null,
+  parentTitle,
+  siblings
 }: AgentInstancePaneProps) {
   // Controller resolution must be identity-stable across renders. The WM map can
   // re-key/evict/forget entries mid-run (forgetRunRouting even disposes), and
@@ -346,16 +407,6 @@ export function AgentInstancePane({
     void controller.stop()
   }, [controller])
 
-  const [collapsedTurns, setCollapsedTurns] = useState<ReadonlySet<number>>(() => new Set())
-  const onTurnToggle = useCallback((turnIndex: number) => {
-    setCollapsedTurns((prev) => {
-      const next = new Set(prev)
-      if (next.has(turnIndex)) next.delete(turnIndex)
-      else next.add(turnIndex)
-      return next
-    })
-  }, [])
-
   const runSession = useMemo(
     () => ({
       workspacePath,
@@ -369,71 +420,131 @@ export function AgentInstancePane({
   const fullGoal = instanceMeta?.goal ?? goalFromDisk
   const title = instanceDisplayTitle(fullGoal, instanceRunId, instanceMeta?.pathScope)
   const tooltip = fullGoal ? stripGoalMarkdown(fullGoal) || fullGoal : instanceRunId
-  const gutter = sideRailPad ? CHAT_STAGE_INSET : CHAT_GUTTER
+  const waitingIds = new Set(pendingGates.map((g) => g.runId))
+  const state: TaskState = running || pendingRun
+    ? instancePhaseState('started', waitingIds.has(instanceRunId))
+    : instancePhaseState(instanceMeta?.phase ?? (controller.turnStatus === 'error' ? 'error' : controller.turnStatus === 'cancelled' ? 'cancelled' : 'done'), false)
+  const siblingIds = siblings ? Object.keys(siblings) : []
+  const pathScope = instanceMeta?.pathScope ?? instanceRun?.pathScope
+  const branch = instanceRun?.worktreeBranch
+
+  const lead = (
+    <>
+      {fullGoal ? (
+        <RecordRow label="Goal">
+          <div className="text-md leading-[22px] text-fg-strong">
+            <MarkdownContent content={fullGoal} />
+          </div>
+        </RecordRow>
+      ) : null}
+      <RecordRow label="Scope">
+        {branch ? (
+          <p className="flex items-center gap-2 text-xs text-secondary">
+            <Icon name="branch" size={13} className="shrink-0 text-muted" />
+            Works in its own worktree
+            <span className="font-mono text-caption text-muted">{branch}</span>
+          </p>
+        ) : null}
+        {pathScope?.length ? (
+          <ul className="space-y-1">
+            {pathScope.map((p) => (
+              <li key={p} className="flex items-center gap-2 text-xs">
+                <Icon name="folder" size={13} className="shrink-0 text-muted" />
+                <span className="font-mono text-caption text-secondary">{p}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <p className={cn('text-xs text-tertiary', Boolean(branch || pathScope?.length) && 'mt-2')}>
+          {pathScope?.length ? 'Writes only under these paths · ' : ''}Reports back to its parent · cannot start
+          instances of its own
+        </p>
+      </RecordRow>
+    </>
+  )
 
   return (
     <div
       className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-bg text-fg"
       role="region"
-      aria-label={`Agent V instance ${shortId}: ${title}`}
+      aria-label={`Instance ${shortId}: ${title}`}
       data-agent-instance-session={instanceRunId}
       data-chat-stage
     >
-      <header
-        className={cn(
-          'flex h-7 shrink-0 items-center gap-2 border-b border-border/40 bg-bg/90',
-          gutter
-        )}
-      >
-        <button
-          type="button"
-          className={HEADER_ACTION}
-          aria-label="Back to parent chat"
+      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2 text-xs" data-instance-header="">
+        <IconButton
+          icon="arrowLeft"
+          label={parentTitle ? `Back to ${parentTitle}` : 'Back to the parent task'}
+          size="sm"
           onClick={onClose}
-        >
-          Back
-        </button>
-        <div
-          className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-xs"
-          title={tooltip}
-        >
-          {title !== shortId ? (
-            <>
-              <span className="min-w-0 truncate text-fg/80">{title}</span>
-              <span className="shrink-0 text-muted/70" aria-hidden>
-                ·
-              </span>
-            </>
-          ) : null}
-          <span className="shrink-0 text-muted">Instance</span>
-          <span className="shrink-0 font-mono text-muted">{shortId}</span>
-        </div>
-        <ContextMeter usage={contextUsage} />
-        {running ? (
-          <button
-            type="button"
-            className={HEADER_ACTION}
-            aria-label="Stop instance"
-            onClick={onStopInstance}
-          >
-            Stop
-          </button>
+        />
+        {parentTitle ? (
+          <>
+            <span className="min-w-0 max-w-[220px] truncate text-muted" title={parentTitle}>
+              {parentTitle}
+            </span>
+            <Icon name="chevronRight" size={11} className="shrink-0 text-tertiary" />
+          </>
         ) : null}
+        <span className="shrink-0">
+          <StatusGlyph state={state} size={14} label />
+        </span>
+        <h1 className="min-w-0 truncate text-sm font-semibold text-fg-strong" title={tooltip}>
+          {title}
+        </h1>
+        <span className="shrink-0 font-mono text-caption text-tertiary" title="Instance id">
+          {shortId}
+        </span>
+        <span className="flex-1" />
+        {siblingIds.length > 1 && onOpenInstance
+          ? siblingIds.map((id) => {
+              const key = formatAgentInstanceShortId(id)
+              const current = id === instanceRunId
+              const sibling = siblings![id]!
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  title={`Instance ${key} · ${instanceDisplayTitle(sibling.goal, id, sibling.pathScope)}`}
+                  aria-current={current ? 'page' : undefined}
+                  onClick={() => {
+                    if (!current) onOpenInstance(id)
+                  }}
+                  className={cn(
+                    'inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 font-mono text-2xs vy-transition focus-visible:vy-focus-ring',
+                    current ? 'bg-surface-2 text-fg-strong' : 'text-muted hover:bg-surface'
+                  )}
+                >
+                  <StatusGlyph state={instancePhaseState(sibling.phase, waitingIds.has(id))} size={10} />
+                  {key}
+                </button>
+              )
+            })
+          : null}
+        <ContextMeter usage={contextUsage} />
+        {running || pendingRun ? (
+          <Button size="xs" variant="ghost" icon="stop" aria-label="Stop instance" onClick={onStopInstance}>
+            Stop
+          </Button>
+        ) : null}
+        {onShowInspector ? (
+          <IconButton
+            icon="inspector"
+            label={`Show inspector (${shortcutLabel('inspector')})`}
+            size="sm"
+            tone="muted"
+            onClick={onShowInspector}
+          />
+        ) : null}
+        {onClosePane ? <IconButton icon="close" label={`Close ${title}`} size="sm" tone="muted" onClick={onClosePane} /> : null}
       </header>
       {loadError ? (
-        <div className={cn('shrink-0 pt-2 text-xs text-danger', gutter)} role="alert">
+        <div className="shrink-0 border-b border-border px-4 py-2 text-xs text-danger" role="alert">
           {loadError}
         </div>
       ) : null}
-      {pendingGates.length > 0 && onOpenInstance ? (
-        <div className={cn('shrink-0 pt-2', gutter)}>
-          <div className={CHAT_COLUMN}>
-            <InlineInstanceGateBanner gates={pendingGates} onOpenInstance={onOpenInstance} />
-          </div>
-        </div>
-      ) : null}
       <RunSessionProvider value={runSession}>
-        <AgentInstanceTranscript
+        <InstanceRecord
           controller={controller}
           running={running}
           pendingRun={pendingRun}
@@ -443,16 +554,35 @@ export function AgentInstancePane({
           onLoadEarlierMessages={() => {
             void controller.loadEarlierMessages()
           }}
-          sideRailPad={sideRailPad}
           showThinking={showThinking}
-          collapsedTurns={collapsedTurns}
-          onTurnToggle={onTurnToggle}
           onLoadToolContent={onLoadToolContent}
           onApprovalDecision={onApprovalDecision}
           onQuestionSubmit={onQuestionSubmit}
           approvalAutoFocus={approvalAutoFocus}
+          lead={lead}
         />
       </RunSessionProvider>
+      <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-4 text-xs text-muted">
+        <Icon name="lock" size={13} className="shrink-0" />
+        <span className="min-w-0 truncate">Instances take instructions from their parent task.</span>
+        <button
+          type="button"
+          onClick={(event) => {
+            // This pane goes back to the parent task: focus its instruction
+            // line, not the first one on the page (the leftmost of a split).
+            const pane = event.currentTarget.closest('[data-chat-pane]')
+            onClose()
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => {
+                if (!(pane?.isConnected && focusComposerMessage(pane))) focusComposerMessage()
+              })
+            )
+          }}
+          className="shrink-0 rounded-sm font-medium text-accent hover:underline focus-visible:vy-focus-ring"
+        >
+          Add an instruction to the parent
+        </button>
+      </div>
     </div>
   )
 }

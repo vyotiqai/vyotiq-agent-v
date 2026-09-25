@@ -54,24 +54,7 @@ describe('collectTurnFileDiffs', () => {
   })
 })
 
-describe('collectLastTurnChangedFiles', () => {
-  it('only includes writing tools after the last user message', async () => {
-    const { collectLastTurnChangedFiles, collectSessionChangedFiles } = await import(
-      '@renderer/features/chat/utils/turnFileDiffs'
-    )
-    const items: UiItem[] = [
-      { kind: 'message', id: 'u1', role: 'user', content: 'first', at: 1 },
-      tool('t1', 'edit', { path: 'old.ts', contents: 'a\nb\n' }),
-      { kind: 'message', id: 'u2', role: 'user', content: 'second', at: 2 },
-      tool('t2', 'edit', { path: 'new.ts', contents: 'x\ny\n' })
-    ]
-    const last = collectLastTurnChangedFiles(items)
-    const session = collectSessionChangedFiles(items)
-    expect(session.some((f) => f.path === 'old.ts')).toBe(true)
-    expect(last.some((f) => f.path === 'old.ts')).toBe(false)
-    expect(last.some((f) => f.path === 'new.ts')).toBe(true)
-  })
-
+describe('collectSessionChangedFiles', () => {
   it('keeps created when a later edit modifies the same path', async () => {
     const { mergeChangedFileAction } = await import(
       '@renderer/features/chat/utils/turnFileDiffs'

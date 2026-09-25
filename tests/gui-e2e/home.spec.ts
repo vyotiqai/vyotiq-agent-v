@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { expect, test } from '@playwright/test'
+import { basename, join } from 'node:path'
+import { expect, test, type Page } from '@playwright/test'
 import { closeApp, launchApp, type LaunchedApp } from './helpers/launch'
 import { namedGitBranch } from '../../src/shared/utils/gitBranch'
 import {
@@ -12,52 +12,44 @@ import {
 } from './helpers/seedWorkspace'
 
 /**
- * Home end to end against real persisted state.
+ * Home and Usage end to end against real persisted state.
  *
- * The workspace is this repository, so the Repositories section reports the
- * branch git itself reports. Every other value on the page comes from files
- * seeded here the way the app writes them — status.json, goal.json,
- * loop.json, receipt.json and the usage ledger — which exercises the whole
- * path: disk → main aggregation → IPC → preload → the Home sections.
+ * The workspace is this repository, so Workspaces reports the branch git
+ * itself reports. Every number on Home and Usage comes from files seeded here
+ * the way the app writes them — status.json, receipt.json and the usage
+ * ledger — which exercises disk → main aggregation → IPC → the page. The
+ * approval is real too: the fixture run asks through the run's own gate, so
+ * main holds it as pending and Home answers it the way the record would.
  */
 
 let launched: LaunchedApp
 const workspacePath = process.cwd()
-// Read through namedGitBranch, the same helper the app resolves a branch with,
-// so the expectation matches the product rather than raw git. `--abbrev-ref`
-// answers the literal "HEAD" on a detached checkout, which is what
-// actions/checkout leaves behind on a pull_request run — and the app
-// deliberately reports no branch there. Asserting the raw string made this
-// test pass on push-to-main and fail on every PR.
+const workspaceName = basename(workspacePath)
+// Read through namedGitBranch, the same helper the app resolves a branch with:
+// a detached checkout (actions/checkout on a PR) reports no branch at all.
 const branch = namedGitBranch(
-  execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-    cwd: workspacePath,
-    encoding: 'utf8'
-  })
+  execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: workspacePath, encoding: 'utf8' })
 )
-
+const MOD = process.platform === 'darwin' ? 'Meta' : 'Control'
 const RECEIPT_VERSION = 5
-const LOOP_NEXT_AT = new Date(Date.now() + 4 * 3_600_000).toISOString()
 
 function today(): string {
   const now = new Date()
-  const m = String(now.getMonth() + 1).padStart(2, '0')
-  const d = String(now.getDate()).padStart(2, '0')
-  return `${now.getFullYear()}-${m}-${d}`
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
 type SeedRun = {
   runId: string
   goal: string
-  status: 'done' | 'error' | 'cancelled' | 'running'
+  status: 'done' | 'error' | 'cancelled'
   minutesAgo: number
   resumable?: true
   error?: string
-  goalRuntime?: { status: 'active' | 'paused'; continueCount?: number }
-  loop?: { prompt: string; intervalMs: number; nextAt: string }
   receipt?: {
     verifiedAfterLastMutation?: boolean
     toolStats?: Record<string, { ok: number; failed: number }>
+    failureClusters?: Array<{ key: string; count: number }>
+    wroteFiles?: string[]
   }
   usage?: { inputTokens: number; outputTokens: number; billedCost?: number }
 }
@@ -67,10 +59,7 @@ function seedRun(userDataDir: string, run: SeedRun): void {
   mkdirSync(dir, { recursive: true })
   const updatedAt = new Date(Date.now() - run.minutesAgo * 60_000).toISOString()
   // Receipts are written now, so every seeded run lands on today's local day.
-  // Dating them by `minutesAgo` instead made `activeDays` depend on the wall
-  // clock: a run seeded 10h ago falls on yesterday before ~10:00 local.
   const writtenAt = new Date().toISOString()
-
   writeFileSync(
     join(dir, 'status.json'),
     JSON.stringify({
@@ -84,36 +73,7 @@ function seedRun(userDataDir: string, run: SeedRun): void {
     }),
     'utf8'
   )
-  writeFileSync(
-    join(dir, 'messages.jsonl'),
-    `${JSON.stringify({ role: 'user', content: run.goal })}\n`,
-    'utf8'
-  )
-
-  if (run.goalRuntime) {
-    writeFileSync(
-      join(dir, 'goal.json'),
-      JSON.stringify({
-        objective: run.goal,
-        status: run.goalRuntime.status,
-        createdAt: updatedAt,
-        updatedAt,
-        ...(run.goalRuntime.continueCount
-          ? { continueCount: run.goalRuntime.continueCount }
-          : {})
-      }),
-      'utf8'
-    )
-  }
-
-  if (run.loop) {
-    writeFileSync(
-      join(dir, 'loop.json'),
-      JSON.stringify({ ...run.loop, status: 'armed' }),
-      'utf8'
-    )
-  }
-
+  writeFileSync(join(dir, 'messages.jsonl'), `${JSON.stringify({ role: 'user', content: run.goal })}\n`, 'utf8')
   if (run.receipt) {
     const byName = run.receipt.toolStats ?? {}
     const totals = Object.values(byName).reduce(
@@ -130,29 +90,19 @@ function seedRun(userDataDir: string, run: SeedRun): void {
         step: 1,
         goal: run.goal,
         compactionCount: 0,
-        toolStats: {
-          totalCalls: totals.ok + totals.failed,
-          ok: totals.ok,
-          failed: totals.failed,
-          byName
-        },
-        failureClusters: [],
+        toolStats: { totalCalls: totals.ok + totals.failed, ok: totals.ok, failed: totals.failed, byName },
+        failureClusters: run.receipt.failureClusters ?? [],
         unreadEditPaths: [],
-        wroteFiles: [],
+        wroteFiles: run.receipt.wroteFiles ?? [],
         diagnostics: { calls: 0, ok: 0, clean: 0 },
         ...(run.receipt.verifiedAfterLastMutation != null
-          ? {
-              verification: {
-                verifiedAfterLastMutation: run.receipt.verifiedAfterLastMutation
-              }
-            }
+          ? { verification: { verifiedAfterLastMutation: run.receipt.verifiedAfterLastMutation } }
           : {}),
         contractExcerpt: ''
       }),
       'utf8'
     )
   }
-
   if (run.usage) {
     writeFileSync(
       join(dir, 'usage.json'),
@@ -174,260 +124,208 @@ function seedRun(userDataDir: string, run: SeedRun): void {
   }
 }
 
-test.beforeAll(async () => {
-  launched = await launchApp({
-    preLaunchSeed: (userDataDir) => {
-      seedAppSettings(userDataDir, {
-        navigationMode: 'home',
-        toolApprovalOnboardingDone: true,
-        // A cloud provider with no key stored — the real condition the
-        // Environment section is meant to surface.
-        provider: 'openai'
-      })
-      seedRun(userDataDir, {
-        runId: 'home-failed',
-        goal: 'Fix the production login redirect',
-        status: 'error',
-        minutesAgo: 5,
-        error: 'provider returned 500',
-        receipt: { toolStats: { apply_patch: { ok: 6, failed: 4 } } },
-        usage: { inputTokens: 120_000, outputTokens: 40_000, billedCost: 1.25 }
-      })
-      seedRun(userDataDir, {
-        runId: 'home-interrupted',
-        goal: 'Rewrite the export pipeline',
-        status: 'cancelled',
-        minutesAgo: 20,
-        resumable: true,
-        error: RUN_INTERRUPTED_ERROR
-      })
-      seedRun(userDataDir, {
-        runId: 'home-unverified',
-        goal: 'Update the installation guide',
-        status: 'done',
-        minutesAgo: 60,
-        receipt: { verifiedAfterLastMutation: false },
-        usage: { inputTokens: 80_000, outputTokens: 20_000, billedCost: 0.75 }
-      })
-      seedRun(userDataDir, {
-        runId: 'home-goal',
-        goal: 'Keep the test suite green',
-        status: 'done',
-        minutesAgo: 120,
-        // Paused, so booting the app does not auto-resume the goal and start a
-        // live run — the Activity numbers below must come only from the seed.
-        goalRuntime: { status: 'paused', continueCount: 7 },
-        receipt: { verifiedAfterLastMutation: true }
-      })
-      seedRun(userDataDir, {
-        runId: 'home-loop',
-        goal: 'Watch the nightly build',
-        status: 'done',
-        minutesAgo: 240,
-        loop: {
-          prompt: 'Check the nightly build',
-          intervalMs: 4 * 3_600_000,
-          nextAt: LOOP_NEXT_AT
-        },
-        receipt: { verifiedAfterLastMutation: true }
-      })
-      seedRun(userDataDir, {
-        runId: 'home-idle',
-        goal: 'Draft the release notes',
-        status: 'done',
-        minutesAgo: 600,
-        receipt: { verifiedAfterLastMutation: true }
-      })
-      seedWorkspacesRegistry(userDataDir, workspacePath, null)
-    }
+function seedRuns(userDataDir: string): void {
+  seedRun(userDataDir, {
+    runId: 'home-failed',
+    goal: 'Fix the production login redirect',
+    status: 'error',
+    minutesAgo: 5,
+    error: 'provider returned 500',
+    receipt: {
+      toolStats: { apply_patch: { ok: 6, failed: 4 } },
+      failureClusters: [{ key: 'apply_patch: patch did not apply', count: 4 }]
+    },
+    usage: { inputTokens: 120_000, outputTokens: 40_000, billedCost: 1.25 }
   })
-  await expect(launched.window.locator('body')).toBeVisible({ timeout: 30_000 })
-})
-
-test.afterAll(async () => {
-  if (launched) await closeApp(launched)
-})
-
-test('Home opens on the briefing, not a second session list', async () => {
-  const { window } = launched
-  await expect(window.getByRole('heading', { name: 'Home' })).toBeVisible({ timeout: 30_000 })
-  await expect(window.getByRole('region', { name: /Needs you/ })).toBeVisible()
-  await expect(window.getByRole('region', { name: /In flight/ })).toBeVisible()
-  await expect(window.getByRole('region', { name: /Repositories/ })).toBeVisible()
-  await expect(window.getByRole('region', { name: /Activity/ })).toBeVisible()
-  await expect(window.getByRole('region', { name: /^Sessions/ })).toHaveCount(0)
-})
-
-test('lays the reference rail beside the session lists, and fits the window', async () => {
-  const { app, window } = launched
-  // The runner's display may be smaller than the size we would like (the macOS
-  // runner is not a 1600x950 screen), and the OS silently clamps setBounds to
-  // the work area. Ask for the largest window the display will actually give,
-  // and report what we got so the assertions below can be honest about it.
-  const { restore, granted } = await app.evaluate(({ BrowserWindow }) => {
-    const win = BrowserWindow.getAllWindows()[0]
-    const before = win.getBounds()
-    win.setBounds({ ...before, x: 0, y: 0, width: 1600, height: 950 })
-    // Windows and Linux hand back the size we asked for even when it exceeds
-    // the display; macOS clamps it to the work area. Read back what we were
-    // actually given so the assertions below only claim what this window can
-    // demonstrate.
-    return { restore: before, granted: win.getBounds() }
+  seedRun(userDataDir, {
+    runId: 'home-interrupted',
+    goal: 'Rewrite the export pipeline',
+    status: 'cancelled',
+    minutesAgo: 20,
+    resumable: true,
+    error: RUN_INTERRUPTED_ERROR
   })
-  try {
-    await expect(window.getByRole('region', { name: /Activity/ })).toBeVisible({ timeout: 30_000 })
-    // setBounds returns before the renderer has relaid out, and every section
-    // below is read by id — measuring too early reads nulls.
-    await expect
-      .poll(
-        () =>
-          window.evaluate(() =>
-            ['home-environment-heading', 'home-attention-heading', 'home-repositories-heading'].every(
-              (id) => document.getElementById(id)?.closest('section') != null
-            )
-          ),
-        { timeout: 20_000 }
-      )
-      .toBe(true)
+  seedRun(userDataDir, {
+    runId: 'home-unverified',
+    goal: 'Update the installation guide',
+    status: 'done',
+    minutesAgo: 60,
+    receipt: { verifiedAfterLastMutation: false, wroteFiles: ['docs/install.md', 'README.md'] },
+    usage: { inputTokens: 80_000, outputTokens: 20_000, billedCost: 0.75 }
+  })
+  for (const [runId, goal, minutesAgo] of [
+    ['home-goal', 'Keep the test suite green', 120],
+    ['home-loop', 'Watch the nightly build', 240],
+    ['home-idle', 'Draft the release notes', 600]
+  ] as const) {
+    seedRun(userDataDir, { runId, goal, status: 'done', minutesAgo, receipt: { verifiedAfterLastMutation: true } })
+  }
+}
 
-    const box = await window.evaluate(() => {
-      const rect = (id: string): { top: number; left: number; bottom: number } | null => {
-        const el = document.getElementById(id)?.closest('section')
-        if (!el) return null
-        const r = el.getBoundingClientRect()
-        return {
-          top: Math.round(r.top),
-          left: Math.round(r.left),
-          bottom: Math.round(r.bottom)
-        }
-      }
-      const main = document
-        .getElementById('home-repositories-heading')
-        ?.closest('main') as HTMLElement | null
-      const attention = rect('home-attention-heading')
-      const repositories = rect('home-repositories-heading')
-      // The band the two session columns occupy together: side by side that is
-      // the taller of the two, stacked it is both of them end to end. Measured
-      // as a union rather than off a wrapper, so it does not depend on which
-      // element happens to be the row.
-      const listsRowHeight =
-        attention && repositories
-          ? Math.max(attention.bottom, repositories.bottom) -
-            Math.min(attention.top, repositories.top)
-          : 0
-      return {
-        environment: rect('home-environment-heading'),
-        attention,
-        repositories,
-        listsRowHeight,
-        clientHeight: main?.clientHeight ?? 0
+async function goHome(window: Page): Promise<void> {
+  await window.keyboard.press(`${MOD}+Shift+H`)
+  await expect(window.getByRole('heading', { name: 'What should the agent do?' })).toBeVisible({ timeout: 20_000 })
+}
+
+test.describe('Home and Usage', () => {
+  test.beforeAll(async () => {
+    launched = await launchApp({
+      fixtureFile: 'tests/gui-e2e/fixtures/home-approval.json',
+      preLaunchSeed: (userDataDir) => {
+        seedAppSettings(userDataDir, { navigationMode: 'home', toolApprovalOnboardingDone: true })
+        seedRuns(userDataDir)
+        seedWorkspacesRegistry(userDataDir, workspacePath, null)
       }
     })
+    await expect(launched.window.locator('body')).toBeVisible({ timeout: 30_000 })
+  })
 
-    // A provider with no key blocks every run, so it cannot render below the
-    // sessions — that is where it was invisible without scrolling. This holds
-    // at any width, stacked or not.
-    expect(box.environment!.top).toBeLessThan(box.attention!.top)
+  test.afterAll(async () => {
+    if (launched) await closeApp(launched)
+  })
 
-    // The rail is a second column, not more page: stacking it is what used to
-    // push Home past a screen. Both of these describe the wide layout, so they
-    // only apply when the window actually got the size they are about — a
-    // display that clamped it is not a regression.
-    if (granted.width >= 1600) {
-      expect(box.repositories!.left).toBeGreaterThan(box.attention!.left)
-      expect(box.repositories!.top).toBe(box.attention!.top)
+  test('Home asks what the agent should do, and holds only what the navigator can’t', async () => {
+    const { window } = launched
+    await expect(window.getByRole('heading', { name: 'What should the agent do?' })).toBeVisible({ timeout: 30_000 })
+    await expect(window.getByRole('textbox', { name: 'New task' })).toBeVisible()
+    for (const name of ['Needs you', 'Workspaces', 'This week']) {
+      await expect(window.getByRole('region', { name })).toBeVisible()
     }
-    if (granted.height >= 950) {
-      // Scoped to the session columns, not the whole page. Home is taller than
-      // a screen on purpose now that Activity leads it full width, so asserting
-      // the page fits measured that decision rather than this layout. What must
-      // not happen is the rail dropping under Attention, which doubles this
-      // band — the two checks above put it beside them, and this keeps that
-      // true at a height where a stacked rail would still fit.
-      expect(box.listsRowHeight).toBeLessThanOrEqual(box.clientHeight)
+    // The task lists are the navigator's; the analytics are Usage's.
+    await expect(window.getByRole('region', { name: /^(Activity|Repositories|In flight|Pinned)/ })).toHaveCount(0)
+    await expect(window.getByRole('region', { name: 'Needs you' })).toContainText('Nothing is waiting on you')
+    await expect(window.getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  test('Workspaces reports the branch git reports', async () => {
+    const region = launched.window.getByRole('region', { name: 'Workspaces' })
+    await expect(region.getByRole('button', { name: `New task in ${workspaceName}` })).toBeVisible({ timeout: 20_000 })
+    if (branch) {
+      await expect(region.getByText(branch, { exact: true })).toBeVisible({ timeout: 20_000 })
+    } else {
+      // Detached HEAD: the app reports no branch, so it must not invent one.
+      await expect(region.getByText('HEAD', { exact: true })).toHaveCount(0)
     }
-  } finally {
-    await app.evaluate(({ BrowserWindow }, bounds) => {
-      BrowserWindow.getAllWindows()[0].setBounds(bounds)
-    }, restore)
-  }
+  })
+
+  test('This week sums the seeded receipts and ledgers', async () => {
+    const region = launched.window.getByRole('region', { name: 'This week' })
+    // Five runs with a receipt today: four done, one failed. The interrupted
+    // run wrote no receipt, so it neither counts nor ended.
+    await expect(region).toContainText('5tasks', { timeout: 20_000 })
+    // $1.25 + $0.75 provider-reported; 200k input + 60k output.
+    await expect(region).toContainText('$2.00spent')
+    await expect(region).toContainText('260Ktokens')
+    await expect(region).toContainText('80%finished')
+    await expect(region.getByRole('img', { name: /^Tasks per day/ })).toBeVisible()
+  })
+
+  test('Usage carries the analytics, read from the same receipts', async () => {
+    const { window } = launched
+    await window.getByRole('region', { name: 'This week' }).getByRole('button', { name: 'Usage' }).click()
+    const page = window.locator('[data-usage]')
+    await expect(page).toBeVisible({ timeout: 20_000 })
+    await expect(window.locator('[data-navigator]').getByRole('button', { name: 'Usage' })).toHaveAttribute('aria-current', 'page')
+    await expect(page).toContainText('Tasks5on 1 of 7 days', { timeout: 20_000 })
+    await expect(page).toContainText('Spend$2.00')
+    await expect(page).toContainText('Finished80%1 failed')
+
+    const tools = window.getByRole('region', { name: 'Tool failures' })
+    await expect(tools).toContainText('of 10 calls')
+    await expect(tools).toContainText('apply_patchpatch did not apply4 of 10')
+
+    const unchecked = window.getByRole('region', { name: 'Unchecked' })
+    await expect(unchecked.getByRole('button', { name: /^Update the installation guide/ })).toContainText('2 files')
+
+    await window.getByRole('radio', { name: '30 days' }).click()
+    await expect(page).toContainText('on 1 of 30 days', { timeout: 20_000 })
+  })
+
+  test('Start sends the line as a task, and Home answers its approval in place', async () => {
+    const { window } = launched
+    await goHome(window)
+    const field = window.getByRole('textbox', { name: 'New task' })
+    await field.fill('Run the updater suite and report')
+    await field.press('Enter')
+
+    // Started at once — the record, already asking before the command.
+    const card = window.locator('[data-tool-approval]')
+    await expect(card).toBeVisible({ timeout: 20_000 })
+    await expect(card).toContainText('run a command?')
+
+    // Home has the same ask, answerable where it is.
+    await goHome(window)
+    const needs = window.getByRole('region', { name: 'Needs you' })
+    const row = needs.getByRole('listitem').filter({ hasText: 'Wants to run pnpm vitest run tests/main/unit/updaterSwap.test.ts' })
+    await expect(row).toBeVisible({ timeout: 20_000 })
+    await expect(row).toContainText('Run the updater suite and report')
+    // The navigator agrees: the task is under Needs you there too.
+    await expect(window.locator('[data-nav-section="needs"]')).toContainText('Run the updater suite and report')
+    // And the bell: main's notification names the task and says what it wants,
+    // in the same words as the row above.
+    await window.getByRole('button', { name: /^Notifications/ }).click()
+    const inbox = window.getByRole('dialog', { name: 'Notifications' })
+    const ask = inbox.locator('[data-notification-kind="needs_you"]')
+    await expect(ask).toContainText('Run the updater suite and report', { timeout: 20_000 })
+    await expect(ask).toContainText('Wants to run pnpm vitest run tests/main/unit/updaterSwap.test.ts')
+    await window.keyboard.press('Escape')
+    await expect(inbox).toBeHidden()
+
+    await row.getByRole('button', { name: 'Allow once' }).click()
+    await expect(needs).toContainText('Nothing is waiting on you', { timeout: 20_000 })
+    await expect(window.locator('[data-nav-section="needs"]')).toHaveCount(0)
+
+    // The run went on with the command's result and finished.
+    await window.locator('[data-navigator]').getByRole('button', { name: /^Run the updater suite and report/ }).click()
+    await expect(window.getByText('The updater suite passes.').first()).toBeVisible({ timeout: 20_000 })
+    await expect(card).toHaveCount(0)
+
+    // Answered, the ask left the inbox; the finish took its place. The run
+    // edited nothing, so it is Finished, not Ready for review.
+    await window.getByRole('button', { name: /^Notifications/ }).click()
+    await expect(inbox.locator('[data-notification-kind="needs_you"]')).toHaveCount(0)
+    const finished = inbox.locator('[data-notification-kind="run_done"]').filter({ hasText: 'Run the updater suite and report' })
+    await expect(finished).toContainText('Finished', { timeout: 20_000 })
+    await expect(finished.locator('[data-state="done"]')).toHaveCount(1)
+    await window.keyboard.press('Escape')
+  })
+
+  test('a workspace row opens a new task there', async () => {
+    const { window } = launched
+    await goHome(window)
+    await window.getByRole('region', { name: 'Workspaces' }).getByRole('button', { name: `New task in ${workspaceName}` }).click()
+    await expect(window.locator('[data-new-task]')).toBeVisible({ timeout: 20_000 })
+  })
 })
 
-test('Needs you lists the real failure states once each', async () => {
-  const region = launched.window.getByRole('region', { name: /Needs you/ })
-  await expect(region.getByText('Failed')).toBeVisible({ timeout: 20_000 })
-  await expect(region.getByText('Interrupted')).toBeVisible()
-  await expect(region.getByText('Unverified edits')).toBeVisible()
-  await expect(
-    launched.window.getByText('Fix the production login redirect')
-  ).toHaveCount(1)
-  // Nothing notable happened to this one, so it is on no list.
-  await expect(launched.window.getByText('Draft the release notes')).toHaveCount(0)
-})
+test.describe('Home when no task can run', () => {
+  let blocked: LaunchedApp
 
-test('In flight reads the goal and loop sidecars from disk', async () => {
-  const region = launched.window.getByRole('region', { name: /In flight/ })
-  await expect(region.getByText('Goal paused ×7')).toBeVisible({ timeout: 20_000 })
-  await expect(region.getByText('Loop in 4h')).toBeVisible()
-})
+  test.beforeAll(async () => {
+    blocked = await launchApp({
+      preLaunchSeed: (userDataDir) => {
+        // A cloud provider with no key stored: nothing can run until one is saved.
+        seedAppSettings(userDataDir, { navigationMode: 'home', toolApprovalOnboardingDone: true, provider: 'openai' })
+        seedWorkspacesRegistry(userDataDir, workspacePath, null)
+      }
+    })
+    await expect(blocked.window.locator('body')).toBeVisible({ timeout: 30_000 })
+  })
 
-test('Activity outcomes match the seeded receipt statuses exactly', async () => {
-  const region = launched.window.getByRole('region', { name: /Activity/ })
-  await expect(region.getByText('Sessions', { exact: true })).toBeVisible({ timeout: 20_000 })
-  // Five seeded receipts: four done, one error. The interrupted run has no
-  // receipt, so it is not an outcome.
-  await expect(region.getByText('Completed')).toBeVisible()
-  await expect(region.getByText('Completed').locator('..')).toContainText('4')
-  await expect(region.getByText('Failed').locator('..')).toContainText('1')
-})
+  test.afterAll(async () => {
+    if (blocked) await closeApp(blocked)
+  })
 
-test('Repositories reports the branch git reports', async () => {
-  const region = launched.window.getByRole('region', { name: /Repositories/ })
-  // The row itself must render either way; only the branch label is
-  // conditional, so a detached checkout still exercises the section.
-  await expect(region.getByRole('button', { name: /New chat/ })).toBeVisible({ timeout: 20_000 })
-  if (branch) {
-    await expect(region.getByText(branch, { exact: true })).toBeVisible({ timeout: 20_000 })
-  } else {
-    // Detached HEAD: the app reports no branch, so it must not invent one.
-    await expect(region.getByText('HEAD', { exact: true })).toHaveCount(0)
-  }
-})
+  test('says the provider has no key, and Start opens the brief instead of a run that can’t start', async () => {
+    const { window } = blocked
+    const needs = window.getByRole('region', { name: 'Needs you' })
+    await expect(needs).toContainText('OpenAI has no API key', { timeout: 30_000 })
+    await expect(needs.getByRole('button', { name: 'Add key' })).toBeVisible()
 
-test('Activity totals come from the seeded receipts and usage ledgers', async () => {
-  const region = launched.window.getByRole('region', { name: /Activity/ })
-  // 200k billed input + 60k output across two ledgers.
-  await expect(region.getByText('260K')).toBeVisible({ timeout: 20_000 })
-  // $1.25 + $0.75 provider-reported. Exact: the panel also renders a
-  // "total $2.00" summary, and a substring match hits both.
-  await expect(region.getByText('$2.00', { exact: true })).toBeVisible()
-  await expect(region.getByText('1 of 7')).toBeVisible()
-  await expect(region.getByRole('img', { name: /Sessions per day/ })).toBeVisible()
-  // The only failing tool in the seeded receipts.
-  await expect(region.getByText('apply_patch')).toBeVisible()
-  await expect(region.getByText('4 of 10')).toBeVisible()
-})
-
-test('Activity switches window without losing the panel', async () => {
-  const { window } = launched
-  const region = window.getByRole('region', { name: /Activity/ })
-  await window.getByRole('button', { name: '30d' }).click()
-  await expect(region.getByText('1 of 30')).toBeVisible({ timeout: 20_000 })
-  await window.getByRole('button', { name: '7d' }).click()
-  await expect(region.getByText('1 of 7')).toBeVisible()
-})
-
-test('Environment reports the seeded provider having no key', async () => {
-  const region = launched.window.getByRole('region', { name: /Environment/ })
-  await expect(region.getByText('OpenAI has no API key')).toBeVisible({ timeout: 20_000 })
-  await expect(region.getByRole('button', { name: 'Add key' })).toBeVisible()
-})
-
-test('opening a session from Home routes into that chat', async () => {
-  const { window } = launched
-  await window
-    .getByRole('button', { name: /^Open Fix the production login redirect/ })
-    .click()
-  await expect(window.getByRole('region', { name: /Needs you/ })).toHaveCount(0)
-  await expect(window.getByRole('button', { name: 'Home' })).toBeVisible()
+    const field = window.getByRole('textbox', { name: 'New task' })
+    await field.fill('Tidy the release notes')
+    await field.press('Enter')
+    await expect(window.locator('[data-new-task]')).toBeVisible({ timeout: 20_000 })
+    await expect(window.getByRole('combobox', { name: 'Brief' })).toHaveText('Tidy the release notes')
+  })
 })
