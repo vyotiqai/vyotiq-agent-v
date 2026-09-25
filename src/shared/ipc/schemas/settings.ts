@@ -553,7 +553,7 @@ export const SettingsSchema = z.object({
   /** Session keys (`${workspacePath}␀${runId}`) pinned above the Home recency list. */
   pinnedRuns: z.array(z.string()).max(24).default([]),
   recentModels: z.array(z.string()).max(5).default([]),
-  thinkingPrefsByProvider: z.record(ProviderIdSchema, ThinkingPrefsSchema).default({}),
+  thinkingPrefsByProvider: z.partialRecord(ProviderIdSchema, ThinkingPrefsSchema).default({}),
   serviceTierByModel: z.record(z.string(), ServiceTierSchema).default({}),
   serviceTier: ServiceTierSchema.default('default'),
   toolApproval: ToolApprovalSettingsSchema.default(DEFAULT_TOOL_APPROVAL),
@@ -717,7 +717,21 @@ export const DEFAULT_SETTINGS: Settings = {
   notifications: DEFAULT_NOTIFICATION_SETTINGS
 }
 
-export const SetSettingsRequestSchema = SettingsSchema.partial()
+/**
+ * A patch: exactly the keys the caller sent. zod 4 runs `.default()` even
+ * under `.partial()`, so a plain `SettingsSchema.partial()` would answer a
+ * one-key patch with every default filled in and `setSettings` would reset
+ * every other setting. The fields' own defaults are peeled first; nested
+ * objects that arrive still get theirs.
+ */
+export const SetSettingsRequestSchema = SettingsSchema.extend(
+  Object.fromEntries(
+    Object.entries(SettingsSchema.shape).map(([key, field]) => [
+      key,
+      field instanceof z.ZodDefault ? field.unwrap() : field
+    ])
+  )
+).partial() as unknown as ReturnType<typeof SettingsSchema.partial>
 export type SetSettingsRequest = z.infer<typeof SetSettingsRequestSchema>
 
 export const WindowMaximizedChangedSchema = z.boolean()

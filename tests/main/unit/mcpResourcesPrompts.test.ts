@@ -273,7 +273,7 @@ describe('mcp_read_resource / mcp_get_prompt validation and gates', () => {
       { runEnabledMcpIds: new Set(['docs']) }
     )
     expect(blankUri.ok).toBe(false)
-    expect(blankUri.content).toMatch(/uri:.*at least 1 character/i)
+    expect(blankUri.content).toMatch(/uri: Too small: expected string to have >=1 character/i)
 
     const blankName = await executeTool(
       'mcp_get_prompt',
@@ -283,7 +283,7 @@ describe('mcp_read_resource / mcp_get_prompt validation and gates', () => {
       { runEnabledMcpIds: new Set(['docs']) }
     )
     expect(blankName.ok).toBe(false)
-    expect(blankName.content).toMatch(/name:.*at least 1 character/i)
+    expect(blankName.content).toMatch(/name: Too small: expected string to have >=1 character/i)
 
     const blankServer = await executeTool(
       'mcp_read_resource',
@@ -292,7 +292,7 @@ describe('mcp_read_resource / mcp_get_prompt validation and gates', () => {
       new AbortController().signal
     )
     expect(blankServer.ok).toBe(false)
-    expect(blankServer.content).toMatch(/serverId:.*at least 1 character/i)
+    expect(blankServer.content).toMatch(/serverId: Too small: expected string to have >=1 character/i)
 
     expect(client.readResource).not.toHaveBeenCalled()
     expect(client.getPrompt).not.toHaveBeenCalled()
