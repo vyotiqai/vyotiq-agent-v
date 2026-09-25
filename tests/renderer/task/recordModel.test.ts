@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { UiItem } from '@shared/transcript'
 import { buildRecordModel, runStateOf } from '@renderer/features/task/recordModel'
+import { latestRetryableErrorId } from '@renderer/features/task/record/WorkItems'
 
 const T0 = Date.parse('2026-09-24T10:00:00.000Z')
 const at = (s: number): string => new Date(T0 + s * 1000).toISOString()
@@ -192,5 +193,38 @@ describe('buildRecordModel', () => {
     ]
     const [r] = buildRecordModel(items, { running: false, failed: true }).runs
     expect(r!.after.map((w) => w.kind)).toEqual(['explore', 'error'])
+  })
+})
+
+describe('a run that ended in an error', () => {
+  const failure = (s: number): UiItem => ({ kind: 'run_error', id: id('err'), message: 'Connection dropped', code: 'PROVIDER_NETWORK', at: at(s) }) as UiItem
+
+  it('reads as failed in the history, though a later run finished', () => {
+    const items = [user('Summarize the notes', 0), read('a.md', 1), failure(2), user('Try the other model', 10), said('Here it is.', 11)]
+    const options = { running: false, failed: false }
+    const { runs } = buildRecordModel(items, options)
+    expect(runStateOf(runs[0]!, false, options)).toBe('failed')
+    expect(runStateOf(runs[1]!, true, options)).toBe('done')
+  })
+
+  it('is not failed when the run carried on after the error', () => {
+    const items = [user('Fix it', 0), failure(1), read('a.ts', 5), said('Fixed.', 6)]
+    const options = { running: false, failed: false }
+    const [r] = buildRecordModel(items, options).runs
+    expect(runStateOf(r!, true, options)).toBe('done')
+  })
+})
+
+describe('latestRetryableErrorId', () => {
+  const failure = (key: string): UiItem => ({ kind: 'run_error', id: key, message: 'Connection lost', code: 'PROVIDER_NETWORK' }) as UiItem
+
+  it('names the error that ended the latest turn', () => {
+    expect(latestRetryableErrorId([user('Go', 0), read('a', 1), failure('e1')], false)).toBe('e1')
+  })
+
+  it('names nothing once a newer instruction was sent, or while the run is live', () => {
+    expect(latestRetryableErrorId([user('Go', 0), failure('e1'), user('Again', 5)], false)).toBeNull()
+    expect(latestRetryableErrorId([user('Go', 0), failure('e1')], true)).toBeNull()
+    expect(latestRetryableErrorId([user('Go', 0), said('Done.', 1)], false)).toBeNull()
   })
 })

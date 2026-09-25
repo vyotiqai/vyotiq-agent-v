@@ -93,6 +93,7 @@ export function SessionChatColumn({
   scrollRestoreToken,
   onScrollTopChange,
   onLoadToolContent,
+  onDismissRunError,
   onApprovalDecision,
   onQuestionSubmit,
   showThinking = true,
@@ -189,6 +190,8 @@ export function SessionChatColumn({
   scrollRestoreToken?: number
   onScrollTopChange?: (scrollTop: number) => void
   onLoadToolContent?: (toolCallId: string) => Promise<string | null>
+  /** Hide one error row in the record for good. */
+  onDismissRunError?: (itemId: string) => void
   onApprovalDecision?: (requestId: string, decision: ToolApprovalDecision) => void | Promise<void>
   onQuestionSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
   showThinking?: boolean
@@ -454,6 +457,8 @@ export function SessionChatColumn({
             messageCount={messages.length}
             onOpenChanges={onOpenChanges}
             onLoadToolContent={onLoadToolContent}
+            onRetry={onContinue}
+            onDismissRunError={onDismissRunError}
             mcpServerNames={mcpServerNames}
             goal={runGoal.goal}
             loop={runGoal.loop}

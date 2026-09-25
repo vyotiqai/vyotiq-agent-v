@@ -175,16 +175,20 @@ test('an edited-and-resent prompt does not bring back its failed attempt', async
   await expect(window.getByText(STALE.error)).toHaveCount(0)
 })
 
-test('an earlier failed turn keeps its box in place, without Retry', async () => {
+test('an earlier failed turn reads as failed in History, its box inside it, without Retry', async () => {
   const { window } = launched
   await openRun(window, HISTORY.goal)
-  const transcript = window.locator('[data-transcript-scroll]')
-  await expect(transcript.getByText(HISTORY.answer)).toBeVisible({ timeout: 20_000 })
+  const record = window.locator('[data-transcript-scroll]')
+  await expect(record.getByText(HISTORY.answer)).toBeVisible({ timeout: 20_000 })
 
-  const box = transcript.getByRole('alert').filter({ hasText: HISTORY.error })
+  const first = record.locator('[data-history-run="1"]')
+  await expect(first.getByRole('img', { name: 'Failed' })).toBeVisible()
+  await first.getByRole('button').first().click()
+  const box = record.getByRole('alert').filter({ hasText: HISTORY.error })
   await expect(box).toHaveCount(1)
-  const followUp = transcript.getByText(HISTORY.followUp, { exact: true }).first()
-  // The failure closes the first turn instead of trailing the newest answer.
+  await expect(first.getByRole('alert').filter({ hasText: HISTORY.error })).toHaveCount(1)
+  const followUp = record.getByText(HISTORY.followUp, { exact: true }).first()
+  // The failure closes the first run instead of trailing the newest answer.
   const boxBeforeFollowUp = await box.evaluate(
     (node, next) =>
       next instanceof Node &&
@@ -198,13 +202,13 @@ test('an earlier failed turn keeps its box in place, without Retry', async () =>
 test('the latest failed turn shows one box with Retry and no duplicate banner', async () => {
   const { window } = launched
   await openRun(window, LATEST.goal)
-  const transcript = window.locator('[data-transcript-scroll]')
-  const box = transcript.getByRole('alert').filter({ hasText: LATEST.error })
+  const record = window.locator('[data-transcript-scroll]')
+  const box = record.getByRole('alert').filter({ hasText: LATEST.error })
   await expect(box).toHaveCount(1, { timeout: 20_000 })
 
   await expect(box.getByRole('button', { name: 'Retry' })).toBeVisible()
   await expect(window.getByRole('button', { name: 'Retry' })).toHaveCount(1)
-  await expect(window.locator('[data-composer-column] [role="alert"]')).toHaveCount(0)
+  await expect(window.locator('[data-composer-line] [role="alert"]')).toHaveCount(0)
 })
 
 // The two tests below dismiss boxes, so they run after the ones that read them.
@@ -212,8 +216,13 @@ test('the latest failed turn shows one box with Retry and no duplicate banner', 
 test('a dismissed error box stays gone after the app reloads', async () => {
   const { window } = launched
   await openRun(window, HISTORY.goal)
-  const transcript = window.locator('[data-transcript-scroll]')
-  const box = transcript.getByRole('alert').filter({ hasText: HISTORY.error })
+  const record = window.locator('[data-transcript-scroll]')
+  await expect(record.getByText(HISTORY.answer)).toBeVisible({ timeout: 20_000 })
+  const first = record.locator('[data-history-run="1"]')
+  if ((await first.getByRole('button').first().getAttribute('aria-expanded')) !== 'true') {
+    await first.getByRole('button').first().click()
+  }
+  const box = record.getByRole('alert').filter({ hasText: HISTORY.error })
   await expect(box).toHaveCount(1, { timeout: 20_000 })
 
   await box.getByRole('button', { name: 'Dismiss error' }).click()
@@ -225,16 +234,17 @@ test('a dismissed error box stays gone after the app reloads', async () => {
 
   await reloadWindow(window)
   await openRun(window, HISTORY.goal)
-  await expect(transcript.getByText(HISTORY.answer)).toBeVisible({ timeout: 20_000 })
+  await expect(record.getByText(HISTORY.answer)).toBeVisible({ timeout: 20_000 })
+  await record.locator('[data-history-run="1"]').getByRole('button').first().click()
   await expect(window.getByText(HISTORY.error)).toHaveCount(0)
 })
 
 test('dismissing the latest failure quiets the banner too, after a reload as well', async () => {
   const { window } = launched
-  const composerAlerts = window.locator('[data-composer-column] [role="alert"]')
+  const composerAlerts = window.locator('[data-composer-line] [role="alert"]')
   await openRun(window, LATEST.goal)
-  const transcript = window.locator('[data-transcript-scroll]')
-  const box = transcript.getByRole('alert').filter({ hasText: LATEST.error })
+  const record = window.locator('[data-transcript-scroll]')
+  const box = record.getByRole('alert').filter({ hasText: LATEST.error })
   await expect(box).toHaveCount(1, { timeout: 20_000 })
 
   await box.getByRole('button', { name: 'Dismiss error' }).click()
@@ -246,7 +256,7 @@ test('dismissing the latest failure quiets the banner too, after a reload as wel
 
   await reloadWindow(window)
   await openRun(window, LATEST.goal)
-  await expect(transcript.getByText(LATEST.goal, { exact: true }).first()).toBeVisible({
+  await expect(record.getByText(LATEST.goal, { exact: true }).first()).toBeVisible({
     timeout: 20_000
   })
   await expect(window.getByText(LATEST.error, { exact: true })).toHaveCount(0)

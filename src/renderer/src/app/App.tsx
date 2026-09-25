@@ -2191,6 +2191,7 @@ function App() {
           onLoadToolContent={
             paneCtrl ? (toolCallId) => paneCtrl.loadToolContent(toolCallId) : undefined
           }
+          onDismissRunError={paneCtrl ? (itemId) => paneCtrl.dismissRunError(itemId) : undefined}
           onApprovalDecision={
             paneCtrl
               ? (requestId, decision) => paneCtrl.respondToApproval(requestId, decision)

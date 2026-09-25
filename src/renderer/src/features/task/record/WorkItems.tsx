@@ -1,5 +1,6 @@
 import { createContext, memo, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { UiItem } from '@shared/transcript'
+import { isRetryableTurnFailure } from '@shared/errors'
 import { inferFileWriteAction, parseArgsRecord } from '@shared/toolSummary'
 import { parseTerminalOutput } from '@shared/utils/terminalFormat'
 import { formatElapsed } from '@shared/utils/timeFormat'
@@ -7,7 +8,7 @@ import { formatAgentInstanceShortId, parseAgentInstanceRunId, parseAgentInstance
 import { Icon, type IconName } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand/AgentVSpinner'
 import { FileTypeIcon } from '@renderer/lib/fileIcons'
-import { DiffStat, IconButton, MarkdownContent, cn } from '@renderer/lib/ui'
+import { Button, DiffStat, IconButton, MarkdownContent, cn } from '@renderer/lib/ui'
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import { ToolRowOutput } from '@renderer/features/chat/components/ToolRow'
 import { CompactSummaryBlock } from '@renderer/features/chat/components/CompactSummaryBlock'
@@ -26,6 +27,28 @@ export type RecordActions = {
   onOpenChanges?: (path?: string) => void
   onLoadToolContent?: (toolCallId: string) => Promise<string | null>
   mcpServerNames?: ReadonlyMap<string, string>
+  /**
+   * The one error row that offers Retry: the latest turn's, once the run has
+   * stopped. Retry continues the run from that turn, so older rows are history.
+   */
+  retryableErrorId?: string | null
+  onRetry?: () => void
+  /** Hide one error row for good (kept with the run's reader state). */
+  onDismissRunError?: (itemId: string) => void
+}
+
+/**
+ * The id of the error that ended the latest turn, when nothing has been sent
+ * since and the run has stopped; otherwise null.
+ */
+export function latestRetryableErrorId(items: readonly UiItem[], live: boolean): string | null {
+  if (live) return null
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const item = items[i]!
+    if (item.kind === 'run_error') return item.id
+    if (item.kind === 'message' && item.role === 'user') return null
+  }
+  return null
 }
 
 export const RecordActionsContext = createContext<RecordActions>({})
@@ -158,6 +181,31 @@ export function sameWork(a: WorkItem, b: WorkItem): boolean {
 
 export const WorkItemView = memo(WorkItemViewImpl, (prev, next) => sameWork(prev.item, next.item))
 
+/** A turn's failure, with Retry on the latest one and a way to put it away. */
+function ErrorItem({ id, message, code }: { id: string; message: string; code?: string | undefined }) {
+  const { retryableErrorId, onRetry, onDismissRunError } = useContext(RecordActionsContext)
+  const canRetry = Boolean(onRetry) && id === retryableErrorId && isRetryableTurnFailure({ errorCode: code })
+  return (
+    <div role="alert" className="flex items-start gap-2 text-xs text-danger">
+      <Icon name="xCircle" size={14} className="mt-px shrink-0" />
+      <p className="min-w-0 flex-1 [overflow-wrap:anywhere]">{message}</p>
+      {code ? <code className="shrink-0 font-mono text-caption text-tertiary">{code}</code> : null}
+      {canRetry || onDismissRunError ? (
+        <div className="-my-1 flex shrink-0 items-center gap-1">
+          {canRetry ? (
+            <Button size="xs" onClick={onRetry}>
+              Retry
+            </Button>
+          ) : null}
+          {onDismissRunError ? (
+            <IconButton icon="close" label="Dismiss error" size="xs" tone="muted" onClick={() => onDismissRunError(id)} />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function WorkItemViewImpl({ item }: { item: WorkItem }) {
   switch (item.kind) {
     case 'explore':
@@ -179,13 +227,7 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
     case 'thought':
       return item.streaming ? <NowLine text={item.text} since={item.item.at} /> : <Thought text={item.text} />
     case 'error':
-      return (
-        <div role="alert" className="flex items-start gap-2 text-xs text-danger">
-          <Icon name="xCircle" size={14} className="mt-px shrink-0" />
-          <p className="min-w-0 flex-1">{item.message}</p>
-          {item.code ? <code className="shrink-0 font-mono text-caption text-tertiary">{item.code}</code> : null}
-        </div>
-      )
+      return <ErrorItem id={item.id} message={item.message} code={item.code} />
     case 'compaction':
       return (
         <CompactSummaryBlock

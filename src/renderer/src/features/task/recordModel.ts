@@ -79,6 +79,8 @@ export type RecordRun = {
   /** First and last stamp seen in the run. */
   startedAt: number | null
   endedAt: number | null
+  /** The run's last event was an error: that turn failed, whatever its steps say. */
+  endedInError?: true
 }
 
 export type RecordModel = { runs: RecordRun[] }
@@ -239,6 +241,8 @@ type RunBuilder = {
   /** Tool ids written while each step was in progress, for its edit summary. */
   stepTools: Map<string, ToolItem[]>
   lastAssistant: MessageItem | null
+  /** The last item seen in this run was a run_error. */
+  endedInError: boolean
 }
 
 function bucketFor(b: RunBuilder, key: string): Bucket {
@@ -302,7 +306,8 @@ function startRun(n: number, user: MessageItem | null, id: string): RunBuilder {
     firstStarted: new Map(),
     lastCompleted: new Map(),
     stepTools: new Map(),
-    lastAssistant: null
+    lastAssistant: null,
+    endedInError: false
   }
 }
 
@@ -371,6 +376,7 @@ function finishRun(b: RunBuilder, options: BuildOptions, isLast: boolean): Recor
   } else {
     b.run.needs = []
   }
+  if (b.endedInError) b.run.endedInError = true
   return b.run
 }
 
@@ -418,6 +424,8 @@ export function buildRecordModel(items: readonly UiItem[], options: BuildOptions
     }
     const run = ensure(item.id)
     touch(run, stamp(item.at))
+    // Anything after an error (a retry carrying on) means the run did not end there.
+    run.endedInError = item.kind === 'run_error'
 
     if (item.kind === 'tool') {
       const snapshot = todoSnapshotOf(item.tool)
@@ -514,6 +522,7 @@ export function buildRecordModel(items: readonly UiItem[], options: BuildOptions
 export function runStateOf(run: RecordRun, isLast: boolean, options: BuildOptions): TaskState {
   if (isLast && options.running) return run.needs.length > 0 ? 'needs' : 'running'
   if (isLast && options.failed) return 'failed'
+  if (run.endedInError) return 'failed'
   if (run.steps.some((s) => s.state === 'failed')) return 'failed'
   if (run.steps.some((s) => s.state === 'stopped') && !run.result) return 'stopped'
   return 'done'

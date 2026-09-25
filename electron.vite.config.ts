@@ -171,12 +171,13 @@ export default defineConfig(({ mode }) => {
         // A budget in place of Vite's 500 kB default, which is a download-size
         // heuristic for websites: this renderer loads from local disk, so it
         // warned on every build and was ignored. The entry chunk is the first
-        // screen (chat surface, react-dom, the icon set, zod) at ~1.52 MB, and
-        // every other chunk over 500 kB is one vendor library that already
-        // loads on demand (mermaid's parser and core, CodeMirror, cytoscape).
-        // 1.7 MB leaves the entry room to grow and still warns if any lazy
-        // library — even katex, the smallest at ~0.26 MB — is pulled into it.
-        chunkSizeWarningLimit: 1700,
+        // screen (the task record, navigator and inspector, react-dom, the icon
+        // set, zod) at ~1.83 MB since the 1.0.0 redesign, and every other chunk
+        // over 500 kB is one vendor library that already loads on demand
+        // (mermaid's parser and core, CodeMirror, cytoscape). 2 MB leaves the
+        // entry some room and still warns if a lazy library — even katex, the
+        // smallest at ~0.26 MB — is pulled into it.
+        chunkSizeWarningLimit: 2000,
         rollupOptions: {
           output: {
             manualChunks(id) {

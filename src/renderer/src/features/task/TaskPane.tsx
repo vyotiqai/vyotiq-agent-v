@@ -33,7 +33,7 @@ import { buildRecordModel, type BuildOptions } from './recordModel'
 import { RecordBody, TaskHeader } from './record/RecordLayout'
 import { useRewindRedo } from './rewindRedo'
 import { TaskWorktreeStrip, useTaskWorktree } from './taskWorktree'
-import { RecordActionsContext } from './record/WorkItems'
+import { RecordActionsContext, latestRetryableErrorId } from './record/WorkItems'
 import { TaskRecord } from './TaskRecord'
 import { clearMatches, findRanges, foldsToOpen, paintMatches, RecordOpenContext } from './recordFind'
 import { useRecordScroll } from './useRecordScroll'
@@ -96,6 +96,10 @@ export type TaskPaneProps = {
   onOpenChanges?: (path?: string) => void
   onLoadToolContent?: (toolCallId: string) => Promise<string | null>
   mcpServerNames?: ReadonlyMap<string, string>
+  /** Continue the run from its failed latest turn. */
+  onRetry?: () => void
+  /** Hide one error row for good. */
+  onDismissRunError?: (itemId: string) => void
   goal?: RunGoal | null
   loop?: RunLoop | null
   onGoalPause?: () => void | Promise<boolean>
@@ -398,13 +402,24 @@ export function TaskPane(props: TaskPaneProps) {
             : formatRunActivityLabel({ kind: 'working' })
 
   const [lightbox, setLightbox] = useState<string | null>(null)
+  const retryableErrorId = useMemo(() => latestRetryableErrorId(items, live), [items, live])
   const recordActions = useMemo(
     () => ({
       onOpenChanges: props.onOpenChanges,
       onLoadToolContent: props.onLoadToolContent,
-      mcpServerNames: props.mcpServerNames
+      mcpServerNames: props.mcpServerNames,
+      retryableErrorId,
+      onRetry: props.onRetry,
+      onDismissRunError: props.onDismissRunError
     }),
-    [props.onOpenChanges, props.onLoadToolContent, props.mcpServerNames]
+    [
+      props.onOpenChanges,
+      props.onLoadToolContent,
+      props.mcpServerNames,
+      retryableErrorId,
+      props.onRetry,
+      props.onDismissRunError
+    ]
   )
 
   const showGoal = Boolean(

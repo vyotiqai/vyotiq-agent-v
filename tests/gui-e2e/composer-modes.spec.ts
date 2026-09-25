@@ -7,8 +7,8 @@ import { requireActivePath } from './helpers/seedWorkspace'
 
 /**
  * Plan mode merged into Agent. Two surfaces let a user pick a mode — the
- * composer pill and the slash menu — and both are assembled from separate
- * lists (MODES in ModePicker, BUILTIN_COMMANDS in main). A unit test on either
+ * task options' Mode control and the slash menu — and both are assembled from
+ * separate lists (MODES in ModePicker, BUILTIN_COMMANDS in main). A unit test on either
  * one passes while the other still offers a mode the gate no longer honours,
  * so this checks the shipped app.
  */
@@ -47,43 +47,36 @@ test.afterAll(async () => {
   }
 })
 
-test('the composer mode pill cycles Agent and Ask only', async () => {
+test('the mode control offers Agent and Ask only', async () => {
   const { window } = launched
 
-  const expand = window.getByRole('button', { name: /expand sidebar/i })
-  if (await expand.isVisible().catch(() => false)) {
-    await expand.click()
-  }
+  await expect(window.locator('[data-composer-input]').first()).toBeVisible({ timeout: 20_000 })
 
-  await expect(window.getByRole('combobox', { name: 'Message' })).toBeVisible({
-    timeout: 20_000
-  })
+  // Mode sits with the model and effort in the task options.
+  await window.locator('[data-task-options]').first().click()
+  const options = window.getByRole('dialog', { name: 'Mode, model and effort' })
+  await expect(options).toBeVisible({ timeout: 10_000 })
+  const mode = options.getByRole('radiogroup', { name: 'Mode' })
+  await expect(mode.getByRole('radio')).toHaveText(['Ask', 'Agent'])
+  await expect(mode.getByRole('radio', { name: 'Agent' })).toHaveAttribute('aria-checked', 'true')
 
-  // The pill's accessible name states the current mode and the next one, so a
-  // full cycle is observable without reading component state.
-  const pill = window.getByRole('button', { name: /mode\. Click for/i })
-  await expect(pill).toBeVisible({ timeout: 20_000 })
-
-  const seen: string[] = []
-  for (let i = 0; i < 4; i += 1) {
-    const label = (await pill.getAttribute('aria-label')) ?? ''
-    seen.push(label.split(' mode.')[0]!.trim())
-    await pill.click()
-  }
-
-  expect(seen).toEqual(['Agent', 'Ask', 'Agent', 'Ask'])
-  expect(seen).not.toContain('Plan')
+  await mode.getByRole('radio', { name: 'Ask' }).click()
+  await expect(mode.getByRole('radio', { name: 'Ask' })).toHaveAttribute('aria-checked', 'true')
+  await mode.getByRole('radio', { name: 'Agent' }).click()
+  await expect(mode.getByRole('radio', { name: 'Agent' })).toHaveAttribute('aria-checked', 'true')
+  await window.keyboard.press('Escape')
+  await expect(options).toHaveCount(0)
 })
 
 test('the slash menu offers /ask and /agent but no /plan', async () => {
   const { window } = launched
 
-  const composer = window.getByRole('combobox', { name: 'Message' })
+  const composer = window.locator('[data-composer-input]').first()
   await expect(composer).toBeVisible({ timeout: 20_000 })
 
   // Mode commands are hidden from the idle list and surface on search, so the
   // query has to be typed rather than just opening the menu.
-  await composer.fill('')
+  await composer.click()
   await composer.pressSequentially('/a')
   const menu = window.getByRole('listbox', { name: 'Slash commands' })
   await expect(menu).toBeVisible({ timeout: 15_000 })
