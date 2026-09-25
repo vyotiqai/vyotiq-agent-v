@@ -167,16 +167,13 @@ type ActivePathResolver = () => string | null
 
 let resolveActivePath: ActivePathResolver = defaultActivePathResolver
 
+/**
+ * Until registerIpc installs the real lookup (setChatEventActivePathResolver),
+ * no workspace is known to be active. A lazy require of workspaces here never
+ * resolved in the bundle — main is one file, the relative path pointed nowhere.
+ */
 function defaultActivePathResolver(): string | null {
-  try {
-    // Lazy require avoids circular import at module load (workspaces ↔ ipc).
-    const { getWorkspaces } = require('../workspace/workspaces') as {
-      getWorkspaces: () => { activePath: string | null }
-    }
-    return getWorkspaces().activePath
-  } catch {
-    return null
-  }
+  return null
 }
 
 /** @internal Override active-path lookup in unit tests. */

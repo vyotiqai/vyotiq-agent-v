@@ -258,6 +258,18 @@ function restoreMcpSecrets(settings: Settings): Settings {
   return changed ? { ...settings, mcpServers } : settings
 }
 
+const settingsWrittenListeners = new Set<(settings: Settings, previous: Settings) => void>()
+
+/**
+ * Called after every settings write, whoever made it. Main writes settings on
+ * its own too — "Always allow" saves the allowlist mid-run — and a window that
+ * only re-reads on its own writes would go on showing the old value.
+ */
+export function onSettingsWritten(listener: (settings: Settings, previous: Settings) => void): () => void {
+  settingsWrittenListeners.add(listener)
+  return () => settingsWrittenListeners.delete(listener)
+}
+
 /** Strip env and header values before sending settings over IPC. */
 export function redactSettingsForIpc(settings: Settings): Settings {
   if (!settings.mcpServers?.length) return settings
@@ -807,21 +819,16 @@ export function setSettings(
     logger.error('Failed to write settings', { scope: 'settings', code: 'SETTINGS', err })
     throw err
   }
-  const prevCodeIndex = prev.codeIndex
-  if (
-    partial.codeIndex !== undefined &&
-    (prevCodeIndex?.enabled ?? true) !== (next.codeIndex?.enabled ?? true)
-  ) {
+  for (const listener of settingsWrittenListeners) {
     try {
-      // Lazy require avoids circular import with codeindex → settings.
-      const { closeCodeIndexStore } = require('../agent/codeindex') as {
-        closeCodeIndexStore: (workspaceRoot?: string) => void
-      }
-      closeCodeIndexStore()
-    } catch {
-      // ignore if codeindex unavailable in early boot / tests without electron
+      listener(next, prev)
+    } catch (err) {
+      logger.warn('settings write listener failed', { scope: 'settings', err })
     }
   }
+  // Closing the code index's stores when it is switched off, and clearing the
+  // MCP resolve cache when servers change, are onSettingsWritten listeners
+  // registerIpc installs (they used lazy requires the bundle could not resolve).
   if (partial.mcpServers !== undefined) {
     const nextIds = new Set((next.mcpServers ?? []).map((s) => s.id))
     for (const s of prev.mcpServers ?? []) {
@@ -842,15 +849,6 @@ export function setSettings(
       } catch {
         // best-effort
       }
-    }
-    try {
-      // Lazy require avoids circular import with marketplace/resolve → settings.
-      const { invalidateMcpResolveCache } = require('../marketplace/resolve') as {
-        invalidateMcpResolveCache: () => void
-      }
-      invalidateMcpResolveCache()
-    } catch {
-      // ignore if resolve module unavailable in early boot
     }
   }
   return next

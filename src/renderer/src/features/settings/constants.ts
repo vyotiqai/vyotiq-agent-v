@@ -205,6 +205,7 @@ export const SETTINGS_ERROR_IDS: Record<Exclude<SettingsErrorField, null>, strin
   customUrl: 'custom-url-error',
   apikey: 'apikey-error',
   keepTurns: 'keep-turns-error',
+  parallelInstances: 'parallel-instances-error',
   autoCompactThreshold: 'auto-compact-threshold-error',
   checkpointKeep: 'checkpoint-keep-error',
   checkpointAge: 'checkpoint-age-error',

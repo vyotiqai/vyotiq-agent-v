@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from 'fs'
 import { join, resolve } from 'path'
 import type { WebContents } from 'electron'
 import type { AgentEvent, AgentInteractionMode, ChatMessage } from '../../shared/ipc'
-import { contentDisplayText, RunReceiptSchema } from '../../shared/ipc'
+import { contentDisplayText, DEFAULT_MAX_PARALLEL_INSTANCES, RunReceiptSchema } from '../../shared/ipc'
+import { getSettings } from '@main/settings/settings'
 import { IPC } from '../../shared/channels'
 import { formatAgentInstanceLabel } from '../../shared/utils/agentInstance'
 import { logger } from '../../shared/logger'
@@ -60,6 +61,23 @@ export function getRunIpcSender(runId: string): WebContents | undefined {
     return undefined
   }
   return wc
+}
+
+/** Instances of this task still running. */
+export function runningInstanceCount(parentRunId: string): number {
+  let n = 0
+  for (const [child, parent] of childToParent) {
+    if (parent === parentRunId && isActive(child)) n += 1
+  }
+  return n
+}
+
+function instanceCap(): number {
+  try {
+    return getSettings().maxParallelInstances ?? DEFAULT_MAX_PARALLEL_INSTANCES
+  } catch {
+    return DEFAULT_MAX_PARALLEL_INSTANCES
+  }
 }
 
 function resolveSpawnWebContents(parentRunId: string): WebContents | undefined {
@@ -581,6 +599,19 @@ export async function spawnAgentInstance(
     briefLines.push(goalText)
   }
   const composedGoal = briefLines.join('\n')
+  // Settings → Agent → Instances at once. Counted and registered with no await
+  // between, so spawns in one step cannot both pass the check.
+  const cap = instanceCap()
+  const running = runningInstanceCount(input.parentRunId)
+  if (running >= cap) {
+    clearRunAbort(childRunId, registered.invokeId)
+    return {
+      ok: false,
+      error:
+        `This task already has ${running} ${running === 1 ? 'instance' : 'instances'} running — the most Settings → Agent → Instances at once allows (${cap}). ` +
+        'Wait for one with await_agent_instance, then spawn the next.'
+    }
+  }
   registerChildInstance(input.parentRunId, childRunId, input.workspacePath)
   const releaseChildIpc = registerRunIpcSender(childRunId, wc)
 

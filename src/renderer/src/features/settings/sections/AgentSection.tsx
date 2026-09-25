@@ -1,5 +1,6 @@
 import type { KeyboardEvent } from 'react'
-import type { ToolApprovalSettings } from '@shared/ipc'
+import { DEFAULT_MAX_PARALLEL_INSTANCES, MAX_PARALLEL_INSTANCES_LIMIT, type ToolApprovalSettings } from '@shared/ipc'
+import { commandFromAllowKey } from '@shared/utils/commandAllow'
 import { Icon } from '@renderer/lib/icons'
 import { Button, Input } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
@@ -67,7 +68,19 @@ function blurOnEnter(e: KeyboardEvent<HTMLInputElement>): void {
   }
 }
 
-/** The tools that no longer ask, as chips that each take themselves off the list. */
+/**
+ * How an allowlist entry reads: a terminal command as the command
+ * (`terminal:pnpm vitest` → `pnpm vitest`), an agent-built tool without the
+ * content hash it is pinned to, anything else as the tool's name.
+ */
+export function allowedEntryLabel(entry: string): { label: string; command: boolean } {
+  const command = commandFromAllowKey(entry)
+  if (command) return { label: command, command: true }
+  const at = entry.indexOf('@')
+  return { label: at > 0 ? entry.slice(0, at) : entry, command: false }
+}
+
+/** The commands and tools that no longer ask, as chips that each take themselves off the list. */
 function AllowedTools({
   names,
   disabled,
@@ -80,16 +93,20 @@ function AllowedTools({
   onRemoveAll: () => void
 }) {
   return (
-    <ul className="m-0 flex list-none flex-wrap items-center gap-1.5 p-0" aria-label="Always allowed tools">
-      {names.map((name) => (
+    <ul className="m-0 flex list-none flex-wrap items-center gap-1.5 p-0" aria-label="Always allowed">
+      {names.map((name) => {
+        const entry = allowedEntryLabel(name)
+        return (
         <li
           key={name}
+          title={entry.command ? `Terminal: ${entry.label} …` : name}
           className="inline-flex h-6 items-center gap-1.5 rounded-md bg-surface pl-2 pr-1 font-mono text-caption text-secondary"
         >
-          {name}
+          {entry.command ? <Icon name="terminal" size={11} className="shrink-0 text-tertiary" aria-label="Command" /> : null}
+          {entry.label}
           <button
             type="button"
-            aria-label={`Remove ${name}`}
+            aria-label={`Remove ${entry.label}`}
             disabled={disabled}
             className="grid size-4 place-items-center rounded-sm text-tertiary vy-transition hover:bg-surface-2 hover:text-fg focus-visible:vy-focus-ring disabled:vy-disabled-state"
             onClick={() => onRemove(name)}
@@ -97,7 +114,8 @@ function AllowedTools({
             <Icon name="close" size={10} />
           </button>
         </li>
-      ))}
+        )
+      })}
       {names.length > 1 ? (
         <li>
           <Button size="xs" variant="ghost" disabled={disabled} onClick={onRemoveAll}>
@@ -152,8 +170,8 @@ export function AgentSection({
           title="Always allowed"
           hint={
             allowed.length > 0
-              ? 'Tools you allowed for good. Remove one to be asked again.'
-              : 'None yet. Always allow on an approval adds the tool here.'
+              ? 'Commands and tools you allowed for good. Remove one to be asked again.'
+              : 'None yet. Always allow on an approval adds the command or tool here.'
           }
           badge={scoped}
           below={
@@ -228,6 +246,22 @@ export function AgentSection({
             void form.runUpdate({ autoResumeInterruptedRuns })
           }}
           {...form.defaultMark('autoResumeInterruptedRuns')}
+        />
+        <NumberField
+          id="parallel-instances"
+          field="parallelInstances"
+          form={form}
+          title="Instances at once"
+          hint="Sub-agents a task may run in parallel. One more is refused until one finishes."
+          unit="at once"
+          min={1}
+          max={MAX_PARALLEL_INSTANCES_LIMIT}
+          value={form.settings.maxParallelInstances ?? DEFAULT_MAX_PARALLEL_INSTANCES}
+          disabled={form.formLocked}
+          onCommit={(maxParallelInstances) => {
+            void form.runUpdate({ maxParallelInstances })
+          }}
+          {...form.defaultMark('maxParallelInstances')}
         />
       </SettingsGroup>
 

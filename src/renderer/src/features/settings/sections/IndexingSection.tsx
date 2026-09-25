@@ -142,6 +142,25 @@ export function IndexingSection({
       ? (openWorkspaces.find((path) => workspacePathsEqual(path, runtime.workspacePath!)) ?? null)
       : null
 
+  /** Pause or resume a workspace's indexing; main keeps the flag, and Settings hears it back. */
+  const setPaused = (path: string, pause: boolean): void => {
+    setReindexing(path)
+    setRowError(null)
+    const call = pause ? window.vyotiq.codeIndexPause(path) : window.vyotiq.codeIndexResume(path)
+    void call
+      .then((res) => {
+        if (!res.ok) setRowError({ path, message: res.error ?? (pause ? 'Could not pause' : 'Could not resume') })
+      })
+      .catch((err: unknown) => {
+        setRowError({ path, message: err instanceof Error ? err.message : pause ? 'Could not pause' : 'Could not resume' })
+      })
+      .finally(() => {
+        setReindexing(null)
+        reload(path)
+        refresh()
+      })
+  }
+
   const reindex = (path: string): void => {
     setReindexing(path)
     setRowError(null)
@@ -187,8 +206,9 @@ export function IndexingSection({
         {codeIndex.enabled
           ? openWorkspaces.map((path) => {
               const own = facts[path]
-              const syncing = syncingPath === path
-              const building = syncing || own?.state === 'building'
+              const paused = (codeIndex.pausedPaths ?? []).some((entry) => workspacePathsEqual(entry, path))
+              const syncing = !paused && syncingPath === path
+              const building = !paused && (syncing || own?.state === 'building')
               // The live status names the workspace its error belongs to.
               const failed =
                 !building &&
@@ -201,15 +221,24 @@ export function IndexingSection({
                   ? runtime.error
                   : null
               const error = rowError?.path === path ? rowError.message : runtimeError
-              const ready = !building && !failed && own?.state === 'ready'
+              const ready = !paused && !building && !failed && own?.state === 'ready'
               const busy = reindexing === path
               const action = busy ? 'Reindexing…' : own?.files ? 'Reindex' : 'Index now'
+              const name = workspaceShort(path)
               return (
                 <SettingsItem
                   key={path}
                   id={`index:${path}`}
                   title={workspaceShort(path)}
-                  hint={syncing && runtime ? syncHint(runtime) : building ? 'Indexing' : factsHint(own)}
+                  hint={
+                    paused
+                      ? `Paused${own?.files ? ` · ${own.files.toLocaleString('en-US')} files indexed so far` : ''} — resume carries on from there`
+                      : syncing && runtime
+                        ? syncHint(runtime)
+                        : building
+                          ? 'Indexing'
+                          : factsHint(own)
+                  }
                   below={
                     syncing || error ? (
                       <div className="flex flex-col gap-1.5">
@@ -231,19 +260,46 @@ export function IndexingSection({
                   <div className="flex items-center gap-3">
                     {ready ? <span className="text-xs text-success">Ready</span> : null}
                     {failed ? <span className="text-xs text-danger">Error</span> : null}
-                    {!own ? null : !building && !failed && !ready ? (
+                    {paused ? <span className="text-xs text-muted">Paused</span> : null}
+                    {!own || paused ? null : !building && !failed && !ready ? (
                       <span className="text-xs text-tertiary">Not indexed</span>
                     ) : null}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      aria-label={`${action} ${workspaceShort(path)}`}
-                      pending={busy}
-                      disabled={form.formLocked || building || (reindexing != null && !busy)}
-                      onClick={() => reindex(path)}
-                    >
-                      {action}
-                    </Button>
+                    {paused ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon="play"
+                        aria-label={`Resume indexing ${name}`}
+                        pending={busy}
+                        disabled={form.formLocked || (reindexing != null && !busy)}
+                        onClick={() => setPaused(path, false)}
+                      >
+                        Resume
+                      </Button>
+                    ) : building ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon="pause"
+                        aria-label={`Pause indexing ${name}`}
+                        pending={busy}
+                        disabled={form.formLocked || (reindexing != null && !busy)}
+                        onClick={() => setPaused(path, true)}
+                      >
+                        Pause
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        aria-label={`${action} ${name}`}
+                        pending={busy}
+                        disabled={form.formLocked || (reindexing != null && !busy)}
+                        onClick={() => reindex(path)}
+                      >
+                        {action}
+                      </Button>
+                    )}
                   </div>
                 </SettingsItem>
               )

@@ -259,6 +259,8 @@ const VYOTIQ_INVOKE_MAP: Record<
   probeNetwork: IPC.networkProbe,
   codeIndexStatus: IPC.codeIndexStatus,
   codeIndexReindex: IPC.codeIndexReindex,
+  codeIndexPause: IPC.codeIndexPause,
+  codeIndexResume: IPC.codeIndexResume,
   processMetrics: IPC.processMetrics,
   listNotifications: IPC.notificationsList,
   markNotificationsRead: IPC.notificationsMarkRead,
@@ -307,6 +309,7 @@ const VYOTIQ_PUSH_MAP: Record<
 > = {
   onChatEvent: IPC.chatEvent,
   onToolApprovalRequest: IPC.toolApprovalRequest,
+  onSettingsChanged: IPC.settingsChanged,
   onAgentQuestionRequest: IPC.agentQuestionRequest,
   onWindowMaximizedChanged: IPC.windowMaximizedChanged,
   onWindowFocusChanged: IPC.windowFocusChanged,

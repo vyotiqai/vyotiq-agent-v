@@ -27,6 +27,7 @@ const GROUPS: ReadonlyArray<{ title: string; ids: readonly string[] }> = [
     ids: [
       'focusComposer',
       'stop',
+      'steer',
       'approval-allow',
       'approval-deny',
       'cycleMode',

@@ -212,6 +212,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'agent'
   },
   {
+    id: 'parallel-instances',
+    title: 'Instances at once',
+    keywords: ['instances', 'sub-agents', 'subagents', 'parallel', 'spawn', 'limit'],
+    section: 'agent'
+  },
+  {
     id: 'show-thinking',
     title: 'Show reasoning',
     keywords: ['thinking', 'reasoning', 'display', 'show thinking'],

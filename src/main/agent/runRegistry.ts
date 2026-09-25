@@ -283,30 +283,43 @@ type CancelGateWaitersOpts = {
   skipQuestions?: boolean
 }
 
-/** Clear parked approval/question waiters (lazy require for toolApproval avoids cycle). */
+/**
+ * What a cancel must also stop, registered by the modules that own it —
+ * toolApproval, tools/terminalSessions, followUpStore — when they load. This
+ * module used to `require()` them lazily to dodge import cycles, but the main
+ * bundle is one file and those relative paths never resolved: every cancel
+ * skipped all three, silently. Registering keeps this module's import graph
+ * small (the test setup loads it before any test's mocks).
+ */
+type RunCancelHooks = {
+  cancelApprovals?: (runId: string, invokeId?: number) => void
+  disposeTerminals?: (runId: string, invokeId: number) => void
+  clearFollowUpsOnDisk?: (workspacePath: string, runId: string) => void
+}
+const cancelHooks: RunCancelHooks = {}
+
+export function registerRunCancelHooks(hooks: RunCancelHooks): void {
+  Object.assign(cancelHooks, hooks)
+}
+
+/** Clear parked approval/question waiters. */
 function cancelPendingGateWaiters(runId: string, opts?: CancelGateWaitersOpts): void {
   try {
-    const { cancelPendingApprovals } = require('./toolApproval') as {
-      cancelPendingApprovals: (runId: string, invokeId?: number) => void
-    }
-    cancelPendingApprovals(runId, opts?.invokeId)
-  } catch {
-    // ignore if modules unavailable in early boot / tests
+    cancelHooks.cancelApprovals?.(runId, opts?.invokeId)
+  } catch (err) {
+    logger.warn('Could not cancel pending approvals', { scope: 'agent', correlationId: runId, err })
   }
   if (!opts?.skipQuestions) {
     cancelPendingQuestions(runId, opts?.invokeId)
   }
 }
 
-/** Kill background terminal sessions immediately (lazy require avoids cycle). */
+/** Kill background terminal sessions immediately. */
 function disposeTerminalSessionsNow(runId: string, invokeId: number): void {
   try {
-    const { disposeTerminalSessionsForInvoke } = require('./tools/terminalSessions') as {
-      disposeTerminalSessionsForInvoke: (runId: string, invokeId: number) => number
-    }
-    disposeTerminalSessionsForInvoke(runId, invokeId)
-  } catch {
-    // ignore if modules unavailable in early boot / tests
+    cancelHooks.disposeTerminals?.(runId, invokeId)
+  } catch (err) {
+    logger.warn('Could not dispose terminal sessions', { scope: 'agent', correlationId: runId, err })
   }
 }
 
@@ -320,15 +333,9 @@ function clearFollowUpsOnDiskNow(runId: string): void {
   try {
     const workspacePath = getRunWorkspace(runId)
     if (!workspacePath) return
-    const { resolveRunDir } = require('../storage/paths') as {
-      resolveRunDir: (workspacePath: string, runId: string) => string
-    }
-    const { clearFollowUps: clearDisk } = require('./followUpStore') as {
-      clearFollowUps: (runDir: string) => void
-    }
-    clearDisk(resolveRunDir(workspacePath, runId))
-  } catch {
-    // ignore if modules unavailable in early boot / tests
+    cancelHooks.clearFollowUpsOnDisk?.(workspacePath, runId)
+  } catch (err) {
+    logger.warn('Could not clear queued follow-ups on disk', { scope: 'agent', correlationId: runId, err })
   }
 }
 

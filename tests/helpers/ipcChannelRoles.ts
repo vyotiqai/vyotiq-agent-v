@@ -14,6 +14,7 @@ export type IpcChannelName = keyof typeof IPC
 export const PUSH_CHANNEL_NAMES = [
   'chatEvent',
   'toolApprovalRequest',
+  'settingsChanged',
   'agentQuestionRequest',
   'windowMaximizedChanged',
   'windowFocusChanged',

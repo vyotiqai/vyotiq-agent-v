@@ -27,6 +27,8 @@ export const IPC = {
   composerAttachmentsSet: 'composer-attachments:set',
   composerAttachmentsClear: 'composer-attachments:clear',
   getSettings: 'settings:get',
+  /** Main → renderer: settings as just written, by anyone (main included). */
+  settingsChanged: 'settings:changed',
   setSettings: 'settings:set',
   setSecret: 'secrets:set',
   clearSecret: 'secrets:clear',
@@ -267,6 +269,9 @@ export const IPC = {
   codeIndexStatus: 'codeindex:status',
   codeIndexStatusEvent: 'codeindex:status-event',
   codeIndexReindex: 'codeindex:reindex',
+  /** Stop a workspace's indexing and keep it stopped; resume carries on from what it has. */
+  codeIndexPause: 'codeindex:pause',
+  codeIndexResume: 'codeindex:resume',
   processMetrics: 'perf:process-metrics',
   notificationsList: 'notifications:list',
   notificationsMarkRead: 'notifications:markRead',

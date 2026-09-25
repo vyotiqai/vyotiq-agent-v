@@ -59,7 +59,7 @@ export function resolveLinePlaceholder(opts: {
   runCount: number
 }): string {
   if (!opts.hasWorkspace) return 'Open a workspace to start chatting'
-  if (opts.running) return 'Add an instruction — starts when this run ends'
+  if (opts.running) return 'Add an instruction — starts when this run ends · Shift+Enter sends it now'
   const readOnly = opts.agentMode === 'ask' ? ' · won’t edit files' : ''
   if (opts.runCount > 0) return `Follow up — starts run ${opts.runCount + 1}${readOnly}`
   return `Add an instruction${readOnly}`

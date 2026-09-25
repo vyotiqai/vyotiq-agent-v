@@ -59,7 +59,9 @@ function renderLine(overrides: Partial<Parameters<typeof Composer>[0]> = {}) {
 describe('resolveLinePlaceholder', () => {
   it('says what sending does now', () => {
     const base = { hasWorkspace: true, agentMode: 'agent' as const, runCount: 0 }
-    expect(resolveLinePlaceholder({ ...base, running: true })).toBe('Add an instruction — starts when this run ends')
+    expect(resolveLinePlaceholder({ ...base, running: true })).toBe(
+      'Add an instruction — starts when this run ends · Shift+Enter sends it now'
+    )
     expect(resolveLinePlaceholder({ ...base, running: false, runCount: 2 })).toBe('Follow up — starts run 3')
     expect(resolveLinePlaceholder({ ...base, running: false })).toBe('Add an instruction')
     expect(resolveLinePlaceholder({ ...base, running: false, agentMode: 'ask' })).toBe('Add an instruction · won’t edit files')
@@ -75,6 +77,34 @@ describe('instruction line', () => {
     expect(screen.getByRole('button', { name: 'Attach files — or type @ for context' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Dictate' })).toBeTruthy()
     expect(document.querySelector('[data-composer-line] [data-composer-shell]')).toBeTruthy()
+  })
+
+  it('steers with Shift+Enter while a run is live, and only then; Enter still queues', async () => {
+    const { props } = renderLine({ running: true, onSend: vi.fn(async () => true) })
+    const line = screen.getByRole('combobox', { name: 'Instruction' })
+    line.textContent = 'Stop and use the other API'
+    fireEvent.input(line)
+    fireEvent.keyDown(line, { key: 'Enter', shiftKey: true })
+    await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(props.onSend).mock.calls[0]![0]).toBe('Stop and use the other API')
+    expect(vi.mocked(props.onSend).mock.calls[0]![3]).toEqual({ steer: true })
+
+    line.textContent = 'Then check the docs'
+    fireEvent.input(line)
+    fireEvent.keyDown(line, { key: 'Enter' })
+    await waitFor(() => expect(props.onSend).toHaveBeenCalledTimes(2))
+    // Queued for the turn's end, as before.
+    expect(vi.mocked(props.onSend).mock.calls[1]![3]).toBeUndefined()
+  })
+
+  it('does not steer when no run is live — Shift+Enter is not a send then', async () => {
+    const { props } = renderLine({ running: false, onSend: vi.fn(async () => true) })
+    const line = screen.getByRole('combobox', { name: 'Instruction' })
+    line.textContent = 'hello'
+    fireEvent.input(line)
+    fireEvent.keyDown(line, { key: 'Enter', shiftKey: true })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(props.onSend).not.toHaveBeenCalled()
   })
 
   it('lists queued instructions with send now, edit and remove', () => {

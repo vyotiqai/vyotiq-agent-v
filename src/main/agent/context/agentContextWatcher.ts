@@ -5,7 +5,7 @@ import { IPC } from '../../../shared/channels'
 import type { WorkspaceAgentContextChanged, WorkspaceAgentContextResult } from '../../../shared/ipc'
 import { canonicalizeWorkspacePath } from '../../../shared/workspacePath'
 import { workspacePathsEqual } from '../../../shared/workspacePathMatch'
-import { getCodeIndexRuntimeStatus, onCodeIndexRuntimeStatus } from '../codeindex'
+import { getCodeIndexRuntimeStatus, isCodeIndexPaused, onCodeIndexRuntimeStatus } from '../codeindex'
 import { invalidateGitStatusCache } from '../../git/gitStatusCache'
 import { getSettings } from '../../settings/settings'
 import { buildWorkspaceAgentContext, mapCodeIndexState } from './agentContext'
@@ -163,7 +163,8 @@ async function rebuild(w: Watch): Promise<void> {
       const next = await buildWorkspaceAgentContext(w.workspacePath, {
         enabled: getSettings().codeIndex?.enabled !== false,
         phase: indexStatus.phase,
-        statusWorkspace: indexStatus.workspacePath
+        statusWorkspace: indexStatus.workspacePath,
+        paused: isCodeIndexPaused(w.workspacePath)
       })
       // Stopped while we were reading disk — drop the result.
       if (watches.get(canonicalizeWorkspacePath(w.workspacePath)) !== w) return

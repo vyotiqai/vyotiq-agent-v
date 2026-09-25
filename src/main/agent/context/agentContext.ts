@@ -9,7 +9,7 @@ import { workspacePathsEqual } from '../../../shared/workspacePathMatch'
 import type { CodeIndexModelPhase, WorkspaceAgentContextResult } from '../../../shared/ipc'
 
 /** Card-facing code-index state (workspace:agentContext payload). */
-export type CodeIndexCardState = 'ready' | 'building' | 'degraded' | 'off'
+export type CodeIndexCardState = 'ready' | 'building' | 'degraded' | 'off' | 'paused'
 
 /**
  * Map the live code-index runtime phase to the context-card state.
@@ -87,10 +87,11 @@ function readIndexFacts(workspacePath: string): IndexFacts | null {
  */
 export function codeIndexStateFor(
   workspacePath: string,
-  codeIndex: { enabled: boolean; phase: CodeIndexModelPhase; statusWorkspace?: string },
+  codeIndex: { enabled: boolean; phase: CodeIndexModelPhase; statusWorkspace?: string; paused?: boolean },
   index: IndexFacts | null
 ): CodeIndexCardState {
   if (!codeIndex.enabled) return 'off'
+  if (codeIndex.paused) return 'paused'
   if (codeIndex.statusWorkspace && workspacePathsEqual(codeIndex.statusWorkspace, workspacePath)) {
     return mapCodeIndexState(codeIndex.phase, true)
   }
@@ -119,6 +120,8 @@ export async function buildWorkspaceAgentContext(
     phase: CodeIndexModelPhase
     /** The workspace that phase belongs to; absent until a sync names one. */
     statusWorkspace?: string
+    /** Settings → Indexing paused this workspace. */
+    paused?: boolean
   }
 ): Promise<WorkspaceAgentContextResult> {
   const [ruleSources, memory, branch] = await Promise.all([

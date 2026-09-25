@@ -3695,6 +3695,9 @@ export function createChatStreamController(
         }
       ]
     })
+    // Shift+Enter: steer — the queued row's "Send now", at once. Queued is
+    // still true if that fails; the row then offers Send now itself.
+    if (extras?.steer) await sendFollowUpNow(res.data.id)
     return true
   }
 
@@ -4314,7 +4317,8 @@ export function createChatStreamController(
       toolName: request.name,
       summary: request.summary,
       argsPreview: request.argsPreview,
-      mutating: request.mutating
+      mutating: request.mutating,
+      ...(request.alwaysAllowCommand !== undefined ? { alwaysAllowCommand: request.alwaysAllowCommand } : {})
     }
 
     const idx = findToolRowIndex(state.items, request.toolCallId, request.name)

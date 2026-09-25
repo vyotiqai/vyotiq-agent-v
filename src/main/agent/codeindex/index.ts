@@ -1,5 +1,7 @@
 import { existsSync } from 'fs'
 import { isAbortError } from '../../../shared/errors'
+import { workspacePathsEqual } from '../../../shared/workspacePath'
+import { getSettings } from '@main/settings/settings'
 import { getOrOpenCodeIndexStore, closeCodeIndexStore } from './storeCache'
 import { codeindexDbPath } from '../indexStoragePaths'
 import { syncCodeIndex } from './sync'
@@ -60,9 +62,40 @@ export {
 export { runDenseVectorization, denseEmbedInput, type DenseEmbedder, type DenseJobProgress } from './denseJob'
 export { getCodeIndexRuntimeStatus, onCodeIndexRuntimeStatus } from './status'
 
+/** Settings → Indexing → Pause: nothing starts syncing or embedding this workspace until it is resumed. */
+export function isCodeIndexPaused(workspaceRoot: string): boolean {
+  try {
+    const paused = getSettings().codeIndex?.pausedPaths ?? []
+    return paused.some((path) => workspacePathsEqual(path, workspaceRoot))
+  } catch {
+    return false
+  }
+}
+
+/** The status a paused workspace shows — set on pause, and again once the stopped job has settled. */
+export function setCodeIndexPausedStatus(workspaceRoot: string): void {
+  setCodeIndexRuntimeStatus({
+    phase: 'idle',
+    message: 'Indexing paused',
+    error: null,
+    progress: null,
+    indexProgress: null,
+    workspacePath: workspaceRoot
+  })
+}
+
+/** Embedding jobs in flight, by workspace: Pause stops one between batches. */
+const denseAborts = new Map<string, AbortController>()
+
+export function abortDenseWarm(workspaceRoot: string): void {
+  denseAborts.get(workspaceKey(workspaceRoot))?.abort()
+}
+
+// A static import: the main bundle leaves a `require('@main/…')` as a literal
+// path that cannot resolve at runtime, so the lazy require this replaces
+// always threw — and this answered "enabled" whatever the setting said.
 function readCodeIndexEnabled(): boolean {
   try {
-    const { getSettings } = require('@main/settings/settings') as typeof import('@main/settings/settings')
     return getSettings().codeIndex?.enabled !== false
   } catch {
     return true
@@ -143,7 +176,11 @@ async function ensureCodeIndexSyncedUnlocked(
     files?: WalkedFile[]
     keepIndexingStatus?: boolean
   } = {}
-): Promise<{ sync: SyncResult | null; disabled?: boolean }> {
+): Promise<{ sync: SyncResult | null; disabled?: boolean; paused?: boolean }> {
+  if (isCodeIndexPaused(workspaceRoot)) {
+    setCodeIndexPausedStatus(workspaceRoot)
+    return { sync: null, paused: true }
+  }
   if (readCodeIndexEnabled() === false) {
     setCodeIndexRuntimeStatus({
       phase: 'idle',
@@ -346,6 +383,7 @@ function scheduleDenseWarm(workspaceRoot: string): void {
       // Honor the disable flag at run time: a toggle mid-queue must not
       // download the model or embed vectors.
       if (readCodeIndexEnabled() === false) return
+      if (isCodeIndexPaused(workspaceRoot)) return
       const store = getOrOpenCodeIndexStore(workspaceRoot)
       const status = store.denseStatus()
       const model = store.getDenseModel()
@@ -359,7 +397,11 @@ function scheduleDenseWarm(workspaceRoot: string): void {
       const client = getEmbedUtilityClient()
       await client.ensure(modelDir)
       let lastPublish = 0
+      // Pause stops it between batches; every finished batch is kept.
+      const abort = new AbortController()
+      denseAborts.set(key, abort)
       const { embedded } = await runDenseVectorization(store, {
+        signal: abort.signal,
         embed: (texts) => client.embed(texts),
         onProgress: ({ done, total }) => {
           const now = Date.now()
@@ -388,8 +430,15 @@ function scheduleDenseWarm(workspaceRoot: string): void {
         })
       }
     }
-  }).catch((err) => {
-    if (isAbortError(err)) return
+  })
+    .finally(() => {
+      denseAborts.delete(key)
+    })
+    .catch((err) => {
+    if (isAbortError(err)) {
+      if (isCodeIndexPaused(workspaceRoot)) setCodeIndexPausedStatus(workspaceRoot)
+      return
+    }
     logger.warn('Dense vector warm job failed', {
       scope: 'codeindex',
       reason: err instanceof Error ? err.message : String(err)

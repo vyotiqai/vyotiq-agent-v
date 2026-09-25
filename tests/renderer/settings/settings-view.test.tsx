@@ -1142,7 +1142,7 @@ describe('settings', () => {
       <SettingsView
         settings={{
           ...baseSettings,
-          toolApproval: { mode: 'mutating', allowlist: ['edit', 'terminal'], mcpProtection: true }
+          toolApproval: { mode: 'mutating', allowlist: ['edit', 'terminal', 'terminal:pnpm vitest'], mcpProtection: true }
         }}
         secrets={emptySecrets}
         section="agent"
@@ -1154,14 +1154,17 @@ describe('settings', () => {
     )
     const row = document.querySelector('[data-settings-field="tool-approval-allowlist"]') as HTMLElement
     expect(row).toBeTruthy()
-    const chips = within(row).getByRole('list', { name: 'Always allowed tools' })
+    const chips = within(row).getByRole('list', { name: 'Always allowed' })
     expect(within(chips).getByText('edit')).toBeTruthy()
     expect(within(chips).getByText('terminal')).toBeTruthy()
+    // A command allow reads as the command, marked as one.
+    expect(within(chips).getByText('pnpm vitest')).toBeTruthy()
+    expect(within(chips).getByLabelText('Command')).toBeTruthy()
     fireEvent.click(within(row).getByRole('button', { name: 'Remove edit' }))
     await waitFor(() =>
       expect(onUpdate).toHaveBeenCalledWith(
         expect.objectContaining({
-          toolApproval: expect.objectContaining({ allowlist: ['terminal'] })
+          toolApproval: expect.objectContaining({ allowlist: ['terminal', 'terminal:pnpm vitest'] })
         })
       )
     )
@@ -1327,6 +1330,52 @@ describe('settings', () => {
     expect(within(row).getByText('Ready')).toBeTruthy()
     fireEvent.click(within(row).getByRole('button', { name: 'Reindex proj' }))
     await waitFor(() => expect(window.vyotiq.codeIndexReindex).toHaveBeenCalledWith({ workspacePath }))
+  })
+
+  it('Indexing pauses a workspace while it builds, and resumes a paused one', async () => {
+    const workspacePath = 'C:/ws/proj'
+    const facts = (state: 'building' | 'paused') => ({
+      ok: true as const,
+      data: {
+        workspaceName: 'proj',
+        branch: null,
+        rules: { agentsMd: false, claudeMd: false, cursorrules: false, ruleFileCount: 0 },
+        memoryNotes: 0,
+        codeIndex: { state, files: 340, indexedAt: new Date().toISOString() }
+      }
+    })
+    window.vyotiq.agentContext = vi.fn(async () => facts('building'))
+    window.vyotiq.onAgentContextChanged = vi.fn(() => () => {})
+    window.vyotiq.codeIndexPause = vi.fn(async () => ({ ok: true as const, data: true as const }))
+    window.vyotiq.codeIndexResume = vi.fn(async () => ({ ok: true as const, data: true as const }))
+    const props = {
+      secrets: emptySecrets,
+      openWorkspaces: [workspacePath],
+      section: 'indexing' as const,
+      onClose: vi.fn(),
+      onUpdate: vi.fn(async () => ({ ok: true as const })),
+      onSaveSecret: vi.fn(async () => ({ ok: true as const })),
+      onClearSecret: vi.fn(async () => ({ ok: true as const }))
+    }
+    const { rerender } = render(<SettingsView settings={baseSettings} {...props} />)
+    const row = () => document.querySelector(`[data-settings-item="index:${workspacePath}"]`) as HTMLElement
+    const pause = await within(row()).findByRole('button', { name: 'Pause indexing proj' })
+    fireEvent.click(pause)
+    await waitFor(() => expect(window.vyotiq.codeIndexPause).toHaveBeenCalledWith(workspacePath))
+
+    // Main keeps the flag; the settings it pushes back carry it.
+    window.vyotiq.agentContext = vi.fn(async () => facts('paused'))
+    rerender(
+      <SettingsView
+        settings={{ ...baseSettings, codeIndex: { ...baseSettings.codeIndex, pausedPaths: [workspacePath] } }}
+        {...props}
+      />
+    )
+    expect(within(row()).getByText('Paused')).toBeTruthy()
+    expect(row().textContent).toContain('Paused · 340 files indexed so far — resume carries on from there')
+    expect(within(row()).queryByRole('button', { name: /^Reindex/ })).toBeNull()
+    fireEvent.click(within(row()).getByRole('button', { name: 'Resume indexing proj' }))
+    await waitFor(() => expect(window.vyotiq.codeIndexResume).toHaveBeenCalledWith(workspacePath))
   })
 
   it('Indexing says so when no workspace is open, and hides the rows when off', () => {

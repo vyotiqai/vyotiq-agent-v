@@ -22,7 +22,7 @@ import {
   DeepLinkPayloadSchema
 } from '../shared/ipc'
 import type { VyotiqApi } from '../shared/vyotiqApi'
-import type { IpcResult } from '../shared/ipc'
+import type { IpcResult, Settings } from '../shared/ipc'
 
 export type { HostPlatform, VyotiqApi } from '../shared/vyotiqApi'
 
@@ -139,6 +139,13 @@ const api: VyotiqApi = {
     ipcRenderer.on(IPC.chatEvent, listener)
     return () => {
       ipcRenderer.removeListener(IPC.chatEvent, listener)
+    }
+  },
+  onSettingsChanged: (handler) => {
+    const listener = (_: IpcRendererEvent, settings: Settings): void => handler(settings)
+    ipcRenderer.on(IPC.settingsChanged, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.settingsChanged, listener)
     }
   },
   onToolApprovalRequest: (handler) => {
@@ -512,6 +519,8 @@ const api: VyotiqApi = {
   },
   codeIndexStatus: () => ipcRenderer.invoke(IPC.codeIndexStatus),
   codeIndexReindex: (payload) => ipcRenderer.invoke(IPC.codeIndexReindex, payload ?? {}),
+  codeIndexPause: (workspacePath) => ipcRenderer.invoke(IPC.codeIndexPause, { workspacePath }),
+  codeIndexResume: (workspacePath) => ipcRenderer.invoke(IPC.codeIndexResume, { workspacePath }),
   processMetrics: () => ipcRenderer.invoke(IPC.processMetrics),
   onCodeIndexStatus: (handler) => {
     const listener = (_: IpcRendererEvent, status: unknown): void => {

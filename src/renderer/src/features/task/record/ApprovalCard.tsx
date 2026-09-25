@@ -109,6 +109,9 @@ export const ApprovalCard = memo(function ApprovalCard({
 
   const args = parseArgsRecord(approval.argsPreview)
   const isCommand = approval.toolName === 'terminal'
+  // The terminal's "Always allow" is per command, as main scoped it; a command
+  // that chains or redirects cannot be, so it is not offered at all.
+  const alwaysAllows = isCommand ? (approval.alwaysAllowCommand ?? null) : approval.toolName
   const command = isCommand ? (typeof args?.command === 'string' ? args.command : approval.summary) : null
   const target = !isCommand && typeof args?.path === 'string' ? args.path : approval.summary
 
@@ -195,19 +198,31 @@ export const ApprovalCard = memo(function ApprovalCard({
           <Button size="sm" disabled={!canDecide} onClick={() => decide('session')} title="Allowed until this run ends">
             {pendingText('session', 'Allow for this run')}
           </Button>
-          {/* Visibility on a wrapper: `hidden` appended to Button's own
-              `inline-flex` would be decided by sheet order, not by cn(). */}
-          <span className="hidden @[600px]:inline-flex">
-            <Button size="sm" variant="ghost" disabled={!canDecide} onClick={() => decide('always')}>
-              {pendingDecision === 'always' && phase === 'pending' ? (
-                'Sending…'
-              ) : (
-                <>
-                  Always allow <code className="font-mono text-caption">{approval.toolName}</code>
-                </>
-              )}
-            </Button>
-          </span>
+          {/* Always shown: hiding it below a width left no way to choose it in
+              a normal window with the inspector open. The row wraps instead. */}
+          {alwaysAllows ? (
+            <span className="inline-flex">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!canDecide}
+                title={
+                  isCommand
+                    ? `Runs ${alwaysAllows} commands in this workspace without asking — never one that chains or redirects`
+                    : `Runs ${alwaysAllows} in this workspace without asking`
+                }
+                onClick={() => decide('always')}
+              >
+                {pendingDecision === 'always' && phase === 'pending' ? (
+                  'Sending…'
+                ) : (
+                  <>
+                    Always allow <code className="font-mono text-caption">{alwaysAllows}</code>
+                  </>
+                )}
+              </Button>
+            </span>
+          ) : null}
           <span className="flex-1" />
           <Button
             size="sm"

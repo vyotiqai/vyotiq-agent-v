@@ -41,3 +41,38 @@ describe('ApprovalCard keys', () => {
     expect(screen.getByRole('button', { name: 'Allow once' }).getAttribute('title')).toBe('Allow once (Alt+A)')
   })
 })
+
+describe('ApprovalCard Always allow', () => {
+  const terminal = {
+    requestId: 'req-t',
+    toolName: 'terminal',
+    summary: 'pnpm vitest run a',
+    argsPreview: '{"command":"pnpm vitest run a"}',
+    mutating: true
+  }
+
+  it('names the command it would remember for a terminal call, and sends always', () => {
+    const onDecide = vi.fn()
+    const { container } = render(
+      <div className="@container" style={{ width: 800 }}>
+        <ApprovalCard approval={{ ...terminal, alwaysAllowCommand: 'pnpm vitest' }} requestedAt={null} onDecide={onDecide} />
+      </div>
+    )
+    const always = screen.getByRole('button', { name: 'Always allow pnpm vitest' })
+    expect(always.getAttribute('title')).toContain('never one that chains or redirects')
+    fireEvent.click(always)
+    expect(onDecide).toHaveBeenCalledWith('req-t', 'always')
+    expect(container.textContent).not.toContain('Always allow terminal')
+  })
+
+  it('offers no Always allow for a command that cannot be scoped', () => {
+    render(<ApprovalCard approval={{ ...terminal, alwaysAllowCommand: null }} requestedAt={null} onDecide={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: /^Always allow/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Allow for this run' })).toBeTruthy()
+  })
+
+  it('names the tool for anything else', () => {
+    render(<ApprovalCard approval={approval} requestedAt={null} onDecide={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Always allow edit' })).toBeTruthy()
+  })
+})

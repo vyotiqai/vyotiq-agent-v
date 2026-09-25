@@ -1,4 +1,8 @@
 import { z } from 'zod'
+
+/** Sub-agents a task may run at once: the default, and the most the setting allows. */
+export const DEFAULT_MAX_PARALLEL_INSTANCES = 16
+export const MAX_PARALLEL_INSTANCES_LIMIT = 16
 import {
   DEFAULT_FONT_SCALE,
   DEFAULT_SKIN_ID,
@@ -231,12 +235,19 @@ export const DEFAULT_TOOL_APPROVAL: ToolApprovalSettings = {
 }
 
 export const CodeIndexSettingsSchema = z.object({
-  enabled: z.boolean().default(true)
+  enabled: z.boolean().default(true),
+  /**
+   * Workspaces whose indexing is paused (Settings → Indexing → Pause): no sync
+   * or embedding starts for them until resumed. What was indexed stays; a
+   * resume carries on from there, since a sync skips unchanged files.
+   */
+  pausedPaths: z.array(z.string().min(1)).default([])
 })
 export type CodeIndexSettings = z.infer<typeof CodeIndexSettingsSchema>
 
 export const DEFAULT_CODE_INDEX_SETTINGS: CodeIndexSettings = {
-  enabled: true
+  enabled: true,
+  pausedPaths: []
 }
 
 export const CodeIndexModelPhaseSchema = z.enum(['idle', 'ready', 'syncing', 'error'])
@@ -288,6 +299,9 @@ export const CodeIndexReindexRequestSchema = z.object({
   workspacePath: z.string().min(1).optional()
 })
 export type CodeIndexReindexRequest = z.infer<typeof CodeIndexReindexRequestSchema>
+
+export const CodeIndexPauseRequestSchema = z.object({ workspacePath: z.string().min(1) })
+export type CodeIndexPauseRequest = z.infer<typeof CodeIndexPauseRequestSchema>
 
 export const DictationEngineSchema = z.enum(['openai', 'openrouter', 'local'])
 export type DictationEngine = z.infer<typeof DictationEngineSchema>
@@ -559,6 +573,12 @@ export const SettingsSchema = z.object({
    */
   autoResumeInterruptedRuns: z.boolean().default(true),
   /**
+   * Sub-agents (inline instances) one task may run at the same time. A spawn
+   * past it is refused and the agent is told to await one first. The default
+   * is above what a task uses in practice, so it changes nothing until lowered.
+   */
+  maxParallelInstances: z.number().int().min(1).max(MAX_PARALLEL_INSTANCES_LIMIT).default(DEFAULT_MAX_PARALLEL_INSTANCES),
+  /**
    * Maximum simultaneously visible chat panes (split session view). 0 = Auto:
    * derived from the viewport (min 280px per pane, hard cap 6). 1–6 is a fixed
    * limit that may exceed what fits — the pane row scrolls horizontally.
@@ -658,6 +678,7 @@ export const DEFAULT_SETTINGS: Settings = {
   diagnosticsCommand: '',
   autoModeSwitch: true,
   autoResumeInterruptedRuns: true,
+  maxParallelInstances: DEFAULT_MAX_PARALLEL_INSTANCES,
   maxChatPanes: 0,
   autoCheckUpdates: true,
   googleMcpClientId: '',

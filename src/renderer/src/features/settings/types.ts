@@ -48,6 +48,7 @@ export type SettingsErrorField =
   | 'customUrl'
   | 'apikey'
   | 'keepTurns'
+  | 'parallelInstances'
   | 'autoCompactThreshold'
   | 'checkpointKeep'
   | 'checkpointAge'

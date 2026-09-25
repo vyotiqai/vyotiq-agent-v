@@ -9,13 +9,20 @@ import { isAbortError } from '../../shared/errors'
 import { logger } from '../../shared/logger'
 import { summarizeToolArgs } from '../../shared/toolSummary'
 import { scrubString } from '../../shared/utils/scrub'
+import {
+  commandAllowKey,
+  commandAllowPrefix,
+  commandFromAllowKey,
+  commandMatchesAllow,
+  terminalCommandOf
+} from '../../shared/utils/commandAllow'
 import { isMcpServerToolName } from '../../shared/mcpApps'
 import { BUILTIN_TOOL_NAMES, canonicalizeAgentToolName } from './schemas/tools'
 import { isApprovalExemptTool } from './tools/classify'
 import { agentBuiltToolAllowKey } from './agentTools/loader'
 import { resolveAgentToolsDir } from './agentTools/paths'
 import { ASK_SAFE_BUILTIN } from './tools/modePolicy'
-import { streamSignalFor } from './runRegistry'
+import { registerRunCancelHooks, streamSignalFor } from './runRegistry'
 import { dismissLifecycleNotification } from '../notifications/bus'
 import { notifyBadgeChange } from '../app/badges'
 import { needsYouDedupeKey } from '../../shared/ipc'
@@ -135,6 +142,16 @@ async function agentBuiltAllowKeyFor(name: string): Promise<string | undefined> 
   }
 }
 
+function parseArgs(argsJson: string | undefined): Record<string, unknown> | undefined {
+  if (!argsJson) return undefined
+  try {
+    const parsed: unknown = JSON.parse(argsJson)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function isToolGated(
   name: string,
   mode: ToolApprovalMode,
@@ -151,14 +168,6 @@ export function isToolGated(
   const allowNames = allowKey ? [allowKey] : [canonical, name]
   if (allowNames.some((entry) => sessionAllowlist.has(entry))) return false
   if (allowNames.some((entry) => workspaceAllowlist.includes(entry))) return false
-  const mcpProtection = opts?.mcpProtection !== false
-  if (mode === 'off') {
-    // "Approvals off" is a judgement about the tools that shipped with the app.
-    // An agent-built module is arbitrary Node this run wrote minutes ago, so it
-    // stays gated here for the same reason an MCP server tool does.
-    return Boolean(allowKey) || (mcpProtection && isMcpServerToolName(canonical))
-  }
-  if (mode === 'all') return true
   let args: Record<string, unknown> | undefined
   if (argsJson) {
     try {
@@ -170,6 +179,27 @@ export function isToolGated(
       args = undefined
     }
   }
+  if (canonical === 'terminal') {
+    const command = terminalCommandOf(args)
+    // Polling a session reads the output of a command already let through; it starts nothing.
+    if (!command && typeof args?.session_id === 'string' && args.session_id.trim()) return false
+    // "Always allow" for the terminal is per command: `terminal:pnpm vitest` lets
+    // `pnpm vitest …` through, never a chained or redirected command.
+    if (command) {
+      for (const entry of [...sessionAllowlist, ...workspaceAllowlist]) {
+        const prefix = commandFromAllowKey(entry)
+        if (prefix && commandMatchesAllow(command, prefix)) return false
+      }
+    }
+  }
+  const mcpProtection = opts?.mcpProtection !== false
+  if (mode === 'off') {
+    // "Approvals off" is a judgement about the tools that shipped with the app.
+    // An agent-built module is arbitrary Node this run wrote minutes ago, so it
+    // stays gated here for the same reason an MCP server tool does.
+    return Boolean(allowKey) || (mcpProtection && isMcpServerToolName(canonical))
+  }
+  if (mode === 'all') return true
   return !isApprovalExemptTool(canonical, args)
 }
 
@@ -366,7 +396,12 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         return { allowed: true }
       }
 
+      // The terminal's "Always allow" is scoped to the command, computed here —
+      // from the full arguments, not the card's truncated preview.
+      const terminalCommand = name === 'terminal' ? terminalCommandOf(parseArgs(call.arguments)) : null
+      const alwaysAllowCommand = terminalCommand ? commandAllowPrefix(terminalCommand) : null
       const request: ToolApprovalRequest = {
+        ...(name === 'terminal' ? { alwaysAllowCommand } : {}),
         requestId: randomUUID(),
         runId: options.runId,
         toolCallId: call.id,
@@ -423,11 +458,21 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
         case 'session':
           sessionAllowlist.add(agentBuiltAllowKey ?? name)
           return { allowed: true }
-        case 'always':
+        case 'always': {
+          if (name === 'terminal') {
+            // Per command. One that cannot be scoped is let through this once
+            // and remembered for nothing — the card never offers it Always.
+            if (!alwaysAllowCommand) return { allowed: true }
+            const key = commandAllowKey(alwaysAllowCommand)
+            workspaceAllowlist.push(key)
+            options.persistAlways?.(key)
+            return { allowed: true }
+          }
           // The key, not the name: rewriting the module withdraws the allow.
           workspaceAllowlist.push(agentBuiltAllowKey ?? name)
           options.persistAlways?.(agentBuiltAllowKey ?? name)
           return { allowed: true }
+        }
         case 'once':
           return { allowed: true }
         default: {
@@ -444,3 +489,6 @@ export function resetToolApprovalForTests(): void {
   senders.clear()
   pending.clear()
 }
+
+// A cancel releases this run's parked approvals (runRegistry calls it).
+registerRunCancelHooks({ cancelApprovals: cancelPendingApprovals })

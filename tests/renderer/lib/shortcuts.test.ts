@@ -174,6 +174,7 @@ describe('shortcutLabel', () => {
     const reference = referenceShortcutCatalog()
     expect(reference.map((row) => row.id)).toEqual([
       'edit-last',
+      'steer',
       'approval-allow',
       'approval-deny',
       'font-smaller',

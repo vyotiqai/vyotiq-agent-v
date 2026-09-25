@@ -65,6 +65,8 @@ export type UiToolApproval = {
   summary: string
   argsPreview: string
   mutating: boolean
+  /** Terminal: what "Always allow" remembers, or null when it cannot be offered. See ToolApprovalRequest. */
+  alwaysAllowCommand?: string | null
 }
 
 /** One field in a pending ask_question form. */

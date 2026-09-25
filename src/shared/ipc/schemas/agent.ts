@@ -1677,7 +1677,13 @@ export const ToolApprovalRequestSchema = z.object({
   /** Raw arguments so the card can show exactly what would run. */
   argsPreview: z.string(),
   /** False for approval-exempt tools; true for mutating tools, web_fetch, and MCP. */
-  mutating: z.boolean()
+  mutating: z.boolean(),
+  /**
+   * Terminal only: the command "Always allow" would remember (`pnpm vitest`),
+   * or null when this command chains or redirects and cannot be scoped — the
+   * card then offers no "Always allow". Absent for every other tool.
+   */
+  alwaysAllowCommand: z.string().nullable().optional()
 })
 export type ToolApprovalRequest = z.infer<typeof ToolApprovalRequestSchema>
 
@@ -2080,7 +2086,8 @@ export const WorkspaceAgentContextResultSchema = z.object({
   /** The most recently changed notes, newest first. */
   memoryNoteNames: z.array(z.string().min(1)).max(3).optional(),
   codeIndex: z.object({
-    state: z.enum(['ready', 'building', 'degraded', 'off']),
+    /** `paused`: Settings → Indexing paused it; what is indexed stays searchable. */
+    state: z.enum(['ready', 'building', 'degraded', 'off', 'paused']),
     /** Files in this workspace's own index, when it has one. */
     files: z.number().int().nonnegative().optional(),
     /** When that index last finished a pass (ISO). */
@@ -2218,6 +2225,11 @@ export type ComposerSendExtras = {
    * the worktree and starts the task there; this never reaches main.
    */
   worktree?: boolean
+  /**
+   * While a run is live: send it now instead of queueing it for the turn's end
+   * (Shift+Enter) — queued, then promoted as "Send now" does. Renderer only.
+   */
+  steer?: boolean
 }
 
 export function buildUserContent(

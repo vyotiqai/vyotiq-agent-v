@@ -220,6 +220,8 @@ export interface VyotiqApi {
   mergeTaskWorktree: (workspacePath: string, message: string) => Promise<IpcResult<TaskWorktreeMergeResult>>
   /** Delete the worktree's folder and branch. Close its workspace first. */
   discardTaskWorktree: (workspacePath: string) => Promise<IpcResult<true>>
+  /** Settings as just written, by the renderer or by main itself. */
+  onSettingsChanged: (handler: (settings: Settings) => void) => () => void
   addWorkspace: (path?: string) => Promise<IpcResult<WorkspacesState>>
   removeWorkspace: (
     path: string,
@@ -843,6 +845,10 @@ export interface VyotiqApi {
     IpcResult<CodeIndexRuntimeStatus & { settings: CodeIndexSettings }>
   >
   /** Force re-sync of the active workspace code index. */
+  /** Stop this workspace's indexing now and keep it stopped until resumed. */
+  codeIndexPause: (workspacePath: string) => Promise<IpcResult<true>>
+  /** Clear the pause and carry on indexing from what is already there. */
+  codeIndexResume: (workspacePath: string) => Promise<IpcResult<true>>
   codeIndexReindex: (payload?: { workspacePath?: string }) => Promise<
     IpcResult<{ scanned: number; indexed: number; skipped: number; removed: number } | null>
   >

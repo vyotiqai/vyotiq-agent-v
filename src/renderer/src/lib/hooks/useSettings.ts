@@ -45,6 +45,15 @@ export function useSettings() {
     void refresh()
   }, [refresh])
 
+  // Main's own writes ("Always allow" saving the allowlist during a run) arrive
+  // here too. Newer than anything in flight, so it also retires those.
+  useEffect(() => {
+    return window.vyotiq?.onSettingsChanged?.((next) => {
+      generationRef.current += 1
+      setSettings(next)
+    })
+  }, [])
+
   const update = useCallback(async (partial: Partial<Settings>): Promise<IpcResult<Settings>> => {
     const gen = ++generationRef.current
     const res = await window.vyotiq.setSettings(partial)

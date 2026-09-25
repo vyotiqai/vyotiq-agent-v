@@ -70,7 +70,8 @@ import {
 } from '@main/agent/state'
 import { startAgentRunInBackground } from '@main/agent/startAgentRun'
 import { resolveRunDir } from '@main/storage/paths'
-import { RUN_RECEIPT_VERSION } from '@shared/ipc'
+import { DEFAULT_MAX_PARALLEL_INSTANCES, RUN_RECEIPT_VERSION } from '@shared/ipc'
+import { setSettings } from '@main/settings/settings'
 import {
   CANCEL_FORCE_FINISH_MS,
   chatCancelResult,
@@ -340,9 +341,10 @@ describe('agentInstances', () => {
     clearRunAbort(child.runId)
   })
 
-  it('spawns many live children per parent with no global run cap', async () => {
+  it('spawns many live children per parent — the default cap is above what a task uses', async () => {
     const ids: string[] = []
-    // No global cap exists: every spawn must succeed regardless of live count.
+    // The default (Settings → Agent → Instances at once) changes nothing at ten.
+    expect(DEFAULT_MAX_PARALLEL_INSTANCES).toBeGreaterThanOrEqual(10)
     for (let i = 0; i < 10; i += 1) {
       const r = await spawnAgentInstance({
         parentRunId,
@@ -360,6 +362,46 @@ describe('agentInstances', () => {
     for (const id of ids) {
       chatCancelResult(id)
       clearRunAbort(id)
+    }
+  })
+
+  it('refuses a spawn past Instances at once, and allows it again once one finishes', async () => {
+    setSettings({ maxParallelInstances: 2 })
+    try {
+      const spawn = (i: number) =>
+        spawnAgentInstance({
+          parentRunId,
+          workspacePath,
+          goal: `task ${i}`,
+          outcome: `task ${i} outcome`,
+          subTasks: [`task ${i} step`],
+          doneWhen: `task ${i} complete`,
+          pathScope: ['src']
+        })
+      const first = await spawn(1)
+      const second = await spawn(2)
+      expect(first.ok && second.ok).toBe(true)
+      const third = await spawn(3)
+      expect(third).toEqual({
+        ok: false,
+        error:
+          'This task already has 2 instances running — the most Settings → Agent → Instances at once allows (2). Wait for one with await_agent_instance, then spawn the next.'
+      })
+      // One finishes: there is room again.
+      if (first.ok) {
+        chatCancelResult(first.runId)
+        clearRunAbort(first.runId)
+      }
+      const fourth = await spawn(4)
+      expect(fourth.ok).toBe(true)
+      for (const r of [second, fourth]) {
+        if (r.ok) {
+          chatCancelResult(r.runId)
+          clearRunAbort(r.runId)
+        }
+      }
+    } finally {
+      setSettings({ maxParallelInstances: DEFAULT_MAX_PARALLEL_INSTANCES })
     }
   })
 

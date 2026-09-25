@@ -169,6 +169,8 @@ import {
   SkillsWriteLocalRequestSchema,
   SkillsDeleteLocalRequestSchema,
   CodeIndexReindexRequestSchema,
+  CodeIndexPauseRequestSchema,
+  DEFAULT_SETTINGS,
   StorageCleanupPreviewRequestSchema,
   StorageCleanupRunRequestSchema,
   StorageSurfaceAckRequestSchema,
@@ -267,7 +269,7 @@ import { logger, logErrorSummary } from '../../shared/logger'
 import { pickWorkspace } from '@main/workspace/workspace'
 import { consumePendingDeepLink } from '@main/app/deepLinks'
 import { resolveInsideWorkspace } from '@main/workspace/safePath'
-import { getSettings, setSettings, setMarketplaceRemoteInstallAcked, redactSettingsForIpc, enqueueSettingsMutation } from '@main/settings/settings'
+import { getSettings, setSettings, setMarketplaceRemoteInstallAcked, redactSettingsForIpc, enqueueSettingsMutation, onSettingsWritten } from '@main/settings/settings'
 import { syncMcpServers, getMcpServerStatus, mcpStatusExtras, refreshMcpServers, retryFailedMcpServers, startMcpOAuth, setMcpStdioWorkspace } from '@main/agent/mcp'
 import { isExecutableMcpBinary } from '@main/agent/mcp/binaries'
 import { headersWithoutAuthorization } from '../../shared/utils/mcpAuth'
@@ -326,7 +328,7 @@ import {
   clearGoogleMcpClientSecret,
   enqueueSecretsMutation
 } from '@main/settings/secrets'
-import { getChatEventDispatcher, setChatEventUiSubscriptions, addChatEventUiSubscription } from './streamBatch'
+import { getChatEventDispatcher, setChatEventUiSubscriptions, addChatEventUiSubscription, setChatEventActivePathResolver } from './streamBatch'
 import { installIpcTiming, timeSyncIpc } from '../perf/ipcTiming'
 import { createRunId, validateExistingRunStart } from '../agent/loop'
 import { hydrateRunFollowUps, startAgentRunInBackground } from '../agent/startAgentRun'
@@ -402,13 +404,16 @@ import { clearModelCache } from '../agent/providers/modelCache'
 import { collectWorkspaceFiles } from '../agent/tools/walk'
 import {
   disposeWorkspaceIndexes,
+  pauseWorkspaceIndexes,
   scheduleWorkspaceIndexSync,
   warmWorkspaceIndexes,
   workspaceIndexAbortSignal
 } from '../agent/workspaceIndex'
 import {
   onCodeIndexRuntimeStatus,
+  closeCodeIndexStore,
   getCodeIndexRuntimeStatus,
+  isCodeIndexPaused,
   reindexCodeIndex
 } from '@main/agent/codeindex'
 import { pruneStaleInstanceWorktreesBestEffort } from '../git/instanceWorktree'
@@ -858,6 +863,38 @@ function getTraceCapture(): ReturnType<typeof getTraceAutoCapture>['capture'] {
 
 export function registerIpc(): void {
   installIpcTiming()
+
+  // The chat stream batcher's active-workspace lookup (it cannot import
+  // workspaces itself without a cycle).
+  setChatEventActivePathResolver(() => getWorkspaces().activePath)
+
+  // What settings.ts once did with lazy requires the one-file bundle could
+  // never resolve: close the code index when it is switched off, and clear the
+  // MCP resolve cache when servers change.
+  onSettingsWritten((next, prev) => {
+    if ((prev.codeIndex?.enabled ?? true) !== (next.codeIndex?.enabled ?? true)) {
+      try {
+        closeCodeIndexStore()
+      } catch {
+        // no store open yet
+      }
+    }
+    if (JSON.stringify(next.mcpServers ?? []) !== JSON.stringify(prev.mcpServers ?? [])) invalidateMcpResolveCache()
+  })
+
+  // Every settings write reaches every window, main's own included ("Always
+  // allow" saving the allowlist mid-run), so no window shows a stale value.
+  onSettingsWritten((next) => {
+    const payload = redactSettingsForIpc(next)
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue
+      try {
+        win.webContents.send(IPC.settingsChanged, payload)
+      } catch {
+        /* ignore */
+      }
+    }
+  })
 
   // Push live code-index / embed progress to all renderer windows.
   onCodeIndexRuntimeStatus((status) => {
@@ -4637,7 +4674,8 @@ export function registerIpc(): void {
       const context = await buildWorkspaceAgentContext(req.workspacePath, {
         enabled: getSettings().codeIndex?.enabled !== false,
         phase: indexStatus.phase,
-        statusWorkspace: indexStatus.workspacePath
+        statusWorkspace: indexStatus.workspacePath,
+        paused: isCodeIndexPaused(req.workspacePath)
       })
       // Reading the summary is what says someone is looking at it: keep this
       // workspace live from here until it is removed.
@@ -4981,6 +5019,7 @@ export function registerIpc(): void {
       if (getSettings().codeIndex?.enabled === false) {
         return fail('Codebase index is disabled')
       }
+      if (isCodeIndexPaused(workspacePath)) return fail('Indexing is paused for this workspace — resume it first')
       const sync = await reindexCodeIndex(workspacePath, {
         signal: workspaceIndexAbortSignal(workspacePath)
       })
@@ -4993,6 +5032,43 @@ export function registerIpc(): void {
       })
     } catch (err) {
       return failFrom(err, IPC.codeIndexReindex)
+    }
+  })
+
+  ipcMain.handle(IPC.codeIndexPause, async (event, raw): Promise<IpcResult<true>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const { workspacePath } = CodeIndexPauseRequestSchema.parse(raw)
+      if (!isOpenWorkspace(workspacePath)) return fail('Workspace is not open')
+      // The flag first: whatever the stop races with then finds it paused.
+      const current = getSettings().codeIndex ?? DEFAULT_SETTINGS.codeIndex
+      if (!isCodeIndexPaused(workspacePath)) {
+        setSettings({ codeIndex: { ...current, pausedPaths: [...(current.pausedPaths ?? []), workspacePath] } })
+      }
+      pauseWorkspaceIndexes(workspacePath)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.codeIndexPause)
+    }
+  })
+
+  ipcMain.handle(IPC.codeIndexResume, async (event, raw): Promise<IpcResult<true>> => {
+    if (!senderOk(event)) return fail('Invalid sender')
+    try {
+      const { workspacePath } = CodeIndexPauseRequestSchema.parse(raw)
+      if (!isOpenWorkspace(workspacePath)) return fail('Workspace is not open')
+      const current = getSettings().codeIndex ?? DEFAULT_SETTINGS.codeIndex
+      setSettings({
+        codeIndex: {
+          ...current,
+          pausedPaths: (current.pausedPaths ?? []).filter((path) => !workspacePathsEqual(path, workspacePath))
+        }
+      })
+      // An incremental sync: files already indexed and unchanged are skipped.
+      warmWorkspaceIndexes(workspacePath)
+      return ok(true)
+    } catch (err) {
+      return failFrom(err, IPC.codeIndexResume)
     }
   })
 

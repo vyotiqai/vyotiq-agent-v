@@ -44,7 +44,7 @@ const APPROVAL_NOTE: Record<ToolApprovalMode, string> = {
   all: 'Asks before every tool'
 }
 
-const INDEX_LABEL = { ready: 'Ready', building: 'Building', degraded: 'Degraded', off: 'Off' } as const
+const INDEX_LABEL = { ready: 'Ready', building: 'Building', degraded: 'Degraded', off: 'Off', paused: 'Paused' } as const
 
 function startChord(): string {
   return window.vyotiq?.platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter'

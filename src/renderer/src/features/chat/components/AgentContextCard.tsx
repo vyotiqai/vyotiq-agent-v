@@ -9,14 +9,16 @@ const INDEX_STATE_LABEL: Record<CodeIndexState, string> = {
   ready: 'Ready',
   building: 'Building',
   degraded: 'Degraded',
-  off: 'Off'
+  off: 'Off',
+  paused: 'Paused'
 }
 
 const INDEX_STATE_HINT: Record<CodeIndexState, string> = {
   ready: 'Code index is built — the agent can search this workspace by symbol.',
   building: 'Code index is still syncing — recent edits may be missing.',
   degraded: 'Code index is incomplete — the agent falls back to plain file search.',
-  off: 'Code index is off for this workspace.'
+  off: 'Code index is off for this workspace.',
+  paused: 'Indexing is paused — the agent searches what is indexed so far. Resume it in Settings → Indexing.'
 }
 
 /** Uneven on purpose, so the pending state reads as text rather than as bars. */

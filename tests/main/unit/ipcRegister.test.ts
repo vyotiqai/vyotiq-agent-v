@@ -112,7 +112,8 @@ vi.mock('@main/settings/settings', () => ({
     theme: 'system',
     telemetryEnabled: false
   }),
-  setSettings: vi.fn()
+  setSettings: vi.fn(),
+  onSettingsWritten: vi.fn(() => () => {})
 }))
 
 vi.mock('@main/settings/secrets', () => ({
@@ -164,6 +165,7 @@ vi.mock('@main/agent/providers/modelCache', () => ({
 }))
 
 vi.mock('@main/agent/runRegistry', () => ({
+  registerRunCancelHooks: vi.fn(),
   activeRunCount: vi.fn(() => 0),
   chatCancelResult: vi.fn(),
   cancelRun: vi.fn(),

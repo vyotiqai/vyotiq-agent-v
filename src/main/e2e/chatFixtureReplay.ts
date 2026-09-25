@@ -4,7 +4,12 @@ import type { AgentEvent, AgentInteractionMode } from '../../shared/ipc'
 import { isAbortError } from '../../shared/errors'
 import { logger } from '../../shared/logger'
 import { clearRunAbort, streamSignalFor } from '../agent/runRegistry'
-import { createApprovalGate } from '../agent/toolApproval'
+import { createApprovalGate, type ToolApprovalGate } from '../agent/toolApproval'
+import { persistAlwaysAllow } from '../agent/toolApprovalStore'
+import { getSettings } from '../settings/settings'
+import { findWorkspaceSettingsOverride, readWorkspacesState } from '../workspace/workspaces'
+import { resolveEffectiveSettings } from '../../shared/effectiveSettings'
+import { DEFAULT_SETTINGS } from '../../shared/ipc'
 import { createRun, runExists, updateStatus } from '../agent/state'
 import { resolveRunDir } from '../storage/paths'
 
@@ -71,18 +76,32 @@ function isFixtureApproval(template: unknown): template is FixtureApproval {
   return (template as { type?: unknown }).type === '__approval'
 }
 
-async function* askFixtureApproval(
-  step: FixtureApproval,
-  input: { runId: string; invokeId: number },
-  signal: AbortSignal
-): AsyncGenerator<AgentEvent> {
-  const gate = createApprovalGate({
+/**
+ * One gate for the replay, as the loop has one per invoke: the workspace's own
+ * standing allows, and "Always allow" saved where a real run saves it — so a
+ * fixture step exercises what the loop does with both. Mode stays 'all': a
+ * fixture step exists to ask.
+ */
+function fixtureApprovalGate(input: { runId: string; invokeId: number; workspacePath: string }, signal: AbortSignal): ToolApprovalGate {
+  const effective = resolveEffectiveSettings(
+    getSettings(),
+    findWorkspaceSettingsOverride(readWorkspacesState(), input.workspacePath)
+  )
+  return createApprovalGate({
     runId: input.runId,
     invokeId: input.invokeId,
     mode: 'all',
-    workspaceAllowlist: [],
-    signal
+    workspaceAllowlist: (effective.toolApproval ?? DEFAULT_SETTINGS.toolApproval).allowlist,
+    signal,
+    persistAlways: (toolName) => persistAlwaysAllow(input.workspacePath, toolName)
   })
+}
+
+async function* askFixtureApproval(
+  step: FixtureApproval,
+  input: { runId: string; invokeId: number },
+  gate: ToolApprovalGate
+): AsyncGenerator<AgentEvent> {
   const verdict = await gate.authorize({ id: step.toolCallId, name: step.name, arguments: step.arguments })
   const base = { runId: input.runId, invokeId: input.invokeId, toolCallId: step.toolCallId, name: step.name, summary: step.summary }
   if (verdict.allowed) {
@@ -148,6 +167,7 @@ export async function* replayChatFixture(input: {
   }
   try {
     const templates = loadFixtureTemplates()
+    let gate: ToolApprovalGate | null = null
     for (const template of templates) {
       if (signal.aborted) {
         const err = new Error('Aborted')
@@ -155,7 +175,8 @@ export async function* replayChatFixture(input: {
         throw err
       }
       if (isFixtureApproval(template)) {
-        yield* askFixtureApproval(template, input, signal)
+        gate ??= fixtureApprovalGate(input, signal)
+        yield* askFixtureApproval(template, input, gate)
         continue
       }
       const event = {

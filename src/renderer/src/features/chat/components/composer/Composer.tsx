@@ -396,6 +396,8 @@ export function Composer({
   const briefState = useBriefState(briefWorkspace)
   const briefDraftIdRef = useRef(briefState.draftId)
   briefDraftIdRef.current = briefState.draftId
+  /** Set by Shift+Enter just before submit: this send steers the live run. */
+  const steerNextRef = useRef(false)
   const briefWorktreeRef = useRef(Boolean(briefState.worktree))
   briefWorktreeRef.current = Boolean(briefState.worktree)
   const [savingDraft, setSavingDraft] = useState(false)
@@ -470,6 +472,11 @@ export function Composer({
         // New worktree: App makes it and starts the task there.
         if (variant === 'brief' && briefWorktreeRef.current) {
           extras = { ...(extras ?? {}), worktree: true }
+        }
+        // Shift+Enter on the instruction line while a run is live.
+        if (steerNextRef.current) {
+          steerNextRef.current = false
+          extras = { ...(extras ?? {}), steer: true }
         }
         const boundWorkspace = workspacePath
         const resolved = await resolveComposerMentions({
@@ -1536,6 +1543,27 @@ export function Composer({
                     requestAnimationFrame(syncCursor)
                   }}
                   onKeyDown={(e) => {
+                    // While a run is live, Shift+Enter steers: send it now, not at the turn's end.
+                    if (
+                      running &&
+                      e.key === 'Enter' &&
+                      e.shiftKey &&
+                      !e.ctrlKey &&
+                      !e.metaKey &&
+                      !e.altKey &&
+                      !e.nativeEvent.isComposing &&
+                      !slash.open &&
+                      !mentions.open
+                    ) {
+                      e.preventDefault()
+                      steerNextRef.current = true
+                      submit()
+                      // The send reads it synchronously; a submit that sent nothing must not leave it set.
+                      queueMicrotask(() => {
+                        steerNextRef.current = false
+                      })
+                      return
+                    }
                     onKeyDown(e)
                     requestAnimationFrame(syncCursor)
                   }}
