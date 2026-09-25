@@ -516,7 +516,8 @@ export const PlanPanel = memo(function PlanPanel({
         ? !content
         // Every run seeds a plan.md stub now that Plan mode is merged in, so
         // `content` is non-empty from step 0 — readiness, not length, decides.
-        : !hasTodos && !isPlanDraftReady(content))
+        // Steps alone are not a plan: the record shows them.
+        : !isPlanDraftReady(content))
 
   const doc = useMemo(() => (tab === 'plan' && content?.trim() ? planDocument(content) : null), [tab, content])
   const live = { steps: hasTodos, checks: checks.length > 0 }

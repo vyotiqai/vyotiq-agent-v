@@ -54,16 +54,8 @@ describe('noticeTaskTitle', () => {
     )
   })
 
-  it('leads with the teammate, as the navigator does', () => {
-    expect(noticeTaskTitle({ goal: 'Audit the pricing pages', agentProfileName: 'Scout' }, 'r')).toBe(
-      'Scout · Audit the pricing pages'
-    )
-    // A delegated run sets no goal; the teammate still names it.
-    expect(noticeTaskTitle({ agentProfileName: 'Scout' }, 'r')).toBe('Scout')
-  })
-
   it('falls back to the run id when there is nothing else, as the navigator does', () => {
-    expect(noticeTaskTitle({ goal: '   ', agentProfileName: '  ' }, 'abcdef1234567')).toBe('abcdef12')
+    expect(noticeTaskTitle({ goal: '   ' }, 'abcdef1234567')).toBe('abcdef12')
     expect(noticeTaskTitle(null, 'abcdef1234567')).toBe('abcdef12')
   })
 })

@@ -92,15 +92,15 @@ const CHAT_START_RETRY_MS = 500
  *
  * An allowlist, not a denylist: most refusals state something that will be
  * just as true 500ms later ('Workspace is not open', 'Workspace path does not
- * exist', a binding conflict), and retrying one only repeats it three times,
+ * exist'), and retrying one only repeats it three times,
  * half a second apart, filling the log and delaying the error the user needed
  * on the first attempt. Anything uncoded or unrecognised is therefore final,
  * matching how `isRetryableTurnFailure` fails closed on unknown codes.
  *
- * Both entries cover a run still unwinding: `launchRunSync` refuses rather
+ * `run_active` covers a run still unwinding: `launchRunSync` refuses rather
  * than waits, so this retry is what absorbs that gap.
  */
-const CHAT_START_RETRYABLE_CODES: ReadonlySet<string> = new Set(['run_active', 'profile_busy'])
+const CHAT_START_RETRYABLE_CODES: ReadonlySet<string> = new Set(['run_active'])
 
 /**
  * An *unclassified* failure (no code) still retries: that covers transient

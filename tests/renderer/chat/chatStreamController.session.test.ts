@@ -347,12 +347,12 @@ describe('createChatStreamController', () => {
       await transientSend
       expect(transient).toHaveBeenCalledTimes(3)
 
-      // A binding refusal is a fact about the run: the same payload gets the
+      // A refusal the user caused is a settled fact: the same payload gets the
       // same answer, so re-sending it only repeats the error in the log.
       const settled = vi.fn().mockResolvedValue({
         ok: false,
-        error: 'Existing run teammate binding cannot be changed',
-        code: 'run_binding_immutable'
+        error: 'Workspace is not open',
+        code: 'IPC_CLIENT'
       })
       // @ts-expect-error test bridge
       window.vyotiq = { ...(window.vyotiq as object), chatStart: settled }
@@ -361,7 +361,7 @@ describe('createChatStreamController', () => {
       await vi.runAllTimersAsync()
       await settledSend
       expect(settled).toHaveBeenCalledTimes(1)
-      expect(b.errorCode).toBe('run_binding_immutable')
+      expect(b.errorCode).toBe('IPC_CLIENT')
     } finally {
       vi.useRealTimers()
     }
@@ -387,7 +387,7 @@ describe('createChatStreamController', () => {
   it('does not retry a settled binding refusal', async () => {
     const chatStart = vi
       .fn()
-      .mockResolvedValue({ ok: false, error: 'bound elsewhere', code: 'run_binding_immutable' })
+      .mockResolvedValue({ ok: false, error: 'Workspace is not open', code: 'IPC_CLIENT' })
     const chatCancel = vi.fn().mockResolvedValue({ ok: true, data: true })
     // @ts-expect-error test bridge
     window.vyotiq = { chatStart, chatCancel }
@@ -396,25 +396,6 @@ describe('createChatStreamController', () => {
     await controller.send('hello')
 
     expect(chatStart).toHaveBeenCalledTimes(1)
-  })
-
-  it('clears the refused teammate binding so the next send is not refused again', async () => {
-    const chatStart = vi
-      .fn()
-      .mockResolvedValue({ ok: false, error: 'bound elsewhere', code: 'run_binding_immutable' })
-    const chatCancel = vi.fn().mockResolvedValue({ ok: true, data: true })
-    // @ts-expect-error test bridge
-    window.vyotiq = { chatStart, chatCancel }
-
-    const onAgentProfileRefused = vi.fn()
-    const controller = createChatStreamController({
-      workspacePath: '/ws',
-      getAgentProfileId: () => 'auditer',
-      onAgentProfileRefused
-    })
-    await controller.send('hello')
-
-    expect(onAgentProfileRefused).toHaveBeenCalledTimes(1)
   })
 
   it('still retries a run that is only transiently busy', async () => {

@@ -83,34 +83,6 @@ describe('listRuns / interruptOrphanRuns', () => {
     expect(result.capped).toBe(false)
   })
 
-  it('includes profile snapshot and runtime in run summaries', async () => {
-    const snapshot = {
-      version: 1,
-      id: 'scout',
-      name: 'Scout',
-      persona: 'Investigate carefully.',
-      scope: 'global',
-      runtime: 'cloud'
-    }
-    writeStatus(resolveRunDir(workspace, 'profile-run'), {
-      status: 'done',
-      updatedAt: '2026-01-03T00:00:00.000Z',
-      workspacePath: workspace,
-      agentProfileId: 'scout',
-      agentProfileName: 'Scout',
-      agentProfileSnapshot: snapshot,
-      runtime: 'cloud'
-    })
-
-    const result = await listRuns(workspace)
-    expect(result.runs[0]).toMatchObject({
-      runId: 'profile-run',
-      agentProfileId: 'scout',
-      agentProfileSnapshot: snapshot,
-      runtime: 'cloud'
-    })
-  })
-
   it('reports capped when more than 30 runs exist', async () => {
     for (let i = 0; i < 31; i++) {
       const stamp = String(i).padStart(2, '0')

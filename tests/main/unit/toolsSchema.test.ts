@@ -65,7 +65,7 @@ describe('toolsSchema', () => {
   it('wires a real handler for every built-in tool (no missing/stub handlers)', () => {
     const handlerNames = Object.keys(BUILTIN_HANDLERS).sort()
     expect(handlerNames).toEqual([...BUILTIN_TOOL_NAMES].sort())
-    expect(handlerNames).toHaveLength(69)
+    expect(handlerNames).toHaveLength(63)
     for (const name of BUILTIN_TOOL_NAMES) {
       const handler = BUILTIN_HANDLERS[name as keyof typeof BUILTIN_HANDLERS]
       expect(typeof handler, `${name} handler must be a function`).toBe('function')

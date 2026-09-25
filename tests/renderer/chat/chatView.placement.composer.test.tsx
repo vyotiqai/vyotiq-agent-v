@@ -691,7 +691,13 @@ describe('ChatView composer placement', () => {
         {...baseProps}
         activeRunId="run-1"
         running
-        items={[CREATE_PLAN_ITEM]}
+        items={[
+          {
+            kind: 'tool',
+            id: 'cp1',
+            tool: { id: 'cp1', name: 'create_plan', summary: 'Ship it', status: 'done' }
+          }
+        ]}
       />
     )
     await act(async () => {

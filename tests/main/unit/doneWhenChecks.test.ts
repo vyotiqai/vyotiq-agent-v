@@ -106,7 +106,7 @@ describe('done-when checks', () => {
     expect(unknown.content).toContain('No check has the id c9')
   })
 
-  it('is dispatched as a tool, allowed in Agent and Plan but not Ask', async () => {
+  it('is dispatched as a tool, allowed in Agent but not Ask', async () => {
     setup()
     executeCreatePlan(workspace, { plan: PLAN }, { runDir })
     const out = await executeTool(
@@ -119,7 +119,6 @@ describe('done-when checks', () => {
     expect(out.ok).toBe(true)
     expect(readChecks(runDir)[1]!.verdict).toBe('not_met')
     expect(isBuiltinAllowedInMode('agent', 'check_done_when')).toBe(true)
-    expect(isBuiltinAllowedInMode('plan', 'check_done_when')).toBe(true)
     expect(isBuiltinAllowedInMode('ask', 'check_done_when')).toBe(false)
   })
 
