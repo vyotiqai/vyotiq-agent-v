@@ -58,7 +58,7 @@
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",
-    "@huggingface/transformers": "^4.2.0",
+    "@huggingface/transformers": "^4.3.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@sentry/electron": "^7.19.0",
     "@sentry/react": "10.74.0",
@@ -67,7 +67,7 @@
     "electron-log": "^5.4.4",
     "electron-updater": "^6.8.9",
     "gpt-tokenizer": "^3.4.0",
-    "onnxruntime-node": "1.24.3",
+    "onnxruntime-node": "1.30.0",
     "tree-kill": "^1.2.2",
     "unpdf": "^1.8.1",
     "zod": "^3.25.76"
