@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
@@ -44,6 +44,22 @@ test.beforeAll(async () => {
   await launched.window.reload()
   await launched.window.waitForLoadState('domcontentloaded')
   await expect(launched.window.locator('body')).toBeVisible({ timeout: 30_000 })
+})
+
+// When the live test fails (it has only ever failed on the windows-latest
+// runner), print what main logged about the watcher: that runner cannot be
+// reproduced locally, so its own log is the evidence.
+test.afterEach(async () => {
+  const testInfo = test.info()
+  if (testInfo.status === testInfo.expectedStatus || !launched) return
+  const dir = join(launched.userDataDir, 'logs')
+  if (!existsSync(dir)) return
+  for (const name of readdirSync(dir)) {
+    const lines = readFileSync(join(dir, name), 'utf8')
+      .split(/\r?\n/)
+      .filter((line) => /agent context|agentContext|watch/i.test(line))
+    if (lines.length > 0) console.log(`[gui-e2e] ${name}:\n${lines.slice(-40).join('\n')}`)
+  }
 })
 
 test.afterAll(async () => {

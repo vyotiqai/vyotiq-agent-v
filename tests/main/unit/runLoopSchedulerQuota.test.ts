@@ -54,8 +54,11 @@ describe('armed prompt loop during quota exhaustion', () => {
   afterEach(() => {
     vi.useRealTimers()
     workspaceState.path = ''
-    if (existsSync(userData)) rmSync(userData, { recursive: true, force: true })
-    if (existsSync(workspace)) rmSync(workspace, { recursive: true, force: true })
+    // A write the loop's tick started can still land while the tree is removed
+    // (ENOTEMPTY on the CI runners); rm retries that case itself.
+    const gone = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }
+    if (existsSync(userData)) rmSync(userData, gone)
+    if (existsSync(workspace)) rmSync(workspace, gone)
   })
 
   const setStatus = (runId: string, patch: Record<string, unknown>): void => {

@@ -15,6 +15,22 @@ async function ensureSidebarExpanded(): Promise<void> {
   }
 }
 
+/**
+ * Two task panes need the navigator (264), the inspector the redesign opens by
+ * default (452) and two usable columns (2 × 280) — 1276 CSS px. Windows and
+ * Linux grant the 1600-wide window beforeAll asks for; macOS clamps it to the
+ * runner's smaller work area, where the layout rightly refuses a second pane.
+ */
+const TWO_PANES_WITH_INSPECTOR_PX = 264 + 452 + 2 * 280
+
+async function skipUnlessTwoPanesFit(): Promise<void> {
+  const width = await launched.window.evaluate(() => window.innerWidth)
+  test.skip(
+    width < TWO_PANES_WITH_INSPECTOR_PX,
+    `window is ${width}px wide; two panes beside the navigator and inspector need ${TWO_PANES_WITH_INSPECTOR_PX}px`
+  )
+}
+
 async function splitBetaBesideAlpha(): Promise<void> {
   const { window } = launched
   const alpha = window.getByRole('button', { name: 'Pane Session Alpha', exact: true }).first()
@@ -68,6 +84,9 @@ test.beforeAll(async () => {
   )
 
   workspacePath = openPath
+  await launched.app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setBounds({ x: 0, y: 0, width: 1600, height: 1000 })
+  })
   await launched.window.evaluate(() => {
     localStorage.removeItem('vyotiq.chatPaneLayout')
     localStorage.removeItem('vyotiq.rightPanel')
@@ -94,6 +113,7 @@ test.afterAll(async () => {
 })
 
 test('drag sidebar session onto right third splits into two panes', async () => {
+  await skipUnlessTwoPanesFit()
   const { window } = launched
   await ensureSidebarExpanded()
   await splitBetaBesideAlpha()
@@ -121,6 +141,7 @@ test('drag sidebar session onto right third splits into two panes', async () => 
 })
 
 test('multi-pane polish: min widths, sidebar open state, docked empty, inspector beside', async () => {
+  await skipUnlessTwoPanesFit()
   const { window } = launched
   await ensureSidebarExpanded()
 
@@ -176,6 +197,7 @@ test('multi-pane polish: min widths, sidebar open state, docked empty, inspector
 })
 
 test('hiding and showing the inspector keeps multi-pane layout', async () => {
+  await skipUnlessTwoPanesFit()
   const { window } = launched
   await ensureSidebarExpanded()
 
@@ -220,6 +242,7 @@ test('hiding and showing the inspector keeps multi-pane layout', async () => {
 })
 
 test('Ctrl/Cmd+\\ splits the focused pane into an empty draft beside it', async () => {
+  await skipUnlessTwoPanesFit()
   const { window } = launched
   await ensureSidebarExpanded()
 

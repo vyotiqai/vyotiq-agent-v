@@ -58,6 +58,8 @@ test('follow mode opens the file the run writes', async () => {
   const expand = window.getByRole('button', { name: /show navigator/i })
   if (await expand.isVisible().catch(() => false)) await expand.click()
 
+  // The chord is answered by the task view: wait for it before pressing.
+  await expect(window.getByRole('combobox', { name: 'Brief' })).toBeVisible({ timeout: 20_000 })
   // A new task keeps the inspector out of the way until asked; Alt 2 asks for Files.
   await window.keyboard.press('Alt+2')
   await expect(window.getByRole('tabpanel', { name: 'Files' })).toBeVisible({ timeout: 20_000 })

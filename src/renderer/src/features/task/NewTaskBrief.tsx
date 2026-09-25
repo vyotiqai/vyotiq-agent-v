@@ -218,8 +218,10 @@ export function NewTaskBrief({
         {headerActions}
       </header>
 
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto grid w-full max-w-[1040px] grid-cols-[minmax(0,1fr)_260px] gap-12 px-8 pb-12 pt-6">
+      {/* The column is what is narrow, not the window: with the inspector open
+          beside it, what the agent will see goes under the brief. */}
+      <div className="@container scroll-thin min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto grid w-full max-w-[1040px] grid-cols-1 gap-10 px-5 pb-12 pt-6 @[720px]:grid-cols-[minmax(0,1fr)_260px] @[720px]:gap-12 @[720px]:px-8">
           <div className="min-w-0">
             {banners}
             <div

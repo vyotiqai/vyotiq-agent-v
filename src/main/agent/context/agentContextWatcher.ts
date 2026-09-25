@@ -2,6 +2,7 @@ import { watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import { BrowserWindow } from 'electron'
 import { IPC } from '../../../shared/channels'
+import { logger } from '../../../shared/logger'
 import type { WorkspaceAgentContextChanged, WorkspaceAgentContextResult } from '../../../shared/ipc'
 import { canonicalizeWorkspacePath } from '../../../shared/workspacePath'
 import { workspacePathsEqual } from '../../../shared/workspacePathMatch'
@@ -139,8 +140,13 @@ function armTargets(w: Watch): void {
       // Never hold the event loop open at quit.
       handle.unref()
       w.handles.set(target.key, handle)
-    } catch {
-      /* Directory does not exist yet; its parent is watched, so retry later. */
+    } catch (err) {
+      // A directory that does not exist yet is expected: its parent is watched,
+      // so it is armed on a later rebuild. Anything else is a watch that will
+      // never fire, and the strip would go quietly stale — say so.
+      if ((err as NodeJS.ErrnoException | null)?.code !== 'ENOENT') {
+        logger.warn('Agent context watch could not start', { scope: 'agent', target: target.key, err })
+      }
     }
   }
 }
@@ -172,8 +178,10 @@ async function rebuild(w: Watch): Promise<void> {
       w.last = next
       push({ workspacePath: w.workspacePath, context: next })
     } while (w.again)
-  } catch {
-    /* Every sub-signal already degrades; keep the last known-good summary. */
+  } catch (err) {
+    // Keep the last known-good summary, but not silently: a rebuild that throws
+    // every time leaves the strip frozen on its boot-time reading.
+    logger.warn('Agent context rebuild failed', { scope: 'agent', err })
   } finally {
     w.building = false
   }
