@@ -34,6 +34,7 @@ import {
   readLoop,
   resetRunLoopSchedulerForTests
 } from '@main/agent/runLoopScheduler'
+import { flushEventAppends } from '@main/agent/eventAppendQueue'
 import { createRun } from '@main/agent/state'
 import { resolveRunDir } from '@main/storage/paths'
 
@@ -51,13 +52,14 @@ describe('armed prompt loop during quota exhaustion', () => {
     vi.useFakeTimers()
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.useRealTimers()
     workspaceState.path = ''
-    // A write the loop's tick started can still land while the tree is removed
-    // (ENOTEMPTY on the CI runners); rm retries that case itself, backing off
-    // linearly: 12 tries is ~4s, where 5 (~0.75s) was outlasted on ubuntu.
-    const gone = { recursive: true, force: true, maxRetries: 12, retryDelay: 50 }
+    // createRun, createGoal and armLoop queue their events.jsonl appends; one
+    // still in flight recreated the file while the tree was removed (ENOTEMPTY
+    // on every runner, and no retry budget outlasted it). Drain the queue first.
+    await flushEventAppends()
+    const gone = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }
     if (existsSync(userData)) rmSync(userData, gone)
     if (existsSync(workspace)) rmSync(workspace, gone)
   })
@@ -111,7 +113,9 @@ describe('armed prompt loop during quota exhaustion', () => {
     armLoop({ workspacePath: workspace, runId, runDir, prompt: 'continue the goal', intervalMs: LOOP_INTERVAL_MS })
     expect(listLoopSchedulerMetaRunIdsForTests()).toContain(runId)
 
-    // Simulate deleteRun: the whole run directory (loop.json included) is rmSync'd.
+    // Simulate deleteRun: drain the run's queued appends, as it does, then
+    // remove the whole run directory (loop.json included).
+    await flushEventAppends(runDir)
     rmSync(runDir, { recursive: true, force: true })
     await vi.advanceTimersByTimeAsync(LOOP_INTERVAL_MS)
     expect(launchMock).not.toHaveBeenCalled()
