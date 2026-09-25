@@ -381,11 +381,16 @@ describe('Saving', () => {
     // A root file has no properties of its own to edit; only its text.
     expect(screen.queryByRole('textbox', { name: 'Rule description' })).toBeNull()
 
-    const editor = document.querySelector<HTMLElement>('.cm-editor')
-    const view = editor ? EditorView.findFromDOM(editor) : null
-    expect(view).toBeTruthy()
-    expect(view!.state.doc.toString()).toBe(agents)
-    view!.dispatch({ changes: { from: view!.state.doc.length, insert: 'Run the tests before committing.\n' } })
+    // The editor mounts after the notice above; on a slow runner it is not
+    // there yet when the notice is (ubuntu-latest).
+    const view = await waitFor(() => {
+      const editor = document.querySelector<HTMLElement>('.cm-editor')
+      const found = editor ? EditorView.findFromDOM(editor) : null
+      expect(found).toBeTruthy()
+      return found!
+    })
+    expect(view.state.doc.toString()).toBe(agents)
+    view.dispatch({ changes: { from: view!.state.doc.length, insert: 'Run the tests before committing.\n' } })
     await waitFor(() => expect(saveButton().disabled).toBe(false))
     fireEvent.click(saveButton())
     await waitFor(() => expect(bridge.workspaceFileSave).toHaveBeenCalledTimes(1))
