@@ -6,9 +6,11 @@ resources/harness/default.md text eol=lf
 resources/marketplace/icons/*.svg text eol=lf
 resources/branding/**/*.svg text eol=lf
 
-# Captured application screenshots and clips. Explicitly binary so no future
-# text attribute can line-ending-convert them into corruption.
+# Captured application screenshots and clips, and the painting behind the
+# hero. Explicitly binary so no future text attribute can line-ending-convert
+# them into corruption.
 landing/src/media/* binary
+landing/src/art/* binary
 landing/public/media/* binary
 
 # Bundled marketplace packages ship byte-for-byte (electron-builder

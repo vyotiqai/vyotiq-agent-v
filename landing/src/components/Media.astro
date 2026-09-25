@@ -2,6 +2,10 @@
 /**
  * One screenshot or clip slot from src/lib/media.ts.
  *
+ * Every slot sits inset on a detail of one painting (src/art/, named by the
+ * slot's art), and a shadow lifts the capture off it like a window. The
+ * painting is decoration, so its alt is empty and screen readers skip it.
+ *
  * Images are resized and served as WebP by astro:assets. When a slot has a
  * light and a dark capture, both are rendered and the stylesheet shows the one
  * that matches the page; the hidden one is lazy, so it is never downloaded.
@@ -36,6 +40,10 @@ const slot = MEDIA[id]
 if (!slot) throw new Error(`Media: no slot called "${String(id)}" in src/lib/media.ts`)
 
 const files = import.meta.glob<{ default: ImageMetadata }>('../media/*.{png,jpg,jpeg,webp}', { eager: true })
+
+const paintings = import.meta.glob<{ default: ImageMetadata }>('../art/*.jpg', { eager: true })
+const painting = paintings[`../art/${slot.art}.jpg`]?.default
+if (!painting) throw new Error(`Media: "${String(id)}" names src/art/${slot.art}.jpg, which does not exist`)
 
 function find(base: string): ImageMetadata | null {
   for (const ext of ['png', 'jpg', 'jpeg', 'webp']) {
@@ -93,46 +101,59 @@ const loading = eager ? 'eager' : 'lazy'
 
 {
   present && (
-    <figure
-      class:list={['media', clips.length > 0 && 'media-clip', className]}
-      data-media={String(id)}
-      data-clip-figure={clips.length > 0 ? '' : undefined}
-    >
-      {stills.map((still) => (
-        <Image
-          src={still.image}
-          alt={slot.alt}
-          widths={widthsFor(still.image)}
-          sizes={sizes}
-          format="webp"
-          quality={88}
-          loading={still.theme === 'dark' ? 'lazy' : loading}
-          decoding="async"
-          class:list={[paired && `only-${still.theme}`]}
-        />
-      ))}
-      {clips.map((clip) => (
-        <video
-          class:list={['clip', paired && `only-${clip.theme}`]}
-          width={clip.image.width}
-          height={clip.image.height}
-          muted
-          loop
-          playsinline
-          preload="none"
-          aria-hidden="true"
-          data-clip
-        >
-          {clip.webm && <source src={clip.webm} type={AV1} />}
-          <source src={clip.mp4} type="video/mp4" />
-        </video>
-      ))}
-      {clips.length > 0 && (
-        <button type="button" class="video-toggle" data-video-toggle>
-          <span data-label>Play</span>
-        </button>
-      )}
-    </figure>
+    <div class:list={['stage', className]}>
+      <Image
+        src={painting}
+        alt=""
+        widths={widthsFor(painting)}
+        sizes={sizes}
+        format="webp"
+        quality={80}
+        loading={loading}
+        decoding="async"
+        class="stage-art"
+      />
+      <figure
+        class:list={['media', clips.length > 0 && 'media-clip']}
+        data-media={String(id)}
+        data-clip-figure={clips.length > 0 ? '' : undefined}
+      >
+        {stills.map((still) => (
+          <Image
+            src={still.image}
+            alt={slot.alt}
+            widths={widthsFor(still.image)}
+            sizes={sizes}
+            format="webp"
+            quality={88}
+            loading={still.theme === 'dark' ? 'lazy' : loading}
+            decoding="async"
+            class:list={[paired && `only-${still.theme}`]}
+          />
+        ))}
+        {clips.map((clip) => (
+          <video
+            class:list={['clip', paired && `only-${clip.theme}`]}
+            width={clip.image.width}
+            height={clip.image.height}
+            muted
+            loop
+            playsinline
+            preload="none"
+            aria-hidden="true"
+            data-clip
+          >
+            {clip.webm && <source src={clip.webm} type={AV1} />}
+            <source src={clip.mp4} type="video/mp4" />
+          </video>
+        ))}
+        {clips.length > 0 && (
+          <button type="button" class="video-toggle" data-video-toggle>
+            <span data-label>Play</span>
+          </button>
+        )}
+      </figure>
+    </div>
   )
 }
 

@@ -33,7 +33,8 @@
 /* ------------------------------------------------------------------ tokens - */
 
 /* Black and white, like the application and the Vyotiq mark. Colour on the
-   site comes from the product screenshots, never from the chrome around them. */
+   site comes from the product captures and the painting they sit on, never
+   from the chrome around them. */
 :root {
   color-scheme: light;
 
@@ -445,13 +446,41 @@ video {
 
 /* ------------------------------------------------------------------ media - */
 
-/* Every product image and video sits in the same frame. */
+/* Every product image and video sits inset on a detail of one painting, and a
+   shadow lifts it off like a window (src/components/Media.astro). The painting
+   looks the same in both themes, so the shadow is plain black rather than a
+   theme token. */
+.stage {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  container-type: inline-size;
+  padding: 4.5% 7.5%;
+  border-radius: var(--r-lg);
+  background: var(--bg-2);
+}
+
+/* Anchored to the bottom, so where the whole painting shows, Richards's
+   signature sits in the corner instead of being cut through. */
+.stage-art {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 100%;
+}
+
+/* The capture's corner shrinks with it, so on a phone it doesn't clip the
+   icons in a captured title bar: 14px on a 986px window and the same
+   proportion below that (cqi is 1% of the stage's width inside its padding). */
 .media {
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
+  border-radius: min(var(--r-lg), 1.42cqi);
   background: var(--bg-2);
+  box-shadow: 0 1.25rem 3rem -1rem rgb(0 0 0 / 0.5);
 }
 
 .media img,
@@ -481,8 +510,9 @@ video {
   display: grid;
   place-items: center;
   padding: 2rem;
-  border-style: dashed;
-  border-color: var(--line-2);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-lg);
+  box-shadow: none;
   text-align: center;
 }
 

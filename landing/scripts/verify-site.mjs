@@ -247,8 +247,10 @@ for (const file of htmlFiles) {
     previous = heading.level
   }
 
+  // A bare alt is alt="" (Astro writes it that way): decoration a screen
+  // reader should skip. Only an image with no alt at all fails.
   for (const m of html.matchAll(/<img\b[^>]*>/g)) {
-    if (!/\salt=/.test(m[0])) {
+    if (!/\salt(=|[\s/>])/.test(m[0])) {
       fail('accessibility', `${route} has an <img> with no alt: ${m[0].slice(0, 70)}`)
       a11yProblems++
     }
