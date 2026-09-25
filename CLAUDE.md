@@ -13,7 +13,6 @@ resolve it by restyling.
 | --- | --- |
 | Tokens, `@theme` mapping, `@utility` helpers | `src/renderer/src/styles.css` |
 | Shared primitives (Button, IconButton, Badge, Tabs, Segmented, StatusGlyph, Keys, ProgressBar/Ring, Menu, Tooltip, FormRow…) | `src/renderer/src/lib/ui/` |
-| The redesign's reference screens (not shipped) | `src/redesign/` in the main checkout, `pnpm redesign` |
 | Icon allowlist | `src/renderer/src/lib/icons/index.tsx` |
 | Feature surfaces | `src/renderer/src/features/` |
 
@@ -107,8 +106,8 @@ classes. Every pane starts with a 40px row (`h-10 border-b`): text-first rows pa
 - Drop the focus ring. Interactive elements use `focus-visible:vy-focus-ring`.
 - Re-open the transcript redesign. Borderless rows, a glyph column, and tighter
   gaps were tried and reverted — they made the timeline harder to read, not
-  easier. The user's Work record redesign (2026-09-23, `src/redesign/`)
-  replaces the chat transcript with a record of steps, but keeps terminal and
+  easier. The Work record (2026-09-23, shipped as 1.0.0) replaces the chat
+  transcript with a record of steps, but keeps terminal and
   diff output in bordered cards for the same reason. "Dissolve cards into the
   layout" does not apply to those.
 - Use a type size off the scale: `2xs` 10 (keycaps only), `caption` 11, `xs`
