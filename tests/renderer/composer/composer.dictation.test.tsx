@@ -487,6 +487,11 @@ describe('Composer dictation', () => {
     await waitFor(() => {
       expect(screen.getByRole('status', { name: /Transcribing/i })).toBeTruthy()
     })
+    // The strip shows before the request goes out; cancel the request itself,
+    // not the moment before it (macos-latest cancelled first).
+    await waitFor(() => {
+      expect(window.vyotiq.transcribeDictation).toHaveBeenCalled()
+    })
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /^Cancel dictation$/i }))
@@ -500,9 +505,6 @@ describe('Composer dictation', () => {
       finish?.({ ok: true, data: { text: 'late transcript must not insert' } })
     })
 
-    await waitFor(() => {
-      expect(window.vyotiq.transcribeDictation).toHaveBeenCalled()
-    })
     const ta = screen.getByRole('combobox', { name: /^Message$/i })
     expect(ta.textContent ?? '').not.toMatch(/late transcript must not insert/)
   })
