@@ -118,7 +118,8 @@ describe('App → Set up', () => {
 
     expect(await screen.findByRole('heading', { name: 'Set up Agent V' }, { timeout: 5000 })).toBeTruthy()
     expect(screen.queryByTestId('home')).toBeNull()
-    expect(listModels).toHaveBeenCalledWith({ provider: 'ollama', forceRefresh: true })
+    // The check starts in an effect after Set up first paints.
+    await waitFor(() => expect(listModels).toHaveBeenCalledWith({ provider: 'ollama', forceRefresh: true }))
     await waitFor(
       () => expect(document.querySelector('[data-setup-step="1"]')?.getAttribute('data-state')).toBe('done'),
       { timeout: 5000 }

@@ -135,8 +135,14 @@ function armTargets(w: Watch): void {
       const handle = watch(dir, { recursive: target.recursive }, (event, filename) => {
         // `filename` is null on platforms that cannot report it — react rather
         // than filter, since a missed change is worse than a wasted rebuild.
-        const name = filename == null ? null : String(filename)
-        trace(`event ${target.key} ${event} ${name == null ? '(no name)' : (name.split(/[\\/]/).pop() ?? '')}`)
+        const reported = filename == null ? null : String(filename)
+        // A non-recursive watch only ever reports its direct entries, so the
+        // last path segment is the entry on every platform. On the
+        // windows-latest runner, events for `.vyotiq` and `memory` reached this
+        // callback and never reached the debounce, with this exact-name filter
+        // the only step between them: the strip froze on its boot reading.
+        const name = reported == null ? null : (reported.split(/[\\/]/).pop() ?? reported)
+        trace(`event ${target.key} ${event} ${name ?? '(no name)'}${reported != null && reported !== name ? ' (reported as a path)' : ''}`)
         if (target.names && name != null && !target.names.includes(name)) return
         const gitChanged =
           target.gitNames != null && (name == null || target.gitNames.includes(name))
