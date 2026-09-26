@@ -1,33 +1,27 @@
 ---
-import { FOOTER, SITE, app, isExternal } from '../lib/site'
+import { FOOTER, SITE, isExternal } from '../lib/site'
 
 const year = new Date().getFullYear()
 ---
 
-<footer class="vy-footer">
-  <div class="vy-shell">
-    <div class="vy-footer-grid">
-      <div class="vy-footer-brand">
-        <a href="/" class="vy-footer-lockup" aria-label="Vyotiq — home">
-          <img src="/brand/vyotiq-wordmark-black.svg" alt="" width="90" height="16" class="vy-dark-invert" />
+<footer class="footer">
+  <div class="wrap">
+    <div class="top">
+      <div class="maker">
+        <a href="/" class="wordmark" aria-label={`${SITE.maker}, home`}>
+          <img src="/brand/vyotiq-wordmark-black.svg" alt="" width="96" height="17" class="logo-art" />
         </a>
-        <p class="vy-footer-blurb">
-          {SITE.product} — a coding workspace for real repositories. Free and open source under{' '}<a href="/license" class="vy-link">GPL-3.0-or-later</a>.
-        </p>
+        <p>{SITE.product} is made by {SITE.maker}.</p>
       </div>
 
       {
         FOOTER.map((column) => (
-          <nav class="vy-footer-col" aria-label={column.heading}>
-            <h2 class="vy-eyebrow vy-footer-heading">{column.heading}</h2>
+          <nav class="column" aria-label={column.heading}>
+            <h2 class="heading">{column.heading}</h2>
             <ul>
               {column.items.map((item) => (
                 <li>
-                  <a
-                    href={item.href}
-                    class="vy-footer-link"
-                    {...(isExternal(item.href) ? { rel: 'noopener noreferrer' } : {})}
-                  >
+                  <a href={item.href} {...(isExternal(item.href) ? { rel: 'noopener noreferrer' } : {})}>
                     {item.label}
                   </a>
                 </li>
@@ -38,80 +32,156 @@ const year = new Date().getFullYear()
       }
     </div>
 
-    <p class="vy-footer-meta">© {year} Vyotiq. Source available on <a href={app.repo.source} class="vy-link" rel="noopener noreferrer">GitHub</a>.</p>
+    <div class="bottom">
+      <p>© {year} {SITE.maker}</p>
+      <div class="theme" role="group" aria-label="Color theme">
+        <button type="button" data-theme-choice="system" aria-pressed="true">System</button>
+        <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+        <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+      </div>
+    </div>
   </div>
 </footer>
 
 <style>
-  .vy-footer {
-    border-top: 1px solid var(--vy-border);
-    padding-block: 3.5rem 2rem;
-    margin-top: 2rem;
+  .footer {
+    margin-top: clamp(3rem, 6vw, 5rem);
+    padding-block: clamp(3rem, 6vw, 4.5rem) 2rem;
+    border-top: 1px solid var(--line);
   }
 
-  .vy-footer-grid {
+  .top {
     display: grid;
-    grid-template-columns: 1.6fr repeat(3, 1fr);
+    grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
     gap: 2.5rem 2rem;
   }
 
-  .vy-footer-lockup {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
+  .wordmark {
+    display: inline-block;
+  }
+
+  .maker p {
+    margin-top: 1rem;
+    font-size: 0.9375rem;
+    color: var(--text-3);
+  }
+
+  .heading {
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
     font-weight: 600;
-    letter-spacing: -0.02em;
-    color: var(--vy-fg-strong);
+    letter-spacing: -0.005em;
+    color: var(--text);
   }
 
-  .vy-footer-blurb {
-    margin-top: 0.875rem;
-    max-width: 34ch;
-    font-size: 0.875rem;
-    line-height: 1.6;
-    color: var(--vy-muted);
-  }
-
-  .vy-footer-heading {
-    margin-bottom: 0.875rem;
-  }
-
-  .vy-footer-col ul {
-    list-style: none;
-    padding: 0;
+  .column ul {
     display: grid;
-    gap: 0.5rem;
+    gap: 0.625rem;
   }
 
-  .vy-footer-link {
-    font-size: 0.875rem;
-    color: var(--vy-muted);
+  .column a {
+    font-size: 0.9375rem;
+    color: var(--text-2);
+    transition: color var(--fast) var(--ease);
   }
 
-  .vy-footer-link:hover {
-    color: var(--vy-fg-strong);
+  .column a:hover {
+    color: var(--text);
   }
 
-  .vy-footer-meta {
-    margin-top: 3rem;
+  .bottom {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: clamp(3rem, 6vw, 4.5rem);
     padding-top: 1.5rem;
-    border-top: 1px solid var(--vy-border);
-    font-size: 0.8125rem;
-    color: var(--vy-tertiary);
+    border-top: 1px solid var(--line);
+    font-size: 0.875rem;
+    color: var(--text-3);
   }
 
-  @media (max-width: 860px) {
-    .vy-footer-grid {
-      grid-template-columns: 1fr 1fr;
+  .theme {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+  }
+
+  .theme button {
+    height: 1.875rem;
+    padding: 0 0.75rem;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-3);
+    cursor: pointer;
+    transition:
+      color var(--fast) var(--ease),
+      background-color var(--fast) var(--ease);
+  }
+
+  .theme button:hover {
+    color: var(--text);
+  }
+
+  .theme button[aria-pressed='true'] {
+    background: var(--bg-3);
+    color: var(--text);
+  }
+
+  @media (max-width: 859px) {
+    .top {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
-    .vy-footer-brand {
+    .maker {
       grid-column: 1 / -1;
     }
   }
 
-  @media (max-width: 520px) {
-    .vy-footer-grid {
-      grid-template-columns: 1fr;
+  @media (max-width: 539px) {
+    .top {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 </style>
+
+<script>
+  // "System" clears the stored choice, so the page follows the OS again.
+  // Storage can throw in a private window; the choice then lasts for the page.
+  const root = document.documentElement
+  const buttons = [...document.querySelectorAll<HTMLButtonElement>('[data-theme-choice]')]
+
+  const show = (choice: string) => {
+    for (const button of buttons) {
+      button.setAttribute('aria-pressed', String(button.dataset.themeChoice === choice))
+    }
+  }
+
+  let stored: string | null = null
+  try {
+    stored = localStorage.getItem('vy-theme')
+  } catch {}
+  show(stored === 'light' || stored === 'dark' ? stored : 'system')
+
+  for (const button of buttons) {
+    button.addEventListener('click', () => {
+      const choice = button.dataset.themeChoice ?? 'system'
+      if (choice === 'light' || choice === 'dark') {
+        root.dataset.theme = choice
+        try {
+          localStorage.setItem('vy-theme', choice)
+        } catch {}
+      } else {
+        delete root.dataset.theme
+        try {
+          localStorage.removeItem('vy-theme')
+        } catch {}
+      }
+      show(choice)
+    })
+  }
+</script>

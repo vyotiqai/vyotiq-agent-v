@@ -1,141 +1,136 @@
-/* Latin subsets only: nothing the site renders falls outside latin / latin-ext. */
-@import '@fontsource/plus-jakarta-sans/latin-400.css';
-@import '@fontsource/plus-jakarta-sans/latin-500.css';
-@import '@fontsource/plus-jakarta-sans/latin-600.css';
-@import '@fontsource/plus-jakarta-sans/latin-ext-400.css';
-@import '@fontsource/plus-jakarta-sans/latin-ext-500.css';
-@import '@fontsource/plus-jakarta-sans/latin-ext-600.css';
+/* JetBrains Mono is the application's own monospace, used here for code,
+   versions and file names. Latin only: nothing set in it is outside ASCII. */
 @import '@fontsource/jetbrains-mono/latin-400.css';
 @import '@fontsource/jetbrains-mono/latin-500.css';
-@import '@fontsource/jetbrains-mono/latin-ext-400.css';
-@import '@fontsource/jetbrains-mono/latin-ext-500.css';
+
+/* Instrument Sans, vendored from @fontsource-variable/instrument-sans 5.3.0
+   under the SIL Open Font License (src/fonts/instrument-sans/OFL.txt). Two
+   variable files cover every weight the site uses. latin-ext is kept because
+   package names and descriptions come from the marketplace catalog. */
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('../fonts/instrument-sans/instrument-sans-latin-wght-normal.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('../fonts/instrument-sans/instrument-sans-latin-ext-wght-normal.woff2') format('woff2');
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
 
 /* ------------------------------------------------------------------ tokens - */
 
-/* Copied from the application (src/renderer/src/styles.css); names are identical. */
+/* Black and white, like the application and the Vyotiq mark. Colour on the
+   site comes from the product captures and the painting they sit on, never
+   from the chrome around them. */
 :root {
   color-scheme: light;
 
-  --vy-bg: #ffffff;
-  --vy-card: #fafafa;
-  --vy-surface: #f4f4f4;
-  --vy-surface-2: #e8e8e8;
-  --vy-border: #d9d9d9;
-  --vy-border-strong: #b7b7b7;
-  --vy-muted: #5c5c5c;
-  --vy-secondary: #4b4b4b;
-  --vy-tertiary: #717171;
-  --vy-fg: #212121;
-  --vy-fg-strong: #131313;
-  --vy-accent: #000000;
-  --vy-accent-fg: #ffffff;
-  --vy-accent-hover: #3d3d3d;
-  --vy-focus: #000000;
-  --vy-success: #15803d;
-  --vy-warning: #a16207;
+  --bg: #ffffff;
+  --bg-2: #f6f6f6;
+  --bg-3: #ececec;
+  --text: #0a0a0a;
+  --text-2: #4a4a4a;
+  --text-3: #6f6f6f;
+  --line: #e6e6e6;
+  --line-2: #cfcfcf;
+  --ink: #0a0a0a;
+  --ink-text: #ffffff;
+  --ink-hover: #333333;
+  --focus: #0a0a0a;
 
-  --vy-font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  --vy-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* Theme-swapped artwork: the black logo inverts on dark, and screenshots
+     supplied as a light/dark pair show the one matching the page. */
+  --logo-filter: none;
+  --show-light: block;
+  --show-dark: none;
 
-  --vy-radius-sm: 4px;
-  --vy-radius-md: 6px;
-  --vy-radius-lg: 8px;
-  --vy-radius-xl: 10px;
-  --vy-radius-2xl: 16px;
-  --vy-radius-3xl: 22px;
+  --font: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-  --vy-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --vy-duration: 160ms;
-  --vy-tracking: -0.01em;
-  --vy-tracking-tight: -0.012em;
-  --vy-tracking-caps: 0.06em;
+  --wrap: 1160px;
+  --gutter: clamp(1.25rem, 4vw, 2rem);
+  --header: 4rem;
+  --measure: 40rem;
 
-  --vy-gutter: 1.5rem;
-  --vy-measure: 64ch;
-  --vy-nav-height: 3.75rem;
-  --vy-aside: 17rem;
-  --vy-shell-max: 1200px;
+  --r-sm: 6px;
+  --r: 10px;
+  --r-lg: 14px;
 
-  /* Derived surfaces. Defined once: the tokens they mix are redefined per
-     theme below, and var() resolves at use time, so these follow along. */
-  --vy-elev-1: color-mix(in srgb, var(--vy-card) 88%, var(--vy-bg));
-  --vy-hairline: color-mix(in srgb, var(--vy-border) 65%, transparent);
-  --vy-accent-wash: color-mix(in srgb, var(--vy-accent) 10%, transparent);
-  --vy-accent-glow: color-mix(in srgb, var(--vy-accent) 20%, transparent);
-  --vy-canvas-top: color-mix(in srgb, var(--vy-card) 70%, var(--vy-bg));
-
-  /* Keyword tokens that drive every theme-swapped asset, so a new one never
-     needs another copy of the media-query/attribute pair. */
-  --vy-invert: none;
-  --vy-swap-light: block;
-  --vy-swap-dark: none;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --fast: 150ms;
 }
 
-/* Dark is the OS preference unless the toggle stored "light"; the toggle's
-   "dark" wins regardless of the OS. Every theme rule follows this shape. */
+/* Dark follows the OS unless the footer switch stored "light"; a stored
+   "dark" wins regardless of the OS. Both blocks must stay identical. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     color-scheme: dark;
 
-    --vy-bg: #141414;
-    --vy-card: #1d1d1d;
-    --vy-surface: #242424;
-    --vy-surface-2: #2f2f2f;
-    --vy-border: #393939;
-    --vy-border-strong: #525252;
-    --vy-muted: #b0b0b0;
-    --vy-secondary: #cacaca;
-    --vy-tertiary: #909090;
-    --vy-fg: #ececec;
-    --vy-fg-strong: #f8f8f8;
-    --vy-accent: #ffffff;
-    --vy-accent-fg: #0a0a0a;
-    --vy-accent-hover: #c4c4c4;
-    --vy-focus: #ffffff;
-    --vy-success: #22c55e;
-    --vy-warning: #fbbf24;
+    --bg: #0a0a0a;
+    --bg-2: #141414;
+    --bg-3: #1d1d1d;
+    --text: #f3f3f3;
+    --text-2: #b4b4b4;
+    --text-3: #8f8f8f;
+    --line: #232323;
+    --line-2: #363636;
+    --ink: #f3f3f3;
+    --ink-text: #0a0a0a;
+    --ink-hover: #d4d4d4;
+    --focus: #f3f3f3;
 
-    --vy-invert: invert(1);
-    --vy-swap-light: none;
-    --vy-swap-dark: block;
+    --logo-filter: invert(1);
+    --show-light: none;
+    --show-dark: block;
   }
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --vy-bg: #141414;
-  --vy-card: #1d1d1d;
-  --vy-surface: #242424;
-  --vy-surface-2: #2f2f2f;
-  --vy-border: #393939;
-  --vy-border-strong: #525252;
-  --vy-muted: #b0b0b0;
-  --vy-secondary: #cacaca;
-  --vy-tertiary: #909090;
-  --vy-fg: #ececec;
-  --vy-fg-strong: #f8f8f8;
-  --vy-accent: #ffffff;
-  --vy-accent-fg: #0a0a0a;
-  --vy-accent-hover: #c4c4c4;
-  --vy-focus: #ffffff;
-  --vy-success: #22c55e;
-  --vy-warning: #fbbf24;
+  --bg: #0a0a0a;
+  --bg-2: #141414;
+  --bg-3: #1d1d1d;
+  --text: #f3f3f3;
+  --text-2: #b4b4b4;
+  --text-3: #8f8f8f;
+  --line: #232323;
+  --line-2: #363636;
+  --ink: #f3f3f3;
+  --ink-text: #0a0a0a;
+  --ink-hover: #d4d4d4;
+  --focus: #f3f3f3;
 
-  --vy-invert: invert(1);
-  --vy-swap-light: none;
-  --vy-swap-dark: block;
+  --logo-filter: invert(1);
+  --show-light: none;
+  --show-dark: block;
 }
 
-/* ------------------------------------------------------------------ reset - */
+/* ------------------------------------------------------------------- base - */
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
 html {
   -webkit-text-size-adjust: 100%;
   scroll-behavior: smooth;
+  scroll-padding-top: calc(var(--header) + 1.5rem);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -152,13 +147,13 @@ html {
 
 body {
   margin: 0;
-  background: var(--vy-bg);
-  color: var(--vy-fg);
-  font-family: var(--vy-font-sans);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
   font-size: 1rem;
   line-height: 1.6;
-  letter-spacing: -0.006em;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
 
@@ -166,11 +161,9 @@ h1,
 h2,
 h3,
 h4 {
-  color: var(--vy-fg-strong);
-  font-weight: 600;
-  letter-spacing: var(--vy-tracking-tight);
-  line-height: 1.2;
   margin: 0;
+  color: var(--text);
+  font-weight: 600;
   text-wrap: balance;
 }
 
@@ -180,19 +173,25 @@ ol,
 dl,
 dd,
 figure,
-blockquote,
-pre {
+pre,
+blockquote {
   margin: 0;
 }
 
-p {
+ul,
+ol {
+  padding: 0;
+  list-style: none;
+}
+
+p,
+li {
   text-wrap: pretty;
 }
 
 a {
   color: inherit;
   text-decoration: none;
-  transition: color var(--vy-duration) var(--vy-ease);
 }
 
 button {
@@ -200,864 +199,638 @@ button {
   color: inherit;
 }
 
-[hidden] {
-  display: none !important;
-}
-
-[id] {
-  scroll-margin-top: calc(var(--vy-nav-height) + 1rem);
-}
-
-:where(a, button, input, select, summary):focus-visible {
-  outline: 2px solid var(--vy-focus);
-  outline-offset: 2px;
-  border-radius: var(--vy-radius-sm);
-}
-
 img,
-svg {
+svg,
+video {
   display: block;
   max-width: 100%;
 }
 
-/* Flat black artwork (the brand mark, the wordmark) inverts on dark. */
-.vy-dark-invert {
-  filter: var(--vy-invert);
+[hidden] {
+  display: none !important;
+}
+
+:where(a, button, input, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+::selection {
+  background: var(--text);
+  color: var(--bg);
+}
+
+.logo-art {
+  filter: var(--logo-filter);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ------------------------------------------------------------- typography - */
 
-.vy-eyebrow {
-  font-family: var(--vy-font-mono);
-  font-size: 0.6875rem;
-  font-weight: 500;
-  letter-spacing: var(--vy-tracking-caps);
-  text-transform: uppercase;
-  color: var(--vy-tertiary);
+.display {
+  font-size: clamp(2.75rem, 1.35rem + 5.2vw, 5.25rem);
+  line-height: 0.98;
+  letter-spacing: -0.036em;
 }
 
-.vy-display {
-  font-size: clamp(2.5rem, 1.55rem + 3.8vw, 4rem);
-  letter-spacing: -0.034em;
-  line-height: 1.03;
+.title {
+  font-size: clamp(2.5rem, 1.6rem + 3.2vw, 4rem);
+  line-height: 1.02;
+  letter-spacing: -0.032em;
 }
 
-.vy-h1 {
-  font-size: clamp(2.25rem, 1.6rem + 2.6vw, 3.25rem);
-  letter-spacing: -0.028em;
+/* A closing line at the foot of a page: bigger than a section heading,
+   quieter than a page title. */
+.statement {
+  font-size: clamp(2.125rem, 1.45rem + 2.4vw, 3.25rem);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+.h2 {
+  font-size: clamp(1.75rem, 1.25rem + 1.7vw, 2.625rem);
   line-height: 1.08;
+  letter-spacing: -0.028em;
 }
 
-.vy-h2 {
-  font-size: clamp(1.75rem, 1.3rem + 1.6vw, 2.375rem);
-  letter-spacing: -0.022em;
-  line-height: 1.15;
+.h3 {
+  font-size: 1.1875rem;
+  line-height: 1.3;
+  letter-spacing: -0.018em;
 }
 
-.vy-h3 {
-  font-size: 1.125rem;
-  letter-spacing: -0.014em;
-}
-
-.vy-lede {
-  font-size: clamp(1.0625rem, 0.98rem + 0.45vw, 1.25rem);
-  line-height: 1.6;
-  color: var(--vy-secondary);
-  max-width: var(--vy-measure);
-}
-
-.vy-prose-muted {
-  color: var(--vy-muted);
-  max-width: var(--vy-measure);
-}
-
-.vy-mono {
-  font-family: var(--vy-font-mono);
-  font-variant-ligatures: none;
-}
-
-/* ----------------------------------------------------------- page layout - */
-
-.vy-shell {
-  width: 100%;
-  max-width: var(--vy-shell-max);
-  margin-inline: auto;
-  padding-inline: var(--vy-gutter);
-}
-
-.vy-rule {
-  border-top: 1px solid var(--vy-border);
-}
-
-.vy-section {
-  padding-block: clamp(3.5rem, 7vw, 5.5rem);
-}
-
-/* Title block at the top of every page: eyebrow, title, lede, optional
-   facts panel to the right. */
-.vy-page-head {
-  padding-block: clamp(3rem, 6vw, 5rem) clamp(2.5rem, 5vw, 4rem);
-}
-
-.vy-page-head .vy-h1,
-.vy-page-head .vy-display {
-  margin-top: 1rem;
-}
-
-.vy-page-head .vy-lede {
-  margin-top: 1.25rem;
-}
-
-.vy-page-head .vy-cta-actions {
-  margin-top: 2rem;
-}
-
-/* Every content section: a heading column on the left, content on the right.
-   The heading stays in view while long content scrolls past it. */
-.vy-section-grid {
-  display: grid;
-  grid-template-columns: minmax(0, var(--vy-aside)) minmax(0, 1fr);
-  gap: 2rem 4rem;
-  align-items: start;
-}
-
-.vy-sec-head {
-  position: sticky;
-  top: calc(var(--vy-nav-height) + 1.5rem);
-}
-
-.vy-sec-head .vy-h2 {
-  margin-top: 0.75rem;
-}
-
-.vy-sec-head .vy-prose-muted {
-  margin-top: 0.875rem;
-  font-size: 0.9375rem;
-}
-
-.vy-sec-head .vy-more {
-  margin-top: 1.25rem;
-}
-
-@media (max-width: 900px) {
-  .vy-section-grid {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 1.75rem;
-  }
-  .vy-sec-head {
-    position: static;
-  }
-}
-
-/* ------------------------------------------------------------- collections - */
-
-/* Hairline-separated rows. Inside a panel the outer edges come from the panel. */
-.vy-rows {
-  list-style: none;
-  padding: 0;
-}
-
-.vy-rows > * {
-  padding-block: 1.25rem;
-  border-top: 1px solid var(--vy-border);
-}
-
-.vy-rows > :last-child {
-  border-bottom: 1px solid var(--vy-border);
-}
-
-.vy-panel > .vy-rows > * {
-  padding-inline: 1.125rem;
-}
-
-.vy-panel > .vy-rows > :first-child {
-  border-top: 0;
-}
-
-.vy-panel > .vy-rows > :last-child {
-  border-bottom: 0;
-}
-
-/* A row with a fixed lead column (a name, a number) and flowing content. */
-.vy-row-lead {
-  display: grid;
-  grid-template-columns: 10rem minmax(0, 1fr);
-  gap: 1.5rem;
-  align-items: start;
-}
-
-@media (max-width: 640px) {
-  .vy-row-lead {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.5rem;
-  }
-}
-
-/* A lead-column row keeps its paragraph on the heading's baseline. */
-.vy-row-lead.vy-item > p {
-  margin-top: 0;
-}
-
-.vy-row-lead > .vy-h3 {
+.lede {
+  max-width: var(--measure);
+  font-size: clamp(1.125rem, 1rem + 0.45vw, 1.3125rem);
   line-height: 1.5;
+  letter-spacing: -0.012em;
+  color: var(--text-2);
 }
 
-/* Heading + paragraph unit used inside rows and grids. */
-.vy-item .vy-h3 + p,
-.vy-item p + p {
-  margin-top: 0.5rem;
-}
-
-.vy-item p {
-  font-size: 0.9375rem;
+.body {
+  max-width: var(--measure);
+  font-size: 1.0625rem;
   line-height: 1.6;
-  color: var(--vy-muted);
+  color: var(--text-2);
 }
 
-/* Equal columns with a hairline above each item. */
-.vy-grid {
-  display: grid;
-  grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
-  gap: 2rem 2.5rem;
+/* The mechanism under a plain claim: there for the reader who wants it,
+   quiet for everyone else. */
+.detail {
+  max-width: var(--measure);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--text-3);
 }
 
-.vy-grid > * {
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--vy-border);
+.meta {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text-3);
 }
 
-.vy-grid-2 {
-  --cols: 2;
+.mono {
+  font-family: var(--mono);
+  font-variant-ligatures: none;
+  font-size: 0.92em;
 }
 
-@media (max-width: 860px) {
-  .vy-grid {
-    --cols: 2;
-  }
+.link {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+  text-decoration-color: var(--line-2);
+  transition: text-decoration-color var(--fast) var(--ease);
 }
 
-@media (max-width: 560px) {
-  .vy-grid {
-    --cols: 1;
-  }
+.link:hover {
+  text-decoration-color: currentColor;
 }
 
-/* Wrapping list of labelled pills (providers, jump links). */
-.vy-pills {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.vy-pills > li {
+/* A link that leads somewhere else on the site. The arrow is drawn by CSS so
+   screen readers read only the words. */
+.more {
   display: inline-flex;
   align-items: center;
-  gap: 0.625rem;
-  min-height: 2.375rem;
-  padding: 0.375rem 0.875rem;
-  border: 1px solid var(--vy-border);
-  border-radius: var(--vy-radius-md);
-  background: var(--vy-card);
-  font-size: 0.875rem;
+  gap: 0.375rem;
   font-weight: 500;
-  color: var(--vy-fg-strong);
+  color: var(--text);
 }
 
-/* Compact monospace chips (tool names). */
-.vy-chips {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.375rem;
+.more::after {
+  content: '→';
+  transition: transform var(--fast) var(--ease);
+}
+
+.more:hover::after {
+  transform: translateX(3px);
+}
+
+/* ----------------------------------------------------------------- layout - */
+
+.wrap {
+  width: 100%;
+  max-width: calc(var(--wrap) + 2 * var(--gutter));
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.band {
+  padding-block: clamp(4rem, 7.5vw, 6.5rem);
+}
+
+.band-tight {
+  padding-block: clamp(3.5rem, 6vw, 5.5rem);
+}
+
+.rule {
+  border-top: 1px solid var(--line);
+}
+
+/* A section heading with an optional paragraph under it. */
+.section-head {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: clamp(2.5rem, 5vw, 3.75rem);
+}
+
+/* Text on the left, content on the right. Collapses to one column. */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(2.5rem, 6vw, 5.5rem);
+  align-items: start;
+}
+
+.split > .stack {
+  display: grid;
+  gap: 1rem;
   align-content: start;
 }
 
-.vy-chips > li {
-  font-family: var(--vy-font-mono);
-  font-variant-ligatures: none;
-  font-size: 0.75rem;
-  line-height: 1.4;
-  color: var(--vy-muted);
-  background: var(--vy-surface);
-  border: 1px solid var(--vy-border);
-  border-radius: var(--vy-radius-sm);
-  padding: 0.1rem 0.4rem;
+@media (max-width: 899px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
-/* In-page navigation under a page title. */
-.vy-jump {
-  list-style: none;
-  padding: 0;
+.actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
-  margin-top: 2rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--vy-border);
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-
-.vy-jump a {
-  color: var(--vy-muted);
-}
-
-.vy-jump a:hover {
-  color: var(--vy-fg-strong);
-}
-
-/* -------------------------------------------------------------- surfaces - */
-
-.vy-panel {
-  background: var(--vy-card);
-  border: 1px solid var(--vy-border);
-  border-radius: var(--vy-radius-xl);
-  overflow: hidden;
-}
-
-.vy-tag {
-  display: inline-flex;
   align-items: center;
-  padding: 0.125rem 0.5rem;
-  border: 1px solid var(--vy-border);
-  border-radius: 999px;
-  background: var(--vy-surface);
-  font-family: var(--vy-font-mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.02em;
-  color: var(--vy-muted);
-  white-space: nowrap;
-}
-
-.vy-codeblock,
-.vy-doc pre {
-  padding: 1rem 1.125rem;
-  background: var(--vy-card);
-  border: 1px solid var(--vy-border);
-  border-radius: var(--vy-radius-lg);
-  font-family: var(--vy-font-mono);
-  font-variant-ligatures: none;
-  font-size: 0.8125rem;
-  line-height: 1.7;
-  color: var(--vy-secondary);
-  overflow-x: auto;
-}
-
-.vy-code {
-  font-family: var(--vy-font-mono);
-  font-variant-ligatures: none;
-  font-size: 0.875em;
-  background: var(--vy-surface);
-  border: 1px solid var(--vy-border);
-  border-radius: var(--vy-radius-sm);
-  padding: 0.1em 0.35em;
-}
-
-.vy-note {
-  padding-left: 1rem;
-  border-left: 2px solid var(--vy-border-strong);
-}
-
-.vy-footnote {
-  margin-top: 1.25rem;
-  font-size: 0.8125rem;
-  line-height: 1.6;
-  color: var(--vy-tertiary);
-  max-width: var(--vy-measure);
-}
-
-.vy-more {
-  font-size: 0.9375rem;
-}
-
-.vy-empty .vy-prose-muted {
-  margin-top: 0.75rem;
-  font-size: 0.9375rem;
+  gap: 0.75rem;
 }
 
 /* ---------------------------------------------------------------- buttons - */
 
-.vy-btn {
+.btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  min-height: 2.75rem;
-  padding-inline: 1.125rem;
+  height: 2.875rem;
+  padding: 0 1.25rem;
   border: 1px solid transparent;
-  border-radius: var(--vy-radius-lg);
-  font-size: 0.9375rem;
+  border-radius: var(--r-sm);
+  font-size: 0.9688rem;
   font-weight: 500;
-  letter-spacing: var(--vy-tracking);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
   cursor: pointer;
   transition:
-    background-color var(--vy-duration) var(--vy-ease),
-    border-color var(--vy-duration) var(--vy-ease),
-    color var(--vy-duration) var(--vy-ease);
+    background-color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
 }
 
-.vy-btn-primary {
-  background: var(--vy-accent);
-  color: var(--vy-accent-fg);
+.btn-primary {
+  background: var(--ink);
+  color: var(--ink-text);
 }
 
-.vy-btn-primary:hover {
-  background: var(--vy-accent-hover);
+.btn-primary:hover {
+  background: var(--ink-hover);
 }
 
-.vy-btn-secondary {
-  background: transparent;
-  border-color: var(--vy-border-strong);
-  color: var(--vy-fg);
+.btn-secondary {
+  border-color: var(--line-2);
+  color: var(--text);
 }
 
-.vy-btn-secondary:hover {
-  background: var(--vy-surface);
-  border-color: var(--vy-fg-strong);
+.btn-secondary:hover {
+  border-color: var(--text-3);
+  background: var(--bg-2);
 }
 
-.vy-cta-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
+.btn-sm {
+  height: 2.25rem;
+  padding: 0 0.875rem;
+  font-size: 0.875rem;
 }
 
-/* Closing call to action. */
-.vy-cta {
-  text-align: center;
+.btn svg {
+  flex-shrink: 0;
 }
 
-.vy-cta .vy-prose-muted {
-  margin: 0.875rem auto 0;
-}
+/* ------------------------------------------------------------------ media - */
 
-.vy-cta .vy-cta-actions {
-  justify-content: center;
-  margin-top: 2rem;
-}
-
-/* ------------------------------------------------------------------ links - */
-
-.vy-link {
-  color: var(--vy-accent);
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-  text-decoration-thickness: 1px;
-  text-decoration-color: color-mix(in srgb, var(--vy-accent) 55%, transparent);
-}
-
-.vy-link:hover {
-  text-decoration-color: currentColor;
-}
-
-/* ------------------------------------------------------- document styling - */
-
-/* The repository's markdown documents (policies, contributing guide). */
-.vy-doc {
-  max-width: 74ch;
-  color: var(--vy-secondary);
-  line-height: 1.7;
-  overflow-wrap: anywhere;
-}
-
-.vy-doc > * + * {
-  margin-top: 1.1rem;
-}
-
-.vy-doc h1 {
-  font-size: 1.75rem;
-  margin-top: 2.5rem;
-}
-
-.vy-doc h2 {
-  font-size: 1.3125rem;
-  margin-top: 2.75rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--vy-border);
-}
-
-.vy-doc h3 {
-  font-size: 1.0625rem;
-  margin-top: 1.75rem;
-}
-
-.vy-doc > :first-child {
-  margin-top: 0;
-}
-
-.vy-doc a {
-  color: var(--vy-accent);
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-  text-decoration-color: color-mix(in srgb, var(--vy-accent) 55%, transparent);
-}
-
-.vy-doc a:hover {
-  text-decoration-color: currentColor;
-}
-
-.vy-doc strong {
-  color: var(--vy-fg-strong);
-  font-weight: 600;
-}
-
-.vy-doc code {
-  font-family: var(--vy-font-mono);
-  font-size: 0.875em;
-  background: var(--vy-surface);
-  border: 1px solid var(--vy-border);
-  border-radius: var(--vy-radius-sm);
-  padding: 0.1em 0.35em;
-}
-
-.vy-doc pre code {
-  font-size: inherit;
-  background: none;
-  border: 0;
-  padding: 0;
-}
-
-.vy-doc ul {
-  list-style: disc;
-  padding-left: 1.25rem;
-}
-
-.vy-doc ol {
-  list-style: decimal;
-  padding-left: 1.25rem;
-}
-
-.vy-doc li + li {
-  margin-top: 0.4rem;
-}
-
-.vy-doc table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9375rem;
-  display: block;
-  overflow-x: auto;
-}
-
-.vy-doc th,
-.vy-doc td {
-  border: 1px solid var(--vy-border);
-  padding: 0.5rem 0.75rem;
-  text-align: left;
-  vertical-align: top;
-}
-
-.vy-doc th {
-  background: var(--vy-surface);
-  color: var(--vy-fg-strong);
-  font-weight: 600;
-}
-
-.vy-doc blockquote {
-  border-left: 2px solid var(--vy-border-strong);
-  padding-left: 1rem;
-  color: var(--vy-muted);
-}
-
-.vy-doc hr {
-  border: 0;
-  border-top: 1px solid var(--vy-border);
-}
-
-/* Hard-wrapped text (the GPL) keeps its original line breaks. */
-.vy-doc-plain {
-  font-family: var(--vy-font-mono);
-  font-size: 0.8125rem;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--vy-secondary);
-}
-
-/* ---------------------------------------------------------- screenshots - */
-
-/* Application screenshots ship as a light/dark pair, swapped with the same
-   rule shape as the tokens above. */
-.vy-shot {
-  border: 1px solid var(--vy-border);
-  border-radius: var(--vy-radius-xl);
+/* Every product image and video sits inset on a detail of one painting, and a
+   shadow lifts it off like a window (src/components/Media.astro). The painting
+   looks the same in both themes, so the shadow is plain black rather than a
+   theme token. */
+.stage {
+  position: relative;
+  isolation: isolate;
   overflow: hidden;
-  background: var(--vy-card);
+  container-type: inline-size;
+  padding: 4.5% 7.5%;
+  border-radius: var(--r-lg);
+  background: var(--bg-2);
 }
 
-.vy-shot img {
+/* Anchored to the bottom, so where the whole painting shows, Richards's
+   signature sits in the corner instead of being cut through. */
+.stage-art {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 100%;
+}
+
+/* The capture's corner shrinks with it, so on a phone it doesn't clip the
+   icons in a captured title bar: 14px on a 986px window and the same
+   proportion below that (cqi is 1% of the stage's width inside its padding). */
+.media {
+  position: relative;
+  overflow: hidden;
+  border-radius: min(var(--r-lg), 1.42cqi);
+  background: var(--bg-2);
+  box-shadow: 0 1.25rem 3rem -1rem rgb(0 0 0 / 0.5);
+}
+
+.media img,
+.media video {
   width: 100%;
   height: auto;
 }
 
-.vy-shot figcaption {
-  border-top: 1px solid var(--vy-border);
+.media figcaption {
   padding: 0.75rem 1rem;
-  font-size: 0.8125rem;
-  line-height: 1.5;
-  color: var(--vy-tertiary);
+  border-top: 1px solid var(--line);
+  font-size: 0.875rem;
+  color: var(--text-3);
 }
 
-.vy-shot-light {
-  display: var(--vy-swap-light);
+.only-light {
+  display: var(--show-light);
 }
 
-.vy-shot-dark {
-  display: var(--vy-swap-dark);
+.only-dark {
+  display: var(--show-dark);
 }
 
-/* ------------------------------------------------------ product canvas - */
-
-/* The large framed surface a product panel sits on. The glow is decorative:
-   it carries no information, so reduced-motion and forced-colors can drop it. */
-.vy-canvas {
-  position: relative;
-  border: 1px solid var(--vy-border);
-  border-radius: var(--vy-radius-3xl);
-  background: linear-gradient(to bottom, var(--vy-canvas-top), var(--vy-bg));
-  padding: clamp(0.75rem, 2vw, 1.5rem);
-  overflow: hidden;
-  isolation: isolate;
-}
-
-.vy-canvas::before {
-  content: '';
-  position: absolute;
-  inset-inline: -20%;
-  top: -60%;
-  aspect-ratio: 2 / 1;
-  background: radial-gradient(ellipse at 50% 100%, var(--vy-accent-glow), transparent 70%);
-  pointer-events: none;
-  z-index: -1;
-}
-
-.vy-panel-xl {
-  border: 1px solid var(--vy-hairline);
-  border-radius: var(--vy-radius-2xl);
-  background: var(--vy-elev-1);
-  overflow: hidden;
-}
-
-/* ----------------------------------------------------------------- cards - */
-
-/* The full-width treatment for sections that describe how a run behaves rather
-   than list what is available. The heading spans the shell and each claim gets
-   its own surface, so the mechanism reads as a set of parts instead of as more
-   list. Cards carry .vy-item too, which is what gives their prose the same size
-   and colour as every other claim on the page. */
-.vy-card-head {
-  margin-bottom: clamp(2rem, 4vw, 3rem);
-}
-
-.vy-card-head > * {
-  margin: 0;
-}
-
-.vy-card-head .vy-h2 {
-  margin-top: 0.75rem;
-}
-
-.vy-card-lede {
-  margin-top: 1rem;
-}
-
-.vy-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--vy-card-min, 16rem), 1fr));
-  gap: 1rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.vy-card {
-  display: flex;
-  flex-direction: column;
-  /* The gap does the spacing, because the margin reset below outranks the
-     .vy-item rule that normally separates a claim title from its body. */
-  gap: 0.5rem;
-  padding: clamp(1.25rem, 2.5vw, 1.75rem);
-  border: 1px solid var(--vy-hairline);
-  border-radius: var(--vy-radius-2xl);
-  background: var(--vy-elev-1);
-}
-
-.vy-card > * {
-  margin: 0;
-}
-
-/* Use-case cards carry a bullet list rather than a sentence, so they want a
-   wider track than the claim cards: three up in the shell rather than four. */
-.vy-uses {
-  --vy-card-min: 19rem;
-}
-
-/* A use case is named work, so its title sits a step above a claim title
-   without reaching .vy-h2, which is display-sized. */
-.vy-uses .vy-h3 {
-  font-size: 1.25rem;
-  letter-spacing: -0.016em;
-}
-
-.vy-uses-list {
-  display: grid;
-  gap: 0.5rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.vy-uses-list > li {
-  position: relative;
-  padding-left: 1rem;
-  font-size: 0.9375rem;
-  line-height: 1.6;
-  color: var(--vy-muted);
-}
-
-/* A hanging rule rather than a disc: these read as clauses describing one job,
-   not as a checklist of things to tick off. */
-.vy-uses-list > li::before {
-  content: '';
-  position: absolute;
-  top: 0.8em;
-  left: 0;
-  width: 0.5rem;
-  height: 1px;
-  background: var(--vy-border-strong);
-}
-
-/* auto pushes the link to the card's bottom edge, so links line up across
-   cards holding different numbers of bullets. It outranks the margin reset on
-   .vy-card > * only because it is declared later. */
-.vy-use-link {
-  margin-top: auto;
-  padding-top: 0.75rem;
-  font-size: 0.9375rem;
-}
-
-
-/* A diagram takes two tracks, so a two-claim section still fills its row
-   instead of leaving a gap where a third card would be. */
-.vy-card-visual {
-  grid-column: span 2;
+/* A slot whose file has not been supplied yet. It names the file it expects,
+   and verify-site.mjs refuses to publish while one is on a page. */
+.media-missing {
   display: grid;
   place-items: center;
-  padding: clamp(1.5rem, 3vw, 2.5rem);
-  background: linear-gradient(to bottom, var(--vy-canvas-top), var(--vy-bg));
+  padding: 2rem;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-lg);
+  box-shadow: none;
+  text-align: center;
 }
 
-/* Below this the grid has fewer than four tracks, and a spanning diagram
-   pushes the last card onto a row of its own with two empty tracks beside it.
-   Four 16rem tracks and their three 1rem gaps need 1072px, and the shell is the
-   viewport less two 1.5rem gutters, so 1120px is the last width that fits them
-   — above it the diagram and two claims fill the row exactly. */
-@media (max-width: 1119px) {
-  .vy-card-visual {
-    grid-column: auto;
+.media-missing p {
+  max-width: 34rem;
+  font-size: 0.9375rem;
+  color: var(--text-3);
+}
+
+.media-missing strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+/* ------------------------------------------------------------------- tags - */
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  height: 1.375rem;
+  padding: 0 0.4375rem;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------- claim collections - */
+
+/* Items separated by a hairline above each one: steps, facts, jobs. */
+.ruled > * {
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2.5rem 2rem;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3rem clamp(2rem, 5vw, 4.5rem);
+}
+
+@media (max-width: 999px) {
+  .grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-/* -------------------------------------------------------------- logo wall - */
+@media (max-width: 639px) {
+  .grid-4,
+  .grid-2 {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2rem;
+  }
+}
 
-/* Separators are each cell's own right and bottom hairline, drawn as a
-   box-shadow so they take no layout space. Painting the container and letting a
-   gap show through would fill a partial last row with a solid block of border
-   colour; an empty cell here simply stays page-coloured. */
-.vy-logowall {
+.item {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border: 1px solid var(--vy-border);
-  border-radius: var(--vy-radius-2xl);
-  overflow: hidden;
+  gap: 0.5rem;
+  align-content: start;
 }
 
-.vy-logowall-item {
+.item p {
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.item .detail {
+  font-size: 0.9063rem;
+  color: var(--text-3);
+}
+
+/* -------------------------------------------------------------- mark lists - */
+
+/* A mark beside its name. Used for model providers and integrations. */
+.marks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+  column-gap: 1.5rem;
+}
+
+.marks > li {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 0.625rem;
-  padding: 0.9375rem 1rem;
-  box-shadow: 1px 0 0 var(--vy-border), 0 1px 0 var(--vy-border);
-  font-size: 0.875rem;
-  line-height: 1.3;
-  color: var(--vy-secondary);
+  gap: 0.75rem;
+  min-height: 3.25rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9688rem;
+  color: var(--text);
   min-width: 0;
 }
 
-/* Labels wrap rather than truncate. They come from the marketplace and the
-   provider registry, so their length is not ours to control, and a mark beside
-   "Google Dri…" reads as a broken cell rather than a named integration. Grid
-   rows stretch to their tallest cell, so a two-line label keeps the wall even. */
-.vy-logowall-label {
+.marks-dense {
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+}
+
+.marks-dense > li {
+  min-height: 2.875rem;
+  font-size: 0.9063rem;
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--text);
+}
+
+.mark img {
+  width: 1.25rem;
+  height: 1.25rem;
+  object-fit: contain;
+  border-radius: 3px;
+}
+
+.mark-label {
   min-width: 0;
-  /* break-word, never anywhere: `anywhere` also shrinks the min-content width
-     to one character, which lets a sibling tag squeeze the label to nothing and
-     stack it letter by letter. This keeps the longest word intact, so the cell
-     wraps the tag onto its own line instead. */
   overflow-wrap: break-word;
 }
 
-.vy-logo {
-  flex-shrink: 0;
-  color: var(--vy-fg-strong);
+.marks .tag {
+  margin-left: auto;
 }
 
-.vy-logo svg {
+/* ------------------------------------------------------------------ prose - */
+
+/* Long-form text baked from the repository: policies, release notes. */
+.prose {
+  max-width: 44rem;
+  font-size: 1.0625rem;
+  line-height: 1.7;
+  color: var(--text-2);
+  overflow-wrap: break-word;
+}
+
+.prose > * + * {
+  margin-top: 1.1em;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+  color: var(--text);
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+
+.prose h1 {
+  font-size: 1.75rem;
+  margin-top: 2.5rem;
+}
+
+.prose h2 {
+  font-size: 1.375rem;
+  margin-top: 2.75rem;
+}
+
+.prose h3 {
+  font-size: 1.125rem;
+  margin-top: 2rem;
+}
+
+.prose h4 {
+  font-size: 1rem;
+  margin-top: 1.5rem;
+}
+
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose a {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+  text-decoration-color: var(--line-2);
+}
+
+.prose a:hover {
+  text-decoration-color: currentColor;
+}
+
+.prose strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.25rem;
+}
+
+.prose ul {
+  list-style: disc;
+}
+
+.prose ol {
+  list-style: decimal;
+}
+
+.prose li + li {
+  margin-top: 0.5em;
+}
+
+.prose li::marker {
+  color: var(--text-3);
+}
+
+.prose code {
+  font-family: var(--mono);
+  font-variant-ligatures: none;
+  font-size: 0.86em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+}
+
+.prose pre {
+  padding: 1rem 1.125rem;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg-2);
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+
+.prose pre code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: inherit;
+}
+
+.prose blockquote {
+  padding-left: 1rem;
+  border-left: 2px solid var(--line-2);
+  color: var(--text-3);
+}
+
+.prose hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.prose table {
   display: block;
   width: 100%;
-  height: 100%;
-}
-
-/* Dense variant: marks only, for long tails like the extension catalogue. */
-.vy-logowall-dense {
-  grid-template-columns: repeat(auto-fill, minmax(8.75rem, 1fr));
-}
-
-.vy-logowall-dense .vy-logowall-item {
-  padding: 0.75rem 0.875rem;
-  font-size: 0.8125rem;
-}
-
-/* --------------------------------------------------------------- strip - */
-
-/* A compact dated list: changelog entries on the home and download pages. */
-.vy-strip {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border-top: 1px solid var(--vy-border);
-}
-
-.vy-strip-row {
-  display: grid;
-  grid-template-columns: 10rem minmax(0, 1fr) auto;
-  gap: 1.5rem;
-  align-items: baseline;
-  padding-block: 1rem;
-  border-bottom: 1px solid var(--vy-border);
-}
-
-.vy-strip-date {
-  font-size: 0.8125rem;
-  color: var(--vy-tertiary);
-}
-
-.vy-strip-name {
+  overflow-x: auto;
+  border-collapse: collapse;
   font-size: 0.9375rem;
-  color: var(--vy-fg);
-  min-width: 0;
 }
 
-@media (max-width: 640px) {
-  .vy-strip-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.375rem;
-  }
+.prose th,
+.prose td {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.prose th {
+  background: var(--bg-2);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------ code blocks - */
+
+.code {
+  padding: 1.125rem 1.25rem;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg-2);
+  font-family: var(--mono);
+  font-variant-ligatures: none;
+  font-size: 0.875rem;
+  line-height: 1.75;
+  color: var(--text);
+}
+
+.code .prompt {
+  color: var(--text-3);
+  user-select: none;
+}
+
+/* ------------------------------------------------------------- page heads - */
+
+/* The top of every page except the home page: title, a line or two, and
+   sometimes the page's own primary action. */
+.page-head {
+  padding-block: clamp(3.5rem, 8vw, 6.5rem) clamp(2.5rem, 5vw, 4rem);
+}
+
+.page-head .lede {
+  margin-top: 1.25rem;
+}
+
+.page-head .actions {
+  margin-top: 2rem;
 }

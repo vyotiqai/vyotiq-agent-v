@@ -1,0 +1,287 @@
+---
+/**
+ * One screenshot or clip slot from src/lib/media.ts.
+ *
+ * Every slot sits inset on a detail of one painting (src/art/, named by the
+ * slot's art), and a shadow lifts the capture off it like a window. The
+ * painting is decoration, so its alt is empty and screen readers skip it.
+ *
+ * Images are resized and served as WebP by astro:assets. When a slot has a
+ * light and a dark capture, both are rendered and the stylesheet shows the one
+ * that matches the page; the hidden one is lazy, so it is never downloaded.
+ *
+ * A clip is a short muted loop laid over its poster. The poster is an ordinary
+ * image pair, so a visitor without JavaScript, or who asked for reduced
+ * motion, still sees the right still. The videos load nothing until the
+ * script picks the one that matches the page theme and the slot is on screen.
+ *
+ * A slot whose file is missing renders a dashed frame that names the file it
+ * expects. verify-site.mjs fails the build check on any such frame.
+ */
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import type { ImageMetadata } from 'astro'
+import { Image } from 'astro:assets'
+import { MEDIA } from '../lib/media'
+
+interface Props {
+  id: keyof typeof MEDIA
+  /** The rendered width, for the browser to pick a file size. */
+  sizes?: string
+  /** Above the fold: load straight away. */
+  eager?: boolean
+  class?: string
+}
+
+const { id, sizes = '(min-width: 1200px) 680px, (min-width: 900px) 58vw, 100vw', eager = false } = Astro.props
+const className = Astro.props.class
+
+const slot = MEDIA[id]
+if (!slot) throw new Error(`Media: no slot called "${String(id)}" in src/lib/media.ts`)
+
+const files = import.meta.glob<{ default: ImageMetadata }>('../media/*.{png,jpg,jpeg,webp}', { eager: true })
+
+const paintings = import.meta.glob<{ default: ImageMetadata }>('../art/*.jpg', { eager: true })
+const painting = paintings[`../art/${slot.art}.jpg`]?.default
+if (!painting) throw new Error(`Media: "${String(id)}" names src/art/${slot.art}.jpg, which does not exist`)
+
+function find(base: string): ImageMetadata | null {
+  for (const ext of ['png', 'jpg', 'jpeg', 'webp']) {
+    const hit = files[`../media/${base}.${ext}`]
+    if (hit) return hit.default
+  }
+  return null
+}
+
+const STEPS = [640, 960, 1280, 1600, 1920, 2400]
+const widthsFor = (image: ImageMetadata) => [
+  ...new Set([...STEPS.filter((w) => w < image.width), Math.min(image.width, 2400)])
+]
+
+type Theme = 'light' | 'dark'
+type Still = { theme: Theme | null; image: ImageMetadata }
+type Clip = Still & { mp4: string; webm: string | null }
+
+/** AV1 in WebM, 10-bit. Browsers that can't decode it skip to the MP4. */
+const AV1 = 'video/webm; codecs="av01.0.12M.10"'
+
+let stills: Still[] = []
+let clips: Clip[] = []
+
+if (slot.kind === 'image') {
+  const light = find(`${String(id)}-light`)
+  const dark = find(`${String(id)}-dark`)
+  const single = find(String(id))
+  if (light && dark) stills = [{ theme: 'light', image: light }, { theme: 'dark', image: dark }]
+  else if (single ?? light) stills = [{ theme: null, image: (single ?? light)! }]
+} else {
+  const publicDir = join(process.cwd(), 'public', 'media')
+  const clipFor = (base: string, theme: Theme | null): Clip | null => {
+    const poster = find(`${base}-poster`)
+    if (!poster || !existsSync(join(publicDir, `${base}.mp4`))) return null
+    return {
+      theme,
+      image: poster,
+      mp4: `/media/${base}.mp4`,
+      webm: existsSync(join(publicDir, `${base}.webm`)) ? `/media/${base}.webm` : null
+    }
+  }
+  const light = clipFor(`${String(id)}-light`, 'light')
+  const dark = clipFor(`${String(id)}-dark`, 'dark')
+  const single = clipFor(String(id), null)
+  if (light && dark) clips = [light, dark]
+  else if (single) clips = [single]
+  stills = clips
+}
+
+const present = stills.length > 0
+const paired = stills.length === 2
+const loading = eager ? 'eager' : 'lazy'
+---
+
+{
+  present && (
+    <div class:list={['stage', className]}>
+      <Image
+        src={painting}
+        alt=""
+        widths={widthsFor(painting)}
+        sizes={sizes}
+        format="webp"
+        quality={80}
+        loading={loading}
+        decoding="async"
+        class="stage-art"
+      />
+      <figure
+        class:list={['media', clips.length > 0 && 'media-clip']}
+        data-media={String(id)}
+        data-clip-figure={clips.length > 0 ? '' : undefined}
+      >
+        {stills.map((still) => (
+          <Image
+            src={still.image}
+            alt={slot.alt}
+            widths={widthsFor(still.image)}
+            sizes={sizes}
+            format="webp"
+            quality={88}
+            loading={still.theme === 'dark' ? 'lazy' : loading}
+            decoding="async"
+            class:list={[paired && `only-${still.theme}`]}
+          />
+        ))}
+        {clips.map((clip) => (
+          <video
+            class:list={['clip', paired && `only-${clip.theme}`]}
+            width={clip.image.width}
+            height={clip.image.height}
+            muted
+            loop
+            playsinline
+            preload="none"
+            aria-hidden="true"
+            data-clip
+          >
+            {clip.webm && <source src={clip.webm} type={AV1} />}
+            <source src={clip.mp4} type="video/mp4" />
+          </video>
+        ))}
+        {clips.length > 0 && (
+          <button type="button" class="video-toggle" data-video-toggle>
+            <span data-label>Play</span>
+          </button>
+        )}
+      </figure>
+    </div>
+  )
+}
+
+{
+  !present && (
+    <div
+      class:list={['media', 'media-missing', className]}
+      data-missing-media={String(id)}
+      style={`aspect-ratio: ${slot.ratio}`}
+    >
+      <p>
+        <strong>{slot.file}</strong>
+        {slot.brief}
+      </p>
+    </div>
+  )
+}
+
+<style>
+  /* The clip sits exactly over its poster and fades in once it is playing. */
+  .clip {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity var(--fast) var(--ease);
+  }
+
+  .clip.is-ready {
+    opacity: 1;
+  }
+
+  .video-toggle {
+    position: absolute;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    height: 2rem;
+    padding: 0 0.75rem;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    background: var(--bg);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+    opacity: 0.85;
+    transition: opacity var(--fast) var(--ease);
+  }
+
+  .video-toggle:hover,
+  .video-toggle:focus-visible {
+    opacity: 1;
+  }
+</style>
+
+<script>
+  // Each clip slot holds one video per theme. Only the one the page is showing
+  // loads and plays, only while the slot is on screen, never for someone who
+  // asked for reduced motion, and never again after they pause it themselves.
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const figures = document.querySelectorAll<HTMLElement>('[data-clip-figure]')
+  const updates: Array<() => void> = []
+
+  for (const figure of figures) {
+    const videos = [...figure.querySelectorAll<HTMLVideoElement>('video[data-clip]')]
+    const toggle = figure.querySelector<HTMLButtonElement>('[data-video-toggle]')
+    const label = toggle?.querySelector<HTMLElement>('[data-label]')
+    if (videos.length === 0 || !toggle || !label) continue
+
+    let pausedByUser = reduce
+    let inView = false
+    const shown = () => videos.find((v) => v.getClientRects().length > 0) ?? null
+
+    // The label says what a press will do; it is the whole state, so no aria-pressed.
+    const sync = () => {
+      const video = shown()
+      label.textContent = video !== null && !video.paused ? 'Pause' : 'Play'
+    }
+
+    const play = (video: HTMLVideoElement) => {
+      video.preload = 'auto'
+      void video.play().catch(sync)
+    }
+
+    const update = () => {
+      const video = shown()
+      for (const other of videos) if (other !== video && !other.paused) other.pause()
+      if (video && inView && !pausedByUser) play(video)
+      else if (video && !video.paused) video.pause()
+      sync()
+    }
+
+    for (const video of videos) {
+      video.addEventListener('playing', () => video.classList.add('is-ready'))
+      video.addEventListener('play', sync)
+      video.addEventListener('pause', sync)
+    }
+
+    toggle.addEventListener('click', () => {
+      const video = shown()
+      if (!video) return
+      if (video.paused) {
+        pausedByUser = false
+        play(video)
+      } else {
+        pausedByUser = true
+        video.pause()
+      }
+    })
+
+    new IntersectionObserver(
+      ([entry]) => {
+        inView = entry.isIntersecting
+        update()
+      },
+      { threshold: 0.25 }
+    ).observe(figure)
+
+    updates.push(update)
+    sync()
+  }
+
+  // The theme can change under a playing clip: the footer switch or the system.
+  if (updates.length > 0) {
+    const all = () => updates.forEach((update) => update())
+    new MutationObserver(all).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', all)
+  }
+</script>

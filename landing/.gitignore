@@ -11,7 +11,8 @@ src/data/logos.json
 src/generated/legal/
 public/brand/
 
-# public/shots/ IS committed. The images come from scripts/capture-shots.mjs
-# booting the real application, and the pages that use them assert the files
-# exist, so a clone has to carry them or the site loses its only product
-# imagery. Only surfaces backed by real shipped data are captured there.
+# src/media/ and public/media/ ARE committed. They hold real captures of the
+# application: the Marketplace shot from scripts/capture-shots.mjs, and the
+# screenshots and video of real runs, supplied by hand. src/lib/media.ts says
+# what each one must show, and verify-site.mjs refuses to publish a page with
+# a slot still empty.

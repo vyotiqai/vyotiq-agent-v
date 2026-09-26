@@ -1,0 +1,29 @@
+---
+/**
+ * The model providers the application can talk to, each mark beside its name.
+ * The marks come from scripts/bake-logos.mjs; showcase.ts gates the names.
+ */
+import app from '../data/app.json'
+import ProviderMark from './ProviderMark.astro'
+
+const providers = app.providers.list.map((p) => ({
+  id: p.id,
+  // The application uses this shorter label in its own provider picker.
+  label: p.id === 'custom' ? 'OpenAI-compatible' : p.label,
+  keyless: app.providers.keyless.includes(p.id)
+}))
+---
+
+<ul class="marks">
+  {
+    providers.map((p) => (
+      <li>
+        <span class="mark">
+          <ProviderMark id={p.id} size={20} />
+        </span>
+        <span class="mark-label">{p.label}</span>
+        {p.keyless && <span class="tag">No key</span>}
+      </li>
+    ))
+  }
+</ul>

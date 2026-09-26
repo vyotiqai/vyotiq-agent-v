@@ -1,143 +1,307 @@
 ---
 import Base from '../layouts/Base.astro'
-import ClaimSection from '../components/ClaimSection.astro'
-import LogoWall from '../components/LogoWall.astro'
-import Shot from '../components/Shot.astro'
-import { app } from '../lib/site'
-import { FEATURE_SECTIONS } from '../lib/showcase'
+import ProviderList from '../components/ProviderList.astro'
+import DownloadButton from '../components/DownloadButton.astro'
+import { app, release } from '../lib/site'
+import { HOME, LIVE_FEATURE_SECTIONS, LIVE_JOBS, jobPackages } from '../lib/showcase'
 import { TOOL_GROUPS, TOOL_TOTAL } from '../lib/tools'
 
 /**
- * Every capability claim on this page comes from src/lib/showcase.ts. The two
- * sections written out below — providers and the tool catalog — render baked
- * data rather than prose, and showcase.ts gates which names that data may
- * contain.
- *
- * The providers and tools sections sit between the opening claim sections and
- * the rest, so the page reads positioning → modes → what it runs on → what it
- * can do, rather than burying the catalogue at the bottom.
+ * The full list. Every claim here comes from showcase.ts, grouped by what the
+ * reader is doing rather than by how the app is built. The jobs and the tool
+ * reference follow, for people who want the specifics.
  */
-const INTRO: string[] = ['principles', 'modes']
-const intro = FEATURE_SECTIONS.filter((s) => INTRO.includes(s.id))
-const rest = FEATURE_SECTIONS.filter((s) => !INTRO.includes(s.id))
 
-const jump = [
-  ...intro.map((s) => ({ href: `#${s.id}`, label: s.eyebrow })),
-  { href: '#providers', label: 'Providers' },
-  { href: '#tools', label: 'Tools' },
-  ...rest.map((s) => ({ href: `#${s.id}`, label: s.eyebrow }))
+const index = [
+  ...LIVE_FEATURE_SECTIONS.map((s) => ({ href: `#${s.id}`, label: s.title })),
+  ...(LIVE_JOBS.length > 0 ? [{ href: '#jobs', label: 'Jobs to hand it' }] : []),
+  { href: '#tools', label: 'Every built-in tool' }
 ]
+const version = release.source === 'github' ? release.version : app.version
 ---
 
 <Base
   title="Features"
-  description={`What Agent V does: ${TOOL_TOTAL} built-in tools, ${app.providers.total} model providers, git worktree parallelism, checkpoints and rewind, a local code index, MCP and skills.`}
+  description={`Everything Agent V can do: ${TOOL_TOTAL} built-in tools, ${app.providers.total} model providers, checkpoints and rewind, parallel work on git worktrees, local code search, MCP and skills.`}
 >
-  <section class="vy-page-head">
-    <div class="vy-shell">
-      <p class="vy-eyebrow">Features</p>
-      <h1 class="vy-h1">Everything Agent V can do</h1>
-      <p class="vy-lede">What is implemented and shipping today.</p>
-      <ul class="vy-jump" aria-label="On this page">
-        {jump.map((j) => <li><a href={j.href}>{j.label}</a></li>)}
+  <section class="page-head">
+    <div class="wrap">
+      <h1 class="title">What Agent&nbsp;V can do</h1>
+      <p class="lede">
+        The full list, grouped by what you’re doing. Everything on this page is in version <span class="mono">{version}</span>.
+      </p>
+    </div>
+  </section>
+
+  <div class="wrap layout">
+    <nav class="toc" aria-label="On this page">
+      <ul>
+        {index.map((entry) => <li><a href={entry.href}>{entry.label}</a></li>)}
       </ul>
-    </div>
-  </section>
+    </nav>
 
-  {intro.map((section) => <ClaimSection section={section} />)}
+    <div class="content">
+      {
+        LIVE_FEATURE_SECTIONS.map((section) => (
+          <section class="group" id={section.id}>
+            <h2 class="h2">{section.title}</h2>
+            {section.intro && <p class="body intro">{section.intro}</p>}
+            <ul class="entries">
+              {section.live.map((claim) => (
+                <li class="entry">
+                  <h3 class="h3">{claim.title}</h3>
+                  <div>
+                    <p class="body">{claim.body}</p>
+                    {claim.detail && <p class="detail">{claim.detail}</p>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {section.id === 'models' && (
+              <div class="providers">
+                <ProviderList />
+                <p class="detail">
+                  {HOME.models.detail} Context windows and pricing come from a public model registry.
+                </p>
+              </div>
+            )}
+          </section>
+        ))
+      }
 
-  <section class="vy-rule vy-section" id="providers">
-    <div class="vy-shell vy-section-grid">
-      <header class="vy-sec-head">
-        <p class="vy-eyebrow">Providers</p>
-        <h2 class="vy-h2">{app.providers.total} providers, your own keys</h2>
-        <p class="vy-prose-muted">
-          Requests go directly from your machine to the provider. There is no Vyotiq API, no
-          account, and no usage metering. Keys are stored in your operating system's keychain.
-        </p>
-      </header>
+      {
+        LIVE_JOBS.length > 0 && (
+          <section class="group" id="jobs">
+            <h2 class="h2">Jobs to hand it</h2>
+            <p class="body intro">{HOME.jobs.body}</p>
+            <ul class="entries">
+              {LIVE_JOBS.map((job) => {
+                const { skills, uses } = jobPackages(job)
+                return (
+                  <li class="entry">
+                    <h3 class="h3">{job.title}</h3>
+                    <div>
+                      <ul class="steps">
+                        {job.steps.map((step) => (
+                          <li>{step}</li>
+                        ))}
+                      </ul>
+                      <p class="detail">
+                        {skills.length > 0 && <>Skills: {skills.join(', ')}.</>}
+                        {uses.length > 0 && <> Works with {uses.join(', ')}.</>}
+                      </p>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
+        )
+      }
 
-      <div>
-        <LogoWall kind="providers" showKeyless />
-        <p class="vy-footnote">
-          Model lists are fetched live per provider where the API supports it. Context windows and
-          pricing metadata come from a public model registry.
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <section class="vy-rule vy-section" id="tools">
-    <div class="vy-shell vy-section-grid">
-      <header class="vy-sec-head">
-        <p class="vy-eyebrow">Tool catalog</p>
-        <h2 class="vy-h2">{TOOL_TOTAL} built-in tools</h2>
-        <p class="vy-prose-muted">Every name below is a tool the agent can call.</p>
-      </header>
-
-      <div>
-        <ol class="vy-rows">
+      <section class="group" id="tools">
+        <h2 class="h2">All {TOOL_TOTAL} built-in tools</h2>
+        <p class="body intro">The exact names, for when you want to know what the agent can call.</p>
+        <ul class="entries">
           {
             TOOL_GROUPS.map((group) => (
-              <li class="vy-row-lead vy-tool-row">
-                <div class="vy-item">
-                  <h3 class="vy-h3">
-                    {group.title} <span class="vy-tool-count vy-mono">{group.names.length}</span>
-                  </h3>
-                  <p>{group.blurb}</p>
+              <li class="entry">
+                <div>
+                  <h3 class="h3">{group.title}</h3>
+                  <p class="detail">{group.blurb}</p>
                 </div>
-                <ul class="vy-chips">
-                  {group.names.map((n) => (
-                    <li>{n}</li>
+                <ul class="tool-names">
+                  {group.names.map((name) => (
+                    <li>{name}</li>
                   ))}
                 </ul>
               </li>
             ))
           }
-        </ol>
-        <div class="vy-tools-shot">
-          <Shot
-            name="settings-tools"
-            alt="The Agent V settings screen listing the built-in tools with their approval state."
-            caption="The same catalog, in Settings → Tools."
-          />
-        </div>
-      </div>
+        </ul>
+      </section>
     </div>
-  </section>
+  </div>
 
-  {rest.map((section) => <ClaimSection section={section} />)}
-
-  <section class="vy-rule vy-section">
-    <div class="vy-shell vy-cta">
-      <h2 class="vy-h2">Try it on a repository you know well.</h2>
-      <div class="vy-cta-actions">
-        <a class="vy-btn vy-btn-primary" href="/download">Download</a>
-        <a class="vy-btn vy-btn-secondary" href="/extensions">Browse extensions</a>
+  <section class="band rule">
+    <div class="wrap">
+      <h2 class="statement">Try it on a repository you know</h2>
+      <div class="actions end-actions">
+        <DownloadButton />
+        <a class="btn btn-secondary" href="/extensions">Browse extensions</a>
       </div>
     </div>
   </section>
 </Base>
 
 <style>
-  .vy-rows > .vy-tool-row {
-    grid-template-columns: 14rem minmax(0, 1fr);
+  .layout {
+    display: grid;
+    grid-template-columns: 13rem minmax(0, 1fr);
+    gap: clamp(2rem, 5vw, 4.5rem);
+    align-items: start;
+    padding-bottom: clamp(3rem, 6vw, 5rem);
   }
 
-  @media (max-width: 640px) {
-    .vy-rows > .vy-tool-row {
-      grid-template-columns: minmax(0, 1fr);
-    }
+  .toc {
+    position: sticky;
+    top: calc(var(--header) + 2rem);
   }
 
-  .vy-tools-shot {
+  .toc ul {
+    display: grid;
+    gap: 0.125rem;
+    padding-left: 0.875rem;
+    border-left: 1px solid var(--line);
+  }
+
+  /* Each link sits on the rule to its left, which marks the section in view. */
+  .toc a {
+    display: block;
+    margin-left: calc(-0.875rem - 1px);
+    padding: 0.3125rem 0 0.3125rem 0.875rem;
+    border-left: 1px solid transparent;
+    font-size: 0.9063rem;
+    line-height: 1.35;
+    color: var(--text-3);
+    transition:
+      color var(--fast) var(--ease),
+      border-color var(--fast) var(--ease);
+  }
+
+  .toc a:hover {
+    color: var(--text);
+  }
+
+  .toc a[aria-current='true'] {
+    border-left-color: var(--text);
+    color: var(--text);
+  }
+
+  .group + .group {
+    margin-top: clamp(4rem, 8vw, 6rem);
+  }
+
+  .intro {
+    margin-top: 1rem;
+  }
+
+  .entries {
+    margin-top: 2rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .entry {
+    display: grid;
+    grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
+    gap: 0.75rem 2.5rem;
+    padding-block: 1.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .entry .h3 {
+    font-size: 1.0625rem;
+    line-height: 1.5;
+  }
+
+  .entry .body {
+    font-size: 1rem;
+  }
+
+  .entry .detail {
+    margin-top: 0.5rem;
+  }
+
+  .steps {
+    display: grid;
+    gap: 0.5rem;
+    padding-left: 1.125rem;
+    list-style: disc;
+    font-size: 1rem;
+    line-height: 1.6;
+    color: var(--text-2);
+  }
+
+  .steps li::marker {
+    color: var(--text-3);
+  }
+
+  .providers {
     margin-top: 2rem;
   }
 
-  .vy-tool-count {
-    margin-left: 0.375rem;
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--vy-tertiary);
+  .providers .detail {
+    margin-top: 1rem;
+  }
+
+  .tool-names {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    align-content: start;
+  }
+
+  .tool-names li {
+    padding: 0.1875rem 0.5rem;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--bg-2);
+    font-family: var(--mono);
+    font-variant-ligatures: none;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  .end-actions {
+    margin-top: 2rem;
+  }
+
+  @media (max-width: 999px) {
+    .layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .toc {
+      position: static;
+    }
+    .toc ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem 1.25rem;
+      padding-left: 0;
+      border-left: 0;
+    }
+    .toc a {
+      margin-left: 0;
+      padding-left: 0;
+      border-left: 0;
+    }
+  }
+
+  @media (max-width: 719px) {
+    .entry {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 </style>
+
+<script>
+  // Marks the section in view in the index on the left.
+  const links = new Map(
+    [...document.querySelectorAll<HTMLAnchorElement>('.toc a')].map((a) => [a.hash.slice(1), a])
+  )
+  const watcher = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue
+        for (const link of links.values()) link.removeAttribute('aria-current')
+        links.get(entry.target.id)?.setAttribute('aria-current', 'true')
+      }
+    },
+    { rootMargin: '-25% 0px -65% 0px' }
+  )
+  for (const id of links.keys()) {
+    const section = document.getElementById(id)
+    if (section) watcher.observe(section)
+  }
+</script>

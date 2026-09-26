@@ -1,24 +1,27 @@
 ---
 import Base from '../layouts/Base.astro'
-import { app, formatBytes, formatDate } from '../lib/site'
-import { HAS_RELEASE, PLATFORMS, FEEDS, RELEASE_META } from '../lib/download'
-import ChangelogStrip from '../components/ChangelogStrip.astro'
 import PlatformMark from '../components/PlatformMark.astro'
+import { app, formatBytes, formatDate } from '../lib/site'
+import { HAS_RELEASE, PICKS, PLATFORMS, RELEASE_META } from '../lib/download'
 
 const signing = app.packaging.signing
+const unsigned = signing.windows === 'unsigned' || signing.macos === 'not-notarized'
 
 const firstRun = [
   {
-    os: 'Windows',
-    body: 'SmartScreen shows “Windows protected your PC”. Choose More info, then Run anyway. The installer is per-user and does not need administrator rights.'
+    os: 'windows' as const,
+    label: 'Windows',
+    body: 'SmartScreen says “Windows protected your PC”. Click More info, then Run anyway. It installs for your user only, with no admin rights needed, and shows up in the Start menu as Vyotiq.'
   },
   {
-    os: 'macOS',
-    body: 'Gatekeeper refuses the first launch. Open System Settings → Privacy & Security, find the blocked app near the bottom, and choose Open Anyway.'
+    os: 'macos' as const,
+    label: 'macOS',
+    body: 'Gatekeeper blocks the first launch. Open System Settings, go to Privacy & Security, find Vyotiq near the bottom and click Open Anyway.'
   },
   {
-    os: 'Linux',
-    body: 'Mark the AppImage executable with chmod +x before running it. The deb and rpm packages install normally through your package manager.'
+    os: 'linux' as const,
+    label: 'Linux',
+    body: 'Make the AppImage executable with chmod +x, then run it. The .deb and .rpm packages install through your package manager as usual.'
   }
 ]
 ---
@@ -27,45 +30,71 @@ const firstRun = [
   title="Download"
   description="Download Agent V for Windows, macOS and Linux. Free and open source under GPL-3.0-or-later."
 >
-  <section class="vy-page-head">
-    <div class="vy-shell">
-      <p class="vy-eyebrow">Download</p>
-      <h1 class="vy-h1">Get Agent V</h1>
-      <p class="vy-lede">
-        Free and open source. Every file is served from the
-        {' '}<a href={app.repo.releases} class="vy-link" rel="noopener noreferrer">GitHub release</a>{' '}
-        the in-app updater also reads.
-      </p>
+  <section class="page-head">
+    <div class="wrap">
+      <h1 class="title">Download Agent&nbsp;V</h1>
       {
-        HAS_RELEASE && (
-          <p class="vy-footnote">
-            Version <span class="vy-mono">{RELEASE_META.version}</span>, released{' '}
-            {formatDate(RELEASE_META.publishedAt)}. {RELEASE_META.installerCount} files, licensed{' '}
-            <span class="vy-mono">{app.license}</span>.
-          </p>
+        HAS_RELEASE ? (
+          <>
+            <p class="lede">
+              Version <span class="mono">{RELEASE_META.version}</span>, released {formatDate(RELEASE_META.publishedAt)}.
+              Free and open source, for Windows, macOS and Linux.
+            </p>
+            <div class="actions">
+              <a class="btn btn-primary" href="#all" data-primary>
+                <span data-primary-label>See all downloads</span>
+              </a>
+              <a class="btn btn-secondary" href="/changelog">What’s new</a>
+            </div>
+            <p class="meta pick" data-pick-meta hidden />
+            <p class="meta pick" data-pick-alt hidden />
+          </>
+        ) : (
+          <p class="lede">No release is published yet. Download links will appear here as soon as one is.</p>
         )
       }
     </div>
   </section>
 
   {
-    !HAS_RELEASE && (
-      <section class="vy-rule vy-section">
-        <div class="vy-shell">
-          <div class="vy-empty">
-            <h2 class="vy-h3">No release is published yet</h2>
-            <p class="vy-prose-muted">
-              Download links appear here as soon as a release is published. In the meantime you can
-              build from source, or watch the releases page.
+    HAS_RELEASE && (
+      <section class="band-tight rule" id="all" aria-labelledby="all-title">
+        <div class="wrap split">
+          <div class="stack">
+            <h2 class="h2" id="all-title">All downloads</h2>
+            <p class="body">
+              Every file comes from the <a class="link" href={RELEASE_META.htmlUrl} rel="noopener noreferrer">GitHub release</a>,
+              the same place the app checks for updates. The Mac builds are separate for Apple silicon and Intel.
             </p>
-            <div class="vy-cta-actions vy-empty-actions">
-              <a class="vy-btn vy-btn-primary" href={app.repo.releases} rel="noopener noreferrer">
-                Releases on GitHub
-              </a>
-              <a class="vy-btn vy-btn-secondary" href="/docs">
-                Build from source
-              </a>
-            </div>
+          </div>
+
+          <div class="platforms">
+            {PLATFORMS.map((platform) => (
+              <div class="platform">
+                <h3 class="h3 platform-name">
+                  <PlatformMark os={platform.id} size={18} />
+                  {platform.label}
+                </h3>
+                {platform.variants.map((variant) => (
+                  <div class="variant">
+                    <p class="meta variant-name">
+                      {variant.heading} <span class="mono">({variant.arch})</span>
+                    </p>
+                    <ul class="assets">
+                      {variant.installers.map((installer) => (
+                        <li class="asset">
+                          <a class="asset-link" data-asset href={installer.url}>
+                            {installer.label}
+                          </a>
+                          <span class="asset-file mono">{installer.name}</span>
+                          <span class="asset-size mono">{formatBytes(installer.size)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -73,131 +102,27 @@ const firstRun = [
   }
 
   {
-    HAS_RELEASE && (
-      <>
-        {/* Shown once the script below finds a build for the visitor's platform. */}
-        <section class="vy-rule vy-section" data-primary-cta hidden>
-          <div class="vy-shell">
-            <div class="vy-primary vy-canvas">
-              <div>
-                <p class="vy-eyebrow">Detected on your system</p>
-                <p class="vy-primary-name" data-primary-label></p>
-                <p class="vy-primary-sub vy-mono" data-primary-meta></p>
-                <p class="vy-primary-note" data-primary-note hidden></p>
-              </div>
-              <a class="vy-btn vy-btn-primary vy-primary-btn" data-primary-link href="#all">
-                Download
-              </a>
-            </div>
-          </div>
-        </section>
-
-        <section class="vy-rule vy-section" id="all">
-          <div class="vy-shell vy-section-grid">
-            <header class="vy-sec-head">
-              <p class="vy-eyebrow">All builds</p>
-              <h2 class="vy-h2">Pick your platform</h2>
-              <p class="vy-prose-muted">
-                Windows and Linux builds are 64-bit x64. macOS has separate Apple silicon and Intel
-                builds; there is no universal binary.
-              </p>
-            </header>
-
-            <div class="vy-platforms">
-              {PLATFORMS.map((platform) => (
-                <section class="vy-platform">
-                  <div class="vy-platform-head">
-                    <PlatformMark os={platform.id as 'windows' | 'macos' | 'linux'} size={18} />
-                    <h3 class="vy-h3">{platform.label}</h3>
-                  </div>
-                  <p class="vy-platform-note">{platform.note}</p>
-
-                  {platform.variants
-                    .filter((v) => v.installers.length > 0)
-                    .map((variant) => (
-                      <div class="vy-variant">
-                        <p class="vy-variant-head vy-eyebrow">
-                          {variant.heading} · {variant.arch}
-                        </p>
-                        <div class="vy-panel">
-                          <ul class="vy-rows">
-                            {variant.installers.map((installer) => (
-                              <li class="vy-asset">
-                                <a class="vy-asset-link" href={installer.url} data-download>
-                                  {installer.label}
-                                </a>
-                                <span class="vy-asset-file vy-mono">{installer.name}</span>
-                                <span class="vy-asset-size vy-mono">{formatBytes(installer.size)}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-                    ))}
-                </section>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section class="vy-rule vy-section">
-          <div class="vy-shell">
-            <ChangelogStrip limit={1} title="What is in this release" />
-          </div>
-        </section>
-      </>
-    )
-  }
-
-  <section class="vy-rule vy-section">
-    <div class="vy-shell vy-section-grid">
-      <header class="vy-sec-head">
-        <p class="vy-eyebrow">Before you install</p>
-        <h2 class="vy-h2">These builds are not code-signed</h2>
-        <p class="vy-prose-muted">
-          Agent V is built and published by CI without a code-signing certificate
-          {signing.windows === 'unsigned' ? ' on Windows' : ''}
-          {signing.macos === 'not-notarized' ? ' and without Apple notarization on macOS' : ''}.
-          Your operating system will warn you on first launch. That warning is expected.
-        </p>
-        <p class="vy-prose-muted">
-          The source is public, the build is produced by a GitHub Actions workflow in that
-          repository, and you can <a href="/docs#source" class="vy-link">build it yourself</a> instead.
-        </p>
-      </header>
-
-      <ul class="vy-rows">
-        {
-          firstRun.map((f) => (
-            <li class="vy-row-lead vy-item">
-              <h3 class="vy-h3">{f.os}</h3>
-              <p>{f.body}</p>
-            </li>
-          ))
-        }
-      </ul>
-    </div>
-  </section>
-
-  {
-    HAS_RELEASE && FEEDS.length > 0 && (
-      <section class="vy-rule vy-section">
-        <div class="vy-shell vy-section-grid">
-          <header class="vy-sec-head">
-            <p class="vy-eyebrow">Update metadata</p>
-            <h2 class="vy-h2">Auto-update feeds</h2>
-            <p class="vy-prose-muted">
-              The app checks these manifests for new versions. Updates are opt-in. Agent V never
-              downloads or installs one without you asking it to.
+    unsigned && (
+      <section class="band-tight rule" id="first-run">
+        <div class="wrap split">
+          <div class="stack">
+            <h2 class="h2">The first time you open it</h2>
+            <p class="body">
+              The builds aren’t code-signed, so your system will warn you the first time you open Agent V. That’s expected.
             </p>
-          </header>
-          <ul class="vy-rows">
-            {FEEDS.map((feed) => (
-              <li class="vy-feed">
-                <a href={feed.url} class="vy-link vy-mono" rel="noopener noreferrer">
-                  {feed.name}
-                </a>
-                <span class="vy-mono vy-feed-size">{feed.size} B</span>
+            <p class="detail">
+              The source is public and the builds come from a GitHub Actions workflow in the same repository. If you’d rather
+              not run an unsigned app, <a class="link" href="/docs#source">build it yourself</a>.
+            </p>
+          </div>
+          <ul class="first-run">
+            {firstRun.map((f) => (
+              <li>
+                <h3 class="h3 platform-name">
+                  <PlatformMark os={f.os} size={16} />
+                  {f.label}
+                </h3>
+                <p>{f.body}</p>
               </li>
             ))}
           </ul>
@@ -205,221 +130,165 @@ const firstRun = [
       </section>
     )
   }
+
+  <section class="band-tight rule" id="updates">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 class="h2">Updates</h2>
+      </div>
+      <div class="stack">
+        <p class="body">
+          When a new version is out, Agent V tells you. It never downloads or installs an update unless you ask it to.
+        </p>
+        <p><a href="/changelog" class="more">Read the changelog</a></p>
+      </div>
+    </div>
+  </section>
+
+  {HAS_RELEASE && <script type="application/json" id="picks" set:html={JSON.stringify(PICKS)} />}
 </Base>
 
 <style>
-  .vy-platform-head {
+  .pick {
+    margin-top: 1rem;
+  }
+
+  .platforms {
+    display: grid;
+    gap: 2.25rem;
+  }
+
+  .platform-name {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    color: var(--vy-fg-strong);
+    gap: 0.625rem;
   }
 
-  .vy-platform-head .vy-h3 {
-    margin: 0;
+  .variant {
+    margin-top: 1rem;
   }
 
-  .vy-empty-actions {
-    margin-top: 1.75rem;
+  .variant-name {
+    margin-bottom: 0.25rem;
   }
 
-  /* ------------------------------------------------------------- primary - */
-
-  .vy-primary {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1.25rem;
-    padding: 1.5rem;
+  .assets {
+    border-top: 1px solid var(--line);
   }
 
-  .vy-primary-name {
-    margin-top: 0.5rem;
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: var(--vy-fg-strong);
-    letter-spacing: -0.018em;
-  }
-
-  .vy-primary-sub {
-    margin-top: 0.25rem;
-    font-size: 0.8125rem;
-    color: var(--vy-tertiary);
-  }
-
-  .vy-primary-note {
-    margin-top: 0.625rem;
-    max-width: 52ch;
-    font-size: 0.8125rem;
-    line-height: 1.55;
-    color: var(--vy-muted);
-  }
-
-  .vy-primary-btn {
-    flex-shrink: 0;
-  }
-
-  /* ------------------------------------------------------------ platforms - */
-
-  .vy-platforms {
+  .asset {
     display: grid;
-    gap: 2.5rem;
-  }
-
-  .vy-platform-note {
-    margin-top: 0.375rem;
-    font-size: 0.875rem;
-    color: var(--vy-muted);
-  }
-
-  .vy-variant {
-    margin-top: 1.25rem;
-  }
-
-  .vy-variant-head {
-    margin-bottom: 0.625rem;
-  }
-
-  .vy-rows > .vy-asset {
-    display: grid;
-    grid-template-columns: 12rem minmax(0, 1fr) auto;
-    align-items: center;
+    grid-template-columns: minmax(0, 12rem) minmax(0, 1fr) auto;
+    align-items: baseline;
     gap: 1rem;
-    padding-block: 0.75rem;
+    padding-block: 0.8125rem;
+    border-bottom: 1px solid var(--line);
   }
 
-  .vy-asset-link {
-    font-size: 0.9375rem;
+  .asset-link {
     font-weight: 500;
-    color: var(--vy-accent);
     text-decoration: underline;
-    text-underline-offset: 0.2em;
-    text-decoration-color: color-mix(in srgb, var(--vy-accent) 35%, transparent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.22em;
+    text-decoration-color: var(--line-2);
   }
 
-  .vy-asset-link:hover {
+  .asset-link:hover {
     text-decoration-color: currentColor;
   }
 
-  .vy-asset-file {
-    font-size: 0.75rem;
-    color: var(--vy-tertiary);
+  .asset-file {
+    font-size: 0.8125rem;
+    color: var(--text-3);
     overflow-wrap: anywhere;
   }
 
-  .vy-asset-size {
+  .asset-size {
     font-size: 0.8125rem;
-    color: var(--vy-muted);
+    color: var(--text-2);
     white-space: nowrap;
   }
 
-  @media (max-width: 680px) {
-    .vy-asset {
+  .first-run {
+    display: grid;
+    border-top: 1px solid var(--line);
+  }
+
+  .first-run li {
+    display: grid;
+    gap: 0.5rem;
+    padding-block: 1.25rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .first-run p {
+    color: var(--text-2);
+  }
+
+  @media (max-width: 639px) {
+    .asset {
       grid-template-columns: minmax(0, 1fr) auto;
-      gap: 0.35rem 1rem;
+      gap: 0.25rem 1rem;
     }
-    .vy-asset-file {
+    .asset-file {
       grid-column: 1 / -1;
       order: 3;
     }
   }
-
-  /* ---------------------------------------------------------------- feeds - */
-
-  .vy-feed {
-    display: flex;
-    justify-content: space-between;
-    gap: 1rem;
-    font-size: 0.875rem;
-  }
-
-  .vy-feed-size {
-    font-size: 0.8125rem;
-    color: var(--vy-tertiary);
-  }
 </style>
 
 <script>
-  // Progressive enhancement: promote the build matching the visitor's platform.
-  // Rows are read back from the rendered list so it stays the single source.
-  type Row = { platform: string; arch: string; label: string; name: string; url: string; size: string }
+  import { detectArm, detectOs, OS_LABEL } from '../lib/detect'
 
-  const wrap = document.querySelector<HTMLElement>('[data-primary-cta]')
-  if (wrap) {
-    const assets: Row[] = [...document.querySelectorAll<HTMLElement>('.vy-asset')].map((li) => {
-      const section = li.closest('.vy-platform')
-      const variant = li.closest('.vy-variant')
-      const link = li.querySelector<HTMLAnchorElement>('.vy-asset-link')!
-      const headingText = variant?.querySelector('.vy-variant-head')?.textContent ?? ''
-      return {
-        platform: section?.querySelector('.vy-h3')?.textContent?.trim().toLowerCase() ?? '',
-        arch: /arm64/i.test(headingText) ? 'arm64' : 'x64',
-        label: link.textContent?.trim() ?? '',
-        name: li.querySelector('.vy-asset-file')?.textContent?.trim() ?? '',
-        url: link.href,
-        size: li.querySelector('.vy-asset-size')?.textContent?.trim() ?? ''
+  type Pick = { platform: string; arch: string; format: string; label: string; name: string; url: string; size: number }
+
+  const data = document.getElementById('picks')?.textContent
+  const picks: Pick[] = data ? JSON.parse(data) : []
+  const primary = document.querySelector<HTMLAnchorElement>('[data-primary]')
+  const label = primary?.querySelector<HTMLElement>('[data-primary-label]')
+  const meta = document.querySelector<HTMLElement>('[data-pick-meta]')
+  const alt = document.querySelector<HTMLElement>('[data-pick-alt]')
+
+  const mb = (bytes: number) => `${Math.round(bytes / 1024 / 1024)} MB`
+  // The first format listed is the one most people want on that system.
+  const PREFERRED: Record<string, string[]> = { windows: ['exe'], macos: ['dmg', 'zip'], linux: ['AppImage', 'deb', 'rpm'] }
+
+  const choose = (platform: string, arch: string | null) => {
+    const candidates = picks.filter((p) => p.platform === platform && (arch === null || p.arch === arch))
+    for (const format of PREFERRED[platform] ?? []) {
+      const hit = candidates.find((p) => p.format === format)
+      if (hit) return hit
+    }
+    return candidates[0] ?? null
+  }
+
+  const os = detectOs()
+  if (os && primary && label && meta && alt) {
+    void detectArm().then((arm) => {
+      // A Mac whose browser won't say which chip it has gets the Apple silicon
+      // build, with the Intel one offered right under the button.
+      const arch = os === 'macos' ? (arm === false ? 'x64' : 'arm64') : 'x64'
+      const pick = choose(os, arch)
+      if (!pick) return
+
+      primary.href = pick.url
+      label.textContent =
+        os === 'macos' ? `Download for Mac (${arch === 'arm64' ? 'Apple silicon' : 'Intel'})` : `Download for ${OS_LABEL[os]}`
+      meta.textContent = `${pick.name} · ${mb(pick.size)}`
+      meta.hidden = false
+
+      if (os === 'macos' && arm === null) {
+        const intel = choose('macos', 'x64')
+        if (intel) {
+          alt.textContent = 'On an Intel Mac? '
+          const link = document.createElement('a')
+          link.href = intel.url
+          link.className = 'link'
+          link.textContent = 'Get the Intel build'
+          alt.append(link, '.')
+          alt.hidden = false
+        }
       }
     })
-
-    const ua = navigator.userAgent
-    const uaData = (navigator as any).userAgentData
-    const platformHint: string = (uaData?.platform ?? '').toLowerCase()
-
-    let want: 'windows' | 'macos' | 'linux' | null = null
-    if (platformHint.includes('win') || /Windows/i.test(ua)) want = 'windows'
-    else if (platformHint.includes('mac') || /Mac OS X|Macintosh/i.test(ua)) want = 'macos'
-    else if (platformHint.includes('linux') || /Linux|X11/i.test(ua)) want = 'linux'
-
-    // Android reports "Linux" and there is no mobile build.
-    if (/Android/i.test(ua) || /iPhone|iPad|iPod/i.test(ua)) want = null
-
-    // CPU architecture is a high-entropy client hint; null when the browser
-    // cannot say (Safari, Firefox).
-    async function detectArm(): Promise<boolean | null> {
-      if (typeof uaData?.getHighEntropyValues !== 'function') return null
-      try {
-        const hints = await uaData.getHighEntropyValues(['architecture'])
-        const arch = String(hints?.architecture ?? '').toLowerCase()
-        if (!arch) return null
-        return arch === 'arm' || arch === 'arm64'
-      } catch {
-        return null
-      }
-    }
-
-    if (want) {
-      const platform = want
-      void detectArm().then((isArm) => {
-        // Unknown architecture falls back to x64: an arm64 Mac runs it under
-        // Rosetta 2, whereas an Intel Mac cannot run an arm64 build at all.
-        const preferArm = isArm === true
-        const candidates = assets.filter((a) => a.platform === platform)
-        const match =
-          candidates.find((a) => (preferArm ? a.arch === 'arm64' : a.arch === 'x64')) ?? candidates[0]
-        if (!match) return
-
-        const labels: Record<string, string> = { windows: 'Windows', macos: 'macOS', linux: 'Linux' }
-        const archLabel = platform === 'linux' ? 'x86_64' : match.arch
-        document.querySelector('[data-primary-label]')!.textContent =
-          `${labels[platform]} · ${match.label}`
-        document.querySelector('[data-primary-meta]')!.textContent =
-          `${archLabel} · ${match.size} · ${match.name}`
-        const link = document.querySelector<HTMLAnchorElement>('[data-primary-link]')!
-        link.href = match.url
-        link.textContent = `Download for ${labels[platform]}`
-
-        const note = document.querySelector<HTMLElement>('[data-primary-note]')!
-        if (platform === 'macos' && isArm === null) {
-          note.textContent =
-            'Your browser does not report the CPU architecture, so this is the Intel build. It runs on Apple silicon through Rosetta 2; on an Apple silicon Mac, take the arm64 build below instead.'
-          note.hidden = false
-        } else {
-          note.hidden = true
-        }
-
-        wrap.hidden = false
-      })
-    }
   }
 </script>

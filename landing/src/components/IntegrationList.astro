@@ -1,0 +1,31 @@
+---
+/**
+ * The MCP servers bundled with the app, each mark beside its name. Skills and
+ * plugins carry generic glyphs, so only the MCP servers, whose icons are the
+ * vendors' own, appear here. Trade marks belong to their owners.
+ */
+import app from '../data/app.json'
+
+const servers = app.extensions.list.filter((p) => p.kind === 'mcp' && p.icon)
+---
+
+<ul class="marks marks-dense">
+  {
+    servers.map((p) => (
+      <li>
+        <span class="mark">
+          <img
+            src={`/brand/extensions/${p.icon}`}
+            alt=""
+            width="20"
+            height="20"
+            loading="lazy"
+            decoding="async"
+            class:list={[p.iconMono && 'logo-art']}
+          />
+        </span>
+        <span class="mark-label">{p.name}</span>
+      </li>
+    ))
+  }
+</ul>

@@ -1,185 +1,277 @@
 ---
 import Base from '../layouts/Base.astro'
-import ChangelogStrip from '../components/ChangelogStrip.astro'
-import ClaimSection from '../components/ClaimSection.astro'
-import UseCaseCard from '../components/UseCaseCard.astro'
-import LogoWall from '../components/LogoWall.astro'
-import { app } from '../lib/site'
-import { FEATURED_USE_CASES, HOME_SECTIONS } from '../lib/showcase'
+import Media from '../components/Media.astro'
+import DownloadButton from '../components/DownloadButton.astro'
+import ProviderList from '../components/ProviderList.astro'
+import IntegrationList from '../components/IntegrationList.astro'
+import { app, release, formatDate } from '../lib/site'
+import { HOME, HOME_JOBS, allLive, claims, jobPackages } from '../lib/showcase'
+import type { MEDIA } from '../lib/media'
 
 /**
- * The homepage showcases the approved sections marked for it in showcase.ts —
- * today runs and parallelism, each as full-width cards. Everything
- * else it carries is baked data rather than prose: the provider and integration
- * marks and the release strip. showcase.ts gates which names that data is
- * allowed to contain.
- *
- * The use-case teaser between them is the entries marked featured in
- * showcase.ts. The full set lives on /use-cases.
- *
- * The hero is the exception: a centred block of hand-written copy and two
- * links, and nothing else. Platforms, licence and version used to sit beside it
- * in a spec column; /download states all three, so they are not repeated here.
+ * Home: what Agent V is, one real task on screen, the four ideas that make it
+ * different, and then the practical questions in the order people ask them.
+ * Which models? What can I hand it? Does anything go through you? Does it work
+ * with my tools? Every sentence comes from showcase.ts.
  */
+
+const steps = claims(HOME.steps.claims)
+const rows = HOME.rows.filter((row) => allLive(row.from))
+const trust = claims(HOME.trust.claims)
+const named = HOME.integrations.named.map((id) => app.extensions.list.find((p) => p.id === id)?.name ?? id)
+const released = release.source === 'github' && release.version
 ---
 
 <Base>
-  <section class="vy-hero">
-    <div class="vy-shell vy-hero-inner">
-      <p class="vy-eyebrow">Agent V · Free and open source</p>
-      {/* The product's own line: package.json, the README and SITE.title all
-          say "a coding workspace for real repositories", and the h1 now
-          agrees with them. Workspace rather than agent is the accurate word —
-          the window ships an editor, a terminal, a diff viewer and git, and
-          the agent is one occupant of it.
-
-          "open-source" stays out of the headline and lives in the eyebrow: at
-          display size it breaks at its own hyphen, and it overflowed 320px. */}
-      <h1 class="vy-display">A coding workspace for real repositories.</h1>
-      {/* No "and" before the last item: the four beats are the point. Each
-          one is a tool in the catalog — read, edit, terminal, run_tests. The
-          second sentence is claims P1 and P2: a child instance gets its own
-          worktree and branch, so "at once" is isolation, not a race. */}
-      <p class="vy-lede">
-        It reads your code, makes the change, runs it, checks its own work. Run several at once,
-        each on its own branch.
+  <section class="hero">
+    <div class="wrap">
+      <h1 class="display hero-title">
+        {HOME.hero.lines.map((line) => <span>{line}</span>)}
+      </h1>
+      <p class="lede hero-lede">{HOME.hero.lede}</p>
+      <div class="actions hero-actions">
+        <DownloadButton />
+        <a class="btn btn-secondary" href={app.repo.source} rel="noopener noreferrer">View on GitHub</a>
+      </div>
+      <p class="meta hero-meta">
+        {
+          released ? (
+            <>
+              Version <span class="mono">{release.version}</span>, released {formatDate(release.publishedAt)}.{' '}
+              <a href="/changelog" class="link">What’s new</a>
+            </>
+          ) : (
+            <>Free and open source.</>
+          )
+        }
       </p>
-      <div class="vy-cta-actions">
-        <a class="vy-btn vy-btn-primary" href="/download">Download</a>
-        <a class="vy-btn vy-btn-secondary" href={app.repo.source} rel="noopener noreferrer">View source</a>
-      </div>
-      {/* The headline already says free and open source; this adds the part
-          it does not — that there is nothing to sign up to. */}
-      <p class="vy-hero-note">No account, no usage metering, no service in the middle.</p>
+    </div>
+
+    <div class="wrap hero-media">
+      <Media id="hero" eager sizes="(min-width: 1224px) 1160px, 100vw" />
     </div>
   </section>
 
-  <section class="vy-rule vy-section">
-    <div class="vy-shell vy-section-grid">
-      <header class="vy-sec-head">
-        <p class="vy-eyebrow">Providers</p>
-        <h2 class="vy-h2">Bring your own key</h2>
-        <p class="vy-prose-muted">
-          Configure any of these with your own credentials. Model lists are fetched live from each
-          provider where the API supports it, so you see current models rather than a stale list.
-        </p>
-        <p class="vy-more"><a href="/features#providers" class="vy-link">Every provider →</a></p>
-      </header>
-
-      <div>
-        <LogoWall kind="providers" />
-        <p class="vy-prose-muted vy-note vy-provider-note">
-          Ollama and private or LAN endpoints need no API key at all. Run entirely local models and
-          keep every request on your own machine.
-        </p>
-      </div>
-    </div>
-  </section>
-
-  {HOME_SECTIONS.map((section) => <ClaimSection section={section} />)}
-
-  <section class="vy-rule vy-section">
-    <div class="vy-shell">
-      <header class="vy-card-head">
-        <p class="vy-eyebrow">Use cases</p>
-        <h2 class="vy-h2">What people point it at</h2>
-        <p class="vy-lede vy-card-lede">
-          Two of the jobs it does today. Each one ships as a skill in the box, installed per
-          workspace and invoked as a slash command.
-        </p>
-      </header>
-
-      <ul class="vy-cards vy-uses">
-        {FEATURED_USE_CASES.map((useCase) => <UseCaseCard useCase={useCase} level={3} />)}
-      </ul>
-
-      <p class="vy-more vy-uses-more"><a href="/use-cases" class="vy-link">All use cases →</a></p>
-    </div>
-  </section>
-
-  <section class="vy-rule vy-section">
-    <div class="vy-shell vy-section-grid">
-      <header class="vy-sec-head">
-        <p class="vy-eyebrow">Integrations</p>
-        <h2 class="vy-h2">Connect the tools you already use</h2>
-        <p class="vy-prose-muted">
-          Model Context Protocol servers ship with the app and install per workspace. Connect one
-          and its tools join the catalog, with OAuth handled for the hosted ones.
-        </p>
-        <p class="vy-more"><a href="/extensions" class="vy-link">Every package →</a></p>
-      </header>
-
-      <LogoWall kind="integrations" dense />
-    </div>
-  </section>
-
-  <section class="vy-rule vy-section">
-    <div class="vy-shell">
-      <ChangelogStrip limit={3} />
-    </div>
-  </section>
-
-  <section class="vy-rule vy-section">
-    <div class="vy-shell">
-      <div class="vy-canvas vy-cta vy-cta-canvas">
-        <h2 class="vy-h2">Install it and point it at a repository.</h2>
-        <p class="vy-prose-muted">
-          Free, open source, and yours to fork. Builds for Windows, macOS and Linux.
-        </p>
-        <div class="vy-cta-actions">
-          <a class="vy-btn vy-btn-primary" href="/download">Download</a>
-          <a class="vy-btn vy-btn-secondary" href="/docs">Read the docs</a>
+  {
+    steps.length > 0 && (
+      <section class="band-tight" aria-labelledby="how">
+        <div class="wrap">
+          <h2 class="h2 steps-title" id="how">{HOME.steps.title}</h2>
+          <ol class="grid-4 ruled steps">
+            {steps.map((step, i) => (
+              <li class="item">
+                <span class="step-n mono">{String(i + 1).padStart(2, '0')}</span>
+                <h3 class="h3">{step.title}</h3>
+                <p>{step.body}</p>
+              </li>
+            ))}
+          </ol>
         </div>
+      </section>
+    )
+  }
+
+  <div class="rows">
+    {
+      rows.map((row, i) => (
+        <section class:list={['row', i % 2 === 1 && 'row-flip']} id={row.id}>
+          <div class="wrap row-grid">
+            <div class="row-text">
+              <h2 class="h2">{row.title}</h2>
+              <p class="body">{row.body}</p>
+              <p class="detail">{row.detail}</p>
+            </div>
+            <div class="row-media">
+              <Media id={row.media as keyof typeof MEDIA} />
+            </div>
+          </div>
+        </section>
+      ))
+    }
+  </div>
+
+  {
+    allLive(HOME.models.from) && (
+      <section class="band rule" id="models">
+        <div class="wrap split">
+          <div class="stack">
+            <h2 class="h2">{HOME.models.title}</h2>
+            <p class="body">{HOME.models.body}</p>
+            <p class="detail">{HOME.models.detail}</p>
+          </div>
+          <ProviderList />
+        </div>
+      </section>
+    )
+  }
+
+  {
+    HOME_JOBS.length > 0 && (
+      <section class="band rule" id="jobs">
+        <div class="wrap">
+          <div class="section-head">
+            <h2 class="h2">{HOME.jobs.title}</h2>
+            <p class="body">{HOME.jobs.body}</p>
+          </div>
+          <ul class="grid-2 ruled">
+            {HOME_JOBS.map((job) => {
+              const { skills, uses } = jobPackages(job)
+              return (
+                <li class="item">
+                  <h3 class="h3">{job.title}</h3>
+                  <p>{job.summary}</p>
+                  <p class="meta job-meta">
+                    {skills.length > 0 && <span>Skills: {skills.join(', ')}</span>}
+                    {uses.length > 0 && <span>Works with {uses.join(', ')}</span>}
+                  </p>
+                </li>
+              )
+            })}
+          </ul>
+          <p class="section-more">
+            <a href="/features#jobs" class="more">More jobs on the features page</a>
+          </p>
+        </div>
+      </section>
+    )
+  }
+
+  {
+    trust.length > 0 && (
+      <section class="band rule" id="privacy">
+        <div class="wrap">
+          <div class="section-head">
+            <h2 class="h2">{HOME.trust.title}</h2>
+          </div>
+          <ul class="grid-4 ruled">
+            {trust.map((fact) => (
+              <li class="item">
+                <h3 class="h3">{fact.title}</h3>
+                <p>{fact.body}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+    )
+  }
+
+  <section class="band rule" id="integrations">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 class="h2">{HOME.integrations.title}</h2>
+        <p class="body">{HOME.integrations.body(named)}</p>
+        <p>
+          <a href="/extensions" class="more">See all {app.extensions.total} extensions</a>
+        </p>
+      </div>
+      <IntegrationList />
+    </div>
+  </section>
+
+  <section class="band rule cta">
+    <div class="wrap">
+      <h2 class="statement">{HOME.cta.title}</h2>
+      <p class="lede">{HOME.cta.body}</p>
+      <div class="actions">
+        <DownloadButton />
+        <a class="btn btn-secondary" href="/docs">Read the docs</a>
       </div>
     </div>
   </section>
 </Base>
 
 <style>
-  /* A centred column: eyebrow, headline, the sentence pair, two links. Each
-     part is capped at its own measure and centred on the shell, so the width of
-     the text is what composes the block — there is no second column to balance
-     against any more. */
-  .vy-hero {
-    padding-block: clamp(3.75rem, 7vw, 6rem) clamp(3.25rem, 5.5vw, 5rem);
-    text-align: center;
+  .hero {
+    padding-top: clamp(3.5rem, 9vw, 7.5rem);
   }
 
-  /* The rule that spaces a title under its eyebrow lives on .vy-page-head,
-     which this section deliberately is not, so it is repeated here. */
-  .vy-hero .vy-display {
+  /* One sentence per line on wide screens; on a phone they wrap freely. */
+  .hero-title span {
+    display: block;
+  }
+
+  .hero-lede {
+    margin-top: 1.5rem;
+    max-width: 38rem;
+  }
+
+  .hero-actions {
+    margin-top: 2.25rem;
+  }
+
+  .hero-meta {
+    margin-top: 1.25rem;
+  }
+
+  .hero-media {
+    margin-top: clamp(3rem, 6vw, 4.5rem);
+  }
+
+  .steps-title {
+    margin-bottom: 2.5rem;
+  }
+
+  .step-n {
+    font-size: 0.8125rem;
+    color: var(--text-3);
+  }
+
+  .rows {
+    padding-bottom: clamp(1.5rem, 3vw, 2.5rem);
+  }
+
+  .row {
+    padding-block: clamp(2.5rem, 5vw, 4rem);
+  }
+
+  .row-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: clamp(2.5rem, 6vw, 5.5rem);
+    align-items: center;
+  }
+
+  /* Media first on alternate rows, with the columns swapped so the media
+     keeps the wider track on both sides. */
+  .row-flip .row-grid {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  }
+
+  .row-flip .row-text {
+    order: 2;
+  }
+
+  .row-text {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .job-meta {
+    display: grid;
+    gap: 0.125rem;
+    margin-top: 0.25rem;
+  }
+
+  .section-more {
+    margin-top: 2.5rem;
+  }
+
+  .cta .lede {
     margin-top: 1rem;
   }
 
-  /* Left at the global measure, which is about the width the two headline
-     lines occupy, so the block squares up. It also happens to be the width the
-     first sentence needs, so `pretty` breaks the lede at its full stop; capping
-     it any tighter splits "checks its / own work" instead. */
-  .vy-hero .vy-lede {
-    margin: 1.25rem auto 0;
-  }
-
-  .vy-hero .vy-cta-actions {
-    justify-content: center;
+  .cta .actions {
     margin-top: 2rem;
   }
 
-  .vy-hero-note {
-    margin-top: 1.125rem;
-    font-size: 0.8125rem;
-    color: var(--vy-tertiary);
-  }
-
-  .vy-provider-note {
-    margin-top: 1.5rem;
-    font-size: 0.9375rem;
-  }
-
-  .vy-uses-more {
-    margin-top: 1.5rem;
-  }
-
-  .vy-cta-canvas {
-    padding-block: clamp(3rem, 7vw, 5rem);
+  @media (max-width: 899px) {
+    .row-grid,
+    .row-flip .row-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .row-flip .row-text {
+      order: 0;
+    }
   }
 </style>
