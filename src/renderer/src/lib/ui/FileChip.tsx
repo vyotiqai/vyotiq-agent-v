@@ -1,7 +1,6 @@
-import { Icon } from '@renderer/lib/icons'
 import { FileTypeIcon } from '@renderer/lib/fileIcons'
+import { IconButton } from './IconButton'
 import { cn } from './cn'
-import { Tooltip } from './Tooltip'
 
 function shortSize(chars: number): string {
   if (chars < 1000) return `${chars} chars`
@@ -35,16 +34,20 @@ export function FileChip({
   )
   return (
     <span
-      className="inline-flex max-w-56 items-center gap-1 rounded-xl border border-border bg-surface px-1.5 py-0.5 text-xs text-muted"
+      className={cn(
+        'inline-flex h-6 max-w-56 items-center gap-1 rounded-md border border-border bg-surface text-xs text-muted',
+        // The remove button brings its own 20px target; the text side keeps the inset.
+        onRemove ? 'pl-1.5 pr-0.5' : 'px-1.5'
+      )}
       title={title}
     >
       {onOpen ? (
         <button
           type="button"
           className={cn(
-            'inline-flex min-w-0 items-center gap-1 text-left text-muted',
-            'underline-offset-2 hover:text-fg hover:underline',
-            'disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]'
+            'inline-flex min-w-0 items-center gap-1 rounded-sm text-left text-muted',
+            'underline-offset-2 vy-transition hover:text-fg hover:underline focus-visible:vy-focus-ring',
+            'disabled:vy-disabled-state'
           )}
           disabled={disabled}
           onClick={onOpen}
@@ -55,17 +58,14 @@ export function FileChip({
         label
       )}
       {onRemove ? (
-        <Tooltip content={`Remove ${name}`}>
-          <button
-            type="button"
-            className="shrink-0 text-muted vy-transition hover:text-fg disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]"
-            aria-label={`Remove ${name}`}
-            disabled={disabled}
-            onClick={onRemove}
-          >
-            <Icon name="close" size={12} />
-          </button>
-        </Tooltip>
+        <IconButton
+          icon="close"
+          label={`Remove ${name}`}
+          size="xs"
+          tone="muted"
+          disabled={disabled}
+          onClick={onRemove}
+        />
       ) : null}
     </span>
   )

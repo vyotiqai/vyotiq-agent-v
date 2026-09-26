@@ -21,7 +21,7 @@ describe('ComposerAttachments image chips', () => {
     )
     const thumb = screen.getByAltText('Image 1')
     expect(thumb.getAttribute('src')).toBe('data:image/png;base64,xx')
-    fireEvent.click(thumb.closest('[role="button"]')!)
+    fireEvent.click(thumb.closest('button')!)
     expect(screen.getByLabelText('Close image preview')).toBeTruthy()
   })
 })
