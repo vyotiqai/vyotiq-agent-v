@@ -195,7 +195,7 @@ export function ChatPaneHost({
               className={cn(
                 'relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent',
                 index > 0 && 'border-l border-border',
-                focused && multi && 'ring-1 ring-inset ring-border-strong/60'
+                focused && multi && 'ring-1 ring-inset ring-border-strong'
               )}
               data-chat-pane
               data-chat-pane-focused={focused ? '1' : '0'}
@@ -209,7 +209,7 @@ export function ChatPaneHost({
                 <div
                   aria-hidden
                   className={cn(
-                    'pointer-events-none absolute inset-y-0 z-drawer bg-fg/8 ring-1 ring-inset ring-border-strong/70',
+                    'pointer-events-none absolute inset-y-0 z-drawer bg-accent-soft ring-1 ring-inset ring-accent',
                     highlight === 'left' && 'left-0 w-1/3',
                     highlight === 'right' && 'right-0 w-1/3',
                     highlight === 'center' && 'left-1/3 w-1/3'
@@ -222,7 +222,7 @@ export function ChatPaneHost({
             </div>
             {index < panes.length - 1 ? (
               <PanelResizeHandle
-                label="Resize chat panes"
+                label="Resize task panes"
                 value={Math.round(rowWidth * (sizes[index] ?? 0))}
                 min={minPanePx}
                 max={Math.max(
@@ -231,7 +231,8 @@ export function ChatPaneHost({
                 )}
                 edge="end"
                 onChange={(next) => resizePane(index, next)}
-                className="w-1"
+                // The next pane's border-l is the rule; the handle only lights it.
+                hairline
               />
             ) : null}
           </div>
