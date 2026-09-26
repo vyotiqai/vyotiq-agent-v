@@ -554,7 +554,7 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
     headerMeta: (tool) => ({
       verb: toolLabel(tool.name, tool.status),
       target: tool.summary,
-      icon: 'bot'
+      icon: 'crew'
     })
   },
   build_tool: {
@@ -640,7 +640,7 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
       return {
         verb: toolLabel(tool.name, tool.status),
         target: tool.summary || data.chip,
-        icon: 'bot'
+        icon: 'sliders'
       }
     }
   },

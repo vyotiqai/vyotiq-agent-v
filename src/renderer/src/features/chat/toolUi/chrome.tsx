@@ -1,5 +1,7 @@
 import { useMemo } from 'react'
 import { toWorkspaceRelPath } from '@shared/utils/workspacePath'
+import { cn } from '@renderer/lib/ui'
+import { CONTROL_HOVER } from '@renderer/lib/utils/layout'
 import { FileBadge } from '../components/FileBadge'
 import { useRunSession } from '../RunSessionContext'
 
@@ -35,7 +37,8 @@ export function ToolFileBadge({
   return (
     <button
       type="button"
-      className="shrink-0 rounded-sm vy-transition hover:bg-surface-2 focus-visible:vy-focus-ring"
+      // The badge sits on the record's bg-bg card header: the control weight.
+      className={cn('shrink-0 rounded-sm vy-transition focus-visible:vy-focus-ring', CONTROL_HOVER)}
       aria-label={`Open ${target}`}
       title={`Open ${target}`}
       onClick={() => {

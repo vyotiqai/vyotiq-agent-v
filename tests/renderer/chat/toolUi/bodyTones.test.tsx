@@ -8,6 +8,9 @@ import { McpBody } from '@renderer/features/chat/toolUi/bodies/McpBody'
 import { DeleteBody } from '@renderer/features/chat/toolUi/bodies/DeleteBody'
 import { WebFetchBody } from '@renderer/features/chat/toolUi/bodies/WebFetchBody'
 import { wrapFamilyShell } from '@renderer/features/chat/toolUi/shells'
+import { Chip, CopyButton } from '@renderer/features/chat/toolUi/primitives'
+import { toolIconName } from '@renderer/features/chat/toolUi/meta'
+import { getToolHeaderMeta } from '@renderer/features/chat/toolUi/registry'
 import type { UiToolRow } from '@shared/transcript'
 
 afterEach(cleanup)
@@ -99,5 +102,28 @@ describe('WebFetchBody', () => {
     expect(root).not.toBeNull()
     expect(root!.classList.contains('text-caption')).toBe(true)
     expect(root!.classList.contains('text-secondary')).toBe(true)
+  })
+})
+
+describe('toolUi primitives and icons', () => {
+  it('never draws the record as a chatbot', () => {
+    for (const name of ['spawn_agent_instance', 'switch_mode', 'build_tool']) {
+      expect(toolIconName(name)).not.toBe('bot')
+      expect(getToolHeaderMeta({ id: 't', name, summary: 'x', status: 'done' }).icon).not.toBe('bot')
+    }
+  })
+
+  it('draws a chip at a scale size without an invented tint', () => {
+    const { container } = render(<Chip>main</Chip>)
+    const chip = container.firstElementChild!
+    expect(chip.classList.contains('text-caption')).toBe(true)
+    expect(chip.className).not.toMatch(/\/\d/)
+  })
+
+  it('copies from an icon button with a label and a focus ring', () => {
+    render(<CopyButton text="src/a.ts" />)
+    const button = screen.getByRole('button', { name: 'Copy' })
+    expect(button.className).toContain('focus-visible:vy-focus-ring')
+    expect(button.textContent).toBe('')
   })
 })
