@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { cn } from '@renderer/lib/ui'
-import { TOOL_BODY_PAD } from '@renderer/lib/utils/layout'
+import { BORDER_DIVIDER, TOOL_BODY_PAD } from '@renderer/lib/utils/layout'
 import { DiffPreview, DIFF_COLLAPSED_LINES, DIFF_MAX_EXPANDED_LINES } from '../../components/DiffPreview'
 import type { ToolBodyProps } from '../types'
 import { parseDiffPreview, parseEditCardData, type DiffLine } from '../parsers/edit'
@@ -75,7 +75,7 @@ export function EditBody({ tool, expanded, loading, loadFailed }: ToolBodyProps)
           className={cn(
             TOOL_BODY_PAD,
             'm-0 text-caption text-danger [overflow-wrap:anywhere]',
-            painted.length > 0 && 'border-b border-border/60 pb-2'
+            painted.length > 0 && cn('border-b pb-2', BORDER_DIVIDER)
           )}
         >
           {status}
@@ -84,7 +84,7 @@ export function EditBody({ tool, expanded, loading, loadFailed }: ToolBodyProps)
       {painted.length > 0 ? (
         <>
           {failed ? (
-            <p className={cn(TOOL_BODY_PAD, 'm-0 pb-1 text-2xs text-tertiary')}>Not applied</p>
+            <p className={cn(TOOL_BODY_PAD, 'm-0 pb-1 text-caption text-tertiary')}>Not applied</p>
           ) : null}
           <DiffPreview
             lines={painted}
@@ -97,7 +97,7 @@ export function EditBody({ tool, expanded, loading, loadFailed }: ToolBodyProps)
         <p
           className={cn(
             TOOL_BODY_PAD,
-            'm-0 text-caption text-fg/80 [overflow-wrap:anywhere]'
+            'm-0 text-caption text-secondary [overflow-wrap:anywhere]'
           )}
         >
           {status}

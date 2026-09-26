@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { TOOL_BODY_FLOW, TOOL_BODY_INNER, TOOL_BODY_PAD } from '@renderer/lib/utils/layout'
+import { SECTION_LABEL, TOOL_BODY_FLOW, TOOL_BODY_INNER, TOOL_BODY_PAD } from '@renderer/lib/utils/layout'
 import { parseMcpToolDisplay } from '@shared/toolSummary'
 import type { ToolBodyProps } from '../types'
 import {
@@ -35,13 +35,13 @@ export function McpIntrospectBody({ tool, loading, loadFailed }: ToolBodyProps) 
       <div className={`${TOOL_BODY_PAD} flex flex-wrap items-center gap-2 pb-1`}>
         {data.filter ? <Chip>{data.filter}</Chip> : null}
         {data.kind === 'tools' && data.tools.length > 0 ? (
-          <span className="text-2xs tabular-nums text-tertiary">
+          <span className="text-caption tnum text-tertiary">
             {data.tools.length} {data.tools.length === 1 ? 'tool' : 'tools'}
             {groups.length > 1 ? ` · ${groups.length} servers` : ''}
           </span>
         ) : null}
         {(data.kind === 'resources' || data.kind === 'prompts') && data.entries.length > 0 ? (
-          <span className="text-2xs tabular-nums text-tertiary">
+          <span className="text-caption tnum text-tertiary">
             {data.entries.length} {data.entries.length === 1 ? 'entry' : 'entries'}
           </span>
         ) : null}
@@ -61,29 +61,29 @@ export function McpIntrospectBody({ tool, loading, loadFailed }: ToolBodyProps) 
           {groups.map((group) => (
             <div key={group.serverId || group.rows[0]?.name}>
               {group.serverId ? (
-                <div className="mb-1 text-2xs font-medium text-secondary">{group.serverId}</div>
+                <div className="mb-1 text-caption font-medium text-secondary">{group.serverId}</div>
               ) : null}
               <ul className="m-0 list-none space-y-1.5 p-0">
                 {group.rows.map((row) => (
                   <li key={row.name} className="min-w-0 text-caption">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <span
-                        className="truncate font-mono text-fg/90"
+                        className="truncate font-mono text-fg"
                         title={row.name}
                       >
                         {toolDisplayName(row.name)}
                       </span>
                       {row.readOnly === true ? (
-                        <span className="text-2xs text-tertiary">read-only</span>
+                        <span className="text-caption text-tertiary">read-only</span>
                       ) : row.readOnly === false ? (
-                        <span className="text-2xs text-tertiary">write</span>
+                        <span className="text-caption text-tertiary">write</span>
                       ) : null}
                       {row.omitted ? (
-                        <span className="text-2xs text-tertiary">not in this step</span>
+                        <span className="text-caption text-tertiary">not in this step</span>
                       ) : null}
                     </div>
                     {row.description ? (
-                      <div className="mt-0.5 text-fg/70 [overflow-wrap:anywhere]">
+                      <div className="mt-0.5 text-secondary [overflow-wrap:anywhere]">
                         {row.description}
                       </div>
                     ) : null}
@@ -100,13 +100,13 @@ export function McpIntrospectBody({ tool, loading, loadFailed }: ToolBodyProps) 
           {data.entries.map((row) => (
             <li key={`${row.serverId}:${row.label}`} className="min-w-0 text-caption">
               <div className="flex min-w-0 items-baseline gap-2">
-                <span className="shrink-0 text-2xs text-tertiary">{row.serverId}</span>
-                <span className="min-w-0 truncate font-mono text-fg/90" title={row.label}>
+                <span className="shrink-0 text-caption text-tertiary">{row.serverId}</span>
+                <span className="min-w-0 truncate font-mono text-fg" title={row.label}>
                   {row.label}
                 </span>
               </div>
               {row.meta ? (
-                <div className="mt-0.5 text-fg/70 [overflow-wrap:anywhere]">{row.meta}</div>
+                <div className="mt-0.5 text-secondary [overflow-wrap:anywhere]">{row.meta}</div>
               ) : null}
             </li>
           ))}
@@ -115,7 +115,7 @@ export function McpIntrospectBody({ tool, loading, loadFailed }: ToolBodyProps) 
 
       {data.kind === 'resource' && data.text ? (
         <pre
-          className={`${TOOL_BODY_INNER} m-0 ${TOOL_BODY_FLOW} font-mono text-caption leading-relaxed whitespace-pre-wrap text-fg/80 [overflow-wrap:anywhere]`}
+          className={`${TOOL_BODY_INNER} m-0 ${TOOL_BODY_FLOW} font-mono text-caption leading-relaxed whitespace-pre-wrap text-secondary [overflow-wrap:anywhere]`}
           aria-busy={loading || undefined}
         >
           {data.text}
@@ -124,15 +124,15 @@ export function McpIntrospectBody({ tool, loading, loadFailed }: ToolBodyProps) 
 
       {data.kind === 'prompt' ? (
         <div className={`${TOOL_BODY_INNER} ${TOOL_BODY_FLOW} space-y-2`}>
-          {data.text ? <p className="m-0 text-caption text-fg/80">{data.text}</p> : null}
+          {data.text ? <p className="m-0 text-caption text-secondary">{data.text}</p> : null}
           {data.blocks.map((block, i) => (
             <div key={`${block.role}:${i}`} className="min-w-0">
               {block.role ? (
-                <div className="mb-0.5 text-2xs font-medium uppercase tracking-wide text-tertiary">
+                <div className={`mb-0.5 ${SECTION_LABEL}`}>
                   {block.role}
                 </div>
               ) : null}
-              <pre className="m-0 font-mono text-caption leading-relaxed whitespace-pre-wrap text-fg/80 [overflow-wrap:anywhere]">
+              <pre className="m-0 font-mono text-caption leading-relaxed whitespace-pre-wrap text-secondary [overflow-wrap:anywhere]">
                 {block.text}
               </pre>
             </div>

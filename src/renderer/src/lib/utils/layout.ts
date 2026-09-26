@@ -114,10 +114,8 @@ export const TOOL_BODY_FLOW = 'overflow-visible pr-5'
 export const TOOL_SNAPSHOT_SCROLL =
   'max-h-[min(12rem,28vh)] overflow-y-auto overscroll-contain'
 
-/** Family shells — compact todo / delete / read-only terminal (not bordered cards). */
+/** Family shell for terminal output inside the record (not a bordered card of its own). */
 export const TOOL_FAMILY_TERMINAL = 'overflow-hidden'
-export const TOOL_FAMILY_TODO = 'rounded-md'
-export const TOOL_FAMILY_DELETE = 'border-l-2 border-danger/50 pl-2'
 
 /** Subtle surface shared by the in-flow docked composer. */
 export const FLOATING_CHROME = 'vy-chrome bg-[var(--vy-chrome-surface)] motion-reduce:animate-none'

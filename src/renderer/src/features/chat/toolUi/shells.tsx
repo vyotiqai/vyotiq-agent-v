@@ -1,10 +1,13 @@
 import type { ReactNode } from 'react'
 import { cn } from '@renderer/lib/ui'
-import { TOOL_FAMILY_DELETE, TOOL_FAMILY_TERMINAL } from '@renderer/lib/utils/layout'
+import { TOOL_FAMILY_TERMINAL } from '@renderer/lib/utils/layout'
 
-const FAMILY_TOOLS = new Set(['delete', 'terminal'])
+const FAMILY_TOOLS = new Set(['terminal'])
 
-/** Family body chrome for compact tools. Edit/diff use bordered ToolCard instead. */
+/**
+ * Family body chrome. A delete gets none: it sits inside the record line's own
+ * rule, and its verb already turns danger when the call fails.
+ */
 export function wrapFamilyShell(toolName: string, children: ReactNode): ReactNode {
   if (!FAMILY_TOOLS.has(toolName)) return children
 
@@ -12,12 +15,6 @@ export function wrapFamilyShell(toolName: string, children: ReactNode): ReactNod
     case 'terminal':
       return (
         <div className={cn(TOOL_FAMILY_TERMINAL)} data-tool-family="terminal">
-          {children}
-        </div>
-      )
-    case 'delete':
-      return (
-        <div className={cn(TOOL_FAMILY_DELETE)} data-tool-family="delete">
           {children}
         </div>
       )

@@ -1,12 +1,9 @@
 import { useMemo } from 'react'
 import { cn } from '@renderer/lib/ui'
-import { READ_BODY_PREVIEW_LINES, TOOL_BODY_CLAMP_PX, TOOL_BODY_PAD } from '@renderer/lib/utils/layout'
+import { READ_BODY_PREVIEW_LINES, SECTION_LABEL, TOOL_BODY_CLAMP_PX, TOOL_BODY_PAD } from '@renderer/lib/utils/layout'
 import type { ToolBodyProps } from '../types'
 import { parseReadData } from '../parsers/read'
 import { CodeBlock, DirListing, TruncatedBanner } from '../primitives'
-
-const DIR_SECTION_LABEL =
-  'text-2xs font-medium uppercase tracking-[var(--vy-tracking-caps)] text-tertiary'
 
 export function ReadBody({ tool, loading, loadFailed }: ToolBodyProps) {
   const failed = tool.status === 'fail'
@@ -40,11 +37,11 @@ export function ReadBody({ tool, loading, loadFailed }: ToolBodyProps) {
     <div>
       {data.isDirectory ? (
         <div className={`${TOOL_BODY_PAD} pb-1`}>
-          <span className={DIR_SECTION_LABEL}>Directory</span>
+          <span className={SECTION_LABEL}>Directory</span>
         </div>
       ) : totalLines > 0 ? (
         <div className={`${TOOL_BODY_PAD} pb-1`}>
-          <span className="text-2xs tabular-nums text-tertiary">
+          <span className="text-caption tnum text-tertiary">
             {totalLines} {totalLines === 1 ? 'line' : 'lines'}
             {clamped ? ` · showing ${previewLines.length}` : ''}
             {data.lineRange ? ` · ${data.lineRange}` : ''}
