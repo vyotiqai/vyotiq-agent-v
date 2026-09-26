@@ -24,6 +24,7 @@ import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
 import { ToastHost, pushToast } from '@renderer/lib/ui'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { focusComposerMessage } from '@renderer/lib/shortcuts'
+import { useFocusComposerSoon } from './useFocusComposerSoon'
 import { useLiveAnnouncer } from '@renderer/lib/a11y'
 import type {
   ProviderId,
@@ -829,21 +830,18 @@ function App() {
     )
   }, [focusedParentRunId, openRunTab, setOpenInstanceForParent])
 
-  // Async when the target workspace differs (switch IPC runs first): bounded
-  // retry so focus lands once the composer mounts (AppShell search-focus pattern).
+  const focusComposerSoon = useFocusComposerSoon()
+
+  // Async when the target workspace differs (switch IPC runs first), so focus
+  // retries until the composer mounts.
   const onNewChatInWorkspace = useCallback(
     (path: string): void => {
       setOpenInstanceByParent({})
       void newChatInWorkspace(path)
       setView('chat')
-      let attempts = 0
-      const tryFocus = (): void => {
-        if (focusComposerMessage()) return
-        if (attempts++ < 10) window.setTimeout(tryFocus, 0)
-      }
-      window.setTimeout(tryFocus, 0)
+      focusComposerSoon()
     },
-    [newChatInWorkspace]
+    [focusComposerSoon, newChatInWorkspace]
   )
 
   // Home start bar / workspace cards route here: same switch + focus flow as
@@ -858,14 +856,9 @@ function App() {
         if (goal) setComposerDraftForPane(path, null, goal)
       })
       setView('chat')
-      let attempts = 0
-      const tryFocus = (): void => {
-        if (focusComposerMessage()) return
-        if (attempts++ < 10) window.setTimeout(tryFocus, 0)
-      }
-      window.setTimeout(tryFocus, 0)
+      focusComposerSoon()
     },
-    [newChatInWorkspace, setComposerDraftForPane]
+    [focusComposerSoon, newChatInWorkspace, setComposerDraftForPane]
   )
 
   // Where a new task's brief can move: the open workspaces, named as the navigator names them.
@@ -876,15 +869,6 @@ function App() {
     }),
     [openWorkspaces, onNewSessionInWorkspace]
   )
-
-  const focusComposerSoon = useCallback((): void => {
-    let attempts = 0
-    const tryFocus = (): void => {
-      if (focusComposerMessage()) return
-      if (attempts++ < 10) window.setTimeout(tryFocus, 0)
-    }
-    window.setTimeout(tryFocus, 0)
-  }, [])
 
   /** After a successful add: show Chat, draft if fresh, focus composer. */
   const handoffToChatAfterWorkspaceAdd = useCallback(
