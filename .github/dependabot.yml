@@ -5,6 +5,25 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    ignore:
+      # electron-vite 5 peers Vite <= 7; Vite 8 support is only in the
+      # electron-vite 6 betas. Move vite, @vitejs/plugin-react and
+      # electron-vite together once electron-vite 6 is stable.
+      - dependency-name: vite
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@vitejs/plugin-react'
+        update-types: ['version-update:semver-major']
+      # @types/node follows the Node bundled with Electron (44 -> Node 24),
+      # not the newest Node major.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      # One Sentry release line: @sentry/electron is pinned exactly, and its
+      # declared @sentry/core sets the override in pnpm-workspace.yaml and the
+      # @sentry/react version. Dependabot cannot edit the override, so a bump
+      # of any one of them mixes two lines; bump all three by hand.
+      - dependency-name: '@sentry/electron'
+      - dependency-name: '@sentry/react'
+      - dependency-name: '@sentry/core'
     groups:
       production-dependencies:
         dependency-type: production

@@ -81,3 +81,15 @@ jobs:
         run: xvfb-run --auto-servernum pnpm test:gui-e2e
         env:
           VYOTIQ_E2E_FIXTURE: '1'
+
+      # Playwright keeps a video of every test, plus screenshots and traces of
+      # the failed ones. Without this, a failure that only reproduces on a
+      # runner (auto-resume-interrupted, Sept 2026) leaves nothing to inspect.
+      - name: Upload GUI e2e artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gui-e2e-${{ matrix.os }}
+          path: test-results/gui-e2e/
+          retention-days: 7
+          if-no-files-found: ignore
