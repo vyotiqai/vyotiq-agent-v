@@ -38,16 +38,14 @@ test.beforeAll(async () => {
     }
   })
 
-  await launched.window.evaluate(async () => {
-    await window.vyotiq.setSettings({
-      toolApprovalOnboardingDone: true,
-      autoResumeInterruptedRuns: true
-    })
-    localStorage.removeItem('vyotiq.chatPaneLayout')
-    localStorage.removeItem('vyotiq.rightPanel')
-    localStorage.removeItem('vyotiq.browserPanelOpen')
-  })
-  await launched.window.reload()
+  // One boot only. The settings are seeded before launch, so the first boot
+  // already auto-resumes the run, and the fixture stream is the only place its
+  // reply exists: replayChatFixture persists the run's status, never its
+  // messages. A second boot (setSettings + reload, as this hook once did)
+  // raced that first resume: when it had started before the reload, the
+  // reloaded window hydrated an empty transcript, found the run done rather
+  // than interrupted, and the reply never appeared (Windows and Ubuntu
+  // runners, twice each with the retry, 60s budget untouched).
   await expect(launched.window.locator('body')).toBeVisible({ timeout: 30_000 })
 })
 
