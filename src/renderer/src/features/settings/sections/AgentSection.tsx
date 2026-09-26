@@ -391,7 +391,7 @@ export function AgentSection({
           id="agent-persona"
           title="Name"
           hint="What the agent calls itself."
-          help="Leave blank to keep the default assistant name."
+          help="Leave blank to keep the default agent name."
           badge={scoped}
           {...form.agentDefaultMark('agentPersona')}
         >

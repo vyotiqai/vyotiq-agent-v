@@ -42,6 +42,9 @@ describe('ErrorBoundary', () => {
     expect(screen.getByRole('alert')).toBeTruthy()
     expect(screen.getByText(/Something went wrong/i)).toBeTruthy()
     expect(screen.queryByText(/boundary-test-crash/i)).toBeNull()
+    // Tasks, not chats: the app's own word for what the user works in.
+    expect(screen.getByText(/Task contents and API keys are not included/)).toBeTruthy()
+    expect(screen.queryByText(/chat/i)).toBeNull()
     expect(screen.getByRole('button', { name: /Try again/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Reload/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Open logs/i })).toBeTruthy()
