@@ -307,7 +307,7 @@ describe('FilesPanel', () => {
     fireEvent.click(await screen.findByText('note.ts'))
     await screen.findByRole('tab', { name: /note\.ts/i })
     fireEvent.click(screen.getByRole('button', { name: 'Editor actions' }))
-    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Auto Save' }))
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Autosave' }))
     const byte = await screen.findByRole('textbox', { name: 'Byte 0' })
     vi.useFakeTimers()
     fireEvent.change(byte, { target: { value: 'ff' } })
@@ -633,7 +633,10 @@ describe('FilesPanel', () => {
     await screen.findByText('README.md')
     fireEvent.click(screen.getByText('src'))
     expect(await screen.findByText('Child directory unavailable')).toBeTruthy()
-    fireEvent.click(screen.getByRole('link', { name: 'Retry' }))
+    // A real button beside the row, never a link nested inside the row button.
+    const retry = screen.getByRole('button', { name: 'Retry' })
+    expect(retry.closest('button[aria-haspopup="menu"]')).toBeNull()
+    fireEvent.click(retry)
     expect(await screen.findByText('note.ts')).toBeTruthy()
   })
 
@@ -947,15 +950,15 @@ describe('FilesPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Editor actions' }))
 
     expect(screen.getByRole('menu', { name: 'Editor actions' })).toBeTruthy()
-    expect(screen.getByRole('menuitem', { name: 'Diff View' })).toBeTruthy()
-    expect(screen.getByRole('menuitem', { name: 'Git Blame' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Diff' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Blame' })).toBeTruthy()
     expect(screen.getByRole('menuitemcheckbox', { name: 'Line numbers' })).toBeTruthy()
-    expect(screen.getByRole('menuitemcheckbox', { name: 'Auto Save' })).toBeTruthy()
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Autosave' })).toBeTruthy()
     expect(
-      screen.getByRole('menuitemcheckbox', { name: 'Format on Save' }).getAttribute('aria-disabled')
+      screen.getByRole('menuitemcheckbox', { name: 'Format on save' }).getAttribute('aria-disabled')
     ).toBe('true')
 
-    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Auto Save' }))
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Autosave' }))
     expect(getFileSession(workspacePath).autoSave).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'Editor actions' }))
     fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Line numbers' }))
@@ -969,6 +972,19 @@ describe('FilesPanel', () => {
         })
       })
     )
+  })
+
+  it('says an empty definition lookup as a notice, not in the danger alert', async () => {
+    api.workspaceLspRequest.mockResolvedValue({ ok: true, data: { kind: 'definition', path: null, line: 0 } })
+    render(<FilesPanel workspacePath={workspacePath} active />)
+    await screen.findByText('README.md')
+    fireEvent.click(screen.getByText('README.md'))
+    await screen.findByRole('tab', { name: /README\.md/i })
+    fireEvent.click(screen.getByRole('button', { name: 'Editor actions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Go to definition' }))
+    const notice = await screen.findByText('No definition found.')
+    expect(notice.closest('[role="status"]')).toBeTruthy()
+    expect(notice.closest('[role="alert"]')).toBeNull()
   })
 
   it('opens find in files when findInFilesNonce increments', async () => {
@@ -1059,7 +1075,7 @@ describe('HexEditor', () => {
       target: { value: 'ff' }
     })
     expect(onChange).toHaveBeenCalledWith(btoa(String.fromCharCode(255, 2, 3)))
-    fireEvent.click(screen.getByRole('button', { name: 'Insert' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Insert byte' }))
     expect(onChange).toHaveBeenCalledTimes(2)
   })
 
@@ -1121,7 +1137,7 @@ describe('HexEditor', () => {
         onMetaChange={vi.fn()}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Find/replace' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Find and replace bytes' }))
     fireEvent.change(screen.getByRole('textbox', { name: 'Prompt input' }), {
       target: { value: '1z' }
     })

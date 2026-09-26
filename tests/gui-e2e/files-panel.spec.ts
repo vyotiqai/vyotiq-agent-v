@@ -53,8 +53,8 @@ test('opens Files, edits a real workspace file, and saves it', async () => {
 
   await window.getByRole('button', { name: 'Editor actions' }).click()
   await expect(window.getByRole('menu', { name: 'Editor actions' })).toBeVisible()
-  await expect(window.getByRole('menuitem', { name: 'Diff View' })).toBeVisible()
-  await expect(window.getByRole('menuitemcheckbox', { name: 'Auto Save' })).toBeVisible()
+  await expect(window.getByRole('menuitem', { name: 'Diff' })).toBeVisible()
+  await expect(window.getByRole('menuitemcheckbox', { name: 'Autosave' })).toBeVisible()
   await window.keyboard.press('Escape')
 
   const editor = window.locator('[data-code-editor] .cm-content')

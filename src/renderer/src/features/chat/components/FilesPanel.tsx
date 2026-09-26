@@ -42,6 +42,7 @@ import {
   type ActionMenuItem
 } from '@renderer/lib/ui'
 import { usePersistedBoolean } from '@renderer/lib/hooks/usePersistedBoolean'
+import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
 import { usePersistedNumber } from '@renderer/lib/hooks/usePersistedNumber'
 import { toWorkspaceRelPath } from '@shared/utils/workspacePath'
 import type { AgentFileFocus } from './ChatStreamLeaves'
@@ -196,6 +197,8 @@ const TREE_ROW_FOCUSED = 'bg-surface text-fg'
 const FILTER_REVEAL_MAX_DIRS = 120
 const FILES_PANEL_ALERT =
   'flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-xs'
+/** Diff, Blame and Language server: a 32px row pinned over the view, split off by a divider. */
+const EDITOR_MODE_ROW = 'sticky top-0 z-sticky flex h-8 items-center gap-2 border-b bg-bg pl-3 pr-2 text-xs'
 const TREE_KIND_ORDER: Record<WorkspaceFileEntry['kind'], number> = {
   directory: 0,
   file: 1,
@@ -283,12 +286,12 @@ function EditorBreadcrumb({ path }: { path: string }) {
         title={path}
       >
         <span className="shrink-0 truncate">{segments[0]}</span>
-        <span className="shrink-0 text-muted/70">/</span>
-        <span className="shrink-0 text-muted/70" title={middle}>
+        <span className="shrink-0 text-tertiary">/</span>
+        <span className="shrink-0 text-tertiary" title={middle}>
           …
         </span>
-        <span className="shrink-0 text-muted/70">/</span>
-        <span className="min-w-0 truncate font-medium text-fg/90">{segments.at(-1)}</span>
+        <span className="shrink-0 text-tertiary">/</span>
+        <span className="min-w-0 truncate font-medium text-fg">{segments.at(-1)}</span>
       </nav>
     )
   }
@@ -300,11 +303,11 @@ function EditorBreadcrumb({ path }: { path: string }) {
     >
       {segments.map((segment, index) => (
         <Fragment key={`${segment}-${index}`}>
-          {index > 0 ? <span className="shrink-0 text-muted/70">/</span> : null}
+          {index > 0 ? <span className="shrink-0 text-tertiary">/</span> : null}
           <span
             className={cn(
               'truncate',
-              index === segments.length - 1 ? 'font-medium text-fg/90' : undefined
+              index === segments.length - 1 ? 'font-medium text-fg' : undefined
             )}
           >
             {segment}
@@ -559,6 +562,8 @@ export const FilesPanel = memo(function FilesPanel({
   const [busy, setBusy] = useState(false)
   const [saveStates, setSaveStates] = useState<Record<string, FileSaveState>>({})
   const [error, setError] = useState<string | null>(null)
+  /** Info and success from editor actions — never shown in the danger alert. */
+  const [notice, setNotice] = useState<{ message: string; success?: boolean } | null>(null)
   const [failedOpenPath, setFailedOpenPath] = useState<string | null>(null)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const [recoveryLoaded, setRecoveryLoaded] = useState(false)
@@ -1286,7 +1291,7 @@ export const FilesPanel = memo(function FilesPanel({
         if (!formatter) {
           if (!isBackground) setBusy(false)
           setTabSaveState(id, 'error')
-          setError('Format on Save is unavailable because no formatter is configured.')
+          setError('Format on save is unavailable because no formatter is configured.')
           return false
         }
         let formatted: Awaited<ReturnType<typeof formatter>>
@@ -1314,7 +1319,7 @@ export const FilesPanel = memo(function FilesPanel({
           return false
         }
         if (formatted.data.kind === 'unavailable') {
-          setError(`Format on Save skipped: ${formatted.data.detail}`)
+          setError(`Format on save skipped: ${formatted.data.detail}`)
         } else {
           contentToSave = formatted.data.content
         }
@@ -2640,7 +2645,7 @@ export const FilesPanel = memo(function FilesPanel({
           vsHead: true
         })
         if (!result.ok) {
-          setError(`Diff View unavailable: ${result.error}`)
+          setError(`Diff unavailable: ${result.error}`)
           return
         }
         setDiffContent(result.data.content)
@@ -2648,7 +2653,7 @@ export const FilesPanel = memo(function FilesPanel({
         setLspResponse(null)
         setEditorMode('diff')
       } catch (err) {
-        setError(`Diff View unavailable: ${err instanceof Error ? err.message : String(err)}`)
+        setError(`Diff unavailable: ${err instanceof Error ? err.message : String(err)}`)
       } finally {
         setIntegrationBusy(false)
       }
@@ -2735,7 +2740,7 @@ export const FilesPanel = memo(function FilesPanel({
     try {
       const result = await window.vyotiq.gitBlame(workspacePath, activeTab.path)
       if (!result.ok) {
-        setError(`Git Blame unavailable: ${result.error}`)
+        setError(`Blame unavailable: ${result.error}`)
         return
       }
       setBlameResult(result.data)
@@ -2743,7 +2748,7 @@ export const FilesPanel = memo(function FilesPanel({
       setLspResponse(null)
       setEditorMode('blame')
     } catch (err) {
-      setError(`Git Blame unavailable: ${err instanceof Error ? err.message : String(err)}`)
+      setError(`Blame unavailable: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setIntegrationBusy(false)
     }
@@ -2762,7 +2767,7 @@ export const FilesPanel = memo(function FilesPanel({
     try {
       const status = await statusApi({ workspacePath, path: activeTab.path })
       if (!status.ok) {
-        setError(`LSP unavailable: ${status.error}`)
+        setError(`Language server unavailable: ${status.error}`)
         return
       }
       setLspStatus(status.data)
@@ -2842,7 +2847,7 @@ export const FilesPanel = memo(function FilesPanel({
   const reloadTabMenuItem = useCallback(
     (tab: FileTab): ContextMenuItem => ({
       id: 'reload-tab',
-      label: 'Discard/Reload',
+      label: 'Discard changes',
       icon: 'refresh',
       disabled: busy || (!tab.dirty && !tab.conflict),
       disabledReason:
@@ -3073,7 +3078,7 @@ export const FilesPanel = memo(function FilesPanel({
       },
       {
         id: 'editor-diff',
-        label: 'Diff View',
+        label: 'Diff',
         icon: 'columns',
         disabled: integrationBusy || !window.vyotiq?.gitDiff,
         disabledReason: integrationBusy
@@ -3083,7 +3088,7 @@ export const FilesPanel = memo(function FilesPanel({
       },
       {
         id: 'editor-lsp',
-        label: 'LSP',
+        label: 'Language server',
         icon: 'plug',
         disabled: activeTab.kind !== 'text' || !window.vyotiq?.workspaceLspStatus,
         disabledReason:
@@ -3092,7 +3097,7 @@ export const FilesPanel = memo(function FilesPanel({
       },
       {
         id: 'editor-go-to-definition',
-        label: 'Go to Definition',
+        label: 'Go to definition',
         icon: 'chevronRight',
         disabled: activeTab.kind !== 'text' || !window.vyotiq?.workspaceLspRequest,
         disabledReason:
@@ -3110,11 +3115,11 @@ export const FilesPanel = memo(function FilesPanel({
             })
             .then((res) => {
               if (!res.ok) {
-                setError(`Go to Definition failed: ${res.error}`)
+                setError(`Go to definition failed: ${res.error}`)
                 return
               }
               if (res.data.kind !== 'definition' || !res.data.path) {
-                setError('No definition found.')
+                setNotice({ message: 'No definition found.' })
                 return
               }
               const defPath = res.data.path
@@ -3125,7 +3130,7 @@ export const FilesPanel = memo(function FilesPanel({
       },
       {
         id: 'editor-rename',
-        label: 'Rename Symbol',
+        label: 'Rename symbol',
         icon: 'edit',
         disabled: activeTab.kind !== 'text' || !window.vyotiq?.workspaceLspRequest,
         disabledReason:
@@ -3151,11 +3156,11 @@ export const FilesPanel = memo(function FilesPanel({
                     return
                   }
                   if (res.data.kind !== 'rename') {
-                    setError('Rename is unavailable for this symbol.')
+                    setNotice({ message: 'Rename is unavailable for this symbol.' })
                     return
                   }
                   if (res.data.edits.length === 0) {
-                    setError('Rename returned no edits.')
+                    setNotice({ message: 'Rename returned no edits.' })
                     return
                   }
                   const byPath = new Map<string, typeof res.data.edits>()
@@ -3198,9 +3203,10 @@ export const FilesPanel = memo(function FilesPanel({
                         const open = sessionRef.current?.tabs.find((tab) => tab.path === path)
                         if (open && !open.dirty) void reloadTab(open.id)
                       }
-                      setError(
-                        `Renamed in ${byPath.size} file${byPath.size === 1 ? '' : 's'}.`
-                      )
+                      setNotice({
+                        message: `Renamed in ${byPath.size} file${byPath.size === 1 ? '' : 's'}.`,
+                        success: true
+                      })
                     } catch (err) {
                       setError(err instanceof Error ? err.message : String(err))
                     }
@@ -3212,7 +3218,7 @@ export const FilesPanel = memo(function FilesPanel({
       },
       {
         id: 'editor-blame',
-        label: 'Git Blame',
+        label: 'Blame',
         icon: 'branch',
         disabled: activeTab.kind !== 'text' || !window.vyotiq?.gitBlame,
         disabledReason:
@@ -3254,13 +3260,13 @@ export const FilesPanel = memo(function FilesPanel({
         : []),
       {
         id: 'editor-auto-save',
-        label: 'Auto Save',
+        label: 'Autosave',
         checked: autoSave,
         onSelect: () => updateSession({ autoSave: !autoSave })
       },
       {
         id: 'editor-format-on-save',
-        label: 'Format on Save',
+        label: 'Format on save',
         checked: formatOnSave,
         disabled:
           activeTab.kind !== 'text' ||
@@ -3286,6 +3292,7 @@ export const FilesPanel = memo(function FilesPanel({
     revealPath,
     saveTabMenuItem,
     setError,
+    setNotice,
     showBlameView,
     showDiffView,
     showLineNumbers,
@@ -3328,22 +3335,6 @@ export const FilesPanel = memo(function FilesPanel({
     }
     return items
   }, [busy, canMutateSelected, deleteSelected, moveSelected, refreshTree, showIgnoredFiles, updateSession])
-
-  const treeSortItems = useMemo<ActionMenuItem[]>(
-    () => [
-      {
-        id: 'sort-name',
-        label: 'Name',
-        onSelect: () => updateSession({ treeSort: 'name' })
-      },
-      {
-        id: 'sort-kind',
-        label: 'Type',
-        onSelect: () => updateSession({ treeSort: 'kind' })
-      }
-    ],
-    [updateSession]
-  )
 
   const closeContextMenu = useCallback((): void => {
     setContextMenu(null)
@@ -3581,8 +3572,8 @@ export const FilesPanel = memo(function FilesPanel({
 
   if (!workspacePath) {
     return (
-      <div className="flex h-full items-center justify-center px-5 text-center text-caption text-muted">
-        Open a workspace to browse and edit files.
+      <div className="flex h-full flex-col">
+        <EmptyPanel icon="folder" title="No workspace" body="Open a workspace to browse and edit files." centered />
       </div>
     )
   }
@@ -3598,7 +3589,7 @@ export const FilesPanel = memo(function FilesPanel({
       {findInFilesOpen ? (
         <div className="flex shrink-0 flex-col border-b border-border">
           <form
-            className="flex h-10 items-center gap-1.5 pl-3 pr-2"
+            className="flex h-10 items-center gap-1.5 pl-4 pr-2"
             onSubmit={(event) => {
               event.preventDefault()
               const q = findQuery.trim()
@@ -3621,7 +3612,7 @@ export const FilesPanel = memo(function FilesPanel({
             <Icon name="search" size={13} className="shrink-0 text-muted" />
             <input
               ref={findInputRef}
-              className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-tertiary"
+              className="min-w-0 flex-1 rounded-sm bg-transparent text-xs text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
               placeholder="Find in files"
               aria-label="Find in files"
               value={findQuery}
@@ -3642,14 +3633,14 @@ export const FilesPanel = memo(function FilesPanel({
               }}
             />
           </form>
-          {findError ? <p className="m-0 px-3 pb-2 text-xs text-danger">{findError}</p> : null}
+          {findError ? <p className="m-0 px-4 pb-2 text-xs text-danger" role="alert">{findError}</p> : null}
           {findHits.length > 0 ? (
             <ul className="scroll-thin m-0 max-h-40 list-none overflow-auto border-t border-border py-1">
               {findHits.map((hit) => (
                 <li key={`${hit.path}:${hit.line}:${hit.text.slice(0, 24)}`}>
                   <button
                     type="button"
-                    className="flex h-6 w-full items-baseline gap-2 truncate px-3 text-left text-xs hover:bg-surface focus-visible:vy-focus-ring"
+                    className="flex h-6 w-full items-baseline gap-2 truncate px-4 text-left text-xs hover:bg-surface focus-visible:vy-focus-ring"
                     onClick={() => {
                       void openFile(hit.path).then(() => setScrollToLine(hit.line))
                     }}
@@ -3731,6 +3722,19 @@ export const FilesPanel = memo(function FilesPanel({
           </div>
         </div>
       ) : null}
+      {notice && !error ? (
+        <div role="status" aria-live="polite" className={cn(FILES_PANEL_ALERT, 'text-secondary')}>
+          <Icon
+            name={notice.success ? 'checkCircle' : 'info'}
+            size={14}
+            className={cn('shrink-0', notice.success ? 'text-success' : 'text-tertiary')}
+          />
+          <span className="min-w-0 flex-1 truncate">{notice.message}</span>
+          <Button size="xs" variant="ghost" onClick={() => setNotice(null)}>
+            Dismiss
+          </Button>
+        </div>
+      ) : null}
       <div className={cn('flex min-h-0 min-w-0 flex-1', narrowSurface ? 'flex-col' : 'flex-row')}>
         <div
           style={explorerWidthStyle}
@@ -3747,10 +3751,9 @@ export const FilesPanel = memo(function FilesPanel({
           >
             <SearchInput
               aria-label="Filter workspace files"
-              className="h-7 min-h-0 min-w-0 flex-1 gap-1 rounded-md border-border bg-bg px-2"
-              inputClassName="min-h-0 py-0 text-xs"
+              size="sm"
+              className="min-w-0 flex-1"
               placeholder="Filter files"
-              tone="quiet"
               value={treeFilter}
               onChange={(event) => setTreeFilter(event.target.value)}
               onClear={() => setTreeFilter('')}
@@ -3867,13 +3870,9 @@ export const FilesPanel = memo(function FilesPanel({
             {directories['']?.error ? (
               <div role="alert" className="flex items-center gap-2 px-3 py-2 text-xs text-danger">
                 {directories[''].error}
-                <button
-                  type="button"
-                  className="shrink-0 text-accent hover:underline"
-                  onClick={() => void loadDirectory('')}
-                >
+                <Button size="xs" variant="ghost" onClick={() => void loadDirectory('')}>
                   Retry
-                </button>
+                </Button>
               </div>
             ) : null}
             {directories['']?.truncated ? (
@@ -3946,7 +3945,7 @@ export const FilesPanel = memo(function FilesPanel({
                     aria-expanded={isDir ? open : undefined}
                     aria-selected={highlighted || (!activeTab && focused)}
                     tabIndex={focused ? 0 : -1}
-                    className="absolute left-0 top-0 m-0 h-6 w-full list-none p-0"
+                    className="absolute left-0 top-0 m-0 flex h-6 w-full list-none items-center p-0"
                     style={{ transform: `translateY(${virtualEntry.start}px)` }}
                     onContextMenu={(event) => {
                       selectContextPath(entry.path)
@@ -3976,7 +3975,7 @@ export const FilesPanel = memo(function FilesPanel({
                       tabIndex={-1}
                       aria-haspopup="menu"
                       className={cn(
-                        'flex h-full w-full min-w-0 items-center gap-1.5 overflow-hidden pr-3 text-left text-xs outline-none focus-visible:vy-focus-ring',
+                        'flex h-full min-w-0 flex-1 items-center gap-1.5 overflow-hidden pr-3 text-left text-xs outline-none focus-visible:vy-focus-ring',
                         highlighted
                           ? TREE_ROW_ACTIVE_FILE
                           : focused
@@ -4027,7 +4026,7 @@ export const FilesPanel = memo(function FilesPanel({
                       </span>
                       {isDir && open && directory?.loading ? (
                         <span
-                          className="flex shrink-0 items-center gap-0.5 text-2xs text-muted"
+                          className="flex shrink-0 items-center gap-0.5 text-caption text-muted"
                           role="status"
                         >
                           <AgentVSpinner size={10} />
@@ -4035,26 +4034,9 @@ export const FilesPanel = memo(function FilesPanel({
                         </span>
                       ) : null}
                       {isDir && open && directory?.error ? (
-                        <span className="flex shrink-0 items-center gap-0.5 text-2xs text-danger" role="alert">
+                        <span className="flex shrink-0 items-center gap-0.5 text-caption text-danger" role="alert">
+                          <Icon name="warningCircle" size={12} className="shrink-0" />
                           <span className="max-w-[5rem] truncate">{directory.error}</span>
-                          <span
-                            role="link"
-                            tabIndex={0}
-                            className="cursor-pointer text-accent hover:underline"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              void loadDirectory(entry.path)
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                event.preventDefault()
-                                event.stopPropagation()
-                                void loadDirectory(entry.path)
-                              }
-                            }}
-                          >
-                            Retry
-                          </span>
                         </span>
                       ) : null}
                       {isDir &&
@@ -4063,11 +4045,11 @@ export const FilesPanel = memo(function FilesPanel({
                       !directory.loading &&
                       !directory.error &&
                       directory.entries.length === 0 ? (
-                        <span className="shrink-0 text-2xs text-muted">Empty</span>
+                        <span className="shrink-0 text-caption text-muted">Empty</span>
                       ) : null}
                       {isDir && open && directory?.truncated ? (
                         <span
-                          className="shrink-0 text-2xs text-warning"
+                          className="shrink-0 text-caption text-warning"
                           title={`Directory capped at ${directory.total.toLocaleString()} entries`}
                         >
                           Capped
@@ -4108,6 +4090,18 @@ export const FilesPanel = memo(function FilesPanel({
                         )
                       })()}
                     </button>
+                    {isDir && open && directory?.error ? (
+                      // Beside the row button, never inside it: two controls, two tab stops.
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        className="mr-1"
+                        onClick={() => void loadDirectory(entry.path)}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      >
+                        Retry
+                      </Button>
+                    ) : null}
                   </li>
                 )
               })}
@@ -4122,6 +4116,7 @@ export const FilesPanel = memo(function FilesPanel({
           edge="end"
           onChange={setExplorerWidthPx}
           className={narrowSurface ? 'hidden' : undefined}
+          hairline
         />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {tabs.length > 0 ? (
@@ -4129,7 +4124,7 @@ export const FilesPanel = memo(function FilesPanel({
               role="tablist"
               aria-label="Open files"
               tabIndex={-1}
-              className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 [scrollbar-width:none]"
+              className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 [scrollbar-width:none]"
               onKeyDown={(event) =>
                 handleTabListKeyDown(event, {
                   tabs: tabs.map((tab) => tab.id),
@@ -4171,14 +4166,13 @@ export const FilesPanel = memo(function FilesPanel({
                       <span className="min-w-0 truncate">{fileName(tab.path)}</span>
                       {tab.dirty ? <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden /> : null}
                     </button>
-                    <button
-                      type="button"
-                      aria-label={`Close ${fileName(tab.path)}`}
+                    <IconButton
+                      icon="close"
+                      label={`Close ${fileName(tab.path)}`}
+                      size="xs"
+                      tone="muted"
                       tabIndex={selected ? 0 : -1}
-                      className={cn(
-                        'mr-1 grid size-4 shrink-0 place-items-center rounded-sm text-tertiary hover:bg-surface-2 hover:text-fg focus-visible:vy-focus-ring',
-                        selected ? '' : 'invisible group-focus-within:visible group-hover:visible'
-                      )}
+                      className={cn('mr-1', selected ? '' : 'invisible group-focus-within:visible group-hover:visible')}
                       onClick={() => void closeTab(tab.id)}
                       onContextMenu={(event) =>
                         openContextMenu(event, { kind: 'tab', tabId: tab.id })
@@ -4194,9 +4188,7 @@ export const FilesPanel = memo(function FilesPanel({
                         }
                         event.stopPropagation()
                       }}
-                    >
-                      <Icon name="close" size={10} />
-                    </button>
+                    />
                   </div>
                 )
               })}
@@ -4228,7 +4220,7 @@ export const FilesPanel = memo(function FilesPanel({
                       : ` from L${mark.read.startLine}`
                     : ''
                   return (
-                    <Badge tone="accent" title={mark.change ? 'This task changed this file' : 'This task read this file'}>
+                    <Badge tone="outline" title={mark.change ? 'This task changed this file' : 'This task read this file'}>
                       <Icon name={mark.change ? 'edit' : 'eye'} size={10} />
                       {mark.change ? 'agent edited' : `agent read${range}`}
                     </Badge>
@@ -4280,9 +4272,9 @@ export const FilesPanel = memo(function FilesPanel({
               {loadingPath === activeTab.path ? (
                 <div className="flex flex-1 items-center justify-center text-caption text-muted">Loading file…</div>
               ) : editorMode === 'diff' ? (
-                <div className="min-h-0 min-w-0 flex-1 overflow-auto" data-editor-integration="diff">
-                  <div className="sticky top-0 z-sticky flex h-8 items-center gap-2 border-b border-border bg-bg pl-3 pr-2 text-xs">
-                    <span className="font-medium text-fg">Diff View</span>
+                <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-sunken" data-editor-integration="diff">
+                  <div className={cn(EDITOR_MODE_ROW, BORDER_DIVIDER)}>
+                    <span className="font-medium text-fg">Diff</span>
                     <span className="min-w-0 flex-1 truncate font-mono text-caption text-tertiary">{activeTab.path}</span>
                     <Button size="xs" variant="ghost" onClick={() => setEditorMode('editor')}>
                       Back to editor
@@ -4300,9 +4292,9 @@ export const FilesPanel = memo(function FilesPanel({
                   )}
                 </div>
               ) : editorMode === 'blame' ? (
-                <div className="min-h-0 min-w-0 flex-1 overflow-auto" data-editor-integration="blame">
-                  <div className="sticky top-0 z-sticky flex h-8 items-center gap-2 border-b border-border bg-bg pl-3 pr-2 text-xs">
-                    <span className="font-medium text-fg">Git Blame</span>
+                <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-sunken" data-editor-integration="blame">
+                  <div className={cn(EDITOR_MODE_ROW, BORDER_DIVIDER)}>
+                    <span className="font-medium text-fg">Blame</span>
                     <span className="min-w-0 flex-1 truncate font-mono text-caption text-tertiary">{activeTab.path}</span>
                     <Button size="xs" variant="ghost" onClick={() => setEditorMode('editor')}>
                       Back to editor
@@ -4318,7 +4310,7 @@ export const FilesPanel = memo(function FilesPanel({
                           <span className="w-32 shrink-0 truncate px-2 text-muted" title={line.date}>
                             {line.author}
                           </span>
-                          <span className="w-10 shrink-0 px-1 text-right tabular-nums text-tertiary">
+                          <span className="w-10 shrink-0 px-1 text-right tnum text-tertiary">
                             {line.line}
                           </span>
                           <span className="min-w-0 whitespace-pre px-2 text-fg">{line.text}</span>
@@ -4342,8 +4334,8 @@ export const FilesPanel = memo(function FilesPanel({
                 </div>
               ) : editorMode === 'lsp' ? (
                 <div className="min-h-0 min-w-0 flex-1 overflow-auto" data-editor-integration="lsp">
-                  <div className="sticky top-0 z-sticky flex h-8 items-center gap-2 border-b border-border bg-bg pl-3 pr-2 text-xs">
-                    <span className="font-medium text-fg">Language Server</span>
+                  <div className={cn(EDITOR_MODE_ROW, BORDER_DIVIDER)}>
+                    <span className="font-medium text-fg">Language server</span>
                     <span className="min-w-0 flex-1 truncate font-mono text-caption text-tertiary">{activeTab.path}</span>
                     <Button size="xs" variant="ghost" onClick={() => setEditorMode('editor')}>
                       Back to editor
@@ -4364,20 +4356,37 @@ export const FilesPanel = memo(function FilesPanel({
                       </p>
                       {lspResponse?.kind === 'diagnostics' ? (
                         lspResponse.items.length > 0 ? (
-                          <ul className="m-0 list-none space-y-1 p-0">
+                          <ul className="m-0 list-none p-0" aria-label="Diagnostics">
                             {lspResponse.items.map((item, index) => (
+                              // A row, not a tinted card: the icon carries the severity, the word says it.
                               <li
                                 key={`${item.line}:${item.character}:${index}`}
-                                className={cn(
-                                  'rounded-md px-2 py-1',
-                                  item.severity === 'error'
-                                    ? 'bg-danger-soft text-danger'
-                                    : item.severity === 'warning'
-                                      ? 'bg-warning-soft text-warning'
-                                      : 'bg-surface text-muted'
-                                )}
+                                className="flex items-start gap-2 py-1"
+                                data-severity={item.severity}
                               >
-                                Ln {item.line + 1}, Col {item.character + 1}: {item.message}
+                                <Icon
+                                  name={
+                                    item.severity === 'error'
+                                      ? 'xCircle'
+                                      : item.severity === 'warning'
+                                        ? 'warningCircle'
+                                        : 'info'
+                                  }
+                                  size={13}
+                                  className={cn(
+                                    'mt-px shrink-0',
+                                    item.severity === 'error'
+                                      ? 'text-danger'
+                                      : item.severity === 'warning'
+                                        ? 'text-warning'
+                                        : 'text-tertiary'
+                                  )}
+                                />
+                                <span className="sr-only">{item.severity}: </span>
+                                <span className="shrink-0 font-mono tnum text-tertiary">
+                                  Ln {item.line + 1}, Col {item.character + 1}
+                                </span>
+                                <span className="min-w-0 text-fg [overflow-wrap:anywhere]">{item.message}</span>
                               </li>
                             ))}
                           </ul>
@@ -4491,8 +4500,8 @@ export const FilesPanel = memo(function FilesPanel({
           ) : (
             <EmptyPanel
               icon="fileSearch"
-              title="Select a file to open it in the editor."
-              body="Text files open in the code editor. Images, SVG, Markdown, and HTML can preview in the tab. Other binary files open in the hex editor."
+              title="No file open"
+              body="Pick a file in the tree to edit or preview it."
               centered
             />
           )}
@@ -4503,7 +4512,7 @@ export const FilesPanel = memo(function FilesPanel({
         data-files-status
       >
         {activeTextPosition ? (
-          <span className="shrink-0 tabular-nums">
+          <span className="shrink-0 tnum">
             Ln {activeTextPosition.line}, Col {activeTextPosition.column}
           </span>
         ) : null}

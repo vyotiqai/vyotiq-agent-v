@@ -23,13 +23,6 @@ export function tabMiddleClickHandlers(onClose: () => void): {
   }
 }
 
-/** Compact dock toolbar control — avoids Button's min-h-8 base. */
-export const DOCK_TOOLBAR_BTN =
-  'inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-md border border-border bg-surface px-2 text-caption leading-none text-fg hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]'
-
-export const DOCK_TOOLBAR_ICON_BTN =
-  'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-caption leading-none text-muted hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]'
-
 export function EmptyPanel({
   icon,
   title,
