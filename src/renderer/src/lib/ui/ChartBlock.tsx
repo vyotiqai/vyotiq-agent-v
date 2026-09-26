@@ -1,6 +1,8 @@
 import { memo, useId, useMemo } from 'react'
 import type { ChartSpec } from '@shared/chartSpec'
 import { CodeBlockCopyButton } from './CodeBlockCopyButton'
+import { cn } from './cn'
+import { SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { buildLineSegments, smoothLinePath } from './lineChart'
 
 /** Virtual viewBox width; the svg stretches non-uniformly, strokes stay 1.5px. */
@@ -12,7 +14,12 @@ const DONUT_SIZE = 88
 const DONUT_RADIUS = 30
 const DONUT_STROKE = 12
 
-/** Opacity ladder over existing theme tokens — no new palette, no rainbow. */
+/**
+ * Opacity ladder over existing theme tokens — no new palette, no rainbow.
+ * Deferred: the redesign has three chart steps (accent, border-strong,
+ * border) and eight slices do not fit in three; a slice cap or an "Other"
+ * bucket is a product call.
+ */
 const SLICE_FILLS: ReadonlyArray<{ color: string; opacity: number }> = [
   { color: 'var(--vy-accent)', opacity: 1 },
   { color: 'var(--vy-accent)', opacity: 0.55 },
@@ -40,7 +47,7 @@ function axisStep(count: number): number {
 }
 
 function NoDataNote() {
-  return <p className="m-0 py-4 text-center text-2xs text-muted">No data points in this chart.</p>
+  return <p className="m-0 py-4 text-center text-caption text-muted">No data points in this chart.</p>
 }
 
 function BarChart({
@@ -53,12 +60,14 @@ function BarChart({
   const measured = values.filter((v): v is number => v != null && v > 0)
   const max = measured.length > 0 ? Math.max(...measured) : 0
   const step = axisStep(labels.length)
+  // The peak is the one accent bar, as on the Usage page; the rest are grey.
+  const peak = max > 0 ? values.indexOf(max) : -1
   return (
     <>
       <div
         role="img"
         aria-label={`Bar chart with ${values.length} points`}
-        className="mt-2 flex h-24 items-end gap-1 border-b border-border/60"
+        className="mt-2 flex h-24 items-end gap-1 border-b border-border"
       >
         {values.map((value, index) => (
           <div key={index} className="flex h-full min-w-0 flex-1 items-end">
@@ -66,7 +75,7 @@ function BarChart({
               <div className="h-[2px] w-full rounded-t-sm bg-border" />
             ) : (
               <div
-                className="w-full rounded-t-sm bg-accent/55 vy-transition"
+                className={cn('w-full rounded-t-sm vy-transition', index === peak ? 'bg-accent' : 'bg-border-strong')}
                 style={{ height: `${Math.max(4, (value / max) * 100)}%` }}
                 title={`${labels[index] ?? `#${index + 1}`} — ${formatChartValue(value)}`}
               />
@@ -74,17 +83,20 @@ function BarChart({
           </div>
         ))}
       </div>
-      <div aria-hidden="true" className="mt-1.5 flex gap-1">
-        {labels.map((label, index) => (
-          <span
-            key={index}
-            className="min-w-0 flex-1 truncate text-center text-3xs tabular-nums text-tertiary"
-          >
-            {index % step === 0 ? label : ''}
-          </span>
-        ))}
-      </div>
+      <AxisLabels labels={labels} step={step} />
     </>
+  )
+}
+
+function AxisLabels({ labels, step }: { labels: readonly string[]; step: number }) {
+  return (
+    <div aria-hidden="true" className="mt-1.5 flex gap-1">
+      {labels.map((label, index) => (
+        <span key={index} className="min-w-0 flex-1 truncate text-center font-mono text-caption text-tertiary tnum">
+          {index % step === 0 ? label : ''}
+        </span>
+      ))}
+    </div>
   )
 }
 
@@ -128,7 +140,6 @@ function LineChart({
             x2={LINE_VIEW_WIDTH}
             y2={LINE_HEIGHT - 2}
             stroke="var(--vy-border)"
-            strokeOpacity="0.4"
             vectorEffect="non-scaling-stroke"
           />
           {segments.map((segment, segmentIndex) => {
@@ -163,16 +174,7 @@ function LineChart({
           />
         ))}
       </div>
-      <div aria-hidden="true" className="mt-1.5 flex gap-1">
-        {labels.map((label, index) => (
-          <span
-            key={index}
-            className="min-w-0 flex-1 truncate text-center text-3xs tabular-nums text-tertiary"
-          >
-            {index % step === 0 ? label : ''}
-          </span>
-        ))}
-      </div>
+      <AxisLabels labels={labels} step={step} />
     </>
   )
 }
@@ -229,7 +231,7 @@ function DonutChart({
           x={DONUT_SIZE / 2}
           y={DONUT_SIZE / 2 - 2}
           textAnchor="middle"
-          fontSize="11"
+          style={{ fontSize: 'var(--text-caption)' }}
           fontWeight="600"
           fill="var(--vy-fg-strong)"
         >
@@ -237,16 +239,16 @@ function DonutChart({
         </text>
         <text
           x={DONUT_SIZE / 2}
-          y={DONUT_SIZE / 2 + 11}
+          y={DONUT_SIZE / 2 + 12}
           textAnchor="middle"
-          fontSize="8"
+          style={{ fontSize: 'var(--text-caption)' }}
           letterSpacing="0.06em"
           fill="var(--vy-tertiary)"
         >
           TOTAL
         </text>
       </svg>
-      <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-2xs text-muted">
+      <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-caption text-muted">
         {slices.map((slice) => (
           <span key={slice.index} className="inline-flex items-center gap-1.5">
             <span
@@ -257,7 +259,7 @@ function DonutChart({
             <span className="max-w-[160px] truncate font-medium text-fg">
               {labels[slice.index] ?? `#${slice.index + 1}`}
             </span>
-            <span className="tabular-nums text-tertiary">
+            <span className="text-tertiary tnum">
               {formatChartValue(slice.value)} · {Math.round((slice.value / total) * 100)}%
             </span>
           </span>
@@ -322,9 +324,9 @@ export const ChartBlock = memo(function ChartBlock({ spec }: { spec: ChartSpec }
   return (
     <div className="group/code relative my-2" data-chart-block="">
       <CodeBlockCopyButton text={JSON.stringify(spec, null, 2)} />
-      <div className="overflow-x-auto rounded-md border border-border bg-surface p-3">
+      <div className="overflow-x-auto rounded-md border border-border bg-sunken p-3">
         {spec.title ? (
-          <p className="m-0 mb-2 text-3xs uppercase tracking-[var(--vy-tracking-caps)] text-tertiary">
+          <p className={cn('m-0 mb-2', SECTION_LABEL)}>
             {spec.title}
           </p>
         ) : null}
