@@ -78,17 +78,6 @@ export const COMPOSER_TEXTAREA_MAX_PX = 280
 /** Tailwind max-height matching `COMPOSER_TEXTAREA_MAX_PX`. */
 export const COMPOSER_TEXTAREA_MAX_CLASS = 'max-h-[280px]'
 
-/** One line of a disclosure list: label, detail, trailing meta. */
-export const DISCLOSURE_ROW =
-  'flex min-w-0 items-center gap-1.5 rounded-sm py-1.5 text-xs vy-transition hover:opacity-80'
-
-/**
- * Disclosure chevron — hidden until the row is hovered or focused.
- * Pair with `group` on the disclosure control; add rotate when expanded.
- */
-export const DISCLOSURE_CHEVRON =
-  'shrink-0 text-tertiary opacity-0 vy-transition group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100'
-
 /** Ask-question gate — quiet panel, not bordered tool-card chrome. */
 /**
  * The needs-you frame: the one accent block in a record. An accent outline,

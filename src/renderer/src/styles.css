@@ -1022,18 +1022,19 @@
     color: var(--vy-fg-strong);
   }
 
+  /* On the type scale, whatever size the body runs at. */
   h1 {
-    font-size: 1.4em;
+    font-size: var(--text-title);
   }
 
   h2 {
     margin-top: 1.4em;
-    font-size: 1.3em;
+    font-size: var(--text-heading);
   }
 
   h3 {
     margin-top: 1.1em;
-    font-size: 1.15em;
+    font-size: var(--text-md);
   }
 
   h4,
@@ -1052,7 +1053,7 @@
     display: block;
     max-width: 100%;
     height: auto;
-    border-radius: 6px;
+    border-radius: var(--vy-radius-md);
   }
 
   input[type='checkbox'] {
@@ -1108,7 +1109,7 @@
   blockquote {
     margin: 0.6em 0;
     padding: 0.1em 0 0.1em 0.85rem;
-    border-left: 2px solid color-mix(in srgb, var(--vy-tertiary) 60%, transparent);
+    border-left: 2px solid var(--vy-border);
     color: var(--vy-secondary);
   }
 
@@ -1160,38 +1161,6 @@
     color: var(--vy-fg-strong);
     font-weight: 600;
   }
-
-  tbody tr:nth-child(even) td {
-    background: color-mix(in srgb, var(--vy-surface) 55%, transparent);
-  }
-}
-
-/*
- * Transcript rows: keep a scrolled-to row clear of the scrollport's top edge.
- *
- * Find-in-transcript and turn-panel jumps land a row at the very top of the
- * container, which sliced the first text line through the glyphs. Reserving
- * scroll margin places the row fully inside the viewport instead.
- */
-[data-transcript-row] {
-  scroll-margin-top: 0.5rem;
-  scroll-margin-bottom: 0.5rem;
-}
-
-/*
- * Turn prompt: the bordered, unshadowed bubble clearly separates the user's
- * turn from the transcript. The prompt is the heading of its turn, so it steps
- * up from the 13px body to the heading scale with tighter tracking and the
- * strong foreground; the assistant's prose stays at
- * --text-sm / --color-fg. Mirrors USER_PROMPT_TEXT, which styles the wrapper:
- * MarkdownContent re-declares size, leading and color on its own root, and
- * specificity (0,2,0) is what beats it — `cn()` only concatenates classes.
- */
-[data-user-prompt] .markdown-body {
-  font-size: var(--text-heading);
-  line-height: 1.5;
-  letter-spacing: var(--vy-tracking-tight);
-  color: var(--vy-fg-strong);
 }
 
 /* Plan dock: wide tables scroll horizontally (readable cells); task lists status-only. */
@@ -1329,12 +1298,6 @@
     opacity: 1;
     transform: none;
   }
-}
-
-.tool-status-morph {
-  transition-property: color, opacity;
-  transition-duration: var(--vy-duration);
-  transition-timing-function: var(--vy-ease);
 }
 
 /* Height disclosure — keep content mounted while grid rows animate 0fr ↔ 1fr. */

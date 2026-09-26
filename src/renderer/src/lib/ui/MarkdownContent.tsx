@@ -157,7 +157,7 @@ function scheduleIdle(cb: () => void, timeoutMs: number): () => void {
 }
 
 const CODE_SHELL =
-  'overflow-x-auto rounded-md border border-border bg-surface font-mono text-[0.85em]'
+  'overflow-x-auto rounded-md border border-border bg-sunken font-mono text-xs'
 
 function FencedCodeBlock({
   text,
@@ -236,7 +236,7 @@ function FencedCodePre({
     | undefined
   if (!child) {
     return (
-      <pre className="my-2 overflow-x-auto rounded-md border border-border bg-surface p-3 font-mono text-[0.85em]">
+      <pre className="my-2 overflow-x-auto rounded-md border border-border bg-sunken p-3 font-mono text-xs">
         {children}
       </pre>
     )
@@ -273,7 +273,7 @@ function buildHeadingComponents(used: Map<string, number>) {
 }
 
 const CODE_CHIP =
-  'rounded-sm bg-surface px-1 py-0.5 font-mono text-[0.85em] hover:bg-surface-2 focus-visible:bg-surface-2'
+  'rounded-sm bg-surface px-1 py-0.5 font-mono text-[0.85em] hover:bg-surface-2 focus-visible:vy-focus-ring'
 
 function formatLinkablePathText(parsed: { path: string; line?: number }): string {
   return parsed.line != null ? `${parsed.path}:${parsed.line}` : parsed.path
@@ -335,7 +335,12 @@ function buildMarkdownComponents(
         return <span className="text-muted underline">{children}</span>
       }
       return (
-        <a href={href} target="_blank" rel="noreferrer noopener" className="text-muted underline">
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="rounded-sm text-muted underline focus-visible:vy-focus-ring"
+        >
           {children}
         </a>
       )
@@ -353,7 +358,8 @@ function buildMarkdownComponents(
       children?: React.ReactNode
     }) => {
       if (codeClass?.includes('language-')) {
-        return <code className={cn('block font-mono text-[0.85em]', codeClass)}>{children}</code>
+        // Sized by the code shell it lands in (`text-xs`), not shrunk again.
+        return <code className={cn('block font-mono', codeClass)}>{children}</code>
       }
       const text = String(children ?? '').trim()
       const parsed = parseLinkableWorkspacePath(text)
@@ -423,6 +429,19 @@ const MemoMarkdownBlock = memo(function MemoMarkdownBlock({
   )
 })
 
+/** `md` keeps the scale's own 22px line; the smaller steps read better relaxed. */
+const MARKDOWN_SIZE = {
+  caption: 'text-caption leading-relaxed',
+  sm: 'text-sm leading-relaxed',
+  md: 'text-md'
+} as const
+
+const MARKDOWN_TONE = {
+  default: 'text-fg',
+  secondary: 'text-secondary',
+  strong: 'text-fg-strong'
+} as const
+
 export function MarkdownContent({
   content,
   streaming = false,
@@ -431,7 +450,8 @@ export function MarkdownContent({
   readOnlyTasks = false,
   linkWorkspacePaths = false,
   onOpenWorkspaceFile,
-  tone = 'fg',
+  size = 'sm',
+  tone = 'default',
   className
 }: {
   content: string
@@ -442,14 +462,20 @@ export function MarkdownContent({
   wrapTables?: boolean
   /** Disable GFM task checkboxes (display-only). */
   readOnlyTasks?: boolean
-  /** Auto-link bare workspace-relative paths in prose (assistant chat). */
+  /** Auto-link bare workspace-relative paths in prose. */
   linkWorkspacePaths?: boolean
   onOpenWorkspaceFile?: (path: string, options?: { line?: number }) => void
   /**
-   * Body text colour. `secondary` is a document's prose under its own
-   * headings (the Plan tab); a class passed in could not override `text-fg`.
+   * Body text size. The root owns size, leading and colour, so a class on a
+   * wrapper (or in `className`) never reaches the text — pass these instead.
+   * `md` is the record's Result; `caption` is prose inside a tool body.
    */
-  tone?: 'fg' | 'secondary'
+  size?: 'caption' | 'sm' | 'md'
+  /**
+   * Body text colour. `secondary` is prose under its own headings (the Plan
+   * tab, a record note); `strong` is the one answer a surface exists to show.
+   */
+  tone?: 'default' | 'secondary' | 'strong'
   className?: string
 }) {
   const markdown = useMemo(
@@ -486,9 +512,11 @@ export function MarkdownContent({
   return (
     <div
       className={cn(
-        'markdown-body text-sm leading-relaxed [overflow-wrap:anywhere] [&_pre]:[overflow-wrap:normal]',
-        tone === 'secondary' ? 'text-secondary' : 'text-fg',
-        // Chat transcript: keep table cells from exploding layout. Plan panel opts into wrap.
+        'markdown-body [overflow-wrap:anywhere] [&_pre]:[overflow-wrap:normal]',
+        // One size and one colour class each, so nothing depends on sheet order.
+        MARKDOWN_SIZE[size],
+        MARKDOWN_TONE[tone],
+        // Keep table cells from exploding layout. The Plan panel opts into wrap.
         !wrapTables &&
           '[&_table]:[overflow-wrap:normal] [&_th]:[overflow-wrap:normal] [&_td]:[overflow-wrap:normal]',
         wrapTables &&
