@@ -127,10 +127,3 @@ export function useRunTodos(opts: {
 
   return { data, loading, loaded, error, reload: load }
 }
-
-/** True when todos.json has at least one task. */
-export function todosArtifactHasItems(content: string | null | undefined): boolean {
-  if (!content?.trim()) return false
-  const parsed = parseTodosJson(content)
-  return (parsed?.items.length ?? 0) > 0
-}

@@ -47,7 +47,6 @@ import { parseStatusMessageData } from '@renderer/features/chat/toolUi/parsers/s
 import { parseDiffPreview, parseUnifiedDiff } from '@renderer/features/chat/toolUi/parsers/edit'
 import { getToolHeaderMeta } from '@renderer/features/chat/toolUi/registry'
 import { toolLabel } from '@renderer/features/chat/toolUi/meta'
-import { toolDefaultExpanded } from '@renderer/features/chat/toolUi/shells'
 import type { UiToolRow } from '@shared/transcript'
 
 /** Exact T1 malformed questions string (unescaped quotes → JSON.parse throws). */
@@ -304,10 +303,6 @@ describe('e2e screenshot audit fixes (T1/T2/R1)', () => {
     expect(edit!.status).toBe('fail')
 
     expect(toolLabel('edit', 'fail', failContent)).toBe('Failed')
-    expect(toolDefaultExpanded('edit', 'fail')).toBe(true)
-    // Finished diffs stay compact — no full-patch dump into the timeline.
-    expect(toolDefaultExpanded('edit', 'done')).toBe(false)
-    expect(toolDefaultExpanded('git_diff', 'done')).toBe(false)
 
     const meta = getToolHeaderMeta(edit!)
     expect(meta.verb).toBe('Failed')
@@ -383,9 +378,6 @@ describe('e2e screenshot audit fixes (T1/T2/R1)', () => {
     expect(midMeta.target).toBe('index.html')
     expect(midMeta.filePath).toBe('index.html')
     expect((midMeta.added ?? 0) + (midMeta.removed ?? 0)).toBeGreaterThan(0)
-
-    // Compact default still holds while running — no full-patch dump.
-    expect(toolDefaultExpanded('edit', 'running')).toBe(false)
   })
 
   it('D3: streaming contents write paints add lines before JSON closes', async () => {

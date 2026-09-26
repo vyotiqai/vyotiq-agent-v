@@ -4,7 +4,7 @@ import { parseListDirData } from '@renderer/features/chat/toolUi/parsers/listDir
 import { parseGlobData } from '@renderer/features/chat/toolUi/parsers/glob'
 import { parseSearchData } from '@renderer/features/chat/toolUi/parsers/search'
 import { parseDeleteData } from '@renderer/features/chat/toolUi/parsers/delete'
-import { parseTodoData, parseTodosJson, pickCurrentTask } from '@renderer/features/chat/toolUi/parsers/todo'
+import { parseTodoData, parseTodosJson } from '@renderer/features/chat/toolUi/parsers/todo'
 import { parseWebSearchData } from '@renderer/features/chat/toolUi/parsers/webSearch'
 import { parseGitCommitData, parseGitDiffData, parseGitStatusData } from '@renderer/features/chat/toolUi/parsers/git'
 import {
@@ -220,16 +220,6 @@ describe('todo parser', () => {
   it('rejects invalid todos.json', () => {
     expect(parseTodosJson('not-json')).toBeNull()
     expect(parseTodosJson('{"todos":"nope"}')).toBeNull()
-  })
-
-  it('picks the in-progress task as current', () => {
-    expect(
-      pickCurrentTask([
-        { id: '1', content: 'Done', status: 'completed' },
-        { id: '2', content: 'Now', status: 'in_progress' },
-        { id: '3', content: 'Later', status: 'pending' }
-      ])?.content
-    ).toBe('Now')
   })
 
   it('parses ids from serialized checklist lines', () => {

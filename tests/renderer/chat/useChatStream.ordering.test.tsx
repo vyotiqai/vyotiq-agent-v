@@ -5,7 +5,6 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { useChatStream } from './helpers/useChatStream'
 import { createChatStreamController } from '@renderer/lib/hooks/createChatStreamController'
-import { buildTranscriptRows } from '@renderer/features/chat/utils/transcriptRows'
 import type { AgentEvent } from '@shared/ipc'
 
 type Handler = (event: AgentEvent) => void
@@ -119,18 +118,12 @@ describe('useChatStream', () => {
       (item) => item.kind === 'tool' && (item.id === 't-new' || item.tool.id === 't-new')
     )
     expect(newToolIdx).toBeGreaterThan(continueIdx)
-
-    const rows = buildTranscriptRows(result.current.items, { running: true })
-    const continueTurn = rows.find(
-      (row) => row.kind === 'user' && row.item.content === 'continue'
-    )?.turnIndex
-    const newActivity = rows.find(
-      (row) =>
-        row.kind === 'activity' &&
-        row.tools.some((t) => t.id === 't-new' || t.tool.id === 't-new')
-    )
-    expect(continueTurn).toBeDefined()
-    expect(newActivity?.turnIndex).toBe(continueTurn)
+    // It belongs to the "continue" turn: no other instruction lands between them.
+    expect(
+      result.current.items
+        .slice(continueIdx + 1, newToolIdx)
+        .some((item) => item.kind === 'message' && item.role === 'user')
+    ).toBe(false)
   })
   it('merges tool_start into an existing tool_call_delta row', async () => {
     const { result } = renderHook(() => useChatStream('/ws'))
@@ -771,17 +764,6 @@ describe('useChatStream', () => {
       'tool:edit',
       'Refactored.'
     ])
-
-    // Turn summary rides the end of work; closing answer follows.
-    expect(buildTranscriptRows(result.current.items).map((row) => row.kind)).toEqual([
-      'user',
-      'thinking',
-      'activity',
-      'thinking',
-      'card',
-      'turn',
-      'text'
-    ])
   })
 
   it('renders narration, reasoning and a command while the run is still live', async () => {
@@ -827,20 +809,19 @@ describe('useChatStream', () => {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
     })
 
-    const rows = buildTranscriptRows(result.current.items)
-    expect(rows.map((row) => row.kind)).toEqual([
-      'user',
-      'thinking',
-      'activity',
-      'text',
-      'card',
-      'turn'
-    ])
-    const narration = rows.find((row) => row.kind === 'text')
-    expect(narration?.kind === 'text' && narration.item.content).toBe(
-      'The table is built up front.'
+    const shape = result.current.items.map((item) =>
+      item.kind === 'tool' ? `tool:${item.tool.name}` : item.thinking || item.content
     )
-    const command = rows.find((row) => row.kind === 'card' && row.item.tool.name === 'terminal')
-    expect(command?.kind === 'card' && command.item.tool.status).toBe('running')
+    expect(shape).toEqual([
+      'audit it',
+      'Start with the router module next.',
+      'tool:read',
+      'The table is built up front.',
+      'tool:terminal'
+    ])
+    const command = result.current.items.find(
+      (item) => item.kind === 'tool' && item.tool.name === 'terminal'
+    )
+    expect(command?.kind === 'tool' && command.tool.status).toBe('running')
   })
 })

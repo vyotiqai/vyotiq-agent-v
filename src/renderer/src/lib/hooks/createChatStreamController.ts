@@ -4421,7 +4421,7 @@ export function createChatStreamController(
     requestId: string,
     decision: ToolApprovalDecision
   ): Promise<void> => {
-    // Failures throw for ToolApprovalCard localError only — do not patch composer error.
+    // Failures throw for the approval row's own error only — do not patch composer error.
     if (!runId) {
       throw new Error('No active run for approval response.')
     }

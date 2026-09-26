@@ -8,8 +8,7 @@ import type { UiItem } from '@shared/transcript'
 const spies = vi.hoisted(() => ({
   collectSessionChangedFiles: vi.fn(() => [] as unknown[]),
   collectSessionFileDiffs: vi.fn(() => new Map()),
-  mergeCheckpointChangedFiles: vi.fn((files: unknown) => files),
-  checkpointOnlyChangedFiles: vi.fn(() => [])
+  mergeCheckpointChangedFiles: vi.fn((files: unknown) => files)
 }))
 
 vi.mock('@renderer/features/chat/utils/turnFileDiffs', () => spies)
