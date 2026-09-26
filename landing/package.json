@@ -16,7 +16,7 @@
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@fontsource/plus-jakarta-sans": "^5.3.0",
-    "astro": "^7.3.3"
+    "astro": "^7.3.4"
   },
   "devDependencies": {
     "@astrojs/sitemap": "^3.7.4",
