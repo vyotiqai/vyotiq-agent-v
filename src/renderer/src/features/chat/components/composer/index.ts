@@ -1,2 +1,2 @@
 export { Composer } from './Composer'
-export type { ComposerVariant } from './ComposerToolbar'
+export type { ComposerVariant } from './Composer'
