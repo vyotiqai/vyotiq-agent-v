@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { FEEDBACK_MESSAGE_MAX, FEEDBACK_TITLE_MAX } from '@shared/ipc'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
+import { Icon } from '@renderer/lib/icons'
 import { copyText } from '@renderer/lib/markdown/copyText'
-import { Button, Input, selectClass } from '@renderer/lib/ui'
+import { Button, Checkbox, IconButton, Input, Segmented } from '@renderer/lib/ui'
 
 export type FeedbackType = 'bug' | 'feature' | 'praise' | 'other'
 
@@ -56,6 +57,18 @@ const FEEDBACK_TYPES: Array<{ value: FeedbackType; label: string }> = [
 
 const FEEDBACK_EMAIL = 'support@vyotiq.com'
 
+const FIELD_LABEL = 'block text-xs font-medium text-fg'
+
+/** Characters used against the limit: a number, so mono and tabular. */
+const COUNTER = 'm-0 text-right font-mono text-caption text-tertiary tnum'
+
+/** Input size="sm"'s chrome, as a textarea: one focus treatment, the ring. */
+const MESSAGE_FIELD =
+  'block w-full resize-y rounded-md border border-border bg-bg px-2.5 py-1.5 text-xs leading-[18px] text-fg placeholder:text-tertiary vy-transition hover:border-border-strong focus-visible:border-border-strong focus-visible:vy-focus-ring disabled:vy-disabled-state disabled:hover:border-border'
+
+const MAIL_LINK =
+  'rounded-sm text-xs text-secondary underline decoration-border underline-offset-2 vy-transition hover:text-fg focus-visible:vy-focus-ring'
+
 /** Plain-text subject/body of the pre-filled email (shared by mailto + copy). */
 function buildFeedbackText(input: FeedbackComposeInput): { subject: string; body: string } {
   const label = FEEDBACK_TYPES.find((t) => t.value === input.type)?.label ?? 'Feedback'
@@ -104,10 +117,9 @@ export function FeedbackDialog({
   const copiedTimerRef = useRef<number | null>(null)
 
   const headerId = useId()
-  const typeFieldId = useId()
+  const formId = useId()
   const titleFieldId = useId()
   const messageFieldId = useId()
-  const diagnosticsFieldId = useId()
 
   const titleInputRef = useRef<HTMLInputElement>(null)
 
@@ -189,127 +201,134 @@ export function FeedbackDialog({
     includeDiagnostics
   })
 
+  const locked = phase === 'sending'
+
+  // The action row changes with the phase; the form's submit sits in it, so it
+  // names the form it belongs to.
+  const footer =
+    phase === 'success' ? (
+      <Button size="sm" variant="secondary" onClick={close}>
+        Done
+      </Button>
+    ) : phase === 'error' ? (
+      <>
+        <Button size="sm" variant="ghost" onClick={close}>
+          Close
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => setPhase('idle')}>
+          Back to form
+        </Button>
+      </>
+    ) : (
+      <>
+        <Button size="sm" variant="ghost" onClick={close} disabled={locked}>
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          form={formId}
+          size="sm"
+          variant="primary"
+          pending={locked}
+          disabled={!canSubmit}
+          title={canSubmit ? undefined : 'Add a title and a message to send feedback'}
+        >
+          {locked ? 'Sending…' : 'Send feedback'}
+        </Button>
+      </>
+    )
+
   return (
     <Dialog
       open={open}
       onClose={close}
       labelledBy={headerId}
+      useNativeDialog={false}
       padded={false}
       initialFocusRef={titleInputRef}
+      className="vy-menu flex w-[480px] flex-col overflow-hidden"
+      footer={footer}
     >
-      <form
-        className="flex flex-col gap-4 p-5"
-        onSubmit={handleSubmit}
-        noValidate
-      >
-        <div className="flex items-start justify-between gap-3">
-          <h2 id={headerId} className="m-0 text-base font-medium text-fg-strong">
-            Send feedback
-          </h2>
-          <button
-            type="button"
-            aria-label="Close feedback dialog"
-            onClick={close}
-            className="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-muted vy-transition hover:bg-surface-2 hover:text-fg focus-visible:vy-focus-ring"
-          >
-            ✕
-          </button>
-        </div>
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
+        <Icon name="note" size={16} className="text-muted" />
+        <h2 id={headerId} className="text-heading font-semibold text-fg-strong">
+          Send feedback
+        </h2>
+        <span className="flex-1" />
+        <IconButton icon="close" label="Close" size="sm" tone="muted" onClick={close} />
+      </div>
 
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {phase === 'success' ? (
-          <div className="flex flex-col gap-3" role="status">
+          <div className="space-y-3" role="status">
             <p className="m-0 text-sm text-fg">
               Thanks — your email client should have opened with the message pre-filled.
               If it didn&apos;t, use the link below to open or copy it manually.
             </p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <a
-                className="text-sm underline decoration-border underline-offset-2 vy-transition hover:text-fg focus-visible:vy-focus-ring rounded-sm"
-                href={mailtoHref}
-              >
+              <a className={MAIL_LINK} href={mailtoHref}>
                 Open email manually
               </a>
-              <Button variant="ghost" onClick={copyEmailText}>
+              <Button size="sm" variant="ghost" onClick={copyEmailText}>
                 {copied ? 'Copied' : 'Copy message'}
-              </Button>
-            </div>
-            <div className="flex justify-end">
-              <Button variant="subtle" onClick={close}>
-                Done
               </Button>
             </div>
           </div>
         ) : phase === 'error' ? (
-          <div className="flex flex-col gap-3" role="alert">
+          <div className="space-y-3" role="alert">
             <p className="m-0 text-sm text-fg">
               We couldn&apos;t open your email client automatically. Your feedback is still
               deliverable — open the pre-filled email below and send it from your mail app.
             </p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <a
-                className="text-sm underline decoration-border underline-offset-2 vy-transition hover:text-fg focus-visible:vy-focus-ring rounded-sm"
-                href={mailtoHref}
-              >
+              <a className={MAIL_LINK} href={mailtoHref}>
                 Open pre-filled email
               </a>
-              <Button variant="ghost" onClick={copyEmailText}>
+              <Button size="sm" variant="ghost" onClick={copyEmailText}>
                 {copied ? 'Copied' : 'Copy message'}
-              </Button>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={close}>
-                Close
-              </Button>
-              <Button variant="subtle" onClick={() => setPhase('idle')}>
-                Back to form
               </Button>
             </div>
           </div>
         ) : (
-          <>
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={typeFieldId} className="text-xs tracking-[var(--vy-tracking)] text-secondary">
+          <form id={formId} className="space-y-4" onSubmit={handleSubmit} noValidate>
+            <div className="space-y-1.5">
+              <span className={FIELD_LABEL} aria-hidden>
                 Type
-              </label>
-              <select
-                id={typeFieldId}
-                className={`${selectClass} w-full`}
-                value={type}
-                disabled={phase === 'sending'}
-                onChange={(e) => {
-                  setType(e.target.value as FeedbackType)
-                }}
-              >
-                {FEEDBACK_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
+              </span>
+              <div>
+                <Segmented
+                  label="Type"
+                  value={type}
+                  items={FEEDBACK_TYPES.map((t) => ({ id: t.value, label: t.label }))}
+                  disabled={locked}
+                  onChange={setType}
+                />
+              </div>
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={titleFieldId} className="text-xs tracking-[var(--vy-tracking)] text-secondary">
+            <div className="space-y-1.5">
+              <label htmlFor={titleFieldId} className={FIELD_LABEL}>
                 Title
               </label>
               <Input
                 id={titleFieldId}
                 ref={titleInputRef}
+                size="sm"
                 placeholder="Short summary"
                 value={title}
                 maxLength={FEEDBACK_TITLE_MAX}
-                disabled={phase === 'sending'}
+                disabled={locked}
                 onChange={(e) => {
                   setTitle(e.target.value)
                 }}
               />
-              <p className="m-0 text-right text-[11px] tabular-nums text-muted" aria-hidden>
+              <p className={COUNTER} aria-hidden>
                 {trimmedTitle.length}/{FEEDBACK_TITLE_MAX}
               </p>
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={messageFieldId} className="text-xs tracking-[var(--vy-tracking)] text-secondary">
+            <div className="space-y-1.5">
+              <label htmlFor={messageFieldId} className={FIELD_LABEL}>
                 Message
               </label>
               <textarea
@@ -319,53 +338,26 @@ export function FeedbackDialog({
                 placeholder="What happened, or what would you like to see?"
                 value={message}
                 maxLength={FEEDBACK_MESSAGE_MAX}
-                disabled={phase === 'sending'}
+                disabled={locked}
                 onChange={(e) => {
                   setMessage(e.target.value)
                 }}
-                className="w-full rounded-md border border-border bg-surface px-[var(--vy-control-px)] py-2 text-sm leading-[1.4] text-fg placeholder:text-muted vy-transition hover:border-border-strong focus-visible:border-border-strong focus-visible:vy-focus-ring focus-visible:outline-none disabled:vy-disabled-state resize-y"
+                className={MESSAGE_FIELD}
               />
-              <p className="m-0 text-right text-[11px] tabular-nums text-muted" aria-hidden>
+              <p className={COUNTER} aria-hidden>
                 {trimmedMessage.length}/{FEEDBACK_MESSAGE_MAX}
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
-              <input
-                id={diagnosticsFieldId}
-                type="checkbox"
-                className="size-4 shrink-0 accent-accent focus-visible:vy-focus-ring"
-                checked={includeDiagnostics}
-                disabled={phase === 'sending'}
-                onChange={(e) => {
-                  setIncludeDiagnostics(e.target.checked)
-                }}
-              />
-              <label
-                htmlFor={diagnosticsFieldId}
-                className="text-xs leading-snug tracking-[var(--vy-tracking)] text-secondary"
-              >
-                Include basic diagnostics (app version, OS)
-              </label>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <Button variant="ghost" onClick={close} disabled={phase === 'sending'}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                type="submit"
-                pending={phase === 'sending'}
-                disabled={!canSubmit}
-                title={canSubmit ? undefined : 'Add a title and a message to send feedback'}
-              >
-                {phase === 'sending' ? 'Sending…' : 'Send feedback'}
-              </Button>
-            </div>
-          </>
+            <Checkbox
+              checked={includeDiagnostics}
+              disabled={locked}
+              onCheckedChange={setIncludeDiagnostics}
+              label="Include basic diagnostics (app version, OS)"
+            />
+          </form>
         )}
-      </form>
+      </div>
     </Dialog>
   )
 }
