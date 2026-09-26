@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActionMenu, Button, IconButton, MarkdownContent, cn } from '@renderer/lib/ui'
-import { CHAT_RIGHT_PANEL_BODY, SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { ActionMenu, Button, IconButton, MarkdownContent, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
+import { Icon } from '@renderer/lib/icons'
+import { CHAT_RIGHT_PANEL_BODY, NUM, SECTION_LABEL } from '@renderer/lib/utils/layout'
 import type { RunReceipt } from '@shared/ipc'
 import { RunReceiptSchema } from '@shared/ipc'
 import { useRunChecks } from '@renderer/features/task/useRunChecks'
@@ -95,16 +96,17 @@ function recordShows(heading: string, live: { steps: boolean; checks: boolean })
   return (live.steps && h === 'steps') || (live.checks && h === 'done when')
 }
 
-function receiptStatusTone(status: RunReceipt['status']): string {
+/** A receipt's status in the task vocabulary: the glyph's shape, then its colour, then the word. */
+function receiptStatusGlyph(status: RunReceipt['status']): TaskState {
   switch (status) {
     case 'done':
-      return 'bg-success-soft text-success'
+      return 'done'
     case 'error':
-      return 'bg-danger-soft text-danger'
+      return 'failed'
     case 'cancelled':
-      return 'bg-warning-soft text-warning'
+      return 'stopped'
     case 'running':
-      return 'bg-surface-2 text-muted'
+      return 'running'
     default: {
       const _exhaustive: never = status
       return _exhaustive
@@ -133,7 +135,7 @@ function PathList({
             {onOpenFile ? (
               <button
                 type="button"
-                className="block max-w-full truncate font-mono text-xs text-secondary underline-offset-2 hover:text-fg hover:underline"
+                className="block max-w-full truncate rounded-sm font-mono text-xs text-secondary underline-offset-2 hover:text-fg hover:underline focus-visible:vy-focus-ring"
                 title={p}
                 onClick={() => onOpenFile(p)}
               >
@@ -163,32 +165,31 @@ function ReceiptSummary({
 }) {
   const failTop = receipt.failureClusters.slice(0, 5)
   const incomplete = Boolean(receipt.incomplete)
-  const statusTone = incomplete
-    ? 'bg-warning-soft text-warning'
-    : receiptStatusTone(receipt.status)
+  const statusGlyph: TaskState = incomplete ? 'stopped' : receiptStatusGlyph(receipt.status)
   const statusLabel = incomplete ? 'incomplete' : receipt.status
 
-  const contextChips: { label: string; value: string }[] = []
+  /** Label and value rows; numbers line up in NUM, words stay in the body face. */
+  const contextChips: { label: string; value: string; numeric?: boolean }[] = []
   if (receipt.tokenUsage?.billedInputTokens != null) {
-    contextChips.push({ label: 'billed in', value: String(receipt.tokenUsage.billedInputTokens) })
+    contextChips.push({ label: 'billed in', value: String(receipt.tokenUsage.billedInputTokens), numeric: true })
   } else if (receipt.tokenUsage?.inputTokens != null) {
-    contextChips.push({ label: 'in', value: String(receipt.tokenUsage.inputTokens) })
+    contextChips.push({ label: 'in', value: String(receipt.tokenUsage.inputTokens), numeric: true })
   }
   if (
     receipt.tokenUsage?.inputTokens != null &&
     receipt.tokenUsage?.billedInputTokens != null &&
     receipt.tokenUsage.billedInputTokens !== receipt.tokenUsage.inputTokens
   ) {
-    contextChips.push({ label: 'window', value: String(receipt.tokenUsage.inputTokens) })
+    contextChips.push({ label: 'window', value: String(receipt.tokenUsage.inputTokens), numeric: true })
   }
   if (receipt.tokenUsage?.outputTokens != null) {
-    contextChips.push({ label: 'out', value: String(receipt.tokenUsage.outputTokens) })
+    contextChips.push({ label: 'out', value: String(receipt.tokenUsage.outputTokens), numeric: true })
   }
   if (receipt.tokenUsage?.reasoningTokens != null && receipt.tokenUsage.reasoningTokens > 0) {
-    contextChips.push({ label: 'reason', value: String(receipt.tokenUsage.reasoningTokens) })
+    contextChips.push({ label: 'reason', value: String(receipt.tokenUsage.reasoningTokens), numeric: true })
   }
   if (receipt.compactionCount > 0) {
-    contextChips.push({ label: 'compact', value: `×${receipt.compactionCount}` })
+    contextChips.push({ label: 'compact', value: `×${receipt.compactionCount}`, numeric: true })
   }
   if (receipt.incomplete) {
     contextChips.push({ label: 'incomplete', value: receipt.incomplete.reason })
@@ -202,17 +203,12 @@ function ReceiptSummary({
   }
 
   return (
-    <div className="mt-4 space-y-5 text-sm" data-receipt-summary>
+    <div className="space-y-5 text-sm" data-receipt-summary>
       <section className="min-w-0">
         <h3 className={SECTION_LABEL}>Status</h3>
         <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
-          <span
-            className={cn(
-              'inline-flex h-[18px] shrink-0 items-center rounded-sm px-1.5 text-caption font-medium leading-none',
-              statusTone
-            )}
-            data-receipt-status={statusLabel}
-          >
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-fg" data-receipt-status={statusLabel}>
+            <StatusGlyph state={statusGlyph} size={13} />
             {statusLabel}
           </span>
           <p className="m-0 min-w-0 text-xs text-muted [overflow-wrap:anywhere]">
@@ -242,30 +238,35 @@ function ReceiptSummary({
 
       <section className="min-w-0">
         <h3 className={SECTION_LABEL}>Tools</h3>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <span className="rounded-md bg-surface px-1.5 py-0.5 text-caption tabular-nums text-fg">
-            {receipt.toolStats.totalCalls} calls
+        {/* One row of counts; only failures draw the eye, with an icon and the word. */}
+        <p className="m-0 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted" data-receipt-tools>
+          <span>
+            <span className={cn(NUM, 'text-fg')}>{receipt.toolStats.totalCalls}</span> calls
           </span>
-          <span className="rounded-md bg-surface px-1.5 py-0.5 text-caption tabular-nums text-success">
-            {receipt.toolStats.ok} ok
+          <span>
+            <span className={cn(NUM, 'text-fg')}>{receipt.toolStats.ok}</span> ok
           </span>
-          <span
-            className={cn(
-              'rounded-md bg-surface px-1.5 py-0.5 text-caption tabular-nums',
-              receipt.toolStats.failed > 0 ? 'text-danger' : 'text-muted'
-            )}
-          >
-            {receipt.toolStats.failed} failed
-          </span>
-        </div>
+          {receipt.toolStats.failed > 0 ? (
+            <span className="inline-flex items-center gap-1 text-danger">
+              <Icon name="xCircle" size={12} className="shrink-0" />
+              <span className={NUM}>{receipt.toolStats.failed}</span> failed
+            </span>
+          ) : (
+            <span>
+              <span className={NUM}>0</span> failed
+            </span>
+          )}
+        </p>
         {failTop.length > 0 ? (
-          <ul className="mt-2 list-none space-y-1.5 p-0">
+          <ul className="mt-2 list-none p-0" aria-label="Failed calls">
             {failTop.map((f) => (
-              <li
-                key={f.key}
-                className="min-w-0 rounded-md bg-danger-soft px-2 py-1.5 font-mono text-caption text-secondary [overflow-wrap:anywhere]"
-              >
-                <span className="text-fg">{f.count}×</span> {f.key}
+              <li key={f.key} className="flex min-w-0 items-start gap-2 py-1 text-caption">
+                <Icon name="xCircle" size={12} className="mt-0.5 shrink-0 text-danger" />
+                <span className={cn(NUM, 'shrink-0 text-fg')}>{f.count}×</span>
+                <span className="min-w-0 font-mono text-secondary [overflow-wrap:anywhere]">
+                  <span className="sr-only">failed: </span>
+                  {f.key}
+                </span>
               </li>
             ))}
           </ul>
@@ -274,8 +275,11 @@ function ReceiptSummary({
 
       <section>
         <h3 className={SECTION_LABEL}>Diagnostics</h3>
-        <p className="m-0 mt-2 text-xs tabular-nums text-fg">
-          {receipt.diagnostics.clean}/{receipt.diagnostics.calls} clean
+        <p className="m-0 mt-2 text-xs text-muted">
+          <span className={cn(NUM, 'text-fg')}>
+            {receipt.diagnostics.clean}/{receipt.diagnostics.calls}
+          </span>{' '}
+          clean
         </p>
         {receipt.verification ? (
           <p
@@ -302,17 +306,14 @@ function ReceiptSummary({
       {contextChips.length > 0 ? (
         <section className="min-w-0">
           <h3 className={SECTION_LABEL}>Context</h3>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <dl className="m-0 mt-2 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">
             {contextChips.map((c) => (
-              <span
-                key={`${c.label}:${c.value}`}
-                className="inline-flex max-w-full items-baseline gap-1 rounded-md bg-surface px-1.5 py-0.5 text-caption [overflow-wrap:anywhere]"
-              >
-                <span className="text-muted">{c.label}</span>
-                <span className="tabular-nums text-fg">{c.value}</span>
-              </span>
+              <div key={`${c.label}:${c.value}`} className="contents">
+                <dt className="text-muted">{c.label}</dt>
+                <dd className={cn('m-0 text-fg [overflow-wrap:anywhere]', c.numeric && NUM)}>{c.value}</dd>
+              </div>
             ))}
-          </div>
+          </dl>
         </section>
       ) : null}
     </div>
@@ -500,9 +501,9 @@ export const PlanPanel = memo(function PlanPanel({
           : 'No receipt yet'
   const emptyBody =
     tab === 'plan'
-      ? 'Publish plan.md with create_plan — Goal, Steps, and Done when. Done when is copied into the contract.'
+      ? 'When the agent plans a task, its goal, steps and done-when checks appear here.'
       : tab === 'contract'
-        ? 'The run contract is created when a chat starts.'
+        ? 'The run contract is created when a task starts.'
         : receiptDeferred
           ? 'Prior receipt is hidden while this run is live. A new receipt appears when the turn writes it.'
           : 'receipt.json appears when the run writes it.'
@@ -546,63 +547,70 @@ export const PlanPanel = memo(function PlanPanel({
       role="region"
       aria-label={`${VIEW_TITLE[tab]} panel`}
     >
+      {/* The pane's 40px row, fixed above the document: it no longer scrolls away. */}
       <div
-        ref={scrollRootRef}
-        className="scroll-thin flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-5 py-4"
-        data-plan-doc={tab === 'plan' ? '' : undefined}
+        className={cn(
+          'flex h-10 shrink-0 items-center gap-2 border-b border-border',
+          tab !== 'plan' ? 'px-2' : 'pl-4 pr-2'
+        )}
+        data-plan-header
       >
-        <div className="flex items-start gap-2">
-          {tab !== 'plan' ? (
-            <IconButton icon="arrowLeft" label="Back to the plan" size="sm" tone="muted" onClick={() => select('plan')} />
-          ) : null}
-          <h2 className="min-w-0 flex-1 text-heading font-semibold tracking-[var(--vy-tracking-tight)] text-fg-strong">
-            {heading}
-          </h2>
-          {canOpen && openName ? (
+        {tab !== 'plan' ? (
+          <IconButton icon="arrowLeft" label="Back to the plan" size="sm" tone="muted" onClick={() => select('plan')} />
+        ) : null}
+        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-fg-strong" title={heading}>
+          {heading}
+        </h2>
+        {canOpen && openName ? (
+          <IconButton
+            icon="external"
+            label={`Open ${openName}`}
+            size="sm"
+            tone="muted"
+            onClick={() => void openArtifact()}
+          />
+        ) : null}
+        <ActionMenu
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          placement="down"
+          align="end"
+          aria-label="Run documents"
+          items={(['plan', 'contract', 'receipt'] as const).map((id) => ({
+            id,
+            label: `${VIEW_TITLE[id]} · ${VIEW_FILE[id]}`,
+            checked: tab === id,
+            onSelect: () => select(id)
+          }))}
+          trigger={(t) => (
             <IconButton
-              icon="external"
-              label={`Open ${openName}`}
+              ref={t.ref}
+              icon="more"
+              label="More — contract, receipt"
               size="sm"
               tone="muted"
-              onClick={() => void openArtifact()}
+              aria-expanded={t['aria-expanded']}
+              aria-controls={t['aria-controls']}
+              aria-haspopup={t['aria-haspopup']}
+              onClick={t.onClick}
             />
-          ) : null}
-          <ActionMenu
-            open={menuOpen}
-            onOpenChange={setMenuOpen}
-            placement="down"
-            align="end"
-            aria-label="Run documents"
-            items={(['plan', 'contract', 'receipt'] as const).map((id) => ({
-              id,
-              label: `${VIEW_TITLE[id]} · ${VIEW_FILE[id]}`,
-              checked: tab === id,
-              onSelect: () => select(id)
-            }))}
-            trigger={(t) => (
-              <IconButton
-                ref={t.ref}
-                icon="more"
-                label="More — contract, receipt"
-                size="sm"
-                tone="muted"
-                aria-expanded={t['aria-expanded']}
-                aria-controls={t['aria-controls']}
-                aria-haspopup={t['aria-haspopup']}
-                onClick={t.onClick}
-              />
-            )}
+          )}
           />
-        </div>
+      </div>
+      <div
+        ref={scrollRootRef}
+        className="scroll-thin flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-4 py-4"
+        data-plan-doc={tab === 'plan' ? '' : undefined}
+      >
         {openError ? (
-          <p role="alert" className="m-0 mt-2 text-xs text-danger">
+          <p role="alert" className="m-0 mb-3 text-xs text-danger">
             {openError}
           </p>
         ) : null}
         {loading ? (
-          <p className="m-0 mt-4 text-xs text-muted">Loading…</p>
+          <p className="m-0 text-xs text-muted">Loading…</p>
         ) : error ? (
-          <p className="m-0 mt-4 text-xs text-danger">{error}</p>
+          <p className="m-0 text-xs text-danger">{error}</p>
         ) : showEmpty ? (
           <EmptyPanel icon={tab === 'receipt' ? 'receipt' : 'plan'} title={emptyTitle} body={emptyBody} centered />
         ) : tab === 'receipt' && receipt ? (
@@ -610,12 +618,12 @@ export const PlanPanel = memo(function PlanPanel({
         ) : doc ? (
           <>
             {doc.lead ? (
-              <div className="mt-3">
+              <div>
                 <MarkdownContent content={doc.lead} readOnlyTasks wrapTables tone="secondary" />
               </div>
             ) : null}
             {sections.map((section, index) => (
-              <section key={`${index}:${section.heading}`} className="mt-5">
+              <section key={`${index}:${section.heading}`} className={index === 0 && !doc.lead ? undefined : 'mt-5'}>
                 <h3 className={SECTION_LABEL}>{section.heading}</h3>
                 {section.body ? (
                   <div className="mt-2">
@@ -626,7 +634,7 @@ export const PlanPanel = memo(function PlanPanel({
             ))}
           </>
         ) : (
-          <div className="mt-3">
+          <div>
             <MarkdownContent content={content ?? ''} readOnlyTasks wrapTables tone="secondary" />
           </div>
         )}
