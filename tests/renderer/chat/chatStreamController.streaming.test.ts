@@ -11,25 +11,6 @@ async function flushStreamPatches(): Promise<void> {
 }
 
 describe('createChatStreamController', () => {
-  it('persists turn collapse across transcript remounts', () => {
-    const controller = createChatStreamController({ workspacePath: '/ws' })
-
-    expect(controller.collapsedTurnIndices).toEqual([])
-
-    controller.toggleTurnCollapsed(0)
-    expect(controller.collapsedTurnIndices).toEqual([0])
-
-    controller.toggleTurnCollapsed(0)
-    expect(controller.collapsedTurnIndices).toEqual([])
-
-    controller.toggleTurnCollapsed(1)
-    controller.toggleTurnCollapsed(2)
-    expect(controller.collapsedTurnIndices).toEqual([1, 2])
-
-    controller.reset()
-    expect(controller.collapsedTurnIndices).toEqual([])
-  })
-
   it('re-notifies agent mode when a stale dedup cache would swallow a live divergence', () => {
     let liveMode: 'ask' | 'plan' | 'agent' = 'agent'
     const onAgentModeChange = vi.fn((mode: 'ask' | 'plan' | 'agent') => {

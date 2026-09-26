@@ -51,12 +51,6 @@ describe('perf matrix scenario 3 — long transcript row build', () => {
 })
 
 describe('live cost of the main surfaces', () => {
-  it('keeps live-early virtualization on the legacy transcript', () => {
-    const root = join(__dirname, '../../../src/renderer/src')
-    const chatView = readFileSync(join(root, 'features/chat/ChatView.tsx'), 'utf8')
-    expect(chatView).toMatch(/virtualizeLiveEarly/)
-  })
-
   it('bounds the task record by folding, deferring and memoising instead', () => {
     const root = join(__dirname, '../../../src/renderer/src')
     const pane = readFileSync(join(root, 'features/task/TaskPane.tsx'), 'utf8')

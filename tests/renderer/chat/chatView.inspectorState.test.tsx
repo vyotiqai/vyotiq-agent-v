@@ -4,8 +4,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { ChatView } from '@renderer/features/chat/ChatView'
-import { DEFAULT_SETTINGS, emptySecretStatus } from '@shared/ipc'
-import { resolveEffectiveSettings } from '@shared/effectiveSettings'
 import type { UiItem } from '@shared/transcript'
 
 beforeEach(() => {
@@ -35,26 +33,11 @@ afterEach(() => {
 const baseProps = {
   items: [] as UiItem[],
   running: false,
-  error: null,
-  hasWorkspace: true,
   workspacePath: '/ws',
-  provider: 'ollama' as const,
-  model: 'qwen2.5',
   // A task is on screen: a new task keeps the inspector out of the way until asked.
   activeRunId: 'run-1',
-  chatSettings: {
-    provider: 'ollama' as const,
-    model: 'qwen2.5',
-    keepRecentTurns: 12,
-    thinkingEnabled: true,
-    thinkingEffort: 'medium' as const,
-    showThinking: true
-  },
-  onChatSettingsChange: vi.fn(),
-  onProviderModel: vi.fn(),
   onSend: vi.fn(),
-  onStop: vi.fn(),
-  secrets: emptySecretStatus()
+  onStop: vi.fn()
 }
 
 function toolItem(
@@ -187,7 +170,7 @@ describe('Inspector tabs: live state from the run', () => {
 
 describe('Inspector body when a task loads after the first render', () => {
   it('mounts the tab the inspector opens on, without a click', () => {
-    const props = { ...baseProps, chatSettings: resolveEffectiveSettings(DEFAULT_SETTINGS, null) }
+    const props = baseProps
     // Launch: the window draws before the task's record has loaded, so the
     // first render is a new task and the inspector stays out of the way.
     const { rerender } = render(<ChatView {...props} activeRunId={null} items={[]} />)

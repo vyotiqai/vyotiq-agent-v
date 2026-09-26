@@ -1,10 +1,10 @@
 import type { Ref } from 'react'
-import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { MessageList } from './components/MessageList'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AgentBrowserPanel } from './components/AgentBrowserPanel'
 import type { WorkspaceFileOpenRequest } from './components/FilesPanel'
 import { ChangesPanel } from './components/ChangesPanel'
 import { ConfirmFileList } from './components/ConfirmFileList'
+import { EmptyPanel } from './components/PanelChrome'
 import { PlanPanel } from './components/PlanPanel'
 import {
   INSPECTOR_DETAIL_MAX,
@@ -14,37 +14,19 @@ import {
   type InspectorTabState
 } from '@renderer/features/inspector/Inspector'
 import { useAgentFileMarks } from '@renderer/features/inspector/agentFileMarks'
-import { Composer } from './components/composer'
-import { RunSessionProvider } from './RunSessionContext'
-import { AgentInstancePane } from './components/AgentInstancePane'
-import { ChatTranscriptStage } from './components/ChatTranscriptStage'
-import { useInlineInstanceUi } from './hooks/useInlineInstanceUi'
-import { useRunGoal } from './hooks/useRunGoal'
-import { useRunFeedback } from './hooks/useRunFeedback'
 import {
-  type AgentInstanceUiState
-} from '@shared/utils/agentInstance'
-import {
-  useControllerWriteCheckpoint,
   useAgentFileFocus,
   useAgentLiveActivity,
-  useGitRevision,
-  useHasChatItems
+  useGitRevision
 } from './components/ChatStreamLeaves'
 import { useGitChrome } from './components/GitChrome'
-import type { UiAgentQuestionAnswer, UiItem } from '@shared/transcript'
+import type { UiItem } from '@shared/transcript'
 import type {
   AgentBrowserState,
-  AgentInteractionMode,
-  ChatMessage,
-  ProviderId,
-  ToolApprovalDecision,
   WorkspaceEditorRecoveryLoadResult
 } from '@shared/ipc'
-import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
-import { useChatErrorSurfaces } from './hooks/composerShared'
 import { ErrorBoundary } from '@renderer/lib/ErrorBoundary'
-import { Alert, Button, PanelResizeHandle, pushToast } from '@renderer/lib/ui'
+import { Button, PanelResizeHandle, pushToast } from '@renderer/lib/ui'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { usePersistedBoolean } from '@renderer/lib/hooks/usePersistedBoolean'
 import { usePersistedNumber } from '@renderer/lib/hooks/usePersistedNumber'
@@ -66,17 +48,10 @@ import { PANEL_SHORTCUT } from '@renderer/lib/utils/dockPanels'
 import { formatPathLabel, truncateMiddle } from '@shared/utils/displayPath'
 import { toWorkspaceRelPath } from '@shared/utils/workspacePath'
 import { cn } from '@renderer/lib/ui/cn'
-import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { focusComposerMessage, matchShortcut, shouldBlockPanelShortcut } from '@renderer/lib/shortcuts'
 import { INSPECTOR_TAB_SHORTCUTS } from '@renderer/lib/shortcuts/bindings'
-import type { ChatItemsStore, ChatMetaStore } from './chatStores'
-import type { StepUsageTotals } from '@shared/utils/runTelemetry'
+import type { ChatItemsStore } from './chatStores'
 import { ChatPaneHost, type PaneRenderOptions } from './ChatPaneHost'
-import {
-  buildComposerSendProps,
-  lastUserMessageIndex,
-  useComposerEditState
-} from './hooks/composerShared'
 import type { PaneCapacityContext } from '@renderer/lib/hooks/useWorkspaceManager'
 import type { ChatPane, PaneDropZone } from '@renderer/lib/chat/chatPaneLayout'
 import { consumeWorkspaceFileRequest, useWorkspaceFileRequest } from '@renderer/lib/chat/workspaceFileRequests'
@@ -94,83 +69,46 @@ const TerminalPanel = lazy(() =>
 const PrPanel = lazy(() => import('./components/PrPanel').then((m) => ({ default: m.PrPanel })))
 
 function DockPanelSuspenseFallback() {
-  return <div className="min-h-0 min-w-0 flex-1 animate-pulse bg-surface/40" aria-busy="true" />
+  return <div className="min-h-0 min-w-0 flex-1 animate-pulse bg-surface" aria-busy="true" />
 }
 
-const MemoComposer = memo(Composer)
+/**
+ * The work area before the pane layout exists — the boot frame, or a
+ * workspace list that failed to load. Pane-shaped, so the first real pane
+ * lands on the same edges.
+ */
+function PanePlaceholder({ loadError }: { loadError: string | null }) {
+  return (
+    <div
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
+      data-chat-pane-placeholder
+      aria-busy={loadError ? undefined : true}
+    >
+      <div className="flex h-10 shrink-0 items-center border-b border-border pl-4 pr-2" />
+      {loadError ? (
+        <div role="alert" className="flex min-h-0 flex-1 flex-col">
+          <EmptyPanel centered icon="warning" title="Couldn’t load workspaces" body={loadError} />
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1" />
+      )}
+    </div>
+  )
+}
 
 export function ChatView({
   items,
   itemsStore,
-  metaStore,
   running,
   invokeId = null,
   pendingRun = false,
-  error,
-  errorCode = null,
-  networkWait = null,
-  compacting = false,
-  incomplete,
-  turnStatus = null,
-  onContinue,
-  contextUsage,
-  turnUsage,
-  onCompactContext,
-  operationalError,
-  hasWorkspace,
   workspacePath,
   writeConflictedPaths,
-  provider,
-  model,
-  ollamaBaseUrl,
-  customOpenAiBaseUrl,
-  modelsRefreshKey,
-  secrets,
   activeRunId,
-  transcriptLoading,
-  transcriptHasEarlier,
-  transcriptLoadingEarlier,
-  onLoadEarlierMessages,
   headingRef,
   taskTitle = null,
-  onProviderModel,
-  favoriteModels = [],
-  recentModels = [],
-  serviceTier = 'default',
-  onToggleFavorite = () => {},
-  onServiceTierChange = () => {},
-  chatSettings,
-  onChatSettingsChange,
-  agentMode = 'agent',
-  onAgentModeChange = () => {},
   onSend,
   onStop,
-  onEditAndResend,
-  onRevertToUserMessage,
-  messages = [],
-  pendingFollowUps = [],
-  onRemoveFollowUp,
-  onEditFollowUp,
-  onSendFollowUpNow,
-  onDismissError,
-  composerDraft,
-  onComposerDraftChange,
-  restoreScrollTop,
-  scrollRestoreToken,
-  onScrollTopChange,
-  onLoadToolContent,
-  onThinkingToggle,
-  onToolToggle,
-  onGroupToggle,
-  onTurnToggle,
-  onDismissRunError,
-  onApprovalDecision,
-  onQuestionSubmit,
-  collapsedTurns,
-  showThinking = true,
-  chatSurfaceEpoch = 0,
-  mcpServerNames,
-  slashHandlers,
   canUndoWrites = false,
   undoBusy = false,
   onUndoWrites,
@@ -182,114 +120,33 @@ export function ChatView({
   onKeepAllWrites,
   resolveBlockedReason = null,
   multiPane = null,
+  loadError = null,
   paneCount: paneCountProp = 1,
   onPaneCapacityChange,
-  agentInstances,
-  openInstanceRunId: openInstanceRunIdProp = null,
-  onOpenInstanceRunIdChange,
-  getInstanceController,
   openChangesRequest = 0,
   openChangesScope = 'uncommitted',
   onOpenChangesRequestHandled
 }: {
   items: UiItem[]
-  /** When set, transcript leaves subscribe so ChatView/Composer skip token patches. */
+  /** When set, the inspector's leaves subscribe so ChatView skips token patches. */
   itemsStore?: ChatItemsStore
-  /** When set, ContextMeter reads usage via meta store (skips prop fanout). */
-  metaStore?: ChatMetaStore
   running: boolean
   /** Live chatStart invoke id — PlanPanel uses it to detect stale receipts. */
   invokeId?: number | null
   pendingRun?: boolean
-  error: string | null
-  errorCode?: string | null
-  networkWait?: {
-    attempt: number
-    maxAttempts: number
-    retryInMs: number
-    code?: string
-  } | null
-  compacting?: boolean
-  incomplete?: import('@renderer/lib/hooks/createChatStreamController').IncompleteTurnState | null
-  turnStatus?: import('@shared/transcript').TurnOutcome | null
-  onContinue?: () => void
-  contextUsage?: import('./components/composer/ContextMeter').ContextUsageState | null
-  turnUsage?: readonly StepUsageTotals[]
-  onCompactContext?: (
-    focus?: string
-  ) => Promise<{ ok: true; message: string } | { ok: false; message: string }>
-  operationalError?: string | null
-  hasWorkspace: boolean
   workspacePath: string | null
-  provider: ProviderId
-  model: string
-  ollamaBaseUrl?: string
-  customOpenAiBaseUrl?: string
-  modelsRefreshKey?: string | number
-  secrets: Record<import('@shared/ipc').SecretProvider, boolean>
   activeRunId: string | null
-  transcriptLoading?: boolean
-  transcriptHasEarlier?: boolean
-  transcriptLoadingEarlier?: boolean
-  onLoadEarlierMessages?: () => void | Promise<void>
   headingRef?: Ref<HTMLHeadingElement>
   /** The task on screen, named as the navigator names it — the review's heading. */
   taskTitle?: string | null
-  onProviderModel: (provider: ProviderId, model: string) => void
-  favoriteModels?: string[]
-  recentModels?: string[]
-  serviceTier?: import('@shared/ipc').ServiceTier
-  onToggleFavorite?: (provider: ProviderId, model: string) => void
-  onServiceTierChange?: (tier: import('@shared/ipc').ServiceTier) => void
-  chatSettings: EffectiveChatSettings
-  onChatSettingsChange: (patch: ChatSettingsPatch) => void
-  agentMode?: AgentInteractionMode
-  onAgentModeChange?: (mode: AgentInteractionMode) => void
+  /** A failing PR check or a line in the review, handed to the task as an instruction. */
   onSend: (
     text: string,
     images?: string[],
     files?: import('@shared/ipc').AttachedFile[],
     extras?: import('@shared/ipc').ComposerSendExtras
   ) => boolean | void | Promise<boolean | void>
-  onEditAndResend?: (
-    editMessageIndex: number,
-    text: string,
-    images?: string[],
-    files?: import('@shared/ipc').AttachedFile[],
-    extras?: import('@shared/ipc').ComposerSendExtras
-  ) => boolean | void | Promise<boolean | void>
-  onRevertToUserMessage?: (userMessageIndex: number, runN?: number) => boolean | Promise<boolean>
-  /** Full chat messages for seeding inline edit attachments. */
-  messages?: ChatMessage[]
   onStop: () => void
-  pendingFollowUps?: import('@renderer/lib/hooks/createChatStreamController').PendingFollowUpState[]
-  onRemoveFollowUp?: (id: string) => void
-  onEditFollowUp?: (id: string, text: string) => boolean | Promise<boolean>
-  onSendFollowUpNow?: (id: string) => void
-  onDismissError?: () => void
-  composerDraft?: string
-  onComposerDraftChange?: (draft: string) => void
-  restoreScrollTop?: number
-  scrollRestoreToken?: number
-  onScrollTopChange?: (scrollTop: number) => void
-  onLoadToolContent?: (toolCallId: string) => Promise<string | null>
-  onThinkingToggle?: (messageId: string, expanded: boolean) => void
-  onToolToggle?: (toolCallId: string, expanded: boolean) => void
-  onGroupToggle?: (anchorToolCallId: string, expanded: boolean) => void
-  onTurnToggle?: (turnIndex: number) => void
-  /** Dismiss (and remember) one run_error row in the transcript. */
-  onDismissRunError?: (itemId: string) => void
-  onApprovalDecision?: (requestId: string, decision: ToolApprovalDecision) => void | Promise<void>
-  onQuestionSubmit?: (requestId: string, answers: UiAgentQuestionAnswer[]) => void | Promise<void>
-  collapsedTurns?: ReadonlySet<number>
-  showThinking?: boolean
-  mcpServerNames?: ReadonlyMap<string, string>
-  /**
-   * Bumps on workspace / run-tab switches (not draft→run id assignment) so the
-   * transcript and composer remount without clearing mid-send attachments.
-   */
-  chatSurfaceEpoch?: number
-  slashHandlers?: import('./components/composer/slashCommandExecute').SlashClientHandlers
   canUndoWrites?: boolean
   undoBusy?: boolean
   onUndoWrites?: () => void | Promise<unknown>
@@ -320,16 +177,10 @@ export function ChatView({
     getPaneTitle: (pane: ChatPane) => string
     renderPane: (pane: ChatPane, options: PaneRenderOptions) => React.ReactNode
   } | null
+  /** Why the pane layout never arrived (the workspace list failed to load). */
+  loadError?: string | null
   paneCount?: number
   onPaneCapacityChange?: (ctx: PaneCapacityContext) => void
-  agentInstances?: Record<string, AgentInstanceUiState>
-  /** Controlled open instance sub-session (sidebar / parent shared). */
-  openInstanceRunId?: string | null
-  onOpenInstanceRunIdChange?: (runId: string | null) => void
-  getInstanceController?: (
-    runId: string,
-    workspacePath: string
-  ) => import('@renderer/lib/hooks/createChatStreamController').ChatStreamController | null
   openChangesRequest?: number
   /** Which changes that request opens: the workspace's (default) or this task's. */
   openChangesScope?: 'agent' | 'uncommitted'
@@ -337,54 +188,6 @@ export function ChatView({
   onOpenChangesRequestHandled?: () => void
 }) {
   const paneCount = paneCountProp ?? multiPane?.panes.length ?? 1
-  const instanceOpenControlled =
-    onOpenInstanceRunIdChange != null
-      ? {
-          openInstanceRunId: openInstanceRunIdProp,
-          setOpenInstanceRunId: onOpenInstanceRunIdChange
-        }
-      : undefined
-  const {
-    openInstanceRunId: viewingInstanceRunId,
-    openInstancePane,
-    closeInstancePane,
-    pendingGates
-  } = useInlineInstanceUi(agentInstances, activeRunId, instanceOpenControlled)
-
-  // The dock Changes panel must reflect the instance run being viewed — the
-  // parent run's items never contain the child's tool rows or write checkpoint.
-  const [instancePaneController, setInstancePaneController] = useState<
-    import('@renderer/lib/hooks/createChatStreamController').ChatStreamController | null
-  >(null)
-  const instanceItemsStore = useMemo<ChatItemsStore | undefined>(() => {
-    if (!instancePaneController) return undefined
-    return {
-      subscribeItems: instancePaneController.subscribeItems.bind(instancePaneController),
-      getItemsRevision: instancePaneController.getItemsRevision.bind(instancePaneController),
-      getItems: () => instancePaneController.items
-    }
-  }, [instancePaneController])
-  const instanceWriteCheckpoint = useControllerWriteCheckpoint(instancePaneController)
-  const instanceWriteCheckpointFiles = useMemo(() => {
-    const files = instanceWriteCheckpoint?.files
-    if (!files?.length || instanceWriteCheckpoint?.undone) return undefined
-    return files.map((f) => ({ path: f.path, action: f.action }))
-  }, [instanceWriteCheckpoint])
-
-const runGoal = useRunGoal({
-  workspacePath,
-  runId: activeRunId,
-  running,
-  active: true
-})
-  const runFeedback = useRunFeedback(workspacePath, activeRunId, !running)
-  const onOpenAgentInstance = useMemo(
-    () =>
-      workspacePath != null
-        ? (instanceRunId: string) => openInstancePane(instanceRunId)
-        : undefined,
-    [openInstancePane, workspacePath]
-  )
   /**
    * The inspector's tab. It outlives a hide, so Ctrl I brings back the tab you
    * left; whether the inspector is on screen is its own switch.
@@ -445,20 +248,6 @@ const runGoal = useRunGoal({
       }),
     [paneCount]
   )
-  // Boolean presence only — stays Object.is-stable across pure text_delta frames.
-  // Item subscription stays on the leaves (MessageList/ChangesPanel); ChatView
-  // reads only Object.is-stable booleans so token patches skip these levels.
-  const hasItems = useHasChatItems(itemsStore, items)
-  const { chatBannerError, turnFailed, turnFailureLabel } = useChatErrorSurfaces({
-    itemsStore,
-    items,
-    error,
-    errorCode,
-    incomplete,
-    turnStatus
-  })
-  const operationalBannerError = operationalError ?? null
-  const surfaceKey = `${workspacePath ?? 'none'}:${chatSurfaceEpoch}`
   const [prNumber, setPrNumber] = useState<number | null>(null)
   /** Visited panels stay mounted (hidden) when switching so PTY/browser state survives. */
   const [mountedPanels, setMountedPanels] = useState<ChatRightPanelId[]>(() =>
@@ -490,11 +279,7 @@ const runGoal = useRunGoal({
   /** Drives the inspector tabs' live dots: what the run has in flight. */
   const liveActivity = useAgentLiveActivity(running, items, itemsStore)
   /** What this task edited and read — the Files tab marks them. */
-  const agentFileMarks = useAgentFileMarks(
-    instancePaneController ? [] : items,
-    instanceItemsStore ?? itemsStore,
-    workspacePath
-  )
+  const agentFileMarks = useAgentFileMarks(items, itemsStore, workspacePath)
   const filesFlushRef = useRef<(() => Promise<boolean>) | null>(null)
   const registerFilesFlush = useCallback(
     (flush: (() => Promise<boolean>) | null): void => {
@@ -627,50 +412,6 @@ const runGoal = useRunGoal({
     consumeWorkspaceFileRequest(fileRequest.seq)
     openWorkspaceFile(fileRequest.path)
   }, [fileRequest, workspacePath, openWorkspaceFile])
-  const transcriptRunSession = useMemo(
-    () => ({
-      workspacePath: workspacePath ?? null,
-      runId: activeRunId ?? null,
-      agentMode,
-      agentInstances,
-      onOpenAgentInstance,
-      onOpenWorkspaceFile: openWorkspaceFile,
-      onOpenPanel: setRightPanel
-    }),
-    [
-      workspacePath,
-      activeRunId,
-      agentMode,
-      agentInstances,
-      onOpenAgentInstance,
-      openWorkspaceFile,
-      setRightPanel
-    ]
-  )
-  const transcriptEmptyLabel =
-    activeRunId == null && workspacePath
-      ? `New chat in ${formatWorkspaceName(workspacePath)}`
-      : undefined
-  const composerRunSession = useMemo(
-    () => ({
-      workspacePath: workspacePath ?? null,
-      runId: activeRunId ?? null,
-      agentMode,
-      agentInstances,
-      onOpenAgentInstance,
-      onOpenWorkspaceFile: openWorkspaceFile,
-      onOpenPanel: setRightPanel
-    }),
-    [
-      workspacePath,
-      activeRunId,
-      agentMode,
-      agentInstances,
-      onOpenAgentInstance,
-      openWorkspaceFile,
-      setRightPanel
-    ]
-  )
   const handleWorkspaceFileOpened = useCallback((request: WorkspaceFileOpenRequest): void => {
     setRequestedFilePath((current) =>
       current &&
@@ -680,16 +421,6 @@ const runGoal = useRunGoal({
         : current
     )
   }, [])
-
-  const mergedSlashHandlers = useMemo(
-    () => ({
-      ...slashHandlers,
-      onOpenFile: (path: string) => {
-        openWorkspaceFile(path)
-      }
-    }),
-    [openWorkspaceFile, slashHandlers]
-  )
 
   const openChangesPanel = useCallback(
     (scope: 'agent' | 'uncommitted' = 'uncommitted', path?: string) => {
@@ -925,8 +656,7 @@ const runGoal = useRunGoal({
       return ''
     }
   }, [browserLive?.url])
-  const pendingChangeCount =
-    (instancePaneController ? instanceWriteCheckpointFiles : writeCheckpointFiles)?.length ?? 0
+  const pendingChangeCount = writeCheckpointFiles?.length ?? 0
 
   /**
    * What each inspector tab says without being opened. A live dot means the
@@ -993,127 +723,6 @@ const runGoal = useRunGoal({
   const showInspector = useCallback(() => setRightPanel(inspectorTab), [inspectorTab, setRightPanel])
   const onShowInspector = inspectorVisible ? undefined : showInspector
 
-  const {
-    editingUserMessageIndex,
-    editDraft,
-    setEditDraft,
-    editSeeds,
-    editing,
-    cancelPromptEdit,
-    beginPromptEdit,
-    submitPromptEdit,
-    beginPromptRevert,
-    sendFromDock
-  } = useComposerEditState({
-    surfaceKey,
-    messages,
-    onSend,
-    onEditAndResend,
-    onRevertToUserMessage,
-    onAfterRevert: notifyGitMutated
-  })
-
-  const onEditLastUserMessage = useCallback((): boolean => {
-    if (!onEditAndResend) return false
-    const index = lastUserMessageIndex(messages)
-    if (index == null) return false
-    beginPromptEdit(index)
-    return true
-  }, [onEditAndResend, messages, beginPromptEdit])
-
-  const editComposer =
-    editing && onEditAndResend ? (
-      <MemoComposer
-        key={`edit-composer:${surfaceKey}:${editingUserMessageIndex}`}
-        provider={provider}
-        model={model}
-        running={running}
-        disabled={!hasWorkspace}
-        hasTranscript
-        hasWorkspace={hasWorkspace}
-        workspacePath={workspacePath}
-        ollamaBaseUrl={ollamaBaseUrl}
-        customOpenAiBaseUrl={customOpenAiBaseUrl}
-        modelsRefreshKey={modelsRefreshKey}
-        secrets={secrets}
-        draft={editDraft}
-        onDraftChange={setEditDraft}
-        onProviderModel={onProviderModel}
-        favoriteModels={favoriteModels}
-        recentModels={recentModels}
-        serviceTier={serviceTier}
-        onToggleFavorite={onToggleFavorite}
-        onServiceTierChange={onServiceTierChange}
-        chatSettings={chatSettings}
-        onChatSettingsChange={onChatSettingsChange}
-        agentMode={agentMode}
-        onAgentModeChange={onAgentModeChange}
-        onSend={submitPromptEdit}
-        onStop={onStop}
-        activeRunId={activeRunId}
-        contextUsage={metaStore ? undefined : contextUsage}
-        metaStore={metaStore}
-        onCompactContext={onCompactContext}
-        slashHandlers={mergedSlashHandlers}
-        variant="inline"
-        bannerError={chatBannerError}
-        secondaryBannerError={operationalBannerError}
-        errorCode={errorCode}
-        onRetryNetwork={onContinue}
-        onDismissError={onDismissError}
-        className="w-full"
-        seedImages={editSeeds.images}
-        seedFiles={editSeeds.files}
-        seedAudio={editSeeds.audio}
-        seedNativeFiles={editSeeds.nativeFiles}
-        onCancelEdit={cancelPromptEdit}
-        composerPlaceholder="Edit message…"
-      />
-    ) : null
-
-  const composerProps = buildComposerSendProps({
-    provider,
-    model,
-    running,
-    hasWorkspace,
-    hasTranscript: hasItems,
-    workspacePath,
-    ollamaBaseUrl,
-    customOpenAiBaseUrl,
-    modelsRefreshKey,
-    secrets,
-    draft: composerDraft,
-    onDraftChange: onComposerDraftChange,
-    onProviderModel,
-    favoriteModels,
-    recentModels,
-    serviceTier,
-    onToggleFavorite,
-    onServiceTierChange,
-    chatSettings,
-    onChatSettingsChange,
-    agentMode,
-    onAgentModeChange,
-    onSend: sendFromDock,
-    onStop,
-    pendingFollowUps,
-    onRemoveFollowUp,
-    onEditFollowUp,
-    onSendFollowUpNow,
-    incomplete,
-    onContinue,
-    errorCode,
-    bannerError: chatBannerError,
-    secondaryBannerError: operationalBannerError,
-    activeRunId,
-    onDismissError,
-    contextUsage,
-    metaStore,
-    onCompactContext,
-    slashHandlers: mergedSlashHandlers,
-    onEditLastUserMessage
-  })
-
   const renderMultiPane = useCallback(
     (pane: ChatPane, options: PaneRenderOptions) =>
       multiPane!.renderPane(pane, {
@@ -1124,12 +733,12 @@ const runGoal = useRunGoal({
     [multiPane, onOpenAgentChanges, openWorkspaceFile]
   )
 
-  const agentColumn =
-    multiPane && multiPane.panes.length >= 1 ? (
-      <>
-        <h1 ref={headingRef} tabIndex={-1} className="sr-only">
-          Tasks
-        </h1>
+  const agentColumn = (
+    <>
+      <h1 ref={headingRef} tabIndex={-1} className="sr-only">
+        Tasks
+      </h1>
+      {multiPane && multiPane.panes.length >= 1 ? (
         <ChatPaneHost
           panes={multiPane.panes}
           focusedPaneId={multiPane.focusedPaneId}
@@ -1143,116 +752,18 @@ const runGoal = useRunGoal({
           getPaneTitle={multiPane.getPaneTitle}
           renderPane={renderMultiPane}
         />
-      </>
-    ) : (
-    <>
-      <h1 ref={headingRef} tabIndex={-1} className="sr-only">
-        Tasks
-      </h1>
-
-      {viewingInstanceRunId && workspacePath ? (
-        <AgentInstancePane
-          key={viewingInstanceRunId}
-          workspacePath={workspacePath}
-          instanceRunId={viewingInstanceRunId}
-          instanceMeta={agentInstances?.[viewingInstanceRunId]}
-          getController={getInstanceController}
-          onControllerChange={setInstancePaneController}
-          onShowInspector={onShowInspector}
-          pendingGates={pendingGates}
-          onOpenInstance={openInstancePane}
-          onClose={closeInstancePane}
-          showThinking={showThinking}
-          onOpenWorkspaceFile={openWorkspaceFile}
-        />
       ) : (
-        <ChatTranscriptStage
-          pendingGates={pendingGates}
-          onOpenInstance={openInstancePane}
-          goal={runGoal.goal}
-          loop={runGoal.loop}
-          running={running}
-          onGoalPause={runGoal.pause}
-          onGoalResume={runGoal.resume}
-          onGoalComplete={runGoal.complete}
-          onGoalActivate={runGoal.activate}
-          onGoalDismiss={runGoal.dismiss}
-          onStopLoop={runGoal.stopLoop}
-          onStopRun={onStop}
-          transcript={
-            <RunSessionProvider value={transcriptRunSession}>
-              <MessageList
-                key={`transcript:${surfaceKey}`}
-                emptyLabel={transcriptEmptyLabel}
-                workspacePath={workspacePath ?? undefined}
-                runFeedback={runFeedback}
-                items={items}
-                itemsStore={itemsStore}
-                virtualizeLiveEarly
-                pendingRun={pendingRun}
-                running={running}
-                networkWait={networkWait}
-                compacting={compacting}
-                turnFailed={turnFailed}
-                turnFailureLabel={turnFailureLabel}
-                turnStatus={turnStatus}
-                transcriptLoading={transcriptLoading}
-                transcriptHasEarlier={transcriptHasEarlier}
-                transcriptLoadingEarlier={transcriptLoadingEarlier}
-                onLoadEarlierMessages={onLoadEarlierMessages}
-                restoreScrollTop={restoreScrollTop}
-                scrollRestoreToken={scrollRestoreToken}
-                onScrollTopChange={onScrollTopChange}
-                onLoadToolContent={onLoadToolContent}
-                onThinkingToggle={onThinkingToggle}
-                onToolToggle={onToolToggle}
-                onGroupToggle={onGroupToggle}
-                onTurnToggle={onTurnToggle}
-                onDismissRunError={onDismissRunError}
-                onApprovalDecision={onApprovalDecision}
-                onQuestionSubmit={onQuestionSubmit}
-                onRetryNetwork={onContinue}
-                collapsedTurns={collapsedTurns}
-                showThinking={showThinking}
-                mcpServerNames={mcpServerNames}
-                onOpenChanges={onOpenAgentChanges}
-                editingUserMessageIndex={editingUserMessageIndex}
-                editComposer={editComposer}
-                onBeginEditUserMessage={onEditAndResend ? beginPromptEdit : undefined}
-                onRevertUserMessage={onRevertToUserMessage ? beginPromptRevert : undefined}
-                messageCount={messages.length}
-                turnUsage={turnUsage}
-                metaStore={metaStore}
-              />
-            </RunSessionProvider>
-          }
-          composer={
-            <RunSessionProvider value={composerRunSession}>
-              <div
-                className={editing ? 'hidden' : undefined}
-                inert={editing ? true : undefined}
-                aria-hidden={editing || undefined}
-              >
-                <MemoComposer
-                  key={`composer:${surfaceKey}`}
-                  {...composerProps}
-                  variant="dock"
-                  onDismissError={onDismissError}
-                />
-              </div>
-            </RunSessionProvider>
-          }
-        />
+        <PanePlaceholder loadError={loadError} />
       )}
     </>
-    )
+  )
 
   // A failing PR check becomes an instruction to the task, sent like any other.
   const handToAgent = useCallback(
     (instruction: string) => {
-      void sendFromDock(instruction)
+      void onSend(instruction)
     },
-    [sendFromDock]
+    [onSend]
   )
 
   // A panel that fails to render says so in its own space; opening another
@@ -1355,39 +866,37 @@ const runGoal = useRunGoal({
         >
           <ErrorBoundary panel={INSPECTOR_TAB_LABEL.changes} resetKey={panelResetKey}>
             <ChangesPanel
-              items={instancePaneController ? [] : items}
-              itemsStore={instanceItemsStore ?? itemsStore}
+              items={items}
+              itemsStore={itemsStore}
               workspacePath={workspacePath}
               gitRevision={gitRevision}
               chrome={gitChrome}
               onGitMutated={notifyGitMutated}
               onOpenFile={openWorkspaceFile}
               onViewPr={() => setRightPanel('pr')}
-              writeFileResolutions={instancePaneController ? undefined : writeFileResolutions}
-              resolvablePaths={instancePaneController ? undefined : writeResolvablePaths}
-              conflictedPaths={instancePaneController ? undefined : writeConflictedPaths}
-              writeCheckpointFiles={
-                instancePaneController ? instanceWriteCheckpointFiles : writeCheckpointFiles
-              }
-              canResolve={instancePaneController ? false : canUndoWrites}
-              resolveBusy={instancePaneController ? false : undoBusy}
-              resolveBlockedReason={instancePaneController ? null : resolveBlockedReason}
-              onKeepWriteFile={instancePaneController ? undefined : keepWriteFile}
-              onDiscardWriteFile={instancePaneController ? undefined : discardWriteFile}
-              onKeepAllWrites={instancePaneController ? undefined : keepAllWrites}
-              onDiscardAllWrites={instancePaneController ? undefined : discardAllWrites}
+              writeFileResolutions={writeFileResolutions}
+              resolvablePaths={writeResolvablePaths}
+              conflictedPaths={writeConflictedPaths}
+              writeCheckpointFiles={writeCheckpointFiles}
+              canResolve={canUndoWrites}
+              resolveBusy={undoBusy}
+              resolveBlockedReason={resolveBlockedReason}
+              onKeepWriteFile={keepWriteFile}
+              onDiscardWriteFile={discardWriteFile}
+              onKeepAllWrites={keepAllWrites}
+              onDiscardAllWrites={discardAllWrites}
               active={visiblePanelId === 'changes'}
-              running={instancePaneController ? false : running}
-              onStopRun={instancePaneController ? undefined : onStop}
+              running={running}
+              onStopRun={onStop}
               preferredScope={changesPreferredScope}
               preferredScopeToken={changesScopeToken}
               preferredSelectedPath={changesPreferredPath}
               preferredSelectedPathToken={changesScopeToken}
-              runId={instancePaneController ? null : activeRunId}
+              runId={activeRunId}
               variant={reviewing ? 'review' : 'panel'}
               reviewTitle={taskTitle ?? 'Review'}
               onReviewBack={toggleInspectorExpanded}
-              onAskAboutLine={instancePaneController ? undefined : handToAgent}
+              onAskAboutLine={handToAgent}
             />
           </ErrorBoundary>
         </div>

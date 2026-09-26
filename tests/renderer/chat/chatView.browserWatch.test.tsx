@@ -4,7 +4,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { ChatView } from '@renderer/features/chat/ChatView'
-import { emptySecretStatus } from '@shared/ipc'
 import type { AgentBrowserState } from '@shared/ipc'
 
 beforeEach(() => {
@@ -36,26 +35,11 @@ afterEach(() => {
 const baseProps = {
   items: [],
   running: false,
-  error: null,
-  hasWorkspace: true,
   workspacePath: '/ws',
-  provider: 'ollama' as const,
-  model: 'qwen2.5',
   // A task is on screen: a new task keeps the inspector out of the way until asked.
   activeRunId: 'run-1',
-  chatSettings: {
-    provider: 'ollama' as const,
-    model: 'qwen2.5',
-    keepRecentTurns: 12,
-    thinkingEnabled: true,
-    thinkingEffort: 'medium' as const,
-    showThinking: true
-  },
-  onChatSettingsChange: vi.fn(),
-  onProviderModel: vi.fn(),
   onSend: vi.fn(),
-  onStop: vi.fn(),
-  secrets: emptySecretStatus()
+  onStop: vi.fn()
 }
 
 function busyBrowserState(): AgentBrowserState {

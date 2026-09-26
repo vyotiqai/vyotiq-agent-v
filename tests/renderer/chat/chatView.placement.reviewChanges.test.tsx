@@ -4,7 +4,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ChatView } from '@renderer/features/chat/ChatView'
-import { emptySecretStatus } from '@shared/ipc'
 import { clampDockWidthPx, DOCK_WIDTH_DEFAULT_PX, readSidebarWidthPxForCapacity } from '@renderer/lib/utils/layout'
 import { minimalReadyPlanMarkdown } from '@renderer/features/chat/utils/planDraft'
 
@@ -21,7 +20,6 @@ beforeEach(() => {
   } catch {
     /* ignore */
   }
-  // The docked composer asks the main process about git as soon as it mounts.
   Object.defineProperty(window, 'vyotiq', {
     configurable: true,
     writable: true,
@@ -115,26 +113,11 @@ afterEach(() => {
 const baseProps = {
   items: [],
   running: false,
-  error: null,
-  hasWorkspace: true,
   workspacePath: '/ws',
-  provider: 'ollama' as const,
-  model: 'qwen2.5',
   // A task is on screen: a new task keeps the inspector out of the way until asked.
   activeRunId: 'run-1',
-  chatSettings: {
-    provider: 'ollama' as const,
-    model: 'qwen2.5',
-    keepRecentTurns: 12,
-    thinkingEnabled: true,
-    thinkingEffort: 'medium' as const,
-    showThinking: true
-  },
-  onChatSettingsChange: vi.fn(),
-  onProviderModel: vi.fn(),
   onSend: vi.fn(),
-  onStop: vi.fn(),
-  secrets: emptySecretStatus()
+  onStop: vi.fn()
 }
 
 /** Heavy dock panels are React.lazy code-split — wait for the chunk. */

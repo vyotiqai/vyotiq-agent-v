@@ -102,7 +102,6 @@ export function useChatStream(workspacePath: string | null) {
     loadEarlierMessages: controller.loadEarlierMessages.bind(controller),
     syncFromDisk: controller.syncFromDisk.bind(controller),
     loadToolContent: controller.loadToolContent.bind(controller),
-    toggleTurnCollapsed: controller.toggleTurnCollapsed.bind(controller),
     handleApprovalRequest: controller.handleApprovalRequest.bind(controller),
     respondToApproval: controller.respondToApproval.bind(controller),
     handleQuestionRequest: controller.handleQuestionRequest.bind(controller),

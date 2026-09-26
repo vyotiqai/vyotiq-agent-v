@@ -1362,14 +1362,6 @@ export type ChatStreamController = ChatStreamState & {
   dismissRunError: (itemId: string) => void
   /** Lazy-load full tool output from disk when IPC preview was truncated. */
   loadToolContent: (toolCallId: string) => Promise<string | null>
-  /** Persist thinking block expand/collapse across transcript remounts. */
-  setThinkingExpanded: (messageId: string, expanded: boolean) => void
-  /** Persist tool detail expand/collapse across transcript remounts. */
-  setToolExpanded: (toolCallId: string, expanded: boolean) => void
-  /** Persist an activity group's disclosure state, keyed by its first tool row. */
-  setGroupExpanded: (anchorToolCallId: string, expanded: boolean) => void
-  /** Persist turn summary collapse across transcript remounts. */
-  toggleTurnCollapsed: (turnIndex: number) => void
   /** Park a gated tool call on its transcript row until the reader answers. */
   handleApprovalRequest: (request: ToolApprovalRequest) => void
   respondToApproval: (requestId: string, decision: ToolApprovalDecision) => Promise<void>
@@ -4373,56 +4365,6 @@ export function createChatStreamController(
     })
   }
 
-  const setToolExpanded = (toolCallId: string, expanded: boolean): void => {
-    if (expanded) expandedToolIds.add(toolCallId)
-    else expandedToolIds.delete(toolCallId)
-    if (!expanded) {
-      const preview = toolContentPreviews.get(toolCallId)
-      const full = toolContentCache.get(toolCallId)
-      if (preview != null && full != null && full !== preview) {
-        toolContentCache.delete(toolCallId)
-        patch({
-          items: state.items.map((item) =>
-            item.kind === 'tool' && (item.id === toolCallId || item.tool.id === toolCallId)
-              ? {
-                  ...item,
-                  toolExpanded: false,
-                  tool: {
-                    ...item.tool,
-                    content: preview,
-                    contentTruncated: true
-                  }
-                }
-              : item
-          )
-        })
-        notifyExpansions()
-        return
-      }
-    }
-    patch({
-      items: state.items.map((item) =>
-        item.kind === 'tool' && (item.id === toolCallId || item.tool.id === toolCallId)
-          ? { ...item, toolExpanded: expanded }
-          : item
-      )
-    })
-    notifyExpansions()
-  }
-
-  const setGroupExpanded = (anchorToolCallId: string, expanded: boolean): void => {
-    if (expanded) expandedGroupIds.add(anchorToolCallId)
-    else expandedGroupIds.delete(anchorToolCallId)
-    patch({
-      items: state.items.map((item) =>
-        item.kind === 'tool' && (item.id === anchorToolCallId || item.tool.id === anchorToolCallId)
-          ? { ...item, groupExpanded: expanded }
-          : item
-      )
-    })
-    notifyExpansions()
-  }
-
   const handleApprovalRequest = (request: ToolApprovalRequest): void => {
     if (closedRuns.has(request.runId)) return
     if (runId && request.runId !== runId) return
@@ -4606,26 +4548,6 @@ export function createChatStreamController(
       items: state.items.filter((_, i) => i !== index),
       ...(current ? { error: null, errorCode: null } : {})
     })
-    notifyExpansions()
-  }
-
-  const setThinkingExpanded = (messageId: string, expanded: boolean): void => {
-    if (expanded) expandedThinkingIds.add(messageId)
-    else expandedThinkingIds.delete(messageId)
-    patch({
-      items: state.items.map((item) =>
-        item.kind === 'message' && item.id === messageId
-          ? { ...item, thinkingExpanded: expanded }
-          : item
-      )
-    })
-    notifyExpansions()
-  }
-
-  const toggleTurnCollapsed = (turnIndex: number): void => {
-    const collapsed = new Set(state.collapsedTurnIndices)
-    if (!collapsed.delete(turnIndex)) collapsed.add(turnIndex)
-    patch({ collapsedTurnIndices: [...collapsed] })
     notifyExpansions()
   }
 
@@ -4964,10 +4886,6 @@ export function createChatStreamController(
     clearError,
     dismissRunError,
     loadToolContent,
-    setThinkingExpanded,
-    setToolExpanded,
-    setGroupExpanded,
-    toggleTurnCollapsed,
     handleApprovalRequest,
     respondToApproval,
     handleQuestionRequest,

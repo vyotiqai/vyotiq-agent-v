@@ -189,9 +189,6 @@ type AgentInstancePaneProps = {
   showThinking?: boolean
   onOpenWorkspaceFile?: (path: string, options?: WorkspaceFileOpenOptions) => void
   approvalAutoFocus?: boolean
-  /** Report the controller backing this pane (WM-shared or pane-owned) so parents
-   * (e.g. the dock Changes panel) can subscribe to the same run's items. */
-  onControllerChange?: (controller: ChatStreamController | null) => void
   /** The instance as the run list has it — its worktree branch, when isolated. */
   instanceRun?: RunSummary | null
   /** The parent task's title, for the way back. */
@@ -230,15 +227,14 @@ export function AgentInstancePane({
   showThinking = true,
   onOpenWorkspaceFile,
   approvalAutoFocus = true,
-  onControllerChange,
   instanceRun = null,
   parentTitle,
   siblings
 }: AgentInstancePaneProps) {
   // Controller resolution must be identity-stable across renders. The WM map can
   // re-key/evict/forget entries mid-run (forgetRunRouting even disposes), and
-  // adopting every identity flip re-fired onControllerChange (parent setState)
-  // plus the catch-up IPC effects below — the churn behind React #185 storms.
+  // adopting every identity flip re-fired the catch-up IPC effects below — the
+  // churn behind React #185 storms.
   // Adopt a shared controller only when it is a genuinely different, live object;
   // otherwise keep the current one and create the pane-owned controller once.
   const sharedRef = useRef<{ key: string; controller: ChatStreamController | null }>({
@@ -259,8 +255,8 @@ export function AgentInstancePane({
       // Adopt the WM-shared controller only over nothing held or a disposed
       // one (WM always disposes before replacing — forgetRunRouting, re-key).
       // Never swap between two live shared controllers: map churn would
-      // re-fire onControllerChange plus the catch-up effects per event — the
-      // engine of the React #185 cascade this guard exists to break.
+      // re-fire the catch-up effects per event — the engine of the React #185
+      // cascade this guard exists to break.
       if (held == null || held.disposed) {
         sharedRef.current.controller = sharedNow
       }
@@ -281,22 +277,6 @@ export function AgentInstancePane({
   )
   if (ownedRef.current && ownedRef.current !== controller) ownedRef.current = null
   const ownsIpc = shared == null
-
-  // Dock surfaces (Changes panel) subscribe to the same run via this — fires on
-  // mount and controller swap, reports null on unmount. Guarded so parent
-  // setState can never fire from a mere re-render.
-  const reportedControllerRef = useRef<ChatStreamController | null>(null)
-  useEffect(() => {
-    if (reportedControllerRef.current === controller) return
-    reportedControllerRef.current = controller
-    onControllerChange?.(controller)
-    return () => {
-      if (reportedControllerRef.current === controller) {
-        reportedControllerRef.current = null
-        onControllerChange?.(null)
-      }
-    }
-  }, [controller, onControllerChange])
 
   const { running, pendingRun, transcriptLoading, transcriptHasEarlier, transcriptLoadingEarlier } =
     useControllerRunningMeta(controller)
