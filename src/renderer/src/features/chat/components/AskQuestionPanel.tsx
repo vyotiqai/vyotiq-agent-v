@@ -110,7 +110,8 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by questionShapeKey
   }, [questionShapeKey])
 
-  // Focus first control; scroll after MessageList's pin-to-bottom rAF so the gate header stays visible.
+  // Focus the first control; the scroll below waits two frames so the record's own
+  // scroll settles first and the gate header stays visible.
   useLayoutEffect(() => {
     const root = rootRef.current
     if (!root) return
@@ -306,13 +307,9 @@ export const AskQuestionPanel = memo(function AskQuestionPanel({
               return (
                 <div key={item.id} className="flex flex-col gap-1.5">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    <div
-                      id={promptId}
-                      className={cn(
-                        'text-sm font-medium text-fg',
-                        multi && !answered && 'opacity-90'
-                      )}
-                    >
+                    {/* MarkdownContent owns size and colour; the quiet
+                        "Unanswered" beside it is what marks an open one. */}
+                    <div id={promptId} className="font-medium">
                       <MarkdownContent content={item.prompt} />
                     </div>
                     {multi ? (
