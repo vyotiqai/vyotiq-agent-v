@@ -47,7 +47,10 @@ describe('ContextMeter', () => {
 
     fireEvent.click(trigger)
 
-    expect(screen.getByRole('dialog', { name: /context details/i })).toBeTruthy()
+    const dialog = screen.getByRole('dialog', { name: /context details/i })
+    // The one popover surface, not a hand-made card.
+    expect(dialog.classList.contains('vy-menu')).toBe(true)
+    expect(dialog.classList.contains('rounded-xl')).toBe(false)
     expect(screen.getByText(/^Context$/)).toBeTruthy()
     expect(screen.getByText(/used of/)).toBeTruthy()
     expect(screen.getAllByText(/45k/).length).toBeGreaterThanOrEqual(1)
@@ -142,7 +145,11 @@ describe('ContextMeter', () => {
     expect(trigger.className).toMatch(/text-danger|bg-danger/)
     expect(trigger.getAttribute('aria-label')).toMatch(/107%/)
     fireEvent.click(trigger)
-    expect(screen.getByText(/over budget/i)).toBeTruthy()
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toMatch(/over budget/i)
+    // Status is never hue alone: the tint carries a warning glyph.
+    expect(alert.querySelector('svg')).toBeTruthy()
+    expect(alert.classList.contains('bg-danger-soft')).toBe(true)
   })
 
   it('shows content-budget headroom aligned with used of budget', () => {
@@ -182,7 +189,10 @@ describe('ContextMeter', () => {
       />
     )
     fireEvent.click(screen.getByRole('button', { name: /context/i }))
-    expect(screen.getByRole('button', { name: /compact history/i })).toBeTruthy()
+    const compact = screen.getByRole('button', { name: /compact history/i })
+    // The Button primitive: its focus ring and outlined geometry.
+    expect(compact.className).toContain('focus-visible:vy-focus-ring')
+    expect(compact.className).toContain('border-border')
   })
 })
 
