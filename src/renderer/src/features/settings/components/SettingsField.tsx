@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { FormCard, FormGroup, FormRow, FormStack } from '@renderer/lib/ui'
+import { FormGroup, FormRow, FormStack } from '@renderer/lib/ui'
 import type { SettingReset } from '../hooks/useSettingsForm'
 
 /**
@@ -23,20 +23,6 @@ export function SettingsStack({
   className?: string
 }) {
   return <FormStack className={className}>{children}</FormStack>
-}
-
-export function SettingsCard({
-  children,
-  className
-}: {
-  children: ReactNode
-  className?: string
-}) {
-  return (
-    <FormCard className={className} dataAttribute={CARD_ATTRIBUTE}>
-      {children}
-    </FormCard>
-  )
 }
 
 /** A caps label over ruled rows; `description` is the note beside the label. */

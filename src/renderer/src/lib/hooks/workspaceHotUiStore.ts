@@ -30,11 +30,9 @@ const EMPTY_HOT_UI: WorkspaceHotUi = Object.freeze({
 
 const byPath = new Map<string, WorkspaceHotUi>()
 const listenersByPath = new Map<string, Set<() => void>>()
-let globalRevision = 0
 const globalListeners = new Set<() => void>()
 
 function notify(path: string): void {
-  globalRevision += 1
   const pathListeners = listenersByPath.get(path)
   if (pathListeners) {
     for (const listener of pathListeners) listener()
@@ -71,10 +69,6 @@ export function getWorkspaceHotUi(path: string | null | undefined): WorkspaceHot
 
 export function hasWorkspaceHotUi(path: string): boolean {
   return byPath.has(path)
-}
-
-export function getWorkspaceHotUiRevision(): number {
-  return globalRevision
 }
 
 export function subscribeWorkspaceHotUi(
@@ -273,5 +267,4 @@ export function resetWorkspaceHotUiStoreForTests(): void {
   byPath.clear()
   listenersByPath.clear()
   globalListeners.clear()
-  globalRevision = 0
 }

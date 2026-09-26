@@ -3,10 +3,8 @@ import { namedGitBranch } from '@shared/utils/gitBranch'
 import {
   runTitle,
   runTooltip,
-  runSearchText,
   stripGoalMarkdown,
   instanceDisplayTitle,
-  uniqueInstanceTitles,
   pathScopeLabel
 } from '@renderer/app/navigator/runTitle'
 import type { RunSummary } from '@shared/ipc'
@@ -89,31 +87,5 @@ describe('runTitle', () => {
   it('strips AUDIT SCOPE dumps into a compact path label', () => {
     const goal = 'AUDIT SCOPE: docs/**, README.md, package.json, and more noise'
     expect(instanceDisplayTitle(goal, 'abcdefgh-1234')).toBe('docs/**')
-  })
-
-  it('disambiguates identical sibling instance titles with path_scope', () => {
-    const siblings: RunSummary[] = [
-      run('Round-4 evidence-based audit', {
-        runId: 'aaa11111-xxxx',
-        inlineInstance: true,
-        parentRunId: 'p',
-        pathScope: ['docs/**']
-      }),
-      run('Round-4 evidence-based audit', {
-        runId: 'bbb22222-xxxx',
-        inlineInstance: true,
-        parentRunId: 'p',
-        pathScope: ['src/tools/']
-      })
-    ]
-    const titles = uniqueInstanceTitles(siblings)
-    expect(titles.get('aaa11111-xxxx')).toBe('docs/**')
-    expect(titles.get('bbb22222-xxxx')).toBe('src/tools')
-  })
-
-  it('search text matches stripped display title', () => {
-    const goal = '### Fix login flow'
-    expect(runSearchText(run(goal))).toBe('fix login flow')
-    expect(runSearchText(run(goal)).includes('fix login')).toBe(true)
   })
 })

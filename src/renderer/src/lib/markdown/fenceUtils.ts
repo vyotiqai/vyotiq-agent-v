@@ -24,26 +24,6 @@ function isFenceCloser(line: string, open: FenceOpen): boolean {
 
 export { isFenceCloser }
 
-/** Walk lines and return the still-open fence, if any. */
-export function scanOpenFence(content: string): FenceOpen | null {
-  const lines = content.split('\n')
-  let open: FenceOpen | null = null
-
-  for (const line of lines) {
-    const parsed = parseFenceLine(line)
-    if (!parsed) continue
-    if (open === null) {
-      open = parsed.open
-      continue
-    }
-    if (isFenceCloser(line, open)) {
-      open = null
-    }
-  }
-
-  return open
-}
-
 /** Body of the fence still streaming, or null when every fence is closed. */
 export function trailingOpenFenceBody(content: string): string | null {
   const lines = content.split('\n')

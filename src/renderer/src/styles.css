@@ -441,22 +441,10 @@
   --vy-danger-soft: color-mix(in srgb, var(--vy-danger) var(--vy-soft-mix), transparent);
   --vy-diff-add: color-mix(in srgb, var(--vy-success) 12%, transparent);
   --vy-diff-del: color-mix(in srgb, var(--vy-danger) 12%, transparent);
-  --vy-diff-add-word: color-mix(in srgb, var(--vy-success) 28%, transparent);
-  --vy-diff-del-word: color-mix(in srgb, var(--vy-danger) 28%, transparent);
 }
 
 /* Opacity-only — transform on ancestors ghosts contenteditable glyphs / spellcheck. */
 @keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes chrome-drop-in {
   from {
     opacity: 0;
   }
@@ -593,9 +581,7 @@
   --leading-mono: 1.6;
 
   --animate-fade-in: fade-in var(--vy-duration) var(--vy-ease);
-  --animate-chrome-drop-in: chrome-drop-in var(--vy-duration) var(--vy-ease);
   --animate-slide-in-left: slide-in-left var(--vy-duration) var(--vy-ease);
-  --animate-spin-slow: spin 1.4s linear infinite;
   --animate-live: vy-live 1.6s var(--vy-ease) infinite;
 
   /* Motion system — anchored emergence and state feedback. */
@@ -612,14 +598,6 @@
 
 @utility app-region-no-drag {
   -webkit-app-region: no-drag;
-}
-
-@utility overflow-anchor-auto {
-  overflow-anchor: auto;
-}
-
-@utility overflow-anchor-none {
-  overflow-anchor: none;
 }
 
 @utility vy-transition {
@@ -644,23 +622,6 @@
 @utility mask-fade-bottom {
   mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
-}
-
-/**
- * Cover behind the pinned turn prompt. Page colour behind the prompt and the
- * tasks band, fading out across the stack's bottom padding so rows scrolling
- * underneath dissolve into it instead of being sliced by a straight edge. The
- * 1rem is TURN_PROMPT_STACK's `pb-4` — change them together. At rest nothing
- * sits behind the stack, so the fade only shows while it is pinned.
- *
- * The side shadows reach 2px past the column: a glyph that starts a line on the
- * column edge (a `T`) antialiases a sliver outside it, which would otherwise
- * show as a stray tick beside the cover. Shadows are ink overflow, so they
- * never add a horizontal scrollbar.
- */
-@utility vy-turn-prompt-cover {
-  background-image: linear-gradient(to bottom, var(--vy-bg) calc(100% - 1rem), transparent);
-  box-shadow: -2px 0 var(--vy-bg), 2px 0 var(--vy-bg);
 }
 
 /**
@@ -705,29 +666,6 @@
   box-shadow: var(--vy-shadow-menu);
 }
 
-@utility mask-fade-right {
-  mask-image: linear-gradient(to right, black 85%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
-}
-
-/** Diff rows: tint + gutter sign (+/−) mark add/del — never hue alone. */
-@utility diff-add {
-  background: var(--vy-diff-add);
-}
-
-@utility diff-del {
-  background: var(--vy-diff-del);
-}
-
-@utility diff-add-word {
-  background: var(--vy-diff-add-word);
-  border-radius: 2px;
-}
-
-@utility diff-del-word {
-  background: var(--vy-diff-del-word);
-  border-radius: 2px;
-}
 
 @utility scroll-thin {
   &::-webkit-scrollbar {
@@ -1318,57 +1256,6 @@
   opacity: 0.9;
 }
 
-@keyframes vy-shimmer {
-  from {
-    background-position: 100% center;
-  }
-
-  to {
-    background-position: 0% center;
-  }
-}
-
-.vy-text-shimmer {
-  display: inline-block;
-  background-size: 250% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  background-image: linear-gradient(90deg,
-      var(--vy-tertiary) 0%,
-      var(--vy-tertiary) 40%,
-      var(--vy-muted) 50%,
-      var(--vy-tertiary) 60%,
-      var(--vy-tertiary) 100%);
-  background-repeat: no-repeat;
-}
-
-.vy-text-shimmer--active {
-  animation: vy-shimmer var(--vy-shimmer-duration, 2s) linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .vy-text-shimmer--active {
-    animation: none;
-    color: inherit;
-    background-image: none;
-    background-clip: unset;
-    -webkit-background-clip: unset;
-  }
-}
-
-@keyframes tool-stagger-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
 /* Emergence from a trigger — scale settles while a few px of rise resolve.
    transform-origin is set per-placement (origin-bottom / origin-top) so the
    panel appears to grow out of the control, not float in from nowhere. */
@@ -1466,15 +1353,6 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .tool-stagger-enter {
-    animation: tool-stagger-in var(--vy-duration) var(--vy-ease) both;
-    animation-delay: calc(min(var(--stagger-index, 0), 8) * 40ms);
-  }
-
-  .tool-body-enter {
-    animation: tool-stagger-in 120ms var(--vy-ease) both;
-  }
-
   .tool-expand {
     transition: grid-template-rows var(--vy-duration) var(--vy-ease);
   }

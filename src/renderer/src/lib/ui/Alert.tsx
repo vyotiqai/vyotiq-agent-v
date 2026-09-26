@@ -75,24 +75,3 @@ export function Alert({
     </div>
   )
 }
-
-/** Persistent inline alert without dismiss — e.g. settings errors. */
-export function AlertBlock({
-  children,
-  className = ''
-}: {
-  children: ReactNode
-  className?: string
-}) {
-  return (
-    <p
-      className={cn(
-        'm-0 rounded-md border border-danger/25 bg-surface px-2.5 py-2 text-xs text-danger [overflow-wrap:anywhere]',
-        className
-      )}
-      role="alert"
-    >
-      {children}
-    </p>
-  )
-}

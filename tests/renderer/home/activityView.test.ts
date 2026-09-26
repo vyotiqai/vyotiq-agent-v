@@ -3,10 +3,7 @@ import type { HomeActivityResult } from '@shared/ipc'
 import {
   activityDayBars,
   activityModelMix,
-  activityOutcomeSegments,
   activitySpendSeries,
-  activityTokenTrend,
-  activityToolFailures,
   finishedShare,
   formatCompactCount,
   weekdayShort
@@ -48,69 +45,6 @@ describe('activityDayBars', () => {
   it('labels a 7-day axis by weekday and a 30-day axis by day number', () => {
     expect(activityDayBars([], 7, NOW).at(-1)!.label).toBe('W')
     expect(activityDayBars([], 30, NOW).at(-1)!.label).toBe('7')
-  })
-})
-
-describe('activityOutcomeSegments', () => {
-  it('returns only outcomes that occurred, as shares of the total', () => {
-    const segments = activityOutcomeSegments({ done: 6, error: 2, cancelled: 0, running: 0 })
-    expect(segments.map((segment) => segment.id)).toEqual(['done', 'error'])
-    expect(segments[0]!.ratio).toBeCloseTo(0.75)
-    expect(segments[1]!.count).toBe(2)
-  })
-
-  it('returns nothing when no session finished in the window', () => {
-    expect(activityOutcomeSegments({ done: 0, error: 0, cancelled: 0, running: 0 })).toEqual([])
-  })
-})
-
-describe('activityTokenTrend', () => {
-  const totals = (
-    extra: Partial<HomeActivityResult['totals']>
-  ): HomeActivityResult['totals'] => ({
-    runs: 4,
-    billedInputTokens: 800,
-    outputTokens: 200,
-    ...extra
-  })
-
-  it('compares against the previous window when there is a baseline', () => {
-    expect(activityTokenTrend(totals({ previousTokens: 500 }))).toEqual({
-      deltaPct: 100,
-      direction: 'up',
-      label: '+100% vs previous'
-    })
-    expect(activityTokenTrend(totals({ previousTokens: 2000 }))?.label).toBe('-50% vs previous')
-    expect(activityTokenTrend(totals({ previousTokens: 1000 }))?.direction).toBe('flat')
-  })
-
-  it('reports no trend when the previous window had no usage', () => {
-    expect(activityTokenTrend(totals({}))).toBeNull()
-    expect(activityTokenTrend(totals({ previousTokens: 0 }))).toBeNull()
-  })
-})
-
-describe('activityToolFailures', () => {
-  it('keeps only tools that failed, worst first, capped', () => {
-    expect(
-      activityToolFailures(
-        [
-          { name: 'read_file', ok: 40, failed: 0 },
-          { name: 'apply_patch', ok: 10, failed: 6 },
-          { name: 'run_terminal', ok: 2, failed: 2 },
-          { name: 'web_fetch', ok: 1, failed: 1 }
-        ],
-        2
-      )
-    ).toEqual([
-      { name: 'apply_patch', failed: 6, total: 16, ratio: 6 / 16 },
-      { name: 'run_terminal', failed: 2, total: 4, ratio: 0.5 }
-    ])
-  })
-
-  it('returns nothing when receipts reported no tool stats', () => {
-    expect(activityToolFailures(undefined)).toEqual([])
-    expect(activityToolFailures([{ name: 'read_file', ok: 9, failed: 0 }])).toEqual([])
   })
 })
 

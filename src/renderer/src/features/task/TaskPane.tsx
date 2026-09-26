@@ -15,7 +15,7 @@ import type { TurnOutcome, UiAgentQuestionAnswer, UiItem } from '@shared/transcr
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand'
-import { ActionMenu, Button, IconButton, ImageLightbox, cn } from '@renderer/lib/ui'
+import { ActionMenu, Button, IconButton, ImageLightbox } from '@renderer/lib/ui'
 import { isEditableShortcutTarget, isMainComposerTarget, matchShortcut, shortcutLabel } from '@renderer/lib/shortcuts'
 import { isChangesOrPrDockClaimingFind } from '@renderer/lib/chat/transcriptFind'
 import { useChatLiveItems, useResolvedTurnUsage } from '@renderer/features/chat/components/ChatStreamLeaves'

@@ -1,23 +1,6 @@
 /** Shared horizontal gutter for chat column surfaces. */
 export const CHAT_GUTTER = 'px-4 sm:px-5'
 
-/**
- * Top inset for chat stage surfaces that carry no sticky child.
- *
- * The transcript scrollport must NOT use this: Chromium insets a sticky child's
- * `top: 0` by the scroller's own `padding-top`, so the pinned turn prompt would
- * rest 16px below the visible edge and rows would scroll through the strip above
- * it. The transcript rides {@link CHAT_STAGE_TOP_SPACER} instead.
- */
-export const CHAT_STAGE_TOP_INSET = 'pt-4'
-
-/**
- * Scrolled equivalent of {@link CHAT_STAGE_TOP_INSET} (same 16px) for the
- * transcript: a leading spacer row rather than scrollport padding, so the
- * pinned turn prompt can pin flush with the scrollport's top edge.
- */
-export const CHAT_STAGE_TOP_SPACER = 'h-4'
-
 /** Minimum chat column width reserved when clamping the side dock. */
 export const CHAT_COLUMN_MIN_USABLE_PX = 280
 
@@ -95,79 +78,6 @@ export const COMPOSER_TEXTAREA_MAX_PX = 280
 /** Tailwind max-height matching `COMPOSER_TEXTAREA_MAX_PX`. */
 export const COMPOSER_TEXTAREA_MAX_CLASS = 'max-h-[280px]'
 
-/** Shared max width for marketplace content column. */
-export const MARKETPLACE_COLUMN_MAX = 'max-w-[1040px]'
-
-/** Centered marketplace column. */
-export const MARKETPLACE_COLUMN = `mx-auto w-full ${MARKETPLACE_COLUMN_MAX}`
-
-/**
- * Vertical rhythm. Applied as padding on each row rather than flex gap so
- * spacing stays consistent across the transcript.
- */
-export const TRANSCRIPT_ROW_GAP = 'pb-2.5'
-
-/** Extra breathing room around tool activity and reasoning rows. */
-export const TRANSCRIPT_WORK_ROW_GAP = 'pb-4'
-
-/**
- * Tight gap between interleaved thinking ↔ activity disclosures so Thought /
- * tool pairs do not stack a full work gap on every step.
- */
-export const TRANSCRIPT_WORK_PAIR_GAP = 'pb-1.5'
-
-/** Lead-in above a user prompt that opens a new turn. */
-export const TRANSCRIPT_TURN_GAP = 'pt-8'
-
-/**
- * User prompt typography — the prompt is the heading of its turn. It steps up
- * from the 13px body to the heading scale with tighter tracking and the strong
- * foreground.
- * Keep in sync with the `[data-user-prompt] .markdown-body` rule in styles.css,
- * which has to restate this because MarkdownContent styles its own root.
- */
-export const USER_PROMPT_TEXT =
-  'text-heading leading-normal tracking-[var(--vy-tracking-tight)] text-fg-strong [overflow-wrap:anywhere]'
-
-/**
- * User prompt block — its border and inset define a readable bubble without a
- * fill or shadow. The pinned turn stack in MessageList carries scroll-through
- * occlusion.
- */
-export const USER_PROMPT_SURFACE = `w-full rounded-[var(--vy-radius-xl)] border border-border px-3 py-2 ${USER_PROMPT_TEXT}`
-
-/**
- * Horizontal inset of a row set under the prompt bubble (the tasks band): the
- * bubble's own border width and padding, with the border left transparent, so
- * the row starts on the prompt text's left edge and ends on its right one.
- */
-export const USER_PROMPT_INSET = 'border-x border-transparent px-3'
-
-/**
- * Lines of a user prompt shown before it folds behind Show more. Every turn
- * prompt pins while its turn is on screen, so this is also how much of the
- * work beneath the pinned stack covers.
- */
-export const USER_PROMPT_CLAMP_LINES = 2
-
-/**
- * Vertical rhythm of the turn-prompt stack (prompt + tasks band). The bottom
- * padding doubles as the pinned cover's fade (`vy-turn-prompt-cover` in
- * styles.css), so the two change together.
- */
-export const TURN_PROMPT_STACK = 'pt-2.5 pb-4'
-
-/**
- * Pinned state of {@link TURN_PROMPT_STACK}: flush with the scrollport's top
- * edge (see {@link CHAT_STAGE_TOP_SPACER}) over a page-colored cover. Rows
- * scrolling beneath dissolve across its bottom padding instead of meeting a
- * hard edge; nothing shows through behind the prompt or the tasks band.
- */
-export const TURN_PROMPT_STACK_PINNED = 'sticky top-0 z-sticky vy-turn-prompt-cover'
-
-/** Quiet activity row — no fill, no border. */
-export const ACTIVITY_ROW = 'text-xs tracking-[var(--vy-tracking)]'
-
 /** One line of a disclosure list: label, detail, trailing meta. */
 export const DISCLOSURE_ROW =
   'flex min-w-0 items-center gap-1.5 rounded-sm py-1.5 text-xs vy-transition hover:opacity-80'
@@ -178,13 +88,6 @@ export const DISCLOSURE_ROW =
  */
 export const DISCLOSURE_CHEVRON =
   'shrink-0 text-tertiary opacity-0 vy-transition group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100'
-
-/** Tool card chrome — bordered terminal / edit ToolCard surfaces. */
-export const TOOL_CARD_SURFACE =
-  'overflow-hidden rounded-lg border border-border'
-export const TOOL_CARD_HEADER = 'px-3 py-2 text-xs'
-/** Body content owns its own padding so a diff can run edge to edge. */
-export const TOOL_CARD_BODY = 'overflow-hidden border-t border-border/40 bg-surface'
 
 /** Ask-question gate — quiet panel, not bordered tool-card chrome. */
 /**
@@ -205,18 +108,9 @@ export const TOOL_BODY_CLAMP_PX = 168
  */
 export const READ_BODY_PREVIEW_LINES = 8
 
-/** Minimum first-paint estimate for an expanded multi-tool group. */
-export const TOOL_GROUP_LIST_ESTIMATE_MIN_PX = 192
-
-/**
- * Cap terminal tool output so streaming cannot inflate the transcript.
- * Keep in sync with TOOL_TERMINAL_VIEWPORT_MAX_PX for virtualizer estimates.
- */
+/** Cap terminal tool output so streaming cannot inflate the record. */
 export const TOOL_TERMINAL_VIEWPORT =
   'max-h-[min(12rem,28vh)] overflow-y-auto overscroll-contain'
-
-/** Pixel ceiling matching TOOL_TERMINAL_VIEWPORT (12rem @ 16px). */
-export const TOOL_TERMINAL_VIEWPORT_MAX_PX = 192
 
 /** Standard inner padding for tool body content. */
 export const TOOL_BODY_PAD = 'px-3 py-2'
@@ -247,7 +141,6 @@ export const SIDEBAR_WIDTH_PX = 264
 export const SIDEBAR_WIDTH_MIN_PX = 220
 export const SIDEBAR_WIDTH_MAX_PX = 420
 export const TITLE_BAR_HEIGHT = 'h-9'
-export const TITLE_BAR_HEIGHT_PX = 36
 
 /** True when the shell draws custom min/max/close (Win/Linux; also jsdom fallback). */
 export function showsWindowControls(
@@ -258,20 +151,9 @@ export function showsWindowControls(
   return platform === 'win32' || platform === 'linux' || !platform
 }
 
-/** Transcript scrollport — floating tasks use `@transcript/…` to sit beside the Plan rail. */
-export const TRANSCRIPT_CONTAINER = '@container/transcript'
-
-/** Quiet micro copy — dense panels, git chrome, dock toolbars. */
-export const MICRO_LABEL =
-  'text-caption font-medium tracking-[var(--vy-tracking-tight)] text-muted'
-
 /** Uppercase section labels in composer dropdowns and tool bodies. */
 export const MICRO_LABEL_CAPS =
   'text-2xs font-medium uppercase tracking-[var(--vy-tracking-caps)] text-secondary'
-
-/** Filled ring active state — sidebar footer nav, dock tabs, marketplace tabs. */
-export const SIDEBAR_NAV_ACTIVE =
-  'bg-surface text-fg-strong ring-1 ring-inset ring-border/50'
 
 /**
  * Hover fills — three weights, chosen by what sits under the pointer.

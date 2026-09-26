@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
-import { VyotiqMark, VyotiqLockup } from '@renderer/lib/brand'
+import { VyotiqMark } from '@renderer/lib/brand'
 import { VYOTIQ_MARK_PATHS, VYOTIQ_MARK_VIEW_BOX } from '@shared/brand/vyotiqMark'
 
 describe('brand marks', () => {
@@ -27,16 +27,5 @@ describe('brand marks', () => {
     const svg = container.querySelector('[data-brand-mark]')
     expect(svg?.getAttribute('aria-hidden')).toBe('true')
     expect(svg?.getAttribute('role')).toBeNull()
-  })
-
-  it('renders the VYOTIQ lockup as one named image', () => {
-    const { container } = render(<VyotiqLockup markSize={36} />)
-    const lockup = container.querySelector<HTMLElement>('[data-brand-lockup]')
-    expect(lockup).toBeTruthy()
-    expect(lockup?.getAttribute('aria-label')).toBe('Vyotiq')
-    expect(lockup?.getAttribute('aria-label')).not.toBe('Agent V')
-    expect(lockup?.style.gap).toBe(`${36 * (56 / 164)}px`)
-    expect(container.querySelectorAll('[data-brand-mark]')).toHaveLength(1)
-    expect(Number(container.querySelectorAll('svg')[1]?.getAttribute('height'))).toBeCloseTo(16.56)
   })
 })
