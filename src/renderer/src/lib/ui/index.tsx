@@ -22,7 +22,7 @@ export {
 } from './menuStyles'
 export { Tooltip } from './Tooltip'
 export { PanelResizeHandle } from './PanelResizeHandle'
-export { Input, selectClass } from './Input'
+export { Input } from './Input'
 export { SearchInput } from './SearchInput'
 export { Checkbox } from './Checkbox'
 export { Switch } from './Switch'
