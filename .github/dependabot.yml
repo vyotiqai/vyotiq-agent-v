@@ -17,6 +17,11 @@ updates:
       # not the newest Node major.
       - dependency-name: '@types/node'
         update-types: ['version-update:semver-major']
+      # The workspace is one directory to Dependabot, so it writes one
+      # @types/node version into every manifest: landing's 22.x patch (landing
+      # builds on Node 22) arrived as a downgrade of the app's ^24 (#46).
+      - dependency-name: '@types/node'
+        versions: ['< 24']
       # One Sentry release line: @sentry/electron is pinned exactly, and its
       # declared @sentry/core sets the override in pnpm-workspace.yaml and the
       # @sentry/react version. Dependabot cannot edit the override, so a bump
