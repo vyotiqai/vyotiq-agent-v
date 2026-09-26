@@ -695,7 +695,6 @@ describe('ChangesPanel', () => {
   })
 
   it('surfaces checkout failure as a notice', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     window.vyotiq.gitBranches = vi.fn().mockResolvedValue({
       ok: true,
       data: [
@@ -711,8 +710,14 @@ describe('ChangesPanel', () => {
     await screen.findByText('a.ts')
     fireEvent.click(await screen.findByRole('button', { name: 'Switch branch' }))
     fireEvent.click(await screen.findByRole('option', { name: 'feat' }))
+    // Uncommitted changes: the app's own dialog asks first.
+    const dialog = await screen.findByRole('dialog', { name: 'Switch branch' })
+    expect(window.vyotiq.gitCheckout).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Check out feat' }))
     expect(await screen.findByRole('alert')).toBeTruthy()
     expect(screen.getByRole('alert').textContent).toMatch(/overwritten/i)
+    // A failure says so with an icon, not only in red.
+    expect(screen.getByRole('alert').querySelector('svg')).toBeTruthy()
   })
 
   it('keeps the branch select out of this task’s view', async () => {

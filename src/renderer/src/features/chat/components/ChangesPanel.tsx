@@ -9,12 +9,14 @@ import {
   ProgressBar,
   Segmented,
   StatusGlyph,
+  Textarea,
   cn,
   type ActionMenuItem,
   type MenuOption
 } from '@renderer/lib/ui'
 import { isEditableShortcutTarget, matchShortcut } from '@renderer/lib/shortcuts'
 import { Icon } from '@renderer/lib/icons'
+import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { CHAT_RIGHT_PANEL_BODY } from '@renderer/lib/utils/layout'
 import type { GitBranchEntry, GitChangedFile, GitLogEntry, GitStatus, TaskFileStat } from '@shared/ipc'
 import { namedGitBranch } from '@shared/utils/gitBranch'
@@ -165,7 +167,6 @@ const STALE_DRAFT_NOTE = 'Written for an earlier version of these changes — ch
 export const ChangesPanel = memo(function ChangesPanel({
   items,
   itemsStore,
-  className,
   workspacePath,
   gitRevision = 0,
   chrome: chromeProp,
@@ -198,7 +199,6 @@ export const ChangesPanel = memo(function ChangesPanel({
 }: {
   items: UiItem[]
   itemsStore?: ChatItemsStore
-  className?: string
   workspacePath?: string | null
   gitRevision?: number
   /** Shared chrome from ChatView — avoids a second gitStatus fetch when the dock is open. */
@@ -740,12 +740,16 @@ export const ChangesPanel = memo(function ChangesPanel({
       })
   }, [commitMode, visibleGitFiles, workspacePath])
 
+  const { confirm, dialog: confirmDialog } = useConfirm()
+
   const checkoutBranch = useCallback(
     async (branch: string) => {
       if (!workspacePath || !window.vyotiq?.gitCheckout) return
       if (status && status.fileCount > 0) {
-        const confirmed = window.confirm(
-          `Working tree has uncommitted changes. Git will refuse to check out "${branch}" if those files would be overwritten.`
+        // Not destructive: git refuses a checkout that would overwrite a change.
+        const confirmed = await confirm(
+          `Working tree has uncommitted changes. Git will refuse to check out "${branch}" if those files would be overwritten.`,
+          { title: 'Switch branch', confirmLabel: `Check out ${branch}` }
         )
         if (!confirmed) return
       }
@@ -759,7 +763,7 @@ export const ChangesPanel = memo(function ChangesPanel({
         chrome.reportNotice(res.error, true)
       }
     },
-    [workspacePath, status, closeMenus, chrome, onGitMutated, refreshCommits]
+    [workspacePath, status, closeMenus, chrome, onGitMutated, refreshCommits, confirm]
   )
 
   const fileDiffStaged = useCallback(
@@ -1069,9 +1073,25 @@ export const ChangesPanel = memo(function ChangesPanel({
     displayScope !== 'agent' &&
     gitFiles.some((file) => file.path === selected!.path && file.status === 'conflicted')
 
+  /** Git's last word: a failure says so with an icon, not only in red. */
+  const gitNotice = chrome.notice ? (
+    <p
+      className={cn(
+        'm-0 flex shrink-0 items-start gap-2 border-b border-border py-1.5 text-xs',
+        // The review's rows inset 16px; the tab's list rows 12px.
+        variant === 'review' ? 'px-4' : 'px-3',
+        chrome.noticeFailed ? 'text-danger' : 'text-secondary'
+      )}
+      role={chrome.noticeFailed ? 'alert' : 'status'}
+    >
+      <Icon name={chrome.noticeFailed ? 'warningCircle' : 'checkCircle'} size={14} className="mt-0.5" />
+      <span className="min-w-0 [overflow-wrap:anywhere]">{chrome.notice}</span>
+    </p>
+  ) : null
+
   const conflictBlock =
     selectedConflicted && selected ? (
-      <div className="shrink-0 space-y-2 border-b border-border bg-warning-soft px-3 py-2 text-xs" data-changes-conflict>
+      <div className="@container shrink-0 space-y-2 border-b border-border bg-warning-soft px-3 py-2 text-xs" data-changes-conflict>
         <div className="flex flex-wrap items-center gap-1.5">
           <Icon name="warning" size={13} className="shrink-0 text-warning" />
           <span className="min-w-0 flex-1 truncate text-fg">Both sides changed this file</span>
@@ -1086,11 +1106,12 @@ export const ChangesPanel = memo(function ChangesPanel({
           </Button>
         </div>
         {conflictSides?.path === selected.path ? (
-          <div className="grid max-h-56 grid-cols-1 gap-1 overflow-auto md:grid-cols-3">
+          // Three columns only when the block itself is wide (the review), not the window.
+          <div className="grid max-h-56 grid-cols-1 gap-1 overflow-auto @xl:grid-cols-3">
             {(['ours', 'theirs', 'base'] as const).map((side) => (
               <pre
                 key={side}
-                className="m-0 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-bg p-1.5 font-mono text-xs text-fg"
+                className="m-0 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-sunken p-1.5 font-mono text-xs text-fg"
               >
                 <span className="block font-sans text-caption font-medium text-muted">
                   {side === 'ours' ? 'Ours' : side === 'theirs' ? 'Theirs' : 'Base'}
@@ -1102,8 +1123,10 @@ export const ChangesPanel = memo(function ChangesPanel({
         ) : null}
         <label className="m-0 block text-muted">
           Working copy
-          <textarea
-            className="mt-1 max-h-36 min-h-[4.5rem] w-full rounded-md border border-border bg-bg px-1.5 py-1 font-mono text-xs text-fg focus-visible:vy-focus-ring"
+          <Textarea
+            size="sm"
+            rows={4}
+            className="mt-1 max-h-36 font-mono"
             value={workingDraft}
             onChange={(e) => setWorkingDraft(e.target.value)}
           />
@@ -1318,7 +1341,7 @@ export const ChangesPanel = memo(function ChangesPanel({
 
     return (
       <div
-        className={cn('flex min-h-0 min-w-0 flex-1 flex-col bg-bg', className)}
+        className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg"
         data-changes-panel
         data-review
         role="region"
@@ -1328,7 +1351,7 @@ export const ChangesPanel = memo(function ChangesPanel({
           <IconButton
             icon="arrowLeft"
             label="Back to the record"
-            size="md"
+            size="sm"
             onClick={onReviewBack}
             data-review-back
           />
@@ -1355,7 +1378,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                 ref={t.ref}
                 icon="more"
                 label="Scope, wrap, whitespace, undo all"
-                size="md"
+                size="sm"
                 tone="muted"
                 aria-expanded={t['aria-expanded']}
                 aria-controls={t['aria-controls']}
@@ -1496,17 +1519,7 @@ export const ChangesPanel = memo(function ChangesPanel({
           </div>
         ) : null}
 
-        {chrome.notice ? (
-          <p
-            className={cn(
-              'm-0 shrink-0 border-b border-border px-4 py-1.5 text-xs',
-              chrome.noticeFailed ? 'text-danger' : 'text-secondary'
-            )}
-            role={chrome.noticeFailed ? 'alert' : 'status'}
-          >
-            {chrome.notice}
-          </p>
-        ) : null}
+        {gitNotice}
 
         <div className="flex min-h-0 flex-1">
           <aside className="flex w-[300px] shrink-0 flex-col border-r border-border" aria-label="Files to review">
@@ -1540,7 +1553,7 @@ export const ChangesPanel = memo(function ChangesPanel({
             ) : (
               <>
                 {displayScope === 'commits' && selectedCommit ? (
-                  <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-1 pr-3 text-xs">
+                  <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border pl-1 pr-3 text-xs">
                     <IconButton
                       icon="arrowLeft"
                       label="Back to commits"
@@ -1668,13 +1681,14 @@ export const ChangesPanel = memo(function ChangesPanel({
             )}
           </div>
         </div>
+        {confirmDialog}
       </div>
     )
   }
 
   return (
     <div
-      className={cn(CHAT_RIGHT_PANEL_BODY, className)}
+      className={CHAT_RIGHT_PANEL_BODY}
       data-changes-panel
       role="region"
       aria-label="Changes"
@@ -1789,17 +1803,7 @@ export const ChangesPanel = memo(function ChangesPanel({
         </div>
       ) : null}
 
-      {chrome.notice ? (
-        <p
-          className={cn(
-            'm-0 shrink-0 border-b border-border px-3 py-1.5 text-xs',
-            chrome.noticeFailed ? 'text-danger' : 'text-secondary'
-          )}
-          role={chrome.noticeFailed ? 'alert' : 'status'}
-        >
-          {chrome.notice}
-        </p>
-      ) : null}
+      {gitNotice}
 
       {status?.truncated && displayScope !== 'agent' && displayScope !== 'commits' ? (
         <p className="m-0 shrink-0 border-b border-border px-3 py-1.5 text-xs text-muted">
@@ -2061,6 +2065,7 @@ export const ChangesPanel = memo(function ChangesPanel({
           )}
         </div>
       ) : null}
+      {confirmDialog}
     </div>
   )
 })
