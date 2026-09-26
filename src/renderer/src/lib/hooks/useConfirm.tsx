@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type JSX, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type JSX, type ReactNode } from 'react'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
 import { Button } from '@renderer/lib/ui'
 
@@ -19,6 +19,7 @@ export function useConfirm(): {
   dialog: JSX.Element
 } {
   const [state, setState] = useState<ConfirmState | null>(null)
+  const messageId = useId()
   const resolverRef = useRef<((value: boolean) => void) | null>(null)
 
   const finish = useCallback((value: boolean): void => {
@@ -57,29 +58,32 @@ export function useConfirm(): {
     []
   )
 
+  // The rewind dialog's shape: title, the sentence under it in the quieter
+  // weight, anything it lists, then the action row under a hairline.
   const dialog = (
     <Dialog
       open={state !== null}
       onClose={() => finish(false)}
       title={state?.title ?? 'Confirm action'}
+      describedBy={messageId}
       useNativeDialog={false}
       className="vy-menu w-[min(92vw,28rem)] text-fg"
-    >
-      <div className="flex flex-col gap-4">
-        <p className="m-0 text-sm text-fg">{state?.message}</p>
-        {state?.details ? <div className="min-h-0">{state.details}</div> : null}
-        <div className="flex justify-end gap-2">
+      footer={
+        <>
           <Button size="sm" variant="ghost" onClick={() => finish(false)}>
             Cancel
           </Button>
-          <Button
-            size="sm"
-            variant={state?.danger ? 'danger' : 'primary'}
-            onClick={() => finish(true)}
-          >
+          <Button size="sm" variant={state?.danger ? 'danger' : 'primary'} onClick={() => finish(true)}>
             {state?.confirmLabel ?? 'Confirm'}
           </Button>
-        </div>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <p id={messageId} className="m-0 text-sm leading-[21px] text-secondary">
+          {state?.message}
+        </p>
+        {state?.details ? <div className="min-h-0">{state.details}</div> : null}
       </div>
     </Dialog>
   )
