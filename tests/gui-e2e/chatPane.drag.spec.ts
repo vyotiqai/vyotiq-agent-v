@@ -271,7 +271,7 @@ test('Ctrl/Cmd+\\ splits the focused pane into an empty draft beside it', async 
   // count unchanged. This is viewport-independent, unlike a capacity-limited split.
   await expect(draft.getByRole('button', { name: /More/ })).toHaveCount(0)
   await window.keyboard.press('ControlOrMeta+Backslash')
-  await expect(window.getByText('Send a message in this pane first.')).toBeVisible({
+  await expect(window.getByText('Give this task an instruction first.')).toBeVisible({
     timeout: 10_000
   })
   await expect(window.locator('[data-chat-pane]')).toHaveCount(2)

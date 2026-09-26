@@ -39,7 +39,7 @@ export const SHORTCUT_TITLES: Record<ShortcutId, string> = {
   settings: 'Settings',
   focusComposer: 'Focus the instruction line',
   stop: 'Stop the run',
-  find: 'Find in transcript, changes, or PR',
+  find: 'Find in record, changes, or PR',
   refresh: 'Refresh changes or PR',
   dictation: 'Dictation',
   cycleMode: 'Switch Ask / Agent mode',

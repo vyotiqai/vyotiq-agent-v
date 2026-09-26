@@ -652,7 +652,7 @@ function App() {
           return lists.some((runs) => runs.some((run) => run.runId === target.runId))
         })
         if (!match) {
-          pushToast('That chat is not in any open workspace.', 'error')
+          pushToast('That task is not in any open workspace.', 'error')
           return
         }
         path = match[0]
@@ -707,12 +707,12 @@ function App() {
         workspacePathsEqual(path, payload.workspacePath)
       )
       if (!isOpen) {
-        pushToast('The workspace for that chat is not open.')
+        pushToast('The workspace for that task is not open.')
         return false
       }
       const ok = dropSessionOnPane(anchorPaneId, zone, payload)
       if (!ok) {
-        pushToast('Not enough room for another chat pane.')
+        pushToast('Not enough room for another task pane.')
         return false
       }
       void (async () => {
@@ -746,8 +746,8 @@ function App() {
       const run =
         ctx?.runs.find((r) => r.runId === pane.runId) ??
         ctx?.instanceRuns?.find((r) => r.runId === pane.runId)
-      if (!run) return 'Chat'
-      return runTitle(run) || 'Chat'
+      if (!run) return 'New task'
+      return runTitle(run) || 'New task'
     },
     [contexts]
   )
@@ -760,11 +760,11 @@ function App() {
     // claiming the row is full.
     if (!focused) return
     if (focused.runId == null) {
-      pushToast('Send a message in this pane first.')
+      pushToast('Give this task an instruction first.')
       return
     }
     if (!splitFocusedPane()) {
-      pushToast('Not enough room for another chat pane.')
+      pushToast('Not enough room for another task pane.')
       return
     }
     setView('chat')
@@ -1349,7 +1349,7 @@ function App() {
     }): SlashClientHandlers => {
       const requireRun = (): { workspacePath: string; runId: string } | null => {
         if (!scope.workspacePath || !scope.runId) {
-          pushToast('Open a chat first.')
+          pushToast('Open a task first.')
           return null
         }
         return { workspacePath: scope.workspacePath, runId: scope.runId }
@@ -1451,8 +1451,17 @@ function App() {
           setSettingsError('Harness already matches the proposal — nothing to apply.')
           return true
         }
-        const confirmed = window.confirm(
-          `Apply harness proposal?\n\n${preview.data.relativePath}\n→ resources/harness/default.md only\n\nRuns fixed harness vitest subset; reverts that file on failure.\nEvaluator / gate-test changes need a normal PR.`
+        const confirmed = await confirm(
+          'Only resources/harness/default.md changes. The fixed harness test subset runs, and the file is reverted if it fails. Evaluator or gate-test changes need a normal PR.',
+          {
+            title: 'Apply harness proposal',
+            confirmLabel: 'Apply',
+            details: (
+              <p className="m-0 font-mono text-caption text-secondary [overflow-wrap:anywhere]">
+                {preview.data.relativePath}
+              </p>
+            )
+          }
         )
         if (!confirmed) return false
         const res = await window.vyotiq.harnessApply({
@@ -1527,7 +1536,7 @@ function App() {
       },
       onGoalUsage: () => {
         pushToast(
-          'Usage: /goal <objective> — /goal pause, /goal resume, /goal complete. Prefer a new chat.'
+          'Usage: /goal <objective> — /goal pause, /goal resume, /goal complete. Prefer a new task.'
         )
         return true
       },
@@ -1651,7 +1660,7 @@ function App() {
       }
     }
     },
-    [refresh, setSettingsError, settings.marketplace]
+    [confirm, refresh, setSettingsError, settings.marketplace]
   )
 
   const operationalError = settingsError ?? workspaceError
@@ -2728,7 +2737,7 @@ function App() {
           </Suspense>
         </ErrorBoundary>
       ) : (
-        <ErrorBoundary title="Chat couldn't render" resetKey={chatSurfaceEpoch}>
+        <ErrorBoundary title="Task couldn't render" resetKey={chatSurfaceEpoch}>
           <ChatView
             items={chat.items}
             itemsStore={chat.itemsStore}

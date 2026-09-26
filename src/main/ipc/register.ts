@@ -2443,7 +2443,7 @@ export function registerIpc(): void {
         // File-name sanitization: strip path/hostile chars, cap length.
         const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 60) || req.runId
         const options: Electron.SaveDialogOptions = {
-          title: 'Export chat as Markdown',
+          title: 'Export task as Markdown',
           defaultPath: `${safeTitle}.md`,
           filters: [{ name: 'Markdown', extensions: ['md'] }]
         }

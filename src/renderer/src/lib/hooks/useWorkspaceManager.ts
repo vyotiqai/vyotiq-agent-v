@@ -1219,7 +1219,7 @@ export function useWorkspaceManager(options?: {
         ) {
           sessionStorage.setItem(INTERRUPTED_RUNS_TOAST_KEY, '1')
           pushToast(
-            `${resumableCount} interrupted run${resumableCount === 1 ? '' : 's'} — open a chat and tap Continue`
+            `${resumableCount} interrupted run${resumableCount === 1 ? '' : 's'} — open the task and choose Continue`
           )
         }
       }

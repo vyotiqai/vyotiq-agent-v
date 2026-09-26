@@ -88,4 +88,10 @@ describe('runTitle', () => {
     const goal = 'AUDIT SCOPE: docs/**, README.md, package.json, and more noise'
     expect(instanceDisplayTitle(goal, 'abcdefgh-1234')).toBe('docs/**')
   })
+
+  it('titles the placeholder goal as an untitled task', () => {
+    // main stores 'chat' when an instruction had no words of its own.
+    expect(runTitle(run('chat'))).toBe('Untitled task')
+    expect(runTooltip(run('chat'))).toBe('Untitled task')
+  })
 })

@@ -3129,7 +3129,7 @@ export function createChatStreamController(
       return followUp(text, images, files, extras)
     }
     if (!workspacePath) {
-      patch({ error: 'Pick a workspace before starting a chat.' })
+      patch({ error: 'Pick a workspace before starting a task.' })
       return false
     }
     patch({
@@ -3447,7 +3447,7 @@ export function createChatStreamController(
     }
     const id = runId ?? contentRunId
     if (!id) {
-      patch({ error: 'No run to edit. Send a message first.' })
+      patch({ error: 'Nothing to edit yet — give the task an instruction first.' })
       return false
     }
     if (
@@ -3455,7 +3455,7 @@ export function createChatStreamController(
       editMessageIndex >= state.messages.length ||
       state.messages[editMessageIndex]?.role !== 'user'
     ) {
-      patch({ error: 'Cannot edit that message.' })
+      patch({ error: 'Can’t edit that instruction.' })
       return false
     }
 
@@ -3649,7 +3649,7 @@ export function createChatStreamController(
       userMessageIndex >= state.messages.length ||
       state.messages[userMessageIndex]?.role !== 'user'
     ) {
-      patch({ error: 'Cannot revert to that message.' })
+      patch({ error: 'Can’t rewind to that instruction.' })
       return false
     }
     if (state.messages.length <= userMessageIndex + 1) {
@@ -3763,13 +3763,13 @@ export function createChatStreamController(
     if (!id) {
       patch({
         error: state.pendingRun
-          ? 'Wait for the run to start before sending a follow-up.'
-          : 'No active run to follow up on.'
+          ? 'Wait for the run to start before adding an instruction.'
+          : 'No live run to add an instruction to.'
       })
       return false
     }
     if (!workspacePath) {
-      patch({ error: 'Pick a workspace before sending a follow-up.' })
+      patch({ error: 'Pick a workspace before adding an instruction.' })
       return false
     }
     const content = buildUserContent(text, images, files, extras)

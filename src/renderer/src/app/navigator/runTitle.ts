@@ -8,6 +8,9 @@ const SCOPE_LINE_PREFIX =
   /^(?:AUDIT(?:\s*\/\s*RESPAWN)?\s+SCOPE|PATH\s+SCOPE|SCOPE)\s*:\s*/i
 const PATH_SCOPE_FOOTER = /^Path scope \(writes must stay within/i
 const MAX_INSTANCE_TITLE = 48
+/** The goal stored when an instruction had no words of its own (runGoalFromUserText). */
+const PLACEHOLDER_GOAL = 'chat'
+const UNTITLED_TASK = 'Untitled task'
 
 function clipTitle(text: string, max = MAX_INSTANCE_TITLE): string {
   const t = text.replace(/\s+/g, ' ').trim()
@@ -104,6 +107,7 @@ export function runTitle(run: RunSummary): string {
     return instanceDisplayTitle(goal, run.runId, run.pathScope)
   }
   if (!goal) return run.runId.slice(0, 8)
+  if (goal.toLowerCase() === PLACEHOLDER_GOAL) return UNTITLED_TASK
   // Full plain title — row CSS `truncate` + tooltip handle overflow (no dual cut).
   return taskTitleFromGoal(goal)
 }
@@ -118,5 +122,6 @@ export function runTooltip(run: RunSummary): string {
     return scope ? `Instance · ${plain} · ${scope}` : `Instance · ${plain}`
   }
   if (!goal) return run.runId
+  if (goal.toLowerCase() === PLACEHOLDER_GOAL) return UNTITLED_TASK
   return taskTitleFromGoal(goal)
 }
