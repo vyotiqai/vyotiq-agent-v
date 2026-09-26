@@ -74,24 +74,6 @@ function sideDelta(
 /** Matches INSTANCE_BRANCH_PREFIX in src/main/git/instanceWorktree.ts. */
 const INSTANCE_BRANCH_PREFIX = 'vyotiq/instance/'
 
-function statusBadge(status: GitChangedFile['status']): string {
-  switch (status) {
-    case 'added':
-    case 'untracked':
-      return 'New'
-    case 'deleted':
-      return 'Deleted'
-    case 'modified':
-      return 'Modified'
-    case 'conflicted':
-      return 'Conflict'
-    default: {
-      const _exhaustive: never = status
-      return _exhaustive
-    }
-  }
-}
-
 function statusLetter(status: GitChangedFile['status']): BrowserFileEntry['statusLetter'] {
   switch (status) {
     case 'added':
@@ -112,13 +94,9 @@ function statusLetter(status: GitChangedFile['status']): BrowserFileEntry['statu
 
 function toBrowserEntry(file: GitChangedFile, scope: ChangeScope): BrowserFileEntry {
   const delta = sideDelta(file, scope === 'commits' ? 'uncommitted' : scope)
-  const label = statusBadge(file.status)
   return {
     path: file.path,
     statusLetter: statusLetter(file.status),
-    statusLabel: label,
-    statusTone:
-      file.status === 'added' || file.status === 'untracked' ? 'success' : 'muted',
     added: delta.added,
     removed: delta.removed,
     binary: file.binary,

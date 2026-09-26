@@ -3,7 +3,9 @@ import {
   ActionMenu,
   Badge,
   Button,
+  DiffStat,
   IconButton,
+  Input,
   Segmented,
   StatusGlyph,
   Tabs,
@@ -11,10 +13,12 @@ import {
   cn,
   type ActionMenuItem,
   type BadgeTone,
+  type TabItem,
   type TaskState
 } from '@renderer/lib/ui'
 import { isEditableShortcutTarget, matchShortcut } from '@renderer/lib/shortcuts'
 import { Icon } from '@renderer/lib/icons'
+import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { MarkdownContent } from '@renderer/lib/ui'
 import { CHAT_RIGHT_PANEL_BODY, SECTION_LABEL } from '@renderer/lib/utils/layout'
@@ -103,27 +107,6 @@ function saveViewed(workspacePath: string, prNumber: number, viewed: Set<string>
   }
 }
 
-function changeBadge(changeType: PrFile['changeType']): string | null {
-  switch (changeType) {
-    case 'ADDED':
-      return 'New'
-    case 'DELETED':
-      return 'Deleted'
-    case 'RENAMED':
-      return 'Renamed'
-    case 'COPIED':
-      return 'Copied'
-    case 'MODIFIED':
-    case 'CHANGED':
-    case 'UNKNOWN':
-      return null
-    default: {
-      const _exhaustive: never = changeType
-      return _exhaustive
-    }
-  }
-}
-
 function prStatusLetter(changeType: PrFile['changeType']): BrowserFileEntry['statusLetter'] {
   switch (changeType) {
     case 'ADDED':
@@ -146,12 +129,9 @@ function prStatusLetter(changeType: PrFile['changeType']): BrowserFileEntry['sta
 }
 
 function toPrBrowserEntry(file: PrFile): BrowserFileEntry {
-  const label = changeBadge(file.changeType)
   return {
     path: file.path,
     statusLetter: prStatusLetter(file.changeType),
-    statusLabel: label,
-    statusTone: label === 'New' ? 'success' : 'muted',
     added: file.additions,
     removed: file.deletions
   }
@@ -195,13 +175,6 @@ function needsGhInstall(error: string | null, auth: GithubAuthStatus | null): bo
   return false
 }
 
-function checksLabel(pr: PrView): string {
-  const total = pr.checks.length
-  if (total === 0) return 'Checks'
-  const passed = checksPassedCount(pr)
-  return `Checks ${passed}/${total}`
-}
-
 /**
  * States GitHub reports while a check has not finished.
  *
@@ -241,13 +214,12 @@ export function checksPassedCount(pr: PrView): number {
   }).length
 }
 
+/** Only an open, ready pull request is tinted; merged, closed and draft are quiet tags. */
 function prStateTone(pr: PrView): BadgeTone {
   const s = pr.state.trim().toUpperCase()
-  if (s === 'MERGED') return 'accent'
-  if (s === 'CLOSED') return 'danger'
-  if (pr.isDraft || s === 'DRAFT') return 'neutral'
+  if (pr.isDraft || s === 'DRAFT') return 'outline'
   if (s === 'OPEN') return 'success'
-  return 'neutral'
+  return 'outline'
 }
 
 const FAILED_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR'])
@@ -331,14 +303,10 @@ export function prMergeBlockedReason(pr: PrView): string | null {
   return null
 }
 
-function reviewsLabel(pr: PrView): string {
-  const n = pr.latestReviews.length || pr.reviews.length
-  return n > 0 ? `Reviews ${n}` : 'Reviews'
-}
-
 function ReviewCard({ review }: { review: PrReview }) {
   const state = review.state.trim().toUpperCase()
-  const tone: BadgeTone = state === 'APPROVED' ? 'success' : state === 'CHANGES_REQUESTED' ? 'danger' : 'outline'
+  // Changes requested is the review that asks for you; the rest are quiet tags.
+  const tone: BadgeTone = state === 'APPROVED' ? 'success' : state === 'CHANGES_REQUESTED' ? 'accent' : 'outline'
   return (
     <li className="py-2 text-xs">
       <div className="flex items-center gap-2">
@@ -744,11 +712,14 @@ export function PrPanel({
     titleInputRef.current?.select()
   }, [editingTitle])
 
+  const { confirm, dialog: confirmDialog } = useConfirm()
+
   const merge = useCallback(
     async (method: PrMergeMethod) => {
       if (!workspacePath || !window.vyotiq?.prMerge || !pr) return
-      const confirmed = window.confirm(
-        `Merge PR #${pr.number} using ${method}? This cannot be undone from the app.`
+      const confirmed = await confirm(
+        `Merge pull request #${pr.number} into ${pr.baseRefName}? This cannot be undone from the app.`,
+        { title: MERGE_LABEL[method], confirmLabel: MERGE_LABEL[method], danger: true }
       )
       if (!confirmed) return
       setMergeBusy(true)
@@ -769,7 +740,7 @@ export function PrPanel({
         setMergeBusy(false)
       }
     },
-    [workspacePath, load, closeMenus, pr]
+    [workspacePath, load, closeMenus, pr, confirm]
   )
 
   const toggleViewed = useCallback(
@@ -843,8 +814,9 @@ export function PrPanel({
 
   const closePr = useCallback(async () => {
     if (!workspacePath || !window.vyotiq?.prClose || !pr) return
-    const confirmed = window.confirm(
-      `Close PR #${pr.number}? The pull request will be closed on GitHub.`
+    const confirmed = await confirm(
+      `Close pull request #${pr.number}? It will be closed on GitHub without merging.`,
+      { title: 'Close pull request', confirmLabel: 'Close pull request', danger: true }
     )
     if (!confirmed) return
     closeMenus()
@@ -859,7 +831,7 @@ export function PrPanel({
       setNotice(res.error)
       setNoticeFailed(true)
     }
-  }, [workspacePath, load, closeMenus, pr])
+  }, [workspacePath, load, closeMenus, pr, confirm])
 
   const saveTitle = useCallback(async () => {
     if (!workspacePath || !window.vyotiq?.prEditTitle || !pr) return
@@ -1023,12 +995,33 @@ export function PrPanel({
     `The “${check.name}” check failed on pull request #${pr?.number ?? ''}${check.description ? ` (${check.description})` : ''}. ` +
     `Read its log${check.url ? ` at ${check.url}` : ''}, find the cause and fix it.`
 
-  const back = (label: string) => (
-    <div className="-mx-2 mb-2 flex items-center gap-1">
+  /** A sub-view's own row, fixed above its scroll area like Changes' commit row. */
+  const back = (label: string, title: string) => (
+    <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border pl-1 pr-3 text-xs">
       <IconButton icon="arrowLeft" label={`Back to ${label}`} size="xs" tone="muted" onClick={() => setTab(pr ? 'checks' : 'changes')} />
-      <span className="text-xs text-muted">{label}</span>
+      <span className="min-w-0 flex-1 truncate text-fg">{title}</span>
     </div>
   )
+
+  const prTabs: TabItem<PrTab>[] = pr
+    ? [
+        {
+          id: 'checks',
+          label: 'Checks',
+          ...(pr.checks.length ? { count: `${checksPassedCount(pr)}/${pr.checks.length}` } : {})
+        },
+        { id: 'changes', label: 'Files', count: pr.files.length },
+        { id: 'commits', label: 'Commits', count: pr.commits.length },
+        {
+          id: 'reviews',
+          label: 'Reviews',
+          ...((pr.latestReviews.length || pr.reviews.length) ? { count: pr.latestReviews.length || pr.reviews.length } : {})
+        },
+        { id: 'description', label: 'About' },
+        // Issues opens from the menu; while it is open the strip says so.
+        ...(tab === 'issues' ? [{ id: 'issues' as const, label: 'Issues' }] : [])
+      ]
+    : []
 
   return (
     <div
@@ -1038,8 +1031,8 @@ export function PrPanel({
       aria-label="Pull request panel"
     >
       {pr ? (
-        <div className="shrink-0 border-b border-border px-4 pt-3" data-pr-header>
-          <div className="flex items-center gap-2 text-xs">
+        <div className="shrink-0 border-b border-border" data-pr-header>
+          <div className="flex h-10 items-center gap-2 border-b border-border pl-4 pr-2 text-xs">
             <Badge tone={prStateTone(pr)}>
               <Icon name="pullRequest" size={11} />
               {pr.isDraft && openState === 'OPEN' ? 'Draft' : formatPrState(pr.state)}
@@ -1071,74 +1064,64 @@ export function PrPanel({
               )}
             />
           </div>
-          {editingTitle ? (
-            <form
-              className="mt-2 flex min-w-0 items-center gap-1.5"
-              onSubmit={(e) => {
-                e.preventDefault()
-                void saveTitle()
-              }}
-            >
-              <input
-                ref={titleInputRef}
-                type="text"
-                className="min-w-0 flex-1 rounded-md border border-border bg-bg px-2 py-1 text-sm text-fg focus-visible:vy-focus-ring"
-                value={titleDraft}
-                maxLength={256}
-                aria-label="PR title"
-                onChange={(e) => setTitleDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    setEditingTitle(false)
-                    setTitleDraft(pr.title)
-                  }
+          <div className="px-4 pt-2">
+            {editingTitle ? (
+              <form
+                className="flex min-w-0 items-center gap-1.5"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  void saveTitle()
                 }}
-              />
-              <Button size="sm" type="submit">
-                Save
-              </Button>
-            </form>
-          ) : (
-            <h3 className="m-0 mt-2 text-sm font-semibold leading-5 text-fg-strong" title={pr.title}>
-              {pr.title} <span className="font-normal text-tertiary">#{pr.number}</span>
-            </h3>
-          )}
-          <Tabs
-            size="sm"
-            value={tab === 'issues' ? 'checks' : tab}
-            onChange={(id) => setTab(id)}
-            label="Pull request"
-            className="mt-1"
-            items={[
-              {
-                id: 'checks',
-                label: 'Checks',
-                ...(pr.checks.length ? { count: `${checksPassedCount(pr)}/${pr.checks.length}` } : {})
-              },
-              { id: 'changes', label: 'Files', count: pr.files.length },
-              { id: 'commits', label: 'Commits', count: pr.commits.length },
-              {
-                id: 'reviews',
-                label: 'Reviews',
-                ...((pr.latestReviews.length || pr.reviews.length) ? { count: pr.latestReviews.length || pr.reviews.length } : {})
-              },
-              { id: 'description', label: 'About' }
-            ]}
-          />
+              >
+                <Input
+                  ref={titleInputRef}
+                  type="text"
+                  size="sm"
+                  className="min-w-0 flex-1"
+                  value={titleDraft}
+                  maxLength={256}
+                  aria-label="PR title"
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setEditingTitle(false)
+                      setTitleDraft(pr.title)
+                    }
+                  }}
+                />
+                <Button size="sm" type="submit">
+                  Save
+                </Button>
+              </form>
+            ) : (
+              <h3 className="m-0 text-sm font-semibold leading-5 text-fg-strong" title={pr.title}>
+                {pr.title} <span className="font-normal text-tertiary">#{pr.number}</span>
+              </h3>
+            )}
+            <Tabs
+              size="sm"
+              value={tab}
+              onChange={(id) => setTab(id)}
+              label="Pull request"
+              className="mt-1"
+              items={prTabs}
+            />
+          </div>
         </div>
       ) : null}
 
       {notice ? (
         <p
           className={cn(
-            'm-0 shrink-0 border-b border-border px-4 py-1.5 text-xs',
+            'm-0 flex shrink-0 items-start gap-2 border-b border-border px-4 py-1.5 text-xs',
             noticeFailed ? 'text-danger' : 'text-success'
           )}
           role={noticeFailed ? 'alert' : 'status'}
         >
-          {notice}
+          <Icon name={noticeFailed ? 'warningCircle' : 'checkCircle'} size={14} className="mt-0.5" />
+          <span className="min-w-0 [overflow-wrap:anywhere]">{notice}</span>
         </p>
       ) : null}
 
@@ -1149,7 +1132,7 @@ export function PrPanel({
             ref={findInputRef}
             type="text"
             role="searchbox"
-            className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-tertiary"
+            className="min-w-0 flex-1 rounded-sm bg-transparent text-xs text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
             value={findQuery}
             placeholder="Filter files"
             aria-label="Filter files"
@@ -1179,85 +1162,87 @@ export function PrPanel({
       {loading ? (
         <p className="m-0 px-4 py-3 text-xs text-muted">Loading…</p>
       ) : tab === 'issues' ? (
-        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          {back(pr ? 'checks' : 'the pull request')}
-          <form
-            className="space-y-2"
-            onSubmit={(event) => {
-              event.preventDefault()
-              const title = issueTitle.trim()
-              if (!title || !workspacePath) return
-              setIssueCreateBusy(true)
-              setNotice(null)
-              void window.vyotiq
-                .githubIssueCreate({
-                  workspacePath,
-                  title,
-                  body: issueBody.trim() || undefined
-                })
-                .then((res) => {
-                  if (!res.ok) {
-                    setNotice(res.error)
-                    setNoticeFailed(true)
-                    return
-                  }
-                  setNotice(res.data.detail)
-                  setNoticeFailed(false)
-                  setIssueTitle('')
-                  setIssueBody('')
-                  void loadIssues()
-                  if (res.data.url) void window.vyotiq.shellOpenExternal(res.data.url)
-                })
-                .finally(() => setIssueCreateBusy(false))
-            }}
-          >
-            <h4 className={SECTION_LABEL}>New issue</h4>
-            <input
-              className="block w-full rounded-md border border-border bg-bg px-2 py-1.5 text-xs text-fg outline-none placeholder:text-tertiary focus-visible:vy-focus-ring"
-              value={issueTitle}
-              onChange={(e) => setIssueTitle(e.target.value)}
-              placeholder="Title"
-              aria-label="Issue title"
-              required
-            />
-            <Textarea
-              className="min-h-[4.5rem] rounded-md border border-border px-2 text-xs"
-              placeholder="Optional description"
-              aria-label="Issue description"
-              value={issueBody}
-              onChange={(e) => setIssueBody(e.target.value)}
-            />
-            <Button size="sm" type="submit" pending={issueCreateBusy} disabled={issueCreateBusy || !issueTitle.trim()}>
-              {issueCreateBusy ? 'Creating…' : 'Create issue'}
-            </Button>
-          </form>
-          <section className="mt-5">
-            <h4 className={cn('mb-1', SECTION_LABEL)}>Open issues</h4>
-            {issuesBusy && issues.length === 0 ? (
-              <p className="m-0 text-xs text-muted">Loading issues…</p>
-            ) : issues.length === 0 ? (
-              <p className="m-0 text-xs text-muted">No open issues.</p>
-            ) : (
-              <ul className="-mx-2 m-0 list-none p-0">
-                {issues.map((issue) => (
-                  <li key={issue.number} className="flex h-8 items-center gap-2 rounded-md px-2 text-xs hover:bg-surface">
-                    <span className="shrink-0 font-mono text-caption text-tertiary">#{issue.number}</span>
-                    <span className="min-w-0 flex-1 truncate text-fg">{issue.title}</span>
-                    <span className="shrink-0 text-caption text-tertiary">{issue.state.toLowerCase()}</span>
-                    {issue.url ? (
-                      <IconButton
-                        icon="external"
-                        label={`Open issue #${issue.number}`}
-                        size="xs"
-                        tone="muted"
-                        onClick={() => void window.vyotiq.shellOpenExternal(issue.url)}
-                      />
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+        <div className="flex min-h-0 flex-1 flex-col">
+          {back(pr ? 'checks' : 'the pull request', 'Issues')}
+          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            <form
+              className="space-y-2"
+              onSubmit={(event) => {
+                event.preventDefault()
+                const title = issueTitle.trim()
+                if (!title || !workspacePath) return
+                setIssueCreateBusy(true)
+                setNotice(null)
+                void window.vyotiq
+                  .githubIssueCreate({
+                    workspacePath,
+                    title,
+                    body: issueBody.trim() || undefined
+                  })
+                  .then((res) => {
+                    if (!res.ok) {
+                      setNotice(res.error)
+                      setNoticeFailed(true)
+                      return
+                    }
+                    setNotice(res.data.detail)
+                    setNoticeFailed(false)
+                    setIssueTitle('')
+                    setIssueBody('')
+                    void loadIssues()
+                    if (res.data.url) void window.vyotiq.shellOpenExternal(res.data.url)
+                  })
+                  .finally(() => setIssueCreateBusy(false))
+              }}
+            >
+              <h4 className={SECTION_LABEL}>New issue</h4>
+              <Input
+                size="sm"
+                value={issueTitle}
+                onChange={(e) => setIssueTitle(e.target.value)}
+                placeholder="Title"
+                aria-label="Issue title"
+                required
+              />
+              <Textarea
+                size="sm"
+                placeholder="Optional description"
+                aria-label="Issue description"
+                value={issueBody}
+                onChange={(e) => setIssueBody(e.target.value)}
+              />
+              <Button size="sm" type="submit" pending={issueCreateBusy} disabled={issueCreateBusy || !issueTitle.trim()}>
+                {issueCreateBusy ? 'Creating…' : 'Create issue'}
+              </Button>
+            </form>
+            <section className="mt-5">
+              <h4 className={cn('mb-1', SECTION_LABEL)}>Open issues</h4>
+              {issuesBusy && issues.length === 0 ? (
+                <p className="m-0 text-xs text-muted">Loading issues…</p>
+              ) : issues.length === 0 ? (
+                <p className="m-0 text-xs text-muted">No open issues.</p>
+              ) : (
+                <ul className="-mx-2 m-0 list-none p-0">
+                  {issues.map((issue) => (
+                    <li key={issue.number} className="flex h-8 items-center gap-2 px-2 text-xs">
+                      <span className="shrink-0 font-mono text-caption text-tertiary">#{issue.number}</span>
+                      <span className="min-w-0 flex-1 truncate text-fg">{issue.title}</span>
+                      <span className="shrink-0 text-caption text-tertiary">{issue.state.toLowerCase()}</span>
+                      {issue.url ? (
+                        <IconButton
+                          icon="external"
+                          label={`Open issue #${issue.number}`}
+                          size="xs"
+                          tone="muted"
+                          onClick={() => void window.vyotiq.shellOpenExternal(issue.url)}
+                        />
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
         </div>
       ) : !pr ? (
         <div className="flex min-h-0 flex-1 flex-col">
@@ -1301,10 +1286,7 @@ export function PrPanel({
               <span className="text-muted">
                 {pr.files.length} {pr.files.length === 1 ? 'file' : 'files'}
               </span>
-              <span className="inline-flex gap-1.5 font-mono text-caption tnum">
-                {pr.additions > 0 ? <span className="text-success">+{pr.additions}</span> : null}
-                {pr.deletions > 0 ? <span className="text-danger">−{pr.deletions}</span> : null}
-              </span>
+              <DiffStat add={pr.additions} del={pr.deletions} />
               <span className="flex-1" />
               <Segmented
                 label="Diff layout"
@@ -1384,7 +1366,8 @@ export function PrPanel({
                 {(pr.latestReviews.length ? pr.latestReviews : pr.reviews).length === 0 ? (
                   <p className="m-0 mt-1 text-xs text-muted">No reviews yet for this pull request.</p>
                 ) : (
-                  <ul className="m-0 mt-1 list-none divide-y divide-border p-0">
+                  // BORDER_DIVIDER's weight, as a divide: rows inside one list.
+                  <ul className="m-0 mt-1 list-none divide-y divide-border/60 p-0">
                     {(pr.latestReviews.length ? pr.latestReviews : pr.reviews).map((r, i) => (
                       <ReviewCard key={`${r.author}-${r.submittedAt ?? i}`} review={r} />
                     ))}
@@ -1430,7 +1413,7 @@ export function PrPanel({
                       ]}
                     />
                     <Textarea
-                      className="min-h-[4.5rem] rounded-md border border-border px-2 text-xs"
+                      size="sm"
                       placeholder="Review comment"
                       aria-label="Review comment"
                       value={reviewBody}
@@ -1544,6 +1527,7 @@ export function PrPanel({
           )}
         </div>
       )}
+      {confirmDialog}
     </div>
   )
 }
