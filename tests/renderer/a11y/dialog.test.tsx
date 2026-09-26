@@ -39,6 +39,16 @@ describe('Dialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('portals a panel by default, so tooltips opened inside draw over it', () => {
+    render(
+      <Dialog open onClose={vi.fn()} title="Default">
+        <p>Body</p>
+      </Dialog>
+    )
+    expect(document.querySelector('dialog')).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Default' })).toBeTruthy()
+  })
+
   it('frames the native dialog with the menu surface and titles it at heading size', () => {
     render(
       <Dialog open onClose={vi.fn()} title="Native" useNativeDialog>

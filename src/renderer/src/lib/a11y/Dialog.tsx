@@ -41,7 +41,7 @@ export function Dialog({
   padded = true,
   initialFocusRef,
   returnFocusRef,
-  useNativeDialog = true
+  useNativeDialog = false
 }: {
   open: boolean
   onClose: () => void
@@ -75,7 +75,12 @@ export function Dialog({
   padded?: boolean
   initialFocusRef?: RefObject<HTMLElement | null>
   returnFocusRef?: RefObject<HTMLElement | null>
-  /** Use native `<dialog>` with showModal for top-layer stacking. */
+  /**
+   * Native `<dialog>` with showModal, in the top layer. Off by default: the
+   * top layer sits above every portal, so a tooltip opened from inside the
+   * dialog would draw underneath it. The default panel stacks at `z-drawer`,
+   * under tooltips and toasts.
+   */
   useNativeDialog?: boolean
 }): JSX.Element | null {
   const autoTitleId = useId()
