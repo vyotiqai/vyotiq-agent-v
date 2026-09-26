@@ -1,6 +1,3 @@
-/** Shared horizontal gutter for chat column surfaces. */
-export const CHAT_GUTTER = 'px-4 sm:px-5'
-
 /** Minimum chat column width reserved when clamping the side dock. */
 export const CHAT_COLUMN_MIN_USABLE_PX = 280
 
@@ -24,58 +21,7 @@ export const INSPECTOR_EXPANDED_KEY = 'vyotiq.inspectorExpanded'
 /** localStorage key for the inspector's width in px. */
 export const DOCK_WIDTH_KEY = 'vyotiq.dockWidth'
 
-/** Shared max width for chat column content (messages + composer). */
-export const CHAT_COLUMN_MAX = 'max-w-[840px]'
-
-/** Centered chat column — transcript and composer share this wrapper. */
-export const CHAT_COLUMN = `mx-auto w-full ${CHAT_COLUMN_MAX}`
-
-/**
- * Floating edge-to-edge composer dock — overlays the chat stage bottom.
- * Anchors to the nearest positioned ancestor (`[data-chat-stage]`); the shell
- * keeps `pointer-events-auto` so the wrapper never blocks the transcript, not
- * even under {@link COMPOSER_DOCK_COVER}'s fade.
- */
-export const COMPOSER_FLOAT_DOCK = 'pointer-events-none absolute inset-x-0 bottom-0 z-20'
-
-/**
- * Cover on the dock's centered column. `pb-2` is the gap under the shell, so
- * its rounded border never reads as clipped by the window edge; `pt-4` is the
- * strip rows fade out across on their way under the shell (the `1rem` in
- * `vy-composer-dock-cover`). Both sit inside the measured dock height, so the
- * transcript's reserve covers them and the last row rests above the fade.
- */
-export const COMPOSER_DOCK_COVER = 'vy-composer-dock-cover pt-4 pb-2'
-
-/**
- * Scroll-clipped dock body — reserves the same scrollbar gutter as the
- * transcript scrollport so the centered composer column lines up exactly with
- * the transcript column under classic (space-reserving) scrollbars.
- */
-export const COMPOSER_FLOAT_BODY =
-  'w-full overflow-x-hidden overflow-y-hidden [scrollbar-gutter:stable]'
-
-/**
- * CSS variable the floating composer publishes its measured height to (on the
- * chat stage root); MessageList reserves that height so the last transcript
- * row can scroll fully clear of the bar. The height includes the dock cover's
- * fade, which doubles as the clearance above the shell.
- */
-export const COMPOSER_DOCK_RESERVE_VAR = '--vy-composer-dock-height'
-
-/**
- * Extra bottom reserve while a run is live so streaming rows stay clear of a
- * reserved dock; idle chats keep only the dock cover's fade.
- */
-export const COMPOSER_DOCK_LIVE_CLEARANCE_PX = 16
-
-/** Fallback dock reserve when measured height is not yet available (`8rem`). */
-export const COMPOSER_DOCK_FALLBACK_PX = 128
-
-/** Composer textarea auto-grow cap — keep in sync with `COMPOSER_TEXTAREA_MAX_CLASS`. */
-export const COMPOSER_TEXTAREA_MAX_PX = 280
-
-/** Tailwind max-height matching `COMPOSER_TEXTAREA_MAX_PX`. */
+/** Auto-grow cap for the instruction field (280px). */
 export const COMPOSER_TEXTAREA_MAX_CLASS = 'max-h-[280px]'
 
 /** One line of a disclosure list: label, detail, trailing meta. */
@@ -130,9 +76,6 @@ export const TOOL_FAMILY_TERMINAL = 'overflow-hidden'
 export const TOOL_FAMILY_TODO = 'rounded-md'
 export const TOOL_FAMILY_DELETE = 'border-l-2 border-danger/50 pl-2'
 
-/** Subtle surface shared by the in-flow docked composer. */
-export const FLOATING_CHROME = 'vy-chrome bg-[var(--vy-chrome-surface)] motion-reduce:animate-none'
-
 /**
  * The navigator column (it replaced the sidebar; the names stay so the pane
  * capacity maths keeps one vocabulary). 264 is the redesign's width.
@@ -150,10 +93,6 @@ export function showsWindowControls(
 ): boolean {
   return platform === 'win32' || platform === 'linux' || !platform
 }
-
-/** Uppercase section labels in composer dropdowns and tool bodies. */
-export const MICRO_LABEL_CAPS =
-  'text-2xs font-medium uppercase tracking-[var(--vy-tracking-caps)] text-secondary'
 
 /**
  * Hover fills — three weights, chosen by what sits under the pointer.

@@ -2,69 +2,65 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { useRef } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { ModePicker } from '@renderer/features/chat/components/composer/ModePicker'
+import type { AgentInteractionMode } from '@shared/ipc'
+import { MODES, nextMode, useCycleModeShortcut } from '@renderer/features/chat/components/composer/ModePicker'
 
 afterEach(() => {
   cleanup()
 })
 
-describe('ModePicker', () => {
-  it('renders Agent without truncate clipping on the short label', () => {
-    render(<ModePicker mode="agent" onModeChange={vi.fn()} />)
-    const button = screen.getByRole('button', { name: /Agent mode/i })
-    expect(button.textContent).toBe('Agent')
-    expect(button.className).not.toMatch(/\btruncate\b/)
-    const label = button.querySelector('span')
-    expect(label).toBeTruthy()
-    expect(label!.className).not.toMatch(/\btruncate\b/)
-    expect(label!.className).toMatch(/leading-tight/)
+/** The shortcut's host, as TaskOptions mounts it: a root inside (or beside) the composer shell. */
+function Host({
+  mode,
+  onModeChange,
+  locked = false
+}: {
+  mode: AgentInteractionMode
+  onModeChange: (mode: AgentInteractionMode) => void
+  locked?: boolean
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  useCycleModeShortcut(ref, locked, (reverse) => onModeChange(nextMode(mode, reverse)))
+  return <div ref={ref} />
+}
+
+describe('agent modes', () => {
+  it('lists Ask and Agent', () => {
+    expect(MODES.map((m) => m.label)).toEqual(['Ask', 'Agent'])
   })
 
-  it('uses foreground color for Agent mode (not muted)', () => {
-    render(<ModePicker mode="agent" onModeChange={vi.fn()} />)
-    const button = screen.getByRole('button', { name: /Agent mode/i })
-    expect(button.className).toMatch(/\btext-fg\b/)
-    expect(button.className).not.toMatch(/\btext-muted\b/)
+  it('cycles between the two, the same hop either way', () => {
+    expect(nextMode('agent', false)).toBe('ask')
+    expect(nextMode('ask', false)).toBe('agent')
+    // Two modes: forward and reverse are the same hop. Plan used to sit
+    // between them, which is what made the two directions differ.
+    expect(nextMode('agent', true)).toBe('ask')
   })
 
-  it('cycles to Ask on click', () => {
-    const onModeChange = vi.fn()
-    render(<ModePicker mode="agent" onModeChange={onModeChange} />)
-    fireEvent.click(screen.getByRole('button', { name: /Agent mode/i }))
-    expect(onModeChange).toHaveBeenCalledWith('ask')
+  it('falls back to Agent when handed a mode that no longer exists', () => {
+    // @ts-expect-error legacy persisted value: Plan was merged into Agent.
+    expect(nextMode('plan', false)).toBe('ask')
   })
+})
 
-  it('stays enabled and cycles while the agent is running', () => {
-    const onModeChange = vi.fn()
-    render(<ModePicker mode="agent" onModeChange={onModeChange} running />)
-    const button = screen.getByRole('button', { name: /Agent mode/i })
-
-    expect(button).toHaveProperty('disabled', false)
-    fireEvent.click(button)
-    expect(onModeChange).toHaveBeenCalledWith('ask')
-  })
-
+describe('useCycleModeShortcut', () => {
   it('cycles with Ctrl+. and reverses with Shift', () => {
     const onModeChange = vi.fn()
-    render(<ModePicker mode="agent" onModeChange={onModeChange} />)
+    render(<Host mode="agent" onModeChange={onModeChange} />)
     fireEvent.keyDown(window, { key: '.', ctrlKey: true })
     expect(onModeChange).toHaveBeenCalledWith('ask')
     onModeChange.mockClear()
-    // Two modes: forward and reverse are the same hop. Plan used to sit
-    // between them, which is what made the two directions differ.
     fireEvent.keyDown(window, { key: '.', ctrlKey: true, shiftKey: true })
     expect(onModeChange).toHaveBeenCalledWith('ask')
   })
 
-  it('falls back to Agent when handed a mode that no longer exists', () => {
+  it('does nothing while locked', () => {
     const onModeChange = vi.fn()
-    // @ts-expect-error legacy persisted value: Plan was merged into Agent.
-    render(<ModePicker mode="plan" onModeChange={onModeChange} />)
-    // Renders as Agent rather than blank, and cycles from Agent to Ask.
-    expect(screen.getByRole('button', { name: /Agent mode/ })).toBeTruthy()
+    render(<Host mode="agent" onModeChange={onModeChange} locked />)
     fireEvent.keyDown(window, { key: '.', ctrlKey: true })
-    expect(onModeChange).toHaveBeenCalledWith('ask')
+    expect(onModeChange).not.toHaveBeenCalled()
   })
 
   it('does not cycle from a generic input', () => {
@@ -72,7 +68,7 @@ describe('ModePicker', () => {
     render(
       <>
         <input aria-label="Other field" />
-        <ModePicker mode="agent" onModeChange={onModeChange} />
+        <Host mode="agent" onModeChange={onModeChange} />
       </>
     )
     fireEvent.keyDown(screen.getByLabelText('Other field'), { key: '.', ctrlKey: true })
@@ -83,12 +79,19 @@ describe('ModePicker', () => {
     const onModeChange = vi.fn()
     const { getByRole } = render(
       <div data-composer-shell="">
-        <div role="combobox" aria-label="Message" aria-expanded="false" aria-controls="test-listbox" contentEditable tabIndex={0} />
-        <ModePicker mode="agent" onModeChange={onModeChange} />
+        <div role="combobox" aria-label="Instruction" aria-expanded="false" aria-controls="test-listbox" contentEditable tabIndex={0} />
+        <Host mode="agent" onModeChange={onModeChange} />
       </div>
     )
-    getByRole('combobox', { name: /^Message$/i }).focus()
-    fireEvent.keyDown(getByRole('combobox', { name: /^Message$/i }), { key: '.', ctrlKey: true })
+    getByRole('combobox', { name: 'Instruction' }).focus()
+    fireEvent.keyDown(getByRole('combobox', { name: 'Instruction' }), { key: '.', ctrlKey: true })
     expect(onModeChange).toHaveBeenCalledWith('ask')
+  })
+
+  it('answers the command palette’s cycleMode command', () => {
+    const onModeChange = vi.fn()
+    render(<Host mode="ask" onModeChange={onModeChange} />)
+    window.dispatchEvent(new CustomEvent('vyotiq:command', { detail: { id: 'cycleMode' } }))
+    expect(onModeChange).toHaveBeenCalledWith('agent')
   })
 })
