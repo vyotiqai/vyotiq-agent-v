@@ -22,7 +22,7 @@ const SIZE_WIDTH: Record<DialogSize, string> = {
   lg: 'w-[min(36rem,calc(100vw_-_2rem))]'
 }
 
-/** Inset shared by the header and the body so they line up on both edges. */
+/** Inset shared by the header, the body and the footer so they line up on both edges. */
 const PAD_X = 'px-5'
 
 export function Dialog({
@@ -34,13 +34,14 @@ export function Dialog({
   labelledBy,
   describedBy,
   children,
+  footer,
   className,
   overlayClassName,
   size = 'md',
   padded = true,
   initialFocusRef,
   returnFocusRef,
-  useNativeDialog = true
+  useNativeDialog = false
 }: {
   open: boolean
   onClose: () => void
@@ -53,6 +54,13 @@ export function Dialog({
   labelledBy?: string
   describedBy?: string
   children: ReactNode
+  /**
+   * The action row: a hairline over the buttons, which sit on the right edge.
+   * Put a note first and a `flex-1` spacer after it if the row needs one. Its
+   * inset follows the body — {@link PAD_X} when padded, and the `px-4` of the
+   * `h-12` header family when the content draws its own.
+   */
+  footer?: ReactNode
   className?: string
   overlayClassName?: string
   /** Panel width — see {@link SIZE_WIDTH}. Native dialogs only. */
@@ -67,7 +75,12 @@ export function Dialog({
   padded?: boolean
   initialFocusRef?: RefObject<HTMLElement | null>
   returnFocusRef?: RefObject<HTMLElement | null>
-  /** Use native `<dialog>` with showModal for top-layer stacking. */
+  /**
+   * Native `<dialog>` with showModal, in the top layer. Off by default: the
+   * top layer sits above every portal, so a tooltip opened from inside the
+   * dialog would draw underneath it. The default panel stacks at `z-drawer`,
+   * under tooltips and toasts.
+   */
   useNativeDialog?: boolean
 }): JSX.Element | null {
   const autoTitleId = useId()
@@ -111,7 +124,7 @@ export function Dialog({
         {title ? (
           <h2
             id={autoTitleId}
-            className="m-0 text-md font-semibold tracking-[var(--vy-tracking)] text-fg-strong"
+            className="m-0 text-heading font-semibold text-fg-strong"
           >
             {title}
           </h2>
@@ -141,6 +154,16 @@ export function Dialog({
       ) : (
         children
       )}
+      {footer ? (
+        <div
+          className={cn(
+            'flex shrink-0 items-center justify-end gap-2 border-t border-border py-3',
+            padded ? PAD_X : 'px-4'
+          )}
+        >
+          {footer}
+        </div>
+      ) : null}
     </>
   )
 
@@ -149,7 +172,7 @@ export function Dialog({
       <dialog
         ref={dialogRef}
         className={cn(
-          'fixed inset-0 m-auto max-h-[min(90vh,900px)] rounded-xl border border-border bg-surface p-0 text-fg shadow-menu animate-dialog-in backdrop:bg-overlay',
+          'vy-menu fixed inset-0 m-auto max-h-[min(90vh,900px)] p-0 text-fg animate-dialog-in backdrop:bg-overlay',
           SIZE_WIDTH[size],
           padded ? 'flex flex-col overflow-hidden' : 'overflow-y-auto',
           className

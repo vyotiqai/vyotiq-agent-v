@@ -64,6 +64,15 @@ describe('ToastHost', () => {
     expect(src).toMatch(/vy-toast-progress/)
   })
 
+  it('sits on the window corner: there is no status bar to clear any more', () => {
+    pushToast('Link copied', 'success')
+    render(<ToastHost />)
+    const stack = screen.getByLabelText('Notifications')
+    expect(stack.classList.contains('bottom-3')).toBe(true)
+    expect(stack.classList.contains('right-3')).toBe(true)
+    expect(stack.className).not.toMatch(/bottom-\[/)
+  })
+
   it('still auto-dismisses timed toasts without rAF', () => {
     pushToast('timed out', 'info', 100)
     render(<ToastHost />)

@@ -69,7 +69,7 @@ export function ToastHost() {
   if (toasts.length === 0) return null
   return (
     <div
-      className="pointer-events-none fixed bottom-[34px] right-3 z-toast flex w-[min(21.25rem,calc(100vw-1.5rem))] flex-col gap-2"
+      className="pointer-events-none fixed bottom-3 right-3 z-toast flex w-[min(21.25rem,calc(100vw-1.5rem))] flex-col gap-2"
       aria-label="Notifications"
     >
       {toasts.map((toast) => {

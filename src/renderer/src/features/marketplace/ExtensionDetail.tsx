@@ -930,10 +930,10 @@ function UserRuleBody({
       </Actions>
       <Status>
         {!rule.enabled
-          ? 'Off — not added to any chat.'
+          ? 'Off — not added to any task.'
           : empty
             ? 'Not applied — it has no text yet.'
-            : 'Added to every chat.'}
+            : 'Added to every task.'}
       </Status>
       <Detail label="Where it can run">
         <WhereControl
@@ -1013,12 +1013,12 @@ function ProjectRuleBody({
       </Actions>
       <Status>
         {root
-          ? `A root instruction file — added to every chat in ${where}.`
+          ? `A root instruction file — added to every task in ${where}.`
           : applies === 'matching'
             ? `Added in ${where} while a file matching its globs is open.`
             : applies === 'request'
               ? 'Added when you @-mention it.'
-              : `Added to every chat in ${where}.`}
+              : `Added to every task in ${where}.`}
       </Status>
     </>
   )

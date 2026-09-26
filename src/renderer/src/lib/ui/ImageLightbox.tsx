@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
-import { Icon } from '@renderer/lib/icons'
+import { IconButton } from './IconButton'
 
 export function ImageLightbox({
   url,
@@ -13,6 +13,7 @@ export function ImageLightbox({
 }) {
   const closeRef = useRef<HTMLButtonElement>(null)
 
+  // Dialog draws the one scrim; the panel is just the image.
   return (
     <Dialog
       open
@@ -20,23 +21,18 @@ export function ImageLightbox({
       label={label}
       padded={false}
       useNativeDialog={false}
-      overlayClassName="bg-overlay"
       className="flex items-center justify-center"
       initialFocusRef={closeRef}
     >
-      <button
-        ref={closeRef}
-        type="button"
-        className="absolute right-4 top-4 inline-grid size-8 place-items-center rounded-full bg-surface/80 text-fg vy-transition hover:bg-surface"
-        aria-label="Close image preview"
-        onClick={onClose}
-      >
-        <Icon name="close" size={16} />
-      </button>
+      {/* A solid chip under the button so it reads on any image; the button's
+          own hover fill sits on top of it. */}
+      <span className="absolute right-4 top-4 rounded-md bg-bg">
+        <IconButton ref={closeRef} icon="close" label="Close image preview" size="lg" onClick={onClose} />
+      </span>
       <img
         src={url}
         alt={label}
-        className="max-h-[min(90vh,900px)] max-w-[min(92vw,1200px)] rounded-md object-contain shadow-lg"
+        className="max-h-[min(90vh,900px)] max-w-[min(92vw,1200px)] rounded-md object-contain"
       />
     </Dialog>
   )

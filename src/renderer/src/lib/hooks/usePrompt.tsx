@@ -1,19 +1,26 @@
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type JSX } from 'react'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
-import { Button } from '@renderer/lib/ui'
+import { Button, Input } from '@renderer/lib/ui'
+
+type PromptOptions = {
+  /** The verb on the submit button, when "OK" says less than it could ("Create", "Rename"). */
+  confirmLabel?: string
+}
 
 type PromptState = {
   message: string
   value: string
+  confirmLabel: string
 }
 
 export function usePrompt(): {
-  prompt: (message: string, defaultValue?: string) => Promise<string | null>
+  prompt: (message: string, defaultValue?: string, options?: PromptOptions) => Promise<string | null>
   dialog: JSX.Element
 } {
   const [state, setState] = useState<PromptState | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const resolverRef = useRef<((value: string | null) => void) | null>(null)
+  const formId = useId()
 
   const finish = useCallback((value: string | null): void => {
     const resolve = resolverRef.current
@@ -23,10 +30,10 @@ export function usePrompt(): {
   }, [])
 
   const prompt = useCallback(
-    (message: string, defaultValue = ''): Promise<string | null> => {
+    (message: string, defaultValue = '', options: PromptOptions = {}): Promise<string | null> => {
       resolverRef.current?.(null)
       resolverRef.current = null
-      setState({ message, value: defaultValue })
+      setState({ message, value: defaultValue, confirmLabel: options.confirmLabel ?? 'OK' })
       return new Promise<string | null>((resolve) => {
         resolverRef.current = resolve
       })
@@ -42,43 +49,44 @@ export function usePrompt(): {
     []
   )
 
+  // The question is the dialog's title, so it reads as one — not as a field
+  // label floating over an input. The action row sits outside the form, so the
+  // submit button names the form it belongs to.
   const dialog = (
     <Dialog
       open={state !== null}
       onClose={() => finish(null)}
-      label={state?.message ?? 'Input'}
+      title={state?.message ?? 'Input'}
       initialFocusRef={inputRef}
       useNativeDialog={false}
       className="vy-menu w-[min(92vw,28rem)] text-fg"
+      footer={
+        <>
+          <Button size="sm" variant="ghost" onClick={() => finish(null)}>
+            Cancel
+          </Button>
+          <Button type="submit" form={formId} size="sm" variant="primary">
+            {state?.confirmLabel ?? 'OK'}
+          </Button>
+        </>
+      }
     >
       <form
-        className="flex flex-col gap-3"
+        id={formId}
         onSubmit={(event) => {
           event.preventDefault()
           finish(state?.value ?? '')
         }}
       >
-        <label className="text-xs text-fg" htmlFor="vyotiq-prompt-input">
-          {state?.message}
-        </label>
-        <input
+        <Input
           ref={inputRef}
-          id="vyotiq-prompt-input"
+          size="sm"
           aria-label="Prompt input"
-          className="w-full rounded-md border border-border bg-bg px-2 py-1.5 text-sm outline-none focus-visible:vy-focus-ring"
           value={state?.value ?? ''}
           onChange={(event) =>
             setState((current) => (current ? { ...current, value: event.target.value } : current))
           }
         />
-        <div className="flex justify-end gap-2">
-          <Button size="sm" variant="ghost" onClick={() => finish(null)}>
-            Cancel
-          </Button>
-          <Button type="submit" size="sm" variant="primary">
-            OK
-          </Button>
-        </div>
       </form>
     </Dialog>
   )
