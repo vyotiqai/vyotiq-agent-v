@@ -35,6 +35,8 @@ import {
   resetRunLoopSchedulerForTests
 } from '@main/agent/runLoopScheduler'
 import { flushEventAppends } from '@main/agent/eventAppendQueue'
+import { flushMessageAppends } from '@main/agent/messageAppendQueue'
+import { clearStatusWritesForDir, flushStatusWrites } from '@main/agent/statusWriteQueue'
 import { createRun } from '@main/agent/state'
 import { resolveRunDir } from '@main/storage/paths'
 
@@ -55,14 +57,25 @@ describe('armed prompt loop during quota exhaustion', () => {
   afterEach(async () => {
     vi.useRealTimers()
     workspaceState.path = ''
-    // createRun, createGoal and armLoop queue their events.jsonl appends; one
-    // still in flight recreated the file while the tree was removed (ENOTEMPTY
-    // on every runner, and no retry budget outlasted it). Drain the queue first.
-    await flushEventAppends()
+    // createRun, createGoal and armLoop queue their events.jsonl appends, and
+    // createGoal also queues a status.json patch. One still in flight recreated
+    // its file while the tree was removed (ENOTEMPTY on every runner; draining
+    // events alone still lost to the status patch on Linux). Drain every writer
+    // deleteRun drains, in its order, before touching the tree.
+    await drainRunWriters()
     const gone = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }
     if (existsSync(userData)) rmSync(userData, gone)
     if (existsSync(workspace)) rmSync(workspace, gone)
   })
+
+  // Mirrors drainRunWritersBeforeDelete in @main/agent/state, which is not
+  // exported: messages, then events, then status patches.
+  const drainRunWriters = async (dir?: string): Promise<void> => {
+    await flushMessageAppends(dir)
+    await flushEventAppends(dir)
+    await flushStatusWrites(dir)
+    if (dir) clearStatusWritesForDir(dir)
+  }
 
   const setStatus = (runId: string, patch: Record<string, unknown>): void => {
     const statusPath = join(resolveRunDir(workspace, runId), 'status.json')
@@ -113,9 +126,9 @@ describe('armed prompt loop during quota exhaustion', () => {
     armLoop({ workspacePath: workspace, runId, runDir, prompt: 'continue the goal', intervalMs: LOOP_INTERVAL_MS })
     expect(listLoopSchedulerMetaRunIdsForTests()).toContain(runId)
 
-    // Simulate deleteRun: drain the run's queued appends, as it does, then
+    // Simulate deleteRun: drain the run's queued writers, as it does, then
     // remove the whole run directory (loop.json included).
-    await flushEventAppends(runDir)
+    await drainRunWriters(runDir)
     rmSync(runDir, { recursive: true, force: true })
     await vi.advanceTimersByTimeAsync(LOOP_INTERVAL_MS)
     expect(launchMock).not.toHaveBeenCalled()
