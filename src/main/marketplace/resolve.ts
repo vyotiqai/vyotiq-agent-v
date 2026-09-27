@@ -27,7 +27,16 @@ type ResolveCacheEntry = {
   servers: McpServer[]
 }
 
-let effectiveCache: ResolveCacheEntry | null = null
+/**
+ * Effective server lists by overrides fingerprint, all built from one
+ * settings + marketplace snapshot. A single entry thrashed: a run with
+ * workspace overrides asks with them every step, and every MCP invoke asks
+ * without, so each alternation re-read and re-parsed every manifest.
+ */
+let effectiveCache: { baseFingerprint: string; byOverrides: Map<string, McpServer[]> } | null =
+  null
+/** Distinct override sets kept per snapshot — one per open workspace is typical. */
+const EFFECTIVE_CACHE_MAX_ENTRIES = 16
 let sessionMapCache: ResolveCacheEntry | null = null
 
 function overridesFingerprint(overrides?: MarketplaceOverrides | null): string {
@@ -121,14 +130,14 @@ export function clearMcpResolveCacheForTests(): void {
 export function resolveEffectiveMcpServers(
   marketplaceOverrides?: MarketplaceOverrides | null
 ): McpServer[] {
-  const fingerprint = [
-    settingsMcpFingerprint(),
-    marketplaceIndexFingerprint(),
-    overridesFingerprint(marketplaceOverrides)
-  ].join('::')
-  if (effectiveCache?.fingerprint === fingerprint) {
-    return effectiveCache.servers.map((s) => ({ ...s }))
+  const baseFingerprint = [settingsMcpFingerprint(), marketplaceIndexFingerprint()].join('::')
+  const overridesKey = overridesFingerprint(marketplaceOverrides)
+  if (effectiveCache?.baseFingerprint !== baseFingerprint) {
+    effectiveCache = { baseFingerprint, byOverrides: new Map() }
   }
+  const byOverrides = effectiveCache.byOverrides
+  const cached = byOverrides.get(overridesKey)
+  if (cached) return cached.map((s) => ({ ...s }))
 
   const settings = getSettings()
   const index = readMarketplaceIndex()
@@ -196,7 +205,11 @@ export function resolveEffectiveMcpServers(
   }
 
   const servers = [...byId.values()]
-  effectiveCache = { fingerprint, servers }
+  if (byOverrides.size >= EFFECTIVE_CACHE_MAX_ENTRIES) {
+    const oldest = byOverrides.keys().next().value
+    if (oldest !== undefined) byOverrides.delete(oldest)
+  }
+  byOverrides.set(overridesKey, servers)
   return servers.map((s) => ({ ...s }))
 }
 

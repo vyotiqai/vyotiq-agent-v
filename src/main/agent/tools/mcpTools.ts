@@ -3,6 +3,7 @@ import { canonicalizeAgentToolName } from '../schemas/tools'
 import { isOptionalBuiltinName } from '../context/toolsBudget'
 import {
   listMcpToolDefinitions,
+  MCP_LIST_ENTRY_CAP,
   getMcpReadOnlyHint,
   listMcpResources,
   readMcpResource,
@@ -42,14 +43,18 @@ function mcpServerGate(
 }
 
 /**
- * Connected tools this run may reach: enabled server, permitted by the
- * server's allow/deny policy. Listing or loading a denied tool would only
- * promise something executeTool then refuses.
+ * Connected tools this run may reach: a session a call from this workspace
+ * resolves, on an enabled server, permitted by the server's allow/deny policy.
+ * Listing or loading anything else would only promise something executeTool
+ * then refuses.
  */
-function reachableMcpTools(context: ToolExecutionContext): ReturnType<typeof listMcpToolDefinitions> {
+function reachableMcpTools(
+  workspace: string,
+  context: ToolExecutionContext
+): ReturnType<typeof listMcpToolDefinitions> {
   const enabled = context.runEnabledMcpIds
   const policies = context.mcpToolPolicies
-  return listMcpToolDefinitions().filter((t) => {
+  return listMcpToolDefinitions(workspace).filter((t) => {
     const parsed = parseMcpToolName(t.name)
     if (!parsed) return false
     if (enabled && !enabled.has(parsed.serverId)) return false
@@ -57,6 +62,14 @@ function reachableMcpTools(context: ToolExecutionContext): ReturnType<typeof lis
     if (policy && !isMcpToolPermitted(parsed.toolName, policy)) return false
     return true
   })
+}
+
+/** Tells the model a listing stopped at the cap, and how to see the rest. */
+function listCapNote(count: number): string {
+  return count >= MCP_LIST_ENTRY_CAP
+    ? `
+(showing the first ${MCP_LIST_ENTRY_CAP}; pass serverId to narrow)`
+    : ''
 }
 
 function formatMcpResourceLines(entries: Awaited<ReturnType<typeof listMcpResources>>): string {
@@ -83,12 +96,12 @@ function formatMcpPromptLines(entries: Awaited<ReturnType<typeof listMcpPrompts>
 }
 
 export const mcpHandlers = {
-  mcp_list_tools: (_workspace, args, signal, context) => {
+  mcp_list_tools: (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const filter = optionalMcpServerId(args)?.toLowerCase() ?? ''
     const enabled = context.runEnabledMcpIds
     const stepCatalog = context.stepMcpToolNames
-    const defs = reachableMcpTools(context).filter((t) => {
+    const defs = reachableMcpTools(workspace, context).filter((t) => {
       const parsed = parseMcpToolName(t.name)
       if (!parsed) return false
       return !filter || parsed.serverId.toLowerCase() === filter
@@ -139,7 +152,7 @@ export const mcpHandlers = {
     }
     return toolOk('mcp_list_tools', `${defs.length} tools`, lines.join('\n'))
   },
-  request_mcp_tools: (_workspace, args, signal, context) => {
+  request_mcp_tools: (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const pinned = context.runPinnedMcpToolNames
     if (!pinned) {
@@ -164,7 +177,7 @@ export const mcpHandlers = {
         'Provide tools: string[] and/or serverId to load MCP tools into the next step.'
       )
     }
-    const connected = reachableMcpTools(context)
+    const connected = reachableMcpTools(workspace, context)
     const byFull = new Map(connected.map((t) => [t.name, t]))
     const byBare = new Map<string, string[]>()
     for (const t of connected) {
@@ -441,7 +454,7 @@ export const mcpHandlers = {
     return toolOk(
       'mcp_list_resources',
       `${entries.length} resources`,
-      formatMcpResourceLines(entries)
+      formatMcpResourceLines(entries) + listCapNote(entries.length)
     )
   },
   mcp_read_resource: async (workspace, args, signal, context) => {
@@ -481,7 +494,11 @@ export const mcpHandlers = {
         : 'No MCP prompts connected.'
       return toolOk('mcp_list_prompts', serverId || 'none', none)
     }
-    return toolOk('mcp_list_prompts', `${entries.length} prompts`, formatMcpPromptLines(entries))
+    return toolOk(
+      'mcp_list_prompts',
+      `${entries.length} prompts`,
+      formatMcpPromptLines(entries) + listCapNote(entries.length)
+    )
   },
   mcp_get_prompt: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
