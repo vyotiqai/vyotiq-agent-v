@@ -520,7 +520,7 @@ describe('Connect MCP wizard', () => {
     )
     fireEvent.click(await screen.findByRole('button', { name: /^Add$/i }))
     expect(await screen.findByRole('dialog', { name: /Connect GitHub/i })).toBeTruthy()
-    fireEvent.click(screen.getByLabelText(/This workspace only/i))
+    fireEvent.click(screen.getByRole('radio', { name: /This workspace only/i }))
     fireEvent.click(screen.getByRole('button', { name: /^Sign in$/i }))
     await waitFor(() => {
       expect(window.vyotiq.mcpStartOAuth).toHaveBeenCalledWith('github', {
@@ -665,7 +665,7 @@ describe('GitHub MCP without registering an OAuth app', () => {
   it('still offers registering your own OAuth app', async () => {
     // Self-hosters and anyone who wants a separate identity keep the old route.
     await openWizard()
-    fireEvent.click(screen.getByLabelText(/Sign in with your own OAuth app/i))
+    fireEvent.click(screen.getByRole('radio', { name: /Sign in with your own OAuth app/i }))
 
     expect(await screen.findByRole('button', { name: /^Continue$/i })).toBeTruthy()
   })
@@ -714,5 +714,67 @@ describe('GitHub MCP without registering an OAuth app', () => {
 
     expect(await screen.findByText(/GitHub CLI on this machine is already signed in/i)).toBeTruthy()
     expect(screen.getByRole('button', { name: /Sign in with GitHub/i })).toBeTruthy()
+  })
+})
+
+describe('Connect MCP wizard frame', () => {
+  const openGithub = async (): Promise<HTMLElement> => {
+    mockVyotiq()
+    render(
+      <MarketplaceView settings={baseSettings} onUpdate={vi.fn(async () => ({ ok: true as const }))} />
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /^Add$/i }))
+    return screen.findByRole('dialog', { name: /Connect GitHub/i })
+  }
+
+  it('sits on the Add MCP frame: menu surface, 48px header with a close, footer row', async () => {
+    const dialog = await openGithub()
+    expect(document.querySelector('dialog')).toBeNull()
+    expect(dialog.classList.contains('vy-menu')).toBe(true)
+    const title = within(dialog).getByRole('heading', { name: 'Connect GitHub' })
+    expect(title.classList.contains('text-heading')).toBe(true)
+    expect(title.parentElement!.classList.contains('h-12')).toBe(true)
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeTruthy()
+    const notNow = within(dialog).getByRole('button', { name: 'Not now' })
+    expect(notNow.closest('.border-t')).toBe(dialog.lastElementChild)
+    expect(within(dialog).getByRole('button', { name: /^Sign in$/i }).closest('.border-t')).toBe(
+      dialog.lastElementChild
+    )
+  })
+
+  it('asks with radio rows, not native radios, and moves the choice with the arrow keys', async () => {
+    const dialog = await openGithub()
+    expect(dialog.querySelector('input[type="radio"]')).toBeNull()
+    const method = within(dialog).getByRole('radiogroup', { name: 'Sign-in method' })
+    const app = within(method).getByRole('radio', { name: /Use the Agent V GitHub sign-in/i })
+    const oauth = within(method).getByRole('radio', { name: /Sign in with your own OAuth app/i })
+    // No sign-in exists and GitHub has no dynamic registration here, so the
+    // wizard starts on the plain browser flow.
+    expect(oauth.getAttribute('aria-checked')).toBe('true')
+    expect(oauth.getAttribute('tabindex')).toBe('0')
+    expect(app.getAttribute('tabindex')).toBe('-1')
+    fireEvent.keyDown(oauth, { key: 'ArrowUp' })
+    expect(app.getAttribute('aria-checked')).toBe('true')
+    expect(document.activeElement).toBe(app)
+  })
+
+  it('keeps an unavailable scope visible, disabled, and out of the arrow-key cycle', async () => {
+    const dialog = await openGithub()
+    const scope = within(dialog).getByRole('radiogroup', { name: /Where can Agent V use this/i })
+    const all = within(scope).getByRole('radio', { name: /All workspaces/i })
+    const here = within(scope).getByRole('radio', { name: /This workspace only/i })
+    expect(here.hasAttribute('disabled')).toBe(true)
+    expect(within(scope).getByText('Open a workspace to use this option.')).toBeTruthy()
+    fireEvent.keyDown(all, { key: 'ArrowDown' })
+    expect(all.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('folds the options behind a ghost disclosure that reports its state', async () => {
+    const dialog = await openGithub()
+    const toggle = within(dialog).getByRole('button', { name: 'Hide options' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(toggle)
+    expect(within(dialog).getByRole('button', { name: 'Options' }).getAttribute('aria-expanded')).toBe('false')
+    expect(within(dialog).queryByRole('radiogroup')).toBeNull()
   })
 })

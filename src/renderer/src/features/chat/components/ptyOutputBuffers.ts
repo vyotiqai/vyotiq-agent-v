@@ -1,6 +1,5 @@
 import {
   appendPtyOutputBuffer,
-  prunePtyOutputBuffers,
   PTY_OUTPUT_BUFFER_MAX_CHARS
 } from '@shared/utils/ptyOutputBuffer'
 
@@ -23,10 +22,6 @@ export function ensurePtyOutputBufferListener(): Map<string, string> {
 
 export function getPtyOutputBuffers(): Map<string, string> {
   return ensurePtyOutputBufferListener()
-}
-
-export function pruneLivePtyBuffers(liveIds: Iterable<string>): void {
-  prunePtyOutputBuffers(ptyOutputBuffers, liveIds)
 }
 
 export { PTY_OUTPUT_BUFFER_MAX_CHARS }

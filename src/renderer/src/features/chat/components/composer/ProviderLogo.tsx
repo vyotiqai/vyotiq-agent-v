@@ -86,14 +86,15 @@ function GenericIcon({
     <span
       className={cn(
         'inline-grid shrink-0 place-items-center rounded-sm font-semibold',
+        // The initial on the type scale, by tile size.
+        size < 20 ? 'text-caption' : size < 24 ? 'text-xs' : 'text-sm',
         // A provider with no mark of its own: its initial on the surface, in every skin.
         tone === 'brand' ? 'bg-surface-2 text-secondary' : '',
         className
       )}
       style={{
         width: size,
-        height: size,
-        fontSize: Math.max(10, size - 6)
+        height: size
       }}
       aria-hidden
     >

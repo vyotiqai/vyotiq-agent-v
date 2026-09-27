@@ -1,6 +1,7 @@
 import type { UiAgentQuestion, UiAttachment, UiItem, UiToolApproval } from '@shared/transcript'
 import {
   duplicatesReasoning,
+  isSerializedPayloadText,
   stripToolShapedAssistantText,
   stripToolShapedAssistantTextForStream
 } from '@shared/transcript'
@@ -186,6 +187,14 @@ function stepState(status: TodoItem['status']): TaskState {
   return 'queued'
 }
 
+/**
+ * A step whose own sub-agent work failed did not finish, whatever its todo
+ * says. A failed non-instance tool (a command, a read) does not fail the step.
+ */
+function stepWorkFailed(items: ToolItem[]): boolean {
+  return items.some((item) => INSTANCE_TOOLS.has(item.tool.name) && item.tool.status === 'fail')
+}
+
 type Bucket = { work: WorkItem[]; pending: ToolItem[] }
 
 function newBucket(): Bucket {
@@ -333,6 +342,9 @@ function finishRun(b: RunBuilder, options: BuildOptions, isLast: boolean): Recor
       const at = bucket.work.findIndex((w) => w.kind === 'note' && w.item.id === last.id)
       if (at >= 0 && at === bucket.work.length - 1) {
         const note = bucket.work[at] as Extract<WorkItem, { kind: 'note' }>
+        // A serialized payload is not an answer: it stays a visible note and
+        // the run keeps no result, so the title falls back to the brief.
+        if (isSerializedPayloadText(note.text)) break
         bucket.work.splice(at, 1)
         b.run.result = { item: last, text: note.text, streaming: Boolean(last.streaming) }
         break
@@ -343,10 +355,13 @@ function finishRun(b: RunBuilder, options: BuildOptions, isLast: boolean): Recor
   const todos = b.todos ?? []
   b.run.steps = todos.map((todo, i) => {
     const key = todoKey(todo)
+    const stepItems = b.stepTools.get(key) ?? []
     let state = stepState(todo.status)
     // A step left in progress by a run that is over did not finish.
     if (state === 'running' && !live) state = isLast && options.failed ? 'failed' : 'stopped'
-    const edits = editSummary(b.stepTools.get(key) ?? [])
+    // The todo can claim a step finished while its own sub-agent work did not.
+    if (stepWorkFailed(stepItems)) state = 'failed'
+    const edits = editSummary(stepItems)
     return {
       key,
       n: i + 1,

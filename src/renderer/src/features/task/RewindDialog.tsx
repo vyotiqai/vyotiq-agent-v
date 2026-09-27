@@ -108,7 +108,7 @@ export function RewindDialog({
         {ask.files && ask.files.length > 0 ? (
           <ul
             aria-label="Files"
-            className="my-3 max-h-[min(40vh,16rem)] min-h-0 divide-y divide-border overflow-y-auto border-y border-border"
+            className="my-3 max-h-[min(40vh,16rem)] min-h-0 divide-y divide-border/60 overflow-y-auto border-y border-border"
           >
             {ask.files.map((file) => {
               const mark = MARK[file.action]

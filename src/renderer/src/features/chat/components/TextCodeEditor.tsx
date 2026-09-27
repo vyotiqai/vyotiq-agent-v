@@ -118,6 +118,26 @@ function normalizedSelections(
   return result
 }
 
+/**
+ * Gutter marker shapes, drawn as masks and filled with a token — the shape says
+ * the severity before the colour does (circle, triangle, square, as the
+ * library draws them). The SVGs set no colour: a mask only reads alpha.
+ */
+const LINT_MARKER_MASK = {
+  error: `url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><circle cx='20' cy='20' r='15'/></svg>")`,
+  warning: `url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><path d='M20 6L37 35L3 35Z'/></svg>")`,
+  info: `url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><path d='M5 5L35 5L35 35L5 35Z'/></svg>")`
+} as const
+
+function lintMarker(mask: string, color: string) {
+  return { content: 'normal', backgroundColor: color, maskImage: mask, maskRepeat: 'no-repeat', maskSize: 'contain' }
+}
+
+/** A lint range: a wavy underline in the severity's token, not the library's baked-in SVG. */
+function lintRange(color: string) {
+  return { backgroundImage: 'none', textDecorationColor: color }
+}
+
 function lintExtension(getDiagnostics: () => Diagnostic[]): Extension {
   return [linter(() => getDiagnostics()), lintGutter()]
 }
@@ -135,7 +155,8 @@ function hoverExtension(
       above: true,
       create() {
         const dom = document.createElement('div')
-        dom.className = 'cm-lsp-hover-tooltip px-2 py-1 text-caption'
+        // The surface is the themed .cm-tooltip around it (vy-menu tokens).
+        dom.className = 'cm-lsp-hover-tooltip px-2.5 py-1.5 text-caption'
         dom.textContent = content
         return { dom }
       }
@@ -310,14 +331,18 @@ export function TextCodeEditor({
             padding: '0 0.125rem'
           },
           '.cm-selectionBackground, ::selection': {
-            backgroundColor: 'color-mix(in srgb, var(--vy-accent) 24%, transparent)'
+            backgroundColor: 'var(--vy-accent-soft)'
+          },
+          // The library's focused-selection rule is just as specific; a theme rule comes later and wins.
+          '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': {
+            background: 'var(--vy-accent-soft)'
           },
           '.cm-cursor, .cm-dropCursor': {
             borderLeftColor: 'var(--vy-accent)'
           },
           '.cm-gutters': {
             backgroundColor: 'transparent',
-            borderRight: '1px solid color-mix(in srgb, var(--vy-border) 60%, transparent)',
+            borderRight: '1px solid var(--vy-border)',
             color: 'var(--vy-muted)',
             paddingRight: '0.25rem'
           },
@@ -328,33 +353,55 @@ export function TextCodeEditor({
           '.cm-activeLineGutter': {
             backgroundColor: 'var(--vy-surface)'
           },
+          // The selection layer paints under the lines, so an opaque line fill would hide
+          // the selection on the caret's line — and there is no translucent grey token.
+          // The gutter cell marks the active line; the class stays for anything reading it.
           '.cm-activeLine': {
-            backgroundColor: 'color-mix(in srgb, var(--vy-surface) 45%, transparent)'
+            backgroundColor: 'transparent'
           },
           '.cm-matchingBracket': {
-            backgroundColor: 'color-mix(in srgb, var(--vy-accent) 14%, transparent)',
-            outline: '1px solid color-mix(in srgb, var(--vy-accent) 35%, transparent)',
+            backgroundColor: 'var(--vy-accent-soft)',
+            outline: '1px solid var(--vy-accent)',
             color: 'inherit'
           },
-          '.cm-lintRange-error': {
-            backgroundImage:
-              "url(\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='3'><path d='m0 3 l2 -2 l1 0 l2 2' fill='none' stroke='%23ef4444' stroke-width='1'/></svg>\")"
+          '.cm-lintRange': {
+            backgroundImage: 'none',
+            paddingBottom: '0',
+            textDecorationLine: 'underline',
+            textDecorationStyle: 'wavy',
+            textDecorationSkipInk: 'none',
+            textUnderlineOffset: '2px'
           },
-          '.cm-lintRange-warning': {
-            backgroundImage:
-              "url(\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='3'><path d='m0 3 l2 -2 l1 0 l2 2' fill='none' stroke='%23f59e0b' stroke-width='1'/></svg>\")"
+          '.cm-lintRange-error': lintRange('var(--vy-danger)'),
+          '.cm-lintRange-warning': lintRange('var(--vy-warning)'),
+          '.cm-lintRange-info': lintRange('var(--vy-tertiary)'),
+          '.cm-lintRange-hint': lintRange('var(--vy-tertiary)'),
+          '.cm-lintRange-active': { backgroundColor: 'var(--vy-warning-soft)' },
+          '.cm-lintPoint:after': { borderBottomColor: 'var(--vy-danger)' },
+          '.cm-lintPoint-warning:after': { borderBottomColor: 'var(--vy-warning)' },
+          '.cm-lintPoint-info:after, .cm-lintPoint-hint:after': { borderBottomColor: 'var(--vy-tertiary)' },
+          '.cm-lint-marker-error': lintMarker(LINT_MARKER_MASK.error, 'var(--vy-danger)'),
+          '.cm-lint-marker-warning': lintMarker(LINT_MARKER_MASK.warning, 'var(--vy-warning)'),
+          '.cm-lint-marker-info': lintMarker(LINT_MARKER_MASK.info, 'var(--vy-tertiary)'),
+          // Hover and lint tooltips on the vy-menu surface: page colour, menu radius and elevation.
+          '.cm-tooltip': {
+            backgroundColor: 'var(--vy-bg)',
+            color: 'var(--vy-fg)',
+            border: 'none',
+            borderRadius: 'var(--vy-radius-xl)',
+            boxShadow: 'var(--vy-shadow-menu)',
+            overflow: 'hidden'
           },
-          '.cm-lintRange-info': {
-            backgroundImage:
-              "url(\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='3'><path d='m0 3 l2 -2 l1 0 l2 2' fill='none' stroke='%236b7280' stroke-width='1'/></svg>\")"
+          '.cm-tooltip-section:not(:first-child)': {
+            borderTop: '1px solid var(--vy-border)'
           },
+          '.cm-diagnostic-error': { borderLeftColor: 'var(--vy-danger)' },
+          '.cm-diagnostic-warning': { borderLeftColor: 'var(--vy-warning)' },
+          '.cm-diagnostic-info, .cm-diagnostic-hint': { borderLeftColor: 'var(--vy-tertiary)' },
           '.cm-lsp-hover-tooltip': {
             maxWidth: '28rem',
             whiteSpace: 'pre-wrap',
-            color: 'var(--vy-fg)',
-            backgroundColor: 'var(--vy-surface)',
-            border: '1px solid color-mix(in srgb, var(--vy-border) 70%, transparent)',
-            borderRadius: '0.375rem'
+            color: 'var(--vy-fg)'
           }
         }),
         EditorView.updateListener.of((update) => {

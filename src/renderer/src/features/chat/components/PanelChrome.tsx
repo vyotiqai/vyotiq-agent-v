@@ -23,24 +23,20 @@ export function tabMiddleClickHandlers(onClose: () => void): {
   }
 }
 
-/** Compact dock toolbar control — avoids Button's min-h-8 base. */
-export const DOCK_TOOLBAR_BTN =
-  'inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-md border border-border bg-surface px-2 text-caption leading-none text-fg hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]'
-
-export const DOCK_TOOLBAR_ICON_BTN =
-  'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-caption leading-none text-muted hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]'
-
 export function EmptyPanel({
   icon,
   title,
   body,
   actions,
+  children,
   centered = false
 }: {
   icon: IconName
   title: string
-  body: string
+  body: ReactNode
   actions?: ReactNode
+  /** Anything the empty state walks you through (steps, a code), between the body and the actions. */
+  children?: ReactNode
   /** Fill a flex parent and center vertically (use with `flex flex-col` on the parent). */
   centered?: boolean
 }) {
@@ -56,6 +52,7 @@ export function EmptyPanel({
       </span>
       <p className="mt-3 text-sm font-medium text-fg-strong">{title}</p>
       <p className="mt-1 max-w-[260px] text-xs leading-[18px] text-muted">{body}</p>
+      {children ? <div className="mt-4 w-full max-w-[260px] text-left">{children}</div> : null}
       {actions ? (
         <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5">{actions}</div>
       ) : null}

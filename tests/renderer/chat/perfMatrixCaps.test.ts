@@ -7,7 +7,6 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { buildTranscriptRows } from '@renderer/features/chat/utils/transcriptRows'
 import { DEFAULT_SNAPSHOT_CHARS } from '@main/app/browserUrl'
 import type { UiItem } from '@shared/transcript'
 
@@ -26,37 +25,7 @@ describe('perf matrix caps (documented constants)', () => {
   })
 })
 
-describe('perf matrix scenario 3 — long transcript row build', () => {
-  function longTranscript(count: number): UiItem[] {
-    const items: UiItem[] = []
-    for (let i = 0; i < count; i++) {
-      items.push({
-        kind: 'message',
-        id: `u-${i}`,
-        role: i % 2 === 0 ? 'user' : 'assistant',
-        content: `Message ${i} with enough text to simulate a real row.`
-      })
-    }
-    return items
-  }
-
-  it('builds 180 transcript rows in under 2 seconds', () => {
-    const items = longTranscript(180)
-    const start = performance.now()
-    const rows = buildTranscriptRows(items, { running: true, pendingRun: false })
-    const elapsed = performance.now() - start
-    expect(rows.length).toBeGreaterThanOrEqual(VIRTUALIZE_MIN_ROWS)
-    expect(elapsed).toBeLessThan(2000)
-  })
-})
-
 describe('live cost of the main surfaces', () => {
-  it('keeps live-early virtualization on the legacy transcript', () => {
-    const root = join(__dirname, '../../../src/renderer/src')
-    const chatView = readFileSync(join(root, 'features/chat/ChatView.tsx'), 'utf8')
-    expect(chatView).toMatch(/virtualizeLiveEarly/)
-  })
-
   it('bounds the task record by folding, deferring and memoising instead', () => {
     const root = join(__dirname, '../../../src/renderer/src')
     const pane = readFileSync(join(root, 'features/task/TaskPane.tsx'), 'utf8')

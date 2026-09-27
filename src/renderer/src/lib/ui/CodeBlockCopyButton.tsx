@@ -34,32 +34,37 @@ export function CodeBlockCopyButton({
     timersRef.current.push(id)
   }
 
+  // The well's own colour behind the icon, so it never sits on a line of code;
+  // the button keeps its muted tone and hover fill. No shadow: blocks are flush.
   return (
-    <IconButton
-      icon={copied ? 'check' : 'copy'}
-      label={copied ? 'Copied' : copyError ? 'Copy failed' : 'Copy code'}
-      size="xs"
-      variant="subtle"
+    <span
       className={cn(
+        'absolute right-1 top-1 z-10 inline-grid rounded-sm bg-sunken vy-transition',
         // Always visible on coarse pointers; hover-reveal on fine pointers.
-        'absolute right-1 top-1 z-10 bg-surface/90 shadow-sm vy-transition',
         'opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/code:opacity-100 [@media(hover:hover)]:group-focus-within/code:opacity-100',
         className
       )}
-      onClick={() => {
-        void copyText(text).then((ok) => {
-          clearTimers()
-          if (ok) {
-            setCopied(true)
-            setCopyError(false)
-            schedule(() => setCopied(false), 1200)
-          } else {
-            setCopied(false)
-            setCopyError(true)
-            schedule(() => setCopyError(false), 1600)
-          }
-        })
-      }}
-    />
+    >
+      <IconButton
+        icon={copied ? 'check' : 'copy'}
+        label={copied ? 'Copied' : copyError ? 'Copy failed' : 'Copy code'}
+        size="xs"
+        tone="muted"
+        onClick={() => {
+          void copyText(text).then((ok) => {
+            clearTimers()
+            if (ok) {
+              setCopied(true)
+              setCopyError(false)
+              schedule(() => setCopied(false), 1200)
+            } else {
+              setCopied(false)
+              setCopyError(true)
+              schedule(() => setCopyError(false), 1600)
+            }
+          })
+        }}
+      />
+    </span>
   )
 }

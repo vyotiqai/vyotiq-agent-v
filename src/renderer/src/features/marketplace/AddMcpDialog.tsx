@@ -588,7 +588,7 @@ function DetectionLine({
 
 function ServerChecklist({ list, disabled }: { list: ImportList; disabled: boolean }) {
   return (
-    <ul className="mt-2 divide-y divide-border border-y border-border">
+    <ul className="mt-2 divide-y divide-border/60 border-y border-border">
       {(list.preview ?? []).map((s) => (
         <li key={s.id} className="flex h-8 items-center gap-2 text-xs">
           <Checkbox

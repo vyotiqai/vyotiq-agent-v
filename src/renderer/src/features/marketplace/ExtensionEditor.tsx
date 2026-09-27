@@ -703,7 +703,7 @@ function ProjectRuleEditor({
                     }}
                   />
                   <span className="text-caption text-tertiary">
-                    {alwaysApply ? 'Added to every chat.' : 'Added when it matches or is @-mentioned.'}
+                    {alwaysApply ? 'Added to every task.' : 'Added when it matches or is @-mentioned.'}
                   </span>
                 </div>
                 <FieldLabel>description</FieldLabel>

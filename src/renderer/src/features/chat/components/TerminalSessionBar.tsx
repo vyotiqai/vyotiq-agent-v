@@ -111,19 +111,21 @@ export function TerminalSessionBar({
                   ) : null}
                 </button>
               </Tooltip>
-              <button
-                type="button"
-                className="-ml-1 mr-1 hidden size-4 shrink-0 place-items-center rounded-sm text-tertiary hover:bg-surface-2 hover:text-fg focus-visible:inline-grid focus-visible:vy-focus-ring group-focus-within:inline-grid group-hover:inline-grid"
-                aria-label={`Close ${name}`}
-                aria-keyshortcuts="Delete"
-                tabIndex={emphasized ? 0 : -1}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onKill(s.id)
-                }}
-              >
-                <Icon name="close" size={10} />
-              </button>
+              {/* The wrapper hides it at rest: IconButton's own display must not meet `hidden` in one class list. */}
+              <span className="-ml-1 mr-1 hidden shrink-0 group-focus-within:inline-flex group-hover:inline-flex">
+                <IconButton
+                  icon="close"
+                  label={`Close ${name}`}
+                  size="xs"
+                  tone="muted"
+                  aria-keyshortcuts="Delete"
+                  tabIndex={emphasized ? 0 : -1}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onKill(s.id)
+                  }}
+                />
+              </span>
             </div>
           )
         })}

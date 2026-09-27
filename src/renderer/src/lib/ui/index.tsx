@@ -22,16 +22,12 @@ export {
 } from './menuStyles'
 export { Tooltip } from './Tooltip'
 export { PanelResizeHandle } from './PanelResizeHandle'
-export { Input, selectClass } from './Input'
+export { Input } from './Input'
 export { SearchInput } from './SearchInput'
 export { Checkbox } from './Checkbox'
 export { Switch } from './Switch'
-export { Alert, AlertBlock } from './Alert'
-export { NavItem } from './NavItem'
-export { PageHeader } from './PageHeader'
-export { Avatar } from './Avatar'
+export { Alert } from './Alert'
 export { Badge, type BadgeTone } from './Badge'
-export { EmptyState } from './EmptyState'
 export {
   FormCard,
   FormChangesContext,

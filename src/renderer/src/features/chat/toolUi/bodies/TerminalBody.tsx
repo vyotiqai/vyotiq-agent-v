@@ -10,7 +10,7 @@ import { TruncatedBanner } from '../primitives'
 const VIEWPORT_PIN_PX = 24
 
 function TerminalDivider(): ReactElement {
-  return <span className="block text-tertiary/70" aria-hidden>
+  return <span className="block text-tertiary" aria-hidden>
     ---
   </span>
 }
@@ -25,7 +25,7 @@ function resolveEndedAt(timing: ToolBodyProps['timing']): number | undefined {
   return ended != null && Number.isFinite(ended) ? ended : undefined
 }
 
-export function TerminalBody({ tool, loading, loadFailed, timing }: ToolBodyProps) {
+export function TerminalBody({ tool, loading, loadFailed, timing, inGroup }: ToolBodyProps) {
   const data = useMemo(() => {
     const parsed = parseTerminalCardData(tool)
     return {
@@ -79,7 +79,9 @@ export function TerminalBody({ tool, loading, loadFailed, timing }: ToolBodyProp
   if (data.sessionStatus) metaLines.push(`status: ${data.sessionStatus}`)
 
   const hasMeta = metaLines.length > 0
-  const hasCommand = Boolean(data.command)
+  // The record's terminal card already heads the output with `$ command`; only
+  // a lookup row (inGroup), which clips the command at 80 chars, repeats it.
+  const hasCommand = Boolean(data.command) && inGroup === true
   const hasStream = Boolean(data.output || data.stderr)
 
   return (
@@ -90,7 +92,11 @@ export function TerminalBody({ tool, loading, loadFailed, timing }: ToolBodyProp
       aria-label="Terminal output"
       tabIndex={0}
       aria-busy={loading || running || undefined}
-      className={cn(TOOL_TERMINAL_VIEWPORT)}
+      // Inset: the card around it clips an outline (overflow-hidden).
+      className={cn(
+        TOOL_TERMINAL_VIEWPORT,
+        'outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus'
+      )}
       onScroll={onViewportScroll}
     >
       {tool.contentTruncated ? <TruncatedBanner loading={loading} failed={loadFailed} /> : null}
@@ -108,10 +114,10 @@ export function TerminalBody({ tool, loading, loadFailed, timing }: ToolBodyProp
           : null}
         {hasMeta && (hasCommand || hasStream) ? <TerminalDivider /> : null}
         {hasCommand ? (
-          <span className="block text-fg/90">{`$ ${data.command}`}</span>
+          <span className="block text-fg">{`$ ${data.command}`}</span>
         ) : null}
         {hasCommand && hasStream ? <TerminalDivider /> : null}
-        {data.output ? <span className="text-fg/75">{data.output}</span> : null}
+        {data.output ? <span className="text-secondary">{data.output}</span> : null}
         {data.stderr ? (
           <span className="text-danger">
             {data.output ? '\n' : ''}

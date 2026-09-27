@@ -290,7 +290,7 @@ const api: VyotiqApi = {
   prEditTitle: (workspacePath, title, number) =>
     ipcRenderer.invoke(IPC.prEditTitle, { workspacePath, title, number }),
   githubAuthStatus: () => ipcRenderer.invoke(IPC.githubAuthStatus),
-  githubAuthStart: () => ipcRenderer.invoke(IPC.githubAuthStart),
+  githubAuthStart: (request?: { fresh?: boolean }) => ipcRenderer.invoke(IPC.githubAuthStart, request),
   githubAuthCancel: () => ipcRenderer.invoke(IPC.githubAuthCancel),
   githubAuthLogout: () => ipcRenderer.invoke(IPC.githubAuthLogout),
   onGithubAuthStatus: (handler) => {

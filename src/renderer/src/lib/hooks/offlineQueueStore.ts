@@ -58,6 +58,36 @@ function storageKey(workspacePath: string): string {
  */
 const memoryFallback = new Map<string, OfflineQueuedSend[]>()
 
+/** A reader that is replaced on every write, so React sees each change. */
+export type OfflineQueueSnapshot = {
+  readonly version: number
+  list: (workspacePath: string) => OfflineQueuedSend[]
+}
+
+/**
+ * Replaced on every write, so the line can show what is waiting without
+ * polling localStorage: a queued instruction used to vanish from the line with
+ * no sign it had been kept.
+ */
+let snapshot: OfflineQueueSnapshot = { version: 0, list: (workspacePath) => readQueue(workspacePath) }
+const listeners = new Set<() => void>()
+
+function notifyQueueChanged(): void {
+  snapshot = { version: snapshot.version + 1, list: (workspacePath) => readQueue(workspacePath) }
+  for (const listener of listeners) listener()
+}
+
+export function subscribeOfflineQueue(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+export function offlineQueueSnapshot(): OfflineQueueSnapshot {
+  return snapshot
+}
+
 function readQueue(workspacePath: string): OfflineQueuedSend[] {
   if (!workspacePath || typeof localStorage === 'undefined') return []
   try {
@@ -72,6 +102,14 @@ function readQueue(workspacePath: string): OfflineQueuedSend[] {
 
 function writeQueue(workspacePath: string, queue: OfflineQueuedSend[]): boolean {
   if (!workspacePath || typeof localStorage === 'undefined') return false
+  try {
+    return writeQueueUnnotified(workspacePath, queue)
+  } finally {
+    notifyQueueChanged()
+  }
+}
+
+function writeQueueUnnotified(workspacePath: string, queue: OfflineQueuedSend[]): boolean {
   try {
     if (queue.length === 0) {
       localStorage.removeItem(storageKey(workspacePath))
@@ -93,6 +131,24 @@ function writeQueue(workspacePath: string, queue: OfflineQueuedSend[]): boolean 
 
 export function offlineQueueLength(workspacePath: string): number {
   return readQueue(workspacePath).length
+}
+
+/** Drop one waiting send; false when it was already sent or removed. */
+export function removeOfflineMessage(workspacePath: string, id: string): boolean {
+  const queue = readQueue(workspacePath)
+  const next = queue.filter((entry) => entry.id !== id)
+  if (next.length === queue.length) return false
+  return writeQueue(workspacePath, next)
+}
+
+/** Change a waiting send's text, keeping its attachments and binding. */
+export function editOfflineMessage(workspacePath: string, id: string, text: string): boolean {
+  const queue = readQueue(workspacePath)
+  if (!queue.some((entry) => entry.id === id)) return false
+  return writeQueue(
+    workspacePath,
+    queue.map((entry) => (entry.id === id ? { ...entry, text } : entry))
+  )
 }
 
 export function enqueueOfflineMessage(

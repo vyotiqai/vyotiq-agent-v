@@ -5,9 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   clearOfflineQueue,
   dequeueOfflineMessage,
+  editOfflineMessage,
   enqueueOfflineMessage,
   offlineQueueLength,
+  offlineQueueSnapshot,
   peekOfflineQueue,
+  removeOfflineMessage,
+  subscribeOfflineQueue,
   removeOfflineQueueEntriesForRun,
   resolveOfflineFlushTarget
 } from '@renderer/lib/hooks/offlineQueueStore'
@@ -134,5 +138,33 @@ describe('resolveOfflineFlushTarget', () => {
       '/ws-a'
     )
     expect(target).toEqual({ workspacePath: '/ws-a', runId: 'run-a' })
+  })
+
+  it('hands out a new reader on every write, so the line re-reads what is waiting', () => {
+    const seen: number[] = []
+    const unsubscribe = subscribeOfflineQueue(() => seen.push(offlineQueueSnapshot().version))
+    const before = offlineQueueSnapshot()
+    enqueueOfflineMessage(WORKSPACE, { text: 'first' })
+    const after = offlineQueueSnapshot()
+    expect(after).not.toBe(before)
+    expect(after.list(WORKSPACE).map((e) => e.text)).toEqual(['first'])
+    dequeueOfflineMessage(WORKSPACE)
+    expect(seen).toHaveLength(2)
+    unsubscribe()
+    enqueueOfflineMessage(WORKSPACE, { text: 'second' })
+    expect(seen).toHaveLength(2)
+  })
+
+  it('edits a waiting send in place and removes one by id', () => {
+    let n = 0
+    vi.stubGlobal('crypto', { randomUUID: () => `id-${++n}` })
+    enqueueOfflineMessage(WORKSPACE, { text: 'a', runId: 'run-1' })
+    enqueueOfflineMessage(WORKSPACE, { text: 'b', runId: 'run-1' })
+    expect(editOfflineMessage(WORKSPACE, 'id-1', 'a, edited')).toBe(true)
+    expect(peekOfflineQueue(WORKSPACE)).toMatchObject({ id: 'id-1', text: 'a, edited', runId: 'run-1' })
+    expect(removeOfflineMessage(WORKSPACE, 'id-1')).toBe(true)
+    expect(removeOfflineMessage(WORKSPACE, 'id-1')).toBe(false)
+    expect(editOfflineMessage(WORKSPACE, 'gone', 'x')).toBe(false)
+    expect(offlineQueueSnapshot().list(WORKSPACE).map((e) => e.text)).toEqual(['b'])
   })
 })

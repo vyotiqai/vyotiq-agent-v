@@ -4,12 +4,12 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
-  rmSync,
-  writeFileSync
+  rmSync
 } from 'fs'
 import { readFile } from 'fs/promises'
 import { dirname, join, relative, resolve, basename } from 'path'
 import { canonicalizeWorkspacePath } from '../../../shared/utils/workspacePath'
+import { atomicWriteFile } from '../../storage/atomicWrite'
 import { isInsideRoot } from '../../workspace/safePath'
 import { MEMORY_INDEX_CAP, MEMORY_STATE_CAP } from './types'
 
@@ -56,10 +56,11 @@ export function ensureMemoryLayout(workspacePath: string): void {
   if (!existsSync(notes)) mkdirSync(notes, { recursive: true })
   const indexPath = join(root, 'index.md')
   if (!existsSync(indexPath)) {
-    writeFileSync(
+    // Atomic like every other note write: a Windows AV/indexer handle on the
+    // index must not turn a first memory write into a hard tool failure.
+    atomicWriteFile(
       indexPath,
-      '# Memory index\n\nShort pointers to durable notes. Keep this file brief.\n',
-      'utf8'
+      '# Memory index\n\nShort pointers to durable notes. Keep this file brief.\n'
     )
   }
 }
@@ -246,7 +247,13 @@ export function writeMemoryFile(
   if (cleaned.includes('..')) throw new Error('Invalid memory path')
   const resolved = assertUnderMemory(workspacePath, cleaned)
   mkdirSync(dirname(resolved), { recursive: true })
-  writeFileSync(resolved, contents, 'utf8')
+  // Temp sibling + renameSyncWithRetry: on Windows a transient EPERM/EACCES/
+  // EBUSY from an AV scanner or indexer holding the note is retried instead of
+  // failing the tool call, which is what left the Memory row at "None".
+  // Still synchronous (the sync ladder is the short ~18ms one) and still
+  // writing only to the path assertUnderMemory already proved is inside the
+  // workspace and inside the real memory root.
+  atomicWriteFile(resolved, contents)
   // Report relative to the REAL memory root: on macOS tmpdir sits under the
   // /var → /private/var symlink, and relative() between the raw and real root
   // produced "../../../../…/private/var/…" (mac CI failure).

@@ -134,7 +134,7 @@ export class ErrorBoundary extends Component<Props, State> {
         </span>
         <h1 className="mt-3 text-sm font-medium text-fg-strong">{title}</h1>
         <p className="mt-1 max-w-[360px] text-xs leading-[18px] text-muted">
-          The error is in the log, with the component it came from. Chat contents and API keys are
+          The error is in the log, with the component it came from. Task contents and API keys are
           not included in crash reports.
         </p>
         <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5">

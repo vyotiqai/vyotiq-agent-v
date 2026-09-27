@@ -49,7 +49,12 @@ import {
   isElevationDeniedContent,
   isProcessKillSweepContent
 } from './terminal'
-import { toolMemoryList, toolMemoryRead, toolMemoryWrite } from './memory'
+import {
+  normalizeMemoryRelPath,
+  toolMemoryList,
+  toolMemoryRead,
+  toolMemoryWrite
+} from './memory'
 import { toolSkill, summarizeSkillArgs } from './skill'
 import { toolDiagnosticsAsync } from './diagnostics'
 import { toolRunTestsAsync } from './runTests'
@@ -694,9 +699,14 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     throwIfAborted(signal)
     const path = requirePathArg('memory_write', args)
     const contents = readString(args, 'contents') ?? readString(args, 'content') ?? ''
-    const relUnderWorkspace = `.vyotiq/memory/${path.trim().replace(/^[/\\]+/, '').replace(/\\/g, '/')}`
+    // Normalise once, BEFORE the key: keying the queue on the raw model arg
+    // reserved a slot for a path that is not the file written (`notes\a.md`,
+    // trailing slash) or not written at all (a rejected path), so a
+    // concurrent write to the real note could serialise behind nothing.
+    const rel = normalizeMemoryRelPath(path)
+    const relUnderWorkspace = `.vyotiq/memory/${rel}`
     const content = await withWorkspaceMutation(workspace, relUnderWorkspace, () =>
-      toolMemoryWrite(workspace, path, contents)
+      toolMemoryWrite(workspace, rel, contents)
     )
     clearWorkspaceSnapshotCache(workspace)
     return toolOk('memory_write', path, content)

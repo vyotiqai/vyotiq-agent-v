@@ -120,10 +120,6 @@ export function visibleRunIds(layout: ChatPaneLayout): Set<string> {
   return ids
 }
 
-export function openRunIdsFromPanes(layout: ChatPaneLayout): Set<string> {
-  return visibleRunIds(layout)
-}
-
 export function paneHasSession(pane: ChatPane, session: ChatPaneSession): boolean {
   return (
     workspacePathsEqual(pane.workspacePath, session.workspacePath) &&

@@ -15,13 +15,13 @@ export function StatusMessageBody({ tool }: ToolBodyProps) {
       {data.answers.length > 0 ? (
         <ul className={`${TOOL_BODY_INNER} m-0 list-none space-y-1 p-0`}>
           {data.answers.map((answer, i) => (
-            <li key={`${i}:${answer.slice(0, 24)}`} className="text-caption text-fg/80">
+            <li key={`${i}:${answer.slice(0, 24)}`} className="text-caption text-secondary">
               {answer}
             </li>
           ))}
         </ul>
       ) : data.message ? (
-        <p className={`${TOOL_BODY_PAD} m-0 text-caption text-fg/80 [overflow-wrap:anywhere]`}>
+        <p className={`${TOOL_BODY_PAD} m-0 text-caption text-secondary [overflow-wrap:anywhere]`}>
           {data.message}
         </p>
       ) : null}

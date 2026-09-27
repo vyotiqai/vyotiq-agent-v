@@ -129,7 +129,7 @@ export function DiagnosticsSection({ form }: { form: SettingsFormState }) {
               ? 'Off by default. Local logs are written either way.'
               : 'Not available in this build. Local logs are written either way.'
           }
-          help="Reports never include chat contents, API keys, or file bodies. Needs a Sentry DSN at build time."
+          help="Reports never include task contents, API keys, or file bodies. Needs a Sentry DSN at build time."
           checked={dsnConfigured && form.settings.telemetryEnabled}
           disabled={!dsnConfigured || form.formLocked}
           {...(dsnConfigured ? form.defaultMark('telemetryEnabled') : {})}

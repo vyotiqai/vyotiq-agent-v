@@ -108,7 +108,7 @@ export function formatLoopStatusLine(loop: {
   status: string
   nextAt: string
 } | null): string {
-  if (!loop) return 'No loop is armed on this chat.'
+  if (!loop) return 'No loop is armed on this task.'
   if (loop.status !== 'armed') return 'Loop is stopped.'
   return `Loop armed every ${formatLoopInterval(loop.intervalMs)}: ${loop.prompt} (next ${loop.nextAt})`
 }

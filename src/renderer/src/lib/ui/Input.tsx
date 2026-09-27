@@ -17,12 +17,6 @@ const sizes = {
   md: 'h-8 px-3 text-sm'
 } as const
 
-/**
- * Shared native `<select>` chrome — mirrors {@link Input}. Width is left to
- * the caller.
- */
-export const selectClass = cn(fieldChrome, legacyGeometry)
-
 export const Input = forwardRef<
   HTMLInputElement,
   Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> & { size?: keyof typeof sizes; mono?: boolean }

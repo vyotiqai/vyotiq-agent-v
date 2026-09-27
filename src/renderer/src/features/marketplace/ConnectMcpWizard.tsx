@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { GithubAuthStatus, McpInput, McpServerStatus, Settings } from '@shared/ipc'
 import {
   GOOGLE_ACCESS_READ,
@@ -14,10 +14,14 @@ import {
   type McpAuthScope
 } from '@shared/mcpApps'
 import { Dialog } from '@renderer/lib/a11y/Dialog'
-import { Button, Input } from '@renderer/lib/ui'
+import { Icon } from '@renderer/lib/icons'
+import { Button, IconButton, Input, cn } from '@renderer/lib/ui'
 import { copyText } from '@renderer/lib/markdown/copyText'
+import { SECTION_LABEL } from '@renderer/lib/utils/layout'
 
 const GOOGLE_MCP_DOCS = 'https://developers.google.com/workspace/guides/configure-mcp-servers'
+
+const FIELD_LABEL = 'block text-xs font-medium text-fg'
 
 /**
  * `app` reuses the GitHub sign-in Agent V already does for itself — device
@@ -431,101 +435,155 @@ export function ConnectMcpWizard({
     return tokenAuth || usingPat ? 'Connect' : 'Sign in'
   }
 
+  const titleId = useId()
+  const descId = useId()
+  const methodLabelId = useId()
+  const scopeLabelId = useId()
+  const accessLabelId = useId()
+  /**
+   * The field the step exists to fill, focused on open. A step with none (the
+   * usual sign-in) leaves Dialog to focus the first control, the close button.
+   */
+  const firstFieldRef = useRef<HTMLInputElement>(null)
+
+  const redirectField = (
+    <div className="space-y-1.5">
+      <span className={FIELD_LABEL} aria-hidden>
+        Redirect URI
+      </span>
+      <div className="flex gap-1.5">
+        <Input size="sm" mono readOnly value={redirectUrl} aria-label="OAuth redirect URI" />
+        <Button size="sm" variant="secondary" onClick={copyRedirect}>
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+      </div>
+    </div>
+  )
+
   return (
     <Dialog
       open
       onClose={onClose}
-      title={title}
-      description="Installed packages stay disconnected until you sign in. Agent V will not see these tools until connect succeeds."
-      useNativeDialog
-      size="lg"
+      labelledBy={titleId}
+      describedBy={descId}
+      useNativeDialog={false}
+      padded={false}
+      initialFocusRef={firstFieldRef}
+      className="vy-menu flex w-[560px] flex-col overflow-hidden"
+      footer={
+        <>
+          <Button size="sm" variant="ghost" onClick={onClose} disabled={pending}>
+            Not now
+          </Button>
+          {stepIndex > 0 ? (
+            <Button size="sm" variant="ghost" disabled={pending} onClick={() => setStepIndex((i) => i - 1)}>
+              Back
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            variant="primary"
+            pending={pending}
+            disabled={step === 'finish' ? finishDisabled : pending}
+            onClick={() => void goNext()}
+          >
+            {primaryLabel()}
+          </Button>
+        </>
+      }
     >
-      <div className="flex flex-col gap-3">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
+        <Icon name="mcp" size={16} className="text-muted" />
+        <h2 id={titleId} className="min-w-0 truncate text-heading font-semibold text-fg-strong">
+          {title}
+        </h2>
+        <span className="flex-1" />
+        <IconButton icon="close" label="Close" size="sm" tone="muted" onClick={onClose} />
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        <p id={descId} className="m-0 text-xs text-muted">
+          Installed packages stay disconnected until you sign in. Agent V will not see these tools until
+          connect succeeds.
+        </p>
 
         {step === 'google-client' ? (
-          <div className="flex flex-col gap-2">
+          <div className="space-y-3">
             <p className="m-0 text-sm text-fg">
               This build ships without a Google client, so connect with your own. Create a Google
               Cloud Web application OAuth client, enable the Gmail, Drive and Calendar APIs plus
               the gmailmcp / drivemcp / calendarmcp services, add this redirect URI, then paste the
               client ID and secret. Later Google apps reuse this client.
             </p>
-            <label className="flex flex-col gap-1 text-xs text-secondary">
-              Redirect URI
-              <div className="flex gap-1.5">
-                <Input readOnly value={redirectUrl} aria-label="OAuth redirect URI" className="font-mono" />
-                <Button variant="subtle" onClick={copyRedirect}>
-                  {copied ? 'Copied' : 'Copy'}
-                </Button>
-              </div>
-            </label>
+            {redirectField}
             <Button
-              variant="subtle"
+              size="sm"
+              variant="secondary"
+              trailingIcon="external"
               onClick={() => void window.vyotiq.shellOpenExternal(GOOGLE_MCP_DOCS)}
             >
               Google Cloud MCP setup
             </Button>
-            <Input
-              aria-label="Google Cloud client ID"
-              placeholder="Client ID"
-              value={clientId}
-              autoComplete="off"
-              onChange={(e) => setClientId(e.target.value)}
-            />
-            <Input
-              type="password"
-              aria-label="Google Cloud client secret"
-              placeholder="Client secret"
-              value={clientSecret}
-              autoComplete="off"
-              onChange={(e) => setClientSecret(e.target.value)}
-            />
+            <div className="space-y-2">
+              <Input
+                ref={firstFieldRef}
+                size="sm"
+                aria-label="Google Cloud client ID"
+                placeholder="Client ID"
+                value={clientId}
+                autoComplete="off"
+                onChange={(e) => setClientId(e.target.value)}
+              />
+              <Input
+                size="sm"
+                type="password"
+                aria-label="Google Cloud client secret"
+                placeholder="Client secret"
+                value={clientSecret}
+                autoComplete="off"
+                onChange={(e) => setClientSecret(e.target.value)}
+              />
+            </div>
           </div>
         ) : null}
 
         {step === 'oauth-client' ? (
-          <div className="flex flex-col gap-2">
+          <div className="space-y-3">
             <p className="m-0 text-sm text-fg">
               {serverName} does not support automatic app registration, so register an OAuth app
               with them once and paste its credentials. Add the redirect URI below to that app.
             </p>
-            <label className="flex flex-col gap-1 text-xs text-secondary">
-              Redirect URI
-              <div className="flex gap-1.5">
-                <Input
-                  readOnly
-                  value={redirectUrl}
-                  aria-label="OAuth redirect URI"
-                  className="font-mono"
-                />
-                <Button variant="subtle" onClick={copyRedirect}>
-                  {copied ? 'Copied' : 'Copy'}
-                </Button>
-              </div>
-            </label>
+            {redirectField}
             {server?.setupUrl ? (
               <Button
-                variant="subtle"
+                size="sm"
+                variant="secondary"
+                trailingIcon="external"
                 onClick={() => void window.vyotiq.shellOpenExternal(server.setupUrl as string)}
               >
                 Register an app with {serverName}
               </Button>
             ) : null}
-            <Input
-              aria-label="OAuth client ID"
-              placeholder="Client ID"
-              value={clientId}
-              autoComplete="off"
-              onChange={(e) => setClientId(e.target.value)}
-            />
-            <Input
-              type="password"
-              aria-label="OAuth client secret"
-              placeholder="Client secret"
-              value={clientSecret}
-              autoComplete="off"
-              onChange={(e) => setClientSecret(e.target.value)}
-            />
+            <div className="space-y-2">
+              <Input
+                ref={firstFieldRef}
+                size="sm"
+                aria-label="OAuth client ID"
+                placeholder="Client ID"
+                value={clientId}
+                autoComplete="off"
+                onChange={(e) => setClientId(e.target.value)}
+              />
+              <Input
+                size="sm"
+                type="password"
+                aria-label="OAuth client secret"
+                placeholder="Client secret"
+                value={clientSecret}
+                autoComplete="off"
+                onChange={(e) => setClientSecret(e.target.value)}
+              />
+            </div>
             <p className="m-0 text-caption text-muted">
               The secret is stored in OS secure storage, never in settings.json.
             </p>
@@ -533,27 +591,33 @@ export function ConnectMcpWizard({
         ) : null}
 
         {step === 'inputs' ? (
-          <div className="flex flex-col gap-2.5">
+          <div className="space-y-3">
             <p className="m-0 text-sm text-fg">
               {serverName} needs {declaredInputs.length === 1 ? 'a value' : 'these values'} before
               it can connect.
             </p>
             {server?.setupUrl ? (
               <Button
-                variant="subtle"
+                size="sm"
+                variant="secondary"
+                trailingIcon="external"
                 onClick={() => void window.vyotiq.shellOpenExternal(server.setupUrl as string)}
               >
                 Where do I get this?
               </Button>
             ) : null}
-            {declaredInputs.map((input) => (
-              <label key={`${input.target}:${input.name}`} className="flex flex-col gap-1 text-xs text-secondary">
-                {inputLabel(input)}
-                {input.isRequired ? '' : ' (optional)'}
+            {declaredInputs.map((input, index) => (
+              <label key={`${input.target}:${input.name}`} className="block space-y-1.5">
+                <span className={FIELD_LABEL}>
+                  {inputLabel(input)}
+                  {input.isRequired ? '' : ' (optional)'}
+                </span>
                 <Input
+                  ref={index === 0 ? firstFieldRef : undefined}
+                  size="sm"
+                  mono
                   type={input.isSecret ? 'password' : 'text'}
                   autoComplete="off"
-                  className="font-mono"
                   aria-label={inputLabel(input)}
                   placeholder={input.placeholder ?? input.name}
                   value={inputValues[input.name] ?? ''}
@@ -562,7 +626,7 @@ export function ConnectMcpWizard({
                   }
                 />
                 {input.description ? (
-                  <span className="text-caption text-muted">{input.description}</span>
+                  <span className="block text-caption text-muted">{input.description}</span>
                 ) : null}
               </label>
             ))}
@@ -573,9 +637,11 @@ export function ConnectMcpWizard({
         ) : null}
 
         {step === 'finish' ? (
-          <div className="flex flex-col gap-2">
+          <div className="space-y-3">
             {usingPat ? (
               <Input
+                ref={firstFieldRef}
+                size="sm"
                 type="password"
                 aria-label="GitHub personal access token"
                 placeholder="GitHub personal access token"
@@ -584,47 +650,44 @@ export function ConnectMcpWizard({
                 onChange={(e) => setPat(e.target.value)}
               />
             ) : usingAppGithub ? (
-              <div className="flex flex-col gap-2">
-                {githubPending && githubAuth?.userCode ? (
-                  <>
-                    <p className="m-0 text-sm text-fg">
-                      Enter this code on GitHub to finish. This dialog closes itself when it
-                      goes through.
-                    </p>
-                    <p className="m-0 font-mono text-lg tracking-[0.2em] text-fg">
-                      {githubAuth.userCode}
-                    </p>
-                    {githubAuth.verificationUri ? (
-                      <Button
-                        variant="subtle"
-                        className="self-start"
-                        onClick={() =>
-                          void window.vyotiq.shellOpenExternal(
-                            githubAuth.verificationUri as string
-                          )
-                        }
-                      >
-                        Open GitHub again
-                      </Button>
-                    ) : null}
-                  </>
-                ) : githubAuth?.hasAppToken ? (
-                  <p className="m-0 text-sm text-secondary">
-                    Agent V is already signed in to GitHub. {serverName} uses that sign-in —
-                    there is nothing to register and nothing to paste.
+              githubPending && githubAuth?.userCode ? (
+                <div className="space-y-2">
+                  <p className="m-0 text-sm text-fg">
+                    Enter this code on GitHub to finish. This dialog closes itself when it
+                    goes through.
                   </p>
-                ) : githubAuth?.ghAuthenticated ? (
-                  <p className="m-0 text-sm text-secondary">
-                    The GitHub CLI on this machine is already signed in. {serverName} can use
-                    that sign-in — no browser and no code.
+                  <p className="m-0 font-mono text-title tracking-[var(--vy-tracking-caps)] text-fg-strong">
+                    {githubAuth.userCode}
                   </p>
-                ) : (
-                  <p className="m-0 text-sm text-secondary">
-                    Sign in to GitHub once and {serverName} uses the same sign-in. Opens your
-                    browser with a code to confirm.
-                  </p>
-                )}
-              </div>
+                  {githubAuth.verificationUri ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      trailingIcon="external"
+                      onClick={() =>
+                        void window.vyotiq.shellOpenExternal(githubAuth.verificationUri as string)
+                      }
+                    >
+                      Open GitHub again
+                    </Button>
+                  ) : null}
+                </div>
+              ) : githubAuth?.hasAppToken ? (
+                <p className="m-0 text-sm text-secondary">
+                  Agent V is already signed in to GitHub. {serverName} uses that sign-in —
+                  there is nothing to register and nothing to paste.
+                </p>
+              ) : githubAuth?.ghAuthenticated ? (
+                <p className="m-0 text-sm text-secondary">
+                  The GitHub CLI on this machine is already signed in. {serverName} can use
+                  that sign-in — no browser and no code.
+                </p>
+              ) : (
+                <p className="m-0 text-sm text-secondary">
+                  Sign in to GitHub once and {serverName} uses the same sign-in. Opens your
+                  browser with a code to confirm.
+                </p>
+              )
             ) : (
               <p className="m-0 text-sm text-secondary">
                 {tokenAuth
@@ -637,133 +700,93 @@ export function ConnectMcpWizard({
               </p>
             )}
 
-            <button
-              type="button"
-              className="m-0 self-start text-xs text-secondary underline-offset-2 hover:text-fg hover:underline"
+            {/* -ml-2 puts the label, not the button's padding, on the body's left edge. */}
+            <Button
+              size="xs"
+              variant="ghost"
+              className="-ml-2"
+              trailingIcon={showOptions ? 'chevronUp' : 'chevron'}
               aria-expanded={showOptions}
               onClick={() => setShowOptions((v) => !v)}
             >
               {showOptions ? 'Hide options' : 'Options'}
-            </button>
+            </Button>
 
             {showOptions ? (
-              <div className="flex flex-col gap-3 rounded-md border border-border bg-surface px-2.5 py-2">
+              <div className="-mx-4 space-y-4 border-t border-border px-4 pt-3">
                 {github ? (
-                  <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-                    <legend className="mb-1 text-xs font-medium text-fg">Sign-in method</legend>
-                    <label className="flex items-start gap-2 text-sm text-fg">
-                      <input
-                        type="radio"
-                        name="github-method"
-                        className="mt-0.5"
-                        checked={githubMethod === 'app'}
-                        onChange={() => setGithubMethod('app')}
-                      />
-                      <span>
-                        Use the Agent V GitHub sign-in
-                        <span className="block text-xs text-secondary">
-                          Nothing to register. Reuses the sign-in Agent V already uses for Git
-                          and pull requests.
-                        </span>
-                      </span>
-                    </label>
-                    <label className="flex items-start gap-2 text-sm text-fg">
-                      <input
-                        type="radio"
-                        name="github-method"
-                        className="mt-0.5"
-                        checked={githubMethod === 'oauth'}
-                        onChange={() => setGithubMethod('oauth')}
-                      />
-                      <span>
-                        Sign in with your own OAuth app
-                        <span className="block text-xs text-secondary">
-                          Needs an app registered with GitHub and its client ID and secret.
-                        </span>
-                      </span>
-                    </label>
-                    <label className="flex items-start gap-2 text-sm text-fg">
-                      <input
-                        type="radio"
-                        name="github-method"
-                        className="mt-0.5"
-                        checked={githubMethod === 'pat'}
-                        onChange={() => setGithubMethod('pat')}
-                      />
-                      <span>
-                        Paste a personal access token
-                        <span className="block text-xs text-secondary">
-                          Use a PAT when OAuth is unavailable for this account.
-                        </span>
-                      </span>
-                    </label>
-                  </fieldset>
+                  <div>
+                    <div id={methodLabelId} className={SECTION_LABEL}>
+                      Sign-in method
+                    </div>
+                    <ChoiceRows
+                      labelledBy={methodLabelId}
+                      value={githubMethod}
+                      onChange={setGithubMethod}
+                      choices={[
+                        {
+                          value: 'app',
+                          label: 'Use the Agent V GitHub sign-in',
+                          description:
+                            'Nothing to register. Reuses the sign-in Agent V already uses for Git and pull requests.'
+                        },
+                        {
+                          value: 'oauth',
+                          label: 'Sign in with your own OAuth app',
+                          description: 'Needs an app registered with GitHub and its client ID and secret.'
+                        },
+                        {
+                          value: 'pat',
+                          label: 'Paste a personal access token',
+                          description: 'Use a PAT when OAuth is unavailable for this account.'
+                        }
+                      ]}
+                    />
+                  </div>
                 ) : null}
 
-                <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-                  <legend className="mb-1 text-xs font-medium text-fg">
+                <div>
+                  <div id={scopeLabelId} className={SECTION_LABEL}>
                     Where can Agent V use this?
-                  </legend>
-                  <label className="flex items-start gap-2 text-sm text-fg">
-                    <input
-                      type="radio"
-                      name="auth-scope"
-                      className="mt-0.5"
-                      checked={authScope === MCP_AUTH_SCOPE_ALL}
-                      onChange={() => setAuthScope(MCP_AUTH_SCOPE_ALL)}
-                    />
-                    All workspaces
-                  </label>
-                  <label className="flex items-start gap-2 text-sm text-fg">
-                    <input
-                      type="radio"
-                      name="auth-scope"
-                      className="mt-0.5"
-                      disabled={!workspaceReady}
-                      checked={authScope === MCP_AUTH_SCOPE_THIS}
-                      onChange={() => setAuthScope(MCP_AUTH_SCOPE_THIS)}
-                    />
-                    <span>
-                      This workspace only
-                      <span className="block text-xs text-secondary">
-                        {workspaceReady
+                  </div>
+                  <ChoiceRows
+                    labelledBy={scopeLabelId}
+                    value={authScope}
+                    onChange={setAuthScope}
+                    choices={[
+                      { value: MCP_AUTH_SCOPE_ALL, label: 'All workspaces' },
+                      {
+                        value: MCP_AUTH_SCOPE_THIS,
+                        label: 'This workspace only',
+                        description: workspaceReady
                           ? 'Tokens stay bound to the open workspace.'
-                          : 'Open a workspace to use this option.'}
-                      </span>
-                    </span>
-                  </label>
-                </fieldset>
+                          : 'Open a workspace to use this option.',
+                        disabled: !workspaceReady
+                      }
+                    ]}
+                  />
+                </div>
 
                 {google ? (
-                  <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-                    <legend className="mb-1 text-xs font-medium text-fg">Access</legend>
-                    <label className="flex items-start gap-2 text-sm text-fg">
-                      <input
-                        type="radio"
-                        name="google-access"
-                        className="mt-0.5"
-                        checked={googleAccess === GOOGLE_ACCESS_READ_WRITE}
-                        onChange={() => setGoogleAccess(GOOGLE_ACCESS_READ_WRITE)}
-                      />
-                      <span>
-                        Read and write
-                        <span className="block text-xs text-secondary">
-                          Default. Drafts, file create/update, and event create. Mutating tools
-                          still need approval.
-                        </span>
-                      </span>
-                    </label>
-                    <label className="flex items-start gap-2 text-sm text-fg">
-                      <input
-                        type="radio"
-                        name="google-access"
-                        className="mt-0.5"
-                        checked={googleAccess === GOOGLE_ACCESS_READ}
-                        onChange={() => setGoogleAccess(GOOGLE_ACCESS_READ)}
-                      />
-                      Read only
-                    </label>
-                  </fieldset>
+                  <div>
+                    <div id={accessLabelId} className={SECTION_LABEL}>
+                      Access
+                    </div>
+                    <ChoiceRows
+                      labelledBy={accessLabelId}
+                      value={googleAccess}
+                      onChange={setGoogleAccess}
+                      choices={[
+                        {
+                          value: GOOGLE_ACCESS_READ_WRITE,
+                          label: 'Read and write',
+                          description:
+                            'Default. Drafts, file create/update, and event create. Mutating tools still need approval.'
+                        },
+                        { value: GOOGLE_ACCESS_READ, label: 'Read only' }
+                      ]}
+                    />
+                  </div>
                 ) : null}
               </div>
             ) : null}
@@ -773,25 +796,86 @@ export function ConnectMcpWizard({
         {error ? (
           <p className="m-0 text-caption text-danger [overflow-wrap:anywhere]">{error}</p>
         ) : null}
-
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="subtle" onClick={onClose} disabled={pending}>
-            Not now
-          </Button>
-          {stepIndex > 0 ? (
-            <Button variant="subtle" disabled={pending} onClick={() => setStepIndex((i) => i - 1)}>
-              Back
-            </Button>
-          ) : null}
-          <Button variant="primary"
-            pending={pending}
-            disabled={step === 'finish' ? finishDisabled : pending}
-            onClick={() => void goNext()}
-          >
-            {primaryLabel()}
-          </Button>
-        </div>
       </div>
     </Dialog>
+  )
+}
+
+type Choice<T extends string> = {
+  value: T
+  label: string
+  description?: string
+  disabled?: boolean
+}
+
+/**
+ * One radio per row, the chosen row filled — the Set up page's approval
+ * choice, so every "pick one of these" in the app reads the same way. Arrow
+ * keys move the choice, skipping rows that are unavailable.
+ */
+function ChoiceRows<T extends string>({
+  labelledBy,
+  value,
+  choices,
+  onChange
+}: {
+  labelledBy: string
+  value: T
+  choices: ReadonlyArray<Choice<T>>
+  onChange: (value: T) => void
+}) {
+  const enabled = choices.filter((c) => !c.disabled).map((c) => c.value)
+  const move = (e: KeyboardEvent<HTMLButtonElement>): void => {
+    const i = enabled.indexOf(value)
+    let next = -1
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = (i + 1) % enabled.length
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = (i - 1 + enabled.length) % enabled.length
+    else if (e.key === 'Home') next = 0
+    else if (e.key === 'End') next = enabled.length - 1
+    if (next < 0 || enabled.length === 0) return
+    e.preventDefault()
+    const to = enabled[next]!
+    onChange(to)
+    e.currentTarget.parentElement
+      ?.querySelector<HTMLButtonElement>(`[role="radio"][data-value="${to}"]`)
+      ?.focus()
+  }
+  return (
+    <div role="radiogroup" aria-labelledby={labelledBy} className="-mx-2 mt-1.5 space-y-px">
+      {choices.map((c) => {
+        const on = c.value === value
+        return (
+          <button
+            key={c.value}
+            type="button"
+            role="radio"
+            data-value={c.value}
+            aria-checked={on}
+            tabIndex={on ? 0 : -1}
+            disabled={c.disabled}
+            onClick={() => onChange(c.value)}
+            onKeyDown={move}
+            className={cn(
+              'flex w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left vy-transition focus-visible:vy-focus-ring disabled:vy-disabled-state',
+              on ? 'bg-surface' : c.disabled ? '' : 'hover:bg-surface'
+            )}
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                'mt-[3px] inline-grid size-3.5 shrink-0 place-items-center rounded-full border',
+                on ? 'border-accent' : 'border-border-strong'
+              )}
+            >
+              {on ? <span className="size-1.5 rounded-full bg-accent" /> : null}
+            </span>
+            <span className="min-w-0">
+              <span className="block text-sm text-fg">{c.label}</span>
+              {c.description ? <span className="block text-xs text-muted">{c.description}</span> : null}
+            </span>
+          </button>
+        )
+      })}
+    </div>
   )
 }

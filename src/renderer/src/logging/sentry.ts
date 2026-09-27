@@ -23,10 +23,6 @@ export function resolveRendererDsn(): string | undefined {
   return dsn || undefined
 }
 
-export function isRendererSentryBuildConfigured(): boolean {
-  return Boolean(resolveRendererDsn())
-}
-
 /**
  * Names are destructured straight off each `import()` so Rollup keeps only
  * these exports. A module namespace held in a variable is opaque to it and

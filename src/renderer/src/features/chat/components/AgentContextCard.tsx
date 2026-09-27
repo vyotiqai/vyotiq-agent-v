@@ -80,6 +80,12 @@ export function AgentContextCard({ workspacePath }: { workspacePath: string }) {
   const { branch, memoryNotes, rules } = context
   const state = context.codeIndex.state
 
+  // index.md and state.md are pre-loaded into the prompt every step, so they
+  // are memory even when the note store is empty.
+  const memoryFiles: string[] = []
+  if (context.memoryState) memoryFiles.push('state.md')
+  if (context.memoryIndex) memoryFiles.push('index.md')
+
   const ruleNames: string[] = []
   if (rules.agentsMd) ruleNames.push('AGENTS.md')
   if (rules.claudeMd) ruleNames.push('CLAUDE.md')
@@ -147,12 +153,25 @@ export function AgentContextCard({ workspacePath }: { workspacePath: string }) {
       title:
         memoryNotes > 0
           ? `${memoryNotes} memory note${memoryNotes === 1 ? '' : 's'} stored for this workspace`
-          : 'No memory notes stored for this workspace yet',
+          : memoryFiles.length > 0
+            ? `Pre-loaded into the prompt every step: ${memoryFiles.join(', ')}`
+            : 'No memory stored for this workspace yet',
       value:
         memoryNotes > 0 ? (
           <span>
             {memoryNotes} note{memoryNotes === 1 ? '' : 's'}
           </span>
+        ) : memoryFiles.length > 0 ? (
+          memoryFiles.map((name, index) => (
+            <Fragment key={name}>
+              {index > 0 ? (
+                <span className="acc-dim" aria-hidden>
+                  ·
+                </span>
+              ) : null}
+              <span>{name}</span>
+            </Fragment>
+          ))
         ) : (
           <span className="acc-value-empty">None</span>
         )

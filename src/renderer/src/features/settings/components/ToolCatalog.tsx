@@ -193,7 +193,7 @@ export function ToolCatalog({ catalog }: { catalog: ToolCatalogResult }) {
   ]
 
   return (
-    <div className="divide-y divide-border border-y border-border">
+    <div className="divide-y divide-border/60 border-y border-border">
       <ToolGroup title="Built-in tools" icon="tool" defaultOpen entries={builtins} />
       {/* Open from the start: there are rarely more than a few, and each is
           code a run wrote, so what it is should not sit behind a click. */}

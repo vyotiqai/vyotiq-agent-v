@@ -262,6 +262,32 @@ describe('PrPanel', () => {
     expect(await screen.findByText('GitHub CLI not found')).toBeTruthy()
   })
 
+  it('asks for a new sign-in, not a draft PR, when gh is signed in but GitHub rejects it', async () => {
+    ;(window.vyotiq.prView as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      error: 'HTTP 401: Bad credentials (https://api.github.com/graphql)'
+    })
+    ;(window.vyotiq.githubAuthStart as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      data: {
+        ghAvailable: true,
+        ghAuthenticated: false,
+        hasAppToken: false,
+        pending: true,
+        userCode: 'ABCD-1234',
+        verificationUri: 'https://github.com/login/device',
+        error: null
+      }
+    })
+    render(<PrPanel workspacePath="/ws" />)
+    expect(await screen.findByText('GitHub sign-in expired')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Create a draft PR/i })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    await waitFor(() => {
+      expect(window.vyotiq.githubAuthStart).toHaveBeenCalledWith({ fresh: true })
+    })
+  })
+
   it('offers automatic GitHub repository setup when no remote exists', async () => {
     ;(window.vyotiq.prView as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: false,
@@ -489,23 +515,62 @@ describe('PrPanel', () => {
   })
 
   it('merges with the method chosen, after confirmation', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const nativeConfirm = vi.spyOn(window, 'confirm')
     render(<PrPanel workspacePath="/ws" />)
     await screen.findByText(/feat: panels/)
     expect(screen.getByText('Open')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /Squash and merge/ }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Squash and merge' }))
-    expect(confirm).toHaveBeenCalled()
-    expect(window.vyotiq.prMerge).toHaveBeenCalledWith('/ws', 'squash', 10)
+    // The app's own dialog, not the browser's.
+    const dialog = await screen.findByRole('dialog', { name: 'Squash and merge' })
+    expect(nativeConfirm).not.toHaveBeenCalled()
+    expect(window.vyotiq.prMerge).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Squash and merge' }))
+    await waitFor(() => {
+      expect(window.vyotiq.prMerge).toHaveBeenCalledWith('/ws', 'squash', 10)
+    })
   })
 
   it('skips prMerge when confirmation is cancelled', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<PrPanel workspacePath="/ws" />)
     await screen.findByText(/feat: panels/)
     fireEvent.click(screen.getByRole('button', { name: /Squash and merge/ }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Rebase and merge' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Rebase and merge' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
     expect(window.vyotiq.prMerge).not.toHaveBeenCalled()
+  })
+
+  it('closes the pull request only after confirming', async () => {
+    render(<PrPanel workspacePath="/ws" />)
+    await screen.findByText(/feat: panels/)
+    fireEvent.click(screen.getByRole('button', { name: 'PR actions' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close pull request' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Close pull request' })
+    expect(window.vyotiq.prClose).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close pull request' }))
+    await waitFor(() => {
+      expect(window.vyotiq.prClose).toHaveBeenCalledWith('/ws', 10)
+    })
+  })
+
+  it('starts with a 40px row and shows Issues as the current view', async () => {
+    window.vyotiq.githubIssuesList = vi.fn().mockResolvedValue({ ok: true, data: { issues: [] } })
+    render(<PrPanel workspacePath="/ws" />)
+    await screen.findByText(/feat: panels/)
+    const firstRow = document.querySelector('[data-pr-header]')?.firstElementChild as HTMLElement
+    expect(firstRow.classList.contains('h-10')).toBe(true)
+    expect(firstRow.textContent).toContain('feat/panels → main')
+    fireEvent.click(screen.getByRole('button', { name: 'PR actions' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Issues' }))
+    expect(screen.getByRole('tab', { name: 'Issues' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tab', { name: /^Checks/ }).getAttribute('aria-selected')).toBe('false')
+    fireEvent.click(screen.getByRole('button', { name: 'Back to checks' }))
+    expect(screen.getByRole('tab', { name: /^Checks/ }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.queryByRole('tab', { name: 'Issues' })).toBeNull()
   })
 
   it('lists files with the selected one’s diff below, and marks files viewed', async () => {

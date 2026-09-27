@@ -11,17 +11,10 @@ export {
 } from './meta'
 export { getToolEntry, getToolBody, toolHasBody, getToolHeaderMeta } from './registry'
 export { ToolBodyView } from './presentation'
-export { CompactRow, ProminentChrome, ToolFileBadge, ToolPanelIcon } from './chrome'
+export { ToolFileBadge } from './chrome'
 export { ExpandPanel } from './ExpandPanel'
 export { useExpandMotion, EXPAND_CLOSE_FALLBACK_MS } from './useExpandMotion'
-export {
-  wrapFamilyShell,
-  familyDefaultExpanded,
-  toolDefaultExpanded,
-  isFileReadTool,
-  isDiffCompactTool,
-  toolUsesPeekCollapse
-} from './shells'
+export { wrapFamilyShell, isFileReadTool } from './shells'
 export { basename } from './pathUtils'
 export type {
   ToolBodyProps,

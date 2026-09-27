@@ -7,7 +7,17 @@ import {
   parseDeleteData,
   collectWritingChanges
 } from '../toolUi'
-import type { ChangedFile, ToolItem, TranscriptRow } from './transcriptRows'
+
+type ToolItem = Extract<UiItem, { kind: 'tool' }>
+
+/** A file a task changed, with line counts when its tool args carry them. */
+export type ChangedFile = {
+  path: string
+  /** Line counts when known from tool args; absent for checkpoint-only paths. */
+  added?: number
+  removed?: number
+  action?: 'created' | 'modified' | 'deleted'
+}
 
 export const WRITING_TOOLS = new Set(['edit', 'str_replace', 'delete'])
 
@@ -56,23 +66,6 @@ export function mergeCheckpointChangedFiles(
   return [...map.values()].sort((a, b) => a.path.localeCompare(b.path))
 }
 
-/** Checkpoint paths with no matching writing-tool row in the same scope. */
-export function checkpointOnlyChangedFiles(
-  toolFiles: ChangedFile[],
-  checkpointFiles: readonly CheckpointChangedFile[] | null | undefined
-): ChangedFile[] {
-  if (!checkpointFiles?.length) return []
-  const toolPaths = new Set(toolFiles.map((f) => normalizeRelPath(f.path)))
-  return checkpointFiles
-    .filter((cp) => !toolPaths.has(normalizeRelPath(cp.path)))
-    .map((cp) => {
-      const key = normalizeRelPath(cp.path)
-      // No tool-arg diff exists for this path — do not invent line counts.
-      return { path: key, action: cp.action }
-    })
-    .sort((a, b) => a.path.localeCompare(b.path))
-}
-
 function isToolItem(item: UiItem): item is ToolItem {
   return item.kind === 'tool'
 }
@@ -115,36 +108,6 @@ function mergeToolDiffs(
   for (const [path, lines] of source) {
     appendLines(target, path, lines)
   }
-}
-
-/** Per-turn, per-path diff lines from writing tool args. */
-export function collectTurnFileDiffs(
-  rows: readonly TranscriptRow[]
-): Map<number, Map<string, DiffLine[]>> {
-  const byTurn = new Map<number, Map<string, DiffLine[]>>()
-
-  const ensure = (turnIndex: number): Map<string, DiffLine[]> => {
-    let map = byTurn.get(turnIndex)
-    if (!map) {
-      map = new Map()
-      byTurn.set(turnIndex, map)
-    }
-    return map
-  }
-
-  for (const row of rows) {
-    if (row.kind === 'card') {
-      if (row.item.tool.status !== 'done') continue
-      mergeToolDiffs(ensure(row.turnIndex), diffLinesByPath(row.item.tool))
-    } else if (row.kind === 'activity') {
-      for (const toolItem of row.tools) {
-        if (toolItem.tool.status !== 'done') continue
-        mergeToolDiffs(ensure(row.turnIndex), diffLinesByPath(toolItem.tool))
-      }
-    }
-  }
-
-  return byTurn
 }
 
 /** Session-wide file diffs from writing tools (Changes panel). */

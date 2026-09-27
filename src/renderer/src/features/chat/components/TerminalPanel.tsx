@@ -289,9 +289,7 @@ export function TerminalPanel({
   workspacePath,
   visible = true,
   agentCommand = null,
-  agentCommandAt = null,
-  onSessionsChange,
-  onActiveSessionChange
+  agentCommandAt = null
 }: {
   className?: string
   workspacePath?: string | null
@@ -301,8 +299,6 @@ export function TerminalPanel({
   agentCommand?: string | null
   /** When that command started (ISO). */
   agentCommandAt?: string | null
-  onSessionsChange?: (sessions: PtySessionInfo[]) => void
-  onActiveSessionChange?: (session: PtySessionInfo | null) => void
 }) {
   const [sessions, setSessions] = useState<PtySessionInfo[]>([])
   const listSeqRef = useRef(0)
@@ -315,10 +311,6 @@ export function TerminalPanel({
   const autoCreateAttemptedRef = useRef(false)
   /** After the user closes the last session, do not immediately spawn another. */
   const suppressAutoCreateRef = useRef(false)
-  const onSessionsChangeRef = useRef(onSessionsChange)
-  onSessionsChangeRef.current = onSessionsChange
-  const onActiveSessionChangeRef = useRef(onActiveSessionChange)
-  onActiveSessionChangeRef.current = onActiveSessionChange
 
   const usingPipeFallback = sessions.some((s) => s.backend === 'pipe')
   /** The run's mirrored output — a view of a spawn, with no shell behind it. */
@@ -327,10 +319,6 @@ export function TerminalPanel({
     [sessions]
   )
   const activeSession = sessions.find((s) => s.id === activeId) ?? null
-
-  useEffect(() => {
-    onActiveSessionChangeRef.current?.(activeSession)
-  }, [activeSession])
 
   const refreshList = useCallback(async () => {
     const seq = ++listSeqRef.current
@@ -356,7 +344,6 @@ export function TerminalPanel({
       res.data.map((s) => s.id)
     )
     setSessions(res.data)
-    onSessionsChangeRef.current?.(res.data)
     setActiveId((cur) => {
       if (cur && res.data.some((s) => s.id === cur)) return cur
       return res.data[0]?.id ?? null
@@ -530,16 +517,13 @@ export function TerminalPanel({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {sessionBar}
         {activeIsAgent ? (
-          <div className="flex h-8 shrink-0 items-center gap-2 bg-surface px-3 text-xs text-muted" data-terminal-readonly>
+          <div className="flex h-8 shrink-0 items-center gap-2 bg-surface pl-3 pr-1 text-xs text-muted" data-terminal-readonly>
             <Icon name="lock" size={12} className="shrink-0" />
             <span className="min-w-0 flex-1 truncate">Agent session · read-only</span>
-            <button
-              type="button"
-              className="shrink-0 whitespace-nowrap rounded-sm font-medium text-accent hover:underline focus-visible:vy-focus-ring"
-              onClick={() => void createSession()}
-            >
+            {/* Outlined: a ghost button's hover fill is this strip's own surface. */}
+            <Button size="xs" variant="secondary" onClick={() => void createSession()}>
               Open a shell here
-            </button>
+            </Button>
           </div>
         ) : null}
         {error ? (

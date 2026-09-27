@@ -167,7 +167,7 @@ export function AboutSection({
     <SettingsStack>
       <SettingsGroup title="Agent V" fieldId="about" plain>
         <div className="mt-2 flex items-start gap-4">
-          <span className="grid size-14 shrink-0 place-items-center rounded-xl bg-surface text-fg-strong">
+          <span className="grid size-14 shrink-0 place-items-center rounded-lg bg-surface text-fg-strong">
             <VyotiqMark size={28} decorative />
           </span>
           <div className="min-w-0 flex-1">
@@ -278,7 +278,7 @@ export function AboutSection({
           id="send-feedback"
           title="Send feedback"
           hint="Opens a pre-filled email to support@vyotiq.com."
-          help="Report a bug, ask for a feature, or say what works. Optional diagnostics add the app version, OS, and locale — never chat contents."
+          help="Report a bug, ask for a feature, or say what works. Optional diagnostics add the app version, OS, and locale — never task contents."
         >
           <Button size="sm" variant="secondary" onClick={onOpenFeedback}>
             Write…

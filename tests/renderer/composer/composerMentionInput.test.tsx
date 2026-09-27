@@ -8,6 +8,7 @@ import {
   ComposerMentionInput,
   type ComposerMentionInputHandle
 } from '@renderer/features/chat/components/composer/ComposerMentionInput'
+import { mentionMarker } from '@renderer/features/chat/components/composer/mentionModel'
 
 describe('ComposerMentionInput sync', () => {
   it('clears orphan DOM nodes when controlled value becomes empty', () => {
@@ -69,7 +70,7 @@ describe('ComposerMentionInput sync', () => {
         onPasteFiles={onPasteFiles}
       />
     )
-    const el = screen.getByRole('combobox', { name: /^message$/i })
+    const el = screen.getByRole('combobox', { name: 'Instruction' })
     fireEvent.paste(el, {
       clipboardData: {
         files: [file],
@@ -92,7 +93,7 @@ describe('ComposerMentionInput sync', () => {
     })
     const onChange = vi.fn()
     render(<ComposerMentionInput value="" onChange={onChange} onKeyDown={vi.fn()} />)
-    const el = screen.getByRole('combobox', { name: /^message$/i })
+    const el = screen.getByRole('combobox', { name: 'Instruction' })
     fireEvent.paste(el, {
       clipboardData: {
         files: [],
@@ -111,7 +112,7 @@ describe('ComposerMentionInput sync', () => {
     render(
       <ComposerMentionInput ref={ref} value="" onChange={vi.fn()} onKeyDown={vi.fn()} />
     )
-    const el = screen.getByRole('combobox', { name: /^message$/i })
+    const el = screen.getByRole('combobox', { name: 'Instruction' })
     fireEvent.paste(el, {
       clipboardData: {
         files: [],
@@ -120,5 +121,20 @@ describe('ComposerMentionInput sync', () => {
       }
     })
     expect(ref.current?.getSelectionStart()).toBe(6)
+  })
+
+  it('draws a chip with its menu icon as SVG, and a file chip with its file-type image', () => {
+    const ref = createRef<ComposerMentionInputHandle>()
+    const value = `${mentionMarker({ kind: 'slash', slashKind: 'skill', trigger: 'code-review' })} and ${mentionMarker({ kind: 'file', path: 'src/a.ts' })}`
+    render(<ComposerMentionInput ref={ref} value={value} onChange={vi.fn()} onKeyDown={vi.fn()} />)
+    const chips = ref.current!.el!.querySelectorAll<HTMLElement>('[data-mention]')
+    expect(chips).toHaveLength(2)
+    const glyph = chips[0]!.querySelector('svg')
+    expect(glyph).toBeTruthy()
+    expect(glyph!.getAttribute('data-chip-glyph')).toBe('skill')
+    expect(chips[0]!.textContent).toBe('code-review')
+    expect(chips[1]!.querySelector('img')).toBeTruthy()
+    // No text glyphs stand in for icons any more.
+    expect(ref.current!.el!.textContent).not.toMatch(/[✦⬡⎇◎▤◇]/)
   })
 })

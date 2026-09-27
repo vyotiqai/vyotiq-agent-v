@@ -245,6 +245,13 @@ export type ApprovalGateOptions = {
   autonomousMode?: boolean
   /** Persists an "always allow" choice; omitted in tests and headless runs. */
   persistAlways?: (toolName: string) => void
+  /**
+   * The task's standing "Allow for this task" grants, read back from its run
+   * directory: one gate is built per run, and the grant covers follow-ups too.
+   */
+  taskAllowlist?: readonly string[]
+  /** Persists an "Allow for this task" choice next to the task; omitted in tests. */
+  persistTask?: (toolName: string) => void
   /** Overridable so tests can drive the decision without an Electron window. */
   ask?: (request: ToolApprovalRequest) => Promise<AskDecision>
 }
@@ -323,11 +330,13 @@ function askThroughRenderer(
 /**
  * Gate for one run.
  *
- * "Allow for session" lives on this object and dies with the run; "Always allow"
- * is handed to `persistAlways` so it survives into the next one.
+ * "Allow for this task" (the wire value is still `session`) starts from the
+ * task's saved grants and is handed to `persistTask`, so the task's next run
+ * builds its gate with it; "Always allow" goes to `persistAlways` and covers
+ * every task in the workspace.
  */
 export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGate {
-  const sessionAllowlist = new Set<string>()
+  const sessionAllowlist = new Set<string>(options.taskAllowlist ?? [])
   const workspaceAllowlist = [...options.workspaceAllowlist]
   const ask =
     options.ask ??
@@ -418,6 +427,7 @@ export function createApprovalGate(options: ApprovalGateOptions): ToolApprovalGa
           }
         case 'session':
           sessionAllowlist.add(agentBuiltAllowKey ?? name)
+          options.persistTask?.(agentBuiltAllowKey ?? name)
           return { allowed: true }
         case 'always': {
           if (name === 'terminal') {

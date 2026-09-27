@@ -6,14 +6,12 @@ import type {
   PersistedEvent,
   RunSummary,
   ToolApprovalRequest,
-  ToolApprovalDecision,
   AgentQuestionRequest,
   ProviderId,
   WorkspaceSettingsOverride,
   WorkspaceUiState,
   WorkspacesState
 } from '@shared/ipc'
-import type { UiAgentQuestionAnswer } from '@shared/transcript'
 import { toLogErr } from '@shared/errors'
 import { isResumableInterruptedRun } from '@shared/runInterrupt'
 import { logger } from '@shared/logger'
@@ -44,7 +42,6 @@ import {
   seedComposerAttachmentsFromDisk
 } from './composerAttachmentStore'
 import { pushToast } from '@renderer/lib/ui'
-import { focusComposerMessage } from '@renderer/lib/shortcuts'
 
 import { finishedBackgroundRuns } from '@renderer/lib/chat/backgroundRuns'
 import type { ChatPane, ChatPaneLayout, PaneDropZone, SessionDragPayload } from '@renderer/lib/chat/chatPaneLayout'
@@ -1222,7 +1219,7 @@ export function useWorkspaceManager(options?: {
         ) {
           sessionStorage.setItem(INTERRUPTED_RUNS_TOAST_KEY, '1')
           pushToast(
-            `${resumableCount} interrupted run${resumableCount === 1 ? '' : 's'} — open a chat and tap Continue`
+            `${resumableCount} interrupted run${resumableCount === 1 ? '' : 's'} — open the task and choose Continue`
           )
         }
       }
@@ -2534,16 +2531,6 @@ export function useWorkspaceManager(options?: {
     [schedulePersistUiState]
   )
 
-  const setComposerDraft = useCallback(
-    (draft: string) => {
-      const focused = getFocusedPane()
-      const path = focused?.workspacePath ?? activeWorkspace
-      if (!path) return
-      setComposerDraftForPane(path, focused?.runId ?? null, draft)
-    },
-    [activeWorkspace, getFocusedPane, setComposerDraftForPane]
-  )
-
   const setAgentMode = useCallback(
     (
       mode: AgentInteractionMode,
@@ -2619,16 +2606,6 @@ export function useWorkspaceManager(options?: {
     [schedulePersistUiState]
   )
 
-  const onMessageListScroll = useCallback(
-    (scrollTop: number) => {
-      const focused = getFocusedPane()
-      const path = focused?.workspacePath ?? activeWorkspace
-      if (!path) return
-      onMessageListScrollForPane(path, focused?.runId ?? null, scrollTop)
-    },
-    [activeWorkspace, getFocusedPane, onMessageListScrollForPane]
-  )
-
   const setSessionQuery = useCallback(
     (query: string): void => {
       if (!activeWorkspace) return
@@ -2676,44 +2653,6 @@ export function useWorkspaceManager(options?: {
   const activeControllerRef = useRef(activeController)
   activeControllerRef.current = activeController
 
-  const onLoadToolContent = useCallback(
-    (toolCallId: string) =>
-      activeControllerRef.current?.loadToolContent(toolCallId) ?? Promise.resolve(null),
-    []
-  )
-
-  const onThinkingToggle = useCallback((messageId: string, expanded: boolean) => {
-    activeControllerRef.current?.setThinkingExpanded(messageId, expanded)
-  }, [])
-
-  const onToolToggle = useCallback((toolCallId: string, expanded: boolean) => {
-    activeControllerRef.current?.setToolExpanded(toolCallId, expanded)
-  }, [])
-
-  const onGroupToggle = useCallback((anchorToolCallId: string, expanded: boolean) => {
-    activeControllerRef.current?.setGroupExpanded(anchorToolCallId, expanded)
-  }, [])
-
-  const onTurnToggle = useCallback((turnIndex: number) => {
-    activeControllerRef.current?.toggleTurnCollapsed(turnIndex)
-  }, [])
-
-  const onDismissRunError = useCallback((itemId: string) => {
-    activeControllerRef.current?.dismissRunError(itemId)
-  }, [])
-
-  const onApprovalDecision = useCallback(
-    (requestId: string, decision: ToolApprovalDecision) =>
-      activeControllerRef.current?.respondToApproval(requestId, decision) ?? Promise.resolve(),
-    []
-  )
-
-  const onQuestionSubmit = useCallback(
-    (requestId: string, answers: UiAgentQuestionAnswer[]) =>
-      activeControllerRef.current?.respondToQuestion(requestId, answers) ?? Promise.resolve(),
-    []
-  )
-
   const subscribeActiveController = useCallback(
     (onStoreChange: () => void) => activeController?.subscribeMeta(onStoreChange) ?? (() => {}),
     [activeController]
@@ -2752,7 +2691,6 @@ export function useWorkspaceManager(options?: {
         transcriptLoading: activeController.transcriptLoading,
         transcriptHasEarlier: activeController.transcriptHasEarlier,
         transcriptLoadingEarlier: activeController.transcriptLoadingEarlier,
-        collapsedTurnIndices: activeController.collapsedTurnIndices,
         writeCheckpoint: activeController.writeCheckpoint,
         pendingFollowUps: activeController.pendingFollowUps,
         agentInstances: activeController.agentInstances,
@@ -2789,7 +2727,6 @@ export function useWorkspaceManager(options?: {
         transcriptLoading: false,
         transcriptHasEarlier: false,
         transcriptLoadingEarlier: false,
-        collapsedTurnIndices: [] as number[],
         writeCheckpoint: null as ChatStreamController['writeCheckpoint'],
         pendingFollowUps: [] as ChatStreamController['pendingFollowUps'],
         agentInstances: {} as ChatStreamController['agentInstances'],
@@ -2805,14 +2742,6 @@ export function useWorkspaceManager(options?: {
         itemsStore: EMPTY_CHAT_STORE.itemsStore,
         metaStore: EMPTY_CHAT_STORE.metaStore
       }
-
-  const collapsedTurns = useMemo(
-    () =>
-      chatSnapshot.collapsedTurnIndices.length > 0
-        ? new Set(chatSnapshot.collapsedTurnIndices)
-        : undefined,
-    [chatSnapshot.collapsedTurnIndices]
-  )
 
   void revision
 
@@ -2903,19 +2832,6 @@ export function useWorkspaceManager(options?: {
 
   const clearWorkspaceError = useCallback(() => setWorkspaceError(null), [])
 
-  const activeScrollTop = focusedWorkspacePath
-    ? (() => {
-        const ctx = findByWorkspacePath(contexts, focusedWorkspacePath)
-        if (!ctx) return undefined
-        const key = scrollKeyForRun(focusedRunId)
-        if (key in ctx.ui.scrollTopByRunId) return ctx.ui.scrollTopByRunId[key]
-        if (Object.keys(ctx.ui.scrollTopByRunId).length === 0 && ctx.ui.scrollTop > 0) {
-          return ctx.ui.scrollTop
-        }
-        return undefined
-      })()
-    : undefined
-
   const getPaneChatSnapshot = useCallback(
     (workspacePath: string, runId: string | null) => {
       const ctrl = ensureController(workspacePath, runId)
@@ -2940,7 +2856,6 @@ export function useWorkspaceManager(options?: {
         transcriptLoading: ctrl.transcriptLoading,
         transcriptHasEarlier: ctrl.transcriptHasEarlier,
         transcriptLoadingEarlier: ctrl.transcriptLoadingEarlier,
-        collapsedTurnIndices: ctrl.collapsedTurnIndices,
         writeCheckpoint: ctrl.writeCheckpoint,
         pendingFollowUps: ctrl.pendingFollowUps,
         agentInstances: ctrl.agentInstances,
@@ -3018,25 +2933,13 @@ export function useWorkspaceManager(options?: {
     workspaceHasBackgroundRun,
     scrollRestoreToken,
     chatSurfaceEpoch,
-    activeScrollTop,
     workspaceError,
     clearWorkspaceError,
     clearRunsError,
-    setComposerDraft,
     setComposerDraftForPane,
     setAgentMode,
-    onMessageListScroll,
     onMessageListScrollForPane,
     setSettingsOverride,
-    onLoadToolContent,
-    onThinkingToggle,
-    onToolToggle,
-    onGroupToggle,
-    onTurnToggle,
-    onDismissRunError,
-    onApprovalDecision,
-    onQuestionSubmit,
-    collapsedTurns,
     chatActions,
     purgeDeletedRunUi,
     paneLayout,

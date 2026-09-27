@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import type { GitStatus, GitStatusResult } from '@shared/ipc'
 import { useGitStatus } from './useGitStatus'
-import { defaultCommitMessageFromStatus } from './CommitComposer'
 
 export type GitChrome = {
   status: GitStatus | null
@@ -241,5 +240,3 @@ export function useGitChrome(
     ]
   )
 }
-
-export { defaultCommitMessageFromStatus }

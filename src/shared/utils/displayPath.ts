@@ -52,21 +52,6 @@ export function truncateMiddle(text: string, maxLen: number): string {
   return `${keepHead.trimEnd()} … ${keepTail.trimStart()}`
 }
 
-/** Compact http(s) URLs for one-line tool headers; other text unchanged. */
-export function formatUrlLabel(text: string, maxLen = 56): string {
-  const trimmed = text.trim()
-  if (!/^https?:\/\//i.test(trimmed)) return text
-  try {
-    const u = new URL(trimmed)
-    const host = u.hostname.replace(/^www\./, '')
-    const path = `${u.pathname}${u.search}${u.hash}`
-    const label = path && path !== '/' ? `${host}${path}` : host
-    return label.length > maxLen ? truncateMiddle(label, maxLen) : label
-  } catch {
-    return text
-  }
-}
-
 /** Join a listing basename onto its directory for workspace-relative open. */
 export function joinWorkspaceRel(basePath: string, name: string): string {
   const base = sanitizeDisplayPath(basePath).replace(/\\/g, '/').replace(/\/+$/, '')

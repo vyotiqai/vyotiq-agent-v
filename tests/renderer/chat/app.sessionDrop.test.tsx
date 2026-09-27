@@ -81,14 +81,6 @@ const workspaceStub = {
     sendFollowUpNow: noop,
     removeFollowUp: noop
   },
-  onLoadToolContent: noop,
-  onThinkingToggle: noop,
-  onToolToggle: noop,
-  onGroupToggle: noop,
-  onTurnToggle: noop,
-  onApprovalDecision: noop,
-  onQuestionSubmit: noop,
-  collapsedTurns: {},
   openRunTab: noop,
   openRunInWorkspace: noop,
   newChatInWorkspace: noop,
@@ -105,19 +97,16 @@ const workspaceStub = {
   loadOlderRuns: noop,
   workspaceHasBackgroundRun: () => false,
   scrollRestoreToken: 0,
-  setComposerDraft: noop,
   setComposerDraftForPane: noop,
   setAgentMode: noop,
   setAgentProfileIdForRun: noop,
   getAgentProfileIdForRun: () => null,
-  onMessageListScroll: noop,
   onMessageListScrollForPane: noop,
   setPaneCapacityContext: noop,
   setSettingsOverride: noop,
   workspaceError: null,
   clearWorkspaceError: noop,
   clearRunsError: noop,
-  activeScrollTop: null,
   chatSurfaceEpoch: 0,
   get paneLayout(): ChatPaneLayout | null {
     return state.paneLayout
@@ -266,8 +255,8 @@ describe('App.handleSessionDrop', () => {
     expect(state.dropCalls[0]![2]).toEqual({ workspacePath: '/ws-a', runId: 'run-a' })
     await waitFor(() => expect(loadRun).toHaveBeenCalledTimes(1))
     expect(loadRun).toHaveBeenCalledWith('/ws-a', 'run-a')
-    expect(screen.queryByText('The workspace for that chat is not open.')).toBeNull()
-    expect(screen.queryByText('Not enough room for another chat pane.')).toBeNull()
+    expect(screen.queryByText('The workspace for that task is not open.')).toBeNull()
+    expect(screen.queryByText('Not enough room for another task pane.')).toBeNull()
   })
 
   it('rejects a drop for a workspace that is not open with an accurate toast', async () => {
@@ -278,7 +267,7 @@ describe('App.handleSessionDrop', () => {
     dropOnPane({ workspacePath: '/ws-closed', runId: 'run-x' })
 
     await waitFor(() =>
-      expect(screen.getByText('The workspace for that chat is not open.')).toBeTruthy()
+      expect(screen.getByText('The workspace for that task is not open.')).toBeTruthy()
     )
     expect(state.dropCalls).toHaveLength(0)
     expect(state.loadRunIntoTab).not.toHaveBeenCalled()
@@ -292,7 +281,7 @@ describe('App.handleSessionDrop', () => {
     dropOnPane({ workspacePath: '/ws-a', runId: 'run-a' })
 
     await waitFor(() =>
-      expect(screen.getByText('Not enough room for another chat pane.')).toBeTruthy()
+      expect(screen.getByText('Not enough room for another task pane.')).toBeTruthy()
     )
     expect(state.dropCalls).toHaveLength(1)
     expect(state.loadRunIntoTab).not.toHaveBeenCalled()

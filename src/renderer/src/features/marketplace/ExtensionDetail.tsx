@@ -615,7 +615,7 @@ function McpBody({
         >
           {tools.length > 0 ? (
             <>
-              <ul className="divide-y divide-border border-y border-border">
+              <ul className="divide-y divide-border/60 border-y border-border">
                 {(showAllTools ? tools : tools.slice(0, TOOLS_SHOWN)).map((tool) => (
                   <ToolRow key={tool.name} tool={tool} />
                 ))}
@@ -800,7 +800,7 @@ function PackageBody({
 
       {item.kind === 'package' && rows.length > 0 ? (
         <Detail label="Contains" note={String(rows.length)}>
-          <ul className="divide-y divide-border border-y border-border">
+          <ul className="divide-y divide-border/60 border-y border-border">
             {rows.map((row) => (
               <li key={row.key} className="flex h-8 items-center gap-2 text-xs">
                 <Icon name={row.icon} size={13} className="text-tertiary" />
@@ -930,10 +930,10 @@ function UserRuleBody({
       </Actions>
       <Status>
         {!rule.enabled
-          ? 'Off — not added to any chat.'
+          ? 'Off — not added to any task.'
           : empty
             ? 'Not applied — it has no text yet.'
-            : 'Added to every chat.'}
+            : 'Added to every task.'}
       </Status>
       <Detail label="Where it can run">
         <WhereControl
@@ -1013,12 +1013,12 @@ function ProjectRuleBody({
       </Actions>
       <Status>
         {root
-          ? `A root instruction file — added to every chat in ${where}.`
+          ? `A root instruction file — added to every task in ${where}.`
           : applies === 'matching'
             ? `Added in ${where} while a file matching its globs is open.`
             : applies === 'request'
               ? 'Added when you @-mention it.'
-              : `Added to every chat in ${where}.`}
+              : `Added to every task in ${where}.`}
       </Status>
     </>
   )

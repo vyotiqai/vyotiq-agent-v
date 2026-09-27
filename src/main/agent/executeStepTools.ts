@@ -730,7 +730,7 @@ function hoistTodoWriteCalls(calls: ToolCall[]): ToolCall[] {
 export async function executeStepToolCalls(
   rawCalls: ToolCall[],
   ctx: ToolStepContext
-): Promise<{ messages: ChatMessage[]; events: AgentEvent[]; stepToolsOk: boolean }> {
+): Promise<{ messages: ChatMessage[]; events: AgentEvent[] }> {
   const calls = ensureToolCallIds(
     rawCalls.map((call) => {
       const name = canonicalizeAgentToolName(call.name)
@@ -742,7 +742,6 @@ export async function executeStepToolCalls(
   const orderedCalls = agentMode === 'agent' ? hoistTodoWriteCalls(calls) : calls
   const messages: ChatMessage[] = []
   const events: AgentEvent[] = []
-  let stepToolsOk = true
   // Cheap call-list checks first: the project probe reads and parses
   // package.json (twice) and is only needed on a step that edits files.
   const softDiagnosticsNudge =
@@ -768,7 +767,6 @@ export async function executeStepToolCalls(
     persistToolResult(ctx, outcome)
     messages.push(outcome.message)
     events.push(...outcome.events)
-    if (!outcome.ok) stepToolsOk = false
   }
 
   for (const group of groups) {
@@ -806,5 +804,5 @@ export async function executeStepToolCalls(
     }
   }
 
-  return { messages, events, stepToolsOk }
+  return { messages, events }
 }

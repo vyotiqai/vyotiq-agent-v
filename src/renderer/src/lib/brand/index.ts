@@ -1,5 +1,3 @@
 export { VyotiqMark } from './VyotiqMark'
-export { VyotiqWordmark } from './VyotiqWordmark'
-export { VyotiqLockup } from './VyotiqLockup'
 export { AgentVSpinner, AGENT_V_SPINNER } from './AgentVSpinner'
 export type { AgentVSpinnerVariant } from './AgentVSpinner'

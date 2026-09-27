@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { hasOpenFloatingLayer } from './floatingLayers'
 
 export function useEscapeToClose(
   onClose: () => void,
@@ -24,7 +25,12 @@ export function useEscapeToClose(
           return
         }
       }
-      if (deferToMenus && document.querySelector('[aria-expanded="true"][aria-haspopup]')) return
+      if (
+        deferToMenus &&
+        (hasOpenFloatingLayer() || document.querySelector('[aria-expanded="true"][aria-haspopup]'))
+      ) {
+        return
+      }
       e.preventDefault()
       e.stopPropagation()
       onClose()

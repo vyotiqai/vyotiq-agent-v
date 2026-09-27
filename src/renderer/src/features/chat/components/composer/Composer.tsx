@@ -32,28 +32,16 @@ import {
 } from '@renderer/lib/drafts/taskDraftStore'
 import { Icon } from '@renderer/lib/icons'
 import { isSessionDragEvent } from '@renderer/lib/chat/chatPaneLayout'
-import {
-  CHAT_COLUMN,
-  CHAT_GUTTER,
-  COMPOSER_DOCK_COVER,
-  COMPOSER_DOCK_RESERVE_VAR,
-  COMPOSER_FLOAT_BODY,
-  COMPOSER_FLOAT_DOCK,
-  FLOATING_CHROME
-} from '@renderer/lib/utils/layout'
 import { ComposerMentionInput, type ComposerMentionInputHandle } from './ComposerMentionInput'
-import { ComposerToolbar, ComposerToolbarTools, type ComposerVariant } from './ComposerToolbar'
 import { ComposerAttachments } from './ComposerAttachments'
 import {
   DictationErrorBanner,
-  Waveform,
-  formatElapsed,
+  DictationSession,
   type DictationSettingsSection,
   type DictationStripState
 } from './DictationSessionStrip'
 import { TaskOptions } from './TaskOptions'
 import { useComposerDraft } from './useComposerDraft'
-import { hasComposerContent } from './mentionModel'
 import { useComposerImages, MAX_IMAGES } from './useComposerImages'
 import { useComposerFiles, ATTACHMENT_ACCEPT, MAX_FILES, isImageFile } from './useComposerFiles'
 import { useComposerAudio, isAudioFile, MAX_AUDIO_FILES } from './useComposerAudio'
@@ -80,26 +68,20 @@ import {
   executeSlashResolveResult,
   type SlashClientHandlers
 } from './slashCommandExecute'
-import { resolveComposerPlaceholder, resolveLinePlaceholder } from './composerPlaceholder'
+import { resolveLinePlaceholder } from './composerPlaceholder'
 import { filesFromDataTransfer } from './dataTransferFiles'
 import { focusComposerMessage, isMainComposerTarget, shortcutLabel } from '@renderer/lib/shortcuts'
 
-const COMPOSER_FORM_LAYOUT = '@container relative flex flex-col gap-1.5 px-3 py-2'
+/**
+ * `line` is the task's instruction line: one row flush with the pane's bottom
+ * edge — no Send or Stop button (Enter sends, Esc stops), options in one token.
+ * `brief` is the New task page. `inline` is Edit and rerun: the line's
+ * controls in the brief's box, in place of the instruction it edits.
+ */
+export type ComposerVariant = 'inline' | 'line' | 'brief'
 
-function composerLayoutKind(variant: ComposerVariant): ComposerVariant {
-  switch (variant) {
-    case 'hero':
-    case 'dock':
-    case 'inline':
-    case 'line':
-    case 'brief':
-      return variant
-    default: {
-      const _exhaustive: never = variant
-      return _exhaustive
-    }
-  }
-}
+/** The inline editor's placeholder when the caller names none. */
+const INLINE_PLACEHOLDER = 'Edit the instruction…'
 
 function resolveDictationStripState(d: {
   phase: DictationPhase
@@ -149,6 +131,18 @@ function lineMic(phase: DictationPhase, engineHint: string | null): { label: str
   }
 }
 
+/** Narrow DictationPhase to the live session phases; null while idle. */
+function liveDictationPhase(phase: DictationPhase): 'checking' | 'recording' | 'transcribing' | null {
+  switch (phase) {
+    case 'checking':
+    case 'recording':
+    case 'transcribing':
+      return phase
+    default:
+      return null
+  }
+}
+
 function notifyMcpUnavailable(
   command: SlashCommandDescriptor,
   handlers?: SlashClientHandlers
@@ -168,7 +162,6 @@ export function Composer({
   running,
   disabled,
   hasWorkspace,
-  hasTranscript,
   ollamaBaseUrl,
   customOpenAiBaseUrl,
   modelsRefreshKey,
@@ -204,8 +197,7 @@ export function Composer({
   metaStore,
   onCompactContext,
   onDismissError,
-  trailing,
-  variant = 'dock',
+  variant = 'line',
   className,
   slashHandlers,
   seedImages,
@@ -225,6 +217,7 @@ export function Composer({
   running: boolean
   disabled?: boolean
   hasWorkspace?: boolean
+  /** No longer read — every placeholder here is set by its variant. Callers still pass it. */
   hasTranscript?: boolean
   ollamaBaseUrl?: string
   customOpenAiBaseUrl?: string
@@ -270,8 +263,6 @@ export function Composer({
     focus?: string
   ) => Promise<{ ok: true; message: string } | { ok: false; message: string }>
   onDismissError?: () => void
-  /** Optional docked chrome below the shell. */
-  trailing?: React.ReactNode
   variant?: ComposerVariant
   className?: string
   slashHandlers?: SlashClientHandlers
@@ -283,7 +274,7 @@ export function Composer({
   /** Escape / cancel while editing a prompt bubble. */
   onCancelEdit?: () => void
   onFocus?: () => void
-  /** Dock and line: ArrowUp on empty draft or caret at start edits the last user prompt. */
+  /** Line only: ArrowUp on empty draft or caret at start edits the last user prompt. */
   onEditLastUserMessage?: () => boolean
   /** Line only: runs the task has had — the placeholder names the next one. */
   runCount?: number
@@ -603,7 +594,7 @@ export function Composer({
         if (command.id === 'builtin:goal') {
           if (running && agentMode !== 'agent') {
             slashHandlers?.onNotice?.(
-              'Start /goal in Agent mode. Prefer a new chat while another mode is running.'
+              'Start /goal in Agent mode. Prefer a new task while another mode is running.'
             )
             return false
           }
@@ -698,8 +689,8 @@ export function Composer({
   )
 
   // Restore composer focus after a send. Runs for every submit path (Enter,
-  // send button, slash) because the contentEditable never fires form submit.
-  // The double rAF recovers focus after a hero → dock remount.
+  // Rerun button, slash) because the contentEditable never fires form submit.
+  // The double rAF recovers focus after a remount (a brief becoming a line).
   const keepComposerFocus = useCallback((): void => {
     const active = document.activeElement
     const hadComposerFocus =
@@ -827,7 +818,7 @@ export function Composer({
     onMentionDismiss: mentions.dismiss,
     onMentionAccept,
     onMentionBack: mentions.goBack,
-    onEditLastUserMessage: variant === 'dock' || variant === 'line' ? onEditLastUserMessage : undefined,
+    onEditLastUserMessage: variant === 'line' ? onEditLastUserMessage : undefined,
     onCancelEdit: variant === 'inline' ? onCancelEdit : undefined,
     getCaretStart: () => taRef.current?.getSelectionStart() ?? 0,
     onSubmitted: keepComposerFocus
@@ -954,37 +945,13 @@ export function Composer({
     void onPickAttachments(dropped)
   }
 
-  const layout = composerLayoutKind(variant)
-  const isDock = layout === 'dock'
-  const isInline = layout === 'inline'
-  const isLine = layout === 'line'
-  const isBrief = layout === 'brief'
+  const isInline = variant === 'inline'
+  const isLine = variant === 'line'
+  const isBrief = variant === 'brief'
 
   useLayoutEffect(() => {
     if (isInline) taRef.current?.focus()
   }, [isInline])
-
-  // Floating dock publishes its measured height so the transcript can reserve
-  // scroll clearance (consumed by MessageList's scroll container).
-  const dockRef = useRef<HTMLDivElement | null>(null)
-  useLayoutEffect(() => {
-    if (!isDock) return
-    const el = dockRef.current
-    if (!el) return
-    const stage = el.closest<HTMLElement>('[data-chat-stage]')
-    if (!stage) return
-    const apply = (): void => {
-      stage.style.setProperty(COMPOSER_DOCK_RESERVE_VAR, `${el.offsetHeight}px`)
-    }
-    apply()
-    if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(apply)
-    observer.observe(el)
-    return () => {
-      observer.disconnect()
-      stage.style.removeProperty(COMPOSER_DOCK_RESERVE_VAR)
-    }
-  }, [isDock])
 
   const imagesFull = images.length >= MAX_IMAGES
   const filesFull = files.length + nativeFiles.length >= MAX_FILES
@@ -1010,25 +977,18 @@ export function Composer({
   const sendDisabledReason = !canSend
     ? disabled
       ? hasWorkspace
-        ? 'Sending is unavailable right now.'
-        : 'Open a workspace to send a message.'
+        ? 'Starting is unavailable right now.'
+        : 'Open a workspace to start a task'
       : readinessBlocksSend && readinessIssue
         ? modelReadinessSendReason(readinessIssue)
         : extracting
-          ? 'Finish processing the attachment before sending.'
+          ? 'Finish processing the attachment before starting.'
           : fileError || imageError || audioError
-            ? 'Resolve the attachment issue before sending.'
+            ? 'Resolve the attachment issue before starting.'
             : isInline
-              ? 'Enter a replacement message to resend.'
-              : 'Type a message or attach a file to send.'
+              ? 'Edit the instruction to rerun it'
+              : 'Write a brief or attach a file to start.'
     : null
-
-  const hasContent =
-    hasComposerContent(text) ||
-    images.length > 0 ||
-    files.length > 0 ||
-    nativeFiles.length > 0 ||
-    audio.length > 0
 
   const slashListId = `slash-command-menu-${variant}`
   const mentionListId = `composer-mention-menu-${variant}`
@@ -1046,15 +1006,6 @@ export function Composer({
     dictationStripState?.kind === 'listening' ||
     dictationStripState?.kind === 'transcribing'
 
-  // The composer is always two rows: a full-width field and a dedicated
-  // control row beneath it. No stacked-mode latching — the field owns the
-  // shell width at every size, single line or multiline.
-
-  const composerShellChrome = cn(
-    FLOATING_CHROME,
-    isDock && 'pointer-events-auto'
-  )
-
   const showRetry =
     Boolean(onRetryNetwork) &&
     isRetryableTurnFailure({ errorCode, incompleteReason: incomplete?.reason })
@@ -1068,6 +1019,7 @@ export function Composer({
         : 'Attach files'
     const showReadiness = Boolean(readinessIssue && readinessIssue.kind !== 'manual_catalog' && hasWorkspace)
     const dictationBusy = dictation.phase === 'checking' || dictation.phase === 'transcribing'
+    const briefLivePhase = liveDictationPhase(dictation.phase)
     const hasAttachmentRow =
       images.length > 0 ||
       files.length > 0 ||
@@ -1108,6 +1060,8 @@ export function Composer({
                 <ModelReadinessBanner
                   issue={readinessIssue}
                   busy={catalogLoading}
+                  // Start task is the brief's one primary.
+                  primary={false}
                   onRecheck={() => {
                     void refreshCatalog({ forceRefresh: true, provider })
                   }}
@@ -1135,80 +1089,91 @@ export function Composer({
           />
         }
         input={
-          dictationActive ? (
+          <>
+            {dictationActive && briefLivePhase ? (
+              <div className="mb-2">
+                <DictationSession
+                  phase={briefLivePhase}
+                  elapsedMs={dictation.elapsedMs}
+                  waveform={dictation.waveform}
+                  style={dictation.waveformStyle}
+                  engineHint={dictation.engineHint}
+                  className="min-w-0 flex-1"
+                />
+              </div>
+            ) : null}
             <div
-              className="flex min-h-[132px] items-start gap-2"
-              role="status"
-              aria-live="polite"
-              aria-label={dictation.phase === 'recording' ? 'Listening' : lineMic(dictation.phase, null).label}
-              data-dictation-session={dictationStripState?.kind}
+              ref={mentionAnchorRef}
+              data-composer-input-wrap
+              onDragOver={onAttachmentDragOver}
+              onDrop={onAttachmentDrop}
             >
-              <Waveform samples={dictation.waveform} style={dictation.waveformStyle} />
-              <span className="shrink-0 font-mono text-xs text-muted tnum" aria-hidden="true">
-                {formatElapsed(dictation.elapsedMs)}
-              </span>
+              <ComposerMentionInput
+                ref={taRef}
+                size="brief"
+                newlineOnEnter
+                ariaLabel="Brief"
+                value={text}
+                onChange={(next) => {
+                  setText(next)
+                  requestAnimationFrame(syncCursor)
+                }}
+                onKeyDown={(e) => {
+                  onKeyDown(e)
+                  requestAnimationFrame(syncCursor)
+                }}
+                onCaretChange={(offset) => setCursor(offset)}
+                onPasteFiles={(pasted) => {
+                  void onPickAttachments(pasted)
+                }}
+                placeholder={
+                  composerPlaceholder?.trim() ||
+                  (hasWorkspace
+                    ? 'Describe the task — the agent plans it, does it, and shows you the result'
+                    : 'Open a workspace to start a task')
+                }
+                disabled={inputLocked}
+                onFocus={onFocus}
+                aria-expanded={slash.open || mentions.open}
+                aria-controls={slash.open ? slashListId : mentions.open ? mentionListId : undefined}
+                aria-autocomplete={slash.open || mentions.open ? 'list' : undefined}
+                aria-activedescendant={
+                  slash.open && slash.activeCommand
+                    ? `${slashListId}-opt-${slash.activeCommand.id}`
+                    : mentions.open && mentions.activeItem
+                      ? `${mentionListId}-opt-${mentions.activeItem.id}`
+                      : undefined
+                }
+              />
             </div>
-          ) : (
-          <div
-            ref={mentionAnchorRef}
-            data-composer-input-wrap
-            onDragOver={onAttachmentDragOver}
-            onDrop={onAttachmentDrop}
-          >
-            <ComposerMentionInput
-              ref={taRef}
-              size="brief"
-              newlineOnEnter
-              ariaLabel="Brief"
-              value={text}
-              onChange={(next) => {
-                setText(next)
-                requestAnimationFrame(syncCursor)
-              }}
-              onKeyDown={(e) => {
-                onKeyDown(e)
-                requestAnimationFrame(syncCursor)
-              }}
-              onCaretChange={(offset) => setCursor(offset)}
-              onPasteFiles={(pasted) => {
-                void onPickAttachments(pasted)
-              }}
-              placeholder={
-                composerPlaceholder?.trim() ||
-                (hasWorkspace
-                  ? 'Describe the task — the agent plans it, does it, and shows you the result'
-                  : 'Open a workspace to start a task')
-              }
-              disabled={inputLocked}
-              onFocus={onFocus}
-              aria-expanded={slash.open || mentions.open}
-              aria-controls={slash.open ? slashListId : mentions.open ? mentionListId : undefined}
-              aria-autocomplete={slash.open || mentions.open ? 'list' : undefined}
-              aria-activedescendant={
-                slash.open && slash.activeCommand
-                  ? `${slashListId}-opt-${slash.activeCommand.id}`
-                  : mentions.open && mentions.activeItem
-                    ? `${mentionListId}-opt-${mentions.activeItem.id}`
-                    : undefined
-              }
-            />
-          </div>
-          )
+          </>
         }
         mic={
-          <IconButton
-            icon={dictationActive ? (dictationBusy ? 'loader' : 'stop') : 'mic'}
-            label={lineMic(dictation.phase, dictation.engineHint).label}
-            title={lineMic(dictation.phase, dictation.engineHint).tip}
-            size="md"
-            tone="muted"
-            active={dictation.phase === 'recording'}
-            disabled={Boolean(disabled) || dictationBusy}
-            aria-busy={dictationBusy || undefined}
-            className={dictationBusy ? '[&_svg]:motion-safe:animate-spin' : undefined}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={dictation.toggle}
-          />
+          <>
+            {dictationActive ? (
+              <IconButton
+                icon="close"
+                label="Cancel dictation"
+                size="md"
+                tone="muted"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={dictation.cancel}
+              />
+            ) : null}
+            <IconButton
+              icon={dictationActive ? (dictationBusy ? 'loader' : 'stop') : 'mic'}
+              label={lineMic(dictation.phase, dictation.engineHint).label}
+              title={lineMic(dictation.phase, dictation.engineHint).tip}
+              size="md"
+              tone="muted"
+              active={dictation.phase === 'recording'}
+              disabled={Boolean(disabled) || dictationBusy}
+              aria-busy={dictationBusy || undefined}
+              className={dictationBusy ? '[&_svg]:motion-safe:animate-spin' : undefined}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={dictation.toggle}
+            />
+          </>
         }
         attachments={
           hasAttachmentRow ? (
@@ -1343,6 +1308,7 @@ export function Composer({
         ? `Attach files — ${attachHint}`
         : 'Attach files — or type @ for context'
     const dictationBusy = dictation.phase === 'checking' || dictation.phase === 'transcribing'
+    const lineLivePhase = liveDictationPhase(dictation.phase)
     const hasAttachmentRow =
       images.length > 0 ||
       files.length > 0 ||
@@ -1387,13 +1353,13 @@ export function Composer({
                         setEditingFollowUpId(null)
                       }
                     }}
-                    aria-label="Edit queued follow-up"
+                    aria-label="Edit queued instruction"
                     rows={2}
                   />
                   <Button
                     size="xs"
                     variant="primary"
-                    aria-label="Save queued follow-up edit"
+                    aria-label="Save queued instruction edit"
                     disabled={!editingFollowUpText.trim()}
                     onClick={async () => {
                       const trimmed = editingFollowUpText.trim()
@@ -1404,45 +1370,50 @@ export function Composer({
                   >
                     Save
                   </Button>
-                  <Button size="xs" variant="ghost" aria-label="Cancel queued follow-up edit" onClick={() => setEditingFollowUpId(null)}>
+                  <Button size="xs" variant="ghost" aria-label="Cancel queued instruction edit" onClick={() => setEditingFollowUpId(null)}>
                     Cancel
                   </Button>
                 </li>
               ) : (
-                <li key={entry.id} className="flex h-8 items-center gap-2.5 border-b border-border px-4 text-xs">
-                  <Icon name="enter" size={13} className="shrink-0 text-tertiary" />
-                  <span className="shrink-0 text-tertiary">Queued</span>
+                <li
+                  key={entry.id}
+                  className="flex h-8 items-center gap-2.5 border-b border-border px-4 text-xs"
+                  data-follow-up-offline={entry.offline ? '' : undefined}
+                >
+                  {/* Offline: kept here, starts when the connection is back — the icon and the word both say so. */}
+                  <Icon name={entry.offline ? 'offline' : 'enter'} size={13} className="shrink-0 text-tertiary" />
+                  <span className="shrink-0 text-tertiary">{entry.offline ? 'Queued · offline' : 'Queued'}</span>
                   <span className="min-w-0 flex-1 truncate text-secondary" title={entry.text}>
                     {entry.preview}
                   </span>
                   {onEditFollowUp ? (
-                    <button
-                      type="button"
-                      aria-label="Edit queued follow-up"
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      aria-label="Edit queued instruction"
                       onClick={() => {
                         setEditingFollowUpId(entry.id)
                         setEditingFollowUpText(entry.text)
                       }}
-                      className="shrink-0 whitespace-nowrap rounded font-medium text-muted vy-transition hover:text-fg-strong focus-visible:vy-focus-ring"
                     >
                       Edit
-                    </button>
+                    </Button>
                   ) : null}
-                  {onSendFollowUpNow ? (
-                    <button
-                      type="button"
-                      aria-label="Send queued follow-up now"
+                  {onSendFollowUpNow && !entry.offline ? (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      aria-label="Send queued instruction now"
                       title="Interrupt the run and apply it now"
                       onClick={() => onSendFollowUpNow(entry.id)}
-                      className="shrink-0 whitespace-nowrap rounded font-medium text-muted vy-transition hover:text-fg-strong focus-visible:vy-focus-ring"
                     >
                       Send now
-                    </button>
+                    </Button>
                   ) : null}
                   {onRemoveFollowUp ? (
                     <IconButton
                       icon="close"
-                      label="Remove queued follow-up"
+                      label="Remove queued instruction"
                       size="xs"
                       tone="muted"
                       onClick={() => onRemoveFollowUp(entry.id)}
@@ -1516,19 +1487,15 @@ export function Composer({
             <span aria-hidden="true" className="flex h-7 shrink-0 items-center font-mono text-md font-semibold text-accent">
               ›
             </span>
-            {dictationActive ? (
-              <div
-                className="flex h-7 min-w-0 flex-1 items-center gap-2"
-                role="status"
-                aria-live="polite"
-                aria-label={dictation.phase === 'recording' ? 'Listening' : lineMic(dictation.phase, null).label}
-                data-dictation-session={dictationStripState?.kind}
-              >
-                <Waveform samples={dictation.waveform} style={dictation.waveformStyle} />
-                <span className="shrink-0 font-mono text-xs text-muted tnum" aria-hidden="true">
-                  {formatElapsed(dictation.elapsedMs)}
-                </span>
-              </div>
+            {lineLivePhase ? (
+              <DictationSession
+                phase={lineLivePhase}
+                elapsedMs={dictation.elapsedMs}
+                waveform={dictation.waveform}
+                style={dictation.waveformStyle}
+                engineHint={dictation.engineHint}
+                className="min-w-0 flex-1"
+              />
             ) : (
               <div ref={mentionAnchorRef} className="min-w-0 flex-1 py-1" data-composer-input-wrap>
                 <ComposerMentionInput
@@ -1702,223 +1669,199 @@ export function Composer({
     )
   }
 
-  const composerFields = (
-    <>
-      <input
-        ref={fileRef}
-        type="file"
-        accept={ATTACHMENT_ACCEPT}
-        multiple
-        className="hidden"
-        aria-hidden
-        tabIndex={-1}
-        onChange={(e) => {
-          void onPickAttachments(e.target.files)
-          e.target.value = ''
-        }}
-      />
+  // Inline: Edit and rerun. The instruction line's controls — field, paperclip,
+  // mic, the options token — in the brief's box, where the instruction was.
+  // Enter reruns, Esc cancels; the two buttons say the same for the pointer.
+  const inlineAttachFull = imagesFull && filesFull && audioFull
+  const inlineAttachLabel = inlineAttachFull
+    ? 'Attachment limits reached'
+    : attachHint
+      ? `Attach files — ${attachHint}`
+      : 'Attach files — or type @ for context'
+  const inlineDictationBusy = dictation.phase === 'checking' || dictation.phase === 'transcribing'
+  const inlineHasAttachmentRow =
+    images.length > 0 ||
+    files.length > 0 ||
+    nativeFiles.length > 0 ||
+    audio.length > 0 ||
+    Boolean(imageError || fileError || audioError) ||
+    extracting
+  const inlineShowReadiness = Boolean(readinessIssue && readinessIssue.kind !== 'manual_catalog' && hasWorkspace)
+  const inlineMic = lineMic(dictation.phase, dictation.engineHint)
+  const inlineLivePhase = liveDictationPhase(dictation.phase)
 
-      {pendingFollowUps.length > 0 ? (
-        <div
-          className="flex flex-col gap-1.5"
-          data-follow-up-queue
-          aria-label="Queued follow-ups"
-        >
-          {pendingFollowUps.map((entry) => {
-            const isEditing = editingFollowUpId === entry.id
-            const queueAction =
-              'shrink-0 rounded px-2 py-1 text-2xs font-medium text-muted vy-transition hover:bg-surface hover:text-fg'
-            return (
-              <div
-                key={entry.id}
-                className="flex flex-wrap items-start gap-2 rounded-lg border border-border bg-surface px-2 py-1.5 text-caption"
-              >
-                {isEditing ? (
-                  <>
-                    <textarea
-                      ref={followUpEditRef}
-                      className="min-h-[var(--vy-control-min-h)] min-w-[12rem] flex-1 resize-y rounded-md border border-border bg-bg px-2 py-1 text-md leading-snug text-fg"
-                      value={editingFollowUpText}
-                      onChange={(e) => setEditingFollowUpText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape') {
-                          e.stopPropagation()
-                          setEditingFollowUpId(null)
-                        }
-                      }}
-                      aria-label="Edit queued follow-up"
-                      rows={2}
-                    />
-                    <div className="flex shrink-0 items-center gap-1">
-                      <button
-                        type="button"
-                        className={queueAction}
-                        aria-label="Save queued follow-up edit"
-                        disabled={!editingFollowUpText.trim()}
-                        onClick={async () => {
-                          const trimmed = editingFollowUpText.trim()
-                          if (!trimmed) return
-                          const ok = onEditFollowUp ? await onEditFollowUp(entry.id, trimmed) : true
-                          if (ok) setEditingFollowUpId(null)
-                        }}
-                      >
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        className={queueAction}
-                        aria-label="Cancel queued follow-up edit"
-                        onClick={() => setEditingFollowUpId(null)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <span className="min-w-0 flex-1 text-fg" title={entry.text}>
-                      {entry.preview}
-                    </span>
-                    <div className="flex shrink-0 items-center gap-0.5">
-                      {onEditFollowUp ? (
-                        <button
-                          type="button"
-                          className={queueAction}
-                          aria-label="Edit queued follow-up"
-                          onClick={() => {
-                            setEditingFollowUpId(entry.id)
-                            setEditingFollowUpText(entry.text)
-                          }}
-                        >
-                          Edit
-                        </button>
-                      ) : null}
-                      {onSendFollowUpNow ? (
-                        <button
-                          type="button"
-                          className={queueAction}
-                          aria-label="Send queued follow-up now"
-                          onClick={() => onSendFollowUpNow(entry.id)}
-                        >
-                          Send now
-                        </button>
-                      ) : null}
-                      {onRemoveFollowUp ? (
-                        <button
-                          type="button"
-                          className={cn(queueAction, 'hover:text-danger')}
-                          aria-label="Remove queued follow-up"
-                          onClick={() => onRemoveFollowUp(entry.id)}
-                        >
-                          Remove
-                        </button>
-                      ) : null}
-                    </div>
-                  </>
-                )}
+  return (
+    <div className={cn('flex w-full flex-col gap-2', className)} data-composer-inline>
+      {bannerError || secondaryBannerError ? (
+        <div className="flex flex-col gap-2">
+          {secondaryBannerError ? <Alert>{secondaryBannerError}</Alert> : null}
+          {bannerError ? (
+            <Alert onDismiss={onDismissError}>
+              <div className="flex items-start justify-between gap-2">
+                <span className="min-w-0 [overflow-wrap:anywhere]">{bannerError}</span>
+                {showRetry ? (
+                  <Button size="xs" onClick={onRetryNetwork}>
+                    Retry
+                  </Button>
+                ) : null}
               </div>
-            )
-          })}
+            </Alert>
+          ) : null}
         </div>
       ) : null}
 
-      <ComposerAttachments
-        images={images}
-        imageError={imageError}
-        files={files}
-        nativeFiles={nativeFiles}
-        audio={audio}
-        fileError={fileError}
-        audioError={audioError}
-        extracting={extracting}
-        attachLocked={inputLocked}
-        onRemove={removeImage}
-        onRemoveFile={removeFile}
-        onRemoveNativeFile={removeNativeFile}
-        onRemoveAudio={removeAudio}
-      />
-
-      {readinessIssue && readinessIssue.kind !== 'manual_catalog' && hasWorkspace ? (
-        <ModelReadinessBanner
-          issue={readinessIssue}
-          busy={catalogLoading}
-          onRecheck={() => {
-            void refreshCatalog({ forceRefresh: true, provider })
-          }}
-          onAddKey={() => {
-            slashHandlers?.onOpenSettings?.('providers')
+      <form
+        onSubmit={submit}
+        className="rounded-lg border border-border bg-bg vy-transition focus-within:border-border-strong"
+        data-composer-shell
+        onDragOver={onAttachmentDragOver}
+        onDrop={onAttachmentDrop}
+      >
+        <input
+          ref={fileRef}
+          type="file"
+          accept={ATTACHMENT_ACCEPT}
+          multiple
+          className="hidden"
+          aria-hidden
+          tabIndex={-1}
+          onChange={(e) => {
+            void onPickAttachments(e.target.files)
+            e.target.value = ''
           }}
         />
-      ) : null}
-
-      {dictationStripState?.kind === 'error' ? (
-        <DictationErrorBanner
-          message={dictationStripState.message}
-          settingsSection={dictationStripState.settingsSection}
-          onDismiss={() => dictation.setError(null)}
-          onOpenSettings={slashHandlers?.onOpenSettings}
-        />
-      ) : null}
-
-      {/* Full-width field — the draft owns the entire shell width at every
-          size; tools and actions share a dedicated control row below it. */}
-      {!dictationActive && (
-        <div ref={mentionAnchorRef} className="w-full min-w-0" data-composer-input-wrap>
-          <ComposerMentionInput
-            ref={taRef}
-            value={text}
-            onChange={(next) => {
-              setText(next)
-              requestAnimationFrame(syncCursor)
-            }}
-            onKeyDown={(e) => {
-              onKeyDown(e)
-              requestAnimationFrame(syncCursor)
-            }}
-            onCaretChange={(offset) => setCursor(offset)}
-            onPasteFiles={(files) => {
-              void onPickAttachments(files)
-            }}
-            placeholder={resolveComposerPlaceholder({
-              hasWorkspace: Boolean(hasWorkspace),
-              running,
-              agentMode,
-              hasTranscript: Boolean(hasTranscript),
-              override: composerPlaceholder
-            })}
-            disabled={inputLocked}
-            onFocus={onFocus}
-            aria-expanded={slash.open || mentions.open}
-            aria-controls={slash.open ? slashListId : mentions.open ? mentionListId : undefined}
-            aria-autocomplete={slash.open || mentions.open ? 'list' : undefined}
-            aria-activedescendant={
-              slash.open && slash.activeCommand
-                ? `${slashListId}-opt-${slash.activeCommand.id}`
-                : mentions.open && mentions.activeItem
-                  ? `${mentionListId}-opt-${mentions.activeItem.id}`
-                  : undefined
-            }
+        {inlineHasAttachmentRow || inlineShowReadiness || dictationStripState?.kind === 'error' ? (
+          <div className="flex flex-col gap-2 px-3 pt-2">
+            <ComposerAttachments
+              images={images}
+              imageError={imageError}
+              files={files}
+              nativeFiles={nativeFiles}
+              audio={audio}
+              fileError={fileError}
+              audioError={audioError}
+              extracting={extracting}
+              attachLocked={inputLocked}
+              onRemove={removeImage}
+              onRemoveFile={removeFile}
+              onRemoveNativeFile={removeNativeFile}
+              onRemoveAudio={removeAudio}
+            />
+            {inlineShowReadiness && readinessIssue ? (
+              <ModelReadinessBanner
+                issue={readinessIssue}
+                busy={catalogLoading}
+                onRecheck={() => {
+                  void refreshCatalog({ forceRefresh: true, provider })
+                }}
+                onAddKey={() => {
+                  slashHandlers?.onOpenSettings?.('providers')
+                }}
+              />
+            ) : null}
+            {dictationStripState?.kind === 'error' ? (
+              <DictationErrorBanner
+                message={dictationStripState.message}
+                settingsSection={dictationStripState.settingsSection}
+                onDismiss={() => dictation.setError(null)}
+                onOpenSettings={slashHandlers?.onOpenSettings}
+              />
+            ) : null}
+          </div>
+        ) : null}
+        <div className="flex min-h-11 items-start gap-2.5 px-3 py-2" data-composer-row>
+          {inlineLivePhase ? (
+            <DictationSession
+              phase={inlineLivePhase}
+              elapsedMs={dictation.elapsedMs}
+              waveform={dictation.waveform}
+              style={dictation.waveformStyle}
+              engineHint={dictation.engineHint}
+              className="min-w-0 flex-1"
+            />
+          ) : (
+            <div ref={mentionAnchorRef} className="min-w-0 flex-1 py-1" data-composer-input-wrap>
+              <ComposerMentionInput
+                ref={taRef}
+                size="sm"
+                ariaLabel="Instruction"
+                value={text}
+                onChange={(next) => {
+                  setText(next)
+                  requestAnimationFrame(syncCursor)
+                }}
+                onKeyDown={(e) => {
+                  onKeyDown(e)
+                  requestAnimationFrame(syncCursor)
+                }}
+                onCaretChange={(offset) => setCursor(offset)}
+                onPasteFiles={(pasted) => {
+                  void onPickAttachments(pasted)
+                }}
+                placeholder={composerPlaceholder?.trim() || INLINE_PLACEHOLDER}
+                disabled={inputLocked}
+                onFocus={onFocus}
+                aria-expanded={slash.open || mentions.open}
+                aria-controls={slash.open ? slashListId : mentions.open ? mentionListId : undefined}
+                aria-autocomplete={slash.open || mentions.open ? 'list' : undefined}
+                aria-activedescendant={
+                  slash.open && slash.activeCommand
+                    ? `${slashListId}-opt-${slash.activeCommand.id}`
+                    : mentions.open && mentions.activeItem
+                      ? `${mentionListId}-opt-${mentions.activeItem.id}`
+                      : undefined
+                }
+              />
+            </div>
+          )}
+          {dictationActive ? (
+            <IconButton
+              icon="close"
+              label="Cancel dictation"
+              size="md"
+              tone="muted"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={dictation.cancel}
+            />
+          ) : (
+            <IconButton
+              icon="paperclip"
+              label={inlineAttachLabel}
+              size="md"
+              tone="muted"
+              disabled={inputLocked || inlineAttachFull}
+              data-composer-plus
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => fileRef.current?.click()}
+            />
+          )}
+          <IconButton
+            icon={dictationActive ? (inlineDictationBusy ? 'loader' : 'stop') : 'mic'}
+            label={inlineMic.label}
+            title={inlineMic.tip}
+            size="md"
+            tone="muted"
+            active={dictation.phase === 'recording'}
+            disabled={Boolean(disabled) || inlineDictationBusy}
+            aria-busy={inlineDictationBusy || undefined}
+            className={inlineDictationBusy ? '[&_svg]:motion-safe:animate-spin' : undefined}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={dictation.toggle}
           />
-        </div>
-      )}
-      <div className="flex min-h-8 items-center justify-between gap-2" data-composer-row>
-        {!dictationActive && (
-          <ComposerToolbarTools
-            locked={settingsLocked}
-            attachDisabled={inputLocked}
-            attachFull={imagesFull && filesFull && audioFull}
-            attachHint={attachHint}
-            onAttach={() => fileRef.current?.click()}
+          <TaskOptions
+            provider={provider}
+            model={model}
             providers={providers}
             optionsByProvider={optionsByProvider}
             seedsByProvider={seedsByProvider}
             modelMetaByValue={modelMetaByValue}
-            provider={provider}
-            model={model}
+            warningsByProvider={warningsByProvider}
             favoriteModels={favoriteModels}
             recentModels={recentModels}
-            warningsByProvider={warningsByProvider}
             serviceTier={serviceTier}
+            secrets={secrets}
+            ollamaBaseUrl={ollamaBaseUrl}
+            customOpenAiBaseUrl={customOpenAiBaseUrl}
             onModelChange={onProviderModel}
             onToggleFavorite={onToggleFavorite}
             onServiceTierChange={onServiceTierChange}
@@ -1932,146 +1875,70 @@ export function Composer({
             catalogLoading={catalogLoading}
             agentMode={agentMode}
             onAgentModeChange={onAgentModeChange}
+            chatSettings={chatSettings}
+            onChatSettingsChange={onChatSettingsChange}
+            contextUsage={contextUsage}
+            metaStore={metaStore}
+            onCompactContext={onCompactContext}
+            onAddProvider={slashHandlers?.onOpenSettings ? () => slashHandlers.onOpenSettings?.('providers') : undefined}
             running={running}
+            disabled={settingsLocked}
             focusInput={focusInput}
           />
-        )}
-        <ComposerToolbar
-          variant={variant}
-          disabled={disabled}
-          // While dictation replaces the input, the toolbar is the row's only
-          // child — flex so the waveform expands and the actions right-align.
-          className={dictationActive ? 'flex-1' : undefined}
-          modelMetaByValue={modelMetaByValue}
-          provider={provider}
-          model={model}
-          chatSettings={chatSettings}
-          onChatSettingsChange={onChatSettingsChange}
-          running={running}
-          canSend={canSend}
-          hasContent={hasContent}
-          sendDisabledReason={sendDisabledReason}
-          onStop={onStop}
-          contextUsage={contextUsage}
-          metaStore={metaStore}
-          onCompactContext={onCompactContext}
-          onCancelEdit={isInline ? onCancelEdit : undefined}
-          dictationPhase={dictation.phase}
-          dictationEngineHint={dictation.engineHint}
-          onDictationToggle={dictation.toggle}
-          dictationWaveform={dictation.waveform}
-          dictationElapsedMs={dictation.elapsedMs}
-          dictationWaveformStyle={dictation.waveformStyle}
-          onDictationCancel={dictation.cancel}
-        />
-      </div>
+          <IconButton
+            type="submit"
+            icon="play"
+            label="Rerun"
+            title={canSend ? 'Rerun with the edited instruction' : (sendDisabledReason ?? undefined)}
+            size="md"
+            tone="muted"
+            disabled={!canSend || dictationActive}
+            onMouseDown={(e) => e.preventDefault()}
+          />
+          {onCancelEdit ? (
+            <IconButton
+              icon="close"
+              label="Cancel edit"
+              title="Cancel edit (Esc)"
+              size="md"
+              tone="muted"
+              onClick={onCancelEdit}
+            />
+          ) : null}
+        </div>
+      </form>
 
       {!dictationActive ? (
         <>
           <SlashCommandMenu
             open={slash.open}
             commands={slash.filtered}
+            mcpServers={slash.mcpServers}
             activeIndex={slash.activeIndex}
             onActiveIndexChange={slash.setActiveIndex}
             onPick={onSlashAccept}
             onDismiss={slash.dismiss}
             anchorRef={mentionAnchorRef}
-                listId={slashListId}
-                loading={slash.loading}
-                listError={slash.listError}
-              />
-
-              <MentionMenu
-                open={mentions.open}
-                view={mentions.view}
-                items={mentions.items}
-                query={mentions.token?.query ?? ''}
-                activeIndex={mentions.activeIndex}
-                onActiveIndexChange={mentions.setActiveIndex}
-                onPick={onMentionAccept}
-                onDismiss={mentions.dismiss}
-                onBack={mentions.goBack}
-                anchorRef={mentionAnchorRef}
-                listId={mentionListId}
-                loading={mentions.loading}
-              />
-            </>
-          ) : null}
-    </>
-  )
-
-  return (
-    <div
-      ref={isDock ? dockRef : undefined}
-      className={cn(
-        isDock ? COMPOSER_FLOAT_DOCK : 'shrink-0 w-full pb-0 pt-0',
-        // Same gutters as the transcript so the floating column's edges line up
-        // exactly with the transcript column (edge to edge with the content).
-        isDock ? CHAT_GUTTER : '',
-        className
-      )}
-      data-composer-dock={isDock ? true : undefined}
-      data-composer-hero={variant === 'hero' ? true : undefined}
-      data-composer-inline={isInline ? true : undefined}
-    >
-      {/* Scroll-clipped body — reserves the transcript's scrollbar gutter so the
-          centered column lines up exactly with the transcript column. */}
-      <div className={cn(isDock && COMPOSER_FLOAT_BODY)}>
-        <div
-          className={cn(isDock && CHAT_COLUMN, isDock && COMPOSER_DOCK_COVER, 'flex flex-col gap-2')}
-          data-composer-column={isDock ? true : undefined}
-        >
-        {(isDock || isInline) && (bannerError || secondaryBannerError) ? (
-          <div className="pointer-events-auto flex shrink-0 flex-col gap-2">
-            {secondaryBannerError ? (
-              <Alert className="shrink-0">{secondaryBannerError}</Alert>
-            ) : null}
-            {bannerError ? (
-              <Alert className="shrink-0" onDismiss={onDismissError}>
-                <div className="flex items-start justify-between gap-2">
-                  <span className="min-w-0 [overflow-wrap:anywhere]">{bannerError}</span>
-                  {showRetry ? (
-                    <button
-                      type="button"
-                      className="shrink-0 rounded-xl border border-border px-2 py-0.5 text-caption font-medium text-fg transition-colors hover:bg-surface focus-visible:vy-focus-ring"
-                      onClick={onRetryNetwork}
-                    >
-                      Retry
-                    </button>
-                  ) : null}
-                </div>
-              </Alert>
-            ) : null}
-          </div>
-        ) : null}
-
-        {isDock ? (
-          <div className="relative flex min-w-0 flex-col">
-            <div
-              className={composerShellChrome}
-              data-composer-shell
-              onDragOver={onAttachmentDragOver}
-              onDrop={onAttachmentDrop}
-            >
-              <form onSubmit={submit} className={COMPOSER_FORM_LAYOUT}>
-                {composerFields}
-              </form>
-            </div>
-            {trailing}
-          </div>
-        ) : (
-          <form
-            onSubmit={submit}
-            className={cn(COMPOSER_FORM_LAYOUT, composerShellChrome)}
-            data-composer-shell
-            onDragOver={onAttachmentDragOver}
-            onDrop={onAttachmentDrop}
-          >
-            {composerFields}
-          </form>
-        )}
-        </div>
-      </div>
+            listId={slashListId}
+            loading={slash.loading}
+            listError={slash.listError}
+          />
+          <MentionMenu
+            open={mentions.open}
+            view={mentions.view}
+            items={mentions.items}
+            query={mentions.token?.query ?? ''}
+            activeIndex={mentions.activeIndex}
+            onActiveIndexChange={mentions.setActiveIndex}
+            onPick={onMentionAccept}
+            onDismiss={mentions.dismiss}
+            onBack={mentions.goBack}
+            anchorRef={mentionAnchorRef}
+            listId={mentionListId}
+            loading={mentions.loading}
+          />
+        </>
+      ) : null}
     </div>
   )
 }

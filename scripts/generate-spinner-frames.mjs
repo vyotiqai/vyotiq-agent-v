@@ -1,8 +1,7 @@
 // Renders the tray spinner frames into resources/tray/.
 //
 // The tray cannot run CSS, so the animation styles.css draws live has to be
-// baked into PNGs here. Only the app-wide default variant is baked: the tray
-// shows one animation, and the other variants exist for in-app callers.
+// baked into PNGs here. The app draws one variant, and the tray bakes that one.
 //
 // Every frame is sampled off that variant's own keyframes, read straight from
 // the values the stylesheet declares. Change a duration or a stop there and the
@@ -75,7 +74,6 @@ function cubicBezier(x1, y1, x2, y2) {
   }
 }
 
-const snap = cubicBezier(0.2, 0.8, 0.2, 1)
 const easeInOut = cubicBezier(0.42, 0, 0.58, 1)
 
 const lerp = (from, to, at) => from + (to - from) * at
@@ -99,19 +97,11 @@ function relayOpacity(phase) {
  * `frame` returns the drawing state at a point in the cycle; `rest` is the
  * unanimated mark, which is what idle.png shows.
  *
- * Only the two that have been the default live here. orbit, pulse, bloom, iris
- * and vee are pure transform/opacity as well and would slot in the same way;
- * gleam would not, since its band needs a clip the flat renderer has no notion of.
+ * Only relay lives here: it is the one variant styles.css still draws. A new
+ * variant that is pure transform/opacity slots in the same way; one that needs
+ * a clip would not, since the flat renderer has no notion of one.
  */
 const BAKEABLE = {
-  // One 120-degree snap per beat, then a hold. The mark has exact 3-fold
-  // rotational symmetry, so 120 degrees lands back on itself: the loop closes
-  // with no seam and the tail frames come out byte-identical to frame 00.
-  ratchet: {
-    durationMs: 820,
-    rest: { rotate: 0 },
-    frame: (p) => ({ rotate: 120 * snap(Math.min(p / 0.55, 1)) })
-  },
   // Each facet takes the light in turn, clockwise from top-right. The delays in
   // the stylesheet are a third of a cycle apart (400ms and 800ms of 1200ms).
   relay: {

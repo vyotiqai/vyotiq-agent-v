@@ -76,7 +76,7 @@ export function ThisWeekSection({
         </div>
         <div role="img" aria-label={`Tasks per day: ${bars.map((bar) => `${bar.title}`).join(', ')}`}>
           <Sparkbars values={perDay} className="mt-4" />
-          <div className="mt-1 flex justify-between font-mono text-2xs text-tertiary" aria-hidden="true">
+          <div className="mt-1 flex justify-between font-mono text-caption text-tertiary" aria-hidden="true">
             {bars.map((bar) => (
               <span key={bar.date} className="w-full text-center">
                 {weekdayShort(bar.date)}

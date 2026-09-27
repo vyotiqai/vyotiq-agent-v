@@ -8,6 +8,9 @@ const SCOPE_LINE_PREFIX =
   /^(?:AUDIT(?:\s*\/\s*RESPAWN)?\s+SCOPE|PATH\s+SCOPE|SCOPE)\s*:\s*/i
 const PATH_SCOPE_FOOTER = /^Path scope \(writes must stay within/i
 const MAX_INSTANCE_TITLE = 48
+/** The goal stored when an instruction had no words of its own (runGoalFromUserText). */
+const PLACEHOLDER_GOAL = 'chat'
+const UNTITLED_TASK = 'Untitled task'
 
 function clipTitle(text: string, max = MAX_INSTANCE_TITLE): string {
   const t = text.replace(/\s+/g, ' ').trim()
@@ -98,45 +101,13 @@ export function instanceDisplayTitle(
   return formatAgentInstanceShortId(runId)
 }
 
-/**
- * Ensure sibling instance rows stay distinguishable when goals collapse to the same label.
- */
-export function uniqueInstanceTitles(runs: RunSummary[]): Map<string, string> {
-  const base = new Map<string, string>()
-  for (const run of runs) {
-    base.set(run.runId, instanceDisplayTitle(run.goal, run.runId, run.pathScope))
-  }
-
-  const counts = new Map<string, number>()
-  for (const title of base.values()) {
-    counts.set(title, (counts.get(title) ?? 0) + 1)
-  }
-
-  const out = new Map<string, string>()
-  const used = new Map<string, number>()
-  for (const run of runs) {
-    let title = base.get(run.runId) ?? formatAgentInstanceShortId(run.runId)
-    if ((counts.get(title) ?? 0) > 1) {
-      const scope = pathScopeLabel(run.pathScope)
-      const shortId = formatAgentInstanceShortId(run.runId)
-      title = scope && scope !== title ? scope : shortId
-    }
-    const n = (used.get(title) ?? 0) + 1
-    used.set(title, n)
-    if (n > 1) {
-      title = `${title} · ${formatAgentInstanceShortId(run.runId)}`
-    }
-    out.set(run.runId, title)
-  }
-  return out
-}
-
 export function runTitle(run: RunSummary): string {
   const goal = run.goal?.trim()
   if (run.inlineInstance) {
     return instanceDisplayTitle(goal, run.runId, run.pathScope)
   }
   if (!goal) return run.runId.slice(0, 8)
+  if (goal.toLowerCase() === PLACEHOLDER_GOAL) return UNTITLED_TASK
   // Full plain title — row CSS `truncate` + tooltip handle overflow (no dual cut).
   return taskTitleFromGoal(goal)
 }
@@ -151,16 +122,6 @@ export function runTooltip(run: RunSummary): string {
     return scope ? `Instance · ${plain} · ${scope}` : `Instance · ${plain}`
   }
   if (!goal) return run.runId
+  if (goal.toLowerCase() === PLACEHOLDER_GOAL) return UNTITLED_TASK
   return taskTitleFromGoal(goal)
-}
-
-/** Lowercase plain text for sidebar search — matches displayed title, not raw goal. */
-export function runSearchText(run: RunSummary): string {
-  const goal = run.goal?.trim()
-  if (!goal) return run.runId.toLowerCase()
-  const plain = (stripGoalMarkdown(goal) || goal).toLowerCase()
-  if (run.inlineInstance) {
-    return `${instanceDisplayTitle(goal, run.runId, run.pathScope).toLowerCase()} ${plain} ${run.runId.toLowerCase()}`
-  }
-  return taskTitleFromGoal(goal).toLowerCase()
 }

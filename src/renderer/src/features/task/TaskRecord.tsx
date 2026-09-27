@@ -7,7 +7,7 @@ import { formatUsdCost } from '@shared/utils/costDisplay'
 import { formatAgentInstanceShortId } from '@shared/utils/agentInstance'
 import { Icon } from '@renderer/lib/icons'
 import { Button, MarkdownContent, StatusGlyph, cn } from '@renderer/lib/ui'
-import { QUESTION_GATE_HEADER, QUESTION_GATE_SURFACE } from '@renderer/lib/utils/layout'
+import { QUESTION_GATE_HEADER, QUESTION_GATE_SURFACE, ROW_HOVER } from '@renderer/lib/utils/layout'
 import { turnCost } from '@renderer/features/chat/utils/messageFooterStats'
 import { AskQuestionPanel } from '@renderer/features/chat/components/AskQuestionPanel'
 import type { InlineInstanceGate } from '@renderer/features/chat/hooks/useInlineInstanceUi'
@@ -164,9 +164,7 @@ function ResultRow({
 }) {
   return (
     <RecordRow label="Result">
-      <div className="text-md leading-[22px] text-fg-strong">
-        <MarkdownContent content={text} streaming={streaming} />
-      </div>
+      <MarkdownContent content={text} streaming={streaming} size="md" tone="strong" />
       <CheckedBlock checks={checks} />
     </RecordRow>
   )
@@ -294,7 +292,10 @@ function HistoryRun({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="group flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-left vy-transition hover:bg-surface focus-visible:vy-focus-ring"
+        className={cn(
+          'group flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-left vy-transition focus-visible:vy-focus-ring',
+          ROW_HOVER
+        )}
       >
         <StatusGlyph state={state} size={14} label />
         <span className="shrink-0 font-mono text-caption text-tertiary">Run {run.n}</span>

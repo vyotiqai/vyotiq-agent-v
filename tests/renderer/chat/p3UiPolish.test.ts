@@ -15,13 +15,9 @@ import { resolveEffectiveSettings } from '@shared/effectiveSettings'
 const root = join(__dirname, '../../../src/renderer/src')
 
 describe('P3 surfaceKey + composer shared hooks', () => {
-  it('aligns SessionChatColumn surfaceKey with ChatView (no activeRunId)', () => {
-    const chatView = readFileSync(join(root, 'features/chat/ChatView.tsx'), 'utf8')
+  it('keys the SessionChatColumn surface by workspace and epoch (no activeRunId)', () => {
     const column = readFileSync(join(root, 'features/chat/SessionChatColumn.tsx'), 'utf8')
 
-    expect(chatView).toMatch(
-      /surfaceKey = `\$\{workspacePath \?\? 'none'\}:\$\{chatSurfaceEpoch\}`/
-    )
     expect(column).toMatch(
       /surfaceKey = `\$\{workspacePath \?\? 'none'\}:\$\{chatSurfaceEpoch\}`/
     )

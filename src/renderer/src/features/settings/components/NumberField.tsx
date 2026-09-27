@@ -66,7 +66,7 @@ export function NumberField({
             type="number"
             size="sm"
             mono
-            className="text-right tabular-nums"
+            className="text-right tnum"
             aria-label={name}
             min={min}
             max={max}

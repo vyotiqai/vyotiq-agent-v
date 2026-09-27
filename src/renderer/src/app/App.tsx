@@ -29,7 +29,6 @@ import { useLiveAnnouncer } from '@renderer/lib/a11y'
 import type {
   ProviderId,
   SecretProvider,
-  ServiceTier,
   AttachedFile,
   ToolApprovalMode,
   AgentInteractionMode,
@@ -53,8 +52,10 @@ import { buildRunDeepLink } from '@shared/deepLink'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { normalizeRelPath } from '../features/chat/utils/turnFileDiffs'
 import { ToolApprovalOnboardingModal } from '../features/chat/components/ToolApprovalOnboardingModal'
-import { useOfflineSendQueue } from '@renderer/lib/hooks/useOfflineSendQueue'
+import { useOfflineQueue, useOfflineSendQueue } from '@renderer/lib/hooks/useOfflineSendQueue'
 import {
+  editOfflineMessage,
+  removeOfflineMessage,
   removeOfflineQueueEntriesForRun,
   resolveOfflineFlushTarget
 } from '@renderer/lib/hooks/offlineQueueStore'
@@ -105,16 +106,32 @@ const UsagePage = lazy(() =>
   import('../features/usage/UsagePage').then((m) => ({ default: m.UsagePage }))
 )
 
-function ViewSuspenseFallback() {
+/**
+ * A pane-shaped stand-in while something loads: the 40px header row every
+ * pane starts with, and a few rows on the body's left edge.
+ */
+function PaneSkeleton({ label }: { label?: string }) {
   return (
-    <div className="min-h-0 min-w-0 flex-1 overflow-hidden p-6" aria-busy="true">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 animate-pulse">
-        <div className="h-4 w-2/5 rounded bg-surface" />
-        <div className="h-4 w-3/5 rounded bg-surface" />
-        <div className="h-4 w-1/3 rounded bg-surface" />
+    <div
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden animate-fade-in"
+      role={label ? 'status' : undefined}
+      aria-busy="true"
+    >
+      {label ? <span className="sr-only">{label}</span> : null}
+      <div className="flex h-10 shrink-0 items-center border-b border-border pl-4 pr-2">
+        <div className="h-3 w-32 animate-pulse rounded bg-surface" />
+      </div>
+      <div className="flex flex-col gap-3 px-4 py-4">
+        <div className="h-4 w-2/5 animate-pulse rounded bg-surface" />
+        <div className="h-4 w-3/5 animate-pulse rounded bg-surface" />
+        <div className="h-4 w-1/3 animate-pulse rounded bg-surface" />
       </div>
     </div>
   )
+}
+
+function ViewSuspenseFallback() {
+  return <PaneSkeleton />
 }
 
 /** Sent as a visible user turn when resuming a run that was cut short. */
@@ -229,21 +246,11 @@ function App() {
     activeRunsLoaded,
     chat,
     chatActions,
-    onLoadToolContent,
-    onThinkingToggle,
-    onToolToggle,
-    onGroupToggle,
-    onTurnToggle,
-    onDismissRunError,
-    onApprovalDecision,
-    onQuestionSubmit,
-    collapsedTurns,
     openRunTab,
     openRunInWorkspace,
     newChatInWorkspace,
     closeRunTab,
     purgeDeletedRunUi,
-    setSessionQuery,
     addWorkspace,
     switchWorkspace,
     removeWorkspace,
@@ -252,19 +259,15 @@ function App() {
     refreshActiveRuns,
     refreshWorkspaceRuns,
     loadOlderRuns: loadOlderWorkspaceRuns,
-    workspaceHasBackgroundRun,
     scrollRestoreToken,
-    setComposerDraft,
     setComposerDraftForPane,
     setAgentMode,
-    onMessageListScroll,
     onMessageListScrollForPane,
     setPaneCapacityContext,
     setSettingsOverride,
     workspaceError,
     clearWorkspaceError,
     clearRunsError,
-    activeScrollTop,
     chatSurfaceEpoch,
     paneLayout,
     focusPaneById,
@@ -272,7 +275,6 @@ function App() {
     setPaneSizesByIndex,
     dropSessionOnPane,
     isSessionOpenInPane,
-    isSessionFocusedInPane,
     getPaneChatSnapshot,
     focusedWorkspacePath,
     getFocusedPane,
@@ -504,21 +506,6 @@ function App() {
     void update({ ...patch, thinkingPrefsByProvider })
   }, [contexts, setSettingsError, setSettingsOverride, settings.thinkingPrefsByProvider, update])
 
-  const onProviderModel = (provider: ProviderId, model: string): void => {
-    onProviderModelForWorkspace(focusedWorkspacePath ?? activeWorkspace, provider, model)
-  }
-
-  /** Pin a model change to the session that made it, then update the shared default. */
-  const onSessionProviderModel = (
-    runId: string | null,
-    workspacePath: string | null | undefined,
-    provider: ProviderId,
-    model: string
-  ): void => {
-    if (!workspacePath) return
-    getRunController(runId, workspacePath)?.setProviderModel(provider, model)
-  }
-
   const onToggleFavorite = useCallback((provider: ProviderId, model: string): void => {
     const key = modelSelectionKey(provider, model)
     const set = new Set(settings.favoriteModels)
@@ -536,22 +523,6 @@ function App() {
     },
     [settings.pinnedRuns, update]
   )
-
-  const onServiceTierChange = (tier: ServiceTier): void => {
-    const key = modelSelectionKey(effectiveChatSettings.provider, effectiveChatSettings.model)
-    void update({
-      serviceTier: tier,
-      serviceTierByModel: { ...settings.serviceTierByModel, [key]: tier }
-    })
-  }
-
-  const onChatSettingsChange = (patch: ChatSettingsPatch): void => {
-    onChatSettingsChangeForWorkspace(
-      focusedWorkspacePath ?? activeWorkspace,
-      patch,
-      effectiveChatSettings
-    )
-  }
 
   const effectiveChatSettings = resolveEffectiveSettings(
     settings,
@@ -582,18 +553,6 @@ function App() {
     ]
   )
 
-  // Session-pinned model: what this session actually uses and displays; falls back to
-  // the shared effective settings until the session's first send (or a composer change
-  // made in this session) pins it — a model change in a different session cannot bleed in.
-  const focusedSessionModel = chat.providerModel
-  const focusedChatSettings = focusedSessionModel
-    ? {
-        ...effectiveChatSettings,
-        provider: focusedSessionModel.provider,
-        model: focusedSessionModel.model
-      }
-    : effectiveChatSettings
-
   // Clear nested instance view when it no longer belongs to the focused parent session.
   useEffect(() => {
     if (focusedOpenInstance == null || focusedParentRunId == null) return
@@ -610,12 +569,6 @@ function App() {
     activeContext?.instanceRuns,
     setOpenInstanceForParent
   ])
-
-  const modelsRefreshKey = modelsRefreshKeyFor(
-    effectiveChatSettings,
-    secrets,
-    modelsRefreshNonce
-  )
 
   const onSelectRunInWorkspace = useCallback(async (path: string, runId: string): Promise<void> => {
     if (!chatActions) {
@@ -701,7 +654,7 @@ function App() {
           return lists.some((runs) => runs.some((run) => run.runId === target.runId))
         })
         if (!match) {
-          pushToast('That chat is not in any open workspace.', 'error')
+          pushToast('That task is not in any open workspace.', 'error')
           return
         }
         path = match[0]
@@ -756,12 +709,12 @@ function App() {
         workspacePathsEqual(path, payload.workspacePath)
       )
       if (!isOpen) {
-        pushToast('The workspace for that chat is not open.')
+        pushToast('The workspace for that task is not open.')
         return false
       }
       const ok = dropSessionOnPane(anchorPaneId, zone, payload)
       if (!ok) {
-        pushToast('Not enough room for another chat pane.')
+        pushToast('Not enough room for another task pane.')
         return false
       }
       void (async () => {
@@ -795,8 +748,8 @@ function App() {
       const run =
         ctx?.runs.find((r) => r.runId === pane.runId) ??
         ctx?.instanceRuns?.find((r) => r.runId === pane.runId)
-      if (!run) return 'Chat'
-      return runTitle(run) || 'Chat'
+      if (!run) return 'New task'
+      return runTitle(run) || 'New task'
     },
     [contexts]
   )
@@ -809,11 +762,11 @@ function App() {
     // claiming the row is full.
     if (!focused) return
     if (focused.runId == null) {
-      pushToast('Send a message in this pane first.')
+      pushToast('Give this task an instruction first.')
       return
     }
     if (!splitFocusedPane()) {
-      pushToast('Not enough room for another chat pane.')
+      pushToast('Not enough room for another task pane.')
       return
     }
     setView('chat')
@@ -916,9 +869,6 @@ function App() {
   } | null>(null)
 
   const offlineWorkspacePath = focusedWorkspacePath ?? activeWorkspace ?? ''
-  const agentSessionContext = focusedWorkspacePath
-    ? (findByWorkspacePath(contexts, focusedWorkspacePath) ?? activeContext)
-    : activeContext
 
   const flushOfflineEntry = useCallback(
     (entry: import('@renderer/lib/hooks/offlineQueueStore').OfflineQueuedSend) => {
@@ -942,6 +892,17 @@ function App() {
   )
 
   const { sendWithOfflineQueue } = useOfflineSendQueue(offlineWorkspacePath, flushOfflineEntry)
+  const offlineQueue = useOfflineQueue()
+
+  /**
+   * The new, still-empty pane a Home or worktree start just opened in `path`.
+   * An offline send with neither a pane nor a run can never be delivered, so it
+   * is bound to that pane and starts there once the connection is back.
+   */
+  const draftPaneIdIn = useCallback((path: string): string | undefined => {
+    const pane = getFocusedPaneRef.current()
+    return pane && pane.runId == null && workspacePathsEqual(pane.workspacePath, path) ? pane.paneId : undefined
+  }, [])
   const startInNewWorktreeRef = useRef<
     (
       parentPath: string,
@@ -1079,7 +1040,7 @@ function App() {
               files,
               extras,
               (t, i, f, e) => getRunControllerRef.current(null, path)?.send(t, i, f, e) ?? false,
-              { runId: null, workspacePath: path }
+              { runId: null, paneId: draftPaneIdIn(path), workspacePath: path }
             ),
           brief,
           undefined,
@@ -1089,7 +1050,7 @@ function App() {
         )
       )
     },
-    [gateSendWithOnboarding, homeProviderIssue, newChatInWorkspace, onNewSessionInWorkspace, sendWithOfflineQueue]
+    [draftPaneIdIn, gateSendWithOnboarding, homeProviderIssue, newChatInWorkspace, onNewSessionInWorkspace, sendWithOfflineQueue]
   )
 
   /**
@@ -1124,7 +1085,7 @@ function App() {
           f,
           e,
           (t2, i2, f2, e2) => getRunControllerRef.current(null, path)?.send(t2, i2, f2, e2) ?? false,
-          { runId: null, workspacePath: path }
+          { runId: null, paneId: draftPaneIdIn(path), workspacePath: path }
         ),
       text,
       images,
@@ -1197,26 +1158,8 @@ function App() {
     return () => window.removeEventListener(DISCARD_TASK_WORKTREE_EVENT, onDiscard)
   }, [addWorkspace, removeWorkspace, switchWorkspace])
 
-  const onChatEditAndResend = useCallback(
-    async (
-      editMessageIndex: number,
-      text: string,
-      images?: string[],
-      files?: AttachedFile[],
-      extras?: import('@shared/ipc').ComposerSendExtras
-    ) => {
-      return (
-        chatActionsRef.current?.editAndResend?.(editMessageIndex, text, images, files, extras) ??
-        false
-      )
-    },
-    []
-  )
-
   const { confirm, dialog: confirmDialog } = useConfirm()
   const { askRewind, dialog: rewindDialog } = useRewindDialog()
-  const chatRunIdRef = useRef<string | null>(null)
-  chatRunIdRef.current = chat.runId
 
   useEffect(() => {
     const onReload = (event: Event): void => {
@@ -1272,70 +1215,12 @@ function App() {
     [askRewind, refreshWorkspaceRuns]
   )
 
-  const onChatRevertToUserMessage = useCallback(
-    (userMessageIndex: number, runN?: number) => {
-      const actions = chatActionsRef.current
-      return confirmRevertToUserMessage(
-        userMessageIndex,
-        runN,
-        {
-          workspacePath: focusedWorkspacePath ?? activeWorkspace,
-          runId: focusedRunId ?? chatRunIdRef.current,
-          preview: (i) => actions?.previewRewindToUserMessage?.(i) ?? Promise.resolve(null),
-          revert: (i) => actions?.revertToUserMessage?.(i) ?? Promise.resolve(false)
-        }
-      )
-    },
-    [activeWorkspace, confirmRevertToUserMessage, focusedRunId, focusedWorkspacePath]
-  )
-
   const onChatStop = useCallback(() => {
     void chatActionsRef.current?.stop()
   }, [])
 
-  const onRemoveFollowUp = useCallback((id: string) => {
-    void chatActionsRef.current?.removeFollowUp?.(id)
-  }, [])
-
-  const onEditFollowUp = useCallback((id: string, text: string) => {
-    return chatActionsRef.current?.editFollowUp?.(id, text) ?? false
-  }, [])
-
-  const onSendFollowUpNow = useCallback((id: string) => {
-    void chatActionsRef.current?.sendFollowUpNow?.(id)
-  }, [])
-
-  const onChatContinue = useCallback(() => {
-    void chatActionsRef.current?.send(CONTINUE_PROMPT)
-  }, [])
-
   const activeRunId = chat.runId
   const [undoBusy, setUndoBusy] = useState(false)
-  const onCompactContext = useCallback(
-    async (focus?: string) => {
-      const workspacePath = focusedWorkspacePath ?? activeWorkspace
-      const runId = activeRunId
-      if (!workspacePath || !runId) {
-        return { ok: false as const, message: 'Compaction is unavailable.' }
-      }
-      chatActionsRef.current?.setCompacting?.(true)
-      try {
-        const res = await window.vyotiq.chatCompact(workspacePath, runId, focus)
-        if (!res.ok) {
-          return { ok: false as const, message: res.error }
-        }
-        chatActionsRef.current?.applyManualCompaction?.(res.data)
-        return {
-          ok: true as const,
-          message: `Summarised ${res.data.messagesBefore - res.data.keptMessages} messages; ${res.data.keptMessages} kept verbatim.`
-        }
-      } finally {
-        chatActionsRef.current?.setCompacting?.(false)
-      }
-    },
-    [activeWorkspace, activeRunId, focusedWorkspacePath]
-  )
-
   const resolveAgentWrites = useCallback(
     async (
       action: 'keep' | 'discard',
@@ -1477,7 +1362,7 @@ function App() {
     }): SlashClientHandlers => {
       const requireRun = (): { workspacePath: string; runId: string } | null => {
         if (!scope.workspacePath || !scope.runId) {
-          pushToast('Open a chat first.')
+          pushToast('Open a task first.')
           return null
         }
         return { workspacePath: scope.workspacePath, runId: scope.runId }
@@ -1579,8 +1464,17 @@ function App() {
           setSettingsError('Harness already matches the proposal — nothing to apply.')
           return true
         }
-        const confirmed = window.confirm(
-          `Apply harness proposal?\n\n${preview.data.relativePath}\n→ resources/harness/default.md only\n\nRuns fixed harness vitest subset; reverts that file on failure.\nEvaluator / gate-test changes need a normal PR.`
+        const confirmed = await confirm(
+          'Only resources/harness/default.md changes. The fixed harness test subset runs, and the file is reverted if it fails. Evaluator or gate-test changes need a normal PR.',
+          {
+            title: 'Apply harness proposal',
+            confirmLabel: 'Apply',
+            details: (
+              <p className="m-0 font-mono text-caption text-secondary [overflow-wrap:anywhere]">
+                {preview.data.relativePath}
+              </p>
+            )
+          }
         )
         if (!confirmed) return false
         const res = await window.vyotiq.harnessApply({
@@ -1655,7 +1549,7 @@ function App() {
       },
       onGoalUsage: () => {
         pushToast(
-          'Usage: /goal <objective> — /goal pause, /goal resume, /goal complete. Prefer a new chat.'
+          'Usage: /goal <objective> — /goal pause, /goal resume, /goal complete. Prefer a new task.'
         )
         return true
       },
@@ -1779,43 +1673,7 @@ function App() {
       }
     }
     },
-    [refresh, setSettingsError, settings.marketplace]
-  )
-
-  const slashHandlersValue = useMemo(
-    () =>
-      createSlashHandlers({
-        workspacePath: focusedWorkspacePath ?? activeWorkspace,
-        runId: focusedRunId ?? chat.runId ?? null,
-        running: chat.running,
-        pendingRun: chat.pendingRun,
-        onClear: () => {
-          onNewChat()
-        },
-        onCompact: onCompactContext,
-        onUndoWrites,
-        onSetAgentMode: (mode) => {
-          setAgentMode(mode, {
-            workspacePath: focusedWorkspacePath ?? undefined,
-            runId: focusedRunId
-          })
-        },
-        onStop: onChatStop
-      }),
-    [
-      activeWorkspace,
-      chat.pendingRun,
-      chat.runId,
-      chat.running,
-      createSlashHandlers,
-      focusedRunId,
-      focusedWorkspacePath,
-      onCompactContext,
-      onNewChat,
-      onUndoWrites,
-      onChatStop,
-      setAgentMode
-    ]
+    [confirm, refresh, setSettingsError, settings.marketplace]
   )
 
   const operationalError = settingsError ?? workspaceError
@@ -1962,6 +1820,20 @@ function App() {
             ? paneContext.ui.scrollTop
             : undefined
       const paneCtrl = getRunController(pane.runId, pane.workspacePath)
+      // Sends queued for this pane while offline: shown in the line's queue until they start.
+      const offlineFollowUps: import('@renderer/lib/hooks/createChatStreamController').PendingFollowUpState[] =
+        offlineQueue.list(pane.workspacePath)
+          .filter((entry) =>
+            entry.paneId ? entry.paneId === pane.paneId : Boolean(pane.runId) && entry.runId === pane.runId
+          )
+          .map((entry) => ({
+            id: entry.id,
+            itemId: entry.id,
+            preview: entry.text.replace(/s+/g, ' ').trim(),
+            text: entry.text,
+            offline: true
+          }))
+      const offlineIds = new Set(offlineFollowUps.map((entry) => entry.id))
       const paneRun = pane.runId ? (paneContext?.runs.find((r) => r.runId === pane.runId) ?? null) : null
       const paneDraft = paneContext
         ? resolveComposerDraft(paneContext.ui, pane.runId)
@@ -2148,17 +2020,24 @@ function App() {
             )
           }
           messages={snap.messages}
-          pendingFollowUps={snap.pendingFollowUps}
+          pendingFollowUps={
+            offlineFollowUps.length > 0 ? [...snap.pendingFollowUps, ...offlineFollowUps] : snap.pendingFollowUps
+          }
           agentInstances={snap.agentInstances}
           openInstanceRunId={pane.runId ? (openInstanceByParent[pane.runId] ?? null) : null}
           onOpenInstanceRunIdChange={(id) => setOpenInstanceForParent(pane.runId, id)}
           getInstanceController={getRunController}
           onRemoveFollowUp={(id) => {
-            void paneCtrl?.removeFollowUp(id)
+            if (offlineIds.has(id)) removeOfflineMessage(pane.workspacePath, id)
+            else void paneCtrl?.removeFollowUp(id)
           }}
-          onEditFollowUp={(id, text) => paneCtrl?.editFollowUp(id, text) ?? false}
+          onEditFollowUp={(id, text) =>
+            offlineIds.has(id)
+              ? editOfflineMessage(pane.workspacePath, id, text)
+              : (paneCtrl?.editFollowUp(id, text) ?? false)
+          }
           onSendFollowUpNow={(id) => {
-            void paneCtrl?.sendFollowUpNow(id)
+            if (!offlineIds.has(id)) void paneCtrl?.sendFollowUpNow(id)
           }}
           onDismissError={onDismissChatBanner}
           composerDraft={paneDraft}
@@ -2229,6 +2108,7 @@ function App() {
       chatSurfaceEpoch,
       confirm,
       contexts,
+      offlineQueue,
       confirmRevertToUserMessage,
       onCopyRunLinkInWorkspace,
       createSlashHandlers,
@@ -2612,8 +2492,6 @@ function App() {
     [openTaskDraft, deleteTaskDraft]
   )
 
-  const chatError = chat.error
-
   const runsByWorkspacePath = useMemo(
     () =>
       Object.fromEntries(
@@ -2711,19 +2589,7 @@ function App() {
         {...shellWorkspaceProps}
         loading
       >
-        <div
-          className="flex min-h-0 flex-1 flex-col gap-3 px-5 pt-6"
-          role="status"
-          aria-busy="true"
-        >
-          <span className="sr-only">Loading Agent V…</span>
-          <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 animate-fade-in">
-            <div className="h-4 w-2/5 animate-pulse rounded bg-surface" />
-            <div className="h-4 w-3/5 animate-pulse rounded bg-surface" />
-            <div className="h-4 w-1/3 animate-pulse rounded bg-surface" />
-            <div className="mt-4 h-24 animate-pulse rounded-lg border border-border bg-surface/60" />
-          </div>
-        </div>
+        <PaneSkeleton label="Loading Agent V…" />
       </AppShell>
     )
   }
@@ -2906,100 +2772,19 @@ function App() {
           </Suspense>
         </ErrorBoundary>
       ) : (
-        <ErrorBoundary title="Chat couldn't render" resetKey={chatSurfaceEpoch}>
+        <ErrorBoundary title="Task couldn't render" resetKey={chatSurfaceEpoch}>
           <ChatView
             items={chat.items}
             itemsStore={chat.itemsStore}
-            metaStore={chat.metaStore}
             running={chat.running}
             invokeId={chat.invokeId}
             pendingRun={chat.pendingRun}
-            error={chatError}
-            errorCode={chat.errorCode}
-            networkWait={chat.networkWait}
-            compacting={chat.compacting}
-            incomplete={chat.incomplete}
-            turnStatus={chat.turnStatus}
-            onContinue={onChatContinue}
-            contextUsage={chat.contextUsage}
-            turnUsage={chat.turnUsage}
-            onCompactContext={
-              (focusedWorkspacePath ?? activeWorkspace) && activeRunId
-                ? onCompactContext
-                : undefined
-            }
-            operationalError={operationalError}
-            hasWorkspace={Boolean(focusedWorkspacePath ?? activeWorkspace)}
             workspacePath={focusedWorkspacePath ?? activeWorkspace}
-            provider={focusedChatSettings.provider}
-            model={focusedChatSettings.model}
-            ollamaBaseUrl={effectiveChatSettings.ollamaBaseUrl}
-            customOpenAiBaseUrl={effectiveChatSettings.customOpenAiBaseUrl}
-            modelsRefreshKey={modelsRefreshKey}
-            secrets={secrets}
             activeRunId={chat.runId ?? activeContext?.activeRunId ?? null}
-            transcriptLoading={chat.transcriptLoading}
-            transcriptHasEarlier={chat.transcriptHasEarlier}
-            transcriptLoadingEarlier={chat.transcriptLoadingEarlier}
-            onLoadEarlierMessages={() => {
-              void chatActionsRef.current?.loadEarlierMessages()
-            }}
             headingRef={chatHeadingRef}
             taskTitle={chatTaskTitle}
-            onProviderModel={(provider, model) => {
-              onSessionProviderModel(
-                focusedParentRunId,
-                focusedWorkspacePath ?? activeWorkspace,
-                provider,
-                model
-              )
-              onProviderModel(provider, model)
-            }}
-            favoriteModels={settings.favoriteModels}
-            recentModels={settings.recentModels}
-            serviceTier={resolveServiceTier(
-              settings,
-              focusedChatSettings.provider,
-              focusedChatSettings.model
-            )}
-            onToggleFavorite={onToggleFavorite}
-            onServiceTierChange={onServiceTierChange}
-            chatSettings={focusedChatSettings}
-            onChatSettingsChange={onChatSettingsChange}
-            agentMode={agentSessionContext?.ui.agentMode ?? 'agent'}
-            onAgentModeChange={(mode) =>
-              setAgentMode(mode, {
-                workspacePath: focusedWorkspacePath ?? undefined,
-                runId: focusedRunId
-              })
-            }
             onSend={onChatSend}
-            onEditAndResend={onChatEditAndResend}
-            onRevertToUserMessage={onChatRevertToUserMessage}
-            messages={chat.messages}
             onStop={onChatStop}
-            pendingFollowUps={chat.pendingFollowUps}
-            onRemoveFollowUp={onRemoveFollowUp}
-            onEditFollowUp={onEditFollowUp}
-            onSendFollowUpNow={onSendFollowUpNow}
-            onDismissError={onDismissChatBanner}
-            onComposerDraftChange={setComposerDraft}
-            restoreScrollTop={activeScrollTop}
-            scrollRestoreToken={scrollRestoreToken}
-            onScrollTopChange={onMessageListScroll}
-            chatSurfaceEpoch={chatSurfaceEpoch}
-            showThinking={effectiveChatSettings.showThinking}
-            onLoadToolContent={onLoadToolContent}
-            onThinkingToggle={onThinkingToggle}
-            onToolToggle={onToolToggle}
-            onGroupToggle={onGroupToggle}
-            onTurnToggle={onTurnToggle}
-            onDismissRunError={onDismissRunError}
-            collapsedTurns={collapsedTurns}
-            onApprovalDecision={onApprovalDecision}
-            onQuestionSubmit={onQuestionSubmit}
-            mcpServerNames={mcpServerNames}
-            slashHandlers={slashHandlersValue}
             canUndoWrites={Boolean(chat.writeCheckpoint && !chat.writeCheckpoint.undone)}
             undoBusy={undoBusy}
             resolveBlockedReason={
@@ -3014,14 +2799,9 @@ function App() {
             onDiscardWriteFile={onDiscardWriteFile}
             onKeepAllWrites={onKeepAllWrites}
             multiPane={multiPaneConfig}
+            loadError={registry ? null : workspaceError}
             onPaneCapacityChange={setPaneCapacityContext}
             paneCount={paneLayout?.panes.length ?? 1}
-            agentInstances={chat.agentInstances}
-            openInstanceRunId={focusedOpenInstance}
-            onOpenInstanceRunIdChange={(id) =>
-              setOpenInstanceForParent(focusedParentRunId, id)
-            }
-            getInstanceController={getRunController}
             openChangesRequest={openChangesRequest}
             openChangesScope={openChangesScope}
             onOpenChangesRequestHandled={consumeOpenChangesRequest}

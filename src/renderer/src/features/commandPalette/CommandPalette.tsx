@@ -182,7 +182,7 @@ export function CommandPalette({
 
   const overlay = (
     <div
-      className="fixed inset-0 z-dropdown flex items-start justify-center bg-overlay pt-[88px] animate-fade-in"
+      className="fixed inset-0 z-drawer flex items-start justify-center bg-overlay pt-[88px] animate-fade-in"
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose()

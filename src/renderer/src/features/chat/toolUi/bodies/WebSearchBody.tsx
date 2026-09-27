@@ -11,7 +11,7 @@ export function WebSearchBody({ tool, loading, loadFailed, inGroup }: ToolBodyPr
     <div>
       <div className={`${TOOL_BODY_PAD} flex flex-wrap items-center gap-2 pb-1`}>
         {!inGroup ? <Chip>{data.query || 'web search'}</Chip> : null}
-        <span className="text-2xs tabular-nums text-tertiary">
+        <span className="text-caption tnum text-tertiary">
           {data.hits.length} {data.hits.length === 1 ? 'result' : 'results'}
         </span>
       </div>
@@ -26,12 +26,12 @@ export function WebSearchBody({ tool, loading, loadFailed, inGroup }: ToolBodyPr
                 {hit.title}
               </div>
               {hit.url ? (
-                <div className="truncate font-mono text-2xs text-accent" title={hit.url}>
+                <div className="truncate font-mono text-caption text-accent" title={hit.url}>
                   {hit.url}
                 </div>
               ) : null}
               {hit.snippet ? (
-                <div className="mt-0.5 text-caption text-fg/75 [overflow-wrap:anywhere]">
+                <div className="mt-0.5 text-caption text-secondary [overflow-wrap:anywhere]">
                   {hit.snippet}
                 </div>
               ) : null}

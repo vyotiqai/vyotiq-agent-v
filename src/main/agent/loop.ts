@@ -37,6 +37,7 @@ import { recallRunModelSelection, rememberRunModelSelection } from './runModelSe
 import { stripToolShapedAssistantText } from '../../shared/transcript'
 import { createApprovalGate } from './toolApproval'
 import { persistAlwaysAllow } from './toolApprovalStore'
+import { persistTaskAllow, readTaskAllowlist } from './taskApprovalStore'
 import { createLiveEventQueue, pushLiveEvent, shiftLiveEvent } from './liveEventQueue'
 import { getSecret, hasStoredSecretBlob, secretStatus } from '@main/settings/secrets'
 import { getSettings } from '@main/settings/settings'
@@ -1506,6 +1507,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     const approvalSettings = settings.toolApproval ?? DEFAULT_SETTINGS.toolApproval
     const mcpProtection = approvalSettings.mcpProtection !== false
     // Skip the gate only when nothing would park: mode off and MCP protection off.
+    const taskRunDir = runDir
     const approvalGate =
       approvalSettings.mode === 'off' && !mcpProtection
         ? undefined
@@ -1518,7 +1520,9 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             autonomousMode: settings.autonomousMode === true,
             // Soft follow-up interrupt must cancel parked approvals, not only hard cancel.
             signal: streamSignalFor(runId, controller.signal),
-            persistAlways: (toolName) => persistAlwaysAllow(workspace, toolName)
+            persistAlways: (toolName) => persistAlwaysAllow(workspace, toolName),
+            taskAllowlist: taskRunDir ? readTaskAllowlist(taskRunDir) : [],
+            persistTask: taskRunDir ? (toolName) => void persistTaskAllow(taskRunDir, toolName) : undefined
           })
 
     /** Persist compaction; `saved` is false only when a write was required and failed. */

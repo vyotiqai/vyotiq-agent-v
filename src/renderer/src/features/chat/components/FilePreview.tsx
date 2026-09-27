@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { MarkdownContent, cn } from '@renderer/lib/ui'
+import { Button, MarkdownContent } from '@renderer/lib/ui'
 import {
   filePreviewKind,
   previewSourceUrl,
@@ -35,20 +35,15 @@ export function FilePreview({
   if (kind === 'html') {
     return (
       <div className="flex min-h-0 flex-1 flex-col" data-file-preview="html">
-        <div className="flex shrink-0 items-center gap-1 border-b border-border/60 bg-bg px-2 py-1 text-caption text-muted">
-          <button
-            type="button"
-            onClick={() => setAllowScripts((value) => !value)}
+        <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border/60 bg-bg px-2">
+          <Button
+            size="xs"
+            variant={allowScripts ? 'secondary' : 'ghost'}
             aria-pressed={allowScripts}
-            className={cn(
-              'rounded px-1.5 py-0.5 text-2xs transition-colors',
-              allowScripts
-                ? 'text-fg'
-                : 'text-muted hover:bg-surface hover:text-fg'
-            )}
+            onClick={() => setAllowScripts((value) => !value)}
           >
             {allowScripts ? 'Scripts on' : 'Enable scripts'}
-          </button>
+          </Button>
         </div>
         <iframe
           // Remount on toggle: Chromium does not reliably apply a dynamically
@@ -57,6 +52,7 @@ export function FilePreview({
           title={`Preview ${path}`}
           sandbox={allowScripts ? 'allow-scripts' : ''}
           srcDoc={content}
+          // A literal on purpose: an HTML page with no background of its own paints on white.
           className="min-h-0 w-full flex-1 border-0 bg-white"
         />
       </div>
@@ -67,7 +63,7 @@ export function FilePreview({
   if (!src) return null
   return (
     <div
-      className="grid min-h-0 flex-1 place-items-center overflow-auto bg-bg p-4"
+      className="grid min-h-0 flex-1 place-items-center overflow-auto bg-sunken p-4"
       data-file-preview={kind}
     >
       <img src={src} alt={path} className="max-h-full max-w-full object-contain" />

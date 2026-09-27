@@ -156,7 +156,7 @@ export function SetupPage({
           Three things, then hand it its first task. Everything here can change later in Settings.
         </p>
 
-        <ol className="mt-8 divide-y divide-border border-y border-border">
+        <ol className="mt-8 divide-y divide-border/60 border-y border-border">
           <SetupStep
             n={1}
             state={provider.ready ? 'done' : 'current'}

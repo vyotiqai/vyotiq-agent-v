@@ -83,6 +83,7 @@ import {
   PrReadyRequestSchema,
   PrEditTitleRequestSchema,
   ShellOpenExternalRequestSchema,
+  GithubAuthStartRequestSchema,
   PtyCreateRequestSchema,
   PtyListRequestSchema,
   PtyIdRequestSchema,
@@ -2455,7 +2456,7 @@ export function registerIpc(): void {
         // File-name sanitization: strip path/hostile chars, cap length.
         const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 60) || req.runId
         const options: Electron.SaveDialogOptions = {
-          title: 'Export chat as Markdown',
+          title: 'Export task as Markdown',
           defaultPath: `${safeTitle}.md`,
           filters: [{ name: 'Markdown', extensions: ['md'] }]
         }
@@ -2958,10 +2959,11 @@ export function registerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.githubAuthStart, async (event) => {
+  ipcMain.handle(IPC.githubAuthStart, async (event, raw: unknown) => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
-      return ok(await startGithubAuth())
+      const req = GithubAuthStartRequestSchema.parse(raw)
+      return ok(await startGithubAuth({ fresh: req?.fresh === true }))
     } catch (err) {
       return failFrom(err, IPC.githubAuthStart)
     }

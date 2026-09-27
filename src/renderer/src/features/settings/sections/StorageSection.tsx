@@ -81,7 +81,7 @@ function StorageUsage({
         label="Managed data against the cap"
         className="mt-2 w-full"
       />
-      <div className="mt-4 divide-y divide-border border-y border-border">
+      <div className="mt-4 divide-y divide-border/60 border-y border-border">
         {[...managed, ...kept].map((category) => (
           <div key={category.id} data-storage-category={category.id} className="flex h-9 items-center gap-3 text-sm">
             <span className={cn('min-w-0 truncate', category.bytes === 0 ? 'text-muted' : 'text-fg')}>
@@ -210,7 +210,7 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
     cleanupStage === 'confirming' && preview ? (
       preview.totalReclaimBytes > 0 || reclaimable.length > 0 ? (
         <div className="flex flex-col gap-2">
-          <ul className="m-0 list-none divide-y divide-border border-y border-border p-0">
+          <ul className="m-0 list-none divide-y divide-border/60 border-y border-border p-0">
             {reclaimable.map((c) => (
               <li key={c.id} className="flex h-8 items-center gap-3 text-xs">
                 <span className="min-w-0 flex-1 truncate text-fg">{c.label}</span>
@@ -448,7 +448,7 @@ export function StorageSection({ form }: { form: SettingsFormState }) {
 
       {report && report.workspaces.length > 0 ? (
         <SettingsGroup title="Workspaces" description="App data each workspace keeps" plain>
-          <div className="divide-y divide-border border-y border-border">
+          <div className="divide-y divide-border/60 border-y border-border">
             {report.workspaces.map((ws) => (
               <div key={ws.workspaceId} className="flex h-9 items-center gap-3 text-sm">
                 <span className="min-w-0 flex-1 truncate text-fg" title={ws.path ?? ws.workspaceId}>

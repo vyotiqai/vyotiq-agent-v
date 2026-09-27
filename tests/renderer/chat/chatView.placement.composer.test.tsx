@@ -4,9 +4,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ChatView } from '@renderer/features/chat/ChatView'
-import { emptySecretStatus } from '@shared/ipc'
-import { TitleBar } from '@renderer/app/TitleBar'
-import { BreakpointProvider } from '@renderer/lib/context/BreakpointProvider'
 import { clampDockWidthPx, DOCK_WIDTH_DEFAULT_PX, readSidebarWidthPxForCapacity } from '@renderer/lib/utils/layout'
 import { minimalReadyPlanMarkdown } from '@renderer/features/chat/utils/planDraft'
 
@@ -23,7 +20,6 @@ beforeEach(() => {
   } catch {
     /* ignore */
   }
-  // The docked composer asks the main process about git as soon as it mounts.
   Object.defineProperty(window, 'vyotiq', {
     configurable: true,
     writable: true,
@@ -117,26 +113,11 @@ afterEach(() => {
 const baseProps = {
   items: [],
   running: false,
-  error: null,
-  hasWorkspace: true,
   workspacePath: '/ws',
-  provider: 'ollama' as const,
-  model: 'qwen2.5',
   // A task is on screen: a new task keeps the inspector out of the way until asked.
   activeRunId: 'run-1',
-  chatSettings: {
-    provider: 'ollama' as const,
-    model: 'qwen2.5',
-    keepRecentTurns: 12,
-    thinkingEnabled: true,
-    thinkingEffort: 'medium' as const,
-    showThinking: true
-  },
-  onChatSettingsChange: vi.fn(),
-  onProviderModel: vi.fn(),
   onSend: vi.fn(),
-  onStop: vi.fn(),
-  secrets: emptySecretStatus()
+  onStop: vi.fn()
 }
 
 /** Heavy dock panels are React.lazy code-split — wait for the chunk. */
@@ -156,7 +137,7 @@ function startHidden(): void {
 
 const agentColumn = (): HTMLElement => document.querySelector('[data-agent-column]') as HTMLElement
 
-describe('ChatView composer placement', () => {
+describe('ChatView inspector placement', () => {
   it('opens the browser panel from the inspector tab strip', async () => {
     render(<ChatView {...baseProps} items={[]} />)
 
@@ -711,125 +692,6 @@ describe('ChatView composer placement', () => {
     ).toHaveLength(0)
   })
 
-    it('shows tasks under the owning user prompt in transcript order', async () => {
-      Object.defineProperty(window, 'vyotiq', {
-        configurable: true,
-        writable: true,
-        value: {
-          ...(window.vyotiq as object),
-          readRunArtifact: vi.fn().mockImplementation(async (req: { name?: string }) => {
-            if (req.name === 'todos.json') {
-              return {
-                ok: true,
-                data: {
-                  exists: true,
-                  content: JSON.stringify({
-                    updatedAt: '2026-01-01T00:00:00.000Z',
-                    todos: [{ id: '1', content: 'Ship it', status: 'in_progress' }]
-                  }),
-                  name: 'todos.json'
-                }
-              }
-            }
-            return { ok: false, error: 'none' }
-          })
-        }
-      })
-
-      render(
-        <ChatView
-          {...baseProps}
-          agentMode="agent"
-          activeRunId="run-1"
-          running
-          items={[
-            {
-              kind: 'message',
-              id: 'user-0',
-              role: 'user',
-              content: 'audit the entire codebase end to end',
-              at: '2024-01-01T00:00:00.000Z'
-            },
-            {
-              kind: 'tool',
-              id: 'todo1',
-              tool: {
-                id: 'todo1',
-                name: 'todo_write',
-                summary: '1 task',
-                status: 'done'
-              }
-            },
-            {
-              kind: 'message',
-              id: 'a1',
-              role: 'assistant',
-              content: 'Working on it.',
-              at: '2024-01-01T00:00:01.000Z'
-            },
-            {
-              kind: 'message',
-              id: 'user-2',
-              role: 'user',
-              content: 'delete it',
-              at: '2024-01-01T00:00:02.000Z'
-            }
-          ]}
-        />
-      )
-
-      expect(await screen.findByText('Ship it')).toBeTruthy()
-      expect(document.querySelector('[data-prompt-pin]')).toBeNull()
-      const band = document.querySelector('[data-tasks-ceiling]')
-      expect(band).toBeTruthy()
-      expect(band?.closest('[data-transcript-scroll]')).toBeTruthy()
-
-      const owningPrompt = screen.getByText('audit the entire codebase end to end')
-      const followUp = screen.getByText('delete it')
-      expect(owningPrompt.closest('[data-transcript-scroll]')).toBeTruthy()
-      expect(followUp.closest('[data-transcript-scroll]')).toBeTruthy()
-      expect(
-        owningPrompt.compareDocumentPosition(band!) & Node.DOCUMENT_POSITION_FOLLOWING
-      ).toBeTruthy()
-      expect(band!.compareDocumentPosition(followUp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-
-      expect(screen.queryByRole('tab', { name: /^Tasks$/i })).toBeNull()
-      expect(document.querySelector('[data-tasks-panel]')).toBeNull()
-    })
-
-    it('keeps prompts in normal scroll order when the turn has no tasks', async () => {
-      render(
-        <ChatView
-          {...baseProps}
-          agentMode="agent"
-          activeRunId="run-1"
-          running
-          items={[
-            {
-              kind: 'message',
-              id: 'user-0',
-              role: 'user',
-              content: 'just say hello',
-              at: '2024-01-01T00:00:00.000Z'
-            },
-            {
-              kind: 'message',
-              id: 'a1',
-              role: 'assistant',
-              content: 'Hello.',
-              at: '2024-01-01T00:00:01.000Z'
-            }
-          ]}
-        />
-      )
-
-      const prompt = await screen.findByText('just say hello')
-      expect(prompt.closest('[data-transcript-scroll]')).toBeTruthy()
-      expect(document.querySelector('[data-prompt-pin]')).toBeNull()
-      expect(document.querySelector('[data-tasks-ceiling]')).toBeNull()
-      expect(screen.getByText('Hello.').closest('[data-transcript-scroll]')).toBeTruthy()
-    })
-
   it('shows Recents in the empty browser panel when history exists', () => {
     localStorage.setItem(
       'vyotiq.browserRecents',
@@ -847,43 +709,6 @@ describe('ChatView composer placement', () => {
     expect(screen.getByText('Example Domain')).toBeTruthy()
   })
 
-  it('renders a single docked composer in empty state', () => {
-    render(<ChatView {...baseProps} items={[]} />)
-
-    const composers = screen.getAllByRole('combobox', { name: /^Message$/i })
-    expect(composers).toHaveLength(1)
-
-    expect(document.querySelector('[data-composer-hero]')).toBeNull()
-    expect(document.querySelector('[data-composer-dock]')).toBeTruthy()
-    expect(document.querySelector('[data-chat-hero]')).toBeNull()
-    expect(screen.queryByText(/Type \/ for commands/i)).toBeNull()
-  })
-
-  it('keeps the transcript and composer on the plain gutter — nothing overlays the stage edge', () => {
-    render(
-      <ChatView
-        {...baseProps}
-        items={[
-          {
-            kind: 'message',
-            id: 'm1',
-            role: 'user',
-            content: 'hello',
-            at: '2024-01-01T00:00:00.000Z'
-          }
-        ]}
-      />
-    )
-
-    expect(document.querySelector('[data-chat-side-rail]')).toBeNull()
-    // Floating composer column aligns edge to edge with the transcript column.
-    const dock = document.querySelector('[data-composer-dock]')
-    expect(dock?.className).toMatch(/inset-x-0/)
-    expect(dock?.className).toMatch(/px-4/)
-    expect(dock?.className).not.toMatch(/pr-10/)
-    expect(document.querySelector('[data-transcript-scroll]')?.className).not.toMatch(/pr-10/)
-  })
-
   it('sizes the inspector beside the record', async () => {
     render(<ChatView {...baseProps} items={[]} />)
     fireEvent.click(inspectorTab(/^Plan/))
@@ -897,27 +722,6 @@ describe('ChatView composer placement', () => {
         sidebarWidthPx: readSidebarWidthPxForCapacity()
       })
     )
-  })
-
-  it('floats the empty-chat composer over the transcript column', () => {
-    render(<ChatView {...baseProps} items={[]} />)
-
-    expect(document.querySelector('[data-chat-hero]')).toBeNull()
-    const dock = document.querySelector('[data-composer-dock]')
-    expect(dock?.className).toMatch(/absolute/)
-    // Flush with the stage bottom: the gap under the shell is the cover's pb-2,
-    // so nothing scrolls through it.
-    expect(dock?.className).toMatch(/bottom-0/)
-    // Same gutters as the transcript so the column edges line up.
-    expect(dock?.className).toMatch(/px-4/)
-
-    const column = document.querySelector('[data-composer-column]')
-    expect(column?.className).toMatch(/mx-auto/)
-    expect(column?.className).toMatch(/max-w-\[840px\]/)
-    // The column carries the cover that rows fade out across above the shell.
-    expect(column?.classList.contains('vy-composer-dock-cover')).toBe(true)
-    expect(document.querySelector('[data-hero-brand]')).toBeNull()
-    expect(document.querySelector('[data-brand-lockup]')).toBeNull()
   })
 
   it('expands the inspector to the whole work area and back', () => {
@@ -976,14 +780,6 @@ describe('ChatView composer placement', () => {
     expect(document.querySelector('[data-right-dock]')?.getAttribute('data-dock-expanded')).toBe('0')
   })
 
-  it('aligns the floating composer with the transcript column', () => {
-    render(<ChatView {...baseProps} items={[]} />)
-    const dock = document.querySelector('[data-composer-dock]')
-    expect(dock?.className).toMatch(/inset-x-0/)
-    expect(dock?.className).toMatch(/px-4/)
-    expect(dock?.className).not.toMatch(/pr-10/)
-  })
-
   it('keeps the inspector tabs in the inspector, never in the title band', async () => {
     render(<ChatView {...baseProps} items={[]} />)
     fireEvent.click(inspectorTab(/^Browser/))
@@ -1010,223 +806,25 @@ describe('ChatView composer placement', () => {
     })
   })
 
-  it('renders the composer floating over the chat stage', () => {
-    render(
-      <ChatView
-        {...baseProps}
-        items={[
-          {
-            kind: 'message',
-            id: 'm1',
-            role: 'user',
-            content: 'hello',
-            at: '2024-01-01T00:00:00.000Z'
-          }
-        ]}
-      />
-    )
-
-    const composerRoot = document.querySelector('[data-composer-dock]')
-    expect(composerRoot?.className).toMatch(/absolute/)
-    expect(composerRoot?.className).toMatch(/inset-x-0/)
-    expect(composerRoot?.className).toMatch(/bottom-0/)
-    expect(composerRoot?.className).toMatch(/z-20/)
-    expect(composerRoot?.className).not.toMatch(/shrink-0/)
+  it('holds a pane-shaped placeholder until the pane layout arrives — no chat column', () => {
+    render(<ChatView {...baseProps} items={[]} />)
+    const placeholder = document.querySelector('[data-chat-pane-placeholder]') as HTMLElement
+    expect(placeholder).toBeTruthy()
+    expect(placeholder.getAttribute('aria-busy')).toBe('true')
+    const header = placeholder.firstElementChild as HTMLElement
+    expect(header.classList.contains('h-10')).toBe(true)
+    expect(header.classList.contains('border-b')).toBe(true)
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(document.querySelector('[data-composer-dock]')).toBeNull()
+    expect(document.querySelector('[data-transcript-scroll]')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('uses dock layout while loading transcript for an active run', () => {
-    render(
-      <ChatView
-        {...baseProps}
-        items={[]}
-        activeRunId="run-1"
-        transcriptLoading
-      />
-    )
-
-    expect(document.querySelector('[data-composer-hero]')).toBeNull()
-    expect(document.querySelector('[data-composer-dock]')).toBeTruthy()
-    expect(document.querySelector('[data-empty-brand]')).toBeNull()
-    expect(screen.getAllByText(/loading chat/i).length).toBeGreaterThan(0)
-  })
-
-  it('uses dock layout for an active run tab with no messages', () => {
-    render(<ChatView {...baseProps} items={[]} activeRunId="run-1" />)
-
-    expect(document.querySelector('[data-composer-hero]')).toBeNull()
-    expect(document.querySelector('[data-chat-hero]')).toBeNull()
-    expect(document.querySelector('[data-composer-dock]')).toBeTruthy()
-    expect(document.querySelector('[data-empty-brand]')).toBeNull()
-    expect(document.querySelector('[data-brand-lockup]')).toBeNull()
-    expect(screen.queryByText(/\/create-rule/)).toBeNull()
-  })
-
-  it('hides the empty-chat lockup once the transcript has messages', () => {
-    render(
-      <ChatView
-        {...baseProps}
-        activeRunId="run-1"
-        items={[
-          {
-            kind: 'message',
-            id: 'm1',
-            role: 'user',
-            content: 'hello',
-            at: '2024-01-01T00:00:00.000Z'
-          }
-        ]}
-      />
-    )
-
-    expect(document.querySelector('[data-empty-brand]')).toBeNull()
-    expect(document.querySelector('[data-composer-dock]')).toBeTruthy()
-  })
-
-  it('keeps transcript and composer in the same centered floating column', () => {
-    render(
-      <ChatView
-        {...baseProps}
-        items={[
-          {
-            kind: 'message',
-            id: 'm1',
-            role: 'user',
-            content: 'hello',
-            at: '2024-01-01T00:00:00.000Z'
-          }
-        ]}
-      />
-    )
-
-    const transcriptColumn = document.querySelector('[data-chat-column]')
-    expect(transcriptColumn?.className).toMatch(/mx-auto/)
-    expect(transcriptColumn?.className).toMatch(/max-w-\[840px\]/)
-    expect(transcriptColumn?.className).toMatch(/w-full/)
-
-    const composerColumn = document.querySelector('[data-composer-column]')
-    expect(composerColumn?.className).toMatch(/mx-auto/)
-    expect(composerColumn?.className).toMatch(/max-w-\[840px\]/)
-    expect(composerColumn?.className).toMatch(/w-full/)
-
-    const composerRoot = document.querySelector('[data-composer-dock]')
-    expect(composerRoot?.className).toMatch(/absolute/)
-    expect(composerRoot?.className).toMatch(/inset-x-0/)
-    expect(composerRoot?.className).toMatch(/px-4/)
-    expect(composerRoot?.className).not.toMatch(/pr-10/)
-    expect(composerRoot?.className).not.toMatch(/\bbg-bg\b/)
-  })
-
-  it('reserves floating composer height on the transcript scrollport', () => {
-    render(
-      <ChatView
-        {...baseProps}
-        items={[
-          {
-            kind: 'message',
-            id: 'm1',
-            role: 'user',
-            content: 'hello',
-            at: '2024-01-01T00:00:00.000Z'
-          }
-        ]}
-      />
-    )
-
-    const stage = document.querySelector('[data-chat-stage]') as HTMLElement | null
-    const transcript = document.querySelector('[data-transcript-scroll]') as HTMLElement | null
-    expect(stage).toBeTruthy()
-    expect(transcript).toBeTruthy()
-    // The floating dock publishes its measured height on the stage (jsdom: 0px)
-    // and the transcript reserves it plus clearance.
-    expect(stage!.style.getPropertyValue('--vy-composer-dock-height')).toMatch(/px$/)
-    expect(transcript!.style.paddingBottom).toContain('var(--vy-composer-dock-height')
-    expect(document.querySelector('[data-composer-dock]')).toBeTruthy()
-  })
-
-  it('remounts the transcript when chatSurfaceEpoch changes but not for draft alone', () => {
-    const items = [
-      {
-        kind: 'message' as const,
-        id: 'm1',
-        role: 'user' as const,
-        content: 'hello',
-        at: '2024-01-01T00:00:00.000Z'
-      }
-    ]
-    const { rerender } = render(
-      <ChatView {...baseProps} items={items} chatSurfaceEpoch={0} activeRunId={null} />
-    )
-    const first = document.querySelector('[data-transcript-scroll]')
-    expect(first).toBeTruthy()
-
-    rerender(
-      <ChatView {...baseProps} items={items} chatSurfaceEpoch={0} activeRunId="run-1" />
-    )
-    expect(document.querySelector('[data-transcript-scroll]')).toBe(first)
-
-    rerender(
-      <ChatView {...baseProps} items={items} chatSurfaceEpoch={1} activeRunId="run-1" />
-    )
-    expect(document.querySelector('[data-transcript-scroll]')).not.toBe(first)
-  })
-
-  it('attaches an active goal banner above the docked composer', async () => {
-    const goalJson = JSON.stringify({
-      objective: 'Ship the composer banner',
-      status: 'active',
-      createdAt: '2026-08-01T00:00:00.000Z',
-      updatedAt: '2026-08-01T00:00:00.000Z'
-    })
-    ;(window.vyotiq as unknown as Record<string, unknown>).readRunArtifact = vi
-      .fn()
-      .mockImplementation(async (args: { name?: string }) =>
-        args.name === 'goal.json'
-          ? { ok: true, data: { content: goalJson } }
-          : { ok: false, error: 'none' }
-      )
-
-    render(
-      <ChatView
-        {...baseProps}
-        activeRunId="run-1"
-        items={[
-          {
-            kind: 'message',
-            id: 'm1',
-            role: 'user',
-            content: 'hello',
-            at: '2024-01-01T00:00:00.000Z'
-          }
-        ]}
-      />
-    )
-
-    const banner = await waitFor(() => {
-      const el = document.querySelector('[data-goal-banner][data-goal-status="active"]')
-      expect(el).toBeTruthy()
-      return el as HTMLElement
-    })
-
-    // Lives inside the chat stage, below the transcript — no longer above the first bubble.
-    expect(banner.closest('[data-chat-stage]')).toBeTruthy()
-    const transcript = document.querySelector('[data-transcript-scroll]')
-    expect(
-      banner.compareDocumentPosition(transcript!) & Node.DOCUMENT_POSITION_PRECEDING
-    ).toBeTruthy()
-
-    // Sits immediately above the docked composer.
-    const dock = document.querySelector('[data-composer-dock]')
-    expect(dock).toBeTruthy()
-    expect(
-      banner.compareDocumentPosition(dock!) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-    const wrapper = banner.parentElement!.parentElement!
-    expect(wrapper.nextElementSibling!.contains(dock!)).toBe(true)
-
-    // Shares the centered chat column with the composer, with its own gap so the
-    // banner and the input never read as one combined block.
-    expect(banner.parentElement!.className).toMatch(/mx-auto/)
-    expect(banner.parentElement!.className).toMatch(/max-w-\[840px\]/)
-    expect(wrapper.className).toMatch(/pb-1\.5/)
+  it('says why when the workspace list failed to load', () => {
+    render(<ChatView {...baseProps} items={[]} loadError="Workspaces file is unreadable." />)
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toContain('Couldn’t load workspaces')
+    expect(alert.textContent).toContain('Workspaces file is unreadable.')
+    expect(document.querySelector('[data-chat-pane-placeholder]')?.hasAttribute('aria-busy')).toBe(false)
   })
 })

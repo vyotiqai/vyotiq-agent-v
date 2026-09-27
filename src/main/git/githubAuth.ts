@@ -445,16 +445,24 @@ async function pollOnce(): Promise<void> {
   }
 }
 
-export async function startGithubAuth(): Promise<GithubAuthStatus> {
+export async function startGithubAuth(options: { fresh?: boolean } = {}): Promise<GithubAuthStatus> {
   const clientId = resolveGithubClientId()
 
   cancelGithubAuth()
+
+  // GitHub turned the saved sign-in away. Adopting the CLI's token again would
+  // hand back the same rejected one, so drop ours and ask for a new one; a
+  // successful flow writes it to the CLI as well.
+  if (options.fresh) {
+    clearGithubAccessToken()
+    logger.info('Replacing a GitHub sign-in that was rejected', { scope: 'github-auth' })
+  }
 
   // Someone who has already run `gh auth login` has done the sign-in. Asking
   // them for a device code as well is theatre, and the flow used to notice six
   // seconds in and abandon itself without keeping the token (see pollOnce) —
   // a browser opened, the code went stale, and nothing was ever stored.
-  const fromCli = await readGhAuthToken()
+  const fromCli = options.fresh ? null : await readGhAuthToken()
   if (fromCli) {
     setGithubAccessToken(fromCli)
     logger.info('Adopted the GitHub CLI sign-in; no device code needed', {
