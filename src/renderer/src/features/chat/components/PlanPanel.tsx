@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActionMenu, Button, IconButton, MarkdownContent, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
+import { ActionMenu, IconButton, MarkdownContent, StatusGlyph, cn, type TaskState } from '@renderer/lib/ui'
 import { Icon } from '@renderer/lib/icons'
 import { CHAT_RIGHT_PANEL_BODY, NUM, SECTION_LABEL } from '@renderer/lib/utils/layout'
 import type { RunReceipt } from '@shared/ipc'

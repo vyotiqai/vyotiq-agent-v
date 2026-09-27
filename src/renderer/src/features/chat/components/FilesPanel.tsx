@@ -569,7 +569,6 @@ export const FilesPanel = memo(function FilesPanel({
   const [recoveryLoaded, setRecoveryLoaded] = useState(false)
   const [contextMenu, setContextMenu] = useState<FilesContextState | null>(null)
   const [workspaceActionsOpen, setWorkspaceActionsOpen] = useState(false)
-  const [treeSortOpen, setTreeSortOpen] = useState(false)
   const [editorActionsAnchor, setEditorActionsAnchor] = useState<ContextMenuAnchor | null>(null)
   const [surfaceWidth, setSurfaceWidth] = useState(0)
   const [editorMode, setEditorMode] = useState<EditorSurfaceMode>('editor')
