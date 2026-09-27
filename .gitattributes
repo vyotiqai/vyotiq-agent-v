@@ -6,10 +6,6 @@ resources/harness/default.md text eol=lf
 resources/marketplace/icons/*.svg text eol=lf
 resources/branding/**/*.svg text eol=lf
 
-# Captured application screenshots. Explicitly binary so no future text
-# attribute can line-ending-convert them into corruption.
-landing/public/shots/*.png binary
-
 # Bundled marketplace packages ship byte-for-byte (electron-builder
 # extraResources) and are compared against the installed copy on every boot
 # (src/main/marketplace/install.ts repairBundled*FromResources). Pin their text
