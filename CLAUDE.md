@@ -44,7 +44,8 @@ are mapped to Tailwind names in the `@theme` block, so `bg-surface`, `text-muted
    are the only shapes that justify a literal: a fallback when reading a CSS var
    into a JS theme object that can't take `var()`
    (`features/chat/components/TerminalPanel.tsx`), and a third-party brand color
-   (`features/chat/toolUi/siteBrands.tsx`).
+   checked for contrast against the skin
+   (`features/chat/components/composer/providerBrandColor.ts`).
 
 3. **`cn()` is `filter(Boolean).join(' ')` — there is no tailwind-merge.**
    Appending a utility does *not* override an earlier one, and two different

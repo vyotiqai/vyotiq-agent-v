@@ -1,15 +1,8 @@
-import { useCallback, useEffect, useRef, type RefObject } from 'react'
-import { Tooltip } from '@renderer/lib/ui/Tooltip'
-import { cn } from '@renderer/lib/ui/cn'
+import { useEffect, type RefObject } from 'react'
 import type { AgentInteractionMode } from '@shared/ipc'
-import {
-  isMainComposerTarget,
-  matchShortcut,
-  shouldBlockAppShortcut,
-  shortcutLabel
-} from '@renderer/lib/shortcuts'
-import { chromePillButton } from './composerChrome'
+import { isMainComposerTarget, matchShortcut, shouldBlockAppShortcut } from '@renderer/lib/shortcuts'
 
+/** The two modes, as TaskOptions' Mode control and the New task brief list them. */
 export const MODES: { value: AgentInteractionMode; label: string; short: string }[] = [
   { value: 'ask', label: 'Ask', short: 'Ask' },
   { value: 'agent', label: 'Agent', short: 'Agent' }
@@ -69,70 +62,4 @@ export function useCycleModeShortcut(
     window.addEventListener('vyotiq:command', onCommand)
     return () => window.removeEventListener('vyotiq:command', onCommand)
   }, [locked, advance])
-}
-
-export function ModePicker({
-  mode,
-  onModeChange,
-  disabled,
-  running = false,
-  className
-}: {
-  mode: AgentInteractionMode
-  onModeChange: (mode: AgentInteractionMode) => void
-  disabled?: boolean
-  /** Settings can change for the next invocation while the current run continues. */
-  running?: boolean
-  className?: string
-}) {
-  const rootRef = useRef<HTMLDivElement>(null)
-  const advance = useCallback(
-    (reverse: boolean) => {
-      onModeChange(nextMode(mode, reverse))
-    },
-    [mode, onModeChange]
-  )
-
-  const locked = Boolean(disabled)
-  useCycleModeShortcut(rootRef, locked, advance)
-
-  const current = MODES.find((m) => m.value === mode) ?? MODES[DEFAULT_MODE_INDEX]!
-  const upcoming = MODES.find((m) => m.value === nextMode(mode, false))!
-  const chord = shortcutLabel('cycleMode')
-
-  const ariaLabel = `${current.label} mode. Click for ${upcoming.label}.`
-  const tip = running
-    ? `${ariaLabel} Changes apply to the next message while this run continues. Shift-click or ${chord} (Shift for previous).`
-    : `${ariaLabel} Shift-click or ${chord} (Shift for previous).`
-  const button = (
-    <button
-      type="button"
-      disabled={locked}
-      aria-label={ariaLabel}
-      className={cn(chromePillButton, 'text-fg')}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={(e) => {
-        e.preventDefault()
-        if (locked) return
-        advance(e.shiftKey)
-      }}
-    >
-      <span className="leading-tight">{current.short}</span>
-    </button>
-  )
-
-  return (
-    <div ref={rootRef} className={cn('relative flex h-7 shrink-0 items-center', className)}>
-      {/* Disabled buttons ignore pointer events — wrap so hover still shows why. */}
-      {locked ? (
-        <Tooltip content={tip}>
-          <span className="inline-grid cursor-not-allowed" aria-disabled="true">
-            {button}
-          </span>
-        </Tooltip>
-      ) : (
-        <Tooltip content={tip}>{button}</Tooltip>
-      )}
-    </div>
-  )
 }

@@ -8,6 +8,7 @@ import {
   type RefObject
 } from 'react'
 import { createPortal } from 'react-dom'
+import { holdFloatingLayer } from '../hooks/floatingLayers'
 import { Icon, type IconName } from '../icons'
 import { cn } from './cn'
 import {
@@ -124,6 +125,9 @@ export function ContextMenu({
     })
     return () => window.cancelAnimationFrame(frame)
   }, [anchor, items.length])
+
+  // While open, a Dialog around it leaves Escape to this menu.
+  useEffect(() => (anchor ? holdFloatingLayer() : undefined), [anchor])
 
   useEffect(() => {
     if (!anchor) return

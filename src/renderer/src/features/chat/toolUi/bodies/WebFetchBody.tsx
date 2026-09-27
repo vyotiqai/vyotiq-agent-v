@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { TOOL_BODY_FLOW, TOOL_BODY_INNER, TOOL_BODY_PAD } from '@renderer/lib/utils/layout'
+import { BORDER_DIVIDER, TOOL_BODY_FLOW, TOOL_BODY_INNER, TOOL_BODY_PAD } from '@renderer/lib/utils/layout'
 import { MarkdownContent } from '@renderer/lib/ui'
 import type { ToolBodyProps } from '../types'
 import { parseWebFetchData } from '../parsers/webFetch'
@@ -11,15 +11,15 @@ export function WebFetchBody({ tool, loading, loadFailed, inGroup }: ToolBodyPro
   return (
     <div>
       {!inGroup ? (
-        <div className={`${TOOL_BODY_PAD} border-b border-border/40 pb-2`}>
-          <span className="truncate font-mono text-2xs text-tertiary" title={data.url}>
+        <div className={`${TOOL_BODY_PAD} border-b ${BORDER_DIVIDER} pb-2`}>
+          <span className="truncate font-mono text-caption text-tertiary" title={data.url}>
             {data.url}
           </span>
         </div>
       ) : null}
       {tool.contentTruncated ? <TruncatedBanner loading={loading} failed={loadFailed} /> : null}
-      <div className={`${TOOL_BODY_INNER} ${TOOL_BODY_FLOW} text-caption text-fg/80`}>
-        <MarkdownContent content={data.content} />
+      <div className={`${TOOL_BODY_INNER} ${TOOL_BODY_FLOW}`}>
+        <MarkdownContent content={data.content} size="caption" tone="secondary" />
       </div>
     </div>
   )

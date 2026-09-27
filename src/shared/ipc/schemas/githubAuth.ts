@@ -11,6 +11,16 @@ export const GithubAuthStatusSchema = z.object({
 })
 export type GithubAuthStatus = z.infer<typeof GithubAuthStatusSchema>
 
+/**
+ * `fresh`: GitHub rejected the saved sign-in (a revoked or expired token), so
+ * skip it and the CLI's copy and run the device flow for a new one.
+ */
+export const GithubAuthStartRequestSchema = z
+  .object({ fresh: z.boolean().optional() })
+  .strict()
+  .optional()
+export type GithubAuthStartRequest = z.infer<typeof GithubAuthStartRequestSchema>
+
 export const GithubCliInstallResultSchema = z.object({
   installed: z.boolean(),
   detail: z.string(),

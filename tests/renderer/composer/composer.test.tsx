@@ -56,7 +56,7 @@ beforeEach(() => {
 const testSecrets = emptySecretStatus()
 
 describe('Composer', () => {
-  it('explains why Send is disabled when no workspace is available', () => {
+  it('says to open a workspace when there is none', () => {
     render(
       <Composer
         provider="ollama"
@@ -73,13 +73,11 @@ describe('Composer', () => {
       />
     )
 
-    expect(screen.getByTitle('Open a workspace to send a message.')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /^Send$/i }).getAttribute('aria-disabled')).toBe(
-      'true'
-    )
+    expect(screen.getByText('Open a workspace to start a task')).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: 'Instruction' }).getAttribute('aria-disabled')).toBe('true')
   })
 
-  it('uses custom model menu not select', async () => {
+  it('picks the model from the options popover, not a select', async () => {
     const onProviderModel = vi.fn()
     render(
       <Composer
@@ -96,13 +94,14 @@ describe('Composer', () => {
     )
 
     expect(document.querySelector('select')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /Select model/i }))
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-task-options]')!)
+    const models = await screen.findByRole('listbox', { name: 'Models' })
     await waitFor(() => {
-      expect(within(screen.getByRole('listbox')).getByText('llama3.2')).toBeTruthy()
+      expect(within(models).getByText('llama3.2')).toBeTruthy()
     })
-    fireEvent.click(within(screen.getByRole('listbox')).getByText('llama3.2'))
+    fireEvent.click(within(models).getByText('llama3.2'))
     expect(onProviderModel).toHaveBeenCalledWith('ollama', 'llama3.2')
-    expect(screen.queryByRole('listbox')).toBeNull()
+    await waitFor(() => expect(screen.queryByRole('listbox', { name: 'Models' })).toBeNull())
   })
 
   it('restores composer draft when send reports failure', async () => {
@@ -121,10 +120,10 @@ describe('Composer', () => {
       />
     )
 
-    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    const ta = screen.getByRole('combobox', { name: 'Instruction' })
     ta.textContent = 'keep me'
     fireEvent.input(ta)
-    fireEvent.click(screen.getByRole('button', { name: /^Send$/i }))
+    fireEvent.keyDown(ta, { key: 'Enter' })
 
     await waitFor(() => {
       expect(onSend).toHaveBeenCalledWith('keep me', undefined, undefined, undefined)
@@ -163,7 +162,7 @@ describe('Composer', () => {
       />
     )
 
-    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    const ta = screen.getByRole('combobox', { name: 'Instruction' })
     ta.focus()
     ta.textContent = 'first task'
     fireEvent.input(ta)
@@ -195,7 +194,7 @@ describe('Composer', () => {
       />
     )
 
-    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    const ta = screen.getByRole('combobox', { name: 'Instruction' })
     ta.textContent = '\n\n\n\n\n\n\n\n\n\n'
     fireEvent.input(ta)
 
@@ -229,10 +228,10 @@ describe('Composer', () => {
       />
     )
 
-    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    const ta = screen.getByRole('combobox', { name: 'Instruction' })
     ta.textContent = 'first message'
     fireEvent.input(ta)
-    fireEvent.click(screen.getByRole('button', { name: /^Send$/i }))
+    fireEvent.keyDown(ta, { key: 'Enter' })
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
 
     ta.textContent = 'newer draft'
@@ -268,7 +267,7 @@ describe('Composer', () => {
       />
     )
 
-    fireEvent.submit(screen.getByRole('combobox', { name: /^Message$/i }).closest('form')!)
+    fireEvent.submit(screen.getByRole('combobox', { name: 'Instruction' }).closest('form')!)
 
     expect((await screen.findByRole('alert')).textContent).toMatch(/no longer exists/i)
     expect(onSend).not.toHaveBeenCalled()
@@ -329,9 +328,9 @@ describe('Composer', () => {
       expect(screen.getByAltText(/Image 1/i)).toBeTruthy()
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /Select model/i }))
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-task-options]')!)
     await waitFor(() => {
-      const listbox = screen.getByRole('listbox')
+      const listbox = screen.getByRole('listbox', { name: 'Models' })
       expect(within(listbox).getByText('gpt-5.6')).toBeTruthy()
       expect(within(listbox).getByText('gpt-5.6-terra')).toBeTruthy()
       expect(within(listbox).queryByText('text-only')).toBeNull()
@@ -367,7 +366,7 @@ describe('Composer', () => {
       />
     )
 
-    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    const ta = screen.getByRole('combobox', { name: 'Instruction' })
     ta.textContent = 'read the attachment'
     fireEvent.input(ta)
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
@@ -376,9 +375,6 @@ describe('Composer', () => {
     fireEvent.change(fileInput)
     await waitFor(() => expect(window.vyotiq.extractAttachment).toHaveBeenCalled())
 
-    expect(screen.getByRole('button', { name: /^Send$/i }).getAttribute('aria-disabled')).toBe(
-      'true'
-    )
     fireEvent.keyDown(ta, { key: 'Enter', code: 'Enter' })
     expect(onSend).not.toHaveBeenCalled()
 
@@ -427,7 +423,7 @@ describe('Composer', () => {
     })
     expect(extractAttachment).toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: /^Send$/i }))
+    fireEvent.submit(document.querySelector('[data-composer-shell]')!)
     await waitFor(() => {
       expect(onSend).toHaveBeenCalledWith(
         '',
@@ -467,7 +463,7 @@ describe('Composer', () => {
     })
   })
 
-  it('keeps composer editable while a run is in progress and shows Stop only', () => {
+  it('keeps the line editable while a run is in progress, with no Send or Stop button', () => {
     render(
       <Composer
         provider="ollama"
@@ -483,10 +479,9 @@ describe('Composer', () => {
       />
     )
 
-    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    const ta = screen.getByRole('combobox', { name: 'Instruction' })
     expect(ta.getAttribute('contenteditable')).toBe('true')
-    expect(screen.getByRole('button', { name: /^Stop$/i })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /^Send follow-up$/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Stop$/i })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Send$/i })).toBeNull()
   })
 
@@ -509,20 +504,16 @@ describe('Composer', () => {
       />
     )
 
-    const mode = screen.getByRole('button', { name: /Agent mode/i })
-    const modelPicker = screen.getByRole('button', { name: 'Select model' })
-    expect(mode).toHaveProperty('disabled', false)
-    expect(modelPicker).toHaveProperty('disabled', false)
+    const token = document.querySelector<HTMLButtonElement>('[data-task-options]')!
+    expect(token).toHaveProperty('disabled', false)
 
-    fireEvent.click(mode)
+    fireEvent.click(token)
+    const dialog = await screen.findByRole('dialog', { name: 'Mode, model and effort' })
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Ask' }))
     expect(onAgentModeChange).toHaveBeenCalledWith('ask')
 
-    fireEvent.click(modelPicker)
-    await waitFor(() => {
-      expect(screen.getByRole('listbox', { name: 'Select model' })).toBeTruthy()
-    })
     // The model rows load after the list opens; a busy suite catches the gap.
-    fireEvent.click(await screen.findByRole('option', { name: /llama3.2 Tools/i }))
+    fireEvent.click(await within(dialog).findByText('llama3.2'))
     expect(onProviderModel).toHaveBeenCalledWith('ollama', 'llama3.2')
   })
 
@@ -547,7 +538,7 @@ describe('Composer', () => {
       />
     )
 
-    expect(document.activeElement).toBe(screen.getByRole('combobox', { name: /^Message$/i }))
+    expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Instruction' }))
   })
 
   it('cancels inline edit on Escape when no menu consumed it', () => {
@@ -572,7 +563,7 @@ describe('Composer', () => {
       />
     )
 
-    fireEvent.keyDown(screen.getByRole('combobox', { name: /^Message$/i }), { key: 'Escape' })
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Instruction' }), { key: 'Escape' })
     expect(onCancelEdit).toHaveBeenCalledTimes(1)
   })
 
@@ -593,7 +584,7 @@ describe('Composer', () => {
       />
     )
 
-    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    const ta = screen.getByRole('combobox', { name: 'Instruction' })
     ta.textContent = 'steer left'
     fireEvent.input(ta)
     fireEvent.keyDown(ta, { key: 'Enter', code: 'Enter' })
@@ -603,7 +594,7 @@ describe('Composer', () => {
     })
   })
 
-  it('shows queued follow-ups with edit, send now, and remove', async () => {
+  it('shows queued instructions with edit, send now, and remove', async () => {
     const onRemoveFollowUp = vi.fn()
     const onEditFollowUp = vi.fn().mockResolvedValue(true)
     const onSendFollowUpNow = vi.fn()
@@ -629,22 +620,22 @@ describe('Composer', () => {
     )
 
     expect(screen.getByText('Steer left')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Edit queued follow-up$/i }))
-    const editor = screen.getByRole('textbox', { name: /^Edit queued follow-up$/i })
+    fireEvent.click(screen.getByRole('button', { name: /^Edit queued instruction$/i }))
+    const editor = screen.getByRole('textbox', { name: /^Edit queued instruction$/i })
     fireEvent.change(editor, { target: { value: 'Steer right' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Save queued follow-up edit$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save queued instruction edit$/i }))
     await waitFor(() => {
       expect(onEditFollowUp).toHaveBeenCalledWith('fu-1', 'Steer right')
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /^Send queued follow-up now$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Send queued instruction now$/i }))
     expect(onSendFollowUpNow).toHaveBeenCalledWith('fu-1')
 
-    fireEvent.click(screen.getByRole('button', { name: /^Remove queued follow-up$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Remove queued instruction$/i }))
     expect(onRemoveFollowUp).toHaveBeenCalledWith('fu-1')
   })
 
-  it('keeps queued follow-up editor open when save fails', async () => {
+  it('keeps the queued instruction editor open when save fails', async () => {
     const onEditFollowUp = vi.fn().mockResolvedValue(false)
     render(
       <Composer
@@ -665,12 +656,12 @@ describe('Composer', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /^Edit queued follow-up$/i }))
-    fireEvent.click(screen.getByRole('button', { name: /^Save queued follow-up edit$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Edit queued instruction$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save queued instruction edit$/i }))
     await waitFor(() => {
       expect(onEditFollowUp).toHaveBeenCalledWith('fu-1', 'Steer left')
     })
-    expect(screen.getByRole('textbox', { name: /^Edit queued follow-up$/i })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: /^Edit queued instruction$/i })).toBeTruthy()
   })
 
   it('does not show reconnecting status below the composer while running with network_wait', () => {
@@ -692,8 +683,9 @@ describe('Composer', () => {
     expect(screen.queryByText(/Reconnecting/i)).toBeNull()
   })
 
-  it('enables send when per-run hot draft has content even if draft prop is empty', () => {
+  it('sends the per-run hot draft even if the draft prop is empty', async () => {
     setWorkspaceHotComposerDraft('/ws/demo', 'run-1', 'I have a typed message')
+    const onSend = vi.fn(async () => true)
     render(
       <Composer
         provider="ollama"
@@ -708,13 +700,15 @@ describe('Composer', () => {
         chatSettings={chatSettings}
         onChatSettingsChange={vi.fn()}
         onProviderModel={vi.fn()}
-        onSend={vi.fn()}
+        onSend={onSend}
         onStop={vi.fn()}
       />
     )
 
-    const send = screen.getByRole('button', { name: 'Send' })
-    expect(send.hasAttribute('disabled')).toBe(false)
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Instruction' }), { key: 'Enter' })
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith('I have a typed message', undefined, undefined, undefined)
+    })
   })
 
   it('attaches a dropped image on the composer shell', async () => {

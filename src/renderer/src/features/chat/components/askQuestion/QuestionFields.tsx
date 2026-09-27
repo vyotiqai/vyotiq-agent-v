@@ -1,18 +1,33 @@
 import { useRef, type JSX, type KeyboardEvent } from 'react'
-import { cn } from '@renderer/lib/ui'
+import { Icon } from '@renderer/lib/icons'
+import { Input, cn } from '@renderer/lib/ui'
+import { CONTROL_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import type { UiAgentQuestionItem } from '@shared/transcript'
 
-/** Inset focus — outer outline clashes with selection and clips under overflow-hidden. */
+/**
+ * The focus ring drawn inside the option: an outline would sit on the selected
+ * fill of its neighbour and clip under the gate's overflow-hidden. Same colour
+ * as `vy-focus-ring`.
+ */
 const OPTION_FOCUS =
-  'outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-border-strong'
+  'outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus'
 const OPTION_BASE = cn(
   'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm vy-transition',
-  'disabled:opacity-[var(--vy-disabled-opacity)]',
+  'disabled:vy-disabled-state',
   OPTION_FOCUS
 )
-/** Hover stays lighter than selected fill so hover ≠ answered. */
-const OPTION_IDLE = 'text-secondary hover:bg-surface hover:text-fg'
-const OPTION_ACTIVE = 'bg-surface-2 text-fg ring-1 ring-inset ring-border/70'
+/** Hover stays lighter than the selected fill so hover never reads as answered. */
+const OPTION_IDLE = cn('text-secondary hover:text-fg', CONTROL_HOVER)
+const OPTION_ACTIVE = SELECTED
+
+/** Input's field chrome, for the one multi-line field (no Textarea primitive yet). */
+const TEXTAREA_CHROME = cn(
+  'rounded-md border border-border bg-bg text-fg placeholder:text-tertiary',
+  'hover:border-border-strong',
+  'focus-visible:border-border-strong focus-visible:vy-focus-ring',
+  'disabled:vy-disabled-state disabled:hover:border-border',
+  'vy-transition'
+)
 
 export type QuestionFieldProps = {
   item: UiAgentQuestionItem
@@ -33,23 +48,29 @@ function OptionMark({
   kind: 'radio' | 'check'
   active: boolean
 }): JSX.Element {
+  if (kind === 'check') {
+    // Checkbox's box, drawn inside the option row that is already the checkbox.
+    return (
+      <span
+        aria-hidden
+        className={cn(
+          'inline-grid size-3.5 shrink-0 place-items-center rounded-[3px] border vy-transition',
+          active ? 'border-accent bg-accent text-accent-fg' : 'border-border-strong bg-bg'
+        )}
+      >
+        {active ? <Icon name="check" size={10} weight="bold" /> : null}
+      </span>
+    )
+  }
   return (
     <span
       className={cn(
-        'flex h-3.5 w-3.5 shrink-0 items-center justify-center border border-border',
-        kind === 'radio' ? 'rounded-full' : 'rounded-sm',
-        active && 'border-fg bg-fg'
+        'flex size-3.5 shrink-0 items-center justify-center rounded-full border',
+        active ? 'border-fg bg-fg' : 'border-border-strong'
       )}
       aria-hidden
     >
-      {active ? (
-        <span
-          className={cn(
-            'bg-bg',
-            kind === 'radio' ? 'h-1.5 w-1.5 rounded-full' : 'h-1.5 w-1.5'
-          )}
-        />
-      ) : null}
+      {active ? <span className="size-1.5 rounded-full bg-bg" /> : null}
     </span>
   )
 }
@@ -64,12 +85,10 @@ function CustomOther({
   onChange: (text: string) => void
 }): JSX.Element {
   return (
-    <input
+    <Input
       type="text"
-      className={cn(
-        'mt-1 w-full rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg',
-        OPTION_FOCUS
-      )}
+      size="md"
+      className="mt-1"
       placeholder="Other…"
       aria-label="Other answer"
       disabled={disabled}
@@ -288,11 +307,9 @@ export function BooleanField({
             disabled={disabled}
             className={cn(
               'min-w-[4.5rem] rounded-md border px-3 py-1.5 text-sm vy-transition',
-              'disabled:opacity-[var(--vy-disabled-opacity)]',
+              'disabled:vy-disabled-state',
               OPTION_FOCUS,
-              active
-                ? 'border-border-strong bg-surface-2 text-fg'
-                : 'border-border text-secondary hover:bg-surface'
+              active ? cn('border-border-strong', SELECTED) : cn('border-border text-secondary', CONTROL_HOVER)
             )}
             onClick={() => onChange([option], '')}
           >
@@ -313,10 +330,7 @@ export function TextField({
   return (
     <textarea
       id={`${promptId}-input`}
-      className={cn(
-        'min-h-[64px] w-full resize-y rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg',
-        OPTION_FOCUS
-      )}
+      className={cn(TEXTAREA_CHROME, 'min-h-[64px] w-full resize-y px-3 py-1.5 text-sm')}
       placeholder="Your answer…"
       aria-labelledby={promptId}
       disabled={disabled}

@@ -6,6 +6,7 @@ import { relativeTimeAgo } from '@shared/utils/timeFormat'
 import { Button, IconButton, Menu, Segmented, StatusGlyph, cn, type MenuOption } from '@renderer/lib/ui'
 import { Icon } from '@renderer/lib/icons'
 import { SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { useConfirm } from '@renderer/lib/hooks/useConfirm'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { MODES } from '@renderer/features/chat/components/composer/ModePicker'
 import { TaskOptions, capabilities, type TaskOptionsProps } from '@renderer/features/chat/components/composer/TaskOptions'
@@ -257,7 +258,7 @@ export function NewTaskBrief({
 
             <Block label="Done when" hint="The run is checked against these before it can finish">
               {checks.length > 0 || adding ? (
-                <ul className="m-0 list-none divide-y divide-border border-y border-border p-0" aria-label="Done when">
+                <ul className="m-0 list-none divide-y divide-border/60 border-y border-border p-0" aria-label="Done when">
                   {checks.map((text, index) => (
                     <li key={`${index}:${text}`} className="group flex h-9 items-center gap-2.5">
                       <StatusGlyph state="queued" size={14} />
@@ -410,6 +411,7 @@ function BranchSelect({
   const git = useGitStatus(workspacePath, revision, true, 0)
   const [branches, setBranches] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const { confirm, dialog: confirmDialog } = useConfirm()
   const branch = git.status?.branch ?? null
 
   useEffect(() => {
@@ -434,12 +436,15 @@ function BranchSelect({
       <Menu
         value={branch}
         options={options}
-        onChange={(name) => {
+        onChange={async (name) => {
           if (name === branch) return
           const dirty = (git.status?.fileCount ?? 0) > 0
           if (
             dirty &&
-            !window.confirm(`The working tree has uncommitted changes. Git refuses to check out "${name}" if they would be overwritten.`)
+            !(await confirm(
+              `The working tree has uncommitted changes. Git refuses to check out "${name}" if they would be overwritten.`,
+              { title: 'Switch branch', confirmLabel: 'Switch branch' }
+            ))
           ) {
             return
           }
@@ -477,6 +482,7 @@ function BranchSelect({
           {error}
         </span>
       ) : null}
+      {confirmDialog}
     </>
   )
 }
@@ -638,6 +644,14 @@ function WhatTheAgentSees({ workspacePath, worktree }: { workspacePath: string; 
           .join(' · ')
     : null
 
+  // The prompt is pre-loaded from index.md and state.md, so those count as
+  // memory even when the note store is empty.
+  const memoryFiles = context
+    ? [context.memoryState ? 'state.md' : null, context.memoryIndex ? 'index.md' : null].filter(
+        (n): n is string => Boolean(n)
+      )
+    : []
+
   const rules = context?.rules
   const ruleFiles = rules
     ? [rules.agentsMd ? 'AGENTS.md' : null, rules.claudeMd ? 'CLAUDE.md' : null, rules.cursorrules ? '.cursorrules' : null].filter(
@@ -697,8 +711,16 @@ function WhatTheAgentSees({ workspacePath, worktree }: { workspacePath: string; 
           />
           <Fact
             k="Memory"
-            v={context ? (context.memoryNotes > 0 ? `${context.memoryNotes} ${context.memoryNotes === 1 ? 'note' : 'notes'}` : 'None') : null}
-            d={context?.memoryNoteNames?.join(', ') ?? null}
+            v={
+              context
+                ? context.memoryNotes > 0
+                  ? `${context.memoryNotes} ${context.memoryNotes === 1 ? 'note' : 'notes'}`
+                  : memoryFiles.length > 0
+                    ? memoryFiles.join(' · ')
+                    : 'None'
+                : null
+            }
+            d={context?.memoryNotes ? (context.memoryNoteNames?.join(', ') ?? null) : null}
           />
           <Fact k="Index" v={context ? INDEX_LABEL[context.codeIndex.state] : null} d={context ? indexDetail(context.codeIndex) : null} />
           <Fact

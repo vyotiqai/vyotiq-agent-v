@@ -10,7 +10,6 @@ import { extractPartialEditArgs } from '@shared/utils/partialJson'
 import { TOOL_LABELS } from '@shared/utils/toolSummary'
 import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import type { ChatItemsStore, ChatMetaStore } from '../chatStores'
-import type { ChatStreamController } from '@renderer/lib/hooks/createChatStreamController'
 
 /** Bumps on workspace change, run end, and (debounced) mid-run mutating tool results. */
 const MUTATING_GIT_TOOLS = new Set([
@@ -398,28 +397,4 @@ export function useResolvedTurnUsage(
   useSyncExternalStore(subscribe, getRevision, getRevision)
   if (getTurnUsage) return getTurnUsage()
   return turnUsage
-}
-
-/**
- * Write-checkpoint leaf for a run controller (e.g. an instance pane's run whose
- * checkpoint never flows through the workspace parent). Subscribes to the meta
- * stream but re-renders only when the checkpoint object identity changes —
- * token/message patches bump the meta revision without touching it.
- */
-export function useControllerWriteCheckpoint(
-  controller: ChatStreamController | null | undefined
-): ChatStreamController['writeCheckpoint'] {
-  const [value, setValue] = useState(() => controller?.writeCheckpoint ?? null)
-  const valueRef = useRef(value)
-  valueRef.current = value
-  useEffect(() => {
-    if (!controller) return
-    const sync = (): void => {
-      const next = controller.writeCheckpoint
-      if (next !== valueRef.current) setValue(next)
-    }
-    sync()
-    return controller.subscribeMeta(sync)
-  }, [controller])
-  return value
 }

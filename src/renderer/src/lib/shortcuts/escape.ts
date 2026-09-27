@@ -9,7 +9,7 @@ export function shouldDeferAppEscapeStop(opts?: {
   if (opts?.drawerOpen) return true
   if (opts?.hasSessionQuery) return true
 
-  // Open popup / menu (ActionMenu, ModelPicker, etc.)
+  // Open popup / menu (ActionMenu, TaskOptions, etc.)
   if (document.querySelector('[aria-expanded="true"][aria-haspopup]')) return true
 
   // Overlay drawer, lightbox, or other modal dialog

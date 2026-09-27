@@ -64,6 +64,6 @@ export function useNetworkStatus(): { online: boolean; offlineHint: string | nul
     online,
     offlineHint: online
       ? null
-      : 'You appear to be offline. Agent runs will retry when connectivity returns.'
+      : 'You appear to be offline. Instructions wait and start when you’re back online.'
   }
 }

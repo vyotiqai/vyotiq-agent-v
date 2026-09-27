@@ -14,16 +14,6 @@ export type TodoParsed = {
   items: TodoItem[]
 }
 
-/** In-progress, else first pending, else the first item. */
-export function pickCurrentTask(items: readonly TodoItem[]): TodoItem | null {
-  return (
-    items.find((item) => item.status === 'in_progress') ??
-    items.find((item) => item.status === 'pending') ??
-    items[0] ??
-    null
-  )
-}
-
 const STATUS_MAP: Record<string, TodoStatus> = {
   '[ ]': 'pending',
   '[~]': 'in_progress',

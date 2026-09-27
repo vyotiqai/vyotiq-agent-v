@@ -91,9 +91,9 @@ export function modelReadinessBlocksSend(issue: ModelReadinessIssue | null | und
 export function modelReadinessSendReason(issue: ModelReadinessIssue): string {
   switch (issue.kind) {
     case 'missing_key':
-      return `Add an API key for ${issue.label} before sending.`
+      return `Add an API key for ${issue.label} before starting.`
     case 'unreachable':
-      return `${issue.label} is not ready. Fix the connection before sending.`
+      return `${issue.label} is not ready. Fix the connection before starting.`
     case 'manual_catalog':
       // Non-blocking tip if ever surfaced — send must remain enabled.
       return `${issue.label} has no model list — type a model ID in the picker to continue.`

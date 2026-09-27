@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { FileTypeIcon } from '@renderer/lib/fileIcons'
-import { TOOL_BODY_FLOW, TOOL_BODY_INNER, TOOL_BODY_PAD } from '@renderer/lib/utils/layout'
+import { BORDER_DIVIDER, TOOL_BODY_FLOW, TOOL_BODY_INNER, TOOL_BODY_PAD } from '@renderer/lib/utils/layout'
 import { DiffPreview } from '../../components/DiffPreview'
 import type { ToolBodyProps } from '../types'
 import { parseGitCommitData, parseGitDiffData, parseGitStatusData } from '../parsers/git'
@@ -19,12 +19,12 @@ export function GitStatusBody({ tool, loading, loadFailed }: ToolBodyProps) {
         {data.message ? (
           <span className="text-caption text-tertiary">{data.message}</span>
         ) : (
-          <span className="text-2xs tabular-nums text-tertiary">
+          <span className="text-caption tnum text-tertiary">
             {data.clean
               ? 'clean'
               : `${data.files.length} ${data.files.length === 1 ? 'file' : 'files'}`}
             {data.added > 0 ? <span className="ml-2 text-success">+{data.added}</span> : null}
-            {data.removed > 0 ? <span className="ml-2 text-danger">-{data.removed}</span> : null}
+            {data.removed > 0 ? <span className="ml-2 text-danger">−{data.removed}</span> : null}
           </span>
         )}
       </div>
@@ -34,14 +34,14 @@ export function GitStatusBody({ tool, loading, loadFailed }: ToolBodyProps) {
           {data.files.map((file) => (
             <li
               key={file.path}
-              className="flex min-w-0 items-center gap-2 font-mono text-caption text-fg/80"
+              className="flex min-w-0 items-center gap-2 font-mono text-caption text-secondary"
             >
               <span className="w-8 shrink-0 text-tertiary">{file.status}</span>
               <FileTypeIcon path={file.path} size={14} />
               {onOpenWorkspaceFile ? (
                 <button
                   type="button"
-                  className="min-w-0 flex-1 truncate text-left underline-offset-2 hover:underline"
+                  className="min-w-0 flex-1 truncate text-left underline-offset-2 hover:underline focus-visible:vy-focus-ring"
                   title={file.path}
                   onClick={() => onOpenWorkspaceFile(file.path)}
                 >
@@ -52,9 +52,9 @@ export function GitStatusBody({ tool, loading, loadFailed }: ToolBodyProps) {
                   {basename(file.path) || file.path}
                 </span>
               )}
-              <span className="ml-auto flex shrink-0 gap-2 tabular-nums">
+              <span className="ml-auto flex shrink-0 gap-2 tnum">
                 {file.added > 0 ? <span className="text-success">+{file.added}</span> : null}
-                {file.removed > 0 ? <span className="text-danger">-{file.removed}</span> : null}
+                {file.removed > 0 ? <span className="text-danger">−{file.removed}</span> : null}
               </span>
             </li>
           ))}
@@ -73,7 +73,7 @@ export function GitDiffBody({ tool, expanded, loading, loadFailed, inGroup }: To
     <div aria-busy={loading || undefined}>
       {showMeta ? (
         <div
-          className={`${TOOL_BODY_PAD} flex flex-wrap items-center gap-2 border-b border-border/40 pb-2`}
+          className={`${TOOL_BODY_PAD} flex flex-wrap items-center gap-2 border-b ${BORDER_DIVIDER} pb-2`}
         >
           {data.path ? (
             <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -81,7 +81,7 @@ export function GitDiffBody({ tool, expanded, loading, loadFailed, inGroup }: To
               {onOpenWorkspaceFile ? (
                 <button
                   type="button"
-                  className="min-w-0 truncate text-left font-mono text-caption text-fg/85 underline-offset-2 hover:underline"
+                  className="min-w-0 truncate text-left font-mono text-caption text-fg underline-offset-2 hover:underline focus-visible:vy-focus-ring"
                   title={data.path}
                   onClick={() => {
                     if (data.path) onOpenWorkspaceFile(data.path)
@@ -90,7 +90,7 @@ export function GitDiffBody({ tool, expanded, loading, loadFailed, inGroup }: To
                   {basename(data.path) || data.path}
                 </button>
               ) : (
-                <span className="min-w-0 truncate font-mono text-caption text-fg/85" title={data.path}>
+                <span className="min-w-0 truncate font-mono text-caption text-fg" title={data.path}>
                   {basename(data.path) || data.path}
                 </span>
               )}
@@ -99,10 +99,10 @@ export function GitDiffBody({ tool, expanded, loading, loadFailed, inGroup }: To
             <Chip>{data.summary}</Chip>
           ) : null}
           {data.added > 0 ? (
-            <span className="text-2xs tabular-nums text-success">+{data.added}</span>
+            <span className="text-caption tnum text-success">+{data.added}</span>
           ) : null}
           {data.removed > 0 ? (
-            <span className="text-2xs tabular-nums text-danger">-{data.removed}</span>
+            <span className="text-caption tnum text-danger">−{data.removed}</span>
           ) : null}
         </div>
       ) : null}
@@ -110,7 +110,7 @@ export function GitDiffBody({ tool, expanded, loading, loadFailed, inGroup }: To
       {data.lines.length > 0 ? (
         <DiffPreview lines={data.lines} path={data.path || 'diff'} expanded={expanded} />
       ) : (
-        <pre className={`${TOOL_BODY_PAD} m-0 ${TOOL_BODY_FLOW} font-mono text-caption leading-relaxed whitespace-pre-wrap text-fg/80 [overflow-wrap:anywhere]`}>
+        <pre className={`${TOOL_BODY_PAD} m-0 ${TOOL_BODY_FLOW} font-mono text-caption leading-relaxed whitespace-pre-wrap text-secondary [overflow-wrap:anywhere]`}>
           {data.message || 'No diff'}
         </pre>
       )}
@@ -134,9 +134,9 @@ export function GitCommitBody({ tool, loading, loadFailed }: ToolBodyProps) {
           <span className="text-caption text-tertiary">{data.detail}</span>
         ) : null}
         {data.pushed === true ? (
-          <span className="text-2xs text-success">pushed</span>
+          <span className="text-caption text-success">pushed</span>
         ) : data.committed === false ? (
-          <span className="text-2xs text-tertiary">nothing to commit</span>
+          <span className="text-caption text-tertiary">nothing to commit</span>
         ) : null}
       </div>
       {tool.contentTruncated ? <TruncatedBanner loading={loading} failed={loadFailed} /> : null}

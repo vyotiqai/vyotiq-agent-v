@@ -104,7 +104,7 @@ export function NotificationsButton({
         {items.length === 0 ? (
           <p className="px-3 py-6 text-center text-xs text-tertiary">Nothing new.</p>
         ) : (
-          <ul className="scroll-thin m-0 min-h-0 flex-1 list-none divide-y divide-border overflow-y-auto p-0">
+          <ul className="scroll-thin m-0 min-h-0 flex-1 list-none divide-y divide-border/60 overflow-y-auto p-0">
             {items.map((item) => (
               <li key={item.id} className="group relative">
                 <button

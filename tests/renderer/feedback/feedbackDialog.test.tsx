@@ -3,6 +3,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { FEEDBACK_TITLE_MAX } from '@shared/ipc'
 import { FeedbackDialog } from '@renderer/features/feedback'
 
 beforeEach(() => {
@@ -27,7 +28,7 @@ function setBridge(compose: ReturnType<typeof vi.fn>): void {
 }
 
 function fillForm(): void {
-  fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'feature' } })
+  fireEvent.click(screen.getByRole('radio', { name: 'Feature request' }))
   fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Search in logs' } })
   fireEvent.change(screen.getByLabelText('Message'), {
     target: { value: 'Please add full-text search over log files.' }
@@ -63,7 +64,7 @@ describe('FeedbackDialog', () => {
     render(<FeedbackDialog open onClose={vi.fn()} />)
 
     fillForm()
-    fireEvent.click(screen.getByLabelText('Include basic diagnostics (app version, OS)'))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Include basic diagnostics (app version, OS)' }))
     fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
 
     await waitFor(() => {
@@ -106,6 +107,48 @@ describe('FeedbackDialog', () => {
     expect(link?.getAttribute('href')).toContain('mailto:support@vyotiq.com')
     expect(link?.getAttribute('href')).toContain(encodeURIComponent('Search in logs'))
     expect(alert).toBeTruthy()
+  })
+
+  it('sits on the redesigned frame: menu surface, 48px header, footer row', () => {
+    setBridge(vi.fn())
+    render(<FeedbackDialog open onClose={vi.fn()} />)
+    const dialog = screen.getByRole('dialog', { name: 'Send feedback' })
+    expect(document.querySelector('dialog')).toBeNull()
+    expect(dialog.classList.contains('vy-menu')).toBe(true)
+    const title = screen.getByRole('heading', { name: 'Send feedback' })
+    expect(title.classList.contains('text-heading')).toBe(true)
+    expect(title.parentElement!.classList.contains('h-12')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
+    const submit = screen.getByRole('button', { name: 'Send feedback' })
+    expect(submit.closest('form')).toBeNull()
+    // Disabled until the form is filled, so a tooltip span wraps it.
+    expect(submit.closest('.border-t')).toBe(dialog.lastElementChild)
+    // The type is a one-glance choice, not a native select.
+    expect(document.querySelector('select')).toBeNull()
+    expect(screen.getByRole('radiogroup', { name: 'Type' })).toBeTruthy()
+    expect(screen.getByRole('radio', { name: 'Bug report' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('keeps one focus treatment on the message field and counts in tabular mono', () => {
+    setBridge(vi.fn())
+    render(<FeedbackDialog open onClose={vi.fn()} />)
+    const field = screen.getByLabelText('Message')
+    expect(field.className).not.toMatch(/outline-none/)
+    expect(field.classList.contains('focus-visible:vy-focus-ring')).toBe(true)
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'abc' } })
+    const counter = screen.getByText(`3/${FEEDBACK_TITLE_MAX}`)
+    expect(counter.className).toMatch(/\bfont-mono\b/)
+    expect(counter.className).toMatch(/\btnum\b/)
+    expect(counter.className).not.toMatch(/text-\[/)
+  })
+
+  it('submits from the footer when the title field takes Enter', async () => {
+    const compose = vi.fn(async () => ({ ok: true as const, mailto: 'mailto:x' }))
+    setBridge(compose)
+    render(<FeedbackDialog open onClose={vi.fn()} />)
+    fillForm()
+    fireEvent.submit(screen.getByLabelText('Title').closest('form')!)
+    await waitFor(() => expect(compose).toHaveBeenCalledTimes(1))
   })
 
   it('closes on Escape', () => {

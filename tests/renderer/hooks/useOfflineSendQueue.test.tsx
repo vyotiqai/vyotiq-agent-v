@@ -53,7 +53,7 @@ describe('useOfflineSendQueue', () => {
 
     expect(onSend).not.toHaveBeenCalled()
     expect(offlineQueueLength(WORKSPACE)).toBe(1)
-    expect(result.current.offlineHint).toBe('1 message queued — will send when online')
+    expect(result.current.offlineHint).toBe('1 instruction queued — will start when online')
   })
 
   it('retains an offline send in memory when persistence fails', async () => {
@@ -125,7 +125,7 @@ describe('useOfflineSendQueue', () => {
 
     expect(onSend).toHaveBeenCalledTimes(1)
     expect(offlineQueueLength(WORKSPACE)).toBe(2)
-    expect(result.current.offlineHint).toContain('2 messages queued')
+    expect(result.current.offlineHint).toContain('2 instructions queued')
   })
 
   it('clearOfflineQueueForWorkspace clears hint and storage', async () => {

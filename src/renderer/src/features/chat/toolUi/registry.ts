@@ -1,7 +1,6 @@
 import type { ComponentType } from 'react'
 import type { UiToolRow } from '@shared/transcript'
 import { isUnresolvedToolName, summarizeToolArgs, TOOL_LABELS } from '@shared/toolSummary'
-import { formatPathLabel } from '@shared/utils/displayPath'
 import { isTerminalSessionInProgress } from '@shared/utils/terminalFormat'
 import { basename } from '@shared/utils/path'
 import {
@@ -26,8 +25,6 @@ import { CodebaseSearchBody } from './bodies/CodebaseSearchBody'
 import { SkillBody } from './bodies/SkillBody'
 import { StatusMessageBody } from './bodies/StatusMessageBody'
 import { TerminalBody } from './bodies/TerminalBody'
-import { TodoBody } from './bodies/TodoBody'
-import { SpawnAgentInstanceBody, AwaitAgentInstanceBody } from './bodies/AgentInstanceBody'
 import { WebFetchBody } from './bodies/WebFetchBody'
 import { WebSearchBody } from './bodies/WebSearchBody'
 import { isInterruptedToolContent, isMcpTool, toolIconName, toolLabel } from './meta'
@@ -96,10 +93,6 @@ function terminalHasBody(tool: UiToolRow): boolean {
   const data = parseTerminalCardData(tool)
   // Command alone is enough — show `$ …` in the fixed viewport before streams arrive.
   return Boolean(data.command || data.output || data.stderr || data.cwd || data.shell)
-}
-
-function todoHasBody(tool: UiToolRow): boolean {
-  return parseTodoData(tool).items.length > 0
 }
 
 function gitStatusHasBody(tool: UiToolRow): boolean {
@@ -342,8 +335,9 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
     }
   },
   todo_write: {
-    Body: TodoBody,
-    hasBody: todoHasBody,
+    Body: StatusMessageBody,
+    hasBody: () => false,
+    headerOnly: true,
     headerMeta: (tool) => {
       const data = parseTodoData(tool)
       // On failure the summary is the args label ("2 tasks"); the actionable
@@ -554,12 +548,13 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
     }
   },
   spawn_agent_instance: {
-    Body: SpawnAgentInstanceBody,
-    hasBody: (tool) => tool.status === 'running' || Boolean(tool.content?.trim()),
+    Body: StatusMessageBody,
+    hasBody: () => false,
+    headerOnly: true,
     headerMeta: (tool) => ({
       verb: toolLabel(tool.name, tool.status),
       target: tool.summary,
-      icon: 'bot'
+      icon: 'crew'
     })
   },
   build_tool: {
@@ -572,8 +567,9 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
     })
   },
   await_agent_instance: {
-    Body: AwaitAgentInstanceBody,
-    hasBody: (tool) => tool.status === 'running' || Boolean(tool.content?.trim()),
+    Body: StatusMessageBody,
+    hasBody: () => false,
+    headerOnly: true,
     headerMeta: (tool) => ({
       verb: toolLabel(tool.name, tool.status),
       target: tool.summary,
@@ -581,8 +577,9 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
     })
   },
   pull_agent_instance: {
-    Body: AwaitAgentInstanceBody,
-    hasBody: (tool) => Boolean(tool.content?.trim()),
+    Body: StatusMessageBody,
+    hasBody: () => false,
+    headerOnly: true,
     headerMeta: (tool) => ({
       verb: toolLabel(tool.name, tool.status),
       target: tool.summary,
@@ -590,8 +587,9 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
     })
   },
   merge_agent_instance: {
-    Body: AwaitAgentInstanceBody,
-    hasBody: (tool) => Boolean(tool.content?.trim()),
+    Body: StatusMessageBody,
+    hasBody: () => false,
+    headerOnly: true,
     headerMeta: (tool) => ({
       verb: toolLabel(tool.name, tool.status),
       target: tool.summary,
@@ -599,8 +597,9 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
     })
   },
   cancel_agent_instance: {
-    Body: AwaitAgentInstanceBody,
-    hasBody: (tool) => Boolean(tool.content?.trim()),
+    Body: StatusMessageBody,
+    hasBody: () => false,
+    headerOnly: true,
     headerMeta: (tool) => ({
       verb: toolLabel(tool.name, tool.status),
       target: tool.summary,
@@ -641,7 +640,7 @@ const BUILTIN_REGISTRY: Record<string, ToolRegistryEntry> = {
       return {
         verb: toolLabel(tool.name, tool.status),
         target: tool.summary || data.chip,
-        icon: 'bot'
+        icon: 'sliders'
       }
     }
   },

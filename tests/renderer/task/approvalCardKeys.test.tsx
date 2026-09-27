@@ -68,7 +68,7 @@ describe('ApprovalCard Always allow', () => {
   it('offers no Always allow for a command that cannot be scoped', () => {
     render(<ApprovalCard approval={{ ...terminal, alwaysAllowCommand: null }} requestedAt={null} onDecide={vi.fn()} />)
     expect(screen.queryByRole('button', { name: /^Always allow/ })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Allow for this run' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Allow for this task' })).toBeTruthy()
   })
 
   it('names the tool for anything else', () => {

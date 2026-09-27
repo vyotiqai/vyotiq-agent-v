@@ -200,27 +200,6 @@ export function mcpInvocationDisplayText(parsed: ParsedMcpToolInvocation): strin
   return `${nameLine}\n\n${parsed.userRequest}`
 }
 
-export type SlashChipInfo =
-  | { kind: 'skill'; name: string; userRequest: string }
-  | { kind: 'mcp'; name: string; userRequest: string }
-
-/** Sidebar / user-prompt chip from stored message content. */
-export function slashChipFromContent(content: string): SlashChipInfo | null {
-  const skill = parseSkillInvocation(content)
-  if (skill) {
-    return { kind: 'skill', name: skill.skillName, userRequest: skill.userRequest }
-  }
-  const mcp = parseMcpToolInvocation(content)
-  if (mcp) {
-    return {
-      kind: 'mcp',
-      name: `${mcp.serverId}-${mcp.toolName}`,
-      userRequest: mcp.userRequest
-    }
-  }
-  return null
-}
-
 /** Display text for any user message; skill/MCP injections collapse to a summary. */
 export function userMessageDisplayText(text: string): string {
   const skill = parseSkillInvocation(text)

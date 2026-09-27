@@ -13,7 +13,7 @@ export function CodebaseSearchBody({ tool, loading, loadFailed, inGroup }: ToolB
     <div>
       <div className={`${TOOL_BODY_PAD} flex flex-wrap items-center gap-2 pb-1`}>
         {!inGroup ? <Chip>{data.query}</Chip> : null}
-        <span className="text-2xs tabular-nums text-tertiary">
+        <span className="text-caption tnum text-tertiary">
           {data.hits.length} {data.hits.length === 1 ? 'hit' : 'hits'}
         </span>
       </div>
@@ -24,7 +24,7 @@ export function CodebaseSearchBody({ tool, loading, loadFailed, inGroup }: ToolB
             {onOpenWorkspaceFile ? (
               <button
                 type="button"
-                className="truncate text-tertiary underline-offset-2 hover:underline"
+                className="truncate rounded-sm text-tertiary underline-offset-2 hover:underline focus-visible:vy-focus-ring"
                 title={`${hit.path}:${hit.startLine}-${hit.endLine}`}
                 onClick={() => onOpenWorkspaceFile(hit.path, { line: hit.startLine })}
               >
@@ -36,7 +36,7 @@ export function CodebaseSearchBody({ tool, loading, loadFailed, inGroup }: ToolB
               </div>
             )}
             {hit.snippet ? (
-              <div className="whitespace-pre-wrap text-fg/80 [overflow-wrap:anywhere]">{hit.snippet}</div>
+              <div className="whitespace-pre-wrap text-secondary [overflow-wrap:anywhere]">{hit.snippet}</div>
             ) : null}
           </div>
         ))}

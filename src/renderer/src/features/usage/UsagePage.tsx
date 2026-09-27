@@ -140,7 +140,7 @@ function UsageBody({
 
   return (
     <>
-      <div className="grid grid-cols-2 divide-border border-y border-border @3xl:grid-cols-4 @3xl:divide-x">
+      <div className="grid grid-cols-2 divide-border/60 border-y border-border @3xl:grid-cols-4 @3xl:divide-x">
         <BigStat value={formatCount(totals.runs)} label="Tasks" detail={taskTrend} />
         <BigStat
           value={formatCompactCount(tokens)}

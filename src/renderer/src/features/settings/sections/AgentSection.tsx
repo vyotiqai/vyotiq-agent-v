@@ -51,7 +51,7 @@ function DraftMeta({ value, max, dirty }: { value: string; max: number; dirty: b
         <div className="flex w-full items-center justify-between gap-2 text-caption text-tertiary">
           <span aria-hidden="true">{status}</span>
           {nearLimit ? (
-            <span className="tabular-nums">
+            <span className="tnum">
               {value.length}/{max}
             </span>
           ) : null}
@@ -391,7 +391,7 @@ export function AgentSection({
           id="agent-persona"
           title="Name"
           hint="What the agent calls itself."
-          help="Leave blank to keep the default assistant name."
+          help="Leave blank to keep the default agent name."
           badge={scoped}
           {...form.agentDefaultMark('agentPersona')}
         >

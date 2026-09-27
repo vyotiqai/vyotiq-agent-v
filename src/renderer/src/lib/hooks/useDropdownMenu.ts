@@ -7,6 +7,7 @@ import {
   type RefObject
 } from 'react'
 import { getFocusableElements } from '@renderer/lib/a11y'
+import { holdFloatingLayer } from './floatingLayers'
 
 const DROPDOWN_GAP_PX = 6
 const VIEWPORT_PAD_PX = 8
@@ -110,6 +111,9 @@ export function useDropdownMenu({
   useEffect(() => {
     if (disabled && open) close(false)
   }, [disabled, open, close])
+
+  // While open, a Dialog around the trigger leaves Escape to this menu.
+  useEffect(() => (open ? holdFloatingLayer() : undefined), [open])
 
   useEffect(() => {
     if (!open) return

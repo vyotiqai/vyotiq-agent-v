@@ -58,7 +58,7 @@ export function ExtensionList({
             {section.label}
             <span className="font-mono font-normal tnum">{section.items.length}</span>
           </h2>
-          <ul className="divide-y divide-border border-y border-border">
+          <ul className="divide-y divide-border/60 border-y border-border">
             {section.items.map((item) => (
               <ExtensionRow
                 key={item.key}

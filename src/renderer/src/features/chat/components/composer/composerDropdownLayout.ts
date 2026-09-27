@@ -1,15 +1,6 @@
-/** Shared viewport clamping for composer portal dropdowns (model / mention / slash). */
-
-import { MICRO_LABEL_CAPS } from '@renderer/lib/utils/layout'
+/** Shared viewport clamping for composer portal dropdowns (options / mention / slash / context). */
 
 export const COMPOSER_DROPDOWN_PAD_PX = 8
-
-/** Section headers inside composer autocomplete panels. */
-export const composerDropdownSectionHeader = `m-0 px-2.5 py-1 ${MICRO_LABEL_CAPS}`
-
-/** Option rows inside composer autocomplete panels. */
-export const composerDropdownRow =
-  'flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-fg vy-transition hover:bg-surface'
 
 export type ComposerDropdownPlacement = 'up' | 'down'
 

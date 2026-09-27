@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { FileTypeIcon } from '@renderer/lib/fileIcons'
-import { Icon } from '@renderer/lib/icons'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { TOOL_BODY_INNER, TOOL_BODY_PAD } from '@renderer/lib/utils/layout'
-import { cn } from '@renderer/lib/ui'
+import { IconButton, cn } from '@renderer/lib/ui'
 import { joinWorkspaceRel } from '@shared/utils/displayPath'
 import { useRunSession } from '../RunSessionContext'
 
@@ -15,7 +14,7 @@ export function TruncatedBanner({
   failed?: boolean
 }) {
   return (
-    <p className="m-0 px-3 py-1 text-2xs text-tertiary">
+    <p className="m-0 px-3 py-1 text-caption text-tertiary">
       {loading
         ? 'Loading full output…'
         : failed
@@ -46,10 +45,10 @@ export function CodeBlock({
     >
       {lines.map((text, index) => (
         <div key={index} className="flex min-w-0 gap-2">
-          <span className="w-8 shrink-0 select-none text-right tabular-nums text-tertiary">
+          <span className="w-8 shrink-0 select-none text-right tnum text-tertiary">
             {startLine + index}
           </span>
-          <span className="min-w-0 flex-1 whitespace-pre-wrap text-fg/80 [overflow-wrap:anywhere]">
+          <span className="min-w-0 flex-1 whitespace-pre-wrap text-secondary [overflow-wrap:anywhere]">
             {text || '\u00a0'}
           </span>
         </div>
@@ -73,14 +72,14 @@ export function PathList({ paths }: { paths: string[] }) {
           {onOpenWorkspaceFile ? (
             <button
               type="button"
-              className="min-w-0 flex-1 truncate text-left font-mono text-caption text-fg/80 underline-offset-2 hover:underline"
+              className="min-w-0 flex-1 truncate rounded-sm text-left font-mono text-caption text-secondary underline-offset-2 hover:underline focus-visible:vy-focus-ring"
               title={path}
               onClick={() => onOpenWorkspaceFile(path)}
             >
               {path}
             </button>
           ) : (
-            <span className="min-w-0 flex-1 truncate font-mono text-caption text-fg/80" title={path}>
+            <span className="min-w-0 flex-1 truncate font-mono text-caption text-secondary" title={path}>
               {path}
             </span>
           )}
@@ -129,20 +128,20 @@ export function DirListing({
             {canOpen && openFile ? (
               <button
                 type="button"
-                className="min-w-0 flex-1 truncate text-left text-fg/80 underline-offset-2 hover:underline"
+                className="min-w-0 flex-1 truncate rounded-sm text-left text-secondary underline-offset-2 hover:underline focus-visible:vy-focus-ring"
                 title={rel}
                 onClick={() => openFile(rel)}
               >
                 {label}
               </button>
             ) : (
-              <span className="min-w-0 flex-1 truncate text-fg/80" title={entry.name}>
+              <span className="min-w-0 flex-1 truncate text-secondary" title={entry.name}>
                 {label}
               </span>
             )}
             {entry.size ? (
               <span
-                className="shrink-0 tabular-nums text-tertiary"
+                className="shrink-0 tnum text-tertiary"
                 title={`Size ${entry.size}`}
               >
                 {entry.size}
@@ -170,14 +169,14 @@ export function MatchList({
       {groups.map((group) => (
         <div key={group.file}>
           <div
-            className="flex min-w-0 items-center gap-1.5 truncate font-mono text-2xs font-medium text-tertiary"
+            className="flex min-w-0 items-center gap-1.5 truncate font-mono text-caption font-medium text-tertiary"
             title={group.file}
           >
             <FileTypeIcon path={group.file} size={12} />
             {onOpenWorkspaceFile ? (
               <button
                 type="button"
-                className="min-w-0 truncate text-left underline-offset-2 hover:underline"
+                className="min-w-0 truncate rounded-sm text-left underline-offset-2 hover:underline focus-visible:vy-focus-ring"
                 onClick={() => onOpenWorkspaceFile(group.file)}
               >
                 {group.file}
@@ -194,19 +193,19 @@ export function MatchList({
               {onOpenWorkspaceFile ? (
                 <button
                   type="button"
-                  className="tabular-nums text-left text-tertiary underline-offset-2 hover:underline"
+                  className="rounded-sm text-left tnum text-tertiary underline-offset-2 hover:underline focus-visible:vy-focus-ring"
                   onClick={() => onOpenWorkspaceFile(group.file, { line: match.line })}
                 >
                   {match.line}
                 </button>
               ) : (
-                <span className="tabular-nums text-tertiary">{match.line}</span>
+                <span className="tnum text-tertiary">{match.line}</span>
               )}
               <span
                 className={
                   match.isMatch
                     ? 'whitespace-pre-wrap text-fg [overflow-wrap:anywhere]'
-                    : 'whitespace-pre-wrap text-fg/60 [overflow-wrap:anywhere]'
+                    : 'whitespace-pre-wrap text-muted [overflow-wrap:anywhere]'
                 }
               >
                 {match.text}
@@ -221,7 +220,7 @@ export function MatchList({
 
 export function Chip({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-sm border border-border bg-surface-2/60 px-1.5 py-px font-mono text-2xs text-tertiary">
+    <span className="inline-flex items-center rounded-sm bg-surface px-1.5 py-px font-mono text-caption text-tertiary">
       {children}
     </span>
   )
@@ -253,18 +252,13 @@ export function CopyButton({ text, className }: { text: string; className?: stri
   const label = copied ? 'Copied' : copyError ? 'Copy failed' : 'Copy'
 
   return (
-    <button
-      type="button"
-      className={cn(
-        'inline-flex items-center gap-1 rounded-sm border border-border px-1.5 py-0.5 text-2xs text-tertiary vy-transition hover:text-fg',
-        className
-      )}
+    <IconButton
+      icon={copied ? 'check' : 'copy'}
+      label={label}
+      size="xs"
+      tone="muted"
+      className={className}
       onClick={() => void copy()}
-      aria-label={label}
-      title={label}
-    >
-      <Icon name={copied ? 'check' : 'copy'} size={14} />
-      {label}
-    </button>
+    />
   )
 }

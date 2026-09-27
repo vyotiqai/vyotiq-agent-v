@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessage } from '@shared/ipc'
-import { inferToolStatus, messagesToUiItems, applyEventTimestamps, applyCompactionItems, insertCompactionItem, applyPersistedLiveTools, finalizeHydratedTranscript, isMeaningfulThinking, shouldRenderThinking, duplicatesReasoning, mergeThinkingContent, applyThinkingSnapshot, stripToolShapedAssistantText, stripToolShapedAssistantTextForStream, stripIncompleteToolPrefix, isToolShapedTextLeak, scrubStreamingAssistantToolLeak, type UiItem } from '@shared/transcript'
+import { inferToolStatus, messagesToUiItems, applyEventTimestamps, applyCompactionItems, insertCompactionItem, applyPersistedLiveTools, finalizeHydratedTranscript, isMeaningfulThinking, shouldRenderThinking, duplicatesReasoning, mergeThinkingContent, applyThinkingSnapshot, stripToolShapedAssistantText, stripToolShapedAssistantTextForStream, stripIncompleteToolPrefix, isToolShapedTextLeak, isSerializedPayloadText, scrubStreamingAssistantToolLeak, type UiItem } from '@shared/transcript'
 
 describe('messagesToUiItems', () => {
   it('never renders loop-injected synthetic user messages', () => {
@@ -497,6 +497,36 @@ describe('isToolShapedTextLeak', () => {
         '<|DSML|tool_calls><|DSML|invoke name="edit"></|DSML|invoke></|DSML|tool_calls>'
       )
     ).toBe(true)
+  })
+})
+
+describe('isSerializedPayloadText', () => {
+  it('detects a whole answer that is a serialized JSON object or array', () => {
+    expect(isSerializedPayloadText('{"a":1}')).toBe(true)
+    expect(isSerializedPayloadText('[{"kind":"output"}]')).toBe(true)
+    // The reported run: a plan/step envelope the model answered with.
+    expect(
+      isSerializedPayloadText(
+        '{"isNewTopic":false,"title":null,"steps":[{"kind":"output","value":"Hi! What do you need?","tool_calls":[]}],"execute_report":""}'
+      )
+    ).toBe(true)
+    // Surrounding whitespace and code fences do not make it prose.
+    expect(isSerializedPayloadText('\n  {"a":1}\n')).toBe(true)
+  })
+
+  it('leaves prose and non-container JSON alone', () => {
+    expect(isSerializedPayloadText('{"a":1} is what the tool returned.')).toBe(false)
+    expect(isSerializedPayloadText('Fixed the flaky updater test.')).toBe(false)
+    expect(isSerializedPayloadText('42')).toBe(false)
+    expect(isSerializedPayloadText('"done"')).toBe(false)
+    expect(isSerializedPayloadText('null')).toBe(false)
+  })
+
+  it('is false for an empty or unterminated container', () => {
+    expect(isSerializedPayloadText('')).toBe(false)
+    expect(isSerializedPayloadText('   ')).toBe(false)
+    expect(isSerializedPayloadText('{')).toBe(false)
+    expect(isSerializedPayloadText('{"a":1')).toBe(false)
   })
 })
 

@@ -42,15 +42,22 @@ const NOTE_NAMES_SHOWN = 3
 /**
  * The notes in `.vyotiq/memory/notes`, newest first. `index.md` and
  * `state.md` are the memory's own files, not notes — `memory_write` keeps
- * every note in `notes/<name>.md`.
+ * every note in `notes/<name>.md`. They are reported separately because the
+ * prompt is pre-loaded from them every step (buildMemorySection), so a
+ * workspace can hold real memory with no notes at all.
  */
-async function readMemoryNotes(workspacePath: string): Promise<{ count: number; names: string[] }> {
-  const dir = join(workspacePath, '.vyotiq', 'memory', 'notes')
+async function readMemoryNotes(
+  workspacePath: string
+): Promise<{ count: number; names: string[]; index: boolean; state: boolean }> {
+  const memoryDir = join(workspacePath, '.vyotiq', 'memory')
+  const index = existsSync(join(memoryDir, 'index.md'))
+  const state = existsSync(join(memoryDir, 'state.md'))
+  const dir = join(memoryDir, 'notes')
   let entries: Dirent[]
   try {
     entries = await readdir(dir, { withFileTypes: true, encoding: 'utf8' })
   } catch {
-    return { count: 0, names: [] }
+    return { count: 0, names: [], index, state }
   }
   const notes = entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
   const stamped = await Promise.all(
@@ -64,7 +71,12 @@ async function readMemoryNotes(workspacePath: string): Promise<{ count: number; 
     })
   )
   stamped.sort((a, b) => b.at - a.at || a.name.localeCompare(b.name))
-  return { count: notes.length, names: stamped.slice(0, NOTE_NAMES_SHOWN).map((note) => note.name) }
+  return {
+    count: notes.length,
+    names: stamped.slice(0, NOTE_NAMES_SHOWN).map((note) => note.name),
+    index,
+    state
+  }
 }
 
 type IndexFacts = { files: number; indexedAt: string | null }
@@ -141,6 +153,8 @@ export async function buildWorkspaceAgentContext(
     },
     memoryNotes: memory.count,
     ...(memory.names.length > 0 ? { memoryNoteNames: memory.names } : {}),
+    memoryIndex: memory.index,
+    memoryState: memory.state,
     codeIndex: {
       state: codeIndexStateFor(workspacePath, codeIndex, index),
       ...(index ? { files: index.files, ...(index.indexedAt ? { indexedAt: index.indexedAt } : {}) } : {})

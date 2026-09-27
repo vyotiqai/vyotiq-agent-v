@@ -95,7 +95,7 @@ function DiffLines({
       )}
     >
       {hiddenBefore ? (
-        <p className="m-0 px-2 py-1 text-2xs text-tertiary">
+        <p className="m-0 px-2 py-1 text-caption text-tertiary">
           {hidden} earlier {hidden === 1 ? 'line' : 'lines'}
         </p>
       ) : null}
@@ -119,11 +119,11 @@ function DiffLines({
               'flex min-w-0',
               line.kind === 'add' && 'diff-row-add',
               line.kind === 'del' && 'diff-row-del',
-              match && 'ring-1 ring-inset ring-accent/40'
+              match && 'ring-1 ring-inset ring-accent'
             )}
           >
             <span
-              className="shrink-0 select-none pr-1 text-right tabular-nums text-2xs text-tertiary"
+              className="shrink-0 select-none pr-1 text-right tnum text-caption text-tertiary"
               style={{ width: `${gutterCh}ch`, minWidth: '2ch' }}
               aria-hidden={line.lineNumber == null}
             >
@@ -132,7 +132,7 @@ function DiffLines({
             </span>
             <span
               className={cn(
-                'min-w-0 flex-1 py-px pl-1 pr-2 text-fg/85',
+                'min-w-0 flex-1 py-px pl-1 pr-2 text-fg',
                 wordWrap
                   ? 'whitespace-pre-wrap [overflow-wrap:anywhere]'
                   : 'whitespace-pre'
@@ -144,7 +144,7 @@ function DiffLines({
         )
       })}
       {!hiddenBefore && hidden > 0 ? (
-        <p className="m-0 px-2 py-1 text-2xs text-tertiary">
+        <p className="m-0 px-2 py-1 text-caption text-tertiary">
           {hidden} more {hidden === 1 ? 'line' : 'lines'}
         </p>
       ) : null}
@@ -184,7 +184,7 @@ export const DiffPreview = memo(function DiffPreview({
   if (splitSides) {
     return (
       <div className="grid min-w-0 grid-cols-2 gap-px overflow-hidden bg-border">
-        <div className="min-h-0 min-w-0 overflow-auto bg-bg">
+        <div className="min-h-0 min-w-0 overflow-auto bg-sunken">
           <DiffLines
             lines={splitSides.left}
             path={path}
@@ -194,7 +194,7 @@ export const DiffPreview = memo(function DiffPreview({
             wordWrap={wordWrap}
           />
         </div>
-        <div className="min-h-0 min-w-0 overflow-auto bg-bg">
+        <div className="min-h-0 min-w-0 overflow-auto bg-sunken">
           <DiffLines
             lines={splitSides.right}
             path={path}

@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import type { UiItem } from '@shared/transcript'
-import { buildTranscriptRows } from '@renderer/features/chat/utils/transcriptRows'
-import { collectTurnFileDiffs } from '@renderer/features/chat/utils/turnFileDiffs'
 
 function tool(
   id: string,
@@ -22,37 +20,6 @@ function tool(
     }
   }
 }
-
-describe('collectTurnFileDiffs', () => {
-  it('buckets str_replace diffs by path for the turn', () => {
-    const rows = buildTranscriptRows([
-      { kind: 'message', id: 'u1', role: 'user', content: 'fix', at: 1 },
-      tool('t1', 'str_replace', {
-        path: 'src/a.ts',
-        old_string: 'foo',
-        new_string: 'bar'
-      })
-    ])
-    const diffs = collectTurnFileDiffs(rows)
-    const turn0 = diffs.get(0)
-    expect(turn0?.get('src/a.ts')?.some((l) => l.kind === 'del')).toBe(true)
-    expect(turn0?.get('src/a.ts')?.some((l) => l.kind === 'add')).toBe(true)
-  })
-
-  it('skips in-flight writing tools', () => {
-    const rows = buildTranscriptRows([
-      { kind: 'message', id: 'u1', role: 'user', content: 'fix', at: 1 },
-      tool(
-        't1',
-        'edit',
-        { path: 'src/a.ts', contents: 'x\n' },
-        'running'
-      )
-    ])
-    const diffs = collectTurnFileDiffs(rows)
-    expect(diffs.get(0)?.size ?? 0).toBe(0)
-  })
-})
 
 describe('collectSessionChangedFiles', () => {
   it('keeps created when a later edit modifies the same path', async () => {
@@ -77,7 +44,7 @@ describe('collectSessionChangedFiles', () => {
 
 describe('mergeCheckpointChangedFiles', () => {
   it('adds checkpoint-only paths to tool-arg changed files', async () => {
-    const { mergeCheckpointChangedFiles, checkpointOnlyChangedFiles } = await import(
+    const { mergeCheckpointChangedFiles } = await import(
       '@renderer/features/chat/utils/turnFileDiffs'
     )
     const toolFiles = [{ path: 'src/a.ts', added: 2, removed: 1, action: 'modified' as const }]
@@ -92,8 +59,5 @@ describe('mergeCheckpointChangedFiles', () => {
       path: 'dist/out.js',
       action: 'created'
     })
-    expect(checkpointOnlyChangedFiles(toolFiles, checkpoint).map((f) => f.path)).toEqual([
-      'dist/out.js'
-    ])
   })
 })

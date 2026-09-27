@@ -42,6 +42,8 @@ beforeEach(() => {
         rules: { agentsMd: false, claudeMd: true, cursorrules: false, ruleFileCount: 3 },
         memoryNotes: 2,
         memoryNoteNames: ['release-runbook', 'packaged-launch'],
+        memoryIndex: false,
+        memoryState: false,
         codeIndex: { state: 'ready' as const, files: 12408, indexedAt: new Date(Date.now() - 4 * 60_000).toISOString() }
       }
     })),
@@ -131,6 +133,25 @@ describe('New task brief', () => {
     expect(sees.textContent).toContain('12,408 files · updated 4m ago')
     await waitFor(() => expect(sees.textContent).toContain('2 built-in · 1 MCP server'))
     await waitFor(() => expect(sees.textContent).toContain('GitHub needs sign-in'))
+  })
+
+  it('names the prompt-loaded memory files when there are no notes, not None', async () => {
+    window.vyotiq.agentContext = vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        workspaceName: 'ws',
+        branch: 'main',
+        rules: { agentsMd: false, claudeMd: true, cursorrules: false, ruleFileCount: 3 },
+        memoryNotes: 0,
+        memoryIndex: true,
+        memoryState: true,
+        codeIndex: { state: 'ready' as const }
+      }
+    })) as unknown as typeof window.vyotiq.agentContext
+    renderBrief()
+    const sees = screen.getByRole('complementary', { name: 'What the agent will see' })
+    await waitFor(() => expect(sees.textContent).toContain('state.md · index.md'))
+    expect(sees.textContent).not.toContain('0 notes')
   })
 
   it('starts the task with its checks, a half-typed one included', async () => {
@@ -279,16 +300,21 @@ describe('New task brief', () => {
   })
 
   it('checks out another branch from the header, after asking over a dirty tree', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    const nativeConfirm = vi.spyOn(window, 'confirm')
     renderBrief()
     fireEvent.click(await screen.findByRole('button', { name: 'Branch' }))
     fireEvent.click(await screen.findByRole('option', { name: 'next' }))
-    // Two changed files: declined, git is not asked.
-    expect(confirm).toHaveBeenCalledTimes(1)
+    // Two changed files: the app asks in its own dialog; declined, git is not asked.
+    let ask = await screen.findByRole('dialog', { name: 'Switch branch' })
+    fireEvent.click(within(ask).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Switch branch' })).toBeNull())
     expect(window.vyotiq.gitCheckout).not.toHaveBeenCalled()
     fireEvent.click(await screen.findByRole('button', { name: 'Branch' }))
     fireEvent.click(await screen.findByRole('option', { name: 'next' }))
+    ask = await screen.findByRole('dialog', { name: 'Switch branch' })
+    fireEvent.click(within(ask).getByRole('button', { name: 'Switch branch' }))
     await waitFor(() => expect(window.vyotiq.gitCheckout).toHaveBeenCalledWith('/ws/app', 'next'))
+    expect(nativeConfirm).not.toHaveBeenCalled()
   })
 
   it('offers a new worktree: says where it will run, and starts with it asked for', async () => {

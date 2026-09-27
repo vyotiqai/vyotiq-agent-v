@@ -5,7 +5,7 @@ export const BUILTIN_COMMANDS: SlashCommandDescriptor[] = [
   {
     id: 'builtin:clear',
     trigger: 'clear',
-    label: 'Clear / new chat',
+    label: 'Clear / new task',
     description: 'Start a new task. Prefer this over carrying stale history into unrelated work',
     kind: 'builtin',
     group: 'App',

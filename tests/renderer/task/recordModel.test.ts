@@ -95,6 +95,47 @@ describe('buildRecordModel', () => {
     expect(over!.result?.text).toBe('Looking at the updater first.')
   })
 
+  it('never promotes a serialized payload answer to the result', () => {
+    const payload =
+      '{"isNewTopic":false,"title":null,"steps":[{"kind":"output","value":"Hi! What do you need?","tool_calls":[]}],"execute_report":""}'
+    const items = [user('Say hi', 0), said(payload, 1)]
+    const [r] = buildRecordModel(items, { running: false }).runs
+    // No result: the history title and Result row fall back to the brief…
+    expect(r!.result).toBeNull()
+    // …and the payload is still a visible note in the work list.
+    expect(r!.after.map((w) => w.kind)).toEqual(['note'])
+    const [note] = r!.after
+    expect(note!.kind === 'note' ? note.text : null).toBe(payload)
+  })
+
+  it('fails a step whose own instance work failed, even when the todo says done', () => {
+    const items = [
+      user('Fan the work out', 0),
+      todos([['a', '~', 'Spawn the children']], 1),
+      tool('spawn_agent_instance', { name: 'a' }, 'spawned', 2),
+      tool('await_agent_instance', { instanceId: 'a' }, 'Cancelled', 20, 'fail'),
+      todos([['a', 'x', 'Spawn the children']], 30)
+    ]
+    const options = { running: false, failed: false }
+    const [r] = buildRecordModel(items, options).runs
+    expect(r!.steps[0]!.state).toBe('failed')
+    expect(r!.steps[0]!.work.map((w) => w.kind)).toEqual(['instance', 'instance'])
+    expect(runStateOf(r!, true, options)).toBe('failed')
+  })
+
+  it('does not fail a step whose only failure is a non-instance tool', () => {
+    const items = [
+      user('Fix it', 0),
+      todos([['a', '~', 'Run the suite']], 1),
+      tool('terminal', { command: 'pnpm vitest run' }, 'cwd: /ws\nexit_code: 1', 2, 'fail'),
+      todos([['a', 'x', 'Run the suite']], 3)
+    ]
+    const options = { running: false, failed: false }
+    const [r] = buildRecordModel(items, options).runs
+    expect(r!.steps[0]!.state).toBe('done')
+    expect(runStateOf(r!, true, options)).toBe('done')
+  })
+
   it('does not lift a note that later work followed, even in a later step', () => {
     const items = [
       user('Do it', 0),

@@ -155,6 +155,42 @@ describe('createApprovalGate', () => {
     expect(asked).toBe(1)
   })
 
+  it('saves "allow for this task" with the task, not the workspace', async () => {
+    const task: string[] = []
+    const always: string[] = []
+    const gate = createApprovalGate({
+      runId: 'run-1',
+      mode: 'mutating',
+      workspaceAllowlist: [],
+      signal: new AbortController().signal,
+      persistTask: (name) => task.push(name),
+      persistAlways: (name) => always.push(name),
+      ask: async () => 'session'
+    })
+
+    expect(await gate.authorize(WRITE)).toEqual({ allowed: true })
+    expect(task).toEqual(['edit'])
+    expect(always).toEqual([])
+  })
+
+  it("does not ask a follow-up's gate again for a tool the task already allowed", async () => {
+    let asked = 0
+    const followUp = createApprovalGate({
+      runId: 'run-1',
+      mode: 'mutating',
+      workspaceAllowlist: [],
+      taskAllowlist: ['edit'],
+      signal: new AbortController().signal,
+      ask: async () => {
+        asked += 1
+        return 'deny'
+      }
+    })
+
+    expect(await followUp.authorize(WRITE)).toEqual({ allowed: true })
+    expect(asked).toBe(0)
+  })
+
   it('persists "always allow" for the next run', async () => {
     const persisted: string[] = []
     const gate = createApprovalGate({

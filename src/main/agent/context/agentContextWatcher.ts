@@ -24,8 +24,29 @@ import { buildWorkspaceAgentContext, mapCodeIndexState } from './agentContext'
  * renderer was given, so fs noise cannot turn into IPC traffic or re-renders.
  */
 
+/**
+ * Match a reported entry name against a target's name list, case-insensitively.
+ *
+ * Windows and macOS filesystems are case-insensitive, so a file stored as
+ * `agents.md` is the same file as `AGENTS.md` and the summary already counts it
+ * — an exact-match `includes` dropped every event for it, and the strip froze
+ * on its boot reading while the rules row kept claiming the file was absent.
+ */
+function nameMatches(names: readonly string[], name: string): boolean {
+  const wanted = name.toLowerCase()
+  return names.some((candidate) => candidate.toLowerCase() === wanted)
+}
+
 /** One checkout writes several files; coalesce the burst into one rebuild. */
 const DEBOUNCE_MS = 250
+/**
+ * How long the coalescing window may stay open no matter how many events keep
+ * arriving. Without a cap the window slides forever: on Windows, deleting a
+ * directory that has an armed recursive watch emits an event storm that never
+ * goes 250ms quiet, so the timer was restarted indefinitely and the summary
+ * was never rebuilt — the strip stayed frozen on its boot reading.
+ */
+const MAX_DEBOUNCE_MS = 1_000
 
 /**
  * Under the GUI e2e fixture, trace what the watcher saw and did. The live-strip
@@ -75,6 +96,8 @@ type Watch = {
   workspacePath: string
   handles: Map<TargetKey, FSWatcher>
   timer: ReturnType<typeof setTimeout> | null
+  /** When the open coalescing window started; 0 when none is pending. */
+  windowOpenedAt: number
   gitDirty: boolean
   last: WorkspaceAgentContextResult
   building: boolean
@@ -94,6 +117,8 @@ function sameContext(a: WorkspaceAgentContextResult, b: WorkspaceAgentContextRes
     a.rules.ruleFileCount === b.rules.ruleFileCount &&
     a.memoryNotes === b.memoryNotes &&
     (a.memoryNoteNames ?? []).join('\0') === (b.memoryNoteNames ?? []).join('\0') &&
+    a.memoryIndex === b.memoryIndex &&
+    a.memoryState === b.memoryState &&
     a.codeIndex.state === b.codeIndex.state &&
     a.codeIndex.files === b.codeIndex.files &&
     a.codeIndex.indexedAt === b.codeIndex.indexedAt
@@ -111,14 +136,35 @@ function push(payload: WorkspaceAgentContextChanged): void {
   }
 }
 
+/**
+ * Ask for a rebuild, coalescing the burst into one.
+ *
+ * The window opens on the first event and slides to 250ms after the last one,
+ * but never past MAX_DEBOUNCE_MS from when it opened: an event stream that
+ * never goes quiet (Windows directory deletion against an armed recursive
+ * watch) must not be able to hold the timer off forever. Still event-driven —
+ * no timer is ever armed without a real fs event, so a quiet workspace stays
+ * quiet.
+ */
 function schedule(w: Watch, gitChanged: boolean): void {
   if (gitChanged) w.gitDirty = true
+  const now = Date.now()
+  if (w.windowOpenedAt === 0) w.windowOpenedAt = now
+  const openFor = now - w.windowOpenedAt
+  const waitMs =
+    openFor >= MAX_DEBOUNCE_MS
+      ? 0
+      : Math.max(0, Math.min(DEBOUNCE_MS, MAX_DEBOUNCE_MS - openFor))
   if (w.timer) clearTimeout(w.timer)
   w.timer = setTimeout(() => {
     w.timer = null
-    trace(`debounce fired${w.building ? ' while a rebuild runs' : ''}`)
+    const held = Date.now() - w.windowOpenedAt
+    w.windowOpenedAt = 0
+    trace(
+      `debounce fired after ${held}ms of events${w.building ? ' while a rebuild runs' : ''}`
+    )
     void rebuild(w)
-  }, DEBOUNCE_MS)
+  }, waitMs)
 }
 
 /**
@@ -137,15 +183,16 @@ function armTargets(w: Watch): void {
         // than filter, since a missed change is worse than a wasted rebuild.
         const reported = filename == null ? null : String(filename)
         // A non-recursive watch only ever reports its direct entries, so the
-        // last path segment is the entry on every platform. On the
-        // windows-latest runner, events for `.vyotiq` and `memory` reached this
-        // callback and never reached the debounce, with this exact-name filter
-        // the only step between them: the strip froze on its boot reading.
+        // last path segment is the entry on every platform. The comparison
+        // below is case-insensitive: on windows-latest the summary already
+        // counts a file stored as `agents.md` (NTFS resolves it for
+        // `AGENTS.md`), so dropping that event's exact spelling left the rules
+        // row frozen on its boot reading.
         const name = reported == null ? null : (reported.split(/[\\/]/).pop() ?? reported)
         trace(`event ${target.key} ${event} ${name ?? '(no name)'}${reported != null && reported !== name ? ' (reported as a path)' : ''}`)
-        if (target.names && name != null && !target.names.includes(name)) return
+        if (target.names && name != null && !nameMatches(target.names, name)) return
         const gitChanged =
-          target.gitNames != null && (name == null || target.gitNames.includes(name))
+          target.gitNames != null && (name == null || nameMatches(target.gitNames, name))
         schedule(w, gitChanged)
       })
       handle.on('error', (err) => {
@@ -251,6 +298,7 @@ export function armAgentContextWatch(
     workspacePath,
     handles: new Map(),
     timer: null,
+    windowOpenedAt: 0,
     gitDirty: false,
     last: initial,
     building: false,

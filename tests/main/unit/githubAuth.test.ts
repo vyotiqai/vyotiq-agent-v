@@ -309,6 +309,34 @@ describe('githubAuth helpers', () => {
       expect(status.pending).toBe(false)
     })
 
+    it('asks GitHub for a new sign-in when the saved one was rejected, not the same token again', async () => {
+      vi.mocked(setGithubAccessToken)('gho_revoked')
+      execFileAsync.mockResolvedValue({ stdout: 'gho_revoked\n', stderr: '' })
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            device_code: 'device-2',
+            user_code: 'ABCD-1234',
+            verification_uri: 'https://github.com/login/device',
+            expires_in: 900,
+            interval: 5
+          }),
+        headers: { get: () => 'application/json' }
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      vi.mocked(setGithubAccessToken).mockClear()
+
+      const status = await startGithubAuth({ fresh: true })
+
+      expect(vi.mocked(clearGithubAccessToken)).toHaveBeenCalled()
+      expect(vi.mocked(setGithubAccessToken)).not.toHaveBeenCalledWith('gho_revoked')
+      expect(fetchMock).toHaveBeenCalled()
+      expect(status.pending).toBe(true)
+      expect(status.hasAppToken).toBe(false)
+      expect(status.userCode).toBe('ABCD-1234')
+    })
+
     it('keeps the token when the user signs in with gh mid-flow', async () => {
       injectPendingGithubAuthForTests({})
       execFileAsync.mockResolvedValue({ stdout: 'gho_fromtheterminal', stderr: '' })

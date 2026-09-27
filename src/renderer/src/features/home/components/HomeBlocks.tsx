@@ -28,7 +28,7 @@ export function HomeSection({
         <span className="flex-1" />
         {trailing}
       </h2>
-      <ul className="divide-y divide-border border-t border-border">{children}</ul>
+      <ul className="divide-y divide-border/60 border-t border-border">{children}</ul>
     </section>
   )
 }

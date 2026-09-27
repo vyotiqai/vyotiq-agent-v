@@ -15,10 +15,10 @@ export function SkillBody({ tool, loading, loadFailed }: ToolBodyProps) {
       {data.kind === 'directory' ? (
         <div>
           <div className={`${TOOL_BODY_PAD} flex items-center gap-2 pb-1`}>
-            <span className="truncate font-mono text-2xs text-tertiary" title={data.dirPath}>
+            <span className="truncate font-mono text-caption text-tertiary" title={data.dirPath}>
               {data.dirPath}
             </span>
-            <span className="shrink-0 text-2xs tabular-nums text-tertiary">
+            <span className="shrink-0 text-caption tnum text-tertiary">
               {data.files.length} {data.files.length === 1 ? 'file' : 'files'}
             </span>
           </div>
@@ -28,10 +28,10 @@ export function SkillBody({ tool, loading, loadFailed }: ToolBodyProps) {
 
       {data.kind === 'markdown' ? (
         <div
-          className={`${TOOL_BODY_INNER} ${TOOL_BODY_FLOW} text-caption text-fg/80`}
+          className={`${TOOL_BODY_INNER} ${TOOL_BODY_FLOW}`}
           aria-busy={loading || undefined}
         >
-          <MarkdownContent content={data.content} />
+          <MarkdownContent content={data.content} size="caption" tone="secondary" />
         </div>
       ) : null}
 

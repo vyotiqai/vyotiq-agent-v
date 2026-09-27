@@ -1,9 +1,7 @@
 export { SHORTCUT_BINDINGS, type ShortcutBinding, type ShortcutId } from './bindings'
 export { shouldDeferAppEscapeStop } from './escape'
 export {
-  extraShortcutCatalog,
   referenceShortcutCatalog,
-  shortcutAriaKeys,
   shortcutCatalog,
   shortcutLabel,
   SHORTCUT_TITLES,

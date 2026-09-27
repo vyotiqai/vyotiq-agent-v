@@ -195,7 +195,6 @@ describe('Agent todo_write planning (no mutation gate)', () => {
       }
     )
 
-    expect(outcome.stepToolsOk).toBe(true)
     expect(outcome.messages.map((m) => m.toolName)).toEqual(['todo_write', 'edit'])
     expect(outcome.messages.every((m) => m.ok !== false)).toBe(true)
     expect(hasInProgressTodo(runDir)).toBe(true)

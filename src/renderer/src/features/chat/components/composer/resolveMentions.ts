@@ -350,7 +350,7 @@ export async function resolveComposerMentions(opts: {
       }
       case 'chat': {
         if (!opts.workspacePath) {
-          problems.push('Cannot load past chat (no workspace)')
+          problems.push('Cannot load past task (no workspace)')
           break
         }
         contextBlocks.push(await resolveChatBlock(opts.workspacePath, mention))

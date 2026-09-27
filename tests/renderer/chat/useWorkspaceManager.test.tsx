@@ -572,7 +572,7 @@ describe('useWorkspaceManager', () => {
     expect(result.current.activeContext?.openRunIds).toEqual(['run-other', 'run-restored'])
     expect(result.current.activeContext?.ui.composerDraft).toBe('draft text')
     expect(result.current.activeContext?.ui.scrollTop).toBe(240)
-    expect(result.current.activeScrollTop).toBe(240)
+    expect(result.current.activeContext?.ui.scrollTopByRunId['run-restored']).toBe(240)
     expect(result.current.scrollRestoreToken).toBeGreaterThan(0)
 
     await waitFor(() => {
@@ -590,7 +590,7 @@ describe('useWorkspaceManager', () => {
     vi.useFakeTimers()
 
     act(() => {
-      result.current.setComposerDraft('hello')
+      result.current.setComposerDraftForPane('/ws-a', null, 'hello')
     })
 
     act(() => {
@@ -874,12 +874,12 @@ describe('useWorkspaceManager', () => {
 
     act(() => {
       result.current.openRunTab('run-tab-a')
-      result.current.onMessageListScroll(120)
+      result.current.onMessageListScrollForPane('/ws-a', 'run-tab-a', 120)
     })
 
     act(() => {
       result.current.openRunTab('run-tab-b')
-      result.current.onMessageListScroll(360)
+      result.current.onMessageListScrollForPane('/ws-a', 'run-tab-b', 360)
     })
 
     act(() => {
@@ -897,12 +897,6 @@ describe('useWorkspaceManager', () => {
         })
       })
     )
-
-    act(() => {
-      result.current.openRunTab('run-tab-a')
-    })
-
-    expect(result.current.activeScrollTop).toBe(120)
 
     vi.useRealTimers()
   })
@@ -1064,7 +1058,7 @@ describe('useWorkspaceManager', () => {
     })
 
     act(() => {
-      result.current.setComposerDraft('flush me')
+      result.current.setComposerDraftForPane('/ws-a', null, 'flush me')
     })
 
     await act(async () => {

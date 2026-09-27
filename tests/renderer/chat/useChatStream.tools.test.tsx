@@ -5,7 +5,6 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { useChatStream } from './helpers/useChatStream'
 import { createChatStreamController } from '@renderer/lib/hooks/createChatStreamController'
-import { buildTranscriptRows } from '@renderer/features/chat/utils/transcriptRows'
 import type { AgentEvent } from '@shared/ipc'
 
 type Handler = (event: AgentEvent) => void
@@ -264,8 +263,6 @@ describe('useChatStream', () => {
 
     const tool = result.current.items.find((i) => i.kind === 'tool')
     expect(tool?.kind === 'tool' ? tool.tool.presentation : null).toBe('prominent')
-    const rows = buildTranscriptRows(result.current.items)
-    expect(rows.some((row) => row.kind === 'card')).toBe(true)
   })
 
   it('does not attach a drifted tool_result to the wrong parallel same-name row', async () => {

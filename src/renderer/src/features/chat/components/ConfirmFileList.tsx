@@ -37,7 +37,7 @@ export const ConfirmFileList = memo(function ConfirmFileList({
             {file.path}
           </span>
           {file.action ? (
-            <span className={`ml-auto shrink-0 text-2xs ${actionClass(file.action)}`}>
+            <span className={`ml-auto shrink-0 text-caption ${actionClass(file.action)}`}>
               {ACTION_LABEL[file.action]}
             </span>
           ) : null}
