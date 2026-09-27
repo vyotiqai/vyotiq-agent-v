@@ -5,12 +5,23 @@ import { readPathArg } from './tools/argAccess'
 import { wireToolCallArguments } from './toolArgWire'
 import { searchHitPathsFromResult } from './tools/search'
 import { loopHintForRetainedDecisions } from './context/retainedDecisions'
+import { isConcreteWorkspacePath, normalizeWorkspaceRelPath } from './pathPlausibility'
 
 /**
  * After this many not-in-catalog failures for the *same* MCP tool name in a run,
  * harden the error so the model stops wasting full steps retrying.
  */
 export const MCP_NOT_IN_CATALOG_FAIL_FAST_THRESHOLD = 2
+
+/**
+ * Distinct tool calls one generation may stream before the loop cuts it off.
+ * Run 50f7b80d streamed 5,862 `run_tests` calls in a single turn for 33
+ * minutes (5,798 of them the same command); every one executed, and the
+ * results filled a history that compaction could not fold in two ten-minute
+ * attempts. The largest real batch across 3,805 recorded tool-call steps was
+ * 20, so this leaves room for wide parallel reads.
+ */
+export const MAX_TOOL_CALLS_PER_STEP = 64
 
 const WRITE_TOOLS = new Set(['edit', 'str_replace', 'edit_notebook'])
 const FILE_MUTATION_TOOLS = new Set([...WRITE_TOOLS, 'delete'])
@@ -212,10 +223,6 @@ export function runNoticeForContextAboveSoftTrigger(): string {
   return 'Context is still large after compaction. Continue; auto-compact will fold again at the next threshold. Move durable facts into memory with memory_write.'
 }
 
-export function normalizeWorkspaceRelPath(path: string): string {
-  return path.trim().replace(/\\/g, '/')
-}
-
 function parseToolArgs(argumentsJson: string): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(argumentsJson)
@@ -279,31 +286,6 @@ export function readPathFromToolCall(
   return path || null
 }
 
-/** True when a path/glob string names a single concrete file (no wildcards). */
-export function isConcreteWorkspacePath(value: string): boolean {
-  const path = normalizeWorkspaceRelPath(value)
-  if (!path || path === '.' || path === '..') return false
-  if (/[*?[{]/.test(path)) return false
-  return true
-}
-
-/**
- * Receipt/checkpoint paths must look like real workspace files — not comma-glued
- * command args, bare punctuation, or assertion fragments from terminal output.
- */
-export function isPlausibleWorkspaceFilePath(value: string): boolean {
-  const path = normalizeWorkspaceRelPath(value)
-  if (!isConcreteWorkspacePath(path)) return false
-  if (path.includes(',')) return false
-  if (/[;|&<>]/.test(path)) return false
-  // PowerShell env paths (`$env:TEMP/…`) are not workspace files.
-  if (path.startsWith('$')) return false
-  if (/^[=+-]+$/.test(path)) return false
-  if (path.includes(')') && !path.includes('(')) return false
-  if (!path.includes('/') && !/\.[a-zA-Z0-9][\w.-]*$/.test(path)) return false
-  return true
-}
-
 /**
  * Compiler output that opaque `dotnet`/`msbuild` watches used to record as
  * agent writes (receipt 92c049d6: 1541 bin/Debug files).
@@ -329,12 +311,19 @@ export function isGateRefusalToolResult(content: string): boolean {
   if (/timed out and was auto-denied\./i.test(content)) return true
   if (/Tool approval required but no app window is listening\./i.test(content)) return true
   if (/Tool approval failed because no app window is listening\./i.test(content)) return true
+  // Refusals from assertToolAllowedInMode, anchored because runReceipt drops
+  // any match, ok or not: a read or grep that quotes one must still count.
+  // loopPolicy.test.ts generates each Ask-mode refusal to keep these in sync.
+  if (/^Tool "\w+" is only available on the root orchestrator/i.test(content)) return true
+  if (/^Tool "\w+" requires Agent mode\./i.test(content)) return true
+  if (/^(?:Ask|Plan) mode does not allow browser_tabs close\./i.test(content)) return true
   if (/^(?:Ask|Plan) mode does not allow (?:tool|lsp|MCP)/i.test(content)) return true
-  // Plan mode was merged into Agent and emits neither message any more, but a
+  // Plan mode was merged into Agent and emits none of these any more, but a
   // receipt is recomputed from history: runs recorded before the merge still
   // carry these strings in messages.jsonl and must not start counting as
   // failures. Historical patterns — keep them, do not "clean up".
   if (/^Plan mode may only edit plan\.md or contract\.md/i.test(content)) return true
+  if (/^Plan mode does not allow update_goal "complete"\./i.test(content)) return true
   if (/^Automatic mode switching is off\./i.test(content)) return true
   if (/^Background terminal requires run ownership/i.test(content)) return true
   return false

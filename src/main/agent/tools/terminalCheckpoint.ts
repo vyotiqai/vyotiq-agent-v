@@ -1,5 +1,5 @@
 import { getWriteCheckpoint } from '../checkpoints'
-import { isPlausibleWorkspaceFilePath } from '../loopPolicy'
+import { looksLikeWorkspacePath } from '../pathPlausibility'
 import { resolveInsideWorkspace } from '@main/workspace/safePath'
 
 /**
@@ -56,7 +56,7 @@ export function extractTerminalWritePaths(command: string): string[] {
     }
   }
 
-  return [...found].filter((path) => isPlausibleWorkspaceFilePath(path))
+  return [...found].filter((path) => looksLikeWorkspacePath(path))
 }
 
 /** Drop trailing `mkdir src/stores;` separators so the path stays plausible. */

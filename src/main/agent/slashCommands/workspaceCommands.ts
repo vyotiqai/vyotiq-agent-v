@@ -1,18 +1,22 @@
-import { readdir, readFile, stat } from 'fs/promises'
-import { existsSync, statSync, type Dirent } from 'fs'
-import { basename, join, relative, sep } from 'path'
+import { basename, join } from 'path'
 import type { SlashCommandDescriptor, SlashCommandResolveResult } from '../../../shared/ipc'
+import { splitFrontmatter, stripQuotes } from '../../../shared/rules'
 import { formatWorkspaceCommand, normalizeTrigger } from '../../../shared/slashCommands'
+import {
+  CACHE_TTL_MS,
+  collectWorkspaceFiles,
+  fingerprintWorkspaceFiles,
+  type ScanDir
+} from '../workspaceFileScan'
 
-const COMMAND_DIRS = [
-  { dir: join('.vyotiq', 'commands'), source: 'vyotiq' as const },
-  { dir: join('.cursor', 'commands'), source: 'cursor' as const }
+const COMMAND_EXTENSIONS = ['.md'] as const
+
+const COMMAND_DIRS: (ScanDir & { source: 'vyotiq' | 'cursor' })[] = [
+  { dir: join('.vyotiq', 'commands'), extensions: COMMAND_EXTENSIONS, source: 'vyotiq' },
+  { dir: join('.cursor', 'commands'), extensions: COMMAND_EXTENSIONS, source: 'cursor' }
 ]
 
-const CACHE_TTL_MS = 30_000
-const MAX_FILE_BYTES = 64 * 1024
 const MAX_COMMAND_FILES = 48
-const MAX_DIR_DEPTH = 3
 
 export type WorkspaceCommandFile = {
   trigger: string
@@ -37,39 +41,24 @@ export function clearWorkspaceCommandsCache(workspacePath?: string): void {
   else cache.clear()
 }
 
-function fingerprintFor(workspacePath: string): string {
-  const parts: string[] = []
-  for (const { dir } of COMMAND_DIRS) {
-    const p = join(workspacePath, dir)
-    try {
-      parts.push(existsSync(p) ? `${dir}:${statSync(p).mtimeMs}` : `${dir}:-`)
-    } catch {
-      parts.push(`${dir}:?`)
-    }
-  }
-  return parts.join('|')
-}
+/** Command frontmatter keys are laxer than rule keys: digits, `_`, and indentation all pass. */
+const COMMAND_KEY_LINE = /^([A-Za-z0-9_-]+):\s*(.*)$/
 
-function parseCommandMarkdown(raw: string, fallbackName: string): {
+function parseCommandMarkdown(
+  raw: string,
+  fallbackName: string
+): {
   name: string
   description: string
   body: string
 } {
-  const trimmed = raw.replace(/^\uFEFF/, '')
-  if (!trimmed.startsWith('---')) {
-    return { name: fallbackName, description: '', body: trimmed.trim() }
-  }
-  const end = trimmed.indexOf('\n---', 3)
-  if (end < 0) {
-    return { name: fallbackName, description: '', body: trimmed.trim() }
-  }
-  const yaml = trimmed.slice(3, end).trim()
-  const body = trimmed.slice(end + 4).replace(/^\r?\n/, '')
+  const { lines, body } = splitFrontmatter(raw)
+  if (!lines) return { name: fallbackName, description: '', body: body.trim() }
   const fields: Record<string, string> = {}
-  for (const line of yaml.split(/\r?\n/)) {
-    const m = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line.trim())
+  for (const line of lines) {
+    const m = COMMAND_KEY_LINE.exec(line.trim())
     if (!m) continue
-    fields[m[1]] = m[2].replace(/^["']|["']$/g, '').trim()
+    fields[m[1]!] = stripQuotes(m[2]!).trim()
   }
   return {
     name: fields.name?.trim() || fallbackName,
@@ -78,65 +67,19 @@ function parseCommandMarkdown(raw: string, fallbackName: string): {
   }
 }
 
-async function readCapped(filePath: string): Promise<string | null> {
-  try {
-    const info = await stat(filePath)
-    if (!info.isFile() || info.size === 0) return null
-    const text = await readFile(filePath, 'utf8')
-    if (text.length <= MAX_FILE_BYTES) return text
-    return `${text.slice(0, MAX_FILE_BYTES)}\n… (truncated)`
-  } catch {
-    return null
-  }
-}
-
-async function collectFromDir(
-  workspacePath: string,
-  dirPath: string,
-  source: 'vyotiq' | 'cursor',
-  depth: number,
-  out: WorkspaceCommandFile[]
-): Promise<void> {
-  if (depth > MAX_DIR_DEPTH || out.length >= MAX_COMMAND_FILES) return
-  let entries: Dirent[]
-  try {
-    entries = await readdir(dirPath, { withFileTypes: true, encoding: 'utf8' })
-  } catch {
-    return
-  }
-  const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name))
-  for (const entry of sorted) {
-    if (out.length >= MAX_COMMAND_FILES) return
-    const full = join(dirPath, entry.name)
-    if (entry.isDirectory()) {
-      await collectFromDir(workspacePath, full, source, depth + 1, out)
-      continue
-    }
-    if (!entry.name.toLowerCase().endsWith('.md')) continue
-    const raw = await readCapped(full)
-    if (!raw) continue
-    const stem = basename(entry.name, '.md')
-    const parsed = parseCommandMarkdown(raw, stem)
-    const trigger = normalizeTrigger(parsed.name || stem)
-    if (!trigger) continue
-    out.push({
-      trigger,
-      label: parsed.name || stem,
-      description: parsed.description,
-      body: parsed.body,
-      relativePath: relative(workspacePath, full).split(sep).join('/'),
-      absolutePath: full,
-      source
-    })
-  }
-}
-
 export async function readWorkspaceCommands(
   workspacePath: string | null
 ): Promise<WorkspaceCommandFile[]> {
   if (!workspacePath) return []
 
-  const fingerprint = fingerprintFor(workspacePath)
+  // Stats every command file, not just the directories: an in-place edit does
+  // not touch the parent's mtime, so a directory-only fingerprint served the
+  // stale body for the whole TTL.
+  const fingerprint = await fingerprintWorkspaceFiles({
+    workspacePath,
+    dirs: COMMAND_DIRS,
+    maxFiles: MAX_COMMAND_FILES
+  })
   const cached = cache.get(workspacePath)
   if (cached && cached.fingerprint === fingerprint && Date.now() - cached.builtAt < CACHE_TTL_MS) {
     return cached.files
@@ -144,8 +87,29 @@ export async function readWorkspaceCommands(
 
   const files: WorkspaceCommandFile[] = []
   // Vyotiq first so it wins on trigger collision when we dedupe.
-  for (const { dir, source } of COMMAND_DIRS) {
-    await collectFromDir(workspacePath, join(workspacePath, dir), source, 0, files)
+  for (const { dir, extensions, source } of COMMAND_DIRS) {
+    await collectWorkspaceFiles<WorkspaceCommandFile>({
+      workspacePath,
+      dirPath: join(workspacePath, dir),
+      extensions,
+      maxFiles: MAX_COMMAND_FILES,
+      out: files,
+      transform: ({ raw, fileName, absolutePath, relativePath }) => {
+        const stem = basename(fileName, '.md')
+        const parsed = parseCommandMarkdown(raw, stem)
+        const trigger = normalizeTrigger(parsed.name || stem)
+        if (!trigger) return null
+        return {
+          trigger,
+          label: parsed.name || stem,
+          description: parsed.description,
+          body: parsed.body,
+          relativePath,
+          absolutePath,
+          source
+        }
+      }
+    })
   }
 
   const byTrigger = new Map<string, WorkspaceCommandFile>()

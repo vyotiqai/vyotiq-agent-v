@@ -14,11 +14,10 @@ import {
   isBuildOutputRelPath,
   isGateRefusalToolResult,
   isNonMutatingWriteFailure,
-  isPlausibleWorkspaceFilePath,
-  normalizeWorkspaceRelPath,
   toolArgsFromCall,
   unreadExistingEditPaths
 } from './loopPolicy'
+import { looksLikeWorkspacePath, normalizeWorkspaceRelPath } from './pathPlausibility'
 import { parseDiagnosticLines } from './tools/diagnostics'
 import { parseTestResultHeader } from './tools/runTests'
 import { logger } from '../../shared/logger'
@@ -141,14 +140,14 @@ export function wroteFilesFromEvents(events: readonly PersistedEvent[]): string[
     for (const entry of ev.files) {
       if (typeof entry === 'string') {
         const path = normalizeWorkspaceRelPath(entry)
-        if (path && isPlausibleWorkspaceFilePath(path) && !isBuildOutputRelPath(path)) {
+        if (path && looksLikeWorkspacePath(path) && !isBuildOutputRelPath(path)) {
           paths.push(path)
         }
         continue
       }
       if (entry && typeof entry === 'object' && typeof (entry as { path?: unknown }).path === 'string') {
         const path = normalizeWorkspaceRelPath((entry as { path: string }).path)
-        if (path && isPlausibleWorkspaceFilePath(path) && !isBuildOutputRelPath(path)) {
+        if (path && looksLikeWorkspacePath(path) && !isBuildOutputRelPath(path)) {
           paths.push(path)
         }
       }

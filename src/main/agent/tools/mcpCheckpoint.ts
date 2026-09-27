@@ -1,5 +1,5 @@
 import { getWriteCheckpoint, type InvokeWriteCheckpoint } from '../checkpoints'
-import { normalizeWorkspaceRelPath } from '../loopPolicy'
+import { normalizeWorkspaceRelPath } from '../pathPlausibility'
 import { resolveInsideWorkspace } from '../../workspace/safePath'
 
 /** Official @modelcontextprotocol/server-filesystem write-capable tools. */

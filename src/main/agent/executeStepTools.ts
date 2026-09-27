@@ -23,13 +23,12 @@ import {
   applyToolCallToMutationPaths,
   deletePathFromToolCall,
   editPathsFromToolCall,
-  isConcreteWorkspacePath,
   isFileMutationToolName,
   isInspectToolName,
-  normalizeWorkspaceRelPath,
   toolArgsFromCall,
   unreadExistingEditPaths
 } from './loopPolicy'
+import { isConcreteWorkspacePath, normalizeWorkspaceRelPath } from './pathPlausibility'
 import { searchHitPathsFromResult } from './tools/search'
 import { codebaseSearchHitPathsFromResult } from './codeindex/query'
 import { readPathArg } from './tools/argAccess'

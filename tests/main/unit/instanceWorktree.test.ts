@@ -31,13 +31,17 @@ import {
   addInstanceWorktree,
   commitDirtyInstanceWorktree,
   gitShowToFile,
+  instanceWorktreeBranch,
   instanceWorktreePath,
   isInstanceWorktreeDir,
   linkNodeModulesBestEffort,
   mergeInstanceBranch,
+  pruneStaleInstanceBranches,
+  pruneStaleInstanceWorktrees,
   removeInstanceWorktree,
   resetInstanceWorktreeCleanupForTests
 } from '@main/git/instanceWorktree'
+import { logger } from '@shared/logger'
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync('git', args, {
@@ -599,4 +603,175 @@ describe.skipIf(!canGit)('linkNodeModulesBestEffort fresh worktree flow', () => 
     expect(existsSync(join(worktreePath, 'node_modules', 'typescript', 'bin'))).toBe(true)
     expect(existsSync(join(worktreePath, 'node_modules', 'vitest'))).toBe(true)
   }, 30_000)
+})
+
+describe.skipIf(!canGit)('instance branch retention', () => {
+  const DAY_MS = 86_400_000
+  const IDENTITY = ['-c', 'user.email=test@example.com', '-c', 'user.name=Test'] as const
+  let repo = ''
+  let extraWorktree = ''
+
+  afterEach(() => {
+    if (repo && extraWorktree && existsSync(extraWorktree)) {
+      try {
+        git(repo, 'worktree', 'remove', '--force', extraWorktree)
+      } catch {
+        /* removed with the repo below */
+      }
+    }
+    if (extraWorktree && existsSync(extraWorktree)) {
+      rmSync(extraWorktree, { recursive: true, force: true })
+    }
+    extraWorktree = ''
+    if (repo && existsSync(repo)) {
+      rmSync(repo, { recursive: true, force: true })
+    }
+    repo = ''
+    if (existsSync(userData)) {
+      rmSync(userData, { recursive: true, force: true })
+    }
+    resetInstanceWorktreeCleanupForTests()
+    vi.restoreAllMocks()
+  })
+
+  function initRepo(): void {
+    repo = mkdtempSync(join(tmpdir(), 'vyotiq-wt-branches-'))
+    git(repo, 'init', '--initial-branch=main')
+    writeFileSync(join(repo, 'README.md'), 'base\n', 'utf8')
+    git(repo, 'add', 'README.md')
+    git(repo, ...IDENTITY, 'commit', '-q', '-m', 'init')
+  }
+
+  /** Commit one file in `cwd`, with author and committer dates `daysAgo` back. */
+  function commitDated(cwd: string, file: string, daysAgo: number): void {
+    writeFileSync(join(cwd, file), `${file}\n`, 'utf8')
+    const date = new Date(Date.now() - daysAgo * DAY_MS).toISOString()
+    execFileSync('git', [...IDENTITY, 'add', '-A'], { cwd, stdio: 'ignore', windowsHide: true })
+    execFileSync('git', [...IDENTITY, 'commit', '-q', '-m', file], {
+      cwd,
+      stdio: 'ignore',
+      windowsHide: true,
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_AUTHOR_DATE: date,
+        GIT_COMMITTER_DATE: date
+      }
+    })
+  }
+
+  /** A branch off main carrying one commit of its own, dated `daysAgo` back. */
+  function branchWithWork(name: string, daysAgo: number): void {
+    git(repo, 'checkout', '-q', '-b', name, 'main')
+    commitDated(repo, `${name.replace(/\//g, '-')}.txt`, daysAgo)
+    git(repo, 'checkout', '-q', 'main')
+  }
+
+  function localBranches(): string[] {
+    return execFileSync('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads/'], {
+      cwd: repo,
+      encoding: 'utf8',
+      windowsHide: true
+    })
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .sort()
+  }
+
+  it('drops merged and empty branches at once and unmerged ones only once aged', async () => {
+    initRepo()
+    // No commits of its own: the instance never wrote anything.
+    const empty = instanceWorktreeBranch('empty-run')
+    git(repo, 'branch', empty, 'main')
+    // Its work landed on another branch, so the branch itself carries nothing.
+    const merged = instanceWorktreeBranch('merged-run')
+    branchWithWork(merged, 1)
+    git(repo, 'checkout', '-q', '-b', 'feature', 'main')
+    git(repo, ...IDENTITY, 'merge', '-q', '--no-ff', '-m', 'land', merged)
+    git(repo, 'checkout', '-q', 'main')
+    // Unmerged work: only age decides.
+    const old = instanceWorktreeBranch('old-run')
+    branchWithWork(old, 20)
+    const fresh = instanceWorktreeBranch('fresh-run')
+    branchWithWork(fresh, 1)
+    // Not an instance branch: never a candidate, however old.
+    branchWithWork('topic/old', 400)
+    const infoSpy = vi.spyOn(logger, 'info')
+
+    const summary = await pruneStaleInstanceBranches(repo, new Set())
+
+    expect(summary).toEqual({
+      merged: 2,
+      aged: 1,
+      kept: 1,
+      protected: 0,
+      checkedOut: 0,
+      failed: 0
+    })
+    expect(localBranches()).toEqual(['feature', fresh, 'main', 'topic/old'].sort())
+    expect(infoSpy).toHaveBeenCalledWith(
+      'instance branch prune summary',
+      expect.objectContaining({
+        scope: 'git',
+        deleted: 3,
+        merged: 2,
+        aged: 1,
+        kept: 1,
+        failed: 0,
+        maxAgeDays: 14
+      })
+    )
+
+    // The cutoff is the only thing keeping the fresh one.
+    const again = await pruneStaleInstanceBranches(repo, new Set(), { branchMaxAgeMs: 0 })
+    expect(again).toMatchObject({ merged: 0, aged: 1, kept: 0 })
+    expect(localBranches()).toEqual(['feature', 'main', 'topic/old'].sort())
+  }, 30_000)
+
+  it('never deletes a protected run branch or one checked out in a worktree', async () => {
+    initRepo()
+    const live = instanceWorktreeBranch('live-run')
+    branchWithWork(live, 30)
+    const checked = instanceWorktreeBranch('checked-run')
+    branchWithWork(checked, 30)
+    extraWorktree = mkdtempSync(join(tmpdir(), 'vyotiq-wt-checked-'))
+    git(repo, 'worktree', 'add', '-q', extraWorktree, checked)
+
+    const summary = await pruneStaleInstanceBranches(repo, new Set(['live-run']))
+
+    expect(summary).toEqual({
+      merged: 0,
+      aged: 0,
+      kept: 0,
+      protected: 1,
+      checkedOut: 1,
+      failed: 0
+    })
+    expect(localBranches()).toEqual([checked, live, 'main'].sort())
+  }, 30_000)
+
+  it('runs after the checkout pass, so a stale checkout frees its branch', async () => {
+    initRepo()
+    // A checkout left by a previous process: registered with git, unknown to
+    // this process's pending set, on a branch with unmerged work past the cutoff.
+    const staleBranch = instanceWorktreeBranch('stale-run')
+    const stalePath = instanceWorktreePath(repo, 'stale-run')
+    mkdirSync(join(stalePath, '..'), { recursive: true })
+    git(repo, 'worktree', 'add', '-q', '-b', staleBranch, stalePath, 'main')
+    commitDated(stalePath, 'stale.txt', 20)
+    // A checkout this process created for a run that is still protected.
+    const live = await addInstanceWorktree(repo, 'live-run')
+    expect(live.ok).toBe(true)
+    if (!live.ok) return
+    commitDated(live.worktreePath, 'live.txt', 20)
+
+    const removed = await pruneStaleInstanceWorktrees(repo, new Set(['live-run']))
+
+    expect(removed).toBe(1)
+    expect(existsSync(stalePath)).toBe(false)
+    expect(existsSync(live.worktreePath)).toBe(true)
+    expect(localBranches()).toEqual([live.branch, 'main'].sort())
+    await removeInstanceWorktree(repo, live.worktreePath)
+  }, 60_000)
 })

@@ -1,4 +1,5 @@
-import { normalizeWorkspaceRelPath, type FoldFacts } from './foldFacts'
+import type { FoldFacts } from './foldFacts'
+import { normalizeWorkspaceFileRelPath } from '../pathPlausibility'
 import { FILE_COVERAGE_MAX_NEEDED, factMentionedInText, pathMentionedInText } from './verifyCompaction'
 
 /** Structured sidecar stored on CompactionRecord so assemble can inject facts after the narrative is capped. */
@@ -57,7 +58,7 @@ function uniqueStrings(values: readonly string[], cap: number): string[] {
 }
 
 function uniquePaths(values: readonly string[], cap: number): string[] {
-  return keepNewestUnique(values, cap, normalizeWorkspaceRelPath)
+  return keepNewestUnique(values, cap, normalizeWorkspaceFileRelPath)
 }
 
 function emptyFoldFacts(): FoldFacts {
@@ -88,7 +89,7 @@ export function foldFactsToPinned(facts: FoldFacts): PinnedFoldFacts {
   const wroteFiles = uniquePaths(facts.wroteFiles, CAPS.wroteFiles)
   const wroteKeys = new Set(wroteFiles.map((path) => path.toLowerCase()))
   const inspect = uniquePaths(
-    facts.files.filter((path) => !wroteKeys.has(normalizeWorkspaceRelPath(path).toLowerCase())),
+    facts.files.filter((path) => !wroteKeys.has(normalizeWorkspaceFileRelPath(path).toLowerCase())),
     FILE_COVERAGE_MAX_NEEDED
   )
   return {

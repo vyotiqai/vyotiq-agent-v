@@ -4,10 +4,10 @@ import { describe, expect, it } from 'vitest'
 import type { ChatMessage } from '@shared/ipc'
 import {
   extractFoldFacts,
-  isPlausibleWorkspaceFilePath,
   parseContractDoneWhen,
   parseContractGoal
 } from '@main/agent/context/foldFacts'
+import { isStrictWorkspaceFilePath } from '@main/agent/pathPlausibility'
 import {
   clipVerifyFailures,
   expandBraceGlobs,
@@ -176,24 +176,27 @@ describe('extractFoldFacts', () => {
   })
 })
 
-describe('isPlausibleWorkspaceFilePath', () => {
+describe('isStrictWorkspaceFilePath (compaction verification)', () => {
   it('keeps workspace files and dotfiles', () => {
-    expect(isPlausibleWorkspaceFilePath('src/cli/index.ts')).toBe(true)
-    expect(isPlausibleWorkspaceFilePath('package.json')).toBe(true)
-    expect(isPlausibleWorkspaceFilePath('.gitignore')).toBe(true)
-    expect(isPlausibleWorkspaceFilePath('.cursor/rules/foo.mdc')).toBe(true)
+    expect(isStrictWorkspaceFilePath('src/cli/index.ts')).toBe(true)
+    expect(isStrictWorkspaceFilePath('package.json')).toBe(true)
+    expect(isStrictWorkspaceFilePath('.gitignore')).toBe(true)
+    expect(isStrictWorkspaceFilePath('.cursor/rules/foo.mdc')).toBe(true)
   })
 
   it('rejects directories, packages, and d7dcdfbf prose tokens', () => {
-    expect(isPlausibleWorkspaceFilePath('src/core')).toBe(false)
-    expect(isPlausibleWorkspaceFilePath('src/core/llm/')).toBe(false)
-    expect(isPlausibleWorkspaceFilePath('@modelcontextprotocol/sdk')).toBe(false)
-    expect(isPlausibleWorkspaceFilePath('e.g.')).toBe(false)
-    expect(isPlausibleWorkspaceFilePath('GET /health')).toBe(false)
-    expect(isPlausibleWorkspaceFilePath('--prompt/-p')).toBe(false)
-    expect(isPlausibleWorkspaceFilePath('process.env')).toBe(false)
-    expect(isPlausibleWorkspaceFilePath('src/core/telemetry.ts:28')).toBe(false)
-    expect(isPlausibleWorkspaceFilePath('/')).toBe(false)
+    expect(isStrictWorkspaceFilePath('src/core')).toBe(false)
+    expect(isStrictWorkspaceFilePath('src/core/llm/')).toBe(false)
+    expect(isStrictWorkspaceFilePath('@modelcontextprotocol/sdk')).toBe(false)
+    expect(isStrictWorkspaceFilePath('e.g.')).toBe(false)
+    expect(isStrictWorkspaceFilePath('GET /health')).toBe(false)
+    expect(isStrictWorkspaceFilePath('--prompt/-p')).toBe(false)
+    expect(isStrictWorkspaceFilePath('process.env')).toBe(false)
+    // Used to pass here (basename `ext.ps1` has a source extension) while the
+    // checkpoint/receipt test rejected it. A temp path is not a workspace file.
+    expect(isStrictWorkspaceFilePath('$env:TEMP/ext.ps1')).toBe(false)
+    expect(isStrictWorkspaceFilePath('src/core/telemetry.ts:28')).toBe(false)
+    expect(isStrictWorkspaceFilePath('/')).toBe(false)
   })
 })
 

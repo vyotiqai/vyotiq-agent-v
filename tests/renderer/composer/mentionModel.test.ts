@@ -18,6 +18,7 @@ import {
   composerDocumentPlainText,
   hasComposerContent
 } from '@renderer/features/chat/components/composer/mentionModel'
+import { RULE_APPLY_CASES } from '../../helpers/ruleFrontmatterCases'
 
 describe('mentionModel', () => {
   it('round-trips file/branch/browser/chat markers', () => {
@@ -277,5 +278,16 @@ describe('mentionModel', () => {
         '---\nalwaysApply: true\n---\nbody'
       )
     ).toBe(true)
+  })
+
+  it('agrees with the agent rule list on every frontmatter shape', () => {
+    // Same table tests/shared/ruleFrontmatter.test.ts runs through
+    // listWorkspaceRulesForMention; the two used to be hand-synced copies.
+    for (const { file, raw, applies } of RULE_APPLY_CASES) {
+      const path = `.vyotiq/rules/${file}`
+      expect(isAutoInjectedWorkspaceRule(path, raw), path).toBe(applies)
+    }
+    // Root files are injected as-is, so an alwaysApply: false in one is ignored.
+    expect(isAutoInjectedWorkspaceRule('AGENTS.md', '---\nalwaysApply: false\n---\nx')).toBe(true)
   })
 })

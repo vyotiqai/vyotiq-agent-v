@@ -3,6 +3,10 @@ import { contentToText } from '../../../shared/ipc'
 import { canonicalizeAgentToolName } from '../schemas/tools'
 import { readPathArg } from '../tools/argAccess'
 import { parseSerializedTodoContent, type TodoItem } from '../tools/todo'
+import {
+  isStrictWorkspaceFilePath,
+  normalizeWorkspaceFileRelPath
+} from '../pathPlausibility'
 import { extractAskQuestionDecisions } from './retainedDecisions'
 
 /** Deterministic facts taken from the folded prefix — ground truth for the summarizer. */
@@ -54,59 +58,6 @@ const PATH_TOKEN_RE =
   /(?:^|[\s`"'([<])((?:[\w.-]+\/)+[\w.-]+\.[A-Za-z][\w.-]*|[\w.-]+\.[A-Za-z][\w.-]{1,12})/g
 const BACKTICK_RE = /`([^`]+)`/g
 
-function normalizeRelPath(path: string): string {
-  const n = path.trim().replace(/\\/g, '/')
-  if (!n || n === '/') return n
-  return n.replace(/\/+$/, '')
-}
-
-function isConcretePath(value: string): boolean {
-  const path = normalizeRelPath(value)
-  if (!path || path === '.' || path === '..') return false
-  if (/[*?[{]/.test(path)) return false
-  return true
-}
-
-const SOURCE_EXT_RE =
-  /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|md|mdc|txt|yml|yaml|toml|css|scss|less|html|astro|vue|svelte|ps1|lock|svg|png|gif|jpe?g|webp|ico|map|wasm|env|sql|py|rs|go|java|kt|kts|swift|rb|php|cs|cpp|cxx|h|hpp|c|mm|xml|ini|cfg|conf|sh|bash|zsh|bat|cmd|ttf|woff2?)$/i
-const DOTFILE_RE = /^\.[A-Za-z0-9][\w.-]*$/
-const IDENTIFIER_STEM_RE =
-  /^(?:process|import|logger|console|module|globalThis|window|document)\./
-
-/**
- * Skip globs, directories and junk tokens.
- *
- * NOT the same rule as the identically-named export in `loopPolicy.ts`, which
- * gates receipt/checkpoint path tracking: that one accepts anything containing
- * `/` (so `src/components`, `src/foo.ts:42` and `https://example.com/a.ts` all
- * pass), while this one requires a known source extension or a dotfile. They
- * disagree on 10 of 16 representative inputs. The two feed disjoint subsystems
- * — this one the compaction facts, that one receipts — so the split is not
- * currently observable, but they are not interchangeable.
- */
-export function isPlausibleWorkspaceFilePath(value: string): boolean {
-  const path = normalizeRelPath(value)
-  if (!isConcretePath(path)) return false
-  if (/\s/.test(path)) return false
-  if (path.includes(',')) return false
-  if (/^[=+-]+$/.test(path)) return false
-  if (path.startsWith('--')) return false
-  if (path.startsWith('@')) return false
-  if (path === '/' || /^\/+$/.test(path)) return false
-  if (/:\d+$/.test(path)) return false
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(path) && !/^[A-Za-z]:\//.test(path)) return false
-  if (path.includes(')') && !path.includes('(')) return false
-  if (!/[A-Za-z0-9]/.test(path.replace(/[./\\_-]/g, ''))) return false
-  const base = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
-  if (IDENTIFIER_STEM_RE.test(base) || IDENTIFIER_STEM_RE.test(path)) return false
-  if (!(DOTFILE_RE.test(base) || SOURCE_EXT_RE.test(base))) return false
-  return true
-}
-
-export function normalizeWorkspaceRelPath(path: string): string {
-  return normalizeRelPath(path)
-}
-
 function parseArgs(argumentsJson: string): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(argumentsJson)
@@ -121,8 +72,8 @@ function parseArgs(argumentsJson: string): Record<string, unknown> {
 
 function addPath(into: Set<string>, raw: string | null | undefined): void {
   if (!raw) return
-  const path = normalizeRelPath(raw)
-  if (!isPlausibleWorkspaceFilePath(path)) return
+  const path = normalizeWorkspaceFileRelPath(raw)
+  if (!isStrictWorkspaceFilePath(path)) return
   into.add(path)
 }
 
@@ -172,8 +123,8 @@ export function collectPathsFromText(text: string): string[] {
   const out: string[] = []
   const seen = new Set<string>()
   for (const raw of pathCandidatesIn(text)) {
-    const path = normalizeRelPath(raw.replace(/^[*_`]+|[*_`]+$/g, ''))
-    if (!isPlausibleWorkspaceFilePath(path)) continue
+    const path = normalizeWorkspaceFileRelPath(raw.replace(/^[*_`]+|[*_`]+$/g, ''))
+    if (!isStrictWorkspaceFilePath(path)) continue
     const key = path.toLowerCase()
     if (seen.has(key)) continue
     seen.add(key)

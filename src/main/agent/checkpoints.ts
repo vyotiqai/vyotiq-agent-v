@@ -19,7 +19,7 @@ import { createHash, randomUUID } from 'crypto'
 import { realpathIfExists, resolveInsideWorkspace } from '../workspace/safePath'
 import { atomicWriteFile, atomicWriteJson } from '@main/storage/atomicWrite'
 import { logger } from '../../shared/logger'
-import { isPlausibleWorkspaceFilePath } from './loopPolicy'
+import { looksLikeWorkspacePath } from './pathPlausibility'
 
 export type CheckpointFileAction = 'created' | 'modified' | 'deleted'
 
@@ -238,9 +238,10 @@ export class InvokeWriteCheckpoint {
     const resolved = resolveInsideWorkspace(this.workspaceRoot, pathArg)
     const rel = this.relPathFromResolved(resolved)
     if (!rel || rel.startsWith('..')) return
-    // Recursive dir deletes are recorded as bare directory names (no extension).
-    // Plausible-file checks reject those; still allow the checkpoint entry.
-    if (!opts?.recursiveDir && !isPlausibleWorkspaceFilePath(rel)) return
+    // Recursive dir deletes are recorded as bare directory names (no extension
+    // and no slash), which `looksLikeWorkspacePath` rejects; still allow the
+    // checkpoint entry.
+    if (!opts?.recursiveDir && !looksLikeWorkspacePath(rel)) return
     if (this.files.has(rel)) return
     const pending = this.pendingRels.get(rel)
     if (pending) {
@@ -370,7 +371,7 @@ export class InvokeWriteCheckpoint {
     const resolved = resolveInsideWorkspace(this.workspaceRoot, pathArg)
     const rel = this.relPathFromResolved(resolved)
     if (!rel || rel.startsWith('..')) return
-    if (!isPlausibleWorkspaceFilePath(rel)) return
+    if (!looksLikeWorkspacePath(rel)) return
     if (this.files.has(rel) || this.pendingRels.has(rel)) return
     let release!: () => void
     this.pendingRels.set(rel, new Promise<void>((resolve) => (release = resolve)))

@@ -157,6 +157,10 @@ describe('ChatView / SessionChatColumn isolation', () => {
     const column = readFileSync(join(root, 'features/chat/SessionChatColumn.tsx'), 'utf8')
     expect(chatView).not.toMatch(/useChatLiveItems/)
     expect(chatView).toMatch(/changesDockVisible/)
+    // ChatView is the pane host only: a record or composer of its own would
+    // never ship (every task renders through SessionChatColumn), so a prop
+    // wired there passes unit tests and reaches no screen.
+    expect(chatView).not.toMatch(/MessageList|ChatTranscriptStage|MemoComposer|<Composer/)
     expect(column).not.toMatch(/useGitChrome/)
     expect(column).not.toMatch(/useGitRevision/)
     // The pane renders the task record; streaming stays on its leaf (see perfMatrixCaps).
