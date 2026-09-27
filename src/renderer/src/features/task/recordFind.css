@@ -1,0 +1,24 @@
+/*
+  Find in record (recordFind.ts): every match, then the one you're on.
+
+  Kept out of styles.css on purpose. Tailwind runs its root stylesheet through
+  lightningcss, which does not know `::highlight()` yet and warned about both
+  rules on every build. A file with no Tailwind in it skips that pass and goes
+  through Vite's own minifier, which does.
+
+  Deliberately not in a `@layer`. This file can land ahead of Tailwind's output
+  in the bundle, and a layer named here first would move that layer to the
+  front of the cascade order for the whole app. Nothing else styles these
+  highlights, so being unlayered costs nothing.
+*/
+::highlight(record-find) {
+  background-color: var(--vy-warning-soft);
+  color: var(--vy-fg-strong);
+}
+
+::highlight(record-find-current) {
+  background-color: var(--vy-accent-soft);
+  color: var(--vy-fg-strong);
+  text-decoration: underline;
+  text-decoration-color: var(--vy-accent);
+}

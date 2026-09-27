@@ -587,10 +587,20 @@ export function ChatView({
 
   // Prefetch recovery once so FilesPanel can hydrate from the same result when
   // it auto-opens, without issuing a second recovery load.
+  //
+  // Every load hands out a new session token and retires the previous one, so
+  // a load whose result is thrown away still takes the lease. Keyed on
+  // `mountedPanels`, this re-ran whenever any other tab was first visited; a
+  // prefetch still in flight when Files opened then retired the token Files had
+  // just been given, and every save and clear after it failed with "Recovery
+  // session is stale". `filesShown` flips in the same render FilesPanel mounts,
+  // so the timer is gone before Files loads, and any prefetch already sent
+  // reaches main ahead of Files' own load and cannot outlive it.
+  const filesShown = shownPanels.includes('files')
   useEffect(() => {
     if (
       !workspacePath ||
-      mountedPanels.includes('files') ||
+      filesShown ||
       !window.vyotiq?.workspaceEditorRecoveryLoad
     ) {
       return undefined
@@ -606,7 +616,7 @@ export function ChatView({
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [mountedPanels, workspacePath])
+  }, [filesShown, workspacePath])
 
   // Live browser state for the watch affordances (banner + tab dot). The push
   // channel updates regardless of whether the browser dock is mounted.
