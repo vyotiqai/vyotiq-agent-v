@@ -44,4 +44,22 @@ describe('ModelReadinessBanner', () => {
     fireEvent.click(addKey)
     expect(onAddKey).toHaveBeenCalledTimes(1)
   })
+
+  it('leaves the brief one primary: its buttons are outlined when primary is off', () => {
+    const { rerender } = render(
+      <ModelReadinessBanner issue={{ kind: 'missing_key', provider: 'openai', label: 'OpenAI' }} onRecheck={vi.fn()} onAddKey={vi.fn()} />
+    )
+    expect(screen.getByRole('button', { name: 'Add API key' }).classList.contains('bg-accent')).toBe(true)
+    rerender(
+      <ModelReadinessBanner
+        issue={{ kind: 'missing_key', provider: 'openai', label: 'OpenAI' }}
+        onRecheck={vi.fn()}
+        onAddKey={vi.fn()}
+        primary={false}
+      />
+    )
+    const addKey = screen.getByRole('button', { name: 'Add API key' })
+    expect(addKey.classList.contains('bg-accent')).toBe(false)
+    expect(addKey.classList.contains('border-border')).toBe(true)
+  })
 })

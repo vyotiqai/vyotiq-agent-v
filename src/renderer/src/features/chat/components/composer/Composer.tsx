@@ -1060,6 +1060,8 @@ export function Composer({
                 <ModelReadinessBanner
                   issue={readinessIssue}
                   busy={catalogLoading}
+                  // Start task is the brief's one primary.
+                  primary={false}
                   onRecheck={() => {
                     void refreshCatalog({ forceRefresh: true, provider })
                   }}

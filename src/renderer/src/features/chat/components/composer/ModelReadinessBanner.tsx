@@ -5,13 +5,20 @@ export function ModelReadinessBanner({
   issue,
   busy = false,
   onRecheck,
-  onAddKey
+  onAddKey,
+  primary = true
 }: {
   issue: ModelReadinessIssue
   busy?: boolean
   onRecheck: () => void
   onAddKey: () => void
+  /**
+   * The fix is the surface's one action (the instruction line has no other).
+   * False on a surface with its own primary, such as the brief's Start task.
+   */
+  primary?: boolean
 }) {
+  const lead = primary ? 'primary' : 'secondary'
   const title =
     issue.kind === 'missing_key'
       ? `Add an API key for ${issue.label}`
@@ -26,12 +33,12 @@ export function ModelReadinessBanner({
 
   const actions =
     issue.kind === 'missing_key' ? (
-      <Button size="sm" variant="primary" onClick={onAddKey}>
+      <Button size="sm" variant={lead} onClick={onAddKey}>
         Add API key
       </Button>
     ) : issue.kind === 'unreachable' ? (
       <>
-        <Button size="sm" variant="primary" disabled={busy} onClick={onRecheck}>
+        <Button size="sm" variant={lead} disabled={busy} onClick={onRecheck}>
           Recheck
         </Button>
         <Button size="sm" variant="secondary" onClick={onAddKey}>
@@ -39,7 +46,7 @@ export function ModelReadinessBanner({
         </Button>
       </>
     ) : (
-      <Button size="sm" variant="primary" disabled={busy} onClick={onRecheck}>
+      <Button size="sm" variant={lead} disabled={busy} onClick={onRecheck}>
         Recheck
       </Button>
     )
