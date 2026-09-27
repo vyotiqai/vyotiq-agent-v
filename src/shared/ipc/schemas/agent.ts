@@ -1668,6 +1668,7 @@ export const ToolApprovalRequestSchema = z.object({
 })
 export type ToolApprovalRequest = z.infer<typeof ToolApprovalRequestSchema>
 
+/** `session` is "Allow for this task": kept with the task, so its follow-ups do not ask again. */
 export const ToolApprovalDecisionSchema = z.enum(['once', 'session', 'always', 'deny'])
 export type ToolApprovalDecision = z.infer<typeof ToolApprovalDecisionSchema>
 

@@ -6,6 +6,7 @@ import { logger } from '../../shared/logger'
 import { clearRunAbort, streamSignalFor } from '../agent/runRegistry'
 import { createApprovalGate, type ToolApprovalGate } from '../agent/toolApproval'
 import { persistAlwaysAllow } from '../agent/toolApprovalStore'
+import { persistTaskAllow, readTaskAllowlist } from '../agent/taskApprovalStore'
 import { getSettings } from '../settings/settings'
 import { findWorkspaceSettingsOverride, readWorkspacesState } from '../workspace/workspaces'
 import { resolveEffectiveSettings } from '../../shared/effectiveSettings'
@@ -83,6 +84,7 @@ function isFixtureApproval(template: unknown): template is FixtureApproval {
  * fixture step exists to ask.
  */
 function fixtureApprovalGate(input: { runId: string; invokeId: number; workspacePath: string }, signal: AbortSignal): ToolApprovalGate {
+  const runDir = resolveRunDir(input.workspacePath, input.runId)
   const effective = resolveEffectiveSettings(
     getSettings(),
     findWorkspaceSettingsOverride(readWorkspacesState(), input.workspacePath)
@@ -93,7 +95,9 @@ function fixtureApprovalGate(input: { runId: string; invokeId: number; workspace
     mode: 'all',
     workspaceAllowlist: (effective.toolApproval ?? DEFAULT_SETTINGS.toolApproval).allowlist,
     signal,
-    persistAlways: (toolName) => persistAlwaysAllow(input.workspacePath, toolName)
+    persistAlways: (toolName) => persistAlwaysAllow(input.workspacePath, toolName),
+    taskAllowlist: readTaskAllowlist(runDir),
+    persistTask: (toolName) => void persistTaskAllow(runDir, toolName)
   })
 }
 

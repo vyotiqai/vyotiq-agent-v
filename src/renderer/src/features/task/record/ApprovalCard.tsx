@@ -196,8 +196,8 @@ export const ApprovalCard = memo(function ApprovalCard({
           >
             {pendingText('once', 'Allow once')}
           </Button>
-          <Button size="sm" disabled={!canDecide} onClick={() => decide('session')} title="Allowed until this run ends">
-            {pendingText('session', 'Allow for this run')}
+          <Button size="sm" disabled={!canDecide} onClick={() => decide('session')} title="Allowed for the rest of this task, follow-ups included">
+            {pendingText('session', 'Allow for this task')}
           </Button>
           {/* Always shown: hiding it below a width left no way to choose it in
               a normal window with the inspector open. The row wraps instead. */}
