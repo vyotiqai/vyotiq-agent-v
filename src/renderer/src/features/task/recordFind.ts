@@ -1,6 +1,7 @@
 import { createContext } from 'react'
 import { parseArgsRecord } from '@shared/toolSummary'
 import type { RecordRun, WorkItem } from './recordModel'
+import './recordFind.css'
 
 /**
  * Find in record (Ctrl F).
@@ -118,7 +119,7 @@ let owner: string | null = null
 /**
  * Marks matches with the CSS Custom Highlight API — no DOM is rewritten, so
  * nothing React owns is touched. Styled by `::highlight(record-find)` and
- * `::highlight(record-find-current)` in styles.css; the last pane to search
+ * `::highlight(record-find-current)` in recordFind.css; the last pane to search
  * owns them.
  */
 export function paintMatches(id: string, ranges: readonly Range[], current: number): void {

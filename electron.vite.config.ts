@@ -1,7 +1,7 @@
 import { resolve } from 'path'
 import { readdirSync, rmSync, statSync } from 'node:fs'
 import { defineConfig, loadEnv } from 'electron-vite'
-import type { Plugin } from 'vite'
+import type { Plugin, Rollup } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -72,6 +72,22 @@ function pruneSupersededRendererAssets(outDir: string): Plugin {
   }
 }
 
+/**
+ * zod ships two prose comments that mention `@__PURE__` (v4/core/regexes.js
+ * and util.js, explaining why its own code is shaped for tree-shaking). Rollup
+ * reads them as misplaced annotations and prints both, in full, once per
+ * bundle that pulls in zod: main, preload and renderer. They are documentation,
+ * so Rollup dropping them changes nothing. 4.6.5 is the latest zod as of
+ * 2026-09-27; re-check on a zod upgrade and delete this if they are gone. Every
+ * other warning, including this code from any other package, still prints.
+ */
+const onRollupWarning: Rollup.WarningHandlerWithDefault = (warning, warn) => {
+  if (warning.code === 'INVALID_ANNOTATION' && /[\\/]node_modules[\\/]zod[\\/]/.test(warning.id ?? '')) {
+    return
+  }
+  warn(warning)
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const sentryDsn = env.SENTRY_DSN || env.VITE_SENTRY_DSN || ''
@@ -113,6 +129,7 @@ export default defineConfig(({ mode }) => {
       build: {
         minify: 'esbuild',
         rollupOptions: {
+          onwarn: onRollupWarning,
           input: {
             index: resolve('src/main/index.ts'),
             'tokenizer.worker': resolve('src/main/agent/context/tokenizer.worker.ts'),
@@ -135,6 +152,7 @@ export default defineConfig(({ mode }) => {
         minify: 'esbuild',
         externalizeDeps: false,
         rollupOptions: {
+          onwarn: onRollupWarning,
           input: {
             index: resolve('src/preload/index.ts')
           }
@@ -179,6 +197,7 @@ export default defineConfig(({ mode }) => {
         // smallest at ~0.26 MB — is pulled into it.
         chunkSizeWarningLimit: 2000,
         rollupOptions: {
+          onwarn: onRollupWarning,
           output: {
             manualChunks(id) {
               if (
