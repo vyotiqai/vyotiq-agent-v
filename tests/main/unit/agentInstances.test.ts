@@ -1383,6 +1383,38 @@ describe('agentInstances worktree', () => {
       clearRunAbort(shared.runId)
     }
   })
+
+  it('deleting a done instance run deletes the branch it kept', async () => {
+    const child = await spawnAgentInstance({
+      parentRunId,
+      workspacePath,
+      goal: 'keep then delete',
+      outcome: 'keep then delete outcome',
+      subTasks: ['keep then delete step'],
+      doneWhen: 'keep then delete complete'
+    })
+    expect(child.ok).toBe(true)
+    if (!child.ok) return
+    expect(child.worktreeBranch).toBeTruthy()
+    const instanceBranches = async (): Promise<string> =>
+      (
+        await execFileAsync(
+          'git',
+          ['for-each-ref', '--format=%(refname:short)', 'refs/heads/vyotiq/instance/'],
+          { cwd: workspacePath, encoding: 'utf8', windowsHide: true }
+        )
+      ).stdout.trim()
+
+    await handleInlineInstanceFinished(workspacePath, child.runId, 'done')
+    clearRunAbort(child.runId)
+    // Finishing keeps the branch: it is what merge_agent_instance merges.
+    expect(await instanceBranches()).toBe(child.worktreeBranch)
+
+    const deleted = await deleteRun(workspacePath, child.runId)
+    expect(deleted.ok).toBe(true)
+    // Nothing can find the branch without the run record, so it goes with it.
+    expect(await instanceBranches()).toBe('')
+  }, 30_000)
 })
 
 describe('instance worktree path/branch guards', () => {

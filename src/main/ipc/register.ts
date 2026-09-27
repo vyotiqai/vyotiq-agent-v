@@ -415,6 +415,7 @@ import {
   listRuns,
   listRunsOlder,
   buildRunMarkdownExport,
+  collectProtectedInstanceRunIds,
   loadMessagesWindowAsync,
   loadEventsForRunAsync,
   LOAD_EVENTS_UI_LIMIT,
@@ -608,6 +609,18 @@ function sendToCurrentRenderer(
         ? fallback
         : null
   target?.send(channel, payload)
+}
+
+/**
+ * Instance runs whose checkout and branch a prune pass must leave alone: live
+ * in this process, plus still `running`/`resumable` on disk. Boot builds the
+ * same union; a workspace switch used to pass only the live set, which left a
+ * resumable instance's branch unprotected the moment its 14-day cutoff passed.
+ */
+function protectedInstanceRunIds(workspacePath: string): Set<string> {
+  const keep = collectProtectedInstanceRunIds(workspacePath)
+  for (const run of listActiveRuns()) keep.add(run.runId)
+  return keep
 }
 
 /** Git runs commands in a directory, so only ever in one the user has opened. */
@@ -1058,10 +1071,7 @@ export function registerIpc(): void {
         const warmPath = next.activePath ?? req.path
         if (warmPath) {
           warmWorkspaceIndexes(warmPath)
-          pruneStaleInstanceWorktreesBestEffort(
-            warmPath,
-            new Set(listActiveRuns().map((run) => run.runId))
-          )
+          pruneStaleInstanceWorktreesBestEffort(warmPath, protectedInstanceRunIds(warmPath))
         }
         return ok(next)
       } catch (err) {
@@ -1130,10 +1140,7 @@ export function registerIpc(): void {
         // warm its index and prune its worktrees a second time.
         if (!alreadyActive) {
           warmWorkspaceIndexes(path)
-          pruneStaleInstanceWorktreesBestEffort(
-            path,
-            new Set(listActiveRuns().map((run) => run.runId))
-          )
+          pruneStaleInstanceWorktreesBestEffort(path, protectedInstanceRunIds(path))
         }
         return ok(state)
       } catch (err) {

@@ -757,7 +757,9 @@ export async function handleInlineInstanceFinished(
         // committed checkpoint is the only durable copy of its applied edits —
         // run 79f92c12 (2026-08-31) lost its branch here and survived only as
         // an fsck-unreachable commit. Cancelled children keep the old contract
-        // (user-backed-out WIP).
+        // (user-backed-out WIP). Retention is bounded elsewhere: deleteRun
+        // drops the branch with the run, and pruneStaleInstanceWorktrees ages
+        // out what is left (INSTANCE_BRANCH_MAX_AGE_MS).
         keepBranch: phase !== 'cancelled',
         branch: childStatus?.worktreeBranch
       })
