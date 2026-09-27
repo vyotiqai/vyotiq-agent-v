@@ -18,15 +18,19 @@ describe('scrollToSettingsField', () => {
     expect(el.className).toContain('ring-1')
   })
 
-  it('falls back to api-keys when a provider URL field is not mounted', () => {
-    document.body.innerHTML = '<div data-settings-field="api-keys"></div>'
-    const el = document.querySelector('[data-settings-field="api-keys"]') as HTMLElement
-    el.scrollIntoView = vi.fn()
+  it('falls back to the owning accordion when a provider URL field is not mounted', () => {
+    document.body.innerHTML =
+      '<div data-settings-field="api-keys"></div><div data-settings-field="custom-endpoints"></div>'
+    const keys = document.querySelector('[data-settings-field="api-keys"]') as HTMLElement
+    const endpoints = document.querySelector(
+      '[data-settings-field="custom-endpoints"]'
+    ) as HTMLElement
+    keys.scrollIntoView = vi.fn()
+    endpoints.scrollIntoView = vi.fn()
     scrollToSettingsField('ollama-url')
-    expect(el.className).toContain('ring-1')
-    el.className = ''
+    expect(keys.className).toContain('ring-1')
     scrollToSettingsField('custom-url')
-    expect(el.className).toContain('ring-1')
+    expect(endpoints.className).toContain('ring-1')
   })
 
   it('is a no-op for removed indexing fields', () => {

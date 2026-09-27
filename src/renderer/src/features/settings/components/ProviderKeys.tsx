@@ -1,5 +1,9 @@
-import { useId, type ReactNode } from 'react'
-import type { ProviderId, SecretProvider } from '@shared/ipc'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import {
+  isCustomProviderId,
+  type CustomProvider,
+  type SecretProvider
+} from '@shared/ipc'
 import {
   CUSTOM_OPENAI_DEFAULT,
   normalizeCustomOpenAiBaseUrl,
@@ -10,58 +14,86 @@ import { Icon } from '@renderer/lib/icons'
 import { Button, Input, pushToast } from '@renderer/lib/ui'
 import { ProviderLogo } from '@renderer/features/chat/components/composer/ProviderLogo'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
-import { PROVIDER_KEY_ORDER, PROVIDER_KEY_URLS } from '../constants'
+import { PROVIDER_KEY_URLS } from '../constants'
 
 type KeyState = 'saved' | 'local' | 'none' | 'unavailable'
 
 /**
- * Every provider as one row: its mark, whether it is the one new tasks use,
- * and whether it has a key. One row opens at a time, for its key and — for
- * Ollama and custom endpoints — its base URL.
+ * Every provider in `ids` as one row: its mark, whether it is the one new
+ * tasks use, and whether it has a key. One row opens at a time, for its key
+ * and — for Ollama, Custom and user-added endpoints — its base URL.
  */
 export function ProviderKeys({
+  ids,
   form,
   secrets,
   onClearKey
 }: {
+  ids: readonly SecretProvider[]
   form: SettingsFormState
   secrets: Record<SecretProvider, boolean>
   onClearKey: () => void
 }) {
   return (
     <>
-      {PROVIDER_KEY_ORDER.map((id) => (
-        <ProviderKeyRow key={id} id={id} form={form} saved={secrets[id]} onClearKey={onClearKey} />
-      ))}
+      {ids.map((id) => {
+        const endpoint = isCustomProviderId(id)
+          ? form.customProviders.find((entry) => entry.id === id)
+          : undefined
+        // An id whose endpoint is gone has nothing left to manage.
+        if (isCustomProviderId(id) && !endpoint) return null
+        return (
+          <ProviderKeyRow
+            key={id}
+            id={id}
+            endpoint={endpoint}
+            form={form}
+            saved={Boolean(secrets[id])}
+            onClearKey={onClearKey}
+          />
+        )
+      })}
     </>
   )
 }
 
 function ProviderKeyRow({
   id,
+  endpoint,
   form,
   saved,
   onClearKey
 }: {
-  id: ProviderId
+  id: SecretProvider
+  /** Set for a user-added `custom:<slug>` endpoint. */
+  endpoint?: CustomProvider
   form: SettingsFormState
   saved: boolean
   onClearKey: () => void
 }) {
   const panelId = useId()
-  const label = providerLabel(id)
+  const [confirmRemove, setConfirmRemove] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const label = providerLabel(id, form.customProviders)
   const open = form.openKeyProvider === id
   const inUse = id === form.settings.provider
-  const url = id === 'ollama' ? form.ollamaUrl : id === 'custom' ? form.customUrl : ''
+  const hasBaseUrl = id === 'ollama' || id === 'custom' || endpoint !== undefined
+  const url = endpoint
+    ? endpoint.baseUrl
+    : id === 'ollama'
+      ? form.ollamaUrl
+      : id === 'custom'
+        ? form.customUrl
+        : ''
   const state: KeyState = saved
     ? 'saved'
-    : (id === 'ollama' || id === 'custom') && !providerNeedsKey(id, url)
+    : hasBaseUrl && !providerNeedsKey(id, url)
       ? 'local'
       : form.encryptionAvailable
         ? 'none'
         : 'unavailable'
   // Without OS secure storage a provider with no base URL has nothing to open.
-  const manageable = form.encryptionAvailable || id === 'ollama' || id === 'custom'
+  const manageable = form.encryptionAvailable || hasBaseUrl
 
   return (
     <div data-settings-field={id === 'custom' ? 'custom-url' : id === 'ollama' ? 'ollama-url' : undefined}>
@@ -85,7 +117,10 @@ function ProviderKeyRow({
           aria-controls={open ? panelId : undefined}
           aria-label={state === 'none' ? `Add key for ${label}` : `Manage ${label}`}
           disabled={form.formLocked || !manageable}
-          onClick={() => form.toggleKeyProvider(id)}
+          onClick={() => {
+            setConfirmRemove(false)
+            form.toggleKeyProvider(id)
+          }}
         >
           {state === 'none' ? 'Add key' : 'Manage'}
         </Button>
@@ -101,6 +136,9 @@ function ProviderKeyRow({
       ) : null}
       {open ? (
         <div id={panelId} className="-mt-1 flex flex-col gap-2 pb-3 pl-10">
+          {endpoint ? (
+            <EndpointFields key={endpoint.id} endpoint={endpoint} form={form} />
+          ) : null}
           {id === 'custom' ? (
             <BaseUrlField
               inputId="custom-openai-url"
@@ -199,21 +237,262 @@ function ProviderKeyRow({
               {form.displayError}
             </p>
           ) : null}
-          {!inUse && state !== 'none' && state !== 'unavailable' ? (
-            <div>
+          {endpoint && confirmRemove ? (
+            <div className="flex items-center gap-2" role="group" aria-label={`Remove ${endpoint.name}`}>
+              <span className="min-w-0 flex-1 text-xs text-fg">
+                Remove {endpoint.name}
+                {saved ? ' and its saved key' : ''}?
+              </span>
+              <Button size="xs" variant="ghost" disabled={removing} onClick={() => setConfirmRemove(false)}>
+                Cancel
+              </Button>
               <Button
                 size="xs"
-                variant="ghost"
-                disabled={form.formLocked}
+                variant="danger"
+                pending={removing}
                 onClick={() => {
-                  void form.setActiveProvider(id)
+                  setRemoving(true)
+                  void form.removeEndpoint(endpoint.id).finally(() => {
+                    setRemoving(false)
+                    setConfirmRemove(false)
+                  })
                 }}
               >
-                Use for new tasks
+                {removing ? 'Removing…' : 'Remove'}
               </Button>
+            </div>
+          ) : (!inUse && state !== 'none' && state !== 'unavailable') || endpoint ? (
+            <div className="flex items-center gap-2">
+              {!inUse && state !== 'none' && state !== 'unavailable' ? (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  disabled={form.formLocked}
+                  onClick={() => {
+                    void form.setActiveProvider(id)
+                  }}
+                >
+                  Use for new tasks
+                </Button>
+              ) : null}
+              {endpoint ? (
+                // Trailing edge; the wrapper carries ml-auto because a
+                // disabled Button renders inside its tooltip span.
+                <span className="ml-auto inline-flex">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    icon="trash"
+                    disabled={form.formLocked || inUse}
+                    title={inUse ? 'Switch the provider for new tasks to remove it.' : undefined}
+                    onClick={() => setConfirmRemove(true)}
+                  >
+                    Remove
+                  </Button>
+                </span>
+              ) : null}
             </div>
           ) : null}
         </div>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Name and base URL of a user-added endpoint. Drafts stay local and save on
+ * blur, so a half-typed URL never reaches settings; the error sits under the
+ * field that caused it.
+ */
+function EndpointFields({ endpoint, form }: { endpoint: CustomProvider; form: SettingsFormState }) {
+  const [name, setName] = useState(endpoint.name)
+  const [url, setUrl] = useState(endpoint.baseUrl)
+  const [nameError, setNameError] = useState<string | null>(null)
+  const [urlError, setUrlError] = useState<string | null>(null)
+
+  const commitName = (): void => {
+    if (name.trim() === endpoint.name) {
+      setNameError(null)
+      return
+    }
+    const error = form.endpointFieldError({ name }, endpoint.id)
+    setNameError(error)
+    if (!error) void form.updateEndpoint(endpoint.id, { name })
+  }
+  const commitUrl = (): void => {
+    if (url.trim() === endpoint.baseUrl) {
+      setUrlError(null)
+      return
+    }
+    const error = form.endpointFieldError({ baseUrl: url }, endpoint.id)
+    setUrlError(error)
+    if (!error) void form.updateEndpoint(endpoint.id, { baseUrl: url })
+  }
+
+  return (
+    <>
+      <div className="flex flex-col gap-1">
+        <Input
+          id="endpoint-name"
+          size="sm"
+          aria-label="Endpoint name"
+          aria-invalid={nameError ? true : undefined}
+          aria-describedby={nameError ? 'endpoint-name-error' : undefined}
+          disabled={form.formLocked}
+          value={name}
+          maxLength={60}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={commitName}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
+        />
+        {nameError ? (
+          <p id="endpoint-name-error" className="m-0 text-xs text-danger" role="alert">
+            {nameError}
+          </p>
+        ) : null}
+      </div>
+      <BaseUrlField
+        inputId="endpoint-url"
+        ariaLabel="Endpoint base URL"
+        hint="An OpenAI-compatible base ending in /v1 or a vendor's mount. Public hosts need a key; loopback and a private LAN can go without."
+        value={url}
+        disabled={form.formLocked}
+        invalid={Boolean(urlError)}
+        describedBy={urlError ? 'endpoint-url-error' : undefined}
+        error={
+          urlError ? (
+            <p id="endpoint-url-error" className="m-0 text-xs text-danger" role="alert">
+              {urlError}
+            </p>
+          ) : null
+        }
+        onChange={setUrl}
+        onCommit={commitUrl}
+      />
+    </>
+  )
+}
+
+/**
+ * The last row of the endpoint list: opens a name + base URL form. Adding
+ * opens the new endpoint's row, so its key can be pasted next.
+ */
+export function AddEndpointRow({ form, max }: { form: SettingsFormState; max: number }) {
+  const panelId = useId()
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [url, setUrl] = useState('')
+  const [nameError, setNameError] = useState<string | null>(null)
+  const [urlError, setUrlError] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const nameRef = useRef<HTMLInputElement>(null)
+  const count = form.customProviders.length
+
+  // Opening the form is an explicit click, so the name field takes focus.
+  useEffect(() => {
+    if (open) nameRef.current?.focus()
+  }, [open])
+
+  const reset = (): void => {
+    setOpen(false)
+    setName('')
+    setUrl('')
+    setNameError(null)
+    setUrlError(null)
+  }
+
+  const submit = async (): Promise<void> => {
+    const nextNameError = form.endpointFieldError({ name })
+    const nextUrlError = form.endpointFieldError({ baseUrl: url })
+    setNameError(nextNameError)
+    setUrlError(nextUrlError)
+    if (nextNameError || nextUrlError) return
+    setAdding(true)
+    const ok = await form.addEndpoint(name, url)
+    setAdding(false)
+    if (ok) reset()
+  }
+
+  if (count >= max) {
+    return <p className="m-0 flex h-11 items-center pl-10 text-xs text-muted">{`${count} of ${max} endpoints saved`}</p>
+  }
+
+  return (
+    <div>
+      <button
+        type="button"
+        className="flex h-11 w-full items-center gap-3 rounded-md text-left text-sm text-muted vy-transition hover:text-fg focus-visible:vy-focus-ring disabled:cursor-not-allowed"
+        aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
+        disabled={form.formLocked}
+        onClick={() => (open ? reset() : setOpen(true))}
+      >
+        <span className="grid size-7 shrink-0 place-items-center rounded-md bg-surface">
+          <Icon name="plus" size={14} />
+        </span>
+        Add endpoint
+      </button>
+      {open ? (
+        <form
+          id={panelId}
+          className="-mt-1 flex flex-col gap-2 pb-3 pl-10"
+          aria-label="Add endpoint"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void submit()
+          }}
+        >
+          <div className="flex flex-col gap-1">
+            <Input
+              ref={nameRef}
+              id="new-endpoint-name"
+              size="sm"
+              aria-label="New endpoint name"
+              aria-invalid={nameError ? true : undefined}
+              aria-describedby={nameError ? 'new-endpoint-name-error' : undefined}
+              placeholder="Name, such as Home GPU"
+              maxLength={60}
+              value={name}
+              disabled={adding}
+              onChange={(e) => setName(e.target.value)}
+            />
+            {nameError ? (
+              <p id="new-endpoint-name-error" className="m-0 text-xs text-danger" role="alert">
+                {nameError}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex flex-col gap-1">
+            <Input
+              id="new-endpoint-url"
+              size="sm"
+              mono
+              aria-label="New endpoint base URL"
+              aria-invalid={urlError ? true : undefined}
+              aria-describedby={urlError ? 'new-endpoint-url-error' : undefined}
+              placeholder="http://localhost:1234/v1"
+              spellCheck={false}
+              value={url}
+              disabled={adding}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+            {urlError ? (
+              <p id="new-endpoint-url-error" className="m-0 text-xs text-danger" role="alert">
+                {urlError}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button type="submit" size="sm" variant="primary" pending={adding} disabled={form.formLocked}>
+              {adding ? 'Adding…' : 'Add'}
+            </Button>
+            <Button size="sm" variant="ghost" disabled={adding} onClick={reset}>
+              Cancel
+            </Button>
+          </div>
+        </form>
       ) : null}
     </div>
   )

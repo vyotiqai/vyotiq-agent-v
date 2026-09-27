@@ -1,16 +1,16 @@
-import type { ProviderId, ServiceTier, Settings } from '../ipc'
+import type { ProviderIdAny, ServiceTier, Settings } from '../ipc'
 import {
   DEFAULT_THINKING_EFFORT,
   type ThinkingEffort
 } from '../ipc/schemas/providers'
 
-export function modelSelectionKey(provider: ProviderId, model: string): string {
+export function modelSelectionKey(provider: ProviderIdAny, model: string): string {
   return `${provider}::${model}`
 }
 
 export function resolveServiceTier(
   settings: Pick<Settings, 'serviceTier' | 'serviceTierByModel'>,
-  provider: ProviderId,
+  provider: ProviderIdAny,
   model: string
 ): ServiceTier {
   const key = modelSelectionKey(provider, model)
@@ -18,21 +18,18 @@ export function resolveServiceTier(
 }
 
 /**
- * Parse a `provider::model` key back into its parts.
- *
- * The declared provider type stays the builtin `ProviderId` union for wire
- * compat with existing call sites. At runtime dynamic `custom:<slug>` ids
- * round-trip through the same split: slugs cannot contain ':' (see
+ * Parse a `provider::model` key back into its parts. Dynamic `custom:<slug>`
+ * ids round-trip through the same split: slugs cannot contain ':' (see
  * CUSTOM_PROVIDER_SLUG_RE), so the parse stays unambiguous.
  */
 export function parseModelSelectionKey(
   key: string
-): { provider: ProviderId; model: string } | null {
+): { provider: ProviderIdAny; model: string } | null {
   if (!key) return null
   const idx = key.indexOf('::')
   if (idx <= 0) return null
   return {
-    provider: key.slice(0, idx) as ProviderId,
+    provider: key.slice(0, idx) as ProviderIdAny,
     model: key.slice(idx + 2)
   }
 }

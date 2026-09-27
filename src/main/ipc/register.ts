@@ -243,6 +243,7 @@ import {
   type NotificationList
 } from '../../shared/ipc'
 import {
+  providerLabel,
   resolveProviderListBaseUrl,
   validateCustomOpenAiBaseUrl,
   validateOllamaBaseUrl
@@ -1368,6 +1369,12 @@ export function registerIpc(): void {
           }
         }
         const settings = getSettings()
+        if (
+          isCustomProviderId(req.provider) &&
+          !settings.customProviders.some((entry) => entry.id === req.provider)
+        ) {
+          return fail('That custom endpoint was removed from Settings → Providers.')
+        }
         const apiKey = getSecret(req.provider)
         const baseUrl = resolveProviderListBaseUrl(
           req.provider,
@@ -1377,6 +1384,7 @@ export function registerIpc(): void {
         )
         const result = await listProviderModels({
           provider: req.provider,
+          label: providerLabel(req.provider, settings.customProviders),
           apiKey,
           baseUrl,
           forceRefresh: req.forceRefresh,

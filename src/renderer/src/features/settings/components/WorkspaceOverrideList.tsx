@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from 'react'
-import type { ProviderId, SecretProvider, Settings, WorkspaceSettingsOverride } from '@shared/ipc'
+import type { ProviderIdAny, SecretProvider, Settings, WorkspaceSettingsOverride } from '@shared/ipc'
 import {
   CUSTOM_OPENAI_DEFAULT,
   defaultModelFor,
@@ -97,9 +97,16 @@ function WorkspaceOverrideRow({
       providerOptionsForConfigured(secrets, {
         ollamaBaseUrl: globalSettings.ollamaBaseUrl,
         customOpenAiBaseUrl: globalSettings.customOpenAiBaseUrl,
+        customProviders: globalSettings.customProviders,
         alwaysInclude: [provider]
       }),
-    [secrets, globalSettings.ollamaBaseUrl, globalSettings.customOpenAiBaseUrl, provider]
+    [
+      secrets,
+      globalSettings.ollamaBaseUrl,
+      globalSettings.customOpenAiBaseUrl,
+      globalSettings.customProviders,
+      provider
+    ]
   )
 
   useEffect(() => {
@@ -173,7 +180,7 @@ function WorkspaceOverrideRow({
           triggerClassName="w-full"
           onChange={(value) => {
             if (value === provider) return
-            const nextProvider = value as ProviderId
+            const nextProvider = value as ProviderIdAny
             const nextModel = defaultModelFor(nextProvider)
             setProvider(nextProvider)
             setModel(nextModel)

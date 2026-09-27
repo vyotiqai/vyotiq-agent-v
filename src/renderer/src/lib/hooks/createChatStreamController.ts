@@ -6,7 +6,7 @@ import type {
   ChatMessage,
   ChatRewindPreviewResult,
   IncompleteReason,
-  ProviderId,
+  ProviderIdAny,
   PersistedEvent,
   ToolApprovalDecision,
   ToolApprovalRequest,
@@ -1313,7 +1313,7 @@ export type ChatStreamState = {
   /** Latest lifecycle for inline Agent V instances spawned by this run. */
   agentInstances: Record<string, AgentInstanceUiState>
   /** Session-pinned provider/model — set on first send; other sessions' model changes cannot bleed in. */
-  providerModel: { provider: ProviderId; model: string } | null
+  providerModel: { provider: ProviderIdAny; model: string } | null
 }
 
 export type ChatStreamController = ChatStreamState & {
@@ -1388,7 +1388,7 @@ export type ChatStreamController = ChatStreamState & {
   /** Mark compacting in-flight for manual Compact (IPC has no live stream). */
   setCompacting: (compacting: boolean) => void
   /** Pin this session's provider/model (composer change made in this session). */
-  setProviderModel: (provider: ProviderId, model: string) => void
+  setProviderModel: (provider: ProviderIdAny, model: string) => void
   /** Apply Keep/Discard results onto the live write checkpoint state. */
   applyWriteCheckpointResolution: (result: {
     checkpointId: string
@@ -1468,7 +1468,7 @@ export type CreateChatStreamControllerOptions = {
   /** Current Ask / Plan / Agent mode for chatStart. */
   getAgentMode?: () => AgentInteractionMode
   /** Live default provider/model (effective settings) until this session pins its own. */
-  getDefaultProviderModel?: () => { provider: ProviderId; model: string } | null
+  getDefaultProviderModel?: () => { provider: ProviderIdAny; model: string } | null
   /** Sync composer mode when the agent calls switch_mode. */
   onAgentModeChange?: (mode: AgentInteractionMode) => void
   /** Restored expansion state for this run (survives reload/tab switches). */
@@ -2111,7 +2111,7 @@ export function createChatStreamController(
    * the first send so a model change in a different session (which only updates
    * the shared global settings) cannot bleed into this one.
    */
-  const resolveTurnProviderModel = (): { provider: ProviderId; model: string } | null => {
+  const resolveTurnProviderModel = (): { provider: ProviderIdAny; model: string } | null => {
     if (state.providerModel) {
       return state.providerModel
     }
@@ -4744,7 +4744,7 @@ export function createChatStreamController(
     patch({ compacting: next })
   }
 
-  const setProviderModel = (provider: ProviderId, model: string): void => {
+  const setProviderModel = (provider: ProviderIdAny, model: string): void => {
     if (disposed) return
     const trimmed = model.trim()
     if (!trimmed) return

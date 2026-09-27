@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { listConfiguredProviders, providerLabel } from '@shared/providers'
-import type { ProviderId, SecretProvider } from '@shared/ipc'
+import type { ProviderIdAny, SecretProvider } from '@shared/ipc'
 import { modelSelectionKey } from '@shared/domain/modelSelection'
 import {
   filterModelsForWorkspace,
@@ -14,6 +14,7 @@ import {
 } from './composerModelUtils'
 import { useProviderCatalogCache, ollamaCatalogNeedsShow } from './useProviderCatalogCache'
 import { findOllamaCatalogModel } from '@shared/reasoning'
+import { useCustomProviders } from '@renderer/lib/hooks/customProvidersStore'
 
 export function useComposerModels({
   provider,
@@ -27,7 +28,7 @@ export function useComposerModels({
   browsedProvider,
   secrets
 }: {
-  provider: ProviderId
+  provider: ProviderIdAny
   model: string
   ollamaBaseUrl?: string
   customOpenAiBaseUrl?: string
@@ -35,13 +36,14 @@ export function useComposerModels({
   hasWorkspace?: boolean
   hasImages: boolean
   hasAudio?: boolean
-  browsedProvider?: ProviderId
+  browsedProvider?: ProviderIdAny
   secrets: Record<SecretProvider, boolean>
 }) {
+  const customProviders = useCustomProviders()
   const value = modelSelectionKey(provider, model)
   const activeBrowse = browsedProvider ?? provider
   /** Browsed (non-active) providers: fetch once per tab open / refresh, not on every idle tick. */
-  const browsedFetchedRef = useRef(new Set<ProviderId>())
+  const browsedFetchedRef = useRef(new Set<ProviderIdAny>())
   /** One `/api/show` enrich per selected Ollama id until catalog refresh. */
   const ollamaShowAttemptedRef = useRef<string | null>(null)
 
@@ -60,9 +62,10 @@ export function useComposerModels({
       listConfiguredProviders(secrets, {
         ollamaBaseUrl,
         customOpenAiBaseUrl,
+        customProviders,
         alwaysInclude: [provider]
       }),
-    [secrets, ollamaBaseUrl, customOpenAiBaseUrl, provider]
+    [secrets, ollamaBaseUrl, customOpenAiBaseUrl, customProviders, provider]
   )
 
   useEffect(() => {
@@ -125,7 +128,7 @@ export function useComposerModels({
   const filtered = filterModelsForWorkspace(catalog, filterOpts)
 
   const warningsByProvider = useMemo(() => {
-    const map = {} as Partial<Record<ProviderId, string | null>>
+    const map = {} as Partial<Record<ProviderIdAny, string | null>>
     for (const id of configuredProviders) {
       map[id] = getEntry(id)?.warning ?? null
     }
@@ -133,9 +136,9 @@ export function useComposerModels({
   }, [cache, configuredProviders, getEntry])
 
   const optionsByProvider = useMemo(() => {
-    const map = {} as Record<ProviderId, ModelPickerOption[]>
+    const map = {} as Record<ProviderIdAny, ModelPickerOption[]>
     for (const id of configuredProviders) {
-      const label = providerLabel(id)
+      const label = providerLabel(id, customProviders)
       const entry = getEntry(id)
       const live = pickerModelsFromCatalogEntry(entry)
       if (live) {
@@ -146,7 +149,7 @@ export function useComposerModels({
       }
     }
     return map
-  }, [cache, filterOpts, getEntry, configuredProviders])
+  }, [cache, filterOpts, getEntry, configuredProviders, customProviders])
 
   const modelMetaByValue = useMemo(
     () => buildModelMetaMap(optionsByProvider),
@@ -154,23 +157,23 @@ export function useComposerModels({
   )
 
   const seedsByProvider = useMemo(() => {
-    const map = {} as Record<ProviderId, ModelPickerOption[]>
+    const map = {} as Record<ProviderIdAny, ModelPickerOption[]>
     for (const id of configuredProviders) {
       const warning = getEntry(id)?.warning ?? null
       if (isSeedFallbackWarning(warning)) {
         map[id] = []
       } else {
-        map[id] = seedOptionsForProvider(id)
+        map[id] = seedOptionsForProvider(id, customProviders)
       }
     }
     return map
-  }, [configuredProviders, cache, getEntry])
+  }, [configuredProviders, cache, getEntry, customProviders])
 
   const currentMeta = modelMetaByValue[value]
 
   const refreshCatalog = async (opts?: {
     forceRefresh?: boolean
-    provider?: ProviderId
+    provider?: ProviderIdAny
   }) => {
     const target = opts?.provider ?? activeBrowse
     if (opts?.forceRefresh) ollamaShowAttemptedRef.current = null
@@ -191,7 +194,8 @@ export function useComposerModels({
     value,
     provider,
     model,
-    providerLabel: providerLabel(provider),
+    providerLabel: providerLabel(provider, customProviders),
+    customProviders,
     modelsWarning,
     warningsByProvider,
     catalogLoading: Boolean(getEntry(activeBrowse)?.loading),

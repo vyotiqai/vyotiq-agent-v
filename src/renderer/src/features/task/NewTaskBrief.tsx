@@ -7,6 +7,7 @@ import { Button, IconButton, Menu, Segmented, StatusGlyph, cn, type MenuOption }
 import { Icon } from '@renderer/lib/icons'
 import { SECTION_LABEL } from '@renderer/lib/utils/layout'
 import { useConfirm } from '@renderer/lib/hooks/useConfirm'
+import { useCustomProviders } from '@renderer/lib/hooks/customProvidersStore'
 import { formatWorkspaceName } from '@renderer/lib/utils/formatWorkspaceName'
 import { MODES } from '@renderer/features/chat/components/composer/ModePicker'
 import { TaskOptions, capabilities, type TaskOptionsProps } from '@renderer/features/chat/components/composer/TaskOptions'
@@ -498,6 +499,7 @@ function HowItRuns({
 }) {
   const { provider, model, modelMetaByValue, agentMode, onAgentModeChange, chatSettings, onChatSettingsChange } = options
   const locked = Boolean(options.disabled)
+  const customProviders = useCustomProviders()
   const meta = modelMetaByValue[modelSelectionKey(provider, model)] ?? modelMetaByValue[model]
   const thinkingUi = resolveThinkingUiMeta(provider, model, meta)
   const effortModes = buildModes(
@@ -537,7 +539,7 @@ function HowItRuns({
       <dd className="m-0 flex min-w-0 items-center gap-3">
         <TaskOptions {...options} trigger="model" />
         <span className="min-w-0 truncate text-xs text-tertiary">
-          {[providerLabel(provider), ...can].join(' · ')}
+          {[providerLabel(provider, customProviders), ...can].join(' · ')}
         </span>
       </dd>
       {showsEffort ? (

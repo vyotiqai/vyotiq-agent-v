@@ -5,7 +5,7 @@ import {
   AttachmentNativeFilePartSchema,
   MAX_IMAGE_DATA_URL_CHARS
 } from './agent'
-import { ProviderIdSchema, ThinkingEffortSchema } from './providers'
+import { ProviderIdSchemaAny, ThinkingEffortSchema } from './providers'
 import { MarketplaceOverridesSchema } from './marketplace'
 import {
   AgentInteractionModeSchema,
@@ -102,7 +102,7 @@ export const ComposerAttachmentsClearRequestSchema = z.object({
 export type ComposerAttachmentsClearRequest = z.infer<typeof ComposerAttachmentsClearRequestSchema>
 
 export const WorkspaceSettingsOverrideSchema = z.object({
-  provider: ProviderIdSchema.optional(),
+  provider: ProviderIdSchemaAny.optional(),
   model: z.string().min(1).optional(),
   customOpenAiBaseUrl: z.string().min(1).optional(),
   keepRecentTurns: z.number().int().min(4).max(50).optional(),

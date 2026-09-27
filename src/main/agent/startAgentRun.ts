@@ -5,7 +5,7 @@ import {
   type AgentEvent,
   type AgentInteractionMode,
   type ChatMessage,
-  type ProviderId,
+  type ProviderIdAny,
   needsYouDedupeKey,
   runDoneDedupeKey,
   runErrorDedupeKey
@@ -109,7 +109,7 @@ export type StartAgentRunAgentInput = {
   persistedMessageCount?: number
   focusedFile?: string | null
   /** Session-pinned provider — authoritative for this invoke. */
-  provider?: ProviderId
+  provider?: ProviderIdAny
   /** Session-pinned model — authoritative for this invoke. */
   model?: string
   /** Execution substrate (Phase 4 runtime seam) — local unless cloud is wired. */
