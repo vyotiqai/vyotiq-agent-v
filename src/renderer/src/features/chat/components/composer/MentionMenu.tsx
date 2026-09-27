@@ -14,7 +14,6 @@ import {
   MENU_SURFACE,
   MenuItemBody
 } from '@renderer/lib/ui'
-import { FileTypeBadge } from './FileTypeBadge'
 import {
   COMPOSER_DROPDOWN_PAD_PX,
   COMPOSER_DROPDOWN_TREE_MIN_PX,
@@ -81,7 +80,7 @@ function PathTree({ path }: { path: string }) {
             style={{ paddingLeft: i * 8 }}
           >
             {isLast ? (
-              <FileTypeBadge path={path} />
+              <FileTypeIcon path={path} size={14} />
             ) : (
               <FileTypeIcon path={part} kind="folder" size={14} />
             )}

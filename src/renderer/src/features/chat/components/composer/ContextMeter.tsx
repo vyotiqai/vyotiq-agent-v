@@ -1,9 +1,12 @@
 import { useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '@renderer/lib/icons'
+import { Button } from '@renderer/lib/ui/Button'
 import { cn } from '@renderer/lib/ui/cn'
+import { MENU_SURFACE } from '@renderer/lib/ui/menuStyles'
 import { useDropdownMenu } from '@renderer/lib/hooks/useDropdownMenu'
 import { formatTokens } from '@renderer/lib/utils/formatTokens'
+import { BORDER_DIVIDER, DIVIDER_FILL, NUM, ROW_HOVER, SECTION_LABEL } from '@renderer/lib/utils/layout'
 import {
   alignContextUsageToModelWindow,
   type ContextToolGroupDetail,
@@ -55,12 +58,6 @@ const levelFill: Record<UsageLevel, string> = {
   normal: 'bg-fg',
   warning: 'bg-warning',
   danger: 'bg-danger'
-}
-
-const levelSoft: Record<UsageLevel, string> = {
-  normal: 'bg-fg/10',
-  warning: 'bg-warning-soft',
-  danger: 'bg-danger-soft'
 }
 
 function formatPct(n: number, total: number): string {
@@ -136,7 +133,7 @@ function UsageRing({
         />
       </svg>
       {children ? (
-        <span className="absolute inset-0 grid place-items-center text-3xs font-semibold tabular-nums leading-none">
+        <span className="absolute inset-0 grid place-items-center text-caption font-semibold tnum leading-none">
           {children}
         </span>
       ) : null}
@@ -178,7 +175,7 @@ function BreakdownRow({
       <span className={cn('size-1.5 shrink-0 rounded-full', color)} aria-hidden />
       <span
         className={cn(
-          'w-24 shrink-0 truncate text-2xs',
+          'w-24 shrink-0 truncate text-caption',
           muted ? 'text-tertiary' : 'text-secondary'
         )}
         title={label}
@@ -189,7 +186,7 @@ function BreakdownRow({
         <span className="min-w-0 flex-1" aria-hidden />
       ) : (
         <div className="min-w-0 flex-1">
-          <div className="h-1 overflow-hidden rounded-full bg-surface-2">
+          <div className={cn('h-1 overflow-hidden rounded-full', DIVIDER_FILL)}>
             <div
               className={cn('h-full rounded-full vy-transition', color)}
               style={{ width: `${total > 0 ? Math.min(100, (tokens / total) * 100) : 0}%` }}
@@ -199,7 +196,7 @@ function BreakdownRow({
       )}
       <span
         className={cn(
-          'w-10 shrink-0 text-right text-2xs tabular-nums',
+          'w-10 shrink-0 text-right text-caption tnum',
           muted ? 'text-tertiary' : 'text-fg'
         )}
       >
@@ -207,7 +204,7 @@ function BreakdownRow({
       </span>
       <span
         className={cn(
-          'w-9 shrink-0 text-right text-2xs tabular-nums',
+          'w-9 shrink-0 text-right text-caption tnum',
           muted ? 'text-tertiary' : 'text-secondary'
         )}
       >
@@ -223,7 +220,7 @@ function BreakdownRow({
       type="button"
       onClick={onToggle}
       aria-expanded={expanded}
-      className="flex w-full items-center gap-2 rounded text-left vy-transition hover:bg-surface"
+      className={cn('flex w-full items-center gap-2 rounded-sm text-left vy-transition focus-visible:vy-focus-ring', ROW_HOVER)}
     >
       {row}
     </button>
@@ -237,13 +234,13 @@ function McpServerRows({ groups }: { groups: ContextToolGroupDetail[] }) {
       {groups.map((group) => (
         <div key={group.serverId} className="flex items-center gap-2 pl-3.5">
           <span className="w-1.5 shrink-0" aria-hidden />
-          <span className="min-w-0 flex-1 truncate text-2xs text-tertiary" title={group.serverId}>
+          <span className="min-w-0 flex-1 truncate text-caption text-tertiary" title={group.serverId}>
             {group.serverId}
           </span>
-          <span className="shrink-0 text-3xs tabular-nums text-tertiary">
+          <span className="shrink-0 text-caption tnum text-tertiary">
             {group.toolCount} {group.toolCount === 1 ? 'tool' : 'tools'}
           </span>
-          <span className="w-10 shrink-0 text-right text-2xs tabular-nums text-secondary">
+          <span className="w-10 shrink-0 text-right text-caption tnum text-secondary">
             {formatTokens(group.tokens)}
           </span>
           <span className="w-9 shrink-0" aria-hidden />
@@ -270,13 +267,13 @@ function BreakdownRows({ usage }: { usage: ContextUsageState }) {
           label="System"
           tokens={usage.layers.system}
           total={contentTotal}
-          color="bg-fg/35"
+          color="bg-tertiary"
         />
         <BreakdownRow
           label="History"
           tokens={usage.layers.history}
           total={contentTotal}
-          color="bg-fg/70"
+          color="bg-secondary"
         />
         <BreakdownRow
           label="Tools"
@@ -317,21 +314,21 @@ function BreakdownRows({ usage }: { usage: ContextUsageState }) {
         label="System prompt"
         tokens={detail.systemPrompt}
         total={base}
-        color="bg-fg/50"
+        color="bg-muted"
       />
-      <BreakdownRow label="Skills" tokens={detail.skills} total={base} color="bg-fg/35" />
+      <BreakdownRow label="Skills" tokens={detail.skills} total={base} color="bg-tertiary" />
       <BreakdownRow
         label="Autocompact buffer"
         tokens={detail.autocompactBuffer}
         total={base}
-        color="bg-fg/20"
+        color="bg-border-strong"
       />
-      <BreakdownRow label="Free space" tokens={detail.free} total={base} color="bg-fg/10" />
+      <BreakdownRow label="Free space" tokens={detail.free} total={base} color={DIVIDER_FILL} />
       <BreakdownRow
         label="Deferred sys tools"
         tokens={detail.tools.deferredBuiltin.tokens}
         total={base}
-        color="bg-fg/15"
+        color={DIVIDER_FILL}
         muted
         pctOverride={null}
       />
@@ -339,7 +336,7 @@ function BreakdownRows({ usage }: { usage: ContextUsageState }) {
         label="Deferred MCP tools"
         tokens={detail.tools.deferredMcp.tokens}
         total={base}
-        color="bg-fg/15"
+        color={DIVIDER_FILL}
         muted
         pctOverride={null}
         onToggle={
@@ -399,14 +396,9 @@ function RunStat({
   title?: string
 }) {
   return (
-    <div
-      className="flex min-w-0 flex-col gap-0.5 rounded-lg bg-surface/40 px-2 py-1.5"
-      title={title}
-    >
-      <span className="text-3xs text-secondary">{label}</span>
-      <span className={cn('truncate text-xs font-medium tabular-nums', tone ?? 'text-fg')}>
-        {value}
-      </span>
+    <div className="flex h-6 min-w-0 items-center justify-between gap-2" title={title}>
+      <dt className="truncate text-caption text-secondary">{label}</dt>
+      <dd className={cn('m-0 shrink-0 truncate', NUM, tone ?? 'text-fg')}>{value}</dd>
     </div>
   )
 }
@@ -456,7 +448,7 @@ export function ContextMeterPanel({
           </UsageRing>
           <div className="min-w-0 flex-1 pt-0.5">
             <p className="m-0 text-sm font-medium text-fg">Context</p>
-            <p className="m-0 mt-0.5 text-2xs leading-snug text-secondary">
+            <p className="m-0 mt-0.5 text-caption leading-snug text-secondary">
               Current step {usage.step}
               <span className="text-tertiary"> · </span>
               {formatTokens(usage.window)} model
@@ -464,7 +456,7 @@ export function ContextMeterPanel({
                 <span className="text-tertiary"> · estimated</span>
               ) : null}
             </p>
-            <p className="m-0 mt-1.5 text-xs tabular-nums text-fg">
+            <p className="m-0 mt-1.5 text-xs tnum text-fg">
               <span className="font-semibold">{formatTokens(usage.used)}</span>
               <span className="text-secondary"> used of </span>
               <span className="font-medium">{formatTokens(budget)}</span>
@@ -472,21 +464,21 @@ export function ContextMeterPanel({
           </div>
         </div>
 
-        <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-surface-2">
+        <div className={cn('relative mt-3 h-2 overflow-hidden rounded-full', DIVIDER_FILL)}>
           <div
             className={cn('absolute inset-y-0 left-0 rounded-full vy-transition', levelFill[level])}
             style={{ width: `${Math.min(100, displayPct)}%` }}
           />
           {compactRatio != null ? (
             <div
-              className="absolute inset-y-0 w-px bg-warning/80"
+              className="absolute inset-y-0 w-px bg-warning"
               style={{ left: `${compactRatio * 100}%` }}
               title={`Auto-compact at ${formatTokens(usage.compactionTrigger)}`}
             />
           ) : null}
         </div>
 
-        <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-3xs text-secondary">
+        <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-caption text-secondary">
           {usage.compactionTrigger > 0 ? (
             <span>Auto-compact at {formatTokens(usage.compactionTrigger)}</span>
           ) : (
@@ -496,36 +488,38 @@ export function ContextMeterPanel({
         </div>
       </header>
 
-      <div className="sidebar-scroll min-h-0 flex-1 overflow-y-auto border-t border-border/40 px-3.5 py-3">
+      <div className={cn('sidebar-scroll min-h-0 flex-1 overflow-y-auto border-t px-3.5 py-3', BORDER_DIVIDER)}>
         {overBudget ? (
-          <p className="m-0 mb-3 rounded-lg bg-danger/10 px-2.5 py-2 text-3xs leading-snug text-danger" role="alert">
-            {usage.overflow
-              ? 'Context still exceeds the model window after compaction. Start a new chat if the agent cannot fold further.'
-              : `${formatTokens(overage)} over budget — auto-compact will fold at the threshold, or use Compact when the run is stopped.`}
+          <p
+            className="m-0 mb-3 flex items-start gap-1.5 rounded-md bg-danger-soft px-2.5 py-2 text-caption leading-snug text-danger"
+            role="alert"
+          >
+            <Icon name="warning" size={13} className="mt-px shrink-0" />
+            <span className="min-w-0">
+              {usage.overflow
+                ? 'Context still exceeds the model window after compaction. Start a new task if the agent cannot fold further.'
+                : `${formatTokens(overage)} over budget — auto-compact will fold at the threshold, or use Compact when the run is stopped.`}
+            </span>
           </p>
         ) : null}
 
         {effectiveAdvisoryHint ? (
-          <p className="m-0 mb-3 rounded-lg bg-warning/10 px-2.5 py-2 text-3xs leading-snug text-warning" role="status">
+          <p className="m-0 mb-3 rounded-md bg-warning-soft px-2.5 py-2 text-caption leading-snug text-warning" role="status">
             {effectiveAdvisoryHint}
           </p>
         ) : null}
 
         {contentTotal > 0 ? (
           <div className="mb-3 flex flex-col gap-2">
-            <p className="m-0 text-3xs font-medium uppercase tracking-[var(--vy-tracking-caps)] text-secondary">
-              Breakdown
-            </p>
+            <p className={cn('m-0', SECTION_LABEL)}>Breakdown</p>
             <BreakdownRows usage={usage} />
           </div>
         ) : null}
 
         {hasRunStats ? (
-          <div className="flex flex-col gap-2">
-            <p className="m-0 text-3xs font-medium uppercase tracking-[var(--vy-tracking-caps)] text-secondary">
-              This run
-            </p>
-            <div className="grid grid-cols-2 gap-1.5">
+          <div className="flex flex-col gap-1">
+            <p className={cn('m-0', SECTION_LABEL)}>This run</p>
+            <dl className="m-0 flex flex-col">
               {usage.stepUsage.steps > 0 ? (
                 <RunStat
                   label="Completed steps"
@@ -592,9 +586,9 @@ export function ContextMeterPanel({
                   tone={reasoningPct != null && reasoningPct >= 40 ? 'text-warning' : undefined}
                 />
               ) : null}
-            </div>
+            </dl>
             {reasoningPct != null && reasoningPct >= 40 ? (
-              <p className="m-0 text-3xs leading-snug text-secondary">
+              <p className="m-0 text-caption leading-snug text-secondary">
                 Reasoning is a large share of output — lower Think effort for simpler work.
               </p>
             ) : null}
@@ -603,11 +597,15 @@ export function ContextMeterPanel({
       </div>
 
       {onCompact ? (
-        <footer className="shrink-0 border-t border-border/40 p-3">
-          <button
-            type="button"
+        <footer className={cn('shrink-0 border-t p-3', BORDER_DIVIDER)}>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon="stack"
+            className="w-full"
             onClick={onCompact}
-            disabled={compacting || compactDisabled}
+            disabled={compactDisabled}
+            pending={compacting}
             title={
               compactDisabled
                 ? 'Unavailable while the agent is running'
@@ -615,19 +613,13 @@ export function ContextMeterPanel({
                   ? 'Compacting…'
                   : 'Summarise older history'
             }
-            className={cn(
-              'flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium vy-transition',
-              'bg-surface text-fg hover:bg-surface-2',
-              'disabled:cursor-not-allowed disabled:opacity-[var(--vy-disabled-opacity)]'
-            )}
           >
-            <Icon name="stack" size={14} className="shrink-0 opacity-70" />
             {compacting ? 'Compacting…' : 'Compact history'}
-          </button>
+          </Button>
           {compactMessage ? (
             <p
               className={cn(
-                'm-0 mt-2 text-center text-3xs leading-snug',
+                'm-0 mt-2 text-center text-caption leading-snug',
                 compactFailed ? 'text-danger' : 'text-secondary'
               )}
               role={compactFailed ? 'alert' : 'status'}
@@ -728,10 +720,10 @@ export function ContextMeter({
         ref={triggerRef}
         type="button"
         className={cn(
-          'inline-grid size-7 shrink-0 place-items-center rounded-md vy-transition',
+          'inline-grid size-7 shrink-0 place-items-center rounded-md vy-transition focus-visible:vy-focus-ring',
           // One state's classes at a time: appended, the open state's text-fg lost to text-muted.
           overBudget
-            ? cn(levelSoft.danger, levelRing.danger)
+            ? cn('bg-danger-soft', levelRing.danger)
             : open
               ? 'bg-surface text-fg'
               : 'text-muted hover:bg-surface hover:text-fg'
@@ -754,7 +746,7 @@ export function ContextMeter({
               id={panelId}
               role="dialog"
               aria-label="Context details"
-              className="fixed z-dropdown flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-menu animate-menu-in origin-bottom"
+              className={cn('fixed flex flex-col origin-bottom', MENU_SURFACE)}
               style={{
                 top: position.placement === 'up' ? undefined : position.top,
                 bottom:

@@ -126,7 +126,7 @@ const baseProps = {
   onSend: vi.fn().mockResolvedValue(true),
   onStop: vi.fn(),
   secrets: emptySecretStatus(),
-  variant: 'hero' as const
+  variant: 'line' as const
 }
 
 describe('Composer slash commands', () => {
@@ -139,7 +139,7 @@ describe('Composer slash commands', () => {
     const onDraftChange = vi.fn()
     const { rerender } = render(<Composer {...baseProps} draft="" onDraftChange={onDraftChange} />)
 
-    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    const ta = screen.getByRole('combobox', { name: 'Instruction' })
     ta.textContent = '/com'
     fireEvent.input(ta)
     expect(onDraftChange).toHaveBeenCalledWith('/com')
@@ -158,7 +158,7 @@ describe('Composer slash commands', () => {
   it('does not accept a slash menu item when Enter is committing IME composition', async () => {
     const onDraftChange = vi.fn()
     const { rerender } = render(<Composer {...baseProps} draft="" onDraftChange={onDraftChange} />)
-    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    const ta = screen.getByRole('combobox', { name: 'Instruction' })
     ta.textContent = '/com'
     fireEvent.input(ta)
     rerender(<Composer {...baseProps} draft="/com" onDraftChange={onDraftChange} />)
@@ -171,9 +171,9 @@ describe('Composer slash commands', () => {
     expect(onDraftChange).not.toHaveBeenCalled()
   })
 
-  it('renders hero composer with message field', () => {
+  it('renders the instruction line with its field', () => {
     render(<Composer {...baseProps} />)
-    expect(screen.getByRole('combobox', { name: /^Message$/i })).toBeTruthy()
+    expect(screen.getByRole('combobox', { name: 'Instruction' })).toBeTruthy()
   })
 
   it('resolves /compact as a client action without sending chat', async () => {
@@ -202,7 +202,7 @@ describe('Composer slash commands', () => {
       />
     )
 
-    const form = screen.getByRole('combobox', { name: /^Message$/i }).closest('form')!
+    const form = screen.getByRole('combobox', { name: 'Instruction' }).closest('form')!
     fireEvent.submit(form)
 
     await waitFor(() => {
@@ -242,7 +242,7 @@ describe('Composer slash commands', () => {
       />
     )
 
-    const form = screen.getByRole('combobox', { name: /^Message$/i }).closest('form')!
+    const form = screen.getByRole('combobox', { name: 'Instruction' }).closest('form')!
     fireEvent.submit(form)
 
     await waitFor(() => {
@@ -279,7 +279,7 @@ describe('Composer slash commands', () => {
         slashHandlers={{ onSetAgentMode }}
       />
     )
-    const form = screen.getByRole('combobox', { name: /^Message$/i }).closest('form')!
+    const form = screen.getByRole('combobox', { name: 'Instruction' }).closest('form')!
     fireEvent.submit(form)
     await waitFor(() => expect(onSetAgentMode).toHaveBeenCalledWith('agent'))
     await waitFor(() => expect(onSend).toHaveBeenCalled())
@@ -307,7 +307,7 @@ describe('Composer slash commands', () => {
         slashHandlers={{ onGoalPause }}
       />
     )
-    const form = screen.getByRole('combobox', { name: /^Message$/i }).closest('form')!
+    const form = screen.getByRole('combobox', { name: 'Instruction' }).closest('form')!
     fireEvent.submit(form)
     await waitFor(() => expect(onGoalPause).toHaveBeenCalled())
     expect(onSend).not.toHaveBeenCalled()
@@ -319,7 +319,7 @@ describe('Composer slash commands', () => {
       <Composer {...baseProps} draft="" onDraftChange={onDraftChange} />
     )
 
-    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    const ta = screen.getByRole('combobox', { name: 'Instruction' })
     ta.textContent = '/zzzznotacommand'
     fireEvent.input(ta)
     rerender(
@@ -356,7 +356,7 @@ describe('Composer slash commands', () => {
       />
     )
 
-    const form = screen.getByRole('combobox', { name: /^Message$/i }).closest('form')!
+    const form = screen.getByRole('combobox', { name: 'Instruction' }).closest('form')!
     fireEvent.submit(form)
 
     await waitFor(() => {
@@ -392,7 +392,7 @@ describe('Composer slash commands', () => {
       />
     )
 
-    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    const ta = screen.getByRole('combobox', { name: 'Instruction' })
     ta.focus()
     const sel = window.getSelection()
     const range = document.createRange()
@@ -433,7 +433,7 @@ describe('Composer slash commands', () => {
       <Composer {...baseProps} draft="/compact" onDraftChange={onDraftChange} onSend={onSend} />
     )
 
-    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    const ta = screen.getByRole('combobox', { name: 'Instruction' })
     ta.focus()
     fireEvent.click(ta)
 
@@ -466,7 +466,7 @@ describe('Composer slash commands', () => {
       <Composer {...baseProps} draft="/cod" onDraftChange={onDraftChange} onSend={onSend} />
     )
 
-    const ta = screen.getByRole('combobox', { name: /^Message$/i })
+    const ta = screen.getByRole('combobox', { name: 'Instruction' })
     ta.focus()
     fireEvent.click(ta)
 
@@ -508,7 +508,7 @@ describe('Composer slash commands', () => {
 
     await waitFor(() => expect(window.vyotiq.slashCommandsList).toHaveBeenCalled())
 
-    const form = screen.getByRole('combobox', { name: /Edit message|Message/i }).closest('form')
+    const form = screen.getByRole('combobox', { name: 'Instruction' }).closest('form')
     expect(form).toBeTruthy()
     fireEvent.submit(form!)
 
@@ -550,7 +550,7 @@ describe('Composer slash commands', () => {
 
     await waitFor(() => expect(window.vyotiq.slashCommandsList).toHaveBeenCalled())
 
-    const form = screen.getByRole('combobox', { name: /Edit message|Message/i }).closest('form')
+    const form = screen.getByRole('combobox', { name: 'Instruction' }).closest('form')
     fireEvent.submit(form!)
 
     await waitFor(() => {
@@ -577,7 +577,7 @@ describe('Composer slash commands', () => {
       />
     )
     await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy())
-    fireEvent.keyDown(screen.getByRole('combobox', { name: /Edit message|Message/i }), {
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Instruction' }), {
       key: 'Escape'
     })
     expect(onCancelEdit).not.toHaveBeenCalled()

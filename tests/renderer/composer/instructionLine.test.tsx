@@ -65,6 +65,7 @@ describe('resolveLinePlaceholder', () => {
     expect(resolveLinePlaceholder({ ...base, running: false, runCount: 2 })).toBe('Follow up — starts run 3')
     expect(resolveLinePlaceholder({ ...base, running: false })).toBe('Add an instruction')
     expect(resolveLinePlaceholder({ ...base, running: false, agentMode: 'ask' })).toBe('Add an instruction · won’t edit files')
+    expect(resolveLinePlaceholder({ ...base, hasWorkspace: false, running: false })).toBe('Open a workspace to start a task')
   })
 })
 
@@ -120,12 +121,12 @@ describe('instruction line', () => {
     const queue = screen.getByRole('list', { name: 'Queued instructions' })
     expect(within(queue).getByText('Queued')).toBeTruthy()
     expect(within(queue).getByText('Also check the docs')).toBeTruthy()
-    fireEvent.click(within(queue).getByRole('button', { name: 'Send queued follow-up now' }))
+    fireEvent.click(within(queue).getByRole('button', { name: 'Send queued instruction now' }))
     expect(onSendFollowUpNow).toHaveBeenCalledWith('f1')
-    fireEvent.click(within(queue).getByRole('button', { name: 'Remove queued follow-up' }))
+    fireEvent.click(within(queue).getByRole('button', { name: 'Remove queued instruction' }))
     expect(onRemoveFollowUp).toHaveBeenCalledWith('f1')
-    fireEvent.click(within(queue).getByRole('button', { name: 'Edit queued follow-up' }))
-    expect(screen.getByRole('textbox', { name: 'Edit queued follow-up' })).toBeTruthy()
+    fireEvent.click(within(queue).getByRole('button', { name: 'Edit queued instruction' }))
+    expect(screen.getByRole('textbox', { name: 'Edit queued instruction' })).toBeTruthy()
   })
 
   it('sets mode, model and effort from one token', async () => {
@@ -139,6 +140,12 @@ describe('instruction line', () => {
     fireEvent.click(within(dialog).getByRole('radio', { name: 'Ask' }))
     expect(onAgentModeChange).toHaveBeenCalledWith('ask')
     await waitFor(() => expect(within(dialog).getByText('llama3.2')).toBeTruthy())
+    // The model in use reads as selected by weight and a check — no accent tint,
+    // which is reserved for Needs you.
+    const current = within(dialog).getByRole('option', { selected: true })
+    expect(current.textContent).toContain('qwen2.5')
+    expect(current.className).not.toContain('bg-accent-soft')
+    expect(current.querySelector('svg')).toBeTruthy()
     fireEvent.click(within(dialog).getByText('llama3.2'))
     expect(onProviderModel).toHaveBeenCalledWith('ollama', 'llama3.2')
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Mode, model and effort' })).toBeNull())

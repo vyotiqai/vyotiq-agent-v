@@ -322,7 +322,7 @@ export function SessionChatColumn({
         seedAudio={editSeeds.audio}
         seedNativeFiles={editSeeds.nativeFiles}
         onCancelEdit={cancelPromptEdit}
-        composerPlaceholder="Edit message…"
+        composerPlaceholder="Edit the instruction…"
         taskFiles={taskFiles}
       />
     ) : null

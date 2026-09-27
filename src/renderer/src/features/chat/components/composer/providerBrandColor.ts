@@ -1,6 +1,12 @@
+/**
+ * Fallbacks for `--vy-bg`, `--vy-card` and `--vy-surface` when the variables
+ * cannot be read (no document): the default skin's values in styles.css. A
+ * contrast check needs real colours, so this is one of the two places a
+ * literal is right — a CSS var read into JS, for a third-party brand colour.
+ */
 const THEME_BACKGROUNDS = {
-  light: ['#ffffff', '#f7fafc', '#eef5f9'],
-  dark: ['#141414', '#1a1e20', '#202528']
+  light: ['#ffffff', '#f7f9fa', '#eef2f5'],
+  dark: ['#13171a', '#171c1f', '#1d2327']
 } as const
 
 const MIN_CONTRAST_RATIO = 3

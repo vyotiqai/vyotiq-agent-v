@@ -42,10 +42,6 @@
   --vy-tracking-tight: -0.01em;
   --vy-tracking-caps: 0.07em;
   --vy-tracking: -0.01em;
-  /* Legacy chrome outline — `vy-chrome` until its last caller is ported. */
-  --vy-chrome-border-width: 1px;
-  --vy-chrome-border-color: var(--vy-border);
-  --vy-chrome-surface: var(--vy-bg);
 }
 
 /* Proof — long-reading dusk: tight corners. */
@@ -62,7 +58,6 @@
   --vy-radius-md: 3px;
   --vy-radius-lg: 4px;
   --vy-radius-xl: 6px;
-  --vy-chrome-surface: var(--vy-surface-2);
 }
 
 /* Native — the platform's own type. The product default. */
@@ -606,13 +601,6 @@
   transition-timing-function: var(--vy-ease);
 }
 
-@utility vy-chrome {
-  border-radius: var(--vy-radius-xl);
-  border-width: var(--vy-chrome-border-width);
-  border-style: solid;
-  border-color: var(--vy-chrome-border-color);
-}
-
 @utility vy-disabled-state {
   cursor: not-allowed;
   opacity: var(--vy-disabled-opacity);
@@ -622,17 +610,6 @@
 @utility mask-fade-bottom {
   mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
-}
-
-/**
- * The same cover under the floating composer, mirrored: page colour behind the
- * shell and the gap beneath it, fading out upward across the dock column's
- * `pt-4` so rows scrolling down to the composer dissolve instead of being cut
- * by its top edge. The 1rem is COMPOSER_DOCK_COVER's `pt-4`.
- */
-@utility vy-composer-dock-cover {
-  background-image: linear-gradient(to top, var(--vy-bg) calc(100% - 1rem), transparent);
-  box-shadow: -2px 0 var(--vy-bg), 2px 0 var(--vy-bg);
 }
 
 /** Diff rows: tint + gutter sign (+/−) mark add/del — never hue alone. */
@@ -1332,42 +1309,6 @@ dialog[open] {
   [data-vy-text-entry] {
     min-height: 2.75rem;
     font-size: 1rem;
-  }
-}
-
-[data-chat-hero][data-hero-mode='plan'] [data-composer-hero] {
-  position: relative;
-}
-
-[data-chat-hero][data-hero-mode='plan'] [data-composer-hero]::before {
-  content: 'Goal\A Scope\A Risks\A Todos';
-  position: absolute;
-  inset: -1.5rem 0 auto;
-  z-index: 0;
-  pointer-events: none;
-  white-space: pre;
-  text-align: left;
-  font-size: 0.625rem;
-  line-height: 2.4;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--vy-fg) 4%, transparent);
-}
-
-[data-chat-hero][data-hero-mode='plan'] [data-composer-hero] > * {
-  position: relative;
-  z-index: 1;
-}
-
-@media (prefers-contrast: more) {
-  [data-chat-hero][data-hero-mode='plan'] [data-composer-hero]::before {
-    color: color-mix(in srgb, var(--vy-fg) 12%, transparent);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  [data-chat-hero][data-hero-mode='plan'] [data-composer-hero]::before {
-    content: none;
   }
 }
 

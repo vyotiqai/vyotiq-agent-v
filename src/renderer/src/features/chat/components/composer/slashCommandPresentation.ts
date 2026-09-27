@@ -55,20 +55,25 @@ const BUILTIN_ICON: Record<string, IconName> = {
   settings: 'gear',
   'create-rule': 'rules',
   'create-skill': 'skill',
-  help: 'question',
+  help: 'info',
   undo: 'undo',
-  ask: 'chat',
+  ask: 'question',
   plan: 'plan',
-  agent: 'robot',
+  agent: 'edit',
   'harness-review': 'checklist',
   'harness-apply': 'check'
 }
 
 /** The glyph in a row's icon slot. An MCP row shows its package's mark over this when it has one. */
 export function slashRowIcon(cmd: SlashCommandDescriptor): IconName {
-  switch (cmd.kind) {
+  return slashKindIcon(cmd.kind, cmd.trigger)
+}
+
+/** The glyph for a command of this kind and trigger — the menu row's, and its chip's in the field. */
+export function slashKindIcon(kind: SlashCommandDescriptor['kind'], trigger: string): IconName {
+  switch (kind) {
     case 'builtin':
-      return BUILTIN_ICON[cmd.trigger] ?? 'command'
+      return BUILTIN_ICON[trigger] ?? 'command'
     case 'workspace':
       return 'command'
     case 'skill':
@@ -78,7 +83,7 @@ export function slashRowIcon(cmd: SlashCommandDescriptor): IconName {
     case 'mcp':
       return 'mcp'
     default: {
-      const _exhaustive: never = cmd.kind
+      const _exhaustive: never = kind
       return _exhaustive
     }
   }
