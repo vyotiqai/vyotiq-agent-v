@@ -6,6 +6,12 @@ import { cleanup, render, screen, fireEvent, waitFor, act } from '@testing-libra
 import { useState } from 'react'
 import { Composer } from '@renderer/features/chat/components/composer'
 import { DEFAULT_SETTINGS, emptySecretStatus, MAX_DICTATION_BYTES } from '@shared/ipc'
+import type { DictationWaveformStyle } from '@shared/ipc'
+import {
+  DictationErrorBanner,
+  DictationSession,
+  Waveform
+} from '@renderer/features/chat/components/composer/DictationSessionStrip'
 import type { EffectiveChatSettings } from '@shared/effectiveSettings'
 import type { SlashClientHandlers } from '@renderer/features/chat/components/composer/slashCommandExecute'
 
@@ -189,7 +195,7 @@ describe('Composer dictation', () => {
     expect(screen.getByRole('button', { name: /^Cancel dictation$/i })).toBeTruthy()
     const strip = screen.getByRole('status', { name: /Listening/i })
     expect(strip.className).toMatch(/\bh-8\b/)
-    expect(strip.className).toMatch(/(?:^|\s)gap-1\.5(?:\s|$)/)
+    expect(strip.className).toMatch(/(?:^|\s)gap-2(?:\s|$)/)
     expect(strip.className).not.toMatch(/\bh-9\b/)
     const cancel = screen.getByRole('button', { name: /^Cancel dictation$/i })
     const confirm = screen.getByRole('button', { name: /^Stop dictation$/i })
@@ -205,7 +211,8 @@ describe('Composer dictation', () => {
     expect(screen.queryByRole('button', { name: /^Send$/i })).toBeNull()
     expect(screen.queryByRole('combobox', { name: /^Message$/i })).toBeNull()
     expect(screen.queryByText('Listening…')).toBeNull()
-    expect(screen.queryByText(/^Listening$/)).toBeNull()
+    // The state word is visible text, not just an aria-label.
+    expect(screen.getByText(/^Listening$/)).toBeTruthy()
     const form = document.querySelector('[data-composer-shell] form')
     expect(form?.className).toMatch(/(?:^|\s)gap-1\.5(?:\s|$)/)
     expect(form?.className).toMatch(/(?:^|\s)py-2(?:\s|$)/)
@@ -608,5 +615,268 @@ describe('Composer dictation', () => {
       const ta = screen.getByRole('combobox', { name: /^Message$/i })
       expect(ta.textContent).toContain('size-capped transcript')
     })
+  })
+})
+
+describe('New task brief dictation', () => {
+  /** The brief variant: its own pane, with the checks and context columns. */
+  function renderBrief(
+    overrides?: Partial<{
+      draft: string
+      onDraftChange: (draft: string) => void
+    }>
+  ) {
+    return render(
+      <Composer
+        variant="brief"
+        provider="ollama"
+        model="qwen2.5"
+        running={false}
+        hasWorkspace
+        secrets={keyedSecrets}
+        draft={overrides?.draft}
+        onDraftChange={overrides?.onDraftChange}
+        // The brief's "How it runs" column reads tool approval, which the
+        // dock-variant fixture does not carry.
+        chatSettings={{ ...chatSettings, toolApproval: DEFAULT_SETTINGS.toolApproval }}
+        onChatSettingsChange={vi.fn()}
+        onProviderModel={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />
+    )
+  }
+
+  beforeEach(() => {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn()
+      }))
+    })
+    installMediaMocks()
+    window.vyotiq = {
+      platform: 'win32',
+      listModels: vi.fn(async () => ({
+        ok: true as const,
+        data: { models: [], warning: null }
+      })),
+      getSettings: vi.fn(async () => ({
+        ok: true as const,
+        data: DEFAULT_SETTINGS
+      })),
+      transcribeDictation: vi.fn(async () => ({
+        ok: true as const,
+        data: { text: 'hello from mic' }
+      })),
+      cancelDictation: vi.fn(async () => ({ ok: true as const, data: true })),
+      dictationStatus: vi.fn(async () => ({
+        ok: true as const,
+        data: {
+          phase: 'idle' as const,
+          progress: null,
+          message: null,
+          error: null,
+          installed: [],
+          recommendedModelId: 'whisper-small.en' as const,
+          engine: 'openai' as const,
+          activeModelId: null,
+          loadedModelId: null
+        }
+      }))
+    }
+  })
+
+  it('keeps the brief field mounted while dictating, in an h-8 band', async () => {
+    renderBrief()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Dictate$/i }))
+    })
+
+    // The brief's own field is not swapped out for the session row.
+    expect(screen.getByRole('combobox', { name: 'Brief' })).toBeTruthy()
+    const status = screen.getByRole('status', { name: /Listening/i })
+    // The band is a fixed row, not the 132px void the old wrapper left.
+    expect(status.className).toMatch(/\bh-8\b/)
+    const wrap = document.querySelector('[data-composer-input-wrap]')
+    expect(wrap).toBeTruthy()
+    expect(status.contains(wrap)).toBe(false)
+  })
+
+  it('puts the dictation band above the brief field', async () => {
+    renderBrief()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Dictate$/i }))
+    })
+
+    const status = screen.getByRole('status', { name: /Listening/i })
+    const wrap = document.querySelector('[data-composer-input-wrap]') as HTMLElement
+    expect(
+      status.compareDocumentPosition(wrap) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it('cancels from the brief icon row without transcribing', async () => {
+    renderBrief()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Dictate$/i }))
+    })
+    expect(screen.getByRole('status', { name: /Listening/i })).toBeTruthy()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Cancel dictation$/i }))
+    })
+
+    expect(window.vyotiq.transcribeDictation).not.toHaveBeenCalled()
+    expect(screen.queryByRole('status', { name: /Listening/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /^Dictate$/i })).toBeTruthy()
+    expect(screen.getByRole('combobox', { name: 'Brief' })).toBeTruthy()
+  })
+
+  it('keeps the typed brief readable through a cancelled session', async () => {
+    const onDraftChange = vi.fn()
+    renderBrief({ draft: 'Wire up the parser', onDraftChange })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Dictate$/i }))
+    })
+    expect(screen.getByRole('status', { name: /Listening/i })).toBeTruthy()
+    expect(screen.getByRole('combobox', { name: 'Brief' }).textContent).toContain(
+      'Wire up the parser'
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Cancel dictation$/i }))
+    })
+
+    expect(window.vyotiq.transcribeDictation).not.toHaveBeenCalled()
+    expect(screen.getByRole('combobox', { name: 'Brief' }).textContent).toContain(
+      'Wire up the parser'
+    )
+  })
+})
+
+describe('DictationSession', () => {
+  const waveformStyles: DictationWaveformStyle[] = ['bars', 'dots', 'line', 'mirror']
+
+  /** Quiet speech-shaped signal: low mean, small amplitude, never flat. */
+  const quietSignal = Array.from({ length: 96 }, (_, i) => 0.3 + 0.08 * Math.sin(i))
+  const flatSignal = Array.from({ length: 96 }, () => 0.12)
+
+  const phases = [
+    { phase: 'checking', label: 'Starting dictation', kind: 'checking', word: 'Starting…' },
+    { phase: 'recording', label: 'Listening', kind: 'listening', word: 'Listening' },
+    { phase: 'transcribing', label: 'Transcribing', kind: 'transcribing', word: 'Transcribing' }
+  ] as const
+
+  /** The flex-1 slot holding the waveform, so assertions skip the phase glyph. */
+  function waveSlot(container: HTMLElement): HTMLElement {
+    const slot = container.querySelector<HTMLElement>('[data-dictation-session] .min-w-0.flex-1')
+    if (!slot) throw new Error('waveform slot not found')
+    return slot
+  }
+
+  function barHeights(root: HTMLElement): number[] {
+    return Array.from(root.querySelectorAll<HTMLElement>('span[style*="height"]')).map((el) =>
+      parseFloat(el.style.height)
+    )
+  }
+
+  /** Class list of the element that owns the bar spans — the Waveform root. */
+  function waveToneClass(root: HTMLElement): string {
+    return root.querySelector('span[style*="height"]')?.parentElement?.className ?? ''
+  }
+
+  it('auto-gains a quiet non-flat signal into a wide bar range', () => {
+    const { container } = render(
+      <DictationSession phase="recording" elapsedMs={1200} waveform={quietSignal} style="bars" />
+    )
+    const heights = barHeights(waveSlot(container))
+    expect(heights.length).toBeGreaterThan(0)
+    expect(Math.max(...heights) - Math.min(...heights)).toBeGreaterThanOrEqual(20)
+  })
+
+  it('leaves a flat signal alone instead of stretching it into a block', () => {
+    const { container } = render(
+      <DictationSession phase="recording" elapsedMs={1200} waveform={flatSignal} style="bars" />
+    )
+    const heights = barHeights(waveSlot(container))
+    expect(heights.length).toBeGreaterThan(0)
+    expect(new Set(heights).size).toBe(1)
+  })
+
+  it('tones the waveform accent while recording and muted while transcribing', () => {
+    const recording = render(<Waveform samples={quietSignal} style="bars" phase="recording" />)
+    const transcribing = render(
+      <Waveform samples={quietSignal} style="bars" phase="transcribing" />
+    )
+
+    const recordingTone = waveToneClass(recording.container)
+    expect(recordingTone).toMatch(/\btext-accent\b/)
+    expect(recordingTone).not.toMatch(/\btext-muted\b/)
+
+    const transcribingTone = waveToneClass(transcribing.container)
+    expect(transcribingTone).toMatch(/\btext-muted\b/)
+    expect(transcribingTone).not.toMatch(/\btext-accent\b/)
+  })
+
+  it.each(waveformStyles)('renders the %s waveform style', (style) => {
+    const { container } = render(
+      <DictationSession phase="recording" elapsedMs={0} waveform={quietSignal} style={style} />
+    )
+    const slot = waveSlot(container)
+    if (style === 'line') {
+      expect(slot.querySelector('svg path')?.getAttribute('d')).toBeTruthy()
+    } else {
+      expect(barHeights(slot).length).toBeGreaterThan(0)
+    }
+  })
+
+  it.each(phases)(
+    'exposes the $phase state as a polite status with a visible state word',
+    ({ phase, label, kind, word }) => {
+      render(
+        <DictationSession
+          phase={phase}
+          elapsedMs={0}
+          waveform={quietSignal}
+          style="bars"
+          engineHint="Whisper small"
+        />
+      )
+      const status = screen.getByRole('status', { name: label })
+      expect(status.getAttribute('aria-live')).toBe('polite')
+      expect(status.getAttribute('data-dictation-session')).toBe(kind)
+      expect(screen.getByText(word)).toBeTruthy()
+    }
+  )
+})
+
+describe('DictationErrorBanner', () => {
+  it('pairs the danger text with a warning glyph', () => {
+    render(
+      <DictationErrorBanner
+        message="Microphone permission denied"
+        settingsSection={null}
+        onDismiss={vi.fn()}
+      />
+    )
+    const alert = screen.getByRole('alert')
+    expect(alert.hasAttribute('data-dictation-error')).toBe(true)
+    expect(alert.textContent).toContain('Microphone permission denied')
+    // Colour never carries meaning alone — the warning glyph rides along.
+    const glyph = alert.querySelector('svg')
+    expect(glyph).toBeTruthy()
+    expect(glyph?.parentElement?.className).toMatch(/\btext-danger\b/)
   })
 })

@@ -638,6 +638,14 @@ function WhatTheAgentSees({ workspacePath, worktree }: { workspacePath: string; 
           .join(' · ')
     : null
 
+  // The prompt is pre-loaded from index.md and state.md, so those count as
+  // memory even when the note store is empty.
+  const memoryFiles = context
+    ? [context.memoryState ? 'state.md' : null, context.memoryIndex ? 'index.md' : null].filter(
+        (n): n is string => Boolean(n)
+      )
+    : []
+
   const rules = context?.rules
   const ruleFiles = rules
     ? [rules.agentsMd ? 'AGENTS.md' : null, rules.claudeMd ? 'CLAUDE.md' : null, rules.cursorrules ? '.cursorrules' : null].filter(
@@ -697,8 +705,16 @@ function WhatTheAgentSees({ workspacePath, worktree }: { workspacePath: string; 
           />
           <Fact
             k="Memory"
-            v={context ? (context.memoryNotes > 0 ? `${context.memoryNotes} ${context.memoryNotes === 1 ? 'note' : 'notes'}` : 'None') : null}
-            d={context?.memoryNoteNames?.join(', ') ?? null}
+            v={
+              context
+                ? context.memoryNotes > 0
+                  ? `${context.memoryNotes} ${context.memoryNotes === 1 ? 'note' : 'notes'}`
+                  : memoryFiles.length > 0
+                    ? memoryFiles.join(' · ')
+                    : 'None'
+                : null
+            }
+            d={context?.memoryNotes ? (context.memoryNoteNames?.join(', ') ?? null) : null}
           />
           <Fact k="Index" v={context ? INDEX_LABEL[context.codeIndex.state] : null} d={context ? indexDetail(context.codeIndex) : null} />
           <Fact

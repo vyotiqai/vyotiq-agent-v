@@ -302,6 +302,26 @@ export function isToolShapedTextLeak(content: string): boolean {
 }
 
 /**
+ * True when the whole answer is a serialized payload — a JSON object or array
+ * the model emitted in place of prose (a leaked plan / step / tool envelope).
+ *
+ * Machine payload, not an answer: it stays a visible note in the work list but
+ * must never be promoted to a run's result or its collapsed history title.
+ */
+export function isSerializedPayloadText(content: string): boolean {
+  const trimmed = content.trim()
+  if (!trimmed) return false
+  const first = trimmed[0]
+  if (first !== '{' && first !== '[') return false
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    return typeof parsed === 'object' && parsed !== null
+  } catch {
+    return false
+  }
+}
+
+/**
  * DeepSeek DSML token. Official V4 encoding uses fullwidth U+FF5C (`｜`);
  * screenshots of the live UI also show ASCII `|` after decode/display.
  */

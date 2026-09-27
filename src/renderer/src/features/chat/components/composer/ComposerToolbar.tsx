@@ -12,7 +12,7 @@ import { ModePicker } from './ModePicker'
 import { ThinkingControls } from './ThinkingControls'
 import { useResolvedContextUsage, useResolvedCostHint } from './useContextUsage'
 import { chromeIconButton, chromeLabelText } from './composerChrome'
-import { Waveform, formatElapsed } from './DictationSessionStrip'
+import { DictationSession } from './DictationSessionStrip'
 import type { DictationPhase } from './useComposerDictation'
 import type { ModelPickerOption } from './composerModelUtils'
 import type { ModelInfo } from '@shared/ipc'
@@ -286,16 +286,17 @@ function dictationActiveLabel(phase: DictationPhase): string {
   }
 }
 
-function dictationActiveStatusLabel(phase: DictationPhase): string {
+/** Narrow `DictationPhase` to the live session phases, or null while idle. */
+function dictationLivePhase(
+  phase: DictationPhase
+): 'checking' | 'recording' | 'transcribing' | null {
   switch (phase) {
     case 'checking':
-      return 'Starting dictation'
     case 'recording':
-      return 'Listening'
     case 'transcribing':
-      return 'Transcribing'
+      return phase
     default:
-      return 'Listening'
+      return null
   }
 }
 
@@ -534,6 +535,7 @@ export function ComposerToolbar({
   )
 
   const dictationKind = dictationSessionKind(dictationPhase)
+  const liveDictationPhase = dictationLivePhase(dictationPhase)
 
   return (
     <div
@@ -542,22 +544,15 @@ export function ComposerToolbar({
       data-dictation-session={dictationKind ?? undefined}
       aria-busy={dictationBusy || undefined}
     >
-      {dictationLive ? (
-        <div
-          className="flex h-8 min-w-0 flex-1 items-center gap-1.5"
-          role="status"
-          aria-live="polite"
-          aria-label={dictationActiveStatusLabel(dictationPhase)}
-          data-dictation-session={dictationKind ?? undefined}
-        >
-          <Waveform samples={dictationWaveform ?? []} style={dictationWaveformStyle} />
-          <span
-            className={cn(chromeLabelText, 'shrink-0 tabular-nums text-muted')}
-            aria-hidden="true"
-          >
-            {formatElapsed(dictationElapsedMs)}
-          </span>
-        </div>
+      {dictationLive && liveDictationPhase ? (
+        <DictationSession
+          phase={liveDictationPhase}
+          elapsedMs={dictationElapsedMs}
+          waveform={dictationWaveform ?? []}
+          style={dictationWaveformStyle}
+          engineHint={dictationEngineHint}
+          className="min-w-0 flex-1"
+        />
       ) : null}
       {!dictationLive && (
         <div className="hidden min-w-0 shrink-0 @min-[300px]:block">

@@ -79,6 +79,19 @@ export function formatTokPerSec(n: number): string {
   return `${label} output tok/s`
 }
 
+/**
+ * The one caption vocabulary for fresh tokens and cache share. The chat
+ * footer and the task record's receipt both print these exact strings, so a
+ * metric reads the same wherever a run is summarized.
+ */
+export function tokensCaption(tokens: number): string {
+  return `${formatTokens(tokens)} tok (in+out)`
+}
+
+export function cacheHitCaption(pct: number): string {
+  return `${pct}% cache hit`
+}
+
 export function formatBilledUsd(n: number): string {
   return formatUsdCost(n)
 }
@@ -157,12 +170,12 @@ export function buildFooterStats(opts: {
     )
   }
   // Fresh (non-cached) input + output — not the run total; the tooltip breaks it down.
-  if (showTokens) captionParts.push(`${formatTokens(tokens)} tok (in+out)`)
+  if (showTokens) captionParts.push(tokensCaption(tokens))
   if (tokPerSec != null) {
     const rate = formatTokPerSec(tokPerSec)
     if (rate) captionParts.push(rate)
   }
-  if (cachePct != null) captionParts.push(`${cachePct}% cache hit`)
+  if (cachePct != null) captionParts.push(cacheHitCaption(cachePct))
   const caption = captionParts.join(' · ')
 
   const clock = clockLabel(opts.at)

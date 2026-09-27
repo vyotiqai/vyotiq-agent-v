@@ -10,6 +10,8 @@ const fixture = {
   branch: 'main',
   rules: { agentsMd: true, claudeMd: false, cursorrules: true, ruleFileCount: 2 },
   memoryNotes: 3,
+  memoryIndex: false,
+  memoryState: false,
   codeIndex: { state: 'ready' as const }
 }
 
@@ -144,6 +146,21 @@ describe('AgentContextCard', () => {
     await screen.findByText('main')
     expect(screen.queryByText('0 notes')).toBeNull()
     expect(screen.getByText('None')).toBeTruthy()
+  })
+
+  it('names the pre-loaded memory files when there are no notes, not None', async () => {
+    agentContextSpy.mockResolvedValue({
+      ok: true,
+      data: { ...fixture, memoryNotes: 0, memoryIndex: true, memoryState: true }
+    })
+    render(<AgentContextCard workspacePath="C:/code/demo" />)
+    await screen.findByText('main')
+    // The prompt is built from these two files every step, so None would lie.
+    expect(screen.getByText('state.md')).toBeTruthy()
+    expect(screen.getByText('index.md')).toBeTruthy()
+    expect(screen.queryByText('None')).toBeNull()
+    // Same dim-separator join the Rules reading uses for real filenames.
+    expect(document.querySelector('[data-agent-context-card]')?.textContent).toContain('state.md·index.md')
   })
 
   it('singularises a lone memory note', async () => {

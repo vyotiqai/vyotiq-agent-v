@@ -67,7 +67,7 @@ describe('executeStepToolCalls', () => {
 
     expect(outcome.messages.map((m) => m.toolCallId)).toEqual(['c1', 'c2', 'c3'])
     expect(outcome.messages.map((m) => m.content)).toEqual(['body:read', 'body:read', 'body:search'])
-    expect(outcome.stepToolsOk).toBe(true)
+    expect(outcome.messages.every((m) => m.ok !== false)).toBe(true)
   })
 
   it('synthesizes ids for empty tool call ids instead of failing malformed', async () => {
@@ -84,8 +84,8 @@ describe('executeStepToolCalls', () => {
       ctx
     )
 
-    expect(outcome.stepToolsOk).toBe(true)
     expect(outcome.messages).toHaveLength(2)
+    expect(outcome.messages.every((m) => m.ok !== false)).toBe(true)
     expect(outcome.messages[0]?.toolCallId?.trim()).toBeTruthy()
     expect(outcome.messages[1]?.toolCallId?.trim()).toBeTruthy()
     expect(outcome.messages[0]?.toolCallId).not.toBe(outcome.messages[1]?.toolCallId)
@@ -220,7 +220,7 @@ describe('executeStepToolCalls', () => {
     softAc.abort()
     const outcome = await work
 
-    expect(outcome.stepToolsOk).toBe(false)
+    expect(outcome.messages[0]?.ok).toBe(false)
     expect(outcome.messages[0]?.content).toBe('Interrupted')
     expect(outcome.messages[0]?.toolCallId).toBe('c1')
   })
@@ -245,7 +245,7 @@ describe('executeStepToolCalls', () => {
     runAc.abort()
     const outcome = await work
 
-    expect(outcome.stepToolsOk).toBe(false)
+    expect(outcome.messages[0]?.ok).toBe(false)
     expect(outcome.messages[0]?.content).toBe('Cancelled')
   })
 
@@ -381,7 +381,6 @@ describe('executeStepToolCalls', () => {
     )
 
     expect(executeTool).not.toHaveBeenCalled()
-    expect(outcome.stepToolsOk).toBe(false)
     expect(outcome.messages[0]?.content).toMatch(/denied permission/)
     expect(outcome.messages[0]?.ok).toBe(false)
     const result = events.find((ev) => ev.type === 'tool_result')

@@ -34,6 +34,8 @@ describe('workspace:agentContext', () => {
       branch: 'main',
       rules: { agentsMd: true, claudeMd: false, cursorrules: false, ruleFileCount: 2 },
       memoryNotes: 3,
+      memoryIndex: true,
+      memoryState: true,
       codeIndex: { state: 'ready' }
     }
     expect(WorkspaceAgentContextResultSchema.parse(valid)).toEqual(valid)
@@ -85,7 +87,38 @@ describe('workspace:agentContext', () => {
       ruleFileCount: 0
     })
     expect(ctx.memoryNotes).toBe(0)
+    expect(ctx.memoryIndex).toBe(false)
+    expect(ctx.memoryState).toBe(false)
     expect(ctx.codeIndex.state).toBe('off')
+  })
+
+  it('reports the prompt-loaded state.md and index.md even with no notes', async () => {
+    const dir = await makeWorkspace({
+      '.vyotiq/memory/index.md': '# Memory index\n',
+      '.vyotiq/memory/state.md': 'state\n'
+    })
+    const ctx = await buildWorkspaceAgentContext(dir, { enabled: true, phase: 'ready' })
+    // buildMemorySection injects both files every step, so zero notes is not None.
+    expect(ctx.memoryNotes).toBe(0)
+    expect(ctx.memoryNoteNames).toBeUndefined()
+    expect(ctx.memoryState).toBe(true)
+    expect(ctx.memoryIndex).toBe(true)
+    await expect(WorkspaceAgentContextResultSchema.parseAsync(ctx)).resolves.toEqual(ctx)
+  })
+
+  it('reports only the memory files that exist', async () => {
+    const stateOnly = await makeWorkspace({ '.vyotiq/memory/state.md': 'state\n' })
+    expect(await buildWorkspaceAgentContext(stateOnly, { enabled: true, phase: 'ready' })).toMatchObject({
+      memoryNotes: 0,
+      memoryState: true,
+      memoryIndex: false
+    })
+    const indexOnly = await makeWorkspace({ '.vyotiq/memory/index.md': '# index\n' })
+    expect(await buildWorkspaceAgentContext(indexOnly, { enabled: true, phase: 'ready' })).toMatchObject({
+      memoryNotes: 0,
+      memoryState: false,
+      memoryIndex: true
+    })
   })
 
   it('counts and names the notes, newest first — not the memory index or state', async () => {

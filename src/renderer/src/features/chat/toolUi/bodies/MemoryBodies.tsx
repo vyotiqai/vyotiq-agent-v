@@ -22,12 +22,6 @@ export function MemoryListBody({ tool, loading, loadFailed }: ToolBodyProps) {
       {tool.contentTruncated ? <TruncatedBanner loading={loading} failed={loadFailed} /> : null}
       <section>
         <h4 className="m-0 mb-1 text-2xs font-medium uppercase tracking-wide text-tertiary">
-          index.md
-        </h4>
-        <p className="m-0 whitespace-pre-wrap text-fg/80">{data.indexExcerpt || '(empty)'}</p>
-      </section>
-      <section>
-        <h4 className="m-0 mb-1 text-2xs font-medium uppercase tracking-wide text-tertiary">
           notes/
         </h4>
         {data.notes.length ? (
@@ -40,7 +34,15 @@ export function MemoryListBody({ tool, loading, loadFailed }: ToolBodyProps) {
           <p className="m-0 text-tertiary">(none)</p>
         )}
       </section>
-      <p className="m-0 text-tertiary">state.md: {data.hasState ? 'present' : 'absent'}</p>
+      <p className="m-0 text-tertiary">
+        {[
+          data.coverage && `index.md ${data.coverage.indexed}/${data.coverage.total} notes`,
+          data.coverage?.drift,
+          `state.md: ${data.hasState ? 'present' : 'absent'}`
+        ]
+          .filter(Boolean)
+          .join(' · ')}
+      </p>
     </div>
   )
 }
