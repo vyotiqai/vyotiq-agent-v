@@ -162,6 +162,12 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     section: 'providers'
   },
   {
+    id: 'custom-endpoints',
+    title: 'Custom endpoints',
+    keywords: ['custom', 'openai', 'compatible', 'endpoint', 'vllm', 'llama.cpp', 'lm studio', 'add'],
+    section: 'providers'
+  },
+  {
     id: 'custom-url',
     title: 'Custom OpenAI base URL',
     keywords: ['custom', 'openai', 'url', 'deepinfra', 'compatible', 'endpoint'],
@@ -534,13 +540,13 @@ function cssEscape(value: string): string {
 }
 
 /**
- * Where a result lands when its own row is not mounted: the provider URL rows
- * are rows of the API key list, and the allowlist belongs to the approval
- * mode above it.
+ * Where a result lands when its own row is not mounted: the Ollama URL row is
+ * a row of the API key list, the Custom URL one of the custom endpoints, and
+ * the allowlist belongs to the approval mode above it.
  */
 const FIELD_SCROLL_FALLBACK: Record<string, string> = {
   'ollama-url': 'api-keys',
-  'custom-url': 'api-keys',
+  'custom-url': 'custom-endpoints',
   'tool-approval-allowlist': 'tool-approval'
 }
 

@@ -1,4 +1,4 @@
-import type { ModelInfo, ProviderId } from '../../shared/ipc'
+import { catalogProviderId, type ModelInfo, type ProviderIdAny } from '../../shared/ipc'
 import {
   knownContextWindow,
   withResolvedContextWindow
@@ -21,14 +21,16 @@ import { listProviderModels } from './providers'
  * disputed windows stay unknown rather than guessed.
  */
 export async function resolveModelInfo(
-  providerId: ProviderId,
+  runProviderId: ProviderIdAny,
   modelId: string,
   apiKey: string | null,
   baseUrl: string | undefined,
   signal: AbortSignal
 ): Promise<ModelInfo> {
+  // The catalog is per endpoint; the heuristics below are per adapter.
+  const providerId = catalogProviderId(runProviderId)
   const listed = await listProviderModels({
-    provider: providerId,
+    provider: runProviderId,
     apiKey,
     baseUrl,
     signal,

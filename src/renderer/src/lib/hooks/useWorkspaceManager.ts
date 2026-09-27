@@ -7,7 +7,7 @@ import type {
   RunSummary,
   ToolApprovalRequest,
   AgentQuestionRequest,
-  ProviderId,
+  ProviderIdAny,
   WorkspaceSettingsOverride,
   WorkspaceUiState,
   WorkspacesState
@@ -585,7 +585,7 @@ export function useWorkspaceManager(options?: {
   /** Effective provider/model for a workspace — the default until a session pins its own. */
   getDefaultProviderModelForWorkspace?: (
     workspacePath: string
-  ) => { provider: ProviderId; model: string } | null
+  ) => { provider: ProviderIdAny; model: string } | null
   /** Settings `maxChatPanes`: 0 = auto (viewport-derived), 1–6 = fixed limit. */
   maxChatPanes?: number
 }) {

@@ -1,12 +1,13 @@
 import { useCallback, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import type {
-  AgentInteractionMode,
-  ModelInfo,
-  ProviderId,
-  SecretProvider,
-  ServiceTier,
-  ThinkingEffort
+import {
+  catalogProviderId,
+  type AgentInteractionMode,
+  type ModelInfo,
+  type ProviderIdAny,
+  type SecretProvider,
+  type ServiceTier,
+  type ThinkingEffort
 } from '@shared/ipc'
 import type { ChatSettingsPatch, EffectiveChatSettings } from '@shared/effectiveSettings'
 import { providerLabel, providerNeedsKey } from '@shared/domain/providers'
@@ -32,6 +33,7 @@ import {
 } from '@renderer/lib/ui'
 import { ROW_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import { useDropdownMenu } from '@renderer/lib/hooks/useDropdownMenu'
+import { useCustomProviders } from '@renderer/lib/hooks/customProvidersStore'
 import { formatTokens } from '@renderer/lib/utils/formatTokens'
 import type { ChatMetaStore } from '../../chatStores'
 import { ContextMeterPanel, contextMeterLabels, usageMetrics, type ContextUsageState } from './ContextMeter'
@@ -45,13 +47,13 @@ import { useResolvedContextUsage, useResolvedCostHint } from './useContextUsage'
 const PANEL_MAX_PX = 560
 
 export type TaskOptionsProps = {
-  provider: ProviderId
+  provider: ProviderIdAny
   model: string
-  providers: ProviderId[]
-  optionsByProvider: Record<ProviderId, ModelPickerOption[]>
-  seedsByProvider: Record<ProviderId, ModelPickerOption[]>
+  providers: ProviderIdAny[]
+  optionsByProvider: Record<ProviderIdAny, ModelPickerOption[]>
+  seedsByProvider: Record<ProviderIdAny, ModelPickerOption[]>
   modelMetaByValue: Record<string, ModelInfo>
-  warningsByProvider: Partial<Record<ProviderId, string | null>>
+  warningsByProvider: Partial<Record<ProviderIdAny, string | null>>
   favoriteModels: string[]
   recentModels: string[]
   serviceTier: ServiceTier
@@ -59,12 +61,12 @@ export type TaskOptionsProps = {
   secrets: Record<SecretProvider, boolean>
   ollamaBaseUrl?: string
   customOpenAiBaseUrl?: string
-  onModelChange: (provider: ProviderId, model: string) => void
-  onToggleFavorite: (provider: ProviderId, model: string) => void
+  onModelChange: (provider: ProviderIdAny, model: string) => void
+  onToggleFavorite: (provider: ProviderIdAny, model: string) => void
   onServiceTierChange: (tier: ServiceTier) => void
   /** Refetches the browsed provider's catalog. */
   onRefreshCatalog: () => void
-  onBrowseProvider: (provider: ProviderId) => void
+  onBrowseProvider: (provider: ProviderIdAny) => void
   catalogLoading?: boolean
   agentMode: AgentInteractionMode
   onAgentModeChange: (mode: AgentInteractionMode) => void
@@ -86,7 +88,7 @@ export type TaskOptionsProps = {
   trigger?: 'token' | 'model'
 }
 
-type Row = { provider: ProviderId; opt: ModelPickerOption; manual?: boolean }
+type Row = { provider: ProviderIdAny; opt: ModelPickerOption; manual?: boolean }
 
 export function capabilities(meta?: ModelInfo): Array<{ icon: IconName; label: string }> {
   if (!meta) return []
@@ -99,7 +101,7 @@ export function capabilities(meta?: ModelInfo): Array<{ icon: IconName; label: s
 }
 
 /** Published input price per million tokens, when the price table knows the model. */
-function inputPrice(provider: ProviderId, model: string): string {
+function inputPrice(provider: ProviderIdAny, model: string): string {
   const resolved = resolveModelPrice(provider, model)
   if (!resolved) return ''
   const n = resolved.price.input
@@ -133,7 +135,8 @@ export function TaskOptions(props: TaskOptionsProps) {
   const [open, setOpen] = useState(false)
   const [view, setView] = useState<'models' | 'context'>('models')
   const [query, setQuery] = useState('')
-  const [tab, setTab] = useState<ProviderId>(provider)
+  const [tab, setTab] = useState<ProviderIdAny>(provider)
+  const customProviders = useCustomProviders()
   const [activeIndex, setActiveIndex] = useState(-1)
   const [dismissedLowerKey, setDismissedLowerKey] = useState<string | null>(null)
   const [compacting, setCompacting] = useState(false)
@@ -239,14 +242,15 @@ export function TaskOptions(props: TaskOptionsProps) {
         }
       }
       const hits = direct.length > 0 ? direct : byGroup
-      // A host without a model list (Custom) takes a typed id as the model.
-      if (tab === 'custom') {
+      // A host without a model list (Custom, or an endpoint the user added)
+      // takes a typed id as the model.
+      if (catalogProviderId(tab) === 'custom') {
         const id = query.trim()
         const exists = hits.some(
           (h) => h.opt.value.toLowerCase() === id.toLowerCase() || h.opt.label.toLowerCase() === id.toLowerCase()
         )
         if (!exists) {
-          hits.push({ provider: 'custom', opt: { value: modelSelectionKey('custom', id), label: `Use "${id}"` }, manual: true })
+          hits.push({ provider: tab, opt: { value: modelSelectionKey(tab, id), label: `Use "${id}"` }, manual: true })
         }
       }
       return hits
@@ -271,13 +275,18 @@ export function TaskOptions(props: TaskOptionsProps) {
 
   const browsedWarning = query.trim() ? null : (props.warningsByProvider[tab] ?? null)
 
-  const noteFor = (p: ProviderId): string | null => {
+  const noteFor = (p: ProviderIdAny): string | null => {
     if (props.secrets[p as SecretProvider]) return null
-    const baseUrl = p === 'ollama' ? props.ollamaBaseUrl : p === 'custom' ? props.customOpenAiBaseUrl : undefined
+    const baseUrl =
+      p === 'ollama'
+        ? props.ollamaBaseUrl
+        : p === 'custom'
+          ? props.customOpenAiBaseUrl
+          : customProviders.find((entry) => entry.id === p)?.baseUrl
     return providerNeedsKey(p, baseUrl) ? 'no key' : 'local'
   }
 
-  const browse = (p: ProviderId): void => {
+  const browse = (p: ProviderIdAny): void => {
     setQuery('')
     setActiveIndex(-1)
     setTab(p)
@@ -324,7 +333,7 @@ export function TaskOptions(props: TaskOptionsProps) {
     loading: props.catalogLoading,
     searching: Boolean(query.trim()),
     warning: browsedWarning,
-    custom: tab === 'custom',
+    custom: catalogProviderId(tab) === 'custom',
     noProviders: providers.length === 0
   })
 
@@ -425,7 +434,7 @@ export function TaskOptions(props: TaskOptionsProps) {
                       )}
                     >
                       <ProviderLogo id={p} size="sm" className="shrink-0" />
-                      <span className="min-w-0 flex-1 truncate">{providerLabel(p)}</span>
+                      <span className="min-w-0 flex-1 truncate">{providerLabel(p, customProviders)}</span>
                       {note ? <span className="shrink-0 text-caption text-tertiary">{note}</span> : null}
                     </button>
                   )

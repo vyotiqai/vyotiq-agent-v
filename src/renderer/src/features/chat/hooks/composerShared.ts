@@ -7,7 +7,7 @@ import type {
   AttachedNativeFile,
   ChatMessage,
   ComposerSendExtras,
-  ProviderId,
+  ProviderIdAny,
   SecretProvider,
   ServiceTier
 } from '@shared/ipc'
@@ -216,7 +216,7 @@ export function lastUserMessageIndex(messages: readonly ChatMessage[]): number |
 }
 
 export type BuildComposerSendPropsInput = {
-  provider: ProviderId
+  provider: ProviderIdAny
   model: string
   running: boolean
   hasWorkspace: boolean
@@ -228,11 +228,11 @@ export type BuildComposerSendPropsInput = {
   secrets: Record<SecretProvider, boolean>
   draft?: string
   onDraftChange?: (draft: string) => void
-  onProviderModel: (provider: ProviderId, model: string) => void
+  onProviderModel: (provider: ProviderIdAny, model: string) => void
   favoriteModels?: string[]
   recentModels?: string[]
   serviceTier?: ServiceTier
-  onToggleFavorite?: (provider: ProviderId, model: string) => void
+  onToggleFavorite?: (provider: ProviderIdAny, model: string) => void
   onServiceTierChange?: (tier: ServiceTier) => void
   chatSettings: EffectiveChatSettings
   onChatSettingsChange: (patch: ChatSettingsPatch) => void

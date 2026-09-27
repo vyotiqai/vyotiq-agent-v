@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { providerLabel } from '@shared/providers'
 import { useNavigatorSlot } from '@renderer/lib/context/NavigatorSlot'
 import { shortcutLabel } from '@renderer/lib/shortcuts'
 import { isEditableShortcutTarget } from '@renderer/lib/shortcuts/match'
@@ -106,7 +105,7 @@ export function SettingsView(props: SettingsViewProps) {
   }, [])
 
   const issues: SettingsIssues = form.activeNeedsKey
-    ? { providers: `${providerLabel(form.settings.provider)} has no API key` }
+    ? { providers: `${form.providerDisplayLabel} has no API key` }
     : {}
 
   const resetSection = (): void => {

@@ -1,6 +1,6 @@
 import { existsSync } from 'fs'
 import type { WebContents } from 'electron'
-import type { AgentInteractionMode, ChatMessage, ProviderId } from '../../shared/ipc'
+import type { AgentInteractionMode, ChatMessage, ProviderIdAny } from '../../shared/ipc'
 import { logger } from '../../shared/logger'
 import { workspacePathsEqual } from '../../shared/workspacePath'
 import { getWorkspaces } from '../workspace/workspaces'
@@ -37,7 +37,7 @@ export type LaunchRunRequest = {
   incremental?: boolean
   mode?: AgentInteractionMode
   focusedFile?: string | null
-  provider?: ProviderId
+  provider?: ProviderIdAny
   model?: string
   runtime?: 'local' | 'cloud'
   /** A new task's done-when checks, from its brief. */

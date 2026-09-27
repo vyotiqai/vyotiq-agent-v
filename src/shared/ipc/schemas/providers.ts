@@ -45,7 +45,8 @@ export type ProviderIdAny = ProviderId | CustomProviderId
 
 /**
  * Wire schema accepting any provider id (builtin enum + dynamic custom ids).
- * `ProviderIdSchema` is kept unchanged for wire compat with existing payloads.
+ * `ProviderIdSchema` stays the builtin catalog; every field that names the
+ * provider a run, setting or catalog request uses takes this one.
  */
 export const ProviderIdSchemaAny = z.union([ProviderIdSchema, CustomProviderIdSchema])
 
@@ -56,6 +57,16 @@ export function isCustomProviderId(id: string): id is CustomProviderId {
 /** Build a dynamic custom-provider id from a slug (parse sites validate it). */
 export function customProviderId(slug: string): CustomProviderId {
   return `custom:${slug}`
+}
+
+/**
+ * The builtin catalog id whose behaviour a provider shares. Every
+ * `custom:<slug>` endpoint is served by the builtin `custom` adapter, so code
+ * keyed by the catalog (adapter lookup, request shaping, thinking heuristics)
+ * resolves through this rather than the dynamic id.
+ */
+export function catalogProviderId(id: ProviderIdAny): ProviderId {
+  return isCustomProviderId(id) ? 'custom' : id
 }
 
 export const InputModalitySchema = z.enum(['text', 'image', 'audio', 'file'])
@@ -122,7 +133,7 @@ export const ModelInfoSchema = z.object({
 export type ModelInfo = z.infer<typeof ModelInfoSchema>
 
 export const ListModelsRequestSchema = z.object({
-  provider: ProviderIdSchema,
+  provider: ProviderIdSchemaAny,
   baseUrl: z.string().optional(),
   forceRefresh: z.boolean().optional(),
   /** Selected model id — Ollama may `/api/show` this one for thinking caps. */

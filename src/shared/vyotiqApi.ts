@@ -51,7 +51,7 @@ import type {
   LoadRunResult,
   LoadEarlierMessagesResult,
   PersistedEvent,
-  ProviderId,
+  ProviderIdAny,
   RunSummary,
   SetGoalStatusRequest,
   SetGoalStatusResult,
@@ -258,7 +258,7 @@ export interface VyotiqApi {
   clearSecret: (provider: SecretProvider) => Promise<IpcResult<true>>
   secretStatus: () => Promise<IpcResult<SecretsStatus>>
   listModels: (payload: {
-    provider: ProviderId
+    provider: ProviderIdAny
     baseUrl?: string
     forceRefresh?: boolean
     model?: string

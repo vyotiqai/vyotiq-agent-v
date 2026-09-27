@@ -8,6 +8,7 @@ import {
 } from '@shared/ipc'
 import { logger } from '@shared/logger'
 import { initRendererSentry } from '../../logging/sentry'
+import { setCustomProviders } from './customProvidersStore'
 
 export function useSettings() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
@@ -53,6 +54,10 @@ export function useSettings() {
       setSettings(next)
     })
   }, [])
+
+  useEffect(() => {
+    setCustomProviders(settings.customProviders)
+  }, [settings.customProviders])
 
   const update = useCallback(async (partial: Partial<Settings>): Promise<IpcResult<Settings>> => {
     const gen = ++generationRef.current

@@ -1,7 +1,7 @@
 import { createHash } from 'crypto'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
-import type { ModelInfo, ProviderId } from '../../../shared/ipc'
+import type { ModelInfo, ProviderIdAny } from '../../../shared/ipc'
 import { ollamaNativeHost } from '../../../shared/domain/providers'
 import { logger } from '../../../shared/logger'
 import { atomicWriteJson } from '../../storage/atomicWrite'
@@ -48,7 +48,7 @@ function currentModelListGeneration(key: string): number {
 
 /** Normalize list/chat base URLs so Ollama `/v1` and native hosts share one cache slot. */
 export function normalizeModelCacheBaseUrl(
-  provider: ProviderId,
+  provider: ProviderIdAny,
   baseUrl: string | undefined
 ): string {
   if (!baseUrl?.trim()) return ''
@@ -58,7 +58,7 @@ export function normalizeModelCacheBaseUrl(
 }
 
 export function modelCacheKey(
-  provider: ProviderId,
+  provider: ProviderIdAny,
   baseUrl: string | undefined,
   apiKey: string | null | undefined
 ): string {
@@ -76,7 +76,7 @@ function migrateDiskCacheKey(key: string): string {
   const rest = key.slice(0, fingerprintSep)
   const providerSep = rest.indexOf('|')
   if (providerSep <= 0) return key
-  const provider = rest.slice(0, providerSep) as ProviderId
+  const provider = rest.slice(0, providerSep) as ProviderIdAny
   const baseUrl = rest.slice(providerSep + 1)
   if (!baseUrl) return key
   const normalized = normalizeModelCacheBaseUrl(provider, baseUrl)

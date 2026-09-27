@@ -27,7 +27,7 @@ import { focusComposerMessage } from '@renderer/lib/shortcuts'
 import { useFocusComposerSoon } from './useFocusComposerSoon'
 import { useLiveAnnouncer } from '@renderer/lib/a11y'
 import type {
-  ProviderId,
+  ProviderIdAny,
   SecretProvider,
   AttachedFile,
   ToolApprovalMode,
@@ -150,6 +150,7 @@ function modelsRefreshKeyFor(
     provider: string
     ollamaBaseUrl?: string
     customOpenAiBaseUrl?: string
+    customProviders?: readonly { id: string; baseUrl: string }[]
   },
   secrets: Record<SecretProvider, boolean> & { ollama?: boolean; custom?: boolean },
   nonce: number
@@ -160,7 +161,12 @@ function modelsRefreshKeyFor(
       : chatSettings.provider === 'custom'
         ? `custom:${chatSettings.customOpenAiBaseUrl}:${secrets.custom ? '1' : '0'}`
         : `${chatSettings.provider}:${secrets[chatSettings.provider as SecretProvider] ? '1' : '0'}`
-  return `${providerKey}:${nonce}`
+  // The picker browses every endpoint, not just the active one: an edited
+  // URL or a key saved on any of them has to drop its cached catalog too.
+  const endpointsKey = (chatSettings.customProviders ?? [])
+    .map((e) => `${e.id}=${e.baseUrl}:${secrets[e.id as SecretProvider] ? '1' : '0'}`)
+    .join(',')
+  return `${providerKey}:${endpointsKey}:${nonce}`
 }
 
 /** Human-readable bytes for the remove-workspace storage confirm (audit H5). */
@@ -223,7 +229,7 @@ function App() {
   }, [])
   const contextsForModelRef = useRef<Record<string, WorkspaceContext>>({})
   const getDefaultProviderModelForWorkspace = useCallback(
-    (workspacePath: string): { provider: ProviderId; model: string } | null => {
+    (workspacePath: string): { provider: ProviderIdAny; model: string } | null => {
       if (!workspacePath) return null
       const ctx = findByWorkspacePath(contextsForModelRef.current, workspacePath)
       const effective = resolveEffectiveSettings(settings, ctx?.settingsOverride)
@@ -434,7 +440,7 @@ function App() {
 
   const onProviderModelForWorkspace = useCallback((
     workspacePath: string | null | undefined,
-    provider: ProviderId,
+    provider: ProviderIdAny,
     model: string
   ): void => {
     const resolvedModel = model || defaultModelFor(provider)
@@ -506,7 +512,7 @@ function App() {
     void update({ ...patch, thinkingPrefsByProvider })
   }, [contexts, setSettingsError, setSettingsOverride, settings.thinkingPrefsByProvider, update])
 
-  const onToggleFavorite = useCallback((provider: ProviderId, model: string): void => {
+  const onToggleFavorite = useCallback((provider: ProviderIdAny, model: string): void => {
     const key = modelSelectionKey(provider, model)
     const set = new Set(settings.favoriteModels)
     if (set.has(key)) set.delete(key)

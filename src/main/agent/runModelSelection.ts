@@ -1,4 +1,4 @@
-import type { ProviderId } from '../../shared/ipc'
+import type { ProviderIdAny } from '../../shared/ipc'
 
 /**
  * Per-run provider/model memory (main side).
@@ -11,11 +11,11 @@ import type { ProviderId } from '../../shared/ipc'
  */
 const MAX_ENTRIES = 512
 
-const selections = new Map<string, { provider: ProviderId; model: string }>()
+const selections = new Map<string, { provider: ProviderIdAny; model: string }>()
 
 export function rememberRunModelSelection(
   runId: string,
-  provider: ProviderId,
+  provider: ProviderIdAny,
   model: string
 ): void {
   selections.delete(runId)
@@ -28,7 +28,7 @@ export function rememberRunModelSelection(
 
 export function recallRunModelSelection(
   runId: string
-): { provider: ProviderId; model: string } | null {
+): { provider: ProviderIdAny; model: string } | null {
   return selections.get(runId) ?? null
 }
 

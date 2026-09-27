@@ -117,3 +117,41 @@ describe('deriveModelReadiness', () => {
     expect(issue).toBeNull()
   })
 })
+
+describe('deriveModelReadiness for custom endpoints', () => {
+  const lab = { id: 'custom:lab' as const, name: 'Lab vLLM', baseUrl: 'http://192.168.1.20:8000/v1' }
+  const infra = {
+    id: 'custom:infra' as const,
+    name: 'DeepInfra',
+    baseUrl: 'https://api.deepinfra.com/v1/openai'
+  }
+  const base = {
+    model: 'qwen',
+    secrets: emptySecretStatus(),
+    catalogWarning: null,
+    liveCatalog: null,
+    catalogLoading: false
+  }
+
+  it('blocks a chat whose endpoint was removed, before any key check', () => {
+    const issue = deriveModelReadiness({ ...base, provider: 'custom:lab', customProviders: [infra] })
+    expect(issue?.kind).toBe('removed_endpoint')
+    expect(modelReadinessBlocksSend(issue)).toBe(true)
+    expect(modelReadinessSendReason(issue!)).toMatch(/endpoint was removed/)
+  })
+
+  it('names the endpoint when its key is missing', () => {
+    const issue = deriveModelReadiness({ ...base, provider: 'custom:infra', customProviders: [infra] })
+    expect(issue).toEqual({ kind: 'missing_key', provider: 'custom:infra', label: 'DeepInfra' })
+  })
+
+  it('lets a LAN endpoint run without a key', () => {
+    const issue = deriveModelReadiness({
+      ...base,
+      provider: 'custom:lab',
+      customProviders: [lab],
+      catalogLoading: true
+    })
+    expect(issue).toBeNull()
+  })
+})

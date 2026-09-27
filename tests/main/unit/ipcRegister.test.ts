@@ -112,6 +112,9 @@ vi.mock('@main/settings/settings', () => ({
     provider: 'ollama',
     model: 'qwen2.5',
     ollamaBaseUrl: 'http://127.0.0.1:11434',
+    customProviders: [
+      { id: 'custom:lab', name: 'Lab vLLM', baseUrl: 'http://192.168.1.20:8000/v1' }
+    ],
     theme: 'system',
     telemetryEnabled: false
   }),
@@ -598,6 +601,35 @@ describe('registerIpc', () => {
 
       expect(result.ok).toBe(false)
       expect(listProviderModels).not.toHaveBeenCalled()
+    })
+
+    it('refuses an endpoint that is no longer in settings', async () => {
+      const { listProviderModels } = await import('@main/agent/providers')
+      vi.mocked(listProviderModels).mockClear()
+
+      const result = await callListModels({ provider: 'custom:gone' })
+
+      expect(result).toEqual({
+        ok: false,
+        error: 'That custom endpoint was removed from Settings → Providers.'
+      })
+      expect(listProviderModels).not.toHaveBeenCalled()
+    })
+
+    it('lists a saved endpoint from its own base URL, under its name', async () => {
+      const { listProviderModels } = await import('@main/agent/providers')
+      vi.mocked(listProviderModels).mockClear()
+      vi.mocked(listProviderModels).mockResolvedValue({ models: [] } as never)
+
+      await callListModels({ provider: 'custom:lab' })
+
+      expect(listProviderModels).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'custom:lab',
+          label: 'Lab vLLM',
+          baseUrl: 'http://192.168.1.20:8000/v1'
+        })
+      )
     })
   })
 

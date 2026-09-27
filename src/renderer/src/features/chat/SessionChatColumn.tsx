@@ -6,7 +6,7 @@ import type {
   AgentInteractionMode,
   AttachedFile,
   ChatMessage,
-  ProviderId,
+  ProviderIdAny,
   RunSummary,
   SecretProvider,
   ToolApprovalDecision
@@ -141,7 +141,7 @@ export function SessionChatColumn({
   operationalError?: string | null
   hasWorkspace: boolean
   workspacePath: string | null
-  provider: ProviderId
+  provider: ProviderIdAny
   model: string
   ollamaBaseUrl?: string
   customOpenAiBaseUrl?: string
@@ -153,11 +153,11 @@ export function SessionChatColumn({
   transcriptLoadingEarlier?: boolean
   onLoadEarlierMessages?: () => void | Promise<void>
   headingRef?: Ref<HTMLHeadingElement>
-  onProviderModel: (provider: ProviderId, model: string) => void
+  onProviderModel: (provider: ProviderIdAny, model: string) => void
   favoriteModels?: string[]
   recentModels?: string[]
   serviceTier?: import('@shared/ipc').ServiceTier
-  onToggleFavorite?: (provider: ProviderId, model: string) => void
+  onToggleFavorite?: (provider: ProviderIdAny, model: string) => void
   onServiceTierChange?: (tier: import('@shared/ipc').ServiceTier) => void
   chatSettings: EffectiveChatSettings
   onChatSettingsChange: (patch: ChatSettingsPatch) => void

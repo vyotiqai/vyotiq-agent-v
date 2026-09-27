@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { SECRET_PROVIDERS, type ProviderId } from '@shared/ipc'
+import { MAX_CUSTOM_PROVIDERS, type ProviderIdAny, type SecretProvider } from '@shared/ipc'
 import { providerLabel, providerOptionsForConfigured } from '@shared/providers'
 import { findByWorkspacePath } from '@shared/workspacePathMatch'
 import { Button, IconButton, Menu, selectTriggerClass, cn, type MenuOption } from '@renderer/lib/ui'
@@ -8,7 +8,8 @@ import type { SettingsViewProps } from '../types'
 import { SelectField } from '../components/SelectField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
 import { SettingsNotice } from '../components/SettingsNotice'
-import { ProviderKeys } from '../components/ProviderKeys'
+import { AddEndpointRow, ProviderKeys } from '../components/ProviderKeys'
+import { PROVIDER_KEY_ORDER } from '../constants'
 import { workspaceShort } from '../utils/settingsHelpers'
 
 /**
@@ -16,7 +17,7 @@ import { workspaceShort } from '../utils/settingsHelpers'
  * in use kept in it even when the list does not (yet) name it.
  */
 function useModelOptions(
-  provider: ProviderId,
+  provider: ProviderIdAny,
   baseUrl: string | undefined,
   current: string,
   reloadKey: unknown
@@ -57,15 +58,27 @@ export function ProvidersSection({
   settingsOverridesByPath?: SettingsViewProps['settingsOverridesByPath']
 }) {
   const settings = form.settings
+  const customProviders = form.customProviders
   const providerOptions = useMemo(
     () =>
       providerOptionsForConfigured(secrets, {
         ollamaBaseUrl: settings.ollamaBaseUrl,
         customOpenAiBaseUrl: settings.customOpenAiBaseUrl,
+        customProviders,
         alwaysInclude: [settings.provider]
       }),
-    [secrets, settings.ollamaBaseUrl, settings.customOpenAiBaseUrl, settings.provider]
+    [secrets, settings.ollamaBaseUrl, settings.customOpenAiBaseUrl, customProviders, settings.provider]
   )
+  // The builtin Custom row sits with the endpoints the user added, so each
+  // group answers one question: which keys are saved, which hosts are set up.
+  const keyIds = useMemo(() => PROVIDER_KEY_ORDER.filter((id) => id !== 'custom'), [])
+  const endpointIds = useMemo<SecretProvider[]>(
+    () => ['custom', ...customProviders.map((entry) => entry.id)],
+    [customProviders]
+  )
+  const savedKeyCount = keyIds.filter((id) => secrets[id]).length
+  // An added endpoint's catalog comes from its own saved base URL (main
+  // resolves it from the list), so only the builtin hosts pass one here.
   const baseUrl =
     settings.provider === 'ollama'
       ? settings.ollamaBaseUrl
@@ -89,9 +102,15 @@ export function ProvidersSection({
       : null
   const overrideHint = overrideModel
     ? `${overrideModel.workspace} overrides this with ${overrideModel.model}${
-        overrideModel.provider !== settings.provider ? ` on ${providerLabel(overrideModel.provider)}` : ''
+        overrideModel.provider !== settings.provider
+          ? ` on ${providerLabel(overrideModel.provider, customProviders)}`
+          : ''
       }.`
     : undefined
+
+  const clearKey = (): void => {
+    void form.clearKey(onClearSecret)
+  }
 
   return (
     <SettingsStack>
@@ -115,7 +134,7 @@ export function ProvidersSection({
           // key), so the gap worth naming is one that cannot run.
           hint={
             form.activeNeedsKey
-              ? `${providerLabel(settings.provider)} has no API key.${
+              ? `${form.providerDisplayLabel} has no API key.${
                   form.savedKeyProviders.length > 0 ? '' : ' Add one under API keys below.'
                 }`
               : undefined
@@ -130,10 +149,10 @@ export function ProvidersSection({
                     variant="secondary"
                     disabled={form.formLocked}
                     onClick={() => {
-                      void form.setActiveProvider(id as ProviderId)
+                      void form.setActiveProvider(id as ProviderIdAny)
                     }}
                   >
-                    Use {providerLabel(id)}
+                    Use {providerLabel(id, customProviders)}
                   </Button>
                 ))}
               </div>
@@ -144,7 +163,7 @@ export function ProvidersSection({
           options={providerOptions}
           disabled={form.formLocked}
           onChange={(provider) => {
-            void form.setActiveProvider(provider as ProviderId)
+            void form.setActiveProvider(provider as ProviderIdAny)
           }}
         />
         <SettingsField
@@ -162,7 +181,7 @@ export function ProvidersSection({
           <div className="flex items-center gap-1">
             <IconButton
               icon="refresh"
-              label={`Refresh the ${providerLabel(settings.provider)} model list`}
+              label={`Refresh the ${form.providerDisplayLabel} model list`}
               size="md"
               tone="muted"
               disabled={form.busy && !form.refreshingModels}
@@ -197,17 +216,24 @@ export function ProvidersSection({
         fieldId="api-keys"
         description={
           form.encryptionAvailable
-            ? `${form.savedKeyCount} of ${SECRET_PROVIDERS.length} saved`
+            ? `${savedKeyCount} of ${keyIds.length} saved`
             : 'Unavailable without OS secure storage'
         }
       >
-        <ProviderKeys
-          form={form}
-          secrets={secrets}
-          onClearKey={() => {
-            void form.clearKey(onClearSecret)
-          }}
-        />
+        <ProviderKeys ids={keyIds} form={form} secrets={secrets} onClearKey={clearKey} />
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Custom endpoints"
+        fieldId="custom-endpoints"
+        description={
+          customProviders.length > 0
+            ? `${customProviders.length} added`
+            : 'Any OpenAI-compatible server: vLLM, llama.cpp, LM Studio, a hosted gateway'
+        }
+      >
+        <ProviderKeys ids={endpointIds} form={form} secrets={secrets} onClearKey={clearKey} />
+        <AddEndpointRow form={form} max={MAX_CUSTOM_PROVIDERS} />
       </SettingsGroup>
     </SettingsStack>
   )

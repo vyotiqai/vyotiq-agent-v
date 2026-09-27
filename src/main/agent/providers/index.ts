@@ -1,4 +1,9 @@
-import type { ModelInfo, ProviderId } from '../../../shared/ipc'
+import {
+  catalogProviderId,
+  type ModelInfo,
+  type ProviderId,
+  type ProviderIdAny
+} from '../../../shared/ipc'
 import { formatError } from '../../../shared/errors'
 import { withResolvedContextWindow } from '../../../shared/domain/modelContextWindows'
 import { providerLabel, providerNeedsKey, seedModelsFor } from '../../../shared/providers'
@@ -55,16 +60,20 @@ const providers: Record<ProviderId, LlmProvider> = {
   opencode: opencodeProvider
 }
 
-export function getProvider(id: ProviderId): LlmProvider {
-  return providers[id]
+/** Adapter for a provider; every `custom:<slug>` endpoint shares the `custom` one. */
+export function getProvider(id: ProviderIdAny): LlmProvider {
+  return providers[catalogProviderId(id)]
 }
 
 /** Providers whose model catalog endpoint is public (no API key required). */
 export const PUBLIC_CATALOG_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>(['opencode'])
 
 /** Map catalog failures into provider-aware, actionable warnings. */
-export function catalogWarningMessage(provider: ProviderId, err: unknown): string {
-  const label = providerLabel(provider)
+export function catalogWarningMessage(
+  provider: ProviderIdAny,
+  err: unknown,
+  label: string = providerLabel(provider)
+): string {
   const raw = formatError(err)
 
   if (/API key not set/i.test(raw)) {
@@ -94,13 +103,13 @@ export function catalogWarningMessage(provider: ProviderId, err: unknown): strin
   return `${label}: ${raw}. Showing seed defaults (not live models).`
 }
 
-function enrichCatalogModels(provider: ProviderId, models: ModelInfo[]): ModelInfo[] {
-  return models.map((m) => withResolvedContextWindow(m, provider))
+function enrichCatalogModels(provider: ProviderIdAny, models: ModelInfo[]): ModelInfo[] {
+  return models.map((m) => withResolvedContextWindow(m, catalogProviderId(provider)))
 }
 
 async function applyOllamaSelectedShow(
   input: {
-    provider: ProviderId
+    provider: ProviderIdAny
     model?: string
     baseUrl?: string
     apiKey?: string | null
@@ -153,7 +162,9 @@ export async function awaitCatalogWithCallerSignal<T>(
 }
 
 export async function listProviderModels(input: {
-  provider: ProviderId
+  provider: ProviderIdAny
+  /** Display name for warnings; a custom endpoint's own name, not "Custom". */
+  label?: string
   apiKey?: string | null
   baseUrl?: string
   signal?: AbortSignal
@@ -201,7 +212,8 @@ export async function listProviderModels(input: {
 
 async function listProviderModelsUncached(
   input: {
-    provider: ProviderId
+    provider: ProviderIdAny
+    label?: string
     apiKey?: string | null
     baseUrl?: string
     signal?: AbortSignal
@@ -227,8 +239,10 @@ async function listProviderModelsUncached(
   // OpenCode Go publishes its catalog without auth (verified: GET /v1/models →
   // HTTP 200 unauthenticated), so fetch it even before a key is saved. Chat
   // still requires a key via providerNeedsKey/preflight.
+  const label = input.label ?? providerLabel(input.provider)
   const catalogNeedsKey =
-    providerNeedsKey(input.provider, input.baseUrl) && !PUBLIC_CATALOG_PROVIDERS.has(input.provider)
+    providerNeedsKey(input.provider, input.baseUrl) &&
+    !PUBLIC_CATALOG_PROVIDERS.has(catalogProviderId(input.provider))
   if (catalogNeedsKey && !input.apiKey?.trim()) {
     const seeds = seedModelsFor(input.provider)
     return {
@@ -236,7 +250,7 @@ async function listProviderModelsUncached(
         input,
         enrichCatalogModels(input.provider, seeds)
       ),
-      warning: `${providerLabel(input.provider)} API key not set — showing illustrative placeholder model IDs. Save a key and refresh to load the live catalog.`
+      warning: `${label} API key not set — showing illustrative placeholder model IDs. Save a key and refresh to load the live catalog.`
     }
   }
 
@@ -261,7 +275,7 @@ async function listProviderModelsUncached(
           { ...input, signal: timeout },
           enrichCatalogModels(input.provider, seeds)
         ),
-        warning: `${providerLabel(input.provider)} live catalog was empty; showing illustrative placeholder model IDs (not installed models).`
+        warning: `${label} live catalog was empty; showing illustrative placeholder model IDs (not installed models).`
       }
     }
     const enriched = await applyOllamaSelectedShow(
@@ -277,9 +291,8 @@ async function listProviderModelsUncached(
     // Reachable host without a model-list route (HTTP 405/501 on /models):
     // the provider connects for chat — manual model entry is the flow, not a fix.
     if (err instanceof ModelListUnsupportedError) {
-      const label = providerLabel(input.provider)
       const hint =
-        input.provider === 'custom'
+        catalogProviderId(input.provider) === 'custom'
           ? ' Type a model ID in the composer model picker search and press Enter to use it.'
           : ''
       return {
@@ -302,7 +315,7 @@ async function listProviderModelsUncached(
     if (timedOut) {
       return {
         models: enrichCatalogModels(input.provider, seeds),
-        warning: `Timed out after 10s reaching ${providerLabel(input.provider)}${
+        warning: `Timed out after 10s reaching ${label}${
           input.baseUrl ? ` at ${normalizeHostForWarning(input.baseUrl)}` : ''
         }. Showing illustrative placeholder model IDs (not live models).`
       }
@@ -312,7 +325,7 @@ async function listProviderModelsUncached(
         { ...input, signal: timeout },
         enrichCatalogModels(input.provider, seeds)
       ),
-      warning: `${catalogWarningMessage(input.provider, err)} Showing illustrative placeholder model IDs (not the live catalog).`
+      warning: `${catalogWarningMessage(input.provider, err, label)} Showing illustrative placeholder model IDs (not the live catalog).`
     }
   }
 }

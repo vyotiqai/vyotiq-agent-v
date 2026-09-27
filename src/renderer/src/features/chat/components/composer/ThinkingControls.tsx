@@ -1,4 +1,4 @@
-import type { ModelInfo, ProviderId, ThinkingEffort, ThinkingMode } from '@shared/ipc'
+import type { ModelInfo, ProviderIdAny, ThinkingEffort, ThinkingMode } from '@shared/ipc'
 import { catalogThinkingAllowed, modelSupportsThinking, ollamaThinkingHeuristicFields } from '@shared/reasoning'
 
 const ALL_EFFORT_OPTIONS: { value: ThinkingEffort; label: string; short: string }[] = [
@@ -62,7 +62,7 @@ export function modeIndex(
 
 /** Catalog fields when present; Ollama GPT-OSS / seed heuristic when unset. */
 export function resolveThinkingUiMeta(
-  provider: ProviderId,
+  provider: ProviderIdAny,
   model: string,
   modelMeta?: ModelInfo | null
 ): {
@@ -90,7 +90,7 @@ export function resolveThinkingUiMeta(
  * Other providers: catalog false softens for known reasoners via catalogThinkingAllowed.
  */
 export function modelShowsThinkingControls(
-  provider: ProviderId,
+  provider: ProviderIdAny,
   model: string,
   modelMeta?: ModelInfo | null
 ): boolean {

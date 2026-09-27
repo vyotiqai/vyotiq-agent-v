@@ -1,4 +1,9 @@
-import type { ModelInfo, ProviderId } from '../ipc/schemas/providers'
+import {
+  catalogProviderId,
+  type ModelInfo,
+  type ProviderId,
+  type ProviderIdAny
+} from '../ipc/schemas/providers'
 import { ollamaIdWithoutCloudSuffix, ollamaModelFamily } from './reasoning'
 
 /**
@@ -195,8 +200,9 @@ export function knownContextWindow(
  */
 export function resolveModelContextWindow(
   model: Pick<ModelInfo, 'id' | 'contextWindow'>,
-  providerId?: ProviderId
+  provider?: ProviderIdAny
 ): number | undefined {
+  const providerId = provider === undefined ? undefined : catalogProviderId(provider)
   const known = knownContextWindow(model.id, providerId)
   const reported = model.contextWindow
   if (reported != null && reported > 0) {

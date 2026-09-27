@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import type { ChatMessage, ProviderId } from '../ipc'
+import type { ChatMessage, ProviderIdAny } from '../ipc'
+import { catalogProviderId } from '../ipc/schemas/providers'
 import {
   ThinkingApiSchema,
   ThinkingEffortSchema,
@@ -263,8 +264,9 @@ export function catalogThinkingAllowed(
 }
 
 /** Heuristic: whether a model id likely supports extended thinking. */
-export function modelSupportsThinking(id: string, providerId?: ProviderId): boolean {
+export function modelSupportsThinking(id: string, provider?: ProviderIdAny): boolean {
   const lower = id.toLowerCase()
+  const providerId = provider === undefined ? undefined : catalogProviderId(provider)
   switch (providerId) {
     case 'custom':
       // Prefer catalog `supportsThinking`; shared families only for known reasoners.
@@ -300,9 +302,10 @@ export function modelSupportsThinking(id: string, providerId?: ProviderId): bool
 /** Map provider + model to the official thinking API surface. */
 export function thinkingApiFor(
   id: string,
-  providerId: ProviderId,
+  provider: ProviderIdAny,
   opts?: { affirmed?: boolean }
 ): ThinkingApi | undefined {
+  const providerId = catalogProviderId(provider)
   // When catalog already set supportsThinking, skip the second heuristic gate.
   if (!opts?.affirmed && !modelSupportsThinking(id, providerId)) return undefined
   switch (providerId) {

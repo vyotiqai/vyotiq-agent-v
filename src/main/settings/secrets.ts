@@ -5,6 +5,7 @@ import { join } from 'path'
 import {
   SECRET_PROVIDERS,
   emptySecretStatus,
+  isCustomProviderId,
   type SecretProvider,
   type SecretsStatus
 } from '../../shared/ipc'
@@ -261,7 +262,10 @@ export function secretStatus(): SecretsStatus {
   }
   const data = readFile()
   const keys = emptySecretStatus()
-  for (const provider of SECRET_PROVIDERS) {
+  // Builtin providers always get an entry; a custom endpoint only once it has
+  // a key stored, since the endpoint list lives in settings, not here.
+  const customIds = Object.keys(data).filter(isCustomProviderId)
+  for (const provider of [...SECRET_PROVIDERS, ...customIds]) {
     const encrypted = data[provider]
     if (!encrypted || !encryptionAvailable) {
       keys[provider] = false
