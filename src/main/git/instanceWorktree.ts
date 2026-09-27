@@ -30,6 +30,17 @@ const READ_TIMEOUT_MS = 5_000
 const WRITE_TIMEOUT_MS = 30_000
 const MAX_BUFFER = 4 * 1024 * 1024
 const INSTANCE_BRANCH_PREFIX = 'vyotiq/instance/'
+// A finished instance keeps its branch after its checkout is removed
+// (handleInlineInstanceFinished): it is what merge_agent_instance merges and
+// the only durable copy of an error'd child's edits. Nothing else bounds that
+// retention — 126 branches had accumulated in two weeks — so the prune pass
+// ages a kept branch out once its last commit is this old. A branch whose
+// commits are all reachable from some other ref carries no work and goes at
+// once, whatever its age.
+const INSTANCE_BRANCH_MAX_AGE_MS = 14 * 24 * 60 * 60_000
+// `git branch -D a b c…` deletes in one spawn (~250 ms each here); chunk so a
+// backlog never builds a command line past the win32 limit.
+const INSTANCE_BRANCH_DELETE_CHUNK = 50
 const GIT_REMOVE_RETRY_DELAYS_MS = [50, 200, 500] as const
 const RM_RETRY_DELAYS_MS = [200, 500, 1000] as const
 // Long backoff: a left-over worktree may be held by a still-living previous
@@ -1298,20 +1309,44 @@ export type PruneInstanceWorktreesOpts = {
   renameFn?: (from: string, to: string) => void
   nowFn?: () => number
   backoffMs?: number
+  /** Age of a kept branch's last commit past which it is deleted. */
+  branchMaxAgeMs?: number
 }
 
-/** Remove instance-worktrees that are not a live child run (startup / workspace open). */
+/**
+ * Remove instance checkouts and kept branches that no protected run needs
+ * (startup / workspace open). `protectedRunIds` is every run the caller wants
+ * left alone — live in this process, or still `running`/`resumable` on disk
+ * (collectProtectedInstanceRunIds). Returns the number of checkouts removed.
+ */
 export async function pruneStaleInstanceWorktrees(
   workspacePath: string,
-  liveRunIds: ReadonlySet<string>,
+  protectedRunIds: ReadonlySet<string>,
   opts?: PruneInstanceWorktreesOpts
 ): Promise<number> {
   return withGitWorktreeMutex(workspacePath, () =>
-    pruneStaleInstanceWorktreesUnlocked(workspacePath, liveRunIds, opts)
+    pruneStaleInstanceWorktreesUnlocked(workspacePath, protectedRunIds, opts)
   )
 }
 
 async function pruneStaleInstanceWorktreesUnlocked(
+  workspacePath: string,
+  protectedRunIds: ReadonlySet<string>,
+  opts?: PruneInstanceWorktreesOpts
+): Promise<number> {
+  const pruned = await pruneStaleInstanceWorktreeDirsUnlocked(workspacePath, protectedRunIds, opts)
+  // Branches after checkouts: a checkout removed above no longer pins its
+  // branch, and one that stayed (locked, deferred) still does. A git failure
+  // here must not fail the checkout pass that already happened.
+  try {
+    await pruneStaleInstanceBranchesUnlocked(workspacePath, protectedRunIds, opts)
+  } catch (err) {
+    logger.warn('instance branch prune failed', { scope: 'git', workspacePath, err })
+  }
+  return pruned
+}
+
+async function pruneStaleInstanceWorktreeDirsUnlocked(
   workspacePath: string,
   liveRunIds: ReadonlySet<string>,
   opts?: PruneInstanceWorktreesOpts
@@ -1383,28 +1418,239 @@ async function pruneStaleInstanceWorktreesUnlocked(
 
 export function pruneStaleInstanceWorktreesBestEffort(
   workspacePath: string,
-  liveRunIds: ReadonlySet<string>,
+  protectedRunIds: ReadonlySet<string>,
   opts?: PruneInstanceWorktreesOpts
 ): void {
-  void pruneStaleInstanceWorktrees(workspacePath, liveRunIds, opts).catch((err) => {
+  void pruneStaleInstanceWorktrees(workspacePath, protectedRunIds, opts).catch((err) => {
     logger.warn('instance worktree prune failed', { scope: 'git', workspacePath, err })
   })
 }
 
+export type PruneInstanceBranchesSummary = {
+  /** Deleted: every commit is reachable from a ref that is not an instance branch. */
+  merged: number
+  /** Deleted: unmerged, but the last commit is older than branchMaxAgeMs. */
+  aged: number
+  /** Unmerged and younger than the cutoff — still the merge source for its run. */
+  kept: number
+  /** Belongs to a protected run or a spawn still in flight. */
+  protected: number
+  /** Checked out in some worktree of the repo (the main checkout included). */
+  checkedOut: number
+  failed: number
+}
+
+const EMPTY_BRANCH_PRUNE_SUMMARY: PruneInstanceBranchesSummary = {
+  merged: 0,
+  aged: 0,
+  kept: 0,
+  protected: 0,
+  checkedOut: 0,
+  failed: 0
+}
+
+type InstanceBranchRef = { name: string; tip: string; committedAtMs: number }
+
+/** Every local vyotiq/instance/* branch with its tip and the tip's committer time. */
+async function listInstanceBranches(workspacePath: string): Promise<InstanceBranchRef[]> {
+  const out = await git(
+    [
+      'for-each-ref',
+      '--format=%(refname)%00%(objectname)%00%(committerdate:unix)',
+      `refs/heads/${INSTANCE_BRANCH_PREFIX}`
+    ],
+    workspacePath,
+    READ_TIMEOUT_MS
+  )
+  const refs: InstanceBranchRef[] = []
+  for (const line of out.split(/\r?\n/)) {
+    const [refname = '', tip = '', committed = ''] = line.split('\0')
+    if (!refname.startsWith('refs/heads/')) continue
+    const name = refname.slice('refs/heads/'.length)
+    if (!isSafeInstanceBranch(name) || !tip) continue
+    const seconds = Number.parseInt(committed, 10)
+    refs.push({
+      name,
+      tip: tip.trim(),
+      committedAtMs: Number.isFinite(seconds) ? seconds * 1000 : Number.NaN
+    })
+  }
+  return refs
+}
+
+/** Branch names checked out in any worktree of the repo (porcelain `branch` lines). */
+function checkedOutBranches(porcelain: string): Set<string> {
+  const names = new Set<string>()
+  for (const line of porcelain.split(/\r?\n/)) {
+    if (!line.startsWith('branch ')) continue
+    const ref = line.slice('branch '.length).trim()
+    names.add(ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref)
+  }
+  return names
+}
+
+/**
+ * Commits reachable from an instance branch but from no other ref — HEAD, any
+ * other local branch, remote-tracking branch or tag. One spawn for every
+ * branch at once: an instance tip absent from this set is fully contained in
+ * something that outlives it (its merge landed, or it never committed), so
+ * deleting it loses nothing. Null when git could not answer, in which case
+ * every branch is treated as unmerged and only the age rule applies.
+ */
+async function unreachableInstanceTips(workspacePath: string): Promise<Set<string> | null> {
+  try {
+    const out = await git(
+      [
+        'rev-list',
+        `--branches=${INSTANCE_BRANCH_PREFIX}*`,
+        '--not',
+        'HEAD',
+        `--exclude=${INSTANCE_BRANCH_PREFIX}*`,
+        '--branches',
+        '--remotes',
+        '--tags'
+      ],
+      workspacePath,
+      READ_TIMEOUT_MS
+    )
+    return new Set(
+      out
+        .split(/\r?\n/)
+        .map((sha) => sha.trim())
+        .filter(Boolean)
+    )
+  } catch (err) {
+    logger.warn('instance branch reachability check failed; keeping unmerged until aged', {
+      scope: 'git',
+      workspacePath,
+      err
+    })
+    return null
+  }
+}
+
+/**
+ * Delete kept instance branches nothing will come back for. Exported for
+ * tests; the prune pass runs it after the checkout pass under the same mutex.
+ */
+export async function pruneStaleInstanceBranches(
+  workspacePath: string,
+  protectedRunIds: ReadonlySet<string>,
+  opts?: PruneInstanceWorktreesOpts
+): Promise<PruneInstanceBranchesSummary> {
+  return withGitWorktreeMutex(workspacePath, () =>
+    pruneStaleInstanceBranchesUnlocked(workspacePath, protectedRunIds, opts)
+  )
+}
+
+async function pruneStaleInstanceBranchesUnlocked(
+  workspacePath: string,
+  protectedRunIds: ReadonlySet<string>,
+  opts?: PruneInstanceWorktreesOpts
+): Promise<PruneInstanceBranchesSummary> {
+  // isGitRepo first: it is a stat, and it is what most workspaces fail.
+  if (!isGitRepo(workspacePath) || !(await gitAvailable())) {
+    return { ...EMPTY_BRANCH_PRUNE_SUMMARY }
+  }
+  const branches = await listInstanceBranches(workspacePath)
+  if (branches.length === 0) return { ...EMPTY_BRANCH_PRUNE_SUMMARY }
+
+  const now = opts?.nowFn ?? Date.now
+  const maxAgeMs = opts?.branchMaxAgeMs ?? INSTANCE_BRANCH_MAX_AGE_MS
+  const protectedBranches = new Set<string>()
+  for (const runId of protectedRunIds) protectedBranches.add(instanceWorktreeBranch(runId))
+  const checkedOut = checkedOutBranches(
+    await git(['worktree', 'list', '--porcelain'], workspacePath, READ_TIMEOUT_MS)
+  )
+  const unreachable = await unreachableInstanceTips(workspacePath)
+
+  const summary: PruneInstanceBranchesSummary = { ...EMPTY_BRANCH_PRUNE_SUMMARY }
+  const doomed: string[] = []
+  for (const branch of branches) {
+    const runId = branch.name.slice(INSTANCE_BRANCH_PREFIX.length)
+    if (
+      protectedBranches.has(branch.name) ||
+      pendingInstanceWorktrees.has(pendingWorktreeKey(workspacePath, runId))
+    ) {
+      summary.protected += 1
+      continue
+    }
+    if (checkedOut.has(branch.name)) {
+      summary.checkedOut += 1
+      continue
+    }
+    if (unreachable && !unreachable.has(branch.tip)) {
+      summary.merged += 1
+      doomed.push(branch.name)
+      continue
+    }
+    // An unparseable date is not evidence of age: keep, and say so in `kept`.
+    if (Number.isFinite(branch.committedAtMs) && now() - branch.committedAtMs >= maxAgeMs) {
+      summary.aged += 1
+      doomed.push(branch.name)
+      continue
+    }
+    summary.kept += 1
+  }
+
+  const deleted = await deleteInstanceBranchesBestEffort(workspacePath, doomed)
+  summary.failed = doomed.length - deleted
+  if (doomed.length > 0) {
+    logger.info('instance branch prune summary', {
+      scope: 'git',
+      workspacePath,
+      deleted,
+      merged: summary.merged,
+      aged: summary.aged,
+      kept: summary.kept,
+      protected: summary.protected,
+      checkedOut: summary.checkedOut,
+      failed: summary.failed,
+      maxAgeDays: Math.round(maxAgeMs / 86_400_000)
+    })
+  }
+  return summary
+}
+
+/** Batch `git branch -D`; returns how many of `branches` are gone afterwards. */
+async function deleteInstanceBranchesBestEffort(
+  workspacePath: string,
+  branches: readonly string[]
+): Promise<number> {
+  let deleted = 0
+  for (let i = 0; i < branches.length; i += INSTANCE_BRANCH_DELETE_CHUNK) {
+    const chunk = branches.slice(i, i + INSTANCE_BRANCH_DELETE_CHUNK)
+    try {
+      await git(['branch', '-D', ...chunk], workspacePath, WRITE_TIMEOUT_MS)
+      deleted += chunk.length
+    } catch {
+      // git deletes what it can and exits 1 for the rest. Retry one at a time
+      // so each failure is named and each success (or prior delete) counted.
+      for (const branch of chunk) {
+        if (await deleteInstanceBranchBestEffort(workspacePath, branch)) deleted += 1
+      }
+    }
+  }
+  return deleted
+}
+
+/** True when the branch is gone afterwards — deleted now, or already missing. */
 async function deleteInstanceBranchBestEffort(
   workspacePath: string,
   branch: string
-): Promise<void> {
-  if (!(await gitAvailable()) || !isGitRepo(workspacePath)) return
+): Promise<boolean> {
+  if (!(await gitAvailable()) || !isGitRepo(workspacePath)) return false
   try {
     await git(['branch', '-D', branch], workspacePath, WRITE_TIMEOUT_MS)
+    return true
   } catch (err) {
-    if (gitRefIsMissingError(err)) return
+    if (gitRefIsMissingError(err)) return true
     logger.warn('instance branch delete failed', {
       scope: 'git',
       branch,
       err
     })
+    return false
   }
 }
 

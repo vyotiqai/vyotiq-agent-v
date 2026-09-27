@@ -1415,9 +1415,10 @@ export async function patchLatestTodoWriteMessage(
  * it was just promised. Read from durable status rather than process-local
  * maps: at boot they are the only record that these runs exist.
  *
- * Callers build this BEFORE pruning; the branch survives either way
- * (interruptRunningRunOnDisk keeps it), but reusing an intact checkout avoids
- * recreating one from the branch.
+ * Callers build this BEFORE pruning. The same set guards the kept branch:
+ * interruptRunningRunOnDisk keeps it, and the branch pass of
+ * pruneStaleInstanceWorktrees skips every id here however old the branch is —
+ * a resumable run's branch is the work its resume comes back to.
  */
 export function collectProtectedInstanceRunIds(workspacePath: string): Set<string> {
   const protectedIds = new Set<string>()
@@ -1509,7 +1510,7 @@ function isRunStaleByAge(updatedAt: string, maxAgeMs: number): boolean {
 async function finalizeInlineInstanceWorktreeBestEffort(
   workspacePath: string,
   status: RunStatus,
-  opts?: { keepBranch?: boolean }
+  opts: { keepBranch: boolean }
 ): Promise<void> {
   if (!status.inlineInstance || !status.worktreePath) return
   if (!isSafeInstanceWorktreePath(workspacePath, status.worktreePath)) {
@@ -1521,7 +1522,7 @@ async function finalizeInlineInstanceWorktreeBestEffort(
   }
   try {
     await finalizeInstanceWorktree(workspacePath, status.worktreePath, {
-      keepBranch: opts?.keepBranch ?? status.status === 'done',
+      keepBranch: opts.keepBranch,
       branch: status.worktreeBranch
     })
   } catch (err) {
@@ -1716,7 +1717,11 @@ export async function deleteRun(
   }
 
   if (status?.inlineInstance && status.worktreePath) {
-    await finalizeInlineInstanceWorktreeBestEffort(workspacePath, status)
+    // The branch a done instance kept is reachable only through this run
+    // record (merge_agent_instance resolves it from the child's status), so it
+    // goes with the run. Anything that slips past here — a locked checkout,
+    // a run dir removed by hand — is aged out by pruneStaleInstanceWorktrees.
+    await finalizeInlineInstanceWorktreeBestEffort(workspacePath, status, { keepBranch: false })
   }
   await drainRunWritersBeforeDelete(dir)
   // M2: a chatStart can register this runId (tryRegisterRunAbort) during the
