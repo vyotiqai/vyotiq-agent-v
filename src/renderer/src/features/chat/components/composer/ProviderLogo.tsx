@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Icon } from '@renderer/lib/icons'
 import { cn } from '@renderer/lib/ui/cn'
 import { useDocumentTheme } from '@renderer/lib/ui/useDocumentTheme'
-import type { ProviderId } from '@shared/ipc'
+import { isCustomProviderId, type ProviderIdAny } from '@shared/ipc'
 import {
   getCachedProviderBrand,
   loadProviderBrand,
@@ -12,7 +12,7 @@ import {
 } from './providerBrandPaths'
 import { resolveProviderBrandColor } from './providerBrandColor'
 
-export type ProviderLogoId = ProviderId | string
+export type ProviderLogoId = ProviderIdAny | string
 
 const SIZE = { xs: 12, sm: 16, md: 20, lg: 24 } as const
 
@@ -126,7 +126,7 @@ export function ProviderLogo({
   const providerSlug = resolveProviderBrandSlug(String(id))
   const slug = subSlug ?? providerSlug
 
-  if (!subProvider && id === 'custom') {
+  if (!subProvider && (id === 'custom' || isCustomProviderId(String(id)))) {
     return (
       <Icon name="mcp" size={px} className={cn('shrink-0', tone === 'brand' ? 'text-secondary' : '', className)} />
     )

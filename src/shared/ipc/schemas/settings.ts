@@ -14,7 +14,7 @@ import {
 import type { ThemeId } from '../../theme'
 import {
   DEFAULT_THINKING_EFFORT,
-  ProviderIdSchema,
+  ProviderIdSchemaAny,
   ServiceTierSchema,
   ThinkingEffortSchema,
   customProviderId,
@@ -445,9 +445,41 @@ export const CustomProviderSchema = z.object({
 })
 export type CustomProvider = z.infer<typeof CustomProviderSchema>
 
-/** Slug of the entry seeded from the legacy single-provider field. */
+/**
+ * Slug of the entry 1.0 builds seeded from the legacy single-provider field.
+ * Reserved: new endpoints never get it, so dropLegacyCustomProviderSeed can
+ * tell the seed apart from an endpoint the user added.
+ */
 export const DEFAULT_CUSTOM_PROVIDER_SLUG = 'default'
 export const DEFAULT_CUSTOM_PROVIDER_ID = customProviderId(DEFAULT_CUSTOM_PROVIDER_SLUG)
+
+/** Max saved custom endpoints; the picker and Settings list stay scannable. */
+export const MAX_CUSTOM_PROVIDERS = 20
+
+/**
+ * A fresh `custom:<slug>` id for an endpoint named `name`: lowercase, hyphenated,
+ * unique against `taken` (ids or slugs), never the reserved seed slug.
+ */
+export function newCustomProviderId(
+  name: string,
+  taken: Iterable<string>
+): ReturnType<typeof customProviderId> {
+  const used = new Set<string>()
+  for (const id of taken) used.add(customProviderSlug(id) ?? id)
+  used.add(DEFAULT_CUSTOM_PROVIDER_SLUG)
+  const base =
+    name
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 32)
+      .replace(/-+$/, '') || 'endpoint'
+  let slug = base
+  for (let n = 2; used.has(slug); n++) slug = `${base}-${n}`
+  return customProviderId(slug)
+}
 
 /**
  * Dedupe custom provider rows: first entry wins per id slug AND per
@@ -477,44 +509,37 @@ export function normalizeCustomProviders(
 }
 
 /**
- * One-time legacy migration: seed a single `custom:default` entry from the
- * pre-multi-provider `customOpenAiBaseUrl` field when it differs from the
- * product default. A persisted list (even empty) prevents re-seeding, and the
- * legacy field is kept intact so nothing is lost on downgrade/rollback.
+ * Drop the `custom:default` entry 1.0 builds seeded from the legacy
+ * `customOpenAiBaseUrl` field. It was never selectable, carried no key, and
+ * copies the builtin Custom provider's URL — shown next to that provider it
+ * would read as a duplicate, and its URL would block adding the same host.
+ * Only the exact seed shape is dropped (reserved slug, seed name, same URL).
  */
-export function seedCustomProvidersFromLegacy(
-  raw: Record<string, unknown>
-): { data: Record<string, unknown>; seeded: boolean } {
-  if (Array.isArray(raw.customProviders)) {
-    // A persisted list already exists (possibly seeded by an earlier load) —
-    // never re-seed over it.
-    return { data: raw, seeded: false }
-  }
-  const legacy =
-    typeof raw.customOpenAiBaseUrl === 'string' ? raw.customOpenAiBaseUrl : undefined
-  if (
-    !legacy?.trim() ||
-    normalizeCustomOpenAiBaseUrl(legacy) === normalizeCustomOpenAiBaseUrl(CUSTOM_OPENAI_DEFAULT)
-  ) {
-    return { data: raw, seeded: false }
-  }
-  const seeded = normalizeCustomProviders([
-    { id: DEFAULT_CUSTOM_PROVIDER_ID, name: 'Custom', baseUrl: legacy.trim() }
-  ])
-  if (!seeded.length) return { data: raw, seeded: false }
-  return { data: { ...raw, customProviders: seeded }, seeded: true }
+export function dropLegacyCustomProviderSeed(
+  list: readonly CustomProvider[],
+  legacyBaseUrl: string | undefined
+): CustomProvider[] {
+  const legacy = normalizeCustomOpenAiBaseUrl(legacyBaseUrl ?? CUSTOM_OPENAI_DEFAULT)
+  return list.filter(
+    (entry) =>
+      !(
+        entry.id === DEFAULT_CUSTOM_PROVIDER_ID &&
+        entry.name === 'Custom' &&
+        normalizeCustomOpenAiBaseUrl(entry.baseUrl) === legacy
+      )
+  )
 }
 
 export const SettingsSchema = z.object({
-  provider: ProviderIdSchema,
+  provider: ProviderIdSchemaAny,
   model: z.string().min(1),
   ollamaBaseUrl: z.string().min(1),
   /** OpenAI-compatible base URL for the `custom` provider (must end with `/v1`). */
   customOpenAiBaseUrl: z.string().min(1).default('http://127.0.0.1:8080/v1'),
   /**
-   * User-defined OpenAI-compatible providers (`custom:<slug>` ids). Global;
-   * deduped on load via normalizeCustomProviders, seeded once from the legacy
-   * single-provider field by seedCustomProvidersFromLegacy.
+   * User-added OpenAI-compatible endpoints (`custom:<slug>` ids), each with
+   * its own key. Global; deduped on load via normalizeCustomProviders. The
+   * builtin `custom` provider and `customOpenAiBaseUrl` stay alongside them.
    */
   customProviders: z.array(CustomProviderSchema).default([]),
   theme: ThemeIdSchema,
@@ -553,7 +578,7 @@ export const SettingsSchema = z.object({
   /** Session keys (`${workspacePath}␀${runId}`) pinned above the Home recency list. */
   pinnedRuns: z.array(z.string()).max(24).default([]),
   recentModels: z.array(z.string()).max(5).default([]),
-  thinkingPrefsByProvider: z.partialRecord(ProviderIdSchema, ThinkingPrefsSchema).default({}),
+  thinkingPrefsByProvider: z.partialRecord(ProviderIdSchemaAny, ThinkingPrefsSchema).default({}),
   serviceTierByModel: z.record(z.string(), ServiceTierSchema).default({}),
   serviceTier: ServiceTierSchema.default('default'),
   toolApproval: ToolApprovalSettingsSchema.default(DEFAULT_TOOL_APPROVAL),

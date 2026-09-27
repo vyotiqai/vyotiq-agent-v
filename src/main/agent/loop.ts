@@ -5,8 +5,10 @@ import type {
   ChatMessage,
   IncompleteReason,
   ModelInfo,
-  ProviderId
+  ProviderId,
+  ProviderIdAny
 } from '../../shared/ipc'
+import { catalogProviderId } from '../../shared/ipc'
 import { DEFAULT_SETTINGS } from '../../shared/ipc'
 import { contentDisplayText, contentToText } from '../../shared/ipc'
 import { runGoalFromUserText, findAbsolutePathsInText, outsideWorkspacePathGuidance, stubPastSkillInvocationsInMessages } from '../../shared/slashCommands'
@@ -963,7 +965,7 @@ async function reconstructStreamSnapshotAssistant(
   appendEvent(runDir, { type: 'assistant_message', runId, content: snapshot })
 }
 
-export type ProviderModelPair = { provider: ProviderId; model: string }
+export type ProviderModelPair = { provider: ProviderIdAny; model: string }
 
 /**
  * Which provider/model a turn runs on.
@@ -1001,7 +1003,7 @@ export type RunAgentInput = {
   mode?: AgentInteractionMode
   focusedFile?: string | null
   /** Session-pinned provider — authoritative for this invoke. */
-  provider?: ProviderId
+  provider?: ProviderIdAny
   /** Session-pinned model — authoritative for this invoke. */
   model?: string
   /** A new task's done-when checks, from its brief — written when the run is created. */
@@ -1421,21 +1423,26 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     })
 
     const harness = loadHarness(workspace)
-    const providerId: ProviderId = settings.provider
-    const provider = getProvider(providerId)
-    costLogProvider = providerId
+    // The endpoint this run talks to (a `custom:<slug>` id for a user-added
+    // one) picks the key, base URL and catalog; `providerId` is the adapter
+    // whose request shaping and heuristics apply to it.
+    const runProviderId: ProviderIdAny = settings.provider
+    const providerId: ProviderId = catalogProviderId(runProviderId)
+    const provider = getProvider(runProviderId)
+    costLogProvider = runProviderId
     costLogModel = settings.model
     // Published price for cost estimation; null when unpriceable (custom
     // endpoints, unknown models) — those runs show tokens, never a fake cost.
-    const runModelPrice = resolveModelPrice(providerId, settings.model)
+    const runModelPrice = resolveModelPrice(runProviderId, settings.model)
 
-    let apiKey: string | null = getSecret(providerId)
-    const baseUrl = resolveProviderChatBaseUrl(providerId, settings, apiKey)
+    let apiKey: string | null = getSecret(runProviderId)
+    const baseUrl = resolveProviderChatBaseUrl(runProviderId, settings, apiKey)
     {
       const status = secretStatus()
-      const storedBlob = hasStoredSecretBlob(providerId)
+      const storedBlob = hasStoredSecretBlob(runProviderId)
       const preflight = preflightChatProviderAuth({
-        providerId,
+        providerId: runProviderId,
+        customProviders: settings.customProviders,
         apiKey,
         baseUrl: baseUrl ?? settings.ollamaBaseUrl,
         encryptionAvailable: status.encryptionAvailable,
@@ -1621,7 +1628,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
     }
 
     const modelInfo = await resolveModelInfo(
-      providerId,
+      runProviderId,
       settings.model,
       apiKey,
       baseUrl,
@@ -2507,7 +2514,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
       const promptPrefixHash = promptPrefixFingerprint(toolDefs, assembled.systemStable)
 
       const streamRetryResult = yield* runWithStreamRetryGen({
-        circuitKey: circuitKeyProvider(providerId, baseUrl),
+        circuitKey: circuitKeyProvider(runProviderId, baseUrl),
         onAttemptStart: function* (attempt) {
           // Any prior attempt may have streamed text, thinking, or tool deltas —
           // tell the UI to drop all of it before the retry starts clean.
@@ -2552,7 +2559,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             scope: 'agent',
             code: 'PROVIDER_STREAM',
             correlationId: runId,
-            provider: providerId,
+            provider: runProviderId,
             step,
             attempt,
             err
@@ -2805,7 +2812,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 // Attribution for offline analysis: events.jsonl is the only
                 // per-step record, and the run-level receipt carries whichever
                 // model the LAST invoke of this run used.
-                provider: providerId,
+                provider: runProviderId,
                 model: settings.model,
                 prefixHash: promptPrefixHash,
                 inputTokens: chunk.usage.inputTokens,
@@ -2849,7 +2856,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               logger.info('Token cost step', {
                 scope: 'agent',
                 correlationId: runId,
-                provider: providerId,
+                provider: runProviderId,
                 model: settings.model,
                 step,
                 inputTokens: chunk.usage.inputTokens,
@@ -2926,7 +2933,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 logger.info('Prompt cache', {
                   scope: 'agent',
                   correlationId: runId,
-                  provider: providerId,
+                  provider: runProviderId,
                   step,
                   cachedInputTokens: chunk.usage.cachedInputTokens,
                   cacheCreationInputTokens: chunk.usage.cacheCreationInputTokens,
@@ -2965,7 +2972,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 scope: 'agent',
                 code: errorCode,
                 correlationId: runId,
-                provider: providerId,
+                provider: runProviderId,
                 step,
                 attempt
               })
@@ -2978,7 +2985,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
                 scope: 'agent',
                 code: errorCode,
                 correlationId: runId,
-                provider: providerId,
+                provider: runProviderId,
                 step,
                 attempt
               })
@@ -2988,7 +2995,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               scope: 'agent',
               code: errorCode,
               correlationId: runId,
-              provider: providerId,
+              provider: runProviderId,
               step,
               providerMessage: message.slice(0, 280)
             })
@@ -3060,7 +3067,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               scope: 'agent',
               code: 'PROVIDER_TIMEOUT',
               correlationId: runId,
-              provider: providerId,
+              provider: runProviderId,
               step,
               idleMs: err.idleMs,
               attempt
@@ -3144,7 +3151,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           scope: 'agent',
           code: errorCode,
           correlationId: runId,
-          provider: providerId,
+          provider: runProviderId,
           step,
           networkRelated
         })
@@ -3546,7 +3553,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
               scope: 'agent',
               code: 'AGENT_INCOMPLETE',
               correlationId: runId,
-              provider: providerId,
+              provider: runProviderId,
               step,
               stopReason: stepStopReason ?? 'unset'
             }

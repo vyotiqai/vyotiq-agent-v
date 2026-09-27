@@ -1,4 +1,4 @@
-import type { ChatMessage, ProviderId } from '../../../shared/ipc'
+import type { ChatMessage, ProviderIdAny } from '../../../shared/ipc'
 import type { ThinkingConfig, ThinkingEffort } from '../../../shared/domain/reasoning'
 import {
   providerLabel,
@@ -29,7 +29,7 @@ import type { ArcCandidate, ArcExample, ArcGrid, ArcTask } from './types'
 
 export interface SolveTaskOptions {
   /** Override the configured chat provider (defaults to settings). */
-  provider?: ProviderId
+  provider?: ProviderIdAny
   /** Override the configured chat model (defaults to settings). */
   model?: string
   /** Cancellation signal for the whole solve. */
@@ -207,7 +207,7 @@ export function extractFirstGrid(text: string): ArcGrid | null {
 }
 
 interface ChatConfig {
-  provider: ProviderId
+  provider: ProviderIdAny
   model: string
   apiKey: string | null
   baseUrl?: string

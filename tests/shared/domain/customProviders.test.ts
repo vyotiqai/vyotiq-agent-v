@@ -5,8 +5,10 @@ import {
   DEFAULT_CUSTOM_PROVIDER_SLUG,
   DEFAULT_SETTINGS,
   SettingsSchema,
-  normalizeCustomProviders,
-  seedCustomProvidersFromLegacy
+  MAX_CUSTOM_PROVIDERS,
+  dropLegacyCustomProviderSeed,
+  newCustomProviderId,
+  normalizeCustomProviders
 } from '@shared/ipc/schemas/settings'
 import {
   CustomProviderIdSchema,
@@ -17,6 +19,7 @@ import {
 } from '@shared/ipc/schemas/providers'
 import { modelSelectionKey, parseModelSelectionKey } from '@shared/domain/modelSelection'
 import type { ProviderId } from '@shared/ipc/schemas/providers'
+import type { CustomProvider } from '@shared/ipc'
 
 describe('custom provider id schema', () => {
   it('accepts builtin ids and rejects unknown strings on the builtin enum', () => {
@@ -134,62 +137,64 @@ describe('normalizeCustomProviders', () => {
   })
 })
 
-describe('seedCustomProvidersFromLegacy', () => {
-  it('seeds custom:default from a non-default legacy base URL and keeps other data', () => {
-    const raw = {
-      customOpenAiBaseUrl: 'https://api.deepinfra.com/v1/openai',
-      model: 'deepseek/deepseek-chat',
-      theme: 'dark'
+describe('dropLegacyCustomProviderSeed', () => {
+  // Earlier builds copied the builtin Custom URL into a `custom:default`
+  // entry, so the same endpoint showed twice. Load drops that copy only.
+  const seeded: CustomProvider = {
+    id: 'custom:default',
+    name: 'Custom',
+    baseUrl: 'https://api.deepinfra.com/v1/openai'
+  }
+
+  it('drops the untouched seeded copy of the builtin Custom endpoint', () => {
+    expect(dropLegacyCustomProviderSeed([seeded], 'https://api.deepinfra.com/v1/openai/')).toEqual([])
+  })
+
+  it('keeps it once renamed or pointed elsewhere', () => {
+    const renamed = { ...seeded, name: 'DeepInfra' }
+    const moved = { ...seeded, baseUrl: 'https://other.example.com/v1' }
+    expect(dropLegacyCustomProviderSeed([renamed], seeded.baseUrl)).toEqual([renamed])
+    expect(dropLegacyCustomProviderSeed([moved], seeded.baseUrl)).toEqual([moved])
+  })
+
+  it('never touches user-added ids', () => {
+    const lan: CustomProvider = { id: 'custom:lan', name: 'Custom', baseUrl: seeded.baseUrl }
+    expect(dropLegacyCustomProviderSeed([lan], seeded.baseUrl)).toEqual([lan])
+  })
+
+  it('compares against the product default when the legacy field is unset', () => {
+    const local = { ...seeded, baseUrl: 'http://127.0.0.1:8080/v1' }
+    expect(dropLegacyCustomProviderSeed([local], undefined)).toEqual([])
+  })
+})
+
+describe('newCustomProviderId', () => {
+  it('slugs the name', () => {
+    expect(newCustomProviderId('Lab vLLM', [])).toBe('custom:lab-vllm')
+    expect(newCustomProviderId('  Café Server!! ', [])).toBe('custom:cafe-server')
+  })
+
+  it('suffixes a taken slug and reserves the legacy default', () => {
+    expect(newCustomProviderId('Lab', ['custom:lab'])).toBe('custom:lab-2')
+    expect(newCustomProviderId('Lab', ['custom:lab', 'custom:lab-2'])).toBe('custom:lab-3')
+    expect(newCustomProviderId('Default', [])).toBe('custom:default-2')
+  })
+
+  it('falls back when the name has no slug characters, and caps the length', () => {
+    expect(newCustomProviderId('！！', [])).toBe('custom:endpoint')
+    const long = newCustomProviderId('x'.repeat(100), [])
+    expect(CustomProviderIdSchema.safeParse(long).success).toBe(true)
+    expect(long.length).toBe('custom:'.length + 32)
+  })
+
+  it('always yields a valid id', () => {
+    for (const name of ['a', 'A-B_C', '---', '日本語', 'x'.repeat(31) + ' y']) {
+      expect(CustomProviderIdSchema.safeParse(newCustomProviderId(name, [])).success).toBe(true)
     }
-    const out = seedCustomProvidersFromLegacy(raw)
-    expect(out.seeded).toBe(true)
-    expect(out.data.customProviders).toEqual([
-      {
-        id: 'custom:default',
-        name: 'Custom',
-        baseUrl: 'https://api.deepinfra.com/v1/openai'
-      }
-    ])
-    // Legacy field and unrelated settings survive untouched.
-    expect(out.data.customOpenAiBaseUrl).toBe('https://api.deepinfra.com/v1/openai')
-    expect(out.data.model).toBe('deepseek/deepseek-chat')
-    expect(out.data.theme).toBe('dark')
   })
 
-  it('does not seed from the product default or a missing legacy field', () => {
-    expect(seedCustomProvidersFromLegacy({ customOpenAiBaseUrl: 'http://127.0.0.1:8080/v1' }).seeded).toBe(false)
-    expect(seedCustomProvidersFromLegacy({}).seeded).toBe(false)
-    expect(seedCustomProvidersFromLegacy({ customOpenAiBaseUrl: '   ' }).seeded).toBe(false)
-  })
-
-  it('never re-seeds once a persisted list exists (even empty)', () => {
-    expect(
-      seedCustomProvidersFromLegacy({
-        customOpenAiBaseUrl: 'https://api.deepinfra.com/v1',
-        customProviders: []
-      }).seeded
-    ).toBe(false)
-    expect(
-      seedCustomProvidersFromLegacy({
-        customOpenAiBaseUrl: 'https://api.deepinfra.com/v1',
-        customProviders: [{ id: 'custom:other', name: 'Other', baseUrl: 'https://other/v1' }]
-      }).seeded
-    ).toBe(false)
-  })
-
-  it('seeds through parse once and survives a reload unchanged', () => {
-    const first = seedCustomProvidersFromLegacy({
-      customOpenAiBaseUrl: 'https://api.deepinfra.com/v1'
-    })
-    expect(first.seeded).toBe(true)
-    const parsed = SettingsSchema.parse({ ...DEFAULT_SETTINGS, ...first.data })
-    expect(parsed.customProviders).toHaveLength(1)
-    // Second load: the persisted list prevents re-seeding.
-    const second = seedCustomProvidersFromLegacy({
-      customOpenAiBaseUrl: 'https://api.deepinfra.com/v1',
-      customProviders: parsed.customProviders
-    })
-    expect(second.seeded).toBe(false)
+  it('caps the list at a documented size', () => {
+    expect(MAX_CUSTOM_PROVIDERS).toBe(20)
   })
 })
 

@@ -22,19 +22,27 @@ export function ModelReadinessBanner({
   const title =
     issue.kind === 'missing_key'
       ? `Add an API key for ${issue.label}`
-      : issue.kind === 'unreachable'
-        ? `${issue.label} isn’t ready`
-        : `${issue.label}: no model list`
+      : issue.kind === 'removed_endpoint'
+        ? 'This task’s custom endpoint was removed'
+        : issue.kind === 'unreachable'
+          ? `${issue.label} isn’t ready`
+          : `${issue.label}: no model list`
 
   const body =
     issue.kind === 'missing_key'
       ? 'Keys stay encrypted on this device.'
-      : issue.detail
+      : issue.kind === 'removed_endpoint'
+        ? 'Pick another model, or add the endpoint again in Settings.'
+        : issue.detail
 
   const actions =
     issue.kind === 'missing_key' ? (
       <Button size="sm" variant={lead} onClick={onAddKey}>
         Add API key
+      </Button>
+    ) : issue.kind === 'removed_endpoint' ? (
+      <Button size="sm" variant={lead} onClick={onAddKey}>
+        Open Providers
       </Button>
     ) : issue.kind === 'unreachable' ? (
       <>

@@ -1,11 +1,16 @@
-import type { ProviderId } from '../../../shared/ipc'
+import {
+  isCustomProviderId,
+  type CustomProvider,
+  type ProviderIdAny
+} from '../../../shared/ipc'
 import {
   isOllamaCloudHost,
+  providerLabel,
   providerNeedsKey
 } from '../../../shared/domain/providers'
 
 export type ProviderPreflightFailure = {
-  code: 'PROVIDER_AUTH' | 'PROVIDER_KEYCHAIN' | 'PROVIDER_KEY_DECRYPT'
+  code: 'PROVIDER_AUTH' | 'PROVIDER_KEYCHAIN' | 'PROVIDER_KEY_DECRYPT' | 'SETTINGS'
   message: string
 }
 
@@ -14,14 +19,29 @@ export type ProviderPreflightFailure = {
  * Does not hit the network — invalid-but-present keys still fail at request time.
  */
 export function preflightChatProviderAuth(opts: {
-  providerId: ProviderId
+  providerId: ProviderIdAny
+  /** Saved custom endpoints; a `custom:<slug>` id must name one of them. */
+  customProviders?: readonly CustomProvider[]
   apiKey: string | null
   baseUrl: string | null | undefined
   encryptionAvailable: boolean
   hasStoredBlob: boolean
 }): ProviderPreflightFailure | null {
   const { providerId, apiKey, baseUrl, encryptionAvailable, hasStoredBlob } = opts
+  // A chat or workspace can still name an endpoint removed from Settings since.
+  // Its base URL no longer resolves, so sending would reach some other host.
+  if (
+    isCustomProviderId(providerId) &&
+    !opts.customProviders?.some((entry) => entry.id === providerId)
+  ) {
+    return {
+      code: 'SETTINGS',
+      message:
+        'The custom endpoint this task uses was removed from Settings → Providers. Pick another model.'
+    }
+  }
   if (!providerNeedsKey(providerId, baseUrl ?? undefined)) return null
+  const label = providerLabel(providerId, opts.customProviders)
   if (apiKey?.trim()) return null
 
   if (!encryptionAvailable) {
@@ -34,7 +54,7 @@ export function preflightChatProviderAuth(opts: {
   if (hasStoredBlob) {
     return {
       code: 'PROVIDER_KEY_DECRYPT',
-      message: `API key for ${providerId} is stored but cannot be decrypted. Re-enter it in Settings → Providers or restore OS keychain access.`
+      message: `API key for ${label} is stored but cannot be decrypted. Re-enter it in Settings → Providers or restore OS keychain access.`
     }
   }
   if (providerId === 'ollama' && isOllamaCloudHost(baseUrl ?? '')) {
@@ -46,6 +66,6 @@ export function preflightChatProviderAuth(opts: {
   }
   return {
     code: 'PROVIDER_AUTH',
-    message: `API key for ${providerId} is not set. Add it in Settings → Providers.`
+    message: `API key for ${label} is not set. Add it in Settings → Providers.`
   }
 }

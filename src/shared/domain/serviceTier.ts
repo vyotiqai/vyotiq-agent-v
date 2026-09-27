@@ -1,4 +1,4 @@
-import type { ProviderId } from '../ipc'
+import type { ProviderIdAny } from '../ipc'
 import { ServiceTierSchema, type ServiceTier } from '../ipc/schemas/providers'
 
 export { ServiceTierSchema, type ServiceTier }
@@ -12,7 +12,7 @@ export function normalizeModelIdForHeuristics(id: string): string {
 /** Infer supported API service tiers for a model. */
 export function inferSupportedServiceTiers(
   id: string,
-  providerId?: ProviderId,
+  providerId?: ProviderIdAny,
   supportedParameters?: string[]
 ): ServiceTier[] {
   if (Array.isArray(supportedParameters) && supportedParameters.includes('service_tier')) {

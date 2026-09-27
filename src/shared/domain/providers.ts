@@ -497,7 +497,7 @@ export type ProviderConfiguredOpts = {
 }
 
 export type ListConfiguredProvidersOpts = ProviderConfiguredOpts & {
-  alwaysInclude?: ProviderId[]
+  alwaysInclude?: ProviderIdAny[]
 }
 
 function resolveProviderBaseUrlForKey(
@@ -522,20 +522,32 @@ export function isProviderConfigured(
   secrets: Record<string, boolean>,
   opts?: ProviderConfiguredOpts
 ): boolean {
+  // A custom endpoint exists only while its entry does; a leftover id (a
+  // removed endpoint still named by a chat) is never ready to send.
+  if (isCustomProviderId(provider) && !opts?.customProviders?.some((e) => e.id === provider)) {
+    return false
+  }
   if (secrets[provider]) return true
   const baseUrl = resolveProviderBaseUrlForKey(provider, opts)
   return !providerNeedsKey(provider, baseUrl)
 }
 
-/** Provider ids that are configured, preserving catalog order. */
+/**
+ * Provider ids that are configured: the builtin catalog in order, then each
+ * saved custom endpoint in the order it was added.
+ */
 export function listConfiguredProviders(
   secrets: Record<string, boolean>,
   opts?: ListConfiguredProvidersOpts
-): ProviderId[] {
+): ProviderIdAny[] {
   const include = new Set(opts?.alwaysInclude ?? [])
-  const configured = PROVIDER_DEFAULTS.filter(
-    (entry) => isProviderConfigured(entry.id, secrets, opts) || include.has(entry.id)
-  ).map((entry) => entry.id)
+  const all: ProviderIdAny[] = [
+    ...PROVIDER_DEFAULTS.map((entry) => entry.id),
+    ...(opts?.customProviders ?? []).map((entry) => entry.id)
+  ]
+  const configured = all.filter(
+    (id) => isProviderConfigured(id, secrets, opts) || include.has(id)
+  )
   for (const id of include) {
     if (!configured.includes(id)) configured.push(id)
   }
@@ -546,7 +558,7 @@ export function listConfiguredProviders(
 export function providerOptionsForConfigured(
   secrets: Record<string, boolean>,
   opts?: ListConfiguredProvidersOpts
-): { value: ProviderId; label: string }[] {
+): { value: ProviderIdAny; label: string }[] {
   return listConfiguredProviders(secrets, opts).map((id) => ({
     value: id,
     label: providerLabel(id, opts?.customProviders)

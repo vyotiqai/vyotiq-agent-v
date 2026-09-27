@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { AgentInteractionModeSchema } from './settings'
-import { ProviderIdSchema } from './providers'
+import { ProviderIdSchemaAny } from './providers'
 
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 export const MAX_IMAGE_DATA_URL_CHARS = Math.ceil(MAX_IMAGE_BYTES * (4 / 3)) + 128
@@ -806,7 +806,7 @@ export const ChatStartRequestSchema = z
     /** Ask / Plan / Agent — authoritative for this invoke. */
     mode: AgentInteractionModeSchema.optional(),
     /** Session's pinned provider — authoritative for this invoke. */
-    provider: ProviderIdSchema.optional(),
+    provider: ProviderIdSchemaAny.optional(),
     /** Session's pinned model — authoritative for this invoke. */
     model: z.string().min(1).optional(),
     /**
@@ -879,7 +879,7 @@ export const ChatRewindAndStartRequestSchema = z.object({
     message: 'editedUserMessage must be a user message'
   }),
   mode: AgentInteractionModeSchema.optional(),
-  provider: ProviderIdSchema.optional(),
+  provider: ProviderIdSchemaAny.optional(),
   model: z.string().min(1).optional()
 })
 export type ChatRewindAndStartRequest = z.infer<typeof ChatRewindAndStartRequestSchema>

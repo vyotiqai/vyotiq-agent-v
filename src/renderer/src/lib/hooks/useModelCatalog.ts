@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import type { ProviderId } from '@shared/ipc'
+import type { ProviderIdAny } from '@shared/ipc'
 import type { ListModelsResult } from '@shared/ipc/schemas/providers'
 
 type ProviderBaseUrls = {
@@ -9,13 +9,13 @@ type ProviderBaseUrls = {
 
 type RefreshOptions = {
   forceRefresh?: boolean
-  provider?: ProviderId
+  provider?: ProviderIdAny
   ollamaBaseUrl?: string
   customOpenAiBaseUrl?: string
 }
 
 export function useModelCatalog(
-  provider: ProviderId,
+  provider: ProviderIdAny,
   baseUrls?: ProviderBaseUrls | string,
   _apiKey?: string | null,
   _enabled = true

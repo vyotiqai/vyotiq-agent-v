@@ -640,6 +640,120 @@ describe('settings', () => {
     expect(screen.queryByText(/still the local default/i)).toBeNull()
   })
 
+  describe('custom endpoints', () => {
+    const lab = {
+      id: 'custom:lab' as const,
+      name: 'Lab vLLM',
+      baseUrl: 'http://192.168.1.20:8000/v1'
+    }
+    const infra = {
+      id: 'custom:infra' as const,
+      name: 'DeepInfra',
+      baseUrl: 'https://api.deepinfra.com/v1/openai'
+    }
+
+    function renderProviders(
+      settings: Partial<Settings>,
+      onUpdate = vi.fn(async (_patch: Partial<Settings>) => ({ ok: true as const }))
+    ) {
+      render(
+        <SettingsView
+          settings={{ ...baseSettings, ...settings }}
+          secrets={emptySecrets}
+          section="providers"
+          onClose={vi.fn()}
+          onUpdate={onUpdate}
+          onSaveSecret={vi.fn(async () => ({ ok: true as const }))}
+          onClearSecret={vi.fn(async () => ({ ok: true as const }))}
+        />
+      )
+      return onUpdate
+    }
+
+    const group = (id: string): HTMLElement =>
+      document.querySelector(`[data-settings-field="${id}"]`) as HTMLElement
+    const rowButtons = (el: HTMLElement): string[] =>
+      within(el)
+        .getAllByRole('button', { name: /^(Manage|Add key for) / })
+        .map((b) => b.getAttribute('aria-label') ?? '')
+
+    it('lists the builtin Custom row first, then saved endpoints, apart from API keys', () => {
+      renderProviders({ customProviders: [lab, infra] })
+      const endpoints = group('custom-endpoints')
+      expect(rowButtons(endpoints)).toEqual([
+        'Manage Custom OpenAI-compatible',
+        'Manage Lab vLLM',
+        'Add key for DeepInfra'
+      ])
+      expect(endpoints.textContent).toContain('192.168.1.20:8000')
+      expect(rowButtons(group('api-keys'))).not.toContain('Manage Custom OpenAI-compatible')
+    })
+
+    it('adds an endpoint with a slugged id', async () => {
+      const onUpdate = renderProviders({ customProviders: [lab] })
+      fireEvent.click(screen.getByRole('button', { name: /Add endpoint/ }))
+      fireEvent.change(screen.getByLabelText('New endpoint name'), {
+        target: { value: 'Home GPU' }
+      })
+      fireEvent.change(screen.getByLabelText('New endpoint base URL'), {
+        target: { value: 'http://10.0.0.5:8080/v1' }
+      })
+      fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
+      await waitFor(() =>
+        expect(onUpdate).toHaveBeenCalledWith({
+          customProviders: [
+            lab,
+            { id: 'custom:home-gpu', name: 'Home GPU', baseUrl: 'http://10.0.0.5:8080/v1' }
+          ]
+        })
+      )
+    })
+
+    it('refuses a blank name or a URL another endpoint already uses', () => {
+      const onUpdate = renderProviders({ customProviders: [lab] })
+      fireEvent.click(screen.getByRole('button', { name: /Add endpoint/ }))
+      fireEvent.change(screen.getByLabelText('New endpoint base URL'), {
+        target: { value: `${lab.baseUrl}/` }
+      })
+      fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
+      expect(screen.getByText('Name the endpoint.')).toBeTruthy()
+      expect(screen.getByText('Lab vLLM already uses this URL.')).toBeTruthy()
+      expect(onUpdate).not.toHaveBeenCalled()
+    })
+
+    it('renames an endpoint on blur', async () => {
+      const onUpdate = renderProviders({ customProviders: [lab] })
+      fireEvent.click(screen.getByRole('button', { name: 'Manage Lab vLLM' }))
+      const name = screen.getByLabelText('Endpoint name')
+      fireEvent.change(name, { target: { value: 'Lab box' } })
+      fireEvent.blur(name)
+      await waitFor(() =>
+        expect(onUpdate).toHaveBeenCalledWith({
+          customProviders: [{ ...lab, name: 'Lab box' }]
+        })
+      )
+    })
+
+    it('removes an endpoint only after confirming', async () => {
+      const onUpdate = renderProviders({ customProviders: [lab, infra] })
+      fireEvent.click(screen.getByRole('button', { name: 'Manage Lab vLLM' }))
+      fireEvent.click(screen.getByRole('button', { name: /^Remove$/ }))
+      expect(onUpdate).not.toHaveBeenCalled()
+      expect(screen.getByText(/Remove Lab vLLM\?/)).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: /^Remove$/ }))
+      await waitFor(() =>
+        expect(onUpdate).toHaveBeenCalledWith({ customProviders: [infra] })
+      )
+    })
+
+    it('does not offer Remove for the endpoint in use', () => {
+      renderProviders({ customProviders: [lab], provider: 'custom:lab', model: 'qwen' })
+      fireEvent.click(screen.getByRole('button', { name: 'Manage Lab vLLM' }))
+      const remove = screen.getByRole('button', { name: /^Remove$/ }) as HTMLButtonElement
+      expect(remove.disabled).toBe(true)
+    })
+  })
+
   it('the Model row picks the app-wide model from the provider list', async () => {
     const model = (id: string) => ({
       id,
@@ -765,8 +879,9 @@ describe('settings', () => {
       />
     )
     openSection('Providers')
-    // modal left SECRET_PROVIDERS (12 → 11) when the Modal provider was removed.
-    expect(screen.getByText(/1 of 11 saved/i)).toBeTruthy()
+    // The builtin Custom row lives under Custom endpoints, so API keys counts
+    // the other ten.
+    expect(screen.getByText(/1 of 10 saved/i)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /^Refresh the .+ model list$/ }))
     expect(
       await screen.findByText(/seed models for Ollama.*Cannot reach Ollama/i)

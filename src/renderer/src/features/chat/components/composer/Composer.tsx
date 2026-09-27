@@ -12,7 +12,7 @@ import type {
   AttachedFile,
   AttachedNativeFile,
   ComposerSendExtras,
-  ProviderId,
+  ProviderIdAny,
   SecretProvider,
   ServiceTier,
   SlashCommandDescriptor
@@ -212,7 +212,7 @@ export function Composer({
   briefHeaderActions,
   taskFiles
 }: {
-  provider: ProviderId
+  provider: ProviderIdAny
   model: string
   running: boolean
   disabled?: boolean
@@ -227,11 +227,11 @@ export function Composer({
   onDraftChange?: (draft: string) => void
   /** When set, draft is read from the hot UI store (avoids App re-renders on keystrokes). */
   workspacePath?: string | null
-  onProviderModel: (provider: ProviderId, model: string) => void
+  onProviderModel: (provider: ProviderIdAny, model: string) => void
   favoriteModels?: string[]
   recentModels?: string[]
   serviceTier?: ServiceTier
-  onToggleFavorite?: (provider: ProviderId, model: string) => void
+  onToggleFavorite?: (provider: ProviderIdAny, model: string) => void
   onServiceTierChange?: (tier: ServiceTier) => void
   chatSettings: EffectiveChatSettings
   onChatSettingsChange: (patch: ChatSettingsPatch) => void
@@ -715,7 +715,7 @@ export function Composer({
   }, [])
 
   const [refreshingCatalog, setRefreshingCatalog] = useState(false)
-  const [browsedProvider, setBrowsedProvider] = useState<ProviderId>(provider)
+  const [browsedProvider, setBrowsedProvider] = useState<ProviderIdAny>(provider)
 
   useEffect(() => {
     setBrowsedProvider(provider)
@@ -731,7 +731,8 @@ export function Composer({
     catalog,
     filterOpts,
     refreshCatalog,
-    catalogLoading: catalogFetchLoading
+    catalogLoading: catalogFetchLoading,
+    customProviders
   } = useComposerModels({
     provider,
     model,
@@ -752,6 +753,7 @@ export function Composer({
     secrets,
     ollamaBaseUrl,
     customOpenAiBaseUrl,
+    customProviders,
     catalogWarning: modelsWarning,
     liveCatalog: catalog.length > 0 ? catalog : null,
     catalogLoading

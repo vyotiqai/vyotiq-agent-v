@@ -1,5 +1,5 @@
-import { PROVIDER_DEFAULTS, seedModelsFor, providerLabel } from '@shared/providers'
-import type { ModelInfo, ProviderId } from '@shared/ipc'
+import { seedModelsFor, providerLabel } from '@shared/providers'
+import type { CustomProvider, ModelInfo, ProviderIdAny } from '@shared/ipc'
 import { modelSelectionKey, parseModelSelectionKey } from '@shared/domain/modelSelection'
 import { inferSupportedServiceTiers } from '@shared/domain/serviceTier'
 
@@ -116,7 +116,7 @@ export function pickAudioFallback(
 }
 
 export function modelsToOptions(
-  provider: ProviderId,
+  provider: ProviderIdAny,
   models: ModelInfo[],
   providerLabel: string
 ): ModelPickerOption[] {
@@ -139,8 +139,11 @@ export function modelsToOptions(
   })
 }
 
-export function seedOptionsForProvider(provider: ProviderId): ModelPickerOption[] {
-  const label = PROVIDER_DEFAULTS.find((p) => p.id === provider)?.label ?? provider
+export function seedOptionsForProvider(
+  provider: ProviderIdAny,
+  customProviders?: readonly CustomProvider[]
+): ModelPickerOption[] {
+  const label = providerLabel(provider, customProviders)
   return modelsToOptions(provider, seedModelsFor(provider), label)
 }
 
@@ -159,8 +162,9 @@ export function buildModelMetaMap(
 /** Resolve a stored model key to a picker row, including cross-provider favorites/recent. */
 export function resolvePickerOption(
   key: string,
-  optionsByProvider: Record<ProviderId, ModelPickerOption[]>,
-  modelMetaByValue: Record<string, ModelInfo>
+  optionsByProvider: Record<ProviderIdAny, ModelPickerOption[]>,
+  modelMetaByValue: Record<string, ModelInfo>,
+  customProviders?: readonly CustomProvider[]
 ): ModelPickerOption | undefined {
   const parsed = parseModelSelectionKey(key)
   if (!parsed) return undefined
@@ -170,10 +174,10 @@ export function resolvePickerOption(
   const group =
     parsed.provider === 'openrouter' && parsed.model.includes('/')
       ? openRouterGroup(parsed.model)
-      : providerLabel(parsed.provider)
+      : providerLabel(parsed.provider, customProviders)
   const label = compactModelLabel(
     formatModelDisplayName(parsed.model, meta?.displayName),
-    providerLabel(parsed.provider),
+    providerLabel(parsed.provider, customProviders),
     group
   )
   return {
@@ -186,7 +190,7 @@ export function resolvePickerOption(
 }
 
 export function supportedTiersForModel(
-  provider: ProviderId,
+  provider: ProviderIdAny,
   modelId: string,
   meta?: ModelInfo
 ): import('@shared/ipc').ServiceTier[] {

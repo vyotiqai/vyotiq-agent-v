@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { normalizeCustomOpenAiBaseUrl, ollamaNativeHost } from '@shared/providers'
-import type { ModelInfo, ProviderId } from '@shared/ipc'
+import type { ModelInfo, ProviderIdAny } from '@shared/ipc'
 import { findOllamaCatalogModel } from '@shared/reasoning'
 
 type CacheEntry = {
@@ -48,18 +48,18 @@ export function useProviderCatalogCache(
   const urls =
     typeof baseUrls === 'string' ? { ollamaBaseUrl: baseUrls } : (baseUrls ?? {})
 
-  const [cache, setCache] = useState<Partial<Record<ProviderId, CacheEntry>>>({})
+  const [cache, setCache] = useState<Partial<Record<ProviderIdAny, CacheEntry>>>({})
   const cacheRef = useRef(cache)
-  const inflight = useRef(new Map<ProviderId, Promise<CacheEntry>>())
+  const inflight = useRef(new Map<ProviderIdAny, Promise<CacheEntry>>())
 
-  const write = useCallback((provider: ProviderId, entry: CacheEntry) => {
+  const write = useCallback((provider: ProviderIdAny, entry: CacheEntry) => {
     cacheRef.current = { ...cacheRef.current, [provider]: entry }
     setCache(cacheRef.current)
   }, [])
 
   const loadProvider = useCallback(
     async (
-      provider: ProviderId,
+      provider: ProviderIdAny,
       opts?: { forceRefresh?: boolean; model?: string }
     ): Promise<CacheEntry> => {
       // Settled successes stick. Failures stick briefly, then expire so a later
@@ -145,7 +145,7 @@ export function useProviderCatalogCache(
   }, [modelsRefreshKey])
 
   const getEntry = useCallback(
-    (provider: ProviderId): CacheEntry | undefined => cache[provider],
+    (provider: ProviderIdAny): CacheEntry | undefined => cache[provider],
     [cache]
   )
 

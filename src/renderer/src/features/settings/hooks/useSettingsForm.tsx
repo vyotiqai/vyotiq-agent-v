@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { AppearanceSettings } from '@shared/appearance'
 import {
+  MAX_CUSTOM_PROVIDERS,
   SECRET_PROVIDERS,
-  type ProviderId,
+  isCustomProviderId,
+  newCustomProviderId,
+  type CustomProvider,
+  type CustomProviderId,
+  type ProviderIdAny,
   type SecretProvider,
   type Settings,
   type ToolApprovalSettings,
@@ -11,7 +16,6 @@ import {
   DEFAULT_TOOL_APPROVAL
 } from '@shared/ipc'
 import {
-  PROVIDER_DEFAULTS,
   defaultModelFor,
   providerLabel,
   validateCustomOpenAiBaseUrl,
@@ -19,6 +23,7 @@ import {
   providerNeedsKey,
   isLocalOllamaHost,
   isOllamaCloudHost,
+  normalizeCustomOpenAiBaseUrl,
   OLLAMA_CLOUD_BASE_URL,
   OLLAMA_LOCAL_DEFAULT
 } from '@shared/providers'
@@ -249,16 +254,19 @@ export function useSettingsForm({
     return ok
   }
 
-  const providerMeta = PROVIDER_DEFAULTS.find((p) => p.id === settings.provider)
+  const customProviders = settings.customProviders
+  const endpointFor = (id: SecretProvider): CustomProvider | undefined =>
+    isCustomProviderId(id) ? customProviders.find((entry) => entry.id === id) : undefined
+  const providerDisplayLabel = providerLabel(settings.provider, customProviders)
   const displayProvider = effectiveChatSettings?.provider ?? settings.provider
   const displayModel = effectiveChatSettings?.model ?? settings.model
-  const displayProviderMeta = PROVIDER_DEFAULTS.find((p) => p.id === displayProvider)
+  const displayProviderLabel = providerLabel(displayProvider, customProviders)
   const workspaceOverrideActive = Boolean(
     activeWorkspacePath &&
       findByWorkspacePath(settingsOverridesByPath, activeWorkspacePath)?.useOverride
   )
   const keyHasSaved = Boolean(secrets[keyProvider])
-  const keyProviderLabel = providerLabel(keyProvider)
+  const keyProviderLabel = providerLabel(keyProvider, customProviders)
   const busy = savingKey || clearingKey || savingField || refreshingModels
   const formLocked = savingKey || clearingKey || savingField
   const activeNeedsKey = (() => {
@@ -278,11 +286,19 @@ export function useSettingsForm({
           (customUrl || settings.customOpenAiBaseUrl)
       )
     }
+    const endpoint = endpointFor(settings.provider)
+    if (endpoint) {
+      if (secrets[endpoint.id]) return false
+      return providerNeedsKey(endpoint.id, endpoint.baseUrl)
+    }
     return !secrets[settings.provider as SecretProvider]
   })()
-  const savedKeyProviders = useMemo(
-    () => SECRET_PROVIDERS.filter((p) => secrets[p]),
-    [secrets]
+  const savedKeyProviders = useMemo<SecretProvider[]>(
+    () =>
+      [...SECRET_PROVIDERS, ...customProviders.map((entry) => entry.id)].filter(
+        (p) => secrets[p]
+      ),
+    [secrets, customProviders]
   )
   const { refresh: refreshCatalog } = useModelCatalog(
     settings.provider,
@@ -331,11 +347,6 @@ export function useSettingsForm({
   }, [settings.provider])
 
   useEscapeToClose(onClose, true, { deferToMenus: true })
-
-  const savedKeyCount = useMemo(
-    () => SECRET_PROVIDERS.filter((p) => secrets[p]).length,
-    [secrets]
-  )
 
   const toolApproval: ToolApprovalSettings =
     (workspaceOverrideActive ? effectiveChatSettings?.toolApproval : undefined) ??
@@ -386,7 +397,7 @@ export function useSettingsForm({
     })
   }
 
-  const setActiveProvider = async (provider: ProviderId): Promise<boolean> => {
+  const setActiveProvider = async (provider: ProviderIdAny): Promise<boolean> => {
     setKeyProvider(provider)
     setKeyDraft('')
     if (provider === settings.provider) return true
@@ -401,7 +412,7 @@ export function useSettingsForm({
       thinkingEffort: prefs.thinkingEffort
     })
     if (!ok) return false
-    setModelsInfo(`Active provider set to ${providerLabel(provider)}.`)
+    setModelsInfo(`Active provider set to ${providerLabel(provider, customProviders)}.`)
     return true
   }
 
@@ -462,11 +473,11 @@ export function useSettingsForm({
           ? effectiveOllama ?? ollamaUrl
           : provider === 'custom'
             ? effectiveCustom ?? customUrl
-            : undefined
+            : endpointFor(provider)?.baseUrl
       if (providerNeedsKey(provider, baseForKeyCheck) && !opts?.skipKeyCheck) {
         const hasKey = Boolean(secrets[provider as SecretProvider])
         if (!hasKey) {
-          const label = providerLabel(provider)
+          const label = providerLabel(provider, customProviders)
           setModelsInfo(`Seed catalog for ${label} (API key missing)`)
           setError(
             `${label} API key not set. Save a ${label} key below, then refresh.`
@@ -516,7 +527,7 @@ export function useSettingsForm({
       })
       if (res.ok) {
         onModelsRefreshed?.()
-        const label = providerLabel(provider)
+        const label = providerLabel(provider, customProviders)
         if (res.warning) {
           setModelsInfo(
             `${res.models.length} seed models for ${label} (live catalog unavailable): ${res.warning}`
@@ -554,7 +565,7 @@ export function useSettingsForm({
         if (ok) setOllamaUrl(OLLAMA_CLOUD_BASE_URL)
       }
       setModelsInfo(`Saved ${keyProviderLabel} key.`)
-      await refreshModels(keyProvider as ProviderId, { skipKeyCheck: true })
+      await refreshModels(keyProvider, { skipKeyCheck: true })
     } finally {
       setSavingKey(false)
     }
@@ -578,6 +589,93 @@ export function useSettingsForm({
     } finally {
       setClearingKey(false)
     }
+  }
+
+  /**
+   * Why a custom endpoint's name or base URL cannot be saved, or null. The
+   * URL must not repeat another endpoint's: two entries on one host would
+   * collapse into one on load (normalizeCustomProviders), dropping a key.
+   */
+  const endpointFieldError = (
+    field: { name?: string; baseUrl?: string },
+    exceptId?: CustomProviderId
+  ): string | null => {
+    if (field.name !== undefined) {
+      const name = field.name.trim()
+      if (!name) return 'Name the endpoint.'
+      if (name.length > 60) return 'Keep the name to 60 characters.'
+    }
+    if (field.baseUrl !== undefined) {
+      const parsed = validateCustomOpenAiBaseUrl(field.baseUrl)
+      if (!parsed.ok) return parsed.error
+      const clash = customProviders.find(
+        (entry) =>
+          entry.id !== exceptId && normalizeCustomOpenAiBaseUrl(entry.baseUrl) === parsed.url
+      )
+      if (clash) return `${clash.name} already uses this URL.`
+    }
+    return null
+  }
+
+  /** Add an endpoint and open its row, so the key can be pasted next. */
+  const addEndpoint = async (name: string, rawUrl: string): Promise<boolean> => {
+    if (customProviders.length >= MAX_CUSTOM_PROVIDERS) {
+      setError(`Up to ${MAX_CUSTOM_PROVIDERS} custom endpoints can be saved.`)
+      return false
+    }
+    const parsed = validateCustomOpenAiBaseUrl(rawUrl)
+    if (!parsed.ok) return false
+    const entry: CustomProvider = {
+      id: newCustomProviderId(
+        name,
+        customProviders.map((e) => e.id)
+      ),
+      name: name.trim(),
+      baseUrl: parsed.url
+    }
+    const ok = await runUpdate({ customProviders: [...customProviders, entry] })
+    if (!ok) return false
+    selectKeyProvider(entry.id)
+    setModelsInfo(`Added ${entry.name}.`)
+    return true
+  }
+
+  const updateEndpoint = async (
+    id: CustomProviderId,
+    patch: { name?: string; baseUrl?: string }
+  ): Promise<boolean> => {
+    const current = customProviders.find((entry) => entry.id === id)
+    if (!current) return false
+    let baseUrl = current.baseUrl
+    if (patch.baseUrl !== undefined) {
+      const parsed = validateCustomOpenAiBaseUrl(patch.baseUrl)
+      if (!parsed.ok) return false
+      baseUrl = parsed.url
+    }
+    const name = patch.name !== undefined ? patch.name.trim() : current.name
+    if (name === current.name && baseUrl === current.baseUrl) return true
+    return runUpdate({
+      customProviders: customProviders.map((entry) =>
+        entry.id === id ? { ...entry, name, baseUrl } : entry
+      )
+    })
+  }
+
+  /** Remove an endpoint; main deletes its key and per-model state with it. */
+  const removeEndpoint = async (id: CustomProviderId): Promise<boolean> => {
+    const current = customProviders.find((entry) => entry.id === id)
+    if (!current) return true
+    const ok = await runUpdate({
+      customProviders: customProviders.filter((entry) => entry.id !== id)
+    })
+    if (!ok) return false
+    if (keyProvider === id) {
+      setKeyProvider(settings.provider)
+      setKeyDraft('')
+      setKeyRowOpen(false)
+    }
+    setModelsInfo(`Removed ${current.name}.`)
+    return true
   }
 
   const navigateSection = (id: SettingsSection): void => {
@@ -746,10 +844,11 @@ export function useSettingsForm({
     setFieldError,
     displayError,
     fieldError,
-    providerMeta,
+    customProviders,
+    providerDisplayLabel,
     displayProvider,
     displayModel,
-    displayProviderMeta,
+    displayProviderLabel,
     workspaceOverrideActive,
     activeWorkspacePath,
     effectiveChatSettings,
@@ -759,7 +858,6 @@ export function useSettingsForm({
     formLocked,
     activeNeedsKey,
     savedKeyProviders,
-    savedKeyCount,
     toolApproval,
     agentKeepRecentTurns,
     agentAutoCompactThresholdPct,
@@ -773,6 +871,10 @@ export function useSettingsForm({
     setGlobalModel,
     commitOllamaUrl,
     commitCustomUrl,
+    endpointFieldError,
+    addEndpoint,
+    updateEndpoint,
+    removeEndpoint,
     refreshModels,
     saveKey,
     clearKey,

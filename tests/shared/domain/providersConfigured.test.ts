@@ -166,7 +166,7 @@ describe('custom provider ids (custom:<slug>)', () => {
     expect(providerNeedsKey('custom:lan', 'http://127.0.0.1:8080/v1')).toBe(false)
   })
 
-  it('resolves configuration from the list entry, then the legacy field', () => {
+  it('resolves configuration from the list entry', () => {
     const secrets = emptySecretStatus()
     // LAN entry is keyless → configured; public entry needs a key.
     expect(
@@ -181,11 +181,29 @@ describe('custom provider ids (custom:<slug>)', () => {
         customProviders: list
       })
     ).toBe(true)
-    // Missing entry falls back to the legacy field.
+    // A removed entry is never configured: borrowing the builtin Custom URL
+    // would send the chat to a different host than the one it was set up for.
     expect(
       isProviderConfigured('custom:missing', secrets, {
-        customOpenAiBaseUrl: CUSTOM_OPENAI_DEFAULT
+        customOpenAiBaseUrl: CUSTOM_OPENAI_DEFAULT,
+        customProviders: list
       })
-    ).toBe(true)
+    ).toBe(false)
+  })
+
+  it('lists endpoints after the builtins, in saved order', () => {
+    const secrets = { ...emptySecretStatus(), 'custom:deepinfra': true }
+    const ids = listConfiguredProviders(secrets, { customProviders: list })
+    expect(ids.slice(-2)).toEqual(['custom:deepinfra', 'custom:lan-llama'])
+    // A public endpoint without a key stays out unless it is the active one.
+    const bare = listConfiguredProviders(emptySecretStatus(), { customProviders: list })
+    expect(bare).not.toContain('custom:deepinfra')
+    expect(bare).toContain('custom:lan-llama')
+    expect(
+      listConfiguredProviders(emptySecretStatus(), {
+        customProviders: list,
+        alwaysInclude: ['custom:deepinfra']
+      })
+    ).toContain('custom:deepinfra')
   })
 })

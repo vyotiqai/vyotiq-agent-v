@@ -3,11 +3,12 @@ import type {
   ChatMessage,
   CompactRunResult,
   ModelInfo,
-  ProviderId,
+  ProviderIdAny,
   Settings
 } from '../../shared/ipc'
-import { contentToText } from '../../shared/ipc'
+import { catalogProviderId, contentToText } from '../../shared/ipc'
 import {
+  providerLabel,
   providerNeedsKey,
   resolveProviderChatBaseUrl
 } from '../../shared/domain/providers'
@@ -128,7 +129,7 @@ type CompactAbortHandle = {
 export type CompactPlan = {
   runDir: string
   runId: string
-  providerId: ProviderId
+  providerId: ProviderIdAny
   provider: LlmProvider
   model: ModelInfo
   apiKey: string | null | undefined
@@ -220,7 +221,8 @@ export async function planCompact(input: {
   const runDir = resolveRunDir(input.workspacePath, input.runId)
   const settings = resolveSettings(input.workspacePath, input.settings)
 
-  const providerId: ProviderId = settings.provider
+  const providerId: ProviderIdAny = settings.provider
+  const label = providerLabel(providerId, settings.customProviders)
   const apiKey = getSecret(providerId)
   const baseUrl = resolveProviderChatBaseUrl(providerId, settings, apiKey)
   if (providerNeedsKey(providerId, baseUrl ?? settings.ollamaBaseUrl) && !apiKey) {
@@ -229,8 +231,8 @@ export async function planCompact(input: {
     const message = !status.encryptionAvailable
       ? 'OS secure storage is unavailable. API keys cannot be decrypted on this system.'
       : storedBlob
-        ? `API key for ${providerId} is stored but cannot be decrypted. Re-enter it in Settings → Providers or restore OS keychain access.`
-        : `API key for ${providerId} is not set.`
+        ? `API key for ${label} is stored but cannot be decrypted. Re-enter it in Settings → Providers or restore OS keychain access.`
+        : `API key for ${label} is not set.`
     throw new CompactionUnavailableError(message)
   }
 
@@ -248,7 +250,7 @@ export async function planCompact(input: {
   const abort = createCompactAbort(input.signal)
   const provider = getProvider(providerId)
   const model = await resolveModelInfo(providerId, settings.model, apiKey, baseUrl, abort.signal)
-  const historyBudget = allocateBudget(model, providerId).history
+  const historyBudget = allocateBudget(model, catalogProviderId(providerId)).history
 
   const keepRecent = manualKeepRecentTurns(countUserTurns(working), configuredKeep)
   let kept = await preserveRecentMessagesAsync(working, keepRecent, historyBudget, model)
@@ -302,7 +304,7 @@ async function invokeCompactionLlm(
     signal: abort.signal,
     messages: plan.toSummarize,
     supportsStructuredOutput,
-    contextWindow: contentWindow(plan.model, plan.providerId),
+    contextWindow: contentWindow(plan.model, catalogProviderId(plan.providerId)),
     priorSummary: plan.existing?.summary,
     focus,
     allowMessageFork: allowFork && plan.allowMessageFork,
@@ -627,8 +629,8 @@ export async function* executeCompactEvents(
   }
 
   const foldedMessages = plan.baseFolded + plan.toSummarize.length
-  const ctxWindow = contextWindowFor(plan.model, plan.providerId)
-  const cWin = contentWindow(plan.model, plan.providerId)
+  const ctxWindow = contextWindowFor(plan.model, catalogProviderId(plan.providerId))
+  const cWin = contentWindow(plan.model, catalogProviderId(plan.providerId))
   const remainingEstimate =
     (await estimateMessagesTokensAsync(plan.kept, plan.model)) + (record.tokenEstimate ?? 0)
   const triggerReason = resolveTriggerReason(mode, autoReason)

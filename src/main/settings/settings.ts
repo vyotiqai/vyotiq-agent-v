@@ -5,8 +5,10 @@ import {
   CustomProviderSchema,
   DEFAULT_SETTINGS,
   DEFAULT_STORAGE_SETTINGS,
+  dropLegacyCustomProviderSeed,
+  isCustomProviderId,
+  MAX_CUSTOM_PROVIDERS,
   normalizeCustomProviders,
-  seedCustomProvidersFromLegacy,
   SETTINGS_FORMAT_VERSION,
   SettingsSchema,
   type Settings,
@@ -35,6 +37,7 @@ import {
   clearMcpOAuthState,
   clearMcpOAuthClientSecret,
   clearGoogleMcpClientSecret,
+  clearSecret,
   hasGoogleMcpClientSecret,
   getMcpServerSecrets,
   setMcpAuthToken,
@@ -374,7 +377,10 @@ function normalizeSettings(data: Settings): Settings {
   if (custom !== data.customOpenAiBaseUrl) next = { ...next, customOpenAiBaseUrl: custom }
   // Dedupe dynamic custom providers on every load: invalid rows dropped, first
   // entry wins per id slug and per normalized base URL.
-  const customProviders = normalizeCustomProviders(data.customProviders)
+  const customProviders = dropLegacyCustomProviderSeed(
+    normalizeCustomProviders(data.customProviders),
+    data.customOpenAiBaseUrl
+  )
   const customProvidersChanged =
     customProviders.length !== data.customProviders.length ||
     customProviders.some(
@@ -384,6 +390,14 @@ function normalizeSettings(data: Settings): Settings {
         entry.baseUrl !== data.customProviders[i]?.baseUrl
     )
   if (customProvidersChanged) next = { ...next, customProviders }
+  // An active endpoint missing from the list (a hand-edited file) would route
+  // chat to whatever the fallback base URL is, with no key: start over instead.
+  if (
+    isCustomProviderId(next.provider) &&
+    !next.customProviders.some((entry) => entry.id === next.provider)
+  ) {
+    next = { ...next, provider: DEFAULT_SETTINGS.provider, model: DEFAULT_SETTINGS.model }
+  }
   // SETTINGS_FORMAT_VERSION 2→3 (storage retention, audit H4/H5): an old
   // settings.json has no `storage` block — schema defaults already fill it at
   // parse ({...DEFAULT_SETTINGS, ...raw}); this guarantees the merged key and
@@ -567,12 +581,9 @@ export function getSettings(): Settings {
   try {
     const raw = JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>
     const migrated = migratePersistedSettingsDefaults(stripLegacyFields(raw))
-    // Seed the legacy single-provider base URL into the customProviders list
-    // BEFORE the first parse so the seeded entry is persisted with the load.
-    const seeded = seedCustomProvidersFromLegacy(migrated.data)
     const parsed = SettingsSchema.safeParse({
       ...DEFAULT_SETTINGS,
-      ...seeded.data
+      ...migrated.data
     })
     if (!parsed.success) {
       logger.warn('Settings schema mismatch; merging known fields', {
@@ -581,25 +592,21 @@ export function getSettings(): Settings {
       })
       const merged: Settings = { ...DEFAULT_SETTINGS }
       for (const key of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
-        const value = seeded.data[key]
+        const value = migrated.data[key]
         const field = SettingsSchema.shape[key].safeParse(value)
         if (field.success) {
           ;(merged as Record<string, unknown>)[key] = field.data
         }
       }
       settingsCache = migrateLegacyMcpSecretsOnLoad(normalizeSettings(merged))
-      if (migrated.persist || seeded.seeded) {
-        persistSettingsOnLoad(
-          settingsCache,
-          migrated.persist ? 'migrated settings defaults' : 'seeded custom providers'
-        )
-      }
+      if (migrated.persist) persistSettingsOnLoad(settingsCache, 'migrated settings defaults')
       return restoreMcpSecrets(settingsCache)
     }
     const data = migrateLegacyMcpSecretsOnLoad(normalizeSettings(parsed.data))
     const shouldPersist =
       migrated.persist ||
-      seeded.seeded ||
+      data.customProviders !== parsed.data.customProviders ||
+      data.provider !== parsed.data.provider ||
       data.ollamaBaseUrl !== parsed.data.ollamaBaseUrl ||
       'workspacePath' in raw ||
       'maxSteps' in raw ||
@@ -615,8 +622,9 @@ export function getSettings(): Settings {
         data,
         migrated.persist
           ? 'migrated settings defaults'
-          : seeded.seeded
-            ? 'seeded custom providers from legacy base URL'
+          : data.customProviders !== parsed.data.customProviders ||
+              data.provider !== parsed.data.provider
+            ? 'normalized custom endpoints'
             : data.ollamaBaseUrl !== parsed.data.ollamaBaseUrl
               ? 'normalized Ollama URL'
               : 'stripped legacy fields from settings'
@@ -793,6 +801,9 @@ export function setSettings(
     // can be merged or persisted (a mangled row throws instead of silently
     // dropping user providers).
     for (const entry of partial.customProviders) CustomProviderSchema.parse(entry)
+    if (partial.customProviders.length > MAX_CUSTOM_PROVIDERS) {
+      throw new Error(`Up to ${MAX_CUSTOM_PROVIDERS} custom endpoints can be saved.`)
+    }
   }
   if (typeof merged.ollamaBaseUrl === 'string') {
     merged.ollamaBaseUrl = ollamaNativeHost(merged.ollamaBaseUrl)
@@ -804,6 +815,30 @@ export function setSettings(
     // Normalize (dedupe by id slug and base URL, drop invalid rows) before the
     // final parse so duplicates never reach storage.
     merged.customProviders = normalizeCustomProviders(merged.customProviders)
+  }
+  const endpointIds = new Set((merged.customProviders ?? []).map((entry) => entry.id))
+  if (merged.provider && isCustomProviderId(merged.provider) && !endpointIds.has(merged.provider)) {
+    throw new Error(
+      partial.provider !== undefined
+        ? 'That custom endpoint does not exist. Add it under Settings → Providers first.'
+        : 'Switch the active provider before removing its endpoint.'
+    )
+  }
+  // A removed endpoint takes its saved per-provider and per-model state with it.
+  const removedEndpoints = (prev.customProviders ?? [])
+    .map((entry) => entry.id)
+    .filter((id) => !endpointIds.has(id))
+  if (partial.customProviders !== undefined && removedEndpoints.length > 0) {
+    const gone = (key: string): boolean =>
+      removedEndpoints.some((id) => key === id || key.startsWith(`${id}::`))
+    merged.thinkingPrefsByProvider = Object.fromEntries(
+      Object.entries(merged.thinkingPrefsByProvider ?? {}).filter(([key]) => !gone(key))
+    )
+    merged.favoriteModels = (merged.favoriteModels ?? []).filter((key) => !gone(key))
+    merged.recentModels = (merged.recentModels ?? []).filter((key) => !gone(key))
+    merged.serviceTierByModel = Object.fromEntries(
+      Object.entries(merged.serviceTierByModel ?? {}).filter(([key]) => !gone(key))
+    )
   }
   if (partial.mcpServers !== undefined) {
     const hasGoogle = (merged.mcpServers ?? []).some((s) => isGoogleMcpId(s.id))
@@ -829,6 +864,18 @@ export function setSettings(
   // Closing the code index's stores when it is switched off, and clearing the
   // MCP resolve cache when servers change, are onSettingsWritten listeners
   // registerIpc installs (they used lazy requires the bundle could not resolve).
+  // A removed custom endpoint takes its saved key with it.
+  if (partial.customProviders !== undefined) {
+    const nextEndpoints = new Set(next.customProviders.map((entry) => entry.id))
+    for (const entry of prev.customProviders ?? []) {
+      if (nextEndpoints.has(entry.id)) continue
+      try {
+        clearSecret(entry.id)
+      } catch {
+        // best-effort orphan cleanup
+      }
+    }
+  }
   if (partial.mcpServers !== undefined) {
     const nextIds = new Set((next.mcpServers ?? []).map((s) => s.id))
     for (const s of prev.mcpServers ?? []) {
