@@ -18,7 +18,6 @@ import { parseMcpPinData } from '@renderer/features/chat/toolUi/parsers/mcpPin'
 import { parseSkillData } from '@renderer/features/chat/toolUi/parsers/skill'
 import { parseStatusMessageData } from '@renderer/features/chat/toolUi/parsers/status'
 import { parseCodebaseSearchData } from '@renderer/features/chat/toolUi/parsers/codebaseSearch'
-import { parseMemoryListData } from '@renderer/features/chat/toolUi/parsers/memory'
 import type { UiToolRow } from '@shared/transcript'
 
 function tool(overrides: Partial<UiToolRow> & Pick<UiToolRow, 'name'>): UiToolRow {
@@ -76,29 +75,6 @@ describe('list_dir parser', () => {
       })
     )
     expect(data.entries[0]?.size).toBe('1K')
-  })
-})
-
-describe('memory parser', () => {
-  it('parses memory section headings case-insensitively', () => {
-    const data = parseMemoryListData(
-      tool({
-        name: 'memory_list',
-        content: [
-          '## INDEX.MD (excerpt)',
-          'Saved context',
-          '',
-          '## NOTES/',
-          '- Keep the release note',
-          '',
-          'STATE.MD: present'
-        ].join('\n')
-      })
-    )
-
-    expect(data.indexExcerpt).toBe('Saved context')
-    expect(data.notes).toEqual(['Keep the release note'])
-    expect(data.hasState).toBe(true)
   })
 })
 

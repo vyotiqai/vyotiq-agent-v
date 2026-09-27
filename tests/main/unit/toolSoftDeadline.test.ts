@@ -36,7 +36,7 @@ async function loadModule(): Promise<{
     calls: { id: string; name: string; arguments: string }[],
     ctx: unknown,
     opts: { step: number }
-  ) => Promise<{ messages: { content?: unknown }[]; stepToolsOk: boolean }>
+  ) => Promise<{ messages: { content?: unknown; ok?: boolean }[] }>
   TOOL_SOFT_DEADLINE_MS: number
 }> {
   vi.resetModules()
@@ -96,7 +96,8 @@ describe('tool soft deadline', () => {
       { step: 1 }
     )
 
-    expect(outcome.stepToolsOk).toBe(false)
+    // The deadline path returns ok: false, so the step reports the tool as failed.
+    expect(outcome.messages[0]?.ok).toBe(false)
     expect(String(messages[0]?.content)).toMatch(/exceeded its .*deadline/)
 
     // The signal handed to the tool is aborted, so handlers that own a process
@@ -123,7 +124,7 @@ describe('tool soft deadline', () => {
       ctx,
       { step: 1 }
     )
-    expect(outcome.stepToolsOk).toBe(true)
+    expect(outcome.messages[0]?.ok).toBe(true)
     expect(seen[0]?.aborted).toBe(false)
   })
 
@@ -151,7 +152,7 @@ describe('tool soft deadline', () => {
       { step: 1 }
     )
 
-    expect(outcome.stepToolsOk).toBe(true)
+    expect(outcome.messages[0]?.ok).toBe(true)
     const content = String(messages[0]?.content)
     expect(content).not.toMatch(/exceeded its/)
     expect(content).toBe('The user answered: 42')

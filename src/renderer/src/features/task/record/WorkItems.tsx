@@ -501,31 +501,65 @@ function ToolLine({ item }: { item: ToolItem }) {
   )
 }
 
+/** The protocol line the instance tools prefix their output with. */
+function displayInstanceContent(content: string | undefined): string {
+  return (content ?? '').replace(/^Agent V Instance id;[^\r\n]*(?:\r?\n)?/i, '').trim()
+}
+
+function firstLine(text: string | undefined): string {
+  return (text ?? '').split('\n').find((l) => l.trim())?.trim() ?? ''
+}
+
 function InstanceItem({ item }: { item: ToolItem }) {
-  const { onOpenAgentInstance } = useRunSession()
+  const { agentInstances, onOpenAgentInstance } = useRunSession()
   const runId = parseAgentInstanceRunId(item.tool.content) ?? parseAgentInstanceRunIdFromArgs(item.tool.argsPreview)
+  const instance = runId ? agentInstances?.[runId] : undefined
+  const shortId = runId ? formatAgentInstanceShortId(runId) : ''
   const args = parseArgsRecord(item.tool.argsPreview)
   const goal = typeof args?.goal === 'string' ? args.goal : ''
-  const verb = toolLabel(item.tool.name, item.tool.status, item.tool.content)
+  const failed = item.tool.status === 'fail'
+  // A settled await is only the waiter's verdict: it can time out or fail
+  // while the child carries on to a terminal phase of its own. The child's
+  // status decides the row; the call only explains the wait.
+  const phase = instance?.phase
+  const finished = failed && phase === 'done'
+  const stopped = phase === 'error' || phase === 'cancelled'
+  const verb = finished
+    ? 'Instance finished'
+    : stopped
+      ? `Instance ${phase === 'cancelled' ? 'cancelled' : 'failed'}`
+      : toolLabel(item.tool.name, item.tool.status, item.tool.content)
+  const content = displayInstanceContent(item.tool.content)
+  // Why the call failed, said under the row so it needs no opening: the child's
+  // own words once it has settled one way or the other, else the call's output.
+  const reason = failed && !finished ? firstLine(stopped ? instance?.summary || content : content) : ''
   return (
-    <WorkLine
-      icon="crew"
-      verb={runId ? `${verb} ${formatAgentInstanceShortId(runId)}` : verb}
-      detail={goal || undefined}
-      trailing={
-        runId && onOpenAgentInstance ? (
-          <button
-            type="button"
-            onClick={() => onOpenAgentInstance(runId)}
-            className="shrink-0 text-xs font-medium text-accent hover:underline focus-visible:vy-focus-ring"
-          >
-            Open
-          </button>
-        ) : item.tool.status === 'running' ? (
-          <AgentVSpinner size={11} />
-        ) : null
-      }
-    />
+    <>
+      <WorkLine
+        icon="crew"
+        verb={runId ? `${verb} ${shortId}` : verb}
+        tone={failed && !finished ? 'danger' : undefined}
+        detail={goal || undefined}
+        trailing={
+          runId && onOpenAgentInstance ? (
+            <button
+              type="button"
+              aria-label={`Open instance ${shortId}`}
+              onClick={() => onOpenAgentInstance(runId)}
+              className="shrink-0 text-xs font-medium text-accent hover:underline focus-visible:vy-focus-ring"
+            >
+              Open
+            </button>
+          ) : item.tool.status === 'running' ? (
+            <AgentVSpinner size={11} />
+          ) : null
+        }
+      />
+      {finished ? (
+        <p className="m-0 mt-0.5 line-clamp-2 pl-[22px] text-caption text-muted">Finished, but the await did not return.</p>
+      ) : null}
+      {reason ? <p className="m-0 mt-0.5 line-clamp-2 pl-[22px] text-caption text-danger">{reason}</p> : null}
+    </>
   )
 }
 
@@ -562,6 +596,7 @@ function Thought({ text }: { text: string }) {
         {long ? (
           <button
             type="button"
+            aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
             className="mt-0.5 text-caption text-tertiary hover:text-fg focus-visible:vy-focus-ring"
           >

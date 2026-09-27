@@ -2066,6 +2066,13 @@ export const WorkspaceAgentContextResultSchema = z.object({
   memoryNotes: z.number().int().nonnegative(),
   /** The most recently changed notes, newest first. */
   memoryNoteNames: z.array(z.string().min(1)).max(3).optional(),
+  /**
+   * `.vyotiq/memory/index.md` and `.vyotiq/memory/state.md` exist. Both are
+   * pre-loaded into the prompt every step, so a workspace can hold memory
+   * with no notes at all.
+   */
+  memoryIndex: z.boolean(),
+  memoryState: z.boolean(),
   codeIndex: z.object({
     /** `paused`: Settings → Indexing paused it; what is indexed stays searchable. */
     state: z.enum(['ready', 'building', 'degraded', 'off', 'paused']),

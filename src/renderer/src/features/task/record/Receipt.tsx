@@ -4,13 +4,14 @@ import type { StepUsageTotals } from '@shared/utils/runTelemetry'
 import { formatUsdCost } from '@shared/utils/costDisplay'
 import { formatElapsed } from '@shared/utils/timeFormat'
 import { IconButton } from '@renderer/lib/ui'
-import { formatTokens } from '@renderer/lib/utils/formatTokens'
 import { useSharedNow } from '@renderer/lib/hooks/useSharedNow'
 import {
   cacheCaptionPct,
+  cacheHitCaption,
   formatTokPerSec,
   freshCaptionTokens,
   outputTokensPerSecond,
+  tokensCaption,
   turnCost
 } from '@renderer/features/chat/utils/messageFooterStats'
 import { RecordRow } from './RecordLayout'
@@ -40,11 +41,11 @@ export function receiptParts(
   }
   if (!usage || usage.steps <= 0) return parts
   const tokens = freshCaptionTokens(usage)
-  if (tokens > 0) parts.push({ key: 'tokens', text: `${formatTokens(tokens)} tokens`, title: 'Fresh input + output tokens' })
+  if (tokens > 0) parts.push({ key: 'tokens', text: tokensCaption(tokens), title: 'Fresh input + output tokens' })
   const speed = outputTokensPerSecond(usage)
   if (speed != null) parts.push({ key: 'speed', text: formatTokPerSec(speed), title: 'Output speed' })
   const cache = cacheCaptionPct(usage)
-  if (cache != null) parts.push({ key: 'cache', text: `${cache}% cached`, title: 'Prompt cache hits' })
+  if (cache != null) parts.push({ key: 'cache', text: cacheHitCaption(cache), title: 'Prompt cache hits' })
   const cost = turnCost(usage)
   if (cost) {
     parts.push({
@@ -92,6 +93,8 @@ export function ReceiptLine({
         {parts.map((p, i) => (
           <span key={p.key} className="inline-flex items-center gap-2" title={p.title}>
             {i > 0 ? <span aria-hidden="true">·</span> : null}
+            {/* The caption alone is cryptic; the meaning reaches screen readers. */}
+            <span className="sr-only">{p.title}: </span>
             {p.text}
           </span>
         ))}

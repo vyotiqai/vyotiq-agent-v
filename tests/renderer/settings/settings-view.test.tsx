@@ -1306,6 +1306,8 @@ describe('settings', () => {
         branch: null,
         rules: { agentsMd: false, claudeMd: false, cursorrules: false, ruleFileCount: 0 },
         memoryNotes: 0,
+        memoryIndex: false,
+        memoryState: false,
         codeIndex: { state: 'ready' as const, files: 12, indexedAt: new Date().toISOString() }
       }
     }))
@@ -1341,6 +1343,8 @@ describe('settings', () => {
         branch: null,
         rules: { agentsMd: false, claudeMd: false, cursorrules: false, ruleFileCount: 0 },
         memoryNotes: 0,
+        memoryIndex: false,
+        memoryState: false,
         codeIndex: { state, files: 340, indexedAt: new Date().toISOString() }
       }
     })

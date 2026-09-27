@@ -42,6 +42,8 @@ beforeEach(() => {
         rules: { agentsMd: false, claudeMd: true, cursorrules: false, ruleFileCount: 3 },
         memoryNotes: 2,
         memoryNoteNames: ['release-runbook', 'packaged-launch'],
+        memoryIndex: false,
+        memoryState: false,
         codeIndex: { state: 'ready' as const, files: 12408, indexedAt: new Date(Date.now() - 4 * 60_000).toISOString() }
       }
     })),
@@ -131,6 +133,25 @@ describe('New task brief', () => {
     expect(sees.textContent).toContain('12,408 files · updated 4m ago')
     await waitFor(() => expect(sees.textContent).toContain('2 built-in · 1 MCP server'))
     await waitFor(() => expect(sees.textContent).toContain('GitHub needs sign-in'))
+  })
+
+  it('names the prompt-loaded memory files when there are no notes, not None', async () => {
+    window.vyotiq.agentContext = vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        workspaceName: 'ws',
+        branch: 'main',
+        rules: { agentsMd: false, claudeMd: true, cursorrules: false, ruleFileCount: 3 },
+        memoryNotes: 0,
+        memoryIndex: true,
+        memoryState: true,
+        codeIndex: { state: 'ready' as const }
+      }
+    })) as unknown as typeof window.vyotiq.agentContext
+    renderBrief()
+    const sees = screen.getByRole('complementary', { name: 'What the agent will see' })
+    await waitFor(() => expect(sees.textContent).toContain('state.md · index.md'))
+    expect(sees.textContent).not.toContain('0 notes')
   })
 
   it('starts the task with its checks, a half-typed one included', async () => {

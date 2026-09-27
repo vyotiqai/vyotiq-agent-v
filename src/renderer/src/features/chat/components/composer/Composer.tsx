@@ -36,8 +36,7 @@ import { ComposerMentionInput, type ComposerMentionInputHandle } from './Compose
 import { ComposerAttachments } from './ComposerAttachments'
 import {
   DictationErrorBanner,
-  Waveform,
-  formatElapsed,
+  DictationSession,
   type DictationSettingsSection,
   type DictationStripState
 } from './DictationSessionStrip'
@@ -129,6 +128,18 @@ function lineMic(phase: DictationPhase, engineHint: string | null): { label: str
       const _exhaustive: never = phase
       return _exhaustive
     }
+  }
+}
+
+/** Narrow DictationPhase to the live session phases; null while idle. */
+function liveDictationPhase(phase: DictationPhase): 'checking' | 'recording' | 'transcribing' | null {
+  switch (phase) {
+    case 'checking':
+    case 'recording':
+    case 'transcribing':
+      return phase
+    default:
+      return null
   }
 }
 
@@ -1008,6 +1019,7 @@ export function Composer({
         : 'Attach files'
     const showReadiness = Boolean(readinessIssue && readinessIssue.kind !== 'manual_catalog' && hasWorkspace)
     const dictationBusy = dictation.phase === 'checking' || dictation.phase === 'transcribing'
+    const briefLivePhase = liveDictationPhase(dictation.phase)
     const hasAttachmentRow =
       images.length > 0 ||
       files.length > 0 ||
@@ -1075,80 +1087,91 @@ export function Composer({
           />
         }
         input={
-          dictationActive ? (
+          <>
+            {dictationActive && briefLivePhase ? (
+              <div className="mb-2">
+                <DictationSession
+                  phase={briefLivePhase}
+                  elapsedMs={dictation.elapsedMs}
+                  waveform={dictation.waveform}
+                  style={dictation.waveformStyle}
+                  engineHint={dictation.engineHint}
+                  className="min-w-0 flex-1"
+                />
+              </div>
+            ) : null}
             <div
-              className="flex min-h-[132px] items-start gap-2"
-              role="status"
-              aria-live="polite"
-              aria-label={dictation.phase === 'recording' ? 'Listening' : lineMic(dictation.phase, null).label}
-              data-dictation-session={dictationStripState?.kind}
+              ref={mentionAnchorRef}
+              data-composer-input-wrap
+              onDragOver={onAttachmentDragOver}
+              onDrop={onAttachmentDrop}
             >
-              <Waveform samples={dictation.waveform} style={dictation.waveformStyle} />
-              <span className="shrink-0 font-mono text-xs text-muted tnum" aria-hidden="true">
-                {formatElapsed(dictation.elapsedMs)}
-              </span>
+              <ComposerMentionInput
+                ref={taRef}
+                size="brief"
+                newlineOnEnter
+                ariaLabel="Brief"
+                value={text}
+                onChange={(next) => {
+                  setText(next)
+                  requestAnimationFrame(syncCursor)
+                }}
+                onKeyDown={(e) => {
+                  onKeyDown(e)
+                  requestAnimationFrame(syncCursor)
+                }}
+                onCaretChange={(offset) => setCursor(offset)}
+                onPasteFiles={(pasted) => {
+                  void onPickAttachments(pasted)
+                }}
+                placeholder={
+                  composerPlaceholder?.trim() ||
+                  (hasWorkspace
+                    ? 'Describe the task — the agent plans it, does it, and shows you the result'
+                    : 'Open a workspace to start a task')
+                }
+                disabled={inputLocked}
+                onFocus={onFocus}
+                aria-expanded={slash.open || mentions.open}
+                aria-controls={slash.open ? slashListId : mentions.open ? mentionListId : undefined}
+                aria-autocomplete={slash.open || mentions.open ? 'list' : undefined}
+                aria-activedescendant={
+                  slash.open && slash.activeCommand
+                    ? `${slashListId}-opt-${slash.activeCommand.id}`
+                    : mentions.open && mentions.activeItem
+                      ? `${mentionListId}-opt-${mentions.activeItem.id}`
+                      : undefined
+                }
+              />
             </div>
-          ) : (
-          <div
-            ref={mentionAnchorRef}
-            data-composer-input-wrap
-            onDragOver={onAttachmentDragOver}
-            onDrop={onAttachmentDrop}
-          >
-            <ComposerMentionInput
-              ref={taRef}
-              size="brief"
-              newlineOnEnter
-              ariaLabel="Brief"
-              value={text}
-              onChange={(next) => {
-                setText(next)
-                requestAnimationFrame(syncCursor)
-              }}
-              onKeyDown={(e) => {
-                onKeyDown(e)
-                requestAnimationFrame(syncCursor)
-              }}
-              onCaretChange={(offset) => setCursor(offset)}
-              onPasteFiles={(pasted) => {
-                void onPickAttachments(pasted)
-              }}
-              placeholder={
-                composerPlaceholder?.trim() ||
-                (hasWorkspace
-                  ? 'Describe the task — the agent plans it, does it, and shows you the result'
-                  : 'Open a workspace to start a task')
-              }
-              disabled={inputLocked}
-              onFocus={onFocus}
-              aria-expanded={slash.open || mentions.open}
-              aria-controls={slash.open ? slashListId : mentions.open ? mentionListId : undefined}
-              aria-autocomplete={slash.open || mentions.open ? 'list' : undefined}
-              aria-activedescendant={
-                slash.open && slash.activeCommand
-                  ? `${slashListId}-opt-${slash.activeCommand.id}`
-                  : mentions.open && mentions.activeItem
-                    ? `${mentionListId}-opt-${mentions.activeItem.id}`
-                    : undefined
-              }
-            />
-          </div>
-          )
+          </>
         }
         mic={
-          <IconButton
-            icon={dictationActive ? (dictationBusy ? 'loader' : 'stop') : 'mic'}
-            label={lineMic(dictation.phase, dictation.engineHint).label}
-            title={lineMic(dictation.phase, dictation.engineHint).tip}
-            size="md"
-            tone="muted"
-            active={dictation.phase === 'recording'}
-            disabled={Boolean(disabled) || dictationBusy}
-            aria-busy={dictationBusy || undefined}
-            className={dictationBusy ? '[&_svg]:motion-safe:animate-spin' : undefined}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={dictation.toggle}
-          />
+          <>
+            {dictationActive ? (
+              <IconButton
+                icon="close"
+                label="Cancel dictation"
+                size="md"
+                tone="muted"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={dictation.cancel}
+              />
+            ) : null}
+            <IconButton
+              icon={dictationActive ? (dictationBusy ? 'loader' : 'stop') : 'mic'}
+              label={lineMic(dictation.phase, dictation.engineHint).label}
+              title={lineMic(dictation.phase, dictation.engineHint).tip}
+              size="md"
+              tone="muted"
+              active={dictation.phase === 'recording'}
+              disabled={Boolean(disabled) || dictationBusy}
+              aria-busy={dictationBusy || undefined}
+              className={dictationBusy ? '[&_svg]:motion-safe:animate-spin' : undefined}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={dictation.toggle}
+            />
+          </>
         }
         attachments={
           hasAttachmentRow ? (
@@ -1283,6 +1306,7 @@ export function Composer({
         ? `Attach files — ${attachHint}`
         : 'Attach files — or type @ for context'
     const dictationBusy = dictation.phase === 'checking' || dictation.phase === 'transcribing'
+    const lineLivePhase = liveDictationPhase(dictation.phase)
     const hasAttachmentRow =
       images.length > 0 ||
       files.length > 0 ||
@@ -1456,19 +1480,15 @@ export function Composer({
             <span aria-hidden="true" className="flex h-7 shrink-0 items-center font-mono text-md font-semibold text-accent">
               ›
             </span>
-            {dictationActive ? (
-              <div
-                className="flex h-7 min-w-0 flex-1 items-center gap-2"
-                role="status"
-                aria-live="polite"
-                aria-label={dictation.phase === 'recording' ? 'Listening' : lineMic(dictation.phase, null).label}
-                data-dictation-session={dictationStripState?.kind}
-              >
-                <Waveform samples={dictation.waveform} style={dictation.waveformStyle} />
-                <span className="shrink-0 font-mono text-xs text-muted tnum" aria-hidden="true">
-                  {formatElapsed(dictation.elapsedMs)}
-                </span>
-              </div>
+            {lineLivePhase ? (
+              <DictationSession
+                phase={lineLivePhase}
+                elapsedMs={dictation.elapsedMs}
+                waveform={dictation.waveform}
+                style={dictation.waveformStyle}
+                engineHint={dictation.engineHint}
+                className="min-w-0 flex-1"
+              />
             ) : (
               <div ref={mentionAnchorRef} className="min-w-0 flex-1 py-1" data-composer-input-wrap>
                 <ComposerMentionInput
@@ -1661,6 +1681,7 @@ export function Composer({
     extracting
   const inlineShowReadiness = Boolean(readinessIssue && readinessIssue.kind !== 'manual_catalog' && hasWorkspace)
   const inlineMic = lineMic(dictation.phase, dictation.engineHint)
+  const inlineLivePhase = liveDictationPhase(dictation.phase)
 
   return (
     <div className={cn('flex w-full flex-col gap-2', className)} data-composer-inline>
@@ -1742,19 +1763,15 @@ export function Composer({
           </div>
         ) : null}
         <div className="flex min-h-11 items-start gap-2.5 px-3 py-2" data-composer-row>
-          {dictationActive ? (
-            <div
-              className="flex h-7 min-w-0 flex-1 items-center gap-2"
-              role="status"
-              aria-live="polite"
-              aria-label={dictation.phase === 'recording' ? 'Listening' : lineMic(dictation.phase, null).label}
-              data-dictation-session={dictationStripState?.kind}
-            >
-              <Waveform samples={dictation.waveform} style={dictation.waveformStyle} />
-              <span className="shrink-0 font-mono text-xs text-muted tnum" aria-hidden="true">
-                {formatElapsed(dictation.elapsedMs)}
-              </span>
-            </div>
+          {inlineLivePhase ? (
+            <DictationSession
+              phase={inlineLivePhase}
+              elapsedMs={dictation.elapsedMs}
+              waveform={dictation.waveform}
+              style={dictation.waveformStyle}
+              engineHint={dictation.engineHint}
+              className="min-w-0 flex-1"
+            />
           ) : (
             <div ref={mentionAnchorRef} className="min-w-0 flex-1 py-1" data-composer-input-wrap>
               <ComposerMentionInput
