@@ -16,6 +16,9 @@ import { ProviderLogo } from '@renderer/features/chat/components/composer/Provid
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import { PROVIDER_KEY_URLS } from '../constants'
 
+const ENDPOINT_URL_HINT =
+  "An OpenAI-compatible base ending in /v1 or a vendor's mount. Public hosts need a key; loopback and a private LAN can go without."
+
 type KeyState = 'saved' | 'local' | 'none' | 'unavailable'
 
 /**
@@ -356,7 +359,7 @@ function EndpointFields({ endpoint, form }: { endpoint: CustomProvider; form: Se
       <BaseUrlField
         inputId="endpoint-url"
         ariaLabel="Endpoint base URL"
-        hint="An OpenAI-compatible base ending in /v1 or a vendor's mount. Public hosts need a key; loopback and a private LAN can go without."
+        hint={ENDPOINT_URL_HINT}
         value={url}
         disabled={form.formLocked}
         invalid={Boolean(urlError)}
@@ -423,7 +426,7 @@ export function AddEndpointRow({ form, max }: { form: SettingsFormState; max: nu
     <div>
       <button
         type="button"
-        className="flex h-11 w-full items-center gap-3 rounded-md text-left text-sm text-muted vy-transition hover:text-fg focus-visible:vy-focus-ring disabled:cursor-not-allowed"
+        className="flex h-11 w-full items-center gap-3 rounded-md text-left text-sm text-muted vy-transition hover:text-fg focus-visible:vy-focus-ring disabled:vy-disabled-state"
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         disabled={form.formLocked}
@@ -483,6 +486,7 @@ export function AddEndpointRow({ form, max }: { form: SettingsFormState; max: nu
                 {urlError}
               </p>
             ) : null}
+            <p className="m-0 text-xs leading-[18px] text-muted">{ENDPOINT_URL_HINT}</p>
           </div>
           <div className="flex items-center gap-2">
             <Button type="submit" size="sm" variant="primary" pending={adding} disabled={form.formLocked}>
