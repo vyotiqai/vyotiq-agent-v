@@ -300,16 +300,21 @@ describe('New task brief', () => {
   })
 
   it('checks out another branch from the header, after asking over a dirty tree', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    const nativeConfirm = vi.spyOn(window, 'confirm')
     renderBrief()
     fireEvent.click(await screen.findByRole('button', { name: 'Branch' }))
     fireEvent.click(await screen.findByRole('option', { name: 'next' }))
-    // Two changed files: declined, git is not asked.
-    expect(confirm).toHaveBeenCalledTimes(1)
+    // Two changed files: the app asks in its own dialog; declined, git is not asked.
+    let ask = await screen.findByRole('dialog', { name: 'Switch branch' })
+    fireEvent.click(within(ask).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Switch branch' })).toBeNull())
     expect(window.vyotiq.gitCheckout).not.toHaveBeenCalled()
     fireEvent.click(await screen.findByRole('button', { name: 'Branch' }))
     fireEvent.click(await screen.findByRole('option', { name: 'next' }))
+    ask = await screen.findByRole('dialog', { name: 'Switch branch' })
+    fireEvent.click(within(ask).getByRole('button', { name: 'Switch branch' }))
     await waitFor(() => expect(window.vyotiq.gitCheckout).toHaveBeenCalledWith('/ws/app', 'next'))
+    expect(nativeConfirm).not.toHaveBeenCalled()
   })
 
   it('offers a new worktree: says where it will run, and starts with it asked for', async () => {

@@ -1,7 +1,9 @@
 import { useMemo } from 'react'
 import { cn } from '@renderer/lib/ui'
 import {
+  BORDER_DIVIDER,
   READ_BODY_PREVIEW_LINES,
+  SECTION_LABEL,
   TOOL_BODY_CLAMP_PX,
   TOOL_BODY_INNER,
   TOOL_BODY_PAD
@@ -21,11 +23,9 @@ export function MemoryListBody({ tool, loading, loadFailed }: ToolBodyProps) {
     <div className={`${TOOL_BODY_INNER} space-y-2 text-caption`} aria-busy={loading || undefined}>
       {tool.contentTruncated ? <TruncatedBanner loading={loading} failed={loadFailed} /> : null}
       <section>
-        <h4 className="m-0 mb-1 text-2xs font-medium uppercase tracking-wide text-tertiary">
-          notes/
-        </h4>
+        <h4 className={cn('m-0 mb-1', SECTION_LABEL)}>notes/</h4>
         {data.notes.length ? (
-          <ul className="m-0 list-disc pl-4 text-fg/80">
+          <ul className="m-0 list-disc pl-4 text-secondary">
             {data.notes.map((note) => (
               <li key={note}>{note}</li>
             ))}
@@ -56,13 +56,13 @@ export function MemoryReadBody({ tool, inGroup }: ToolBodyProps) {
   return (
     <div>
       {!inGroup ? (
-        <div className="border-b border-border/40 px-3 py-1 font-mono text-2xs text-tertiary">
+        <div className={cn('border-b px-3 py-1 font-mono text-caption text-tertiary', BORDER_DIVIDER)}>
           {data.path}
         </div>
       ) : null}
       {totalLines > 0 ? (
         <div className={`${TOOL_BODY_PAD} pb-1`}>
-          <span className="text-2xs tabular-nums text-tertiary">
+          <span className="text-caption tnum text-tertiary">
             {totalLines} {totalLines === 1 ? 'line' : 'lines'}
             {clamped ? ` · showing ${previewLines.length}` : ''}
           </span>
@@ -85,9 +85,9 @@ export function MemoryWriteBody({ tool, inGroup }: ToolBodyProps) {
   return (
     <div>
       {!inGroup ? (
-        <div className="flex items-baseline justify-between gap-2 border-b border-border/40 px-3 py-1">
-          <span className="truncate font-mono text-2xs text-tertiary">{data.path}</span>
-          <span className="shrink-0 text-2xs tabular-nums text-tertiary">
+        <div className={cn('flex items-baseline justify-between gap-2 border-b px-3 py-1', BORDER_DIVIDER)}>
+          <span className="truncate font-mono text-caption text-tertiary">{data.path}</span>
+          <span className="shrink-0 text-caption tnum text-tertiary">
             {data.charCount} chars
           </span>
         </div>
