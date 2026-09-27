@@ -82,6 +82,7 @@ import {
   loopHintAfterCompaction,
   loopHintForMcpNotInCatalogFailFast,
   MCP_NOT_IN_CATALOG_FAIL_FAST_THRESHOLD,
+  MAX_TOOL_CALLS_PER_STEP,
   runNoticeForContextAboveSoftTrigger,
   seedKnownPathsFromMessages,
   seedMutationPathsFromMessages
@@ -304,7 +305,8 @@ const INCOMPLETE_MESSAGES: Record<Exclude<IncompleteReason, never>, string> = {
     'Goal is still active. Two finishes without tools — waiting for you to continue or mark complete.',
   goal_budget:
     'Goal paused: it used its auto-continue budget without finishing. Resume it to spend another stretch, or mark it complete.',
-  repetition: 'The model kept repeating the same output text; the generation was cut off.'
+  repetition: 'The model kept repeating the same output text; the generation was cut off.',
+  tool_burst: `The model requested more than ${MAX_TOOL_CALLS_PER_STEP} tool calls in one turn; the generation was cut off and none of them ran.`
 }
 
 /** True when two messages are the same role + normalized text (resume dedupe). */
@@ -2465,6 +2467,12 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
        */
       let repetitionMonitor = new GenerationRepetitionMonitor()
       let repetitionAborted = false
+      /**
+       * The repetition monitor sees text and thinking only, so a generation
+       * that degenerates into tool calls (run 50f7b80d) streams past it. Cut
+       * off at MAX_TOOL_CALLS_PER_STEP distinct calls; reset per attempt.
+       */
+      let toolBurstAborted = false
       let lastStreamSnapshotAt = 0
       /** Text content of the last durable snapshot — unchanged text is not re-persisted. */
       let lastSnapshotText = ''
@@ -2525,6 +2533,7 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           streamGotDone = false
           repetitionMonitor = new GenerationRepetitionMonitor()
           repetitionAborted = false
+          toolBurstAborted = false
         },
         waitBeforeRetry: async function* (attempt) {
           yield* yieldStreamRetryWait(
@@ -3035,6 +3044,14 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
             })
             return 'terminal'
           }
+          if (!toolBurstAborted && streamedToolCalls.size > MAX_TOOL_CALLS_PER_STEP) {
+            // Stop the generation here rather than after it ends: run 50f7b80d
+            // kept streaming calls for 33 minutes before any of them ran.
+            toolBurstAborted = true
+            streamSteered = true
+            stepSoftAbort.abort()
+            break
+          }
         }
       } catch (err) {
           if (isStreamIdleTimeoutError(err)) {
@@ -3227,6 +3244,44 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
           role: 'user',
           content:
             'Your output was cut off because it repeated the same text. Continue from the task list with a fresh concrete action; do not restate the plan.',
+          // Loop-injected protocol turn — must never render as a user bubble.
+          synthetic: true
+        }
+        messages.push(continueUser)
+        appendMessage(runDir, continueUser)
+        continue
+      }
+
+      // Degenerate tool-call burst (run 50f7b80d): same contract as the
+      // repetition abort above. None of the calls run — a generation that has
+      // lost the thread is not trusted with dozens of workspace actions — and
+      // each flushes as an Interrupted stub so the transcript stays paired.
+      if (toolBurstAborted) {
+        yield* flushPartialAssistant(
+          runId,
+          runDir,
+          messages,
+          assistantText,
+          thinkingText,
+          stepReasoningState,
+          toolCalls,
+          streamedToolCalls,
+          step,
+          'interrupted'
+        )
+        const continueEv: AgentEvent = {
+          type: 'incomplete',
+          runId,
+          invokeId,
+          reason: 'tool_burst',
+          step,
+          message: `Output requested more than ${MAX_TOOL_CALLS_PER_STEP} tool calls in one turn; continuing automatically…`
+        }
+        appendEvent(runDir, continueEv)
+        yield continueEv
+        const continueUser: ChatMessage = {
+          role: 'user',
+          content: `Your turn was cut off after more than ${MAX_TOOL_CALLS_PER_STEP} tool calls, and none of them ran. Continue from the task list with only the calls the next step needs; do not repeat a call whose result you already have.`,
           // Loop-injected protocol turn — must never render as a user bubble.
           synthetic: true
         }
