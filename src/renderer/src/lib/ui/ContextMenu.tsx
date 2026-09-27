@@ -240,12 +240,13 @@ export function ContextMenu({
               {item.shortcut ? (
                 <span className="shrink-0 text-xs text-tertiary">{item.shortcut}</span>
               ) : null}
-              {item.disabled && item.disabledReason ? (
-                <span id={`context-menu-reason-${item.id}`} className="sr-only">
-                  Unavailable: {item.disabledReason}
-                </span>
-              ) : null}
             </button>
+            {/* Outside the button, so it is the row's description and not also its text. */}
+            {item.disabled && item.disabledReason ? (
+              <span id={`context-menu-reason-${item.id}`} hidden>
+                Unavailable: {item.disabledReason}
+              </span>
+            ) : null}
           </li>
         )
       )}

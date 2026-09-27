@@ -338,12 +338,19 @@ export function isGateRefusalToolResult(content: string): boolean {
   if (/timed out and was auto-denied\./i.test(content)) return true
   if (/Tool approval required but no app window is listening\./i.test(content)) return true
   if (/Tool approval failed because no app window is listening\./i.test(content)) return true
+  // Refusals from assertToolAllowedInMode, anchored because runReceipt drops
+  // any match, ok or not: a read or grep that quotes one must still count.
+  // loopPolicy.test.ts generates each Ask-mode refusal to keep these in sync.
+  if (/^Tool "\w+" is only available on the root orchestrator/i.test(content)) return true
+  if (/^Tool "\w+" requires Agent mode\./i.test(content)) return true
+  if (/^(?:Ask|Plan) mode does not allow browser_tabs close\./i.test(content)) return true
   if (/^(?:Ask|Plan) mode does not allow (?:tool|lsp|MCP)/i.test(content)) return true
-  // Plan mode was merged into Agent and emits neither message any more, but a
+  // Plan mode was merged into Agent and emits none of these any more, but a
   // receipt is recomputed from history: runs recorded before the merge still
   // carry these strings in messages.jsonl and must not start counting as
   // failures. Historical patterns — keep them, do not "clean up".
   if (/^Plan mode may only edit plan\.md or contract\.md/i.test(content)) return true
+  if (/^Plan mode does not allow update_goal "complete"\./i.test(content)) return true
   if (/^Automatic mode switching is off\./i.test(content)) return true
   if (/^Background terminal requires run ownership/i.test(content)) return true
   return false

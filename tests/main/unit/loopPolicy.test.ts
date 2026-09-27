@@ -17,6 +17,7 @@ import {
   isPlausibleWorkspaceFilePath,
   isBuildOutputRelPath,
   isAbortStubToolResult,
+  isGateRefusalToolResult,
   isNonMutatingWriteFailure,
   normalizeWorkspaceRelPath,
   readPathFromToolCall,
@@ -24,6 +25,7 @@ import {
   toolArgsFromCall,
   unreadExistingEditPaths
 } from '@main/agent/loopPolicy'
+import { assertToolAllowedInMode, type ModePolicyOptions } from '@main/agent/tools/modePolicy'
 
 describe('loopPolicy', () => {
   it('normalizes workspace-relative paths', () => {
@@ -57,6 +59,51 @@ describe('loopPolicy', () => {
       )
     ).toBe(true)
     expect(isNonMutatingWriteFailure('Diff hunk failed to match near line 150')).toBe(false)
+  })
+
+  it('treats every mode-gate refusal as a gate refusal, not a failed call', () => {
+    // Every refusal assertToolAllowedInMode can return in Ask mode, in branch
+    // order. Generated rather than copied, so a reworded refusal fails here
+    // instead of quietly counting as a failed call in receipts.
+    const askCalls: [string, Record<string, unknown>, ModePolicyOptions?][] = [
+      ['switch_mode', { mode: 'agent' }],
+      ['create_goal', { objective: 'x' }, { inlineInstance: true }],
+      ['spawn_agent_instance', { goal: 'x' }],
+      ['mcp__srv__tool', {}],
+      ['edit', { path: 'a.ts' }],
+      ['lsp', { path: 'a.ts', action: 'rename', new_name: 'b' }],
+      ['browser_tabs', { action: 'close' }]
+    ]
+    const askRefusals = askCalls.map(([name, args, opts]) => {
+      const verdict = assertToolAllowedInMode('ask', name, args, opts)
+      if (verdict.ok) throw new Error(`expected Ask mode to refuse ${name}`)
+      return verdict.error
+    })
+    // Literals on purpose: after the Plan→Agent merge nothing emits these, but
+    // receipts are recomputed from messages.jsonl, and runs recorded before the
+    // merge still carry them.
+    const planRefusals = [
+      'Plan mode does not allow tool "delete". Switch to Agent mode to make changes.',
+      'Plan mode does not allow MCP tools. "mcp__srv__tool" requires Agent mode. Switch to Agent mode to make changes.',
+      'Plan mode does not allow lsp rename. Switch to Agent mode to make changes.',
+      'Plan mode does not allow browser_tabs close. Switch to Agent mode to make changes.',
+      'Plan mode does not allow update_goal "complete". Switch to Agent mode to make changes.',
+      'Plan mode may only edit plan.md or contract.md (run plan artifacts). Switch to Agent mode to edit product code.'
+    ]
+    for (const refusal of [...askRefusals, ...planRefusals]) {
+      expect(isGateRefusalToolResult(refusal), refusal).toBe(true)
+      // runReceipt drops a matched result even when it succeeded, so a read or
+      // grep that merely quotes a refusal must still count.
+      expect(isGateRefusalToolResult(`modePolicy.ts: ${refusal}`), refusal).toBe(false)
+    }
+
+    // Real failures that name a tool or a gate still count as failures.
+    for (const failure of [
+      'Tool "terminal" exceeded its 10-minute deadline and was stopped. Split the work into smaller calls or check whether the tool is stuck.',
+      "Browser tab limit reached (8). Close tabs with browser_tabs { action: 'close' } or reuse the active tab before opening another."
+    ]) {
+      expect(isGateRefusalToolResult(failure), failure).toBe(false)
+    }
   })
 
   it('extracts read and edit paths from tool calls', () => {
