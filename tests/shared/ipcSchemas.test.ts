@@ -822,7 +822,6 @@ describe('ipc schemas', () => {
     const parsed = SettingsSchema.parse(DEFAULT_SETTINGS)
     expect(parsed).toEqual(DEFAULT_SETTINGS)
     expect(parsed.fontScale).toBe('default')
-    expect(parsed.uiDensity).toBe('default')
     expect(parsed.telemetryEnabled).toBe(false)
     expect(parsed.autoCompactThresholdRatio).toBe(0.55)
     expect(parsed.settingsVersion).toBe(SETTINGS_FORMAT_VERSION)
@@ -838,7 +837,9 @@ describe('ipc schemas', () => {
       provider: 'ollama',
       model: 'qwen2.5',
       ollamaBaseUrl: 'http://127.0.0.1:11434',
-      theme: 'system'
+      theme: 'system',
+      // The removed Density setting: still in old files, stripped on parse.
+      uiDensity: 'compact'
     })
     expect(legacy.telemetryEnabled).toBe(false)
     expect(legacy.autoCompactThresholdRatio).toBe(0.55)
@@ -847,7 +848,7 @@ describe('ipc schemas', () => {
     expect(legacy.autoModeSwitch).toBe(true)
     expect(legacy.offlineWaitMode).toBe('default')
     expect(legacy.fontScale).toBe('default')
-    expect(legacy.uiDensity).toBe('default')
+    expect('uiDensity' in legacy).toBe(false)
     expect(parsed.dictation.engine).toBe('openai')
     expect(legacy.dictation.engine).toBe('openai')
     expect(legacy.notifications).toEqual(DEFAULT_NOTIFICATION_SETTINGS)

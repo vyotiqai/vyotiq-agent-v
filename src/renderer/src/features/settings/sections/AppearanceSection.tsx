@@ -2,7 +2,7 @@ import type { AppearanceSettings } from '@shared/appearance'
 import { Button } from '@renderer/lib/ui'
 import type { SettingsFormState } from '../hooks/useSettingsForm'
 import type { SettingsViewProps } from '../types'
-import { DENSITY_OPTIONS, FONT_SCALE_OPTIONS, THEME_OPTIONS } from '../constants'
+import { FONT_SCALE_OPTIONS, THEME_OPTIONS } from '../constants'
 import { SegmentedField } from '../components/SegmentedField'
 import { SettingsField, SettingsGroup, SettingsStack } from '../components/SettingsField'
 import { SkinPicker } from '../components/SkinPicker'
@@ -71,7 +71,7 @@ export function AppearanceSection({
         />
       </SettingsGroup>
 
-      <SettingsGroup title="Text and spacing">
+      <SettingsGroup title="Text">
         <SegmentedField
           id="appearance-font-scale"
           title="Text size"
@@ -81,16 +81,6 @@ export function AppearanceSection({
           disabled={locked}
           onChange={(fontScale) => apply({ fontScale })}
           {...form.appearanceMark('fontScale')}
-        />
-        <SegmentedField
-          id="appearance-density"
-          title="Density"
-          hint="Row and control height."
-          value={settings.uiDensity}
-          options={DENSITY_OPTIONS}
-          disabled={locked}
-          onChange={(uiDensity) => apply({ uiDensity })}
-          {...form.appearanceMark('uiDensity')}
         />
       </SettingsGroup>
 

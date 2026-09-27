@@ -140,10 +140,6 @@
   --z-tooltip: 50;
 
   --vy-font-scale: 1;
-  --vy-density-scale: 1;
-  --vy-control-min-h: calc(2rem * var(--vy-density-scale));
-  --vy-control-px: calc(0.75rem * var(--vy-density-scale));
-  --vy-control-gap: calc(0.375rem * var(--vy-density-scale));
 }
 
 [data-theme="dark"] {
@@ -204,10 +200,6 @@
   --z-tooltip: 50;
 
   --vy-font-scale: 1;
-  --vy-density-scale: 1;
-  --vy-control-min-h: calc(2rem * var(--vy-density-scale));
-  --vy-control-px: calc(0.75rem * var(--vy-density-scale));
-  --vy-control-gap: calc(0.375rem * var(--vy-density-scale));
 }
 
 [data-font-scale="small"] {
@@ -216,14 +208,6 @@
 
 [data-font-scale="large"] {
   --vy-font-scale: 1.08;
-}
-
-[data-density="compact"] {
-  --vy-density-scale: 0.9;
-}
-
-[data-density="comfortable"] {
-  --vy-density-scale: 1.08;
 }
 
 /* ─── Skin palettes: 4 skins × 2 themes (Default is the base above) ─────────── */

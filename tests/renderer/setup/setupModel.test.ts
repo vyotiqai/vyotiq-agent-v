@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from '@shared/ipc'
 import {
-  needsSetup,
+  isFirstRun,
   providerCheckFrom,
   setupProvider,
   setupRecents,
@@ -139,11 +139,11 @@ describe('setupRecents', () => {
   })
 })
 
-describe('needsSetup', () => {
-  it('is a first run: no approval choice on record and no task yet', () => {
-    expect(needsSetup(false, 0)).toBe(true)
-    expect(needsSetup(false, 3)).toBe(false)
-    expect(needsSetup(true, 0)).toBe(false)
+describe('isFirstRun', () => {
+  it('is no approval choice on record and no task yet', () => {
+    expect(isFirstRun(false, 0)).toBe(true)
+    expect(isFirstRun(false, 3)).toBe(false)
+    expect(isFirstRun(true, 0)).toBe(false)
   })
 })
 

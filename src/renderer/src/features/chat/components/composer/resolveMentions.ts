@@ -1,5 +1,6 @@
-import { contentDisplayText } from '@shared/ipc'
+import { contentDisplayText, MAX_IMAGE_BYTES, MAX_IMAGE_DATA_URL_CHARS } from '@shared/ipc'
 import type { AttachedFile } from '@shared/ipc'
+import { filePreviewKind } from '../filePreviewKind'
 import { MAX_FILES } from './useComposerFiles'
 import { MAX_IMAGES } from './useComposerImages'
 import {
@@ -50,6 +51,38 @@ async function resolveFileMention(
     mime: res.data.mime,
     text: res.data.text
   }
+}
+
+/**
+ * A raster image the model can look at. SVG is left out on purpose: it is text,
+ * so it attaches as a file like any other source.
+ */
+export function isImageMentionPath(path: string): boolean {
+  return filePreviewKind(path) === 'image'
+}
+
+/** True when the draft @-mentions a workspace image, which goes as an image. */
+export function draftHasImageMention(raw: string): boolean {
+  return extractMentions(raw).some((m) => m.kind === 'file' && isImageMentionPath(m.path))
+}
+
+/**
+ * Read an @-mentioned workspace image as a data URL, the same shape a pasted
+ * or picked image takes, under the same per-image size cap.
+ */
+async function resolveImageMention(
+  workspacePath: string,
+  path: string
+): Promise<{ dataUrl: string } | { error: string }> {
+  if (!window.vyotiq?.workspaceReadImage) {
+    return { error: `Cannot read ${path}` }
+  }
+  const res = await window.vyotiq.workspaceReadImage({ workspacePath, path })
+  if (!res.ok) return { error: res.error }
+  if (res.data.dataUrl.length > MAX_IMAGE_DATA_URL_CHARS) {
+    return { error: `${path} is over ${Math.round(MAX_IMAGE_BYTES / (1024 * 1024))}MB` }
+  }
+  return { dataUrl: res.data.dataUrl }
 }
 
 async function resolveBranchBlock(workspacePath: string): Promise<string> {
@@ -215,6 +248,8 @@ export async function resolveComposerMentions(opts: {
   const images = [...(opts.existingImages ?? [])]
   const problems: string[] = []
   const contextBlocks: string[] = []
+  /** Workspace images attached this send, named so the model knows which is which. */
+  const attachedImagePaths: string[] = []
 
   for (const mention of mentions) {
     if (!stillCurrent()) return staleResult()
@@ -226,6 +261,22 @@ export async function resolveComposerMentions(opts: {
         }
         if (!isSafeWorkspaceRelPath(mention.path)) {
           problems.push(`Path is outside the workspace: ${mention.path}`)
+          break
+        }
+        if (isImageMentionPath(mention.path)) {
+          if (attachedImagePaths.includes(mention.path)) break
+          if (images.length >= MAX_IMAGES) {
+            problems.push(`Image limit (${MAX_IMAGES}) — skipped ${mention.path}`)
+            break
+          }
+          const image = await resolveImageMention(opts.workspacePath, mention.path)
+          if (!stillCurrent()) return staleResult()
+          if ('error' in image) {
+            problems.push(image.error)
+            break
+          }
+          if (!images.includes(image.dataUrl)) images.push(image.dataUrl)
+          attachedImagePaths.push(mention.path)
           break
         }
         if (files.length >= MAX_FILES) {
@@ -369,6 +420,15 @@ export async function resolveComposerMentions(opts: {
   }
 
   if (!stillCurrent()) return staleResult()
+
+  if (attachedImagePaths.length) {
+    // The marker is gone from the text, and an image carries no name of its own.
+    contextBlocks.unshift(
+      attachedImagePaths.length === 1
+        ? `Attached image: ${attachedImagePaths[0]}`
+        : ['Attached images:', ...attachedImagePaths.map((p) => `- ${p}`)].join('\n')
+    )
+  }
 
   if (contextBlocks.length) {
     text = [text, ...contextBlocks].filter(Boolean).join('\n\n')

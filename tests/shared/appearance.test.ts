@@ -17,7 +17,6 @@ import { resolveTheme } from '@shared/theme'
 const baseAppearance = {
   theme: 'system' as const,
   fontScale: 'default' as const,
-  uiDensity: 'default' as const,
   skinId: DEFAULT_SKIN_ID,
   customCssPath: ''
 }
@@ -27,7 +26,6 @@ describe('appearance', () => {
     localStorage.clear()
     document.documentElement.removeAttribute('data-theme')
     document.documentElement.removeAttribute('data-font-scale')
-    document.documentElement.removeAttribute('data-density')
     document.documentElement.removeAttribute('data-skin')
   })
 
@@ -50,7 +48,6 @@ describe('appearance', () => {
       theme: 'dark',
       resolvedTheme: resolveTheme('dark', false),
       fontScale: 'large',
-      uiDensity: 'compact',
       skinId: 'proof'
     }
     writeAppearanceBootCache(cache)
@@ -63,18 +60,28 @@ describe('appearance', () => {
       theme: 'system' as const,
       resolvedTheme: 'light' as const,
       fontScale: 'small' as const,
-      uiDensity: 'comfortable' as const,
       skinId: 'native' as const
     }
     const root = document.documentElement
     root.setAttribute('data-theme', cache.resolvedTheme)
     root.setAttribute('data-font-scale', cache.fontScale)
-    root.setAttribute('data-density', cache.uiDensity)
     root.setAttribute('data-skin', cache.skinId)
     expect(root.getAttribute('data-theme')).toBe('light')
     expect(root.getAttribute('data-font-scale')).toBe('small')
-    expect(root.getAttribute('data-density')).toBe('comfortable')
     expect(root.getAttribute('data-skin')).toBe('native')
+  })
+
+  it('readAppearanceBootCache accepts and drops a legacy uiDensity', () => {
+    const legacy = {
+      theme: 'dark',
+      resolvedTheme: 'dark',
+      fontScale: 'default',
+      uiDensity: 'compact',
+      skinId: 'proof'
+    }
+    localStorage.setItem(APPEARANCE_LOCAL_STORAGE_KEY, JSON.stringify(legacy))
+    const { uiDensity: _dropped, ...expected } = legacy
+    expect(readAppearanceBootCache()).toEqual(expected)
   })
 
   it('readAppearanceBootCache rejects corrupt cache', () => {
@@ -89,7 +96,6 @@ describe('appearance', () => {
         theme: 'dark',
         resolvedTheme: 'dark',
         fontScale: 'default',
-        uiDensity: 'default',
         skinId: 'neon'
       })
     )

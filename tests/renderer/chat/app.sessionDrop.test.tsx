@@ -25,7 +25,6 @@ const settingsStub = {
   navigationMode: 'sidebar' as const,
   theme: 'system',
   fontScale: 1,
-  uiDensity: 'comfortable',
   skinId: 'default',
   customCssPath: '',
   favoriteModels: [],

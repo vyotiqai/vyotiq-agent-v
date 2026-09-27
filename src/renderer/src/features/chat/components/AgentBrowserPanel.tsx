@@ -391,6 +391,18 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
     [activeRunId, fail, onPopOut, say, state.url, workspacePath]
   )
 
+  /**
+   * The page is a native view, so Tab never reaches it from this toolbar; this
+   * hands it keyboard focus without a click. `false` means no tab is showing.
+   */
+  const focusPage = useCallback(() => {
+    void window.vyotiq.browserFocus?.().then((res) => {
+      if (!res) fail('Could not focus the page')
+      else if (!res.ok) fail(res.error)
+      else if (!res.data) fail('No page to focus')
+    })
+  }, [fail])
+
   const viewportSpec = browserViewportPreset(viewportPreset)
   const viewportFitted = viewportSpec.id === 'fit'
   const setViewport = useCallback((next: BrowserViewportPresetId) => {
@@ -406,6 +418,9 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
   const address = splitBrowserUrl(state.url)
   const showAddress = !urlFocused && hasPage && address !== null
   const bannerDetail = agentAction?.trim() || state.title?.trim() || address?.host || ''
+  // Not while the agent drives (Take control is the way in) or while the page
+  // lives in the pop-out window, where a click already reaches it.
+  const canFocusPage = hasPage && !state.pip && !(state.agentBusy && !state.userControl)
 
   const menuItems: ActionMenuItem[] = [
     {
@@ -620,6 +635,9 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
           ) : null}
         </div>
 
+        {canFocusPage ? (
+          <IconButton icon="keyboard" label="Type in the page" size="sm" tone="muted" onClick={focusPage} />
+        ) : null}
         <Segmented
           label="Viewport size"
           value={viewportFitted ? 'fit' : fixedPreset.id}

@@ -249,9 +249,11 @@ function McpServerRows({ groups }: { groups: ContextToolGroupDetail[] }) {
 }
 
 /**
- * Full context breakdown (Messages / System tools / MCP tools / System prompt /
+ * Full context breakdown (Record / System tools / MCP tools / System prompt /
  * Skills / Autocompact buffer / Free space + deferred tools), falling back to
- * the legacy 3-layer split when the run predates `detail` events.
+ * the legacy 3-layer split when the run predates `detail` events. Categories
+ * take the accent (the record) and then a grey ramp by weight — never a status
+ * hue, which would read as a warning or a pass.
  */
 function BreakdownRows({ usage }: { usage: ContextUsageState }) {
   const [mcpOpen, setMcpOpen] = useState(false)
@@ -297,13 +299,13 @@ function BreakdownRows({ usage }: { usage: ContextUsageState }) {
         label="System tools"
         tokens={detail.tools.builtin.tokens}
         total={base}
-        color="bg-warning"
+        color="bg-fg"
       />
       <BreakdownRow
         label="MCP tools"
         tokens={detail.tools.mcp.tokens}
         total={base}
-        color="bg-success"
+        color="bg-secondary"
         onToggle={hasMcpServers ? () => setMcpOpen((v) => !v) : undefined}
         expanded={hasMcpServers ? mcpOpen : undefined}
       />

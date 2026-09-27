@@ -270,6 +270,16 @@ describe('ContextMeter breakdown', () => {
     expect(screen.getByText('4.2%')).toBeTruthy()
   })
 
+  it('colours categories with the accent and greys, never a status hue', () => {
+    render(<ContextMeter usage={detailUsage} />)
+    fireEvent.click(screen.getByRole('button', { name: /context window/i }))
+    for (const label of ['Record', 'System tools', 'MCP tools', 'System prompt', 'Skills']) {
+      const row = screen.getByText(new RegExp(`^${label}$`)).parentElement!
+      const swatch = row.querySelector('[aria-hidden]')!
+      expect(swatch.className).not.toMatch(/\bbg-(warning|success|danger)\b/)
+    }
+  })
+
   it('expands MCP tools into per-server rows', () => {
     render(<ContextMeter usage={detailUsage} />)
     fireEvent.click(screen.getByRole('button', { name: /context window/i }))

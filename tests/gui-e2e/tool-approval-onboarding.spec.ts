@@ -42,7 +42,7 @@ test.afterAll(async () => {
   }
 })
 
-test('a task started around Set up asks the approval question on first send', async () => {
+test('a task started around Set up is held there for the approval choice, then sent', async () => {
   const { window } = launched
 
   const expand = window.getByRole('button', { name: /show navigator/i })
@@ -52,7 +52,8 @@ test('a task started around Set up asks the approval question on first send', as
 
   // No choice on record and no task yet: the window opens on Set up. New task
   // (Ctrl+N) goes around it, so the first send still has to ask.
-  await expect(window.getByRole('heading', { name: 'Set up Agent V' })).toBeVisible({ timeout: 20_000 })
+  const heading = window.getByRole('heading', { name: 'Set up Agent V' })
+  await expect(heading).toBeVisible({ timeout: 20_000 })
   await window.keyboard.press('Control+n')
 
   const composer = window.getByRole('combobox', { name: 'Brief' })
@@ -62,15 +63,21 @@ test('a task started around Set up asks the approval question on first send', as
   // A new task starts from its brief on Ctrl+Enter — Enter is a new line there.
   await composer.press('Control+Enter')
 
-  const question = window.getByRole('dialog', { name: 'What needs your OK?' })
-  await expect(question).toBeVisible({ timeout: 10_000 })
-  await expect(question.getByRole('button', { name: /Unattended/ })).toContainText(
+  // Set up takes the send: the folder it was written in is already counted,
+  // and only the approval choice is left before it goes.
+  await expect(heading).toBeVisible({ timeout: 10_000 })
+  await expect(window.getByText('Your instruction waits here until you decide what needs your OK.', { exact: false })).toBeVisible()
+  await expect(window.locator('[data-setup-step="2"]')).toHaveAttribute('data-state', 'done')
+  await expect(window.getByRole('radio', { name: /Unattended/ })).toContainText(
     'MCP tools and tools the agent writes still ask.'
   )
-  await expect(question.getByRole('button', { name: /Edits and commands/ })).toBeFocused()
-  await question.getByRole('button', { name: /Edits and commands/ }).click()
+  await expect(window.getByRole('radio', { name: /Edits and commands/ })).toHaveAttribute('aria-checked', 'true')
+  const send = window.getByRole('button', { name: /Send your instruction/ })
+  await expect(send).toBeEnabled({ timeout: 15_000 })
+  await send.click()
 
   await expect(window.getByText(FIXTURE_ASSISTANT_TEXT)).toBeVisible({ timeout: 15_000 })
+  await expect(heading).toHaveCount(0)
 
   const settings = await window.evaluate(async () => {
     const res = await window.vyotiq.getSettings()

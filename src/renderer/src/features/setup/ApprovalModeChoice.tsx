@@ -5,8 +5,7 @@ import { cn } from '@renderer/lib/ui'
 type ModeCopy = { mode: ToolApprovalMode; label: string; description: string }
 
 /**
- * The three approval modes in the words the Set up page and the first-send
- * question both use. "Unattended" is not "nothing asks": with approvals off,
+ * The three approval modes in the words Set up uses. "Unattended" is not "nothing asks": with approvals off,
  * tools the agent writes for itself still ask, and so do MCP server tools
  * while MCP protection is on (Settings → Agent).
  */

@@ -8,7 +8,7 @@ import { formatAgentInstanceShortId, parseAgentInstanceRunId, parseAgentInstance
 import { Icon, type IconName } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand/AgentVSpinner'
 import { FileTypeIcon } from '@renderer/lib/fileIcons'
-import { Button, DiffStat, IconButton, MarkdownContent, cn } from '@renderer/lib/ui'
+import { Button, DiffStat, IconButton, cn } from '@renderer/lib/ui'
 import { useRunSession } from '@renderer/features/chat/RunSessionContext'
 import { ToolRowOutput } from '@renderer/features/chat/components/ToolRow'
 import { CompactSummaryBlock } from '@renderer/features/chat/components/CompactSummaryBlock'
@@ -19,6 +19,7 @@ import { parseEditCardData } from '@renderer/features/chat/toolUi/parsers/edit'
 import { parseStatusMessageData } from '@renderer/features/chat/toolUi/parsers/status'
 import { editStatOf } from '../editStat'
 import type { WorkItem } from '../recordModel'
+import { RecordProse } from './RecordProse'
 
 type ToolItem = Extract<UiItem, { kind: 'tool' }>
 
@@ -219,7 +220,7 @@ function WorkItemViewImpl({ item }: { item: WorkItem }) {
     case 'plan':
       return <PlanItem title={item.title} running={item.tool.tool.status === 'running'} />
     case 'note':
-      return <MarkdownContent content={item.text} streaming={Boolean(item.item.streaming)} tone="secondary" />
+      return <RecordProse text={item.text} streaming={Boolean(item.item.streaming)} tone="secondary" />
     case 'thought':
       return item.streaming ? <NowLine text={item.text} since={item.item.at} /> : <Thought text={item.text} />
     case 'error':

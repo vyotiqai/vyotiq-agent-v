@@ -51,7 +51,6 @@ import { workspacePathsEqual, findByWorkspacePath } from '@shared/workspacePathM
 import { buildRunDeepLink } from '@shared/deepLink'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { normalizeRelPath } from '../features/chat/utils/turnFileDiffs'
-import { ToolApprovalOnboardingModal } from '../features/chat/components/ToolApprovalOnboardingModal'
 import { useOfflineQueue, useOfflineSendQueue } from '@renderer/lib/hooks/useOfflineSendQueue'
 import {
   editOfflineMessage,
@@ -76,7 +75,7 @@ import type {
 import { rewoundToastText, useRewindDialog } from '@renderer/features/task/RewindDialog'
 import { RELOAD_RUN_EVENT, announceRewound, redoRewindAndReload, type ReloadRunDetail } from '@renderer/features/task/rewindRedo'
 import { DISCARD_TASK_WORKTREE_EVENT, type DiscardTaskWorktreeDetail } from '@renderer/features/task/taskWorktree'
-import { needsSetup, setupRecents, setupStartingMode, setupWorkspace } from '@renderer/features/setup/setupModel'
+import { isFirstRun, setupRecents, setupStartingMode, setupWorkspace } from '@renderer/features/setup/setupModel'
 import {
   briefStateFor,
   setBriefChecks,
@@ -338,10 +337,11 @@ function App() {
     }
   }, [view])
 
-  // Set up is the first run: no approval choice recorded, and no task in any open
-  // workspace. Until the open workspaces' task lists have loaded that can't be
-  // told, so a returning user never sees Set up flash by on the way to Home.
-  // Once told it stays told — a folder opened from Set up loads its tasks too.
+  // Set up shows until an approval choice is on record. Whether it is a first
+  // run (no task in any open workspace) decides what it looks like, and until
+  // the open workspaces' task lists have loaded that can't be told, so nobody
+  // sees the first-run form flash by on the way to their tasks. Once told it
+  // stays told — a folder opened from Set up loads its tasks too.
   const taskCount = Object.values(contexts).reduce((sum, ctx) => sum + ctx.runs.length, 0)
   // Main opens its own scratch folder whenever no project is; Set up must know
   // it to tell a folder someone chose from one nobody did.
@@ -374,13 +374,21 @@ function App() {
     setupDecidedRef.current = true
   }
   const setupUndecided = !settings.toolApprovalOnboardingDone && !setupDecidedRef.current
-  const showSetup = !setupUndecided && needsSetup(settings.toolApprovalOnboardingDone, taskCount)
-  const setupChosenWorkspace = setupWorkspace(activeWorkspace, openWorkspaces, scratchPath?.path ?? null)
+  const showSetup = !setupUndecided && !settings.toolApprovalOnboardingDone
+  const setupFirstRun = showSetup && isFirstRun(settings.toolApprovalOnboardingDone, taskCount)
+  // A send held back until the approval choice is made: Set up asks it, then
+  // sends. The instruction itself waits in pendingSendRef (and in its composer).
+  const [setupSend, setSetupSend] = useState<{ workspacePath: string } | null>(null)
+  // The folder a held send was written in; else the one in front. Only a first
+  // run discounts main's scratch folder — anyone else's tasks may live there.
+  const setupChosenWorkspace =
+    setupSend?.workspacePath ??
+    setupWorkspace(activeWorkspace, openWorkspaces, setupFirstRun ? (scratchPath?.path ?? null) : null)
 
   // Navigation-mode preference applies once settings have loaded. During load the
   // shell keeps the established chat skeleton; the launch view lands before the
-  // first post-load paint (useLayoutEffect) so no wrong surface flashes. A first
-  // run lands on Home, where Set up lives.
+  // first post-load paint (useLayoutEffect) so no wrong surface flashes. With no
+  // approval choice on record it lands on Home, where Set up lives.
   const launchViewAppliedRef = useRef(false)
   useLayoutEffect(() => {
     if (loading || setupUndecided || launchViewAppliedRef.current) return
@@ -393,7 +401,6 @@ function App() {
       pickAppearanceSettings({
         theme: settings.theme,
         fontScale: settings.fontScale,
-        uiDensity: settings.uiDensity,
         skinId: settings.skinId,
         customCssPath: settings.customCssPath
       })
@@ -401,7 +408,6 @@ function App() {
   }, [
     settings.theme,
     settings.fontScale,
-    settings.uiDensity,
     settings.skinId,
     settings.customCssPath,
     hydrate
@@ -852,7 +858,7 @@ function App() {
   getFocusedPaneRef.current = getFocusedPane
   const getPaneByIdRef = useRef(getPaneById)
   getPaneByIdRef.current = getPaneById
-  const [approvalOnboardingOpen, setApprovalOnboardingOpen] = useState(false)
+  /** The send Set up is holding back until the approval choice is made. */
   const pendingSendRef = useRef<{
     text: string
     images?: string[]
@@ -929,25 +935,20 @@ function App() {
     return ok
   }, [setComposerDraftForPane])
 
-  const completeApprovalOnboarding = useCallback(
-    async (mode: ToolApprovalMode) => {
-      const res = await update({
-        toolApproval: { ...settings.toolApproval, mode },
-        toolApprovalOnboardingDone: true
-      })
-      if (!res.ok) return
-      setApprovalOnboardingOpen(false)
-      await flushPendingSend()
-    },
-    [flushPendingSend, settings.toolApproval, update]
-  )
-
-  const dismissApprovalOnboarding = useCallback(() => {
-    // Close without sending and without marking onboarding done or forcing Off.
-    // The next send re-opens the modal until the user picks an explicit mode.
+  // Going back to a composer without choosing lets the held send go: its text
+  // is still in that composer (a held send returns false, which puts it back),
+  // and a later choice must not send words that may have been edited since.
+  // Only once Set up has shown it — a send held on the way into Home is new.
+  const setupSendShownRef = useRef(false)
+  useEffect(() => {
+    if (view !== 'chat' || !setupSendShownRef.current) return
+    setupSendShownRef.current = false
     pendingSendRef.current = null
-    setApprovalOnboardingOpen(false)
-  }, [])
+    setSetupSend(null)
+  }, [view])
+  useEffect(() => {
+    if (view === 'home' && showSetup && setupSend) setupSendShownRef.current = true
+  }, [view, showSetup, setupSend])
 
   const gateSendWithOnboarding = useCallback(
     async (
@@ -966,6 +967,8 @@ function App() {
       if (extras?.worktree && !binding.runId) {
         return startInNewWorktreeRef.current(binding.workspacePath, text, images, files, extras)
       }
+      // No approval choice on record: hold the send and ask it on Set up, which
+      // sends it once the choice is saved.
       if (!settings.toolApprovalOnboardingDone) {
         pendingSendRef.current = {
           text,
@@ -976,7 +979,9 @@ function App() {
           runId: binding.runId,
           deliver
         }
-        setApprovalOnboardingOpen(true)
+        setupSendShownRef.current = false
+        setSetupSend({ workspacePath: binding.workspacePath })
+        setView('home')
         return false
       }
       return Boolean(await deliver(text, images, files, extras))
@@ -2395,7 +2400,10 @@ function App() {
     [addWorkspace]
   )
 
-  /** Start your first task: the approval choice is saved the way the first-send question saves it. */
+  /**
+   * Set up's Start: save the approval choice, then send the instruction it held
+   * back, back where it was written — or, with none held, open a new brief.
+   */
   const setupStart = useCallback(
     async (path: string, mode: ToolApprovalMode): Promise<string | null> => {
       const res = await update({
@@ -2404,10 +2412,20 @@ function App() {
       })
       // Said on Set up itself: the window's settings banner is not on screen there.
       if (!res.ok) return res.error
+      if (pendingSendRef.current) {
+        // Taken before the view changes, so leaving Set up can't drop it first.
+        const sent = flushPendingSend()
+        setupSendShownRef.current = false
+        setSetupSend(null)
+        setView('chat')
+        // A send that fails keeps its text in the composer; nothing to say here.
+        await sent.catch(() => false)
+        return null
+      }
       onNewSessionInWorkspace(path, '')
       return null
     },
-    [onNewSessionInWorkspace, settings.toolApproval, update]
+    [flushPendingSend, onNewSessionInWorkspace, settings.toolApproval, update]
   )
 
   // Drafts of the open workspaces. A new task (the count moving) reads them
@@ -2596,7 +2614,7 @@ function App() {
     <AppShell
       view={view}
       workspacePath={activeWorkspace}
-      firstRun={view === 'home' && showSetup ? { workspace: setupChosenWorkspace } : null}
+      firstRun={view === 'home' && setupFirstRun ? { workspace: setupChosenWorkspace } : null}
       drafts={{ items: taskDrafts, actions: draftActions, open: openDraft }}
       onOpenSettings={() => {
         setView('settings')
@@ -2724,6 +2742,7 @@ function App() {
               onChooseFolder={setupChooseFolder}
               onOpenPath={setupOpenPath}
               onStart={setupStart}
+              next={setupSend ? 'send' : setupFirstRun ? 'first-task' : 'task'}
             />
           </Suspense>
         </ErrorBoundary>
@@ -2810,17 +2829,6 @@ function App() {
       <ToastHost />
       {confirmDialog}
       {rewindDialog}
-      <ToolApprovalOnboardingModal
-        open={approvalOnboardingOpen}
-        error={settingsError}
-        mcpProtection={settings.toolApproval.mcpProtection !== false}
-        onChoose={(mode) => {
-          void completeApprovalOnboarding(mode)
-        }}
-        onDismiss={() => {
-          void dismissApprovalOnboarding()
-        }}
-      />
     </AppShell>
   )
 }

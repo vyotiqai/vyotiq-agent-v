@@ -62,7 +62,7 @@ import { NewTaskBrief, type NewTaskTargets } from '@renderer/features/task/NewTa
 import { useSlashCommands } from './useSlashCommands'
 import { MentionMenu } from './MentionMenu'
 import { useComposerMentions } from './useComposerMentions'
-import { resolveComposerMentions } from './resolveMentions'
+import { draftHasImageMention, resolveComposerMentions } from './resolveMentions'
 import { mentionMarker, type MentionMenuItem } from './mentionModel'
 import {
   executeSlashResolveResult,
@@ -695,8 +695,7 @@ export function Composer({
     if (!hadComposerFocus) return
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        // A dialog the send opened (the first-send approval question) took
-        // focus on purpose; taking it back would strand the keyboard behind it.
+        // A dialog the send opened took focus on purpose; taking it back would strand the keyboard behind it.
         if (document.activeElement?.closest('[aria-modal="true"]')) return
         // Own editor first — document order can point at another pane's composer.
         const own = taRef.current?.el
@@ -904,10 +903,14 @@ export function Composer({
     onProviderModel(provider, fallback)
   }, [running, catalog, model, filterOpts, onProviderModel, provider])
 
+  // An @-mentioned workspace image goes as an image at send, so it needs a
+  // vision model just as a pasted one does.
+  const imageMentioned = draftHasImageMention(text)
+
   // Cover picker, draft restore, and any setImages path — not only onPickAttachments.
   useEffect(() => {
-    if (images.length > 0) ensureVisionModel()
-  }, [images.length, ensureVisionModel])
+    if (images.length > 0 || imageMentioned) ensureVisionModel()
+  }, [images.length, imageMentioned, ensureVisionModel])
 
   useEffect(() => {
     if (audio.length > 0) ensureAudioModel()

@@ -8,9 +8,6 @@ export { SkinIdSchema, type SkinId, DEFAULT_SKIN_ID, SKIN_CATALOG, SKIN_IDS } fr
 export const FontScaleSchema = z.enum(['small', 'default', 'large'])
 export type FontScale = z.infer<typeof FontScaleSchema>
 
-export const UiDensitySchema = z.enum(['compact', 'default', 'comfortable'])
-export type UiDensity = z.infer<typeof UiDensitySchema>
-
 export const DEFAULT_FONT_SCALE: FontScale = 'default'
 
 const FONT_SCALE_STEPS: readonly FontScale[] = ['small', 'default', 'large']
@@ -23,12 +20,9 @@ export function stepFontScale(current: FontScale, direction: 1 | -1): FontScale 
   return FONT_SCALE_STEPS[next]!
 }
 
-export const DEFAULT_UI_DENSITY: UiDensity = 'default'
-
 export type AppearanceSettings = {
   theme: ThemeId
   fontScale: FontScale
-  uiDensity: UiDensity
   skinId: SkinId
   customCssPath: string
 }
@@ -39,7 +33,6 @@ export type AppearanceBootCache = {
   theme: ThemeId
   resolvedTheme: ResolvedTheme
   fontScale: FontScale
-  uiDensity: UiDensity
   skinId: SkinId
 }
 
@@ -47,7 +40,6 @@ export function pickAppearanceSettings(settings: AppearanceSettings): Appearance
   return {
     theme: settings.theme,
     fontScale: settings.fontScale,
-    uiDensity: settings.uiDensity,
     skinId: settings.skinId,
     customCssPath: settings.customCssPath
   }
@@ -60,7 +52,6 @@ export function resolveAppearanceBootCache(
   return {
     theme: appearance.theme,
     fontScale: appearance.fontScale,
-    uiDensity: appearance.uiDensity,
     skinId: appearance.skinId,
     resolvedTheme: resolveTheme(appearance.theme, systemDark)
   }
@@ -76,13 +67,11 @@ export function readAppearanceBootCache(): AppearanceBootCache | null {
     const obj = parsed as Record<string, unknown>
     const theme = obj.theme
     const fontScale = obj.fontScale
-    const uiDensity = obj.uiDensity
     const skinId = obj.skinId
     const resolvedTheme = obj.resolvedTheme
     if (
       (theme !== 'system' && theme !== 'light' && theme !== 'dark') ||
       (fontScale !== 'small' && fontScale !== 'default' && fontScale !== 'large') ||
-      (uiDensity !== 'compact' && uiDensity !== 'default' && uiDensity !== 'comfortable') ||
       (skinId !== 'default' &&
         skinId !== 'proof' &&
         skinId !== 'bench' &&
@@ -95,7 +84,6 @@ export function readAppearanceBootCache(): AppearanceBootCache | null {
     return {
       theme,
       fontScale,
-      uiDensity,
       skinId,
       resolvedTheme
     }

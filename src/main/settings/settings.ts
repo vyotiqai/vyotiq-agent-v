@@ -415,6 +415,8 @@ function stripLegacyFields(raw: Record<string, unknown>): Record<string, unknown
     harnessProposalRewriter: _harnessProposalRewriter,
     githubClientId: _legacyGithubClientId,
     accentPreset: _legacyAccentPreset,
+    // The Density setting was removed; the schema strips it anyway, this also rewrites the file.
+    uiDensity: _legacyUiDensity,
     ...rest
   } = raw
   return rest
@@ -609,7 +611,8 @@ export function getSettings(): Settings {
       'contractDoneWhen' in raw ||
       'readBeforeEdit' in raw ||
       'memoryAutoPromote' in raw ||
-      'accentPreset' in raw
+      'accentPreset' in raw ||
+      'uiDensity' in raw
     if (shouldPersist) {
       persistSettingsOnLoad(
         data,

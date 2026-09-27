@@ -25,15 +25,6 @@
         : 'default'
     root.setAttribute('data-font-scale', fontScale)
 
-    var density =
-      cache &&
-      (cache.uiDensity === 'compact' ||
-        cache.uiDensity === 'default' ||
-        cache.uiDensity === 'comfortable')
-        ? cache.uiDensity
-        : 'default'
-    root.setAttribute('data-density', density)
-
     // Keep the id list and the fallback in step with SKIN_IDS /
     // DEFAULT_SKIN_ID in src/shared/skins.ts — this runs before any
     // bundle loads, so it cannot import them.

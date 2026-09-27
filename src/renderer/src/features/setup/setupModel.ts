@@ -113,10 +113,12 @@ export function setupRecents(
 }
 
 /**
- * Set up shows on a first run: until "Start your first task" records the
- * approval choice, and only while no task exists — someone who dismissed the
- * approval question and already has tasks goes straight to Home.
+ * Set up shows until its Start records the approval choice. A first run is
+ * the part of that with no task anywhere yet: it gets the first-run navigator
+ * and "Start your first task", and the scratch folder main opened by itself
+ * doesn't count as a workspace. Someone who already has tasks keeps their
+ * navigator, and the folder their tasks live in counts, whatever it is.
  */
-export function needsSetup(onboardingDone: boolean, taskCount: number): boolean {
+export function isFirstRun(onboardingDone: boolean, taskCount: number): boolean {
   return !onboardingDone && taskCount === 0
 }
