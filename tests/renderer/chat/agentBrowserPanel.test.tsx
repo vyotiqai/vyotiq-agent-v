@@ -91,6 +91,44 @@ describe('AgentBrowserPanel visibility', () => {
     expect(await findByLabelText('Search or enter URL')).toBeTruthy()
   })
 
+  it('starts with the 40px address row and puts the tabs under it', async () => {
+    Object.defineProperty(window, 'vyotiq', {
+      configurable: true,
+      writable: true,
+      value: {
+        browserGetState: vi.fn().mockResolvedValue({
+          ok: true,
+          data: {
+            open: true,
+            url: 'https://example.com',
+            title: 'Example',
+            navigating: false,
+            userControl: true,
+            tabs: [
+              { id: 't1', title: 'Example', url: 'https://example.com', active: true },
+              { id: 't2', title: 'Docs', url: 'https://example.com/docs', active: false }
+            ],
+            canGoBack: false,
+            canGoForward: false
+          }
+        }),
+        onBrowserState: vi.fn().mockReturnValue(() => {}),
+        browserSetBounds: vi.fn().mockResolvedValue({ ok: true, data: true })
+      }
+    })
+    render(<AgentBrowserPanel visible={true} />)
+    const tabs = await waitFor(() => {
+      const el = document.querySelector('[data-browser-tabs]')
+      expect(el).not.toBeNull()
+      return el!
+    })
+    const panel = document.querySelector('[data-agent-browser-panel]')!
+    const firstRow = [...panel.children].find((el) => el.tagName !== 'P')!
+    expect(firstRow.classList.contains('h-10')).toBe(true)
+    expect(firstRow.contains(screen.getByLabelText('Search or enter URL'))).toBe(true)
+    expect(firstRow.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('says what the agent is doing in the browser when a call is in flight', async () => {
     Object.defineProperty(window, 'vyotiq', {
       configurable: true,

@@ -9,7 +9,7 @@ import {
   MENU_ROW_ACTIVE,
   MENU_ROW_IDLE,
   MENU_ROW_TEXT,
-  MENU_SURFACE,
+  MENU_SURFACE_SCROLL,
   Segmented,
   type ActionMenuItem
 } from '@renderer/lib/ui'
@@ -460,43 +460,6 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         Embedded browser for agent web tasks. Page content is controlled by the agent; use the
         address bar and toolbar for manual navigation when user control is enabled.
       </p>
-      {tabs.length > 1 ? (
-        <div className="flex h-8 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 [scrollbar-width:none]" data-browser-tabs>
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className={cn(
-                'group inline-flex h-6 max-w-[10rem] shrink-0 items-center rounded-md vy-transition',
-                tab.active ? 'bg-surface-2 text-fg-strong' : 'text-muted hover:bg-surface hover:text-fg'
-              )}
-            >
-              <button
-                type="button"
-                className="inline-flex h-full min-w-0 items-center gap-1.5 rounded-md px-2 text-xs focus-visible:vy-focus-ring"
-                title={`${tab.title || tab.id}\n${tab.url}`}
-                onClick={() => {
-                  void window.vyotiq.browserSelectTab?.(tab.id, workspacePath ?? undefined)
-                }}
-              >
-                <Icon name="globe" size={12} className="shrink-0" />
-                <span className="truncate">{tab.title?.trim() || tab.id}</span>
-              </button>
-              <span className="-ml-1 mr-1 hidden shrink-0 group-focus-within:inline-flex group-hover:inline-flex">
-                <IconButton
-                  icon="close"
-                  label={`Close tab ${tab.title || tab.id}`}
-                  size="xs"
-                  tone="muted"
-                  onClick={() => {
-                    void window.vyotiq.browserCloseTab?.(tab.id, workspacePath ?? undefined)
-                  }}
-                />
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
         <IconButton
           icon="arrowLeft"
@@ -620,7 +583,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
               id="browser-history-list"
               role="listbox"
               aria-label="Recent pages"
-              className={cn(MENU_SURFACE, 'absolute left-0 right-0 top-full mt-1 max-h-[min(50vh,320px)] overflow-y-auto p-1')}
+              className={cn(MENU_SURFACE_SCROLL, 'absolute left-0 right-0 top-full mt-1 max-h-[min(50vh,320px)] p-1')}
               data-browser-history-dropdown
             >
               {recentGroups.map((group) => (
@@ -688,6 +651,44 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
           )}
         />
       </div>
+
+      {/* Tabs sit under the address row: the pane starts with its 40px row, whatever the tab count. */}
+      {tabs.length > 1 ? (
+        <div className="flex h-8 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 [scrollbar-width:none]" data-browser-tabs>
+          {tabs.map((tab) => (
+            <div
+              key={tab.id}
+              className={cn(
+                'group inline-flex h-6 max-w-[10rem] shrink-0 items-center rounded-md vy-transition',
+                tab.active ? 'bg-surface-2 text-fg-strong' : 'text-muted hover:bg-surface hover:text-fg'
+              )}
+            >
+              <button
+                type="button"
+                className="inline-flex h-full min-w-0 items-center gap-1.5 rounded-md px-2 text-xs focus-visible:vy-focus-ring"
+                title={`${tab.title || tab.id}\n${tab.url}`}
+                onClick={() => {
+                  void window.vyotiq.browserSelectTab?.(tab.id, workspacePath ?? undefined)
+                }}
+              >
+                <Icon name="globe" size={12} className="shrink-0" />
+                <span className="truncate">{tab.title?.trim() || tab.id}</span>
+              </button>
+              <span className="-ml-1 mr-1 hidden shrink-0 group-focus-within:inline-flex group-hover:inline-flex">
+                <IconButton
+                  icon="close"
+                  label={`Close tab ${tab.title || tab.id}`}
+                  size="xs"
+                  tone="muted"
+                  onClick={() => {
+                    void window.vyotiq.browserCloseTab?.(tab.id, workspacePath ?? undefined)
+                  }}
+                />
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {showAgentBanner ? (
         <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs" role="status" data-browser-agent-banner>
