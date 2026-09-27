@@ -129,6 +129,25 @@ describe('instruction line', () => {
     expect(screen.getByRole('textbox', { name: 'Edit queued instruction' })).toBeTruthy()
   })
 
+  it('shows an instruction queued offline as such, with edit and remove but no send now', () => {
+    const onRemoveFollowUp = vi.fn()
+    renderLine({
+      pendingFollowUps: [
+        { id: 'o1', itemId: 'o1', preview: 'Run the tests again', text: 'Run the tests again', offline: true }
+      ],
+      onSendFollowUpNow: vi.fn(),
+      onRemoveFollowUp,
+      onEditFollowUp: vi.fn(async () => true)
+    })
+    const queue = screen.getByRole('list', { name: 'Queued instructions' })
+    expect(within(queue).getByText('Queued · offline')).toBeTruthy()
+    expect(queue.querySelector('[data-follow-up-offline]')).not.toBeNull()
+    expect(within(queue).queryByRole('button', { name: 'Send queued instruction now' })).toBeNull()
+    expect(within(queue).getByRole('button', { name: 'Edit queued instruction' })).toBeTruthy()
+    fireEvent.click(within(queue).getByRole('button', { name: 'Remove queued instruction' }))
+    expect(onRemoveFollowUp).toHaveBeenCalledWith('o1')
+  })
+
   it('sets mode, model and effort from one token', async () => {
     const onProviderModel = vi.fn()
     const onAgentModeChange = vi.fn()

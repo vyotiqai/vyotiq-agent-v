@@ -1218,6 +1218,11 @@ export type PendingFollowUpState = {
   itemId: string
   preview: string
   text: string
+  /**
+   * Queued while offline: it waits in the renderer's offline queue, not main's
+   * follow-up store, so it can be edited or removed but not sent now.
+   */
+  offline?: boolean
   /** Full queued message — preserved so text-only edits keep attachments. */
   message?: ChatMessage
 }

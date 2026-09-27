@@ -52,8 +52,10 @@ import { buildRunDeepLink } from '@shared/deepLink'
 import { copyText } from '@renderer/lib/markdown/copyText'
 import { normalizeRelPath } from '../features/chat/utils/turnFileDiffs'
 import { ToolApprovalOnboardingModal } from '../features/chat/components/ToolApprovalOnboardingModal'
-import { useOfflineSendQueue } from '@renderer/lib/hooks/useOfflineSendQueue'
+import { useOfflineQueue, useOfflineSendQueue } from '@renderer/lib/hooks/useOfflineSendQueue'
 import {
+  editOfflineMessage,
+  removeOfflineMessage,
   removeOfflineQueueEntriesForRun,
   resolveOfflineFlushTarget
 } from '@renderer/lib/hooks/offlineQueueStore'
@@ -890,6 +892,17 @@ function App() {
   )
 
   const { sendWithOfflineQueue } = useOfflineSendQueue(offlineWorkspacePath, flushOfflineEntry)
+  const offlineQueue = useOfflineQueue()
+
+  /**
+   * The new, still-empty pane a Home or worktree start just opened in `path`.
+   * An offline send with neither a pane nor a run can never be delivered, so it
+   * is bound to that pane and starts there once the connection is back.
+   */
+  const draftPaneIdIn = useCallback((path: string): string | undefined => {
+    const pane = getFocusedPaneRef.current()
+    return pane && pane.runId == null && workspacePathsEqual(pane.workspacePath, path) ? pane.paneId : undefined
+  }, [])
   const startInNewWorktreeRef = useRef<
     (
       parentPath: string,
@@ -1027,7 +1040,7 @@ function App() {
               files,
               extras,
               (t, i, f, e) => getRunControllerRef.current(null, path)?.send(t, i, f, e) ?? false,
-              { runId: null, workspacePath: path }
+              { runId: null, paneId: draftPaneIdIn(path), workspacePath: path }
             ),
           brief,
           undefined,
@@ -1037,7 +1050,7 @@ function App() {
         )
       )
     },
-    [gateSendWithOnboarding, homeProviderIssue, newChatInWorkspace, onNewSessionInWorkspace, sendWithOfflineQueue]
+    [draftPaneIdIn, gateSendWithOnboarding, homeProviderIssue, newChatInWorkspace, onNewSessionInWorkspace, sendWithOfflineQueue]
   )
 
   /**
@@ -1072,7 +1085,7 @@ function App() {
           f,
           e,
           (t2, i2, f2, e2) => getRunControllerRef.current(null, path)?.send(t2, i2, f2, e2) ?? false,
-          { runId: null, workspacePath: path }
+          { runId: null, paneId: draftPaneIdIn(path), workspacePath: path }
         ),
       text,
       images,
@@ -1807,6 +1820,20 @@ function App() {
             ? paneContext.ui.scrollTop
             : undefined
       const paneCtrl = getRunController(pane.runId, pane.workspacePath)
+      // Sends queued for this pane while offline: shown in the line's queue until they start.
+      const offlineFollowUps: import('@renderer/lib/hooks/createChatStreamController').PendingFollowUpState[] =
+        offlineQueue.list(pane.workspacePath)
+          .filter((entry) =>
+            entry.paneId ? entry.paneId === pane.paneId : Boolean(pane.runId) && entry.runId === pane.runId
+          )
+          .map((entry) => ({
+            id: entry.id,
+            itemId: entry.id,
+            preview: entry.text.replace(/s+/g, ' ').trim(),
+            text: entry.text,
+            offline: true
+          }))
+      const offlineIds = new Set(offlineFollowUps.map((entry) => entry.id))
       const paneRun = pane.runId ? (paneContext?.runs.find((r) => r.runId === pane.runId) ?? null) : null
       const paneDraft = paneContext
         ? resolveComposerDraft(paneContext.ui, pane.runId)
@@ -1993,17 +2020,24 @@ function App() {
             )
           }
           messages={snap.messages}
-          pendingFollowUps={snap.pendingFollowUps}
+          pendingFollowUps={
+            offlineFollowUps.length > 0 ? [...snap.pendingFollowUps, ...offlineFollowUps] : snap.pendingFollowUps
+          }
           agentInstances={snap.agentInstances}
           openInstanceRunId={pane.runId ? (openInstanceByParent[pane.runId] ?? null) : null}
           onOpenInstanceRunIdChange={(id) => setOpenInstanceForParent(pane.runId, id)}
           getInstanceController={getRunController}
           onRemoveFollowUp={(id) => {
-            void paneCtrl?.removeFollowUp(id)
+            if (offlineIds.has(id)) removeOfflineMessage(pane.workspacePath, id)
+            else void paneCtrl?.removeFollowUp(id)
           }}
-          onEditFollowUp={(id, text) => paneCtrl?.editFollowUp(id, text) ?? false}
+          onEditFollowUp={(id, text) =>
+            offlineIds.has(id)
+              ? editOfflineMessage(pane.workspacePath, id, text)
+              : (paneCtrl?.editFollowUp(id, text) ?? false)
+          }
           onSendFollowUpNow={(id) => {
-            void paneCtrl?.sendFollowUpNow(id)
+            if (!offlineIds.has(id)) void paneCtrl?.sendFollowUpNow(id)
           }}
           onDismissError={onDismissChatBanner}
           composerDraft={paneDraft}
@@ -2074,6 +2108,7 @@ function App() {
       chatSurfaceEpoch,
       confirm,
       contexts,
+      offlineQueue,
       confirmRevertToUserMessage,
       onCopyRunLinkInWorkspace,
       createSlashHandlers,

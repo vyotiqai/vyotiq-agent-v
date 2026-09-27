@@ -1373,9 +1373,14 @@ export function Composer({
                   </Button>
                 </li>
               ) : (
-                <li key={entry.id} className="flex h-8 items-center gap-2.5 border-b border-border px-4 text-xs">
-                  <Icon name="enter" size={13} className="shrink-0 text-tertiary" />
-                  <span className="shrink-0 text-tertiary">Queued</span>
+                <li
+                  key={entry.id}
+                  className="flex h-8 items-center gap-2.5 border-b border-border px-4 text-xs"
+                  data-follow-up-offline={entry.offline ? '' : undefined}
+                >
+                  {/* Offline: kept here, starts when the connection is back — the icon and the word both say so. */}
+                  <Icon name={entry.offline ? 'offline' : 'enter'} size={13} className="shrink-0 text-tertiary" />
+                  <span className="shrink-0 text-tertiary">{entry.offline ? 'Queued · offline' : 'Queued'}</span>
                   <span className="min-w-0 flex-1 truncate text-secondary" title={entry.text}>
                     {entry.preview}
                   </span>
@@ -1392,7 +1397,7 @@ export function Composer({
                       Edit
                     </Button>
                   ) : null}
-                  {onSendFollowUpNow ? (
+                  {onSendFollowUpNow && !entry.offline ? (
                     <Button
                       size="xs"
                       variant="ghost"

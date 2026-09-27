@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import type { AttachedFile, ComposerSendExtras } from '@shared/ipc'
 import { useNetworkStatus } from './useNetworkStatus'
 import {
@@ -6,7 +6,10 @@ import {
   dequeueOfflineMessage,
   enqueueOfflineMessage,
   offlineQueueLength,
+  offlineQueueSnapshot,
   peekOfflineQueue,
+  subscribeOfflineQueue,
+  type OfflineQueueSnapshot,
   type OfflineQueuedSend
 } from './offlineQueueStore'
 
@@ -46,7 +49,7 @@ export function useOfflineSendQueue(
   const queuedCount = workspacePath ? offlineQueueLength(workspacePath) : 0
   const offlineHint =
     queuedCount > 0
-      ? `${queuedCount} message${queuedCount === 1 ? '' : 's'} queued — will send when online`
+      ? `${queuedCount} instruction${queuedCount === 1 ? '' : 's'} queued — will start when online`
       : networkOfflineHint
 
   const bumpQueue = useCallback(() => {
@@ -146,6 +149,11 @@ export function useOfflineSendQueue(
   }, [online, workspacePath, onFlush, bumpQueue, queueTick])
 
   return { online, offlineHint, sendWithOfflineQueue, clearOfflineQueueForWorkspace }
+}
+
+/** The waiting sends; a new reader whenever one is queued, edited, removed or flushed. */
+export function useOfflineQueue(): OfflineQueueSnapshot {
+  return useSyncExternalStore(subscribeOfflineQueue, offlineQueueSnapshot, offlineQueueSnapshot)
 }
 
 /** Test helper: reset in-memory flush locks between cases. */
