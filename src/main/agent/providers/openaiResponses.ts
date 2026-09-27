@@ -37,6 +37,32 @@ import { mergeOpenAiCompatToolArgDelta, wireToolCallArguments } from '../toolArg
 
 export { supportsExplicitPromptCache } from './systemZones'
 
+const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses'
+
+/**
+ * One `thinking_done` per stream, emitted before the first answer or tool frame
+ * and again offered at stream end (a no-op once emitted). Shared by the chat
+ * completions and Responses streams.
+ */
+export function thinkingDoneLatch(text: () => string): {
+  emit: () => Generator<StreamChunk, void, unknown>
+  readonly emitted: boolean
+} {
+  let emitted = false
+  return {
+    *emit() {
+      const current = text()
+      if (current && !emitted) {
+        emitted = true
+        yield { type: 'thinking_done', text: current }
+      }
+    },
+    get emitted() {
+      return emitted
+    }
+  }
+}
+
 /** Exported for tests — parse Responses usage including cache write tokens. */
 export function parseOpenAiResponsesUsage(raw: unknown): TokenUsage | undefined {
   if (!raw || typeof raw !== 'object') return undefined
@@ -256,7 +282,7 @@ const RESPONSES_BODY_MAX_ATTEMPTS = 6
 /** Stream chat via OpenAI Responses API for reasoning models. */
 export async function* streamOpenAiResponses(
   req: ProviderChatRequest,
-  responsesUrl = 'https://api.openai.com/v1/responses',
+  responsesUrl = OPENAI_RESPONSES_URL,
   extraHeaders?: Record<string, string>,
   providerId: ProviderId = 'openai'
 ): AsyncGenerator<StreamChunk> {
@@ -429,7 +455,6 @@ export async function* streamOpenAiResponses(
   const outputItems: unknown[] = []
   let responseId: string | undefined
   let thinkingText = ''
-  let thinkingDoneEmitted = false
   let answerStarted = false
   let lastUsage: TokenUsage | undefined
   let stopReason: StopReason | undefined
@@ -444,14 +469,11 @@ export async function* streamOpenAiResponses(
     return next
   }
 
-  const emitThinkingDoneIfNeeded = function* (): Generator<StreamChunk, void, unknown> {
-    if (thinkingText && !thinkingDoneEmitted) {
-      thinkingDoneEmitted = true
-      yield { type: 'thinking_done', text: thinkingText }
-    }
-  }
+  const thinkingDone = thinkingDoneLatch(() => thinkingText)
 
   const drops = { dropped: 0 }
+  /** A terminal `response.*` event arrived; the protocol always ends on one. */
+  let finished = false
 
   for await (const event of iterateSseJson(res, req.signal, drops)) {
     const type = event.type as string | undefined
@@ -462,7 +484,7 @@ export async function* streamOpenAiResponses(
       const delta = event.delta as string | undefined
       if (delta) {
         answerStarted = true
-        yield* emitThinkingDoneIfNeeded()
+        yield* thinkingDone.emit()
         yield { type: 'text', text: delta }
       }
     }
@@ -494,7 +516,7 @@ export async function* streamOpenAiResponses(
         }
         pending.set(callId, call)
         // Emit immediately so UI can show tool chrome before argument deltas.
-        yield* emitThinkingDoneIfNeeded()
+        yield* thinkingDone.emit()
         yield {
           type: 'tool_call_delta',
           toolCallDelta: {
@@ -512,7 +534,7 @@ export async function* streamOpenAiResponses(
       if (item) {
         outputItems.push(item)
         if (item.type === 'function_call') {
-          yield* emitThinkingDoneIfNeeded()
+          yield* thinkingDone.emit()
           const callId = String(item.call_id ?? item.id ?? `call_${pending.size}`)
           const call: ToolCall = {
             id: callId,
@@ -527,7 +549,7 @@ export async function* streamOpenAiResponses(
           const summary = item.summary as Array<{ text?: string }> | undefined
           if (summary?.length) {
             const text = summary.map((s) => s.text ?? '').join('')
-            if (text && !thinkingText && !answerStarted && !thinkingDoneEmitted) {
+            if (text && !thinkingText && !answerStarted && !thinkingDone.emitted) {
               thinkingText = text
               yield { type: 'thinking_delta', text }
             }
@@ -549,7 +571,7 @@ export async function* streamOpenAiResponses(
         continue
       }
       if (callId && delta) {
-        yield* emitThinkingDoneIfNeeded()
+        yield* thinkingDone.emit()
         const existing = pending.get(callId) ?? { id: callId, name: '', arguments: '' }
         const merged = mergeOpenAiCompatToolArgDelta(existing.arguments, delta)
         existing.arguments = merged.arguments
@@ -564,6 +586,7 @@ export async function* streamOpenAiResponses(
     }
 
     if (type === 'response.incomplete' || type === 'response.failed') {
+      finished = true
       const details = response?.incomplete_details as Record<string, unknown> | undefined
       stopReason = normalizeStopReason(details?.reason) ?? (type === 'response.failed' ? 'error' : 'unknown')
       // `response.incomplete` (length-capped output) carries usage just like
@@ -581,6 +604,7 @@ export async function* streamOpenAiResponses(
     }
 
     if (type === 'response.completed' || type === 'response.done') {
+      finished = true
       const details = response?.incomplete_details as Record<string, unknown> | undefined
       // `incomplete_details` is present even on a terminal `completed` frame when the
       // response was cut short, so prefer it over the event name.
@@ -590,7 +614,22 @@ export async function* streamOpenAiResponses(
     }
   }
 
-  if (thinkingText && !thinkingDoneEmitted) yield { type: 'thinking_done', text: thinkingText }
+  // A connection that closes cleanly before the terminal event is not a
+  // finished turn: the flush below would run half-streamed tool calls.
+  // First-party only: the protocol always ends there on a terminal event, but
+  // no compatible host (OpenCode Go /responses) has been seen streaming, and
+  // one that skipped it would fail every reply.
+  if (!finished && responsesUrl === OPENAI_RESPONSES_URL) {
+    logProviderFailure(providerId, 'stream', { message: 'ended before response.completed' })
+    yield {
+      type: 'error',
+      error: 'Response stream ended before the response completed',
+      errorCode: 'PROVIDER_NETWORK'
+    }
+    return
+  }
+
+  yield* thinkingDone.emit()
 
   // item_id buckets that never received their mapping — count rather than
   // silently discard.

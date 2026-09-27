@@ -32,7 +32,12 @@ export type ThinkingConfig = z.infer<typeof ThinkingConfigSchema>
 const AnthropicThinkingBlockSchema = z.object({
   type: z.enum(['thinking', 'redacted_thinking']),
   thinking: z.string().optional(),
-  data: z.string().optional()
+  data: z.string().optional(),
+  /**
+   * Opaque `signature_delta` payload. First-party Anthropic rejects a replayed
+   * thinking block without it, and verifies it against the block unchanged.
+   */
+  signature: z.string().optional()
 })
 
 const OpenAiResponsesStateSchema = z.object({
@@ -341,6 +346,15 @@ export function anthropicUsesAdaptiveThinking(modelId: string): boolean {
   if (/claude-(opus|sonnet)-4[.-]([6-9]|\d{2,})/i.test(m)) return true
   if (/claude-(opus|sonnet)-4-[6-9]/i.test(m)) return true
   return false
+}
+
+/**
+ * False for the Anthropic models whose thinking is always on: Fable 5 / 5.1,
+ * the Mythos models, and Opus 5.5 answer `thinking: {type: "disabled"}` with a
+ * 400. Opus 5 accepts it (at effort ≤ high), as do Sonnet 5 and Opus 4.x.
+ */
+export function anthropicThinkingCanDisable(modelId: string): boolean {
+  return !/claude-(fable-5|mythos|opus-5[.-]5(?![0-9]))/i.test(modelId)
 }
 
 /** Anthropic manual budget_tokens mode for older Claude models (pre-4.6). */

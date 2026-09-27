@@ -3,6 +3,7 @@ import { ThinkingEffortSchema } from '../../../shared/ipc'
 import {
   modelSupportsThinking,
   thinkingApiFor,
+  anthropicThinkingCanDisable,
   anthropicUsesAdaptiveThinking,
   isOllamaGptOssModel,
   OLLAMA_GPT_OSS_THINKING_EFFORTS,
@@ -349,6 +350,7 @@ function providerThinkingDefaults(
   switch (providerId) {
     case 'anthropic':
       thinkingMode = anthropicUsesAdaptiveThinking(id) ? 'adaptive' : 'manual'
+      thinkingCanDisable = anthropicThinkingCanDisable(id)
       break
     case 'openai':
       thinkingMode = 'effort'

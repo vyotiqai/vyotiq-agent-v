@@ -1,6 +1,9 @@
 import { logger } from '../../../shared/logger'
 import { formatError, type ErrorCode } from '../../../shared/errors'
+import type { ProviderId } from '../../../shared/ipc'
 import { isCircuitOpenError } from '../circuitBreaker'
+import { isRetriableNetworkError } from './fetchWithRetry'
+import { formatProviderHttpError, scrubProviderErrorText } from './httpErrors'
 import type { StreamChunk } from './types'
 
 /**
@@ -90,13 +93,63 @@ export function logProviderFailure(
   logger.error(`Provider ${kind} failure`, fields)
 }
 
-/** Shared catch path for fetchWithRetry failures (network vs open circuit). */
+/**
+ * Failures raised while building the request, before a byte leaves the
+ * machine: a header value fetch refuses (an API key pasted with an invisible
+ * character), an unparseable URL, or a redirect we refused to follow. Every
+ * retry rebuilds the same request, so they are not network waits. Anything
+ * that could be a network failure stays PROVIDER_NETWORK.
+ */
+const HEADER_CONSTRUCTION_RE = /Cannot convert argument to a ByteString|is an invalid header (?:name|value)/i
+const REQUEST_CONSTRUCTION_RE = /Failed to parse URL|Refusing cross-origin redirect/i
+
+function requestConstructionFailure(err: unknown): 'header' | 'request' | null {
+  if (isRetriableNetworkError(err)) return null
+  let current: unknown = err
+  while (current instanceof Error) {
+    if (HEADER_CONSTRUCTION_RE.test(current.message)) return 'header'
+    if (REQUEST_CONSTRUCTION_RE.test(current.message)) return 'request'
+    if ((current as Error & { code?: unknown }).code === 'ERR_INVALID_URL') return 'request'
+    current = (current as Error & { cause?: unknown }).cause
+  }
+  return null
+}
+
+/** Shared catch path for fetchWithRetry failures (network vs open circuit vs a request that cannot be built). */
 export function providerFetchFailureChunk(provider: string, err: unknown): StreamChunk {
   const circuit = isCircuitOpenError(err)
+  const construction = circuit ? null : requestConstructionFailure(err)
+  if (construction) {
+    logProviderFailure(provider, 'network', { message: construction === 'header' ? 'invalid header' : 'invalid request' })
+    return {
+      type: 'error',
+      // The header message echoes the offending value — the API key itself.
+      error:
+        construction === 'header'
+          ? `${provider}: the API key or a request header contains a character HTTP headers cannot carry (often an invisible character from copy-paste). Re-enter the key in Settings → Providers.`
+          : scrubProviderErrorText(formatError(err)),
+      errorCode: 'PROVIDER_REQUEST'
+    }
+  }
   logProviderFailure(provider, circuit ? 'circuit' : 'network', {})
   return {
     type: 'error',
     error: formatError(err),
     errorCode: circuit ? 'CIRCUIT_OPEN' : 'PROVIDER_NETWORK'
+  }
+}
+
+/** Shared non-OK response path: log the status and surface it as a PROVIDER_HTTP chunk. */
+export function providerHttpFailureChunk(
+  provider: ProviderId,
+  status: number,
+  body: string
+): StreamChunk {
+  logProviderFailure(provider, 'http', { status })
+  return {
+    type: 'error',
+    error: formatProviderHttpError(status, body, provider),
+    errorCode: 'PROVIDER_HTTP',
+    httpStatus: status
   }
 }

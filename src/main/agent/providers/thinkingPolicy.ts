@@ -1,6 +1,7 @@
 import type { ProviderChatRequest } from './types'
 import {
   anthropicBudgetTokensForEffort,
+  anthropicThinkingCanDisable,
   anthropicUsesAdaptiveThinking,
   anthropicUsesManualThinking,
   normalizeEffortForAnthropic,
@@ -21,6 +22,11 @@ export function anthropicThinkingFields(req: ProviderChatRequest): Record<string
   if (!req.thinking?.enabled) {
     // Explicit disable for models that may think by default (adaptive / Opus 5+).
     if (mode === 'adaptive' || anthropicUsesAdaptiveThinking(model)) {
+      // Always-thinking models 400 on `disabled`; the documented stand-in for
+      // "thinking off" there is the lowest effort with `thinking` omitted.
+      if (req.modelInfo?.thinkingCanDisable === false || !anthropicThinkingCanDisable(model)) {
+        return { output_config: { effort: 'low' } }
+      }
       return { thinking: { type: 'disabled' } }
     }
     return {}
@@ -52,7 +58,8 @@ export function anthropicThinkingFields(req: ProviderChatRequest): Record<string
   return {}
 }
 
-function defaultAnthropicMaxTokens(model: string, hint?: number): number {
+/** Anthropic `max_tokens` when the request carries no usable hint. */
+export function defaultAnthropicMaxTokens(model: string, hint?: number): number {
   if (hint && hint > 0) return Math.min(hint, 64_000)
   if (/haiku/i.test(model)) return 8192
   if (/opus|fable/i.test(model)) return 16_384

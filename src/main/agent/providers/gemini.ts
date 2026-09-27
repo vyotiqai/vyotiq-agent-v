@@ -14,12 +14,13 @@ import type {
 import { billedCostFromUsage } from './usageFields'
 import { normalizeStopReason } from './stopReason'
 import { iterateSseJson } from './sse'
-import { logProviderFailure, providerFetchFailureChunk } from './log'
+import { logProviderFailure, providerFetchFailureChunk, providerHttpFailureChunk } from './log'
 import { CHAT_FETCH_MAX_ATTEMPTS, fetchWithRetry } from './fetchWithRetry'
 import { formatProviderHttpError, scrubProviderErrorText } from './httpErrors'
 import { streamGeminiInteractions } from './geminiInteractions'
 import { resolveSystemZones, volatileSessionMessage } from './systemZones'
 import { wireToolCallArguments } from '../toolArgWire'
+import { syntheticToolCallIdTag } from '../dedupeToolCalls'
 
 /** Exported for tests — parse Gemini usage metadata including implicit cache hits. */
 export function parseGeminiUsage(usageMetadata: Record<string, unknown>): TokenUsage {
@@ -129,12 +130,8 @@ function toGeminiContents(messages: ChatMessage[]): Array<Record<string, unknown
       const text = typeof m.content === 'string' ? m.content : contentToText(m.content)
       if (text) parts.push({ text })
       for (const t of m.toolCalls) {
-        let args: unknown = {}
-        try {
-          args = JSON.parse(wireToolCallArguments(t.name, t.arguments))
-        } catch {
-          args = {}
-        }
+        // wireToolCallArguments only returns parse-checked JSON or `{}`.
+        const args: unknown = JSON.parse(wireToolCallArguments(t.name, t.arguments))
         parts.push({
           functionCall: {
             name: t.name,
@@ -362,12 +359,14 @@ export const geminiProvider: LlmProvider = {
 
     if (!res.ok) {
       const text = await res.text().catch(() => '')
-      logProviderFailure('gemini', 'http', { status: res.status })
-      yield { type: 'error', error: formatProviderHttpError(res.status, text, 'gemini'), errorCode: 'PROVIDER_HTTP', httpStatus: res.status }
+      yield providerHttpFailureChunk('gemini', res.status, text)
       return
     }
 
     let toolIndex = 0
+    // Gemini usually sends no functionCall id; a bare counter would repeat
+    // `gemini_0` on every step and pair later results onto earlier calls.
+    const idTag = syntheticToolCallIdTag()
     let lastUsage: TokenUsage | undefined
     let stopReason: StopReason | undefined
     const pendingCalls = new Map<string, ToolCall>()
@@ -375,15 +374,20 @@ export const geminiProvider: LlmProvider = {
 
     for await (const event of iterateSseJson(res, req.signal, drops)) {
       if (event.error) {
-        const errObj = event.error as { message?: string } | string
+        const errObj = event.error as { message?: string; code?: unknown } | string
         const raw =
           typeof errObj === 'string' ? errObj : (errObj.message ?? 'Gemini stream error')
         const message = scrubProviderErrorText(raw)
-        logProviderFailure('gemini', 'stream', {})
+        // In-band errors carry the HTTP status in `code`; it lets the retry
+        // layer tell a transient 503 from a permanent 400.
+        const code = typeof errObj === 'string' ? undefined : errObj.code
+        const httpStatus = typeof code === 'number' && code >= 400 && code < 600 ? code : undefined
+        logProviderFailure('gemini', 'stream', { status: httpStatus, message })
         yield {
           type: 'error',
           error: message,
-          errorCode: 'PROVIDER_STREAM'
+          errorCode: 'PROVIDER_HTTP',
+          ...(httpStatus !== undefined ? { httpStatus } : {})
         }
         return
       }
@@ -405,7 +409,7 @@ export const geminiProvider: LlmProvider = {
         const fc = part.functionCall as { name?: string; args?: unknown; id?: string } | undefined
         if (fc?.name) {
           const id =
-            typeof fc.id === 'string' && fc.id ? fc.id : `gemini_${toolIndex++}`
+            typeof fc.id === 'string' && fc.id ? fc.id : `gemini_${idTag}_${toolIndex++}`
           const argsJson = JSON.stringify(fc.args ?? {})
           const existing = pendingCalls.get(id)
           if (existing) {
