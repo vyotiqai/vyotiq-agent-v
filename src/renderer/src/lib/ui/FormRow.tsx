@@ -85,7 +85,7 @@ export function FormCard({
   dataAttribute?: string
 }) {
   return (
-    <div {...{ [dataAttribute]: true }} className={cn('divide-y divide-border border-y border-border', className)}>
+    <div {...{ [dataAttribute]: true }} className={cn('divide-y divide-border/60 border-y border-border', className)}>
       {children}
     </div>
   )

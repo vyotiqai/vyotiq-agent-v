@@ -615,7 +615,7 @@ function McpBody({
         >
           {tools.length > 0 ? (
             <>
-              <ul className="divide-y divide-border border-y border-border">
+              <ul className="divide-y divide-border/60 border-y border-border">
                 {(showAllTools ? tools : tools.slice(0, TOOLS_SHOWN)).map((tool) => (
                   <ToolRow key={tool.name} tool={tool} />
                 ))}
@@ -800,7 +800,7 @@ function PackageBody({
 
       {item.kind === 'package' && rows.length > 0 ? (
         <Detail label="Contains" note={String(rows.length)}>
-          <ul className="divide-y divide-border border-y border-border">
+          <ul className="divide-y divide-border/60 border-y border-border">
             {rows.map((row) => (
               <li key={row.key} className="flex h-8 items-center gap-2 text-xs">
                 <Icon name={row.icon} size={13} className="text-tertiary" />
