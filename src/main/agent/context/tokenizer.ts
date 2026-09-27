@@ -1,17 +1,15 @@
 import { createHash } from 'node:crypto'
-import { encode as encodeO200k } from 'gpt-tokenizer/encoding/o200k_base'
-import { encode as encodeCl100k } from 'gpt-tokenizer/encoding/cl100k_base'
 import type { ModelInfo } from '../../../shared/ipc/schemas/providers'
+import { countBpeTokens, HEURISTIC_CHARS_PER_TOKEN, type EncodingName } from './bpeCount'
 import { encodeCountsInWorker } from './tokenizerPool'
 
-export type EncodingName = 'o200k_base' | 'cl100k_base'
+export type { EncodingName }
 
 /**
  * Running a real BPE over a megabyte of tool output costs more than the
  * accuracy is worth, so anything past this falls back to the chars/4 heuristic.
  */
 const LARGE_TEXT_CHARS = 100_000
-const HEURISTIC_CHARS_PER_TOKEN = 4
 
 /**
  * Assembly re-counts the whole history on every step. Small strings keep the
@@ -72,10 +70,6 @@ function cacheKey(encoding: EncodingName, text: string): string {
   return `${encoding}\u0000${text.length}\u0000${digest}`
 }
 
-function encodeWith(encoding: EncodingName, text: string): number {
-  return encoding === 'cl100k_base' ? encodeCl100k(text).length : encodeO200k(text).length
-}
-
 function remember(key: string, count: number): number {
   if (cache.size >= CACHE_LIMIT) {
     const oldest = cache.keys().next().value
@@ -86,12 +80,7 @@ function remember(key: string, count: number): number {
 }
 
 function countUncachedSync(text: string, encoding: EncodingName): number {
-  try {
-    return encodeWith(encoding, text)
-  } catch {
-    // A malformed lone surrogate can throw; the heuristic is better than crashing.
-    return Math.ceil(text.length / HEURISTIC_CHARS_PER_TOKEN)
-  }
+  return countBpeTokens(text, encoding)
 }
 
 /**

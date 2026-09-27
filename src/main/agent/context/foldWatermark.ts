@@ -17,6 +17,18 @@ export function stripLeadingOrphanToolMessages(messages: ChatMessage[]): ChatMes
 }
 
 /**
+ * Start of the shortest suffix that does not open on a `tool` row: the last
+ * non-tool message, or the final message when every row is a tool result.
+ * The last-resort keep window when no fold point leaves a valid suffix.
+ */
+export function lastNonToolStart(messages: readonly ChatMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]!.role !== 'tool') return i
+  }
+  return Math.max(0, messages.length - 1)
+}
+
+/**
  * Apply a compaction `foldedMessages` watermark without leaving a leading orphan
  * `tool` row (including the sole-message case).
  */
@@ -34,15 +46,8 @@ export function applyFoldedMessagesWatermark(
       return { messages: kept, foldedMessages: fold + (messages.length - fold - kept.length) }
     }
     if (fold <= 0) {
-      for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role !== 'tool') {
-          return { messages: messages.slice(i), foldedMessages: i }
-        }
-      }
-      return {
-        messages: messages.slice(-1),
-        foldedMessages: Math.max(0, messages.length - 1)
-      }
+      const start = lastNonToolStart(messages)
+      return { messages: messages.slice(start), foldedMessages: start }
     }
     fold--
   }

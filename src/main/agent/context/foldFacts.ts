@@ -313,9 +313,14 @@ export function extractFoldFacts(
     }
   }
 
-  const fromDisk = extras?.todos ? openTodoTitles(extras.todos) : []
-  const fromMessages = todosFromMessages(messages)
-  const todos = [...new Set([...fromDisk, ...fromMessages])].sort()
+  // todos.json is the run's current list; a todo_write result inside the folded
+  // prefix is an older snapshot of it. When the file has items it alone decides
+  // what is open — the union kept a todo completed after that snapshot pinned as
+  // open. The transcript is the fallback only when there is no list on disk.
+  const todos =
+    extras?.todos && extras.todos.length > 0
+      ? [...new Set(openTodoTitles(extras.todos))].sort()
+      : [...new Set(todosFromMessages(messages))].sort()
   const contractGoal = extras?.contract ? parseContractGoal(extras.contract) : undefined
   const doneWhen = extras?.contract ? parseContractDoneWhen(extras.contract) : []
 
