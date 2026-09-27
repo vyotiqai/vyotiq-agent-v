@@ -1,3 +1,5 @@
+import { matchFrontmatterKey, splitFrontmatter, stripQuotes } from '@shared/rules'
+
 export type ParsedRuleEditor = {
   alwaysApply: boolean
   hadAlwaysApplyKey: boolean
@@ -7,47 +9,41 @@ export type ParsedRuleEditor = {
   frontmatterLines: string[] | null
 }
 
+/**
+ * Editor-side read of a rule file.
+ *
+ * Shares the split and the key regex with the agent, but keeps its own policy:
+ * it wants raw values and the verbatim frontmatter lines so an unrecognized key
+ * survives a save, and it tracks whether `alwaysApply` was written at all —
+ * which the agent's parsed meta cannot express, since an unrecognized value
+ * leaves the flag absent.
+ */
 export function parseRuleEditor(raw: string): ParsedRuleEditor {
-  const trimmed = raw.replace(/^\uFEFF/, '')
-  if (!trimmed.startsWith('---')) {
+  const { lines, body } = splitFrontmatter(raw)
+  if (!lines) {
     return {
       alwaysApply: true,
       hadAlwaysApplyKey: false,
       description: '',
-      body: trimmed,
+      body,
       frontmatterLines: null
     }
   }
-  const end = trimmed.indexOf('\n---', 3)
-  if (end < 0) {
-    return {
-      alwaysApply: true,
-      hadAlwaysApplyKey: false,
-      description: '',
-      body: trimmed,
-      frontmatterLines: null
-    }
-  }
-  const fmRaw = trimmed.slice(3, end).replace(/^\r?\n/, '').replace(/\r?\n$/, '')
-  const frontmatterLines = fmRaw.length > 0 ? fmRaw.split(/\r?\n/) : []
-  const body = trimmed.slice(end + 4).replace(/^\r?\n/, '')
   let alwaysApply = true
   let hadAlwaysApplyKey = false
   let description = ''
-  for (const line of frontmatterLines) {
-    const m = line.match(/^([A-Za-z][\w-]*)\s*:\s*(.*)$/)
-    if (!m) continue
-    const key = m[1]!
-    const value = m[2]!.trim()
-    if (key === 'alwaysApply') {
+  for (const line of lines) {
+    const entry = matchFrontmatterKey(line)
+    if (!entry) continue
+    if (entry.key === 'alwaysApply') {
       hadAlwaysApplyKey = true
-      if (/^(false|no|0)$/i.test(value)) alwaysApply = false
-      else if (/^(true|yes|1)$/i.test(value)) alwaysApply = true
-    } else if (key === 'description') {
-      description = value.replace(/^["']|["']$/g, '')
+      if (/^(false|no|0)$/i.test(entry.value)) alwaysApply = false
+      else if (/^(true|yes|1)$/i.test(entry.value)) alwaysApply = true
+    } else if (entry.key === 'description') {
+      description = stripQuotes(entry.value)
     }
   }
-  return { alwaysApply, hadAlwaysApplyKey, description, body, frontmatterLines }
+  return { alwaysApply, hadAlwaysApplyKey, description, body, frontmatterLines: lines }
 }
 
 export function serializeRuleEditor(args: {
@@ -62,8 +58,7 @@ export function serializeRuleEditor(args: {
   let sawDesc = false
   const originals = args.frontmatterLines ?? []
   for (const line of originals) {
-    const m = line.match(/^([A-Za-z][\w-]*)\s*:\s*(.*)$/)
-    const key = m?.[1]
+    const key = matchFrontmatterKey(line)?.key
     if (key === 'alwaysApply') {
       lines.push(`alwaysApply: ${args.alwaysApply ? 'true' : 'false'}`)
       sawAlways = true

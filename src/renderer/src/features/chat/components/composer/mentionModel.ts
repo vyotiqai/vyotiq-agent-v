@@ -1,6 +1,12 @@
 import type { SlashCommandKind } from '@shared/ipc'
 import { isSafeWorkspaceRelPath, isCuratedDocPath } from '@shared/workspacePath'
 import { basename } from '@shared/utils/path'
+import {
+  frontmatterBody,
+  isAlwaysApplyRule,
+  isRootInstructionFileName,
+  parseRuleFrontmatter
+} from '@shared/rules'
 
 /** Private-use markers so chips survive draft persistence as plain strings. */
 export const MENTION_START = '\uFFF9'
@@ -107,40 +113,21 @@ export { isSafeWorkspaceRelPath, isCuratedDocPath }
 
 /** Strip Cursor-style YAML frontmatter for rule body injection. */
 export function parseRuleFrontmatterBody(raw: string): string {
-  const trimmed = raw.replace(/^\uFEFF/, '')
-  if (!trimmed.startsWith('---')) return trimmed.trim()
-  const end = trimmed.indexOf('\n---', 3)
-  if (end < 0) return trimmed.trim()
-  return trimmed.slice(end + 4).replace(/^\r?\n/, '').trim()
+  return frontmatterBody(raw)
 }
-
-const AUTO_INJECT_ROOT_RULES = new Set(['AGENTS.md', 'CLAUDE.md', '.cursorrules'])
 
 /**
  * True when this rule path is already injected into the system prompt
  * (root instruction files, or Cursor rules without `alwaysApply: false`).
+ *
+ * Runs the same parser and the same `isAlwaysApplyRule` policy as the main-side
+ * mention list, so the composer's "already in the prompt" note and the agent's
+ * rule list cannot disagree.
  */
 export function isAutoInjectedWorkspaceRule(path: string, raw: string): boolean {
   const norm = path.replace(/\\/g, '/')
-  if (AUTO_INJECT_ROOT_RULES.has(norm) || AUTO_INJECT_ROOT_RULES.has(basenamePath(norm))) {
-    return true
-  }
-  const trimmed = raw.replace(/^\uFEFF/, '')
-  if (!trimmed.startsWith('---')) {
-    // No frontmatter in rule dirs ⇒ treated as auto-inject (matches main rules.ts).
-    return true
-  }
-  const end = trimmed.indexOf('\n---', 3)
-  if (end < 0) return true
-  const fmBlock = trimmed.slice(3, end)
-  for (const line of fmBlock.split(/\r?\n/)) {
-    const m = line.match(/^alwaysApply\s*:\s*(.*)$/i)
-    if (!m) continue
-    const value = m[1]!.trim()
-    if (/^(false|no|0)$/i.test(value)) return false
-    return true
-  }
-  return true
+  if (isRootInstructionFileName(basenamePath(norm))) return true
+  return isAlwaysApplyRule(parseRuleFrontmatter(raw).meta)
 }
 
 /** @deprecated Prefer `@shared/utils/path` `basename` — kept as a stable export for callers. */

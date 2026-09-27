@@ -1,6 +1,8 @@
 // Shared by main and renderer, so this must stay free of node:path — the renderer
 // bundle externalizes it and the module would resolve to an empty browser shim.
 
+import { isRootInstructionFilePath } from '../rules'
+
 const WINDOWS_DRIVE = /^([a-zA-Z]):([\\/]|$)/
 const UNC_PREFIX = /^[\\/]{2}[^\\/]/
 
@@ -105,7 +107,7 @@ export function isCuratedDocPath(rel: string): boolean {
   const lower = n.toLowerCase()
   const slash = lower.lastIndexOf('/')
   const base = slash >= 0 ? lower.slice(slash + 1) : lower
-  if (lower === 'agents.md' || lower === 'claude.md' || lower === '.cursorrules') return true
+  if (isRootInstructionFilePath(n)) return true
   if (base.startsWith('readme')) return true
   if (lower.startsWith('docs/') || lower.includes('/docs/')) {
     return base.endsWith('.md') || base.endsWith('.mdx') || base.endsWith('.mdc')
