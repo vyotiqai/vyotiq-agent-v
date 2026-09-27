@@ -10,7 +10,7 @@ afterEach(() => {
 })
 
 describe('ModelReadinessBanner', () => {
-  it('lays out inside the Alert, never by overriding its root', () => {
+  it('hands its buttons to the Alert, never by overriding its root', () => {
     render(
       <ModelReadinessBanner
         issue={{ kind: 'unreachable', provider: 'ollama', label: 'Ollama', detail: 'Nothing is listening on :11434' }}
@@ -22,8 +22,9 @@ describe('ModelReadinessBanner', () => {
     // cn() has no merge: a second flex direction on the root would fight `items-start`.
     expect(alert.classList.contains('flex-col')).toBe(false)
     expect(alert.classList.contains('items-stretch')).toBe(false)
-    const layout = alert.querySelector('[data-readiness-layout]')!
-    expect(layout.classList.contains('flex-col')).toBe(true)
+    // The buttons sit in the Alert's own actions slot, after the text.
+    const recheck = screen.getByRole('button', { name: 'Recheck' })
+    expect(recheck.parentElement?.previousElementSibling?.textContent).toContain('Ollama isn’t ready')
   })
 
   it('offers Recheck and an outlined Add API key when the provider is unreachable', () => {
