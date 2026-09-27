@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, type JSX, type ReactNode, type RefObject } fr
 import { retainModal } from './modalPresence'
 import { createPortal } from 'react-dom'
 import { useEscapeToClose } from '@renderer/lib/hooks/useEscapeToClose'
-import { cn } from '@renderer/lib/ui'
+import { cn } from '@renderer/lib/ui/cn'
 import { useFocusTrap } from './useFocusTrap'
 
 export type DialogSize = 'sm' | 'md' | 'lg'
