@@ -17,7 +17,20 @@ import { resolveModelPrice } from '@shared/pricing/modelPrices'
 import { alignContextUsageToModelWindow } from '@shared/utils/contextUsage'
 import { nextLowerThinkingEffort, shouldSuggestLowerThinkingEffort } from '@shared/utils/tokenCost'
 import { Icon, type IconName } from '@renderer/lib/icons'
-import { Button, IconButton, MENU_SURFACE, Ring, Segmented, cn } from '@renderer/lib/ui'
+import {
+  Button,
+  IconButton,
+  MENU_ROW,
+  MENU_ROW_ACTIVE,
+  MENU_ROW_IDLE,
+  MENU_ROW_SELECTED,
+  MENU_ROW_TEXT,
+  MENU_SURFACE,
+  Ring,
+  Segmented,
+  cn
+} from '@renderer/lib/ui'
+import { ROW_HOVER, SELECTED } from '@renderer/lib/utils/layout'
 import { useDropdownMenu } from '@renderer/lib/hooks/useDropdownMenu'
 import { formatTokens } from '@renderer/lib/utils/formatTokens'
 import type { ChatMetaStore } from '../../chatStores'
@@ -408,7 +421,7 @@ export function TaskOptions(props: TaskOptionsProps) {
                       onClick={() => browse(p)}
                       className={cn(
                         'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm vy-transition focus-visible:vy-focus-ring',
-                        on ? 'bg-surface-2 text-fg-strong' : 'text-secondary hover:bg-surface'
+                        on ? SELECTED : cn('text-secondary', ROW_HOVER)
                       )}
                     >
                       <ProviderLogo id={p} size="sm" className="shrink-0" />
@@ -432,7 +445,7 @@ export function TaskOptions(props: TaskOptionsProps) {
                 ) : null}
               </div>
               <div className="scroll-thin min-w-0 flex-1 overflow-y-auto p-1.5">
-                <div className="flex h-7 items-center gap-3 px-2 text-caption text-tertiary" aria-hidden="true">
+                <div className="flex h-7 items-center gap-2 px-2 text-caption text-tertiary" aria-hidden="true">
                   <span className="flex-1">Model</span>
                   <span className="w-16">Can</span>
                   <span className="w-10 text-right">Context</span>
@@ -665,8 +678,10 @@ function ModelRow({
         }
       }}
       className={cn(
-        'group flex h-8 cursor-pointer items-center gap-3 rounded-md px-2',
-        selected ? 'bg-accent-soft' : active ? 'bg-surface' : 'hover:bg-surface'
+        MENU_ROW,
+        'group',
+        active ? MENU_ROW_ACTIVE : MENU_ROW_IDLE,
+        selected ? MENU_ROW_SELECTED : MENU_ROW_TEXT
       )}
     >
       {showProvider && !row.manual ? (
@@ -678,6 +693,7 @@ function ModelRow({
       >
         {row.manual ? row.opt.label : modelId}
       </span>
+      {selected ? <Icon name="check" size={12} className="shrink-0 text-fg-strong" /> : null}
       {row.manual ? null : (
         <button
           type="button"

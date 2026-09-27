@@ -4,15 +4,18 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
   type KeyboardEvent
 } from 'react'
 import { fileIconUrl } from '@renderer/lib/fileIcons'
+import { Icon, type IconName } from '@renderer/lib/icons'
 import { cn } from '@renderer/lib/ui/cn'
 import { COMPOSER_TEXTAREA_MAX_CLASS } from '@renderer/lib/utils/layout'
 import { filesFromDataTransfer } from './dataTransferFiles'
+import { slashKindIcon } from './slashCommandPresentation'
 import {
   MENTION_END,
   MENTION_START,
@@ -48,24 +51,38 @@ function chipClassName(kind: ComposerMention['kind']): string {
   ].join(' ')
 }
 
-function slashChipGlyph(slashKind: Extract<ComposerMention, { kind: 'slash' }>['slashKind']): string {
-  switch (slashKind) {
-    case 'skill':
-      return '✦'
-    case 'mcp':
-      return '⬡'
-    case 'builtin':
-      return '/'
-    case 'workspace':
-      return '⌘'
+/**
+ * A chip's glyph: the icon its row has in the @ or / menu. Files and docs show
+ * their file-type image instead, so they have none.
+ */
+function mentionChipIcon(mention: ComposerMention): IconName | null {
+  switch (mention.kind) {
+    case 'file':
+    case 'docs':
+      return null
     case 'rule':
-      return '▤'
-    default:
-      return '/'
+      return 'rules'
+    case 'lints':
+      return mention.diagnosticsKind === 'lint' ? 'warning' : 'warningCircle'
+    case 'branch':
+      return 'branch'
+    case 'browser':
+      return 'browser'
+    case 'chat':
+      return 'tasks'
+    case 'slash':
+      return slashKindIcon(mention.slashKind, mention.trigger)
+    default: {
+      const _exhaustive: never = mention
+      return _exhaustive
+    }
   }
 }
 
-function buildChipElement(mention: ComposerMention): HTMLSpanElement {
+/** Hands out a copy of an icon rendered in the input's hidden glyph set, or null before it mounts. */
+type ChipGlyphs = (name: IconName) => Node | null
+
+function buildChipElement(mention: ComposerMention, glyphs: ChipGlyphs): HTMLSpanElement {
   const span = document.createElement('span')
   span.contentEditable = 'false'
   span.dataset.mention = encodeDataMention(mention)
@@ -83,21 +100,9 @@ function buildChipElement(mention: ComposerMention): HTMLSpanElement {
     img.className = 'shrink-0 object-contain'
     span.appendChild(img)
   } else {
-    const ico = document.createElement('span')
-    ico.className = 'text-caption opacity-70'
-    ico.textContent =
-      mention.kind === 'branch'
-        ? '⎇'
-        : mention.kind === 'browser'
-          ? '◎'
-          : mention.kind === 'lints'
-            ? '!'
-            : mention.kind === 'rule'
-              ? '▤'
-              : mention.kind === 'slash'
-                ? slashChipGlyph(mention.slashKind)
-                : '◇'
-    span.appendChild(ico)
+    const name = mentionChipIcon(mention)
+    const glyph = name ? glyphs(name) : null
+    if (glyph) span.appendChild(glyph)
   }
 
   const label = document.createElement('span')
@@ -142,7 +147,7 @@ function serializeDom(root: HTMLElement): string {
   return serializeComposerDocument(segmentsFromDom(root))
 }
 
-function renderSegmentsInto(root: HTMLElement, value: string): void {
+function renderSegmentsInto(root: HTMLElement, value: string, glyphs: ChipGlyphs): void {
   root.replaceChildren()
   const segments = parseComposerDocument(value)
   for (const seg of segments) {
@@ -154,7 +159,7 @@ function renderSegmentsInto(root: HTMLElement, value: string): void {
         if (i < parts.length - 1) root.appendChild(document.createElement('br'))
       })
     } else {
-      root.appendChild(buildChipElement(seg.mention))
+      root.appendChild(buildChipElement(seg.mention, glyphs))
     }
   }
 }
@@ -386,7 +391,7 @@ export const ComposerMentionInput = forwardRef<
     placeholder,
     disabled,
     className,
-    ariaLabel = 'Message',
+    ariaLabel = 'Instruction',
     size = 'md',
     newlineOnEnter = false,
     onPasteFiles,
@@ -399,6 +404,7 @@ export const ComposerMentionInput = forwardRef<
   ref
 ) {
   const elRef = useRef<HTMLDivElement>(null)
+  const glyphSetRef = useRef<HTMLSpanElement>(null)
   const lastValueRef = useRef(value)
   const composingRef = useRef(false)
   const [composing, setComposing] = useState(false)
@@ -418,41 +424,57 @@ export const ComposerMentionInput = forwardRef<
     }
   }))
 
+  // The chips' icons, rendered once here and copied into each chip: a chip is
+  // plain DOM inside the contentEditable, where React cannot render.
+  const chipIcons = useMemo(() => {
+    const names = new Set<IconName>()
+    for (const seg of parseComposerDocument(value)) {
+      if (seg.type !== 'mention') continue
+      const name = mentionChipIcon(seg.mention)
+      if (name) names.add(name)
+    }
+    return [...names]
+  }, [value])
+  const glyphs = useCallback<ChipGlyphs>((name) => {
+    const found = glyphSetRef.current?.querySelector(`[data-chip-glyph="${name}"]`)
+    return found ? found.cloneNode(true) : null
+  }, [])
+
   useLayoutEffect(() => {
     const el = elRef.current
     if (!el) return
     if (value === lastValueRef.current) {
       if (!el.childNodes.length && value) {
-        renderSegmentsInto(el, value)
+        renderSegmentsInto(el, value, glyphs)
       } else if (
         !value &&
         el.childNodes.length > 0 &&
         !composingRef.current
       ) {
         // Controlled value is empty but DOM still has nodes (orphan after desync).
-        renderSegmentsInto(el, value)
+        renderSegmentsInto(el, value, glyphs)
       }
       return
     }
     const focused = document.activeElement === el
     const caret = focused ? caretSerializedOffset(el) : value.length
-    renderSegmentsInto(el, value)
+    renderSegmentsInto(el, value, glyphs)
     lastValueRef.current = value
     if (focused) {
       // replaceChildren can drop focus/caret even when activeElement still looks set.
       el.focus()
       setCaretSerializedOffset(el, Math.min(caret, value.length))
     }
-  }, [value])
+  }, [value, glyphs])
 
   useEffect(() => {
     const el = elRef.current
     if (!el) return
     if (!el.childNodes.length && value) {
-      renderSegmentsInto(el, value)
+      renderSegmentsInto(el, value, glyphs)
       lastValueRef.current = value
     }
-  }, [value])
+  }, [value, glyphs])
 
   const emitFromDom = useCallback((): void => {
     const el = elRef.current
@@ -492,6 +514,11 @@ export const ComposerMentionInput = forwardRef<
 
   return (
     <div className="relative min-w-0 w-full">
+      <span ref={glyphSetRef} hidden aria-hidden="true">
+        {chipIcons.map((name) => (
+          <Icon key={name} name={name} size={13} className="text-muted" data-chip-glyph={name} />
+        ))}
+      </span>
       {empty && placeholder ? (
         <div
           className={cn(
@@ -500,7 +527,7 @@ export const ComposerMentionInput = forwardRef<
               ? 'items-center truncate text-sm text-tertiary'
               : size === 'brief'
                 ? 'items-start text-md leading-[22px] text-tertiary'
-                : 'items-center text-md leading-snug text-secondary'
+                : 'items-center text-md leading-snug text-tertiary'
           )}
           aria-hidden
           style={{ letterSpacing: 0, textRendering: 'auto' }}

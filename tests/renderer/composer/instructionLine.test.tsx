@@ -140,6 +140,12 @@ describe('instruction line', () => {
     fireEvent.click(within(dialog).getByRole('radio', { name: 'Ask' }))
     expect(onAgentModeChange).toHaveBeenCalledWith('ask')
     await waitFor(() => expect(within(dialog).getByText('llama3.2')).toBeTruthy())
+    // The model in use reads as selected by weight and a check — no accent tint,
+    // which is reserved for Needs you.
+    const current = within(dialog).getByRole('option', { selected: true })
+    expect(current.textContent).toContain('qwen2.5')
+    expect(current.className).not.toContain('bg-accent-soft')
+    expect(current.querySelector('svg')).toBeTruthy()
     fireEvent.click(within(dialog).getByText('llama3.2'))
     expect(onProviderModel).toHaveBeenCalledWith('ollama', 'llama3.2')
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Mode, model and effort' })).toBeNull())
