@@ -4,6 +4,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ChatView } from '@renderer/features/chat/ChatView'
+import { PaneChatView } from './helpers/chatViewPane'
+import { DEFAULT_SETTINGS, emptySecretStatus } from '@shared/ipc'
+import { resolveEffectiveSettings } from '@shared/effectiveSettings'
 import { clampDockWidthPx, DOCK_WIDTH_DEFAULT_PX, readSidebarWidthPxForCapacity } from '@renderer/lib/utils/layout'
 import { minimalReadyPlanMarkdown } from '@renderer/features/chat/utils/planDraft'
 
@@ -424,8 +427,9 @@ describe('ChatView inspector placement', () => {
   })
 
   it('does not auto-open Browser on IPC rising edge', async () => {
-    let browserHandler: ((state: { open: boolean; url: string; title: string }) => void) | null =
-      null
+    // Assigned from the mock below; declared through the assertion so TypeScript
+    // does not narrow it to null at the declaration.
+    let browserHandler = null as ((state: { open: boolean; url: string; title: string }) => void) | null
     Object.defineProperty(window, 'vyotiq', {
       configurable: true,
       writable: true,
@@ -454,8 +458,9 @@ describe('ChatView inspector placement', () => {
   })
 
   it('does not auto-open Browser when Terminal is already open', async () => {
-    let browserHandler: ((state: { open: boolean; url: string; title: string }) => void) | null =
-      null
+    // Assigned from the mock below; declared through the assertion so TypeScript
+    // does not narrow it to null at the declaration.
+    let browserHandler = null as ((state: { open: boolean; url: string; title: string }) => void) | null
     Object.defineProperty(window, 'vyotiq', {
       configurable: true,
       writable: true,
@@ -510,8 +515,9 @@ describe('ChatView inspector placement', () => {
   })
 
   it('does not auto-open Browser over a restored Plan panel', async () => {
-    let browserHandler: ((state: { open: boolean; url: string; title: string }) => void) | null =
-      null
+    // Assigned from the mock below; declared through the assertion so TypeScript
+    // does not narrow it to null at the declaration.
+    let browserHandler = null as ((state: { open: boolean; url: string; title: string }) => void) | null
     Object.defineProperty(window, 'vyotiq', {
       configurable: true,
       writable: true,
@@ -826,5 +832,145 @@ describe('ChatView inspector placement', () => {
     expect(alert.textContent).toContain('Couldn’t load workspaces')
     expect(alert.textContent).toContain('Workspaces file is unreadable.')
     expect(document.querySelector('[data-chat-pane-placeholder]')?.hasAttribute('aria-busy')).toBe(false)
+  })
+})
+
+/** What the pane column needs on top of ChatView's own props. */
+const paneProps = {
+  ...baseProps,
+  error: null,
+  hasWorkspace: true,
+  provider: 'ollama' as const,
+  model: 'qwen2.5',
+  // A new task's brief reads the whole settings shape (tool approval, worktrees).
+  chatSettings: {
+    ...resolveEffectiveSettings(DEFAULT_SETTINGS, null),
+    provider: 'ollama' as const,
+    model: 'qwen2.5'
+  },
+  onChatSettingsChange: vi.fn(),
+  onProviderModel: vi.fn(),
+  secrets: emptySecretStatus()
+}
+
+// What ChatView shows on the left is the pane column, the surface the app
+// ships. ChatView draws no record or composer of its own, so these cases
+// read the pane's DOM, not a dock that only unit tests ever saw.
+describe('ChatView pane host', () => {
+  it("renders one composer, the pane column's, and no dock of its own", () => {
+    render(<PaneChatView {...paneProps} items={[]} />)
+
+    expect(screen.getAllByRole('combobox', { name: /^Instruction$/i })).toHaveLength(1)
+    expect(document.querySelector('[data-composer-line]')).toBeTruthy()
+    expect(document.querySelector('[data-composer-dock]')).toBeNull()
+    expect(document.querySelector('[data-composer-hero]')).toBeNull()
+    expect(document.querySelector('[data-chat-hero]')).toBeNull()
+  })
+
+  it("shows a new task's brief with what the agent will see", async () => {
+    // The card fails closed (renders nothing) without its bridge, which is how
+    // a pane column that forgot to forward the workspace once shipped blank.
+    const agentContext = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        workspaceName: 'ws',
+        branch: 'main',
+        rules: { agentsMd: true, claudeMd: false, cursorrules: false, ruleFileCount: 1 },
+        memoryNotes: 0,
+        codeIndex: { state: 'ready' }
+      }
+    })
+    Object.defineProperty(window, 'vyotiq', {
+      configurable: true,
+      writable: true,
+      value: {
+        ...(window.vyotiq as object),
+        agentContext,
+        onAgentContextChanged: vi.fn().mockReturnValue(() => undefined)
+      }
+    })
+    render(<PaneChatView {...paneProps} items={[]} activeRunId={null} />)
+
+    expect(screen.getByRole('combobox', { name: 'Brief' })).toBeTruthy()
+    expect(document.querySelector('[data-composer-dock]')).toBeNull()
+    const aside = await screen.findByRole('complementary', { name: 'What the agent will see' })
+    await waitFor(() => expect(aside.textContent).toContain('AGENTS.md'))
+  })
+
+  it('remounts the record when chatSurfaceEpoch changes but not for draft alone', () => {
+    const items = [
+      {
+        kind: 'message' as const,
+        id: 'm1',
+        role: 'user' as const,
+        content: 'hello',
+        at: '2024-01-01T00:00:00.000Z'
+      }
+    ]
+    const { rerender } = render(
+      <PaneChatView {...paneProps} items={items} chatSurfaceEpoch={0} activeRunId={null} />
+    )
+    const first = document.querySelector('[data-transcript-scroll]')
+    expect(first).toBeTruthy()
+
+    rerender(
+      <PaneChatView {...paneProps} items={items} chatSurfaceEpoch={0} activeRunId="run-1" />
+    )
+    expect(document.querySelector('[data-transcript-scroll]')).toBe(first)
+
+    rerender(
+      <PaneChatView {...paneProps} items={items} chatSurfaceEpoch={1} activeRunId="run-1" />
+    )
+    expect(document.querySelector('[data-transcript-scroll]')).not.toBe(first)
+  })
+
+  it('attaches an active goal banner between the record and the instruction line', async () => {
+    const goalJson = JSON.stringify({
+      objective: 'Ship the composer banner',
+      status: 'active',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z'
+    })
+    ;(window.vyotiq as unknown as Record<string, unknown>).readRunArtifact = vi
+      .fn()
+      .mockImplementation(async (args: { name?: string }) =>
+        args.name === 'goal.json'
+          ? { ok: true, data: { content: goalJson } }
+          : { ok: false, error: 'none' }
+      )
+
+    render(
+      <PaneChatView
+        {...paneProps}
+        activeRunId="run-1"
+        items={[
+          {
+            kind: 'message',
+            id: 'm1',
+            role: 'user',
+            content: 'hello',
+            at: '2024-01-01T00:00:00.000Z'
+          }
+        ]}
+      />
+    )
+
+    const banner = await waitFor(() => {
+      const el = document.querySelector('[data-goal-banner][data-goal-status="active"]')
+      expect(el).toBeTruthy()
+      return el as HTMLElement
+    })
+
+    // Inside the pane's stage: after the record, before the instruction line.
+    expect(banner.closest('[data-chat-stage]')).toBeTruthy()
+    const transcript = document.querySelector('[data-transcript-scroll]')
+    expect(
+      banner.compareDocumentPosition(transcript!) & Node.DOCUMENT_POSITION_PRECEDING
+    ).toBeTruthy()
+    const composer = document.querySelector('[data-composer-line]')
+    expect(composer).toBeTruthy()
+    expect(
+      banner.compareDocumentPosition(composer!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
   })
 })
