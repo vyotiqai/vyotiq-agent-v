@@ -117,7 +117,12 @@ export function classifyMcpConnectError(err: unknown): McpConnectErrorKind {
   if (isGitMcpNotARepoError(text)) return 'workspace'
   if (/\b(401|403|unauthorized|forbidden|invalid_token)\b/i.test(text)) return 'sign-in'
   if (isRetriableMcpConnectError(err)) return 'network'
-  if (FRIENDLY_NETWORK.test(text.trim())) return 'network'
+  // Whatever `describe` calls a network failure is one. Reading its sentence
+  // rather than re-deriving the rule keeps a live error and its stored
+  // description on the same control; re-deriving it is how the SDK's
+  // "Request timed out" was logged as `config` beside a card saying "did not
+  // respond in time".
+  if (FRIENDLY_NETWORK.test(describeMcpConnectError(err, {}).trim())) return 'network'
   if (/TLS certificate rejected/i.test(text)) return 'network'
   const errorCodes = codes(err)
   if (errorCodes.includes('ENOENT') || /spawn |is not recognized/i.test(text)) return 'binary'

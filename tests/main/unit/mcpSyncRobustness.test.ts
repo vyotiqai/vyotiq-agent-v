@@ -205,7 +205,8 @@ describe('what a server offers reaches the model', () => {
     const result = await call('rich', 'screenshot')
     expect(result.ok).toBe(true)
     expect(result.content).toContain('Screenshot taken')
-    expect(result.content).toContain('[image mime=image/png bytes=300000]')
+    // No run directory here, so the image is noted rather than attached.
+    expect(result.content).toContain('[MCP returned an image (image/png); no run directory to store it]')
     expect(result.content).not.toContain('"data"')
     expect(result.content.length).toBeLessThan(2_000)
   }, 60_000)

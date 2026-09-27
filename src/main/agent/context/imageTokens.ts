@@ -97,6 +97,11 @@ function webpDimensions(buf: Buffer): ImageDimensions | null {
 export function imageDimensionsFromDataUrl(url: string): ImageDimensions | null {
   const buf = dataUrlHeaderBytes(url)
   if (!buf) return null
+  return imageDimensionsFromBytes(buf)
+}
+
+/** Read intrinsic pixel dimensions from PNG/JPEG/GIF/WebP bytes, or null if unreadable. */
+export function imageDimensionsFromBytes(buf: Buffer): ImageDimensions | null {
   const dims =
     pngDimensions(buf) ?? jpegDimensions(buf) ?? gifDimensions(buf) ?? webpDimensions(buf)
   if (!dims || dims.width <= 0 || dims.height <= 0) return null

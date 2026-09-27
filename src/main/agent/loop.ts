@@ -2116,7 +2116,8 @@ export async function* runAgent(input: RunAgentInput): AsyncGenerator<AgentEvent
         taskList: formatTodosContextSection(readTodos(runDir)),
         activeGoal: isInlineInstance ? undefined : formatActiveGoalSection(readGoal(runDir)),
         providerId,
-        countReasoningReplay
+        countReasoningReplay,
+        runDir
       }
 
       let assembled = await assembleContext(assembleBase)

@@ -1,4 +1,10 @@
-import { contentToText, type AgentEvent, type ChatMessage } from '../ipc'
+import {
+  contentImageArtifacts,
+  contentToText,
+  toolContentWithImages,
+  type AgentEvent,
+  type ChatMessage
+} from '../ipc'
 
 /** Matches ToolRow display cap — IPC should not ship more than the UI can show live. */
 export const TOOL_RESULT_IPC_PREVIEW_CHARS = 4000
@@ -49,7 +55,11 @@ export function toolMessageForIpc(message: ChatMessage): ChatMessage {
   if (content.length <= TOOL_RESULT_IPC_PREVIEW_CHARS) return message
   return {
     ...message,
-    content: truncateToolResultContent(content) ?? '',
+    // Image parts are small run-dir references; keep them so the row can show them.
+    content: toolContentWithImages(
+      truncateToolResultContent(content) ?? '',
+      contentImageArtifacts(message.content)
+    ),
     contentTruncated: true
   }
 }

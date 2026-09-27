@@ -17,6 +17,8 @@ import { toolIconName, toolLabel } from '@renderer/features/chat/toolUi'
 import { ToolFileBadge } from '@renderer/features/chat/toolUi/chrome'
 import { parseEditCardData } from '@renderer/features/chat/toolUi/parsers/edit'
 import { parseStatusMessageData } from '@renderer/features/chat/toolUi/parsers/status'
+import { toolImagesOf } from '@renderer/features/chat/toolUi/parsers/browser'
+import { ToolImageStrip } from '@renderer/features/chat/toolUi/ToolImageStrip'
 import { editStatOf } from '../editStat'
 import type { WorkItem } from '../recordModel'
 
@@ -258,6 +260,8 @@ function ExploreItem({ tools }: { tools: ToolItem[] }) {
   )
   const running = group.state === 'pending'
   const failed = tools.filter((t) => t.tool.status === 'fail').length
+  // Screenshots stay in view with the line closed: seeing the page is the point.
+  const images = tools.flatMap((t) => toolImagesOf(t.tool))
   return (
     <div>
       <WorkLine
@@ -273,6 +277,7 @@ function ExploreItem({ tools }: { tools: ToolItem[] }) {
           </>
         }
       />
+      {images.length > 0 ? <ToolImageStrip images={images} className="mt-1 pl-[22px]" /> : null}
       {open ? (
         <ul className="mt-1 space-y-px border-l border-border pl-3">
           {group.nestedTools.map((nested, i) => {
@@ -467,6 +472,7 @@ function ToolLine({ item }: { item: ToolItem }) {
   const chip =
     tool.name === 'ask_question' || tool.name === 'switch_mode' ? parseStatusMessageData(tool).chip : null
   const reason = failed ? (tool.content ?? '').trim().split('\n').find((l) => l.trim()) ?? '' : ''
+  const images = toolImagesOf(tool)
   return (
     <div data-record-tool={tool.name}>
       <WorkLine
@@ -486,6 +492,7 @@ function ToolLine({ item }: { item: ToolItem }) {
         }
       />
       {reason && !open ? <p className="m-0 mt-0.5 line-clamp-2 pl-[22px] text-caption text-danger">{reason}</p> : null}
+      {images.length > 0 ? <ToolImageStrip images={images} className="mt-1 pl-[22px]" /> : null}
       {open ? (
         <div className="mt-1 border-l border-border pl-3">
           <ToolRowOutput

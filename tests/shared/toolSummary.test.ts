@@ -53,6 +53,15 @@ describe('toolSummary', () => {
     ).toBe('vyotiq agent browser')
   })
 
+  it('says what a screen snip will capture, for the approval card', () => {
+    expect(summarizeToolArgs('screen_snip', JSON.stringify({ window: 'My Game' }))).toBe('My Game')
+    expect(summarizeToolArgs('screen_snip', JSON.stringify({ display: 1, frames: 4 }))).toBe('display 1 ×4')
+    expect(
+      summarizeToolArgs('screen_snip', JSON.stringify({ region: { x: 0, y: 0, width: 5, height: 5 } }))
+    ).toBe('primary display (region)')
+    expect(summarizeToolArgs('screen_snip', JSON.stringify({ list: true }))).toBe('window list')
+  })
+
   it('summarizes browser hover and dialog actions with their targets', () => {
     expect(summarizeToolArgs('browser_hover', JSON.stringify({ selector: '#menu' }))).toBe('#menu')
     expect(summarizeToolArgs('browser_handle_dialog', JSON.stringify({ action: 'dismiss' }))).toBe(

@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react'
-import { cn } from '@renderer/lib/ui'
+import { cn } from '@renderer/lib/ui/cn'
 import { fileIconUrl, folderIconUrl, iconUrlForId } from './urls'
 
 export type FileTypeIconProps = {

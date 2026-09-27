@@ -73,6 +73,7 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   browser_handle_dialog: { running: 'Handling dialog', done: 'Dialog handled' },
   browser_press_key: { running: 'Pressing', done: 'Pressed' },
   browser_select_option: { running: 'Selecting', done: 'Selected' },
+  screen_snip: { running: 'Snipping', done: 'Snipped' },
   mcp_list_tools: { running: 'Listing MCP', done: 'MCP tools' },
   request_mcp_tools: { running: 'Loading MCP', done: 'Loaded MCP' },
   release_mcp_tools: { running: 'Releasing MCP', done: 'Released MCP' },
@@ -225,6 +226,18 @@ export function normalizeToolTarget(name: string, args: Record<string, unknown> 
   }
   if (name === 'browser_snapshot') {
     return 'page'
+  }
+  if (name === 'screen_snip') {
+    // The approval card reads this line: it must say what will be captured.
+    if (args.list === true) return 'window list'
+    const what =
+      typeof args.window === 'string' && args.window.trim()
+        ? truncate(args.window.trim())
+        : typeof args.display === 'number'
+          ? `display ${args.display}`
+          : 'primary display'
+    const frames = typeof args.frames === 'number' && args.frames > 1 ? ` ×${args.frames}` : ''
+    return `${what}${args.region ? ' (region)' : ''}${frames}`
   }
   if (name === 'browser_tabs' || name === 'browser_handle_dialog') {
     const action = args.action

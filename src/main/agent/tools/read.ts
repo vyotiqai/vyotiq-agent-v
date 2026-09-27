@@ -2,6 +2,9 @@ import { resolveInsideWorkspace } from '../../workspace/safePath'
 import { existsSync, readdirSync, statSync, promises as fsp } from 'fs'
 import { basename, dirname, join } from 'path'
 import { memoryRoot } from '../context/memory'
+import type { ToolImageRef } from '../../../shared/ipc'
+import { storeToolImage } from '../toolImageStore'
+import { MAX_TOOL_IMAGE_BYTES } from '../context/toolImages'
 import {
   extractDocxText,
   isDocxPath,
@@ -215,6 +218,44 @@ export function missingDirectoryHint(
     lines.push(`If it is nested, glob **/${leaf} or list_dir from '.' first.`)
   }
   return lines.join('\n')
+}
+
+const IMAGE_READ_EXT = /\.(png|jpe?g|gif|webp)$/i
+
+/** True for the image types `read` hands to the model as an image. */
+export function isReadableImagePath(pathArg: string): boolean {
+  return IMAGE_READ_EXT.test(pathArg)
+}
+
+/**
+ * Read an image file as an image the model can see: stored in the run dir and
+ * attached to the tool result. Text reads refused these as binary, so a
+ * screenshot a script or test saved to disk could never be looked at.
+ */
+export async function toolReadImage(
+  workspaceRoot: string,
+  pathArg: string,
+  runDir: string
+): Promise<{ content: string; image: ToolImageRef }> {
+  const resolved = resolveInsideWorkspace(workspaceRoot, pathArg)
+  if (!existsSync(resolved)) {
+    throw new Error(formatMissingFileHint(workspaceRoot, pathArg))
+  }
+  const st = statSync(resolved)
+  if (!st.isFile()) throw new Error(`Not a file: ${pathArg}`)
+  if (st.size > MAX_TOOL_IMAGE_BYTES) {
+    throw new Error(
+      `Image too large to attach: ${pathArg} (${st.size} bytes; limit ${MAX_TOOL_IMAGE_BYTES}).`
+    )
+  }
+  const bytes = await fsp.readFile(resolved)
+  const stored = storeToolImage(runDir, bytes, { source: 'read', label: basename(pathArg) })
+  if (!stored.ok) throw new Error(`Cannot attach ${pathArg} as an image: ${stored.reason}.`)
+  const dims = stored.image.width ? `${stored.image.width}x${stored.image.height}, ` : ''
+  return {
+    content: `Image ${pathArg} (${stored.mime}, ${dims}${stored.bytes} bytes) is attached.`,
+    image: stored.image
+  }
 }
 
 export async function toolRead(

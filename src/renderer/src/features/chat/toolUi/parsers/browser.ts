@@ -1,4 +1,5 @@
 import type { UiToolRow } from '@shared/transcript'
+import { TOOL_IMAGE_ARTIFACT_RE, type ToolImageRef } from '@shared/ipc'
 import { parseArgsRecord } from '@shared/toolSummary'
 
 export type BrowserRef = {
@@ -16,8 +17,10 @@ export type BrowserSnapshotParsed = {
   refs: BrowserRef[]
   body: string
   screenshotNote: string
-  /** Relative run artifact path e.g. browser/snapshot-….jpg */
+  /** Relative run artifact path e.g. browser/snapshot-….jpg; '' when the note names none. */
   screenshotPath: string
+  /** True when the tool tried to capture and could not. */
+  screenshotFailed: boolean
   message: string
 }
 
@@ -46,6 +49,51 @@ function headerValue(content: string, key: string): string {
   return m?.[1]?.trim() || ''
 }
 
+const SCREENSHOT_NOTE_RE = /\[Screenshot (?:saved|capture failed)[^\]]*\]/gi
+/** The open/close lines of the fence main wraps page text in. */
+const UNTRUSTED_FENCE_LINE_RE = /^<\/?untrusted_content\b[^>]*>$/i
+
+function lastMatch(content: string, re: RegExp): string {
+  let last = ''
+  for (const m of content.matchAll(re)) last = m[0]
+  return last
+}
+
+/** Page text without the fence lines and screenshot notes main adds around it. */
+function stripHarnessLines(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim()
+      return !UNTRUSTED_FENCE_LINE_RE.test(trimmed) && !/^\[Screenshot (?:saved|capture failed)\b/i.test(trimmed)
+    })
+    .join('\n')
+    .trim()
+}
+
+/**
+ * Images a tool row shows. Rows carry them since tool results gained images;
+ * older browser rows only name the file in their note, so read it from there.
+ */
+export function toolImagesOf(tool: UiToolRow): ToolImageRef[] {
+  if (tool.images?.length) return tool.images
+  if (!tool.name.startsWith('browser_') || !tool.content) return []
+  const path = /run\s+(browser\/snapshot-[\w.-]+\.jpg)/i.exec(
+    lastMatch(tool.content, SCREENSHOT_NOTE_RE)
+  )?.[1]
+  return path && TOOL_IMAGE_ARTIFACT_RE.test(path) ? [{ artifact: path }] : []
+}
+
+/**
+ * Split a browser action result from the snapshot `includeSnapshot` appended:
+ * the action's own lines, then the fenced page snapshot (or '' when none).
+ */
+export function splitActionSnapshot(content: string): { action: string; snapshot: string } {
+  const at = content.search(/^<untrusted_content\b[^>]*kind="snapshot"/m)
+  if (at < 0) return { action: content.trim(), snapshot: '' }
+  return { action: content.slice(0, at).trim(), snapshot: content.slice(at) }
+}
+
 /** Parse browser_snapshot content from agentBrowser.takeSnapshot. */
 export function parseBrowserSnapshotData(tool: UiToolRow): BrowserSnapshotParsed {
   const content = tool.content ?? ''
@@ -59,6 +107,7 @@ export function parseBrowserSnapshotData(tool: UiToolRow): BrowserSnapshotParsed
       body: '',
       screenshotNote: '',
       screenshotPath: '',
+      screenshotFailed: false,
       message: ''
     }
   }
@@ -72,12 +121,14 @@ export function parseBrowserSnapshotData(tool: UiToolRow): BrowserSnapshotParsed
   const viewport = headerValue(content, 'Viewport')
   const navLine = /^Navigated to\s+.+$/im.exec(content)?.[0]?.trim() ?? ''
 
-  const screenshotMatch = content.match(/\[Screenshot (?:saved|capture failed)[^\]]*\]/i)
-  const screenshotNote = screenshotMatch?.[0] ?? ''
+  // The last note is the harness's own: it follows the page text, which could
+  // contain a look-alike line. Only a per-call file counts — the bare
+  // `snapshot.jpg` alias is whatever was captured last, not this call's page.
+  const screenshotNote = lastMatch(content, SCREENSHOT_NOTE_RE)
   const captureFailed = /capture failed/i.test(screenshotNote)
-  const pathFromNote =
-    /run\s+(browser\/snapshot(?:-[\w.-]+)?\.jpg)/i.exec(screenshotNote)?.[1] ??
-    (screenshotNote && !captureFailed ? 'browser/snapshot.jpg' : '')
+  const pathFromNote = captureFailed
+    ? ''
+    : (/run\s+(browser\/snapshot-[\w.-]+\.jpg)/i.exec(screenshotNote)?.[1] ?? '')
 
   const refs: BrowserRef[] = []
   const newRefRe =
@@ -132,10 +183,7 @@ export function parseBrowserSnapshotData(tool: UiToolRow): BrowserSnapshotParsed
     const afterInteractive = content.slice(interactiveIdx)
     const blankAfterRefs = afterInteractive.search(/\n\n/)
     if (blankAfterRefs >= 0) {
-      body = afterInteractive
-        .slice(blankAfterRefs + 2)
-        .replace(/\n?\[Screenshot saved[^\]]*\]\s*$/i, '')
-        .trim()
+      body = stripHarnessLines(afterInteractive.slice(blankAfterRefs + 2))
     }
   }
   if (!body) {
@@ -152,6 +200,7 @@ export function parseBrowserSnapshotData(tool: UiToolRow): BrowserSnapshotParsed
         if (/^Showing truncated preview\.?$/i.test(trimmed)) return false
         if (/^\w+\s+\d+\s+refs?$/i.test(trimmed)) return false
         if (/^\[Screenshot (?:saved|capture failed)\b/i.test(trimmed)) return false
+        if (UNTRUSTED_FENCE_LINE_RE.test(trimmed)) return false
         return true
       })
       .join('\n')
@@ -168,6 +217,7 @@ export function parseBrowserSnapshotData(tool: UiToolRow): BrowserSnapshotParsed
     body,
     screenshotNote,
     screenshotPath: pathFromNote,
+    screenshotFailed: captureFailed,
     // Keep navigate preamble when present; otherwise fall back to raw content if unstructured.
     message: structured ? navLine : content.trim()
   }
@@ -203,7 +253,9 @@ export function parseBrowserTabsData(tool: UiToolRow): BrowserTabsParsed {
 /** Parse short browser action tools (navigate, click, type, …). */
 export function parseBrowserActionData(tool: UiToolRow): BrowserActionParsed {
   const args = parseArgsRecord(tool.argsPreview)
-  const message = (tool.content ?? '').trim()
+  // Only the action's own lines: an appended snapshot is page text, and a page
+  // that merely says "failed" must not mark a successful click as failed.
+  const message = splitActionSnapshot(tool.content ?? '').action
   let target = ''
   if (typeof args?.url === 'string' && args.url.trim()) target = args.url.trim()
   else if (typeof args?.query === 'string' && args.query.trim()) target = args.query.trim()

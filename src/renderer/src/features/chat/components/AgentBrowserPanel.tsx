@@ -17,6 +17,7 @@ import { cn } from '@renderer/lib/ui/cn'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand/AgentVSpinner'
 import { SECTION_LABEL } from '@renderer/lib/utils/layout'
+import { useAnyModalOpen } from '@renderer/lib/a11y/modalPresence'
 import { EmptyPanel } from './PanelChrome'
 import { DEFAULT_SETTINGS } from '@shared/ipc'
 import { resolveAddressBarTarget } from '@shared/utils/searchEngine'
@@ -110,6 +111,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
   const [urlInput, setUrlInput] = useState('')
   const [urlFocused, setUrlFocused] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const modalOpen = useAnyModalOpen()
   const [historyOpen, setHistoryOpen] = useState(false)
   const [recents, setRecents] = useState<BrowserRecent[]>(() => loadBrowserRecents())
   const [recentsBar, setRecentsBar] = useState(() => {
@@ -213,7 +215,8 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         x: Math.round(r.x),
         y: Math.round(r.y),
         width: Math.round(r.width),
-        height: Math.round(r.height)
+        height: Math.round(r.height),
+        ...(modalOpen ? { occluded: true } : {})
       })
     }
 
@@ -229,7 +232,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
       window.removeEventListener('resize', report)
       void window.vyotiq.browserSetBounds?.(null)
     }
-  }, [visible, viewportPreset])
+  }, [visible, viewportPreset, modalOpen])
 
   useEffect(() => {
     if (!historyOpen) return

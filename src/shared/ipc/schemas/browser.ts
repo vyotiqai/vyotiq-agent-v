@@ -83,6 +83,11 @@ export const BrowserSetBoundsRequestSchema = z.object({
   x: z.number().finite(),
   y: z.number().finite(),
   width: z.number().finite(),
-  height: z.number().finite()
+  height: z.number().finite(),
+  /**
+   * A modal covers the panel. The native view paints above the page's DOM, so
+   * it is hidden meanwhile — keeping its size, so the page does not re-layout.
+   */
+  occluded: z.boolean().optional()
 })
 export type BrowserSetBoundsRequest = z.infer<typeof BrowserSetBoundsRequestSchema>

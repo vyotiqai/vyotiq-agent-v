@@ -114,7 +114,9 @@ describe('gh helpers', () => {
           { stderr: 'no git remotes found\n' }
         )
       )
-    await expect(prView('/ws')).rejects.toThrow(/no git remotes found/i)
+    // gh's reason comes first: the command line runs past the 200 characters
+    // the log keeps, and the log used to show only that.
+    await expect(prView('/ws')).rejects.toThrow(/^no git remotes found/i)
   })
 
   it('prView falls back when optional JSON fields are unknown', async () => {

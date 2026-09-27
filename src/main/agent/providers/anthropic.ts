@@ -25,6 +25,7 @@ import {
 } from './thinkingPolicy'
 import { volatileSessionMessage } from './systemZones'
 import { wireToolCallArguments } from '../toolArgWire'
+import { splitToolContent } from './toolImages'
 
 function asContentBlocks(content: unknown): Array<Record<string, unknown>> {
   if (Array.isArray(content)) return content as Array<Record<string, unknown>>
@@ -95,6 +96,26 @@ type AnthropicWireOptions = {
   omitUnsignedThinking?: boolean
 }
 
+/** tool_result accepts text and image blocks, so screenshots stay with their call. */
+function toAnthropicToolResultContent(
+  content: MessageContent
+): string | Array<Record<string, unknown>> {
+  if (typeof content === 'string') return content
+  const { text, images } = splitToolContent(content)
+  if (images.length === 0) return text
+  const blocks: Array<Record<string, unknown>> = []
+  if (text) blocks.push({ type: 'text', text })
+  for (const image of images) {
+    const data = parseDataUrl(image.url)
+    blocks.push(
+      data
+        ? { type: 'image', source: { type: 'base64', media_type: data.mediaType, data: data.data } }
+        : { type: 'image', source: { type: 'url', url: image.url } }
+    )
+  }
+  return blocks
+}
+
 function assistantThinkingTextContent(
   thinkingBlocks: ReturnType<typeof anthropicThinkingBlocksFromMessage>,
   m: ChatMessage,
@@ -117,9 +138,10 @@ function assistantThinkingTextContent(
   return content
 }
 
-function toAnthropicMessages(
+/** Exported for tests — map chat messages to the Messages API shape. */
+export function toAnthropicMessages(
   messages: ChatMessage[],
-  opts: AnthropicWireOptions
+  opts: AnthropicWireOptions = {}
 ): {
   system?: string | Array<Record<string, unknown>>
   messages: Array<Record<string, unknown>>
@@ -142,7 +164,7 @@ function toAnthropicMessages(
           {
             type: 'tool_result',
             tool_use_id: m.toolCallId,
-            content: typeof m.content === 'string' ? m.content : contentToText(m.content)
+            content: toAnthropicToolResultContent(m.content)
           }
         ]
       })

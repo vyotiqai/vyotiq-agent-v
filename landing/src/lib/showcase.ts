@@ -540,6 +540,8 @@ export const APPROVED_TOOLS: string[] = [
   'browser_hover',
   'browser_wait_for_text',
   'browser_handle_dialog',
+  // screen
+  'screen_snip',
   // mcp
   'mcp_list_tools',
   'request_mcp_tools',

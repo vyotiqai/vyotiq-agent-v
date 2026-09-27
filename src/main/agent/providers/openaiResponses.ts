@@ -34,6 +34,7 @@ import {
   attachTrailingHistoryCacheBreakpoint
 } from './systemZones'
 import { mergeOpenAiCompatToolArgDelta, wireToolCallArguments } from '../toolArgWire'
+import { liftToolImagesToUserTurn } from './toolImages'
 
 export { supportsExplicitPromptCache } from './systemZones'
 
@@ -119,7 +120,8 @@ function appendResponsesMessageItems(
   out: Array<Record<string, unknown>>,
   messages: ChatMessage[]
 ): void {
-  for (const m of messages) {
+  // function_call_output is text here; screenshots follow as a user turn.
+  for (const m of liftToolImagesToUserTurn(messages)) {
     if (m.role === 'tool') {
       // Orphan tool rows emit call_id: undefined and get an HTTP 400 — skip them.
       if (!m.toolCallId) continue

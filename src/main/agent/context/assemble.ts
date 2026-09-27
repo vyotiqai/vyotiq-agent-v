@@ -24,6 +24,7 @@ import {
 import { formatPinnedFacts, stripPinnedFactsAppendix } from './pinFoldFacts'
 import { capImagesPerRequest, stripUnsupportedModalitiesFromMessages, wireCapsFromModel } from './stripImages'
 import { trimToolResults } from './toolTrim'
+import { hydrateToolImages } from './toolImages'
 import { buildWorkspaceRulesSection } from './rules'
 import { formatResponseStyle, formatUserRules } from './userRules'
 import { readMemoryIndexAsync, readMemoryStateAsync } from './memory'
@@ -73,6 +74,11 @@ export type AssembleContextRequest = AssembleInput & {
    * again after a fold, like contract.md / plan.md. Omitted: read from disk.
    */
   memorySection?: string
+  /**
+   * The run's directory. Tool screenshots are stored there and referenced from
+   * the history; assembly loads the newest ones into the request copy.
+   */
+  runDir?: string
 }
 
 /**
@@ -931,8 +937,10 @@ export async function assembleContext(
     return content === message.content ? message : { ...message, content }
   })
   messages = stubPastSkillInvocationsInMessages(messages).messages
-  messages = stripUnsupportedModalitiesFromMessages(messages, wireCapsFromModel(input.model))
-  messages = capImagesPerRequest(messages, wireCapsFromModel(input.model))
+  const wireCaps = wireCapsFromModel(input.model)
+  messages = hydrateToolImages(messages, input.runDir, { vision: wireCaps.image !== false })
+  messages = stripUnsupportedModalitiesFromMessages(messages, wireCaps)
+  messages = capImagesPerRequest(messages, wireCaps)
   const compaction = input.priorCompaction ?? null
   messages = withLeadingUserTurn(messages, Boolean(compaction?.summary))
 

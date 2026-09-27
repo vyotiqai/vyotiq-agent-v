@@ -41,7 +41,7 @@ import {
   flushComposerAttachmentsToDisk,
   seedComposerAttachmentsFromDisk
 } from './composerAttachmentStore'
-import { pushToast } from '@renderer/lib/ui'
+import { pushToast } from '@renderer/lib/ui/toastStore'
 
 import { finishedBackgroundRuns } from '@renderer/lib/chat/backgroundRuns'
 import type { ChatPane, ChatPaneLayout, PaneDropZone, SessionDragPayload } from '@renderer/lib/chat/chatPaneLayout'

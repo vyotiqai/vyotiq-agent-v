@@ -211,6 +211,9 @@ export function isAutonomousHighRiskTool(name: string, argsJson?: string): boole
     // is at least as consequential as an edit, and the approval card is the
     // only place anyone reads the code before it exists.
     canonical === 'build_tool' ||
+    // It can see every other app on the user's screen, so autonomy never
+    // answers for them.
+    canonical === 'screen_snip' ||
     canonical.startsWith('mcp__') ||
     !BUILTIN_TOOL_NAME_SET.has(canonical)
   )

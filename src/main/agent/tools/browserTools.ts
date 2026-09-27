@@ -1,4 +1,5 @@
 import { buildSearchUrl } from '../../../shared/utils/searchEngine'
+import type { ToolImageRef } from '../../../shared/ipc'
 import type { AgentToolName } from '../schemas/tools'
 import {
   navigateUrl,
@@ -16,7 +17,8 @@ import {
   selectOption,
   hoverSelector,
   waitForText,
-  handleDialog
+  handleDialog,
+  type BrowserCaptureTarget
 } from '@main/app/agentBrowser'
 import { getSettings } from '@main/settings/settings'
 import { currentEgressSeq, listEgress } from '@main/net/egress'
@@ -83,6 +85,24 @@ function withEgressNotes<T extends Partial<Record<AgentToolName, ToolHandler>>>(
   return wrapped as T
 }
 
+/** Snip target from browser_snapshot args; the schema already refuses both at once. */
+function captureTargetFromArgs(args: Record<string, unknown>): BrowserCaptureTarget {
+  if (typeof args.clip === 'string' && args.clip.trim()) {
+    return { kind: 'element', selector: args.clip.trim() }
+  }
+  const region = args.region as Record<string, unknown> | undefined
+  if (
+    region &&
+    typeof region.x === 'number' &&
+    typeof region.y === 'number' &&
+    typeof region.width === 'number' &&
+    typeof region.height === 'number'
+  ) {
+    return { kind: 'region', x: region.x, y: region.y, width: region.width, height: region.height }
+  }
+  return { kind: 'viewport' }
+}
+
 const rawBrowserHandlers = {
   browser_search: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
@@ -100,14 +120,16 @@ const rawBrowserHandlers = {
       allowLocal
     })
     throwIfAborted(signal)
+    const captures: ToolImageRef[] = []
     const snap = await snapshotPage({
       signal,
       workspacePath: workspace,
       runDir: context.runDir,
-      maxChars: typeof args.maxChars === 'number' ? args.maxChars : undefined
+      maxChars: typeof args.maxChars === 'number' ? args.maxChars : undefined,
+      captures
     })
     throwIfAborted(signal)
-    return toolOk('browser_search', query, `${nav}\n\n${snap}`)
+    return toolOk('browser_search', query, `${nav}\n\n${snap}`, captures)
   },
   browser_navigate: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
@@ -125,18 +147,28 @@ const rawBrowserHandlers = {
   },
   browser_snapshot: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
+    const captures: ToolImageRef[] = []
+    const capture = captureTargetFromArgs(args)
     const content = await snapshotPage({
       signal,
       maxChars: typeof args.maxChars === 'number' ? args.maxChars : undefined,
       runDir: context.runDir,
       tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined,
-      workspacePath: workspace
+      workspacePath: workspace,
+      screenshot: args.screenshot !== false,
+      capture,
+      frames: typeof args.frames === 'number' ? args.frames : undefined,
+      intervalMs: typeof args.intervalMs === 'number' ? args.intervalMs : undefined,
+      captures
     })
     throwIfAborted(signal)
-    return toolOk('browser_snapshot', 'page', content)
+    const summary =
+      capture.kind === 'element' ? capture.selector : capture.kind === 'region' ? 'region' : 'page'
+    return toolOk('browser_snapshot', summary, content, captures)
   },
   browser_click: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
+    const captures: ToolImageRef[] = []
     const selector = args.selector as string
     const button =
       args.button === 'left' || args.button === 'right' || args.button === 'middle'
@@ -150,10 +182,11 @@ const rawBrowserHandlers = {
       workspacePath: workspace,
       includeSnapshot: args.includeSnapshot === true,
       runDir: context.runDir,
-      maxChars: typeof args.maxChars === 'number' ? args.maxChars : undefined
+      maxChars: typeof args.maxChars === 'number' ? args.maxChars : undefined,
+      captures
     })
     throwIfAborted(signal)
-    return toolOk('browser_click', selector, content)
+    return toolOk('browser_click', selector, content, captures)
   },
   browser_type: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
@@ -167,12 +200,14 @@ const rawBrowserHandlers = {
       settleMs: typeof args.settleMs === 'number' ? args.settleMs : undefined,
       workspacePath: workspace
     })
+    const captures: ToolImageRef[] = []
     if (args.includeSnapshot === true) {
       content = `${content}\n\n${await snapshotPage({
         signal,
         workspacePath: workspace,
         runDir: context.runDir,
-        tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined
+        tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined,
+        captures
       })}`
     }
     throwIfAborted(signal)
@@ -180,7 +215,7 @@ const rawBrowserHandlers = {
       typeof args.selector === 'string' && args.selector.trim()
         ? args.selector.trim()
         : 'active element'
-    return toolOk('browser_type', target, content)
+    return toolOk('browser_type', target, content, captures)
   },
   browser_scroll: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
@@ -193,12 +228,14 @@ const rawBrowserHandlers = {
       settleMs: typeof args.settleMs === 'number' ? args.settleMs : undefined,
       workspacePath: workspace
     })
+    const captures: ToolImageRef[] = []
     if (args.includeSnapshot === true) {
       content = `${content}\n\n${await snapshotPage({
         signal,
         workspacePath: workspace,
         runDir: context.runDir,
-        tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined
+        tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined,
+        captures
       })}`
     }
     throwIfAborted(signal)
@@ -206,7 +243,7 @@ const rawBrowserHandlers = {
       typeof args.selector === 'string' && args.selector.trim()
         ? args.selector.trim()
         : `Δ(${Number(args.deltaX) || 0},${Number(args.deltaY) || 0})`
-    return toolOk('browser_scroll', target, content)
+    return toolOk('browser_scroll', target, content, captures)
   },
   browser_fill: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
@@ -219,16 +256,18 @@ const rawBrowserHandlers = {
       settleMs: typeof args.settleMs === 'number' ? args.settleMs : undefined,
       workspacePath: workspace
     })
+    const captures: ToolImageRef[] = []
     if (args.includeSnapshot === true) {
       content = `${content}\n\n${await snapshotPage({
         signal,
         workspacePath: workspace,
         runDir: context.runDir,
-        tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined
+        tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined,
+        captures
       })}`
     }
     throwIfAborted(signal)
-    return toolOk('browser_fill', selector, content)
+    return toolOk('browser_fill', selector, content, captures)
   },
   browser_tabs: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
@@ -311,16 +350,18 @@ const rawBrowserHandlers = {
       settleMs: typeof args.settleMs === 'number' ? args.settleMs : undefined,
       workspacePath: workspace
     })
+    const captures: ToolImageRef[] = []
     if (args.includeSnapshot === true) {
       content = `${content}\n\n${await snapshotPage({
         signal,
         workspacePath: workspace,
         runDir: context.runDir,
-        tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined
+        tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined,
+        captures
       })}`
     }
     throwIfAborted(signal)
-    return toolOk('browser_press_key', key, content)
+    return toolOk('browser_press_key', key, content, captures)
   },
   browser_select_option: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
@@ -334,19 +375,22 @@ const rawBrowserHandlers = {
       settleMs: typeof args.settleMs === 'number' ? args.settleMs : undefined,
       workspacePath: workspace
     })
+    const captures: ToolImageRef[] = []
     if (args.includeSnapshot === true) {
       content = `${content}\n\n${await snapshotPage({
         signal,
         workspacePath: workspace,
         runDir: context.runDir,
-        tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined
+        tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined,
+        captures
       })}`
     }
     throwIfAborted(signal)
-    return toolOk('browser_select_option', selector, content)
+    return toolOk('browser_select_option', selector, content, captures)
   },
   browser_hover: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
+    const captures: ToolImageRef[] = []
     const selector = args.selector as string
     const content = await hoverSelector(selector, {
       signal,
@@ -354,10 +398,11 @@ const rawBrowserHandlers = {
       settleMs: typeof args.settleMs === 'number' ? args.settleMs : undefined,
       workspacePath: workspace,
       includeSnapshot: args.includeSnapshot === true,
-      runDir: context.runDir
+      runDir: context.runDir,
+      captures
     })
     throwIfAborted(signal)
-    return toolOk('browser_hover', selector, content)
+    return toolOk('browser_hover', selector, content, captures)
   },
   browser_wait_for_text: async (workspace, args, signal) => {
     throwIfAborted(signal)

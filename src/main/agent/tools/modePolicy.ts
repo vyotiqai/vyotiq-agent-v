@@ -60,6 +60,8 @@ export const ASK_SAFE_BUILTIN = new Set([
   'browser_wait_for_url',
   'browser_wait_for_text',
   'browser_hover',
+  // Reads the screen and changes nothing; the approval gate still asks first.
+  'screen_snip',
   // Catalog listers only. `mcp_read_resource` / `mcp_get_prompt` call into a
   // server and return server-controlled content, so they stay Agent-only like
   // every other MCP invocation.

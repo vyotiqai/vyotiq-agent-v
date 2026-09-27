@@ -222,7 +222,11 @@ const PR_VIEW_JSON_FIELDS_FALLBACK = [
 function execErrorText(err: unknown): string {
   if (!(err instanceof Error)) return String(err)
   const withIo = err as Error & { stderr?: string; stdout?: string }
-  return [err.message, withIo.stderr, withIo.stdout].filter(Boolean).join('\n')
+  // Lead with what gh said. Node's message opens with `Command failed:` and the
+  // whole command line, which for `pr view` is 25 JSON field names, so anything
+  // that shortens this text (the log keeps 200 characters, a panel shows a
+  // line) kept the command and dropped the reason, e.g. "no git remotes found".
+  return [withIo.stderr?.trim(), withIo.stdout?.trim(), err.message].filter(Boolean).join('\n')
 }
 
 /** Expected “no PR / no GitHub repo” outcomes — return null instead of failing IPC. */

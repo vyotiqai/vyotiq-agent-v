@@ -22,6 +22,8 @@ const fake = vi.hoisted(() => ({
   /** What `client.connect` does, one entry per call. */
   script: [] as Array<Error | null>,
   connectCalls: 0,
+  /** The request options each `client.connect` received. */
+  connectOptions: [] as Array<{ timeout?: number } | undefined>,
   closedClients: 0,
   /** Held open to observe the in-flight state; null means connect immediately. */
   gate: null as Promise<void> | null
@@ -61,7 +63,8 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
     getServerCapabilities(): Record<string, unknown> {
       return {}
     }
-    async connect(): Promise<void> {
+    async connect(_transport: unknown, options?: { timeout?: number }): Promise<void> {
+      fake.connectOptions.push(options)
       const outcome = fake.script[fake.connectCalls] ?? null
       fake.connectCalls += 1
       if (fake.gate) await fake.gate
@@ -111,6 +114,7 @@ function connectTimeout(): Error {
 beforeEach(() => {
   fake.script = []
   fake.connectCalls = 0
+  fake.connectOptions = []
   fake.closedClients = 0
   fake.gate = null
 })
@@ -174,6 +178,16 @@ describe('connecting a remote MCP server', () => {
     const settled = getMcpServerStatus([server])[0]
     expect(settled.connecting).toBeUndefined()
     expect(settled.connected).toBe(true)
+  })
+
+  it('gives the initialize handshake the connect budget, not the SDK default', async () => {
+    // The SDK times `initialize` out at 60s unless told otherwise. A cold
+    // `npx -y pkg@latest` stdio server needed longer, so the app's own 120s
+    // connect budget never got to apply and the server failed with
+    // "Request timed out".
+    await connectMcpServer(server)
+
+    expect(fake.connectOptions).toEqual([{ timeout: 120_000 }])
   })
 
   it('does not retry a failure a second attempt cannot change', async () => {

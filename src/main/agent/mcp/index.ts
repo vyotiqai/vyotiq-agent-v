@@ -24,6 +24,8 @@ import { logger } from '../../../shared/logger'
 import { neutralizeUntrustedBody, wrapUntrustedContent } from '../untrustedContent'
 import { mcpToolSummary } from '../../../shared/toolSummary'
 import type { ToolResult } from '../tools'
+import type { ToolImageRef } from '../../../shared/ipc'
+import { storeToolImage } from '../toolImageStore'
 import { sanitizedTerminalEnv } from '../tools/terminal'
 import {
   getMcpAuthToken,
@@ -103,7 +105,7 @@ import { readWorkspacesState } from '../../workspace/workspaces'
 import { workspacePathsEqual } from '../../../shared/workspacePath'
 import { workspaceIdFromPath } from '../../../shared/workspaceId'
 import { listActiveRuns } from '../runRegistry'
-import { AppError, formatError, isAbortError, mcpConnectErrorCode } from '../../../shared/errors'
+import { formatError, isAbortError, mcpConnectErrorCode } from '../../../shared/errors'
 import { assertPublicUrl } from '@main/net/webFetch'
 import { recordEgress } from '@main/net/egress'
 import {
@@ -626,14 +628,13 @@ function base64Bytes(data: string): number {
 }
 
 /**
- * Model-facing text for one tool-result content block. Binary blocks become a
- * one-line summary, as blobs do in `formatResourceContents`: stringified, a
- * single screenshot put ~64K chars of base64 in front of the model.
+ * Model-facing text for a tool-result block that is neither text nor a stored
+ * image. Binary bodies become a one-line summary, as blobs do in
+ * `formatResourceContents`; an embedded resource keeps its base64 under
+ * `resource.blob`, so eliding only top-level fields still pasted it whole.
  */
 function formatMcpContentBlock(block: McpContentBlock): string {
   switch (block.type) {
-    case 'text':
-      return block.text ?? ''
     case 'image':
     case 'audio':
       return `[${block.type} mime=${block.mimeType ?? 'unknown'} bytes=${
@@ -1291,6 +1292,23 @@ async function createTransport(
   return new SSEClientTransport(url, { requestInit, fetch: fetchImpl })
 }
 
+/**
+ * Whole-connect budget: handshake, `tools/list` and the resource/prompt
+ * probes. Those three used to run after it on the SDK's per-request default,
+ * so a server that stalled on `tools/list` held a sync for minutes more.
+ */
+const MCP_CONNECT_TIMEOUT_MS = 120_000
+
+/**
+ * The `initialize` handshake answers to the connect deadline above, not the
+ * SDK's 60s request default. A stdio server launched as `npx -y pkg@latest`
+ * checks the registry and, run from a pnpm checkout, walks that project's
+ * whole node_modules before the package even starts: 17s idle in this repo,
+ * well past 60s on a busy launch. The SDK's timeout fired first, so the
+ * 120s budget never applied and the server showed "did not respond in time".
+ */
+const MCP_INITIALIZE_OPTIONS = { timeout: MCP_CONNECT_TIMEOUT_MS }
+
 type PendingMcpConnection = { client: Client; transport: Transport }
 
 /** The server said no to the credential we sent, as opposed to failing to answer. */
@@ -1330,7 +1348,7 @@ async function connectWithOptionalOAuth(
     const transport = await createTransport(server, { workspacePath })
     const client = createMcpClient(workspacePath)
     track({ client, transport })
-    await client.connect(transport)
+    await client.connect(transport, MCP_INITIALIZE_OPTIONS)
     return { client, transport }
   }
 
@@ -1344,7 +1362,7 @@ async function connectWithOptionalOAuth(
     const connection = { client, transport }
     track(connection)
     try {
-      await client.connect(transport)
+      await client.connect(transport, MCP_INITIALIZE_OPTIONS)
       return connection
     } catch (err) {
       if (!isMcpAuthRejection(err)) throw err
@@ -1389,7 +1407,7 @@ async function connectWithOptionalOAuth(
   const connection = { client, transport }
   track(connection)
   try {
-    await client.connect(transport)
+    await client.connect(transport, MCP_INITIALIZE_OPTIONS)
     return connection
   } catch (err) {
     if (!(err instanceof UnauthorizedError)) throw err
@@ -1456,7 +1474,7 @@ async function connectRemoteWithOAuth(
   track({ client, transport })
 
   try {
-    await client.connect(transport)
+    await client.connect(transport, MCP_INITIALIZE_OPTIONS)
     cancelMcpOAuthCallback(server.id)
     return { client, transport }
   } catch (err) {
@@ -1502,7 +1520,7 @@ async function connectRemoteWithOAuth(
       const transport2 = await createTransport(server, { authProvider, workspacePath })
       const client2 = createMcpClient(workspacePath)
       track({ client: client2, transport: transport2 })
-      await client2.connect(transport2)
+      await client2.connect(transport2, MCP_INITIALIZE_OPTIONS)
       await maybeLinkNativeGithubAfterMcpAuth(server.id)
       return { client: client2, transport: transport2 }
     } catch (oauthErr) {
@@ -1517,12 +1535,6 @@ async function connectRemoteWithOAuth(
   }
 }
 
-/**
- * Whole-connect budget: handshake, `tools/list` and the resource/prompt
- * probes. Those three used to run after it on the SDK's per-request default,
- * so a server that stalled on `tools/list` held a sync for minutes more.
- */
-const MCP_CONNECT_TIMEOUT_MS = 120_000
 /**
  * An interactive sign-in waits on the user in a browser. It gets the callback
  * server's own window plus room for the token exchange and the reconnect —
@@ -2125,30 +2137,27 @@ async function syncMcpServersUnlocked(
       await connectMcpServer(server, workspacePath)
       recordCircuitSuccess(circuitKeyMcpConnect(key))
     } catch (err) {
-      // What the card will show. The raw text still reaches the log below, so
-      // the six IP addresses undici prints stay available for diagnosis
-      // without being the thing the user is asked to read.
+      // What the card will show. The thrown error itself goes to the log as
+      // `err`, so the six IP addresses undici prints (or the SDK's own
+      // "Request timed out") stay available for diagnosis without being the
+      // thing the user is asked to read. Log fields pass an allowlist:
+      // anything not on it, such as a workspace path, is dropped silently.
       const message = describeMcpConnectError(err, server)
-      const raw = formatError(err)
       const code = mcpConnectErrorCode(err)
       connectErrors.set(key, message)
       recordCircuitFailure(circuitKeyMcpConnect(key), MCP_CONNECT_CIRCUIT_POLICY)
       if (quietMcpConnectSkip(message)) return
-      const logged = new AppError(message, {
-        code,
-        severity: 'warn',
-        retriable: !isGitMcpNotARepoError(message),
-        cause: err instanceof Error ? err : undefined
-      })
+      const stdioWorkspace = isStdioTransport(server.transport)
+        ? resolveStdioWorkspacePath(workspacePath)
+        : null
       logger.warn('MCP connect failed', {
         scope: 'mcp',
         serverId: server.id,
-        workspacePath: workspacePath ?? undefined,
+        ...(stdioWorkspace ? { workspaceId: workspaceIdFromPath(stdioWorkspace) } : {}),
         code,
         kind: classifyMcpConnectError(err),
         reason: message,
-        ...(raw === message ? {} : { raw }),
-        err: logged
+        err
       })
     }
   }
@@ -2352,6 +2361,54 @@ export function getMcpToolDefinition(fullName: string): ToolDefinition | undefin
   return toolsByName.get(fullName)
 }
 
+/** Most images one MCP result may attach; the request-wide cap is 8. */
+const MCP_MAX_IMAGES_PER_RESULT = 4
+
+/**
+ * Text of an MCP tool result, with its image blocks stored in the run dir.
+ *
+ * Image blocks used to be JSON-stringified: ~100 KB of base64 that the 64 KB
+ * text cap then cut mid-string, so the model got neither the image nor the
+ * text after it (Playwright MCP's browser_take_screenshot, for one).
+ */
+export function mcpResultContent(
+  blocks: Array<Record<string, unknown>> | undefined,
+  runDir: string | undefined
+): { text: string; images: ToolImageRef[]; notes: string[] } {
+  const texts: string[] = []
+  const images: ToolImageRef[] = []
+  const notes: string[] = []
+  for (const block of blocks ?? []) {
+    if (block.type === 'text') {
+      texts.push(typeof block.text === 'string' ? block.text : '')
+      continue
+    }
+    if (block.type === 'image' && typeof block.data === 'string') {
+      const mime = typeof block.mimeType === 'string' ? block.mimeType : 'image'
+      if (!runDir) {
+        notes.push(`[MCP returned an image (${mime}); no run directory to store it]`)
+        continue
+      }
+      if (images.length >= MCP_MAX_IMAGES_PER_RESULT) {
+        notes.push(`[MCP image dropped: more than ${MCP_MAX_IMAGES_PER_RESULT} images in one result]`)
+        continue
+      }
+      const stored = storeToolImage(runDir, Buffer.from(block.data, 'base64'), { source: 'mcp' })
+      if (!stored.ok) {
+        notes.push(`[MCP image not attached: ${stored.reason}]`)
+        continue
+      }
+      images.push(stored.image)
+      const dims = stored.image.width ? `${stored.image.width}x${stored.image.height}, ` : ''
+      notes.push(`[Image saved under run ${stored.image.artifact} (${dims}${stored.bytes} bytes)]`)
+      continue
+    }
+    // Audio and embedded resources: text as text, base64 bodies as a summary.
+    texts.push(formatMcpContentBlock(block as McpContentBlock))
+  }
+  return { text: texts.join('\n'), images, notes }
+}
+
 export async function invokeMcpTool(
   serverId: string,
   toolName: string,
@@ -2359,7 +2416,9 @@ export async function invokeMcpTool(
   signal: AbortSignal,
   fullToolName?: string,
   enabledIds?: ReadonlySet<string>,
-  workspacePath?: string | null
+  workspacePath?: string | null,
+  /** Run directory; image blocks are stored there and returned as images. */
+  runDir?: string
 ): Promise<ToolResult> {
   if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
   const summary = mcpToolSummary(toolName, args)
@@ -2398,14 +2457,20 @@ export async function invokeMcpTool(
         maxTotalTimeout: MCP_INVOKE_MAX_TOTAL_TIMEOUT_MS
       }
     )
-    const text = (result.content as McpContentBlock[]).map(formatMcpContentBlock).join('\n')
+    const { text, images, notes } = mcpResultContent(
+      result.content as Array<Record<string, unknown>>,
+      runDir
+    )
     const ok = result.isError !== true
     const prefix = ok ? '' : `[MCP ${fullToolName ?? toolName} error]\n`
+    // Image notes are harness-authored, so they sit outside the untrusted fence.
+    const body = text || (images.length ? '(image only)' : '(empty)')
     const content =
       prefix +
-      wrapMcpPayload(capMcpText(text || '(empty)'), `${serverId}/${toolName}`)
+      wrapMcpPayload(capMcpText(body), `${serverId}/${toolName}`) +
+      (notes.length ? `\n${notes.join('\n')}` : '')
     recordCircuitSuccess(circuitKeyMcpInvoke(access.sessionKey))
-    return { ok, summary, content }
+    return images.length ? { ok, summary, content, images } : { ok, summary, content }
   } catch (err) {
     if (signal.aborted || isAbortError(err)) {
       releaseCircuitProbe(circuitKeyMcpInvoke(access.sessionKey))

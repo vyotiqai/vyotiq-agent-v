@@ -273,6 +273,38 @@ describe('ChatView inspector placement', () => {
     expect(workspaceEditorRecoveryLoad).toHaveBeenCalledTimes(1)
   })
 
+  it('does not load recovery again when another inspector tab is visited', async () => {
+    const workspaceEditorRecoveryLoad = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { source: 'none', sessionToken: 'lease', generation: 0, snapshot: null }
+    })
+    Object.defineProperty(window, 'vyotiq', {
+      configurable: true,
+      writable: true,
+      value: { ...(window.vyotiq as object), workspaceEditorRecoveryLoad }
+    })
+    vi.useFakeTimers()
+    render(<ChatView {...baseProps} items={[]} />)
+    await act(async () => {
+      vi.advanceTimersByTime(900)
+      await Promise.resolve()
+    })
+    expect(workspaceEditorRecoveryLoad).toHaveBeenCalledTimes(1)
+
+    // Changes is already up; Browser is a tab this view has not mounted yet.
+    fireEvent.click(inspectorTab(/^Browser/))
+    await act(async () => {
+      vi.advanceTimersByTime(900)
+      await Promise.resolve()
+    })
+    vi.useRealTimers()
+
+    // Every load retires the session token before it. A second prefetch here,
+    // still in flight when Files opened, stranded the token Files was handed
+    // and every save after it failed with "Recovery session is stale".
+    expect(workspaceEditorRecoveryLoad).toHaveBeenCalledTimes(1)
+  })
+
   it('opens the terminal panel with Ctrl+`', async () => {
     render(<ChatView {...baseProps} items={[]} />)
     fireEvent.keyDown(window, { key: '`', ctrlKey: true })

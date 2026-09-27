@@ -1,4 +1,11 @@
-import { BrowserWindow, WebContentsView, session, type WebContents } from 'electron'
+import {
+  BaseWindow,
+  BrowserWindow,
+  WebContentsView,
+  nativeImage,
+  session,
+  type WebContents
+} from 'electron'
 import { createHash } from 'crypto'
 import { mkdirSync, writeFileSync, existsSync } from 'fs'
 import { join, basename } from 'path'
@@ -16,6 +23,7 @@ import { assertAllowedUrl } from '@main/net/webFetch'
 import { checkEgress, hostAllowedByAllowlist } from '@main/net/egress'
 import {
   DEFAULT_NAV_TIMEOUT_MS,
+  DEFAULT_SNAPSHOT_CHARS,
   DEFAULT_WAIT_TIMEOUT_MS,
   SETTLE_FALLBACK_MS,
   normalizeBrowserUrl
@@ -25,6 +33,8 @@ import { isInsideRoot } from '@main/workspace/safePath'
 import { wrapBrowserPageContent } from './browserContentBoundary'
 import { getSettings } from '@main/settings/settings'
 import { assertBrowserActionAllowed, resolveBrowserUploadPath } from './browserActionPolicy'
+import type { ToolImageRef } from '../../shared/ipc'
+import { clampSnipFrames, clampSnipInterval } from './snipLimits'
 
 export {
   DEFAULT_NAV_TIMEOUT_MS,
@@ -36,8 +46,19 @@ export {
   SETTLE_FALLBACK_MS,
   normalizeBrowserUrl
 } from './browserUrl'
-const SNAPSHOT_JPEG_QUALITY = 55
-const PREVIEW_MAX_WIDTH = 960
+/** High enough that page text in a screenshot stays legible to a vision model. */
+const SNAPSHOT_JPEG_QUALITY = 72
+/** Viewport captures are scaled to this width (≈1.1k image tokens at 16:10). */
+const PREVIEW_MAX_WIDTH = 1280
+/** Element and region snips keep more detail: the longest edge a model reads unscaled. */
+const SNIP_MAX_EDGE = 1568
+/**
+ * Layout size for the active tab while no panel shows it. It used to be parked
+ * in the main window at 0×0, so the page laid out with no viewport: captures
+ * came back empty, the snapshot's visibility filter dropped every element, and
+ * nothing was clickable.
+ */
+export const HEADLESS_VIEWPORT = { width: 1280, height: 800 } as const
 /**
  * Hard cap on live agent-browser tabs (restored pre-a067d81 behavior). Each
  * tab is a full WebContentsView; unbounded growth exhausts memory/fds.
@@ -128,6 +149,8 @@ type BrowserTab = {
 }
 
 type EmbedBounds = { x: number; y: number; width: number; height: number }
+/** A renderer modal covers the dock panel; the view stays sized but unpainted. */
+let embedOccluded = false
 
 export type AgentBrowserState = {
   open: boolean
@@ -175,6 +198,16 @@ let embedBounds: EmbedBounds | null = null
 /** Floating always-on-top mini window hosting the visible tab (PiP mode). */
 let pipWindow: BrowserWindow | null = null
 let pipMode = false
+/**
+ * Invisible window that hosts the active tab while no panel or PiP shows it.
+ * The page must be painted to be read reliably: rendering a hidden view for a
+ * screenshot crashed its renderer (Electron 44, verified), and a view outside
+ * its window is laid out at 0×0. Opacity 0, click-through, never focused and
+ * off the taskbar, so it is not seen and takes no input.
+ */
+let offstageWindow: BaseWindow | null = null
+/** Captures in flight; they need the offstage view painted even when idle. */
+let captureHolds = 0
 const PIP_MIN_WIDTH = 380
 const PIP_MIN_HEIGHT = 260
 
@@ -282,6 +315,53 @@ function detachViewFromHosts(view: WebContentsView): void {
       // already detached
     }
   }
+  if (offstageWindow && !offstageWindow.isDestroyed()) {
+    try {
+      offstageWindow.contentView.removeChildView(view)
+    } catch {
+      // already detached
+    }
+  }
+}
+
+function ensureOffstageWindow(): BaseWindow | null {
+  if (offstageWindow && !offstageWindow.isDestroyed()) return offstageWindow
+  const main = getMainWindow()
+  if (!main || main.isDestroyed()) return null
+  let win: BaseWindow
+  try {
+    win = new BaseWindow({
+      width: HEADLESS_VIEWPORT.width,
+      height: HEADLESS_VIEWPORT.height,
+      useContentSize: true,
+      show: false,
+      frame: false,
+      focusable: false,
+      skipTaskbar: true,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      hasShadow: false,
+      opacity: 0,
+      title: 'Vyotiq agent browser (offstage)'
+    })
+  } catch {
+    return null
+  }
+  win.setIgnoreMouseEvents(true)
+  // Linux has no window opacity; keep the window off every screen there.
+  if (process.platform === 'linux') win.setPosition(-20000, -20000)
+  win.showInactive()
+  // It would otherwise keep the app alive after the last real window closes.
+  main.once('closed', destroyOffstageWindow)
+  offstageWindow = win
+  return win
+}
+
+function destroyOffstageWindow(): void {
+  const win = offstageWindow
+  offstageWindow = null
+  if (win && !win.isDestroyed()) win.destroy()
 }
 
 function destroyTab(tab: BrowserTab): void {
@@ -292,12 +372,13 @@ function destroyTab(tab: BrowserTab): void {
   tabs.delete(tab.id)
 }
 
-function attachTabView(tab: BrowserTab): void {
-  detachViewFromHosts(tab.view)
+function attachTabView(tab: BrowserTab, to?: BaseWindow): void {
   // In PiP mode the visible tab is hosted by the floating mini window.
   const host =
-    pipMode && pipWindow && !pipWindow.isDestroyed() ? pipWindow : getMainWindow()
+    to ?? (pipMode && pipWindow && !pipWindow.isDestroyed() ? pipWindow : getMainWindow())
   if (!host || host.isDestroyed()) return
+  if (host.contentView.children.includes(tab.view)) return
+  detachViewFromHosts(tab.view)
   // Later children paint above the window's main WebContentsView.
   host.contentView.addChildView(tab.view)
 }
@@ -333,22 +414,39 @@ function applyActiveViewBounds(): void {
       continue
     }
     const bounds = embedBounds
-    if (!active || !bounds || bounds.width < 1 || bounds.height < 1) {
-      tab.view.setVisible(false)
-      tab.view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-      if (pipMode) detachViewFromHosts(tab.view)
+    const panelLive = bounds != null && bounds.width >= 1 && bounds.height >= 1
+    if (active && panelLive && !embedOccluded) {
+      attachTabView(tab)
+      tab.view.setBounds(bounds)
+      tab.view.setVisible(true)
       applyGuestThrottling(tab)
       continue
     }
-
-    attachTabView(tab)
-    tab.view.setBounds(bounds)
-    tab.view.setVisible(true)
+    // Nothing on screen shows the active tab: keep it laid out offstage — at
+    // the panel's size while a modal covers the panel, so the page does not
+    // reflow — and painted while tools use it.
+    const offstage = active && !pipMode ? ensureOffstageWindow() : null
+    if (offstage) {
+      const width = panelLive ? bounds.width : HEADLESS_VIEWPORT.width
+      const height = panelLive ? bounds.height : HEADLESS_VIEWPORT.height
+      const [cw, ch] = offstage.getContentSize()
+      if (cw !== width || ch !== height) offstage.setContentSize(width, height)
+      attachTabView(tab, offstage)
+      tab.view.setBounds({ x: 0, y: 0, width, height })
+      tab.view.setVisible(agentBusyDepth > 0 || captureHolds > 0)
+      applyGuestThrottling(tab)
+      continue
+    }
+    tab.view.setVisible(false)
+    tab.view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+    if (pipMode) detachViewFromHosts(tab.view)
     applyGuestThrottling(tab)
   }
+  if (tabs.size === 0) destroyOffstageWindow()
 }
 
-export function setAgentBrowserBounds(bounds: EmbedBounds | null): void {
+export function setAgentBrowserBounds(bounds: (EmbedBounds & { occluded?: boolean }) | null): void {
+  embedOccluded = bounds?.occluded === true
   // The dock panel reporting a live rect reclaims the view: PiP exits so the
   // tab re-attaches to the main window exactly where the panel expects it.
   if (bounds && bounds.width >= 2 && bounds.height >= 2 && pipMode) {
@@ -469,6 +567,9 @@ function beginAgentControl(): void {
   agentBusyDepth += 1
   if (!userTookControl) {
     emitCurrent({ agentBusy: true, userControl: false })
+  } else {
+    // Still paint an offstage tab for the tool, even with the banner suppressed.
+    applyActiveViewBounds()
   }
 }
 
@@ -1094,30 +1195,40 @@ async function navigateUrlUnlocked(
   return [`Navigated to ${finalUrl}`, `Title: ${title || '(none)'}`, `tab_id: ${tab.id}`].join('\n')
 }
 
-/** Accessibility text (+ optional JPEG on disk) for the current page. */
-export async function snapshotPage(
-  opts: {
-    signal?: AbortSignal
-    maxChars?: number
-    runDir?: string
-    tabId?: string
-    workspacePath?: string
-  } = {}
-): Promise<string> {
+/** What a screenshot covers: the viewport, one element, or a viewport rectangle. */
+export type BrowserCaptureTarget =
+  | { kind: 'viewport' }
+  | { kind: 'element'; selector: string }
+  | { kind: 'region'; x: number; y: number; width: number; height: number }
+
+export type SnapshotPageOpts = {
+  signal?: AbortSignal
+  maxChars?: number
+  runDir?: string
+  tabId?: string
+  workspacePath?: string
+  /** Capture a screenshot (default true). */
+  screenshot?: boolean
+  /** Snip one element or a region instead of the whole viewport. */
+  capture?: BrowserCaptureTarget
+  /** Burst: this many screenshots, `intervalMs` apart (default 1). */
+  frames?: number
+  intervalMs?: number
+  /**
+   * Receives each screenshot the call stored in the run dir, so the tool
+   * result can hand the image itself to the model and the transcript.
+   */
+  captures?: ToolImageRef[]
+}
+
+/** Accessibility text plus a screenshot (stored in the run dir) of the current page. */
+export async function snapshotPage(opts: SnapshotPageOpts = {}): Promise<string> {
   return withBrowserLock(() => snapshotPageUnlocked(opts), opts.workspacePath, {
     agentControl: true
   })
 }
 
-async function snapshotPageUnlocked(
-  opts: {
-    signal?: AbortSignal
-    maxChars?: number
-    runDir?: string
-    tabId?: string
-    workspacePath?: string
-  } = {}
-): Promise<string> {
+async function snapshotPageUnlocked(opts: SnapshotPageOpts = {}): Promise<string> {
   throwIfAborted(opts.signal)
   const tab = requireTab(opts.tabId, opts.workspacePath)
   activateTab(tab)
@@ -1271,21 +1382,33 @@ async function snapshotPageUnlocked(
   }))
   tab.lastRefs = new Map(refs.map((r) => [r.id, r]))
 
+  // The note is harness-authored, so it sits outside the untrusted fence below:
+  // page text can never forge which screenshot a result claims.
   let imageNote = ''
-  try {
-    let image = await wc.capturePage()
-    const size = image.getSize()
-    if (size.width > PREVIEW_MAX_WIDTH) {
-      image = image.resize({ width: PREVIEW_MAX_WIDTH, quality: 'better' })
+  if (opts.screenshot !== false && opts.runDir) {
+    try {
+      const shots = await captureTabFrames(
+        tab,
+        opts.capture ?? { kind: 'viewport' },
+        opts.signal,
+        clampSnipFrames(opts.frames),
+        clampSnipInterval(opts.intervalMs)
+      )
+      const notes: string[] = []
+      for (const [i, shot] of shots.entries()) {
+        const rel = writeBrowserScreenshot(opts.runDir, shot.jpeg)
+        const label =
+          shots.length > 1 ? `${shot.label} · frame ${i + 1}/${shots.length} +${shot.atMs}ms` : shot.label
+        opts.captures?.push({ artifact: rel, width: shot.width, height: shot.height, label })
+        notes.push(
+          `[Screenshot saved under run ${rel} (${label}, ${shot.width}x${shot.height}, ${shot.jpeg.length} bytes)]`
+        )
+      }
+      imageNote = `\n\n${notes.join('\n')}`
+    } catch (err) {
+      if (isAbortError(err)) throw err
+      imageNote = `\n\n[Screenshot capture failed: ${err instanceof Error ? err.message : String(err)}]`
     }
-    const jpeg = image.toJPEG(SNAPSHOT_JPEG_QUALITY)
-    if (opts.runDir) {
-      const rel = writeBrowserScreenshot(opts.runDir, jpeg)
-      imageNote = `\n\n[Screenshot saved under run ${rel} (${jpeg.length} bytes)]`
-    }
-    // Live embed shows the page; JPEG is also loaded in the chat snapshot card.
-  } catch (err) {
-    imageNote = `\n\n[Screenshot capture failed: ${err instanceof Error ? err.message : String(err)}]`
   }
 
   const viewport = payload?.viewport
@@ -1301,12 +1424,13 @@ async function snapshotPageUnlocked(
     '',
     'Interactive elements (use @eN with browser_click / browser_type):'
   ].join('\n')
-  const imageReserve = Math.min(180, imageNote.length)
-  const maxChars = opts.maxChars
+  // The schema documents DEFAULT_SNAPSHOT_CHARS as the default; it was never
+  // applied, so an unbounded page dump rode every snapshot.
+  const maxChars = opts.maxChars ?? DEFAULT_SNAPSHOT_CHARS
   let refText: string
   let body: string
   if (maxChars != null && Number.isFinite(maxChars) && maxChars > 0) {
-    const afterHeader = Math.max(400, maxChars - header.length - imageReserve - 2)
+    const afterHeader = Math.max(400, maxChars - header.length - 2)
     const refBudget = Math.min(Math.floor(afterHeader * 0.5), afterHeader - 200)
     refText = formatInteractiveRefsWithinBudget(refs, Math.max(64, refBudget)).text
     const bodyBudget = Math.max(200, afterHeader - refText.length - 2)
@@ -1316,14 +1440,287 @@ async function snapshotPageUnlocked(
     body = String(payload?.text ?? '')
   }
 
-  const raw = `${header}\n${refText}\n\n${body}${imageNote}`
+  const raw = `${header}\n${refText}\n\n${body}`
   let origin = 'unknown'
   try {
     origin = url ? new URL(url).origin : 'unknown'
   } catch {
     origin = url || 'unknown'
   }
-  return wrapBrowserPageContent(raw, { origin, kind: 'snapshot' })
+  return `${wrapBrowserPageContent(raw, { origin, kind: 'snapshot' })}${imageNote}`
+}
+
+type CapturedImage = {
+  jpeg: Buffer
+  width: number
+  height: number
+  label: string
+  /** Milliseconds after the first frame of its burst. */
+  atMs: number
+}
+
+/** True when the tab's view is attached and painted, on screen or offstage. */
+function tabIsPainted(tab: BrowserTab): boolean {
+  if (tab.id !== visibleTabId) return false
+  try {
+    return tab.view.getVisible()
+  } catch {
+    return false
+  }
+}
+
+/** Viewport rect (CSS px) to capture for a snip, scrolled into view first. */
+async function resolveCaptureRect(
+  tab: BrowserTab,
+  target: Exclude<BrowserCaptureTarget, { kind: 'viewport' }>
+): Promise<{ x: number; y: number; width: number; height: number; label: string }> {
+  const wc = tabContents(tab)
+  let css = ''
+  let label = ''
+  if (target.kind === 'element') {
+    const parsed = parseBrowserTarget(target.selector)
+    if (parsed.kind === 'ref') {
+      const ref = tab.lastRefs.get(parsed.id)
+      if (!ref) {
+        throw new Error(
+          `Unknown snapshot ref @${parsed.id}. Call browser_snapshot first and use a listed @eN ref.`
+        )
+      }
+      css = ref.selector
+      label = `element @${parsed.id}`
+    } else {
+      css = parsed.selector
+      label = `element ${css.slice(0, 80)}`
+    }
+  }
+  const region = target.kind === 'region' ? target : null
+  const rect = (await wc.executeJavaScript(
+    `(() => {
+      const vw = window.innerWidth || 0
+      const vh = window.innerHeight || 0
+      const css = ${JSON.stringify(css)}
+      let r
+      if (css) {
+        const el = document.querySelector(css)
+        if (!el) return { error: 'none' }
+        el.scrollIntoView({ block: 'center', inline: 'nearest' })
+        const b = el.getBoundingClientRect()
+        const pad = 8
+        r = { x: b.left - pad, y: b.top - pad, width: b.width + pad * 2, height: b.height + pad * 2 }
+      } else {
+        r = ${JSON.stringify(region)}
+      }
+      const x = Math.max(0, Math.floor(r.x))
+      const y = Math.max(0, Math.floor(r.y))
+      const right = Math.min(vw, Math.ceil(r.x + r.width))
+      const bottom = Math.min(vh, Math.ceil(r.y + r.height))
+      return { x, y, width: right - x, height: bottom - y, vw, vh }
+    })()`,
+    true
+  )) as
+    | { error: string }
+    | { x: number; y: number; width: number; height: number; vw: number; vh: number }
+    | null
+  if (!rect || 'error' in rect) {
+    throw new Error(
+      `No element matches ${target.kind === 'element' ? target.selector : 'the region'}`
+    )
+  }
+  if (rect.width < 1 || rect.height < 1) {
+    throw new Error(
+      target.kind === 'region'
+        ? `Region lies outside the ${rect.vw}x${rect.vh} viewport`
+        : `Element has no visible area inside the ${rect.vw}x${rect.vh} viewport`
+    )
+  }
+  if (target.kind === 'region') {
+    label = `region ${rect.x},${rect.y} ${rect.width}x${rect.height}`
+  }
+  return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, label }
+}
+
+/**
+ * Screenshot through the DevTools protocol, which renders the frame it returns
+ * rather than copying the last one the compositor drew. `clip` is in viewport
+ * CSS px. The request shape is the one verified stable over repeated captures:
+ * without `captureBeyondViewport` and an explicit clip, a full capture after a
+ * clipped one crashed the page's renderer.
+ */
+async function captureViaDevTools(
+  wc: WebContents,
+  clip: { x: number; y: number; width: number; height: number } | undefined
+): Promise<Electron.NativeImage> {
+  const dbg = wc.debugger
+  // Another client (the user's DevTools) may already hold the session; share it.
+  const attachedHere = !dbg.isAttached()
+  if (attachedHere) dbg.attach('1.3')
+  try {
+    const metrics = (await dbg.sendCommand('Page.getLayoutMetrics')) as {
+      cssVisualViewport?: { pageX?: number; pageY?: number; clientWidth?: number; clientHeight?: number }
+    }
+    const viewport = metrics.cssVisualViewport ?? {}
+    // The protocol clips in document coordinates; the rect is viewport-relative.
+    const pageX = viewport.pageX ?? 0
+    const pageY = viewport.pageY ?? 0
+    const pageClip = clip
+      ? { x: clip.x + pageX, y: clip.y + pageY, width: clip.width, height: clip.height, scale: 1 }
+      : {
+          x: pageX,
+          y: pageY,
+          width: Math.max(1, viewport.clientWidth ?? HEADLESS_VIEWPORT.width),
+          height: Math.max(1, viewport.clientHeight ?? HEADLESS_VIEWPORT.height),
+          scale: 1
+        }
+    const shot = (await dbg.sendCommand('Page.captureScreenshot', {
+      format: 'png',
+      fromSurface: true,
+      captureBeyondViewport: true,
+      clip: pageClip
+    })) as { data?: string }
+    if (!shot.data) throw new Error('empty screenshot')
+    return nativeImage.createFromBuffer(Buffer.from(shot.data, 'base64'))
+  } finally {
+    if (attachedHere) {
+      try {
+        dbg.detach()
+      } catch {
+        // already gone with its page
+      }
+    }
+  }
+}
+
+/** Capture the tab as JPEG, whether or not a panel shows it. */
+async function captureTab(
+  tab: BrowserTab,
+  target: BrowserCaptureTarget,
+  signal?: AbortSignal
+): Promise<CapturedImage> {
+  return (await captureTabFrames(tab, target, signal, 1, 0))[0]!
+}
+
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(abortError())
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    if (signal?.aborted) onAbort()
+    else signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+/**
+ * Capture `frames` screenshots `intervalMs` apart. The page stays painted for
+ * the whole burst, and an element snip is measured once so every frame shows
+ * the same rectangle while the page animates inside it.
+ */
+async function captureTabFrames(
+  tab: BrowserTab,
+  target: BrowserCaptureTarget,
+  signal: AbortSignal | undefined,
+  frames: number,
+  intervalMs: number
+): Promise<CapturedImage[]> {
+  const wc = tabContents(tab)
+  let clip: { x: number; y: number; width: number; height: number } | undefined
+  let label = 'viewport'
+  if (target.kind !== 'viewport') {
+    const css = await resolveCaptureRect(tab, target)
+    label = css.label
+    clip = { x: css.x, y: css.y, width: css.width, height: css.height }
+    // Let the scroll-into-view settle before the frame is grabbed.
+    await new Promise<void>((resolve) => setTimeout(resolve, 120))
+    throwIfAborted(signal)
+  }
+  const out: CapturedImage[] = []
+  let firstAt = 0
+  captureHolds += 1
+  try {
+    for (let i = 0; i < frames; i++) {
+      if (i > 0) await sleepAbortable(firstAt + i * intervalMs - Date.now(), signal)
+      throwIfAborted(signal)
+      const image = await grabTabFrame(tab, wc, clip)
+      const at = Date.now()
+      if (i === 0) firstAt = at
+      out.push({ ...encodeCapture(image, target), label, atMs: at - firstAt })
+    }
+  } finally {
+    captureHolds -= 1
+    // An idle offstage page goes back to unpainted once no capture needs it.
+    if (captureHolds === 0 && agentBusyDepth === 0) applyActiveViewBounds()
+  }
+  throwIfAborted(signal)
+  return out
+}
+
+/** One frame of a painted tab: DevTools first, the compositor as a fallback. */
+async function grabTabFrame(
+  tab: BrowserTab,
+  wc: WebContents,
+  clip: { x: number; y: number; width: number; height: number } | undefined
+): Promise<Electron.NativeImage> {
+  let image: Electron.NativeImage | null = null
+  let devToolsError: unknown = null
+  try {
+    if (!tabIsPainted(tab)) {
+      applyActiveViewBounds()
+      // One frame for the newly shown view before it is read.
+      await new Promise<void>((resolve) => setTimeout(resolve, 50))
+    }
+    if (!tabIsPainted(tab)) {
+      // Rendering a hidden view for a screenshot can crash its renderer.
+      throw new Error('the page is not painted anywhere (no window to host it)')
+    }
+    image = await captureViaDevTools(wc, clip)
+  } catch (err) {
+    devToolsError = err
+  }
+  if ((!image || image.isEmpty()) && tabIsPainted(tab)) {
+    // A painted view can still be read straight off the compositor. Never try
+    // this on a hidden view: it can take the page's renderer down with it.
+    const zoom = wc.getZoomFactor() || 1
+    image = await wc.capturePage(
+      clip
+        ? {
+            x: Math.round(clip.x * zoom),
+            y: Math.round(clip.y * zoom),
+            width: Math.max(1, Math.round(clip.width * zoom)),
+            height: Math.max(1, Math.round(clip.height * zoom))
+          }
+        : undefined
+    )
+  }
+  if (!image || image.isEmpty()) {
+    const why = devToolsError instanceof Error ? `: ${devToolsError.message}` : ''
+    throw new Error(`the page produced no frame${why}`)
+  }
+  return image
+}
+
+function encodeCapture(
+  captured: Electron.NativeImage,
+  target: BrowserCaptureTarget
+): { jpeg: Buffer; width: number; height: number } {
+  let image = captured
+  const size = image.getSize()
+  if (target.kind === 'viewport') {
+    if (size.width > PREVIEW_MAX_WIDTH) {
+      image = image.resize({ width: PREVIEW_MAX_WIDTH, quality: 'better' })
+    }
+  } else if (Math.max(size.width, size.height) > SNIP_MAX_EDGE) {
+    image =
+      size.width >= size.height
+        ? image.resize({ width: SNIP_MAX_EDGE, quality: 'better' })
+        : image.resize({ height: SNIP_MAX_EDGE, quality: 'better' })
+  }
+  const out = image.getSize()
+  return { jpeg: image.toJPEG(SNAPSHOT_JPEG_QUALITY), width: out.width, height: out.height }
 }
 
 function writeBrowserScreenshot(runDir: string, jpeg: Buffer): string {
@@ -1506,6 +1903,7 @@ export async function clickSelector(
     settleMs?: number
     workspacePath?: string
     includeSnapshot?: boolean
+    captures?: ToolImageRef[]
     runDir?: string
     maxChars?: number
   } = {}
@@ -1522,6 +1920,7 @@ async function clickSelectorUnlocked(
     workspacePath?: string
     settleMs?: number
     includeSnapshot?: boolean
+    captures?: ToolImageRef[]
     runDir?: string
     maxChars?: number
   } = {}
@@ -1571,6 +1970,7 @@ async function maybeAppendSnapshot(
     workspacePath?: string
     runDir?: string
     maxChars?: number
+    captures?: ToolImageRef[]
   }
 ): Promise<string> {
   if (!opts.includeSnapshot) return result
@@ -1579,7 +1979,8 @@ async function maybeAppendSnapshot(
     tabId: opts.tabId,
     workspacePath: opts.workspacePath,
     runDir: opts.runDir,
-    maxChars: opts.maxChars
+    maxChars: opts.maxChars,
+    captures: opts.captures
   })
   return `${result}\n\n${snap}`
 }
@@ -1906,6 +2307,7 @@ export function closeAgentBrowser(): void {
     destroyTab(tab)
   }
   tabs.clear()
+  destroyOffstageWindow()
   visibleTabId = null
   activeTabIdByWorkspace.clear()
   // Keep embedBounds — the chat panel is always visible and will host the next tab.
@@ -2005,24 +2407,18 @@ export async function clearAgentBrowserData(
   return { cleared: kind }
 }
 
-/** Capture the active page to `{runDir}/browser/snapshot.jpg`. */
+/** Capture the active page to `{runDir}/browser/snapshot-<id>.jpg` (and the latest alias). */
 export async function takeBrowserScreenshot(opts: {
   runDir: string
   tabId?: string
   workspacePath?: string
-}): Promise<{ path: string }> {
+}): Promise<{ path: string; artifact: string }> {
   return withBrowserLock(async () => {
     const tab = requireTab(opts.tabId, opts.workspacePath)
     activateTab(tab)
-    const wc = tabContents(tab)
-    let image = await wc.capturePage()
-    const size = image.getSize()
-    if (size.width > PREVIEW_MAX_WIDTH) {
-      image = image.resize({ width: PREVIEW_MAX_WIDTH, quality: 'better' })
-    }
-    const jpeg = image.toJPEG(SNAPSHOT_JPEG_QUALITY)
-    const rel = writeBrowserScreenshot(opts.runDir, jpeg)
-    return { path: join(opts.runDir, rel) }
+    const shot = await captureTab(tab, { kind: 'viewport' })
+    const rel = writeBrowserScreenshot(opts.runDir, shot.jpeg)
+    return { path: join(opts.runDir, rel), artifact: rel }
   }, opts.workspacePath)
 }
 
@@ -2076,6 +2472,9 @@ export function resetAgentBrowserForTests(): void {
   embedBounds = null
   pipWindow = null
   pipMode = false
+  embedOccluded = false
+  offstageWindow = null
+  captureHolds = 0
   agentBusyDepth = 0
   userTookControl = false
   snapshotSeq = 0
@@ -2482,6 +2881,7 @@ export async function hoverSelector(
     settleMs?: number
     workspacePath?: string
     includeSnapshot?: boolean
+    captures?: ToolImageRef[]
     runDir?: string
     maxChars?: number
   } = {}
@@ -2499,6 +2899,7 @@ async function hoverSelectorUnlocked(
     workspacePath?: string
     settleMs?: number
     includeSnapshot?: boolean
+    captures?: ToolImageRef[]
     runDir?: string
     maxChars?: number
   } = {}
