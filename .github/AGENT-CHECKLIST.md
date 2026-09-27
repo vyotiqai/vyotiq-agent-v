@@ -62,11 +62,11 @@ in-app updater chain never breaks.**
       changelog file or a changelog gate to the pipeline. But the stub body
       `release.yml` writes (`Vyotiq vX.Y.Z installers and update metadata.`) is
       a failure state, not an acceptable default: every release ships authored
-      `## ` / `- ` sections, because that body is what the website's
-      `/changelog` and the in-app update panel both render.
+      `## ` / `- ` sections, because that body is what GitHub and the in-app
+      update panel both render.
       Format and house style: `.github/RELEASE-AGENT-PROMPT.md` §5.
 - [ ] **Installers live on the releases-only repo**
-      (`vyotiqai/vyotiq-agent-v-releases`); the updater and website point
+      (`vyotiqai/vyotiq-agent-v-releases`); the updater points
       there. The source repo (`vyotiqai/vyotiq-agent-v`) only receives a
       mirrored pointer release (finalize job does this — keep it).
 

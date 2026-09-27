@@ -6,5 +6,5 @@ contact_links:
       Report security issues privately (never in a public issue). See
       SECURITY.md for the full policy.
   - name: Documentation
-    url: https://vyotiq.com/docs
-    about: Product manual, troubleshooting, and concepts.
+    url: https://github.com/vyotiqai/vyotiq-agent-v#readme
+    about: Setup, development workflow, and project documentation.

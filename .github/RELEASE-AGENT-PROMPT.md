@@ -2,8 +2,7 @@
 
 > **Paste this whole file to a coding agent** (Claude Code, Cursor, Codex,
 > Copilot, Windsurf, Aider — any of them) when the job is: *get the current work
-> committed, verified, released as installers, written up, and live on the
-> website.* It is written to be executed top to bottom with no prior knowledge of
+> committed, verified, released as installers, and written up.* It is written to be executed top to bottom with no prior knowledge of
 > this repository.
 >
 > Companion documents, which this prompt supersedes where they disagree:
@@ -16,15 +15,14 @@
 
 ## 0. How to use this prompt
 
-Fill in the four variables below, then execute §1 → §12 in order. Do not skip a
+Fill in the three variables below, then execute §1 → §12 in order. Do not skip a
 phase because it "looks fine"; each gate exists because skipping it once shipped
 a broken installer, a red `main`, or a silently dead auto-updater.
 
 ```
 RELEASE_KIND   = patch | minor | major          # §4 decides if unset
 SCOPE          = <what is being released, in one sentence>
-DRY_RUN        = false                          # true = do everything except push, tag, publish, deploy
-SITE_DEPLOY    = <auto|manual|none>             # §11 discovers this if unset
+DRY_RUN        = false                          # true = do everything except push, tag, publish
 ```
 
 **Report as you go.** After every phase, print a one-line status:
@@ -37,8 +35,8 @@ having run the command and read its output. If a command fails, stop and apply
 ## 1. Mission
 
 Take the repository from *"there is work in the tree"* to *"a user on Windows,
-macOS or Linux can download and install the new version from the website, and an
-existing installation offers the update in-app."*
+macOS or Linux can download and install the new version from the releases
+repository, and an existing installation offers the update in-app."*
 
 That is done when, and only when, all of the following are true:
 
@@ -50,9 +48,7 @@ That is done when, and only when, all of the following are true:
 4. `package.json` version, the git tag and the release all state the same version.
 5. The GitHub release is **published**, carries **authored structured notes**, and
    has every installer plus all three updater manifests.
-6. The website shows the new version on `/download` and the new notes on
-   `/changelog`, and is deployed.
-7. The in-app updater offers the new version to an older installation.
+6. The in-app updater offers the new version to an older installation.
 
 ---
 
@@ -86,8 +82,8 @@ That is done when, and only when, all of the following are true:
 - **Do not unpin `@xmldom/xmldom` from exactly `0.8.15`** in
   `pnpm-workspace.yaml` — `>=0.8.15` resolves 0.9.x and breaks macOS packaging.
 - If `DRY_RUN = true`: do every check, produce every artifact and write every
-  file, but execute no `git push`, no `git tag`, no `gh release` mutation and no
-  deploy. Print exactly what you *would* have run.
+  file, but execute no `git push`, no `git tag` and no `gh release` mutation.
+  Print exactly what you *would* have run.
 
 ---
 
@@ -103,8 +99,8 @@ electron-updater. Node ≥ 22.18, pnpm 12.4.2 via corepack.
 
 | Repo | Role |
 |---|---|
-| `vyotiqai/vyotiq-agent-v` | Source. CI, the release workflow, the website source in `landing/`. |
-| `vyotiqai/vyotiq-agent-v-releases` | **Installers live here.** The in-app updater and the website both read this repo. |
+| `vyotiqai/vyotiq-agent-v` | Source. CI and the release workflow. |
+| `vyotiqai/vyotiq-agent-v-releases` | **Installers live here.** The in-app updater reads this repo. |
 
 The source repo also gets a *pointer* release per tag (title + links, no
 assets), created automatically by the finalize job so its Releases page is not
@@ -133,21 +129,9 @@ Draft-first is deliberate: the updater can never see a half-uploaded release.
 **CI** (`.github/workflows/ci.yml`) runs on every push to `main` and every PR,
 across Windows/macOS/Linux: typecheck, tests with coverage, lint, build,
 `pnpm audit --audit-level high`, an unpacked packaging smoke test, and GUI e2e.
-**CI does not build or deploy the website** — that is on you, §11.
 
-**The website** is `landing/` — Astro, static output, deployed to
-`https://vyotiq.com`. It has **no CHANGELOG file and no hardcoded version**.
-Both its download page and its changelog page are *baked from the GitHub API at
-build time* by `landing/scripts/bake-release.mjs` and
-`landing/scripts/bake-changelog.mjs`, which read
-`vyotiqai/vyotiq-agent-v-releases`:
-
-- `bake-release.mjs` → `landing/src/data/release.json` → `/download`
-- `bake-changelog.mjs` → `landing/src/data/changelog.json` → `/changelog`
-
-**The consequence that drives §11:** the site only shows a release *after* that
-release is **published (non-draft)** and the site is **rebuilt and redeployed**.
-A published release alone changes nothing on vyotiq.com.
+**There is no website right now.** The old vyotiq.com (`landing/`) was removed on
+2026-09-27 and GitHub Pages was unpublished while a new site is built; see §11.
 
 ---
 
@@ -189,7 +173,7 @@ much the choice can hurt:
 |---|---|
 | electron-updater | Compares ordinally: is the release newer than what is installed. |
 | What's New (`useWhatsNew.ts`) | Compares ordinally against the last version the user saw. |
-| The website, the tag, the filenames | Prints it. |
+| The tag, the filenames | Prints it. |
 
 Nothing in this codebase branches on *which* component changed. No migration,
 no settings schema, no compatibility gate keys off major-vs-minor. So the one
@@ -231,16 +215,13 @@ Print: `PHASE 1 orient — PASS — releasing X.Y.Z (was A.B.C, bump=<kind>), N 
 Written now, deliberately — not at the end. The notes are a design review of
 what you are shipping; writing them first catches "wait, that isn't finished".
 
-### 5.1 Where the notes live, and why they matter three times over
+### 5.1 Where the notes live, and why they matter twice over
 
 There is **no `CHANGELOG.md` in this project.** The GitHub release body *is* the
-changelog, and it is consumed by three surfaces:
+changelog, and it is consumed by two surfaces:
 
 1. **GitHub** — the release page, rendered as full markdown.
-2. **The website's `/changelog`** — `bake-changelog.mjs` copies the body
-   verbatim into `changelog.json`; `landing/src/pages/changelog.astro` renders it
-   inside `<pre class="vy-codeblock">`, i.e. **as plain text, not markdown**.
-3. **The in-app update panel** — `src/shared/utils/releaseNotes.ts`
+2. **The in-app update panel** — `src/shared/utils/releaseNotes.ts`
    (`parseReleaseNotes`) parses the body into sections that
    `src/renderer/src/features/updates/UpdatePanel.tsx` renders. Its grammar is
    narrow, and anything outside it is silently dropped from the card.
@@ -254,7 +235,7 @@ changelog, and it is consumed by three surfaces:
   land in one unlabelled section.
 
 Everything else (prose paragraphs, sub-headings, code fences, tables) still
-appears on GitHub and on the website, but **is invisible in the update panel**.
+appears on GitHub, but **is invisible in the update panel**.
 Therefore:
 
 - **Every substantive change must appear as a `- ` bullet under a `## ` heading.**
@@ -262,25 +243,10 @@ Therefore:
   also a bullet.
 - Nested bullets are flattened into the parent section by the parser. Use them
   sparingly, and only for detail that reads fine standing alone.
-- No code fences, tables or raw HTML. HTML tags are stripped; fences become
-  noise inside a `<pre>` block.
+- No code fences, tables or raw HTML. HTML tags are stripped from the update
+  panel, and fences become noise there.
 
-### 5.3 The banned-word trap
-
-`pnpm site:verify` scans every built page — **including `/changelog`, which now
-contains your release body** — and fails the build on any of:
-
-```
-lorem ipsum · TODO · FIXME · example.com · your-company
-Coming soon · placeholder · undefined · NaN · [object Object]
-```
-
-`TODO`, `FIXME`, `Coming soon`, `NaN` and `[object Object]` match
-case-sensitively; the rest match case-insensitively. So a note reading *"the
-value was undefined"* or *"placeholder icons are gone"* will **fail the website
-build**. Rewrite the sentence — never weaken the check.
-
-### 5.4 House style
+### 5.3 House style
 
 Sections, in this order, omitting any that is empty:
 
@@ -290,7 +256,7 @@ Sections, in this order, omitting any that is empty:
 ## Removed      anything taken away — always name it explicitly
 ## Fixed        defects that users could hit
 ## Security     vulnerability fixes, dependency CVEs (name the advisory)
-## Known issues anything shipping broken on purpose — see 5.5
+## Known issues anything shipping broken on purpose — see 5.4
 ```
 
 Bullet style, as established by the v1.0.0 release — copy it:
@@ -319,21 +285,20 @@ first release. The `0.x` previews and the teammates release before it were
 withdrawn; never cite them in a release, and never link a reader to them.
 
 **Known cosmetic limitation, accepted deliberately:** `**bold**` renders as bold
-on GitHub, but the update panel and the website's `<pre>` block show the asterisks
-literally, because neither renders markdown. Keep the bold — GitHub is the
+on GitHub, but the update panel shows the asterisks literally, because it does
+not render markdown. Keep the bold — GitHub is the
 primary surface — and do not "fix" it by dropping the emphasis. The real fix is
 in `parseReleaseNotes` / `UpdatePanel`, and is a separate change from a release.
 
-### 5.5 Honesty requirements
+### 5.4 Honesty requirements
 
 - Anything knowingly shipping broken goes under `## Known issues`. Do not omit it.
 - If this release cannot self-update from a previous broken build, say so in the
   notes, with the manual reinstall instruction. A build that crashes at startup
   never renders the update panel, so the notes are the only channel left.
-- Do not claim a capability the app does not ship. The website has a hard gate on
-  this (`landing/src/lib/showcase.ts`) and it will fail your site build.
+- Do not claim a capability the app does not ship.
 
-### 5.6 Produce the file
+### 5.5 Produce the file
 
 Write the notes to `release-notes/vX.Y.Z.md` (create the directory if needed; it
 is a working file, and it is fine for it to stay untracked). Derive its content
@@ -522,8 +487,7 @@ gh release view vX.Y.Z --repo vyotiqai/vyotiq-agent-v-releases --json body --jq 
 ```
 
 If the finalize job already ran and backfilled the stub, editing the published
-release afterwards is fine — just make sure you re-bake the site (§11) *after*
-the edit, or the website will show the stub.
+release afterwards is fine.
 
 Print: `PHASE 6 notes — PASS — authored body set on vX.Y.Z (N chars, not the stub)`.
 
@@ -605,96 +569,19 @@ Print: `PHASE 7 verify — PASS — 8 installers + 3 manifests, SHA512 matched, 
 
 ---
 
-## 11. PHASE 8 — Update the website
+## 11. PHASE 8 — The website
 
-**This is the step that makes the release reachable.** A published release does
-nothing for users until the site is rebuilt and redeployed, because the download
-and changelog pages are baked from the GitHub API at build time.
+**There is no website right now.** The old vyotiq.com (`landing/`, an Astro site
+deployed to GitHub Pages by `deploy-landing.yml`) was removed on 2026-09-27, and
+Pages was unpublished, while a new site is built. Both removed versions are kept
+under the git tags `archive/site-old` and `archive/site-new`; their page files
+are in `docs/site-pages/`.
 
-**Precondition:** the release must be **published (non-draft)** with the authored
-notes already on it. `bake-release.mjs` reads `/releases/latest`, which never
-returns a draft — building too early silently bakes the *old* version, and the
-site will confidently offer the previous installer.
+Skip this phase. If a new site exists by the time you run this prompt and this
+section has not been rewritten for it, **STOP and ask** (§B) how it learns about a
+release and what deploys it. Do not restore the old pipeline from the tags.
 
-### 11.1 Build and verify
-
-```bash
-# Authenticate the bake to avoid GitHub's 60-req/hr unauthenticated rate limit.
-# A 5xx or 429 makes bake-release exit non-zero by design, rather than baking a
-# false "no downloads" state into production.
-export GH_TOKEN=$(gh auth token)      # PowerShell: $env:GH_TOKEN = (gh auth token)
-
-pnpm site:build
-pnpm site:verify
-```
-
-`pnpm site:build` runs the full bake — app data, legal pages, brand, logos,
-release, changelog — then `astro build`. Two gates can legitimately fail here:
-
-- **The showcase gate** (`landing/src/lib/showcase.ts`). Every tool, provider and
-  marketplace package the site may name is allow-listed there. If this release
-  added one, the site build fails until it is approved. That is deliberate — it
-  is the one moment somebody is guaranteed to read a new capability claim before
-  it goes public. Approve it properly; never disable the gate.
-- **`verify-site.mjs`** — routes, placeholder/banned words (§5.3, which now
-  includes your release notes), meta tags, no third-party scripts, internal
-  links, accessibility, sitemap/canonical agreement, and stated counts matching
-  the baked data.
-
-### 11.2 Confirm the new version actually baked
-
-```bash
-node -p "require('./landing/src/data/release.json').version"            # must be X.Y.Z
-node -p "require('./landing/src/data/release.json').installers.length"  # must be 8
-node -p "require('./landing/src/data/changelog.json').entries[0].tag"   # must be vX.Y.Z
-```
-
-If `release.json` still shows the previous version, the release was not published
-when you built. Publish it, then rebuild — do not hand-edit these files; they are
-generated, and a hand-edit will be silently overwritten on the next build while
-making the site lie in the meantime.
-
-Also run a network link check before shipping, since the download URLs are new:
-
-```bash
-node landing/scripts/verify-site.mjs --network
-```
-
-### 11.3 Deploy
-
-**There is currently no site-deploy workflow in this repository**, and there is no
-separate website repository. Discover the real target before doing anything:
-
-```bash
-ls .github/workflows/
-git log --oneline --all -- .github/workflows/deploy-landing.yml | head -5
-```
-
-Then:
-
-- **If a deploy workflow exists** — use it. Push to `main` if it is
-  path-triggered on `landing/**`, or `gh workflow run <name>`. Watch it to green.
-- **If deployment is connected outside the repo** (a Cloudflare Pages / Vercel /
-  Netlify project pointed at this repo through their dashboard) — pushing
-  `landing/**` to `main` is the deploy. Confirm from the provider afterwards; do
-  not assume.
-- **If neither** — **STOP and ask** (§B). Do not invent a deploy target, do not
-  `wrangler publish` against guessed credentials, do not push to an unrelated
-  branch hoping it is GitHub Pages. The site was previously deployed to
-  Cloudflare Pages via `wrangler-action` in a `deploy-landing.yml` that was later
-  removed; Appendix D restores it, but adding a deploy pipeline is a change the
-  user must approve, not a step you take mid-release.
-
-### 11.4 Confirm it is live
-
-Once deployed, check the real site — not the local build:
-
-- `https://vyotiq.com/download` offers `X.Y.Z` and every platform's installer.
-- Click one download link per platform; confirm it resolves (a 404 here means a
-  stale bake).
-- `https://vyotiq.com/changelog` shows `vX.Y.Z` at the top with your notes.
-
-Print: `PHASE 8 site — PASS — release.json=X.Y.Z, 8 installers, verify green, deployed via <mechanism>, /download live`.
+Print: `PHASE 8 site — SKIPPED — no website`.
 
 ---
 
@@ -729,10 +616,6 @@ Print: `PHASE 8 site — PASS — release.json=X.Y.Z, 8 installers, verify green
 | App installs but shows a window titled `Error` | Main-process crash, usually a packaging trim dropping a required module | Read `%APPDATA%\Vyotiq\logs\vyotiq.log` and `crash-history.json`; the missing module names the bad filter. Fix, ship the next version, and say in the notes that the broken build cannot self-update. |
 | Installer "corrupt" / cryptic failure | Truncated download | Verify SHA512 against `latest.yml` before suspecting anything else. |
 | Silent install exits 0, old version still runs | A running `Vyotiq.exe` locked the files | Kill it, reinstall. |
-| Site shows the old version | Built before the release was published, or not deployed | Publish, re-run `pnpm site:build`, redeploy. Never hand-edit `release.json`. |
-| `bake-release` exits non-zero | GitHub API 429/5xx | Set `GH_TOKEN` and retry. Never bypass it — failing loudly is deliberate, to stop a false "no downloads" state reaching production. |
-| `pnpm site:build` fails on an unapproved capability | The showcase gate | Approve it in `landing/src/lib/showcase.ts` with a real reading of the claim. |
-| `pnpm site:verify` fails on a banned word | Your release notes contain `TODO`, `undefined`, `placeholder`… | Rewrite the sentence (§5.3). |
 | Terminal/PTY tests fail under full-suite load | Known `AttachConsole` flake | Re-run that file alone. Passing in isolation = not a blocker; record it. |
 
 ---
@@ -743,7 +626,7 @@ Stop, state what you found, and ask, if any of these are true:
 
 1. The version you are about to release **is already published**.
 2. `main` is red and the fix is not obviously yours.
-3. The website has **no discoverable deploy target** (§11.3).
+3. A new website exists but §11 does not yet say how to update it.
 4. The release needs a **major** bump, or a breaking change needs a migration you
    were not asked to write.
 5. Tests fail in a way you cannot attribute, or the failure set has grown beyond
@@ -772,9 +655,6 @@ A release is done when every box is ticked with evidence:
 - [ ] 8 installers + `latest.yml` + `latest-linux.yml` + `latest-mac.yml` + blockmaps
 - [ ] Downloaded installer SHA512 matched, installed, launched, version confirmed
 - [ ] Pointer release mirrored on the source repo, marked Latest
-- [ ] `landing/src/data/release.json` baked to the new version
-- [ ] `pnpm site:verify` green (including `--network`)
-- [ ] Site deployed; `vyotiq.com/download` and `/changelog` show the new version
 - [ ] In-app updater offers the new version from an older installation
 - [ ] Signing / crash-reporting status stated honestly
 
@@ -788,7 +668,6 @@ Gate           typecheck/lint/test/audit/build <status> · packaged launch <stat
 Release        https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/vX.Y.Z
 Installers     <n> assets, 3 manifests, SHA512 verified on <platform>
 Notes          <n> sections, <m> bullets, authored
-Website        release.json=X.Y.Z · verify <status> · deployed via <mechanism> · <url>
 Updater        <offered from A.B.C | not verified — reason>
 Signing        Windows <signed|unsigned> · macOS <notarized|unsigned>
 Crash report   Sentry DSN <present|absent at build time>
@@ -806,7 +685,7 @@ is not green is worse than a release reported blocked.
 
 ```markdown
 <One or two sentences framing the release: what changed in character, not a list.
-This paragraph is visible on GitHub and the website, but NOT in the update panel —
+This paragraph is visible on GitHub, but NOT in the update panel —
 never let it carry a change that is not also a bullet below.>
 
 ## Added
@@ -835,8 +714,7 @@ never let it carry a change that is not also a bullet below.>
 ```
 
 Rules restated: only `## Heading` and `- bullet` reach the update panel. No code
-fences, tables or HTML. None of the §5.3 banned words. No commit hashes, PR
-numbers or file paths.
+fences, tables or HTML. No commit hashes, PR numbers or file paths.
 
 ---
 
@@ -863,12 +741,6 @@ git tag -a vX.Y.Z -m "Vyotiq vX.Y.Z" && git push origin main && git push origin 
 gh run watch <id> --repo vyotiqai/vyotiq-agent-v --exit-status
 gh release edit vX.Y.Z --repo vyotiqai/vyotiq-agent-v-releases --notes-file release-notes/vX.Y.Z.md
 gh release view vX.Y.Z --repo vyotiqai/vyotiq-agent-v-releases --json isDraft,body,assets
-
-# Website
-export GH_TOKEN=$(gh auth token)
-pnpm site:build && pnpm site:verify
-node landing/scripts/verify-site.mjs --network
-pnpm site:dev            # local preview
 ```
 
 ---
@@ -893,35 +765,7 @@ describe files that are no longer there.
 
 ---
 
-## Appendix D — If the website has no deploy target
-
-Do not act on this without the user's approval; it is a repository change, not a
-release step.
-
-The site was previously deployed to **Cloudflare Pages** by
-`.github/workflows/deploy-landing.yml`, removed when the site was rebuilt. Its
-shape, recoverable from git history
-(`git show d0c2cac:.github/workflows/deploy-landing.yml`):
-
-- Triggers on pushes to `main` touching `landing/**`, plus `workflow_dispatch`
-- Enables corepack/pnpm **before** `setup-node` (which resolves the package
-  manager for its cache)
-- `pnpm install --frozen-lockfile`, bakes the release data, then `astro build`
-- Deploys via `cloudflare/wrangler-action` (v4 wants **camelCase**
-  `workingDirectory`), secret-gated on `CLOUDFLARE_API_TOKEN` /
-  `CLOUDFLARE_ACCOUNT_ID` so forks and PRs stay green instead of failing
-
-If restored, it must also run `pnpm site:verify` before deploying — the
-historical version did not, which is how a stale or invalid site could ship. Pin
-all actions by SHA (repository policy). Note that a rebuild is needed after every
-release regardless of whether `landing/**` changed, since the download data comes
-from the GitHub API rather than from the repo; a `workflow_dispatch` trigger, or
-a `repository_dispatch` fired by the release workflow's finalize job, covers that
-case.
-
----
-
-## Appendix E — Using this prompt on a different project
+## Appendix D — Using this prompt on a different project
 
 Sections §1, §2, §6, §7, §10 and §C transfer as written, as does §5 apart from
 the format contract. Replace the project-specific parts by answering these, from

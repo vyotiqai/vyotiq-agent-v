@@ -86,8 +86,8 @@ emitted (release.yml:222-235); publishing happens only on real tag pushes.
   `latest.yml`, `latest-linux.yml`, `latest-mac.yml` (:289-294) plus the
   installers — Windows NSIS `*-setup.exe`, `.AppImage`, `.deb`, `.rpm`,
   at least 2 `.dmg` and 2 `mac.zip` (:295-300); "Publish the draft release"
-  (:303-312) flips `--draft=false` — the moment the updater and the website
-  can see the release, safe on re-runs; "Mirror a release pointer on the
+  (:303-312) flips `--draft=false` — the moment the updater can see the
+  release, safe on re-runs; "Mirror a release pointer on the
   source repo" (:314-338) keeps a pointer release `v$VERSION` on
   `vyotiqai/vyotiq-agent-v`, marked Latest, linking to the real installers.
 

@@ -57,7 +57,3 @@ overrides:
   # keys, but the audit gate is high. 4.18.1 (2026-04-01) is a minor within
   # 4.x, so the same API.
   lodash-es: '>=4.18.1'
-
-# Workspace packages: root Electron app + Astro website.
-packages:
-  - landing

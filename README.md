@@ -35,7 +35,7 @@ Vyotiq builds for **Windows** (NSIS installer), **macOS** (dmg and zip), and **L
 
 ## Downloads
 
-Installers are published to the companion repository [vyotiqai/vyotiq-agent-v-releases](https://github.com/vyotiqai/vyotiq-agent-v-releases). Grab the latest release there, or use the download UI on [vyotiq.com/download](https://vyotiq.com/download). You can still build from source as described below.
+Installers are published to the companion repository [vyotiqai/vyotiq-agent-v-releases](https://github.com/vyotiqai/vyotiq-agent-v-releases). Grab the latest release there. You can still build from source as described below.
 
 ## Quick start
 
@@ -102,20 +102,6 @@ Artifacts are written to `dist-package/` (see `electron-builder.yml`: appId `com
 - `src/shared` — code shared between main and renderer
 - `tests/` — vitest unit/e2e suites plus Playwright GUI e2e
 - `scripts/` — sync and build helper scripts wired into the package scripts
-- `landing/` — the [vyotiq.com](https://vyotiq.com) website, a workspace package
-
-## Website
-
-The website is a static Astro site in `landing/`, built from this repository's own data rather than restated prose — the tool names come from the tool registry, the providers from the provider defaults, the extensions from the bundled marketplace catalog, and the legal pages render the repository's own Markdown verbatim.
-
-```bash
-pnpm site:dev     # dev server
-pnpm site:build   # static build into landing/dist
-pnpm site:capture # re-capture the application screenshots
-pnpm site:verify  # post-build assertions over landing/dist
-```
-
-Which capabilities the site may name is gated by `landing/src/lib/showcase.ts`: adding a tool, provider, or marketplace package to the app fails `pnpm site:build` until it is approved there.
 
 ## Documentation
 

@@ -306,8 +306,7 @@ jobs:
       - name: Publish the draft release
         # Flip the draft created by create-release and filled by
         # electron-builder to published only after every asset check passed.
-        # This is the moment the in-app updater and the website can see the
-        # release. Re-runs are safe: --draft=false on a published release is
+        # This is the moment the in-app updater can see the release. Re-runs are safe: --draft=false on a published release is
         # a no-op.
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
@@ -330,7 +329,7 @@ jobs:
           {
             echo "Agent V v$VERSION."
             echo ""
-            echo "**Downloads:** the [Windows · macOS · Linux installers](https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v$VERSION) are published on the [releases repository](https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/latest), where the in-app updater and the [website](https://vyotiq.com) point."
+            echo "**Downloads:** the [Windows · macOS · Linux installers](https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v$VERSION) are published on the [releases repository](https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/latest), where the in-app updater points."
             echo ""
             echo "Full release notes: https://github.com/vyotiqai/vyotiq-agent-v-releases/releases/tag/v$VERSION"
           } > pointer.md

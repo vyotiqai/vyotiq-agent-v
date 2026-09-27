@@ -52,7 +52,7 @@ this into `pnpm typecheck` and CI once the count reaches zero.
 
 - Releases are tag-driven: push an annotated `vX.Y.Z` tag (matching `package.json`'s `version`) and the Release workflow (`.github/workflows/release.yml`) builds and publishes the installers.
 - The workflow verifies that the tag matches `package.json`'s version and fails the release on mismatch.
-- Releases and installer assets live in the public `vyotiqai/vyotiq-agent-v-releases` repository; the website and the in-app updater point there.
+- Releases and installer assets live in the public `vyotiqai/vyotiq-agent-v-releases` repository; the in-app updater points there.
 
 ## Notes
 
