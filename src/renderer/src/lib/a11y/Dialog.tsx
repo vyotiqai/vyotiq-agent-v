@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, type JSX, type ReactNode, type RefObject } from 'react'
+import { retainModal } from './modalPresence'
 import { createPortal } from 'react-dom'
 import { useEscapeToClose } from '@renderer/lib/hooks/useEscapeToClose'
 import { cn } from '@renderer/lib/ui'
@@ -100,6 +101,9 @@ export function Dialog({
     initialFocusRef,
     returnFocusRef
   })
+
+  // Lets the agent browser panel hide its native view, which would paint over us.
+  useEffect(() => (open ? retainModal() : undefined), [open])
 
   useEffect(() => {
     if (!useNativeDialog) return

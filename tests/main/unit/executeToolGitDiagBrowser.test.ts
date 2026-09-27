@@ -66,6 +66,17 @@ vi.mock('@main/app/agentBrowser', async (importOriginal) => {
   }
 })
 
+const snipScreen = vi.fn()
+const listSnipSources = vi.fn(async () => ({
+  windows: ['Game — dev build', 'Notes'],
+  displays: [{ index: 0, width: 1920, height: 1080, primary: true }]
+}))
+
+vi.mock('@main/app/screenSnip', () => ({
+  snipScreen: (...args: unknown[]) => snipScreen(...args),
+  listSnipSources: (...args: unknown[]) => listSnipSources(...args)
+}))
+
 const toolWebFetch = vi.fn(async () => '# Fetched page')
 
 vi.mock('@main/net/webFetch', async (importOriginal) => {
@@ -616,6 +627,142 @@ describe('executeTool browser action handlers', () => {
     )
     expect(result.content).toContain('pressed Enter')
     expect(result.content).toContain('refs:')
+  })
+
+  it('browser_snapshot returns its screenshot as an image and passes a snip target', async () => {
+    snapshotPage.mockImplementationOnce((async (opts: { captures?: unknown[] }) => {
+      opts.captures?.push({ artifact: 'browser/snapshot-1-1.jpg', width: 300, height: 120, label: 'element @e2' })
+      return 'refs:'
+    }) as never)
+    const result = await executeTool(
+      'browser_snapshot',
+      JSON.stringify({ clip: '@e2' }),
+      workspace,
+      new AbortController().signal,
+      { runDir: workspace }
+    )
+    expect(result.ok).toBe(true)
+    expect(result.summary).toBe('@e2')
+    expect(result.images).toEqual([
+      { artifact: 'browser/snapshot-1-1.jpg', width: 300, height: 120, label: 'element @e2' }
+    ])
+    expect(snapshotPage).toHaveBeenCalledWith(
+      expect.objectContaining({ capture: { kind: 'element', selector: '@e2' }, screenshot: true })
+    )
+  })
+
+  it('browser_snapshot refuses clip and region together', async () => {
+    const result = await executeTool(
+      'browser_snapshot',
+      JSON.stringify({ clip: '@e2', region: { x: 0, y: 0, width: 10, height: 10 } }),
+      workspace,
+      new AbortController().signal,
+      { runDir: workspace }
+    )
+    expect(result.ok).toBe(false)
+    expect(result.content).toMatch(/clip or region/)
+  })
+
+  it('browser_snapshot passes a burst through', async () => {
+    await executeTool(
+      'browser_snapshot',
+      JSON.stringify({ frames: 3, intervalMs: 200 }),
+      workspace,
+      new AbortController().signal,
+      { runDir: workspace }
+    )
+    expect(snapshotPage).toHaveBeenCalledWith(expect.objectContaining({ frames: 3, intervalMs: 200 }))
+  })
+
+  it('screen_snip stores every burst frame and hands them to the model', async () => {
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10])
+    snipScreen.mockResolvedValueOnce({
+      source: { kind: 'window', name: 'Game — dev build' },
+      full: { width: 1280, height: 720 },
+      native: { width: 1920, height: 1080 },
+      frames: [
+        { jpeg, width: 1280, height: 720, atMs: 0 },
+        { jpeg, width: 1280, height: 720, atMs: 251 }
+      ],
+      otherMatches: ['Game — settings']
+    })
+    const result = await executeTool(
+      'screen_snip',
+      JSON.stringify({ window: 'game', frames: 2, intervalMs: 250 }),
+      workspace,
+      new AbortController().signal,
+      { runDir: workspace }
+    )
+    expect(result.ok).toBe(true)
+    expect(result.summary).toBe('game ×2')
+    expect(snipScreen).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { kind: 'window', title: 'game' }, frames: 2, intervalMs: 250 })
+    )
+    expect(result.images).toHaveLength(2)
+    for (const image of result.images ?? []) {
+      expect(image.artifact).toMatch(/^images\/snip-\d+-\d+\.jpg$/)
+      expect(existsSync(join(workspace, image.artifact))).toBe(true)
+    }
+    expect(result.images?.[1]?.label).toBe('"Game — dev build" · frame 2/2 +251ms')
+    expect(result.content).toContain('Snip space: 1280x720 (native 1920x1080)')
+    expect(result.content).toContain('Frames: 2 at +0ms, +251ms')
+    expect(result.content).toContain('Also matched (not captured): "Game — settings"')
+    expect(result.content).toMatch(/\[Snip saved under run images\/snip-/)
+    // Two byte-identical frames: a covered Chromium window stops drawing.
+    expect(result.content).toContain('All frames are identical')
+  })
+
+  it('screen_snip defaults to the primary display and passes a region', async () => {
+    snipScreen.mockResolvedValueOnce({
+      source: { kind: 'display', name: 'display 0 (1920x1080, primary)' },
+      full: { width: 1280, height: 720 },
+      native: { width: 1920, height: 1080 },
+      region: { x: 10, y: 20, width: 300, height: 200 },
+      frames: [{ jpeg: Buffer.from([0xff, 0xd8, 0xff, 0xe0]), width: 450, height: 300, atMs: 0 }],
+      otherMatches: []
+    })
+    const result = await executeTool(
+      'screen_snip',
+      JSON.stringify({ region: { x: 10, y: 20, width: 300, height: 200 } }),
+      workspace,
+      new AbortController().signal,
+      { runDir: workspace }
+    )
+    expect(snipScreen).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { kind: 'display' }, region: { x: 10, y: 20, width: 300, height: 200 } })
+    )
+    expect(result.content).toContain('Source: display 0 (1920x1080, primary)')
+    expect(result.content).toContain('Region: x=10 y=20 300x200')
+    expect(result.images?.[0]?.label).toBe('display 0 (1920x1080, primary) region')
+  })
+
+  it('screen_snip list names windows without capturing', async () => {
+    snipScreen.mockClear()
+    const result = await executeTool(
+      'screen_snip',
+      JSON.stringify({ list: true }),
+      workspace,
+      new AbortController().signal,
+      { runDir: workspace }
+    )
+    expect(result.ok).toBe(true)
+    expect(snipScreen).not.toHaveBeenCalled()
+    expect(result.images).toBeUndefined()
+    expect(result.content).toContain('- display 0: 1920x1080 (primary)')
+    expect(result.content).toContain('- "Game — dev build"')
+  })
+
+  it('screen_snip refuses a window and a display together, and bursts past the cap', async () => {
+    for (const args of [{ window: 'x', display: 0 }, { frames: 7 }, { intervalMs: 10 }]) {
+      const result = await executeTool(
+        'screen_snip',
+        JSON.stringify(args),
+        workspace,
+        new AbortController().signal,
+        { runDir: workspace }
+      )
+      expect(result.ok).toBe(false)
+    }
   })
 
   it('browser_select_option maps value or label', async () => {

@@ -1,6 +1,7 @@
-import type { ChatMessage, MessageContent, PersistedEvent } from '../ipc'
+import type { ChatMessage, MessageContent, PersistedEvent, ToolImageRef } from '../ipc'
 import {
   contentAudios,
+  contentImageArtifacts,
   contentDisplayText,
   contentFiles,
   contentImages,
@@ -38,6 +39,8 @@ export type UiToolRow = {
   argsPreview?: string
   /** Locked at first render; terminal may recompute when args arrive for read-only demotion. */
   presentation?: ToolPresentation
+  /** Screenshots and other images the tool returned, as run-dir artifacts. */
+  images?: ToolImageRef[]
 }
 
 export type UiGroupTiming = {
@@ -666,6 +669,7 @@ export function messagesToUiItems(messages: ChatMessage[]): UiItem[] {
       const name = m.toolName ?? pending?.name ?? 'tool'
       const summary = summarizeToolArgs(name, pending?.arguments)
       const content = toolContentText(m.content)
+      const images = contentImageArtifacts(m.content)
       const row: Extract<UiItem, { kind: 'tool' }> = {
         kind: 'tool',
         id,
@@ -676,7 +680,8 @@ export function messagesToUiItems(messages: ChatMessage[]): UiItem[] {
           status: inferToolStatus(m.content, m.ok),
           content,
           contentTruncated: m.contentTruncated,
-          argsPreview: uiArgsPreview(name, pending?.arguments || undefined)
+          argsPreview: uiArgsPreview(name, pending?.arguments || undefined),
+          ...(images.length ? { images } : {})
         }
       }
       const existingIdx = items.findIndex((item) => item.kind === 'tool' && item.id === id)

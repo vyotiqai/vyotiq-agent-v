@@ -263,6 +263,7 @@ const TOOL_ICON_BY_NAME: Record<string, IconName> = {
   browser_handle_dialog: 'globe',
   browser_press_key: 'globe',
   browser_select_option: 'globe',
+  screen_snip: 'monitor',
   mcp_list_tools: 'plug',
   mcp_list_resources: 'plug',
   mcp_read_resource: 'plug',

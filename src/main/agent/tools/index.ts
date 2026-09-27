@@ -12,7 +12,7 @@ import {
 } from '../schemas/tools'
 import { invokeMcpTool, parseMcpToolName, getMcpToolDefinition } from '../mcp'
 import { isMcpToolPermitted } from '../../../shared/utils/mcpToolPolicy'
-import { toolRead } from './read'
+import { isReadableImagePath, toolRead, toolReadImage } from './read'
 import { toolEditAsync } from './edit'
 import { readPathArg, readEditBody, requirePathArg, readString, readTrimmed } from './argAccess'
 import { toolSearch } from './search'
@@ -69,6 +69,7 @@ import { invalidateGitStatusCache } from '@main/git/gitStatusCache'
 import { invalidateSlashCommandsCache } from '../slashCommands/listCache'
 import { clearGitignoreMatcherCache, isGitignoreRelPath } from './gitignore'
 import { browserHandlers } from './browserTools'
+import { screenSnipHandlers } from './screenSnipTool'
 import { mcpHandlers } from './mcpTools'
 import { terminalHandlers } from './terminalHandlers'
 import { gitGithubHandlers } from './gitGithubTools'
@@ -100,7 +101,8 @@ import type {
   AgentQuestionRequest,
   RunGoal,
   Settings,
-  TerminalShell
+  TerminalShell,
+  ToolImageRef
 } from '../../../shared/ipc'
 import { basename, join } from 'path'
 import { existsSync } from 'fs'
@@ -118,6 +120,11 @@ export interface ToolResult {
   ok: boolean
   summary: string
   content: string
+  /**
+   * Images the tool stored in the run dir (screenshots). They reach the model
+   * as image parts after `content`, and the transcript as thumbnails.
+   */
+  images?: ToolImageRef[]
   /** True when tools layer already logged this failure (avoid duplicate agent warn). */
   failureLogged?: boolean
 }
@@ -238,9 +245,14 @@ function logToolSuccess(name: string): void {
   })
 }
 
-export function toolOk(name: string, summary: string, content: string): ToolResult {
+export function toolOk(
+  name: string,
+  summary: string,
+  content: string,
+  images?: ToolImageRef[]
+): ToolResult {
   logToolSuccess(name)
-  return { ok: true, summary, content }
+  return images?.length ? { ok: true, summary, content, images } : { ok: true, summary, content }
 }
 
 export function toolFail(
@@ -374,9 +386,14 @@ export function invalidateAfterWorkspaceMutation(
 }
 
 export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
-  read: async (workspace, args, signal) => {
+  read: async (workspace, args, signal, context) => {
     throwIfAborted(signal)
     const path = requirePathArg('read', args)
+    if (isReadableImagePath(path) && context.runDir) {
+      const { content, image } = await toolReadImage(workspace, path, context.runDir)
+      throwIfAborted(signal)
+      return toolOk('read', path, content, [image])
+    }
     const offset = typeof args.offset === 'number' ? args.offset : undefined
     const limit = typeof args.limit === 'number' ? args.limit : undefined
     const startLine = typeof args.startLine === 'number' ? args.startLine : undefined
@@ -591,6 +608,7 @@ export const BUILTIN_HANDLERS: Record<AgentToolName, ToolHandler> = {
     return toolOk('create_plan', result.summary, result.content)
   },
   ...browserHandlers,
+  ...screenSnipHandlers,
   ...mcpHandlers,
   ask_question: async (_workspace, args, signal, context) => {
     throwIfAborted(signal)
@@ -1069,7 +1087,8 @@ export async function executeTool(
       signal,
       name,
       context.runEnabledMcpIds,
-      workspace
+      workspace,
+      context.runDir
     )
     if (mcpResult.ok) {
       const mutated = new Set<string>()

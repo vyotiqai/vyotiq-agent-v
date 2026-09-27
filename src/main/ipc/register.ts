@@ -23,6 +23,7 @@ import {
   CompactRunRequestSchema,
   ResolveWritesRequestSchema,
   ReadRunArtifactRequestSchema,
+  runArtifactImageMime,
   OpenRunArtifactRequestSchema,
   TaskFileStatsRequestSchema,
   TaskFileDiffRequestSchema,
@@ -2106,12 +2107,13 @@ export function registerIpc(): void {
         if (!existsSync(filePath)) {
           return ok({ name: req.name, exists: false, content: null })
         }
-        if (/^browser\/snapshot(?:-[\w.-]+)?\.jpg$/.test(req.name)) {
-          const jpeg = readFileSync(filePath)
+        const imageMime = runArtifactImageMime(req.name)
+        if (imageMime) {
+          const bytes = readFileSync(filePath)
           return ok({
             name: req.name,
             exists: true,
-            content: `data:image/jpeg;base64,${jpeg.toString('base64')}`
+            content: `data:${imageMime};base64,${bytes.toString('base64')}`
           })
         }
         const content = readFileSync(filePath, 'utf8')

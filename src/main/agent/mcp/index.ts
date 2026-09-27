@@ -16,6 +16,8 @@ import { logger } from '../../../shared/logger'
 import { neutralizeUntrustedBody, wrapUntrustedContent } from '../untrustedContent'
 import { mcpToolSummary } from '../../../shared/toolSummary'
 import type { ToolResult } from '../tools'
+import type { ToolImageRef } from '../../../shared/ipc'
+import { storeToolImage } from '../toolImageStore'
 import { sanitizedTerminalEnv } from '../tools/terminal'
 import {
   getMcpAuthToken,
@@ -2058,6 +2060,61 @@ export function getMcpToolDefinition(fullName: string): ToolDefinition | undefin
   return toolsByName.get(fullName)
 }
 
+/** Most images one MCP result may attach; the request-wide cap is 8. */
+const MCP_MAX_IMAGES_PER_RESULT = 4
+
+/**
+ * Text of an MCP tool result, with its image blocks stored in the run dir.
+ *
+ * Image blocks used to be JSON-stringified: ~100 KB of base64 that the 64 KB
+ * text cap then cut mid-string, so the model got neither the image nor the
+ * text after it (Playwright MCP's browser_take_screenshot, for one).
+ */
+export function mcpResultContent(
+  blocks: Array<Record<string, unknown>> | undefined,
+  runDir: string | undefined
+): { text: string; images: ToolImageRef[]; notes: string[] } {
+  const texts: string[] = []
+  const images: ToolImageRef[] = []
+  const notes: string[] = []
+  for (const block of blocks ?? []) {
+    if (block.type === 'text') {
+      texts.push(typeof block.text === 'string' ? block.text : '')
+      continue
+    }
+    if (block.type === 'image' && typeof block.data === 'string') {
+      const mime = typeof block.mimeType === 'string' ? block.mimeType : 'image'
+      if (!runDir) {
+        notes.push(`[MCP returned an image (${mime}); no run directory to store it]`)
+        continue
+      }
+      if (images.length >= MCP_MAX_IMAGES_PER_RESULT) {
+        notes.push(`[MCP image dropped: more than ${MCP_MAX_IMAGES_PER_RESULT} images in one result]`)
+        continue
+      }
+      const stored = storeToolImage(runDir, Buffer.from(block.data, 'base64'), { source: 'mcp' })
+      if (!stored.ok) {
+        notes.push(`[MCP image not attached: ${stored.reason}]`)
+        continue
+      }
+      images.push(stored.image)
+      const dims = stored.image.width ? `${stored.image.width}x${stored.image.height}, ` : ''
+      notes.push(`[Image saved under run ${stored.image.artifact} (${dims}${stored.bytes} bytes)]`)
+      continue
+    }
+    // Audio and resources keep their JSON shape, with base64 bodies elided.
+    const { data, blob, ...rest } = block as { data?: unknown; blob?: unknown }
+    texts.push(
+      JSON.stringify({
+        ...rest,
+        ...(typeof data === 'string' ? { data: `[base64, ${data.length} chars]` } : {}),
+        ...(typeof blob === 'string' ? { blob: `[base64, ${blob.length} chars]` } : {})
+      })
+    )
+  }
+  return { text: texts.join('\n'), images, notes }
+}
+
 export async function invokeMcpTool(
   serverId: string,
   toolName: string,
@@ -2065,7 +2122,9 @@ export async function invokeMcpTool(
   signal: AbortSignal,
   fullToolName?: string,
   enabledIds?: ReadonlySet<string>,
-  workspacePath?: string | null
+  workspacePath?: string | null,
+  /** Run directory; image blocks are stored there and returned as images. */
+  runDir?: string
 ): Promise<ToolResult> {
   if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
   const summary = mcpToolSummary(toolName, args)
@@ -2104,16 +2163,20 @@ export async function invokeMcpTool(
         maxTotalTimeout: MCP_INVOKE_MAX_TOTAL_TIMEOUT_MS
       }
     )
-    const text = (result.content as Array<{ type?: string; text?: string }>)
-      .map((c) => (c.type === 'text' ? c.text ?? '' : JSON.stringify(c)))
-      .join('\n')
+    const { text, images, notes } = mcpResultContent(
+      result.content as Array<Record<string, unknown>>,
+      runDir
+    )
     const ok = result.isError !== true
     const prefix = ok ? '' : `[MCP ${fullToolName ?? toolName} error]\n`
+    // Image notes are harness-authored, so they sit outside the untrusted fence.
+    const body = text || (images.length ? '(image only)' : '(empty)')
     const content =
       prefix +
-      wrapMcpPayload(capMcpText(text || '(empty)'), `${serverId}/${toolName}`)
+      wrapMcpPayload(capMcpText(body), `${serverId}/${toolName}`) +
+      (notes.length ? `\n${notes.join('\n')}` : '')
     recordCircuitSuccess(circuitKeyMcpInvoke(access.sessionKey))
-    return { ok, summary, content }
+    return images.length ? { ok, summary, content, images } : { ok, summary, content }
   } catch (err) {
     if (signal.aborted || isAbortError(err)) {
       releaseCircuitProbe(circuitKeyMcpInvoke(access.sessionKey))
