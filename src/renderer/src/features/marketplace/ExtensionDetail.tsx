@@ -8,6 +8,7 @@ import type {
 } from '@shared/ipc'
 import { GITHUB_MCP_ID, isGoogleMcpId, mcpSupportsOAuth, mcpUsesTokenAuth } from '@shared/mcpApps'
 import { workspaceOverrideForId } from '@shared/domain/marketplaceEnablement'
+import { isRootInstructionFileName } from '@shared/rules'
 import { Icon, type IconName } from '@renderer/lib/icons'
 import { Button, Segmented, cn, pushToast } from '@renderer/lib/ui'
 import { SECTION_LABEL } from '@renderer/lib/utils/layout'
@@ -37,11 +38,8 @@ export type ConfirmFn = (
 
 const TOOLS_SHOWN = 6
 
-const ROOT_RULE_FILES = new Set(['agents.md', 'claude.md', '.cursorrules'])
-
 export function isRootRulePath(path: string): boolean {
-  const base = path.replace(/\\/g, '/').toLowerCase().split('/').pop() ?? ''
-  return ROOT_RULE_FILES.has(base)
+  return isRootInstructionFileName(path.replace(/\\/g, '/').split('/').pop() ?? '')
 }
 
 /** Why an MCP tool is out of the next step's catalog, in the row's words. */
