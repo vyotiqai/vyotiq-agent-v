@@ -30,9 +30,6 @@ export type BrowserFileEntry = {
   path: string
   /** Letter status (A / M / D / …). */
   statusLetter: 'A' | 'M' | 'D' | 'R' | 'C' | '?'
-  /** Badge text (New / Deleted / Modified / …). */
-  statusLabel: string | null
-  statusTone?: 'success' | 'muted'
   added: number
   removed: number
   binary?: boolean

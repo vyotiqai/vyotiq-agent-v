@@ -491,7 +491,7 @@ export function AgentInstancePane({
                     if (!current) onOpenInstance(id)
                   }}
                   className={cn(
-                    'inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 font-mono text-2xs vy-transition focus-visible:vy-focus-ring',
+                    'inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 font-mono text-caption vy-transition focus-visible:vy-focus-ring',
                     current ? 'bg-surface-2 text-fg-strong' : 'text-muted hover:bg-surface'
                   )}
                 >
@@ -545,8 +545,9 @@ export function AgentInstancePane({
       <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-4 text-xs text-muted">
         <Icon name="lock" size={13} className="shrink-0" />
         <span className="min-w-0 truncate">Instances take instructions from their parent task.</span>
-        <button
-          type="button"
+        <Button
+          size="xs"
+          variant="ghost"
           onClick={(event) => {
             // This pane goes back to the parent task: focus its instruction
             // line, not the first one on the page (the leftmost of a split).
@@ -558,10 +559,9 @@ export function AgentInstancePane({
               })
             )
           }}
-          className="shrink-0 rounded-sm font-medium text-accent hover:underline focus-visible:vy-focus-ring"
         >
           Add an instruction to the parent
-        </button>
+        </Button>
       </div>
     </div>
   )

@@ -178,9 +178,8 @@ describe('AgentBrowserPanel visibility', () => {
     })
   })
 
-  it('Close browser menu calls browserClose and onClose', async () => {
+  it('Close browser menu calls browserClose', async () => {
     const browserClose = vi.fn().mockResolvedValue({ ok: true, data: true })
-    const onClose = vi.fn()
     Object.defineProperty(window, 'vyotiq', {
       configurable: true,
       writable: true,
@@ -204,13 +203,10 @@ describe('AgentBrowserPanel visibility', () => {
         browserClose
       }
     })
-    const { findByLabelText, findByText } = render(
-      <AgentBrowserPanel visible={true} onClose={onClose} />
-    )
+    const { findByLabelText, findByText } = render(<AgentBrowserPanel visible={true} />)
     fireEvent.click(await findByLabelText('More actions'))
     fireEvent.click(await findByText('Close browser'))
     expect(browserClose).toHaveBeenCalled()
-    expect(onClose).toHaveBeenCalled()
   })
 
   it('surfaces navigation control failures', async () => {
@@ -244,6 +240,38 @@ describe('AgentBrowserPanel visibility', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(browserBack).toHaveBeenCalled()
     expect(await findByText('Workspace is closed')).toBeTruthy()
+    // A failure is an alert with an icon, not the quiet confirmation line.
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toContain('Workspace is closed')
+    expect(alert.querySelector('svg')).toBeTruthy()
+  })
+
+  it('walks the recents list with the arrow keys and opens the one it is on', async () => {
+    const now = Date.now()
+    localStorage.setItem(
+      BROWSER_RECENTS_KEY,
+      JSON.stringify([
+        { url: 'https://a.example/', title: 'A', visitedAt: now },
+        { url: 'https://b.example/', title: 'B', visitedAt: now - 1000 }
+      ])
+    )
+    const browserNavigate = vi.fn().mockResolvedValue({ ok: true, data: true })
+    window.vyotiq.browserNavigate = browserNavigate
+    render(<AgentBrowserPanel visible={true} />)
+    const input = await screen.findByLabelText('Search or enter URL')
+    fireEvent.focus(input)
+    const list = await screen.findByRole('listbox', { name: 'Recent pages' })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    const second = list.querySelector('#browser-recent-1') as HTMLElement
+    expect(second.getAttribute('aria-selected')).toBe('true')
+    expect(input.getAttribute('aria-activedescendant')).toBe('browser-recent-1')
+    expect(second.classList.contains('bg-surface-2')).toBe(true)
+    expect(second.classList.contains('hover:bg-surface')).toBe(false)
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => {
+      expect(browserNavigate).toHaveBeenCalledWith('https://b.example/', undefined)
+    })
   })
 
   it('searches with the Settings search engine from the address bar', async () => {

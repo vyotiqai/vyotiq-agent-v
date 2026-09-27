@@ -1,6 +1,18 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { copyText } from '@renderer/lib/markdown/copyText'
-import { ActionMenu, Button, IconButton, MENU_LABEL, MENU_ROW, MENU_ROW_IDLE, MENU_ROW_TEXT, MENU_SURFACE, Segmented, type ActionMenuItem } from '@renderer/lib/ui'
+import {
+  ActionMenu,
+  Button,
+  IconButton,
+  MENU_LABEL,
+  MENU_ROW,
+  MENU_ROW_ACTIVE,
+  MENU_ROW_IDLE,
+  MENU_ROW_TEXT,
+  MENU_SURFACE,
+  Segmented,
+  type ActionMenuItem
+} from '@renderer/lib/ui'
 import { cn } from '@renderer/lib/ui/cn'
 import { Icon } from '@renderer/lib/icons'
 import { AgentVSpinner } from '@renderer/lib/brand/AgentVSpinner'
@@ -40,16 +52,19 @@ const EMPTY: AgentBrowserState = {
 
 const RECENTS_BAR_KEY = 'vyotiq.browserRecentsBar'
 
+/** A line under the toolbar: a confirmation, or a failure that says so. */
+type BrowserStatus = { text: string; failed: boolean }
+
 function reportBrowserIpc(
   res: { ok: true } | { ok: false; error: string } | undefined,
   fallback: string,
-  setStatusMsg: (msg: string) => void
+  fail: (msg: string) => void
 ): void {
   if (!res) {
-    setStatusMsg(fallback)
+    fail(fallback)
     return
   }
-  if (!res.ok) setStatusMsg(res.error)
+  if (!res.ok) fail(res.error)
 }
 
 /**
@@ -78,7 +93,6 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
   activeRunId,
   visible = true,
   agentAction = null,
-  onClose,
   onPopOut
 }: {
   className?: string
@@ -88,8 +102,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
   agentAction?: string | null
   /** When false (CSS-hidden dock tab), clear native WebContentsView bounds so the overlay does not paint over other panels. */
   visible?: boolean
-  onClose?: () => void
-  /** Hide the dock while keeping the browser alive (PiP pop-out) — unlike onClose, which closes the browser. */
+  /** Hide the dock while keeping the browser alive (PiP pop-out) — unlike Close browser, which closes it. */
   onPopOut?: () => void
 }) {
   const [state, setState] = useState<AgentBrowserState>(EMPTY)
@@ -106,7 +119,11 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
       return false
     }
   })
-  const [statusMsg, setStatusMsg] = useState<string | null>(null)
+  const [status, setStatus] = useState<BrowserStatus | null>(null)
+  const say = useCallback((text: string) => setStatus({ text, failed: false }), [])
+  const fail = useCallback((text: string) => setStatus({ text, failed: true }), [])
+  /** The recent row the arrow keys are on; -1 is the typed text. */
+  const [historyIndex, setHistoryIndex] = useState(-1)
   const [viewportPreset, setViewportPreset] = useState<BrowserViewportPresetId>(() => {
     try {
       return parseBrowserViewportPreset(localStorage.getItem(BROWSER_VIEWPORT_KEY))
@@ -226,10 +243,10 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
   }, [historyOpen])
 
   useEffect(() => {
-    if (!statusMsg) return
-    const t = window.setTimeout(() => setStatusMsg(null), 2500)
+    if (!status) return
+    const t = window.setTimeout(() => setStatus(null), 2500)
     return () => window.clearTimeout(t)
-  }, [statusMsg])
+  }, [status])
 
   const tabs = state.tabs ?? []
   const hasPage = Boolean(state.open) && tabs.length > 0
@@ -240,15 +257,17 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
     [recents, urlFocused, urlInput]
   )
   const recentGroups = useMemo(() => groupBrowserRecents(filteredRecents), [filteredRecents])
+  const flatRecents = useMemo(() => recentGroups.flatMap((group) => group.items), [recentGroups])
 
   const navigateTo = useCallback((raw: string) => {
     const input = raw.trim()
     if (!input) return
     const go = (target: string): void => {
       void window.vyotiq.browserNavigate?.(target, workspacePath ?? undefined)?.then((res) => {
-        reportBrowserIpc(res, 'Navigation failed', setStatusMsg)
+        reportBrowserIpc(res, 'Navigation failed', fail)
       })
       setHistoryOpen(false)
+      setHistoryIndex(-1)
       urlInputRef.current?.blur()
     }
     if (/^https?:\/\//i.test(input) || /^[a-z0-9-]+\.[a-z]{2,}/i.test(input)) {
@@ -265,7 +284,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         res && res.ok ? res.data.searchEngine : DEFAULT_SETTINGS.searchEngine
       go(resolveAddressBarTarget(input, engine))
     })
-  }, [workspacePath])
+  }, [fail, workspacePath])
 
   const handleNavigate = useCallback(
     (e: React.FormEvent) => {
@@ -281,7 +300,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
       switch (action) {
         case 'screenshot': {
           if (!workspacePath) {
-            setStatusMsg('Open a workspace to save a screenshot')
+            say('Open a workspace to save a screenshot')
             break
           }
           void window.vyotiq
@@ -291,22 +310,21 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
             })
             .then((res) => {
               if (res?.ok) {
-                setStatusMsg(
-                  activeRunId ? 'Screenshot saved to run artifacts' : 'Screenshot saved'
-                )
-              } else setStatusMsg(res && !res.ok ? res.error : 'Screenshot failed')
+                say(activeRunId ? 'Screenshot saved to run artifacts' : 'Screenshot saved')
+              } else fail(res && !res.ok ? res.error : 'Screenshot failed')
             })
           break
         }
         case 'reload':
           void window.vyotiq.browserReload?.(workspacePath ?? undefined)?.then((res) => {
-            reportBrowserIpc(res, 'Reload failed', setStatusMsg)
+            reportBrowserIpc(res, 'Reload failed', fail)
           })
           break
         case 'copy-url':
           if (state.url) {
             void copyText(state.url).then((ok) => {
-              setStatusMsg(ok ? 'URL copied' : 'Copy failed')
+              if (ok) say('URL copied')
+              else fail('Copy failed')
             })
           }
           break
@@ -325,38 +343,38 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         case 'clear-history':
           void window.vyotiq.browserClearBrowsingData?.({ kind: 'history', workspacePath: workspacePath ?? undefined }).then((res) => {
             if (!res?.ok) {
-              setStatusMsg(res && !res.ok ? res.error : 'Failed to clear history')
+              fail(res && !res.ok ? res.error : 'Failed to clear history')
               return
             }
             clearBrowserRecents()
             lastRecordedUrl.current = ''
             lastRecordedTitle.current = ''
             setRecents([])
-            setStatusMsg('Browsing history cleared')
+            say('Browsing history cleared')
           })
           break
         case 'clear-cookies':
           void window.vyotiq.browserClearBrowsingData?.({ kind: 'cookies', workspacePath: workspacePath ?? undefined }).then((res) => {
             if (!res?.ok) {
-              setStatusMsg(res && !res.ok ? res.error : 'Failed to clear cookies')
+              fail(res && !res.ok ? res.error : 'Failed to clear cookies')
               return
             }
-            setStatusMsg('Cookies cleared')
+            say('Cookies cleared')
           })
           break
         case 'clear-cache':
           void window.vyotiq.browserClearBrowsingData?.({ kind: 'cache' }).then((res) => {
             if (!res?.ok) {
-              setStatusMsg(res && !res.ok ? res.error : 'Failed to clear cache')
+              fail(res && !res.ok ? res.error : 'Failed to clear cache')
               return
             }
-            setStatusMsg('Cache cleared')
+            say('Cache cleared')
           })
           break
         case 'pip-toggle': {
           void window.vyotiq.browserPipToggle?.().then((res) => {
             if (res && !res.ok) {
-              setStatusMsg(res.error)
+              fail(res.error)
               return
             }
             if (res?.ok && res.data.pip) onPopOut?.()
@@ -364,16 +382,13 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
           break
         }
         case 'close':
-          // onClose → closeDockTab('browser') also calls browserClose; invoke here
-          // so Close works even if onClose is omitted in tests.
           void window.vyotiq.browserClose?.()
-          onClose?.()
           break
         default:
           break
       }
     },
-    [activeRunId, onClose, onPopOut, state.url, workspacePath]
+    [activeRunId, fail, onPopOut, say, state.url, workspacePath]
   )
 
   const viewportSpec = browserViewportPreset(viewportPreset)
@@ -466,16 +481,17 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
                 <Icon name="globe" size={12} className="shrink-0" />
                 <span className="truncate">{tab.title?.trim() || tab.id}</span>
               </button>
-              <button
-                type="button"
-                className="-ml-1 mr-1 hidden size-4 shrink-0 place-items-center rounded-sm text-tertiary hover:bg-surface-2 hover:text-fg focus-visible:vy-focus-ring group-focus-within:inline-grid group-hover:inline-grid"
-                aria-label={`Close tab ${tab.title || tab.id}`}
-                onClick={() => {
-                  void window.vyotiq.browserCloseTab?.(tab.id, workspacePath ?? undefined)
-                }}
-              >
-                <Icon name="close" size={10} />
-              </button>
+              <span className="-ml-1 mr-1 hidden shrink-0 group-focus-within:inline-flex group-hover:inline-flex">
+                <IconButton
+                  icon="close"
+                  label={`Close tab ${tab.title || tab.id}`}
+                  size="xs"
+                  tone="muted"
+                  onClick={() => {
+                    void window.vyotiq.browserCloseTab?.(tab.id, workspacePath ?? undefined)
+                  }}
+                />
+              </span>
             </div>
           ))}
         </div>
@@ -490,7 +506,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
           disabled={!state.canGoBack}
           onClick={() =>
             void window.vyotiq.browserBack?.(workspacePath ?? undefined)?.then((res) => {
-              reportBrowserIpc(res, 'Back failed', setStatusMsg)
+              reportBrowserIpc(res, 'Back failed', fail)
             })
           }
         />
@@ -502,7 +518,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
           disabled={!state.canGoForward}
           onClick={() =>
             void window.vyotiq.browserForward?.(workspacePath ?? undefined)?.then((res) => {
-              reportBrowserIpc(res, 'Forward failed', setStatusMsg)
+              reportBrowserIpc(res, 'Forward failed', fail)
             })
           }
         />
@@ -514,7 +530,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
           disabled={!hasPage || state.navigating}
           onClick={() =>
             void window.vyotiq.browserReload?.(workspacePath ?? undefined)?.then((res) => {
-              reportBrowserIpc(res, 'Reload failed', setStatusMsg)
+              reportBrowserIpc(res, 'Reload failed', fail)
             })
           }
         />
@@ -539,15 +555,39 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
                 )}
                 placeholder="Search or enter URL"
                 aria-label="Search or enter URL"
+                aria-autocomplete="list"
+                aria-controls={historyOpen && flatRecents.length > 0 ? 'browser-history-list' : undefined}
+                aria-activedescendant={historyOpen && historyIndex >= 0 ? `browser-recent-${historyIndex}` : undefined}
                 value={urlInput}
                 onChange={(e) => {
                   setUrlInput(e.target.value)
                   setHistoryOpen(true)
+                  setHistoryIndex(-1)
                 }}
                 onFocus={() => {
                   setUrlFocused(true)
                   setHistoryOpen(true)
+                  setHistoryIndex(-1)
                   setTimeout(() => urlInputRef.current?.select(), 0)
+                }}
+                onKeyDown={(e) => {
+                  if (!historyOpen || flatRecents.length === 0) return
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setHistoryIndex((i) => (i + 1) % flatRecents.length)
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setHistoryIndex((i) => (i <= 0 ? flatRecents.length - 1 : i - 1))
+                  } else if (e.key === 'Enter' && historyIndex >= 0) {
+                    e.preventDefault()
+                    const item = flatRecents[historyIndex]
+                    if (item) navigateTo(item.url)
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setHistoryOpen(false)
+                    setHistoryIndex(-1)
+                  }
                 }}
                 onBlur={() => {
                   if (blurTimerRef.current != null) clearTimeout(blurTimerRef.current)
@@ -577,25 +617,40 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
 
           {historyOpen && recentGroups.length > 0 ? (
             <div
+              id="browser-history-list"
+              role="listbox"
+              aria-label="Recent pages"
               className={cn(MENU_SURFACE, 'absolute left-0 right-0 top-full mt-1 max-h-[min(50vh,320px)] overflow-y-auto p-1')}
               data-browser-history-dropdown
             >
               {recentGroups.map((group) => (
-                <div key={group.label}>
-                  <div className={MENU_LABEL}>{group.label}</div>
-                  {group.items.map((item) => (
-                    <button
-                      key={`${item.url}-${item.visitedAt}`}
-                      type="button"
-                      className={cn(MENU_ROW, MENU_ROW_IDLE, MENU_ROW_TEXT, 'text-xs')}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => navigateTo(item.url)}
-                      title={item.url}
-                    >
-                      <Icon name="globe" size={12} className="shrink-0 text-tertiary" />
-                      <span className="min-w-0 flex-1 truncate">{item.title?.trim() || item.url}</span>
-                    </button>
-                  ))}
+                <div key={group.label} role="group" aria-label={group.label}>
+                  <div className={MENU_LABEL} aria-hidden>
+                    {group.label}
+                  </div>
+                  {group.items.map((item) => {
+                    const index = flatRecents.indexOf(item)
+                    const on = index === historyIndex
+                    return (
+                      <button
+                        key={`${item.url}-${item.visitedAt}`}
+                        id={`browser-recent-${index}`}
+                        type="button"
+                        role="option"
+                        aria-selected={on}
+                        tabIndex={-1}
+                        // One fill at a time: the arrow keys' row, or the pointer's.
+                        className={cn(MENU_ROW, on ? MENU_ROW_ACTIVE : MENU_ROW_IDLE, MENU_ROW_TEXT)}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onMouseEnter={() => setHistoryIndex(index)}
+                        onClick={() => navigateTo(item.url)}
+                        title={item.url}
+                      >
+                        <Icon name="globe" size={12} className="shrink-0 text-tertiary" />
+                        <span className="min-w-0 flex-1 truncate">{item.title?.trim() || item.url}</span>
+                      </button>
+                    )
+                  })}
                 </div>
               ))}
             </div>
@@ -635,7 +690,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
       </div>
 
       {showAgentBanner ? (
-        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-3 text-xs" role="status" data-browser-agent-banner>
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2 text-xs" role="status" data-browser-agent-banner>
           {state.userControl ? (
             <>
               <Icon name="hand" size={12} className="shrink-0 text-muted" />
@@ -682,10 +737,21 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         </div>
       ) : null}
 
-      {statusMsg ? (
-        <div className="shrink-0 border-b border-border px-3 py-1.5 text-xs text-muted" role="status">
-          {statusMsg}
-        </div>
+      {status ? (
+        status.failed ? (
+          <div
+            className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-xs text-danger"
+            role="alert"
+            data-browser-status="failed"
+          >
+            <Icon name="warningCircle" size={13} className="shrink-0" />
+            <span className="min-w-0 flex-1">{status.text}</span>
+          </div>
+        ) : (
+          <div className="shrink-0 border-b border-border px-3 py-1.5 text-xs text-muted" role="status" data-browser-status="ok">
+            {status.text}
+          </div>
+        )
       ) : null}
 
       <div
@@ -714,7 +780,7 @@ export const AgentBrowserPanel = memo(function AgentBrowserPanel({
         data-browser-viewport={viewportSpec.id}
       >
         {!hasPage ? (
-          <div className="absolute inset-0 flex flex-col overflow-auto px-5 py-4">
+          <div className="absolute inset-0 flex flex-col overflow-auto px-4 py-4">
             {recents.length > 0 ? (
               <div>
                 <p className={SECTION_LABEL}>Recents</p>

@@ -12,7 +12,8 @@ import {
   type WorkspaceEditorSelection
 } from '@shared/ipc'
 import { Icon } from '@renderer/lib/icons'
-import { DOCK_TOOLBAR_BTN, DOCK_TOOLBAR_ICON_BTN } from './PanelChrome'
+import { Button, IconButton, cn } from '@renderer/lib/ui'
+import { BORDER_DIVIDER } from '@renderer/lib/utils/layout'
 import { usePrompt } from '@renderer/lib/hooks/usePrompt'
 
 const BYTES_PER_ROW = 16
@@ -543,49 +544,26 @@ export function HexEditor({
       {validationError ? (
         <div
           role="alert"
-          className="flex shrink-0 items-center gap-2 border-b border-danger/30 bg-danger/10 px-2 py-1 text-2xs text-danger"
+          className="flex shrink-0 items-center gap-2 border-b border-border bg-danger-soft py-1 pl-2 pr-1 text-caption text-danger"
         >
+          <Icon name="warningCircle" size={13} className="shrink-0" />
           <span className="min-w-0 flex-1">{validationError}</span>
-          <button
-            type="button"
-            className={DOCK_TOOLBAR_BTN}
-            onClick={() => setValidationError(null)}
-          >
+          <Button size="xs" variant="ghost" onClick={() => setValidationError(null)}>
             Dismiss
-          </button>
+          </Button>
         </div>
       ) : null}
-      <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-1 border-b border-border/60 px-2 py-1">
-        <button type="button" className={DOCK_TOOLBAR_BTN} onClick={undo} disabled={past.length === 0}>
-          <Icon name="undo" size={11} />
-          Undo
-        </button>
-        <button type="button" className={DOCK_TOOLBAR_BTN} onClick={redo} disabled={future.length === 0}>
-          <Icon name="redo" size={11} />
-          Redo
-        </button>
-        <button type="button" className={DOCK_TOOLBAR_BTN} onClick={insertByte}>
-          <Icon name="plus" size={11} />
-          Insert
-        </button>
-        <button type="button" className={DOCK_TOOLBAR_BTN} onClick={deleteByte} disabled={bytes.length === 0}>
-          <Icon name="trash" size={11} />
-          Delete
-        </button>
-        <button type="button" className={DOCK_TOOLBAR_BTN} onClick={searchReplace}>
-          <Icon name="scanSearch" size={11} />
-          Find/replace
-        </button>
-        <button type="button" className={DOCK_TOOLBAR_BTN} onClick={toggleBookmark}>
-          <Icon name="star" size={11} />
-          Bookmark
-        </button>
-        <button type="button" className={DOCK_TOOLBAR_BTN} onClick={setTemplate}>
-          <Icon name="doc" size={11} />
-          Template
-        </button>
+      {/* One 32px row of icons: seven labelled buttons wrapped at inspector width. */}
+      <div className={cn('flex h-8 min-w-0 shrink-0 items-center gap-0.5 border-b px-2', BORDER_DIVIDER)}>
+        <IconButton icon="undo" label="Undo" size="xs" tone="muted" onClick={undo} disabled={past.length === 0} />
+        <IconButton icon="redo" label="Redo" size="xs" tone="muted" onClick={redo} disabled={future.length === 0} />
+        <IconButton icon="plus" label="Insert byte" size="xs" tone="muted" onClick={insertByte} />
+        <IconButton icon="trash" label="Delete byte" size="xs" tone="muted" onClick={deleteByte} disabled={bytes.length === 0} />
+        <IconButton icon="scanSearch" label="Find and replace bytes" size="xs" tone="muted" onClick={() => void searchReplace()} />
+        <IconButton icon="star" label="Toggle bookmark" size="xs" tone="muted" onClick={toggleBookmark} />
+        <IconButton icon="doc" label="Set template" size="xs" tone="muted" onClick={() => void setTemplate()} />
         <span
-          className="ml-auto text-2xs text-muted"
+          className="ml-auto min-w-0 truncate pl-2 font-mono text-caption text-muted tnum"
           aria-live="polite"
           title="Cursor position: byte offset in the file and the hex value of the selected byte"
         >
@@ -594,7 +572,7 @@ export function HexEditor({
       </div>
       <div
         ref={scrollRef}
-        className="min-h-0 min-w-0 flex-1 overflow-auto pl-2 pr-4 py-1 font-mono text-caption"
+        className="min-h-0 min-w-0 flex-1 overflow-auto bg-sunken py-1 pl-2 pr-4 font-mono text-caption"
         role="list"
         aria-label="Hex editor"
       >
@@ -619,9 +597,11 @@ export function HexEditor({
                     return (
                       <input
                         key={`hex-${index}`}
-                        className={`h-5 w-5 rounded border-0 bg-transparent p-0 text-center text-2xs outline-none focus:ring-1 focus:ring-accent ${
-                          active ? 'bg-accent/20 text-fg-strong' : 'text-fg'
-                        }`}
+                        className={cn(
+                          'h-5 w-5 rounded-sm border-0 p-0 text-center text-caption outline-none focus-visible:vy-focus-ring',
+                          // One fill at a time: cn() cannot let a second background win.
+                          active ? 'bg-accent-soft text-fg-strong' : 'bg-transparent text-fg'
+                        )}
                         aria-label={exists ? `Byte ${index}` : 'Empty byte'}
                         disabled={!exists}
                         tabIndex={exists && selected === index && selectedColumn === 'hex' ? 0 : -1}
@@ -659,7 +639,7 @@ export function HexEditor({
                     return (
                       <input
                         key={`ascii-${index}`}
-                        className="h-5 w-3 rounded border-0 bg-transparent p-0 text-center text-2xs text-muted outline-none focus:ring-1 focus:ring-accent"
+                        className="h-5 w-3 rounded-sm border-0 bg-transparent p-0 text-center text-caption text-muted outline-none focus-visible:vy-focus-ring"
                         aria-label={exists ? `ASCII byte ${index}` : 'Empty ASCII byte'}
                         disabled={!exists}
                         tabIndex={
@@ -688,7 +668,7 @@ export function HexEditor({
         </div>
       </div>
       {templateFields.length > 0 ? (
-        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 px-2 py-1 text-2xs text-muted">
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 px-2 py-1 text-caption text-muted">
           <span className="font-medium text-fg">Template</span>
           {templateFields.map((field) => (
             <span key={`${field.name}:${field.offset}`}>
@@ -697,24 +677,23 @@ export function HexEditor({
           ))}
         </div>
       ) : null}
-      <div className="flex shrink-0 items-center gap-1 border-t border-border/60 px-2 py-1 text-2xs text-muted">
+      <div className="flex h-7 shrink-0 items-center gap-1 border-t border-border/60 px-2 text-caption text-muted">
         <span>{bytes.length.toLocaleString()} bytes</span>
         <span className="ml-auto">{activeBookmarks.length} bookmarks</span>
         {activeTemplate ? <span className="truncate">Template: {activeTemplate}</span> : null}
         {selections.length > 0 ? (
-          <button
-            type="button"
-            className={DOCK_TOOLBAR_ICON_BTN}
-            aria-label="Clear hex selection"
+          <IconButton
+            icon="close"
+            label="Clear hex selection"
             title="Clear selection"
+            size="xs"
+            tone="muted"
             onClick={() => {
               const next: WorkspaceEditorSelection[] = []
               setSelections(next)
               emitMeta(selected, next, activeBookmarks, activeTemplate)
             }}
-          >
-            <Icon name="close" size={12} />
-          </button>
+          />
         ) : null}
       </div>
     </div>

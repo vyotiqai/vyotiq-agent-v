@@ -64,7 +64,7 @@ describe('PlanPanel', () => {
     await waitFor(() => {
       expect(screen.getByText('No contract yet')).toBeTruthy()
     })
-    expect(screen.getByText('The run contract is created when a chat starts.')).toBeTruthy()
+    expect(screen.getByText('The run contract is created when a task starts.')).toBeTruthy()
     expect(window.vyotiq.readRunArtifact).not.toHaveBeenCalled()
   })
 
@@ -132,6 +132,10 @@ describe('PlanPanel', () => {
 
     const title = await screen.findByRole('heading', { level: 2, name: 'Comprehensive plan' })
     expect(title).toBeTruthy()
+    // The title rides the pane's fixed 40px row, not the scrolling document.
+    const header = title.closest('[data-plan-header]') as HTMLElement
+    expect(header.classList.contains('h-10')).toBe(true)
+    expect(title.closest('[data-plan-doc]')).toBeNull()
     const labels = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)
     expect(labels).toEqual(['Goal', 'Risks'])
     expect(screen.getByRole('heading', { level: 3, name: 'Goal' }).className).toContain('uppercase')
@@ -228,7 +232,10 @@ describe('PlanPanel', () => {
     })
     const badge = screen.getByText('error')
     expect(badge.getAttribute('data-receipt-status')).toBe('error')
-    expect(badge.className).toMatch(/text-danger/)
+    // Shape, then colour, then the word: the failed glyph sits beside it.
+    expect(badge.querySelector('[data-state="failed"]')).toBeTruthy()
+    // Counts are rows, not tinted chips; the failure carries an icon and the word.
+    expect(document.querySelector('[data-receipt-tools]')?.textContent).toContain('1 failed')
     expect(screen.getByText(/Done when/)).toBeTruthy()
     expect(screen.getByText('billed in')).toBeTruthy()
 
@@ -502,16 +509,17 @@ describe('PlanPanel', () => {
     })
   })
 
-  it('uses one empty copy that points at create_plan, not at a mode', async () => {
+  it('uses one empty copy about the task, not a mode or a tool name', async () => {
     window.vyotiq.readRunArtifact = vi.fn().mockResolvedValue({
       ok: true,
       data: { name: 'plan.md', exists: false, content: null }
     })
     render(<PlanPanel workspacePath="/ws" runId="run-empty" running={false} />)
     await waitFor(() => {
-      expect(screen.getByText(/Publish plan.md with create_plan/)).toBeTruthy()
+      expect(screen.getByText(/When the agent plans a task/)).toBeTruthy()
     })
     expect(screen.queryByText(/Switch to Plan mode/)).toBeNull()
+    expect(screen.queryByText(/create_plan/)).toBeNull()
   })
 
   it('shows the empty plan state when only todos.json exists — the record shows the steps', async () => {
