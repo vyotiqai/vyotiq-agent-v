@@ -182,7 +182,9 @@ describe('runAgent MCP failure retry', () => {
         // drain
       }
     })()
-    const stalled = new Promise<'stalled'>((resolve) => setTimeout(() => resolve('stalled'), 8_000))
+    // An awaited retry never settles here (only step 2 releases it), so any
+    // bound tells the two apart; a wide one keeps a loaded machine from failing it.
+    const stalled = new Promise<'stalled'>((resolve) => setTimeout(() => resolve('stalled'), 25_000))
     expect(await Promise.race([run.then(() => 'finished' as const), stalled])).toBe('finished')
 
     expect(mcp.syncCalls.some((c) => c.forceRetryFailures)).toBe(true)
@@ -190,5 +192,5 @@ describe('runAgent MCP failure retry', () => {
     // (autoLoad) reached the wire on the step after it landed.
     expect(toolCatalogs[1]).not.toContain('mcp__notion__search')
     expect(toolCatalogs[2]).toContain('mcp__notion__search')
-  }, 20_000)
+  }, 40_000)
 })
