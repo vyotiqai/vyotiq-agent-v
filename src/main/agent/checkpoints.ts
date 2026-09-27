@@ -12,7 +12,7 @@ import {
   writeFileSync,
   type Stats
 } from 'fs'
-import { copyFile, mkdir, readdir, stat } from 'fs/promises'
+import { copyFile, mkdir, readdir, rm, stat } from 'fs/promises'
 import { tmpdir } from 'os'
 import { basename, dirname, join, relative } from 'path'
 import { createHash, randomUUID } from 'crypto'
@@ -103,6 +103,26 @@ function blobPathFor(checkpointDir: string, relPath: string): string {
     throw new Error('Invalid checkpoint path')
   }
   return join(checkpointDir, 'files', ...parts)
+}
+
+/** Most files a directory delete snapshots for undo; past it, none of the tree is undoable. */
+const DIR_RESTORE_FILE_CAP = 20_000
+let dirRestoreFileCap = DIR_RESTORE_FILE_CAP
+
+/** Test helper — a small cap, so the overflow path runs without 20,000 files. */
+export function setDirRestoreFileCapForTests(cap: number | null): void {
+  dirRestoreFileCap = cap ?? DIR_RESTORE_FILE_CAP
+}
+
+/** Delete these paths' copies, a batch at a time so thousands do not queue at once. */
+async function removeBlobs(checkpointDir: string, relPaths: readonly string[]): Promise<void> {
+  for (let i = 0; i < relPaths.length; i += 64) {
+    await Promise.all(
+      relPaths
+        .slice(i, i + 64)
+        .map((relPath) => rm(blobPathFor(checkpointDir, relPath), { force: true }).catch(() => undefined))
+    )
+  }
 }
 
 function loadIndex(runDir: string): CheckpointIndex {
@@ -283,7 +303,6 @@ export class InvokeWriteCheckpoint {
       // Snapshot the directory tree so the delete is undoable. Each file becomes
       // its own 'deleted' checkpoint entry; restoring them recreates the original
       // tree (v1 could not restore directories — now fixed).
-      const maxDirRestoreFiles = 20000
       let fileCount = 0
       let overflow = false
       const recordedChildren: string[] = []
@@ -304,7 +323,7 @@ export class InvokeWriteCheckpoint {
             continue
           }
           if (!entry.isFile()) continue // skip symlinks / sockets / devices
-          if (fileCount >= maxDirRestoreFiles) {
+          if (fileCount >= dirRestoreFileCap) {
             overflow = true
             return
           }
@@ -324,7 +343,7 @@ export class InvokeWriteCheckpoint {
       }
       await snapshotTree(resolved)
       if (overflow) {
-        // `overflow` can flip true only AFTER up to maxDirRestoreFiles children
+        // `overflow` can flip true only AFTER up to dirRestoreFileCap children
         // were already recorded as undoable. Marking just the parent
         // non-undoable left Undo restoring that partial subtree and reporting
         // it as a completed undo — a directory silently missing most of its
@@ -333,6 +352,9 @@ export class InvokeWriteCheckpoint {
           const entry = this.files.get(childRel)
           if (entry) this.files.set(childRel, { ...entry, undoable: false })
         }
+        // Nothing reads a non-undoable entry's copy, so the copies already made
+        // are dead weight — 119 MB for one 20,000-file node_modules delete.
+        await removeBlobs(this.checkpointDir(), recordedChildren)
         logger.warn('Directory delete too large to snapshot for undo; marked non-undoable', {
           scope: 'agent',
           path: rel

@@ -2149,7 +2149,7 @@ export function registerIpc(): void {
         const req = TaskFileStatsRequestSchema.parse(raw)
         if (!isOpenWorkspace(req.workspacePath)) return fail('Workspace is not open')
         if (!runExists(req.workspacePath, req.runId)) return fail('Run not found')
-        return ok({ files: taskFileStats(resolveRunDir(req.workspacePath, req.runId), req.workspacePath) })
+        return ok({ files: await taskFileStats(resolveRunDir(req.workspacePath, req.runId), req.workspacePath) })
       } catch (err) {
         return failFrom(err, IPC.runsTaskFileStats)
       }
