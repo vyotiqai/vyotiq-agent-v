@@ -160,7 +160,8 @@ export const IncompleteReasonSchema = z.enum([
   'provider_error',
   'goal_wait',
   'goal_budget',
-  'repetition'
+  'repetition',
+  'tool_burst'
 ])
 export type IncompleteReason = z.infer<typeof IncompleteReasonSchema>
 

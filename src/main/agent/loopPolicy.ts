@@ -11,6 +11,16 @@ import { loopHintForRetainedDecisions } from './context/retainedDecisions'
  */
 export const MCP_NOT_IN_CATALOG_FAIL_FAST_THRESHOLD = 2
 
+/**
+ * Distinct tool calls one generation may stream before the loop cuts it off.
+ * Run 50f7b80d streamed 5,862 `run_tests` calls in a single turn for 33
+ * minutes (5,798 of them the same command); every one executed, and the
+ * results filled a history that compaction could not fold in two ten-minute
+ * attempts. The largest real batch across 3,805 recorded tool-call steps was
+ * 20, so this leaves room for wide parallel reads.
+ */
+export const MAX_TOOL_CALLS_PER_STEP = 64
+
 const WRITE_TOOLS = new Set(['edit', 'str_replace', 'edit_notebook'])
 const FILE_MUTATION_TOOLS = new Set([...WRITE_TOOLS, 'delete'])
 

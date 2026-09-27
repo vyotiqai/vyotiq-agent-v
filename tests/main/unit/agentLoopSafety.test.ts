@@ -88,6 +88,7 @@ vi.mock('@main/agent/tools', () => ({
 }))
 
 import { runAgent } from '@main/agent/loop'
+import { MAX_TOOL_CALLS_PER_STEP } from '@main/agent/loopPolicy'
 import { enqueueFollowUp, resetActiveRunsForTests } from '@main/agent/runRegistry'
 
 type CapturedEvent = {
@@ -407,5 +408,96 @@ describe('runAgent loop continuation integration', () => {
     expect(events.some((e) => e.type === 'status' && e.status === 'done')).toBe(true)
     expect(events.some((e) => e.type === 'status' && e.status === 'error')).toBe(false)
     expect(events.some((e) => e.type === 'error' && e.code === 'LOOP_SAFETY')).toBe(false)
+  })
+
+  it('cuts off a tool-call burst mid-stream and runs none of it (run 50f7b80d replay)', async () => {
+    // One generation streamed 5,862 run_tests calls with distinct ids for 33
+    // minutes, 5,798 of them `ffmpeg -h filter=aspectralstats`. The repetition
+    // monitor never saw them (it reads text and thinking only), every call
+    // executed, and compaction then timed out folding the results.
+    const runId = 'safety-tool-burst'
+    const burst = 5862
+    let burstYielded = 0
+    let call = 0
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      call += 1
+      if (call === 1) {
+        yield { type: 'thinking_done', text: '\n\n' }
+        for (let i = 0; i < burst; i++) {
+          burstYielded += 1
+          yield {
+            type: 'tool_call_delta',
+            toolCallDelta: {
+              index: i,
+              id: `call_${i}`,
+              name: 'run_tests',
+              arguments: '{"command": "ffmpeg -h filter=aspectralstats"}'
+            }
+          }
+        }
+        yield { type: 'done', stopReason: 'tool_calls' }
+        return
+      }
+      yield { type: 'text', text: 'recovered with one concrete call' }
+      yield { type: 'done', stopReason: 'stop' }
+    })
+    executeTool.mockResolvedValue({ ok: true, summary: 'help', content: 'Filter aspectralstats' })
+
+    const events = await collect(runId, workspace)
+
+    // Stopped on the first call past the cap, not after the provider finished.
+    expect(burstYielded).toBe(MAX_TOOL_CALLS_PER_STEP + 1)
+    expect(executeTool).not.toHaveBeenCalled()
+    expect(events.some((e) => e.type === 'tool_start')).toBe(false)
+    expect(events.some((e) => e.type === 'incomplete' && e.reason === 'tool_burst')).toBe(true)
+    expect(streamChat).toHaveBeenCalledTimes(2)
+
+    const secondCallMessages = assembleContext.mock.calls[1][0].messages as Array<{
+      role: string
+      synthetic?: boolean
+      content: string
+      toolCalls?: unknown[]
+    }>
+    // Every streamed call is paired with an Interrupted stub, then the steer.
+    const cutOff = secondCallMessages.find((m) => m.role === 'assistant' && m.toolCalls?.length)
+    expect(cutOff?.toolCalls).toHaveLength(MAX_TOOL_CALLS_PER_STEP + 1)
+    expect(
+      secondCallMessages.filter((m) => m.role === 'tool' && m.content === 'Interrupted')
+    ).toHaveLength(MAX_TOOL_CALLS_PER_STEP + 1)
+    expect(
+      secondCallMessages.some(
+        (m) =>
+          m.role === 'user' &&
+          m.synthetic === true &&
+          m.content.startsWith(`Your turn was cut off after more than ${MAX_TOOL_CALLS_PER_STEP} tool calls`)
+      )
+    ).toBe(true)
+    expectNoLoopSafetyStop(events)
+  })
+
+  it('runs a batch of exactly MAX_TOOL_CALLS_PER_STEP calls', async () => {
+    let call = 0
+    streamChat.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      call += 1
+      if (call === 1) {
+        for (let i = 0; i < MAX_TOOL_CALLS_PER_STEP; i++) {
+          yield {
+            type: 'tool_call',
+            toolCall: { id: `r${i}`, name: 'read', arguments: JSON.stringify({ path: `f${i}.ts` }) }
+          }
+        }
+        yield { type: 'done', stopReason: 'tool_calls' }
+        return
+      }
+      yield { type: 'text', text: 'read them all' }
+      yield { type: 'done', stopReason: 'stop' }
+    })
+    executeTool.mockResolvedValue({ ok: true, summary: 'file', content: 'body' })
+
+    const events = await collect('safety-tool-batch-at-cap', workspace)
+
+    expect(executeTool).toHaveBeenCalledTimes(MAX_TOOL_CALLS_PER_STEP)
+    expect(events.some((e) => e.type === 'incomplete' && e.reason === 'tool_burst')).toBe(false)
+    expectNoLoopSafetyStop(events)
   })
 })
