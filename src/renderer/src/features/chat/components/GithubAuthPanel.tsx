@@ -10,6 +10,8 @@ import { EmptyPanel } from './PanelChrome'
 type GithubAuthPanelProps = {
   auth: GithubAuthStatus | null
   authBusy: boolean
+  /** gh reports a sign-in but GitHub rejected it: offer a new one, not Connect. */
+  rejected?: boolean
   onConnect: () => void
   onCancel: () => void
   onOpenGithub: (url: string) => void
@@ -63,6 +65,7 @@ function AuthStep({
 export function GithubAuthPanel({
   auth,
   authBusy,
+  rejected = false,
   onConnect,
   onCancel,
   onOpenGithub
@@ -143,6 +146,21 @@ export function GithubAuthPanel({
           <span>Waiting for authorisation…</span>
         </div>
       </EmptyPanel>
+    )
+  }
+
+  if (rejected) {
+    return (
+      <EmptyPanel
+        icon="pullRequest"
+        title="GitHub sign-in expired"
+        body="GitHub turned down the saved sign-in. Sign in again to load pull requests for this branch."
+        actions={
+          <Button size="sm" variant="primary" disabled={authBusy} onClick={onConnect}>
+            {authBusy ? 'Starting…' : 'Sign in again'}
+          </Button>
+        }
+      />
     )
   }
 

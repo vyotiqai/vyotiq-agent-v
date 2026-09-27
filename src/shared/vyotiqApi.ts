@@ -511,7 +511,8 @@ export interface VyotiqApi {
     number: number
   ) => Promise<IpcResult<{ title: string }>>
   githubAuthStatus: () => Promise<IpcResult<import('./ipc').GithubAuthStatus>>
-  githubAuthStart: () => Promise<IpcResult<import('./ipc').GithubAuthStatus>>
+  /** `fresh`: the saved sign-in was rejected; get a new one instead of re-adopting it. */
+  githubAuthStart: (request?: import('./ipc').GithubAuthStartRequest) => Promise<IpcResult<import('./ipc').GithubAuthStatus>>
   githubAuthCancel: () => Promise<IpcResult<import('./ipc').GithubAuthStatus>>
   githubAuthLogout: () => Promise<IpcResult<import('./ipc').GithubAuthStatus>>
   onGithubAuthStatus: (handler: (status: import('./ipc').GithubAuthStatus) => void) => () => void

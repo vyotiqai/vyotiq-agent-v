@@ -262,6 +262,32 @@ describe('PrPanel', () => {
     expect(await screen.findByText('GitHub CLI not found')).toBeTruthy()
   })
 
+  it('asks for a new sign-in, not a draft PR, when gh is signed in but GitHub rejects it', async () => {
+    ;(window.vyotiq.prView as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      error: 'HTTP 401: Bad credentials (https://api.github.com/graphql)'
+    })
+    ;(window.vyotiq.githubAuthStart as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      data: {
+        ghAvailable: true,
+        ghAuthenticated: false,
+        hasAppToken: false,
+        pending: true,
+        userCode: 'ABCD-1234',
+        verificationUri: 'https://github.com/login/device',
+        error: null
+      }
+    })
+    render(<PrPanel workspacePath="/ws" />)
+    expect(await screen.findByText('GitHub sign-in expired')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Create a draft PR/i })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    await waitFor(() => {
+      expect(window.vyotiq.githubAuthStart).toHaveBeenCalledWith({ fresh: true })
+    })
+  })
+
   it('offers automatic GitHub repository setup when no remote exists', async () => {
     ;(window.vyotiq.prView as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: false,

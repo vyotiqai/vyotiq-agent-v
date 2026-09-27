@@ -43,6 +43,18 @@ function formatPrState(state: string): string {
   return lower.charAt(0).toUpperCase() + lower.slice(1)
 }
 
+/** A GitHub call turned away for its credentials, whatever gh auth status says. */
+const GITHUB_AUTH_ERROR = /auth|login|bad credentials|HTTP 401|HTTP 403/i
+
+/**
+ * gh reports a sign-in, yet GitHub rejected the call: the saved token was
+ * revoked or has expired. Connecting would re-adopt the same token, and
+ * creating a PR would fail the same way, so the panel asks for a new sign-in.
+ */
+export function githubSignInRejected(error: string | null, auth: GithubAuthStatus | null): boolean {
+  return Boolean(auth?.ghAuthenticated && !auth.pending && error && GITHUB_AUTH_ERROR.test(error))
+}
+
 function prEmptyTitle(error: string | null): string {
   if (!error) return 'No pull request'
   if (/GitHub CLI \(gh\) is not installed|gh is not installed|not on PATH/i.test(error)) {
@@ -53,7 +65,7 @@ function prEmptyTitle(error: string | null): string {
     return 'GitHub repository not configured'
   }
   if (/no initial commit/i.test(error)) return 'No commits yet'
-  if (/auth|login|HTTP 401|HTTP 403/i.test(error)) return 'GitHub authentication required'
+  if (GITHUB_AUTH_ERROR.test(error)) return 'GitHub authentication required'
   if (/no pull request|no open pull request/i.test(error)) return 'No pull request'
   return 'Pull request unavailable'
 }
@@ -69,7 +81,7 @@ function prEmptyBody(error: string | null): string {
   if (/no initial commit/i.test(error)) {
     return 'Commit changes first, then create a pull request. An empty git history cannot be published.'
   }
-  if (/auth|login|HTTP 401|HTTP 403/i.test(error)) {
+  if (GITHUB_AUTH_ERROR.test(error)) {
     return 'Connect GitHub, then refresh the pull request panel.'
   }
   return error
@@ -138,13 +150,14 @@ function toPrBrowserEntry(file: PrFile): BrowserFileEntry {
 }
 
 function needsGithubConnect(error: string | null, auth: GithubAuthStatus | null): boolean {
+  if (githubSignInRejected(error, auth)) return true
   if (auth?.ghAuthenticated && !auth.pending) return false
   if (auth?.pending) return true
   if (auth?.error) return true
   if (auth?.ghAvailable && !auth.ghAuthenticated) return true
   if (
     error &&
-    /auth|login|HTTP 401|HTTP 403|to get started|not logged into any github/i.test(error)
+    (GITHUB_AUTH_ERROR.test(error) || /to get started|not logged into any github/i.test(error))
   ) {
     return true
   }
@@ -563,7 +576,7 @@ export function PrPanel({
     return () => window.clearInterval(id)
   }, [auth?.pending, refreshAuth])
 
-  const connectGithub = useCallback(async () => {
+  const connectGithub = useCallback(async (options?: { fresh?: boolean }) => {
     if (!window.vyotiq?.githubAuthStart) {
       setAuth((prev) => ({
         ghAvailable: prev?.ghAvailable ?? true,
@@ -587,7 +600,7 @@ export function PrPanel({
       error: null
     }))
     try {
-      const res = await window.vyotiq.githubAuthStart()
+      const res = await window.vyotiq.githubAuthStart(options?.fresh ? { fresh: true } : undefined)
       if (res.ok) {
         applyAuthStatus(res.data)
       } else {
@@ -783,12 +796,14 @@ export function PrPanel({
     return browserFiles.filter((f) => f.path.toLowerCase().includes(q))
   }, [browserFiles, findQuery])
 
+  const signInRejected = githubSignInRejected(error, auth)
   const showConnect = needsGithubConnect(error, auth)
   const showGhInstall = needsGhInstall(error, auth)
   const canCreatePr = Boolean(
     auth?.ghAvailable &&
       auth.ghAuthenticated &&
       !auth.pending &&
+      !signInRejected &&
       !/not a git repository/i.test(error ?? '')
   )
 
@@ -806,7 +821,8 @@ export function PrPanel({
     <GithubAuthPanel
       auth={auth}
       authBusy={authBusy}
-      onConnect={() => void connectGithub()}
+      rejected={signInRejected}
+      onConnect={() => void connectGithub(signInRejected ? { fresh: true } : undefined)}
       onCancel={cancelGithub}
       onOpenGithub={(url) => void openExternal(url)}
     />

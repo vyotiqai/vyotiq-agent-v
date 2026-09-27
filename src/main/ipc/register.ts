@@ -83,6 +83,7 @@ import {
   PrReadyRequestSchema,
   PrEditTitleRequestSchema,
   ShellOpenExternalRequestSchema,
+  GithubAuthStartRequestSchema,
   PtyCreateRequestSchema,
   PtyListRequestSchema,
   PtyIdRequestSchema,
@@ -2946,10 +2947,11 @@ export function registerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.githubAuthStart, async (event) => {
+  ipcMain.handle(IPC.githubAuthStart, async (event, raw: unknown) => {
     if (!senderOk(event)) return fail('Invalid sender')
     try {
-      return ok(await startGithubAuth())
+      const req = GithubAuthStartRequestSchema.parse(raw)
+      return ok(await startGithubAuth({ fresh: req?.fresh === true }))
     } catch (err) {
       return failFrom(err, IPC.githubAuthStart)
     }
