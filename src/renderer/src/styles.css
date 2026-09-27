@@ -153,10 +153,12 @@
   /* Window chrome: above sticky page content, below menus, drawers and toasts,
      which must still open on top of the bar. */
   --z-titlebar: 15;
-  --z-dropdown: 20;
-  --z-tooltip: 50;
+  /* Menus sit above the surface that opened them, dialogs and drawers
+     included (a menu inside a dialog used to open behind it). */
   --z-drawer: 30;
+  --z-dropdown: 35;
   --z-toast: 40;
+  --z-tooltip: 50;
 
   --vy-font-scale: 1;
   --vy-density-scale: 1;
@@ -233,10 +235,12 @@
   --z-base: 0;
   --z-sticky: 10;
   --z-titlebar: 15;
-  --z-dropdown: 20;
-  --z-tooltip: 50;
+  /* Menus sit above the surface that opened them, dialogs and drawers
+     included (a menu inside a dialog used to open behind it). */
   --z-drawer: 30;
+  --z-dropdown: 35;
   --z-toast: 40;
+  --z-tooltip: 50;
 
   --vy-font-scale: 1;
   --vy-density-scale: 1;

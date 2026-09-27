@@ -90,7 +90,9 @@ export function Dialog({
   const titleId = labelledBy ?? (title ? autoTitleId : undefined)
   const descId = describedBy ?? (description ? autoDescId : undefined)
 
-  useEscapeToClose(onClose, open, { capture: true })
+  // Capture, so the dialog closes before anything under it reacts; but a menu
+  // open inside it takes that Escape first, and the next one closes the dialog.
+  useEscapeToClose(onClose, open, { capture: true, deferToMenus: true })
 
   useFocusTrap({
     active: open,
